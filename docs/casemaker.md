@@ -1,6 +1,6 @@
-# CaseSmith: Parametric 3D Printed Enclosure Designer
+# CaseMaker: Parametric 3D Printed Enclosure Designer
 
-CaseSmith is a web-based Single Page Application (SPA) designed to automate the creation of custom 3D-printable enclosures for microcontrollers and single-board computers (SBCs). It allows users to visualize components, place mounting points, and generate production-ready `.3mf` or `.stl` files.
+CaseMaker is a web-based Single Page Application (SPA) designed to automate the creation of custom 3D-printable enclosures for microcontrollers and single-board computers (SBCs). It allows users to visualize components, place mounting points, and generate production-ready `.3mf` or `.stl` files.
 
 ## 1. Core Architecture
 The application is structured as a modular web application to avoid monolithic file issues and ensure scalability.

@@ -1,0 +1,89 @@
+{
+  "id": "rpi-4b",
+  "name": "Raspberry Pi 4 Model B",
+  "manufacturer": "Raspberry Pi Foundation",
+  "pcb": { "size": { "x": 85, "y": 56, "z": 1.6 } },
+  "mountingHoles": [
+    { "id": "h1", "x": 3.5, "y": 3.5, "diameter": 2.75 },
+    { "id": "h2", "x": 3.5, "y": 52.5, "diameter": 2.75 },
+    { "id": "h3", "x": 61.5, "y": 3.5, "diameter": 2.75 },
+    { "id": "h4", "x": 61.5, "y": 52.5, "diameter": 2.75 }
+  ],
+  "components": [
+    {
+      "id": "usbc-power",
+      "kind": "usb-c",
+      "position": { "x": 3.5, "y": -1, "z": 1.6 },
+      "size": { "x": 9, "y": 7.5, "z": 3.2 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "hdmi0",
+      "kind": "micro-hdmi",
+      "position": { "x": 19, "y": -1, "z": 1.6 },
+      "size": { "x": 7, "y": 8, "z": 3 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "hdmi1",
+      "kind": "micro-hdmi",
+      "position": { "x": 32, "y": -1, "z": 1.6 },
+      "size": { "x": 7, "y": 8, "z": 3 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "audio",
+      "kind": "barrel-jack",
+      "position": { "x": 53, "y": -1, "z": 1.6 },
+      "size": { "x": 7, "y": 6, "z": 5.5 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "usb3-a",
+      "kind": "usb-a",
+      "position": { "x": 70, "y": 27, "z": 1.6 },
+      "size": { "x": 13.5, "y": 17, "z": 16 },
+      "facing": "+x",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "usb3-b",
+      "kind": "usb-a",
+      "position": { "x": 70, "y": 9, "z": 1.6 },
+      "size": { "x": 13.5, "y": 17, "z": 16 },
+      "facing": "+x",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "rj45",
+      "kind": "ethernet-rj45",
+      "position": { "x": 70, "y": 45.75, "z": 1.6 },
+      "size": { "x": 16, "y": 16, "z": 13.5 },
+      "facing": "+x",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "gpio",
+      "kind": "gpio-header",
+      "position": { "x": 32.5, "y": 49, "z": 1.6 },
+      "size": { "x": 51, "y": 5, "z": 8.5 },
+      "facing": "+z"
+    },
+    {
+      "id": "sd",
+      "kind": "sd-card",
+      "position": { "x": 0, "y": 22, "z": 0 },
+      "size": { "x": 12, "y": 11, "z": 1.6 },
+      "facing": "-x",
+      "cutoutMargin": 0.7
+    }
+  ],
+  "defaultStandoffHeight": 3,
+  "recommendedZClearance": 5,
+  "source": "https://datasheets.raspberrypi.com/rpi4/raspberry-pi-4-mechanical-drawing.pdf",
+  "builtin": true
+}
