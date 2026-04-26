@@ -1,5 +1,6 @@
 import { CasePanel } from '@/components/panels/CasePanel';
 import { ExportPanel } from '@/components/panels/ExportPanel';
+import { PortsPanel } from '@/components/panels/PortsPanel';
 import { useProjectStore } from '@/store/projectStore';
 import { listBuiltinBoardIds } from '@/library';
 
@@ -27,6 +28,7 @@ export function Sidebar() {
         </p>
       </div>
       <CasePanel />
+      <PortsPanel />
       <ExportPanel />
     </aside>
   );

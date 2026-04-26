@@ -97,6 +97,26 @@ body, html, #root {
   color: #8a94a4;
 }
 
+.port-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.port-list label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 6px;
+  align-items: center;
+  cursor: pointer;
+}
+.port-facing {
+  color: #6c7585;
+  font-variant-numeric: tabular-nums;
+}
+
 select, button {
   background: #14181c;
   color: #e6e8eb;

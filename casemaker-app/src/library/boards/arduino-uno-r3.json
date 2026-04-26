@@ -1,0 +1,48 @@
+{
+  "id": "arduino-uno-r3",
+  "name": "Arduino Uno R3",
+  "manufacturer": "Arduino",
+  "pcb": { "size": { "x": 68.6, "y": 53.4, "z": 1.6 } },
+  "mountingHoles": [
+    { "id": "h1", "x": 13.97, "y": 2.54, "diameter": 3.2 },
+    { "id": "h2", "x": 66.04, "y": 7.62, "diameter": 3.2 },
+    { "id": "h3", "x": 66.04, "y": 35.56, "diameter": 3.2 },
+    { "id": "h4", "x": 15.24, "y": 50.8, "diameter": 3.2 }
+  ],
+  "components": [
+    {
+      "id": "usb-b",
+      "kind": "usb-b",
+      "position": { "x": -2, "y": 41, "z": 1.6 },
+      "size": { "x": 14, "y": 12, "z": 11 },
+      "facing": "-x",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "barrel",
+      "kind": "barrel-jack",
+      "position": { "x": -2, "y": 8, "z": 1.6 },
+      "size": { "x": 13, "y": 9, "z": 10.5 },
+      "facing": "-x",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "header-digital",
+      "kind": "gpio-header",
+      "position": { "x": 51, "y": 47, "z": 1.6 },
+      "size": { "x": 26, "y": 4, "z": 9 },
+      "facing": "+z"
+    },
+    {
+      "id": "header-analog",
+      "kind": "gpio-header",
+      "position": { "x": 50, "y": 4, "z": 1.6 },
+      "size": { "x": 17, "y": 4, "z": 9 },
+      "facing": "+z"
+    }
+  ],
+  "defaultStandoffHeight": 5,
+  "recommendedZClearance": 12,
+  "source": "https://docs.arduino.cc/static/0e1ac8f3a72e3e0c8e3a52bd96ffaab1/A000066-datasheet.pdf",
+  "builtin": true
+}

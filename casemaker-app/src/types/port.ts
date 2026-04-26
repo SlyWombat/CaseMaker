@@ -10,4 +10,5 @@ export interface PortPlacement {
   facing: Facing;
   cutoutMargin: Mm;
   locked: boolean;
+  enabled: boolean;
 }

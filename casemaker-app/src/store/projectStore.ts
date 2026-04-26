@@ -4,6 +4,7 @@ import { produce } from 'immer';
 import type { Project, BoardProfile, CaseParameters, PortPlacement } from '@/types';
 import { getBuiltinBoard } from '@/library';
 import { newId } from '@/utils/id';
+import { autoPortsForBoard } from '@/engine/compiler/portFactory';
 
 const DEFAULT_BOARD_ID = 'rpi-4b';
 
@@ -38,7 +39,7 @@ export function createDefaultProject(boardId = DEFAULT_BOARD_ID): Project {
     modifiedAt: now,
     board: structuredClone(board),
     case: defaultCase(),
-    ports: [],
+    ports: autoPortsForBoard(board),
     externalAssets: [],
   };
 }
@@ -50,6 +51,7 @@ export interface ProjectState {
   loadBuiltinBoard: (boardId: string) => void;
   addPort: (port: PortPlacement) => void;
   removePort: (portId: string) => void;
+  setPortEnabled: (portId: string, enabled: boolean) => void;
   setBoard: (board: BoardProfile) => void;
 }
 
@@ -76,6 +78,13 @@ export const useProjectStore = create<ProjectState>()(
       set((s) => ({
         project: produce(s.project, (draft) => {
           draft.ports = draft.ports.filter((p) => p.id !== portId);
+        }),
+      })),
+    setPortEnabled: (portId, enabled) =>
+      set((s) => ({
+        project: produce(s.project, (draft) => {
+          const p = draft.ports.find((x) => x.id === portId);
+          if (p) p.enabled = enabled;
         }),
       })),
     setBoard: (board) =>
