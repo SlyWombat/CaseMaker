@@ -10,6 +10,17 @@ Open issues:
 
 - [#2](https://github.com/SlyWombat/case-maker/issues/2) Snap-fit physical print validation loop (blocked on hardware).
 
+## [0.7.2] — 2026-04-27
+
+### Added
+
+- **Built-in Arduino GIGA R1 WiFi profile** (closes [#6](https://github.com/SlyWombat/case-maker/issues/6)). 101.6 × 53.3 × 1.6 mm PCB with 4 M3 mounting holes, USB-C / USB-A / USB-B / barrel-jack side-facing components, three GPIO header rows, and side SD-card slot. Datasheet source URL: <https://docs.arduino.cc/resources/datasheets/ABX00063-datasheet.pdf>.
+- New regression tests: `tests/unit/gigaR1.spec.ts` (5 assertions), GIGA-specific outer-bbox check in `tests/e2e/board-swap.spec.ts`, and the all-builtins E2E loop now covers 6 boards.
+
+### Tests
+
+- 88 Vitest unit tests, 32 Playwright E2E tests (120 total).
+
 ## [0.7.1] — Phase 7 follow-up — 2026-04-27
 
 ### Added
