@@ -4,3 +4,4 @@ export * from './case';
 export * from './port';
 export * from './mesh';
 export * from './project';
+export * from './hat';

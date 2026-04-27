@@ -9,6 +9,21 @@ All notable changes to Case Maker. The project follows the [Keep a Changelog](ht
 Open issues:
 
 - [#2](https://github.com/SlyWombat/case-maker/issues/2) Snap-fit physical print validation loop (blocked on hardware).
+- [#8](https://github.com/SlyWombat/case-maker/issues/8) Display mounting system + library of common displays.
+- [#9](https://github.com/SlyWombat/case-maker/issues/9) External case mounting features (screw tabs, zip-tie slots, VESA, DIN rail, keyhole, magnets).
+
+## [0.7.3] — Phase 8a — 2026-04-27
+
+### Added
+
+- **HAT / shield stacking foundation** (closes [#7](https://github.com/SlyWombat/case-maker/issues/7), Phase 8a). Data model (`HatProfile`, `HatPlacement`), strict zod schema with mandatory `source` URL on built-ins, compiler-side stack-Z math (`computeStackedHatHeight`, `computeHatBaseZ`), and wall-piercing cutouts at the HAT's Z (`buildHatCutoutsForProject`). `zClearance` auto-grows when HATs are enabled. Project schema bumps to `schemaVersion: 2` with a v1 → v2 migration that defaults `hats: []` and `customHats: []`.
+- **Built-in HAT: CQRobot DMX Shield (MAX485)** (`cqrobot-dmx-shield-max485`) — Arduino-shield form factor, 8.5 mm header gap, two XLR connectors on +y, screw terminal on -y. Compatible with Arduino Uno R3 and Arduino GIGA R1 WiFi.
+- **Test API expansion** — `addHat`, `removeHat`, `patchHat`, `getHats`.
+- **Sample STLs for issue #2** snap-fit print validation. `samples/snap-fit-calibration-30x30.stl` (tiny tolerance test, 72 tris) and `samples/esp32-devkit-snap-fit.stl` (real ESP32 case, 828 tris). New `npm run sample:export` script (`tsx scripts/export-sample.ts`) drives the real `compileProject` pipeline against Manifold WASM in Node.
+
+### Tests
+
+- 98 Vitest unit tests, 35 Playwright E2E tests (133 total).
 
 ## [0.7.2] — 2026-04-27
 

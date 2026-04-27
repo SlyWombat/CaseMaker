@@ -67,6 +67,13 @@ export interface CaseMakerTestApi {
     portId: string,
     patch: { position?: { x?: number; y?: number; z?: number } },
   ): Promise<void>;
+  addHat(hatId: string): Promise<string>;
+  removeHat(placementId: string): Promise<void>;
+  patchHat(
+    placementId: string,
+    patch: { enabled?: boolean; liftOverride?: number },
+  ): Promise<void>;
+  getHats(): import('@/types').HatPlacement[];
 }
 
 export function installCaseMakerTestApi(): void {
@@ -178,6 +185,22 @@ export function installCaseMakerTestApi(): void {
       useProjectStore.getState().patchPort(portId, patch);
       await waitForIdle();
     },
+    async addHat(hatId) {
+      const before = useProjectStore.getState().project.hats.length;
+      useProjectStore.getState().addHat(hatId);
+      await waitForIdle();
+      const hats = useProjectStore.getState().project.hats;
+      return hats[before]?.id ?? '';
+    },
+    async removeHat(placementId) {
+      useProjectStore.getState().removeHat(placementId);
+      await waitForIdle();
+    },
+    async patchHat(placementId, patch) {
+      useProjectStore.getState().patchHat(placementId, patch);
+      await waitForIdle();
+    },
+    getHats: () => useProjectStore.getState().project.hats,
   };
 
   (window as unknown as { __caseMaker: CaseMakerTestApi }).__caseMaker = api;

@@ -10,10 +10,13 @@ import type {
   BoardComponent,
   ComponentKind,
   Facing,
+  HatPlacement,
 } from '@/types';
 import { getBuiltinBoard } from '@/library';
+import { getBuiltinHat } from '@/library/hats';
 import { newId } from '@/utils/id';
 import { autoPortsForBoard } from '@/engine/compiler/portFactory';
+import { autoPortsForHat } from '@/engine/compiler/hats';
 
 const DEFAULT_BOARD_ID = 'rpi-4b';
 
@@ -41,7 +44,7 @@ export function createDefaultProject(boardId = DEFAULT_BOARD_ID): Project {
   if (!board) throw new Error(`Unknown built-in board: ${boardId}`);
   const now = new Date(0).toISOString();
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: newId('proj'),
     name: `${board.name} Case`,
     createdAt: now,
@@ -50,6 +53,8 @@ export function createDefaultProject(boardId = DEFAULT_BOARD_ID): Project {
     case: defaultCase(),
     ports: autoPortsForBoard(board),
     externalAssets: [],
+    hats: [],
+    customHats: [],
   };
 }
 
@@ -92,6 +97,11 @@ export interface ProjectState {
       cutoutMargin?: number;
     },
   ) => void;
+  addHat: (hatId: string) => void;
+  removeHat: (placementId: string) => void;
+  reorderHat: (placementId: string, newIndex: number) => void;
+  patchHat: (placementId: string, patch: Partial<HatPlacement>) => void;
+  setHatPortEnabled: (placementId: string, portId: string, enabled: boolean) => void;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -273,6 +283,73 @@ export const useProjectStore = create<ProjectState>()(
                 if (patch.position) Object.assign(matchingPort.position, patch.position);
                 if (patch.size) Object.assign(matchingPort.size, patch.size);
               }
+            }),
+          })),
+        addHat: (hatId) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.hats) draft.hats = [];
+              if (!draft.customHats) draft.customHats = [];
+              const profile =
+                draft.customHats.find((h) => h.id === hatId) ?? getBuiltinHat(hatId);
+              if (!profile) return;
+              const placementId = `hat-${newId()}`;
+              const stackIndex = draft.hats.length;
+              draft.hats.push({
+                id: placementId,
+                hatId,
+                stackIndex,
+                ports: autoPortsForHat(profile, placementId),
+                enabled: true,
+              });
+            }),
+          })),
+        removeHat: (placementId) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.hats) return;
+              draft.hats = draft.hats.filter((h) => h.id !== placementId);
+              draft.hats.forEach((h, i) => {
+                h.stackIndex = i;
+              });
+            }),
+          })),
+        reorderHat: (placementId, newIndex) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.hats) return;
+              const ordered = [...draft.hats].sort((a, b) => a.stackIndex - b.stackIndex);
+              const idx = ordered.findIndex((h) => h.id === placementId);
+              if (idx === -1) return;
+              const [moved] = ordered.splice(idx, 1);
+              ordered.splice(Math.max(0, Math.min(newIndex, ordered.length)), 0, moved!);
+              ordered.forEach((h, i) => {
+                h.stackIndex = i;
+              });
+              draft.hats = ordered;
+            }),
+          })),
+        patchHat: (placementId, patch) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.hats) return;
+              const h = draft.hats.find((x) => x.id === placementId);
+              if (!h) return;
+              if (typeof patch.enabled === 'boolean') h.enabled = patch.enabled;
+              if (typeof patch.liftOverride === 'number' || patch.liftOverride === undefined)
+                h.liftOverride = patch.liftOverride;
+              if (patch.offsetOverride) h.offsetOverride = patch.offsetOverride;
+              if (typeof patch.stackIndex === 'number') h.stackIndex = patch.stackIndex;
+            }),
+          })),
+        setHatPortEnabled: (placementId, portId, enabled) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.hats) return;
+              const h = draft.hats.find((x) => x.id === placementId);
+              if (!h) return;
+              const port = h.ports.find((p) => p.id === portId);
+              if (port) port.enabled = enabled;
             }),
           })),
       }),

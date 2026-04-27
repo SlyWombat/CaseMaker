@@ -1,0 +1,45 @@
+{
+  "id": "cqrobot-dmx-shield-max485",
+  "name": "CQRobot DMX Shield (MAX485)",
+  "manufacturer": "CQRobot",
+  "pcb": { "size": { "x": 68.6, "y": 53.4, "z": 1.6 } },
+  "mountingHoles": [
+    { "id": "h1", "x": 13.97, "y": 2.54, "diameter": 3.2 },
+    { "id": "h2", "x": 66.04, "y": 7.62, "diameter": 3.2 },
+    { "id": "h3", "x": 66.04, "y": 35.56, "diameter": 3.2 },
+    { "id": "h4", "x": 15.24, "y": 50.8, "diameter": 3.2 }
+  ],
+  "headerHeight": 8.5,
+  "components": [
+    {
+      "id": "dmx-in-xlr",
+      "kind": "custom",
+      "position": { "x": 5, "y": 49, "z": 1.6 },
+      "size": { "x": 22, "y": 22, "z": 24 },
+      "facing": "+y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "dmx-out-xlr",
+      "kind": "custom",
+      "position": { "x": 38, "y": 49, "z": 1.6 },
+      "size": { "x": 22, "y": 22, "z": 24 },
+      "facing": "+y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "screw-terminal",
+      "kind": "custom",
+      "position": { "x": 5, "y": 0, "z": 1.6 },
+      "size": { "x": 18, "y": 8, "z": 13 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    }
+  ],
+  "compatibleBoards": [
+    "arduino-uno-r3",
+    "arduino-giga-r1-wifi"
+  ],
+  "source": "https://www.cqrobot.com/index.php?route=product/product&product_id=1126",
+  "builtin": true
+}

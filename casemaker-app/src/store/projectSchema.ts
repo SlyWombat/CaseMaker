@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { boardProfileSchema } from '@/library/schema';
+import { hatProfileSchema } from '@/library/hatSchema';
 
 const xyzSchema = z.object({ x: z.number(), y: z.number(), z: z.number() });
 
@@ -61,7 +62,17 @@ const externalAssetSchema = z.object({
   visibility: z.enum(['reference', 'subtract', 'union']),
 });
 
-export const projectSchema = z.object({
+const hatPlacementSchema = z.object({
+  id: z.string(),
+  hatId: z.string(),
+  stackIndex: z.number().int().nonnegative(),
+  liftOverride: z.number().optional(),
+  offsetOverride: z.object({ x: z.number(), y: z.number() }).optional(),
+  ports: z.array(portPlacementSchema),
+  enabled: z.boolean(),
+});
+
+const projectV1Schema = z.object({
   schemaVersion: z.literal(1),
   id: z.string(),
   name: z.string(),
@@ -71,6 +82,32 @@ export const projectSchema = z.object({
   case: caseParamsSchema,
   ports: z.array(portPlacementSchema),
   externalAssets: z.array(externalAssetSchema),
+});
+
+const projectV2Schema = z.object({
+  schemaVersion: z.literal(2),
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.string(),
+  modifiedAt: z.string(),
+  board: boardProfileSchema,
+  case: caseParamsSchema,
+  ports: z.array(portPlacementSchema),
+  externalAssets: z.array(externalAssetSchema),
+  hats: z.array(hatPlacementSchema),
+  customHats: z.array(hatProfileSchema),
+});
+
+export const projectSchema = z.union([projectV1Schema, projectV2Schema]).transform((p) => {
+  if (p.schemaVersion === 1) {
+    return {
+      ...p,
+      schemaVersion: 2 as const,
+      hats: [],
+      customHats: [],
+    };
+  }
+  return p;
 });
 
 export type ProjectInput = z.infer<typeof projectSchema>;
