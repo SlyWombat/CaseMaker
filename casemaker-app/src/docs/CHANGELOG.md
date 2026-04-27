@@ -8,6 +8,8 @@ All notable changes to Case Maker. The project follows the [Keep a Changelog](ht
 
 ### Added
 
+- **HAT orientation model** ([#23](https://github.com/SlyWombat/case-maker/issues/23)): new optional `mountingPositions: HatMountingPosition[]` on `HatProfile` plus `mountingPositionId` on `HatPlacement`. Compiler rotates port positions/sizes/facings around the HAT PCB center per the chosen position. CQRobot DMX shield ships two declared positions (default + flipped 180°). Test API: `setHatMountingPosition(placementId, mountingPositionId)`. Drag-and-snap UX is a follow-up — this lands the data model + compiler.
+- **Board visualization toggle** ([#24](https://github.com/SlyWombat/case-maker/issues/24)): new `boardVisualization: 'schematic' | 'photo' | '3d'` mode on the viewport store with toolbar cycle button and `localStorage` persistence. New optional `visualAssets` field on `BoardProfile` for `glb` / `topImage` / `sideImage` / `license` / `sourceUrl`. `docs/board-assets.md` tracks per-board asset acquisition status (all 12 currently `_pending_` license-clearance verification).
 - **Lid visibility toggle** ([#20](https://github.com/SlyWombat/case-maker/issues/20)): toolbar button + `L` keyboard shortcut hide/show the lid in the viewport without recompiling. Preference persists in `localStorage`. Test API: `getLidVisible()` / `setLidVisible(v)`.
 - **Screw-down lid posts** ([#21](https://github.com/SlyWombat/case-maker/issues/21)): the screw-down lid now carries downward posts at every mounting-hole position that descend to within 0.3 mm of the board top. The post is hollow with a continuous screw-clearance hole through plate + post. Floor bosses are no longer over-extended; they stop at `floor + standoff` like other joints. New `engine/compiler/validation.ts::validateScrewDownAlignment` reports `lid-post-collides-component` warnings when a post would intersect a +z component, plus `board-overlap-boss` errors when a boss sits outside the PCB outline.
 - **Round cutouts for circular connectors** ([#18](https://github.com/SlyWombat/case-maker/issues/18)): new optional `cutoutShape: 'rect' | 'round'` on `BoardComponent` / `PortPlacement`. The compiler emits a wall-aligned cylindrical cutout (rotated about X or Y) when `round` is selected. CQRobot DMX shield XLR connectors now produce round 24 mm-dia cutouts instead of square slots.
@@ -22,10 +24,10 @@ All notable changes to Case Maker. The project follows the [Keep a Changelog](ht
 
 Open issues:
 
-- [#2](https://github.com/SlyWombat/case-maker/issues/2) Snap-fit physical print validation loop (blocked on hardware).
-- [#22](https://github.com/SlyWombat/case-maker/issues/22) Library audit: per-board datasheet research (schema lands now; manual audit follows).
-- [#23](https://github.com/SlyWombat/case-maker/issues/23) HAT orientation: drag-and-snap to declared mounting positions.
-- [#24](https://github.com/SlyWombat/case-maker/issues/24) Board visualization: bundle manufacturer 3D models / images per board.
+- [#2](https://github.com/SlyWombat/case-maker/issues/2) Snap-fit physical print validation loop (printing now).
+- [#22](https://github.com/SlyWombat/case-maker/issues/22) Library audit: per-board datasheet research (schema lands; manual audit follows).
+- [#25](https://github.com/SlyWombat/case-maker/issues/25) HatsPanel: visual list of added HATs with remove + reorder.
+- [#26](https://github.com/SlyWombat/case-maker/issues/26) Compiler: guarantee only two connected components (eliminate floating parts).
 
 ## [0.9.0] — Marketing-gap sweep — 2026-04-27
 

@@ -42,6 +42,20 @@
     "arduino-uno-r3",
     "arduino-giga-r1-wifi"
   ],
+  "mountingPositions": [
+    {
+      "id": "default",
+      "label": "Standard (XLR on +y)",
+      "offset": { "x": 0, "y": 0 },
+      "rotation": 0
+    },
+    {
+      "id": "flipped",
+      "label": "Reversed (XLR on -y)",
+      "offset": { "x": 0, "y": 0 },
+      "rotation": 180
+    }
+  ],
   "source": "https://www.cqrobot.com/index.php?route=product/product&product_id=1126",
   "builtin": true
 }

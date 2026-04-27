@@ -43,6 +43,13 @@ const componentSchema = z.object({
   cutoutShape: cutoutShapeSchema.optional(),
 });
 
+const mountingPositionSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  offset: z.object({ x: z.number(), y: z.number() }),
+  rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]),
+});
+
 export const hatProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -56,6 +63,7 @@ export const hatProfileSchema = z.object({
   headerHeight: z.number().positive(),
   components: z.array(componentSchema),
   compatibleBoards: z.array(z.string()),
+  mountingPositions: z.array(mountingPositionSchema).optional(),
   source: z.string().url().optional(),
   builtin: z.boolean(),
 });

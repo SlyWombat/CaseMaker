@@ -2,6 +2,15 @@ import type { Mm } from './units';
 import type { MountingHole, BoardComponent } from './board';
 import type { PortPlacement } from './port';
 
+export type HatRotation = 0 | 90 | 180 | 270;
+
+export interface HatMountingPosition {
+  id: string;
+  label: string;
+  offset: { x: Mm; y: Mm };
+  rotation: HatRotation;
+}
+
 export interface HatProfile {
   id: string;
   name: string;
@@ -18,6 +27,11 @@ export interface HatProfile {
   components: BoardComponent[];
   /** Empty array = generic / universally compatible. */
   compatibleBoards: string[];
+  /**
+   * Valid mounting positions for HATs that support more than one orientation.
+   * The first entry is the default. Empty/undefined = single canonical orientation.
+   */
+  mountingPositions?: HatMountingPosition[];
   source?: string;
   builtin: boolean;
 }
@@ -31,6 +45,8 @@ export interface HatPlacement {
   liftOverride?: number;
   /** mm — XY offset relative to the host PCB origin. Default is centered match-up. */
   offsetOverride?: { x: Mm; y: Mm };
+  /** When the HAT profile has mountingPositions, names the chosen entry. */
+  mountingPositionId?: string;
   /** Auto-generated cutouts mirroring the HAT's components, with per-port toggles. */
   ports: PortPlacement[];
   enabled: boolean;

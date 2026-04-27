@@ -74,6 +74,7 @@ const hatPlacementSchema = z.object({
   stackIndex: z.number().int().nonnegative(),
   liftOverride: z.number().optional(),
   offsetOverride: z.object({ x: z.number(), y: z.number() }).optional(),
+  mountingPositionId: z.string().optional(),
   ports: z.array(portPlacementSchema),
   enabled: z.boolean(),
 });

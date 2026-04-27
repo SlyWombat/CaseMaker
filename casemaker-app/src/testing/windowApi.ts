@@ -80,6 +80,9 @@ export interface CaseMakerTestApi {
   getHats(): import('@/types').HatPlacement[];
   getLidVisible(): boolean;
   setLidVisible(v: boolean): void;
+  setHatMountingPosition(placementId: string, mountingPositionId: string): Promise<void>;
+  getBoardVisualization(): 'schematic' | 'photo' | '3d';
+  setBoardVisualization(mode: 'schematic' | 'photo' | '3d'): void;
 }
 
 export function installCaseMakerTestApi(): void {
@@ -194,6 +197,14 @@ export function installCaseMakerTestApi(): void {
     getLidVisible: () => useViewportStore.getState().showLid,
     setLidVisible: (v) => {
       useViewportStore.getState().setShowLid(v);
+    },
+    async setHatMountingPosition(placementId, mountingPositionId) {
+      useProjectStore.getState().patchHat(placementId, { mountingPositionId });
+      await waitForIdle();
+    },
+    getBoardVisualization: () => useViewportStore.getState().boardVisualization,
+    setBoardVisualization: (mode) => {
+      useViewportStore.getState().setBoardVisualization(mode);
     },
     async patchPort(portId, patch) {
       useProjectStore.getState().patchPort(portId, patch);

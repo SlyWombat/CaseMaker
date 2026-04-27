@@ -364,6 +364,8 @@ export const useProjectStore = create<ProjectState>()(
                 h.liftOverride = patch.liftOverride;
               if (patch.offsetOverride) h.offsetOverride = patch.offsetOverride;
               if (typeof patch.stackIndex === 'number') h.stackIndex = patch.stackIndex;
+              if (typeof patch.mountingPositionId === 'string')
+                h.mountingPositionId = patch.mountingPositionId;
             }),
           })),
         setHatPortEnabled: (placementId, portId, enabled) =>

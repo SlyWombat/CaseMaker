@@ -14,6 +14,8 @@ export function Toolbar() {
   const setProject = useProjectStore((s) => s.setProject);
   const showLid = useViewportStore((s) => s.showLid);
   const toggleShowLid = useViewportStore((s) => s.toggleShowLid);
+  const boardVisualization = useViewportStore((s) => s.boardVisualization);
+  const cycleBoardVisualization = useViewportStore((s) => s.cycleBoardVisualization);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [docsOpen, setDocsOpen] = useState(false);
@@ -85,6 +87,13 @@ export function Toolbar() {
         aria-pressed={showLid}
       >
         {showLid ? '👁 Lid' : '🚫 Lid'}
+      </button>
+      <button
+        onClick={cycleBoardVisualization}
+        data-testid="cycle-board-visualization-btn"
+        title="Board visualization: schematic / photo / 3D"
+      >
+        Board: {boardVisualization}
       </button>
       <button onClick={() => setDocsOpen(true)} data-testid="docs-open">
         📖 Docs

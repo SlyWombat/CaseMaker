@@ -43,6 +43,19 @@ export type MeasurementMethod =
   | 'open-source-cad'
   | 'physical-measurement';
 
+export interface BoardVisualAssets {
+  /** Path under public/ to a glTF/GLB 3D model. */
+  glb?: string;
+  /** Path under public/ to a top-down PNG/JPG. */
+  topImage?: string;
+  /** Path under public/ to a side-view PNG/JPG. */
+  sideImage?: string;
+  /** SPDX expression or URL to manufacturer license. */
+  license?: string;
+  /** Source of the assets (e.g. manufacturer doc URL). */
+  sourceUrl?: string;
+}
+
 export interface BoardProfile {
   id: string;
   name: string;
@@ -58,5 +71,6 @@ export interface BoardProfile {
   /** Datasheet revision string, e.g. "Rev 1.4 — 2023-08". */
   datasheetRevision?: string;
   measurementMethod?: MeasurementMethod;
+  visualAssets?: BoardVisualAssets;
   builtin: boolean;
 }

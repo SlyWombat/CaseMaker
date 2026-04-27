@@ -64,6 +64,15 @@ export const boardProfileSchema = z.object({
   crossReference: z.string().url().optional(),
   datasheetRevision: z.string().optional(),
   measurementMethod: z.enum(['datasheet', 'open-source-cad', 'physical-measurement']).optional(),
+  visualAssets: z
+    .object({
+      glb: z.string().optional(),
+      topImage: z.string().optional(),
+      sideImage: z.string().optional(),
+      license: z.string().optional(),
+      sourceUrl: z.string().url().optional(),
+    })
+    .optional(),
   builtin: z.boolean(),
 });
 

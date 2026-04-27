@@ -8,6 +8,7 @@ import type {
 import { type BuildOp } from './buildPlan';
 import { buildAxisAlignedCutout } from './roundCutout';
 import { computeStackedHatHeight, HOST_HAT_CLEARANCE } from './caseShell';
+import { transformPlacementPorts } from './hatOrientation';
 
 const OVERSHOOT = 1;
 
@@ -75,8 +76,9 @@ export function buildHatCutoutsForProject(
     if (z0 === undefined) continue;
     const offsetX = placement.offsetOverride?.x ?? 0;
     const offsetY = placement.offsetOverride?.y ?? 0;
+    const transformedPorts = transformPlacementPorts(placement, profile);
 
-    for (const port of placement.ports) {
+    for (const port of transformedPorts) {
       if (!port.enabled) continue;
       if (port.facing === '+z') continue;
       const m = port.cutoutMargin;

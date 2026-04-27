@@ -33,4 +33,20 @@ describe('Issue #20 — viewport lid toggle', () => {
     const parsed = JSON.parse(raw!);
     expect(parsed.showLid).toBe(false);
   });
+
+  it('boardVisualization defaults to schematic and cycles to photo, then 3d, then back', () => {
+    expect(useViewportStore.getState().boardVisualization).toBe('schematic');
+    useViewportStore.getState().cycleBoardVisualization();
+    expect(useViewportStore.getState().boardVisualization).toBe('photo');
+    useViewportStore.getState().cycleBoardVisualization();
+    expect(useViewportStore.getState().boardVisualization).toBe('3d');
+    useViewportStore.getState().cycleBoardVisualization();
+    expect(useViewportStore.getState().boardVisualization).toBe('schematic');
+  });
+
+  it('setBoardVisualization sets the named mode', () => {
+    useViewportStore.getState().setBoardVisualization('3d');
+    expect(useViewportStore.getState().boardVisualization).toBe('3d');
+    useViewportStore.getState().setBoardVisualization('schematic');
+  });
 });
