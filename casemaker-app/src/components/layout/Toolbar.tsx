@@ -6,12 +6,14 @@ import {
   clearHistory,
 } from '@/store/projectStore';
 import { downloadProjectJson, readProjectFromFile } from '@/store/persistence';
+import { DocsModal } from '@/components/docs/DocsModal';
 
 export function Toolbar() {
   const project = useProjectStore((s) => s.project);
   const setProject = useProjectStore((s) => s.setProject);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [docsOpen, setDocsOpen] = useState(false);
 
   const onSave = useCallback(() => {
     downloadProjectJson(project);
@@ -60,7 +62,11 @@ export function Toolbar() {
         onChange={onFileChange}
         data-testid="load-project-input"
       />
+      <button onClick={() => setDocsOpen(true)} data-testid="docs-open">
+        📖 Docs
+      </button>
       {error && <span style={{ color: '#ff8888', fontSize: 12 }}>{error}</span>}
+      {docsOpen && <DocsModal onClose={() => setDocsOpen(false)} />}
     </div>
   );
 }

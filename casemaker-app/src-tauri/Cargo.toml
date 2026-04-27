@@ -18,6 +18,16 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "tokio"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["set-header", "trace"] }
+mime_guess = "2"
+rust-embed = { version = "8", features = ["debug-embed"] }
+clap = { version = "4", features = ["derive"] }
+dirs = "5"
+log = "0.4"
+env_logger = "0.11"
 
 [profile.release]
 panic = "abort"

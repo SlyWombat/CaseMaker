@@ -248,6 +248,138 @@ body, html, #root {
   margin: 4px 0 0;
 }
 
+.docs-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.docs-modal {
+  background: #1f242a;
+  width: min(1100px, 95vw);
+  height: min(80vh, 800px);
+  border-radius: 8px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  border: 1px solid #2a2f36;
+  overflow: hidden;
+}
+.docs-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid #2a2f36;
+}
+.docs-modal-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.docs-modal-body {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  min-height: 0;
+}
+.docs-modal-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  background: #14181c;
+  border-right: 1px solid #2a2f36;
+  overflow-y: auto;
+}
+.docs-modal-nav button {
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: #c4cad3;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.docs-modal-nav button:hover {
+  background: #1f2a36;
+}
+.docs-modal-nav button.active {
+  background: #2c3b50;
+  color: #ffd267;
+}
+.docs-modal-content {
+  padding: 24px 28px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.docs-modal-content h1 {
+  font-size: 22px;
+  margin: 0 0 12px;
+}
+.docs-modal-content h2 {
+  font-size: 18px;
+  margin: 24px 0 8px;
+  color: #e6e8eb;
+  border-bottom: 1px solid #2a2f36;
+  padding-bottom: 4px;
+}
+.docs-modal-content h3 {
+  font-size: 15px;
+  margin: 18px 0 6px;
+  color: #c4cad3;
+}
+.docs-modal-content h4 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8a94a4;
+  margin: 14px 0 4px;
+}
+.docs-modal-content code {
+  background: #14181c;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.docs-modal-content pre {
+  background: #14181c;
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+.docs-modal-content pre code {
+  background: transparent;
+  padding: 0;
+}
+.docs-modal-content table {
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 8px 0 14px;
+}
+.docs-modal-content th, .docs-modal-content td {
+  border: 1px solid #2a2f36;
+  padding: 4px 8px;
+  text-align: left;
+}
+.docs-modal-content th {
+  background: #14181c;
+}
+.docs-modal-content blockquote {
+  border-left: 3px solid #ffd267;
+  padding: 4px 12px;
+  margin: 10px 0;
+  background: #1f1d18;
+  color: #d4cab0;
+  border-radius: 0 4px 4px 0;
+}
+.docs-modal-content a {
+  color: #67c0ff;
+}
+
 select, button {
   background: #14181c;
   color: #e6e8eb;
