@@ -47,7 +47,7 @@ export function createDefaultProject(boardId = DEFAULT_BOARD_ID): Project {
   if (!board) throw new Error(`Unknown built-in board: ${boardId}`);
   const now = new Date(0).toISOString();
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     id: newId('proj'),
     name: `${board.name} Case`,
     createdAt: now,
@@ -61,6 +61,8 @@ export function createDefaultProject(boardId = DEFAULT_BOARD_ID): Project {
     mountingFeatures: [],
     display: null,
     customDisplays: [],
+    fanMounts: [],
+    textLabels: [],
   };
 }
 
@@ -116,6 +118,12 @@ export interface ProjectState {
   patchDisplay: (
     patch: Partial<import('@/types/display').DisplayPlacement>,
   ) => void;
+  addFanMount: (size: import('@/types/fan').FanSize, face: import('@/types/fan').CaseFace) => void;
+  removeFanMount: (id: string) => void;
+  patchFanMount: (id: string, patch: Partial<import('@/types/fan').FanMount>) => void;
+  addTextLabel: (label: import('@/types/textLabel').TextLabel) => void;
+  removeTextLabel: (id: string) => void;
+  patchTextLabel: (id: string, patch: Partial<import('@/types/textLabel').TextLabel>) => void;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -436,6 +444,84 @@ export const useProjectStore = create<ProjectState>()(
                 hostSupport: 'gpio-only',
                 enabled: true,
               };
+            }),
+          })),
+        addFanMount: (size, face) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.fanMounts) draft.fanMounts = [];
+              const dims = computeShellDims(
+                draft.board,
+                draft.case,
+                draft.hats ?? [],
+                () => undefined,
+              );
+              const u = face === '+z' || face === '-z' ? dims.outerX / 2 : dims.outerX / 2;
+              const v = face === '+z' || face === '-z' ? dims.outerY / 2 : dims.outerZ / 2;
+              draft.fanMounts.push({
+                id: `fan-${newId()}`,
+                size,
+                face,
+                position: { u, v },
+                grille: 'cross',
+                bladeStandoff: 4,
+                bossesEnabled: true,
+                enabled: true,
+              });
+            }),
+          })),
+        removeFanMount: (id) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.fanMounts) return;
+              draft.fanMounts = draft.fanMounts.filter((f) => f.id !== id);
+            }),
+          })),
+        patchFanMount: (id, patch) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.fanMounts) return;
+              const f = draft.fanMounts.find((x) => x.id === id);
+              if (!f) return;
+              if (typeof patch.enabled === 'boolean') f.enabled = patch.enabled;
+              if (typeof patch.bossesEnabled === 'boolean') f.bossesEnabled = patch.bossesEnabled;
+              if (patch.size) f.size = patch.size;
+              if (patch.grille) f.grille = patch.grille;
+              if (patch.face) f.face = patch.face;
+              if (patch.position) Object.assign(f.position, patch.position);
+              if (typeof patch.bladeStandoff === 'number') f.bladeStandoff = patch.bladeStandoff;
+            }),
+          })),
+        addTextLabel: (label) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.textLabels) draft.textLabels = [];
+              draft.textLabels.push(label);
+            }),
+          })),
+        removeTextLabel: (id) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.textLabels) return;
+              draft.textLabels = draft.textLabels.filter((l) => l.id !== id);
+            }),
+          })),
+        patchTextLabel: (id, patch) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.textLabels) return;
+              const l = draft.textLabels.find((x) => x.id === id);
+              if (!l) return;
+              if (typeof patch.enabled === 'boolean') l.enabled = patch.enabled;
+              if (typeof patch.text === 'string') l.text = patch.text;
+              if (typeof patch.size === 'number') l.size = patch.size;
+              if (typeof patch.depth === 'number') l.depth = patch.depth;
+              if (typeof patch.rotation === 'number') l.rotation = patch.rotation;
+              if (patch.mode) l.mode = patch.mode;
+              if (patch.face) l.face = patch.face;
+              if (patch.font) l.font = patch.font;
+              if (patch.weight) l.weight = patch.weight;
+              if (patch.position) Object.assign(l.position, patch.position);
             }),
           })),
         patchDisplay: (patch) =>

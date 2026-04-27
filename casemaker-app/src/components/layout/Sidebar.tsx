@@ -5,6 +5,7 @@ import { BoardEditorPanel } from '@/components/panels/BoardEditorPanel';
 import { AssetsPanel } from '@/components/panels/AssetsPanel';
 import { SettingsPanel } from '@/components/panels/SettingsPanel';
 import { HatsPanel } from '@/components/panels/HatsPanel';
+import { TemplatesPanel } from '@/components/panels/TemplatesPanel';
 import { useProjectStore } from '@/store/projectStore';
 import { listBuiltinBoardIds } from '@/library';
 
@@ -14,6 +15,7 @@ export function Sidebar() {
   const ids = listBuiltinBoardIds();
   return (
     <aside className="sidebar">
+      <TemplatesPanel />
       <div className="panel">
         <h3>Board</h3>
         <select

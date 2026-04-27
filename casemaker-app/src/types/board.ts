@@ -11,6 +11,9 @@ export type ComponentKind =
   | 'ethernet-rj45'
   | 'gpio-header'
   | 'sd-card'
+  | 'flat-cable'
+  | 'fan-mount'
+  | 'text-label'
   | 'custom';
 
 export type Facing = '+x' | '-x' | '+y' | '-y' | '+z';

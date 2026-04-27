@@ -1,0 +1,56 @@
+{
+  "id": "teensy-41",
+  "name": "Teensy 4.1",
+  "manufacturer": "PJRC",
+  "pcb": { "size": { "x": 61, "y": 17.78, "z": 1.6 } },
+  "mountingHoles": [
+    { "id": "h1", "x": 2.54, "y": 2.54, "diameter": 2.5 },
+    { "id": "h2", "x": 58.46, "y": 2.54, "diameter": 2.5 },
+    { "id": "h3", "x": 2.54, "y": 15.24, "diameter": 2.5 },
+    { "id": "h4", "x": 58.46, "y": 15.24, "diameter": 2.5 }
+  ],
+  "components": [
+    {
+      "id": "usb",
+      "kind": "micro-usb",
+      "position": { "x": -2, "y": 6, "z": 1.6 },
+      "size": { "x": 7, "y": 5.5, "z": 2.5 },
+      "facing": "-x",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "ethernet",
+      "kind": "ethernet-rj45",
+      "position": { "x": 49, "y": -2, "z": 1.6 },
+      "size": { "x": 11, "y": 14, "z": 13.5 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "sd",
+      "kind": "sd-card",
+      "position": { "x": 26, "y": 0, "z": 0 },
+      "size": { "x": 12, "y": 11, "z": 1.4 },
+      "facing": "-y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "header-left",
+      "kind": "gpio-header",
+      "position": { "x": 1.27, "y": 4.2, "z": 1.6 },
+      "size": { "x": 4, "y": 9, "z": 9 },
+      "facing": "+z"
+    },
+    {
+      "id": "header-right",
+      "kind": "gpio-header",
+      "position": { "x": 55.73, "y": 4.2, "z": 1.6 },
+      "size": { "x": 4, "y": 9, "z": 9 },
+      "facing": "+z"
+    }
+  ],
+  "defaultStandoffHeight": 3,
+  "recommendedZClearance": 12,
+  "source": "https://www.pjrc.com/teensy/card11a_rev1.pdf",
+  "builtin": true
+}

@@ -40,6 +40,9 @@ const portPlacementSchema = z.object({
     'ethernet-rj45',
     'gpio-header',
     'sd-card',
+    'flat-cable',
+    'fan-mount',
+    'text-label',
     'custom',
   ]),
   position: xyzSchema,
@@ -147,27 +150,84 @@ const projectV3Schema = z.object({
   customDisplays: z.array(displayProfileSchema),
 });
 
+const fanMountSchema = z.object({
+  id: z.string(),
+  size: z.enum(['30x30x10', '40x40x10', '40x40x20', '50x50x10', '60x60x15']),
+  face: z.enum(['+x', '-x', '+y', '-y', '+z', '-z']),
+  position: z.object({ u: z.number(), v: z.number() }),
+  grille: z.enum(['cross', 'spiral', 'honeycomb', 'concentric', 'open']),
+  bladeStandoff: z.number().nonnegative(),
+  bossesEnabled: z.boolean(),
+  enabled: z.boolean(),
+});
+
+const textLabelSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  font: z.enum(['sans-default', 'mono-default']),
+  weight: z.enum(['regular', 'bold']),
+  size: z.number().positive(),
+  face: z.enum(['+x', '-x', '+y', '-y', '+z', '-z']),
+  position: z.object({ u: z.number(), v: z.number() }),
+  rotation: z.number(),
+  depth: z.number().positive(),
+  mode: z.enum(['engrave', 'emboss']),
+  enabled: z.boolean(),
+  attachedToPortId: z.string().optional(),
+});
+
+const projectV4Schema = z.object({
+  schemaVersion: z.literal(4),
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.string(),
+  modifiedAt: z.string(),
+  board: boardProfileSchema,
+  case: caseParamsSchema,
+  ports: z.array(portPlacementSchema),
+  externalAssets: z.array(externalAssetSchema),
+  hats: z.array(hatPlacementSchema),
+  customHats: z.array(hatProfileSchema),
+  mountingFeatures: z.array(mountingFeatureSchema),
+  display: displayPlacementSchema.nullable(),
+  customDisplays: z.array(displayProfileSchema),
+  fanMounts: z.array(fanMountSchema),
+  textLabels: z.array(textLabelSchema),
+});
+
 export const projectSchema = z
-  .union([projectV1Schema, projectV2Schema, projectV3Schema])
+  .union([projectV1Schema, projectV2Schema, projectV3Schema, projectV4Schema])
   .transform((p) => {
     if (p.schemaVersion === 1) {
       return {
         ...p,
-        schemaVersion: 3 as const,
+        schemaVersion: 4 as const,
         hats: [],
         customHats: [],
         mountingFeatures: [],
         display: null,
         customDisplays: [],
+        fanMounts: [],
+        textLabels: [],
       };
     }
     if (p.schemaVersion === 2) {
       return {
         ...p,
-        schemaVersion: 3 as const,
+        schemaVersion: 4 as const,
         mountingFeatures: [],
         display: null,
         customDisplays: [],
+        fanMounts: [],
+        textLabels: [],
+      };
+    }
+    if (p.schemaVersion === 3) {
+      return {
+        ...p,
+        schemaVersion: 4 as const,
+        fanMounts: [],
+        textLabels: [],
       };
     }
     return p;

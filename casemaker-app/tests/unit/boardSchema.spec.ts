@@ -13,9 +13,10 @@ describe('board library', () => {
     }
   });
 
-  it('every built-in board has at least 3 mounting holes', () => {
+  it('every built-in board has at least 1 mounting hole', () => {
+    // Most boards have 4; micro:bit V2 has 2; some have 1. Schema requires ≥ 1.
     for (const b of builtinBoards) {
-      expect(b.mountingHoles.length).toBeGreaterThanOrEqual(3);
+      expect(b.mountingHoles.length).toBeGreaterThanOrEqual(1);
     }
   });
 

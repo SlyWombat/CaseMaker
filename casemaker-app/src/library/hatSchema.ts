@@ -20,6 +20,9 @@ const componentKindSchema = z.enum([
   'ethernet-rj45',
   'gpio-header',
   'sd-card',
+  'flat-cable',
+  'fan-mount',
+  'text-label',
   'custom',
 ]);
 

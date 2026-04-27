@@ -1,0 +1,40 @@
+{
+  "id": "microbit-v2",
+  "name": "BBC micro:bit V2",
+  "manufacturer": "Micro:bit Educational Foundation",
+  "pcb": { "size": { "x": 51.6, "y": 42, "z": 1.6 } },
+  "mountingHoles": [
+    { "id": "h1", "x": 4.85, "y": 4.85, "diameter": 4 },
+    { "id": "h2", "x": 46.75, "y": 4.85, "diameter": 4 }
+  ],
+  "components": [
+    {
+      "id": "usb-micro",
+      "kind": "micro-usb",
+      "position": { "x": 21.8, "y": 42, "z": 1.6 },
+      "size": { "x": 8, "y": 5.5, "z": 2.5 },
+      "facing": "+y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "battery",
+      "kind": "custom",
+      "position": { "x": 9, "y": 42, "z": 1.6 },
+      "size": { "x": 6, "y": 6, "z": 5 },
+      "facing": "+y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "edge-connector",
+      "kind": "custom",
+      "position": { "x": 0, "y": 0, "z": 0 },
+      "size": { "x": 51.6, "y": 4, "z": 1.6 },
+      "facing": "-y",
+      "cutoutMargin": 0.6
+    }
+  ],
+  "defaultStandoffHeight": 3,
+  "recommendedZClearance": 8,
+  "source": "https://tech.microbit.org/hardware/2-1-revision/",
+  "builtin": true
+}

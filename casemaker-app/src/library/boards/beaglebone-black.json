@@ -1,0 +1,72 @@
+{
+  "id": "beaglebone-black",
+  "name": "BeagleBone Black",
+  "manufacturer": "BeagleBoard.org",
+  "pcb": { "size": { "x": 86.4, "y": 53.3, "z": 1.6 } },
+  "mountingHoles": [
+    { "id": "h1", "x": 14.6, "y": 3, "diameter": 3.2 },
+    { "id": "h2", "x": 82.5, "y": 3, "diameter": 3.2 },
+    { "id": "h3", "x": 14.6, "y": 50.3, "diameter": 3.2 },
+    { "id": "h4", "x": 82.5, "y": 50.3, "diameter": 3.2 }
+  ],
+  "components": [
+    {
+      "id": "ethernet",
+      "kind": "ethernet-rj45",
+      "position": { "x": 0, "y": 17, "z": 1.6 },
+      "size": { "x": 16, "y": 21, "z": 13.5 },
+      "facing": "-x",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "usb-host",
+      "kind": "usb-a",
+      "position": { "x": 71, "y": 33, "z": 1.6 },
+      "size": { "x": 16, "y": 14, "z": 7.5 },
+      "facing": "+x",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "usb-mini-client",
+      "kind": "micro-usb",
+      "position": { "x": 79, "y": 7, "z": 1.6 },
+      "size": { "x": 8, "y": 8.4, "z": 3.4 },
+      "facing": "+x",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "barrel",
+      "kind": "barrel-jack",
+      "position": { "x": 65, "y": -2, "z": 1.6 },
+      "size": { "x": 13, "y": 9, "z": 10.5 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "micro-hdmi",
+      "kind": "micro-hdmi",
+      "position": { "x": 36, "y": -2, "z": 1.6 },
+      "size": { "x": 8, "y": 6, "z": 3 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "header-p9",
+      "kind": "gpio-header",
+      "position": { "x": 7, "y": 4, "z": 1.6 },
+      "size": { "x": 56, "y": 5, "z": 8.5 },
+      "facing": "+z"
+    },
+    {
+      "id": "header-p8",
+      "kind": "gpio-header",
+      "position": { "x": 7, "y": 44, "z": 1.6 },
+      "size": { "x": 56, "y": 5, "z": 8.5 },
+      "facing": "+z"
+    }
+  ],
+  "defaultStandoffHeight": 4,
+  "recommendedZClearance": 14,
+  "source": "https://www.beagleboard.org/static/beagleboard/black/BBB_SRM.pdf",
+  "builtin": true
+}

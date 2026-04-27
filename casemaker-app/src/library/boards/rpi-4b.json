@@ -80,6 +80,22 @@
       "size": { "x": 12, "y": 11, "z": 1.6 },
       "facing": "-x",
       "cutoutMargin": 0.7
+    },
+    {
+      "id": "csi-camera-ribbon",
+      "kind": "flat-cable",
+      "position": { "x": 38, "y": 47, "z": 1.6 },
+      "size": { "x": 18, "y": 1, "z": 9 },
+      "facing": "+z",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "dsi-display-ribbon",
+      "kind": "flat-cable",
+      "position": { "x": 13, "y": 27, "z": 1.6 },
+      "size": { "x": 18, "y": 1, "z": 9 },
+      "facing": "+z",
+      "cutoutMargin": 0.5
     }
   ],
   "defaultStandoffHeight": 3,

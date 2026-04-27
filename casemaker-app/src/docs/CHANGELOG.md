@@ -10,6 +10,27 @@ Open issues:
 
 - [#2](https://github.com/SlyWombat/case-maker/issues/2) Snap-fit physical print validation loop (blocked on hardware).
 
+## [0.9.0] — Marketing-gap sweep — 2026-04-27
+
+Closes the five marketing-gap issues filed after the v0.8.0 release.
+
+### Added
+
+- **6 new built-in boards** ([#12](https://github.com/SlyWombat/case-maker/issues/12)): Raspberry Pi Pico (W), Teensy 4.1, NVIDIA Jetson Nano Dev Kit (B01), BeagleBone Black, BBC micro:bit V2, M5Stack Core2. Total board count is now **12**. Each schema-validated with a manufacturer datasheet `source` URL.
+- **Flat-ribbon cable cutouts** ([#13](https://github.com/SlyWombat/case-maker/issues/13)): new `flat-cable` ComponentKind. Pi 4B / Pi 5 / Pi Zero 2W board profiles auto-generate CSI camera (and DSI display, where applicable) ribbon slots through the case top.
+- **Integrated case-fan mounts** ([#14](https://github.com/SlyWombat/case-maker/issues/14)): new `FanMount` data model with 30/40/40-tall/50/60 mm sizes, four grille patterns (`cross`, `concentric`, `honeycomb`, `spiral`, `open`), optional mounting-boss bosses sized to the fan's screw-spacing spec. Wired into the project compiler; UI panel deferred.
+- **Project templates / starter gallery** ([#15](https://github.com/SlyWombat/case-maker/issues/15)): new `TemplatesPanel` at the top of the sidebar with five one-click recipes — Pi 4 server tray, Pi 4 + PoE+, Pi Zero 2W tablet (HyperPixel recessed-bezel), Arduino DMX controller (Uno + CQRobot DMX), ESP32 dev tray. Each builds a fully populated v4 Project.
+- **Engraved text labels** ([#16](https://github.com/SlyWombat/case-maker/issues/16)): new `TextLabel` data model + Phase-1 block-letter compiler. Engrave (`mode=engrave`) subtracts character blocks from the case face; emboss (`mode=emboss`) extrudes them. Per-character rectangles serve as a placeholder; full TTF glyph extraction is a follow-up.
+- New `flat-cable`, `fan-mount`, `text-label` enum members in every component-kind schema (board / hat / display / port).
+
+### Changed
+
+- **Project schema bumped to `schemaVersion: 4`** with v3 → v4 migration adding `fanMounts: []` and `textLabels: []`. v1/v2 → v4 transforms backfill all intermediate fields.
+
+### Tests
+
+- 135 Vitest unit tests, 36 Playwright E2E tests (171 total).
+
 ## [0.8.0] — Phase 8b/9a/10a + print-ready export — 2026-04-27
 
 ### Added

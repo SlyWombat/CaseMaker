@@ -10,16 +10,37 @@ import { buildVentilationCutouts } from './ventilation';
 import { buildExternalAssetOps } from './externalAssets';
 import { buildHatCutoutsForProject } from './hats';
 import { buildMountingFeatureOps } from './mountingFeatures';
+import { buildDisplayCutoutOps } from './displays';
+import { buildFanMountOps } from './fans';
+import { buildTextLabelOps } from './textLabels';
 import { getBuiltinHat } from '@/library/hats';
+import { getBuiltinDisplay } from '@/library/displays';
+import type { DisplayProfile } from '@/types/display';
 
 function makeHatResolver(project: Project): (id: string) => HatProfile | undefined {
   const customById = new Map((project.customHats ?? []).map((h) => [h.id, h] as const));
   return (id: string) => customById.get(id) ?? getBuiltinHat(id);
 }
 
+function makeDisplayResolver(project: Project): (id: string) => DisplayProfile | undefined {
+  const customById = new Map((project.customDisplays ?? []).map((d) => [d.id, d] as const));
+  return (id: string) => customById.get(id) ?? getBuiltinDisplay(id);
+}
+
 export function compileProject(project: Project): BuildPlan {
-  const { board, case: caseParams, ports, externalAssets, hats, mountingFeatures } = project;
+  const {
+    board,
+    case: caseParams,
+    ports,
+    externalAssets,
+    hats,
+    mountingFeatures,
+    display,
+    fanMounts,
+    textLabels,
+  } = project;
   const resolveHat = makeHatResolver(project);
+  const resolveDisplay = makeDisplayResolver(project);
 
   const shellOuter = buildOuterShell(board, caseParams, hats ?? [], resolveHat);
   const bossPlacements = computeBossPlacements(board, caseParams);
@@ -33,12 +54,19 @@ export function compileProject(project: Project): BuildPlan {
     hats ?? [],
     resolveHat,
   );
+  const displayOps = buildDisplayCutoutOps(board, caseParams, display, resolveDisplay);
+  const fanOps = buildFanMountOps(fanMounts, board, caseParams, hats ?? [], resolveHat);
+  const textOps = buildTextLabelOps(textLabels, board, caseParams, hats ?? [], resolveHat);
+
   const additive = [
     shellOuter,
     ...bossOps,
     ...railOps,
     ...assetOps.unionOps,
     ...featureOps.additive,
+    ...displayOps.additive,
+    ...fanOps.additive,
+    ...textOps.additive,
   ];
 
   const cutoutOps: BuildOp[] = [
@@ -47,6 +75,9 @@ export function compileProject(project: Project): BuildPlan {
     ...buildHatCutoutsForProject(board, caseParams, hats ?? [], resolveHat),
     ...assetOps.subtractOps,
     ...featureOps.subtractive,
+    ...displayOps.subtractive,
+    ...fanOps.subtractive,
+    ...textOps.subtractive,
   ];
 
   let shellOp: BuildOp = additive.length > 1 ? union(additive) : shellOuter;

@@ -13,7 +13,7 @@ export interface DisplayFootprint {
 
 export function computeDisplayFootprint(
   board: BoardProfile,
-  placement: DisplayPlacement | undefined,
+  placement: DisplayPlacement | null | undefined,
   resolveDisplay: (id: string) => DisplayProfile | undefined,
 ): DisplayFootprint {
   if (!placement || !placement.enabled) {
@@ -37,7 +37,7 @@ export function computeDisplayFootprint(
 export function buildDisplayCutoutOps(
   board: BoardProfile,
   params: CaseParameters,
-  placement: DisplayPlacement | undefined,
+  placement: DisplayPlacement | null | undefined,
   resolveDisplay: (id: string) => DisplayProfile | undefined,
 ): { additive: BuildOp[]; subtractive: BuildOp[] } {
   if (!placement || !placement.enabled) return { additive: [], subtractive: [] };

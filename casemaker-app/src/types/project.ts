@@ -5,6 +5,8 @@ import type { PortPlacement } from './port';
 import type { HatProfile, HatPlacement } from './hat';
 import type { MountingFeature } from './mounting';
 import type { DisplayProfile, DisplayPlacement } from './display';
+import type { FanMount } from './fan';
+import type { TextLabel } from './textLabel';
 
 export interface ExternalAsset {
   id: string;
@@ -19,7 +21,7 @@ export interface ExternalAsset {
   visibility: 'reference' | 'subtract' | 'union';
 }
 
-export type ProjectSchemaVersion = 1 | 2 | 3;
+export type ProjectSchemaVersion = 1 | 2 | 3 | 4;
 
 export interface Project {
   schemaVersion: ProjectSchemaVersion;
@@ -31,14 +33,13 @@ export interface Project {
   case: CaseParameters;
   ports: PortPlacement[];
   externalAssets: ExternalAsset[];
-  /** Stacked HATs / shields (Phase 8a, schemaVersion 2+). v1 projects default to []. */
   hats: HatPlacement[];
-  /** User-defined HAT profiles (schemaVersion 2+). v1 projects default to []. */
   customHats: HatProfile[];
-  /** External mounting features (schemaVersion 3+). v1/v2 projects default to []. */
   mountingFeatures: MountingFeature[];
-  /** At most one display placement (Phase 9a, schemaVersion 3+). */
   display: DisplayPlacement | null;
-  /** User-defined display profiles. */
   customDisplays: DisplayProfile[];
+  /** Fan mounts (issue #14, schemaVersion 4+). */
+  fanMounts: FanMount[];
+  /** Engraved/embossed text labels (issue #16, schemaVersion 4+). */
+  textLabels: TextLabel[];
 }
