@@ -64,10 +64,13 @@ export function computeShellDims(
   // Cavity height includes the standoff under the PCB (issue #28) plus the
   // PCB itself plus headroom for components / HATs.
   const cavityZ = board.defaultStandoffHeight + pcb.z + Math.max(zClearance, stackHeight);
+  // When the lid is recessed (issue #30), the case envelope extends above the
+  // cavity by lidThickness + 1mm ledge so the lid drops in flush with the rim.
+  const recessExtra = params.lidRecess ? params.lidThickness + 1 : 0;
   return {
     outerX: cavityX + 2 * wall,
     outerY: cavityY + 2 * wall,
-    outerZ: floor + cavityZ,
+    outerZ: floor + cavityZ + recessExtra,
     cavityX,
     cavityY,
     cavityZ,
@@ -89,6 +92,25 @@ export function buildOuterShell(
     [wall, wall, floor],
     cube([dims.cavityX, dims.cavityY, dims.cavityZ + overshoot], false),
   );
+
+  if (params.lidRecess) {
+    // Recess pocket: oversized rectangular cut at the top to receive the lid,
+    // sitting on a 1mm ledge above the cavity (issue #30).
+    const recessLedge = 1;
+    const recessOffset = Math.max(0.5, wall - 0.5);
+    const pocketX = dims.cavityX + 2 * recessOffset;
+    const pocketY = dims.cavityY + 2 * recessOffset;
+    const pocketZ = params.lidThickness + 0.5;
+    const pocketOriginX = wall - recessOffset;
+    const pocketOriginY = wall - recessOffset;
+    const pocketOriginZ = dims.outerZ - pocketZ;
+    void recessLedge;
+    const pocket = translate(
+      [pocketOriginX, pocketOriginY, pocketOriginZ],
+      cube([pocketX, pocketY, pocketZ + overshoot], false),
+    );
+    return difference([outer, cavity, pocket]);
+  }
 
   return difference([outer, cavity]);
 }

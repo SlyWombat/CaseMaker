@@ -12,7 +12,11 @@ const caseParamsSchema = z.object({
   cornerRadius: z.number().nonnegative(),
   internalClearance: z.number().nonnegative(),
   zClearance: z.number().nonnegative(),
-  joint: z.enum(['snap-fit', 'sliding', 'screw-down', 'flat-lid']),
+  joint: z.preprocess(
+    (v) => (v === 'sliding' ? 'flat-lid' : v),
+    z.enum(['snap-fit', 'screw-down', 'flat-lid']),
+  ),
+  lidRecess: z.boolean().optional(),
   ventilation: z.object({
     enabled: z.boolean(),
     pattern: z.enum(['none', 'slots', 'hex']),
@@ -24,6 +28,16 @@ const caseParamsSchema = z.object({
     outerDiameter: z.number().positive(),
     holeDiameter: z.number().positive(),
   }),
+  snapCatches: z
+    .array(
+      z.object({
+        id: z.string(),
+        wall: z.enum(['+x', '-x', '+y', '-y']),
+        uPosition: z.number(),
+        enabled: z.boolean(),
+      }),
+    )
+    .optional(),
 });
 
 const portPlacementSchema = z.object({

@@ -19,6 +19,7 @@ import { newId } from '@/utils/id';
 import { autoPortsForBoard } from '@/engine/compiler/portFactory';
 import { autoPortsForHat } from '@/engine/compiler/hats';
 import { defaultAntennasForBoard } from '@/engine/compiler/antennas';
+import { defaultSnapCatchesForCase } from '@/engine/compiler/snapCatches';
 import { fourCornerScrewTabs } from '@/engine/compiler/mountingFeatures';
 import { computeShellDims } from '@/engine/compiler/caseShell';
 
@@ -139,6 +140,13 @@ export const useProjectStore = create<ProjectState>()(
             project: produce(s.project, (draft) => {
               for (const [k, v] of Object.entries(patch) as [keyof CaseParameters, unknown][]) {
                 (draft.case as Record<string, unknown>)[k as string] = v;
+              }
+              // Auto-populate snap catches the first time joint flips to snap-fit (issue #29).
+              if (
+                draft.case.joint === 'snap-fit' &&
+                (!draft.case.snapCatches || draft.case.snapCatches.length === 0)
+              ) {
+                draft.case.snapCatches = defaultSnapCatchesForCase(draft.board, draft.case);
               }
               draft.modifiedAt = new Date(0).toISOString();
             }),

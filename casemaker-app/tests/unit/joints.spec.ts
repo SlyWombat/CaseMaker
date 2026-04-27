@@ -20,24 +20,16 @@ describe('joint type compilation', () => {
     expect(lid.op.child.kind).toBe('union');
   });
 
-  it('sliding joint adds rails: shell op tree includes union with extra children', () => {
-    const flat = compileProject({
-      ...createDefaultProject('rpi-4b'),
-      case: { ...createDefaultProject('rpi-4b').case, joint: 'flat-lid' },
+  it('lidRecess produces a different shell op tree than non-recessed (issue #30)', () => {
+    const project = createDefaultProject('rpi-4b');
+    const flat = compileProject(project);
+    const recessed = compileProject({
+      ...project,
+      case: { ...project.case, lidRecess: true },
     });
-    const sliding = compileProject({
-      ...createDefaultProject('rpi-4b'),
-      case: { ...createDefaultProject('rpi-4b').case, joint: 'sliding' },
-    });
-    const flatShell = flat.nodes.find((n) => n.id === 'shell')!.op;
-    const slidingShell = sliding.nodes.find((n) => n.id === 'shell')!.op;
-    const countAdditiveChildren = (op: typeof flatShell): number => {
-      // Walk through outer difference (cutouts) wrapper if present
-      let inner = op;
-      if (inner.kind === 'difference') inner = inner.children[0]!;
-      return inner.kind === 'union' ? inner.children.length : 1;
-    };
-    expect(countAdditiveChildren(slidingShell)).toBeGreaterThan(countAdditiveChildren(flatShell));
+    const flatShell = JSON.stringify(flat.nodes.find((n) => n.id === 'shell')!.op);
+    const recessedShell = JSON.stringify(recessed.nodes.find((n) => n.id === 'shell')!.op);
+    expect(flatShell).not.toBe(recessedShell);
   });
 
   it('ventilation enabled adds cutout ops to the shell', () => {

@@ -6,6 +6,15 @@ All notable changes to Case Maker. The project follows the [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Added
+
+- **Real snap-fit catches** ([#29](https://github.com/SlyWombat/case-maker/issues/29)): the snap-fit lid now generates cantilever arm + barb geometry on the lid lip, with mating pockets cut into the case wall. New `case.snapCatches: SnapCatch[]` is auto-populated when the joint flips to `snap-fit` based on the case's longest outer dimension — 2 catches for cases under 80 mm, 4 for 80–150 mm, 6 for over 150 mm. Default cantilever dimensions are tuned for PLA per the Bayer/Bonenberger snap-fit guides; tuning notes and the strain formula are documented in `docs/snap-fit.md`. Tests: `tests/unit/snapCatches.spec.ts` (6 cases).
+- **Recessed-lid mode** ([#30](https://github.com/SlyWombat/case-maker/issues/30)): new `case.lidRecess: boolean` (default `false`) drops the lid into a pocket at the top of the case so its top surface is flush with the rim. Works with every joint. Walls thicken slightly (the recess offset eats into wall thickness) and the case envelope grows by `lidThickness + 1 mm` to host the pocket. Tests: `tests/unit/lidRecess.spec.ts` (5 cases).
+
+### Removed
+
+- **Sliding joint type** ([#30](https://github.com/SlyWombat/case-maker/issues/30)): the `sliding` joint generated rails that didn't mate with channels in the lid edges, and the lid posts (issue #21/#27) would have collided with cavity walls during the slide. The joint was unbuildable. Removed from the `JointType` enum and from the case panel; existing projects with `joint='sliding'` are migrated to `flat-lid` on load.
+
 ### Fixed
 
 - **Port cutout Z aligns with the elevated PCB** ([#28](https://github.com/SlyWombat/case-maker/issues/28)): port and HAT cutouts now include `defaultStandoffHeight` in their world-Z anchor, so cutouts line up with the board *as it sits on the floor bosses*, not as if the PCB were flush with the case floor. Cavity height in `computeShellDims` and antenna Z in `engine/compiler/antennas.ts` updated for the same reason. Without this fix, side cutouts were off by one standoff height (~3 mm on Pi 4, 5 mm on GIGA). New `tests/unit/portZAlignment.spec.ts` (2 cases) checks every built-in board's side ports.

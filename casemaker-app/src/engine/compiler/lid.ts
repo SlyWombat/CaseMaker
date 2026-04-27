@@ -4,10 +4,11 @@ import { computeShellDims } from './caseShell';
 import { computeBossPlacements, getScrewClearanceDiameter } from './bosses';
 
 const LID_POST_BOARD_CLEARANCE = 0.3;
+const RECESS_LEDGE = 1; // shelf the lid sits on
+const RECESS_CLEARANCE = 0.2; // gap on each side between lid edge and pocket wall
 
 const SNAP_FRICTION = 0.2;
 const SNAP_LIP_DEPTH = 4;
-const SLIDING_END_INSET = 2; // each end shortened by this
 
 export interface LidDims {
   x: number;
@@ -17,8 +18,39 @@ export interface LidDims {
   liftAboveShell: number;
 }
 
+/**
+ * Recessed-lid pocket dimensions (issue #30). The lid drops into the top of
+ * the case, sitting on a 1mm horizontal ledge with a small clearance around
+ * the perimeter. Returns null when lidRecess is disabled.
+ */
+export function computeRecessDims(
+  board: BoardProfile,
+  params: CaseParameters,
+): { pocketX: number; pocketY: number; pocketZ: number; ledge: number; clearance: number } | null {
+  if (!params.lidRecess) return null;
+  const dims = computeShellDims(board, params);
+  const offset = Math.max(0.5, params.wallThickness - 0.5);
+  return {
+    pocketX: dims.cavityX + 2 * offset,
+    pocketY: dims.cavityY + 2 * offset,
+    pocketZ: params.lidThickness,
+    ledge: RECESS_LEDGE,
+    clearance: RECESS_CLEARANCE,
+  };
+}
+
 export function computeLidDims(board: BoardProfile, params: CaseParameters): LidDims {
   const dims = computeShellDims(board, params);
+  const recess = computeRecessDims(board, params);
+  if (recess) {
+    return {
+      x: recess.pocketX - 2 * recess.clearance,
+      y: recess.pocketY - 2 * recess.clearance,
+      z: params.lidThickness,
+      zPosition: dims.outerZ - params.lidThickness,
+      liftAboveShell: 2,
+    };
+  }
   return {
     x: dims.outerX,
     y: dims.outerY,
@@ -105,17 +137,6 @@ export function buildSnapFitLid(board: BoardProfile, params: CaseParameters): Bu
   return holes.length > 0 ? difference([withPosts, ...holes]) : withPosts;
 }
 
-export function buildSlidingLid(board: BoardProfile, params: CaseParameters): BuildOp {
-  const dims = computeShellDims(board, params);
-  const { lidThickness: lid } = params;
-  const slidX = dims.outerX;
-  const slidY = dims.outerY - 2 * SLIDING_END_INSET;
-  const baseY = SLIDING_END_INSET;
-  const plate = translate([0, baseY, 0], cube([slidX, slidY, lid], false));
-  const { posts, holes } = buildLidPosts(board, params);
-  return attachPosts(plate, posts, holes);
-}
-
 export function buildScrewDownLid(board: BoardProfile, params: CaseParameters): BuildOp {
   const dims = computeShellDims(board, params);
   const plate = cube([dims.outerX, dims.outerY, params.lidThickness], false);
@@ -124,11 +145,17 @@ export function buildScrewDownLid(board: BoardProfile, params: CaseParameters): 
 }
 
 export function buildLid(board: BoardProfile, params: CaseParameters): BuildOp {
+  // When recessed, every joint variant produces a flat plate sized to the
+  // recess pocket; the joint flavor only adds posts / holes / snap arms.
+  if (params.lidRecess) {
+    const lid = computeLidDims(board, params);
+    const plate = cube([lid.x, lid.y, lid.z], false);
+    const { posts, holes } = buildLidPosts(board, params);
+    return attachPosts(plate, posts, holes);
+  }
   switch (params.joint) {
     case 'snap-fit':
       return buildSnapFitLid(board, params);
-    case 'sliding':
-      return buildSlidingLid(board, params);
     case 'screw-down':
       return buildScrewDownLid(board, params);
     case 'flat-lid':

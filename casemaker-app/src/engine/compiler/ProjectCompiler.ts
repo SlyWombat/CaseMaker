@@ -6,7 +6,6 @@ import { computeBossPlacements, buildBossesUnion } from './bosses';
 import { buildLid, computeLidDims } from './lid';
 import { buildPortCutoutsForProject } from './ports';
 import { applySmartCutoutLayout, type SmartCutoutDecision } from './smartCutoutLayout';
-import { buildSlidingRails } from './slidingRails';
 import { buildVentilationCutouts } from './ventilation';
 import { buildExternalAssetOps } from './externalAssets';
 import { buildHatCutoutsForProject } from './hats';
@@ -15,6 +14,7 @@ import { buildDisplayCutoutOps } from './displays';
 import { buildFanMountOps } from './fans';
 import { buildTextLabelOps } from './textLabels';
 import { buildAntennaOps } from './antennas';
+import { buildSnapCatchOps } from './snapCatches';
 import { getBuiltinHat } from '@/library/hats';
 import { getBuiltinDisplay } from '@/library/displays';
 import type { DisplayProfile } from '@/types/display';
@@ -54,7 +54,6 @@ export function compileProject(project: Project): BuildPlan {
   const shellOuter = buildOuterShell(board, caseParams, hats ?? [], resolveHat);
   const bossPlacements = computeBossPlacements(board, caseParams);
   const bossOps = buildBossesUnion(bossPlacements);
-  const railOps = caseParams.joint === 'sliding' ? buildSlidingRails(board, caseParams) : [];
   const assetOps = buildExternalAssetOps(externalAssets);
   const featureOps = buildMountingFeatureOps(
     mountingFeatures,
@@ -67,11 +66,11 @@ export function compileProject(project: Project): BuildPlan {
   const fanOps = buildFanMountOps(fanMounts, board, caseParams, hats ?? [], resolveHat);
   const textOps = buildTextLabelOps(textLabels, board, caseParams, hats ?? [], resolveHat);
   const antennaOps = buildAntennaOps(antennas, board, caseParams);
+  const snapOps = buildSnapCatchOps(caseParams.snapCatches, board, caseParams);
 
   const additive = [
     shellOuter,
     ...bossOps,
-    ...railOps,
     ...assetOps.unionOps,
     ...featureOps.additive,
     ...displayOps.additive,
@@ -98,6 +97,7 @@ export function compileProject(project: Project): BuildPlan {
     ...fanOps.subtractive,
     ...textOps.subtractive,
     ...antennaOps.subtractive,
+    ...snapOps.shellSubtract,
   ];
 
   let shellOp: BuildOp = additive.length > 1 ? union(additive) : shellOuter;
@@ -107,7 +107,10 @@ export function compileProject(project: Project): BuildPlan {
 
   const nodes: BuildNode[] = [{ id: 'shell', op: shellOp }];
 
-  const lidOp = buildLid(board, caseParams);
+  let lidOp = buildLid(board, caseParams);
+  if (snapOps.lidAdd.length > 0) {
+    lidOp = union([lidOp, ...snapOps.lidAdd]);
+  }
   const lidDims = computeLidDims(board, caseParams);
   nodes.push({
     id: 'lid',
