@@ -19,10 +19,13 @@ export const SNAP_DEFAULTS = {
   // extrusion (= 0.8 mm wall) so the lip and barb don't have major
   // overhangs to print without supports. The slope on the lip's top
   // (issue #75) at 45° (lipHeight = barbProtrusion) prints clean on
-  // typical FDM at 0.2 mm layers without bridging. Strain at the arm
-  // root for 0.8 mm deflection on a 12 mm arm = 0.7 %, well within
-  // PLA's ~5 % elastic budget.
-  armLength: 12,
+  // typical FDM at 0.2 mm layers without bridging.
+  // Issue #77 — armLength shortened from 12 mm to "just enough to snap"
+  // so the lid arm doesn't dangle into the cavity. 8 mm =
+  //   liftAboveShell (2) + lipHeight (0.8) + barbLength (3) + 2 mm buffer.
+  // Strain at the arm root for 0.8 mm deflection on an 8 mm × 1.6 mm arm
+  // = 1.5 * 0.8 * 1.6 / 64 = 3 %, within PLA's ~5 % elastic budget.
+  armLength: 8,
   armThickness: 1.6,
   armWidth: 6,
   barbProtrusion: 0.8,

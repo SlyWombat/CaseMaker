@@ -14,9 +14,10 @@ const LID_POST_BOARD_CLEARANCE = 0.3;
 const RECESS_LEDGE = 1; // shelf the lid sits on
 const RECESS_CLEARANCE = 0.2; // gap on each side between lid edge and pocket wall
 
-// Issue #73 — the continuous snap-fit lid lip ring was dropped in favour of
-// discrete cantilever arms (snapCatches.ts). SNAP_FRICTION / SNAP_LIP_DEPTH
-// are no longer used.
+// Friction-fit clearance (mm) and depth (mm) for the Full-Lid snap variant
+// (issue #78). Barb snap variant doesn't use these.
+const SNAP_FRICTION = 0.2;
+const SNAP_LIP_DEPTH = 4;
 
 export interface LidDims {
   x: number;
@@ -159,15 +160,50 @@ export function buildSnapFitLid(
   hats: HatPlacement[] = NO_HATS,
   resolveHat: HatResolver = NO_RESOLVE,
 ): BuildOp {
-  // Issue #73 — drop the continuous lip ring around the entire perimeter.
-  // The snap-fit lid is now a flat plate; retention is provided by the
-  // discrete cantilever arms in `snapOps.lidAdd` (one per snap catch
-  // declared in `params.snapCatches`). The case-side inside-wall lips
-  // engage those arms.
   const dims = computeShellDims(board, params, hats, resolveHat);
   const topPlate = cube([dims.outerX, dims.outerY, params.lidThickness], false);
   const { posts, holes } = buildLidPosts(board, params, hats, resolveHat);
-  return attachPosts(topPlate, posts, holes);
+
+  // Issue #78 — snapType selects the lid style:
+  //  - 'barb' (default): flat plate, retention via discrete arms in
+  //    snapOps.lidAdd. The case-side inside-wall lips engage the arms.
+  //  - 'full-lid': continuous perimeter lip ring providing friction fit
+  //    against the cavity walls. Snap arms are still added on top if
+  //    present.
+  if (params.snapType !== 'full-lid') {
+    return attachPosts(topPlate, posts, holes);
+  }
+
+  // Full-Lid variant — restored from the pre-#73 implementation.
+  const wall = params.wallThickness;
+  const lipOuterX = dims.cavityX - 2 * SNAP_FRICTION;
+  const lipOuterY = dims.cavityY - 2 * SNAP_FRICTION;
+  const lipOriginX = wall + SNAP_FRICTION;
+  const lipOriginY = wall + SNAP_FRICTION;
+
+  // Degenerate-cavity guard from issue #42.
+  const lipWallNominal = Math.max(0.8, wall - 0.6);
+  const minInnerDim = 1.0;
+  const maxLipWallX = (lipOuterX - minInnerDim) / 2;
+  const maxLipWallY = (lipOuterY - minInnerDim) / 2;
+  const lipWall = Math.min(lipWallNominal, maxLipWallX, maxLipWallY);
+  const canBuildLip = lipOuterX > minInnerDim && lipOuterY > minInnerDim && lipWall >= 0.4;
+  if (!canBuildLip) return attachPosts(topPlate, posts, holes);
+
+  const lipInnerX = lipOuterX - 2 * lipWall;
+  const lipInnerY = lipOuterY - 2 * lipWall;
+
+  const lipOuter = translate(
+    [lipOriginX, lipOriginY, -SNAP_LIP_DEPTH],
+    cube([lipOuterX, lipOuterY, SNAP_LIP_DEPTH], false),
+  );
+  const lipInner = translate(
+    [lipOriginX + lipWall, lipOriginY + lipWall, -SNAP_LIP_DEPTH - 0.5],
+    cube([lipInnerX, lipInnerY, SNAP_LIP_DEPTH + 1], false),
+  );
+  const lipRing = difference([lipOuter, lipInner]);
+  const withPosts = posts.length > 0 ? union([topPlate, lipRing, ...posts]) : union([topPlate, lipRing]);
+  return holes.length > 0 ? difference([withPosts, ...holes]) : withPosts;
 }
 
 export function buildScrewDownLid(

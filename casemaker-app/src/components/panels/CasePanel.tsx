@@ -1,6 +1,6 @@
 import type { ChangeEvent } from 'react';
 import { useProjectStore } from '@/store/projectStore';
-import type { CaseParameters, JointType, InsertType } from '@/types';
+import type { CaseParameters, JointType, InsertType, SnapType } from '@/types';
 
 const JOINT_OPTIONS: { value: JointType; label: string }[] = [
   { value: 'flat-lid', label: 'Flat lid' },
@@ -136,6 +136,31 @@ export function CasePanel() {
           ))}
         </div>
       </div>
+      {params.joint === 'snap-fit' && (
+        <div className="joint-row">
+          <span className="joint-label">Snap type</span>
+          <div className="joint-buttons" role="radiogroup" aria-label="Snap type">
+            {(
+              [
+                { value: 'barb', label: 'Barb Lid' },
+                { value: 'full-lid', label: 'Full Lid' },
+              ] as { value: SnapType; label: string }[]
+            ).map((opt) => (
+              <label key={opt.value}>
+                <input
+                  type="radio"
+                  name="snap-type"
+                  value={opt.value}
+                  checked={(params.snapType ?? 'barb') === opt.value}
+                  onChange={() => patch({ snapType: opt.value })}
+                  data-testid={`snap-type-${opt.value}`}
+                />
+                <span>{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="joint-row">
         <span className="joint-label">Boss insert type</span>
         <select

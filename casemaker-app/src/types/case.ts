@@ -2,6 +2,15 @@ import type { Mm } from './units';
 import type { SnapCatch } from './snap';
 
 export type JointType = 'snap-fit' | 'screw-down' | 'flat-lid';
+/**
+ * Issue #78 — only meaningful when joint === 'snap-fit'.
+ *  - 'barb'   : discrete cantilever arms with inside-wall lips at each catch
+ *               position. Lid is a flat plate. Print-friendly, easy to release.
+ *  - 'full-lid': continuous lip ring around the entire perimeter — friction-fit
+ *               between lid lip and cavity walls. Snap catches still optional.
+ *               Tighter seal, harder to insert / remove.
+ */
+export type SnapType = 'barb' | 'full-lid';
 export type InsertType =
   | 'self-tap'
   | 'heat-set-m2.5'
@@ -47,4 +56,10 @@ export interface CaseParameters {
    * joint is changed to snap-fit.
    */
   snapCatches?: SnapCatch[];
+  /**
+   * Issue #78 — pick the snap-fit lid style. Default 'barb' (discrete catches +
+   * flat lid). 'full-lid' restores the continuous perimeter friction lip.
+   * Only meaningful when joint === 'snap-fit'.
+   */
+  snapType?: SnapType;
 }

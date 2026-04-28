@@ -195,12 +195,13 @@ export function buildSnapCatch(
   // retain a hand-removable PLA case, not enough to need supports.
   const LIP_HEIGHT = barbProtrusion;
   const ARM_INSET = 0.3; // clearance between arm body and lip's inward tip
-  // Lip bottom Z aligns with the barb's top in the engaged position. Barb
-  // top in lid-local coords = -armLength + barbLength. Lid is at
-  // outerZ + liftAboveShell (=2), so barb top world Z =
-  // outerZ + 2 + (-armLength + barbLength).
-  const lipBottomZ = dims.outerZ + 2 - armLength + barbLength;
-  const lipTopZ = lipBottomZ + LIP_HEIGHT;
+  // Issue #77 — lip is FLUSH WITH THE RIM (top edge of the case wall).
+  // Earlier the lip sat 5–6 mm below the rim with a chunk of solid wall
+  // above it; that wasted material and made the cavity feel cramped. Now
+  // the lip's top sits at outerZ and the catch face hangs LIP_HEIGHT
+  // below — the rim itself becomes the slope's top edge.
+  const lipTopZ = dims.outerZ;
+  const lipBottomZ = lipTopZ - LIP_HEIGHT;
 
   const wallId: SnapWall = c.wall;
   let lip: BuildOp;

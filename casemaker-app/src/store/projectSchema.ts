@@ -18,6 +18,7 @@ const caseParamsSchema = z.object({
   ),
   lidRecess: z.boolean().optional(),
   extraCavityZ: z.number().nonnegative().optional(),
+  snapType: z.enum(['barb', 'full-lid']).optional(),
   ventilation: z.object({
     enabled: z.boolean(),
     pattern: z.enum(['none', 'slots', 'hex']),

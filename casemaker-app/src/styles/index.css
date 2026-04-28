@@ -317,10 +317,30 @@ body, html, #root {
 }
 .port-coord-grid {
   display: grid;
-  grid-template-columns: 32px 1fr 1fr 1fr;
-  gap: 2px 4px;
+  /* minmax(0, 1fr) is the critical part — prevents number inputs' default
+   * min-width from pushing columns onto separate rows in narrow sidebars. */
+  grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 2px 3px;
   align-items: center;
   margin-bottom: 4px;
+}
+.port-coord-grid input,
+.port-coord-grid select {
+  /* Browsers default number inputs to a min-width that breaks narrow grids. */
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.port-num {
+  /* Issue #79 — must NOT inherit `.slider-num`'s `grid-column: 2`, which
+   * was pinning every input to column 2 and stacking the values vertically.
+   * Plain styled number input instead. */
+  background: #14181c;
+  color: #e6e8eb;
+  border: 1px solid #2a2f36;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 11px;
 }
 .coord-axis {
   font-size: 10px;

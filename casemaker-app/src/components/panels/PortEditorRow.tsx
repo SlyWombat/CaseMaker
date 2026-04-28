@@ -47,7 +47,13 @@ export function PortEditorRow({
           data-testid={`${tid}-expand`}
           aria-expanded={open}
         >
-          {open ? '▾' : '▸'} {port.kind} <span className="port-facing">[{port.facing}]</span>
+          {open ? '▾' : '▸'}{' '}
+          {/* Issue #79 — show the source component id when kind is 'custom'
+              (e.g., DMX shield XLRs would otherwise all read "custom"). */}
+          {port.kind === 'custom' && port.sourceComponentId
+            ? port.sourceComponentId
+            : port.kind}{' '}
+          <span className="port-facing">[{port.facing}]</span>
         </button>
       </div>
       {open && (
@@ -131,7 +137,7 @@ function NumInput({
       onChange={(e) => onChange(Number(e.target.value))}
       data-testid={testId}
       title={title}
-      className="slider-num"
+      className="port-num"
       style={{ width: '100%' }}
     />
   );
