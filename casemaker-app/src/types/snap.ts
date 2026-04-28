@@ -15,17 +15,19 @@ export interface SnapCatch {
  * for the strain derivation.
  */
 export const SNAP_DEFAULTS = {
-  // Issue #73 — bumped from anemic defaults (0.8 mm barb / 1 mm lip) so the
-  // features are both visually obvious in the viewport and have enough
-  // engagement to actually retain on PLA. Strain at the arm root for a
-  // 1.5 mm deflection on a 12 mm arm = ~2 %, well within PLA's elastic
-  // budget (~5 % yield).
+  // Issue #76 — printable defaults, sized to two perimeters of 0.4 mm
+  // extrusion (= 0.8 mm wall) so the lip and barb don't have major
+  // overhangs to print without supports. The slope on the lip's top
+  // (issue #75) at 45° (lipHeight = barbProtrusion) prints clean on
+  // typical FDM at 0.2 mm layers without bridging. Strain at the arm
+  // root for 0.8 mm deflection on a 12 mm arm = 0.7 %, well within
+  // PLA's ~5 % elastic budget.
   armLength: 12,
-  armThickness: 2.0,
+  armThickness: 1.6,
   armWidth: 6,
-  barbProtrusion: 1.5,
-  barbLength: 4,
-  pocketDepth: 1.5,
-  pocketWidth: 8,
-  pocketHeight: 5,
+  barbProtrusion: 0.8,
+  barbLength: 3,
+  pocketDepth: 0.8,
+  pocketWidth: 7,
+  pocketHeight: 4,
 } as const;

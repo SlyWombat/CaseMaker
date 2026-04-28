@@ -189,9 +189,17 @@ export function buildSnapCatch(
   // Barb top in lid-local coords = -armLength + barbLength = -8.
   // Lid is positioned at outerZ + liftAboveShell (=2), so barb top world Z =
   // outerZ + 2 - 8 = outerZ - 6. Put lip bottom at outerZ - 6 to match.
-  const LIP_HEIGHT = 2.0;
+  // Issue #76 — lip cross-section is print-sized: barbProtrusion-wide × same
+  // height (45° slope on the hypotenuse, just on the edge of bridge-free
+  // FDM printing). The barb engages 0.8 mm of catch face — enough to
+  // retain a hand-removable PLA case, not enough to need supports.
+  const LIP_HEIGHT = barbProtrusion;
   const ARM_INSET = 0.3; // clearance between arm body and lip's inward tip
-  const lipBottomZ = dims.outerZ - 6;
+  // Lip bottom Z aligns with the barb's top in the engaged position. Barb
+  // top in lid-local coords = -armLength + barbLength. Lid is at
+  // outerZ + liftAboveShell (=2), so barb top world Z =
+  // outerZ + 2 + (-armLength + barbLength).
+  const lipBottomZ = dims.outerZ + 2 - armLength + barbLength;
   const lipTopZ = lipBottomZ + LIP_HEIGHT;
 
   const wallId: SnapWall = c.wall;
