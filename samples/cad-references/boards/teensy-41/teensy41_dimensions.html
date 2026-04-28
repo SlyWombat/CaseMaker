@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Teensy Dimension and Size</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="shortcut icon" href="/favicon.ico">
+<style>
+body,td,p {font-family: Arial, Helvetica, sans-serif;}
+html { scroll-behavior: smooth; }
+img { max-width:100%; height:auto; }
+nav.left { float:left; width:172px; }
+.logoimg { display:block; padding-left:40px; }
+.notmobile {/* display:normal */}
+.navtopwidth { width=100%; max-width:calc(185px + 1080px); }
+.headertop { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:2px }
+.navtop { display:flex; justify-content:space-around; background-color:#D0E0FF; }
+.navtopitem { padding:6px; }
+.navbreadcrumb { background-color:#F0F0F0; }
+main { float:left; margin-left:10px; width:calc(100% - 185px); max-width:1080px; }
+aside { float:right; }
+figure { display:table; }
+figcaption { display:table-caption; caption-side:bottom; font-size:0.8em; font-weight:bold; }
+@media only screen and (max-width:960px) {
+	aside { float:none; display:table; margin:auto; }
+}
+@media only screen and (max-width:600px) {
+	nav.left { display:none; }
+	.notmobile { display:none; }
+	.logoimg { padding-left:6px; }
+	main { width:100%; margin-left:0; }
+	table { font-size:75%; }
+}
+.center { margin: auto; }
+h1 {font-size: 200% }
+h2 {font-size: 160% }
+h3 {font-size: 140% }
+h4 {font-size: 120% }
+h5 {font-size: 110% }
+dl.featurelist dt {
+	font-weight: bold;
+	font-size: 130%;
+	margin-left: 2em;
+	display: list-item;
+	list-style-type: disc;
+}
+dl.featurelist dd {
+	margin-left: 4em;
+	padding-bottom: 0.75em;
+}
+ul.subfeaturelist {
+	padding-top: 0.4em;
+}
+ul.subfeaturelist li {
+	font-size: 90%;
+	padding-bottom: 0.25em;
+}
+.orderButton {
+	background:linear-gradient(to bottom, #c5f7be 5%, #cae0b3 100%);
+	background-color:#c5f7be;
+	border-radius:6px;
+	cursor:pointer;
+	padding:8px 20px;
+}
+.orderButton:hover {
+	background:linear-gradient(to bottom, #cae0b3 5%, #c5f7be 100%);
+	background-color:#cae0b3;
+}
+.orderButton:active {
+	position:relative;
+	top:1px;
+}
+tr.top {background-color:#C0C0C0}
+tr.odd {background-color:#F0F0F0}
+tr.even {background-color:#E0E0E0}
+p.desc {padding-left:3em; margin:0px; padding-top:0.2em; padding-bottom:0.8em; font-size:0.75em}
+span.literal {color: #006666}
+span.comment {color: #777755}
+span.keyword {color: #cc6600}
+span.function {color: #996600}
+span.mainfunction {color: #993300; font-weight: bolder}
+span.footnote {vertical-align: super; font-size: smaller; color: #ff0000;}
+a.footnote:link {text-decoration: none}
+a.footnote:visited {text-decoration: none}
+</style>
+</head>
+<body bgcolor="#FFFFFF" text="#000000" link="#0000D0" vlink="#202080">
+<!--nav begin-->
+<header class="headertop navtopwidth">
+<div><a href="/"><img src="/img/logo.gif" alt="PJRC" width=276 height=31 class=logoimg></a></div>
+<div>
+<small>
+<a href="https://www.pjrc.com/cart/cart.php">Shopping&nbsp;Cart</a>
+<span class=notmobile><img src="/img/a.gif" width=10 height=10 alt="">
+<a href="/cgi-bin/archive/summary">Download&nbsp;Website</a></span>
+</small>
+</div>
+</header>
+<nav class="navtop navtopwidth">
+<div class=navtopitem><a href="/">Home</a></div>
+<div class=navtopitem><a href="/store/">Products</a></div>
+<div class=navtopitem><a href="/teensy/">Teensy</a></div>
+<div class=navtopitem><a href="/blog/">Blog</a></div>
+<div class=navtopitem><a href="https://forum.pjrc.com/">Forum</a></div>
+</nav>
+<nav class="navbreadcrumb navtopwidth">
+<small><span class=notmobile>You are here:</span>
+<a href="/teensy/">Teensy</a>
+<img src="/img/b.gif" width=10 height=10 alt="">
+<a href="pinout.html">Reference</a>
+<img src="/img/b.gif" width=10 height=10 alt="">
+<span style="background-color: #B0E4A8">Dimensions</span>
+</small></nav>
+<p>
+<nav class=left>
+<table width=172 border=0 cellspacing=0 cellpadding=6>
+<tr><td bgcolor="#D0E0FF" align=center>
+<big><b>PJRC Store</b></big>
+</td></tr>
+<tr><td bgcolor="#F0F0F0">
+<small>
+<img src="/img/a.gif" width=10 height=10 alt="" align=middle>
+<a href="/store/teensy41.html">Teensy 4.1</a><br>
+<img src="/img/a.gif" width=10 height=10 alt="" align=middle>
+<a href="/store/teensy40.html">Teensy 4.0</a><br>
+<img src="/img/a.gif" width=10 height=10 alt="" align=middle>
+<a href="/store/ic_mkl02_t4.html">Chips for PCB</a><br>
+</small></td></tr>
+<tr><td height=15></td></tr>
+<tr><td bgcolor="#D0E0FF" align=center>
+<big><b>Teensy</b></big>
+</td></tr>
+<tr><td bgcolor="#F0F0F0" style="line-height: 96%">
+<small>
+<img src="/img/a.gif" width=10 height=10 alt="">
+<a href="index.html">Main Page</a><br>
+<a href="techspecs.html"><img src="/img/c.gif" width=10 height=10 alt="" border=0>
+<b>Hardware</b></a><br>
+<a href="first_use.html"><img src="/img/c.gif" width=10 height=10 alt="" border=0>
+<b>Getting Started</b></a><br>
+<a href="tutorial.html"><img src="/img/c.gif" width=10 height=10 alt="" border=0>
+<b>Tutorial</b></a><br>
+<a href="pins.html"><img src="/img/c.gif" width=10 height=10 alt="" border=0>
+<b>How-To Tips</b></a><br>
+<a href="usb_debug_only.html"><img src="/img/c.gif" width=10 height=10 alt="" border=0>
+<b>Code Library</b></a><br>
+<img src="/img/a.gif" width=10 height=10 alt="">
+<a href="projects.html">Projects</a><br>
+<a href="teensyduino.html"><img src="/img/c.gif" width=10 height=10 alt="" border=0>
+<b>Teensyduino</b></a><br>
+<img src="/img/b.gif" width=10 height=10 alt="">
+<b>Reference</b><br>
+</small>
+<div style="padding-left: 1.2em">
+<small>
+<img src="/img/a.gif" width=10 height=10 alt="">
+<a href="pinout.html">Pin Assignments</a><br>
+<img src="/img/a.gif" width=10 height=10 alt="">
+<a href="schematic.html">Schematic</a><br>
+<img src="/img/b.gif" width=10 height=10 alt="selected">
+<span style="background-color: #B0E4A8">Dimensions</span><br>
+<img src="/img/a.gif" width=10 height=10 alt="">
+<a href="datasheets.html">Datasheet</a><br>
+<img src="/img/a.gif" width=10 height=10 alt="">
+<a href="benchmark_usb_serial_receive.html">Benchmarks</a><br>
+<img src="/img/a.gif" width=10 height=10 alt="">
+<a href="eagle_lib.html">Eagle Libs</a><br>
+<img src="/img/a.gif" width=10 height=10 alt="">
+<a href="sd_adaptor.html">SD Adaptor</a><br>
+<img src="/img/a.gif" width=10 height=10 alt="">
+<a href="arduino_contrib.html">Arduino Contrib.</a><br>
+<a href="check_halfkay.html"><img src="/img/c.gif" width=10 height=10 alt="" border=0>
+<b>HalfKay Identify</b></a><br>
+<img src="/img/a.gif" width=10 height=10 alt="">
+<a href="halfkay_protocol.html">HalfKay Protocol</a><br>
+<img src="/img/a.gif" width=10 height=10 alt="">
+<a href="counterfeit.html">Counterfeits</a><br>
+</small>
+</div>
+<small>
+</small></td></tr>
+<tr><td height=60></td></tr>
+</table><br>
+<a name="navend"> </a>
+</nav>
+<!--nav end-->
+
+
+<main>
+<h1>Teensy 4.1 Dimensions</h1>
+
+<table align=center><tr><td>
+<img src="dimensions_teensy41.png">
+</td></tr></table>
+<p>
+
+
+<h1>Teensy 4.0 Dimensions</h1>
+
+<table align=center><tr><td>
+<img src="dimensions_teensy40.png">
+</td></tr></table>
+<p>
+
+
+<h1>Teensy 3.5 / 3.6 Dimensions</h1>
+
+<table align=center><tr><td>
+<img src="dimensions_teensy36.png">
+</td></tr></table>
+<p>
+
+
+<h1>Teensy 3.2 Dimensions</h1>
+
+<table align=center><tr><td>
+<img src="dimensions_teensy32.png">
+</td></tr></table>
+<p>
+
+
+<h1>Teensy LC Dimensions</h1>
+
+<table align=center><tr><td>
+<img src="dimensions_teensylc.png">
+</td></tr></table>
+<p>
+
+
+<h1>Teensy++ 2.0 Dimensions</h1>
+
+<table align=center><tr><td>
+<img src="dimensions_teensy20pp.png">
+</td></tr></table>
+<p>
+
+
+<h1>Teensy 2.0 Dimensions</h1>
+
+<table align=center><tr><td>
+<img src="dimensions_teensy20.png">
+</td></tr></table>
+<p>
+
+
+
+
+<h1>Drawings &amp; CAD Files</h1>
+
+JLJ created an <a href="https://forum.pjrc.com/threads/41007-3D-Cad-for-Teensy-3-5-and-3-6?p=137927&viewfull=1#post137927">Inventor model for Teensy 3.6</a>, and also this
+<a href="https://github.com/BasicAirData/AirDataComputer/tree/master/Hardware/3D%20support/teensy3.6/STEP/Teensy%203_6%20under%20test">STEP version</a>.
+<p>
+<a href="https://forum.pjrc.com/threads/41007-3D-Cad-for-Teensy-3-5-and-3-6?p=137927&viewfull=1#post137927"><img src="cad_4.jpg"></a>
+
+<p>
+KurtE created this <a href="https://forum.pjrc.com/threads/41007-3D-Cad-for-Teensy-3-5-and-3-6?p=138569&viewfull=1#post138569">3D model for Diptrace</a>.
+<p>
+<a href="https://forum.pjrc.com/threads/41007-3D-Cad-for-Teensy-3-5-and-3-6?p=138569&viewfull=1#post138569"><img src="cad_5.jpg"></a>
+
+<p>
+ZS6HG created this <a href="https://forum.pjrc.com/threads/41007-3D-Cad-for-Teensy-3-5-and-3-6?p=138798&viewfull=1#post138798">Altium 3D Model</a>.
+<p>
+<a href="https://forum.pjrc.com/threads/41007-3D-Cad-for-Teensy-3-5-and-3-6?p=138798&viewfull=1#post138798"><img src="cad_6.jpg"></a>
+
+<p>
+Arron (bringfire) posted a
+<a href="https://forum.pjrc.com/threads/32224-Teensy-3-2-3D-Model">3D model for Teensy 3.2</a>.<br>
+Also see
+<a href="https://forum.pjrc.com/threads/25820-Teensy-3-1-SketchUp-model?p=49702&viewfull=1#post49702">resized #1</a>
+and
+<a href="https://forum.pjrc.com/threads/25820-Teensy-3-1-SketchUp-model?p=53535&viewfull=1#post53535">resized #2</a>
+versions.
+<p>
+<a href="https://forum.pjrc.com/threads/32224-Teensy-3-2-3D-Model"><img src="cad_3.jpg" border=0></a>
+
+<p>
+Laurent created this
+<a href="https://forum.pjrc.com/threads/25820-Teensy-3-1-SketchUp-model?p=47926&viewfull=1#post47926">Teensy 3.1 SketchUp Model</a>:
+<p>
+<a href="https://forum.pjrc.com/threads/25820-Teensy-3-1-SketchUp-model?p=47926&viewfull=1#post47926" border=0><img src="cad_2.jpg"></a>
+
+<p>
+John Steensen created this
+<a href="http://grabcad.com/library/teensy-2-0">Teensy++ 2.0 CAD File</a>:
+<p>
+<a href="http://grabcad.com/library/teensy-2-0" border=0><img src="cad_1.jpg"></a>
+
+
+</main>
+</body>
+</html>

@@ -40,8 +40,17 @@ export function applySmartCutoutLayout(
       continue;
     }
 
+    // Issue #43 — must include the standoff that lifts the host PCB above the
+    // floor. `ports.ts:50` computes the actual cutout Z as
+    // `floor + standoff + position.z`; this pre-pass needs to match or it
+    // overestimates `topClearance` by exactly `defaultStandoffHeight` and the
+    // bridge-thinning branch never fires (regression of issue #17).
     const cutoutTopWorldZ =
-      params.floorThickness + port.position.z + port.size.z + port.cutoutMargin;
+      params.floorThickness +
+      board.defaultStandoffHeight +
+      port.position.z +
+      port.size.z +
+      port.cutoutMargin;
     const topClearance = shell.outerZ - cutoutTopWorldZ;
 
     if (topClearance > 0 && topClearance < MIN_BRIDGE_THICKNESS) {

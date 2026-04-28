@@ -2,47 +2,105 @@
   "id": "esp32-devkit-v1",
   "name": "ESP32 DevKit V1 (30-pin)",
   "manufacturer": "DOIT",
-  "pcb": { "size": { "x": 51.5, "y": 28, "z": 1.6 } },
+  "pcb": {
+    "size": {
+      "x": 51.5,
+      "y": 28,
+      "z": 1.6
+    }
+  },
   "mountingHoles": [
-    { "id": "h1", "x": 1.5, "y": 1.5, "diameter": 3.2 },
-    { "id": "h2", "x": 50, "y": 1.5, "diameter": 3.2 },
-    { "id": "h3", "x": 1.5, "y": 26.5, "diameter": 3.2 },
-    { "id": "h4", "x": 50, "y": 26.5, "diameter": 3.2 }
+    {
+      "id": "h1",
+      "x": 1.5,
+      "y": 1.5,
+      "diameter": 3.2
+    },
+    {
+      "id": "h2",
+      "x": 50,
+      "y": 1.5,
+      "diameter": 3.2
+    },
+    {
+      "id": "h3",
+      "x": 1.5,
+      "y": 26.5,
+      "diameter": 3.2
+    },
+    {
+      "id": "h4",
+      "x": 50,
+      "y": 26.5,
+      "diameter": 3.2
+    }
   ],
   "components": [
     {
       "id": "usb-micro",
       "kind": "micro-usb",
-      "position": { "x": 25.5, "y": 28, "z": 1.6 },
-      "size": { "x": 8, "y": 5.5, "z": 2.5 },
+      "position": {
+        "x": 25.5,
+        "y": 28,
+        "z": 1.6
+      },
+      "size": {
+        "x": 8,
+        "y": 5.5,
+        "z": 2.5
+      },
       "facing": "+y",
       "cutoutMargin": 0.5
     },
     {
       "id": "header-left",
       "kind": "gpio-header",
-      "position": { "x": 4, "y": 14, "z": 1.6 },
-      "size": { "x": 5, "y": 28, "z": 9 },
+      "position": {
+        "x": 4,
+        "y": 14,
+        "z": 1.6
+      },
+      "size": {
+        "x": 5,
+        "y": 28,
+        "z": 9
+      },
       "facing": "+z"
     },
     {
       "id": "header-right",
       "kind": "gpio-header",
-      "position": { "x": 47, "y": 14, "z": 1.6 },
-      "size": { "x": 5, "y": 28, "z": 9 },
+      "position": {
+        "x": 47,
+        "y": 14,
+        "z": 1.6
+      },
+      "size": {
+        "x": 5,
+        "y": 28,
+        "z": 9
+      },
       "facing": "+z"
     },
     {
       "id": "pcb-antenna",
       "kind": "antenna-connector",
-      "position": { "x": 25, "y": 25, "z": 1.6 },
-      "size": { "x": 6, "y": 3, "z": 1 },
-      "facing": "+y",
+      "position": {
+        "x": 25,
+        "y": 25,
+        "z": 1.6
+      },
+      "size": {
+        "x": 6,
+        "y": 3,
+        "z": 1
+      },
       "cutoutMargin": 0
     }
   ],
   "defaultStandoffHeight": 4,
   "recommendedZClearance": 12,
   "source": "https://docs.espressif.com/projects/esp-idf/en/latest/esp32/hw-reference/esp32/get-started-devkitc.html",
+  "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/esp32-devkit-v1",
   "builtin": true
 }

@@ -15,6 +15,7 @@ import { buildFanMountOps } from './fans';
 import { buildTextLabelOps } from './textLabels';
 import { buildAntennaOps } from './antennas';
 import { buildSnapCatchOps } from './snapCatches';
+import { validatePlacements } from './placementValidator';
 import { getBuiltinHat } from '@/library/hats';
 import { getBuiltinDisplay } from '@/library/displays';
 import type { DisplayProfile } from '@/types/display';
@@ -62,11 +63,11 @@ export function compileProject(project: Project): BuildPlan {
     hats ?? [],
     resolveHat,
   );
-  const displayOps = buildDisplayCutoutOps(board, caseParams, display, resolveDisplay);
+  const displayOps = buildDisplayCutoutOps(board, caseParams, display, resolveDisplay, hats ?? [], resolveHat);
   const fanOps = buildFanMountOps(fanMounts, board, caseParams, hats ?? [], resolveHat);
   const textOps = buildTextLabelOps(textLabels, board, caseParams, hats ?? [], resolveHat);
-  const antennaOps = buildAntennaOps(antennas, board, caseParams);
-  const snapOps = buildSnapCatchOps(caseParams.snapCatches, board, caseParams);
+  const antennaOps = buildAntennaOps(antennas, board, caseParams, hats ?? [], resolveHat);
+  const snapOps = buildSnapCatchOps(caseParams.snapCatches, board, caseParams, hats ?? [], resolveHat);
 
   const additive = [
     shellOuter,
@@ -76,6 +77,7 @@ export function compileProject(project: Project): BuildPlan {
     ...displayOps.additive,
     ...fanOps.additive,
     ...textOps.additive,
+    ...snapOps.shellAdd,
   ];
 
   const smartLayout = applySmartCutoutLayout(
@@ -89,7 +91,7 @@ export function compileProject(project: Project): BuildPlan {
 
   const cutoutOps: BuildOp[] = [
     ...buildPortCutoutsForProject(smartLayout.ports, board, caseParams),
-    ...buildVentilationCutouts(board, caseParams),
+    ...buildVentilationCutouts(board, caseParams, hats ?? [], resolveHat),
     ...buildHatCutoutsForProject(board, caseParams, hats ?? [], resolveHat),
     ...assetOps.subtractOps,
     ...featureOps.subtractive,
@@ -107,15 +109,16 @@ export function compileProject(project: Project): BuildPlan {
 
   const nodes: BuildNode[] = [{ id: 'shell', op: shellOp }];
 
-  let lidOp = buildLid(board, caseParams);
+  let lidOp = buildLid(board, caseParams, hats ?? [], resolveHat);
   if (snapOps.lidAdd.length > 0) {
     lidOp = union([lidOp, ...snapOps.lidAdd]);
   }
-  const lidDims = computeLidDims(board, caseParams);
+  const lidDims = computeLidDims(board, caseParams, hats ?? [], resolveHat);
   nodes.push({
     id: 'lid',
     op: translate([0, 0, lidDims.zPosition + lidDims.liftAboveShell], lidOp),
   });
 
-  return { nodes };
+  const placementReport = validatePlacements(project);
+  return { nodes, placementReport };
 }

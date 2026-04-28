@@ -45,6 +45,7 @@ const componentSchema = z.object({
   facing: facingSchema.optional(),
   cutoutMargin: z.number().nonnegative().optional(),
   cutoutShape: cutoutShapeSchema.optional(),
+  fixtureId: z.string().min(1).optional(),
 });
 
 export const boardProfileSchema = z.object({
@@ -64,6 +65,7 @@ export const boardProfileSchema = z.object({
   crossReference: z.string().url().optional(),
   datasheetRevision: z.string().optional(),
   measurementMethod: z.enum(['datasheet', 'open-source-cad', 'physical-measurement']).optional(),
+  clonedFrom: z.string().min(1).optional(),
   visualAssets: z
     .object({
       glb: z.string().optional(),

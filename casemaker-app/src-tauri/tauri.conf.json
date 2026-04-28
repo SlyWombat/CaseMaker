@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' http://localhost:* http://127.0.0.1:*; img-src 'self' data: blob: http://localhost:* http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' http://localhost:* http://127.0.0.1:*; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost http://localhost:* http://127.0.0.1:*"
+      "csp": "default-src 'self' tauri: ipc: http://ipc.localhost; img-src 'self' data: blob: tauri: ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' tauri: ipc: http://ipc.localhost; worker-src 'self' blob:; connect-src 'self' ws: wss: tauri: ipc: http://ipc.localhost"
     }
   },
   "bundle": {

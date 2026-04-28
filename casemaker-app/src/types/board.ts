@@ -36,6 +36,9 @@ export interface BoardComponent {
   facing?: Facing;
   cutoutMargin?: Mm;
   cutoutShape?: CutoutShape;
+  /** Optional procedural-fixture id (e.g. 'xlr-3', 'audio-jack-3-5'). When
+   * absent, the placeholder falls back to the component's `kind`-based shape. */
+  fixtureId?: string;
 }
 
 export type MeasurementMethod =
@@ -73,4 +76,8 @@ export interface BoardProfile {
   measurementMethod?: MeasurementMethod;
   visualAssets?: BoardVisualAssets;
   builtin: boolean;
+  /** Issue #71 — set when this profile is a clone of a built-in. HAT
+   * compatibility checks accept the clonedFrom id as well as `id` so users
+   * don't lose shield compatibility just by cloning the board for editing. */
+  clonedFrom?: string;
 }

@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { Sidebar } from './Sidebar';
 import { StatusBar } from './StatusBar';
 import { Toolbar } from './Toolbar';
+import { PlacementBanner } from './PlacementBanner';
+import { WelcomeOverlay } from './WelcomeOverlay';
 import { Viewport } from '@/components/viewport/Viewport';
 import { useRebuildOnProjectChange } from '@/hooks/useRebuildOnProjectChange';
 import { undoProject, redoProject, useProjectStore } from '@/store/projectStore';
@@ -29,6 +31,7 @@ export function AppShell() {
   useRebuildOnProjectChange();
   useUndoRedoShortcuts();
   const board = useProjectStore((s) => s.project.board);
+  const welcomeMode = useProjectStore((s) => s.welcomeMode);
   const boardVisualization = useViewportStore((s) => s.boardVisualization);
   const assets = board.visualAssets;
   const wantsAsset = boardVisualization === 'photo' || boardVisualization === '3d';
@@ -65,7 +68,9 @@ export function AppShell() {
               No {boardVisualization} asset for {board.name}; rendering schematic.
             </div>
           )}
-          <Viewport />
+          {!welcomeMode && <PlacementBanner />}
+          {!welcomeMode && <Viewport />}
+          {welcomeMode && <WelcomeOverlay />}
         </div>
       </main>
       <StatusBar />

@@ -12,6 +12,8 @@ import jetsonNanoRaw from './boards/jetson-nano-b01.json';
 import beagleboneBlackRaw from './boards/beaglebone-black.json';
 import microbitV2Raw from './boards/microbit-v2.json';
 import m5stackCore2Raw from './boards/m5stack-core2.json';
+import snapTestFixtureRaw from './boards/snap-test-fixture.json';
+import genericZeroRaw from './boards/generic-zero.json';
 
 const validated: BoardProfile[] = [
   rpi4bRaw,
@@ -26,6 +28,8 @@ const validated: BoardProfile[] = [
   beagleboneBlackRaw,
   microbitV2Raw,
   m5stackCore2Raw,
+  snapTestFixtureRaw,
+  genericZeroRaw,
 ].map((raw) => {
   const parsed = builtinBoardProfileSchema.parse(raw);
   return parsed as BoardProfile;

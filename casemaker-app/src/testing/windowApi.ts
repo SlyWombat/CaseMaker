@@ -81,8 +81,8 @@ export interface CaseMakerTestApi {
   getLidVisible(): boolean;
   setLidVisible(v: boolean): void;
   setHatMountingPosition(placementId: string, mountingPositionId: string): Promise<void>;
-  getBoardVisualization(): 'schematic' | 'photo' | '3d';
-  setBoardVisualization(mode: 'schematic' | 'photo' | '3d'): void;
+  getBoardVisualization(): 'none' | 'schematic' | 'photo' | '3d';
+  setBoardVisualization(mode: 'none' | 'schematic' | 'photo' | '3d'): void;
 }
 
 export function installCaseMakerTestApi(): void {

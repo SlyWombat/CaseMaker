@@ -1,0 +1,26 @@
+{
+  "id": "snap-test-fixture",
+  "name": "Snap-fit test fixture",
+  "manufacturer": "Case Maker",
+  "pcb": { "size": { "x": 50, "y": 40, "z": 1.6 } },
+  "mountingHoles": [
+    { "id": "h1", "x": 5,  "y": 5,  "diameter": 2.7 },
+    { "id": "h2", "x": 45, "y": 5,  "diameter": 2.7 },
+    { "id": "h3", "x": 5,  "y": 35, "diameter": 2.7 },
+    { "id": "h4", "x": 45, "y": 35, "diameter": 2.7 }
+  ],
+  "components": [
+    {
+      "id": "dummy-port",
+      "kind": "usb-a",
+      "position": { "x": 21, "y": -2, "z": 1.6 },
+      "size": { "x": 8, "y": 5, "z": 3 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    }
+  ],
+  "defaultStandoffHeight": 3,
+  "recommendedZClearance": 6,
+  "source": "https://github.com/SlyWombat/case-maker/issues/65",
+  "builtin": true
+}

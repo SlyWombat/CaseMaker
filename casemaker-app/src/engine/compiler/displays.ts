@@ -1,7 +1,11 @@
-import type { CaseParameters, BoardProfile } from '@/types';
+import type { CaseParameters, BoardProfile, HatPlacement, HatProfile } from '@/types';
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
 import { cube, translate, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
+
+type HatResolver = (id: string) => HatProfile | undefined;
+const NO_HATS: HatPlacement[] = [];
+const NO_RESOLVE: HatResolver = () => undefined;
 
 export interface DisplayFootprint {
   /** Effective PCB X for the case, max(host, display) */
@@ -39,11 +43,13 @@ export function buildDisplayCutoutOps(
   params: CaseParameters,
   placement: DisplayPlacement | null | undefined,
   resolveDisplay: (id: string) => DisplayProfile | undefined,
+  hats: HatPlacement[] = NO_HATS,
+  resolveHat: HatResolver = NO_RESOLVE,
 ): { additive: BuildOp[]; subtractive: BuildOp[] } {
   if (!placement || !placement.enabled) return { additive: [], subtractive: [] };
   const profile = resolveDisplay(placement.displayId);
   if (!profile) return { additive: [], subtractive: [] };
-  const dims = computeShellDims(board, params);
+  const dims = computeShellDims(board, params, hats, resolveHat);
   const { wallThickness: wall, internalClearance: cl } = params;
 
   // Active-area corner in world frame: PCB origin in world is (wall+cl, wall+cl, ...);

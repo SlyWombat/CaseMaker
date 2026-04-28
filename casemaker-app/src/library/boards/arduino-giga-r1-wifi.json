@@ -2,80 +2,195 @@
   "id": "arduino-giga-r1-wifi",
   "name": "Arduino GIGA R1 WiFi",
   "manufacturer": "Arduino",
-  "pcb": { "size": { "x": 101.6, "y": 53.3, "z": 1.6 } },
+  "pcb": {
+    "size": {
+      "x": 101.6,
+      "y": 53.3,
+      "z": 1.6
+    }
+  },
   "mountingHoles": [
-    { "id": "h1", "x": 13.97, "y": 2.54, "diameter": 3.2 },
-    { "id": "h2", "x": 99.06, "y": 7.62, "diameter": 3.2 },
-    { "id": "h3", "x": 99.06, "y": 35.56, "diameter": 3.2 },
-    { "id": "h4", "x": 15.24, "y": 50.8, "diameter": 3.2 }
+    {
+      "id": "h1",
+      "x": 13.97,
+      "y": 2.54,
+      "diameter": 3.2
+    },
+    {
+      "id": "h2",
+      "x": 99.06,
+      "y": 7.62,
+      "diameter": 3.2
+    },
+    {
+      "id": "h3",
+      "x": 99.06,
+      "y": 35.56,
+      "diameter": 3.2
+    },
+    {
+      "id": "h4",
+      "x": 15.24,
+      "y": 50.8,
+      "diameter": 3.2
+    }
   ],
   "components": [
     {
       "id": "usb-c-host",
       "kind": "usb-c",
-      "position": { "x": -2, "y": 7, "z": 1.6 },
-      "size": { "x": 9, "y": 9, "z": 3.5 },
+      "position": {
+        "x": -2,
+        "y": 41,
+        "z": 1.6
+      },
+      "size": {
+        "x": 9,
+        "y": 9,
+        "z": 3.5
+      },
       "facing": "-x",
       "cutoutMargin": 0.5
     },
     {
       "id": "usb-a-host",
       "kind": "usb-a",
-      "position": { "x": -2, "y": 22, "z": 1.6 },
-      "size": { "x": 14, "y": 13, "z": 7 },
+      "position": {
+        "x": -2,
+        "y": 22,
+        "z": 1.6
+      },
+      "size": {
+        "x": 14,
+        "y": 13,
+        "z": 7
+      },
       "facing": "-x",
       "cutoutMargin": 0.5
     },
     {
-      "id": "usb-b-prog",
-      "kind": "usb-b",
-      "position": { "x": -2, "y": 41, "z": 1.6 },
-      "size": { "x": 14, "y": 12, "z": 11 },
+      "id": "audio-jack-3-5mm",
+      "kind": "custom",
+      "fixtureId": "audio-jack-3-5",
+      "position": {
+        "x": -2,
+        "y": 7,
+        "z": 1.6
+      },
+      "size": {
+        "x": 14,
+        "y": 6.5,
+        "z": 5
+      },
       "facing": "-x",
-      "cutoutMargin": 0.5
+      "cutoutMargin": 0.5,
+      "cutoutShape": "round"
     },
     {
-      "id": "barrel-power",
-      "kind": "barrel-jack",
-      "position": { "x": 95, "y": 5, "z": 1.6 },
-      "size": { "x": 13, "y": 9, "z": 10.5 },
+      "id": "camera-connector",
+      "kind": "flat-cable",
+      "position": {
+        "x": 99,
+        "y": 14,
+        "z": 1.6
+      },
+      "size": {
+        "x": 3,
+        "y": 22,
+        "z": 6
+      },
       "facing": "+x",
-      "cutoutMargin": 0.5
+      "cutoutMargin": 0.4
+    },
+    {
+      "id": "display-connector",
+      "kind": "flat-cable",
+      "position": {
+        "x": 99,
+        "y": 38,
+        "z": 1.6
+      },
+      "size": {
+        "x": 3,
+        "y": 12,
+        "z": 6
+      },
+      "facing": "+x",
+      "cutoutMargin": 0.4
     },
     {
       "id": "header-digital-low",
       "kind": "gpio-header",
-      "position": { "x": 28, "y": 4, "z": 1.6 },
-      "size": { "x": 56, "y": 4, "z": 9 },
+      "position": {
+        "x": 28,
+        "y": 4,
+        "z": 1.6
+      },
+      "size": {
+        "x": 56,
+        "y": 4,
+        "z": 9
+      },
       "facing": "+z"
     },
     {
       "id": "header-digital-high",
       "kind": "gpio-header",
-      "position": { "x": 28, "y": 47, "z": 1.6 },
-      "size": { "x": 56, "y": 4, "z": 9 },
+      "position": {
+        "x": 28,
+        "y": 47,
+        "z": 1.6
+      },
+      "size": {
+        "x": 56,
+        "y": 4,
+        "z": 9
+      },
       "facing": "+z"
     },
     {
       "id": "header-analog",
       "kind": "gpio-header",
-      "position": { "x": 88, "y": 18, "z": 1.6 },
-      "size": { "x": 4, "y": 32, "z": 9 },
+      "position": {
+        "x": 88,
+        "y": 18,
+        "z": 1.6
+      },
+      "size": {
+        "x": 4,
+        "y": 32,
+        "z": 9
+      },
       "facing": "+z"
     },
     {
       "id": "sd-card",
       "kind": "sd-card",
-      "position": { "x": 0, "y": 30, "z": 0 },
-      "size": { "x": 13, "y": 11, "z": 1.4 },
-      "facing": "-x",
+      "position": {
+        "x": 0,
+        "y": 30,
+        "z": 0
+      },
+      "size": {
+        "x": 13,
+        "y": 11,
+        "z": 1.4
+      },
       "cutoutMargin": 0.7
     },
     {
       "id": "wifi-antenna-ufl",
       "kind": "antenna-connector",
-      "position": { "x": 80, "y": 50, "z": 1.6 },
-      "size": { "x": 3, "y": 3, "z": 2 },
+      "position": {
+        "x": 80,
+        "y": 50,
+        "z": 1.6
+      },
+      "size": {
+        "x": 3,
+        "y": 3,
+        "z": 2
+      },
       "facing": "+y",
       "cutoutMargin": 0.4
     }
@@ -83,5 +198,6 @@
   "defaultStandoffHeight": 5,
   "recommendedZClearance": 14,
   "source": "https://docs.arduino.cc/resources/datasheets/ABX00063-datasheet.pdf",
+  "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/arduino-giga-r1-wifi",
   "builtin": true
 }

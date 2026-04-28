@@ -22,11 +22,15 @@ describe('ProjectCompiler', () => {
     expect(after.outerY - before.outerY).toBeCloseTo(2 * delta, 6);
   });
 
-  it('outer Z grows by exactly delta when zClearance changes by delta', () => {
+  it('outer Z grows by exactly delta when zClearance changes by delta (above the host-tallest floor)', () => {
+    // Issue #66 — cavity height uses max(zClearance, hostTallest+z). Pi 4B
+    // host-tallest is ~16 mm, so zClearance only dominates above that. Start
+    // the test at zClearance=30 (well past host-tallest) and grow by 8.
     const project = createDefaultProject('rpi-4b');
-    const before = computeShellDims(project.board, project.case);
+    project.case.zClearance = 30;
+    const before = computeShellDims(project.board, project.case, [], () => undefined);
     project.case.zClearance += 8;
-    const after = computeShellDims(project.board, project.case);
+    const after = computeShellDims(project.board, project.case, [], () => undefined);
     expect(after.outerZ - before.outerZ).toBeCloseTo(8, 6);
   });
 

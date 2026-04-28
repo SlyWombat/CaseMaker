@@ -15,10 +15,14 @@ use tokio::sync::oneshot;
 #[exclude = "*.map"]
 struct Assets;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub requested_port: u16,
     pub bind_to_all: bool,
+    /// Optional explicit listen IP. Wins over `bind_to_all` when set and
+    /// parses as a valid IP. Empty string / invalid IP → fall back to the
+    /// bind_to_all / 127.0.0.1 behaviour.
+    pub host: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -34,10 +38,26 @@ pub struct ServerHandle {
 pub fn start(
     cfg: ServerConfig,
 ) -> Result<(ServerHandle, oneshot::Receiver<()>), std::io::Error> {
-    let bind_addr = if cfg.bind_to_all {
-        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-    } else {
-        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    let bind_addr = match cfg.host.as_deref() {
+        Some(h) if !h.is_empty() => match h.parse::<IpAddr>() {
+            Ok(ip) => ip,
+            Err(_) => {
+                log::warn!("invalid host '{h}'; falling back to {}",
+                    if cfg.bind_to_all { "0.0.0.0" } else { "127.0.0.1" });
+                if cfg.bind_to_all {
+                    IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+                } else {
+                    IpAddr::V4(Ipv4Addr::LOCALHOST)
+                }
+            }
+        },
+        _ => {
+            if cfg.bind_to_all {
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+            } else {
+                IpAddr::V4(Ipv4Addr::LOCALHOST)
+            }
+        }
     };
 
     // Try the requested port first; if taken, let the OS pick.
@@ -109,6 +129,19 @@ async fn serve_path(AxumPath(path): AxumPath<String>) -> impl IntoResponse {
     serve_asset(&path)
 }
 
+/// Issue #47 — Content Security Policy that works regardless of bind host.
+///
+/// `'self'` covers same-origin requests on whatever IP / port the server
+/// actually bound to (loopback, LAN, or any future case), so the SPA can
+/// always fetch its own chunks. We additionally allow the Tauri webview's
+/// IPC origins and `wasm-unsafe-eval` for the manifold-3d worker.
+const CSP_HEADER: &str = "default-src 'self' tauri: ipc: http://ipc.localhost; \
+img-src 'self' data: blob: tauri: ipc: http://ipc.localhost; \
+style-src 'self' 'unsafe-inline'; \
+script-src 'self' 'wasm-unsafe-eval' tauri: ipc: http://ipc.localhost; \
+worker-src 'self' blob:; \
+connect-src 'self' ws: wss: tauri: ipc: http://ipc.localhost";
+
 fn serve_asset(path: &str) -> Response<Body> {
     // Strip leading slashes; fall back to index.html for SPA routes.
     let trimmed = path.trim_start_matches('/');
@@ -125,6 +158,10 @@ fn serve_asset(path: &str) -> Response<Body> {
             resp.headers_mut().insert(
                 header::CACHE_CONTROL,
                 HeaderValue::from_static("public, max-age=3600"),
+            );
+            resp.headers_mut().insert(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(CSP_HEADER),
             );
             resp
         }

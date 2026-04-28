@@ -3,10 +3,16 @@ import type {
   AntennaFacing,
   BoardProfile,
   CaseParameters,
+  HatPlacement,
+  HatProfile,
 } from '@/types';
 import { ANTENNA_SPECS } from '@/types/antenna';
 import { cylinder, rotate, translate, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
+
+type HatResolver = (id: string) => HatProfile | undefined;
+const NO_HATS: HatPlacement[] = [];
+const NO_RESOLVE: HatResolver = () => undefined;
 
 const COUNTERBORE_FLOOR = 1; // leave at least 1mm of wall between counterbore and outside
 
@@ -83,9 +89,11 @@ export function buildAntennaOps(
   antennas: AntennaPlacement[] | undefined,
   board: BoardProfile,
   params: CaseParameters,
+  hats: HatPlacement[] = NO_HATS,
+  resolveHat: HatResolver = NO_RESOLVE,
 ): AntennaCutoutOps {
   if (!antennas || antennas.length === 0) return { subtractive: [] };
-  const shell = computeShellDims(board, params);
+  const shell = computeShellDims(board, params, hats, resolveHat);
   const { wallThickness: wall, internalClearance: cl, floorThickness: floor } = params;
   const out: BuildOp[] = [];
 

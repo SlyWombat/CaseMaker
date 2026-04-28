@@ -17,6 +17,7 @@ const caseParamsSchema = z.object({
     z.enum(['snap-fit', 'screw-down', 'flat-lid']),
   ),
   lidRecess: z.boolean().optional(),
+  extraCavityZ: z.number().nonnegative().optional(),
   ventilation: z.object({
     enabled: z.boolean(),
     pattern: z.enum(['none', 'slots', 'hex']),

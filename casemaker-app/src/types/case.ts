@@ -33,6 +33,12 @@ export interface CaseParameters {
   joint: JointType;
   /** Recessed-lid mode: lid drops into a pocket at the top of the shell, flush with the rim. */
   lidRecess?: boolean;
+  /**
+   * Issue #36 — extra cavity height (mm) added on top of the auto-computed
+   * minimum. Grows the wall and pushes the lid up; cutout positions are
+   * unchanged so connectors stay aligned with their openings.
+   */
+  extraCavityZ?: Mm;
   ventilation: VentilationParams;
   bosses: BossesParams;
   /**

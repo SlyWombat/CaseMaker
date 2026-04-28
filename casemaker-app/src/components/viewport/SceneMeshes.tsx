@@ -5,6 +5,7 @@ import { useViewportStore } from '@/store/viewportStore';
 import { bufferToGeometry } from '@/engine/scene/meshFromBuffer';
 import { ExternalAssetMeshes } from './ExternalAssetMeshes';
 import { PortMarkers } from './PortMarkers';
+import { BoardPlaceholderMesh } from './BoardPlaceholderMesh';
 
 interface NodeMeshProps {
   id: string;
@@ -36,8 +37,9 @@ export function SceneMeshes() {
   const showLid = useViewportStore((s) => s.showLid);
   return (
     <group>
-      <NodeMesh id="shell" color="#88a4cc" />
-      {showLid && <NodeMesh id="lid" color="#a8b8d0" opacity={0.85} />}
+      <NodeMesh id="shell" color="#88a4cc" opacity={0.55} />
+      {showLid && <NodeMesh id="lid" color="#a8b8d0" opacity={0.6} />}
+      <BoardPlaceholderMesh />
       <ExternalAssetMeshes />
       <PortMarkers />
     </group>

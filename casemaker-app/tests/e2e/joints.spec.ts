@@ -21,19 +21,18 @@ test('snap-fit lid: triangle count grows substantially over flat-lid baseline', 
   expect(snapHeight - flatHeight).toBeGreaterThanOrEqual(2);
 });
 
-test('sliding lid: lid Y span is shorter than outer shell Y span', async ({ cm, page }) => {
+test('removed sliding joint coerces to flat-lid (issue #48)', async ({ cm, page }) => {
+  // The 'sliding' joint type was removed; the schema preprocesses it to
+  // 'flat-lid' on load. Setting it via patchCase should leave the project
+  // with a valid joint (either ignored or coerced) — never break the build.
   await cm.ready();
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
-    await window.__caseMaker!.patchCase({ joint: 'sliding' });
+    // Cast to bypass typed API; this exercises the runtime defensive path.
+    await window.__caseMaker!.patchCase({ joint: 'sliding' as never });
   });
-  const result = await page.evaluate(() => ({
-    shell: window.__caseMaker!.getMeshStats('shell')!.bbox,
-    lid: window.__caseMaker!.getMeshStats('lid')!.bbox,
-  }));
-  const shellYSpan = result.shell.max[1] - result.shell.min[1];
-  const lidYSpan = result.lid.max[1] - result.lid.min[1];
-  expect(lidYSpan).toBeLessThan(shellYSpan);
+  const joint = await page.evaluate(() => window.__caseMaker!.getProject()?.case.joint);
+  expect(['flat-lid', 'snap-fit', 'screw-down']).toContain(joint);
 });
 
 test('ventilation slots: enabling reduces shell triangle count differential vs disabled', async ({

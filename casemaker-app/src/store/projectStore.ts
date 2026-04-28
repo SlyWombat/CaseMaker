@@ -71,6 +71,10 @@ export function createDefaultProject(boardId = DEFAULT_BOARD_ID): Project {
 
 export interface ProjectState {
   project: Project;
+  /** Issue #69 — true on first load until the user picks a board / template.
+   * Suppresses the viewport rendering and shows a Welcome panel instead. */
+  welcomeMode: boolean;
+  dismissWelcome: () => void;
   setProject: (p: Project) => void;
   patchCase: (patch: Partial<CaseParameters>) => void;
   loadBuiltinBoard: (boardId: string) => void;
@@ -79,10 +83,36 @@ export interface ProjectState {
   setPortEnabled: (portId: string, enabled: boolean) => void;
   patchPort: (
     portId: string,
-    patch: { position?: Partial<{ x: number; y: number; z: number }>; locked?: boolean },
+    patch: {
+      position?: Partial<{ x: number; y: number; z: number }>;
+      size?: Partial<{ x: number; y: number; z: number }>;
+      cutoutMargin?: number;
+      cutoutShape?: 'rect' | 'round';
+      locked?: boolean;
+    },
   ) => void;
+  patchHatPort: (
+    placementId: string,
+    portId: string,
+    patch: {
+      position?: Partial<{ x: number; y: number; z: number }>;
+      size?: Partial<{ x: number; y: number; z: number }>;
+      cutoutMargin?: number;
+      cutoutShape?: 'rect' | 'round';
+    },
+  ) => void;
+  resetPortToDefault: (portId: string) => void;
+  resetHatPortToDefault: (placementId: string, portId: string) => void;
   setBoard: (board: BoardProfile) => void;
   cloneBoardForEditing: () => void;
+  patchBoardMeta: (patch: {
+    name?: string;
+    manufacturer?: string;
+    defaultStandoffHeight?: number;
+    recommendedZClearance?: number;
+    crossReference?: string;
+    datasheetRevision?: string;
+  }) => void;
   patchBoardPcb: (patch: { x?: number; y?: number; z?: number }) => void;
   addMountingHole: () => void;
   removeMountingHole: (holeId: string) => void;
@@ -106,6 +136,8 @@ export interface ProjectState {
       size?: Partial<{ x: number; y: number; z: number }>;
       facing?: Facing;
       cutoutMargin?: number;
+      cutoutShape?: 'rect' | 'round';
+      fixtureId?: string | null;
     },
   ) => void;
   addHat: (hatId: string) => void;
@@ -127,14 +159,28 @@ export interface ProjectState {
   addTextLabel: (label: import('@/types/textLabel').TextLabel) => void;
   removeTextLabel: (id: string) => void;
   patchTextLabel: (id: string, patch: Partial<import('@/types/textLabel').TextLabel>) => void;
+  addAntenna: (antenna: import('@/types/antenna').AntennaPlacement) => void;
+  removeAntenna: (id: string) => void;
+  patchAntenna: (
+    id: string,
+    patch: Partial<import('@/types/antenna').AntennaPlacement>,
+  ) => void;
+  addSnapCatch: (wall: import('@/types/snap').SnapWall, uPosition: number) => void;
+  removeSnapCatch: (id: string) => void;
+  patchSnapCatch: (id: string, patch: Partial<import('@/types/snap').SnapCatch>) => void;
 }
 
 export const useProjectStore = create<ProjectState>()(
   subscribeWithSelector(
     temporal(
       (set) => ({
+        // Project still initializes with a valid Pi 4B so the engine never
+        // sees a null board (avoids a million null-checks). The viewport is
+        // gated on `welcomeMode` instead.
         project: createDefaultProject(),
-        setProject: (p) => set({ project: p }),
+        welcomeMode: true,
+        dismissWelcome: () => set({ welcomeMode: false }),
+        setProject: (p) => set({ project: p, welcomeMode: false }),
         patchCase: (patch) =>
           set((s) => ({
             project: produce(s.project, (draft) => {
@@ -146,7 +192,17 @@ export const useProjectStore = create<ProjectState>()(
                 draft.case.joint === 'snap-fit' &&
                 (!draft.case.snapCatches || draft.case.snapCatches.length === 0)
               ) {
-                draft.case.snapCatches = defaultSnapCatchesForCase(draft.board, draft.case);
+                // Issue #46 — pass HATs so snap catches sit at the right Z on
+                // a HAT-stacked case rim. defaultSnapCatchesForCase reads
+                // outerZ from the shell dims; HAT stack contributes to outerZ.
+                const hatResolver = (id: string) =>
+                  (draft.customHats ?? []).find((h) => h.id === id) ?? getBuiltinHat(id);
+                draft.case.snapCatches = defaultSnapCatchesForCase(
+                  draft.board,
+                  draft.case,
+                  draft.hats ?? [],
+                  hatResolver,
+                );
               }
               // Issue #33: when ventilation is toggled on with coverage still 0,
               // bump coverage to a sensible default so vents are visible. Pattern
@@ -169,7 +225,7 @@ export const useProjectStore = create<ProjectState>()(
             }),
           })),
         loadBuiltinBoard: (boardId) =>
-          set(() => ({ project: createDefaultProject(boardId) })),
+          set(() => ({ project: createDefaultProject(boardId), welcomeMode: false })),
         addPort: (port) =>
           set((s) => ({
             project: produce(s.project, (draft) => {
@@ -199,7 +255,71 @@ export const useProjectStore = create<ProjectState>()(
                 if (typeof patch.position.y === 'number') p.position.y = patch.position.y;
                 if (typeof patch.position.z === 'number') p.position.z = patch.position.z;
               }
+              if (patch.size) {
+                if (typeof patch.size.x === 'number') p.size.x = patch.size.x;
+                if (typeof patch.size.y === 'number') p.size.y = patch.size.y;
+                if (typeof patch.size.z === 'number') p.size.z = patch.size.z;
+              }
+              if (typeof patch.cutoutMargin === 'number') p.cutoutMargin = patch.cutoutMargin;
+              if (patch.cutoutShape) p.cutoutShape = patch.cutoutShape;
               if (typeof patch.locked === 'boolean') p.locked = patch.locked;
+            }),
+          })),
+        patchHatPort: (placementId, portId, patch) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              const placement = draft.hats?.find((h) => h.id === placementId);
+              if (!placement) return;
+              const p = placement.ports.find((x) => x.id === portId);
+              if (!p) return;
+              if (patch.position) {
+                if (typeof patch.position.x === 'number') p.position.x = patch.position.x;
+                if (typeof patch.position.y === 'number') p.position.y = patch.position.y;
+                if (typeof patch.position.z === 'number') p.position.z = patch.position.z;
+              }
+              if (patch.size) {
+                if (typeof patch.size.x === 'number') p.size.x = patch.size.x;
+                if (typeof patch.size.y === 'number') p.size.y = patch.size.y;
+                if (typeof patch.size.z === 'number') p.size.z = patch.size.z;
+              }
+              if (typeof patch.cutoutMargin === 'number') p.cutoutMargin = patch.cutoutMargin;
+              if (patch.cutoutShape) p.cutoutShape = patch.cutoutShape;
+            }),
+          })),
+        resetPortToDefault: (portId) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              const p = draft.ports.find((x) => x.id === portId);
+              if (!p || !p.sourceComponentId) return;
+              const c = draft.board.components.find((x) => x.id === p.sourceComponentId);
+              if (!c) return;
+              p.position = { ...c.position };
+              p.size = { ...c.size };
+              p.cutoutMargin = c.cutoutMargin ?? 0.5;
+              if (c.facing) p.facing = c.facing;
+              if (c.cutoutShape) p.cutoutShape = c.cutoutShape;
+              else delete p.cutoutShape;
+            }),
+          })),
+        resetHatPortToDefault: (placementId, portId) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              const placement = draft.hats?.find((h) => h.id === placementId);
+              if (!placement) return;
+              const profile =
+                (draft.customHats ?? []).find((h) => h.id === placement.hatId) ??
+                getBuiltinHat(placement.hatId);
+              if (!profile) return;
+              const p = placement.ports.find((x) => x.id === portId);
+              if (!p || !p.sourceComponentId) return;
+              const c = profile.components.find((x) => x.id === p.sourceComponentId);
+              if (!c) return;
+              p.position = { ...c.position };
+              p.size = { ...c.size };
+              p.cutoutMargin = c.cutoutMargin ?? 0.5;
+              if (c.facing) p.facing = c.facing;
+              if (c.cutoutShape) p.cutoutShape = c.cutoutShape;
+              else delete p.cutoutShape;
             }),
           })),
         setBoard: (board) =>
@@ -212,10 +332,36 @@ export const useProjectStore = create<ProjectState>()(
           set((s) => ({
             project: produce(s.project, (draft) => {
               if (!draft.board.builtin) return;
-              draft.board.id = `custom-${draft.board.id}-${newId()}`;
+              const sourceId = draft.board.id;
+              draft.board.id = `custom-${sourceId}-${newId()}`;
               draft.board.name = `${draft.board.name} (custom)`;
               draft.board.builtin = false;
+              // Issue #71 — remember the source so HAT compatibility checks
+              // still match (`hatsCompatibleWith` and the placement validator
+              // both accept `clonedFrom` in addition to `id`).
+              draft.board.clonedFrom = sourceId;
+              // Source URL belongs to the upstream built-in. The user's clone
+              // can drop it; if they have a private datasheet they enter it
+              // via patchBoardMeta.
               delete draft.board.source;
+            }),
+          })),
+        patchBoardMeta: (patch) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (draft.board.builtin) return;
+              if (typeof patch.name === 'string' && patch.name.length > 0)
+                draft.board.name = patch.name;
+              if (typeof patch.manufacturer === 'string' && patch.manufacturer.length > 0)
+                draft.board.manufacturer = patch.manufacturer;
+              if (typeof patch.defaultStandoffHeight === 'number')
+                draft.board.defaultStandoffHeight = patch.defaultStandoffHeight;
+              if (typeof patch.recommendedZClearance === 'number')
+                draft.board.recommendedZClearance = patch.recommendedZClearance;
+              if (typeof patch.crossReference === 'string')
+                draft.board.crossReference = patch.crossReference || undefined;
+              if (typeof patch.datasheetRevision === 'string')
+                draft.board.datasheetRevision = patch.datasheetRevision || undefined;
             }),
           })),
         patchBoardPcb: (patch) =>
@@ -313,6 +459,9 @@ export const useProjectStore = create<ProjectState>()(
               if (patch.kind) c.kind = patch.kind;
               if (patch.facing) c.facing = patch.facing;
               if (typeof patch.cutoutMargin === 'number') c.cutoutMargin = patch.cutoutMargin;
+              if (patch.cutoutShape) c.cutoutShape = patch.cutoutShape;
+              if (patch.fixtureId === null) delete c.fixtureId;
+              else if (typeof patch.fixtureId === 'string') c.fixtureId = patch.fixtureId;
               if (patch.position) {
                 if (typeof patch.position.x === 'number') c.position.x = patch.position.x;
                 if (typeof patch.position.y === 'number') c.position.y = patch.position.y;
@@ -564,6 +713,62 @@ export const useProjectStore = create<ProjectState>()(
               if (typeof patch.bezelInset === 'number') draft.display.bezelInset = patch.bezelInset;
               if (patch.offset) Object.assign(draft.display.offset, patch.offset);
               if (patch.hostSupport) draft.display.hostSupport = patch.hostSupport;
+            }),
+          })),
+        addAntenna: (antenna) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.antennas) draft.antennas = [];
+              draft.antennas.push(antenna);
+            }),
+          })),
+        removeAntenna: (id) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.antennas) return;
+              draft.antennas = draft.antennas.filter((a) => a.id !== id);
+            }),
+          })),
+        patchAntenna: (id, patch) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.antennas) return;
+              const a = draft.antennas.find((x) => x.id === id);
+              if (!a) return;
+              if (typeof patch.enabled === 'boolean') a.enabled = patch.enabled;
+              if (patch.type) a.type = patch.type;
+              if (patch.facing) a.facing = patch.facing;
+              if (typeof patch.uOffset === 'number') a.uOffset = patch.uOffset;
+            }),
+          })),
+        addSnapCatch: (wall, uPosition) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.case.snapCatches) draft.case.snapCatches = [];
+              draft.case.snapCatches.push({
+                id: `snap-${newId()}`,
+                wall,
+                uPosition,
+                enabled: true,
+              });
+            }),
+          })),
+        removeSnapCatch: (id) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.case.snapCatches) return;
+              draft.case.snapCatches = draft.case.snapCatches.filter((c) => c.id !== id);
+            }),
+          })),
+        patchSnapCatch: (id, patch) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.case.snapCatches) return;
+              const c = draft.case.snapCatches.find((x) => x.id === id);
+              if (!c) return;
+              if (typeof patch.enabled === 'boolean') c.enabled = patch.enabled;
+              if (patch.wall) c.wall = patch.wall;
+              if (typeof patch.uPosition === 'number') c.uPosition = patch.uPosition;
             }),
           })),
       }),

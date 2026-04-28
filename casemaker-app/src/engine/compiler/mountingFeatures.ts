@@ -5,7 +5,8 @@ import type {
   HatProfile,
 } from '@/types';
 import type { MountingFeature, CaseFace } from '@/types/mounting';
-import { cube, cylinder, translate, type BuildOp } from './buildPlan';
+import { axisCylinder, cube, cylinder, translate, type BuildOp } from './buildPlan';
+import type { Facing } from '@/types';
 import { computeShellDims } from './caseShell';
 
 export interface FeatureOpGroups {
@@ -184,6 +185,13 @@ function generateVesaMount(
     [-half, half],
     [half, half],
   ];
+  // Issue #45 — drill perpendicular to the face along its outward axis. The
+  // earlier code used a fixed Z-axis cylinder for every face; on +x/-x/+y/-y
+  // faces that ships a 20mm tall slug at the corner that doesn't pierce the
+  // wall. axisCylinder + the face's outward direction now gives a real
+  // through-hole.
+  const holeRadius = holeDiameter / 2;
+  const holeLength = 20;
   for (const [du, dv] of offsets) {
     const u = feature.position.u + du;
     const v = feature.position.v + dv;
@@ -193,17 +201,28 @@ function generateVesaMount(
     const vx = frame.vAxis[0] * v;
     const vy = frame.vAxis[1] * v;
     const vz = frame.vAxis[2] * v;
-    // Drill perpendicular to the face — for back face (+y) hole axis is along Y.
-    // We approximate with a tall cylinder oriented along Z and translated; for
-    // -y/+y faces this works because Manifold cylinders are Z-axis but we don't
-    // care about the exact orientation for a through-hole (the cylinder length
-    // exceeds the wall thickness).
-    const hole = cylinder(20, holeDiameter / 2, 24);
-    subs.push(translate([
-      frame.origin[0] + ux + vx,
-      frame.origin[1] + uy + vy - 10,
-      frame.origin[2] + uz + vz,
-    ], hole));
+    // Determine the cylinder axis from the face's outward axis. Reverse the
+    // outward direction so the cylinder body extends *into* the case from the
+    // face plane, then offset by half its length so the through-hole is
+    // centered on the face.
+    const outward = frame.outwardAxis;
+    const facing: Facing | '-z' =
+      outward[2] === 1 ? '+z' :
+      outward[2] === -1 ? '-z' :
+      outward[1] === 1 ? '+y' :
+      outward[1] === -1 ? '-y' :
+      outward[0] === 1 ? '+x' : '-x';
+    // axisCylinder accepts only Facing (no -z); fall back to Z-axis for -z
+    // (the cylinder primitive is already Z-axis).
+    const hole = facing === '-z'
+      ? cylinder(holeLength, holeRadius, 24)
+      : axisCylinder(facing, holeLength, holeRadius, 24);
+    // Translate to the hole center, then offset back along the face normal so
+    // the cylinder spans the wall (half above, half below the face plane).
+    const cx = frame.origin[0] + ux + vx - outward[0] * holeLength / 2;
+    const cy = frame.origin[1] + uy + vy - outward[1] * holeLength / 2;
+    const cz = frame.origin[2] + uz + vz - outward[2] * holeLength / 2;
+    subs.push(translate([cx, cy, cz], hole));
   }
   return { additive: [], subtractive: subs };
 }

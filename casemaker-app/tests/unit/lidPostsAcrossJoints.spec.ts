@@ -12,7 +12,7 @@ function countOps(op: BuildOp, kind: BuildOp['kind']): number {
 }
 
 describe('Issue #27 — lid posts present on every joint', () => {
-  const joints: JointType[] = ['flat-lid', 'snap-fit', 'sliding', 'screw-down'];
+  const joints: JointType[] = ['flat-lid', 'snap-fit', 'screw-down'];
 
   for (const joint of joints) {
     it(`${joint}: lid mesh contains cylinder posts (one per mounting hole)`, () => {

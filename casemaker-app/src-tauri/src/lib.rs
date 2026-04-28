@@ -16,6 +16,10 @@ struct CliArgs {
     #[arg(long)]
     port: Option<u16>,
 
+    /// Override the listen host (e.g. 192.168.10.16). Wins over --bind-all.
+    #[arg(long)]
+    host: Option<String>,
+
     /// Print effective config and exit.
     #[arg(long, default_value_t = false)]
     print_config: bool,
@@ -35,10 +39,15 @@ pub fn run() {
             cfg.port = p;
         }
     }
+    if let Some(h) = args.host.clone() {
+        cfg.host = Some(h);
+    }
     if args.print_config {
         println!(
-            "{{\"port\":{},\"bind_to_all\":{}}}",
-            cfg.port, cfg.bind_to_all
+            "{{\"port\":{},\"bind_to_all\":{},\"host\":{}}}",
+            cfg.port,
+            cfg.bind_to_all,
+            cfg.host.as_deref().map(|h| format!("\"{}\"", h)).unwrap_or_else(|| "null".to_string()),
         );
         return;
     }
@@ -48,6 +57,7 @@ pub fn run() {
     let server_cfg = server::ServerConfig {
         requested_port: cfg.port,
         bind_to_all: cfg.bind_to_all,
+        host: cfg.host.clone(),
     };
 
     let server_handle = match server::start(server_cfg) {
@@ -66,7 +76,19 @@ pub fn run() {
     };
 
     let window_url = match server_handle {
-        Some(h) => format!("http://127.0.0.1:{}", h.bound_port),
+        Some(h) => {
+            // The webview always reaches the server via loopback, even when
+            // the server itself is bound to a LAN IP for external access.
+            // 127.0.0.1 works because the OS routes all *.0.0.0 binds to the
+            // loopback path too; explicit-IP binds need the actual address.
+            let host_for_webview = match h.bind_addr {
+                std::net::IpAddr::V4(v4) if v4.is_unspecified() || v4.is_loopback() => {
+                    "127.0.0.1".to_string()
+                }
+                ip => ip.to_string(),
+            };
+            format!("http://{}:{}", host_for_webview, h.bound_port)
+        }
         None => "tauri://localhost".to_string(),
     };
 

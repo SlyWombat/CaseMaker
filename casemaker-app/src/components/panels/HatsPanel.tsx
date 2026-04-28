@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { getBuiltinHat, hatsCompatibleWith } from '@/library/hats';
+import { PortEditorRow } from './PortEditorRow';
 
 export function HatsPanel() {
   const board = useProjectStore((s) => s.project.board);
@@ -9,8 +10,13 @@ export function HatsPanel() {
   const removeHat = useProjectStore((s) => s.removeHat);
   const patchHat = useProjectStore((s) => s.patchHat);
   const setHatPortEnabled = useProjectStore((s) => s.setHatPortEnabled);
+  const patchHatPort = useProjectStore((s) => s.patchHatPort);
+  const resetHatPort = useProjectStore((s) => s.resetHatPortToDefault);
 
-  const compatible = useMemo(() => hatsCompatibleWith(board.id), [board.id]);
+  const compatible = useMemo(
+    () => hatsCompatibleWith(board.id, board.clonedFrom),
+    [board.id, board.clonedFrom],
+  );
   const [pickerValue, setPickerValue] = useState('');
 
   return (
@@ -141,20 +147,20 @@ export function HatsPanel() {
                     </div>
                   )}
                   {h.ports.length > 0 && (
-                    <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 0 18px' }}>
+                    <ul className="port-list" style={{ margin: '4px 0 0 18px' }}>
                       {h.ports.map((p) => (
-                        <li key={p.id} style={{ fontSize: 11, color: '#8a94a4' }}>
-                          <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                            <input
-                              type="checkbox"
-                              checked={p.enabled}
-                              onChange={(e) =>
-                                setHatPortEnabled(h.id, p.id, e.target.checked)
-                              }
-                            />
-                            {p.kind} [{p.facing}]
-                          </label>
-                        </li>
+                        <PortEditorRow
+                          key={p.id}
+                          port={p}
+                          onSetEnabled={(v) => setHatPortEnabled(h.id, p.id, v)}
+                          onPatch={(patch) => patchHatPort(h.id, p.id, patch)}
+                          onReset={
+                            p.sourceComponentId
+                              ? () => resetHatPort(h.id, p.id)
+                              : undefined
+                          }
+                          testIdPrefix={`hatport-${h.id}-${p.sourceComponentId ?? p.id}`}
+                        />
                       ))}
                     </ul>
                   )}

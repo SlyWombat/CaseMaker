@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 const LS_KEY = 'casemaker.viewport';
 
-export type BoardVisualizationMode = 'schematic' | 'photo' | '3d';
+export type BoardVisualizationMode = 'none' | 'schematic' | 'photo' | '3d';
 
 interface PersistedViewportFlags {
   showLid?: boolean;
@@ -49,7 +49,7 @@ export interface ViewportState {
 
 const persisted = loadPersisted();
 
-const VISUALIZATION_CYCLE: BoardVisualizationMode[] = ['schematic', 'photo', '3d'];
+const VISUALIZATION_CYCLE: BoardVisualizationMode[] = ['schematic', 'photo', '3d', 'none'];
 
 export const useViewportStore = create<ViewportState>()((set, get) => ({
   showLid: persisted.showLid ?? true,

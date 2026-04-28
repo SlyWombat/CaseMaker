@@ -54,7 +54,7 @@ describe('Marketing gap #17 — smart cutout layout (printability)', () => {
     // cavityZ ~ 11.6 (zClearance + pcb.z), outerZ = 13.6
     // place port low enough to leave > MIN_BRIDGE_THICKNESS above
     const p = port({ position: { x: 5, y: 0, z: 0 }, size: { x: 14, y: 16, z: 4 } });
-    const cutoutTopWorld = baseCase.floorThickness + p.position.z + p.size.z + p.cutoutMargin;
+    const cutoutTopWorld = baseCase.floorThickness + baseBoard.defaultStandoffHeight + p.position.z + p.size.z + p.cutoutMargin;
     expect(shell.outerZ - cutoutTopWorld).toBeGreaterThan(MIN_BRIDGE_THICKNESS);
 
     const out = applySmartCutoutLayout([p], baseBoard, baseCase);
@@ -68,7 +68,7 @@ describe('Marketing gap #17 — smart cutout layout (printability)', () => {
     const targetTop = shell.outerZ - 1.0;
     const margin = 0.4;
     const positionZ = 0;
-    const sizeZ = targetTop - baseCase.floorThickness - positionZ - margin;
+    const sizeZ = targetTop - baseCase.floorThickness - baseBoard.defaultStandoffHeight - positionZ - margin;
     const p = port({ position: { x: 5, y: 0, z: positionZ }, size: { x: 14, y: 16, z: sizeZ } });
 
     const out = applySmartCutoutLayout([p], baseBoard, baseCase);
@@ -76,7 +76,11 @@ describe('Marketing gap #17 — smart cutout layout (printability)', () => {
     // After extension, world-Z top should be at-or-above outerZ
     const newPort = out.ports[0]!;
     const newTopWorld =
-      baseCase.floorThickness + newPort.position.z + newPort.size.z + newPort.cutoutMargin;
+      baseCase.floorThickness +
+      baseBoard.defaultStandoffHeight +
+      newPort.position.z +
+      newPort.size.z +
+      newPort.cutoutMargin;
     expect(newTopWorld).toBeGreaterThanOrEqual(shell.outerZ);
   });
 
@@ -104,7 +108,7 @@ describe('Marketing gap #17 — smart cutout layout (printability)', () => {
     const target = project.ports[0]!;
     const shell = computeShellDims(project.board, project.case);
     const targetTop = shell.outerZ - 0.8;
-    const newSizeZ = targetTop - project.case.floorThickness - target.position.z - target.cutoutMargin;
+    const newSizeZ = targetTop - project.case.floorThickness - project.board.defaultStandoffHeight - target.position.z - target.cutoutMargin;
     const adjusted = { ...target, size: { ...target.size, z: newSizeZ } };
     const ports = [adjusted, ...project.ports.slice(1)];
     const plan = compileProject({ ...project, ports });

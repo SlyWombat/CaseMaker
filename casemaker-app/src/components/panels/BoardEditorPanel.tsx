@@ -44,6 +44,7 @@ export function BoardEditorPanel() {
   const board = useProjectStore((s) => s.project.board);
   const cloneForEditing = useProjectStore((s) => s.cloneBoardForEditing);
   const patchPcb = useProjectStore((s) => s.patchBoardPcb);
+  const patchMeta = useProjectStore((s) => s.patchBoardMeta);
   const addHole = useProjectStore((s) => s.addMountingHole);
   const removeHole = useProjectStore((s) => s.removeMountingHole);
   const patchHole = useProjectStore((s) => s.patchMountingHole);
@@ -56,7 +57,7 @@ export function BoardEditorPanel() {
       <div className="panel">
         <h3>Board editor</h3>
         <p className="board-meta">
-          Built-in profiles are read-only. Clone to a custom copy to edit dimensions and mounting holes.
+          Built-in profiles are read-only. Clone to a custom copy to edit dimensions, mounting holes, components, and metadata.
         </p>
         <button onClick={cloneForEditing} data-testid="clone-board">
           Clone &amp; edit
@@ -68,6 +69,66 @@ export function BoardEditorPanel() {
   return (
     <div className="panel">
       <h3>Board editor (custom)</h3>
+      <div className="board-meta-grid">
+        <label>
+          Name
+          <input
+            type="text"
+            value={board.name}
+            onChange={(e) => patchMeta({ name: e.target.value })}
+            data-testid="meta-name"
+            style={{ width: '100%' }}
+          />
+        </label>
+        <label>
+          Manufacturer
+          <input
+            type="text"
+            value={board.manufacturer}
+            onChange={(e) => patchMeta({ manufacturer: e.target.value })}
+            data-testid="meta-manufacturer"
+            style={{ width: '100%' }}
+          />
+        </label>
+        <label>
+          Standoff (mm)
+          <NumInput
+            value={board.defaultStandoffHeight}
+            onChange={(v) => patchMeta({ defaultStandoffHeight: v })}
+            testId="meta-standoff"
+          />
+        </label>
+        <label>
+          Z clearance (mm)
+          <NumInput
+            value={board.recommendedZClearance}
+            onChange={(v) => patchMeta({ recommendedZClearance: v })}
+            testId="meta-zclearance"
+          />
+        </label>
+        <label>
+          Cross-reference URL
+          <input
+            type="text"
+            value={board.crossReference ?? ''}
+            onChange={(e) => patchMeta({ crossReference: e.target.value })}
+            data-testid="meta-crossref"
+            placeholder="https://..."
+            style={{ width: '100%' }}
+          />
+        </label>
+        <label>
+          Datasheet revision
+          <input
+            type="text"
+            value={board.datasheetRevision ?? ''}
+            onChange={(e) => patchMeta({ datasheetRevision: e.target.value })}
+            data-testid="meta-revision"
+            placeholder="Rev 1.4 — 2023-08"
+            style={{ width: '100%' }}
+          />
+        </label>
+      </div>
       <div className="pcb-grid">
         <label>
           PCB X (mm)

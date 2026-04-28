@@ -2,58 +2,132 @@
   "id": "rpi-zero-2w",
   "name": "Raspberry Pi Zero 2 W",
   "manufacturer": "Raspberry Pi Ltd",
-  "pcb": { "size": { "x": 65, "y": 30, "z": 1.2 } },
+  "pcb": {
+    "size": {
+      "x": 65,
+      "y": 30,
+      "z": 1.2
+    }
+  },
   "mountingHoles": [
-    { "id": "h1", "x": 3.5, "y": 3.5, "diameter": 2.75 },
-    { "id": "h2", "x": 3.5, "y": 26.5, "diameter": 2.75 },
-    { "id": "h3", "x": 61.5, "y": 3.5, "diameter": 2.75 },
-    { "id": "h4", "x": 61.5, "y": 26.5, "diameter": 2.75 }
+    {
+      "id": "h1",
+      "x": 3.5,
+      "y": 3.5,
+      "diameter": 2.75
+    },
+    {
+      "id": "h2",
+      "x": 3.5,
+      "y": 26.5,
+      "diameter": 2.75
+    },
+    {
+      "id": "h3",
+      "x": 61.5,
+      "y": 3.5,
+      "diameter": 2.75
+    },
+    {
+      "id": "h4",
+      "x": 61.5,
+      "y": 26.5,
+      "diameter": 2.75
+    }
   ],
   "components": [
     {
       "id": "usb-data",
       "kind": "micro-usb",
-      "position": { "x": 54, "y": 30, "z": 1.2 },
-      "size": { "x": 8, "y": 5.6, "z": 2.5 },
+      "position": {
+        "x": 54,
+        "y": 30,
+        "z": 1.2
+      },
+      "size": {
+        "x": 8,
+        "y": 5.6,
+        "z": 2.5
+      },
       "facing": "+y",
       "cutoutMargin": 0.5
     },
     {
       "id": "usb-power",
       "kind": "micro-usb",
-      "position": { "x": 41, "y": 30, "z": 1.2 },
-      "size": { "x": 8, "y": 5.6, "z": 2.5 },
+      "position": {
+        "x": 41,
+        "y": 30,
+        "z": 1.2
+      },
+      "size": {
+        "x": 8,
+        "y": 5.6,
+        "z": 2.5
+      },
       "facing": "+y",
       "cutoutMargin": 0.5
     },
     {
       "id": "hdmi",
       "kind": "micro-hdmi",
-      "position": { "x": 12.4, "y": 30, "z": 1.2 },
-      "size": { "x": 7, "y": 8, "z": 3 },
+      "position": {
+        "x": 12.4,
+        "y": 30,
+        "z": 1.2
+      },
+      "size": {
+        "x": 7,
+        "y": 8,
+        "z": 3
+      },
       "facing": "+y",
       "cutoutMargin": 0.5
     },
     {
       "id": "gpio",
       "kind": "gpio-header",
-      "position": { "x": 32.5, "y": 3.5, "z": 1.2 },
-      "size": { "x": 51, "y": 5, "z": 8.5 },
+      "position": {
+        "x": 32.5,
+        "y": 3.5,
+        "z": 1.2
+      },
+      "size": {
+        "x": 51,
+        "y": 5,
+        "z": 8.5
+      },
       "facing": "+z"
     },
     {
       "id": "sd",
       "kind": "sd-card",
-      "position": { "x": 0, "y": 12, "z": 0 },
-      "size": { "x": 13, "y": 11, "z": 1.4 },
+      "position": {
+        "x": 0,
+        "y": 12,
+        "z": 0
+      },
+      "size": {
+        "x": 13,
+        "y": 11,
+        "z": 1.4
+      },
       "facing": "-x",
       "cutoutMargin": 0.7
     },
     {
       "id": "csi-camera-ribbon",
       "kind": "flat-cable",
-      "position": { "x": 51, "y": 9.5, "z": 1.2 },
-      "size": { "x": 1, "y": 11, "z": 9 },
+      "position": {
+        "x": 51,
+        "y": 9.5,
+        "z": 1.2
+      },
+      "size": {
+        "x": 1,
+        "y": 11,
+        "z": 9
+      },
       "facing": "+z",
       "cutoutMargin": 0.4
     }
@@ -61,5 +135,6 @@
   "defaultStandoffHeight": 3,
   "recommendedZClearance": 5,
   "source": "https://datasheets.raspberrypi.com/rpizero2/raspberry-pi-zero-2-w-mechanical-drawing.pdf",
+  "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/rpi-zero-2w",
   "builtin": true
 }

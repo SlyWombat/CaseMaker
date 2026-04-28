@@ -41,6 +41,7 @@ const componentSchema = z.object({
   facing: facingSchema.optional(),
   cutoutMargin: z.number().nonnegative().optional(),
   cutoutShape: cutoutShapeSchema.optional(),
+  fixtureId: z.string().min(1).optional(),
 });
 
 const mountingPositionSchema = z.object({

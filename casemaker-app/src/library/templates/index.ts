@@ -1,6 +1,9 @@
 import type { Project } from '@/types';
 import { createDefaultProject } from '@/store/projectStore';
 import { autoPortsForBoard } from '@/engine/compiler/portFactory';
+import { autoPortsForHat } from '@/engine/compiler/hats';
+import { getBuiltinHat } from '@/library/hats';
+import { defaultSnapCatchesForCase } from '@/engine/compiler/snapCatches';
 
 export interface ProjectTemplate {
   id: string;
@@ -55,14 +58,15 @@ function arduinoDmxController(): Project {
   p.name = 'Arduino Uno DMX controller';
   p.case.joint = 'screw-down';
   p.case.ventilation = { enabled: false, pattern: 'none', coverage: 0 };
+  const placementId = 'tpl-hat-dmx';
+  const profile = getBuiltinHat('cqrobot-dmx-shield-max485');
   p.hats.push({
-    id: 'tpl-hat-dmx',
+    id: placementId,
     hatId: 'cqrobot-dmx-shield-max485',
     stackIndex: 0,
-    ports: [],
+    ports: profile ? autoPortsForHat(profile, placementId) : [],
     enabled: true,
   });
-  // Auto-fill ports for the HAT
   return p;
 }
 
@@ -71,13 +75,39 @@ function gigaDmxController(): Project {
   p.name = 'GIGA R1 + CQRobot DMX shield';
   p.case.joint = 'screw-down';
   p.case.ventilation = { enabled: true, pattern: 'slots', coverage: 0.5 };
+  const placementId = 'tpl-hat-giga-dmx';
+  const profile = getBuiltinHat('cqrobot-dmx-shield-max485');
+  // Uno-form-factor shield plugs into the Uno-compatible header column at the
+  // -x (USB) end of the Mega/Giga, so the shield's coordinate frame aligns
+  // with the host's coordinate frame at x=0 — no offset. The XLRs sit at the
+  // shield's -x edge, above the Giga's USB / audio cluster on the same -x
+  // wall (stacked in Z because the shield sits ~15 mm above the host PCB).
   p.hats.push({
-    id: 'tpl-hat-giga-dmx',
+    id: placementId,
     hatId: 'cqrobot-dmx-shield-max485',
     stackIndex: 0,
-    ports: [],
+    ports: profile ? autoPortsForHat(profile, placementId) : [],
     enabled: true,
   });
+  return p;
+}
+
+function snapFitTestCube(): Project {
+  // Issue #65 — small printable test fixture for snap-fit cantilever
+  // validation. ~50×40 mm board → case is ~60×50×~12 mm. Prints in roughly
+  // 30 min on PLA, 0.2 mm layers. Use this to physically verify catch geometry.
+  const p = createDefaultProject('snap-test-fixture');
+  p.name = 'Snap-fit test cube';
+  p.case.joint = 'snap-fit';
+  p.case.wallThickness = 2;
+  p.case.lidThickness = 2;
+  p.case.floorThickness = 2;
+  p.case.zClearance = 4;
+  p.case.ventilation = { enabled: false, pattern: 'none', coverage: 0 };
+  // Templates set joint directly (bypassing patchCase), so the auto-populate
+  // path in projectStore.patchCase doesn't fire. Seed the catches here so
+  // the snap geometry actually shows up on first render.
+  p.case.snapCatches = defaultSnapCatchesForCase(p.board, p.case);
   return p;
 }
 
@@ -131,6 +161,13 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
     description: 'ESP32 DevKit V1 in an open flat-lid tray for prototyping.',
     estPrintMinutes: 90,
     build: esp32DevTray,
+  },
+  {
+    id: 'snap-fit-test',
+    name: 'Snap-fit test cube',
+    description: 'Small ~60×50×12 mm test fixture for physically validating snap-fit cantilever geometry.',
+    estPrintMinutes: 30,
+    build: snapFitTestCube,
   },
 ];
 

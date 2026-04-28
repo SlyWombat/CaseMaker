@@ -2,104 +2,219 @@
   "id": "rpi-5",
   "name": "Raspberry Pi 5",
   "manufacturer": "Raspberry Pi Ltd",
-  "pcb": { "size": { "x": 85, "y": 56, "z": 1.6 } },
+  "pcb": {
+    "size": {
+      "x": 85,
+      "y": 56,
+      "z": 1.6
+    }
+  },
   "mountingHoles": [
-    { "id": "h1", "x": 3.5, "y": 3.5, "diameter": 2.7 },
-    { "id": "h2", "x": 3.5, "y": 52.5, "diameter": 2.7 },
-    { "id": "h3", "x": 61.5, "y": 3.5, "diameter": 2.7 },
-    { "id": "h4", "x": 61.5, "y": 52.5, "diameter": 2.7 }
+    {
+      "id": "h1",
+      "x": 3.5,
+      "y": 3.5,
+      "diameter": 2.7
+    },
+    {
+      "id": "h2",
+      "x": 3.5,
+      "y": 52.5,
+      "diameter": 2.7
+    },
+    {
+      "id": "h3",
+      "x": 61.5,
+      "y": 3.5,
+      "diameter": 2.7
+    },
+    {
+      "id": "h4",
+      "x": 61.5,
+      "y": 52.5,
+      "diameter": 2.7
+    }
   ],
   "components": [
     {
       "id": "usbc-power",
       "kind": "usb-c",
-      "position": { "x": 9.5, "y": -1, "z": 1.6 },
-      "size": { "x": 9, "y": 7.5, "z": 3.2 },
+      "position": {
+        "x": 9.5,
+        "y": -1,
+        "z": 1.6
+      },
+      "size": {
+        "x": 9,
+        "y": 7.5,
+        "z": 3.2
+      },
       "facing": "-y",
       "cutoutMargin": 0.5
     },
     {
       "id": "hdmi0",
       "kind": "micro-hdmi",
-      "position": { "x": 26, "y": -1, "z": 1.6 },
-      "size": { "x": 7, "y": 8, "z": 3 },
+      "position": {
+        "x": 26,
+        "y": -1,
+        "z": 1.6
+      },
+      "size": {
+        "x": 7,
+        "y": 8,
+        "z": 3
+      },
       "facing": "-y",
       "cutoutMargin": 0.5
     },
     {
       "id": "hdmi1",
       "kind": "micro-hdmi",
-      "position": { "x": 39, "y": -1, "z": 1.6 },
-      "size": { "x": 7, "y": 8, "z": 3 },
+      "position": {
+        "x": 39,
+        "y": -1,
+        "z": 1.6
+      },
+      "size": {
+        "x": 7,
+        "y": 8,
+        "z": 3
+      },
       "facing": "-y",
       "cutoutMargin": 0.5
     },
     {
       "id": "usb3-a",
       "kind": "usb-a",
-      "position": { "x": 70, "y": 27, "z": 1.6 },
-      "size": { "x": 13.5, "y": 17, "z": 16 },
+      "position": {
+        "x": 70,
+        "y": 27,
+        "z": 1.6
+      },
+      "size": {
+        "x": 13.5,
+        "y": 17,
+        "z": 16
+      },
       "facing": "+x",
       "cutoutMargin": 0.5
     },
     {
       "id": "usb3-b",
       "kind": "usb-a",
-      "position": { "x": 70, "y": 9, "z": 1.6 },
-      "size": { "x": 13.5, "y": 17, "z": 16 },
+      "position": {
+        "x": 70,
+        "y": 9,
+        "z": 1.6
+      },
+      "size": {
+        "x": 13.5,
+        "y": 17,
+        "z": 16
+      },
       "facing": "+x",
       "cutoutMargin": 0.5
     },
     {
       "id": "rj45",
       "kind": "ethernet-rj45",
-      "position": { "x": 70, "y": 45.75, "z": 1.6 },
-      "size": { "x": 16, "y": 16, "z": 13.5 },
+      "position": {
+        "x": 70,
+        "y": 45.75,
+        "z": 1.6
+      },
+      "size": {
+        "x": 16,
+        "y": 16,
+        "z": 13.5
+      },
       "facing": "+x",
       "cutoutMargin": 0.5
     },
     {
       "id": "gpio",
       "kind": "gpio-header",
-      "position": { "x": 32.5, "y": 49, "z": 1.6 },
-      "size": { "x": 51, "y": 5, "z": 8.5 },
+      "position": {
+        "x": 32.5,
+        "y": 49,
+        "z": 1.6
+      },
+      "size": {
+        "x": 51,
+        "y": 5,
+        "z": 8.5
+      },
       "facing": "+z"
     },
     {
       "id": "sd",
       "kind": "sd-card",
-      "position": { "x": 0, "y": 22, "z": 0 },
-      "size": { "x": 12, "y": 11, "z": 1.6 },
+      "position": {
+        "x": 0,
+        "y": 22,
+        "z": 0
+      },
+      "size": {
+        "x": 12,
+        "y": 11,
+        "z": 1.6
+      },
       "facing": "-x",
       "cutoutMargin": 0.7
     },
     {
       "id": "csi-camera-ribbon-0",
       "kind": "flat-cable",
-      "position": { "x": 1.5, "y": 30, "z": 1.6 },
-      "size": { "x": 1, "y": 11, "z": 9 },
+      "position": {
+        "x": 1.5,
+        "y": 30,
+        "z": 1.6
+      },
+      "size": {
+        "x": 1,
+        "y": 11,
+        "z": 9
+      },
       "facing": "+z",
       "cutoutMargin": 0.4
     },
     {
       "id": "csi-camera-ribbon-1",
       "kind": "flat-cable",
-      "position": { "x": 16.5, "y": 30, "z": 1.6 },
-      "size": { "x": 1, "y": 11, "z": 9 },
+      "position": {
+        "x": 16.5,
+        "y": 30,
+        "z": 1.6
+      },
+      "size": {
+        "x": 1,
+        "y": 11,
+        "z": 9
+      },
       "facing": "+z",
       "cutoutMargin": 0.4
     },
     {
       "id": "ufl-wifi-antenna",
       "kind": "antenna-connector",
-      "position": { "x": 78, "y": 51, "z": 1.6 },
-      "size": { "x": 3, "y": 3, "z": 2 },
-      "facing": "+x",
+      "position": {
+        "x": 60,
+        "y": 53,
+        "z": 1.6
+      },
+      "size": {
+        "x": 3,
+        "y": 3,
+        "z": 2
+      },
+      "facing": "+y",
       "cutoutMargin": 0.4
     }
   ],
   "defaultStandoffHeight": 3,
   "recommendedZClearance": 8,
   "source": "https://datasheets.raspberrypi.com/rpi5/raspberry-pi-5-mechanical-drawing.pdf",
+  "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/rpi-5",
   "builtin": true
 }

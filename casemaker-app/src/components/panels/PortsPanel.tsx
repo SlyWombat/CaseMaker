@@ -1,8 +1,11 @@
 import { useProjectStore } from '@/store/projectStore';
+import { PortEditorRow } from './PortEditorRow';
 
 export function PortsPanel() {
   const ports = useProjectStore((s) => s.project.ports);
   const setEnabled = useProjectStore((s) => s.setPortEnabled);
+  const patchPort = useProjectStore((s) => s.patchPort);
+  const resetPort = useProjectStore((s) => s.resetPortToDefault);
   if (ports.length === 0) {
     return (
       <div className="panel">
@@ -16,18 +19,14 @@ export function PortsPanel() {
       <h3>Port cutouts</h3>
       <ul className="port-list">
         {ports.map((p) => (
-          <li key={p.id}>
-            <label>
-              <input
-                type="checkbox"
-                checked={p.enabled}
-                onChange={(e) => setEnabled(p.id, e.target.checked)}
-                data-testid={`port-toggle-${p.sourceComponentId ?? p.id}`}
-              />
-              <span>{p.kind}</span>
-              <span className="port-facing">[{p.facing}]</span>
-            </label>
-          </li>
+          <PortEditorRow
+            key={p.id}
+            port={p}
+            onSetEnabled={(v) => setEnabled(p.id, v)}
+            onPatch={(patch) => patchPort(p.id, patch)}
+            onReset={p.sourceComponentId ? () => resetPort(p.id) : undefined}
+            testIdPrefix={`port-${p.sourceComponentId ?? p.id}`}
+          />
         ))}
       </ul>
     </div>

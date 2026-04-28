@@ -1,6 +1,8 @@
 # Board Visual Assets
 
-Per-board status of bundled 3D models / photos used by the **Board: photo / 3D** viewport mode (issue [#24](https://github.com/SlyWombat/case-maker/issues/24)). When `boardVisualization` is `schematic` (default) the viewport renders a flat colored PCB plus rectangular component blocks derived from `BoardComponent` — that path is always available and is the cutout-driving authority. The other modes are purely informational; if assets are missing the viewport silently falls back to schematic.
+Per-board status of bundled 3D models / photos used by the **Board: photo / 3D** viewport mode (issue [#24](https://github.com/SlyWombat/case-maker/issues/24)). When `boardVisualization` is `schematic` (default) the viewport renders a synthesised placeholder built from `BoardProfile.pcb.size` + per-component bounding boxes (`engine/scene/boardPlaceholder.ts`) — green PCB, mounting-hole rings, and one coloured block per `BoardComponent`. This path is always available for every board and is the cutout-driving authority. The `photo` and `3d` modes are purely informational; when their assets are missing the viewport silently falls back to the schematic placeholder.
+
+Authoritative geometry sources for hand-validating board / HAT JSONs live under `samples/cad-references/` (KiCad templates + Raspberry Pi HAT mechanical PDFs).
 
 ## Asset acquisition priority
 

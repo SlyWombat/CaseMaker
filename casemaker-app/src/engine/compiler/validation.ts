@@ -38,8 +38,15 @@ export function validateScrewDownAlignment(project: Project): ValidationIssue[] 
       const halfY = c.size.y / 2;
       const cx = c.position.x + project.case.wallThickness + project.case.internalClearance;
       const cy = c.position.y + project.case.wallThickness + project.case.internalClearance;
+      // Issue #44 — must include the standoff that lifts the host PCB above
+      // the floor; otherwise componentTopZ is biased low by `standoff` and
+      // most real +z components silently pass the lid-post collision check.
       const componentTopZ =
-        project.case.floorThickness + project.board.pcb.size.z + c.position.z + c.size.z;
+        project.case.floorThickness +
+        standoff +
+        project.board.pcb.size.z +
+        c.position.z +
+        c.size.z;
       if (componentTopZ < boardTopZ + POST_BOARD_CLEARANCE) continue;
       const dx = Math.abs(b.x - cx);
       const dy = Math.abs(b.y - cy);

@@ -2,32 +2,75 @@
   "id": "m5stack-core2",
   "name": "M5Stack Core2",
   "manufacturer": "M5Stack",
-  "pcb": { "size": { "x": 54, "y": 54, "z": 13.2 } },
+  "pcb": {
+    "size": {
+      "x": 54,
+      "y": 54,
+      "z": 13.2
+    }
+  },
   "mountingHoles": [
-    { "id": "h1", "x": 4, "y": 4, "diameter": 3 },
-    { "id": "h2", "x": 50, "y": 4, "diameter": 3 },
-    { "id": "h3", "x": 4, "y": 50, "diameter": 3 },
-    { "id": "h4", "x": 50, "y": 50, "diameter": 3 }
+    {
+      "id": "h1",
+      "x": 4,
+      "y": 4,
+      "diameter": 3
+    },
+    {
+      "id": "h2",
+      "x": 50,
+      "y": 4,
+      "diameter": 3
+    },
+    {
+      "id": "h3",
+      "x": 4,
+      "y": 50,
+      "diameter": 3
+    },
+    {
+      "id": "h4",
+      "x": 50,
+      "y": 50,
+      "diameter": 3
+    }
   ],
   "components": [
     {
       "id": "usb-c",
       "kind": "usb-c",
-      "position": { "x": 23, "y": -1, "z": 4 },
-      "size": { "x": 9, "y": 7.5, "z": 3.2 },
+      "position": {
+        "x": 23,
+        "y": -1,
+        "z": 4
+      },
+      "size": {
+        "x": 9,
+        "y": 7.5,
+        "z": 3.2
+      },
       "facing": "-y",
       "cutoutMargin": 0.5
     },
     {
       "id": "lcd-screen",
       "kind": "custom",
-      "position": { "x": 4, "y": 4, "z": 13.2 },
-      "size": { "x": 46, "y": 35, "z": 0.5 },
+      "position": {
+        "x": 4,
+        "y": 4,
+        "z": 13.2
+      },
+      "size": {
+        "x": 46,
+        "y": 35,
+        "z": 0.5
+      },
       "facing": "+z"
     }
   ],
   "defaultStandoffHeight": 0,
   "recommendedZClearance": 0,
   "source": "https://docs.m5stack.com/en/core/core2",
+  "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/m5stack-core2",
   "builtin": true
 }

@@ -2,72 +2,155 @@
   "id": "jetson-nano-b01",
   "name": "NVIDIA Jetson Nano Dev Kit (B01)",
   "manufacturer": "NVIDIA",
-  "pcb": { "size": { "x": 100, "y": 80, "z": 1.6 } },
+  "pcb": {
+    "size": {
+      "x": 100,
+      "y": 80,
+      "z": 1.6
+    }
+  },
   "mountingHoles": [
-    { "id": "h1", "x": 4, "y": 4, "diameter": 3.2 },
-    { "id": "h2", "x": 96, "y": 4, "diameter": 3.2 },
-    { "id": "h3", "x": 4, "y": 76, "diameter": 3.2 },
-    { "id": "h4", "x": 96, "y": 76, "diameter": 3.2 }
+    {
+      "id": "h1",
+      "x": 4,
+      "y": 4,
+      "diameter": 3.2
+    },
+    {
+      "id": "h2",
+      "x": 96,
+      "y": 4,
+      "diameter": 3.2
+    },
+    {
+      "id": "h3",
+      "x": 4,
+      "y": 76,
+      "diameter": 3.2
+    },
+    {
+      "id": "h4",
+      "x": 96,
+      "y": 76,
+      "diameter": 3.2
+    }
   ],
   "components": [
     {
       "id": "barrel-power",
       "kind": "barrel-jack",
-      "position": { "x": -2, "y": 6, "z": 1.6 },
-      "size": { "x": 14, "y": 10, "z": 11 },
+      "position": {
+        "x": -2,
+        "y": 6,
+        "z": 1.6
+      },
+      "size": {
+        "x": 14,
+        "y": 10,
+        "z": 11
+      },
       "facing": "-x",
       "cutoutMargin": 0.5
     },
     {
       "id": "micro-usb",
       "kind": "micro-usb",
-      "position": { "x": -2, "y": 22, "z": 1.6 },
-      "size": { "x": 8, "y": 5.5, "z": 2.5 },
+      "position": {
+        "x": -2,
+        "y": 22,
+        "z": 1.6
+      },
+      "size": {
+        "x": 8,
+        "y": 5.5,
+        "z": 2.5
+      },
       "facing": "-x",
       "cutoutMargin": 0.5
     },
     {
       "id": "hdmi",
       "kind": "hdmi",
-      "position": { "x": -2, "y": 36, "z": 1.6 },
-      "size": { "x": 14, "y": 16, "z": 6.5 },
+      "position": {
+        "x": -2,
+        "y": 36,
+        "z": 1.6
+      },
+      "size": {
+        "x": 14,
+        "y": 16,
+        "z": 6.5
+      },
       "facing": "-x",
       "cutoutMargin": 0.5
     },
     {
       "id": "displayport",
       "kind": "custom",
-      "position": { "x": -2, "y": 56, "z": 1.6 },
-      "size": { "x": 16, "y": 17, "z": 7.5 },
+      "position": {
+        "x": -2,
+        "y": 56,
+        "z": 1.6
+      },
+      "size": {
+        "x": 16,
+        "y": 17,
+        "z": 7.5
+      },
       "facing": "-x",
       "cutoutMargin": 0.5
     },
     {
       "id": "ethernet",
       "kind": "ethernet-rj45",
-      "position": { "x": 84, "y": 64, "z": 1.6 },
-      "size": { "x": 16, "y": 16, "z": 13.5 },
-      "facing": "+y",
+      "position": {
+        "x": 84,
+        "y": 64,
+        "z": 1.6
+      },
+      "size": {
+        "x": 16,
+        "y": 16,
+        "z": 13.5
+      },
+      "facing": "+x",
       "cutoutMargin": 0.5
     },
     {
       "id": "usb3-cluster",
       "kind": "usb-a",
-      "position": { "x": 84, "y": 32, "z": 1.6 },
-      "size": { "x": 16, "y": 32, "z": 16 },
-      "facing": "+y",
+      "position": {
+        "x": 84,
+        "y": 32,
+        "z": 1.6
+      },
+      "size": {
+        "x": 16,
+        "y": 32,
+        "z": 16
+      },
+      "facing": "+x",
       "cutoutMargin": 0.5
     },
     {
       "id": "gpio",
       "kind": "gpio-header",
-      "position": { "x": 36, "y": 75, "z": 1.6 },
-      "size": { "x": 51, "y": 5, "z": 9 },
+      "position": {
+        "x": 36,
+        "y": 75,
+        "z": 1.6
+      },
+      "size": {
+        "x": 51,
+        "y": 5,
+        "z": 9
+      },
       "facing": "+z"
     }
   ],
   "defaultStandoffHeight": 5,
   "recommendedZClearance": 24,
   "source": "https://developer.nvidia.com/jetson-nano-developer-kit",
+  "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/jetson-nano-b01",
   "builtin": true
 }

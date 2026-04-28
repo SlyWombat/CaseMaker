@@ -23,11 +23,19 @@ describe('Issue #28 — port cutout Z aligns with elevated board (sits on bosses
         const wz = t!.offset[2];
         const expectedFloor = project.case.floorThickness;
         const standoff = project.board.defaultStandoffHeight;
+        const zMin = expectedFloor + standoff + port.position.z - port.cutoutMargin;
+        // Rect cutouts: the outer translate puts the cube at zMin.
+        // Round cutouts (#4): the outer translate puts the centered cylinder
+        // at zMin + (size.z + 2*margin) / 2 so the cylinder axis is centered
+        // on the connector body.
+        const sizeZ = port.size.z + 2 * port.cutoutMargin;
         const expectedWZ =
-          expectedFloor + standoff + port.position.z - port.cutoutMargin;
+          (port.cutoutShape === 'round')
+            ? zMin + sizeZ / 2
+            : zMin;
         expect(
           wz,
-          `${id}/${port.id} cutout Z=${wz}, expected ${expectedWZ}`,
+          `${id}/${port.id} (${port.cutoutShape ?? 'rect'}) cutout Z=${wz}, expected ${expectedWZ}`,
         ).toBeCloseTo(expectedWZ, 4);
       }
     }

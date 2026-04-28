@@ -14,19 +14,21 @@
     {
       "id": "dmx-xlr-female",
       "kind": "custom",
-      "position": { "x": 7, "y": 28, "z": 1.6 },
-      "size": { "x": 24, "y": 26, "z": 24 },
-      "facing": "+y",
-      "cutoutMargin": 0.7,
+      "fixtureId": "xlr-3",
+      "position": { "x": 0, "y": 3, "z": 1.6 },
+      "size": { "x": 20, "y": 24, "z": 24 },
+      "facing": "-x",
+      "cutoutMargin": 0.2,
       "cutoutShape": "round"
     },
     {
       "id": "dmx-xlr-male",
       "kind": "custom",
-      "position": { "x": 34, "y": 28, "z": 1.6 },
-      "size": { "x": 24, "y": 26, "z": 24 },
-      "facing": "+y",
-      "cutoutMargin": 0.7,
+      "fixtureId": "xlr-3",
+      "position": { "x": 0, "y": 27, "z": 1.6 },
+      "size": { "x": 20, "y": 24, "z": 24 },
+      "facing": "-x",
+      "cutoutMargin": 0.2,
       "cutoutShape": "round"
     }
   ],

@@ -6,13 +6,25 @@ import { AssetsPanel } from '@/components/panels/AssetsPanel';
 import { SettingsPanel } from '@/components/panels/SettingsPanel';
 import { HatsPanel } from '@/components/panels/HatsPanel';
 import { TemplatesPanel } from '@/components/panels/TemplatesPanel';
+import { FeaturesPanel } from '@/components/panels/FeaturesPanel';
 import { useProjectStore } from '@/store/projectStore';
 import { listBuiltinBoardIds } from '@/library';
 
 export function Sidebar() {
   const board = useProjectStore((s) => s.project.board);
+  const welcomeMode = useProjectStore((s) => s.welcomeMode);
   const loadBoard = useProjectStore((s) => s.loadBuiltinBoard);
   const ids = listBuiltinBoardIds();
+  if (welcomeMode) {
+    // Issue #69 — hide all per-board panels until the user picks a board /
+    // template via the WelcomeOverlay. Settings stays visible so users can
+    // still tweak global preferences.
+    return (
+      <aside className="sidebar">
+        <SettingsPanel />
+      </aside>
+    );
+  }
   return (
     <aside className="sidebar">
       <TemplatesPanel />
@@ -37,6 +49,7 @@ export function Sidebar() {
       <CasePanel />
       <PortsPanel />
       <HatsPanel />
+      <FeaturesPanel />
       <AssetsPanel />
       <ExportPanel />
       <SettingsPanel />

@@ -5,7 +5,6 @@ import type { CaseParameters, JointType, InsertType } from '@/types';
 const JOINT_OPTIONS: { value: JointType; label: string }[] = [
   { value: 'flat-lid', label: 'Flat lid' },
   { value: 'snap-fit', label: 'Snap-fit' },
-  { value: 'sliding', label: 'Sliding' },
   { value: 'screw-down', label: 'Screw-down' },
 ];
 
@@ -109,6 +108,15 @@ export function CasePanel() {
         step={0.5}
         onChange={set('zClearance')}
         testId="z-clearance"
+      />
+      <Slider
+        label="Extra cavity height (mm)"
+        value={params.extraCavityZ ?? 0}
+        min={0}
+        max={100}
+        step={0.5}
+        onChange={(v) => patch({ extraCavityZ: v })}
+        testId="extra-cavity-z"
       />
       <div className="joint-row">
         <span className="joint-label">Joint type</span>

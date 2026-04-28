@@ -43,18 +43,10 @@ const baseCase: CaseParameters = {
 };
 
 describe('Issue #29 — snap-catch placement and geometry', () => {
-  it('small case (<80mm longest) → 2 catches at the short ends', () => {
-    const board = makeBoard(60, 50); // outer ~65 × 55
-    const catches = defaultSnapCatchesForCase(board, baseCase);
-    expect(catches.length).toBe(2);
-    // longer dim is X → catches on -x and +x walls
-    const walls = new Set(catches.map((c) => c.wall));
-    expect(walls.has('-x')).toBe(true);
-    expect(walls.has('+x')).toBe(true);
-  });
-
-  it('medium case (80-150mm longest) → 4 catches, one per wall', () => {
-    const board = makeBoard(100, 70); // outer ~105 × 75
+  it('small case (every dim ≤ 80 mm) → 4 catches, one per wall', () => {
+    // Issue #73 — every wall always gets at least one catch (no more
+    // "two catches on opposite ends, the long sides flap free").
+    const board = makeBoard(60, 50);
     const catches = defaultSnapCatchesForCase(board, baseCase);
     expect(catches.length).toBe(4);
     const walls = new Set(catches.map((c) => c.wall));
@@ -64,10 +56,20 @@ describe('Issue #29 — snap-catch placement and geometry', () => {
     expect(walls.has('+y')).toBe(true);
   });
 
-  it('large case (>150mm longest) → 6 catches', () => {
+  it('one long side > 80 mm → that side gets 2 catches at thirds, opposite walls get 1 each', () => {
+    const board = makeBoard(100, 70); // outer ~105 × 75 → outerX > 80, outerY <= 80
+    const catches = defaultSnapCatchesForCase(board, baseCase);
+    expect(catches.length).toBe(6); // 2 on -y, 2 on +y, 1 on -x, 1 on +x
+    const yCatches = catches.filter((c) => c.wall === '-y' || c.wall === '+y');
+    const xCatches = catches.filter((c) => c.wall === '-x' || c.wall === '+x');
+    expect(yCatches.length).toBe(4);
+    expect(xCatches.length).toBe(2);
+  });
+
+  it('both sides > 80 mm → 8 catches, 2 per wall', () => {
     const board = makeBoard(180, 120);
     const catches = defaultSnapCatchesForCase(board, baseCase);
-    expect(catches.length).toBe(6);
+    expect(catches.length).toBe(8);
   });
 
   it('disabled catches produce no shell or lid ops', () => {

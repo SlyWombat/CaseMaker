@@ -29,8 +29,19 @@ export function listBuiltinHatIds(): string[] {
   return Array.from(byId.keys());
 }
 
-export function hatsCompatibleWith(boardId: string): HatProfile[] {
-  return builtinHats.filter(
-    (h) => h.compatibleBoards.length === 0 || h.compatibleBoards.includes(boardId),
-  );
+/**
+ * Issue #71 — `clonedFromBoardId` is the original built-in id when the
+ * project's active board is a custom clone. Compatibility matches either
+ * the live id OR the source.
+ */
+export function hatsCompatibleWith(
+  boardId: string,
+  clonedFromBoardId?: string,
+): HatProfile[] {
+  return builtinHats.filter((h) => {
+    if (h.compatibleBoards.length === 0) return true;
+    if (h.compatibleBoards.includes(boardId)) return true;
+    if (clonedFromBoardId && h.compatibleBoards.includes(clonedFromBoardId)) return true;
+    return false;
+  });
 }

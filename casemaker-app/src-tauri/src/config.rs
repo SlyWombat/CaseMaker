@@ -12,6 +12,11 @@ pub struct AppConfig {
     pub port: u16,
     #[serde(default)]
     pub bind_to_all: bool,
+    /// Optional explicit listen IP (e.g. "192.168.10.16"). When set, takes
+    /// precedence over `bind_to_all`. Empty string / None = use the existing
+    /// 127.0.0.1 / 0.0.0.0 behaviour.
+    #[serde(default)]
+    pub host: Option<String>,
 }
 
 fn default_port() -> u16 {
@@ -23,7 +28,26 @@ impl Default for AppConfig {
         Self {
             port: DEFAULT_PORT,
             bind_to_all: false,
+            host: None,
         }
+    }
+}
+
+impl AppConfig {
+    /// Resolve the effective listen address as a string suitable for
+    /// `TcpListener::bind` etc.
+    pub fn listen_addr(&self) -> String {
+        let host = match &self.host {
+            Some(h) if !h.is_empty() => h.clone(),
+            _ => {
+                if self.bind_to_all {
+                    "0.0.0.0".to_string()
+                } else {
+                    "127.0.0.1".to_string()
+                }
+            }
+        };
+        format!("{}:{}", host, self.port)
     }
 }
 

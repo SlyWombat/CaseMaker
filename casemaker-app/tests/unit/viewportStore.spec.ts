@@ -34,12 +34,16 @@ describe('Issue #20 — viewport lid toggle', () => {
     expect(parsed.showLid).toBe(false);
   });
 
-  it('boardVisualization defaults to schematic and cycles to photo, then 3d, then back', () => {
+  it('boardVisualization defaults to schematic and cycles schematic → photo → 3d → none → schematic', () => {
+    // Reset to schematic in case a prior test left it elsewhere.
+    useViewportStore.getState().setBoardVisualization('schematic');
     expect(useViewportStore.getState().boardVisualization).toBe('schematic');
     useViewportStore.getState().cycleBoardVisualization();
     expect(useViewportStore.getState().boardVisualization).toBe('photo');
     useViewportStore.getState().cycleBoardVisualization();
     expect(useViewportStore.getState().boardVisualization).toBe('3d');
+    useViewportStore.getState().cycleBoardVisualization();
+    expect(useViewportStore.getState().boardVisualization).toBe('none');
     useViewportStore.getState().cycleBoardVisualization();
     expect(useViewportStore.getState().boardVisualization).toBe('schematic');
   });

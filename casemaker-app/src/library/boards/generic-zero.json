@@ -1,0 +1,17 @@
+{
+  "id": "generic-zero",
+  "name": "Generic Zero-sized board (blank)",
+  "manufacturer": "Case Maker",
+  "pcb": { "size": { "x": 65, "y": 30, "z": 1.6 } },
+  "mountingHoles": [
+    { "id": "h1", "x": 3.5,  "y": 3.5,  "diameter": 2.75 },
+    { "id": "h2", "x": 61.5, "y": 3.5,  "diameter": 2.75 },
+    { "id": "h3", "x": 3.5,  "y": 26.5, "diameter": 2.75 },
+    { "id": "h4", "x": 61.5, "y": 26.5, "diameter": 2.75 }
+  ],
+  "components": [],
+  "defaultStandoffHeight": 4,
+  "recommendedZClearance": 8,
+  "source": "https://github.com/SlyWombat/case-maker",
+  "builtin": true
+}

@@ -51,4 +51,32 @@ describe('mounting features (#9 Phase 10a)', () => {
     // Outer wrapper is difference (cutouts present from corner-tab holes), inner is union with tabs.
     expect(shell.kind).toBe('difference');
   });
+
+  // Issue #45 — VESA holes must orient along the face's outward normal so
+  // they actually pierce the wall. The earlier code shipped a fixed Z-axis
+  // cylinder for every face; on +y the result was a 20mm slug standing up at
+  // the corner instead of a through-hole.
+  it('rear-vesa-100 (+y face) produces hole cylinders rotated to pierce +y', () => {
+    useProjectStore.getState().applyMountingPreset('rear-vesa-100');
+    const project = useProjectStore.getState().project;
+    const ops = buildMountingFeatureOps(
+      project.mountingFeatures,
+      project.board,
+      project.case,
+    );
+    // Subtractive ops should be 4 holes; each is translate(rotate(cylinder)).
+    // The rotate's degrees should be [-90, 0, 0] for +y facing (axisCylinder).
+    expect(ops.subtractive.length).toBe(4);
+    let foundRotate = false;
+    function visit(op: import('@/engine/compiler/buildPlan').BuildOp): void {
+      if (op.kind === 'rotate') {
+        const [rx, ry, rz] = op.degrees;
+        if (rx === -90 && ry === 0 && rz === 0) foundRotate = true;
+      }
+      if ('child' in op && op.child) visit(op.child);
+      if ('children' in op) for (const c of op.children) visit(c);
+    }
+    ops.subtractive.forEach(visit);
+    expect(foundRotate, 'VESA holes on +y face must have a rotate of -90,0,0').toBe(true);
+  });
 });

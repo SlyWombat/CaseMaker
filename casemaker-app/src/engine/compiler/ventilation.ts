@@ -1,6 +1,10 @@
-import type { CaseParameters, BoardProfile } from '@/types';
+import type { CaseParameters, BoardProfile, HatPlacement, HatProfile } from '@/types';
 import { cube, cylinder, rotate, translate, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
+
+type HatResolver = (id: string) => HatProfile | undefined;
+const NO_HATS: HatPlacement[] = [];
+const NO_RESOLVE: HatResolver = () => undefined;
 
 const SLOT_WIDTH = 3;
 const SLOT_GAP = 3;
@@ -10,8 +14,13 @@ const HEX_RADIUS = 2.2;
 const HEX_GAP = 1.4;
 const HEX_INSET_FROM_EDGE = 5;
 
-function buildSlotCutouts(board: BoardProfile, params: CaseParameters): BuildOp[] {
-  const dims = computeShellDims(board, params);
+function buildSlotCutouts(
+  board: BoardProfile,
+  params: CaseParameters,
+  hats: HatPlacement[],
+  resolveHat: HatResolver,
+): BuildOp[] {
+  const dims = computeShellDims(board, params, hats, resolveHat);
   const { wallThickness: wall, floorThickness: floor } = params;
   const coverage = clamp01(params.ventilation.coverage);
   const slotHeight = (dims.cavityZ - 4) * coverage;
@@ -35,8 +44,13 @@ function buildSlotCutouts(board: BoardProfile, params: CaseParameters): BuildOp[
   return ops;
 }
 
-function buildHexCutouts(board: BoardProfile, params: CaseParameters): BuildOp[] {
-  const dims = computeShellDims(board, params);
+function buildHexCutouts(
+  board: BoardProfile,
+  params: CaseParameters,
+  hats: HatPlacement[],
+  resolveHat: HatResolver,
+): BuildOp[] {
+  const dims = computeShellDims(board, params, hats, resolveHat);
   const { wallThickness: wall, floorThickness: floor } = params;
   const coverage = clamp01(params.ventilation.coverage);
   const usableHeight = (dims.cavityZ - 2 * HEX_INSET_FROM_EDGE) * coverage;
@@ -78,11 +92,13 @@ function buildHexCutouts(board: BoardProfile, params: CaseParameters): BuildOp[]
 export function buildVentilationCutouts(
   board: BoardProfile,
   params: CaseParameters,
+  hats: HatPlacement[] = NO_HATS,
+  resolveHat: HatResolver = NO_RESOLVE,
 ): BuildOp[] {
   if (!params.ventilation.enabled) return [];
   if (params.ventilation.coverage <= 0) return [];
-  if (params.ventilation.pattern === 'slots') return buildSlotCutouts(board, params);
-  if (params.ventilation.pattern === 'hex') return buildHexCutouts(board, params);
+  if (params.ventilation.pattern === 'slots') return buildSlotCutouts(board, params, hats, resolveHat);
+  if (params.ventilation.pattern === 'hex') return buildHexCutouts(board, params, hats, resolveHat);
   return [];
 }
 

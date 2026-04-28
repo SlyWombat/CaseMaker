@@ -3,7 +3,7 @@ import { TEMPLATES, findTemplate } from '@/library/templates';
 import { parseProject, serializeProject } from '@/store/persistence';
 
 describe('Marketing gap #15 — project templates', () => {
-  it('exposes 5 starter templates', () => {
+  it('exposes the starter template set in expected order', () => {
     expect(TEMPLATES.map((t) => t.id)).toEqual([
       'pi-server-tray',
       'pi-poe-stack',
@@ -11,6 +11,7 @@ describe('Marketing gap #15 — project templates', () => {
       'arduino-dmx',
       'giga-dmx-controller',
       'esp32-dev-tray',
+      'snap-fit-test',
     ]);
   });
 
