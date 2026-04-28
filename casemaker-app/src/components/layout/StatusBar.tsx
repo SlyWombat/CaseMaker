@@ -15,6 +15,14 @@ export function StatusBar() {
           {duration.toFixed(0)}ms
         </span>
       )}
+      {/* Issue #80 — version + build date pinned right of the status bar. */}
+      <span
+        className="status-bar__version"
+        title={`Built ${__BUILD_DATE__}`}
+        data-testid="app-version"
+      >
+        v{__APP_VERSION__}
+      </span>
     </footer>
   );
 }

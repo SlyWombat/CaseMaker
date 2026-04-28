@@ -1,7 +1,7 @@
 {
   "name": "casemaker-app",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,7 +16,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "sample:export": "tsx --tsconfig tsconfig.scripts.json scripts/export-sample.ts"
+    "sample:export": "tsx --tsconfig tsconfig.scripts.json scripts/export-sample.ts",
+    "deploy": "node scripts/deploy-cpanel.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

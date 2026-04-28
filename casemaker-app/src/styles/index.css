@@ -708,10 +708,17 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 0 12px;
   background: #14181c;
   border-top: 1px solid #2a2f36;
   font-size: 11px;
   color: #8a94a4;
   font-variant-numeric: tabular-nums;
+}
+.status-bar__version {
+  margin-left: auto;
+  color: #6b7280;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
 }

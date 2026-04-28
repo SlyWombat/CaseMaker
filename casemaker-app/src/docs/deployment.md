@@ -101,6 +101,60 @@ curl -v http://<host>:8000/
 - *Connection timed out* → firewall or NAT dropping. Add the firewall rule (and portproxy if WSL2).
 - *200 OK with HTML* → working; any failure beyond this is in the client browser / DNS.
 
+## Static / shared-hosting (cPanel, Nginx, etc.) — issue #71
+
+The `dist/` build is a pure SPA (no Node runtime needed on the server). Host it on cPanel, plain Apache, Nginx, GitHub Pages — anywhere static files can live.
+
+### One-command deploy via cPanel API (`npm run deploy`)
+
+1. Generate a cPanel API token (cPanel → Manage API Tokens).
+2. Create `.env` at the **repo root** (already gitignored):
+   ```
+   CPANEL_HOST=cpanel.example.com
+   CPANEL_PORT=2083
+   CPANEL_USER=<your-cpanel-user>
+   CPANEL_TOKEN=<the-api-token>
+   WEB_ROOT=/home/<your-cpanel-user>/public_html/casemaker
+   ```
+3. From `casemaker-app/`:
+   ```
+   npm run deploy             # build + upload
+   npm run deploy -- --skip-build   # upload existing dist/ as-is
+   npm run deploy -- --dry-run      # walk + log without uploading
+   ```
+
+The script (`scripts/deploy-cpanel.mjs`) builds, walks `dist/`, recursively `mkdir`s the remote subdirectories, uploads every file via `Fileman::upload_files` with the API-token header, and writes a `.htaccess` for the `.wasm` MIME type and long cache headers. A `VERSION.txt` (matching the in-app StatusBar) is also uploaded so you can confirm what's live by hitting `<host>/casemaker/VERSION.txt`.
+
+### Manual cPanel / generic Apache deploy
+
+If you'd rather drag-and-drop in cPanel File Manager, copy the contents of `dist/` into the destination directory and add a `.htaccess` next to `index.html`:
+
+```apache
+AddType application/wasm .wasm
+
+<FilesMatch "\.(js|wasm|css)$">
+  Header set Cache-Control "max-age=31536000, immutable"
+</FilesMatch>
+
+# SPA fallback — uncomment if/when client routes are added.
+# RewriteEngine On
+# RewriteCond %{REQUEST_FILENAME} !-f
+# RewriteCond %{REQUEST_FILENAME} !-d
+# RewriteRule ^ index.html [L]
+```
+
+### HTTPS strongly recommended
+
+The File System Access API (planned for issue #70) requires HTTPS. cPanel ships free Let's Encrypt certs — enable AutoSSL on the deployed subdirectory before users start saving projects.
+
+### What doesn't carry over from the Tauri build
+
+| Feature | Tauri | Static / shared host |
+|---|---|---|
+| Embedded HTTP server, `--host` / `--port` flags, installer firewall rules | yes | n/a |
+| Native file dialogs (Tauri plugin) | yes | falls back to browser File System Access API on HTTPS, or download/upload on HTTP |
+| Multi-user LAN access via embedded server | yes | replaced by the public host |
+
 ## Asking for a specific deployment
 
 If you need a particular target validated (kiosk PC, shared LAN server, browser-only client served from a Pi), open an issue with the scenario; the answer will be a concrete spec, not a generic "should work."
