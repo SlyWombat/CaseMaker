@@ -771,9 +771,13 @@ export const useProjectStore = create<ProjectState>()(
               if (!draft.case.snapCatches) return;
               const c = draft.case.snapCatches.find((x) => x.id === id);
               if (!c) return;
-              if (typeof patch.enabled === 'boolean') c.enabled = patch.enabled;
-              if (patch.wall) c.wall = patch.wall;
-              if (typeof patch.uPosition === 'number') c.uPosition = patch.uPosition;
+              // Generic field copy so newer schema fields (barbType,
+              // insertionRampDeg, retentionRampDeg from #69) propagate without
+              // a per-field handler. Skip undefined so callers can patch
+              // selectively.
+              for (const [k, v] of Object.entries(patch)) {
+                if (v !== undefined) (c as Record<string, unknown>)[k] = v;
+              }
             }),
           })),
       }),

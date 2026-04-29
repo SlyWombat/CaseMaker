@@ -404,9 +404,27 @@ export function buildSnapCatch(
 ): CatchGeometry | null {
   if (!c.enabled) return null;
   const dims = computeShellDims(board, params, hats, resolveHat);
-  const { barbProtrusion } = SNAP_DEFAULTS;
-  const LIP_HEIGHT = barbProtrusion;
-  const lipTopZ = dims.outerZ;
+  const { armLength, barbLength } = SNAP_DEFAULTS;
+  // Issue #80 — LIP_HEIGHT is determined by arm geometry, not by
+  // barbProtrusion. The lip's bottom (catch face) must align with the
+  // barb's top in the seated position:
+  //
+  //   barb_top_seated = lid_plate_bottom - armLength + barbLength
+  //   lipBottom must equal barb_top_seated
+  //   → lipTop - LIP_HEIGHT = lid_plate_bottom - armLength + barbLength
+  //   → LIP_HEIGHT = (lipTop - lid_plate_bottom) + (armLength - barbLength)
+  //
+  // For a non-recessed lid, lid_plate_bottom and lipTop both = outerZ.
+  // For a recessed lid, the lid drops into a pocket so
+  //   lid_plate_bottom = outerZ - lidThickness
+  // and the lip should sit just below the pocket (which is at
+  // outerZ - lidThickness). In both cases the (lipTop - lid_plate_bottom)
+  // term cancels, so LIP_HEIGHT = armLength - barbLength.
+  const LIP_HEIGHT = armLength - barbLength;
+  // Issue #80 — when the lid is recessed it sits IN a pocket at
+  // (outerZ - lidThickness). The lip on the wall has to drop with it
+  // or the barb engages thin air.
+  const lipTopZ = params.lidRecess ? dims.outerZ - params.lidThickness : dims.outerZ;
   const lipBottomZ = lipTopZ - LIP_HEIGHT;
   const frame = computeWallFrame(c, params, dims.outerX, dims.outerY, lipBottomZ);
   const barbType: BarbType = c.barbType ?? 'hook';

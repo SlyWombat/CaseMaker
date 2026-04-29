@@ -39,21 +39,26 @@ export interface SnapCatch {
  * for the strain derivation.
  */
 export const SNAP_DEFAULTS = {
-  // Issue #76 — printable defaults, sized to two perimeters of 0.4 mm
-  // extrusion (= 0.8 mm wall) so the lip and barb don't have major
-  // overhangs to print without supports. The slope on the lip's top
-  // (issue #75) at 45° (lipHeight = barbProtrusion) prints clean on
-  // typical FDM at 0.2 mm layers without bridging.
-  // Issue #77 — armLength shortened from 12 mm to "just enough to snap"
-  // so the lid arm doesn't dangle into the cavity. 8 mm =
-  //   liftAboveShell (2) + lipHeight (0.8) + barbLength (3) + 2 mm buffer.
-  // Strain at the arm root for 0.8 mm deflection on an 8 mm × 1.6 mm arm
-  // = 1.5 * 0.8 * 1.6 / 64 = 3 %, within PLA's ~5 % elastic budget.
-  armLength: 8,
+  // Issue #80 — geometry was broken by the #77 attempt at a "flush rim"
+  // lip. The lip sat 0.8 mm below the rim with the barb dangling 5 mm
+  // BELOW the lip's catch face, so the snap could never engage —
+  // confirmed in print: lid arms hung deep into the cavity with no
+  // contact. Re-derive arm + lip dims so the barb top sits flush with
+  // the lip's bottom catch face when seated:
+  //
+  //   lipBottomZ (catch face) = lidPlateBottom - (armLength - barbLength)
+  //   → required LIP_HEIGHT = armLength - barbLength
+  //
+  // armLength chosen to keep strain at the root within PLA's ~5%
+  // elastic budget for a 0.8 mm deflection on a 1.6 mm-thick arm:
+  //   strain = 1.5 * 0.8 * 1.6 / L^2 ≤ 0.05  →  L ≥ 6.2 mm  →  L = 6 mm.
+  // barbLength shortened to 2 mm so the cantilever doesn't dangle as
+  // far into the cavity. LIP_HEIGHT then = 6 - 2 = 4 mm.
+  armLength: 6,
   armThickness: 1.6,
   armWidth: 6,
   barbProtrusion: 0.8,
-  barbLength: 3,
+  barbLength: 2,
   pocketDepth: 0.8,
   pocketWidth: 7,
   pocketHeight: 4,
