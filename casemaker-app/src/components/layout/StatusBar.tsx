@@ -1,4 +1,5 @@
 import { useJobStore } from '@/store/jobStore';
+import { DonateButton } from './DonateButton';
 
 export function StatusBar() {
   const status = useJobStore((s) => s.status);
@@ -15,6 +16,7 @@ export function StatusBar() {
           {duration.toFixed(0)}ms
         </span>
       )}
+      <DonateButton variant="status" />
       {/* Issue #80 — version + build date pinned right of the status bar. */}
       <span
         className="status-bar__version"

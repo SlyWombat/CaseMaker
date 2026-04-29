@@ -1,0 +1,33 @@
+<!--
+  Case Maker wordmark — mark + text. Used in:
+   - the persistent app header (replaces the plain <h1>Case Maker</h1>)
+   - the README header
+   - any horizontal placement
+  Width:height ratio ≈ 4.5:1.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 160" role="img" aria-label="Case Maker">
+  <title>Case Maker</title>
+
+  <!-- ===== Mark (re-used from logo-mark.svg, scaled into 144×144) ===== -->
+  <g transform="translate(8 8) scale(0.5625)">
+    <rect x="0" y="0" width="256" height="256" rx="48" fill="#11151a"/>
+    <polygon points="48,168 144,216 144,148 48,100" fill="#5d7796" stroke="#1a2028" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="144,216 208,184 208,116 144,148" fill="#446080" stroke="#1a2028" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="48,100 144,148 208,116 112,68" fill="#7d97b8" stroke="#1a2028" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="64,104 144,144 200,116 120,76" fill="#1a8a4e" stroke="#0a4525" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="100" cy="106" r="4" fill="#d4af37"/>
+    <circle cx="148" cy="118" r="4" fill="#d4af37"/>
+    <polygon points="56,60 152,108 216,76 120,28" fill="#a4bcd8" stroke="#1a2028" stroke-width="3" stroke-linejoin="round" opacity="0.95"/>
+    <rect x="76" y="172" width="22" height="14" rx="2" fill="#11151a"/>
+    <rect x="106" y="178" width="14" height="14" rx="2" fill="#11151a"/>
+  </g>
+
+  <!-- ===== Wordmark ===== -->
+  <text x="184" y="92"
+        font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        font-size="68" font-weight="700" letter-spacing="-1" fill="#e2e6ec">Case Maker</text>
+  <!-- Tagline -->
+  <text x="186" y="124"
+        font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        font-size="20" font-weight="400" fill="#8a94a4" letter-spacing="0.3">Parametric 3D-printable enclosures</text>
+</svg>

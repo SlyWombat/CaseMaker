@@ -43,7 +43,9 @@ export function AppShell() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <h1>Case Maker</h1>
+        <h1 className="app-header__logo">
+          <img src="logo-wordmark.svg" alt="Case Maker" height="36" />
+        </h1>
         <Toolbar />
       </header>
       <main className="app-main">

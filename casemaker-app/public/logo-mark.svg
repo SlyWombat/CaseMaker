@@ -1,0 +1,32 @@
+<!--
+  Case Maker mark — simplified iso view of an open case revealing a PCB.
+  Designed to read at 16×16 (favicon) up to 512×512 (PWA / store icon).
+  Palette pulled from the live app:
+    case shell #88a4cc, PCB #0d6b3a, accent gold #d4af37, dark bg #11151a
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Case Maker">
+  <title>Case Maker</title>
+  <!-- Rounded-square background tile so the mark works on any host bg -->
+  <rect x="0" y="0" width="256" height="256" rx="48" fill="#11151a"/>
+
+  <!-- ===== Case (isometric) ===== -->
+  <!-- Bottom shell: front face -->
+  <polygon points="48,168 144,216 144,148 48,100" fill="#5d7796" stroke="#1a2028" stroke-width="3" stroke-linejoin="round"/>
+  <!-- Bottom shell: right face -->
+  <polygon points="144,216 208,184 208,116 144,148" fill="#446080" stroke="#1a2028" stroke-width="3" stroke-linejoin="round"/>
+  <!-- Bottom shell: top rim (catches the light) -->
+  <polygon points="48,100 144,148 208,116 112,68" fill="#7d97b8" stroke="#1a2028" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- ===== PCB inside (peeking through the open top) ===== -->
+  <polygon points="64,104 144,144 200,116 120,76" fill="#1a8a4e" stroke="#0a4525" stroke-width="2" stroke-linejoin="round"/>
+  <!-- Two header pins on the PCB -->
+  <circle cx="100" cy="106" r="4" fill="#d4af37"/>
+  <circle cx="148" cy="118" r="4" fill="#d4af37"/>
+
+  <!-- ===== Floating lid above (offset, hints "open case") ===== -->
+  <polygon points="56,60 152,108 216,76 120,28" fill="#a4bcd8" stroke="#1a2028" stroke-width="3" stroke-linejoin="round" opacity="0.95"/>
+
+  <!-- ===== Port cutout on the front face (signature detail at all sizes) ===== -->
+  <rect x="76" y="172" width="22" height="14" rx="2" fill="#11151a"/>
+  <rect x="106" y="178" width="14" height="14" rx="2" fill="#11151a"/>
+</svg>

@@ -1,0 +1,58 @@
+<!--
+  GitHub social card / Open Graph image — 1280×640 (2:1).
+  Lands when the repo URL is shared on Twitter, LinkedIn, Slack, etc.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img" aria-label="Case Maker">
+  <title>Case Maker — parametric 3D-printable enclosures</title>
+
+  <!-- ===== Background gradient ===== -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#1a2028"/>
+    </linearGradient>
+    <pattern id="grid" x="0" y="0" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M0 0 L64 0 M0 0 L0 64" stroke="#1f262e" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect width="1280" height="640" fill="url(#grid)"/>
+
+  <!-- ===== Mark — large, on the right ===== -->
+  <g transform="translate(720 80) scale(2)">
+    <rect x="0" y="0" width="256" height="256" rx="48" fill="#11151a"/>
+    <polygon points="48,168 144,216 144,148 48,100" fill="#5d7796" stroke="#1a2028" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="144,216 208,184 208,116 144,148" fill="#446080" stroke="#1a2028" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="48,100 144,148 208,116 112,68" fill="#7d97b8" stroke="#1a2028" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="64,104 144,144 200,116 120,76" fill="#1a8a4e" stroke="#0a4525" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="100" cy="106" r="4" fill="#d4af37"/>
+    <circle cx="148" cy="118" r="4" fill="#d4af37"/>
+    <polygon points="56,60 152,108 216,76 120,28" fill="#a4bcd8" stroke="#1a2028" stroke-width="3" stroke-linejoin="round" opacity="0.95"/>
+    <rect x="76" y="172" width="22" height="14" rx="2" fill="#11151a"/>
+    <rect x="106" y="178" width="14" height="14" rx="2" fill="#11151a"/>
+  </g>
+
+  <!-- ===== Headline + tagline ===== -->
+  <text x="80" y="248"
+        font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        font-size="92" font-weight="800" letter-spacing="-2" fill="#e2e6ec">Case Maker</text>
+  <text x="84" y="310"
+        font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        font-size="34" font-weight="500" fill="#8a94a4">Parametric 3D-printable enclosures</text>
+  <text x="84" y="356"
+        font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        font-size="34" font-weight="500" fill="#8a94a4">for ESP32, Arduino, Raspberry Pi, your custom board.</text>
+
+  <!-- ===== Feature bullets ===== -->
+  <g font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+     font-size="24" fill="#cbd5e1">
+    <text x="84" y="448">▸ 13 built-in boards · DMX / display / fan / antenna HATs</text>
+    <text x="84" y="486">▸ Snap-fit, screw-down, flat-lid joints</text>
+    <text x="84" y="524">▸ Exports STL / 3MF — slicer-ready in seconds</text>
+  </g>
+
+  <!-- ===== URL footer ===== -->
+  <text x="84" y="600"
+        font-family="ui-monospace, 'SF Mono', Menlo, monospace"
+        font-size="22" fill="#6b7280">github.com/SlyWombat/CaseMaker</text>
+</svg>

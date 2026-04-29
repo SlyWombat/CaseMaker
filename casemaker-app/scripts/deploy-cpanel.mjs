@@ -92,12 +92,33 @@ console.log(`Mode: ${DRY_RUN ? 'DRY RUN' : 'LIVE'}${SKIP_BUILD ? ' (skip build)'
 console.log();
 
 // ---------- 1. build ----------
+// Issue #82 — derive the public URL prefix from WEB_ROOT so vite emits
+// /casemaker/assets/... in index.html instead of root-absolute /assets/....
+// `/home/USER/public_html/casemaker` → '/casemaker/'.
+const PUB_HTML_RE = /\/public_html(\/.*)?$/;
+const m = env.WEB_ROOT.match(PUB_HTML_RE);
+const sub = (m?.[1] ?? '').replace(/\/+$/, '');
+const DEPLOY_BASE = sub ? `${sub}/` : '/';
+console.log(`▸ Vite base for this deploy: ${DEPLOY_BASE}`);
+
+// Issue #72 — pass DEPLOY_TARGET + DONATE_URL into the build env so the
+// production-only Donate button gets wired up. Empty values keep the button
+// hidden in dev / Tauri / GitHub Pages builds.
+const DEPLOY_TARGET = 'electricrv';
+const DONATE_URL = env.DONATE_URL ?? '';
+if (DONATE_URL) {
+  console.log(`▸ Donate button enabled: ${DONATE_URL}`);
+} else {
+  console.warn('▸ DONATE_URL not set in .env — Donate button will be hidden.');
+}
+
 if (!SKIP_BUILD) {
   console.log('▸ Building dist/...');
   const result = spawnSync('npm', ['run', 'build'], {
     cwd: APP_DIR,
     stdio: 'inherit',
     shell: process.platform === 'win32',
+    env: { ...process.env, DEPLOY_BASE, DEPLOY_TARGET, DONATE_URL },
   });
   if (result.status !== 0) {
     console.error('error: build failed');
@@ -169,6 +190,9 @@ async function uploadOne(localPath, remoteDir, name) {
   const buf = await readFile(localPath);
   const fd = new FormData();
   fd.append('dir', remoteDir);
+  // overwrite=1 is required for re-deploys; without it the second deploy
+  // fails on every file already in place (index.html, .htaccess, etc.).
+  fd.append('overwrite', '1');
   fd.append('file-1', new Blob([buf]), name);
   const url = new URL('/execute/Fileman/upload_files', baseUrl);
   const r = await fetch(url, { method: 'POST', headers: { Authorization: auth }, body: fd });

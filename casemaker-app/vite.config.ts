@@ -32,11 +32,25 @@ try {
 const APP_VERSION = `${pkg.version}+${gitSha}`;
 const BUILD_DATE = new Date().toISOString().slice(0, 10);
 
+// Issue #82 — DEPLOY_BASE controls the public URL prefix the bundle uses for
+// `<script src=...>` and `import()` chunk URLs. cPanel deploy script sets it
+// to '/casemaker/' so the SPA can live at electricrv.ca/casemaker/. Default
+// '/' for dev / Tauri / GitHub Pages root deploys.
+const BASE = process.env.DEPLOY_BASE ?? '/';
+
+// Issue #72 — DEPLOY_TARGET + DONATE_URL gate the in-app Donate button to the
+// electricrv.ca production deploy. Empty in dev, Tauri, GitHub Pages, etc.
+const DEPLOY_TARGET = process.env.DEPLOY_TARGET ?? '';
+const DONATE_URL = process.env.DONATE_URL ?? '';
+
 export default defineConfig({
+  base: BASE,
   plugins: [react(), wasm()],
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
     __BUILD_DATE__: JSON.stringify(BUILD_DATE),
+    __DEPLOY_TARGET__: JSON.stringify(DEPLOY_TARGET),
+    __DONATE_URL__: JSON.stringify(DONATE_URL),
   },
   resolve: {
     alias: { '@': path.resolve(__dirname, 'src') },

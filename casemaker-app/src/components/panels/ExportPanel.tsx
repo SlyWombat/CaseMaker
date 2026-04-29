@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { triggerExport, type ExportFormat } from '@/engine/exportTrigger';
+import { DonateButton } from '@/components/layout/DonateButton';
 
 const FORMATS: { value: ExportFormat; label: string; testId: string }[] = [
   { value: 'stl-binary', label: 'STL (binary)', testId: 'export-stl' },
@@ -9,10 +10,12 @@ const FORMATS: { value: ExportFormat; label: string; testId: string }[] = [
 
 export function ExportPanel() {
   const [busy, setBusy] = useState(false);
+  const [exported, setExported] = useState(false);
   const onClick = (format: ExportFormat) => async () => {
     setBusy(true);
     try {
       await triggerExport(format);
+      setExported(true);
     } finally {
       setBusy(false);
     }
@@ -32,6 +35,7 @@ export function ExportPanel() {
           </button>
         ))}
       </div>
+      {exported && <DonateButton variant="export" />}
     </div>
   );
 }
