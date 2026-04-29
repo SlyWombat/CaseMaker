@@ -5,24 +5,18 @@ import type {
   HatProfile,
   SnapCatch,
   SnapWall,
+  BarbType,
 } from '@/types';
 import { SNAP_DEFAULTS } from '@/types/snap';
-import { cube, difference, mesh, translate, union, type BuildOp } from './buildPlan';
+import { cube, cylinder, mesh, rotate, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
 
 /**
  * Issue #75 — build a triangular-prism wedge for the inside-wall snap lip.
  *
- * The wedge has a flat horizontal base (the catch face — the bottom of the
- * lip, where the lid's barb engages from below) and a sloping top (the
- * insertion ramp — runs from the wall surface at lipTop down to the lip
- * tip at lipBottom). The slope deflects the descending lid barb inward as
- * it passes the lip, so the lid can be pushed down without the barb
- * jamming into a square edge.
- *
- * `wallNormal` is the OUTWARD direction of the wall (e.g. (-1,0,0) for the
- * -x wall). The prism's "wall" face sits at the case's inner wall surface
- * and the "tip" extends inward by `protrusion`.
+ * The wedge has a flat horizontal base (the catch face) and a sloping top (the
+ * insertion ramp), running from lipTop at the wall down to lipBottom at the
+ * inward tip. Used for hook + asymmetric-ramp + half-round catches.
  */
 function buildLipWedge(
   origin: { x: number; y: number; z: number },
@@ -32,68 +26,70 @@ function buildLipWedge(
   width: number,
   height: number,
 ): BuildOp {
-  // Local frame: u = along the wall (pocket width direction), n = inward
-  // (away from wall, toward cavity), z = up. We build 6 vertices in world
-  // coords directly using `origin` as the (wall-surface, u-min, lipBottom)
-  // corner.
-  //
-  //  Cross-section in (n, z) plane (wall on left at n=0):
-  //
-  //    (0, height) - top-wall corner
-  //         |\
-  //         | \
-  //         |  \  slope (insertion ramp)
-  //         |   \
-  //         |____\ (protrusion, 0) - lip tip on bottom
-  //  (0, 0)         catch face is the horizontal bottom edge
-  //
-  // Extruded along u for `width`.
   const n = wallAxis === 'x' ? 'x' : 'y';
-  const t = wallAxis === 'x' ? 'y' : 'x'; // tangent (along wall)
-  // Vertices: name them by (u-end, n-position, z-position)
-  //   A0 = (u=0, n=0, z=0)  wall-bottom-front
-  //   A1 = (u=W, n=0, z=0)  wall-bottom-back
-  //   B0 = (u=0, n=protr, z=0) tip-bottom-front
-  //   B1 = (u=W, n=protr, z=0) tip-bottom-back
-  //   C0 = (u=0, n=0, z=h) wall-top-front
-  //   C1 = (u=W, n=0, z=h) wall-top-back
+  const t = wallAxis === 'x' ? 'y' : 'x';
   const positions: number[] = [];
   function pushVert(uOff: number, nOff: number, zOff: number) {
     const dx = (n === 'x' ? wallNormalSign * -nOff : 0) + (t === 'x' ? uOff : 0);
     const dy = (n === 'y' ? wallNormalSign * -nOff : 0) + (t === 'y' ? uOff : 0);
-    // wallNormalSign positive (+x wall) means the wall normal points +x =
-    // outward → "inward" is -x → nOff subtracted from origin.x gives a
-    // smaller x. For -x wall (sign = -1), inward is +x → -1 * -nOff = +nOff.
-    // The expression above handles both cases: dx for n='x' is
-    // wallNormalSign * -nOff (which is +nOff for sign=-1 and -nOff for
-    // sign=+1).
     positions.push(origin.x + dx, origin.y + dy, origin.z + zOff);
   }
-  pushVert(0, 0, 0);            // 0: A0
-  pushVert(width, 0, 0);        // 1: A1
-  pushVert(0, protrusion, 0);   // 2: B0
-  pushVert(width, protrusion, 0); // 3: B1
-  pushVert(0, 0, height);       // 4: C0
-  pushVert(width, 0, height);   // 5: C1
-
-  // 8 triangles — winding chosen so outward normals point AWAY from the
-  // prism interior. Manifold tolerates either winding for solid input but
-  // we follow standard CCW-from-outside.
-  // Bottom (z = 0, normal = -z): A0, B0, B1, A0, B1, A1
-  // Wall  (n = 0, normal = wallNormalSign on the wall axis):
-  //        A0, A1, C1, A0, C1, C0
-  // Slope (the hypotenuse, normal points up-and-inward):
-  //        B0, B1, C1, B0, C1, C0  (need to verify winding)
-  // Front cap (u = 0, normal = -t): A0, C0, B0
-  // Back cap  (u = W, normal = +t): A1, B1, C1
+  pushVert(0, 0, 0);
+  pushVert(width, 0, 0);
+  pushVert(0, protrusion, 0);
+  pushVert(width, protrusion, 0);
+  pushVert(0, 0, height);
+  pushVert(width, 0, height);
   const indices: number[] = [
-    0, 2, 3,  0, 3, 1,   // bottom
-    0, 1, 5,  0, 5, 4,   // wall face
-    2, 5, 3,  2, 4, 5,   // slope
-    0, 4, 2,             // front cap
-    1, 3, 5,             // back cap
+    0, 2, 3,  0, 3, 1,
+    0, 1, 5,  0, 5, 4,
+    2, 5, 3,  2, 4, 5,
+    0, 4, 2,
+    1, 3, 5,
   ];
+  return mesh(new Float32Array(positions), new Uint32Array(indices));
+}
 
+/**
+ * Issue #69 — symmetric (diamond / triangular-prism) lip for symmetric-ramp
+ * catches. Both top and bottom are sloped; the catch face becomes a sharp
+ * edge at mid-height. Equal insertion and removal force.
+ */
+function buildLipSymmetricPrism(
+  origin: { x: number; y: number; z: number },
+  wallAxis: 'x' | 'y',
+  wallNormalSign: 1 | -1,
+  protrusion: number,
+  width: number,
+  height: number,
+): BuildOp {
+  const n = wallAxis === 'x' ? 'x' : 'y';
+  const t = wallAxis === 'x' ? 'y' : 'x';
+  const positions: number[] = [];
+  function pushVert(uOff: number, nOff: number, zOff: number) {
+    const dx = (n === 'x' ? wallNormalSign * -nOff : 0) + (t === 'x' ? uOff : 0);
+    const dy = (n === 'y' ? wallNormalSign * -nOff : 0) + (t === 'y' ? uOff : 0);
+    positions.push(origin.x + dx, origin.y + dy, origin.z + zOff);
+  }
+  // Cross-section is a triangle: (n=0, z=0), (n=protrusion, z=h/2), (n=0, z=h).
+  pushVert(0, 0, 0);            // 0: bottom-wall-front
+  pushVert(width, 0, 0);        // 1: bottom-wall-back
+  pushVert(0, protrusion, height / 2); // 2: tip-front
+  pushVert(width, protrusion, height / 2); // 3: tip-back
+  pushVert(0, 0, height);       // 4: top-wall-front
+  pushVert(width, 0, height);   // 5: top-wall-back
+  const indices: number[] = [
+    // wall face (n=0)
+    0, 1, 5,  0, 5, 4,
+    // bottom slope (from wall-bottom up to tip)
+    0, 2, 3,  0, 3, 1,
+    // top slope (from tip up to wall-top)
+    2, 4, 5,  2, 5, 3,
+    // front cap
+    0, 4, 2,
+    // back cap
+    1, 3, 5,
+  ];
   return mesh(new Float32Array(positions), new Uint32Array(indices));
 }
 
@@ -101,12 +97,6 @@ type HatResolver = (id: string) => HatProfile | undefined;
 const NO_HATS: HatPlacement[] = [];
 const NO_RESOLVE: HatResolver = () => undefined;
 
-/**
- * Default snap-catch placement based on case longest dimension (issue #29):
- *   < 80 mm  → 2 catches (midpoint of each short end)
- *   80–150 → 4 catches (midpoint of each wall)
- *   > 150  → 6 catches (short ends + thirds along the long walls)
- */
 export function defaultSnapCatchesForCase(
   board: BoardProfile,
   params: CaseParameters,
@@ -116,13 +106,7 @@ export function defaultSnapCatchesForCase(
   const dims = computeShellDims(board, params, hats, resolveHat);
   const out: SnapCatch[] = [];
   const mid = (n: number) => n / 2;
-  // Issue #73 — every wall always gets at least one catch (no more "two
-  // catches on opposite ends, the long sides flap free"). Long sides longer
-  // than ~80 mm get two catches at thirds. Discrete points only — no
-  // continuous lid-lip ring (also issue #73).
   const LONG_SIDE_THRESHOLD = 80;
-
-  // -x and +x walls: catches positioned along Y
   if (dims.outerY > LONG_SIDE_THRESHOLD) {
     out.push({ id: 'snap-mx-1', wall: '-x', uPosition: dims.outerY / 3, enabled: true });
     out.push({ id: 'snap-mx-2', wall: '-x', uPosition: (2 * dims.outerY) / 3, enabled: true });
@@ -132,7 +116,6 @@ export function defaultSnapCatchesForCase(
     out.push({ id: 'snap-mx', wall: '-x', uPosition: mid(dims.outerY), enabled: true });
     out.push({ id: 'snap-px', wall: '+x', uPosition: mid(dims.outerY), enabled: true });
   }
-  // -y and +y walls: catches positioned along X
   if (dims.outerX > LONG_SIDE_THRESHOLD) {
     out.push({ id: 'snap-my-1', wall: '-y', uPosition: dims.outerX / 3, enabled: true });
     out.push({ id: 'snap-my-2', wall: '-y', uPosition: (2 * dims.outerX) / 3, enabled: true });
@@ -146,25 +129,272 @@ export function defaultSnapCatchesForCase(
 }
 
 interface CatchGeometry {
-  /** Issue #70 — small lip extruded INWARD from the inside of the case wall
-   *  (additive, world coords). The lid's barb catches under this lip. */
   lip: BuildOp;
-  /** Cantilever arm + barb attached under the lid (additive, lid-local Z). */
   armBarb: BuildOp;
 }
 
-/**
- * Build geometry for one snap catch.
- *
- * The case carries an INSIDE lip — a small additive bump on the inner wall
- * surface near the rim. The lid carries the cantilever arm with a barb at
- * its tip. During assembly the barb deflects outward to clear the lip, then
- * springs back inward and is captured under the lip's flat bottom face.
- *
- * Compared to the original through-wall pocket implementation: no holes are
- * cut through the case wall (better aesthetic + waterproofing), and the
- * snap features all live on the parts that mate, not in free air.
- */
+/** Per-wall frame: where the inside wall surface is, which way is "inward",
+ *  and how to orient features along the wall. Computed once per catch. */
+interface WallFrame {
+  /** World-coord origin of the wedge (wall surface, u-min, lipBottom). */
+  lipOrigin: { x: number; y: number; z: number };
+  /** Wall normal axis ('x' if wall is ±x, 'y' if wall is ±y). */
+  wallAxis: 'x' | 'y';
+  /** +1 if outward normal is +axis, -1 if −axis. */
+  wallNormalSign: 1 | -1;
+  /** World-coord position of the cantilever arm's bbox-min corner. */
+  armOrigin: { x: number; y: number; z: number };
+  /** Arm bbox size (n is wall-normal, t is along-wall, z is height). */
+  armSize: { n: number; t: number; z: number };
+  /** Barb world-coord bbox-min and size — same convention as arm. */
+  barbOrigin: { x: number; y: number; z: number };
+  barbSize: { n: number; t: number; z: number };
+}
+
+function computeWallFrame(
+  c: SnapCatch,
+  params: CaseParameters,
+  outerX: number,
+  outerY: number,
+  lipBottomZ: number,
+): WallFrame {
+  const { wallThickness: wall } = params;
+  const { armLength, armThickness, armWidth, barbProtrusion, barbLength, pocketWidth } = SNAP_DEFAULTS;
+  const ARM_INSET = 0.3;
+  const armZ = -armLength;
+  const wallId: SnapWall = c.wall;
+  switch (wallId) {
+    case '-x': {
+      const armX = wall + barbProtrusion + ARM_INSET;
+      return {
+        lipOrigin: { x: wall, y: c.uPosition - pocketWidth / 2, z: lipBottomZ },
+        wallAxis: 'x',
+        wallNormalSign: -1,
+        armOrigin: { x: armX, y: c.uPosition - armWidth / 2, z: armZ },
+        armSize: { n: armThickness, t: armWidth, z: armLength },
+        barbOrigin: { x: armX - barbProtrusion, y: c.uPosition - armWidth / 2, z: armZ },
+        barbSize: { n: barbProtrusion, t: armWidth, z: barbLength },
+      };
+    }
+    case '+x': {
+      const innerX = outerX - wall;
+      const armX = innerX - barbProtrusion - ARM_INSET - armThickness;
+      return {
+        lipOrigin: { x: innerX, y: c.uPosition - pocketWidth / 2, z: lipBottomZ },
+        wallAxis: 'x',
+        wallNormalSign: +1,
+        armOrigin: { x: armX, y: c.uPosition - armWidth / 2, z: armZ },
+        armSize: { n: armThickness, t: armWidth, z: armLength },
+        barbOrigin: { x: armX + armThickness, y: c.uPosition - armWidth / 2, z: armZ },
+        barbSize: { n: barbProtrusion, t: armWidth, z: barbLength },
+      };
+    }
+    case '-y': {
+      const armY = wall + barbProtrusion + ARM_INSET;
+      return {
+        lipOrigin: { x: c.uPosition - pocketWidth / 2, y: wall, z: lipBottomZ },
+        wallAxis: 'y',
+        wallNormalSign: -1,
+        armOrigin: { x: c.uPosition - armWidth / 2, y: armY, z: armZ },
+        armSize: { n: armThickness, t: armWidth, z: armLength },
+        barbOrigin: { x: c.uPosition - armWidth / 2, y: armY - barbProtrusion, z: armZ },
+        barbSize: { n: barbProtrusion, t: armWidth, z: barbLength },
+      };
+    }
+    case '+y': {
+      const innerY = outerY - wall;
+      const armY = innerY - barbProtrusion - ARM_INSET - armThickness;
+      return {
+        lipOrigin: { x: c.uPosition - pocketWidth / 2, y: innerY, z: lipBottomZ },
+        wallAxis: 'y',
+        wallNormalSign: +1,
+        armOrigin: { x: c.uPosition - armWidth / 2, y: armY, z: armZ },
+        armSize: { n: armThickness, t: armWidth, z: armLength },
+        barbOrigin: { x: c.uPosition - armWidth / 2, y: armY + armThickness, z: armZ },
+        barbSize: { n: barbProtrusion, t: armWidth, z: barbLength },
+      };
+    }
+  }
+}
+
+/** Build the cantilever arm and translate-place a pre-built barb mesh. */
+function buildArm(frame: WallFrame): BuildOp {
+  const sz: [number, number, number] =
+    frame.wallAxis === 'x'
+      ? [frame.armSize.n, frame.armSize.t, frame.armSize.z]
+      : [frame.armSize.t, frame.armSize.n, frame.armSize.z];
+  return translate([frame.armOrigin.x, frame.armOrigin.y, frame.armOrigin.z], cube(sz));
+}
+
+// ---------- Per-barb-type builders (issue #69) ----------
+//
+// Each builder returns the lip (additive on case wall) and the barb (additive
+// under the lid arm). The arm itself is built once outside and unioned in.
+
+function buildHookBarb(frame: WallFrame): BuildOp {
+  // Rectangular block at the arm tip. The lip's flat catch face engages the
+  // barb's flat top face — high retention, sloped insertion via the lip wedge.
+  const sz: [number, number, number] =
+    frame.wallAxis === 'x'
+      ? [frame.barbSize.n, frame.barbSize.t, frame.barbSize.z]
+      : [frame.barbSize.t, frame.barbSize.n, frame.barbSize.z];
+  return translate([frame.barbOrigin.x, frame.barbOrigin.y, frame.barbOrigin.z], cube(sz));
+}
+
+function buildHookLip(frame: WallFrame, height: number): BuildOp {
+  const { barbProtrusion, pocketWidth } = SNAP_DEFAULTS;
+  return buildLipWedge(
+    frame.lipOrigin,
+    frame.wallAxis,
+    frame.wallNormalSign,
+    barbProtrusion,
+    pocketWidth,
+    height,
+  );
+}
+
+function buildAsymmetricRampBarb(frame: WallFrame): BuildOp {
+  // Cube barb with a chamfered entry face. We approximate the chamfer as a
+  // shorter, narrower cube that still presents a flat retention face.
+  // Visually distinct from hook because the barb is shorter (lower retention
+  // edge) and the entry face isn't hidden under a wedge — the asymmetry comes
+  // from the *barb*, not just the lip.
+  const sz: [number, number, number] =
+    frame.wallAxis === 'x'
+      ? [frame.barbSize.n, frame.barbSize.t, frame.barbSize.z * 0.7]
+      : [frame.barbSize.t, frame.barbSize.n, frame.barbSize.z * 0.7];
+  return translate([frame.barbOrigin.x, frame.barbOrigin.y, frame.barbOrigin.z], cube(sz));
+}
+
+/** Triangular prism barb: full protrusion at center, tapered top + bottom. */
+function buildSymmetricRampBarb(frame: WallFrame): BuildOp {
+  // Build a tri-prism mesh in local (n, t, z) space, then translate to barb origin.
+  // The prism extrudes along t for armWidth; cross-section in (n, z):
+  //   (0, 0) - (n_max, h/2) - (0, h)
+  const nMax = frame.barbSize.n;
+  const tLen = frame.barbSize.t;
+  const h = frame.barbSize.z;
+  // Local origin will sit at barbOrigin (the bbox-min corner of the rectangular
+  // hook barb). For ±x walls the n-axis aligns with x; for ±y walls, with y.
+  const origin = frame.barbOrigin;
+  const wallNormalSign = frame.wallNormalSign;
+  const positions: number[] = [];
+  function pushVert(uOff: number, nOff: number, zOff: number) {
+    if (frame.wallAxis === 'x') {
+      // n is along x (with sign), t is along y, z is up.
+      // For the lid-side barb origin already accounts for which side of the
+      // arm; here we offset INWARD by nOff. wallNormalSign +1 means +x wall →
+      // inward is -x; -1 means -x wall → inward is +x. So x_offset = -wallNormalSign * nOff.
+      positions.push(origin.x - wallNormalSign * nOff, origin.y + uOff, origin.z + zOff);
+    } else {
+      positions.push(origin.x + uOff, origin.y - wallNormalSign * nOff, origin.z + zOff);
+    }
+  }
+  // Vertices (cross-section: tri); extruded along u for tLen.
+  pushVert(0, 0, 0);            // 0: u=0, base-wall
+  pushVert(tLen, 0, 0);         // 1: u=W, base-wall
+  pushVert(0, nMax, h / 2);     // 2: u=0, tip
+  pushVert(tLen, nMax, h / 2);  // 3: u=W, tip
+  pushVert(0, 0, h);            // 4: u=0, top-wall
+  pushVert(tLen, 0, h);         // 5: u=W, top-wall
+  const indices: number[] = [
+    0, 1, 5,  0, 5, 4,           // wall face
+    0, 2, 3,  0, 3, 1,           // bottom slope
+    2, 4, 5,  2, 5, 3,           // top slope
+    0, 4, 2,                     // front cap
+    1, 3, 5,                     // back cap
+  ];
+  return mesh(new Float32Array(positions), new Uint32Array(indices));
+}
+
+function buildHalfRoundBarb(frame: WallFrame): BuildOp {
+  // Half-cylinder along the arm's t-axis. Use a full cylinder oriented along t,
+  // then position so its axis sits at the wall surface — only the inward half
+  // protrudes. cylinder() builds along +Z, so we rotate to align with t.
+  const radius = Math.max(frame.barbSize.n, frame.barbSize.z / 2);
+  const length = frame.barbSize.t;
+  // Cylinder spans Z from 0 to length. Orient along the wall tangent:
+  //   +x walls → tangent is y → rotate so cylinder's axis is along +y.
+  //   ±y walls → tangent is x → rotate so cylinder's axis is along +x.
+  const cyl = cylinder(length, radius, 24);
+  const oriented =
+    frame.wallAxis === 'x' ? rotate([90, 0, 0], cyl) : rotate([0, 90, 0], cyl);
+  // Center the cylinder at (n=0, z=h/2) where n is wall-normal-inward.
+  const cz = frame.barbOrigin.z + frame.barbSize.z / 2;
+  if (frame.wallAxis === 'x') {
+    // After rotate([90,0,0]) cylinder runs along +y starting at y=cylinderOrigin
+    // and z stays. We want the cylinder's circular center on the wall surface,
+    // which means x at the wall (barbOrigin.x + n_inward_offset_to_hit_wall).
+    // Place cylinder center at (cx, ty_min, cz) where cx = barbOrigin.x +
+    // wallNormalSign*0 (i.e. the wall surface that the barb origin already
+    // sits at, since barbOrigin's n-side is set up for the cube barb).
+    // For a half-cylinder we want the round side facing inward.
+    const cx = frame.barbOrigin.x; // wall side of barb
+    const ty = frame.barbOrigin.y;
+    return translate([cx, ty, cz], oriented);
+  } else {
+    const tx = frame.barbOrigin.x;
+    const cy = frame.barbOrigin.y;
+    return translate([tx, cy, cz], oriented);
+  }
+}
+
+function buildBallSocketBarb(frame: WallFrame): BuildOp {
+  // Approximate a "ball" with a short, wide cylinder + tapered cap, along the
+  // wall normal. Concretely: a cylinder oriented inward, length=barbProtrusion,
+  // radius slightly larger than barbLength/3 so the bump reads as a detent.
+  // Lower retention than half-round; hand-removable.
+  const radius = Math.min(frame.barbSize.t, frame.barbSize.z) / 3;
+  const length = frame.barbSize.n; // along wall-normal
+  const cyl = cylinder(length, radius, 24);
+  // cylinder() runs along +Z; rotate so it runs along the wall normal.
+  // Wall normal (inward) is opposite wallNormalSign on the wallAxis.
+  let oriented: BuildOp;
+  if (frame.wallAxis === 'x') {
+    // +x wall: inward is -x → rotate cylinder so +Z → -X. rotate([0, -90, 0]) maps +Z to +X;
+    // rotate([0, 90, 0]) maps +Z to -X. wallNormalSign=+1 → inward -x → +90.
+    oriented = rotate([0, frame.wallNormalSign * 90, 0], cyl);
+  } else {
+    oriented = rotate([frame.wallNormalSign * -90, 0, 0], cyl);
+  }
+  const cx =
+    frame.wallAxis === 'x'
+      ? frame.barbOrigin.x
+      : frame.barbOrigin.x + frame.barbSize.t / 2;
+  const cy =
+    frame.wallAxis === 'y'
+      ? frame.barbOrigin.y
+      : frame.barbOrigin.y + frame.barbSize.t / 2;
+  const cz = frame.barbOrigin.z + frame.barbSize.z / 2;
+  return translate([cx, cy, cz], oriented);
+}
+
+interface BarbBuilders {
+  buildBarb(frame: WallFrame): BuildOp;
+  buildLip(frame: WallFrame, lipHeight: number): BuildOp;
+}
+
+const BARB_REGISTRY: Record<BarbType, BarbBuilders> = {
+  hook: { buildBarb: buildHookBarb, buildLip: buildHookLip },
+  'asymmetric-ramp': { buildBarb: buildAsymmetricRampBarb, buildLip: buildHookLip },
+  'symmetric-ramp': {
+    buildBarb: buildSymmetricRampBarb,
+    buildLip: (frame, lipHeight) => {
+      const { barbProtrusion, pocketWidth } = SNAP_DEFAULTS;
+      return buildLipSymmetricPrism(
+        frame.lipOrigin,
+        frame.wallAxis,
+        frame.wallNormalSign,
+        barbProtrusion,
+        pocketWidth,
+        lipHeight,
+      );
+    },
+  },
+  'half-round': { buildBarb: buildHalfRoundBarb, buildLip: buildHookLip },
+  'ball-socket': { buildBarb: buildBallSocketBarb, buildLip: buildHookLip },
+};
+
 export function buildSnapCatch(
   c: SnapCatch,
   board: BoardProfile,
@@ -174,136 +404,17 @@ export function buildSnapCatch(
 ): CatchGeometry | null {
   if (!c.enabled) return null;
   const dims = computeShellDims(board, params, hats, resolveHat);
-  const { wallThickness: wall } = params;
-  const {
-    armLength,
-    armThickness,
-    armWidth,
-    barbProtrusion,
-    barbLength,
-    pocketWidth,
-  } = SNAP_DEFAULTS;
-
-  // Lip placement (world Z): just below the wall top. lipBottomZ aligns with
-  // the barb's top in the engaged position so the barb catches cleanly.
-  // Barb top in lid-local coords = -armLength + barbLength = -8.
-  // Lid is positioned at outerZ + liftAboveShell (=2), so barb top world Z =
-  // outerZ + 2 - 8 = outerZ - 6. Put lip bottom at outerZ - 6 to match.
-  // Issue #76 — lip cross-section is print-sized: barbProtrusion-wide × same
-  // height (45° slope on the hypotenuse, just on the edge of bridge-free
-  // FDM printing). The barb engages 0.8 mm of catch face — enough to
-  // retain a hand-removable PLA case, not enough to need supports.
+  const { barbProtrusion } = SNAP_DEFAULTS;
   const LIP_HEIGHT = barbProtrusion;
-  const ARM_INSET = 0.3; // clearance between arm body and lip's inward tip
-  // Issue #77 — lip is FLUSH WITH THE RIM (top edge of the case wall).
-  // Earlier the lip sat 5–6 mm below the rim with a chunk of solid wall
-  // above it; that wasted material and made the cavity feel cramped. Now
-  // the lip's top sits at outerZ and the catch face hangs LIP_HEIGHT
-  // below — the rim itself becomes the slope's top edge.
   const lipTopZ = dims.outerZ;
   const lipBottomZ = lipTopZ - LIP_HEIGHT;
-
-  const wallId: SnapWall = c.wall;
-  let lip: BuildOp;
-  let armBarb: BuildOp;
-
-  // Issue #75 — sloped triangular lip (replaces the rectangular block). The
-  // wedge has a flat horizontal catch face on the bottom and a slope on top
-  // running from wall (high) down to lip tip (low), so the lid barb is
-  // deflected inward as it descends past the lip rather than jamming into
-  // a square outer corner.
-  switch (wallId) {
-    case '-x': {
-      lip = buildLipWedge(
-        { x: wall, y: c.uPosition - pocketWidth / 2, z: lipBottomZ },
-        'x',
-        -1, // -x wall: outward normal is -x, so inward (into cavity) is +x
-        barbProtrusion,
-        pocketWidth,
-        LIP_HEIGHT,
-      );
-      const armX = wall + barbProtrusion + ARM_INSET;
-      const arm = translate(
-        [armX, c.uPosition - armWidth / 2, -armLength],
-        cube([armThickness, armWidth, armLength]),
-      );
-      const barb = translate(
-        [armX - barbProtrusion, c.uPosition - armWidth / 2, -armLength],
-        cube([barbProtrusion, armWidth, barbLength]),
-      );
-      armBarb = union([arm, barb]);
-      break;
-    }
-    case '+x': {
-      const innerX = dims.outerX - wall;
-      lip = buildLipWedge(
-        { x: innerX, y: c.uPosition - pocketWidth / 2, z: lipBottomZ },
-        'x',
-        +1, // +x wall: outward normal is +x, so inward is -x
-        barbProtrusion,
-        pocketWidth,
-        LIP_HEIGHT,
-      );
-      const armX = innerX - barbProtrusion - ARM_INSET - armThickness;
-      const arm = translate(
-        [armX, c.uPosition - armWidth / 2, -armLength],
-        cube([armThickness, armWidth, armLength]),
-      );
-      const barb = translate(
-        [armX + armThickness, c.uPosition - armWidth / 2, -armLength],
-        cube([barbProtrusion, armWidth, barbLength]),
-      );
-      armBarb = union([arm, barb]);
-      break;
-    }
-    case '-y': {
-      lip = buildLipWedge(
-        { x: c.uPosition - pocketWidth / 2, y: wall, z: lipBottomZ },
-        'y',
-        -1,
-        barbProtrusion,
-        pocketWidth,
-        LIP_HEIGHT,
-      );
-      const armY = wall + barbProtrusion + ARM_INSET;
-      const arm = translate(
-        [c.uPosition - armWidth / 2, armY, -armLength],
-        cube([armWidth, armThickness, armLength]),
-      );
-      const barb = translate(
-        [c.uPosition - armWidth / 2, armY - barbProtrusion, -armLength],
-        cube([armWidth, barbProtrusion, barbLength]),
-      );
-      armBarb = union([arm, barb]);
-      break;
-    }
-    case '+y': {
-      const innerY = dims.outerY - wall;
-      lip = buildLipWedge(
-        { x: c.uPosition - pocketWidth / 2, y: innerY, z: lipBottomZ },
-        'y',
-        +1,
-        barbProtrusion,
-        pocketWidth,
-        LIP_HEIGHT,
-      );
-      const armY = innerY - barbProtrusion - ARM_INSET - armThickness;
-      const arm = translate(
-        [c.uPosition - armWidth / 2, armY, -armLength],
-        cube([armWidth, armThickness, armLength]),
-      );
-      const barb = translate(
-        [c.uPosition - armWidth / 2, armY + armThickness, -armLength],
-        cube([armWidth, barbProtrusion, barbLength]),
-      );
-      armBarb = union([arm, barb]);
-      break;
-    }
-  }
-
-  void difference;
-  void lipTopZ;
-  return { lip, armBarb };
+  const frame = computeWallFrame(c, params, dims.outerX, dims.outerY, lipBottomZ);
+  const barbType: BarbType = c.barbType ?? 'hook';
+  const builders = BARB_REGISTRY[barbType];
+  const lip = builders.buildLip(frame, LIP_HEIGHT);
+  const arm = buildArm(frame);
+  const barb = builders.buildBarb(frame);
+  return { lip, armBarb: union([arm, barb]) };
 }
 
 export function buildSnapCatchOps(
@@ -322,7 +433,6 @@ export function buildSnapCatchOps(
   for (const c of catches) {
     const g = buildSnapCatch(c, board, params, hats, resolveHat);
     if (!g) continue;
-    // Issue #70 — inside-wall lip is additive; no through-wall pocket.
     shellAdd.push(g.lip);
     lidAdd.push(g.armBarb);
   }

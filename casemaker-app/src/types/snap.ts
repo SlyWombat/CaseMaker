@@ -2,12 +2,36 @@ import type { Mm } from './units';
 
 export type SnapWall = '+x' | '-x' | '+y' | '-y';
 
+/** Issue #69 — barb cross-sections trade off insertion vs. retention force.
+ *
+ *   hook            — rectangular barb (current). High retention, sloped insertion.
+ *   asymmetric-ramp — rectangular barb with the entry corner chamfered. Lower
+ *                     insertion force, retention unchanged.
+ *   symmetric-ramp  — triangular barb. Insertion ≈ removal force; service-friendly.
+ *   half-round      — half-cylinder barb. Smoother strain, lower retention.
+ *   ball-socket     — spherical detent against a hemispherical pocket.
+ */
+export type BarbType = 'hook' | 'asymmetric-ramp' | 'symmetric-ramp' | 'half-round' | 'ball-socket';
+
+export const BARB_TYPES: ReadonlyArray<BarbType> = [
+  'hook',
+  'asymmetric-ramp',
+  'symmetric-ramp',
+  'half-round',
+  'ball-socket',
+];
+
 export interface SnapCatch {
   id: string;
   wall: SnapWall;
   /** Position along the wall (mm from the lower-corner end of that wall). */
   uPosition: Mm;
   enabled: boolean;
+  /** Issue #69 — barb cross-section. Default 'hook' matches pre-#69 behavior. */
+  barbType?: BarbType;
+  /** Issue #69 — advanced overrides (not surfaced in UI v1). */
+  insertionRampDeg?: number;
+  retentionRampDeg?: number;
 }
 
 /**

@@ -4,7 +4,8 @@ import { newId } from '@/utils/id';
 import type { AntennaType } from '@/types/antenna';
 import type { FanSize, CaseFace, FanGrille } from '@/types/fan';
 import type { TextLabel } from '@/types/textLabel';
-import type { SnapWall } from '@/types/snap';
+import type { SnapWall, BarbType } from '@/types/snap';
+import { BARB_TYPES } from '@/types/snap';
 import type { DisplayFraming } from '@/types/display';
 
 /**
@@ -373,6 +374,20 @@ function SnapCatchesSection() {
             onChange={(e) => patchSnapCatch(c.id, { uPosition: Number(e.target.value) })}
             style={{ width: 60 }}
           />
+          {/* Issue #69 — barb cross-section selector. Default 'hook' matches
+              the pre-#69 geometry so older projects render unchanged. */}
+          <select
+            value={c.barbType ?? 'hook'}
+            onChange={(e) => patchSnapCatch(c.id, { barbType: e.target.value as BarbType })}
+            data-testid={`snap-barb-type-${c.id}`}
+            title="Barb cross-section"
+          >
+            {BARB_TYPES.map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
           <button onClick={() => removeSnapCatch(c.id)}>✕</button>
         </div>
       ))}

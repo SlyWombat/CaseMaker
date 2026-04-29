@@ -70,8 +70,29 @@ Common print-time issues and adjustments:
 - **Arm snaps off on first close** — strain over yield. Switch material or lengthen arm.
 - **Loose fit at the catch** — pocket too wide for the barb. Reduce `pocketWidth` (raise the wall around the barb).
 
+## Barb cross-sections (issue #69)
+
+The `barbType` field on each `SnapCatch` selects the cross-section of the barb at the cantilever tip and the matching lip on the case wall. Defaults to `hook` so legacy projects keep the original geometry.
+
+| Type | Geometry | Insertion force | Retention force | Best for |
+|---|---|---|---|---|
+| `hook` (default) | Rectangular barb + sloped wedge lip | Medium (45° lip ramp) | High (flat catch face) | Permanent / semi-permanent assembly. Default for Case Maker. |
+| `asymmetric-ramp` | Shorter rectangular barb (70% z) + same wedge lip | Low | Medium | Frequent open/close — battery covers, IO trays. |
+| `symmetric-ramp` | Triangular prism barb + symmetric prism lip | Medium | Medium (≈ insertion) | Service-friendly enclosures the user opens by hand. |
+| `half-round` | Half-cylinder barb + wedge lip | Medium-low | Medium | Smoother strain distribution; better PLA fatigue life. |
+| `ball-socket` | Cylindrical detent + wedge lip | Low | Low-medium | Multi-position retention, light-duty alignment. |
+
+**Strain budget.** All five share the same cantilever arm geometry (8 mm × 1.6 mm × 6 mm wide) and barb protrusion (0.8 mm). Per Bayer's snap-fit design guide, the strain at the arm root for 0.8 mm deflection is
+
+ε = 1.5 · y · h / L² ≈ 1.5 · 0.8 · 1.6 / 64 ≈ 0.030 (3%)
+
+within PLA's ~5% elastic budget. Each barb cross-section concentrates that strain differently — half-round and ball-socket distribute it across a curved face, hook concentrates it at the corner.
+
+Advanced users can override `insertionRampDeg` and `retentionRampDeg` per-catch via the project JSON; UI v1 doesn't expose them.
+
 ## References
 
 - Bayer Plastics, "Snap-Fit Joints for Plastics — A Design Guide"
 - Bonenberger, P. R. (2000), *The First Snap-Fit Handbook*
 - Protolabs design tip: "Designing snap fits for 3D-printed parts"
+- Malloy, R. A. (1994), *Plastic Part Design for Injection Moulding*, §6.3 "Snap-fit cross-section catalogue"
