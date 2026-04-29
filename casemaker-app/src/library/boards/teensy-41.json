@@ -116,7 +116,7 @@
     }
   ],
   "defaultStandoffHeight": 3,
-  "recommendedZClearance": 12,
+  "recommendedZClearance": 16,
   "source": "https://www.pjrc.com/teensy/card11a_rev1.pdf",
   "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/teensy-41",
   "builtin": true

@@ -213,7 +213,7 @@
     }
   ],
   "defaultStandoffHeight": 3,
-  "recommendedZClearance": 8,
+  "recommendedZClearance": 18,
   "source": "https://datasheets.raspberrypi.com/rpi5/raspberry-pi-5-mechanical-drawing.pdf",
   "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/rpi-5",
   "builtin": true

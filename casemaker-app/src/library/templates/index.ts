@@ -27,12 +27,15 @@ function piPoeStack(): Project {
   p.name = 'Pi 4 with PoE+ HAT';
   p.case.joint = 'screw-down';
   p.case.ventilation = { enabled: true, pattern: 'slots', coverage: 0.5 };
-  // Add a PoE+ HAT placement
+  // Issue #62 — populate ports via autoPortsForHat so PoE+ pass-through and
+  // fan exhaust cutouts aren't silently dropped (same #35 pattern).
+  const placementId = 'tpl-hat-poe';
+  const profile = getBuiltinHat('rpi-poe-plus');
   p.hats.push({
-    id: 'tpl-hat-poe',
+    id: placementId,
     hatId: 'rpi-poe-plus',
     stackIndex: 0,
-    ports: [],
+    ports: profile ? autoPortsForHat(profile, placementId) : [],
     enabled: true,
   });
   return p;

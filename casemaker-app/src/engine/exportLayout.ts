@@ -146,10 +146,10 @@ export function applyPartTransform(
       out[i + 2] = positions[i + 2]! + tz;
     }
   }
-  // When flipping (which negates an axis), the triangle winding is reversed.
-  // We don't reorder indices here — stl/3mf consumers normalize, and the
-  // STL writer recomputes face normals from positions+winding so the practical
-  // effect is normals point inward on flipped meshes. Slicers handle this.
+  // Flipping negates an axis and inverts triangle winding — but indices live
+  // separately, so applyLayoutToMeshes calls reverseTriangleWinding on the
+  // index buffer when t.flipAxis !== null. This function only handles
+  // positions; winding correction happens at the caller.
   return out;
 }
 

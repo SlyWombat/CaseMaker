@@ -4,9 +4,11 @@ import { DOCS, findDoc } from '@/docs';
 describe('docs registry', () => {
   it('exposes the five core documents', () => {
     const ids = DOCS.map((d) => d.id);
+    // Order matches DocsModal nav (#74): User Manual is the in-app default,
+    // so it leads the list.
     expect(ids).toEqual([
-      'getting-started',
       'user-manual',
+      'getting-started',
       'technical-reference',
       'changelog',
       'contributing',

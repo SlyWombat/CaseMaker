@@ -213,7 +213,7 @@
     }
   ],
   "defaultStandoffHeight": 3,
-  "recommendedZClearance": 5,
+  "recommendedZClearance": 18,
   "source": "https://datasheets.raspberrypi.com/rpi4/raspberry-pi-4-mechanical-drawing.pdf",
   "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/rpi-4b",
   "builtin": true

@@ -133,7 +133,7 @@
     }
   ],
   "defaultStandoffHeight": 3,
-  "recommendedZClearance": 5,
+  "recommendedZClearance": 11,
   "source": "https://datasheets.raspberrypi.com/rpizero2/raspberry-pi-zero-2-w-mechanical-drawing.pdf",
   "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/rpi-zero-2w",
   "builtin": true

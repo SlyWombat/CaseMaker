@@ -98,14 +98,25 @@ function projectPortToFace(
   };
 }
 
+// Issue #67 — panel-mount connectors (USB, Ethernet, etc.) are deliberately
+// at the PCB edge with their body overhanging in the `facing` direction. The
+// overhang can reach 4–5 mm (Pi Pico micro-USB). Allow that direction extra
+// budget; keep the tight ±1 mm rule on every other edge so we still catch
+// genuine placement bugs.
+const CONNECTOR_OVERHANG_BUDGET = 5;
+const NON_OVERHANG_BUDGET = 1;
+
 function validateBoardComponentBounds(board: BoardProfile): PlacementIssue[] {
   const issues: PlacementIssue[] = [];
   for (const c of board.components) {
-    // A small overhang is allowed for connectors (USB-C at x=-2 is normal),
-    // but the body's centroid must lie inside the PCB outline.
     const cx = c.position.x + c.size.x / 2;
     const cy = c.position.y + c.size.y / 2;
-    if (cx < -1 || cx > board.pcb.size.x + 1) {
+    const facing = c.facing ?? null;
+    const xMaxBudget = facing === '+x' ? CONNECTOR_OVERHANG_BUDGET : NON_OVERHANG_BUDGET;
+    const xMinBudget = facing === '-x' ? CONNECTOR_OVERHANG_BUDGET : NON_OVERHANG_BUDGET;
+    const yMaxBudget = facing === '+y' ? CONNECTOR_OVERHANG_BUDGET : NON_OVERHANG_BUDGET;
+    const yMinBudget = facing === '-y' ? CONNECTOR_OVERHANG_BUDGET : NON_OVERHANG_BUDGET;
+    if (cx < -xMinBudget || cx > board.pcb.size.x + xMaxBudget) {
       issues.push({
         severity: 'warning',
         kind: 'off-pcb',
@@ -113,7 +124,7 @@ function validateBoardComponentBounds(board: BoardProfile): PlacementIssue[] {
         message: `Component "${c.id}" centroid is outside the PCB X outline (cx=${cx.toFixed(1)} mm, PCB x=0..${board.pcb.size.x})`,
       });
     }
-    if (cy < -1 || cy > board.pcb.size.y + 1) {
+    if (cy < -yMinBudget || cy > board.pcb.size.y + yMaxBudget) {
       issues.push({
         severity: 'warning',
         kind: 'off-pcb',
