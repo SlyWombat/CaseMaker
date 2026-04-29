@@ -11,8 +11,8 @@ export interface DocEntry {
 }
 
 export const DOCS: ReadonlyArray<DocEntry> = [
-  { id: 'getting-started', title: 'Getting Started', source: gettingStartedRaw },
   { id: 'user-manual', title: 'User Manual', source: userManualRaw },
+  { id: 'getting-started', title: 'Getting Started', source: gettingStartedRaw },
   { id: 'technical-reference', title: 'Technical Reference', source: technicalReferenceRaw },
   { id: 'changelog', title: 'Changelog', source: changelogRaw },
   { id: 'contributing', title: 'Contributing', source: contributingRaw },

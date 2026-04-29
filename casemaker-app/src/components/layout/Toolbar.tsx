@@ -99,7 +99,7 @@ export function Toolbar() {
         📖 Docs
       </button>
       {error && <span style={{ color: '#ff8888', fontSize: 12 }}>{error}</span>}
-      {docsOpen && <DocsModal onClose={() => setDocsOpen(false)} />}
+      {docsOpen && <DocsModal initialId="user-manual" onClose={() => setDocsOpen(false)} />}
     </div>
   );
 }
