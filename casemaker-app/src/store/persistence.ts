@@ -52,10 +52,10 @@ function fsAccess(): { save: ShowSaveFilePicker; open: ShowOpenFilePicker } | nu
   return { save: w.showSaveFilePicker, open: w.showOpenFilePicker };
 }
 
-const PROJECT_FILE_TYPE = {
+const PROJECT_FILE_TYPE: { description: string; accept: Record<string, string[]> } = {
   description: 'Case Maker project',
   accept: { 'application/json': ['.caseproj.json', '.json'] },
-} as const;
+};
 
 /** Save via the File System Access API. Returns the file handle so the caller
  *  can do subsequent in-place saves. Throws if the user cancels. */
