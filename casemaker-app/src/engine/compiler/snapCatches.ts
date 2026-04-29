@@ -241,13 +241,45 @@ function buildHookBarb(frame: WallFrame): BuildOp {
   return translate([frame.barbOrigin.x, frame.barbOrigin.y, frame.barbOrigin.z], cube(sz));
 }
 
+/**
+ * Issue #81 — when the lip's wall-side face is exactly coplanar with the
+ * inner wall surface, manifold's union sometimes treats the two solids as
+ * non-overlapping (touching only). The result is a "loose" lip that the
+ * slicer drops to the build plate. Embedding the lip into the wall by
+ * EMBED_INTO_WALL guarantees a volumetric overlap so the union always
+ * produces a single connected component.
+ */
+const EMBED_INTO_WALL = 0.2;
+
+/** Shift the wedge origin INTO the wall and add the same amount to the
+ *  protrusion so the inward tip stays at the same world location. */
+function embedInWall(frame: WallFrame): {
+  origin: { x: number; y: number; z: number };
+  extraProtrusion: number;
+} {
+  const { x, y, z } = frame.lipOrigin;
+  // Inward direction (cavity-bound) is `-wallNormalSign * axis`. To go
+  // INTO the wall we move in the opposite direction: `+wallNormalSign * axis`.
+  if (frame.wallAxis === 'x') {
+    return {
+      origin: { x: x + frame.wallNormalSign * EMBED_INTO_WALL, y, z },
+      extraProtrusion: EMBED_INTO_WALL,
+    };
+  }
+  return {
+    origin: { x, y: y + frame.wallNormalSign * EMBED_INTO_WALL, z },
+    extraProtrusion: EMBED_INTO_WALL,
+  };
+}
+
 function buildHookLip(frame: WallFrame, height: number): BuildOp {
   const { barbProtrusion, pocketWidth } = SNAP_DEFAULTS;
+  const { origin, extraProtrusion } = embedInWall(frame);
   return buildLipWedge(
-    frame.lipOrigin,
+    origin,
     frame.wallAxis,
     frame.wallNormalSign,
-    barbProtrusion,
+    barbProtrusion + extraProtrusion,
     pocketWidth,
     height,
   );
@@ -381,11 +413,14 @@ const BARB_REGISTRY: Record<BarbType, BarbBuilders> = {
     buildBarb: buildSymmetricRampBarb,
     buildLip: (frame, lipHeight) => {
       const { barbProtrusion, pocketWidth } = SNAP_DEFAULTS;
+      // Issue #81 — embed wall-side into the wall so manifold's union doesn't
+      // leave the lip as a loose component (same fix as buildHookLip).
+      const { origin, extraProtrusion } = embedInWall(frame);
       return buildLipSymmetricPrism(
-        frame.lipOrigin,
+        origin,
         frame.wallAxis,
         frame.wallNormalSign,
-        barbProtrusion,
+        barbProtrusion + extraProtrusion,
         pocketWidth,
         lipHeight,
       );

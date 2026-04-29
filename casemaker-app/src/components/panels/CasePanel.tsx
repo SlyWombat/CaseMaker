@@ -92,15 +92,6 @@ export function CasePanel() {
         onChange={set('lidThickness')}
         testId="lid-thickness"
       />
-      <label className="vent-row">
-        <input
-          type="checkbox"
-          checked={params.lidRecess ?? false}
-          onChange={(e) => patch({ lidRecess: e.target.checked })}
-          data-testid="lid-recess"
-        />
-        <span>Recessed lid (drops into a pocket flush with the rim)</span>
-      </label>
       <Slider
         label="Internal clearance (mm)"
         value={params.internalClearance}
@@ -171,6 +162,15 @@ export function CasePanel() {
           </div>
         </div>
       )}
+      <label className="vent-row">
+        <input
+          type="checkbox"
+          checked={params.lidRecess ?? false}
+          onChange={(e) => patch({ lidRecess: e.target.checked })}
+          data-testid="lid-recess"
+        />
+        <span>Recessed lid (drops into a pocket flush with the rim)</span>
+      </label>
       <div className="joint-row">
         <span className="joint-label">Boss insert type</span>
         <select
