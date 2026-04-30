@@ -1,24 +1,18 @@
-import { useMemo } from 'react';
-import { useProjectStore } from '@/store/projectStore';
-import { validatePlacements } from '@/engine/compiler/placementValidator';
+import { useJobStore } from '@/store/jobStore';
 
 /**
- * Issue #37 — surface placement-validator findings as a sticky banner above
- * the viewport. Errors get a red bar; warnings only get a yellow bar. Clicking
- * an entry doesn't navigate yet — that's a follow-up — but the message
- * names the offending feature ids so users can find them by hand.
+ * Issue #37 + #51 — surface placement-validator findings as a sticky banner
+ * above the viewport. The report is produced once per compile in
+ * ProjectCompiler.ts and shipped to the job store; we just read it here
+ * instead of re-running validatePlacements on every render. Errors get a red
+ * bar; warnings only get a yellow bar. Clicking an entry doesn't navigate
+ * yet — that's a follow-up — but the message names the offending feature ids
+ * so users can find them by hand.
  */
 export function PlacementBanner() {
-  const project = useProjectStore((s) => s.project);
-  const report = useMemo(() => {
-    try {
-      return validatePlacements(project);
-    } catch {
-      return { issues: [], errorCount: 0, warningCount: 0 };
-    }
-  }, [project]);
+  const report = useJobStore((s) => s.placementReport);
 
-  if (report.errorCount === 0 && report.warningCount === 0) return null;
+  if (!report || (report.errorCount === 0 && report.warningCount === 0)) return null;
 
   const severity: 'error' | 'warning' = report.errorCount > 0 ? 'error' : 'warning';
 

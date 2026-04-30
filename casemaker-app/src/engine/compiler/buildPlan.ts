@@ -27,6 +27,12 @@ export interface BuildPlan {
   nodes: BuildNode[];
   /** Issue #37 — placement validator findings; consumers may show a banner. */
   placementReport?: import('./placementValidator').PlacementReport;
+  /**
+   * Issue #51 — smart-cutout decisions taken during this compile. Lives on
+   * the plan (not as module-level mutable state in ProjectCompiler) so it
+   * stays in sync with the project that produced it.
+   */
+  smartCutoutDecisions?: import('./smartCutoutLayout').SmartCutoutDecision[];
 }
 
 export function cube(size: Vec3, center = false): BuildOp {

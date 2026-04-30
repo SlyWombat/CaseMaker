@@ -20,7 +20,6 @@ import { triggerExport } from '@/engine/exportTrigger';
 import { isZUp } from '@/engine/coords';
 import { serializeProject, parseProject } from '@/store/persistence';
 import { importStlFile } from '@/engine/import/assetImporter';
-import { getLastSmartCutoutDecisions } from '@/engine/compiler/ProjectCompiler';
 import type { SmartCutoutDecision } from '@/engine/compiler/smartCutoutLayout';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useViewportStore } from '@/store/viewportStore';
@@ -167,7 +166,7 @@ export function installCaseMakerTestApi(): void {
     },
     getLastDiag: () => useJobStore.getState().lastDiag,
     getJobError: () => useJobStore.getState().error,
-    getSmartCutoutDecisions: () => getLastSmartCutoutDecisions(),
+    getSmartCutoutDecisions: () => useJobStore.getState().smartCutoutDecisions,
     async importStlAsset(name, base64) {
       const binary = atob(base64);
       const bytes = new Uint8Array(binary.length);

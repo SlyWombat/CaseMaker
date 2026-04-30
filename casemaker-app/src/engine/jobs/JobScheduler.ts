@@ -52,7 +52,10 @@ async function dispatch(project: Project, myGen: number): Promise<void> {
       triangleCount: result.combinedTriangleCount,
       bbox: result.combinedBBox,
     };
-    job.applyResult(myGen, nodes, combined, result.durationMs, result.diag);
+    job.applyResult(myGen, nodes, combined, result.durationMs, result.diag, {
+      placementReport: plan.placementReport,
+      smartCutoutDecisions: plan.smartCutoutDecisions,
+    });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     useJobStore.getState().setStatus('error', message);
