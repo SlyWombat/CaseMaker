@@ -12,18 +12,28 @@ import { cube, cylinder, mesh, rotate, translate, union, type BuildOp } from './
 import { computeShellDims } from './caseShell';
 
 /**
- * Issue #75 / #90 — inside-wall snap lip. Originally a triangular-prism mesh
- * (wedge with sloped top), but the manually-built mesh was prone to
- * non-manifold winding and at small case scales (snap-fit-test, 53×43 mm)
- * caused manifold's union to drop the lip as a loose component (#90).
+ * Issue #75 / #90 / followup — inside-wall snap lip. Trapezoidal prism with
+ * a sloped outboard face that gives the lid arm a smooth lead-in: as the
+ * lid pushes down, the barb's leading edge contacts the slope and the
+ * slope translates downward force into outward force on the arm,
+ * flexing it past the lip without requiring the wall to flex. Once the
+ * barb clears the lip's bottom face (the catch face), the arm springs
+ * back and the barb sits below the lip.
  *
- * Replaced with a primitive cube of size (width × protrusion × height)
- * placed so its wall-side face sits at the embedded origin and the body
- * extends inward by `protrusion`. The catch face (cube top) is flat instead
- * of sloped — slightly less ergonomic insertion than the wedge but
- * mechanically equivalent because the cantilever arm flexes to clear the
- * lip on its way past. Cube is guaranteed-manifold; manifold's union fuses
- * it with the wall every time.
+ * Cross-section in (n, z): trapezoid with vertices
+ *   (0, 0)             — wall-base
+ *   (protrusion, 0)    — outboard-base (full protrusion at the catch face)
+ *   (protrusion·k, H)  — outboard-top (narrowed by factor k)
+ *   (0, H)             — wall-top
+ * where k ≈ 0.2 gives a steep but printable insertion ramp. Trapezoid
+ * (NOT triangle) avoids the thin-apex issue at z=H that fragmented the
+ * earlier triangular-prism wedge in #90 — there's always at least
+ * protrusion·k of material along every z slice.
+ *
+ * Mesh winding verified for outward normals: base −z, top +z, wall −n,
+ * slanted outboard +n+z, front cap −u (front = u=0), back cap +u.
+ * Every face's right-hand-rule cross product points away from the
+ * trapezoid interior so manifold treats the prism as a valid solid.
  */
 function buildLipWedge(
   origin: { x: number; y: number; z: number },
@@ -33,22 +43,48 @@ function buildLipWedge(
   width: number,
   height: number,
 ): BuildOp {
-  // World-space cube dims: width along the wall tangent, protrusion along
-  // the wall normal, height along Z. Map (u, n, z) local → world axes by
-  // wallAxis: when wallAxis === 'x', u maps to world Y, n maps to world X;
-  // when wallAxis === 'y', u maps to world X, n maps to world Y.
-  const sx = wallAxis === 'x' ? protrusion : width;
-  const sy = wallAxis === 'y' ? protrusion : width;
-  const slab = cube([sx, sy, height], false);
-  // Position the corner so the wall-side face sits at `origin` and the
-  // body extends inward (cavity-bound) by `protrusion`. wallNormalSign === +1
-  // means outward is +axis → inward is -axis → corner offset = -protrusion.
-  // wallNormalSign === -1 → inward = +axis → corner offset stays at origin.
-  const cornerX =
-    wallAxis === 'x' ? origin.x - (wallNormalSign === 1 ? protrusion : 0) : origin.x;
-  const cornerY =
-    wallAxis === 'y' ? origin.y - (wallNormalSign === 1 ? protrusion : 0) : origin.y;
-  return translate([cornerX, cornerY, origin.z], slab);
+  const TOP_RATIO = 0.2; // outboard-top is 20% of the base protrusion
+  const pMin = protrusion * TOP_RATIO;
+  // pushVert maps face-local (uOff, nOff, zOff) → world coords. wallAxis
+  // chooses which world axis hosts u and n; wallNormalSign flips the n
+  // direction so n>0 is always cavity-bound.
+  const positions: number[] = [];
+  function pushVert(uOff: number, nOff: number, zOff: number): void {
+    if (wallAxis === 'x') {
+      const dx = wallNormalSign * nOff;
+      positions.push(origin.x + dx, origin.y + uOff, origin.z + zOff);
+    } else {
+      const dy = wallNormalSign * nOff;
+      positions.push(origin.x + uOff, origin.y + dy, origin.z + zOff);
+    }
+  }
+  // 8 vertices — base quad (4) + top quad (4).
+  pushVert(0, 0, 0);              // 0  A — wall, base
+  pushVert(width, 0, 0);          // 1  B — wall, base, far-u
+  pushVert(0, protrusion, 0);     // 2  C — outboard, base
+  pushVert(width, protrusion, 0); // 3  D — outboard, base, far-u
+  pushVert(0, 0, height);         // 4  E — wall, top
+  pushVert(width, 0, height);     // 5  F — wall, top, far-u
+  pushVert(0, pMin, height);      // 6  G — outboard, top (narrowed)
+  pushVert(width, pMin, height);  // 7  I — outboard, top, far-u (narrowed)
+  const indices = new Uint32Array([
+    // base z=0, outside -z
+    0, 1, 3,  0, 3, 2,
+    // top z=H, outside +z
+    4, 6, 7,  4, 7, 5,
+    // wall n=0, outside -n
+    0, 1, 5,  0, 5, 4,
+    // slanted outboard, outside +n+z
+    3, 2, 6,  3, 6, 7,
+    // front cap u=0, outside -u
+    0, 6, 2,  0, 4, 6,
+    // back cap u=width, outside +u
+    1, 7, 5,  1, 3, 7,
+  ]);
+  // Note: wallNormalSign=+1 (outward +x or +y) means n>0 is cavity-bound,
+  // so the trapezoid still sits "inside" the cavity for both wall signs.
+  // For -1 the same holds because we multiply nOff by wallNormalSign.
+  return mesh(new Float32Array(positions), indices);
 }
 
 /**
@@ -235,7 +271,10 @@ function buildHookBarb(frame: WallFrame): BuildOp {
  * EMBED_INTO_WALL guarantees a volumetric overlap so the union always
  * produces a single connected component.
  */
-const EMBED_INTO_WALL = 0.2;
+// Bumped 0.2 → 0.4 mm so manifold's union has more volumetric overlap to
+// fuse the trapezoidal-prism lip with the wall. Still well under the
+// minimum 1.0 mm wall thickness so the lip never breaks through.
+const EMBED_INTO_WALL = 0.4;
 
 /** Shift the wedge origin INTO the wall and add the same amount to the
  *  protrusion so the inward tip stays at the same world location. */

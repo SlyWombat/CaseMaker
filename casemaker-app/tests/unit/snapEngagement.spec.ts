@@ -126,19 +126,21 @@ describe('Snap-fit engagement geometry (#80)', () => {
     expect(armExtent.max).toBeLessThanOrEqual(0.001);
   });
 
-  it('lip slab has positive volume (LIP_HEIGHT > 0) and renders as a cube (#90)', () => {
+  it('lip slab has positive volume (LIP_HEIGHT > 0) and renders as a sloped trapezoidal prism', () => {
     const g = buildSnapCatch(firstCatch!, project.board, project.case);
     // armLength - barbLength must be positive for the lip to have height.
     expect(SNAP_DEFAULTS.armLength).toBeGreaterThan(SNAP_DEFAULTS.barbLength);
-    // #90 — lip moved from a manually-built mesh wedge to a primitive cube
-    // so manifold's union fuses it with the wall reliably at small case
-    // scales (snap-fit-test, etc.). Assert the new shape.
-    function findCube(op: import('@/engine/compiler/buildPlan').BuildOp): boolean {
-      if (op.kind === 'cube') return op.size[0] > 0 && op.size[1] > 0 && op.size[2] > 0;
-      if ('child' in op && op.child) return findCube(op.child);
-      if ('children' in op) return op.children.some((c) => findCube(c));
+    // The lip is a trapezoidal-prism mesh with a sloped outboard face —
+    // the slope translates lid-down force into outward arm-flex so
+    // rectangular barbs can click past without flexing the wall. The cube
+    // primitive used between #90 and the slope-restoration didn't give
+    // any insertion ramp.
+    function findMesh(op: import('@/engine/compiler/buildPlan').BuildOp): boolean {
+      if (op.kind === 'mesh') return op.positions.length > 0 && op.indices.length > 0;
+      if ('child' in op && op.child) return findMesh(op.child);
+      if ('children' in op) return op.children.some((c) => findMesh(c));
       return false;
     }
-    expect(findCube(g!.lip)).toBe(true);
+    expect(findMesh(g!.lip)).toBe(true);
   });
 });

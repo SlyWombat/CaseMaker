@@ -175,26 +175,26 @@ describe('Snap-fit barb cross-section registry (#69)', () => {
     expect(countByKind(ball!.armBarb, 'cylinder')).toBe(1);
   });
 
-  it('hook + symmetric-ramp lips both produce a non-empty cube primitive (#90 cube-lip refactor)', () => {
+  it('hook + symmetric-ramp lips both produce a single trapezoidal-prism mesh (sloped lip)', () => {
     const hook = buildSnapCatch({ ...firstCatch!, barbType: 'hook' }, project.board, project.case);
     const sym = buildSnapCatch(
       { ...firstCatch!, barbType: 'symmetric-ramp' },
       project.board,
       project.case,
     );
-    // Pre-#90 these were two distinct mesh primitives. After the cube-lip
-    // refactor (manifold-safe at small case scales) they both produce a
-    // translated cube of identical dimensions — the hook-vs-symmetric
-    // distinction now lives entirely in the BARB shape on the lid side.
-    expect(countByKind(hook!.lip, 'cube')).toBe(1);
-    expect(countByKind(sym!.lip, 'cube')).toBe(1);
-    // Confirm zero mesh primitives in the lip — the bug-prone wedge mesh
-    // is gone.
-    expect(countByKind(hook!.lip, 'mesh')).toBe(0);
-    expect(countByKind(sym!.lip, 'mesh')).toBe(0);
+    // The lip is a trapezoidal-prism mesh with a sloped outboard face — the
+    // slope converts lid-down force into arm-flex force so rectangular
+    // barbs can click past without requiring the wall itself to flex.
+    // Hook vs symmetric-ramp differ only in the barb shape on the lid side.
+    expect(countByKind(hook!.lip, 'mesh')).toBe(1);
+    expect(countByKind(sym!.lip, 'mesh')).toBe(1);
+    expect(countByKind(hook!.lip, 'cube')).toBe(0);
+    expect(countByKind(sym!.lip, 'cube')).toBe(0);
+    // 8-vert / 12-tri trapezoidal prism — sanity check the topology.
+    expect(meshTriangles(hook!.lip)).toBe(12);
+    expect(meshTriangles(sym!.lip)).toBe(12);
   });
 
   // Suppress unused-import lint when the helpers below stop being used.
-  void meshTriangles;
   void meshPositionsDigest;
 });
