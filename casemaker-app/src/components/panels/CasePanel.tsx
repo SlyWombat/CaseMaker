@@ -171,19 +171,6 @@ export function CasePanel() {
           </div>
         </div>
       )}
-      {/* Issue #79 — surface the silent interaction between full-lid + recessed-lid.
-          buildLid short-circuits to a flat plate when lidRecess is on, so the
-          full-lid friction perimeter is dropped. Tell the user instead of
-          letting them wonder why the toggle had no effect. */}
-      {params.joint === 'snap-fit' &&
-        (params.snapType ?? 'barb') === 'full-lid' &&
-        (params.lidRecess ?? false) && (
-          <div className="joint-row" data-testid="full-lid-recess-note">
-            <span className="case-panel-note">
-              Full-lid friction perimeter is disabled while the lid is recessed.
-            </span>
-          </div>
-        )}
       <label className="vent-row">
         <input
           type="checkbox"

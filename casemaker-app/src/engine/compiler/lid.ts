@@ -204,6 +204,30 @@ export function buildSnapFitLid(
   }
 
   // Full-Lid variant — restored from the pre-#73 implementation.
+  const lipRing = buildFullLidFrictionLip(board, params, hats, resolveHat);
+  if (!lipRing) return attachPosts(topPlate, posts, holes);
+
+  const withPosts = posts.length > 0 ? union([topPlate, lipRing, ...posts]) : union([topPlate, lipRing]);
+  return holes.length > 0 ? difference([withPosts, ...holes]) : withPosts;
+}
+
+/**
+ * Continuous-perimeter friction lip for the Full-Lid snap variant. Returns a
+ * hollow rectangular ring extruded DOWN by SNAP_LIP_DEPTH from the lid-plate
+ * underside, sized to friction-fit between the cavity walls.
+ *
+ * Returns null when the cavity is too narrow to host a lip wide enough to
+ * survive the print (issue #42 degenerate-cavity guard).
+ *
+ * Used by buildSnapFitLid AND by the lidRecess + full-lid combo path.
+ */
+function buildFullLidFrictionLip(
+  board: BoardProfile,
+  params: CaseParameters,
+  hats: HatPlacement[] = NO_HATS,
+  resolveHat: HatResolver = NO_RESOLVE,
+): BuildOp | null {
+  const dims = computeShellDims(board, params, hats, resolveHat);
   const wall = params.wallThickness;
   const lipOuterX = dims.cavityX - 2 * SNAP_FRICTION;
   const lipOuterY = dims.cavityY - 2 * SNAP_FRICTION;
@@ -216,8 +240,7 @@ export function buildSnapFitLid(
   const maxLipWallX = (lipOuterX - minInnerDim) / 2;
   const maxLipWallY = (lipOuterY - minInnerDim) / 2;
   const lipWall = Math.min(lipWallNominal, maxLipWallX, maxLipWallY);
-  const canBuildLip = lipOuterX > minInnerDim && lipOuterY > minInnerDim && lipWall >= 0.4;
-  if (!canBuildLip) return attachPosts(topPlate, posts, holes);
+  if (lipOuterX <= minInnerDim || lipOuterY <= minInnerDim || lipWall < 0.4) return null;
 
   const lipInnerX = lipOuterX - 2 * lipWall;
   const lipInnerY = lipOuterY - 2 * lipWall;
@@ -230,9 +253,7 @@ export function buildSnapFitLid(
     [lipOriginX + lipWall, lipOriginY + lipWall, -SNAP_LIP_DEPTH - 0.5],
     cube([lipInnerX, lipInnerY, SNAP_LIP_DEPTH + 1], false),
   );
-  const lipRing = difference([lipOuter, lipInner]);
-  const withPosts = posts.length > 0 ? union([topPlate, lipRing, ...posts]) : union([topPlate, lipRing]);
-  return holes.length > 0 ? difference([withPosts, ...holes]) : withPosts;
+  return difference([lipOuter, lipInner]);
 }
 
 export function buildScrewDownLid(
@@ -258,12 +279,23 @@ export function buildLid(
   hats: HatPlacement[] = NO_HATS,
   resolveHat: HatResolver = NO_RESOLVE,
 ): BuildOp {
-  // When recessed, every joint variant produces a flat plate sized to the
-  // recess pocket; the joint flavor only adds posts / holes / snap arms.
+  // When recessed, the plate is sized to drop into the recess pocket; the
+  // joint flavor adds posts / holes / snap arms ON TOP of that plate.
+  // Issue (recessed + full-lid combo) — earlier code short-circuited here
+  // and dropped the full-lid friction perimeter when lidRecess was on.
+  // That's a valid combination: the plate sits flush in the rim AND the
+  // friction lip drops into the cavity from the plate underside.
   if (params.lidRecess) {
     const lid = computeLidDims(board, params, hats, resolveHat);
     const plate = roundedRectPrism(lid.x, lid.y, lid.z, lidRecessedCornerRadius(params));
     const { posts, holes } = buildLidPosts(board, params, hats, resolveHat);
+    if (params.joint === 'snap-fit' && params.snapType === 'full-lid') {
+      const lip = buildFullLidFrictionLip(board, params, hats, resolveHat);
+      if (lip) {
+        const withLip = union([plate, lip]);
+        return attachPosts(withLip, posts, holes);
+      }
+    }
     return attachPosts(plate, posts, holes);
   }
   switch (params.joint) {
