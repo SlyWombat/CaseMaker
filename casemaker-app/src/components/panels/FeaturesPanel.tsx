@@ -574,8 +574,18 @@ function SnapCatchesSection() {
         </button>
       </h4>
       {catches.length === 0 && <p className="features-empty">No catches.</p>}
+      {catches.length > 0 && (
+        <div className="features-row features-row--header" aria-hidden="true">
+          <span className="features-col features-col--check">on</span>
+          <span className="features-col">wall</span>
+          <span className="features-col">u (mm)</span>
+          <span className="features-col">barb</span>
+          <span className="features-col">arm on</span>
+          <span className="features-col features-col--remove" />
+        </div>
+      )}
       {catches.map((c) => (
-        <div key={c.id} className="features-row">
+        <div key={c.id} className="features-row" title={`Catch ${c.id} on wall ${c.wall}`}>
           <input
             type="checkbox"
             checked={c.enabled}

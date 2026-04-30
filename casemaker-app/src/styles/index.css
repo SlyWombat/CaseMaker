@@ -353,6 +353,30 @@ body, html, #root {
   font-style: italic;
   margin: 2px 0;
 }
+/* Issue #89 follow-up — visible column headers above feature rows so
+   sighted users identify each per-row input without hovering. */
+.features-row--header {
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  color: var(--cm-color-on-surface-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: var(--cm-border-1);
+  padding-bottom: 2px;
+  margin-bottom: 2px;
+}
+.features-col {
+  flex: 1;
+  min-width: 0;
+}
+.features-col--check {
+  flex: 0 0 auto;
+  width: 18px;
+}
+.features-col--remove {
+  flex: 0 0 auto;
+  width: 22px;
+}
 
 .port-editor-row {
   list-style: none;

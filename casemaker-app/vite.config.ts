@@ -5,7 +5,10 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
-const DEFAULT_PORT = Number(process.env.CASEMAKER_PORT ?? 8000);
+// Default port 5173 (Vite's standard). Port 8000 was the historical default
+// but conflicts with kernel-reserved ports on some WSL2 / Hyper-V hosts;
+// pick a port that's free everywhere and let CASEMAKER_PORT override.
+const DEFAULT_PORT = Number(process.env.CASEMAKER_PORT ?? 5173);
 
 // Issue #80 — inject the package version + a short git sha into the bundle so
 // the StatusBar can show "v0.10.0+abc1234". The git lookup tolerates a

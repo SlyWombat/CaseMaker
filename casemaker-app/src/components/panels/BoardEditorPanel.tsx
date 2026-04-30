@@ -26,9 +26,23 @@ interface NumInputProps {
   testId?: string;
   ariaLabel: string;
   title: string;
+  /** Forwarded by LabelledField via cloneElement so `<label htmlFor>` resolves. */
+  id?: string;
+  /** Forwarded by LabelledField for screen-reader hint text. */
+  'aria-describedby'?: string;
 }
 
-function NumInput({ value, step = 0.1, min, onChange, testId, ariaLabel, title }: NumInputProps) {
+function NumInput({
+  value,
+  step = 0.1,
+  min,
+  onChange,
+  testId,
+  ariaLabel,
+  title,
+  id,
+  'aria-describedby': describedBy,
+}: NumInputProps) {
   return (
     <input
       type="number"
@@ -39,6 +53,8 @@ function NumInput({ value, step = 0.1, min, onChange, testId, ariaLabel, title }
       data-testid={testId}
       aria-label={ariaLabel}
       title={title}
+      id={id}
+      aria-describedby={describedBy}
       className="slider-num numeric-input"
       style={{ width: '100%' }}
     />

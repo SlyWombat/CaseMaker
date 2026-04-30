@@ -1,6 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const isCI = !!process.env.CI;
+// Port 8000 is kernel-reserved on some WSL2 / Hyper-V hosts (and 8001/8002
+// often follow). 5173 is Vite's standard dev port and is free on every
+// host I've tested. CASEMAKER_PORT overrides for hosts where 5173 conflicts.
+const PORT = Number(process.env.CASEMAKER_PORT ?? 5173);
+const BASE = `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -13,7 +18,7 @@ export default defineConfig({
     toHaveScreenshot: { maxDiffPixelRatio: 0.005 },
   },
   use: {
-    baseURL: 'http://127.0.0.1:8000',
+    baseURL: BASE,
     viewport: { width: 1024, height: 768 },
     deviceScaleFactor: 1,
     trace: 'on-first-retry',
@@ -33,10 +38,10 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev -- --port 8000 --strictPort',
-    url: 'http://127.0.0.1:8000',
+    command: `npm run dev -- --port ${PORT} --strictPort`,
+    url: BASE,
     reuseExistingServer: !isCI,
     timeout: 120_000,
-    env: { VITE_E2E: '1' },
+    env: { VITE_E2E: '1', CASEMAKER_PORT: String(PORT) },
   },
 });
