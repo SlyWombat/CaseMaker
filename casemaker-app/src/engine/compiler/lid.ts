@@ -1,5 +1,5 @@
 import type { CaseParameters, BoardProfile, HatPlacement, HatProfile } from '@/types';
-import { cube, cylinder, difference, translate, union, type BuildOp } from './buildPlan';
+import { cube, cylinder, difference, roundedRectPrism, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
 import { computeBossPlacements, getScrewClearanceDiameter } from './bosses';
 import { computeHatBaseZ } from './hats';
@@ -153,9 +153,29 @@ export function buildFlatLid(
   resolveHat: HatResolver = NO_RESOLVE,
 ): BuildOp {
   const lid = computeLidDims(board, params, hats, resolveHat);
-  const plate = cube([lid.x, lid.y, lid.z], false);
+  // Issue #81 — non-recessed flat-lid plate matches the case envelope's
+  // outer corner radius so the lid silhouette aligns with the rim.
+  const plate = roundedRectPrism(lid.x, lid.y, lid.z, lidOuterCornerRadius(params));
   const { posts, holes } = buildLidPosts(board, params, hats, resolveHat);
   return attachPosts(plate, posts, holes);
+}
+
+/**
+ * Issue #81 — vertical-corner radius applied to the lid plate. For a
+ * recessed lid the pocket radius determines this; for a flat lid the case
+ * envelope's outer radius matches the rim. cornerRadius=0 returns 0 and
+ * roundedRectPrism falls back to a plain cube for byte-identical legacy.
+ */
+function lidOuterCornerRadius(params: CaseParameters): number {
+  return Math.max(0, params.cornerRadius);
+}
+
+function lidRecessedCornerRadius(params: CaseParameters): number {
+  // Recessed lid sits inside the pocket; pocket radius = cornerRadius -
+  // recessOffset; lid clearance subtracts another small amount that's
+  // negligible compared to typical radii (≤ 0.2 mm).
+  const recessOffset = Math.max(0.5, params.wallThickness - 0.5);
+  return Math.max(0, params.cornerRadius - recessOffset);
 }
 
 export function buildSnapFitLid(
@@ -165,7 +185,12 @@ export function buildSnapFitLid(
   resolveHat: HatResolver = NO_RESOLVE,
 ): BuildOp {
   const dims = computeShellDims(board, params, hats, resolveHat);
-  const topPlate = cube([dims.outerX, dims.outerY, params.lidThickness], false);
+  const topPlate = roundedRectPrism(
+    dims.outerX,
+    dims.outerY,
+    params.lidThickness,
+    lidOuterCornerRadius(params),
+  );
   const { posts, holes } = buildLidPosts(board, params, hats, resolveHat);
 
   // Issue #78 — snapType selects the lid style:
@@ -217,7 +242,12 @@ export function buildScrewDownLid(
   resolveHat: HatResolver = NO_RESOLVE,
 ): BuildOp {
   const dims = computeShellDims(board, params, hats, resolveHat);
-  const plate = cube([dims.outerX, dims.outerY, params.lidThickness], false);
+  const plate = roundedRectPrism(
+    dims.outerX,
+    dims.outerY,
+    params.lidThickness,
+    lidOuterCornerRadius(params),
+  );
   const { posts, holes } = buildLidPosts(board, params, hats, resolveHat);
   return attachPosts(plate, posts, holes);
 }
@@ -232,7 +262,7 @@ export function buildLid(
   // recess pocket; the joint flavor only adds posts / holes / snap arms.
   if (params.lidRecess) {
     const lid = computeLidDims(board, params, hats, resolveHat);
-    const plate = cube([lid.x, lid.y, lid.z], false);
+    const plate = roundedRectPrism(lid.x, lid.y, lid.z, lidRecessedCornerRadius(params));
     const { posts, holes } = buildLidPosts(board, params, hats, resolveHat);
     return attachPosts(plate, posts, holes);
   }

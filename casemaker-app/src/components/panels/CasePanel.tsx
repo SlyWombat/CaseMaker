@@ -93,6 +93,15 @@ export function CasePanel() {
         testId="lid-thickness"
       />
       <Slider
+        label="Corner radius (mm)"
+        value={params.cornerRadius}
+        min={0}
+        max={10}
+        step={0.5}
+        onChange={set('cornerRadius')}
+        testId="corner-radius"
+      />
+      <Slider
         label="Internal clearance (mm)"
         value={params.internalClearance}
         min={0}

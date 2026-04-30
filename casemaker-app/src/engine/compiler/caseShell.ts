@@ -1,5 +1,5 @@
 import type { CaseParameters, BoardProfile, HatPlacement, HatProfile } from '@/types';
-import { cube, difference, translate, type BuildOp } from './buildPlan';
+import { difference, roundedRectPrism, translate, type BuildOp } from './buildPlan';
 
 export interface ShellDims {
   outerX: number;
@@ -113,16 +113,26 @@ export function buildOuterShell(
   const dims = computeShellDims(board, params, hats, resolveHat);
   const { wallThickness: wall, floorThickness: floor } = params;
 
-  const outer = cube([dims.outerX, dims.outerY, dims.outerZ], false);
+  // Issue #81 — vertical-edge rounding. Outer corners use cornerRadius;
+  // inner cavity corners use cornerRadius - wallThickness so the wall
+  // thickness stays uniform around the corner. Floor and lid (top/bottom
+  // horizontal edges) are NOT rounded — out of scope. cornerRadius === 0
+  // falls back to plain cubes so legacy builds stay byte-identical.
+  const outerR = Math.max(0, params.cornerRadius);
+  const innerR = Math.max(0, outerR - wall);
+
+  const outer = roundedRectPrism(dims.outerX, dims.outerY, dims.outerZ, outerR);
   const overshoot = 1;
   const cavity = translate(
     [wall, wall, floor],
-    cube([dims.cavityX, dims.cavityY, dims.cavityZ + overshoot], false),
+    roundedRectPrism(dims.cavityX, dims.cavityY, dims.cavityZ + overshoot, innerR),
   );
 
   if (params.lidRecess) {
     // Recess pocket: oversized rectangular cut at the top to receive the lid,
-    // sitting on a 1mm ledge above the cavity (issue #30).
+    // sitting on a 1mm ledge above the cavity (issue #30). The pocket itself
+    // is rounded too — outer-rim radius matches the case envelope so the lid
+    // (also rounded) drops in flush; inner radius matches the wall offset.
     const recessLedge = 1;
     const recessOffset = Math.max(0.5, wall - 0.5);
     const pocketX = dims.cavityX + 2 * recessOffset;
@@ -131,10 +141,13 @@ export function buildOuterShell(
     const pocketOriginX = wall - recessOffset;
     const pocketOriginY = wall - recessOffset;
     const pocketOriginZ = dims.outerZ - pocketZ;
+    // Pocket radius: outer-corner radius minus the offset between the case
+    // envelope and the pocket rim. Stays ≥ 0 even when cornerRadius is 0.
+    const pocketR = Math.max(0, outerR - recessOffset);
     void recessLedge;
     const pocket = translate(
       [pocketOriginX, pocketOriginY, pocketOriginZ],
-      cube([pocketX, pocketY, pocketZ + overshoot], false),
+      roundedRectPrism(pocketX, pocketY, pocketZ + overshoot, pocketR),
     );
     return difference([outer, cavity, pocket]);
   }

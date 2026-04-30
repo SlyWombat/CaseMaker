@@ -104,6 +104,50 @@ export function union(children: BuildOp[]): BuildOp {
   return { kind: 'union', children };
 }
 
+/**
+ * Issue #81 — extruded rounded rectangle: a box of (width × height × depth)
+ * with the four VERTICAL edges rounded to `radius`. Built as the union of
+ * two perpendicular center-cross strips + four corner cylinders, all of full
+ * `depth`. Manifold's union fuses them into a single connected component.
+ *
+ * When `radius <= 0` returns a plain cube to keep the legacy fast path
+ * byte-identical to pre-#81 builds.
+ *
+ * Origin convention: bbox-min corner sits at (0, 0, 0); body extends to
+ * (width, height, depth) — same as `cube([w, h, d], false)` so callers can
+ * swap in roundedRectPrism without changing translation logic.
+ */
+export function roundedRectPrism(
+  width: number,
+  height: number,
+  depth: number,
+  radius: number,
+  segments = 24,
+): BuildOp {
+  if (radius <= 0) return cube([width, height, depth], false);
+  // Clamp so the corner cylinders never exceed the rectangle's half-extent.
+  const r = Math.min(radius, width / 2, height / 2);
+  // Center cross: a "+"-shaped pair of overlapping cubes that fill everything
+  // inside the rounded rim. Each strip is full-thickness in one axis and
+  // (full - 2r) in the other. Skip a strip entirely when its in-plane
+  // thickness collapses to zero (radius == width/2 or height/2 exactly) —
+  // a zero-extent cube would be an empty manifold mesh that breaks union.
+  const out: BuildOp[] = [];
+  const horizH = height - 2 * r;
+  if (horizH > 0) out.push(translate([0, r, 0], cube([width, horizH, depth], false)));
+  const vertW = width - 2 * r;
+  if (vertW > 0) out.push(translate([r, 0, 0], cube([vertW, height, depth], false)));
+  // Quarter circles at each corner — using a full cylinder is cheaper than
+  // building a quarter-cylinder mesh, and the parts of the cylinder past the
+  // rim get clipped by manifold's boolean union with the strips automatically
+  // since they sit at the same depth.
+  out.push(translate([r, r, 0], cylinder(depth, r, segments)));
+  out.push(translate([width - r, r, 0], cylinder(depth, r, segments)));
+  out.push(translate([r, height - r, 0], cylinder(depth, r, segments)));
+  out.push(translate([width - r, height - r, 0], cylinder(depth, r, segments)));
+  return union(out);
+}
+
 export function collectMeshTransferables(op: BuildOp): ArrayBuffer[] {
   const out: ArrayBuffer[] = [];
   walk(op);
