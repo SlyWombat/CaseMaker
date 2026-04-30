@@ -134,30 +134,10 @@ export function BoardEditorPanel() {
             title="Recommended Z headroom above the tallest component (mm)."
           />
         </LabelledField>
-        <LabelledField
-          label="Cross-reference URL"
-          hint="Link to product page, schematic, or documentation. Free-form."
-        >
-          <input
-            type="text"
-            value={board.crossReference ?? ''}
-            onChange={(e) => patchMeta({ crossReference: e.target.value })}
-            data-testid="meta-crossref"
-            placeholder="https://..."
-          />
-        </LabelledField>
-        <LabelledField
-          label="Datasheet revision"
-          hint="Datasheet version + date this profile was measured against, e.g. 'Rev 1.4 — 2023-08'."
-        >
-          <input
-            type="text"
-            value={board.datasheetRevision ?? ''}
-            onChange={(e) => patchMeta({ datasheetRevision: e.target.value })}
-            data-testid="meta-revision"
-            placeholder="Rev 1.4 — 2023-08"
-          />
-        </LabelledField>
+        {/* Issue #103 — Cross-reference URL + Datasheet revision moved to
+            the sidebar footer (SidebarFooter). They're reference data, not
+            interactive day-to-day, so they no longer take real estate
+            alongside Name / Manufacturer / Standoff in the meta-grid. */}
       </div>
       <div className="pcb-grid">
         <LabelledField

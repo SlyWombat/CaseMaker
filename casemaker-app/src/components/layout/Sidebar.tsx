@@ -5,6 +5,7 @@ import { BoardEditorPanel } from '@/components/panels/BoardEditorPanel';
 import { AssetsPanel } from '@/components/panels/AssetsPanel';
 import { HatsPanel } from '@/components/panels/HatsPanel';
 import { FeaturesPanel } from '@/components/panels/FeaturesPanel';
+import { SidebarFooter } from './SidebarFooter';
 import { useProjectStore } from '@/store/projectStore';
 
 export function Sidebar() {
@@ -25,6 +26,7 @@ export function Sidebar() {
       <FeaturesPanel />
       <AssetsPanel />
       <ExportPanel />
+      <SidebarFooter />
     </aside>
   );
 }

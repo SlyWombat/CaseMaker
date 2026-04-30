@@ -73,6 +73,52 @@ body, html, #root {
   border-right: var(--cm-border-1);
 }
 
+/* Issue #103 — board reference metadata (URL + datasheet revision) lives at
+   the bottom of the sidebar in muted footer style. */
+.sidebar-footer {
+  margin-top: auto;
+  padding: var(--cm-space-2) var(--cm-space-1) 0;
+  border-top: 1px solid #2a2f36;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: #6b7280;
+}
+.sidebar-footer__link {
+  color: #6b7280;
+  text-decoration: underline;
+  text-decoration-color: #374151;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar-footer__link:hover {
+  color: #9ca3af;
+  text-decoration-color: #6b7280;
+}
+.sidebar-footer__rev {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: #6b7280;
+}
+.sidebar-footer__input {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #9ca3af;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.sidebar-footer__input:hover,
+.sidebar-footer__input:focus {
+  border-color: #2a2f36;
+  background: #14181c;
+  color: #d1d5db;
+  outline: none;
+}
+
 /* Issue #93 Phase 4a — right context rail (≥ 1366 px) / drawer (< 1366 px) */
 .context-panel {
   background: var(--cm-color-surface-container-low);
