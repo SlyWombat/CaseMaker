@@ -1,0 +1,86 @@
+/*
+ * Industrial Parametric design tokens (#84).
+ *
+ * Source: docs/case_maker_design_specification.md +
+ * docs/industrial_parametric_ui/DESIGN.md.
+ *
+ * All tokens are CSS custom properties so any CSS in src/styles/*.css can opt
+ * in incrementally without a Tailwind dependency. Phase 1 uses these to
+ * retheme existing panels; Phases 2/3 build new components against them.
+ */
+
+:root {
+  /* Surfaces */
+  --cm-color-surface: #0b1326;
+  --cm-color-surface-dim: #0b1326;
+  --cm-color-surface-bright: #31394d;
+  --cm-color-surface-container-lowest: #060e20;
+  --cm-color-surface-container-low: #131b2e;
+  --cm-color-surface-container: #171f33;
+  --cm-color-surface-container-high: #222a3d;
+  --cm-color-surface-container-highest: #2d3449;
+
+  /* Text */
+  --cm-color-on-surface: #dae2fd;
+  --cm-color-on-surface-variant: #c2c6d6;
+  --cm-color-on-surface-muted: #8c909f;
+
+  /* Outlines */
+  --cm-color-outline: #8c909f;
+  --cm-color-outline-variant: #424754;
+
+  /* Brand / accents */
+  --cm-color-primary: #adc6ff;
+  --cm-color-on-primary: #002e6a;
+  --cm-color-primary-container: #4d8eff;
+  --cm-color-on-primary-container: #00285d;
+
+  --cm-color-secondary: #4edea3;     /* "valid / ready" */
+  --cm-color-on-secondary: #003824;
+  --cm-color-tertiary: #ffb786;      /* warnings / accents */
+
+  /* Status */
+  --cm-color-error: #ffb4ab;
+  --cm-color-error-container: #93000a;
+
+  /* Typography stacks */
+  --cm-font-display: 'Space Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --cm-font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --cm-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Type scale */
+  --cm-text-h1-size: 1.5rem;       /* 24px */
+  --cm-text-h2-size: 1.125rem;     /* 18px */
+  --cm-text-body-size: 0.875rem;   /* 14px */
+  --cm-text-mono-size: 0.75rem;    /* 12px */
+
+  /* Spacing — 4 px base */
+  --cm-space-1: 4px;
+  --cm-space-2: 8px;
+  --cm-space-3: 12px;
+  --cm-space-4: 16px;
+  --cm-space-5: 20px;
+  --cm-space-6: 24px;
+  --cm-space-8: 32px;
+
+  /* Shape */
+  --cm-radius-sm: 4px;
+  --cm-radius-md: 6px;
+  --cm-radius-lg: 8px;
+
+  /* Borders */
+  --cm-border-1: 1px solid var(--cm-color-outline-variant);
+  --cm-border-strong: 1px solid var(--cm-color-outline);
+}
+
+/*
+ * Numeric-input class: monospace + tabular-nums so dimension fields align
+ * column-style and don't jitter as the user types. Applied opt-in via
+ * className on the input element (e.g. <input class="numeric-input">).
+ */
+.numeric-input {
+  font-family: var(--cm-font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  letter-spacing: 0;
+}

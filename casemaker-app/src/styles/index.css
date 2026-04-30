@@ -1,8 +1,15 @@
 :root {
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Issue #84 — body / heading stacks fall back to system fonts cleanly if
+     Google Fonts fails (offline / blocked CDN). */
+  font-family: var(--cm-font-body);
   color-scheme: dark;
-  background: #1a1d21;
-  color: #e6e8eb;
+  background: var(--cm-color-surface);
+  color: var(--cm-color-on-surface);
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--cm-font-display);
+  letter-spacing: -0.01em;
 }
 
 body, html, #root {
@@ -23,13 +30,13 @@ body, html, #root {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
-  background: #14181c;
-  border-bottom: 1px solid #2a2f36;
+  padding: 0 var(--cm-space-4);
+  background: var(--cm-color-surface-container);
+  border-bottom: var(--cm-border-1);
 }
 .app-header h1 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--cm-text-h2-size);
   font-weight: 600;
 }
 .app-header__logo {
@@ -52,23 +59,25 @@ body, html, #root {
 
 .sidebar {
   overflow-y: auto;
-  padding: 12px;
-  background: #1f242a;
-  border-right: 1px solid #2a2f36;
+  padding: var(--cm-space-3);
+  background: var(--cm-color-surface-container-low);
+  border-right: var(--cm-border-1);
 }
 
 .panel {
-  padding: 12px;
-  margin-bottom: 12px;
-  background: #232930;
-  border-radius: 6px;
+  padding: var(--cm-space-3);
+  margin-bottom: var(--cm-space-3);
+  background: var(--cm-color-surface-container);
+  border: var(--cm-border-1);
+  border-radius: var(--cm-radius-md);
 }
 .panel h3 {
-  margin: 0 0 12px;
-  font-size: 13px;
+  margin: 0 0 var(--cm-space-3);
+  font-family: var(--cm-font-display);
+  font-size: var(--cm-text-mono-size);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #8a94a4;
+  letter-spacing: 0.08em;
+  color: var(--cm-color-on-surface-variant);
 }
 
 .slider-row {
