@@ -52,11 +52,11 @@ describe('Snap-fit render integrity (#42)', () => {
       const plan = compileProject(project);
       const shell = plan.nodes.find((n) => n.id === 'shell')!;
       const lid = plan.nodes.find((n) => n.id === 'lid')!;
-      // Shell must have at least the outer cube + cavity subtraction; the
-      // snap lips on the inside walls are mesh wedges (issue #75), not
-      // cubes — so just check the count of mesh ops covers the catches.
+      // Shell must have at least the outer cube + cavity subtraction. The
+      // snap lips on the inside walls were mesh wedges in #75, but #90
+      // moved them to cube primitives so manifold's union fuses them
+      // reliably at small case scales — every lip is now a translated cube.
       expect(countOps(shell.op, 'cube')).toBeGreaterThanOrEqual(2);
-      expect(countOps(shell.op, 'mesh')).toBeGreaterThanOrEqual(1);
       // Lid: flat plate cube + (arm + barb cubes per catch). The default
       // catch layout is at least 4 catches (one per wall), so ≥ 1 plate
       // + 4 × 2 = 9 cubes. The lower bound of 3 keeps the assertion

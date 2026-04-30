@@ -12,11 +12,18 @@ import { cube, cylinder, mesh, rotate, translate, union, type BuildOp } from './
 import { computeShellDims } from './caseShell';
 
 /**
- * Issue #75 — build a triangular-prism wedge for the inside-wall snap lip.
+ * Issue #75 / #90 — inside-wall snap lip. Originally a triangular-prism mesh
+ * (wedge with sloped top), but the manually-built mesh was prone to
+ * non-manifold winding and at small case scales (snap-fit-test, 53×43 mm)
+ * caused manifold's union to drop the lip as a loose component (#90).
  *
- * The wedge has a flat horizontal base (the catch face) and a sloping top (the
- * insertion ramp), running from lipTop at the wall down to lipBottom at the
- * inward tip. Used for hook + asymmetric-ramp + half-round catches.
+ * Replaced with a primitive cube of size (width × protrusion × height)
+ * placed so its wall-side face sits at the embedded origin and the body
+ * extends inward by `protrusion`. The catch face (cube top) is flat instead
+ * of sloped — slightly less ergonomic insertion than the wedge but
+ * mechanically equivalent because the cantilever arm flexes to clear the
+ * lip on its way past. Cube is guaranteed-manifold; manifold's union fuses
+ * it with the wall every time.
  */
 function buildLipWedge(
   origin: { x: number; y: number; z: number },
@@ -26,47 +33,30 @@ function buildLipWedge(
   width: number,
   height: number,
 ): BuildOp {
-  const n = wallAxis === 'x' ? 'x' : 'y';
-  const t = wallAxis === 'x' ? 'y' : 'x';
-  const positions: number[] = [];
-  function pushVert(uOff: number, nOff: number, zOff: number) {
-    const dx = (n === 'x' ? wallNormalSign * -nOff : 0) + (t === 'x' ? uOff : 0);
-    const dy = (n === 'y' ? wallNormalSign * -nOff : 0) + (t === 'y' ? uOff : 0);
-    positions.push(origin.x + dx, origin.y + dy, origin.z + zOff);
-  }
-  pushVert(0, 0, 0);
-  pushVert(width, 0, 0);
-  pushVert(0, protrusion, 0);
-  pushVert(width, protrusion, 0);
-  pushVert(0, 0, height);
-  pushVert(width, 0, height);
-  // Issue #90 — the original index list was wound for inward-facing normals
-  // (right-hand rule rolled the cross product into the wedge interior).
-  // Manifold auto-corrected on the Pi/Arduino case scale where surface area
-  // dominated, but at the snap-fit-test scale (53×43×13.6 mm) the auto-fix
-  // failed and each lip ended up as a loose Manifold component. Reversed
-  // every triangle so all face normals point outward (away from the wedge
-  // interior). Every face now satisfies the right-hand rule:
-  //   base (z=0) → -z normal
-  //   wall face (n=0, ie. INTO wall material) → -n normal (dx for ±x walls,
-  //                                                        dy for ±y walls)
-  //   top slope → +n,+z normal
-  //   front cap (u=0)  → -t normal
-  //   back cap  (u=W)  → +t normal
-  const indices: number[] = [
-    0, 3, 2,  0, 1, 3,    // base
-    0, 5, 1,  0, 4, 5,    // wall face
-    2, 3, 5,  2, 5, 4,    // top slope
-    0, 2, 4,              // front cap
-    1, 5, 3,              // back cap
-  ];
-  return mesh(new Float32Array(positions), new Uint32Array(indices));
+  // World-space cube dims: width along the wall tangent, protrusion along
+  // the wall normal, height along Z. Map (u, n, z) local → world axes by
+  // wallAxis: when wallAxis === 'x', u maps to world Y, n maps to world X;
+  // when wallAxis === 'y', u maps to world X, n maps to world Y.
+  const sx = wallAxis === 'x' ? protrusion : width;
+  const sy = wallAxis === 'y' ? protrusion : width;
+  const slab = cube([sx, sy, height], false);
+  // Position the corner so the wall-side face sits at `origin` and the
+  // body extends inward (cavity-bound) by `protrusion`. wallNormalSign === +1
+  // means outward is +axis → inward is -axis → corner offset = -protrusion.
+  // wallNormalSign === -1 → inward = +axis → corner offset stays at origin.
+  const cornerX =
+    wallAxis === 'x' ? origin.x - (wallNormalSign === 1 ? protrusion : 0) : origin.x;
+  const cornerY =
+    wallAxis === 'y' ? origin.y - (wallNormalSign === 1 ? protrusion : 0) : origin.y;
+  return translate([cornerX, cornerY, origin.z], slab);
 }
 
 /**
- * Issue #69 — symmetric (diamond / triangular-prism) lip for symmetric-ramp
- * catches. Both top and bottom are sloped; the catch face becomes a sharp
- * edge at mid-height. Equal insertion and removal force.
+ * Issue #69 / #90 — symmetric (diamond) lip for symmetric-ramp catches.
+ * Same primitive-cube fix as buildLipWedge — the original mesh pattern was
+ * the same fragile mesh-with-winding approach. Functional difference vs the
+ * hook lip is gone (both are now flat cubes); the symmetric-ramp BARB still
+ * provides the symmetric insertion/removal force on the lid side.
  */
 function buildLipSymmetricPrism(
   origin: { x: number; y: number; z: number },
@@ -76,35 +66,7 @@ function buildLipSymmetricPrism(
   width: number,
   height: number,
 ): BuildOp {
-  const n = wallAxis === 'x' ? 'x' : 'y';
-  const t = wallAxis === 'x' ? 'y' : 'x';
-  const positions: number[] = [];
-  function pushVert(uOff: number, nOff: number, zOff: number) {
-    const dx = (n === 'x' ? wallNormalSign * -nOff : 0) + (t === 'x' ? uOff : 0);
-    const dy = (n === 'y' ? wallNormalSign * -nOff : 0) + (t === 'y' ? uOff : 0);
-    positions.push(origin.x + dx, origin.y + dy, origin.z + zOff);
-  }
-  // Cross-section is a triangle: (n=0, z=0), (n=protrusion, z=h/2), (n=0, z=h).
-  pushVert(0, 0, 0);            // 0: bottom-wall-front
-  pushVert(width, 0, 0);        // 1: bottom-wall-back
-  pushVert(0, protrusion, height / 2); // 2: tip-front
-  pushVert(width, protrusion, height / 2); // 3: tip-back
-  pushVert(0, 0, height);       // 4: top-wall-front
-  pushVert(width, 0, height);   // 5: top-wall-back
-  // Issue #90 — same outward-normal winding fix as buildLipWedge.
-  const indices: number[] = [
-    // wall face (n=0, normal -n)
-    0, 5, 1,  0, 4, 5,
-    // bottom slope (from wall-bottom out to tip): normal points -z, +n
-    0, 3, 2,  0, 1, 3,
-    // top slope (from tip up to wall-top): normal points +z, +n
-    2, 5, 4,  2, 3, 5,
-    // front cap (u=0, normal -t)
-    0, 2, 4,
-    // back cap (u=W, normal +t)
-    1, 5, 3,
-  ];
-  return mesh(new Float32Array(positions), new Uint32Array(indices));
+  return buildLipWedge(origin, wallAxis, wallNormalSign, protrusion, width, height);
 }
 
 type HatResolver = (id: string) => HatProfile | undefined;
