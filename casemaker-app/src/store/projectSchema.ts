@@ -51,6 +51,10 @@ export const caseParamsSchema = z.object({
           .default('hook'),
         insertionRampDeg: z.number().optional(),
         retentionRampDeg: z.number().optional(),
+        // Issue #64 — which part holds the flexing cantilever. Optional so
+        // legacy projects load with the implicit 'lid' default; geometry
+        // dispatch keys off the .default() at parse time.
+        cantileverOn: z.enum(['lid', 'case']).default('lid'),
       }),
     )
     .optional(),

@@ -510,6 +510,21 @@ function SnapCatchesSection() {
               </option>
             ))}
           </select>
+          {/* Issue #64 — which part holds the flexing cantilever. Engine
+              still treats 'case' as 'lid' geometry (follow-up). */}
+          <select
+            value={c.cantileverOn ?? 'lid'}
+            onChange={(e) =>
+              patchSnapCatch(c.id, {
+                cantileverOn: e.target.value as 'lid' | 'case',
+              })
+            }
+            data-testid={`snap-cantilever-on-${c.id}`}
+            title="Which part flexes — lid or case"
+          >
+            <option value="lid">arm on lid</option>
+            <option value="case">arm on case</option>
+          </select>
           <button onClick={() => removeSnapCatch(c.id)}>✕</button>
         </div>
       ))}

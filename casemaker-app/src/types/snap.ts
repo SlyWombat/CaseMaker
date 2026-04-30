@@ -21,6 +21,17 @@ export const BARB_TYPES: ReadonlyArray<BarbType> = [
   'ball-socket',
 ];
 
+/**
+ * Issue #64 — which mating part holds the flexing cantilever:
+ *   'lid'  : arm + barb on the lid; lip on the case wall (default, current
+ *            behavior — pre-#64 catches assume this).
+ *   'case' : arm + barb stand UP from the inside floor on the case shell;
+ *            lip hangs DOWN from the lid underside.
+ * Mixing both styles across catches distributes the flex stress and is
+ * standard practice in production injection-molded enclosures.
+ */
+export type CantileverOn = 'lid' | 'case';
+
 export interface SnapCatch {
   id: string;
   wall: SnapWall;
@@ -32,6 +43,13 @@ export interface SnapCatch {
   /** Issue #69 — advanced overrides (not surfaced in UI v1). */
   insertionRampDeg?: number;
   retentionRampDeg?: number;
+  /**
+   * Issue #64 — which part holds the flexing cantilever. Defaults to 'lid'
+   * for back-compat. Engine geometry for 'case' is a follow-up; today the
+   * engine logs and falls back to 'lid' geometry but the field round-trips
+   * so users can record their preferred mix.
+   */
+  cantileverOn?: CantileverOn;
 }
 
 /**
