@@ -1,6 +1,15 @@
 import type { Mm } from './units';
 import type { SnapCatch } from './snap';
 
+/**
+ * The six faces of an axis-aligned box-shaped case.
+ *
+ * Issue #50 — single canonical definition. Previously duplicated across
+ * `fan.ts`, `mounting.ts`, `textLabel.ts`; those modules now re-export this
+ * type so existing import paths keep working.
+ */
+export type CaseFace = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
+
 export type JointType = 'snap-fit' | 'screw-down' | 'flat-lid';
 /**
  * Issue #78 — only meaningful when joint === 'snap-fit'.

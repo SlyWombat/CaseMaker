@@ -4,75 +4,15 @@ import type {
   HatPlacement,
   HatProfile,
 } from '@/types';
-import type { MountingFeature, CaseFace } from '@/types/mounting';
+import type { MountingFeature } from '@/types/mounting';
 import { axisCylinder, cube, cylinder, translate, type BuildOp } from './buildPlan';
 import type { Facing } from '@/types';
 import { computeShellDims } from './caseShell';
+import { faceFrame, type FaceFrame } from '@/engine/coords';
 
 export interface FeatureOpGroups {
   additive: BuildOp[];
   subtractive: BuildOp[];
-}
-
-interface FaceFrame {
-  origin: [number, number, number];
-  uAxis: [number, number, number];
-  vAxis: [number, number, number];
-  outwardAxis: [number, number, number];
-}
-
-function faceFrame(
-  face: CaseFace,
-  outerX: number,
-  outerY: number,
-  outerZ: number,
-): FaceFrame {
-  switch (face) {
-    default:
-    case '-z':
-      // Bottom: u=X, v=Y, outward = -Z
-      return {
-        origin: [0, 0, 0],
-        uAxis: [1, 0, 0],
-        vAxis: [0, 1, 0],
-        outwardAxis: [0, 0, -1],
-      };
-    case '+z':
-      return {
-        origin: [0, 0, outerZ],
-        uAxis: [1, 0, 0],
-        vAxis: [0, 1, 0],
-        outwardAxis: [0, 0, 1],
-      };
-    case '-y':
-      return {
-        origin: [0, 0, 0],
-        uAxis: [1, 0, 0],
-        vAxis: [0, 0, 1],
-        outwardAxis: [0, -1, 0],
-      };
-    case '+y':
-      return {
-        origin: [0, outerY, 0],
-        uAxis: [1, 0, 0],
-        vAxis: [0, 0, 1],
-        outwardAxis: [0, 1, 0],
-      };
-    case '-x':
-      return {
-        origin: [0, 0, 0],
-        uAxis: [0, 1, 0],
-        vAxis: [0, 0, 1],
-        outwardAxis: [-1, 0, 0],
-      };
-    case '+x':
-      return {
-        origin: [outerX, 0, 0],
-        uAxis: [0, 1, 0],
-        vAxis: [0, 0, 1],
-        outwardAxis: [1, 0, 0],
-      };
-  }
 }
 
 function num(params: MountingFeature['params'], key: string, fallback: number): number {

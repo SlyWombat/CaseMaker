@@ -4,7 +4,8 @@ export type TextFont = 'sans-default' | 'mono-default';
 export type TextWeight = 'regular' | 'bold';
 export type TextMode = 'engrave' | 'emboss';
 
-export type CaseFace = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
+import type { CaseFace } from './case';
+export type { CaseFace };
 
 export interface TextLabel {
   id: string;

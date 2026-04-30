@@ -3,7 +3,8 @@ import type { Mm } from './units';
 export type FanSize = '30x30x10' | '40x40x10' | '40x40x20' | '50x50x10' | '60x60x15';
 export type FanGrille = 'cross' | 'spiral' | 'honeycomb' | 'concentric' | 'open';
 
-export type CaseFace = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
+import type { CaseFace } from './case';
+export type { CaseFace };
 
 export interface FanSpec {
   size: FanSize;

@@ -5,7 +5,8 @@ export type MountingFeatureType =
   | 'zip-tie-slot'
   | 'vesa-mount';
 
-export type CaseFace = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
+import type { CaseFace } from './case';
+export type { CaseFace };
 
 export interface MountingFeatureParams {
   [key: string]: number | string;

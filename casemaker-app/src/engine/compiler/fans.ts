@@ -1,35 +1,13 @@
 import type { CaseParameters, BoardProfile, HatPlacement, HatProfile } from '@/types';
-import type { FanMount, CaseFace } from '@/types/fan';
+import type { FanMount } from '@/types/fan';
 import { FAN_SPECS } from '@/types/fan';
 import { cube, cylinder, difference, translate, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
+import { faceFrame, placeOnFace } from '@/engine/coords';
 
 export interface FanOpGroups {
   additive: BuildOp[];
   subtractive: BuildOp[];
-}
-
-interface FaceFrame {
-  origin: [number, number, number];
-  uAxis: [number, number, number];
-  vAxis: [number, number, number];
-}
-
-function faceFrame(face: CaseFace, x: number, y: number, z: number): FaceFrame {
-  switch (face) {
-    case '+z':
-      return { origin: [0, 0, z], uAxis: [1, 0, 0], vAxis: [0, 1, 0] };
-    case '-z':
-      return { origin: [0, 0, 0], uAxis: [1, 0, 0], vAxis: [0, 1, 0] };
-    case '+y':
-      return { origin: [0, y, 0], uAxis: [1, 0, 0], vAxis: [0, 0, 1] };
-    case '-y':
-      return { origin: [0, 0, 0], uAxis: [1, 0, 0], vAxis: [0, 0, 1] };
-    case '+x':
-      return { origin: [x, 0, 0], uAxis: [0, 1, 0], vAxis: [0, 0, 1] };
-    default:
-      return { origin: [0, 0, 0], uAxis: [0, 1, 0], vAxis: [0, 0, 1] };
-  }
 }
 
 function generateGrille(spec: typeof FAN_SPECS[keyof typeof FAN_SPECS], grille: FanMount['grille']): BuildOp[] {
@@ -116,10 +94,7 @@ export function buildFanMountOps(
     const spec = FAN_SPECS[fan.size];
     if (!spec) continue;
     const frame = faceFrame(fan.face, dims.outerX, dims.outerY, dims.outerZ);
-    // Position center of fan at (origin + uAxis*u + vAxis*v).
-    const cx = frame.origin[0] + frame.uAxis[0] * fan.position.u + frame.vAxis[0] * fan.position.v;
-    const cy = frame.origin[1] + frame.uAxis[1] * fan.position.u + frame.vAxis[1] * fan.position.v;
-    const cz = frame.origin[2] + frame.uAxis[2] * fan.position.u + frame.vAxis[2] * fan.position.v;
+    const [cx, cy, cz] = placeOnFace(frame, fan.position.u, fan.position.v);
     // Generate grille at origin then translate to (cx, cy, cz - depth/2) so the cylinder's
     // axis is along Z (only +z/-z faces really lay flat — for v1 we ship that case).
     if (fan.face !== '+z' && fan.face !== '-z') {

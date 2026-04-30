@@ -1,7 +1,8 @@
 import type { CaseParameters, BoardProfile, HatPlacement, HatProfile } from '@/types';
-import type { TextLabel, CaseFace } from '@/types/textLabel';
+import type { TextLabel } from '@/types/textLabel';
 import { cube, translate, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
+import { faceFrame, type FaceFrame } from '@/engine/coords';
 
 /**
  * Phase 1 text-label implementation: each character becomes a single
@@ -15,67 +16,6 @@ import { computeShellDims } from './caseShell';
 export interface TextLabelOpGroups {
   additive: BuildOp[];
   subtractive: BuildOp[];
-}
-
-interface FaceFrame {
-  origin: [number, number, number];
-  uAxis: [number, number, number];
-  vAxis: [number, number, number];
-  outwardSign: number; // +1 if outward axis is positive, -1 otherwise
-  outwardAxis: 'x' | 'y' | 'z';
-}
-
-function faceFrame(face: CaseFace, x: number, y: number, z: number): FaceFrame {
-  switch (face) {
-    case '+z':
-      return {
-        origin: [0, 0, z],
-        uAxis: [1, 0, 0],
-        vAxis: [0, 1, 0],
-        outwardSign: 1,
-        outwardAxis: 'z',
-      };
-    case '-z':
-      return {
-        origin: [0, 0, 0],
-        uAxis: [1, 0, 0],
-        vAxis: [0, 1, 0],
-        outwardSign: -1,
-        outwardAxis: 'z',
-      };
-    case '+y':
-      return {
-        origin: [0, y, 0],
-        uAxis: [1, 0, 0],
-        vAxis: [0, 0, 1],
-        outwardSign: 1,
-        outwardAxis: 'y',
-      };
-    case '-y':
-      return {
-        origin: [0, 0, 0],
-        uAxis: [1, 0, 0],
-        vAxis: [0, 0, 1],
-        outwardSign: -1,
-        outwardAxis: 'y',
-      };
-    case '+x':
-      return {
-        origin: [x, 0, 0],
-        uAxis: [0, 1, 0],
-        vAxis: [0, 0, 1],
-        outwardSign: 1,
-        outwardAxis: 'x',
-      };
-    default:
-      return {
-        origin: [0, 0, 0],
-        uAxis: [0, 1, 0],
-        vAxis: [0, 0, 1],
-        outwardSign: -1,
-        outwardAxis: 'x',
-      };
-  }
 }
 
 function generateLabelOps(label: TextLabel, frame: FaceFrame): BuildOp[] {
@@ -103,19 +43,19 @@ function generateLabelOps(label: TextLabel, frame: FaceFrame): BuildOp[] {
     // Block size in world coords — depth extends along the outward axis.
     const sizeX =
       Math.abs(frame.uAxis[0] * blockUWidth + frame.vAxis[0] * blockVHeight) +
-      (frame.outwardAxis === 'x' ? label.depth : 0);
+      (frame.outwardLetter === 'x' ? label.depth : 0);
     const sizeY =
       Math.abs(frame.uAxis[1] * blockUWidth + frame.vAxis[1] * blockVHeight) +
-      (frame.outwardAxis === 'y' ? label.depth : 0);
+      (frame.outwardLetter === 'y' ? label.depth : 0);
     const sizeZ =
       Math.abs(frame.uAxis[2] * blockUWidth + frame.vAxis[2] * blockVHeight) +
-      (frame.outwardAxis === 'z' ? label.depth : 0);
+      (frame.outwardLetter === 'z' ? label.depth : 0);
     // For engrave: pull the block inward by `depth` on the outward axis.
     // For emboss: keep at face plane, extending outward by `depth`.
     const offset: [number, number, number] = [0, 0, 0];
     if (label.mode === 'engrave') {
-      if (frame.outwardAxis === 'z') offset[2] = -label.depth * frame.outwardSign;
-      else if (frame.outwardAxis === 'y') offset[1] = -label.depth * frame.outwardSign;
+      if (frame.outwardLetter === 'z') offset[2] = -label.depth * frame.outwardSign;
+      else if (frame.outwardLetter === 'y') offset[1] = -label.depth * frame.outwardSign;
       else offset[0] = -label.depth * frame.outwardSign;
     }
     const blockPos: [number, number, number] = [
