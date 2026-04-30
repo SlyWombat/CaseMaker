@@ -36,55 +36,65 @@ export function WelcomeOverlay() {
   return (
     <div className="welcome-overlay" data-testid="welcome-overlay">
       <div className="welcome-overlay__card">
-        <h2>Case Maker</h2>
-        <p className="welcome-overlay__lede">
-          Pick a board to start a blank case, or a template for a one-click recipe.
-        </p>
+        <header className="welcome-overlay__hero">
+          <h1>Start a New Project</h1>
+          <p>
+            Select a base microcontroller board to drop into a blank parametric
+            enclosure, or pick a quick-start template for a one-click recipe.
+          </p>
+        </header>
 
-        <h3>Start from a board</h3>
-        <div className="welcome-overlay__row">
-          <select
-            value={boardChoice}
-            onChange={(e) => setBoardChoice(e.target.value)}
-            data-testid="welcome-board-select"
-          >
-            <option value="">— pick a board —</option>
-            {boardIds.map((id) => {
-              const b = getBuiltinBoard(id);
-              return (
-                <option key={id} value={id}>
-                  {b?.name ?? id}
-                </option>
-              );
-            })}
-          </select>
-          <button
-            disabled={!boardChoice}
-            onClick={() => applyBoard(boardChoice)}
-            data-testid="welcome-board-go"
-          >
-            Use this board
-          </button>
-        </div>
+        <section className="welcome-overlay__section">
+          <h2>Target Hardware</h2>
+          <div className="welcome-overlay__row">
+            <select
+              value={boardChoice}
+              onChange={(e) => setBoardChoice(e.target.value)}
+              data-testid="welcome-board-select"
+              aria-label="Target hardware"
+            >
+              <option value="">— pick a board —</option>
+              {boardIds.map((id) => {
+                const b = getBuiltinBoard(id);
+                return (
+                  <option key={id} value={id}>
+                    {b?.name ?? id}
+                  </option>
+                );
+              })}
+            </select>
+            <button
+              disabled={!boardChoice}
+              onClick={() => applyBoard(boardChoice)}
+              data-testid="welcome-board-go"
+            >
+              Generate Shell
+            </button>
+          </div>
+        </section>
 
-        <h3>Or start from a template</h3>
-        <ul className="welcome-overlay__templates">
-          {TEMPLATES.map((t) => (
-            <li key={t.id}>
-              <button
-                onClick={() => {
-                  void applyTemplate(t.id);
-                }}
-                data-testid={`welcome-template-${t.id}`}
-              >
-                <div className="welcome-overlay__tpl-name">{t.name}</div>
-                <div className="welcome-overlay__tpl-desc">
-                  {t.description} · ~{t.estPrintMinutes} min
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <section className="welcome-overlay__section">
+          <h2>Quick Start Templates</h2>
+          <ul className="welcome-overlay__templates">
+            {TEMPLATES.map((t) => (
+              <li key={t.id}>
+                <button
+                  onClick={() => {
+                    void applyTemplate(t.id);
+                  }}
+                  data-testid={`welcome-template-${t.id}`}
+                  aria-label={`Load ${t.name} template`}
+                >
+                  <div className="welcome-overlay__tpl-name">{t.name}</div>
+                  <div className="welcome-overlay__tpl-desc">{t.description}</div>
+                  <div className="welcome-overlay__tpl-meta">
+                    ~{t.estPrintMinutes} min print
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
 
         <div className="welcome-overlay__footer">
           <button

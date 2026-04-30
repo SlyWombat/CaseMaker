@@ -445,90 +445,158 @@ body, html, #root {
   border-radius: 2px;
 }
 
+/* Issue #85 — welcome screen redesign per refined_selection mockup. Hero
+   block + hardware combobox + template card grid. Token-driven so it
+   inherits any future palette tweaks from #84. */
 .welcome-overlay {
   position: absolute;
   inset: 0;
-  background: #11151a;
+  background: var(--cm-color-surface);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   z-index: 20;
+  overflow-y: auto;
+  padding: var(--cm-space-8) var(--cm-space-4);
 }
 .welcome-overlay__card {
-  background: #1a1f26;
-  border: 1px solid #2c343c;
-  border-radius: 6px;
-  padding: 28px 32px;
-  max-width: 600px;
-  width: 90%;
-  max-height: 90vh;
-  overflow-y: auto;
+  background: var(--cm-color-surface-container);
+  border: var(--cm-border-1);
+  border-radius: var(--cm-radius-md);
+  padding: var(--cm-space-8);
+  max-width: 920px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cm-space-6);
 }
-.welcome-overlay__card h2 {
-  margin: 0 0 6px;
-  color: #e2e6ec;
+.welcome-overlay__hero h1 {
+  margin: 0 0 var(--cm-space-2);
+  font-family: var(--cm-font-display);
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--cm-color-on-surface);
 }
-.welcome-overlay__card h3 {
-  margin: 18px 0 6px;
-  font-size: 13px;
-  color: #c4cad3;
+.welcome-overlay__hero p {
+  margin: 0;
+  color: var(--cm-color-on-surface-variant);
+  font-size: 1rem;
+  line-height: 1.5;
+  max-width: 60ch;
 }
-.welcome-overlay__lede {
-  color: #8a94a4;
-  margin: 0 0 8px;
+.welcome-overlay__section h2 {
+  margin: 0 0 var(--cm-space-3);
+  font-family: var(--cm-font-display);
+  font-size: var(--cm-text-mono-size);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--cm-color-on-surface-variant);
+  font-weight: 600;
 }
 .welcome-overlay__row {
   display: flex;
-  gap: 8px;
+  gap: var(--cm-space-3);
+  align-items: stretch;
 }
 .welcome-overlay__row select {
   flex: 1;
-  background: #1f242c;
-  border: 1px solid #3a4250;
-  color: #e2e6ec;
-  padding: 4px 6px;
-  border-radius: 3px;
+  background: var(--cm-color-surface-container-low);
+  border: var(--cm-border-1);
+  color: var(--cm-color-on-surface);
+  padding: var(--cm-space-2) var(--cm-space-3);
+  border-radius: var(--cm-radius-sm);
+  font-size: var(--cm-text-body-size);
+  font-family: var(--cm-font-body);
+}
+.welcome-overlay__row select:focus-visible {
+  outline: 2px solid var(--cm-color-primary);
+  outline-offset: 1px;
+}
+.welcome-overlay__row button {
+  background: var(--cm-color-primary-container);
+  color: var(--cm-color-on-primary);
+  border: none;
+  border-radius: var(--cm-radius-sm);
+  padding: var(--cm-space-2) var(--cm-space-5);
+  font-family: var(--cm-font-display);
+  font-weight: 600;
+  font-size: var(--cm-text-body-size);
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+.welcome-overlay__row button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.welcome-overlay__row button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .welcome-overlay__templates {
   list-style: none;
   padding: 0;
-  margin: 4px 0 0;
+  margin: 0;
   display: grid;
-  gap: 4px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--cm-space-3);
 }
 .welcome-overlay__templates button {
   width: 100%;
   text-align: left;
-  padding: 6px 8px;
-  background: #20262e;
-  border: 1px solid #2c343c;
-  color: #e2e6ec;
-  border-radius: 3px;
+  padding: var(--cm-space-4);
+  background: var(--cm-color-surface-container-low);
+  border: var(--cm-border-1);
+  color: var(--cm-color-on-surface);
+  border-radius: var(--cm-radius-md);
   cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cm-space-2);
+  min-height: 120px;
+  transition: border-color 120ms ease, transform 120ms ease;
 }
 .welcome-overlay__templates button:hover {
-  background: #2a323c;
+  border-color: var(--cm-color-primary);
+  transform: translateY(-1px);
+}
+.welcome-overlay__templates button:focus-visible {
+  outline: 2px solid var(--cm-color-primary);
+  outline-offset: 2px;
 }
 .welcome-overlay__tpl-name {
-  font-size: 12px;
+  font-family: var(--cm-font-display);
+  font-size: 1rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 .welcome-overlay__tpl-desc {
-  font-size: 11px;
-  color: #8a94a4;
-  margin-top: 2px;
+  font-size: var(--cm-text-mono-size);
+  color: var(--cm-color-on-surface-variant);
+  line-height: 1.4;
+  flex: 1;
+}
+.welcome-overlay__tpl-meta {
+  font-family: var(--cm-font-mono);
+  font-size: 0.6875rem;
+  color: var(--cm-color-on-surface-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 .welcome-overlay__footer {
-  margin-top: 16px;
-  text-align: right;
+  display: flex;
+  justify-content: flex-end;
 }
 .welcome-overlay__skip {
   background: none;
   border: none;
-  color: #8a94a4;
-  font-size: 11px;
-  text-decoration: underline;
+  color: var(--cm-color-on-surface-variant);
+  font-size: var(--cm-text-body-size);
+  font-family: var(--cm-font-body);
   cursor: pointer;
+  padding: var(--cm-space-2);
+}
+.welcome-overlay__skip:hover {
+  color: var(--cm-color-on-surface);
 }
 
 .subhead {
