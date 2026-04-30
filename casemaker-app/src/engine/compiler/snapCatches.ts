@@ -40,12 +40,25 @@ function buildLipWedge(
   pushVert(width, protrusion, 0);
   pushVert(0, 0, height);
   pushVert(width, 0, height);
+  // Issue #90 — the original index list was wound for inward-facing normals
+  // (right-hand rule rolled the cross product into the wedge interior).
+  // Manifold auto-corrected on the Pi/Arduino case scale where surface area
+  // dominated, but at the snap-fit-test scale (53×43×13.6 mm) the auto-fix
+  // failed and each lip ended up as a loose Manifold component. Reversed
+  // every triangle so all face normals point outward (away from the wedge
+  // interior). Every face now satisfies the right-hand rule:
+  //   base (z=0) → -z normal
+  //   wall face (n=0, ie. INTO wall material) → -n normal (dx for ±x walls,
+  //                                                        dy for ±y walls)
+  //   top slope → +n,+z normal
+  //   front cap (u=0)  → -t normal
+  //   back cap  (u=W)  → +t normal
   const indices: number[] = [
-    0, 2, 3,  0, 3, 1,
-    0, 1, 5,  0, 5, 4,
-    2, 5, 3,  2, 4, 5,
-    0, 4, 2,
-    1, 3, 5,
+    0, 3, 2,  0, 1, 3,    // base
+    0, 5, 1,  0, 4, 5,    // wall face
+    2, 3, 5,  2, 5, 4,    // top slope
+    0, 2, 4,              // front cap
+    1, 5, 3,              // back cap
   ];
   return mesh(new Float32Array(positions), new Uint32Array(indices));
 }
@@ -78,17 +91,18 @@ function buildLipSymmetricPrism(
   pushVert(width, protrusion, height / 2); // 3: tip-back
   pushVert(0, 0, height);       // 4: top-wall-front
   pushVert(width, 0, height);   // 5: top-wall-back
+  // Issue #90 — same outward-normal winding fix as buildLipWedge.
   const indices: number[] = [
-    // wall face (n=0)
-    0, 1, 5,  0, 5, 4,
-    // bottom slope (from wall-bottom up to tip)
-    0, 2, 3,  0, 3, 1,
-    // top slope (from tip up to wall-top)
-    2, 4, 5,  2, 5, 3,
-    // front cap
-    0, 4, 2,
-    // back cap
-    1, 3, 5,
+    // wall face (n=0, normal -n)
+    0, 5, 1,  0, 4, 5,
+    // bottom slope (from wall-bottom out to tip): normal points -z, +n
+    0, 3, 2,  0, 1, 3,
+    // top slope (from tip up to wall-top): normal points +z, +n
+    2, 5, 4,  2, 3, 5,
+    // front cap (u=0, normal -t)
+    0, 2, 4,
+    // back cap (u=W, normal +t)
+    1, 5, 3,
   ];
   return mesh(new Float32Array(positions), new Uint32Array(indices));
 }
