@@ -66,23 +66,26 @@ function DisplaySection() {
   return (
     <section className="features-section">
       <h4>Display</h4>
-      <select
-        value={display?.displayId ?? ''}
-        onChange={(e) => {
-          const v = e.target.value;
-          setDisplay(v === '' ? null : v);
-        }}
-        data-testid="display-select"
-        aria-label="Display module"
-        title="Pick a built-in display module to add a window/cutout to the case."
-      >
-        <option value="">— none —</option>
-        {ids.map((id) => (
-          <option key={id} value={id}>
-            {id}
-          </option>
-        ))}
-      </select>
+      <label className="cell-label" style={{ display: 'flex', width: '100%' }}>
+        <span className="cell-label__axis">module</span>
+        <select
+          value={display?.displayId ?? ''}
+          onChange={(e) => {
+            const v = e.target.value;
+            setDisplay(v === '' ? null : v);
+          }}
+          data-testid="display-select"
+          aria-label="Display module"
+          title="Pick a built-in display module to add a window/cutout to the case."
+        >
+          <option value="">— none —</option>
+          {ids.map((id) => (
+            <option key={id} value={id}>
+              {id}
+            </option>
+          ))}
+        </select>
+      </label>
       {display && (
         <div className="features-row">
           <label title="Toggle whether the display window is cut into the case.">

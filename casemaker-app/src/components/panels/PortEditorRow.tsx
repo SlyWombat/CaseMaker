@@ -41,14 +41,16 @@ export function PortEditorRow({
   return (
     <li className="port-editor-row">
       <div className="port-editor-row__head">
-        <input
-          type="checkbox"
-          checked={port.enabled}
-          onChange={(e) => onSetEnabled(e.target.checked)}
-          data-testid={`${tid}-enabled`}
-          aria-label={`Port ${portLabel} enabled`}
-          title={`Enable / disable the cutout for the ${portLabel} port.`}
-        />
+        <label className="cell-label" title={`Enable / disable the cutout for the ${portLabel} port.`}>
+          <span className="cell-label__axis">on</span>
+          <input
+            type="checkbox"
+            checked={port.enabled}
+            onChange={(e) => onSetEnabled(e.target.checked)}
+            data-testid={`${tid}-enabled`}
+            aria-label={`Port ${portLabel} enabled`}
+          />
+        </label>
         <button
           className="port-editor-row__expand"
           onClick={() => setOpen((v) => !v)}

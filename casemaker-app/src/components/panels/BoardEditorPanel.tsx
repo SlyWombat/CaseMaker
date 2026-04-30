@@ -307,40 +307,47 @@ export function BoardEditorPanel() {
           {board.components.flatMap((c) => [
             <tr key={`${c.id}-head`}>
               <td>
-                <select
-                  value={c.kind}
-                  onChange={(e) =>
-                    patchComponent(c.id, { kind: e.target.value as ComponentKind })
-                  }
-                  data-testid={`component-${c.id}-kind`}
-                  aria-label={`Component ${c.id} kind`}
-                  title="Connector kind. Drives the default cutout shape and port group."
-                  style={{ width: '100%' }}
-                >
-                  {KIND_OPTIONS.map((k) => (
-                    <option key={k} value={k}>
-                      {k}
-                    </option>
-                  ))}
-                </select>
+                <label className="cell-label">
+                  <span className="cell-label__row">{c.id}</span>
+                  <span className="cell-label__axis">kind</span>
+                  <select
+                    value={c.kind}
+                    onChange={(e) =>
+                      patchComponent(c.id, { kind: e.target.value as ComponentKind })
+                    }
+                    data-testid={`component-${c.id}-kind`}
+                    aria-label={`Component ${c.id} kind`}
+                    title="Connector kind. Drives the default cutout shape and port group."
+                    style={{ width: '100%' }}
+                  >
+                    {KIND_OPTIONS.map((k) => (
+                      <option key={k} value={k}>
+                        {k}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </td>
               <td>
-                <select
-                  value={c.facing ?? '+y'}
-                  onChange={(e) =>
-                    patchComponent(c.id, { facing: e.target.value as Facing })
-                  }
-                  data-testid={`component-${c.id}-facing`}
-                  aria-label={`Component ${c.id} facing`}
-                  title="Which case face the connector points out of (e.g. +y = back wall)."
-                  style={{ width: '100%' }}
-                >
-                  {FACING_OPTIONS.map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
-                </select>
+                <label className="cell-label">
+                  <span className="cell-label__axis">facing</span>
+                  <select
+                    value={c.facing ?? '+y'}
+                    onChange={(e) =>
+                      patchComponent(c.id, { facing: e.target.value as Facing })
+                    }
+                    data-testid={`component-${c.id}-facing`}
+                    aria-label={`Component ${c.id} facing`}
+                    title="Which case face the connector points out of (e.g. +y = back wall)."
+                    style={{ width: '100%' }}
+                  >
+                    {FACING_OPTIONS.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </td>
               <td colSpan={2} style={{ color: '#8a94a4', fontSize: 11 }}>
                 pos / size below
@@ -364,49 +371,67 @@ export function BoardEditorPanel() {
                   <span className="coord-axis-header">Y</span>
                   <span className="coord-axis-header">Z</span>
                   <span className="coord-label">pos</span>
-                  <NumInput
-                    value={c.position.x}
-                    onChange={(v) => patchComponent(c.id, { position: { x: v } })}
-                    testId={`component-${c.id}-pos-x`}
-                    ariaLabel={`Component ${c.id} position X (mm)`}
-                    title={`Component ${c.id} — position X (mm), measured from the PCB origin.`}
-                  />
-                  <NumInput
-                    value={c.position.y}
-                    onChange={(v) => patchComponent(c.id, { position: { y: v } })}
-                    testId={`component-${c.id}-pos-y`}
-                    ariaLabel={`Component ${c.id} position Y (mm)`}
-                    title={`Component ${c.id} — position Y (mm), measured from the PCB origin.`}
-                  />
-                  <NumInput
-                    value={c.position.z}
-                    onChange={(v) => patchComponent(c.id, { position: { z: v } })}
-                    testId={`component-${c.id}-pos-z`}
-                    ariaLabel={`Component ${c.id} position Z (mm)`}
-                    title={`Component ${c.id} — position Z (mm), measured from the top of the PCB.`}
-                  />
+                  <label className="cell-label">
+                    <span className="cell-label__axis cell-label__axis--xs">X</span>
+                    <NumInput
+                      value={c.position.x}
+                      onChange={(v) => patchComponent(c.id, { position: { x: v } })}
+                      testId={`component-${c.id}-pos-x`}
+                      ariaLabel={`Component ${c.id} position X (mm)`}
+                      title={`Component ${c.id} — position X (mm), measured from the PCB origin.`}
+                    />
+                  </label>
+                  <label className="cell-label">
+                    <span className="cell-label__axis cell-label__axis--xs">Y</span>
+                    <NumInput
+                      value={c.position.y}
+                      onChange={(v) => patchComponent(c.id, { position: { y: v } })}
+                      testId={`component-${c.id}-pos-y`}
+                      ariaLabel={`Component ${c.id} position Y (mm)`}
+                      title={`Component ${c.id} — position Y (mm), measured from the PCB origin.`}
+                    />
+                  </label>
+                  <label className="cell-label">
+                    <span className="cell-label__axis cell-label__axis--xs">Z</span>
+                    <NumInput
+                      value={c.position.z}
+                      onChange={(v) => patchComponent(c.id, { position: { z: v } })}
+                      testId={`component-${c.id}-pos-z`}
+                      ariaLabel={`Component ${c.id} position Z (mm)`}
+                      title={`Component ${c.id} — position Z (mm), measured from the top of the PCB.`}
+                    />
+                  </label>
                   <span className="coord-label">size</span>
-                  <NumInput
-                    value={c.size.x}
-                    onChange={(v) => patchComponent(c.id, { size: { x: v } })}
-                    testId={`component-${c.id}-size-x`}
-                    ariaLabel={`Component ${c.id} size X (mm)`}
-                    title={`Component ${c.id} — size X (mm). For side-facing connectors this is the depth into the wall.`}
-                  />
-                  <NumInput
-                    value={c.size.y}
-                    onChange={(v) => patchComponent(c.id, { size: { y: v } })}
-                    testId={`component-${c.id}-size-y`}
-                    ariaLabel={`Component ${c.id} size Y (mm)`}
-                    title={`Component ${c.id} — size Y (mm).`}
-                  />
-                  <NumInput
-                    value={c.size.z}
-                    onChange={(v) => patchComponent(c.id, { size: { z: v } })}
-                    testId={`component-${c.id}-size-z`}
-                    ariaLabel={`Component ${c.id} size Z (mm)`}
-                    title={`Component ${c.id} — size Z (mm).`}
-                  />
+                  <label className="cell-label">
+                    <span className="cell-label__axis cell-label__axis--xs">X</span>
+                    <NumInput
+                      value={c.size.x}
+                      onChange={(v) => patchComponent(c.id, { size: { x: v } })}
+                      testId={`component-${c.id}-size-x`}
+                      ariaLabel={`Component ${c.id} size X (mm)`}
+                      title={`Component ${c.id} — size X (mm). For side-facing connectors this is the depth into the wall.`}
+                    />
+                  </label>
+                  <label className="cell-label">
+                    <span className="cell-label__axis cell-label__axis--xs">Y</span>
+                    <NumInput
+                      value={c.size.y}
+                      onChange={(v) => patchComponent(c.id, { size: { y: v } })}
+                      testId={`component-${c.id}-size-y`}
+                      ariaLabel={`Component ${c.id} size Y (mm)`}
+                      title={`Component ${c.id} — size Y (mm).`}
+                    />
+                  </label>
+                  <label className="cell-label">
+                    <span className="cell-label__axis cell-label__axis--xs">Z</span>
+                    <NumInput
+                      value={c.size.z}
+                      onChange={(v) => patchComponent(c.id, { size: { z: v } })}
+                      testId={`component-${c.id}-size-z`}
+                      ariaLabel={`Component ${c.id} size Z (mm)`}
+                      title={`Component ${c.id} — size Z (mm).`}
+                    />
+                  </label>
                 </div>
               </td>
             </tr>,

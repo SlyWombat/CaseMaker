@@ -23,6 +23,8 @@ export function HatsPanel() {
     <div className="panel">
       <h3>HATs / shields</h3>
       <div className="settings-row" style={{ gridTemplateColumns: '1fr auto' }}>
+        <label className="cell-label" style={{ flex: 1 }}>
+          <span className="cell-label__axis">add HAT</span>
         <select
           value={pickerValue}
           onChange={(e) => setPickerValue(e.target.value)}
@@ -37,6 +39,7 @@ export function HatsPanel() {
             </option>
           ))}
         </select>
+        </label>
         <button
           onClick={() => {
             if (pickerValue) {
