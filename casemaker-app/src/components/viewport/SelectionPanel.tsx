@@ -3,6 +3,7 @@ import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { getBuiltinBoard } from '@/library';
 import { getBuiltinHat } from '@/library/hats';
+import type { CutoutShape, PortPlacement } from '@/types';
 
 /**
  * Issue #83 — floating panel that surfaces the active in-viewport selection
@@ -39,6 +40,8 @@ export function SelectionPanel() {
   const project = useProjectStore((s) => s.project);
   const patchBoardMeta = useProjectStore((s) => s.patchBoardMeta);
   const patchHat = useProjectStore((s) => s.patchHat);
+  const patchPort = useProjectStore((s) => s.patchPort);
+  const resetPort = useProjectStore((s) => s.resetPortToDefault);
 
   // Track whether we've already warned about host X/Y nudge being a no-op
   // in v1 — log once per page session.
@@ -111,7 +114,12 @@ export function SelectionPanel() {
           const next = Math.max(0, project.board.defaultStandoffHeight + dz);
           patchBoardMeta({ defaultStandoffHeight: round(next) });
         }
-      } else {
+      } else if (selection.kind === 'port') {
+        // Issue #94 — port nudge already handled by PortMarkers' own
+        // keyboard handler (axis-locked + facing-aware via
+        // nudgeVectorsForFacing). Skip here to avoid double-firing.
+        return;
+      } else if (selection.kind === 'hat') {
         const placement = project.hats?.find((h) => h.id === selection.hatPlacementId);
         if (!placement) return;
         if (dz !== 0) {
@@ -135,6 +143,19 @@ export function SelectionPanel() {
   }, [selection, project.board.defaultStandoffHeight, project.hats, project.customHats, patchBoardMeta, patchHat, setSelection]);
 
   if (!selection) return null;
+
+  if (selection.kind === 'port') {
+    const port = project.ports.find((p) => p.id === selection.portId);
+    if (!port) return null;
+    return (
+      <PortDetail
+        port={port}
+        onClose={() => setSelection(null)}
+        onPatch={(patch) => patchPort(port.id, patch)}
+        onReset={port.sourceComponentId ? () => resetPort(port.id) : undefined}
+      />
+    );
+  }
 
   if (selection.kind === 'host') {
     const board = project.board;
@@ -331,4 +352,144 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
 /** Round to 0.01 mm to keep nudge math from accumulating float drift. */
 function round(v: number): number {
   return Math.round(v * 100) / 100;
+}
+
+/**
+ * Issue #94 (Phase 4b) — port detail form. Mirrors the inline expand block
+ * that used to live in PortEditorRow, but rendered in the right rail with
+ * full-width inputs and proper labels. Position / size on a 3-column grid;
+ * cutout-margin + shape on a row below.
+ */
+function PortDetail({
+  port,
+  onClose,
+  onPatch,
+  onReset,
+}: {
+  port: PortPlacement;
+  onClose: () => void;
+  onPatch: (patch: {
+    position?: Partial<{ x: number; y: number; z: number }>;
+    size?: Partial<{ x: number; y: number; z: number }>;
+    cutoutMargin?: number;
+    cutoutShape?: CutoutShape;
+  }) => void;
+  onReset?: () => void;
+}) {
+  const portLabel = port.kind === 'custom' && port.sourceComponentId
+    ? port.sourceComponentId
+    : port.kind;
+  return (
+    <div className="selection-panel" data-testid="selection-panel-port">
+      <div className="selection-panel__header">
+        <span className="selection-panel__title">{portLabel}</span>
+        <button
+          type="button"
+          className="selection-panel__close"
+          onClick={onClose}
+          aria-label="Close selection"
+          title="Close (Esc)"
+        >
+          ×
+        </button>
+      </div>
+      <div className="selection-panel__subtitle">
+        port [{port.facing}] · {port.enabled ? 'enabled' : 'disabled'}
+      </div>
+
+      <div className="port-coord-grid">
+        <span className="coord-label" />
+        <span className="coord-axis">x</span>
+        <span className="coord-axis">y</span>
+        <span className="coord-axis">z</span>
+        <span className="coord-label">pos</span>
+        <PortNum value={port.position.x} onChange={(v) => onPatch({ position: { x: v } })} testId={`port-${port.id}-pos-x`} ariaLabel="Port position X (mm)" />
+        <PortNum value={port.position.y} onChange={(v) => onPatch({ position: { y: v } })} testId={`port-${port.id}-pos-y`} ariaLabel="Port position Y (mm)" />
+        <PortNum value={port.position.z} onChange={(v) => onPatch({ position: { z: v } })} testId={`port-${port.id}-pos-z`} ariaLabel="Port position Z (mm)" />
+        <span className="coord-label">size</span>
+        <PortNum value={port.size.x} onChange={(v) => onPatch({ size: { x: v } })} testId={`port-${port.id}-size-x`} ariaLabel="Port size X (mm)" />
+        <PortNum value={port.size.y} onChange={(v) => onPatch({ size: { y: v } })} testId={`port-${port.id}-size-y`} ariaLabel="Port size Y (mm)" />
+        <PortNum value={port.size.z} onChange={(v) => onPatch({ size: { z: v } })} testId={`port-${port.id}-size-z`} ariaLabel="Port size Z (mm)" />
+      </div>
+
+      <FieldRow label="Cutout margin (mm)">
+        <input
+          type="number"
+          step={0.1}
+          className="numeric-input selection-panel__input"
+          value={port.cutoutMargin}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) onPatch({ cutoutMargin: v });
+          }}
+          data-testid={`port-${port.id}-margin`}
+          aria-label="Port cutout margin (mm)"
+          title="Extra clearance added to the cutout (mm). For round shapes the diameter = max(size.y, size.z) + 2 × margin."
+        />
+      </FieldRow>
+      <FieldRow label="Cutout shape">
+        <select
+          className="selection-panel__input"
+          value={port.cutoutShape ?? 'rect'}
+          onChange={(e) => onPatch({ cutoutShape: e.target.value as CutoutShape })}
+          data-testid={`port-${port.id}-shape`}
+          aria-label="Port cutout shape"
+          title="Cutout shape — rectangle (size.y × size.z) or round (max axis = diameter)."
+        >
+          <option value="rect">rect</option>
+          <option value="round">round</option>
+        </select>
+      </FieldRow>
+
+      {port.cutoutShape === 'round' ? (
+        <p className="selection-panel__hint">
+          Round hole diameter = max(size.y={port.size.y.toFixed(1)}, size.z={port.size.z.toFixed(1)}) + 2 × margin = <strong>{(Math.max(port.size.y, port.size.z) + 2 * port.cutoutMargin).toFixed(2)} mm</strong>.
+        </p>
+      ) : (
+        <p className="selection-panel__hint">
+          Rect cutout = (size.y + 2 × margin) × (size.z + 2 × margin) on the wall face.
+        </p>
+      )}
+
+      {onReset && (
+        <div className="selection-panel__actions">
+          <button
+            type="button"
+            className="selection-panel__btn"
+            onClick={onReset}
+            data-testid={`port-${port.id}-reset`}
+            title="Reset position / size / margin / shape back to the source component's default."
+          >
+            ↺ Reset to component default
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PortNum({
+  value,
+  onChange,
+  testId,
+  ariaLabel,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  testId?: string;
+  ariaLabel: string;
+}) {
+  return (
+    <input
+      type="number"
+      value={value}
+      step={0.1}
+      onChange={(e) => onChange(Number(e.target.value))}
+      data-testid={testId}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      className="port-num numeric-input"
+      style={{ width: '100%' }}
+    />
+  );
 }

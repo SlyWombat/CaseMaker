@@ -16,11 +16,18 @@ export type ViewportTool = 'select' | 'pan' | 'orbit';
 export type ViewportCameraMode = 'perspective' | 'top' | 'front' | 'side';
 
 // Issue #83 — host PCB / HAT in-viewport selection. Session-scoped (NOT
-// persisted) — fresh page load = no selection. The selection drives
-// SelectionPanel and the keyboard nudge handler.
+// persisted) — fresh page load = no selection. The selection drives the
+// ContextPanel content (right rail) and the keyboard nudge handler.
+//
+// Issue #94 (Phase 4b) — extended with `port` so PortEditorRow's old
+// inline expand block can route through the same selection plumbing.
+// Clicking a port row in the left rail OR a port marker in the 3D
+// viewport sets `{ kind: 'port', portId }` and the right rail renders
+// the position / size / margin / shape detail form.
 export type ViewportSelection =
   | { kind: 'host' }
   | { kind: 'hat'; hatPlacementId: string }
+  | { kind: 'port'; portId: string }
   | null;
 
 // Issue #91 — 4-way view-mode picker that drives lid lift + per-mesh

@@ -26,6 +26,7 @@ export function PortMarkers() {
   const caseParams = useProjectStore((s) => s.project.case);
   const selectedId = useViewportStore((s) => s.selectedPortId);
   const select = useViewportStore((s) => s.selectPort);
+  const setSelection = useViewportStore((s) => s.setSelection);
   const patchPort = useProjectStore((s) => s.patchPort);
 
   const markers = useMemo<MarkerInfo[]>(() => {
@@ -110,7 +111,11 @@ export function PortMarkers() {
             <mesh
               onClick={(e) => {
                 e.stopPropagation();
+                // Issue #94 — clicking a port marker in the 3D viewport
+                // selects the port AND opens the right-rail detail editor
+                // via the unified selection model.
                 select(m.port.id);
+                setSelection({ kind: 'port', portId: m.port.id });
               }}
               userData={{ portId: m.port.id }}
               name={`port-marker-${m.port.id}`}

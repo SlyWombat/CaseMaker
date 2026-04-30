@@ -518,6 +518,15 @@ body, html, #root {
 .port-editor-row__expand:hover {
   color: #fff;
 }
+/* Issue #94 — visually mark the row whose detail is open in the right rail. */
+.port-editor-row--selected {
+  background: var(--cm-color-surface-bright);
+  border-left: 2px solid var(--cm-color-primary);
+  padding-left: 4px;
+}
+.port-editor-row--selected .port-editor-row__expand {
+  color: var(--cm-color-primary);
+}
 .port-editor-row__body {
   padding: 4px 0 6px 22px;
   font-size: 11px;
