@@ -213,21 +213,33 @@ function buildHexForFrame(frame: VentFrame, coverage: number): BuildOp[] {
   return ops;
 }
 
+export interface VentilationCutouts {
+  /** Cutters for surfaces that are part of the case shell (sides + bottom). */
+  shellCuts: BuildOp[];
+  /** Cutters for the lid (the 'top' surface) — applied separately by
+   *  ProjectCompiler so they actually pierce the lid mesh. Until this split
+   *  existed, top-surface vents were placed in shellCuts and silently
+   *  removed nothing because the shell has no material at lid Z. */
+  lidCuts: BuildOp[];
+}
+
 export function buildVentilationCutouts(
   board: BoardProfile,
   params: CaseParameters,
   hats: HatPlacement[] = NO_HATS,
   resolveHat: HatResolver = NO_RESOLVE,
-): BuildOp[] {
-  if (!params.ventilation.enabled) return [];
-  if (params.ventilation.coverage <= 0) return [];
+): VentilationCutouts {
+  const empty: VentilationCutouts = { shellCuts: [], lidCuts: [] };
+  if (!params.ventilation.enabled) return empty;
+  if (params.ventilation.coverage <= 0) return empty;
   const dims = computeShellDims(board, params, hats, resolveHat);
   const surfaces: VentSurface[] =
     params.ventilation.surfaces && params.ventilation.surfaces.length > 0
       ? params.ventilation.surfaces
       : ['back'];
   const coverage = clamp01(params.ventilation.coverage);
-  const ops: BuildOp[] = [];
+  const shellCuts: BuildOp[] = [];
+  const lidCuts: BuildOp[] = [];
   for (const s of surfaces) {
     const frame = frameFor(
       s,
@@ -239,13 +251,14 @@ export function buildVentilationCutouts(
       params.lidThickness,
     );
     if (!frame) continue;
+    const dest = s === 'top' ? lidCuts : shellCuts;
     if (params.ventilation.pattern === 'slots') {
-      ops.push(...buildSlotsForFrame(frame, coverage));
+      dest.push(...buildSlotsForFrame(frame, coverage));
     } else if (params.ventilation.pattern === 'hex') {
-      ops.push(...buildHexForFrame(frame, coverage));
+      dest.push(...buildHexForFrame(frame, coverage));
     }
   }
-  return ops;
+  return { shellCuts, lidCuts };
 }
 
 function clamp01(v: number): number {

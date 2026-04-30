@@ -6,6 +6,14 @@ import { describe, it, expect } from 'vitest';
 import { buildVentilationCutouts } from '@/engine/compiler/ventilation';
 import { createDefaultProject } from '@/store/projectStore';
 
+// Followup to #75 — buildVentilationCutouts now returns split cuts:
+//   { shellCuts, lidCuts }. shellCuts pierce the case shell; lidCuts
+//   pierce the lid mesh (top-surface vents — previously silently
+//   dropped because the shell has no material at lid Z).
+function totalCount(c: { shellCuts: unknown[]; lidCuts: unknown[] }): number {
+  return c.shellCuts.length + c.lidCuts.length;
+}
+
 describe('Multi-surface ventilation (#75)', () => {
   const baseProject = createDefaultProject('rpi-4b');
   baseProject.case.ventilation = {
@@ -15,8 +23,8 @@ describe('Multi-surface ventilation (#75)', () => {
   };
 
   it('legacy project (no surfaces field) defaults to back wall only', () => {
-    const ops = buildVentilationCutouts(baseProject.board, baseProject.case);
-    expect(ops.length).toBeGreaterThan(0);
+    const cuts = buildVentilationCutouts(baseProject.board, baseProject.case);
+    expect(totalCount(cuts)).toBeGreaterThan(0);
   });
 
   it('explicit surfaces=["back"] matches legacy output count', () => {
@@ -25,7 +33,7 @@ describe('Multi-surface ventilation (#75)', () => {
       ...baseProject.case,
       ventilation: { ...baseProject.case.ventilation, surfaces: ['back'] },
     });
-    expect(explicit.length).toBe(legacy.length);
+    expect(totalCount(explicit)).toBe(totalCount(legacy));
   });
 
   it('top + bottom + back produces strictly more cutouts than back alone', () => {
@@ -40,7 +48,10 @@ describe('Multi-surface ventilation (#75)', () => {
         surfaces: ['back', 'top', 'bottom'],
       },
     });
-    expect(multi.length).toBeGreaterThan(single.length);
+    expect(totalCount(multi)).toBeGreaterThan(totalCount(single));
+    // top vents are routed to lidCuts; back+bottom go to shellCuts.
+    expect(multi.lidCuts.length).toBeGreaterThan(0);
+    expect(multi.shellCuts.length).toBeGreaterThan(single.shellCuts.length);
   });
 
   it('all six surfaces selected produces ~6× the cutouts of one surface', () => {
@@ -55,10 +66,7 @@ describe('Multi-surface ventilation (#75)', () => {
         surfaces: ['top', 'bottom', 'front', 'back', 'left', 'right'],
       },
     });
-    // Top and bottom may have a different cell count than walls (different
-    // u/v extents), so don't insist on exactly 6×; just that we're in the
-    // right neighborhood.
-    expect(all.length).toBeGreaterThanOrEqual(single.length * 4);
+    expect(totalCount(all)).toBeGreaterThanOrEqual(totalCount(single) * 4);
   });
 
   it('hex pattern multi-surface also produces more cutouts than single', () => {
@@ -80,14 +88,23 @@ describe('Multi-surface ventilation (#75)', () => {
         surfaces: ['back', 'left', 'right'],
       },
     });
-    expect(multi.length).toBeGreaterThan(single.length);
+    expect(totalCount(multi)).toBeGreaterThan(totalCount(single));
   });
 
   it('empty surfaces array also defaults to back wall (defensive)', () => {
-    const ops = buildVentilationCutouts(baseProject.board, {
+    const cuts = buildVentilationCutouts(baseProject.board, {
       ...baseProject.case,
       ventilation: { ...baseProject.case.ventilation, surfaces: [] },
     });
-    expect(ops.length).toBeGreaterThan(0);
+    expect(totalCount(cuts)).toBeGreaterThan(0);
+  });
+
+  it("'top' surface routes vents to lidCuts (#user-reported regression)", () => {
+    const cuts = buildVentilationCutouts(baseProject.board, {
+      ...baseProject.case,
+      ventilation: { ...baseProject.case.ventilation, surfaces: ['top'] },
+    });
+    expect(cuts.shellCuts.length).toBe(0);
+    expect(cuts.lidCuts.length).toBeGreaterThan(0);
   });
 });

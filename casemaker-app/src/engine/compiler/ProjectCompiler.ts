@@ -96,9 +96,15 @@ export function compileProject(project: Project): BuildPlan {
     resolveHat,
   );
 
+  // Ventilation cutters split by destination: top-surface vents pierce the
+  // LID node (separate mesh below); side / bottom vents pierce the shell.
+  // Pre-split they were all routed to the shell and top vents silently
+  // dropped because the shell has no material at lid Z.
+  const ventCuts = buildVentilationCutouts(board, caseParams, hats ?? [], resolveHat);
+
   const cutoutOps: BuildOp[] = [
     ...buildPortCutoutsForProject(smartLayout.ports, board, caseParams),
-    ...buildVentilationCutouts(board, caseParams, hats ?? [], resolveHat),
+    ...ventCuts.shellCuts,
     ...buildHatCutoutsForProject(board, caseParams, hats ?? [], resolveHat),
     ...assetOps.subtractOps,
     ...featureOps.subtractive,
@@ -124,6 +130,9 @@ export function compileProject(project: Project): BuildPlan {
   }
   if (hingeOps.lidAdditive.length > 0) {
     lidOp = union([lidOp, ...hingeOps.lidAdditive]);
+  }
+  if (ventCuts.lidCuts.length > 0) {
+    lidOp = difference([lidOp, ...ventCuts.lidCuts]);
   }
   const lidDims = computeLidDims(board, caseParams, hats ?? [], resolveHat);
   // Issue #91 — lid is emitted at its ASSEMBLED Z position. The scene layer
