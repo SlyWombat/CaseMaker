@@ -445,6 +445,74 @@ body, html, #root {
   border-radius: 2px;
 }
 
+/* Issue #86 — viewport toolbar overlay. Floats top-left over the canvas;
+   pointer-events: none on the wrapper so 3D orbit/pan still works on the
+   areas the toolbar doesn't cover. */
+.viewport-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.viewport-toolbar {
+  position: absolute;
+  top: var(--cm-space-3);
+  left: var(--cm-space-3);
+  z-index: 5;
+  display: flex;
+  gap: var(--cm-space-2);
+  background: var(--cm-color-surface-container);
+  border: var(--cm-border-1);
+  border-radius: var(--cm-radius-md);
+  padding: var(--cm-space-1);
+  backdrop-filter: blur(8px);
+}
+.viewport-toolbar__group {
+  display: flex;
+  gap: 2px;
+}
+.viewport-toolbar__group + .viewport-toolbar__group {
+  border-left: var(--cm-border-1);
+  padding-left: var(--cm-space-2);
+  margin-left: var(--cm-space-1);
+}
+.viewport-toolbar__btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--cm-color-on-surface-variant);
+  padding: var(--cm-space-1) var(--cm-space-2);
+  border-radius: var(--cm-radius-sm);
+  cursor: pointer;
+  font-family: var(--cm-font-display);
+  font-size: var(--cm-text-mono-size);
+  letter-spacing: 0.04em;
+  min-width: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 100ms ease, color 100ms ease;
+}
+.viewport-toolbar__btn:hover:not(:disabled) {
+  background: var(--cm-color-surface-bright);
+  color: var(--cm-color-on-surface);
+}
+.viewport-toolbar__btn--active {
+  background: var(--cm-color-primary-container);
+  color: var(--cm-color-on-primary);
+}
+.viewport-toolbar__btn--text {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  padding: var(--cm-space-1) var(--cm-space-3);
+}
+.viewport-toolbar__btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.viewport-toolbar__btn:focus-visible {
+  outline: 2px solid var(--cm-color-primary);
+  outline-offset: 2px;
+}
+
 /* Issue #85 — welcome screen redesign per refined_selection mockup. Hero
    block + hardware combobox + template card grid. Token-driven so it
    inherits any future palette tweaks from #84. */
