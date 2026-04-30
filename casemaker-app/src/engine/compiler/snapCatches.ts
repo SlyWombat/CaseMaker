@@ -108,22 +108,22 @@ export function defaultSnapCatchesForCase(
   const mid = (n: number) => n / 2;
   const LONG_SIDE_THRESHOLD = 80;
   if (dims.outerY > LONG_SIDE_THRESHOLD) {
-    out.push({ id: 'snap-mx-1', wall: '-x', uPosition: dims.outerY / 3, enabled: true });
-    out.push({ id: 'snap-mx-2', wall: '-x', uPosition: (2 * dims.outerY) / 3, enabled: true });
-    out.push({ id: 'snap-px-1', wall: '+x', uPosition: dims.outerY / 3, enabled: true });
-    out.push({ id: 'snap-px-2', wall: '+x', uPosition: (2 * dims.outerY) / 3, enabled: true });
+    out.push({ id: 'snap-mx-1', wall: '-x', uPosition: dims.outerY / 3, enabled: true, barbType: 'hook' });
+    out.push({ id: 'snap-mx-2', wall: '-x', uPosition: (2 * dims.outerY) / 3, enabled: true, barbType: 'hook' });
+    out.push({ id: 'snap-px-1', wall: '+x', uPosition: dims.outerY / 3, enabled: true, barbType: 'hook' });
+    out.push({ id: 'snap-px-2', wall: '+x', uPosition: (2 * dims.outerY) / 3, enabled: true, barbType: 'hook' });
   } else {
-    out.push({ id: 'snap-mx', wall: '-x', uPosition: mid(dims.outerY), enabled: true });
-    out.push({ id: 'snap-px', wall: '+x', uPosition: mid(dims.outerY), enabled: true });
+    out.push({ id: 'snap-mx', wall: '-x', uPosition: mid(dims.outerY), enabled: true, barbType: 'hook' });
+    out.push({ id: 'snap-px', wall: '+x', uPosition: mid(dims.outerY), enabled: true, barbType: 'hook' });
   }
   if (dims.outerX > LONG_SIDE_THRESHOLD) {
-    out.push({ id: 'snap-my-1', wall: '-y', uPosition: dims.outerX / 3, enabled: true });
-    out.push({ id: 'snap-my-2', wall: '-y', uPosition: (2 * dims.outerX) / 3, enabled: true });
-    out.push({ id: 'snap-py-1', wall: '+y', uPosition: dims.outerX / 3, enabled: true });
-    out.push({ id: 'snap-py-2', wall: '+y', uPosition: (2 * dims.outerX) / 3, enabled: true });
+    out.push({ id: 'snap-my-1', wall: '-y', uPosition: dims.outerX / 3, enabled: true, barbType: 'hook' });
+    out.push({ id: 'snap-my-2', wall: '-y', uPosition: (2 * dims.outerX) / 3, enabled: true, barbType: 'hook' });
+    out.push({ id: 'snap-py-1', wall: '+y', uPosition: dims.outerX / 3, enabled: true, barbType: 'hook' });
+    out.push({ id: 'snap-py-2', wall: '+y', uPosition: (2 * dims.outerX) / 3, enabled: true, barbType: 'hook' });
   } else {
-    out.push({ id: 'snap-my', wall: '-y', uPosition: mid(dims.outerX), enabled: true });
-    out.push({ id: 'snap-py', wall: '+y', uPosition: mid(dims.outerX), enabled: true });
+    out.push({ id: 'snap-my', wall: '-y', uPosition: mid(dims.outerX), enabled: true, barbType: 'hook' });
+    out.push({ id: 'snap-py', wall: '+y', uPosition: mid(dims.outerX), enabled: true, barbType: 'hook' });
   }
   return out;
 }

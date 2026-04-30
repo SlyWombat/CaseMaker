@@ -42,11 +42,13 @@ export const caseParamsSchema = z.object({
         wall: z.enum(['+x', '-x', '+y', '-y']),
         uPosition: z.number(),
         enabled: z.boolean(),
-        // Issue #69 — barb cross-section. Optional so older projects load
-        // unchanged (defaults to 'hook' at compile time).
+        // Issue #69 + #78 — barb cross-section. Defaults to 'hook' at parse
+        // time so older projects load with an explicit value (avoids the
+        // UI-shows-wrong-option bug where the select didn't reflect the
+        // engine's compile-time fallback).
         barbType: z
           .enum(['hook', 'asymmetric-ramp', 'symmetric-ramp', 'half-round', 'ball-socket'])
-          .optional(),
+          .default('hook'),
         insertionRampDeg: z.number().optional(),
         retentionRampDeg: z.number().optional(),
       }),
