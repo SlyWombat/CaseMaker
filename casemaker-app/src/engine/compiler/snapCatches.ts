@@ -129,8 +129,18 @@ export function defaultSnapCatchesForCase(
 }
 
 interface CatchGeometry {
-  lip: BuildOp;
+  /**
+   * Additive lip on the case wall. Null for detent designs (ball-socket)
+   * that use a wall pocket instead.
+   */
+  lip: BuildOp | null;
+  /** Cantilever arm + barb mesh on the lid (always present). */
   armBarb: BuildOp;
+  /**
+   * Optional subtractive pocket cut into the case wall. Null for lip-based
+   * designs.
+   */
+  wallPocket: BuildOp | null;
 }
 
 /** Per-wall frame: where the inside wall surface is, which way is "inward",
@@ -403,9 +413,35 @@ function buildBallSocketBarb(frame: WallFrame): BuildOp {
 
 interface BarbBuilders {
   buildBarb(frame: WallFrame): BuildOp;
-  buildLip(frame: WallFrame, lipHeight: number): BuildOp;
+  /**
+   * Lip on the case wall (additive). Returns null when the barb design
+   * doesn't use a lip — e.g. ball-socket relies on a wall pocket instead.
+   */
+  buildLip(frame: WallFrame, lipHeight: number): BuildOp | null;
+  /**
+   * Optional pocket cut INTO the case wall (subtractive). Used by detent
+   * designs (ball-socket) where the barb snaps into a recess rather than
+   * past a lip. Returns null for lip-based designs.
+   */
+  buildWallPocket?(frame: WallFrame): BuildOp | null;
 }
 
+/**
+ * Issue #77 — barb-type ↔ shell-geometry mapping.
+ *
+ *   hook + asymmetric-ramp: both flat-top barbs that engage the same flat
+ *     catch face — sharing buildHookLip is correct, not a bug. The shell
+ *     mesh is intentionally identical between these two; the difference
+ *     is in the BARB shape on the lid.
+ *   symmetric-ramp: triangular prism barb + matching prism lip.
+ *   half-round: half-cylinder barb still engages a flat catch face cleanly,
+ *     so it shares the hook lip.
+ *   ball-socket: detent design — NO lip; the wall has a circular pocket
+ *     drilled at the seated-ball Z so the ball clicks IN. This is the fix
+ *     for #77's "shell unchanged when ball-socket selected" symptom: the
+ *     old code shipped a hook-style lip that the ball just slid past with
+ *     nothing to retain it.
+ */
 const BARB_REGISTRY: Record<BarbType, BarbBuilders> = {
   hook: { buildBarb: buildHookBarb, buildLip: buildHookLip },
   'asymmetric-ramp': { buildBarb: buildAsymmetricRampBarb, buildLip: buildHookLip },
@@ -427,8 +463,57 @@ const BARB_REGISTRY: Record<BarbType, BarbBuilders> = {
     },
   },
   'half-round': { buildBarb: buildHalfRoundBarb, buildLip: buildHookLip },
-  'ball-socket': { buildBarb: buildBallSocketBarb, buildLip: buildHookLip },
+  'ball-socket': {
+    buildBarb: buildBallSocketBarb,
+    buildLip: () => null,
+    buildWallPocket: buildBallSocketWallPocket,
+  },
 };
+
+/**
+ * Cylindrical pocket cut into the inside wall at the seated ball position.
+ * The cylinder axis runs along the wall outward normal so it bores INTO the
+ * wall; depth is chosen so the ball seats flush with the inside surface.
+ */
+function buildBallSocketWallPocket(frame: WallFrame): BuildOp {
+  const { barbLength, armWidth, barbProtrusion } = SNAP_DEFAULTS;
+  // Pocket radius matches the ball detent radius computed in
+  // buildBallSocketBarb (frame.barbSize.t and .z chosen from armWidth /
+  // barbLength). Add a tiny margin so the ball clicks in without grinding.
+  const ballRadius = Math.min(armWidth, barbLength) / 3;
+  const radius = ballRadius + 0.1;
+  const depth = ballRadius + 0.4; // slightly deeper than the ball's protrusion
+  // Seated ball center: lipBottomZ - barbLength/2 (derived from the existing
+  // seated-arm geometry — the barb's vertical center sits half a barbLength
+  // below the lip's bottom face).
+  const ballCenterZ = frame.lipOrigin.z - barbLength / 2;
+  const cyl = cylinder(depth, radius, 24);
+  // cylinder() runs along +Z; rotate so its axis runs along the wall normal
+  // OUTWARD (so we bore from the inside surface into the wall).
+  let oriented: BuildOp;
+  let pocketOriginX: number;
+  let pocketOriginY: number;
+  if (frame.wallAxis === 'x') {
+    // +x wall (wallNormalSign=+1): outward is +x → rotate +Z to +X (rotate y by -90°)
+    // -x wall (wallNormalSign=-1): outward is -x → rotate +Z to -X (rotate y by +90°)
+    oriented = rotate([0, frame.wallNormalSign === 1 ? -90 : 90, 0], cyl);
+    pocketOriginX = frame.lipOrigin.x;
+    // The lip's u-extent is `pocketWidth` (~7 mm) starting at lipOrigin.y; the
+    // catch is centered along that extent, which is also where the barb sits.
+    // armWidth (6) is centered inside pocketWidth (7) → +0.5 inset.
+    const tInset = (SNAP_DEFAULTS.pocketWidth - armWidth) / 2;
+    pocketOriginY = frame.lipOrigin.y + tInset + armWidth / 2;
+  } else {
+    oriented = rotate([frame.wallNormalSign === 1 ? 90 : -90, 0, 0], cyl);
+    const tInset = (SNAP_DEFAULTS.pocketWidth - armWidth) / 2;
+    pocketOriginX = frame.lipOrigin.x + tInset + armWidth / 2;
+    pocketOriginY = frame.lipOrigin.y;
+  }
+  // Suppress an unused-var warning when this code path doesn't reference
+  // barbProtrusion directly — keeping it imported documents the design link.
+  void barbProtrusion;
+  return translate([pocketOriginX, pocketOriginY, ballCenterZ], oriented);
+}
 
 export function buildSnapCatch(
   c: SnapCatch,
@@ -467,7 +552,8 @@ export function buildSnapCatch(
   const lip = builders.buildLip(frame, LIP_HEIGHT);
   const arm = buildArm(frame);
   const barb = builders.buildBarb(frame);
-  return { lip, armBarb: union([arm, barb]) };
+  const wallPocket = builders.buildWallPocket?.(frame) ?? null;
+  return { lip, armBarb: union([arm, barb]), wallPocket };
 }
 
 export function buildSnapCatchOps(
@@ -486,7 +572,8 @@ export function buildSnapCatchOps(
   for (const c of catches) {
     const g = buildSnapCatch(c, board, params, hats, resolveHat);
     if (!g) continue;
-    shellAdd.push(g.lip);
+    if (g.lip) shellAdd.push(g.lip);
+    if (g.wallPocket) shellSubtract.push(g.wallPocket);
     lidAdd.push(g.armBarb);
   }
   return { shellAdd, shellSubtract, lidAdd };

@@ -55,16 +55,33 @@ describe('Snap-fit barb cross-section registry (#69)', () => {
   });
 
   for (const barbType of BARB_TYPES) {
-    it(`${barbType}: produces a non-empty lip + arm/barb pair`, () => {
+    it(`${barbType}: produces a non-empty arm/barb pair plus either a lip or a wall pocket`, () => {
       const c = { ...firstCatch!, barbType };
       const g = buildSnapCatch(c, project.board, project.case);
       expect(g).not.toBeNull();
       // Lid arm/barb is always: arm cube + a barb primitive (cube/cylinder/mesh).
       expect(countSolidPrimitives(g!.armBarb)).toBeGreaterThanOrEqual(2);
-      // Lip is always at least one mesh primitive (or cube for non-wedge variants).
-      expect(countSolidPrimitives(g!.lip)).toBeGreaterThanOrEqual(1);
+      // Issue #77 — every barb type produces SOME case-side geometry change:
+      // either a lip (additive) or a wall pocket (subtractive). Ball-socket is
+      // the detent design (pocket only); every other type is lip-based.
+      const caseSide = (g!.lip ? countSolidPrimitives(g!.lip) : 0)
+        + (g!.wallPocket ? countSolidPrimitives(g!.wallPocket) : 0);
+      expect(caseSide).toBeGreaterThanOrEqual(1);
     });
   }
+
+  it('ball-socket emits a wall pocket and no lip; other types emit a lip and no pocket', () => {
+    for (const barbType of BARB_TYPES) {
+      const g = buildSnapCatch({ ...firstCatch!, barbType }, project.board, project.case);
+      if (barbType === 'ball-socket') {
+        expect(g!.lip).toBeNull();
+        expect(g!.wallPocket).not.toBeNull();
+      } else {
+        expect(g!.lip).not.toBeNull();
+        expect(g!.wallPocket).toBeNull();
+      }
+    }
+  });
 
   it('omitting barbType (legacy projects) defaults to hook geometry', () => {
     const legacy = { ...firstCatch! };
