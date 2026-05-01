@@ -9,7 +9,11 @@ import type {
   HingeStyle,
   HingePinMode,
   HingePositioning,
+  SealParams,
+  RuggedParams,
+  Latch,
 } from '@/types';
+import { newId } from '@/utils/id';
 import { VENT_SURFACES } from '@/types';
 import { LabelledField } from '@/components/ui/LabelledField';
 
@@ -329,6 +333,12 @@ export function CasePanel() {
           enable-checkbox + style-radio with a single None / External pin /
           Print-in-place dropdown. Detailed knuckle/pin params expand below. */}
       {params.joint !== 'flat-lid' && <HingeSection params={params} patch={patch} />}
+      {/* Issue #107–#111 — protective-case feature sections. Each is
+          collapsed by default; toggling the section's "enabled" surfaces
+          its detail form. */}
+      <SealSection params={params} patch={patch} />
+      <LatchesSection params={params} patch={patch} />
+      <RuggedSection params={params} patch={patch} />
       <label
         className="vent-row"
         title="Add ventilation cutouts to the selected case faces."
@@ -669,6 +679,354 @@ function HingeSection({ params, patch }: HingeSectionProps) {
           {/* Issue #98 — Pin-mode radio removed; pinMode now follows the
               hinge dropdown style choice ('print-in-place' style ⇒
               print-in-place pin, 'external-pin' style ⇒ separate hardware). */}
+        </>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// Issue #107 — waterproof gasket section.
+//
+// Collapsing toggle. When enabled, the lid is forced into recessed mode
+// (a flat lid can't compress a gasket reliably) and the section reveals
+// gasket profile / width / depth / compression / material controls.
+// Surfaces an honest waterproofness disclaimer per Whity-style design
+// experience: TPU gasket = moisture resistance, NOT IP67 immersion.
+// =============================================================================
+
+interface SealSectionProps {
+  params: CaseParameters;
+  patch: (p: Partial<CaseParameters>) => void;
+}
+
+function defaultSeal(): SealParams {
+  return {
+    enabled: true,
+    profile: 'flat',
+    width: 4,
+    depth: 2,
+    compressionFactor: 0.25,
+    gasketMaterial: 'tpu',
+  };
+}
+
+function SealSection({ params, patch }: SealSectionProps) {
+  const seal = params.seal;
+  const enabled = !!seal?.enabled;
+  const onToggle = (next: boolean): void => {
+    if (next) {
+      patch({
+        seal: seal ? { ...seal, enabled: true } : defaultSeal(),
+        // Force recessed lid (flat lid can't seal). User can revert
+        // afterward but they'll lose the seal.
+        lidRecess: true,
+      });
+    } else if (seal) {
+      patch({ seal: { ...seal, enabled: false } });
+    }
+  };
+  const updateSeal = (p: Partial<SealParams>): void => {
+    if (!seal) return;
+    patch({ seal: { ...seal, ...p } });
+  };
+  return (
+    <div className="seal-section">
+      <label className="vent-row" title="Closed-loop gasket channel + lid tongue. Compresses a printable TPU ring against the rim for moisture resistance.">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => onToggle(e.target.checked)}
+          data-testid="seal-enabled"
+          aria-label="Waterproof seal enabled"
+        />
+        <span>Waterproof gasket (TPU ring) — #107/#108</span>
+      </label>
+      {enabled && seal && (
+        <>
+          <p className="labelled-field__hint" style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0' }}>
+            ⚠ TPU gasket print = moisture resistance. NOT certified IP67/IP68 immersion. For full waterproofness, source a pre-formed EPDM gasket of the dimensions in the export.
+          </p>
+          <div className="joint-row">
+            <span className="joint-label" id="seal-profile-label">Profile</span>
+            <div className="joint-buttons" role="radiogroup" aria-labelledby="seal-profile-label">
+              {(['flat', 'o-ring'] as const).map((p) => (
+                <label key={p}>
+                  <input
+                    type="radio"
+                    name="seal-profile"
+                    value={p}
+                    checked={seal.profile === p}
+                    onChange={() => updateSeal({ profile: p })}
+                    data-testid={`seal-profile-${p}`}
+                  />
+                  <span>{p}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <LabelledField label="Gasket width" unit="mm" hint="Cross-section width (or O-ring diameter). Must be < wall thickness.">
+            <input type="number" step={0.5} min={2} max={10} value={seal.width} onChange={(e) => updateSeal({ width: Number(e.target.value) })} className="numeric-input" data-testid="seal-width" />
+          </LabelledField>
+          <LabelledField label="Gasket depth" unit="mm" hint="Uncompressed thickness.">
+            <input type="number" step={0.5} min={1} max={6} value={seal.depth} onChange={(e) => updateSeal({ depth: Number(e.target.value) })} className="numeric-input" data-testid="seal-depth" />
+          </LabelledField>
+          <Slider
+            label="Compression"
+            unit=""
+            hint="Fraction the tongue presses the gasket past flush. 0.20–0.30 typical."
+            value={seal.compressionFactor}
+            min={0.1}
+            max={0.4}
+            step={0.05}
+            onChange={(v) => updateSeal({ compressionFactor: v })}
+            testId="seal-compression"
+          />
+          <div className="joint-row">
+            <span className="joint-label" id="seal-mat-label">Material</span>
+            <div className="joint-buttons" role="radiogroup" aria-labelledby="seal-mat-label">
+              {(['tpu', 'eva', 'epdm'] as const).map((m) => (
+                <label key={m} title={m === 'tpu' ? 'Print in TPU 95A' : m === 'eva' ? 'Buy a pre-formed EVA gasket' : 'Buy a pre-formed EPDM gasket (best for waterproof)'}>
+                  <input
+                    type="radio"
+                    name="seal-mat"
+                    value={m}
+                    checked={seal.gasketMaterial === m}
+                    onChange={() => updateSeal({ gasketMaterial: m })}
+                    data-testid={`seal-mat-${m}`}
+                  />
+                  <span>{m.toUpperCase()}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// Issue #109 — spring-cam locking latches.
+//
+// Array editor. Add latches via "Add latch" button (pre-fills wall + uPos);
+// each row shows wall picker + uPosition + throw + width + height +
+// enabled toggle. Remove via × button. Defers cam-profile detail tuning to
+// per-latch geometry refinement (separate follow-up).
+// =============================================================================
+
+interface LatchesSectionProps {
+  params: CaseParameters;
+  patch: (p: Partial<CaseParameters>) => void;
+}
+
+function LatchesSection({ params, patch }: LatchesSectionProps) {
+  const latches = params.latches ?? [];
+  const setLatches = (next: Latch[]): void => patch({ latches: next });
+  const addLatch = (): void => {
+    setLatches([
+      ...latches,
+      {
+        id: `latch-${newId()}`,
+        wall: '-y',
+        uPosition: 30,
+        enabled: true,
+        throw: 1.5,
+        width: 14,
+        height: 30,
+      },
+    ]);
+  };
+  const updateLatch = (i: number, p: Partial<Latch>): void => {
+    setLatches(latches.map((l, idx) => (idx === i ? { ...l, ...p } : l)));
+  };
+  const removeLatch = (i: number): void => {
+    setLatches(latches.filter((_, idx) => idx !== i));
+  };
+  return (
+    <div className="latches-section">
+      <div className="vent-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>Latches ({latches.length}) — #109</span>
+        <button type="button" onClick={addLatch} data-testid="add-latch" title="Add a Pelican-style spring-cam latch on a side wall">
+          + Add latch
+        </button>
+      </div>
+      {latches.map((latch, i) => (
+        <div key={latch.id} className="joint-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', margin: '4px 0' }}>
+          <input
+            type="checkbox"
+            checked={latch.enabled}
+            onChange={(e) => updateLatch(i, { enabled: e.target.checked })}
+            data-testid={`latch-${i}-enabled`}
+            title="Enable this latch"
+          />
+          <select
+            value={latch.wall}
+            onChange={(e) => updateLatch(i, { wall: e.target.value as Latch['wall'] })}
+            data-testid={`latch-${i}-wall`}
+            aria-label={`Latch ${i} wall`}
+          >
+            {(['+x', '-x', '+y', '-y'] as const).map((w) => (
+              <option key={w} value={w}>{w}</option>
+            ))}
+          </select>
+          <input
+            type="number"
+            step={1}
+            value={latch.uPosition}
+            onChange={(e) => updateLatch(i, { uPosition: Number(e.target.value) })}
+            className="numeric-input"
+            style={{ width: 60 }}
+            data-testid={`latch-${i}-u`}
+            aria-label={`Latch ${i} u position`}
+            title="Position along the wall (mm)"
+          />
+          <input
+            type="number"
+            step={0.5}
+            min={0.5}
+            max={5}
+            value={latch.throw}
+            onChange={(e) => updateLatch(i, { throw: Number(e.target.value) })}
+            className="numeric-input"
+            style={{ width: 50 }}
+            data-testid={`latch-${i}-throw`}
+            aria-label={`Latch ${i} throw`}
+            title="Cam throw distance (mm) — pull-down at over-center"
+          />
+          <button type="button" onClick={() => removeLatch(i)} data-testid={`latch-${i}-remove`} aria-label={`Remove latch ${i}`}>×</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// =============================================================================
+// Issue #111 — rugged exterior options.
+//
+// Top-level enabled toggle reveals three sub-toggles (corners, ribbing,
+// feet). Each sub-section can be enabled independently with its own knobs.
+// =============================================================================
+
+interface RuggedSectionProps {
+  params: CaseParameters;
+  patch: (p: Partial<CaseParameters>) => void;
+}
+
+function defaultRugged(): RuggedParams {
+  return {
+    enabled: true,
+    corners: { enabled: true, radius: 8, flexBumper: false },
+    ribbing: { enabled: true, direction: 'vertical', ribCount: 4, ribDepth: 1.5, clearBand: 5 },
+    feet: { enabled: true, pads: 4, padDiameter: 10, padHeight: 2 },
+  };
+}
+
+function RuggedSection({ params, patch }: RuggedSectionProps) {
+  const rugged = params.rugged;
+  const enabled = !!rugged?.enabled;
+  const onToggle = (next: boolean): void => {
+    if (next) {
+      patch({ rugged: rugged ? { ...rugged, enabled: true } : defaultRugged() });
+    } else if (rugged) {
+      patch({ rugged: { ...rugged, enabled: false } });
+    }
+  };
+  const update = (p: Partial<RuggedParams>): void => {
+    if (!rugged) return;
+    patch({ rugged: { ...rugged, ...p } });
+  };
+  return (
+    <div className="rugged-section">
+      <label className="vent-row" title="Drop-protective exterior: corner bumpers, wall ribbing, integrated feet.">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => onToggle(e.target.checked)}
+          data-testid="rugged-enabled"
+        />
+        <span>Rugged exterior (corners, ribs, feet) — #111</span>
+      </label>
+      {enabled && rugged && (
+        <>
+          <label className="vent-row" style={{ marginLeft: 16 }} title="Vertical-axis bumpers at each external corner.">
+            <input
+              type="checkbox"
+              checked={rugged.corners.enabled}
+              onChange={(e) => update({ corners: { ...rugged.corners, enabled: e.target.checked } })}
+              data-testid="rugged-corners-enabled"
+            />
+            <span>Corner bumpers (radius {rugged.corners.radius} mm)</span>
+          </label>
+          {rugged.corners.enabled && (
+            <div style={{ marginLeft: 32 }}>
+              <Slider label="Bumper radius" unit="mm" hint="Outer radius of the corner cylinder past the case envelope."
+                value={rugged.corners.radius} min={4} max={15} step={0.5}
+                onChange={(v) => update({ corners: { ...rugged.corners, radius: v } })}
+                testId="rugged-corner-radius"
+              />
+              <label className="vent-row">
+                <input
+                  type="checkbox"
+                  checked={rugged.corners.flexBumper}
+                  onChange={(e) => update({ corners: { ...rugged.corners, flexBumper: e.target.checked } })}
+                  data-testid="rugged-flex-bumper"
+                  title="Print bumpers in TPU as separate slip-on parts"
+                />
+                <span>Flex bumpers (print TPU separately)</span>
+              </label>
+            </div>
+          )}
+          <label className="vent-row" style={{ marginLeft: 16 }} title="Stiffening ribs on each side wall.">
+            <input
+              type="checkbox"
+              checked={rugged.ribbing.enabled}
+              onChange={(e) => update({ ribbing: { ...rugged.ribbing, enabled: e.target.checked } })}
+              data-testid="rugged-ribbing-enabled"
+            />
+            <span>Wall ribbing ({rugged.ribbing.direction}, {rugged.ribbing.ribCount}×)</span>
+          </label>
+          {rugged.ribbing.enabled && (
+            <div style={{ marginLeft: 32 }}>
+              <div className="joint-row">
+                <span className="joint-label" id="rib-dir-label">Direction</span>
+                <div className="joint-buttons" role="radiogroup" aria-labelledby="rib-dir-label">
+                  {(['vertical', 'horizontal'] as const).map((d) => (
+                    <label key={d}>
+                      <input
+                        type="radio"
+                        name="rib-direction"
+                        value={d}
+                        checked={rugged.ribbing.direction === d}
+                        onChange={() => update({ ribbing: { ...rugged.ribbing, direction: d } })}
+                        data-testid={`rib-dir-${d}`}
+                      />
+                      <span>{d}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <Slider label="Rib count" unit="" hint="Number of ribs per wall"
+                value={rugged.ribbing.ribCount} min={1} max={12} step={1}
+                onChange={(v) => update({ ribbing: { ...rugged.ribbing, ribCount: v } })}
+                testId="rib-count"
+              />
+              <Slider label="Clear band" unit="mm" hint="Smooth wall band at top + bottom of each rib"
+                value={rugged.ribbing.clearBand} min={0} max={20} step={1}
+                onChange={(v) => update({ ribbing: { ...rugged.ribbing, clearBand: v } })}
+                testId="rib-clear-band"
+              />
+            </div>
+          )}
+          <label className="vent-row" style={{ marginLeft: 16 }} title="Cylindrical pads at the case bottom corners.">
+            <input
+              type="checkbox"
+              checked={rugged.feet.enabled}
+              onChange={(e) => update({ feet: { ...rugged.feet, enabled: e.target.checked } })}
+              data-testid="rugged-feet-enabled"
+            />
+            <span>Integrated feet ({rugged.feet.pads} pads)</span>
+          </label>
         </>
       )}
     </div>
