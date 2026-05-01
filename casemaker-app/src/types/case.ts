@@ -71,11 +71,17 @@ export type InsertType =
   | 'none';
 export type VentilationPattern = 'none' | 'slots' | 'hex';
 
+export type BossPosition = 'bottom' | 'top';
+
 export interface BossesParams {
   enabled: boolean;
   insertType: InsertType;
   outerDiameter: Mm;
   holeDiameter: Mm;
+  /** Issue #104 — 'bottom' (default) anchors bosses to the case floor;
+   *  'top' anchors them to the lid underside with a tapered support column
+   *  on the inside wall. Optional for back-compat with v1..v7 projects. */
+  position?: BossPosition;
 }
 
 /** Issue #75 — surfaces the vent pattern can be cut into. Multi-select; the

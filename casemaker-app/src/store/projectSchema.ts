@@ -34,6 +34,11 @@ export const caseParamsSchema = z.object({
     insertType: z.enum(['self-tap', 'heat-set-m2.5', 'heat-set-m3', 'pass-through', 'none']),
     outerDiameter: z.number().positive(),
     holeDiameter: z.number().positive(),
+    // Issue #104 — 'bottom' (default) anchors bosses to the case floor;
+    // 'top' anchors them to the lid underside, with a tapered support
+    // column on the inside wall providing material continuity. Optional
+    // so legacy projects load as 'bottom' without a migration.
+    position: z.enum(['bottom', 'top']).optional(),
   }),
   snapCatches: z
     .array(

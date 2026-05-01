@@ -2,7 +2,7 @@ import type { Project, HatProfile } from '@/types';
 import type { BuildPlan, BuildNode, BuildOp } from './buildPlan';
 import { union, difference, translate } from './buildPlan';
 import { buildOuterShell } from './caseShell';
-import { computeBossPlacements, buildBossesUnion } from './bosses';
+import { computeBossPlacements, buildBossesUnion, buildLidBosses, buildBossSupportColumns } from './bosses';
 import { buildLid, computeLidDims } from './lid';
 import { buildPortCutoutsForProject } from './ports';
 import { applySmartCutoutLayout } from './smartCutoutLayout';
@@ -50,7 +50,11 @@ export function compileProject(project: Project): BuildPlan {
 
   const shellOuter = buildOuterShell(board, caseParams, hats ?? [], resolveHat);
   const bossPlacements = computeBossPlacements(board, caseParams);
+  // Issue #104 — bottom-position bosses fuse with the floor (legacy path).
+  // Top-position bosses are emitted into the lid below; the case wall gets
+  // tapered support columns instead so the print works without supports.
   const bossOps = buildBossesUnion(bossPlacements);
+  const bossSupportColumns = buildBossSupportColumns(bossPlacements, board, caseParams);
   const assetOps = buildExternalAssetOps(externalAssets);
   const featureOps = buildMountingFeatureOps(
     mountingFeatures,
@@ -79,6 +83,7 @@ export function compileProject(project: Project): BuildPlan {
   const additive = [
     shellOuter,
     ...bossOps,
+    ...bossSupportColumns,
     ...assetOps.unionOps,
     ...featureOps.additive,
     ...displayOps.additive,
@@ -125,6 +130,23 @@ export function compileProject(project: Project): BuildPlan {
   const nodes: BuildNode[] = [{ id: 'shell', op: shellOp }];
 
   let lidOp = buildLid(board, caseParams, hats ?? [], resolveHat);
+  const lidDims = computeLidDims(board, caseParams, hats ?? [], resolveHat);
+  // Issue #104 — top-position bosses fuse with the lid mesh, anchored to
+  // the lid's WORLD underside Z. The buildLid result is in lid-local
+  // coords (the translate([0,0,zPosition], …) below moves it into world).
+  // To union the world-coord boss cylinders we have to translate them
+  // BACK by lidDims.zPosition first, since the lid op gets translated UP
+  // afterward.
+  const lidUndersideWorldZ = lidDims.zPosition; // lid-local z=0 sits here
+  const lidBossOps = buildLidBosses(bossPlacements, lidUndersideWorldZ);
+  if (lidBossOps.length > 0) {
+    // Bosses live at world coords; shift them to lid-local before union so
+    // the eventual translate([0,0,zPosition], lidOp) lands them correctly.
+    const lidBossOpsLocal = lidBossOps.map((op) =>
+      translate([0, 0, -lidDims.zPosition], op),
+    );
+    lidOp = union([lidOp, ...lidBossOpsLocal]);
+  }
   if (snapOps.lidAdd.length > 0) {
     lidOp = union([lidOp, ...snapOps.lidAdd]);
   }
@@ -134,7 +156,6 @@ export function compileProject(project: Project): BuildPlan {
   if (ventCuts.lidCuts.length > 0) {
     lidOp = difference([lidOp, ...ventCuts.lidCuts]);
   }
-  const lidDims = computeLidDims(board, caseParams, hats ?? [], resolveHat);
   // Issue #91 — lid is emitted at its ASSEMBLED Z position. The scene layer
   // (SceneMeshes) applies the exploded lift dynamically based on viewMode,
   // so toggling Complete / Exploded doesn't require a full recompile.

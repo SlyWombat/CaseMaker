@@ -260,27 +260,69 @@ export function CasePanel() {
       {/* Issue #98 — Boss-insert type only applies when the joint actually
           uses bosses (screw-down). Hidden for flat-lid and snap-fit. */}
       {params.joint === 'screw-down' && (
-        <div className="joint-row">
-          <label className="joint-label" htmlFor="case-insert-type">
-            Boss insert type
-          </label>
-          <select
-            id="case-insert-type"
-            value={params.bosses.insertType}
-            onChange={(e) =>
-              patch({ bosses: { ...params.bosses, insertType: e.target.value as InsertType } })
-            }
-            data-testid="insert-type"
-            title="What kind of fastener anchors into the corner bosses."
-            aria-label="Boss insert type"
-          >
-            {INSERT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value} title={o.hint}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <>
+          <div className="joint-row">
+            <label className="joint-label" htmlFor="case-insert-type">
+              Boss insert type
+            </label>
+            <select
+              id="case-insert-type"
+              value={params.bosses.insertType}
+              onChange={(e) =>
+                patch({ bosses: { ...params.bosses, insertType: e.target.value as InsertType } })
+              }
+              data-testid="insert-type"
+              title="What kind of fastener anchors into the corner bosses."
+              aria-label="Boss insert type"
+            >
+              {INSERT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value} title={o.hint}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {/* Issue #104 — Boss position. Bottom (default) anchors bosses to
+              the floor; Top anchors them to the lid underside with a
+              tapered support column on the inside wall (printable open
+              side up without supports). */}
+          <div className="joint-row">
+            <span className="joint-label" id="boss-position-label">
+              Boss position
+            </span>
+            <div className="joint-buttons" role="radiogroup" aria-labelledby="boss-position-label">
+              {(
+                [
+                  {
+                    value: 'bottom',
+                    label: 'Bottom',
+                    hint: 'Bosses rise from the case floor; lid screws down through the lid into the boss tops.',
+                  },
+                  {
+                    value: 'top',
+                    label: 'Top',
+                    hint: 'Bosses hang from the lid underside, with a tapered support column on the inside wall. Useful for printing the case open-side-up without support material under the bosses.',
+                  },
+                ] as { value: 'bottom' | 'top'; label: string; hint: string }[]
+              ).map((opt) => (
+                <label key={opt.value} title={opt.hint}>
+                  <input
+                    type="radio"
+                    name="boss-position"
+                    value={opt.value}
+                    checked={(params.bosses.position ?? 'bottom') === opt.value}
+                    onChange={() =>
+                      patch({ bosses: { ...params.bosses, position: opt.value } })
+                    }
+                    data-testid={`boss-position-${opt.value}`}
+                    aria-label={`${opt.label} — ${opt.hint}`}
+                  />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </>
       )}
       {/* Issue #98 — Hinge dropdown sits JUST ABOVE Ventilation. Hidden for
           flat-lid (no closure mechanism to pivot). Replaced the previous
