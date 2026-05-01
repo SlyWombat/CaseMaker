@@ -17,7 +17,8 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "sample:export": "tsx --tsconfig tsconfig.scripts.json scripts/export-sample.ts",
-    "deploy": "node scripts/deploy-cpanel.mjs"
+    "deploy": "node scripts/deploy-cpanel.mjs",
+    "quota": "node scripts/cpanel-quota.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
