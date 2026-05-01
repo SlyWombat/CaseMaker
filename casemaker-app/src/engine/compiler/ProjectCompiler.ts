@@ -5,6 +5,7 @@ import { buildOuterShell } from './caseShell';
 import { computeBossPlacements, buildBossesUnion, buildLidBosses, buildBossSupportColumns } from './bosses';
 import { buildSealChannel, buildSealTongue, buildGasketBody } from './seal';
 import { buildLatchOps } from './latches';
+import { buildAlignmentFlange } from './alignmentFlange';
 import { buildRuggedOps } from './rugged';
 import { buildLid, computeLidDims } from './lid';
 import { buildPortCutoutsForProject } from './ports';
@@ -78,6 +79,9 @@ export function compileProject(project: Project): BuildPlan {
   // Issue #109 — Pelican-style latches. Striker fuses with shell;
   // each cam arm becomes its own top-level node so it prints as a free part.
   const latchOps = buildLatchOps(caseParams.latches, board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+  // Pelican alignment brim + tongue/groove around the perimeter (auto-on
+  // for shell-mode lids).
+  const flangeOps = buildAlignmentFlange(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   // Issue #111 — rugged exterior (corner bumpers, ribbing, feet).
   const ruggedOps = buildRuggedOps(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   // Issue #92 — barrel hinge. caseAdditive joins the shell pre-cavity-cut so
@@ -107,6 +111,7 @@ export function compileProject(project: Project): BuildPlan {
     ...hingeOps.caseAdditive,
     ...latchOps.caseAdditive,
     ...ruggedOps.caseAdditive,
+    ...(flangeOps.caseAdditive ? [flangeOps.caseAdditive] : []),
   ];
 
   const smartLayout = applySmartCutoutLayout(
@@ -198,11 +203,20 @@ export function compileProject(project: Project): BuildPlan {
   if (ruggedOps.lidAdditive.length > 0) {
     lidOp = union([lidOp, ...ruggedOps.lidAdditive]);
   }
+  // Pelican alignment-flange BRIM on the lid bottom (additive in
+  // lid-local coords).
+  if (flangeOps.lidAdditive) {
+    lidOp = union([lidOp, flangeOps.lidAdditive]);
+  }
   // Top-surface vent cuts. ventilation.ts emits the 'top' frame in
   // lid-LOCAL Z (so the difference here actually pierces the lid mesh
   // — pre-fix the cuts were in world coords and removed nothing).
   if (ventCuts.lidCuts.length > 0) {
     lidOp = difference([lidOp, ...ventCuts.lidCuts]);
+  }
+  // Groove cut into lid brim underside.
+  if (flangeOps.lidSubtract) {
+    lidOp = difference([lidOp, flangeOps.lidSubtract]);
   }
   // Issue #91 — lid is emitted at its ASSEMBLED Z position. The scene layer
   // (SceneMeshes) applies the exploded lift dynamically based on viewMode,
