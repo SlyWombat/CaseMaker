@@ -107,28 +107,47 @@ function buildWallRibs(
   const ribZBottom = clear;
   const ribZSpan = ribZTop - ribZBottom;
   if (ribZSpan <= 1) return [];
-  const wallThickness = ribbing.ribDepth;
+  const ribDepth = ribbing.ribDepth;
+  // Issue #119 — ribs MUST overlap the case wall volumetrically so manifold's
+  // union fuses them. Coplanar contact (rib base on the outer wall plane) is
+  // NOT enough. Embed the rib INTO the wall by EMBED mm; the visible
+  // protrusion stays `ribDepth`.
+  const EMBED = 0.5;
+  const totalDepth = ribDepth + EMBED;
 
   if (ribbing.direction === 'vertical') {
     // Vertical ribs on each side wall (±x and ±y). Distributed along the
     // wall's tangent axis; each rib is a thin cube extending OUTWARD from
-    // the wall by ribDepth.
+    // the wall by ribDepth and embedded INWARD by EMBED.
     const RIB_W = 2;
     for (const wall of ['+x', '-x', '+y', '-y'] as const) {
       const tangent = wall === '+x' || wall === '-x' ? dims.outerY : dims.outerX;
       const stride = tangent / (ribbing.ribCount + 1);
       for (let i = 1; i <= ribbing.ribCount; i++) {
         const t = i * stride;
-        const ribCube = cube([RIB_W, wallThickness, ribZSpan], false);
         let placed: BuildOp;
         if (wall === '+x') {
-          placed = translate([dims.outerX, t - RIB_W / 2, ribZBottom], ribCube);
+          // Cube dims [depth-along-x, width-along-y, span-along-z].
+          placed = translate(
+            [dims.outerX - EMBED, t - RIB_W / 2, ribZBottom],
+            cube([totalDepth, RIB_W, ribZSpan], false),
+          );
         } else if (wall === '-x') {
-          placed = translate([-wallThickness, t - RIB_W / 2, ribZBottom], ribCube);
+          placed = translate(
+            [-ribDepth, t - RIB_W / 2, ribZBottom],
+            cube([totalDepth, RIB_W, ribZSpan], false),
+          );
         } else if (wall === '+y') {
-          placed = translate([t - RIB_W / 2, dims.outerY, ribZBottom], cube([RIB_W, wallThickness, ribZSpan], false));
+          // Cube dims [width-along-x, depth-along-y, span-along-z].
+          placed = translate(
+            [t - RIB_W / 2, dims.outerY - EMBED, ribZBottom],
+            cube([RIB_W, totalDepth, ribZSpan], false),
+          );
         } else {
-          placed = translate([t - RIB_W / 2, -wallThickness, ribZBottom], cube([RIB_W, wallThickness, ribZSpan], false));
+          placed = translate(
+            [t - RIB_W / 2, -ribDepth, ribZBottom],
+            cube([RIB_W, totalDepth, ribZSpan], false),
+          );
         }
         out.push(placed);
       }
@@ -136,19 +155,39 @@ function buildWallRibs(
   } else {
     // Horizontal ribs — run along each wall's tangent. ribCount horizontal
     // bands distributed along Z within [ribZBottom, ribZTop]. Each rib
-    // wraps the perimeter (4 cube segments).
+    // wraps the perimeter (4 cube segments). Same embed rule as vertical.
     const RIB_H = 2;
     const stride = ribZSpan / (ribbing.ribCount + 1);
     for (let i = 1; i <= ribbing.ribCount; i++) {
       const z = ribZBottom + i * stride;
       // +x wall
-      out.push(translate([dims.outerX, 0, z - RIB_H / 2], cube([wallThickness, dims.outerY, RIB_H], false)));
+      out.push(
+        translate(
+          [dims.outerX - EMBED, 0, z - RIB_H / 2],
+          cube([totalDepth, dims.outerY, RIB_H], false),
+        ),
+      );
       // -x wall
-      out.push(translate([-wallThickness, 0, z - RIB_H / 2], cube([wallThickness, dims.outerY, RIB_H], false)));
+      out.push(
+        translate(
+          [-ribDepth, 0, z - RIB_H / 2],
+          cube([totalDepth, dims.outerY, RIB_H], false),
+        ),
+      );
       // +y wall
-      out.push(translate([0, dims.outerY, z - RIB_H / 2], cube([dims.outerX, wallThickness, RIB_H], false)));
+      out.push(
+        translate(
+          [0, dims.outerY - EMBED, z - RIB_H / 2],
+          cube([dims.outerX, totalDepth, RIB_H], false),
+        ),
+      );
       // -y wall
-      out.push(translate([0, -wallThickness, z - RIB_H / 2], cube([dims.outerX, wallThickness, RIB_H], false)));
+      out.push(
+        translate(
+          [0, -ribDepth, z - RIB_H / 2],
+          cube([dims.outerX, totalDepth, RIB_H], false),
+        ),
+      );
     }
   }
   return out;
@@ -160,7 +199,16 @@ function buildIntegratedFeet(
 ): BuildOp[] {
   const feet = params.rugged!.feet;
   const r = feet.padDiameter / 2;
-  // Pads sit at the case bottom (z = -padHeight to z = 0, fused with floor).
+  // Issue #119 — feet must OVERLAP the floor volumetrically. Original code
+  // had the foot cylinder spanning z = [-padHeight, 0] which is coplanar
+  // with the floor (which starts at z = 0) — manifold's union doesn't fuse
+  // coplanar solids reliably. Extend the cylinder UP into the floor by
+  // EMBED mm so there's real volume sharing.
+  const EMBED = 1;
+  const cylHeight = feet.padHeight + EMBED;
+  // Pads sit at the case bottom: cylinder z = [-padHeight, +EMBED]. Visible
+  // protrusion below the floor remains feet.padHeight; the EMBED slice is
+  // hidden inside the floor.
   const pads4: [number, number][] = [
     [r + 1, r + 1],
     [dims.outerX - r - 1, r + 1],
@@ -174,6 +222,6 @@ function buildIntegratedFeet(
   ];
   const positions = feet.pads === 6 ? pads6 : pads4;
   return positions.map(([x, y]) =>
-    translate([x, y, -feet.padHeight], cylinder(feet.padHeight, r, 24)),
+    translate([x, y, -feet.padHeight], cylinder(cylHeight, r, 24)),
   );
 }
