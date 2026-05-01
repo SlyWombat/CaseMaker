@@ -1,39 +1,23 @@
 import { useState } from 'react';
-import { triggerExport, type ExportFormat } from '@/engine/exportTrigger';
 import { DonateButton } from '@/components/layout/DonateButton';
 import { useJobStore } from '@/store/jobStore';
+import { ExportModal } from './ExportModal';
 
-const FORMATS: { value: ExportFormat; label: string; testId: string; hint: string }[] = [
-  {
-    value: 'stl-binary',
-    label: 'STL (binary)',
-    testId: 'export-stl',
-    hint: 'Compact binary STL — fastest export and smallest file. Recommended for most slicers.',
-  },
-  {
-    value: 'stl-ascii',
-    label: 'STL (ASCII)',
-    testId: 'export-stl-ascii',
-    hint: 'Text STL — much larger files, but human-readable for diffs and inspection.',
-  },
-  {
-    value: '3mf',
-    label: '3MF',
-    testId: 'export-3mf',
-    hint: 'Modern 3MF format with units, color, and metadata baked in.',
-  },
-];
-
+/**
+ * Issue #120 — ExportPanel collapses to a single "Export…" button that
+ * opens the persistent ExportModal. The per-format buttons + per-call
+ * confirm dialog logic moves into the modal.
+ *
+ * Placement-error warning (#52) stays inline above the button so the user
+ * sees the count before opening the modal; the confirm-on-export check
+ * fires inside the modal's per-part Save handler.
+ */
 export function ExportPanel() {
-  const [busy, setBusy] = useState(false);
-  const [exported, setExported] = useState(false);
-  // Issue #52 — placement-validator errors WARN before export rather than
-  // BLOCK it. Users with edge-case projects need an override path; a hard
-  // block leaves them unable to ship. confirm() preserves the safety net
-  // (you have to deliberately click through) while keeping the door open.
+  const [open, setOpen] = useState(false);
   const placementReport = useJobStore((s) => s.placementReport);
   const errorCount = placementReport?.errorCount ?? 0;
-  const onClick = (format: ExportFormat) => async () => {
+
+  const onOpen = (): void => {
     if (errorCount > 0) {
       const errorIssues = placementReport!.issues
         .filter((i) => i.severity === 'error')
@@ -42,18 +26,13 @@ export function ExportPanel() {
         .join('\n');
       const more = errorCount > 5 ? `\n…and ${errorCount - 5} more.` : '';
       const ok = window.confirm(
-        `Placement validator found ${errorCount} error${errorCount === 1 ? '' : 's'} in this project:\n\n${errorIssues}${more}\n\nExport anyway?`,
+        `Placement validator found ${errorCount} error${errorCount === 1 ? '' : 's'} in this project:\n\n${errorIssues}${more}\n\nOpen export anyway?`,
       );
       if (!ok) return;
     }
-    setBusy(true);
-    try {
-      await triggerExport(format);
-      setExported(true);
-    } finally {
-      setBusy(false);
-    }
+    setOpen(true);
   };
+
   return (
     <div className="panel">
       <h3>Export</h3>
@@ -66,21 +45,15 @@ export function ExportPanel() {
           ⚠ {errorCount} placement error{errorCount === 1 ? '' : 's'} — export will prompt to confirm.
         </p>
       )}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {FORMATS.map((f) => (
-          <button
-            key={f.value}
-            onClick={onClick(f.value)}
-            disabled={busy}
-            data-testid={f.testId}
-            title={f.hint}
-            aria-label={`Export as ${f.label}`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-      {exported && <DonateButton variant="export" />}
+      <button
+        onClick={onOpen}
+        data-testid="export-open"
+        title="Open the export panel — list every part with per-part Save plus a Save-all-in-one option."
+      >
+        ⬇ Export…
+      </button>
+      {open && <ExportModal onClose={() => setOpen(false)} />}
+      <DonateButton variant="export" />
     </div>
   );
 }

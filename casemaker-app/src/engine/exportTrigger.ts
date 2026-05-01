@@ -73,6 +73,47 @@ export function meshNodesForExport(): ExportMeshGroups {
   };
 }
 
+/**
+ * Issue #120 — export a single named part as a separate file. The user
+ * picks the node from the export modal; this helper triggers a download
+ * for just that one mesh in the chosen format. Returns the file's byte
+ * size so the caller can show "saved 142 KB" feedback.
+ */
+export async function exportSinglePart(
+  nodeId: string,
+  format: ExportFormat,
+): Promise<{ filename: string; bytes: number } | null> {
+  const project = useProjectStore.getState().project;
+  await scheduleImmediate(project);
+  await waitForIdle();
+  const nodes = useJobStore.getState().nodes;
+  const node = nodes.get(nodeId);
+  if (!node) return null;
+  const mesh: StlMeshInput = {
+    positions: node.buffer.positions,
+    indices: node.buffer.indices,
+  };
+  const safeProject = project.name.replace(/[^a-z0-9-_]+/gi, '_');
+  const safePart = nodeId.replace(/[^a-z0-9-_]+/gi, '_');
+  const baseName = `${safeProject}-${safePart}`;
+  if (format === 'stl-binary') {
+    const buf = await exportStlBinary([mesh]);
+    const filename = `${baseName}.stl`;
+    downloadArrayBuffer(buf, filename, 'model/stl');
+    return { filename, bytes: buf.byteLength };
+  }
+  if (format === 'stl-ascii') {
+    const text = await exportStlAscii([mesh]);
+    const filename = `${baseName}.ascii.stl`;
+    downloadText(text, filename, 'model/stl');
+    return { filename, bytes: new Blob([text]).size };
+  }
+  const buf = await exportThreeMf([mesh]);
+  const filename = `${baseName}.3mf`;
+  downloadArrayBuffer(buf, filename, 'model/3mf');
+  return { filename, bytes: buf.byteLength };
+}
+
 function gasketSlicerHints(material: 'tpu' | 'eva' | 'epdm' | undefined): string {
   // Default to TPU 95A. EVA and EPDM are pre-formed gaskets the user
   // installs; if those materials are picked the gasket STL is for
