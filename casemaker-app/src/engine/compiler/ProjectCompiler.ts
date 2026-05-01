@@ -3,6 +3,7 @@ import type { BuildPlan, BuildNode, BuildOp } from './buildPlan';
 import { union, difference, translate } from './buildPlan';
 import { buildOuterShell } from './caseShell';
 import { computeBossPlacements, buildBossesUnion, buildLidBosses, buildBossSupportColumns } from './bosses';
+import { buildSealChannel, buildSealTongue } from './seal';
 import { buildLid, computeLidDims } from './lid';
 import { buildPortCutoutsForProject } from './ports';
 import { applySmartCutoutLayout } from './smartCutoutLayout';
@@ -107,9 +108,12 @@ export function compileProject(project: Project): BuildPlan {
   // dropped because the shell has no material at lid Z.
   const ventCuts = buildVentilationCutouts(board, caseParams, hats ?? [], resolveHat);
 
+  // Issue #107 — gasket channel cut into the rim top face (waterproof seal).
+  const sealChannel = buildSealChannel(board, caseParams, hats ?? [], resolveHat);
   const cutoutOps: BuildOp[] = [
     ...buildPortCutoutsForProject(smartLayout.ports, board, caseParams),
     ...ventCuts.shellCuts,
+    ...(sealChannel ? [sealChannel] : []),
     ...buildHatCutoutsForProject(board, caseParams, hats ?? [], resolveHat),
     ...assetOps.subtractOps,
     ...featureOps.subtractive,
@@ -152,6 +156,14 @@ export function compileProject(project: Project): BuildPlan {
   }
   if (hingeOps.lidAdditive.length > 0) {
     lidOp = union([lidOp, ...hingeOps.lidAdditive]);
+  }
+  // Issue #107 — gasket TONGUE on the lid underside. The tongue op is in
+  // world coords; shift to lid-local before union so the eventual
+  // translate([0,0,zPosition], lidOp) lands it correctly.
+  const sealTongue = buildSealTongue(board, caseParams, hats ?? [], resolveHat);
+  if (sealTongue) {
+    const tongueLocal = translate([0, 0, -lidDims.zPosition], sealTongue);
+    lidOp = union([lidOp, tongueLocal]);
   }
   if (ventCuts.lidCuts.length > 0) {
     lidOp = difference([lidOp, ...ventCuts.lidCuts]);

@@ -73,6 +73,27 @@ export type VentilationPattern = 'none' | 'slots' | 'hex';
 
 export type BossPosition = 'bottom' | 'top';
 
+/** Issue #107 — waterproof gasket cross-section profile. 'flat' is a
+ *  rectangular cross-section (most common for printable TPU). 'o-ring' is
+ *  a circular cross-section (better seal, harder to print evenly). */
+export type SealProfile = 'flat' | 'o-ring';
+
+/** Issue #107 — gasket material, drives slicer hint sidecar in #108. */
+export type SealGasketMaterial = 'tpu' | 'eva' | 'epdm';
+
+export interface SealParams {
+  enabled: boolean;
+  profile: SealProfile;
+  /** Gasket cross-section width (or O-ring diameter). */
+  width: Mm;
+  /** Gasket cross-section depth — uncompressed thickness. */
+  depth: Mm;
+  /** Fraction of `depth` the tongue presses the gasket past flush. 0.20–0.30 typical. */
+  compressionFactor: number;
+  /** Informational; #108 uses this to pick slicer-hint defaults. */
+  gasketMaterial: SealGasketMaterial;
+}
+
 export interface BossesParams {
   enabled: boolean;
   insertType: InsertType;
@@ -153,6 +174,10 @@ export interface CaseParameters {
   extraCavityZ?: Mm;
   ventilation: VentilationParams;
   bosses: BossesParams;
+  /** Issue #107 — waterproof gasket geometry. Optional so legacy projects
+   *  load without a seal. When enabled, `lidRecess` is forced true at the
+   *  UI layer (a flat lid can't compress a gasket reliably). */
+  seal?: SealParams;
   /**
    * Optional cantilever snap-fit catches (issue #29). Only consulted when
    * joint === 'snap-fit'; auto-populated by createDefaultProject when the

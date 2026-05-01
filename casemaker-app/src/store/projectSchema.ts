@@ -40,6 +40,20 @@ export const caseParamsSchema = z.object({
     // so legacy projects load as 'bottom' without a migration.
     position: z.enum(['bottom', 'top']).optional(),
   }),
+  // Issue #107 — waterproof gasket. Closed-loop channel cut into the rim
+  // top face plus a matching tongue on the lid underside. Optional so
+  // legacy projects load with no seal geometry. Forces lidRecess=true at
+  // the UI layer when enabled.
+  seal: z
+    .object({
+      enabled: z.boolean(),
+      profile: z.enum(['flat', 'o-ring']),
+      width: z.number().positive(),
+      depth: z.number().positive(),
+      compressionFactor: z.number().min(0.1).max(0.4),
+      gasketMaterial: z.enum(['tpu', 'eva', 'epdm']),
+    })
+    .optional(),
   snapCatches: z
     .array(
       z.object({
