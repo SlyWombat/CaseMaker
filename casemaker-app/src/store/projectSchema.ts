@@ -52,6 +52,8 @@ export const caseParamsSchema = z.object({
       depth: z.number().positive(),
       compressionFactor: z.number().min(0.1).max(0.4),
       gasketMaterial: z.enum(['tpu', 'eva', 'epdm']),
+      // Issue #113 — per-printer gasket clearance tolerance.
+      gasketClearance: z.number().nonnegative().max(1).optional(),
     })
     .optional(),
   // Issue #109 — spring-cam locking latches. Optional array; legacy
@@ -66,6 +68,8 @@ export const caseParamsSchema = z.object({
         throw: z.number().positive(),
         width: z.number().positive(),
         height: z.number().positive(),
+        // Issue #113 — per-printer cam/striker engagement tolerance.
+        tolerance: z.number().nonnegative().max(1).optional(),
       }),
     )
     .optional(),
@@ -76,6 +80,9 @@ export const caseParamsSchema = z.object({
       corners: z.object({
         enabled: z.boolean(),
         radius: z.number().positive(),
+        // Issue #121 — discrete cap height (top + bottom). Optional;
+        // defaults to 12 mm at the compiler boundary.
+        capHeight: z.number().positive().optional(),
         flexBumper: z.boolean(),
       }),
       ribbing: z.object({

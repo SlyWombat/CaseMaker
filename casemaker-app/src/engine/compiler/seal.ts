@@ -195,20 +195,25 @@ export function buildSealTongue(
   const outerWidth = ring.outerWidth - 2 * outerInset;
   const outerHeight = ring.outerHeight - 2 * outerInset;
   const cornerR = Math.max(0, ring.cornerRadius - outerInset);
-  const outerSolid = roundedRectPrism(outerWidth, outerHeight, tongueHeight, cornerR);
+  // Issue #121 — extend tongue UP by EMBED so it overlaps the lid plate
+  // volumetrically. Without this the tongue's TOP face = lid plate's
+  // BOTTOM face — coplanar contact only, manifold doesn't reliably fuse
+  // them, lid splits into [plate, tongue] components.
+  const TONGUE_EMBED = 0.5;
+  const tongueTotalHeight = tongueHeight + TONGUE_EMBED;
+  const outerSolid = roundedRectPrism(outerWidth, outerHeight, tongueTotalHeight, cornerR);
   const innerWidth = outerWidth - 2 * tongueRingWidth;
   const innerHeight = outerHeight - 2 * tongueRingWidth;
   if (innerWidth <= 0 || innerHeight <= 0) return null;
   const innerR = Math.max(0, cornerR - tongueRingWidth);
   const innerSolid = translate(
     [tongueRingWidth, tongueRingWidth, -0.1],
-    roundedRectPrism(innerWidth, innerHeight, tongueHeight + 0.2, innerR),
+    roundedRectPrism(innerWidth, innerHeight, tongueTotalHeight + 0.2, innerR),
   );
   const tongueOp = difference([outerSolid, innerSolid]);
-  // The tongue's TOP face sits at the lid plate UNDERSIDE Z; tongue extends
-  // DOWN by tongueHeight. For a recessed lid, the lid plate underside is at
-  // (outerZ - lidThickness). For non-recessed, the lid plate sits ABOVE the
-  // rim, so the tongue protrudes from the plate's bottom (= outerZ in world).
+  // Tongue spans z = [tongueBottomZ, tongueBottomZ + tongueTotalHeight].
+  // Top extends EMBED past lidUndersideZ INTO the lid plate so they share
+  // volume. Visible protrusion below the lid plate = tongueHeight (unchanged).
   const lidUndersideZ = params.lidRecess
     ? dims.outerZ - params.lidThickness
     : dims.outerZ;

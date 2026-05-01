@@ -21,17 +21,18 @@ describe('Rugged exterior (#111)', () => {
     expect(ops.bumperNodes).toEqual([]);
   });
 
-  it('full rugged config emits 4 corners + ribs + 4 feet into caseAdditive', () => {
+  it('full rugged config emits 8 corner caps (top+bottom) + ribs + 4 feet (#121)', () => {
     const project = createDefaultProject('rpi-4b');
     const params: CaseParameters = { ...project.case, rugged: RUGGED_FULL };
     const ops = buildRuggedOps(project.board, params, project.hats ?? [], () => undefined);
-    // 4 corners (1 cylinder each) + 4 walls × 5 ribs = 20 ribs + 4 feet
-    // = 4 + 20 + 4 = 28 ops, all fused with the case body.
-    expect(ops.caseAdditive.length).toBe(4 + 20 + 4);
+    // #121 — corners are now DISCRETE top+bottom caps, not full-height
+    // pillars. 4 vertical corners × (1 top + 1 bottom) = 8 cap cylinders.
+    // 4 walls × 5 ribs = 20 ribs. 4 feet. Total = 32 ops.
+    expect(ops.caseAdditive.length).toBe(8 + 20 + 4);
     expect(ops.bumperNodes).toEqual([]);
   });
 
-  it('flexBumper=true splits corners into separate top-level nodes', () => {
+  it('flexBumper=true splits 8 corner caps into separate top-level nodes (#121)', () => {
     const project = createDefaultProject('rpi-4b');
     const params: CaseParameters = {
       ...project.case,
@@ -41,7 +42,8 @@ describe('Rugged exterior (#111)', () => {
       },
     };
     const ops = buildRuggedOps(project.board, params, project.hats ?? [], () => undefined);
-    expect(ops.bumperNodes.length).toBe(4);
+    // 8 caps now (top + bottom × 4 corners), each a separate flex node
+    expect(ops.bumperNodes.length).toBe(8);
     // caseAdditive = ribs + feet, no corners
     expect(ops.caseAdditive.length).toBe(20 + 4);
   });
@@ -145,6 +147,7 @@ describe('Rugged exterior (#111)', () => {
     };
     const plan = compileProject(ruggedProject);
     const bumpers = plan.nodes.filter((n) => n.id.startsWith('bumper-'));
-    expect(bumpers).toHaveLength(4);
+    // #121 — discrete top+bottom caps × 4 corners = 8.
+    expect(bumpers).toHaveLength(8);
   });
 });

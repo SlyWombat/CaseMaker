@@ -141,12 +141,19 @@ function buildOneLatch(
   // simple cube; the hook is a smaller cube at the bottom protruding
   // INWARD toward the wall.
   const armOuterDistance = 1.5; // mm gap between wall outer face and arm inner face
+  // Issue #121 — plate + hook MUST overlap volumetrically. Original code
+  // had plate z=[-height, 0] and hook z=[-height-thickness, -height] —
+  // they only TOUCH at z=-height, manifold doesn't fuse coplanar solids
+  // reliably (same lesson as the lip embed in 4a16cda). Extend the hook
+  // upward into the plate by EMBED mm so they share volume.
+  const EMBED = 0.5;
   const armPlate = cube([latch.width, ARM_THICKNESS, latch.height], false);
-  const hookCube = cube([latch.width, HOOK_DEPTH + ARM_THICKNESS, ARM_THICKNESS], false);
+  const hookCube = cube([latch.width, HOOK_DEPTH + ARM_THICKNESS, ARM_THICKNESS + EMBED], false);
   // Compose arm + hook in arm-local coords (origin = top of arm, inner-face XY corner).
   // Local: x along wall, y outward, z down.
   // Arm plate: x [0, width], y [0, ARM_THICKNESS], z [-height, 0]
-  // Hook plate: x [0, width], y [-HOOK_DEPTH, ARM_THICKNESS], z [-height-ARM_THICKNESS, -height]
+  // Hook plate: x [0, width], y [-HOOK_DEPTH, ARM_THICKNESS],
+  //   z [-height-ARM_THICKNESS, -height+EMBED]  ← overlaps plate by EMBED
   const armLocal = {
     plate: armPlate,
     hook: translate([0, -HOOK_DEPTH, -latch.height - ARM_THICKNESS], hookCube),

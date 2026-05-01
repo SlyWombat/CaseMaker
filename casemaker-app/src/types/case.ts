@@ -91,8 +91,13 @@ export interface RuggedParams {
   enabled: boolean;
   corners: {
     enabled: boolean;
-    /** Bumper outer radius extending past the case envelope. Typical 6–12 mm. */
+    /** Bumper outer radius extending past the case envelope. Typical 3–6 mm. */
     radius: Mm;
+    /** Issue #121 — height of each discrete corner cap (NOT full case
+     *  height — that produced full-height pillars at every corner, which
+     *  is wrong). Bumpers are placed as TOP + BOTTOM caps so 4 vertical
+     *  corners get 8 caps total. Default 12 mm. */
+    capHeight?: Mm;
     /** When true, bumpers print as SEPARATE top-level nodes (in TPU) so
      *  the user can slip them on. When false, fused with the case body. */
     flexBumper: boolean;
@@ -133,6 +138,10 @@ export interface SealParams {
   compressionFactor: number;
   /** Informational; #108 uses this to pick slicer-hint defaults. */
   gasketMaterial: SealGasketMaterial;
+  /** Issue #113 — per-feature tolerance (mm) added to channel + tongue
+   *  widths so the gasket installs without binding. Optional; defaults to
+   *  0.2 mm at the compiler boundary. Tune per printer. */
+  gasketClearance?: Mm;
 }
 
 export interface BossesParams {

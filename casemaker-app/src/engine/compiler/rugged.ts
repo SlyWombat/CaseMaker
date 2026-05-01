@@ -81,18 +81,30 @@ function buildCornerBumpers(
   const corners = params.rugged!.corners;
   const r = Math.max(0, corners.radius);
   if (r <= 0) return [];
-  // Each bumper is a vertical cylinder at the case corner, full case height,
-  // extending radially past the case envelope by (radius - existing cornerRadius).
-  // For v1 we use FULL cylinders (not just the quarter past the envelope) and
-  // let manifold's union with the shell do the trimming. cylinder() default
-  // axis is +Z which matches the vertical orientation.
-  const positions: [number, number][] = [
+  // Issue #121 — DISCRETE top + bottom caps at each vertical corner. The
+  // previous design emitted full-height cylindrical pillars (cylinder of
+  // height = outerZ) which produced four giant rods at the corners — not
+  // matching any real protective-case design. Caps are short cylinders
+  // of `capHeight` mm at the top and bottom of each vertical corner,
+  // leaving the middle of the wall smooth.
+  const capHeight = Math.max(2, corners.capHeight ?? 12);
+  // Cap height clamped to half the case so top + bottom don't overlap.
+  const safeCap = Math.min(capHeight, dims.outerZ / 2 - 2);
+  if (safeCap <= 0) return [];
+  const corners2D: [number, number][] = [
     [0, 0],
     [dims.outerX, 0],
     [0, dims.outerY],
     [dims.outerX, dims.outerY],
   ];
-  return positions.map(([x, y]) => translate([x, y, 0], cylinder(dims.outerZ, r, 24)));
+  const ops: BuildOp[] = [];
+  for (const [x, y] of corners2D) {
+    // Bottom cap: z = [0, safeCap].
+    ops.push(translate([x, y, 0], cylinder(safeCap, r, 24)));
+    // Top cap: z = [outerZ - safeCap, outerZ].
+    ops.push(translate([x, y, dims.outerZ - safeCap], cylinder(safeCap, r, 24)));
+  }
+  return ops;
 }
 
 function buildWallRibs(
