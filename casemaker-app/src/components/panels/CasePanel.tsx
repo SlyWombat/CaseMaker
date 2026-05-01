@@ -744,9 +744,17 @@ function SealSection({ params, patch }: SealSectionProps) {
       </label>
       {enabled && seal && (
         <>
-          <p className="labelled-field__hint" style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0' }}>
-            ⚠ TPU gasket print = moisture resistance. NOT certified IP67/IP68 immersion. For full waterproofness, source a pre-formed EPDM gasket of the dimensions in the export.
-          </p>
+          <div className="labelled-field__hint" style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0', lineHeight: 1.45 }}>
+            <p style={{ margin: '0 0 4px' }}>
+              <strong style={{ color: '#fcd34d' }}>⚠ Sets expectations:</strong> a printed TPU gasket gives <em>moisture resistance</em>, typically IP54 (dust + splash) when printed at 100% infill with 3+ walls and no layer-line voids.
+            </p>
+            <p style={{ margin: '0 0 4px' }}>
+              For <strong>IP67</strong> (1 m immersion 30 min) you need a pre-formed <strong>EPDM</strong> gasket of the dimensions this project will export — set <em>Material</em> to EPDM below to get a "buy don't print" sidecar instead.
+            </p>
+            <p style={{ margin: '0' }}>
+              <em>True submersion</em> also needs a pressure-equalization vent (Goretex membrane plug) — without it, temperature swings break the seal as the air inside expands and contracts.
+            </p>
+          </div>
           <div className="joint-row">
             <span className="joint-label" id="seal-profile-label">Profile</span>
             <div className="joint-buttons" role="radiogroup" aria-labelledby="seal-profile-label">

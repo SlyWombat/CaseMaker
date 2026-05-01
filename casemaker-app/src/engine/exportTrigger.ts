@@ -115,20 +115,38 @@ export async function exportSinglePart(
 }
 
 function gasketSlicerHints(material: 'tpu' | 'eva' | 'epdm' | undefined): string {
-  // Default to TPU 95A. EVA and EPDM are pre-formed gaskets the user
-  // installs; if those materials are picked the gasket STL is for
-  // reference only (the user buys the gasket — doesn't print it).
+  // Issue #115 — honest IP-rating context. TPU print = moisture resistance,
+  // NOT certified immersion. EVA / EPDM are pre-formed gaskets the user
+  // buys; the included STL is for fit-checking only.
   if (material === 'eva' || material === 'epdm') {
     return [
-      `# Gasket — DO NOT PRINT. Buy a pre-formed ${material.toUpperCase()} gasket of`,
-      '# the dimensions specified in the project. The included STL is for',
-      '# reference / fit-checking only.',
+      `# Gasket — DO NOT PRINT.`,
+      '#',
+      `# Buy a pre-formed ${material.toUpperCase()} gasket of the dimensions in the project.`,
+      '# The included STL is for fit-checking only — the case channel and lid',
+      '# tongue are sized to compress the dimensioned gasket by ~25%.',
+      '#',
+      `# ${material.toUpperCase()} is recommended for IP67-rated immersion. For full`,
+      '# waterproofness you ALSO need a pressure-equalization vent (Goretex',
+      '# membrane plug) — temperature swings break a sealed enclosure if there',
+      '# is no pressure relief.',
       '',
     ].join('\n');
   }
   return [
     '# Gasket — print in TPU 95A flex filament.',
     '#',
+    '# IP-rating expectations:',
+    '#   • Printed TPU 95A at 100% infill, 3+ walls, no layer voids ≈ IP54',
+    '#     (dust + splash). Useful for outdoor electronics, RV / boat panels',
+    '#     that see rain but not submersion.',
+    '#   • IP67 (1 m immersion, 30 min) is NOT achievable from a printed',
+    '#     gasket — switch the project to gasketMaterial=epdm to get a',
+    '#     "buy a real gasket" sidecar instead.',
+    '#   • True submersion ALSO needs a pressure-equalization vent (Goretex',
+    '#     membrane plug). Temperature swings break a fully-sealed box.',
+    '#',
+    '# Slicer settings:',
     '#   Nozzle:        0.4 mm',
     '#   Layer height:  0.2 mm',
     '#   Infill:        100%',
@@ -138,8 +156,11 @@ function gasketSlicerHints(material: 'tpu' | 'eva' | 'epdm' | undefined): string
     '#   Bed adhesion:  brim',
     '#   Retraction:    minimal (0.5 mm) — TPU oozes',
     '#',
-    '# The gasket should be installed in the case channel before the lid is',
-    '# attached. The lid tongue compresses it by ~25% to form the seal.',
+    '# Installation:',
+    '#   The gasket presses into the case channel before the lid is attached.',
+    '#   The lid tongue compresses it by ~25% to form the seal. If the gasket',
+    '#   does not seat fully, ream the channel with a sharp blade to remove',
+    '#   layer-line elephant-foot before re-installing.',
     '',
   ].join('\n');
 }
