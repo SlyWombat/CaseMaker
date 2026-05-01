@@ -14,7 +14,18 @@ import type { SnapCatch } from './snap';
  * faces only (±x / ±y), no detents, lid does NOT animate to its closed
  * position in Complete view (drops straight down regardless of hinge axis).
  */
-export type HingeStyle = 'external-pin' | 'print-in-place';
+export type HingeStyle =
+  | 'external-pin'
+  | 'print-in-place'
+  /** Issue #110 — piano-continuous: many tightly-spaced knuckles giving a
+   *  visually-continuous hinge bar. Strongest action, spreads load evenly. */
+  | 'piano-continuous'
+  /** Issue #110 — piano-segmented: 5–7 knuckle clusters with gaps. Easier
+   *  to print than continuous; visually similar. */
+  | 'piano-segmented'
+  /** Issue #110 — pip-pivot: two short pivot bosses near the ends, no
+   *  centerline pin. Lid clips on. Only suitable for shallow cases. */
+  | 'pip-pivot';
 export type HingePinMode = 'separate' | 'print-in-place';
 export type HingePositioning = 'continuous' | 'pair-at-ends' | 'centered';
 

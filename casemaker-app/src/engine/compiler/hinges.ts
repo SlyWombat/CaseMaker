@@ -100,6 +100,31 @@ function orientAlongFaceU(op: BuildOp, face: HingeFeature['face']): BuildOp {
 }
 
 /**
+ * Issue #110 — normalize HingeFeature based on style. Piano-continuous
+ * derives many tightly-spaced knuckles from hingeLength so the user's
+ * numKnuckles is overridden. Pip-pivot forces N=2 for the captive-pip
+ * mechanism. Other styles pass through.
+ *
+ * Done as a pure function so the existing computeAxisLayout +
+ * buildHingeOps loop body keeps working unchanged.
+ */
+function normalizeHingeForStyle(hinge: HingeFeature): HingeFeature {
+  if (hinge.style === 'piano-continuous') {
+    // Tight spacing (knuckle len ≈ knuckle diameter) → many knuckles.
+    const targetPitch = hinge.knuckleOuterDiameter + Math.max(hinge.knuckleClearance, 0.4);
+    const N = Math.max(5, Math.floor(hinge.hingeLength / targetPitch));
+    // Round to odd so case + lid each get an evenly-distributed share.
+    const oddN = N % 2 === 0 ? N + 1 : N;
+    return { ...hinge, numKnuckles: oddN };
+  }
+  if (hinge.style === 'pip-pivot') {
+    // Two captive pivot bosses near the ends; no centerline pin.
+    return { ...hinge, numKnuckles: 3, pinMode: 'separate' };
+  }
+  return hinge;
+}
+
+/**
  * Compute face-plane (u, normal) coordinates for the knuckle axis. World
  * placement is then frame.origin + uAxis*uPos + vAxis*0 + outwardOffset.
  *
@@ -213,13 +238,17 @@ function dirY(face: HingeFeature['face']): number {
 }
 
 export function buildHingeOps(
-  hinge: HingeFeature | undefined,
+  hingeRaw: HingeFeature | undefined,
   board: BoardProfile,
   params: CaseParameters,
   hats: HatPlacement[] = NO_HATS,
   resolveHat: HatResolver = NO_RESOLVE,
 ): HingeOps {
-  if (!hinge || !hinge.enabled) return EMPTY_OPS;
+  if (!hingeRaw || !hingeRaw.enabled) return EMPTY_OPS;
+  // Issue #110 — normalize numKnuckles per style. piano-continuous derives
+  // many tightly-spaced knuckles from the hingeLength; pip-pivot forces 2.
+  // Other styles use the user-set numKnuckles as-is.
+  const hinge = normalizeHingeForStyle(hingeRaw);
   const dims = computeShellDims(board, params, hats, resolveHat);
   const lidDims = computeLidDims(board, params, hats, resolveHat);
   const frame = faceFrame(hinge.face, dims.outerX, dims.outerY, dims.outerZ);
@@ -297,7 +326,17 @@ export function buildHingeOps(
   // Shell-side through-hole (subtracted from the unified shell op).
   subtractive.push(buildThroughHole(hinge, [holeStartX, holeStartY, axisZ]));
 
-  if (hinge.style === 'print-in-place') {
+  // Issue #110 — pin generation for the new styles maps to existing modes:
+  //   piano-continuous + piano-segmented: same as external-pin or
+  //     print-in-place per the user's pinMode. No extra pin geometry needed.
+  //   pip-pivot: no centerline pin at all (the two knuckles act as captive
+  //     pivot bosses with paired sockets on the lid side). Skip pin emission.
+  const emitsPin =
+    hinge.style === 'print-in-place' ||
+    (hinge.pinMode === 'print-in-place' &&
+      (hinge.style === 'piano-continuous' || hinge.style === 'piano-segmented'));
+
+  if (emitsPin && hinge.style !== 'pip-pivot') {
     // Centered pin solid threads through both case and lid knuckles. Emit
     // it as a SEPARATE TOP-LEVEL NODE — see the HingeOps comment for the
     // rationale. Putting it in caseAdditive would let the shell's

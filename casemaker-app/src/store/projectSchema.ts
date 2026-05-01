@@ -115,7 +115,14 @@ export const caseParamsSchema = z.object({
   hinge: z
     .object({
       id: z.string(),
-      style: z.enum(['external-pin', 'print-in-place']),
+      style: z.enum([
+        'external-pin',
+        'print-in-place',
+        // Issue #110 — protective-case styles.
+        'piano-continuous',
+        'piano-segmented',
+        'pip-pivot',
+      ]),
       face: z.enum(['+x', '-x', '+y', '-y']),
       numKnuckles: z.number().int().min(3),
       knuckleOuterDiameter: z.number().positive(),

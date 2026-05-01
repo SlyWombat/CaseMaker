@@ -239,6 +239,63 @@ describe('Issue #92 — barrel-hinge geometry compiler', () => {
   });
 });
 
+describe('Issue #110 — protective-case hinge styles', () => {
+  function defaultHinge(style: HingeFeature['style']): HingeFeature {
+    return {
+      id: 'h-test',
+      style,
+      face: '-y',
+      numKnuckles: 5,
+      knuckleOuterDiameter: 8,
+      pinDiameter: 3,
+      knuckleClearance: 0.4,
+      positioning: 'centered',
+      hingeLength: 80,
+      pinMode: 'separate',
+      enabled: true,
+    };
+  }
+
+  it('piano-continuous derives many tightly-spaced knuckles from hingeLength', () => {
+    const project = createDefaultProject('rpi-4b');
+    const params: CaseParameters = {
+      ...project.case,
+      hinge: defaultHinge('piano-continuous'),
+    };
+    const ops = buildHingeOps(params.hinge!, project.board, params, project.hats ?? [], () => undefined);
+    // hingeLength=80, knuckleOD=8, clearance=0.4 → pitch≈8.4 → ~9 knuckles.
+    // Forced odd, ≥5. We assert it's at least 7 (much more than the user's 5).
+    const cylCount = countOps(
+      { kind: 'union', children: [...ops.caseAdditive, ...ops.lidAdditive] },
+      'cylinder',
+    );
+    expect(cylCount).toBeGreaterThanOrEqual(7);
+  });
+
+  it('pip-pivot emits no centerline pin even with pinMode = print-in-place', () => {
+    const project = createDefaultProject('rpi-4b');
+    const params: CaseParameters = {
+      ...project.case,
+      hinge: { ...defaultHinge('pip-pivot'), pinMode: 'print-in-place' },
+    };
+    const ops = buildHingeOps(params.hinge!, project.board, params, project.hats ?? [], () => undefined);
+    expect(ops.pinNode).toBeNull();
+  });
+
+  it('all three new styles compile through compileProject without errors', () => {
+    const project = createDefaultProject('rpi-4b');
+    for (const style of ['piano-continuous', 'piano-segmented', 'pip-pivot'] as const) {
+      const sealedProject = {
+        ...project,
+        case: { ...project.case, hinge: defaultHinge(style) },
+      };
+      const plan = compileProject(sealedProject);
+      expect(plan.nodes.find((n) => n.id === 'shell')).toBeDefined();
+      expect(plan.nodes.find((n) => n.id === 'lid')).toBeDefined();
+    }
+  });
+});
+
 describe('Issue #92 — schema migration v6 → v7', () => {
   it('createDefaultProject stamps schemaVersion: 7 with hinge undefined', () => {
     const p = createDefaultProject('rpi-4b');

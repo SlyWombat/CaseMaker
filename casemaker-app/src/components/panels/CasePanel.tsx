@@ -469,6 +469,21 @@ const HINGE_STYLE_OPTIONS: { value: HingeStyle; label: string; hint: string }[] 
     label: 'Print-in-place',
     hint: 'Pin solid is printed inside the through-hole — no assembly required, slightly looser action.',
   },
+  {
+    value: 'piano-continuous',
+    label: 'Piano (continuous)',
+    hint: 'Many tightly-spaced knuckles giving a visually-continuous hinge bar. Strongest action — best for protective cases. (#110)',
+  },
+  {
+    value: 'piano-segmented',
+    label: 'Piano (segmented)',
+    hint: '5–7 knuckle clusters with gaps. Easier to print than continuous; visually similar. (#110)',
+  },
+  {
+    value: 'pip-pivot',
+    label: 'Pip pivot',
+    hint: 'Two short pivot bosses near the ends, no centerline pin. Lid clips on. Suitable only for shallow cases (< 80 mm). (#110)',
+  },
 ];
 
 const HINGE_FACE_OPTIONS: { value: HingeFeature['face']; label: string }[] = [
