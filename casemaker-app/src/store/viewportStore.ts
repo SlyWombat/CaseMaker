@@ -95,6 +95,12 @@ export interface ViewportState {
   selection: ViewportSelection;
   /** Issue #91 — 4-way view-mode picker. */
   viewMode: ViewportViewMode;
+  /** Issue #120 — per-part visibility. Set entries are HIDDEN; absence =
+   *  visible. Keyed by BuildPlan node id (shell, lid, gasket, hinge-pin,
+   *  latch-arm-*, bumper-*). Session-only — not persisted; reverts to all-
+   *  visible on reload, so a hidden part doesn't silently stay hidden when
+   *  the user opens a different project. */
+  hiddenParts: ReadonlySet<string>;
   setShowLid: (v: boolean) => void;
   setShowBoard: (v: boolean) => void;
   setShowGrid: (v: boolean) => void;
@@ -104,6 +110,10 @@ export interface ViewportState {
   setCameraMode: (m: ViewportCameraMode) => void;
   setSelection: (s: ViewportSelection) => void;
   setViewMode: (m: ViewportViewMode) => void;
+  /** Issue #120 — toggle a part's visibility by node id. */
+  togglePartVisible: (partId: string) => void;
+  /** Issue #120 — set all parts visible (clear the hidden set). */
+  showAllParts: () => void;
 }
 
 const persisted = loadPersisted();
@@ -121,6 +131,7 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
   // stale selection that points at a HAT placement that may no longer
   // exist.
   selection: null,
+  hiddenParts: new Set<string>(),
   setShowLid: (v) => {
     set({ showLid: v });
     savePersisted({ ...get(), showLid: v });
@@ -155,4 +166,12 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
     set({ viewMode: m, showLid: m !== 'base-only' });
     savePersisted({ ...get(), viewMode: m, showLid: m !== 'base-only' });
   },
+  togglePartVisible: (partId) => {
+    const cur = get().hiddenParts;
+    const next = new Set(cur);
+    if (next.has(partId)) next.delete(partId);
+    else next.add(partId);
+    set({ hiddenParts: next });
+  },
+  showAllParts: () => set({ hiddenParts: new Set<string>() }),
 }));

@@ -5,7 +5,6 @@ import {
   redoProject,
   clearHistory,
 } from '@/store/projectStore';
-import { useViewportStore } from '@/store/viewportStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
   downloadProjectJson,
@@ -18,6 +17,7 @@ import {
 import { triggerExport } from '@/engine/exportTrigger';
 import { DocsModal } from '@/components/docs/DocsModal';
 import { SettingsMenu } from '@/components/layout/SettingsMenu';
+import { PartsMenu } from '@/components/layout/PartsMenu';
 
 const FORMAT_LABEL: Record<string, string> = {
   'stl-binary': 'STL (binary)',
@@ -29,8 +29,6 @@ export function Toolbar() {
   const project = useProjectStore((s) => s.project);
   const setProject = useProjectStore((s) => s.setProject);
   const showWelcome = useProjectStore((s) => s.showWelcome);
-  const showBoard = useViewportStore((s) => s.showBoard);
-  const setShowBoard = useViewportStore((s) => s.setShowBoard);
   const exportFormat = useSettingsStore((s) => s.exportFormat);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -189,20 +187,13 @@ export function Toolbar() {
         onChange={onFileChange}
         data-testid="load-project-input"
       />
-      {/* Lid show/hide moved to the viewport's 4-mode picker (#91 —
-          Complete / Exploded / Base / Lid). Board visibility stays here
-          since the view-mode picker covers lid only. The schematic /
-          photo cycle was removed in #59 (no GLB / topImage assets ship
-          with any built-in board); this is a single boolean toggle
-          until #39 phase 2 brings GLB assets back. */}
-      <button
-        onClick={() => setShowBoard(!showBoard)}
-        data-testid="toggle-board-btn"
-        title="Show/hide the host PCB + HATs in the viewport"
-        aria-pressed={showBoard}
-      >
-        {showBoard ? '👁 Board' : '🚫 Board'}
-      </button>
+      {/* Issue #120 — Parts pulldown replaces the Show-board toggle. Lists
+          every top-level node in the current BuildPlan (case, lid, gasket,
+          fasteners, accessories) with per-part visibility checkboxes. The
+          host-board visibility is no longer split out — it's a separate
+          rendering layer that the view-mode picker covers via base-only
+          mode. */}
+      <PartsMenu />
       <button
         onClick={() => setDocsOpen(true)}
         data-testid="docs-open"
