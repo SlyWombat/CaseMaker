@@ -141,13 +141,18 @@ function buildOneLatch(
   // simple cube; the hook is a smaller cube at the bottom protruding
   // INWARD toward the wall.
   const armOuterDistance = 1.5; // mm gap between wall outer face and arm inner face
-  // Issue #121 — plate + hook MUST overlap volumetrically. Original code
-  // had plate z=[-height, 0] and hook z=[-height-thickness, -height] —
-  // they only TOUCH at z=-height, manifold doesn't fuse coplanar solids
-  // reliably (same lesson as the lip embed in 4a16cda). Extend the hook
-  // upward into the plate by EMBED mm so they share volume.
+  // Issue #121 — plate + hook MUST overlap volumetrically. The original
+  // code had plate at z=[0, height] (cube extends +z from origin) but the
+  // hook positioned at z=[-height-thickness, -height] — opposite sides of
+  // the origin, no overlap, manifold returned 2 components.
+  // Fix: shift the plate DOWN so its z range matches the comments
+  // (z=[-height, 0], origin = TOP of arm = hinge pivot point), and extend
+  // the hook UP by EMBED so plate+hook share volume.
   const EMBED = 0.5;
-  const armPlate = cube([latch.width, ARM_THICKNESS, latch.height], false);
+  const armPlate = translate(
+    [0, 0, -latch.height],
+    cube([latch.width, ARM_THICKNESS, latch.height], false),
+  );
   const hookCube = cube([latch.width, HOOK_DEPTH + ARM_THICKNESS, ARM_THICKNESS + EMBED], false);
   // Compose arm + hook in arm-local coords (origin = top of arm, inner-face XY corner).
   // Local: x along wall, y outward, z down.

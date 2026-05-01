@@ -69,10 +69,16 @@ function buildLipWedge(
   pushVert(0, pMin, height);      // 6  G — outboard, top (narrowed)
   pushVert(width, pMin, height);  // 7  I — outboard, top, far-u (narrowed)
   const indices = new Uint32Array([
+    // Issue #121 — base + top triangle windings were INVERTED. Verified by
+    // hand: tri (0,1,3) cross product = (0, 0, +W·P) which points +z, but
+    // the base's outward direction is -z; manifold rejected the whole
+    // mesh as non-orientable ("Not manifold" error on snap-fit-test).
+    // Reversed: base 0,3,1 / 0,2,3; top 4,7,6 / 4,5,7. The other 8
+    // triangles already wound correctly.
     // base z=0, outside -z
-    0, 1, 3,  0, 3, 2,
+    0, 3, 1,  0, 2, 3,
     // top z=H, outside +z
-    4, 6, 7,  4, 7, 5,
+    4, 7, 6,  4, 5, 7,
     // wall n=0, outside -n
     0, 1, 5,  0, 5, 4,
     // slanted outboard, outside +n+z
