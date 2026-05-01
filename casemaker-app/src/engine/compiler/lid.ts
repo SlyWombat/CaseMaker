@@ -291,6 +291,92 @@ export function buildScrewDownLid(
   return attachPosts(plate, posts, holes);
 }
 
+/**
+ * Issue #122 — extension tab on a recessed lid that bridges the lid plate's
+ * hinge-side edge out to the hinge knuckle bodies (which sit OUTSIDE the
+ * case envelope). Without this the recessed lid plate doesn't reach the
+ * knuckle XY positions and the lid splits into [plate, knuckle-1, …]
+ * disconnected components.
+ *
+ * Returns null when no hinge is configured or the hinge isn't on a side
+ * face (±x / ±y).
+ */
+function buildHingeLidExtension(
+  board: BoardProfile,
+  params: CaseParameters,
+  hats: HatPlacement[],
+  resolveHat: HatResolver,
+  display: DisplayPlacement | null | undefined,
+  resolveDisplay: DisplayResolver,
+  plateOriginX: number,
+  plateOriginY: number,
+  lid: LidDims,
+): BuildOp | null {
+  const hinge = params.hinge;
+  if (!hinge?.enabled) return null;
+  const dims = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
+  const knuckleR = hinge.knuckleOuterDiameter / 2;
+  // Tab spans `hingeLength + 2 mm` along the hinge u-axis (the wall tangent),
+  // covering the knuckle XY footprint plus a small overshoot at each end.
+  const tabU = hinge.hingeLength + 2;
+  // Tab depth along the wall normal: from the lid plate's hinge-side edge
+  // OUT past the case envelope to the knuckle outer face. Plus an EMBED
+  // overlap on each end so the union with both lid plate and knuckles is
+  // volumetric, not coplanar.
+  const EMBED_PLATE = 0.5;
+  const EMBED_KNUCKLE = 0.5;
+  // Plate edge (lid-local coord on the hinge axis), case envelope (world),
+  // knuckle outer face (world): all derived per face below.
+  const plateEdgeX = plateOriginX; // -x face
+  const plateEdgeXMax = plateOriginX + lid.x; // +x face
+  const plateEdgeY = plateOriginY; // -y face
+  const plateEdgeYMax = plateOriginY + lid.y; // +y face
+
+  // u position along the wall tangent (centered for now; honor positioning
+  // via existing layout in a follow-up if needed).
+  const isXFace = hinge.face === '+x' || hinge.face === '-x';
+  const wallTangentLen = isXFace ? dims.outerY : dims.outerX;
+  const uStart = (wallTangentLen - hinge.hingeLength) / 2 - 1;
+
+  // Tab z range = full lid plate thickness (matches lid plate underside +
+  // top exactly) so the tab fuses with the plate AND the knuckle body
+  // (which extends from z=-knuckleR upward to z=0 in lid-local — see
+  // hinges.ts buildKnuckleLidFairing).
+  const tabZ = lid.z;
+  switch (hinge.face) {
+    case '+y': {
+      // Tab covers from plate's +y edge (with EMBED overlap inward) to the
+      // case +y envelope and beyond by knuckleR + EMBED_KNUCKLE.
+      const yStart = plateEdgeYMax - EMBED_PLATE;
+      const yEnd = dims.outerY + knuckleR + EMBED_KNUCKLE;
+      const yLen = yEnd - yStart;
+      if (yLen <= 0) return null;
+      return translate([uStart, yStart, 0], cube([tabU, yLen, tabZ], false));
+    }
+    case '-y': {
+      const yEnd = plateEdgeY + EMBED_PLATE;
+      const yStart = -knuckleR - EMBED_KNUCKLE;
+      const yLen = yEnd - yStart;
+      if (yLen <= 0) return null;
+      return translate([uStart, yStart, 0], cube([tabU, yLen, tabZ], false));
+    }
+    case '+x': {
+      const xStart = plateEdgeXMax - EMBED_PLATE;
+      const xEnd = dims.outerX + knuckleR + EMBED_KNUCKLE;
+      const xLen = xEnd - xStart;
+      if (xLen <= 0) return null;
+      return translate([xStart, uStart, 0], cube([xLen, tabU, tabZ], false));
+    }
+    case '-x': {
+      const xEnd = plateEdgeX + EMBED_PLATE;
+      const xStart = -knuckleR - EMBED_KNUCKLE;
+      const xLen = xEnd - xStart;
+      if (xLen <= 0) return null;
+      return translate([xStart, uStart, 0], cube([xLen, tabU, tabZ], false));
+    }
+  }
+}
+
 export function buildLid(
   board: BoardProfile,
   params: CaseParameters,
@@ -317,10 +403,18 @@ export function buildLid(
     const recessOffset = Math.max(0.5, params.wallThickness - 0.5);
     const plateOriginX = params.wallThickness - recessOffset + recess.clearance;
     const plateOriginY = params.wallThickness - recessOffset + recess.clearance;
-    const plate = translate(
+    let plate: BuildOp = translate(
       [plateOriginX, plateOriginY, 0],
       roundedRectPrism(lid.x, lid.y, lid.z, lidRecessedCornerRadius(params)),
     );
+    // Issue #122 — recessed lid is INSET from the case envelope; hinge
+    // knuckles sit OUTSIDE the case envelope. Without an extension, the
+    // lid plate doesn't reach the knuckle XY positions and the lid splits
+    // into [plate, knuckle-1, knuckle-2, …]. Emit a slab tab that bridges
+    // the lid plate's hinge-side edge OUT to the case envelope (and a bit
+    // beyond, to overlap the knuckle bodies).
+    const ext = buildHingeLidExtension(board, params, hats, resolveHat, display, resolveDisplay, plateOriginX, plateOriginY, lid);
+    if (ext) plate = union([plate, ext]);
     const { posts, holes } = buildLidPosts(board, params, hats, resolveHat, display, resolveDisplay);
     if (params.joint === 'snap-fit' && params.snapType === 'full-lid') {
       const lip = buildFullLidFrictionLip(board, params, hats, resolveHat, display, resolveDisplay);

@@ -280,10 +280,12 @@ function buildHookBarb(frame: WallFrame): BuildOp {
  * EMBED_INTO_WALL guarantees a volumetric overlap so the union always
  * produces a single connected component.
  */
-// Bumped 0.2 → 0.4 mm so manifold's union has more volumetric overlap to
-// fuse the trapezoidal-prism lip with the wall. Still well under the
-// minimum 1.0 mm wall thickness so the lip never breaks through.
-const EMBED_INTO_WALL = 0.4;
+// Issue #123 — 0.4 mm overlap was insufficient when the trapezoidal-prism
+// mesh's slanted outboard face combined with the case-shell's rounded
+// inner corners left thin slivers of wall material. Bumped to 1.0 mm —
+// still well under the minimum 2 mm wall thickness so the lip never
+// breaks through to the outside.
+const EMBED_INTO_WALL = 1.0;
 
 /** Shift the wedge origin INTO the wall and add the same amount to the
  *  protrusion so the inward tip stays at the same world location. */
