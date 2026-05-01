@@ -137,6 +137,335 @@ function buildLipSymmetricPrism(
   return buildLipWedge(origin, wallAxis, wallNormalSign, protrusion, width, height);
 }
 
+// ---------------------------------------------------------------------------
+// Hook (subtract-tab) snap-fit design.
+//
+// Departure from the lip-based designs (asymmetric-ramp, symmetric-ramp,
+// half-round): instead of an additive lip on the wall + a separate barb on
+// the lid that hooks under it, the lid carries a full TAB (cantilever arm
+// + integral barb) and the SHELL has the seated-tab volume SUBTRACTED out,
+// creating the snap hole. The wall material above the hole forms the catch
+// ledge — engagement is purely 90° flat-to-flat retention with no lip.
+//
+// Tab geometry (in WORLD coords, computed for arbitrary wall):
+//
+//                    ┌─── lid plate at lidPlateBottomZ
+//                    │     ┐
+//                    │arm  │ HOOK_TOP_MARGIN (also clamped under recess
+//                    │     │   pocket bottom for recessed lids — gives
+//                    │     ┘   solid catch material above the barb)
+//                    │  ┌──┐ ← barb top (90° flat catch face)
+//                    │  │  │
+//                    │  │  │ HOOK_BARB_BODY_HEIGHT (vertical retention body)
+//                    │  └──┘ ← body bottom
+//                    │  /             ─┐
+//                    │ /                │ HOOK_BARB_TAPER_HEIGHT (insertion ramp:
+//                    │/                 │   collapses outboard protrusion to
+//                    │  ← arm bottom    ┘   zero at the tip so the barb's
+//                    │                       leading edge enters cleanly)
+//
+// The arm hugs the inner wall surface (with HOOK_ARM_INSET clearance for
+// sliding); the barb extends OUTWARD from the arm's outer face by
+// HOOK_BARB_PROTRUSION, INTO the wall material. During insertion the
+// tapered face rides up the inner wall surface, deflecting the arm
+// inward; at full insertion the body's outer face slides past the inner
+// wall surface (touching it); at seated, the body drops into the
+// subtracted hole and the arm springs back outward — the body's flat
+// 90° top engages the wall material above.
+const HOOK_TOP_MARGIN = 1.0;        // mm — barb top sits this far below lid plate / pocket bot
+const HOOK_BARB_PROTRUSION = 0.8;   // mm — barb extends this far into wall material
+const HOOK_BARB_BODY_HEIGHT = 2.5;  // mm — vertical retention body
+const HOOK_BARB_TAPER_HEIGHT = 1.5; // mm — tapered insertion ramp at the bottom
+const HOOK_ARM_INSET = 0.2;         // mm — arm outer face to inner wall surface (sliding clearance)
+const HOOK_RECESS_CATCH_GUARD = 1.0;// mm — minimum solid wall above barb top below recess pocket
+// Issue #121-class — manifold can't reliably fuse solids that meet only at
+// coplanar surfaces (no shared volume). Body+arm and body+tip share planes
+// by construction, so each barb sub-piece extends INTO the adjacent piece
+// by HOOK_TAB_EMBED for a guaranteed volumetric overlap.
+const HOOK_TAB_EMBED = 0.3;
+
+interface HookTabFrame {
+  /** Bbox-min corner of the arm in world X / Y (X/Y don't differ between
+   *  lid-local and world — the lid sits at world X / Y with no offset). */
+  armOriginX: number;
+  armOriginY: number;
+  armSizeX: number;
+  armSizeY: number;
+  /** Bbox-min corner of the barb body in world X / Y. */
+  barbBodyOriginX: number;
+  barbBodyOriginY: number;
+  barbBodySizeX: number;
+  barbBodySizeY: number;
+  /** Z values in LID-LOCAL coords (lid plate underside = z=0; arm extends
+   *  into negative z). buildHookTab emits in lid-local; the wall subtract
+   *  translates by lidPlateBottomZ_world to get the world-coord cut. */
+  armBotZ_local: number;       // = -SNAP_DEFAULTS.armLength
+  barbTopZ_local: number;
+  barbBodyBotZ_local: number;
+  barbTipBotZ_local: number;
+  /** World Z of the lid plate underside — used to translate the tab into
+   *  world coords for the shell subtraction. */
+  lidPlateBottomZ_world: number;
+  /** Wall geometry (for the tapered-tip mesh winding). */
+  wallAxis: 'x' | 'y';
+  wallNormalSign: 1 | -1;
+}
+
+function computeHookTabFrame(
+  c: SnapCatch,
+  params: CaseParameters,
+  dims: { outerX: number; outerY: number; outerZ: number },
+): HookTabFrame {
+  const { wallThickness: wall } = params;
+  const lidPlateBottomZ_world = params.lidRecess
+    ? dims.outerZ - params.lidThickness
+    : dims.outerZ;
+  const pocketBotZ_world = params.lidRecess
+    ? dims.outerZ - (params.lidThickness + 0.5)
+    : Infinity;
+  // Barb top must be (a) below lid plate by HOOK_TOP_MARGIN and (b) below
+  // the recess pocket bottom by HOOK_RECESS_CATCH_GUARD (recessed only)
+  // so the catch material above is solid wall, not the partially-carved
+  // pocket region. Z values are stored as LID-LOCAL (relative to lid plate
+  // underside = 0) so they can union directly into the lid-local lidOp.
+  const recessCatchGuard_local = pocketBotZ_world - lidPlateBottomZ_world; // negative or -∞
+  const barbTopZ_local = Math.min(
+    -HOOK_TOP_MARGIN,
+    recessCatchGuard_local - HOOK_RECESS_CATCH_GUARD,
+  );
+  const barbBodyBotZ_local = barbTopZ_local - HOOK_BARB_BODY_HEIGHT;
+  const barbTipBotZ_local = barbBodyBotZ_local - HOOK_BARB_TAPER_HEIGHT;
+  const armBotZ_local = -SNAP_DEFAULTS.armLength;
+  const armWidth = SNAP_DEFAULTS.armWidth;
+  const armThickness = SNAP_DEFAULTS.armThickness;
+
+  let wallAxis: 'x' | 'y';
+  let wallNormalSign: 1 | -1;
+  let armOriginX: number, armOriginY: number;
+  let armSizeX: number, armSizeY: number;
+  let barbBodyOriginX: number, barbBodyOriginY: number;
+  let barbBodySizeX: number, barbBodySizeY: number;
+
+  switch (c.wall) {
+    case '-x': {
+      wallAxis = 'x'; wallNormalSign = -1;
+      const innerWallX = wall;
+      armOriginX = innerWallX + HOOK_ARM_INSET;
+      armOriginY = c.uPosition - armWidth / 2;
+      armSizeX = armThickness;
+      armSizeY = armWidth;
+      barbBodyOriginX = armOriginX - HOOK_BARB_PROTRUSION;
+      barbBodyOriginY = armOriginY;
+      barbBodySizeX = HOOK_BARB_PROTRUSION;
+      barbBodySizeY = armWidth;
+      break;
+    }
+    case '+x': {
+      wallAxis = 'x'; wallNormalSign = +1;
+      const innerWallX = dims.outerX - wall;
+      armOriginX = innerWallX - HOOK_ARM_INSET - armThickness;
+      armOriginY = c.uPosition - armWidth / 2;
+      armSizeX = armThickness;
+      armSizeY = armWidth;
+      barbBodyOriginX = armOriginX + armThickness;
+      barbBodyOriginY = armOriginY;
+      barbBodySizeX = HOOK_BARB_PROTRUSION;
+      barbBodySizeY = armWidth;
+      break;
+    }
+    case '-y': {
+      wallAxis = 'y'; wallNormalSign = -1;
+      const innerWallY = wall;
+      armOriginX = c.uPosition - armWidth / 2;
+      armOriginY = innerWallY + HOOK_ARM_INSET;
+      armSizeX = armWidth;
+      armSizeY = armThickness;
+      barbBodyOriginX = armOriginX;
+      barbBodyOriginY = armOriginY - HOOK_BARB_PROTRUSION;
+      barbBodySizeX = armWidth;
+      barbBodySizeY = HOOK_BARB_PROTRUSION;
+      break;
+    }
+    case '+y': {
+      wallAxis = 'y'; wallNormalSign = +1;
+      const innerWallY = dims.outerY - wall;
+      armOriginX = c.uPosition - armWidth / 2;
+      armOriginY = innerWallY - HOOK_ARM_INSET - armThickness;
+      armSizeX = armWidth;
+      armSizeY = armThickness;
+      barbBodyOriginX = armOriginX;
+      barbBodyOriginY = armOriginY + armThickness;
+      barbBodySizeX = armWidth;
+      barbBodySizeY = HOOK_BARB_PROTRUSION;
+      break;
+    }
+  }
+
+  return {
+    armOriginX, armOriginY, armSizeX, armSizeY,
+    barbBodyOriginX, barbBodyOriginY, barbBodySizeX, barbBodySizeY,
+    lidPlateBottomZ_world,
+    armBotZ_local, barbTopZ_local, barbBodyBotZ_local, barbTipBotZ_local,
+    wallAxis, wallNormalSign,
+  };
+}
+
+/** Triangular prism for the tapered insertion ramp. The cross-section in
+ *  the (n, z) plane is a right triangle:
+ *    A = (n=0,                           z=barbBodyBotZ)  — arm-side, top of taper
+ *    B = (n=barbProtrusion·outwardSign,  z=barbBodyBotZ)  — outboard, top of taper
+ *    C = (n=0,                           z=barbTipBotZ)   — arm-side, tip
+ *  Extruded along the wall tangent for armWidth. The hypotenuse B-C is
+ *  the slope the inner wall surface rides up during insertion.
+ *  Winding parity is computed the same way as buildLipWedge — flip if the
+ *  local→world basis Jacobian is negative for the (axis, sign) pair. */
+function buildHookTaperedTip(frame: HookTabFrame): BuildOp {
+  // Anchor along the wall-NORMAL axis (where "outer" / "into wall" makes
+  // sense): the arm's outer face. Anchor along the wall-TANGENT axis is
+  // always bbox-min (the start of the armWidth extrusion).
+  let normalAnchor: number;   // arm outer face on the wall-normal axis
+  let tangentAnchor: number;  // bbox-min along the wall-tangent axis
+  let armWidth: number;
+  if (frame.wallAxis === 'x') {
+    // Wall normal = X; wall tangent = Y. Arm bbox: X=[armOriginX, armOriginX+armSizeX], Y=[armOriginY, armOriginY+armSizeY=armOriginY+armWidth].
+    normalAnchor = frame.wallNormalSign === -1
+      ? frame.armOriginX
+      : frame.armOriginX + frame.armSizeX;
+    tangentAnchor = frame.armOriginY;
+    armWidth = frame.armSizeY;
+  } else {
+    // Wall normal = Y; wall tangent = X.
+    normalAnchor = frame.wallNormalSign === -1
+      ? frame.armOriginY
+      : frame.armOriginY + frame.armSizeY;
+    tangentAnchor = frame.armOriginX;
+    armWidth = frame.armSizeX;
+  }
+  // Outward = into wall = wallNormalSign on the wall-normal axis.
+  const outward = frame.wallNormalSign;
+
+  const positions: number[] = [];
+  function pushVert(uOff: number, nOff: number, z: number): void {
+    if (frame.wallAxis === 'x') {
+      // u = world Y; n = world X (with `outward` sign).
+      positions.push(normalAnchor + outward * nOff, tangentAnchor + uOff, z);
+    } else {
+      // u = world X; n = world Y.
+      positions.push(tangentAnchor + uOff, normalAnchor + outward * nOff, z);
+    }
+  }
+  // 6 vertices: A, B, C at uOff=0 (front cap) and at uOff=armWidth (back cap).
+  // The arm-side anchor (n=0) extends INTO the arm by HOOK_TAB_EMBED for
+  // a volumetric overlap so manifold fuses the tip + arm into one solid
+  // (coplanar contact alone does not). The tip's TOP face also extends UP
+  // into the body by HOOK_TAB_EMBED for the same reason.
+  // A: arm-side, top of taper      → (0,                                0, barbBodyBotZ + EMBED)
+  // B: outboard, top of taper      → (0,         HOOK_BARB_PROTRUSION, barbBodyBotZ + EMBED)
+  // C: arm-side, tip               → (0,                                0, barbTipBotZ)
+  // arm-side n offset = -EMBED  (negative n = into the arm, opposite of "into wall")
+  pushVert(0,                    -HOOK_TAB_EMBED,         frame.barbBodyBotZ_local + HOOK_TAB_EMBED);  // 0  Af
+  pushVert(0,                    HOOK_BARB_PROTRUSION,    frame.barbBodyBotZ_local + HOOK_TAB_EMBED);  // 1  Bf
+  pushVert(0,                    -HOOK_TAB_EMBED,         frame.barbTipBotZ_local);   // 2  Cf
+  pushVert(armWidth,             -HOOK_TAB_EMBED,         frame.barbBodyBotZ_local + HOOK_TAB_EMBED);  // 3  Ab
+  pushVert(armWidth,             HOOK_BARB_PROTRUSION,    frame.barbBodyBotZ_local + HOOK_TAB_EMBED);  // 4  Bb
+  pushVert(armWidth,             -HOOK_TAB_EMBED,         frame.barbTipBotZ_local);   // 5  Cb
+  // Reference winding (verified by cross-products of every face giving the
+  // expected outward normal for the (axis, sign) parity-positive case):
+  //   front cap (uOff=0,        outside -u):              0, 2, 1
+  //   back cap  (uOff=armWidth, outside +u):              3, 4, 5
+  //   top quad  (z=barbBodyBotZ,outside +z): split:       0, 1, 4   and  0, 4, 3
+  //   arm-face  (n=arm-side,    outside +arm-toward):     0, 3, 5   and  0, 5, 2
+  //   slope     (hypotenuse,    outside (-n, -z)):        1, 5, 4   and  1, 2, 5
+  // The slope was the trickiest — its outward direction is OPPOSITE the
+  // wedge interior, which sits on the arm-side / top-side of the
+  // hypotenuse, so the slope normal points into the cavity AND down. The
+  // initial naive winding (1,4,5)/(1,5,2) gave (+n,+z) and made the mesh
+  // non-orientable.
+  const tris: number[] = [
+    0, 2, 1,                    // front cap
+    3, 4, 5,                    // back cap
+    0, 1, 4,  0, 4, 3,          // top quad
+    0, 3, 5,  0, 5, 2,          // arm-face
+    1, 5, 4,  1, 2, 5,          // slope
+  ];
+  const inverted =
+    (frame.wallAxis === 'x' && frame.wallNormalSign === -1) ||
+    (frame.wallAxis === 'y' && frame.wallNormalSign === +1);
+  if (inverted) {
+    for (let i = 0; i < tris.length; i += 3) {
+      const swap = tris[i + 1]!;
+      tris[i + 1] = tris[i + 2]!;
+      tris[i + 2] = swap;
+    }
+  }
+  return mesh(new Float32Array(positions), new Uint32Array(tris));
+}
+
+/** Full lid-side tab: arm + barb body + tapered tip, unioned into one
+ *  build op. Result is in WORLD coords; ProjectCompiler offsets it to
+ *  lid-local before unioning into the lid mesh. */
+function buildHookTab(frame: HookTabFrame): BuildOp {
+  // Arm extends UP into the lid plate by HOOK_TAB_EMBED so manifold fuses
+  // arm+lid (otherwise the arm's top face is coplanar with the lid plate
+  // underside and the union leaves the tab as a loose component).
+  const arm = translate(
+    [frame.armOriginX, frame.armOriginY, frame.armBotZ_local],
+    cube([frame.armSizeX, frame.armSizeY, SNAP_DEFAULTS.armLength + HOOK_TAB_EMBED]),
+  );
+  // Body extends into the arm by HOOK_TAB_EMBED on the arm-side face so
+  // manifold fuses body+arm volumetrically (not just coplanar contact).
+  // For ±y walls the arm-side face is y±, for ±x walls it's x±, governed
+  // by wallNormalSign (outward), so the embed direction is OPPOSITE
+  // (toward the cavity / arm body) = -wallNormalSign.
+  const intoArm = -frame.wallNormalSign;
+  const bodyOriginX = frame.wallAxis === 'x'
+    ? frame.barbBodyOriginX + (intoArm > 0 ? 0 : -HOOK_TAB_EMBED)  // wallNormalSign>0 → barb on +x side, embed extends +x; <0 → barb on -x side, extend -x
+    : frame.barbBodyOriginX;
+  // Wait — easier: always extend the body's wall-NORMAL extent by HOOK_TAB_EMBED
+  // on the side facing the arm. For ±x wall, that's the X axis; for ±y wall,
+  // that's the Y axis. Direction is INTO the arm = -wallNormalSign.
+  void bodyOriginX;
+  const body = (() => {
+    let ox = frame.barbBodyOriginX;
+    let oy = frame.barbBodyOriginY;
+    let sx = frame.barbBodySizeX;
+    let sy = frame.barbBodySizeY;
+    if (frame.wallAxis === 'x') {
+      // Extend by HOOK_TAB_EMBED on the arm-facing side along X.
+      // Barb body bbox along X is from barbBodyOriginX (size barbBodySizeX).
+      // Arm is on the opposite side from the wall. For -x wall (wallNormalSign=-1),
+      // wall is at -X so barb is at -X side of arm; arm is at +X side of barb.
+      // Extending the body's +X face into the arm: ox unchanged, sx += EMBED.
+      // For +x wall (wallNormalSign=+1), barb is at +X side of arm; arm is at -X side.
+      // Extending the body's -X face into the arm: ox -= EMBED, sx += EMBED.
+      if (frame.wallNormalSign === -1) sx += HOOK_TAB_EMBED;
+      else { ox -= HOOK_TAB_EMBED; sx += HOOK_TAB_EMBED; }
+    } else {
+      if (frame.wallNormalSign === -1) sy += HOOK_TAB_EMBED;
+      else { oy -= HOOK_TAB_EMBED; sy += HOOK_TAB_EMBED; }
+    }
+    // Also extend the body DOWN by HOOK_TAB_EMBED so it overlaps the tip's
+    // top extension (the tip extends UP into the body's footprint).
+    return translate([ox, oy, frame.barbBodyBotZ_local - HOOK_TAB_EMBED], cube([sx, sy, HOOK_BARB_BODY_HEIGHT + HOOK_TAB_EMBED]));
+  })();
+  const tip = buildHookTaperedTip(frame);
+  return union([arm, body, tip]);
+}
+
+/** Subtract-from-shell volume = the full barb (body + taper) in seated
+ *  position. The arm itself is NOT subtracted — it stays in the cavity
+ *  during insertion via elastic flex. Subtracting the body+taper carves
+ *  the snap hole; the wall material above z=barbTopZ becomes the catch
+ *  ledge that engages the barb's flat top on retention. The cavity-side
+ *  portion of the body (between arm outer face and inner wall surface,
+ *  if any) is already empty so the subtraction is a no-op there. */
+function buildHookTabWallSubtract(frame: HookTabFrame): BuildOp {
+  // Reuse buildHookTab so the subtraction shape matches the tab exactly
+  // (including the arm + the embed slop). The tab is in lid-local Z, so
+  // shift it UP into world Z by lidPlateBottomZ_world for the shell op.
+  return translate([0, 0, frame.lidPlateBottomZ_world], buildHookTab(frame));
+}
+
 type HatResolver = (id: string) => HatProfile | undefined;
 const NO_HATS: HatPlacement[] = [];
 const NO_RESOLVE: HatResolver = () => undefined;
@@ -583,30 +912,28 @@ export function buildSnapCatch(
 ): CatchGeometry | null {
   if (!c.enabled) return null;
   const dims = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
-  const { armLength, barbLength } = SNAP_DEFAULTS;
-  // Issue #80 — LIP_HEIGHT is determined by arm geometry, not by
-  // barbProtrusion. The lip's bottom (catch face) must align with the
-  // barb's top in the seated position:
-  //
+  const barbType: BarbType = c.barbType ?? 'hook';
+  // 'hook' uses the new subtract-tab design (per-user followup): arm hugs
+  // inner wall surface, barb extends OUTWARD into wall material with a
+  // tapered insertion bottom + flat 90° top, and the seated barb volume
+  // is SUBTRACTED from the shell to create the snap hole. No additive lip.
+  if (barbType === 'hook') {
+    const tabFrame = computeHookTabFrame(c, params, dims);
+    return {
+      lip: null,
+      armBarb: buildHookTab(tabFrame),
+      wallPocket: buildHookTabWallSubtract(tabFrame),
+    };
+  }
+  // Other barb types — additive lip on the case wall, separate barb on
+  // lid that hooks under it. Geometry per Issue #80:
   //   barb_top_seated = lid_plate_bottom - armLength + barbLength
-  //   lipBottom must equal barb_top_seated
-  //   → lipTop - LIP_HEIGHT = lid_plate_bottom - armLength + barbLength
-  //   → LIP_HEIGHT = (lipTop - lid_plate_bottom) + (armLength - barbLength)
-  //
-  // For a non-recessed lid, lid_plate_bottom and lipTop both = outerZ.
-  // For a recessed lid, the lid drops into a pocket so
-  //   lid_plate_bottom = outerZ - lidThickness
-  // and the lip should sit just below the pocket (which is at
-  // outerZ - lidThickness). In both cases the (lipTop - lid_plate_bottom)
-  // term cancels, so LIP_HEIGHT = armLength - barbLength.
+  //   LIP_HEIGHT      = armLength - barbLength
+  const { armLength, barbLength } = SNAP_DEFAULTS;
   const LIP_HEIGHT = armLength - barbLength;
-  // Issue #80 — when the lid is recessed it sits IN a pocket at
-  // (outerZ - lidThickness). The lip on the wall has to drop with it
-  // or the barb engages thin air.
   const lipTopZ = params.lidRecess ? dims.outerZ - params.lidThickness : dims.outerZ;
   const lipBottomZ = lipTopZ - LIP_HEIGHT;
   const frame = computeWallFrame(c, params, dims.outerX, dims.outerY, lipBottomZ);
-  const barbType: BarbType = c.barbType ?? 'hook';
   const builders = BARB_REGISTRY[barbType];
   const lip = builders.buildLip(frame, LIP_HEIGHT);
   const arm = buildArm(frame);

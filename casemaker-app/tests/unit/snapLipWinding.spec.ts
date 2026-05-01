@@ -18,6 +18,11 @@
 //   (2) the lip lives in the CAVITY half-space (cavity-bound side of the
 //       inner wall surface), not on the outer side — catches a future
 //       direction-flip regression that would still pass (1).
+//
+// NB: post-followup (subtract-tab redesign), the 'hook' barb type no
+// longer emits a lip — it engages via wall subtraction. These winding
+// regression tests use 'asymmetric-ramp' instead, which still uses the
+// trapezoidal-prism lip mesh and exercises the same buildLipWedge code.
 
 import { describe, it, expect } from 'vitest';
 import { buildSnapCatch } from '@/engine/compiler/snapCatches';
@@ -116,7 +121,7 @@ describe('Snap-fit lip wedge winding + direction (regression)', () => {
         wall,
         uPosition: wall.endsWith('x') ? dims.outerY / 2 : dims.outerX / 2,
         enabled: true,
-        barbType: 'hook' as const,
+        barbType: 'asymmetric-ramp' as const,
       };
       const g = buildSnapCatch(c, project.board, project.case);
       expect(g?.lip).not.toBeNull();
@@ -132,7 +137,7 @@ describe('Snap-fit lip wedge winding + direction (regression)', () => {
         wall,
         uPosition: wall.endsWith('x') ? dims.outerY / 2 : dims.outerX / 2,
         enabled: true,
-        barbType: 'hook' as const,
+        barbType: 'asymmetric-ramp' as const,
       };
       const g = buildSnapCatch(c, project.board, project.case);
       const m = findMesh(g!.lip!);

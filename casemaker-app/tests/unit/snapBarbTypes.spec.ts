@@ -70,15 +70,23 @@ describe('Snap-fit barb cross-section registry (#69)', () => {
     });
   }
 
-  it('ball-socket emits a wall pocket and no lip; other types emit a lip and no pocket', () => {
+  it('hook + ball-socket emit a wall pocket (subtractive); the lip-based barb types emit a lip', () => {
+    // Two engagement modes after the hook redesign:
+    //   - subtract-tab (hook): lid carries the full barbed tab; shell has the
+    //     seated tab volume subtracted (= snap hole). g.lip is null.
+    //   - additive lip (asymmetric-ramp, symmetric-ramp, half-round): lip on
+    //     the shell wall; lid arm hooks under it. g.wallPocket is null.
+    //   - detent (ball-socket): cylindrical pocket cut into the wall; ball
+    //     barb on the lid clicks INTO the pocket. g.lip is null.
+    const subtractTabTypes = new Set(['hook', 'ball-socket']);
     for (const barbType of BARB_TYPES) {
       const g = buildSnapCatch({ ...firstCatch!, barbType }, project.board, project.case);
-      if (barbType === 'ball-socket') {
-        expect(g!.lip!).toBeNull();
-        expect(g!.wallPocket).not.toBeNull();
+      if (subtractTabTypes.has(barbType)) {
+        expect(g!.lip, `${barbType} should not emit a lip`).toBeNull();
+        expect(g!.wallPocket, `${barbType} should emit a wallPocket`).not.toBeNull();
       } else {
-        expect(g!.lip!).not.toBeNull();
-        expect(g!.wallPocket).toBeNull();
+        expect(g!.lip, `${barbType} should emit a lip`).not.toBeNull();
+        expect(g!.wallPocket, `${barbType} should not emit a wallPocket`).toBeNull();
       }
     }
   });
@@ -152,12 +160,15 @@ describe('Snap-fit barb cross-section registry (#69)', () => {
     const explicit = { ...firstCatch!, barbType: 'hook' as const };
     const gLegacy = buildSnapCatch(legacy, project.board, project.case);
     const gExplicit = buildSnapCatch(explicit, project.board, project.case);
-    expect(countSolidPrimitives(gLegacy!.lip!)).toBe(countSolidPrimitives(gExplicit!.lip!));
+    // Hook uses the subtract-tab design — both runs should agree on
+    // wallPocket structure and lid-side tab structure.
+    expect(gLegacy!.lip).toBeNull();
+    expect(gExplicit!.lip).toBeNull();
+    expect(countSolidPrimitives(gLegacy!.wallPocket!)).toBe(countSolidPrimitives(gExplicit!.wallPocket!));
     expect(countSolidPrimitives(gLegacy!.armBarb)).toBe(countSolidPrimitives(gExplicit!.armBarb));
   });
 
-  it('half-round and ball-socket use cylinder primitives (different from cube hook)', () => {
-    const hook = buildSnapCatch({ ...firstCatch!, barbType: 'hook' }, project.board, project.case);
+  it('half-round and ball-socket use cylinder primitives on the lid side', () => {
     const halfRound = buildSnapCatch(
       { ...firstCatch!, barbType: 'half-round' },
       project.board,
@@ -168,30 +179,30 @@ describe('Snap-fit barb cross-section registry (#69)', () => {
       project.board,
       project.case,
     );
-    // Hook is cube-only on the lid side; half-round and ball-socket bring in
-    // a cylinder primitive — so geometry is observably distinct.
-    expect(countByKind(hook!.armBarb, 'cylinder')).toBe(0);
+    // half-round and ball-socket bring in a cylinder primitive on the lid.
     expect(countByKind(halfRound!.armBarb, 'cylinder')).toBe(1);
     expect(countByKind(ball!.armBarb, 'cylinder')).toBe(1);
   });
 
-  it('hook + symmetric-ramp lips both produce a single trapezoidal-prism mesh (sloped lip)', () => {
-    const hook = buildSnapCatch({ ...firstCatch!, barbType: 'hook' }, project.board, project.case);
+  it('asymmetric-ramp + symmetric-ramp lips both render as a single trapezoidal-prism mesh', () => {
+    // Post-redesign hook no longer emits a lip (subtract-tab design). The
+    // lip-based barb types still share the trapezoidal-prism mesh format.
+    const asym = buildSnapCatch(
+      { ...firstCatch!, barbType: 'asymmetric-ramp' },
+      project.board,
+      project.case,
+    );
     const sym = buildSnapCatch(
       { ...firstCatch!, barbType: 'symmetric-ramp' },
       project.board,
       project.case,
     );
-    // The lip is a trapezoidal-prism mesh with a sloped outboard face — the
-    // slope converts lid-down force into arm-flex force so rectangular
-    // barbs can click past without requiring the wall itself to flex.
-    // Hook vs symmetric-ramp differ only in the barb shape on the lid side.
-    expect(countByKind(hook!.lip!, 'mesh')).toBe(1);
+    expect(countByKind(asym!.lip!, 'mesh')).toBe(1);
     expect(countByKind(sym!.lip!, 'mesh')).toBe(1);
-    expect(countByKind(hook!.lip!, 'cube')).toBe(0);
+    expect(countByKind(asym!.lip!, 'cube')).toBe(0);
     expect(countByKind(sym!.lip!, 'cube')).toBe(0);
     // 8-vert / 12-tri trapezoidal prism — sanity check the topology.
-    expect(meshTriangles(hook!.lip!)).toBe(12);
+    expect(meshTriangles(asym!.lip!)).toBe(12);
     expect(meshTriangles(sym!.lip!)).toBe(12);
   });
 
