@@ -5,7 +5,7 @@ import type {
   HatProfile,
 } from '@/types';
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
-import { cube, cylinder, translate, type BuildOp } from './buildPlan';
+import { cube, cylinder, mesh, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
 
 type HatResolver = (id: string) => HatProfile | undefined;
@@ -102,12 +102,10 @@ function buildCornerBumpers(
   const corners = params.rugged!.corners;
   const r = Math.max(0, corners.radius);
   if (r <= 0) return { caseCaps: [], lidCaps: [] };
-  // Issue #121 — DISCRETE top + bottom caps at each vertical corner. The
-  // previous design emitted full-height cylindrical pillars (cylinder of
-  // height = outerZ) which produced four giant rods at the corners — not
-  // matching any real protective-case design. Caps are short cylinders
-  // of `capHeight` mm at the top and bottom of each vertical corner,
-  // leaving the middle of the wall smooth.
+  // Issue #121 — DISCRETE top + bottom caps at each vertical corner.
+  // Caps are CHAMFERED cylinders (small frustum at top + bottom rim) so
+  // the bumper reads as moulded with slightly rounded edges instead of
+  // a printed-flat sharp disc.
   const capHeight = Math.max(2, corners.capHeight ?? 12);
   const corners2D: [number, number][] = [
     [0, 0],
@@ -117,28 +115,55 @@ function buildCornerBumpers(
   ];
   const caseCaps: BuildOp[] = [];
   const lidCaps: BuildOp[] = [];
-  // Bottom caps live on the case (z=[0, safeCap]). With a Pelican shell
-  // lid the TOP cap moves to the LID (lid-local z=[lidTotalZ - safeCap,
-  // lidTotalZ]). Without shell mode, both caps stay on the case — same
-  // as pre-Pelican behavior.
   const safeCapCase = Math.min(capHeight, dims.outerZ / 2 - 2);
   if (safeCapCase <= 0) return { caseCaps: [], lidCaps: [] };
   for (const [x, y] of corners2D) {
-    caseCaps.push(translate([x, y, 0], cylinder(safeCapCase, r, 24)));
+    caseCaps.push(translate([x, y, 0], chamferedCylinder(safeCapCase, r)));
     if (!lidShellMode) {
-      caseCaps.push(translate([x, y, dims.outerZ - safeCapCase], cylinder(safeCapCase, r, 24)));
+      caseCaps.push(translate([x, y, dims.outerZ - safeCapCase], chamferedCylinder(safeCapCase, r)));
     }
   }
   if (lidShellMode) {
     const safeCapLid = Math.min(capHeight, lidTotalZ / 2 - 2);
     if (safeCapLid > 0) {
       for (const [x, y] of corners2D) {
-        // Lid-local Z: cap sits at the TOP of the lid.
-        lidCaps.push(translate([x, y, lidTotalZ - safeCapLid], cylinder(safeCapLid, r, 24)));
+        lidCaps.push(translate([x, y, lidTotalZ - safeCapLid], chamferedCylinder(safeCapLid, r)));
       }
     }
   }
   return { caseCaps, lidCaps };
+}
+
+/** Tiny frustum at the top + bottom rim of a vertical bumper cylinder so
+ *  the edges read as gently rounded instead of printed-flat. The middle
+ *  cylinder + the two frustums are extended by SECTION_EMBED to overlap
+ *  volumetrically; otherwise their coplanar junction at z=CHAM_H and
+ *  z=height-CHAM_H produces a tiny zero-area sliver during manifold's
+ *  union, breaking the single-component invariant. */
+function chamferedCylinder(height: number, r: number): BuildOp {
+  const CHAM_H = Math.min(0.6, height * 0.15);
+  const CHAM_R = Math.min(0.6, r * 0.2);
+  if (height <= 2 * CHAM_H + 0.4 || r <= CHAM_R + 0.4) {
+    return cylinder(height, r, 24);
+  }
+  const innerR = r - CHAM_R;
+  const SECTION_EMBED = 0.05;
+  const bottom: BuildOp = {
+    kind: 'cylinder',
+    height: CHAM_H + SECTION_EMBED,
+    radiusLow: innerR,
+    radiusHigh: r,
+    segments: 24,
+  };
+  const middle = translate(
+    [0, 0, CHAM_H - SECTION_EMBED],
+    cylinder(height - 2 * CHAM_H + 2 * SECTION_EMBED, r, 24),
+  );
+  const top = translate(
+    [0, 0, height - CHAM_H - SECTION_EMBED],
+    { kind: 'cylinder', height: CHAM_H + SECTION_EMBED, radiusLow: r, radiusHigh: innerR, segments: 24 },
+  );
+  return union([bottom, middle, top]);
 }
 
 function buildWallRibs(
@@ -169,10 +194,12 @@ function buildWallRibs(
   const EMBED = 0.5;
   const totalDepth = ribDepth + EMBED;
 
+  const RIB_TAPER = 3.0;  // mm — vertical taper at top + bottom of each vertical rib
+
   // Inner helper: emit ribs for a given Z range (zBot, zSpan) into the
   // supplied output array. Same X/Y geometry; only Z anchors change so
   // case + lid ribs line up vertically when assembled.
-  const emitRibs = (out: BuildOp[], zBot: number, zSpan: number, ribFilter?: (wall: '+x' | '-x' | '+y' | '-y', tPos: number) => boolean): void => {
+  const emitRibs = (out: BuildOp[], zBot: number, zSpan: number): void => {
     if (zSpan <= 1) return;
     if (ribbing.direction === 'vertical') {
       const RIB_W = 2;
@@ -180,19 +207,8 @@ function buildWallRibs(
         const tangent = wall === '+x' || wall === '-x' ? dims.outerY : dims.outerX;
         const stride = tangent / (ribbing.ribCount + 1);
         for (let i = 1; i <= ribbing.ribCount; i++) {
-          const t = i * stride;
-          if (ribFilter && !ribFilter(wall, t)) continue;
-          let placed: BuildOp;
-          if (wall === '+x') {
-            placed = translate([dims.outerX - EMBED, t - RIB_W / 2, zBot], cube([totalDepth, RIB_W, zSpan], false));
-          } else if (wall === '-x') {
-            placed = translate([-ribDepth, t - RIB_W / 2, zBot], cube([totalDepth, RIB_W, zSpan], false));
-          } else if (wall === '+y') {
-            placed = translate([t - RIB_W / 2, dims.outerY - EMBED, zBot], cube([RIB_W, totalDepth, zSpan], false));
-          } else {
-            placed = translate([t - RIB_W / 2, -ribDepth, zBot], cube([RIB_W, totalDepth, zSpan], false));
-          }
-          out.push(placed);
+          const tCenter = i * stride;
+          out.push(buildTaperedVerticalRib(wall, tCenter, RIB_W, zBot, zBot + zSpan, ribDepth, EMBED, RIB_TAPER, dims));
         }
       }
     } else {
@@ -218,16 +234,18 @@ function buildWallRibs(
     emitRibs(lidRibs, lidRibBot, lidRibSpan);
   }
 
-  // Issue (per-user followup) — protective vertical ribs flanking each
-  // latch, so the latch arm is shielded from impact. Two ribs per latch
-  // (one on each side of the latch's u-position). These are emitted on
-  // BOTH case + lid (when shell mode) so the protection wraps the
-  // assembled exterior.
+  // Protective vertical ribs flanking each latch — shield the latch arm
+  // from impact. Two ribs per latch (one on each side of the latch's
+  // u-position), wider than regular ribs and extending OUT past the
+  // latch arm's outermost face. Same tapered ends + on case AND lid.
   const latches = params.latches ?? [];
-  const LATCH_RIB_GAP = 6;       // mm — how far outboard of the latch the protective rib sits
-  const LATCH_RIB_W = 3;         // mm — wider than regular ribs for impact protection
-  const LATCH_RIB_DEPTH = ribDepth + 1;  // protect a touch proud of the regular rib line
-  const latchRibTotalDepth = LATCH_RIB_DEPTH + EMBED;
+  const LATCH_RIB_GAP = 6;
+  const LATCH_RIB_W = 3;
+  // Latch arm body's outer face is at HOOK_WALL_OFFSET (1.0) + tolerance
+  // (0.2 default) + ARM_PLATE_THICKNESS (3.0) ≈ 4.2 mm out from the wall.
+  // Make the protective rib stick out past that so the rib tip shields
+  // the arm.
+  const LATCH_RIB_DEPTH = Math.max(ribDepth + 1, 5);
   const emitLatchRibs = (out: BuildOp[], zBot: number, zSpan: number): void => {
     if (zSpan <= 1) return;
     for (const latch of latches) {
@@ -235,18 +253,10 @@ function buildWallRibs(
       const halfW = latch.width / 2;
       const offsets = [-(halfW + LATCH_RIB_GAP), halfW + LATCH_RIB_GAP];
       for (const off of offsets) {
-        const tPos = latch.uPosition + off;
-        let placed: BuildOp;
-        if (latch.wall === '+x') {
-          placed = translate([dims.outerX - EMBED, tPos - LATCH_RIB_W / 2, zBot], cube([latchRibTotalDepth, LATCH_RIB_W, zSpan], false));
-        } else if (latch.wall === '-x') {
-          placed = translate([-LATCH_RIB_DEPTH, tPos - LATCH_RIB_W / 2, zBot], cube([latchRibTotalDepth, LATCH_RIB_W, zSpan], false));
-        } else if (latch.wall === '+y') {
-          placed = translate([tPos - LATCH_RIB_W / 2, dims.outerY - EMBED, zBot], cube([LATCH_RIB_W, latchRibTotalDepth, zSpan], false));
-        } else {
-          placed = translate([tPos - LATCH_RIB_W / 2, -LATCH_RIB_DEPTH, zBot], cube([LATCH_RIB_W, latchRibTotalDepth, zSpan], false));
-        }
-        out.push(placed);
+        const tCenter = latch.uPosition + off;
+        out.push(
+          buildTaperedVerticalRib(latch.wall, tCenter, LATCH_RIB_W, zBot, zBot + zSpan, LATCH_RIB_DEPTH, EMBED, RIB_TAPER, dims),
+        );
       }
     }
   };
@@ -256,6 +266,108 @@ function buildWallRibs(
   }
 
   return { caseRibs, lidRibs };
+}
+
+/** Tapered vertical rib: hexagonal cross-section in the (wall-normal,
+ *  Z) plane extruded along the wall tangent for `ribW`. The hexagon has
+ *  a flat outer face spanning the middle Z range and a slope at top +
+ *  bottom that ramps from no outward protrusion (at the very edge) up
+ *  to full ribDepth at z=zBot+taper / z=zTop-taper. The wall-side face
+ *  is fully embedded into the wall material throughout. */
+function buildTaperedVerticalRib(
+  wall: '+x' | '-x' | '+y' | '-y',
+  tCenter: number,
+  ribW: number,
+  zBot: number,
+  zTop: number,
+  ribDepth: number,
+  embed: number,
+  taper: number,
+  dims: { outerX: number; outerY: number; outerZ: number },
+): BuildOp {
+  const axis: 'x' | 'y' = wall === '+x' || wall === '-x' ? 'x' : 'y';
+  const sign: 1 | -1 = wall === '+x' || wall === '+y' ? +1 : -1;
+  const wallOuter =
+    wall === '-x' || wall === '-y' ? 0 :
+    wall === '+x' ? dims.outerX : dims.outerY;
+  const tStart = tCenter - ribW / 2;
+  const span = zTop - zBot;
+  // Clamp the per-end taper to no more than 45% of the span — leaves at
+  // least 10% of straight outer face in the middle so the hexagon
+  // doesn't degenerate.
+  const effTaper = Math.min(taper, Math.max(0, span * 0.45));
+  if (effTaper < 0.5 || span < 1.5) {
+    // Fall back to a plain cube when there's no room for a useful taper.
+    if (axis === 'x') {
+      const x0 = sign === -1 ? wallOuter - ribDepth : wallOuter - embed;
+      return translate([x0, tStart, zBot], cube([embed + ribDepth, ribW, span], false));
+    }
+    const y0 = sign === -1 ? wallOuter - ribDepth : wallOuter - embed;
+    return translate([tStart, y0, zBot], cube([ribW, embed + ribDepth, span], false));
+  }
+
+  // Hexagon cross-section vertices in local (n, z) — n positive = OUTWARD,
+  // negative = INTO wall. Trace A→B→C→D→E→F is CCW viewed from the +t
+  // side of the rib.
+  //   A = (-embed,    zBot)              wall-side, bottom
+  //   B = (0,         zBot)              outer-bottom corner (no protrusion)
+  //   C = (+ribDepth, zBot+effTaper)     outer-bottom-of-flat (full protrusion)
+  //   D = (+ribDepth, zTop-effTaper)     outer-top-of-flat
+  //   E = (0,         zTop)              outer-top corner (back to no protrusion)
+  //   F = (-embed,    zTop)              wall-side, top
+  const positions: number[] = [];
+  function pushVert(t: number, n: number, z: number): void {
+    if (axis === 'x') {
+      positions.push(wallOuter + sign * n, tStart + t, z);
+    } else {
+      positions.push(tStart + t, wallOuter + sign * n, z);
+    }
+  }
+  // Front cap (t=0): A,B,C,D,E,F → indices 0..5
+  pushVert(0,    -embed,  zBot);
+  pushVert(0,    0,       zBot);
+  pushVert(0,    ribDepth, zBot + effTaper);
+  pushVert(0,    ribDepth, zTop - effTaper);
+  pushVert(0,    0,       zTop);
+  pushVert(0,    -embed,  zTop);
+  // Back cap (t=ribW): indices 6..11
+  pushVert(ribW, -embed,  zBot);
+  pushVert(ribW, 0,       zBot);
+  pushVert(ribW, ribDepth, zBot + effTaper);
+  pushVert(ribW, ribDepth, zTop - effTaper);
+  pushVert(ribW, 0,       zTop);
+  pushVert(ribW, -embed,  zTop);
+
+  // Reference winding (matches positive-determinant local→world basis).
+  // Local basis (t, n, z) maps to world differently per axis:
+  //   axis='x': (t, n, z) → (Y, sign·X, Z)  ⇒ det = -sign
+  //   axis='y': (t, n, z) → (X, sign·Y, Z)  ⇒ det = +sign
+  // Flip every triangle's winding when det < 0 so outward normals stay
+  // consistent — same parity-flip pattern as buildLipWedge in snapCatches.ts.
+  const inverted =
+    (axis === 'x' && sign === +1) ||
+    (axis === 'y' && sign === -1);
+  const tris: number[] = [
+    // Front cap (CCW viewed from -t; fan from A=0)
+    0, 5, 4,  0, 4, 3,  0, 3, 2,  0, 2, 1,
+    // Back cap (CCW viewed from +t; fan from A_b=6)
+    6, 7, 8,  6, 8, 9,  6, 9, 10,  6, 10, 11,
+    // Side faces (each edge of hexagon → quad → 2 tris)
+    0, 1, 7,  0, 7, 6,    // A→B: bottom face (z=zBot, normal -z)
+    1, 2, 8,  1, 8, 7,    // B→C: bottom slope (normal +n,-z)
+    2, 3, 9,  2, 9, 8,    // C→D: outer face (n=ribDepth, normal +n)
+    3, 4, 10, 3, 10, 9,   // D→E: top slope (normal +n,+z)
+    4, 5, 11, 4, 11, 10,  // E→F: top face (z=zTop, normal +z)
+    5, 0, 6,  5, 6, 11,   // F→A: wall face (n=-embed, normal -n)
+  ];
+  if (inverted) {
+    for (let i = 0; i < tris.length; i += 3) {
+      const swap = tris[i + 1]!;
+      tris[i + 1] = tris[i + 2]!;
+      tris[i + 2] = swap;
+    }
+  }
+  return mesh(new Float32Array(positions), new Uint32Array(tris));
 }
 
 

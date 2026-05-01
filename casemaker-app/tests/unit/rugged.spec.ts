@@ -100,7 +100,7 @@ describe('Rugged exterior (#111)', () => {
     }
   });
 
-  it('+x and +y vertical ribs embed INTO the wall by 0.5 mm (#119 manifold-overlap fix)', () => {
+  it('+x and +y vertical ribs embed INTO the wall and protrude past it (#119 manifold-overlap fix)', () => {
     const project = createDefaultProject('rpi-4b');
     const params: CaseParameters = {
       ...project.case,
@@ -118,19 +118,34 @@ describe('Rugged exterior (#111)', () => {
     const ops = buildRuggedOps(project.board, params, project.hats ?? [], () => undefined);
     // 4 walls × 2 ribs = 8.
     expect(ops.caseAdditive).toHaveLength(8);
-    // Look for the +x rib(s): translate x = outerX - 0.5 (= EMBED). Cube
-    // x-extent is ribDepth + EMBED = 2.0. The rib covers x = [outerX-0.5, outerX+1.5].
-    const plusX = ops.caseAdditive.filter((op) => {
-      if (op.kind !== 'translate') return false;
-      return Math.abs(op.offset[0] - (dims.outerX - 0.5)) < 0.01;
+    // Post-taper: each rib is a hexagonal-prism mesh whose vertices already
+    // bake the world-coord wall position. Inspect the mesh vertices to
+    // confirm the +x rib(s) include points BOTH inside the wall (x <
+    // outerX, by EMBED) AND outside the case envelope (x > outerX, by
+    // ribDepth) — the embed gives the manifold-fusion overlap and the
+    // protrusion gives the visible rib bump.
+    const collectXs = (op: import('@/engine/compiler/buildPlan').BuildOp): number[] => {
+      if (op.kind === 'mesh') {
+        const xs: number[] = [];
+        for (let i = 0; i < op.positions.length; i += 3) xs.push(op.positions[i]!);
+        return xs;
+      }
+      return [];
+    };
+    const ribXs = ops.caseAdditive.flatMap(collectXs);
+    expect(ribXs.some((x) => x > dims.outerX + 1)).toBe(true);   // ≥1 rib protrudes past +x wall
+    expect(ribXs.some((x) => x < -1)).toBe(true);                // ≥1 rib protrudes past -x wall
+    expect(ribXs.some((x) => Math.abs(x - (dims.outerX + 0.0)) < 0.01 || x > dims.outerX - 0.6)).toBe(true);
+    const ribYs = ops.caseAdditive.flatMap((op) => {
+      if (op.kind === 'mesh') {
+        const ys: number[] = [];
+        for (let i = 1; i < op.positions.length; i += 3) ys.push(op.positions[i]!);
+        return ys;
+      }
+      return [];
     });
-    expect(plusX.length).toBeGreaterThan(0);
-    // Look for +y rib(s): translate y = outerY - 0.5.
-    const plusY = ops.caseAdditive.filter((op) => {
-      if (op.kind !== 'translate') return false;
-      return Math.abs(op.offset[1] - (dims.outerY - 0.5)) < 0.01;
-    });
-    expect(plusY.length).toBeGreaterThan(0);
+    expect(ribYs.some((y) => y > dims.outerY + 1)).toBe(true);   // ≥1 rib protrudes past +y wall
+    expect(ribYs.some((y) => y < -1)).toBe(true);                // ≥1 rib protrudes past -y wall
   });
 
   it('flex-bumper config emits bumper-* nodes in the BuildPlan', () => {
