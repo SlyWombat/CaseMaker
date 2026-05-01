@@ -192,6 +192,15 @@ export function compileProject(project: Project): BuildPlan {
     const tongueLocal = translate([0, 0, -lidDims.zPosition], sealTongue);
     lidOp = union([lidOp, tongueLocal]);
   }
+  // Pelican rugged exterior on the LID (top corner caps + upper ribs +
+  // protective ribs flanking each latch). Ops are in lid-LOCAL coords;
+  // union into lidOp BEFORE the lid translates to its world Z.
+  if (ruggedOps.lidAdditive.length > 0) {
+    lidOp = union([lidOp, ...ruggedOps.lidAdditive]);
+  }
+  // Top-surface vent cuts. ventilation.ts emits the 'top' frame in
+  // lid-LOCAL Z (so the difference here actually pierces the lid mesh
+  // — pre-fix the cuts were in world coords and removed nothing).
   if (ventCuts.lidCuts.length > 0) {
     lidOp = difference([lidOp, ...ventCuts.lidCuts]);
   }

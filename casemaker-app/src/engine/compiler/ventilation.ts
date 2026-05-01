@@ -53,6 +53,7 @@ function frameFor(
   wall: number,
   floor: number,
   lid: number,
+  lidTotalZ: number,
 ): VentFrame | null {
   // Each face: identify the plane, the in-plane (u, v) extents, and the
   // cutting direction + cutter length. The cutter origin sits OUTSIDE the
@@ -114,7 +115,13 @@ function frameFor(
         cutOriginW: { x: 0, y: 0, z: -OVER },
         cutThru: floor + 2 * OVER,
       };
-    case 'top': // lid (+z)
+    case 'top': // lid (+z) — emitted in LID-LOCAL coords so it actually
+      // pierces the lid mesh when ProjectCompiler does
+      // difference([lidOp, ...lidCuts]) BEFORE translating the lid into
+      // world Z. Pre-fix the cut was placed in world coords: subtraction
+      // had no overlap with the lid-local geometry and removed nothing.
+      // Pierce the TOP-MOST `lid` mm of the lid (the closed-top "ceiling"
+      // of a shell lid, OR the entire flat lid plate).
       return {
         uAxis: 'x',
         vAxis: 'y',
@@ -122,7 +129,7 @@ function frameFor(
         vMax: outerY,
         cutAxis: 'z',
         cutDir: -1,
-        cutOriginW: { x: 0, y: 0, z: outerZ - lid - OVER },
+        cutOriginW: { x: 0, y: 0, z: lidTotalZ - lid - OVER },
         cutThru: lid + 2 * OVER,
       };
   }
@@ -245,6 +252,7 @@ export function buildVentilationCutouts(
   const coverage = clamp01(params.ventilation.coverage);
   const shellCuts: BuildOp[] = [];
   const lidCuts: BuildOp[] = [];
+  const lidTotalZ = params.lidThickness + (params.lidCavityHeight ?? 0);
   for (const s of surfaces) {
     const frame = frameFor(
       s,
@@ -254,6 +262,7 @@ export function buildVentilationCutouts(
       params.wallThickness,
       params.floorThickness,
       params.lidThickness,
+      lidTotalZ,
     );
     if (!frame) continue;
     const dest = s === 'top' ? lidCuts : shellCuts;
