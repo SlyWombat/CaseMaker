@@ -67,7 +67,10 @@ function colorForNode(id: string): string {
 export function SceneMeshes() {
   const viewMode = useViewportStore((s) => s.viewMode);
   const hiddenParts = useViewportStore((s) => s.hiddenParts);
-  const nodeIds = useJobStore((s) => Array.from(s.nodes.keys()));
+  // Subscribe to the Map ref; derive ids in the body. See PartsMenu for the
+  // explanation of the Zustand `?? []` selector trap.
+  const nodes = useJobStore((s) => s.nodes);
+  const nodeIds = Array.from(nodes.keys());
   const explodedLift = useExplodedLift();
   // Issue #91 — view-mode dispatch:
   //   complete  : lid at assembled Z (no lift)

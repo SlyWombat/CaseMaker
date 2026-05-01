@@ -19,7 +19,13 @@ const CATEGORY_LABELS: Record<PartCategory, string> = {
 export function PartsMenu() {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const nodeIds = useJobStore((s) => Array.from(s.nodes.keys()));
+  // Subscribe to the Map ref (only changes when nodes are added/removed),
+  // then derive the id list in the component body. Selecting an Array.from
+  // result inside the selector returns a fresh array every render and
+  // triggers React's "max update depth exceeded" infinite loop guard
+  // (memory: Zustand `?? []` selector trap).
+  const nodes = useJobStore((s) => s.nodes);
+  const nodeIds = Array.from(nodes.keys());
   const hiddenParts = useViewportStore((s) => s.hiddenParts);
   const togglePart = useViewportStore((s) => s.togglePartVisible);
   const showAllParts = useViewportStore((s) => s.showAllParts);
