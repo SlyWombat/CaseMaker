@@ -14,6 +14,8 @@ describe('Marketing gap #15 — project templates', () => {
       'giga-dmx-controller',
       'esp32-dev-tray',
       'snap-fit-test',
+      'protective-case',
+      'large-box-200',
     ]);
   });
 
@@ -50,6 +52,30 @@ describe('Marketing gap #15 — project templates', () => {
   // produces — so if the HAT profile later grows an edge component (Ethernet
   // pass-through, side connector), the template picks it up automatically
   // instead of silently dropping it.
+  it('protective-case wires gasket + hinge + latches + rugged (#112)', () => {
+    const tpl = findTemplate('protective-case')!;
+    const project = tpl.build();
+    expect(project.case.seal?.enabled).toBe(true);
+    expect(project.case.lidRecess).toBe(true);
+    expect(project.case.hinge?.enabled).toBe(true);
+    expect(project.case.hinge?.style).toBe('piano-segmented');
+    expect(project.case.latches?.length).toBe(2);
+    expect(project.case.rugged?.enabled).toBe(true);
+    expect(project.case.rugged?.corners.enabled).toBe(true);
+    expect(project.case.rugged?.feet.enabled).toBe(true);
+  });
+
+  it('large-box-200 produces a ~200×200×100 mm flat-lid box (#112)', () => {
+    const tpl = findTemplate('large-box-200')!;
+    const project = tpl.build();
+    expect(project.case.joint).toBe('flat-lid');
+    // PCB 192 + 2*(wall=3 + cl=1) = 200 mm outer.
+    expect(project.board.pcb.size.x).toBe(192);
+    expect(project.board.pcb.size.y).toBe(192);
+    expect(project.case.wallThickness).toBe(3);
+    expect(project.case.internalClearance).toBe(1);
+  });
+
   it('pi-poe-stack ports come from autoPortsForHat (regression #62)', () => {
     const tpl = findTemplate('pi-poe-stack')!;
     const project = tpl.build();

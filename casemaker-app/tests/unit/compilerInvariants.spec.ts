@@ -88,12 +88,20 @@ function projectsToTest(): Array<{ label: string; build: () => Project }> {
 describe('compiler invariants (#58) — matrix of boards × templates', () => {
   const cases = projectsToTest();
 
-  describe('Invariant 1: BuildPlan emits exactly the shell + lid nodes', () => {
+  describe('Invariant 1: BuildPlan emits at LEAST shell + lid; optionally extra named parts', () => {
+    // Some templates legitimately add extra top-level nodes:
+    //   - Hinge print-in-place pin (#92)            — id: hinge-pin
+    //   - TPU gasket (#108)                          — id: gasket
+    //   - Spring-cam latch arms (#109)               — id: latch-arm-<id>
+    //   - Top-position boss flex bumpers (#111)      — id: bumper-<i>
+    // The invariant we're protecting is that EVERY plan has shell + lid;
+    // the open-ended set of extras is a feature, not a regression.
     for (const c of cases) {
-      it(`${c.label}: nodes are exactly { shell, lid }`, () => {
+      it(`${c.label}: nodes include shell + lid (extras allowed)`, () => {
         const plan = compileProject(c.build());
-        const ids = plan.nodes.map((n) => n.id).sort();
-        expect(ids).toEqual(['lid', 'shell']);
+        const ids = plan.nodes.map((n) => n.id);
+        expect(ids).toContain('shell');
+        expect(ids).toContain('lid');
       });
     }
   });

@@ -57,7 +57,10 @@ export const boardProfileSchema = z.object({
       message: 'pcb size must be positive on all axes',
     }),
   }),
-  mountingHoles: z.array(mountingHoleSchema).min(1),
+  // #112 — generic-empty boards (Protective case interior, large box)
+  // legitimately have zero mounting holes. The case still has bosses
+  // disabled in those templates so no geometry depends on the hole list.
+  mountingHoles: z.array(mountingHoleSchema),
   components: z.array(componentSchema),
   defaultStandoffHeight: z.number().nonnegative(),
   recommendedZClearance: z.number().nonnegative(),

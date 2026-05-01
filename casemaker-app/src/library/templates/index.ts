@@ -1,9 +1,28 @@
-import type { Project } from '@/types';
+import type { BoardProfile, Project } from '@/types';
 import { createDefaultProject } from '@/store/projectStore';
 import { autoPortsForBoard } from '@/engine/compiler/portFactory';
 import { autoPortsForHat } from '@/engine/compiler/hats';
 import { getBuiltinHat } from '@/library/hats';
 import { defaultSnapCatchesForCase } from '@/engine/compiler/snapCatches';
+
+/**
+ * Synthesize an empty board profile of the given size — no host PCB, no
+ * components, no mounting holes. Used by the protective-case and large-box
+ * templates that don't have a specific host board.
+ */
+function emptyBoard(opts: { id: string; name: string; x: number; y: number }): BoardProfile {
+  return {
+    id: opts.id,
+    name: opts.name,
+    manufacturer: 'CaseMaker (generic)',
+    pcb: { size: { x: opts.x, y: opts.y, z: 1 } },
+    mountingHoles: [],
+    components: [],
+    defaultStandoffHeight: 0,
+    recommendedZClearance: 10,
+    builtin: false,
+  };
+}
 
 export interface ProjectTemplate {
   id: string;
@@ -114,6 +133,108 @@ function snapFitTestCube(): Project {
   return p;
 }
 
+/**
+ * Issue #112 — Pelican-style protective case. Composite of #107 (gasket) +
+ * #108 (TPU export) + #109 (latches) + #110 (piano hinge) + #111 (rugged).
+ * Sized for a typical hand-portable enclosure (~150 × 100 × ~60 mm). The
+ * user replaces the empty board with their actual host PCB after the
+ * project is created.
+ */
+function protectiveCase(): Project {
+  // Generic 140×90 mm interior gives ~150×100 mm outer at 5 mm walls.
+  const board = emptyBoard({
+    id: 'generic-protective-cavity',
+    name: 'Protective case interior',
+    x: 140,
+    y: 90,
+  });
+  const p = createDefaultProject();
+  p.name = 'Protective case (waterproof, hinged, latched)';
+  p.board = board;
+  p.case.wallThickness = 4;
+  p.case.floorThickness = 4;
+  p.case.lidThickness = 4;
+  p.case.cornerRadius = 6;
+  p.case.zClearance = 50;
+  p.case.lidRecess = true;
+  p.case.joint = 'flat-lid';
+  p.case.ventilation = { enabled: false, pattern: 'none', coverage: 0 };
+  p.case.bosses.enabled = false;
+  // Issue #107 — gasket
+  p.case.seal = {
+    enabled: true,
+    profile: 'flat',
+    width: 4,
+    depth: 2,
+    compressionFactor: 0.25,
+    gasketMaterial: 'tpu',
+  };
+  // Issue #110 — piano-segmented hinge on the back face. Sits OUTSIDE the
+  // gasket loop; the lid pivots up without breaking the seal.
+  p.case.hinge = {
+    id: 'tpl-protective-hinge',
+    style: 'piano-segmented',
+    face: '+y',
+    numKnuckles: 7,
+    knuckleOuterDiameter: 8,
+    pinDiameter: 3,
+    knuckleClearance: 0.4,
+    positioning: 'centered',
+    hingeLength: 110,
+    pinMode: 'separate',
+    enabled: true,
+  };
+  // Issue #109 — two latches on the FRONT face (-y), opposite the hinge.
+  p.case.latches = [
+    { id: 'tpl-latch-1', wall: '-y', uPosition: 40, enabled: true, throw: 1.5, width: 14, height: 30 },
+    { id: 'tpl-latch-2', wall: '-y', uPosition: 110, enabled: true, throw: 1.5, width: 14, height: 30 },
+  ];
+  // Issue #111 — rugged exterior
+  p.case.rugged = {
+    enabled: true,
+    corners: { enabled: true, radius: 8, flexBumper: false },
+    ribbing: { enabled: true, direction: 'vertical', ribCount: 4, ribDepth: 1.5, clearBand: 6 },
+    feet: { enabled: true, pads: 4, padDiameter: 12, padHeight: 2 },
+  };
+  p.ports = [];
+  p.mountingFeatures = [];
+  return p;
+}
+
+/**
+ * Large 200×200×100 mm general-purpose case. No host board, flat lid,
+ * basic envelope — user adds whichever board / parts they want. Useful as
+ * a starting point for storage boxes, LiPo battery packs, RV instrument
+ * panels, etc.
+ */
+function largeBoxTemplate(): Project {
+  // Outer dims target ~200×200×100 mm. With wall=3 and clearance=1,
+  // pcb = 200 - 2*(3+1) = 192. Cavity height target 100 - floor(3) -
+  // lidThickness(3) ≈ 94 mm ⇒ zClearance + standoff + pcbZ = 94. Standoff=0,
+  // pcbZ=1 → zClearance ≈ 93.
+  const board = emptyBoard({
+    id: 'generic-200-cavity',
+    name: '200×200 mm interior',
+    x: 192,
+    y: 192,
+  });
+  const p = createDefaultProject();
+  p.name = '200 × 200 × 100 mm box';
+  p.board = board;
+  p.case.wallThickness = 3;
+  p.case.floorThickness = 3;
+  p.case.lidThickness = 3;
+  p.case.internalClearance = 1;
+  p.case.cornerRadius = 4;
+  p.case.zClearance = 93;
+  p.case.joint = 'flat-lid';
+  p.case.ventilation = { enabled: false, pattern: 'none', coverage: 0 };
+  p.case.bosses.enabled = false;
+  p.ports = [];
+  p.mountingFeatures = [];
+  return p;
+}
+
 function esp32DevTray(): Project {
   const p = createDefaultProject('esp32-devkit-v1');
   p.name = 'ESP32 DevKit dev tray';
@@ -171,6 +292,20 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
     description: 'Small ~60×50×12 mm test fixture for physically validating snap-fit cantilever geometry.',
     estPrintMinutes: 30,
     build: snapFitTestCube,
+  },
+  {
+    id: 'protective-case',
+    name: 'Protective case (waterproof, hinged, latched)',
+    description: 'Pelican-style protective enclosure with TPU gasket, piano-segmented hinge, two spring-cam latches, rugged corners, vertical ribs, and feet. Replace the empty interior with your host PCB after creating the project. (#106)',
+    estPrintMinutes: 480,
+    build: protectiveCase,
+  },
+  {
+    id: 'large-box-200',
+    name: '200 × 200 × 100 mm box',
+    description: 'Large general-purpose flat-lid box (~200 × 200 × 100 mm outer). No host board — drop in whichever boards / parts you want.',
+    estPrintMinutes: 360,
+    build: largeBoxTemplate,
   },
 ];
 
