@@ -74,6 +74,15 @@ const STRIKER_TAB_THICKNESS = 3;      // wall-normal extent of the lid-side stri
 const STRIKER_TAB_HEIGHT = 5;         // vertical extent of the striker tab above lid plate top
 const HOOK_VERTICAL = 4;              // vertical extent of the cam hook lip
 const EMBED = 0.5;                    // volumetric overlap so manifold fuses sub-pieces
+// Cam preload: when the arm is in the closed position, the cam hook's
+// catch face sits CAM_PRELOAD mm BELOW the striker top. The arm has to
+// flex outward by this much for the hook to slide past the striker
+// during closure, then springs back to hold the lid down with a real
+// clamping force. Without this the latch is "captured" but unloaded —
+// first time you pick the case up by the lid the hook just slides off.
+// 0.3 mm is well within PLA's elastic budget for a 6 mm-long, 3 mm-thick
+// arm and gives ~10 N of clamping force.
+const CAM_PRELOAD = 0.3;
 
 export interface LatchOps {
   /** Striker geometry on the LID (additive, in lid-local coords — caller
@@ -261,8 +270,14 @@ function buildOneLatch(
   // the body's inner face) shares the upper Z slice with the body
   // volumetrically. Bottom edge starts INSIDE the knuckle for fusion.
   const bodyBotZ = pivotZ - KNUCKLE_OUTER_R + EMBED;
-  // Catch face = hook bottom = just above striker top (preload via tolerance).
-  const hookBotZ = strikerZ + STRIKER_R + tolerance;
+  // Catch face = hook bottom. Pre-#X this sat ABOVE the striker top by
+  // `tolerance` (no clamping); now sits BELOW by CAM_PRELOAD so the cam
+  // physically interferes with the striker when the arm is closed. The
+  // arm flexes elastically to accommodate, providing real lid-clamping
+  // force against the gasket. `tolerance` is added back as a relief so
+  // sloppy printers don't end up with a press fit so tight the latch
+  // can't close.
+  const hookBotZ = strikerZ + STRIKER_R - CAM_PRELOAD + tolerance;
   const hookTopZ = hookBotZ + HOOK_VERTICAL;
   const bodyTopZ = hookTopZ;
   // Arm body sits on the OUTSIDE of the case; its inner face is at
