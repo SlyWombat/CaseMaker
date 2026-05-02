@@ -1,5 +1,5 @@
 import type { CaseParameters, BoardProfile, InsertType } from '@/types';
-import { cylinder, difference, mesh, translate, type BuildOp } from './buildPlan';
+import { cylinder, difference, mesh, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
 
 export interface BossPlacement {
@@ -18,6 +18,14 @@ export interface BossPlacement {
    *  - 'bottom': base sits at z=0 (the case floor underside reference).
    *  - 'top': base sits at the lid underside Z; boss extends DOWN. */
   baseZ: number;
+  /** Locator stub diameter on top of the standoff. Slip-fits into the
+   *  board's mounting hole so the board self-locates before screws are
+   *  added. 0 means no stub (geometry won't fit, e.g. self-tap pilot is
+   *  too close to the mount-hole diameter to leave any pilot wall). */
+  lockNotchDiameter: number;
+  /** Locator stub height — bottom of stub at the standoff top, top of
+   *  stub flush with the board surface. 0 means no stub. */
+  lockNotchHeight: number;
 }
 
 const HEAT_SET_SPECS: Record<InsertType, { hole: number; minOuter: number }> = {
@@ -78,16 +86,34 @@ export function computeBossPlacements(
   // the actual lid Z (it depends on shell + lidRecess + lidThickness).
   // Default it to 0 here; buildBossesUnion fills in the right value.
   const baseZ = 0;
-  return board.mountingHoles.map((h) => ({
-    id: `boss-${h.id}`,
-    x: h.x + wall + cl,
-    y: h.y + wall + cl,
-    outerDiameter,
-    holeDiameter,
-    totalHeight,
-    position,
-    baseZ,
-  }));
+  // Locator stub — see buildBossesUnion. Only emitted for bottom-mounted
+  // standoffs; top-mounted bosses anchor to the lid and the board hangs
+  // off the screws so a stub adds no value there.
+  // Geometric constraint: stub must fit through the board's mounting hole
+  // (OD ≤ mountHole - 0.4 for a slip-fit) AND leave a usable wall around
+  // the screw pilot (OD ≥ pilot + 0.8). These two constraints conflict
+  // for the common self-tap-on-3.2mm-mount-hole case (would need OD ≥ 3.3
+  // and ≤ 2.8 simultaneously) — when they conflict we skip the stub
+  // rather than emit something the board can't seat over.
+  return board.mountingHoles.map((h) => {
+    const stubMaxOD = h.diameter - 0.4;
+    const stubMinOD = holeDiameter > 0 ? holeDiameter + 0.8 : 0.8;
+    const stubCanFit = position === 'bottom' && stubMinOD <= stubMaxOD;
+    const lockNotchDiameter = stubCanFit ? stubMaxOD : 0;
+    const lockNotchHeight = stubCanFit ? Math.min(board.pcb.size.z, 1.6) : 0;
+    return {
+      id: `boss-${h.id}`,
+      x: h.x + wall + cl,
+      y: h.y + wall + cl,
+      outerDiameter,
+      holeDiameter,
+      totalHeight,
+      position,
+      baseZ,
+      lockNotchDiameter,
+      lockNotchHeight,
+    };
+  });
 }
 
 export function getScrewClearanceDiameter(insertType: InsertType): number {
@@ -112,15 +138,32 @@ export function getScrewClearanceDiameter(insertType: InsertType): number {
  * {@link buildLidBosses} instead so they fuse with the lid mesh.
  */
 export function buildBossesUnion(placements: BossPlacement[]): BuildOp[] {
+  // Tiny vertical overlap fuses the locator stub with the standoff body
+  // (coplanar contact would leave a sliver in the union — same fix as the
+  // #121 SECTION_EMBED pattern in rugged.ts).
+  const SECTION_EMBED = 0.05;
   return placements
     .filter((b) => b.position === 'bottom')
     .map((b) => {
       const outer = cylinder(b.totalHeight, b.outerDiameter / 2, 32);
-      if (b.holeDiameter <= 0) {
-        return translate([b.x, b.y, 0], outer);
+      // Composite body = standoff post + (optional) locator stub on top.
+      // The stub gives the board something to drop over so it self-aligns
+      // before screws are installed.
+      let body: BuildOp = outer;
+      if (b.lockNotchDiameter > 0 && b.lockNotchHeight > 0) {
+        const stubH = b.lockNotchHeight + SECTION_EMBED;
+        const stub = cylinder(stubH, b.lockNotchDiameter / 2, 24);
+        const stubAtTop = translate([0, 0, b.totalHeight - SECTION_EMBED], stub);
+        body = union([outer, stubAtTop]);
       }
-      const pilot = cylinder(b.totalHeight + 2, b.holeDiameter / 2, 24);
-      const piloted = difference([outer, translate([0, 0, -1], pilot)]);
+      if (b.holeDiameter <= 0) {
+        return translate([b.x, b.y, 0], body);
+      }
+      // Pilot must extend through both the standoff and the stub so the
+      // screw can pass cleanly all the way down.
+      const pilotH = b.totalHeight + b.lockNotchHeight + 2;
+      const pilot = cylinder(pilotH, b.holeDiameter / 2, 24);
+      const piloted = difference([body, translate([0, 0, -1], pilot)]);
       return translate([b.x, b.y, 0], piloted);
     });
 }
