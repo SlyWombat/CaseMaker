@@ -98,6 +98,16 @@ export function partForId(id: string, index = 0): ProjectPart {
       printOrientation: FLAT_ORIENTATION,
     };
   }
+  if (id.startsWith('latch-pin-')) {
+    const suffix = id.slice('latch-pin-'.length);
+    return {
+      id,
+      displayName: `Latch pin ${suffix}`,
+      material: 'rigid',
+      category: 'fastener',
+      printOrientation: FLAT_ORIENTATION,
+    };
+  }
   if (id.startsWith('bumper-')) {
     const suffix = id.slice('bumper-'.length);
     return {
@@ -116,6 +126,23 @@ export function partForId(id: string, index = 0): ProjectPart {
     category: 'case',
     printOrientation: CASE_ORIENTATION,
   };
+}
+
+/** Human-readable print orientation hint for the export modal. Tells the
+ *  user how the part should sit on the bed for a clean print — based on
+ *  the same metadata applyLayoutToMeshes uses to lay parts out. */
+export function printOrientationHint(part: ProjectPart): string {
+  if (part.printOrientation.flipForPrint) {
+    if (part.id === 'lid') return 'Print upside-down (lid ceiling on the bed)';
+    return 'Print upside-down (flipped 180° on X)';
+  }
+  if (part.id === 'shell') return 'Print right-side up (case floor on the bed, walls + cavity opening up)';
+  if (part.id.startsWith('latch-arm-')) return 'Lay flat — knuckle and cam hook face up';
+  if (part.id.startsWith('latch-pin-')) return 'Stand on end (cap up) for a clean barrel; or lay flat if seam tolerance is OK';
+  if (part.id === 'hinge-pin')         return 'Stand on end or lay flat — straight cylinder';
+  if (part.id === 'gasket')            return 'Lay flat (TPU 95A — see the *-gasket-print-instructions.txt sidecar)';
+  if (part.id.startsWith('bumper-'))   return 'Lay flat — TPU 95A flexible bumper';
+  return 'Default orientation';
 }
 
 /** Walk a BuildPlan and return the typed parts list. Order preserved from

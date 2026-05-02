@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useJobStore } from '@/store/jobStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useSettingsStore, type ExportFormat } from '@/store/settingsStore';
-import { partsForIds, partsByCategory, type PartCategory, type ProjectPart } from '@/engine/exporters/parts';
+import { partsForIds, partsByCategory, printOrientationHint, type PartCategory, type ProjectPart } from '@/engine/exporters/parts';
 import { exportSinglePart, triggerExport } from '@/engine/exportTrigger';
 import { hardwareForProject } from '@/engine/exporters/hardwareList';
 import { PartThumbnail } from './PartThumbnail';
@@ -202,6 +202,9 @@ export function ExportModal({ onClose }: ExportModalProps) {
                       <div style={{ fontSize: 13 }}>{p.displayName}</div>
                       <div style={{ fontSize: 11, color: '#9ca3af' }}>
                         {p.material === 'flex' ? 'Flex (TPU 95A)' : 'Rigid'} · {formatBytes(estBytes(p.id))}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#86b8d2', marginTop: 2 }}>
+                        🛠 {printOrientationHint(p)}
                       </div>
                     </div>
                     <button
