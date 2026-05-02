@@ -22,28 +22,51 @@ export function hardwareForProject(project: Project): HardwareItem[] {
   const items: HardwareItem[] = [];
   const c = project.case;
 
-  // ----- Lid screws (joint='screw-down') -----
-  if (c.joint === 'screw-down') {
-    const insert = c.bosses?.insertType ?? 'self-tap';
-    const numHoles = project.board.mountingHoles?.length ?? 0;
-    if (numHoles > 0) {
-      const screwLabel = insertScrewLabel(insert);
-      const screwLength = recommendedScrewLength(insert, c.lidThickness);
-      items.push({
-        id: 'lid-screws',
-        label: `${screwLabel} × ${screwLength} mm pan-head — lid → boss`,
-        count: numHoles,
-        note: noteForInsert(insert),
-      });
-      if (insert === 'heat-set-m2.5' || insert === 'heat-set-m3') {
-        items.push({
-          id: 'heat-set-inserts',
-          label: `${insertHeatLabel(insert)} brass heat-set inserts`,
-          count: numHoles,
-          note: 'Press into the bosses with a soldering iron at 200 °C — see your insert manufacturer for exact temperature.',
-        });
-      }
-    }
+  // ----- Screws into the bosses --------------------------------------------
+  // Two independent retention paths share the same threaded boss/insert:
+  //   (a) LID screws — when joint='screw-down': screw goes from the top
+  //       through the lid clearance hole into the insert.
+  //   (b) BOARD screws — when boardRetention='screws' (default): screw goes
+  //       from the top through the PCB mounting hole into the insert.
+  // The user can pick either, neither, or both. Hardware count + length
+  // recommendation is given per path so a "lid-only" build doesn't list
+  // (and double-buy) board screws.
+  const insert = c.bosses?.insertType ?? 'self-tap';
+  const numHoles = project.board.mountingHoles?.length ?? 0;
+  const boardRetention = c.boardRetention ?? 'screws';
+
+  if (numHoles > 0 && c.joint === 'screw-down') {
+    const lidLen = recommendedScrewLength(insert, c.lidThickness);
+    items.push({
+      id: 'lid-screws',
+      label: `${insertScrewLabel(insert)} × ${lidLen} mm pan-head — lid → boss`,
+      count: numHoles,
+      note: noteForInsert(insert),
+    });
+  }
+  if (numHoles > 0 && boardRetention === 'screws') {
+    const pcbThickness = project.board.pcb.size.z;
+    const boardLen = recommendedScrewLength(insert, pcbThickness);
+    items.push({
+      id: 'board-screws',
+      label: `${insertScrewLabel(insert)} × ${boardLen} mm pan-head — board → boss`,
+      count: numHoles,
+      note: 'Goes through the PCB mounting hole into the boss insert.',
+    });
+  }
+  // Heat-set inserts are needed once per boss regardless of how many screws
+  // pass through (lid + board can share the insert).
+  if (
+    numHoles > 0 &&
+    (insert === 'heat-set-m2.5' || insert === 'heat-set-m3') &&
+    (c.joint === 'screw-down' || boardRetention === 'screws')
+  ) {
+    items.push({
+      id: 'heat-set-inserts',
+      label: `${insertHeatLabel(insert)} brass heat-set inserts`,
+      count: numHoles,
+      note: 'Press into the bosses with a soldering iron at 200 °C — see your insert manufacturer for exact temperature.',
+    });
   }
 
   // ----- Hinge pin (only when the user picked an external pin) -----

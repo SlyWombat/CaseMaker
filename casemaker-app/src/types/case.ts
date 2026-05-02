@@ -217,6 +217,21 @@ export interface CaseParameters {
   /** Recessed-lid mode: lid drops into a pocket at the top of the shell, flush with the rim. */
   lidRecess?: boolean;
   /**
+   * How the BOARD is retained inside the case — independent from the lid
+   * `joint` (which governs lid retention). Lets the user pick lid screws
+   * + board snap-fit, lid snap + board screws, both screwed, etc.
+   *
+   *   'screws':    board screws into the bosses from above (default; matches
+   *                pre-#X behavior). Bosses must be enabled.
+   *   'snap':      board snaps into cavity-wall snap fingers — no screws
+   *                needed. (Geometry: future commit.)
+   *   'press-fit': board friction-fits between cavity walls. No retention
+   *                hardware; relies on internalClearance ≈ 0.
+   *   'none':      board floats. The user provides their own retention
+   *                (foam, double-sided tape, etc.).
+   */
+  boardRetention?: 'screws' | 'snap' | 'press-fit' | 'none';
+  /**
    * Pelican-style shell lid: the lid is itself a hollow box (walls extending
    * UP from the lid plate, with a closed top). When > 0, buildLid produces
    * a shell with an internal cavity of this height; the latch striker rides

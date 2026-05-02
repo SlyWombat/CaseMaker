@@ -272,6 +272,36 @@ export function CasePanel() {
           <span>Recessed lid (drops into a pocket flush with the rim)</span>
         </label>
       )}
+      {/* Board retention — INDEPENDENT from the lid joint above. The user
+          can pick e.g. snap-fit lid + screws-into-board, or screw-down lid
+          + snap-fit board. The export modal's hardware list reflects the
+          combined choice. */}
+      <div className="joint-row">
+        <span className="joint-label" id="board-retention-label" title="How the board is held in the case — independent of how the lid attaches.">
+          Board retention
+        </span>
+        <div className="joint-buttons" role="radiogroup" aria-labelledby="board-retention-label">
+          {([
+            { value: 'screws',    label: 'Screws',    hint: 'Screws from above through the PCB into the boss inserts.' },
+            { value: 'snap',      label: 'Snap',      hint: 'Snap fingers on the cavity walls grip the PCB edges. (Geometry: in progress.)' },
+            { value: 'press-fit', label: 'Press',     hint: 'Friction fit — relies on internalClearance ≈ 0.' },
+            { value: 'none',      label: 'None',      hint: 'Board floats — supply your own retention (foam, tape, etc.).' },
+          ] as const).map((opt) => (
+            <label key={opt.value} title={opt.hint}>
+              <input
+                type="radio"
+                name="board-retention"
+                value={opt.value}
+                checked={(params.boardRetention ?? 'screws') === opt.value}
+                onChange={() => patch({ boardRetention: opt.value })}
+                data-testid={`board-retention-${opt.value}`}
+                aria-label={`${opt.label} — ${opt.hint}`}
+              />
+              <span>{opt.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
       {/* Issue #98 — Boss-insert type only applies when the joint actually
           uses bosses (screw-down). Hidden for flat-lid and snap-fit. */}
       {params.joint === 'screw-down' && (
