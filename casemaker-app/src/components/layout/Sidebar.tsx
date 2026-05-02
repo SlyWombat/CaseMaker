@@ -6,6 +6,7 @@ import { AssetsPanel } from '@/components/panels/AssetsPanel';
 import { HatsPanel } from '@/components/panels/HatsPanel';
 import { FeaturesPanel } from '@/components/panels/FeaturesPanel';
 import { SidebarFooter } from './SidebarFooter';
+import { CollapsibleSidebarSection } from './CollapsibleSidebarSection';
 import { useProjectStore } from '@/store/projectStore';
 
 export function Sidebar() {
@@ -17,15 +18,38 @@ export function Sidebar() {
     // pull-down (issue #75), so the sidebar is empty in welcome mode.
     return <aside className="sidebar" />;
   }
+  // All sections start COLLAPSED — click the header to expand. State per
+  // section persists to localStorage so the user keeps their chosen open
+  // panels across reloads. Inline styles on `.sidebar` add a CSS rule
+  // suppressing each wrapped panel's own h3 (the section header is the
+  // title now, so a second h3 inside the body would double up).
   return (
     <aside className="sidebar">
-      <BoardEditorPanel />
-      <CasePanel />
-      <PortsPanel />
-      <HatsPanel />
-      <FeaturesPanel />
-      <AssetsPanel />
-      <ExportPanel />
+      <style>{`
+        .sidebar-section__body > .panel > h3 { display: none; }
+        .sidebar-section__body > .panel { margin-top: 0; padding-top: 4px; }
+      `}</style>
+      <CollapsibleSidebarSection title="Board" storageKey="board">
+        <BoardEditorPanel />
+      </CollapsibleSidebarSection>
+      <CollapsibleSidebarSection title="Case parameters" storageKey="case">
+        <CasePanel />
+      </CollapsibleSidebarSection>
+      <CollapsibleSidebarSection title="Port cutouts" storageKey="ports">
+        <PortsPanel />
+      </CollapsibleSidebarSection>
+      <CollapsibleSidebarSection title="HATs" storageKey="hats">
+        <HatsPanel />
+      </CollapsibleSidebarSection>
+      <CollapsibleSidebarSection title="Features" storageKey="features">
+        <FeaturesPanel />
+      </CollapsibleSidebarSection>
+      <CollapsibleSidebarSection title="External assets" storageKey="assets">
+        <AssetsPanel />
+      </CollapsibleSidebarSection>
+      <CollapsibleSidebarSection title="Export" storageKey="export" defaultOpen>
+        <ExportPanel />
+      </CollapsibleSidebarSection>
       <SidebarFooter />
     </aside>
   );
