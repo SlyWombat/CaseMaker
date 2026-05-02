@@ -254,13 +254,9 @@ function buildWallRibs(
   // hole so the print-in-place hinge pin can be poked out with a
   // paperclip without disassembling the case.
   const latches = params.latches ?? [];
+  const RAMP_LEN = 3;  // mm — slope length between body depth and knuckle bump
   const emitLatchRibs = (out: BuildOp[], zBot: number, zSpan: number, zIsLidLocal: boolean): void => {
     if (zSpan <= 1) return;
-    // World Z for the hinge knuckle bump only makes sense on the CASE side
-    // (the latch hinge lives on the case wall, world Z = rimTopZ -
-    // LATCH_PIVOT_BELOW_RIM where rimTopZ = dims.outerZ for non-recessed).
-    // On the lid the knuckle isn't there, so the lid's protective rib
-    // stays at body depth across its full Z range.
     const knuckleCenterZ = dims.outerZ - LATCH_PIVOT_BELOW_RIM;
     const knuckleZBot = knuckleCenterZ - LATCH_KNUCKLE_OUTER_R - LATCH_RIB_KNUCKLE_PAD;
     const knuckleZTop = knuckleCenterZ + LATCH_KNUCKLE_OUTER_R + LATCH_RIB_KNUCKLE_PAD;
@@ -272,48 +268,38 @@ function buildWallRibs(
         { center: positions.innerCenter,  isCorner: false },
         { center: positions.cornerCenter, isCorner: true  },
       ];
+      // Build the rib as ONE smooth continuous mesh: a generalized prism
+      // whose (z, depth) profile follows the latch contour with ramped
+      // transitions instead of stepped boundaries. The case-side profile
+      // includes the knuckle bump; the lid-side profile is just body
+      // depth (no hinge there).
       for (const { center: tCenter, isCorner } of ribCenters) {
-        // Build a contoured rib as a stack of vertical segments. On the
-        // case side three segments — body / knuckle bump / body. On the
-        // lid (no hinge) — single body segment.
-        const segmentZTop = zBot + zSpan;
-        const segments: { zBot: number; zTop: number; depth: number }[] = [];
-        if (zIsLidLocal || knuckleZBot >= segmentZTop || knuckleZTop <= zBot) {
-          segments.push({ zBot, zTop: segmentZTop, depth: LATCH_RIB_BODY_DEPTH });
-        } else {
-          const safeKnuckleBot = Math.max(zBot, knuckleZBot);
-          const safeKnuckleTop = Math.min(segmentZTop, knuckleZTop);
-          if (zBot < safeKnuckleBot) {
-            segments.push({ zBot, zTop: safeKnuckleBot, depth: LATCH_RIB_BODY_DEPTH });
+        const zTop = zBot + zSpan;
+        const slices: { z: number; depth: number }[] = [];
+        const push = (z: number, depth: number): void => {
+          // De-dup consecutive identical-Z slices (keep the LATER depth).
+          if (slices.length > 0 && Math.abs(slices[slices.length - 1]!.z - z) < 0.01) {
+            slices[slices.length - 1]!.depth = depth;
+            return;
           }
-          segments.push({ zBot: safeKnuckleBot, zTop: safeKnuckleTop, depth: LATCH_RIB_KNUCKLE_DEPTH });
-          if (safeKnuckleTop < segmentZTop) {
-            segments.push({ zBot: safeKnuckleTop, zTop: segmentZTop, depth: LATCH_RIB_BODY_DEPTH });
-          }
+          slices.push({ z, depth });
+        };
+        push(zBot, 0);                              // bottom edge: zero outward
+        push(Math.min(zBot + RIB_TAPER, zTop), LATCH_RIB_BODY_DEPTH);
+        if (!zIsLidLocal && knuckleZBot < zTop && knuckleZTop > zBot) {
+          // Insert the knuckle bump with sloped shoulders.
+          const rampInZ  = Math.max(zBot + RIB_TAPER, knuckleZBot - RAMP_LEN);
+          const bumpBotZ = Math.max(zBot + RIB_TAPER, knuckleZBot);
+          const bumpTopZ = Math.min(zTop - RIB_TAPER, knuckleZTop);
+          const rampOutZ = Math.min(zTop - RIB_TAPER, knuckleZTop + RAMP_LEN);
+          if (rampInZ  > slices[slices.length - 1]!.z) push(rampInZ,  LATCH_RIB_BODY_DEPTH);
+          if (bumpBotZ > rampInZ  - 0.01)              push(bumpBotZ, LATCH_RIB_KNUCKLE_DEPTH);
+          if (bumpTopZ > bumpBotZ - 0.01)              push(bumpTopZ, LATCH_RIB_KNUCKLE_DEPTH);
+          if (rampOutZ > bumpTopZ - 0.01)              push(rampOutZ, LATCH_RIB_BODY_DEPTH);
         }
-        // Build each segment as a tapered hexagonal-prism rib. Use a
-        // smaller taper at SHARED z boundaries (between adjacent
-        // segments) so the segments meet at full depth — outer ends keep
-        // the full RIB_TAPER for the smooth wall fade.
-        const segmentRibs: BuildOp[] = [];
-        for (let i = 0; i < segments.length; i++) {
-          const s = segments[i]!;
-          const isFirst = i === 0;
-          const isLast = i === segments.length - 1;
-          const segTaperBot = isFirst ? RIB_TAPER : 0.6;
-          const segTaperTop = isLast ? RIB_TAPER : 0.6;
-          segmentRibs.push(
-            buildTaperedVerticalRibAsymmetric(
-              latch.wall, tCenter, LATCH_RIB_W, s.zBot, s.zTop,
-              s.depth, EMBED, segTaperBot, segTaperTop, dims,
-            ),
-          );
-        }
-        let rib = segmentRibs.length === 1 ? segmentRibs[0]! : union(segmentRibs);
-        // Pin hole through the corner-facing rib (case side only — lid
-        // has no pin). Hole is a horizontal cylinder along the wall
-        // tangent at pin axis Z, slightly larger than the pin so it
-        // slides freely.
+        push(Math.max(zBot, zTop - RIB_TAPER), LATCH_RIB_BODY_DEPTH);
+        push(zTop, 0);                              // top edge: zero outward
+        let rib = buildSmoothLatchRib(latch.wall, tCenter, LATCH_RIB_W, slices, EMBED, dims);
         if (!zIsLidLocal && isCorner) {
           const holeR = LATCH_PIN_R + LATCH_PIN_HOLE_CLEAR;
           rib = difference([rib, buildPinHoleCutter(latch.wall, tCenter, holeR, knuckleCenterZ, dims)]);
@@ -328,6 +314,95 @@ function buildWallRibs(
   }
 
   return { caseRibs, lidRibs };
+}
+
+/** Smooth latch protective rib: a generalized-prism mesh built from a
+ *  sequence of (z, depth) slices. Each slice is a horizontal cross-section
+ *  with the same wall-side at n=-embed and a varying outer face at
+ *  n=depth. Adjacent slices connect with sloped quad faces — no segment
+ *  boundaries / no hard angular shoulders — so the contour reads as one
+ *  smooth continuous part as the user requested. */
+function buildSmoothLatchRib(
+  wall: '+x' | '-x' | '+y' | '-y',
+  tCenter: number,
+  ribW: number,
+  slices: { z: number; depth: number }[],
+  embed: number,
+  dims: { outerX: number; outerY: number; outerZ: number },
+): BuildOp {
+  const axis: 'x' | 'y' = wall === '+x' || wall === '-x' ? 'x' : 'y';
+  const sign: 1 | -1 = wall === '+x' || wall === '+y' ? +1 : -1;
+  const wallOuter =
+    wall === '-x' || wall === '-y' ? 0 :
+    wall === '+x' ? dims.outerX : dims.outerY;
+  const tStart = tCenter - ribW / 2;
+  if (slices.length < 2) {
+    return cube([0, 0, 0]);  // degenerate; should never happen
+  }
+
+  // Vertex layout: for each slice i, 4 vertices at (front-wall,
+  // front-outer, back-wall, back-outer). Index = i*4 + k where:
+  //   k=0: front-wall  (t=0,    n=-embed, z=slice.z)
+  //   k=1: front-outer (t=0,    n=depth,  z=slice.z)
+  //   k=2: back-wall   (t=ribW, n=-embed, z=slice.z)
+  //   k=3: back-outer  (t=ribW, n=depth,  z=slice.z)
+  const positions: number[] = [];
+  function pushVert(t: number, n: number, z: number): void {
+    if (axis === 'x') {
+      positions.push(wallOuter + sign * n, tStart + t, z);
+    } else {
+      positions.push(tStart + t, wallOuter + sign * n, z);
+    }
+  }
+  for (const s of slices) {
+    pushVert(0,    -embed,   s.z);
+    pushVert(0,    s.depth,  s.z);
+    pushVert(ribW, -embed,   s.z);
+    pushVert(ribW, s.depth,  s.z);
+  }
+  const N = slices.length;
+  const idx = (i: number, k: 0 | 1 | 2 | 3): number => i * 4 + k;
+
+  const tris: number[] = [];
+  // End caps (rectangle at zBot and zTop in the t,n plane).
+  // Bottom (z=slices[0].z, outward normal -z): quad (FW, BW, BO, FO) viewed
+  // from -z = CCW when n→right, t→up... let's just trust the parity flip.
+  tris.push(idx(0, 0), idx(0, 2), idx(0, 3));
+  tris.push(idx(0, 0), idx(0, 3), idx(0, 1));
+  // Top (z=slices[N-1].z, outward +z): quad (FW, FO, BO, BW)
+  tris.push(idx(N - 1, 0), idx(N - 1, 1), idx(N - 1, 3));
+  tris.push(idx(N - 1, 0), idx(N - 1, 3), idx(N - 1, 2));
+
+  // Side faces between consecutive slices.
+  for (let i = 0; i < N - 1; i++) {
+    // Wall face (n=-embed, normal -n): quad (FW_i, FW_{i+1}, BW_{i+1}, BW_i)
+    tris.push(idx(i, 0), idx(i + 1, 0), idx(i + 1, 2));
+    tris.push(idx(i, 0), idx(i + 1, 2), idx(i, 2));
+    // Outer face (n=depth, normal +n + Δz): quad (FO_i, BO_i, BO_{i+1}, FO_{i+1})
+    tris.push(idx(i, 1), idx(i, 3), idx(i + 1, 3));
+    tris.push(idx(i, 1), idx(i + 1, 3), idx(i + 1, 1));
+    // Front face (t=0, normal -t): quad (FW_i, FO_i, FO_{i+1}, FW_{i+1})
+    tris.push(idx(i, 0), idx(i, 1), idx(i + 1, 1));
+    tris.push(idx(i, 0), idx(i + 1, 1), idx(i + 1, 0));
+    // Back face (t=ribW, normal +t): quad (BW_i, BW_{i+1}, BO_{i+1}, BO_i)
+    tris.push(idx(i, 2), idx(i + 1, 2), idx(i + 1, 3));
+    tris.push(idx(i, 2), idx(i + 1, 3), idx(i, 3));
+  }
+
+  // Parity flip — my reference triangle list is wound for the "inverted"
+  // (negative-determinant) case; the non-inverted case needs the swap.
+  // Same logic as snapCatches.ts buildLipWedge.
+  const inverted =
+    (axis === 'x' && sign === -1) ||
+    (axis === 'y' && sign === +1);
+  if (inverted) {
+    for (let i = 0; i < tris.length; i += 3) {
+      const swap = tris[i + 1]!;
+      tris[i + 1] = tris[i + 2]!;
+      tris[i + 2] = swap;
+    }
+  }
+  return mesh(new Float32Array(positions), new Uint32Array(tris));
 }
 
 /** A horizontal cylinder along the wall tangent at the latch pin axis,
