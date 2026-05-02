@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import * as THREE from 'three';
 import { useJobStore } from '@/store/jobStore';
 import { useViewportStore } from '@/store/viewportStore';
+import { useProjectStore } from '@/store/projectStore';
 import { bufferToGeometry } from '@/engine/scene/meshFromBuffer';
 import { ExternalAssetMeshes } from './ExternalAssetMeshes';
 import { PortMarkers } from './PortMarkers';
@@ -67,24 +68,47 @@ function colorForNode(id: string): string {
 export function SceneMeshes() {
   const viewMode = useViewportStore((s) => s.viewMode);
   const hiddenParts = useViewportStore((s) => s.hiddenParts);
+  const latches = useProjectStore((s) => s.project.case.latches);
   // Subscribe to the Map ref; derive ids in the body. See PartsMenu for the
   // explanation of the Zustand `?? []` selector trap.
   const nodes = useJobStore((s) => s.nodes);
   const nodeIds = Array.from(nodes.keys());
   const explodedLift = useExplodedLift();
-  // Issue #91 — view-mode dispatch:
-  //   complete  : lid at assembled Z (no lift)
-  //   exploded  : dynamic lift to clear deepest lid feature
-  //   base-only : lid hidden
-  //   lid-only  : shell hidden, lid at assembled Z
   const showShell = viewMode !== 'lid-only';
   const showLidMesh = viewMode !== 'base-only';
   const lift = viewMode === 'exploded' ? explodedLift : 0;
-  // Issue #120 — render EVERY top-level node, not just shell+lid. Apply
-  // exploded-lift to lid + lid-attached parts; case-attached extras stay
-  // at z=0. Hide nodes flagged in viewportStore.hiddenParts.
-  const lidAttached = (id: string): boolean =>
-    id === 'lid' || id === 'gasket' || id.startsWith('latch-arm-');
+  // Lateral OUTWARD shift applied to latch arms + pins in exploded view
+  // so they don't appear stranded against the case wall. Per-latch direction
+  // determined by the latch's wall (-y wall arms shift in -y, +y in +y, etc.).
+  const lateral = viewMode === 'exploded' ? 25 : 0;
+
+  // Build a lookup from latch id → wall direction so the per-arm / per-pin
+  // node offset can shift in the latch's wall-outward direction.
+  const latchWallById = new Map<string, '+x' | '-x' | '+y' | '-y'>();
+  for (const l of latches ?? []) latchWallById.set(l.id, l.wall);
+  const wallToOffset = (wall: '+x' | '-x' | '+y' | '-y'): [number, number] => {
+    if (wall === '-x') return [-lateral, 0];
+    if (wall === '+x') return [+lateral, 0];
+    if (wall === '-y') return [0, -lateral];
+    return [0, +lateral];
+  };
+  // Returns the [dx, dy, dz] offset to apply to a node in exploded view.
+  // Lid + gasket: pure Z lift (lid lifts straight up).
+  // Latch arms + pins: Z lift PLUS lateral pull in their wall direction.
+  // Hinge pin: Z lift (rides with lid hinge knuckles).
+  // Bumpers: stay attached to the case.
+  function explodedOffsetFor(id: string): [number, number, number] {
+    if (id === 'lid' || id === 'gasket') return [0, 0, lift];
+    if (id === 'hinge-pin') return [0, 0, lift];
+    if (id.startsWith('latch-arm-') || id.startsWith('latch-pin-')) {
+      const latchId = id.replace(/^latch-(arm|pin)-/, '');
+      const wall = latchWallById.get(latchId);
+      const [dx, dy] = wall ? wallToOffset(wall) : [0, 0];
+      return [dx, dy, lift];
+    }
+    return [0, 0, 0];
+  }
+
   return (
     <group>
       {nodeIds.map((id) => {
@@ -92,12 +116,13 @@ export function SceneMeshes() {
         if (id === 'shell' && !showShell) return null;
         if (id === 'lid' && !showLidMesh) return null;
         const color = colorForNode(id);
-        const isLifted = lidAttached(id) && lift > 0;
+        const offset = explodedOffsetFor(id);
+        const isLifted = (offset[0] !== 0 || offset[1] !== 0 || offset[2] !== 0);
         const opacity = id === 'shell' ? 0.55 : id === 'lid' ? 0.6 : 1;
         const mesh = <NodeMesh key={id} id={id} color={color} opacity={opacity} />;
         if (isLifted) {
           return (
-            <group key={id} position={[0, 0, lift]}>
+            <group key={id} position={offset}>
               {mesh}
             </group>
           );
