@@ -11,6 +11,7 @@ import { cube, cylinder, difference, rotate, translate, type BuildOp } from './b
 import { computeShellDims } from './caseShell';
 import { faceFrame } from '../coords';
 import { computeLidDims } from './lid';
+import { clampHinge } from './featureScale';
 
 type HatResolver = (id: string) => HatProfile | undefined;
 const NO_HATS: HatPlacement[] = [];
@@ -305,12 +306,19 @@ export function buildHingeOps(
   resolveDisplay: DisplayResolver = NO_RESOLVE_DISPLAY,
 ): HingeOps {
   if (!hingeRaw || !hingeRaw.enabled) return EMPTY_OPS;
+  // Auto-scale: clamp the user's stored hinge dims to fit the case + stay
+  // printable. As the case shrinks, the hinge run + knuckle OD shrink
+  // with it; floors prevent the hardware from dropping below FDM-reliable
+  // sizes.
+  const dimsForScale = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
+  const hingeFitted = clampHinge(hingeRaw, dimsForScale);
   // Issue #110 — normalize numKnuckles per style. piano-continuous derives
   // many tightly-spaced knuckles from the hingeLength; pip-pivot forces 2.
   // Other styles use the user-set numKnuckles as-is.
-  const hinge = normalizeHingeForStyle(hingeRaw);
-  const dims = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
+  const hinge = normalizeHingeForStyle(hingeFitted);
   const lidDims = computeLidDims(board, params, hats, resolveHat, display, resolveDisplay);
+  // Reuse the dims block — same as the one used for clampHinge above.
+  const dims = dimsForScale;
   const frame = faceFrame(hinge.face, dims.outerX, dims.outerY, dims.outerZ);
   // Face length along u: ±x face's u maps to world Y, so faceLen = outerY.
   // ±y face's u maps to world X, so faceLen = outerX.

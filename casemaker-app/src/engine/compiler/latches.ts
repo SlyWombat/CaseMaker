@@ -9,6 +9,7 @@ import type { DisplayPlacement, DisplayProfile } from '@/types/display';
 import { cube, cylinder, difference, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
 import { pinSpanU, pinCapSpanU, LATCH_PIN_CAP_R } from './latchProtection';
+import { clampLatch } from './featureScale';
 
 type HatResolver = (id: string) => HatProfile | undefined;
 const NO_HATS: HatPlacement[] = [];
@@ -109,8 +110,10 @@ export function buildLatchOps(
   const out: LatchOps = {
     lidAdditive: [], caseAdditive: [], caseSubtract: [], armNodes: [], pinNodes: [],
   };
-  for (const latch of latches) {
-    if (!latch.enabled) continue;
+  for (const rawLatch of latches) {
+    if (!rawLatch.enabled) continue;
+    // Clamp the user's stored dims to fit the case + stay printable.
+    const latch = clampLatch(rawLatch, dims);
     const built = buildOneLatch(latch, dims, params);
     if (!built) continue;
     out.caseAdditive.push(...built.caseAdditive);
