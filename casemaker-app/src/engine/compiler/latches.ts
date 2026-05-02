@@ -6,7 +6,7 @@ import type {
   Latch,
 } from '@/types';
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
-import { cube, cylinder, difference, translate, union, type BuildOp } from './buildPlan';
+import { cube, cylinder, difference, roundedRectPrism, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
 import { pinSpanU, pinCapSpanU, LATCH_PIN_CAP_R } from './latchProtection';
 import { clampLatch } from './featureScale';
@@ -285,11 +285,16 @@ function buildOneLatch(
   // at inner + ARM_PLATE_THICKNESS.
   const armBodyInnerN = wallOuter + f.outwardSign * (HOOK_WALL_OFFSET + tolerance);
   const armBodyOuterN = armBodyInnerN + f.outwardSign * ARM_PLATE_THICKNESS;
+  // Round the arm body's four vertical edges by ARM_BODY_RADIUS — visual
+  // polish so the arm doesn't look like a CAD primitive. Falls back to
+  // a plain cube if the latch is too narrow for the radius.
+  const ARM_BODY_RADIUS = 0.6;
   const armBody = makeBoxBetween(
     f,
     u0 - latch.width / 2, u0 + latch.width / 2,
     armBodyInnerN, armBodyOuterN,
     bodyBotZ, bodyTopZ,
+    ARM_BODY_RADIUS,
   );
   // Cam hook at the TOP of the arm: a horizontal extension that turns
   // INWARD from the arm body and hangs OVER the striker post. The hook's
@@ -305,11 +310,15 @@ function buildOneLatch(
   // body+hook (otherwise coplanar contact at the body inner face leaves
   // the hook as a loose component).
   const hookOuterN = armBodyInnerN + f.outwardSign * EMBED;
+  // Cam hook gets the same vertical-edge rounding for visual continuity
+  // with the arm body — the inboard tip of the hook (the part the user
+  // sees most when the latch is closed) is no longer a sharp corner.
   const hook = makeBoxBetween(
     f,
     u0 - latch.width / 2, u0 + latch.width / 2,
     hookInnerN, hookOuterN,
     hookBotZ, hookTopZ,
+    ARM_BODY_RADIUS,
   );
   const arm = union([armKnuckle, armBody, hook]);
 
@@ -390,12 +399,14 @@ function makeBoreAlongTangent(
 
 /** Rectangular box (cube) spanning [u0,u1] along the wall tangent,
  *  [n0,n1] along the wall normal, [z0,z1] along Z. Handles either sign
- *  ordering of n0/n1. */
+ *  ordering of n0/n1. Optional `radius` rounds the FOUR vertical (Z-axis)
+ *  corners — the user-facing "soften the sharp arm body edges" knob. */
 function makeBoxBetween(
   f: WallFrame,
   u0: number, u1: number,
   n0: number, n1: number,
   z0: number, z1: number,
+  radius = 0,
 ): BuildOp {
   const uMin = Math.min(u0, u1);
   const uMax = Math.max(u0, u1);
@@ -403,11 +414,26 @@ function makeBoxBetween(
   const nMax = Math.max(n0, n1);
   const zMin = Math.min(z0, z1);
   const zMax = Math.max(z0, z1);
+  // Pick the primitive: rounded prism if requested AND there's room for
+  // the radius without collapsing the box footprint, else a plain cube.
+  const widthN = nMax - nMin;
+  const widthU = uMax - uMin;
+  const heightZ = zMax - zMin;
+  const safeRadius =
+    radius > 0 && widthN > 2 * radius + 0.2 && widthU > 2 * radius + 0.2 ? radius : 0;
   if (f.wallAxis === 'x') {
-    // n = X axis, u = Y axis.
-    return translate([nMin, uMin, zMin], cube([nMax - nMin, uMax - uMin, zMax - zMin]));
+    // n = X axis, u = Y axis. roundedRectPrism rounds Z-axis corners,
+    // which here are the four vertical edges of the box.
+    const prim = safeRadius > 0
+      ? roundedRectPrism(widthN, widthU, heightZ, safeRadius)
+      : cube([widthN, widthU, heightZ]);
+    return translate([nMin, uMin, zMin], prim);
   }
-  return translate([uMin, nMin, zMin], cube([uMax - uMin, nMax - nMin, zMax - zMin]));
+  // wallAxis === 'y': n = Y axis, u = X axis.
+  const prim = safeRadius > 0
+    ? roundedRectPrism(widthU, widthN, heightZ, safeRadius)
+    : cube([widthU, widthN, heightZ]);
+  return translate([uMin, nMin, zMin], prim);
 }
 
 // difference is imported above for completeness but currently unused at
