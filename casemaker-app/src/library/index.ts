@@ -1,5 +1,6 @@
 import type { BoardProfile } from '@/types';
 import { builtinBoardProfileSchema } from './schema';
+import rpi3bRaw from './boards/rpi-3b.json';
 import rpi4bRaw from './boards/rpi-4b.json';
 import rpi5Raw from './boards/rpi-5.json';
 import rpiZero2WRaw from './boards/rpi-zero-2w.json';
@@ -16,6 +17,7 @@ import snapTestFixtureRaw from './boards/snap-test-fixture.json';
 import genericZeroRaw from './boards/generic-zero.json';
 
 const validated: BoardProfile[] = [
+  rpi3bRaw,
   rpi4bRaw,
   rpi5Raw,
   rpiZero2WRaw,
