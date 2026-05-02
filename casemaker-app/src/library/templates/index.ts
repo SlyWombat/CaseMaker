@@ -198,10 +198,17 @@ function protectiveCase(): Project {
     pinMode: 'separate',
     enabled: true,
   };
-  // Issue #109 — two latches on the FRONT face (-y), opposite the hinge.
+  // Two latches on the FRONT face (-y), opposite the hinge. Positions
+  // are computed as a FRACTION of the wall tangent length so the
+  // template auto-fits when the user shrinks the board — pre-fix the
+  // positions were hard-coded uPos=40 and uPos=110, which left the
+  // second latch hanging off any case shorter than ~120 mm wide. Wall
+  // tangent for a -y wall = outerX = pcb.x + 2 × (wall + internalClear).
+  const pcbX = p.board.pcb.size.x;
+  const wallTangentLen = pcbX + 2 * (p.case.wallThickness + p.case.internalClearance);
   p.case.latches = [
-    { id: 'tpl-latch-1', wall: '-y', uPosition: 40, enabled: true, throw: 1.5, width: 14, height: 30 },
-    { id: 'tpl-latch-2', wall: '-y', uPosition: 110, enabled: true, throw: 1.5, width: 14, height: 30 },
+    { id: 'tpl-latch-1', wall: '-y', uPosition: wallTangentLen * 0.27, enabled: true, throw: 1.5, width: 14, height: 30 },
+    { id: 'tpl-latch-2', wall: '-y', uPosition: wallTangentLen * 0.73, enabled: true, throw: 1.5, width: 14, height: 30 },
   ];
   // Issue #111 — rugged exterior
   p.case.rugged = {
