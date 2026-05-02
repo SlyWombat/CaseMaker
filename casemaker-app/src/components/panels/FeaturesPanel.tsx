@@ -182,6 +182,20 @@ function AntennasSection() {
               </option>
             ))}
           </select>
+          <label className="cell-label" style={{ flex: 0 }} title="Position along the chosen face (mm from the lower-corner end). Adjust to move the antenna hole left/right along the wall — defaults to the on-board connector position when known.">
+            <span className="cell-label__axis">u</span>
+            <input
+              type="number"
+              step={1}
+              min={0}
+              value={a.uOffset ?? 0}
+              onChange={(e) => patchAntenna(a.id, { uOffset: Number(e.target.value) })}
+              className="numeric-input"
+              style={{ width: 60 }}
+              data-testid={`antenna-${a.id}-uoffset`}
+              aria-label={`Antenna ${a.id} u offset (mm)`}
+            />
+          </label>
           <button
             onClick={() => removeAntenna(a.id)}
             data-testid={`remove-antenna-${a.id}`}

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useJobStore } from '@/store/jobStore';
+import { useProjectStore } from '@/store/projectStore';
 import { useSettingsStore, type ExportFormat } from '@/store/settingsStore';
 import { partsForIds, partsByCategory, type PartCategory, type ProjectPart } from '@/engine/exporters/parts';
 import { exportSinglePart, triggerExport } from '@/engine/exportTrigger';
+import { hardwareForProject } from '@/engine/exporters/hardwareList';
 import { PartThumbnail } from './PartThumbnail';
 
 interface ExportModalProps {
@@ -34,8 +36,10 @@ function formatBytes(n: number): string {
  *  Modal stays open until the user dismisses it (× / ESC / outside-click). */
 export function ExportModal({ onClose }: ExportModalProps) {
   const nodes = useJobStore((s) => s.nodes);
+  const project = useProjectStore((s) => s.project);
   const exportFormat = useSettingsStore((s) => s.exportFormat);
   const setExportFormat = useSettingsStore((s) => s.setExportFormat);
+  const hardware = hardwareForProject(project);
   const [busy, setBusy] = useState<string | null>(null);
   const [recent, setRecent] = useState<{ id: string; filename: string; bytes: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +143,34 @@ export function ExportModal({ onClose }: ExportModalProps) {
             ))}
           </select>
         </div>
+
+        {hardware.length > 0 && (
+          <div
+            data-testid="export-hardware-list"
+            style={{
+              marginBottom: 12,
+              padding: '8px 10px',
+              background: '#1a1f25',
+              border: '1px solid #2a4a6a',
+              borderRadius: 4,
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}
+          >
+            <div style={{ fontSize: 10, textTransform: 'uppercase', color: '#9ab0c2', letterSpacing: '0.05em', marginBottom: 6 }}>
+              🔩 Hardware you'll need
+            </div>
+            {hardware.map((h) => (
+              <div key={h.id} style={{ marginBottom: 4 }}>
+                <span style={{ color: '#cfe', fontWeight: 500 }}>×{h.count}&nbsp;</span>
+                <span>{h.label}</span>
+                {h.note && (
+                  <div style={{ color: '#9ca3af', fontSize: 11, marginLeft: 16 }}>↳ {h.note}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         {parts.length === 0 ? (
           <p style={{ color: '#9ca3af' }}>No parts available. Wait for the engine to finish rebuilding, then try again.</p>
