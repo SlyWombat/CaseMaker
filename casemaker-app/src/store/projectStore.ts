@@ -32,7 +32,7 @@ function defaultCase(): CaseParameters {
     floorThickness: 2,
     lidThickness: 2,
     cornerRadius: 2,
-    internalClearance: 0.5,
+    internalClearance: 1,
     zClearance: 5,
     joint: 'flat-lid',
     ventilation: { enabled: false, pattern: 'none', coverage: 0 },
