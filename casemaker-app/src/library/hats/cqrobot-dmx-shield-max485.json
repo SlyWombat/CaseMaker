@@ -16,7 +16,7 @@
       "kind": "custom",
       "fixtureId": "xlr-3",
       "position": { "x": 0, "y": 3, "z": 1.6 },
-      "size": { "x": 20, "y": 24, "z": 24 },
+      "size": { "x": 20, "y": 23, "z": 23 },
       "facing": "-x",
       "cutoutMargin": 0.2,
       "cutoutShape": "round"
@@ -26,7 +26,7 @@
       "kind": "custom",
       "fixtureId": "xlr-3",
       "position": { "x": 0, "y": 27, "z": 1.6 },
-      "size": { "x": 20, "y": 24, "z": 24 },
+      "size": { "x": 20, "y": 23, "z": 23 },
       "facing": "-x",
       "cutoutMargin": 0.2,
       "cutoutShape": "round"
