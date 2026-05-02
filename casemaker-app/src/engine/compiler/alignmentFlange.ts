@@ -1,6 +1,6 @@
 import type { BoardProfile, CaseParameters, HatPlacement, HatProfile } from '@/types';
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
-import { difference, roundedRectPrism, translate, union, type BuildOp } from './buildPlan';
+import { cube, difference, roundedRectPrism, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
 
 type HatResolver = (id: string) => HatProfile | undefined;
@@ -34,12 +34,22 @@ const NO_RESOLVE_DISPLAY: DisplayResolver = () => undefined;
  * and not recessed.
  */
 
-const BRIM_T = 2.0;             // mm — thickness of each brim half
-const TONGUE_HEIGHT = 1.0;      // mm — tongue protrudes ABOVE meeting plane
-const TONGUE_WIDTH = 1.5;       // mm — wall-normal width of the tongue ring
+// Brim thickness bumped from 2 mm → 4 mm so the flange survives a drop
+// (real Pelican brims are 4-6 mm, reinforced with corner gussets). 2 mm
+// snapped off too easily under impact at the corners.
+const BRIM_T = 4.0;             // mm — thickness of each brim half
+const TONGUE_HEIGHT = 1.5;      // mm — tongue protrudes ABOVE meeting plane (scales with the thicker brim)
+const TONGUE_WIDTH = 2.0;       // mm — wall-normal width of the tongue ring
 const GROOVE_CLEAR = 0.3;       // mm — total slop (groove WIDER than tongue)
 const GROOVE_EXTRA_DEPTH = 0.3; // mm — groove deeper than tongue so the lid seats
-const FLANGE_FALLBACK_DEPTH = 2.5; // mm — used when ribbing is disabled
+const FLANGE_MIN_DEPTH = 3.0;   // mm — flange always extends out at least this much (impact protection)
+const FLANGE_FALLBACK_DEPTH = 3.0; // mm — used when ribbing is disabled
+// Corner gussets — small triangular braces under the brim at each of
+// the 4 outside corners so the brim doesn't snap off when the case is
+// dropped on a corner. Each gusset is a vertical triangle in the corner-
+// diagonal plane, height = GUSSET_H, leg lengths = GUSSET_LEG.
+const GUSSET_H = 6;             // mm — vertical extent down the wall
+const GUSSET_LEG = 4;           // mm — leg length out from the wall corner
 
 export interface AlignmentFlangeOps {
   /** Case brim + tongue, in WORLD coords. */
@@ -68,12 +78,14 @@ export function buildAlignmentFlange(
 
   // Flange depth matches the wall-rib depth so the brim outline is flush
   // with the rib outer face — the assembled exterior reads as one
-  // continuous outline. Falls back to a sensible default when ribbing is
-  // off so the flange still works for non-rugged cases.
-  const flangeDepth =
+  // continuous outline. Clamped UP to FLANGE_MIN_DEPTH so a thin-rib
+  // project still gets a brim with enough material to survive a drop.
+  const flangeDepth = Math.max(
+    FLANGE_MIN_DEPTH,
     params.rugged?.ribbing?.enabled && params.rugged.ribbing.ribDepth > 0
       ? params.rugged.ribbing.ribDepth
-      : FLANGE_FALLBACK_DEPTH;
+      : FLANGE_FALLBACK_DEPTH,
+  );
 
   // ---- Case brim (world coords) ----
   //
@@ -101,6 +113,46 @@ export function buildAlignmentFlange(
   );
   const caseBrimRing = difference([caseBrimSlab, envelopeSubtract]);
   const caseBrim = translate([-flangeDepth, -flangeDepth, caseBrimZ0 - EMBED], caseBrimRing);
+
+  // ---- Corner gussets ----
+  //
+  // Small triangular braces under the brim at each of the 4 outside
+  // corners. Each gusset reinforces the brim ↔ wall junction at the
+  // corner where impact loads are highest. Implemented as a cube fused
+  // into the wall corner; the brim's underside provides the top face
+  // and the wall's outside provides the back face, so the gusset reads
+  // visually as a triangular brace even though the geometry is a small
+  // box (cheaper than a triangular prism + good enough for impact
+  // protection). Each gusset spans GUSSET_LEG mm out from the wall
+  // corner along each axis and GUSSET_H mm DOWN from the brim's
+  // underside.
+  const gussets: BuildOp[] = [];
+  if (GUSSET_H > 0 && GUSSET_LEG > 0 && flangeDepth >= GUSSET_LEG - 0.5) {
+    const gussetTopZ = caseBrimZ0;
+    const gussetBotZ = gussetTopZ - GUSSET_H;
+    if (gussetBotZ < dims.outerZ - 0.5) {
+      // Sized so the gusset's outer corner is FLUSH with the brim's outer
+      // corner (visually integrated). Inner corner is INSIDE the wall by
+      // EMBED so the gusset fuses with the case shell.
+      const gusset = (xCorner: -1 | 1, yCorner: -1 | 1): BuildOp => {
+        const xOrigin = xCorner === -1 ? -GUSSET_LEG : dims.outerX;
+        const yOrigin = yCorner === -1 ? -GUSSET_LEG : dims.outerY;
+        // Embed slightly INTO wall material on the inboard side.
+        const xEmbed = xCorner === -1 ? -EMBED : 0;
+        const yEmbed = yCorner === -1 ? -EMBED : 0;
+        const xExtra = xCorner === -1 ? EMBED : EMBED;
+        const yExtra = yCorner === -1 ? EMBED : EMBED;
+        return translate(
+          [xOrigin + (xCorner === -1 ? 0 : xEmbed), yOrigin + (yCorner === -1 ? 0 : yEmbed), gussetBotZ],
+          cube([GUSSET_LEG + xExtra, GUSSET_LEG + yExtra, GUSSET_H + EMBED]),
+        );
+      };
+      gussets.push(gusset(-1, -1));
+      gussets.push(gusset(+1, -1));
+      gussets.push(gusset(-1, +1));
+      gussets.push(gusset(+1, +1));
+    }
+  }
 
   // ---- Tongue on top of case brim (world coords) ----
   //
@@ -132,6 +184,9 @@ export function buildAlignmentFlange(
       tongueRing,
     );
     caseAdditive = union([caseBrim, tongue]);
+  }
+  if (gussets.length > 0) {
+    caseAdditive = union([caseAdditive, ...gussets]);
   }
 
   // ---- Lid brim (lid-local coords) ----
