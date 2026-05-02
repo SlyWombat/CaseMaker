@@ -19,6 +19,7 @@ import { buildFanMountOps } from './fans';
 import { buildTextLabelOps } from './textLabels';
 import { buildAntennaOps } from './antennas';
 import { buildSnapCatchOps } from './snapCatches';
+import { buildBoardSnapOps } from './boardSnap';
 import { buildHingeOps } from './hinges';
 import { buildCustomCutouts } from './customCutouts';
 import { validatePlacements } from './placementValidator';
@@ -82,6 +83,9 @@ export function compileProject(project: Project): BuildPlan {
   // Pelican alignment brim + tongue/groove around the perimeter (auto-on
   // for shell-mode lids).
   const flangeOps = buildAlignmentFlange(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+  // Board-retention snap fingers (when boardRetention='snap'). Emitted
+  // on the cavity walls; auto-skipped when boardRetention is anything else.
+  const boardSnapOps = buildBoardSnapOps(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   // Issue #111 — rugged exterior (corner bumpers, ribbing, feet).
   const ruggedOps = buildRuggedOps(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   // Issue #92 — barrel hinge. caseAdditive joins the shell pre-cavity-cut so
@@ -112,6 +116,7 @@ export function compileProject(project: Project): BuildPlan {
     ...latchOps.caseAdditive,
     ...ruggedOps.caseAdditive,
     ...(flangeOps.caseAdditive ? [flangeOps.caseAdditive] : []),
+    ...boardSnapOps.caseAdditive,
   ];
 
   const smartLayout = applySmartCutoutLayout(
