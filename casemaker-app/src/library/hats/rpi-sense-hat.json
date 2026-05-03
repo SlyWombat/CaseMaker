@@ -19,7 +19,7 @@
       "facing": "+z"
     }
   ],
-  "compatibleBoards": ["rpi-4b", "rpi-5", "rpi-zero-2w"],
+  "compatibleBoards": ["rpi-3b", "rpi-4b", "rpi-5", "rpi-zero-2w"],
   "source": "https://datasheets.raspberrypi.com/sense-hat/sense-hat-product-brief.pdf",
   "builtin": true
 }

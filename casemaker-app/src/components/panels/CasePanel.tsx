@@ -16,6 +16,7 @@ import type {
 import { newId } from '@/utils/id';
 import { VENT_SURFACES } from '@/types';
 import { LabelledField } from '@/components/ui/LabelledField';
+import { resolveInsertSpec } from '@/engine/compiler/bosses';
 
 const JOINT_OPTIONS: { value: JointType; label: string; hint: string }[] = [
   {
@@ -102,8 +103,53 @@ function Slider({ label, value, min, max, step, onChange, testId, hint, unit }: 
   );
 }
 
+/** Mirrors the locator-stub fit math in computeBossPlacements (bosses.ts).
+ *  Tells the user whether the stub will actually emit on the current board
+ *  given the chosen insert type — the stub silently skips when there's no
+ *  geometric solution (e.g. self-tap pilot too close to the mount-hole
+ *  diameter to leave a usable pilot wall). */
+function LocatorStubHint(props: {
+  board: { mountingHoles: { diameter: number }[] };
+  insertType: InsertType;
+  outerDiameter: number;
+  holeDiameter: number;
+  position?: 'bottom' | 'top';
+}) {
+  if (props.position === 'top') {
+    return (
+      <div className="hint-row" style={{ fontSize: 11, color: '#7a8590', padding: '0 0 8px 0' }}>
+        Locator stub: — n/a for lid-mounted bosses
+      </div>
+    );
+  }
+  if (props.board.mountingHoles.length === 0) {
+    return null;
+  }
+  const minMountHole = Math.min(...props.board.mountingHoles.map((h) => h.diameter));
+  const { holeDiameter: pilot } = resolveInsertSpec(
+    props.insertType,
+    props.outerDiameter,
+    props.holeDiameter,
+  );
+  const stubMaxOD = minMountHole - 0.4;
+  const stubMinOD = pilot > 0 ? pilot + 0.8 : 0.8;
+  const fits = stubMinOD <= stubMaxOD;
+  return (
+    <div
+      className="hint-row"
+      data-testid="locator-stub-hint"
+      style={{ fontSize: 11, color: fits ? '#86b8d2' : '#a08577', padding: '0 0 8px 0' }}
+    >
+      {fits
+        ? `Locator stub: ✓ enabled (${stubMaxOD.toFixed(1)}mm Ø, fits the ${minMountHole}mm mount holes)`
+        : `Locator stub: — skipped (needs ≥ ${stubMinOD.toFixed(1)}mm Ø for pilot wall, but mount holes only allow ≤ ${stubMaxOD.toFixed(1)}mm)`}
+    </div>
+  );
+}
+
 export function CasePanel() {
   const params = useProjectStore((s) => s.project.case);
+  const board = useProjectStore((s) => s.project.board);
   const patch = useProjectStore((s) => s.patchCase);
   const set = (key: keyof CaseParameters) => (v: number) => patch({ [key]: v } as Partial<CaseParameters>);
 
@@ -327,6 +373,13 @@ export function CasePanel() {
               ))}
             </select>
           </div>
+          <LocatorStubHint
+            board={board}
+            insertType={params.bosses.insertType}
+            outerDiameter={params.bosses.outerDiameter}
+            holeDiameter={params.bosses.holeDiameter}
+            position={params.bosses.position ?? 'bottom'}
+          />
           {/* Issue #104 — Boss position. Bottom (default) anchors bosses to
               the floor; Top anchors them to the lid underside with a
               tapered support column on the inside wall (printable open

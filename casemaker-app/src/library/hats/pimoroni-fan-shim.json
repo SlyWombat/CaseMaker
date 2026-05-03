@@ -14,7 +14,7 @@
       "facing": "+z"
     }
   ],
-  "compatibleBoards": ["rpi-4b", "rpi-5", "rpi-zero-2w"],
+  "compatibleBoards": ["rpi-3b", "rpi-4b", "rpi-5", "rpi-zero-2w"],
   "source": "https://shop.pimoroni.com/products/fan-shim",
   "builtin": true
 }
