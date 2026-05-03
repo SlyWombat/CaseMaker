@@ -511,6 +511,7 @@ export function CasePanel() {
                 [
                   { value: 'slots', hint: 'Vertical-slot pattern — fastest to print, easiest to clean.' },
                   { value: 'hex', hint: 'Hexagonal honeycomb pattern — strong, more decorative.' },
+                  { value: 'chevron', hint: 'Angled louver slats — prints without supports, sheds water.' },
                 ] as const
               ).map((p) => (
                 <label key={p.value} title={p.hint}>

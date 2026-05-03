@@ -30,7 +30,7 @@ export const caseParamsSchema = z.object({
       .array(z.enum(['top', 'bottom', 'front', 'back', 'left', 'right']))
       .optional(),
     enabled: z.boolean(),
-    pattern: z.enum(['none', 'slots', 'hex']),
+    pattern: z.enum(['none', 'slots', 'hex', 'chevron']),
     coverage: z.number().min(0).max(1),
   }),
   bosses: z.object({

@@ -80,7 +80,7 @@ export type InsertType =
   | 'heat-set-m3'
   | 'pass-through'
   | 'none';
-export type VentilationPattern = 'none' | 'slots' | 'hex';
+export type VentilationPattern = 'none' | 'slots' | 'hex' | 'chevron';
 
 export type BossPosition = 'bottom' | 'top';
 

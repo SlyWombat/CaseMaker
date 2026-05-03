@@ -1,0 +1,105 @@
+{
+  "id": "quinled-dig-octa",
+  "name": "QuinLED-Dig-Octa (Brainboard-32-8L)",
+  "manufacturer": "Quindor / quinled.info",
+  "pcb": {
+    "size": {
+      "x": 150,
+      "y": 105,
+      "z": 1.6
+    }
+  },
+  "mountingHoles": [
+    { "id": "h1", "x": 4, "y": 4, "diameter": 2.75 },
+    { "id": "h2", "x": 146, "y": 4, "diameter": 2.75 },
+    { "id": "h3", "x": 4, "y": 101, "diameter": 2.75 },
+    { "id": "h4", "x": 146, "y": 101, "diameter": 2.75 },
+    { "id": "h5", "x": 75, "y": 50.5, "diameter": 2.75 }
+  ],
+  "components": [
+    {
+      "id": "usb-c",
+      "kind": "usb-c",
+      "position": { "x": -2, "y": 50, "z": 1.6 },
+      "size": { "x": 9, "y": 9, "z": 3.2 },
+      "facing": "-x",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "led-output-1",
+      "kind": "custom",
+      "position": { "x": 12, "y": 102, "z": 1.6 },
+      "size": { "x": 16, "y": 6, "z": 11 },
+      "facing": "+y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "led-output-2",
+      "kind": "custom",
+      "position": { "x": 30, "y": 102, "z": 1.6 },
+      "size": { "x": 16, "y": 6, "z": 11 },
+      "facing": "+y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "led-output-3",
+      "kind": "custom",
+      "position": { "x": 48, "y": 102, "z": 1.6 },
+      "size": { "x": 16, "y": 6, "z": 11 },
+      "facing": "+y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "led-output-4",
+      "kind": "custom",
+      "position": { "x": 66, "y": 102, "z": 1.6 },
+      "size": { "x": 16, "y": 6, "z": 11 },
+      "facing": "+y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "led-output-5",
+      "kind": "custom",
+      "position": { "x": 84, "y": 102, "z": 1.6 },
+      "size": { "x": 16, "y": 6, "z": 11 },
+      "facing": "+y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "led-output-6",
+      "kind": "custom",
+      "position": { "x": 102, "y": 102, "z": 1.6 },
+      "size": { "x": 16, "y": 6, "z": 11 },
+      "facing": "+y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "led-output-7",
+      "kind": "custom",
+      "position": { "x": 120, "y": 102, "z": 1.6 },
+      "size": { "x": 16, "y": 6, "z": 11 },
+      "facing": "+y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "led-output-8",
+      "kind": "custom",
+      "position": { "x": 138, "y": 102, "z": 1.6 },
+      "size": { "x": 12, "y": 6, "z": 11 },
+      "facing": "+y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "power-input",
+      "kind": "custom",
+      "position": { "x": 75, "y": -4, "z": 1.6 },
+      "size": { "x": 30, "y": 8, "z": 14 },
+      "facing": "-y",
+      "cutoutMargin": 0.7
+    }
+  ],
+  "defaultStandoffHeight": 5,
+  "recommendedZClearance": 22,
+  "source": "https://quinled.info/quinled-dig-octa-dimensions/",
+  "builtin": true
+}

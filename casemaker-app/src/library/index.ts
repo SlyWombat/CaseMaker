@@ -11,6 +11,9 @@ import esp32DevkitV1Raw from './boards/esp32-devkit-v1.json';
 import esp32S3DevkitcRaw from './boards/esp32-s3-devkitc-1.json';
 import rpiPicoRaw from './boards/rpi-pico.json';
 import rpiPicoWRaw from './boards/rpi-pico-w.json';
+import quinledDigUnoRaw from './boards/quinled-dig-uno.json';
+import quinledDigQuadRaw from './boards/quinled-dig-quad.json';
+import quinledDigOctaRaw from './boards/quinled-dig-octa.json';
 import teensy41Raw from './boards/teensy-41.json';
 import jetsonNanoRaw from './boards/jetson-nano-b01.json';
 import beagleboneBlackRaw from './boards/beaglebone-black.json';
@@ -31,6 +34,9 @@ const validated: BoardProfile[] = [
   esp32S3DevkitcRaw,
   rpiPicoRaw,
   rpiPicoWRaw,
+  quinledDigUnoRaw,
+  quinledDigQuadRaw,
+  quinledDigOctaRaw,
   teensy41Raw,
   jetsonNanoRaw,
   beagleboneBlackRaw,

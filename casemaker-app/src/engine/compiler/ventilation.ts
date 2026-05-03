@@ -23,6 +23,14 @@ const HEX_RADIUS = 2.2;
 const HEX_GAP = 1.4;
 const HEX_INSET_FROM_EDGE = 5;
 
+// Chevron pattern: long horizontal slots running along U, each tilted 45°
+// in the V-N plane so the top of each slot is a 45° overhang (printable
+// FDM angle without supports — the visual look is venetian-blind louvers).
+const CHEVRON_HEIGHT = 4;
+const CHEVRON_GAP = 4;
+const CHEVRON_INSET_FROM_EDGE = 6;
+const CHEVRON_TILT_DEG = 45;
+
 /**
  * Issue #75 — describes one face of the case as a planar rectangle plus a
  * cutting direction. Pattern builders work in the (u, v) plane and extrude
@@ -223,6 +231,42 @@ function buildHexForFrame(frame: VentFrame, coverage: number): BuildOp[] {
   return ops;
 }
 
+function buildChevronForFrame(frame: VentFrame, coverage: number): BuildOp[] {
+  // Long horizontal slots along U, stacked in V. Each slot is built as a
+  // cube cutter centered at origin so we can rotate it 45° about U and
+  // then translate the rotated parallelepiped into place. Cutter depth in
+  // N is over-extended so the tilt still pierces the wall fully.
+  const usableU = frame.uMax - 2 * CHEVRON_INSET_FROM_EDGE;
+  const usableV = (frame.vMax - 2 * CHEVRON_INSET_FROM_EDGE) * coverage;
+  if (usableU <= 0 || usableV <= CHEVRON_HEIGHT) return [];
+  const stride = CHEVRON_HEIGHT + CHEVRON_GAP;
+  const rows = Math.max(1, Math.floor(usableV / stride));
+  const totalUsedV = rows * stride - CHEVRON_GAP;
+  const vStart = (frame.vMax - totalUsedV) / 2;
+  const cutThruExt = Math.max(frame.cutThru * 2, 8);
+  const rotVec: [number, number, number] =
+    frame.uAxis === 'x'
+      ? [CHEVRON_TILT_DEG, 0, 0]
+      : frame.uAxis === 'y'
+        ? [0, CHEVRON_TILT_DEG, 0]
+        : [0, 0, CHEVRON_TILT_DEG];
+  const ops: BuildOp[] = [];
+  for (let r = 0; r < rows; r++) {
+    const v = vStart + r * stride + CHEVRON_HEIGHT / 2;
+    const uCenter = frame.uMax / 2;
+    // Build the cutter sized in (U, V, N) and let the U axis stay
+    // axis-aligned with world. Rotation around the U axis tilts only V/N.
+    const sx = frame.uAxis === 'x' ? usableU : frame.vAxis === 'x' ? CHEVRON_HEIGHT : cutThruExt;
+    const sy = frame.uAxis === 'y' ? usableU : frame.vAxis === 'y' ? CHEVRON_HEIGHT : cutThruExt;
+    const sz = frame.uAxis === 'z' ? usableU : frame.vAxis === 'z' ? CHEVRON_HEIGHT : cutThruExt;
+    const c = cube([sx, sy, sz], true);
+    const rotated = rotate(rotVec, c);
+    const w = place(frame, uCenter, v);
+    ops.push(translate([w.x, w.y, w.z], rotated));
+  }
+  return ops;
+}
+
 export interface VentilationCutouts {
   /** Cutters for surfaces that are part of the case shell (sides + bottom). */
   shellCuts: BuildOp[];
@@ -270,6 +314,8 @@ export function buildVentilationCutouts(
       dest.push(...buildSlotsForFrame(frame, coverage));
     } else if (params.ventilation.pattern === 'hex') {
       dest.push(...buildHexForFrame(frame, coverage));
+    } else if (params.ventilation.pattern === 'chevron') {
+      dest.push(...buildChevronForFrame(frame, coverage));
     }
   }
   return { shellCuts, lidCuts };

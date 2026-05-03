@@ -1,0 +1,56 @@
+{
+  "id": "quinled-dig-uno",
+  "name": "QuinLED-Dig-Uno (v3)",
+  "manufacturer": "Quindor / quinled.info",
+  "pcb": {
+    "size": {
+      "x": 48.523,
+      "y": 39.37,
+      "z": 1.6
+    }
+  },
+  "mountingHoles": [
+    { "id": "h1", "x": 2.627, "y": 2.627, "diameter": 2.4 },
+    { "id": "h2", "x": 45.896, "y": 2.627, "diameter": 2.4 },
+    { "id": "h3", "x": 2.627, "y": 36.743, "diameter": 2.4 },
+    { "id": "h4", "x": 45.896, "y": 36.743, "diameter": 2.4 }
+  ],
+  "components": [
+    {
+      "id": "esp32-micro-usb",
+      "kind": "micro-usb",
+      "position": { "x": 20, "y": 39.37, "z": 7.6 },
+      "size": { "x": 8, "y": 5.5, "z": 2.5 },
+      "facing": "+y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "screw-terminal-power",
+      "kind": "custom",
+      "position": { "x": 4, "y": -2, "z": 1.6 },
+      "size": { "x": 12, "y": 8, "z": 11 },
+      "facing": "-y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "screw-terminal-led1",
+      "kind": "custom",
+      "position": { "x": 18, "y": -2, "z": 1.6 },
+      "size": { "x": 12, "y": 8, "z": 11 },
+      "facing": "-y",
+      "cutoutMargin": 0.7
+    },
+    {
+      "id": "screw-terminal-led2",
+      "kind": "custom",
+      "position": { "x": 32, "y": -2, "z": 1.6 },
+      "size": { "x": 12, "y": 8, "z": 11 },
+      "facing": "-y",
+      "cutoutMargin": 0.7
+    }
+  ],
+  "defaultStandoffHeight": 6,
+  "recommendedZClearance": 30,
+  "source": "https://quinled.info/2020/08/02/quinled-dig-uno-board-dimensions/",
+  "builtin": true
+}
