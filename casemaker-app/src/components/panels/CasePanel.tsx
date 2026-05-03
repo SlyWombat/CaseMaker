@@ -131,18 +131,32 @@ function LocatorStubHint(props: {
     props.outerDiameter,
     props.holeDiameter,
   );
+  const STUB_MIN_OD = 1.8;
+  const STUB_PILOT_MIN = 1.2;
+  const STUB_PILOT_WALL = 0.5;
   const stubMaxOD = minMountHole - 0.4;
-  const stubMinOD = pilot > 0 ? pilot + 0.8 : 0.8;
-  const fits = stubMinOD <= stubMaxOD;
+  const canEmitStub = stubMaxOD >= STUB_MIN_OD;
+  let starterPilot = 0;
+  if (canEmitStub && pilot > 0) {
+    const wallLimited = stubMaxOD - 2 * STUB_PILOT_WALL;
+    const candidate = Math.min(pilot - 0.5, wallLimited);
+    starterPilot = candidate >= STUB_PILOT_MIN ? candidate : 0;
+  }
   return (
     <div
       className="hint-row"
       data-testid="locator-stub-hint"
-      style={{ fontSize: 11, color: fits ? '#86b8d2' : '#a08577', padding: '0 0 8px 0' }}
+      style={{ fontSize: 11, color: canEmitStub ? '#86b8d2' : '#a08577', padding: '0 0 8px 0' }}
     >
-      {fits
-        ? `Locator stub: ✓ enabled (${stubMaxOD.toFixed(1)}mm Ø, fits the ${minMountHole}mm mount holes)`
-        : `Locator stub: — skipped (needs ≥ ${stubMinOD.toFixed(1)}mm Ø for pilot wall, but mount holes only allow ≤ ${stubMaxOD.toFixed(1)}mm)`}
+      {canEmitStub
+        ? `Locator stub: ✓ ${stubMaxOD.toFixed(1)}mm Ø${
+            starterPilot > 0
+              ? ` with ${starterPilot.toFixed(1)}mm starter pilot for the screw`
+              : pilot > 0
+                ? ' (solid — screw self-taps through stub)'
+                : ' (solid retention peg)'
+          }`
+        : `Locator stub: — skipped (mount holes < ${(STUB_MIN_OD + 0.4).toFixed(1)}mm)`}
     </div>
   );
 }

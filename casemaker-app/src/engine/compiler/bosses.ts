@@ -20,12 +20,16 @@ export interface BossPlacement {
   baseZ: number;
   /** Locator stub diameter on top of the standoff. Slip-fits into the
    *  board's mounting hole so the board self-locates before screws are
-   *  added. 0 means no stub (geometry won't fit, e.g. self-tap pilot is
-   *  too close to the mount-hole diameter to leave any pilot wall). */
+   *  added. 0 means no stub (mount hole too small for any useful stub). */
   lockNotchDiameter: number;
   /** Locator stub height — bottom of stub at the standoff top, top of
    *  stub flush with the board surface. 0 means no stub. */
   lockNotchHeight: number;
+  /** Starter pilot diameter through the stub portion only. Smaller than
+   *  the standoff body's pilot so a self-tap screw can find center on the
+   *  stub before the wider main pilot picks up below the board. 0 means
+   *  no starter (no main pilot, or stub absent). */
+  lockNotchPilotDiameter: number;
 }
 
 const HEAT_SET_SPECS: Record<InsertType, { hole: number; minOuter: number }> = {
@@ -88,19 +92,30 @@ export function computeBossPlacements(
   const baseZ = 0;
   // Locator stub — see buildBossesUnion. Only emitted for bottom-mounted
   // standoffs; top-mounted bosses anchor to the lid and the board hangs
-  // off the screws so a stub adds no value there.
-  // Geometric constraint: stub must fit through the board's mounting hole
-  // (OD ≤ mountHole - 0.4 for a slip-fit) AND leave a usable wall around
-  // the screw pilot (OD ≥ pilot + 0.8). These two constraints conflict
-  // for the common self-tap-on-3.2mm-mount-hole case (would need OD ≥ 3.3
-  // and ≤ 2.8 simultaneously) — when they conflict we skip the stub
-  // rather than emit something the board can't seat over.
+  // off the screws so a stub adds no value there. The stub OD slip-fits
+  // through the board's mounting hole; when the standoff carries a
+  // pilot, the stub gets a smaller starter pilot through it (down to
+  // STUB_PILOT_MIN) so a self-tap screw finds center on the stub before
+  // the wider main pilot picks up below the board.
+  const STUB_PILOT_MIN = 1.2;
+  const STUB_PILOT_WALL = 0.5;
+  const STUB_MIN_OD = 1.8;
   return board.mountingHoles.map((h) => {
     const stubMaxOD = h.diameter - 0.4;
-    const stubMinOD = holeDiameter > 0 ? holeDiameter + 0.8 : 0.8;
-    const stubCanFit = position === 'bottom' && stubMinOD <= stubMaxOD;
-    const lockNotchDiameter = stubCanFit ? stubMaxOD : 0;
-    const lockNotchHeight = stubCanFit ? Math.min(board.pcb.size.z, 1.6) : 0;
+    const canEmitStub = position === 'bottom' && stubMaxOD >= STUB_MIN_OD;
+    const lockNotchDiameter = canEmitStub ? stubMaxOD : 0;
+    const lockNotchHeight = canEmitStub ? Math.min(board.pcb.size.z, 1.6) : 0;
+    // Starter pilot must (a) be smaller than the main pilot so the screw
+    // engages new material as it descends, and (b) leave at least
+    // STUB_PILOT_WALL on each side of the stub. If those clamps drive it
+    // below STUB_PILOT_MIN, omit the starter (the screw will simply
+    // self-tap through the solid stub).
+    let lockNotchPilotDiameter = 0;
+    if (canEmitStub && holeDiameter > 0) {
+      const wallLimited = lockNotchDiameter - 2 * STUB_PILOT_WALL;
+      const candidate = Math.min(holeDiameter - 0.5, wallLimited);
+      lockNotchPilotDiameter = candidate >= STUB_PILOT_MIN ? candidate : 0;
+    }
     return {
       id: `boss-${h.id}`,
       x: h.x + wall + cl,
@@ -112,6 +127,7 @@ export function computeBossPlacements(
       baseZ,
       lockNotchDiameter,
       lockNotchHeight,
+      lockNotchPilotDiameter,
     };
   });
 }
@@ -159,11 +175,30 @@ export function buildBossesUnion(placements: BossPlacement[]): BuildOp[] {
       if (b.holeDiameter <= 0) {
         return translate([b.x, b.y, 0], body);
       }
-      // Pilot must extend through both the standoff and the stub so the
-      // screw can pass cleanly all the way down.
-      const pilotH = b.totalHeight + b.lockNotchHeight + 2;
-      const pilot = cylinder(pilotH, b.holeDiameter / 2, 24);
-      const piloted = difference([body, translate([0, 0, -1], pilot)]);
+      // Main pilot drills the standoff body. If a starter pilot is
+      // configured, it drills the stub portion only — narrower so the
+      // screw bites the stub material first, then engages the wider main
+      // pilot as it descends past the board surface.
+      const mainPilotH = b.totalHeight + SECTION_EMBED;
+      const mainPilot = translate(
+        [0, 0, -1],
+        cylinder(mainPilotH + 1, b.holeDiameter / 2, 24),
+      );
+      let piloted: BuildOp;
+      if (b.lockNotchPilotDiameter > 0 && b.lockNotchHeight > 0) {
+        const starterH = b.lockNotchHeight + 1;
+        const starter = translate(
+          [0, 0, b.totalHeight - SECTION_EMBED],
+          cylinder(starterH, b.lockNotchPilotDiameter / 2, 24),
+        );
+        piloted = difference([body, mainPilot, starter]);
+      } else {
+        // Stub absent or no starter — let the main pilot pass through any
+        // stub above by extending it the full composite height.
+        const fullH = b.totalHeight + b.lockNotchHeight + 2;
+        const fullPilot = translate([0, 0, -1], cylinder(fullH, b.holeDiameter / 2, 24));
+        piloted = difference([body, fullPilot]);
+      }
       return translate([b.x, b.y, 0], piloted);
     });
 }
