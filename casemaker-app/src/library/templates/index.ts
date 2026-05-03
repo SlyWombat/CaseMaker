@@ -183,8 +183,16 @@ function protectiveCase(): Project {
     compressionFactor: 0.25,
     gasketMaterial: 'tpu',
   };
-  // Issue #110 — piano-segmented hinge on the back face. Sits OUTSIDE the
-  // gasket loop; the lid pivots up without breaking the seal.
+  // Wall tangent length for the ±y faces — used by both the hinge
+  // (back, +y) and the latches (front, -y) so they scale together when
+  // the user resizes the board. outerX = pcb.x + 2 × (wall + clearance).
+  const pcbX = p.board.pcb.size.x;
+  const wallTangentLen = pcbX + 2 * (p.case.wallThickness + p.case.internalClearance);
+  // Piano-segmented hinge on the back face. Length scales to ~75% of the
+  // wall tangent so the hinge dominates the back face on any case size,
+  // not just the default 150 mm one. featureScale.clampHinge enforces
+  // the printable minimums (knuckle OD ≥ 5 mm, pin ≥ 2 mm, length ≥ 25
+  // mm) so the hinge stays buildable down to ~50 mm wall lengths.
   p.case.hinge = {
     id: 'tpl-protective-hinge',
     style: 'piano-segmented',
@@ -194,18 +202,13 @@ function protectiveCase(): Project {
     pinDiameter: 3,
     knuckleClearance: 0.4,
     positioning: 'centered',
-    hingeLength: 110,
+    hingeLength: wallTangentLen * 0.75,
     pinMode: 'separate',
     enabled: true,
   };
   // Two latches on the FRONT face (-y), opposite the hinge. Positions
-  // are computed as a FRACTION of the wall tangent length so the
-  // template auto-fits when the user shrinks the board — pre-fix the
-  // positions were hard-coded uPos=40 and uPos=110, which left the
-  // second latch hanging off any case shorter than ~120 mm wide. Wall
-  // tangent for a -y wall = outerX = pcb.x + 2 × (wall + internalClear).
-  const pcbX = p.board.pcb.size.x;
-  const wallTangentLen = pcbX + 2 * (p.case.wallThickness + p.case.internalClearance);
+  // are a FRACTION of the wall tangent so the template auto-fits when
+  // the user shrinks the board.
   p.case.latches = [
     { id: 'tpl-latch-1', wall: '-y', uPosition: wallTangentLen * 0.27, enabled: true, throw: 1.5, width: 14, height: 30 },
     { id: 'tpl-latch-2', wall: '-y', uPosition: wallTangentLen * 0.73, enabled: true, throw: 1.5, width: 14, height: 30 },
