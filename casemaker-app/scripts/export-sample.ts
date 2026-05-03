@@ -18,6 +18,7 @@ import { createDefaultProject } from '../src/store/projectStore';
 import { buildBinaryStl } from '../src/workers/export/stlBinary';
 import { autoPortsForBoard } from '../src/engine/compiler/portFactory';
 import { applyLayoutToMeshes } from '../src/engine/exportLayout';
+import { defaultSnapCatchesForCase } from '../src/engine/compiler/snapCatches';
 import type { Project, BoardProfile, MeshNode } from '../src/types';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -195,6 +196,29 @@ function buildEsp32Project(): Project {
   project.name = 'ESP32 DevKit V1 — snap-fit sample';
   // Re-run port factory in case the default board profile changed shape
   project.ports = autoPortsForBoard(project.board);
+  // Same as the RPi 3B sample — direct project mutation bypasses the
+  // store's auto-population, so populate snap catches explicitly.
+  project.case.snapCatches = defaultSnapCatchesForCase(project.board, project.case);
+  return project;
+}
+
+function buildRpi3bProject(): Project {
+  // Calibration print following the 2026-05-03 fixes:
+  //   • USB-A x: 70 → 74 (+4mm outward, user-measured)
+  //   • Snap catch placement now scans tall connectors per wall and
+  //     skips U-positions where the lid arm would collide with USB/RJ45.
+  // Use snap-fit to exercise the new placement logic, default 1mm
+  // internal clearance, recommended Z clearance (18mm) so the lid
+  // actually closes over the 16mm USB-A stack.
+  const project = createDefaultProject('rpi-3b');
+  project.case.joint = 'snap-fit';
+  project.case.zClearance = project.board.recommendedZClearance;
+  project.name = 'Raspberry Pi 3B — snap-fit calibration';
+  project.ports = autoPortsForBoard(project.board);
+  // The store's patchCase auto-populates snap catches when joint flips to
+  // 'snap-fit'; we bypass that here by mutating the project directly, so
+  // populate them ourselves.
+  project.case.snapCatches = defaultSnapCatchesForCase(project.board, project.case);
   return project;
 }
 
@@ -214,6 +238,12 @@ const SAMPLES: SampleSpec[] = [
     filename: 'esp32-devkit-snap-fit.stl',
     description: 'ESP32 DevKit V1 with snap-fit lid (full real-world test case)',
     build: buildEsp32Project,
+  },
+  {
+    filename: 'rpi-3b-snap-fit-calibration.stl',
+    description:
+      'RPi 3B snap-fit calibration print — verify USB-A 4mm shift + snap-arm/USB collision avoidance',
+    build: buildRpi3bProject,
   },
 ];
 
