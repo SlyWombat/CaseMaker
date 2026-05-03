@@ -1,0 +1,49 @@
+{
+  "id": "arduino-nano-esp32",
+  "name": "Arduino Nano ESP32",
+  "manufacturer": "Arduino",
+  "pcb": {
+    "size": {
+      "x": 45,
+      "y": 18,
+      "z": 1.6
+    }
+  },
+  "mountingHoles": [],
+  "components": [
+    {
+      "id": "usb-c",
+      "kind": "usb-c",
+      "position": { "x": 14.5, "y": -1.5, "z": 1.6 },
+      "size": { "x": 9, "y": 7.5, "z": 3.2 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "header-left",
+      "kind": "gpio-header",
+      "position": { "x": 0, "y": 1.5, "z": 1.6 },
+      "size": { "x": 2.54, "y": 15, "z": 8.5 },
+      "facing": "+z"
+    },
+    {
+      "id": "header-right",
+      "kind": "gpio-header",
+      "position": { "x": 42.46, "y": 1.5, "z": 1.6 },
+      "size": { "x": 2.54, "y": 15, "z": 8.5 },
+      "facing": "+z"
+    },
+    {
+      "id": "pcb-antenna",
+      "kind": "antenna-connector",
+      "position": { "x": 36, "y": 14, "z": 1.6 },
+      "size": { "x": 6, "y": 4, "z": 1.4 },
+      "facing": "+z",
+      "cutoutMargin": 0
+    }
+  ],
+  "defaultStandoffHeight": 4,
+  "recommendedZClearance": 12,
+  "source": "https://docs.arduino.cc/resources/datasheets/ABX00083-datasheet.pdf",
+  "builtin": true
+}

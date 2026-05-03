@@ -1,0 +1,62 @@
+{
+  "id": "esp32-s3-devkitc-1",
+  "name": "ESP32-S3-DevKitC-1 (44-pin)",
+  "manufacturer": "Espressif",
+  "pcb": {
+    "size": {
+      "x": 25.5,
+      "y": 63.5,
+      "z": 1.6
+    }
+  },
+  "mountingHoles": [
+    { "id": "h1", "x": 1.5, "y": 1.5, "diameter": 2.5 },
+    { "id": "h2", "x": 24, "y": 1.5, "diameter": 2.5 },
+    { "id": "h3", "x": 1.5, "y": 62, "diameter": 2.5 },
+    { "id": "h4", "x": 24, "y": 62, "diameter": 2.5 }
+  ],
+  "components": [
+    {
+      "id": "usb-c-uart",
+      "kind": "usb-c",
+      "position": { "x": 5, "y": -1, "z": 1.6 },
+      "size": { "x": 9, "y": 7.5, "z": 3.2 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "usb-c-native",
+      "kind": "usb-c",
+      "position": { "x": 16, "y": -1, "z": 1.6 },
+      "size": { "x": 9, "y": 7.5, "z": 3.2 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "header-left",
+      "kind": "gpio-header",
+      "position": { "x": 1.5, "y": 12, "z": 1.6 },
+      "size": { "x": 2.54, "y": 48, "z": 8.5 },
+      "facing": "+z"
+    },
+    {
+      "id": "header-right",
+      "kind": "gpio-header",
+      "position": { "x": 21.46, "y": 12, "z": 1.6 },
+      "size": { "x": 2.54, "y": 48, "z": 8.5 },
+      "facing": "+z"
+    },
+    {
+      "id": "wroom-module",
+      "kind": "antenna-connector",
+      "position": { "x": 6, "y": 45, "z": 1.6 },
+      "size": { "x": 13.5, "y": 17, "z": 3.2 },
+      "facing": "+z",
+      "cutoutMargin": 0
+    }
+  ],
+  "defaultStandoffHeight": 4,
+  "recommendedZClearance": 14,
+  "source": "https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/hw-reference/esp32s3/user-guide-devkitc-1.html",
+  "builtin": true
+}

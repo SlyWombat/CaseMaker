@@ -13,10 +13,14 @@ describe('board library', () => {
     }
   });
 
-  it('every built-in board has at least 1 mounting hole', () => {
-    // Most boards have 4; micro:bit V2 has 2; some have 1. Schema requires ≥ 1.
+  it('every built-in board has a mountingHoles array (may be empty)', () => {
+    // Most boards have 4; micro:bit V2 has 2; the Arduino Nano ESP32 has 0
+    // (it's a breadboard module — the user retains it via headers, snap-fit,
+    // or friction posts, not PCB mount holes). The schema accepts an empty
+    // array (#112 — generic-empty boards) and computeBossPlacements returns
+    // [] when there are no holes, so the case build still works.
     for (const b of builtinBoards) {
-      expect(b.mountingHoles.length).toBeGreaterThanOrEqual(1);
+      expect(Array.isArray(b.mountingHoles)).toBe(true);
     }
   });
 

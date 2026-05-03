@@ -6,8 +6,11 @@ import rpi5Raw from './boards/rpi-5.json';
 import rpiZero2WRaw from './boards/rpi-zero-2w.json';
 import arduinoUnoR3Raw from './boards/arduino-uno-r3.json';
 import arduinoGigaR1WifiRaw from './boards/arduino-giga-r1-wifi.json';
+import arduinoNanoEsp32Raw from './boards/arduino-nano-esp32.json';
 import esp32DevkitV1Raw from './boards/esp32-devkit-v1.json';
+import esp32S3DevkitcRaw from './boards/esp32-s3-devkitc-1.json';
 import rpiPicoRaw from './boards/rpi-pico.json';
+import rpiPicoWRaw from './boards/rpi-pico-w.json';
 import teensy41Raw from './boards/teensy-41.json';
 import jetsonNanoRaw from './boards/jetson-nano-b01.json';
 import beagleboneBlackRaw from './boards/beaglebone-black.json';
@@ -23,8 +26,11 @@ const validated: BoardProfile[] = [
   rpiZero2WRaw,
   arduinoUnoR3Raw,
   arduinoGigaR1WifiRaw,
+  arduinoNanoEsp32Raw,
   esp32DevkitV1Raw,
+  esp32S3DevkitcRaw,
   rpiPicoRaw,
+  rpiPicoWRaw,
   teensy41Raw,
   jetsonNanoRaw,
   beagleboneBlackRaw,
