@@ -472,6 +472,85 @@ const NO_RESOLVE: HatResolver = () => undefined;
 type DisplayResolver = (id: string) => DisplayProfile | undefined;
 const NO_RESOLVE_DISPLAY: DisplayResolver = () => undefined;
 
+/** Compute the world-coord U range a board-local port occupies on the named
+ *  wall. U is Y for ±x walls and X for ±y walls. Returns null if the port
+ *  doesn't face this wall. */
+function portUOnWall(
+  port: BoardProfile['components'][number],
+  wall: SnapWall,
+  params: CaseParameters,
+): [number, number] | null {
+  if (port.facing !== wall) return null;
+  const off = params.wallThickness + params.internalClearance;
+  if (wall === '+x' || wall === '-x') {
+    return [port.position.y + off, port.position.y + port.size.y + off];
+  }
+  return [port.position.x + off, port.position.x + port.size.x + off];
+}
+
+/** Find the largest clear gaps along a 1D wall of length `wallLen` given
+ *  a list of blocked ranges. Returns gaps wider than `minWidth`, sorted by
+ *  width descending. Each gap is reported with its center and width. */
+function findClearGaps(
+  wallLen: number,
+  blocked: Array<[number, number]>,
+  minWidth: number,
+  edgeInset: number,
+): Array<{ start: number; width: number; center: number }> {
+  const merged: Array<[number, number]> = [];
+  const sorted = [...blocked].sort((a, b) => a[0] - b[0]);
+  for (const [a, b] of sorted) {
+    if (merged.length === 0 || a > merged[merged.length - 1]![1]) {
+      merged.push([a, b]);
+    } else if (b > merged[merged.length - 1]![1]) {
+      merged[merged.length - 1]![1] = b;
+    }
+  }
+  const gaps: Array<{ start: number; width: number; center: number }> = [];
+  let cursor = edgeInset;
+  for (const [a, b] of merged) {
+    if (a > cursor) gaps.push({ start: cursor, width: a - cursor, center: (cursor + a) / 2 });
+    cursor = Math.max(cursor, b);
+  }
+  if (wallLen - edgeInset > cursor) {
+    const w = wallLen - edgeInset - cursor;
+    gaps.push({ start: cursor, width: w, center: cursor + w / 2 });
+  }
+  return gaps.filter((g) => g.width >= minWidth).sort((a, b) => b.width - a.width);
+}
+
+/** Pick up to `wantCount` catch positions along the wall. If the widest
+ *  available gap can host all wantCount catches (each needs `minWidth`),
+ *  evenly distribute them within that gap. Otherwise fall back to placing
+ *  one catch per gap, biggest gaps first. */
+function findCatchPositions(
+  wallLen: number,
+  blocked: Array<[number, number]>,
+  wantCount: number,
+  minWidth: number,
+  edgeInset: number,
+): number[] {
+  const gaps = findClearGaps(wallLen, blocked, minWidth, edgeInset);
+  if (gaps.length === 0) return [];
+  const widest = gaps[0]!;
+  const maxInOne = Math.floor(widest.width / minWidth);
+  if (maxInOne >= wantCount) {
+    const positions: number[] = [];
+    for (let i = 1; i <= wantCount; i++) {
+      positions.push(widest.start + (widest.width * i) / (wantCount + 1));
+    }
+    return positions;
+  }
+  return gaps.slice(0, wantCount).map((g) => g.center);
+}
+
+/** Place snap catches on each wall, avoiding U-ranges blocked by tall
+ *  connectors (the lid arm hangs ~6mm down into the cavity and would
+ *  collide with anything taller). For each wall:
+ *    - Long wall (>80mm): try to place 2 catches in the two widest gaps.
+ *    - Short wall: 1 catch in the widest gap.
+ *    - Wall fully blocked: skip silently — the user will see fewer
+ *      catches but the lid still seats on the remaining ones. */
 export function defaultSnapCatchesForCase(
   board: BoardProfile,
   params: CaseParameters,
@@ -480,25 +559,27 @@ export function defaultSnapCatchesForCase(
 ): SnapCatch[] {
   const dims = computeShellDims(board, params, hats, resolveHat);
   const out: SnapCatch[] = [];
-  const mid = (n: number) => n / 2;
   const LONG_SIDE_THRESHOLD = 80;
-  if (dims.outerY > LONG_SIDE_THRESHOLD) {
-    out.push({ id: 'snap-mx-1', wall: '-x', uPosition: dims.outerY / 3, enabled: true, barbType: 'hook' });
-    out.push({ id: 'snap-mx-2', wall: '-x', uPosition: (2 * dims.outerY) / 3, enabled: true, barbType: 'hook' });
-    out.push({ id: 'snap-px-1', wall: '+x', uPosition: dims.outerY / 3, enabled: true, barbType: 'hook' });
-    out.push({ id: 'snap-px-2', wall: '+x', uPosition: (2 * dims.outerY) / 3, enabled: true, barbType: 'hook' });
-  } else {
-    out.push({ id: 'snap-mx', wall: '-x', uPosition: mid(dims.outerY), enabled: true, barbType: 'hook' });
-    out.push({ id: 'snap-px', wall: '+x', uPosition: mid(dims.outerY), enabled: true, barbType: 'hook' });
-  }
-  if (dims.outerX > LONG_SIDE_THRESHOLD) {
-    out.push({ id: 'snap-my-1', wall: '-y', uPosition: dims.outerX / 3, enabled: true, barbType: 'hook' });
-    out.push({ id: 'snap-my-2', wall: '-y', uPosition: (2 * dims.outerX) / 3, enabled: true, barbType: 'hook' });
-    out.push({ id: 'snap-py-1', wall: '+y', uPosition: dims.outerX / 3, enabled: true, barbType: 'hook' });
-    out.push({ id: 'snap-py-2', wall: '+y', uPosition: (2 * dims.outerX) / 3, enabled: true, barbType: 'hook' });
-  } else {
-    out.push({ id: 'snap-my', wall: '-y', uPosition: mid(dims.outerX), enabled: true, barbType: 'hook' });
-    out.push({ id: 'snap-py', wall: '+y', uPosition: mid(dims.outerX), enabled: true, barbType: 'hook' });
+  const ARM_CLEARANCE = SNAP_DEFAULTS.armWidth + 2; // 2mm of side margin
+  const EDGE_INSET = 4; // keep catches off the corner radius
+  const PER_WALL: Array<{ wall: SnapWall; uMax: number; idStem: string }> = [
+    { wall: '-x', uMax: dims.outerY, idStem: 'snap-mx' },
+    { wall: '+x', uMax: dims.outerY, idStem: 'snap-px' },
+    { wall: '-y', uMax: dims.outerX, idStem: 'snap-my' },
+    { wall: '+y', uMax: dims.outerX, idStem: 'snap-py' },
+  ];
+  for (const { wall, uMax, idStem } of PER_WALL) {
+    const blocked: Array<[number, number]> = [];
+    for (const port of board.components) {
+      const range = portUOnWall(port, wall, params);
+      if (range) blocked.push(range);
+    }
+    const wantCount = uMax > LONG_SIDE_THRESHOLD ? 2 : 1;
+    const positions = findCatchPositions(uMax, blocked, wantCount, ARM_CLEARANCE, EDGE_INSET);
+    positions.forEach((p, i) => {
+      const id = positions.length > 1 ? `${idStem}-${i + 1}` : idStem;
+      out.push({ id, wall, uPosition: p, enabled: true, barbType: 'hook' });
+    });
   }
   return out;
 }

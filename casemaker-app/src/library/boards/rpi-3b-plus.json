@@ -43,7 +43,7 @@
     {
       "id": "usb-a-upper",
       "kind": "usb-a",
-      "position": { "x": 70, "y": 36, "z": 1.6 },
+      "position": { "x": 74, "y": 36, "z": 1.6 },
       "size": { "x": 17, "y": 13.5, "z": 16 },
       "facing": "+x",
       "cutoutMargin": 0.5
@@ -51,7 +51,7 @@
     {
       "id": "usb-a-lower",
       "kind": "usb-a",
-      "position": { "x": 70, "y": 19, "z": 1.6 },
+      "position": { "x": 74, "y": 19, "z": 1.6 },
       "size": { "x": 17, "y": 13.5, "z": 16 },
       "facing": "+x",
       "cutoutMargin": 0.5
