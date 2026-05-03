@@ -1,6 +1,7 @@
 import type { BoardProfile } from '@/types';
 import { builtinBoardProfileSchema } from './schema';
 import rpi3bRaw from './boards/rpi-3b.json';
+import rpi3bPlusRaw from './boards/rpi-3b-plus.json';
 import rpi4bRaw from './boards/rpi-4b.json';
 import rpi5Raw from './boards/rpi-5.json';
 import rpiZero2WRaw from './boards/rpi-zero-2w.json';
@@ -24,6 +25,7 @@ import genericZeroRaw from './boards/generic-zero.json';
 
 const validated: BoardProfile[] = [
   rpi3bRaw,
+  rpi3bPlusRaw,
   rpi4bRaw,
   rpi5Raw,
   rpiZero2WRaw,

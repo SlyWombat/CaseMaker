@@ -15,20 +15,19 @@ const NO_RESOLVE: HatResolver = () => undefined;
 type DisplayResolver = (id: string) => DisplayProfile | undefined;
 const NO_RESOLVE_DISPLAY: DisplayResolver = () => undefined;
 
-const SLOT_WIDTH = 3;
-const SLOT_GAP = 3;
-const SLOT_INSET_FROM_EDGE = 6;
-
 const HEX_RADIUS = 2.2;
 const HEX_GAP = 1.4;
 const HEX_INSET_FROM_EDGE = 5;
 
-// Chevron pattern: long horizontal slots running along U, each tilted 45°
-// in the V-N plane so the top of each slot is a 45° overhang (printable
-// FDM angle without supports — the visual look is venetian-blind louvers).
-const CHEVRON_HEIGHT = 4;
-const CHEVRON_GAP = 4;
-const CHEVRON_INSET_FROM_EDGE = 6;
+// Slats / chevron share a tiled grid of short rectangular slots (cols × rows)
+// — same coverage-scales-V semantics as hex, just with rectangular cells
+// instead of hexagons. Chevron differs only in that each cell is tilted 45°
+// in the V-N plane so the top of every slot is a printable FDM overhang.
+const SLAT_LENGTH = 14;
+const SLAT_HEIGHT = 4;
+const SLAT_U_GAP = 4;
+const SLAT_V_GAP = 4;
+const SLAT_INSET_FROM_EDGE = 6;
 const CHEVRON_TILT_DEG = 45;
 
 /**
@@ -167,23 +166,46 @@ function planarCutter(frame: VentFrame, uOrigin: number, vOrigin: number, uSize:
   return translate([place(frame, uOrigin, vOrigin).x, place(frame, uOrigin, vOrigin).y, place(frame, uOrigin, vOrigin).z], cube([sx, sy, sz]));
 }
 
+/** Lay out a tiled grid of short slots over the given frame using the SLAT_*
+ *  constants. Coverage scales the usable V range (matching hex's behavior) so
+ *  the slider controls "how much of the wall is open" the same way for all
+ *  patterns. Returns the column origin / row origin / counts so callers can
+ *  emit either flat slot cutters (slats) or rotated cutters (chevron). */
+function slatGrid(frame: VentFrame, coverage: number): {
+  cols: number;
+  rows: number;
+  uOrigin: number;
+  vOrigin: number;
+  strideU: number;
+  strideV: number;
+} | null {
+  const usableU = frame.uMax - 2 * SLAT_INSET_FROM_EDGE;
+  const usableV = (frame.vMax - 2 * SLAT_INSET_FROM_EDGE) * coverage;
+  if (usableU < SLAT_LENGTH || usableV < SLAT_HEIGHT) return null;
+  const strideU = SLAT_LENGTH + SLAT_U_GAP;
+  const strideV = SLAT_HEIGHT + SLAT_V_GAP;
+  const cols = Math.max(1, Math.floor((usableU + SLAT_U_GAP) / strideU));
+  const rows = Math.max(1, Math.floor((usableV + SLAT_V_GAP) / strideV));
+  const totalUsedU = cols * SLAT_LENGTH + (cols - 1) * SLAT_U_GAP;
+  const totalUsedV = rows * SLAT_HEIGHT + (rows - 1) * SLAT_V_GAP;
+  const uOrigin = (frame.uMax - totalUsedU) / 2;
+  const vOrigin = (frame.vMax - totalUsedV) / 2;
+  return { cols, rows, uOrigin, vOrigin, strideU, strideV };
+}
+
 function buildSlotsForFrame(frame: VentFrame, coverage: number): BuildOp[] {
-  // For walls: u = horizontal (along wall), v = vertical (Z). Slots run vertically
-  //   (along v) and are spaced along u.
-  // For top/bottom: u = X, v = Y. Slots run along v (Y direction), spaced along u.
-  const slotHeight = (frame.vMax - 4) * coverage;
-  if (slotHeight <= 1) return [];
-  // Vertical inset of 2 mm from the lower edge of the face.
-  const vStart = 2;
-  const usable = frame.uMax - 2 * SLOT_INSET_FROM_EDGE;
-  const stride = SLOT_WIDTH + SLOT_GAP;
-  const slotCount = Math.max(1, Math.floor(usable / stride));
-  const totalUsed = slotCount * stride - SLOT_GAP;
-  const startU = (frame.uMax - totalUsed) / 2;
+  // Tiled grid of horizontal slats — same layout as chevron but no tilt.
+  // Each slat is a small flat rectangular cutter (SLAT_LENGTH × SLAT_HEIGHT);
+  // tiles fill the wall in cols × rows and coverage scales the V density.
+  const grid = slatGrid(frame, coverage);
+  if (!grid) return [];
   const ops: BuildOp[] = [];
-  for (let i = 0; i < slotCount; i++) {
-    const u = startU + i * stride;
-    ops.push(planarCutter(frame, u, vStart, SLOT_WIDTH, slotHeight));
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      const u = grid.uOrigin + c * grid.strideU;
+      const v = grid.vOrigin + r * grid.strideV;
+      ops.push(planarCutter(frame, u, v, SLAT_LENGTH, SLAT_HEIGHT));
+    }
   }
   return ops;
 }
@@ -232,37 +254,42 @@ function buildHexForFrame(frame: VentFrame, coverage: number): BuildOp[] {
 }
 
 function buildChevronForFrame(frame: VentFrame, coverage: number): BuildOp[] {
-  // Long horizontal slots along U, stacked in V. Each slot is built as a
-  // cube cutter centered at origin so we can rotate it 45° about U and
-  // then translate the rotated parallelepiped into place. Cutter depth in
-  // N is over-extended so the tilt still pierces the wall fully.
-  const usableU = frame.uMax - 2 * CHEVRON_INSET_FROM_EDGE;
-  const usableV = (frame.vMax - 2 * CHEVRON_INSET_FROM_EDGE) * coverage;
-  if (usableU <= 0 || usableV <= CHEVRON_HEIGHT) return [];
-  const stride = CHEVRON_HEIGHT + CHEVRON_GAP;
-  const rows = Math.max(1, Math.floor(usableV / stride));
-  const totalUsedV = rows * stride - CHEVRON_GAP;
-  const vStart = (frame.vMax - totalUsedV) / 2;
+  // Same tiled grid as slats, but each cell is a cube cutter rotated 45°
+  // around the U axis so the top of every slot becomes a 45° overhang
+  // (printable FDM angle, no supports needed). Tilt direction per face is
+  // chosen so the OUTSIDE edge of each slot is HIGHER than the INSIDE edge
+  // — venetian-blind orientation, sheds water on vertical walls.
+  const grid = slatGrid(frame, coverage);
+  if (!grid) return [];
   const cutThruExt = Math.max(frame.cutThru * 2, 8);
+  // Rain-shed sign per face:
+  //   X-axis rotation (uAxis === 'x'): +θ tilts +Y up; for back wall outside
+  //     is +y (cutDir=-1) so we want +θ → sign = -cutDir.
+  //   Y-axis rotation (uAxis === 'y'): +θ tilts +X DOWN; for right wall
+  //     outside is +x (cutDir=-1) so we want -θ → sign = +cutDir.
+  //   Z-axis rotation (top/bottom): no rain concern, sign = +1.
+  const tiltSign =
+    frame.uAxis === 'x' ? -frame.cutDir : frame.uAxis === 'y' ? frame.cutDir : 1;
+  const angle = CHEVRON_TILT_DEG * tiltSign;
   const rotVec: [number, number, number] =
     frame.uAxis === 'x'
-      ? [CHEVRON_TILT_DEG, 0, 0]
+      ? [angle, 0, 0]
       : frame.uAxis === 'y'
-        ? [0, CHEVRON_TILT_DEG, 0]
-        : [0, 0, CHEVRON_TILT_DEG];
+        ? [0, angle, 0]
+        : [0, 0, angle];
+  const sx = frame.uAxis === 'x' ? SLAT_LENGTH : frame.vAxis === 'x' ? SLAT_HEIGHT : cutThruExt;
+  const sy = frame.uAxis === 'y' ? SLAT_LENGTH : frame.vAxis === 'y' ? SLAT_HEIGHT : cutThruExt;
+  const sz = frame.uAxis === 'z' ? SLAT_LENGTH : frame.vAxis === 'z' ? SLAT_HEIGHT : cutThruExt;
   const ops: BuildOp[] = [];
-  for (let r = 0; r < rows; r++) {
-    const v = vStart + r * stride + CHEVRON_HEIGHT / 2;
-    const uCenter = frame.uMax / 2;
-    // Build the cutter sized in (U, V, N) and let the U axis stay
-    // axis-aligned with world. Rotation around the U axis tilts only V/N.
-    const sx = frame.uAxis === 'x' ? usableU : frame.vAxis === 'x' ? CHEVRON_HEIGHT : cutThruExt;
-    const sy = frame.uAxis === 'y' ? usableU : frame.vAxis === 'y' ? CHEVRON_HEIGHT : cutThruExt;
-    const sz = frame.uAxis === 'z' ? usableU : frame.vAxis === 'z' ? CHEVRON_HEIGHT : cutThruExt;
-    const c = cube([sx, sy, sz], true);
-    const rotated = rotate(rotVec, c);
-    const w = place(frame, uCenter, v);
-    ops.push(translate([w.x, w.y, w.z], rotated));
+  for (let r = 0; r < grid.rows; r++) {
+    for (let c = 0; c < grid.cols; c++) {
+      const u = grid.uOrigin + c * grid.strideU + SLAT_LENGTH / 2;
+      const v = grid.vOrigin + r * grid.strideV + SLAT_HEIGHT / 2;
+      const cube0 = cube([sx, sy, sz], true);
+      const rotated = rotate(rotVec, cube0);
+      const w = place(frame, u, v);
+      ops.push(translate([w.x, w.y, w.z], rotated));
+    }
   }
   return ops;
 }

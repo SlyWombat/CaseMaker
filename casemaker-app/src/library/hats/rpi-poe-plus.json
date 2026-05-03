@@ -19,7 +19,7 @@
       "facing": "+z"
     }
   ],
-  "compatibleBoards": ["rpi-4b", "rpi-5"],
+  "compatibleBoards": ["rpi-3b-plus", "rpi-4b", "rpi-5"],
   "source": "https://datasheets.raspberrypi.com/poe-plus/poe-plus-hat-product-brief.pdf",
   "builtin": true
 }
