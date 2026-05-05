@@ -9,6 +9,7 @@ import type {
 } from '@/types';
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
 import { SNAP_DEFAULTS } from '@/types/snap';
+import { cavityClearance } from '@/engine/coords';
 import { cube, cylinder, mesh, rotate, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
 
@@ -481,10 +482,14 @@ function portUOnWall(
   params: CaseParameters,
 ): [number, number] | null {
   if (port.facing !== wall) return null;
-  const off = params.wallThickness + params.internalClearance;
+  const cl = cavityClearance(params);
+  // U-axis depends on which wall the port pierces: ±x walls run along Y,
+  // ±y walls run along X. Use the per-side board origin for that axis.
   if (wall === '+x' || wall === '-x') {
+    const off = params.wallThickness + cl.yMin;
     return [port.position.y + off, port.position.y + port.size.y + off];
   }
+  const off = params.wallThickness + cl.xMin;
   return [port.position.x + off, port.position.x + port.size.x + off];
 }
 

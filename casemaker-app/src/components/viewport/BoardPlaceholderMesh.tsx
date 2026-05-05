@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore } from '@/store/viewportStore';
+import { cavityOriginXY } from '@/engine/coords';
 import { buildBoardPlaceholderGroup } from '@/engine/scene/boardPlaceholder';
 
 /**
@@ -22,17 +23,17 @@ export function BoardPlaceholderMesh() {
   const showBoard = useViewportStore((s) => s.showBoard);
 
   const group = useMemo(() => {
-    const wall = params.wallThickness;
-    const cl = params.internalClearance;
+    const xy = cavityOriginXY(params);
     const floor = params.floorThickness;
     const standoff = board.defaultStandoffHeight;
     return buildBoardPlaceholderGroup(board, {
-      origin: { x: wall + cl, y: wall + cl, z: floor + standoff },
+      origin: { x: xy.x, y: xy.y, z: floor + standoff },
     });
   }, [
     board,
     params.wallThickness,
     params.internalClearance,
+    params.clearanceTweaks,
     params.floorThickness,
   ]);
 

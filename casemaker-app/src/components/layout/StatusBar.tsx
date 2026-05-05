@@ -9,12 +9,8 @@ export function StatusBar() {
   return (
     <footer className="status-bar" data-testid="status-bar" data-status={status}>
       <DonateButton variant="status" />
-      <span
-        className="status-bar__version"
-        title={`Built ${__BUILD_DATE__}`}
-        data-testid="app-version"
-      >
-        v{__APP_VERSION__}
+      <span className="status-bar__version" data-testid="app-version">
+        V{__APP_VERSION__}
       </span>
       <span className="status-bar__engine">
         <span>{status === 'rebuilding' ? 'Rebuilding…' : status === 'error' ? `Error: ${error}` : 'Ready'}</span>

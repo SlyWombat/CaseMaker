@@ -1,4 +1,5 @@
 import type { BoardProfile, CaseParameters, PortPlacement } from '@/types';
+import { cavityClearance } from '@/engine/coords';
 import { type BuildOp } from './buildPlan';
 import { buildAxisAlignedCutout } from './roundCutout';
 
@@ -19,7 +20,8 @@ export function buildPortCutoutOp(
   if (port.kind === 'antenna-connector') return null;
 
   const m = port.cutoutMargin;
-  const { wallThickness: wall, internalClearance: cl, floorThickness: floor } = params;
+  const { wallThickness: wall, floorThickness: floor } = params;
+  const cl = cavityClearance(params);
   const pcb = board.pcb.size;
 
   let xMin = port.position.x - m;
@@ -31,16 +33,16 @@ export function buildPortCutoutOp(
 
   switch (port.facing) {
     case '-x':
-      xMin = -(wall + cl) - OVERSHOOT;
+      xMin = -(wall + cl.xMin) - OVERSHOOT;
       break;
     case '+x':
-      xMax = pcb.x + cl + wall + OVERSHOOT;
+      xMax = pcb.x + cl.xMax + wall + OVERSHOOT;
       break;
     case '-y':
-      yMin = -(wall + cl) - OVERSHOOT;
+      yMin = -(wall + cl.yMin) - OVERSHOOT;
       break;
     case '+y':
-      yMax = pcb.y + cl + wall + OVERSHOOT;
+      yMax = pcb.y + cl.yMax + wall + OVERSHOOT;
       break;
   }
 
@@ -49,8 +51,8 @@ export function buildPortCutoutOp(
   const sizeZ = zMax - zMin;
   if (sizeX <= 0 || sizeY <= 0 || sizeZ <= 0) return null;
 
-  const wx = wall + cl + xMin;
-  const wy = wall + cl + yMin;
+  const wx = wall + cl.xMin + xMin;
+  const wy = wall + cl.yMin + yMin;
   // Issue #28: the board sits on bosses at floor + standoff; port cutouts must
   // align with the elevated board, not with the case floor.
   const wz = floor + board.defaultStandoffHeight + zMin;

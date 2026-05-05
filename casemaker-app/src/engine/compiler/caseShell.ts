@@ -1,5 +1,6 @@
 import type { CaseParameters, BoardProfile, HatPlacement, HatProfile } from '@/types';
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
+import { cavityClearance } from '@/engine/coords';
 import { difference, roundedRectPrism, translate, type BuildOp } from './buildPlan';
 
 export interface ShellDims {
@@ -74,7 +75,8 @@ export function computeShellDims(
   display: DisplayPlacement | null | undefined = null,
   resolveDisplay: (id: string) => DisplayProfile | undefined = () => undefined,
 ): ShellDims {
-  const { wallThickness: wall, floorThickness: floor, internalClearance: cl, zClearance } = params;
+  const { wallThickness: wall, floorThickness: floor, zClearance } = params;
+  const cl = cavityClearance(params);
   const pcb = board.pcb.size;
   // Issue #105 — when a display is mounted with a PCB wider than the host,
   // the case must grow to contain it. The display PCB is positioned at
@@ -93,8 +95,8 @@ export function computeShellDims(
       displayTopAddedZ = profile.overallHeight;
     }
   }
-  const cavityX = displayMaxX + 2 * cl;
-  const cavityY = displayMaxY + 2 * cl;
+  const cavityX = displayMaxX + cl.xMin + cl.xMax;
+  const cavityY = displayMaxY + cl.yMin + cl.yMax;
   const stackHeight = computeStackedHatHeight(hats, resolveHat, board);
   // Issue #66 — host's own tallest +z component must always fit, even with
   // no HATs present. `recommendedZClearance` was set too low on several

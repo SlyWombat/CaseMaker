@@ -1,4 +1,5 @@
 import type { CaseParameters, BoardProfile, InsertType } from '@/types';
+import { cavityOriginXY, cavityClearance } from '@/engine/coords';
 import { cylinder, difference, mesh, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
 
@@ -63,7 +64,8 @@ export function computeBossPlacements(
   params: CaseParameters,
 ): BossPlacement[] {
   if (!params.bosses.enabled) return [];
-  const { wallThickness: wall, internalClearance: cl, floorThickness: floor } = params;
+  const { floorThickness: floor } = params;
+  const origin = cavityOriginXY(params);
   const standoff = board.defaultStandoffHeight;
   // All joint types use floor + standoff. For screw-down, the lid carries
   // matching posts that descend from above to clamp the board (issue #21).
@@ -118,8 +120,8 @@ export function computeBossPlacements(
     }
     return {
       id: `boss-${h.id}`,
-      x: h.x + wall + cl,
-      y: h.y + wall + cl,
+      x: h.x + origin.x,
+      y: h.y + origin.y,
       outerDiameter,
       holeDiameter,
       totalHeight,
@@ -259,7 +261,8 @@ export function buildBossSupportColumns(
   const top = placements.filter((b) => b.position === 'top');
   if (top.length === 0) return [];
   const dims = computeShellDims(board, params, [], () => undefined);
-  const { wallThickness: wall, internalClearance: cl } = params;
+  const { wallThickness: wall } = params;
+  const cl = cavityClearance(params);
   // The column extends from the lid underside DOWN by supportTaperLength.
   const supportTaperLength = Math.min(dims.cavityZ - 2, 8);
   if (supportTaperLength <= 1) return [];
@@ -274,9 +277,9 @@ export function buildBossSupportColumns(
     // extends `wall` into the cavity at its top, narrowing to 1 mm rib at
     // the bottom).
     const innerXMin = wall;
-    const innerXMax = wall + cl + board.pcb.size.x + cl;
+    const innerXMax = wall + cl.xMin + board.pcb.size.x + cl.xMax;
     const innerYMin = wall;
-    const innerYMax = wall + cl + board.pcb.size.y + cl;
+    const innerYMax = wall + cl.yMin + board.pcb.size.y + cl.yMax;
     const dXmin = b.x - innerXMin;
     const dXmax = innerXMax - b.x;
     const dYmin = b.y - innerYMin;

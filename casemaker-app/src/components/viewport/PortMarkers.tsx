@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore } from '@/store/viewportStore';
 import type { PortPlacement } from '@/types';
+import { cavityOriginXY } from '@/engine/coords';
 import {
   axisLockForFacing,
   snapToGrid,
@@ -30,11 +31,12 @@ export function PortMarkers() {
   const patchPort = useProjectStore((s) => s.patchPort);
 
   const markers = useMemo<MarkerInfo[]>(() => {
-    const { wallThickness: wall, internalClearance: cl, floorThickness: floor } = caseParams;
+    const xy = cavityOriginXY(caseParams);
+    const floor = caseParams.floorThickness;
     return ports.map((p) => ({
       port: p,
-      worldX: wall + cl + p.position.x + p.size.x / 2,
-      worldY: wall + cl + p.position.y + p.size.y / 2,
+      worldX: xy.x + p.position.x + p.size.x / 2,
+      worldY: xy.y + p.position.y + p.size.y / 2,
       worldZ: floor + p.position.z + p.size.z / 2,
     }));
   }, [ports, caseParams]);

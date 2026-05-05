@@ -2,7 +2,6 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import wasm from 'vite-plugin-wasm';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 // Default port 5173 (Vite's standard). Port 8000 was the historical default
@@ -10,30 +9,10 @@ import { readFileSync } from 'node:fs';
 // pick a port that's free everywhere and let CASEMAKER_PORT override.
 const DEFAULT_PORT = Number(process.env.CASEMAKER_PORT ?? 5173);
 
-// Issue #80 — inject the package version + a short git sha into the bundle so
-// the StatusBar can show "v0.10.0+abc1234". The git lookup tolerates a
-// non-git build environment (Tauri / static deploy outside the repo) by
-// falling back to "nogit".
 const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')) as {
   version: string;
 };
-let gitSha = 'nogit';
-try {
-  gitSha = execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
-    .toString()
-    .trim()
-    .slice(0, 7);
-  // Mark dirty when there are uncommitted changes so production builds with
-  // local modifications don't masquerade as the clean tag.
-  const dirty = execSync('git status --porcelain', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
-    .toString()
-    .trim().length > 0;
-  if (dirty) gitSha += '-dirty';
-} catch {
-  /* not a git checkout */
-}
-const APP_VERSION = `${pkg.version}+${gitSha}`;
-const BUILD_DATE = new Date().toISOString().slice(0, 10);
+const APP_VERSION = pkg.version;
 
 // Issue #82 — DEPLOY_BASE controls the public URL prefix the bundle uses for
 // `<script src=...>` and `import()` chunk URLs. cPanel deploy script sets it
@@ -51,7 +30,6 @@ export default defineConfig({
   plugins: [react(), wasm()],
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
-    __BUILD_DATE__: JSON.stringify(BUILD_DATE),
     __DEPLOY_TARGET__: JSON.stringify(DEPLOY_TARGET),
     __DONATE_URL__: JSON.stringify(DONATE_URL),
   },

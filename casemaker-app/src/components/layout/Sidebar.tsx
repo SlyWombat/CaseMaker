@@ -1,4 +1,3 @@
-import { SidebarFooter } from './SidebarFooter';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore, type SidebarSectionId } from '@/store/viewportStore';
 
@@ -57,7 +56,6 @@ export function Sidebar() {
           </button>
         );
       })}
-      <SidebarFooter />
     </aside>
   );
 }

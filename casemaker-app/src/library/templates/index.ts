@@ -248,7 +248,7 @@ function largeBoxTemplate(): Project {
   p.case.wallThickness = 3;
   p.case.floorThickness = 3;
   p.case.lidThickness = 3;
-  p.case.internalClearance = 1;
+  p.case.internalClearance = 2;
   p.case.cornerRadius = 4;
   p.case.zClearance = 93;
   p.case.joint = 'flat-lid';

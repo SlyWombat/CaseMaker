@@ -1,5 +1,6 @@
 import type { CaseParameters, BoardProfile, HatPlacement, HatProfile } from '@/types';
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
+import { cavityOriginXY } from '@/engine/coords';
 import { cube, translate, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
 
@@ -30,13 +31,14 @@ export function buildDisplayCutoutOps(
   const profile = resolveDisplay(placement.displayId);
   if (!profile) return { additive: [], subtractive: [] };
   const dims = computeShellDims(board, params, hats, resolveHat);
-  const { wallThickness: wall, internalClearance: cl } = params;
+  const origin = cavityOriginXY(params);
 
-  // Active-area corner in world frame: PCB origin in world is (wall+cl, wall+cl, ...);
+  // Active-area corner in world frame: PCB origin in world comes from
+  // cavityOriginXY (already accounting for any per-side clearance tweaks);
   // active-area is offset by (offsetX, offsetY) within the display's PCB,
   // and the display PCB is offset by `placement.offset` from the host PCB origin.
-  const hostBaseX = wall + cl + (placement.offset?.x ?? 0);
-  const hostBaseY = wall + cl + (placement.offset?.y ?? 0);
+  const hostBaseX = origin.x + (placement.offset?.x ?? 0);
+  const hostBaseY = origin.y + (placement.offset?.y ?? 0);
   const aaX = hostBaseX + profile.activeArea.offsetX;
   const aaY = hostBaseY + profile.activeArea.offsetY;
 

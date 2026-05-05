@@ -1,4 +1,5 @@
 import type { Project } from '@/types';
+import { cavityOriginXY } from '@/engine/coords';
 import { computeBossPlacements } from './bosses';
 
 export type ValidationCode =
@@ -27,6 +28,7 @@ export function validateScrewDownAlignment(project: Project): ValidationIssue[] 
   const placements = computeBossPlacements(project.board, project.case);
   if (placements.length === 0) return issues;
 
+  const origin = cavityOriginXY(project.case);
   // Check 1: lid posts vs +z board components
   const standoff = project.board.defaultStandoffHeight;
   const boardTopZ =
@@ -36,8 +38,8 @@ export function validateScrewDownAlignment(project: Project): ValidationIssue[] 
       if (c.facing !== '+z') continue;
       const halfX = c.size.x / 2;
       const halfY = c.size.y / 2;
-      const cx = c.position.x + project.case.wallThickness + project.case.internalClearance;
-      const cy = c.position.y + project.case.wallThickness + project.case.internalClearance;
+      const cx = c.position.x + origin.x;
+      const cy = c.position.y + origin.y;
       // Issue #44 — must include the standoff that lifts the host PCB above
       // the floor; otherwise componentTopZ is biased low by `standoff` and
       // most real +z components silently pass the lid-post collision check.
@@ -65,8 +67,8 @@ export function validateScrewDownAlignment(project: Project): ValidationIssue[] 
   // PCB outline (otherwise board can't fit over the boss footprint).
   const pcb = project.board.pcb.size;
   for (const b of placements) {
-    const px = b.x - project.case.wallThickness - project.case.internalClearance;
-    const py = b.y - project.case.wallThickness - project.case.internalClearance;
+    const px = b.x - origin.x;
+    const py = b.y - origin.y;
     if (px < 0 || py < 0 || px > pcb.x || py > pcb.y) {
       issues.push({
         code: 'board-overlap-boss',

@@ -32,7 +32,8 @@ function defaultCase(): CaseParameters {
     floorThickness: 2,
     lidThickness: 2,
     cornerRadius: 2,
-    internalClearance: 1,
+    internalClearance: 2,
+    clearanceTweaks: { xMin: 0, xMax: 0, yMin: 0, yMax: 0 },
     zClearance: 5,
     joint: 'flat-lid',
     ventilation: { enabled: false, pattern: 'none', coverage: 0 },
@@ -88,7 +89,6 @@ export interface ProjectState {
   /** Issue #69 — true on first load until the user picks a board / template.
    * Suppresses the viewport rendering and shows a Welcome panel instead. */
   welcomeMode: boolean;
-  dismissWelcome: () => void;
   /** Issue #75 — return to the welcome screen so the user can pick a new
    * board / template. Project is reset to the default so the engine still
    * has a valid board behind the welcome overlay. */
@@ -203,7 +203,6 @@ export const useProjectStore = create<ProjectState>()(
         // gated on `welcomeMode` instead.
         project: createDefaultProject(),
         welcomeMode: true,
-        dismissWelcome: () => set({ welcomeMode: false }),
         showWelcome: () => set({ project: createDefaultProject(), welcomeMode: true }),
         setProject: (p) => set({ project: p, welcomeMode: false }),
         patchCase: (patch) =>

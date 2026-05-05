@@ -206,12 +206,29 @@ export interface VentilationParams {
   surfaces?: VentSurface[];
 }
 
+/**
+ * Per-side additive deltas on top of `internalClearance`, in mm. Each value
+ * widens the cavity (and outer envelope) on exactly one side without scaling
+ * the board itself. xMin pushes the -X wall further from the PCB's -X edge,
+ * shifting the board origin in +X by that amount; xMax pushes the +X wall
+ * further from the +X edge; ditto yMin/yMax. Z is governed by `zClearance`
+ * and the board's standoff height, so no Z entries here.
+ */
+export interface CavityClearanceTweaks {
+  xMin: Mm;
+  xMax: Mm;
+  yMin: Mm;
+  yMax: Mm;
+}
+
 export interface CaseParameters {
   wallThickness: Mm;
   floorThickness: Mm;
   lidThickness: Mm;
   cornerRadius: Mm;
   internalClearance: Mm;
+  /** Optional per-side widening; missing entries treated as 0. */
+  clearanceTweaks?: CavityClearanceTweaks;
   zClearance: Mm;
   joint: JointType;
   /** Recessed-lid mode: lid drops into a pocket at the top of the shell, flush with the rim. */

@@ -72,11 +72,11 @@ describe('Marketing gap #15 — project templates', () => {
     const tpl = findTemplate('large-box-200')!;
     const project = tpl.build();
     expect(project.case.joint).toBe('flat-lid');
-    // PCB 192 + 2*(wall=3 + cl=1) = 200 mm outer.
+    // PCB 192 + 2*(wall=3 + cl=2) = 202 mm outer (2 mm default clearance).
     expect(project.board.pcb.size.x).toBe(192);
     expect(project.board.pcb.size.y).toBe(192);
     expect(project.case.wallThickness).toBe(3);
-    expect(project.case.internalClearance).toBe(1);
+    expect(project.case.internalClearance).toBe(2);
   });
 
   it('pi-poe-stack ports come from autoPortsForHat (regression #62)', () => {

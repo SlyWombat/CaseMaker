@@ -1,5 +1,6 @@
 import type { BoardProfile, CaseParameters, HatPlacement, HatProfile } from '@/types';
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
+import { cavityClearance, cavityOriginXY } from '@/engine/coords';
 import { mesh, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
 
@@ -70,24 +71,24 @@ export function buildBoardSnapOps(
   const dims = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
   void dims;
   const wall = params.wallThickness;
-  const cl = params.internalClearance;
+  const cl = cavityClearance(params);
+  const origin = cavityOriginXY(params);
   const pcbTopZ = params.floorThickness + board.defaultStandoffHeight + board.pcb.size.z;
   const botZ = pcbTopZ + FINGER_CLEARANCE_Z;
   const topZ = botZ + FINGER_THICKNESS;
-  // PCB occupies world XY:
-  //   x = [wall + cl, wall + cl + pcb.x]
-  //   y = [wall + cl, wall + cl + pcb.y]
-  const pcbXMin = wall + cl;
+  // PCB occupies world XY (origin already accounts for per-side clearance tweaks):
+  //   x = [origin.x, origin.x + pcb.x]
+  //   y = [origin.y, origin.y + pcb.y]
+  const pcbXMin = origin.x;
   const pcbXMax = pcbXMin + board.pcb.size.x;
-  const pcbYMin = wall + cl;
+  const pcbYMin = origin.y;
   const pcbYMax = pcbYMin + board.pcb.size.y;
-  // Wall inner surfaces:
-  //   -y wall: y = wall    +y wall: y = wall + pcb.y + 2*cl
-  //   -x wall: x = wall    +x wall: x = wall + pcb.x + 2*cl
+  // Wall inner surfaces. The far walls sit at the cavity span, which adds
+  // both per-side clearances (xMin + xMax / yMin + yMax) on top of the PCB.
   const wallInnerYMin = wall;
-  const wallInnerYMax = wall + board.pcb.size.y + 2 * cl;
+  const wallInnerYMax = wall + board.pcb.size.y + cl.yMin + cl.yMax;
   const wallInnerXMin = wall;
-  const wallInnerXMax = wall + board.pcb.size.x + 2 * cl;
+  const wallInnerXMax = wall + board.pcb.size.x + cl.xMin + cl.xMax;
   // Centers along each wall tangent.
   const xCenter = (pcbXMin + pcbXMax) / 2;
   const yCenter = (pcbYMin + pcbYMax) / 2;

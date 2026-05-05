@@ -228,14 +228,45 @@ export function CasePanel() {
       <Slider
         label="Internal clearance"
         unit="mm"
-        hint="XY clearance added between the PCB edge and the inside of the wall. Increase if the PCB rocks or doesn't drop in."
+        hint="XY clearance added between the PCB edge and the inside of the wall on every side. Increase if the PCB rocks or doesn't drop in."
         value={params.internalClearance}
         min={0}
-        max={3}
+        max={5}
         step={0.1}
         onChange={set('internalClearance')}
         testId="internal-clearance"
       />
+      <details className="clearance-tweaks" data-testid="clearance-tweaks">
+        <summary>Per-side tweak (mm)</summary>
+        <p className="hint-text" style={{ fontSize: 11, color: '#86b8d2', margin: '4px 0 6px' }}>
+          Extra clearance added on a single side, on top of "Internal clearance".
+          Widens the cavity (and outer envelope) without scaling the board.
+        </p>
+        {(['xMin', 'xMax', 'yMin', 'yMax'] as const).map((side) => (
+          <Slider
+            key={side}
+            label={({ xMin: '−X side', xMax: '+X side', yMin: '−Y side', yMax: '+Y side' } as const)[side]}
+            unit="mm"
+            hint={`Extra clearance added on the ${side} side only.`}
+            value={params.clearanceTweaks?.[side] ?? 0}
+            min={0}
+            max={20}
+            step={0.5}
+            onChange={(v) =>
+              patch({
+                clearanceTweaks: {
+                  xMin: params.clearanceTweaks?.xMin ?? 0,
+                  xMax: params.clearanceTweaks?.xMax ?? 0,
+                  yMin: params.clearanceTweaks?.yMin ?? 0,
+                  yMax: params.clearanceTweaks?.yMax ?? 0,
+                  [side]: v,
+                },
+              })
+            }
+            testId={`clearance-tweak-${side}`}
+          />
+        ))}
+      </details>
       <Slider
         label="Z-clearance"
         unit="mm"

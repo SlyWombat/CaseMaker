@@ -8,6 +8,7 @@ import type {
 } from '@/types';
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
 import { ANTENNA_SPECS } from '@/types/antenna';
+import { cavityClearance } from '@/engine/coords';
 import { cylinder, rotate, translate, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
 
@@ -99,7 +100,8 @@ export function buildAntennaOps(
 ): AntennaCutoutOps {
   if (!antennas || antennas.length === 0) return { subtractive: [] };
   const shell = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
-  const { wallThickness: wall, internalClearance: cl, floorThickness: floor } = params;
+  const { wallThickness: wall, floorThickness: floor } = params;
+  const cl = cavityClearance(params);
   const out: BuildOp[] = [];
 
   for (const ant of antennas) {
@@ -136,8 +138,8 @@ export function buildAntennaOps(
 
     switch (facing) {
       case '+y': {
-        const xCenter = wall + cl + uOffset;
-        const yMin = wall + cl + board.pcb.size.y - overshoot;
+        const xCenter = wall + cl.xMin + uOffset;
+        const yMin = wall + cl.yMin + board.pcb.size.y - overshoot;
         const cyl = cylinder(wall + 2 * overshoot, spec.holeDiameter / 2 + 0.2, 48);
         const rotated = rotate([-90, 0, 0], cyl);
         out.push(translate([xCenter, yMin, zCenter], rotated));
@@ -147,13 +149,13 @@ export function buildAntennaOps(
           if (cbDepth > 0) {
             const cb = cylinder(cbDepth + overshoot, spec.counterboreDiameter / 2, 48);
             const cbRot = rotate([-90, 0, 0], cb);
-            out.push(translate([xCenter, wall + cl + board.pcb.size.y - overshoot, zCenter], cbRot));
+            out.push(translate([xCenter, wall + cl.yMin + board.pcb.size.y - overshoot, zCenter], cbRot));
           }
         }
         break;
       }
       case '-y': {
-        const xCenter = wall + cl + uOffset;
+        const xCenter = wall + cl.xMin + uOffset;
         const yMin = -overshoot;
         const cyl = cylinder(wall + 2 * overshoot, spec.holeDiameter / 2 + 0.2, 48);
         const rotated = rotate([-90, 0, 0], cyl);
@@ -161,15 +163,15 @@ export function buildAntennaOps(
         break;
       }
       case '+x': {
-        const yCenter = wall + cl + uOffset;
-        const xMin = wall + cl + board.pcb.size.x - overshoot;
+        const yCenter = wall + cl.yMin + uOffset;
+        const xMin = wall + cl.xMin + board.pcb.size.x - overshoot;
         const cyl = cylinder(wall + 2 * overshoot, spec.holeDiameter / 2 + 0.2, 48);
         const rotated = rotate([0, 90, 0], cyl);
         out.push(translate([xMin, yCenter, zCenter], rotated));
         break;
       }
       case '-x': {
-        const yCenter = wall + cl + uOffset;
+        const yCenter = wall + cl.yMin + uOffset;
         const xMin = -overshoot;
         const cyl = cylinder(wall + 2 * overshoot, spec.holeDiameter / 2 + 0.2, 48);
         const rotated = rotate([0, 90, 0], cyl);

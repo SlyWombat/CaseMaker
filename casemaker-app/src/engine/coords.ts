@@ -34,10 +34,33 @@ export function pcbBottomZ(board: BoardProfile, params: CaseParameters): number 
   return params.floorThickness + board.defaultStandoffHeight;
 }
 
+/**
+ * Per-side total X/Y clearance from PCB edge to inside wall. Each side =
+ * `internalClearance + (clearanceTweaks?.<side> ?? 0)`. Use this anywhere you
+ * previously wrote `wall + cl` for a board-origin or inside-wall position;
+ * the per-side values let the cavity grow asymmetrically without scaling
+ * the board.
+ */
+export function cavityClearance(params: CaseParameters): {
+  xMin: number;
+  xMax: number;
+  yMin: number;
+  yMax: number;
+} {
+  const cl = params.internalClearance;
+  const t = params.clearanceTweaks;
+  return {
+    xMin: cl + (t?.xMin ?? 0),
+    xMax: cl + (t?.xMax ?? 0),
+    yMin: cl + (t?.yMin ?? 0),
+    yMax: cl + (t?.yMax ?? 0),
+  };
+}
+
 /** World-frame X / Y of the cavity origin (PCB lower-left corner in world coords). */
 export function cavityOriginXY(params: CaseParameters): { x: number; y: number } {
-  const off = params.wallThickness + params.internalClearance;
-  return { x: off, y: off };
+  const cl = cavityClearance(params);
+  return { x: params.wallThickness + cl.xMin, y: params.wallThickness + cl.yMin };
 }
 
 // =============================================================================

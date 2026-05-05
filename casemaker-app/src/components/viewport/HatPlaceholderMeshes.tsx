@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import * as THREE from 'three';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore } from '@/store/viewportStore';
+import { cavityOriginXY } from '@/engine/coords';
 import { buildHatPlaceholderGroup } from '@/engine/scene/boardPlaceholder';
 import { computeHatBaseZ } from '@/engine/compiler/hats';
 import { getBuiltinHat } from '@/library/hats';
@@ -29,8 +30,7 @@ export function HatPlaceholderMeshes() {
     const resolveHat = (id: string): HatProfile | undefined =>
       (customHats ?? []).find((h) => h.id === id) ?? getBuiltinHat(id);
     const baseZ = computeHatBaseZ(board, params, hats, resolveHat);
-    const wall = params.wallThickness;
-    const cl = params.internalClearance;
+    const xy = cavityOriginXY(params);
     const out: { placementId: string; group: THREE.Group }[] = [];
     for (const placement of hats) {
       if (!placement.enabled) continue;
@@ -40,11 +40,8 @@ export function HatPlaceholderMeshes() {
       if (z0 === undefined) continue;
       const offX = placement.offsetOverride?.x ?? 0;
       const offY = placement.offsetOverride?.y ?? 0;
-      // computeHatBaseZ returns the PCB-bottom Z. buildHatPlaceholderGroup
-      // expects the lower-left corner; the cavity's XY origin is
-      // (wall + cl), so anchor here.
       const group = buildHatPlaceholderGroup(profile, {
-        origin: { x: wall + cl + offX, y: wall + cl + offY, z: z0 },
+        origin: { x: xy.x + offX, y: xy.y + offY, z: z0 },
       });
       out.push({ placementId: placement.id, group });
     }
@@ -53,6 +50,7 @@ export function HatPlaceholderMeshes() {
     board,
     params.wallThickness,
     params.internalClearance,
+    params.clearanceTweaks,
     params.floorThickness,
     hats,
     customHats,

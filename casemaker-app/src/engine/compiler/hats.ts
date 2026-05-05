@@ -5,6 +5,7 @@ import type {
   HatProfile,
   PortPlacement,
 } from '@/types';
+import { cavityClearance } from '@/engine/coords';
 import { type BuildOp } from './buildPlan';
 import { buildAxisAlignedCutout } from './roundCutout';
 import { computeStackedHatHeight, HOST_HAT_CLEARANCE } from './caseShell';
@@ -69,7 +70,8 @@ export function buildHatCutoutsForProject(
   if (!hats || hats.length === 0) return [];
   const baseZ = computeHatBaseZ(board, params, hats, resolveHat);
   const ops: BuildOp[] = [];
-  const { wallThickness: wall, internalClearance: cl } = params;
+  const { wallThickness: wall } = params;
+  const cl = cavityClearance(params);
   const pcbXY = board.pcb.size;
 
   for (const placement of hats) {
@@ -95,16 +97,16 @@ export function buildHatCutoutsForProject(
 
       switch (port.facing) {
         case '-x':
-          xMin = -(wall + cl) - OVERSHOOT;
+          xMin = -(wall + cl.xMin) - OVERSHOOT;
           break;
         case '+x':
-          xMax = pcbXY.x + cl + wall + OVERSHOOT;
+          xMax = pcbXY.x + cl.xMax + wall + OVERSHOOT;
           break;
         case '-y':
-          yMin = -(wall + cl) - OVERSHOOT;
+          yMin = -(wall + cl.yMin) - OVERSHOOT;
           break;
         case '+y':
-          yMax = pcbXY.y + cl + wall + OVERSHOOT;
+          yMax = pcbXY.y + cl.yMax + wall + OVERSHOOT;
           break;
       }
 
@@ -113,8 +115,8 @@ export function buildHatCutoutsForProject(
       const sizeZ = zMax - zMin;
       if (sizeX <= 0 || sizeY <= 0 || sizeZ <= 0) continue;
 
-      const wx = wall + cl + xMin;
-      const wy = wall + cl + yMin;
+      const wx = wall + cl.xMin + xMin;
+      const wy = wall + cl.yMin + yMin;
       const wz = zMin;
       ops.push(
         buildAxisAlignedCutout(

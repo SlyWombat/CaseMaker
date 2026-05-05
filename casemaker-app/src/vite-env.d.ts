@@ -1,10 +1,7 @@
 /// <reference types="vite/client" />
 
-// Issue #80 — injected by vite.config.ts via `define:`. Format:
-//   __APP_VERSION__ = "0.10.0+abc1234" (or "0.10.0+abc1234-dirty" / "0.10.0+nogit")
-//   __BUILD_DATE__  = "2026-04-28"
+// Injected by vite.config.ts via `define:` — bare semver from package.json.
 declare const __APP_VERSION__: string;
-declare const __BUILD_DATE__: string;
 
 // Issue #72 — production-only Donate button.
 //   __DEPLOY_TARGET__ = "electricrv" on the cPanel deploy, "" elsewhere.

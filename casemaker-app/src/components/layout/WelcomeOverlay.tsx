@@ -14,7 +14,6 @@ import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
 export function WelcomeOverlay() {
   const loadBoard = useProjectStore((s) => s.loadBuiltinBoard);
   const setProject = useProjectStore((s) => s.setProject);
-  const dismiss = useProjectStore((s) => s.dismissWelcome);
   const [boardChoice, setBoardChoice] = useState('');
 
   const boardIds = listBuiltinBoardIds();
@@ -96,16 +95,6 @@ export function WelcomeOverlay() {
             ))}
           </ul>
         </section>
-
-        <div className="welcome-overlay__footer">
-          <button
-            className="welcome-overlay__skip"
-            onClick={dismiss}
-            data-testid="welcome-skip"
-          >
-            Skip — I'll pick later
-          </button>
-        </div>
       </div>
     </div>
   );

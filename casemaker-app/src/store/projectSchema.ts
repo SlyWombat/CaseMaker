@@ -11,6 +11,14 @@ export const caseParamsSchema = z.object({
   lidThickness: z.number().positive(),
   cornerRadius: z.number().nonnegative(),
   internalClearance: z.number().nonnegative(),
+  clearanceTweaks: z
+    .object({
+      xMin: z.number().nonnegative(),
+      xMax: z.number().nonnegative(),
+      yMin: z.number().nonnegative(),
+      yMax: z.number().nonnegative(),
+    })
+    .optional(),
   zClearance: z.number().nonnegative(),
   joint: z.preprocess(
     (v) => (v === 'sliding' ? 'flat-lid' : v),

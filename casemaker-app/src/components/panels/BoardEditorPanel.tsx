@@ -134,10 +134,6 @@ export function BoardEditorPanel() {
             title="Recommended Z headroom above the tallest component (mm)."
           />
         </LabelledField>
-        {/* Issue #103 — Cross-reference URL + Datasheet revision moved to
-            the sidebar footer (SidebarFooter). They're reference data, not
-            interactive day-to-day, so they no longer take real estate
-            alongside Name / Manufacturer / Standoff in the meta-grid. */}
       </div>
       <div className="pcb-grid">
         <LabelledField
