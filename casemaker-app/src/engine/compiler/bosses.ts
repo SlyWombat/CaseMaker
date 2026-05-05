@@ -102,9 +102,19 @@ export function computeBossPlacements(
   const STUB_PILOT_MIN = 1.2;
   const STUB_PILOT_WALL = 0.5;
   const STUB_MIN_OD = 1.8;
+  // Issue #124 — the stub bottom face must overlap the standoff TOP annulus
+  // (which is r=holeDiameter/2..outerDiameter/2 once the screw pilot is
+  // drilled). If stubMaxOD ≤ holeDiameter, the stub disk and standoff
+  // annulus are radially disjoint and the stub orphans into the cavity as
+  // a floating part. Require a small radial embed past the pilot edge so
+  // they actually fuse.
+  const STUB_RADIAL_EMBED = 0.1;
   return board.mountingHoles.map((h) => {
     const stubMaxOD = h.diameter - 0.4;
-    const canEmitStub = position === 'bottom' && stubMaxOD >= STUB_MIN_OD;
+    const canEmitStub =
+      position === 'bottom' &&
+      stubMaxOD >= STUB_MIN_OD &&
+      stubMaxOD >= holeDiameter + STUB_RADIAL_EMBED;
     const lockNotchDiameter = canEmitStub ? stubMaxOD : 0;
     const lockNotchHeight = canEmitStub ? Math.min(board.pcb.size.z, 1.6) : 0;
     // Starter pilot must (a) be smaller than the main pilot so the screw

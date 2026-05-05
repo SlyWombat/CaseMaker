@@ -159,6 +159,49 @@ function attachPosts(plate: BuildOp, posts: BuildOp[], holes: BuildOp[]): BuildO
   return holes.length > 0 ? difference([solid, ...holes]) : solid;
 }
 
+/**
+ * Lid body without posts — shared between the flat-lid and (cavity-mode)
+ * snap-fit branches so both paths produce the same Pelican-style shell
+ * when lidCavityHeight > 0. Issue #125: previously buildSnapFitLid emitted
+ * just a thin plate, so latch/hinge/rugged/seal/flange features sized for
+ * the tall cavity-mode lid orphaned into 20+ disjoint components when the
+ * user toggled joint to snap-fit on a hinged template.
+ */
+function buildLidBody(
+  board: BoardProfile,
+  params: CaseParameters,
+  hats: HatPlacement[],
+  resolveHat: HatResolver,
+  display: DisplayPlacement | null | undefined,
+  resolveDisplay: DisplayResolver,
+): BuildOp {
+  const lid = computeLidDims(board, params, hats, resolveHat, display, resolveDisplay);
+  const cavityHeight = params.lidCavityHeight ?? 0;
+  const outerR = lidOuterCornerRadius(params);
+  if (cavityHeight <= 0) {
+    return roundedRectPrism(lid.x, lid.y, lid.z, outerR);
+  }
+  // Pelican-style shell lid: outer prism MINUS inner cavity. Side walls
+  // = `wallThickness`, top "ceiling" panel = `lidThickness`. Cavity opens
+  // DOWNWARD (toward the case rim) from lid-local z=0 up to the ceiling
+  // at z=cavityHeight; the closed top spans z=[cavityHeight, cavityHeight
+  // + lidThickness].
+  const wall = params.wallThickness;
+  const innerR = Math.max(0, outerR - wall);
+  const outer = roundedRectPrism(lid.x, lid.y, lid.z, outerR);
+  // Cavity: a touch taller than `cavityHeight` at the bottom face so the
+  // boolean cut is clean (overshoot avoids a 0-thickness shell skin).
+  const overshoot = 0.1;
+  const innerW = lid.x - 2 * wall;
+  const innerH = lid.y - 2 * wall;
+  if (innerW <= 0 || innerH <= 0) return outer;
+  const cavity = translate(
+    [wall, wall, -overshoot],
+    roundedRectPrism(innerW, innerH, cavityHeight + overshoot, innerR),
+  );
+  return difference([outer, cavity]);
+}
+
 export function buildFlatLid(
   board: BoardProfile,
   params: CaseParameters,
@@ -167,38 +210,7 @@ export function buildFlatLid(
   display: DisplayPlacement | null | undefined = null,
   resolveDisplay: DisplayResolver = NO_RESOLVE_DISPLAY,
 ): BuildOp {
-  const lid = computeLidDims(board, params, hats, resolveHat, display, resolveDisplay);
-  const cavityHeight = params.lidCavityHeight ?? 0;
-  const outerR = lidOuterCornerRadius(params);
-  // Issue #81 — non-recessed flat-lid plate matches the case envelope's
-  // outer corner radius so the lid silhouette aligns with the rim.
-  let body: BuildOp;
-  if (cavityHeight > 0) {
-    // Pelican-style shell lid: outer prism MINUS inner cavity. Side walls
-    // = `wallThickness`, top "ceiling" panel = `lidThickness`. Cavity opens
-    // DOWNWARD (toward the case rim) from lid-local z=0 up to the ceiling
-    // at z=cavityHeight; the closed top spans z=[cavityHeight, cavityHeight
-    // + lidThickness].
-    const wall = params.wallThickness;
-    const innerR = Math.max(0, outerR - wall);
-    const outer = roundedRectPrism(lid.x, lid.y, lid.z, outerR);
-    // Cavity: a touch taller than `cavityHeight` at the bottom face so the
-    // boolean cut is clean (overshoot avoids a 0-thickness shell skin).
-    const overshoot = 0.1;
-    const innerW = lid.x - 2 * wall;
-    const innerH = lid.y - 2 * wall;
-    if (innerW > 0 && innerH > 0 && cavityHeight > 0) {
-      const cavity = translate(
-        [wall, wall, -overshoot],
-        roundedRectPrism(innerW, innerH, cavityHeight + overshoot, innerR),
-      );
-      body = difference([outer, cavity]);
-    } else {
-      body = outer;
-    }
-  } else {
-    body = roundedRectPrism(lid.x, lid.y, lid.z, outerR);
-  }
+  const body = buildLidBody(board, params, hats, resolveHat, display, resolveDisplay);
   const { posts, holes } = buildLidPosts(board, params, hats, resolveHat, display, resolveDisplay);
   return attachPosts(body, posts, holes);
 }
@@ -230,13 +242,14 @@ export function buildSnapFitLid(
   display: DisplayPlacement | null | undefined = null,
   resolveDisplay: DisplayResolver = NO_RESOLVE_DISPLAY,
 ): BuildOp {
-  const dims = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
-  const topPlate = roundedRectPrism(
-    dims.outerX,
-    dims.outerY,
-    params.lidThickness,
-    lidOuterCornerRadius(params),
-  );
+  // Issue #125 — when lidCavityHeight > 0 the lid is a Pelican-style shell.
+  // The latches, hinge, rugged ribs, seal tongue and flange brim are all
+  // sized to attach to that tall shell; if the snap-fit lid here was just a
+  // thin plate (lidThickness only), every one of those features would float
+  // free and the lid mesh would split into 20+ disjoint components. Use the
+  // shared lid body (which honors cavityHeight) so cavity-mode lids match
+  // flat-lid output; non-cavity lids still get the thin plate.
+  const topPlate = buildLidBody(board, params, hats, resolveHat, display, resolveDisplay);
   const { posts, holes } = buildLidPosts(board, params, hats, resolveHat, display, resolveDisplay);
 
   // Issue #78 — snapType selects the lid style:
