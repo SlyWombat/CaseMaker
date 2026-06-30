@@ -13,6 +13,7 @@ describe('Marketing gap #15 — project templates', () => {
       'arduino-dmx',
       'giga-dmx-controller',
       'esp32-dev-tray',
+      'elp-camera-enclosure',
       'snap-fit-test',
       'protective-case',
       'large-box-200',

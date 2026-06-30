@@ -267,6 +267,21 @@ function esp32DevTray(): Project {
   return p;
 }
 
+function elpCameraEnclosure(): Project {
+  // ELP-USBGS1200P01-H120: 38×38 mm AR0234 USB camera mounted lens-DOWN.
+  // The lens stack is encoded on the board profile as a `-z`-facing
+  // component, so autoPortsForBoard generates the floor cutout
+  // automatically — no template-specific cutout wiring needed. The
+  // template just picks snap-fit (matches user preference for camera
+  // enclosures) and disables ventilation.
+  const p = createDefaultProject('elp-usbgs1200p01-h120');
+  p.name = 'ELP AR0234 camera enclosure';
+  p.case.joint = 'snap-fit';
+  p.case.ventilation = { enabled: false, pattern: 'none', coverage: 0 };
+  p.ports = autoPortsForBoard(p.board);
+  return p;
+}
+
 export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
   {
     id: 'pi-server-tray',
@@ -309,6 +324,13 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
     description: 'ESP32 DevKit V1 in an open flat-lid tray for prototyping.',
     estPrintMinutes: 90,
     build: esp32DevTray,
+  },
+  {
+    id: 'elp-camera-enclosure',
+    name: 'ELP AR0234 camera enclosure',
+    description: 'ELP-USBGS1200P01-H120 (1080P global-shutter USB camera, 120° lens) in a screw-down enclosure with a lens lid hole and a USB-A pass-through cutout sized for the pigtail plug.',
+    estPrintMinutes: 75,
+    build: elpCameraEnclosure,
   },
   {
     id: 'snap-fit-test',

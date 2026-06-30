@@ -41,7 +41,9 @@ export function applySmartCutoutLayout(
   const out: PortPlacement[] = [];
 
   for (const port of ports) {
-    if (!port.enabled || port.facing === '+z') {
+    if (!port.enabled || port.facing === '+z' || port.facing === '-z') {
+      // Top/bottom-face cutouts don't have a top-of-wall to bridge to —
+      // skip the side-wall smart-extend pre-pass.
       out.push(port);
       continue;
     }

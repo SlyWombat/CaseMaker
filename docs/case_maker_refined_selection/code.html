@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Case Maker - Start</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "inverse-surface": "#dae2fd",
+                        "on-primary-fixed": "#001a42",
+                        "on-tertiary-container": "#461f00",
+                        "on-error": "#690005",
+                        "error": "#ffb4ab",
+                        "surface-container-highest": "#2d3449",
+                        "on-tertiary-fixed-variant": "#723600",
+                        "secondary-container": "#00a572",
+                        "on-tertiary": "#502400",
+                        "on-surface-variant": "#c2c6d6",
+                        "secondary-fixed-dim": "#4edea3",
+                        "on-error-container": "#ffdad6",
+                        "primary-container": "#4d8eff",
+                        "tertiary": "#ffb786",
+                        "on-tertiary-fixed": "#311400",
+                        "on-secondary-fixed": "#002113",
+                        "on-background": "#dae2fd",
+                        "tertiary-fixed-dim": "#ffb786",
+                        "primary-fixed-dim": "#adc6ff",
+                        "surface-tint": "#adc6ff",
+                        "error-container": "#93000a",
+                        "outline-variant": "#424754",
+                        "surface-bright": "#31394d",
+                        "primary": "#adc6ff",
+                        "on-secondary-container": "#00311f",
+                        "surface-container-lowest": "#060e20",
+                        "on-primary-fixed-variant": "#004395",
+                        "on-secondary": "#003824",
+                        "tertiary-fixed": "#ffdcc6",
+                        "surface-container": "#171f33",
+                        "on-surface": "#dae2fd",
+                        "on-primary-container": "#00285d",
+                        "surface-container-low": "#131b2e",
+                        "surface-container-high": "#222a3d",
+                        "secondary-fixed": "#6ffbbe",
+                        "outline": "#8c909f",
+                        "surface": "#0b1326",
+                        "inverse-on-surface": "#283044",
+                        "tertiary-container": "#df7412",
+                        "primary-fixed": "#d8e2ff",
+                        "surface-dim": "#0b1326",
+                        "surface-variant": "#2d3449",
+                        "on-primary": "#002e6a",
+                        "background": "#0b1326",
+                        "secondary": "#4edea3",
+                        "on-secondary-fixed-variant": "#005236",
+                        "inverse-primary": "#005ac2"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "md": "16px",
+                        "panel-padding": "20px",
+                        "gutter": "12px",
+                        "sm": "8px",
+                        "xs": "4px",
+                        "unit": "4px",
+                        "lg": "24px",
+                        "xl": "32px"
+                    },
+                    "fontFamily": {
+                        "code-value": ["Inter"],
+                        "label-mono": ["Inter"],
+                        "h1": ["Space Grotesk"],
+                        "body-md": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "h2": ["Space Grotesk"]
+                    },
+                    "fontSize": {
+                        "code-value": ["13px", { "lineHeight": "1.4", "letterSpacing": "0", "fontWeight": "500" }],
+                        "label-mono": ["12px", { "lineHeight": "1.4", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                        "h1": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "body-md": ["14px", { "lineHeight": "1.5", "letterSpacing": "0", "fontWeight": "400" }],
+                        "body-lg": ["16px", { "lineHeight": "1.6", "letterSpacing": "0", "fontWeight": "400" }],
+                        "h2": ["24px", { "lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-surface h-screen w-screen overflow-hidden flex flex-col font-body-md text-body-md antialiased selection:bg-primary selection:text-on-primary">
+<!-- TopNavBar -->
+<header class="bg-surface-container-lowest text-primary font-['Space_Grotesk'] tracking-tight text-sm w-full top-0 border-b border-surface-container shadow-[0_2px_0_0_rgba(0,0,0,0.4)] flex justify-between items-center px-4 h-12 z-50 shrink-0">
+<div class="flex items-center gap-6">
+<div class="text-lg font-bold tracking-tighter text-on-surface">Case Maker</div>
+<nav class="hidden md:flex gap-4 items-center">
+<a class="text-primary font-bold active:scale-95 duration-75" href="#">New</a>
+<a class="text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors duration-150 px-2 py-1 rounded-DEFAULT active:scale-95 duration-75" href="#">Undo</a>
+<a class="text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors duration-150 px-2 py-1 rounded-DEFAULT active:scale-95 duration-75" href="#">Redo</a>
+<a class="text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors duration-150 px-2 py-1 rounded-DEFAULT active:scale-95 duration-75" href="#">Save</a>
+<a class="text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors duration-150 px-2 py-1 rounded-DEFAULT active:scale-95 duration-75" href="#">Load</a>
+<a class="text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors duration-150 px-2 py-1 rounded-DEFAULT active:scale-95 duration-75" href="#">Export</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="bg-primary text-on-primary font-code-value text-code-value px-3 py-1.5 rounded-DEFAULT hover:opacity-90 transition-opacity flex items-center gap-2">
+                Share
+            </button>
+<div class="flex items-center gap-2">
+<button aria-label="settings" class="text-on-surface-variant hover:text-on-surface transition-colors p-1">
+<span class="material-symbols-outlined" style="font-variation-settings: 'wght' 300;">settings</span>
+</button>
+<button aria-label="help" class="text-on-surface-variant hover:text-on-surface transition-colors p-1">
+<span class="material-symbols-outlined" style="font-variation-settings: 'wght' 300;">help</span>
+</button>
+</div>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden">
+<!-- SideNavBar -->
+<aside class="bg-surface-container-lowest text-primary font-['Space_Grotesk'] uppercase tracking-widest text-[10px] font-medium w-[280px] border-r border-surface-container flex flex-col h-full py-4 shrink-0 hidden md:flex">
+<div class="px-panel-padding mb-6">
+<h2 class="text-on-surface font-h2 text-h2 tracking-tight normal-case">Project Workspace</h2>
+<div class="text-on-surface-variant text-[10px] tracking-wider mt-1">V0.1.4-BETA</div>
+</div>
+<nav class="flex-1 flex flex-col gap-1 px-2">
+<!-- Using Intent Fallback: Highlighting the first tab arbitrarily as there isn't a direct match for a "New/Template" screen in the JSON tabs, and hiding it entirely contradicts the prompt's request to feature it. Assuming "Parameters" or general workspace view.  Actually, as per rule "Contextual State & Identity (THE LOCK)", generic highlighting is bad. But it's a structural shell. Let's leave them all inactive since the main content is "Pick a board". Wait, active logic says pick closest match. None match. I'll make the first one inactive. Actually, let's make Parameters active to show the style. -->
+<a class="flex items-center gap-3 px-3 py-2 text-primary border-l-2 border-primary bg-surface-container/50 transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-[18px]">tune</span>
+                    Parameters
+                </a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant border-l-2 border-transparent hover:bg-surface-container/80 hover:text-on-surface transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-[18px]">layers</span>
+                    Layers
+                </a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant border-l-2 border-transparent hover:bg-surface-container/80 hover:text-on-surface transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-[18px]">texture</span>
+                    Materials
+                </a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant border-l-2 border-transparent hover:bg-surface-container/80 hover:text-on-surface transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-[18px]">precision_manufacturing</span>
+                    Scene
+                </a>
+</nav>
+<div class="px-panel-padding mt-auto mb-4">
+<button class="w-full bg-surface-container border border-outline-variant text-on-surface py-2 rounded-DEFAULT hover:border-primary transition-colors normal-case tracking-normal font-code-value text-code-value">
+                    Add Component
+                </button>
+</div>
+<div class="px-2 border-t border-surface-container pt-4 flex flex-col gap-1">
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant border-l-2 border-transparent hover:bg-surface-container/80 hover:text-on-surface transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-[18px]">menu_book</span>
+                    Documentation
+                </a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant border-l-2 border-transparent hover:bg-surface-container/80 hover:text-on-surface transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-[18px]">support_agent</span>
+                    Support
+                </a>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="flex-1 overflow-y-auto bg-background p-xl flex flex-col items-center">
+<div class="max-w-4xl w-full flex flex-col gap-xl">
+<header class="flex flex-col gap-sm">
+<h1 class="font-h1 text-h1 text-on-surface">Start a New Project</h1>
+<p class="text-on-surface-variant font-body-lg text-body-lg max-w-2xl">Select a base microcontroller board or start from a blank parametric enclosure template to begin your design.</p>
+</header>
+<!-- Configuration Block -->
+<section class="bg-surface-container-low border border-surface-container rounded-lg p-lg flex flex-col md:flex-row gap-md items-start md:items-end w-full shadow-[0_2px_4px_0_rgba(0,0,0,0.2)]">
+<div class="flex-1 w-full">
+<label class="block font-label-mono text-label-mono text-on-surface-variant mb-2" for="board-select">TARGET HARDWARE</label>
+<div class="relative w-full">
+<select class="w-full bg-surface-container-highest border border-outline-variant text-on-surface font-code-value text-code-value rounded-DEFAULT py-2.5 pl-3 pr-10 appearance-none focus:outline-none focus:border-primary transition-colors" id="board-select">
+<option>Raspberry Pi 4 Model B</option>
+<option>Raspberry Pi Zero 2 W</option>
+<option>Arduino Uno R3</option>
+<option>ESP32 DevKit V1</option>
+<option>Custom Dimensions</option>
+</select>
+<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[20px]">expand_more</span>
+</div>
+</div>
+</div>
+<div class="w-full md:w-auto">
+<button class="w-full md:w-auto bg-primary text-on-primary font-code-value text-code-value px-6 py-2.5 rounded-DEFAULT hover:opacity-90 transition-opacity shadow-[0_2px_0_0_rgba(0,0,0,0.4)]">
+                            Generate Shell
+                        </button>
+</div>
+</section>
+<div class="w-full h-px bg-surface-container my-md"></div>
+<!-- Template Grid -->
+<section class="flex flex-col gap-lg">
+<h2 class="font-h2 text-h2 text-on-surface">Quick Start Templates</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-md">
+<!-- Template Card 1 -->
+<button class="group text-left bg-surface-container-lowest border border-surface-container rounded-lg overflow-hidden hover:border-primary transition-all duration-200 shadow-[0_2px_0_0_rgba(0,0,0,0.2)] hover:shadow-[0_4px_12px_0_rgba(0,0,0,0.3)] hover:-translate-y-0.5">
+<div class="h-32 bg-surface-container flex items-center justify-center relative overflow-hidden">
+<div class="absolute inset-0 opacity-20 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-primary-fixed to-transparent pointer-events-none"></div>
+<span class="material-symbols-outlined text-4xl text-on-surface-variant group-hover:text-primary transition-colors duration-200 z-10" style="font-variation-settings: 'wght' 200;">view_in_ar</span>
+</div>
+<div class="p-4 flex flex-col gap-2">
+<h3 class="font-code-value text-code-value text-on-surface flex items-center gap-2">
+                                    Basic Snap-Fit
+                                    <span class="bg-surface-container-highest text-on-surface-variant text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-sm">Standard</span>
+</h3>
+<p class="text-label-mono text-on-surface-variant normal-case">A simple two-part enclosure with friction-fit posts. Ideal for quick prototyping.</p>
+</div>
+</button>
+<!-- Template Card 2 -->
+<button class="group text-left bg-surface-container-lowest border border-surface-container rounded-lg overflow-hidden hover:border-primary transition-all duration-200 shadow-[0_2px_0_0_rgba(0,0,0,0.2)] hover:shadow-[0_4px_12px_0_rgba(0,0,0,0.3)] hover:-translate-y-0.5">
+<div class="h-32 bg-surface-container flex items-center justify-center relative overflow-hidden">
+<div class="absolute inset-0 opacity-20 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-secondary-fixed to-transparent pointer-events-none"></div>
+<span class="material-symbols-outlined text-4xl text-on-surface-variant group-hover:text-secondary transition-colors duration-200 z-10" style="font-variation-settings: 'wght' 200;">conveyor_belt</span>
+</div>
+<div class="p-4 flex flex-col gap-2">
+<h3 class="font-code-value text-code-value text-on-surface flex items-center gap-2">
+                                    Vented Industrial
+                                    <span class="bg-surface-container-highest text-on-surface-variant text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-sm">Rugged</span>
+</h3>
+<p class="text-label-mono text-on-surface-variant normal-case">Features hex-grid ventilation and mounting flanges. Optimized for continuous use.</p>
+</div>
+</button>
+<!-- Template Card 3 -->
+<button class="group text-left bg-surface-container-lowest border border-surface-container rounded-lg overflow-hidden hover:border-primary transition-all duration-200 shadow-[0_2px_0_0_rgba(0,0,0,0.2)] hover:shadow-[0_4px_12px_0_rgba(0,0,0,0.3)] hover:-translate-y-0.5">
+<div class="h-32 bg-surface-container flex items-center justify-center relative overflow-hidden">
+<div class="absolute inset-0 opacity-20 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-tertiary-fixed to-transparent pointer-events-none"></div>
+<span class="material-symbols-outlined text-4xl text-on-surface-variant group-hover:text-tertiary transition-colors duration-200 z-10" style="font-variation-settings: 'wght' 200;">speaker</span>
+</div>
+<div class="p-4 flex flex-col gap-2">
+<h3 class="font-code-value text-code-value text-on-surface flex items-center gap-2">
+                                    Display Bezel
+                                    <span class="bg-primary/20 text-primary text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-sm">New</span>
+</h3>
+<p class="text-label-mono text-on-surface-variant normal-case">Front-facing panel design optimized for OLED/LCD screens and tactile buttons.</p>
+</div>
+</button>
+</div>
+</section>
+</div>
+</main>
+</div>
+</body></html>

@@ -202,7 +202,7 @@ const portPlacementSchema = z.object({
   ]),
   position: xyzSchema,
   size: xyzSchema,
-  facing: z.enum(['+x', '-x', '+y', '-y', '+z']),
+  facing: z.enum(['+x', '-x', '+y', '-y', '+z', '-z']),
   cutoutMargin: z.number().nonnegative(),
   locked: z.boolean(),
   enabled: z.boolean(),

@@ -28,7 +28,7 @@ export function buildPortCutoutOp(
   let xMax = port.position.x + port.size.x + m;
   let yMin = port.position.y - m;
   let yMax = port.position.y + port.size.y + m;
-  const zMin = port.position.z - m;
+  let zMin = port.position.z - m;
   const zMax = port.position.z + port.size.z + m;
 
   switch (port.facing) {
@@ -43,6 +43,14 @@ export function buildPortCutoutOp(
       break;
     case '+y':
       yMax = pcb.y + cl.yMax + wall + OVERSHOOT;
+      break;
+    case '-z':
+      // Floor cutout (e.g. camera lens, downward-facing SD slot). Extend
+      // the cutter through the floor and the standoff space so it punches
+      // a clean hole in the bottom face. zMin is in board-local coords
+      // (z=0 = PCB bottom face); the floor outer surface is at
+      // z = -(standoff + floor) in those coords.
+      zMin = -(board.defaultStandoffHeight + floor) - OVERSHOOT;
       break;
   }
 

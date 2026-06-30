@@ -77,7 +77,7 @@ function projectPortToFace(
   port: PortPlacement,
   inflate: number,
 ): Rect2D | null {
-  if (!port.facing || port.facing === '+z') return null;
+  if (!port.facing || port.facing === '+z' || port.facing === '-z') return null;
   let uMin: number;
   let uMax: number;
   if (port.facing === '+x' || port.facing === '-x') {
@@ -332,7 +332,9 @@ function buildFaceRects(
   for (const port of project.ports) {
     if (!port.enabled) continue;
     const rect = projectPortToFace(port, 0);
-    if (rect && port.facing && port.facing !== '+z') {
+    // Skip top/bottom-face ports — overlap detection is only meaningful
+    // for the four side walls (no +z or -z buckets in the map).
+    if (rect && port.facing && port.facing !== '+z' && port.facing !== '-z') {
       map.get(port.facing)!.push(rect);
     }
   }
@@ -356,7 +358,7 @@ function buildFaceRects(
       const offsetY = placement.offsetOverride?.y ?? 0;
       const ports = transformPlacementPorts(placement, profile);
       for (const port of ports) {
-        if (!port.enabled || !port.facing || port.facing === '+z') continue;
+        if (!port.enabled || !port.facing || port.facing === '+z' || port.facing === '-z') continue;
         const shifted: PortPlacement = {
           ...port,
           position: {

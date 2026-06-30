@@ -1,0 +1,587 @@
+<!DOCTYPE html><html lang="en" class="" style=""><head><script type="text/javascript" src="https://beacon-v2.helpscout.net/static/js/vendor.4969c740.js"></script><script type="text/javascript" src="https://beacon-v2.helpscout.net/static/js/main.a6cfe222.js"></script><script type="text/javascript" async="" src="https://beacon-v2.helpscout.net"></script><script type="text/javascript" async="" src="//munchkin.marketo.net/165/munchkin.js"></script><script type="text/javascript" async="" src="https://cdn.bizible.com/xdc.js?_biz_u=69af253f96744e01b4349599f36f5f2f&amp;_biz_h=-1719903014&amp;cdn_o=a&amp;jsVer=4.26.05.04&amp;a=stratasys.com"></script><script async="" src="https://scripts.clarity.ms/0.8.62/clarity.js"></script>
+		
+		<meta charset="utf-8">
+<meta name="robots" content="noodp">
+<meta name="MSSmartTagsPreventParsing" content="true">
+<meta name="google-site-verification" content="sRcy8COOEVzfXadS3NzNsefhbSouqvlesgWngH5kKxs">
+<meta name="csrf-param" content="authenticity_token">
+<meta name="csrf-token" content="T0R32RtLWkYrkERKGdOuz6iFBFotzXwRIQZUh+cuGqKFepsLiFr5YfeTMM8YIx39tFYGwubqtkA4gmhvrp1Xmg==">
+<link rel="shortcut icon" type="image/x-icon" href="https://grabcad.com/static/favicon.ico">
+
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1.0">
+		<title>GrabCAD</title>
+<meta name="description" content="The GrabCAD platform drives additive manufacturing at scale through connected solutions, including GrabCAD Print, GrabCAD Shop &amp; the GrabCAD SDKs.">
+		<link rel="stylesheet" media="screen" href="https://grabcad.com/assets/production/app/app_community-005c5d10b325fdd8701b958c83254a5713787ff946f676b715a38c4be71e71fb.css">
+		
+		<link rel="stylesheet" media="screen" href="https://grabcad.com/assets/production/app/app_1-1ad08866e32cab73681570847d3f60e756e07a58214c3fcac6ff5310515dcfa6.css">
+		<link rel="stylesheet" media="screen" href="https://grabcad.com/assets/production/app/application_frontend/app-0e99142ee2ecf869a2c65ffaf370a1572346c4e9864a256046e06f91bb2f1970.css">
+		
+		<script async="" src="https://www.clarity.ms/tag/n55qnhg70c"></script><script src="https://grabcad.com/assets/production/app/modernizr.min-c0c448f456c0b3d4c9bdd265b8dd874015e13877fbba7b777c94c0c1c8f8fcfb.js"></script>
+		
+		<script type="text/javascript">
+var Grabcad = Grabcad || {};
+
+Grabcad.site = {
+	community: 'https://grabcad.com',
+	community_home: 'https://grabcad.com/home',
+	help_center_badges: 'https://help.grabcad.com/article/52-badges-score',
+	help_center_guidelines: 'https://help.grabcad.com/article/149-community-values-and-guidelines',
+	shop: 'https://shop.grabcad.com',
+	company_signup: 'https://login.grabcad.com/create_account'
+};
+Grabcad.mails = {
+	info: 'info@grabcad.com',
+	support: 'support@grabcad.com',
+};
+
+Grabcad.openToWork_profileIcon_white = 'https://grabcad.com/assets/production/app/gc/shared/gc-shared-opentowork-profileicon-white-21a94fec4637037f09f77f4bb0f1dd85d46a7b8119372f7067c248da45f92396.svg';
+Grabcad.signInGreenTick = 'https://grabcad.com/assets/production/app/confirmation/green_tick-e2f4c3ce46722430dc7a9a0a72eba2ee91381a92e16094440d6cd893ec6f5d9d.svg';
+
+Grabcad.asense = {
+	modal_image: 'https://grabcad.com/assets/production/app/gc/shared/asense/modalimage-f53d5e8e4f17c51f5e98011814415365534b15a4b19246de79999414e305e91f.png',
+	info_icon: 'https://grabcad.com/assets/production/app/gc/shared/asense/infoicon-21cf6b76c25d7b37bdf9e82b40ea4bc56362abd53afe3537b36cff6fd7277567.svg',
+	horizontal_ad_format: 'horizontal',
+};
+Grabcad.defaultAvatar = 'https://grabcad.com/assets/production/app/default/avatar-13e49413d14d7528c1dba3d70cb39957e4aa4b997dff5cf4cd6c89992da9aaa5.png';
+Grabcad.Components = Grabcad.Components || {};
+
+Grabcad.locale = 'en';
+Grabcad.authenticated = false;
+Grabcad.memberAvatar = '';
+
+
+Grabcad.AttributeLimits = {
+	Generic: {
+		CONTENT_BODY: 50000,
+		CONTENT_DESCRIPTION_LONG: 2500,
+		ORGANISATION_NAME: 250,
+		SEARCH: 2048,
+		TAG: 60,
+		TITLE: 250,
+	},
+	Legacy: {
+		URL: 255,
+	},
+};
+</script>
+
+		  <script id="bizible-settings" type="text/javascript" src="https://cdn.bizible.com/scripts/bizible.js?account=stratasys.com" async="">
+  </script>
+
+		<script async="" src="https://www.googletagmanager.com/gtag/js?id=G-173TDQJFJ7"></script>
+<script>
+	window.dataLayer = window.dataLayer || [];
+	function gtag(){dataLayer.push(arguments);}
+	gtag('js', new Date());
+	gtag('config', 'G-173TDQJFJ7');
+</script>
+
+
+		<script type="text/javascript"> (function(c,l,a,r,i,t,y){ c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)}; t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i; y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y); })(window, document, "clarity", "script", "n55qnhg70c"); </script>
+	<style></style><script type="text/javascript" async="" src="https://googleads.g.doubleclick.net/pagead/viewthroughconversion/981400234/?random=1778363135688&amp;cv=9&amp;fst=1778363135688&amp;num=1&amp;guid=ON&amp;resp=GooglemKTybQhCsO&amp;eid=375603260%2C466465926%2C512247839%2C658953495&amp;u_h=900&amp;u_w=1280&amp;ig=1&amp;frm=0&amp;url=https%3A%2F%2Fgrabcad.com%2Flogin&amp;tiba=GrabCAD&amp;hn=www.googleadservices.com&amp;rfmt=3&amp;fmt=4"></script><style type="text/css">.resize-observer[data-v-b329ee4c]{position:absolute;top:0;left:0;z-index:-1;width:100%;height:100%;border:none;background-color:transparent;pointer-events:none;display:block;overflow:hidden;opacity:0}.resize-observer[data-v-b329ee4c] object{display:block;position:absolute;top:0;left:0;height:100%;width:100%;overflow:hidden;pointer-events:none;z-index:-1}</style><style hs-beacon="active" data-styled-version="5.1.1"></style></head>
+	<body id="members-sessions">
+		<div class="gc-shared-homepagev2modal__overlay hidden">
+	<div class="gc-shared-homepagev2modal__wrapper">
+		<div class="gc-shared-homepagev2modal__box">
+			<img class="gc-shared-homepagev2modal__hidebutton" alt="Hide modal button" src="https://grabcad.com/assets/production/app/gc/shared/navicon/mobileNavButtonClose-e12499ee0504c21efa0a48408d113964d6c4f8f33e9ae44676837808f2320510.svg">
+
+			<div class="gc-shared-homepagev2modal__image-box">
+				<img class="gc-shared-homepagev2modal__image" alt="GrabCAD Platform" width="320" height="200" src="https://grabcad.com/assets/production/app/gc/pages/homepage/hero/big-5e8eabd176a106bebf5f0bebf7a118d6a6f8fd60a0eef7706b9926f6adc6aaa1.svg">
+			</div>
+
+			<div class="gc-shared-homepagev2modal__content">
+				<div class="gc-shared-homepagev2modal__title">Learn about the GrabCAD Platform</div>
+				<div class="gc-shared-homepagev2modal__text">Get to know GrabCAD as an open software platform for Additive Manufacturing</div>
+				<a href="https://grabcad.com/home" class="gc-shared-homepagev2modal__ctabutton gc_web_el-button--primary gc_web_el-button--icon-right-white">Visit our new homepage</a>
+			</div>
+	  </div>
+	</div>
+</div>
+
+		
+		<header class="community" ng-non-bindable="">
+  <nav class="main">
+    <div class="headerMainMenu">
+      <ul class="app-menu">
+	<li class="app-selection-menu hover-element">
+		<a class="selected-app link-mobile-disabled" href="https://grabcad.com/dashboard">
+			<span class="grabcad-logo grabcad-logo-community"></span>
+			<span class="dropdown-icon">
+				<svg width="10" height="11" viewBox="0 0 1024 1024">
+					<path d="M1025 320q0 -26 -19 -45t-45 -19h-896q-26 0 -45 19t-19 45t19 45l448 448q19 19 45 19t45 -19l448 -448q19 -19 19 -45z" fill="#fff"></path>
+				</svg>
+			</span>
+		</a>
+		<ul class="selection lightDropdown">
+			<li>
+				<a class="text-normal" target="_self" href="/home">
+					Home<i class="gc-icon gc-icon-check-circle"></i>
+</a>			</li>
+			<li>
+				<a class="text-normal " target="_self" href="/print">
+					Print<i class="gc-icon gc-icon-check-circle"></i>
+</a>			</li>
+			<li>
+				<a class="text-normal " target="_self" href="/print/pro">
+					<span class="translation_missing" title="translation missing: en.navigation.main.print_pro">Print Pro</span><i class="gc-icon gc-icon-check-circle"></i>
+</a>			</li>
+			<li>
+				<a class="text-normal " target="_self" href="/analyze">
+					Analyze<i class="gc-icon gc-icon-check-circle"></i>
+</a>			</li>
+			<li>
+				<a class="text-normal " target="_self" href="/control">
+					Control<i class="gc-icon gc-icon-check-circle"></i>
+</a>			</li>
+			<li>
+				<a class="text-normal" target="_self" href="/streamline-pro">
+					Streamline Pro<i class="gc-icon gc-icon-check-circle"></i>
+</a>			</li>
+			<li>
+				<a class="text-normal " target="_self" href="/featured-software-partners">
+					Develop<i class="gc-icon gc-icon-check-circle"></i>
+</a>			</li>
+
+
+			<li class="separator"></li>
+
+			<li>
+				<a class="text-normal active" href="https://grabcad.com/dashboard" target="_self">
+					Community<i class="gc-icon gc-icon-check-circle"></i>
+				</a>
+			</li>
+
+		</ul>
+	</li>
+</ul>
+
+      <label for="showMenu" class="showMenu">
+	<span class="menuIcon"><span></span></span>
+</label>
+<input type="checkbox" id="showMenu" role="button">
+	<ul class="login-menu">
+		<li>
+			<a data-toggle="modal" href="https://grabcad.com/community/login" class="login" target="_self">
+				Log in
+			</a>
+		</li>
+	</ul>
+
+
+      <ul class="menu">
+        <li class="communityMenu">
+          <ul>
+            <li>
+              <a target="_self" href="https://grabcad.com/library">
+                <span>Library</span>
+              </a>
+            </li>
+            <li>
+              <a target="_self" href="https://grabcad.com/challenges">
+                <span>Challenges</span>
+              </a>
+            </li>
+            <li class="communityMenu__groups ">
+              <a target="_self" href="https://grabcad.com/groups">
+                <span>Groups</span>
+              </a>
+            </li>
+            <li class="">
+              <a target="_self" href="https://grabcad.com/questions">
+                <span>Questions</span>
+              </a>
+            </li>
+            <li>
+              <a target="_self" href="https://grabcad.com/tutorials">
+                <span>Tutorials</span>
+              </a>
+            </li>
+            <li>
+              <a target="_self" href="https://grabcad.com/engineers">
+                <span>Engineers</span>
+              </a>
+            </li>
+          </ul>
+        </li>
+        <li class="rightMenu">
+          <ul>
+            <li class="staticMenu">
+              <ul>
+                <li>
+                  <a target="_self" href="https://blog.grabcad.com">
+                    <span>Blog</span>
+                  </a>
+                </li>
+              </ul>
+            </li>
+            <li class="personalMenu logged-out">
+              <ul>
+
+
+                <li class="account hover-element ">
+                    <ul class="login">
+                      <li>
+                        <a target="_self" href="/community/login?return=true" class="login">Log in</a>
+                      </li>
+                    </ul>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+  </nav>
+</header>
+
+		<section id="body" class="">
+			<section id="bodyContent" class="gc">
+				<div class="g1">
+					<div class="flashMessage">
+</div>
+
+				</div>
+				<script> window.signInModalPermanent = true; </script>
+
+			</section>
+		</section>
+		<a class="replacer hidden"><img alt="" src="https://grabcad.com/images/_/spinner-default.gif"></a>
+		
+
+		<div id="dimmer"></div>
+<div id="" class="popupWin">
+	<div class="contentWrapper">
+		<div class="popupHeader">
+			<span class="popupName">
+				<h2></h2>
+				<p></p>
+			</span>
+			<span class="closeButton"></span>
+			<span class="close"></span>
+		</div>
+		<div class="popupBody">
+			<div class="bodyContent"></div>
+			<div class="spinnerDiv"></div>
+		</div>
+		<div class="popupFooter">
+			<span class="buttons">
+				<span class="button b32 red submit" id="popupSubmit">Save</span>
+				<a href="#" class="button cancelButton" id="popupCancel">Cancel</a>
+			</span>
+		</div>
+	</div>
+</div>
+		<div class="clearer"></div>
+		
+	<div id="signInApp" ng-non-bindable=""><div id="signInModal"><div class="sign-in-modal__wrap sign-in-modal__wrap--permanent"><!----><div class="sign-in-modal__modal"><div class="sign-in-modal__header"><h4 class="sign-in-modal__title"> Sign In or Create Account </h4><!----><!----></div><div class="sign-in-modal__body"><!----><div class="sign-in-modal__form-container"><div><form id="login_form" method="post" class="sign-in-modal__form" __bizdiag="770083267" __biza="WJ__"><div class="sign-in__input-block"><i class="fas fa-envelope sign-in__input-icon"></i><input type="email" name="member[email]" autocomplete="off" placeholder="Enter email" class="sign-in__input sign-in__input--email"></div><div class="sign-in__input-wrap"><div class="sign-in__input-block"><i class="fas fa-lock sign-in__input-icon"></i><input type="password" name="member[password]" autocomplete="off" placeholder="Enter password" class="sign-in__input sign-in__input--password"><a href="#" class="sign-in__input--password-visibility"><i class="fas fa-eye"></i></a></div><a href="#" class="sign-in__forgot-password"><i class="fas fa-question"></i></a></div><!----><button id="signInButton" type="submit" class="sign-in__button"> Sign In </button></form><div class="sign-in__social-network-buttons"><form action="/auth/facebook" method="post" __bizdiag="994322731" __biza="WJ__"><input type="hidden" name="authenticity_token" value="T0R32RtLWkYrkERKGdOuz6iFBFotzXwRIQZUh+cuGqKFepsLiFr5YfeTMM8YIx39tFYGwubqtkA4gmhvrp1Xmg=="><button type="submit" class="sign-in__social-network-button sign-in__social-network-button--facebook"><i class="fab fa-facebook-f"></i></button></form><form action="/auth/linkedin" method="post" __bizdiag="994322731" __biza="WJ__"><input type="hidden" name="authenticity_token" value="T0R32RtLWkYrkERKGdOuz6iFBFotzXwRIQZUh+cuGqKFepsLiFr5YfeTMM8YIx39tFYGwubqtkA4gmhvrp1Xmg=="><button type="submit" class="sign-in__social-network-button sign-in__social-network-button--linkedin"><i class="fab fa-linkedin-in"></i></button></form><form action="/auth/google_oauth2" method="post" __bizdiag="994322731" __biza="WJ__"><input type="hidden" name="authenticity_token" value="T0R32RtLWkYrkERKGdOuz6iFBFotzXwRIQZUh+cuGqKFepsLiFr5YfeTMM8YIx39tFYGwubqtkA4gmhvrp1Xmg=="><button type="submit" class="sign-in__social-network-button sign-in__social-network-button--google"><i class="fab fa-google"></i></button></form></div><div><div class="sign-in__or-wrap"><hr class="sign-in__or-hr"><div class="sign-in__or">or</div><hr class="sign-in__or-hr"></div><a href="/profile/register" target="_self" class="sign-in__button"> Create Account </a></div></div></div><!----><!----></div></div></div></div></div>
+
+
+    <div class="gc_web_layout-wrapper gc_web_comp-footer__wrapper">
+        <div class="gc_web_layout-container">
+            <div class="gc_web_comp-footer__toplinks">
+                <div>
+                    <div class="gc_web_comp-footer__logos">
+                        <a href="https://www.stratasys.com/" target="_blank" rel="noopener noreferrer">
+                            <img alt="White Stratasys Logo" width="112" height="25" src="https://grabcad.com/assets/production/app/gc/shared/logo/stratasys-white-4b77020b3f456bc74cfda0e64727c838a1670a408727365c16916105579d091f.svg">
+                        </a>
+                        <img alt="White GrabCAD Logo" width="112" height="17" src="https://grabcad.com/assets/production/app/gc/shared/logo/grabcad-white-69ffbd57ceb362664748e93188589f101afe294023645493c7e71e4c93d27aa8.svg">
+                    </div>
+
+
+                    <div class="gc_web_comp-footer__copyright">
+                        © 2026 Stratasys Inc.
+                    </div>
+                </div>
+
+                <div class="gc_web_comp-footer__sections">
+                        <div class="gc_web_comp-footer__section">
+                            <span class="gc_web_comp-footer__section-title">ABOUT US</span>
+                            <div class="gc_web_comp-footer__section-links">
+                                    <div>
+                                        <a target="_self" rel="noopener noreferrer" href="https://resources.grabcad.com/company/">Company</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" rel="noopener noreferrer" href="https://blog.grabcad.com/jobs/">Jobs</a>
+                                    </div>
+                            </div>
+                        </div>
+                        <div class="gc_web_comp-footer__section">
+                            <span class="gc_web_comp-footer__section-title">RESOURCES</span>
+                            <div class="gc_web_comp-footer__section-links">
+                                    <div>
+                                        <a target="_blank" rel="noopener noreferrer" href="https://blog.grabcad.com">Blog</a>
+                                    </div>
+                                    <div>
+                                        <a target="_blank" rel="noopener noreferrer" href="https://resources.grabcad.com">Resource Center</a>
+                                    </div>
+                            </div>
+                        </div>
+                        <div class="gc_web_comp-footer__section">
+                            <span class="gc_web_comp-footer__section-title"><span class="translation_missing" title="translation missing: en.footer_new.links.support">Support</span></span>
+                            <div class="gc_web_comp-footer__section-links">
+                                    <div>
+                                        <a target="_blank" rel="noopener noreferrer" href="https://help.grabcad.com">GrabCAD Software Support</a>
+                                    </div>
+                                    <div>
+                                        <a target="_blank" rel="noopener noreferrer" href="https://support.stratasys.com/Software">GrabCAD Community Support</a>
+                                    </div>
+                            </div>
+                        </div>
+                        <div class="gc_web_comp-footer__section">
+                            <span class="gc_web_comp-footer__section-title">SOCIAL</span>
+                            <div class="gc_web_comp-footer__section-links">
+                                    <div>
+                                        <a target="_blank" rel="noopener noreferrer" href="https://www.facebook.com/GrabCAD">Facebook</a>
+                                    </div>
+                                    <div>
+                                        <a target="_blank" rel="noopener noreferrer" href="https://www.youtube.com/channel/UCKObKIn7qvIfd25MQOSbwjA">Youtube</a>
+                                    </div>
+                                    <div>
+                                        <a target="_blank" rel="noopener noreferrer" href="https://www.instagram.com/grabcadcommunity/">Instagram</a>
+                                    </div>
+                                    <div>
+                                        <a target="_blank" rel="noopener noreferrer" href="https://www.linkedin.com/company/grabcad/">Linkedin</a>
+                                    </div>
+                                    <div>
+                                        <a target="_blank" rel="noopener noreferrer" href="https://twitter.com/grabcad">Twitter</a>
+                                    </div>
+                            </div>
+                        </div>
+                        <div class="gc_web_comp-footer__section">
+                            <span class="gc_web_comp-footer__section-title"><span class="translation_missing" title="translation missing: en.navigation.footer.streamline_pro">Streamline Pro</span></span>
+                            <div class="gc_web_comp-footer__section-links">
+                                    <div>
+                                        <a target="_self" href="/streamline-pro">Overview</a>
+                                    </div>
+                            </div>
+                        </div>
+                        <div class="gc_web_comp-footer__section">
+                            <span class="gc_web_comp-footer__section-title"><span class="translation_missing" title="translation missing: en.navigation.footer.analyze">Analyze</span></span>
+                            <div class="gc_web_comp-footer__section-links">
+                                    <div>
+                                        <a target="_self" href="/analyze">Overview</a>
+                                    </div>
+                            </div>
+                        </div>
+                        <div class="gc_web_comp-footer__section">
+                            <span class="gc_web_comp-footer__section-title"><span class="translation_missing" title="translation missing: en.navigation.footer.control">Control</span></span>
+                            <div class="gc_web_comp-footer__section-links">
+                                    <div>
+                                        <a target="_self" href="/control">Overview</a>
+                                    </div>
+                            </div>
+                        </div>
+                        <div class="gc_web_comp-footer__section">
+                            <span class="gc_web_comp-footer__section-title">Print</span>
+                            <div class="gc_web_comp-footer__section-links">
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/print">Overview</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/print/pro">Pro</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/print/fdm">GrabCAD Print for FDM</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/print/polyjet">GrabCAD Print for PolyJet</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/print/digital_anatomy">Digital Anatomy</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/print/saf">SAF Technology</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/print/p3">Origin</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/print/sl">GrabCAD Print for Neo</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/print/pro/fixturemate">fixturemate by trinckle</a>
+                                    </div>
+                            </div>
+                        </div>
+                        <div class="gc_web_comp-footer__section">
+                            <span class="gc_web_comp-footer__section-title">Shop</span>
+                            <div class="gc_web_comp-footer__section-links">
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/shop">Overview</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/shop/features">Features</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/shop/compare">Compare</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/shop/schools">Teachers &amp; Lab Managers</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/shop/security">IT &amp; Security</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/shop/3d-printing-management-software">Engineering Managers</a>
+                                    </div>
+                            </div>
+                        </div>
+                        <div class="gc_web_comp-footer__section">
+                            <span class="gc_web_comp-footer__section-title">PARTNERS</span>
+                            <div class="gc_web_comp-footer__section-links">
+                                    <div>
+                                        <a target="_self" href="/featured-software-partners">Software Partners</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="/software-development-kit">GrabCAD SDKs</a>
+                                    </div>
+                            </div>
+                        </div>
+                        <div class="gc_web_comp-footer__section">
+                            <span class="gc_web_comp-footer__section-title">COMMUNITY</span>
+                            <div class="gc_web_comp-footer__section-links">
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/library">Library</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/challenges">Challenges</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/groups">Groups</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/questions">Questions</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/tutorials">Tutorials</a>
+                                    </div>
+                                    <div>
+                                        <a target="_self" href="https://grabcad.com/engineers">Engineers</a>
+                                    </div>
+                            </div>
+                        </div>
+                </div>
+            </div>
+
+            <div class="gc_web_comp-footer__bottomlinks">
+                <a target="_blank" rel="noopener" href="https://resources.grabcad.com/company/">Contact Us</a>
+                <a target="_self" href="https://grabcad.com/terms">Website Terms of Use</a>
+                <a target="_self" href="https://grabcad.com/software_terms">Software Terms of Use</a>
+                <a target="_self" href="https://grabcad.com/privacy_policy">Privacy policy</a>
+                <a target="_blank" rel="noopener" href="https://www.stratasys.com/en/legal/legal-information/">Trademarks</a>
+								<a target="_blank" rel="noopener" href="https://support.stratasys.com/Software/GrabCAD-Print/About/Your-Data-on-GrabCAD">Your Data on GrabCAD</a>
+            </div>
+
+            <div class="gc_web_comp-footer__bottomtext">
+                The Computer-Aided Design ("CAD") files and all associated content posted to this website are created, uploaded, managed and owned by third-party users. Each CAD and any associated text, image or data is in no way sponsored by or affiliated with any company, organization or real-world item, product, or good it may purport to portray.
+            </div>
+        </div>
+    </div>
+
+		<script src="https://grabcad.com/assets/production/app/application-1f1212ef1439dd6e1d29897aa7b5126fb8d20541b495f8e5a1e1bb7b29f76e04.js"></script>
+		<script type="text/javascript">
+            Grabcad.configuration.configure({
+  imagePath: 'https://grabcad.com/images',
+  default3dModelPath: '/static/content/cube_holes_5.STL',
+  maximumCategoriesOnCadfile: 3,
+  uploadPath: 'https://s3.amazonaws.com/gc-p',
+  uploadifyFlash: 'https://grabcad.com/flash/uploadify.swf',
+  uploadFileSizeLimit: 524288000,
+  recaptchaKey: '6LdkkBkUAAAAAOpZhSajb_PoE1sw3mORcZhLNkKe',
+  airbrake_options: {
+    project_key: '',
+    production: true,
+    environment_name: 'production',
+    project_id: '20621'
+  },
+  evaluatorServer: {}
+});
+
+            
+		</script>
+		<script type="text/javascript">
+$.ajax({
+	url: '//munchkin.marketo.net/munchkin.js',
+	dataType: 'script',
+	cache: true,
+	success: function() {
+		Munchkin.init('533-LAV-099', { asyncOnly: true });
+	}
+});
+</script>
+
+		<div class="feedbackContainer">
+	<script type="text/javascript">!function(e,t,n){function a(){var e=t.getElementsByTagName("script")[0],n=t.createElement("script");n.type="text/javascript",n.async=!0,n.src="https://beacon-v2.helpscout.net",e.parentNode.insertBefore(n,e)}if(e.Beacon=n=function(t,n,a){e.Beacon.readyQueue.push({method:t,options:n,data:a})},n.readyQueue=[],"complete"===t.readyState)return a();e.attachEvent?e.attachEvent("onload",a):e.addEventListener("load",a,!1)}(window,document,window.Beacon||function(){});</script>
+
+	<script>
+		Beacon('init', '95673dc0-6024-429e-be64-5211d77631fb');
+
+		Beacon('config', {
+			labels: {
+				answer: 'Search',
+				ask: 'Contact',
+				suggestedForYou: 'Related Articles',
+				searchLabel: 'Search our Help Center'
+			},
+			hideAvatars: true
+		});
+
+		Beacon('on', 'ready', () => {
+			Beacon('suggest', [])
+
+		});
+
+		function toggleBeacon(event) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			Beacon('toggle');
+		}
+
+		$('#openHelp').click(toggleBeacon)
+
+		function closeBeacon() {
+			Beacon('close');
+		}
+
+		Beacon('on', 'open', () => {
+			$(document).click(closeBeacon);
+		});
+
+		Beacon('on', 'close', () => {
+			$(document).unbind('click', closeBeacon);
+		});
+
+	</script>
+</div>
+
+		
+			<!-- Google Code for Remarketing Tag -->
+	<script type="text/javascript">
+		/* <![CDATA[ */
+		var google_conversion_id = 981400234;
+		var google_custom_params = window.google_tag_params;
+		var google_remarketing_only = true;
+		/* ]]> */
+	</script>
+	<script type="text/javascript" src="//www.googleadservices.com/pagead/conversion.js">
+	</script>
+	<noscript>
+		<div style="display:inline;">
+			<img height="1" width="1" style="border-style:none;" alt="" src="//googleads.g.doubleclick.net/pagead/viewthroughconversion/981400234/?value=0&guid=ON&script=0"/>
+		</div>
+	</noscript>
+
+    
+
+    
+
+		<script src="https://grabcad.com/assets/production/app/application_frontend/app-2449bf31aadde948a7319d4381174679a4f2838ed7d674c73af53bb4c9de934f.js"></script>
+  
+
+<img alt="" src="https://cdn.bizible.com/ipv?_biz_r=&amp;_biz_h=-1719903014&amp;_biz_u=69af253f96744e01b4349599f36f5f2f&amp;_biz_l=https%3A%2F%2Fgrabcad.com%2Flogin&amp;_biz_t=1778363135559&amp;_biz_i=GrabCAD&amp;_biz_n=0&amp;a=stratasys.com&amp;rnd=641626&amp;cdn_o=a&amp;_biz_z=1778363135936" style="display: none;"><img alt="" src="https://cdn.bizibly.com/u?_biz_u=69af253f96744e01b4349599f36f5f2f&amp;_biz_l=https%3A%2F%2Fgrabcad.com%2Flogin&amp;_biz_t=1778363135940&amp;_biz_i=GrabCAD&amp;a=stratasys.com&amp;rnd=241589&amp;cdn_o=a&amp;_biz_z=1778363135941" style="display: none;"><div id="beacon-container"><div class="hsds-beacon"><div class="Beacon"><div class="ContainerGradient-sc-62zoy-0 dkxqZi"></div><div class="ContainerFramecss__WrapperUI-sc-d7rzhh-0 idbzdx BeaconContainer is-configDisplayRight" role="dialog" aria-label="Help Scout Beacon"></div><div class="FabButtonFramecss__FabButtonFrameUI-sc-y1b4md-0 bbHIsf BeaconFabButtonFrame" style="border-radius: 60px; height: 60px; position: fixed; transform: scale(1); width: 60px; z-index: 1049;"><span class="FabButtonFramecss__FabButtonPulseUI-sc-y1b4md-1 xqqWB is-visible"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60" preserveAspectRatio="none" aria-hidden="true">
+  <path d="M60 30C60 51.25 51.25 60 30 60C8.75 60 1.99634e-09 51.25 1.99563e-09 30C1.99492e-09 8.75 8.75 0 30 0C51.25 0 60 8.75 60 30Z"></path>
+</svg>
+</span><span class="FabButtonFramecss__FabButtonPulseUI-sc-y1b4md-1 xqqWB"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60" preserveAspectRatio="none" aria-hidden="true">
+  <path d="M60 30C60 51.25 51.25 60 30 60C8.75 60 1.99634e-09 51.25 1.99563e-09 30C1.99492e-09 8.75 8.75 0 30 0C51.25 0 60 8.75 60 30Z"></path>
+</svg>
+</span><iframe title="Help Scout Beacon - Open" id="" allowtransparency="true" data-cy="FrameComponent"></iframe></div></div></div></div><img alt="" src="https://cdn.bizible.com/u?mapType=mkto&amp;mapValue=id%3A533-LAV-099%26token%3A_mch-grabcad.com-436f0ccdf3d1961879cf7f76e6302680&amp;_biz_u=69af253f96744e01b4349599f36f5f2f&amp;_biz_l=https%3A%2F%2Fgrabcad.com%2Flogin&amp;_biz_t=1778363136942&amp;_biz_i=GrabCAD&amp;_biz_n=1&amp;a=stratasys.com&amp;rnd=88558&amp;cdn_o=a&amp;_biz_z=1778363136942" style="display: none;"></body></html>

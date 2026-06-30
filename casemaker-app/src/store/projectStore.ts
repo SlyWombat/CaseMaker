@@ -70,7 +70,15 @@ export function createDefaultProject(boardId = DEFAULT_BOARD_ID): Project {
     createdAt: now,
     modifiedAt: now,
     board: cloned,
-    case: defaultCase(),
+    // Honor the board's recommended Z clearance (room above PCB top for
+    // tall components like camera connectors, GPIO stacks, etc.) when it
+    // exceeds the generic default. Boards that don't specify or specify
+    // a small value keep the default.
+    case: (() => {
+      const c = defaultCase();
+      if (board.recommendedZClearance > c.zClearance) c.zClearance = board.recommendedZClearance;
+      return c;
+    })(),
     ports: autoPortsForBoard(board),
     externalAssets: [],
     hats: [],

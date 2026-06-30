@@ -15,7 +15,11 @@ describe('Issue #28 — port cutout Z aligns with elevated board (sits on bosses
     for (const id of listBuiltinBoardIds()) {
       const project = createDefaultProject(id);
       for (const port of project.ports) {
-        if (port.facing === '+z') continue;
+        // +z (lid) cutouts are emitted explicitly by templates; -z (floor)
+        // cutouts use a different placement convention (cylinder bottom at
+        // zMin, extending up through the floor) so they don't satisfy the
+        // side-wall centering rule below. Skip both top/bottom faces.
+        if (port.facing === '+z' || port.facing === '-z') continue;
         const op = buildPortCutoutOp(port, project.board, project.case);
         if (!op) continue;
         const t = findFirstTranslate(op);

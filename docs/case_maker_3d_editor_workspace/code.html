@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Case Maker - Editor</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-secondary": "#003824",
+                    "surface-variant": "#2d3449",
+                    "on-tertiary-fixed": "#311400",
+                    "tertiary-fixed-dim": "#ffb786",
+                    "error-container": "#93000a",
+                    "surface-tint": "#adc6ff",
+                    "on-secondary-container": "#00311f",
+                    "surface-container-highest": "#2d3449",
+                    "inverse-on-surface": "#283044",
+                    "surface-container": "#171f33",
+                    "primary-fixed-dim": "#adc6ff",
+                    "on-tertiary-container": "#461f00",
+                    "inverse-primary": "#005ac2",
+                    "tertiary-fixed": "#ffdcc6",
+                    "on-tertiary-fixed-variant": "#723600",
+                    "on-background": "#dae2fd",
+                    "surface-container-high": "#222a3d",
+                    "tertiary": "#ffb786",
+                    "primary-container": "#4d8eff",
+                    "primary": "#adc6ff",
+                    "on-surface": "#dae2fd",
+                    "outline": "#8c909f",
+                    "surface-bright": "#31394d",
+                    "secondary-fixed-dim": "#4edea3",
+                    "on-tertiary": "#502400",
+                    "on-primary": "#002e6a",
+                    "error": "#ffb4ab",
+                    "on-secondary-fixed-variant": "#005236",
+                    "secondary-fixed": "#6ffbbe",
+                    "inverse-surface": "#dae2fd",
+                    "tertiary-container": "#df7412",
+                    "surface-container-low": "#131b2e",
+                    "outline-variant": "#424754",
+                    "on-surface-variant": "#c2c6d6",
+                    "background": "#0b1326",
+                    "on-error-container": "#ffdad6",
+                    "on-primary-fixed": "#001a42",
+                    "on-primary-fixed-variant": "#004395",
+                    "primary-fixed": "#d8e2ff",
+                    "on-error": "#690005",
+                    "surface-container-lowest": "#060e20",
+                    "secondary": "#4edea3",
+                    "surface": "#0b1326",
+                    "on-secondary-fixed": "#002113",
+                    "on-primary-container": "#00285d",
+                    "secondary-container": "#00a572",
+                    "surface-dim": "#0b1326"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "sm": "8px",
+                    "panel-padding": "20px",
+                    "xl": "32px",
+                    "lg": "24px",
+                    "xs": "4px",
+                    "gutter": "12px",
+                    "unit": "4px",
+                    "md": "16px"
+            },
+            "fontFamily": {
+                    "h2": [
+                            "Space Grotesk"
+                    ],
+                    "body-md": [
+                            "Inter"
+                    ],
+                    "label-mono": [
+                            "Inter"
+                    ],
+                    "h1": [
+                            "Space Grotesk"
+                    ],
+                    "body-lg": [
+                            "Inter"
+                    ],
+                    "code-value": [
+                            "Inter"
+                    ]
+            },
+            "fontSize": {
+                    "h2": [
+                            "24px",
+                            {
+                                    "lineHeight": "1.3",
+                                    "letterSpacing": "-0.01em",
+                                    "fontWeight": "500"
+                            }
+                    ],
+                    "body-md": [
+                            "14px",
+                            {
+                                    "lineHeight": "1.5",
+                                    "letterSpacing": "0",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "label-mono": [
+                            "12px",
+                            {
+                                    "lineHeight": "1.4",
+                                    "letterSpacing": "0.05em",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "h1": [
+                            "32px",
+                            {
+                                    "lineHeight": "1.2",
+                                    "letterSpacing": "-0.02em",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "body-lg": [
+                            "16px",
+                            {
+                                    "lineHeight": "1.6",
+                                    "letterSpacing": "0",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "code-value": [
+                            "13px",
+                            {
+                                    "lineHeight": "1.4",
+                                    "letterSpacing": "0",
+                                    "fontWeight": "500"
+                            }
+                    ]
+            }
+    },
+        },
+      }
+    </script>
+</head>
+<body class="bg-background text-on-background h-screen overflow-hidden flex flex-col font-body-md text-body-md selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopNavBar -->
+<header class="bg-zinc-900 border-b border-zinc-800 shadow-[0_2px_0_0_rgba(0,0,0,0.4)] flex justify-between items-center px-4 h-12 w-full z-50">
+<div class="flex items-center gap-6">
+<span class="text-lg font-bold tracking-tighter text-zinc-100">Case Maker</span>
+<nav class="hidden md:flex items-center gap-1 font-['Space_Grotesk'] tracking-tight text-sm">
+<button class="text-blue-400 font-bold px-3 py-1.5 rounded hover:bg-zinc-800 hover:text-zinc-100 transition-colors duration-150 active:scale-95">New</button>
+<button class="text-zinc-400 px-3 py-1.5 rounded hover:bg-zinc-800 hover:text-zinc-100 transition-colors duration-150 active:scale-95">Undo</button>
+<button class="text-zinc-400 px-3 py-1.5 rounded hover:bg-zinc-800 hover:text-zinc-100 transition-colors duration-150 active:scale-95">Redo</button>
+<button class="text-zinc-400 px-3 py-1.5 rounded hover:bg-zinc-800 hover:text-zinc-100 transition-colors duration-150 active:scale-95">Save</button>
+<button class="text-zinc-400 px-3 py-1.5 rounded hover:bg-zinc-800 hover:text-zinc-100 transition-colors duration-150 active:scale-95">Load</button>
+<button class="text-zinc-400 px-3 py-1.5 rounded hover:bg-zinc-800 hover:text-zinc-100 transition-colors duration-150 active:scale-95">Export</button>
+</nav>
+</div>
+<div class="flex items-center gap-2">
+<button class="bg-blue-600 hover:bg-blue-500 text-white font-['Space_Grotesk'] tracking-tight text-sm px-4 py-1.5 rounded transition-colors duration-150 active:scale-95 font-medium">Share</button>
+<div class="flex items-center gap-1 border-l border-zinc-800 pl-2 ml-2">
+<button aria-label="settings" class="text-zinc-400 hover:text-zinc-100 p-1.5 rounded hover:bg-zinc-800 transition-colors duration-150 active:scale-95">
+<span class="material-symbols-outlined text-[20px]" data-icon="settings">settings</span>
+</button>
+<button aria-label="help" class="text-zinc-400 hover:text-zinc-100 p-1.5 rounded hover:bg-zinc-800 transition-colors duration-150 active:scale-95">
+<span class="material-symbols-outlined text-[20px]" data-icon="help">help</span>
+</button>
+</div>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden">
+<!-- SideNavBar -->
+<aside class="bg-zinc-900 border-r border-zinc-800 w-[280px] flex-shrink-0 flex flex-col h-full py-4 z-40">
+<div class="px-4 mb-6">
+<h2 class="font-h2 text-h2 text-zinc-100">Project Workspace</h2>
+<p class="font-label-mono text-label-mono text-zinc-500 mt-1">V0.1.4-BETA</p>
+</div>
+<nav class="flex-1 overflow-y-auto px-2 space-y-1 font-['Space_Grotesk'] uppercase tracking-widest text-[10px] font-medium">
+<button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-sm text-blue-500 border-l-2 border-blue-500 bg-zinc-800/50 transition-all duration-200 ease-in-out text-left">
+<span class="material-symbols-outlined text-[18px]" data-icon="tune">tune</span>
+                    Parameters
+                </button>
+<button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-sm text-zinc-500 border-l-2 border-transparent hover:bg-zinc-800/80 hover:text-zinc-300 transition-all duration-200 ease-in-out text-left">
+<span class="material-symbols-outlined text-[18px]" data-icon="layers">layers</span>
+                    Layers
+                </button>
+<button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-sm text-zinc-500 border-l-2 border-transparent hover:bg-zinc-800/80 hover:text-zinc-300 transition-all duration-200 ease-in-out text-left">
+<span class="material-symbols-outlined text-[18px]" data-icon="texture">texture</span>
+                    Materials
+                </button>
+<button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-sm text-zinc-500 border-l-2 border-transparent hover:bg-zinc-800/80 hover:text-zinc-300 transition-all duration-200 ease-in-out text-left">
+<span class="material-symbols-outlined text-[18px]" data-icon="precision_manufacturing">precision_manufacturing</span>
+                    Scene
+                </button>
+</nav>
+<div class="p-4 mt-auto border-t border-zinc-800/50 space-y-4">
+<button class="w-full bg-surface-container hover:bg-surface-bright text-primary border border-outline-variant py-2 rounded-sm font-label-mono text-label-mono transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[16px]">add</span>
+                    Add Component
+                </button>
+<div class="space-y-1 font-['Space_Grotesk'] uppercase tracking-widest text-[10px] font-medium">
+<button class="w-full flex items-center gap-3 px-2 py-2 rounded-sm text-zinc-500 hover:bg-zinc-800/80 hover:text-zinc-300 transition-all duration-200 ease-in-out text-left">
+<span class="material-symbols-outlined text-[16px]" data-icon="menu_book">menu_book</span>
+                        Documentation
+                    </button>
+<button class="w-full flex items-center gap-3 px-2 py-2 rounded-sm text-zinc-500 hover:bg-zinc-800/80 hover:text-zinc-300 transition-all duration-200 ease-in-out text-left">
+<span class="material-symbols-outlined text-[16px]" data-icon="support_agent">support_agent</span>
+                        Support
+                    </button>
+</div>
+</div>
+</aside>
+<!-- Main Canvas Area -->
+<main class="flex-1 flex bg-surface-container-lowest relative overflow-hidden">
+<!-- 3D Viewport -->
+<div class="flex-1 relative">
+<!-- Grid Background simulating 3D space base -->
+<div class="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
+<!-- Viewport Tools -->
+<div class="absolute top-4 left-4 flex gap-2 z-10">
+<div class="bg-surface-container-high border border-outline-variant rounded shadow-[0_2px_4px_rgba(0,0,0,0.5)] flex p-1">
+<button class="p-1.5 text-on-surface-variant hover:text-primary hover:bg-surface-bright rounded-sm transition-colors" title="Select">
+<span class="material-symbols-outlined text-[18px]">near_me</span>
+</button>
+<button class="p-1.5 text-on-surface-variant hover:text-primary hover:bg-surface-bright rounded-sm transition-colors" title="Pan">
+<span class="material-symbols-outlined text-[18px]">pan_tool</span>
+</button>
+<button class="p-1.5 text-primary bg-surface-bright rounded-sm transition-colors" title="Orbit">
+<span class="material-symbols-outlined text-[18px]">360</span>
+</button>
+</div>
+</div>
+<!-- Viewport Content Placeholder -->
+<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+<img alt="3D Viewport" class="w-[60%] h-auto opacity-80 mix-blend-screen drop-shadow-[0_0_30px_rgba(77,142,255,0.2)]" data-alt="A highly detailed 3D rendering of a translucent blue parametric electronics enclosure, specifically designed for a Raspberry Pi 4. The enclosure is floating in a dark, industrial grid workspace typical of professional CAD software. The lighting is studio-quality, highlighting the precise geometry, chamfered edges, and internal mounting standoffs of the case. The background is a deep, minimalist dark gray, emphasizing the luminous cyan and electric blue hues of the 3D model." src="https://lh3.googleusercontent.com/aida-public/AB6AXuClxd-PZY9qy-8cb-CagP9EooL5sf7ct0eAo93ASSOfzz0HCkkPbrQZZH0A9_0AQ7N-GhTN9g0rSVkY1S-NjFjSve7w-1FQNoLn2FI0MUziJmHxtJNiJs5cvX27O-hJOCZXlsQH3KQN5qwUOkfhtUZA9y29-5JucXDzhquJAFJHORQhPVVsnp910VNiIaw6Xa3EQZ_5QUK0n8Jt3tHPJ0BNP9n8sEyPp5LoUPdB9jHU9GLKmzK-zlqiubegUZ3vFLE66lbFLUVzxkA"/>
+</div>
+<!-- View Cues -->
+<div class="absolute bottom-4 left-4 text-outline font-code-value text-code-value tracking-wider">
+                    X: 12.04 Y: -4.50 Z: 0.00
+                </div>
+<div class="absolute top-4 right-4 text-outline font-label-mono text-label-mono bg-surface-container-highest px-2 py-1 rounded-sm border border-outline-variant opacity-70">
+                    Perspective
+                </div>
+</div>
+<!-- Right Panel: Parametric Controls -->
+<div class="w-[320px] border-l border-outline-variant bg-surface-container flex flex-col flex-shrink-0 z-20 shadow-[-4px_0_15px_rgba(0,0,0,0.2)]">
+<div class="p-4 border-b border-outline-variant flex items-center justify-between bg-surface-container-highest">
+<h3 class="font-label-mono text-label-mono text-on-surface uppercase tracking-widest">Parametric Controls</h3>
+<button class="text-on-surface-variant hover:text-on-surface">
+<span class="material-symbols-outlined text-[16px]">more_vert</span>
+</button>
+</div>
+<div class="flex-1 overflow-y-auto p-4 space-y-6">
+<!-- Dimensions Section -->
+<div class="space-y-4">
+<div class="flex items-center justify-between">
+<span class="font-label-mono text-label-mono text-on-surface-variant">Dimensions</span>
+<span class="px-1.5 py-0.5 bg-surface-bright text-primary text-[10px] rounded-sm font-label-mono">MM</span>
+</div>
+<!-- Parametric Slider: Length -->
+<div class="space-y-1 group">
+<div class="flex justify-between items-end">
+<label class="font-code-value text-code-value text-on-surface">Length</label>
+<div class="flex items-center gap-1 bg-surface-container-highest border border-outline-variant rounded-sm px-2 py-1 focus-within:border-primary">
+<input class="bg-transparent border-none text-right font-code-value text-code-value text-primary p-0 w-12 focus:ring-0" type="text" value="85.0"/>
+</div>
+</div>
+<div class="relative h-6 bg-surface-container-highest rounded-sm border border-outline-variant/50 overflow-hidden cursor-ew-resize">
+<div class="absolute left-0 top-0 bottom-0 bg-primary/20 w-[60%] pointer-events-none"></div>
+<div class="absolute left-[60%] top-0 bottom-0 w-1 bg-primary pointer-events-none"></div>
+</div>
+</div>
+<!-- Parametric Slider: Width -->
+<div class="space-y-1 group">
+<div class="flex justify-between items-end">
+<label class="font-code-value text-code-value text-on-surface">Width</label>
+<div class="flex items-center gap-1 bg-surface-container-highest border border-outline-variant rounded-sm px-2 py-1 focus-within:border-primary">
+<input class="bg-transparent border-none text-right font-code-value text-code-value text-primary p-0 w-12 focus:ring-0" type="text" value="56.0"/>
+</div>
+</div>
+<div class="relative h-6 bg-surface-container-highest rounded-sm border border-outline-variant/50 overflow-hidden cursor-ew-resize">
+<div class="absolute left-0 top-0 bottom-0 bg-primary/20 w-[45%] pointer-events-none"></div>
+<div class="absolute left-[45%] top-0 bottom-0 w-1 bg-primary pointer-events-none"></div>
+</div>
+</div>
+<!-- Parametric Slider: Height -->
+<div class="space-y-1 group">
+<div class="flex justify-between items-end">
+<label class="font-code-value text-code-value text-on-surface">Height</label>
+<div class="flex items-center gap-1 bg-surface-container-highest border border-outline-variant rounded-sm px-2 py-1 focus-within:border-primary">
+<input class="bg-transparent border-none text-right font-code-value text-code-value text-primary p-0 w-12 focus:ring-0" type="text" value="25.0"/>
+</div>
+</div>
+<div class="relative h-6 bg-surface-container-highest rounded-sm border border-outline-variant/50 overflow-hidden cursor-ew-resize">
+<div class="absolute left-0 top-0 bottom-0 bg-primary/20 w-[30%] pointer-events-none"></div>
+<div class="absolute left-[30%] top-0 bottom-0 w-1 bg-primary pointer-events-none"></div>
+</div>
+</div>
+<!-- Parametric Slider: Wall Thickness -->
+<div class="space-y-1 group pt-2">
+<div class="flex justify-between items-end">
+<label class="font-code-value text-code-value text-on-surface flex items-center gap-1">
+                                    Wall Thk
+                                    <span class="material-symbols-outlined text-[14px] text-outline cursor-help" title="Thickness of the outer shell">info</span>
+</label>
+<div class="flex items-center gap-1 bg-surface-container-highest border border-outline-variant rounded-sm px-2 py-1 focus-within:border-primary">
+<input class="bg-transparent border-none text-right font-code-value text-code-value text-secondary p-0 w-12 focus:ring-0" type="text" value="2.5"/>
+</div>
+</div>
+<div class="relative h-6 bg-surface-container-highest rounded-sm border border-outline-variant/50 overflow-hidden cursor-ew-resize">
+<div class="absolute left-0 top-0 bottom-0 bg-secondary/20 w-[15%] pointer-events-none"></div>
+<div class="absolute left-[15%] top-0 bottom-0 w-1 bg-secondary pointer-events-none"></div>
+</div>
+</div>
+</div>
+<div class="h-px bg-outline-variant w-full"></div>
+<!-- Features Section -->
+<div class="space-y-4">
+<span class="font-label-mono text-label-mono text-on-surface-variant">Features</span>
+<div class="bg-surface-container-highest border border-outline-variant p-3 rounded-sm space-y-3">
+<div class="flex items-center justify-between">
+<span class="font-code-value text-code-value text-on-surface">Top Vents</span>
+<button class="w-8 h-4 bg-primary rounded-full relative transition-colors duration-200">
+<span class="absolute right-0.5 top-0.5 w-3 h-3 bg-on-primary rounded-full shadow-sm"></span>
+</button>
+</div>
+<div class="flex items-center justify-between">
+<span class="font-code-value text-code-value text-on-surface">Side Vents</span>
+<button class="w-8 h-4 bg-surface-bright border border-outline rounded-full relative transition-colors duration-200">
+<span class="absolute left-0.5 top-0.5 w-3 h-3 bg-outline rounded-full shadow-sm"></span>
+</button>
+</div>
+</div>
+<div class="bg-surface-container-highest border border-outline-variant p-3 rounded-sm space-y-3">
+<div class="flex items-center justify-between">
+<span class="font-code-value text-code-value text-on-surface">GPIO Access Slot</span>
+<button class="w-8 h-4 bg-primary rounded-full relative transition-colors duration-200">
+<span class="absolute right-0.5 top-0.5 w-3 h-3 bg-on-primary rounded-full shadow-sm"></span>
+</button>
+</div>
+<div class="flex items-center justify-between">
+<span class="font-code-value text-code-value text-on-surface">Camera Ribbon Port</span>
+<button class="w-8 h-4 bg-surface-bright border border-outline rounded-full relative transition-colors duration-200">
+<span class="absolute left-0.5 top-0.5 w-3 h-3 bg-outline rounded-full shadow-sm"></span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<div class="p-4 border-t border-outline-variant bg-surface-container-highest">
+<button class="w-full bg-primary hover:bg-primary-container text-on-primary py-2 rounded-sm font-label-mono text-label-mono transition-colors shadow-[0_2px_0_0_rgba(0,0,0,0.5)] active:shadow-none active:translate-y-[2px]">
+                        Generate Mesh
+                    </button>
+</div>
+</div>
+</main>
+</div>
+</body></html>

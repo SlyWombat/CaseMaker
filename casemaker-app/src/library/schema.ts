@@ -20,7 +20,7 @@ const componentKindSchema = z.enum([
 
 const cutoutShapeSchema = z.enum(['rect', 'round']);
 
-const facingSchema = z.enum(['+x', '-x', '+y', '-y', '+z']);
+const facingSchema = z.enum(['+x', '-x', '+y', '-y', '+z', '-z']);
 
 const mountingHoleSchema = z.object({
   id: z.string().min(1),

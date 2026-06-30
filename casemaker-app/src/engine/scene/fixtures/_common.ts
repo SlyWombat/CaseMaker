@@ -42,6 +42,8 @@ export function depthAxisForFacing(facing: Facing, size: FixtureSize): DepthAxis
       return { axis: 'y', length: size.y, positive: false, perpSize: { wide: size.x, tall: size.z } };
     case '+z':
       return { axis: 'z', length: size.z, positive: true, perpSize: { wide: size.x, tall: size.y } };
+    case '-z':
+      return { axis: 'z', length: size.z, positive: false, perpSize: { wide: size.x, tall: size.y } };
   }
 }
 
@@ -83,6 +85,8 @@ export function frontFaceCenter(
       return [size.x / 2, insetFromFront, size.z / 2];
     case '+z':
       return [size.x / 2, size.y / 2, size.z - insetFromFront];
+    case '-z':
+      return [size.x / 2, size.y / 2, insetFromFront];
   }
 }
 

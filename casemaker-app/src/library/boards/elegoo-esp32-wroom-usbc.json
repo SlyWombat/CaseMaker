@@ -1,0 +1,56 @@
+{
+  "id": "elegoo-esp32-wroom-usbc",
+  "name": "ELEGOO ESP32 WROOM-32 (USB-C, 30-pin)",
+  "manufacturer": "ELEGOO",
+  "pcb": {
+    "size": {
+      "x": 52.5,
+      "y": 29.2,
+      "z": 1.6
+    }
+  },
+  "mountingHoles": [
+    { "id": "h1", "x": 2.97, "y": 3.1, "diameter": 3.0 },
+    { "id": "h2", "x": 49.19, "y": 3.1, "diameter": 3.0 },
+    { "id": "h3", "x": 2.97, "y": 26.31, "diameter": 3.0 },
+    { "id": "h4", "x": 49.19, "y": 26.31, "diameter": 3.0 }
+  ],
+  "components": [
+    {
+      "id": "usb-c",
+      "kind": "usb-c",
+      "position": { "x": 48, "y": 10.6, "z": 1.6 },
+      "size": { "x": 5.5, "y": 9, "z": 3.2 },
+      "facing": "+x",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "header-bottom",
+      "kind": "gpio-header",
+      "position": { "x": 7.1, "y": 0.6, "z": 1.6 },
+      "size": { "x": 38.1, "y": 2.54, "z": 8.5 },
+      "facing": "+z"
+    },
+    {
+      "id": "header-top",
+      "kind": "gpio-header",
+      "position": { "x": 7.1, "y": 26.0, "z": 1.6 },
+      "size": { "x": 38.1, "y": 2.54, "z": 8.5 },
+      "facing": "+z"
+    },
+    {
+      "id": "pcb-antenna",
+      "kind": "antenna-connector",
+      "position": { "x": 1.5, "y": 11.6, "z": 1.6 },
+      "size": { "x": 6, "y": 7, "z": 1.4 },
+      "facing": "+z",
+      "cutoutMargin": 0
+    }
+  ],
+  "defaultStandoffHeight": 4,
+  "recommendedZClearance": 12,
+  "source": "https://wiki.elegoo.com/oshw-getting-started-&-kits/first-look-esp32",
+  "crossReference": "https://wiki.elegoo.com/oshw-getting-started-kits/esp32-30pin.7z",
+  "measurementMethod": "open-source-cad",
+  "builtin": true
+}

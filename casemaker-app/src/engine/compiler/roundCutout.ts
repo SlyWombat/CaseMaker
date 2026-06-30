@@ -43,6 +43,16 @@ export function buildAxisAlignedCutout(
       const cz = zMin + sizeZ / 2;
       return translate([xMin, cy, cz], rotated);
     }
+    case '-z': {
+      // Floor cutout: cylinder axis is already aligned with +Z (the
+      // primitive defaults). Center on (cx, cy) of the bbox; start at
+      // zMin (which extends below the floor outer surface).
+      const radius = Math.max(sizeX, sizeY) / 2;
+      const cyl = cylinder(sizeZ, radius, segments);
+      const cx = xMin + sizeX / 2;
+      const cy = yMin + sizeY / 2;
+      return translate([cx, cy, zMin], cyl);
+    }
     default:
       return translate([xMin, yMin, zMin], cube([sizeX, sizeY, sizeZ], false));
   }

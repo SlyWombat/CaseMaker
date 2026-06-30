@@ -10,6 +10,7 @@ import arduinoGigaR1WifiRaw from './boards/arduino-giga-r1-wifi.json';
 import arduinoNanoEsp32Raw from './boards/arduino-nano-esp32.json';
 import esp32DevkitV1Raw from './boards/esp32-devkit-v1.json';
 import esp32S3DevkitcRaw from './boards/esp32-s3-devkitc-1.json';
+import elegooEsp32WroomUsbcRaw from './boards/elegoo-esp32-wroom-usbc.json';
 import rpiPicoRaw from './boards/rpi-pico.json';
 import rpiPicoWRaw from './boards/rpi-pico-w.json';
 import quinledDigUnoRaw from './boards/quinled-dig-uno.json';
@@ -22,6 +23,7 @@ import microbitV2Raw from './boards/microbit-v2.json';
 import m5stackCore2Raw from './boards/m5stack-core2.json';
 import snapTestFixtureRaw from './boards/snap-test-fixture.json';
 import genericZeroRaw from './boards/generic-zero.json';
+import elpUsbgs1200P01H120Raw from './boards/elp-usbgs1200p01-h120.json';
 
 const validated: BoardProfile[] = [
   rpi3bRaw,
@@ -34,6 +36,7 @@ const validated: BoardProfile[] = [
   arduinoNanoEsp32Raw,
   esp32DevkitV1Raw,
   esp32S3DevkitcRaw,
+  elegooEsp32WroomUsbcRaw,
   rpiPicoRaw,
   rpiPicoWRaw,
   quinledDigUnoRaw,
@@ -46,6 +49,7 @@ const validated: BoardProfile[] = [
   m5stackCore2Raw,
   snapTestFixtureRaw,
   genericZeroRaw,
+  elpUsbgs1200P01H120Raw,
 ].map((raw) => {
   const parsed = builtinBoardProfileSchema.parse(raw);
   return parsed as BoardProfile;

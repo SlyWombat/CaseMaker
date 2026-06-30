@@ -19,7 +19,7 @@ export type ComponentKind =
 
 export type CutoutShape = 'rect' | 'round';
 
-export type Facing = '+x' | '-x' | '+y' | '-y' | '+z';
+export type Facing = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
 
 export interface MountingHole {
   id: string;
