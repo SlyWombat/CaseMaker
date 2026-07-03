@@ -40,14 +40,22 @@ describe('Marketing gap #15 — project templates', () => {
     expect(project.display!.framing).toBe('recessed-bezel');
   });
 
-  it('esp32-s3-touch-panel mounts the integrated 4.3" LCD in a top-window', () => {
+  it('esp32-s3-touch-panel cuts the LCD window in the floor and snaps the board in screwless', () => {
     const tpl = findTemplate('esp32-s3-touch-panel')!;
     const project = tpl.build();
     expect(project.board.clonedFrom).toBe('esp32-s3-touch-lcd-4.3b');
-    expect(project.display).not.toBeNull();
-    expect(project.display!.displayId).toBe('esp32-s3-touch-lcd-4.3');
-    expect(project.display!.framing).toBe('top-window');
-    expect(project.case.joint).toBe('screw-down');
+    // Screwless: no mounting holes, board held by snap fingers + snap-fit lid.
+    expect(project.board.mountingHoles.length).toBe(0);
+    expect(project.case.joint).toBe('snap-fit');
+    expect(project.case.boardRetention).toBe('snap');
+    // The screen window is an intrinsic -z (floor) cutout — present on the
+    // board itself, so picking the board alone (no display) still gets it.
+    expect(project.display).toBeNull();
+    const window = project.ports.find((p) => p.sourceComponentId === 'lcd-window');
+    expect(window).toBeDefined();
+    expect(window!.facing).toBe('-z');
+    expect(window!.size.x).toBeCloseTo(95.54);
+    expect(window!.size.y).toBeCloseTo(54.36);
   });
 
   it('arduino-dmx adds the CQRobot DMX shield', () => {

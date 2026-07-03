@@ -284,26 +284,23 @@ function elpCameraEnclosure(): Project {
 
 function esp32S3TouchLcd43BPanel(): Project {
   // Waveshare ESP32-S3-Touch-LCD-4.3B: an all-in-one board with a 4.3"
-  // 800x480 capacitive touch LCD bonded to the front. The screen is modelled
-  // as an integrated display profile (coincident with the board) so the lid
-  // gets a real active-area window that frames the glass — a plain +z board
-  // component wouldn't (portFactory skips +z). framing 'top-window' cuts the
-  // 95.54x54.36 active-area window through the lid; the 8.43/12.31 bezel
-  // border rests on the lid rim. Screw-down so the panel is captured securely
-  // behind the bezel. Edge cutouts (USB-C x2 on +X, 16-pos 3.5mm terminal
-  // block on -Y) come from autoPortsForBoard.
+  // 800x480 capacitive touch LCD bonded to the front, and NO screw holes.
+  // The board is modelled screen-DOWN: the 95.54x54.36 active area is a
+  // `-z`-facing component, so autoPortsForBoard punches the window through
+  // the case FLOOR (front bezel) — intrinsic to the board, so it appears
+  // whether you pick the board or this template. You drop the panel in
+  // glass-down: the window is smaller than the 112.4x75.1 glass, so the
+  // glass rests on the floor bezel lip and can't fall through. Screwless
+  // retention: boardRetention 'snap' adds wall fingers that hold the board
+  // down onto the lip; the snap-fit lid is the roomy back cover. Connectors
+  // face up into the cavity — USB-C x2 (-X) and the 16-pos 3.5mm terminal
+  // block (-Y) exit the side walls near the back seam.
   const p = createDefaultProject('esp32-s3-touch-lcd-4.3b');
   p.name = 'ESP32-S3 4.3" touch panel';
-  p.case.joint = 'screw-down';
+  p.case.joint = 'snap-fit';
+  p.case.boardRetention = 'snap';
   p.case.ventilation = { enabled: false, pattern: 'none', coverage: 0 };
-  p.display = {
-    id: 'tpl-display-esp32-s3-lcd-43',
-    displayId: 'esp32-s3-touch-lcd-4.3',
-    framing: 'top-window',
-    offset: { x: 0, y: 0 },
-    hostSupport: 'full-cradle',
-    enabled: true,
-  };
+  p.case.snapCatches = defaultSnapCatchesForCase(p.board, p.case);
   p.ports = autoPortsForBoard(p.board);
   return p;
 }

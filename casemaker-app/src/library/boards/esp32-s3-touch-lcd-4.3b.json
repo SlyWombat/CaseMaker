@@ -6,42 +6,46 @@
     "size": {
       "x": 112.4,
       "y": 75.1,
-      "z": 8.3
+      "z": 17.4
     }
   },
-  "mountingHoles": [
-    { "id": "h1", "x": 10.2, "y": 16.1, "diameter": 3.0 },
-    { "id": "h2", "x": 102.2, "y": 16.1, "diameter": 3.0 },
-    { "id": "h3", "x": 10.2, "y": 66.1, "diameter": 3.0 },
-    { "id": "h4", "x": 102.2, "y": 66.1, "diameter": 3.0 }
-  ],
+  "mountingHoles": [],
   "components": [
+    {
+      "id": "lcd-window",
+      "kind": "custom",
+      "position": { "x": 8.43, "y": 12.31, "z": 0 },
+      "size": { "x": 95.54, "y": 54.36, "z": 1 },
+      "facing": "-z",
+      "cutoutShape": "rect",
+      "cutoutMargin": 0
+    },
     {
       "id": "terminal-block",
       "kind": "custom",
-      "position": { "x": 29.4, "y": -1, "z": 0.5 },
-      "size": { "x": 52.5, "y": 9, "z": 6 },
+      "position": { "x": 29.4, "y": -1, "z": 10.7 },
+      "size": { "x": 52.5, "y": 9, "z": 6.7 },
       "facing": "-y",
       "cutoutMargin": 0.5
     },
     {
       "id": "usb-c-power",
       "kind": "usb-c",
-      "position": { "x": 105.4, "y": 13.1, "z": 3.5 },
+      "position": { "x": 0, "y": 13.1, "z": 11.5 },
       "size": { "x": 7, "y": 9, "z": 3.2 },
-      "facing": "+x",
+      "facing": "-x",
       "cutoutMargin": 0.5
     },
     {
       "id": "usb-c-uart",
       "kind": "usb-c",
-      "position": { "x": 105.4, "y": 24.2, "z": 3.5 },
+      "position": { "x": 0, "y": 24.2, "z": 11.5 },
       "size": { "x": 7, "y": 9, "z": 3.2 },
-      "facing": "+x",
+      "facing": "-x",
       "cutoutMargin": 0.5
     }
   ],
-  "defaultStandoffHeight": 3.5,
+  "defaultStandoffHeight": 0,
   "recommendedZClearance": 0,
   "source": "https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3B",
   "crossReference": "https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3B/ESP32-S3-Touch-LCD-4in3B_Drawing.zip",

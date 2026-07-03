@@ -27,7 +27,7 @@ Initial population: only the `Source` columns reflect the JSON `source` field. T
 | `beaglebone-black` | https://github.com/beagleboard/beaglebone-black/raw/master/SRM/BBB_SRM.pdf | _pending_ | _pending_ | |
 | `microbit-v2` | https://tech.microbit.org/hardware/2-1-revision/ | _pending_ | _pending_ | |
 | `m5stack-core2` | https://docs.m5stack.com/en/core/core2 | _pending_ | _pending_ | LCD active-area dims need verification. |
-| `esp32-s3-touch-lcd-4.3b` | https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3B | verified | 2026-07-03 | All dims read from Waveshare's official dimensional drawing (`ESP32-S3-Touch-LCD-4in3B_Drawing.zip`): 112.4×75.1 glass, VA 95.54×54.36 @ 8.43/8.43 offset, PCB 104×62 (holes 92×50, 6 mm insets), 17.4 mm stack (9.10 front module). Integrated LCD modelled as coincident display `esp32-s3-touch-lcd-4.3` (top-window). MH Ø3.0 assumed (no callout on drawing). |
+| `esp32-s3-touch-lcd-4.3b` | https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3B | verified | 2026-07-03 | Dims from Waveshare's dimensional drawing (`ESP32-S3-Touch-LCD-4in3B_Drawing.zip`): 112.4×75.1 glass, VA 95.54×54.36 (8.43 X-border, 12.31 from terminal edge), 17.4 mm stack. NO screw holes — modelled screen-DOWN: LCD window is a `-z` (floor) cutout intrinsic to the board (appears board-alone, not just in the template); screwless snap-fit bezel case (`boardRetention: 'snap'` + snap-fit back lid). Connectors face up: USB-C ×2 (-X), 16-pos 3.5 mm terminal block (-Y). |
 
 ## Authoritative external references
 
