@@ -14,6 +14,7 @@ describe('Marketing gap #15 — project templates', () => {
       'giga-dmx-controller',
       'esp32-dev-tray',
       'elp-camera-enclosure',
+      'esp32-s3-touch-panel',
       'snap-fit-test',
       'protective-case',
       'large-box-200',
@@ -37,6 +38,16 @@ describe('Marketing gap #15 — project templates', () => {
     expect(project.display).not.toBeNull();
     expect(project.display!.displayId).toBe('hyperpixel-4');
     expect(project.display!.framing).toBe('recessed-bezel');
+  });
+
+  it('esp32-s3-touch-panel mounts the integrated 4.3" LCD in a top-window', () => {
+    const tpl = findTemplate('esp32-s3-touch-panel')!;
+    const project = tpl.build();
+    expect(project.board.clonedFrom).toBe('esp32-s3-touch-lcd-4.3b');
+    expect(project.display).not.toBeNull();
+    expect(project.display!.displayId).toBe('esp32-s3-touch-lcd-4.3');
+    expect(project.display!.framing).toBe('top-window');
+    expect(project.case.joint).toBe('screw-down');
   });
 
   it('arduino-dmx adds the CQRobot DMX shield', () => {

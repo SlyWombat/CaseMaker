@@ -282,6 +282,32 @@ function elpCameraEnclosure(): Project {
   return p;
 }
 
+function esp32S3TouchLcd43BPanel(): Project {
+  // Waveshare ESP32-S3-Touch-LCD-4.3B: an all-in-one board with a 4.3"
+  // 800x480 capacitive touch LCD bonded to the front. The screen is modelled
+  // as an integrated display profile (coincident with the board) so the lid
+  // gets a real active-area window that frames the glass — a plain +z board
+  // component wouldn't (portFactory skips +z). framing 'top-window' cuts the
+  // 95.54x54.36 active-area window through the lid; the 8.43/12.31 bezel
+  // border rests on the lid rim. Screw-down so the panel is captured securely
+  // behind the bezel. Edge cutouts (USB-C x2 on +X, 16-pos 3.5mm terminal
+  // block on -Y) come from autoPortsForBoard.
+  const p = createDefaultProject('esp32-s3-touch-lcd-4.3b');
+  p.name = 'ESP32-S3 4.3" touch panel';
+  p.case.joint = 'screw-down';
+  p.case.ventilation = { enabled: false, pattern: 'none', coverage: 0 };
+  p.display = {
+    id: 'tpl-display-esp32-s3-lcd-43',
+    displayId: 'esp32-s3-touch-lcd-4.3',
+    framing: 'top-window',
+    offset: { x: 0, y: 0 },
+    hostSupport: 'full-cradle',
+    enabled: true,
+  };
+  p.ports = autoPortsForBoard(p.board);
+  return p;
+}
+
 export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
   {
     id: 'pi-server-tray',
@@ -331,6 +357,13 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
     description: 'ELP-USBGS1200P01-H120 (1080P global-shutter USB camera, 120° lens) in a screw-down enclosure with a lens lid hole and a USB-A pass-through cutout sized for the pigtail plug.',
     estPrintMinutes: 75,
     build: elpCameraEnclosure,
+  },
+  {
+    id: 'esp32-s3-touch-panel',
+    name: 'ESP32-S3 4.3" touch panel',
+    description: 'Waveshare ESP32-S3-Touch-LCD-4.3B (4.3" 800x480 capacitive touch) in a screw-down bezel case: the lid frames the active-area window, with USB-C and the 16-position 3.5mm terminal block brought out to the edges.',
+    estPrintMinutes: 150,
+    build: esp32S3TouchLcd43BPanel,
   },
   {
     id: 'snap-fit-test',
