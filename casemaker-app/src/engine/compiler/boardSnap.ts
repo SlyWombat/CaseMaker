@@ -15,11 +15,13 @@ const NO_RESOLVE_DISPLAY: DisplayResolver = () => undefined;
  *
  * When `boardRetention === 'snap'`, four small retainers are emitted on
  * the cavity walls — one per wall, centered along the wall tangent —
- * that overhang the PCB's top edge by FINGER_OVERHANG mm. The user
- * presses the PCB down past the fingers; the fingers' SLOPED bottom
- * faces guide the PCB past with a small lateral force (cavity walls
- * flex very slightly), and once the PCB top clears the finger the
- * horizontal top face holds it down.
+ * that overhang the PCB's top edge by FINGER_OVERHANG mm. The board is
+ * pressed DOWN into the cavity: its top edge first meets the finger's
+ * SLOPED TOP face (the insertion lead-in), which cams the finger/wall
+ * aside so the board slides past. Once the board top clears the finger,
+ * the wall springs back and the finger's FLAT BOTTOM face sits over the
+ * board edge — square to the pull-out direction, so removal is resisted.
+ * Ramp-in, catch-out: the taper favours insertion, not removal.
  *
  * No screws, no foam — just a snap-in board. The PCB still sits on
  * standoffs (board.defaultStandoffHeight) for clearance underneath,
@@ -28,20 +30,17 @@ const NO_RESOLVE_DISPLAY: DisplayResolver = () => undefined;
  * Geometry per finger (in cavity-local coords for the -y wall, with
  * "n outward" meaning AWAY from the cavity = INTO the wall):
  *
- *      outer face          ┌─────────┐  ← top face (z = topZ)
- *      (interior end)      │         │
- *                          │         │
- *                          │ ╲       │  ← sloped bottom — high at the
- *                          │  ╲      │     interior end, low at the
- *                          │   ╲     │     wall side. PCB top edge
- *                          │    ╲    │     pushes against the slope as
- *                          │     ╲   │     it descends, briefly flexing
- *                          │      ╲  │     the wall outward.
- *                          │       ╲ │
- *      cavity-wall side    └────────╲┘  ← bottom face (z = botZ)
- *                                    ↑
- *                                  embedded into wall by EMBED for
- *                                  manifold-fusion with the case shell.
+ *      cavity-wall side    ┌╲            ← sloped TOP face (z: topZ at the
+ *                          │ ╲              wall, ramping DOWN to botZ at the
+ *                          │  ╲             interior tip). The descending
+ *                          │   ╲            board edge rides this ramp and
+ *                          │    ╲           flexes the wall outward.
+ *                          │     ╲
+ *                          └──────┘  ← flat BOTTOM face (z = botZ) — the
+ *      (interior end) ────────────↑    catch: square to pull-out, holds
+ *                                      the board down.
+ *                          ↑
+ *                        wall side embedded by EMBED for manifold fusion.
  */
 
 const FINGER_W = 10;              // mm — along wall tangent
@@ -131,10 +130,11 @@ export function buildBoardSnapOps(
   return { caseAdditive: ops };
 }
 
-/** Build a -y / +y wall finger as a tapered slab — bottom face is sloped
- *  (low at wall side, high at interior end) so the PCB top can ramp past
- *  it during insertion. Implemented as a triangular-prism MESH so we get
- *  the slope cleanly without a difference operation. */
+/** Build a -y / +y wall finger as a tapered slab — the TOP face is sloped
+ *  (high at the wall, ramping DOWN to the interior tip) so the descending
+ *  board rides it and flexes the wall aside during insertion; the BOTTOM
+ *  face is flat (the catch, square to pull-out). Implemented as a
+ *  triangular-prism MESH so we get the slope cleanly without a difference. */
 function buildFingerY(
   sign: -1 | 1,
   tangentCenterX: number,
@@ -151,23 +151,17 @@ function buildFingerY(
   // +y wall (sign=+1) wall material is at y > wallInner, embeddedOuter =
   // wallInner + EMBED. Either way: + sign * EMBED.
   const embeddedOuter = outerNy + sign * EMBED;
-  // Five vertices per cap (pentagon cross-section in y-z), extruded along
-  // x. Cross-section vertices:
-  //   A: wall-side bottom    (n = embeddedOuter, z = botZ)
-  //   B: interior bottom     (n = innerNy,       z = topZ)   ← bottom is SLOPED, B is at topZ
-  //   C: interior top        (n = innerNy,       z = topZ)
-  //   D: wall-side top       (n = embeddedOuter, z = topZ)
-  // …wait B and C are coincident if both at z=topZ. Use 4-vertex
-  // trapezoid in y-z (no separate "interior bottom" vertex) — the slope
-  // runs from A (wall-bottom) to C (interior-top).
-  // Vertices in (y, z): A, B, C  where B is wall-side top, C is
-  // interior-top. The bottom face (slope) is the edge A-C. The other
-  // three faces are: A-B (wall side, vertical), B-C (top face,
-  // horizontal), C-A (the slope, hypotenuse).
-  // This is a triangular prism extruded along x.
+  // Triangular cross-section in (y, z), extruded along x:
+  //   A: wall-side bottom  (n = embeddedOuter, z = botZ)
+  //   B: wall-side top     (n = embeddedOuter, z = topZ)
+  //   C: interior tip      (n = innerNy,       z = botZ)  ← tip at BOTTOM
+  // Faces: A-B wall-side (vertical), B-C the sloped TOP ramp (wall-top down
+  // to interior-bottom = the insertion lead-in), C-A the flat BOTTOM catch
+  // (both at botZ). Only C's z differs from the removal-taper version
+  // (botZ, not topZ) — same vertex order, so winding/normals are unchanged.
   return makeTriPrism(
     [embeddedOuter, embeddedOuter, innerNy], // y values for A, B, C
-    [botZ, topZ, topZ],                       // z values for A, B, C
+    [botZ, topZ, botZ],                       // z values for A, B, C
     xMin,
     xMax,
     /*axis=*/'y',
@@ -188,9 +182,12 @@ function buildFingerX(
   const yMin = tangentCenterY - FINGER_W / 2;
   const yMax = tangentCenterY + FINGER_W / 2;
   const embeddedOuter = outerNx + sign * EMBED;
+  // Sloped TOP ramp (insertion lead-in) + flat BOTTOM catch — interior tip
+  // at botZ, mirroring buildFingerY. Only the tip's z differs from the
+  // removal-taper version.
   return makeTriPrismX(
     [embeddedOuter, embeddedOuter, innerNx],
-    [botZ, topZ, topZ],
+    [botZ, topZ, botZ],
     yMin, yMax,
     sign,
   );
