@@ -1,8 +1,7 @@
 import type { BoardProfile, CaseParameters, HatPlacement, HatProfile } from '@/types';
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
 import { cavityClearance, cavityOriginXY } from '@/engine/coords';
-import { mesh, type BuildOp } from './buildPlan';
-import { computeShellDims } from './caseShell';
+import { cube, translate, mesh, type BuildOp } from './buildPlan';
 
 type HatResolver = (id: string) => HatProfile | undefined;
 const NO_HATS: HatPlacement[] = [];
@@ -49,6 +48,18 @@ const FINGER_THICKNESS = 1.6;     // mm — vertical extent of the finger
 const FINGER_CLEARANCE_Z = 0.25;  // mm — gap above PCB top before the finger's lowest point
 const EMBED = 0.5;                // mm — fuse with wall material
 
+// Seat-shoulder (board.retentionShoulder). A raised rim around the cavity
+// perimeter that brings the walls IN to the PCB/glass footprint over the
+// seat height (bezel lip → finger catch), so a face-down panel drops into a
+// snug pocket instead of floating in the internal-clearance gap. Without it,
+// when internalClearance per side exceeds FINGER_OVERHANG the panel can shift
+// far enough to slip past the fingers entirely and fall through — which is
+// exactly what happens on the ESP32-S3-Touch-LCD-4.3B (1.5 mm/side clearance
+// vs 1.2 mm overhang). The shoulder eliminates the lateral float; the fingers
+// then reliably overhang the seated panel's top edge.
+const SHOULDER_FIT = 0.15;           // mm — lateral clearance per side (pocket = footprint + 2×)
+const SHOULDER_FINGER_EXTRA = 0.4;   // mm — extra finger overhang in shoulder mode (more positive catch)
+
 export interface BoardSnapOps {
   /** Snap retainer geometry, fused with the case shell (additive). */
   caseAdditive: BuildOp[];
@@ -57,24 +68,28 @@ export interface BoardSnapOps {
 export function buildBoardSnapOps(
   board: BoardProfile,
   params: CaseParameters,
-  hats: HatPlacement[] = NO_HATS,
-  resolveHat: HatResolver = NO_RESOLVE,
-  display: DisplayPlacement | null | undefined = null,
-  resolveDisplay: DisplayResolver = NO_RESOLVE_DISPLAY,
+  // hats/display are accepted for the uniform compiler-op signature but the
+  // snap fingers + seat shoulder are anchored purely on the PCB footprint.
+  _hats: HatPlacement[] = NO_HATS,
+  _resolveHat: HatResolver = NO_RESOLVE,
+  _display: DisplayPlacement | null | undefined = null,
+  _resolveDisplay: DisplayResolver = NO_RESOLVE_DISPLAY,
 ): BoardSnapOps {
   if (params.boardRetention !== 'snap') return { caseAdditive: [] };
   // Need a non-degenerate PCB footprint to anchor the fingers.
   if (board.pcb.size.x < FINGER_W + 4 || board.pcb.size.y < FINGER_W + 4) {
     return { caseAdditive: [] };
   }
-  const dims = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
-  void dims;
   const wall = params.wallThickness;
   const cl = cavityClearance(params);
   const origin = cavityOriginXY(params);
   const pcbTopZ = params.floorThickness + board.defaultStandoffHeight + board.pcb.size.z;
   const botZ = pcbTopZ + FINGER_CLEARANCE_Z;
   const topZ = botZ + FINGER_THICKNESS;
+  // Seat-shoulder mode: fingers reach a touch further past the (now snug)
+  // panel edge for a more positive catch; a perimeter rim locates the panel.
+  const shoulder = board.retentionShoulder === true;
+  const overhang = FINGER_OVERHANG + (shoulder ? SHOULDER_FINGER_EXTRA : 0);
   // PCB occupies world XY (origin already accounts for per-side clearance tweaks):
   //   x = [origin.x, origin.x + pcb.x]
   //   y = [origin.y, origin.y + pcb.y]
@@ -94,12 +109,12 @@ export function buildBoardSnapOps(
 
   const ops: BuildOp[] = [];
   // -y wall: finger spans y from (wallInnerYMin - EMBED) to
-  // (pcbYMin + FINGER_OVERHANG); embed extends INTO wall material at y < wall.
+  // (pcbYMin + overhang); embed extends INTO wall material at y < wall.
   ops.push(buildFingerY(
     /*sign*/ -1,
     /*tangentCenter*/ xCenter,
     /*outerN*/ wallInnerYMin,                        // wall inner surface (cavity side)
-    /*innerN*/ pcbYMin + FINGER_OVERHANG,            // interior end overhanging PCB
+    /*innerN*/ pcbYMin + overhang,                   // interior end overhanging PCB
     botZ, topZ,
   ));
   // +y wall
@@ -107,7 +122,7 @@ export function buildBoardSnapOps(
     /*sign*/ +1,
     /*tangentCenter*/ xCenter,
     /*outerN*/ wallInnerYMax,
-    /*innerN*/ pcbYMax - FINGER_OVERHANG,
+    /*innerN*/ pcbYMax - overhang,
     botZ, topZ,
   ));
   // -x wall
@@ -115,7 +130,7 @@ export function buildBoardSnapOps(
     /*sign*/ -1,
     /*tangentCenter*/ yCenter,
     /*outerN*/ wallInnerXMin,
-    /*innerN*/ pcbXMin + FINGER_OVERHANG,
+    /*innerN*/ pcbXMin + overhang,
     botZ, topZ,
   ));
   // +x wall
@@ -123,9 +138,35 @@ export function buildBoardSnapOps(
     /*sign*/ +1,
     /*tangentCenter*/ yCenter,
     /*outerN*/ wallInnerXMax,
-    /*innerN*/ pcbXMax - FINGER_OVERHANG,
+    /*innerN*/ pcbXMax - overhang,
     botZ, topZ,
   ));
+
+  // Seat-shoulder rim: four boxes that fill the clearance gap between each
+  // cavity wall and the panel footprint, over the seat height (floor top →
+  // finger catch). They union into a picture-frame whose opening is the
+  // panel footprint + 2×SHOULDER_FIT, so the panel drops in snug and can't
+  // drift out from under the fingers. Connectors exit higher up (z well above
+  // botZ), so a low perimeter rim never fouls their cutouts.
+  if (shoulder) {
+    const z0 = params.floorThickness;
+    const z1 = botZ;                     // rim top meets the finger catch plane
+    const openXLo = pcbXMin - SHOULDER_FIT;
+    const openXHi = pcbXMax + SHOULDER_FIT;
+    const openYLo = pcbYMin - SHOULDER_FIT;
+    const openYHi = pcbYMax + SHOULDER_FIT;
+    // Inner cavity extents, embedded a touch into the walls for clean fusion.
+    const xLo = wallInnerXMin - EMBED;
+    const xHi = wallInnerXMax + EMBED;
+    const yLo = wallInnerYMin - EMBED;
+    const yHi = wallInnerYMax + EMBED;
+    const box = (bxLo: number, bxHi: number, byLo: number, byHi: number): BuildOp =>
+      translate([bxLo, byLo, z0], cube([bxHi - bxLo, byHi - byLo, z1 - z0]));
+    ops.push(box(xLo, openXLo, yLo, yHi));   // -x rim
+    ops.push(box(openXHi, xHi, yLo, yHi));   // +x rim
+    ops.push(box(xLo, xHi, yLo, openYLo));   // -y rim
+    ops.push(box(xLo, xHi, openYHi, yHi));   // +y rim
+  }
 
   return { caseAdditive: ops };
 }

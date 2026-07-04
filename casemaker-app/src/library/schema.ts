@@ -64,6 +64,9 @@ export const boardProfileSchema = z.object({
   components: z.array(componentSchema),
   defaultStandoffHeight: z.number().nonnegative(),
   recommendedZClearance: z.number().nonnegative(),
+  // Board-retention seat shoulder — raised perimeter rim so a face-down panel
+  // seats snug instead of floating in the internal-clearance gap (see boardSnap).
+  retentionShoulder: z.boolean().optional(),
   source: z.string().url().optional(),
   crossReference: z.string().url().optional(),
   datasheetRevision: z.string().optional(),

@@ -68,6 +68,13 @@ export interface BoardProfile {
   components: BoardComponent[];
   defaultStandoffHeight: Mm;
   recommendedZClearance: Mm;
+  /** Board-retention seat shoulder. When true AND boardRetention='snap', the
+   * snap compiler adds a raised perimeter rim that brings the cavity walls in
+   * to the PCB/glass footprint over the seat height, so a face-down panel
+   * seats in a snug pocket instead of floating in the internal-clearance gap.
+   * Needed when clearance/side exceeds the finger overhang (e.g. the
+   * ESP32-S3-Touch-LCD-4.3B glass would otherwise slip past the fingers). */
+  retentionShoulder?: boolean;
   source?: string;
   /** Independent confirmation of dimensions (e.g., open-source CAD repo). */
   crossReference?: string;

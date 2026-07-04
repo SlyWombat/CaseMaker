@@ -29,17 +29,9 @@
       "cutoutMargin": 0.5
     },
     {
-      "id": "usb-c-power",
+      "id": "usb-c",
       "kind": "usb-c",
-      "position": { "x": 0, "y": 13.1, "z": 11.5 },
-      "size": { "x": 7, "y": 9, "z": 3.2 },
-      "facing": "-x",
-      "cutoutMargin": 0.5
-    },
-    {
-      "id": "usb-c-uart",
-      "kind": "usb-c",
-      "position": { "x": 0, "y": 24.2, "z": 11.5 },
+      "position": { "x": 0, "y": 31.6, "z": 8.8 },
       "size": { "x": 7, "y": 9, "z": 3.2 },
       "facing": "-x",
       "cutoutMargin": 0.5
@@ -47,6 +39,7 @@
   ],
   "defaultStandoffHeight": 0,
   "recommendedZClearance": 0,
+  "retentionShoulder": true,
   "source": "https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3B",
   "crossReference": "https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-4.3B/ESP32-S3-Touch-LCD-4in3B_Drawing.zip",
   "measurementMethod": "datasheet",

@@ -293,7 +293,7 @@ function esp32S3TouchLcd43BPanel(): Project {
   // glass rests on the floor bezel lip and can't fall through. Screwless
   // retention: boardRetention 'snap' adds wall fingers that hold the board
   // down onto the lip; the snap-fit lid is the roomy back cover. Connectors
-  // face up into the cavity — USB-C x2 (-X) and the 16-pos 3.5mm terminal
+  // face up into the cavity — one USB-C (-X) and the 16-pos 3.5mm terminal
   // block (-Y) exit the side walls near the back seam.
   const p = createDefaultProject('esp32-s3-touch-lcd-4.3b');
   p.name = 'ESP32-S3 4.3" touch panel';
