@@ -67,6 +67,33 @@ export const boardProfileSchema = z.object({
   // Board-retention seat shoulder — raised perimeter rim so a face-down panel
   // seats snug instead of floating in the internal-clearance gap (see boardSnap).
   retentionShoulder: z.boolean().optional(),
+  // Scope board-retention to a sub-rectangle of the PCB (extended boards).
+  retentionFootprint: z
+    .object({
+      x: z.number(),
+      y: z.number(),
+      width: z.number().positive(),
+      height: z.number().positive(),
+    })
+    .optional(),
+  // Secondary boards held on snap clips above the floor (e.g. SlyTherm MSR-2).
+  secondaryBoardMounts: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        position: z.object({ x: z.number(), y: z.number() }),
+        size: xyzSchema.refine((s) => s.x > 0 && s.y > 0 && s.z > 0),
+        standoffHeight: z.number().nonnegative(),
+        overhang: z.number().positive().optional(),
+        clips: z.array(
+          z.object({
+            edge: z.enum(['+x', '-x', '+y', '-y']),
+            offset: z.number().nonnegative(),
+          }),
+        ),
+      }),
+    )
+    .optional(),
   source: z.string().url().optional(),
   crossReference: z.string().url().optional(),
   datasheetRevision: z.string().optional(),

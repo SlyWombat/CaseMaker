@@ -1,0 +1,62 @@
+{
+  "id": "slytherm",
+  "name": "SlyTherm (ESP32-S3 4.3\" + MSR-2 mmWave)",
+  "manufacturer": "ElectricRV",
+  "clonedFrom": "esp32-s3-touch-lcd-4.3b",
+  "pcb": {
+    "size": {
+      "x": 142,
+      "y": 75.1,
+      "z": 1.3
+    }
+  },
+  "mountingHoles": [],
+  "components": [
+    {
+      "id": "lcd-window",
+      "kind": "custom",
+      "position": { "x": 8.43, "y": 12.31, "z": 0 },
+      "size": { "x": 95.54, "y": 54.36, "z": 1 },
+      "facing": "-z",
+      "cutoutShape": "rect",
+      "cutoutMargin": 0
+    },
+    {
+      "id": "terminal-block",
+      "kind": "custom",
+      "position": { "x": 29.4, "y": -1, "z": 10.7 },
+      "size": { "x": 52.5, "y": 9, "z": 6.7 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "usb-c",
+      "kind": "usb-c",
+      "position": { "x": 0, "y": 31.6, "z": 8.8 },
+      "size": { "x": 7, "y": 9, "z": 3.2 },
+      "facing": "-x",
+      "cutoutMargin": 0.5
+    }
+  ],
+  "defaultStandoffHeight": 0,
+  "recommendedZClearance": 0,
+  "retentionShoulder": true,
+  "retentionFootprint": { "x": 0, "y": 0, "width": 112.4, "height": 75.1 },
+  "secondaryBoardMounts": [
+    {
+      "id": "msr2",
+      "position": { "x": 118, "y": 18.8 },
+      "size": { "x": 21, "y": 37.5, "z": 1.5 },
+      "standoffHeight": 10,
+      "overhang": 2,
+      "clips": [
+        { "edge": "-y", "offset": 10.5 },
+        { "edge": "+y", "offset": 10.5 },
+        { "edge": "-x", "offset": 9 }
+      ]
+    }
+  ],
+  "source": "https://electricrv.ca",
+  "measurementMethod": "physical-measurement",
+  "builtin": true
+}

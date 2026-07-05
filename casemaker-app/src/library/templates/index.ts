@@ -305,6 +305,22 @@ function esp32S3TouchLcd43BPanel(): Project {
   return p;
 }
 
+function slythermPanel(): Project {
+  // SlyTherm: the ESP32-S3-Touch-LCD-4.3B panel extended +X to co-locate a
+  // Seeed MSR-2 mmWave radar module. Same screen-down bezel + snap retention as
+  // the touch panel (scoped to the 112.4x75.1 screen so its rim/fingers stay on
+  // the glass), plus snap-clip standoffs that hold the 21x37.5 MSR-2 PCB 10 mm
+  // above the floor in the extension bay, radar facing out the front.
+  const p = createDefaultProject('slytherm');
+  p.name = 'SlyTherm (4.3" touch + MSR-2 radar)';
+  p.case.joint = 'snap-fit';
+  p.case.boardRetention = 'snap';
+  p.case.ventilation = { enabled: false, pattern: 'none', coverage: 0 };
+  p.case.snapCatches = defaultSnapCatchesForCase(p.board, p.case);
+  p.ports = autoPortsForBoard(p.board);
+  return p;
+}
+
 export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
   {
     id: 'pi-server-tray',
@@ -361,6 +377,13 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
     description: 'Waveshare ESP32-S3-Touch-LCD-4.3B (4.3" 800x480 capacitive touch) in a screw-down bezel case: the lid frames the active-area window, with USB-C and the 16-position 3.5mm terminal block brought out to the edges.',
     estPrintMinutes: 150,
     build: esp32S3TouchLcd43BPanel,
+  },
+  {
+    id: 'slytherm',
+    name: 'SlyTherm (4.3" touch + MSR-2 radar)',
+    description: 'ESP32-S3 4.3" touch panel extended with a snap-clip bay for a Seeed MSR-2 mmWave radar module held 10mm off the floor, radar facing out the front alongside the screen.',
+    estPrintMinutes: 170,
+    build: slythermPanel,
   },
   {
     id: 'snap-fit-test',

@@ -20,6 +20,7 @@ import { buildTextLabelOps } from './textLabels';
 import { buildAntennaOps } from './antennas';
 import { buildSnapCatchOps } from './snapCatches';
 import { buildBoardSnapOps } from './boardSnap';
+import { buildSecondaryMountOps } from './secondaryMounts';
 import { buildHingeOps } from './hinges';
 import { buildCustomCutouts } from './customCutouts';
 import { validatePlacements } from './placementValidator';
@@ -86,6 +87,9 @@ export function compileProject(project: Project): BuildPlan {
   // Board-retention snap fingers (when boardRetention='snap'). Emitted
   // on the cavity walls; auto-skipped when boardRetention is anything else.
   const boardSnapOps = buildBoardSnapOps(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+  // Snap-clip mounts for secondary boards (e.g. SlyTherm's MSR-2), fused with
+  // the shell. Empty unless board.secondaryBoardMounts is set.
+  const secondaryMountOps = buildSecondaryMountOps(board, caseParams);
   // Issue #111 — rugged exterior (corner bumpers, ribbing, feet).
   const ruggedOps = buildRuggedOps(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   // Issue #92 — barrel hinge. caseAdditive joins the shell pre-cavity-cut so
@@ -117,6 +121,7 @@ export function compileProject(project: Project): BuildPlan {
     ...ruggedOps.caseAdditive,
     ...(flangeOps.caseAdditive ? [flangeOps.caseAdditive] : []),
     ...boardSnapOps.caseAdditive,
+    ...secondaryMountOps.caseAdditive,
   ];
 
   const smartLayout = applySmartCutoutLayout(

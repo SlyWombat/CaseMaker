@@ -12,6 +12,7 @@ import esp32DevkitV1Raw from './boards/esp32-devkit-v1.json';
 import esp32S3DevkitcRaw from './boards/esp32-s3-devkitc-1.json';
 import elegooEsp32WroomUsbcRaw from './boards/elegoo-esp32-wroom-usbc.json';
 import esp32S3TouchLcd43BRaw from './boards/esp32-s3-touch-lcd-4.3b.json';
+import slythermRaw from './boards/slytherm.json';
 import rpiPicoRaw from './boards/rpi-pico.json';
 import rpiPicoWRaw from './boards/rpi-pico-w.json';
 import quinledDigUnoRaw from './boards/quinled-dig-uno.json';
@@ -39,6 +40,7 @@ const validated: BoardProfile[] = [
   esp32S3DevkitcRaw,
   elegooEsp32WroomUsbcRaw,
   esp32S3TouchLcd43BRaw,
+  slythermRaw,
   rpiPicoRaw,
   rpiPicoWRaw,
   quinledDigUnoRaw,

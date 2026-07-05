@@ -76,8 +76,16 @@ export function buildBoardSnapOps(
   _resolveDisplay: DisplayResolver = NO_RESOLVE_DISPLAY,
 ): BoardSnapOps {
   if (params.boardRetention !== 'snap') return { caseAdditive: [] };
-  // Need a non-degenerate PCB footprint to anchor the fingers.
-  if (board.pcb.size.x < FINGER_W + 4 || board.pcb.size.y < FINGER_W + 4) {
+  // Retention footprint — the sub-rectangle actually captured. Defaults to the
+  // whole PCB, but an extended board (e.g. SlyTherm's +X MSR-2 bay) scopes it to
+  // the screen so the rim/fingers don't wrap the extension.
+  const rf = board.retentionFootprint;
+  const fpX = rf?.x ?? 0;
+  const fpY = rf?.y ?? 0;
+  const fpW = rf?.width ?? board.pcb.size.x;
+  const fpH = rf?.height ?? board.pcb.size.y;
+  // Need a non-degenerate footprint to anchor the fingers.
+  if (fpW < FINGER_W + 4 || fpH < FINGER_W + 4) {
     return { caseAdditive: [] };
   }
   const wall = params.wallThickness;
@@ -90,82 +98,65 @@ export function buildBoardSnapOps(
   // panel edge for a more positive catch; a perimeter rim locates the panel.
   const shoulder = board.retentionShoulder === true;
   const overhang = FINGER_OVERHANG + (shoulder ? SHOULDER_FINGER_EXTRA : 0);
-  // PCB occupies world XY (origin already accounts for per-side clearance tweaks):
-  //   x = [origin.x, origin.x + pcb.x]
-  //   y = [origin.y, origin.y + pcb.y]
-  const pcbXMin = origin.x;
-  const pcbXMax = pcbXMin + board.pcb.size.x;
-  const pcbYMin = origin.y;
-  const pcbYMax = pcbYMin + board.pcb.size.y;
-  // Wall inner surfaces. The far walls sit at the cavity span, which adds
-  // both per-side clearances (xMin + xMax / yMin + yMax) on top of the PCB.
+  // Captured panel occupies world XY = origin + footprint offset.
+  const pcbXMin = origin.x + fpX;
+  const pcbXMax = pcbXMin + fpW;
+  const pcbYMin = origin.y + fpY;
+  const pcbYMax = pcbYMin + fpH;
+  // Full-board cavity wall inner surfaces.
   const wallInnerYMin = wall;
   const wallInnerYMax = wall + board.pcb.size.y + cl.yMin + cl.yMax;
   const wallInnerXMin = wall;
   const wallInnerXMax = wall + board.pcb.size.x + cl.xMin + cl.xMax;
-  // Centers along each wall tangent.
+  // Per-side "back" coordinate for the rim/finger anchor: fill to the cavity
+  // wall when the panel edge is within RIB_FILL_MAX of it, else stand a
+  // standalone internal rib RIB_W outboard of the panel edge (used on the side
+  // that faces an extension bay rather than a wall).
+  const RIB_W = 2.0;
+  const RIB_FILL_MAX = 4.0;
+  const backLo = (edge: number, wallC: number) => (edge - wallC <= RIB_FILL_MAX ? wallC : edge - RIB_W);
+  const backHi = (edge: number, wallC: number) => (wallC - edge <= RIB_FILL_MAX ? wallC : edge + RIB_W);
+  const backXLo = backLo(pcbXMin, wallInnerXMin);
+  const backXHi = backHi(pcbXMax, wallInnerXMax);
+  const backYLo = backLo(pcbYMin, wallInnerYMin);
+  const backYHi = backHi(pcbYMax, wallInnerYMax);
+  // Centers along each edge tangent.
   const xCenter = (pcbXMin + pcbXMax) / 2;
   const yCenter = (pcbYMin + pcbYMax) / 2;
 
   const ops: BuildOp[] = [];
-  // -y wall: finger spans y from (wallInnerYMin - EMBED) to
-  // (pcbYMin + overhang); embed extends INTO wall material at y < wall.
-  ops.push(buildFingerY(
-    /*sign*/ -1,
-    /*tangentCenter*/ xCenter,
-    /*outerN*/ wallInnerYMin,                        // wall inner surface (cavity side)
-    /*innerN*/ pcbYMin + overhang,                   // interior end overhanging PCB
-    botZ, topZ,
-  ));
-  // +y wall
-  ops.push(buildFingerY(
-    /*sign*/ +1,
-    /*tangentCenter*/ xCenter,
-    /*outerN*/ wallInnerYMax,
-    /*innerN*/ pcbYMax - overhang,
-    botZ, topZ,
-  ));
-  // -x wall
-  ops.push(buildFingerX(
-    /*sign*/ -1,
-    /*tangentCenter*/ yCenter,
-    /*outerN*/ wallInnerXMin,
-    /*innerN*/ pcbXMin + overhang,
-    botZ, topZ,
-  ));
-  // +x wall
-  ops.push(buildFingerX(
-    /*sign*/ +1,
-    /*tangentCenter*/ yCenter,
-    /*outerN*/ wallInnerXMax,
-    /*innerN*/ pcbXMax - overhang,
-    botZ, topZ,
-  ));
+  // -y edge: finger fuses at backYLo (wall or rib), tip overhangs the panel.
+  ops.push(buildFingerY(-1, xCenter, backYLo, pcbYMin + overhang, botZ, topZ));
+  // +y edge
+  ops.push(buildFingerY(+1, xCenter, backYHi, pcbYMax - overhang, botZ, topZ));
+  // -x edge
+  ops.push(buildFingerX(-1, yCenter, backXLo, pcbXMin + overhang, botZ, topZ));
+  // +x edge
+  ops.push(buildFingerX(+1, yCenter, backXHi, pcbXMax - overhang, botZ, topZ));
 
-  // Seat-shoulder rim: four boxes that fill the clearance gap between each
-  // cavity wall and the panel footprint, over the seat height (floor top →
-  // finger catch). They union into a picture-frame whose opening is the
-  // panel footprint + 2×SHOULDER_FIT, so the panel drops in snug and can't
-  // drift out from under the fingers. Connectors exit higher up (z well above
-  // botZ), so a low perimeter rim never fouls their cutouts.
+  // Seat-shoulder rim: a picture-frame around the captured footprint over the
+  // seat height (floor top → finger catch). Its opening is footprint + 2×
+  // SHOULDER_FIT so the panel drops in snug; each side runs out to its `back`
+  // coord — filling the clearance gap to a nearby wall, or a slim internal rib
+  // where the footprint faces an extension bay.
   if (shoulder) {
     const z0 = params.floorThickness;
-    const z1 = botZ;                     // rim top meets the finger catch plane
+    const z1 = botZ;
     const openXLo = pcbXMin - SHOULDER_FIT;
     const openXHi = pcbXMax + SHOULDER_FIT;
     const openYLo = pcbYMin - SHOULDER_FIT;
     const openYHi = pcbYMax + SHOULDER_FIT;
-    // Inner cavity extents, embedded a touch into the walls for clean fusion.
-    const xLo = wallInnerXMin - EMBED;
-    const xHi = wallInnerXMax + EMBED;
-    const yLo = wallInnerYMin - EMBED;
-    const yHi = wallInnerYMax + EMBED;
+    // Embed toward a wall for fusion; a standalone rib needs no embed.
+    const eXLo = backXLo <= wallInnerXMin + 1e-3 ? backXLo - EMBED : backXLo;
+    const eXHi = backXHi >= wallInnerXMax - 1e-3 ? backXHi + EMBED : backXHi;
+    const eYLo = backYLo <= wallInnerYMin + 1e-3 ? backYLo - EMBED : backYLo;
+    const eYHi = backYHi >= wallInnerYMax - 1e-3 ? backYHi + EMBED : backYHi;
     const box = (bxLo: number, bxHi: number, byLo: number, byHi: number): BuildOp =>
       translate([bxLo, byLo, z0], cube([bxHi - bxLo, byHi - byLo, z1 - z0]));
-    ops.push(box(xLo, openXLo, yLo, yHi));   // -x rim
-    ops.push(box(openXHi, xHi, yLo, yHi));   // +x rim
-    ops.push(box(xLo, xHi, yLo, openYLo));   // -y rim
-    ops.push(box(xLo, xHi, openYHi, yHi));   // +y rim
+    ops.push(box(eXLo, openXLo, eYLo, eYHi));   // -x rim
+    ops.push(box(openXHi, eXHi, eYLo, eYHi));   // +x rim
+    ops.push(box(eXLo, eXHi, eYLo, openYLo));   // -y rim
+    ops.push(box(eXLo, eXHi, openYHi, eYHi));   // +y rim
   }
 
   return { caseAdditive: ops };
