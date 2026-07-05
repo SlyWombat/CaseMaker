@@ -86,8 +86,9 @@ function buildClip(
   const [armLo, armHi] = nr(armInner, armOuter);
   const [ledLo, ledHi] = nr(armInner, ledgeInner);
   const [hookLo, hookHi] = nr(armInner, hookInner);
-  const tLo = tCenter - CLIP_W / 2;
-  const tHi = tCenter + CLIP_W / 2;
+  const w = clip.width ?? CLIP_W;
+  const tLo = tCenter - w / 2;
+  const tHi = tCenter + w / 2;
   const armZLo = floorTop - EMBED;
   const armZHi = boardTopZ + HOOK_THK;
 

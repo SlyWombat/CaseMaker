@@ -47,6 +47,9 @@ export interface BoardClip {
   edge: '+x' | '-x' | '+y' | '-y';
   /** Position along that edge, measured from the board's min corner (mm). */
   offset: Mm;
+  /** Clip width along the edge (mm). Defaults to a nominal ~6 mm; set small to
+   * squeeze into a narrow gap between edge components. */
+  width?: Mm;
 }
 
 /**

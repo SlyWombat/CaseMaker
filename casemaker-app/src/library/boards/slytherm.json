@@ -50,9 +50,9 @@
       "standoffHeight": 10,
       "overhang": 2,
       "clips": [
-        { "edge": "-y", "offset": 10.5 },
-        { "edge": "+y", "offset": 10.5 },
-        { "edge": "-x", "offset": 9 }
+        { "edge": "-y", "offset": 10.5, "width": 0.9 },
+        { "edge": "+y", "offset": 10.5, "width": 0.9 },
+        { "edge": "-x", "offset": 28.5 }
       ]
     }
   ],

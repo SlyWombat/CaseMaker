@@ -89,6 +89,7 @@ export const boardProfileSchema = z.object({
           z.object({
             edge: z.enum(['+x', '-x', '+y', '-y']),
             offset: z.number().nonnegative(),
+            width: z.number().positive().optional(),
           }),
         ),
       }),
