@@ -10,6 +10,7 @@ import arduinoGigaR1WifiRaw from './boards/arduino-giga-r1-wifi.json';
 import arduinoNanoEsp32Raw from './boards/arduino-nano-esp32.json';
 import esp32DevkitV1Raw from './boards/esp32-devkit-v1.json';
 import esp32S3DevkitcRaw from './boards/esp32-s3-devkitc-1.json';
+import esp32C61DevkitcRaw from './boards/esp32-c61-devkitc-1.json';
 import elegooEsp32WroomUsbcRaw from './boards/elegoo-esp32-wroom-usbc.json';
 import esp32S3TouchLcd43BRaw from './boards/esp32-s3-touch-lcd-4.3b.json';
 import slythermRaw from './boards/slytherm.json';
@@ -38,6 +39,7 @@ const validated: BoardProfile[] = [
   arduinoNanoEsp32Raw,
   esp32DevkitV1Raw,
   esp32S3DevkitcRaw,
+  esp32C61DevkitcRaw,
   elegooEsp32WroomUsbcRaw,
   esp32S3TouchLcd43BRaw,
   slythermRaw,

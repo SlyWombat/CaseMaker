@@ -65,6 +65,9 @@ export function defaultAntennasForBoard(board: BoardProfile): AntennaPlacement[]
   let type: AntennaPlacement['type'] = 'external-mount';
   if (id === 'rpi-5' || id === 'rpi-cm-io') type = 'rpi-external';
   if (id === 'esp32-devkit-v1' || id.startsWith('esp32-wroom')) type = 'internal';
+  // ESP32-C61-DevKitC-1's WROOM-1 module has an on-module PCB antenna
+  // (overhanging the +y edge) — no external SMA connector to drill for.
+  if (id.startsWith('esp32-c61')) type = 'internal';
 
   const { facing, uOffset } = resolveFacingForConnector(
     connector.position.x,

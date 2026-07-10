@@ -29,6 +29,11 @@ export interface ProjectTemplate {
   name: string;
   description: string;
   estPrintMinutes: number;
+  /** Built-in board this template is the curated recipe for. The welcome
+   * screen's pick-a-board flow applies the first template matching the
+   * chosen board instead of generating a bare default shell. Omit for
+   * templates with no host board (protective-case, large-box-200). */
+  boardId?: string;
   build: () => Project;
 }
 
@@ -267,6 +272,28 @@ function esp32DevTray(): Project {
   return p;
 }
 
+function esp32C61DevTray(): Project {
+  // ESP32-C61-DevKitC-1: 25.4×51.8 mm devkit with NO mounting holes, dual
+  // USB-C on the -y edge (UART left, native right), and the WROOM-1 module's
+  // PCB antenna overhanging the +y edge by 6.35 mm. No holes → no bosses;
+  // press-fit retention instead: near-zero wall clearance grips the PCB and
+  // the two USB-C wall cutouts register it in X/Z. The +y clearance tweak
+  // opens 6.6 mm past the PCB edge so the antenna clears the back wall
+  // (and keeps case plastic off the radiator).
+  const p = createDefaultProject('esp32-c61-devkitc-1');
+  p.name = 'ESP32-C61 dev tray';
+  p.case.joint = 'flat-lid';
+  p.case.boardRetention = 'press-fit';
+  p.case.internalClearance = 0.3;
+  p.case.clearanceTweaks = { xMin: 0, xMax: 0, yMin: 0, yMax: 6.3 };
+  // The header pin tails stick ~3 mm below the PCB (that's the board's
+  // defaultStandoffHeight floor) — raise the board a further 20 mm so
+  // jumper wires can plug onto the pins from underneath inside the case.
+  p.board.defaultStandoffHeight = 23;
+  p.ports = autoPortsForBoard(p.board);
+  return p;
+}
+
 function elpCameraEnclosure(): Project {
   // ELP-USBGS1200P01-H120: 38×38 mm AR0234 USB camera mounted lens-DOWN.
   // The lens stack is encoded on the board profile as a `-z`-facing
@@ -324,6 +351,7 @@ function slythermPanel(): Project {
 export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
   {
     id: 'pi-server-tray',
+    boardId: 'rpi-4b',
     name: 'Pi 4 server tray',
     description: 'Pi 4B with hex-vent screw-down lid and 4 corner mounting tabs.',
     estPrintMinutes: 180,
@@ -331,6 +359,7 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
   },
   {
     id: 'pi-poe-stack',
+    boardId: 'rpi-4b',
     name: 'Pi 4 with PoE+ HAT',
     description: 'Pi 4B + PoE+ HAT, screw-down lid, slot ventilation.',
     estPrintMinutes: 210,
@@ -338,6 +367,7 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
   },
   {
     id: 'pi-zero-tablet',
+    boardId: 'rpi-zero-2w',
     name: 'Pi Zero 2W tablet',
     description: 'Pi Zero 2W + HyperPixel 4.0 in a recessed-bezel frame.',
     estPrintMinutes: 150,
@@ -345,6 +375,7 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
   },
   {
     id: 'arduino-dmx',
+    boardId: 'arduino-uno-r3',
     name: 'Arduino DMX controller',
     description: 'Arduino Uno R3 + CQRobot DMX MAX485 shield with screw-down lid.',
     estPrintMinutes: 200,
@@ -352,6 +383,7 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
   },
   {
     id: 'giga-dmx-controller',
+    boardId: 'arduino-giga-r1-wifi',
     name: 'GIGA R1 + DMX shield',
     description: 'Arduino GIGA R1 WiFi + CQRobot DMX shield, slot-vented screw-down lid.',
     estPrintMinutes: 240,
@@ -359,13 +391,23 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
   },
   {
     id: 'esp32-dev-tray',
+    boardId: 'esp32-devkit-v1',
     name: 'ESP32 dev tray',
     description: 'ESP32 DevKit V1 in an open flat-lid tray for prototyping.',
     estPrintMinutes: 90,
     build: esp32DevTray,
   },
   {
+    id: 'esp32-c61-dev-tray',
+    boardId: 'esp32-c61-devkitc-1',
+    name: 'ESP32-C61 dev tray',
+    description: 'ESP32-C61-DevKitC-1 (Wi-Fi 6, dual USB-C) in a press-fit flat-lid tray with both USB-C cutouts and back-wall clearance for the overhanging PCB antenna.',
+    estPrintMinutes: 60,
+    build: esp32C61DevTray,
+  },
+  {
     id: 'elp-camera-enclosure',
+    boardId: 'elp-usbgs1200p01-h120',
     name: 'ELP AR0234 camera enclosure',
     description: 'ELP-USBGS1200P01-H120 (1080P global-shutter USB camera, 120° lens) in a screw-down enclosure with a lens lid hole and a USB-A pass-through cutout sized for the pigtail plug.',
     estPrintMinutes: 75,
@@ -373,6 +415,7 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
   },
   {
     id: 'esp32-s3-touch-panel',
+    boardId: 'esp32-s3-touch-lcd-4.3b',
     name: 'ESP32-S3 4.3" touch panel',
     description: 'Waveshare ESP32-S3-Touch-LCD-4.3B (4.3" 800x480 capacitive touch) in a screw-down bezel case: the lid frames the active-area window, with USB-C and the 16-position 3.5mm terminal block brought out to the edges.',
     estPrintMinutes: 150,
@@ -380,6 +423,7 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
   },
   {
     id: 'slytherm',
+    boardId: 'slytherm',
     name: 'SlyTherm (4.3" touch + MSR-2 radar)',
     description: 'ESP32-S3 4.3" touch panel extended with a snap-clip bay for a Seeed MSR-2 mmWave radar module held 10mm off the floor, radar facing out the front alongside the screen.',
     estPrintMinutes: 170,
@@ -387,6 +431,7 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
   },
   {
     id: 'snap-fit-test',
+    boardId: 'snap-test-fixture',
     name: 'Snap-fit test cube',
     description: 'Small ~60×50×12 mm test fixture for physically validating snap-fit cantilever geometry.',
     estPrintMinutes: 30,
@@ -410,4 +455,13 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
 
 export function findTemplate(id: string): ProjectTemplate | undefined {
   return TEMPLATES.find((t) => t.id === id);
+}
+
+/**
+ * First template curated for the given built-in board, if any. Boards can
+ * back multiple templates (rpi-4b → pi-server-tray + pi-poe-stack); list
+ * order in TEMPLATES decides which one the pick-a-board flow applies.
+ */
+export function findTemplateByBoard(boardId: string): ProjectTemplate | undefined {
+  return TEMPLATES.find((t) => t.boardId === boardId);
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useProjectStore, clearHistory } from '@/store/projectStore';
 import { listBuiltinBoardIds, getBuiltinBoard } from '@/library';
-import { TEMPLATES, findTemplate } from '@/library/templates';
+import { TEMPLATES, findTemplate, findTemplateByBoard } from '@/library/templates';
 import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
 
 /**
@@ -18,11 +18,6 @@ export function WelcomeOverlay() {
 
   const boardIds = listBuiltinBoardIds();
 
-  const applyBoard = (id: string) => {
-    if (!id) return;
-    loadBoard(id); // also flips welcomeMode off
-  };
-
   const applyTemplate = async (id: string) => {
     const t = findTemplate(id);
     if (!t) return;
@@ -30,6 +25,18 @@ export function WelcomeOverlay() {
     setProject(project); // also flips welcomeMode off
     clearHistory();
     await scheduleImmediate(project);
+  };
+
+  const applyBoard = (id: string) => {
+    if (!id) return;
+    // Boards with a curated quickstart template get the template's recipe
+    // (retention, clearances, ports, …) instead of a bare default shell.
+    const tpl = findTemplateByBoard(id);
+    if (tpl) {
+      void applyTemplate(tpl.id);
+      return;
+    }
+    loadBoard(id); // also flips welcomeMode off
   };
 
   return (
@@ -51,14 +58,15 @@ export function WelcomeOverlay() {
               onChange={(e) => setBoardChoice(e.target.value)}
               data-testid="welcome-board-select"
               aria-label="Target hardware"
-              title="Pick a built-in microcontroller board to drop into a blank parametric enclosure."
+              title="Pick a built-in microcontroller board. Boards marked ★ apply their curated quickstart template; others drop into a blank parametric enclosure."
             >
               <option value="">— pick a board —</option>
               {boardIds.map((id) => {
                 const b = getBuiltinBoard(id);
+                const hasTpl = Boolean(findTemplateByBoard(id));
                 return (
                   <option key={id} value={id}>
-                    {b?.name ?? id}
+                    {(b?.name ?? id) + (hasTpl ? ' ★ quickstart' : '')}
                   </option>
                 );
               })}

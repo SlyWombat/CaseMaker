@@ -1,0 +1,60 @@
+{
+  "id": "esp32-c61-devkitc-1",
+  "name": "ESP32-C61-DevKitC-1 (N8R2)",
+  "manufacturer": "Espressif",
+  "pcb": {
+    "size": {
+      "x": 25.4,
+      "y": 51.8,
+      "z": 1.6
+    }
+  },
+  "mountingHoles": [],
+  "components": [
+    {
+      "id": "usb-c-uart",
+      "kind": "usb-c",
+      "position": { "x": 1.0, "y": -0.4, "z": 1.6 },
+      "size": { "x": 9, "y": 7.3, "z": 3.2 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "usb-c-native",
+      "kind": "usb-c",
+      "position": { "x": 15.4, "y": -0.4, "z": 1.6 },
+      "size": { "x": 9, "y": 7.3, "z": 3.2 },
+      "facing": "-y",
+      "cutoutMargin": 0.5
+    },
+    {
+      "id": "header-left",
+      "kind": "gpio-header",
+      "position": { "x": 0, "y": 10.86, "z": 1.6 },
+      "size": { "x": 2.54, "y": 40.64, "z": 8.5 },
+      "facing": "+z"
+    },
+    {
+      "id": "header-right",
+      "kind": "gpio-header",
+      "position": { "x": 22.86, "y": 10.86, "z": 1.6 },
+      "size": { "x": 2.54, "y": 40.64, "z": 8.5 },
+      "facing": "+z"
+    },
+    {
+      "id": "wroom-module",
+      "kind": "antenna-connector",
+      "position": { "x": 3.71, "y": 32.6, "z": 1.6 },
+      "size": { "x": 18, "y": 25.55, "z": 3.1 },
+      "facing": "+z",
+      "cutoutMargin": 0
+    }
+  ],
+  "defaultStandoffHeight": 3,
+  "recommendedZClearance": 12,
+  "source": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c61/esp32-c61-devkitc-1/user_guide.html",
+  "crossReference": "https://dl.espressif.com/dl/schematics/esp32-c61-devkitc-1-dimensions_v2.0.pdf",
+  "datasheetRevision": "v2.0 (PW-2025-05-0781+)",
+  "measurementMethod": "datasheet",
+  "builtin": true
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { TEMPLATES, findTemplate } from '@/library/templates';
+import { TEMPLATES, findTemplate, findTemplateByBoard } from '@/library/templates';
 import { parseProject, serializeProject } from '@/store/persistence';
 import { getBuiltinHat } from '@/library/hats';
 import { autoPortsForHat } from '@/engine/compiler/hats';
@@ -13,6 +13,7 @@ describe('Marketing gap #15 — project templates', () => {
       'arduino-dmx',
       'giga-dmx-controller',
       'esp32-dev-tray',
+      'esp32-c61-dev-tray',
       'elp-camera-enclosure',
       'esp32-s3-touch-panel',
       'slytherm',
@@ -57,6 +58,37 @@ describe('Marketing gap #15 — project templates', () => {
     expect(window!.facing).toBe('-z');
     expect(window!.size.x).toBeCloseTo(95.54);
     expect(window!.size.y).toBeCloseTo(54.36);
+  });
+
+  it('esp32-c61-dev-tray press-fits the hole-less devkit and clears the antenna overhang', () => {
+    const tpl = findTemplate('esp32-c61-dev-tray')!;
+    const project = tpl.build();
+    expect(project.board.clonedFrom).toBe('esp32-c61-devkitc-1');
+    // No mounting holes on the DevKitC — press-fit walls hold the board.
+    expect(project.board.mountingHoles.length).toBe(0);
+    expect(project.case.boardRetention).toBe('press-fit');
+    expect(project.case.internalClearance).toBeCloseTo(0.3);
+    // Header pin tails (~3 mm) + 20 mm of under-board room for jumper wires.
+    expect(project.board.defaultStandoffHeight).toBe(23);
+    // WROOM-1 antenna overhangs the +y edge by 6.35 mm — back wall opens up.
+    expect(project.case.clearanceTweaks?.yMax).toBeGreaterThanOrEqual(6.05);
+    // Both USB-C connectors get -y wall cutouts.
+    const usbPorts = project.ports.filter(
+      (p) => p.sourceComponentId === 'usb-c-uart' || p.sourceComponentId === 'usb-c-native',
+    );
+    expect(usbPorts.length).toBe(2);
+    for (const p of usbPorts) expect(p.facing).toBe('-y');
+    // On-module PCB antenna — internal, no SMA wall hole.
+    expect(project.antennas.length).toBe(1);
+    expect(project.antennas[0]!.type).toBe('internal');
+  });
+
+  it('findTemplateByBoard links boards to their quickstart recipe', () => {
+    expect(findTemplateByBoard('esp32-c61-devkitc-1')?.id).toBe('esp32-c61-dev-tray');
+    // Multi-template board: list order wins.
+    expect(findTemplateByBoard('rpi-4b')?.id).toBe('pi-server-tray');
+    // Boards without a curated template fall back to the bare shell flow.
+    expect(findTemplateByBoard('generic-zero')).toBeUndefined();
   });
 
   it('arduino-dmx adds the CQRobot DMX shield', () => {
