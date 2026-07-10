@@ -76,6 +76,16 @@ export const boardProfileSchema = z.object({
       height: z.number().positive(),
     })
     .optional(),
+  // Explicit board-retention clip placements (two-jaw catches; see boardSnap).
+  retentionClips: z
+    .array(
+      z.object({
+        edge: z.enum(['+x', '-x', '+y', '-y']),
+        offset: z.number().nonnegative(),
+        width: z.number().positive().optional(),
+      }),
+    )
+    .optional(),
   // Secondary boards held on snap clips above the floor (e.g. SlyTherm MSR-2).
   secondaryBoardMounts: z
     .array(

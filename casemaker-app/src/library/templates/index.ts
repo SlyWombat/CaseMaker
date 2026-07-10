@@ -276,14 +276,16 @@ function esp32C61DevTray(): Project {
   // ESP32-C61-DevKitC-1: 25.4×51.8 mm devkit with NO mounting holes, dual
   // USB-C on the -y edge (UART left, native right), and the WROOM-1 module's
   // PCB antenna overhanging the +y edge by 6.35 mm. No holes → no bosses;
-  // press-fit retention instead: near-zero wall clearance grips the PCB and
-  // the two USB-C wall cutouts register it in X/Z. The +y clearance tweak
-  // opens 6.6 mm past the PCB edge so the antenna clears the back wall
+  // snap retention with the board's own two-jaw clips (see retentionClips on
+  // the profile): the side edges ahead of the header rows are the only clear
+  // edge segments, so a clip grips each one — shelf under the board, finger
+  // over it — and the USB-C wall cutouts register the front. The +y clearance
+  // tweak opens 6.6 mm past the PCB edge so the antenna clears the back wall
   // (and keeps case plastic off the radiator).
   const p = createDefaultProject('esp32-c61-devkitc-1');
   p.name = 'ESP32-C61 dev tray';
   p.case.joint = 'flat-lid';
-  p.case.boardRetention = 'press-fit';
+  p.case.boardRetention = 'snap';
   p.case.internalClearance = 0.3;
   p.case.clearanceTweaks = { xMin: 0, xMax: 0, yMin: 0, yMax: 6.3 };
   // The header pin tails stick ~3 mm below the PCB (that's the board's

@@ -50,6 +50,10 @@
       "cutoutMargin": 0
     }
   ],
+  "retentionClips": [
+    { "edge": "-x", "offset": 2.5, "width": 6 },
+    { "edge": "+x", "offset": 2.5, "width": 6 }
+  ],
   "defaultStandoffHeight": 3,
   "recommendedZClearance": 12,
   "source": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c61/esp32-c61-devkitc-1/user_guide.html",

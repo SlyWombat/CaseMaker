@@ -48,6 +48,17 @@ const FINGER_THICKNESS = 1.6;     // mm — vertical extent of the finger
 const FINGER_CLEARANCE_Z = 0.25;  // mm — gap above PCB top before the finger's lowest point
 const EMBED = 0.5;                // mm — fuse with wall material
 
+// Two-jaw clip (issue: lone fingers float in free space and nothing carries
+// a hole-less board at standoff height). Every clip is now a C-shaped catch:
+// a SHELF whose top face is the board's underside (bottom jaw — the board
+// rests on it, replacing screw bosses as the vertical datum), the ramped
+// FINGER above (top jaw), and a full-height SPINE grounding both jaws to the
+// case floor and the nearest wall (or standing as a floor-mounted rib when
+// the wall is far, e.g. across an antenna-clearance gap). The jaw opening is
+// pcb.z + FINGER_CLEARANCE_Z — the board edge sits captured in the middle.
+const CLIP_SHELF_T = 1.6;         // mm — bottom-jaw shelf thickness
+const CLIP_FIT = 0.15;            // mm — lateral gap between spine face and PCB edge
+
 // Seat-shoulder (board.retentionShoulder). A raised rim around the cavity
 // perimeter that brings the walls IN to the PCB/glass footprint over the
 // seat height (bezel lip → finger catch), so a face-down panel drops into a
@@ -84,8 +95,10 @@ export function buildBoardSnapOps(
   const fpY = rf?.y ?? 0;
   const fpW = rf?.width ?? board.pcb.size.x;
   const fpH = rf?.height ?? board.pcb.size.y;
-  // Need a non-degenerate footprint to anchor the fingers.
-  if (fpW < FINGER_W + 4 || fpH < FINGER_W + 4) {
+  const customClips = board.retentionClips?.length ? board.retentionClips : undefined;
+  // Need a non-degenerate footprint to anchor the default wall-center clips.
+  // Boards that place their own clips vouch for their own geometry.
+  if (!customClips && (fpW < FINGER_W + 4 || fpH < FINGER_W + 4)) {
     return { caseAdditive: [] };
   }
   const wall = params.wallThickness;
@@ -120,19 +133,73 @@ export function buildBoardSnapOps(
   const backXHi = backHi(pcbXMax, wallInnerXMax);
   const backYLo = backLo(pcbYMin, wallInnerYMin);
   const backYHi = backHi(pcbYMax, wallInnerYMax);
-  // Centers along each edge tangent.
-  const xCenter = (pcbXMin + pcbXMax) / 2;
-  const yCenter = (pcbYMin + pcbYMax) / 2;
 
   const ops: BuildOp[] = [];
-  // -y edge: finger fuses at backYLo (wall or rib), tip overhangs the panel.
-  ops.push(buildFingerY(-1, xCenter, backYLo, pcbYMin + overhang, botZ, topZ));
-  // +y edge
-  ops.push(buildFingerY(+1, xCenter, backYHi, pcbYMax - overhang, botZ, topZ));
-  // -x edge
-  ops.push(buildFingerX(-1, yCenter, backXLo, pcbXMin + overhang, botZ, topZ));
-  // +x edge
-  ops.push(buildFingerX(+1, yCenter, backXHi, pcbXMax - overhang, botZ, topZ));
+
+  // Bottom-jaw Z extents. The shelf's top face IS the board's underside —
+  // it takes over the standoff datum for hole-less boards. Boards that sit
+  // on the floor (standoff ≈ 0, e.g. face-down panels on the bezel lip)
+  // get no shelf; the floor is their bottom jaw already.
+  const boardBotZ = params.floorThickness + board.defaultStandoffHeight;
+  const shelfBotZ = Math.max(params.floorThickness, boardBotZ - CLIP_SHELF_T);
+  const wantShelf = boardBotZ - params.floorThickness > 0.4;
+  const spineZ0 = Math.max(0, params.floorThickness - EMBED);
+
+  /** Emit one two-jaw clip on the given edge: spine (floor → finger top),
+   * shelf (bottom jaw, board rests on it), finger (top jaw). */
+  const emitClip = (axis: 'x' | 'y', sign: -1 | 1, center: number, width: number) => {
+    const edgeN =
+      axis === 'y' ? (sign < 0 ? pcbYMin : pcbYMax) : (sign < 0 ? pcbXMin : pcbXMax);
+    const wallN =
+      axis === 'y'
+        ? (sign < 0 ? wallInnerYMin : wallInnerYMax)
+        : (sign < 0 ? wallInnerXMin : wallInnerXMax);
+    const back = sign < 0 ? backLo(edgeN, wallN) : backHi(edgeN, wallN);
+    const fused = sign < 0 ? back <= wallN + 1e-3 : back >= wallN - 1e-3;
+    // Outboard extent: embed into the wall when fused, else the rib's own back.
+    const outer = fused ? back + sign * EMBED : back;
+    const spineInner = edgeN + sign * CLIP_FIT; // just outboard of the PCB edge
+    const jawInner = edgeN - sign * overhang;   // both jaws reach under/over the edge
+    const t0 = center - width / 2;
+    const box = (nA: number, nB: number, z0: number, z1: number): BuildOp => {
+      const nMin = Math.min(nA, nB);
+      const nSize = Math.abs(nB - nA);
+      return axis === 'y'
+        ? translate([t0, nMin, z0], cube([width, nSize, z1 - z0]))
+        : translate([nMin, t0, z0], cube([nSize, width, z1 - z0]));
+    };
+    // Spine — grounds the clip; a far-from-wall clip becomes a floor rib
+    // instead of a slab floating in free space.
+    if (Math.abs(spineInner - outer) > 0.2) ops.push(box(outer, spineInner, spineZ0, topZ));
+    // Bottom jaw.
+    if (wantShelf) ops.push(box(outer, jawInner, shelfBotZ, boardBotZ));
+    // Top jaw — ramped snap finger; catch face at botZ leaves a jaw opening
+    // of pcb.z + FINGER_CLEARANCE_Z above the shelf: board captured between.
+    ops.push(
+      axis === 'y'
+        ? buildFingerY(sign, center, back, jawInner, botZ, topZ, width)
+        : buildFingerX(sign, center, back, jawInner, botZ, topZ, width),
+    );
+  };
+
+  if (customClips) {
+    // Board-specified placements: offset measured from the retention
+    // footprint's min corner along the edge tangent.
+    for (const c of customClips) {
+      const w = c.width ?? FINGER_W;
+      const alongX = c.edge === '-y' || c.edge === '+y';
+      const center = (alongX ? pcbXMin : pcbYMin) + c.offset + w / 2;
+      emitClip(alongX ? 'y' : 'x', c.edge.startsWith('-') ? -1 : +1, center, w);
+    }
+  } else {
+    // Default: one clip centered on each wall.
+    const xCenter = (pcbXMin + pcbXMax) / 2;
+    const yCenter = (pcbYMin + pcbYMax) / 2;
+    emitClip('y', -1, xCenter, FINGER_W);
+    emitClip('y', +1, xCenter, FINGER_W);
+    emitClip('x', -1, yCenter, FINGER_W);
+    emitClip('x', +1, yCenter, FINGER_W);
+  }
 
   // Seat-shoulder rim: a picture-frame around the captured footprint over the
   // seat height (floor top → finger catch). Its opening is footprint + 2×
@@ -174,9 +241,10 @@ function buildFingerY(
   innerNy: number,         // interior end Y position (overhanging the PCB top)
   botZ: number,
   topZ: number,
+  width: number = FINGER_W,
 ): BuildOp {
-  const xMin = tangentCenterX - FINGER_W / 2;
-  const xMax = tangentCenterX + FINGER_W / 2;
+  const xMin = tangentCenterX - width / 2;
+  const xMax = tangentCenterX + width / 2;
   // Embed the wall side INTO wall material by EMBED for manifold fusion.
   // Embed INTO wall material: for -y wall (sign=-1) wall material is at
   // y < wallInner, so embeddedOuter = wallInner - EMBED (smaller y); for
@@ -210,9 +278,10 @@ function buildFingerX(
   innerNx: number,
   botZ: number,
   topZ: number,
+  width: number = FINGER_W,
 ): BuildOp {
-  const yMin = tangentCenterY - FINGER_W / 2;
-  const yMax = tangentCenterY + FINGER_W / 2;
+  const yMin = tangentCenterY - width / 2;
+  const yMax = tangentCenterY + width / 2;
   const embeddedOuter = outerNx + sign * EMBED;
   // Sloped TOP ramp (insertion lead-in) + flat BOTTOM catch — interior tip
   // at botZ, mirroring buildFingerY. Only the tip's z differs from the

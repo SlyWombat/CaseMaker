@@ -111,6 +111,14 @@ export interface BoardProfile {
    * extension. On a side whose footprint edge is far from the cavity wall, the
    * shoulder becomes a standalone internal rib instead of filling to the wall. */
   retentionFootprint?: { x: Mm; y: Mm; width: Mm; height: Mm };
+  /** Explicit board-retention clip placements (edge + offset from the
+   * retention footprint's min corner along that edge). Overrides the default
+   * one-clip-per-wall-center layout when the edge centers are occupied —
+   * headers flush to the edge, USB stacks, an antenna overhang. Each clip is
+   * a two-jaw catch: a shelf the board rests on plus the ramped finger above,
+   * separated by the PCB thickness, carried on a spine grounded to the floor
+   * (so a clip far from a wall never floats in free space). */
+  retentionClips?: BoardClip[];
   /** Secondary boards held on snap clips above the floor (e.g. SlyTherm MSR-2). */
   secondaryBoardMounts?: SecondaryBoardMount[];
   source?: string;

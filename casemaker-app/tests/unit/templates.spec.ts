@@ -60,13 +60,19 @@ describe('Marketing gap #15 — project templates', () => {
     expect(window!.size.y).toBeCloseTo(54.36);
   });
 
-  it('esp32-c61-dev-tray press-fits the hole-less devkit and clears the antenna overhang', () => {
+  it('esp32-c61-dev-tray snap-clips the hole-less devkit and clears the antenna overhang', () => {
     const tpl = findTemplate('esp32-c61-dev-tray')!;
     const project = tpl.build();
     expect(project.board.clonedFrom).toBe('esp32-c61-devkitc-1');
-    // No mounting holes on the DevKitC — press-fit walls hold the board.
+    // No mounting holes on the DevKitC — two-jaw snap clips hold the board.
+    expect(project.case.boardRetention).toBe('snap');
     expect(project.board.mountingHoles.length).toBe(0);
-    expect(project.case.boardRetention).toBe('press-fit');
+    // Clips sit on the side edges ahead of the header rows (headers start at
+    // y=10.86; USBs own the -y edge; the antenna overhangs +y).
+    expect(project.board.retentionClips?.map((c) => c.edge).sort()).toEqual(['+x', '-x']);
+    for (const c of project.board.retentionClips!) {
+      expect(c.offset + (c.width ?? 10)).toBeLessThanOrEqual(10.86);
+    }
     expect(project.case.internalClearance).toBeCloseTo(0.3);
     // Header pin tails (~3 mm) + 20 mm of under-board room for jumper wires.
     expect(project.board.defaultStandoffHeight).toBe(23);
