@@ -1,6 +1,6 @@
 import type { Project, HatProfile } from '@/types';
-import type { BuildPlan, BuildNode, BuildOp } from './buildPlan';
-import { union, difference, translate } from './buildPlan';
+import type { Aabb, BuildPlan, BuildNode, BuildOp } from './buildPlan';
+import { union, difference, translate, aabbOfOp } from './buildPlan';
 import { buildOuterShell } from './caseShell';
 import { computeBossPlacements, buildBossesUnion, buildLidBosses, buildBossSupportColumns } from './bosses';
 import { buildSealChannel, buildSealTongue, buildGasketBody } from './seal';
@@ -134,16 +134,24 @@ export function compileProject(project: Project): BuildPlan {
     resolveDisplay,
   );
 
+  // Port cutouts double as ventilation keep-outs: vent cells too close to a
+  // port opening can sever an island of wall into a loose part (QA: chevron
+  // + Pi 4B front ports).
+  const portCutOps = buildPortCutoutsForProject(smartLayout.ports, board, caseParams);
+  const ventKeepOuts = portCutOps
+    .map(aabbOfOp)
+    .filter((b): b is Aabb => b !== null);
+
   // Ventilation cutters split by destination: top-surface vents pierce the
   // LID node (separate mesh below); side / bottom vents pierce the shell.
   // Pre-split they were all routed to the shell and top vents silently
   // dropped because the shell has no material at lid Z.
-  const ventCuts = buildVentilationCutouts(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+  const ventCuts = buildVentilationCutouts(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay, ventKeepOuts);
 
   // Issue #107 — gasket channel cut into the rim top face (waterproof seal).
   const sealChannel = buildSealChannel(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   const cutoutOps: BuildOp[] = [
-    ...buildPortCutoutsForProject(smartLayout.ports, board, caseParams),
+    ...portCutOps,
     ...ventCuts.shellCuts,
     ...(sealChannel ? [sealChannel] : []),
     ...buildHatCutoutsForProject(board, caseParams, hats ?? [], resolveHat),

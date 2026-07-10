@@ -96,6 +96,117 @@ export function axisCylinder(
   }
 }
 
+export interface Aabb {
+  min: Vec3;
+  max: Vec3;
+}
+
+/**
+ * Conservative world-space bounding box of a build op. Rotations transform
+ * the child box's corners (applied X→Y→Z), so the result may over-cover but
+ * never under-covers. Used for coarse keep-out tests (e.g. ventilation
+ * avoiding port cutouts). Returns null for empty composites.
+ */
+export function aabbOfOp(op: BuildOp): Aabb | null {
+  switch (op.kind) {
+    case 'cube': {
+      const [x, y, z] = op.size;
+      return op.center
+        ? { min: [-x / 2, -y / 2, -z / 2], max: [x / 2, y / 2, z / 2] }
+        : { min: [0, 0, 0], max: [x, y, z] };
+    }
+    case 'cylinder': {
+      const r = Math.max(op.radiusLow, op.radiusHigh ?? op.radiusLow);
+      return op.center
+        ? { min: [-r, -r, -op.height / 2], max: [r, r, op.height / 2] }
+        : { min: [-r, -r, 0], max: [r, r, op.height] };
+    }
+    case 'mesh': {
+      if (!op.positions.length) return null;
+      const min: [number, number, number] = [Infinity, Infinity, Infinity];
+      const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+      for (let i = 0; i < op.positions.length; i += 3) {
+        for (let a = 0; a < 3; a++) {
+          const v = op.positions[i + a]!;
+          if (v < min[a]!) min[a] = v;
+          if (v > max[a]!) max[a] = v;
+        }
+      }
+      return { min, max };
+    }
+    case 'translate': {
+      const b = aabbOfOp(op.child);
+      if (!b) return null;
+      const o = op.offset;
+      return {
+        min: [b.min[0] + o[0], b.min[1] + o[1], b.min[2] + o[2]],
+        max: [b.max[0] + o[0], b.max[1] + o[1], b.max[2] + o[2]],
+      };
+    }
+    case 'scale': {
+      const b = aabbOfOp(op.child);
+      if (!b) return null;
+      const f = op.factor;
+      return {
+        min: [b.min[0] * f, b.min[1] * f, b.min[2] * f],
+        max: [b.max[0] * f, b.max[1] * f, b.max[2] * f],
+      };
+    }
+    case 'rotate': {
+      const b = aabbOfOp(op.child);
+      if (!b) return null;
+      const [ax, ay, az] = op.degrees.map((d) => (d * Math.PI) / 180) as [
+        number,
+        number,
+        number,
+      ];
+      const rot = (v: [number, number, number]): [number, number, number] => {
+        let [x, y, z] = v;
+        let c = Math.cos(ax);
+        let s = Math.sin(ax);
+        [y, z] = [y * c - z * s, y * s + z * c];
+        c = Math.cos(ay);
+        s = Math.sin(ay);
+        [x, z] = [x * c + z * s, -x * s + z * c];
+        c = Math.cos(az);
+        s = Math.sin(az);
+        [x, y] = [x * c - y * s, x * s + y * c];
+        return [x, y, z];
+      };
+      const min: [number, number, number] = [Infinity, Infinity, Infinity];
+      const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+      for (const cx of [b.min[0], b.max[0]])
+        for (const cy of [b.min[1], b.max[1]])
+          for (const cz of [b.min[2], b.max[2]]) {
+            const p = rot([cx, cy, cz]);
+            for (let a = 0; a < 3; a++) {
+              if (p[a]! < min[a]!) min[a] = p[a]!;
+              if (p[a]! > max[a]!) max[a] = p[a]!;
+            }
+          }
+      return { min, max };
+    }
+    case 'union':
+    case 'difference':
+    case 'intersection': {
+      // The FIRST child bounds a difference/intersection; a union merges all.
+      const kids = op.kind === 'union' ? op.children : op.children.slice(0, 1);
+      let out: Aabb | null = null;
+      for (const k of kids) {
+        const b = aabbOfOp(k);
+        if (!b) continue;
+        if (!out) out = { min: [...b.min] as Vec3, max: [...b.max] as Vec3 };
+        else
+          for (let a = 0; a < 3; a++) {
+            if (b.min[a]! < out.min[a]!) (out.min as number[])[a] = b.min[a]!;
+            if (b.max[a]! > out.max[a]!) (out.max as number[])[a] = b.max[a]!;
+          }
+      }
+      return out;
+    }
+  }
+}
+
 export function difference(children: BuildOp[]): BuildOp {
   return { kind: 'difference', children };
 }
