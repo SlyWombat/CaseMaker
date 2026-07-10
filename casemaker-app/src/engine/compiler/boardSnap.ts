@@ -146,8 +146,18 @@ export function buildBoardSnapOps(
   const spineZ0 = Math.max(0, params.floorThickness - EMBED);
 
   /** Emit one two-jaw clip on the given edge: spine (floor → finger top),
-   * shelf (bottom jaw, board rests on it), finger (top jaw). */
-  const emitClip = (axis: 'x' | 'y', sign: -1 | 1, center: number, width: number) => {
+   * shelf (bottom jaw, board rests on it), finger (top jaw). Style 'shelf'
+   * emits a support tab instead — a solid pedestal from the wall to `reach`
+   * under the board, floor to board underside, no finger. Use it where
+   * nothing may protrude above the board (e.g. under an antenna overhang). */
+  const emitClip = (
+    axis: 'x' | 'y',
+    sign: -1 | 1,
+    center: number,
+    width: number,
+    style: 'clip' | 'shelf' = 'clip',
+    reach?: number,
+  ) => {
     const edgeN =
       axis === 'y' ? (sign < 0 ? pcbYMin : pcbYMax) : (sign < 0 ? pcbXMin : pcbXMax);
     const wallN =
@@ -159,7 +169,7 @@ export function buildBoardSnapOps(
     // Outboard extent: embed into the wall when fused, else the rib's own back.
     const outer = fused ? back + sign * EMBED : back;
     const spineInner = edgeN + sign * CLIP_FIT; // just outboard of the PCB edge
-    const jawInner = edgeN - sign * overhang;   // both jaws reach under/over the edge
+    const jawInner = edgeN - sign * (reach ?? overhang); // in under/over the edge
     const t0 = center - width / 2;
     const box = (nA: number, nB: number, z0: number, z1: number): BuildOp => {
       const nMin = Math.min(nA, nB);
@@ -168,6 +178,15 @@ export function buildBoardSnapOps(
         ? translate([t0, nMin, z0], cube([width, nSize, z1 - z0]))
         : translate([nMin, t0, z0], cube([nSize, width, z1 - z0]));
     };
+    if (style === 'shelf') {
+      // Support tab: solid from the wall (always wall-anchored, even across
+      // a wide clearance gap) to `reach` under the board, capped at the
+      // board's underside so nothing rises past board level. Solid to the
+      // floor — prints without overhangs, can't float.
+      if (boardBotZ - spineZ0 < 0.4) return; // board sits on the floor: no tab needed
+      ops.push(box(wallN + sign * EMBED, jawInner, spineZ0, boardBotZ));
+      return;
+    }
     // Spine — grounds the clip; a far-from-wall clip becomes a floor rib
     // instead of a slab floating in free space.
     if (Math.abs(spineInner - outer) > 0.2) ops.push(box(outer, spineInner, spineZ0, topZ));
@@ -189,7 +208,7 @@ export function buildBoardSnapOps(
       const w = c.width ?? FINGER_W;
       const alongX = c.edge === '-y' || c.edge === '+y';
       const center = (alongX ? pcbXMin : pcbYMin) + c.offset + w / 2;
-      emitClip(alongX ? 'y' : 'x', c.edge.startsWith('-') ? -1 : +1, center, w);
+      emitClip(alongX ? 'y' : 'x', c.edge.startsWith('-') ? -1 : +1, center, w, c.style ?? 'clip', c.reach);
     }
   } else {
     // Default: one clip centered on each wall.

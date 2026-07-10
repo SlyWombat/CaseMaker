@@ -50,6 +50,14 @@ export interface BoardClip {
   /** Clip width along the edge (mm). Defaults to a nominal ~6 mm; set small to
    * squeeze into a narrow gap between edge components. */
   width?: Mm;
+  /** 'clip' (default): two-jaw catch — shelf + snap finger over the board.
+   * 'shelf': support tab only — a solid pedestal from the wall to `reach`
+   * under the board, floor to board underside, NO finger. For an end with
+   * no room above the board (e.g. the C61's overhanging PCB antenna). */
+  style?: 'clip' | 'shelf';
+  /** How far the bottom jaw reaches in under the board (mm). Defaults to the
+   * snap-finger overhang (~1.2); support tabs want more (C61 antenna end: 10). */
+  reach?: Mm;
 }
 
 /**

@@ -76,13 +76,16 @@ export const boardProfileSchema = z.object({
       height: z.number().positive(),
     })
     .optional(),
-  // Explicit board-retention clip placements (two-jaw catches; see boardSnap).
+  // Explicit board-retention clip placements (two-jaw catches or shelf-only
+  // support tabs; see boardSnap).
   retentionClips: z
     .array(
       z.object({
         edge: z.enum(['+x', '-x', '+y', '-y']),
         offset: z.number().nonnegative(),
         width: z.number().positive().optional(),
+        style: z.enum(['clip', 'shelf']).optional(),
+        reach: z.number().positive().optional(),
       }),
     )
     .optional(),

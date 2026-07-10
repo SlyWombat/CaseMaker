@@ -103,6 +103,29 @@ describe('board-snap two-jaw clips', () => {
     }
   });
 
+  it('shelf-style clip is a wall-anchored pedestal capped at the board underside', () => {
+    // C61 antenna end: +y wall 8mm away (clearance tweak), tab reaches 10mm
+    // under the board, nothing may rise above board-bottom level.
+    const board = makeBoard({
+      retentionClips: [{ edge: '+y', offset: 15, width: 12, style: 'shelf', reach: 10 }],
+    });
+    const params = makeParams({ clearanceTweaks: { xMin: 0, xMax: 0, yMin: 0, yMax: 8 } });
+    const ops = buildBoardSnapOps(board, params).caseAdditive;
+    // No snap finger — shelf style emits exactly one solid box.
+    expect(ops.filter((o) => o.kind === 'mesh').length).toBe(0);
+    const boxes = cubeExtents(ops);
+    expect(boxes.length).toBe(1);
+    const tab = boxes[0]!;
+    const boardBotZ = 2 + 5; // floor + standoff
+    // Capped at the board underside; grounded on the floor.
+    expect(tab.max[2]).toBeCloseTo(boardBotZ, 5);
+    expect(tab.min[2]).toBeLessThanOrEqual(params.floorThickness);
+    // Board edge at y = 3 + 50 = 53; wall inner at 3 + 50 + 1 + 8 = 62.
+    // Tab reaches 10 under the board and anchors into the wall.
+    expect(tab.min[1]).toBeCloseTo(53 - 10, 5);
+    expect(tab.max[1]).toBeGreaterThanOrEqual(62);
+  });
+
   it('a clip far from its wall stands on a grounded rib, not in free space', () => {
     // +y wall pushed 8mm away (antenna gap) — beyond the fill limit.
     const board = makeBoard({ retentionClips: [{ edge: '+y', offset: 15, width: 10 }] });

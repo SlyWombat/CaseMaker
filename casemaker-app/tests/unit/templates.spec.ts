@@ -67,15 +67,22 @@ describe('Marketing gap #15 — project templates', () => {
     // No mounting holes on the DevKitC — two-jaw snap clips hold the board.
     expect(project.case.boardRetention).toBe('snap');
     expect(project.board.mountingHoles.length).toBe(0);
-    // Clips sit on the side edges ahead of the header rows (headers start at
-    // y=10.86; USBs own the -y edge; the antenna overhangs +y).
-    expect(project.board.retentionClips?.map((c) => c.edge).sort()).toEqual(['+x', '-x']);
-    for (const c of project.board.retentionClips!) {
+    // Snap clips sit on the side edges ahead of the header rows (headers
+    // start at y=10.86; USBs own the -y edge); the antenna end (+y) gets a
+    // shelf-only support tab reaching 10 mm under the board — no room for a
+    // finger above the board there.
+    const clips = project.board.retentionClips!;
+    expect(clips.map((c) => c.edge).sort()).toEqual(['+x', '+y', '-x']);
+    for (const c of clips.filter((c) => c.edge !== '+y')) {
+      expect(c.style ?? 'clip').toBe('clip');
       expect(c.offset + (c.width ?? 10)).toBeLessThanOrEqual(10.86);
     }
+    const tab = clips.find((c) => c.edge === '+y')!;
+    expect(tab.style).toBe('shelf');
+    expect(tab.reach).toBe(10);
     expect(project.case.internalClearance).toBeCloseTo(0.3);
-    // Header pin tails (~3 mm) + 20 mm of under-board room for jumper wires.
-    expect(project.board.defaultStandoffHeight).toBe(23);
+    // Header pin tails need ~3 mm under the board; no extra depth beyond that.
+    expect(project.board.defaultStandoffHeight).toBe(3);
     // WROOM-1 antenna overhangs the +y edge by 6.35 mm — back wall opens up.
     expect(project.case.clearanceTweaks?.yMax).toBeGreaterThanOrEqual(6.05);
     // Both USB-C connectors get -y wall cutouts.

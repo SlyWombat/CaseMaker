@@ -52,7 +52,8 @@
   ],
   "retentionClips": [
     { "edge": "-x", "offset": 2.5, "width": 6 },
-    { "edge": "+x", "offset": 2.5, "width": 6 }
+    { "edge": "+x", "offset": 2.5, "width": 6 },
+    { "edge": "+y", "offset": 6.7, "width": 12, "style": "shelf", "reach": 10 }
   ],
   "defaultStandoffHeight": 3,
   "recommendedZClearance": 12,
