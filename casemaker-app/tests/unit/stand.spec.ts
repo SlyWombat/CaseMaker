@@ -85,6 +85,23 @@ describe('desk stand geometry', () => {
     expect(b.max[1]).toBeGreaterThan(50);
   });
 
+  it('trims everything forward of the frame face, so the front beds flat', () => {
+    // Printed face down: the frame's front plane must be the extreme front
+    // surface. The foot's front lip is VERTICAL while the frame leans back, so
+    // untrimmed it stands ~frameThickness·sin(tilt) ≈ 2.6 mm proud and the part
+    // rocks on it. buildStandOp subtracts the half-space in front of that plane.
+    // The boolean only resolves at mesh time, so assert it structurally here;
+    // the flushness itself is measured on the exported mesh (see the STL check).
+    const op = buildStandOp(board, STAND)!;
+    expect(op.kind).toBe('difference');
+    const cutter = (op as { children: { kind: string }[] }).children[1]!;
+    // The cutter is the tilted half-space: translate(rotate(translate(cube))).
+    expect(cutter.kind).toBe('translate');
+    const rot = (cutter as unknown as { child: { kind: string; degrees: number[] } }).child;
+    expect(rot.kind).toBe('rotate');
+    expect(rot.degrees[0]).toBeCloseTo(90 - STAND.tiltAngleDeg, 5);
+  });
+
   it('a bare PCB (no enclosure block) yields no stand', () => {
     const bare = getBuiltinBoard('rpi-4b')!;
     expect(bare.enclosure).toBeUndefined();

@@ -145,7 +145,7 @@ export function printOrientationHint(part: ProjectPart): string {
     if (part.id === 'lid') return 'Print upside-down (lid ceiling on the bed)';
     return 'Print upside-down (flipped 180° on X)';
   }
-  if (part.id === 'stand') return 'Print as modelled — foot flat on the bed, frame leaning back. No supports: the frame sits at 75° and the gussets taper upward';
+  if (part.id === 'stand') return 'Print FACE DOWN — lay the frame\'s front face on the bed (the foot\'s front edge is flush with it, so the whole front beds flat). The foot and gussets then rise at 75°, self-supporting. Gives a flat, accurate mating face for the panel';
   if (part.id === 'shell') return 'Print right-side up (case floor on the bed, walls + cavity opening up)';
   if (part.id.startsWith('latch-arm-')) return 'Lay flat — knuckle and cam hook face up';
   if (part.id.startsWith('latch-pin-')) return 'Stand on end (cap up) for a clean barrel; or lay flat if seam tolerance is OK';

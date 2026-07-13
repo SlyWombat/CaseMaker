@@ -1,5 +1,6 @@
 import type { BoardProfile, StandParams } from '@/types';
 import {
+  cube,
   cylinder,
   difference,
   mesh,
@@ -205,5 +206,21 @@ export function buildStandOp(board: BoardProfile, stand: StandParams): BuildOp |
     gussets.push(triPrismX(tri, W - gt, W));
   }
 
-  return union([foot, frame, ...gussets]);
+  // ---- Flush front --------------------------------------------------------
+  // The part is printed FACE DOWN: the frame's front face goes on the bed. But
+  // the foot's front lip is a VERTICAL face while the frame's front is tilted,
+  // so the lip stands proud of the frame's plane (~T·sin t at the top of the
+  // foot) and the part would rock on that lip instead of bedding on the frame.
+  // Shave everything forward of the frame's front plane, so the frame face and
+  // the foot's front edge end up coplanar — one flat surface on the bed.
+  const BIG = 500;
+  const frontHalfSpace = translate(
+    [0, Ty, Tz],
+    rotate(
+      [90 - stand.tiltAngleDeg, 0, 0],
+      translate([-BIG, -BIG, T], cube([W + 2 * BIG, H + 2 * BIG, BIG])),
+    ),
+  );
+
+  return difference([union([foot, frame, ...gussets]), frontHalfSpace]);
 }
