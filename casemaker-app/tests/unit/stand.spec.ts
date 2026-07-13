@@ -145,3 +145,65 @@ describe('desk stand geometry', () => {
     expect(findTemplateByBoard('guition-jc4880p443c')?.id).toBe('guition-desk-stand');
   });
 });
+
+describe('wall mount', () => {
+  const board = getBuiltinBoard('guition-jc4880p443c')!;
+  const project = () => findTemplate('guition-wall-mount')!.build();
+
+  it('emits the two snap-together parts: body + wall plate', () => {
+    const plan = compileProject(project());
+    expect(plan.nodes.map((n) => n.id)).toEqual(['wall-body', 'wall-plate']);
+  });
+
+  it('the shroud walls clear the module\'s rear body — the reason bezelMargin exists', () => {
+    const s = project().case.stand!;
+    const enc = board.enclosure!;
+    // Frame outline is the module + 2×bezelMargin; the shroud eats shroudWall
+    // off each side. What's left MUST still pass the module's rear body, or the
+    // panel can't seat. The module's own rim is only ~2.2mm top/bottom, so with
+    // bezelMargin 0 (the desk stand's value) this would fail.
+    const cavH = board.pcb.size.y + 2 * s.bezelMargin - 2 * s.shroudWall!;
+    const cavW = board.pcb.size.x + 2 * s.bezelMargin - 2 * s.shroudWall!;
+    expect(cavH).toBeGreaterThan(enc.body.height + 1);
+    expect(cavW).toBeGreaterThan(enc.body.width + 1);
+    // And with a naive margin of 0 it genuinely wouldn't fit — pin the trap.
+    expect(board.pcb.size.y - 2 * s.shroudWall!).toBeLessThan(enc.body.height);
+  });
+
+  it('the shroud is deep enough for a USB-C plug behind the panel', () => {
+    const s = project().case.stand!;
+    const enc = board.enclosure!;
+    // The module's back face sits (frameThickness - body.depth) forward of the
+    // frame's back plane, so plug clearance = shroudDepth + that.
+    const clearance = s.shroudDepth! + (s.frameThickness - enc.body.depth);
+    expect(clearance).toBeGreaterThan(20); // a USB-C plug body is ~12mm + bend
+  });
+
+  it('the snap fingers fit inside the shroud cavity depth', () => {
+    const s = project().case.stand!;
+    const fingerReach = s.plateThickness! + 12; // plate + FINGER_H
+    expect(fingerReach).toBeLessThan(s.shroudDepth!);
+  });
+
+  it('both wall parts are grounded at z=0 (they meet at the wall plane)', () => {
+    const plan = compileProject(project());
+    for (const n of plan.nodes) {
+      const bb = aabbOfOp(n.op)!;
+      expect(bb.min[2]).toBeCloseTo(0, 3);
+    }
+  });
+
+  it('the export hardware list calls out the drywall screws AND the M2s', () => {
+    const hw = hardwareForProject(project());
+    expect(hw.find((h) => h.id === 'stand-screws')?.count).toBe(4);
+    const wall = hw.find((h) => h.id === 'wall-plate-screws')!;
+    expect(wall).toBeDefined();
+    expect(wall.count).toBe(2);
+    expect(wall.label).toMatch(/drywall/i);
+  });
+
+  it('the desk stand does NOT list drywall screws', () => {
+    const hw = hardwareForProject(findTemplate('guition-desk-stand')!.build());
+    expect(hw.find((h) => h.id === 'wall-plate-screws')).toBeUndefined();
+  });
+});

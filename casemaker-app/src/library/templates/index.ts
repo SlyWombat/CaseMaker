@@ -362,6 +362,44 @@ function guitionDeskStand(): Project {
   return p;
 }
 
+function guitionWallMount(): Project {
+  // Same Guition panel, wall-mounted instead of on a desk. Two parts: a plate
+  // that screws to the drywall (open middle for the cable, two counterbored
+  // screw holes) and a body that SNAPS onto it.
+  //
+  // bezelMargin 5 is load-bearing, not cosmetic: the module's rear body is
+  // 65.06 tall inside a 69.41 outline, leaving only ~2.2 mm of rim, so shroud
+  // walls inside the module's own footprint would pinch the body. Widening the
+  // frame by 5 mm a side gives the 4 mm walls somewhere to stand.
+  const p = createDefaultProject('guition-jc4880p443c');
+  p.name = 'Guition 4.3" panel — wall mount';
+  p.case.stand = {
+    enabled: true,
+    mount: 'wall',
+    tiltAngleDeg: 0, // flat to the wall
+    frameThickness: 10,
+    bezelMargin: 5,
+    openingClearance: 0.4,
+    screwHoleDiameter: 2.4,
+    shroudDepth: 22, // room for the USB-C plug + wire slack
+    shroudWall: 4,
+    plateThickness: 4,
+    plateBorder: 12,
+    drywallScrewDiameter: 4.4,
+    drywallHeadDiameter: 8.5,
+    // desk-only fields, unused when mount === 'wall'
+    baseDepth: 55,
+    baseThickness: 5,
+    gussetThickness: 6,
+    gussetHeightFraction: 0.55,
+  };
+  p.case.bosses.enabled = false;
+  p.case.ventilation = { enabled: false, pattern: 'none', coverage: 0 };
+  p.ports = [];
+  p.mountingFeatures = [];
+  return p;
+}
+
 function slythermPanel(): Project {
   // SlyTherm: the ESP32-S3-Touch-LCD-4.3B panel extended +X to co-locate a
   // Seeed MSR-2 mmWave radar module. Same screen-down bezel + snap retention as
@@ -466,6 +504,13 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
     description: 'Desk stand for the Guition JC4880P443C (4.3" 480x800 ESP32-P4 touch panel in its vendor shell). Picture-frame plate the panel screws into on its four M2 bosses, leaning back 15° on a braced foot. No lid — the frame\'s open centre keeps the back USB-C ports and pin header reachable.',
     estPrintMinutes: 200,
     build: guitionDeskStand,
+  },
+  {
+    id: 'guition-wall-mount',
+    name: 'Guition 4.3" panel — wall mount',
+    description: 'Wall mount for the Guition JC4880P443C. Two parts: a wall plate that screws to the drywall (open middle so the cable comes straight out of the wall, two counterbored screw holes), and a body that snaps onto it — four cantilever fingers on the plate click into windows in the body\'s shroud. The shroud houses the USB-C plug and wire slack.',
+    estPrintMinutes: 260,
+    build: guitionWallMount,
   },
   {
     id: 'snap-fit-test',

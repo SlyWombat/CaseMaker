@@ -61,6 +61,13 @@ export const caseParamsSchema = z.object({
   stand: z
     .object({
       enabled: z.boolean(),
+      mount: z.enum(['desk', 'wall']).optional(),
+      shroudDepth: z.number().positive().optional(),
+      shroudWall: z.number().positive().optional(),
+      plateThickness: z.number().positive().optional(),
+      plateBorder: z.number().positive().optional(),
+      drywallScrewDiameter: z.number().positive().optional(),
+      drywallHeadDiameter: z.number().positive().optional(),
       tiltAngleDeg: z.number().min(0).max(60),
       frameThickness: z.number().positive(),
       bezelMargin: z.number().nonnegative(),

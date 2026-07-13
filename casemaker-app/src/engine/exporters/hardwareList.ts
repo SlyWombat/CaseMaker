@@ -47,6 +47,14 @@ export function hardwareForProject(project: Project): HardwareItem[] {
         note: `Into the panel's own Ø${holeDia} mounting bosses, from the BACK of the frame. ${land.toFixed(1)} mm of frame behind the boss pocket; heads sit in the ${headRecess} mm counterbores. Don't overtighten — they're cutting threads in the panel's plastic bosses.`,
       });
     }
+    if ((stand.mount ?? 'desk') === 'wall') {
+      items.push({
+        id: 'wall-plate-screws',
+        label: '2 × drywall screws + anchors (#6 / 3.5 mm, ~32 mm)',
+        count: 2,
+        note: 'Through the wall plate into the drywall — use anchors unless you hit a stud. Heads sit in the counterbores so the plate stays flat. Screw the plate on first, feed the cable through its open middle, then push the body on until the four snap fingers click into the shroud windows.',
+      });
+    }
     return items; // a stand has no lid, no cavity, no gasket — nothing else applies
   }
 

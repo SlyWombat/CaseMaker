@@ -61,6 +61,24 @@ export function partForId(id: string, index = 0): ProjectPart {
       printOrientation: CASE_ORIENTATION,
     };
   }
+  if (id === 'wall-body') {
+    return {
+      id,
+      displayName: 'Wall mount — body (frame + shroud)',
+      material: 'rigid',
+      category: 'case',
+      printOrientation: CASE_ORIENTATION,
+    };
+  }
+  if (id === 'wall-plate') {
+    return {
+      id,
+      displayName: 'Wall mount — wall plate',
+      material: 'rigid',
+      category: 'case',
+      printOrientation: CASE_ORIENTATION,
+    };
+  }
   if (id === 'shell') {
     return {
       id,
@@ -146,6 +164,8 @@ export function printOrientationHint(part: ProjectPart): string {
     return 'Print upside-down (flipped 180° on X)';
   }
   if (part.id === 'stand') return 'Print FACE DOWN — lay the frame\'s front face on the bed (the foot\'s front edge is flush with it, so the whole front beds flat). The foot and gussets then rise at 75°, self-supporting. Gives a flat, accurate mating face for the panel';
+  if (part.id === 'wall-body') return 'Print FACE DOWN — frame\'s front face on the bed, shroud walls rising. No supports';
+  if (part.id === 'wall-plate') return 'Print flat, wall-side face DOWN on the bed — the snap fingers point up and print without supports';
   if (part.id === 'shell') return 'Print right-side up (case floor on the bed, walls + cavity opening up)';
   if (part.id.startsWith('latch-arm-')) return 'Lay flat — knuckle and cam hook face up';
   if (part.id.startsWith('latch-pin-')) return 'Stand on end (cap up) for a clean barrel; or lay flat if seam tolerance is OK';

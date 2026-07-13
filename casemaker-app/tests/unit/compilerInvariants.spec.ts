@@ -205,18 +205,24 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   // Stands are the shell/lid invariants' counterpart for the other archetype:
   // exactly one 'stand' node, well-formed, and it rests ON the desk (z = 0)
   // rather than floating — the geometry equivalent of "no loose parts".
-  describe('Invariant 8: stand archetype emits one well-formed part sitting on z = 0', () => {
+  describe('Invariant 8: stand archetype emits well-formed parts, all grounded at z = 0', () => {
     for (const c of standCases) {
-      it(`${c.label}: single 'stand' node, well-formed, grounded`, () => {
+      it(`${c.label}: stand parts well-formed and grounded`, () => {
         const plan = compileProject(c.build());
-        expect(plan.nodes.map((n) => n.id)).toEqual(['stand']);
-        const stand = plan.nodes[0]!;
-        assertWellFormed(stand.op, `${c.label} stand`);
-        // aabbOfOp (not the local bboxOf) — bboxOf counts subtractive cutters,
-        // which deliberately overshoot the faces they punch through.
-        const bb = aabbOfOp(stand.op)!;
-        expect(bb.min[2]).toBeGreaterThanOrEqual(-0.01);
-        expect(bb.min[2]).toBeLessThanOrEqual(0.01);
+        const ids = plan.nodes.map((n) => n.id);
+        // Desk → one fused part. Wall → the body and the plate it snaps onto.
+        const mount = c.build().case.stand?.mount ?? 'desk';
+        expect(ids).toEqual(mount === 'wall' ? ['wall-body', 'wall-plate'] : ['stand']);
+        for (const n of plan.nodes) {
+          assertWellFormed(n.op, `${c.label} ${n.id}`);
+          // aabbOfOp (not the local bboxOf) — bboxOf counts subtractive cutters,
+          // which deliberately overshoot the faces they punch through. Every
+          // stand part datums on z=0: the desk stand's foot on the table, both
+          // wall parts on the wall plane.
+          const bb = aabbOfOp(n.op)!;
+          expect(bb.min[2]).toBeGreaterThanOrEqual(-0.01);
+          expect(bb.min[2]).toBeLessThanOrEqual(0.01);
+        }
       });
     }
   });

@@ -18,6 +18,7 @@ describe('Marketing gap #15 — project templates', () => {
       'esp32-s3-touch-panel',
       'slytherm',
       'guition-desk-stand',
+      'guition-wall-mount',
       'snap-fit-test',
       'protective-case',
       'large-box-200',

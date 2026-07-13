@@ -23,7 +23,7 @@ import { buildBoardSnapOps } from './boardSnap';
 import { buildSecondaryMountOps } from './secondaryMounts';
 import { buildHingeOps } from './hinges';
 import { buildCustomCutouts } from './customCutouts';
-import { buildStandOp } from './stand';
+import { buildStandNodes } from './stand';
 import { validatePlacements } from './placementValidator';
 import { getBuiltinHat } from '@/library/hats';
 import { getBuiltinDisplay } from '@/library/displays';
@@ -59,10 +59,10 @@ export function compileProject(project: Project): BuildPlan {
   // feature compiler below assumes a box shell around a PCB, so the stand
   // takes its own path rather than trying to make fourteen of them no-op.
   if (caseParams.stand?.enabled) {
-    const standOp = buildStandOp(board, caseParams.stand);
-    if (standOp) {
+    const standNodes = buildStandNodes(board, caseParams.stand);
+    if (standNodes) {
       return {
-        nodes: [{ id: 'stand', op: standOp }],
+        nodes: standNodes,
         placementReport: validatePlacements(project),
         // No smart cutout layout runs for a stand (no walls to lay ports out
         // on), but the field is part of every plan's contract.

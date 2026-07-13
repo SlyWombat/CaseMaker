@@ -322,7 +322,15 @@ export interface CaseParameters {
  */
 export interface StandParams {
   enabled: boolean;
-  /** Backward lean of the screen from vertical, in degrees. */
+  /**
+   * 'desk' (default): frame + tilted foot, printed as one part.
+   * 'wall':  two parts — a WALL PLATE that screws to the drywall (open middle
+   *          for wires, countersunk screw holes), and a BODY (the same frame,
+   *          plus a shroud housing the cable) that SNAPS onto it. The plate's
+   *          cantilever fingers click into windows in the shroud walls.
+   */
+  mount?: 'desk' | 'wall';
+  /** Backward lean of the screen from vertical, in degrees. Wall mount: 0. */
   tiltAngleDeg: number;
   /** Frame plate thickness (must exceed bossHeight + a few mm of screw land). */
   frameThickness: Mm;
@@ -340,4 +348,21 @@ export interface StandParams {
   gussetThickness: Mm;
   /** How far up the frame the gussets reach, as a fraction of frame height. */
   gussetHeightFraction: number;
+
+  // ---- Wall mount only (ignored when mount === 'desk') --------------------
+  /** Depth of the shroud behind the frame: room for the USB plug + wire bend.
+   *  NOTE the frame needs a `bezelMargin` big enough that the shroud walls
+   *  don't pinch the module's rear body — the module's own rim is only ~2 mm. */
+  shroudDepth?: Mm;
+  /** Shroud wall thickness. */
+  shroudWall?: Mm;
+  /** Wall plate thickness. */
+  plateThickness?: Mm;
+  /** Border of solid plate around its central wire opening. */
+  plateBorder?: Mm;
+  /** Clearance hole for the drywall screws (shank, not the head). */
+  drywallScrewDiameter?: Mm;
+  /** Counterbore diameter for the drywall screw heads (recessed so the plate
+   *  still lies flat on the wall). */
+  drywallHeadDiameter?: Mm;
 }
