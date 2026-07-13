@@ -78,6 +78,28 @@ export interface SecondaryBoardMount {
   clips: BoardClip[];
 }
 
+/**
+ * A finished module in a vendor shell, described well enough to mount it.
+ *
+ * Z convention matches the physical stack, measured from the FRONT face
+ * (glass) backwards:
+ *   0 .. flangeThickness                     front flange (= pcb.size x/y outline)
+ *   flangeThickness .. + body.depth          rear body (smaller, centred-ish)
+ * Mounting bosses stand on the flange's REAR face, inside the rim left over
+ * around the rear body, and are `bossHeight` tall — so they usually sit
+ * recessed relative to the rear body's back face.
+ */
+export interface EnclosureModule {
+  /** Thickness of the front flange plate (the full outline). */
+  flangeThickness: Mm;
+  /** Raised rear body, origin-relative to the module outline's min corner. */
+  body: { x: Mm; y: Mm; width: Mm; height: Mm; depth: Mm };
+  /** Outer diameter of each mounting boss (positions come from mountingHoles). */
+  bossDiameter: Mm;
+  /** How far each boss stands proud of the flange's rear face. */
+  bossHeight: Mm;
+}
+
 export type MeasurementMethod =
   | 'datasheet'
   | 'open-source-cad'
@@ -134,6 +156,13 @@ export interface BoardProfile {
   crossReference?: string;
   /** Datasheet revision string, e.g. "Rev 1.4 — 2023-08". */
   datasheetRevision?: string;
+  /** Set when this "board" is not a bare PCB but a FINISHED module in its own
+   * shell (e.g. the Guition JC4880P443C touch panel). The case archetypes that
+   * hold such a module — the desk stand — need its shell geometry, not a
+   * cavity: pcb.size is the module's overall outline, and this block describes
+   * the shell's front flange, the rear body that must pass through a frame's
+   * opening, and the mounting bosses that `mountingHoles` locates. */
+  enclosure?: EnclosureModule;
   measurementMethod?: MeasurementMethod;
   visualAssets?: BoardVisualAssets;
   builtin: boolean;

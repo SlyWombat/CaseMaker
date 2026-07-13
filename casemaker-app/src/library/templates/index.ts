@@ -330,6 +330,38 @@ function esp32S3TouchLcd43BPanel(): Project {
   return p;
 }
 
+function guitionDeskStand(): Project {
+  // Guition JC4880P443C (4.3" 480x800 ESP32-P4 panel, in its vendor shell):
+  // a FINISHED module, so there's no cavity to build — the case is a desk
+  // stand. Geometry comes from Guition's own structure drawing: the 117.01 x
+  // 69.41 flange, the 102.6 x 65.06 rear body that passes through the frame's
+  // opening, and four Ø5.4 x 5.0 mm bosses with M2 holes on a 108 x 60 grid.
+  // Landscape, leaning back 15°. The frame's middle is open so the two
+  // back-facing USB-C ports and the 2x10 header stay reachable.
+  const p = createDefaultProject('guition-jc4880p443c');
+  p.name = 'Guition 4.3" panel — desk stand';
+  p.case.stand = {
+    enabled: true,
+    tiltAngleDeg: 15,
+    // 10 mm, not 8: the boss pocket eats 5.2 mm, and the screw head's
+    // counterbore another 1.5 — an 8 mm frame would leave only 1.3 mm of
+    // plastic under each head, thin enough to pull through.
+    frameThickness: 10,
+    bezelMargin: 0,
+    openingClearance: 0.4,
+    screwHoleDiameter: 2.4,
+    baseDepth: 55,
+    baseThickness: 5,
+    gussetThickness: 6,
+    gussetHeightFraction: 0.55,
+  };
+  p.case.bosses.enabled = false;
+  p.case.ventilation = { enabled: false, pattern: 'none', coverage: 0 };
+  p.ports = [];
+  p.mountingFeatures = [];
+  return p;
+}
+
 function slythermPanel(): Project {
   // SlyTherm: the ESP32-S3-Touch-LCD-4.3B panel extended +X to co-locate a
   // Seeed MSR-2 mmWave radar module. Same screen-down bezel + snap retention as
@@ -426,6 +458,14 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
     description: 'ESP32-S3 4.3" touch panel extended with a snap-clip bay for a Seeed MSR-2 mmWave radar module held 10mm off the floor, radar facing out the front alongside the screen.',
     estPrintMinutes: 170,
     build: slythermPanel,
+  },
+  {
+    id: 'guition-desk-stand',
+    boardId: 'guition-jc4880p443c',
+    name: 'Guition 4.3" panel — desk stand',
+    description: 'Desk stand for the Guition JC4880P443C (4.3" 480x800 ESP32-P4 touch panel in its vendor shell). Picture-frame plate the panel screws into on its four M2 bosses, leaning back 15° on a braced foot. No lid — the frame\'s open centre keeps the back USB-C ports and pin header reachable.',
+    estPrintMinutes: 200,
+    build: guitionDeskStand,
   },
   {
     id: 'snap-fit-test',

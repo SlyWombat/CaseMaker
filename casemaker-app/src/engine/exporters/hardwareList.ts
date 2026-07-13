@@ -22,6 +22,34 @@ export function hardwareForProject(project: Project): HardwareItem[] {
   const items: HardwareItem[] = [];
   const c = project.case;
 
+  // ----- Desk stand ---------------------------------------------------------
+  // The stand is screwed to the module's own mounting bosses, so the thread is
+  // set by the module (Ø2 hole → M2), not by our boss/insert settings. The
+  // screw enters from the BACK of the frame: it crosses the land left behind
+  // the boss pocket, then threads into the boss.
+  const stand = c.stand;
+  const enc = project.board.enclosure;
+  if (stand?.enabled && enc) {
+    const holes = project.board.mountingHoles?.length ?? 0;
+    if (holes > 0) {
+      const holeDia = project.board.mountingHoles[0]!.diameter; // Ø2 on the Guition panel
+      const thread = `M${Math.round(holeDia)}`;
+      const pocketDepth = enc.bossHeight + 0.2;
+      const land = stand.frameThickness - pocketDepth; // frame left behind the pocket
+      const headRecess = 1.5;
+      // Reach the boss, then engage ~70% of its depth — round up to an even mm.
+      const ideal = land - headRecess + 0.7 * enc.bossHeight;
+      const len = Math.max(4, Math.ceil(ideal / 2) * 2);
+      items.push({
+        id: 'stand-screws',
+        label: `${thread} × ${len} mm pan-head self-tapping screws`,
+        count: holes,
+        note: `Into the panel's own Ø${holeDia} mounting bosses, from the BACK of the frame. ${land.toFixed(1)} mm of frame behind the boss pocket; heads sit in the ${headRecess} mm counterbores. Don't overtighten — they're cutting threads in the panel's plastic bosses.`,
+      });
+    }
+    return items; // a stand has no lid, no cavity, no gasket — nothing else applies
+  }
+
   // ----- Screws into the bosses --------------------------------------------
   // Two independent retention paths share the same threaded boss/insert:
   //   (a) LID screws — when joint='screw-down': screw goes from the top

@@ -56,6 +56,22 @@ export const caseParamsSchema = z.object({
   // top face plus a matching tongue on the lid underside. Optional so
   // legacy projects load with no seal geometry. Forces lidRecess=true at
   // the UI layer when enabled.
+  // Desk-stand archetype: frame + tilted foot, no lid. Optional so legacy
+  // projects load unchanged; absent/disabled = normal shell+lid box.
+  stand: z
+    .object({
+      enabled: z.boolean(),
+      tiltAngleDeg: z.number().min(0).max(60),
+      frameThickness: z.number().positive(),
+      bezelMargin: z.number().nonnegative(),
+      openingClearance: z.number().nonnegative(),
+      screwHoleDiameter: z.number().positive(),
+      baseDepth: z.number().positive(),
+      baseThickness: z.number().positive(),
+      gussetThickness: z.number().positive(),
+      gussetHeightFraction: z.number().min(0.1).max(1),
+    })
+    .optional(),
   seal: z
     .object({
       enabled: z.boolean(),

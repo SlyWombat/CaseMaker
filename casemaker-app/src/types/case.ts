@@ -301,4 +301,43 @@ export interface CaseParameters {
    * geometry emitted, no envelope growth.
    */
   hinge?: HingeFeature;
+  /**
+   * Desk-stand archetype. When enabled, the project compiles to a STAND
+   * instead of a shell+lid box: a picture frame the finished display module
+   * screws into, tilted back, carried on a foot. Bypasses the whole
+   * shell/lid/boss/vent pipeline — a stand has no cavity and no lid.
+   * Requires a board whose `enclosure` block describes the finished module.
+   */
+  stand?: StandParams;
+}
+
+/**
+ * Desk stand for a finished display module (see BoardProfile.enclosure).
+ *
+ * The frame is a flat plate matching the module's outline: the module's rear
+ * body passes THROUGH the frame's opening, its front flange seats on the
+ * frame's face, and screws pass from the frame's back into the module's
+ * mounting bosses (which sink into counterbored pockets so the flange sits
+ * flush). The centre is open, so back-facing connectors stay reachable.
+ */
+export interface StandParams {
+  enabled: boolean;
+  /** Backward lean of the screen from vertical, in degrees. */
+  tiltAngleDeg: number;
+  /** Frame plate thickness (must exceed bossHeight + a few mm of screw land). */
+  frameThickness: Mm;
+  /** Extra material added around the module outline. 0 = frame matches the module. */
+  bezelMargin: Mm;
+  /** Clearance per side around the module's rear body in the frame opening. */
+  openingClearance: Mm;
+  /** Screw clearance-hole diameter through the frame (M2 → 2.4). */
+  screwHoleDiameter: Mm;
+  /** Foot depth, front to back. Must out-reach the leaning screen's centre of mass. */
+  baseDepth: Mm;
+  /** Foot plate thickness. */
+  baseThickness: Mm;
+  /** Thickness of each side gusset bracing the frame against the foot. */
+  gussetThickness: Mm;
+  /** How far up the frame the gussets reach, as a fraction of frame height. */
+  gussetHeightFraction: number;
 }

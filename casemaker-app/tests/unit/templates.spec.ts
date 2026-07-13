@@ -17,6 +17,7 @@ describe('Marketing gap #15 — project templates', () => {
       'elp-camera-enclosure',
       'esp32-s3-touch-panel',
       'slytherm',
+      'guition-desk-stand',
       'snap-fit-test',
       'protective-case',
       'large-box-200',

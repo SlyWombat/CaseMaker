@@ -108,6 +108,21 @@ export const boardProfileSchema = z.object({
       }),
     )
     .optional(),
+  // Finished module in a vendor shell (stand archetype needs its shell, not a cavity).
+  enclosure: z
+    .object({
+      flangeThickness: z.number().positive(),
+      body: z.object({
+        x: z.number(),
+        y: z.number(),
+        width: z.number().positive(),
+        height: z.number().positive(),
+        depth: z.number().positive(),
+      }),
+      bossDiameter: z.number().positive(),
+      bossHeight: z.number().positive(),
+    })
+    .optional(),
   source: z.string().url().optional(),
   crossReference: z.string().url().optional(),
   datasheetRevision: z.string().optional(),

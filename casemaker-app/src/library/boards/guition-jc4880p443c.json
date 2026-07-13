@@ -1,0 +1,49 @@
+{
+  "id": "guition-jc4880p443c",
+  "name": "Guition JC4880P443C 4.3\" ESP32-P4 panel (shelled)",
+  "manufacturer": "Guition",
+  "pcb": {
+    "size": {
+      "x": 117.01,
+      "y": 69.41,
+      "z": 13.8
+    }
+  },
+  "mountingHoles": [
+    { "id": "m1", "x": 4.5, "y": 4.7, "diameter": 2 },
+    { "id": "m2", "x": 112.51, "y": 4.7, "diameter": 2 },
+    { "id": "m3", "x": 4.5, "y": 64.71, "diameter": 2 },
+    { "id": "m4", "x": 112.51, "y": 64.71, "diameter": 2 }
+  ],
+  "components": [
+    {
+      "id": "lcd-window",
+      "kind": "custom",
+      "position": { "x": 11.71, "y": 6.63, "z": 0 },
+      "size": { "x": 93.6, "y": 56.16, "z": 1 },
+      "facing": "-z",
+      "cutoutMargin": 0
+    },
+    {
+      "id": "usb-c-bay",
+      "kind": "usb-c",
+      "position": { "x": 91.8, "y": 20.5, "z": 13.8 },
+      "size": { "x": 6.7, "y": 25.6, "z": 3.2 },
+      "facing": "+z",
+      "cutoutMargin": 0.5
+    }
+  ],
+  "enclosure": {
+    "flangeThickness": 4.8,
+    "body": { "x": 7.205, "y": 2.175, "width": 102.6, "height": 65.06, "depth": 9.0 },
+    "bossDiameter": 5.4,
+    "bossHeight": 5.0
+  },
+  "defaultStandoffHeight": 0,
+  "recommendedZClearance": 0,
+  "source": "https://www.guition.com/esp32p4-display-module/esp32p4-display",
+  "crossReference": "http://pan.jczn1688.com/directlink/1/HMI%20display/JC4880P443C_I_W.zip",
+  "datasheetRevision": "Structure diagram JC4880P443C_I_W_Y (rev V1.0)",
+  "measurementMethod": "datasheet",
+  "builtin": true
+}

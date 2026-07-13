@@ -4,6 +4,7 @@ import { createDefaultProject } from '@/store/projectStore';
 import { listBuiltinBoardIds } from '@/library';
 import { TEMPLATES } from '@/library/templates';
 import { computeShellDims } from '@/engine/compiler/caseShell';
+import { aabbOfOp } from '@/engine/compiler/buildPlan';
 import type { BuildOp, BuildPlan } from '@/engine/compiler/buildPlan';
 import type { Project } from '@/types';
 
@@ -85,8 +86,18 @@ function projectsToTest(): Array<{ label: string; build: () => Project }> {
   return out;
 }
 
+/** A stand is a different archetype: a frame + foot, no cavity and no lid. The
+ * shell/lid invariants below don't apply to it — it gets its own (Invariant 8)
+ * plus stand.spec.ts. Everything archetype-agnostic (purity, placementReport,
+ * smartCutoutDecisions) still covers it. */
+function isStand(build: () => Project): boolean {
+  return build().case.stand?.enabled === true;
+}
+
 describe('compiler invariants (#58) — matrix of boards × templates', () => {
-  const cases = projectsToTest();
+  const allCases = projectsToTest();
+  const cases = allCases.filter((c) => !isStand(c.build));
+  const standCases = allCases.filter((c) => isStand(c.build));
 
   describe('Invariant 1: BuildPlan emits at LEAST shell + lid; optionally extra named parts', () => {
     // Some templates legitimately add extra top-level nodes:
@@ -107,7 +118,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   });
 
   describe('Invariant 2: compileProject is pure — two calls produce structurally identical plans', () => {
-    for (const c of cases) {
+    for (const c of allCases) {
       it(`${c.label}: identical node count + ids on two calls`, () => {
         const a = compileProject(c.build());
         const b = compileProject(c.build());
@@ -153,7 +164,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   });
 
   describe('Invariant 4: smartCutoutDecisions are part of the plan output (#51)', () => {
-    for (const c of cases) {
+    for (const c of allCases) {
       it(`${c.label}: plan.smartCutoutDecisions is an array`, () => {
         const plan = compileProject(c.build());
         expect(Array.isArray(plan.smartCutoutDecisions)).toBe(true);
@@ -162,7 +173,7 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
   });
 
   describe('Invariant 5: placementReport is attached to every plan (#51)', () => {
-    for (const c of cases) {
+    for (const c of allCases) {
       it(`${c.label}: plan.placementReport.issues is an array`, () => {
         const plan = compileProject(c.build());
         expect(plan.placementReport).toBeDefined();
@@ -187,6 +198,25 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
         const plan = compileProject(c.build());
         const lid = plan.nodes.find((n) => n.id === 'lid')!;
         assertWellFormed(lid.op, `${c.label} lid`);
+      });
+    }
+  });
+
+  // Stands are the shell/lid invariants' counterpart for the other archetype:
+  // exactly one 'stand' node, well-formed, and it rests ON the desk (z = 0)
+  // rather than floating — the geometry equivalent of "no loose parts".
+  describe('Invariant 8: stand archetype emits one well-formed part sitting on z = 0', () => {
+    for (const c of standCases) {
+      it(`${c.label}: single 'stand' node, well-formed, grounded`, () => {
+        const plan = compileProject(c.build());
+        expect(plan.nodes.map((n) => n.id)).toEqual(['stand']);
+        const stand = plan.nodes[0]!;
+        assertWellFormed(stand.op, `${c.label} stand`);
+        // aabbOfOp (not the local bboxOf) — bboxOf counts subtractive cutters,
+        // which deliberately overshoot the faces they punch through.
+        const bb = aabbOfOp(stand.op)!;
+        expect(bb.min[2]).toBeGreaterThanOrEqual(-0.01);
+        expect(bb.min[2]).toBeLessThanOrEqual(0.01);
       });
     }
   });

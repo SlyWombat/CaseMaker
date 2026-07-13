@@ -23,6 +23,7 @@ import { buildBoardSnapOps } from './boardSnap';
 import { buildSecondaryMountOps } from './secondaryMounts';
 import { buildHingeOps } from './hinges';
 import { buildCustomCutouts } from './customCutouts';
+import { buildStandOp } from './stand';
 import { validatePlacements } from './placementValidator';
 import { getBuiltinHat } from '@/library/hats';
 import { getBuiltinDisplay } from '@/library/displays';
@@ -53,6 +54,24 @@ export function compileProject(project: Project): BuildPlan {
   } = project;
   const resolveHat = makeHatResolver(project);
   const resolveDisplay = makeDisplayResolver(project);
+
+  // Desk-stand archetype: a frame + tilted foot, no cavity and no lid. Every
+  // feature compiler below assumes a box shell around a PCB, so the stand
+  // takes its own path rather than trying to make fourteen of them no-op.
+  if (caseParams.stand?.enabled) {
+    const standOp = buildStandOp(board, caseParams.stand);
+    if (standOp) {
+      return {
+        nodes: [{ id: 'stand', op: standOp }],
+        placementReport: validatePlacements(project),
+        // No smart cutout layout runs for a stand (no walls to lay ports out
+        // on), but the field is part of every plan's contract.
+        smartCutoutDecisions: [],
+      };
+    }
+    // Board isn't a finished enclosure module — fall through to the normal
+    // shell so the user still gets geometry rather than an empty viewport.
+  }
 
   // Issue #105 — pass display so the shell envelope grows when the display
   // PCB is larger than the host (e.g. Pi 7" Touch on a Pi 4B).

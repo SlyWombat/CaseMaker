@@ -13,6 +13,7 @@ import esp32S3DevkitcRaw from './boards/esp32-s3-devkitc-1.json';
 import esp32C61DevkitcRaw from './boards/esp32-c61-devkitc-1.json';
 import elegooEsp32WroomUsbcRaw from './boards/elegoo-esp32-wroom-usbc.json';
 import esp32S3TouchLcd43BRaw from './boards/esp32-s3-touch-lcd-4.3b.json';
+import guitionJc4880P443CRaw from './boards/guition-jc4880p443c.json';
 import slythermRaw from './boards/slytherm.json';
 import rpiPicoRaw from './boards/rpi-pico.json';
 import rpiPicoWRaw from './boards/rpi-pico-w.json';
@@ -42,6 +43,7 @@ const validated: BoardProfile[] = [
   esp32C61DevkitcRaw,
   elegooEsp32WroomUsbcRaw,
   esp32S3TouchLcd43BRaw,
+  guitionJc4880P443CRaw,
   slythermRaw,
   rpiPicoRaw,
   rpiPicoWRaw,

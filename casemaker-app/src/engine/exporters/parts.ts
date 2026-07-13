@@ -52,6 +52,15 @@ const FLAT_ORIENTATION: PrintOrientation = { rotation: [0, 0, 0], flipForPrint: 
  * Map keyed by id without ops attached).
  */
 export function partForId(id: string, index = 0): ProjectPart {
+  if (id === 'stand') {
+    return {
+      id,
+      displayName: 'Desk stand (frame + foot)',
+      material: 'rigid',
+      category: 'case',
+      printOrientation: CASE_ORIENTATION,
+    };
+  }
   if (id === 'shell') {
     return {
       id,
@@ -136,6 +145,7 @@ export function printOrientationHint(part: ProjectPart): string {
     if (part.id === 'lid') return 'Print upside-down (lid ceiling on the bed)';
     return 'Print upside-down (flipped 180° on X)';
   }
+  if (part.id === 'stand') return 'Print as modelled — foot flat on the bed, frame leaning back. No supports: the frame sits at 75° and the gussets taper upward';
   if (part.id === 'shell') return 'Print right-side up (case floor on the bed, walls + cavity opening up)';
   if (part.id.startsWith('latch-arm-')) return 'Lay flat — knuckle and cam hook face up';
   if (part.id.startsWith('latch-pin-')) return 'Stand on end (cap up) for a clean barrel; or lay flat if seam tolerance is OK';
