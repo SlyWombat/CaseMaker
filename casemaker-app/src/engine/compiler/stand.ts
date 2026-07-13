@@ -1,6 +1,5 @@
 import type { BoardProfile, StandParams } from '@/types';
 import {
-  cube,
   cylinder,
   difference,
   mesh,
@@ -83,14 +82,20 @@ export function computeStandDims(board: BoardProfile, stand: StandParams): Stand
  * regardless of the caller's ordering.
  */
 function triPrismX(
-  tri: [number, number][], // three (y, z) pairs
+  tri: readonly [[number, number], [number, number], [number, number]], // three (y, z) pairs
   xMin: number,
   xMax: number,
 ): BuildOp {
-  let [a, b, c] = tri;
+  const a = tri[0];
+  let b = tri[1];
+  let c = tri[2];
   // Force CCW in (y, z) so the caps' winding below is consistent.
   const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-  if (cross < 0) [b, c] = [c, b];
+  if (cross < 0) {
+    const swap = b;
+    b = c;
+    c = swap;
+  }
   const positions: number[] = [];
   for (const [y, z] of [a, b, c]) positions.push(xMin, y, z); // 0,1,2
   for (const [y, z] of [a, b, c]) positions.push(xMax, y, z); // 3,4,5
@@ -188,7 +193,7 @@ export function buildStandOp(board: BoardProfile, stand: StandParams): BuildOp |
   const zBot = stand.baseThickness;
   const zTop = stand.baseThickness + stand.gussetHeightFraction * H * cosT;
   const yHeel = baseDepth - 2;
-  const tri: [number, number][] = [
+  const tri: [[number, number], [number, number], [number, number]] = [
     [backFaceY(zBot), zBot], // at the frame, on the foot
     [yHeel, zBot], // back of the foot
     [backFaceY(zTop), zTop], // up the frame's back
