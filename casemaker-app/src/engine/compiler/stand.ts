@@ -134,6 +134,25 @@ const CHANNEL_CLEAR = 0.6;
 const MIN_RIB = 1.2;
 
 /**
+ * Board X → frame X. **The frame's X is MIRRORED relative to the board's.**
+ *
+ * Board coordinates are the module's BACK view (that's how the vendor drawing
+ * is dimensioned). The module seats FACE-TO-FACE against the frame: its flange
+ * rear touches the frame's front, so board +z points into the frame (= frame
+ * −z), while board +y still has to point up (the buttons are on the bottom
+ * edge). A rigid placement with z flipped and y kept must flip x — it's a 180°
+ * turn about the vertical axis. Turn a phone around to face you and a button on
+ * its back-LEFT ends up on your RIGHT.
+ *
+ * The bosses (108×60, centred) and the rear body are both symmetric in x, so
+ * they land correctly either way and hide this. The three soft buttons are not
+ * symmetric: get this wrong and their channels are cut on the wrong side.
+ */
+function mirrorX(board: BoardProfile, stand: StandParams, boardX: number): number {
+  return stand.bezelMargin + (board.pcb.size.x - boardX);
+}
+
+/**
  * The frame plate, flat, in local coords (z: 0 = BACK, T = FRONT — the front
  * is the face the module's flange seats against). Shared by both mounts.
  */
@@ -149,7 +168,7 @@ function buildFrameLocal(board: BoardProfile, stand: StandParams, W: number, H: 
   const openH = enc.body.height + 2 * clr;
   cuts.push(
     translate(
-      [m + enc.body.x - clr, m + enc.body.y - clr, -OVER],
+      [mirrorX(board, stand, enc.body.x + enc.body.width) - clr, m + enc.body.y - clr, -OVER],
       roundedRectPrism(openW, openH, T + 2 * OVER, Math.min(3, openW / 4, openH / 4)),
     ),
   );
@@ -158,7 +177,7 @@ function buildFrameLocal(board: BoardProfile, stand: StandParams, W: number, H: 
   // a screw clearance hole through, and a head counterbore on the BACK face.
   const pocketDepth = enc.bossHeight + 0.2;
   for (const h of board.mountingHoles) {
-    const hx = m + h.x;
+    const hx = mirrorX(board, stand, h.x);
     const hy = m + h.y;
     cuts.push(
       translate(
@@ -203,32 +222,83 @@ export function buildEdgeChannels(
 ): BuildOp[] {
   const enc = board.enclosure!;
   const m = stand.bezelMargin;
-  const bx0 = m + enc.body.x;
+  // Body edges in FRAME space. X is mirrored (see mirrorX), so the body's -x
+  // face becomes the frame's high-x side and vice versa.
+  const bx0 = mirrorX(board, stand, enc.body.x + enc.body.width);
+  const bx1 = mirrorX(board, stand, enc.body.x);
   const by0 = m + enc.body.y;
-  const bx1 = bx0 + enc.body.width;
   const by1 = by0 + enc.body.height;
   const zLo = -OVER;
   const zLen = T + 2 * OVER;
   const out: BuildOp[] = [];
   for (const p of enc.edgeProtrusions ?? []) {
-    const a = m + Math.min(p.from, p.to) - CHANNEL_MARGIN;
-    const b = m + Math.max(p.from, p.to) + CHANNEL_MARGIN;
     const reach = p.depth + CHANNEL_CLEAR;
     if (p.edge === '-y' || p.edge === '+y') {
+      // The span runs along x, so it mirrors (and its ends swap).
+      const a = mirrorX(board, stand, Math.max(p.from, p.to)) - CHANNEL_MARGIN;
+      const b = mirrorX(board, stand, Math.min(p.from, p.to)) + CHANNEL_MARGIN;
       let yLo = p.edge === '-y' ? by0 - reach : by1 - 0.5;
       let yHi = p.edge === '-y' ? by0 + 0.5 : by1 + reach;
       if (p.edge === '-y' && yLo < MIN_RIB) yLo = -OVER;
       if (p.edge === '+y' && H - yHi < MIN_RIB) yHi = H + OVER;
       out.push(translate([a, yLo, zLo], cube([b - a, yHi - yLo, zLen])));
     } else {
-      let xLo = p.edge === '-x' ? bx0 - reach : bx1 - 0.5;
-      let xHi = p.edge === '-x' ? bx0 + 0.5 : bx1 + reach;
-      if (p.edge === '-x' && xLo < MIN_RIB) xLo = -OVER;
-      if (p.edge === '+x' && W - xHi < MIN_RIB) xHi = W + OVER;
+      // A bump on the body's -x face lands on the frame's +x side, and vice
+      // versa. The span runs along y, which is not mirrored.
+      const a = m + Math.min(p.from, p.to) - CHANNEL_MARGIN;
+      const b = m + Math.max(p.from, p.to) + CHANNEL_MARGIN;
+      const frameEdge = p.edge === '-x' ? '+x' : '-x';
+      let xLo = frameEdge === '-x' ? bx0 - reach : bx1 - 0.5;
+      let xHi = frameEdge === '-x' ? bx0 + 0.5 : bx1 + reach;
+      if (frameEdge === '-x' && xLo < MIN_RIB) xLo = -OVER;
+      if (frameEdge === '+x' && W - xHi < MIN_RIB) xHi = W + OVER;
       out.push(translate([xLo, a, zLo], cube([xHi - xLo, b - a, zLen])));
     }
   }
   return out;
+}
+
+/**
+ * Where the module sits, for the viewport to draw it IN PLACE rather than flat.
+ *
+ * Compose in this order (all in the stand's world frame):
+ *   1. Ry(180°)  — the face-to-face turn (see mirrorX): x → −x, z → −z
+ *   2. translate(frameOffset)   — lands the module on the frame's front face
+ *   3. Rx(rotXDeg)              — the frame's own tilt (desk); 0 for wall
+ *   4. translate(worldOffset)
+ */
+export interface ModulePlacement {
+  frameOffset: [number, number, number];
+  rotXDeg: number;
+  worldOffset: [number, number, number];
+}
+
+export function standModulePlacement(
+  board: BoardProfile,
+  stand: StandParams,
+): ModulePlacement | null {
+  const enc = board.enclosure;
+  if (!enc) return null;
+  const m = stand.bezelMargin;
+  const T = stand.frameThickness;
+  const t = (stand.tiltAngleDeg * Math.PI) / 180;
+  // After Ry(180) the module's x,z are negated; shift it back into place. The
+  // flange's rear face (board z = flangeThickness) must land on the frame's
+  // front face (frame z = T).
+  const frameOffset: [number, number, number] = [
+    m + board.pcb.size.x,
+    m,
+    T + enc.flangeThickness,
+  ];
+  if ((stand.mount ?? 'desk') === 'wall') {
+    const D = stand.shroudDepth ?? WALL_DEFAULTS.shroudDepth;
+    return { frameOffset, rotXDeg: 0, worldOffset: [0, 0, D] };
+  }
+  return {
+    frameOffset,
+    rotXDeg: 90 - stand.tiltAngleDeg,
+    worldOffset: [0, T * Math.cos(t) + 2, stand.baseThickness - FOOT_EMBED],
+  };
 }
 
 /**

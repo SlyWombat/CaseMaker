@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
+import * as THREE from 'three';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { cavityOriginXY } from '@/engine/coords';
+import { standModulePlacement } from '@/engine/compiler/stand';
 import { buildBoardPlaceholderGroup } from '@/engine/scene/boardPlaceholder';
 
 /**
@@ -23,6 +25,25 @@ export function BoardPlaceholderMesh() {
   const showBoard = useViewportStore((s) => s.showBoard);
 
   const group = useMemo(() => {
+    // Stand archetype: the module isn't lying in a cavity, it's bolted to a
+    // frame that leans back (desk) or stands off a wall. Build the placeholder
+    // in board coords and drop it onto the frame with the same placement the
+    // geometry compiler uses — otherwise it renders flat on the foot, which is
+    // where the module very much is not.
+    const stand = params.stand;
+    const placement = stand?.enabled ? standModulePlacement(board, stand) : null;
+    if (placement) {
+      const g = buildBoardPlaceholderGroup(board, { origin: { x: 0, y: 0, z: 0 } });
+      const m = new THREE.Matrix4()
+        .makeTranslation(...placement.worldOffset)
+        .multiply(new THREE.Matrix4().makeRotationX((placement.rotXDeg * Math.PI) / 180))
+        .multiply(new THREE.Matrix4().makeTranslation(...placement.frameOffset))
+        // Ry(180): the face-to-face turn. A rotation, not a mirror, so the
+        // placeholder's normals stay outward.
+        .multiply(new THREE.Matrix4().makeRotationY(Math.PI));
+      g.applyMatrix4(m);
+      return g;
+    }
     const xy = cavityOriginXY(params);
     const floor = params.floorThickness;
     const standoff = board.defaultStandoffHeight;
@@ -31,6 +52,7 @@ export function BoardPlaceholderMesh() {
     });
   }, [
     board,
+    params.stand,
     params.wallThickness,
     params.internalClearance,
     params.clearanceTweaks,

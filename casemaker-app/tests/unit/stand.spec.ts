@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
-import { buildEdgeChannels, buildStandOp, computeStandDims } from '@/engine/compiler/stand';
+import {
+  buildEdgeChannels,
+  buildStandOp,
+  computeStandDims,
+  standModulePlacement,
+} from '@/engine/compiler/stand';
 import { getBuiltinBoard } from '@/library';
 import { findTemplate, findTemplateByBoard } from '@/library/templates';
 import { aabbOfOp } from '@/engine/compiler/buildPlan';
@@ -125,9 +130,12 @@ describe('desk stand geometry', () => {
     expect(buttonTip).toBeLessThan(openingEdge); // i.e. the button is INSIDE the frame material
   });
 
-  it('cuts a full-thickness channel per button, clear of the tip', () => {
-    // The channel must run through the whole frame — the button slides in along
-    // the insertion path and is never pressed to reach a recess.
+  it('cuts a full-thickness channel per button, at the MIRRORED x', () => {
+    // The frame's x is a mirror of the board's back-view x — the module seats
+    // face-to-face against it (see mirrorX). The bosses and the rear body are
+    // symmetric so they hide this; the buttons are not. Cut them un-mirrored and
+    // the middle button gets no channel at all and stays fully clamped — which
+    // is exactly the bug this test exists to prevent.
     const enc = board.enclosure!;
     const T = STAND.frameThickness;
     const W = board.pcb.size.x;
@@ -135,18 +143,46 @@ describe('desk stand geometry', () => {
     const channels = buildEdgeChannels(board, STAND, W, H, T).map((c) => aabbOfOp(c)!);
     expect(channels.length).toBe(3);
     for (const b of enc.edgeProtrusions!) {
+      // Where the button PHYSICALLY lands on the frame.
+      const fx0 = W - b.to;
+      const fx1 = W - b.from;
       const tipY = enc.body.y - b.depth;
       const hit = channels.find(
         (bx) =>
-          bx.min[0] <= b.from - 1 && // slack along the edge, both sides
-          bx.max[0] >= b.to + 1 &&
+          bx.min[0] <= fx0 - 1 && // slack along the edge, both sides
+          bx.max[0] >= fx1 + 1 &&
           bx.min[1] < tipY - 0.4 && // reaches past the button's tip
           bx.max[1] >= enc.body.y && // opens into the frame's opening
           bx.min[2] <= 0 &&
           bx.max[2] >= T, // through the FULL thickness — the insertion path
       );
-      expect(hit, `no full-depth channel for ${b.id}`).toBeDefined();
+      expect(hit, `no full-depth channel at the mirrored x for ${b.id}`).toBeDefined();
     }
+    // And explicitly: nothing sits at the UN-mirrored x of the lone button —
+    // proving we didn't just widen everything until both sides pass.
+    const lone = enc.edgeProtrusions!.find((b) => b.from > 90)!;
+    const wrongSide = channels.find(
+      (bx) => bx.min[0] <= lone.from && bx.max[0] >= lone.to && bx.min[1] < 1,
+    );
+    expect(wrongSide, 'a channel was cut on the un-mirrored side').toBeUndefined();
+  });
+
+  it('the module placement puts the flange on the frame face, screen out', () => {
+    // Use the SHIPPED params, not the fixture: the 10 mm frame is what actually
+    // swallows the 9 mm rear body (an 8 mm frame would let it poke out the back).
+    const shipped = findTemplate('guition-desk-stand')!.build().case.stand!;
+    const p = standModulePlacement(board, shipped)!;
+    const enc = board.enclosure!;
+    // Ry(180) negates z, so board z=flangeThickness must land on frame z=T.
+    const flangeRearZ = p.frameOffset[2] - enc.flangeThickness;
+    expect(flangeRearZ).toBeCloseTo(shipped.frameThickness, 5);
+    // ...and the rear body's back face lands inside the frame, not through it.
+    const bodyBackZ = p.frameOffset[2] - board.pcb.size.z;
+    expect(bodyBackZ).toBeGreaterThan(0);
+    expect(bodyBackZ).toBeLessThan(shipped.frameThickness);
+    // The desk frame is tilted; the wall frame is not.
+    expect(p.rotXDeg).toBeCloseTo(90 - shipped.tiltAngleDeg, 5);
+    expect(standModulePlacement(board, findTemplate('guition-wall-mount')!.build().case.stand!)!.rotXDeg).toBe(0);
   });
 
   it('a bare PCB (no enclosure block) yields no stand', () => {
