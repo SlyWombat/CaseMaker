@@ -98,6 +98,29 @@ export interface EnclosureModule {
   bossDiameter: Mm;
   /** How far each boss stands proud of the flange's rear face. */
   bossHeight: Mm;
+  /**
+   * Things that stand proud of the REAR BODY's side faces and must never be
+   * squashed — the Guition panel's three soft buttons, for instance. A frame
+   * whose opening hugs the rear body would otherwise hold them permanently
+   * pressed.
+   *
+   * The frame cuts a channel at each: open into the opening, and open through
+   * the frame's FULL thickness, so the feature slides straight in along the
+   * insertion path and is never compressed on the way to a recess.
+   */
+  edgeProtrusions?: EdgeProtrusion[];
+}
+
+/** A bump on one of the rear body's side faces (button, latch, connector shell). */
+export interface EdgeProtrusion {
+  id: string;
+  /** Which face of the rear body it sticks out of. */
+  edge: '+x' | '-x' | '+y' | '-y';
+  /** Span along that edge, in module coords (mm). */
+  from: Mm;
+  to: Mm;
+  /** How far it stands proud of that face (mm). */
+  depth: Mm;
 }
 
 export type MeasurementMethod =

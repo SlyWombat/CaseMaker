@@ -127,6 +127,11 @@ const BARB_P = 1.5; // how far the barb juts out past the finger face
 const BARB_H = 2.5;
 /** Plate-to-shroud-cavity clearance, per side. */
 const PLATE_FIT = 0.3;
+/** Edge-protrusion channels: slack along the edge, and off the bump's tip. */
+const CHANNEL_MARGIN = 1.5;
+const CHANNEL_CLEAR = 0.6;
+/** Thinner than this and a leftover rib isn't worth printing — take it out. */
+const MIN_RIB = 1.2;
 
 /**
  * The frame plate, flat, in local coords (z: 0 = BACK, T = FRONT — the front
@@ -169,7 +174,61 @@ function buildFrameLocal(board: BoardProfile, stand: StandParams, W: number, H: 
       ),
     );
   }
+
   return difference([roundedRectPrism(W, H, T, outerR), ...cuts]);
+}
+
+/**
+ * Channels for anything standing proud of the rear body's side faces — the
+ * Guition panel's three soft buttons. Without these the frame's opening hugs
+ * the body and holds the buttons permanently pressed.
+ *
+ * Returned in FRAME-LOCAL coords, but they must be subtracted from the whole
+ * assembled part, not just the frame: the desk stand's frame sinks its bottom
+ * edge into the foot, and the buttons live exactly in that overlap — cut the
+ * frame alone and the foot fills the channel straight back in.
+ *
+ * Each channel runs through the frame's FULL thickness, so the button slides in
+ * along the insertion path and is never pressed in to reach a recess. It opens
+ * into the frame's opening, and if the rib left outboard of it would be thinner
+ * than MIN_RIB it is taken right out to the frame's edge — a sub-millimetre
+ * sliver of plastic there is neither printable nor useful.
+ */
+export function buildEdgeChannels(
+  board: BoardProfile,
+  stand: StandParams,
+  W: number,
+  H: number,
+  T: number,
+): BuildOp[] {
+  const enc = board.enclosure!;
+  const m = stand.bezelMargin;
+  const bx0 = m + enc.body.x;
+  const by0 = m + enc.body.y;
+  const bx1 = bx0 + enc.body.width;
+  const by1 = by0 + enc.body.height;
+  const zLo = -OVER;
+  const zLen = T + 2 * OVER;
+  const out: BuildOp[] = [];
+  for (const p of enc.edgeProtrusions ?? []) {
+    const a = m + Math.min(p.from, p.to) - CHANNEL_MARGIN;
+    const b = m + Math.max(p.from, p.to) + CHANNEL_MARGIN;
+    const reach = p.depth + CHANNEL_CLEAR;
+    if (p.edge === '-y' || p.edge === '+y') {
+      let yLo = p.edge === '-y' ? by0 - reach : by1 - 0.5;
+      let yHi = p.edge === '-y' ? by0 + 0.5 : by1 + reach;
+      if (p.edge === '-y' && yLo < MIN_RIB) yLo = -OVER;
+      if (p.edge === '+y' && H - yHi < MIN_RIB) yHi = H + OVER;
+      out.push(translate([a, yLo, zLo], cube([b - a, yHi - yLo, zLen])));
+    } else {
+      let xLo = p.edge === '-x' ? bx0 - reach : bx1 - 0.5;
+      let xHi = p.edge === '-x' ? bx0 + 0.5 : bx1 + reach;
+      if (p.edge === '-x' && xLo < MIN_RIB) xLo = -OVER;
+      if (p.edge === '+x' && W - xHi < MIN_RIB) xHi = W + OVER;
+      out.push(translate([xLo, a, zLo], cube([xHi - xLo, b - a, zLen])));
+    }
+  }
+  return out;
 }
 
 /**
@@ -243,7 +302,15 @@ export function buildStandOp(board: BoardProfile, stand: StandParams): BuildOp |
     ),
   );
 
-  return difference([union([foot, frame, ...gussets]), frontHalfSpace]);
+  // Button channels, placed with the frame. Subtracted from the ASSEMBLED part
+  // so they also cut the foot the frame's bottom edge is embedded in — the
+  // buttons sit right in that overlap, and cutting the frame alone leaves the
+  // foot filling the channel back in.
+  const channels = buildEdgeChannels(board, stand, W, H, T).map((c) =>
+    translate([0, Ty, Tz], rotate([90 - stand.tiltAngleDeg, 0, 0], c)),
+  );
+
+  return difference([union([foot, frame, ...gussets]), frontHalfSpace, ...channels]);
 }
 
 /**
@@ -320,7 +387,14 @@ function buildWallBody(board: BoardProfile, stand: StandParams): BuildOp {
     );
   }
 
-  return difference([union([shroud, frame]), ...windows]);
+  // Button channels — same reasoning as the desk stand: subtract from the whole
+  // body, so a channel that reaches the frame's edge also clears the shroud
+  // wall standing directly behind it.
+  const channels = buildEdgeChannels(board, stand, W, H, T).map((c) =>
+    translate([0, 0, D], c),
+  );
+
+  return difference([union([shroud, frame]), ...windows, ...channels]);
 }
 
 function buildWallPlate(board: BoardProfile, stand: StandParams): BuildOp {

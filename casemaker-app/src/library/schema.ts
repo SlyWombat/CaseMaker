@@ -121,6 +121,18 @@ export const boardProfileSchema = z.object({
       }),
       bossDiameter: z.number().positive(),
       bossHeight: z.number().positive(),
+      // Bumps on the rear body's side faces that a frame must channel around.
+      edgeProtrusions: z
+        .array(
+          z.object({
+            id: z.string().min(1),
+            edge: z.enum(['+x', '-x', '+y', '-y']),
+            from: z.number(),
+            to: z.number(),
+            depth: z.number().positive(),
+          }),
+        )
+        .optional(),
     })
     .optional(),
   source: z.string().url().optional(),

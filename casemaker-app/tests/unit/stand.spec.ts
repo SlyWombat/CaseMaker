@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
-import { buildStandOp, computeStandDims } from '@/engine/compiler/stand';
+import { buildEdgeChannels, buildStandOp, computeStandDims } from '@/engine/compiler/stand';
 import { getBuiltinBoard } from '@/library';
 import { findTemplate, findTemplateByBoard } from '@/library/templates';
 import { aabbOfOp } from '@/engine/compiler/buildPlan';
@@ -100,6 +100,53 @@ describe('desk stand geometry', () => {
     const rot = (cutter as unknown as { child: { kind: string; degrees: number[] } }).child;
     expect(rot.kind).toBe('rotate');
     expect(rot.degrees[0]).toBeCloseTo(90 - STAND.tiltAngleDeg, 5);
+  });
+
+  it('the three soft buttons are modelled as edge protrusions', () => {
+    const enc = board.enclosure!;
+    const btns = enc.edgeProtrusions ?? [];
+    expect(btns.length).toBe(3);
+    for (const b of btns) {
+      expect(b.edge).toBe('-y'); // all on the bottom edge, with the SD slot
+      expect(b.depth).toBeCloseTo(1.5); // measured off the vendor drawing
+      expect(b.to - b.from).toBeGreaterThan(3); // ~3.2mm wide
+    }
+  });
+
+  it('WITHOUT a channel the frame would clamp the buttons — regression guard', () => {
+    // This is the bug the printed part had. The opening hugs the rear body, so
+    // its edge lands at (body.y - openingClearance) = 1.775, while the buttons
+    // reach out to (body.y - 1.5) = 0.675. The frame overlapped them by ~1.1mm
+    // and held them pressed. Pin the arithmetic so nobody "tidies" the channel
+    // away without noticing.
+    const enc = board.enclosure!;
+    const openingEdge = enc.body.y - STAND.openingClearance;
+    const buttonTip = enc.body.y - enc.edgeProtrusions![0]!.depth;
+    expect(buttonTip).toBeLessThan(openingEdge); // i.e. the button is INSIDE the frame material
+  });
+
+  it('cuts a full-thickness channel per button, clear of the tip', () => {
+    // The channel must run through the whole frame — the button slides in along
+    // the insertion path and is never pressed to reach a recess.
+    const enc = board.enclosure!;
+    const T = STAND.frameThickness;
+    const W = board.pcb.size.x;
+    const H = board.pcb.size.y;
+    const channels = buildEdgeChannels(board, STAND, W, H, T).map((c) => aabbOfOp(c)!);
+    expect(channels.length).toBe(3);
+    for (const b of enc.edgeProtrusions!) {
+      const tipY = enc.body.y - b.depth;
+      const hit = channels.find(
+        (bx) =>
+          bx.min[0] <= b.from - 1 && // slack along the edge, both sides
+          bx.max[0] >= b.to + 1 &&
+          bx.min[1] < tipY - 0.4 && // reaches past the button's tip
+          bx.max[1] >= enc.body.y && // opens into the frame's opening
+          bx.min[2] <= 0 &&
+          bx.max[2] >= T, // through the FULL thickness — the insertion path
+      );
+      expect(hit, `no full-depth channel for ${b.id}`).toBeDefined();
+    }
   });
 
   it('a bare PCB (no enclosure block) yields no stand', () => {

@@ -37,7 +37,12 @@
     "flangeThickness": 4.8,
     "body": { "x": 7.205, "y": 2.175, "width": 102.6, "height": 65.06, "depth": 9.0 },
     "bossDiameter": 5.4,
-    "bossHeight": 5.0
+    "bossHeight": 5.0,
+    "edgeProtrusions": [
+      { "id": "button-1", "edge": "-y", "from": 21.89, "to": 25.04, "depth": 1.5 },
+      { "id": "button-2", "edge": "-y", "from": 27.79, "to": 31.0, "depth": 1.5 },
+      { "id": "button-3", "edge": "-y", "from": 94.19, "to": 97.4, "depth": 1.5 }
+    ]
   },
   "defaultStandoffHeight": 0,
   "recommendedZClearance": 0,
