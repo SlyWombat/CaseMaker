@@ -28,6 +28,7 @@ import m5stackCore2Raw from './boards/m5stack-core2.json';
 import snapTestFixtureRaw from './boards/snap-test-fixture.json';
 import genericZeroRaw from './boards/generic-zero.json';
 import elpUsbgs1200P01H120Raw from './boards/elp-usbgs1200p01-h120.json';
+import adafruitSht31DRaw from './boards/adafruit-sht31d.json';
 
 const validated: BoardProfile[] = [
   rpi3bRaw,
@@ -58,6 +59,7 @@ const validated: BoardProfile[] = [
   snapTestFixtureRaw,
   genericZeroRaw,
   elpUsbgs1200P01H120Raw,
+  adafruitSht31DRaw,
 ].map((raw) => {
   const parsed = builtinBoardProfileSchema.parse(raw);
   return parsed as BoardProfile;

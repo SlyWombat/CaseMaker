@@ -14,6 +14,7 @@ describe('Marketing gap #15 — project templates', () => {
       'giga-dmx-controller',
       'esp32-dev-tray',
       'esp32-c61-dev-tray',
+      'sht31-sensor-pod',
       'elp-camera-enclosure',
       'esp32-s3-touch-panel',
       'slytherm',

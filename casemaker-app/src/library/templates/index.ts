@@ -292,6 +292,26 @@ function esp32C61DevTray(): Project {
   return p;
 }
 
+function sht31SensorPod(): Project {
+  // Adafruit SHT31-D STEMMA QT breakout (25.4 x 17.78 mm, measured from
+  // Adafruit's Eagle .brd). Only the two top-corner holes are real mounting
+  // holes, and two screws on one edge can't hold the board flat — so the pod
+  // is screwless: four two-jaw clips on the side edges, in the free segments
+  // above and below the JST-SH connectors (which sit dead-center on each side
+  // edge and get their wall cutouts from autoPortsForBoard). A humidity/temp
+  // sensor in a sealed box reads the box, not the room — vent three faces.
+  const p = createDefaultProject('adafruit-sht31d');
+  p.name = 'SHT31-D sensor pod';
+  p.case.joint = 'snap-fit';
+  p.case.boardRetention = 'snap';
+  p.case.ventilation = { enabled: true, pattern: 'hex', coverage: 0.5, surfaces: ['top', 'front', 'back'] };
+  // Templates set joint directly (bypassing patchCase), so seed the catches
+  // here — same pattern as snapFitTestCube.
+  p.case.snapCatches = defaultSnapCatchesForCase(p.board, p.case);
+  p.ports = autoPortsForBoard(p.board);
+  return p;
+}
+
 function elpCameraEnclosure(): Project {
   // ELP-USBGS1200P01-H120: 38×38 mm AR0234 USB camera mounted lens-DOWN.
   // The lens stack is encoded on the board profile as a `-z`-facing
@@ -472,6 +492,14 @@ export const TEMPLATES: ReadonlyArray<ProjectTemplate> = [
     description: 'ESP32-C61-DevKitC-1 (Wi-Fi 6, dual USB-C) in a press-fit flat-lid tray with both USB-C cutouts and back-wall clearance for the overhanging PCB antenna.',
     estPrintMinutes: 60,
     build: esp32C61DevTray,
+  },
+  {
+    id: 'sht31-sensor-pod',
+    boardId: 'adafruit-sht31d',
+    name: 'SHT31-D sensor pod',
+    description: 'Adafruit SHT31-D (STEMMA QT) temperature/humidity breakout in a small vented snap-fit pod: hex vents on three faces so the sensor reads ambient air, side-wall cutouts for both STEMMA QT cables, screwless snap retention.',
+    estPrintMinutes: 40,
+    build: sht31SensorPod,
   },
   {
     id: 'elp-camera-enclosure',

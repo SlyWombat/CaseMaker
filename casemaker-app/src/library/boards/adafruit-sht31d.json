@@ -1,0 +1,116 @@
+{
+  "id": "adafruit-sht31d",
+  "name": "Adafruit SHT31-D (STEMMA QT)",
+  "manufacturer": "Adafruit Industries",
+  "pcb": {
+    "size": {
+      "x": 25.4,
+      "y": 17.78,
+      "z": 1.6
+    }
+  },
+  "mountingHoles": [
+    {
+      "id": "top-left",
+      "x": 2.54,
+      "y": 15.24,
+      "diameter": 2.5
+    },
+    {
+      "id": "top-right",
+      "x": 22.86,
+      "y": 15.24,
+      "diameter": 2.5
+    }
+  ],
+  "components": [
+    {
+      "id": "stemma-qt-left",
+      "kind": "custom",
+      "position": {
+        "x": 0.5,
+        "y": 5.79,
+        "z": 1.6
+      },
+      "size": {
+        "x": 4.6,
+        "y": 6.1,
+        "z": 3
+      },
+      "facing": "-x",
+      "cutoutMargin": 2
+    },
+    {
+      "id": "stemma-qt-right",
+      "kind": "custom",
+      "position": {
+        "x": 20.28,
+        "y": 5.89,
+        "z": 1.6
+      },
+      "size": {
+        "x": 4.6,
+        "y": 6.1,
+        "z": 3
+      },
+      "facing": "+x",
+      "cutoutMargin": 2
+    },
+    {
+      "id": "i2c-header",
+      "kind": "gpio-header",
+      "position": {
+        "x": 3.81,
+        "y": 1.27,
+        "z": 1.6
+      },
+      "size": {
+        "x": 17.78,
+        "y": 2.54,
+        "z": 8.5
+      },
+      "facing": "+z"
+    },
+    {
+      "id": "sht31-sensor",
+      "kind": "custom",
+      "position": {
+        "x": 11.36,
+        "y": 8.95,
+        "z": 1.6
+      },
+      "size": {
+        "x": 2.8,
+        "y": 2.8,
+        "z": 1
+      }
+    }
+  ],
+  "retentionClips": [
+    {
+      "edge": "-x",
+      "offset": 0.5,
+      "width": 4.8
+    },
+    {
+      "edge": "-x",
+      "offset": 12.5,
+      "width": 4.8
+    },
+    {
+      "edge": "+x",
+      "offset": 0.5,
+      "width": 4.8
+    },
+    {
+      "edge": "+x",
+      "offset": 12.5,
+      "width": 4.8
+    }
+  ],
+  "defaultStandoffHeight": 3,
+  "recommendedZClearance": 12,
+  "source": "https://github.com/adafruit/Adafruit-SHT31-Sensor-Breakout-PCB",
+  "measurementMethod": "open-source-cad",
+  "builtin": true
+}
