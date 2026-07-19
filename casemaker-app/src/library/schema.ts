@@ -153,6 +153,7 @@ export const boardProfileSchema = z.object({
       sourceUrl: z.string().url().optional(),
     })
     .optional(),
+  verified: z.boolean().optional(),
   builtin: z.boolean(),
 });
 

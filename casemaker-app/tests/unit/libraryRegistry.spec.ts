@@ -141,6 +141,7 @@ describe('remote sources', () => {
       vi.fn(async () => ({
         ok,
         status,
+        text: async () => JSON.stringify(payload),
         json: async () => payload,
       })),
     );

@@ -34,6 +34,13 @@ body, html, #root {
   background: var(--cm-color-surface-container);
   border-bottom: var(--cm-border-1);
 }
+/* Phones (#134): the toolbar's ~850px min-content would otherwise force
+   mobile shrink-to-fit — the whole page lays out at 850px and scales down.
+   A scroll container contributes no min-content width, so the layout
+   viewport stays at device width and the ≤640px styles actually apply. */
+@media (max-width: 900px) {
+  .app-header { overflow-x: auto; }
+}
 .app-header h1 {
   margin: 0;
   font-size: var(--cm-text-h2-size);
@@ -1354,10 +1361,39 @@ body, html, #root {
   margin-top: var(--cm-space-1);
 }
 
+.wb-badge--verified {
+  color: var(--cm-color-secondary);
+  border-color: color-mix(in srgb, var(--cm-color-secondary) 50%, transparent);
+  font-weight: 700;
+}
+
 @media (max-width: 1080px) {
   .wb-layout { grid-template-columns: 1fr; }
   .wb-rail { position: static; order: -1; }
   .wb-detail { max-height: none; }
+}
+
+/* Phone-width welcome (#134): single-column catalog, stacked header, and
+   the empty-state rail hint hidden — it's pure chrome at this size. */
+@media (max-width: 640px) {
+  .wb { padding: var(--cm-space-4) var(--cm-space-3) 64px; }
+  .wb-header { flex-direction: column; align-items: stretch; }
+  .wb-header h1 { font-size: 1.5rem; }
+  .wb-header p { max-width: 100%; overflow-wrap: break-word; }
+  .wb-header > div { min-width: 0; }
+  .wb-header__actions { flex-wrap: wrap; }
+  /* flex-basis is the MAIN axis — in the column toolbar the search's
+     `flex: 1 1 260px` would become a 260px-tall input. */
+  .wb-search { flex: none; min-width: 0; }
+  .wb-grid,
+  .wb-grid--templates { grid-template-columns: 1fr; }
+  .wb-toolbar { align-items: stretch; flex-direction: column; }
+  .wb-chips { flex-wrap: wrap; }
+  .wb-mfr { max-width: none; }
+  .wb-detail--empty { display: none; }
+  .wb-source { flex-wrap: wrap; }
+  .wb-sources__add { flex-direction: column; }
+  .wb-sources__suggest { flex-wrap: wrap; }
 }
 
 .subhead {

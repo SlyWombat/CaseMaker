@@ -200,6 +200,11 @@ export interface LibraryState {
   setRemoteSourceEnabled: (id: string, enabled: boolean) => void;
 }
 
+/** Hard caps so a hostile/misconfigured URL can't blow the localStorage
+ * quota (#132): 5 MB of JSON, 500 boards per source. */
+const MAX_INDEX_BYTES = 5 * 1024 * 1024;
+const MAX_BOARDS_PER_SOURCE = 500;
+
 async function fetchIndex(url: string): Promise<{
   boards: BoardProfile[];
   templates: TemplateSpec[];
@@ -208,13 +213,20 @@ async function fetchIndex(url: string): Promise<{
 }> {
   const res = await fetch(url, { headers: { accept: 'application/json' } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const doc: unknown = await res.json();
+  const text = await res.text();
+  if (text.length > MAX_INDEX_BYTES) {
+    throw new Error(`index too large (${(text.length / 1e6).toFixed(1)} MB > 5 MB cap)`);
+  }
+  const doc: unknown = JSON.parse(text);
   const parsed = remoteIndexSchema.safeParse(doc);
   if (!parsed.success) throw new Error('index is not a board array or {boards: [...]} document');
   const isBare = Array.isArray(parsed.data);
   const rawBoards = isBare ? (parsed.data as unknown[]) : (parsed.data as { boards: unknown[] }).boards;
   const name = isBare ? undefined : (parsed.data as { name?: string }).name;
   const rawTemplates = isBare ? [] : ((parsed.data as { templates?: unknown[] }).templates ?? []);
+  if (rawBoards.length > MAX_BOARDS_PER_SOURCE) {
+    throw new Error(`index lists ${rawBoards.length} boards (> ${MAX_BOARDS_PER_SOURCE} cap)`);
+  }
   const { boards, invalidCount } = validateBoards(rawBoards);
   const { templates, invalid: invalidTpl } = validateTemplates(rawTemplates);
   if (boards.length === 0) {
@@ -225,6 +237,18 @@ async function fetchIndex(url: string): Promise<{
     );
   }
   return { boards, templates, invalidCount: invalidCount + invalidTpl, name };
+}
+
+/** Refresh enabled sources whose cache is older than 7 days (#132).
+ * Fire-and-forget from app mount; failures leave the cache usable. */
+export function refreshStaleSources(): void {
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  const { remoteSources, refreshRemoteSource } = useLibraryStore.getState();
+  for (const s of remoteSources) {
+    if (!s.enabled) continue;
+    if (s.fetchedAt && Date.now() - Date.parse(s.fetchedAt) < WEEK_MS) continue;
+    void refreshRemoteSource(s.id);
+  }
 }
 
 export const useLibraryStore = create<LibraryState>()((set, get) => ({
@@ -385,9 +409,13 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
       set({ remoteSources: next });
       persist(get().localBoards, get().localTemplates, next);
     } catch (err) {
-      const next = get().remoteSources.map((s) =>
-        s.id === id ? { ...s, error: err instanceof Error ? err.message : String(err) } : s,
-      );
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      const msg = offline
+        ? 'offline — using the cached copy'
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      const next = get().remoteSources.map((s) => (s.id === id ? { ...s, error: msg } : s));
       set({ remoteSources: next });
       persist(get().localBoards, get().localTemplates, next);
     } finally {

@@ -190,6 +190,9 @@ export interface BoardProfile {
   enclosure?: EnclosureModule;
   measurementMethod?: MeasurementMethod;
   visualAssets?: BoardVisualAssets;
+  /** Community-library curator flag: a case printed from this profile has
+   * been physically verified to fit. Drives the ✓ badge + sort priority. */
+  verified?: boolean;
   builtin: boolean;
   /** Issue #71 — set when this profile is a clone of a built-in. HAT
    * compatibility checks accept the clonedFrom id as well as `id` so users

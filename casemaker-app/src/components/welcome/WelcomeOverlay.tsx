@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProjectStore, clearHistory } from '@/store/projectStore';
-import { useLibraryStore, type ImportResult } from '@/store/libraryStore';
+import { useLibraryStore, refreshStaleSources, type ImportResult } from '@/store/libraryStore';
 import { listBoards, type RegisteredBoard } from '@/library/registry';
 import {
   listTemplates,
@@ -83,6 +83,11 @@ export function WelcomeOverlay() {
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Refresh week-old source caches in the background on first mount (#132).
+  useEffect(() => {
+    refreshStaleSources();
+  }, []);
+
   // Store slices in deps: registry reads the store, re-list on change.
   const entries = useMemo(() => listBoards(), [localBoards, remoteSources]);
   const allTemplates = useMemo(() => listTemplates(), [remoteSources, localTemplates, localBoards]);
@@ -94,7 +99,7 @@ export function WelcomeOverlay() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return entries.filter(({ board, origin }) => {
+    const filteredList = entries.filter(({ board, origin }) => {
       if (sourceFilter === 'local' && origin.kind !== 'local') return false;
       if (sourceFilter === 'quickstart' && !findTemplateByBoardAcrossSources(board.id)) return false;
       if (sourceFilter.startsWith('remote:')) {
@@ -109,6 +114,12 @@ export function WelcomeOverlay() {
         board.id.toLowerCase().includes(q)
       );
     });
+    // Verified tier (#128): unverified remote boards list after everything
+    // else; builtins/locals/verified-remotes keep their relative order.
+    return filteredList.sort(
+      (a, b) => Number(a.origin.kind === 'remote' && !a.board.verified) -
+        Number(b.origin.kind === 'remote' && !b.board.verified),
+    );
   }, [entries, search, sourceFilter, manufacturer]);
 
   const selected: RegisteredBoard | null = useMemo(
@@ -359,6 +370,14 @@ export function WelcomeOverlay() {
                                   ⛁ {origin.sourceLabel}
                                 </span>
                               )}
+                              {board.verified && (
+                                <span
+                                  className="wb-badge wb-badge--verified"
+                                  title="A case printed from this profile has been physically verified to fit"
+                                >
+                                  ✓ printed
+                                </span>
+                              )}
                               {badge && (
                                 <span className="wb-badge" title={badge.title}>
                                   {badge.label}
@@ -509,6 +528,9 @@ export function WelcomeOverlay() {
                   <>
                     <h3>Provenance</h3>
                     <ul className="wb-provenance">
+                      {selected.board.verified && (
+                        <li>✓ A printed case from this profile has been verified to fit.</li>
+                      )}
                       {selected.board.measurementMethod && (
                         <li>{MEASUREMENT_BADGES[selected.board.measurementMethod]?.title}</li>
                       )}
