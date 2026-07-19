@@ -142,6 +142,8 @@ export interface BoardVisualAssets {
 }
 
 export interface BoardProfile {
+  /** Board-profile format version; absent = 1. Bump on breaking changes. */
+  schemaVersion?: number;
   id: string;
   name: string;
   manufacturer: string;

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore } from '@/store/viewportStore';
-import { getBuiltinBoard } from '@/library';
+import { getBoard } from '@/library/registry';
 import { getBuiltinHat } from '@/library/hats';
 import type { CutoutShape, PortPlacement } from '@/types';
 import type { SnapCatch, SnapWall, BarbType } from '@/types/snap';
@@ -213,7 +213,7 @@ export function SelectionPanel() {
     const board = project.board;
     const sourceId = board.clonedFrom ?? board.id;
     const builtinDefault =
-      getBuiltinBoard(sourceId)?.defaultStandoffHeight ?? board.defaultStandoffHeight;
+      getBoard(sourceId)?.defaultStandoffHeight ?? board.defaultStandoffHeight;
     return (
       <div className="selection-panel" data-testid="selection-panel">
         <div className="selection-panel__header">

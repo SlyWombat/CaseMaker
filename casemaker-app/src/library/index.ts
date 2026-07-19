@@ -1,73 +1,36 @@
 import type { BoardProfile } from '@/types';
 import { builtinBoardProfileSchema } from './schema';
-import rpi3bRaw from './boards/rpi-3b.json';
-import rpi3bPlusRaw from './boards/rpi-3b-plus.json';
-import rpi4bRaw from './boards/rpi-4b.json';
-import rpi5Raw from './boards/rpi-5.json';
-import rpiZero2WRaw from './boards/rpi-zero-2w.json';
-import arduinoUnoR3Raw from './boards/arduino-uno-r3.json';
-import arduinoGigaR1WifiRaw from './boards/arduino-giga-r1-wifi.json';
-import arduinoNanoEsp32Raw from './boards/arduino-nano-esp32.json';
-import esp32DevkitV1Raw from './boards/esp32-devkit-v1.json';
-import esp32S3DevkitcRaw from './boards/esp32-s3-devkitc-1.json';
-import esp32C61DevkitcRaw from './boards/esp32-c61-devkitc-1.json';
-import elegooEsp32WroomUsbcRaw from './boards/elegoo-esp32-wroom-usbc.json';
-import esp32S3TouchLcd43BRaw from './boards/esp32-s3-touch-lcd-4.3b.json';
-import guitionJc4880P443CRaw from './boards/guition-jc4880p443c.json';
-import slythermRaw from './boards/slytherm.json';
-import rpiPicoRaw from './boards/rpi-pico.json';
-import rpiPicoWRaw from './boards/rpi-pico-w.json';
-import quinledDigUnoRaw from './boards/quinled-dig-uno.json';
-import quinledDigQuadRaw from './boards/quinled-dig-quad.json';
-import quinledDigOctaRaw from './boards/quinled-dig-octa.json';
-import teensy41Raw from './boards/teensy-41.json';
-import jetsonNanoRaw from './boards/jetson-nano-b01.json';
-import beagleboneBlackRaw from './boards/beaglebone-black.json';
-import microbitV2Raw from './boards/microbit-v2.json';
-import m5stackCore2Raw from './boards/m5stack-core2.json';
-import snapTestFixtureRaw from './boards/snap-test-fixture.json';
-import genericZeroRaw from './boards/generic-zero.json';
-import elpUsbgs1200P01H120Raw from './boards/elp-usbgs1200p01-h120.json';
-import adafruitSht31DRaw from './boards/adafruit-sht31d.json';
 
-const validated: BoardProfile[] = [
-  rpi3bRaw,
-  rpi3bPlusRaw,
-  rpi4bRaw,
-  rpi5Raw,
-  rpiZero2WRaw,
-  arduinoUnoR3Raw,
-  arduinoGigaR1WifiRaw,
-  arduinoNanoEsp32Raw,
-  esp32DevkitV1Raw,
-  esp32S3DevkitcRaw,
-  esp32C61DevkitcRaw,
-  elegooEsp32WroomUsbcRaw,
-  esp32S3TouchLcd43BRaw,
-  guitionJc4880P443CRaw,
-  slythermRaw,
-  rpiPicoRaw,
-  rpiPicoWRaw,
-  quinledDigUnoRaw,
-  quinledDigQuadRaw,
-  quinledDigOctaRaw,
-  teensy41Raw,
-  jetsonNanoRaw,
-  beagleboneBlackRaw,
-  microbitV2Raw,
-  m5stackCore2Raw,
-  snapTestFixtureRaw,
-  genericZeroRaw,
-  elpUsbgs1200P01H120Raw,
-  adafruitSht31DRaw,
-].map((raw) => {
-  const parsed = builtinBoardProfileSchema.parse(raw);
-  return parsed as BoardProfile;
+/**
+ * Built-in board profiles are discovered from the filesystem — every
+ * `boards/*.json` is picked up at build time, validated, and registered.
+ * Adding a built-in board is now just "drop a JSON file in boards/";
+ * there is no import list to maintain.
+ *
+ * `import.meta.glob` keys are relative paths ("./boards/rpi-4b.json"), so
+ * iteration order follows the sorted path order Vite provides. UI surfaces
+ * apply their own grouping/sorting; nothing may depend on this order.
+ */
+const boardModules = import.meta.glob<{ default: unknown }>('./boards/*.json', {
+  eager: true,
 });
 
-export const builtinBoards: ReadonlyArray<BoardProfile> = Object.freeze(validated);
+const validated: BoardProfile[] = Object.entries(boardModules).map(([path, mod]) => {
+  try {
+    return builtinBoardProfileSchema.parse(mod.default) as BoardProfile;
+  } catch (err) {
+    throw new Error(`Invalid built-in board profile ${path}: ${String(err)}`);
+  }
+});
 
-const byId = new Map(builtinBoards.map((b) => [b.id, b]));
+const byId = new Map(validated.map((b) => [b.id, b]));
+if (byId.size !== validated.length) {
+  const seen = new Set<string>();
+  const dupes = validated.map((b) => b.id).filter((id) => (seen.has(id) ? true : (seen.add(id), false)));
+  throw new Error(`Duplicate built-in board id(s): ${dupes.join(', ')}`);
+}
+
+export const builtinBoards: ReadonlyArray<BoardProfile> = Object.freeze(validated);
 
 export function getBuiltinBoard(id: string): BoardProfile | undefined {
   return byId.get(id);
@@ -76,3 +39,8 @@ export function getBuiltinBoard(id: string): BoardProfile | undefined {
 export function listBuiltinBoardIds(): string[] {
   return Array.from(byId.keys());
 }
+
+// Board resolution across ALL sources (builtin + local imports) lives in
+// ./registry — import getBoard/listBoards from '@/library/registry'. Not
+// re-exported here to keep the module graph acyclic (registry depends on
+// the local-library store, which depends on this module).

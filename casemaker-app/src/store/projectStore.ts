@@ -13,7 +13,7 @@ import type {
   HatPlacement,
 } from '@/types';
 import type { MountingFeature } from '@/types/mounting';
-import { getBuiltinBoard } from '@/library';
+import { getBoard } from '@/library/registry';
 import { getBuiltinHat } from '@/library/hats';
 import { newId } from '@/utils/id';
 import { autoPortsForBoard } from '@/engine/compiler/portFactory';
@@ -47,8 +47,9 @@ function defaultCase(): CaseParameters {
 }
 
 export function createDefaultProject(boardId = DEFAULT_BOARD_ID): Project {
-  const board = getBuiltinBoard(boardId);
-  if (!board) throw new Error(`Unknown built-in board: ${boardId}`);
+  // Resolves builtin AND locally-imported boards (see library/registry).
+  const board = getBoard(boardId);
+  if (!board) throw new Error(`Unknown board: ${boardId}`);
   const now = new Date(0).toISOString();
   // Issue #82 — every fresh project starts with an editable copy of the
   // built-in profile. Pre-#82 we'd structuredClone(board) but leave it

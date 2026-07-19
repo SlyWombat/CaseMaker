@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore } from '@/store/viewportStore';
+import { useLibraryStore } from '@/store/libraryStore';
 import { LabelledField } from '@/components/ui/LabelledField';
 // Issue #97 (Phase 4e) — KIND_OPTIONS / FACING_OPTIONS lists moved to
 // SelectionPanel.ComponentDetail (right-rail editor) since the inline
@@ -85,6 +87,7 @@ export function BoardEditorPanel() {
   return (
     <div className="panel">
       <h3>Board editor (custom)</h3>
+      <SaveToLibrary board={board} />
       <div className="board-meta-grid">
         <LabelledField
           label="Name"
@@ -296,6 +299,46 @@ export function BoardEditorPanel() {
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * Save the current custom board into the local library so it shows up in the
+ * welcome screen's board picker for future projects. The library copy gets a
+ * clean slug id derived from the name (the in-project id keeps its
+ * custom-<base>-<nonce> form); collisions are auto-suffixed by the store.
+ */
+function SaveToLibrary({ board }: { board: import('@/types').BoardProfile }) {
+  const addLocalBoard = useLibraryStore((s) => s.addLocalBoard);
+  const [savedAs, setSavedAs] = useState<string | null>(null);
+
+  const onSave = () => {
+    const slug =
+      board.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'custom-board';
+    const profile = structuredClone(board);
+    profile.id = slug;
+    const result = addLocalBoard(profile);
+    setSavedAs(result.ok ? (result.board?.id ?? slug) : null);
+  };
+
+  return (
+    <div className="save-to-library">
+      <button
+        onClick={onSave}
+        data-testid="save-board-to-library"
+        title="Save this board profile to your local library — it will appear in the board picker for new projects."
+      >
+        ⛃ Save to library
+      </button>
+      {savedAs && (
+        <span className="board-meta" data-testid="save-board-confirmation">
+          Saved as “{savedAs}” — available on the New Project screen.
+        </span>
+      )}
     </div>
   );
 }

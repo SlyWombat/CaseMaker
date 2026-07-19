@@ -4,7 +4,7 @@ import { StatusBar } from './StatusBar';
 import { Toolbar } from './Toolbar';
 import { PlacementBanner } from './PlacementBanner';
 import { FloatersBanner } from './FloatersBanner';
-import { WelcomeOverlay } from './WelcomeOverlay';
+import { WelcomeOverlay } from '../welcome/WelcomeOverlay';
 import { ContextPanel } from './ContextPanel';
 import { Viewport } from '@/components/viewport/Viewport';
 import { useRebuildOnProjectChange } from '@/hooks/useRebuildOnProjectChange';
@@ -42,14 +42,21 @@ export function AppShell() {
         <Toolbar />
       </header>
       <main className="app-main">
-        <Sidebar />
-        <div className="viewport-pane">
-          {!welcomeMode && <PlacementBanner />}
-          {!welcomeMode && <FloatersBanner />}
-          {!welcomeMode && <Viewport />}
-          {welcomeMode && <WelcomeOverlay />}
-        </div>
-        {!welcomeMode && <ContextPanel />}
+        {/* Welcome mode owns the full main area — the board-picker catalog
+            needs the width; sidebar/context panels are project UI anyway. */}
+        {welcomeMode ? (
+          <WelcomeOverlay />
+        ) : (
+          <>
+            <Sidebar />
+            <div className="viewport-pane">
+              <PlacementBanner />
+              <FloatersBanner />
+              <Viewport />
+            </div>
+            <ContextPanel />
+          </>
+        )}
       </main>
       <StatusBar />
     </div>

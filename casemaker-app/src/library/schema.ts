@@ -49,6 +49,10 @@ const componentSchema = z.object({
 });
 
 export const boardProfileSchema = z.object({
+  // Board-profile format version. Optional (absent = 1) so every existing
+  // file stays valid; bump when a breaking format change ships so future
+  // registries/importers can migrate old community files forward.
+  schemaVersion: z.number().int().positive().optional(),
   id: z.string().min(1),
   name: z.string().min(1),
   manufacturer: z.string().min(1),
@@ -156,5 +160,16 @@ export const builtinBoardProfileSchema = boardProfileSchema.refine(
   (b) => b.builtin === true && typeof b.source === 'string' && b.source.length > 0,
   { message: 'builtin boards must include a source URL for traceability' },
 );
+
+/**
+ * User-imported (local-library) board profiles. Same shape as builtin, but:
+ *  - `builtin` is optional on input and always coerced to false — an imported
+ *    file must never masquerade as a bundled profile;
+ *  - no source-URL requirement (a home-measured board has no URL) — the
+ *    import UI surfaces a soft warning instead.
+ */
+export const localBoardProfileSchema = boardProfileSchema
+  .extend({ builtin: z.boolean().optional() })
+  .transform((b) => ({ ...b, builtin: false }));
 
 export type BoardProfileInput = z.infer<typeof boardProfileSchema>;
