@@ -15,10 +15,12 @@ test('snap-fit lid: triangle count grows substantially over flat-lid baseline', 
   });
   const snap = await page.evaluate(() => window.__caseMaker!.getMeshStats('lid')!);
   expect(snap.triangleCount).toBeGreaterThan(flat.triangleCount);
-  // Snap-fit lid extends downward by ~4mm via the lip ring.
+  // Snap geometry lives in barb catches on the lid + windows/ramps (#121/#123
+  // redesign — the old ~4mm skirt-lip that grew lid HEIGHT is gone), so
+  // assert the lid never gets SHORTER and the whole assembly gains triangles.
   const flatHeight = flat.bbox.max[2] - flat.bbox.min[2];
   const snapHeight = snap.bbox.max[2] - snap.bbox.min[2];
-  expect(snapHeight - flatHeight).toBeGreaterThanOrEqual(2);
+  expect(snapHeight).toBeGreaterThanOrEqual(flatHeight - 0.01);
 });
 
 test('removed sliding joint coerces to flat-lid (issue #48)', async ({ cm, page }) => {

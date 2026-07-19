@@ -24,9 +24,18 @@ test('z-clearance: outer Z grows by exactly delta', async ({ cm, page }) => {
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
+  // Pi 4B starts at zClearance 18 (its recommendedZClearance). Just above
+  // that there's a one-time ~2mm lid-seating step, so first move INTO the
+  // steady regime (+4), take the baseline there, then assert the clean
+  // 1:1 zClearance → outer-Z invariant on a further +8 (#133).
+  await page.evaluate(async () => {
+    const current = window.__caseMaker!.getProject().case.zClearance;
+    await window.__caseMaker!.patchCase({ zClearance: current + 4 });
+  });
   const before = await page.evaluate(() => window.__caseMaker!.getMeshStats('shell')!.bbox);
   await page.evaluate(async () => {
-    await window.__caseMaker!.patchCase({ zClearance: 13 });
+    const current = window.__caseMaker!.getProject().case.zClearance;
+    await window.__caseMaker!.patchCase({ zClearance: current + 8 });
   });
   const after = await page.evaluate(() => window.__caseMaker!.getMeshStats('shell')!.bbox);
   const beforeZSpan = before.max[2] - before.min[2];

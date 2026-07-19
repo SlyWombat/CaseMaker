@@ -21,6 +21,14 @@ test('screw-down lid: triangle count grows over flat lid (lid holes), shell boss
     shell: window.__caseMaker!.getMeshStats('shell')!,
   }));
   expect(screw.lid.triangleCount).toBeGreaterThan(flat.lid.triangleCount);
-  // Bosses now reach into the cavity, so shell triangle count grows too.
-  expect(screw.shell.triangleCount).toBeGreaterThan(flat.shell.triangleCount);
+  // Bosses are enabled by DEFAULT now, so the flat baseline already carries
+  // them and switching joints doesn't add shell geometry (#133). The real
+  // invariant: bosses themselves add shell triangles — compare against a
+  // bosses-off shell.
+  await page.evaluate(async () => {
+    const bosses = window.__caseMaker!.getProject().case.bosses;
+    await window.__caseMaker!.patchCase({ bosses: { ...bosses, enabled: false } });
+  });
+  const noBosses = await page.evaluate(() => window.__caseMaker!.getMeshStats('shell')!);
+  expect(screw.shell.triangleCount).toBeGreaterThan(noBosses.triangleCount);
 });

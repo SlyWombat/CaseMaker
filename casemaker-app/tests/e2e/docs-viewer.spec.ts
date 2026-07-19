@@ -7,10 +7,11 @@ test('Docs button opens the modal; nav switches between docs; Escape closes', as
   await cm.ready();
   await page.getByTestId('docs-open').click();
   await expect(page.getByTestId('docs-modal')).toBeVisible();
-  await expect(page.getByTestId('docs-content-getting-started')).toContainText('Getting Started');
-
-  await page.getByTestId('docs-nav-user-manual').click();
+  // Registry order puts the User Manual first, so it's the default doc.
   await expect(page.getByTestId('docs-content-user-manual')).toContainText('Parameter dictionary');
+
+  await page.getByTestId('docs-nav-getting-started').click();
+  await expect(page.getByTestId('docs-content-getting-started')).toContainText('Getting Started');
 
   await page.getByTestId('docs-nav-technical-reference').click();
   await expect(page.getByTestId('docs-content-technical-reference')).toContainText('Module API');

@@ -49,7 +49,9 @@ test('arrow-key nudges DO NOT fire while typing in an input', async ({ cm, page 
     portId,
   );
 
-  // Focus a numeric input in the sidebar and fire arrow keys there
+  // Focus a numeric input in the sidebar and fire arrow keys there.
+  // Since #93 the CasePanel only mounts after opening its sidebar section.
+  await page.getByTestId('sidebar-button-case').click();
   const wallInput = page.getByTestId('wall-thickness-num');
   await wallInput.focus();
   await page.keyboard.press('ArrowRight');

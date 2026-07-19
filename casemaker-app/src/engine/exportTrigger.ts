@@ -30,7 +30,11 @@ async function saveBlob(blob: Blob, filename: string): Promise<void> {
     types?: { description?: string; accept: Record<string, string[]> }[];
   }) => Promise<FileSystemFileHandle>;
   const w = window as Window & { showSaveFilePicker?: SaveFilePicker };
-  if (typeof w.showSaveFilePicker === 'function') {
+  // E2E runs need the anchor-download path: headless Chromium exposes
+  // showSaveFilePicker but there's no native dialog to complete, so the
+  // picker never resolves and Playwright's `download` event never fires.
+  const isE2E = import.meta.env.VITE_E2E === '1' || import.meta.env.MODE === 'test';
+  if (!isE2E && typeof w.showSaveFilePicker === 'function') {
     try {
       const ext = filename.includes('.') ? filename.slice(filename.lastIndexOf('.')) : '';
       const mime = blob.type || 'application/octet-stream';
