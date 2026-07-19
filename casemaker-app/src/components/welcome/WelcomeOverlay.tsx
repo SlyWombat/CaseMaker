@@ -207,7 +207,7 @@ export function WelcomeOverlay() {
           </div>
           <div className="wb-header__actions">
             <button
-              className="wb-btn wb-btn--ghost"
+              className={`wb-btn wb-btn--ghost ${sourcesOpen ? 'wb-btn--toggled' : ''}`}
               onClick={() => setSourcesOpen((v) => !v)}
               data-testid="welcome-sources-toggle"
               aria-expanded={sourcesOpen}
@@ -215,6 +215,9 @@ export function WelcomeOverlay() {
             >
               ⛁ Sources
               {remoteSources.length > 0 && ` · ${remoteSources.length}`}
+              <span className="wb-btn__chevron" aria-hidden="true">
+                {sourcesOpen ? ' ▾' : ' ▸'}
+              </span>
             </button>
             <button
               className="wb-btn wb-btn--ghost"

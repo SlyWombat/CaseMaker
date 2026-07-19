@@ -902,6 +902,12 @@ body, html, #root {
   color: var(--cm-color-on-primary);
 }
 .wb-btn--ghost { background: transparent; }
+.wb-btn--toggled {
+  background: var(--cm-color-surface-container-highest);
+  border-color: var(--cm-color-primary);
+  color: var(--cm-color-primary);
+}
+.wb-btn__chevron { font-size: 0.7em; }
 .wb-btn--danger {
   color: var(--cm-color-error);
   border-color: color-mix(in srgb, var(--cm-color-error) 40%, transparent);

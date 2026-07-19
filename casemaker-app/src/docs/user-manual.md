@@ -30,6 +30,11 @@ The picker's catalog merges three source tiers, resolved in priority order:
   disabled or removed at any time. Boards with a **✓ printed** badge have
   been physically verified to fit by a library maintainer.
 
+> **No fit guarantee:** profiles are measured by humans and printers vary —
+> treat the first print of any case as a test article and check critical
+> dimensions against your real board first. The **✓ printed** badge means at
+> least one confirmed fit, not a promise for your hardware.
+
 If two sources provide the same board id, the higher tier wins and the
 Sources panel shows what's shadowed. Projects embed a full copy of their
 board profile, so a saved project opens fine on a machine without the board

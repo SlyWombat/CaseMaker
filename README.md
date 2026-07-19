@@ -63,6 +63,16 @@ The desktop build embeds a small HTTP server (default port `8000`, configurable 
 
 Bug reports, board profiles, and PRs are all welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the issue-first bug workflow, code style, and test-suite contract, and [good first issues](https://github.com/SlyWombat/CaseMaker/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) for places to start.
 
+## Disclaimer
+
+Case Maker generates geometry from board profiles that are measured and
+maintained by humans — **there is no guarantee a generated case will print
+correctly or fit your board**. Printer calibration, filament shrinkage,
+board revisions, and profile errors all affect fit. Treat your first print
+of any case as a test article, and verify critical dimensions against your
+actual board before committing to a long print. Boards marked **✓ printed**
+have had at least one confirmed fit, but your hardware may still differ.
+
 ## License
 
 License terms are still being finalized. Contact `dave@drscapital.com` for usage questions.
