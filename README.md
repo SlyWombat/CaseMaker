@@ -75,4 +75,8 @@ have had at least one confirmed fit, but your hardware may still differ.
 
 ## License
 
-License terms are still being finalized. Contact `dave@drscapital.com` for usage questions.
+[Apache License 2.0](LICENSE) — free for personal and commercial use, with an
+explicit patent grant. Community board-profile *data* in
+[casemaker-library](https://github.com/SlyWombat/casemaker-library) is
+[CC BY 4.0](https://github.com/SlyWombat/casemaker-library/blob/main/LICENSE).
+By contributing you agree your contribution is licensed under the same terms.

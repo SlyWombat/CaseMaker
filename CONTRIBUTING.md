@@ -6,6 +6,9 @@ Thanks for considering a contribution. The fastest paths to a merged PR:
 2. **Fix a bug** flagged in the [issue tracker](https://github.com/SlyWombat/CaseMaker/issues) — look for `good first issue`.
 3. **Improve docs** — the in-app docs live in `casemaker-app/src/docs/`.
 
+By submitting a contribution you agree it is licensed under the project's
+[Apache License 2.0](LICENSE) (board-profile data in casemaker-library: CC BY 4.0).
+
 ## Bug workflow
 
 The project follows an issue-first bug workflow:
