@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { builtinBoards, getBuiltinBoard } from '@/library';
-import { getBoard, listBoards } from '@/library/registry';
+import { getBoard, listBoards, shadowedIdsForSource } from '@/library/registry';
+import { listTemplates, findTemplateByBoardAcrossSources } from '@/library/templateRegistry';
 import { useLibraryStore } from '@/store/libraryStore';
 import { localBoardProfileSchema } from '@/library/schema';
 import { createDefaultProject } from '@/store/projectStore';
@@ -206,5 +207,87 @@ describe('remote sources', () => {
     expect(result.ok).toBe(true);
     expect(result.source?.boards).toHaveLength(1);
     expect(result.source?.invalidCount).toBe(1);
+  });
+
+  it('shadowedIdsForSource reports remote ids hidden by higher tiers (#128)', async () => {
+    stubFetch({ boards: [sampleBoard('rpi-4b'), sampleBoard('community-board')] });
+    const { source } = await useLibraryStore.getState().addRemoteSource('https://example.com/i.json');
+    expect(shadowedIdsForSource(source!.id)).toEqual(['rpi-4b']);
+  });
+
+  it('index templates[] register and resolve across sources (#126)', async () => {
+    stubFetch({
+      name: 'Community',
+      boards: [sampleBoard('community-board')],
+      templates: [
+        {
+          id: 'community-pod',
+          name: 'Community pod',
+          description: 'Snap pod for the community board.',
+          estPrintMinutes: 30,
+          boardId: 'community-board',
+          casePatch: { joint: 'snap-fit' },
+        },
+        { id: 'broken-template' }, // invalid — dropped, counted
+        {
+          id: 'orphan-template',
+          name: 'Orphan',
+          description: 'References a board nobody has.',
+          estPrintMinutes: 30,
+          boardId: 'board-that-does-not-exist',
+        },
+      ],
+    });
+    const { source } = await useLibraryStore.getState().addRemoteSource('https://example.com/i.json');
+    expect(source?.templates.map((t) => t.id)).toEqual(['community-pod', 'orphan-template']);
+    expect(source?.invalidCount).toBe(1);
+
+    const listed = listTemplates();
+    // Community template listed after the bundled set; orphan filtered out
+    // because its board doesn't resolve.
+    expect(listed.some((t) => t.id === 'community-pod')).toBe(true);
+    expect(listed.some((t) => t.id === 'orphan-template')).toBe(false);
+
+    // Pick-a-board quickstart flow finds it, and building it runs the shared
+    // patchCase path — snap catches seeded, not bypassed.
+    const tpl = findTemplateByBoardAcrossSources('community-board');
+    expect(tpl?.id).toBe('community-pod');
+    const project = tpl!.build();
+    expect(project.case.joint).toBe('snap-fit');
+    expect(project.case.snapCatches!.length).toBeGreaterThan(0);
+  });
+
+  it('addLocalTemplate imports a spec, warns on unknown board, lists once board arrives', () => {
+    const store = useLibraryStore.getState();
+    const spec = {
+      id: 'my-imported-pod',
+      name: 'My imported pod',
+      description: 'Snap pod from a JSON file.',
+      estPrintMinutes: 25,
+      boardId: 'my-test-board',
+      casePatch: { joint: 'snap-fit' },
+    };
+    const result = store.addLocalTemplate(spec);
+    expect(result.ok).toBe(true);
+    expect(result.kind).toBe('template');
+    // Board not present yet → warned, and hidden from the template list.
+    expect(result.warnings.join(' ')).toMatch(/my-test-board/);
+    expect(listTemplates().some((t) => t.id === 'my-imported-pod')).toBe(false);
+    // Import the board → template appears with local provenance.
+    store.addLocalBoard(sampleBoard());
+    const listed = listTemplates().find((t) => t.id === 'my-imported-pod');
+    expect(listed?.sourceLabel).toBe('your library');
+    const project = listed!.build();
+    expect(project.case.snapCatches!.length).toBeGreaterThan(0);
+    useLibraryStore.getState().removeLocalTemplate('my-imported-pod');
+    expect(useLibraryStore.getState().localTemplates).toHaveLength(0);
+  });
+
+  it('addLocalBoard warns about unrecognized fields instead of silently stripping (#129)', () => {
+    const result = useLibraryStore
+      .getState()
+      .addLocalBoard({ ...sampleBoard(), futureFeatureField: { x: 1 } });
+    expect(result.ok).toBe(true);
+    expect(result.warnings.join(' ')).toMatch(/futureFeatureField/);
   });
 });

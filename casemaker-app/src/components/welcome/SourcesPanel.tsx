@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { useLibraryStore } from '@/store/libraryStore';
 import { builtinBoards } from '@/library';
+import { shadowedIdsForSource } from '@/library/registry';
+
+/** Official community index (github.com/SlyWombat/casemaker-library). */
+const COMMUNITY_SOURCE_URL = 'https://slywombat.github.io/casemaker-library/index.json';
 
 /**
  * Board-source manager, shown inline under the welcome header. Lists the
@@ -61,7 +65,16 @@ export function SourcesPanel() {
             </label>
             <span className="wb-source__meta">
               {s.boards.length} boards
+              {s.templates.length > 0 && ` + ${s.templates.length} templates`}
               {typeof s.invalidCount === 'number' && s.invalidCount > 0 && ` (${s.invalidCount} invalid skipped)`}
+              {(() => {
+                const shadowed = shadowedIdsForSource(s.id);
+                return shadowed.length > 0 ? (
+                  <span title={`Hidden because a higher-priority source already provides: ${shadowed.join(', ')}`}>
+                    {' '}· {shadowed.length} shadowed
+                  </span>
+                ) : null;
+              })()}
               {s.fetchedAt && ` · fetched ${new Date(s.fetchedAt).toLocaleDateString()}`}
               {s.error && <span className="wb-source__err"> · refresh failed: {s.error}</span>}
             </span>
@@ -85,6 +98,28 @@ export function SourcesPanel() {
           </li>
         ))}
       </ul>
+
+      {!remoteSources.some((s) => s.url === COMMUNITY_SOURCE_URL) && (
+        <div className="wb-sources__suggest">
+          <span>
+            <strong>Case Maker Community</strong> — the official community board index
+          </span>
+          <button
+            className="wb-btn"
+            disabled={busy}
+            data-testid="welcome-source-add-community"
+            onClick={async () => {
+              setBusy(true);
+              setError(null);
+              const result = await addRemoteSource(COMMUNITY_SOURCE_URL);
+              setBusy(false);
+              if (!result.ok) setError(result.error ?? 'Could not add source.');
+            }}
+          >
+            {busy ? 'Fetching…' : '+ Add community library'}
+          </button>
+        </div>
+      )}
 
       <div className="wb-sources__add">
         <input

@@ -2,7 +2,11 @@ import { useMemo, useRef, useState } from 'react';
 import { useProjectStore, clearHistory } from '@/store/projectStore';
 import { useLibraryStore, type ImportResult } from '@/store/libraryStore';
 import { listBoards, type RegisteredBoard } from '@/library/registry';
-import { TEMPLATES, findTemplate, findTemplateByBoard } from '@/library/templates';
+import {
+  listTemplates,
+  findTemplateAcrossSources,
+  findTemplateByBoardAcrossSources,
+} from '@/library/templateRegistry';
 import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
 import { BoardPreviewSvg } from './BoardPreviewSvg';
 import { SourcesPanel } from './SourcesPanel';
@@ -64,8 +68,10 @@ export function WelcomeOverlay() {
   const loadBoard = useProjectStore((s) => s.loadBuiltinBoard);
   const setProject = useProjectStore((s) => s.setProject);
   const localBoards = useLibraryStore((s) => s.localBoards);
+  const localTemplates = useLibraryStore((s) => s.localTemplates);
   const remoteSources = useLibraryStore((s) => s.remoteSources);
   const addLocalBoard = useLibraryStore((s) => s.addLocalBoard);
+  const addLocalTemplate = useLibraryStore((s) => s.addLocalTemplate);
   const removeLocalBoard = useLibraryStore((s) => s.removeLocalBoard);
   const exportLocalBoard = useLibraryStore((s) => s.exportLocalBoard);
 
@@ -79,6 +85,7 @@ export function WelcomeOverlay() {
 
   // Store slices in deps: registry reads the store, re-list on change.
   const entries = useMemo(() => listBoards(), [localBoards, remoteSources]);
+  const allTemplates = useMemo(() => listTemplates(), [remoteSources, localTemplates, localBoards]);
 
   const manufacturers = useMemo(() => {
     const set = new Set(entries.map((e) => e.board.manufacturer));
@@ -89,7 +96,7 @@ export function WelcomeOverlay() {
     const q = search.trim().toLowerCase();
     return entries.filter(({ board, origin }) => {
       if (sourceFilter === 'local' && origin.kind !== 'local') return false;
-      if (sourceFilter === 'quickstart' && !findTemplateByBoard(board.id)) return false;
+      if (sourceFilter === 'quickstart' && !findTemplateByBoardAcrossSources(board.id)) return false;
       if (sourceFilter.startsWith('remote:')) {
         if (origin.kind !== 'remote' || origin.sourceId !== sourceFilter.slice('remote:'.length))
           return false;
@@ -111,14 +118,14 @@ export function WelcomeOverlay() {
 
   const filteredTemplates = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return TEMPLATES;
-    return TEMPLATES.filter(
+    if (!q) return allTemplates;
+    return allTemplates.filter(
       (t) => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q),
     );
-  }, [search]);
+  }, [search, allTemplates]);
 
   const applyTemplate = async (id: string) => {
-    const t = findTemplate(id);
+    const t = findTemplateAcrossSources(id);
     if (!t) return;
     const project = t.build();
     setProject(project); // also flips welcomeMode off
@@ -128,7 +135,7 @@ export function WelcomeOverlay() {
 
   /** Board's curated quickstart when it has one, else a blank default shell. */
   const applyBoard = (id: string, opts?: { forceBlank?: boolean }) => {
-    const tpl = opts?.forceBlank ? undefined : findTemplateByBoard(id);
+    const tpl = opts?.forceBlank ? undefined : findTemplateByBoardAcrossSources(id);
     if (tpl) {
       void applyTemplate(tpl.id);
       return;
@@ -144,7 +151,13 @@ export function WelcomeOverlay() {
       setImportNotice({ ok: false, warnings: [], error: `${file.name} is not valid JSON.` });
       return;
     }
-    const result = addLocalBoard(raw);
+    // Auto-detect what the file is: try board first, then template spec.
+    // A template file has no pcb block, so the board parse fails fast.
+    let result = addLocalBoard(raw);
+    if (!result.ok && typeof raw === 'object' && raw !== null && !('pcb' in raw)) {
+      const asTemplate = addLocalTemplate(raw);
+      if (asTemplate.ok) result = asTemplate;
+    }
     setImportNotice(result);
     if (result.ok && result.board) {
       setSourceFilter('all');
@@ -164,9 +177,9 @@ export function WelcomeOverlay() {
     URL.revokeObjectURL(a.href);
   };
 
-  const selectedTpl = selected ? findTemplateByBoard(selected.board.id) : undefined;
+  const selectedTpl = selected ? findTemplateByBoardAcrossSources(selected.board.id) : undefined;
   const selectedTemplates = selected
-    ? TEMPLATES.filter((t) => t.boardId === selected.board.id)
+    ? allTemplates.filter((t) => t.boardId === selected.board.id)
     : [];
 
   return (
@@ -225,7 +238,8 @@ export function WelcomeOverlay() {
             <span>
               {importNotice.ok ? (
                 <>
-                  Imported <strong>{importNotice.board?.name}</strong>
+                  Imported {importNotice.kind === 'template' ? 'template ' : ''}
+                  <strong>{(importNotice.board ?? importNotice.template)?.name}</strong>
                   {importNotice.renamedFrom &&
                     ` (id "${importNotice.renamedFrom}" was taken — saved as "${importNotice.board?.id}")`}
                   {importNotice.warnings.length > 0 && ` — ${importNotice.warnings.join(' ')}`}
@@ -304,7 +318,7 @@ export function WelcomeOverlay() {
               ) : (
                 <ul className="wb-grid">
                   {filtered.map(({ board, origin }) => {
-                    const tpl = findTemplateByBoard(board.id);
+                    const tpl = findTemplateByBoardAcrossSources(board.id);
                     const badge = board.measurementMethod
                       ? MEASUREMENT_BADGES[board.measurementMethod]
                       : undefined;
@@ -375,7 +389,10 @@ export function WelcomeOverlay() {
                     >
                       <div className="wb-card__name">{t.name}</div>
                       <div className="wb-card__desc">{t.description}</div>
-                      <div className="wb-card__print">~{t.estPrintMinutes} min print</div>
+                      <div className="wb-card__print">
+                        ~{t.estPrintMinutes} min print
+                        {t.sourceLabel ? ` · ⛁ ${t.sourceLabel}` : ''}
+                      </div>
                     </button>
                   </li>
                 ))}

@@ -43,6 +43,26 @@ export function listBoards(): RegisteredBoard[] {
   return out;
 }
 
+/**
+ * Ids in the given remote source that are shadowed by a higher-priority
+ * source (builtin, local, or an earlier-added remote) — #128: surfaced in
+ * the Sources panel instead of silently dropping them from listings.
+ */
+export function shadowedIdsForSource(sourceId: string): string[] {
+  const { localBoards, remoteSources } = useLibraryStore.getState();
+  const higher = new Set<string>([
+    ...builtinBoards.map((b) => b.id),
+    ...localBoards.map((b) => b.id),
+  ]);
+  for (const source of remoteSources) {
+    if (source.id === sourceId) {
+      return source.boards.map((b) => b.id).filter((id) => higher.has(id));
+    }
+    if (source.enabled) for (const b of source.boards) higher.add(b.id);
+  }
+  return [];
+}
+
 export function getBoard(id: string): BoardProfile | undefined {
   const builtin = getBuiltinBoard(id);
   if (builtin) return builtin;

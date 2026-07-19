@@ -1066,11 +1066,13 @@ body, html, #root {
   align-items: center;
   justify-content: space-between;
   gap: var(--cm-space-2);
+  flex-wrap: wrap;
 }
 .wb-dims {
   font-family: var(--cm-font-mono);
   font-size: 0.6875rem;
   color: var(--cm-color-on-surface-variant);
+  white-space: nowrap;
 }
 .wb-card__badges { display: flex; gap: var(--cm-space-1); }
 .wb-badge {
@@ -1150,6 +1152,17 @@ body, html, #root {
 .wb-sources__add {
   display: flex;
   gap: var(--cm-space-2);
+}
+.wb-sources__suggest {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cm-space-3);
+  padding: var(--cm-space-2) var(--cm-space-3);
+  border: 1px dashed color-mix(in srgb, var(--cm-color-primary) 45%, transparent);
+  border-radius: var(--cm-radius-md);
+  font-size: var(--cm-text-body-size);
+  color: var(--cm-color-on-surface-variant);
 }
 .wb-sources__add input {
   flex: 1;

@@ -173,3 +173,15 @@ export const localBoardProfileSchema = boardProfileSchema
   .transform((b) => ({ ...b, builtin: false }));
 
 export type BoardProfileInput = z.infer<typeof boardProfileSchema>;
+
+/**
+ * Top-level keys of `raw` the board schema doesn't know (#129). Zod parsing
+ * silently STRIPS unknown keys, so a board authored against a newer Case
+ * Maker would lose fields without a trace — surface them as import warnings
+ * instead.
+ */
+export function unknownBoardKeys(raw: unknown): string[] {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return [];
+  const known = new Set(Object.keys(boardProfileSchema.shape));
+  return Object.keys(raw).filter((k) => !known.has(k));
+}
