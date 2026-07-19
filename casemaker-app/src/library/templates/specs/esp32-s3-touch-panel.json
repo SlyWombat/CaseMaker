@@ -1,0 +1,18 @@
+{
+  "id": "esp32-s3-touch-panel",
+  "order": 100,
+  "boardId": "esp32-s3-touch-lcd-4.3b",
+  "name": "ESP32-S3 4.3\" touch panel",
+  "description": "Waveshare ESP32-S3-Touch-LCD-4.3B (4.3\" 800x480 capacitive touch) in a screw-down bezel case: the lid frames the active-area window, with USB-C and the 16-position 3.5mm terminal block brought out to the edges.",
+  "estPrintMinutes": 150,
+  "projectName": "ESP32-S3 4.3\" touch panel",
+  "casePatch": {
+    "joint": "snap-fit",
+    "boardRetention": "snap",
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  }
+}

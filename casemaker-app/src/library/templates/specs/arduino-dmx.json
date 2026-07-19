@@ -1,0 +1,24 @@
+{
+  "id": "arduino-dmx",
+  "order": 40,
+  "boardId": "arduino-uno-r3",
+  "name": "Arduino DMX controller",
+  "description": "Arduino Uno R3 + CQRobot DMX MAX485 shield with screw-down lid.",
+  "estPrintMinutes": 200,
+  "projectName": "Arduino Uno DMX controller",
+  "casePatch": {
+    "joint": "screw-down",
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  },
+  "hats": [
+    {
+      "hatId": "cqrobot-dmx-shield-max485",
+      "stackIndex": 0,
+      "placementId": "tpl-hat-dmx"
+    }
+  ]
+}

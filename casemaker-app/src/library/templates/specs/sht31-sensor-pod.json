@@ -1,0 +1,23 @@
+{
+  "id": "sht31-sensor-pod",
+  "order": 80,
+  "boardId": "adafruit-sht31d",
+  "name": "SHT31-D sensor pod",
+  "description": "Adafruit SHT31-D (STEMMA QT) temperature/humidity breakout in a small vented snap-fit pod: hex vents on three faces so the sensor reads ambient air, side-wall cutouts for both STEMMA QT cables, screwless snap retention.",
+  "estPrintMinutes": 40,
+  "projectName": "SHT31-D sensor pod",
+  "casePatch": {
+    "joint": "snap-fit",
+    "boardRetention": "snap",
+    "ventilation": {
+      "enabled": true,
+      "pattern": "hex",
+      "coverage": 0.5,
+      "surfaces": [
+        "top",
+        "front",
+        "back"
+      ]
+    }
+  }
+}

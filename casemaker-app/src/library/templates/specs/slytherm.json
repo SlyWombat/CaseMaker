@@ -1,0 +1,18 @@
+{
+  "id": "slytherm",
+  "order": 110,
+  "boardId": "slytherm",
+  "name": "SlyTherm (4.3\" touch + MSR-2 radar)",
+  "description": "ESP32-S3 4.3\" touch panel extended with a snap-clip bay for a Seeed MSR-2 mmWave radar module held 10mm off the floor, radar facing out the front alongside the screen.",
+  "estPrintMinutes": 170,
+  "projectName": "SlyTherm (4.3\" touch + MSR-2 radar)",
+  "casePatch": {
+    "joint": "snap-fit",
+    "boardRetention": "snap",
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  }
+}

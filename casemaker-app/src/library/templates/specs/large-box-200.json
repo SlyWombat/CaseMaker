@@ -1,0 +1,35 @@
+{
+  "id": "large-box-200",
+  "order": 160,
+  "name": "200 × 200 × 100 mm box",
+  "description": "Large general-purpose flat-lid box (~200 × 200 × 100 mm outer). No host board — drop in whichever boards / parts you want.",
+  "estPrintMinutes": 360,
+  "projectName": "200 × 200 × 100 mm box",
+  "emptyBoard": {
+    "id": "generic-200-cavity",
+    "name": "200×200 mm interior",
+    "x": 192,
+    "y": 192
+  },
+  "casePatch": {
+    "wallThickness": 3,
+    "floorThickness": 3,
+    "lidThickness": 3,
+    "internalClearance": 2,
+    "cornerRadius": 4,
+    "zClearance": 93,
+    "joint": "flat-lid",
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    },
+    "bosses": {
+      "enabled": false,
+      "insertType": "self-tap",
+      "outerDiameter": 5,
+      "holeDiameter": 2.5
+    }
+  },
+  "ports": "none"
+}

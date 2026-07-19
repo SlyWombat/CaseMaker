@@ -1,0 +1,24 @@
+{
+  "id": "giga-dmx-controller",
+  "order": 50,
+  "boardId": "arduino-giga-r1-wifi",
+  "name": "GIGA R1 + DMX shield",
+  "description": "Arduino GIGA R1 WiFi + CQRobot DMX shield, slot-vented screw-down lid.",
+  "estPrintMinutes": 240,
+  "projectName": "GIGA R1 + CQRobot DMX shield",
+  "casePatch": {
+    "joint": "screw-down",
+    "ventilation": {
+      "enabled": true,
+      "pattern": "slots",
+      "coverage": 0.5
+    }
+  },
+  "hats": [
+    {
+      "hatId": "cqrobot-dmx-shield-max485",
+      "stackIndex": 0,
+      "placementId": "tpl-hat-giga-dmx"
+    }
+  ]
+}

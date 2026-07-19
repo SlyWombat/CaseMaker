@@ -1,0 +1,24 @@
+{
+  "id": "pi-poe-stack",
+  "order": 20,
+  "boardId": "rpi-4b",
+  "name": "Pi 4 with PoE+ HAT",
+  "description": "Pi 4B + PoE+ HAT, screw-down lid, slot ventilation.",
+  "estPrintMinutes": 210,
+  "projectName": "Pi 4 with PoE+ HAT",
+  "casePatch": {
+    "joint": "screw-down",
+    "ventilation": {
+      "enabled": true,
+      "pattern": "slots",
+      "coverage": 0.5
+    }
+  },
+  "hats": [
+    {
+      "hatId": "rpi-poe-plus",
+      "stackIndex": 0,
+      "placementId": "tpl-hat-poe"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "pi-zero-tablet",
+  "order": 30,
+  "boardId": "rpi-zero-2w",
+  "name": "Pi Zero 2W tablet",
+  "description": "Pi Zero 2W + HyperPixel 4.0 in a recessed-bezel frame.",
+  "estPrintMinutes": 150,
+  "projectName": "Pi Zero 2W tablet (HyperPixel 4.0)",
+  "casePatch": {
+    "joint": "snap-fit"
+  },
+  "display": {
+    "displayId": "hyperpixel-4",
+    "framing": "recessed-bezel",
+    "offset": {
+      "x": 0,
+      "y": 0
+    },
+    "hostSupport": "gpio-only"
+  }
+}

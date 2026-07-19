@@ -1,0 +1,42 @@
+{
+  "id": "guition-wall-mount",
+  "order": 130,
+  "boardId": "guition-jc4880p443c",
+  "name": "Guition 4.3\" panel — wall mount",
+  "description": "Wall mount for the Guition JC4880P443C. Two parts: a wall plate that screws to the drywall (open middle so the cable comes straight out of the wall, two counterbored screw holes), and a body that snaps onto it — four cantilever fingers on the plate click into windows in the body's shroud. The shroud houses the USB-C plug and wire slack.",
+  "estPrintMinutes": 260,
+  "projectName": "Guition 4.3\" panel — wall mount",
+  "casePatch": {
+    "stand": {
+      "enabled": true,
+      "mount": "wall",
+      "tiltAngleDeg": 0,
+      "frameThickness": 10,
+      "bezelMargin": 5,
+      "openingClearance": 0.4,
+      "screwHoleDiameter": 2.4,
+      "shroudDepth": 22,
+      "shroudWall": 4,
+      "plateThickness": 4,
+      "plateBorder": 12,
+      "drywallScrewDiameter": 4.4,
+      "drywallHeadDiameter": 8.5,
+      "baseDepth": 55,
+      "baseThickness": 5,
+      "gussetThickness": 6,
+      "gussetHeightFraction": 0.55
+    },
+    "bosses": {
+      "enabled": false,
+      "insertType": "self-tap",
+      "outerDiameter": 5,
+      "holeDiameter": 2.5
+    },
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  },
+  "ports": "none"
+}

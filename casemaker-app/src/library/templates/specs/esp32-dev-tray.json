@@ -1,0 +1,12 @@
+{
+  "id": "esp32-dev-tray",
+  "order": 60,
+  "boardId": "esp32-devkit-v1",
+  "name": "ESP32 dev tray",
+  "description": "ESP32 DevKit V1 in an open flat-lid tray for prototyping.",
+  "estPrintMinutes": 90,
+  "projectName": "ESP32 DevKit dev tray",
+  "casePatch": {
+    "joint": "flat-lid"
+  }
+}

@@ -19,7 +19,7 @@ import { newId } from '@/utils/id';
 import { autoPortsForBoard } from '@/engine/compiler/portFactory';
 import { autoPortsForHat } from '@/engine/compiler/hats';
 import { defaultAntennasForBoard } from '@/engine/compiler/antennas';
-import { defaultSnapCatchesForCase } from '@/engine/compiler/snapCatches';
+import { applyCasePatch } from '@/engine/compiler/applyCasePatch';
 import { fourCornerScrewTabs, endFlangesPreset } from '@/engine/compiler/mountingFeatures';
 import { computeShellDims } from '@/engine/compiler/caseShell';
 import { caseParamsSchema } from '@/store/projectSchema';
@@ -240,43 +240,12 @@ export const useProjectStore = create<ProjectState>()(
             const validPatch = parsed.data;
             return {
             project: produce(s.project, (draft) => {
-              for (const [k, v] of Object.entries(validPatch) as [keyof CaseParameters, unknown][]) {
-                (draft.case as Record<string, unknown>)[k as string] = v;
-              }
-              // Auto-populate snap catches the first time joint flips to snap-fit (issue #29).
-              if (
-                draft.case.joint === 'snap-fit' &&
-                (!draft.case.snapCatches || draft.case.snapCatches.length === 0)
-              ) {
-                // Issue #46 — pass HATs so snap catches sit at the right Z on
-                // a HAT-stacked case rim. defaultSnapCatchesForCase reads
-                // outerZ from the shell dims; HAT stack contributes to outerZ.
-                const hatResolver = (id: string) =>
-                  (draft.customHats ?? []).find((h) => h.id === id) ?? getBuiltinHat(id);
-                draft.case.snapCatches = defaultSnapCatchesForCase(
-                  draft.board,
-                  draft.case,
-                  draft.hats ?? [],
-                  hatResolver,
-                );
-              }
-              // Issue #33: when ventilation is toggled on with coverage still 0,
-              // bump coverage to a sensible default so vents are visible. Pattern
-              // 'none' likewise defaults to 'hex' so the user sees something.
-              if (
-                draft.case.ventilation.enabled &&
-                draft.case.ventilation.coverage === 0
-              ) {
-                draft.case.ventilation.coverage = 0.5;
-              }
-              if (
-                draft.case.ventilation.enabled &&
-                draft.case.ventilation.pattern === 'none'
-              ) {
-                // Default to slots — works on small cavity heights where hex
-                // wouldn't fit (issue #33).
-                draft.case.ventilation.pattern = 'slots';
-              }
+              // Auto-population rules (snap-catch seeding #29/#46, ventilation
+              // defaults #33) live in applyCasePatch — shared with the
+              // template interpreter so templates can't bypass them.
+              const hatResolver = (id: string) =>
+                (draft.customHats ?? []).find((h) => h.id === id) ?? getBuiltinHat(id);
+              applyCasePatch(draft, validPatch as Partial<CaseParameters>, hatResolver);
               draft.modifiedAt = new Date(0).toISOString();
             }),
           };

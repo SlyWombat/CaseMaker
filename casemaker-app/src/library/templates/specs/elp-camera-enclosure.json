@@ -1,0 +1,17 @@
+{
+  "id": "elp-camera-enclosure",
+  "order": 90,
+  "boardId": "elp-usbgs1200p01-h120",
+  "name": "ELP AR0234 camera enclosure",
+  "description": "ELP-USBGS1200P01-H120 (1080P global-shutter USB camera, 120° lens) in a screw-down enclosure with a lens lid hole and a USB-A pass-through cutout sized for the pigtail plug.",
+  "estPrintMinutes": 75,
+  "projectName": "ELP AR0234 camera enclosure",
+  "casePatch": {
+    "joint": "snap-fit",
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  }
+}

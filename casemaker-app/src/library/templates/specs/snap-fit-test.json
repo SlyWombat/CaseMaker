@@ -1,0 +1,22 @@
+{
+  "id": "snap-fit-test",
+  "order": 140,
+  "boardId": "snap-test-fixture",
+  "name": "Snap-fit test cube",
+  "description": "Small ~60×50×12 mm test fixture for physically validating snap-fit cantilever geometry.",
+  "estPrintMinutes": 30,
+  "projectName": "Snap-fit test cube",
+  "casePatch": {
+    "joint": "snap-fit",
+    "wallThickness": 2,
+    "lidThickness": 2,
+    "floorThickness": 2,
+    "zClearance": 4,
+    "lidRecess": true,
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  }
+}

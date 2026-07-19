@@ -1,0 +1,35 @@
+{
+  "id": "guition-desk-stand",
+  "order": 120,
+  "boardId": "guition-jc4880p443c",
+  "name": "Guition 4.3\" panel — desk stand",
+  "description": "Desk stand for the Guition JC4880P443C (4.3\" 480x800 ESP32-P4 touch panel in its vendor shell). Picture-frame plate the panel screws into on its four M2 bosses, leaning back 15° on a braced foot. No lid — the frame's open centre keeps the back USB-C ports and pin header reachable.",
+  "estPrintMinutes": 200,
+  "projectName": "Guition 4.3\" panel — desk stand",
+  "casePatch": {
+    "stand": {
+      "enabled": true,
+      "tiltAngleDeg": 15,
+      "frameThickness": 10,
+      "bezelMargin": 0,
+      "openingClearance": 0.4,
+      "screwHoleDiameter": 2.4,
+      "baseDepth": 55,
+      "baseThickness": 5,
+      "gussetThickness": 6,
+      "gussetHeightFraction": 0.55
+    },
+    "bosses": {
+      "enabled": false,
+      "insertType": "self-tap",
+      "outerDiameter": 5,
+      "holeDiameter": 2.5
+    },
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  },
+  "ports": "none"
+}

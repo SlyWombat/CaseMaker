@@ -1,0 +1,17 @@
+{
+  "id": "pi-server-tray",
+  "order": 10,
+  "boardId": "rpi-4b",
+  "name": "Pi 4 server tray",
+  "description": "Pi 4B with hex-vent screw-down lid and 4 corner mounting tabs.",
+  "estPrintMinutes": 180,
+  "projectName": "Pi 4 server tray",
+  "casePatch": {
+    "joint": "screw-down",
+    "ventilation": {
+      "enabled": true,
+      "pattern": "hex",
+      "coverage": 0.6
+    }
+  }
+}

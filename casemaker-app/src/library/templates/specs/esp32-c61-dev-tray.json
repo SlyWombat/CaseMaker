@@ -1,0 +1,20 @@
+{
+  "id": "esp32-c61-dev-tray",
+  "order": 70,
+  "boardId": "esp32-c61-devkitc-1",
+  "name": "ESP32-C61 dev tray",
+  "description": "ESP32-C61-DevKitC-1 (Wi-Fi 6, dual USB-C) in a press-fit flat-lid tray with both USB-C cutouts and back-wall clearance for the overhanging PCB antenna.",
+  "estPrintMinutes": 60,
+  "projectName": "ESP32-C61 dev tray",
+  "casePatch": {
+    "joint": "flat-lid",
+    "boardRetention": "snap",
+    "internalClearance": 0.3,
+    "clearanceTweaks": {
+      "xMin": 0,
+      "xMax": 0,
+      "yMin": 0,
+      "yMax": 6.3
+    }
+  }
+}
