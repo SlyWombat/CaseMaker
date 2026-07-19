@@ -1,0 +1,15 @@
+name: 💡 Feature request
+description: A case feature, workflow improvement, or new archetype
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What do you want to build or do?
+      description: Describe the physical outcome first (e.g. "a belt-clip mount for the sensor pod") — the parametric feature follows from it.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What do you do today instead?

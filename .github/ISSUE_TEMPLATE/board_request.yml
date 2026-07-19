@@ -1,0 +1,27 @@
+name: 🧩 Board request
+description: Ask for a board profile you can't author yourself
+labels: ["board-authoring", "help wanted"]
+body:
+  - type: input
+    id: board
+    attributes:
+      label: Board name + manufacturer
+    validations:
+      required: true
+  - type: input
+    id: mech
+    attributes:
+      label: Link to mechanical data
+      description: Vendor CAD (STEP/Eagle/KiCad/DXF) strongly preferred; datasheet drawing as a fallback.
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        💡 Want it faster? You can author it yourself with an AI copilot — point Claude Code at the
+        [community library's AGENT.md](https://github.com/SlyWombat/casemaker-library/blob/main/AGENT.md)
+        and it will walk you through measuring, validating, and submitting the profile.
+  - type: textarea
+    id: usecase
+    attributes:
+      label: What are you enclosing it for?

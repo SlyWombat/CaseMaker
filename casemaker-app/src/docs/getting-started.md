@@ -1,6 +1,26 @@
 # Getting Started
 
-A 10-minute walkthrough that gets you from "freshly cloned repo" to "Pi 4B enclosure STL on disk."
+A 10-minute walkthrough from zero to "enclosure STL on disk."
+
+## 0. The fast path — no install at all
+
+Case Maker runs entirely in the browser: **<https://electricrv.ca/casemaker>**.
+
+1. On the **Start a New Project** screen, search for your board (29 built-ins,
+   plus anything you import or enable from an online source).
+2. Click a card to see its specs, connector inventory, and provenance in the
+   detail rail. Boards marked **★** have a curated quickstart recipe.
+3. Click **★ Create from quickstart** (or **Blank shell**) — the case
+   generates around the board's real connector and mounting-hole geometry.
+4. Tweak parameters, then **Export → STL** and slice.
+
+Board not in the library? **Import board JSON** on the same screen, or open
+**Sources** and add the community library. To author your own profile, point
+Claude Code at the
+[community library's AGENT.md](https://github.com/SlyWombat/casemaker-library/blob/main/AGENT.md)
+and it will walk you through measuring, authoring, testing, and publishing it.
+
+The rest of this guide covers running the app from source.
 
 ## 1. Dependencies
 
@@ -30,14 +50,17 @@ npm run dev
 ```
 
 1. Open <http://localhost:8000> in your browser.
-2. The viewport boots with a Raspberry Pi 4B tray (the default project).
-3. Drag the **Wall thickness** slider in the sidebar from 2mm → 3mm — the case rebuilds in ~50ms.
-4. Open the **Board** dropdown and switch to `rpi-5`. Bbox grows; the lid lifts to expose the new shell.
-5. Toggle individual ports under **Port cutouts** to see USB/HDMI cutouts disappear and reappear.
-6. In the **Joint type** radio, select **Snap-fit** — the lid grows a downward lip ring.
-7. Open **Export** and click **STL (binary)**. Save to disk.
-8. Drag the file into your slicer of choice. PrusaSlicer / Bambu / OrcaSlicer / Cura will all open it. The model is in mm, Z-up — no rotation required.
-9. Slice with default 0.2mm layer height. Print. Confirm a real Pi 4B fits the bosses.
+2. The **board picker** greets you: search "rpi-4b" and click the Raspberry
+   Pi 4B card, then **★ Create from quickstart**.
+3. Drag the **Wall thickness** slider (sidebar → Case parameters) from
+   2mm → 3mm — the case rebuilds in ~50ms.
+4. Toggle individual ports under **Port cutouts** to see USB/HDMI cutouts
+   disappear and reappear.
+5. Under **Case parameters → Joint**, select **Snap-fit** — snap catches
+   populate automatically.
+6. Open **Export** and click **STL (binary)**. Save to disk.
+7. Drag the file into your slicer of choice. PrusaSlicer / Bambu / OrcaSlicer / Cura all open it. The model is in mm, Z-up — no rotation required.
+8. Slice with default 0.2mm layer height. Print. Confirm a real Pi 4B fits the bosses.
 
 If anything went wrong, see [Troubleshooting](#troubleshooting) below.
 

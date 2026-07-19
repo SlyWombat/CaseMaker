@@ -1,0 +1,33 @@
+name: 🐛 Bug report
+description: Something generated wrong geometry, crashed, or misbehaved
+labels: [bug]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Where did it happen?
+      placeholder: live app (electricrv.ca/casemaker) / local dev / desktop app + version from the status bar
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Board + template used, parameters changed, what you clicked. Attach the .caseproj.json if you can (Save As) — it embeds everything.
+      placeholder: |
+        1. Pick "Adafruit SHT31-D" → Create from quickstart
+        2. Set wall thickness to 4
+        3. Export STL
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots / STL / console errors
+      description: A screenshot of the viewport and the status-bar bbox line helps a lot.

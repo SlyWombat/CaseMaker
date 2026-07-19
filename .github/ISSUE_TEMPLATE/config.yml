@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 🧩 Contribute a board profile
+    url: https://github.com/SlyWombat/casemaker-library
+    about: Board profiles live in the community library — its AGENT.md lets Claude Code drive the whole contribution for you.
+  - name: ▶ Live app
+    url: https://electricrv.ca/casemaker
+    about: Try Case Maker in your browser — free, no signup.
