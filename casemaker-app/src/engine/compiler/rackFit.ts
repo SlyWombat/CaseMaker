@@ -110,8 +110,9 @@ export function rackPartFootprints(rack: RackParams): PartFootprint[] {
   return out;
 }
 
-/** Largest rack width whose widest parts (faceplates/plates) still fit. */
-function maxFittingWidth(bedX: number, bedY: number): number {
+/** Largest rack width whose widest parts (faceplates/plates) still fit.
+ *  Also drives the RackPanel width slider's upper bound. */
+export function maxRackWidthForBed(bedX: number, bedY: number): number {
   // Faceplates are width × ~50 mm; binary-search the diagonal fit.
   let lo = 120;
   let hi = 600;
@@ -123,8 +124,9 @@ function maxFittingWidth(bedX: number, bedY: number): number {
   return Math.floor(lo);
 }
 
-/** Largest slot count whose side panel still fits the bed. */
-function maxFittingSlots(depth: number, bedX: number, bedY: number): number {
+/** Largest slot count whose side panel still fits the bed.
+ *  Also drives the RackPanel height slider's upper bound. */
+export function maxRackSlotsForBed(depth: number, bedX: number, bedY: number): number {
   for (let s = 40; s >= 2; s--) {
     const h = 5 + s * SLOT_PITCH + 11;
     if (rectFitsBed(depth, h, bedX, bedY)) return s;
@@ -182,8 +184,8 @@ export function validateRackFit(rack: RackParams): PlacementIssue[] {
     });
   }
   if (blocked.length > 0) {
-    const maxW = maxFittingWidth(printer.x, printer.y);
-    const maxS = maxFittingSlots(Math.min(dims.depth, maxW), printer.x, printer.y);
+    const maxW = maxRackWidthForBed(printer.x, printer.y);
+    const maxS = maxRackSlotsForBed(Math.min(dims.depth, maxW), printer.x, printer.y);
     issues.push({
       severity: 'error',
       kind: 'printer-fit',

@@ -54,13 +54,24 @@ const REAR_HOLE_Y = 100;
 const LONG_SHELF = 112;
 /** Side panel structure: solid front band (the cable-protecting column),
  *  rear band, top/bottom rails, rib carrying the rear screw column. */
-const FRONT_BAND = 40;
+const FRONT_BAND = 34;
 const REAR_BAND = 15;
 const REAR_BAND_WALL = 25; // widened when wall-mounted (strength)
 const RAIL = 14;
 const REAR_RIB = [92, 108] as const;
 /** Lateral fit clearances. */
 const SIDE_CLEAR = 0.3;
+/** Weight relief: blind pockets cut into the solid bands from the OUTER
+ *  face (so they open UPWARD in the inner-face-down print orientation — no
+ *  bridging), leaving this much inner skin, with solid bosses kept around
+ *  every screw / tie hole. */
+const POCKET_SKIN = 6;
+const SCREW_BOSS_D = 13;
+const TIE_BOSS_D = 10;
+/** Accessory rib hollowing: C-channel wall thickness and the boss kept
+ *  around each thread hole so screw engagement stays full-width. */
+const RIB_WALL = 5;
+const RIB_BOSS_D = 12;
 /** Top/bottom plates: thickness, snap tab size, tab fit slack. */
 const PLATE_T = 5;
 const TAB_LEN = 20;
@@ -249,6 +260,31 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   for (const yC of [depth * 0.25, depth * 0.75]) {
     cuts.push(innerPocket(yC, FOOT_H)); // bottom plate seat
     cuts.push(innerPocket(yC, H_TOP - PLATE_T)); // top plate seat
+  }
+
+  // Weight-relief pockets in the solid bands, cut from the OUTER face with
+  // POCKET_SKIN of inner wall left and solid bosses around every hole. The
+  // rear band stays solid whenever the rack wall-mounts (strength package).
+  const [pa, pb] = xr(-OVER, SIDE_T - POCKET_SKIN);
+  const pocketZ0 = FOOT_H + RAIL;
+  const pocketZLen = bodyH - 2 * RAIL;
+  const pocketDepthX = pb - pa;
+  const frontBosses: BuildOp[] = [];
+  for (let k = 0; k < dims.slots; k++) {
+    const z = dims.holeZ(k);
+    frontBosses.push(translate([pa, FRONT_HOLE_Y, z], axisCylinder('+x', pocketDepthX, SCREW_BOSS_D / 2, 24)));
+    frontBosses.push(translate([pa, 25, z], axisCylinder('+x', pocketDepthX, TIE_BOSS_D / 2, 16)));
+  }
+  cuts.push(
+    difference([
+      translate([pa, 3, pocketZ0], cube([pocketDepthX, FRONT_BAND - 6, pocketZLen])),
+      ...frontBosses,
+    ]),
+  );
+  if ((rack.wallMount ?? 'none') === 'none') {
+    cuts.push(
+      translate([pa, depth - rearBand + 3, pocketZ0], cube([pocketDepthX, rearBand - 6, pocketZLen])),
+    );
   }
 
   // ---- Wall mount ----------------------------------------------------------
@@ -446,7 +482,44 @@ function buildShelf(dims: RackDims, nSlots: number, shelfDepth: number): BuildOp
       }
     }
   }
+  cuts.push(...ribChannelCuts(width, ribX, d, h, nSlots, d >= LONG_SHELF));
   return difference([union(solid), ...cuts]);
+}
+
+/** Hollow accessory end ribs into C-channels: keep the outer wall (the
+ *  screw-bearing face against the side panel), front/rear posts, and a
+ *  bottom band tying into the deck; open the pocket to the TOP and the
+ *  inner face so nothing bridges when printed deck-down. Solid bosses stay
+ *  around every thread hole for full-width screw engagement. */
+function ribChannelCuts(
+  width: number,
+  ribX: number[],
+  d: number,
+  h: number,
+  nSlots: number,
+  rearHoles: boolean,
+): BuildOp[] {
+  const out: BuildOp[] = [];
+  for (const rx of ribX) {
+    const isLeft = rx < width / 2;
+    const px0 = isLeft ? rx + RIB_WALL : rx - OVER;
+    const px1 = isLeft ? rx + RIB_W + OVER : rx + RIB_W - RIB_WALL;
+    const bosses: BuildOp[] = [];
+    for (let k = 0; k < nSlots; k++) {
+      const z = (k + 0.5) * SLOT_PITCH - 0.25;
+      bosses.push(translate([px0, FRONT_HOLE_Y, z], axisCylinder('+x', px1 - px0, RIB_BOSS_D / 2, 24)));
+      if (rearHoles) {
+        bosses.push(translate([px0, REAR_HOLE_Y, z], axisCylinder('+x', px1 - px0, RIB_BOSS_D / 2, 24)));
+      }
+    }
+    out.push(
+      difference([
+        translate([px0, 8, 8], cube([px1 - px0, d - 16, h - 8 + OVER])),
+        ...bosses,
+      ]),
+    );
+  }
+  return out;
 }
 
 /** Cable tray: shelf-like ribs + a deck with tie-wrap comb fingers along the
@@ -479,6 +552,16 @@ function buildCableTray(dims: RackDims): BuildOp {
     for (const rx of ribX) {
       cuts.push(translate([rx - OVER, FRONT_HOLE_Y, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
     }
+  }
+  cuts.push(...ribChannelCuts(width, ribX, d, h, nSlots, false));
+  // Vent/drain slots along the deck between the finger rows.
+  const rim = 12;
+  const slotW = 8;
+  const gap = 8;
+  const n = Math.floor((deckW - 2 * rim) / (slotW + gap));
+  for (let i = 0; i < n; i++) {
+    const sx = deckX0 + rim + (deckW - 2 * rim - n * (slotW + gap) + gap) / 2 + i * (slotW + gap);
+    cuts.push(translate([sx, rim, -OVER], roundedRectPrism(slotW, Math.max(10, d - 2 * rim), 4 + 2 * OVER, slotW / 2)));
   }
   return difference([union(solid), ...cuts]);
 }

@@ -1,7 +1,7 @@
 import { useProjectStore } from '@/store/projectStore';
 import type { RackParams, RackAccessory, RackAccessoryType } from '@/types';
 import { LabelledField } from '@/components/ui/LabelledField';
-import { PRINTER_PRESETS } from '@/engine/compiler/rackFit';
+import { PRINTER_PRESETS, maxRackWidthForBed, maxRackSlotsForBed } from '@/engine/compiler/rackFit';
 import { computeRackDims, accessorySlots, SLOT_PITCH } from '@/engine/compiler/rack';
 import { newId } from '@/utils/id';
 
@@ -77,6 +77,22 @@ export function RackPanel() {
   const usedSlots = (rack.accessories ?? []).reduce((s, a) => s + accessorySlots(a), 0);
   const presetId = rack.printer?.preset ?? 'custom';
 
+  // Slider ceilings from the printer's build volume. Never below the current
+  // value so the handle doesn't jump when a smaller printer is picked — the
+  // fit banner flags oversize instead.
+  const printerMaxW = rack.printer
+    ? Math.min(400, maxRackWidthForBed(rack.printer.x, rack.printer.y))
+    : 400;
+  const printerMaxS = rack.printer
+    ? maxRackSlotsForBed(rack.depth, rack.printer.x, rack.printer.y)
+    : 40;
+  const sliderMaxW = Math.max(printerMaxW, Math.ceil(rack.width));
+  const sliderMaxS = Math.min(40, Math.max(printerMaxS, rack.slots));
+  // Height in mm ↔ slots: total = feet + slots·pitch + margins.
+  const mmForSlots = (s: number): number => Math.round(5 + s * SLOT_PITCH + 11);
+  const slotsForMm = (mm: number): number =>
+    Math.min(40, Math.max(2, Math.round((mm - 16) / SLOT_PITCH)));
+
   const setPreset = (id: string): void => {
     if (id === 'custom') {
       update({ printer: { ...(rack.printer ?? { x: 220, y: 220, z: 250 }), preset: undefined } });
@@ -94,16 +110,34 @@ export function RackPanel() {
 
   return (
     <div className="panel-stack" data-testid="rack-panel">
-      <LabelledField label="Width" unit="mm" hint="Exterior width across the front — faceplates span it fully. Original: 252.">
-        <input
-          type="number"
-          min={120}
-          max={600}
-          step={1}
-          value={rack.width}
-          data-testid="rack-width"
-          onChange={(e) => update({ width: Number(e.target.value) })}
-        />
+      <LabelledField
+        label="Width"
+        unit="mm"
+        hint={`Exterior width across the front — faceplates span it fully. Original: 252. Slider tops out at what the selected printer can fit (${printerMaxW} mm).`}
+      >
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            type="range"
+            min={120}
+            max={sliderMaxW}
+            step={1}
+            value={rack.width}
+            data-testid="rack-width-slider"
+            aria-label="Width slider"
+            style={{ flex: 1 }}
+            onChange={(e) => update({ width: Number(e.target.value) })}
+          />
+          <input
+            type="number"
+            min={120}
+            max={600}
+            step={1}
+            value={rack.width}
+            data-testid="rack-width"
+            style={{ width: 72 }}
+            onChange={(e) => update({ width: Number(e.target.value) })}
+          />
+        </div>
       </LabelledField>
       <LabelledField label="Depth" unit="mm" hint="Side panel front-to-back depth. Original: 250.">
         <input
@@ -119,17 +153,43 @@ export function RackPanel() {
       <LabelledField
         label="Height"
         unit="slots"
-        hint={`Rack height in ${SLOT_PITCH} mm mounting slots — the fixed pitch every shelf/faceplate mounts on. Current total ≈ ${Math.round(dims.totalH)} mm.`}
+        hint={`Rack height in ${SLOT_PITCH} mm mounting slots — the fixed pitch every shelf/faceplate mounts on. Each slider step is one valid slot; it tops out at what the selected printer can fit (${printerMaxS} slots at the current depth). The mm box rounds to the nearest whole slot.`}
       >
-        <input
-          type="number"
-          min={2}
-          max={40}
-          step={1}
-          value={rack.slots}
-          data-testid="rack-slots"
-          onChange={(e) => update({ slots: Number(e.target.value) })}
-        />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            type="range"
+            min={2}
+            max={sliderMaxS}
+            step={1}
+            value={rack.slots}
+            data-testid="rack-slots-slider"
+            aria-label="Height slider in slots"
+            style={{ flex: 1 }}
+            onChange={(e) => update({ slots: Number(e.target.value) })}
+          />
+          <input
+            type="number"
+            min={2}
+            max={40}
+            step={1}
+            value={rack.slots}
+            data-testid="rack-slots"
+            style={{ width: 56 }}
+            onChange={(e) => update({ slots: Number(e.target.value) })}
+          />
+          <input
+            type="number"
+            min={mmForSlots(2)}
+            max={mmForSlots(40)}
+            step={1}
+            value={mmForSlots(rack.slots)}
+            data-testid="rack-height-mm"
+            aria-label="Height in millimetres (rounds to whole slots)"
+            style={{ width: 72 }}
+            onChange={(e) => update({ slots: slotsForMm(Number(e.target.value)) })}
+          />
+          <span style={{ fontSize: 11, color: '#9aa4b0' }}>mm</span>
+        </div>
       </LabelledField>
       <p style={{ fontSize: 12, color: '#9aa4b0', margin: '2px 0 0' }}>
         Overall: {Math.round(dims.width)} × {Math.round(dims.depth)} × {Math.round(dims.totalH)} mm

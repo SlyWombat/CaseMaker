@@ -15,7 +15,13 @@ import ManifoldModule from 'manifold-3d';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { aabbOfOp, type BuildOp } from '@/engine/compiler/buildPlan';
 import { buildRackNodes, computeRackDims, SLOT_PITCH } from '@/engine/compiler/rack';
-import { rectFitsBed, validateRackFit, PRINTER_PRESETS } from '@/engine/compiler/rackFit';
+import {
+  rectFitsBed,
+  validateRackFit,
+  PRINTER_PRESETS,
+  maxRackWidthForBed,
+  maxRackSlotsForBed,
+} from '@/engine/compiler/rackFit';
 import { findTemplate } from '@/library/templates';
 import type { RackParams } from '@/types';
 
@@ -193,6 +199,18 @@ describe('rack archetype — mini-rack template', () => {
     };
     const issues = validateRackFit(rack);
     expect(issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
+  it('slider ceilings: max width/slots are consistent with the fit check', () => {
+    // Whatever the helpers claim fits must actually pass rectFitsBed…
+    const maxW = maxRackWidthForBed(220, 220);
+    expect(rectFitsBed(maxW, 50, 220, 220)).toBe(true);
+    expect(rectFitsBed(maxW + 4, 50, 220, 220)).toBe(false);
+    // …and the max slot count's side panel must fit while one more doesn't.
+    const maxS = maxRackSlotsForBed(180, 220, 220);
+    expect(maxS).toBeGreaterThanOrEqual(2);
+    expect(rectFitsBed(180, 5 + maxS * SLOT_PITCH + 11, 220, 220)).toBe(true);
+    expect(rectFitsBed(180, 5 + (maxS + 1) * SLOT_PITCH + 11, 220, 220)).toBe(false);
   });
 
   it('rectFitsBed: straight, rotated, diagonal, and impossible placements', () => {
