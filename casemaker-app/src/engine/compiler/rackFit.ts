@@ -124,6 +124,31 @@ export function maxRackWidthForBed(bedX: number, bedY: number): number {
   return Math.floor(lo);
 }
 
+/** Largest rack depth that still fits the bed at the given width and slot
+ *  count. Depth is governed by two parts: the side panel (depth × height)
+ *  and the top/bottom plate (≈width × depth). Drives the RackPanel depth
+ *  slider's upper bound. */
+export function maxRackDepthForBed(
+  width: number,
+  slots: number,
+  bedX: number,
+  bedY: number,
+): number {
+  const sideH = 5 + slots * SLOT_PITCH + 11;
+  const plateSpan = width - 2 * SIDE_T + 22; // plate + snap tabs
+  const fits = (d: number): boolean =>
+    rectFitsBed(d, sideH, bedX, bedY) && rectFitsBed(plateSpan, d, bedX, bedY);
+  if (!fits(80)) return 0;
+  let lo = 80;
+  let hi = 600;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (fits(mid)) lo = mid;
+    else hi = mid;
+  }
+  return Math.floor(lo);
+}
+
 /** Largest slot count whose side panel still fits the bed.
  *  Also drives the RackPanel height slider's upper bound. */
 export function maxRackSlotsForBed(depth: number, bedX: number, bedY: number): number {

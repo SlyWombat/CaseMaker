@@ -20,6 +20,7 @@ import {
   validateRackFit,
   PRINTER_PRESETS,
   maxRackWidthForBed,
+  maxRackDepthForBed,
   maxRackSlotsForBed,
 } from '@/engine/compiler/rackFit';
 import { findTemplate } from '@/library/templates';
@@ -211,6 +212,13 @@ describe('rack archetype — mini-rack template', () => {
     expect(maxS).toBeGreaterThanOrEqual(2);
     expect(rectFitsBed(180, 5 + maxS * SLOT_PITCH + 11, 220, 220)).toBe(true);
     expect(rectFitsBed(180, 5 + (maxS + 1) * SLOT_PITCH + 11, 220, 220)).toBe(false);
+    // …and the max depth's governing parts (side panel + top/bottom plate)
+    // must both fit while 4 mm more does not.
+    const maxD = maxRackDepthForBed(200, 10, 220, 220);
+    const sideH = 5 + 10 * SLOT_PITCH + 11;
+    expect(maxD).toBeGreaterThanOrEqual(80);
+    expect(rectFitsBed(maxD, sideH, 220, 220) && rectFitsBed(200 - 30 + 22, maxD, 220, 220)).toBe(true);
+    expect(rectFitsBed(maxD + 4, sideH, 220, 220) && rectFitsBed(200 - 30 + 22, maxD + 4, 220, 220)).toBe(false);
   });
 
   it('rectFitsBed: straight, rotated, diagonal, and impossible placements', () => {

@@ -1,7 +1,12 @@
 import { useProjectStore } from '@/store/projectStore';
 import type { RackParams, RackAccessory, RackAccessoryType } from '@/types';
 import { LabelledField } from '@/components/ui/LabelledField';
-import { PRINTER_PRESETS, maxRackWidthForBed, maxRackSlotsForBed } from '@/engine/compiler/rackFit';
+import {
+  PRINTER_PRESETS,
+  maxRackWidthForBed,
+  maxRackDepthForBed,
+  maxRackSlotsForBed,
+} from '@/engine/compiler/rackFit';
 import { computeRackDims, accessorySlots, SLOT_PITCH } from '@/engine/compiler/rack';
 import { newId } from '@/utils/id';
 
@@ -83,10 +88,14 @@ export function RackPanel() {
   const printerMaxW = rack.printer
     ? Math.min(400, maxRackWidthForBed(rack.printer.x, rack.printer.y))
     : 400;
+  const printerMaxD = rack.printer
+    ? Math.min(400, maxRackDepthForBed(rack.width, rack.slots, rack.printer.x, rack.printer.y))
+    : 400;
   const printerMaxS = rack.printer
     ? maxRackSlotsForBed(rack.depth, rack.printer.x, rack.printer.y)
     : 40;
   const sliderMaxW = Math.max(printerMaxW, Math.ceil(rack.width));
+  const sliderMaxD = Math.max(printerMaxD, Math.ceil(rack.depth));
   const sliderMaxS = Math.min(40, Math.max(printerMaxS, rack.slots));
   // Height in mm ↔ slots: total = feet + slots·pitch + margins.
   const mmForSlots = (s: number): number => Math.round(5 + s * SLOT_PITCH + 11);
@@ -139,16 +148,34 @@ export function RackPanel() {
           />
         </div>
       </LabelledField>
-      <LabelledField label="Depth" unit="mm" hint="Side panel front-to-back depth. Original: 250.">
-        <input
-          type="number"
-          min={80}
-          max={600}
-          step={1}
-          value={rack.depth}
-          data-testid="rack-depth"
-          onChange={(e) => update({ depth: Number(e.target.value) })}
-        />
+      <LabelledField
+        label="Depth"
+        unit="mm"
+        hint={`Side panel front-to-back depth. Original: 250. Slider tops out at what the selected printer can fit at the current width and height (${printerMaxD} mm).`}
+      >
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            type="range"
+            min={80}
+            max={sliderMaxD}
+            step={1}
+            value={rack.depth}
+            data-testid="rack-depth-slider"
+            aria-label="Depth slider"
+            style={{ flex: 1 }}
+            onChange={(e) => update({ depth: Number(e.target.value) })}
+          />
+          <input
+            type="number"
+            min={80}
+            max={600}
+            step={1}
+            value={rack.depth}
+            data-testid="rack-depth"
+            style={{ width: 72 }}
+            onChange={(e) => update({ depth: Number(e.target.value) })}
+          />
+        </div>
       </LabelledField>
       <LabelledField
         label="Height"
