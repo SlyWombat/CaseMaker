@@ -424,7 +424,7 @@ export function RackPanel() {
               <select
                 value={acc.type}
                 aria-label={`Accessory ${i + 1} type`}
-                style={{ flex: 1 }}
+                style={{ flex: 1, minWidth: 0 }}
                 onChange={(e) => setAccessory(i, { ...acc, type: e.target.value as RackAccessoryType })}
               >
                 {ACCESSORY_LABELS.map((o) => (
@@ -434,17 +434,16 @@ export function RackPanel() {
                 ))}
               </select>
               {acc.type !== 'cable-tray' && (
-                <LabelledField label="Slots" inline>
-                  <input
-                    type="number"
-                    min={1}
-                    max={12}
-                    value={n}
-                    aria-label={`Accessory ${i + 1} slots`}
-                    style={{ width: 48 }}
-                    onChange={(e) => setAccessory(i, { ...acc, slots: Number(e.target.value) })}
-                  />
-                </LabelledField>
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={n}
+                  aria-label={`Accessory ${i + 1} slots`}
+                  title="Height in slots"
+                  style={{ width: 44, flexShrink: 0 }}
+                  onChange={(e) => setAccessory(i, { ...acc, slots: Number(e.target.value) })}
+                />
               )}
               <button
                 type="button"
