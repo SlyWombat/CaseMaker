@@ -326,37 +326,75 @@ describe('rack archetype — mini-rack template', () => {
       fans: [{ id: 'f1', side: 'left', size: 80, y: 170, z: 140 }],
     };
     const nodes = buildRackNodes(rack);
-    const left = nodes.find((n) => n.id === 'rack-side-left')!.op;
-    const right = nodes.find((n) => n.id === 'rack-side-right')!.op;
+    const leftOp = nodes.find((n) => n.id === 'rack-side-left')!.op;
+    const rightOp = nodes.find((n) => n.id === 'rack-side-right')!.op;
     const zC = 5 + 140; // feet + configured height
-    const probe = (op: BuildOp, x: number, y: number, z: number, s = 3): number => {
-      const m = exec({
-        kind: 'intersection',
-        children: [op, { kind: 'translate', offset: [x - s / 2, y - s / 2, z - s / 2], child: { kind: 'cube', size: [s, s, s] } }],
-      });
-      const v = m.volume();
-      m.delete();
+    // Execute each panel ONCE; probes are then cheap intersections.
+    const leftM = exec(leftOp);
+    const rightM = exec(rightOp);
+    const probe = (m: ManifoldInstance, x: number, y: number, z: number, s = 3): number => {
+      const box = Manifold.cube([s, s, s], true).translate([x, y, z]);
+      const i = Manifold.intersection([m, box]);
+      const v = i.volume();
+      box.delete();
+      i.delete();
       return v;
     };
-    // Opening void at the fan center, through the full thickness.
-    expect(probe(left, 7.5, 170, zC)).toBe(0);
-    // All four bolt holes at the standard 71.5 mm spacing (void at hole
-    // centers, solid right next to them).
-    for (const sy of [-1, 1]) {
-      for (const sz of [-1, 1]) {
-        expect(probe(left, 7.5, 170 + (sy * 71.5) / 2, zC + (sz * 71.5) / 2, 2)).toBe(0);
+    try {
+      // Opening void at the fan center, through the full thickness.
+      expect(probe(leftM, 7.5, 170, zC)).toBe(0);
+      // All four bolt holes at the standard 71.5 mm spacing (void at hole
+      // centers, solid right next to them).
+      for (const sy of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          expect(probe(leftM, 7.5, 170 + (sy * 71.5) / 2, zC + (sz * 71.5) / 2, 2)).toBe(0);
+        }
       }
+      expect(probe(leftM, 7.5, 170 + 71.5 / 2 + 6, zC)).toBeGreaterThan(0);
+      // The strip is solid full-thickness beyond the opening (no bridge zone)…
+      expect(probe(leftM, 7.5, 170, zC + 44)).toBeGreaterThan(0);
+      // …and the right panel is untouched there (fan is left-side only): the
+      // same spot falls in a vent window on the mirrored panel.
+      expect(probe(rightM, 252 - 7.5, 170, zC)).toBe(0);
+    } finally {
+      leftM.delete();
+      rightM.delete();
     }
-    expect(probe(left, 7.5, 170 + 71.5 / 2 + 6, zC)).toBeGreaterThan(0);
-    // The strip is solid full-thickness beyond the opening (no bridge zone)…
-    expect(probe(left, 7.5, 170, zC + 44)).toBeGreaterThan(0);
-    // …and the right panel is untouched there (fan is left-side only): the
-    // same spot falls in a vent window on the mirrored panel.
-    expect(probe(right, 252 - 7.5, 170, zC)).toBe(0);
     // Still one connected component per panel.
-    expectClean('rack-side-left+fan', left);
-    expectClean('rack-side-right', right);
-  });
+    expectClean('rack-side-left+fan', leftOp);
+    expectClean('rack-side-right', rightOp);
+  }, 30000);
+
+  it('fan strip does NOT bury the screw columns (mid-post regression)', () => {
+    // A 120 mm fan at the default-ish position overlaps the mid rib — the
+    // strip fuses after the base cuts and must be re-drilled.
+    const rack: RackParams = {
+      ...SAMPLE,
+      accessories: [],
+      fans: [{ id: 'f1', side: 'left', size: 120, y: 150, z: 140 }],
+    };
+    const left = buildRackNodes(rack).find((n) => n.id === 'rack-side-left')!.op;
+    const holeZ = 5 + 5.5 + 0.5 * SLOT_PITCH; // first slot's screw center
+    // Execute the panel ONCE; each probe is then a cheap intersection.
+    const panel = exec(left);
+    try {
+      const probe = (x: number, y: number, z: number): number => {
+        const box = Manifold.cube([2, 2, 2], true).translate([x, y, z]);
+        const m = Manifold.intersection([panel, box]);
+        const v = m.volume();
+        box.delete();
+        m.delete();
+        return v;
+      };
+      for (let k = 0; k < 16; k += 3) {
+        const z = holeZ + k * SLOT_PITCH;
+        expect(probe(7.5, 100, z), `rear screw hole at slot ${k} must stay open`).toBe(0);
+        expect(probe(7.5, 22, z), `front screw hole at slot ${k} must stay open`).toBe(0);
+      }
+    } finally {
+      panel.delete();
+    }
+  }, 30000);
 
   it('keyhole mount: flush rear face with working keyhole hangers', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'keyhole' };

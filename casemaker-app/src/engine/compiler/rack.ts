@@ -416,6 +416,19 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   if (fans.length === 0) return base;
   const strips: BuildOp[] = [];
   const fanCuts: BuildOp[] = [];
+  // The strips fuse AFTER the base cuts, so they would bury any screw/tie
+  // column they overlap — re-drill every column through the final solid.
+  for (let k = 0; k < dims.slots; k++) {
+    const z = dims.holeZ(k);
+    fanCuts.push(translate([holeX, SIDE_FRONT_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
+    if (depth >= MID_BAR_MIN_DEPTH) {
+      fanCuts.push(translate([holeX, REAR_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
+    }
+  }
+  for (let ty = FRONT_BAND + 12; ty <= depth - rearBand - 8; ty += 33) {
+    fanCuts.push(translate([holeX, ty, FOOT_H + RAIL / 2], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
+    fanCuts.push(translate([holeX, ty, FOOT_H + bodyH - RAIL / 2], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
+  }
   const [sx0, sx1] = xr(0, SIDE_T);
   const [hx] = xr(-OVER, 0);
   const [ppa, ppb] = xr(-OVER, SIDE_T - POCKET_SKIN);
