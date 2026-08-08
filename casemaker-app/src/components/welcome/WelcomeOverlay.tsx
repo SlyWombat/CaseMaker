@@ -135,6 +135,18 @@ export function WelcomeOverlay() {
     );
   }, [search, allTemplates]);
 
+  // Board-less project types (mini rack, large box, protective case) have no
+  // card in the board grid to discover them from — surface them in their own
+  // strip ABOVE the boards, and keep the board-bound quickstarts below.
+  const projectTypeTemplates = useMemo(
+    () => filteredTemplates.filter((t) => !t.boardId),
+    [filteredTemplates],
+  );
+  const boardTemplates = useMemo(
+    () => filteredTemplates.filter((t) => t.boardId),
+    [filteredTemplates],
+  );
+
   const applyTemplate = async (id: string) => {
     const t = findTemplateAcrossSources(id);
     if (!t) return;
@@ -317,6 +329,32 @@ export function WelcomeOverlay() {
 
         <div className="wb-layout">
           <main className="wb-main">
+            {projectTypeTemplates.length > 0 && (
+              <section className="wb-templates" aria-label="Project types without a board">
+                <h2>No board? Start from a project type</h2>
+                <ul className="wb-grid wb-grid--templates">
+                  {projectTypeTemplates.map((t) => (
+                    <li key={t.id}>
+                      <button
+                        className="wb-card wb-card--tpl"
+                        onClick={() => {
+                          void applyTemplate(t.id);
+                        }}
+                        data-testid={`welcome-template-${t.id}`}
+                        aria-label={`Load ${t.name} template`}
+                      >
+                        <div className="wb-card__name">{t.name}</div>
+                        <div className="wb-card__desc">{t.description}</div>
+                        <div className="wb-card__print">
+                          ~{t.estPrintMinutes} min print
+                          {t.sourceLabel ? ` · ⛁ ${t.sourceLabel}` : ''}
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             <section aria-label="Boards">
               {filtered.length === 0 ? (
                 <div className="wb-empty" data-testid="welcome-no-boards">
@@ -399,7 +437,7 @@ export function WelcomeOverlay() {
             <section className="wb-templates" aria-label="Quick start templates">
               <h2>Quick Start Templates</h2>
               <ul className="wb-grid wb-grid--templates">
-                {filteredTemplates.map((t) => (
+                {boardTemplates.map((t) => (
                   <li key={t.id}>
                     <button
                       className="wb-card wb-card--tpl"
