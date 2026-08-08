@@ -178,17 +178,10 @@ export function validateRackFit(rack: RackParams): PlacementIssue[] {
     });
   }
 
-  if (rack.wallMount && rack.wallMount !== 'none') {
-    issues.push({
-      severity: 'warning',
-      kind: 'rack-config',
-      involves: ['rack'],
-      message:
-        rack.wallMount === 'ears'
-          ? 'Wall mount (ears): drive the ear screws into studs or use rated drywall anchors — a loaded rack can exceed 10 kg. Print side panels inner-face-down so the ears and gussets build up as solid walls.'
-          : 'Wall mount (cleat): screw the cleat AND the bottom spacer strip to studs or rated anchors with the bevel facing up-and-out. The rack hooks on from above.',
-    });
-  }
+  // NOTE: wall-mount usage guidance intentionally does NOT go through this
+  // report — a permanent warning banner blocks viewport controls. The
+  // RackPanel shows the guidance inline under the Mounting picker instead;
+  // this validator only reports actionable problems.
 
   const printer = rack.printer;
   if (!printer) return issues;

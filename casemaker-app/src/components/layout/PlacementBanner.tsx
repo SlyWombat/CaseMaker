@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useJobStore } from '@/store/jobStore';
 
 /**
@@ -8,11 +9,20 @@ import { useJobStore } from '@/store/jobStore';
  * bar; warnings only get a yellow bar. Clicking an entry doesn't navigate
  * yet — that's a follow-up — but the message names the offending feature ids
  * so users can find them by hand.
+ *
+ * Dismissible: the ✕ hides the banner for the CURRENT issue set only — any
+ * change in the report's content (new issue, message change, one fixed)
+ * brings it back. Keyed by content, not by compile, so the banner doesn't
+ * reappear on every rebuild while the same problems persist.
  */
 export function PlacementBanner() {
   const report = useJobStore((s) => s.placementReport);
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
 
   if (!report || (report.errorCount === 0 && report.warningCount === 0)) return null;
+
+  const contentKey = report.issues.map((i) => `${i.severity}:${i.message}`).join('|');
+  if (dismissedKey === contentKey) return null;
 
   const severity: 'error' | 'warning' = report.errorCount > 0 ? 'error' : 'warning';
 
@@ -33,6 +43,16 @@ export function PlacementBanner() {
             {report.warningCount} warning{report.warningCount > 1 ? 's' : ''}
           </span>
         )}
+        <button
+          type="button"
+          className="placement-banner__close"
+          data-testid="placement-banner-close"
+          aria-label="Dismiss warnings (they return if the issues change)"
+          title="Dismiss — returns if the issues change"
+          onClick={() => setDismissedKey(contentKey)}
+        >
+          ✕
+        </button>
       </div>
       <ul className="placement-banner__list">
         {report.issues.slice(0, 5).map((iss, idx) => (

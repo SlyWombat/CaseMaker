@@ -238,7 +238,9 @@ describe('rack archetype — mini-rack template', () => {
     const right = aabbOfOp(nodes.find((n) => n.id === 'rack-side-right')!.op)!;
     expect(right.max[0]).toBeGreaterThan(252 + 20);
     for (const node of nodes) expectClean(node.id, node.op);
-    expect(validateRackFit(rack).some((i) => i.kind === 'rack-config' && /studs/.test(i.message))).toBe(true);
+    // Guidance lives in the RackPanel now — the validator must NOT emit a
+    // permanent warning for merely having a wall mount selected.
+    expect(validateRackFit(rack).filter((i) => i.kind === 'rack-config')).toEqual([]);
   });
 
   it('wall mount (cleat): emits cleat + spacer strips, all manifold-clean', () => {
@@ -248,6 +250,35 @@ describe('rack archetype — mini-rack template', () => {
     expect(ids).toContain('rack-wall-cleat');
     expect(ids).toContain('rack-wall-spacer');
     for (const node of nodes) expectClean(node.id, node.op);
+  });
+
+  it('cleat hook geometry: hook above the 45° seat, relief below, zero interference', () => {
+    const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'cleat' };
+    const nodes = buildRackNodes(rack);
+    const byId = new Map(nodes.map((n) => [n.id, n.op]));
+    const D = 250;
+    const seatZ = 5 + 16 * SLOT_PITCH + 11 - 45; // front (low) edge of the seat plane
+    const probeVol = (op: BuildOp, x0: number, y0: number, z0: number): number => {
+      const m = exec({
+        kind: 'intersection',
+        children: [op, { kind: 'translate', offset: [x0, y0, z0], child: { kind: 'cube', size: [15, 10, 10] } }],
+      });
+      const v = m.volume();
+      m.delete();
+      return v;
+    };
+    const side = byId.get('rack-side-left')!;
+    // Hook: material must exist in the rear band ABOVE the seat…
+    expect(probeVol(side, 0, D - 10, seatZ + 16)).toBeGreaterThan(500);
+    // …and must be fully relieved BELOW it (that's where the cleat + wall sit).
+    expect(probeVol(side, 0, D - 10, seatZ - 25)).toBe(0);
+    expect(probeVol(side, 0, D - 10, 100)).toBe(0);
+    // The assembled cleat and spacer must not intersect the side panel.
+    for (const partId of ['rack-wall-cleat', 'rack-wall-spacer'] as const) {
+      const m = exec({ kind: 'intersection', children: [side, byId.get(partId)!] });
+      expect(m.volume(), `${partId} interferes with the side panel`).toBe(0);
+      m.delete();
+    }
   });
 
   it('hardware BOM lists the structural M5 screws (the shelf-to-side connection)', () => {

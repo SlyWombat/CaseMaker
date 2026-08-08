@@ -115,7 +115,9 @@ export function SceneMeshes() {
     if (id === 'rack-side-right') return [+lateral, 0, 0];
     if (id === 'rack-top') return [0, 0, lift];
     if (id === 'rack-bottom') return [0, 0, -lift / 2];
-    if (id === 'rack-wall-cleat' || id === 'rack-wall-spacer') return [0, lateral, 0];
+    // Wall parts pull well clear toward the wall side so the sides' cleat
+    // hooks — and the strips they seat on — read as separate pieces.
+    if (id === 'rack-wall-cleat' || id === 'rack-wall-spacer') return [0, lateral + 35, 0];
     if (id.startsWith('rack-')) return [0, -lateral - 15, 0];
     if (id.startsWith('latch-arm-') || id.startsWith('latch-pin-')) {
       const latchId = id.replace(/^latch-(arm|pin)-/, '');

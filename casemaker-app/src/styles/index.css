@@ -378,7 +378,8 @@ body, html, #root {
 
 .placement-banner {
   position: absolute;
-  top: 8px;
+  /* Below the viewport toolbar row — never cover the view-mode buttons. */
+  top: 52px;
   right: 12px;
   max-width: 420px;
   padding: 6px 10px;
@@ -403,6 +404,21 @@ body, html, #root {
   gap: 10px;
   font-weight: 600;
   margin-bottom: 4px;
+  align-items: center;
+}
+.placement-banner__close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  opacity: 0.75;
+}
+.placement-banner__close:hover {
+  opacity: 1;
 }
 .placement-banner__list {
   list-style: none;

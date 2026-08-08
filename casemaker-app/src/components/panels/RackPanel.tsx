@@ -270,6 +270,21 @@ export function RackPanel() {
           ))}
         </select>
       </LabelledField>
+      {rack.wallMount === 'ears' && (
+        <p style={{ fontSize: 12, color: '#d9c98a', margin: '2px 0 0' }} data-testid="rack-mount-guidance">
+          Each side panel grows a gusseted rear flange. Drive the ear screws into studs or
+          rated drywall anchors — a loaded rack can exceed 10&nbsp;kg. Print the sides
+          inner-face-down so ears and gussets build up as solid walls.
+        </p>
+      )}
+      {rack.wallMount === 'cleat' && (
+        <p style={{ fontSize: 12, color: '#d9c98a', margin: '2px 0 0' }} data-testid="rack-mount-guidance">
+          The hanger is cut INTO the side panels: a 45° hook at the top of each rear edge
+          (visible in Exploded view). Screw the cleat strip to studs bevel-up, the flat
+          spacer strip near the floor level, then lower the rack on from above — its hooks
+          seat on the cleat and gravity pulls it against the wall.
+        </p>
+      )}
 
       <h3 className="panel-subhead">Accessories</h3>
       {(rack.accessories ?? []).map((acc, i) => {
