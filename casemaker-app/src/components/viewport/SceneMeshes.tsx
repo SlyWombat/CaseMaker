@@ -62,6 +62,15 @@ function colorForNode(id: string): string {
   if (id === 'hinge-pin') return '#c0a060';
   if (id.startsWith('latch-arm-')) return '#b09080';
   if (id.startsWith('bumper-')) return '#7a7a82';
+  // Rack assembly: structural frame blue-grey, accessories differentiated
+  // so the stacked faceplates read as separate parts.
+  if (id.startsWith('rack-side-')) return '#88a4cc';
+  if (id === 'rack-top' || id === 'rack-bottom') return '#a8b8d0';
+  if (id.startsWith('rack-keystone-')) return '#c0a060';
+  if (id.startsWith('rack-shelf-')) return '#8fb0a0';
+  if (id.startsWith('rack-cable-tray-')) return '#b09080';
+  if (id.startsWith('rack-blank-')) return '#9aa8c0';
+  if (id.startsWith('rack-wall-')) return '#d4af37';
   return '#9a9aa8';
 }
 
@@ -100,6 +109,14 @@ export function SceneMeshes() {
   function explodedOffsetFor(id: string): [number, number, number] {
     if (id === 'lid' || id === 'gasket') return [0, 0, lift];
     if (id === 'hinge-pin') return [0, 0, lift];
+    // Rack assembly: sides pull apart laterally, top/bottom split
+    // vertically, accessories slide forward out of the frame.
+    if (id === 'rack-side-left') return [-lateral, 0, 0];
+    if (id === 'rack-side-right') return [+lateral, 0, 0];
+    if (id === 'rack-top') return [0, 0, lift];
+    if (id === 'rack-bottom') return [0, 0, -lift / 2];
+    if (id === 'rack-wall-cleat' || id === 'rack-wall-spacer') return [0, lateral, 0];
+    if (id.startsWith('rack-')) return [0, -lateral - 15, 0];
     if (id.startsWith('latch-arm-') || id.startsWith('latch-pin-')) {
       const latchId = id.replace(/^latch-(arm|pin)-/, '');
       const wall = latchWallById.get(latchId);

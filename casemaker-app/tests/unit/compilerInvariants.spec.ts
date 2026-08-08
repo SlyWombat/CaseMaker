@@ -94,10 +94,18 @@ function isStand(build: () => Project): boolean {
   return build().case.stand?.enabled === true;
 }
 
+/** The rack archetype is a multi-part assembly with neither shell nor lid;
+ * its geometry contract lives in rack.spec.ts. Invariant 9 below keeps the
+ * node-set shape pinned here alongside the other archetypes. */
+function isRack(build: () => Project): boolean {
+  return build().case.rack?.enabled === true;
+}
+
 describe('compiler invariants (#58) — matrix of boards × templates', () => {
   const allCases = projectsToTest();
-  const cases = allCases.filter((c) => !isStand(c.build));
+  const cases = allCases.filter((c) => !isStand(c.build) && !isRack(c.build));
   const standCases = allCases.filter((c) => isStand(c.build));
+  const rackCases = allCases.filter((c) => isRack(c.build));
 
   describe('Invariant 1: BuildPlan emits at LEAST shell + lid; optionally extra named parts', () => {
     // Some templates legitimately add extra top-level nodes:
@@ -222,6 +230,26 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
           const bb = aabbOfOp(n.op)!;
           expect(bb.min[2]).toBeGreaterThanOrEqual(-0.01);
           expect(bb.min[2]).toBeLessThanOrEqual(0.01);
+        }
+      });
+    }
+  });
+
+  // Rack archetype: an assembly — two chiral side panels, top + bottom
+  // plates, plus per-accessory parts. Every node well-formed and nothing
+  // below the floor (z = 0 is the underside of the stacking feet).
+  describe('Invariant 9: rack archetype emits the structural set, all above z = 0', () => {
+    for (const c of rackCases) {
+      it(`${c.label}: rack parts well-formed and grounded`, () => {
+        const plan = compileProject(c.build());
+        const ids = plan.nodes.map((n) => n.id);
+        for (const required of ['rack-side-left', 'rack-side-right', 'rack-bottom', 'rack-top']) {
+          expect(ids).toContain(required);
+        }
+        for (const n of plan.nodes) {
+          assertWellFormed(n.op, `${c.label} ${n.id}`);
+          const bb = aabbOfOp(n.op)!;
+          expect(bb.min[2], `${c.label} ${n.id} sits above the floor`).toBeGreaterThanOrEqual(-0.01);
         }
       });
     }

@@ -58,6 +58,36 @@ export const caseParamsSchema = z.object({
   // the UI layer when enabled.
   // Desk-stand archetype: frame + tilted foot, no lid. Optional so legacy
   // projects load unchanged; absent/disabled = normal shell+lid box.
+  // Mini-rack archetype (types/rack.ts): parametric rack ASSEMBLY — side
+  // panels + top/bottom + accessories — replacing the shell+lid pipeline.
+  // Optional so legacy projects load with no migration (v7 hinge precedent).
+  rack: z
+    .object({
+      enabled: z.boolean(),
+      width: z.number().positive(),
+      depth: z.number().positive(),
+      slots: z.number().int().min(2).max(40),
+      printer: z
+        .object({
+          preset: z.string().optional(),
+          x: z.number().positive(),
+          y: z.number().positive(),
+          z: z.number().positive(),
+        })
+        .optional(),
+      wallMount: z.enum(['none', 'ears', 'cleat']).optional(),
+      accessories: z
+        .array(
+          z.object({
+            id: z.string(),
+            type: z.enum(['blank', 'shelf', 'keystone', 'cable-tray']),
+            slots: z.number().int().min(1).max(12).optional(),
+            shelfDepth: z.number().positive().optional(),
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
   stand: z
     .object({
       enabled: z.boolean(),

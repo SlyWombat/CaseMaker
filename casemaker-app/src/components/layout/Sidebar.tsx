@@ -4,6 +4,7 @@ import { useViewportStore, type SidebarSectionId } from '@/store/viewportStore';
 const SECTIONS: { id: SidebarSectionId; label: string; icon: string; hint: string }[] = [
   { id: 'board',    label: 'Board',           icon: '🟦', hint: 'Host PCB profile, mounting holes, components' },
   { id: 'case',     label: 'Case parameters', icon: '📦', hint: 'Walls, lid, joint, seal, latches, hinge, rugged exterior' },
+  { id: 'rack',     label: 'Mini rack',       icon: '🗄️', hint: 'Parametric 10"-class network rack — resize to your printer, shelves, keystone plates, wall mount' },
   { id: 'ports',    label: 'Port cutouts',    icon: '🔌', hint: 'USB, HDMI, audio, custom port openings' },
   { id: 'hats',     label: 'HATs',            icon: '🎩', hint: 'HAT placements stacked above the host board' },
   { id: 'features', label: 'Features',        icon: '⚙️',  hint: 'Snap catches, mounting features, fans, antennas, displays, text labels' },

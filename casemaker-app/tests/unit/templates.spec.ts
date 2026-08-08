@@ -21,6 +21,7 @@ describe('Marketing gap #15 — project templates', () => {
       'guition-desk-stand',
       'guition-wall-mount',
       'u7-pro-outdoor-desk-stand',
+      'mini-rack-10in',
       'snap-fit-test',
       'protective-case',
       'large-box-200',

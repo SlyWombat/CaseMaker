@@ -21,6 +21,7 @@ const TEMPLATE_IDS = [
   'arduino-dmx',
   'giga-dmx-controller',
   'esp32-dev-tray',
+  'mini-rack-10in',
   'snap-fit-test',
 ] as const;
 
@@ -46,6 +47,13 @@ const TEMPLATE_IDS = [
  * When a template gets fixed, remove its entry from KNOWN_BROKEN — the
  * hard assertion will engage automatically and prevent regression.
  */
+
+/** Templates that compile to a multi-part ASSEMBLY instead of shell+lid.
+ *  Values are the structural node ids the smoke test pins in place of the
+ *  shell/lid spot-check. */
+const ASSEMBLY_TEMPLATE_NODES: Record<string, string[]> = {
+  'mini-rack-10in': ['rack-side-left', 'rack-side-right', 'rack-bottom', 'rack-top'],
+};
 
 const KNOWN_BROKEN: Record<string, number> = {
   // Empty — every template currently passes the harness.
@@ -145,9 +153,20 @@ for (const id of TEMPLATE_IDS) {
       );
     }
 
-    // Spot-check shell + lid stats specifically (per issue #88 acceptance).
-    check(result.shellStats !== null, `${id}: no 'shell' MeshStats`);
-    check(result.lidStats !== null, `${id}: no 'lid' MeshStats`);
+    // Spot-check the archetype's structural nodes (per issue #88 acceptance).
+    // Assembly archetypes (rack) have no shell/lid — pin their frame parts
+    // instead so a compile that silently drops a panel still fails here.
+    if (ASSEMBLY_TEMPLATE_NODES[id]) {
+      for (const nodeId of ASSEMBLY_TEMPLATE_NODES[id]) {
+        check(
+          result.graph.some((n) => n.id === nodeId),
+          `${id}: missing '${nodeId}' node`,
+        );
+      }
+    } else {
+      check(result.shellStats !== null, `${id}: no 'shell' MeshStats`);
+      check(result.lidStats !== null, `${id}: no 'lid' MeshStats`);
+    }
 
     const knownBrokenIssue = KNOWN_BROKEN[id];
     if (failures.length > 0 && knownBrokenIssue) {

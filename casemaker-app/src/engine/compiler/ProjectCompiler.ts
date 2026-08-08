@@ -24,6 +24,7 @@ import { buildSecondaryMountOps } from './secondaryMounts';
 import { buildHingeOps } from './hinges';
 import { buildCustomCutouts } from './customCutouts';
 import { buildStandNodes } from './stand';
+import { buildRackNodes } from './rack';
 import { validatePlacements } from './placementValidator';
 import { getBuiltinHat } from '@/library/hats';
 import { getBuiltinDisplay } from '@/library/displays';
@@ -54,6 +55,17 @@ export function compileProject(project: Project): BuildPlan {
   } = project;
   const resolveHat = makeHatResolver(project);
   const resolveDisplay = makeDisplayResolver(project);
+
+  // Mini-rack archetype: an assembly of side panels + plates + accessories,
+  // no PCB and no shell at all. Unlike the stand it needs no board data, so
+  // this branch never falls through.
+  if (caseParams.rack?.enabled) {
+    return {
+      nodes: buildRackNodes(caseParams.rack),
+      placementReport: validatePlacements(project),
+      smartCutoutDecisions: [],
+    };
+  }
 
   // Desk-stand archetype: a frame + tilted foot, no cavity and no lid. Every
   // feature compiler below assumes a box shell around a PCB, so the stand

@@ -135,6 +135,36 @@ export function partForId(id: string, index = 0): ProjectPart {
       printOrientation: FLAT_ORIENTATION,
     };
   }
+  if (id.startsWith('rack-')) {
+    const RACK_NAMES: Record<string, string> = {
+      'rack-side-left': 'Rack side panel — LEFT',
+      'rack-side-right': 'Rack side panel — RIGHT',
+      'rack-top': 'Rack top plate',
+      'rack-bottom': 'Rack bottom plate',
+      'rack-wall-cleat': 'Wall cleat (screws to the wall)',
+      'rack-wall-spacer': 'Wall spacer strip (bottom)',
+    };
+    let displayName = RACK_NAMES[id];
+    if (!displayName) {
+      // Accessory ids: rack-<type>-<index>.
+      const m = /^rack-(blank|shelf|keystone|cable-tray)-(\d+)$/.exec(id);
+      const label: Record<string, string> = {
+        blank: 'Blank faceplate',
+        shelf: 'Shelf',
+        keystone: 'Keystone patch plate',
+        'cable-tray': 'Cable tray',
+      };
+      displayName = m ? `${label[m[1]!]} ${Number(m[2]) + 1}` : id;
+    }
+    const structural = id.startsWith('rack-side-') || id === 'rack-top' || id === 'rack-bottom';
+    return {
+      id,
+      displayName,
+      material: 'rigid',
+      category: structural ? 'case' : 'accessory',
+      printOrientation: FLAT_ORIENTATION,
+    };
+  }
   if (id.startsWith('bumper-')) {
     const suffix = id.slice('bumper-'.length);
     return {
@@ -172,6 +202,18 @@ export function printOrientationHint(part: ProjectPart): string {
   if (part.id === 'hinge-pin')         return 'Stand on end or lay flat — straight cylinder';
   if (part.id === 'gasket')            return 'Lay flat (TPU 95A — see the *-gasket-print-instructions.txt sidecar)';
   if (part.id.startsWith('bumper-'))   return 'Lay flat — TPU 95A flexible bumper';
+  if (part.id.startsWith('rack-side-'))
+    return 'Lay FLAT, inner face down (the face with the snap-tab pockets). Wall-mount ears/gussets then rise as self-supporting walls. Strongest layer direction for the screw columns';
+  if (part.id === 'rack-top' || part.id === 'rack-bottom')
+    return 'Lay flat — vent-hole face on the bed, snap tabs in-plane';
+  if (part.id.startsWith('rack-blank-') || part.id.startsWith('rack-keystone-'))
+    return 'Front face DOWN on the bed — the end ribs and keystone bosses rise behind it, no supports needed';
+  if (part.id.startsWith('rack-shelf-') || part.id.startsWith('rack-cable-tray-'))
+    return 'Deck DOWN on the bed — end ribs and comb fingers rise as walls, no supports needed';
+  if (part.id === 'rack-wall-cleat')
+    return 'Wall-side face DOWN — the 45° bevel prints self-supporting. Screw it to studs with the bevel sloping up toward the wall';
+  if (part.id === 'rack-wall-spacer')
+    return 'Lay flat, either face down — plain strip, mounts low on the wall so the rack hangs plumb';
   return 'Default orientation';
 }
 

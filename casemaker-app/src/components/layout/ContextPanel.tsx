@@ -2,6 +2,7 @@ import { useEffect, useState, type JSX } from 'react';
 import { useViewportStore, type SidebarSectionId } from '@/store/viewportStore';
 import { SelectionPanel } from '@/components/viewport/SelectionPanel';
 import { CasePanel } from '@/components/panels/CasePanel';
+import { RackPanel } from '@/components/panels/RackPanel';
 import { ExportPanel } from '@/components/panels/ExportPanel';
 import { PortsPanel } from '@/components/panels/PortsPanel';
 import { BoardEditorPanel } from '@/components/panels/BoardEditorPanel';
@@ -12,6 +13,7 @@ import { FeaturesPanel } from '@/components/panels/FeaturesPanel';
 const SECTION_TITLES: Record<SidebarSectionId, string> = {
   board: 'Board',
   case: 'Case parameters',
+  rack: 'Mini rack',
   ports: 'Port cutouts',
   hats: 'HATs',
   features: 'Features',
@@ -23,6 +25,7 @@ function renderSection(id: SidebarSectionId): JSX.Element {
   switch (id) {
     case 'board':    return <BoardEditorPanel />;
     case 'case':     return <CasePanel />;
+    case 'rack':     return <RackPanel />;
     case 'ports':    return <PortsPanel />;
     case 'hats':     return <HatsPanel />;
     case 'features': return <FeaturesPanel />;

@@ -1,0 +1,264 @@
+import { useProjectStore } from '@/store/projectStore';
+import type { RackParams, RackAccessory, RackAccessoryType } from '@/types';
+import { LabelledField } from '@/components/ui/LabelledField';
+import { PRINTER_PRESETS } from '@/engine/compiler/rackFit';
+import { computeRackDims, accessorySlots, SLOT_PITCH } from '@/engine/compiler/rack';
+import { newId } from '@/utils/id';
+
+/**
+ * Rack archetype editor (see types/rack.ts). IMPORTANT: patchCase validates
+ * with a TOP-LEVEL partial only, so every update sends the COMPLETE `rack`
+ * object — never a nested fragment.
+ */
+
+const DEFAULT_RACK: RackParams = {
+  enabled: true,
+  width: 252,
+  depth: 250,
+  slots: 16,
+  printer: { preset: 'prusa-xl', x: 360, y: 360, z: 360 },
+  wallMount: 'none',
+  accessories: [],
+};
+
+const ACCESSORY_LABELS: { value: RackAccessoryType; label: string; hint: string }[] = [
+  { value: 'blank', label: 'Blank faceplate', hint: 'Solid N-slot plate for drilling or custom cutouts.' },
+  { value: 'shelf', label: 'Vented shelf', hint: 'Open-front shelf; 86 mm short (pairs back-to-back) or 123 mm long (adds rear screws).' },
+  { value: 'keystone', label: 'Keystone patch plate', hint: 'Standard keystone jacks (never scaled); count auto-fits the rack width at 30 mm pitch.' },
+  { value: 'cable-tray', label: 'Cable tray', hint: 'Comb-finger tray for cable routing and tie-wraps; occupies 2 slots.' },
+];
+
+const WALL_MOUNT_OPTIONS: { value: NonNullable<RackParams['wallMount']>; label: string; hint: string }[] = [
+  { value: 'none', label: 'Freestanding', hint: 'Sits on its stacking feet.' },
+  {
+    value: 'ears',
+    label: 'Wall — screw ears',
+    hint: 'Gusseted rear flanges on both side panels with countersunk screw holes. Screw into studs or rated anchors.',
+  },
+  {
+    value: 'cleat',
+    label: 'Wall — french cleat',
+    hint: 'Separate 45° cleat strip screws to the wall; the rack hooks over it. Adds a bottom spacer strip. Removable without tools.',
+  },
+];
+
+export function RackPanel() {
+  const project = useProjectStore((s) => s.project);
+  const patchCase = useProjectStore((s) => s.patchCase);
+  const rack = project?.case.rack;
+
+  if (!project) return null;
+
+  if (!rack?.enabled) {
+    return (
+      <div className="panel-stack" data-testid="rack-panel-disabled">
+        <p style={{ fontSize: 13, lineHeight: 1.5, color: '#9aa4b0' }}>
+          Turn this project into a parametric 10&quot;-class mini rack: side panels, snap-in
+          top/bottom plates, and any mix of faceplates, shelves, keystone plates, and cable
+          trays on a universal 16.5&nbsp;mm screw pitch. Resizes to fit YOUR printer — screw
+          holes and keystone jacks never scale. Replaces the normal case/lid pipeline while
+          enabled.
+        </p>
+        <button
+          type="button"
+          data-testid="rack-enable"
+          onClick={() => patchCase({ rack: { ...DEFAULT_RACK } })}
+        >
+          Enable mini-rack project
+        </button>
+      </div>
+    );
+  }
+
+  const update = (partial: Partial<RackParams>): void => {
+    patchCase({ rack: { ...rack, ...partial } });
+  };
+  const dims = computeRackDims(rack);
+  const usedSlots = (rack.accessories ?? []).reduce((s, a) => s + accessorySlots(a), 0);
+  const presetId = rack.printer?.preset ?? 'custom';
+
+  const setPreset = (id: string): void => {
+    if (id === 'custom') {
+      update({ printer: { ...(rack.printer ?? { x: 220, y: 220, z: 250 }), preset: undefined } });
+      return;
+    }
+    const p = PRINTER_PRESETS.find((x) => x.id === id);
+    if (p) update({ printer: { preset: p.id, x: p.x, y: p.y, z: p.z } });
+  };
+
+  const setAccessory = (i: number, next: RackAccessory): void => {
+    const list = [...(rack.accessories ?? [])];
+    list[i] = next;
+    update({ accessories: list });
+  };
+
+  return (
+    <div className="panel-stack" data-testid="rack-panel">
+      <LabelledField label="Width" unit="mm" hint="Exterior width across the front — faceplates span it fully. Original: 252.">
+        <input
+          type="number"
+          min={120}
+          max={600}
+          step={1}
+          value={rack.width}
+          data-testid="rack-width"
+          onChange={(e) => update({ width: Number(e.target.value) })}
+        />
+      </LabelledField>
+      <LabelledField label="Depth" unit="mm" hint="Side panel front-to-back depth. Original: 250.">
+        <input
+          type="number"
+          min={80}
+          max={600}
+          step={1}
+          value={rack.depth}
+          data-testid="rack-depth"
+          onChange={(e) => update({ depth: Number(e.target.value) })}
+        />
+      </LabelledField>
+      <LabelledField
+        label="Height"
+        unit="slots"
+        hint={`Rack height in ${SLOT_PITCH} mm mounting slots — the fixed pitch every shelf/faceplate mounts on. Current total ≈ ${Math.round(dims.totalH)} mm.`}
+      >
+        <input
+          type="number"
+          min={2}
+          max={40}
+          step={1}
+          value={rack.slots}
+          data-testid="rack-slots"
+          onChange={(e) => update({ slots: Number(e.target.value) })}
+        />
+      </LabelledField>
+      <p style={{ fontSize: 12, color: '#9aa4b0', margin: '2px 0 0' }}>
+        Overall: {Math.round(dims.width)} × {Math.round(dims.depth)} × {Math.round(dims.totalH)} mm
+        — {usedSlots}/{dims.slots} slots used
+      </p>
+
+      <h3 className="panel-subhead">Printer</h3>
+      <LabelledField
+        label="Printer"
+        hint="Every part is checked against this build volume (flat or diagonal placement); blockers appear in the banner with achievable sizes."
+      >
+        <select value={presetId} data-testid="rack-printer-preset" onChange={(e) => setPreset(e.target.value)}>
+          {PRINTER_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+          <option value="custom">Custom…</option>
+        </select>
+      </LabelledField>
+      {presetId === 'custom' && rack.printer && (
+        <div style={{ display: 'flex', gap: 6 }}>
+          {(['x', 'y', 'z'] as const).map((axis) => (
+            <LabelledField key={axis} label={axis.toUpperCase()} unit="mm" inline>
+              <input
+                type="number"
+                min={80}
+                max={1000}
+                value={rack.printer![axis]}
+                data-testid={`rack-printer-${axis}`}
+                onChange={(e) =>
+                  update({ printer: { ...rack.printer!, [axis]: Number(e.target.value) } })
+                }
+              />
+            </LabelledField>
+          ))}
+        </div>
+      )}
+
+      <h3 className="panel-subhead">Mounting</h3>
+      <LabelledField label="Mounting" hint="Freestanding, or wall-mounted via screw ears / french cleat. Wall modes solidify the sides' rear band for strength.">
+        <select
+          value={rack.wallMount ?? 'none'}
+          data-testid="rack-wall-mount"
+          onChange={(e) => update({ wallMount: e.target.value as RackParams['wallMount'] })}
+        >
+          {WALL_MOUNT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value} title={o.hint}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </LabelledField>
+
+      <h3 className="panel-subhead">Accessories</h3>
+      {(rack.accessories ?? []).map((acc, i) => {
+        const n = accessorySlots(acc);
+        return (
+          <div
+            key={acc.id}
+            data-testid={`rack-accessory-${i}`}
+            style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}
+          >
+            <select
+              value={acc.type}
+              aria-label={`Accessory ${i + 1} type`}
+              onChange={(e) => setAccessory(i, { ...acc, type: e.target.value as RackAccessoryType })}
+            >
+              {ACCESSORY_LABELS.map((o) => (
+                <option key={o.value} value={o.value} title={o.hint}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            {acc.type !== 'cable-tray' && (
+              <input
+                type="number"
+                min={1}
+                max={12}
+                value={n}
+                aria-label={`Accessory ${i + 1} slots`}
+                style={{ width: 52 }}
+                onChange={(e) => setAccessory(i, { ...acc, slots: Number(e.target.value) })}
+              />
+            )}
+            {acc.type === 'shelf' && (
+              <select
+                value={String(acc.shelfDepth ?? 123)}
+                aria-label={`Accessory ${i + 1} shelf depth`}
+                onChange={(e) => setAccessory(i, { ...acc, shelfDepth: Number(e.target.value) })}
+              >
+                <option value="86">short (86 mm)</option>
+                <option value="123">long (123 mm)</option>
+              </select>
+            )}
+            <button
+              type="button"
+              aria-label={`Remove accessory ${i + 1}`}
+              onClick={() => update({ accessories: (rack.accessories ?? []).filter((_, j) => j !== i) })}
+            >
+              ✕
+            </button>
+          </div>
+        );
+      })}
+      <button
+        type="button"
+        data-testid="rack-add-accessory"
+        onClick={() =>
+          update({
+            accessories: [...(rack.accessories ?? []), { id: newId(), type: 'blank', slots: 2 }],
+          })
+        }
+      >
+        + Add accessory
+      </button>
+
+      <p style={{ fontSize: 12, color: '#9aa4b0' }}>
+        Hardware: M5 cap screws (≈20–25 mm) through the side panels into each part&apos;s end
+        ribs — one per slot per side. Attribution: remix of &quot;Mini Rack&quot; by Meuon
+        (Printables 1307276, CC-BY 4.0).
+      </p>
+      <button
+        type="button"
+        data-testid="rack-disable"
+        onClick={() => patchCase({ rack: { ...rack, enabled: false } })}
+      >
+        Disable rack (back to normal case)
+      </button>
+    </div>
+  );
+}

@@ -1,5 +1,6 @@
 import type { Mm } from './units';
 import type { SnapCatch } from './snap';
+import type { RackParams } from './rack';
 
 /**
  * Issue #92 — barrel-hinge feature for snap-fit / flat-lid cases.
@@ -309,6 +310,14 @@ export interface CaseParameters {
    * Requires a board whose `enclosure` block describes the finished module.
    */
   stand?: StandParams;
+  /**
+   * Parametric mini-rack archetype (see types/rack.ts). When enabled, the
+   * project compiles to a RACK ASSEMBLY — side panels, top/bottom plates,
+   * and accessories — instead of a shell+lid box. Like `stand`, it bypasses
+   * the whole shell/lid/boss/vent pipeline; unlike `stand` it needs no real
+   * board data at all (templates use `emptyBoard`).
+   */
+  rack?: RackParams;
 }
 
 /**

@@ -254,6 +254,34 @@ const SAMPLES: SampleSpec[] = [
       'UniFi U7 Pro Outdoor slide-on bench stand — CHANNEL DIMS UNVERIFIED, caliper the AP first',
     build: () => findTemplate('u7-pro-outdoor-desk-stand')!.build(),
   },
+  {
+    filename: 'Rack/mini-rack-10in-sample-size.stl',
+    description:
+      'Parametric 10" mini rack at the original 252×250×16-slot size (Prusa XL class) — sides, top/bottom, keystone plate, blank, short+long shelves, cable tray',
+    build: () => findTemplate('mini-rack-10in')!.build(),
+  },
+  {
+    filename: 'Rack/mini-rack-200-bedslinger.stl',
+    description:
+      'Same rack resized for 220 mm printers (200 wide × 180 deep × 10 slots, wall-mount ears) — same screws, same keystone jacks, smaller envelope',
+    build: () => {
+      const p = findTemplate('mini-rack-10in')!.build();
+      p.case.rack = {
+        ...p.case.rack!,
+        width: 200,
+        depth: 180,
+        slots: 10,
+        wallMount: 'ears',
+        printer: { preset: 'ender-3', x: 220, y: 220, z: 250 },
+        accessories: [
+          { id: 'acc-keystone', type: 'keystone' },
+          { id: 'acc-shelf', type: 'shelf', slots: 3, shelfDepth: 86 },
+          { id: 'acc-blank', type: 'blank', slots: 2 },
+        ],
+      };
+      return p;
+    },
+  },
 ];
 
 let totalTris = 0;

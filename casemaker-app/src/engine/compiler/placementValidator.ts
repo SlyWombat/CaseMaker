@@ -13,6 +13,7 @@ import { computeHatBaseZ } from './hats';
 import { transformPlacementPorts } from './hatOrientation';
 import { getBuiltinHat } from '@/library/hats';
 import { getBuiltinDisplay } from '@/library/displays';
+import { validateRackFit } from './rackFit';
 
 /**
  * Issue #37 — cross-cutting validation that catches overlap, off-PCB, and
@@ -34,7 +35,11 @@ export type PlacementIssueKind =
   | 'misaligned'
   | 'unsupported-hat'
   | 'hat-stack-collision'
-  | 'incompatible-hat';
+  | 'incompatible-hat'
+  // Rack archetype: a part exceeds the configured printer's build volume.
+  | 'printer-fit'
+  // Rack archetype: configuration problems (slot overflow, mount guidance).
+  | 'rack-config';
 
 export interface PlacementIssue {
   severity: PlacementSeverity;
@@ -381,6 +386,18 @@ function buildFaceRects(
 }
 
 export function validatePlacements(project: Project): PlacementReport {
+  // Rack archetype: no shell, no walls, no ports — the box-oriented checks
+  // below are all vacuous. Its own validation covers printer fit, slot
+  // budget, and wall-mount guidance.
+  if (project.case.rack?.enabled) {
+    const issues = validateRackFit(project.case.rack);
+    return {
+      issues,
+      errorCount: issues.filter((i) => i.severity === 'error').length,
+      warningCount: issues.filter((i) => i.severity === 'warning').length,
+    };
+  }
+
   const resolveHat = (id: string): HatProfile | undefined => {
     const builtin = getBuiltinHat(id);
     if (builtin) return builtin;

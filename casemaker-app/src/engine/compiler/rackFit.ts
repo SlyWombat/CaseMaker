@@ -1,0 +1,195 @@
+import type { RackParams } from '@/types';
+import type { PlacementIssue } from './placementValidator';
+import { computeRackDims, accessorySlots, SLOT_PITCH, SIDE_T } from './rack';
+
+/**
+ * Printer build-volume fit checking for the rack archetype. The original
+ * sample ("Mini Rack", Prusa XL only) simply didn't fit smaller printers;
+ * our parametric version instead tells the user exactly WHICH part is the
+ * blocker and what rack dimensions their printer CAN produce.
+ *
+ * Footprints are computed in each part's PRINT orientation (flat on the
+ * bed), not its assembly orientation, and a part counts as fitting if it
+ * fits straight OR rotated diagonally across the bed.
+ */
+
+export interface PrinterPreset {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  z: number;
+}
+
+export const PRINTER_PRESETS: PrinterPreset[] = [
+  { id: 'a1-mini', name: 'Bambu A1 mini (180³)', x: 180, y: 180, z: 180 },
+  { id: 'prusa-mini', name: 'Prusa MINI+ (180³)', x: 180, y: 180, z: 180 },
+  { id: 'ender-3', name: 'Ender-3 class (220×220×250)', x: 220, y: 220, z: 250 },
+  { id: 'prusa-mk4', name: 'Prusa MK4/MK3 (250×210×220)', x: 250, y: 210, z: 220 },
+  { id: 'bambu-256', name: 'Bambu X1/P1/A1 (256³)', x: 256, y: 256, z: 256 },
+  { id: 'prusa-xl', name: 'Prusa XL (360³)', x: 360, y: 360, z: 360 },
+];
+
+/**
+ * Does a p×q rectangle fit on an a×b bed, allowing 90° and diagonal
+ * rotation? Straight placement first; otherwise the classic rotated-
+ * rectangle bound: for p > a (long side over bed width), the rectangle
+ * fits at some angle iff
+ *   b ≥ (2·p·q·a + (p² − q²)·√(p² + q² − a²)) / (p² + q²).
+ */
+export function rectFitsBed(p0: number, q0: number, a0: number, b0: number): boolean {
+  const p = Math.max(p0, q0);
+  const q = Math.min(p0, q0);
+  const a = Math.max(a0, b0);
+  const b = Math.min(a0, b0);
+  if (p <= a && q <= b) return true;
+  if (q > b) return false; // even the short part side exceeds the short bed side
+  // Here p > a (straight placement failed with q ≤ b), which guarantees the
+  // discriminant below is positive.
+  const d2 = p * p + q * q - a * a;
+  const need = (2 * p * q * a + (p * p - q * q) * Math.sqrt(d2)) / (p * p + q * q);
+  return need <= b + 1e-9;
+}
+
+interface PartFootprint {
+  id: string;
+  label: string;
+  /** Bed footprint in the part's print orientation. */
+  fx: number;
+  fy: number;
+  /** Print height. */
+  fz: number;
+}
+
+/** Per-part print footprints for the current rack configuration. */
+export function rackPartFootprints(rack: RackParams): PartFootprint[] {
+  const dims = computeRackDims(rack);
+  const wallMount = rack.wallMount ?? 'none';
+  const sideH = wallMount === 'ears' ? SIDE_T + 28 : SIDE_T;
+  const out: PartFootprint[] = [
+    {
+      id: 'rack-side-left',
+      label: 'side panel',
+      fx: dims.depth,
+      fy: dims.totalH,
+      fz: sideH,
+    },
+    {
+      id: 'rack-top',
+      label: 'top/bottom plate',
+      fx: dims.plateW + 22,
+      fy: dims.depth,
+      fz: 5,
+    },
+  ];
+  (rack.accessories ?? []).forEach((acc, i) => {
+    const n = accessorySlots(acc);
+    if (acc.type === 'shelf') {
+      out.push({
+        id: `rack-shelf-${i}`,
+        label: `shelf (${n}-slot)`,
+        fx: dims.width,
+        fy: acc.shelfDepth ?? 123,
+        fz: n * SLOT_PITCH,
+      });
+    } else if (acc.type === 'cable-tray') {
+      out.push({ id: `rack-cable-tray-${i}`, label: 'cable tray', fx: dims.width, fy: 104, fz: 33 });
+    } else {
+      out.push({
+        id: `rack-${acc.type}-${i}`,
+        label: acc.type === 'keystone' ? 'keystone plate' : `blank faceplate (${n}-slot)`,
+        fx: dims.width,
+        fy: n * SLOT_PITCH,
+        fz: acc.type === 'keystone' ? 10 : 16,
+      });
+    }
+  });
+  if (wallMount === 'cleat') {
+    out.push({ id: 'rack-wall-cleat', label: 'wall cleat', fx: dims.width, fy: 30, fz: 12 });
+  }
+  return out;
+}
+
+/** Largest rack width whose widest parts (faceplates/plates) still fit. */
+function maxFittingWidth(bedX: number, bedY: number): number {
+  // Faceplates are width × ~50 mm; binary-search the diagonal fit.
+  let lo = 120;
+  let hi = 600;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (rectFitsBed(mid, 50, bedX, bedY)) lo = mid;
+    else hi = mid;
+  }
+  return Math.floor(lo);
+}
+
+/** Largest slot count whose side panel still fits the bed. */
+function maxFittingSlots(depth: number, bedX: number, bedY: number): number {
+  for (let s = 40; s >= 2; s--) {
+    const h = 5 + s * SLOT_PITCH + 11;
+    if (rectFitsBed(depth, h, bedX, bedY)) return s;
+  }
+  return 0;
+}
+
+/**
+ * Fit-check every part against the configured printer. Returns banner-ready
+ * placement issues: one error per non-fitting part plus a summary suggestion,
+ * and the wall-mount load guidance when relevant.
+ */
+export function validateRackFit(rack: RackParams): PlacementIssue[] {
+  const issues: PlacementIssue[] = [];
+  const dims = computeRackDims(rack);
+
+  const totalSlots = (rack.accessories ?? []).reduce((s, a) => s + accessorySlots(a), 0);
+  if (totalSlots > dims.slots) {
+    issues.push({
+      severity: 'warning',
+      kind: 'rack-config',
+      involves: ['rack'],
+      message: `Accessories occupy ${totalSlots} slots but the rack has ${dims.slots} — remove accessories or increase the rack height.`,
+    });
+  }
+
+  if (rack.wallMount && rack.wallMount !== 'none') {
+    issues.push({
+      severity: 'warning',
+      kind: 'rack-config',
+      involves: ['rack'],
+      message:
+        rack.wallMount === 'ears'
+          ? 'Wall mount (ears): drive the ear screws into studs or use rated drywall anchors — a loaded rack can exceed 10 kg. Print side panels inner-face-down so the ears and gussets build up as solid walls.'
+          : 'Wall mount (cleat): screw the cleat AND the bottom spacer strip to studs or rated anchors with the bevel facing up-and-out. The rack hooks on from above.',
+    });
+  }
+
+  const printer = rack.printer;
+  if (!printer) return issues;
+
+  const blocked: string[] = [];
+  for (const part of rackPartFootprints(rack)) {
+    const fitsBed = rectFitsBed(part.fx, part.fy, printer.x, printer.y);
+    const fitsZ = part.fz <= printer.z;
+    if (fitsBed && fitsZ) continue;
+    blocked.push(part.label);
+    issues.push({
+      severity: 'error',
+      kind: 'printer-fit',
+      involves: [part.id],
+      message: `${part.label} needs ${Math.ceil(part.fx)}×${Math.ceil(part.fy)}×${Math.ceil(part.fz)} mm but the printer bed is ${printer.x}×${printer.y}×${printer.z} mm${
+        fitsBed ? '' : ' (even placed diagonally)'
+      }.`,
+    });
+  }
+  if (blocked.length > 0) {
+    const maxW = maxFittingWidth(printer.x, printer.y);
+    const maxS = maxFittingSlots(Math.min(dims.depth, maxW), printer.x, printer.y);
+    issues.push({
+      severity: 'error',
+      kind: 'printer-fit',
+      involves: ['rack'],
+      message: `This printer could fit a rack up to ≈${maxW} mm wide/deep with up to ${maxS} slots — reduce width/depth/slots, or pick a larger printer preset.`,
+    });
+  }
+  return issues;
+}

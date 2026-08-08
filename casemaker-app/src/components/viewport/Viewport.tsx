@@ -7,6 +7,7 @@ import { SceneMeshes } from './SceneMeshes';
 import { ViewportToolbar } from './ViewportToolbar';
 import { ensureZUp } from '@/engine/coords';
 import { useViewportStore, type ViewportCameraMode } from '@/store/viewportStore';
+import { useJobStore } from '@/store/jobStore';
 
 ensureZUp();
 
@@ -52,6 +53,56 @@ function CameraModeController() {
   return null;
 }
 
+/**
+ * Auto-frame the camera when the scene's overall size changes substantially
+ * (loading a template, switching archetype, a big resize). The default
+ * camera comfortably frames a ~150 mm board case; a 280 mm rack or the
+ * 200 mm box fills the screen edge-to-edge. Deliberately does NOT re-frame
+ * on small size changes so it never fights the user's own orbiting.
+ */
+function AutoFrame() {
+  const nodes = useJobStore((s) => s.nodes);
+  const { camera, controls } = useThree() as {
+    camera: THREE.PerspectiveCamera;
+    controls: { target: THREE.Vector3; update?: () => void } | null;
+  };
+  const lastDiag = useRef(0);
+  useEffect(() => {
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+    for (const n of nodes.values()) {
+      for (let a = 0; a < 3; a++) {
+        if (n.stats.bbox.min[a]! < min[a]!) min[a] = n.stats.bbox.min[a]!;
+        if (n.stats.bbox.max[a]! > max[a]!) max[a] = n.stats.bbox.max[a]!;
+      }
+    }
+    if (!Number.isFinite(min[0]!)) return;
+    const diag = Math.hypot(max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!);
+    if (diag <= 0) return;
+    // Re-frame only on a substantial size change (>35% either way).
+    if (lastDiag.current > 0 && diag < lastDiag.current * 1.35 && diag > lastDiag.current / 1.35) {
+      return;
+    }
+    lastDiag.current = diag;
+    const center = new THREE.Vector3(
+      (min[0]! + max[0]!) / 2,
+      (min[1]! + max[1]!) / 2,
+      (min[2]! + max[2]!) / 2,
+    );
+    const fov = (camera.fov * Math.PI) / 180;
+    const dist = (diag / 2) / Math.tan(fov / 2) * 1.15;
+    // Keep the canonical perspective direction; just move out far enough.
+    const dir = new THREE.Vector3(0.5, -1, 0.55).normalize();
+    camera.position.copy(center.clone().add(dir.multiplyScalar(dist)));
+    if (controls && controls.target) {
+      controls.target.copy(center);
+      controls.update?.();
+    }
+    camera.lookAt(center);
+  }, [nodes, camera, controls]);
+  return null;
+}
+
 export function Viewport() {
   return (
     <div className="viewport-wrapper">
@@ -82,6 +133,7 @@ export function Viewport() {
           makeDefault
         />
         <CameraModeController />
+        <AutoFrame />
         <GridFloor />
         <SceneMeshes />
       </Canvas>

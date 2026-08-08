@@ -40,6 +40,7 @@ export type ViewportSelection =
 export type SidebarSectionId =
   | 'board'
   | 'case'
+  | 'rack'
   | 'ports'
   | 'hats'
   | 'features'

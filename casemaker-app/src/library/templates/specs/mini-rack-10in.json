@@ -1,0 +1,38 @@
+{
+  "id": "mini-rack-10in",
+  "order": 140,
+  "emptyBoard": { "id": "mini-rack-empty", "name": "Mini rack (no board)", "x": 100, "y": 100 },
+  "name": "Mini rack — 10\" network rack",
+  "description": "Parametric snap-together 10\" mini rack for small network gear (emulates 'Mini Rack' by Meuon, Printables 1307276, CC-BY 4.0). Defaults match the original: 252 mm wide, 250 mm deep, 16 slots (~280 mm tall) on the universal 16.5 mm screw pitch — M5 cap screws clamp shelves/faceplates through the side panels and hold everything together. UNLIKE the original (Prusa XL only), every dimension here regenerates parametrically: shrink width/depth/slots to fit YOUR printer, and the fit checker names any part that still won't fit, even placed diagonally. Includes keystone patch plate, blank faceplates, short + long vented shelves, and a cable tray; optional wall mounting via gusseted screw ears or a french cleat. Screw holes, keystone jacks, and snap tabs never scale.",
+  "estPrintMinutes": 2400,
+  "projectName": "Mini rack 10\"",
+  "casePatch": {
+    "rack": {
+      "enabled": true,
+      "width": 252,
+      "depth": 250,
+      "slots": 16,
+      "printer": { "preset": "prusa-xl", "x": 360, "y": 360, "z": 360 },
+      "wallMount": "none",
+      "accessories": [
+        { "id": "acc-keystone", "type": "keystone", "slots": 2 },
+        { "id": "acc-blank-2", "type": "blank", "slots": 2 },
+        { "id": "acc-shelf-short", "type": "shelf", "slots": 3, "shelfDepth": 86 },
+        { "id": "acc-shelf-long", "type": "shelf", "slots": 3, "shelfDepth": 123 },
+        { "id": "acc-tray", "type": "cable-tray" }
+      ]
+    },
+    "bosses": {
+      "enabled": false,
+      "insertType": "self-tap",
+      "outerDiameter": 5,
+      "holeDiameter": 2.5
+    },
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  },
+  "ports": "none"
+}
