@@ -91,4 +91,9 @@ export interface RackAccessory {
    * second screw column). Clamped to the rack's usable depth.
    */
   shelfDepth?: Mm;
+  /** Shelf only — add a 4 mm faceplate closing the shelf's front opening. */
+  frontPlate?: boolean;
+  /** Shelf only — deck vent slots + rib side vents. Default true; false
+   *  gives a solid deck and solid rib walls (dust/EMI/looks). */
+  vented?: boolean;
 }

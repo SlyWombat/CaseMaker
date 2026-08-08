@@ -383,6 +383,31 @@ describe('rack archetype — mini-rack template', () => {
     for (const n of nodes.slice(0, 2)) expectClean(n.id, n.op);
   });
 
+  it('shelf options: front plate closes the opening; vented=false solidifies deck and ribs', () => {
+    const rack: RackParams = {
+      ...SAMPLE,
+      accessories: [{ id: 'x', type: 'shelf', slots: 3, shelfDepth: 86, frontPlate: true, vented: false }],
+    };
+    const shelf = buildRackNodes(rack).find((n) => n.id === 'rack-shelf-0')!.op;
+    const probe = (x: number, y: number, z: number): number => {
+      const m = exec({
+        kind: 'intersection',
+        children: [shelf, { kind: 'translate', offset: [x - 1, y - 1, z - 1], child: { kind: 'cube', size: [2, 2, 2] } }],
+      });
+      const v = m.volume();
+      m.delete();
+      return v;
+    };
+    const z0 = 10.75; // slot 0 with the 12 mm recess applied to y only
+    // Front plate present mid-opening (global y = recess + plate middle)…
+    expect(probe(126, 12 + 2, z0 + 25)).toBeGreaterThan(0);
+    // …deck solid where a vent slot would be, rib wall solid where a side
+    // vent hole would be.
+    expect(probe(126, 12 + 40, z0 + 1.5)).toBeGreaterThan(0);
+    expect(probe(15.3 + 2.5, 12 + 36, z0 + 26)).toBeGreaterThan(0);
+    expectClean('rack-shelf-frontplate-solid', shelf);
+  });
+
   it('hardware BOM lists the structural M5 screws (the shelf-to-side connection)', () => {
     const tpl = findTemplate('mini-rack-10in');
     const project = tpl!.build();

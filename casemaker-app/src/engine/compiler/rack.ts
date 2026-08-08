@@ -559,26 +559,38 @@ function buildKeystone(dims: RackDims, nSlots: number): { op: BuildOp; jacks: nu
 }
 
 /** Open-front vented shelf: end ribs the screws bite into + a low deck. */
-function buildShelf(dims: RackDims, nSlots: number, shelfDepth: number): BuildOp {
-  const { width, depth } = dims;
+function buildShelf(
+  dims: RackDims,
+  nSlots: number,
+  shelfDepth: number,
+  opts: { frontPlate?: boolean; vented?: boolean } = {},
+): BuildOp {
+  const { width, depth, plateW } = dims;
+  const vented = opts.vented !== false;
   const h = nSlots * SLOT_PITCH - 0.5;
   const d = Math.min(Math.max(60, shelfDepth), depth - FRONT_BAND / 2);
   const ribX: number[] = [SIDE_T + SIDE_CLEAR, width - SIDE_T - SIDE_CLEAR - RIB_W];
   const solid: BuildOp[] = [];
   const cuts: BuildOp[] = [];
   for (const rx of ribX) solid.push(translate([rx, 0, 0], cube([RIB_W, d, h])));
+  // Optional faceplate closing the shelf's front opening.
+  if (opts.frontPlate) {
+    solid.push(translate([SIDE_T + SIDE_CLEAR, 0, 0], cube([plateW, FACE_T, h])));
+  }
   // Deck at the bottom so the device opening is maximal.
   const deckX0 = SIDE_T + SIDE_CLEAR + 1;
   const deckW = width - 2 * deckX0;
   solid.push(translate([deckX0, 0, 0], cube([deckW, d, 3])));
   // Vent slots along the deck.
-  const rim = 12;
-  const slotW = 8;
-  const gap = 8;
-  const n = Math.floor((deckW - 2 * rim) / (slotW + gap));
-  for (let i = 0; i < n; i++) {
-    const sx = deckX0 + rim + (deckW - 2 * rim - n * (slotW + gap) + gap) / 2 + i * (slotW + gap);
-    cuts.push(translate([sx, rim, -OVER], roundedRectPrism(slotW, Math.max(10, d - 2 * rim), 3 + 2 * OVER, slotW / 2)));
+  if (vented) {
+    const rim = 12;
+    const slotW = 8;
+    const gap = 8;
+    const n = Math.floor((deckW - 2 * rim) / (slotW + gap));
+    for (let i = 0; i < n; i++) {
+      const sx = deckX0 + rim + (deckW - 2 * rim - n * (slotW + gap) + gap) / 2 + i * (slotW + gap);
+      cuts.push(translate([sx, rim, -OVER], roundedRectPrism(slotW, Math.max(10, d - 2 * rim), 3 + 2 * OVER, slotW / 2)));
+    }
   }
   // Screw holes: front column always; rear column when the shelf is long
   // enough to reach it (matches the sides' rear rib).
@@ -594,14 +606,16 @@ function buildShelf(dims: RackDims, nSlots: number, shelfDepth: number): BuildOp
   cuts.push(...ribChannelCuts(width, ribX, d, h, nSlots, d >= LONG_SHELF));
   // Side vents: perforate the rib walls laterally so a side fan blows
   // straight through the shelf (cross-flow), skipping the screw bosses.
-  const bossYs = d >= LONG_SHELF ? [FRONT_HOLE_Y, ACC_REAR_HOLE_Y] : [FRONT_HOLE_Y];
-  const bossZs = Array.from({ length: nSlots }, (_, k) => (k + 0.5) * SLOT_PITCH - 0.25);
-  for (const rx of ribX) {
-    for (let vy = 22; vy <= d - 10; vy += 14) {
-      for (let vz = 12; vz <= h - 8; vz += 14) {
-        const nearBoss = bossYs.some((by) => Math.abs(vy - by) < 11) && bossZs.some((bz) => Math.abs(vz - bz) < 11);
-        if (nearBoss) continue;
-        cuts.push(translate([rx - OVER, vy, vz], axisCylinder('+x', RIB_W + 2 * OVER, 4, 20)));
+  if (vented) {
+    const bossYs = d >= LONG_SHELF ? [FRONT_HOLE_Y, ACC_REAR_HOLE_Y] : [FRONT_HOLE_Y];
+    const bossZs = Array.from({ length: nSlots }, (_, k) => (k + 0.5) * SLOT_PITCH - 0.25);
+    for (const rx of ribX) {
+      for (let vy = 22; vy <= d - 10; vy += 14) {
+        for (let vz = 12; vz <= h - 8; vz += 14) {
+          const nearBoss = bossYs.some((by) => Math.abs(vy - by) < 11) && bossZs.some((bz) => Math.abs(vz - bz) < 11);
+          if (nearBoss) continue;
+          cuts.push(translate([rx - OVER, vy, vz], axisCylinder('+x', RIB_W + 2 * OVER, 4, 20)));
+        }
       }
     }
   }
@@ -748,7 +762,8 @@ export function buildRackNodes(rack: RackParams): BuildNode[] {
     let op: BuildOp;
     if (acc.type === 'blank') op = buildBlank(dims, n);
     else if (acc.type === 'keystone') op = buildKeystone(dims, n).op;
-    else if (acc.type === 'shelf') op = buildShelf(dims, n, acc.shelfDepth ?? 123);
+    else if (acc.type === 'shelf')
+      op = buildShelf(dims, n, acc.shelfDepth ?? 123, { frontPlate: acc.frontPlate, vented: acc.vented });
     else op = buildCableTray(dims);
     // Recessed behind the sides' protective front columns (FRONT_RECESS).
     nodes.push({ id: `rack-${acc.type}-${i}`, op: translate([0, FRONT_RECESS, z0], op) });

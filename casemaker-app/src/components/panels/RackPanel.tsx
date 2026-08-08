@@ -1,3 +1,4 @@
+import type React from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import type { RackParams, RackAccessory, RackAccessoryType } from '@/types';
 import { LabelledField } from '@/components/ui/LabelledField';
@@ -15,6 +16,24 @@ import { newId } from '@/utils/id';
  * with a TOP-LEVEL partial only, so every update sends the COMPLETE `rack`
  * object — never a nested fragment.
  */
+
+/** Bordered card grouping one accessory/fan's controls with its remove
+ *  button — so the ✕ visibly belongs to its row. */
+const CARD_STYLE: React.CSSProperties = {
+  border: '1px solid #2a2f36',
+  borderRadius: 4,
+  padding: 8,
+  marginBottom: 6,
+  background: '#161a20',
+};
+const REMOVE_STYLE: React.CSSProperties = {
+  marginLeft: 'auto',
+  flexShrink: 0,
+  width: 26,
+  height: 26,
+  lineHeight: 1,
+  borderRadius: 4,
+};
 
 const DEFAULT_RACK: RackParams = {
   enabled: true,
@@ -302,76 +321,71 @@ export function RackPanel() {
       )}
 
       <h3 className="panel-subhead">Fans</h3>
-      {(rack.fans ?? []).map((fan, i) => (
-        <div
-          key={fan.id}
-          data-testid={`rack-fan-${i}`}
-          style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}
-        >
-          <select
-            value={fan.side}
-            aria-label={`Fan ${i + 1} side`}
-            onChange={(e) => {
-              const list = [...(rack.fans ?? [])];
-              list[i] = { ...fan, side: e.target.value as 'left' | 'right' };
-              update({ fans: list });
-            }}
-          >
-            <option value="left">Left panel</option>
-            <option value="right">Right panel</option>
-          </select>
-          <select
-            value={String(fan.size)}
-            aria-label={`Fan ${i + 1} size`}
-            onChange={(e) => {
-              const list = [...(rack.fans ?? [])];
-              list[i] = { ...fan, size: Number(e.target.value) as typeof fan.size };
-              update({ fans: list });
-            }}
-          >
-            {[40, 60, 80, 92, 120].map((s) => (
-              <option key={s} value={s}>
-                {s} mm
-              </option>
-            ))}
-          </select>
-          <input
-            type="number"
-            min={30}
-            max={rack.depth - 30}
-            value={fan.y}
-            aria-label={`Fan ${i + 1} position from front`}
-            title="Fan center, mm from the rack front"
-            style={{ width: 60 }}
-            onChange={(e) => {
-              const list = [...(rack.fans ?? [])];
-              list[i] = { ...fan, y: Number(e.target.value) };
-              update({ fans: list });
-            }}
-          />
-          <input
-            type="number"
-            min={30}
-            max={Math.round(dims.bodyH) - 30}
-            value={fan.z}
-            aria-label={`Fan ${i + 1} height`}
-            title="Fan center, mm above the panel bottom"
-            style={{ width: 60 }}
-            onChange={(e) => {
-              const list = [...(rack.fans ?? [])];
-              list[i] = { ...fan, z: Number(e.target.value) };
-              update({ fans: list });
-            }}
-          />
-          <button
-            type="button"
-            aria-label={`Remove fan ${i + 1}`}
-            onClick={() => update({ fans: (rack.fans ?? []).filter((_, j) => j !== i) })}
-          >
-            ✕
-          </button>
-        </div>
-      ))}
+      {(rack.fans ?? []).map((fan, i) => {
+        const setFan = (next: typeof fan): void => {
+          const list = [...(rack.fans ?? [])];
+          list[i] = next;
+          update({ fans: list });
+        };
+        return (
+          <div key={fan.id} data-testid={`rack-fan-${i}`} style={CARD_STYLE}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <select
+                value={fan.side}
+                aria-label={`Fan ${i + 1} side`}
+                onChange={(e) => setFan({ ...fan, side: e.target.value as 'left' | 'right' })}
+              >
+                <option value="left">Left panel</option>
+                <option value="right">Right panel</option>
+              </select>
+              <select
+                value={String(fan.size)}
+                aria-label={`Fan ${i + 1} size`}
+                onChange={(e) => setFan({ ...fan, size: Number(e.target.value) as typeof fan.size })}
+              >
+                {[40, 60, 80, 92, 120].map((s) => (
+                  <option key={s} value={s}>
+                    {s} mm
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                aria-label={`Remove fan ${i + 1}`}
+                title="Remove this fan"
+                style={REMOVE_STYLE}
+                onClick={() => update({ fans: (rack.fans ?? []).filter((_, j) => j !== i) })}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
+              <LabelledField label="From front" unit="mm" inline>
+                <input
+                  type="number"
+                  min={30}
+                  max={rack.depth - 30}
+                  value={fan.y}
+                  aria-label={`Fan ${i + 1} position from front`}
+                  style={{ width: 60 }}
+                  onChange={(e) => setFan({ ...fan, y: Number(e.target.value) })}
+                />
+              </LabelledField>
+              <LabelledField label="Height" unit="mm" inline>
+                <input
+                  type="number"
+                  min={30}
+                  max={Math.round(dims.bodyH) - 30}
+                  value={fan.z}
+                  aria-label={`Fan ${i + 1} height`}
+                  style={{ width: 60 }}
+                  onChange={(e) => setFan({ ...fan, z: Number(e.target.value) })}
+                />
+              </LabelledField>
+            </div>
+          </div>
+        );
+      })}
       <button
         type="button"
         data-testid="rack-add-fan"
@@ -405,51 +419,74 @@ export function RackPanel() {
       {(rack.accessories ?? []).map((acc, i) => {
         const n = accessorySlots(acc);
         return (
-          <div
-            key={acc.id}
-            data-testid={`rack-accessory-${i}`}
-            style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}
-          >
-            <select
-              value={acc.type}
-              aria-label={`Accessory ${i + 1} type`}
-              onChange={(e) => setAccessory(i, { ...acc, type: e.target.value as RackAccessoryType })}
-            >
-              {ACCESSORY_LABELS.map((o) => (
-                <option key={o.value} value={o.value} title={o.hint}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            {acc.type !== 'cable-tray' && (
-              <input
-                type="number"
-                min={1}
-                max={12}
-                value={n}
-                aria-label={`Accessory ${i + 1} slots`}
-                style={{ width: 52 }}
-                onChange={(e) => setAccessory(i, { ...acc, slots: Number(e.target.value) })}
-              />
-            )}
-            {acc.type === 'shelf' && (
+          <div key={acc.id} data-testid={`rack-accessory-${i}`} style={CARD_STYLE}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <select
-                value={String(acc.shelfDepth ?? 123)}
-                aria-label={`Accessory ${i + 1} shelf depth`}
-                onChange={(e) => setAccessory(i, { ...acc, shelfDepth: Number(e.target.value) })}
+                value={acc.type}
+                aria-label={`Accessory ${i + 1} type`}
+                style={{ flex: 1 }}
+                onChange={(e) => setAccessory(i, { ...acc, type: e.target.value as RackAccessoryType })}
               >
-                <option value="86">short (86 mm) — front screws only</option>
-                <option value="123">long (123 mm) — anchors mid bar</option>
-                <option value="160">extra deep (160 mm) — anchors mid bar</option>
+                {ACCESSORY_LABELS.map((o) => (
+                  <option key={o.value} value={o.value} title={o.hint}>
+                    {o.label}
+                  </option>
+                ))}
               </select>
+              {acc.type !== 'cable-tray' && (
+                <LabelledField label="Slots" inline>
+                  <input
+                    type="number"
+                    min={1}
+                    max={12}
+                    value={n}
+                    aria-label={`Accessory ${i + 1} slots`}
+                    style={{ width: 48 }}
+                    onChange={(e) => setAccessory(i, { ...acc, slots: Number(e.target.value) })}
+                  />
+                </LabelledField>
+              )}
+              <button
+                type="button"
+                aria-label={`Remove accessory ${i + 1}`}
+                title="Remove this accessory"
+                style={REMOVE_STYLE}
+                onClick={() => update({ accessories: (rack.accessories ?? []).filter((_, j) => j !== i) })}
+              >
+                ✕
+              </button>
+            </div>
+            {acc.type === 'shelf' && (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                <select
+                  value={String(acc.shelfDepth ?? 123)}
+                  aria-label={`Accessory ${i + 1} shelf depth`}
+                  onChange={(e) => setAccessory(i, { ...acc, shelfDepth: Number(e.target.value) })}
+                >
+                  <option value="86">short (86 mm) — front screws only</option>
+                  <option value="123">long (123 mm) — anchors mid bar</option>
+                  <option value="160">extra deep (160 mm) — anchors mid bar</option>
+                </select>
+                <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={acc.frontPlate ?? false}
+                    aria-label={`Accessory ${i + 1} front plate`}
+                    onChange={(e) => setAccessory(i, { ...acc, frontPlate: e.target.checked })}
+                  />
+                  Front plate
+                </label>
+                <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={acc.vented !== false}
+                    aria-label={`Accessory ${i + 1} vented`}
+                    onChange={(e) => setAccessory(i, { ...acc, vented: e.target.checked })}
+                  />
+                  Vented
+                </label>
+              </div>
             )}
-            <button
-              type="button"
-              aria-label={`Remove accessory ${i + 1}`}
-              onClick={() => update({ accessories: (rack.accessories ?? []).filter((_, j) => j !== i) })}
-            >
-              ✕
-            </button>
           </div>
         );
       })}
