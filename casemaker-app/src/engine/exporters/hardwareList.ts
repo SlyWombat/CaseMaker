@@ -47,6 +47,16 @@ export function hardwareForProject(project: Project): HardwareItem[] {
         note: `The rack's structure: from OUTSIDE through the side panels' Ø5.2 clearance holes into each accessory's end-rib thread holes (Ø4.7, self-tapping in plastic) — one per slot per side${rearScrews > 0 ? `, plus ${rearScrews} into the rear column for long shelves` : ''}. Snug, don't strip.`,
       });
     }
+    const fanCount = rack.fans?.length ?? 0;
+    if (fanCount > 0) {
+      const sizes = [...new Set(rack.fans!.map((f) => f.size))].sort((a, b) => a - b);
+      items.push({
+        id: 'rack-fans',
+        label: `Axial case fan${fanCount > 1 ? 's' : ''} (${sizes.map((s) => `${s} mm`).join(', ')})`,
+        count: fanCount,
+        note: 'Screw on from OUTSIDE the side panel with the self-tapping screws that ship with the fan (4 per fan) — they bite the Ø3.6 printed holes. Point the airflow arrow inward for intake.',
+      });
+    }
     const wallMount = rack.wallMount ?? 'none';
     if (wallMount === 'ears') {
       const perSide = Math.max(2, Math.floor(Math.max(2, Math.round(rack.slots)) / 6));

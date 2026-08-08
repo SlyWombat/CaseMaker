@@ -286,6 +286,106 @@ export function RackPanel() {
         </p>
       )}
 
+      <h3 className="panel-subhead">Fans</h3>
+      {(rack.fans ?? []).map((fan, i) => (
+        <div
+          key={fan.id}
+          data-testid={`rack-fan-${i}`}
+          style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}
+        >
+          <select
+            value={fan.side}
+            aria-label={`Fan ${i + 1} side`}
+            onChange={(e) => {
+              const list = [...(rack.fans ?? [])];
+              list[i] = { ...fan, side: e.target.value as 'left' | 'right' };
+              update({ fans: list });
+            }}
+          >
+            <option value="left">Left panel</option>
+            <option value="right">Right panel</option>
+          </select>
+          <select
+            value={String(fan.size)}
+            aria-label={`Fan ${i + 1} size`}
+            onChange={(e) => {
+              const list = [...(rack.fans ?? [])];
+              list[i] = { ...fan, size: Number(e.target.value) as typeof fan.size };
+              update({ fans: list });
+            }}
+          >
+            {[40, 60, 80, 92, 120].map((s) => (
+              <option key={s} value={s}>
+                {s} mm
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            min={30}
+            max={rack.depth - 30}
+            value={fan.y}
+            aria-label={`Fan ${i + 1} position from front`}
+            title="Fan center, mm from the rack front"
+            style={{ width: 60 }}
+            onChange={(e) => {
+              const list = [...(rack.fans ?? [])];
+              list[i] = { ...fan, y: Number(e.target.value) };
+              update({ fans: list });
+            }}
+          />
+          <input
+            type="number"
+            min={30}
+            max={Math.round(dims.bodyH) - 30}
+            value={fan.z}
+            aria-label={`Fan ${i + 1} height`}
+            title="Fan center, mm above the panel bottom"
+            style={{ width: 60 }}
+            onChange={(e) => {
+              const list = [...(rack.fans ?? [])];
+              list[i] = { ...fan, z: Number(e.target.value) };
+              update({ fans: list });
+            }}
+          />
+          <button
+            type="button"
+            aria-label={`Remove fan ${i + 1}`}
+            onClick={() => update({ fans: (rack.fans ?? []).filter((_, j) => j !== i) })}
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        data-testid="rack-add-fan"
+        onClick={() =>
+          update({
+            fans: [
+              ...(rack.fans ?? []),
+              {
+                id: newId(),
+                side: 'left',
+                size: 80,
+                y: Math.round(rack.depth * 0.6),
+                z: Math.round(dims.bodyH / 2),
+              },
+            ],
+          })
+        }
+      >
+        + Add side fan
+      </button>
+      {(rack.fans ?? []).length > 0 && (
+        <p style={{ fontSize: 12, color: '#9aa4b0', margin: '2px 0 0' }}>
+          Each fan sits on a solid full-height strip in the side panel with the standard
+          bolt pattern for its size — fans screw on from outside with their own
+          self-tapping screws. Position is the fan&apos;s center: mm from the front, mm
+          above the panel bottom.
+        </p>
+      )}
+
       <h3 className="panel-subhead">Accessories</h3>
       {(rack.accessories ?? []).map((acc, i) => {
         const n = accessorySlots(acc);

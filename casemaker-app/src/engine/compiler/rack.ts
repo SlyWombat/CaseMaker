@@ -75,6 +75,18 @@ const TIE_BOSS_D = 10;
  *  around each thread hole so screw engagement stays full-width. */
 const RIB_WALL = 5;
 const RIB_BOSS_D = 12;
+/** Side-panel fan mounts: strip margin beyond the fan frame, screw hole
+ *  (fan self-tappers bite plastic), and the standard bolt spacing /
+ *  opening per frame size. */
+const FAN_BAND_MARGIN = 7;
+const FAN_SCREW_D = 3.6;
+export const FAN_SPECS: Record<number, { bolt: number; opening: number }> = {
+  40: { bolt: 32, opening: 36 },
+  60: { bolt: 50, opening: 55 },
+  80: { bolt: 71.5, opening: 73 },
+  92: { bolt: 82.5, opening: 84 },
+  120: { bolt: 105, opening: 112 },
+};
 /** Top/bottom plates: thickness, snap tab size, tab fit slack. */
 const PLATE_T = 5;
 const TAB_LEN = 20;
@@ -344,7 +356,54 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     cuts.push(translate([na, depth - notchD, -OVER], cube([nb - na, notchD + OVER, seatZ + 2 + OVER])));
   }
 
-  return difference([union(solid), ...cuts]);
+  const base = difference([union(solid), ...cuts]);
+
+  // ---- Fan mounts ----------------------------------------------------------
+  // Each fan gets a FULL-THICKNESS, full-height strip fused into the panel
+  // — added AFTER the window/pocket cuts so nothing carves it, spanning
+  // rail-to-rail so the mount is always anchored to the frame, and solid
+  // through the thickness so it never bridges over a vent window in the
+  // inner-face-down print orientation. The strip is then lightened with
+  // the same outer-face blind pockets as the structural bands, above and
+  // below the fan zone. Opening + standard 4-bolt pattern cut through.
+  const fans = (rack.fans ?? []).filter((f) => (f.side === 'left') === !mirror);
+  if (fans.length === 0) return base;
+  const strips: BuildOp[] = [];
+  const fanCuts: BuildOp[] = [];
+  const [sx0, sx1] = xr(0, SIDE_T);
+  const [hx] = xr(-OVER, 0);
+  const [ppa, ppb] = xr(-OVER, SIDE_T - POCKET_SKIN);
+  const holeLenF = SIDE_T + 2 * OVER;
+  for (const fan of fans) {
+    const spec = FAN_SPECS[fan.size] ?? FAN_SPECS[80]!;
+    const half = fan.size / 2 + FAN_BAND_MARGIN;
+    const yC = Math.min(Math.max(fan.y, half), depth - half);
+    const zC =
+      FOOT_H + Math.min(Math.max(fan.z, spec.opening / 2 + 3), bodyH - spec.opening / 2 - 3);
+    const y0 = yC - half;
+    strips.push(translate([sx0, y0, FOOT_H], cube([sx1 - sx0, 2 * half, bodyH])));
+    // Lightening pockets in the strip outside the fan zone.
+    const zones: Array<[number, number]> = [
+      [FOOT_H + RAIL, zC - half],
+      [zC + half, FOOT_H + bodyH - RAIL],
+    ];
+    for (const [za, zb] of zones) {
+      if (zb - za < 15) continue;
+      fanCuts.push(translate([ppa, y0 + 4, za], cube([ppb - ppa, 2 * half - 8, zb - za])));
+    }
+    fanCuts.push(translate([hx, yC, zC], axisCylinder('+x', holeLenF, spec.opening / 2, 64)));
+    for (const sy of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        fanCuts.push(
+          translate(
+            [hx, yC + (sy * spec.bolt) / 2, zC + (sz * spec.bolt) / 2],
+            axisCylinder('+x', holeLenF, FAN_SCREW_D / 2, 20),
+          ),
+        );
+      }
+    }
+  }
+  return difference([union([base, ...strips]), ...fanCuts]);
 }
 
 /** Top/bottom plate: vented deck spanning between the sides with snap tabs. */

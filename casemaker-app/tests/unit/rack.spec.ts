@@ -312,6 +312,45 @@ describe('rack archetype — mini-rack template', () => {
     expect(validateRackFit(shallow).some((i) => i.kind === 'rack-config' && /middle bar/.test(i.message))).toBe(true);
   });
 
+  it('side fan mount: opening + standard bolt pattern cut through a solid anchored strip', () => {
+    const rack: RackParams = {
+      ...SAMPLE,
+      accessories: [],
+      fans: [{ id: 'f1', side: 'left', size: 80, y: 170, z: 140 }],
+    };
+    const nodes = buildRackNodes(rack);
+    const left = nodes.find((n) => n.id === 'rack-side-left')!.op;
+    const right = nodes.find((n) => n.id === 'rack-side-right')!.op;
+    const zC = 5 + 140; // feet + configured height
+    const probe = (op: BuildOp, x: number, y: number, z: number, s = 3): number => {
+      const m = exec({
+        kind: 'intersection',
+        children: [op, { kind: 'translate', offset: [x - s / 2, y - s / 2, z - s / 2], child: { kind: 'cube', size: [s, s, s] } }],
+      });
+      const v = m.volume();
+      m.delete();
+      return v;
+    };
+    // Opening void at the fan center, through the full thickness.
+    expect(probe(left, 7.5, 170, zC)).toBe(0);
+    // All four bolt holes at the standard 71.5 mm spacing (void at hole
+    // centers, solid right next to them).
+    for (const sy of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        expect(probe(left, 7.5, 170 + (sy * 71.5) / 2, zC + (sz * 71.5) / 2, 2)).toBe(0);
+      }
+    }
+    expect(probe(left, 7.5, 170 + 71.5 / 2 + 6, zC)).toBeGreaterThan(0);
+    // The strip is solid full-thickness beyond the opening (no bridge zone)…
+    expect(probe(left, 7.5, 170, zC + 44)).toBeGreaterThan(0);
+    // …and the right panel is untouched there (fan is left-side only): the
+    // same spot falls in a vent window on the mirrored panel.
+    expect(probe(right, 252 - 7.5, 170, zC)).toBe(0);
+    // Still one connected component per panel.
+    expectClean('rack-side-left+fan', left);
+    expectClean('rack-side-right', right);
+  });
+
   it('hardware BOM lists the structural M5 screws (the shelf-to-side connection)', () => {
     const tpl = findTemplate('mini-rack-10in');
     const project = tpl!.build();

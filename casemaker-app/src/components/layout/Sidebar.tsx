@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore, type SidebarSectionId } from '@/store/viewportStore';
 
@@ -12,20 +13,34 @@ const SECTIONS: { id: SidebarSectionId; label: string; icon: string; hint: strin
   { id: 'export',   label: 'Export',          icon: '⬇️',  hint: 'Per-part Save + Save All' },
 ];
 
+/** Sections that make sense for a rack project — everything else (boards,
+ *  ports, HATs, board-case features) assumes a PCB in a shell. Rack fans
+ *  live inside the rack panel itself. */
+const RACK_SECTION_IDS: SidebarSectionId[] = ['rack', 'export'];
+
 export function Sidebar() {
   const welcomeMode = useProjectStore((s) => s.welcomeMode);
+  const rackMode = useProjectStore((s) => s.project?.case.rack?.enabled === true);
   const activeSection = useViewportStore((s) => s.activeSidebarSection);
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
+  // A stale active section (e.g. HATs was open when the rack got enabled)
+  // would leave the right rail showing an inapplicable panel.
+  useEffect(() => {
+    if (rackMode && activeSection && !RACK_SECTION_IDS.includes(activeSection)) {
+      setSection('rack');
+    }
+  }, [rackMode, activeSection, setSection]);
   if (welcomeMode) {
     return <aside className="sidebar" />;
   }
+  const sections = rackMode ? SECTIONS.filter((s) => RACK_SECTION_IDS.includes(s.id)) : SECTIONS;
   // Sidebar is now an INDEX of sections. Clicking a section opens its
   // editor in the right rail (ContextPanel). Mutually exclusive with
   // viewport geometry selection — clicking either switches the right
   // rail to host that thing.
   return (
     <aside className="sidebar" style={{ padding: 8 }}>
-      {SECTIONS.map((s) => {
+      {sections.map((s) => {
         const isActive = activeSection === s.id;
         return (
           <button

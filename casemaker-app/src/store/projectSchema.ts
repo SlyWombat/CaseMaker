@@ -86,6 +86,23 @@ export const caseParamsSchema = z.object({
           }),
         )
         .optional(),
+      fans: z
+        .array(
+          z.object({
+            id: z.string(),
+            side: z.enum(['left', 'right']),
+            size: z.union([
+              z.literal(40),
+              z.literal(60),
+              z.literal(80),
+              z.literal(92),
+              z.literal(120),
+            ]),
+            y: z.number().positive(),
+            z: z.number().positive(),
+          }),
+        )
+        .optional(),
     })
     .optional(),
   stand: z

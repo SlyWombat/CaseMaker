@@ -47,6 +47,26 @@ export interface RackParams {
   wallMount?: 'none' | 'ears' | 'cleat';
   /** Printable accessories; each entry compiles to one part/STL. */
   accessories?: RackAccessory[];
+  /**
+   * Axial case fans mounted through the side panels. Each fan gets a solid
+   * full-height band fused onto the panel's outer face (so the mount is
+   * always anchored to the frame, never floating in a vent window), with
+   * the standard round opening + 4-bolt pattern for its size cut through.
+   */
+  fans?: RackFan[];
+}
+
+export interface RackFan {
+  id: string;
+  /** Which side panel carries the fan. */
+  side: 'left' | 'right';
+  /** Standard fan frame size. Bolt spacing follows the industry standard
+   *  (40→32, 60→50, 80→71.5, 92→82.5, 120→105). */
+  size: 40 | 60 | 80 | 92 | 120;
+  /** Fan center, mm from the rack FRONT along the panel. */
+  y: Mm;
+  /** Fan center, mm above the bottom of the panel body. */
+  z: Mm;
 }
 
 export type RackAccessoryType = 'blank' | 'shelf' | 'keystone' | 'cable-tray';
