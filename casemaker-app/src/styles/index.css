@@ -378,9 +378,11 @@ body, html, #root {
 
 .placement-banner {
   position: absolute;
-  /* Below the viewport toolbar row — never cover the view-mode buttons. */
+  /* Below the viewport toolbar row and on the LEFT — never cover the
+   * view-mode buttons, and never sit under the right-rail context panel
+   * when it opens as an overlay drawer on narrow windows. */
   top: 52px;
-  right: 12px;
+  left: 12px;
   max-width: 420px;
   padding: 6px 10px;
   border-radius: 4px;
