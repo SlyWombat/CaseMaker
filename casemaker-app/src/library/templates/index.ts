@@ -2,6 +2,7 @@ import type { Project } from '@/types';
 import { createDefaultProject } from '@/store/projectStore';
 import { templateSpecSchema, type TemplateSpec } from './templateSchema';
 import { buildProjectFromSpec, emptyBoard } from './buildFromSpec';
+import { hasNodeGlob, nodeGlobJson } from '@/utils/nodeGlobJson';
 
 /**
  * Project templates (#126). Most templates are declarative JSON specs in
@@ -33,7 +34,11 @@ export interface ProjectTemplate {
 
 type OrderedTemplate = ProjectTemplate & { order: number };
 
-const specModules = import.meta.glob<{ default: unknown }>('./specs/*.json', { eager: true });
+// Same dual path as library/index.ts: Vite transforms the glob at build
+// time; plain-Node runners read the specs off disk with identical keys.
+const specModules = hasNodeGlob()
+  ? nodeGlobJson<unknown>(import.meta.url, './specs/')
+  : import.meta.glob<{ default: unknown }>('./specs/*.json', { eager: true });
 
 const specTemplates: OrderedTemplate[] = Object.entries(specModules).map(([path, mod]) => {
   let spec: TemplateSpec;

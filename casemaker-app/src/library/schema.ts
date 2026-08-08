@@ -137,6 +137,25 @@ export const boardProfileSchema = z.object({
           }),
         )
         .optional(),
+      // Rear T-slot mounting channel (slide-on bracket devices, e.g. the
+      // UniFi U7 Pro Outdoor). Consumed by the stand archetype's 'slider'
+      // mount. throat < cavity and lip < total, or the bracket can't lock.
+      sliderChannel: z
+        .object({
+          cavityWidth: z.number().positive(),
+          throatWidth: z.number().positive(),
+          lipDepth: z.number().positive(),
+          totalDepth: z.number().positive(),
+          length: z.number().positive(),
+          topFromDeviceBottom: z.number().positive(),
+        })
+        .refine((c) => c.throatWidth < c.cavityWidth, {
+          message: 'sliderChannel.throatWidth must be smaller than cavityWidth',
+        })
+        .refine((c) => c.lipDepth < c.totalDepth, {
+          message: 'sliderChannel.lipDepth must be smaller than totalDepth',
+        })
+        .optional(),
     })
     .optional(),
   source: z.string().url().optional(),

@@ -109,6 +109,33 @@ export interface EnclosureModule {
    * insertion path and is never compressed on the way to a recess.
    */
   edgeProtrusions?: EdgeProtrusion[];
+  /**
+   * Rear slide-on mounting channel (Ubiquiti U7 Pro Outdoor style): a
+   * T-slot recessed into the device's back face, open at its BOTTOM end.
+   * The device is hung by lowering it onto a male T-bracket until the
+   * channel's closed top end lands on the bracket's top. Present → the
+   * stand archetype's 'slider' mount can build that bracket.
+   *
+   * All dimensions are measured on the DEVICE with calipers:
+   *   cavityWidth  — full channel width BEHIND the retention lips
+   *   throatWidth  — the opening between the two lips (< cavityWidth)
+   *   lipDepth     — from the device's outer back face to the lips' inner faces
+   *   totalDepth   — from the outer back face to the channel floor (> lipDepth)
+   *   length       — usable channel length along the slide direction
+   *   topFromDeviceBottom — device's bottom edge to the channel's closed TOP
+   *                  end; sets how high the device hangs on the bracket
+   */
+  sliderChannel?: SliderChannel;
+}
+
+/** Rear T-slot mounting channel — see EnclosureModule.sliderChannel. */
+export interface SliderChannel {
+  cavityWidth: Mm;
+  throatWidth: Mm;
+  lipDepth: Mm;
+  totalDepth: Mm;
+  length: Mm;
+  topFromDeviceBottom: Mm;
 }
 
 /** A bump on one of the rear body's side faces (button, latch, connector shell). */

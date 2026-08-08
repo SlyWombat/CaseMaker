@@ -61,7 +61,7 @@ export const caseParamsSchema = z.object({
   stand: z
     .object({
       enabled: z.boolean(),
-      mount: z.enum(['desk', 'wall']).optional(),
+      mount: z.enum(['desk', 'wall', 'slider']).optional(),
       shroudDepth: z.number().positive().optional(),
       shroudWall: z.number().positive().optional(),
       plateThickness: z.number().positive().optional(),

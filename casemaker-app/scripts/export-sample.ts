@@ -19,6 +19,7 @@ import { buildBinaryStl } from '../src/workers/export/stlBinary';
 import { autoPortsForBoard } from '../src/engine/compiler/portFactory';
 import { applyLayoutToMeshes } from '../src/engine/exportLayout';
 import { defaultSnapCatchesForCase } from '../src/engine/compiler/snapCatches';
+import { findTemplate } from '../src/library/templates';
 import type { Project, BoardProfile, MeshNode } from '../src/types';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -29,8 +30,10 @@ mkdirSync(samplesDir, { recursive: true });
 const require = createRequire(import.meta.url);
 const wasmPath = require.resolve('manifold-3d/manifold.wasm');
 
+// manifold-3d types locateFile as zero-arg; the only file it ever
+// requests is the wasm, so returning it unconditionally is equivalent.
 const tl = await ManifoldModule({
-  locateFile: (p: string) => (p.endsWith('.wasm') ? wasmPath : p),
+  locateFile: () => wasmPath,
 });
 tl.setup();
 const { Manifold, Mesh } = tl;
@@ -244,6 +247,12 @@ const SAMPLES: SampleSpec[] = [
     description:
       'RPi 3B snap-fit calibration print — verify USB-A 4mm shift + snap-arm/USB collision avoidance',
     build: buildRpi3bProject,
+  },
+  {
+    filename: 'u7-pro-outdoor-bench-stand.stl',
+    description:
+      'UniFi U7 Pro Outdoor slide-on bench stand — CHANNEL DIMS UNVERIFIED, caliper the AP first',
+    build: () => findTemplate('u7-pro-outdoor-desk-stand')!.build(),
   },
 ];
 

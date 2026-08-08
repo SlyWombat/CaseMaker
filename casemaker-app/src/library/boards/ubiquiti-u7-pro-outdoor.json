@@ -1,0 +1,27 @@
+{
+  "id": "ubiquiti-u7-pro-outdoor",
+  "name": "Ubiquiti UniFi U7 Pro Outdoor (device shell)",
+  "manufacturer": "Ubiquiti",
+  "pcb": { "size": { "x": 170, "y": 208, "z": 66.5 } },
+  "mountingHoles": [],
+  "components": [],
+  "defaultStandoffHeight": 0,
+  "recommendedZClearance": 0,
+  "enclosure": {
+    "flangeThickness": 60,
+    "body": { "x": 35, "y": 54, "width": 100, "height": 100, "depth": 6.5 },
+    "bossDiameter": 5,
+    "bossHeight": 1,
+    "sliderChannel": {
+      "cavityWidth": 42.0,
+      "throatWidth": 38.0,
+      "lipDepth": 3.0,
+      "totalDepth": 6.5,
+      "length": 75.0,
+      "topFromDeviceBottom": 141.5
+    }
+  },
+  "source": "https://techspecs.ui.com/unifi/wifi/u7-pro-outdoor-us",
+  "datasheetRevision": "techspecs.ui.com 2026-08 — outline 170x208x66.5 / 1.2 kg are official; ALL sliderChannel dims are UNVERIFIED estimates (Ubiquiti publishes none) — caliper the rear channel before printing",
+  "builtin": true
+}

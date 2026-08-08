@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import {
   buildEdgeChannels,
+  buildSliderStandOp,
   buildStandOp,
+  computeSliderDims,
   computeStandDims,
   standModulePlacement,
 } from '@/engine/compiler/stand';
@@ -288,5 +290,106 @@ describe('wall mount', () => {
   it('the desk stand does NOT list drywall screws', () => {
     const hw = hardwareForProject(findTemplate('guition-desk-stand')!.build());
     expect(hw.find((h) => h.id === 'wall-plate-screws')).toBeUndefined();
+  });
+});
+
+describe('U7 Pro Outdoor slider bench stand', () => {
+  const board = getBuiltinBoard('ubiquiti-u7-pro-outdoor')!;
+  const project = () => findTemplate('u7-pro-outdoor-desk-stand')!.build();
+  const stand = () => project().case.stand!;
+
+  it('device outline matches the official tech specs (the only published dims)', () => {
+    // 170 x 208 x 66.5 mm / 1.2 kg — techspecs.ui.com. The channel dims are
+    // NOT published anywhere; they are estimates awaiting caliper verification.
+    expect(board.pcb.size.x).toBeCloseTo(170);
+    expect(board.pcb.size.y).toBeCloseTo(208);
+    expect(board.pcb.size.z).toBeCloseTo(66.5);
+    const enc = board.enclosure!;
+    expect(enc.flangeThickness + enc.body.depth).toBeCloseTo(board.pcb.size.z, 5);
+  });
+
+  it('the channel is geometrically coherent: lips narrower than the cavity, shallower than the floor', () => {
+    const ch = board.enclosure!.sliderChannel!;
+    expect(ch.throatWidth).toBeLessThan(ch.cavityWidth);
+    expect(ch.lipDepth).toBeLessThan(ch.totalDepth);
+    expect(ch.length).toBeLessThan(ch.topFromDeviceBottom); // channel fits on the back
+    expect(ch.topFromDeviceBottom).toBeLessThan(board.pcb.size.y);
+  });
+
+  it('emits a single fused stand part', () => {
+    const plan = compileProject(project());
+    expect(plan.nodes.map((n) => n.id)).toEqual(['stand']);
+  });
+
+  it('stands on the desk, grounded at z = 0', () => {
+    const op = buildSliderStandOp(board, stand())!;
+    const b = aabbOfOp(op)!;
+    expect(b.min[2]).toBeCloseTo(0, 3);
+    expect(b.min[0]).toBeGreaterThanOrEqual(-0.01);
+    expect(b.min[1]).toBeGreaterThanOrEqual(-0.01);
+  });
+
+  it('the male T-profile clears every channel surface by the design fits', () => {
+    const s = stand();
+    const d = computeSliderDims(board, s)!;
+    const ch = board.enclosure!.sliderChannel!;
+    // Lateral: throat through the lip opening, wings inside the cavity.
+    expect(ch.throatWidth - d.throatW).toBeCloseTo(2 * s.openingClearance, 5);
+    expect(ch.cavityWidth - d.wingW).toBeCloseTo(2 * s.openingClearance, 5);
+    // Axial: wings sit behind the lips and stop short of the channel floor.
+    expect(d.protrusion).toBeLessThanOrEqual(ch.totalDepth - 0.29);
+    expect(d.wingT).toBeGreaterThan(0.8); // still a printable locking wing
+    // The bracket is shorter than the channel, so the top end-stop seats.
+    expect(d.engagement).toBeLessThan(ch.length);
+    expect(d.engagement).toBeGreaterThan(50); // leverage against wobble
+  });
+
+  it('the 208 mm device hangs clear of the foot — the column is sized from topFromDeviceBottom', () => {
+    const s = stand();
+    const d = computeSliderDims(board, s)!;
+    // Bottom edge floats above the foot's top face...
+    expect(d.deviceBottomZ).toBeGreaterThan(s.baseThickness + 4);
+    // ...which forces a tall column: this is the trap the reference OpenSCAD
+    // fell into (75 mm column ⇒ the AP's lower half hits the base plate).
+    expect(d.colH).toBeGreaterThan(board.enclosure!.sliderChannel!.topFromDeviceBottom);
+  });
+
+  it('the foot out-reaches the leaning device, front and back', () => {
+    const s = stand();
+    const d = computeSliderDims(board, s)!;
+    const t = (s.tiltAngleDeg * Math.PI) / 180;
+    const enc = board.enclosure!;
+    const devD = enc.flangeThickness + enc.body.depth;
+    const yDevBot = d.colH - enc.sliderChannel!.topFromDeviceBottom;
+    // Device bottom-front corner, in world y (same math as the compiler).
+    const S = d.TyCol - d.colT * Math.cos(t);
+    const frontCorner = S + yDevBot * Math.sin(t) - devD * Math.cos(t);
+    expect(frontCorner).toBeGreaterThanOrEqual(25); // anti-tip reserve
+    // Column's top-back corner stays inside the foot.
+    expect(d.TyCol + d.colH * Math.sin(t)).toBeLessThan(d.baseDepth - 8);
+    // And the foot is wide enough to resist sideways tipping of a 170 mm AP.
+    expect(d.footW).toBeGreaterThanOrEqual(0.75 * board.pcb.size.x);
+  });
+
+  it('needs no hardware — gravity is the retention', () => {
+    expect(hardwareForProject(project())).toEqual([]);
+  });
+
+  it('the module placement hangs the device on the tilted column', () => {
+    const p = standModulePlacement(board, stand())!;
+    expect(p.rotXDeg).toBeCloseTo(90 - stand().tiltAngleDeg, 5);
+    // Ry(180) negates z, so the device's back (z = 66.5) lands on the column
+    // front face (z = colT).
+    const d = computeSliderDims(board, stand())!;
+    expect(p.frameOffset[2] - board.pcb.size.z).toBeCloseTo(d.colT, 5);
+  });
+
+  it('pick-a-board on the U7 Pro Outdoor applies the bench-stand template', () => {
+    expect(findTemplateByBoard('ubiquiti-u7-pro-outdoor')?.id).toBe('u7-pro-outdoor-desk-stand');
+  });
+
+  it('a board without a sliderChannel cannot build a slider stand', () => {
+    const guition = getBuiltinBoard('guition-jc4880p443c')!;
+    expect(buildSliderStandOp(guition, stand())).toBeNull();
   });
 });

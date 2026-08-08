@@ -279,6 +279,23 @@ export function standModulePlacement(
 ): ModulePlacement | null {
   const enc = board.enclosure;
   if (!enc) return null;
+  if ((stand.mount ?? 'desk') === 'slider') {
+    const d = computeSliderDims(board, stand);
+    if (!d) return null;
+    // The device's BACK face (board z = full module depth) seats on the
+    // column's front face (column-local z = colT), centred on the column,
+    // hanging so its bottom edge sits topFromDeviceBottom below the top.
+    const devD = enc.flangeThickness + enc.body.depth;
+    return {
+      frameOffset: [
+        d.colX0 + (d.colW + board.pcb.size.x) / 2,
+        d.colH - enc.sliderChannel!.topFromDeviceBottom,
+        d.colT + devD,
+      ],
+      rotXDeg: 90 - stand.tiltAngleDeg,
+      worldOffset: [0, d.TyCol, d.Tz],
+    };
+  }
   const m = stand.bezelMargin;
   const T = stand.frameThickness;
   const t = (stand.tiltAngleDeg * Math.PI) / 180;
@@ -381,6 +398,178 @@ export function buildStandOp(board: BoardProfile, stand: StandParams): BuildOp |
   );
 
   return difference([union([foot, frame, ...gussets]), frontHalfSpace, ...channels]);
+}
+
+// ---- Slider mount ----------------------------------------------------------
+// A device with a rear T-slot channel (enclosure.sliderChannel) hangs on a
+// male T-bracket: a tilted column on an anti-tip foot, the bracket on the
+// column's front face. The device is lowered onto the bracket until the
+// channel's closed TOP end lands on the bracket's top — gravity is the
+// retention, no screws. One fused part, printed standing on its foot (the
+// column leans back by only tiltAngleDeg, self-supporting).
+
+/** Axial fit: lip inner face ↔ wing underside, and wing top ↔ channel floor. */
+const SLIDER_AXIAL_FIT = 0.3;
+/** Gap between the device's bottom edge and the foot's top face when seated. */
+const SLIDER_BOTTOM_CLEAR = 6;
+/** Foot in front of the device's bottom-front corner — the anti-tip reserve. */
+const SLIDER_FRONT_MARGIN = 30;
+/** Foot behind the column's top-back corner (gusset heel room). */
+const SLIDER_BACK_MARGIN = 12;
+/** Overlap embeds so the union fuses into one shell (see buildWallPlate). */
+const SLIDER_EMBED = 0.8;
+
+export interface SliderDims {
+  /** Column plate, in its local frame (x across, y up, z back→front). */
+  colW: number;
+  colH: number;
+  colT: number;
+  /** Column's x offset on the foot (centred). */
+  colX0: number;
+  footW: number;
+  baseDepth: number;
+  /** Column translate (world), same composition as the desk frame. */
+  TyCol: number;
+  Tz: number;
+  /** Male T-profile: throat passes the lips, wings lock behind them. */
+  throatW: number;
+  wingW: number;
+  wingT: number;
+  /** Total protrusion of the male past the column's front face. */
+  protrusion: number;
+  /** Vertical length of the male (channel engagement). */
+  engagement: number;
+  /** World z of the device's bottom edge when seated. */
+  deviceBottomZ: number;
+}
+
+export function computeSliderDims(board: BoardProfile, stand: StandParams): SliderDims | null {
+  const enc = board.enclosure;
+  const ch = enc?.sliderChannel;
+  if (!enc || !ch) return null;
+  const t = (stand.tiltAngleDeg * Math.PI) / 180;
+  const sinT = Math.sin(t);
+  const cosT = Math.cos(t);
+  const colT = stand.frameThickness;
+  const colW = ch.cavityWidth + 2 * stand.bezelMargin;
+  const Tz = stand.baseThickness - FOOT_EMBED;
+  // Column top = bracket top = the channel's closed top end when seated, so
+  // the device bottom hangs topFromDeviceBottom below it (measured along the
+  // column). Tall enough that the device clears the foot.
+  const colH = ch.topFromDeviceBottom + (SLIDER_BOTTOM_CLEAR + FOOT_EMBED) / cosT;
+  const devD = enc.flangeThickness + enc.body.depth;
+  const yDevBot = colH - ch.topFromDeviceBottom; // device bottom, column-local y
+  // Setback: the foot must reach SLIDER_FRONT_MARGIN past the device's
+  // bottom-front corner, which sits devD in front of the column's face.
+  const S = Math.max(5, SLIDER_FRONT_MARGIN + devD * cosT - yDevBot * sinT);
+  const TyCol = S + colT * cosT;
+  const baseDepth = Math.max(stand.baseDepth, TyCol + colH * sinT + SLIDER_BACK_MARGIN);
+  const footW = Math.max(colW + 2 * stand.gussetThickness + 20, 0.75 * board.pcb.size.x);
+  const fit = stand.openingClearance;
+  const wingT = ch.totalDepth - ch.lipDepth - 2 * SLIDER_AXIAL_FIT;
+  if (wingT < 0.8) return null; // channel too shallow to lock a printable wing
+  return {
+    colW,
+    colH,
+    colT,
+    colX0: (footW - colW) / 2,
+    footW,
+    baseDepth,
+    TyCol,
+    Tz,
+    throatW: ch.throatWidth - 2 * fit,
+    wingW: ch.cavityWidth - 2 * fit,
+    wingT,
+    protrusion: ch.lipDepth + SLIDER_AXIAL_FIT + wingT,
+    engagement: ch.length - 2,
+    deviceBottomZ: Tz + yDevBot * cosT,
+  };
+}
+
+/**
+ * Build the slider bench stand: foot + tilted column + male T-bracket +
+ * gussets, fused into a single solid. Null when the board has no
+ * enclosure.sliderChannel (nothing to slide into).
+ */
+export function buildSliderStandOp(board: BoardProfile, stand: StandParams): BuildOp | null {
+  const d = computeSliderDims(board, stand);
+  if (!d) return null;
+  const { colW: CW, colH: CH, colT: CT } = d;
+  const t = (stand.tiltAngleDeg * Math.PI) / 180;
+  const sinT = Math.sin(t);
+  const cosT = Math.cos(t);
+
+  // ---- Column + male T-profile, in column-local coords --------------------
+  // (x 0..CW, y 0..CH up, z 0 = BACK face, z = CT = FRONT face.)
+  const plate = roundedRectPrism(CW, CH, CT, Math.min(3, CW / 4));
+  const yBot = CH - d.engagement;
+  const P = d.protrusion;
+  const ch = board.enclosure!.sliderChannel!;
+  // Throat: passes between the channel's lips, and runs the full protrusion
+  // so the wings have a spine to fuse onto.
+  const throat = translate(
+    [(CW - d.throatW) / 2, yBot, CT - SLIDER_EMBED],
+    cube([d.throatW, d.engagement, P + SLIDER_EMBED]),
+  );
+  // Wings: lock behind the lips. Their underside sits SLIDER_AXIAL_FIT past
+  // the lips' inner faces; their top face clears the channel floor by the same.
+  const wings = translate(
+    [(CW - d.wingW) / 2, yBot, CT + ch.lipDepth + SLIDER_AXIAL_FIT],
+    cube([d.wingW, d.engagement, d.wingT]),
+  );
+  // 45° chamfers on the male's two ends. Top: lead-in, so the channel's lips
+  // ride over the wings as the device is lowered on. Bottom: turns the male's
+  // underside from a near-horizontal 6+ mm overhang into a printable slope.
+  const xCut0 = (CW - d.wingW) / 2 - 1;
+  const xCut1 = (CW + d.wingW) / 2 + 1;
+  const cutTop = triPrismX(
+    [
+      [CH, CT],
+      [CH - P - 1, CT + P + 1],
+      [CH + P + 2, CT + P + 1],
+    ],
+    xCut0,
+    xCut1,
+  );
+  const cutBot = triPrismX(
+    [
+      [yBot, CT],
+      [yBot + P + 1, CT + P + 1],
+      [yBot - P - 2, CT + P + 1],
+    ],
+    xCut0,
+    xCut1,
+  );
+  const columnLocal = difference([union([plate, throat, wings]), cutTop, cutBot]);
+
+  // ---- Place the column: lean it back, stand it on the foot ---------------
+  // Same composition as the desk frame (rotate about world X by 90° − tilt).
+  const column = translate(
+    [d.colX0, d.TyCol, d.Tz],
+    rotate([90 - stand.tiltAngleDeg, 0, 0], columnLocal),
+  );
+
+  // ---- Foot ---------------------------------------------------------------
+  const foot = roundedRectPrism(d.footW, d.baseDepth, stand.baseThickness, Math.min(4, d.footW / 6));
+
+  // ---- Side gussets, bracing the column's back against the foot -----------
+  const backFaceY = (z: number) => d.TyCol + (z - d.Tz) * (sinT / cosT) - GUSSET_BITE;
+  const zBot = stand.baseThickness - 1; // embed into the foot so the union fuses
+  const zTop = stand.baseThickness + stand.gussetHeightFraction * CH * cosT;
+  const yHeel = d.baseDepth - 2;
+  const gussets: BuildOp[] = [];
+  if (yHeel > backFaceY(zBot) + 4 && zTop > zBot + 4) {
+    const gt = stand.gussetThickness;
+    const tri: [[number, number], [number, number], [number, number]] = [
+      [backFaceY(zBot), zBot],
+      [yHeel, zBot],
+      [backFaceY(zTop), zTop],
+    ];
+    gussets.push(triPrismX(tri, d.colX0, d.colX0 + gt));
+    gussets.push(triPrismX(tri, d.colX0 + CW - gt, d.colX0 + CW));
+  }
+
+  return union([foot, column, ...gussets]);
 }
 
 /**
@@ -560,12 +749,13 @@ export function buildStandNodes(
   stand: StandParams,
 ): Array<{ id: string; op: BuildOp }> | null {
   if (!board.enclosure) return null;
-  if ((stand.mount ?? 'desk') === 'wall') {
+  const mount = stand.mount ?? 'desk';
+  if (mount === 'wall') {
     return [
       { id: 'wall-body', op: buildWallBody(board, stand) },
       { id: 'wall-plate', op: buildWallPlate(board, stand) },
     ];
   }
-  const op = buildStandOp(board, stand);
+  const op = mount === 'slider' ? buildSliderStandOp(board, stand) : buildStandOp(board, stand);
   return op ? [{ id: 'stand', op }] : null;
 }

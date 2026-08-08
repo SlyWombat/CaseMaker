@@ -23,8 +23,10 @@ import type { Project } from '@/types';
 const require = createRequire(import.meta.url);
 const wasmPath = require.resolve('manifold-3d/manifold.wasm');
 
+// manifold-3d types locateFile as zero-arg; the only file it ever
+// requests is the wasm, so returning it unconditionally is equivalent.
 const tl = await ManifoldModule({
-  locateFile: (p: string) => (p.endsWith('.wasm') ? wasmPath : p),
+  locateFile: () => wasmPath,
 });
 tl.setup();
 const { Manifold, Mesh } = tl;

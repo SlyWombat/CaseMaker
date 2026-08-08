@@ -328,8 +328,15 @@ export interface StandParams {
    *          for wires, countersunk screw holes), and a BODY (the same frame,
    *          plus a shroud housing the cable) that SNAPS onto it. The plate's
    *          cantilever fingers click into windows in the shroud walls.
+   * 'slider': one part — a tilted COLUMN carrying a male T-bracket that the
+   *          device's rear channel (enclosure.sliderChannel) slides down onto,
+   *          on a wide anti-tip foot. No screws: gravity seats the device on
+   *          the bracket. Params are reused: frameThickness = column plate
+   *          thickness, bezelMargin = column width margin per side beyond the
+   *          channel cavity, openingClearance = bracket-to-channel fit
+   *          clearance per side.
    */
-  mount?: 'desk' | 'wall';
+  mount?: 'desk' | 'wall' | 'slider';
   /** Backward lean of the screen from vertical, in degrees. Wall mount: 0. */
   tiltAngleDeg: number;
   /** Frame plate thickness (must exceed bossHeight + a few mm of screw land). */

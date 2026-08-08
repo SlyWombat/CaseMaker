@@ -1,0 +1,36 @@
+{
+  "id": "u7-pro-outdoor-desk-stand",
+  "order": 135,
+  "boardId": "ubiquiti-u7-pro-outdoor",
+  "name": "UniFi U7 Pro Outdoor — bench stand",
+  "description": "Bench-test desk stand for the Ubiquiti UniFi U7 Pro Outdoor AP (1.2 kg). A column leaning back 12° carries a male T-bracket; the AP's rear mounting channel slides down onto it until the channel's closed top end seats — no screws, gravity holds it. Wide 12 mm foot with side gussets keeps the front-heavy unit from tipping. FIT WARNING: Ubiquiti publishes no dimensions for the rear channel, so the bracket profile ships with estimates. Before printing, caliper YOUR unit's channel: width behind the retention lips, opening between the lips, lip depth from the back face, total depth to the channel floor, channel length, and the distance from the AP's bottom edge up to the channel's closed end. First-print iteration expected.",
+  "estPrintMinutes": 420,
+  "projectName": "UniFi U7 Pro Outdoor — bench stand",
+  "casePatch": {
+    "stand": {
+      "enabled": true,
+      "mount": "slider",
+      "tiltAngleDeg": 12,
+      "frameThickness": 12,
+      "bezelMargin": 14,
+      "openingClearance": 0.25,
+      "screwHoleDiameter": 2.4,
+      "baseDepth": 170,
+      "baseThickness": 12,
+      "gussetThickness": 8,
+      "gussetHeightFraction": 0.55
+    },
+    "bosses": {
+      "enabled": false,
+      "insertType": "self-tap",
+      "outerDiameter": 5,
+      "holeDiameter": 2.5
+    },
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  },
+  "ports": "none"
+}

@@ -1,5 +1,6 @@
 import type { BoardProfile } from '@/types';
 import { builtinBoardProfileSchema } from './schema';
+import { hasNodeGlob, nodeGlobJson } from '@/utils/nodeGlobJson';
 
 /**
  * Built-in board profiles are discovered from the filesystem — every
@@ -10,10 +11,17 @@ import { builtinBoardProfileSchema } from './schema';
  * `import.meta.glob` keys are relative paths ("./boards/rpi-4b.json"), so
  * iteration order follows the sorted path order Vite provides. UI surfaces
  * apply their own grouping/sorting; nothing may depend on this order.
+ *
+ * Under plain Node (tsx scripts, vitest's node env) there is no Vite glob
+ * transform at runtime, so the same files are read off disk with identical
+ * keys — that keeps scripts/export-sample.ts working (it imports the
+ * project store, which resolves boards through this module).
  */
-const boardModules = import.meta.glob<{ default: unknown }>('./boards/*.json', {
-  eager: true,
-});
+const boardModules = hasNodeGlob()
+  ? nodeGlobJson<unknown>(import.meta.url, './boards/')
+  : import.meta.glob<{ default: unknown }>('./boards/*.json', {
+      eager: true,
+    });
 
 const validated: BoardProfile[] = Object.entries(boardModules).map(([path, mod]) => {
   try {

@@ -20,6 +20,7 @@ describe('Marketing gap #15 — project templates', () => {
       'slytherm',
       'guition-desk-stand',
       'guition-wall-mount',
+      'u7-pro-outdoor-desk-stand',
       'snap-fit-test',
       'protective-case',
       'large-box-200',
