@@ -72,7 +72,7 @@ export function hardwareForProject(project: Project): HardwareItem[] {
         id: 'rack-cleat-screws',
         label: 'Wood screws #8 / 4.5 mm × 60 mm (into studs) or rated anchors',
         count: cleatScrews * 2,
-        note: `${cleatScrews} through the wall cleat (bevel up and out) + ${cleatScrews} through the bottom spacer strip. Hook the rack on from above. The strips stand the rack 12 mm off the wall by design.`,
+        note: `${cleatScrews} through the wall cleat (bevel up and out) + ${cleatScrews} through the bottom spacer strip. Hook the rack on from above. The strips stand the rack 15 mm off the wall by design.`,
       });
     } else if (wallMount === 'keyhole') {
       items.push({

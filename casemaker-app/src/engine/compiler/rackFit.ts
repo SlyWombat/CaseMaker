@@ -114,7 +114,7 @@ export function rackPartFootprints(rack: RackParams): PartFootprint[] {
     }
   });
   if (wallMount === 'cleat') {
-    out.push({ id: 'rack-wall-cleat', label: 'wall cleat', fx: dims.width, fy: 30, fz: 12 });
+    out.push({ id: 'rack-wall-cleat', label: 'wall cleat', fx: dims.width, fy: 40, fz: 15 });
   }
   return out;
 }

@@ -115,10 +115,13 @@ const WALL_SCREW_D = 4.5;
 const WALL_HEAD_D = 9.6;
 const WALL_HEAD_RECESS = 2;
 const GUSSET_T = 4;
-/** Wall mount — french cleat. */
-const CLEAT_D = 12;
-const CLEAT_H = 30;
+/** Wall mount — french cleat. Chunky on purpose: the 15×40 profile keeps
+ *  the hook step and bevel legible at rack scale and adds bearing area. */
+const CLEAT_D = 15;
+const CLEAT_H = 40;
 const CLEAT_FIT = 0.4;
+/** Seat height below the panel top (hook block height + a little). */
+const CLEAT_SEAT_DROP = 58;
 /** Wall mount — keyhole hangers (flush): sized for #8 / 4 mm pan heads. */
 const KEY_HEAD_D = 9.6;
 const KEY_SLOT_W = 4.8;
@@ -354,10 +357,10 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     // below it is relieved by the cleat's thickness so the rack slides down
     // the wall onto the cleat. A wall strip that protrudes from the wall
     // makes a truly flush back geometrically impossible — the cleat +
-    // bottom spacer strips ARE the 12 mm standoff plane. For a dead-flush
+    // bottom spacer strips ARE the 15 mm standoff plane. For a dead-flush
     // wall mount use 'keyhole' instead.
     const notchD = CLEAT_D + CLEAT_FIT;
-    const seatZ = FOOT_H + bodyH - 45; // seat height at its front (low) edge
+    const seatZ = FOOT_H + bodyH - CLEAT_SEAT_DROP; // seat height at its front (low) edge
     const [na, nb] = xr(-OVER, SIDE_T + OVER);
     const diag = (notchD + OVER) * Math.SQRT2;
     cuts.push(
@@ -739,7 +742,7 @@ export function buildRackNodes(rack: RackParams): BuildNode[] {
   });
 
   if (rack.wallMount === 'cleat') {
-    const seatZ = FOOT_H + dims.bodyH - 45;
+    const seatZ = FOOT_H + dims.bodyH - CLEAT_SEAT_DROP;
     nodes.push({
       id: 'rack-wall-cleat',
       op: translate([CLEAT_FIT, dims.depth - CLEAT_D, seatZ - CLEAT_H + CLEAT_D], buildWallCleat(dims)),

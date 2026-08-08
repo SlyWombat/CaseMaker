@@ -41,7 +41,7 @@ export interface RackParams {
    * 'cleat': a separate french-cleat strip screws to the wall; the sides'
    *          rear band is relieved below a 45° hook at each rear-top edge
    *          and the rack slides down onto the strip. Strong in shear,
-   *          removable without tools — but the strips are a 12 mm standoff
+   *          removable without tools — but the strips are a 15 mm standoff
    *          plane by geometric necessity (a protruding wall strip and a
    *          flush back are mutually exclusive).
    * 'keyhole': the FLUSH option — two keyhole hangers cut into each side's

@@ -42,8 +42,8 @@ const WALL_MOUNT_OPTIONS: { value: NonNullable<RackParams['wallMount']>; label: 
   },
   {
     value: 'cleat',
-    label: 'Wall — french cleat (12 mm standoff)',
-    hint: 'Separate 45° cleat strip screws to the wall; the rack hooks over it. Strong, removable without tools — the strips hold the rack 12 mm off the wall.',
+    label: 'Wall — french cleat (15 mm standoff)',
+    hint: 'Separate 45° cleat strip screws to the wall; the rack hooks over it. Strong, removable without tools — the strips hold the rack 15 mm off the wall.',
   },
   {
     value: 'keyhole',
@@ -288,7 +288,7 @@ export function RackPanel() {
           rear edge is the hook — it rests on the cleat&apos;s 45° bevel, and the rear band
           below it is relieved by the cleat&apos;s thickness. Screw the cleat strip to studs
           bevel-up, the flat spacer strip low, then lower the rack on from above. NOTE:
-          the strips hold the rack 12&nbsp;mm off the wall by design — for a dead-flush
+          the strips hold the rack 15&nbsp;mm off the wall by design — for a dead-flush
           back use keyhole hangers instead.
         </p>
       )}

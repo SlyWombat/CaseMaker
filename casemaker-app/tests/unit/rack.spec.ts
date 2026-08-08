@@ -260,7 +260,7 @@ describe('rack archetype — mini-rack template', () => {
     const nodes = buildRackNodes(rack);
     const byId = new Map(nodes.map((n) => [n.id, n.op]));
     const D = 250;
-    const seatZ = 5 + 16 * SLOT_PITCH + 11 - 45; // front (low) edge of the seat plane
+    const seatZ = 5 + 16 * SLOT_PITCH + 11 - 58; // front (low) edge of the seat plane
     const probeVol = (op: BuildOp, x0: number, y0: number, z0: number): number => {
       const m = exec({
         kind: 'intersection',
