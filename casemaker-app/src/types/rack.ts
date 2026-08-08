@@ -38,13 +38,19 @@ export interface RackParams {
    * 'ears':  each side panel grows a gusseted rear flange with countersunk
    *          wall-screw holes — load path runs straight from the structural
    *          sides into the wall.
-   * 'cleat': a separate french-cleat strip screws to the wall; the side
-   *          panels get a matching 45° notch at their rear-top edge and the
-   *          rack hooks on. Strong in shear, removable without tools.
-   * Either wall style also solidifies the sides' rear band (no vent window
-   * near the wall joint) for strength.
+   * 'cleat': a separate french-cleat strip screws to the wall; the sides'
+   *          rear band is relieved below a 45° hook at each rear-top edge
+   *          and the rack slides down onto the strip. Strong in shear,
+   *          removable without tools — but the strips are a 12 mm standoff
+   *          plane by geometric necessity (a protruding wall strip and a
+   *          flush back are mutually exclusive).
+   * 'keyhole': the FLUSH option — two keyhole hangers cut into each side's
+   *          rear face drop over pan-head screws in the wall. No extra
+   *          printed parts, back sits dead flat on the wall.
+   * Every wall style also solidifies the sides' rear band (no vent window
+   * or relief pocket near the wall joint) for strength.
    */
-  wallMount?: 'none' | 'ears' | 'cleat';
+  wallMount?: 'none' | 'ears' | 'cleat' | 'keyhole';
   /** Printable accessories; each entry compiles to one part/STL. */
   accessories?: RackAccessory[];
   /**

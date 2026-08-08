@@ -72,7 +72,14 @@ export function hardwareForProject(project: Project): HardwareItem[] {
         id: 'rack-cleat-screws',
         label: 'Wood screws #8 / 4.5 mm × 60 mm (into studs) or rated anchors',
         count: cleatScrews * 2,
-        note: `${cleatScrews} through the wall cleat (bevel up and out) + ${cleatScrews} through the bottom spacer strip. Hook the rack on from above.`,
+        note: `${cleatScrews} through the wall cleat (bevel up and out) + ${cleatScrews} through the bottom spacer strip. Hook the rack on from above. The strips stand the rack 12 mm off the wall by design.`,
+      });
+    } else if (wallMount === 'keyhole') {
+      items.push({
+        id: 'rack-keyhole-screws',
+        label: 'Pan-head screws #8 / 4 mm (into studs) or rated anchors',
+        count: 4,
+        note: 'Two per side into the wall, heads left ~4.5 mm proud. Hang the rack over the heads via the keyhole hangers in the rear faces and slide down to lock — the back sits flush.',
       });
     }
     return items; // no lid, no bosses, no gasket — nothing below applies

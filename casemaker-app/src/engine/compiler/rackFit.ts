@@ -89,23 +89,25 @@ export function rackPartFootprints(rack: RackParams): PartFootprint[] {
       fz: 5,
     },
   ];
+  // Accessories span BETWEEN the sides (recessed behind the front columns).
+  const accW = dims.plateW + 2;
   (rack.accessories ?? []).forEach((acc, i) => {
     const n = accessorySlots(acc);
     if (acc.type === 'shelf') {
       out.push({
         id: `rack-shelf-${i}`,
         label: `shelf (${n}-slot)`,
-        fx: dims.width,
+        fx: accW,
         fy: acc.shelfDepth ?? 123,
         fz: n * SLOT_PITCH,
       });
     } else if (acc.type === 'cable-tray') {
-      out.push({ id: `rack-cable-tray-${i}`, label: 'cable tray', fx: dims.width, fy: 104, fz: 33 });
+      out.push({ id: `rack-cable-tray-${i}`, label: 'cable tray', fx: accW, fy: 104, fz: 33 });
     } else {
       out.push({
         id: `rack-${acc.type}-${i}`,
         label: acc.type === 'keystone' ? 'keystone plate' : `blank faceplate (${n}-slot)`,
-        fx: dims.width,
+        fx: accW,
         fy: n * SLOT_PITCH,
         fz: acc.type === 'keystone' ? 10 : 16,
       });
@@ -117,15 +119,15 @@ export function rackPartFootprints(rack: RackParams): PartFootprint[] {
   return out;
 }
 
-/** Largest rack width whose widest parts (faceplates/plates) still fit.
+/** Largest rack width whose widest part still fits. The governing part is
+ *  now the top/bottom plate (width − 2·SIDE_T + snap tabs ≈ width − 8).
  *  Also drives the RackPanel width slider's upper bound. */
 export function maxRackWidthForBed(bedX: number, bedY: number): number {
-  // Faceplates are width × ~50 mm; binary-search the diagonal fit.
   let lo = 120;
   let hi = 600;
   for (let i = 0; i < 40; i++) {
     const mid = (lo + hi) / 2;
-    if (rectFitsBed(mid, 50, bedX, bedY)) lo = mid;
+    if (rectFitsBed(mid - 8, 60, bedX, bedY)) lo = mid;
     else hi = mid;
   }
   return Math.floor(lo);

@@ -50,19 +50,32 @@ Independent knobs (all default to sample values):
 Fixed (never scaled): 16.5 pitch, 5 mm screw holes, keystone 15 mm/30 mm pitch +
 latch shoulder depths, 4 mm faceplate thickness, snap tab sizes, wall thicknesses.
 
+## Front recess
+
+Accessories mount 12 mm (`FRONT_RECESS`) behind the sides' front faces and span
+BETWEEN the sides (plate width = W − 2×15 − clearance), so the front columns
+stand proud and protect cables — the original's signature feature. Side screw
+column sits at y=22 (accessory-local hole at 10); rear column at y=100
+(accessory-local 88). Tie-wrap holes run along the top/bottom rails.
+
 ## Wall mount + strength
 
-Two styles (both optional, per project):
+Three styles (all optional, per project):
 
 1. **Screw-through rear ears** — ears integral to the side panels (in the panel's
    print plane, so load is carried along layers, not across them), gusseted,
    2 screws per side; screw count scales with slot count. Load path goes straight
    from the structural sides into the wall.
-2. **French cleat** — printed wall cleat strip + mating cleat across the rack rear.
-   Strong in shear, easy leveling/removal.
+2. **French cleat** — printed wall cleat strip + bottom spacer. The hook is the
+   full-depth block at each side's rear-top; the rear band below is relieved by
+   the cleat's thickness. NOTE: the strips are a 12 mm standoff plane by
+   geometric necessity — a wall strip that protrudes cannot coexist with a
+   flush back below the seat (it would collide during the slide-down).
+3. **Keyhole hangers** — the FLUSH option: two keyholes per side cut into the
+   rear faces drop over #8/4 mm pan-head wall screws. No extra printed parts.
 
-Strength package when wall mount is enabled: solid (non-vented) rear band on the
-sides, thickened rear sections, and UI guidance (studs/anchors, screw spec).
+Strength package when wall mount is enabled: solid (non-vented, non-pocketed)
+rear band on the sides, and UI guidance (studs/anchors, screw spec).
 No fake FEA — design rules + clear guidance only.
 
 ## Implementation status

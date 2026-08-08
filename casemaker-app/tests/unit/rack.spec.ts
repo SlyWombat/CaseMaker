@@ -165,8 +165,11 @@ describe('rack archetype — mini-rack template', () => {
     const side = aabbOfOp(byId.get('rack-side-left')!)!;
     expect(side.max[1] - side.min[1]).toBeCloseTo(250, 1); // depth
     expect(side.max[2] - side.min[2]).toBeCloseTo(280, 1); // height incl. feet
+    // Accessories span BETWEEN the sides (recessed 12 mm behind the front
+    // columns) — plate width, not full rack width.
     const keystone = aabbOfOp(byId.get('rack-keystone-0')!)!;
-    expect(keystone.max[0] - keystone.min[0]).toBeCloseTo(252, 1); // full width
+    expect(keystone.max[0] - keystone.min[0]).toBeCloseTo(252 - 30 - 0.6, 1);
+    expect(keystone.min[1]).toBeCloseTo(12, 1); // FRONT_RECESS
   });
 
   it('resizing tracks parameters while the slot pitch stays fixed', () => {
@@ -349,6 +352,31 @@ describe('rack archetype — mini-rack template', () => {
     // Still one connected component per panel.
     expectClean('rack-side-left+fan', left);
     expectClean('rack-side-right', right);
+  });
+
+  it('keyhole mount: flush rear face with working keyhole hangers', () => {
+    const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'keyhole' };
+    const nodes = buildRackNodes(rack);
+    // No extra printed parts — just the four structural pieces.
+    expect(nodes.map((n) => n.id)).toEqual(['rack-side-left', 'rack-side-right', 'rack-bottom', 'rack-top']);
+    const side = nodes[0]!.op;
+    const zEntry = 5 + (16 * SLOT_PITCH + 11) - 30; // upper hanger
+    const probe = (x: number, y: number, z: number, s = 2.4): number => {
+      const m = exec({
+        kind: 'intersection',
+        children: [side, { kind: 'translate', offset: [x - s / 2, y - s / 2, z - s / 2], child: { kind: 'cube', size: [s, s, s] } }],
+      });
+      const v = m.volume();
+      m.delete();
+      return v;
+    };
+    expect(probe(7.5, 248, zEntry)).toBe(0); // entry circle void at the rear face
+    expect(probe(7.5, 248, zEntry - 10)).toBe(0); // shank slot void below it
+    expect(probe(7.5 + 4.2, 248, zEntry - 10)).toBeGreaterThan(0); // face wall beside the slot
+    expect(probe(7.5, 243.5, zEntry - 10)).toBe(0); // head cavity behind the face wall
+    // Flush: the rear band is full-depth solid away from the hangers.
+    expect(probe(7.5, 248, 100)).toBeGreaterThan(0);
+    for (const n of nodes.slice(0, 2)) expectClean(n.id, n.op);
   });
 
   it('hardware BOM lists the structural M5 screws (the shelf-to-side connection)', () => {

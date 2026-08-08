@@ -47,10 +47,17 @@ const FACE_T = 4;
 /** Accessory end-rib: width across x, depth along y, front screw center. */
 const RIB_W = 12;
 const RIB_D = 12;
-/** Screw-column y centers in the side panels. Front column serves every
- *  accessory; the rear column adds support for long shelves (>= LONG_SHELF). */
+/** Accessories mount RECESSED behind the sides' front faces so the front
+ *  columns stand proud and protect cables/switches — the original's
+ *  signature "extra column over the front". */
+export const FRONT_RECESS = 12;
+/** Screw-column y centers. Accessory-local: FRONT_HOLE_Y / ACC_REAR_HOLE_Y
+ *  (from the accessory's front). Side-panel: add FRONT_RECESS. The rear
+ *  column adds support for long shelves (>= LONG_SHELF). */
 const FRONT_HOLE_Y = 10;
+const SIDE_FRONT_HOLE_Y = FRONT_RECESS + FRONT_HOLE_Y;
 const REAR_HOLE_Y = 100;
+const ACC_REAR_HOLE_Y = REAR_HOLE_Y - FRONT_RECESS;
 export const LONG_SHELF = 112;
 /** Rack depth below which the sides have no mid rib (and thus no rear
  *  screw column) — long/extra-deep shelves lose their middle-bar anchor. */
@@ -70,7 +77,6 @@ const SIDE_CLEAR = 0.3;
  *  every screw / tie hole. */
 const POCKET_SKIN = 6;
 const SCREW_BOSS_D = 13;
-const TIE_BOSS_D = 10;
 /** Accessory rib hollowing: C-channel wall thickness and the boss kept
  *  around each thread hole so screw engagement stays full-width. */
 const RIB_WALL = 5;
@@ -113,6 +119,12 @@ const GUSSET_T = 4;
 const CLEAT_D = 12;
 const CLEAT_H = 30;
 const CLEAT_FIT = 0.4;
+/** Wall mount — keyhole hangers (flush): sized for #8 / 4 mm pan heads. */
+const KEY_HEAD_D = 9.6;
+const KEY_SLOT_W = 4.8;
+const KEY_DEPTH = 9;
+const KEY_FACE_T = 4;
+const KEY_TRAVEL = 14;
 /** Cutter overshoot so booleans punch cleanly through faces. */
 const OVER = 1;
 
@@ -249,17 +261,21 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   }
 
   // Screw columns: front (every accessory) + rear (long shelves), one hole
-  // per slot, pierced laterally through the panel. Plus tie-wrap holes down
-  // the front band.
+  // per slot, pierced laterally through the panel. Tie-wrap holes run along
+  // the top/bottom rails instead of the front band — the recessed screw
+  // column leaves no band room for a second column.
   const [holeX] = xr(-OVER, SIDE_T + OVER);
   const holeLen = SIDE_T + 2 * OVER;
   for (let k = 0; k < dims.slots; k++) {
     const z = dims.holeZ(k);
-    cuts.push(translate([holeX, FRONT_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
-    cuts.push(translate([holeX, 25, z], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
+    cuts.push(translate([holeX, SIDE_FRONT_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
     if (depth >= MID_BAR_MIN_DEPTH) {
       cuts.push(translate([holeX, REAR_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
     }
+  }
+  for (let ty = FRONT_BAND + 12; ty <= depth - rearBand - 8; ty += 33) {
+    cuts.push(translate([holeX, ty, FOOT_H + RAIL / 2], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
+    cuts.push(translate([holeX, ty, FOOT_H + bodyH - RAIL / 2], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
   }
 
   // Snap-tab pockets for the top/bottom plates, opening from the INNER face.
@@ -287,8 +303,7 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   const frontBosses: BuildOp[] = [];
   for (let k = 0; k < dims.slots; k++) {
     const z = dims.holeZ(k);
-    frontBosses.push(translate([pa, FRONT_HOLE_Y, z], axisCylinder('+x', pocketDepthX, SCREW_BOSS_D / 2, 24)));
-    frontBosses.push(translate([pa, 25, z], axisCylinder('+x', pocketDepthX, TIE_BOSS_D / 2, 16)));
+    frontBosses.push(translate([pa, SIDE_FRONT_HOLE_Y, z], axisCylinder('+x', pocketDepthX, SCREW_BOSS_D / 2, 24)));
   }
   cuts.push(
     difference([
@@ -334,26 +349,54 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     }
   } else if (wallMount === 'cleat') {
     // French-cleat hook: the panel keeps full depth only ABOVE a 45° seat
-    // plane near the top rear; everything in the rear band below it is
-    // relieved so the rack slides down the wall until the seat lands on the
-    // wall cleat's matching sloped top. The seat plane rises toward the wall
-    // (rear), so gravity pulls the rack tight against it.
+    // plane near the top rear (that full-depth region IS the catch — it
+    // rests on the wall cleat's beveled top); everything in the rear band
+    // below it is relieved by the cleat's thickness so the rack slides down
+    // the wall onto the cleat. A wall strip that protrudes from the wall
+    // makes a truly flush back geometrically impossible — the cleat +
+    // bottom spacer strips ARE the 12 mm standoff plane. For a dead-flush
+    // wall mount use 'keyhole' instead.
     const notchD = CLEAT_D + CLEAT_FIT;
     const seatZ = FOOT_H + bodyH - 45; // seat height at its front (low) edge
     const [na, nb] = xr(-OVER, SIDE_T + OVER);
     const diag = (notchD + OVER) * Math.SQRT2;
-    // Wedge under the seat plane: a cube rotated +45° about x has its former
-    // TOP face on the plane z' = y', so pre-dropping the cube by its own
-    // diagonal puts the interior exactly below that plane.
     cuts.push(
       translate(
         [na, depth - notchD, seatZ],
         rotate([45, 0, 0], translate([0, 0, -diag], cube([nb - na, diag, diag]))),
       ),
     );
-    // Relieve the rest of the rear band below the seat (the wall cleat and
-    // the bottom spacer strip occupy this plane against the wall).
     cuts.push(translate([na, depth - notchD, -OVER], cube([nb - na, notchD + OVER, seatZ + 2 + OVER])));
+  } else if (wallMount === 'keyhole') {
+    // Keyhole hangers: the FLUSH wall option. The rear face stays a flat
+    // plane; two keyholes per side accept pan-head screws driven into the
+    // wall — drop the rack over the heads and slide down to lock. The entry
+    // circle passes the screw head; the narrow slot traps its shank behind
+    // a KEY_FACE_T face wall while a widened internal cavity gives the head
+    // room to travel. Cut into the solid rear band (wall mounts keep it
+    // unpocketed), centered in the panel thickness.
+    const cx = mirror ? width - SIDE_T / 2 : SIDE_T / 2;
+    for (const zEntry of [FOOT_H + bodyH - 30, FOOT_H + bodyH * 0.45]) {
+      // Entry circle, cut from the rear face inward (cylinder re-aimed -y).
+      cuts.push(
+        translate([cx, depth + OVER, zEntry], rotate([90, 0, 0], cylinder(KEY_DEPTH + OVER, KEY_HEAD_D / 2, 32))),
+      );
+      // Shank slot through the face wall, running DOWN from the entry.
+      cuts.push(
+        translate(
+          [cx - KEY_SLOT_W / 2, depth - KEY_DEPTH, zEntry - KEY_TRAVEL],
+          cube([KEY_SLOT_W, KEY_DEPTH + OVER, KEY_TRAVEL]),
+        ),
+      );
+      // Head cavity behind the face wall (blind — no overshoot, or it
+      // would breach the wall that does the trapping).
+      cuts.push(
+        translate(
+          [cx - KEY_HEAD_D / 2 - 0.5, depth - KEY_DEPTH, zEntry - KEY_TRAVEL],
+          cube([KEY_HEAD_D + 1, KEY_DEPTH - KEY_FACE_T, KEY_TRAVEL]),
+        ),
+      );
+    }
   }
 
   const base = difference([union(solid), ...cuts]);
@@ -434,11 +477,12 @@ function buildPlate(dims: RackDims): BuildOp {
   return difference([union(solid), ...cuts]);
 }
 
-/** Full-width faceplate + threaded end ribs — shared by blank & keystone. */
+/** Faceplate spanning BETWEEN the side panels (recessed behind their
+ *  protective front columns) + threaded end ribs — blank & keystone. */
 function faceplateBase(dims: RackDims, nSlots: number, plateDepth: number): { solid: BuildOp[]; cuts: BuildOp[]; h: number } {
-  const { width } = dims;
+  const { width, plateW } = dims;
   const h = nSlots * SLOT_PITCH - 0.5;
-  const solid: BuildOp[] = [cube([width, plateDepth, h])];
+  const solid: BuildOp[] = [translate([SIDE_T + SIDE_CLEAR, 0, 0], cube([plateW, plateDepth, h]))];
   const ribX: number[] = [SIDE_T + SIDE_CLEAR, width - SIDE_T - SIDE_CLEAR - RIB_W];
   const cuts: BuildOp[] = [];
   for (const rx of ribX) {
@@ -540,7 +584,7 @@ function buildShelf(dims: RackDims, nSlots: number, shelfDepth: number): BuildOp
     for (const rx of ribX) {
       cuts.push(translate([rx - OVER, FRONT_HOLE_Y, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
       if (d >= LONG_SHELF) {
-        cuts.push(translate([rx - OVER, REAR_HOLE_Y, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
+        cuts.push(translate([rx - OVER, ACC_REAR_HOLE_Y, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
       }
     }
   }
@@ -571,7 +615,7 @@ function ribChannelCuts(
       const z = (k + 0.5) * SLOT_PITCH - 0.25;
       bosses.push(translate([px0, FRONT_HOLE_Y, z], axisCylinder('+x', px1 - px0, RIB_BOSS_D / 2, 24)));
       if (rearHoles) {
-        bosses.push(translate([px0, REAR_HOLE_Y, z], axisCylinder('+x', px1 - px0, RIB_BOSS_D / 2, 24)));
+        bosses.push(translate([px0, ACC_REAR_HOLE_Y, z], axisCylinder('+x', px1 - px0, RIB_BOSS_D / 2, 24)));
       }
     }
     out.push(
@@ -690,7 +734,8 @@ export function buildRackNodes(rack: RackParams): BuildNode[] {
     else if (acc.type === 'keystone') op = buildKeystone(dims, n).op;
     else if (acc.type === 'shelf') op = buildShelf(dims, n, acc.shelfDepth ?? 123);
     else op = buildCableTray(dims);
-    nodes.push({ id: `rack-${acc.type}-${i}`, op: translate([0, 0, z0], op) });
+    // Recessed behind the sides' protective front columns (FRONT_RECESS).
+    nodes.push({ id: `rack-${acc.type}-${i}`, op: translate([0, FRONT_RECESS, z0], op) });
   });
 
   if (rack.wallMount === 'cleat') {

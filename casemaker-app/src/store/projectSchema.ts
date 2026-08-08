@@ -75,7 +75,7 @@ export const caseParamsSchema = z.object({
           z: z.number().positive(),
         })
         .optional(),
-      wallMount: z.enum(['none', 'ears', 'cleat']).optional(),
+      wallMount: z.enum(['none', 'ears', 'cleat', 'keyhole']).optional(),
       accessories: z
         .array(
           z.object({
