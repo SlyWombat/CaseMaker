@@ -1,4 +1,5 @@
 import type { Project } from '@/types';
+import { accessorySlots, LONG_SHELF } from '@/engine/compiler/rack';
 
 /** A bill of materials for the user-supplied hardware needed to assemble
  *  the printed parts. Surfaced in the export modal so the user knows what
@@ -21,6 +22,51 @@ export interface HardwareItem {
 export function hardwareForProject(project: Project): HardwareItem[] {
   const items: HardwareItem[] = [];
   const c = project.case;
+
+  // ----- Mini rack ----------------------------------------------------------
+  // The rack is held together by lateral M5 cap screws: they pass through
+  // the side panels' clearance holes and thread into the accessories' end
+  // ribs — one per slot per side, both sides. Long shelves reach the rear
+  // screw column and take a second row. THESE SCREWS ARE THE STRUCTURE:
+  // without accessories fitted, only the top/bottom snap tabs hold the
+  // frame square.
+  const rack = c.rack;
+  if (rack?.enabled) {
+    let frontScrews = 0;
+    let rearScrews = 0;
+    for (const acc of rack.accessories ?? []) {
+      const n = accessorySlots(acc);
+      frontScrews += n * 2;
+      if (acc.type === 'shelf' && (acc.shelfDepth ?? 123) >= LONG_SHELF) rearScrews += n * 2;
+    }
+    if (frontScrews + rearScrews > 0) {
+      items.push({
+        id: 'rack-screws',
+        label: 'M5 × 20–25 mm socket cap screws',
+        count: frontScrews + rearScrews,
+        note: `The rack's structure: from OUTSIDE through the side panels' Ø5.2 clearance holes into each accessory's end-rib thread holes (Ø4.7, self-tapping in plastic) — one per slot per side${rearScrews > 0 ? `, plus ${rearScrews} into the rear column for long shelves` : ''}. Snug, don't strip.`,
+      });
+    }
+    const wallMount = rack.wallMount ?? 'none';
+    if (wallMount === 'ears') {
+      const perSide = Math.max(2, Math.floor(Math.max(2, Math.round(rack.slots)) / 6));
+      items.push({
+        id: 'rack-wall-screws',
+        label: 'Wood screws #8 / 4.5 mm × 60 mm (into studs) or rated anchors',
+        count: perSide * 2,
+        note: 'Through the ear counterbores into studs or rated drywall anchors — a loaded rack can exceed 10 kg.',
+      });
+    } else if (wallMount === 'cleat') {
+      const cleatScrews = Math.max(3, Math.floor(rack.width / 80));
+      items.push({
+        id: 'rack-cleat-screws',
+        label: 'Wood screws #8 / 4.5 mm × 60 mm (into studs) or rated anchors',
+        count: cleatScrews * 2,
+        note: `${cleatScrews} through the wall cleat (bevel up and out) + ${cleatScrews} through the bottom spacer strip. Hook the rack on from above.`,
+      });
+    }
+    return items; // no lid, no bosses, no gasket — nothing below applies
+  }
 
   // ----- Desk stand ---------------------------------------------------------
   // The stand is screwed to the module's own mounting bosses, so the thread is

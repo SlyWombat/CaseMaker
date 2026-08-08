@@ -24,6 +24,7 @@ import {
   maxRackSlotsForBed,
 } from '@/engine/compiler/rackFit';
 import { findTemplate } from '@/library/templates';
+import { hardwareForProject } from '@/engine/exporters/hardwareList';
 import type { RackParams } from '@/types';
 
 const require = createRequire(import.meta.url);
@@ -247,6 +248,19 @@ describe('rack archetype — mini-rack template', () => {
     expect(ids).toContain('rack-wall-cleat');
     expect(ids).toContain('rack-wall-spacer');
     for (const node of nodes) expectClean(node.id, node.op);
+  });
+
+  it('hardware BOM lists the structural M5 screws (the shelf-to-side connection)', () => {
+    const tpl = findTemplate('mini-rack-10in');
+    const project = tpl!.build();
+    const items = hardwareForProject(project);
+    const screws = items.find((i) => i.id === 'rack-screws');
+    expect(screws).toBeDefined();
+    // Template accessories: keystone 2 + blank 2 + shelf 3 + shelf 3 + tray 2
+    // = 12 slots × 2 sides = 24 front screws, + long shelf (123 ≥ 112)
+    // 3 slots × 2 sides = 6 rear screws.
+    expect(screws!.count).toBe(30);
+    expect(screws!.note).toMatch(/side panels/);
   });
 
   it('slot overflow warns instead of silently stacking', () => {

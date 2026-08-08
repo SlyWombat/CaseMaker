@@ -51,7 +51,7 @@ const RIB_D = 12;
  *  accessory; the rear column adds support for long shelves (>= LONG_SHELF). */
 const FRONT_HOLE_Y = 10;
 const REAR_HOLE_Y = 100;
-const LONG_SHELF = 112;
+export const LONG_SHELF = 112;
 /** Side panel structure: solid front band (the cable-protecting column),
  *  rear band, top/bottom rails, rib carrying the rear screw column. */
 const FRONT_BAND = 34;
