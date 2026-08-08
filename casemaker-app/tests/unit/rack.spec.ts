@@ -310,6 +310,10 @@ describe('rack archetype — mini-rack template', () => {
     expect(probe(side, 7.5, 100, holeZ)).toBe(0);
     // Sanity: the rib boss around the hole is solid (offset probe hits material).
     expect(probe(shelf, 15.3 + 6, 100, holeZ + 5)).toBeGreaterThan(0);
+    // Side vents: the rib wall is perforated away from the bosses so a side
+    // fan can blow through (vent hole center: local y=36, z=26 → global
+    // y=48; shelf sits at slot 0, z0=10.75).
+    expect(probe(shelf, 15.3 + 2.5, 48, 10.75 + 26)).toBe(0);
     // Shrinking the rack below the mid bar's minimum depth warns.
     const shallow: RackParams = { ...rack, depth: 120 };
     expect(validateRackFit(shallow).some((i) => i.kind === 'rack-config' && /middle bar/.test(i.message))).toBe(true);
