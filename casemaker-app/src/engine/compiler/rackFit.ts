@@ -1,6 +1,13 @@
 import type { RackParams } from '@/types';
 import type { PlacementIssue } from './placementValidator';
-import { computeRackDims, accessorySlots, SLOT_PITCH, SIDE_T } from './rack';
+import {
+  computeRackDims,
+  accessorySlots,
+  SLOT_PITCH,
+  SIDE_T,
+  LONG_SHELF,
+  MID_BAR_MIN_DEPTH,
+} from './rack';
 
 /**
  * Printer build-volume fit checking for the rack archetype. The original
@@ -182,6 +189,20 @@ export function validateRackFit(rack: RackParams): PlacementIssue[] {
   // report — a permanent warning banner blocks viewport controls. The
   // RackPanel shows the guidance inline under the Mounting picker instead;
   // this validator only reports actionable problems.
+
+  // Long/extra-deep shelves screw into the sides' mid bar — which only
+  // exists when the rack is deep enough to have one.
+  const hasLongShelf = (rack.accessories ?? []).some(
+    (a) => a.type === 'shelf' && (a.shelfDepth ?? 123) >= LONG_SHELF,
+  );
+  if (hasLongShelf && dims.depth < MID_BAR_MIN_DEPTH) {
+    issues.push({
+      severity: 'warning',
+      kind: 'rack-config',
+      involves: ['rack'],
+      message: `Long/extra-deep shelves anchor into the sides' middle bar, which needs a rack depth of at least ${MID_BAR_MIN_DEPTH} mm (currently ${Math.round(dims.depth)}) — deepen the rack or switch to short shelves.`,
+    });
+  }
 
   const printer = rack.printer;
   if (!printer) return issues;

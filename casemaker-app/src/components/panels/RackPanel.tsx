@@ -323,8 +323,9 @@ export function RackPanel() {
                 aria-label={`Accessory ${i + 1} shelf depth`}
                 onChange={(e) => setAccessory(i, { ...acc, shelfDepth: Number(e.target.value) })}
               >
-                <option value="86">short (86 mm)</option>
-                <option value="123">long (123 mm)</option>
+                <option value="86">short (86 mm) — front screws only</option>
+                <option value="123">long (123 mm) — anchors mid bar</option>
+                <option value="160">extra deep (160 mm) — anchors mid bar</option>
               </select>
             )}
             <button

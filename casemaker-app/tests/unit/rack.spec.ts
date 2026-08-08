@@ -281,6 +281,37 @@ describe('rack archetype — mini-rack template', () => {
     }
   });
 
+  it('extra-deep 160 mm shelf anchors the mid bar: rear holes align with the side column', () => {
+    const rack: RackParams = {
+      ...SAMPLE,
+      accessories: [{ id: 'x', type: 'shelf', slots: 3, shelfDepth: 160 }],
+    };
+    const nodes = buildRackNodes(rack);
+    const byId = new Map(nodes.map((n) => [n.id, n.op]));
+    // First slot's screw z in assembly space: feet + margin + half pitch.
+    const holeZ = 5 + 5.5 + 0.5 * SLOT_PITCH;
+    const probe = (op: BuildOp, x: number, y: number, z: number): number => {
+      const m = exec({
+        kind: 'intersection',
+        children: [op, { kind: 'translate', offset: [x - 1.5, y - 1.5, z - 1.5], child: { kind: 'cube', size: [3, 3, 3] } }],
+      });
+      const v = m.volume();
+      m.delete();
+      return v;
+    };
+    // Void at the REAR hole center through the shelf's rib boss (y=100)…
+    const shelf = byId.get('rack-shelf-0')!;
+    expect(probe(shelf, 15.3 + 6, 100, holeZ)).toBe(0);
+    // …and through the side panel's mid-bar column at the same y/z.
+    const side = byId.get('rack-side-left')!;
+    expect(probe(side, 7.5, 100, holeZ)).toBe(0);
+    // Sanity: the rib boss around the hole is solid (offset probe hits material).
+    expect(probe(shelf, 15.3 + 6, 100, holeZ + 5)).toBeGreaterThan(0);
+    // Shrinking the rack below the mid bar's minimum depth warns.
+    const shallow: RackParams = { ...rack, depth: 120 };
+    expect(validateRackFit(shallow).some((i) => i.kind === 'rack-config' && /middle bar/.test(i.message))).toBe(true);
+  });
+
   it('hardware BOM lists the structural M5 screws (the shelf-to-side connection)', () => {
     const tpl = findTemplate('mini-rack-10in');
     const project = tpl!.build();

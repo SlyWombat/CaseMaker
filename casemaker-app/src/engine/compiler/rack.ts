@@ -52,6 +52,9 @@ const RIB_D = 12;
 const FRONT_HOLE_Y = 10;
 const REAR_HOLE_Y = 100;
 export const LONG_SHELF = 112;
+/** Rack depth below which the sides have no mid rib (and thus no rear
+ *  screw column) — long/extra-deep shelves lose their middle-bar anchor. */
+export const MID_BAR_MIN_DEPTH = 132;
 /** Side panel structure: solid front band (the cable-protecting column),
  *  rear band, top/bottom rails, rib carrying the rear screw column. */
 const FRONT_BAND = 34;
@@ -210,7 +213,7 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   // same airflow + tie-wrap intent with primitive-friendly geometry.
   const spans: Array<[number, number]> = [];
   const rearEdge = depth - rearBand;
-  if (depth >= REAR_RIB[1] + 24) {
+  if (depth >= MID_BAR_MIN_DEPTH) {
     spans.push([FRONT_BAND, REAR_RIB[0]]);
     spans.push([REAR_RIB[1], rearEdge]);
   } else {
@@ -242,7 +245,7 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     const z = dims.holeZ(k);
     cuts.push(translate([holeX, FRONT_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
     cuts.push(translate([holeX, 25, z], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
-    if (depth >= REAR_RIB[1] + 24) {
+    if (depth >= MID_BAR_MIN_DEPTH) {
       cuts.push(translate([holeX, REAR_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
     }
   }
