@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { aabbOfOp, type BuildOp } from '@/engine/compiler/buildPlan';
-import { buildRackNodes, computeRackDims, SLOT_PITCH } from '@/engine/compiler/rack';
+import { buildRackNodes, computeRackDims, SLOT_PITCH, plateScrewYs } from '@/engine/compiler/rack';
 import {
   rectFitsBed,
   validateRackFit,
@@ -335,9 +335,9 @@ describe('rack archetype — mini-rack template', () => {
     const sides = ['rack-side-left', 'rack-side-right'].map((id) => exec(byId.get(id)!));
     // Joint geometry (rack.ts): tabs reach TAB_REACH over the side from the
     // plate edge, centred TAB_LEN/2 in from each stacking foot's front edge.
-    const TAB_REACH = 11, TAB_LEN = 22, TAB_T = 8, FOOT_INSET = 4;
+    const TAB_REACH = 11, TAB_T = 8;
     const axisX = 15 + 0.3 - TAB_REACH / 2;
-    const tabYs = [FOOT_INSET + TAB_LEN / 2, SAMPLE.depth - (FOOT_INSET + TAB_LEN / 2)];
+    const tabYs = plateScrewYs(SAMPLE.depth);
     try {
       for (const plateId of ['rack-bottom', 'rack-top']) {
         const plate = exec(byId.get(plateId)!);
@@ -410,6 +410,19 @@ describe('rack archetype — mini-rack template', () => {
       for (const y of tabYs) {
         expect(ring(sides[0]!, y, 5 + TAB_T, 5 + TAB_T + 21), `bottom tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
         expect(ring(sides[0]!, y, H - TAB_T - 21, H - TAB_T), `top tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
+
+        // ...and it has to be possible to actually INSERT it. The bottom
+        // screw threads upward, so it can only be entered from under the
+        // rack, and the end tabs sit over a stacking foot. Without an access
+        // hole through the foot the head pocket is a sealed void — a screw
+        // that cannot be fitted at all, which is exactly what shipped in the
+        // first cut of this joint.
+        const path = Manifold.cylinder(5, 4.9, 4.9, 32).translate([axisX, y, 0]);
+        const blocked = Manifold.intersection([sides[0]!, path]);
+        const v = blocked.volume();
+        blocked.delete();
+        path.delete();
+        expect(v, `bottom tab screw at y=${y} can be inserted from below`).toBeLessThan(50);
       }
     } finally {
       sides.forEach((s) => s.delete());

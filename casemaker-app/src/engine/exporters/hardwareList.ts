@@ -1,5 +1,5 @@
 import type { Project } from '@/types';
-import { accessorySlots, LONG_SHELF } from '@/engine/compiler/rack';
+import { accessorySlots, plateScrewYs, LONG_SHELF } from '@/engine/compiler/rack';
 
 /** A bill of materials for the user-supplied hardware needed to assemble
  *  the printed parts. Surfaced in the export modal so the user knows what
@@ -24,11 +24,14 @@ export function hardwareForProject(project: Project): HardwareItem[] {
   const c = project.case;
 
   // ----- Mini rack ----------------------------------------------------------
-  // The rack is held together by lateral M5 cap screws: they pass through
-  // the side panels' clearance holes and thread into the accessories' end
-  // ribs — one per slot per side, both sides. Long shelves reach the rear
-  // screw column and take a second row. THESE SCREWS ARE THE STRUCTURE:
-  // without accessories fitted, only the top/bottom snap tabs hold the
+  // Two different screw jobs, and users kept asking which was which:
+  //   1. LATERAL, through the side panels into each accessory's end ribs —
+  //      one per slot per side. These are the structure.
+  //   2. VERTICAL, through the plates' corner tabs into the side rails. The
+  //      two ends are driven in OPPOSITE directions, because there is only
+  //      19 mm of rack below plate level and a screw long enough to hold
+  //      would come out through the foot.
+  // Without accessories fitted, the plate tab screws are all that holds the
   // frame square.
   const rack = c.rack;
   if (rack?.enabled) {
@@ -42,11 +45,20 @@ export function hardwareForProject(project: Project): HardwareItem[] {
     if (frontScrews + rearScrews > 0) {
       items.push({
         id: 'rack-screws',
-        label: 'M5 × 20–25 mm socket cap screws',
+        label: 'M5 × 25 mm socket cap screws',
         count: frontScrews + rearScrews,
-        note: `The rack's structure: from OUTSIDE through the side panels' Ø5.2 clearance holes into each accessory's end-rib thread holes (Ø4.7, self-tapping in plastic) — one per slot per side${rearScrews > 0 ? `, plus ${rearScrews} into the rear column for long shelves` : ''}. Snug, don't strip.`,
+        note: `The rack's structure: from OUTSIDE through the side panels' Ø5.2 clearance holes into each accessory's end-rib thread holes (Ø4.7, self-tapping in plastic) — one per slot per side${rearScrews > 0 ? `, plus ${rearScrews} into the rear column for long shelves` : ''}. 15.3 mm of that is grip through the panel, so a 20 mm screw leaves under 5 mm of thread — use 25. Snug, don't strip.`,
       });
     }
+    // Plate tab screws. This is the answer to "where do the plates take a
+    // screw" — they had none at all before the tab joint.
+    const tabScrews = plateScrewYs(rack.depth).length * 2 * 2;
+    items.push({
+      id: 'rack-plate-screws',
+      label: 'M5 × 25 mm socket cap screws (top + bottom plates)',
+      count: tabScrews,
+      note: `Vertical, into the side rails through each plate's corner tabs — ${tabScrews / 2} per plate. TOP plate: driven DOWN from above, head flush in the tab's counterbore. BOTTOM plate: driven UP from underneath, through the access holes in the stacking feet — there is no room to go downward at that end. Fit the bottom plate before the sides; the top one drops into the finished frame and lifts back out.`,
+    });
     const fanCount = rack.fans?.length ?? 0;
     if (fanCount > 0) {
       const sizes = [...new Set(rack.fans!.map((f) => f.size))].sort((a, b) => a - b);

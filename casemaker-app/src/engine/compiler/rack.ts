@@ -158,6 +158,8 @@ const TAB_SCREW_HEAD_H = 5.0;
 const TAB_SCREW_BITE = 21;
 /** Solid column reserved around a tab screw in the side's lightening pocket. */
 const TAB_COLUMN_D = 12;
+/** Driver access up through a stacking foot to the bottom tab screw's head. */
+const TAB_ACCESS_D = 10.8;
 /** Keystone jack (industry standard, NEVER scaled): retention window in a
  *  2 mm web the jack's latch clicks over (insert from the back), body
  *  clearance behind, 30 mm jack pitch. */
@@ -363,6 +365,7 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   const tabEdge = SIDE_T + SIDE_CLEAR;
   const xAt = (v: number): number => xr(v, v)[0];
   const tabAxis = xAt(tabEdge - TAB_REACH / 2);
+  const screwYs = new Set(plateScrewYs(depth));
   for (const ty of plateTabYs(depth)) {
     const y0 = ty - TAB_LEN / 2 - TAB_SLACK;
     const dy = TAB_LEN + 2 * TAB_SLACK;
@@ -374,15 +377,25 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     // web above it, and lands the head in the same outer-face counterbore the
     // top plate uses.
     cuts.push(box(tabEdge - TAB_REACH - TAB_SLACK, SIDE_T + OVER, y0, FOOT_H, dy, TAB_T));
+    // Top: only as deep as the tab, so the rail below stays solid to bite.
+    cuts.push(
+      box(tabEdge - TAB_REACH - TAB_SLACK, SIDE_T + OVER, y0, H_TOP - TAB_T, dy, TAB_T + OVER),
+    );
+    if (!screwYs.has(ty)) continue; // mid tab carries the deck, takes no screw
     cuts.push(
       translate(
         [tabAxis, ty, FOOT_H + TAB_T],
         cylinder(TAB_SCREW_BITE + OVER, TAB_SCREW_PILOT_D / 2, 24),
       ),
     );
-    // Top: only as deep as the tab, so the rail below stays solid to bite.
+    // Driver access to that screw's head. The head lands in the tab's
+    // outer-face counterbore, which on the bottom plate faces the underside of
+    // the rack — and these tabs sit over a stacking foot. Without this the
+    // head pocket is a sealed void: the screw threads upward, so it can only
+    // be entered from below, and below is solid foot. (Measured: a Ø9.8
+    // insertion path was 375 mm3 blocked — an unfittable screw.)
     cuts.push(
-      box(tabEdge - TAB_REACH - TAB_SLACK, SIDE_T + OVER, y0, H_TOP - TAB_T, dy, TAB_T + OVER),
+      translate([tabAxis, ty, -OVER], cylinder(FOOT_H + 2 * OVER, TAB_ACCESS_D / 2, 32)),
     );
     cuts.push(
       translate(
@@ -449,6 +462,7 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     keepOut.push(yzRect(yC - TAB_LEN / 2 - 4, yC + TAB_LEN / 2 + 4, H_TOP - TAB_T - 2, H_TOP));
     // ...and the column each tab screw threads into, running up from the
     // bottom ledge and down from the top one.
+    if (!screwYs.has(yC)) continue;
     for (const [za, zb] of [
       [FOOT_H + TAB_T, FOOT_H + TAB_T + TAB_SCREW_BITE + 2],
       [H_TOP - TAB_T - TAB_SCREW_BITE - 2, H_TOP - TAB_T],
@@ -634,7 +648,21 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
  *    would run out into slot 0's clearance hole. Sitting the tab at the FRONT
  *    of the foot instead opens that to 7 mm.
  */
-function plateTabYs(depth: number): number[] {
+export function plateTabYs(depth: number): number[] {
+  const ys = [...plateScrewYs(depth)];
+  // A deep rack carried only at its four corners sags across the middle of a
+  // 5 mm latticed deck; the old rebate joint had a mid seat for this. The mid
+  // tab is SUPPORT ONLY — it takes no screw. Giving it one means reserving a
+  // solid column at depth/2, and the only way to do that is to split the vent
+  // window there, which measured ~100 cm3 per panel. A tab that just carries
+  // the deck costs nothing and is what the sag actually needs.
+  if (depth >= MID_BAR_MIN_DEPTH) ys.push(depth / 2);
+  return ys;
+}
+
+/** Tab centres that additionally take a screw: the two ends, where the panel
+ *  can give the thread a solid column without eating a vent window. */
+export function plateScrewYs(depth: number): number[] {
   const yc = FOOT_INSET + TAB_LEN / 2;
   return [yc, depth - yc];
 }
@@ -674,11 +702,13 @@ function buildPlate(dims: RackDims): BuildOp {
 
   const solid: BuildOp[] = [extrude(deck, PLATE_T)];
   const cuts: BuildOp[] = [];
+  const screwYs = new Set(plateScrewYs(depth));
   for (const yC of plateTabYs(depth)) {
     for (const dir of [-1, 1] as const) {
       const edge = dir < 0 ? x0 : x0 + plateW;
       const xa = dir < 0 ? edge - TAB_REACH : edge;
       solid.push(translate([xa, yC - TAB_LEN / 2, 0], cube([TAB_REACH, TAB_LEN, TAB_T])));
+      if (!screwYs.has(yC)) continue; // mid tab is a rest, not a fixing
       const axis = xa + TAB_REACH / 2;
       // Thread-width clearance the whole way through...
       cuts.push(

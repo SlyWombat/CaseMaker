@@ -93,6 +93,18 @@ standing rack.
   foot put the tab screw 3 mm from that column — with radii summing to 4.7 the
   two holes broke into each other, so the tab screw ran out into slot 0's
   clearance hole. Sitting the tab at the *front* of the foot opens that to 7 mm.
+- **The bottom screw needs a way IN.** Its head lands in the tab's outer-face
+  counterbore, which on the bottom plate faces the rack's underside — and the
+  end tabs sit over a stacking foot. The first cut of this joint left that head
+  pocket sealed against the foot: a Ø9.8 insertion path measured 375 mm³
+  blocked, so the screw could not be fitted at all. Each foot now carries a
+  driver access hole. The constraint worth remembering: *whichever face carries
+  the counterbore must have unobstructed access in the assembled rack.*
+- **The mid tab (racks ≥ 180 mm deep) is support only** — it carries the deck
+  against sag and takes no screw. Giving it one means reserving a solid column
+  at depth/2, and the only way to do that is to split the vent window there,
+  which measured ~100 cm³ per panel. A tab that just carries the deck costs
+  nothing and is what the sag actually needs.
 - **Each screw needs a reserved solid column.** Measured: directly under the
   rack's top face there is only ~1.5 mm of solid before the lightening pocket
   opens up. The columns are keep-outs in the lightening profile, and the vent
