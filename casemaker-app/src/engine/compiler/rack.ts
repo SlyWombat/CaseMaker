@@ -85,7 +85,7 @@ const SIDE_CLEAR = 0.3;
  *  face (so they open UPWARD in the inner-face-down print orientation — no
  *  bridging), leaving this much inner skin, with solid bosses kept around
  *  every screw / tie hole. */
-const POCKET_SKIN = 5;
+const POCKET_SKIN = 3;
 /** Boss kept full-thickness around each lateral screw hole. This is bearing
  *  area for the M5 cap head (8.5 mm across), NOT thread — the screw threads
  *  into the accessory's rib, so 10 mm leaves 2.4 mm of wall around the 5.2 mm
@@ -95,7 +95,7 @@ const POCKET_SKIN = 5;
 const SCREW_BOSS_D = 10;
 /** Weight relief: solid margin kept around the panel edge and each keep-out,
  *  and the collar left around a tie-wrap hole. */
-const RELIEF_RIM = 4;
+const RELIEF_RIM = 3;
 const TIE_BOSS_MARGIN = 2;
 /** Accessory rib hollowing: C-channel wall thickness and the boss kept
  *  around each thread hole so screw engagement stays full-width. */
@@ -808,9 +808,13 @@ function buildShelf(
         [0, 0, -OVER],
         extrude(
           lightenPocket(pTranslate([deckX0, 0], rectProfile(deckW, d)), {
+            // Opened up from rib 3 / pitch 14: that left 43% of the deck
+            // solid, and the deck was the single worst part against the
+            // original (+81%). At 2.6/19 it is 27%, still a closed enough
+            // grid to stand a small appliance foot on.
             rim: 10,
-            rib: 3,
-            pitch: 14,
+            rib: 2.6,
+            pitch: 19,
             keepOut: ribKeepOut,
           }),
           3 + 2 * OVER,
