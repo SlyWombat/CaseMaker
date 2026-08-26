@@ -4,7 +4,7 @@ import { useSettingsStore, type ExportFormat } from '@/store/settingsStore';
 import { exportStlBinary, exportStlAscii, exportThreeMf } from '@/engine/jobs/workerClient';
 import { scheduleImmediate, waitForIdle } from '@/engine/jobs/JobScheduler';
 import type { StlMeshInput } from '@/workers/export/stlBinary';
-import { applyLayoutToMeshes } from '@/engine/exportLayout';
+import { applyLayoutToMeshes, PRINT_FLIP_NODE_IDS } from '@/engine/exportLayout';
 import type { MeshNode } from '@/types';
 
 export type { ExportFormat };
@@ -99,7 +99,7 @@ export function meshNodesForExport(): ExportMeshGroups {
     };
   }
   // Print-ready: lay main parts out flat, lid flipped, side-by-side along +X.
-  const laid = applyLayoutToMeshes(main, { flipNodeIds: ['lid'] });
+  const laid = applyLayoutToMeshes(main, { flipNodeIds: PRINT_FLIP_NODE_IDS });
   return {
     main: laid.map((m) => ({ positions: m.positions, indices: m.indices })),
     gasket: gasketNode ? toMesh(gasketNode) : null,

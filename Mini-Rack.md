@@ -14,7 +14,7 @@ Overall: ~250 deep × 252 wide × 275 tall mm. Author printed on a Prusa XL;
 | Part | Dims (mm) | Notes |
 |---|---|---|
 | Side panel L/R | 250 d × 275 h × 20 thick | Mirror pair. Heavy front column (x 0–45) protecting cables; y range −5..270 → 5 mm stacking foot below base |
-| Top/bottom ×2 | 222 × 250 × 15 | 5 mm plate + 5 mm lip + 10 mm snap tabs (z levels −10/−5/0/5). 222 = 252 − 2×15 |
+| Top/bottom ×2 | 222 × 250 × 15 | 5 mm plate + 5 mm lip + 10 mm snap tabs (z levels −10/−5/0/5). 222 = 252 − 2×15. See **Plate joint** below — the lip/tab is a hook that clips under a ledge, not a lap |
 | 3-slot long shelf | 252 × 49.5 × 123 deep | Vented deck, no front lip |
 | 3-slot short shelf | 252 × 49.5 × 86 deep | Pairs back-to-back with long shelf |
 | 3-slot blank | 252 × 49.5 × 4 | For user drilling/CAD variations |
@@ -49,6 +49,51 @@ Independent knobs (all default to sample values):
 
 Fixed (never scaled): 16.5 pitch, 5 mm screw holes, keystone 15 mm/30 mm pitch +
 latch shoulder depths, 4 mm faceplate thickness, snap tab sizes, wall thicknesses.
+
+## Plate joint
+
+The top and bottom plates seat in **blind rebates** cut into the side panels'
+top and bottom rails, and are snapped in by **two-jaw darts**.
+
+Measured from `samples/Rack/miniracktoporbottom.obj`, the original's plate is a
+5 mm deck (z 0..5) with a lip hanging 5 mm below it set 5 mm in from each long
+edge, which then widens back out to the plate edge for a further 5 mm — an
+undercut barb that clips under a ledge on the side panel. The four z levels the
+table above records (−10/−5/0/5) are that hook. Our first cut of this
+reproduced the *tab* and lost the *hook*: it cut the seat pocket the plate's
+full thickness at z = FOOT_H and z = H_TOP − PLATE_T, so both pockets broke out
+through the side body's bottom and top faces. The plates were located fore/aft
+and free in z — on the first printed set the top plate lifted straight off and
+the bottom plate dropped out.
+
+What replaced it:
+
+- **Seat in the plate's inner 3 mm only**, never its full 5 mm, so the rebate
+  keeps solid material on its outboard z face at both ends of the rack.
+- **Seats sit over the stacking feet** (y centres at 19 and depth − 19, plus a
+  mid seat past 180 mm depth), so the bottom rebate's floor has the full foot
+  depth under it. Both rebates sit wholly inside the top/bottom rails, which
+  are solid the full depth.
+- **Two-jaw darts** at each seat: the jaws lie *in* the plate's print plane so
+  they flex along the layers, and they squeeze toward each other into the
+  dart's own central slot — the side panel never has to provide deflection
+  clearance, which is what lets the rebate stay tight. Each jaw carries a barb
+  that ramps in and returns square into a detent at the blind end of the
+  rebate.
+- **The rebate is the seat outline grown by `SEAT_SLACK`**, generated from the
+  same `plateSeats()` profile, so fit clearance cannot drift from the shape it
+  is meant to clear.
+- **One printed plate, installed twice** — the top is the same part turned
+  over. Every y feature is symmetric about depth/2 and the barbs are on both
+  jaw faces, so the flip lands on the same rebates. `buildRackNodes` emits
+  `rack-top` as `rotate([180,0,0])` of `rack-bottom`'s op.
+
+Assembly is plate-then-sides: the rebates are blind, so the signature front
+column stays uncut and the plates are not removable from a standing rack.
+
+`tests/unit/rack.spec.ts` pins all of this by nudging an assembled plate ±1 mm
+in z, 3 mm in y, and pulling a side 0.6 mm outward, asserting each move
+collides.
 
 ## Front recess
 

@@ -11,14 +11,27 @@ export interface PartTransform {
 export interface LayoutOptions {
   gap: number;
   bedWidth: number;
-  /** Per-node hint of whether it's the lid (gets flipped) or the base (stays). */
+  /** Nodes whose assembly orientation is upside-down for printing. */
   flipNodeIds?: ReadonlyArray<string>;
 }
+
+/**
+ * Parts that must be turned over to print cleanly.
+ *
+ * The lid prints ceiling-down. The rack's BOTTOM plate carries its seats on
+ * its upper face in assembly space, so slicing it as-modelled would start
+ * each 9 mm seat tongue in mid-air 2 mm above the bed — six unsupported
+ * overhangs. Flipped, the seats land on the bed and the deck steps inward
+ * above them, no supports needed. `rack-top` is the same printed part already
+ * turned over in assembly space, so it is correct as-is and must NOT be
+ * listed here.
+ */
+export const PRINT_FLIP_NODE_IDS: ReadonlyArray<string> = ['lid', 'rack-bottom'];
 
 const DEFAULTS: Required<LayoutOptions> = {
   gap: 5,
   bedWidth: 220,
-  flipNodeIds: ['lid'],
+  flipNodeIds: PRINT_FLIP_NODE_IDS,
 };
 
 interface NodeBBox {

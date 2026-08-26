@@ -10,8 +10,6 @@
 //   • wall-mount variants emit their extra geometry/parts
 
 import { describe, it, expect } from 'vitest';
-import { createRequire } from 'node:module';
-import ManifoldModule from 'manifold-3d';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { aabbOfOp, type BuildOp } from '@/engine/compiler/buildPlan';
 import { buildRackNodes, computeRackDims, SLOT_PITCH } from '@/engine/compiler/rack';
@@ -26,80 +24,8 @@ import {
 import { findTemplate } from '@/library/templates';
 import { hardwareForProject } from '@/engine/exporters/hardwareList';
 import type { RackParams } from '@/types';
+import { Manifold, exec, type ManifoldInstance } from './helpers/manifoldExec';
 
-const require = createRequire(import.meta.url);
-const wasmPath = require.resolve('manifold-3d/manifold.wasm');
-const tl = await ManifoldModule({ locateFile: () => wasmPath });
-tl.setup();
-const { Manifold, Mesh } = tl;
-type ManifoldInstance = InstanceType<typeof Manifold>;
-
-function dedupeVertices(positions: Float32Array, indices: Uint32Array): {
-  positions: Float32Array;
-  indices: Uint32Array;
-} {
-  const map = new Map<string, number>();
-  const newPos: number[] = [];
-  const newIdx = new Uint32Array(indices.length);
-  const PREC = 1e5;
-  for (let i = 0; i < indices.length; i++) {
-    const v = indices[i]!;
-    const x = Math.round(positions[v * 3]! * PREC) / PREC;
-    const y = Math.round(positions[v * 3 + 1]! * PREC) / PREC;
-    const z = Math.round(positions[v * 3 + 2]! * PREC) / PREC;
-    const k = `${x},${y},${z}`;
-    let id = map.get(k);
-    if (id === undefined) {
-      id = newPos.length / 3;
-      newPos.push(x, y, z);
-      map.set(k, id);
-    }
-    newIdx[i] = id;
-  }
-  return { positions: new Float32Array(newPos), indices: newIdx };
-}
-
-function exec(op: BuildOp): ManifoldInstance {
-  switch (op.kind) {
-    case 'cube':
-      return Manifold.cube(op.size, op.center ?? false);
-    case 'cylinder':
-      return Manifold.cylinder(op.height, op.radiusLow, op.radiusHigh ?? op.radiusLow, op.segments ?? 0, op.center ?? false);
-    case 'mesh': {
-      const d = dedupeVertices(op.positions, op.indices);
-      return new Manifold(new Mesh({ numProp: 3, vertProperties: d.positions, triVerts: d.indices }));
-    }
-    case 'translate': {
-      const c = exec(op.child);
-      const r = c.translate(op.offset);
-      c.delete();
-      return r;
-    }
-    case 'rotate': {
-      const c = exec(op.child);
-      const r = c.rotate(op.degrees);
-      c.delete();
-      return r;
-    }
-    case 'scale': {
-      const c = exec(op.child);
-      const r = c.scale([op.factor, op.factor, op.factor]);
-      c.delete();
-      return r;
-    }
-    case 'union':
-    case 'difference':
-    case 'intersection': {
-      const cs = op.children.map(exec);
-      let r: ManifoldInstance;
-      if (op.kind === 'union') r = Manifold.union(cs);
-      else if (op.kind === 'difference') r = Manifold.difference(cs);
-      else r = Manifold.intersection(cs);
-      cs.forEach((c) => c.delete());
-      return r;
-    }
-  }
-}
 
 function expectClean(id: string, op: BuildOp): void {
   const m = exec(op);
@@ -109,7 +35,7 @@ function expectClean(id: string, op: BuildOp): void {
     components.forEach((c) => c.delete());
     const detail = `${id} — status=${m.status()} empty=${m.isEmpty()} tris=${m.numTri()} components=${n}`;
     expect(m.isEmpty(), detail).toBe(false);
-    expect(m.status() === 'NoError' || m.status() === 0, detail).toBe(true);
+    expect(m.status(), detail).toBe('NoError');
     expect(n, detail).toBe(1);
   } finally {
     m.delete();
@@ -395,6 +321,53 @@ describe('rack archetype — mini-rack template', () => {
       panel.delete();
     }
   }, 30000);
+
+  // The first printed set had nothing holding the plates in: the seat pockets
+  // were cut the plate's FULL thickness at z = FOOT_H and z = H_TOP - PLATE_T,
+  // so both broke out through the side body's bottom and top faces. The plates
+  // were located fore/aft and free in z — the top lifted straight off and the
+  // bottom dropped out. These probes pin the rebate-plus-dart joint that
+  // replaced it, at both ends of the rack (the top plate is the same part
+  // flipped, so a barb on one side only would have engaged at one end).
+  it('captures the top and bottom plates and snaps the sides on', () => {
+    const rack: RackParams = { ...SAMPLE, accessories: [] };
+    const byId = new Map(buildRackNodes(rack).map((n) => [n.id, n.op]));
+    const sides = ['rack-side-left', 'rack-side-right'].map((id) => exec(byId.get(id)!));
+    try {
+      for (const plateId of ['rack-bottom', 'rack-top']) {
+        const plate = exec(byId.get(plateId)!);
+        try {
+          const clash = (d: [number, number, number]): number => {
+            const moved = plate.translate(d);
+            let v = 0;
+            for (const side of sides) {
+              const i = Manifold.intersection([side, moved]);
+              v += i.volume();
+              i.delete();
+            }
+            moved.delete();
+            return v;
+          };
+          expect(clash([0, 0, 0]), `${plateId} seats without interference`).toBeLessThan(1);
+          expect(clash([0, 0, 1]), `${plateId} cannot lift`).toBeGreaterThan(20);
+          expect(clash([0, 0, -1]), `${plateId} cannot drop`).toBeGreaterThan(20);
+          expect(clash([0, 3, 0]), `${plateId} cannot slide out fore/aft`).toBeGreaterThan(20);
+          // A side lifted straight off sideways has to force the dart barbs
+          // back over their return faces.
+          const pulled = sides[0]!.translate([-0.6, 0, 0]);
+          const i = Manifold.intersection([pulled, plate]);
+          const v = i.volume();
+          i.delete();
+          pulled.delete();
+          expect(v, `${plateId} dart barbs resist the side pulling off`).toBeGreaterThan(0.5);
+        } finally {
+          plate.delete();
+        }
+      }
+    } finally {
+      sides.forEach((s) => s.delete());
+    }
+  }, 60000);
 
   it('keyhole mount: flush rear face with working keyhole hangers', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'keyhole' };

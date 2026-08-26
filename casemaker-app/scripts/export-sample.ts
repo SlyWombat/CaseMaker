@@ -13,11 +13,11 @@ import { createRequire } from 'node:module';
 import ManifoldModule from 'manifold-3d';
 
 import { compileProject } from '../src/engine/compiler/ProjectCompiler';
-import type { BuildOp } from '../src/engine/compiler/buildPlan';
+import { executeOp } from '../src/workers/geometry/evaluateOp';
 import { createDefaultProject } from '../src/store/projectStore';
 import { buildBinaryStl } from '../src/workers/export/stlBinary';
 import { autoPortsForBoard } from '../src/engine/compiler/portFactory';
-import { applyLayoutToMeshes } from '../src/engine/exportLayout';
+import { applyLayoutToMeshes, PRINT_FLIP_NODE_IDS } from '../src/engine/exportLayout';
 import { defaultSnapCatchesForCase } from '../src/engine/compiler/snapCatches';
 import { findTemplate } from '../src/library/templates';
 import type { Project, BoardProfile, MeshNode } from '../src/types';
@@ -36,82 +36,6 @@ const tl = await ManifoldModule({
   locateFile: () => wasmPath,
 });
 tl.setup();
-const { Manifold, Mesh } = tl;
-type ManifoldInstance = InstanceType<typeof Manifold>;
-
-function dedupe(positions: Float32Array, indices: Uint32Array): {
-  positions: Float32Array;
-  indices: Uint32Array;
-} {
-  const map = new Map<string, number>();
-  const newPos: number[] = [];
-  const newIdx = new Uint32Array(indices.length);
-  const PREC = 1e5;
-  for (let i = 0; i < indices.length; i++) {
-    const v = indices[i]!;
-    const x = Math.round(positions[v * 3]! * PREC) / PREC;
-    const y = Math.round(positions[v * 3 + 1]! * PREC) / PREC;
-    const z = Math.round(positions[v * 3 + 2]! * PREC) / PREC;
-    const key = `${x},${y},${z}`;
-    let id = map.get(key);
-    if (id === undefined) {
-      id = newPos.length / 3;
-      newPos.push(x, y, z);
-      map.set(key, id);
-    }
-    newIdx[i] = id;
-  }
-  return { positions: new Float32Array(newPos), indices: newIdx };
-}
-
-function exec(op: BuildOp): ManifoldInstance {
-  switch (op.kind) {
-    case 'cube':
-      return Manifold.cube(op.size, op.center ?? false);
-    case 'cylinder':
-      return Manifold.cylinder(
-        op.height,
-        op.radiusLow,
-        op.radiusHigh ?? op.radiusLow,
-        op.segments ?? 0,
-        op.center ?? false,
-      );
-    case 'mesh': {
-      const d = dedupe(op.positions, op.indices);
-      const mesh = new Mesh({ numProp: 3, vertProperties: d.positions, triVerts: d.indices });
-      return new Manifold(mesh);
-    }
-    case 'translate': {
-      const child = exec(op.child);
-      const result = child.translate(op.offset);
-      child.delete();
-      return result;
-    }
-    case 'rotate': {
-      const child = exec(op.child);
-      const result = child.rotate(op.degrees);
-      child.delete();
-      return result;
-    }
-    case 'scale': {
-      const child = exec(op.child);
-      const result = child.scale([op.factor, op.factor, op.factor]);
-      child.delete();
-      return result;
-    }
-    case 'union':
-    case 'difference':
-    case 'intersection': {
-      const children = op.children.map(exec);
-      let result: ManifoldInstance;
-      if (op.kind === 'union') result = Manifold.union(children);
-      else if (op.kind === 'difference') result = Manifold.difference(children);
-      else result = Manifold.intersection(children);
-      children.forEach((c) => c.delete());
-      return result;
-    }
-  }
-}
 
 interface NodeOutput {
   id: string;
@@ -120,11 +44,11 @@ interface NodeOutput {
   triCount: number;
 }
 
-function buildNodeMeshes(project: Project): NodeOutput[] {
+async function buildNodeMeshes(project: Project): Promise<NodeOutput[]> {
   const plan = compileProject(project);
   const out: NodeOutput[] = [];
   for (const node of plan.nodes) {
-    const m = exec(node.op);
+    const m = await executeOp(tl, node.op);
     try {
       const mesh = m.getMesh();
       const numProp = mesh.numProp;
@@ -287,7 +211,7 @@ const SAMPLES: SampleSpec[] = [
 let totalTris = 0;
 for (const sample of SAMPLES) {
   const project = sample.build();
-  const rawMeshes = buildNodeMeshes(project);
+  const rawMeshes = await buildNodeMeshes(project);
   // Apply the print-ready layout (issue #10): flip the lid 180° on X, drop
   // every part to Z=0, pack side-by-side along +X with a 5 mm gap.
   const meshNodes: MeshNode[] = rawMeshes.map((m) => ({
@@ -299,7 +223,7 @@ for (const sample of SAMPLES) {
       bbox: { min: [0, 0, 0], max: [0, 0, 0] },
     },
   }));
-  const laid = applyLayoutToMeshes(meshNodes, { gap: 5, bedWidth: 220, flipNodeIds: ['lid'] });
+  const laid = applyLayoutToMeshes(meshNodes, { gap: 5, bedWidth: 220, flipNodeIds: PRINT_FLIP_NODE_IDS });
   const buf = buildBinaryStl(laid.map((m) => ({ positions: m.positions, indices: m.indices })));
   const path = join(samplesDir, sample.filename);
   writeFileSync(path, Buffer.from(buf));

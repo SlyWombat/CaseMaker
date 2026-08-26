@@ -19,101 +19,12 @@
 // If any of those interact badly with each other, this spec catches it.
 
 import { describe, it, expect } from 'vitest';
-import { createRequire } from 'node:module';
-import ManifoldModule from 'manifold-3d';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import type { BuildOp } from '@/engine/compiler/buildPlan';
 import { findTemplate } from '@/library/templates';
 import type { Project } from '@/types';
+import { exec } from './helpers/manifoldExec';
 
-const require = createRequire(import.meta.url);
-const wasmPath = require.resolve('manifold-3d/manifold.wasm');
-
-// Top-level await isn't allowed in vitest beforeAll; load the module
-// once at module-eval time and reuse.
-// manifold-3d types locateFile as zero-arg; the only file it ever
-// requests is the wasm, so returning it unconditionally is equivalent.
-const tl = await ManifoldModule({
-  locateFile: () => wasmPath,
-});
-tl.setup();
-const { Manifold, Mesh } = tl;
-type ManifoldInstance = InstanceType<typeof Manifold>;
-
-function dedupeVertices(positions: Float32Array, indices: Uint32Array): {
-  positions: Float32Array;
-  indices: Uint32Array;
-} {
-  const map = new Map<string, number>();
-  const newPos: number[] = [];
-  const newIdx = new Uint32Array(indices.length);
-  const PREC = 1e5;
-  for (let i = 0; i < indices.length; i++) {
-    const v = indices[i]!;
-    const x = Math.round(positions[v * 3]! * PREC) / PREC;
-    const y = Math.round(positions[v * 3 + 1]! * PREC) / PREC;
-    const z = Math.round(positions[v * 3 + 2]! * PREC) / PREC;
-    const k = `${x},${y},${z}`;
-    let id = map.get(k);
-    if (id === undefined) {
-      id = newPos.length / 3;
-      newPos.push(x, y, z);
-      map.set(k, id);
-    }
-    newIdx[i] = id;
-  }
-  return { positions: new Float32Array(newPos), indices: newIdx };
-}
-
-function exec(op: BuildOp): ManifoldInstance {
-  switch (op.kind) {
-    case 'cube':
-      return Manifold.cube(op.size, op.center ?? false);
-    case 'cylinder':
-      return Manifold.cylinder(
-        op.height,
-        op.radiusLow,
-        op.radiusHigh ?? op.radiusLow,
-        op.segments ?? 0,
-        op.center ?? false,
-      );
-    case 'mesh': {
-      const d = dedupeVertices(op.positions, op.indices);
-      return new Manifold(
-        new Mesh({ numProp: 3, vertProperties: d.positions, triVerts: d.indices }),
-      );
-    }
-    case 'translate': {
-      const c = exec(op.child);
-      const r = c.translate(op.offset);
-      c.delete();
-      return r;
-    }
-    case 'rotate': {
-      const c = exec(op.child);
-      const r = c.rotate(op.degrees);
-      c.delete();
-      return r;
-    }
-    case 'scale': {
-      const c = exec(op.child);
-      const r = c.scale([op.factor, op.factor, op.factor]);
-      c.delete();
-      return r;
-    }
-    case 'union':
-    case 'difference':
-    case 'intersection': {
-      const cs = op.children.map(exec);
-      let r: ManifoldInstance;
-      if (op.kind === 'union') r = Manifold.union(cs);
-      else if (op.kind === 'difference') r = Manifold.difference(cs);
-      else r = Manifold.intersection(cs);
-      cs.forEach((c) => c.delete());
-      return r;
-    }
-  }
-}
 
 interface NodeCheck {
   isEmpty: boolean;

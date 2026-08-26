@@ -3,14 +3,25 @@ import {
   cube,
   cylinder,
   axisCylinder,
+  circleProfile,
   difference,
+  extrude,
+  extrudeX,
+  lightenPocket,
   mesh,
+  pDifference,
+  pOffset,
+  poly,
+  pTranslate,
+  pUnion,
+  rectProfile,
   roundedRectPrism,
   rotate,
   translate,
   union,
   type BuildNode,
   type BuildOp,
+  type Profile,
 } from './buildPlan';
 
 /**
@@ -37,6 +48,7 @@ const END_MARGIN = 5.5;
 /** Stacking feet under the side panels. */
 const FOOT_H = 5;
 const FOOT_LEN = 30;
+const FOOT_INSET = 4;
 /** M5 cap screws: clearance through the sides, thread into accessory ribs. */
 const SCREW_CLEAR_D = 5.2;
 const SCREW_THREAD_D = 4.7;
@@ -75,8 +87,18 @@ const SIDE_CLEAR = 0.3;
  *  face (so they open UPWARD in the inner-face-down print orientation — no
  *  bridging), leaving this much inner skin, with solid bosses kept around
  *  every screw / tie hole. */
-const POCKET_SKIN = 6;
-const SCREW_BOSS_D = 13;
+const POCKET_SKIN = 5;
+/** Boss kept full-thickness around each lateral screw hole. This is bearing
+ *  area for the M5 cap head (8.5 mm across), NOT thread — the screw threads
+ *  into the accessory's rib, so 10 mm leaves 2.4 mm of wall around the 5.2 mm
+ *  clearance hole and still supports the whole head. At 13 mm the bosses were
+ *  3.5 mm apart on the 16.5 pitch, which made each screw column a solid bar:
+ *  the two columns alone were 107 cm3 of a 330 cm3 panel. */
+const SCREW_BOSS_D = 10;
+/** Weight relief: solid margin kept around the panel edge and each keep-out,
+ *  and the collar left around a tie-wrap hole. */
+const RELIEF_RIM = 4;
+const TIE_BOSS_MARGIN = 2;
 /** Accessory rib hollowing: C-channel wall thickness and the boss kept
  *  around each thread hole so screw engagement stays full-width. */
 const RIB_WALL = 5;
@@ -93,11 +115,45 @@ export const FAN_SPECS: Record<number, { bolt: number; opening: number }> = {
   92: { bolt: 82.5, opening: 84 },
   120: { bolt: 105, opening: 112 },
 };
-/** Top/bottom plates: thickness, snap tab size, tab fit slack. */
+/**
+ * Top/bottom plates. Each plate lands in a blind rebate cut into the side
+ * panels' top and bottom rails.
+ *
+ * The seat occupies only the plate's INNER 3 mm, never its full thickness, so
+ * the rebate keeps solid material on its outboard z face. The full-thickness
+ * tab this replaces cut clean through the side body's bottom and top faces: it
+ * located the plates fore/aft and left them free in z, so on the first printed
+ * set the top plate lifted straight off and the bottom plate dropped out.
+ * Seats sit over the stacking feet, which puts the whole foot depth beneath
+ * the bottom rebate's floor.
+ */
 const PLATE_T = 5;
-const TAB_LEN = 20;
-const TAB_DEPTH = 10;
-const TAB_SLACK = 0.3;
+const SEAT_T = 3;
+const SEAT_LEN = 20;
+const SEAT_DEPTH = 10;
+const SEAT_SLACK = 0.3;
+/**
+ * Snap darts hold the sides onto the plates before a single shelf is screwed
+ * in — the assembly step the printed set had no answer for.
+ *
+ * Each dart is a two-jaw arrowhead lying IN the plate's print plane, so the
+ * jaws flex along the layers rather than across them, and they squeeze toward
+ * each other into the dart's own central slot — the side panel never has to
+ * provide deflection clearance, which is what lets the rebate stay tight on
+ * both faces. Symmetric about the seat centre on purpose: the top plate is
+ * this same part turned over, so a barb on one side only would engage at the
+ * bottom of the rack and do nothing at the top.
+ *
+ * A jaw clears `DART_BARB - SEAT_SLACK` over `DART_FREE` of free length, which
+ * puts peak surface strain near 0.35% — well inside PLA, never mind PETG.
+ */
+const DART_W = 8;
+const DART_SPLIT = 2;
+const DART_BARB = 1.0;
+const DART_LEAD = 2.5;
+const DART_LAND = 4;
+const DART_RELIEF = 2.5;
+const DART_FREE = 30;
 /** Keystone jack (industry standard, NEVER scaled): retention window in a
  *  2 mm web the jack's latch clicks over (insert from the back), body
  *  clearance behind, 30 mm jack pitch. */
@@ -229,8 +285,8 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   const solid: BuildOp[] = [
     // Panel body spans z FOOT_H..H_TOP; stacking feet hang below at both ends.
     box(0, SIDE_T, 0, FOOT_H, depth, bodyH),
-    box(0, SIDE_T, 4, 0, FOOT_LEN, FOOT_H + OVER),
-    box(0, SIDE_T, depth - 4 - FOOT_LEN, 0, FOOT_LEN, FOOT_H + OVER),
+    box(0, SIDE_T, FOOT_INSET, 0, FOOT_LEN, FOOT_H + OVER),
+    box(0, SIDE_T, depth - FOOT_INSET - FOOT_LEN, 0, FOOT_LEN, FOOT_H + OVER),
   ];
 
   const cuts: BuildOp[] = [];
@@ -246,6 +302,7 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   } else {
     spans.push([FRONT_BAND, rearEdge]);
   }
+  const windows: Array<[number, number, number, number]> = []; // y0, yLen, z0, zLen
   for (const [a, b] of spans) {
     let segs: Array<[number, number]> = [[a, b]];
     if (b - a > 130) {
@@ -257,10 +314,11 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     }
     for (const [sa, sb] of segs) {
       if (sb - sa < 24) continue;
-      const winZ0 = FOOT_H + RAIL;
-      const winZLen = bodyH - 2 * RAIL;
-      cuts.push(xWindow(xr(0, SIDE_T)[0], sa + 4, winZ0, sb - sa - 8, winZLen, 6));
+      windows.push([sa + 4, sb - sa - 8, FOOT_H + RAIL, bodyH - 2 * RAIL]);
     }
+  }
+  for (const [wy, wdy, wz, wdz] of windows) {
+    cuts.push(xWindow(xr(0, SIDE_T)[0], wy, wz, wdy, wdz, 6));
   }
 
   // Screw columns: front (every accessory) + rear (long shelves), one hole
@@ -281,44 +339,82 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     cuts.push(translate([holeX, ty, FOOT_H + bodyH - RAIL / 2], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
   }
 
-  // Snap-tab pockets for the top/bottom plates, opening from the INNER face.
-  const innerPocket = (yC: number, z0: number): BuildOp => {
-    const [a, b] = mirror
-      ? [width - SIDE_T - OVER, width - SIDE_T + TAB_DEPTH]
-      : [SIDE_T - TAB_DEPTH, SIDE_T + OVER];
-    return translate(
-      [a, yC - TAB_LEN / 2 - TAB_SLACK, z0 - TAB_SLACK],
-      cube([b - a, TAB_LEN + 2 * TAB_SLACK, PLATE_T + 2 * TAB_SLACK]),
+  // Blind rebates for the top/bottom plates, opening from the INNER face. Both
+  // sit wholly inside the top/bottom rails, which are solid the full depth, so
+  // each rebate keeps material above AND below it — the bottom one is backed
+  // by the stacking foot as well.
+  const seats = plateSeats(
+    mirror ? width - SIDE_T - SIDE_CLEAR : SIDE_T + SIDE_CLEAR,
+    mirror ? 1 : -1,
+    depth,
+  );
+  for (const z0 of [FOOT_H + PLATE_T - SEAT_T, H_TOP - PLATE_T]) {
+    cuts.push(
+      translate([0, 0, z0 - SEAT_SLACK], extrude(seats.pocket, SEAT_T + 2 * SEAT_SLACK)),
     );
-  };
-  for (const yC of [depth * 0.25, depth * 0.75]) {
-    cuts.push(innerPocket(yC, FOOT_H)); // bottom plate seat
-    cuts.push(innerPocket(yC, H_TOP - PLATE_T)); // top plate seat
   }
 
-  // Weight-relief pockets in the solid bands, cut from the OUTER face with
-  // POCKET_SKIN of inner wall left and solid bosses around every hole. The
-  // rear band stays solid whenever the rack wall-mounts (strength package).
+  // Weight relief, cut from the OUTER face — which faces UP in the
+  // inner-face-down print orientation, so every pocket opens upward and
+  // nothing bridges. Relieving only the front and rear bands (what this
+  // replaces) left the rails and the rear rib essentially solid, and the
+  // panel came out 46% heavier than the original despite being 5 mm THINNER.
+  // Every structural region gets pocketed now; the profile is drawn once in
+  // the panel's own y-z plane and extruded through the thickness.
+  //
+  // What stays full thickness, and why:
+  //   - a rim around the panel edge and each region
+  //   - a boss at every screw and tie-wrap hole (head bearing area)
+  //   - the plate rebates: those are cut SEAT_DEPTH from the INNER face, and
+  //     POCKET_SKIN + SEAT_DEPTH exceeds SIDE_T, so pocketing across one would
+  //     punch straight through the seat
+  //   - the whole rear band whenever the rack wall-mounts (strength package,
+  //     and where the cleat hook and keyhole hangers land)
   const [pa, pb] = xr(-OVER, SIDE_T - POCKET_SKIN);
-  const pocketZ0 = FOOT_H + RAIL;
-  const pocketZLen = bodyH - 2 * RAIL;
   const pocketDepthX = pb - pa;
-  const frontBosses: BuildOp[] = [];
+  const yzRect = (y0: number, y1: number, z0: number, z1: number): Profile =>
+    pTranslate([y0, z0], rectProfile(y1 - y0, z1 - z0));
+  const webZ0 = FOOT_H + RELIEF_RIM;
+  const webZ1 = H_TOP - RELIEF_RIM;
+  const wallMounted = (rack.wallMount ?? 'none') !== 'none';
+  const regions: Profile[] = [
+    yzRect(RELIEF_RIM, FRONT_BAND - RELIEF_RIM, webZ0, webZ1),
+    // The rails run the full depth and sit below / above every window.
+    yzRect(RELIEF_RIM, depth - RELIEF_RIM, webZ0, FOOT_H + RAIL - 2),
+    yzRect(RELIEF_RIM, depth - RELIEF_RIM, H_TOP - RAIL + 2, webZ1),
+  ];
+  if (depth >= MID_BAR_MIN_DEPTH) {
+    regions.push(yzRect(REAR_RIB[0] + 2, REAR_RIB[1] - 2, webZ0, webZ1));
+  }
+  if (!wallMounted) {
+    regions.push(yzRect(depth - rearBand + RELIEF_RIM, depth - RELIEF_RIM, webZ0, webZ1));
+  }
+  const keepOut: Profile[] = [];
   for (let k = 0; k < dims.slots; k++) {
     const z = dims.holeZ(k);
-    frontBosses.push(translate([pa, SIDE_FRONT_HOLE_Y, z], axisCylinder('+x', pocketDepthX, SCREW_BOSS_D / 2, 24)));
+    keepOut.push(pTranslate([SIDE_FRONT_HOLE_Y, z], circleProfile(SCREW_BOSS_D / 2, 20)));
+    if (depth >= MID_BAR_MIN_DEPTH) {
+      keepOut.push(pTranslate([REAR_HOLE_Y, z], circleProfile(SCREW_BOSS_D / 2, 20)));
+    }
+  }
+  for (let ty = FRONT_BAND + 12; ty <= depth - rearBand - 8; ty += 33) {
+    for (const z of [FOOT_H + RAIL / 2, FOOT_H + bodyH - RAIL / 2]) {
+      keepOut.push(pTranslate([ty, z], circleProfile(TIE_D / 2 + TIE_BOSS_MARGIN, 16)));
+    }
+  }
+  for (const yC of plateSeatYs(depth)) {
+    for (const z0 of [FOOT_H + PLATE_T - SEAT_T, H_TOP - PLATE_T]) {
+      keepOut.push(
+        yzRect(yC - SEAT_LEN / 2 - 3, yC + SEAT_LEN / 2 + 3, z0 - 2, z0 + SEAT_T + 2),
+      );
+    }
   }
   cuts.push(
-    difference([
-      translate([pa, 3, pocketZ0], cube([pocketDepthX, FRONT_BAND - 6, pocketZLen])),
-      ...frontBosses,
-    ]),
+    translate(
+      [pa, 0, 0],
+      extrudeX(pDifference([pUnion(regions), ...keepOut]), pocketDepthX),
+    ),
   );
-  if ((rack.wallMount ?? 'none') === 'none') {
-    cuts.push(
-      translate([pa, depth - rearBand + 3, pocketZ0], cube([pocketDepthX, rearBand - 6, pocketZLen])),
-    );
-  }
 
   // ---- Wall mount ----------------------------------------------------------
   const wallMount = rack.wallMount ?? 'none';
@@ -429,6 +525,13 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     fanCuts.push(translate([holeX, ty, FOOT_H + RAIL / 2], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
     fanCuts.push(translate([holeX, ty, FOOT_H + bodyH - RAIL / 2], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
   }
+  // ...and the plate rebates: a strip spans rail-to-rail, so one landing on a
+  // seat would fill the rebate right back in.
+  for (const z0 of [FOOT_H + PLATE_T - SEAT_T, H_TOP - PLATE_T]) {
+    fanCuts.push(
+      translate([0, 0, z0 - SEAT_SLACK], extrude(seats.pocket, SEAT_T + 2 * SEAT_SLACK)),
+    );
+  }
   const [sx0, sx1] = xr(0, SIDE_T);
   const [hx] = xr(-OVER, 0);
   const [ppa, ppb] = xr(-OVER, SIDE_T - POCKET_SKIN);
@@ -465,32 +568,141 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   return difference([union([base, ...strips]), ...fanCuts]);
 }
 
-/** Top/bottom plate: vented deck spanning between the sides with snap tabs. */
+/**
+ * Seat centres along y. They sit over the stacking feet so the bottom rebate's
+ * floor is backed by the full foot depth, plus a mid seat on deep racks so the
+ * plate is not carried by its two ends alone. Symmetric about depth/2, which is
+ * what lets the top plate be the same printed part, flipped.
+ */
+function plateSeatYs(depth: number): number[] {
+  const yc = FOOT_INSET + FOOT_LEN / 2;
+  const ys = [yc, depth - yc];
+  if (depth >= 180) ys.push(depth / 2);
+  return ys;
+}
+
+/** Distances measured OUTBOARD from a plate edge; negative reaches inboard. */
+const D_TIP = SEAT_DEPTH - 1;
+const D_ROOT = -2;
+const D_LEAD = D_TIP - DART_LEAD;
+const D_LAND = D_LEAD - DART_LAND;
+
+interface SeatProfiles {
+  /** Bearing lands plus both dart jaws — everything that carries load. */
+  solid: Profile;
+  /** The outward-facing barb on each jaw: ramp in, land, square return. */
+  barb: Profile;
+  /** Slots that free the jaws; these cut the FULL plate thickness. */
+  relief: Profile;
+  /** Blind rebate + the two barb detents, cut into the side panel. */
+  pocket: Profile;
+}
+
+/**
+ * The plate-to-side joint, drawn once as a 2D outline and used three ways: the
+ * plate's seats, the slots that free its dart jaws, and the side panel's
+ * rebate. The rebate is the *same* outline grown by `SEAT_SLACK`, so fit
+ * clearance can never drift away from the shape it is meant to clear.
+ *
+ * `dir` is +1 when the seat reaches outboard toward +x (the right-hand edge)
+ * and -1 for the left, so one builder serves both plate edges and both panels.
+ */
+function plateSeats(edge: number, dir: 1 | -1, depth: number): SeatProfiles {
+  const at = (a: number, b: number, y0: number, y1: number): Profile => {
+    const p = edge + dir * a;
+    const q = edge + dir * b;
+    const [xa, xb] = p < q ? [p, q] : [q, p];
+    return pTranslate([xa, y0], rectProfile(xb - xa, y1 - y0));
+  };
+  const half = SEAT_LEN / 2;
+  const jawOut = DART_W / 2;              // outer face of each jaw
+  const jawIn = DART_SPLIT / 2;           // inner face, against the central slot
+  const landIn = jawOut + DART_RELIEF;    // inner edge of each bearing land
+  const xTip = edge + dir * D_TIP;
+  const xLead = edge + dir * D_LEAD;
+  const solid: Profile[] = [];
+  const barb: Profile[] = [];
+  const relief: Profile[] = [];
+  const pocket: Profile[] = [];
+  for (const yC of plateSeatYs(depth)) {
+    // Two bearing lands outboard, two dart jaws inboard of them. The jaws run
+    // DART_FREE into the deck so their flexing length lives in the plate.
+    const bearing = [
+      at(D_TIP, D_ROOT, yC - half, yC - landIn),
+      at(D_TIP, D_ROOT, yC + landIn, yC + half),
+      at(D_TIP, -DART_FREE, yC - jawOut, yC - jawIn),
+      at(D_TIP, -DART_FREE, yC + jawIn, yC + jawOut),
+    ];
+    solid.push(...bearing);
+    // Slot each jaw free of its land, and split the pair so they can squeeze.
+    relief.push(at(D_TIP + OVER, -DART_FREE, yC - landIn, yC - jawOut));
+    relief.push(at(D_TIP + OVER, -DART_FREE, yC + jawOut, yC + landIn));
+    relief.push(at(D_TIP + OVER, -DART_FREE, yC - jawIn, yC + jawIn));
+
+    for (const sign of [1, -1] as const) {
+      const y0 = yC + sign * jawOut;
+      const y1 = y0 + sign * DART_BARB;
+      const [ya, yb] = sign > 0 ? [y0, y1] : [y1, y0];
+      // Ramp the side cams over on the way in, then a square return face it
+      // has to be forced back over to come apart.
+      barb.push(poly([[xTip, y0], [xLead, y1], [xLead, y0]]));
+      barb.push(at(D_LEAD, D_LAND, ya, yb));
+      // Detent the barb springs into, stopping 0.4 mm short of that return
+      // face so the joint seats without preload.
+      const [da, db] =
+        sign > 0
+          ? [y0, y1 + SEAT_SLACK]
+          : [y1 - SEAT_SLACK, y0];
+      pocket.push(at(D_TIP + OVER, D_LAND - 0.4, da, db));
+    }
+    pocket.push(pOffset(pUnion(bearing), SEAT_SLACK, 'miter'));
+  }
+  return {
+    solid: pUnion(solid),
+    barb: pUnion(barb),
+    relief: pUnion(relief),
+    pocket: pUnion(pocket),
+  };
+}
+
+/**
+ * Top/bottom plate: a vented deck spanning between the sides, seated in their
+ * rebates and snapped in by four darts. One printed part serves both ends of
+ * the rack — the top is the same plate turned over (see buildRackNodes).
+ */
 function buildPlate(dims: RackDims): BuildOp {
   const { plateW, depth } = dims;
   const x0 = SIDE_T + SIDE_CLEAR;
-  const solid: BuildOp[] = [translate([x0, 0, 0], cube([plateW, depth, PLATE_T]))];
-  for (const yC of [depth * 0.25, depth * 0.75]) {
-    solid.push(translate([x0 - TAB_DEPTH + 1, yC - TAB_LEN / 2, 0], cube([TAB_DEPTH + 1, TAB_LEN, PLATE_T])));
-    solid.push(translate([x0 + plateW - 1, yC - TAB_LEN / 2, 0], cube([TAB_DEPTH + 1, TAB_LEN, PLATE_T])));
-  }
-  // Airflow hole grid, 15 mm solid rim.
-  const cuts: BuildOp[] = [];
-  const rim = 15;
-  const pitch = 14;
-  const r = 4;
-  const ux = plateW - 2 * rim;
-  const uy = depth - 2 * rim;
-  const nx = Math.floor(ux / pitch);
-  const ny = Math.floor(uy / pitch);
-  for (let i = 0; i < nx; i++) {
-    for (let j = 0; j < ny; j++) {
-      const cx = x0 + rim + (ux - (nx - 1) * pitch) / 2 + i * pitch;
-      const cy = rim + (uy - (ny - 1) * pitch) / 2 + j * pitch;
-      cuts.push(translate([cx, cy, -OVER], cylinder(PLATE_T + 2 * OVER, r, 24)));
+  const left = plateSeats(x0, -1, depth);
+  const right = plateSeats(x0 + plateW, 1, depth);
+
+  // Airflow: a triangulated rib lattice inside a 15 mm solid rim. The hole
+  // grid this replaces was only ~25% open and left the plate heavier than it
+  // needed to be; a lattice opens ~55% for a stiffer panel. Each dart's
+  // flexing length is kept solid so the jaws stay a clean cantilever.
+  const plateOutline = pTranslate([x0, 0], rectProfile(plateW, depth));
+  const dartKeepOut: Profile[] = [];
+  for (const yC of plateSeatYs(depth)) {
+    for (const nearLeft of [true, false]) {
+      const a = nearLeft ? x0 : x0 + plateW - DART_FREE - 6;
+      dartKeepOut.push(
+        pTranslate([a, yC - SEAT_LEN / 2 - 3], rectProfile(DART_FREE + 6, SEAT_LEN + 6)),
+      );
     }
   }
-  return difference([union(solid), ...cuts]);
+  const deck = pDifference([
+    plateOutline,
+    lightenPocket(plateOutline, { rim: 15, rib: 3.5, pitch: 14, keepOut: dartKeepOut }),
+    left.relief,
+    right.relief,
+  ]);
+  // Seats ride on the deck's inner face, so the rebate that receives them can
+  // keep solid material outboard of the plate at both ends of the rack.
+  const seats = pUnion([left.solid, left.barb, right.solid, right.barb]);
+  return union([
+    extrude(deck, PLATE_T),
+    translate([0, 0, PLATE_T - SEAT_T], extrude(seats, SEAT_T)),
+  ]);
 }
 
 /** Faceplate spanning BETWEEN the side panels (recessed behind their
@@ -594,16 +806,29 @@ function buildShelf(
   const deckX0 = SIDE_T + SIDE_CLEAR + 1;
   const deckW = width - 2 * deckX0;
   solid.push(translate([deckX0, 0, 0], cube([deckW, d, 3])));
-  // Vent slots along the deck.
+  // Vent the deck with a triangulated rib lattice rather than parallel slots:
+  // ~60% open against the slots' ~35% for a stiffer deck, and a side fan can
+  // blow diagonally across it instead of only along the slot direction. The
+  // end ribs are kept out — the deck overlaps them, and they carry the M5
+  // threads.
   if (vented) {
-    const rim = 12;
-    const slotW = 8;
-    const gap = 8;
-    const n = Math.floor((deckW - 2 * rim) / (slotW + gap));
-    for (let i = 0; i < n; i++) {
-      const sx = deckX0 + rim + (deckW - 2 * rim - n * (slotW + gap) + gap) / 2 + i * (slotW + gap);
-      cuts.push(translate([sx, rim, -OVER], roundedRectPrism(slotW, Math.max(10, d - 2 * rim), 3 + 2 * OVER, slotW / 2)));
-    }
+    const ribKeepOut = ribX.map((rx) =>
+      pTranslate([rx - 1, -OVER], rectProfile(RIB_W + 2, d + 2 * OVER)),
+    );
+    cuts.push(
+      translate(
+        [0, 0, -OVER],
+        extrude(
+          lightenPocket(pTranslate([deckX0, 0], rectProfile(deckW, d)), {
+            rim: 10,
+            rib: 3,
+            pitch: 14,
+            keepOut: ribKeepOut,
+          }),
+          3 + 2 * OVER,
+        ),
+      ),
+    );
   }
   // Screw holes: front column always; rear column when the shelf is long
   // enough to reach it (matches the sides' rear rib).
@@ -703,15 +928,21 @@ function buildCableTray(dims: RackDims): BuildOp {
     }
   }
   cuts.push(...ribChannelCuts(width, ribX, d, h, nSlots, false));
-  // Vent/drain slots along the deck between the finger rows.
-  const rim = 12;
-  const slotW = 8;
-  const gap = 8;
-  const n = Math.floor((deckW - 2 * rim) / (slotW + gap));
-  for (let i = 0; i < n; i++) {
-    const sx = deckX0 + rim + (deckW - 2 * rim - n * (slotW + gap) + gap) / 2 + i * (slotW + gap);
-    cuts.push(translate([sx, rim, -OVER], roundedRectPrism(slotW, Math.max(10, d - 2 * rim), 4 + 2 * OVER, slotW / 2)));
-  }
+  // Drain the deck with the same triangulated lattice as the shelf. The 10 mm
+  // rim clears both comb-finger rows, which are rooted on the deck.
+  cuts.push(
+    translate(
+      [0, 0, -OVER],
+      extrude(
+        lightenPocket(pTranslate([deckX0, 0], rectProfile(deckW, d)), {
+          rim: 10,
+          rib: 3,
+          pitch: 14,
+        }),
+        4 + 2 * OVER,
+      ),
+    ),
+  );
   return difference([union(solid), ...cuts]);
 }
 
@@ -763,7 +994,16 @@ export function buildRackNodes(rack: RackParams): BuildNode[] {
     { id: 'rack-side-left', op: buildSide(rack, dims, false) },
     { id: 'rack-side-right', op: buildSide(rack, dims, true) },
     { id: 'rack-bottom', op: translate([0, 0, FOOT_H], buildPlate(dims)) },
-    { id: 'rack-top', op: translate([0, 0, FOOT_H + dims.bodyH - PLATE_T], buildPlate(dims)) },
+    // Same printed part, turned over: the seats have to face INTO the rack at
+    // both ends, and the plate's y features are symmetric about depth/2 so the
+    // flip lands them back on the same rebates.
+    {
+      id: 'rack-top',
+      op: translate(
+        [0, dims.depth, FOOT_H + dims.bodyH],
+        rotate([180, 0, 0], buildPlate(dims)),
+      ),
+    },
   ];
 
   // Accessories stack bottom-up in their mounted positions for the preview.

@@ -131,8 +131,37 @@ The compiler produces a top-level `BuildPlan = { nodes: [{ id, op }] }`. Each `B
 | `scale` | `{ factor, child }` |
 | `mesh` | `{ positions: Float32Array, indices: Uint32Array }` |
 | `union`/`difference`/`intersection` | `{ children: [...] }` |
+| `hull` | `{ children: [...] }` — convex hull |
+| `extrude` | `{ profile, height, divisions?, twistDegrees?, scaleTop?, center? }` |
+| `revolve` | `{ profile, degrees?, segments? }` |
 
 `mesh` ops carry transferable typed-array buffers; the worker client uses `collectMeshTransferables` to enumerate them so Comlink can pass them zero-copy.
+
+### 2D profiles
+
+`extrude` and `revolve` take a `Profile` (`src/engine/compiler/profile.ts`), a serializable 2D cross-section evaluated by Manifold's `CrossSection` (Clipper2). Most features in this codebase are prismatic — ribs, ledges, cleats, snap barbs, keyholes, lightening pockets are an outline plus a thickness — so draw the outline in its own plane and extrude it rather than stacking cubes or hand-rolling triangle soup.
+
+| Kind | Shape |
+| :--- | :--- |
+| `p-poly` | `{ contours: Vec2[][] }` — even-odd fill, so inner contours are holes |
+| `p-rect` | `{ size: [w,h], center? }` |
+| `p-circle` | `{ radius, segments? }` |
+| `p-union`/`p-difference`/`p-intersection`/`p-hull` | `{ children: [...] }` |
+| `p-offset` | `{ child, delta, join?, miterLimit?, segments? }` — true 2D offset |
+| `p-translate`/`p-rotate`/`p-mirror` | `{ child, ... }` |
+
+Helpers: `roundedRect`, `trapezoid`, `shellProfile(outline, wall)`, `pMirrorX/Y`, and `lightenPocket(outline, {rim, rib, pitch, angle?, cross?, keepOut?})` — the pocket that ribs out a prismatic part, so lightening is part of drawing it instead of a second pass.
+
+`p-offset` is the operation with no cube-stacking equivalent: it is what makes shelling, uniform walls, and in-plane fillets possible.
+
+**Two wasm-binding traps, both handled inside `evaluateOp.ts` — don't call Manifold directly and re-introduce them:**
+
+- `Manifold.extrude`'s `scaleTop` must be passed as a `Vec2`. The scalar form its `.d.ts` advertises builds a broken solid: correct bounding box, half the volume, inverted top face.
+- `CrossSection.mirror(v)` takes the mirror line's **normal**, not its direction.
+
+### One evaluator
+
+`src/workers/geometry/evaluateOp.ts` holds the single `BuildOp` → Manifold switch (`executeOp` async, `executeOpSync`). The browser worker (`ManifoldRuntime.ts`), the node sample exporter (`scripts/export-sample.ts`), and the mesh-level specs (`tests/unit/helpers/manifoldExec.ts`) all call it, so a new primitive is added in exactly one place. Analytic bounds for every kind live in `aabbOfOp` / `aabbOfProfile`.
 
 ## CI
 

@@ -5,7 +5,7 @@ import { listBuiltinBoardIds } from '@/library';
 import { TEMPLATES } from '@/library/templates';
 import { computeShellDims } from '@/engine/compiler/caseShell';
 import { aabbOfOp } from '@/engine/compiler/buildPlan';
-import type { BuildOp, BuildPlan } from '@/engine/compiler/buildPlan';
+import type { BuildOp, BuildPlan, Profile } from '@/engine/compiler/buildPlan';
 import type { Project } from '@/types';
 
 /**
@@ -276,10 +276,40 @@ function opSignature(op: BuildOp): string {
       return `r(${op.degrees.join(',')})|${opSignature(op.child)}`;
     case 'scale':
       return `s(${op.factor})|${opSignature(op.child)}`;
+    case 'extrude':
+      return `ext[h=${op.height},s=${JSON.stringify(op.scaleTop ?? 1)},tw=${op.twistDegrees ?? 0}]{${profileSignature(op.profile)}}`;
+    case 'revolve':
+      return `rev[d=${op.degrees ?? 360}]{${profileSignature(op.profile)}}`;
     case 'union':
     case 'difference':
     case 'intersection':
+    case 'hull':
       return `${op.kind}[${op.children.map(opSignature).join('|')}]`;
+  }
+}
+
+/** Structural signature of a 2D profile, mirroring opSignature. */
+function profileSignature(p: Profile): string {
+  switch (p.kind) {
+    case 'p-poly':
+      return `poly[${p.contours.map((c) => c.length).join(',')}]`;
+    case 'p-rect':
+      return `rect[${p.size.join(',')},c=${p.center ?? false}]`;
+    case 'p-circle':
+      return `circ[r=${p.radius},s=${p.segments ?? 0}]`;
+    case 'p-offset':
+      return `off(${p.delta},${p.join ?? 'round'})|${profileSignature(p.child)}`;
+    case 'p-mirror':
+      return `pm(${p.normal.join(',')})|${profileSignature(p.child)}`;
+    case 'p-translate':
+      return `pt(${p.offset.join(',')})|${profileSignature(p.child)}`;
+    case 'p-rotate':
+      return `pr(${p.degrees})|${profileSignature(p.child)}`;
+    case 'p-union':
+    case 'p-difference':
+    case 'p-intersection':
+    case 'p-hull':
+      return `${p.kind}[${p.children.map(profileSignature).join('|')}]`;
   }
 }
 

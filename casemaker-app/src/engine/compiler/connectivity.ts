@@ -1,4 +1,4 @@
-import type { BuildOp, BuildPlan } from './buildPlan';
+import { aabbOfOp, type BuildOp, type BuildPlan } from './buildPlan';
 
 interface BBox {
   min: [number, number, number];
@@ -68,6 +68,12 @@ export function bboxOfOp(op: BuildOp): BBox | null {
         max: [inner.max[0] * op.factor, inner.max[1] * op.factor, inner.max[2] * op.factor],
       };
     }
+    case 'extrude':
+    case 'revolve':
+      // Profile-driven solids: reuse the analytic profile bounds from
+      // buildPlan rather than duplicating the 2D walk here.
+      return aabbOfOp(op);
+    case 'hull':
     case 'union': {
       let result: BBox | null = null;
       for (const c of op.children) {

@@ -1,4 +1,8 @@
-import type { Vec3, Facing } from '@/types';
+import type { Vec3, Vec2, Facing } from '@/types';
+import { aabbOfProfile, type Profile } from './profile';
+
+export type { Profile } from './profile';
+export * from './profile';
 
 export type BuildOp =
   | { kind: 'cube'; size: Vec3; center?: boolean }
@@ -16,7 +20,25 @@ export type BuildOp =
   | { kind: 'mesh'; positions: Float32Array; indices: Uint32Array }
   | { kind: 'union'; children: BuildOp[] }
   | { kind: 'difference'; children: BuildOp[] }
-  | { kind: 'intersection'; children: BuildOp[] };
+  | { kind: 'intersection'; children: BuildOp[] }
+  /**
+   * Extrude a 2D profile along +Z. `scaleTop` tapers the far end (a scalar or
+   * per-axis pair), which is how draft, snap-barb lead-ins and printable
+   * overhang transitions get built without hand-rolling triangle soup.
+   */
+  | {
+      kind: 'extrude';
+      profile: Profile;
+      height: number;
+      divisions?: number;
+      twistDegrees?: number;
+      scaleTop?: Vec2 | number;
+      center?: boolean;
+    }
+  /** Revolve a 2D profile about its Y axis, which becomes the solid's Z axis. */
+  | { kind: 'revolve'; profile: Profile; degrees?: number; segments?: number }
+  /** Convex hull of the children — blends bosses into walls in one call. */
+  | { kind: 'hull'; children: BuildOp[] };
 
 export interface BuildNode {
   id: string;
@@ -186,11 +208,43 @@ export function aabbOfOp(op: BuildOp): Aabb | null {
           }
       return { min, max };
     }
+    case 'extrude': {
+      const b = aabbOfProfile(op.profile);
+      if (!b) return null;
+      // Manifold scales and twists the far face about the profile's ORIGIN, so
+      // bound the solid by the union of the base outline and the scaled one;
+      // a twist sweeps the whole circumscribing radius.
+      const s = op.scaleTop ?? 1;
+      const sx = typeof s === 'number' ? s : s[0];
+      const sy = typeof s === 'number' ? s : s[1];
+      let lo: Vec2 = [Math.min(b.min[0], b.min[0] * sx), Math.min(b.min[1], b.min[1] * sy)];
+      let hi: Vec2 = [Math.max(b.max[0], b.max[0] * sx), Math.max(b.max[1], b.max[1] * sy)];
+      if (op.twistDegrees) {
+        const r =
+          Math.max(Math.abs(lo[0]), Math.abs(hi[0]), Math.abs(lo[1]), Math.abs(hi[1]));
+        lo = [-r, -r];
+        hi = [r, r];
+      }
+      return op.center
+        ? { min: [lo[0], lo[1], -op.height / 2], max: [hi[0], hi[1], op.height / 2] }
+        : { min: [lo[0], lo[1], 0], max: [hi[0], hi[1], op.height] };
+    }
+    case 'revolve': {
+      const b = aabbOfProfile(op.profile);
+      if (!b) return null;
+      // Only the +X half of the profile is swept; it becomes a disc of that
+      // radius, and the profile's Y range becomes the solid's Z range.
+      const r = Math.max(Math.abs(b.min[0]), Math.abs(b.max[0]));
+      return { min: [-r, -r, b.min[1]], max: [r, r, b.max[1]] };
+    }
+    case 'hull':
     case 'union':
     case 'difference':
     case 'intersection': {
-      // The FIRST child bounds a difference/intersection; a union merges all.
-      const kids = op.kind === 'union' ? op.children : op.children.slice(0, 1);
+      // The FIRST child bounds a difference/intersection; a union (and a hull,
+      // which never reaches outside its inputs) merges all.
+      const kids =
+        op.kind === 'union' || op.kind === 'hull' ? op.children : op.children.slice(0, 1);
       let out: Aabb | null = null;
       for (const k of kids) {
         const b = aabbOfOp(k);
@@ -213,6 +267,46 @@ export function difference(children: BuildOp[]): BuildOp {
 
 export function union(children: BuildOp[]): BuildOp {
   return { kind: 'union', children };
+}
+
+export function intersection(children: BuildOp[]): BuildOp {
+  return { kind: 'intersection', children };
+}
+
+export interface ExtrudeOptions {
+  /** Intermediate slices — only needed with twist or a taper. */
+  divisions?: number;
+  twistDegrees?: number;
+  /** Scale of the far face: a scalar, or [x, y]. 1 = straight prism. */
+  scaleTop?: Vec2 | number;
+  center?: boolean;
+}
+
+/** Extrude a profile along +Z, base at z = 0. */
+export function extrude(profile: Profile, height: number, opts: ExtrudeOptions = {}): BuildOp {
+  const divisions =
+    opts.divisions ?? (opts.twistDegrees || opts.scaleTop !== undefined ? 16 : 0);
+  return { kind: 'extrude', profile, height, ...opts, divisions };
+}
+
+/** Extrude along +X — the profile's x becomes y, its y becomes z. */
+export function extrudeX(profile: Profile, length: number, opts: ExtrudeOptions = {}): BuildOp {
+  return rotate([0, 90, 0], rotate([0, 0, 90], extrude(profile, length, opts)));
+}
+
+/** Extrude along +Y — the profile's x stays x, its y becomes z. */
+export function extrudeY(profile: Profile, length: number, opts: ExtrudeOptions = {}): BuildOp {
+  return rotate([-90, 0, 0], extrude(profile, length, opts));
+}
+
+/** Revolve a profile about its Y axis (which becomes the solid's Z axis). */
+export function revolve(profile: Profile, degrees = 360, segments?: number): BuildOp {
+  return { kind: 'revolve', profile, degrees, segments };
+}
+
+/** Convex hull of the children. */
+export function hull(children: BuildOp[]): BuildOp {
+  return { kind: 'hull', children };
 }
 
 /**
@@ -276,6 +370,7 @@ export function collectMeshTransferables(op: BuildOp): ArrayBuffer[] {
       case 'union':
       case 'difference':
       case 'intersection':
+      case 'hull':
         for (const c of o.children) walk(c);
         return;
       default:
