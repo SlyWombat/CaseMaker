@@ -335,8 +335,8 @@ describe('rack archetype — mini-rack template', () => {
     const sides = ['rack-side-left', 'rack-side-right'].map((id) => exec(byId.get(id)!));
     // Joint geometry (rack.ts): tabs reach TAB_REACH over the side from the
     // plate edge, centred TAB_LEN/2 in from each stacking foot's front edge.
-    const TAB_REACH = 11, TAB_T = 8;
-    const axisX = 15 + 0.3 - TAB_REACH / 2;
+    const TAB_T = 6, TAB_SCREW_INSET = 4.3;
+    const axisX = 15 + 0.3 - TAB_SCREW_INSET;
     const tabYs = plateScrewYs(SAMPLE.depth);
     try {
       for (const plateId of ['rack-bottom', 'rack-top']) {
@@ -394,8 +394,12 @@ describe('rack archetype — mini-rack template', () => {
       // Every tab screw needs a solid column to thread into. Before the vent
       // windows were pulled back and the tabs moved off the slot-0 accessory
       // screw column, two of these four had only ~67% of their thread annulus.
+      // Ring from just outside the Ø4.2 pilot to Ø8 — the zone thread
+      // actually forms in. Not wider: the axis sits 4.3 mm in from the plate
+      // edge, so a generous ring pokes out past the panel's inner face and
+      // measures open air as if it were a defect.
       const ring = (side: ReturnType<typeof exec>, y: number, z0: number, z1: number): number => {
-        const outer = Manifold.cylinder(z1 - z0, 5.5, 5.5, 32).translate([axisX, y, z0]);
+        const outer = Manifold.cylinder(z1 - z0, 4, 4, 32).translate([axisX, y, z0]);
         const inner = Manifold.cylinder(z1 - z0 + 2, 2.1, 2.1, 32).translate([axisX, y, z0 - 1]);
         const shell = Manifold.difference([outer, inner]);
         const i = Manifold.intersection([side, shell]);

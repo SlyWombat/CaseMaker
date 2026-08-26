@@ -93,6 +93,12 @@ standing rack.
   foot put the tab screw 3 mm from that column — with radii summing to 4.7 the
   two holes broke into each other, so the tab screw ran out into slot 0's
   clearance hole. Sitting the tab at the *front* of the foot opens that to 7 mm.
+- **The screw axis is offset, not centred in the tab.** The heads in hand are
+  Ø9.2 × 3 mm (a button head), so the counterbore is Ø9.8. Centred in an 11 mm
+  tab that leaves 0.6 mm of wall each side, which is not a wall. Offset 4.3 mm
+  inboard from the plate edge, the outboard wall gets 1.8 mm and the inboard
+  side of the bore runs into the deck, which is solid there. Tab thickness is
+  head height + a 3 mm bearing floor.
 - **The bottom screw needs a way IN.** Its head lands in the tab's outer-face
   counterbore, which on the bottom plate faces the rack's underside — and the
   end tabs sit over a stacking foot. The first cut of this joint left that head

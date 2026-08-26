@@ -144,14 +144,22 @@ const PLATE_T = 5;
  */
 const TAB_REACH = 11;
 const TAB_LEN = 22;
-const TAB_T = 8;
+const TAB_T = 6;
 const TAB_SLACK = 0.3;
 /** Clearance through the tab, starter hole in the side. Sizes are provisional
  *  pending issue #140 — the one repeatable screw-hole mechanism. */
 const TAB_SCREW_CLEAR_D = 5.2;
 const TAB_SCREW_PILOT_D = 4.2;
 const TAB_SCREW_HEAD_D = 9.8;
-const TAB_SCREW_HEAD_H = 5.0;
+const TAB_SCREW_HEAD_H = 3.0;
+/**
+ * Screw axis, measured INBOARD from the plate edge — not the centre of the
+ * tab. Centred, a Ø9.8 counterbore in an 11 mm tab leaves 0.6 mm of wall on
+ * each side, which is not a wall. Offset inboard, the outboard wall gets
+ * 1.8 mm and the inboard side of the bore simply runs into the deck, which is
+ * solid there. The axis still sits well within the side panel beneath it.
+ */
+const TAB_SCREW_INSET = 4.3;
 /** Pilot depth below the TOP ledge, sized for the 24 mm-thread M5s in hand:
  *  a screw longer than its hole bottoms out and jacks the plate back up. The
  *  bottom tab lands on a stacking foot instead and takes what the foot gives. */
@@ -364,7 +372,7 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   // down there to thread into.
   const tabEdge = SIDE_T + SIDE_CLEAR;
   const xAt = (v: number): number => xr(v, v)[0];
-  const tabAxis = xAt(tabEdge - TAB_REACH / 2);
+  const tabAxis = xAt(tabEdge - TAB_SCREW_INSET);
   const screwYs = new Set(plateScrewYs(depth));
   for (const ty of plateTabYs(depth)) {
     const y0 = ty - TAB_LEN / 2 - TAB_SLACK;
@@ -709,7 +717,7 @@ function buildPlate(dims: RackDims): BuildOp {
       const xa = dir < 0 ? edge - TAB_REACH : edge;
       solid.push(translate([xa, yC - TAB_LEN / 2, 0], cube([TAB_REACH, TAB_LEN, TAB_T])));
       if (!screwYs.has(yC)) continue; // mid tab is a rest, not a fixing
-      const axis = xa + TAB_REACH / 2;
+      const axis = dir < 0 ? edge - TAB_SCREW_INSET : edge + TAB_SCREW_INSET;
       // Thread-width clearance the whole way through...
       cuts.push(
         translate([axis, yC, -OVER], cylinder(TAB_T + 2 * OVER, TAB_SCREW_CLEAR_D / 2, 24)),
