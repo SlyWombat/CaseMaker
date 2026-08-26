@@ -354,7 +354,6 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     const trimmed = url.trim();
     try {
       // Validate URL shape before fetching.
-      // eslint-disable-next-line no-new
       new URL(trimmed);
     } catch {
       return { ok: false, error: 'Not a valid URL.' };

@@ -18,10 +18,11 @@ export function PartThumbnail({ partId, size, color = '#9ca3af' }: PartThumbnail
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!node) {
-      setSrc(null);
-      return;
-    }
+    // No node: nothing to render. `src` is deliberately NOT cleared here —
+    // clearing it synchronously in an effect costs a second render pass
+    // (react-hooks/set-state-in-effect). The render guard below treats a
+    // missing node as "show the placeholder" regardless of any stale src.
+    if (!node) return;
     let cancelled = false;
     let renderer: THREE.WebGLRenderer | null = null;
     let geo: THREE.BufferGeometry | null = null;
@@ -90,6 +91,11 @@ export function PartThumbnail({ partId, size, color = '#9ca3af' }: PartThumbnail
       camera.lookAt(0, 0, 0);
       renderer.render(scene, camera);
       if (cancelled) return;
+      // Publishing the result of an imperative offscreen WebGL render. There
+      // is no render-phase equivalent — the PNG cannot be derived from props
+      // or state, it has to be rasterised first. Scoped disable rather than a
+      // file-wide one so any *other* setState added to this effect still errors.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSrc(canvas.toDataURL('image/png'));
     } catch (err) {
       // WebGL not available or render failed — leave src null and the
@@ -113,7 +119,7 @@ export function PartThumbnail({ partId, size, color = '#9ca3af' }: PartThumbnail
     borderRadius: 3,
     display: 'inline-block',
   };
-  if (!src) return <div aria-hidden style={placeholderStyle} />;
+  if (!node || !src) return <div aria-hidden style={placeholderStyle} />;
   return (
     <img
       src={src}

@@ -18,6 +18,18 @@ export default defineConfig([
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
     },
+    rules: {
+      // The codebase marks deliberately-unused bindings with a leading
+      // underscore (uniform compiler-op signatures like `_hats`, keys
+      // dropped by rest-destructuring like `_order`). Honour that.
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+        destructuredArrayIgnorePattern: '^_',
+        ignoreRestSiblings: true,
+      }],
+    },
   },
   {
     files: ['tests/e2e/**/*.{ts,tsx}'],

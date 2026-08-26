@@ -27,7 +27,7 @@ const validated: BoardProfile[] = Object.entries(boardModules).map(([path, mod])
   try {
     return builtinBoardProfileSchema.parse(mod.default) as BoardProfile;
   } catch (err) {
-    throw new Error(`Invalid built-in board profile ${path}: ${String(err)}`);
+    throw new Error(`Invalid built-in board profile ${path}: ${String(err)}`, { cause: err });
   }
 });
 

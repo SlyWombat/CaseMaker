@@ -64,9 +64,23 @@ export function ContextPanel() {
 
   // Auto-open the drawer when EITHER a geometry selection OR a sidebar
   // section becomes active (compact viewports only).
-  useEffect(() => {
+  //
+  // Adjusted during render rather than in an effect: this is state derived
+  // from a *change* in selection/section, and an effect firing setState
+  // synchronously costs an extra render pass on every selection change
+  // (react-hooks/set-state-in-effect). Comparing against the previous values
+  // keeps the original trigger condition exactly — the drawer re-opens only
+  // when one of the three inputs actually changes, so a drawer the user
+  // closed by hand stays closed until the next selection.
+  const [prevInputs, setPrevInputs] = useState({ selection, activeSection, isCompact });
+  if (
+    prevInputs.selection !== selection ||
+    prevInputs.activeSection !== activeSection ||
+    prevInputs.isCompact !== isCompact
+  ) {
+    setPrevInputs({ selection, activeSection, isCompact });
     if (isCompact && (selection || activeSection)) setDrawerOpen(true);
-  }, [selection, activeSection, isCompact]);
+  }
 
   const isOpen = !isCompact || drawerOpen;
   const className = [

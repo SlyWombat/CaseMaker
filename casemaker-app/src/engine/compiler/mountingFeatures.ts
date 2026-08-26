@@ -349,7 +349,7 @@ function generateEndFlange(
   // then translated to the outboard tip of the rectangle.
   const capRadius = width / 2;
   const capCyl = cylinder(thickness, capRadius, 32);
-  let capOriented: BuildOp = capCyl;
+  const capOriented: BuildOp = capCyl;
   // The cylinder's axis after rotation should align with the face's v-axis.
   // For ±x or ±y walls, vAxis is +z (vertical), so the un-rotated Z-axis
   // cylinder is already aligned. We just need to center it on the v range.

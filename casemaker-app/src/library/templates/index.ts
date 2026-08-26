@@ -45,7 +45,7 @@ const specTemplates: OrderedTemplate[] = Object.entries(specModules).map(([path,
   try {
     spec = templateSpecSchema.parse(mod.default);
   } catch (err) {
-    throw new Error(`Invalid template spec ${path}: ${String(err)}`);
+    throw new Error(`Invalid template spec ${path}: ${String(err)}`, { cause: err });
   }
   return {
     id: spec.id,

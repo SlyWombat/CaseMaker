@@ -98,7 +98,6 @@ async function main() {
   // each file's download_url directly — much more reliable than UI hover-
   // hunting. Then fetch via the authenticated browser context.
   const fileMeta = await page.evaluate(() => {
-    // eslint-disable-next-line no-undef
     const scope = window.angular
       ? window.angular.element(document.querySelector('.fileTable'))?.scope?.()
       : null;

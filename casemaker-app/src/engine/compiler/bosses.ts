@@ -345,8 +345,8 @@ function buildWallColumnMesh(
   const uMax = uCenter + tangentSize / 2;
   const positions: number[] = [];
   function pushVert(uOff: number, nOff: number, zOff: number): void {
-    let x = 0;
-    let y = 0;
+    let x: number;
+    let y: number;
     if (wallSide === '+x') {
       // +x wall is at world x = wallPlaneCoord = innerXMax; inboard direction is -x.
       x = wallPlaneCoord - nOff;
