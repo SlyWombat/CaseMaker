@@ -162,7 +162,7 @@ export function partForId(id: string, index = 0): ProjectPart {
       displayName,
       material: 'rigid',
       category: structural ? 'case' : 'accessory',
-      // The bottom plate sits seats-UP in the assembly; it has to be turned
+      // The bottom plate sits tabs-UP in the assembly; it has to be turned
       // over to print them without supports (see PRINT_FLIP_NODE_IDS).
       printOrientation: id === 'rack-bottom' ? LID_ORIENTATION : FLAT_ORIENTATION,
     };
@@ -194,7 +194,7 @@ export function printOrientationHint(part: ProjectPart): string {
   if (part.printOrientation.flipForPrint) {
     if (part.id === 'lid') return 'Print upside-down (lid ceiling on the bed)';
     if (part.id === 'rack-bottom')
-      return 'Lay flat, SEAT FACE DOWN — the seats and snap darts sit on the bed and the vented deck steps inward above them. No supports. (This is upside-down from how it sits in the rack.)';
+      return 'Lay flat, OUTER FACE DOWN — the corner tabs are flush with that face, so the whole underside is one flat plane on the bed. No supports. (This is upside-down from how the bottom plate sits in the rack.)';
     return 'Print upside-down (flipped 180° on X)';
   }
   if (part.id === 'stand') return 'Print FACE DOWN — lay the frame\'s front face on the bed (the foot\'s front edge is flush with it, so the whole front beds flat). The foot and gussets then rise at 75°, self-supporting. Gives a flat, accurate mating face for the panel';
@@ -207,9 +207,9 @@ export function printOrientationHint(part: ProjectPart): string {
   if (part.id === 'gasket')            return 'Lay flat (TPU 95A — see the *-gasket-print-instructions.txt sidecar)';
   if (part.id.startsWith('bumper-'))   return 'Lay flat — TPU 95A flexible bumper';
   if (part.id.startsWith('rack-side-'))
-    return 'Lay FLAT, inner face down (the face with the plate rebates). Wall-mount ears/gussets then rise as self-supporting walls. Strongest layer direction for the screw columns';
+    return 'Lay FLAT, inner face down (the face with the plate tab ledges). Wall-mount ears/gussets then rise as self-supporting walls. Strongest layer direction for the screw columns';
   if (part.id === 'rack-top')
-    return 'Lay flat, SEAT FACE DOWN — seats and snap darts on the bed, vented deck above. Darts flex in the print plane, so they bend along the layers. No supports';
+    return 'Lay flat, OUTER FACE DOWN — the tab faces sit flat on the bed, vented deck above. Head counterbores open downward; their floors bridge. No supports';
   if (part.id.startsWith('rack-blank-') || part.id.startsWith('rack-keystone-'))
     return 'Front face DOWN on the bed — the end ribs and keystone bosses rise behind it, no supports needed';
   if (part.id.startsWith('rack-shelf-') || part.id.startsWith('rack-cable-tray-'))

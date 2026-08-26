@@ -18,15 +18,19 @@ export interface LayoutOptions {
 /**
  * Parts that must be turned over to print cleanly.
  *
- * The lid prints ceiling-down. The rack's BOTTOM plate carries its seats on
- * its upper face in assembly space, so slicing it as-modelled would start
- * each 9 mm seat tongue in mid-air 2 mm above the bed — six unsupported
- * overhangs. Flipped, the seats land on the bed and the deck steps inward
- * above them, no supports needed. `rack-top` is the same printed part already
- * turned over in assembly space, so it is correct as-is and must NOT be
- * listed here.
+ * The lid prints ceiling-down.
+ *
+ * The rack plates flipped sides when the joint changed. The corner tabs are
+ * flush with the plate's OUTER face, so that face is the flat plane you want
+ * on the bed. In assembly space the BOTTOM plate already has its outer face
+ * down, so it is correct as-modelled and must NOT be listed. The TOP plate is
+ * that same part turned over, which puts its flat face up and its tabs
+ * hanging in mid-air, so it is the one that needs flipping.
+ *
+ * (This is inverted from the old rebate joint, where `rack-bottom` was the
+ * flipped one — do not restore that entry by inertia.)
  */
-export const PRINT_FLIP_NODE_IDS: ReadonlyArray<string> = ['lid', 'rack-bottom'];
+export const PRINT_FLIP_NODE_IDS: ReadonlyArray<string> = ['lid', 'rack-top'];
 
 const DEFAULTS: Required<LayoutOptions> = {
   gap: 5,

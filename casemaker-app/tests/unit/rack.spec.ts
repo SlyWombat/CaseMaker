@@ -329,10 +329,15 @@ describe('rack archetype — mini-rack template', () => {
   // bottom dropped out. These probes pin the rebate-plus-dart joint that
   // replaced it, at both ends of the rack (the top plate is the same part
   // flipped, so a barb on one side only would have engaged at one end).
-  it('captures the top and bottom plates and snaps the sides on', () => {
+  it('carries the plates on corner tabs and lets the top one come back off', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [] };
     const byId = new Map(buildRackNodes(rack).map((n) => [n.id, n.op]));
     const sides = ['rack-side-left', 'rack-side-right'].map((id) => exec(byId.get(id)!));
+    // Joint geometry (rack.ts): tabs reach TAB_REACH over the side from the
+    // plate edge, centred TAB_LEN/2 in from each stacking foot's front edge.
+    const TAB_REACH = 11, TAB_LEN = 22, TAB_T = 8, FOOT_INSET = 4;
+    const axisX = 15 + 0.3 - TAB_REACH / 2;
+    const tabYs = [FOOT_INSET + TAB_LEN / 2, SAMPLE.depth - (FOOT_INSET + TAB_LEN / 2)];
     try {
       for (const plateId of ['rack-bottom', 'rack-top']) {
         const plate = exec(byId.get(plateId)!);
@@ -349,20 +354,62 @@ describe('rack archetype — mini-rack template', () => {
             return v;
           };
           expect(clash([0, 0, 0]), `${plateId} seats without interference`).toBeLessThan(1);
-          expect(clash([0, 0, 1]), `${plateId} cannot lift`).toBeGreaterThan(20);
-          expect(clash([0, 0, -1]), `${plateId} cannot drop`).toBeGreaterThan(20);
+          // The ledge floor carries the plate, and its walls locate it fore/aft.
+          expect(clash([0, 0, -1]), `${plateId} cannot drop through its ledges`).toBeGreaterThan(20);
           expect(clash([0, 3, 0]), `${plateId} cannot slide out fore/aft`).toBeGreaterThan(20);
-          // A side lifted straight off sideways has to force the dart barbs
-          // back over their return faces.
-          const pulled = sides[0]!.translate([-0.6, 0, 0]);
-          const i = Manifold.intersection([pulled, plate]);
-          const v = i.volume();
-          i.delete();
-          pulled.delete();
-          expect(v, `${plateId} dart barbs resist the side pulling off`).toBeGreaterThan(0.5);
         } finally {
           plate.delete();
         }
+      }
+
+      // The two ends retain differently ON PURPOSE, and that asymmetry is the
+      // whole point of the joint — so pin it rather than let it drift.
+      //
+      // The BOTTOM tab tucks under rail material, so the plate is captured and
+      // the frame has to be built onto it. The TOP ledge is open upward so the
+      // plate drops into an assembled rack and lifts back out — that
+      // serviceability is what replaced the old snap darts, and its retention
+      // is the screws, not the geometry.
+      const bottom = exec(byId.get('rack-bottom')!);
+      const top = exec(byId.get('rack-top')!);
+      try {
+        const lift = (m: ReturnType<typeof exec>): number => {
+          const moved = m.translate([0, 0, 1]);
+          let v = 0;
+          for (const side of sides) {
+            const i = Manifold.intersection([side, moved]);
+            v += i.volume();
+            i.delete();
+          }
+          moved.delete();
+          return v;
+        };
+        expect(lift(bottom), 'bottom plate is captured under the rails').toBeGreaterThan(20);
+        expect(lift(top), 'top plate lifts straight out — it is screw-retained').toBeLessThan(1);
+      } finally {
+        bottom.delete();
+        top.delete();
+      }
+
+      // Every tab screw needs a solid column to thread into. Before the vent
+      // windows were pulled back and the tabs moved off the slot-0 accessory
+      // screw column, two of these four had only ~67% of their thread annulus.
+      const ring = (side: ReturnType<typeof exec>, y: number, z0: number, z1: number): number => {
+        const outer = Manifold.cylinder(z1 - z0, 5.5, 5.5, 32).translate([axisX, y, z0]);
+        const inner = Manifold.cylinder(z1 - z0 + 2, 2.1, 2.1, 32).translate([axisX, y, z0 - 1]);
+        const shell = Manifold.difference([outer, inner]);
+        const i = Manifold.intersection([side, shell]);
+        const f = i.volume() / shell.volume();
+        i.delete();
+        shell.delete();
+        outer.delete();
+        inner.delete();
+        return f;
+      };
+      const H = 5 + (16 * SLOT_PITCH + 11);
+      for (const y of tabYs) {
+        expect(ring(sides[0]!, y, 5 + TAB_T, 5 + TAB_T + 21), `bottom tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
+        expect(ring(sides[0]!, y, H - TAB_T - 21, H - TAB_T), `top tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
       }
     } finally {
       sides.forEach((s) => s.delete());

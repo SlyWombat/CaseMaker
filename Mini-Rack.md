@@ -14,7 +14,7 @@ Overall: ~250 deep × 252 wide × 275 tall mm. Author printed on a Prusa XL;
 | Part | Dims (mm) | Notes |
 |---|---|---|
 | Side panel L/R | 250 d × 275 h × 20 thick | Mirror pair. Heavy front column (x 0–45) protecting cables; y range −5..270 → 5 mm stacking foot below base |
-| Top/bottom ×2 | 222 × 250 × 15 | 5 mm plate + 5 mm lip + 10 mm snap tabs (z levels −10/−5/0/5). 222 = 252 − 2×15. See **Plate joint** below — the lip/tab is a hook that clips under a ledge, not a lap |
+| Top/bottom ×2 | 222 × 250 × 15 | 5 mm deck + four 8 mm corner tabs that sit in ledges in the side rails, screwed down with M5. 222 = 252 − 2×15. See **Plate joint** below |
 | 3-slot long shelf | 252 × 49.5 × 123 deep | Vented deck, no front lip |
 | 3-slot short shelf | 252 × 49.5 × 86 deep | Pairs back-to-back with long shelf |
 | 3-slot blank | 252 × 49.5 × 4 | For user drilling/CAD variations |
@@ -52,48 +52,67 @@ latch shoulder depths, 4 mm faceplate thickness, snap tab sizes, wall thicknesse
 
 ## Plate joint
 
-The top and bottom plates seat in **blind rebates** cut into the side panels'
-top and bottom rails, and are snapped in by **two-jaw darts**.
+The top and bottom plates are carried on **four corner tabs** that drop into
+**ledges** cut in the side rails, and each tab is screwed to the side with an
+M5. This is the third joint on this part; the history matters because each
+version failed in a way the next one fixes.
 
-Measured from `samples/Rack/miniracktoporbottom.obj`, the original's plate is a
-5 mm deck (z 0..5) with a lip hanging 5 mm below it set 5 mm in from each long
-edge, which then widens back out to the plate edge for a further 5 mm — an
-undercut barb that clips under a ledge on the side panel. The four z levels the
-table above records (−10/−5/0/5) are that hook. Our first cut of this
-reproduced the *tab* and lost the *hook*: it cut the seat pocket the plate's
-full thickness at z = FOOT_H and z = H_TOP − PLATE_T, so both pockets broke out
-through the side body's bottom and top faces. The plates were located fore/aft
-and free in z — on the first printed set the top plate lifted straight off and
-the bottom plate dropped out.
+**v1** cut the seat pocket the plate's full thickness at z = FOOT_H and
+z = H_TOP − PLATE_T, so both pockets broke out through the side body's faces.
+The plates were located fore/aft and free in z — on the first printed set the
+top plate lifted straight off and the bottom plate dropped out.
 
-What replaced it:
+**v2** replaced that with a blind rebate (seat = the plate's inner 3 mm only)
+plus two-jaw snap darts. It held z properly, but it could only ever be
+assembled plate-then-sides, and the plates could not come back out of a
+standing rack.
 
-- **Seat in the plate's inner 3 mm only**, never its full 5 mm, so the rebate
-  keeps solid material on its outboard z face at both ends of the rack.
-- **Seats sit over the stacking feet** (y centres at 19 and depth − 19, plus a
-  mid seat past 180 mm depth), so the bottom rebate's floor has the full foot
-  depth under it. Both rebates sit wholly inside the top/bottom rails, which
-  are solid the full depth.
-- **Two-jaw darts** at each seat: the jaws lie *in* the plate's print plane so
-  they flex along the layers, and they squeeze toward each other into the
-  dart's own central slot — the side panel never has to provide deflection
-  clearance, which is what lets the rebate stay tight. Each jaw carries a barb
-  that ramps in and returns square into a detent at the blind end of the
-  rebate.
-- **The rebate is the seat outline grown by `SEAT_SLACK`**, generated from the
-  same `plateSeats()` profile, so fit clearance cannot drift from the shape it
-  is meant to clear.
-- **One printed plate, installed twice** — the top is the same part turned
-  over. Every y feature is symmetric about depth/2 and the barbs are on both
-  jaw faces, so the flip lands on the same rebates. `buildRackNodes` emits
-  `rack-top` as `rotate([180,0,0])` of `rack-bottom`'s op.
+**v3 — what is there now.** Tabs and screws, for serviceability:
 
-Assembly is plate-then-sides: the rebates are blind, so the signature front
-column stays uncut and the plates are not removable from a standing rack.
+- Each tab is **flush with the plate's OUTER face** and reaches `TAB_REACH`
+  over the side panel. That face points out of the rack in *both* installs, so
+  the tab fills its ledge at whichever end it lands: the top stays flat enough
+  to stack on and the underside stays flat enough to sit on.
+- **One printed plate, installed twice** survives. `rack-top` is `rack-bottom`'s
+  op rotated 180° about x; every y feature is symmetric about depth/2.
+- **The two ends are not alike, and cannot be.** At the top the ledge is only
+  as deep as the tab, so the rail keeps material underneath for the screw, and
+  the ledge is open upward — the plate drops into an assembled frame and lifts
+  back out. At the bottom there is nothing below plate level at all (the
+  plate's underside *is* the rack's underside), so the bottom screw is driven
+  **UP** into the rail instead, and the tab tucks under rail material, which
+  captures the bottom plate and means the frame is built onto it.
+- **Screw direction is set by what fits.** Downward at the bottom is not an
+  option: there are only 19 mm of rack below plate level (5 mm foot + 14 mm
+  rail) and a 24 mm screw would come straight out through the foot. Driving up
+  reaches the rail and the web above it, and lands the head in the same
+  outer-face counterbore the top plate uses.
+- **Tab placement is pinned by three constraints that nearly conflict:**
+  symmetric about depth/2; wholly over a stacking foot (what the bottom tab
+  lands on); and clear of the front accessory screw column. Centring on the
+  foot put the tab screw 3 mm from that column — with radii summing to 4.7 the
+  two holes broke into each other, so the tab screw ran out into slot 0's
+  clearance hole. Sitting the tab at the *front* of the foot opens that to 7 mm.
+- **Each screw needs a reserved solid column.** Measured: directly under the
+  rack's top face there is only ~1.5 mm of solid before the lightening pocket
+  opens up. The columns are keep-outs in the lightening profile, and the vent
+  windows were pulled back off the rear tabs — without both, two of the four
+  screws had only ~67% of their thread annulus. They now measure 98–99%.
 
-`tests/unit/rack.spec.ts` pins all of this by nudging an assembled plate ±1 mm
-in z, 3 mm in y, and pulling a side 0.6 mm outward, asserting each move
-collides.
+Print the plate **outer face down**: the tabs are flush with that face, so the
+whole underside is one flat plane on the bed. The head counterbores open
+downward and their floors bridge, which slicers handle. Note this **inverts the
+old print flip** — `rack-top` is now the part that needs turning over, not
+`rack-bottom`.
+
+Screw sizes (clearance, pilot, counterbore) are provisional pending
+[issue #140](https://github.com/SlyWombat/CaseMaker/issues/140), which is
+researching one repeatable screw-hole mechanism to replace the ~90 hand-rolled
+hole sites across the compiler.
+
+`tests/unit/rack.spec.ts` pins the seat, the fore/aft location, the
+deliberate top-lifts / bottom-captured asymmetry, and the thread annulus at
+all four screws.
 
 ## Front recess
 
