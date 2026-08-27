@@ -20,6 +20,7 @@ import {
   type BuildNode,
   type BuildOp,
   type Profile,
+  aabbOfOp,
 } from './buildPlan';
 
 /**
@@ -1046,6 +1047,73 @@ function buildWallSpacer(dims: RackDims): BuildOp {
   return difference([cube([len, CLEAT_D, 20]), ...cuts]);
 }
 
+/**
+ * Can the whole rack be printed in one piece on the selected printer?
+ *
+ * It is a box: it prints in its assembly orientation, so this is straight or
+ * turned 90 degrees on the bed, nothing diagonal, and the full height has to
+ * clear. Shared by the compiler and the panel so the offer and the checkbox
+ * can never disagree.
+ */
+export function rackFitsWhole(rack: RackParams): boolean {
+  const printer = rack.printer;
+  if (!printer) return false;
+  const { width, depth, totalH } = computeRackDims(rack);
+  const onBed =
+    (width <= printer.x && depth <= printer.y) || (depth <= printer.x && width <= printer.y);
+  return onBed && totalH <= printer.z;
+}
+
+/**
+ * Optional one-piece exports. Printing the rack fused is far stronger than
+ * bolting it together, at the cost of a very long print and heavy internal
+ * support — so these are OFFERED, never substituted for the separate parts,
+ * and only when the whole thing fits the selected printer.
+ *
+ * Two variants, because they are not the same gamble:
+ *  - FRAME: sides + plates. They already touch — the plate tabs seat in their
+ *    ledges with no z clearance — so this is a plain union of existing
+ *    geometry, and support stays in the open interior where a hand can reach.
+ *  - ALL: accessories too. Those sit on SIDE_CLEAR and do NOT touch, so they
+ *    are welded to the sides deliberately. Shelf positions become permanent
+ *    and the support under each deck is sealed in, reachable only through the
+ *    side vent windows.
+ */
+function assembledNodes(
+  rack: RackParams,
+  dims: RackDims,
+  built: BuildNode[],
+  accessoryOps: BuildOp[],
+): BuildNode[] {
+  const { width } = dims;
+  if (!rack.assembledExport || !rackFitsWhole(rack)) return [];
+
+  const FRAME_IDS = ['rack-side-left', 'rack-side-right', 'rack-bottom', 'rack-top'];
+  const frameOps = built.filter((n) => FRAME_IDS.includes(n.id)).map((n) => n.op);
+  if (frameOps.length === 0) return [];
+  const out: BuildNode[] = [{ id: 'rack-assembled-frame', op: union(frameOps) }];
+
+  if (accessoryOps.length > 0) {
+    // Weld each accessory to both sides across the fit clearance. The slab is
+    // backed by the accessory's full-height end rib on one face and the panel
+    // on the other, so it is a joint rather than a floating fin.
+    const welds: BuildOp[] = [];
+    for (const op of accessoryOps) {
+      const bb = aabbOfOp(op);
+      if (!bb) continue;
+      const y0 = bb.min[1];
+      const dy = bb.max[1] - y0;
+      const z0 = bb.min[2];
+      const dz = bb.max[2] - z0;
+      const t = SIDE_CLEAR + 0.8; // bites 0.4 mm into the panel and 0.4 into the rib
+      welds.push(translate([SIDE_T - 0.4, y0, z0], cube([t, dy, dz])));
+      welds.push(translate([width - SIDE_T - SIDE_CLEAR - 0.4, y0, z0], cube([t, dy, dz])));
+    }
+    out.push({ id: 'rack-assembled-all', op: union([...frameOps, ...accessoryOps, ...welds]) });
+  }
+  return out;
+}
+
 /** Compile the whole rack to one BuildNode per printable part, positioned in
  *  assembly space so the viewport previews the assembled rack. */
 export function buildRackNodes(rack: RackParams): BuildNode[] {
@@ -1067,6 +1135,7 @@ export function buildRackNodes(rack: RackParams): BuildNode[] {
   ];
 
   // Accessories stack bottom-up in their mounted positions for the preview.
+  const accessoryOps: BuildOp[] = [];
   let cursor = 0;
   (rack.accessories ?? []).forEach((acc, i) => {
     const n = accessorySlots(acc);
@@ -1079,8 +1148,12 @@ export function buildRackNodes(rack: RackParams): BuildNode[] {
       op = buildShelf(dims, n, acc.shelfDepth ?? 123, { frontPlate: acc.frontPlate, vented: acc.vented });
     else op = buildCableTray(dims);
     // Recessed behind the sides' protective front columns (FRONT_RECESS).
-    nodes.push({ id: `rack-${acc.type}-${i}`, op: translate([0, FRONT_RECESS, z0], op) });
+    const placed = translate([0, FRONT_RECESS, z0], op);
+    accessoryOps.push(placed);
+    nodes.push({ id: `rack-${acc.type}-${i}`, op: placed });
   });
+
+  nodes.push(...assembledNodes(rack, dims, nodes, accessoryOps));
 
   if (rack.wallMount === 'cleat') {
     const seatZ = FOOT_H + dims.bodyH - CLEAT_SEAT_DROP;

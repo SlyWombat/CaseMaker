@@ -8,6 +8,7 @@ import { ViewportToolbar } from './ViewportToolbar';
 import { ensureZUp } from '@/engine/coords';
 import { useViewportStore, type ViewportCameraMode } from '@/store/viewportStore';
 import { useJobStore } from '@/store/jobStore';
+import { isAssembledNodeId } from '@/engine/exporters/parts';
 
 ensureZUp();
 
@@ -70,7 +71,8 @@ function AutoFrame() {
   useEffect(() => {
     const min = [Infinity, Infinity, Infinity];
     const max = [-Infinity, -Infinity, -Infinity];
-    for (const n of nodes.values()) {
+    for (const [id, n] of nodes.entries()) {
+      if (isAssembledNodeId(id)) continue; // same geometry as the parts it fuses
       for (let a = 0; a < 3; a++) {
         if (n.stats.bbox.min[a]! < min[a]!) min[a] = n.stats.bbox.min[a]!;
         if (n.stats.bbox.max[a]! > max[a]!) max[a] = n.stats.bbox.max[a]!;

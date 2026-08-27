@@ -73,11 +73,46 @@ describe('rack archetype — mini-rack template', () => {
       'rack-shelf-2',
       'rack-shelf-3',
       'rack-cable-tray-4',
+      // No one-piece exports: assembledExport is opt-in, and off by default so
+      // that building the unions does not tax every edit.
     ]);
     for (const node of plan.nodes) expectClean(node.id, node.op);
     // Template default (Prusa XL) fits — no fit errors on the report.
     expect(plan.placementReport?.errorCount ?? 0).toBe(0);
   });
+
+  it('offers the one-piece exports only when the rack fits the printer', () => {
+    const accs: RackAccessory[] = [
+      { id: 'a', type: 'shelf', slots: 3, shelfDepth: 123, vented: true },
+      { id: 'b', type: 'keystone', slots: 2 },
+    ];
+    const asmIds = (printer?: { x: number; y: number; z: number }, on = true): string[] =>
+      buildRackNodes({ ...SAMPLE, accessories: accs, printer, assembledExport: on })
+        .map((n) => n.id)
+        .filter((id) => id.startsWith('rack-assembled'));
+
+    // 252 x 250 x 280 needs a large-format machine.
+    expect(asmIds({ x: 360, y: 360, z: 360 })).toEqual(['rack-assembled-frame', 'rack-assembled-all']);
+    expect(asmIds({ x: 220, y: 220, z: 250 }), 'bedslinger cannot print it whole').toEqual([]);
+    expect(asmIds({ x: 360, y: 360, z: 200 }), 'tall enough matters too').toEqual([]);
+    expect(asmIds(undefined), 'no printer set = no claim it fits').toEqual([]);
+    expect(asmIds({ x: 360, y: 360, z: 360 }, false), 'opt-in: off by default').toEqual([]);
+
+    // Both must come out as ONE body. The frame parts already touch; the
+    // accessories sit on SIDE_CLEAR and are welded across it deliberately, so
+    // this is the assertion that catches a weld that stopped reaching.
+    const nodes = buildRackNodes({ ...SAMPLE, accessories: accs, printer: { x: 360, y: 360, z: 360 }, assembledExport: true });
+    for (const id of ['rack-assembled-frame', 'rack-assembled-all']) {
+      const m = exec(nodes.find((n) => n.id === id)!.op);
+      try {
+        const parts = m.decompose();
+        expect(parts.length, `${id} must be a single connected solid`).toBe(1);
+        parts.forEach((c) => c.delete());
+      } finally {
+        m.delete();
+      }
+    }
+  }, 120000);
 
   it('default dimensions reproduce the measured sample envelope', () => {
     const dims = computeRackDims(SAMPLE);

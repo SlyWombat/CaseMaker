@@ -8,7 +8,7 @@ import {
   maxRackDepthForBed,
   maxRackSlotsForBed,
 } from '@/engine/compiler/rackFit';
-import { computeRackDims, accessorySlots, SLOT_PITCH } from '@/engine/compiler/rack';
+import { computeRackDims, rackFitsWhole, accessorySlots, SLOT_PITCH } from '@/engine/compiler/rack';
 import { newId } from '@/utils/id';
 
 /**
@@ -278,6 +278,29 @@ export function RackPanel() {
             </LabelledField>
           ))}
         </div>
+      )}
+
+      {rackFitsWhole(rack) && (
+        <label
+          style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, fontSize: 13 }}
+        >
+          <input
+            type="checkbox"
+            data-testid="rack-assembled-export"
+            checked={rack.assembledExport === true}
+            onChange={(e) => update({ assembledExport: e.target.checked })}
+            style={{ marginTop: 3 }}
+          />
+          <span>
+            Offer one-piece export
+            <span style={{ display: 'block', color: '#9aa4b0', fontSize: 11, lineHeight: 1.45 }}>
+              This printer can fit the whole rack, so it can be printed fused instead of bolted
+              together — far stiffer, but a multi-day print with heavy internal support. Adds two
+              entries to Export: the frame alone, and the frame with the shelves fused in. Off by
+              default because building them costs a couple of seconds on every edit.
+            </span>
+          </span>
+        </label>
       )}
 
       <h3 className="panel-subhead">Mounting</h3>

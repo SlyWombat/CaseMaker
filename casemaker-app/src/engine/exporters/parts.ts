@@ -28,6 +28,17 @@ export interface PrintOrientation {
   flipForPrint: boolean;
 }
 
+/**
+ * Assembled one-piece rack exports. These are ALTERNATIVES to the separate
+ * parts, not extra parts: the same geometry fused. They belong in the export
+ * list, but must be kept out of the 3D view (they would sit exactly on top of
+ * the parts they are made from) and out of Save All (which would hand you the
+ * rack twice over).
+ */
+export function isAssembledNodeId(id: string): boolean {
+  return id.startsWith('rack-assembled-');
+}
+
 export interface ProjectPart {
   /** Stable id matching the BuildPlan node id. */
   id: string;
@@ -143,6 +154,8 @@ export function partForId(id: string, index = 0): ProjectPart {
       'rack-bottom': 'Rack bottom plate',
       'rack-wall-cleat': 'Wall cleat (screws to the wall)',
       'rack-wall-spacer': 'Wall spacer strip (bottom)',
+      'rack-assembled-frame': 'Rack frame — ASSEMBLED (one piece)',
+      'rack-assembled-all': 'Whole rack — ASSEMBLED (one piece)',
     };
     let displayName = RACK_NAMES[id];
     if (!displayName) {
@@ -156,7 +169,11 @@ export function partForId(id: string, index = 0): ProjectPart {
       };
       displayName = m ? `${label[m[1]!]} ${Number(m[2]) + 1}` : id;
     }
-    const structural = id.startsWith('rack-side-') || id === 'rack-top' || id === 'rack-bottom';
+    const structural =
+      id.startsWith('rack-side-') ||
+      id === 'rack-top' ||
+      id === 'rack-bottom' ||
+      isAssembledNodeId(id);
     return {
       id,
       displayName,
@@ -206,6 +223,10 @@ export function printOrientationHint(part: ProjectPart): string {
   if (part.id === 'hinge-pin')         return 'Stand on end or lay flat — straight cylinder';
   if (part.id === 'gasket')            return 'Lay flat (TPU 95A — see the *-gasket-print-instructions.txt sidecar)';
   if (part.id.startsWith('bumper-'))   return 'Lay flat — TPU 95A flexible bumper';
+  if (part.id === 'rack-assembled-frame')
+    return 'One piece, printed standing as it sits in the rack. Needs support throughout the interior — that support is reachable through the open front and the side windows. Expect ~1.1 kg and a multi-day print; a failure late is an expensive one';
+  if (part.id === 'rack-assembled-all')
+    return 'One piece with the shelves fused in, printed standing. Support under each shelf deck is SEALED INSIDE and can only be worked out through the side vent windows — and the shelf layout becomes permanent. ~1.6 kg. Print the frame-only version first if you have not done this before';
   if (part.id.startsWith('rack-side-'))
     return 'Lay FLAT, inner face down (the face with the plate tab ledges). Wall-mount ears/gussets then rise as self-supporting walls. Strongest layer direction for the screw columns';
   if (part.id === 'rack-top')

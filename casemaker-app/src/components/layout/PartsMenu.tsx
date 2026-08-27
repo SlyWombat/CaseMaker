@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useJobStore } from '@/store/jobStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { partsForIds, partsByCategory, type PartCategory } from '@/engine/exporters/parts';
+import { isAssembledNodeId } from '@/engine/exporters/parts';
 
 const CATEGORY_LABELS: Record<PartCategory, string> = {
   case: 'Case',
@@ -25,7 +26,8 @@ export function PartsMenu() {
   // triggers React's "max update depth exceeded" infinite loop guard
   // (memory: Zustand `?? []` selector trap).
   const nodes = useJobStore((s) => s.nodes);
-  const nodeIds = Array.from(nodes.keys());
+  // Not a separate part — an alternative way to print the ones already listed.
+  const nodeIds = Array.from(nodes.keys()).filter((id) => !isAssembledNodeId(id));
   const hiddenParts = useViewportStore((s) => s.hiddenParts);
   const togglePart = useViewportStore((s) => s.togglePartVisible);
   const showAllParts = useViewportStore((s) => s.showAllParts);

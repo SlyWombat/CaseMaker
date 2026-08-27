@@ -76,6 +76,7 @@ export const caseParamsSchema = z.object({
         })
         .optional(),
       wallMount: z.enum(['none', 'ears', 'cleat', 'keyhole']).optional(),
+      assembledExport: z.boolean().optional(),
       accessories: z
         .array(
           z.object({

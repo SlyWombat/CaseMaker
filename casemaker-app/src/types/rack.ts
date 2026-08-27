@@ -34,6 +34,15 @@ export interface RackParams {
    */
   printer?: { preset?: string; x: Mm; y: Mm; z: Mm };
   /**
+   * Offer the fused one-piece exports (see assembledNodes in rack.ts).
+   *
+   * Off by default and deliberately so: building them means unioning the whole
+   * rack twice, which measured ~2.4 s and 70k extra triangles on the sample —
+   * a cost every slider drag would pay, for an export most people never take.
+   * Only shown when the rack actually fits the selected printer.
+   */
+  assembledExport?: boolean;
+  /**
    * 'none' (default): freestanding, stackable feet.
    * 'ears':  each side panel grows a gusseted rear flange with countersunk
    *          wall-screw holes — load path runs straight from the structural

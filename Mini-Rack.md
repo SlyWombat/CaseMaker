@@ -151,6 +151,35 @@ across the compiler.
 deliberate top-lifts / bottom-captured asymmetry, and the thread annulus at
 all four screws.
 
+## One-piece (assembled) export
+
+A rack printed fused is far stiffer than one bolted together. Where the printer
+can fit the whole thing, **Offer one-piece export** in the rack panel adds two
+entries to Export:
+
+| Entry | What it fuses | Mass at sample size | Support |
+| :--- | :--- | ---: | :--- |
+| Rack frame — ASSEMBLED | sides + plates | ~1.09 kg | open box interior, reachable |
+| Whole rack — ASSEMBLED | + all accessories | ~1.58 kg | sealed under each shelf deck |
+
+The frame variant is a plain union of existing geometry: the four parts already
+touch, because the plate tabs seat in their ledges with no z clearance. The
+whole-rack variant is not — accessories sit on `SIDE_CLEAR` and do **not**
+touch, so each is welded to both sides across that gap. Shelf positions become
+permanent, and the support under each deck can only be worked out through the
+side vent windows.
+
+Both are **alternatives** to the separate parts, not extra parts: they are kept
+out of the 3D view (they would sit exactly on the geometry they fuse) and out
+of Save All (which would otherwise hand you the rack twice).
+
+Off by default, and gated on fit. Building them means unioning the whole rack
+twice — measured ~2.4 s and 70k extra triangles on the sample — which is not a
+cost every slider drag should pay. The fit test lives in `rackFitsWhole()` and
+is shared by the compiler and the panel so the offer and the checkbox cannot
+disagree; the rack prints in its assembly orientation, so it is straight or
+turned 90° on the bed, nothing diagonal.
+
 ## Front recess
 
 Accessories mount 12 mm (`FRONT_RECESS`) behind the sides' front faces and span

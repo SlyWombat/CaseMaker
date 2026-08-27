@@ -6,6 +6,7 @@ import { scheduleImmediate, waitForIdle } from '@/engine/jobs/JobScheduler';
 import type { StlMeshInput } from '@/workers/export/stlBinary';
 import { applyLayoutToMeshes, PRINT_FLIP_NODE_IDS } from '@/engine/exportLayout';
 import type { MeshNode } from '@/types';
+import { isAssembledNodeId } from '@/engine/exporters/parts';
 
 export type { ExportFormat };
 
@@ -85,6 +86,10 @@ export function meshNodesForExport(): ExportMeshGroups {
   const main: MeshNode[] = [];
   let gasketNode: MeshNode | null = null;
   for (const n of nodes.values()) {
+    // The fused one-piece rack exports are alternatives to the parts they are
+    // made from. Including them in Save All would hand you the whole rack
+    // twice — once in pieces, once welded.
+    if (isAssembledNodeId(n.id)) continue;
     if (n.id === GASKET_NODE_ID) gasketNode = n;
     else main.push(n);
   }
