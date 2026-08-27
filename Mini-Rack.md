@@ -180,6 +180,22 @@ is shared by the compiler and the panel so the offer and the checkbox cannot
 disagree; the rack prints in its assembly orientation, so it is straight or
 turned 90° on the bed, nothing diagonal.
 
+## Wall mount — ears
+
+A loaded rack hangs entirely off the two ear blades, and the load grows with
+the box: a 250 mm deep rack cantilevers hard off the wall. Screws are one per
+~60 mm of blade, never fewer than four — five a side at the sample height,
+seven on a 24-slot rack. Erring high is deliberate: extra holes cost almost
+nothing to print, and more of them up the blade gives more chances to land on
+a stud or on solid backing rather than bare plasterboard.
+
+Gussets brace the blade back to the panel under every screw, **plus one at each
+end of the blade**. The screws are spread through the middle of the height by
+construction, which used to leave the top and bottom of the blade as unbraced
+cantilever — the corners that peel first when a heavy rack tries to rotate off
+the wall. `earScrewsPerSide()` is shared with the hardware list so the count in
+the list is the count in the part.
+
 ## Front recess
 
 Accessories mount 12 mm (`FRONT_RECESS`) behind the sides' front faces and span

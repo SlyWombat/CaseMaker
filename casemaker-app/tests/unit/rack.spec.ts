@@ -12,7 +12,17 @@
 import { describe, it, expect } from 'vitest';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { aabbOfOp, type BuildOp } from '@/engine/compiler/buildPlan';
-import { buildRackNodes, computeRackDims, SLOT_PITCH, plateScrewYs, accessorySlots } from '@/engine/compiler/rack';
+import {
+  buildRackNodes,
+  computeRackDims,
+  SLOT_PITCH,
+  plateScrewYs,
+  accessorySlots,
+  TAB_T,
+  TAB_SCREW_INSET,
+  TAB_SCREW_HEAD_H,
+  TAB_SCREW_BITE,
+} from '@/engine/compiler/rack';
 import { PRINT_FLIP_NODE_IDS } from '@/engine/exportLayout';
 import {
   rectFitsBed,
@@ -79,7 +89,9 @@ describe('rack archetype — mini-rack template', () => {
     for (const node of plan.nodes) expectClean(node.id, node.op);
     // Template default (Prusa XL) fits — no fit errors on the report.
     expect(plan.placementReport?.errorCount ?? 0).toBe(0);
-  });
+    // Explicit timeout: this compiles and meshes the whole rack, which sits
+    // near vitest's 5 s default and tips over it on a loaded machine.
+  }, 60000);
 
   it('offers the one-piece exports only when the rack fits the printer', () => {
     const accs: RackAccessory[] = [
@@ -371,7 +383,6 @@ describe('rack archetype — mini-rack template', () => {
     const sides = ['rack-side-left', 'rack-side-right'].map((id) => exec(byId.get(id)!));
     // Joint geometry (rack.ts): tabs reach TAB_REACH over the side from the
     // plate edge, centred TAB_LEN/2 in from each stacking foot's front edge.
-    const TAB_T = 5, TAB_SCREW_INSET = 3.5;
     const axisX = 15 + 0.3 - TAB_SCREW_INSET;
     const tabYs = plateScrewYs(SAMPLE.depth);
     try {
@@ -448,8 +459,8 @@ describe('rack archetype — mini-rack template', () => {
       };
       const H = 5 + (16 * SLOT_PITCH + 11);
       for (const y of tabYs) {
-        expect(ring(sides[0]!, y, 5 + TAB_T, 5 + TAB_T + 21), `bottom tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
-        expect(ring(sides[0]!, y, H - TAB_T - 21, H - TAB_T), `top tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
+        expect(ring(sides[0]!, y, 5 + TAB_T, 5 + TAB_T + TAB_SCREW_BITE), `bottom tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
+        expect(ring(sides[0]!, y, H - TAB_T - TAB_SCREW_BITE, H - TAB_T), `top tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
 
         // ...and it has to be possible to actually INSERT it. The bottom
         // screw threads upward, so it can only be entered from under the
@@ -474,7 +485,7 @@ describe('rack archetype — mini-rack template', () => {
     const byId = new Map(buildRackNodes(rack).map((n) => [n.id, n.op]));
     const dims = computeRackDims(rack);
     const plate = exec(byId.get('rack-bottom')!);
-    const PLATE_T = 5, HEAD_H = 3, TAB_SCREW_INSET = 3.5, FOOT_H = 5;
+    const PLATE_T = 5, HEAD_H = TAB_SCREW_HEAD_H, FOOT_H = 5;
     const x0 = 15 + 0.3;
     const axes = [x0 - TAB_SCREW_INSET, x0 + dims.plateW + TAB_SCREW_INSET];
     try {
@@ -585,7 +596,49 @@ describe('rack archetype — mini-rack template', () => {
         [L, R, A].forEach((m) => m.delete());
       }
     }
-  }, 120000);
+
+    // ...and again as a full STACK, because the single-accessory case always
+    // lands at slot 0 and would not catch a placement that drifts as the slot
+    // cursor advances.
+    const stack: RackAccessory[] = [
+      { id: 'a', type: 'keystone', slots: 2 },
+      { id: 'b', type: 'blank', slots: 2 },
+      { id: 'c', type: 'shelf', slots: 3, shelfDepth: 86, vented: true },
+      { id: 'd', type: 'shelf', slots: 3, shelfDepth: 123, vented: true },
+      { id: 'e', type: 'cable-tray' },
+    ];
+    const stacked = { ...SAMPLE, accessories: stack };
+    const sdims = computeRackDims(stacked);
+    const snodes = buildRackNodes(stacked);
+    const SL = exec(snodes.find((n) => n.id === 'rack-side-left')!.op);
+    try {
+      let cursor = 0;
+      stack.forEach((acc, i) => {
+        const n = accessorySlots(acc);
+        const start = Math.min(cursor, Math.max(0, sdims.slots - n));
+        const A = exec(snodes.find((nd) => nd.id === `rack-${acc.type}-${i}`)!.op);
+        try {
+          // Recessed the same 12 mm behind the front face, whatever the type.
+          expect(A.boundingBox().min[1], `${acc.type} ${i}: front recess`).toBeCloseTo(12, 2);
+          for (let k = 0; k < n; k++) {
+            const probe = Manifold.cylinder(28, 2, 2, 24)
+              .rotate([0, 90, 0])
+              .translate([0, 22, sdims.holeZ(start + k)]);
+            const inL = Manifold.intersection([SL, probe]).volume();
+            const inA = Manifold.intersection([A, probe]).volume();
+            probe.delete();
+            expect(inL, `${acc.type} ${i}: side hole at slot ${start + k}`).toBeLessThan(1);
+            expect(inA, `${acc.type} ${i}: thread hole at slot ${start + k}`).toBeLessThan(1);
+          }
+        } finally {
+          A.delete();
+        }
+        cursor += n;
+      });
+    } finally {
+      SL.delete();
+    }
+  }, 180000);
 
   it('keyhole mount: flush rear face with working keyhole hangers', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'keyhole' };

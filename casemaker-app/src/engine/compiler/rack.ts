@@ -155,7 +155,7 @@ const PLATE_T = 5;
  * could only be assembled plate-then-sides and could never come back out of a
  * standing rack; the screws buy serviceability the snap could not.
  */
-const TAB_REACH = 11;
+export const TAB_REACH = 12;
 const TAB_LEN = 22;
 /**
  * Tab thickness EQUALS the deck, so the plate is a flat slab with ears rather
@@ -164,7 +164,7 @@ const TAB_LEN = 22;
  * bed and its floor becomes an unsupported ceiling — a bridge — which is no
  * seat for a screw head to bear on.
  */
-const TAB_T = PLATE_T;
+export const TAB_T = PLATE_T;
 const TAB_SLACK = 0.3;
 /** How far a tab overlaps the deck it grows out of, to avoid a coplanar seam. */
 const TAB_MERGE = 0.5;
@@ -174,22 +174,34 @@ const TAB_MERGE = 0.5;
 const TAB_SCREW_CLEAR_D = 5.2;
 const TAB_SCREW_PILOT_D = SCREW_THREAD_D;
 const TAB_SCREW_HEAD_D = 9.8;
-const TAB_SCREW_HEAD_H = 3.0;
+export const TAB_SCREW_HEAD_H = 3.0;
 /**
  * Screw axis, measured INBOARD from the plate edge — not the centre of the
- * tab. Centred, a Ø9.8 counterbore in an 11 mm tab leaves 0.6 mm of wall on
- * each side, which is not a wall. Offset inboard, the outboard wall gets
- * 2.6 mm and the inboard side of the bore simply runs into the deck, which is
- * solid there (well inside the lattice's 15 mm rim). The axis still sits well
- * within the side panel beneath it.
+ * tab. Centred, a Ø9.8 counterbore leaves 0.6 mm of wall each side, which is
+ * not a wall.
+ *
+ * The offset trades two walls directly against each other and both matter:
+ * moving the axis inboard fattens the tab's outboard wall but thins the side
+ * panel's inner wall, where the same screw threads a few millimetres from the
+ * open ledge. At an inset of 3.5 in an 11 mm tab that inner wall was 0.8 mm —
+ * a thread that would split straight out into the rack. 12 mm of reach at
+ * 4.3 balances them: 2.8 mm of tab outboard, 1.6 mm of panel inboard, and
+ * still 3 mm of rail left outboard of the ledge.
  */
-const TAB_SCREW_INSET = 3.5;
+export const TAB_SCREW_INSET = 4.3;
 /** Pilot depth below the TOP ledge, sized for the 24 mm-thread M5s in hand:
  *  a screw longer than its hole bottoms out and jacks the plate back up. The
  *  bottom tab lands on a stacking foot instead and takes what the foot gives. */
-const TAB_SCREW_BITE = 21;
+export const TAB_SCREW_BITE = 21;
 /** Solid column reserved around a tab screw in the side's lightening pocket. */
-const TAB_COLUMN_D = 12;
+const TAB_COLUMN_D = 10;
+/**
+ * How far in from the outer face a tab screw column is pocketed back to. The
+ * thread only needs material around itself, not a full-height lump: with the
+ * axis 4.3 mm in from the plate edge the screw spans x 8.6..13.4, so keeping
+ * material from x=8 inward covers it with room to spare.
+ */
+const COLUMN_FLOOR = 7;
 /** Driver access up through a stacking foot to the bottom tab screw's head. */
 const TAB_ACCESS_D = 10.8;
 /** Keystone jack (industry standard, NEVER scaled): retention window in a
@@ -472,6 +484,7 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     regions.push(yzRect(depth - rearBand + RELIEF_RIM, depth - RELIEF_RIM, webZ0, webZ1));
   }
   const keepOut: Profile[] = [];
+  const screwColumns: Profile[] = [];
   for (let k = 0; k < dims.slots; k++) {
     const z = dims.holeZ(k);
     keepOut.push(pTranslate([SIDE_FRONT_HOLE_Y, z], circleProfile(SCREW_BOSS_D / 2, 20)));
@@ -493,21 +506,36 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     keepOut.push(yzRect(yC - TAB_LEN / 2 - 4, yC + TAB_LEN / 2 + 4, FOOT_H - 2, FOOT_H + TAB_T + 2));
     keepOut.push(yzRect(yC - TAB_LEN / 2 - 4, yC + TAB_LEN / 2 + 4, H_TOP - TAB_T - 2, H_TOP));
     // ...and the column each tab screw threads into, running up from the
-    // bottom ledge and down from the top one.
+    // bottom ledge and down from the top one. These are collected separately
+    // from the true keep-outs: they need material for the thread, but NOT all
+    // the way out to the face — see the shallow pocket below.
     if (!screwYs.has(yC)) continue;
     for (const [za, zb] of [
       [FOOT_H + TAB_T, FOOT_H + TAB_T + TAB_SCREW_BITE + 2],
       [H_TOP - TAB_T - TAB_SCREW_BITE - 2, H_TOP - TAB_T],
     ] as [number, number][]) {
-      keepOut.push(yzRect(yC - TAB_COLUMN_D / 2, yC + TAB_COLUMN_D / 2, za, zb));
+      screwColumns.push(yzRect(yC - TAB_COLUMN_D / 2, yC + TAB_COLUMN_D / 2, za, zb));
     }
   }
   cuts.push(
     translate(
       [pa, 0, 0],
-      extrudeX(pDifference([pUnion(regions), ...keepOut]), pocketDepthX),
+      extrudeX(pDifference([pUnion(regions), ...keepOut, ...screwColumns]), pocketDepthX),
     ),
   );
+  // The tab screw columns get a SHALLOWER pocket rather than none at all.
+  // The thread needs material from COLUMN_FLOOR inward — it does not need the
+  // column standing out flush with the face. Left full height each one was a
+  // 12 mm lump at the corner that read as lightening having missed a patch,
+  // and it swallowed the neighbouring accessory screw boss into the same mass.
+  // Cut back to COLUMN_FLOOR it is a shallow pad, the bosses stay their own
+  // distinct cylinders, and the thread still has 7 mm of material around it.
+  if (screwColumns.length > 0) {
+    const [ca, cb] = xr(-OVER, COLUMN_FLOOR);
+    cuts.push(
+      translate([ca, 0, 0], extrudeX(pDifference([pUnion(screwColumns), ...keepOut]), cb - ca)),
+    );
+  }
 
   // ---- Wall mount ----------------------------------------------------------
   const wallMount = rack.wallMount ?? 'none';
@@ -516,17 +544,12 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     // with the panel lying inner-face-down; the blade rises as a wall.
     const [ba, bb] = mirror ? [width - OVER, width + EAR_REACH] : [-EAR_REACH, OVER];
     solid.push(translate([ba, depth - EAR_T, FOOT_H], cube([bb - ba, EAR_T, bodyH])));
-    const screws = Math.max(2, Math.floor(dims.slots / 6));
+    const screws = earScrewsPerSide(bodyH);
     const xC = mirror ? width + EAR_REACH / 2 : -EAR_REACH / 2;
-    for (let i = 0; i < screws; i++) {
-      const z = FOOT_H + (bodyH * (i + 1)) / (screws + 1);
-      cuts.push(translate([xC, depth - EAR_T - OVER, z], axisCylinder('+y', EAR_T + 2 * OVER, WALL_SCREW_D / 2, 24)));
-      cuts.push(
-        translate([xC, depth - EAR_T - OVER, z], axisCylinder('+y', WALL_HEAD_RECESS + OVER, WALL_HEAD_D / 2, 32)),
-      );
-      // Horizontal triangular gusset bracing blade to panel, below the screw.
-      const tipX = mirror ? width + EAR_REACH - 4 : -(EAR_REACH - 4);
-      const rootX = mirror ? width - OVER : OVER;
+    const tipX = mirror ? width + EAR_REACH - 4 : -(EAR_REACH - 4);
+    const rootX = mirror ? width - OVER : OVER;
+    /** Horizontal triangular gusset bracing the blade back to the panel. */
+    const gusset = (zTop: number): void => {
       solid.push(
         triPrismZ(
           [
@@ -534,11 +557,25 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
             [rootX, depth - EAR_T + 0.5],
             [rootX, depth - EAR_T - 24],
           ],
-          z - 8 - GUSSET_T,
-          z - 8,
+          zTop - GUSSET_T,
+          zTop,
         ),
       );
+    };
+    for (let i = 0; i < screws; i++) {
+      const z = FOOT_H + (bodyH * (i + 1)) / (screws + 1);
+      cuts.push(translate([xC, depth - EAR_T - OVER, z], axisCylinder('+y', EAR_T + 2 * OVER, WALL_SCREW_D / 2, 24)));
+      cuts.push(
+        translate([xC, depth - EAR_T - OVER, z], axisCylinder('+y', WALL_HEAD_RECESS + OVER, WALL_HEAD_D / 2, 32)),
+      );
+      gusset(z - 8);
     }
+    // ...and brace the ENDS of the blade, not just under the screws. The screws
+    // are spread through the middle of the height by construction, which left
+    // the top and bottom of the blade as unbraced cantilever — the corners that
+    // peel first when a heavy rack tries to rotate off the wall.
+    gusset(FOOT_H + GUSSET_T + 2);
+    gusset(FOOT_H + bodyH - 2);
   } else if (wallMount === 'cleat') {
     // French-cleat hook: the panel keeps full depth only ABOVE a 45° seat
     // plane near the top rear (that full-depth region IS the catch — it
@@ -1045,6 +1082,23 @@ function buildWallSpacer(dims: RackDims): BuildOp {
     cuts.push(translate([x, -OVER, 10], axisCylinder('+y', WALL_HEAD_RECESS + OVER, WALL_HEAD_D / 2, 32)));
   }
   return difference([cube([len, CLEAT_D, 20]), ...cuts]);
+}
+
+/**
+ * Wall-mount ear screws per side.
+ *
+ * A loaded rack hangs off these, and the load grows with the box: a 250 mm
+ * deep rack cantilevers hard off the wall, and the ear is the only thing
+ * carrying it. Two screws at a third and two thirds of the height — the old
+ * rule — is thin for anything of size.
+ *
+ * So: one screw per ~60 mm of blade and never fewer than four. Erring high is
+ * deliberate — extra holes cost almost nothing to print, and more of them up
+ * the blade gives more chances to land on a stud or on solid backing rather
+ * than bare plasterboard. At the sample height that is five a side.
+ */
+export function earScrewsPerSide(bodyH: number): number {
+  return Math.max(4, Math.round(bodyH / 60));
 }
 
 /**

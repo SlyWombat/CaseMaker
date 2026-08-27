@@ -1,5 +1,5 @@
 import type { Project } from '@/types';
-import { accessorySlots, plateScrewYs, LONG_SHELF } from '@/engine/compiler/rack';
+import { accessorySlots, computeRackDims, earScrewsPerSide, plateScrewYs, LONG_SHELF } from '@/engine/compiler/rack';
 
 /** A bill of materials for the user-supplied hardware needed to assemble
  *  the printed parts. Surfaced in the export modal so the user knows what
@@ -71,7 +71,8 @@ export function hardwareForProject(project: Project): HardwareItem[] {
     }
     const wallMount = rack.wallMount ?? 'none';
     if (wallMount === 'ears') {
-      const perSide = Math.max(2, Math.floor(Math.max(2, Math.round(rack.slots)) / 6));
+      // Shared with the geometry so the count in the list is the count in the part.
+      const perSide = earScrewsPerSide(computeRackDims(rack).bodyH);
       items.push({
         id: 'rack-wall-screws',
         label: 'Wood screws #8 / 4.5 mm × 60 mm (into studs) or rated anchors',
