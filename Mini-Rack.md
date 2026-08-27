@@ -14,7 +14,7 @@ Overall: ~250 deep × 252 wide × 275 tall mm. Author printed on a Prusa XL;
 | Part | Dims (mm) | Notes |
 |---|---|---|
 | Side panel L/R | 250 d × 275 h × 20 thick | Mirror pair. Heavy front column (x 0–45) protecting cables; y range −5..270 → 5 mm stacking foot below base |
-| Top/bottom ×2 | 222 × 250 × 15 | 5 mm deck + four 8 mm corner tabs that sit in ledges in the side rails, screwed down with M5. 222 = 252 − 2×15. See **Plate joint** below |
+| Top/bottom ×2 | 222 × 250 × 15 | Flat 5 mm slab with six corner/mid tabs that sit in ledges in the side rails; four are screwed with M5. 222 = 252 − 2×15. See **Plate joint** below |
 | 3-slot long shelf | 252 × 49.5 × 123 deep | Vented deck, no front lip |
 | 3-slot short shelf | 252 × 49.5 × 86 deep | Pairs back-to-back with long shelf |
 | 3-slot blank | 252 × 49.5 × 4 | For user drilling/CAD variations |
@@ -117,11 +117,22 @@ standing rack.
   windows were pulled back off the rear tabs — without both, two of the four
   screws had only ~67% of their thread annulus. They now measure 98–99%.
 
-Print the plate **outer face down**: the tabs are flush with that face, so the
-whole underside is one flat plane on the bed. The head counterbores open
-downward and their floors bridge, which slicers handle. Note this **inverts the
-old print flip** — `rack-top` is now the part that needs turning over, not
-`rack-bottom`.
+Print the plate **counterbores UP**. The tab is the same thickness as the deck
+— the plate is a flat slab with ears, not a slab with lumps — so it lies flat
+either way and the only thing choosing the orientation is the head seats.
+Printed the other way up, each seat is a downward-facing ceiling spanning its
+own bore: it bridges, droops, and gives the screw head nothing flat to bear on.
+Turned over, the same face is an ordinary supported top surface.
+
+In assembly the bottom plate's counterbored face points down, so **`rack-bottom`
+is the one that gets turned over**; `rack-top` is already correct as modelled.
+Both therefore reach the bed the same way up, which is right — they are one
+printed part, and `rack.spec.ts` proves it by mapping one onto the other and
+differencing (0.00 mm³).
+
+This flip entry has now changed twice. It is decided by which way the
+counterbores face and nothing else; re-derive it from that if the joint moves
+again.
 
 **Pilot diameter is 4.8, set by test print** (`samples/pilot-coupon-m5.stl`,
 [issue #140](https://github.com/SlyWombat/CaseMaker/issues/140)) — not by

@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { aabbOfOp, type BuildOp } from '@/engine/compiler/buildPlan';
 import { buildRackNodes, computeRackDims, SLOT_PITCH, plateScrewYs } from '@/engine/compiler/rack';
+import { PRINT_FLIP_NODE_IDS } from '@/engine/exportLayout';
 import {
   rectFitsBed,
   validateRackFit,
@@ -335,7 +336,7 @@ describe('rack archetype — mini-rack template', () => {
     const sides = ['rack-side-left', 'rack-side-right'].map((id) => exec(byId.get(id)!));
     // Joint geometry (rack.ts): tabs reach TAB_REACH over the side from the
     // plate edge, centred TAB_LEN/2 in from each stacking foot's front edge.
-    const TAB_T = 6, TAB_SCREW_INSET = 4.3;
+    const TAB_T = 5, TAB_SCREW_INSET = 3.5;
     const axisX = 15 + 0.3 - TAB_SCREW_INSET;
     const tabYs = plateScrewYs(SAMPLE.depth);
     try {
@@ -430,6 +431,70 @@ describe('rack archetype — mini-rack template', () => {
       }
     } finally {
       sides.forEach((s) => s.delete());
+    }
+  }, 60000);
+
+  it('gives each tab screw head a flat seat, printed facing up', () => {
+    const rack: RackParams = { ...SAMPLE, accessories: [] };
+    const byId = new Map(buildRackNodes(rack).map((n) => [n.id, n.op]));
+    const dims = computeRackDims(rack);
+    const plate = exec(byId.get('rack-bottom')!);
+    const PLATE_T = 5, HEAD_H = 3, TAB_SCREW_INSET = 3.5, FOOT_H = 5;
+    const x0 = 15 + 0.3;
+    const axes = [x0 - TAB_SCREW_INSET, x0 + dims.plateW + TAB_SCREW_INSET];
+    try {
+      // The head bears on an annulus between the clearance hole and the bore
+      // wall. It has to be solid and complete, with a clean step: a partial
+      // reading means the seat is broken up rather than one flat face.
+      const ring = (x: number, y: number, z: number): number => {
+        const outer = Manifold.cylinder(0.1, 4.8, 4.8, 48).translate([x, y, z]);
+        const inner = Manifold.cylinder(0.3, 2.7, 2.7, 48).translate([x, y, z - 0.1]);
+        const shell = Manifold.difference([outer, inner]);
+        const i = Manifold.intersection([plate, shell]);
+        const f = i.volume() / shell.volume();
+        i.delete();
+        shell.delete();
+        outer.delete();
+        inner.delete();
+        return f;
+      };
+      const floorZ = FOOT_H + HEAD_H; // outer face is at z = FOOT_H
+      for (const x of axes) {
+        for (const y of plateScrewYs(SAMPLE.depth)) {
+          expect(ring(x, y, floorZ - 0.2), `bore is open below the seat at ${x},${y}`).toBeLessThan(0.02);
+          expect(ring(x, y, floorZ + 0.2), `seat is solid and complete at ${x},${y}`).toBeGreaterThan(0.98);
+        }
+      }
+      // A flat seat is only half of it — it also has to print facing UP. The
+      // plate's counterbored face points DOWN in assembly, so the bottom plate
+      // is the one that must be turned over; printed the other way the seat is
+      // a bridged ceiling and the head has nothing smooth to bear on.
+      expect(PRINT_FLIP_NODE_IDS, 'plates print counterbore-up').toContain('rack-bottom');
+      expect(PRINT_FLIP_NODE_IDS, 'rack-top is already counterbore-up as modelled').not.toContain('rack-top');
+      // Flat slab: tab and deck are the same thickness, which is what lets it
+      // lie flat either way up.
+      const bb = plate.boundingBox();
+      expect(bb.max[2] - bb.min[2], 'plate is a flat slab').toBeCloseTo(PLATE_T, 5);
+
+      // "One printed plate, installed twice" is a design claim the whole joint
+      // rests on — every y feature symmetric about depth/2, tabs on the face
+      // that points out of the rack. Prove it rather than trusting that both
+      // ends call the same builder: map the bottom onto the top and difference.
+      const top = exec(byId.get('rack-top')!);
+      const mapped = plate
+        .translate([0, -dims.depth / 2, -(FOOT_H + PLATE_T / 2)])
+        .rotate([180, 0, 0])
+        .translate([0, dims.depth / 2, dims.totalH - PLATE_T / 2]);
+      try {
+        const a = Manifold.difference([mapped, top]).volume();
+        const b = Manifold.difference([top, mapped]).volume();
+        expect(a + b, 'top plate is the bottom plate turned over — one printed part').toBeLessThan(1);
+      } finally {
+        top.delete();
+        mapped.delete();
+      }
+    } finally {
+      plate.delete();
     }
   }, 60000);
 

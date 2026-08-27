@@ -20,17 +20,22 @@ export interface LayoutOptions {
  *
  * The lid prints ceiling-down.
  *
- * The rack plates flipped sides when the joint changed. The corner tabs are
- * flush with the plate's OUTER face, so that face is the flat plane you want
- * on the bed. In assembly space the BOTTOM plate already has its outer face
- * down, so it is correct as-modelled and must NOT be listed. The TOP plate is
- * that same part turned over, which puts its flat face up and its tabs
- * hanging in mid-air, so it is the one that needs flipping.
+ * The rack plates print COUNTERBORE-UP, and that is the whole reason this
+ * entry exists. Each tab screw's head bears on the floor of its counterbore;
+ * printed the other way up that floor is a downward-facing ceiling spanning
+ * the bore — it bridges, droops, and gives the head nothing flat to seat on.
+ * Turned over, the same floor is an ordinary supported top surface.
  *
- * (This is inverted from the old rebate joint, where `rack-bottom` was the
- * flipped one — do not restore that entry by inertia.)
+ * In assembly the BOTTOM plate has its counterbored face pointing down at the
+ * underside of the rack, so it is the one that needs turning. The TOP plate is
+ * that same part already rotated 180 degrees, so its counterbores face up and
+ * it is correct as-modelled. Both therefore reach the bed in the SAME
+ * orientation, which is right — they are one printed part.
+ *
+ * This entry has now flipped twice. It is set by which way the counterbores
+ * face, nothing else; re-derive it from that if the joint changes again.
  */
-export const PRINT_FLIP_NODE_IDS: ReadonlyArray<string> = ['lid', 'rack-top'];
+export const PRINT_FLIP_NODE_IDS: ReadonlyArray<string> = ['lid', 'rack-bottom'];
 
 const DEFAULTS: Required<LayoutOptions> = {
   gap: 5,

@@ -162,7 +162,7 @@ export function partForId(id: string, index = 0): ProjectPart {
       displayName,
       material: 'rigid',
       category: structural ? 'case' : 'accessory',
-      // The bottom plate sits tabs-UP in the assembly; it has to be turned
+      // The bottom plate has its counterbores facing DOWN in the assembly; it has to be turned
       // over to print them without supports (see PRINT_FLIP_NODE_IDS).
       printOrientation: id === 'rack-bottom' ? LID_ORIENTATION : FLAT_ORIENTATION,
     };
@@ -194,7 +194,7 @@ export function printOrientationHint(part: ProjectPart): string {
   if (part.printOrientation.flipForPrint) {
     if (part.id === 'lid') return 'Print upside-down (lid ceiling on the bed)';
     if (part.id === 'rack-bottom')
-      return 'Lay flat, OUTER FACE DOWN — the corner tabs are flush with that face, so the whole underside is one flat plane on the bed. No supports. (This is upside-down from how the bottom plate sits in the rack.)';
+      return 'Lay flat, COUNTERBORES UP — the plate is a flat slab, so either face lies flat, but the head seats must face up: printed the other way their floors bridge and the screw head has nothing smooth to bear on. No supports. (This is upside-down from how the bottom plate sits in the rack.)';
     return 'Print upside-down (flipped 180° on X)';
   }
   if (part.id === 'stand') return 'Print FACE DOWN — lay the frame\'s front face on the bed (the foot\'s front edge is flush with it, so the whole front beds flat). The foot and gussets then rise at 75°, self-supporting. Gives a flat, accurate mating face for the panel';
@@ -209,7 +209,7 @@ export function printOrientationHint(part: ProjectPart): string {
   if (part.id.startsWith('rack-side-'))
     return 'Lay FLAT, inner face down (the face with the plate tab ledges). Wall-mount ears/gussets then rise as self-supporting walls. Strongest layer direction for the screw columns';
   if (part.id === 'rack-top')
-    return 'Lay flat, OUTER FACE DOWN — the tab faces sit flat on the bed, vented deck above. Head counterbores open downward; their floors bridge. No supports';
+    return 'Lay flat, COUNTERBORES UP — flat slab, so it sits flat either way, but the head seats must face up or their floors bridge and give the head nothing smooth to bear on. No supports';
   if (part.id.startsWith('rack-blank-') || part.id.startsWith('rack-keystone-'))
     return 'Front face DOWN on the bed — the end ribs and keystone bosses rise behind it, no supports needed';
   if (part.id.startsWith('rack-shelf-') || part.id.startsWith('rack-cable-tray-'))

@@ -156,7 +156,14 @@ const PLATE_T = 5;
  */
 const TAB_REACH = 11;
 const TAB_LEN = 22;
-const TAB_T = 6;
+/**
+ * Tab thickness EQUALS the deck, so the plate is a flat slab with ears rather
+ * than a slab with lumps: both faces are dead flat, which is what lets it be
+ * printed counterbore-UP. Printed the other way the counterbore opens onto the
+ * bed and its floor becomes an unsupported ceiling — a bridge — which is no
+ * seat for a screw head to bear on.
+ */
+const TAB_T = PLATE_T;
 const TAB_SLACK = 0.3;
 /** Clearance through the tab; the starter hole reuses SCREW_THREAD_D, which
  *  is test-print derived. The head recess is still provisional pending issue
@@ -169,10 +176,11 @@ const TAB_SCREW_HEAD_H = 3.0;
  * Screw axis, measured INBOARD from the plate edge — not the centre of the
  * tab. Centred, a Ø9.8 counterbore in an 11 mm tab leaves 0.6 mm of wall on
  * each side, which is not a wall. Offset inboard, the outboard wall gets
- * 1.8 mm and the inboard side of the bore simply runs into the deck, which is
- * solid there. The axis still sits well within the side panel beneath it.
+ * 2.6 mm and the inboard side of the bore simply runs into the deck, which is
+ * solid there (well inside the lattice's 15 mm rim). The axis still sits well
+ * within the side panel beneath it.
  */
-const TAB_SCREW_INSET = 4.3;
+const TAB_SCREW_INSET = 3.5;
 /** Pilot depth below the TOP ledge, sized for the 24 mm-thread M5s in hand:
  *  a screw longer than its hole bottoms out and jacks the plate back up. The
  *  bottom tab lands on a stacking foot instead and takes what the foot gives. */
