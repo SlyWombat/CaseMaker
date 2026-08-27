@@ -49,7 +49,19 @@ const FOOT_LEN = 30;
 const FOOT_INSET = 4;
 /** M5 cap screws: clearance through the sides, thread into accessory ribs. */
 const SCREW_CLEAR_D = 5.2;
-const SCREW_THREAD_D = 4.7;
+/**
+ * Receiving hole for the M5s, set by TEST PRINT (samples/pilot-coupon-m5.stl,
+ * issue #140), not by arithmetic — the arithmetic was wrong and it is worth
+ * saying why so nobody "corrects" this back.
+ *
+ * The usual 0.8x-major rule (~4.0-4.3 for M5) is for thread-FORMING screws
+ * designed for plastic, with a ~30 degree thread profile that displaces
+ * material. A standard 60 degree metric machine screw driven into PLA at that
+ * size splits it: the hoop stress goes up faster than the grip does. Of
+ * 4.0 / 4.2 / 4.4 / 4.6 / 4.8 driven into a printed coupon in both layer
+ * orientations, 4.8 held best.
+ */
+const SCREW_THREAD_D = 4.8;
 /** Tie-wrap holes down the front band. */
 const TIE_D = 4.5;
 /** Accessory faceplate thickness (blank/keystone front plate). */
@@ -146,10 +158,11 @@ const TAB_REACH = 11;
 const TAB_LEN = 22;
 const TAB_T = 6;
 const TAB_SLACK = 0.3;
-/** Clearance through the tab, starter hole in the side. Sizes are provisional
- *  pending issue #140 — the one repeatable screw-hole mechanism. */
+/** Clearance through the tab; the starter hole reuses SCREW_THREAD_D, which
+ *  is test-print derived. The head recess is still provisional pending issue
+ *  #140 — the one repeatable screw-hole mechanism. */
 const TAB_SCREW_CLEAR_D = 5.2;
-const TAB_SCREW_PILOT_D = 4.2;
+const TAB_SCREW_PILOT_D = SCREW_THREAD_D;
 const TAB_SCREW_HEAD_D = 9.8;
 const TAB_SCREW_HEAD_H = 3.0;
 /**

@@ -123,10 +123,18 @@ downward and their floors bridge, which slicers handle. Note this **inverts the
 old print flip** — `rack-top` is now the part that needs turning over, not
 `rack-bottom`.
 
-Screw sizes (clearance, pilot, counterbore) are provisional pending
-[issue #140](https://github.com/SlyWombat/CaseMaker/issues/140), which is
-researching one repeatable screw-hole mechanism to replace the ~90 hand-rolled
-hole sites across the compiler.
+**Pilot diameter is 4.8, set by test print** (`samples/pilot-coupon-m5.stl`,
+[issue #140](https://github.com/SlyWombat/CaseMaker/issues/140)) — not by
+arithmetic, which got it wrong. The usual 0.8×major rule (~4.0–4.3 for M5) is
+for thread-*forming* screws designed for plastic, with a ~30° profile that
+displaces material. A standard 60° metric machine screw driven into PLA at
+that size splits the boss instead of forming a thread. Of 4.0/4.2/4.4/4.6/4.8
+driven into a printed coupon in both layer orientations, 4.8 held best. Note
+4.8 was the top of the tested range, so the optimum is not yet bracketed.
+
+The head recess is still provisional pending #140, which is researching one
+repeatable screw-hole mechanism to replace the ~90 hand-rolled hole sites
+across the compiler.
 
 `tests/unit/rack.spec.ts` pins the seat, the fore/aft location, the
 deliberate top-lifts / bottom-captured asymmetry, and the thread annulus at

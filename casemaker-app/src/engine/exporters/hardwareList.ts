@@ -47,7 +47,7 @@ export function hardwareForProject(project: Project): HardwareItem[] {
         id: 'rack-screws',
         label: 'M5 × 25 mm socket cap screws',
         count: frontScrews + rearScrews,
-        note: `The rack's structure: from OUTSIDE through the side panels' Ø5.2 clearance holes into each accessory's end-rib thread holes (Ø4.7, self-tapping in plastic) — one per slot per side${rearScrews > 0 ? `, plus ${rearScrews} into the rear column for long shelves` : ''}. 15.3 mm of that is grip through the panel, so a 20 mm screw leaves under 5 mm of thread — use 25. Snug, don't strip.`,
+        note: `The rack's structure: from OUTSIDE through the side panels' Ø5.2 clearance holes into each accessory's end-rib thread holes (Ø4.8, self-tapping in plastic — size confirmed by test print) — one per slot per side${rearScrews > 0 ? `, plus ${rearScrews} into the rear column for long shelves` : ''}. 15.3 mm of that is grip through the panel, so a 20 mm screw leaves under 5 mm of thread — use 25. Snug, don't strip.`,
       });
     }
     // Plate tab screws. This is the answer to "where do the plates take a
