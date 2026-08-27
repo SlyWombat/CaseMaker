@@ -83,7 +83,7 @@ export const caseParamsSchema = z.object({
             id: z.string(),
             type: z.enum(['blank', 'shelf', 'keystone', 'cable-tray']),
             slots: z.number().int().min(1).max(12).optional(),
-            shelfDepth: z.number().positive().optional(),
+            shelfDepth: z.union([z.number().positive(), z.literal('full')]).optional(),
             frontPlate: z.boolean().optional(),
             vented: z.boolean().optional(),
           }),

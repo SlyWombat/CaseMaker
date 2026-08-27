@@ -640,6 +640,57 @@ describe('rack archetype — mini-rack template', () => {
     }
   }, 180000);
 
+  it("full-depth shelf tracks the rack's depth and anchors front, mid and rear", () => {
+    for (const depth of [200, 250, 300]) {
+      const rack: RackParams = {
+        ...SAMPLE,
+        depth,
+        accessories: [{ id: 'a', type: 'shelf', slots: 3, shelfDepth: 'full', vented: true }],
+      };
+      const dims = computeRackDims(rack);
+      const nodes = buildRackNodes(rack);
+      const L = exec(nodes.find((n) => n.id === 'rack-side-left')!.op);
+      const A = exec(nodes.find((n) => n.id.startsWith('rack-shelf'))!.op);
+      try {
+        const bb = A.boundingBox();
+        // Auto-sizes: front stays on the recess, back lands on the rack's rear
+        // face, whatever the depth is set to.
+        expect(bb.min[1], `depth ${depth}: front`).toBeCloseTo(12, 2);
+        expect(bb.max[1], `depth ${depth}: back reaches the rack's rear`).toBeCloseTo(depth, 2);
+        // Three anchors, not two: a shelf this long cantilevers badly off the
+        // mid column alone, so the sides gain a rear column to match it.
+        for (const y of [22, 100, depth - 12]) {
+          for (let k = 0; k < 3; k++) {
+            const probe = Manifold.cylinder(28, 2, 2, 24).rotate([0, 90, 0]).translate([0, y, dims.holeZ(k)]);
+            const inL = Manifold.intersection([L, probe]).volume();
+            const inA = Manifold.intersection([A, probe]).volume();
+            probe.delete();
+            expect(inL, `depth ${depth}: side hole at y=${y}, slot ${k}`).toBeLessThan(1);
+            expect(inA, `depth ${depth}: shelf thread hole at y=${y}, slot ${k}`).toBeLessThan(1);
+          }
+        }
+      } finally {
+        [L, A].forEach((m) => m.delete());
+      }
+    }
+
+    // The rear column is cut ONLY when a full-depth shelf is present, so an
+    // ordinary rack is not peppered with holes it will never use.
+    const plain = buildRackNodes({ ...SAMPLE, accessories: [{ id: 'a', type: 'shelf', slots: 3, shelfDepth: 123 }] });
+    const dims = computeRackDims(SAMPLE);
+    const L = exec(plain.find((n) => n.id === 'rack-side-left')!.op);
+    try {
+      const probe = Manifold.cylinder(28, 2, 2, 24)
+        .rotate([0, 90, 0])
+        .translate([0, SAMPLE.depth - 12, dims.holeZ(0)]);
+      const inL = Manifold.intersection([L, probe]).volume();
+      probe.delete();
+      expect(inL, 'no rear anchor column without a full-depth shelf').toBeGreaterThan(1);
+    } finally {
+      L.delete();
+    }
+  }, 180000);
+
   it('keyhole mount: flush rear face with working keyhole hangers', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'keyhole' };
     const nodes = buildRackNodes(rack);

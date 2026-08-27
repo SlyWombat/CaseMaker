@@ -1,5 +1,5 @@
 import type { Project } from '@/types';
-import { accessorySlots, computeRackDims, earScrewsPerSide, plateScrewYs, LONG_SHELF } from '@/engine/compiler/rack';
+import { accessorySlots, computeRackDims, earScrewsPerSide, plateScrewYs, resolveShelfDepth, LONG_SHELF } from '@/engine/compiler/rack';
 
 /** A bill of materials for the user-supplied hardware needed to assemble
  *  the printed parts. Surfaced in the export modal so the user knows what
@@ -40,7 +40,12 @@ export function hardwareForProject(project: Project): HardwareItem[] {
     for (const acc of rack.accessories ?? []) {
       const n = accessorySlots(acc);
       frontScrews += n * 2;
-      if (acc.type === 'shelf' && (acc.shelfDepth ?? 123) >= LONG_SHELF) rearScrews += n * 2;
+      if (acc.type === 'shelf') {
+        const sd = resolveShelfDepth(acc.shelfDepth, rack.depth);
+        if (sd >= LONG_SHELF) rearScrews += n * 2;
+        // A full-depth shelf also takes the rear anchor at the very back.
+        if (acc.shelfDepth === 'full') rearScrews += n * 2;
+      }
     }
     if (frontScrews + rearScrews > 0) {
       items.push({

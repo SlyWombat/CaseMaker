@@ -196,6 +196,20 @@ cantilever — the corners that peel first when a heavy rack tries to rotate off
 the wall. `earScrewsPerSide()` is shared with the hardware list so the count in
 the list is the count in the part.
 
+## Full-depth shelf
+
+`shelfDepth: 'full'` re-sizes with the rack instead of being a fixed number:
+the shelf always runs from the front recess to the rack's rear face, so
+changing the rack's depth changes the shelf with it.
+
+It anchors in **three** places, not two. A full shelf spans ~238 mm at sample
+size while the existing rear column sits only 88 mm back from its front edge,
+which would leave most of the shelf cantilevered. The sides therefore gain a
+rear column at `REAR_ANCHOR_INSET` in from the back face — inside the rear
+band, which is solid at every mount type. That column is cut **only when a
+full-depth shelf is present**, so an ordinary rack is not peppered with holes
+it will never use.
+
 ## Front recess
 
 Accessories mount 12 mm (`FRONT_RECESS`) behind the sides' front faces and span

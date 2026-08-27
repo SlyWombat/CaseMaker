@@ -7,6 +7,7 @@ import {
   SIDE_T,
   LONG_SHELF,
   MID_BAR_MIN_DEPTH,
+  resolveShelfDepth,
 } from './rack';
 
 /**
@@ -98,7 +99,7 @@ export function rackPartFootprints(rack: RackParams): PartFootprint[] {
         id: `rack-shelf-${i}`,
         label: `shelf (${n}-slot)`,
         fx: accW,
-        fy: acc.shelfDepth ?? 123,
+        fy: resolveShelfDepth(acc.shelfDepth, dims.depth),
         fz: n * SLOT_PITCH,
       });
     } else if (acc.type === 'cable-tray') {
@@ -195,7 +196,7 @@ export function validateRackFit(rack: RackParams): PlacementIssue[] {
   // Long/extra-deep shelves screw into the sides' mid bar — which only
   // exists when the rack is deep enough to have one.
   const hasLongShelf = (rack.accessories ?? []).some(
-    (a) => a.type === 'shelf' && (a.shelfDepth ?? 123) >= LONG_SHELF,
+    (a) => a.type === 'shelf' && resolveShelfDepth(a.shelfDepth, dims.depth) >= LONG_SHELF,
   );
   if (hasLongShelf && dims.depth < MID_BAR_MIN_DEPTH) {
     issues.push({

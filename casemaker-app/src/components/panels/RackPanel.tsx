@@ -483,11 +483,19 @@ export function RackPanel() {
                 <select
                   value={String(acc.shelfDepth ?? 123)}
                   aria-label={`Accessory ${i + 1} shelf depth`}
-                  onChange={(e) => setAccessory(i, { ...acc, shelfDepth: Number(e.target.value) })}
+                  onChange={(e) =>
+                    setAccessory(i, {
+                      ...acc,
+                      shelfDepth: e.target.value === 'full' ? 'full' : Number(e.target.value),
+                    })
+                  }
                 >
                   <option value="86">short (86 mm) — front screws only</option>
                   <option value="123">long (123 mm) — anchors mid bar</option>
                   <option value="160">extra deep (160 mm) — anchors mid bar</option>
+                  <option value="full">
+                    full depth ({Math.round(rack.depth - 12)} mm) — front, mid and rear screws
+                  </option>
                 </select>
                 <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>
                   <input

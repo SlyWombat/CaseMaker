@@ -1,4 +1,4 @@
-import type { RackParams, RackAccessory } from '@/types';
+import type { Mm, RackParams, RackAccessory } from '@/types';
 import {
   cube,
   cylinder,
@@ -82,6 +82,28 @@ const SIDE_FRONT_HOLE_Y = FRONT_RECESS + FRONT_HOLE_Y;
 const REAR_HOLE_Y = 100;
 const ACC_REAR_HOLE_Y = REAR_HOLE_Y - FRONT_RECESS;
 export const LONG_SHELF = 112;
+/**
+ * Rear anchor for a full-depth shelf, measured in from the rack's back face.
+ * Lands inside the rear band, which is solid at every mount type.
+ *
+ * A full shelf spans ~238 mm at sample size; the existing rear column sits
+ * only 88 mm back from its front edge, which would leave most of the shelf
+ * cantilevered. This gives it a screw at the actual back. The column is cut
+ * into the sides ONLY when a full-depth shelf is present, so an ordinary rack
+ * is not peppered with holes it will never use.
+ */
+const REAR_ANCHOR_INSET = 12;
+
+/** Resolve a shelf's depth, expanding 'full' against the rack's own depth. */
+export function resolveShelfDepth(shelfDepth: Mm | 'full' | undefined, rackDepth: Mm): number {
+  if (shelfDepth === 'full') return rackDepth - FRONT_RECESS;
+  return shelfDepth ?? 123;
+}
+
+/** Does this rack carry a shelf that runs its whole depth? */
+export function hasFullDepthShelf(rack: RackParams): boolean {
+  return (rack.accessories ?? []).some((a) => a.type === 'shelf' && a.shelfDepth === 'full');
+}
 /** Rack depth below which the sides have no mid rib (and thus no rear
  *  screw column) — long/extra-deep shelves lose their middle-bar anchor. */
 export const MID_BAR_MIN_DEPTH = 132;
@@ -384,11 +406,16 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   // column leaves no band room for a second column.
   const [holeX] = xr(-OVER, SIDE_T + OVER);
   const holeLen = SIDE_T + 2 * OVER;
+  const rearAnchorY = depth - REAR_ANCHOR_INSET;
+  const wantsRearAnchor = hasFullDepthShelf(rack);
   for (let k = 0; k < dims.slots; k++) {
     const z = dims.holeZ(k);
     cuts.push(translate([holeX, SIDE_FRONT_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
     if (depth >= MID_BAR_MIN_DEPTH) {
       cuts.push(translate([holeX, REAR_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
+    }
+    if (wantsRearAnchor) {
+      cuts.push(translate([holeX, rearAnchorY, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
     }
   }
   for (let ty = FRONT_BAND + 12; ty <= depth - rearBand - 8; ty += 33) {
@@ -488,6 +515,9 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   for (let k = 0; k < dims.slots; k++) {
     const z = dims.holeZ(k);
     keepOut.push(pTranslate([SIDE_FRONT_HOLE_Y, z], circleProfile(SCREW_BOSS_D / 2, 20)));
+    if (wantsRearAnchor) {
+      keepOut.push(pTranslate([rearAnchorY, z], circleProfile(SCREW_BOSS_D / 2, 20)));
+    }
     if (depth >= MID_BAR_MIN_DEPTH) {
       keepOut.push(pTranslate([REAR_HOLE_Y, z], circleProfile(SCREW_BOSS_D / 2, 20)));
     }
@@ -887,7 +917,7 @@ function buildShelf(
   const { width, depth, plateW } = dims;
   const vented = opts.vented !== false;
   const h = nSlots * SLOT_PITCH - 0.5;
-  const d = Math.min(Math.max(60, shelfDepth), depth - FRONT_BAND / 2);
+  const d = Math.min(Math.max(60, shelfDepth), depth - FRONT_RECESS);
   const ribX: number[] = [SIDE_T + SIDE_CLEAR, width - SIDE_T - SIDE_CLEAR - RIB_W];
   const solid: BuildOp[] = [];
   const cuts: BuildOp[] = [];
@@ -936,6 +966,11 @@ function buildShelf(
       cuts.push(translate([rx - OVER, FRONT_HOLE_Y, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
       if (d >= LONG_SHELF) {
         cuts.push(translate([rx - OVER, ACC_REAR_HOLE_Y, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
+      }
+      // ...and a third at the very back once the shelf actually reaches it.
+      const backY = depth - REAR_ANCHOR_INSET - FRONT_RECESS;
+      if (d >= backY + 4) {
+        cuts.push(translate([rx - OVER, backY, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
       }
     }
   }
@@ -1199,7 +1234,7 @@ export function buildRackNodes(rack: RackParams): BuildNode[] {
     if (acc.type === 'blank') op = buildBlank(dims, n);
     else if (acc.type === 'keystone') op = buildKeystone(dims, n).op;
     else if (acc.type === 'shelf')
-      op = buildShelf(dims, n, acc.shelfDepth ?? 123, { frontPlate: acc.frontPlate, vented: acc.vented });
+      op = buildShelf(dims, n, resolveShelfDepth(acc.shelfDepth, dims.depth), { frontPlate: acc.frontPlate, vented: acc.vented });
     else op = buildCableTray(dims);
     // Recessed behind the sides' protective front columns (FRONT_RECESS).
     const placed = translate([0, FRONT_RECESS, z0], op);

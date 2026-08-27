@@ -99,7 +99,12 @@ export interface RackAccessory {
    * pairs back-to-back with a rear-mounted one) and 123 (long, gains a
    * second screw column). Clamped to the rack's usable depth.
    */
-  shelfDepth?: Mm;
+  /**
+   * Shelf depth in mm, or 'full' to track the rack's own depth — a full-depth
+   * shelf re-sizes itself whenever the rack does, and picks up a third screw
+   * at the very back rather than cantilevering off the mid column.
+   */
+  shelfDepth?: Mm | 'full';
   /** Shelf only — add a 4 mm faceplate closing the shelf's front opening. */
   frontPlate?: boolean;
   /** Shelf only — deck vent slots + rib side vents. Default true; false
