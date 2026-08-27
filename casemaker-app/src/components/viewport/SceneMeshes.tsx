@@ -110,6 +110,16 @@ export function SceneMeshes() {
   // Hinge pin: Z lift (rides with lid hinge knuckles).
   // Bumpers: stay attached to the case.
   function explodedOffsetFor(id: string): [number, number, number] {
+    // Nothing moves unless we are actually exploded.
+    //
+    // This guard is load-bearing: the rack accessory and wall-part branches
+    // below add CONSTANTS (-15, +35) on top of `lateral`, which is 0 in every
+    // other view. Without it those constants displaced parts in the assembled
+    // view too — accessories were drawn 15 mm proud of the frame, so they
+    // appeared to hang out the front and their screw holes sat 15 mm ahead of
+    // the side panels'. The geometry was right the whole time; only the
+    // picture was wrong, which made it a hard thing to trust a measurement on.
+    if (viewMode !== 'exploded') return [0, 0, 0];
     if (id === 'lid' || id === 'gasket') return [0, 0, lift];
     if (id === 'hinge-pin') return [0, 0, lift];
     // Rack assembly: sides pull apart laterally, top/bottom split
