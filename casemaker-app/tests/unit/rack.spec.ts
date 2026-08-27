@@ -674,6 +674,39 @@ describe('rack archetype — mini-rack template', () => {
       }
     }
 
+    // Each rear boss must stand as an isolated ring, like the front column's.
+    // Centred on the rear band's pocket EDGE they straddled it and printed as
+    // half-buried crescents — 31-50% fused into the surrounding rim against
+    // the front column's 0-4%, which is what the defect looked like in a
+    // render. Both the bearing face and the halo around it are pinned.
+    {
+      const rack: RackParams = {
+        ...SAMPLE,
+        accessories: [{ id: 'a', type: 'shelf', slots: 3, shelfDepth: 'full', vented: true }],
+      };
+      const dims = computeRackDims(rack);
+      const L = exec(buildRackNodes(rack).find((n) => n.id === 'rack-side-left')!.op);
+      try {
+        const annulus = (rIn: number, rOut: number, y: number, z: number): number => {
+          const o = Manifold.cylinder(0.4, rOut, rOut, 48).rotate([0, 90, 0]).translate([0.2, y, z]);
+          const i = Manifold.cylinder(0.8, rIn, rIn, 48).rotate([0, 90, 0]).translate([0, y, z]);
+          const sh = Manifold.difference([o, i]);
+          const t = Manifold.intersection([L, sh]);
+          const f = t.volume() / sh.volume();
+          [o, i, sh, t].forEach((m) => m.delete());
+          return f;
+        };
+        for (let k = 1; k < 5; k++) {
+          const z = dims.holeZ(k);
+          const y = SAMPLE.depth - 12;
+          expect(annulus(2.9, 4.6, y, z), `slot ${k}: rear head bearing`).toBeGreaterThan(0.98);
+          expect(annulus(5.4, 7.5, y, z), `slot ${k}: rear boss stands isolated`).toBeLessThan(0.1);
+        }
+      } finally {
+        L.delete();
+      }
+    }
+
     // The rear column is cut ONLY when a full-depth shelf is present, so an
     // ordinary rack is not peppered with holes it will never use.
     const plain = buildRackNodes({ ...SAMPLE, accessories: [{ id: 'a', type: 'shelf', slots: 3, shelfDepth: 123 }] });

@@ -508,7 +508,23 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     regions.push(yzRect(REAR_RIB[0] + 2, REAR_RIB[1] - 2, webZ0, webZ1));
   }
   if (!wallMounted) {
-    regions.push(yzRect(depth - rearBand + RELIEF_RIM, depth - RELIEF_RIM, webZ0, webZ1));
+    // When the rear anchor column is present, its bosses have to sit WHOLLY
+    // inside this pocket. Left at the band edge each boss straddles the pocket
+    // boundary and prints as a half-buried crescent rather than the clean ring
+    // the front column gives — measured, the rear bosses were 31-50% fused
+    // into the surrounding rim where the front ones are 0-4%. Pull the pocket
+    // forward far enough to clear a whole boss with margin.
+    const bandStart = depth - rearBand + RELIEF_RIM;
+    regions.push(
+      yzRect(
+        wantsRearAnchor
+          ? Math.min(bandStart, rearAnchorY - SCREW_BOSS_D / 2 - 4)
+          : bandStart,
+        depth - RELIEF_RIM,
+        webZ0,
+        webZ1,
+      ),
+    );
   }
   const keepOut: Profile[] = [];
   const screwColumns: Profile[] = [];
