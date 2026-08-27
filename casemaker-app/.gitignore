@@ -29,3 +29,8 @@ local-docs/
 *.njsproj
 *.sln
 *.sw?
+
+# Generated QA/triage output — screenshots and downloaded STLs from the
+# harnesses below. The harnesses are tracked; what they emit is not.
+qa-*-out/
+triage-*-out/
