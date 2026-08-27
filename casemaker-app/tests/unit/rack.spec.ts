@@ -111,16 +111,37 @@ describe('rack archetype — mini-rack template', () => {
     expect(asmIds(undefined), 'no printer set = no claim it fits').toEqual([]);
     expect(asmIds({ x: 360, y: 360, z: 360 }, false), 'opt-in: off by default').toEqual([]);
 
-    // Both must come out as ONE body. The frame parts already touch; the
-    // accessories sit on SIDE_CLEAR and are welded across it deliberately, so
-    // this is the assertion that catches a weld that stopped reaching.
     const nodes = buildRackNodes({ ...SAMPLE, accessories: accs, printer: { x: 360, y: 360, z: 360 }, assembledExport: true });
+    const dims = computeRackDims(SAMPLE);
     for (const id of ['rack-assembled-frame', 'rack-assembled-all']) {
       const m = exec(nodes.find((n) => n.id === id)!.op);
       try {
         const parts = m.decompose();
         expect(parts.length, `${id} must be a single connected solid`).toBe(1);
         parts.forEach((c) => c.delete());
+
+        // One component is a MUCH weaker claim than it sounds, and on its own
+        // it let a broken frame through: the plate tabs merely touch their
+        // ledges on coincident faces, so Manifold called it connected while
+        // 74% of each plate edge was an open SIDE_CLEAR slot and 1.1 kg hung
+        // off six small tabs. Measure how much of the edge is actually bridged.
+        for (const [label, z0] of [
+          ['bottom', 5],
+          ['top', dims.totalH - 5],
+        ] as [string, number][]) {
+          let bridged = 0;
+          for (let y = 0; y < dims.depth; y += 2) {
+            const c = Manifold.cube([0.28, 2, 5]).translate([15.01, y, z0]);
+            const i = Manifold.intersection([m, c]);
+            if (i.volume() > 0.1) bridged += 2;
+            i.delete();
+            c.delete();
+          }
+          expect(
+            bridged / dims.depth,
+            `${id}: ${label} plate edge must be welded to the side along its whole length`,
+          ).toBeGreaterThan(0.95);
+        }
       } finally {
         m.delete();
       }

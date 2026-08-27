@@ -1275,13 +1275,34 @@ function assembledNodes(
   built: BuildNode[],
   accessoryOps: BuildOp[],
 ): BuildNode[] {
-  const { width } = dims;
+  const { width, depth } = dims;
   if (!rack.assembledExport || !rackFitsWhole(rack)) return [];
 
   const FRAME_IDS = ['rack-side-left', 'rack-side-right', 'rack-bottom', 'rack-top'];
   const frameOps = built.filter((n) => FRAME_IDS.includes(n.id)).map((n) => n.op);
   if (frameOps.length === 0) return [];
-  const out: BuildNode[] = [{ id: 'rack-assembled-frame', op: union(frameOps) }];
+
+  // Weld the plates to the sides along their FULL length.
+  //
+  // Unioning the frame as it stands yields a single Manifold component, which
+  // is a much weaker statement than it sounds: the plate tabs only TOUCH their
+  // ledges on coincident faces, and everywhere else a SIDE_CLEAR slot runs the
+  // whole depth. Measured, just 26% of each plate edge was bridged — the three
+  // tabs, 66 mm of 250 — leaving a 1.1 kg frame hanging off six small tabs and
+  // a 0.3 mm crack down both sides. Fit clearance is for parts that come apart;
+  // this one is printed as a unit, so the clearance is filled.
+  const plateWelds: BuildOp[] = [];
+  const wt = SIDE_CLEAR + 0.8; // bites 0.4 mm into the panel and 0.4 into the deck
+  for (const zPlate of [FOOT_H, FOOT_H + dims.bodyH - PLATE_T]) {
+    plateWelds.push(translate([SIDE_T - 0.4, 0, zPlate], cube([wt, depth, PLATE_T])));
+    plateWelds.push(
+      translate([width - SIDE_T - SIDE_CLEAR - 0.4, 0, zPlate], cube([wt, depth, PLATE_T])),
+    );
+  }
+
+  const out: BuildNode[] = [
+    { id: 'rack-assembled-frame', op: union([...frameOps, ...plateWelds]) },
+  ];
 
   if (accessoryOps.length > 0) {
     // Weld each accessory to both sides across the fit clearance. The slab is
@@ -1299,7 +1320,10 @@ function assembledNodes(
       welds.push(translate([SIDE_T - 0.4, y0, z0], cube([t, dy, dz])));
       welds.push(translate([width - SIDE_T - SIDE_CLEAR - 0.4, y0, z0], cube([t, dy, dz])));
     }
-    out.push({ id: 'rack-assembled-all', op: union([...frameOps, ...accessoryOps, ...welds]) });
+    out.push({
+      id: 'rack-assembled-all',
+      op: union([...frameOps, ...plateWelds, ...accessoryOps, ...welds]),
+    });
   }
   return out;
 }

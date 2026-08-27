@@ -162,10 +162,16 @@ entries to Export:
 | Rack frame — ASSEMBLED | sides + plates | ~1.09 kg | open box interior, reachable |
 | Whole rack — ASSEMBLED | + all accessories | ~1.58 kg | sealed under each shelf deck |
 
-The frame variant is a plain union of existing geometry: the four parts already
-touch, because the plate tabs seat in their ledges with no z clearance. The
-whole-rack variant is not — accessories sit on `SIDE_CLEAR` and do **not**
-touch, so each is welded to both sides across that gap. Shelf positions become
+**Both variants weld the plate edges to the sides along their full length.**
+Unioning the frame as-is gives a single Manifold component, which sounds like
+more than it is: the tabs only TOUCH their ledges on coincident faces, and
+everywhere else the `SIDE_CLEAR` slot runs the whole depth. Measured, just 26%
+of each plate edge was bridged — the three tabs, 66 mm of 250 — leaving a
+1.1 kg frame hanging off six small tabs with a 0.3 mm crack down both sides.
+Fit clearance is for parts that come apart; a part printed as a unit gets it
+filled. Now 100% bridged.
+
+The whole-rack variant additionally welds the accessories, which sit on `SIDE_CLEAR` and do **not** touch at all. Shelf positions become
 permanent, and the support under each deck can only be worked out through the
 side vent windows.
 
