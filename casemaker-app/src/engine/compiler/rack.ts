@@ -165,6 +165,8 @@ const TAB_LEN = 22;
  */
 const TAB_T = PLATE_T;
 const TAB_SLACK = 0.3;
+/** How far a tab overlaps the deck it grows out of, to avoid a coplanar seam. */
+const TAB_MERGE = 0.5;
 /** Clearance through the tab; the starter hole reuses SCREW_THREAD_D, which
  *  is test-print derived. The head recess is still provisional pending issue
  *  #140 — the one repeatable screw-hole mechanism. */
@@ -735,8 +737,15 @@ function buildPlate(dims: RackDims): BuildOp {
   for (const yC of plateTabYs(depth)) {
     for (const dir of [-1, 1] as const) {
       const edge = dir < 0 ? x0 : x0 + plateW;
-      const xa = dir < 0 ? edge - TAB_REACH : edge;
-      solid.push(translate([xa, yC - TAB_LEN / 2, 0], cube([TAB_REACH, TAB_LEN, TAB_T])));
+      // Overlap the deck by TAB_MERGE rather than butting exactly against it.
+      // The solid is identical either way — the deck is solid here, well inside
+      // the lattice's rim — but an exact face-to-face union leaves coincident
+      // vertices along the seam, and a slicer reading the de-indexed STL sees
+      // those as a mesh needing repair. Overlapping removes the seam.
+      const xa = dir < 0 ? edge - TAB_REACH : edge - TAB_MERGE;
+      solid.push(
+        translate([xa, yC - TAB_LEN / 2, 0], cube([TAB_REACH + TAB_MERGE, TAB_LEN, TAB_T])),
+      );
       if (!screwYs.has(yC)) continue; // mid tab is a rest, not a fixing
       const axis = dir < 0 ? edge - TAB_SCREW_INSET : edge + TAB_SCREW_INSET;
       // Thread-width clearance the whole way through...
