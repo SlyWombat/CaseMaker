@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { aabbOfOp, type BuildOp } from '@/engine/compiler/buildPlan';
-import { buildRackNodes, computeRackDims, SLOT_PITCH, plateScrewYs } from '@/engine/compiler/rack';
+import { buildRackNodes, computeRackDims, SLOT_PITCH, plateScrewYs, accessorySlots } from '@/engine/compiler/rack';
 import { PRINT_FLIP_NODE_IDS } from '@/engine/exportLayout';
 import {
   rectFitsBed,
@@ -24,7 +24,7 @@ import {
 } from '@/engine/compiler/rackFit';
 import { findTemplate } from '@/library/templates';
 import { hardwareForProject } from '@/engine/exporters/hardwareList';
-import type { RackParams } from '@/types';
+import type { RackAccessory, RackParams } from '@/types';
 import { Manifold, exec, type ManifoldInstance } from './helpers/manifoldExec';
 
 
@@ -497,6 +497,60 @@ describe('rack archetype — mini-rack template', () => {
       plate.delete();
     }
   }, 60000);
+
+  it('lands every accessory variant on the sides: gap, clearance and screw holes', () => {
+    // One shelf config was being spot-checked and the rest assumed. These are
+    // the variants the panel can actually produce.
+    const VARIANTS: { label: string; acc: RackAccessory }[] = [
+      { label: 'shelf 86 vented', acc: { id: 'a', type: 'shelf', slots: 3, shelfDepth: 86, vented: true } },
+      { label: 'shelf 86 solid', acc: { id: 'a', type: 'shelf', slots: 3, shelfDepth: 86, vented: false } },
+      { label: 'shelf 123 vented', acc: { id: 'a', type: 'shelf', slots: 3, shelfDepth: 123, vented: true } },
+      { label: 'shelf 123 frontplate', acc: { id: 'a', type: 'shelf', slots: 3, shelfDepth: 123, vented: true, frontPlate: true } },
+      { label: 'shelf 160 vented', acc: { id: 'a', type: 'shelf', slots: 3, shelfDepth: 160, vented: true } },
+      { label: 'shelf 160 solid+plate', acc: { id: 'a', type: 'shelf', slots: 3, shelfDepth: 160, vented: false, frontPlate: true } },
+      { label: 'shelf 1-slot', acc: { id: 'a', type: 'shelf', slots: 1, shelfDepth: 123, vented: true } },
+      { label: 'shelf custom 100', acc: { id: 'a', type: 'shelf', slots: 2, shelfDepth: 100, vented: true } },
+      { label: 'keystone', acc: { id: 'a', type: 'keystone', slots: 2 } },
+      { label: 'blank 2-slot', acc: { id: 'a', type: 'blank', slots: 2 } },
+      { label: 'blank 1-slot', acc: { id: 'a', type: 'blank', slots: 1 } },
+      { label: 'cable tray', acc: { id: 'a', type: 'cable-tray' } },
+    ];
+    for (const { label, acc } of VARIANTS) {
+      const rack: RackParams = { ...SAMPLE, accessories: [acc] };
+      const dims = computeRackDims(rack);
+      const nodes = buildRackNodes(rack);
+      const L = exec(nodes.find((n) => n.id === 'rack-side-left')!.op);
+      const R = exec(nodes.find((n) => n.id === 'rack-side-right')!.op);
+      const A = exec(nodes.find((n) => /^rack-(shelf|keystone|blank|cable-tray)-/.test(n.id))!.op);
+      try {
+        const bb = A.boundingBox();
+        expect(bb.min[0] - 15, `${label}: left gap`).toBeCloseTo(0.3, 2);
+        expect(dims.width - 15 - bb.max[0], `${label}: right gap`).toBeCloseTo(0.3, 2);
+        for (const side of [L, R]) {
+          const i = Manifold.intersection([A, side]);
+          const v = i.volume();
+          i.delete();
+          expect(v, `${label}: fouls a side panel`).toBeLessThan(1);
+        }
+        // Screw holes must be coaxial. The accessory's local hole offset
+        // cancels its placement offset, so they land exactly on holeZ(k).
+        const n = accessorySlots(acc);
+        for (let k = 0; k < n; k++) {
+          // Span the side and the accessory's END RIB only — longer and this
+          // pokes into the keystone's jack boss and reports a good hole as a
+          // miss, which is exactly how it fooled a hand-run probe.
+          const probe = Manifold.cylinder(28, 2, 2, 24).rotate([0, 90, 0]).translate([0, 22, dims.holeZ(k)]);
+          const inL = Manifold.intersection([L, probe]).volume();
+          const inA = Manifold.intersection([A, probe]).volume();
+          probe.delete();
+          expect(inL, `${label}: side hole blocked at slot ${k}`).toBeLessThan(1);
+          expect(inA, `${label}: accessory thread hole missing at slot ${k}`).toBeLessThan(1);
+        }
+      } finally {
+        [L, R, A].forEach((m) => m.delete());
+      }
+    }
+  }, 120000);
 
   it('keyhole mount: flush rear face with working keyhole hangers', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'keyhole' };
