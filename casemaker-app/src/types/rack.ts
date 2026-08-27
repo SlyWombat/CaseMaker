@@ -43,6 +43,24 @@ export interface RackParams {
    */
   assembledExport?: boolean;
   /**
+   * Cable / power pass-through notches cut into the REAR edge of the plates.
+   *
+   * Note this costs the "one printed plate, installed twice" property: the top
+   * plate is the bottom one turned over, and that flip maps the rear edge to
+   * the front, so a rear-only notch cannot be shared. With notches on you
+   * print two different plates.
+   */
+  cableNotches?: {
+    /** Which plate(s) carry them. */
+    plate: 'top' | 'bottom' | 'both';
+    /** How many, spread evenly across the plate. */
+    count: number;
+    /** Opening width across the rack. */
+    width: Mm;
+    /** How far forward the notch cuts from the rear edge. */
+    depth: Mm;
+  };
+  /**
    * 'none' (default): freestanding, stackable feet.
    * 'ears':  each side panel grows a gusseted rear flange with countersunk
    *          wall-screw holes — load path runs straight from the structural

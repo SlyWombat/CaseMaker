@@ -303,6 +303,75 @@ export function RackPanel() {
         </label>
       )}
 
+      <h3 className="panel-subhead">Cable notches</h3>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+        <input
+          type="checkbox"
+          data-testid="rack-notches-enable"
+          checked={rack.cableNotches != null}
+          onChange={(e) =>
+            update({
+              cableNotches: e.target.checked
+                ? { plate: 'bottom', count: 2, width: 40, depth: 30 }
+                : undefined,
+            })
+          }
+          style={{ marginTop: 3 }}
+        />
+        <span>
+          Pass-throughs in the plate&apos;s rear edge
+          <span style={{ display: 'block', color: '#9aa4b0', fontSize: 11, lineHeight: 1.45 }}>
+            Openings at the BACK of the top and/or bottom plate for power and cabling. Note this
+            makes the two plates different parts: the top plate is normally the bottom one turned
+            over, and that flip would put a rear notch at the front.
+          </span>
+        </span>
+      </label>
+      {rack.cableNotches && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+          <select
+            data-testid="rack-notches-plate"
+            aria-label="Notch plate"
+            value={rack.cableNotches.plate}
+            onChange={(e) =>
+              update({
+                cableNotches: { ...rack.cableNotches!, plate: e.target.value as 'top' | 'bottom' | 'both' },
+              })
+            }
+          >
+            <option value="bottom">bottom plate</option>
+            <option value="top">top plate</option>
+            <option value="both">both plates</option>
+          </select>
+          {([
+            ['count', 'how many', 1, 12],
+            ['width', 'width (mm)', 4, 120],
+            ['depth', 'depth (mm)', 4, 120],
+          ] as const).map(([key, label, lo, hi]) => (
+            <label key={key} style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>
+              {label}
+              <input
+                type="number"
+                min={lo}
+                max={hi}
+                data-testid={`rack-notches-${key}`}
+                aria-label={`Notch ${key}`}
+                value={rack.cableNotches![key]}
+                onChange={(e) =>
+                  update({
+                    cableNotches: {
+                      ...rack.cableNotches!,
+                      [key]: Math.max(lo, Math.min(hi, Number(e.target.value) || lo)),
+                    },
+                  })
+                }
+                style={{ width: 62 }}
+              />
+            </label>
+          ))}
+        </div>
+      )}
+
       <h3 className="panel-subhead">Mounting</h3>
       <LabelledField label="Mounting" hint="Freestanding, or wall-mounted via screw ears / french cleat. Wall modes solidify the sides' rear band for strength.">
         <select

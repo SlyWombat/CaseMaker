@@ -794,7 +794,7 @@ export function plateScrewYs(depth: number): number[] {
  * counterbores open downward and their floors bridge — a short annular bridge
  * slicers handle cleanly.
  */
-function buildPlate(dims: RackDims): BuildOp {
+function buildPlate(dims: RackDims, notchSolid: Profile[] = []): BuildOp {
   const { plateW, depth } = dims;
   const x0 = SIDE_T + SIDE_CLEAR;
   const plateOutline = pTranslate([x0, 0], rectProfile(plateW, depth));
@@ -812,7 +812,7 @@ function buildPlate(dims: RackDims): BuildOp {
   }
   const deck = pDifference([
     plateOutline,
-    lightenPocket(plateOutline, { rim: 15, rib: 3.5, pitch: 14, keepOut: tabKeepOut }),
+    lightenPocket(plateOutline, { rim: 15, rib: 3.5, pitch: 14, keepOut: [...tabKeepOut, ...notchSolid] }),
   ]);
 
   const solid: BuildOp[] = [extrude(deck, PLATE_T)];
@@ -1169,7 +1169,92 @@ export function rackFitsWhole(rack: RackParams): boolean {
   return onBed && totalH <= printer.z;
 }
 
+/** Keep notches clear of the plate's lattice rim and its tab roots. */
+const NOTCH_EDGE_MARGIN = 18;
+/** Minimum wall left between two adjacent notches. */
+const NOTCH_GAP = 6;
+
 /**
+ * Cable / power pass-throughs in a plate's REAR edge, cut in ASSEMBLY space.
+ *
+ * Assembly space matters: the top plate is the bottom one turned over, and
+ * that flip maps the authored rear edge to the front. Cutting here — after the
+ * flip — puts the notch at the back of whichever plate carries it, at the cost
+ * of the two plates no longer being one printed part. That trade is the user's
+ * to make, so notches are opt-in and the panel says so.
+ *
+ * Slots open at the rear edge and are rounded at their inner end: a square
+ * inside corner is where a loaded plate starts a crack, and a cable dragged
+ * over a sharp edge is a cable that eventually shorts.
+ */
+function plateNotchCuts(rack: RackParams, dims: RackDims, zBase: number): BuildOp[] {
+  const cfg = rack.cableNotches;
+  if (!cfg || cfg.count < 1) return [];
+  const x0 = SIDE_T + SIDE_CLEAR;
+  const span = dims.plateW - 2 * NOTCH_EDGE_MARGIN;
+  if (span <= 0) return [];
+  // Clamp so N notches plus the walls between them actually fit the plate.
+  const widest = span / cfg.count - NOTCH_GAP;
+  const w = Math.max(4, Math.min(cfg.width, widest));
+  if (w < 4) return [];
+  const d = Math.max(4, Math.min(cfg.depth, dims.depth * 0.4));
+  const cuts: BuildOp[] = [];
+  for (let i = 0; i < cfg.count; i++) {
+    const cx = x0 + NOTCH_EDGE_MARGIN + (span * (i + 0.5)) / cfg.count;
+    const yInner = dims.depth - d + w / 2;
+    cuts.push(
+      translate([cx - w / 2, yInner, zBase - OVER], cube([w, dims.depth - yInner + OVER, PLATE_T + 2 * OVER])),
+    );
+    cuts.push(translate([cx, yInner, zBase - OVER], cylinder(PLATE_T + 2 * OVER, w / 2, 32)));
+  }
+  return cuts;
+}
+
+/**
+ * The same notches as flat footprints in the plate's OWN coordinates, so the
+ * deck's lattice can keep solid material around them.
+ *
+ * Without this the walls between notches land wherever the lattice happens to
+ * be open and come away as detached fingers — eight notches at the minimum
+ * spacing split the plate into NINE separate bodies. The flip is why this
+ * needs the plate argument: a rear notch is at authored y≈depth on the bottom
+ * plate and authored y≈0 on the top one.
+ */
+function notchKeepOut(rack: RackParams, dims: RackDims, which: 'top' | 'bottom'): Profile[] {
+  const cfg = rack.cableNotches;
+  if (!cfg || (cfg.plate !== 'both' && cfg.plate !== which) || cfg.count < 1) return [];
+  const x0 = SIDE_T + SIDE_CLEAR;
+  const span = dims.plateW - 2 * NOTCH_EDGE_MARGIN;
+  if (span <= 0) return [];
+  const w = Math.max(4, Math.min(cfg.width, span / cfg.count - NOTCH_GAP));
+  if (w < 4) return [];
+  const d = Math.max(4, Math.min(cfg.depth, dims.depth * 0.4));
+  const pad = 5;
+  const out: Profile[] = [];
+  for (let i = 0; i < cfg.count; i++) {
+    const cx = x0 + NOTCH_EDGE_MARGIN + (span * (i + 0.5)) / cfg.count;
+    const y0 = which === 'bottom' ? dims.depth - d - pad : -pad;
+    out.push(pTranslate([cx - w / 2 - pad, y0], rectProfile(w + 2 * pad, d + 2 * pad)));
+  }
+  return out;
+}
+
+/** Apply the rear cable notches to a plate, if this one carries them. */
+function withNotches(
+  op: BuildOp,
+  rack: RackParams,
+  dims: RackDims,
+  which: 'top' | 'bottom',
+  zBase: number,
+): BuildOp {
+  const cfg = rack.cableNotches;
+  if (!cfg || (cfg.plate !== 'both' && cfg.plate !== which)) return op;
+  const cuts = plateNotchCuts(rack, dims, zBase);
+  return cuts.length > 0 ? difference([op, ...cuts]) : op;
+}
+
+/**
+ * Optional one-piece exports./**
  * Optional one-piece exports. Printing the rack fused is far stronger than
  * bolting it together, at the cost of a very long print and heavy internal
  * support — so these are OFFERED, never substituted for the separate parts,
@@ -1226,15 +1311,30 @@ export function buildRackNodes(rack: RackParams): BuildNode[] {
   const nodes: BuildNode[] = [
     { id: 'rack-side-left', op: buildSide(rack, dims, false) },
     { id: 'rack-side-right', op: buildSide(rack, dims, true) },
-    { id: 'rack-bottom', op: translate([0, 0, FOOT_H], buildPlate(dims)) },
+    {
+      id: 'rack-bottom',
+      op: withNotches(
+        translate([0, 0, FOOT_H], buildPlate(dims, notchKeepOut(rack, dims, 'bottom'))),
+        rack,
+        dims,
+        'bottom',
+        FOOT_H,
+      ),
+    },
     // Same printed part, turned over: the tabs sit on the face that points OUT
     // of the rack, and every y feature is symmetric about depth/2, so the flip
     // lands them back in the same ledges.
     {
       id: 'rack-top',
-      op: translate(
-        [0, dims.depth, FOOT_H + dims.bodyH],
-        rotate([180, 0, 0], buildPlate(dims)),
+      op: withNotches(
+        translate(
+          [0, dims.depth, FOOT_H + dims.bodyH],
+          rotate([180, 0, 0], buildPlate(dims, notchKeepOut(rack, dims, 'top'))),
+        ),
+        rack,
+        dims,
+        'top',
+        FOOT_H + dims.bodyH - PLATE_T,
       ),
     },
   ];

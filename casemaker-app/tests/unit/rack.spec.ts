@@ -724,6 +724,63 @@ describe('rack archetype — mini-rack template', () => {
     }
   }, 180000);
 
+  it('cuts cable notches in the rear edge of the chosen plate, without splitting it', () => {
+    const dims = computeRackDims(SAMPLE);
+    const rearOpenings = (op: Parameters<typeof exec>[0], zMid: number): number => {
+      const m = exec(op);
+      try {
+        let open = 0;
+        let was = false;
+        for (let x = 16; x < dims.width - 16; x += 0.5) {
+          const c = Manifold.cube([0.4, 3, 0.4]).translate([x, dims.depth - 3, zMid]);
+          const i = Manifold.intersection([m, c]);
+          const isOpen = i.volume() < 0.05;
+          if (isOpen && !was) open++;
+          was = isOpen;
+          i.delete();
+          c.delete();
+        }
+        return open;
+      } finally {
+        m.delete();
+      }
+    };
+    const zBottom = 7.5;
+    const zTop = dims.totalH - 2.5;
+    const plateOf = (rack: RackParams, id: string) =>
+      buildRackNodes(rack).find((n) => n.id === id)!.op;
+
+    // Off by default.
+    expect(rearOpenings(plateOf(SAMPLE, 'rack-bottom'), zBottom)).toBe(0);
+
+    // Only the chosen plate is cut — the flip means these are no longer one
+    // printed part, which is the trade the panel warns about.
+    const onlyBottom: RackParams = { ...SAMPLE, cableNotches: { plate: 'bottom', count: 2, width: 40, depth: 30 } };
+    expect(rearOpenings(plateOf(onlyBottom, 'rack-bottom'), zBottom)).toBe(2);
+    expect(rearOpenings(plateOf(onlyBottom, 'rack-top'), zTop)).toBe(0);
+
+    const both: RackParams = { ...SAMPLE, cableNotches: { plate: 'both', count: 3, width: 30, depth: 25 } };
+    expect(rearOpenings(plateOf(both, 'rack-bottom'), zBottom)).toBe(3);
+    expect(rearOpenings(plateOf(both, 'rack-top'), zTop)).toBe(3);
+
+    // Crowded and over-wide: the width clamps, and — the part that matters —
+    // the plate stays ONE body. The walls between notches fall in the deck's
+    // lattice, so without keeping solid material around each notch eight of
+    // them came away as detached fingers: nine separate bodies.
+    const crowded: RackParams = { ...SAMPLE, cableNotches: { plate: 'top', count: 8, width: 60, depth: 40 } };
+    for (const id of ['rack-top', 'rack-bottom']) {
+      const m = exec(plateOf(crowded, id));
+      try {
+        const parts = m.decompose();
+        expect(parts.length, `${id} must stay one body`).toBe(1);
+        parts.forEach((c) => c.delete());
+      } finally {
+        m.delete();
+      }
+    }
+    expect(rearOpenings(plateOf(crowded, 'rack-top'), zTop)).toBe(8);
+  }, 180000);
+
   it('keyhole mount: flush rear face with working keyhole hangers', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'keyhole' };
     const nodes = buildRackNodes(rack);

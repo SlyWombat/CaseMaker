@@ -210,6 +210,28 @@ band, which is solid at every mount type. That column is cut **only when a
 full-depth shelf is present**, so an ordinary rack is not peppered with holes
 it will never use.
 
+## Cable notches
+
+Pass-throughs for power and cabling, cut into the **rear edge** of the top
+and/or bottom plate. Count, width and depth are all configurable; width is
+clamped so N notches plus the walls between them actually fit the plate.
+
+Two things worth knowing:
+
+- **It costs the shared plate.** The top plate is the bottom one turned over,
+  and that flip maps the rear edge to the front, so a rear-only notch cannot be
+  shared. With notches on you print two different plates. The cuts are made in
+  ASSEMBLY space for exactly this reason — after the flip, so each notch lands
+  at the back of whichever plate carries it.
+- **The deck keeps solid material around each notch.** The walls between
+  notches otherwise land wherever the lattice happens to be open and come away
+  as detached fingers — eight notches at minimum spacing split the plate into
+  *nine* separate bodies before `notchKeepOut()` fed their footprints into the
+  lattice's keep-out list.
+
+Slots are rounded at their inner end: a square inside corner is where a loaded
+plate starts a crack, and a cable dragged over a sharp edge eventually shorts.
+
 ## Front recess
 
 Accessories mount 12 mm (`FRONT_RECESS`) behind the sides' front faces and span
