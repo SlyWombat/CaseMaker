@@ -23,6 +23,7 @@ import {
   TAB_SCREW_HEAD_H,
   TAB_SCREW_BITE,
 } from '@/engine/compiler/rack';
+import { collectMeshTransferables, transferListForPlan, union } from '@/engine/compiler/buildPlan';
 import { PRINT_FLIP_NODE_IDS } from '@/engine/exportLayout';
 import {
   rectFitsBed,
@@ -780,6 +781,39 @@ describe('rack archetype — mini-rack template', () => {
     }
     expect(rearOpenings(plateOf(crowded, 'rack-top'), zTop)).toBe(8);
   }, 180000);
+
+  it('never hands the worker the same ArrayBuffer twice', () => {
+    // postMessage rejects a transfer list holding a buffer twice, and the
+    // browser only says "ArrayBuffer at index N is a duplicate" — no hint as
+    // to which node. The one-piece export unions the very same side-panel ops
+    // that are also emitted as their own nodes, so with wall-mount ears (whose
+    // gussets are `mesh` ops carrying typed arrays) every gusset buffer was
+    // reachable three times over and the viewport died on any rack edit.
+    for (const wallMount of ['none', 'ears', 'cleat', 'keyhole'] as const) {
+      for (const assembledExport of [false, true]) {
+        const rack: RackParams = {
+          ...SAMPLE,
+          wallMount,
+          assembledExport,
+          printer: { x: 360, y: 360, z: 360 },
+        };
+        // The ACTUAL list workerClient transfers. Asserting per-node would
+        // not catch this: no single node repeats a buffer — the repeats are
+        // across nodes, between a part and the fused export that contains it.
+        const list = transferListForPlan({ nodes: buildRackNodes(rack) });
+        expect(
+          new Set(list).size,
+          `${wallMount}/assembled=${assembledExport}: duplicate ArrayBuffer in the transfer list`,
+        ).toBe(list.length);
+      }
+    }
+
+    // And the collector itself must dedupe a subtree that appears twice.
+    const shared = buildRackNodes({ ...SAMPLE, wallMount: 'ears' })[0]!.op;
+    const once = collectMeshTransferables(shared);
+    const twice = collectMeshTransferables(union([shared, shared]));
+    expect(twice.length, 'a subtree used twice still transfers once').toBe(once.length);
+  }, 120000);
 
   it('keyhole mount: flush rear face with working keyhole hangers', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'keyhole' };

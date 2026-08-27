@@ -353,14 +353,46 @@ export function roundedRectPrism(
   return union(out);
 }
 
+/**
+ * The transfer list for a whole plan — every ArrayBuffer it holds, exactly
+ * once.
+ *
+ * Deduping ACROSS nodes is the point. A subtree can legitimately be emitted as
+ * its own node AND reused inside another: the rack's one-piece export unions
+ * the very same side-panel ops it also emits separately, so with wall-mount
+ * ears (gussets are `mesh` ops) every gusset buffer appeared three times and
+ * postMessage refused the whole message — "ArrayBuffer at index 28 is a
+ * duplicate of an earlier ArrayBuffer" — taking the viewport down on any edit.
+ */
+export function transferListForPlan(plan: BuildPlan): ArrayBuffer[] {
+  const seen = new Set<ArrayBuffer>();
+  for (const node of plan.nodes) {
+    for (const buf of collectMeshTransferables(node.op)) seen.add(buf);
+  }
+  return [...seen];
+}
+
+/**
+ * Enumerate the ArrayBuffers in an op tree for Comlink's zero-copy transfer.
+ *
+ * DEDUPLICATED, and it has to be: postMessage rejects a transfer list holding
+ * the same ArrayBuffer twice ("ArrayBuffer at index N is a duplicate of an
+ * earlier ArrayBuffer"), and op subtrees are legitimately shared — the rack's
+ * one-piece export unions the very same side-panel ops that are also emitted
+ * as their own nodes, so every gusset mesh in a wall-mounted rack was reachable
+ * three times over. Transferring a shared buffer once is correct: structured
+ * clone preserves object identity within a single message, so both references
+ * land on the same buffer at the other end.
+ */
 export function collectMeshTransferables(op: BuildOp): ArrayBuffer[] {
-  const out: ArrayBuffer[] = [];
+  const seen = new Set<ArrayBuffer>();
   walk(op);
-  return out;
+  return [...seen];
   function walk(o: BuildOp): void {
     switch (o.kind) {
       case 'mesh':
-        out.push(o.positions.buffer as ArrayBuffer, o.indices.buffer as ArrayBuffer);
+        seen.add(o.positions.buffer as ArrayBuffer);
+        seen.add(o.indices.buffer as ArrayBuffer);
         return;
       case 'translate':
       case 'rotate':
