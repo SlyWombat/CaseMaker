@@ -18,6 +18,9 @@ import {
   SLOT_PITCH,
   plateScrewYs,
   accessorySlots,
+  accessorySpaces,
+  SHELF_DECK_T,
+  TRAY_DECK_T,
   TAB_T,
   TAB_SCREW_INSET,
   TAB_SCREW_HEAD_H,
@@ -835,6 +838,56 @@ describe('rack archetype — mini-rack template', () => {
     const twice = collectMeshTransferables(union([shared, shared]));
     expect(twice.length, 'a subtree used twice still transfers once').toBe(once.length);
   }, 120000);
+
+  it('reports the usable space on each accessory, matching the geometry (#141)', () => {
+    const accessories: RackAccessory[] = [
+      { id: 'a', type: 'shelf', slots: 3, shelfDepth: 123, vented: true },
+      { id: 'b', type: 'blank', slots: 2 },
+      { id: 'c', type: 'shelf', slots: 1, shelfDepth: 86, vented: true },
+      { id: 'd', type: 'cable-tray' },
+      { id: 'e', type: 'shelf', slots: 2, shelfDepth: 123, vented: true },
+    ];
+    const rack: RackParams = { ...SAMPLE, accessories };
+    const dims = computeRackDims(rack);
+    const spaces = accessorySpaces(rack);
+    const all = Manifold.union(buildRackNodes(rack).map((n) => exec(n.op)));
+    try {
+      expect(spaces).toHaveLength(accessories.length);
+      // A faceplate holds nothing.
+      expect(spaces[1]!.usable, 'a blank faceplate has no usable volume').toBeNull();
+
+      for (const sp of spaces) {
+        if (!sp.usable) continue;
+        const acc = accessories[sp.index]!;
+        const deckT = acc.type === 'cable-tray' ? TRAY_DECK_T : SHELF_DECK_T;
+        const z0 = dims.slotZ(sp.startSlot) + 0.25 + deckT;
+        // Rise a column off the middle of the deck until something stops it.
+        let free = 0;
+        for (let z = z0 + 0.25; z < dims.totalH; z += 0.25) {
+          const c = Manifold.cube([60, 40, 0.2]).translate([dims.width / 2 - 30, 60, z]);
+          const i = Manifold.intersection([all, c]);
+          const hit = i.volume() > 0.5;
+          i.delete();
+          c.delete();
+          if (hit) break;
+          free = z - z0;
+        }
+        expect(
+          Math.abs(free - sp.usable.h),
+          `accessory ${sp.index} (${acc.type}): reported ${sp.usable.h.toFixed(1)} mm but measured ${free.toFixed(1)}`,
+        ).toBeLessThan(1);
+      }
+
+      // The specific thing that made the first formula wrong: a shelf under a
+      // BLANK has the full run up to the next shelf, not one slot span. Getting
+      // this wrong under-reported a 3-slot shelf as 46.5 mm when it had 79.5.
+      expect(spaces[0]!.usable!.h, 'faceplate above must not form a ceiling').toBeGreaterThan(70);
+      // Width is between the end ribs, well under the rack's outside width.
+      expect(spaces[0]!.usable!.w).toBeCloseTo(SAMPLE.width - 2 * (15 + 0.3 + 12), 1);
+    } finally {
+      all.delete();
+    }
+  }, 180000);
 
   it('keyhole mount: flush rear face with working keyhole hangers', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'keyhole' };

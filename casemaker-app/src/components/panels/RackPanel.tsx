@@ -8,7 +8,13 @@ import {
   maxRackDepthForBed,
   maxRackSlotsForBed,
 } from '@/engine/compiler/rackFit';
-import { computeRackDims, rackFitsWhole, accessorySlots, SLOT_PITCH } from '@/engine/compiler/rack';
+import {
+  computeRackDims,
+  rackFitsWhole,
+  accessorySlots,
+  accessorySpaces,
+  SLOT_PITCH,
+} from '@/engine/compiler/rack';
 import { newId } from '@/utils/id';
 
 /**
@@ -103,6 +109,7 @@ export function RackPanel() {
     patchCase({ rack: { ...rack, ...partial } });
   };
   const dims = computeRackDims(rack);
+  const spaces = accessorySpaces(rack);
   const usedSlots = (rack.accessories ?? []).reduce((s, a) => s + accessorySlots(a), 0);
   const presetId = rack.printer?.preset ?? 'custom';
 
@@ -508,8 +515,17 @@ export function RackPanel() {
       )}
 
       <h3 className="panel-subhead">Accessories</h3>
+      <p style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '0 0 8px' }}>
+        Shelves and trays show the box that actually fits on them. Height is clear space
+        above the deck up to the next shelf — or the top plate, when nothing is above.
+        A faceplate above doesn&apos;t reduce it; it only closes the front. Width is
+        between the end ribs, not the rack&apos;s outside width.
+      </p>
       {(rack.accessories ?? []).map((acc, i) => {
         const n = accessorySlots(acc);
+        // Issue #141 — slots are a mounting pitch, not usable space. Show what
+        // will actually fit on this shelf.
+        const space = spaces[i]?.usable ?? null;
         return (
           <div key={acc.id} data-testid={`rack-accessory-${i}`} style={CARD_STYLE}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -547,6 +563,17 @@ export function RackPanel() {
                 ✕
               </button>
             </div>
+            {space && (
+              <div
+                data-testid={`rack-accessory-space-${i}`}
+                style={{ fontSize: 11, color: '#9aa4b0', marginTop: 6, lineHeight: 1.45 }}
+              >
+                Fits <strong style={{ color: '#c8d3de' }}>
+                  {space.w.toFixed(0)} × {space.d.toFixed(0)} × {space.h.toFixed(0)} mm
+                </strong>{' '}
+                (W×D×H)
+              </div>
+            )}
             {acc.type === 'shelf' && (
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
                 <select

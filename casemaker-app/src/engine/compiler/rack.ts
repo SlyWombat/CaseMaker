@@ -82,6 +82,9 @@ const SIDE_FRONT_HOLE_Y = FRONT_RECESS + FRONT_HOLE_Y;
 const REAR_HOLE_Y = 100;
 const ACC_REAR_HOLE_Y = REAR_HOLE_Y - FRONT_RECESS;
 export const LONG_SHELF = 112;
+/** Deck thickness — a shelf's is thinner than a cable tray's. */
+export const SHELF_DECK_T = 3;
+export const TRAY_DECK_T = 4;
 /**
  * Rear anchor for a full-depth shelf, measured in from the rack's back face.
  * Lands inside the rear band, which is solid at every mount type.
@@ -98,6 +101,11 @@ const REAR_ANCHOR_INSET = 12;
 export function resolveShelfDepth(shelfDepth: Mm | 'full' | undefined, rackDepth: Mm): number {
   if (shelfDepth === 'full') return rackDepth - FRONT_RECESS;
   return shelfDepth ?? 123;
+}
+
+/** A shelf's ACTUAL deck depth after clamping — what buildShelf really cuts. */
+export function shelfDeckDepth(shelfDepth: Mm | 'full' | undefined, rackDepth: Mm): number {
+  return Math.min(Math.max(60, resolveShelfDepth(shelfDepth, rackDepth)), rackDepth - FRONT_RECESS);
 }
 
 /** Does this rack carry a shelf that runs its whole depth? */
@@ -945,7 +953,7 @@ function buildShelf(
   // Deck at the bottom so the device opening is maximal.
   const deckX0 = SIDE_T + SIDE_CLEAR + 1;
   const deckW = width - 2 * deckX0;
-  solid.push(translate([deckX0, 0, 0], cube([deckW, d, 3])));
+  solid.push(translate([deckX0, 0, 0], cube([deckW, d, SHELF_DECK_T])));
   // Vent the deck with a triangulated rib lattice rather than parallel slots:
   // ~60% open against the slots' ~35% for a stiffer deck, and a side fan can
   // blow diagonally across it instead of only along the slot direction. The
@@ -1058,7 +1066,7 @@ function buildCableTray(dims: RackDims): BuildOp {
   for (const rx of ribX) solid.push(translate([rx, 0, 0], cube([RIB_W, d, h])));
   const deckX0 = SIDE_T + SIDE_CLEAR + 1;
   const deckW = width - 2 * deckX0;
-  solid.push(translate([deckX0, 0, 0], cube([deckW, d, 4])));
+  solid.push(translate([deckX0, 0, 0], cube([deckW, d, TRAY_DECK_T])));
   // Comb fingers rising from both long edges: cables drop between them and
   // tie-wraps loop through the gaps.
   const fingerW = 5;
@@ -1326,6 +1334,78 @@ function assembledNodes(
     });
   }
   return out;
+}
+
+export interface AccessorySpace {
+  /** Index into rack.accessories. */
+  index: number;
+  slots: number;
+  /** First slot the accessory occupies, after the overflow clamp. */
+  startSlot: number;
+  /**
+   * The clear box a device can occupy on this accessory, or null for things
+   * with no deck (a blank or keystone faceplate holds nothing).
+   */
+  usable: { w: Mm; d: Mm; h: Mm } | null;
+}
+
+/**
+ * What actually fits on each accessory (issue #141).
+ *
+ * Slots are a mounting pitch, not usable space: a 3-slot shelf is not 49.5 mm
+ * of room, because the deck takes its thickness off the bottom and the next
+ * accessory starts at its own slot boundary. Height is measured from the deck's
+ * TOP face to the underside of whatever is above — the next accessory, or the
+ * top plate when the shelf is the highest thing in the rack.
+ *
+ * The slot cursor here mirrors buildRackNodes exactly, overflow clamp included.
+ * Computing it any other way would let the number drift away from the geometry
+ * it claims to describe.
+ */
+export function accessorySpaces(rack: RackParams): AccessorySpace[] {
+  const dims = computeRackDims(rack);
+  const accs = rack.accessories ?? [];
+  const starts: number[] = [];
+  let cursor = 0;
+  for (const acc of accs) {
+    const n = accessorySlots(acc);
+    starts.push(Math.min(cursor, Math.max(0, dims.slots - n)));
+    cursor += n;
+  }
+  // Between the end ribs, not the rack's outside width — a device sits between
+  // them, and the difference is ~55 mm at sample size.
+  const usableW = dims.width - 2 * (SIDE_T + SIDE_CLEAR + RIB_W);
+  return accs.map((acc, i) => {
+    const n = accessorySlots(acc);
+    const startSlot = starts[i]!;
+    const base = { index: i, slots: n, startSlot };
+    if (acc.type !== 'shelf' && acc.type !== 'cable-tray') return { ...base, usable: null };
+    const deckT = acc.type === 'cable-tray' ? TRAY_DECK_T : SHELF_DECK_T;
+    const deckTop = dims.slotZ(startSlot) + 0.25 + deckT;
+    // Only a DECKED accessory forms a ceiling. A blank or keystone faceplate
+    // above is 4 mm of plate at the very front and blocks nothing behind it —
+    // measured against the compiled geometry, a shelf under a blank has the
+    // full run up to the next shelf, not one slot span. Counting faceplates
+    // here under-reported a 3-slot shelf as 46.5 mm when it really had 79.5.
+    let ceiling = FOOT_H + dims.bodyH - PLATE_T;
+    for (let j = 0; j < accs.length; j++) {
+      const above = accs[j]!;
+      if (above.type !== 'shelf' && above.type !== 'cable-tray') continue;
+      if (starts[j]! >= startSlot + n) ceiling = Math.min(ceiling, dims.slotZ(starts[j]!) + 0.25);
+    }
+    const d =
+      acc.type === 'cable-tray'
+        ? Math.min(104, dims.depth - FRONT_BAND / 2)
+        : shelfDeckDepth(acc.shelfDepth, dims.depth);
+    return {
+      ...base,
+      usable: {
+        w: Math.max(0, usableW),
+        d: Math.max(0, d),
+        h: Math.max(0, ceiling - deckTop),
+      },
+    };
+  });
 }
 
 /** Compile the whole rack to one BuildNode per printable part, positioned in

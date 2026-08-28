@@ -238,6 +238,28 @@ Two things worth knowing:
 Slots are rounded at their inner end: a square inside corner is where a loaded
 plate starts a crack, and a cable dragged over a sharp edge eventually shorts.
 
+## Usable space on an accessory
+
+Slots are a mounting pitch, not usable space. `accessorySpaces()` reports the
+box a device can actually occupy on each shelf or tray, and the panel shows it
+per accessory:
+
+- **Height** — from the deck's TOP face to the underside of what is above. The
+  deck takes its own thickness off the bottom (3 mm shelf, 4 mm tray), so a
+  3-slot shelf is 46.5 mm of room, not 49.5.
+- **Only decked accessories form a ceiling.** A blank or keystone faceplate
+  above is 4 mm of plate at the very front and blocks nothing behind it —
+  measured against the compiled geometry, a 3-slot shelf under a blank has the
+  full 79.5 mm run up to the next shelf. Counting faceplates as a ceiling
+  under-reported it as 46.5.
+- **Width is between the end ribs**, ~197 mm at sample size, not the rack's
+  252 mm outside width.
+
+The slot cursor mirrors `buildRackNodes` exactly, overflow clamp included —
+computed any other way the figure drifts away from the geometry it describes.
+`rack.spec.ts` checks each reported height against a column raised off the
+deck in the compiled model.
+
 ## Front recess
 
 Accessories mount 12 mm (`FRONT_RECESS`) behind the sides' front faces and span
