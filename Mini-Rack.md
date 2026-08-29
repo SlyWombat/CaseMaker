@@ -285,6 +285,14 @@ Two things worth knowing:
   *nine* separate bodies before `notchKeepOut()` fed their footprints into the
   lattice's keep-out list.
 
+**Full-depth shelves get the same notches.** A full shelf runs right to the
+rack's back face, so its deck blocks the vertical cable run the plate notches
+exist to open; a shorter shelf leaves that run clear behind it and gets
+nothing. Both are cut from one shared `cableNotchGeometry()`, so a cable
+dropping through a shelf lands on the opening below rather than beside it.
+The shelf's deck keeps solid material around each notch for the same reason
+the plates do.
+
 Slots are rounded at their inner end: a square inside corner is where a loaded
 plate starts a crack, and a cable dragged over a sharp edge eventually shorts.
 

@@ -19,6 +19,7 @@ import {
   plateScrewYs,
   accessorySlots,
   accessorySpaces,
+  cableNotchGeometry,
   floorRibsEnabled,
   plateTabYs,
   SHELF_DECK_T,
@@ -939,6 +940,54 @@ describe('rack archetype — mini-rack template', () => {
       } finally {
         [B, T, L].forEach((m) => m.delete());
       }
+    }
+  }, 180000);
+
+  it('notches full-depth shelves to match the plates, and lines them up', () => {
+    const accessories: RackAccessory[] = [
+      { id: 'a', type: 'shelf', slots: 3, shelfDepth: 123, vented: true },
+      { id: 'b', type: 'shelf', slots: 3, shelfDepth: 'full', vented: true },
+    ];
+    const rack: RackParams = {
+      ...SAMPLE,
+      accessories,
+      cableNotches: { plate: 'both', count: 3, width: 40, depth: 30 },
+    };
+    const dims = computeRackDims(rack);
+    const g = cableNotchGeometry(rack, dims);
+    expect(g, 'notch geometry resolves').not.toBeNull();
+    const nodes = buildRackNodes(rack);
+    const B = exec(nodes.find((n) => n.id === 'rack-bottom')!.op);
+    const short = exec(nodes.find((n) => n.id === 'rack-shelf-0')!.op);
+    const full = exec(nodes.find((n) => n.id === 'rack-shelf-1')!.op);
+    try {
+      const open = (m: ReturnType<typeof exec>, x: number, y: number, z: number): boolean => {
+        const c = Manifold.cube([3, 3, 2]).translate([x - 1.5, y - 1.5, z - 1]);
+        const i = Manifold.intersection([m, c]);
+        const v = i.volume() < 0.5;
+        i.delete();
+        c.delete();
+        return v;
+      };
+      const yRear = dims.depth - 8;
+      // A cable dropping through a shelf must land on the plate opening below
+      // it, not beside it — so both are cut from ONE shared geometry.
+      for (const cx of g!.cx) {
+        expect(open(B, cx, yRear, 7.5), `bottom plate notch at x=${cx.toFixed(0)}`).toBe(true);
+        expect(
+          open(full, cx, yRear, full.boundingBox().min[2] + 1.5),
+          `full shelf notch at x=${cx.toFixed(0)}`,
+        ).toBe(true);
+      }
+      // A shorter shelf stops well before the back, so the cable run behind it
+      // is already clear and it gets nothing.
+      expect(short.boundingBox().max[1], 'short shelf does not reach the back').toBeLessThan(dims.depth - 50);
+      // And the notches must not sever the deck, same trap as the plates.
+      const parts = full.decompose();
+      expect(parts.filter((c) => c.volume() > 1).length, 'notched shelf is one body').toBe(1);
+      parts.forEach((c) => c.delete());
+    } finally {
+      [B, short, full].forEach((m) => m.delete());
     }
   }, 180000);
 

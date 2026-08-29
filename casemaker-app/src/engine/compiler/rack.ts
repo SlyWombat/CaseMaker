@@ -970,7 +970,20 @@ function buildShelf(
   dims: RackDims,
   nSlots: number,
   shelfDepth: number,
-  opts: { frontPlate?: boolean; vented?: boolean } = {},
+  opts: {
+    frontPlate?: boolean;
+    vented?: boolean;
+    /**
+     * Cable pass-throughs in the shelf's REAR edge, matching the plates'.
+     *
+     * Only a FULL-DEPTH shelf needs them: it runs right to the rack's back
+     * face, so its deck blocks the vertical cable run the plate notches exist
+     * to open. A shorter shelf leaves that run clear behind it already. The
+     * geometry is shared with the plates so a cable dropping through a shelf
+     * lands on the opening below rather than beside it.
+     */
+    rearNotches?: { cx: number[]; w: number; d: number };
+  } = {},
 ): BuildOp {
   const { width, depth, plateW } = dims;
   const vented = opts.vented !== false;
@@ -993,10 +1006,16 @@ function buildShelf(
   // blow diagonally across it instead of only along the slot direction. The
   // end ribs are kept out — the deck overlaps them, and they carry the M5
   // threads.
+  const notch = opts.rearNotches;
+  const notchKeep: Profile[] = notch
+    ? notch.cx.map((cx) =>
+        pTranslate([cx - notch.w / 2 - 5, d - notch.d - 5], rectProfile(notch.w + 10, notch.d + 10)),
+      )
+    : [];
   if (vented) {
     const ribKeepOut = ribX.map((rx) =>
       pTranslate([rx - 1, -OVER], rectProfile(RIB_W + 2, d + 2 * OVER)),
-    );
+    ).concat(notchKeep);
     cuts.push(
       translate(
         [0, 0, -OVER],
@@ -1030,6 +1049,18 @@ function buildShelf(
       if (d >= backY + 4) {
         cuts.push(translate([rx - OVER, backY, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
       }
+    }
+  }
+  if (notch) {
+    // Through the deck at the rear edge, rounded at the inner end like the
+    // plates'. The deck is what blocks the cable run; the space above it is
+    // open already.
+    for (const cx of notch.cx) {
+      const yInner = d - notch.d + notch.w / 2;
+      cuts.push(
+        translate([cx - notch.w / 2, yInner, -OVER], cube([notch.w, d - yInner + OVER, SHELF_DECK_T + 2 * OVER])),
+      );
+      cuts.push(translate([cx, yInner, -OVER], cylinder(SHELF_DECK_T + 2 * OVER, notch.w / 2, 32)));
     }
   }
   cuts.push(...ribChannelCuts(width, ribX, d, h, nSlots, d >= LONG_SHELF));
@@ -1256,20 +1287,38 @@ const NOTCH_GAP = 6;
  * inside corner is where a loaded plate starts a crack, and a cable dragged
  * over a sharp edge is a cable that eventually shorts.
  */
-function plateNotchCuts(rack: RackParams, dims: RackDims, zBase: number): BuildOp[] {
+/**
+ * Where the cable notches sit, sized and clamped — resolved ONCE so the plates
+ * and any full-depth shelf cut the same slots at the same x. A cable dropping
+ * through a shelf has to line up with the plate opening below it, so these
+ * cannot be computed twice.
+ */
+export function cableNotchGeometry(
+  rack: RackParams,
+  dims: RackDims,
+): { cx: number[]; w: number; d: number } | null {
   const cfg = rack.cableNotches;
-  if (!cfg || cfg.count < 1) return [];
+  if (!cfg || cfg.count < 1) return null;
   const x0 = SIDE_T + SIDE_CLEAR;
   const span = dims.plateW - 2 * NOTCH_EDGE_MARGIN;
-  if (span <= 0) return [];
-  // Clamp so N notches plus the walls between them actually fit the plate.
-  const widest = span / cfg.count - NOTCH_GAP;
-  const w = Math.max(4, Math.min(cfg.width, widest));
-  if (w < 4) return [];
+  if (span <= 0) return null;
+  // Clamp so N notches plus the walls between them actually fit.
+  const w = Math.max(4, Math.min(cfg.width, span / cfg.count - NOTCH_GAP));
+  if (w < 4) return null;
   const d = Math.max(4, Math.min(cfg.depth, dims.depth * 0.4));
-  const cuts: BuildOp[] = [];
+  const cx: number[] = [];
   for (let i = 0; i < cfg.count; i++) {
-    const cx = x0 + NOTCH_EDGE_MARGIN + (span * (i + 0.5)) / cfg.count;
+    cx.push(x0 + NOTCH_EDGE_MARGIN + (span * (i + 0.5)) / cfg.count);
+  }
+  return { cx, w, d };
+}
+
+function plateNotchCuts(rack: RackParams, dims: RackDims, zBase: number): BuildOp[] {
+  const g = cableNotchGeometry(rack, dims);
+  if (!g) return [];
+  const { w, d } = g;
+  const cuts: BuildOp[] = [];
+  for (const cx of g.cx) {
     const yInner = dims.depth - d + w / 2;
     cuts.push(
       translate([cx - w / 2, yInner, zBase - OVER], cube([w, dims.depth - yInner + OVER, PLATE_T + 2 * OVER])),
@@ -1291,21 +1340,16 @@ function plateNotchCuts(rack: RackParams, dims: RackDims, zBase: number): BuildO
  */
 function notchKeepOut(rack: RackParams, dims: RackDims, which: 'top' | 'bottom'): Profile[] {
   const cfg = rack.cableNotches;
-  if (!cfg || (cfg.plate !== 'both' && cfg.plate !== which) || cfg.count < 1) return [];
-  const x0 = SIDE_T + SIDE_CLEAR;
-  const span = dims.plateW - 2 * NOTCH_EDGE_MARGIN;
-  if (span <= 0) return [];
-  const w = Math.max(4, Math.min(cfg.width, span / cfg.count - NOTCH_GAP));
-  if (w < 4) return [];
-  const d = Math.max(4, Math.min(cfg.depth, dims.depth * 0.4));
+  if (!cfg || (cfg.plate !== 'both' && cfg.plate !== which)) return [];
+  const g = cableNotchGeometry(rack, dims);
+  if (!g) return [];
   const pad = 5;
-  const out: Profile[] = [];
-  for (let i = 0; i < cfg.count; i++) {
-    const cx = x0 + NOTCH_EDGE_MARGIN + (span * (i + 0.5)) / cfg.count;
-    const y0 = which === 'bottom' ? dims.depth - d - pad : -pad;
-    out.push(pTranslate([cx - w / 2 - pad, y0], rectProfile(w + 2 * pad, d + 2 * pad)));
-  }
-  return out;
+  return g.cx.map((cx) =>
+    pTranslate(
+      [cx - g.w / 2 - pad, which === 'bottom' ? dims.depth - g.d - pad : -pad],
+      rectProfile(g.w + 2 * pad, g.d + 2 * pad),
+    ),
+  );
 }
 
 /** Apply the rear cable notches to a plate, if this one carries them. */
@@ -1515,7 +1559,12 @@ export function buildRackNodes(rack: RackParams): BuildNode[] {
     if (acc.type === 'blank') op = buildBlank(dims, n);
     else if (acc.type === 'keystone') op = buildKeystone(dims, n).op;
     else if (acc.type === 'shelf')
-      op = buildShelf(dims, n, resolveShelfDepth(acc.shelfDepth, dims.depth), { frontPlate: acc.frontPlate, vented: acc.vented });
+      op = buildShelf(dims, n, resolveShelfDepth(acc.shelfDepth, dims.depth), {
+        frontPlate: acc.frontPlate,
+        vented: acc.vented,
+        // Only a full-depth shelf reaches the back and blocks the cable run.
+        rearNotches: acc.shelfDepth === 'full' ? (cableNotchGeometry(rack, dims) ?? undefined) : undefined,
+      });
     else op = buildCableTray(dims);
     // Recessed behind the sides' protective front columns (FRONT_RECESS).
     const placed = translate([0, FRONT_RECESS, z0], op);
