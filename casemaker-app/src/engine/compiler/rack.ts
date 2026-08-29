@@ -7,10 +7,12 @@ import {
   difference,
   extrude,
   extrudeX,
+  lightenBars,
   lightenPocket,
   pOffset,
   mesh,
   pDifference,
+  pIntersection,
   pTranslate,
   pUnion,
   rectProfile,
@@ -103,6 +105,18 @@ export const SHELF_DECK_T = 3;
 export const SHELF_RIB_H = 4;
 const SHELF_RIB_W = 3;
 const SHELF_RIB_PITCH = 30;
+/**
+ * The stiffening ribs run ACROSS the direction a device slides in and out, so
+ * on their own they are a row of steps to catch on. Half the deck's cross-hatch
+ * — one of the two diagonal families — is raised to the same height between
+ * them, so a device rides on a near-continuous plane instead of dropping into
+ * the gaps and snagging on the next rib. Diagonals rather than more straight
+ * ribs on purpose: they engage progressively as something slides over them.
+ *
+ * Left clear at the very FRONT so there is a flat lead-in to start a device on,
+ * and around any rear cable cutout, where nothing needs supporting.
+ */
+const SHELF_LEAD_CLEAR = 12;
 export const TRAY_DECK_T = 4;
 /**
  * Rear anchor for a full-depth shelf, measured in from the rack's back face.
@@ -1037,6 +1051,18 @@ function buildShelf(
         pTranslate([cx - notch.w / 2 - 5, d - notch.d - 5], rectProfile(notch.w + 10, notch.d + 10)),
       )
     : [];
+  // One outline and one set of lattice options, shared by the pocket that cuts
+  // the cross-hatch and the bars raised to slide over. Reconstructing the bars
+  // separately would land them fractionally off the lattice they must sit on.
+  const deckOutline = pTranslate([deckX0, 0], rectProfile(deckW, d));
+  const latticeOpts = {
+    // Back to 3/14 (~43% solid). Opening this to 2.6/19 saved 7.5 cm3 and cost
+    // a third of the deck's material on the one accessory that carries
+    // equipment — a bad trade, and the printed shelf showed it.
+    rim: 10,
+    rib: 3,
+    pitch: 14,
+  };
   if (vented) {
     const ribKeepOut = ribX
       .map((rx) => pTranslate([rx - 1, -OVER], rectProfile(RIB_W + 2, d + 2 * OVER)))
@@ -1044,23 +1070,16 @@ function buildShelf(
     cuts.push(
       translate(
         [0, 0, -OVER],
-        extrude(
-          lightenPocket(pTranslate([deckX0, 0], rectProfile(deckW, d)), {
-            // Back to 3/14 (~43% solid). Opening this to 2.6/19 saved 7.5 cm3
-            // and cost a third of the deck's material on the one accessory that
-            // carries equipment — a bad trade, and the printed shelf showed it.
-            rim: 10,
-            rib: 3,
-            pitch: 14,
-            keepOut: ribKeepOut,
-          }),
-          3 + 2 * OVER,
-        ),
+        extrude(lightenPocket(deckOutline, { ...latticeOpts, keepOut: ribKeepOut }), 3 + 2 * OVER),
       ),
     );
   }
   // Screw holes: front column always; rear column when the shelf is long
-  // enough to reach it (matches the sides' rear rib).
+  // enough to reach it (matches the sides' rear rib); plus a rear anchor once
+  // the shelf actually reaches the back. Resolved ONCE so the hole and the
+  // boss that gives it something to bite cannot disagree.
+  const backCandidate = depth - REAR_ANCHOR_INSET - FRONT_RECESS;
+  const backAnchorY = d >= backCandidate + 4 ? backCandidate : undefined;
   for (let k = 0; k < nSlots; k++) {
     const z = (k + 0.5) * SLOT_PITCH - 0.25;
     for (const rx of ribX) {
@@ -1069,14 +1088,29 @@ function buildShelf(
         cuts.push(translate([rx - OVER, ACC_REAR_HOLE_Y, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
       }
       // ...and a third at the very back once the shelf actually reaches it.
-      const backY = depth - REAR_ANCHOR_INSET - FRONT_RECESS;
-      if (d >= backY + 4) {
-        cuts.push(translate([rx - OVER, backY, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
+      if (backAnchorY !== undefined) {
+        cuts.push(translate([rx - OVER, backAnchorY, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
       }
     }
   }
   if (shelfRibs.length > 0) {
     solid.push(translate([0, 0, SHELF_DECK_T], extrude(pUnion(shelfRibs), SHELF_RIB_H)));
+    // ...and raise ONE of the two diagonal families to the same height, so the
+    // ribs are not a row of steps across the sliding direction. Clear of the
+    // front lead-in and of any rear cutout.
+    const family = lightenBars(deckOutline, latticeOpts)[0];
+    if (family) {
+      const clear: Profile[] = [
+        pTranslate([deckX0 - OVER, -OVER], rectProfile(deckW + 2 * OVER, SHELF_LEAD_CLEAR + OVER)),
+        ...notchKeep,
+      ];
+      solid.push(
+        translate(
+          [0, 0, SHELF_DECK_T],
+          extrude(pDifference([pIntersection([family, deckOutline]), ...clear]), SHELF_RIB_H),
+        ),
+      );
+    }
   }
   if (notch) {
     // Through the deck at the rear edge, rounded at the inner end like the
@@ -1090,7 +1124,7 @@ function buildShelf(
       cuts.push(translate([cx, yInner, -OVER], cylinder(SHELF_DECK_T + 2 * OVER, notch.w / 2, 32)));
     }
   }
-  cuts.push(...ribChannelCuts(width, ribX, d, h, nSlots, d >= LONG_SHELF));
+  cuts.push(...ribChannelCuts(width, ribX, d, h, nSlots, d >= LONG_SHELF, backAnchorY));
   // Side vents: perforate the rib walls laterally so a side fan blows
   // straight through the shelf (cross-flow), skipping the screw bosses.
   if (vented) {
@@ -1121,6 +1155,15 @@ function ribChannelCuts(
   h: number,
   nSlots: number,
   rearHoles: boolean,
+  /**
+   * Extra screw column for a full-depth shelf's rear anchor, in shelf-local y.
+   *
+   * Every screw needs a boss left standing in the hollowed rib — that solid
+   * plug is what the thread bites. Adding the rear anchor hole without adding
+   * its boss meant the channel hollowed straight through behind it and the
+   * screw caught nothing, which is exactly how it printed.
+   */
+  backAnchorY?: number,
 ): BuildOp[] {
   const out: BuildOp[] = [];
   for (const rx of ribX) {
@@ -1133,6 +1176,9 @@ function ribChannelCuts(
       bosses.push(translate([px0, FRONT_HOLE_Y, z], axisCylinder('+x', px1 - px0, RIB_BOSS_D / 2, 24)));
       if (rearHoles) {
         bosses.push(translate([px0, ACC_REAR_HOLE_Y, z], axisCylinder('+x', px1 - px0, RIB_BOSS_D / 2, 24)));
+      }
+      if (backAnchorY !== undefined) {
+        bosses.push(translate([px0, backAnchorY, z], axisCylinder('+x', px1 - px0, RIB_BOSS_D / 2, 24)));
       }
     }
     out.push(

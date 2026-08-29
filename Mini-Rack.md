@@ -246,6 +246,17 @@ tying the two end ribs together:
 | flat deck, lattice opened | 106 | 23.2 mm | 46.3 mm |
 | ribbed, lattice restored | 687 | 3.6 mm | 7.1 mm |
 
+The stiffening ribs run **across** the direction a device slides in and out, so
+on their own they are a row of steps to catch on. Half the cross-hatch — one of
+the two diagonal families — is raised to the same height between them, so a
+device rides on a near-continuous plane instead of dropping into the gaps and
+snagging on the next rib. Diagonals rather than more straight ribs on purpose:
+they engage progressively as something slides over them. Left clear at the very
+front, so there is a flat lead-in to start a device on, and around any rear
+cable cutout. The raised bars come from `lightenBars()` — the same construction
+the pocket uses — so they sit exactly on the lattice rather than fractionally
+off it.
+
 UPSTAND, not downstand, for two independent reasons: the shelf prints
 **deck-down**, so downstand ribs would print first and leave the deck bridging
 between them; and downstand ribs would steal headroom from the accessory below.

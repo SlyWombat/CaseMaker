@@ -304,26 +304,37 @@ export interface LightenOptions {
  * pass bolted on afterwards — the rim, the ribs, and the bosses that must stay
  * solid are all stated once, in the outline's own plane.
  */
-export function lightenPocket(outline: Profile, opts: LightenOptions): Profile {
-  const { rim, rib, pitch, angle = 45, cross = true, keepOut = [] } = opts;
-  const field = pOffset(outline, -rim, 'miter');
+/**
+ * The rib bars a lightenPocket leaves behind, one Profile per angle.
+ *
+ * Exposed so callers can build ON the lattice they just cut — raising one
+ * diagonal family to stand proud, say. Anything that has to line up with the
+ * lattice must come from here rather than being reconstructed, or it lands
+ * fractionally off and the two patterns fight.
+ */
+export function lightenBars(outline: Profile, opts: LightenOptions): Profile[] {
+  const { rib, pitch, angle = 45, cross = true } = opts;
   const b = aabbOfProfile(outline);
-  if (!b) return field;
+  if (!b) return [];
   const w = b.max[0] - b.min[0];
   const h = b.max[1] - b.min[1];
   const cx = (b.min[0] + b.max[0]) / 2;
   const cy = (b.min[1] + b.max[1]) / 2;
   // Bars long enough to cross the field at any angle, centred on the outline.
   const span = Math.hypot(w, h) + 2 * pitch;
-  const bars: Profile[] = [];
-  const angles = cross ? [angle, -angle] : [angle];
-  for (const a of angles) {
-    const n = Math.ceil(span / pitch);
+  const n = Math.ceil(span / pitch);
+  return (cross ? [angle, -angle] : [angle]).map((a) => {
     const strip: Profile[] = [];
     for (let i = -n; i <= n; i++) {
       strip.push(pTranslate([-span / 2, i * pitch - rib / 2], rectProfile(span, rib)));
     }
-    bars.push(pTranslate([cx, cy], pRotate(a, pUnion(strip))));
-  }
-  return pDifference([field, ...bars, ...keepOut]);
+    return pTranslate([cx, cy], pRotate(a, pUnion(strip)));
+  });
+}
+
+export function lightenPocket(outline: Profile, opts: LightenOptions): Profile {
+  const { rim, keepOut = [] } = opts;
+  const field = pOffset(outline, -rim, 'miter');
+  if (!aabbOfProfile(outline)) return field;
+  return pDifference([field, ...lightenBars(outline, opts), ...keepOut]);
 }

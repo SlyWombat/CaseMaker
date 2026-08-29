@@ -1037,6 +1037,42 @@ describe('rack archetype — mini-rack template', () => {
     }
   }, 120000);
 
+  it('gives every shelf screw a boss to bite, the rear anchor included', () => {
+    // The end ribs are hollowed into a C-channel; ribChannelCuts leaves a solid
+    // BOSS standing at each screw so the thread has something to catch. The
+    // rear anchor hole was added without its boss, so on a full-depth shelf the
+    // channel hollowed straight through behind it and the screw caught nothing
+    // — found on a printed shelf, not by any test.
+    const rack: RackParams = {
+      ...SAMPLE,
+      accessories: [{ id: 'a', type: 'shelf', slots: 3, shelfDepth: 'full', vented: true }],
+    };
+    const dims = computeRackDims(rack);
+    const A = exec(buildRackNodes(rack).find((n) => n.id.startsWith('rack-shelf'))!.op);
+    try {
+      const ring = (y: number, z: number): number => {
+        const o = Manifold.cylinder(11, 4.5, 4.5, 32).rotate([0, 90, 0]).translate([15.5, y, z]);
+        const i = Manifold.cylinder(13, 2.4, 2.4, 32).rotate([0, 90, 0]).translate([14.5, y, z]);
+        const sh = Manifold.difference([o, i]);
+        const t = Manifold.intersection([A, sh]);
+        const f = t.volume() / sh.volume();
+        [o, i, sh, t].forEach((m) => m.delete());
+        return f;
+      };
+      for (const [label, y] of [
+        ['front', 22],
+        ['mid', 100],
+        ['rear anchor', SAMPLE.depth - 12],
+      ] as [string, number][]) {
+        for (let k = 0; k < 3; k++) {
+          expect(ring(y, dims.holeZ(k)), `${label} screw, slot ${k}: nothing to bite`).toBeGreaterThan(0.9);
+        }
+      }
+    } finally {
+      A.delete();
+    }
+  }, 120000);
+
   it('keyhole mount: flush rear face with working keyhole hangers', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'keyhole' };
     const nodes = buildRackNodes(rack);
