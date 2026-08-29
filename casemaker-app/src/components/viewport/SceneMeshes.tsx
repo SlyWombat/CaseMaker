@@ -79,6 +79,11 @@ export function SceneMeshes() {
   const viewMode = useViewportStore((s) => s.viewMode);
   const hiddenParts = useViewportStore((s) => s.hiddenParts);
   const latches = useProjectStore((s) => s.project.case.latches);
+  // A rack has no host PCB. The rack archetype replaces the case/lid pipeline
+  // entirely, but a project still carries a board, so the placeholder PCB and
+  // its HATs kept rendering — a green board sitting inside the rack, part of
+  // nothing and printed by nothing.
+  const rackMode = useProjectStore((s) => s.project.case.rack?.enabled === true);
   // Subscribe to the Map ref; derive ids in the body. See PartsMenu for the
   // explanation of the Zustand `?? []` selector trap.
   const nodes = useJobStore((s) => s.nodes);
@@ -161,8 +166,8 @@ export function SceneMeshes() {
         }
         return mesh;
       })}
-      {showShell && <BoardPlaceholderMesh />}
-      {showShell && <HatPlaceholderMeshes />}
+      {showShell && !rackMode && <BoardPlaceholderMesh />}
+      {showShell && !rackMode && <HatPlaceholderMeshes />}
       <ExternalAssetMeshes />
       <PortMarkers />
     </group>
