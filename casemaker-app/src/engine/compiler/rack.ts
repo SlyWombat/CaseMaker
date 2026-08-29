@@ -756,18 +756,25 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   const fanCuts: BuildOp[] = [];
   // The strips fuse AFTER the base cuts, so they would bury any screw/tie
   // column they overlap — re-drill every column through the final solid.
+  // Every column: a horizontal strip runs the full depth, so it crosses the
+  // rear anchor too, not just the front and mid ones.
   for (let k = 0; k < dims.slots; k++) {
     const z = dims.holeZ(k);
     fanCuts.push(translate([holeX, SIDE_FRONT_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
     if (depth >= MID_BAR_MIN_DEPTH) {
       fanCuts.push(translate([holeX, REAR_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
     }
+    if (hasFullDepthShelf(rack)) {
+      fanCuts.push(
+        translate([holeX, depth - REAR_ANCHOR_INSET, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)),
+      );
+    }
   }
   for (let ty = FRONT_BAND + 12; ty <= depth - rearBand - 8; ty += 33) {
     fanCuts.push(translate([holeX, ty, FOOT_H + RAIL / 2], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
     fanCuts.push(translate([holeX, ty, FOOT_H + bodyH - RAIL / 2], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
   }
-  // ...and the tab ledges: a fan strip spans rail-to-rail, so one landing on a
+  // ...and the tab ledges: a vertical fan strip spans rail-to-rail, so one landing on a
   // ledge would fill it right back in.
   for (const ty of plateTabYs(depth)) {
     const y0 = ty - TAB_LEN / 2 - TAB_SLACK;
@@ -778,9 +785,15 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     );
   }
   const [sx0, sx1] = xr(0, SIDE_T);
-  const [hx] = xr(-OVER, 0);
   const [ppa, ppb] = xr(-OVER, SIDE_T - POCKET_SKIN);
-  const holeLenF = SIDE_T + 2 * OVER;
+  // Fan cuts reuse holeX/holeLen — the SAME lateral start the screw columns
+  // use — rather than their own interval.
+  //
+  // They had `xr(-OVER, 0)`, whose mirrored form is [width, width + OVER]. On
+  // the right-hand panel that put the cutting cylinder's start ON the outer
+  // face, extending +x AWAY from the part, so every fan cut landed in thin air
+  // and the panel came out a solid wall. Only the left panel was ever right,
+  // which is why it looked like "the second fan doesn't work".
   for (const fan of fans) {
     const spec = FAN_SPECS[fan.size] ?? FAN_SPECS[80]!;
     const half = fan.size / 2 + FAN_BAND_MARGIN;
@@ -788,23 +801,41 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     const zC =
       FOOT_H + Math.min(Math.max(fan.z, spec.opening / 2 + 3), bodyH - spec.opening / 2 - 3);
     const y0 = yC - half;
-    strips.push(translate([sx0, y0, FOOT_H], cube([sx1 - sx0, 2 * half, bodyH])));
-    // Lightening pockets in the strip outside the fan zone.
-    const zones: Array<[number, number]> = [
-      [FOOT_H + RAIL, zC - half],
-      [zC + half, FOOT_H + bodyH - RAIL],
-    ];
-    for (const [za, zb] of zones) {
-      if (zb - za < 15) continue;
-      fanCuts.push(translate([ppa, y0 + 4, za], cube([ppb - ppa, 2 * half - 8, zb - za])));
+    // The strip has to reach frame at BOTH ends — rail to rail going up, or
+    // front band to rear band going across. Take whichever span is shorter.
+    // Always going vertical meant a tall rack paid its full height in solid
+    // material for a mount that only needs local rails, and swept the whole
+    // screw column into the strip on the way past.
+    const vertical = bodyH <= depth;
+    if (vertical) {
+      strips.push(translate([sx0, y0, FOOT_H], cube([sx1 - sx0, 2 * half, bodyH])));
+      // Lightening pockets in the strip outside the fan zone.
+      for (const [za, zb] of [
+        [FOOT_H + RAIL, zC - half],
+        [zC + half, FOOT_H + bodyH - RAIL],
+      ] as Array<[number, number]>) {
+        if (zb - za < 15) continue;
+        fanCuts.push(translate([ppa, y0 + 4, za], cube([ppb - ppa, 2 * half - 8, zb - za])));
+      }
+    } else {
+      const zLo = Math.max(FOOT_H, zC - half);
+      const zHi = Math.min(FOOT_H + bodyH, zC + half);
+      strips.push(translate([sx0, 0, zLo], cube([sx1 - sx0, depth, zHi - zLo])));
+      for (const [ya, yb] of [
+        [RELIEF_RIM, yC - half],
+        [yC + half, depth - RELIEF_RIM],
+      ] as Array<[number, number]>) {
+        if (yb - ya < 15) continue;
+        fanCuts.push(translate([ppa, ya, zLo + 4], cube([ppb - ppa, yb - ya, zHi - zLo - 8])));
+      }
     }
-    fanCuts.push(translate([hx, yC, zC], axisCylinder('+x', holeLenF, spec.opening / 2, 64)));
+    fanCuts.push(translate([holeX, yC, zC], axisCylinder('+x', holeLen, spec.opening / 2, 64)));
     for (const sy of [-1, 1]) {
       for (const sz of [-1, 1]) {
         fanCuts.push(
           translate(
-            [hx, yC + (sy * spec.bolt) / 2, zC + (sz * spec.bolt) / 2],
-            axisCylinder('+x', holeLenF, FAN_SCREW_D / 2, 20),
+            [holeX, yC + (sy * spec.bolt) / 2, zC + (sz * spec.bolt) / 2],
+            axisCylinder('+x', holeLen, FAN_SCREW_D / 2, 20),
           ),
         );
       }

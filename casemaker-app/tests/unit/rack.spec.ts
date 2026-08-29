@@ -406,6 +406,72 @@ describe('rack archetype — mini-rack template', () => {
     }
   }, 30000);
 
+  it('a right-side fan cuts the right panel (mirrored-panel regression)', () => {
+    // The fan cuts used their own lateral start, computed as xr(-OVER, 0).
+    // Mirrored that evaluates to [width, width + 1], so on the right panel
+    // every cutting cylinder began ON the outer face and ran +x into thin
+    // air: the user added a fan per side and got one working panel and one
+    // solid wall. The cuts now share holeX/holeLen with the screw columns,
+    // which are mirrored correctly.
+    const mk = (side: 'left' | 'right'): ManifoldInstance =>
+      exec(
+        buildRackNodes({
+          ...SAMPLE,
+          accessories: [],
+          fans: [{ id: 'f1', side, size: 80, y: 170, z: 140 }],
+        }).find((n) => n.id === `rack-side-${side}`)!.op,
+      );
+    const left = mk('left');
+    const right = mk('right');
+    try {
+      const bore = (m: ManifoldInstance, x: number): number => {
+        const pin = Manifold.cylinder(30, 3, 3, 32).rotate([0, 90, 0]).translate([x, 170, 5 + 140]);
+        const i = Manifold.intersection([m, pin]);
+        const v = i.volume();
+        pin.delete();
+        i.delete();
+        return v;
+      };
+      // Both openings are clear through the wall — not just the left one.
+      expect(bore(left, -5), 'left fan opening').toBe(0);
+      expect(bore(right, SAMPLE.width - 25), 'right fan opening').toBe(0);
+    } finally {
+      left.delete();
+      right.delete();
+    }
+  }, 30000);
+
+  it('fan mount spans the shorter of the two axes, not always full height', () => {
+    // A rail-to-rail strip made a tall rack pay its whole height in solid
+    // material for a local mount. The strip now runs whichever way is
+    // shorter — across the depth on a tall rack, up the height on a squat
+    // deep one — so fan cost stops tracking rack height.
+    const cost = (slots: number, depth: number): number => {
+      const base: RackParams = { ...SAMPLE, accessories: [], slots, depth };
+      const dims = computeRackDims(base);
+      const y = depth / 2;
+      const z = dims.bodyH / 2;
+      const bare = exec(buildRackNodes(base).find((n) => n.id === 'rack-side-left')!.op);
+      const fanned = exec(
+        buildRackNodes({ ...base, fans: [{ id: 'f1', side: 'left', size: 80, y, z }] }).find(
+          (n) => n.id === 'rack-side-left',
+        )!.op,
+      );
+      const v = fanned.volume() - bare.volume();
+      bare.delete();
+      fanned.delete();
+      return v;
+    };
+    // Two racks of the same depth, one nearly twice as tall. Same fan, so
+    // the same mount: within a slot's worth of material of each other.
+    const short = cost(16, 250);
+    const tall = cost(28, 250);
+    expect(Math.abs(tall - short)).toBeLessThan(2000);
+    // And the vertical span still wins when it is genuinely the shorter one.
+    const dims = computeRackDims({ ...SAMPLE, accessories: [], slots: 8, depth: 340 });
+    expect(dims.bodyH).toBeLessThan(340);
+  }, 60000);
+
   // The first printed set had nothing holding the plates in: the seat pockets
   // were cut the plate's FULL thickness at z = FOOT_H and z = H_TOP - PLATE_T,
   // so both broke out through the side body's bottom and top faces. The plates
