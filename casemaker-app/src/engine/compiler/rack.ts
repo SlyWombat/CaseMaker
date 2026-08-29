@@ -120,7 +120,13 @@ const SHELF_LEAD_CLEAR = 12;
 export const TRAY_DECK_T = 4;
 /**
  * Rear anchor for a full-depth shelf, measured in from the rack's back face.
- * Lands inside the rear band, which is solid at every mount type.
+ *
+ * 25, not 12. At 12 it sat 3 mm from the REAR TAB SCREW (which is at
+ * depth - 15) — radii summing 5.0 against a 3 mm separation, so the two holes
+ * ran into each other at slot 0 and slot 15. The tab screws cannot move: the
+ * front one is already as close to the foot's front edge as the tab allows, and
+ * the plate is symmetric, so the rear one is pinned opposite it. Moving the
+ * anchor is the only free variable, and 25 buys 10 mm of separation.
  *
  * A full shelf spans ~238 mm at sample size; the existing rear column sits
  * only 88 mm back from its front edge, which would leave most of the shelf
@@ -128,7 +134,7 @@ export const TRAY_DECK_T = 4;
  * into the sides ONLY when a full-depth shelf is present, so an ordinary rack
  * is not peppered with holes it will never use.
  */
-const REAR_ANCHOR_INSET = 12;
+export const REAR_ANCHOR_INSET = 25;
 
 /** Resolve a shelf's depth, expanding 'full' against the rack's own depth. */
 export function resolveShelfDepth(shelfDepth: Mm | 'full' | undefined, rackDepth: Mm): number {
@@ -398,8 +404,12 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   const solid: BuildOp[] = [
     // Panel body spans z FOOT_H..H_TOP; stacking feet hang below at both ends.
     box(0, SIDE_T, 0, FOOT_H, depth, bodyH),
-    box(0, SIDE_T, FOOT_INSET, 0, FOOT_LEN, FOOT_H + OVER),
-    box(0, SIDE_T, depth - FOOT_INSET - FOOT_LEN, 0, FOOT_LEN, FOOT_H + OVER),
+    // Run to the front and rear FACES, not inset from them. The plate tab
+    // ledge is cut from z FOOT_H upward and reaches within ~4 mm of each face,
+    // so an inset foot left that end wall of the ledge standing on nothing —
+    // a thin cantilevered lip exactly where the tab loads it.
+    box(0, SIDE_T, 0, 0, FOOT_INSET + FOOT_LEN, FOOT_H + OVER),
+    box(0, SIDE_T, depth - FOOT_INSET - FOOT_LEN, 0, FOOT_INSET + FOOT_LEN, FOOT_H + OVER),
   ];
   // Bearing pad under the MID tab, on a rack deep enough to have one.
   //
@@ -428,6 +438,8 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   const windowRear = Math.min(
     rearEdge,
     depth - (FOOT_INSET + TAB_LEN / 2) - TAB_COLUMN_D / 2 - 3,
+    // ...and clear of the rear anchor's head boss when one is present.
+    ...(hasFullDepthShelf(rack) ? [depth - REAR_ANCHOR_INSET - SCREW_BOSS_D / 2 - 3] : []),
   );
   if (depth >= MID_BAR_MIN_DEPTH) {
     spans.push([FRONT_BAND, REAR_RIB[0]]);
@@ -1118,17 +1130,27 @@ function buildShelf(
     // open already.
     for (const cx of notch.cx) {
       const yInner = d - notch.d + notch.w / 2;
+      // Full rib height, not just the deck: cutting only the deck left the
+      // stiffening rib bridging straight over the cable opening.
+      const thru = SHELF_DECK_T + SHELF_RIB_H + 2 * OVER;
       cuts.push(
-        translate([cx - notch.w / 2, yInner, -OVER], cube([notch.w, d - yInner + OVER, SHELF_DECK_T + 2 * OVER])),
+        translate([cx - notch.w / 2, yInner, -OVER], cube([notch.w, d - yInner + OVER, thru])),
       );
-      cuts.push(translate([cx, yInner, -OVER], cylinder(SHELF_DECK_T + 2 * OVER, notch.w / 2, 32)));
+      cuts.push(translate([cx, yInner, -OVER], cylinder(thru, notch.w / 2, 32)));
     }
   }
   cuts.push(...ribChannelCuts(width, ribX, d, h, nSlots, d >= LONG_SHELF, backAnchorY));
   // Side vents: perforate the rib walls laterally so a side fan blows
   // straight through the shelf (cross-flow), skipping the screw bosses.
   if (vented) {
-    const bossYs = d >= LONG_SHELF ? [FRONT_HOLE_Y, ACC_REAR_HOLE_Y] : [FRONT_HOLE_Y];
+    // Every screw column, the rear anchor included. Miss one and the vents
+    // perforate the very boss its thread was supposed to bite — which is how
+    // the rear anchor ended up at 83% after it moved.
+    const bossYs = [
+      FRONT_HOLE_Y,
+      ...(d >= LONG_SHELF ? [ACC_REAR_HOLE_Y] : []),
+      ...(backAnchorY !== undefined ? [backAnchorY] : []),
+    ];
     const bossZs = Array.from({ length: nSlots }, (_, k) => (k + 0.5) * SLOT_PITCH - 0.25);
     for (const rx of ribX) {
       for (let vy = 22; vy <= d - 10; vy += 14) {

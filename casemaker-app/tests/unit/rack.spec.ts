@@ -29,6 +29,7 @@ import {
   TAB_SCREW_INSET,
   TAB_SCREW_HEAD_H,
   TAB_SCREW_BITE,
+  REAR_ANCHOR_INSET,
 } from '@/engine/compiler/rack';
 import { collectMeshTransferables, transferListForPlan, union } from '@/engine/compiler/buildPlan';
 import { PRINT_FLIP_NODE_IDS } from '@/engine/exportLayout';
@@ -694,7 +695,7 @@ describe('rack archetype — mini-rack template', () => {
         expect(bb.max[1], `depth ${depth}: back reaches the rack's rear`).toBeCloseTo(depth, 2);
         // Three anchors, not two: a shelf this long cantilevers badly off the
         // mid column alone, so the sides gain a rear column to match it.
-        for (const y of [22, 100, depth - 12]) {
+        for (const y of [22, 100, depth - REAR_ANCHOR_INSET]) {
           for (let k = 0; k < 3; k++) {
             const probe = Manifold.cylinder(28, 2, 2, 24).rotate([0, 90, 0]).translate([0, y, dims.holeZ(k)]);
             const inL = Manifold.intersection([L, probe]).volume();
@@ -733,7 +734,7 @@ describe('rack archetype — mini-rack template', () => {
         };
         for (let k = 1; k < 5; k++) {
           const z = dims.holeZ(k);
-          const y = SAMPLE.depth - 12;
+          const y = SAMPLE.depth - REAR_ANCHOR_INSET;
           expect(annulus(2.9, 4.6, y, z), `slot ${k}: rear head bearing`).toBeGreaterThan(0.98);
           expect(annulus(5.4, 7.5, y, z), `slot ${k}: rear boss stands isolated`).toBeLessThan(0.1);
         }
@@ -750,7 +751,7 @@ describe('rack archetype — mini-rack template', () => {
     try {
       const probe = Manifold.cylinder(28, 2, 2, 24)
         .rotate([0, 90, 0])
-        .translate([0, SAMPLE.depth - 12, dims.holeZ(0)]);
+        .translate([0, SAMPLE.depth - REAR_ANCHOR_INSET, dims.holeZ(0)]);
       const inL = Manifold.intersection([L, probe]).volume();
       probe.delete();
       expect(inL, 'no rear anchor column without a full-depth shelf').toBeGreaterThan(1);
@@ -1062,7 +1063,7 @@ describe('rack archetype — mini-rack template', () => {
       for (const [label, y] of [
         ['front', 22],
         ['mid', 100],
-        ['rear anchor', SAMPLE.depth - 12],
+        ['rear anchor', SAMPLE.depth - REAR_ANCHOR_INSET],
       ] as [string, number][]) {
         for (let k = 0; k < 3; k++) {
           expect(ring(y, dims.holeZ(k)), `${label} screw, slot ${k}: nothing to bite`).toBeGreaterThan(0.9);
@@ -1072,6 +1073,73 @@ describe('rack archetype — mini-rack template', () => {
       A.delete();
     }
   }, 120000);
+
+  it('keeps screws, cutouts and ledges out of each other (all found on a print)', () => {
+    const rack: RackParams = {
+      ...SAMPLE,
+      cableNotches: { plate: 'both', count: 3, width: 40, depth: 30 },
+      accessories: [{ id: 'a', type: 'shelf', slots: 3, shelfDepth: 'full', vented: true }],
+    };
+    const dims = computeRackDims(rack);
+    const nodes = buildRackNodes(rack);
+    const S = exec(nodes.find((n) => n.id.startsWith('rack-shelf'))!.op);
+    const L = exec(nodes.find((n) => n.id === 'rack-side-left')!.op);
+    const g = cableNotchGeometry(rack, dims)!;
+    try {
+      // 1. The cable cutout must be clear to the FULL rib height. Cutting only
+      // the deck left a stiffening rib bridging straight over the opening.
+      const sb = S.boundingBox();
+      for (const cx of g.cx) {
+        let material = 0;
+        for (let z = sb.min[2]; z < sb.min[2] + SHELF_DECK_T + SHELF_RIB_H; z += 0.5) {
+          const c = Manifold.cube([30, 20, 0.5]).translate([cx - 15, dims.depth - 22, z]);
+          const i = Manifold.intersection([S, c]);
+          if (i.volume() > 1) material += 0.5;
+          i.delete();
+          c.delete();
+        }
+        expect(material, `rib bridges the cutout at x=${cx.toFixed(0)}`).toBeLessThan(0.6);
+      }
+
+      // 2. The tab ledge's end walls need material beneath them. An inset foot
+      // left them cantilevered exactly where the tab loads them.
+      for (const [label, y] of [['front', 1.5], ['rear', dims.depth - 1.5]] as [string, number][]) {
+        const c = Manifold.cube([12, 3, 5]).translate([3, y - 1.5, 0]);
+        const i = Manifold.intersection([L, c]);
+        const f = i.volume() / c.volume();
+        i.delete();
+        c.delete();
+        expect(f, `${label} ledge end wall is unsupported`).toBeGreaterThan(0.5);
+      }
+
+      // 3. NO tab screw may run into an accessory screw. Checked over every
+      // combination, not a sampled pair: the front tab cleared its column by
+      // 7 mm and looked fine, while the REAR tab sat 3 mm from the full-depth
+      // shelf's rear anchor and the two holes ran into each other.
+      const axisX = 15 + 0.3 - TAB_SCREW_INSET;
+      const accCols = [22, 100, SAMPLE.depth - REAR_ANCHOR_INSET];
+      for (const ty of plateScrewYs(dims.depth)) {
+        for (const zBase of [5 + TAB_T, dims.totalH - TAB_T - TAB_SCREW_BITE]) {
+          const pilot = Manifold.cylinder(TAB_SCREW_BITE, 2.4, 2.4, 32).translate([axisX, ty, zBase]);
+          for (const cy of accCols) {
+            for (let k = 0; k < dims.slots; k++) {
+              const accHole = Manifold.cylinder(20, 2.6, 2.6, 32)
+                .rotate([0, 90, 0])
+                .translate([-2, cy, dims.holeZ(k)]);
+              const hit = Manifold.intersection([pilot, accHole]);
+              const v = hit.volume();
+              hit.delete();
+              accHole.delete();
+              expect(v, `tab screw y=${ty} runs into the accessory column at y=${cy}, slot ${k}`).toBeLessThan(0.01);
+            }
+          }
+          pilot.delete();
+        }
+      }
+    } finally {
+      [S, L].forEach((m) => m.delete());
+    }
+  }, 240000);
 
   it('keyhole mount: flush rear face with working keyhole hangers', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'keyhole' };
