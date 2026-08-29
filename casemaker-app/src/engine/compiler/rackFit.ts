@@ -8,6 +8,11 @@ import {
   LONG_SHELF,
   MID_BAR_MIN_DEPTH,
   resolveShelfDepth,
+  FAN_SPECS,
+  fanCenter,
+  SIDE_FRONT_HOLE_Y,
+  REAR_HOLE_Y,
+  SCREW_BOSS_D,
 } from './rack';
 
 /**
@@ -205,6 +210,40 @@ export function validateRackFit(rack: RackParams): PlacementIssue[] {
       involves: ['rack'],
       message: `Long/extra-deep shelves anchor into the sides' middle bar, which needs a rack depth of at least ${MID_BAR_MIN_DEPTH} mm (currently ${Math.round(dims.depth)}) — deepen the rack or switch to short shelves.`,
     });
+  }
+
+  // A fan opening is a 36–56 mm hole through the side panel. Park it over an
+  // accessory screw column and that column simply ceases to exist for the
+  // slots it covers — no geometry can prevent it, but the user should hear it
+  // from the app rather than from a shelf with nothing to bolt to.
+  for (const fan of rack.fans ?? []) {
+    const spec = FAN_SPECS[fan.size] ?? FAN_SPECS[80]!;
+    const { y: yC, z: zC } = fanCenter(fan, dims);
+    const reach = spec.opening / 2 + SCREW_BOSS_D / 2;
+    const columns: Array<[string, number]> = [
+      ['front', SIDE_FRONT_HOLE_Y],
+      ...(dims.depth >= MID_BAR_MIN_DEPTH
+        ? ([['middle', REAR_HOLE_Y]] as Array<[string, number]>)
+        : []),
+    ];
+    for (const [name, colY] of columns) {
+      if (Math.abs(yC - colY) >= reach) continue;
+      const lost: number[] = [];
+      for (let k = 0; k < dims.slots; k++) {
+        if (Math.hypot(yC - colY, dims.holeZ(k) - zC) < reach) lost.push(k + 1);
+      }
+      if (lost.length === 0) continue;
+      issues.push({
+        severity: 'warning',
+        kind: 'rack-config',
+        involves: ['rack'],
+        message: `The ${fan.side} ${fan.size} mm fan sits over the ${name} screw column — slot${
+          lost.length > 1 ? `s ${lost[0]}–${lost[lost.length - 1]}` : ` ${lost[0]}`
+        } lose that fixing point. Move the fan ${Math.ceil(reach - Math.abs(yC - colY))} mm further ${
+          yC >= colY ? 'back' : 'forward'
+        } to clear it.`,
+      });
+    }
   }
 
   const printer = rack.printer;

@@ -30,6 +30,8 @@ import {
   TAB_SCREW_HEAD_H,
   TAB_SCREW_BITE,
   REAR_ANCHOR_INSET,
+  fanStripAxis,
+  SIDE_T,
 } from '@/engine/compiler/rack';
 import { collectMeshTransferables, transferListForPlan, union } from '@/engine/compiler/buildPlan';
 import { PRINT_FLIP_NODE_IDS } from '@/engine/exportLayout';
@@ -467,10 +469,83 @@ describe('rack archetype — mini-rack template', () => {
     const short = cost(16, 250);
     const tall = cost(28, 250);
     expect(Math.abs(tall - short)).toBeLessThan(2000);
-    // And the vertical span still wins when it is genuinely the shorter one.
-    const dims = computeRackDims({ ...SAMPLE, accessories: [], slots: 8, depth: 340 });
-    expect(dims.bodyH).toBeLessThan(340);
+    // Both branches of the choice, asserted on the rule rather than on a
+    // fixture that happens to be tall.
+    expect(fanStripAxis(473, 250)).toBe('horizontal');
+    expect(fanStripAxis(143, 340)).toBe('vertical');
+    expect(fanStripAxis(250, 250)).toBe('vertical');
   }, 60000);
+
+  it('fan pockets keep the screw bosses (crowding regression)', () => {
+    // The lightening pockets inside a fan strip are blind cuts from the outer
+    // face. Without keep-outs they thin every screw column they cross down to
+    // POCKET_SKIN, and the re-drill then bores a tidy hole through ~1 mm of
+    // plastic — patent, and holding nothing. Measure the ANNULUS of material
+    // a screw actually bites into, not whether the hole is open.
+    const depth = 250;
+    const base: RackParams = {
+      ...SAMPLE,
+      depth,
+      accessories: [{ id: 's', type: 'shelf', slots: 3, shelfDepth: 'full' }],
+    };
+    const dims = computeRackDims(base);
+    const zC = dims.bodyH / 2;
+    const build = (p: RackParams): ManifoldInstance =>
+      exec(buildRackNodes(p).find((n) => n.id === 'rack-side-left')!.op);
+    const bare = build(base);
+    const fanned = build({
+      ...base,
+      fans: [{ id: 'f1', side: 'left', size: 80, y: 150, z: zC }],
+    });
+    try {
+      const boss = (m: ManifoldInstance, y: number, z: number): number => {
+        const outer = Manifold.cylinder(SIDE_T, 5, 5, 48).rotate([0, 90, 0]).translate([0, y, z]);
+        const inner = Manifold.cylinder(SIDE_T + 4, 2.7, 2.7, 32)
+          .rotate([0, 90, 0])
+          .translate([-2, y, z]);
+        const ring = Manifold.difference([outer, inner]);
+        const hit = Manifold.intersection([m, ring]);
+        const v = hit.volume();
+        [outer, inner, ring, hit].forEach((x) => x.delete());
+        return v;
+      };
+      // Slots inside the fan's band are the ones the pockets reach.
+      const inBand = Array.from({ length: dims.slots }, (_, k) => dims.holeZ(k)).filter(
+        (z) => Math.abs(z - (5 + zC)) < 43,
+      );
+      expect(inBand.length).toBeGreaterThan(2);
+      for (const y of [22, 100, depth - REAR_ANCHOR_INSET]) {
+        for (const z of inBand) {
+          expect(
+            boss(fanned, y, z),
+            `screw boss at y=${y}, z=${z.toFixed(1)} must survive the fan pocket`,
+          ).toBeGreaterThan(boss(bare, y, z) * 0.9);
+        }
+      }
+    } finally {
+      bare.delete();
+      fanned.delete();
+    }
+  }, 60000);
+
+  it('warns when a fan opening swallows an accessory screw column', () => {
+    // Geometry cannot win this one — a 73 mm bore centred on the column
+    // removes it. The user gets told instead of finding out at assembly.
+    const over: RackParams = {
+      ...SAMPLE,
+      fans: [{ id: 'f1', side: 'left', size: 80, y: 100, z: 140 }],
+    };
+    const issues = validateRackFit(over).filter((i) => /screw column/.test(i.message));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.severity).toBe('warning');
+    expect(issues[0]!.message).toMatch(/middle screw column/);
+    // Clear of both columns, nothing to say.
+    const clear: RackParams = {
+      ...SAMPLE,
+      fans: [{ id: 'f1', side: 'left', size: 80, y: 180, z: 140 }],
+    };
+    expect(validateRackFit(clear).filter((i) => /screw column/.test(i.message))).toHaveLength(0);
+  });
 
   // The first printed set had nothing holding the plates in: the seat pockets
   // were cut the plate's FULL thickness at z = FOOT_H and z = H_TOP - PLATE_T,

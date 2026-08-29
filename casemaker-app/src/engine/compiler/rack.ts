@@ -81,8 +81,8 @@ export const FRONT_RECESS = 12;
  *  (from the accessory's front). Side-panel: add FRONT_RECESS. The rear
  *  column adds support for long shelves (>= LONG_SHELF). */
 const FRONT_HOLE_Y = 10;
-const SIDE_FRONT_HOLE_Y = FRONT_RECESS + FRONT_HOLE_Y;
-const REAR_HOLE_Y = 100;
+export const SIDE_FRONT_HOLE_Y = FRONT_RECESS + FRONT_HOLE_Y;
+export const REAR_HOLE_Y = 100;
 const ACC_REAR_HOLE_Y = REAR_HOLE_Y - FRONT_RECESS;
 export const LONG_SHELF = 112;
 /** Deck thickness — a shelf's is thinner than a cable tray's. */
@@ -174,7 +174,7 @@ const POCKET_SKIN = 3;
  *  clearance hole and still supports the whole head. At 13 mm the bosses were
  *  3.5 mm apart on the 16.5 pitch, which made each screw column a solid bar:
  *  the two columns alone were 107 cm3 of a 330 cm3 panel. */
-const SCREW_BOSS_D = 10;
+export const SCREW_BOSS_D = 10;
 /** Weight relief: solid margin kept around the panel edge and each keep-out,
  *  and the collar left around a tie-wrap hole. */
 const RELIEF_RIM = 3;
@@ -188,6 +188,33 @@ const RIB_BOSS_D = 12;
  *  opening per frame size. */
 const FAN_BAND_MARGIN = 7;
 const FAN_SCREW_D = 3.6;
+/**
+ * Which way a fan's mounting strip runs. It has to reach frame at BOTH ends —
+ * rail to rail going up, or front band to rear band going across — so it takes
+ * whichever span is shorter. Always going vertical meant a tall rack paid its
+ * entire height in solid material for a local mount.
+ */
+/**
+ * Where a fan actually lands. Its configured position is clamped so the whole
+ * mounting band stays on the panel and the opening keeps clear of the rails —
+ * the validator has to warn about the clamped position, not the typed one.
+ */
+export function fanCenter(
+  fan: { size: number; y: Mm; z: Mm },
+  dims: { depth: Mm; bodyH: Mm },
+): { y: Mm; z: Mm } {
+  const spec = FAN_SPECS[fan.size] ?? FAN_SPECS[80]!;
+  const half = fan.size / 2 + FAN_BAND_MARGIN;
+  return {
+    y: Math.min(Math.max(fan.y, half), dims.depth - half),
+    z:
+      FOOT_H +
+      Math.min(Math.max(fan.z, spec.opening / 2 + 3), dims.bodyH - spec.opening / 2 - 3),
+  };
+}
+export function fanStripAxis(bodyH: Mm, depth: Mm): 'vertical' | 'horizontal' {
+  return bodyH <= depth ? 'vertical' : 'horizontal';
+}
 export const FAN_SPECS: Record<number, { bolt: number; opening: number }> = {
   40: { bolt: 32, opening: 36 },
   60: { bolt: 50, opening: 55 },
@@ -797,17 +824,43 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   for (const fan of fans) {
     const spec = FAN_SPECS[fan.size] ?? FAN_SPECS[80]!;
     const half = fan.size / 2 + FAN_BAND_MARGIN;
-    const yC = Math.min(Math.max(fan.y, half), depth - half);
-    const zC =
-      FOOT_H + Math.min(Math.max(fan.z, spec.opening / 2 + 3), bodyH - spec.opening / 2 - 3);
+    const { y: yC, z: zC } = fanCenter(fan, dims);
     const y0 = yC - half;
     // The strip has to reach frame at BOTH ends — rail to rail going up, or
     // front band to rear band going across. Take whichever span is shorter.
     // Always going vertical meant a tall rack paid its full height in solid
     // material for a mount that only needs local rails, and swept the whole
     // screw column into the strip on the way past.
-    const vertical = bodyH <= depth;
-    if (vertical) {
+    // A lightening pocket is a blind cut from the outer face, so any screw
+    // column inside its footprint loses its boss down to POCKET_SKIN — and
+    // then the re-drill below puts a tidy hole through what is left, which
+    // looks correct and holds nothing. The base panel's own lightening keeps
+    // circles of boss around every column (see keepOut, above); the fan
+    // pockets have to do the same. This is the "crowding the screw posts"
+    // the strip was reported for.
+    const pocket = (
+      op: BuildOp,
+      [ya, yb]: [number, number],
+      [za, zb]: [number, number],
+    ): BuildOp => {
+      const r = SCREW_BOSS_D / 2;
+      const columns = [
+        SIDE_FRONT_HOLE_Y,
+        ...(depth >= MID_BAR_MIN_DEPTH ? [REAR_HOLE_Y] : []),
+        ...(hasFullDepthShelf(rack) ? [depth - REAR_ANCHOR_INSET] : []),
+      ];
+      const bosses: BuildOp[] = [];
+      for (const y of columns) {
+        if (y < ya - r || y > yb + r) continue;
+        for (let k = 0; k < dims.slots; k++) {
+          const z = dims.holeZ(k);
+          if (z < za - r || z > zb + r) continue;
+          bosses.push(translate([holeX, y, z], axisCylinder('+x', holeLen, r, 20)));
+        }
+      }
+      return bosses.length > 0 ? difference([op, ...bosses]) : op;
+    };
+    if (fanStripAxis(bodyH, depth) === 'vertical') {
       strips.push(translate([sx0, y0, FOOT_H], cube([sx1 - sx0, 2 * half, bodyH])));
       // Lightening pockets in the strip outside the fan zone.
       for (const [za, zb] of [
@@ -815,7 +868,13 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
         [zC + half, FOOT_H + bodyH - RAIL],
       ] as Array<[number, number]>) {
         if (zb - za < 15) continue;
-        fanCuts.push(translate([ppa, y0 + 4, za], cube([ppb - ppa, 2 * half - 8, zb - za])));
+        fanCuts.push(
+          pocket(
+            translate([ppa, y0 + 4, za], cube([ppb - ppa, 2 * half - 8, zb - za])),
+            [y0 + 4, y0 + 2 * half - 4],
+            [za, zb],
+          ),
+        );
       }
     } else {
       const zLo = Math.max(FOOT_H, zC - half);
@@ -826,7 +885,13 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
         [yC + half, depth - RELIEF_RIM],
       ] as Array<[number, number]>) {
         if (yb - ya < 15) continue;
-        fanCuts.push(translate([ppa, ya, zLo + 4], cube([ppb - ppa, yb - ya, zHi - zLo - 8])));
+        fanCuts.push(
+          pocket(
+            translate([ppa, ya, zLo + 4], cube([ppb - ppa, yb - ya, zHi - zLo - 8])),
+            [ya, yb],
+            [zLo + 4, zHi - 4],
+          ),
+        );
       }
     }
     fanCuts.push(translate([holeX, yC, zC], axisCylinder('+x', holeLen, spec.opening / 2, 64)));
