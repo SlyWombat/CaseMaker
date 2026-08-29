@@ -531,12 +531,11 @@ export function RackPanel() {
       </button>
       {(rack.fans ?? []).length > 0 && (
         <p style={{ fontSize: 12, color: '#9aa4b0', margin: '2px 0 0' }}>
-          Each fan sits on a solid strip in the side panel with the standard bolt
-          pattern for its size — fans screw on from outside with their own
-          self-tapping screws. The strip runs whichever way is shorter, across the
-          depth or up the height, so a tall rack doesn&apos;t carry a full-height
-          slab. Position is the fan&apos;s center: mm from the front, mm above the
-          panel bottom.
+          Each fan gets a pad with the standard bolt pattern for its size, hung
+          off the frame on two rails — fans screw on from outside with their own
+          self-tapping screws. The vent windows around it stay open, so a fan on
+          each side can push and pull through the case. Position is the
+          fan&apos;s center: mm from the front, mm above the panel bottom.
         </p>
       )}
 

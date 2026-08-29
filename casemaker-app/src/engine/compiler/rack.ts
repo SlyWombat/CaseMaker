@@ -187,13 +187,13 @@ const RIB_BOSS_D = 12;
  *  (fan self-tappers bite plastic), and the standard bolt spacing /
  *  opening per frame size. */
 const FAN_BAND_MARGIN = 7;
+/** Material outside the bolt circle on the fan pad. */
+const FAN_BOLT_EDGE = 6;
+/** Width of the rails that hang the pad off the frame. Deliberately
+ *  SCREW_BOSS_D: a rail crossing a screw column then leaves that hole exactly
+ *  the boss the panel's own lightening would have. */
+const FAN_RAIL_W = 10;
 const FAN_SCREW_D = 3.6;
-/**
- * Which way a fan's mounting strip runs. It has to reach frame at BOTH ends —
- * rail to rail going up, or front band to rear band going across — so it takes
- * whichever span is shorter. Always going vertical meant a tall rack paid its
- * entire height in solid material for a local mount.
- */
 /**
  * Where a fan actually lands. Its configured position is clamped so the whole
  * mounting band stays on the panel and the opening keeps clear of the rails —
@@ -211,9 +211,6 @@ export function fanCenter(
       FOOT_H +
       Math.min(Math.max(fan.z, spec.opening / 2 + 3), dims.bodyH - spec.opening / 2 - 3),
   };
-}
-export function fanStripAxis(bodyH: Mm, depth: Mm): 'vertical' | 'horizontal' {
-  return bodyH <= depth ? 'vertical' : 'horizontal';
 }
 export const FAN_SPECS: Record<number, { bolt: number; opening: number }> = {
   40: { bolt: 32, opening: 36 },
@@ -770,13 +767,18 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   const base = difference([union(solid), ...cuts]);
 
   // ---- Fan mounts ----------------------------------------------------------
-  // Each fan gets a FULL-THICKNESS, full-height strip fused into the panel
-  // — added AFTER the window/pocket cuts so nothing carves it, spanning
-  // rail-to-rail so the mount is always anchored to the frame, and solid
-  // through the thickness so it never bridges over a vent window in the
-  // inner-face-down print orientation. The strip is then lightened with
-  // the same outer-face blind pockets as the structural bands, above and
-  // below the fan zone. Opening + standard 4-bolt pattern cut through.
+  // A fan gets a PAD carrying its bolt circle, hung off the surrounding frame
+  // by two rails — not a strip. A strip, whichever way it ran, slabbed over
+  // the vent windows it crossed: even lightened it left POCKET_SKIN there, so
+  // the panel came out closed exactly where the air was meant to move. With a
+  // fan on each side (one pushing, one pulling) the windows are the intake and
+  // exhaust path, so nothing may close them.
+  //
+  // The pad is full thickness — it is the fan's flange seat and the four bolts
+  // thread into it — and it is added AFTER the window/pocket cuts so nothing
+  // carves it. Rails run to the nearest structural members on whichever axis
+  // has the shorter worst-case gap, and overrun 3 mm into them so they fuse
+  // rather than butt. Opening + standard 4-bolt pattern cut through.
   const fans = (rack.fans ?? []).filter((f) => (f.side === 'left') === !mirror);
   if (fans.length === 0) return base;
   const strips: BuildOp[] = [];
@@ -812,7 +814,6 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     );
   }
   const [sx0, sx1] = xr(0, SIDE_T);
-  const [ppa, ppb] = xr(-OVER, SIDE_T - POCKET_SKIN);
   // Fan cuts reuse holeX/holeLen — the SAME lateral start the screw columns
   // use — rather than their own interval.
   //
@@ -823,75 +824,51 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   // which is why it looked like "the second fan doesn't work".
   for (const fan of fans) {
     const spec = FAN_SPECS[fan.size] ?? FAN_SPECS[80]!;
-    const half = fan.size / 2 + FAN_BAND_MARGIN;
     const { y: yC, z: zC } = fanCenter(fan, dims);
-    const y0 = yC - half;
-    // The strip has to reach frame at BOTH ends — rail to rail going up, or
-    // front band to rear band going across. Take whichever span is shorter.
-    // Always going vertical meant a tall rack paid its full height in solid
-    // material for a mount that only needs local rails, and swept the whole
-    // screw column into the strip on the way past.
-    // A lightening pocket is a blind cut from the outer face, so any screw
-    // column inside its footprint loses its boss down to POCKET_SKIN — and
-    // then the re-drill below puts a tidy hole through what is left, which
-    // looks correct and holds nothing. The base panel's own lightening keeps
-    // circles of boss around every column (see keepOut, above); the fan
-    // pockets have to do the same. This is the "crowding the screw posts"
-    // the strip was reported for.
-    const pocket = (
-      op: BuildOp,
-      [ya, yb]: [number, number],
-      [za, zb]: [number, number],
-    ): BuildOp => {
-      const r = SCREW_BOSS_D / 2;
-      const columns = [
-        SIDE_FRONT_HOLE_Y,
-        ...(depth >= MID_BAR_MIN_DEPTH ? [REAR_HOLE_Y] : []),
-        ...(hasFullDepthShelf(rack) ? [depth - REAR_ANCHOR_INSET] : []),
-      ];
-      const bosses: BuildOp[] = [];
-      for (const y of columns) {
-        if (y < ya - r || y > yb + r) continue;
-        for (let k = 0; k < dims.slots; k++) {
-          const z = dims.holeZ(k);
-          if (z < za - r || z > zb + r) continue;
-          bosses.push(translate([holeX, y, z], axisCylinder('+x', holeLen, r, 20)));
+    // Pad: big enough for the bolt circle with an edge, and for the opening
+    // rim. Everything outside it stays window.
+    const padHalf = Math.max(spec.bolt / 2 + FAN_BOLT_EDGE, spec.opening / 2 + 3);
+    const [padY0, padY1] = [yC - padHalf, yC + padHalf];
+    const [padZ0, padZ1] = [zC - padHalf, zC + padHalf];
+    strips.push(translate([sx0, padY0, padZ0], cube([sx1 - sx0, 2 * padHalf, 2 * padHalf])));
+
+    // What the rails can hang from. Along y that is the structural span the
+    // fan sits between (front band / rear rib / rear band) — the `windows`
+    // rects are already inset 4 mm from those, so a rail ending on one would
+    // stop in mid-air. Along z it is the top and bottom rails.
+    const span = spans.find(([a, b]) => yC > a && yC < b);
+    const gapY: [number, number] = span
+      ? [Math.max(0, padY0 - span[0]), Math.max(0, span[1] - padY1)]
+      : [0, 0];
+    const gapZ: [number, number] = [
+      Math.max(0, padZ0 - (FOOT_H + RAIL)),
+      Math.max(0, FOOT_H + bodyH - RAIL - padZ1),
+    ];
+    // Worst gap, not total: a pad already touching on one side and reaching
+    // 30 mm on the other is a cantilever, however small the sum looks.
+    const runY = !span || Math.max(...gapY) <= Math.max(...gapZ);
+    // A rail is SCREW_BOSS_D wide, so where one crosses a screw column it
+    // gives that hole exactly the boss the panel's own lightening leaves.
+    const railOff = padHalf - FAN_RAIL_W / 2;
+    if (runY && span) {
+      for (const zr of [zC - railOff, zC + railOff]) {
+        for (const [a, b] of [
+          [span[0] - 3, padY0],
+          [padY1, span[1] + 3],
+        ] as Array<[number, number]>) {
+          if (b - a <= 0) continue;
+          strips.push(translate([sx0, a, zr - FAN_RAIL_W / 2], cube([sx1 - sx0, b - a, FAN_RAIL_W])));
         }
       }
-      return bosses.length > 0 ? difference([op, ...bosses]) : op;
-    };
-    if (fanStripAxis(bodyH, depth) === 'vertical') {
-      strips.push(translate([sx0, y0, FOOT_H], cube([sx1 - sx0, 2 * half, bodyH])));
-      // Lightening pockets in the strip outside the fan zone.
-      for (const [za, zb] of [
-        [FOOT_H + RAIL, zC - half],
-        [zC + half, FOOT_H + bodyH - RAIL],
-      ] as Array<[number, number]>) {
-        if (zb - za < 15) continue;
-        fanCuts.push(
-          pocket(
-            translate([ppa, y0 + 4, za], cube([ppb - ppa, 2 * half - 8, zb - za])),
-            [y0 + 4, y0 + 2 * half - 4],
-            [za, zb],
-          ),
-        );
-      }
-    } else {
-      const zLo = Math.max(FOOT_H, zC - half);
-      const zHi = Math.min(FOOT_H + bodyH, zC + half);
-      strips.push(translate([sx0, 0, zLo], cube([sx1 - sx0, depth, zHi - zLo])));
-      for (const [ya, yb] of [
-        [RELIEF_RIM, yC - half],
-        [yC + half, depth - RELIEF_RIM],
-      ] as Array<[number, number]>) {
-        if (yb - ya < 15) continue;
-        fanCuts.push(
-          pocket(
-            translate([ppa, ya, zLo + 4], cube([ppb - ppa, yb - ya, zHi - zLo - 8])),
-            [ya, yb],
-            [zLo + 4, zHi - 4],
-          ),
-        );
+    } else if (!runY) {
+      for (const yr of [yC - railOff, yC + railOff]) {
+        for (const [a, b] of [
+          [FOOT_H + RAIL - 3, padZ0],
+          [padZ1, FOOT_H + bodyH - RAIL + 3],
+        ] as Array<[number, number]>) {
+          if (b - a <= 0) continue;
+          strips.push(translate([sx0, yr - FAN_RAIL_W / 2, a], cube([sx1 - sx0, FAN_RAIL_W, b - a])));
+        }
       }
     }
     fanCuts.push(translate([holeX, yC, zC], axisCylinder('+x', holeLen, spec.opening / 2, 64)));

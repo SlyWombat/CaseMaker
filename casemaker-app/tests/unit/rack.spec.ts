@@ -30,7 +30,6 @@ import {
   TAB_SCREW_HEAD_H,
   TAB_SCREW_BITE,
   REAR_ANCHOR_INSET,
-  fanStripAxis,
   SIDE_T,
 } from '@/engine/compiler/rack';
 import { collectMeshTransferables, transferListForPlan, union } from '@/engine/compiler/buildPlan';
@@ -331,7 +330,7 @@ describe('rack archetype — mini-rack template', () => {
     expect(validateRackFit(shallow).some((i) => i.kind === 'rack-config' && /middle bar/.test(i.message))).toBe(true);
   });
 
-  it('side fan mount: opening + standard bolt pattern cut through a solid anchored strip', () => {
+  it('side fan mount: opening + standard bolt pattern cut through a solid anchored pad', () => {
     const rack: RackParams = {
       ...SAMPLE,
       accessories: [],
@@ -363,8 +362,12 @@ describe('rack archetype — mini-rack template', () => {
         }
       }
       expect(probe(leftM, 7.5, 170 + 71.5 / 2 + 6, zC)).toBeGreaterThan(0);
-      // The strip is solid full-thickness beyond the opening (no bridge zone)…
-      expect(probe(leftM, 7.5, 170, zC + 44)).toBeGreaterThan(0);
+      // The pad is solid full-thickness out past the bolt circle, so the
+      // bolts have material either side of them…
+      expect(probe(leftM, 7.5, 170, zC + 71.5 / 2 + 4, 2)).toBeGreaterThan(0);
+      // …and stops there: beyond the pad the vent window is open again,
+      // which is the whole point of a pad rather than a strip.
+      expect(probe(leftM, 7.5, 170, zC + 52, 2)).toBe(0);
       // …and the right panel is untouched there (fan is left-side only): the
       // same spot falls in a vent window on the mirrored panel.
       expect(probe(rightM, 252 - 7.5, 170, zC)).toBe(0);
@@ -443,38 +446,89 @@ describe('rack archetype — mini-rack template', () => {
     }
   }, 30000);
 
-  it('fan mount spans the shorter of the two axes, not always full height', () => {
-    // A rail-to-rail strip made a tall rack pay its whole height in solid
-    // material for a local mount. The strip now runs whichever way is
-    // shorter — across the depth on a tall rack, up the height on a squat
-    // deep one — so fan cost stops tracking rack height.
+  it('fan mount does not close the vent windows', () => {
+    // With a fan on each side — one pushing, one pulling — the windows ARE
+    // the air path, so the mount may not slab over them. A strip did: even
+    // lightened it left POCKET_SKIN, which reads as open at mid-thickness and
+    // is not, so the probe has to span the FULL thickness.
+    const depth = 250;
+    const base: RackParams = { ...SAMPLE, accessories: [], depth };
+    const dims = computeRackDims(base);
+    const build = (p: RackParams): ManifoldInstance =>
+      exec(buildRackNodes(p).find((n) => n.id === 'rack-side-left')!.op);
+    const bare = build(base);
+    const fanned = build({
+      ...base,
+      fans: [{ id: 'f1', side: 'left', size: 80, y: 150, z: dims.bodyH / 2 }],
+    });
+    try {
+      const through = (m: ManifoldInstance, y: number, z: number): boolean => {
+        const pin = Manifold.cylinder(SIDE_T + 4, 1.5, 1.5, 16)
+          .rotate([0, 90, 0])
+          .translate([-2, y, z]);
+        const i = Manifold.intersection([m, pin]);
+        const v = i.volume();
+        [pin, i].forEach((x) => x.delete());
+        return v < 0.5;
+      };
+      let openBare = 0;
+      let openFan = 0;
+      for (let y = 20; y < depth - 20; y += 12) {
+        for (let z = 20; z < dims.bodyH - 10; z += 12) {
+          if (through(bare, y, 5 + z)) openBare++;
+          if (through(fanned, y, 5 + z)) openFan++;
+        }
+      }
+      // The pad itself has to sit somewhere; a strip closed ~30% of the open
+      // area at this size, the pad and its two rails cost well under half that.
+      expect(openBare).toBeGreaterThan(100);
+      expect(openFan / openBare).toBeGreaterThan(0.85);
+    } finally {
+      bare.delete();
+      fanned.delete();
+    }
+  }, 60000);
+
+  it('fan mount costs the same on a tall rack as on a short one', () => {
+    // The mount is local to the fan, so its cost must not track rack height.
     const cost = (slots: number, depth: number): number => {
       const base: RackParams = { ...SAMPLE, accessories: [], slots, depth };
       const dims = computeRackDims(base);
-      const y = depth / 2;
-      const z = dims.bodyH / 2;
       const bare = exec(buildRackNodes(base).find((n) => n.id === 'rack-side-left')!.op);
       const fanned = exec(
-        buildRackNodes({ ...base, fans: [{ id: 'f1', side: 'left', size: 80, y, z }] }).find(
-          (n) => n.id === 'rack-side-left',
-        )!.op,
+        buildRackNodes({
+          ...base,
+          fans: [{ id: 'f1', side: 'left', size: 80, y: depth / 2, z: dims.bodyH / 2 }],
+        }).find((n) => n.id === 'rack-side-left')!.op,
       );
       const v = fanned.volume() - bare.volume();
       bare.delete();
       fanned.delete();
       return v;
     };
-    // Two racks of the same depth, one nearly twice as tall. Same fan, so
-    // the same mount: within a slot's worth of material of each other.
     const short = cost(16, 250);
     const tall = cost(28, 250);
     expect(Math.abs(tall - short)).toBeLessThan(2000);
-    // Both branches of the choice, asserted on the rule rather than on a
-    // fixture that happens to be tall.
-    expect(fanStripAxis(473, 250)).toBe('horizontal');
-    expect(fanStripAxis(143, 340)).toBe('vertical');
-    expect(fanStripAxis(250, 250)).toBe('vertical');
   }, 60000);
+
+  it('a fan mount stays one piece wherever the fan is put', () => {
+    // The pad hangs off the frame on two rails, so a mispicked anchor would
+    // leave it floating in a window as a second component.
+    const dims = computeRackDims(SAMPLE);
+    for (const [size, y, z] of [
+      [80, 60, dims.bodyH / 2],
+      [80, 150, 40],
+      [80, 220, dims.bodyH - 40],
+      [120, 150, dims.bodyH / 2],
+      [40, 100, dims.bodyH / 2],
+    ] as Array<[number, number, number]>) {
+      const op = buildRackNodes({
+        ...SAMPLE,
+        fans: [{ id: 'f1', side: 'left', size: size as 40 | 80 | 120, y, z }],
+      }).find((n) => n.id === 'rack-side-left')!.op;
+      expectClean(`side+fan ${size}mm @ y=${y}, z=${Math.round(z)}`, op);
+    }
+  }, 120000);
 
   it('fan pockets keep the screw bosses (crowding regression)', () => {
     // The lightening pockets inside a fan strip are blind cuts from the outer
