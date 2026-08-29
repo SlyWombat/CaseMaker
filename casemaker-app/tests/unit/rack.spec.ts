@@ -19,6 +19,8 @@ import {
   plateScrewYs,
   accessorySlots,
   accessorySpaces,
+  floorRibsEnabled,
+  plateTabYs,
   SHELF_DECK_T,
   TRAY_DECK_T,
   TAB_T,
@@ -119,8 +121,14 @@ describe('rack archetype — mini-rack template', () => {
     for (const id of ['rack-assembled-frame', 'rack-assembled-all']) {
       const m = exec(nodes.find((n) => n.id === id)!.op);
       try {
+        // Count SOLID bodies. decompose() also returns inverted shells with
+        // negative volume for sealed internal voids — the mid tab's fit slack
+        // becomes one once the bearing pad closes it off from below. A 0.1 cm3
+        // air pocket is not a second piece; counting it as one made this test
+        // report "3 pieces" for a frame that is demonstrably one.
         const parts = m.decompose();
-        expect(parts.length, `${id} must be a single connected solid`).toBe(1);
+        const solids = parts.filter((c) => c.volume() > 1);
+        expect(solids.length, `${id} must be a single connected solid`).toBe(1);
         parts.forEach((c) => c.delete());
 
         // One component is a MUCH weaker claim than it sounds, and on its own
@@ -886,6 +894,51 @@ describe('rack archetype — mini-rack template', () => {
       expect(spaces[0]!.usable!.w).toBeCloseTo(SAMPLE.width - 2 * (15 + 0.3 + 12), 1);
     } finally {
       all.delete();
+    }
+  }, 180000);
+
+  it('stiffens the floor plate and gives every tab something to bear on', () => {
+    // The floor is NOT held up by the ground: it sits 5 mm clear, carried by
+    // its tabs, so anything heavy on it is a plate spanning between the sides.
+    for (const [width, expectRibs] of [[252, false], [350, true]] as [number, boolean][]) {
+      const rack: RackParams = { ...SAMPLE, width, depth: 300, slots: 20, accessories: [] };
+      const dims = computeRackDims(rack);
+      expect(floorRibsEnabled(rack), `${width}: ribs auto`).toBe(expectRibs);
+      const nodes = buildRackNodes(rack);
+      const B = exec(nodes.find((n) => n.id === 'rack-bottom')!.op);
+      const T = exec(nodes.find((n) => n.id === 'rack-top')!.op);
+      const L = exec(nodes.find((n) => n.id === 'rack-side-left')!.op);
+      try {
+        const bb = B.boundingBox();
+        // Ribs hang BELOW the plate into the foot gap, keeping 1 mm of ground
+        // clearance — reaching the floor would help a freestanding rack and do
+        // nothing for a wall-mounted one, which is the case that needs them.
+        expect(bb.min[2], `${width}: underside`).toBeCloseTo(expectRibs ? 1 : 5, 1);
+        expect(B.decompose().length, `${width}: plate is one body`).toBe(1);
+        // Bottom plate only — ribs on the top plate would stand proud of the
+        // rack and break stacking, since it is the same part turned over.
+        if (expectRibs) expect(B.volume(), `${width}: top plate has no ribs`).toBeGreaterThan(T.volume() * 1.1);
+        else expect(B.volume()).toBeCloseTo(T.volume(), -1);
+        // Plate still seats without fouling the sides.
+        const i = Manifold.intersection([B, L]);
+        const clash = i.volume();
+        i.delete();
+        expect(clash, `${width}: plate fouls a side`).toBeLessThan(1);
+
+        // EVERY tab must have material beneath it. Only the end tabs used to:
+        // they land on a stacking foot, while the mid tab had nothing under it
+        // and could only resist uplift, so a load was carried on four corners.
+        for (const y of plateTabYs(dims.depth)) {
+          const c = Manifold.cube([11, 20, 5]).translate([4.3, y - 10, 0]);
+          const t = Manifold.intersection([L, c]);
+          const frac = t.volume() / c.volume();
+          t.delete();
+          c.delete();
+          expect(frac, `${width}: tab at y=${y} has nothing to bear on`).toBeGreaterThan(0.3);
+        }
+      } finally {
+        [B, T, L].forEach((m) => m.delete());
+      }
     }
   }, 180000);
 

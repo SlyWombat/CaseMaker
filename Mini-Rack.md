@@ -225,6 +225,47 @@ band, which is solid at every mount type. That column is cut **only when a
 full-depth shelf is present**, so an ordinary rack is not peppered with holes
 it will never use.
 
+## Floor plate stiffening
+
+The floor is **not held up by the ground**. It sits 5 mm clear, carried by its
+tabs — the feet are under the SIDES, not under the deck — so anything heavy on
+the rack floor is a plate spanning between the side panels.
+
+Worse, only the END tabs bear downward: they land on a stacking foot, while the
+mid tab has nothing beneath it and can only resist uplift. A load was therefore
+carried on **four corners**.
+
+Two fixes, both automatic:
+
+- **A bearing pad under the mid tab** (racks ≥ `MID_BAR_MIN_DEPTH` deep) takes
+  it to six load points. It works in COMPRESSION into the side panel, so it
+  carries whether the rack stands on the floor or hangs off its ears. A screw
+  there would do the same job in tension, but needs a reserved column at
+  mid-depth which splits the vent window — measured at ~100 cm³ per panel
+  against this pad's ~2.
+- **Downstand ribs under the plate** (`floorRibs`, default on once the span
+  passes 260 mm), 4 mm into the 5 mm of air beneath, 1 mm of ground clearance
+  left deliberately: ribs reaching the floor would help a freestanding rack and
+  do nothing for a wall-mounted one, which is the case that needs them. The
+  perimeter rib matters as much as the cross ribs, since the load runs to four
+  corners and the edge rib is the beam that gets it there.
+
+Measured on a 350 mm rack (319 mm span), second moment of the real section:
+
+| | I (mm⁴) | sag @10 kg | @15 kg |
+| :--- | ---: | ---: | ---: |
+| no ribs | 1540 | 7.7 mm | 11.6 mm |
+| ribs | 3501 | 3.4 mm | 5.1 mm |
+
+2.3× stiffer for ~64 g. Those figures assume line support along both edges, so
+the real plate — supported at six points — does a little worse; treat them as
+the optimistic bound. PLA also creeps under sustained load, so a UPS parked
+there will settle further than day one.
+
+Ribs go on the plate's OUTER face and therefore only on the bottom plate: the
+top plate is the same part turned over, and ribs would stand proud of the rack.
+With ribs on, the two plates are different printed parts.
+
 ## Cable notches
 
 Pass-throughs for power and cabling, cut into the **rear edge** of the top

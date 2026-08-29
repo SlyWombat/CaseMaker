@@ -13,6 +13,7 @@ import {
   rackFitsWhole,
   accessorySlots,
   accessorySpaces,
+  floorRibsEnabled,
   SLOT_PITCH,
 } from '@/engine/compiler/rack';
 import { newId } from '@/utils/id';
@@ -309,6 +310,29 @@ export function RackPanel() {
           </span>
         </label>
       )}
+
+      <h3 className="panel-subhead">Floor plate</h3>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+        <input
+          type="checkbox"
+          data-testid="rack-floor-ribs"
+          checked={floorRibsEnabled(rack)}
+          onChange={(e) => update({ floorRibs: e.target.checked })}
+          style={{ marginTop: 3 }}
+        />
+        <span>
+          Stiffening ribs under the floor
+          <span style={{ display: 'block', color: '#9aa4b0', fontSize: 11, lineHeight: 1.45 }}>
+            The floor plate is not supported by the ground — it sits 5 mm up, carried by its
+            tabs. Ribs run into that gap and roughly halve the sag under heavy gear (a UPS
+            on a {Math.round(dims.plateW)} mm span goes from ~
+            {(((10 * 9.81 * dims.plateW ** 3) / (384 * 3500 * 1540)) * 5).toFixed(0)} mm to
+            about half that at 10 kg). Adds ~64 g and makes the two plates different parts,
+            since the top one is the bottom turned over. On automatically once the span
+            passes 260 mm.
+          </span>
+        </span>
+      </label>
 
       <h3 className="panel-subhead">Cable notches</h3>
       <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>

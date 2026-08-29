@@ -77,6 +77,7 @@ export const caseParamsSchema = z.object({
         .optional(),
       wallMount: z.enum(['none', 'ears', 'cleat', 'keyhole']).optional(),
       assembledExport: z.boolean().optional(),
+      floorRibs: z.boolean().optional(),
       cableNotches: z
         .object({
           plate: z.enum(['top', 'bottom', 'both']),

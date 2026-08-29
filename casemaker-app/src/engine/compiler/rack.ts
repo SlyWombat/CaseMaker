@@ -8,6 +8,7 @@ import {
   extrude,
   extrudeX,
   lightenPocket,
+  pOffset,
   mesh,
   pDifference,
   pTranslate,
@@ -368,6 +369,19 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     box(0, SIDE_T, FOOT_INSET, 0, FOOT_LEN, FOOT_H + OVER),
     box(0, SIDE_T, depth - FOOT_INSET - FOOT_LEN, 0, FOOT_LEN, FOOT_H + OVER),
   ];
+  // Bearing pad under the MID tab, on a rack deep enough to have one.
+  //
+  // Only the end tabs carry downward load: they land on a stacking foot, while
+  // the mid tab has nothing beneath it and merely resists uplift — so anything
+  // heavy on the floor plate is held on four corners. This pad gives the mid
+  // tab something to bear on, taking it to six. It works in COMPRESSION into
+  // the side panel, so it carries whether the rack stands on the floor or hangs
+  // off its ears; a screw there would do the same job in tension but needs a
+  // reserved column at mid-depth, which splits the vent window and measured
+  // ~100 cm3 per panel against this pad's ~2.
+  if (depth >= MID_BAR_MIN_DEPTH) {
+    solid.push(box(0, SIDE_T, depth / 2 - FOOT_LEN / 2, 0, FOOT_LEN, FOOT_H + OVER));
+  }
 
   const cuts: BuildOp[] = [];
 
@@ -460,7 +474,7 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     cuts.push(
       box(tabEdge - TAB_REACH - TAB_SLACK, SIDE_T + OVER, y0, H_TOP - TAB_T, dy, TAB_T + OVER),
     );
-    if (!screwYs.has(ty)) continue; // mid tab carries the deck, takes no screw
+    if (!screwYs.has(ty)) continue; // mid tab bears the deck, takes no screw
     cuts.push(
       translate(
         [tabAxis, ty, FOOT_H + TAB_T],
@@ -802,7 +816,7 @@ export function plateScrewYs(depth: number): number[] {
  * counterbores open downward and their floors bridge — a short annular bridge
  * slicers handle cleanly.
  */
-function buildPlate(dims: RackDims, notchSolid: Profile[] = []): BuildOp {
+function buildPlate(dims: RackDims, notchSolid: Profile[] = [], floorRibs = false): BuildOp {
   const { plateW, depth } = dims;
   const x0 = SIDE_T + SIDE_CLEAR;
   const plateOutline = pTranslate([x0, 0], rectProfile(plateW, depth));
@@ -818,12 +832,32 @@ function buildPlate(dims: RackDims, notchSolid: Profile[] = []): BuildOp {
       );
     }
   }
+  // Downstand stiffening ribs, and the deck kept SOLID where they attach: a rib
+  // rising off an open lattice cell is neither a T-section nor printable
+  // without bridging.
+  const ribProfiles: Profile[] = [];
+  if (floorRibs) {
+    ribProfiles.push(pDifference([plateOutline, pOffset(plateOutline, -FLOOR_RIB_W, 'miter')]));
+    for (let y = FLOOR_RIB_PITCH; y < depth - FLOOR_RIB_W; y += FLOOR_RIB_PITCH) {
+      ribProfiles.push(pTranslate([x0, y], rectProfile(plateW, FLOOR_RIB_W)));
+    }
+  }
   const deck = pDifference([
     plateOutline,
-    lightenPocket(plateOutline, { rim: 15, rib: 3.5, pitch: 14, keepOut: [...tabKeepOut, ...notchSolid] }),
+    lightenPocket(plateOutline, {
+      rim: 15,
+      rib: 3.5,
+      pitch: 14,
+      keepOut: [...tabKeepOut, ...notchSolid, ...ribProfiles],
+    }),
   ]);
 
   const solid: BuildOp[] = [extrude(deck, PLATE_T)];
+  if (ribProfiles.length > 0) {
+    // Below the OUTER face, into the 5 mm of air under the floor. 1 mm of
+    // ground clearance is left on purpose — see FLOOR_RIB_D.
+    solid.push(translate([0, 0, -FLOOR_RIB_D], extrude(pUnion(ribProfiles), FLOOR_RIB_D)));
+  }
   const cuts: BuildOp[] = [];
   const screwYs = new Set(plateScrewYs(depth));
   for (const yC of plateTabYs(depth)) {
@@ -1177,6 +1211,33 @@ export function rackFitsWhole(rack: RackParams): boolean {
   return onBed && totalH <= printer.z;
 }
 
+/**
+ * Downstand stiffening ribs under the floor plate.
+ *
+ * There is 5 mm of clear air beneath the plate doing nothing — the feet are
+ * under the SIDES, not under the deck — so ribs cost no space. 4 mm deep takes
+ * the section from 5 mm to 9 mm where it counts, and stiffness goes as depth
+ * cubed. 1 mm of ground clearance is left deliberately: ribs reaching the floor
+ * would help a freestanding rack and do nothing for a wall-mounted one, which
+ * is the case that needs them.
+ *
+ * The perimeter rib matters as much as the cross ribs. Only the END tabs bear
+ * downward — the mid tab has nothing under it and merely resists uplift — so
+ * the load runs to four corners, and the edge rib is the beam that gets it
+ * there.
+ */
+const FLOOR_RIB_D = 4;
+const FLOOR_RIB_W = 3;
+const FLOOR_RIB_PITCH = 45;
+/** Plate span past which ribs default ON. */
+const FLOOR_RIB_AUTO_SPAN = 260;
+
+/** Ribs on? Explicit setting wins; otherwise on once the span gets wide. */
+export function floorRibsEnabled(rack: RackParams): boolean {
+  if (rack.floorRibs !== undefined) return rack.floorRibs;
+  return computeRackDims(rack).plateW >= FLOOR_RIB_AUTO_SPAN;
+}
+
 /** Keep notches clear of the plate's lattice rim and its tab roots. */
 const NOTCH_EDGE_MARGIN = 18;
 /** Minimum wall left between two adjacent notches. */
@@ -1418,7 +1479,7 @@ export function buildRackNodes(rack: RackParams): BuildNode[] {
     {
       id: 'rack-bottom',
       op: withNotches(
-        translate([0, 0, FOOT_H], buildPlate(dims, notchKeepOut(rack, dims, 'bottom'))),
+        translate([0, 0, FOOT_H], buildPlate(dims, notchKeepOut(rack, dims, 'bottom'), floorRibsEnabled(rack))),
         rack,
         dims,
         'bottom',

@@ -50,6 +50,17 @@ export interface RackParams {
    * the front, so a rear-only notch cannot be shared. With notches on you
    * print two different plates.
    */
+  /**
+   * Stiffening ribs under the floor plate. Undefined = automatic, on once the
+   * plate span is wide enough to sag under load.
+   *
+   * The floor is NOT supported by the ground: it sits 5 mm up, held by its
+   * tabs, and only the two END tabs per side bear downward (they land on the
+   * stacking feet — the mid tab has nothing beneath it and only resists
+   * uplift). So anything heavy on the rack floor is carried on four corners.
+   * At 350 mm wide that is ~9 mm of centre sag under 10 kg, before PLA creep.
+   */
+  floorRibs?: boolean;
   cableNotches?: {
     /** Which plate(s) carry them. */
     plate: 'top' | 'bottom' | 'both';
