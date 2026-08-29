@@ -179,6 +179,15 @@ Both are **alternatives** to the separate parts, not extra parts: they are kept
 out of the 3D view (they would sit exactly on the geometry they fuse) and out
 of Save All (which would otherwise hand you the rack twice).
 
+**Print them UPSIDE DOWN — top plate on the bed.** Found on the first one
+printed: standing the way it sits in the rack, the four stacking feet are the
+only thing touching (14.6 cm² of a 630 cm² footprint) and the whole
+221 × 250 mm bottom plate bridges 5 mm above the bed, so a slicer supports the
+entire underside. Turned over, the top plate and rails give 392 cm² of bed
+contact and nothing bridges. Both fused ids are in `PRINT_FLIP_NODE_IDS`, and
+single-part export now applies that flip too, so the file arrives the right way
+up rather than relying on the hint being read.
+
 Off by default, and gated on fit. Building them means unioning the whole rack
 twice — measured ~2.4 s and 70k extra triangles on the sample — which is not a
 cost every slider drag should pay. The fit test lives in `rackFitsWhole()` and

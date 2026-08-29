@@ -127,10 +127,18 @@ export async function exportSinglePart(
   const nodes = useJobStore.getState().nodes;
   const node = nodes.get(nodeId);
   if (!node) return null;
-  const mesh: StlMeshInput = {
-    positions: node.buffer.positions,
-    indices: node.buffer.indices,
-  };
+  // Orient for the BED, not for the assembly.
+  //
+  // A single part used to export exactly as it sits in the rack, leaving the
+  // print orientation to a hint the user had to read and act on. That cost a
+  // 1.1 kg print: the fused frame stands on four stacking feet, so only 2.3%
+  // of its footprint touched and a slicer supported the entire bottom plate.
+  // Routing through the same layout the Save All path uses applies the flip
+  // AND corrects the triangle winding a flip inverts.
+  const [laid] = applyLayoutToMeshes([node]);
+  const mesh: StlMeshInput = laid
+    ? { positions: laid.positions, indices: laid.indices }
+    : { positions: node.buffer.positions, indices: node.buffer.indices };
   const safeProject = project.name.replace(/[^a-z0-9-_]+/gi, '_');
   const safePart = nodeId.replace(/[^a-z0-9-_]+/gi, '_');
   const baseName = `${safeProject}-${safePart}`;

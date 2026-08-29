@@ -211,7 +211,7 @@ export function printOrientationHint(part: ProjectPart): string {
   if (part.printOrientation.flipForPrint) {
     if (part.id === 'lid') return 'Print upside-down (lid ceiling on the bed)';
     if (part.id === 'rack-bottom')
-      return 'Lay flat, COUNTERBORES UP — the plate is a flat slab, so either face lies flat, but the head seats must face up: printed the other way their floors bridge and the screw head has nothing smooth to bear on. No supports. (This is upside-down from how the bottom plate sits in the rack.)';
+      return 'Lay flat, COUNTERBORES UP — the plate is a flat slab, so either face lies flat, but the head seats must face up: printed the other way their floors bridge and the screw head has nothing smooth to bear on. No supports. The exported file already comes this way up — drop it straight in.';
     return 'Print upside-down (flipped 180° on X)';
   }
   if (part.id === 'stand') return 'Print FACE DOWN — lay the frame\'s front face on the bed (the foot\'s front edge is flush with it, so the whole front beds flat). The foot and gussets then rise at 75°, self-supporting. Gives a flat, accurate mating face for the panel';
@@ -224,9 +224,9 @@ export function printOrientationHint(part: ProjectPart): string {
   if (part.id === 'gasket')            return 'Lay flat (TPU 95A — see the *-gasket-print-instructions.txt sidecar)';
   if (part.id.startsWith('bumper-'))   return 'Lay flat — TPU 95A flexible bumper';
   if (part.id === 'rack-assembled-frame')
-    return 'One piece, printed standing as it sits in the rack. Needs support throughout the interior — that support is reachable through the open front and the side windows. Expect ~1.1 kg and a multi-day print; a failure late is an expensive one';
+    return 'Top plate flat on the bed, stacking feet in the air — the exported file already comes this way up. The other way up only the four feet touch (14.6 cm² against 392 cm²) and the whole 221 × 250 mm bottom plate bridges 5 mm above the bed, so a slicer supports the entire underside. Interior support is still needed and is reachable through the open front and side windows. ~1.1 kg, a multi-day print';
   if (part.id === 'rack-assembled-all')
-    return 'One piece with the shelves fused in, printed standing. Support under each shelf deck is SEALED INSIDE and can only be worked out through the side vent windows — and the shelf layout becomes permanent. ~1.6 kg. Print the frame-only version first if you have not done this before';
+    return 'Top plate on the bed as with the frame — the exported file already comes this way up. Support under each shelf deck is SEALED INSIDE and can only be worked out through the side vent windows, and the shelf layout becomes permanent. ~1.6 kg. Print the frame-only version first if you have not done this before';
   if (part.id.startsWith('rack-side-'))
     return 'Lay FLAT, inner face down (the face with the plate tab ledges). Wall-mount ears/gussets then rise as self-supporting walls. Strongest layer direction for the screw columns';
   if (part.id === 'rack-top')

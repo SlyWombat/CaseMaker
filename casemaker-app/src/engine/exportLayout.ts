@@ -35,7 +35,18 @@ export interface LayoutOptions {
  * This entry has now flipped twice. It is set by which way the counterbores
  * face, nothing else; re-derive it from that if the joint changes again.
  */
-export const PRINT_FLIP_NODE_IDS: ReadonlyArray<string> = ['lid', 'rack-bottom'];
+export const PRINT_FLIP_NODE_IDS: ReadonlyArray<string> = [
+  'lid',
+  'rack-bottom',
+  // The fused frames print UPSIDE DOWN. As they stand in the rack the four
+  // stacking feet are the only thing touching — 2.3% of the footprint — and
+  // the whole bottom plate bridges 5 mm above the bed, so a slicer supports
+  // the entire underside. That is not a hypothetical: it happened on the first
+  // one printed. Turned over, the top plate and rails give a 31% first layer
+  // and nothing bridges.
+  'rack-assembled-frame',
+  'rack-assembled-all',
+];
 
 const DEFAULTS: Required<LayoutOptions> = {
   gap: 5,
