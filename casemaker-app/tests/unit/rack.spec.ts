@@ -23,6 +23,7 @@ import {
   floorRibsEnabled,
   plateTabYs,
   SHELF_DECK_T,
+  SHELF_RIB_H,
   TRAY_DECK_T,
   TAB_T,
   TAB_SCREW_INSET,
@@ -868,7 +869,7 @@ describe('rack archetype — mini-rack template', () => {
       for (const sp of spaces) {
         if (!sp.usable) continue;
         const acc = accessories[sp.index]!;
-        const deckT = acc.type === 'cable-tray' ? TRAY_DECK_T : SHELF_DECK_T;
+        const deckT = acc.type === 'cable-tray' ? TRAY_DECK_T : SHELF_DECK_T + SHELF_RIB_H;
         const z0 = dims.slotZ(sp.startSlot) + 0.25 + deckT;
         // Rise a column off the middle of the deck until something stops it.
         let free = 0;
@@ -990,6 +991,51 @@ describe('rack archetype — mini-rack template', () => {
       [B, short, full].forEach((m) => m.delete());
     }
   }, 180000);
+
+  it('stiffens the shelf deck enough to matter in PETG', () => {
+    // A printed shelf came out flimsy. A flat 3 mm deck over a ~197 mm span
+    // measured I = 106 mm4 — 23 mm of sag under 5 kg in PETG, which is about
+    // HALF the stiffness of PLA and what this user prints in. Section depth is
+    // the only lever big enough; closing the lattice alone reached 14.5 mm.
+    const rack: RackParams = {
+      ...SAMPLE,
+      accessories: [{ id: 'a', type: 'shelf', slots: 3, shelfDepth: 123, vented: true }],
+    };
+    const dims = computeRackDims(rack);
+    const S = exec(buildRackNodes(rack).find((n) => n.id.startsWith('rack-shelf'))!.op);
+    try {
+      const bb = S.boundingBox();
+      const span = dims.width - 2 * (15 + 0.3 + 12);
+      const z0 = bb.min[2];
+      const shelfD = bb.max[1] - bb.min[1];
+      // Section in the Y-Z plane: the deck spans in X between the end ribs.
+      const len = 60;
+      const xm = 15 + 0.3 + 12 + span / 2 - len / 2;
+      const layers: { z: number; a: number }[] = [];
+      for (let z = z0 - 0.5; z < z0 + SHELF_DECK_T + SHELF_RIB_H + 1; z += 0.2) {
+        const c = Manifold.cube([len, shelfD, 0.2]).translate([xm, bb.min[1], z]);
+        const i = Manifold.intersection([S, c]);
+        const a = i.volume() / 0.2 / len;
+        i.delete();
+        c.delete();
+        if (a > 0.001) layers.push({ z: z + 0.1, a });
+      }
+      const A = layers.reduce((acc, l) => acc + l.a * 0.2, 0);
+      const zbar = layers.reduce((acc, l) => acc + l.z * l.a * 0.2, 0) / A;
+      const I = layers.reduce((acc, l) => acc + l.a * 0.2 * (l.z - zbar) ** 2, 0);
+      // Ribbed it measures ~687. Guard well clear of the 106 it had flat, so a
+      // future "lightening" pass cannot quietly take the stiffness back out —
+      // which is exactly how it got flimsy: opening the lattice to save 7.5 cm3.
+      expect(I, 'shelf deck second moment').toBeGreaterThan(450);
+      const petgSag5kg = (5 * 5 * 9.81 * span ** 3) / (384 * 2000 * I);
+      expect(petgSag5kg, 'sag under 5 kg in PETG (mm)').toBeLessThan(6);
+      // Ribs must rise ABOVE the deck: the shelf prints deck-down, so downstand
+      // ribs would print first and leave the deck bridging between them.
+      expect(bb.max[2] - z0, 'ribs stand proud of the deck').toBeGreaterThan(SHELF_DECK_T);
+    } finally {
+      S.delete();
+    }
+  }, 120000);
 
   it('keyhole mount: flush rear face with working keyhole hangers', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [], wallMount: 'keyhole' };

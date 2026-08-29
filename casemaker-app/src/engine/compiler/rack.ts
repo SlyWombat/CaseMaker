@@ -85,6 +85,24 @@ const ACC_REAR_HOLE_Y = REAR_HOLE_Y - FRONT_RECESS;
 export const LONG_SHELF = 112;
 /** Deck thickness — a shelf's is thinner than a cable tray's. */
 export const SHELF_DECK_T = 3;
+/**
+ * Upstand stiffening ribs across the shelf deck.
+ *
+ * A flat 3 mm deck over a ~197 mm span is a trampoline: measured I = 106 mm4,
+ * which is 23 mm of sag under 5 kg in PETG. PETG matters — it is about HALF the
+ * stiffness of PLA (E ~2.0 GPa against ~3.5), and every earlier figure in this
+ * file assumed PLA. Section depth is the only lever that works; closing the
+ * lattice back up only reached 14.5 mm.
+ *
+ * UPSTAND, not downstand, for two reasons: the shelf prints deck-down, so
+ * downstand ribs would print first and leave the deck bridging between them;
+ * and downstand ribs would steal headroom from the accessory below. Raised ribs
+ * also give a device airflow underneath, which is how most rack shelves work.
+ * They run ACROSS the span, tying the two end ribs together.
+ */
+export const SHELF_RIB_H = 4;
+const SHELF_RIB_W = 3;
+const SHELF_RIB_PITCH = 30;
 export const TRAY_DECK_T = 4;
 /**
  * Rear anchor for a full-depth shelf, measured in from the rack's back face.
@@ -1006,6 +1024,13 @@ function buildShelf(
   // blow diagonally across it instead of only along the slot direction. The
   // end ribs are kept out — the deck overlaps them, and they carry the M5
   // threads.
+  // Upstand ribs across the deck, tying the two end ribs together. The deck is
+  // kept SOLID under each one: a rib rising off an open lattice cell is neither
+  // a T-section nor printable without bridging.
+  const shelfRibs: Profile[] = [];
+  for (let y = SHELF_RIB_PITCH / 2; y < d - SHELF_RIB_W; y += SHELF_RIB_PITCH) {
+    shelfRibs.push(pTranslate([deckX0, y], rectProfile(deckW, SHELF_RIB_W)));
+  }
   const notch = opts.rearNotches;
   const notchKeep: Profile[] = notch
     ? notch.cx.map((cx) =>
@@ -1013,21 +1038,20 @@ function buildShelf(
       )
     : [];
   if (vented) {
-    const ribKeepOut = ribX.map((rx) =>
-      pTranslate([rx - 1, -OVER], rectProfile(RIB_W + 2, d + 2 * OVER)),
-    ).concat(notchKeep);
+    const ribKeepOut = ribX
+      .map((rx) => pTranslate([rx - 1, -OVER], rectProfile(RIB_W + 2, d + 2 * OVER)))
+      .concat(notchKeep, shelfRibs);
     cuts.push(
       translate(
         [0, 0, -OVER],
         extrude(
           lightenPocket(pTranslate([deckX0, 0], rectProfile(deckW, d)), {
-            // Opened up from rib 3 / pitch 14: that left 43% of the deck
-            // solid, and the deck was the single worst part against the
-            // original (+81%). At 2.6/19 it is 27%, still a closed enough
-            // grid to stand a small appliance foot on.
+            // Back to 3/14 (~43% solid). Opening this to 2.6/19 saved 7.5 cm3
+            // and cost a third of the deck's material on the one accessory that
+            // carries equipment — a bad trade, and the printed shelf showed it.
             rim: 10,
-            rib: 2.6,
-            pitch: 19,
+            rib: 3,
+            pitch: 14,
             keepOut: ribKeepOut,
           }),
           3 + 2 * OVER,
@@ -1050,6 +1074,9 @@ function buildShelf(
         cuts.push(translate([rx - OVER, backY, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
       }
     }
+  }
+  if (shelfRibs.length > 0) {
+    solid.push(translate([0, 0, SHELF_DECK_T], extrude(pUnion(shelfRibs), SHELF_RIB_H)));
   }
   if (notch) {
     // Through the deck at the rear edge, rounded at the inner end like the
@@ -1485,7 +1512,9 @@ export function accessorySpaces(rack: RackParams): AccessorySpace[] {
     const startSlot = starts[i]!;
     const base = { index: i, slots: n, startSlot };
     if (acc.type !== 'shelf' && acc.type !== 'cable-tray') return { ...base, usable: null };
-    const deckT = acc.type === 'cable-tray' ? TRAY_DECK_T : SHELF_DECK_T;
+    // A device rests on the shelf's stiffening ribs, not on the deck between
+    // them, so the usable height starts at the RIB TOP.
+    const deckT = acc.type === 'cable-tray' ? TRAY_DECK_T : SHELF_DECK_T + SHELF_RIB_H;
     const deckTop = dims.slotZ(startSlot) + 0.25 + deckT;
     // Only a DECKED accessory forms a ceiling. A blank or keystone faceplate
     // above is 4 mm of plate at the very front and blocks nothing behind it —

@@ -225,6 +225,38 @@ band, which is solid at every mount type. That column is cut **only when a
 full-depth shelf is present**, so an ordinary rack is not peppered with holes
 it will never use.
 
+## Shelf deck stiffening — and a note on material
+
+**Every figure of sag in this document assumed PLA.** PETG is about HALF the
+stiffness (E ≈ 2.0 GPa against ≈ 3.5) — and it is the right material for a rack
+holding warm gear, since it has ~25 °C more heat headroom (Tg ≈ 80–85 °C against
+55–60) and far better creep resistance under sustained load. Design for the
+lower modulus rather than switching material.
+
+A flat 3 mm deck over the ~197 mm span between the end ribs is not enough:
+measured I = 106 mm⁴, which is **23 mm of sag under 5 kg in PETG**. A printed
+shelf came out flimsy exactly as that predicts. Closing the deck lattice alone
+only reaches 14.5 mm — section depth is the only lever big enough.
+
+The deck therefore carries **upstand ribs** across the span, `SHELF_RIB_H` tall,
+tying the two end ribs together:
+
+| | I (mm⁴) | PETG @5 kg | @10 kg |
+| :--- | ---: | ---: | ---: |
+| flat deck, lattice opened | 106 | 23.2 mm | 46.3 mm |
+| ribbed, lattice restored | 687 | 3.6 mm | 7.1 mm |
+
+UPSTAND, not downstand, for two independent reasons: the shelf prints
+**deck-down**, so downstand ribs would print first and leave the deck bridging
+between them; and downstand ribs would steal headroom from the accessory below.
+Raised ribs also give a device airflow underneath, which is how most rack
+shelves work — so `accessorySpaces()` measures usable height from the RIB TOP,
+not the deck.
+
+The deck lattice was also restored to 3/14 (~43% solid). Opening it to 2.6/19
+saved 7.5 cm³ and removed a third of the material from the one accessory that
+carries equipment. Do not re-open it for weight.
+
 ## Floor plate stiffening
 
 The floor is **not held up by the ground**. It sits 5 mm clear, carried by its
