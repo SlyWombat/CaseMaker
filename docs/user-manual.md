@@ -148,4 +148,55 @@ The lid sits on top with a 2 mm visual lift. Slicers ingest the model exactly as
 - **Print orientation:** lay the case open-side-up so the floor and bosses print on the bed without supports. The lid prints flat-side-down separately.
 - **Layer height:** 0.2 mm works for the default geometry; drop to 0.12 mm if your snap-fit lip needs better dimensional accuracy.
 - **Walls:** at least 3 perimeters for snap-fit lids — the lip flexes under load.
-- **Infill:** 15% gyroid is plenty for an enclosure; raise to 30% if you'll be plugging cables in/out frequently.
+- **Infill:** 15% gyroid is plenty for an enclosure; raise to 30% if you'll be plugging cables in/out frequently. Racks are a different load case — see below.
+
+### Racks — a different load case
+
+Everything above is written for an **enclosure**: a small box that sits on a desk
+and carries nothing but itself. A rack carries 5–10 kg of equipment, so the
+settings change. Print racks in **PETG**, not PLA — about 25 °C more heat
+headroom (Tg ≈ 80–85 °C against 55–60) and far better creep resistance under
+sustained load. It is roughly half the stiffness of PLA (E ≈ 2.0 GPa against
+≈ 3.5); the rib geometry is already designed for the lower modulus.
+
+**Infill pattern: gyroid.** Not because it wins a benchmark, but because it has
+no self-crossings (no nozzle collision, no over-extruded ridge where lines
+meet), it extrudes as continuous curves, and it is near-isotropic. That last
+point is the one that matters: every rack part is loaded differently — side
+panels in bending, the plate tabs in shear across layers, the wall-mount ears in
+tension — and one profile prints all of them. Grid and triangles are stronger
+*along* their line direction and weaker across it, which is only worth having if
+you can align the pattern per part. **Cubic** is a fine faster substitute.
+
+**Infill percent, by part:**
+
+| Part | Infill | Why |
+| :--- | :--- | :--- |
+| Side panels (250 × 275 × 20) | 40% | The only parts thick enough for infill to dominate mass and time. The M5 bosses live here and the whole load path runs through them. |
+| Bottom plate (5 mm + floor ribs) | 30–40% | ~25 layers at 0.2 mm, ~15 of them sparse. The infill's job is shear-coupling the two skins so the plate acts as one section — it is not carrying the bending itself. |
+| Shelf decks (3 mm + upstand ribs) | 30–40% | ~15 layers total, ~5 sparse. Almost pure skin and rib; the percent barely moves the mass, so pick 40 and stop thinking about it. |
+| One-piece fused export (1.09–1.58 kg) | 25% | Here 40% against 25% is hours and hundreds of grams. The skins still do the work, so this is a budget decision, not a strength one. |
+
+Do not go above ~50%. Past that you are adding mass and print time to a region
+that is not carrying load, and you start fighting over-extrusion where the
+infill meets the perimeter.
+
+**The settings that matter more than infill:**
+
+- **Perimeters: 4–5.** Every loaded section in a rack is a thin-walled beam and
+  the perimeters are its flanges. Going 2 → 4 walls does more for a shelf than
+  15% → 50% infill does.
+- **Top/bottom solid layers: 5 / 5.** On a 3 mm deck this *is* most of the part.
+- **Layer adhesion is where a rack actually fails**, not the infill. The
+  wall-mount ears cantilever the whole loaded box and the plate tabs load in
+  shear across layer lines. Run PETG at the hot end of its range and cut the fan
+  on everything that is not an overhang. That buys more real strength than any
+  infill change available to you.
+- **Ensure vertical shell thickness: on** — it matters on the ribs and around
+  the tab bores.
+- Large flat PETG panels want a brim and no draft on the printer.
+
+**Stay on a 0.4 mm nozzle.** A 1.5 kg part begs for 0.6, but the geometry blocks
+it: the outboard wall of the plate tab bore is 1.8 mm, and the snap tabs and
+keystone latch shoulders are finer still. Possible if you re-check every thin
+wall in the slicer preview first; not a free win.
