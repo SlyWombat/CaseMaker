@@ -30,6 +30,7 @@ import {
   type FastenerSize,
 } from '@/engine/compiler/fasteners';
 import { cube, difference, translate, type BuildOp } from '@/engine/compiler/buildPlan';
+import type { Facing } from '@/types';
 import { Manifold, exec, type ManifoldInstance } from './helpers/manifoldExec';
 
 const SIZES: FastenerSize[] = ['M2', 'M2.5', 'M3', 'M4', 'M5', 'M6'];
@@ -343,6 +344,53 @@ describe('screwHole', () => {
       expect(boreRadius(m, 6, 1, 6)).toBeCloseTo(2.2, 1);
     } finally {
       m.delete();
+    }
+  });
+
+  it('orients correctly on all six axes, head end first', () => {
+    // Every branch of orient(), because a sign error is invisible until the
+    // day someone migrates a module on the opposite face — and mountingFeatures
+    // has already shipped a wrong rotation once (issue #45). The block is
+    // centred on the origin, so for each axis the recess must land at the entry
+    // face and the far end must have none.
+    const blk: BuildOp = translate([-9, -9, -9], cube([18, 18, 18]));
+    const AXES: [Facing, [number, number, number]][] = [
+      ['+x', [1, 0, 0]],
+      ['-x', [-1, 0, 0]],
+      ['+y', [0, 1, 0]],
+      ['-y', [0, -1, 0]],
+      ['+z', [0, 0, 1]],
+      ['-z', [0, 0, -1]],
+    ];
+    for (const [axis, d] of AXES) {
+      // Entry face is the one the screw comes IN through, i.e. -d * 9.
+      const at: [number, number, number] = [-d[0] * 9, -d[1] * 9, -d[2] * 9];
+      const m = exec(
+        difference([
+          blk,
+          screwHole({ size: 'M5', at, axis, through: 18, head: 'button', recess: 'flush' }),
+        ]),
+      );
+      try {
+        // A point 4.5 mm off the axis (inside the Ø9.8 recess, outside the
+        // Ø5.2 shank), 1.5 mm in from each end.
+        const off: [number, number, number] = d[0] !== 0 ? [0, 4.5, 0] : [4.5, 0, 0];
+        const near: [number, number, number] = [
+          at[0] + d[0] * 1.5 + off[0],
+          at[1] + d[1] * 1.5 + off[1],
+          at[2] + d[2] * 1.5 + off[2],
+        ];
+        const far: [number, number, number] = [
+          -at[0] - d[0] * 1.5 + off[0],
+          -at[1] - d[1] * 1.5 + off[1],
+          -at[2] - d[2] * 1.5 + off[2],
+        ];
+        expect(solidAt(m, near), `${axis}: recess at the entry end`).toBe(false);
+        expect(solidAt(m, far), `${axis}: no recess at the far end`).toBe(true);
+        expect(solidAt(m, [0, 0, 0]), `${axis}: shank runs right through`).toBe(false);
+      } finally {
+        m.delete();
+      }
     }
   });
 
