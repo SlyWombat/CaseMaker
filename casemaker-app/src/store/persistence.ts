@@ -49,7 +49,16 @@ function fsAccess(): { save: ShowSaveFilePicker; open: ShowOpenFilePicker } | nu
     showOpenFilePicker?: ShowOpenFilePicker;
   };
   if (!w.showSaveFilePicker || !w.showOpenFilePicker) return null;
-  return { save: w.showSaveFilePicker, open: w.showOpenFilePicker };
+  // BIND the receiver (issue #144). Handing back the bare function references
+  // and calling them as `api.save(...)` makes `this` the returned literal, and
+  // Chrome's WebIDL binding checks it: "Failed to execute 'showSaveFilePicker'
+  // on 'Window': Illegal invocation". It broke Save as... and Load in production
+  // while export kept working, because exportTrigger still calls the picker on
+  // `window` itself.
+  return {
+    save: w.showSaveFilePicker.bind(window),
+    open: w.showOpenFilePicker.bind(window),
+  };
 }
 
 const PROJECT_FILE_TYPE: { description: string; accept: Record<string, string[]> } = {
