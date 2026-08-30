@@ -286,6 +286,14 @@ Two fixes, both automatic:
   there would do the same job in tension, but needs a reserved column at
   mid-depth which splits the vent window — measured at ~100 cm³ per panel
   against this pad's ~2.
+
+  The pad is `MID_PAD_LEN` = **46 mm**, deliberately longer than the 30 mm
+  `FOOT_LEN` of an end foot. An end tab is *pulled* onto its foot by an M5;
+  the mid tab has no screw at all, so the material it bears on is its whole
+  fixing. At FOOT_LEN the pad ran out only 4 mm past each end of the 22 mm tab
+  — the bearing patch sat almost on the pad's own edges. 46 mm puts 12 mm of
+  pad beyond the tab at each end and spreads the load into the panel body
+  instead of into a corner.
 - **Downstand ribs under the plate** (`floorRibs`, default on once the span
   passes 260 mm), 4 mm into the 5 mm of air beneath, 1 mm of ground clearance
   left deliberately: ribs reaching the floor would help a freestanding rack and
@@ -327,6 +335,14 @@ Two things worth knowing:
   as detached fingers — eight notches at minimum spacing split the plate into
   *nine* separate bodies before `notchKeepOut()` fed their footprints into the
   lattice's keep-out list.
+- **The cut goes through the FLOOR RIBS, not just the deck.** The perimeter rib
+  runs along the very edge the notches open through, so a cut only `PLATE_T`
+  deep left it bridging straight across the mouth of every notch — a 3 mm bar
+  in front of each opening, with the cross ribs closing anything deeper than
+  the 45 mm pitch. `plateNotchCuts()` takes the rib depth and cuts the full
+  section. This is the same trap the shelf's upstand ribs hit, and it was
+  invisible to the tests because the notch case used the 252 mm sample (ribs
+  off) and the rib case set no notches.
 
 **Full-depth shelves get the same notches.** A full shelf runs right to the
 rack's back face, so its deck blocks the vertical cable run the plate notches

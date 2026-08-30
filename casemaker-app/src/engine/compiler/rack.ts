@@ -51,6 +51,14 @@ const END_MARGIN = 5.5;
 const FOOT_H = 5;
 const FOOT_LEN = 30;
 const FOOT_INSET = 4;
+/**
+ * The MID bearing pad is longer than an end foot, and deliberately so: the end
+ * tabs are each pulled down onto their foot by an M5, but the mid tab has no
+ * screw at all. Bearing is the only thing holding it, so the pad is sized to
+ * put a wide margin of material around the tab's footprint rather than the
+ * 4 mm of overhang a plain FOOT_LEN block left at each end.
+ */
+const MID_PAD_LEN = 46;
 /** M5 cap screws: clearance through the sides, thread into accessory ribs. */
 const SCREW_CLEAR_D = 5.2;
 /**
@@ -446,7 +454,9 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   // reserved column at mid-depth, which splits the vent window and measured
   // ~100 cm3 per panel against this pad's ~2.
   if (depth >= MID_BAR_MIN_DEPTH) {
-    solid.push(box(0, SIDE_T, depth / 2 - FOOT_LEN / 2, 0, FOOT_LEN, FOOT_H + OVER));
+    // MID_PAD_LEN, not FOOT_LEN: no screw pins this tab down, so all it has is
+    // the material it bears on — see MID_PAD_LEN.
+    solid.push(box(0, SIDE_T, depth / 2 - MID_PAD_LEN / 2, 0, MID_PAD_LEN, FOOT_H + OVER));
   }
 
   const cuts: BuildOp[] = [];
@@ -1481,17 +1491,21 @@ export function cableNotchGeometry(
   return { cx, w, d };
 }
 
-function plateNotchCuts(rack: RackParams, dims: RackDims, zBase: number): BuildOp[] {
+function plateNotchCuts(rack: RackParams, dims: RackDims, zBase: number, ribD = 0): BuildOp[] {
   const g = cableNotchGeometry(rack, dims);
   if (!g) return [];
   const { w, d } = g;
   const cuts: BuildOp[] = [];
+  // The FULL section, not just the deck: the floor ribs hang below the plate's
+  // outer face, and the perimeter rib runs along the very edge the notches open
+  // through. Cutting only PLATE_T left that rib bridging straight across the
+  // mouth of every notch — the same trap the shelf ribs hit.
+  const z0 = zBase - ribD - OVER;
+  const thru = PLATE_T + ribD + 2 * OVER;
   for (const cx of g.cx) {
     const yInner = dims.depth - d + w / 2;
-    cuts.push(
-      translate([cx - w / 2, yInner, zBase - OVER], cube([w, dims.depth - yInner + OVER, PLATE_T + 2 * OVER])),
-    );
-    cuts.push(translate([cx, yInner, zBase - OVER], cylinder(PLATE_T + 2 * OVER, w / 2, 32)));
+    cuts.push(translate([cx - w / 2, yInner, z0], cube([w, dims.depth - yInner + OVER, thru])));
+    cuts.push(translate([cx, yInner, z0], cylinder(thru, w / 2, 32)));
   }
   return cuts;
 }
@@ -1527,10 +1541,11 @@ function withNotches(
   dims: RackDims,
   which: 'top' | 'bottom',
   zBase: number,
+  ribD = 0,
 ): BuildOp {
   const cfg = rack.cableNotches;
   if (!cfg || (cfg.plate !== 'both' && cfg.plate !== which)) return op;
-  const cuts = plateNotchCuts(rack, dims, zBase);
+  const cuts = plateNotchCuts(rack, dims, zBase, ribD);
   return cuts.length > 0 ? difference([op, ...cuts]) : op;
 }
 
@@ -1687,17 +1702,21 @@ export function accessorySpaces(rack: RackParams): AccessorySpace[] {
  *  assembly space so the viewport previews the assembled rack. */
 export function buildRackNodes(rack: RackParams): BuildNode[] {
   const dims = computeRackDims(rack);
+  // One local for both the build and the notch depth: the notches have to cut
+  // as deep as the ribs actually reach, so these two must never drift apart.
+  const floorRibs = floorRibsEnabled(rack);
   const nodes: BuildNode[] = [
     { id: 'rack-side-left', op: buildSide(rack, dims, false) },
     { id: 'rack-side-right', op: buildSide(rack, dims, true) },
     {
       id: 'rack-bottom',
       op: withNotches(
-        translate([0, 0, FOOT_H], buildPlate(dims, notchKeepOut(rack, dims, 'bottom'), floorRibsEnabled(rack))),
+        translate([0, 0, FOOT_H], buildPlate(dims, notchKeepOut(rack, dims, 'bottom'), floorRibs)),
         rack,
         dims,
         'bottom',
         FOOT_H,
+        floorRibs ? FLOOR_RIB_D : 0,
       ),
     },
     // Same printed part, turned over: the tabs sit on the face that points OUT

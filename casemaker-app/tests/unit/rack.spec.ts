@@ -22,6 +22,7 @@ import {
   cableNotchGeometry,
   floorRibsEnabled,
   plateTabYs,
+  MID_BAR_MIN_DEPTH,
   SHELF_DECK_T,
   SHELF_RIB_H,
   TRAY_DECK_T,
@@ -1134,9 +1135,110 @@ describe('rack archetype — mini-rack template', () => {
           c.delete();
           expect(frac, `${width}: tab at y=${y} has nothing to bear on`).toBeGreaterThan(0.3);
         }
+
+        // ...and the MID pad carries a wider margin than an end foot does. The
+        // end tabs are each pulled onto their foot by an M5; the mid tab has no
+        // screw, so bearing is the whole of its fixing and the pad has to reach
+        // well past the tab footprint rather than the 4 mm it used to.
+        const midY = dims.depth / 2;
+        for (const side of [-1, 1] as const) {
+          const y0 = midY + side * (22 / 2 + 8);
+          const c = Manifold.cube([15, 6, 5]).translate([0, y0 - 3, 0]);
+          const t = Manifold.intersection([L, c]);
+          const frac = t.volume() / c.volume();
+          t.delete();
+          c.delete();
+          expect(frac, `${width}: mid pad stops short on the ${side < 0 ? 'front' : 'rear'} side`).toBeGreaterThan(0.9);
+        }
       } finally {
         [B, T, L].forEach((m) => m.delete());
       }
+    }
+  }, 180000);
+
+  it('keeps the widened mid pad clear of the end feet at the shallowest depth', () => {
+    // The mid pad is longer than an end foot (no screw holds the mid tab, so
+    // bearing is all it has). At the shallowest rack that gets one there is
+    // only ~9 mm of gap left at each end — enough, but not by much, so a future
+    // bump to MID_PAD_LEN must not silently fuse the pad into a foot.
+    for (const depth of [MID_BAR_MIN_DEPTH, 300]) {
+      const L = exec(buildRackNodes({ ...SAMPLE, depth, slots: 8 }).find((n) => n.id === 'rack-side-left')!.op);
+      try {
+        // Walk the foot band (z 0..5) and count separate runs of material.
+        let runs = 0;
+        let was = false;
+        for (let y = 0.5; y < depth; y += 0.5) {
+          const c = Manifold.cube([6, 0.4, 0.4]).translate([4, y, 2.3]);
+          const i = Manifold.intersection([L, c]);
+          const solid = i.volume() > 0.05;
+          i.delete();
+          c.delete();
+          if (solid && !was) runs++;
+          was = solid;
+        }
+        expect(runs, `depth ${depth}: front foot, mid pad and rear foot must stay separate`).toBe(3);
+      } finally {
+        L.delete();
+      }
+    }
+  }, 180000);
+
+  it('cuts the cable notches through the floor ribs, not just the deck', () => {
+    // The two features were only ever tested apart: the notch test uses the
+    // 252 mm sample (plateW 222, ribs OFF) and the rib test sets no notches.
+    // With both on, the perimeter rib runs along the very edge the notches
+    // open through and bridged straight across the mouth of every one.
+    const rack: RackParams = {
+      ...SAMPLE,
+      width: 350,
+      depth: 300,
+      slots: 20,
+      accessories: [],
+      cableNotches: { plate: 'bottom', count: 3, width: 40, depth: 60 },
+    };
+    expect(floorRibsEnabled(rack), 'this config must have ribs').toBe(true);
+    const dims = computeRackDims(rack);
+    const B = exec(buildRackNodes(rack).find((n) => n.id === 'rack-bottom')!.op);
+    try {
+      // Count clear runs across the rear edge at a given height.
+      const openings = (zMid: number): number => {
+        let open = 0;
+        let was = false;
+        for (let x = 16; x < dims.width - 16; x += 0.5) {
+          const c = Manifold.cube([0.4, 3, 0.4]).translate([x, dims.depth - 3, zMid]);
+          const i = Manifold.intersection([B, c]);
+          const isOpen = i.volume() < 0.05;
+          if (isOpen && !was) open++;
+          was = isOpen;
+          i.delete();
+          c.delete();
+        }
+        return open;
+      };
+      // Deck band (z 5..10) — this part always worked.
+      expect(openings(7.5), 'deck is notched').toBe(3);
+      // Rib band (z 1..5) — this is the one that was solid.
+      expect(openings(2.5), 'ribs are notched too').toBe(3);
+      // ...and the CROSS ribs the notch runs past inboard of the rear edge,
+      // not just the perimeter one. A 60 mm notch on a 300 mm plate crosses
+      // the rib at y = 270 on the 45 mm pitch.
+      const g = cableNotchGeometry(rack, dims)!;
+      for (const cx of g.cx) {
+        for (const y of [dims.depth - 30, dims.depth - 8]) {
+          const c = Manifold.cube([3, 3, 3]).translate([cx - 1.5, y - 1.5, 1.5]);
+          const i = Manifold.intersection([B, c]);
+          const v = i.volume();
+          i.delete();
+          c.delete();
+          expect(v, `rib left standing in the notch at x=${cx.toFixed(0)}, y=${y}`).toBeLessThan(0.5);
+        }
+      }
+      // The rib segments between notches stay fused to the deck above them.
+      const parts = B.decompose();
+      expect(parts.length, 'notched ribbed plate is one body').toBe(1);
+      parts.forEach((c) => c.delete());
+    } finally {
+      B.delete();
     }
   }, 180000);
 
