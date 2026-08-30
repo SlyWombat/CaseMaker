@@ -25,14 +25,7 @@ import {
   type Profile,
   aabbOfOp,
 } from './buildPlan';
-import {
-  clearanceDiameter,
-  headHeight,
-  headRecessDiameter,
-  pilotDiameter,
-  screwHole,
-  screwStarter,
-} from './fasteners';
+import { headHeight, screwHole, screwStarter } from './fasteners';
 
 /**
  * Parametric mini-rack assembly (emulates "Mini Rack" by Meuon, Printables
@@ -68,18 +61,17 @@ const FOOT_INSET = 4;
  */
 const MID_PAD_LEN = 46;
 /**
- * The rack's fastener is an M5 throughout, and every dimension of it now comes
- * off the shared table in fasteners.ts (issue #140) rather than being written
- * out here. The names stay because the geometry below reads better with them;
- * the VALUES are no longer this file's to invent.
+ * The rack's fastener is an M5 throughout, and no dimension of it is written
+ * out in this file any more — `screwHole({ size: 'M5' })` and
+ * `screwStarter({ size: 'M5' })` read the shared table in fasteners.ts
+ * (issue #140).
  *
- * Clearance through the sides at the house 'located' fit (5.2, deliberately
- * tighter than ISO close — these holes hold the accessories square, so slack
- * is crookedness); receiving holes at the coupon-tested 4.8, which is the one
- * number in that table that came from a printed part.
+ * What that gets us, concretely: clearance through the sides at the house
+ * 'located' fit of 5.2, deliberately tighter than ISO close because these holes
+ * hold the accessories square and slack in them is crookedness; receiving holes
+ * at the coupon-tested 4.8, the one number in that table that came from a
+ * printed part rather than a standard.
  */
-const SCREW_CLEAR_D = clearanceDiameter('M5');
-const SCREW_THREAD_D = pilotDiameter('M5', 'machine');
 /** Tie-wrap holes down the front band. */
 const TIE_D = 4.5;
 /** Accessory faceplate thickness (blank/keystone front plate). */
@@ -280,10 +272,12 @@ const TAB_MERGE = 0.5;
  * same numbers. It used to carry its own: TAB_SCREW_CLEAR_D was a byte-identical
  * duplicate of SCREW_CLEAR_D, and the head recess was a pair of magic numbers
  * with a "provisional pending #140" comment on them. #140 has landed, and the
- * recess is now the MEASURED button head (9.2 across, 3.0 tall) plus the
- * table's head fit.
+ * recess is the MEASURED button head (9.2 across, 3.0 tall) plus the table's
+ * head fit, giving the same Ø9.8 x 3.0 as before.
+ *
+ * Only the HEIGHT survives as a named constant, because the tab's thickness is
+ * built from it (head height + a bearing floor) and the tests pin that.
  */
-const TAB_SCREW_HEAD_D = headRecessDiameter('M5', 'button');
 export const TAB_SCREW_HEAD_H = headHeight('M5', 'button');
 /**
  * Screw axis, measured INBOARD from the plate edge — not the centre of the
