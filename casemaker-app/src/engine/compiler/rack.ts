@@ -25,6 +25,14 @@ import {
   type Profile,
   aabbOfOp,
 } from './buildPlan';
+import {
+  clearanceDiameter,
+  headHeight,
+  headRecessDiameter,
+  pilotDiameter,
+  screwHole,
+  screwStarter,
+} from './fasteners';
 
 /**
  * Parametric mini-rack assembly (emulates "Mini Rack" by Meuon, Printables
@@ -59,21 +67,19 @@ const FOOT_INSET = 4;
  * 4 mm of overhang a plain FOOT_LEN block left at each end.
  */
 const MID_PAD_LEN = 46;
-/** M5 cap screws: clearance through the sides, thread into accessory ribs. */
-const SCREW_CLEAR_D = 5.2;
 /**
- * Receiving hole for the M5s, set by TEST PRINT (samples/pilot-coupon-m5.stl,
- * issue #140), not by arithmetic — the arithmetic was wrong and it is worth
- * saying why so nobody "corrects" this back.
+ * The rack's fastener is an M5 throughout, and every dimension of it now comes
+ * off the shared table in fasteners.ts (issue #140) rather than being written
+ * out here. The names stay because the geometry below reads better with them;
+ * the VALUES are no longer this file's to invent.
  *
- * The usual 0.8x-major rule (~4.0-4.3 for M5) is for thread-FORMING screws
- * designed for plastic, with a ~30 degree thread profile that displaces
- * material. A standard 60 degree metric machine screw driven into PLA at that
- * size splits it: the hoop stress goes up faster than the grip does. Of
- * 4.0 / 4.2 / 4.4 / 4.6 / 4.8 driven into a printed coupon in both layer
- * orientations, 4.8 held best.
+ * Clearance through the sides at the house 'located' fit (5.2, deliberately
+ * tighter than ISO close — these holes hold the accessories square, so slack
+ * is crookedness); receiving holes at the coupon-tested 4.8, which is the one
+ * number in that table that came from a printed part.
  */
-const SCREW_THREAD_D = 4.8;
+const SCREW_CLEAR_D = clearanceDiameter('M5');
+const SCREW_THREAD_D = pilotDiameter('M5', 'machine');
 /** Tie-wrap holes down the front band. */
 const TIE_D = 4.5;
 /** Accessory faceplate thickness (blank/keystone front plate). */
@@ -201,7 +207,7 @@ const FAN_BOLT_EDGE = 6;
  *  SCREW_BOSS_D: a rail crossing a screw column then leaves that hole exactly
  *  the boss the panel's own lightening would have. */
 const FAN_RAIL_W = 10;
-const FAN_SCREW_D = 3.6;
+export const FAN_SCREW_D = 3.6;
 /**
  * Where a fan actually lands. Its configured position is clamped so the whole
  * mounting band stays on the panel and the opening keeps clear of the rails —
@@ -269,13 +275,16 @@ export const TAB_T = PLATE_T;
 const TAB_SLACK = 0.3;
 /** How far a tab overlaps the deck it grows out of, to avoid a coplanar seam. */
 const TAB_MERGE = 0.5;
-/** Clearance through the tab; the starter hole reuses SCREW_THREAD_D, which
- *  is test-print derived. The head recess is still provisional pending issue
- *  #140 — the one repeatable screw-hole mechanism. */
-const TAB_SCREW_CLEAR_D = 5.2;
-const TAB_SCREW_PILOT_D = SCREW_THREAD_D;
-const TAB_SCREW_HEAD_D = 9.8;
-export const TAB_SCREW_HEAD_H = 3.0;
+/**
+ * The tab screw is the SAME M5 as everything else in the rack, so it takes the
+ * same numbers. It used to carry its own: TAB_SCREW_CLEAR_D was a byte-identical
+ * duplicate of SCREW_CLEAR_D, and the head recess was a pair of magic numbers
+ * with a "provisional pending #140" comment on them. #140 has landed, and the
+ * recess is now the MEASURED button head (9.2 across, 3.0 tall) plus the
+ * table's head fit.
+ */
+const TAB_SCREW_HEAD_D = headRecessDiameter('M5', 'button');
+export const TAB_SCREW_HEAD_H = headHeight('M5', 'button');
 /**
  * Screw axis, measured INBOARD from the plate edge — not the centre of the
  * tab. Centred, a Ø9.8 counterbore leaves 0.6 mm of wall each side, which is
@@ -510,13 +519,11 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   const wantsRearAnchor = hasFullDepthShelf(rack);
   for (let k = 0; k < dims.slots; k++) {
     const z = dims.holeZ(k);
-    cuts.push(translate([holeX, SIDE_FRONT_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
-    if (depth >= MID_BAR_MIN_DEPTH) {
-      cuts.push(translate([holeX, REAR_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
-    }
-    if (wantsRearAnchor) {
-      cuts.push(translate([holeX, rearAnchorY, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
-    }
+    const column = (y: number): BuildOp =>
+      screwHole({ size: 'M5', at: [holeX, y, z], axis: '+x', through: holeLen, segments: 24 });
+    cuts.push(column(SIDE_FRONT_HOLE_Y));
+    if (depth >= MID_BAR_MIN_DEPTH) cuts.push(column(REAR_HOLE_Y));
+    if (wantsRearAnchor) cuts.push(column(rearAnchorY));
   }
   for (let ty = FRONT_BAND + 12; ty <= depth - rearBand - 8; ty += 33) {
     cuts.push(translate([holeX, ty, FOOT_H + RAIL / 2], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
@@ -553,11 +560,16 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
       box(tabEdge - TAB_REACH - TAB_SLACK, SIDE_T + OVER, y0, H_TOP - TAB_T, dy, TAB_T + OVER),
     );
     if (!screwYs.has(ty)) continue; // mid tab bears the deck, takes no screw
+    // A millimetre deeper than the screw reaches: a screw that bottoms out
+    // jacks the plate back up off its seat.
     cuts.push(
-      translate(
-        [tabAxis, ty, FOOT_H + TAB_T],
-        cylinder(TAB_SCREW_BITE + OVER, TAB_SCREW_PILOT_D / 2, 24),
-      ),
+      screwStarter({
+        size: 'M5',
+        at: [tabAxis, ty, FOOT_H + TAB_T],
+        axis: '+z',
+        depth: TAB_SCREW_BITE + OVER,
+        segments: 24,
+      }),
     );
     // Driver access to that screw's head. The head lands in the tab's
     // outer-face counterbore, which on the bottom plate faces the underside of
@@ -568,11 +580,17 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     cuts.push(
       translate([tabAxis, ty, -OVER], cylinder(FOOT_H + 2 * OVER, TAB_ACCESS_D / 2, 32)),
     );
+    // Driven DOWN from the top ledge, so the hole runs -z from its mouth. The
+    // bottom one is the mirror case and goes UP, which is the whole reason the
+    // two ends of this joint are not the same part of the rail.
     cuts.push(
-      translate(
-        [tabAxis, ty, H_TOP - TAB_T - TAB_SCREW_BITE],
-        cylinder(TAB_SCREW_BITE + OVER, TAB_SCREW_PILOT_D / 2, 24),
-      ),
+      screwStarter({
+        size: 'M5',
+        at: [tabAxis, ty, H_TOP - TAB_T],
+        axis: '-z',
+        depth: TAB_SCREW_BITE,
+        segments: 24,
+      }),
     );
   }
 
@@ -710,9 +728,22 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     };
     for (let i = 0; i < screws; i++) {
       const z = FOOT_H + (bodyH * (i + 1)) / (screws + 1);
-      cuts.push(translate([xC, depth - EAR_T - OVER, z], axisCylinder('+y', EAR_T + 2 * OVER, WALL_SCREW_D / 2, 24)));
+      // The user's own wall fixings, not ours: the diameters stay explicit
+      // overrides rather than a table lookup, because whatever goes into the
+      // wall is whatever they have.
       cuts.push(
-        translate([xC, depth - EAR_T - OVER, z], axisCylinder('+y', WALL_HEAD_RECESS + OVER, WALL_HEAD_D / 2, 32)),
+        screwHole({
+          size: 'M4',
+          at: [xC, depth - EAR_T, z],
+          axis: '+y',
+          through: EAR_T,
+          clearanceD: WALL_SCREW_D,
+          head: 'socket-cap',
+          headD: WALL_HEAD_D,
+          recess: WALL_HEAD_RECESS,
+          segments: 24,
+          recessSegments: 32,
+        }),
       );
       gusset(z - 8);
     }
@@ -799,15 +830,11 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   // rear anchor too, not just the front and mid ones.
   for (let k = 0; k < dims.slots; k++) {
     const z = dims.holeZ(k);
-    fanCuts.push(translate([holeX, SIDE_FRONT_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
-    if (depth >= MID_BAR_MIN_DEPTH) {
-      fanCuts.push(translate([holeX, REAR_HOLE_Y, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)));
-    }
-    if (hasFullDepthShelf(rack)) {
-      fanCuts.push(
-        translate([holeX, depth - REAR_ANCHOR_INSET, z], axisCylinder('+x', holeLen, SCREW_CLEAR_D / 2, 24)),
-      );
-    }
+    const column = (y: number): BuildOp =>
+      screwHole({ size: 'M5', at: [holeX, y, z], axis: '+x', through: holeLen, segments: 24 });
+    fanCuts.push(column(SIDE_FRONT_HOLE_Y));
+    if (depth >= MID_BAR_MIN_DEPTH) fanCuts.push(column(REAR_HOLE_Y));
+    if (hasFullDepthShelf(rack)) fanCuts.push(column(depth - REAR_ANCHOR_INSET));
   }
   for (let ty = FRONT_BAND + 12; ty <= depth - rearBand - 8; ty += 33) {
     fanCuts.push(translate([holeX, ty, FOOT_H + RAIL / 2], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
@@ -885,10 +912,16 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     for (const sy of [-1, 1]) {
       for (const sz of [-1, 1]) {
         fanCuts.push(
-          translate(
-            [holeX, yC + (sy * spec.bolt) / 2, zC + (sz * spec.bolt) / 2],
-            axisCylinder('+x', holeLen, FAN_SCREW_D / 2, 20),
-          ),
+          // The screws that ship with the fan: a self-tapper with no metric
+          // size, so the hole is named outright rather than looked up.
+          screwStarter({
+            size: 'M4',
+            at: [holeX, yC + (sy * spec.bolt) / 2, zC + (sz * spec.bolt) / 2],
+            axis: '+x',
+            depth: holeLen,
+            pilotD: FAN_SCREW_D,
+            segments: 20,
+          }),
         );
       }
     }
@@ -969,6 +1002,32 @@ function buildPlate(dims: RackDims, notchSolid: Profile[] = [], floorRibs = fals
       ribProfiles.push(pTranslate([x0, y], rectProfile(plateW, FLOOR_RIB_W)));
     }
   }
+  // ...and the ribs notched clear of the tab screws' driver paths.
+  //
+  // The bottom plate's tab screws are driven UP from the rack's underside, so a
+  // driver has to reach each head counterbore through the very face the ribs
+  // hang off. Measured on a 350x300 rack, the perimeter rib left 18.5 mm3
+  // standing in every one of those four Ø10.8 access circles. Same failure as a
+  // rib bridging a cable notch: the rib is right, the thing it crosses is right,
+  // and nobody subtracted one from the other.
+  if (ribProfiles.length > 0) {
+    const access: Profile[] = [];
+    for (const yC of plateScrewYs(depth)) {
+      for (const dir of [-1, 1] as const) {
+        const edge = dir < 0 ? x0 : x0 + plateW;
+        access.push(
+          pTranslate(
+            [dir < 0 ? edge - TAB_SCREW_INSET : edge + TAB_SCREW_INSET, yC],
+            circleProfile(TAB_ACCESS_D / 2, 32),
+          ),
+        );
+      }
+    }
+    for (let i = 0; i < ribProfiles.length; i++) {
+      ribProfiles[i] = pDifference([ribProfiles[i]!, ...access]);
+    }
+  }
+
   const deck = pDifference([
     plateOutline,
     lightenPocket(plateOutline, {
@@ -1001,17 +1060,43 @@ function buildPlate(dims: RackDims, notchSolid: Profile[] = [], floorRibs = fals
       );
       if (!screwYs.has(yC)) continue; // mid tab is a rest, not a fixing
       const axis = dir < 0 ? edge - TAB_SCREW_INSET : edge + TAB_SCREW_INSET;
-      // Thread-width clearance the whole way through...
+      // Thread-width clearance the whole way through, and a counterbore in the
+      // OUTER face so the head finishes flush — one call, because they are one
+      // hole. The recess carries more facets than the shank: it is a seating
+      // face the head bears on, and it shows on the finished part.
       cuts.push(
-        translate([axis, yC, -OVER], cylinder(TAB_T + 2 * OVER, TAB_SCREW_CLEAR_D / 2, 24)),
-      );
-      // ...and a counterbore in the outer face so the head finishes flush.
-      cuts.push(
-        translate([axis, yC, -OVER], cylinder(TAB_SCREW_HEAD_H + OVER, TAB_SCREW_HEAD_D / 2, 32)),
+        screwHole({
+          size: 'M5',
+          at: [axis, yC, 0],
+          axis: '+z',
+          through: TAB_T,
+          head: 'button',
+          recess: 'flush',
+          segments: 24,
+          recessSegments: 32,
+        }),
       );
     }
   }
   return difference([union(solid), ...cuts]);
+}
+
+/**
+ * Receiving hole in an accessory end rib — one per slot per side. This is the
+ * joint that holds the whole rack together: the M5 goes in from OUTSIDE the
+ * side panel, through its clearance column, and taps into this.
+ *
+ * Shared by the faceplate, the shelf and the cable tray, which had three
+ * copies of the same cylinder between them.
+ */
+function ribStarter(rx: number, y: number, z: number): BuildOp {
+  return screwStarter({
+    size: 'M5',
+    at: [rx - OVER, y, z],
+    axis: '+x',
+    depth: RIB_W + 2 * OVER,
+    segments: 24,
+  });
 }
 
 /** Faceplate spanning BETWEEN the side panels (recessed behind their
@@ -1030,7 +1115,7 @@ function faceplateBase(dims: RackDims, nSlots: number, plateDepth: number): { so
   for (let k = 0; k < nSlots; k++) {
     const z = (k + 0.5) * SLOT_PITCH - 0.25;
     for (const rx of ribX) {
-      cuts.push(translate([rx - OVER, FRONT_HOLE_Y, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
+      cuts.push(ribStarter(rx, FRONT_HOLE_Y, z));
     }
   }
   return { solid, cuts, h };
@@ -1178,13 +1263,13 @@ function buildShelf(
   for (let k = 0; k < nSlots; k++) {
     const z = (k + 0.5) * SLOT_PITCH - 0.25;
     for (const rx of ribX) {
-      cuts.push(translate([rx - OVER, FRONT_HOLE_Y, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
+      cuts.push(ribStarter(rx, FRONT_HOLE_Y, z));
       if (d >= LONG_SHELF) {
-        cuts.push(translate([rx - OVER, ACC_REAR_HOLE_Y, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
+        cuts.push(ribStarter(rx, ACC_REAR_HOLE_Y, z));
       }
       // ...and a third at the very back once the shelf actually reaches it.
       if (backAnchorY !== undefined) {
-        cuts.push(translate([rx - OVER, backAnchorY, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
+        cuts.push(ribStarter(rx, backAnchorY, z));
       }
     }
   }
@@ -1324,7 +1409,7 @@ function buildCableTray(dims: RackDims): BuildOp {
   for (let k = 0; k < nSlots; k++) {
     const z = (k + 0.5) * SLOT_PITCH - 0.25;
     for (const rx of ribX) {
-      cuts.push(translate([rx - OVER, FRONT_HOLE_Y, z], axisCylinder('+x', RIB_W + 2 * OVER, SCREW_THREAD_D / 2, 24)));
+      cuts.push(ribStarter(rx, FRONT_HOLE_Y, z));
     }
   }
   cuts.push(...ribChannelCuts(width, ribX, d, h, nSlots, false));

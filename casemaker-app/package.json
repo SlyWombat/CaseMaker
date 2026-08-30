@@ -20,7 +20,8 @@
     "pilot:coupon": "tsx --tsconfig tsconfig.scripts.json scripts/pilot-coupon.ts",
     "sample:export": "tsx --tsconfig tsconfig.scripts.json scripts/export-sample.ts",
     "deploy": "node scripts/deploy-cpanel.mjs",
-    "quota": "node scripts/cpanel-quota.mjs"
+    "quota": "node scripts/cpanel-quota.mjs",
+    "thread:coupon": "tsx --tsconfig tsconfig.scripts.json scripts/thread-coupon.ts"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

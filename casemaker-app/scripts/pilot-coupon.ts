@@ -1,18 +1,25 @@
-// M5 thread-forming pilot-hole test coupon — issue #140.
+// Machine-screw pilot-hole test coupon — issue #140.
 //
-// The rack's receiving holes are SCREW_THREAD_D = 4.7. For M5x0.8 (major
-// 5.000, minor 4.134) that leaves (5.0 - 4.7) / 2 = 0.15 mm of radial thread
-// engagement, which is a clearance hole pretending to hold. Thread forming
-// into thermoplastic normally wants ~0.8x major, about 4.0-4.3. Rather than
-// change it on arithmetic, this coupon settles it empirically with the
-// operator's own screws, filament and printer.
+// Settles, empirically and with the operator's own screws, filament and
+// printer, what starter hole a 60-degree metric MACHINE screw wants when it is
+// driven straight into plastic. The arithmetic answer is not the answer: the
+// ~0.8x-major rule everyone quotes is for thread-FORMING screws, and when this
+// coupon was first printed for M5 it came back at 4.8, nearly a millimetre
+// away from the 4.0-4.3 that rule predicts. A machine screw at 4.0 does not
+// form thread in PLA, it splits the boss.
 //
 // Two rows, because layer direction changes thread strength and the rack uses
 // both: holes down through the TOP face (axis across the layers, as the plate
 // tab screws sit when the side panel prints inner-face-down) and holes into
 // the FRONT face (axis along the layers). Same five diameters in each.
 //
-//   npm run pilot:coupon   ->  samples/pilot-coupon-m5.stl
+// The ladder is the table's pilot for the size and the four 0.2 mm steps below
+// it, so the SHIPPED value is always the last column. If the best hole is that
+// last column the optimum is not bracketed above — which is exactly where M5
+// still stands.
+//
+//   npm run pilot:coupon           ->  samples/pilot-coupon-m5.stl
+//   npm run pilot:coupon -- M3     ->  samples/pilot-coupon-m3.stl
 
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -21,8 +28,10 @@ import { createRequire } from 'node:module';
 import ManifoldModule from 'manifold-3d';
 
 import { cube, cylinder, axisCylinder, translate, union, difference, type BuildOp } from '../src/engine/compiler/buildPlan';
+import { FASTENERS, pilotDiameter, type FastenerSize } from '../src/engine/compiler/fasteners';
 import { executeOpSync } from '../src/workers/geometry/evaluateOp';
 import { buildBinaryStl } from '../src/workers/export/stlBinary';
+import { engrave } from './coupon-glyphs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const samplesDir = join(here, '..', '..', 'samples');
@@ -31,7 +40,14 @@ const require = createRequire(import.meta.url);
 const tl = await ManifoldModule({ locateFile: () => require.resolve('manifold-3d/manifold.wasm') });
 tl.setup();
 
-const DIAMETERS = [4.0, 4.2, 4.4, 4.6, 4.8];
+const arg = (process.argv[2] ?? 'M5').toUpperCase();
+const SIZE = (Object.keys(FASTENERS) as FastenerSize[]).find((s) => s.toUpperCase() === arg);
+if (!SIZE) {
+  console.error(`unknown size "${arg}" — one of ${Object.keys(FASTENERS).join(', ')}`);
+  process.exit(1);
+}
+const SHIPPED = pilotDiameter(SIZE, 'machine');
+const DIAMETERS = [4, 3, 2, 1, 0].map((k) => Math.round((SHIPPED - k * 0.2) * 100) / 100);
 const PITCH = 19;
 const X0 = 17;
 const BAR_X = X0 * 2 + PITCH * (DIAMETERS.length - 1); // 110
@@ -43,39 +59,6 @@ const HORIZ_DEPTH = 14;  // blind into a 30 mm bar
 const HORIZ_Z = 7;
 const ENGRAVE = 0.8;
 
-// ---- seven-segment digits, drawn as rectangles -----------------------------
-// Only 0/2/4/6/8 are ever needed (the tenths of 4.0-4.8), plus the leading 4.
-const H = 7;            // digit height
-const W = 4.2;          // digit width
-const T = 1.0;          // stroke thickness
-type Seg = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g';
-const SEGMENTS: Record<string, Seg[]> = {
-  '0': ['a', 'b', 'c', 'd', 'e', 'f'],
-  '2': ['a', 'b', 'g', 'e', 'd'],
-  '4': ['f', 'g', 'b', 'c'],
-  '6': ['a', 'f', 'g', 'e', 'c', 'd'],
-  '8': ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
-};
-// Each segment as [x, y, w, h] in a W x H box with origin at bottom-left.
-const SEG_RECT: Record<Seg, [number, number, number, number]> = {
-  a: [T, H - T, W - 2 * T, T],
-  g: [T, H / 2 - T / 2, W - 2 * T, T],
-  d: [T, 0, W - 2 * T, T],
-  f: [0, H / 2, T, H / 2 - T / 2],
-  b: [W - T, H / 2, T, H / 2 - T / 2],
-  e: [0, T, T, H / 2 - T / 2],
-  c: [W - T, T, T, H / 2 - T / 2],
-};
-
-/** Engraved glyph on the top face: shallow prisms cut into z = BAR_Z. */
-function glyph(ch: string, x: number, y: number): BuildOp[] {
-  const segs = SEGMENTS[ch]!;
-  return segs.map((s) => {
-    const [sx, sy, sw, sh] = SEG_RECT[s];
-    return translate([x + sx, y + sy, BAR_Z - ENGRAVE], cube([sw, sh, ENGRAVE + 1]));
-  });
-}
-
 const solid: BuildOp[] = [cube([BAR_X, BAR_Y, BAR_Z])];
 const cuts: BuildOp[] = [];
 
@@ -85,12 +68,8 @@ DIAMETERS.forEach((d, i) => {
   cuts.push(translate([cx, VERT_Y, BAR_Z - VERT_DEPTH], cylinder(VERT_DEPTH + 1, d / 2, 48)));
   // Row 2 — into the front face.
   cuts.push(translate([cx, -0.5, HORIZ_Z], axisCylinder('+y', HORIZ_DEPTH + 0.5, d / 2, 48)));
-  // Label: the two digits of the diameter, e.g. 4.4 -> "44".
-  const text = `${d.toFixed(1)}`.replace('.', '');
-  const totalW = text.length * W + (text.length - 1) * 1.4;
-  text.split('').forEach((ch, k) => {
-    cuts.push(...glyph(ch, cx - totalW / 2 + k * (W + 1.4), 11.5));
-  });
+  // Label: the digits of the diameter, e.g. 4.4 -> "44".
+  cuts.push(...engrave(d.toFixed(1).replace('.', ''), cx, 11.5, BAR_Z, ENGRAVE));
 });
 
 const op = difference([union(solid), ...cuts]);
@@ -137,9 +116,9 @@ for (let y = 19.5; y >= 9.5; y -= 0.75) {
 }
 
 const buf = buildBinaryStl([{ positions, indices }]);
-const out = join(samplesDir, 'pilot-coupon-m5.stl');
+const out = join(samplesDir, `pilot-coupon-${SIZE.toLowerCase().replace('.', '')}.stl`);
 writeFileSync(out, Buffer.from(buf));
-console.log(`pilot-coupon-m5.stl  ${indices.length / 3} triangles  ${(buf.byteLength / 1024).toFixed(1)} KB`);
+console.log(`${out.split(/[\\/]/).pop()}  ${indices.length / 3} triangles  ${(buf.byteLength / 1024).toFixed(1)} KB`);
 console.log(`bar ${BAR_X} x ${BAR_Y} x ${BAR_Z} mm; volume ${(m.volume() / 1000).toFixed(1)} cm3`);
 console.log(`diameters ${DIAMETERS.join(', ')} — top row blind ${VERT_DEPTH} mm, front row blind ${HORIZ_DEPTH} mm`);
 m.delete();

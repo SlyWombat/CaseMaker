@@ -54,6 +54,7 @@ For developers extending Case Maker. Audience: TypeScript + React + a passing ac
 | `portFactory.ts` | `autoPortsForBoard` | Populate `project.ports` from a board's `components` array |
 | `ventilation.ts` | `buildVentilationCutouts` | Slot or hex pattern through the +y wall |
 | `externalAssets.ts` | `buildExternalAssetOps` | Convert imported STL/3MF assets into mesh BuildOps with transforms |
+| `fasteners.ts` | `FASTENERS`, `screwHole`, `screwStarter`, `threadTool`, `clearanceDiameter`, `pilotDiameter`, `headRecessDiameter`, `preThreadPrintable` | The fastener table and the one screw-hole mechanism — see below |
 
 ### Geometry worker — `src/workers/geometry/`
 
@@ -133,6 +134,73 @@ The compiler produces a top-level `BuildPlan = { nodes: [{ id, op }] }`. Each `B
 | `union`/`difference`/`intersection` | `{ children: [...] }` |
 
 `mesh` ops carry transferable typed-array buffers; the worker client uses `collectMeshTransferables` to enumerate them so Comlink can pass them zero-copy.
+
+## Screw holes
+
+Every screw hole in the project comes from `fasteners.ts`. Before it, each
+compiler module hand-rolled cylinders and carried its own constants, which is
+how the same M5 ended up with two head-recess depths by two rules and a
+byte-identical duplicate of its own clearance diameter.
+
+A screw hole has three parts, and they are not interchangeable:
+
+| Part | Function | Sized to |
+| :--- | :--- | :--- |
+| Head recess | `screwHole({ head, recess })` | The head — counterbore for cap/button, a 90° cone for countersunk |
+| Clearance hole | `screwHole({ through })` | Pass the **thread**, and no more |
+| Receiving hole | `screwStarter({ depth })` | **Hold** — a starter hole to tap, or a modelled thread |
+
+Confusing the last two is the classic way to build a joint that assembles
+perfectly and holds nothing.
+
+### The table
+
+Keyed on size (M2–M6). Major diameter and coarse pitch are ISO 261; the basic
+internal minor is D1 = D − 1.0825 × P from the ISO 68-1 form; clearance grades
+are ISO 273; head geometry is ISO 4762 / 7380-1 / 10642 / 14583. Two things are
+ours rather than a standard's:
+
+- **A `located` clearance grade**, tighter than ISO close (M5 → 5.2, not 5.3).
+  These holes locate as well as pass; slack in them is a shelf sitting crooked.
+- **Measured head dimensions** where they differ from nominal. The M5 button
+  heads in hand are 9.2 × 3.0 against a 9.5 × 2.75 nominal, and 0.3 mm of head
+  diameter is most of the wall left outboard of a counterbore.
+
+**Pilots have two columns, not one.** `pilotMachine` is for a 60° metric machine
+screw driven into plastic; `pilotForming` is the ~0.8 × major rule for
+thread-forming screws (Delta PT and friends). Collapsing them into a single
+"pilot for M5 in PLA" is exactly the mistake that produced the original bug in
+issue #140: the 0.8 rule predicted 4.0–4.3, and a printed coupon came back at
+**4.8**. A machine screw at 4.0 does not form thread in PLA, it splits the boss —
+the failure mode is the part cracking, not the thread shearing. `npm run
+pilot:coupon -- M3` prints the ladder for another size; M5 is the only one that
+has been driven.
+
+### Modelled threads
+
+`screwStarter({ mode: 'pre-threaded' })` cuts a real helical thread instead of a
+starter hole, so the screw turns into an existing thread rather than cutting
+one — which is what survives repeated assembly.
+
+It needs no new primitive. `extrude` already carries `twistDegrees`, so a 2D
+profile of "circle at the minor radius, plus one tooth" traced through 360° per
+pitch sweeps the whole thread in one op. The tooth is drawn in POLAR form, angle
+standing for axial position, which makes the 60° flank exact rather than
+approximated. Positive twist is a right-hand thread — pinned by test, because a
+left-hand one passes every volume and bounding-box check ever written.
+
+**It is not available at every size, and the limit is PITCH, not diameter.** The
+female thread's crest is a wedge about a quarter-pitch wide; below roughly two
+nozzle widths there is nothing for the slicer to lay down, and the "thread"
+prints as a smooth bore at the major diameter — which holds *less* than the
+starter hole it replaced. `preThreadPrintable()` gates it at pitch ≥ 2 × 0.4 mm,
+so M5 and M6 qualify and M4 down does not; asking for `pre-threaded` below the
+line quietly gets you `self-tap`.
+
+`THREAD_FIT` — the radial clearance between the modelled thread and the screw —
+is the one number here that has **not** been printed. `npm run thread:coupon`
+prints a ladder of fits for exactly that reason. Until one comes back, no
+structural joint should move from `self-tap` to `pre-threaded`.
 
 ## CI
 

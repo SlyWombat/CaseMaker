@@ -1183,6 +1183,36 @@ describe('rack archetype — mini-rack template', () => {
     }
   }, 180000);
 
+  it('keeps the floor ribs out of the tab screws\' driver paths', () => {
+    // The bottom plate's tab screws are driven UP from the rack's underside —
+    // there is no room to go downward — so a driver has to reach each head
+    // counterbore through the very face the ribs hang off. Measured before the
+    // fix: 18.5 mm3 of perimeter rib standing in every one of the four Ø10.8
+    // access circles. Same shape of bug as a rib bridging a cable notch.
+    const rack: RackParams = { ...SAMPLE, width: 350, depth: 300, slots: 20, accessories: [] };
+    expect(floorRibsEnabled(rack), 'this config must have ribs').toBe(true);
+    const dims = computeRackDims(rack);
+    const B = exec(buildRackNodes(rack).find((n) => n.id === 'rack-bottom')!.op);
+    try {
+      const x0 = SIDE_T + 0.3;
+      for (const yC of plateScrewYs(dims.depth)) {
+        for (const axis of [x0 - TAB_SCREW_INSET, x0 + dims.plateW + TAB_SCREW_INSET]) {
+          // Sweep the driver's whole path, from the plate's outer face down
+          // past the ribs.
+          const probe = Manifold.cylinder(6, 10.8 / 2, 10.8 / 2, 48).translate([axis, yC, -1]);
+          const i = Manifold.intersection([B, probe]);
+          const v = i.volume();
+          i.delete();
+          probe.delete();
+          expect(v, `rib in the driver path at y=${yC}, x=${axis.toFixed(1)}`).toBeLessThan(2);
+        }
+      }
+      expect(B.decompose().length, 'plate is still one body').toBe(1);
+    } finally {
+      B.delete();
+    }
+  }, 180000);
+
   it('cuts the cable notches through the floor ribs, not just the deck', () => {
     // The two features were only ever tested apart: the notch test uses the
     // 252 mm sample (plateW 222, ribs OFF) and the rib test sets no notches.

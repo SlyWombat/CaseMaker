@@ -1,5 +1,15 @@
 import type { Project } from '@/types';
-import { accessorySlots, computeRackDims, earScrewsPerSide, plateScrewYs, resolveShelfDepth, LONG_SHELF } from '@/engine/compiler/rack';
+import { accessorySlots, computeRackDims, earScrewsPerSide, plateScrewYs, resolveShelfDepth, FAN_SCREW_D, LONG_SHELF } from '@/engine/compiler/rack';
+import { clearanceDiameter, pilotDiameter } from '@/engine/compiler/fasteners';
+
+/**
+ * The list quotes diameters, so it reads them from the same table the geometry
+ * cuts them from (issue #140). These used to be prose — "Ø5.2", "Ø4.8", "Ø3.6"
+ * typed out beside numbers that lived in rack.ts, which is a bill of materials
+ * waiting to disagree with the part it describes.
+ */
+const RACK_CLEAR_D = clearanceDiameter('M5');
+const RACK_THREAD_D = pilotDiameter('M5', 'machine');
 
 /** A bill of materials for the user-supplied hardware needed to assemble
  *  the printed parts. Surfaced in the export modal so the user knows what
@@ -52,7 +62,7 @@ export function hardwareForProject(project: Project): HardwareItem[] {
         id: 'rack-screws',
         label: 'M5 × 25 mm socket cap screws',
         count: frontScrews + rearScrews,
-        note: `The rack's structure: from OUTSIDE through the side panels' Ø5.2 clearance holes into each accessory's end-rib thread holes (Ø4.8, self-tapping in plastic — size confirmed by test print) — one per slot per side${rearScrews > 0 ? `, plus ${rearScrews} into the rear column for long shelves` : ''}. 15.3 mm of that is grip through the panel, so a 20 mm screw leaves under 5 mm of thread — use 25. Snug, don't strip.`,
+        note: `The rack's structure: from OUTSIDE through the side panels' Ø${RACK_CLEAR_D} clearance holes into each accessory's end-rib thread holes (Ø${RACK_THREAD_D}, self-tapping in plastic — size confirmed by test print) — one per slot per side${rearScrews > 0 ? `, plus ${rearScrews} into the rear column for long shelves` : ''}. 15.3 mm of that is grip through the panel, so a 20 mm screw leaves under 5 mm of thread — use 25. Snug, don't strip.`,
       });
     }
     // Plate tab screws. This is the answer to "where do the plates take a
@@ -71,7 +81,7 @@ export function hardwareForProject(project: Project): HardwareItem[] {
         id: 'rack-fans',
         label: `Axial case fan${fanCount > 1 ? 's' : ''} (${sizes.map((s) => `${s} mm`).join(', ')})`,
         count: fanCount,
-        note: 'Screw on from OUTSIDE the side panel with the self-tapping screws that ship with the fan (4 per fan) — they bite the Ø3.6 printed holes. Point the airflow arrow inward for intake.',
+        note: `Screw on from OUTSIDE the side panel with the self-tapping screws that ship with the fan (4 per fan) — they bite the Ø${FAN_SCREW_D} printed holes. Point the airflow arrow inward for intake.`,
       });
     }
     const wallMount = rack.wallMount ?? 'none';

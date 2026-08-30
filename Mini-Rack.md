@@ -317,6 +317,39 @@ Ribs go on the plate's OUTER face and therefore only on the bottom plate: the
 top plate is the same part turned over, and ribs would stand proud of the rack.
 With ribs on, the two plates are different printed parts.
 
+## Screws
+
+Every hole in the rack now comes from the shared fastener table
+(`fasteners.ts`, issue #140) rather than from constants in `rack.ts`:
+
+| Was | Is | Value |
+| :--- | :--- | :--- |
+| `SCREW_CLEAR_D`, `TAB_SCREW_CLEAR_D` (two names, one number) | `clearanceDiameter('M5')` | 5.2 |
+| `SCREW_THREAD_D`, `TAB_SCREW_PILOT_D` | `pilotDiameter('M5', 'machine')` | 4.8 |
+| `TAB_SCREW_HEAD_D` | `headRecessDiameter('M5', 'button')` | 9.8 |
+| `TAB_SCREW_HEAD_H` | `headHeight('M5', 'button')` | 3.0 |
+
+The values are unchanged — the migration is geometry-neutral — but they are no
+longer this file's to invent, and the bill of materials quotes them from the
+same place instead of spelling "Ø5.2" out in prose beside them.
+
+Two holes stay explicit overrides, because the screw is not ours: the **ear**
+screws take whatever goes into the user's wall, and the **fan** screws are the
+self-tappers that ship with the fan.
+
+**The floor ribs are notched clear of the tab screws' driver paths.** The bottom
+plate's tab screws are driven UP from the rack's underside, so a driver reaches
+each head counterbore through the very face the ribs hang off — and measured on
+a 350 × 300 rack, the perimeter rib left 18.5 mm³ standing in every one of those
+four Ø10.8 access circles. Same shape of bug as a rib bridging a cable notch:
+the rib is right, the thing it crosses is right, and nobody subtracted one from
+the other.
+
+The rack does **not** use modelled printed threads. `screwStarter` can cut them
+and M5 is coarse enough to print them, but `THREAD_FIT` has not been settled by
+a test print, and these screws are what holds the frame together. `npm run
+thread:coupon` prints the ladder that would settle it.
+
 ## Cable notches
 
 Pass-throughs for power and cabling, cut into the **rear edge** of the top
