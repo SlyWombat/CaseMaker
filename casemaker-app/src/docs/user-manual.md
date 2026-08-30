@@ -1,6 +1,6 @@
 # User Manual
 
-Every panel, every parameter, every export option. For a quick start, see [Getting Started](getting-started.md).
+Every panel, every parameter, every export option. For a quick start, see [Getting Started](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/src/docs/getting-started.md).
 
 ## Workflow at a glance
 

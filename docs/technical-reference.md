@@ -42,18 +42,73 @@ For developers extending Case Maker. Audience: TypeScript + React + a passing ac
 
 ### Engine compiler — `src/engine/compiler/`
 
+The compiler is 38 modules. Grouped by what they build:
+
+**Core pipeline**
+
 | Module | Exports | Purpose |
 | :--- | :--- | :--- |
-| `ProjectCompiler.ts` | `compileProject(project) → BuildPlan` | Top-level: turn a Project into a serializable op tree |
-| `buildPlan.ts` | `BuildOp`, `cube`, `cylinder`, `translate`, `rotate`, `scale`, `mesh`, `union`, `difference`, `collectMeshTransferables` | Op constructors + transferable-buffer enumeration for Comlink |
-| `caseShell.ts` | `buildOuterShell`, `computeShellDims` | Outer hollow box + cavity dims |
+| `ProjectCompiler.ts` | `compileProject(project) → BuildPlan` | Top level: turn a Project into a serializable op tree |
+| `buildPlan.ts` | `BuildOp`, `cube`, `cylinder`, `extrude`, `revolve`, `hull`, `axisCylinder`, `union`/`difference`/`intersection`, `collectMeshTransferables` | Op constructors + transferable-buffer enumeration for Comlink |
+| `profile.ts` | `poly`, `rectProfile`, `circleProfile`, `roundedRect`, `pOffset`, `pHull`, `lightenPocket` | 2D cross-sections (Clipper2). Nearly every feature here is prismatic — draw the outline, then extrude it |
+| `connectivity.ts` | `bboxOfOp`, `checkBuildPlanShape` | Shape and connectivity sanity checks over a finished plan |
+
+**The case itself**
+
+| Module | Exports | Purpose |
+| :--- | :--- | :--- |
+| `caseShell.ts` | `buildOuterShell`, `computeShellDims`, `computeStackedHatHeight` | Outer hollow box + cavity dims |
+| `lid.ts` | `buildLid`, `buildFlatLid`, `buildSnapFitLid`, `buildSlidingLid`, `buildScrewDownLid`, `computeLidDims`, `computeRecessDims` | All four joint variants, including the sliding rails |
 | `bosses.ts` | `computeBossPlacements`, `buildBossesUnion`, `resolveInsertSpec`, `getScrewClearanceDiameter` | Mounting boss geometry + insert variant resolution |
-| `lid.ts` | `buildLid`, `buildFlatLid`, `buildSnapFitLid`, `buildSlidingLid`, `buildScrewDownLid`, `computeLidDims` | All four joint variants |
-| `slidingRails.ts` | `buildSlidingRails` | Two horizontal rails inside the case (sliding joint only) |
 | `ports.ts` | `buildPortCutoutOp`, `buildPortCutoutsForProject` | Per-port wall-piercing cutouts |
 | `portFactory.ts` | `autoPortsForBoard` | Populate `project.ports` from a board's `components` array |
-| `ventilation.ts` | `buildVentilationCutouts` | Slot or hex pattern through the +y wall |
-| `externalAssets.ts` | `buildExternalAssetOps` | Convert imported STL/3MF assets into mesh BuildOps with transforms |
+| `roundCutout.ts` | `buildAxisAlignedCutout` | Round/oval cutouts on any face |
+| `customCutouts.ts` | `buildCustomCutouts` | User-placed cutouts that belong to no component |
+| `ventilation.ts` | `buildVentilationCutouts` | Slot, hex or chevron patterns through a wall |
+| `textLabels.ts` | `buildTextLabelOps` | Embossed / engraved text |
+
+**Joints and fixings**
+
+| Module | Exports | Purpose |
+| :--- | :--- | :--- |
+| `fasteners.ts` | `FASTENERS`, `screwHole`, `screwStarter`, `threadTool`, `clearanceDiameter`, `pilotDiameter`, `headRecessDiameter`, `preThreadPrintable` | The fastener table and the one screw-hole mechanism — see **Screw holes** below |
+| `snapCatches.ts` | `defaultSnapCatchesForCase`, `buildSnapCatch`, `buildSnapCatchOps` | Cantilever arm + barb, and the mating pockets |
+| `latches.ts` / `latchProtection.ts` | `buildLatchOps`, `protectiveRibPositions` | Draw latches, and the ribs that stop them snagging |
+| `hinges.ts` | `buildHingeOps` | Knuckle-and-pin hinges |
+| `seal.ts` | `computeChannelAndTongue`, `computeSealRing`, `buildSealChannel` | Gasket channel + tongue for sealed cases |
+| `alignmentFlange.ts` | `buildAlignmentFlange` | Lip that locates the lid on the shell |
+| `boardSnap.ts` | `buildBoardSnapOps` | Two-jaw clips that hold a PCB without screws |
+| `validation.ts` | `validateScrewDownAlignment` | Refuse joints whose fixings cannot line up |
+
+**Boards and add-ons**
+
+| Module | Exports | Purpose |
+| :--- | :--- | :--- |
+| `hats.ts` / `hatOrientation.ts` | `computeHatBaseZ`, `buildHatCutoutsForProject`, `applyMountingPosition` | Stacked HATs: height, rotation, and their cutouts |
+| `displays.ts` | `buildDisplayCutoutOps` | Screen windows and their retention shoulders |
+| `antennas.ts` | `defaultAntennasForBoard`, `buildAntennaOps` | Antenna bores + counterbores |
+| `fans.ts` | `buildFanMountOps` | Fan opening, bolt circle and mounting pad |
+| `externalAssets.ts` | `buildExternalAssetOps` | Imported STL/3MF turned into mesh ops with transforms |
+| `secondaryMounts.ts` | `buildSecondaryMountOps` | A second board or module carried in the same case |
+
+**Whole-product archetypes**
+
+| Module | Exports | Purpose |
+| :--- | :--- | :--- |
+| `rack.ts` | `buildRackNodes`, `computeRackDims`, `accessorySpaces`, `cableNotchGeometry` | The parametric mini-rack: sides, plates, shelves, trays, faceplates. See [Mini-Rack.md](https://github.com/SlyWombat/CaseMaker/blob/main/Mini-Rack.md) |
+| `rackFit.ts` | `rectFitsBed`, `rackPartFootprints`, `maxRackWidthForBed` | Printer-fit checks: does every rack part land on the bed? |
+| `stand.ts` | `computeStandDims`, `buildEdgeChannels`, `standModulePlacement` | Desk and bench stands |
+| `rugged.ts` | `buildRuggedOps` | Corner bumpers and impact ribs |
+| `mountingFeatures.ts` | `buildMountingFeatureOps`, `endFlangesPreset`, `fourCornerScrewTabs` | How the finished case attaches to the world: tabs, flanges, VESA |
+
+**Layout and guards**
+
+| Module | Exports | Purpose |
+| :--- | :--- | :--- |
+| `placementValidator.ts` | `validatePlacements` | Overlapping cutouts, off-PCB holes, HAT collisions — surfaced as a `PlacementReport` on the plan |
+| `smartCutoutLayout.ts` | `applySmartCutoutLayout` | Nudge crowded cutouts apart rather than merging them |
+| `featureScale.ts` | `clampLatch`, `clampHinge` | Keep features printable as the case shrinks |
+| `applyCasePatch.ts` | `applyCasePatch` | The ONE way to mutate `project.case` — direct assignment skips auto-population |
 
 ### Geometry worker — `src/workers/geometry/`
 
@@ -131,37 +186,75 @@ The compiler produces a top-level `BuildPlan = { nodes: [{ id, op }] }`. Each `B
 | `scale` | `{ factor, child }` |
 | `mesh` | `{ positions: Float32Array, indices: Uint32Array }` |
 | `union`/`difference`/`intersection` | `{ children: [...] }` |
-| `hull` | `{ children: [...] }` — convex hull |
-| `extrude` | `{ profile, height, divisions?, twistDegrees?, scaleTop?, center? }` |
-| `revolve` | `{ profile, degrees?, segments? }` |
 
 `mesh` ops carry transferable typed-array buffers; the worker client uses `collectMeshTransferables` to enumerate them so Comlink can pass them zero-copy.
 
-### 2D profiles
+## Screw holes
 
-`extrude` and `revolve` take a `Profile` (`src/engine/compiler/profile.ts`), a serializable 2D cross-section evaluated by Manifold's `CrossSection` (Clipper2). Most features in this codebase are prismatic — ribs, ledges, cleats, snap barbs, keyholes, lightening pockets are an outline plus a thickness — so draw the outline in its own plane and extrude it rather than stacking cubes or hand-rolling triangle soup.
+Every screw hole in the project comes from `fasteners.ts`. Before it, each
+compiler module hand-rolled cylinders and carried its own constants, which is
+how the same M5 ended up with two head-recess depths by two rules and a
+byte-identical duplicate of its own clearance diameter.
 
-| Kind | Shape |
-| :--- | :--- |
-| `p-poly` | `{ contours: Vec2[][] }` — even-odd fill, so inner contours are holes |
-| `p-rect` | `{ size: [w,h], center? }` |
-| `p-circle` | `{ radius, segments? }` |
-| `p-union`/`p-difference`/`p-intersection`/`p-hull` | `{ children: [...] }` |
-| `p-offset` | `{ child, delta, join?, miterLimit?, segments? }` — true 2D offset |
-| `p-translate`/`p-rotate`/`p-mirror` | `{ child, ... }` |
+A screw hole has three parts, and they are not interchangeable:
 
-Helpers: `roundedRect`, `trapezoid`, `shellProfile(outline, wall)`, `pMirrorX/Y`, and `lightenPocket(outline, {rim, rib, pitch, angle?, cross?, keepOut?})` — the pocket that ribs out a prismatic part, so lightening is part of drawing it instead of a second pass.
+| Part | Function | Sized to |
+| :--- | :--- | :--- |
+| Head recess | `screwHole({ head, recess })` | The head — counterbore for cap/button, a 90° cone for countersunk |
+| Clearance hole | `screwHole({ through })` | Pass the **thread**, and no more |
+| Receiving hole | `screwStarter({ depth })` | **Hold** — a starter hole to tap, or a modelled thread |
 
-`p-offset` is the operation with no cube-stacking equivalent: it is what makes shelling, uniform walls, and in-plane fillets possible.
+Confusing the last two is the classic way to build a joint that assembles
+perfectly and holds nothing.
 
-**Two wasm-binding traps, both handled inside `evaluateOp.ts` — don't call Manifold directly and re-introduce them:**
+### The table
 
-- `Manifold.extrude`'s `scaleTop` must be passed as a `Vec2`. The scalar form its `.d.ts` advertises builds a broken solid: correct bounding box, half the volume, inverted top face.
-- `CrossSection.mirror(v)` takes the mirror line's **normal**, not its direction.
+Keyed on size (M2–M6). Major diameter and coarse pitch are ISO 261; the basic
+internal minor is D1 = D − 1.0825 × P from the ISO 68-1 form; clearance grades
+are ISO 273; head geometry is ISO 4762 / 7380-1 / 10642 / 14583. Two things are
+ours rather than a standard's:
 
-### One evaluator
+- **A `located` clearance grade**, tighter than ISO close (M5 → 5.2, not 5.3).
+  These holes locate as well as pass; slack in them is a shelf sitting crooked.
+- **Measured head dimensions** where they differ from nominal. The M5 button
+  heads in hand are 9.2 × 3.0 against a 9.5 × 2.75 nominal, and 0.3 mm of head
+  diameter is most of the wall left outboard of a counterbore.
 
-`src/workers/geometry/evaluateOp.ts` holds the single `BuildOp` → Manifold switch (`executeOp` async, `executeOpSync`). The browser worker (`ManifoldRuntime.ts`), the node sample exporter (`scripts/export-sample.ts`), and the mesh-level specs (`tests/unit/helpers/manifoldExec.ts`) all call it, so a new primitive is added in exactly one place. Analytic bounds for every kind live in `aabbOfOp` / `aabbOfProfile`.
+**Pilots have two columns, not one.** `pilotMachine` is for a 60° metric machine
+screw driven into plastic; `pilotForming` is the ~0.8 × major rule for
+thread-forming screws (Delta PT and friends). Collapsing them into a single
+"pilot for M5 in PLA" is exactly the mistake that produced the original bug in
+issue #140: the 0.8 rule predicted 4.0–4.3, and a printed coupon came back at
+**4.8**. A machine screw at 4.0 does not form thread in PLA, it splits the boss —
+the failure mode is the part cracking, not the thread shearing. `npm run
+pilot:coupon -- M3` prints the ladder for another size; M5 is the only one that
+has been driven.
+
+### Modelled threads
+
+`screwStarter({ mode: 'pre-threaded' })` cuts a real helical thread instead of a
+starter hole, so the screw turns into an existing thread rather than cutting
+one — which is what survives repeated assembly.
+
+It needs no new primitive. `extrude` already carries `twistDegrees`, so a 2D
+profile of "circle at the minor radius, plus one tooth" traced through 360° per
+pitch sweeps the whole thread in one op. The tooth is drawn in POLAR form, angle
+standing for axial position, which makes the 60° flank exact rather than
+approximated. Positive twist is a right-hand thread — pinned by test, because a
+left-hand one passes every volume and bounding-box check ever written.
+
+**It is not available at every size, and the limit is PITCH, not diameter.** The
+female thread's crest is a wedge about a quarter-pitch wide; below roughly two
+nozzle widths there is nothing for the slicer to lay down, and the "thread"
+prints as a smooth bore at the major diameter — which holds *less* than the
+starter hole it replaced. `preThreadPrintable()` gates it at pitch ≥ 2 × 0.4 mm,
+so M5 and M6 qualify and M4 down does not; asking for `pre-threaded` below the
+line quietly gets you `self-tap`.
+
+`THREAD_FIT` — the radial clearance between the modelled thread and the screw —
+is the one number here that has **not** been printed. `npm run thread:coupon`
+prints a ladder of fits for exactly that reason. Until one comes back, no
+structural joint should move from `self-tap` to `pre-threaded`.
 
 ## CI
 

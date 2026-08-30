@@ -73,7 +73,7 @@ npm run typecheck        # TypeScript --noEmit
 npm run lint             # ESLint
 ```
 
-The Playwright suite spins up the Vite dev server on port 8000 automatically. If port 8000 is taken, set `VITE_PORT=8001 npm run test:e2e` (or change [`vite.config.ts`](../casemaker-app/vite.config.ts)).
+The Playwright suite spins up the Vite dev server on port 8000 automatically. If port 8000 is taken, set `VITE_PORT=8001 npm run test:e2e` (or change [`vite.config.ts`](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/vite.config.ts)).
 
 ## 5. Build the production bundle
 
@@ -105,7 +105,7 @@ If you don't have Rust locally, push to `main` and grab the Windows installer fr
 
 ## Next steps
 
-- [User Manual](user-manual.md) — every parameter, every joint type
-- [Technical Reference](technical-reference.md) — module API, coordinate system, adding new boards
-- [CHANGELOG](../CHANGELOG.md) — what shipped in each phase
-- [CONTRIBUTING](../CONTRIBUTING.md) — how to add a board profile or fix a bug
+- [User Manual](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/src/docs/user-manual.md) — every parameter, every joint type
+- [Technical Reference](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/src/docs/technical-reference.md) — module API, coordinate system, adding new boards
+- [CHANGELOG](https://github.com/SlyWombat/CaseMaker/blob/main/CHANGELOG.md) — what shipped in each phase
+- [CONTRIBUTING](https://github.com/SlyWombat/CaseMaker/blob/main/CONTRIBUTING.md) — how to add a board profile or fix a bug

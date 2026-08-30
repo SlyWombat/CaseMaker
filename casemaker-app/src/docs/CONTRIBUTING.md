@@ -2,9 +2,12 @@
 
 Thanks for considering a contribution. The fastest paths to a merged PR:
 
-1. **Add a board profile** for hardware that isn't yet in the built-in library.
-2. **Fix a bug** flagged in the [issue tracker](https://github.com/SlyWombat/case-maker/issues).
-3. **Improve docs** in the `docs/` directory.
+1. **Add a board profile** — these go to the [community library](https://github.com/SlyWombat/casemaker-library), not this repo; its [AGENT.md](https://github.com/SlyWombat/casemaker-library/blob/main/AGENT.md) lets Claude Code drive the whole flow for you.
+2. **Fix a bug** flagged in the [issue tracker](https://github.com/SlyWombat/CaseMaker/issues) — look for `good first issue`.
+3. **Improve docs** — see [Editing the docs](#editing-the-docs) below; there are two copies of each and only one of them is the one you edit.
+
+By submitting a contribution you agree it is licensed under the project's
+[Apache License 2.0](https://github.com/SlyWombat/CaseMaker/blob/main/LICENSE) (board-profile data in casemaker-library: CC BY 4.0).
 
 ## Bug workflow
 
@@ -17,16 +20,28 @@ The project follows an issue-first bug workflow:
 
 ## Adding a board profile
 
-See the [Technical Reference](docs/technical-reference.md#adding-a-board-template) for the step-by-step. In short:
+**Community boards** (the usual case): contribute to
+[casemaker-library](https://github.com/SlyWombat/casemaker-library) — users
+enable it under **Sources** in the app. Provenance (`source` URL +
+`measurementMethod`) is mandatory there, and measure-don't-guess is the
+cardinal rule.
+
+**Built-in boards** (bundled with the app, maintainer-curated):
 
 1. Drop `casemaker-app/src/library/boards/<id>.json` (model after `rpi-4b.json`).
-2. Register it in `casemaker-app/src/library/index.ts`.
-3. Add an entry in `tests/e2e/board-swap.spec.ts`.
-4. Datasheet URL is **mandatory** for built-ins (the strict zod schema rejects boards without it).
+   Discovery is automatic (`import.meta.glob`) — there is **no import list to edit**.
+2. A manufacturer `source` URL is **mandatory** (the strict zod schema rejects builtins without one); record `measurementMethod` honestly — vendor CAD beats datasheet drawings.
+3. Ship a quickstart template: drop `casemaker-app/src/library/templates/specs/<id>.json`
+   with `boardId` and an `order` value, then add the template id to the
+   sequence assertion in `tests/unit/templates.spec.ts` and the mirror list in
+   `tests/e2e/templates-smoke.spec.ts`.
+4. New board-JSON *fields* must be added in three places: `library/schema.ts`,
+   `types/board.ts`, and (if projects persist them) `store/projectSchema.ts` —
+   the zod schemas silently strip unknown keys.
 
 ## Development setup
 
-See [Getting Started](docs/getting-started.md) for the full setup. TL;DR:
+See [Getting Started](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/src/docs/getting-started.md) for the full setup. TL;DR:
 
 ```bash
 cd casemaker-app
@@ -40,6 +55,40 @@ npm run build        # production bundle
 ```
 
 > **Note:** On WSL, develop inside your Linux home (`~/casemaker-app`), not the Windows-mounted `/mnt/c/...` path. The `sharp` postinstall fails on the Windows mount.
+
+## Editing the docs
+
+Five documents exist **twice**, because each has to be readable from two places:
+
+| Edit this | Mirrored to |
+| :--- | :--- |
+| `CHANGELOG.md` | `casemaker-app/src/docs/CHANGELOG.md` |
+| `CONTRIBUTING.md` | `casemaker-app/src/docs/CONTRIBUTING.md` |
+| `casemaker-app/src/docs/user-manual.md` | `docs/user-manual.md` |
+| `casemaker-app/src/docs/technical-reference.md` | `docs/technical-reference.md` |
+| `casemaker-app/src/docs/getting-started.md` | `docs/getting-started.md` |
+
+The direction is not arbitrary. `CHANGELOG` and `CONTRIBUTING` belong at the
+repo root where GitHub looks for them; the three manuals belong in
+`src/docs/`, because `src/docs/index.ts` imports them with `?raw` and the
+in-app 📖 Docs viewer serves exactly those bytes.
+
+Edit the left column, then:
+
+```bash
+cd casemaker-app && npm run docs:sync
+```
+
+`tests/unit/docsMirror.spec.ts` fails if a mirror is stale, and names which
+file to copy which way. It is worth having: the copy of this file that shipped
+inside the app went four months without an update and spent them telling
+contributors to register boards in an import list that no longer exists.
+
+**Cross-document links must be absolute GitHub URLs.** A relative link cannot be
+right from both copies at once — `../CHANGELOG.md` resolves correctly from
+`docs/` and to nothing at all from `src/docs/` — and the in-app viewer renders
+plain anchors, so a wrong one is a 404 rather than a fallback. The mirror test
+enforces this too.
 
 ## Code style
 
@@ -71,7 +120,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 - Run `npm run lint && npm run typecheck && npm test && npm run test:e2e && npm run build` locally before pushing.
 - Keep PRs scoped to one logical change.
 - Include screenshots or a short clip if you touch the UI.
-- Update the [CHANGELOG](CHANGELOG.md) under `[Unreleased]`.
+- Update the [CHANGELOG](https://github.com/SlyWombat/CaseMaker/blob/main/CHANGELOG.md) under `[Unreleased]`.
 
 ## Reporting bugs
 

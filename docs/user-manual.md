@@ -1,15 +1,46 @@
 # User Manual
 
-Every panel, every parameter, every export option. For a quick start, see [Getting Started](getting-started.md).
+Every panel, every parameter, every export option. For a quick start, see [Getting Started](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker-app/src/docs/getting-started.md).
 
 ## Workflow at a glance
 
-1. Pick a **board** from the dropdown — five built-in profiles cover Pi 4B, Pi 5, Pi Zero 2W, Arduino Uno R3, ESP32 DevKit V1.
+1. Pick a **board** in the board picker — 29 built-in profiles (Raspberry Pi,
+   Arduino, ESP32 devkits, touch panels, QuinLED, sensors, cameras, …), plus
+   boards you import or enable from online sources. Boards marked **★** apply
+   a curated quickstart recipe; otherwise you get a blank parametric shell.
 2. Adjust **case parameters** until the geometry suits your print and assembly.
 3. Toggle individual **port cutouts** if you don't need them all.
-4. Select a **joint type** for the lid (flat / snap-fit / sliding / screw-down).
+4. Select a **joint type** for the lid (flat / snap-fit / screw-down).
 5. Optionally turn on **ventilation** for thermal designs.
 6. **Export** STL or 3MF and slice for printing.
+
+## Board library & sources
+
+The picker's catalog merges three source tiers, resolved in priority order:
+
+- **Built-in** — 29 profiles bundled with the app, each schema-validated with
+  a manufacturer source URL.
+- **My library** — profiles you imported (**Import board JSON**) or saved
+  from the Board editor's **Save to library**. Stored in this browser;
+  **Export JSON** from the detail rail to share one.
+- **Online sources** — any URL serving a board index (a JSON array or
+  `{name, boards, templates}`), managed under **Sources**. The official
+  community library is offered one click away; sources cache locally so the
+  picker works offline, refresh weekly in the background, and can be
+  disabled or removed at any time. Boards with a **✓ printed** badge have
+  been physically verified to fit by a library maintainer.
+
+> **No fit guarantee:** profiles are measured by humans and printers vary —
+> treat the first print of any case as a test article and check critical
+> dimensions against your real board first. The **✓ printed** badge means at
+> least one confirmed fit, not a promise for your hardware.
+
+If two sources provide the same board id, the higher tier wins and the
+Sources panel shows what's shadowed. Projects embed a full copy of their
+board profile, so a saved project opens fine on a machine without the board
+installed. To contribute a profile to the community library, follow
+[casemaker-library's AGENT.md](https://github.com/SlyWombat/casemaker-library/blob/main/AGENT.md) —
+Claude Code can drive the whole flow, from measuring to the pull request.
 
 The case rebuilds in real time — every slider, every toggle, every dropdown triggers a Manifold CSG rebuild on a worker thread. Slider drags debounce to 200ms; everything else is instant.
 

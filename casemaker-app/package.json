@@ -21,7 +21,8 @@
     "sample:export": "tsx --tsconfig tsconfig.scripts.json scripts/export-sample.ts",
     "deploy": "node scripts/deploy-cpanel.mjs",
     "quota": "node scripts/cpanel-quota.mjs",
-    "thread:coupon": "tsx --tsconfig tsconfig.scripts.json scripts/thread-coupon.ts"
+    "thread:coupon": "tsx --tsconfig tsconfig.scripts.json scripts/thread-coupon.ts",
+    "docs:sync": "node scripts/sync-docs.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

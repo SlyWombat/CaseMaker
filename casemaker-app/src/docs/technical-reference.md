@@ -42,19 +42,73 @@ For developers extending Case Maker. Audience: TypeScript + React + a passing ac
 
 ### Engine compiler — `src/engine/compiler/`
 
+The compiler is 38 modules. Grouped by what they build:
+
+**Core pipeline**
+
 | Module | Exports | Purpose |
 | :--- | :--- | :--- |
-| `ProjectCompiler.ts` | `compileProject(project) → BuildPlan` | Top-level: turn a Project into a serializable op tree |
-| `buildPlan.ts` | `BuildOp`, `cube`, `cylinder`, `translate`, `rotate`, `scale`, `mesh`, `union`, `difference`, `collectMeshTransferables` | Op constructors + transferable-buffer enumeration for Comlink |
-| `caseShell.ts` | `buildOuterShell`, `computeShellDims` | Outer hollow box + cavity dims |
+| `ProjectCompiler.ts` | `compileProject(project) → BuildPlan` | Top level: turn a Project into a serializable op tree |
+| `buildPlan.ts` | `BuildOp`, `cube`, `cylinder`, `extrude`, `revolve`, `hull`, `axisCylinder`, `union`/`difference`/`intersection`, `collectMeshTransferables` | Op constructors + transferable-buffer enumeration for Comlink |
+| `profile.ts` | `poly`, `rectProfile`, `circleProfile`, `roundedRect`, `pOffset`, `pHull`, `lightenPocket` | 2D cross-sections (Clipper2). Nearly every feature here is prismatic — draw the outline, then extrude it |
+| `connectivity.ts` | `bboxOfOp`, `checkBuildPlanShape` | Shape and connectivity sanity checks over a finished plan |
+
+**The case itself**
+
+| Module | Exports | Purpose |
+| :--- | :--- | :--- |
+| `caseShell.ts` | `buildOuterShell`, `computeShellDims`, `computeStackedHatHeight` | Outer hollow box + cavity dims |
+| `lid.ts` | `buildLid`, `buildFlatLid`, `buildSnapFitLid`, `buildSlidingLid`, `buildScrewDownLid`, `computeLidDims`, `computeRecessDims` | All four joint variants, including the sliding rails |
 | `bosses.ts` | `computeBossPlacements`, `buildBossesUnion`, `resolveInsertSpec`, `getScrewClearanceDiameter` | Mounting boss geometry + insert variant resolution |
-| `lid.ts` | `buildLid`, `buildFlatLid`, `buildSnapFitLid`, `buildSlidingLid`, `buildScrewDownLid`, `computeLidDims` | All four joint variants |
-| `slidingRails.ts` | `buildSlidingRails` | Two horizontal rails inside the case (sliding joint only) |
 | `ports.ts` | `buildPortCutoutOp`, `buildPortCutoutsForProject` | Per-port wall-piercing cutouts |
 | `portFactory.ts` | `autoPortsForBoard` | Populate `project.ports` from a board's `components` array |
-| `ventilation.ts` | `buildVentilationCutouts` | Slot or hex pattern through the +y wall |
-| `externalAssets.ts` | `buildExternalAssetOps` | Convert imported STL/3MF assets into mesh BuildOps with transforms |
-| `fasteners.ts` | `FASTENERS`, `screwHole`, `screwStarter`, `threadTool`, `clearanceDiameter`, `pilotDiameter`, `headRecessDiameter`, `preThreadPrintable` | The fastener table and the one screw-hole mechanism — see below |
+| `roundCutout.ts` | `buildAxisAlignedCutout` | Round/oval cutouts on any face |
+| `customCutouts.ts` | `buildCustomCutouts` | User-placed cutouts that belong to no component |
+| `ventilation.ts` | `buildVentilationCutouts` | Slot, hex or chevron patterns through a wall |
+| `textLabels.ts` | `buildTextLabelOps` | Embossed / engraved text |
+
+**Joints and fixings**
+
+| Module | Exports | Purpose |
+| :--- | :--- | :--- |
+| `fasteners.ts` | `FASTENERS`, `screwHole`, `screwStarter`, `threadTool`, `clearanceDiameter`, `pilotDiameter`, `headRecessDiameter`, `preThreadPrintable` | The fastener table and the one screw-hole mechanism — see **Screw holes** below |
+| `snapCatches.ts` | `defaultSnapCatchesForCase`, `buildSnapCatch`, `buildSnapCatchOps` | Cantilever arm + barb, and the mating pockets |
+| `latches.ts` / `latchProtection.ts` | `buildLatchOps`, `protectiveRibPositions` | Draw latches, and the ribs that stop them snagging |
+| `hinges.ts` | `buildHingeOps` | Knuckle-and-pin hinges |
+| `seal.ts` | `computeChannelAndTongue`, `computeSealRing`, `buildSealChannel` | Gasket channel + tongue for sealed cases |
+| `alignmentFlange.ts` | `buildAlignmentFlange` | Lip that locates the lid on the shell |
+| `boardSnap.ts` | `buildBoardSnapOps` | Two-jaw clips that hold a PCB without screws |
+| `validation.ts` | `validateScrewDownAlignment` | Refuse joints whose fixings cannot line up |
+
+**Boards and add-ons**
+
+| Module | Exports | Purpose |
+| :--- | :--- | :--- |
+| `hats.ts` / `hatOrientation.ts` | `computeHatBaseZ`, `buildHatCutoutsForProject`, `applyMountingPosition` | Stacked HATs: height, rotation, and their cutouts |
+| `displays.ts` | `buildDisplayCutoutOps` | Screen windows and their retention shoulders |
+| `antennas.ts` | `defaultAntennasForBoard`, `buildAntennaOps` | Antenna bores + counterbores |
+| `fans.ts` | `buildFanMountOps` | Fan opening, bolt circle and mounting pad |
+| `externalAssets.ts` | `buildExternalAssetOps` | Imported STL/3MF turned into mesh ops with transforms |
+| `secondaryMounts.ts` | `buildSecondaryMountOps` | A second board or module carried in the same case |
+
+**Whole-product archetypes**
+
+| Module | Exports | Purpose |
+| :--- | :--- | :--- |
+| `rack.ts` | `buildRackNodes`, `computeRackDims`, `accessorySpaces`, `cableNotchGeometry` | The parametric mini-rack: sides, plates, shelves, trays, faceplates. See [Mini-Rack.md](https://github.com/SlyWombat/CaseMaker/blob/main/Mini-Rack.md) |
+| `rackFit.ts` | `rectFitsBed`, `rackPartFootprints`, `maxRackWidthForBed` | Printer-fit checks: does every rack part land on the bed? |
+| `stand.ts` | `computeStandDims`, `buildEdgeChannels`, `standModulePlacement` | Desk and bench stands |
+| `rugged.ts` | `buildRuggedOps` | Corner bumpers and impact ribs |
+| `mountingFeatures.ts` | `buildMountingFeatureOps`, `endFlangesPreset`, `fourCornerScrewTabs` | How the finished case attaches to the world: tabs, flanges, VESA |
+
+**Layout and guards**
+
+| Module | Exports | Purpose |
+| :--- | :--- | :--- |
+| `placementValidator.ts` | `validatePlacements` | Overlapping cutouts, off-PCB holes, HAT collisions — surfaced as a `PlacementReport` on the plan |
+| `smartCutoutLayout.ts` | `applySmartCutoutLayout` | Nudge crowded cutouts apart rather than merging them |
+| `featureScale.ts` | `clampLatch`, `clampHinge` | Keep features printable as the case shrinks |
+| `applyCasePatch.ts` | `applyCasePatch` | The ONE way to mutate `project.case` — direct assignment skips auto-population |
 
 ### Geometry worker — `src/workers/geometry/`
 
