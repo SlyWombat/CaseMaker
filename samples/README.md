@@ -33,6 +33,6 @@ cd casemaker-app
 npm run sample:export
 ```
 
-The script at [`casemaker-app/scripts/export-sample.ts`](../casemaker-app/scripts/export-sample.ts) drives the real `compileProject` pipeline, executes the resulting `BuildPlan` ops against the Manifold WASM kernel running in Node, and writes binary STL via the same `buildBinaryStl` writer the in-app Export button uses. Output goes to `~/casemaker-build/samples/` (or wherever the working tree's parent is); the files committed here are copied from there.
+The script at [`casemaker-app/scripts/export-sample.ts`](../casemaker-app/scripts/export-sample.ts) drives the real `compileProject` pipeline, executes the resulting `BuildPlan` ops against the Manifold WASM kernel running in Node, and writes binary STL via the same `buildBinaryStl` writer the in-app Export button uses. Output goes to this directory — the script resolves `../../samples` from its own location, i.e. the working tree's parent. (It used to say `~/casemaker-build/samples/`, which was where the tree lived until April 2026; that staging copy is retired.)
 
 To add another sample, append to the `SAMPLES` array in `export-sample.ts`.
