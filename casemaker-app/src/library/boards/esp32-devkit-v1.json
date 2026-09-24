@@ -5,96 +5,45 @@
   "pcb": {
     "size": {
       "x": 51.5,
-      "y": 28,
+      "y": 28.3,
       "z": 1.6
     }
   },
   "mountingHoles": [
-    {
-      "id": "h1",
-      "x": 1.5,
-      "y": 1.5,
-      "diameter": 3.2
-    },
-    {
-      "id": "h2",
-      "x": 50,
-      "y": 1.5,
-      "diameter": 3.2
-    },
-    {
-      "id": "h3",
-      "x": 1.5,
-      "y": 26.5,
-      "diameter": 3.2
-    },
-    {
-      "id": "h4",
-      "x": 50,
-      "y": 26.5,
-      "diameter": 3.2
-    }
+    { "id": "h1", "x": 2.96, "y": 2.54, "diameter": 3.0 },
+    { "id": "h2", "x": 48.96, "y": 2.54, "diameter": 3.0 },
+    { "id": "h3", "x": 2.96, "y": 25.54, "diameter": 3.0 },
+    { "id": "h4", "x": 48.96, "y": 25.54, "diameter": 3.0 }
   ],
   "components": [
     {
       "id": "usb-micro",
       "kind": "micro-usb",
-      "position": {
-        "x": 25.5,
-        "y": 28,
-        "z": 1.6
-      },
-      "size": {
-        "x": 8,
-        "y": 5.5,
-        "z": 2.5
-      },
-      "facing": "+y",
+      "position": { "x": -1.0, "y": 10.16, "z": 1.6 },
+      "size": { "x": 5.5, "y": 7.62, "z": 2.6 },
+      "facing": "-x",
       "cutoutMargin": 0.5
     },
     {
       "id": "header-left",
       "kind": "gpio-header",
-      "position": {
-        "x": 4,
-        "y": 14,
-        "z": 1.6
-      },
-      "size": {
-        "x": 5,
-        "y": 28,
-        "z": 9
-      },
+      "position": { "x": 6.81, "y": 25.63, "z": 1.6 },
+      "size": { "x": 38.1, "y": 2.54, "z": 9 },
       "facing": "+z"
     },
     {
       "id": "header-right",
       "kind": "gpio-header",
-      "position": {
-        "x": 47,
-        "y": 14,
-        "z": 1.6
-      },
-      "size": {
-        "x": 5,
-        "y": 28,
-        "z": 9
-      },
+      "position": { "x": 6.81, "y": 0.23, "z": 1.6 },
+      "size": { "x": 38.1, "y": 2.54, "z": 9 },
       "facing": "+z"
     },
     {
-      "id": "pcb-antenna",
+      "id": "wroom-module",
       "kind": "antenna-connector",
-      "position": {
-        "x": 25,
-        "y": 25,
-        "z": 1.6
-      },
-      "size": {
-        "x": 6,
-        "y": 3,
-        "z": 1
-      },
+      "position": { "x": 26.0, "y": 5.15, "z": 1.6 },
+      "size": { "x": 25.5, "y": 18.0, "z": 3.1 },
+      "facing": "+z",
       "cutoutMargin": 0
     }
   ],
@@ -102,5 +51,6 @@
   "recommendedZClearance": 12,
   "source": "https://docs.espressif.com/projects/esp-idf/en/latest/esp32/hw-reference/esp32/get-started-devkitc.html",
   "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/esp32-devkit-v1",
+  "measurementMethod": "open-source-cad",
   "builtin": true
 }
