@@ -47,7 +47,7 @@
       "cutoutMargin": 0
     }
   ],
-  "defaultStandoffHeight": 4,
+  "defaultStandoffHeight": 10,
   "recommendedZClearance": 12,
   "source": "https://docs.espressif.com/projects/esp-idf/en/latest/esp32/hw-reference/esp32/get-started-devkitc.html",
   "crossReference": "https://github.com/SlyWombat/case-maker/tree/main/samples/cad-references/boards/esp32-devkit-v1",
