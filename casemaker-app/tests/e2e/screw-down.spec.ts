@@ -25,9 +25,15 @@ test('screw-down lid: triangle count grows over flat lid (lid holes), shell boss
   // them and switching joints doesn't add shell geometry (#133). The real
   // invariant: bosses themselves add shell triangles — compare against a
   // bosses-off shell.
+  // Issue #162 — bosses.enabled governs the LID bosses only; a screw-retained
+  // board keeps its floor seat regardless, so switching the toggle alone no
+  // longer strips the shell. Drop board retention too for a boss-free shell.
   await page.evaluate(async () => {
     const bosses = window.__caseMaker!.getProject().case.bosses;
-    await window.__caseMaker!.patchCase({ bosses: { ...bosses, enabled: false } });
+    await window.__caseMaker!.patchCase({
+      bosses: { ...bosses, enabled: false },
+      boardRetention: 'none',
+    });
   });
   const noBosses = await page.evaluate(() => window.__caseMaker!.getMeshStats('shell')!);
   expect(screw.shell.triangleCount).toBeGreaterThan(noBosses.triangleCount);

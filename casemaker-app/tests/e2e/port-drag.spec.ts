@@ -16,7 +16,14 @@ test('patchPort updates the port position and triggers a rebuild', async ({ cm, 
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  const before = await page.evaluate(() => window.__caseMaker!.getMeshStats('shell')!);
+  // Issue #162 — this used to assert `shell.triangleCount` changed. That was
+  // never a property of moving a port: translating a rectangular wall cutout
+  // in Z does not alter the triangle count. It only passed because at the
+  // default Z the cutout incidentally interacted with other shell geometry
+  // (1236 -> 1228); once the boss seats changed shape the coincidence went
+  // away and the counts matched at 1220. getGeneration() is the signal the
+  // test name actually describes.
+  const before = await page.evaluate(() => window.__caseMaker!.getGeneration());
   const portId = await page.evaluate(() => window.__caseMaker!.getProject().ports[0]!.id);
   await page.evaluate(async (id) => {
     await window.__caseMaker!.patchPort(id, { position: { z: 4 } });
@@ -26,6 +33,10 @@ test('patchPort updates the port position and triggers a rebuild', async ({ cm, 
     portId,
   );
   expect(updated?.z).toBe(4);
-  const after = await page.evaluate(() => window.__caseMaker!.getMeshStats('shell')!);
-  expect(after.triangleCount).not.toBe(before.triangleCount);
+  await page.evaluate(async () => { await window.__caseMaker!.waitForIdle(); });
+  const after = await page.evaluate(() => window.__caseMaker!.getGeneration());
+  expect(after).toBeGreaterThan(before);
+  // and the shell still builds
+  const stats = await page.evaluate(() => window.__caseMaker!.getMeshStats('shell')!);
+  expect(stats.triangleCount).toBeGreaterThan(0);
 });
