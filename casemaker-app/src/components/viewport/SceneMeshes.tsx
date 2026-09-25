@@ -29,6 +29,15 @@ function NodeMesh({ id, color, opacity = 1 }: NodeMeshProps) {
         color={color}
         transparent={opacity < 1}
         opacity={opacity}
+        // Issue #162 — a transparent mesh still writes depth by default, and
+        // the triangles inside ONE mesh are not sorted. The shell's outer
+        // walls were drawn first, wrote depth, and every interior feature —
+        // the board standoffs above all — failed the depth test and vanished.
+        // The viewport was pixel-identical with 4 standoffs and with none.
+        // (Lid posts stayed visible only because they hang into open space
+        // below the lid plate rather than sitting inside a closed box.)
+        // depthWrite:false lets the whole shell blend, so the interior reads.
+        depthWrite={opacity >= 1}
         metalness={0.1}
         roughness={0.7}
       />
