@@ -27,16 +27,14 @@
     {
       "id": "header-left",
       "kind": "gpio-header",
-      "position": { "x": 6.81, "y": 25.63, "z": 1.6 },
-      "size": { "x": 38.1, "y": 2.54, "z": 9 },
-      "facing": "+z"
+      "position": { "x": 6.81, "y": 25.63, "z": -8.5 },
+      "size": { "x": 38.1, "y": 2.54, "z": 8.5 }
     },
     {
       "id": "header-right",
       "kind": "gpio-header",
-      "position": { "x": 6.81, "y": 0.23, "z": 1.6 },
-      "size": { "x": 38.1, "y": 2.54, "z": 9 },
-      "facing": "+z"
+      "position": { "x": 6.81, "y": 0.23, "z": -8.5 },
+      "size": { "x": 38.1, "y": 2.54, "z": 8.5 }
     },
     {
       "id": "wroom-module",
