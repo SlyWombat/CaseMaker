@@ -4,6 +4,7 @@ import {
   type ViewportTool,
   type ViewportCameraMode,
   type ViewportViewMode,
+  type ShellRenderMode,
 } from '@/store/viewportStore';
 
 /**
@@ -32,6 +33,17 @@ const CAMERAS: { id: ViewportCameraMode; label: string; shortcut: string }[] = [
   { id: 'side', label: 'Side', shortcut: '4' },
 ];
 
+// Issue #163 — shell/lid shading. Deliberately two states, not a slider:
+// the useful answers are "show me the guts" and "show me the object", and a
+// continuum just invites hunting for a value the pair already gives. Rendered
+// as ONE icon button rather than a labelled pair — the toolbar already runs
+// the full width of the viewport at 1024 px and a second text group pushed
+// the layout into horizontal overflow.
+const RENDER_HINT: Record<ShellRenderMode, string> = {
+  xray: 'X-ray: translucent case — interior geometry (board standoffs, ribs) visible. Click for solid.',
+  solid: 'Solid: opaque case — judge it as the object it will print as. Click for x-ray.',
+};
+
 const VIEW_MODES: { id: ViewportViewMode; label: string; shortcut: string; hint: string }[] = [
   { id: 'complete', label: 'Complete', shortcut: 'Shift+1', hint: 'Lid assembled — no exploded gap' },
   { id: 'exploded', label: 'Exploded', shortcut: 'Shift+2', hint: 'Lid lifted clear of all protrusions' },
@@ -56,6 +68,8 @@ export function ViewportToolbar() {
   const setActiveTool = useViewportStore((s) => s.setActiveTool);
   const setCameraMode = useViewportStore((s) => s.setCameraMode);
   const setViewMode = useViewportStore((s) => s.setViewMode);
+  const shellRender = useViewportStore((s) => s.shellRender);
+  const setShellRender = useViewportStore((s) => s.setShellRender);
 
   // Keyboard shortcuts. Skip when the user is typing into a panel field.
   useEffect(() => {
@@ -88,6 +102,8 @@ export function ViewportToolbar() {
         setCameraMode('front');
       } else if (k === '4') {
         setCameraMode('side');
+      } else if (k === 'x') {
+        setShellRender(useViewportStore.getState().shellRender === 'xray' ? 'solid' : 'xray');
       } else {
         return;
       }
@@ -95,7 +111,7 @@ export function ViewportToolbar() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setActiveTool, setCameraMode, setViewMode, showBoard]);
+  }, [setActiveTool, setCameraMode, setViewMode, setShellRender, showBoard]);
 
   return (
     <div className="viewport-toolbar" data-testid="viewport-toolbar">
@@ -173,6 +189,20 @@ export function ViewportToolbar() {
             </button>
           );
         })}
+      </div>
+      <div className="viewport-toolbar__group">
+        <button
+          type="button"
+          className={`viewport-toolbar__btn${shellRender === 'solid' ? ' viewport-toolbar__btn--active' : ''}`}
+          onClick={() => setShellRender(shellRender === 'xray' ? 'solid' : 'xray')}
+          aria-pressed={shellRender === 'solid'}
+          aria-label={shellRender === 'solid' ? 'Solid shading' : 'X-ray shading'}
+          title={`${RENDER_HINT[shellRender]} (X)`}
+          data-testid="viewport-render-toggle"
+          data-mode={shellRender}
+        >
+          {shellRender === 'solid' ? '◼' : '◻'}
+        </button>
       </div>
     </div>
   );

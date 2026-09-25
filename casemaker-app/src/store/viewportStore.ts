@@ -57,6 +57,15 @@ export type SidebarSectionId =
 // Default 'exploded' so first-load behavior matches the pre-#91 lift hack.
 export type ViewportViewMode = 'complete' | 'exploded' | 'base-only' | 'lid-only';
 
+// Issue #163 — how the shell + lid are shaded.
+//   xray  : translucent, interior features (board standoffs, ribs) visible
+//   solid : opaque, the case as it will actually look and print
+// Default 'xray'. #162 shipped a board resting on nothing partly because the
+// viewport could not show the interior at all — the default has to be the
+// one that reveals geometry, not the one that flatters it. 'solid' was
+// previously unreachable: opacity was hardcoded at 0.55 / 0.6.
+export type ShellRenderMode = 'xray' | 'solid';
+
 interface PersistedViewportFlags {
   showLid?: boolean;
   showBoard?: boolean;
@@ -64,6 +73,7 @@ interface PersistedViewportFlags {
   activeTool?: ViewportTool;
   cameraMode?: ViewportCameraMode;
   viewMode?: ViewportViewMode;
+  shellRender?: ShellRenderMode;
 }
 
 function loadPersisted(): PersistedViewportFlags {
@@ -91,6 +101,7 @@ function savePersisted(flags: PersistedViewportFlags): void {
   if (flags.activeTool !== undefined) out.activeTool = flags.activeTool;
   if (flags.cameraMode !== undefined) out.cameraMode = flags.cameraMode;
   if (flags.viewMode !== undefined) out.viewMode = flags.viewMode;
+  if (flags.shellRender !== undefined) out.shellRender = flags.shellRender;
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(out));
   } catch {
@@ -113,6 +124,7 @@ export interface ViewportState {
   activeSidebarSection: SidebarSectionId | null;
   /** Issue #91 — 4-way view-mode picker. */
   viewMode: ViewportViewMode;
+  shellRender: ShellRenderMode;
   /** Issue #120 — per-part visibility. Set entries are HIDDEN; absence =
    *  visible. Keyed by BuildPlan node id (shell, lid, gasket, hinge-pin,
    *  latch-arm-*, bumper-*). Session-only — not persisted; reverts to all-
@@ -129,6 +141,7 @@ export interface ViewportState {
   setSelection: (s: ViewportSelection) => void;
   setActiveSidebarSection: (s: SidebarSectionId | null) => void;
   setViewMode: (m: ViewportViewMode) => void;
+  setShellRender: (m: ShellRenderMode) => void;
   /** Issue #120 — toggle a part's visibility by node id. */
   togglePartVisible: (partId: string) => void;
   /** Issue #120 — set all parts visible (clear the hidden set). */
@@ -145,6 +158,7 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
   activeTool: persisted.activeTool ?? 'orbit',
   cameraMode: persisted.cameraMode ?? 'perspective',
   viewMode: persisted.viewMode ?? 'exploded',
+  shellRender: persisted.shellRender ?? 'xray',
   // Issue #83 — selection is session-scoped. Intentionally NOT loaded from
   // (or written to) localStorage so opening a project never resurrects a
   // stale selection that points at a HAT placement that may no longer
@@ -180,6 +194,10 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
   },
   setSelection: (s) => set({ selection: s, activeSidebarSection: s ? null : get().activeSidebarSection }),
   setActiveSidebarSection: (s) => set({ activeSidebarSection: s, selection: s ? null : get().selection }),
+  setShellRender: (m) => {
+    set({ shellRender: m });
+    savePersisted({ ...get(), shellRender: m });
+  },
   setViewMode: (m) => {
     // Issue #91 — keep showLid in sync with the view mode for legacy
     // consumers that still gate on showLid (export layouts etc.). The

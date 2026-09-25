@@ -86,6 +86,7 @@ function colorForNode(id: string): string {
 
 export function SceneMeshes() {
   const viewMode = useViewportStore((s) => s.viewMode);
+  const shellRender = useViewportStore((s) => s.shellRender);
   const hiddenParts = useViewportStore((s) => s.hiddenParts);
   const latches = useProjectStore((s) => s.project.case.latches);
   // A rack has no host PCB. The rack archetype replaces the case/lid pipeline
@@ -164,7 +165,11 @@ export function SceneMeshes() {
         const color = colorForNode(id);
         const offset = explodedOffsetFor(id);
         const isLifted = (offset[0] !== 0 || offset[1] !== 0 || offset[2] !== 0);
-        const opacity = id === 'shell' ? 0.55 : id === 'lid' ? 0.6 : 1;
+        // Issue #163 — solid mode makes the case opaque so it can be judged
+        // as the object it will print as (wall thickness, vents, chamfers).
+        // Anything that is not the shell or lid is opaque in both modes.
+        const opacity =
+          shellRender === 'solid' ? 1 : id === 'shell' ? 0.55 : id === 'lid' ? 0.6 : 1;
         const mesh = <NodeMesh key={id} id={id} color={color} opacity={opacity} />;
         if (isLifted) {
           return (

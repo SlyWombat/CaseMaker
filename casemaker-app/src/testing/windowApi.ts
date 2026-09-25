@@ -67,6 +67,9 @@ export interface CaseMakerTestApi {
   getSettings(): { port: number; bindToAll: boolean };
   setPortSetting(port: number): void;
   setExportLayout(mode: 'print-ready' | 'assembled'): void;
+  /** Issue #163 — shell/lid shading: 'xray' (default) or 'solid'. */
+  setShellRender(mode: 'xray' | 'solid'): void;
+  getShellRender(): 'xray' | 'solid';
   selectPort(portId: string | null): void;
   getSelectedPortId(): string | null;
   patchPort(
@@ -188,6 +191,10 @@ export function installCaseMakerTestApi(): void {
     setPortSetting: (port) => {
       useSettingsStore.getState().setPort(port);
     },
+    setShellRender: (mode) => {
+      useViewportStore.getState().setShellRender(mode);
+    },
+    getShellRender: () => useViewportStore.getState().shellRender,
     setExportLayout: (mode) => {
       useSettingsStore.getState().setExportLayout(mode);
     },
