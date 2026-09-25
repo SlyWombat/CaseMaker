@@ -47,10 +47,24 @@ describe('ProjectCompiler', () => {
     }
   });
 
-  it('produces no boss placements when bosses are disabled', () => {
+  it('produces no boss placements when bosses are disabled AND the board is not screw-retained', () => {
+    // Issue #162 — `bosses.enabled` governs the LID bosses. A screw-retained
+    // board keeps its floor seat regardless, so the board can never be left
+    // resting on nothing; only a non-screw retention honours the toggle.
     const project = createDefaultProject('rpi-4b');
     project.case.bosses.enabled = false;
+    project.case.boardRetention = 'none';
     const placements = computeBossPlacements(project.board, project.case);
     expect(placements).toEqual([]);
+  });
+
+  it('keeps the floor seat when bosses are disabled but retention is screws (#162)', () => {
+    const project = createDefaultProject('rpi-4b');
+    project.case.bosses.enabled = false;
+    project.case.boardRetention = 'screws';
+    const placements = computeBossPlacements(project.board, project.case);
+    expect(placements.length).toBe(project.board.mountingHoles.length);
+    expect(placements.every((b) => b.position === 'bottom')).toBe(true);
+    expect(placements.every((b) => b.holeDiameter > 0)).toBe(true);
   });
 });

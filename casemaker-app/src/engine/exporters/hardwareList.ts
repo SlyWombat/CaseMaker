@@ -1,4 +1,5 @@
 import type { Project } from '@/types';
+import { computeBossPlacements } from '@/engine/compiler/bosses';
 import { accessorySlots, computeRackDims, earScrewsPerSide, plateScrewYs, resolveShelfDepth, FAN_SCREW_D, LONG_SHELF } from '@/engine/compiler/rack';
 import { clearanceDiameter, pilotDiameter } from '@/engine/compiler/fasteners';
 
@@ -159,8 +160,15 @@ export function hardwareForProject(project: Project): HardwareItem[] {
   // recommendation is given per path so a "lid-only" build doesn't list
   // (and double-buy) board screws.
   const insert = c.bosses?.insertType ?? 'self-tap';
-  const numHoles = project.board.mountingHoles?.length ?? 0;
   const boardRetention = c.boardRetention ?? 'screws';
+  // Issue #162 — count the bosses the compiler ACTUALLY emits with an open
+  // pilot, not the board's mounting holes. The old `numHoles` count billed
+  // four board screws in every configuration that produced solid pegs or no
+  // standoffs at all, naming "the boss insert" that was never built.
+  const pilotedSeats = computeBossPlacements(project.board, c).filter(
+    (b) => b.position === 'bottom' && b.holeDiameter > 0,
+  ).length;
+  const numHoles = pilotedSeats;
 
   if (numHoles > 0 && c.joint === 'screw-down') {
     const lidLen = recommendedScrewLength(insert, c.lidThickness);

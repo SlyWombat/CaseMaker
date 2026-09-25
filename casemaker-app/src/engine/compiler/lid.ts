@@ -137,12 +137,19 @@ function buildLidPosts(
     params.joint === 'screw-down'
       ? getScrewClearanceDiameter(params.bosses.insertType)
       : 0;
-  const posts: BuildOp[] = placements.map((b) =>
+  // Issue #162 — when the user asked for lid-anchored bosses, buildLidBosses
+  // already fuses a post into the lid at these same XY positions. Emitting
+  // the #21 clamping post as well put two concentric posts on every hole.
+  const hasLidAnchored = placements.some((b) => b.position === 'top');
+  const postPlacements = hasLidAnchored
+    ? []
+    : placements.filter((b) => b.position === 'bottom');
+  const posts: BuildOp[] = postPlacements.map((b) =>
     translate([b.x, b.y, -postLength], cylinder(postLength, b.outerDiameter / 2, 32)),
   );
   const holes: BuildOp[] =
     screwDia > 0
-      ? placements.map((b) => {
+      ? postPlacements.map((b) => {
           const totalH = params.lidThickness + postLength + 1;
           return translate(
             [b.x, b.y, -postLength - 0.5],

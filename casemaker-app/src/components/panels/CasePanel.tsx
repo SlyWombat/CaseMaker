@@ -393,9 +393,13 @@ export function CasePanel() {
           ))}
         </div>
       </div>
-      {/* Issue #98 — Boss-insert type only applies when the joint actually
-          uses bosses (screw-down). Hidden for flat-lid and snap-fit. */}
-      {params.joint === 'screw-down' && (
+      {/* Issue #98 — Boss-insert type applies when a screw actually drives
+          into a boss. Issue #162: that is EITHER a screw-down lid OR
+          boardRetention='screws' — gating on the joint alone hid the control
+          in the default flat-lid case while the parts list still billed
+          board screws the user had no way to choose. */}
+      {(params.joint === 'screw-down' ||
+        (params.boardRetention ?? 'screws') === 'screws') && (
         <>
           <div className="joint-row">
             <label className="joint-label" htmlFor="case-insert-type">

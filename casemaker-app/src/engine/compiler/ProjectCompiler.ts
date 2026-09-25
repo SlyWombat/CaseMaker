@@ -2,7 +2,7 @@ import type { Project, HatProfile } from '@/types';
 import type { Aabb, BuildPlan, BuildNode, BuildOp } from './buildPlan';
 import { union, difference, translate, aabbOfOp } from './buildPlan';
 import { buildOuterShell } from './caseShell';
-import { computeBossPlacements, buildBossesUnion, buildLidBosses, buildBossSupportColumns } from './bosses';
+import { computeBossPlacements, buildBossesUnion, buildLidBosses } from './bosses';
 import { buildSealChannel, buildSealTongue, buildGasketBody } from './seal';
 import { buildLatchOps } from './latches';
 import { buildAlignmentFlange } from './alignmentFlange';
@@ -93,7 +93,6 @@ export function compileProject(project: Project): BuildPlan {
   // Top-position bosses are emitted into the lid below; the case wall gets
   // tapered support columns instead so the print works without supports.
   const bossOps = buildBossesUnion(bossPlacements);
-  const bossSupportColumns = buildBossSupportColumns(bossPlacements, board, caseParams);
   const assetOps = buildExternalAssetOps(externalAssets);
   const featureOps = buildMountingFeatureOps(
     mountingFeatures,
@@ -140,7 +139,6 @@ export function compileProject(project: Project): BuildPlan {
   const additive = [
     shellOuter,
     ...bossOps,
-    ...bossSupportColumns,
     ...assetOps.unionOps,
     ...featureOps.additive,
     ...displayOps.additive,
@@ -214,7 +212,12 @@ export function compileProject(project: Project): BuildPlan {
   // BACK by lidDims.zPosition first, since the lid op gets translated UP
   // afterward.
   const lidUndersideWorldZ = lidDims.zPosition; // lid-local z=0 sits here
-  const lidBossOps = buildLidBosses(bossPlacements, lidUndersideWorldZ);
+  // Issue #162 — lid-anchored bosses stop just above the board top, the same
+  // anchor the #21 lid clamping posts use, so the board is clamped between
+  // its floor standoff and the lid boss rather than floating.
+  const lidBossBottomZ =
+    caseParams.floorThickness + board.defaultStandoffHeight + board.pcb.size.z + 0.3;
+  const lidBossOps = buildLidBosses(bossPlacements, lidUndersideWorldZ, lidBossBottomZ);
   if (lidBossOps.length > 0) {
     // Bosses live at world coords; shift them to lid-local before union so
     // the eventual translate([0,0,zPosition], lidOp) lands them correctly.

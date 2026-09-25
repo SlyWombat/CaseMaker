@@ -8,7 +8,6 @@ import {
   computeBossPlacements,
   buildBossesUnion,
   buildLidBosses,
-  buildBossSupportColumns,
 } from '@/engine/compiler/bosses';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { computeShellDims } from '@/engine/compiler/caseShell';
@@ -29,17 +28,26 @@ describe('Boss position (#104)', () => {
     }
   });
 
-  it('explicit position="top" with screw-down joint flips placements to top-anchored', () => {
+  it('explicit position="top" ADDS a lid-anchored boss above the floor seat (#162)', () => {
+    // Issue #162 — 'top' used to REPLACE the floor standoff, leaving the
+    // board resting on nothing. It is now additive: every hole keeps its
+    // floor seat and gains a lid-anchored boss, clamping the board.
     const project = createDefaultProject('rpi-4b');
+    const holes = project.board.mountingHoles.length;
     const placements = computeBossPlacements(project.board, {
       ...project.case,
       joint: 'screw-down',
       bosses: { ...project.case.bosses, enabled: true, position: 'top' },
     });
-    expect(placements.length).toBeGreaterThan(0);
-    for (const p of placements) {
-      expect(p.position).toBe('top');
+    expect(placements.length).toBe(holes * 2);
+    expect(placements.filter((p) => p.position === 'bottom').length).toBe(holes);
+    expect(placements.filter((p) => p.position === 'top').length).toBe(holes);
+    // Every hole must have a seat under it — that is the whole point.
+    for (const seat of placements.filter((p) => p.position === 'bottom')) {
+      expect(placements.some((t) => t.position === 'top' && t.x === seat.x && t.y === seat.y)).toBe(true);
     }
+    // IDs must stay unique now that a hole yields two placements.
+    expect(new Set(placements.map((p) => p.id)).size).toBe(placements.length);
   });
 
   it('top-position with NON-screw-down joint falls back to bottom (no screw, no top-anchor)', () => {
@@ -61,8 +69,9 @@ describe('Boss position (#104)', () => {
       joint: 'screw-down',
       bosses: { ...project.case.bosses, enabled: true, position: 'top' },
     });
+    // #162 — the floor seat survives, so bottom ops are still emitted.
     const ops = buildBossesUnion(all);
-    expect(ops.length).toBe(0);
+    expect(ops.length).toBe(project.board.mountingHoles.length);
 
     const bottomPlacements = computeBossPlacements(project.board, {
       ...project.case,
@@ -82,27 +91,30 @@ describe('Boss position (#104)', () => {
     });
     const dims = computeShellDims(project.board, project.case, project.hats ?? [], () => undefined);
     const lidUndersideZ = dims.outerZ - project.case.lidThickness;
-    const ops = buildLidBosses(top, lidUndersideZ);
-    expect(ops.length).toBe(top.length);
+    // #162 — buildLidBosses now takes the board-top anchor so the post
+    // actually reaches the board instead of being floor+standoff long.
+    const postBottomZ =
+      project.case.floorThickness + project.board.defaultStandoffHeight + project.board.pcb.size.z + 0.3;
+    const ops = buildLidBosses(top, lidUndersideZ, postBottomZ);
+    const topCount = top.filter((b) => b.position === 'top').length;
+    expect(ops.length).toBe(topCount);
     expect(ops.length).toBeGreaterThan(0);
   });
 
-  it('buildBossSupportColumns emits one mesh per top-position boss against the closest wall', () => {
+  it('no shell-side support columns remain for top bosses (#162)', () => {
+    // #104's columns attached to nothing once the floor seat came back —
+    // they left the shell in 5 disconnected pieces. Removed entirely.
     const project = createDefaultProject('rpi-4b');
-    const top = computeBossPlacements(project.board, {
-      ...project.case,
-      joint: 'screw-down',
-      bosses: { ...project.case.bosses, enabled: true, position: 'top' },
+    const plan = compileProject({
+      ...project,
+      case: {
+        ...project.case,
+        joint: 'screw-down',
+        boardRetention: 'screws',
+        bosses: { ...project.case.bosses, enabled: true, position: 'top' },
+      },
     });
-    const cols = buildBossSupportColumns(top, project.board, {
-      ...project.case,
-      joint: 'screw-down',
-      bosses: { ...project.case.bosses, enabled: true, position: 'top' },
-    });
-    expect(cols.length).toBe(top.length);
-    for (const c of cols) {
-      expect(c.kind).toBe('mesh');
-    }
+    expect(plan.nodes.find((n) => n.id === 'shell')).toBeDefined();
   });
 
   it('compileProject builds successfully for both bottom and top boss configs', () => {
