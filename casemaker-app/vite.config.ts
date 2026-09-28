@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import wasm from 'vite-plugin-wasm';
 import path from 'node:path';
@@ -25,9 +25,25 @@ const BASE = process.env.DEPLOY_BASE ?? '/';
 const DEPLOY_TARGET = process.env.DEPLOY_TARGET ?? '';
 const DONATE_URL = process.env.DONATE_URL ?? '';
 
+// Issue #164 — electricrv.ca's shared, cookie-free page-view counter. Injected
+// into <head> only for the cPanel production deploy, the same gate as the Donate
+// button, so dev, tests, other static hosts and the Tauri desktop build never
+// load it (Tauri's CSP would refuse the script anyway). SPA route changes are
+// counted by the script itself, so nothing in src/ knows about it.
+const ANALYTICS_SRC = 'https://electricrv.ca/api/analytics/a.js';
+function analyticsTag(): Plugin {
+  return {
+    name: 'casemaker:analytics-tag',
+    transformIndexHtml() {
+      if (DEPLOY_TARGET !== 'electricrv') return;
+      return [{ tag: 'script', attrs: { defer: true, src: ANALYTICS_SRC }, injectTo: 'head' }];
+    },
+  };
+}
+
 export default defineConfig({
   base: BASE,
-  plugins: [react(), wasm()],
+  plugins: [react(), wasm(), analyticsTag()],
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
     __DEPLOY_TARGET__: JSON.stringify(DEPLOY_TARGET),

@@ -18,7 +18,7 @@ Pick a board, and Case Maker generates a parametric case around its *real* conne
 - **Automatic port cutouts** for USB-C/A/B, micro-USB, HDMI/micro-HDMI, barrel jack, RJ-45, SD, ribbon cables, antennas — per-port toggles and custom cutouts.
 - **Beyond boxes:** display bezels, desk stands and snap-on wall mounts for finished panel modules, piano hinges, cam latches, TPU gaskets, rugged ribbing, fan mounts, ventilation patterns.
 - **External STL/3MF import** with reference / subtract / union — drop a fan grille STL, mark it *subtract*, watch it carve the shell.
-- **STL (binary/ASCII) + 3MF export**, print-ready or assembled layout; schema-versioned project save/load; full undo/redo. Fully client-side — your designs never leave your machine. Also ships as a Windows desktop app.
+- **STL (binary/ASCII) + 3MF export**, print-ready or assembled layout; schema-versioned project save/load; full undo/redo. Fully client-side — your designs never leave your machine. Also ships as a Windows desktop app. The electricrv.ca site keeps a cookie-free page-view count (no cookies or local storage, no IP addresses stored, nothing recorded under Do Not Track / Global Privacy Control); the desktop app keeps none.
 
 [![Exploded view of a generated sensor pod](docs/assets/workspace-exploded.png)](https://electricrv.ca/casemaker)
 
