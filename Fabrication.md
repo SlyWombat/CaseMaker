@@ -362,47 +362,90 @@ Two gaps on the export side that V1 has to close:
 This section previously got the physics backwards. The correction matters because
 every V1 decision about depth rests on it.
 
-### 7.1 The window is bed-referenced
-Both bounds that matter — the colour change at z = 3.0 and the pocket ceiling at
-z = 2.3 (`make_badge.py:24-25, 97-98`) — are set by the **slicer's layer count from
-the bed**. FDM thickness error accumulates at the **top** surface, in the top skins,
-not at a layer boundary fifteen layers up.
+### 7.1 Print orientation decides everything, and the blank is printed flipped
 
-So touching off the top face and cutting a fixed depth puts every 0.1 mm of print
-thickness error straight into a window less than 1 mm wide. And `G32` makes one case
-*worse*: it faithfully follows a top surface that is high because the print came out
-thick, and therefore cuts **shallower relative to the colour boundary** — which is
-the boundary that decides the outcome.
+**The blank is printed upside down relative to the script's authored orientation:
+the engraved face goes on the build plate, and the magnet pocket opens upward.**
+The reason is printability — pocket-up needs no support and no bridging.
 
-**The job needs measured stock thickness as an input**, and the post must compute
+This matters more than anything else in this section, because it decides which face
+is the dimensional datum. `make_badge.py` authors the part with the pocket on the
+**z = 0** face and ships its 3MF identity-transformed
+(`make_badge.py:117`), so as exported it would print pocket-down and bridge the
+pocket roof. Flipping removes that — and relocates the accumulated error.
+
+Measured up from the build plate in the flipped orientation:
+
+| Boundary | Distance from the **engraved** face | At 0.2 mm layers |
+|---|---|---|
+| Colour split (model z = 3.0) | **0.810 mm** | layer 4.05 |
+| Pocket ceiling (model z = 2.3) | **1.510 mm** | layer 7.55 |
+| Back face / pocket opening | 3.810 mm | layer 19.05 ← rounding lands **here** |
+
+Both boundaries that matter are therefore **fixed layer counts from the engraved
+face**, and the part's total-thickness error accumulates at the *back* face, which
+nothing references.
+
+**Consequence — this reverses an earlier conclusion in this document.** Depth
+referenced from the **probed engraved surface** is correct and repeatable. Total
+measured thickness is *not* the right input, and feeding it in would actively import
+back-face error into the cut:
 
 ```
-Z_cut = t_measured − 3.0 − margin        (NOT −(0.81 + margin))
+Z_cut = −(topBand + margin)                       // CORRECT in this orientation
+Z_cut = measuredThickness − split − margin        // WRONG: imports back-face error
 ```
 
-Autolevel then only addresses warp and tilt, which clamping flat in a nest largely
-removes. **`G32` is optional here; the thickness measurement is not.** That is the
-reverse of what this document said.
+An earlier revision of this document argued the opposite. That argument was sound for
+a part printed engrave-face-up, which is not what happens here. Probe the face you are
+about to cut, and cut relative to it.
 
-### 7.2 The usable band is narrower than it looks
-The nominal band is 0.81 → 1.51 mm. Two things eat into it.
+What remains variable in Z, and it is small:
+- **First-layer squish** — one layer, not accumulated, and consistent across a run.
+- **Layer quantisation of the colour split.** 0.810 mm is layer 4.05 at 0.2 mm, so the
+  slicer puts the change at 0.80 or 1.00 mm — a 0.2 mm step inside a sub-millimetre
+  window. **Fix this in the spec**: choose the top-colour band as an exact layer count
+  and derive `split = thickness − N × layerHeight`. See #166.
 
-**Sparse infill — retired, not measured.** The blank is not solid by default: top-solid
-layers reach only ~1.0 mm down, so an engrave much past that would expose infill as
-the floor. Rather than measure that, **the test blank was printed at 100 % infill**,
-which removes the variable outright. On a 3.81 mm part the cost is negligible, so
-**100 % infill is a premise of the blank spec** (decision 13, #166) rather than a
-finding. A default-infill blank would characterise a configuration we will never ship.
+### 7.2 What the usable band actually is
 
-**The bridged pocket roof — still live.** The magnet pocket is a void whatever the
-infill density, so its roof is bridged, and a first bridged layer is porous. The real
-sealed ceiling therefore sits somewhere above the nominal 2.3 mm, which pulls the
-breakthrough limit below the nominal 1.51 mm by an unknown amount. **This is the
-measurement #165 most needs**, and until it lands the keep-out limit enforced by
-#171 and #174 is a guess.
+**Sparse infill — retired.** The test blank is printed at **100 % infill**, which
+removes the sparse-floor variable outright rather than measuring it. On a 3.81 mm part
+the cost is negligible, so 100 % infill is a **premise of the blank spec**
+(decision 13, #166), not a finding.
+
+**The bridged pocket roof — also retired, by the flip.** With the pocket opening
+upward, the material over it is printed as ordinary solid layers on top of solid
+layers. There is no bridge and no porous first bridged layer. The earlier concern that
+the real sealed ceiling sat above the nominal 2.3 mm **does not apply in this
+orientation.**
+
+**What is left is layer quantisation at both ends:**
+
+| Bound | Nominal | Conservative, layer-aligned at 0.2 mm |
+|---|---|---|
+| Reveal (must exceed) | 0.810 | **0.80** — or exact, if §7.1's spec fix lands |
+| Pocket breakthrough (must stay above) | 1.510 | **1.40** — the pocket may begin a layer early |
+
+So the realistic working band is roughly **0.80 → 1.40 mm**, about 0.6 mm wide — and
+unlike the earlier estimate it is *not* eroded by print thickness error, because of
+§7.1. #165 measures the true values.
+
+**Two new consequences of the flip, both worth designing around:**
+
+1. **Cutting over the pocket means cutting over a void.** Engraving inside the
+   45 × 13 mm footprint removes material from a 1.4–1.6 mm membrane spanning an
+   unsupported cavity. Expect deflection, chatter and a worse finish there than
+   anywhere else on the badge, independent of depth. #171 should discourage deep
+   engraving over the pocket, not merely block breaches.
+2. **The engraved face is a build-plate surface.** Flatter and more dimensionally
+   honest than a top surface, and on smooth PEI it is glossy — so an engrave reads
+   matte-on-gloss, which flatters the part. It also means the probe lands on a genuinely
+   flat reference.
 
 **The blank's slicing is part of the depth model, and the app does not control the
-slicer.** It therefore has to specify it — which is what #166 is for.
+slicer.** It therefore has to specify it, including the print orientation — which is
+what #166 is for.
 
 ### 7.3 Why a V-bit breaks the whole idea
 For an included angle θ, floor width at depth d is `w = 2·d·tan(θ/2)`. At 60° that
