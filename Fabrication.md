@@ -199,6 +199,10 @@ accepted.
 | 18 | **V1 is a vertical slice, and several agreed decisions are explicitly deferred out of it** | Deferring is sequencing, not reversal. See §10.1. |
 | 19 | **Workholding is a printed nest, and it is a V1 deliverable** | See §10.3. |
 | 20 | **Per-label depth is a two-state choice with a numeric override** | Two outcomes exist (top colour, bottom colour), so that is what the control should offer. Same reasoning as the X-ray toggle. |
+| 21 | **The app loads the object; depth limits come from the solid** | No hand-coded pocket rectangles. A void in the geometry produces a shallower limit automatically, for this part and any future one. §7.1. |
+| 22 | **The app models the printer's layer grid** | Layer height is an input. The colour boundary and the depth limits sit on real layer lines, not ideal dimensions — because 0.810 mm is layer 4.05 and the difference matters. §7.1. |
+| 23 | **Registration: probe everything** | Edge-find X/Y on two *straight* edges (the corners are R3.175 and make poor datums), then probe Z on the engraved face. The nest holds the part but is not a position reference. §7.3. |
+| 24 | **Thickness error is ignored, by design** | The blank prints engraved-face-down, so error lands on the back face. Cut depths come from the probed face plus model distances. Total thickness is **not** a job input. §7.2. |
 
 ---
 
@@ -357,137 +361,128 @@ Two gaps on the export side that V1 has to close:
 
 ---
 
-## 7. The depth window — corrected
+## 7. Depth: the model is the source of truth
 
-This section previously got the physics backwards. The correction matters because
-every V1 decision about depth rests on it.
+Earlier revisions of this section argued twice, in opposite directions, about whether
+cut depth should be referenced from the top face or derived from a measured total
+thickness. Both arguments were wrong-headed, because both were *inferring* something
+the app already knows exactly. The resolution, decided with the user:
 
-### 7.1 Print orientation decides everything, and the blank is printed flipped
+> **The app loads the actual object. It knows where the pocket is and where the colour
+> boundary sits, because it compiled them. Nothing about depth is inferred, measured or
+> re-derived.** The machine's only job is to establish where the physical part sits
+> relative to that model.
 
-**The blank is printed upside down relative to the script's authored orientation:
-the engraved face goes on the build plate, and the magnet pocket opens upward.**
-The reason is printability — pocket-up needs no support and no bridging.
+Everything below follows from that.
 
-This matters more than anything else in this section, because it decides which face
-is the dimensional datum. `make_badge.py` authors the part with the pocket on the
-**z = 0** face and ships its 3MF identity-transformed
-(`make_badge.py:117`), so as exported it would print pocket-down and bridge the
-pocket roof. Flipping removes that — and relocates the accumulated error.
+### 7.1 The layer stack — one structure, two answers
 
-Measured up from the build plate in the flipped orientation:
+The app slices the compiled solid on **the printer's actual layer grid** (layer height
+is an input, recorded in the blank spec). That single structure answers both questions
+that matter:
 
-| Boundary | Distance from the **engraved** face | At 0.2 mm layers |
-|---|---|---|
-| Colour split (model z = 3.0) | **0.810 mm** | layer 4.05 |
-| Pocket ceiling (model z = 2.3) | **1.510 mm** | layer 7.55 |
-| Back face / pocket opening | 3.810 mm | layer 19.05 ← rounding lands **here** |
+- **Where does the colour change?** At the layer boundary where the extruder
+  assignment changes. Not at the ideal design height — at the layer line the printer
+  will really produce.
+- **How deep can the cutter go at any point?** Descend the stack from the engraved
+  face; a point is cuttable to depth *d* only if it is solid in **every** layer from
+  the face down to *d*. The running intersection of cross-sections is the depth-limit
+  map.
 
-Both boundaries that matter are therefore **fixed layer counts from the engraved
-face**, and the part's total-thickness error accumulates at the *back* face, which
-nothing references.
+The magnet pocket needs no special case. It is a void in the solid, so the stack
+reports a shallower limit over its footprint automatically — and so would any future
+pocket, slot, or boss on any other part. There are no hand-coded keep-out rectangles
+anywhere.
 
-**Consequence — this reverses an earlier conclusion in this document.** Depth
-referenced from the **probed engraved surface** is correct and repeatable. Total
-measured thickness is *not* the right input, and feeding it in would actively import
-back-face error into the cut:
+This is cheap: the cross-sections are Clipper2 `CrossSection` objects, the running
+intersection is one `intersection` call per layer, and the badge is ~19 layers.
 
-```
-Z_cut = −(topBand + margin)                       // CORRECT in this orientation
-Z_cut = measuredThickness − split − margin        // WRONG: imports back-face error
-```
+Why the layer grid rather than ideal dimensions: the badge's nominal top-colour band is
+0.810 mm, which at 0.2 mm layers is layer 4.05. A slicer puts that boundary at 0.80 or
+1.00 mm, and the difference is a large fraction of the usable depth range. Modelling the
+grid removes the guess instead of budgeting for it.
 
-An earlier revision of this document argued the opposite. That argument was sound for
-a part printed engrave-face-up, which is not what happens here. Probe the face you are
-about to cut, and cut relative to it.
+### 7.2 Print orientation, and why it settles the Z reference
 
-What remains variable in Z, and it is small:
-- **First-layer squish** — one layer, not accumulated, and consistent across a run.
-- **Layer quantisation of the colour split.** 0.810 mm is layer 4.05 at 0.2 mm, so the
-  slicer puts the change at 0.80 or 1.00 mm — a 0.2 mm step inside a sub-millimetre
-  window. **Fix this in the spec**: choose the top-colour band as an exact layer count
-  and derive `split = thickness − N × layerHeight`. See #166.
+**The blank is printed flipped relative to `make_badge.py`'s authored orientation:
+engraved face on the build plate, pocket opening upward.** No support, no bridging.
 
-### 7.2 What the usable band actually is
+`make_badge.py` authors the pocket on the z = 0 face and ships its 3MF
+identity-transformed (`make_badge.py:117`), so as exported it prints the wrong way up and
+the user flips it by hand. The app's export should emit it print-ready — the
+`PRINT_FLIP_NODE_IDS` machinery in `engine/exportTrigger.ts` already exists for this.
 
-**Sparse infill — retired.** The test blank is printed at **100 % infill**, which
-removes the sparse-floor variable outright rather than measuring it. On a 3.81 mm part
-the cost is negligible, so 100 % infill is a **premise of the blank spec**
-(decision 13, #166), not a finding.
+Consequences, and these are the ones that stop the argument:
 
-**The bridged pocket roof — also retired, by the flip.** With the pocket opening
-upward, the material over it is printed as ordinary solid layers on top of solid
-layers. There is no bridge and no porous first bridged layer. The earlier concern that
-the real sealed ceiling sat above the nominal 2.3 mm **does not apply in this
-orientation.**
+- The **engraved face is the build-plate face**, so the colour boundary and pocket
+  ceiling are at fixed layer counts *from the face the cutter touches*.
+- The part's **total-thickness error accumulates at the back face**, which nothing
+  references and nothing cuts.
+- Therefore **cut depths are measured down from the probed engraved face, using the
+  model's layer distances, and a thickness-deviant blank needs no compensation at all.**
+  Total thickness is not an input to the job. Feeding it in would import far-side error
+  into the cut.
 
-**What is left is layer quantisation at both ends:**
+Secondary benefits: a build-plate face is flatter and more dimensionally honest than a
+top surface, it gives the probe a genuinely flat reference, and on smooth PEI it is
+glossy — so the engrave reads matte-on-gloss.
 
-| Bound | Nominal | Conservative, layer-aligned at 0.2 mm |
-|---|---|---|
-| Reveal (must exceed) | 0.810 | **0.80** — or exact, if §7.1's spec fix lands |
-| Pocket breakthrough (must stay above) | 1.510 | **1.40** — the pocket may begin a layer early |
+### 7.3 Registration — probe everything
 
-So the realistic working band is roughly **0.80 → 1.40 mm**, about 0.6 mm wide — and
-unlike the earlier estimate it is *not* eroded by print thickness error, because of
-§7.1. #165 measures the true values.
+The machine measures where the part is rather than trusting the fixture:
 
-**Two new consequences of the flip, both worth designing around:**
+1. **X and Y by edge-find on two straight edges** — two touches on a long edge for
+   position and rotation, one on a short edge. **Not a corner find:** the badge corners
+   are R3.175 (`make_badge.py:23`) and a radiused corner is a poor datum. Probing the
+   flats avoids the radii entirely, and gets rotation for free, which a single corner
+   does not.
+2. **Z by touching the engraved face**, once. That is the datum every cut depth is
+   measured from (§7.2).
+3. Set the work origin with `G10 L2 P1`, swap probe for cutter, `M491` to re-establish
+   tool length, run.
 
-1. **Cutting over the pocket means cutting over a void.** Engraving inside the
-   45 × 13 mm footprint removes material from a 1.4–1.6 mm membrane spanning an
-   unsupported cavity. Expect deflection, chatter and a worse finish there than
-   anywhere else on the badge, independent of depth. #171 should discourage deep
-   engraving over the pocket, not merely block breaches.
-2. **The engraved face is a build-plate surface.** Flatter and more dimensionally
-   honest than a top surface, and on smooth PEI it is glossy — so an engrave reads
-   matte-on-gloss, which flatters the part. It also means the probe lands on a genuinely
-   flat reference.
+The nest (§7.6) still earns its place — it holds the blank flat and repeatable, and
+stops it moving while cut — but it is **not** load-bearing for position, and its datum
+corner is a convenience rather than a reference.
 
-**The blank's slicing is part of the depth model, and the app does not control the
-slicer.** It therefore has to specify it, including the print orientation — which is
-what #166 is for.
+### 7.4 What a V-bit does, and why V1 uses a flat end mill
 
-### 7.3 Why a V-bit breaks the whole idea
-For an included angle θ, floor width at depth d is `w = 2·d·tan(θ/2)`. At 60° that
-is `w = 1.155·d`, so reaching the 0.81 mm colour boundary needs a stroke at least
-0.94 mm wide; at 90° it needs 1.62 mm. A 4 mm cap-height title line has a stroke
-around 0.5 mm, so **it never changes colour with a V-bit, whatever depth the label
-claims.** V-carving derives depth from stroke width; the user's number becomes a
-clamp at best.
+For an included angle θ, floor width at depth *d* is `w = 2·d·tan(θ/2)` — at 60°,
+`w = 1.155·d`. So reaching a 0.81 mm colour boundary needs a stroke at least 0.94 mm
+wide, and at 90° at least 1.62 mm. A 4 mm cap-height title has a stroke around 0.5 mm,
+so **it cannot change colour with a V-bit at any commanded depth.** V-carving derives
+depth from stroke width; a per-label depth becomes a clamp at best.
 
-"Label → depth → colour" only holds for a **flat end mill pocketing the glyph
-region**, where depth is genuinely independent. Hence decision 14.
+"Depth controls colour" holds only for a **flat end mill pocketing the glyph region**,
+where depth is genuinely independent. Hence decision 14, and V-carve is V2.
 
-### 7.4 Tool radius is the third coupled variable
-With an end mill of radius r, the cut region is the morphological **opening** of the
-glyph: `offset(offset(G, −r), +r)`. Anything thinner than 2r disappears; inside
-corners get radius r. A 3.175 mm cutter engraves nothing legible on a badge; a 1 mm
-cutter handles a 10 mm name and loses a 4 mm title's thin strokes.
+### 7.5 Tool radius silently deletes glyph detail
 
-This is computable **today** with two `p-offset` nodes
-(`engine/compiler/profile.ts:116-123`), so the viewport must render the opened region
-rather than the ideal glyph, and colour engraved floors by `depth > T − split`. The
-user sees the real result before anything is cut — the honest default, not a knob.
+With an end mill of radius *r*, the reachable region is the morphological **opening** of
+the glyph: `offset(offset(G, −r), +r)`. Anything thinner than 2*r* vanishes; inside
+corners get radius *r*. A 3.175 mm cutter engraves nothing legible at badge scale; a
+1 mm cutter handles a 10 mm name and loses a 4 mm title's thin strokes.
 
-### 7.5 The Z reference chain crosses a tool change
-Probing happens with the probe fitted; cutting happens with the cutter after a hand
-swap and `M491`. The achievable depth tolerance is therefore probe repeatability +
-`M491` repeatability + how well the operator seats the collet. **None of these is
-quantified anywhere.** Cut a step and caliper it once before anyone trusts a 0.3 mm
-margin.
+Two `p-offset` nodes compute it today (`engine/compiler/profile.ts:116-123`), so the
+viewport renders the **opened** region and colours engraved floors by which side of the
+colour boundary they land on. The user sees the true result before cutting — the honest
+default rather than a warning bolted onto a lie.
 
-### 7.6 Workholding, and why the corner find is the wrong plan
-Decision 7 called for an XY corner find, but the badge corner is a 3.175 mm radius
-(`make_badge.py:23`) and the part is 3.8 mm thick — too thin to clamp below the cut
-line, and a rounded corner is a poor datum.
+### 7.6 What is still physical, and therefore still unmeasured
 
-The cheap answer is the good one: a **printed nest** — the badge outline offset
-`+0.15` via `p-offset`, a sharp datum corner, double-sided tape. Printed on the same
-printer that makes the blank. It fixes XY once instead of every job, and gives the
-probe a known flat floor to measure thickness against (§7.1). Hence decision 19.
+The model settles geometry. These need the machine:
 
-
----
+- **The Z chain across a tool change.** Probe fitted → hand swap → `M491` → cutter.
+  Probe repeatability plus `M491` repeatability plus collet seating has never been
+  quantified. #176 measures it by cutting a step and calipering it.
+- **Chatter over the pocket.** Engraving inside the pocket footprint cuts a ~1.5 mm
+  membrane spanning an unsupported void. Expect deflection and poor finish there at
+  *any* depth. The layer stack correctly permits the cut; it cannot predict the finish.
+  #171 warns on overlap for this reason, separately from the depth limit.
+- **Workholding.** A printed nest: badge outline offset `+0.15` via `p-offset`, flat
+  floor, finger relief. The blank sits **pocket-down**, contacting on the annulus around
+  the pocket — so tape goes on the annulus, never spanning the void.
+- **PLA finish at 13 000 RPM.** A parameter table, not a design risk. #165 records it.
 
 ## 8. Safety constraints
 
@@ -567,6 +562,7 @@ physical engraved badge, `[F]` = follows.
 | | Issue |
 |---|---|
 | [P] | **#167** `case.badge` part type + `badge.ts` compiler (§5.1, §6) |
+| [P] | **#178** Layer-stack model: colour boundary + depth limits from the solid (§7.1) |
 | [P] | **#168** Per-node material tag + two-volume 3MF export (§6) |
 | [P] | **#169** Real glyph outlines, multi-font (§7.4) |
 | [P] | **#170** Badge-face labels: per-label font and depth, two-colour viewport (decision 20) |
@@ -592,8 +588,9 @@ feeds/speeds from `makera_library.db` · WiFi bridge · `G32` option if #176 jus
 it · V-carve · `Project.kind` · multi-tool jobs · importer registry · image methods ·
 heightmap engine · 4th axis.
 
-#165 and #166 gate everything numeric. #167–#171 and #172–#174 can proceed in
-parallel. #175 needs only #167. #176 needs all of them.
+#165 and #166 gate everything numeric. **#178 gates #171, #172 and #174** — all three
+ask it for depth limits rather than carrying rules of their own. #175 needs only #167.
+#176 needs all of them.
 
 ### 9.4 Still unverified
 
