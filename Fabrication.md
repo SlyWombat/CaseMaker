@@ -325,8 +325,18 @@ break UDP discovery, and the Tauri build has to run on Windows anyway (`CLAUDE.m
 
 **Why it is not in V1:** Makera Studio already uploads over WiFi. Putting a protocol
 reverse-engineer and a Windows-only development loop on the critical path buys
-nothing a working `.nc` file does not already deliver. See §10.1 — this is the one
+nothing a working `.nc` file does not already deliver. See §9.1 — this is the one
 place V1 narrows the original brief, and it is deliberate.
+
+**The platform seam it needs is #181.** The split follows what a browser physically
+cannot do — raw sockets (this bridge), local filesystem reads (Makera's feeds/speeds
+database, the filesystem board library in #131), and the embedded server controls.
+Everything else stays on web, including geometry, CAM, the post-processor, the
+verifier, `.nc` export, and fonts. Fonts were considered for removal from the web
+build and **rejected**: opentype.js needs no platform capability, glyph outlines serve
+case labels which are a core web feature, and the 1.1 MB payload is a loading problem
+whose fix is #180. Build the seam before the bridge, so bridge work does not scatter
+platform checks through the UI.
 
 ---
 
@@ -583,7 +593,8 @@ physical engraved badge, `[F]` = follows.
 | [P] | **#175** Printed nest fixture (§7.6) — any time after #167 |
 | [P] | **#176** First cut: V1 acceptance + Z-chain error measurement (§7.5) (`bench-test`) |
 
-**[F] Deferred**, each with its reasoning in §9.1: `MachineProfile` unification ·
+**[F] Deferred**, each with its reasoning in §9.1: **#181** web/desktop build split
+(prerequisite for the bridge, not for V1) · `MachineProfile` unification ·
 feeds/speeds from `makera_library.db` · WiFi bridge · `G32` option if #176 justifies
 it · V-carve · `Project.kind` · multi-tool jobs · importer registry · image methods ·
 heightmap engine · 4th axis.
