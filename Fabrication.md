@@ -384,22 +384,25 @@ Autolevel then only addresses warp and tilt, which clamping flat in a nest large
 removes. **`G32` is optional here; the thickness measurement is not.** That is the
 reverse of what this document said.
 
-### 7.2 The usable band is narrower than 0.70 mm
-The blank is not solid. With default slicing, top-solid layers reach only ~1.0 mm
-down, so an engrave much past that exposes **sparse infill as the floor**. The
-pocket roof is bridged, and a first bridged layer is porous, so the real sealed
-ceiling sits above the nominal 2.3. The realistic clean band off a default-sliced
-blank is roughly **0.81 → 1.0 mm**, not 0.81 → 1.51.
+### 7.2 The usable band is narrower than it looks
+The nominal band is 0.81 → 1.51 mm. Two things eat into it.
 
-*(Marked by the reviewer as inference from PrusaSlicer defaults, not measurement —
-which is exactly why §10.2 measures it before any number is ported into code.)*
+**Sparse infill — retired, not measured.** The blank is not solid by default: top-solid
+layers reach only ~1.0 mm down, so an engrave much past that would expose infill as
+the floor. Rather than measure that, **the test blank was printed at 100 % infill**,
+which removes the variable outright. On a 3.81 mm part the cost is negligible, so
+**100 % infill is a premise of the blank spec** (decision 13, #166) rather than a
+finding. A default-infill blank would characterise a configuration we will never ship.
 
-The fix is cheap and belongs in the blank spec: **100 % infill**. On a 3.81 mm part
-the cost is negligible, and it is set per-object in the 3MF sidecar
-`make_badge.py` already writes.
+**The bridged pocket roof — still live.** The magnet pocket is a void whatever the
+infill density, so its roof is bridged, and a first bridged layer is porous. The real
+sealed ceiling therefore sits somewhere above the nominal 2.3 mm, which pulls the
+breakthrough limit below the nominal 1.51 mm by an unknown amount. **This is the
+measurement #165 most needs**, and until it lands the keep-out limit enforced by
+#171 and #174 is a guess.
 
 **The blank's slicing is part of the depth model, and the app does not control the
-slicer.** It therefore has to specify it.
+slicer.** It therefore has to specify it — which is what #166 is for.
 
 ### 7.3 Why a V-bit breaks the whole idea
 For an included angle θ, floor width at depth d is `w = 2·d·tan(θ/2)`. At 60° that
