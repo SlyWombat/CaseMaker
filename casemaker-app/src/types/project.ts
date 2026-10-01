@@ -6,7 +6,7 @@ import type { HatProfile, HatPlacement } from './hat';
 import type { MountingFeature } from './mounting';
 import type { DisplayProfile, DisplayPlacement } from './display';
 import type { FanMount } from './fan';
-import type { TextLabel } from './textLabel';
+import type { TextLabel, CustomFont } from './textLabel';
 import type { AntennaPlacement } from './antenna';
 
 export interface ExternalAsset {
@@ -22,7 +22,7 @@ export interface ExternalAsset {
   visibility: 'reference' | 'subtract' | 'union';
 }
 
-export type ProjectSchemaVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type ProjectSchemaVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 export interface Project {
   schemaVersion: ProjectSchemaVersion;
@@ -45,4 +45,6 @@ export interface Project {
   textLabels: TextLabel[];
   /** Antennas (issue #19, schemaVersion 5+). */
   antennas: AntennaPlacement[];
+  /** User-supplied fonts embedded for text labels (issue #169, schemaVersion 8+). */
+  customFonts: CustomFont[];
 }

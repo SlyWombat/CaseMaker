@@ -28,8 +28,9 @@ export function executeProfile(tl: ManifoldToplevel, p: Profile): CrossSectionIn
   const CS = tl.CrossSection;
   switch (p.kind) {
     case 'p-poly':
-      // Even-odd so inner contours read as holes whichever way they wind.
-      return CS.ofPolygons(p.contours, 'EvenOdd');
+      // Even-odd by default so inner contours read as holes whichever way they
+      // wind; a profile that carries its own winding (glyphs) opts into NonZero.
+      return CS.ofPolygons(p.contours, p.fillRule ?? 'EvenOdd');
     case 'p-rect':
       return CS.square(p.size, p.center ?? false);
     case 'p-circle':

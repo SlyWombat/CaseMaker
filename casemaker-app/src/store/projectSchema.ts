@@ -405,7 +405,9 @@ const fanMountSchema = z.object({
 const textLabelSchema = z.object({
   id: z.string(),
   text: z.string(),
-  font: z.enum(['sans-default', 'mono-default']),
+  // Issue #169 — a font registry id (bundled or a project customFonts id), no longer a
+  // two-value enum. Legacy 'sans-default' / 'mono-default' remain valid ids.
+  font: z.string(),
   weight: z.enum(['regular', 'bold']),
   size: z.number().positive(),
   face: z.enum(['+x', '-x', '+y', '-y', '+z', '-z']),
@@ -455,6 +457,21 @@ const projectV7Schema = projectV6Schema.extend({
   schemaVersion: z.literal(7),
 });
 
+const customFontSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  data: z.string(),
+});
+
+// Issue #169 — v8 adds `customFonts` (user-supplied TTFs embedded as base64) and
+// widens textLabel.font from a two-value enum to a registry id string. Older
+// projects get customFonts: [] in the transform below; their 'sans-default' /
+// 'mono-default' font ids are still valid registry ids, so no label rewrite.
+const projectV8Schema = projectV7Schema.extend({
+  schemaVersion: z.literal(8),
+  customFonts: z.array(customFontSchema).default([]),
+});
+
 export const projectSchema = z
   .union([
     projectV1Schema,
@@ -464,12 +481,14 @@ export const projectSchema = z
     projectV5Schema,
     projectV6Schema,
     projectV7Schema,
+    projectV8Schema,
   ])
   .transform((p) => {
     if (p.schemaVersion === 1) {
       return {
         ...p,
-        schemaVersion: 7 as const,
+        schemaVersion: 8 as const,
+        customFonts: [],
         hats: [],
         customHats: [],
         mountingFeatures: [],
@@ -483,7 +502,8 @@ export const projectSchema = z
     if (p.schemaVersion === 2) {
       return {
         ...p,
-        schemaVersion: 7 as const,
+        schemaVersion: 8 as const,
+        customFonts: [],
         mountingFeatures: [],
         display: null,
         customDisplays: [],
@@ -495,7 +515,8 @@ export const projectSchema = z
     if (p.schemaVersion === 3) {
       return {
         ...p,
-        schemaVersion: 7 as const,
+        schemaVersion: 8 as const,
+        customFonts: [],
         fanMounts: [],
         textLabels: [],
         antennas: [],
@@ -504,19 +525,23 @@ export const projectSchema = z
     if (p.schemaVersion === 4) {
       return {
         ...p,
-        schemaVersion: 7 as const,
+        schemaVersion: 8 as const,
+        customFonts: [],
         antennas: [],
       };
     }
     if (p.schemaVersion === 5) {
       // mountingFeatures items already have mountClass filled by the
       // mountingFeatureSchema default at parse time; just stamp the version.
-      return { ...p, schemaVersion: 7 as const };
+      return { ...p, schemaVersion: 8 as const, customFonts: [] };
     }
     if (p.schemaVersion === 6) {
       // v6 → v7 is a pure version bump — `hinge` is optional and absent on
       // legacy projects, so the parsed object already has the right shape.
-      return { ...p, schemaVersion: 7 as const };
+      return { ...p, schemaVersion: 8 as const, customFonts: [] };
+    }
+    if (p.schemaVersion === 7) {
+      return { ...p, schemaVersion: 8 as const, customFonts: [] };
     }
     return p;
   });

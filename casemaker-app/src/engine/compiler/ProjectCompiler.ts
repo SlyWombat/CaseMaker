@@ -105,7 +105,16 @@ export function compileProject(project: Project): BuildPlan {
   );
   const displayOps = buildDisplayCutoutOps(board, caseParams, display, resolveDisplay, hats ?? [], resolveHat);
   const fanOps = buildFanMountOps(fanMounts, board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
-  const textOps = buildTextLabelOps(textLabels, board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
+  const textOps = buildTextLabelOps(
+    textLabels,
+    board,
+    caseParams,
+    hats ?? [],
+    resolveHat,
+    display,
+    resolveDisplay,
+    project.customFonts ?? [],
+  );
   const antennaOps = buildAntennaOps(antennas, board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   const snapOps = buildSnapCatchOps(caseParams.snapCatches, board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   // Issue #109 — Pelican-style latches. Striker fuses with shell;

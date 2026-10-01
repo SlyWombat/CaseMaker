@@ -3,3 +3,39 @@ Copyright 2026 David Seaman (SlyWombat)
 
 This product includes software developed as part of the Case Maker project
 (https://github.com/SlyWombat/CaseMaker).
+
+Bundled fonts
+-------------
+
+The text-label feature embeds the following fonts, each licensed under the
+SIL Open Font License, Version 1.1 (https://openfontlicense.org). The full
+licence text for each is kept alongside the font data in
+casemaker-app/src/engine/fonts/licenses/. The font files are unmodified and
+were obtained from the Google Fonts repository (https://github.com/google/fonts,
+directory ofl/<family>/), where the OFL.txt shipped with each family matches the
+licence string embedded in the font files themselves.
+
+  Barlow (Regular, Bold)
+    Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)
+    SIL OFL 1.1 - casemaker-app/src/engine/fonts/licenses/Barlow-OFL.txt
+
+  IBM Plex Mono (Regular, Bold)
+    Copyright 2017 IBM Corp., with Reserved Font Name "Plex"
+    SIL OFL 1.1 - casemaker-app/src/engine/fonts/licenses/IBMPlexMono-OFL.txt
+
+  IBM Plex Serif (Regular, Bold)
+    Copyright 2017 IBM Corp., with Reserved Font Name "Plex" (per OFL.txt; the
+    font files' own copyright field reads "Copyright 2020 IBM Corp.")
+    SIL OFL 1.1 - casemaker-app/src/engine/fonts/licenses/IBMPlexSerif-OFL.txt
+
+The fonts are embedded as base64 in src/engine/fonts/bundledFontData.ts (generated
+by scripts/gen-font-data.mjs) purely for runtime use; the font files are not
+renamed or altered, so the Reserved Font Name provisions are not engaged.
+Glyph outlines extracted from them for engraving are output geometry, not a
+distribution of the Font Software.
+
+Third-party libraries
+---------------------
+
+opentype.js (MIT) - https://github.com/opentypejs/opentype.js - parses the fonts
+above and any user-supplied TTF/OTF.

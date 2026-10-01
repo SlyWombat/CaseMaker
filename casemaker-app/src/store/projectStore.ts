@@ -65,7 +65,7 @@ export function createDefaultProject(boardId = DEFAULT_BOARD_ID): Project {
   cloned.clonedFrom = board.id;
   delete cloned.source;
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     id: newId('proj'),
     name: `${board.name} Case`,
     createdAt: now,
@@ -90,6 +90,7 @@ export function createDefaultProject(boardId = DEFAULT_BOARD_ID): Project {
     fanMounts: [],
     textLabels: [],
     antennas: defaultAntennasForBoard(board),
+    customFonts: [],
   };
 }
 
@@ -191,6 +192,10 @@ export interface ProjectState {
   patchFanMount: (id: string, patch: Partial<import('@/types/fan').FanMount>) => void;
   addTextLabel: (label: import('@/types/textLabel').TextLabel) => void;
   removeTextLabel: (id: string) => void;
+  /** Embed a user-supplied font (issue #169). Replaces a font with the same id. */
+  addCustomFont: (font: import('@/types/textLabel').CustomFont) => void;
+  /** Remove an embedded font; labels using it fall back to the default sans. */
+  removeCustomFont: (id: string) => void;
   patchTextLabel: (id: string, patch: Partial<import('@/types/textLabel').TextLabel>) => void;
   addAntenna: (antenna: import('@/types/antenna').AntennaPlacement) => void;
   removeAntenna: (id: string) => void;
@@ -753,6 +758,21 @@ export const useProjectStore = create<ProjectState>()(
             project: produce(s.project, (draft) => {
               if (!draft.textLabels) draft.textLabels = [];
               draft.textLabels.push(label);
+            }),
+          })),
+        addCustomFont: (font) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.customFonts) draft.customFonts = [];
+              draft.customFonts = draft.customFonts.filter((f) => f.id !== font.id);
+              draft.customFonts.push(font);
+            }),
+          })),
+        removeCustomFont: (id) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              if (!draft.customFonts) return;
+              draft.customFonts = draft.customFonts.filter((f) => f.id !== id);
             }),
           })),
         removeTextLabel: (id) =>

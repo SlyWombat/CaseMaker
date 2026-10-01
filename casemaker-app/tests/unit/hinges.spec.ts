@@ -298,18 +298,18 @@ describe('Issue #110 — protective-case hinge styles', () => {
   });
 });
 
-describe('Issue #92 — schema migration v6 → v7', () => {
-  it('createDefaultProject stamps schemaVersion: 7 with hinge undefined', () => {
+describe('Issue #92 — schema migration v6 → v7 (now stamps v8, see #169)', () => {
+  it('createDefaultProject stamps schemaVersion: 8 with hinge undefined', () => {
     const p = createDefaultProject('rpi-4b');
-    expect(p.schemaVersion).toBe(7);
+    expect(p.schemaVersion).toBe(8);
     expect(p.case.hinge).toBeUndefined();
   });
 
-  it('a v6-shaped project on disk loads, stamps schemaVersion: 7, and has hinge undefined', () => {
+  it('a v6-shaped project on disk loads, stamps schemaVersion: 8, and has hinge undefined', () => {
     const v6 = { ...createDefaultProject('rpi-4b'), schemaVersion: 6 };
     const text = JSON.stringify(v6);
     const parsed = parseProject(text);
-    expect(parsed.schemaVersion).toBe(7);
+    expect(parsed.schemaVersion).toBe(8);
     expect(parsed.case.hinge).toBeUndefined();
   });
 

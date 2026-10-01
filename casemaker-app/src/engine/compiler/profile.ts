@@ -18,9 +18,17 @@ import type { Vec2 } from '@/types';
  */
 export type ProfileJoin = 'round' | 'miter' | 'square';
 
+/** Polygon fill rule, as Manifold names them. */
+export type ProfileFillRule = 'EvenOdd' | 'NonZero' | 'Positive' | 'Negative';
+
 export type Profile =
-  /** Explicit contours. Even-odd fill, so inner contours punch holes. */
-  | { kind: 'p-poly'; contours: Vec2[][] }
+  /**
+   * Explicit contours. Even-odd fill by default, so inner contours punch holes
+   * whichever way they wind. Pass `fillRule: 'NonZero'` for outlines that carry
+   * their own winding (font glyphs): overlapping same-direction contours then
+   * UNION instead of cancelling into a hole.
+   */
+  | { kind: 'p-poly'; contours: Vec2[][]; fillRule?: ProfileFillRule }
   | { kind: 'p-rect'; size: Vec2; center?: boolean }
   | { kind: 'p-circle'; radius: number; segments?: number }
   | { kind: 'p-union'; children: Profile[] }

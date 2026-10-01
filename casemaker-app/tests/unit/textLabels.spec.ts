@@ -3,7 +3,7 @@ import { buildTextLabelOps } from '@/engine/compiler/textLabels';
 import { useProjectStore, createDefaultProject } from '@/store/projectStore';
 import type { TextLabel } from '@/types/textLabel';
 
-describe('Marketing gap #16 — text engraving (block-letter Phase 1)', () => {
+describe('Marketing gap #16 — text engraving (real glyph outlines, #169)', () => {
   beforeEach(() => {
     useProjectStore.getState().setProject(createDefaultProject('rpi-4b'));
   });
@@ -28,7 +28,7 @@ describe('Marketing gap #16 — text engraving (block-letter Phase 1)', () => {
     expect(useProjectStore.getState().project.textLabels.length).toBe(0);
   });
 
-  it('engraved label produces subtractive ops, one per non-space char', () => {
+  it('engraved label produces subtractive ops, one solid per label (real glyph outlines, #169)', () => {
     const label: TextLabel = {
       id: 'lbl-1',
       text: 'ABC',
@@ -44,7 +44,7 @@ describe('Marketing gap #16 — text engraving (block-letter Phase 1)', () => {
     };
     const project = useProjectStore.getState().project;
     const ops = buildTextLabelOps([label], project.board, project.case);
-    expect(ops.subtractive.length).toBe(3);
+    expect(ops.subtractive.length).toBe(1);
     expect(ops.additive.length).toBe(0);
   });
 

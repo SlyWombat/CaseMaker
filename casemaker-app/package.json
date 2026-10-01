@@ -34,6 +34,7 @@
     "manifold-3d": "^3.4.1",
     "marked": "^18.0.2",
     "nanoid": "^5.1.9",
+    "opentype.js": "^2.0.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "three": "^0.184.0",

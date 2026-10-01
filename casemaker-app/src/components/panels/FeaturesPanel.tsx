@@ -1,3 +1,6 @@
+import { useState } from 'react';
+import * as opentype from 'opentype.js';
+import { BUNDLED_FONTS } from '@/engine/fonts/registry';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { listBuiltinDisplayIds } from '@/library/displays';
@@ -38,6 +41,7 @@ const DISPLAY_FRAMINGS: DisplayFraming[] = ['top-window', 'recessed-bezel'];
 const EMPTY_ANTENNAS: import('@/types/antenna').AntennaPlacement[] = [];
 const EMPTY_FANS: import('@/types/fan').FanMount[] = [];
 const EMPTY_LABELS: import('@/types/textLabel').TextLabel[] = [];
+const EMPTY_FONTS: import('@/types/textLabel').CustomFont[] = [];
 const EMPTY_FEATURES: import('@/types/mounting').MountingFeature[] = [];
 const EMPTY_CATCHES: import('@/types/snap').SnapCatch[] = [];
 const EMPTY_CUTOUTS: import('@/types').CustomCutout[] = [];
@@ -293,6 +297,28 @@ function TextLabelsSection() {
   const addTextLabel = useProjectStore((s) => s.addTextLabel);
   const removeTextLabel = useProjectStore((s) => s.removeTextLabel);
   const patchTextLabel = useProjectStore((s) => s.patchTextLabel);
+  const customFonts = useProjectStore((s) => s.project.customFonts) ?? EMPTY_FONTS;
+  const addCustomFont = useProjectStore((s) => s.addCustomFont);
+  const [fontError, setFontError] = useState<string | null>(null);
+
+  // Issue #169 — embed a user-supplied TTF/OTF in the project (base64, like
+  // ExternalAsset.data) so the project stays self-contained and portable.
+  const onFontFile = async (file: File | undefined) => {
+    if (!file) return;
+    setFontError(null);
+    try {
+      const buf = await file.arrayBuffer();
+      opentype.parse(buf); // throws on anything that is not a usable font
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      }
+      addCustomFont({ id: `font-${newId()}`, name: file.name.replace(/\.[^.]+$/, ''), data: btoa(bin) });
+    } catch {
+      setFontError(`Could not read "${file.name}" as a TTF/OTF font.`);
+    }
+  };
 
   return (
     <section className="features-section">
@@ -322,6 +348,21 @@ function TextLabelsSection() {
           + add
         </button>
       </h4>
+      <div className="features-row">
+        <label title="Embed your own TTF/OTF font in this project for use in labels.">
+          Add font…{' '}
+          <input
+            type="file"
+            accept=".ttf,.otf,font/ttf,font/otf"
+            data-testid="add-custom-font"
+            onChange={(e) => {
+              void onFontFile(e.target.files?.[0]);
+              e.target.value = '';
+            }}
+          />
+        </label>
+        {fontError && <span role="alert">{fontError}</span>}
+      </div>
       {labels.length === 0 && <p className="features-empty">No labels.</p>}
       {labels.map((l) => (
         <div key={l.id} className="features-row">
@@ -351,6 +392,36 @@ function TextLabelsSection() {
                 {c}
               </option>
             ))}
+          </select>
+          <select
+            value={l.font}
+            onChange={(e) => patchTextLabel(l.id, { font: e.target.value })}
+            aria-label={`Label ${l.id} font`}
+            title="Typeface for the label."
+          >
+            {BUNDLED_FONTS.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+            {customFonts.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name} (embedded)
+              </option>
+            ))}
+            {!BUNDLED_FONTS.some((f) => f.id === l.font) &&
+              !customFonts.some((f) => f.id === l.font) && (
+                <option value={l.font}>{l.font} (missing - using sans)</option>
+              )}
+          </select>
+          <select
+            value={l.weight}
+            onChange={(e) => patchTextLabel(l.id, { weight: e.target.value as 'regular' | 'bold' })}
+            aria-label={`Label ${l.id} weight`}
+            title="Regular or bold (bundled fonts only; an embedded font is used as-is)."
+          >
+            <option value="regular">regular</option>
+            <option value="bold">bold</option>
           </select>
           <button
             onClick={() => removeTextLabel(l.id)}

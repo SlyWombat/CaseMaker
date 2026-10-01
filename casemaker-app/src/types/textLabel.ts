@@ -1,6 +1,18 @@
 import type { Mm } from './units';
 
-export type TextFont = 'sans-default' | 'mono-default';
+/**
+ * A font registry id: a bundled font ('sans-default', 'mono-default',
+ * 'serif-default') or the id of a `CustomFont` embedded in the project.
+ */
+export type TextFont = string;
+
+/** A user-supplied TTF/OTF embedded in the project, base64 like ExternalAsset.data. */
+export interface CustomFont {
+  id: string;
+  name: string;
+  /** base64 of the font file. */
+  data: string;
+}
 export type TextWeight = 'regular' | 'bold';
 export type TextMode = 'engrave' | 'emboss';
 
