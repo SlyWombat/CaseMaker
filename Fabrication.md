@@ -325,7 +325,9 @@ interface PartPlan {
 ```
 
 with two pure derivations: `toBuildPlan(part)` for the viewport, STL and 3MF, and
-`toCamJob(part, tool, measuredThickness)` for the `.nc`. That is literally "a set of
+`toCamJob(part, tool)` for the `.nc`. **It takes no `measuredThickness`** — this document
+said it did, and decision 24 says total thickness is not a job input. The signature was a
+leftover from the superseded depth model. That is literally "a set of
 2D profiles each with a target Z", which is what V1 is. Generalise when a second
 consumer exists.
 
@@ -808,8 +810,10 @@ feeds/speeds from `makera_library.db` · WiFi bridge · `G32` option if #176 jus
 it · V-carve · `Project.kind` · multi-tool jobs · importer registry · image methods ·
 heightmap engine · 4th axis.
 
-**#182 needs #172** and cross-checks #171 and #178, so it lands after the CAM core and
-before the first cut — it is what makes the `.nc` trustworthy without cutting.
+**#182 needs #174's parser, not #172** — it simulates the emitted `.nc` (`/Simulation.md`
+§1), so parser, frame tests and sweeper can all be built and validated against Makera's own
+sample files before our CAM core exists. It cross-checks #171 and #178 once those land, and
+it is what makes the `.nc` trustworthy without cutting.
 
 #165 and #166 gate everything numeric. **#178 gates #171, #172 and #174** — all three
 ask it for depth limits rather than carrying rules of their own. #175 needs only #167.

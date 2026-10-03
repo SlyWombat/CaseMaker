@@ -34,8 +34,25 @@ So:
 
 - **One sweep, over one `Move[]` type.** #172's CAM core emits it; #174's G-code parser
   emits the same type from text. The sweep does not know or care which produced it.
-- **The round-trip is the post-processor's test:** `sweep(ir) ≡ sweep(parse(post(ir)))`
-  within ε. That validates #173 with no machine at all, which nothing else in the plan does.
+- **The round-trip is a *serialisation* test, and only that:** `sweep(ir) ≡
+  sweep(parse(post(ir)))` within ε. It catches number formatting, modal `G0`/`G1`, sticky
+  words and `F` placement.
+  **It cannot catch a frame error.** §2 insists `toWorkFrame` is one function shared by the
+  post-processor and the simulator — so both sides of the `≡` pass through it and a wrong
+  sign, origin corner, Y direction or unit scale **cancels exactly**. The frame is the thing
+  this project has reversed twice, so it needs its own test: **golden-number assertions on
+  the emitted coordinates** of a known move, hand-derived from the badge's dimensions, for
+  an off-centre label near one corner. Not a sweep equality.
+- **A volumetric oracle is blind to more than frames.** A union is invariant to **move
+  order** — plunging full depth into solid stock and then clearing gives a picture identical
+  to a correct roughing sequence, with a broken cutter — and to **feed and spindle**
+  entirely (`F1200` plunge, `M3` issued after the first cutting move). Those belong in
+  #174 as sequence checks, not here.
+- **The one genuinely independent validation available** is #165's ladder `.nc`, generated
+  by Studio, whose intent is known by construction: twelve squares at six depths. Note that
+  "validate against Studio's output" cannot mean `TopClamp.nc` — it has 482 distinct Z
+  levels (§4.4), so V1's `ExactSweeper` cannot run it at all, and there is no independent
+  model of it to compare against.
 - **It removes the hard dependency on #172.** Parser + sweep + stock can be built and
   validated first, against **Makera Studio's own output** — including the `.nc` Studio
   generates for #165's depth ladder, *before* that ladder is cut. The simulator gets
@@ -90,10 +107,22 @@ exact sweep for all of them**, at any Z, including ramps and plunges.
 The exception is the **thread mill**, whose helical form is not convex; model it as a union
 of convex discs. V1 does not use one.
 
-**This matters for scope.** Designing the sweep around "flat end mill at constant Z" would
-build something that has to be replaced to reach the rest of `/Makera-Parity.md` §2's
-strategy list. Designing it around *convex hull of two tool solids* reaches all of 3-axis
-work for free, and only rotary needs a different backend (§5).
+**But "for free" was wrong, and §4.5 is the measurement.** The hull identity is exact and
+the *algorithm* is unaffordable: 1 600 hull-moves take 40–119 s against Manifold. So V1's
+exactness claim is **a flat end mill at constant Z**, the 2D fast path in §3.2, and
+hull-per-move sits with the dexel decision in §5 rather than in V1.
+
+**Two caveats on the tool solids themselves**, from `t_MakeraCutterList`:
+
+- The *modelled* tool — the cutting profile extended upward — is convex. The *physical*
+  tool often is not: the 3.175 mm 30° engravers have a 5.0 mm flute but need 5.74 mm to
+  reach shank diameter, so the cone tops out at 2.78 mm and then **steps** to 3.175. Every
+  1 mm flat end and every drill is a stepped solid. The gap is a shank-collision question,
+  and §6's depth gate is what covers it.
+- The data needed to *build* some of these solids is missing: `shoulderLength` is **empty**
+  for every engraver and chamfer, and category 7 (tapered ball) has empty `tipDiameter` and
+  `halfAngle`. So "cone point + cylinder" and "tip diameter + half angle" cannot be
+  constructed from the catalogue for those types. Refuse them rather than guess.
 
 ### 3.2 The 2.5D fast path
 
@@ -103,9 +132,17 @@ keeping: the sweep of a disc along a segment is a **capsule**, which is
 `Positive` fill rule union them, with no hull arithmetic in JS.
 
 Constant-Z moves are bucketed by quantised Z, unioned in 2D per bucket, then extruded once
-from that Z up past the stock top. Non-constant-Z moves fall back to §3.1.
+from that Z up past the stock top.
 
-**The naive version of this is catastrophically slow.** §4 is the measurement and the fix.
+**Non-constant-Z moves use the conservative rule, not the exact hull:** the move's capsule
+extruded from its **lowest** Z. That is the rule #182's body always described, it is the
+only affordable one (§4.5), and it **over-removes** — so §7's over-cut check must tolerate
+it rather than treat it as a toolpath fault. Ramps are not an edge case: Studio's own 2.5D
+pockets ramp in.
+
+**Winding is load-bearing.** All contours must be wound counter-clockwise. A clockwise
+rectangle against counter-clockwise caps cancels under `Positive` fill and silently yields
+half a disc — see §4's opening note. Assert the closed-form area (§4.0).
 
 ### 3.3 Rapids, arcs and modal state
 
@@ -128,115 +165,118 @@ from that Z up past the stock top. Non-constant-Z moves fall back to §3.1.
 
 ## 4. Measured performance, and the algorithm it dictates
 
-> ### ⚠ The tables in §4.1–4.3 are WITHDRAWN. They were measured on defective geometry.
->
-> Found by adversarial review, 2026-10-03, and confirmed. Three separate defects in
-> `probe-sim-{perf,2d,3,4}.mjs`:
->
-> 1. **Winding.** The capsule's rectangle was emitted **clockwise** while its end discs
->    were counter-clockwise, so under Clipper2's `Positive` fill rule the windings
->    **cancelled** instead of unioning. A capsule that should measure
->    `2rL + 8r²·sin(2π/n)` = **10.7654 mm²** at L = 10, r = 0.5 actually measured
->    **0.3827 mm²** — exactly half of one 16-gon disc. Every timing, point count and area
->    below is for a union of half-discs.
-> 2. **Pathological load.** The synthetic path was a golden-angle walk of 0.35 mm steps
->    that never left a **1.4 × 1.4 mm box**, so every contour overlapped every other —
->    the worst case for any sweep-line union, and nothing like a glyph.
-> 3. **Lazy evaluation.** Manifold booleans are lazy and `numTri()` sat *outside* the
->    timer, so "extrude + subtract = 2 ms" never timed the subtract at all.
->
-> **What this changes.** The headline conclusion — "a single Clipper2 union call is
-> quadratic and unusable" — **does not survive.** On a spatially spread contour-parallel
-> raster at 250 moves / 750 contours, the single call is **101 ms** against the tree's
-> **72 ms**, and both return an identical 422.444 mm². The quadratic blow-up was a
-> property of the 1.4 mm blob, not of Clipper2.
->
-> **What does survive:** `simplify()` before extruding still pays — with forced
-> evaluation inside the timer, 54 ms unsimplified against 16 ms simplified on that load —
-> and the tree is still the faster of the two. The 482-Z-level finding in §4.5 is
-> unaffected, because it is a count from a real file and involves no sweep.
->
-> **The lesson, and it is a repo rule now:** assert a closed-form area or volume for a
-> single primitive *before* measuring anything built from it. This repo's own notes
-> already said so for two earlier Manifold traps; I did not do it, and three documents
-> carried the consequence. The replacement probe (`probe-sim-5.mjs`) runs that gate first
-> and refuses to continue if it fails.
->
-> Re-measurement on a realistic raster load is in progress; §4.4's algorithm and the
-> budget will be restated from it.
+> **This section was wrong once and is now re-measured.** The first version reported a
+> single Clipper2 union as quadratic and unusable (114 s at 8 000 contours). That came from
+> a probe whose capsule rectangle was wound **clockwise** while its end discs were
+> counter-clockwise, so under `Positive` fill the windings cancelled: a capsule that should
+> be 10.7654 mm² measured **0.3827 mm²**, exactly half a 16-gon disc. The load was also a
+> golden-angle walk confined to a **1.4 mm box**, so every contour overlapped every other,
+> and `numTri()` sat outside the timer so the subtract was never timed. All three are fixed
+> below. Keeping the history because §5.6 of `/Fabrication.md` has now been wrong in both
+> directions, and the reason was always the same: nobody checked a single primitive against
+> a closed form.
 
-All figures below: Manifold 3D wasm via this repo's harness, Windows node v24.19.0,
-synthetic glyph-like paths (short wandering segments), 1 mm flat end mill (r = 0.5),
-16-gon cap circles, one Z level. Scratch probes: `casemaker-app/probe-sim-{perf,2d,3,4}.mjs`.
+### 4.0 The gate comes first
 
-### 4.1 A single Clipper2 union call is quadratic and unusable
+`probe-sim-5.mjs` asserts one capsule against the exact closed form before it measures
+anything:
 
-Feeding every capsule contour to one `new CrossSection(all, 'Positive')`:
+```
+area(capsule(L, r))  ==  2·r·L  +  8·r²·sin(2π/n)        # rectangle + inscribed n-gon disc
+GATE one capsule (L=10, r=0.5): area 10.7654  expected 10.7654  OK
+```
 
-| cutting segments | contours | points | single call | chunked (64) |
+It prints `*** WRONG ***` and skips the measurement if that fails. Whatever ships as the
+real sweeper carries the same assertion as a unit test. This is the only reason the
+defect above is now a paragraph instead of a shipped algorithm.
+
+### 4.1 The load has to be a real toolpath
+
+Figures: Manifold 3D wasm through this repo's harness, Windows node v24.19.0, 1 mm flat
+end mill (r = 0.5), 16-gon caps, one Z level, **contour-parallel raster over a 60 × 20 mm
+face at 63 % stepover** — the shape pocketing actually emits.
+
+| cutting moves | contours | single `CrossSection(all)` | chunk-64 → simplify → 8-way tree | swept area |
 |---|---|---|---|---|
-| 250 | 500 | 5 000 | 261 ms | 34 ms |
-| 500 | 1 000 | 10 000 | 783 ms | 57 ms |
-| 1 000 | 2 000 | 20 000 | **4 530 ms** | 141 ms |
-| 2 000 | 4 000 | 40 000 | **43 430 ms** | 1 903 ms |
-| 4 000 | 8 000 | 80 000 | **114 093 ms** | 904 ms |
+| 250 | 750 | 101 ms | **72 ms** | 422.444 mm² |
+| 1 000 | 3 000 | 282 ms | **192 ms** | 1250.427 mm² |
+| 4 000 | 12 000 | 1 011 ms | **676 ms** | 1250.427 mm² |
+| 12 000 | 36 000 | 6 131 ms | **2 192 ms** | 1250.427 mm² |
 
-Both methods produce an **identical area** (1.366 mm²), so chunking is a restructuring, not
-an approximation. An earlier probe that unioned the extruded solids one at a time instead
-died outright with `RuntimeError: memory access out of bounds`.
+Three things to read off it:
 
-### 4.2 `simplify()` before extruding is free, and removes the 3D cost entirely
+- **The tree is linear; the single call is mildly superlinear.** 12× the contours costs the
+  tree 11.4× and the single call 21.7×. So the tree is worth having — but it is a **2–3×
+  win, not the two orders of magnitude this document previously claimed.**
+- **Area is identical between the two methods at every size**, so the tree is a
+  restructuring and not an approximation. It is also **invariant to how finely the path is
+  subdivided** (1 000 and 12 000 moves over the same region both give 1250.427 mm²), which
+  is a strong signal that the sweep is geometrically right.
+- A single Clipper2 union call is a perfectly serviceable fallback. Clipper2 is not the
+  villain; the 1.4 mm blob was.
 
-The union keeps per-capsule sliver detail: 8 000 contours covering 2.38 mm² came out with
-9 016 contour points and produced 36 076 triangles.
+### 4.2 `simplify()` before extruding, timed properly
 
-| simplify ε | contour points | area (mm²) | extrude + subtract | result triangles |
-|---|---|---|---|---|
-| none | 9 016 | 2.38 | 176 ms | 36 076 |
-| **0.002** | **145** | **2.38** | **2 ms** | **592** |
-| 0.01 | 58 | 2.38 | 1 ms | 244 |
-| 0.05 | 29 | 2.38 | 0 ms | 128 |
+With forced evaluation inside the timer:
 
-`simplify(0.002)` costs 5 ms, cuts contour points 62×, preserves area to three significant
-figures, and makes the whole 3D stage cost 2 ms. **The 3D boolean was never the problem.**
+| contours | extrude + subtract, unsimplified | after `simplify(0.002)` |
+|---|---|---|
+| 3 000 | 80 ms | **40 ms** |
+| 12 000 | 34 ms | **28 ms** |
+| 36 000 | 42 ms | **29 ms** |
 
-### 4.3 Pairwise tree reduction with simplify at each level makes it linear
+A 1.4–2× win, not the 88× the lazy-evaluation bug suggested. The useful property is that
+the 3D stage **stops growing with contour count** once simplified — ~29 ms at 36 000
+contours — so the whole cost sits in the 2D union and the budget is predictable.
 
-| segments | contours | flat union | simplify-each, then one union | **pairwise tree (8-way) + simplify** |
-|---|---|---|---|---|
-| 4 000 | 8 000 | 2 432 ms | 2 153 ms | **473 ms** |
-| 12 000 | 24 000 | 29 811 ms | 25 747 ms | **1 435 ms** |
+Independently verified by the review: `simplify(0.002)` is **safe for this oracle** —
+deliberately left uncut walls of 0.05, 0.01 and 0.003 mm all survive it with unchanged
+contour counts. Only sub-ε slivers, which Clipper2 has already fragmented, change. §9's
+open question 2 is closed for V1 and reopens for V-carve.
 
-Areas agree across all three methods to three decimals (2.374–2.380). Tripling the input
-triples the tree-reduction time — 473 → 1 435 ms — so the tree is **linear** where the flat
-union is quadratic. Simplifying each chunk without restructuring the reduction buys almost
-nothing; the win is the tree.
-
-### 4.4 The algorithm, and the budget
+### 4.3 The algorithm, and the budget
 
 ```
 for each quantised Z level:
-    contours   = capsules for every cutting move at that level        (JS)
-    chunks     = CrossSection(chunk of 64, 'Positive').simplify(ε)    (Clipper2)
-    region     = pairwise 8-way union tree, simplify(ε) at each level
-    solid      = extrude(region, stockTop - z).translate(z)
+    contours = capsules for every cutting move at that level            (JS, CCW!)
+    chunks   = CrossSection(chunk of 64, 'Positive').simplify(ε)        (Clipper2)
+    region   = 8-way pairwise union tree, simplify(ε) at each level
+    solid    = extrude(region, stockTop - z).translate(z)
 removal = union(solids);   after = stock.subtract(removal)
 ```
 
-with ε = 0.002 mm. **Budget: ~1.4 s per Z level at 12 000 cutting segments**, so a
-three-depth badge lands at **4–5 s** — a debounced background job in the geometry worker,
-not a per-frame computation. Cap circles at 16 segments (chord error 0.010 mm at r = 0.5);
-reducing to 12 made it *slower*, not faster, so segment-count tuning is not a lever.
+ε = 0.002 mm. **Budget: ~0.7 s per Z level at 4 000 cutting moves, ~2.2 s at 12 000.** A
+solid 60 × 20 mm pocket at 63 % stepover is about 1 000 moves, so a realistic three-label
+badge lands **well under a second in total**; 12 000 is a generous upper bound. That makes
+it a debounced worker job comfortably, and possibly an interactive one.
 
-### 4.5 Where exact CSG stops being the right answer
+**Do not pick the cap-segment count by intuition.** 16 segments gives 0.010 mm chord error
+at r = 0.5. Dropping to 12 made an earlier probe *slower*, not faster.
+
+### 4.4 Where exact CSG stops being the right answer
 
 Parsing Studio's `TopClamp.nc` — a real 3D job with ramping — gives **9 618 cutting moves
-spread over 482 distinct Z levels**, 19 204 contours, 192 232 points. Exact CSG needs one
-extrude and one boolean per level, so 482 levels is not a tuning problem; it is the wrong
-representation. **This is the case decision 2's dexel engine exists for**, and it is now
-measured rather than assumed.
+over 482 distinct Z levels**, 19 204 contours. Exact CSG needs an extrude and a boolean per
+level, so 482 levels is not a tuning problem; it is the wrong representation. This figure
+is a count from a real file and involves no sweep, so it is unaffected by everything
+retracted above. **It is the measured case for decision 2's dexel engine.**
 
----
+### 4.5 The hull path has no budget, and that is a scope problem
+
+§3.1's "one `hull` of two tool solids is an exact sweep for all of them" is correct
+mathematics and **not a V1-usable algorithm**. Measured with forced evaluation: 400
+hull-moves take 8–13 s; 1 600 take **40–119 s**, super-linearly, and the tree reduction
+helps only ~2.5×. At 12 000 moves it is hours.
+
+This bites earlier than V-bits do. **Studio's own 2.5D pockets ramp in** — `TopClamp.nc`'s
+first toolpath enters on a Z-interpolating ramp — so any third-party file has
+non-constant-Z moves. §3.2's "those fall back to §3.1" therefore commits V1 to an
+unaffordable path.
+
+**V1's exactness claim is for a flat end mill at constant Z.** Non-constant-Z moves use the
+conservative rule — the capsule extruded from the move's lowest Z — which over-removes, so
+§7's over-cut oracle has to tolerate it. Hull-per-move moves next to the dexel decision in
+§5, not into V1.
 
 ## 5. Two backends, one interface
 
@@ -277,7 +317,10 @@ from in our own UI is an open question (§9).
 settings files, so a simulator that quietly coerces bad input reproduces bad input.
 
 - Unknown or unsupported tool `type=` → refuse. Do not simulate a V-bit as a flat end.
-- Cut depth greater than `fluteLength` → refuse; the shank would be rubbing.
+- Cut depth greater than **`shoulderLength ?? fluteLength`** → refuse; the shank or neck
+  would be rubbing. `shoulderLength` is the governing field and the catalogue leaves it
+  **empty for every engraver and chamfer**, so **refuse when both are missing** rather
+  than falling through to "no limit".
 - Non-finite, denormal or out-of-range coordinate, feed or spindle value → refuse, naming
   the line.
 - Feed or spindle beyond the selected machine's limits → refuse. Makera's own tool table
@@ -292,13 +335,29 @@ engravable region **analytically**, as the morphological opening of the glyph
 `offset(offset(G, −r), +r)`. The simulator computes the same region **from the toolpath**.
 Disagreement means the toolpath is wrong.
 
+**First, a limit on what this can prove.** #172 computes its first pocket loop as
+`offset(region, −r)` using the same Clipper2 primitive #171 uses for `offset(G, −r)`, and
+sweeping that loop with a disc of radius *r* reconstructs `offset(offset(G,−r),+r)` **by
+construction**. So "no over-cut" is close to an identity, and a wrong *r* shared by #171,
+#172 and #182, a glyph-outline bug, or a Clipper2 offset bug is invisible to it — and the
+viewport, drawing the same opened region, agrees with the mistake. **The oracle's real
+content is the under-cut direction** (stepover cusps, unreached interior) plus
+serialisation. For genuine independence, add one check computed a *different* way: sample
+points of the raw glyph whose distance to its boundary is ≥ *r* — by point-in-polygon on
+the original outline, not by offsetting — and assert each lies inside the simulated region.
+
 The two cannot be compared for exact equality: #171's prediction uses Clipper2 arc offsets
 while the sweep hulls tessellated circles and then simplifies, so every round corner leaves
-slivers. Compare in an **ε band** instead, with the band strictly larger than the sweep's
-own simplify ε and the cap-circle chord error:
+slivers. Compare in an **ε band**, and size it honestly — the tree applies `simplify(ε)` at
+**every level**, so the drift is `levels × ε` (about 3ε here), not ε; the inscribed 16-gon
+also under-removes by 0.010 mm **one-sidedly**, which is a bias rather than a tolerance.
+The band must exceed the sum:
 
 - `difference(offset(predicted, −ε), simulated)` must be empty → the toolpath does not
   **under-cut**. This is what catches uncut corners and stepover gaps.
+  **Per level, `predicted` is the union of the openings of every label whose depth reaches
+  that level or deeper**, because the extrude runs from that Z up to the stock top. Comparing
+  a single label's opening against a level's removal will fail for the wrong reason.
 - `difference(simulated, offset(predicted, +ε))` must be empty → it does not **over-cut**
   outside the glyph.
 - `intersection(removal, magnetPocketVoid)` must be **empty** at every permitted depth, and
@@ -351,9 +410,10 @@ about how the part will *look* beyond which colour volume a floor lands in.
    catalogue is in a local SQLite file the web build cannot read (`/Fabrication.md` §5.7,
    #181), so V1 needs its own small tool list with the §6 fields, and the DB becomes an
    import path later.
-2. **Is ε = 0.002 mm safe for the oracle, or does it mask a real thin feature?** It
-   preserved area to three figures on synthetic paths; it has not been tried on real glyph
-   outlines at badge scale.
+2. ~~**Is ε = 0.002 mm safe for the oracle?**~~ **Closed for V1.** Independently checked:
+   deliberately uncut walls of 0.05, 0.01 and 0.003 mm all survive `simplify(0.002)` with
+   unchanged contour counts; only sub-ε slivers that Clipper2 has already fragmented change.
+   Reopens for V-carve, where the floor width is a function of depth.
 3. **Does the pairwise tree stay linear past 24 000 contours?** Measured at 8 000 and
    24 000. A full-face relief would be far larger.
 4. **Can the dexel backend share the `Move[]` type unchanged?** It should, but rotary adds
