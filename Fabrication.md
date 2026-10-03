@@ -402,13 +402,19 @@ flat end mill at constant Z. For any *convex* tool translated along a segment,
 convex solid of revolution (`/Makera-Parity.md` §3). So one rule covers flat, ball, bull,
 V, chamfer and drill, at any Z, ramps included.
 
-**Correction, from measurement.** This section previously claimed "Clipper2 unions
-thousands of short glyph segments cheaply; Manifold booleans do not". That is backwards.
-A single `CrossSection(allContours, 'Positive')` call is **quadratic** — 114 s at 8 000
-contours — while the Manifold boolean, after a `simplify(0.002)` that costs 5 ms and
-preserves area to three figures, costs **2 ms**. The fix is a chunked **pairwise union
-tree** with simplify at each level, which is linear: 1.4 s at 24 000 contours against
-29.8 s for the flat union. `/Simulation.md` §4 has the tables.
+**Performance: see `/Simulation.md` §4, and note the retraction there.** This section
+previously claimed "Clipper2 unions thousands of short glyph segments cheaply; Manifold
+booleans do not", then replaced it with the opposite — that a single Clipper2 union is
+quadratic. **Both statements were wrong**, the second because the probe behind it had a
+clockwise capsule rectangle that cancelled its own end discs under `Positive` fill, and a
+synthetic load confined to a 1.4 mm box. On a realistic raster the single call and the
+union tree are within 30 % of each other. The settled position is that `simplify()` before
+extruding pays, the tree is modestly faster, and neither library is the villain — the full
+re-measurement lives in `/Simulation.md` §4.
+
+**The rule that would have caught it:** assert a closed-form area or volume for one
+primitive before measuring anything built from it. §5 of the geometry notes already said
+this for two earlier Manifold traps.
 
 **Correction, on scope.** Exact CSG is right for V1 but does not generalise to dense 3D:
 Studio's own `TopClamp.nc` spreads 9 618 cutting moves over **482 distinct Z levels**, and

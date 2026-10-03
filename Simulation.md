@@ -128,9 +128,46 @@ from that Z up past the stock top. Non-constant-Z moves fall back to §3.1.
 
 ## 4. Measured performance, and the algorithm it dictates
 
-All figures: Manifold 3D wasm via this repo's harness, Windows node v24.19.0, synthetic
-glyph-like paths (short wandering segments), 1 mm flat end mill (r = 0.5), 16-gon cap
-circles, one Z level. Scratch probes: `casemaker-app/probe-sim-{perf,2d,3,4}.mjs`.
+> ### ⚠ The tables in §4.1–4.3 are WITHDRAWN. They were measured on defective geometry.
+>
+> Found by adversarial review, 2026-10-03, and confirmed. Three separate defects in
+> `probe-sim-{perf,2d,3,4}.mjs`:
+>
+> 1. **Winding.** The capsule's rectangle was emitted **clockwise** while its end discs
+>    were counter-clockwise, so under Clipper2's `Positive` fill rule the windings
+>    **cancelled** instead of unioning. A capsule that should measure
+>    `2rL + 8r²·sin(2π/n)` = **10.7654 mm²** at L = 10, r = 0.5 actually measured
+>    **0.3827 mm²** — exactly half of one 16-gon disc. Every timing, point count and area
+>    below is for a union of half-discs.
+> 2. **Pathological load.** The synthetic path was a golden-angle walk of 0.35 mm steps
+>    that never left a **1.4 × 1.4 mm box**, so every contour overlapped every other —
+>    the worst case for any sweep-line union, and nothing like a glyph.
+> 3. **Lazy evaluation.** Manifold booleans are lazy and `numTri()` sat *outside* the
+>    timer, so "extrude + subtract = 2 ms" never timed the subtract at all.
+>
+> **What this changes.** The headline conclusion — "a single Clipper2 union call is
+> quadratic and unusable" — **does not survive.** On a spatially spread contour-parallel
+> raster at 250 moves / 750 contours, the single call is **101 ms** against the tree's
+> **72 ms**, and both return an identical 422.444 mm². The quadratic blow-up was a
+> property of the 1.4 mm blob, not of Clipper2.
+>
+> **What does survive:** `simplify()` before extruding still pays — with forced
+> evaluation inside the timer, 54 ms unsimplified against 16 ms simplified on that load —
+> and the tree is still the faster of the two. The 482-Z-level finding in §4.5 is
+> unaffected, because it is a count from a real file and involves no sweep.
+>
+> **The lesson, and it is a repo rule now:** assert a closed-form area or volume for a
+> single primitive *before* measuring anything built from it. This repo's own notes
+> already said so for two earlier Manifold traps; I did not do it, and three documents
+> carried the consequence. The replacement probe (`probe-sim-5.mjs`) runs that gate first
+> and refuses to continue if it fails.
+>
+> Re-measurement on a realistic raster load is in progress; §4.4's algorithm and the
+> budget will be restated from it.
+
+All figures below: Manifold 3D wasm via this repo's harness, Windows node v24.19.0,
+synthetic glyph-like paths (short wandering segments), 1 mm flat end mill (r = 0.5),
+16-gon cap circles, one Z level. Scratch probes: `casemaker-app/probe-sim-{perf,2d,3,4}.mjs`.
 
 ### 4.1 A single Clipper2 union call is quadratic and unusable
 
