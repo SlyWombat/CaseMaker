@@ -672,10 +672,19 @@ measure it. Z stays probed, always.
 
 **Unverified, and all of it load-bearing before any of the above is designed:**
 
-- **The camera-to-machine transform.** Position relative to the spindle, field of view,
-  resolution, whether it looks straight down, and lens distortion. Without a calibrated
-  pixel→machine mapping there is no vision registration, only a picture. Nothing found so
-  far documents any of it.
+- **The camera-to-machine transform** — position relative to the spindle, field of view,
+  resolution, whether it looks straight down, lens distortion. Nothing found documents any
+  of it. **But it does not need to be documented: we can measure it ourselves (#189.)** The
+  maintainer's procedure is a target with identifiable features plus a machine-driven grid
+  of snapshots, stitched, checking the offset at each location — which solves scale,
+  rotation and distortion at once, and gives machine backlash and squareness free as the
+  stitch's closure residual.
+  The point that makes it sound: **the machine is the length standard, not the paper.** A
+  commanded 50 mm move is a far better ruler than a desktop printer, which carries
+  0.2–0.5 % scale error. The printed pattern supplies detectable features; the machine
+  supplies distance. Two things #189 adds: stitching alone cannot give the
+  **camera-to-spindle offset** (that needs one tie-point milled with the actual cutter), and
+  **mm-per-pixel is a function of Z**, so it must be calibrated at more than one height.
 - **Whether Studio exposes camera-based origin setting for the Z1.** Everything found
   describes the work-origin flow as jog buttons plus the 3D Probe or Auto Probe, and the
   camera as monitoring and time-lapse. The feature may simply not exist.
