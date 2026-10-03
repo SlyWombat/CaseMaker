@@ -8,9 +8,12 @@
  * runs on any `.nc` — the vendor's included — which is the point of simulating the file.
  *
  * WHAT IT CATCHES THAT A VOLUMETRIC ORACLE CANNOT. A union of swept volumes is blind to
- * move order, feed and spindle state: it will draw a cut made with the spindle off exactly
- * as it draws a correct one. A state machine sees it for free. So "cutting with the spindle
- * off" and "cutting at an unknown Z" are diagnostics here, not geometry checks.
+ * move order and to state: it cannot tell a cut at an unknown position from a known one. So
+ * "cutting at a position the program never established" is a diagnostic here — a WARNING,
+ * because the machine knows where it is and only the emulator does not: the picture has a
+ * gap, the program is not wrong. `summary.unsweptMoves` counts the gaps. Spindle-off is deliberately NOT: a feed
+ * move with the spindle off is fine in air, and only the geometry knows whether the tool is
+ * near the material, the fixture or the bed, so that check lives with the sweep.
  *
  * CHECKPOINTS ARE KEYED BY (SEGMENT, Z), not by Z alone. `/Simulation.md` §4.3 once
  * bucketed by quantised Z across the whole program, which merges two labels cut at the same
@@ -22,7 +25,8 @@
  */
 
 import { machinePosToWork, workPosToMachine } from '../frames';
-import type { GcodeEvent, MoveEvent, ParseResult, Pos } from '../gcode/types';
+import type { GcodeEvent, MoveEvent, ParseResult, Pos, ProbeEvent, ToolChangeEvent } from '../gcode/types';
+import type { MachineProfile } from '../machine';
 import type { Setup } from '../setup';
 import type { Vec3 } from '@/types/units';
 
@@ -42,6 +46,8 @@ export interface MachineState {
   wcsOrigin: Vec3;
   work: Pos;
   machine: Pos;
+  /** Rotary axis, tracked only. */
+  a: number | null;
 }
 
 export type PauseKind = 'tool-change' | 'M490.1' | 'M600';
@@ -75,8 +81,16 @@ export interface Checkpoint {
   zKey: number;
   /** The Z in mm that bucket stands for: the LOWEST Z of any move in it. */
   z: number;
-  /** Event indices of the cutting moves, in program order. */
+  /** Step indices of the cutting moves, in program order. */
   steps: number[];
+  /**
+   * The same moves resolved in the WORK frame, flat: [x0, y0, x1, y1, ...], one quad per
+   * entry of `steps`. This is what the sweep consumes. A move whose START X,Y the program
+   * never established is stored as a zero-length move at its end (a plunge: the disc only),
+   * which is the conservative geometric reading; one whose END X,Y is unknown is dropped
+   * with an error, because nothing can be invented for it.
+   */
+  xy: number[];
   /**
    * True if any move in the bucket changes Z. These use the conservative rule (the move's
    * lowest Z), which OVER-removes; the over-cut check must tolerate it (`/Simulation.md` §3.2).
@@ -100,7 +114,15 @@ export interface Timeline {
   diagnostics: TimelineDiagnostic[];
   /** The state AFTER event `i`; `i = -1` is the state before the program starts. */
   stateAt(i: number): MachineState;
-  summary: { steps: number; segments: number; pauses: number; checkpoints: number; cuttingMoves: number };
+  summary: {
+    steps: number;
+    segments: number;
+    pauses: number;
+    checkpoints: number;
+    cuttingMoves: number;
+    /** Cutting moves the sweep cannot place because the program never established their position. */
+    unsweptMoves: number;
+  };
 }
 
 const SNAPSHOT_EVERY = 512;
@@ -117,6 +139,7 @@ export function initialState(setup: Setup): MachineState {
     wcsOrigin: [setup.wcs.origin[0], setup.wcs.origin[1], setup.wcs.origin[2]],
     work: [null, null, null],
     machine: [null, null, null],
+    a: null,
   };
 }
 
@@ -174,6 +197,7 @@ export function applyEvent(s: MachineState, ev: GcodeEvent, setup: Setup): Machi
       if (ev.frame === 'work') {
         return {
           ...s,
+          a: ev.a,
           work: to,
           // Only G54 is modelled: another WCS has an offset this emulator was not given.
           machine: s.wcs === 0 ? workPosToMachine(withOrigin(setup, s), to) : unknownPos(),
@@ -189,9 +213,12 @@ export function applyEvent(s: MachineState, ev: GcodeEvent, setup: Setup): Machi
       const real = isRealToolChange(s, ev.tool);
       // A no-op leaves everything alone: no change, no calibration, the head does not move.
       if (real === false) return s;
-      // A real change (or one that cannot be ruled out): the spindle is stopped, the new tool
-      // is active, and the head comes back to the saved X,Y at the machine's clearance Z. So
-      // X and Y survive and Z is unknown, in BOTH frames.
+      // A real change (or one that cannot be ruled out): the spindle is stopped and the new
+      // tool is active. Where the head ends up depends on whether the runner expanded the
+      // macro: if it did, the surrounding synthetic moves own the position and nothing is
+      // forgotten here; if not, the head comes back to the saved X,Y at a clearance Z this
+      // reducer was not given, so X and Y survive and Z is unknown, in BOTH frames.
+      if (ev.expanded) return { ...s, tool: ev.tool, spindle: 'off' };
       return {
         ...s,
         tool: ev.tool,
@@ -223,8 +250,21 @@ export function applyEvent(s: MachineState, ev: GcodeEvent, setup: Setup): Machi
       next.work = s.wcs === 0 ? machinePosToWork(withOrigin(setup, next), s.machine) : unknownPos();
       return next;
     }
+    case 'probe': {
+      // A probe moves only the axes it names, and stops early, at contact: those axes are
+      // unknown afterwards and the others are exactly where they were. (A Z probe at the
+      // tool-length sensor leaves X,Y at the sensor.)
+      const work: Pos = [s.work[0], s.work[1], s.work[2]];
+      const machine: Pos = [s.machine[0], s.machine[1], s.machine[2]];
+      for (let i = 0; i < 3; i++) {
+        if (ev.target[i] !== null) {
+          work[i] = null;
+          machine[i] = null;
+        }
+      }
+      return { ...s, work, machine };
+    }
     case 'home':
-    case 'probe':
     case 'tlo-calibrate':
       return { ...s, work: unknownPos(), machine: unknownPos() };
     case 'program-end':
@@ -241,8 +281,62 @@ function lowestKnownZ(a: number | null, b: number | null): number | null {
   return Math.min(a, b);
 }
 
-export function buildTimeline(parse: ParseResult, setup: Setup): Timeline {
-  const events = parse.events;
+/**
+ * The firmware's manual tool-change macro, as synthetic machine-frame steps (#182, Q14).
+ * Read from `fill_change_scripts`, `fill_cali_scripts` and the completion path of
+ * `ATCHandler.cpp` (`/Z1-Firmware-Dialect.md` §2); the positions are the profile's.
+ *
+ *   lift to clearance Z -> park at the change position -> [M490.1: operator swaps the tool]
+ *   -> safe Z -> to the tool-length sensor -> probe down fast, retract, probe slow
+ *   -> save the offset -> safe Z -> clearance Z -> back to the saved X,Y
+ *
+ * The probe stops at the tool tip's contact, a height the program cannot know, so Z is
+ * unknown between the probe and the next rapid. After the macro the head is at the saved
+ * X,Y and `clearanceZ`: all three axes KNOWN, which is strictly more than the un-expanded
+ * change (Z unknown) can say.
+ */
+export function toolChangeMacro(ev: ToolChangeEvent, before: MachineState, m: MachineProfile): GcodeEvent[] {
+  const tc = m.toolChange;
+  const base = { line: ev.line, synthetic: 'tool-change-macro' as const };
+  const mv = (from: Pos, to: Pos, commanded: [boolean, boolean, boolean]): MoveEvent => ({
+    kind: 'move',
+    ...base,
+    mode: 'rapid',
+    frame: 'machine',
+    from,
+    to,
+    a: before.a ?? null,
+    feed: null,
+    power: null,
+    fromArc: false,
+    commanded,
+    values: [commanded[0] ? to[0] : null, commanded[1] ? to[1] : null, commanded[2] ? to[2] : null],
+    relative: false,
+  });
+  const probe = (target: Pos): ProbeEvent => ({ kind: 'probe', ...base, subcode: 6, target });
+  const saved = before.machine;
+  const atClear: Pos = [saved[0], saved[1], tc.clearanceZ];
+  const parked: Pos = [tc.changePosition[0], tc.changePosition[1], tc.clearanceZ];
+  const safeOverPark: Pos = [parked[0], parked[1], tc.safeZ];
+  const sensorAtSafe: Pos = [tc.sensor[0], tc.sensor[1], tc.safeZ];
+  const sensorUnknownZ: Pos = [tc.sensor[0], tc.sensor[1], null];
+  return [
+    mv(saved, atClear, [false, false, true]),
+    mv(atClear, parked, [true, true, false]),
+    { ...ev, expanded: true },
+    mv(parked, safeOverPark, [false, false, true]),
+    mv(safeOverPark, sensorAtSafe, [true, true, false]),
+    probe([null, null, tc.sensorZ]),
+    probe([null, null, tc.sensorZ]),
+    { kind: 'tlo-calibrate', ...base },
+    mv(sensorUnknownZ, sensorAtSafe, [false, false, true]),
+    mv(sensorAtSafe, [tc.sensor[0], tc.sensor[1], tc.clearanceZ], [false, false, true]),
+    mv([tc.sensor[0], tc.sensor[1], tc.clearanceZ], atClear, [true, true, false]),
+  ];
+}
+
+export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MachineProfile): Timeline {
+  const events: GcodeEvent[] = [];
   const diagnostics: TimelineDiagnostic[] = [];
   const segments: Segment[] = [];
   const pauses: PausePoint[] = [];
@@ -250,6 +344,7 @@ export function buildTimeline(parse: ParseResult, setup: Setup): Timeline {
   const order: Checkpoint[] = [];
   const snapshots: MachineState[] = [];
   let cuttingMoves = 0;
+  let unswept = 0;
 
   const diag = (severity: TimelineDiagnostic['severity'], code: string, step: number, line: number, message: string): void => {
     diagnostics.push({ severity, code, line, step, message });
@@ -263,6 +358,7 @@ export function buildTimeline(parse: ParseResult, setup: Setup): Timeline {
   segments.push(seg);
   let segHasMove = false;
   const warnedWcs = new Set<number>();
+  let warnedFromXY = false;
 
   /** Open a new segment at `step`, unless the current one has done no work yet. */
   const boundary = (step: number, pause: PausePoint | null): void => {
@@ -278,8 +374,9 @@ export function buildTimeline(parse: ParseResult, setup: Setup): Timeline {
     segHasMove = false;
   };
 
-  for (let i = 0; i < events.length; i++) {
-    const ev = events[i] as GcodeEvent;
+  const process = (ev: GcodeEvent): void => {
+    const i = events.length;
+    events.push(ev);
 
     if (ev.kind === 'toolpath-start') {
       toolpath = ev.number;
@@ -311,14 +408,11 @@ export function buildTimeline(parse: ParseResult, setup: Setup): Timeline {
       const m: MoveEvent = ev;
       if (m.mode === 'cut' && !state.laser) {
         cuttingMoves++;
-        if (state.spindle === 'off') {
-          // A WARNING, not an error. The state machine cannot know whether the move is in air
-          // or in stock, and a feed move with the spindle off is sometimes deliberate: the
-          // vendor's own `fatigue-test-air.nc` opens with `G1 Z-50` / `G1 Z-61` under the
-          // label "(Height Test)" before it ever issues `M3`. It becomes an ERROR only when
-          // the move enters stock, which needs the geometry (`/Simulation.md` §7.1).
-          diag('warning', 'cut-spindle-off', i, m.line, 'a feed move with the spindle off. If it enters stock a volumetric simulation would draw it exactly like a correct cut; it is an error only then, which needs the geometry');
-        }
+        // NOT checked here: a feed move with the spindle off. The maintainer's rule
+        // (2026-10-03): it is neither an error nor a warning UNLESS the tool is near the
+        // material, the fixture or the bed, and nearness is geometry, which this state machine
+        // does not have. The vendor's own fatigue-test-air.nc feeds down with the spindle off
+        // in a "(Height Test)" before its first M3. The proximity check belongs to the sweep.
         // Cutting happens in work coordinates; a machine-frame cut converts first. Resolved
         // against the RUNNER's state, not the parser's (see `resolveMove`).
         const r = resolveMove(state, m);
@@ -326,17 +420,32 @@ export function buildTimeline(parse: ParseResult, setup: Setup): Timeline {
         const fromW = m.frame === 'work' ? r.from : machinePosToWork(withOrigin(setup, state), r.from);
         const z = lowestKnownZ(toW[2], fromW[2]);
         if (toW[2] === null || z === null) {
-          diag('error', 'cut-unknown-z', i, m.line, 'a cutting move to a Z the program never established: the emulator will not invent one');
+          // A WARNING, not an error: the machine knows where it is, the emulator was not told.
+          // The vendor's own rotary samples open with `G01 Z30` before any X,Y is set. The
+          // picture has a gap here; the move is counted so the UI can say how many.
+          unswept++;
+          diag('warning', 'cut-unknown-z', i, m.line, 'a cutting move at a Z the program never established: not swept, the emulator will not invent one (the picture has a gap here)');
         } else {
           const zKey = Math.round(z * 1000);
           const key = `${seg.index}:${zKey}`;
           let cp = buckets.get(key);
           if (!cp) {
-            cp = { segment: seg.index, zKey, z, steps: [], nonConstantZ: false };
+            cp = { segment: seg.index, zKey, z, steps: [], xy: [], nonConstantZ: false };
             buckets.set(key, cp);
             order.push(cp);
           }
-          cp.steps.push(i);
+          if (toW[0] === null || toW[1] === null) {
+            unswept++;
+            diag('warning', 'cut-unknown-xy', i, m.line, 'a cutting move to an X or Y the program never established: not swept, nothing can be invented for it (the picture has a gap here)');
+          } else {
+            const fromKnown = fromW[0] !== null && fromW[1] !== null;
+            if (!fromKnown && !warnedFromXY) {
+              warnedFromXY = true;
+              diag('info', 'cut-from-unknown-xy', i, m.line, 'a cutting move from an X,Y the program never established is swept as a plunge at its end point only');
+            }
+            cp.steps.push(i);
+            cp.xy.push(fromKnown ? (fromW[0] as number) : toW[0], fromKnown ? (fromW[1] as number) : toW[1], toW[0], toW[1]);
+          }
           // Non-constant only when BOTH ends are known and differ. A move whose start Z is
           // unknown (a plunge from the tool-change clearance height) is not a ramp: it is a
           // vertical column from its known end up, which is exactly what the lowest-Z rule
@@ -351,6 +460,14 @@ export function buildTimeline(parse: ParseResult, setup: Setup): Timeline {
 
     state = applyEvent(state, ev, setup);
     if ((i + 1) % SNAPSHOT_EVERY === 0) snapshots.push(state);
+  };
+
+  for (const src of parse.events) {
+    if (src.kind === 'tool-change' && machine && !machine.hasATC && isRealToolChange(state, src.tool) !== false) {
+      for (const step of toolChangeMacro(src, state, machine)) process(step);
+    } else {
+      process(src);
+    }
   }
   seg.end = events.length;
 
@@ -376,6 +493,7 @@ export function buildTimeline(parse: ParseResult, setup: Setup): Timeline {
       pauses: pauses.length,
       checkpoints: order.length,
       cuttingMoves,
+      unsweptMoves: unswept,
     },
   };
 }

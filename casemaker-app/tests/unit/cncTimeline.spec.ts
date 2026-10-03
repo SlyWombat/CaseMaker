@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyEvent, buildTimeline, initialState, parseGcode, stubSetup, type Setup } from '@/engine/cnc';
+import { applyEvent, buildTimeline, initialState, parseGcode, stubSetup, Z1, type Setup } from '@/engine/cnc';
 import type { GcodeEvent } from '@/engine/cnc/gcode';
 
 const part = { kind: 'prism' as const, outline: { kind: 'p-rect' as const, size: [76.2, 38.1] as [number, number] }, thickness: 3.81 };
@@ -17,7 +17,7 @@ const codes = (src: string, o: Partial<Setup> = {}) => run(src, o).diagnostics.m
 describe('machine state: what the controller holds after each step', () => {
   it('starts from the setup: starting tool, spindle off, nothing known', () => {
     const s = initialState(setupWith({ startingTool: 3 }));
-    expect(s).toMatchObject({ tool: 3, spindle: 'off', air: false, laser: false, wcs: 0 });
+    expect(s).toMatchObject({ tool: 3, spindle: 'off', air: false, laser: false, wcs: 0, a: null });
     expect(s.work).toEqual([null, null, null]);
     expect(s.machine).toEqual([null, null, null]);
   });
@@ -65,12 +65,19 @@ describe('machine state: what the controller holds after each step', () => {
     expect(run('G10L2P1X-9Y-9Z-9\n').stateAt(0).wcsOrigin).toEqual([0, 0, 3.81]);
   });
 
-  it('G28, a probe and M491 forget the position', () => {
-    for (const cmd of ['G28', 'G38.2 Z-5 F50', 'M491']) {
+  it('G28 and M491 make the whole position unknown again', () => {
+    for (const cmd of ['G28', 'M491']) {
       const s = run(`G0 X1 Y2 Z3\n${cmd}\n`).stateAt(1);
       expect(s.work, cmd).toEqual([null, null, null]);
       expect(s.machine, cmd).toEqual([null, null, null]);
     }
+  });
+
+  it('a probe forgets ONLY the axes it moved: a Z probe leaves X,Y where they were', () => {
+    const s = run('G0 X1 Y2 Z3\nG38.2 Z-5 F50\n').stateAt(1);
+    expect(s.work).toEqual([1, 2, null]);
+    expect(s.machine[2]).toBeNull();
+    expect(s.machine[0]).toBeCloseTo(1, 12);
   });
 
   it('selecting a work offset the setup was not given makes positions unknown, and warns ONCE', () => {
@@ -198,6 +205,85 @@ describe('tool changes and pauses (the emulator stops where the machine stops)',
   });
 });
 
+describe('the tool-change macro, animated from the machine profile (#182 Q14, #184)', () => {
+  const M = Z1;
+  const prog = 'G0 X-50 Y-60 Z-10\nS1000 M3\nT2M6\nG0 X-55\n';
+
+  it('without a profile: a pause, X,Y kept, Z unknown (the un-expanded change)', () => {
+    const tl = run(prog, { startingTool: 1 });
+    expect(tl.events.filter((e) => e.synthetic)).toHaveLength(0);
+    // The parser emits a `spindle off` BEFORE the change (the spindle was on), so the change
+    // is not at the index a naive count gives: find it.
+    const tc = tl.events.findIndex((e) => e.kind === 'tool-change');
+    expect(tl.stateAt(tc).machine).toEqual([-50, -60, null]);
+  });
+
+  it('with the Z1 profile: the macro\'s steps are inserted, in the firmware\'s order', () => {
+    const tl = buildTimeline(parseGcode(prog), setupWith({ startingTool: 1 }), M);
+    const synth = tl.events.filter((e) => e.synthetic === 'tool-change-macro');
+    expect(synth.map((e) => e.kind)).toEqual([
+      'move', 'move', // lift to clearance Z, park at the change position
+      'move', 'move', // safe Z, to the sensor
+      'probe', 'probe', 'tlo-calibrate', // probe twice, save the offset
+      'move', 'move', 'move', // safe Z, clearance Z, back to the saved X,Y
+    ]);
+    // Every synthetic step carries the M6 line, and is a machine-frame rapid.
+    expect(synth.every((e) => e.line === 3)).toBe(true);
+    expect(synth.filter((e) => e.kind === 'move').every((e) => e.kind === 'move' && e.frame === 'machine' && e.mode === 'rapid')).toBe(true);
+  });
+
+  it('the tool-change event itself sits between the park and the probe, and is the pause point', () => {
+    const tl = buildTimeline(parseGcode(prog), setupWith({ startingTool: 1 }), M);
+    const tcIdx = tl.events.findIndex((e) => e.kind === 'tool-change');
+    expect(tl.events[tcIdx - 1]).toMatchObject({ kind: 'move', synthetic: 'tool-change-macro' });
+    expect(tl.events[tcIdx + 1]).toMatchObject({ kind: 'move', synthetic: 'tool-change-macro' });
+    expect(tl.pauses).toHaveLength(1);
+    expect(tl.pauses[0]?.step).toBe(tcIdx);
+    expect(tl.events[tcIdx]).toMatchObject({ kind: 'tool-change', expanded: true });
+  });
+
+  it('the head goes where the firmware sends it: clearance, change position, safe, sensor, and BACK', () => {
+    const tl = buildTimeline(parseGcode(prog), setupWith({ startingTool: 1 }), M);
+    // The program's work (-50, -60, -10) with the stub WCS at (0, 0, 3.81) is machine (-50, -60, -6.19).
+    const steps = tl.events.map((_, i) => tl.stateAt(i).machine);
+    const tc = M.toolChange;
+    const first = tl.events.findIndex((e) => e.synthetic === 'tool-change-macro'); // the lift
+    expect(steps[first]).toEqual([-50, -60, tc.clearanceZ]);
+    expect(steps[first + 1]).toEqual([tc.changePosition[0], tc.changePosition[1], tc.clearanceZ]);
+    expect(tl.events[first + 2]?.kind).toBe('tool-change');
+    expect(steps[first + 3]).toEqual([tc.changePosition[0], tc.changePosition[1], tc.safeZ]);
+    expect(steps[first + 4]).toEqual([tc.sensor[0], tc.sensor[1], tc.safeZ]);
+    expect(steps[first + 5]).toEqual([tc.sensor[0], tc.sensor[1], null]); // after the probe: Z is at contact
+    expect(steps[first + 10]).toEqual([-50, -60, tc.clearanceZ]); // back to the saved X,Y, at clearance
+  });
+
+  it('after the macro ALL THREE axes are known, so the next move is drawable', () => {
+    const tl = buildTimeline(parseGcode(prog), setupWith({ startingTool: 1 }), M);
+    const last = tl.events.length - 1;
+    expect(tl.events[last]).toMatchObject({ kind: 'move', frame: 'work' });
+    const s = tl.stateAt(last);
+    expect(s.work[0]).toBeCloseTo(-55, 12);
+    expect(s.work[1]).toBeCloseTo(-60, 12);
+    expect(s.work[2]).toBeCloseTo(M.toolChange.clearanceZ - 3.81, 12);
+    expect(tl.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  });
+
+  it('a NO-OP change inserts nothing, with or without a profile', () => {
+    expect(buildTimeline(parseGcode('G0 X1\nT1M6\n'), setupWith({ startingTool: 1 }), M).events.filter((e) => e.synthetic)).toHaveLength(0);
+  });
+
+  it('a change from an unknown position still animates, returning to an unknown X,Y', () => {
+    const tl = buildTimeline(parseGcode('T2M6\n'), setupWith({ startingTool: 1 }), M);
+    const last = tl.stateAt(tl.events.length - 1).machine;
+    expect(last).toEqual([null, null, M.toolChange.clearanceZ]);
+  });
+
+  it('synthetic moves never make checkpoints: they are rapids, not cuts', () => {
+    const tl = buildTimeline(parseGcode('S1000 M3\nG1 X1 Y1 Z-1 F100\nT2M6\n'), setupWith({ startingTool: 1 }), M);
+    expect(tl.summary.checkpoints).toBe(1);
+  });
+});
+
 describe('segments: the boundaries playback pauses and scrubs on', () => {
   const prog = [
     ';@MKR|TOOLPATH_START|toolpath_number=1',
@@ -244,7 +330,7 @@ describe('checkpoints: keyed by (segment, Z), never by Z alone', () => {
   it('two cuts at the SAME depth either side of a tool change are TWO checkpoints', () => {
     // This is the defect the review found in §4.3's original keying: bucketing by Z across the
     // whole program merges them, destroys their order, and leaves the M6 pause nothing to show.
-    const tl = run('S1000 M3\nG1 Z-1 F100\nG1 X5\nT2M6\nS1000 M3\nG1 Z-1 F100\nG1 X9\n', { startingTool: 1 });
+    const tl = run('G0 X0 Y0 Z0\nS1000 M3\nG1 Z-1 F100\nG1 X5\nT2M6\nS1000 M3\nG0 X0 Y0\nG1 Z-1 F100\nG1 X9\n', { startingTool: 1 });
     const atMinus1 = tl.checkpoints.filter((c) => c.zKey === -1000);
     expect(atMinus1).toHaveLength(2);
     expect(atMinus1.map((c) => c.segment)).toEqual([0, 1]);
@@ -274,6 +360,26 @@ describe('checkpoints: keyed by (segment, Z), never by Z alone', () => {
     expect(tl.checkpoints[0]?.nonConstantZ).toBe(false);
   });
 
+  it('carries the resolved WORK-frame X,Y of each cutting move, for the sweep', () => {
+    const tl = run('S1000 M3\nG0 X1 Y2 Z0\nG1 Z-1 F100\nG1 X5\nG1 Y7\n');
+    const cp = tl.checkpoints[0]!;
+    expect(cp.steps).toHaveLength(3);
+    expect(cp.xy).toEqual([1, 2, 1, 2, 1, 2, 5, 2, 5, 2, 5, 7]);
+  });
+
+  it('a cut from an UNKNOWN X,Y is swept as a plunge at its end (zero-length), noted once', () => {
+    const tl = run('S1000 M3\nG1 X3 Y4 Z-1 F100\n');
+    expect(tl.checkpoints[0]?.xy).toEqual([3, 4, 3, 4]);
+    expect(tl.diagnostics.filter((d) => d.code === 'cut-from-unknown-xy')).toHaveLength(1);
+  });
+
+  it('a cut to an UNKNOWN X,Y is an error and is not swept', () => {
+    const tl = run('G0 Z0\nS1000 M3\nG91\nG1 X3 Z-1 F100\n');
+    expect(tl.diagnostics.map((d) => d.code)).toContain('cut-unknown-xy');
+    expect(tl.summary.unsweptMoves).toBe(1);
+    expect(tl.checkpoints.every((c) => c.xy.length === 0)).toBe(true);
+  });
+
   it('only CUTTING moves make checkpoints: rapids and laser moves do not', () => {
     expect(run('G0 X1 Y1 Z-5\n').checkpoints).toHaveLength(0);
     expect(run('M321\nG1 X1 Y1 Z-5 S0.5 F100\n').checkpoints).toHaveLength(0);
@@ -286,28 +392,21 @@ describe('checkpoints: keyed by (segment, Z), never by Z alone', () => {
 });
 
 describe('what a volumetric oracle cannot see, a state machine can', () => {
-  it('a cutting move at a Z the program never established is an ERROR: nothing is invented', () => {
-    expect(codes('S1000 M3\nG1 X5 F100\n')).toContain('cut-unknown-z');
-    expect(run('S1000 M3\nG1 X5 F100\n').diagnostics.find((d) => d.code === 'cut-unknown-z')?.severity).toBe('error');
+  it('a cutting move at a position the program never established is a WARNING and a counted gap: nothing is invented', () => {
+    // Not an error: the MACHINE knows where it is; the emulator was not told. The vendor's own
+    // rotary samples open with `G01 Z30` before any X,Y is set and run fine.
+    const tl = run('S1000 M3\nG1 X5 F100\n');
+    expect(tl.diagnostics.find((d) => d.code === 'cut-unknown-z')?.severity).toBe('warning');
+    expect(tl.summary.unsweptMoves).toBe(1);
+    expect(tl.checkpoints).toHaveLength(0);
   });
 
-  it('a feed move with the spindle off is reported, as a WARNING', () => {
-    // An error would refuse the vendor's own fatigue-test-air.nc, which opens with exactly
-    // this under the label "(Height Test)". It is an error only when it enters stock.
-    const tl = run('G0 Z5\nG1 Z-1 F100\n');
-    const d = tl.diagnostics.find((x) => x.code === 'cut-spindle-off');
-    expect(d?.severity).toBe('warning');
-    expect(d?.line).toBe(2);
-  });
-
-  it('no warning once the spindle is on, and none in laser mode', () => {
-    expect(codes('G0 Z5\nS1000 M3\nG1 Z-1 F100\n')).not.toContain('cut-spindle-off');
-    expect(codes('M321\nG1 X1 Y1 Z0 S0.5 F100\n')).not.toContain('cut-spindle-off');
-  });
-
-  it('a tool change stops the spindle, so cutting straight after one without M3 is reported', () => {
-    const tl = run('S1000 M3\nG0 Z5\nT2M6\nG0 Z5\nG1 Z-1 F100\n', { startingTool: 1 });
-    expect(tl.diagnostics.map((d) => d.code)).toContain('cut-spindle-off');
+  it('a feed move with the spindle off is NOT reported here: nearness is geometry', () => {
+    // Maintainer's rule: neither an error nor a warning unless the tool is near the material,
+    // the fixture or the bed. The state machine cannot know that; the sweep can. The vendor's
+    // own fatigue-test-air.nc feeds down with the spindle off before its first M3.
+    expect(codes('G0 X0 Y0 Z5\nG1 Z-1 F100\n')).toEqual([]);
+    expect(codes('S1000 M3\nG0 X0 Y0 Z5\nT2M6\nG0 Z5\nG1 Z-1 F100\n', { startingTool: 1 }).filter((c) => c.includes('spindle'))).toEqual([]);
   });
 });
 
@@ -339,8 +438,8 @@ describe('stateAt: scrubbing is exact at every snapshot boundary', () => {
 
 describe('summary', () => {
   it('counts steps, segments, pauses, checkpoints and cutting moves', () => {
-    const tl = run('T1M6\nS1000 M3\nG1 Z-1 F100\nG1 X5\nG0 Z5\n', { startingTool: 'unknown' });
-    expect(tl.summary).toEqual({ steps: 5, segments: 1, pauses: 1, checkpoints: 1, cuttingMoves: 2 });
+    const tl = run('T1M6\nS1000 M3\nG0 X0 Y0 Z0\nG1 Z-1 F100\nG1 X5\nG0 Z5\n', { startingTool: 'unknown' });
+    expect(tl.summary).toEqual({ steps: 6, segments: 1, pauses: 1, checkpoints: 1, cuttingMoves: 2, unsweptMoves: 0 });
   });
 });
 
@@ -369,9 +468,9 @@ describe.skipIf(!existsSync(CORPUS))('the runner on the vendor corpus', () => {
     expect(tl.summary.checkpoints).toBeGreaterThan(300); // a ramping 3D job: many Z levels
   });
 
-  it("fatigue-test-air.nc's feed moves before M3 are WARNINGS (the vendor's own height test)", () => {
+  it("fatigue-test-air.nc's feed moves before M3 raise nothing at all (the vendor's own height test)", () => {
     const tl = buildTimeline(load('Tests/fatigue-test-air.nc'), setupWith());
-    expect(tl.diagnostics.filter((d) => d.code === 'cut-spindle-off').map((d) => d.severity)).toEqual(['warning', 'warning', 'warning']);
+    expect(tl.diagnostics.filter((d) => d.code.includes('spindle'))).toEqual([]);
   });
 
   it('NO file in the corpus produces a state-level ERROR: all of them, not a hand-picked few', () => {

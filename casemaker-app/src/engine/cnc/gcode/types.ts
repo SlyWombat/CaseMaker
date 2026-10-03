@@ -43,6 +43,12 @@ export type Pos = [number | null, number | null, number | null];
 export interface BaseEvent {
   /** 1-based source line. Every segment of a tessellated arc keeps its arc's line. */
   line: number;
+  /**
+   * Set by the RUNNER, never the parser, on steps it inserted that are not in the program:
+   * the head movement of the firmware's manual tool-change macro (#182, Q14). They carry
+   * the `M6` line. The parser's own events never have this field.
+   */
+  synthetic?: 'tool-change-macro';
 }
 
 export interface MoveEvent extends BaseEvent {
@@ -96,6 +102,11 @@ export interface ToolChangeEvent extends BaseEvent {
    * parser emits the `spindle off` event itself; this flag records that it did.
    */
   stoppedSpindle: boolean;
+  /**
+   * Set by the RUNNER when it has expanded this change into the macro's synthetic moves:
+   * the surrounding steps then own the head position, so the reducer must not forget Z.
+   */
+  expanded?: boolean;
 }
 
 export interface PauseEvent extends BaseEvent {

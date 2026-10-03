@@ -97,8 +97,11 @@ Executing a program means modelling what the controller holds, not just sweeping
   §9.1 defers multi-tool *jobs* from V1; it costs almost nothing to let the **emulator**
   handle them, and Makera's own sample corpus requires it — `atc-test.nc` cycles `T0M6`
   through `T6M6` (#186).
-- **Spindle and coolant state.** A cutting move with the spindle off is a bug a volumetric
-  oracle cannot see (#187), but a state machine catches it for free.
+- **Spindle and coolant state.** Tracked, so the emulator can show them. A feed move with
+  the spindle off is **not** a fault by itself — it is routine in air, and the vendor's own
+  `fatigue-test-air.nc` does it in a "(Height Test)". It is a fault only when the tool is
+  **near the material, the fixture or the bed**, and nearness is geometry: the sweep checks
+  it, the state machine does not (maintainer's rule, 2026-10-03).
 - **Modal state and the WCS** — `G90`/`G91`, `G53`/`G54`, units, plane. The parser resolves
   these; the emulator holds them.
 
@@ -549,11 +552,9 @@ And the ones that must **fail**, which matter more than the ones that pass:
   false errors on 6 vendor files.)
 - A label 2 mm from a **vise jaw** with a 3.175 mm cutter → fixture collision (§1.2).
 - A cut deeper than the tool's `shoulderLength` → holder collision.
-- A `G0` that crosses the stock, and a feed move with the **spindle off that enters stock**.
-  (A feed move with the spindle off is **not** a failure by itself: the vendor's own
-  `fatigue-test-air.nc` opens with `G1 Z-50` / `G1 Z-61` under "(Height Test)" before its
-  first `M3`. The state machine reports it as a **warning**; it becomes an error only when
-  the geometry says the move is in stock.)
+- A `G0` that crosses the stock, and a spindle-off move that comes **near the material, the
+  fixture or the bed** (a proximity test on the geometry — a spindle-off feed move in air is
+  not reported at all; the vendor's own `fatigue-test-air.nc` makes one in its height test).
 - A **deliberately offset or rotated `placement`** → the emulator predicts the scrap, which
   is the test the stub makes possible (§1.1).
 
