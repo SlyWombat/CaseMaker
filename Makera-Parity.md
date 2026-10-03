@@ -415,13 +415,63 @@ the provenance rule applies):
 - `Sample_Files/NefertitiFinish.nc` — a **second** sample `.nc`, and a 3D finishing job, so
   a much harsher parser and simulator test case than `TopClamp.nc`.
 
-### 11.2 One discrepancy to resolve
+### 11.2 The 6000-vs-1200 velocity discrepancy — resolved
 
-`Makera_Z1.fcm` gives **`max_velocity: 6000`** on X, Y and Z, while `t_MachineType` gives
-**`maxFeedRate: 1200`**. Most likely rapid-traverse velocity versus maximum *cutting* feed,
-but it could equally be a FreeCAD default nobody edited. **#184 must not pick one without
-deciding which it is** — clamping cutting feeds at 1 200 is safe either way, clamping
-rapids at 1 200 may merely be slow.
+`Makera_Z1.fcm` gives `max_velocity: 6000` on X, Y and Z; `t_MachineType` gives
+`maxFeedRate: 1200`. **They measure different things, and the question turns out not to
+matter.**
+
+**Smoothieware keeps cutting feed and rapid traverse as separate limits.** The firmware's
+own config (`src/configZ1.default`) names them explicitly:
+
+```
+#default_feed_rate   1000   # Default speed (mm/minute) for G1/G2/G3 moves
+#default_seek_rate   3000   # Default speed (mm/minute) for G0 moves
+#x_axis_max_speed    4000   # Maximum speed in mm/min        <- the axis ceiling, caps both
+```
+
+So `maxFeedRate: 1200` is the **cutting** ceiling — the largest `F` Studio will write on a
+`G1` — and FreeCAD's `max_velocity` is an **axis traverse** figure, which caps rapids.
+Both can be true at once, and in stock Smoothieware the seek rate is 3× the feed rate.
+
+**Neither 6000 nor those firmware numbers are Z1 figures.** Every rate line in
+`configZ1.default` is commented out, so the firmware uses its compiled-in defaults, and
+the commented values are **identical in `configZ1.default` and `configZ1Pro.default`** —
+untouched Smoothieware boilerplate for two mechanically different machines. `Makera_Z1.fcm`
+carries the same smell: its A-axis limits are **±10 000 000 degrees**, so whoever wrote it
+filled in the real travel limits and left the rest at placeholders.
+
+**Why it does not matter: a rapid never carries a feed rate.** In `TopClamp.nc`, **none of
+the 25 `G0` lines has an `F` word**, and all 577 `F` words sit on `G1`. The controller uses
+its own configured seek rate for rapids. So a post-processor emits `F` on cutting moves
+only, clamped at **1 200 mm/min** — the one figure that comes from the machine's own
+database row and that Studio's whole feeds table respects (max 1 200, zero rows above it).
+The rapid ceiling is never ours to state.
+
+For #184 that means: a `maxCutFeed` field with a sourced value, and **no `maxRapid` field at
+all** rather than a guessed one.
+
+### 11.3 The Z1 Pro is a different machine
+
+The firmware ships `src/configZ1.default` **and** `src/configZ1Pro.default`, and they differ
+in the mechanics:
+
+| | Z1 | Z1 Pro |
+|---|---|---|
+| X / Y steps per mm | 1600 | **640** |
+| Z steps per mm | 3200 | **2560** |
+| X / Y motor alarm pin | `nc` | **`1.27` / `1.24`** |
+
+Fewer steps per mm means more travel per step, so at the same step frequency the Pro moves
+roughly 2.5× faster in X and Y — consistent with it being the faster machine. And the Pro
+wires up **servo motor alarm feedback** where the Z1 leaves those pins unconnected.
+
+`t_MachineType` has only one `Makera Z1` row, so **Studio's database does not model the Pro
+at all.** #184 should carry a machine identity rather than assume a single Z1.
+
+**One trap in that file:** `alpha_max_travel 500` and `beta_max_travel 380` are *homing*
+search distances — the comment says "Max travel in mm for … axis when homing" — **not** the
+work envelope, which is 200 × 200 × 100. They are large enough to be mistaken for it.
 
 ## 12. Open unknowns
 
