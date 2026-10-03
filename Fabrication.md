@@ -1,6 +1,10 @@
 # Fabrication — driving a CNC as well as a 3D printer
 
-Status as of 2026-10-01. Decisions taken in conversation; nothing implemented yet.
+Status as of 2026-10-03. Decisions taken in conversation; nothing implemented yet.
+
+**Review scope.** Fable's adversarial review produced decisions 12–18 and covers this
+document as it stood at commit `d4369d7`. The print-orientation flip (§7.2), the §7
+rewrite and decisions 19–24 all postdate it and have **not** been reviewed.
 
 This is the plan for expanding Case Maker from "compile geometry, write an STL" to
 "compile geometry, then make it on a chosen machine" — initially a **Makera Z1**
@@ -52,7 +56,7 @@ G-code semantics are LinuxCNC-flavoured and documented.
   *not* listed on the `Z1/Accessories` page (which names only the 4th Axis module,
   Vacuum Bed, Low-Profile Vise and Ionizer); the user has confirmed owning it.
 - Using it is itself a tool change: remove cutter → fit probe → unplug wired probe
-  connector → plug 3D probe → probe → swap back → `M491`. §7.5 explains why that
+  connector → plug 3D probe → probe → swap back → `M491`. §7.6 explains why that
   chain's repeatability needs measuring.
 - What the **wired** probe can and cannot touch off is **not documented either way**.
   Assume nothing; the 3D probe is the one to use for anything non-metallic.
@@ -185,12 +189,12 @@ accepted.
 | 4 | **No laser, ever (on this machine)** | Removes `M321`–`M325` and two strategy families. |
 | 5 | **Images get two user-selectable methods** | Vector trace and greyscale relief. Not in V1 — V1 is text. |
 | 6 | **Mesh import only to start (STL/3MF/OBJ)** | Behind a pluggable registry. Not needed for V1. |
-| 7 | **Stock setup = corner find + Z touch-off, `G32` autolevel, model cross-check** | **Substantially revised by decision 12.** |
+| 7 | **Stock setup = corner find + Z touch-off, `G32` autolevel, model cross-check** | **Superseded in all three parts** — by decision 23 (edge-find on flats, not a corner), decision 12 (`G32` out) and decision 24 (no thickness cross-check). |
 | 8 | **We have both the wired probe and the Makera 3D Probe** | Non-conductive probing is available, so PLA can be probed. |
 | 9 | **First real job is a 3D-printed blank (PLA/PETG)** | The badge, literally. |
 | 10 | **Transport is WiFi** | Still the chosen transport. **Not in V1** — see §10.1. |
 | 11 | **4th axis: designed for, not built** | See decision 18. |
-| 12 | **The depth window is bed-referenced. Measured stock thickness is the required input; `G32` is not.** | See §7. This inverts what this document said before. |
+| 12 | **The depth window is bed-referenced; `G32` is not an input.** | See §7. **The clause "measured stock thickness is the required input" is superseded by decision 24** — after the flip, total thickness is not a job input at all. "Bed-referenced" survives and is strengthened: the printer's bed face *is* the engraved face. |
 | 13 | **The blank must be printed 100 % infill, and its spec is part of the depth model** | See §7. |
 | 14 | **V1 cuts with a flat end mill, not a V-bit** | A V-bit couples depth to stroke width, so per-label depth stops meaning what the UI says. V-carve is V2. |
 | 15 | **Engravability is computed and rendered, not assumed** | Tool radius removes glyph detail; the viewport shows the *opened* region and the predicted colour. |
@@ -200,7 +204,7 @@ accepted.
 | 19 | **Workholding is a printed nest, and it is a V1 deliverable** | See §10.3. |
 | 20 | **Per-label depth is a two-state choice with a numeric override** | Two outcomes exist (top colour, bottom colour), so that is what the control should offer. Same reasoning as the X-ray toggle. |
 | 21 | **The app loads the object; depth limits come from the solid** | No hand-coded pocket rectangles. A void in the geometry produces a shallower limit automatically, for this part and any future one. §7.1. |
-| 22 | **The app models the printer's layer grid** | Layer height is an input. The colour boundary and the depth limits sit on real layer lines, not ideal dimensions — because 0.810 mm is layer 4.05 and the difference matters. §7.1. |
+| 22 | **The app models the printer's layer grid** | Layer height **and first-layer height** are inputs. The colour boundary and the depth limits sit on real layer lines, not ideal dimensions — because 0.810 mm is layer 4.05 and the difference matters, and after the flip the first layer *is* the engraved face. §7.1. |
 | 23 | **Registration: probe everything** | Edge-find X/Y on two *straight* edges (the corners are R3.175 and make poor datums), then probe Z on the engraved face. The nest holds the part but is not a position reference. §7.3. |
 | 24 | **Thickness error is ignored, by design** | The blank prints engraved-face-down, so error lands on the back face. Cut depths come from the probed face plus model distances. Total thickness is **not** a job input. §7.2. |
 
@@ -313,7 +317,31 @@ engine.
 What this approach cannot do in either coordinate system: undercuts, and simultaneous
 4-axis motion. The A axis indexes or wraps; it does not interpolate with X/Y/Z.
 
-### 5.6 Machine bridge — deferred out of V1
+### 5.6 Simulation is the pre-hardware oracle
+
+**Sweep the selected tool along the computed toolpath, subtract it from the stock, show
+before and after.** #182. This is in V1, and it is the single highest-value thing that
+can be built before the machine is touched: it needs no bridge, no probe and **no
+numbers from #165** — depth is an input, not a measurement.
+
+For a flat end mill at constant Z the swept volume is **exact**, with no dexel grid and
+no sampling. One cutting move is a capsule — `pHull` of two tool-radius circles at the
+move's endpoints — and `p-hull` already exists (`engine/compiler/profile.ts`). Union the
+capsules **per depth level in 2D**, then one `extrude` and one `difference` per level.
+Clipper2 unions thousands of short glyph segments cheaply; Manifold booleans do not, so
+that batching is the whole performance story.
+
+The reason it is an oracle and not a picture: §7.5 predicts the engravable region
+*analytically*, as the morphological opening of the glyph. The simulator computes the
+same region *from the toolpath*. **Disagreement means the toolpath is wrong**, and that
+is a machine-free unit test — as is intersecting the simulated removal with the magnet
+pocket void and asserting it empty. Volumes and bounding boxes snapshot cleanly, so none
+of it needs an eye or a screenshot.
+
+This is **not** the heightmap/dexel engine, which stays deferred (§9.1). Exact 2.5D CSG
+is enough for V1 because V1 cuts flat-bottomed pockets with a flat tool.
+
+### 5.7 Machine bridge — deferred out of V1
 
 **Tauri-only** when it happens; the web deploy can write `.nc` but cannot open
 sockets. Transport is **WiFi** (decision 10), with a transport interface behind the
@@ -388,8 +416,10 @@ Everything below follows from that.
 ### 7.1 The layer stack — one structure, two answers
 
 The app slices the compiled solid on **the printer's actual layer grid** (layer height
-is an input, recorded in the blank spec). That single structure answers both questions
-that matter:
+**and first-layer height** are inputs, recorded in the blank spec). The first layer
+matters disproportionately here: after the flip (§7.2) it *is* the engraved face, and
+the colour split sits only four or five layers above it. That single structure answers
+both questions that matter:
 
 - **Where does the colour change?** At the layer boundary where the extruder
   assignment changes. Not at the ideal design height — at the layer line the printer
@@ -436,6 +466,16 @@ Consequences, and these are the ones that stop the argument:
 Secondary benefits: a build-plate face is flatter and more dimensionally honest than a
 top surface, it gives the probe a genuinely flat reference, and on smooth PEI it is
 glossy — so the engrave reads matte-on-gloss.
+
+**Two orientations, and they are opposite ways up.** The blank is *printed*
+engraved-face-down — magnet hole facing up, away from the plate. It is *machined* the
+other way up: **pocket-down in the nest, engraved face up to the cutter**, contacting
+the nest floor on the annulus around the pocket (§7.6). Both are fixed, and the only
+thing they share is that the engraved face is the reference in each. Conflating them is
+what put a bridged-roof measurement into #165 that this blank does not have — printed
+this way up, **no layer in the part is bridged**, and the 1.51 mm over the magnet pocket
+is solid 100 %-infill material. What that membrane *does* have is nothing underneath it
+while it is being cut.
 
 ### 7.3 Registration — probe everything
 
@@ -522,15 +562,15 @@ each is recorded above and keeps its decision number.
 | Deferred | Why it is not in V1 |
 |---|---|
 | **WiFi machine bridge** (decision 10) | Studio already uploads over WiFi. A protocol reverse-engineer plus a Windows-only dev loop on the critical path buys nothing a working `.nc` doesn't. |
-| **`G32` autolevel** (decision 7) | §7.1 — it addresses the wrong error. Re-add only if §9.3 item 12 shows warp matters after clamping in the nest. |
-| **Heightmap/dexel engine** (decision 2) | Nothing in V1 is 3D. The G-code re-parser (item 10) is the stock check V1 actually needs. |
+| **`G32` autolevel** (decision 7) | §7.1 — it addresses the wrong error. Re-add only if **#176** shows warp matters after clamping in the nest. |
+| **Heightmap/dexel engine** (decision 2) | Nothing in V1 is 3D. **#182** does exact 2.5D stock simulation with CSG, and **#174** re-parses the output — between them that is the stock check V1 actually needs, with no sampled grid. |
 | **4th-axis fields in the IR** (decisions 3, 11) | Adding an `A` to a move record later is one line. Adding it now is a field nobody tests. |
 | **Image methods** (decision 5) | V1 is text. |
 | **Mesh import registry** (decision 6) | V1 is text; `assetImporter.ts` is fine as is. |
 | **`MachineProfile` unification** (§5.3) | One `Z1` constant until a second CNC exists. |
-| **Feeds/speeds from `makera_library.db`** (§3) | Hardcode the measured numbers from item 1; read the DB when there are two tools. |
+| **Feeds/speeds from `makera_library.db`** (§3) | Hardcode the measured numbers from **#165**; read the DB when there are two tools. |
 | **Multi-tool `M490.1/.2` handshake** | V1 jobs are single-tool. The probe→cutter swap happens before the job starts. |
-| **V-carve** (§7.3) | V2. It is the thing that eventually gets small text to change colour, and it needs a medial-axis engine. |
+| **V-carve** (§7.4) | V2. It is the thing that eventually gets small text to change colour, and it needs a medial-axis engine. |
 | **`Project.kind` union** (decision 17) | §5.1 — not on the critical path, and the flags are already the derivation. |
 
 > **One flag for the user.** The original brief asked the app to "ensure the blank
@@ -543,17 +583,34 @@ each is recorded above and keeps its decision number.
 ### 9.2 The riskiest assumption, and the experiment that kills it first
 
 **The assumption:** that engrave depth is a controllable scalar inside a sub-millimetre
-band on *this* blank — i.e. that two-colour reveal is a depth-controlled deliverable
-at all, given FDM thickness error (§7.1), default infill and a bridged pocket roof
-(§7.2), the probe→cutter Z chain (§7.5), and PLA finish at 13 000 RPM.
+band on *this* blank — i.e. that two-colour reveal is a depth-controlled deliverable at
+all.
 
-Every other depth decision hangs on it, and §7.2 suggests the usable band may be
-~0.2 mm rather than 0.70.
+Three of the four reasons this document originally gave for doubting it have been
+**retired**, by the print orientation (§7.2) and the 100 % infill premise (decision 13):
+thickness error lands on the uncut back face, the engraved face is the flat build-plate
+face, and no layer anywhere in the part is bridged. What is left is a shorter list, and
+a different one:
 
-**It gets tested before a line of code is written.** If it fails, the fix is a
-*blank* change — thicker top colour, split lower, 5 mm part, magnet moved, 100 %
-infill — which is the cheapest thing in this entire plan to change, and impossible to
-change cheaply once its numbers are compiled into `badge.ts`.
+- **The entire usable band sits inside the first few print layers.** The colour split is
+  0.810 mm above the build plate — layer 4 or 5. So first-layer height and first-layer
+  squish set the boundary, and elephant's foot distorts the one face the probe touches.
+  This is the measurement #165 most needs, and it replaces the bridged-roof question.
+- **The probe → hand swap → `M491` → cutter Z chain is unquantified** (§7.6). The band is
+  sub-millimetre; the chain's error has never been measured against it.
+- **The membrane over the magnet pocket is unsupported while it is cut** — 1.51 mm of
+  solid material spanning a 45 × 13 mm void, because the blank is machined pocket-down
+  (§7.2). Deflection and finish there are unpredictable at *any* depth, and that is a
+  separate failure from breaking through.
+- **PLA finish at 13 000 RPM** — a parameter table, not a design risk.
+
+Every other depth decision hangs on this, and the usable band may be well under the
+nominal 0.810 mm.
+
+**It gets tested before a line of code is written.** If it fails, the fix is a *blank*
+change — thicker top colour, split lower, 5 mm part, magnet moved — which is the
+cheapest thing in this entire plan to change, and impossible to change cheaply once its
+numbers are compiled into `badge.ts`.
 
 ### 9.3 Breakdown
 
@@ -585,19 +642,23 @@ physical engraved badge, `[F]` = follows.
 | [P] | **#172** CAM core: contour-parallel pocketing → toolpath IR (§5.2) |
 | [P] | **#173** Z1 post-processor: IR → `.nc`, bed-referenced Z, MKR header (§7.1, §2) |
 | [P] | **#174** G-code verifier: parse our own output, refuse unsafe files |
+| [P] | **#182** Toolpath simulation: sweep the selected tool, show the object before and after (§5.6) |
 
 **Fixture, then the run:**
 
 | | Issue |
 |---|---|
 | [P] | **#175** Printed nest fixture (§7.6) — any time after #167 |
-| [P] | **#176** First cut: V1 acceptance + Z-chain error measurement (§7.5) (`bench-test`) |
+| [P] | **#176** First cut: V1 acceptance + Z-chain error measurement (§7.6) (`bench-test`) |
 
 **[F] Deferred**, each with its reasoning in §9.1: **#181** web/desktop build split
 (prerequisite for the bridge, not for V1) · `MachineProfile` unification ·
 feeds/speeds from `makera_library.db` · WiFi bridge · `G32` option if #176 justifies
 it · V-carve · `Project.kind` · multi-tool jobs · importer registry · image methods ·
 heightmap engine · 4th axis.
+
+**#182 needs #172** and cross-checks #171 and #178, so it lands after the CAM core and
+before the first cut — it is what makes the `.nc` trustworthy without cutting.
 
 #165 and #166 gate everything numeric. **#178 gates #171, #172 and #174** — all three
 ask it for depth limits rather than carrying rules of their own. #175 needs only #167.
