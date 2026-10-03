@@ -255,6 +255,8 @@ accepted.
 | 23 | **Registration: probe everything** | Edge-find X/Y on two *straight* edges (the corners are R3.175 and make poor datums), then probe Z on the engraved face. The nest holds the part but is not a position reference. §7.3. |
 | 24 | **Thickness error is ignored, by design** | The blank prints engraved-face-down, so error lands on the back face. Cut depths come from the probed face plus model distances. Total thickness is **not** a job input. §7.2. |
 | 25 | **Build the `MachineProfile` now, even though the Z1 is the only machine** | Maintainer's call, 2026-10-03, overriding §5.3's deferral: pay for the seam once rather than recode later. Scope stays Z1-only; the profile is where machine limits get clamped and where "no laser on this machine" becomes a flag instead of an assumption. §5.3, #184. |
+| 26 | **Workholding is an explicit input, and the probe plan is derived from it** | Supersedes decision 23's fixed edge-find sequence. The part may be in a nest, under clamps, in the vise or in the rotary chuck; each answers reachable / obstructed / datum candidates / residual uncertainty, and the planner queries the compiled solid for touch points. §7.3, #188. |
+| 27 | **The blank spec makes the colour boundary slicer-independent** | Slicers sample each layer at its mid-plane, not its boundary, and the rule differs per slicer. So put the split on an exact layer multiple and give the pocket ceiling a one-layer conservative margin, rather than modelling one slicer's arithmetic. Costs a little depth band; removes a dependency on which slicer the user owns. #166, #178. |
 
 ---
 
@@ -593,41 +595,71 @@ this way up, **no layer in the part is bridged**, and the 1.51 mm over the magne
 is solid 100 %-infill material. What that membrane *does* have is nothing underneath it
 while it is being cut.
 
-### 7.3 Registration — probe everything
+### 7.3 Registration is derived from workholding, not fixed
 
-The machine measures where the part is rather than trusting the fixture:
+**Decision 26, taken 2026-10-03, and it supersedes decision 23's single sequence.** The
+first question is not "which edges do we probe" — it is **how is the part held?** A badge
+in a printed nest, a plate under top clamps, a block in the low-profile vise and a cylinder
+in the 4th-axis chuck are four different registration problems, and a hardcoded
+edge-find sequence is only correct for one of them.
 
-1. **X and Y by edge-find on two straight edges** — two touches on a long edge for
-   position and rotation, one on a short edge. **Not a corner find:** the badge corners
-   are R3.175 (`make_badge.py:23`) and a radiused corner is a poor datum. Probing the
-   flats avoids the radii entirely, and gets rotation for free, which a single corner
-   does not.
-2. **Z by touching the engraved face**, once. That is the datum every cut depth is
-   measured from (§7.2).
-3. Set the work origin with `G10 L2 P1`, swap probe for cutter, `M491` to re-establish
-   tool length, run.
+So **workholding is an explicit input to the model**, and the probing plan is **derived**
+from it together with the part the app already compiled. The app knows the geometry because
+it built it; given how the part is held, it can plan the probe itself rather than being
+told where to touch.
 
-**What the machine offers instead, and why this is still the plan.** The Z1 has a native
-**anchor-based XY datum** (§1): an L-bracket pinned to the bed, and a documented "Work
-Origin relative to Anchor 1" with X and Y offsets. That is a hardware datum, which is
-exactly the thing decision 23 assumed was unavailable — so it deserves a straight answer
-rather than silence.
+```ts
+type Workholding =
+  | { kind: 'anchor-bracket'; anchor: 1 | 2; offset: Vec2 }   // native L-bracket
+  | { kind: 'top-clamps';     clamps: { at: Vec2; footprint: Profile }[] }
+  | { kind: 'vise';           jawFaces: [Plane, Plane]; jawHeight: Mm }
+  | { kind: 'printed-nest';   nest: NodeId; seatClearance: Mm }
+  | { kind: 'rotary-chuck';   jawDiameter: Mm; stickout: Mm }
+  | { kind: 'vacuum-bed' };
+```
 
-Probing still wins for *this* part, for one reason that the anchor system cannot fix: the
-badge's registration surfaces are **its own edges**, and the blank is a printed part whose
-outline carries FDM tolerance. An anchor tells you where the *bracket* is, not where the
-blank's edges ended up inside the nest. Edge-finding the blank measures the thing the cuts
-are referenced to.
+Each variant has to answer the same four questions, and that is the whole interface:
 
-**But the anchor is worth using as well, not instead.** It gives the nest a repeatable
-home on the bed, which turns "clamp the nest somewhere" into "clamp the nest at Anchor 1"
-and makes a second run of the same job reproducible without re-probing from scratch.
-#175 should put the nest on the anchor pins. That is a fixture improvement, not a change
-to decision 23.
+| | What the planner needs from it |
+|---|---|
+| **Reachable** | Which faces and edges a probe can touch without hitting the fixture |
+| **Obstructed** | Clamp, jaw and bracket footprints, as keep-out profiles in the work frame |
+| **Datum candidates** | What this fixture *already* establishes, and how well — the anchor bracket fixes XY to the bed; a vise fixes one face and rotation; a chuck fixes the axis; a nest fixes nothing but holds the part still |
+| **Residual uncertainty** | What is left for the probe to resolve, with a number. A nest pocket cut at `+0.15` leaves ±0.15 mm of XY slop; a vise leaves essentially none across the jaws |
 
-The nest (§7.6) still earns its place — it holds the blank flat and repeatable, and
-stops it moving while cut — but it is **not** load-bearing for position, and its datum
-corner is a convenience rather than a reference.
+**The plan then falls out of geometry, not out of a rule.** Query the compiled solid for
+candidate surfaces, score them, and emit the touches that resolve the residual:
+
+- Prefer **long straight edges** — the badge's corners are R3.175 (`make_badge.py:23`) and a
+  radiused corner is a poor datum, but that is a *consequence* of querying the outline, not
+  a special case to hand-code.
+- Reject any touch point inside an obstructed footprint, or on a face the fixture covers.
+- Two touches on one straight edge give position **and rotation**; one on a perpendicular
+  edge closes XY. Only emit them if the residual uncertainty justifies the cycle time.
+- **Z is always probed** on the engraved face (§7.2), whatever the fixture. That is the
+  datum every cut depth is measured from and no fixture can supply it.
+- If the residual cannot be resolved by any reachable surface, **say so and refuse** rather
+  than registering against something that is not a reference.
+
+**For V1's badge specifically**, that derivation produces: nest on the anchor pins for a
+repeatable home, Z probed on the engraved face, and XY either taken from the anchor (±0.15
+mm, which is invisible on engraved text and leaves the magnet-pocket keep-out ~2.5 mm of
+margin) or refined by two edge touches if the engravability check (§7.5) shows the margin
+is tight. The point of decision 26 is that this is now an *output* of the model, so the
+rotary and vise cases do not each need a new hand-written sequence.
+
+**What this does not settle — see #187 item 1.** Whether the probing happens in our `.nc`
+or in Studio's dialogs is still open, and the in-file route is constrained: Smoothieware has
+no variables, so `G10 L2 P1` cannot take a computed offset and **rotation compensation is
+impossible in a static file.** A derived *plan* can be executed interactively today and
+emitted later when the bridge exists; the planner does not care which.
+
+**One correction on hardware.** The Z1's three probes — wired probe, 3D Probe Rod, and the
+separate Makera 3D Probe — are all **cabled** (§1); using one means unplugging the previous
+connector. The *wireless* probe is a Carvera part, which is why `M491` and `T0` talk about
+it in the shared firmware and why Studio's control panel has wireless-probe charging
+voltages. If a wireless probe is in play on this machine, that is new information and §1
+needs it.
 
 ### 7.4 What a V-bit does, and why V1 uses a flat end mill
 
