@@ -623,16 +623,24 @@ about how the part will *look* beyond which colour volume a floor lands in.
 
 ## 10. Build order
 
-1. **`Setup` + stubbed `placement`** (§1.1). First, because it is what unblocks the rest —
-   and it is a type, not an algorithm.
-2. **`Move[]` type + G-code parser** (#174's front half) — pure, no geometry.
-3. **Machine state machine** (§1.1): active tool, TLO, spindle, modal, WCS, and the pause
-   points. Pure, and testable against `atc-test.nc` at 75 bytes.
-4. **`toWorkFrame` + the frame tests** (§2), including the off-centre-label case.
-5. **`ExactSweeper`** (§4.3) with the measured algorithm, in the geometry worker.
-6. **Validation and collision gates** (§6, §1.2) — refusals, with the line named.
-7. **Run it on Makera's corpus** (§7.1, #186), including the files that must fail.
-8. **Checkpointed playback** (§8.0), then the UI after a mockup.
+1. ~~**`Setup` + stubbed `placement`**~~ **Done** (`src/engine/cnc/setup.ts`, two transforms).
+2. ~~**G-code parser**~~ **Done** (`src/engine/cnc/gcode/`, zero errors on the 26-file corpus).
+3. ~~**Machine state machine**~~ **Done** (`emulator/timeline.ts`), including the tool-change
+   macro animated from the machine profile (#184) and checkpoints keyed by (segment, Z).
+4. ~~**Frames**~~ **Done** (`frames.ts`), golden-number tested and mutation-checked.
+5. ~~**`ExactSweeper`**~~ **Done** (`src/workers/geometry/sweep.ts`): chunk-64 → simplify →
+   8-way union tree → extrude → subtract, with the closed-form capsule gate asserted FIRST in
+   its spec, the lowest-Z rule for ramps, and a real vendor 2.5D job swept end to end. The
+   removal solids overshoot the stock top by 0.01 mm so the subtraction has no coplanar face;
+   the volume identity is therefore `stock − (removal ∩ stock)`, not `stock − removal`.
+6. **Validation and collision gates** (§6, §1.2) — refusals, with the line named. The tool
+   and stock refusals exist; the envelope check (`insideEnvelope`, #184) is not yet wired in;
+   fixture collision and the spindle-off **proximity** check (maintainer's rule: a fault only
+   near the material, the fixture or the bed) are not started.
+7. **Run it on Makera's corpus** (§7.1, #186) — the parser and runner gates exist; the sweep
+   runs one real file. The must-FAIL list is not yet a test.
+8. **Checkpointed playback** (§8.0), then the UI after a mockup. Per-checkpoint solids exist
+   (`SweepResult.perCheckpoint`); the cumulative-union scrub and the viewport are not built.
 9. **The oracle tests** (§7), once #171 and #178 exist to compare against.
 10. **Round-trip against #173**, once the post-processor exists.
 

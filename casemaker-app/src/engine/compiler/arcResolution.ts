@@ -29,6 +29,17 @@
  */
 export const ARC_CHORD_TOLERANCE_MM = 0.005;
 
+/**
+ * Vertex-removal tolerance applied to 2D regions in the sweep (`CrossSection.simplify`),
+ * at every level of the union tree. Kept HERE, beside the chord tolerance, because the
+ * oracle band in /Simulation.md §7 is derived from the two of them and must move when
+ * either does: band >= levels x SWEEP_SIMPLIFY_EPS_MM + 2 x ARC_CHORD_TOLERANCE_MM.
+ *
+ * Verified safe for a flat-end sweep (review #191): deliberately uncut walls of 0.05, 0.01
+ * and 0.003 mm all survive it with unchanged contour counts.
+ */
+export const SWEEP_SIMPLIFY_EPS_MM = 0.002;
+
 const MIN_SEGMENTS = 8;
 const MAX_SEGMENTS = 512;
 

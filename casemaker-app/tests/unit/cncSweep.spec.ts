@@ -1,0 +1,393 @@
+// The exact 2.5D sweep (#182 step 5). Every geometric assertion here is against a CLOSED
+// FORM, never against another run of the same code, and the capsule gate runs FIRST: the
+// first benchmark of this design was taken on a capsule whose rectangle was wound the wrong
+// way and had silently collapsed to half a disc (#187). A test that compared the sweep with
+// itself would have passed on that.
+
+import { describe, it, expect, beforeAll } from 'vitest';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { tl } from './helpers/manifoldExec';
+import {
+  capsuleArea,
+  capsuleContours,
+  checkpointRegion,
+  circlePolygon,
+  sweepTimeline,
+  stockFromSetup,
+  unionCapsules,
+  SWEEP_TOLERANCES,
+} from '@/workers/geometry/sweep';
+import { buildTimeline, parseGcode, stubSetup, type Setup } from '@/engine/cnc';
+import { flatEndMill, toolFromMkrRecord, cuttingRadiusForSweep, shapeFromType } from '@/engine/cnc/tool';
+import { parseMkrRecord } from '@/engine/cnc/gcode/mkrHeader';
+import { segmentsForRadius } from '@/engine/compiler/arcResolution';
+import { roundedRect } from '@/engine/compiler/profile';
+
+type Poly = [number, number][];
+const area = (polys: Poly[]) => {
+  const cs = tl.CrossSection.ofPolygons(polys, 'Positive');
+  const a = cs.area();
+  cs.delete();
+  return a;
+};
+const signedArea = (p: Poly) => {
+  let s = 0;
+  for (let i = 0; i < p.length; i++) {
+    const [x0, y0] = p[i]!;
+    const [x1, y1] = p[(i + 1) % p.length]!;
+    s += x0 * y1 - x1 * y0;
+  }
+  return s / 2;
+};
+
+// A 100 x 60 x 5 slab, work origin on its top-front-left corner: work z in [-5, 0].
+const SLAB = { kind: 'prism' as const, outline: { kind: 'p-rect' as const, size: [100, 60] as [number, number] }, thickness: 5 };
+const HOLD = { kind: 'tape-down' as const, contact: SLAB.outline };
+const setup = (o: Partial<Setup> = {}) => stubSetup(SLAB, HOLD, o);
+const R = 0.5; // a 1 mm flat end mill
+const N = segmentsForRadius(R);
+const tool = flatEndMill(2 * R);
+
+/** Run a program against the slab and return the volume removed plus the outcome. */
+function sweep(src: string, t = tool, s = setup()) {
+  const timeline = buildTimeline(parseGcode(src), s);
+  const out = sweepTimeline(tl, timeline, t, s);
+  return { out, timeline };
+}
+
+beforeAll(() => {
+  expect(N).toBeGreaterThanOrEqual(8);
+});
+
+describe('GATE: one capsule against its closed form, before anything is built on it', () => {
+  it('a 10 mm capsule at r = 0.5 has area 2rL + (n/2) r^2 sin(2π/n)', () => {
+    const polys: Poly[] = [];
+    capsuleContours(0, 0, 10, 0, R, N, polys);
+    expect(polys).toHaveLength(3);
+    expect(area(polys)).toBeCloseTo(capsuleArea(10, R, N), 6);
+  });
+
+  it('every contour is COUNTER-CLOCKWISE, including the rectangle', () => {
+    const polys: Poly[] = [];
+    capsuleContours(3, 4, -7, 11, R, N, polys);
+    for (const p of polys) expect(signedArea(p)).toBeGreaterThan(0);
+  });
+
+  it('REGRESSION (#187): a clockwise rectangle would cancel the discs and leave half a disc', () => {
+    // The trap, pinned: reverse the rectangle and the area collapses. If Clipper2's fill rule
+    // ever changed so this stopped being true, the gate above would still hold and this one
+    // would tell us the premise moved.
+    const polys: Poly[] = [];
+    capsuleContours(0, 0, 10, 0, R, N, polys);
+    const rect = polys[2]!;
+    const cw: Poly[] = [polys[0]!, polys[1]!, [...rect].reverse() as Poly];
+    const got = area(cw);
+    expect(got).toBeLessThan(capsuleArea(10, R, N) * 0.5);
+  });
+
+  it('a zero-length move is the disc alone', () => {
+    const polys: Poly[] = [];
+    capsuleContours(5, 5, 5, 5, R, N, polys);
+    expect(polys).toHaveLength(1);
+    expect(area(polys)).toBeCloseTo((N / 2) * R * R * Math.sin((2 * Math.PI) / N), 6);
+  });
+
+  it('the capsule is independent of direction and translation', () => {
+    const a: Poly[] = [];
+    const b: Poly[] = [];
+    capsuleContours(0, 0, 10, 0, R, N, a);
+    capsuleContours(110, -40, 100, -40, R, N, b);
+    expect(area(a)).toBeCloseTo(area(b), 9);
+  });
+
+  it('circlePolygon has the circle\'s exact bounding box (n is a multiple of 4)', () => {
+    const p = circlePolygon(0, 0, 2, N);
+    expect(Math.max(...p.map((q) => q[0]))).toBeCloseTo(2, 12);
+    expect(Math.min(...p.map((q) => q[1]))).toBeCloseTo(-2, 12);
+  });
+});
+
+describe('unionCapsules: the chunked tree is a restructuring, not an approximation', () => {
+  it('two disjoint capsules add; two coincident ones do not double-count', () => {
+    const disjoint: Poly[] = [];
+    capsuleContours(0, 0, 10, 0, R, N, disjoint);
+    capsuleContours(0, 20, 10, 20, R, N, disjoint);
+    const u1 = unionCapsules(tl, disjoint)!;
+    expect(u1.area()).toBeCloseTo(2 * capsuleArea(10, R, N), 2);
+    u1.delete();
+    const same: Poly[] = [];
+    capsuleContours(0, 0, 10, 0, R, N, same);
+    capsuleContours(0, 0, 10, 0, R, N, same);
+    const u2 = unionCapsules(tl, same)!;
+    expect(u2.area()).toBeCloseTo(capsuleArea(10, R, N), 2);
+    u2.delete();
+  });
+
+  it('the tree gives the same area as one flat union, across several chunk boundaries', () => {
+    // 300 capsules: 5 chunks, two tree levels. A raster that actually covers area.
+    const polys: Poly[] = [];
+    for (let i = 0; i < 300; i++) capsuleContours(0, i * 0.3, 30, i * 0.3, R, N, polys);
+    const tree = unionCapsules(tl, polys)!;
+    const flat = tl.CrossSection.ofPolygons(polys, 'Positive');
+    expect(tree.area()).toBeCloseTo(flat.area(), 1);
+    // And the closed form of that shape: a 30 x (299 x 0.3) rectangle with capsule ends.
+    const h = 299 * 0.3;
+    expect(flat.area()).toBeGreaterThan(30 * h);
+    expect(flat.area()).toBeLessThan((30 + 2 * R) * (h + 2 * R));
+    tree.delete();
+    flat.delete();
+  });
+
+  it('returns null for no contours', () => {
+    expect(unionCapsules(tl, [])).toBeNull();
+  });
+});
+
+describe('stock from the setup', () => {
+  it('a prism stock sits in WORK coordinates with its top at Z = 0 for a stub registered on the face', () => {
+    const st = stockFromSetup(tl, setup());
+    if ('severity' in st) throw new Error(st.message);
+    expect(st.topZ).toBeCloseTo(0, 9);
+    const bb = st.stock.boundingBox();
+    expect(bb.min[2]).toBeCloseTo(-5, 9);
+    expect(st.stock.volume()).toBeCloseTo(100 * 60 * 5, 6);
+    st.stock.delete();
+  });
+
+  it('follows the placement: a rotated, offset part lands where the frames say', () => {
+    const s = setup({ placement: { origin: [10, 20, 0], rotationZ: 90, source: 'stub' } });
+    s.wcs = { ...s.wcs, origin: [10, 20, 5] };
+    const st = stockFromSetup(tl, s);
+    if ('severity' in st) throw new Error(st.message);
+    const bb = st.stock.boundingBox();
+    // Rz(90) maps x in [0,100] to y in [0,100] and y in [0,60] to x in [-60,0]; the WCS is at the corner.
+    expect(bb.min[0]).toBeCloseTo(-60, 6);
+    expect(bb.max[0]).toBeCloseTo(0, 6);
+    expect(bb.max[1]).toBeCloseTo(100, 6);
+    st.stock.delete();
+  });
+
+  it('the badge: rounded-rect outline, volume within 0.1 % of the closed form', () => {
+    const badge = { kind: 'prism' as const, outline: roundedRect(76.2, 38.1, 3.175), thickness: 3.81 };
+    const st = stockFromSetup(tl, stubSetup(badge, HOLD));
+    if ('severity' in st) throw new Error(st.message);
+    const exact = (76.2 * 38.1 - (4 - Math.PI) * 3.175 * 3.175) * 3.81;
+    expect(Math.abs(st.stock.volume() - exact) / exact).toBeLessThan(0.001);
+    st.stock.delete();
+  });
+
+  it('refuses a non-prism stock in V1', () => {
+    const st = stockFromSetup(tl, stubSetup({ kind: 'cylinder', diameter: 30, length: 50 }, { kind: 'rotary-chuck', jawDiameter: 80, stickout: 10 }));
+    expect('severity' in st && st.code).toBe('stock-unsupported');
+  });
+});
+
+describe('sweeping a program against the slab: closed-form volumes', () => {
+  it('one straight stroke at depth d removes capsuleArea x d', () => {
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-0.6 F100\nG1 X40\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    // The plunge and the stroke share the checkpoint at z = -0.6; the stroke's capsule
+    // contains the plunge's disc, so the region is one capsule of length 20.
+    const want = capsuleArea(20, R, N) * 0.6;
+    const got = out.value.stats.removedVolume;
+    expect(Math.abs(got - want) / want).toBeLessThan(0.005);
+    expect(out.value.stats.checkpointsSwept).toBe(1);
+    expect(out.value.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    out.value.stock.delete();
+    out.value.result.delete();
+  });
+
+  it('a plunge alone removes a disc x d', () => {
+    const { out } = sweep('S1000 M3\nG0 X50 Y30 Z1\nG1 Z-1.5 F100\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    const want = (N / 2) * R * R * Math.sin((2 * Math.PI) / N) * 1.5;
+    expect(Math.abs(out.value.stats.removedVolume - want) / want).toBeLessThan(0.005);
+  });
+
+  it('a stroke entirely outside the stock footprint removes nothing', () => {
+    const { out } = sweep('S1000 M3\nG0 X200 Y200 Z1\nG1 Z-1 F100\nG1 X220\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.stats.removedVolume).toBeCloseTo(0, 6);
+    expect(out.value.stats.resultVolume).toBeCloseTo(out.value.stats.stockVolume, 6);
+  });
+
+  it('a cutting move ABOVE the stock top is skipped: the rotary files feed in air at Z = +30', () => {
+    const { out } = sweep('S1000 M3\nG0 X10 Y10 Z30\nG1 X50 F100\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.stats.checkpointsSkipped).toBe(1);
+    expect(out.value.stats.removedVolume).toBeCloseTo(0, 6);
+  });
+
+  it('THE LOWEST-Z RULE: a ramp is swept at its lowest Z along its whole length, and says so', () => {
+    // From Z 0 to Z -1 over 20 mm. The machine removes a wedge; the sweep removes the full
+    // 1 mm column (over-removal, by design: /Simulation.md §3.2). The oracle's over-cut check
+    // has to tolerate this.
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z0\nG1 X40 Z-1 F100\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    const want = capsuleArea(20, R, N) * 1;
+    expect(Math.abs(out.value.stats.removedVolume - want) / want).toBeLessThan(0.005);
+    expect(out.value.diagnostics.map((d) => d.code)).toContain('ramp-over-removed');
+  });
+
+  it('two checkpoints at the SAME depth either side of a tool change are two solids and do not double-count', () => {
+    const { out, timeline } = sweep(
+      'S1000 M3\nG0 X20 Y30 Z1\nG1 Z-1 F100\nG1 X40\nT2M6\nS1000 M3\nG0 X20 Y30 Z1\nG1 Z-1 F100\nG1 X40\n',
+      tool,
+      setup({ startingTool: 1 }),
+    );
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(timeline.checkpoints).toHaveLength(2);
+    expect(out.value.perCheckpoint.filter(Boolean)).toHaveLength(2);
+    const want = capsuleArea(20, R, N) * 1; // the same region twice, removed once
+    expect(Math.abs(out.value.stats.removedVolume - want) / want).toBeLessThan(0.005);
+  });
+
+  it('deeper and shallower passes nest: the union is the deeper column plus the shallower ring', () => {
+    // A 20 mm stroke at -0.5 then a 10 mm stroke at -1.0 inside it.
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-0.5 F100\nG1 X40\nG0 Z1\nG0 X25\nG1 Z-1.0\nG1 X35\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    const want = capsuleArea(20, R, N) * 0.5 + capsuleArea(10, R, N) * 0.5;
+    expect(Math.abs(out.value.stats.removedVolume - want) / want).toBeLessThan(0.005);
+    expect(out.value.stats.checkpointsSwept).toBe(2);
+  });
+
+  it('stock − removal is the result: volumes are consistent and the removal is a solid', () => {
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-0.6 F100\nG1 X40\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    const v = out.value;
+    expect(v.removal).not.toBeNull();
+    // The removal solid OVERSHOOTS the stock top by OVERSHOOT_MM on purpose (no coplanar
+    // faces in the subtraction), so its own volume is larger than what it removed by exactly
+    // capsuleArea x 0.01. The identity that holds is against the part of it inside the stock.
+    const inside = v.removal!.intersect(v.stock);
+    expect(v.stats.stockVolume - inside.volume()).toBeCloseTo(v.stats.resultVolume, 4);
+    expect(v.removal!.volume() - inside.volume()).toBeCloseTo(capsuleArea(20, R, N) * 0.01, 3);
+    inside.delete();
+    expect(v.result.numTri()).toBeGreaterThan(12);
+  });
+
+  it('an empty program sweeps nothing and says so', () => {
+    const { out } = sweep('G0 X1 Y1 Z1\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.removal).toBeNull();
+    expect(out.value.diagnostics.map((d) => d.code)).toContain('nothing-to-sweep');
+  });
+
+  it('gaps in the picture are reported, not hidden', () => {
+    const { out } = sweep('S1000 M3\nG1 X5 F100\n'); // Z never established
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.diagnostics.map((d) => d.code)).toContain('gaps');
+  });
+});
+
+describe('tools: V1 sweeps a flat end mill and refuses everything else BY NAME', () => {
+  it.each([
+    ['Flat End', 'flat'], ['flat end mill', 'flat'], ['Ball Nose', 'ball'], ['ball end mill', 'ball'],
+    ['Tapered Ball Nose', 'tapered-ball'], ['Engraving', 'engraving'], ['Chamfer', 'chamfer'],
+    ['Drill', 'drill'], ['Thread', 'thread'], ['Bull Nose', 'bull'], ['', 'unknown'], ['Laser', 'unknown'],
+  ])('%s -> %s', (text, shape) => {
+    expect(shapeFromType(text)).toBe(shape);
+  });
+
+  it("reads Studio's own TOOL record", () => {
+    const rec = parseMkrRecord(';@MKR|TOOL|number=1|id=112111313812|name=3.175*12mm Flat End(Metal)|type=Flat End|handlediameter=3.175|sticklength=0|shoulderlength=12|flutelength=12|diameter=3.175|tipdiameter=3.175|cornerradius=0|angle=0|halfAngle=0', 9)!;
+    const t = toolFromMkrRecord(rec);
+    expect(t).toMatchObject({ number: 1, shape: 'flat', tipDiameter: 3.175, shoulderLength: 12, fluteLength: 12, cornerRadius: 0 });
+    expect(cuttingRadiusForSweep(t)).toEqual({ ok: true, radius: 3.175 / 2 });
+  });
+
+  it('refuses a V-bit rather than simulating it as a flat end', () => {
+    const t = toolFromMkrRecord(parseMkrRecord(';@MKR|TOOL|number=3|name=3.175*0.1mm*30º Engraving|type=Engraving|diameter=3.175|tipdiameter=0.1|halfAngle=15', 1)!);
+    const r = cuttingRadiusForSweep(t);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/Engraving/);
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-0.6 F100\nG1 X40\n', t);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.diagnostics[0]?.code).toBe('tool-refused');
+  });
+
+  it('refuses a missing type, a corner radius (bull nose), and a missing diameter', () => {
+    expect(cuttingRadiusForSweep(flatEndMill(1, { typeText: '', shape: 'unknown' })).ok).toBe(false);
+    expect(cuttingRadiusForSweep(flatEndMill(1, { cornerRadius: 0.2 })).ok).toBe(false);
+    expect(cuttingRadiusForSweep(flatEndMill(1, { tipDiameter: null, diameter: null })).ok).toBe(false);
+  });
+});
+
+describe('the region a checkpoint removes is exposed for the oracle (§7)', () => {
+  it('checkpointRegion of one stroke is one capsule', () => {
+    const timeline = buildTimeline(parseGcode('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-0.6 F100\nG1 X40\n'), setup());
+    const { region, contours } = checkpointRegion(tl, timeline.checkpoints[0]!, R);
+    expect(contours).toBe(1 + 3); // the plunge's disc + the stroke's three contours
+    expect(region!.area()).toBeCloseTo(capsuleArea(20, R, N), 3);
+    region!.delete();
+  });
+
+  it('the tolerances a band is derived from are named, not guessed', () => {
+    expect(SWEEP_TOLERANCES.chord).toBe(0.005);
+    expect(SWEEP_TOLERANCES.simplify).toBe(0.002);
+    expect(SWEEP_TOLERANCES.simplifyLevels(64)).toBe(1);
+    expect(SWEEP_TOLERANCES.simplifyLevels(64 * 8)).toBe(2);
+    expect(SWEEP_TOLERANCES.simplifyLevels(64 * 64)).toBe(3);
+  });
+});
+
+describe('performance smoke: the measured budget holds', () => {
+  it('a 1000-move raster over 60 x 20 at three depths sweeps in well under the budget', () => {
+    const lines = ['S1000 M3'];
+    for (const z of [-0.4, -0.9, -1.2]) {
+      lines.push(`G0 X8 Y8 Z1`, `G1 Z${z} F100`);
+      let flip = false;
+      for (let y = 8; y <= 28; y += 0.63) {
+        lines.push(flip ? 'G1 X8' : 'G1 X68');
+        lines.push(`G1 Y${(y + 0.63).toFixed(2)}`);
+        flip = !flip;
+      }
+    }
+    const { out, timeline } = sweep(lines.join('\n'));
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(timeline.summary.cuttingMoves).toBeGreaterThan(190);
+    expect(out.value.stats.checkpointsSwept).toBe(3);
+    expect(out.value.stats.removedVolume).toBeGreaterThan(60 * 20 * 0.4);
+    expect(out.value.stats.ms.total).toBeLessThan(15_000);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// OPT-IN: a real vendor file (`npm run reference-gcode:fetch`). Skipped when absent.
+// ---------------------------------------------------------------------------------------
+const CORPUS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'reference-gcode');
+
+describe.skipIf(!existsSync(CORPUS))('a real 2.5D vendor job sweeps end to end', () => {
+  it('LED/ACRYLIC-Balloon.nc: ten Z levels, 3 300 cuts with arcs, removes a positive volume with no errors', () => {
+    const parsed = parseGcode(readFileSync(join(CORPUS, 'LED/ACRYLIC-Balloon.nc'), 'latin1'));
+    // Size a slab to the job: the stock is the cutting moves' XY extent plus a margin, and
+    // thick enough to hold the deepest cut. The file's own stock is not stated.
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, minZ = Infinity;
+    for (const e of parsed.events) {
+      if (e.kind !== 'move' || e.mode !== 'cut') continue;
+      for (const p of [e.from, e.to]) {
+        if (p[0] !== null) { minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]); }
+        if (p[1] !== null) { minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]); }
+        if (p[2] !== null) minZ = Math.min(minZ, p[2]);
+      }
+    }
+    const thickness = Math.ceil(-minZ + 1);
+    const part = { kind: 'prism' as const, outline: { kind: 'p-rect' as const, size: [maxX - minX + 10, maxY - minY + 10] as [number, number] }, thickness };
+    const s = stubSetup(part, { kind: 'tape-down', contact: part.outline });
+    // Put the part's model origin 5 mm below/left of the cuts; the work origin stays on the top face at (0, 0).
+    s.placement = { origin: [minX - 5, minY - 5, 0], rotationZ: 0, source: 'stub' };
+    s.wcs = { origin: [0, 0, thickness], source: 'stub', uncertainty: 0.05 };
+    const timeline = buildTimeline(parsed, s);
+    // The file's TOOL header is not Studio's (it is a Carvera-era file without one), so use
+    // the tool its comment names: a 3.175 mm flat end mill.
+    const out = sweepTimeline(tl, timeline, flatEndMill(3.175), s);
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(out.value.stats.removedVolume).toBeGreaterThan(0);
+    expect(out.value.stats.resultVolume).toBeLessThan(out.value.stats.stockVolume);
+    expect(out.value.stats.checkpointsSwept).toBeGreaterThan(5);
+    expect(out.value.stats.ms.total).toBeLessThan(120_000);
+  });
+});
