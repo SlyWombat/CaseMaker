@@ -685,16 +685,40 @@ measure it. Z stays probed, always.
   supplies distance. Two things #189 adds: stitching alone cannot give the
   **camera-to-spindle offset** (that needs one tie-point milled with the actual cutter), and
   **mm-per-pixel is a function of Z**, so it must be calibrated at more than one height.
-- **Whether Studio exposes camera-based origin setting for the Z1.** Everything found
-  describes the work-origin flow as jog buttons plus the 3D Probe or Auto Probe, and the
-  camera as monitoring and time-lapse. The feature may simply not exist.
+- ~~Whether Studio exposes camera-based origin setting for the Z1.~~ **Answered
+  2026-10-03: it does not. The camera view is a monitoring feed — no crosshair, no
+  origin-setting overlay.** So there is nothing to lean on and nothing to imitate: vision
+  registration is entirely ours to build (#189), and it is a capability Studio has the
+  hardware for and does not use.
 - **Whether the stream is reachable by anything but Studio and the mobile app.** `ws_video`
   suggests a WebSocket endpoint on the machine, which is a bridge-era question (§5.7, #181).
 
-**So for V1 the camera is an operator aid, not an app feature.** Reading the stream needs
-raw sockets the web build does not have, and using it for registration needs a calibration
-nobody has measured. It belongs in the planner's *interface* now — a datum source with an
-uncertainty — and in its implementation after the bridge.
+**So for V1 the camera contributes nothing to registration.** Studio will not position with
+it, reading the stream needs raw sockets the web build does not have (§5.7, #181), and the
+calibration (#189) is bridge-era too. It belongs in the planner's *interface* now — a datum
+source with an uncertainty — and in its implementation after the bridge. In V1 it is a
+webcam you can watch.
+
+#### What that means for V1's fixture, and a correction
+
+With vision deferred, **the vise is the strongest V1 option**, and this document briefly
+argued otherwise on the strength of a camera capability that turns out not to be available
+yet. Setting it out plainly:
+
+| Fixture | What V1 must do to register it | Depends on |
+|---|---|---|
+| **Vise on the anchor pins** | **Set an origin, probe Z.** The jaws fix rotation mechanically; the anchor fixes the vise on the bed | Documented Studio features only — anchor-relative origin and automatic Z probing |
+| **Tape** | Probe X, **Y and rotation** blind | Whether Studio's work-origin dialog can do a two-point edge find **at all** — unknown (#187 item 1) |
+| **Printed nest** | Same as tape, plus a print per part | Same unknown |
+
+So the vise is the only option whose V1 registration needs **nothing unverified**. It also
+**de-risks #187 item 1 almost entirely**: if rotation is fixed by the jaws, V1 never needs
+rotation compensation, and the static-`.nc` limitation (no variables in Smoothieware, so no
+computed `G10 L2 P1`) stops mattering.
+
+Tape remains the better long-term answer — camera coarse, probe fine, shim for the
+membrane, no fixture per part — and it is the one to revisit once #189 lands. The membrane
+shim question is independent of all of this and #165 Row A settles it.
 
 **The plan then falls out of geometry, not out of a rule.** Query the compiled solid for
 candidate surfaces, score them, and emit the touches that resolve the residual:

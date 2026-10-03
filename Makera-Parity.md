@@ -336,6 +336,11 @@ Worth stating, because parity is not the whole goal:
   subsystem whose Studio counterpart logs a font-loading failure.
 - **Text, boards and enclosures are first-class**, which is the actual job; Studio is a
   general CAM front end with no notion of the part.
+- **The camera is unused for metrology.** The Z1 has an integrated camera and Studio shows
+  it as a **monitoring feed only** — no crosshair, no origin-setting overlay (confirmed by
+  the maintainer, 2026-10-03). Calibrating it (#189) and using it to find the part before
+  probing is a capability the hardware already supports and the vendor's own software does
+  not offer. That is not parity; it is an advantage available for the taking.
 
 ---
 
