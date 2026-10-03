@@ -23,8 +23,10 @@ coverage. It does not copy the tables into this repo, and neither should the app
 
 ## 1. Evidence base
 
-Everything below was read from the local Studio 0.1.2.0 install. Paths are written
-relative to `%APPDATA%/MakeraStudio` and `%LOCALAPPDATA%/Programs/Makera Studio`.
+Sections 2–10 were read from the local Studio 0.1.2.0 install; paths are written relative
+to `%APPDATA%/MakeraStudio` and `%LOCALAPPDATA%/Programs/Makera Studio`. **§11 covers the
+published documentation** — Makera's wiki and GitHub — including how to reach the Z1 wiki
+pages at all, and the licence constraint that applies to their repos.
 
 | Source | What it proves |
 |---|---|
@@ -356,7 +358,72 @@ so that machine limits have somewhere to be clamped from day one (§5.1 item 3).
 
 ---
 
-## 11. Open unknowns
+## 11. Documentation sources
+
+Found 2026-10-03. The Z1 wiki pages are **absent from `sitemap.xml`** (`/Fabrication.md`
+§2), so they are reachable only via the wiki.js GraphQL page list:
+
+```
+curl -X POST https://wiki.makera.com/graphql -H 'Content-Type: application/json' \
+  -d '{"query":"{pages{list(locale:\"en\"){id path title}}}"}'
+```
+
+That returns **100 pages**, of which **9 are Z1**. Fetch the rendered HTML with a browser
+User-Agent; `single(id:)` content needs auth, the rendered page does not.
+
+| Page | Worth reading for |
+|---|---|
+| `Z1/QuickStart` | **The actual manual.** Safety, tool change, the anchor workholding system, all three probes, bit collars, collet change, WiFi/Bluetooth setup, and the first-job walkthrough |
+| `Z1/Manual` | An index of anchors into `Z1/QuickStart` — little content of its own |
+| `Z1/new-page/Maintenance` | Maintenance, almost entirely as YouTube links. Note the unguessable path |
+| `Z1/Accessories` + `/4Axis`, `/4Axis/HRG`, `/Ionizer`, `/Low-Profile-Vise`, `/VacuumBed` | The five accessory quick-starts |
+| `Makera-Accessories/Makera-3D-Probe` | The probe that handles non-conductive material — **not** the 3D Probe Rod |
+| `Makera-Accessories/Engraving-Module` | Despite the name this is the **laser** module ("connect the laser module cable", "wear laser safety goggles") |
+| `speeds-and-feeds` | Big table, organised by bit rather than material. Has a "Plastic" column and a "Woods & Plastics" group, **but still no PLA or PETG row** — consistent with §5.1 |
+| `software/MakeraCAM_userguide`, `_Intro`, `_tutorials` | Makera's own CAM documentation — the user-facing counterpart to §2's strategy list |
+| `software/vcarve-desktop`, `fusion360`, `LightBurn`, and 7 more | Which third-party CAM is supported, and how |
+| `supported-codes` | Carvera-written; see `/Fabrication.md` §2 |
+
+### 11.1 GitHub, and a licence trap
+
+| Repo | Licence | Contents |
+|---|---|---|
+| `MakeraInc/MakeraZ1Firmware` | — | Smoothieware fork; already §2's authority |
+| `MakeraInc/CarveraController` | **GPL-3.0** | The official client. `src/` holds `WIFIStream.py`, `USBStream.py`, `XMODEM.py`, `CNC.py`, `Controller.py` — **the whole machine protocol, published** |
+| `MakeraInc/CarveraProfiles` | **none (all rights reserved)** | Post-processors for **13** CAM packages, machine design files, sample `.nc`, a kiri:moto tool database |
+| `MakeraInc/MakeraCAM` | — | README only; an issue tracker, not source |
+
+> **Case Maker is Apache-2.0.** GPL-3.0 code cannot be copied or adapted in, and an
+> unlicensed repo is all-rights-reserved. Protocol and format *facts* are
+> interoperability information and fine to reimplement; **files, code and comments are
+> not.** `/Fabrication.md` §5.7 states the rule for the bridge.
+
+**Z1-specific assets in `CarveraProfiles`** (everything else there is Carvera-named, so
+the provenance rule applies):
+
+- `CAM_Post_Processors/Freecad/26PostProcesssor_Machine/Makera_Z1.fcm` — a small JSON
+  machine definition, and the most useful single file found. It independently confirms
+  X 0–200, Y 0–200, Z 0–100, and adds: the kinematic chain (Y is the table; X and Z are
+  the head, Z parented to X; A is a table rotary parented to Y), `axis_precision: 3` and
+  `feed_precision: 2` for output formatting, `split_arcs: false` (**the controller takes
+  arcs**), `translate_drill_cycles: true` (**it does not take canned cycles**),
+  `xy_before_z_after_tool_change: true`, and `dwo_supported: false` / `tcp_supported: false`.
+- `Machine_Design_Files/Makera-Z1_MDF-v2.1.dxf` and `.STEP` — **the Z1's bed plate**. This
+  is the primary source for where a fixture can actually be clamped and where the anchor
+  pins sit, which #175 currently guesses at.
+- `Machine_Design_Files/Makera-Z1_Simplified_4Axis.step` — machine model.
+- `Sample_Files/NefertitiFinish.nc` — a **second** sample `.nc`, and a 3D finishing job, so
+  a much harsher parser and simulator test case than `TopClamp.nc`.
+
+### 11.2 One discrepancy to resolve
+
+`Makera_Z1.fcm` gives **`max_velocity: 6000`** on X, Y and Z, while `t_MachineType` gives
+**`maxFeedRate: 1200`**. Most likely rapid-traverse velocity versus maximum *cutting* feed,
+but it could equally be a FreeCAD default nobody edited. **#184 must not pick one without
+deciding which it is** — clamping cutting feeds at 1 200 is safe either way, clamping
+rapids at 1 200 may merely be slow.
+
+## 12. Open unknowns
 
 - Is strategy `type 5` V-carve? Is `toolType 4` Bull Nose? Both are hypotheses from the
   enum gaps plus binary strings.

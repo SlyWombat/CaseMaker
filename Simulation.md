@@ -112,9 +112,15 @@ from that Z up past the stock top. Non-constant-Z moves fall back to §3.1.
 - **A G0 above the stock removes nothing.** A G0 that intersects the stock **removes
   material in the simulation** — it is not merely flagged. The gouge must be visible;
   #174 refuses the file separately.
-- **Linear only.** Studio's own output contains no arcs at all — 9 607 `G1`, 25 `G0`, zero
-  `G2`/`G3` (`/Makera-Parity.md` §6). Our IR is linear too. If a file ever does contain
-  arcs, the **parser** tessellates them, so the sweep never sees a curve.
+- **The sweep is linear-only; the parser is not optional about arcs.** Studio's own output
+  contains no arcs — 9 607 `G1`, 25 `G0`, zero `G2`/`G3` (`/Makera-Parity.md` §6) — and our
+  IR is linear too, so it was tempting to treat arcs as a contingency. They are not:
+  Makera's own Z1 FreeCAD machine definition sets **`split_arcs: false`**, which means the
+  *controller accepts* `G2`/`G3` and other CAM will emit them. Since §1 commits to
+  simulating any `.nc`, **the parser must tessellate arcs**, with the tessellation
+  tolerance tied to the same ε as everything else (§7). The sweep still never sees a curve.
+- The same definition sets `translate_drill_cycles: true`, so the machine does **not**
+  take canned cycles (`G81`/`G83`) — consistent with Studio emitting none.
 - The parser must survive a file with **no `G54` and no `G10`** that opens with `T1 M6`,
   because that is what Studio emits.
 

@@ -42,12 +42,47 @@ Firmware is a branch of **Smoothieware** (`MakeraInc/MakeraZ1Firmware`), so the
 G-code semantics are LinuxCNC-flavoured and documented.
 
 ### Hardware we have
-- Base machine and the **wired probe** that ships with it.
-- **The Makera 3D Probe** — probes X/Y/Z on conductive *and* non-conductive
-  materials, which is what makes the printed-blank workflow possible. This is the
-  probe to use for anything that isn't metal.
+- Base machine, the **wired probe** and the **3D Probe Rod** that ship with it.
+- **The Makera 3D Probe** — a separate accessory, and the one that matters. See the
+  warning below: it is *not* the 3D Probe Rod.
 - **4th axis rotary module.** Work envelope ⌀80 × 150 mm. Belt-driven: fine for
   hobby work, with real compromises in rigidity and precision.
+
+> ### ⚠ Three probes ship or are sold for this machine, and only one can touch off PLA
+>
+> They have nearly identical names, they all install the same way, and they all plug
+> into the same connector. Picking the wrong one means **the printed-blank workflow
+> does not work at all**.
+>
+> | | Probes | Materials |
+> |---|---|---|
+> | **Wired probe** (in the box) | Z only, plus surface levelling and area scanning | not stated |
+> | **3D Probe Rod** (in the box) | X, Y and Z | **CONDUCTIVE ONLY.** "The workpiece must be electrically connected to the aluminum table via locating pins, screws, or other conductive methods" (`Z1/QuickStart`) |
+> | **Makera 3D Probe** (separate accessory, **the user owns this one**) | X, Y and Z | "both conductive and non-conductive materials" (`Makera-Accessories/Makera-3D-Probe`) |
+>
+> So **decision 8 and §7.3 stand — but only because the user owns the separate 3D
+> Probe.** The rod that came in the box cannot do it. #165 still verifies it on PLA
+> rather than taking the page's word for it.
+
+### Workholding, as the machine does it natively
+`Z1/QuickStart` documents an **anchor-based system** this document had not accounted
+for: an L-bracket pinned to the bed with two 4 mm dowel pins and three M5×20 screws,
+the workpiece registered against its inner face and clamped at the opposite corner, and
+**"the system will automatically detect the lower-left corner as the machining origin"**.
+The first-job walkthrough sets "Work Origin relative to Anchor 1, with X Offset = 0 and
+Y Offset = 0".
+
+That is a hardware XY datum, which is exactly what decision 23 assumed did not exist —
+see §7.3 for why probing is still the plan, and what would change that.
+
+**Bit collars** also matter more than they look: they set the shank protrusion
+(~12 mm by default) so that stickout is repeatable across tool changes. That is one of
+the three unquantified terms in §7.6's Z chain, and the machine ships with a jig for it.
+
+**There is a Z1 Pro.** `Z1/QuickStart` is written throughout for "Makera Z1（Z1&Z1Pro）",
+but `t_MachineType` has only one `Makera Z1` row. Whether the Pro differs in any figure
+this document relies on is **unknown** — #184 should not hard-code a single Z1 identity
+without noting it.
 
 ### Hardware we do NOT have
 - **No laser module.** The optional unit is 5 W / 445 nm. Everything laser is out
@@ -63,8 +98,15 @@ G-code semantics are LinuxCNC-flavoured and documented.
 - Using it is itself a tool change: remove cutter → fit probe → unplug wired probe
   connector → plug 3D probe → probe → swap back → `M491`. §7.6 explains why that
   chain's repeatability needs measuring.
-- What the **wired** probe can and cannot touch off is **not documented either way**.
-  Assume nothing; the 3D probe is the one to use for anything non-metallic.
+- The **wired** probe *is* documented after all: `Z1/QuickStart` says it "supports
+  automatic Z-axis probing, surface leveling, and machining area scanning", and that with
+  the anchor system "it enables easy XYZ positioning". What it does **not** state is
+  whether it touches off non-conductive material — so for PLA the separate Makera 3D
+  Probe remains the one to use.
+- **Work volume is independently confirmed.** `CarveraProfiles`'s Z1 FreeCAD machine
+  definition gives X 0–200, Y 0–200, Z 0–100, matching `t_MachineType`. It also gives the
+  kinematic chain — Y is the **table**, X and Z are the **head** (Z parented to X), and
+  the A axis is a table rotary parented to Y.
 
 ---
 
@@ -396,10 +438,31 @@ MAC, which is how we confirm we are talking to the right machine.
 It must be developed and tested **from Windows** — WSL2's NAT will almost certainly
 break UDP discovery, and the Tauri build has to run on Windows anyway (`CLAUDE.md`).
 
-**Why it is not in V1:** Makera Studio already uploads over WiFi. Putting a protocol
-reverse-engineer and a Windows-only development loop on the critical path buys
-nothing a working `.nc` file does not already deliver. See §9.1 — this is the one
-place V1 narrows the original brief, and it is deliberate.
+**Why it is not in V1:** Makera Studio already uploads over WiFi. Putting a
+Windows-only development loop on the critical path buys nothing a working `.nc` file
+does not already deliver. See §9.1 — this is the one place V1 narrows the original
+brief, and it is deliberate.
+
+**Correction: there is no protocol to reverse-engineer.** This section used to justify
+the deferral partly as avoiding "a protocol reverse-engineer". Makera publish their own
+controller client — **`MakeraInc/CarveraController`** — and its `src/` contains
+`WIFIStream.py`, `USBStream.py`, `XMODEM.py`, `CNC.py` and `Controller.py`. The
+transport, the discovery and the file-transfer mechanism are all readable. The
+`Z1/QuickStart` manual also documents the connection surface: USB, the machine's own
+AP-mode hotspot (SSID prefix `Makera Z1`), or a shared local network, with the WiFi
+credentials pushed over **Bluetooth** from Studio or the mobile Makera App. So the
+bridge is a smaller job than this document assumed — it is deferred on *sequencing*
+now, not on risk.
+
+> **⚠ Licence constraint, and it binds before anyone opens those files.**
+> `CarveraController` is **GPL-3.0**. Case Maker is **Apache-2.0**. GPL-3.0 code cannot
+> be copied or adapted into this repo. `CarveraProfiles` is worse: it carries **no
+> licence at all**, which means all rights reserved.
+>
+> Protocol *facts* — port numbers, framing, command sequences — are interoperability
+> information and fine to learn and reimplement. **Code, comments and files are not.**
+> Write the bridge from a written-down description of the protocol, not with the Python
+> open beside it.
 
 **The platform seam it needs is #181.** The split follows what a browser physically
 cannot do — raw sockets (this bridge), local filesystem reads (Makera's feeds/speeds
@@ -535,6 +598,24 @@ The machine measures where the part is rather than trusting the fixture:
    measured from (§7.2).
 3. Set the work origin with `G10 L2 P1`, swap probe for cutter, `M491` to re-establish
    tool length, run.
+
+**What the machine offers instead, and why this is still the plan.** The Z1 has a native
+**anchor-based XY datum** (§1): an L-bracket pinned to the bed, and a documented "Work
+Origin relative to Anchor 1" with X and Y offsets. That is a hardware datum, which is
+exactly the thing decision 23 assumed was unavailable — so it deserves a straight answer
+rather than silence.
+
+Probing still wins for *this* part, for one reason that the anchor system cannot fix: the
+badge's registration surfaces are **its own edges**, and the blank is a printed part whose
+outline carries FDM tolerance. An anchor tells you where the *bracket* is, not where the
+blank's edges ended up inside the nest. Edge-finding the blank measures the thing the cuts
+are referenced to.
+
+**But the anchor is worth using as well, not instead.** It gives the nest a repeatable
+home on the bed, which turns "clamp the nest somewhere" into "clamp the nest at Anchor 1"
+and makes a second run of the same job reproducible without re-probing from scratch.
+#175 should put the nest on the anchor pins. That is a fixture improvement, not a change
+to decision 23.
 
 The nest (§7.6) still earns its place — it holds the blank flat and repeatable, and
 stops it moving while cut — but it is **not** load-bearing for position, and its datum
