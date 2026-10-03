@@ -493,6 +493,8 @@ only, clamped at **1 200 mm/min** — the one figure that comes from the machine
 database row and that Studio's whole feeds table respects (max 1 200, zero rows above it).
 The rapid ceiling is never ours to state.
 
+**Caveat (review of #174):** a file *can* set the seek rate — `F` on a `G0` does. It is true of the samples read that none does, so emitting `F` on cutting moves only is still right, but the profile must not assume rapids are unconfigured. `/Z1-Firmware-Dialect.md` §10.
+
 For #184 that means: a `maxCutFeed` field with a sourced value, and **no `maxRapid` field at
 all** rather than a guessed one.
 

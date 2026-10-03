@@ -82,8 +82,15 @@ Consequences, and they are large:
 
 Executing a program means modelling what the controller holds, not just sweeping geometry:
 
-- **Active tool and its length offset.** `T<n> M6` switches the tool solid; `M491`
-  re-establishes TLO (`/Fabrication.md` §2).
+- **Active tool and its length offset.** `T<n> M6` switches the tool solid **and
+  calibrates its length by itself** — the firmware's manual-change macro probes the
+  tool-length sensor and saves the offset (`/Z1-Firmware-Dialect.md` §2). `M491` is a
+  second entry point to the same calibration, not a required follow-up. Four more facts
+  from the same source: `M6` needs its `T` **in the same command**; it **stops a running
+  spindle** (it halts only if the spindle is *still* running afterwards, which a program
+  cannot cause — Makera's own concatenated samples rely on this); `M6` to the **already-active
+  tool does nothing at all** — no change, no calibration; and afterwards the head returns to
+  the **saved X,Y** at the machine's clearance Z, so only Z is unknown.
 - **A virtual tool swap is a pause.** `M490.1` beeps and waits for the operator, `M490.2`
   releases, `M600` suspends. The emulator **stops and prompts**, exactly where the machine
   would — which is the only way to see that a program's tool sequence makes sense.
@@ -533,7 +540,13 @@ And the ones that must **fail**, which matter more than the ones that pass:
 - `atc-test.nc` → **not a refusal.** §2 of `/Fabrication.md` says the manual handshake is
   exactly what makes a multi-tool single `.nc` viable on this machine, and `TopClamp.nc`
   (a Z1 job) opens with `T1 M6`. Seven tool changes are **seven pauses**, not an error.
-  A refusal needs a real reason — a change with no `M491` after it, for instance.
+  A refusal needs a real reason, and the obvious one is **wrong**: "an `M6` with no `M491`
+  after it" would refuse `TopClamp.nc`, a known-good Z1 job, because `M6` calibrates by
+  itself (`/Z1-Firmware-Dialect.md` §2). The real refusable fault is `M6` **without a `T`
+  in the same command**, which the firmware ignores. `M6` **with the spindle running** is
+  *not* one: the firmware stops the spindle first, and Makera's own concatenated samples
+  depend on it. (An earlier version of this paragraph said otherwise and the parser raised 7
+  false errors on 6 vendor files.)
 - A label 2 mm from a **vise jaw** with a 3.175 mm cutter → fixture collision (§1.2).
 - A cut deeper than the tool's `shoulderLength` → holder collision.
 - A `G1` with the **spindle off**, and a `G0` that crosses the stock.

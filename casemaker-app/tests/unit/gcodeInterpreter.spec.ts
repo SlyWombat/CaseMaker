@@ -1,0 +1,356 @@
+// The modal state machine (#174, #182). Hand-written fixtures only: each one pins a dialect
+// fact from /Z1-Firmware-Dialect.md, or a defect the adversarial review found in this
+// parser (and says so), or an invariant the emulator relies on.
+
+import { describe, it, expect } from 'vitest';
+import { parseGcode, hasErrors } from '@/engine/cnc/gcode';
+import type { GcodeEvent, MoveEvent, ParseResult } from '@/engine/cnc/gcode';
+
+const moves = (r: ParseResult) => r.events.filter((e): e is MoveEvent => e.kind === 'move');
+const kinds = (r: ParseResult) => r.events.map((e) => e.kind);
+const errors = (r: ParseResult) => r.diagnostics.filter((d) => d.severity === 'error').map((d) => d.code);
+const codes = (r: ParseResult) => r.diagnostics.map((d) => d.code);
+
+describe('UNKNOWN IS A STATE: the parser never invents a coordinate', () => {
+  it('a program that opens `T1 M6` then rapids with no Z must not get Z = 0', () => {
+    // The opening of a real Z1 job (Studio's TopClamp.nc). The tool-change macro leaves the
+    // head at a safe height the file cannot see, so the first G0 has no known Z.
+    const r = parseGcode('T1 M6\nM7\nG0 X70.11 Y6.42\nS12000 M3\nG0 Z5\n');
+    const m = moves(r);
+    expect(m[0]?.from).toEqual([null, null, null]);
+    expect(m[0]?.to).toEqual([70.11, 6.42, null]);
+    expect(m[1]?.from).toEqual([70.11, 6.42, null]);
+    expect(m[1]?.to).toEqual([70.11, 6.42, 5]);
+    expect(kinds(r)).toEqual(['tool-change', 'air', 'move', 'spindle', 'move']);
+  });
+
+  it('an axis that was never set stays null through relative moves', () => {
+    const r = parseGcode('G91\nG1 X5 F100\n');
+    // X is relative to a position nobody established, so it is still unknown: not 5.
+    expect(moves(r)[0]?.to).toEqual([null, null, null]);
+  });
+
+  it('G28, G38 and M491 make the position unknown again', () => {
+    for (const cmd of ['G28', 'G38.2 Z-5 F50', 'M491']) {
+      const r = parseGcode(`G0 X1 Y2 Z3\n${cmd}\nG0 X5\n`);
+      const last = moves(r).at(-1)!;
+      expect(last.from, cmd).toEqual([null, null, null]);
+    }
+  });
+});
+
+describe('M6, as the firmware executes it (§2)', () => {
+  it('keeps X and Y — the head returns to the SAVED position — and forgets only Z', () => {
+    // The dialect document first said the head ends "at the far corner". The firmware
+    // rapids back to the saved X,Y at clearance Z; Z is a machine constant.
+    const r = parseGcode('G0 X10 Y20 Z5\nT2M6\nG0 X30\n');
+    expect(moves(r).at(-1)?.from).toEqual([10, 20, null]);
+    expect(moves(r).at(-1)?.to).toEqual([30, 20, null]);
+  });
+
+  it('does NOTHING for the already-active tool: no change, position kept', () => {
+    const r = parseGcode('T1M6\nG0 X1 Y2 Z3\nT1M6\nG0 X4\n');
+    const tcs = r.events.filter((e) => e.kind === 'tool-change');
+    expect(tcs.map((e) => (e.kind === 'tool-change' ? e.noOp : null))).toEqual([false, true]);
+    expect(moves(r).at(-1)?.from).toEqual([1, 2, 3]); // Z survives a no-op
+  });
+
+  it('REGRESSION (review #174): M6 with the spindle on stops the spindle; it is NOT an error', () => {
+    // The first version, and the dialect document, said the firmware halts. It turns the
+    // spindle off first and halts only if it is STILL running afterwards. Makera's own
+    // concatenated samples run `M30` then `T1M6` with no `M5` between, and the parser
+    // raised 7 false errors on 6 of them.
+    const r = parseGcode('S10000 M3\nT1M6\n');
+    expect(hasErrors(r)).toBe(false);
+    expect(kinds(r)).toEqual(['spindle', 'spindle', 'tool-change']);
+    const off = r.events[1];
+    expect(off).toMatchObject({ kind: 'spindle', state: 'off' });
+    expect(r.events[2]).toMatchObject({ kind: 'tool-change', tool: 1, stoppedSpindle: true });
+  });
+
+  it('M6 with no T in the same command does nothing, and says so', () => {
+    expect(errors(parseGcode('M6\n'))).toEqual(['m6-without-t']);
+    // T on one line and M6 on the next is the same mistake: T alone does nothing.
+    const r = parseGcode('T2\nM6\n');
+    expect(codes(r)).toEqual(['t-without-m6', 'm6-without-t']);
+    expect(r.summary.toolChanges).toBe(0);
+  });
+
+  it('M490.1 / M490.2 / M600 are pauses; M491 recalibrates', () => {
+    const r = parseGcode('M490.1\nM490.2\nM600\nM491\n');
+    expect(kinds(r)).toEqual(['pause', 'pause', 'pause', 'tlo-calibrate']);
+    expect(r.events.filter((e) => e.kind === 'pause').map((e) => (e.kind === 'pause' ? e.reason : ''))).toEqual([
+      'M490.1',
+      'M490.2',
+      'M600',
+    ]);
+  });
+});
+
+describe('M2 / M30 end of program (grbl mode: M30 is M2)', () => {
+  it('stops the spindle and air, resets the modal motion to G1 and distance to absolute', () => {
+    const r = parseGcode('G91\nS1000 M3\nM7\nM30\nG1 X5 F100\n');
+    expect(kinds(r)).toEqual(['spindle', 'air', 'spindle', 'air', 'program-end', 'move']);
+    expect(r.events[2]).toMatchObject({ kind: 'spindle', state: 'off' });
+    expect(r.events[3]).toMatchObject({ kind: 'air', on: false });
+    // Distance mode is absolute again: X5 is the position X5, not "5 from unknown".
+    expect(moves(r)[0]?.to[0]).toBe(5);
+  });
+
+  it('a bare X line after M30 is a CUT: the firmware sets the modal motion to G1', () => {
+    const r = parseGcode('G0 X1\nM2\nX5\n');
+    expect(moves(r).map((m) => m.mode)).toEqual(['rapid', 'cut']);
+  });
+
+  it('M2 and M30 behave identically', () => {
+    const a = parseGcode('S100 M3\nM2\n');
+    const b = parseGcode('S100 M3\nM30\n');
+    expect(kinds(a)).toEqual(kinds(b));
+  });
+
+  it('a concatenated program does not leak the spindle into the next one', () => {
+    const r = parseGcode('S10000 M3\nG1 X1 F100\nM30\n\nT1M6\nS10000 M3\n');
+    expect(hasErrors(r)).toBe(false);
+  });
+});
+
+describe('N-numbered lines (§10): the firmware strips the number but keeps testing "N"', () => {
+  it('`N10 G1 X5` is IGNORED by the firmware, so the parser must not execute it', () => {
+    const r = parseGcode('N10 G1 X5 F100\n');
+    expect(moves(r)).toHaveLength(0);
+    expect(errors(r)).toEqual(['n-line-ignored']);
+  });
+  it('...but `N10 X5` survives, via the bare-axis path', () => {
+    const r = parseGcode('N10 X5\n');
+    expect(moves(r)).toHaveLength(1);
+    expect(hasErrors(r)).toBe(false);
+  });
+  it('a lone line number is a blank line', () => {
+    expect(codes(parseGcode('N20\n'))).toEqual([]);
+  });
+});
+
+describe('firmware hazards (§6) are reported, not silently obeyed', () => {
+  it('G90/G91 are HOISTED out of a comment: the distance mode really changes', () => {
+    const r = parseGcode('G0 X1\nG91\nG1 X5 ; back to G90\nG1 X1\n');
+    expect(errors(r)).toContain('comment-contains-g90-g91');
+    // Under G91, X5 would be 1+5 = 6. The hoisted G90 makes it absolute: 5.
+    expect(moves(r)[1]?.to[0]).toBe(5);
+  });
+
+  it('text after a "(" comment is DISCARDED, not executed as RS274 would', () => {
+    const r = parseGcode('G0 (hop) X5\n');
+    expect(errors(r)).toEqual(['paren-comment-truncates']);
+    expect(moves(r)).toHaveLength(0);
+  });
+
+  it('a lone F line switches the modal motion to G1: later bare-X lines become CUTS', () => {
+    const r = parseGcode('G0 X1\nF500\nX5\n');
+    expect(codes(r)).toContain('lone-f-switches-g1');
+    expect(moves(r).map((m) => m.mode)).toEqual(['rapid', 'cut']);
+    expect(moves(r)[1]?.feed).toBe(500);
+  });
+
+  it('a lowercase line is a console command and does nothing', () => {
+    const r = parseGcode('g1 x5\necho hello\n');
+    expect(moves(r)).toHaveLength(0);
+    expect(errors(r)).toEqual(['console-line']); // echo is fine; g1 x5 is not
+  });
+
+  it('trailing remark text after a command is one WARNING and the command still runs', () => {
+    const r = parseGcode('M7 # air on\n');
+    expect(r.events[0]).toMatchObject({ kind: 'air', on: true });
+    expect(hasErrors(r)).toBe(false);
+    expect(codes(r)).toEqual(['ignored-text']);
+  });
+});
+
+describe('G53 (§4)', () => {
+  it('`G90 G0 G53 Z-3` — the G53 axes use the modal G0, in MACHINE coordinates', () => {
+    const r = parseGcode('G90 G0 G53 Z-3\nG53 G0 X-295 Y-205\nG53 Z-50\n');
+    expect(moves(r).map((m) => [m.mode, m.frame])).toEqual([
+      ['rapid', 'machine'],
+      ['rapid', 'machine'],
+      ['rapid', 'machine'],
+    ]);
+    expect(moves(r)[0]?.to).toEqual([null, null, -3]);
+    expect(moves(r)[1]?.to).toEqual([-295, -205, -3]);
+    expect(moves(r)[2]?.from).toEqual([-295, -205, -3]);
+    expect(moves(r)[2]?.to).toEqual([-295, -205, -50]);
+  });
+
+  it('machine coordinates are absolute even under G91', () => {
+    const r = parseGcode('G91\nG53 G0 X5\nG53 G0 X5\n');
+    expect(moves(r).at(-1)?.to[0]).toBe(5);
+  });
+
+  it('G53 followed by anything but G0/G1 is "Invalid G53" and ignored', () => {
+    const r = parseGcode('G53 G2 X1\n');
+    expect(errors(r)).toContain('g53-invalid');
+    expect(moves(r)).toHaveLength(0);
+  });
+
+  it('a machine-frame move invalidates ONLY the work axes it moved', () => {
+    // The G53 move changed Z, so the work-frame Z is no longer known; X and Y were not
+    // touched, so they still are. (Over-invalidating would lose a rapid the emulator can
+    // draw; under-invalidating would draw a rapid from a Z the head is no longer at.)
+    const r = parseGcode('G0 X1 Y2 Z3\nG53 G0 Z-3\nG0 X9\n');
+    expect(moves(r)[2]?.from).toEqual([1, 2, null]);
+    expect(moves(r)[2]?.to).toEqual([9, 2, null]);
+  });
+});
+
+describe('motion, units and modes', () => {
+  it('relative moves accumulate; absolute moves do not', () => {
+    const r = parseGcode('G0 X10\nG91\nG1 X5 F100\nG1 X5\n');
+    expect(moves(r).map((m) => m.to[0])).toEqual([10, 15, 20]);
+  });
+
+  it('G20 converts inches to millimetres at ingest', () => {
+    const r = parseGcode('G20\nG0 X1\n');
+    expect(moves(r)[0]?.to[0]).toBeCloseTo(25.4, 12);
+    expect(r.summary.usesInches).toBe(true);
+  });
+
+  it('a feed rate sticks and is reported on cutting moves only', () => {
+    const r = parseGcode('G1 X1 F250\nG1 X2\nG0 X3\n');
+    expect(moves(r).map((m) => m.feed)).toEqual([250, 250, null]);
+  });
+
+  it('refuses a non-positive feed', () => {
+    expect(errors(parseGcode('G1 X1 F0\n'))).toEqual(['bad-feed']);
+  });
+
+  it('S on a motion line is laser POWER only in laser mode', () => {
+    const r = parseGcode('M321\nG1 X1 S0.5 F100\nM322\nG1 X2 S0.7\n');
+    expect(r.summary.laser).toBe(true);
+    expect(moves(r).map((m) => m.power)).toEqual([0.5, null]);
+  });
+
+  it('tracks the A axis without interpreting it', () => {
+    const r = parseGcode('G1 X1 A90 F100\n');
+    expect(r.summary.usesRotary).toBe(true);
+    expect(moves(r)[0]?.a).toBe(90);
+    expect(codes(r)).toContain('rotary-axis');
+  });
+
+  it('G10 L2 is carried raw and NOT applied (the WCS lives in the controller)', () => {
+    const r = parseGcode('G10L2P0X-300Y-210Z-50\n');
+    expect(r.events[0]).toMatchObject({ kind: 'wcs-set', l: 2, p: 0, values: [-300, -210, -50] });
+  });
+
+  it('G4, G28, G38.x, G54..G59 and G92.x produce events', () => {
+    const r = parseGcode('G4 P1\nG28\nG38.2 Z-5 F50\nG55\nG92.4A0S0\n');
+    expect(kinds(r)).toEqual(['dwell', 'home', 'probe', 'wcs-select', 'offset-set']);
+    expect(r.events[2]).toMatchObject({ kind: 'probe', subcode: 2 });
+    expect(r.events[3]).toMatchObject({ kind: 'wcs-select', wcs: 1 });
+    expect(r.events[4]).toMatchObject({ kind: 'offset-set', subcode: 4 });
+  });
+});
+
+describe('arcs, through the interpreter (§8)', () => {
+  it('G2 semicircle: CW, centre start+(I,J), every segment flagged and on the arc line', () => {
+    const r = parseGcode('G0 X0 Y0 Z0\nG2 X10 Y0 I5 J0 F100\n');
+    const arc = moves(r).filter((m) => m.fromArc);
+    expect(arc.length).toBeGreaterThan(8);
+    expect(arc.every((m) => m.mode === 'cut' && m.line === 2)).toBe(true);
+    expect(arc.at(-1)?.to).toEqual([10, 0, 0]);
+    // Clockwise from (0,0) about (5,0) passes THROUGH the top, (5,5).
+    expect(Math.max(...arc.map((m) => m.to[1] as number))).toBeCloseTo(5, 2);
+    expect(r.summary.usesArcs).toBe(true);
+  });
+
+  it('G3 is the other way round', () => {
+    const r = parseGcode('G0 X0 Y0 Z0\nG3 X10 Y0 I5 J0 F100\n');
+    expect(Math.min(...moves(r).filter((m) => m.fromArc).map((m) => m.to[1] as number))).toBeCloseTo(-5, 2);
+  });
+
+  it('a helical arc interpolates the linear axis', () => {
+    const r = parseGcode('G0 X0 Y0 Z0\nG3 X0 Y10 Z6 I0 J5 F100\n');
+    const arc = moves(r).filter((m) => m.fromArc);
+    expect(arc.at(-1)?.to).toEqual([0, 10, 6]);
+    const zs = arc.map((m) => m.to[2] as number);
+    expect(zs).toEqual([...zs].sort((a, b) => a - b)); // monotone
+  });
+
+  it('there is NO R form: an R arc is refused, not guessed', () => {
+    const r = parseGcode('G0 X0 Y0 Z0\nG2 X10 R5 F100\n');
+    expect(errors(r)).toContain('arc-r-unsupported');
+  });
+
+  it('an arc from an unknown position is refused, not invented', () => {
+    expect(errors(parseGcode('G2 X10 I5 F100\n'))).toContain('arc-from-unknown');
+  });
+
+  it('an arc with no feed alarms on the machine', () => {
+    expect(errors(parseGcode('G0 X0 Y0 Z0\nG2 X10 Y0 I5 J0\n'))).toContain('no-feed');
+  });
+
+  it('a mismatched radius is a WARNING: the firmware runs it', () => {
+    const r = parseGcode('G0 X0 Y0 Z0\nG3 X10 Y12 I10 J0 F100\n');
+    expect(codes(r)).toContain('arc-radius-mismatch');
+    expect(hasErrors(r)).toBe(false);
+  });
+});
+
+describe('codes the machine does not know', () => {
+  it('every unknown G or M code is an error NAMING THE LINE', () => {
+    const r = parseGcode('G0 X1\nG999\nM777\nG81 Z-1\n');
+    const errs = r.diagnostics.filter((d) => d.severity === 'error');
+    expect(errs.map((d) => [d.line, d.code])).toEqual([
+      [2, 'unknown-code'],
+      [3, 'unknown-code'],
+      [4, 'unsupported-code'],
+    ]);
+  });
+
+  it('known accessory codes are accepted silently', () => {
+    expect(codes(parseGcode('M811\nM812\nM331\nM332\nM106\nM220 S100\n'))).toEqual([]);
+  });
+
+  it('M0, M1 and M8 are NOT accepted: nothing read shows the Z1 implements them', () => {
+    expect(errors(parseGcode('M0\nM1\nM8\n'))).toEqual(['unknown-code', 'unknown-code', 'unknown-code']);
+  });
+
+  it('collects EVERY diagnostic rather than stopping at the first', () => {
+    const r = parseGcode('G999\nM777\nG1 X1e5\n');
+    expect(new Set(r.diagnostics.map((d) => d.line))).toEqual(new Set([1, 2, 3]));
+  });
+
+  it('refuses an exponent and a nan, with the line', () => {
+    const r = parseGcode('G1 X1e61 F100\nG1 XNAN F100\n');
+    expect(r.diagnostics.filter((d) => d.code === 'bad-number').map((d) => d.line)).toEqual([1, 2]);
+  });
+});
+
+describe('header, markers and robustness', () => {
+  it('collects the header and emits a marker per TOOLPATH_START', () => {
+    const r = parseGcode(
+      ';@MKR|BEGIN\n;@MKR|TOOL|number=1|name=a\n;@MKR|END\nG90 G21\n;@MKR|TOOLPATH_START|toolpath_number=2\nG0 X1\n',
+    );
+    expect(r.header?.records.map((x) => x.tag)).toEqual(['BEGIN', 'TOOL', 'END', 'TOOLPATH_START']);
+    const marker = r.events.find((e): e is Extract<GcodeEvent, { kind: 'toolpath-start' }> => e.kind === 'toolpath-start');
+    expect(marker?.number).toBe(2);
+    // A marker precedes the moves of its toolpath: it is the segment boundary.
+    expect(kinds(r)).toEqual(['toolpath-start', 'move']);
+  });
+
+  it('a file with no header has header = null', () => {
+    expect(parseGcode('G0 X1\n').header).toBeNull();
+  });
+
+  it('never throws, whatever it is fed', () => {
+    const nasty = ['\u0000￿ G1 X\nXYZ\n(((\nT\nS\nM\nG\n', 'G'.repeat(2000), 'X'.repeat(5000), '\r\r\r', '%\n%\n', ';'.repeat(100)];
+    for (const s of nasty) expect(() => parseGcode(s)).not.toThrow();
+  });
+
+  it('counts lines, code lines, moves and tool changes', () => {
+    const r = parseGcode('; c\n\nG0 X1\nG1 X2 F10\nT1M6\n');
+    expect(r.summary).toMatchObject({ lines: 6, codeLines: 3, moves: 2, rapids: 1, cuts: 1, toolChanges: 1 });
+  });
+
+  it('every event carries its 1-based source line', () => {
+    const r = parseGcode('\n\nG0 X1\n\nM7\n');
+    expect(r.events.map((e) => e.line)).toEqual([3, 5]);
+  });
+});

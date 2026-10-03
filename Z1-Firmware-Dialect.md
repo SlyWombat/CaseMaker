@@ -10,6 +10,14 @@ what runs, so this is what the parser (#174) and the emulator (#182) model.
 *behaviour* — interoperability facts — and quotes no code. Nothing here is copied from it.
 The corpus is Carvera-generated: evidence about the shared dialect, not about Z1 specifics.
 
+> **Errata, 2026-10-03 (adversarial review of the first draft, #174).** Three statements in
+> the first version of this document were misreadings of the source, and are corrected below.
+> Each one was caught by RUNNING the parser over the corpus or by re-reading the surrounding
+> code, not by re-reading this document: **(1)** `M6` with the spindle running does *not*
+> halt (§2); **(2)** after a tool change the head returns to the *saved X,Y*, not "a far
+> corner" (§2); **(3)** a mismatched-radius arc is a circle then one jump, not a spiral (§8).
+> Two items first filed as "not yet established" are now answered from the source (§10).
+
 ## Why this exists
 
 Reading the sources overturned several things the plan asserted, and they would each have
@@ -51,15 +59,25 @@ Four things follow:
   follow-up. `TopClamp.nc` is a known-good Z1 job with **no `M491`**, so a check that "an `M6`
   not followed by `M491` is a fault" would refuse the vendor's own file. **That check is
   withdrawn** (it was recorded in #191 item 9).
-- **`M6` while the spindle is running halts the machine** ("can not change tool while spindle
-  is running"). That *is* a checkable fault.
+- **`M6` while the spindle is running does NOT halt — it stops the spindle.** The handler
+  first turns the spindle OFF, re-reads its state, and halts ("can not change tool while
+  spindle is running") only if it is *still* running afterwards, which a program cannot
+  cause. The first version of this document read only the second block and said the
+  opposite; that produced 7 false errors on 6 vendor files, which concatenate programs with
+  `M30` then `T1M6` and no `M5` between, and so *rely on* `M6` stopping the spindle.
 - **`M6` to the tool that is already active does nothing — no change, and no calibration.**
   `TopClamp.nc` opens with `T1 M6`; if T1 is already loaded the machine skips both, and the
   tool length offset stays whatever it was. That answers the open question about what the Z1
   does at `T1 M6` when T1 is already loaded: nothing.
-- **After `M6` the tool is at the far corner at safe Z**, so the position is unknown to a
-  parser that has not been told the machine's `safe_z` and anchor. The next `G0 X.. Y..`
-  therefore moves from an unknown Z — which is exactly what `TopClamp.nc` does.
+- **After `M6` the head returns to the SAVED X and Y, at the machine's clearance Z.** The
+  macro visits the far-corner sensor in steps 5–6, but when the script queue empties the
+  completion path rapids to `clearance_z` and then back to the X,Y that were recorded when
+  the change began, and pops the saved modal state. (The first version of this document said
+  the head stays "at the far corner"; that was wrong, and the parser wiped all three axes
+  because of it.) So **X and Y survive a tool change and only Z is unknown** — it is a
+  machine constant, `clearance_z`, a value for the machine profile (#184), not for the file.
+  The next `G0 X.. Y..` then moves from a known X,Y and an unknown Z, which is what
+  `TopClamp.nc` does.
 
 ## 3. The work coordinate system lives in the machine, not in the file
 
@@ -122,9 +140,13 @@ saying the firmware would have taken it.
   coincide in the plane it is a **full circle**, ±2π.
 - **`G18` flips the sense** (`if the linear axis is Y, clockwise = !clockwise`) because the XZ
   plane's handedness is reversed.
-- A mismatch between the start radius and the end radius is **not rejected**: the arc runs on
-  the start radius and the last segment lands on the target. So a bad `I`/`J` gives a quietly
-  wrong spiral, not an error — a case where a verifier should be stricter than the controller.
+- A mismatch between the start radius and the end radius is **not rejected**. The firmware
+  rotates the START radius vector through the angular travel, so every intermediate point is
+  on the start circle, and only the LAST segment lands on the target: **a circle followed by
+  one jump**, not a spiral. (The first version of this document, and of the parser's arc
+  code, said "spiral"; a review measured the port at 2.0 mm of radial error on a 10 → 12 mm
+  test.) Either way a bad `I`/`J` is a quiet wrong path, not an error — a case where a
+  verifier should be stricter than the controller.
 - An arc with no feed rate alarms ("Undefined feed rate"); a `G1` falls back to the default.
 
 This also corrects the plan: **arcs are not a contingency.** Studio's `TopClamp.nc` has none,
@@ -154,11 +176,30 @@ Accessory codes with no geometric effect, all Carvera-era: `M106`/`M107` (fan), 
 (auto vacuum), `M801`/`M802` (vacuum), `M811`/`M812` (spindle fan), `M821`/`M822` (light),
 `M831`/`M832`, `M841`/`M842`.
 
-## 10. Not yet established
+## 10. Settled from the source, and what is still open
+
+**Answered (they were "not yet established" in the first version):**
+
+- **The Z1 runs in grbl mode.** `Kernel.cpp` defaults `grbl_mode` to **true** under the `CNC`
+  build flag, and `configZ1.default` does not override it. Consequences: **`M30` is
+  end-of-program**, identical to `M2`; **`G4 P` is in seconds**, not milliseconds; and `M0`
+  (feed hold) stays unimplemented — it is commented out in `Robot.cpp`. *Unverified on the
+  machine itself: a config on the device could differ from the default shipped in the repo.*
+- **`M2` / `M30` do more than end the program.** The dispatcher issues `M5` and `M9` and
+  sets the modal motion to `G1`; the robot resets the work offset to **G54** and the distance
+  mode to **absolute**. Makera's samples depend on it: they concatenate programs with `M30`
+  then `T1M6` and no `M5` between.
+- **An `N`-numbered line is dropped.** The dispatcher captures `first_char` *before* it
+  strips the line number and never refreshes it, so `N10 G1 X5` matches none of its G/M/T/S
+  branches and falls through to "ignore". Only a remainder starting with `X`, `Y`, `Z`, `A`
+  or `F` survives, via the bare-axis path. No corpus file has an `N` word.
+- **`F` on a `G0` sets the SEEK rate.** `Makera-Parity.md` §11.2 said a rapid "never carries a
+  feed rate" and that the rapid ceiling is therefore never ours to state. True of the
+  samples read, but a *file can* set it. The parser ignores `F` on `G0` for feed purposes,
+  which is right; the profile should still not assume rapids are unset.
+
+**Still open:**
 
 - `ROUND_NEAR_HALF`, applied to every computed target, is defined outside the files read; the
   quantisation it applies is unknown. It does not affect the parser, which does not round.
-- Whether the Z1 runs in "grbl mode", which changes the unit of `G4 P` (seconds vs ms).
-- How `N` line numbers interact with the dispatcher: the first-character test uses the value
-  *before* stripping, which looks like it skips the `G` branch. No corpus file has one.
-- The firmware has been read, not run. Everything here is a reading.
+- Everything here is a reading of source. The firmware has **not been run**.
