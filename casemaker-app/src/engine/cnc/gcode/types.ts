@@ -59,6 +59,23 @@ export interface MoveEvent extends BaseEvent {
   power: number | null;
   /** True for every segment of a tessellated G2/G3. */
   fromArc: boolean;
+  /**
+   * Which axes the program COMMANDED on this line. A `null` in `to` is ambiguous without
+   * this: it can be an axis the line did not mention, or an axis it did mention whose base
+   * the PARSER does not know (a relative move after an unknown). A consumer holding more
+   * state than the parser (the runner knows the starting tool, so it knows Z survived a
+   * no-op `M6`) must be able to tell them apart, or it overwrites what it knows with the
+   * parser's null. Without this, `T1M6` (a real change to the parser, a no-op to the
+   * emulator) followed by `G1 X4` lost the known Z and raised a false `cut-unknown-z`.
+   */
+  commanded: [boolean, boolean, boolean];
+  /** The commanded values as written, in mm, or `null` where the axis was not commanded. */
+  values: Pos;
+  /**
+   * True when `values` are DELTAS (`G91`, work frame). A machine-frame move (`G53`) is never
+   * relative, and tessellated arc segments carry resolved absolute values.
+   */
+  relative: boolean;
 }
 
 export interface ToolChangeEvent extends BaseEvent {

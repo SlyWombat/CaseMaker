@@ -401,6 +401,7 @@ class Interp {
     const cur = (mcs ? this.machine : this.work).slice() as Pos;
     const target = cur.slice() as Pos;
     const commanded: boolean[] = [false, false, false];
+    const values: Pos = [null, null, null];
     // Machine coordinates are absolute even under G91; so are work coordinates under G90.
     const relative = !mcs && !this.absolute;
     for (const w of words) {
@@ -408,6 +409,7 @@ class Interp {
       if (idx === undefined) continue;
       commanded[idx] = true;
       const v = w.value * this.scale;
+      values[idx] = v;
       if (relative) {
         const base = cur[idx];
         target[idx] = base === null ? null : (base as number) + v;
@@ -426,7 +428,7 @@ class Interp {
     }
 
     if (g >= 2) {
-      this.doArc(g === 2, words, target, commanded, cur, frame, mcs, power, line);
+      this.doArc(g === 2, words, target, commanded, values, relative, cur, frame, mcs, power, line);
       return;
     }
 
@@ -436,11 +438,24 @@ class Interp {
       this.warnedNoFeed = true;
       this.diag('warning', 'no-feed', line, 'a G1 with no feed rate defined: the machine falls back to its own default');
     }
-    this.pushMove(g === 0 ? 'rapid' : 'cut', frame, cur, target, power, false, line);
+    this.pushMove(g === 0 ? 'rapid' : 'cut', frame, cur, target, power, false, line, {
+      commanded: [commanded[0] as boolean, commanded[1] as boolean, commanded[2] as boolean],
+      values,
+      relative,
+    });
     this.commit(frame, target, commanded);
   }
 
-  private pushMove(mode: 'rapid' | 'cut', frame: Frame, from: Pos, to: Pos, power: number | null, fromArc: boolean, line: number): void {
+  private pushMove(
+    mode: 'rapid' | 'cut',
+    frame: Frame,
+    from: Pos,
+    to: Pos,
+    power: number | null,
+    fromArc: boolean,
+    line: number,
+    cmd: { commanded: [boolean, boolean, boolean]; values: Pos; relative: boolean },
+  ): void {
     const ev: MoveEvent = {
       kind: 'move',
       line,
@@ -452,6 +467,9 @@ class Interp {
       feed: mode === 'cut' ? this.feed : null,
       power,
       fromArc,
+      commanded: cmd.commanded,
+      values: cmd.values,
+      relative: cmd.relative,
     };
     this.events.push(ev);
     this.moves++;
@@ -472,6 +490,8 @@ class Interp {
     words: Word[],
     target: Pos,
     commanded: boolean[],
+    values: Pos,
+    relative: boolean,
     cur: Pos,
     frame: Frame,
     mcs: boolean,
@@ -480,7 +500,11 @@ class Interp {
   ): void {
     this.usesArcs = true;
     const fallback = (): void => {
-      this.pushMove('cut', frame, cur, target, power, false, line);
+      this.pushMove('cut', frame, cur, target, power, false, line, {
+        commanded: [commanded[0] as boolean, commanded[1] as boolean, commanded[2] as boolean],
+        values,
+        relative,
+      });
       this.commit(frame, target, commanded);
     };
     if (mcs) {
@@ -534,7 +558,13 @@ class Interp {
     let prev: Pos = [cur[0], cur[1], cur[2]];
     for (const p of res.points) {
       const to: Pos = [p[0], p[1], p[2]];
-      this.pushMove('cut', frame, prev, to, power, true, line);
+      // Tessellated points are resolved ABSOLUTE coordinates in the parser's own frame of
+      // reference, so all three axes count as commanded and nothing is relative.
+      this.pushMove('cut', frame, prev, to, power, true, line, {
+        commanded: [true, true, true],
+        values: [to[0], to[1], to[2]],
+        relative: false,
+      });
       prev = to;
     }
     this.commit(frame, target, [true, true, true]);

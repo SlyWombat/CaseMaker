@@ -131,22 +131,58 @@ export function isRealToolChange(s: MachineState, tool: number): boolean | null 
   return s.tool !== tool;
 }
 
+/**
+ * Resolve a move against THIS state, not the parser's.
+ *
+ * The parser knows less than the runner: it cannot know the starting tool, so it treats
+ * `T1M6` as a real change and forgets Z, while the runner (told the tool is already T1)
+ * correctly keeps it. If the runner simply adopted the event's `to`, the next move's null Z
+ * would overwrite what it knows. So: AXES THE PROGRAM COMMANDED come from the event
+ * (`values`, plus the runner's own base when the move is relative), and EVERY OTHER AXIS
+ * stays whatever the runner already holds. This also keeps a `G53` move from erasing the
+ * work X and Y, which the machine-frame event knows nothing about.
+ *
+ * Tessellated arc points are already absolute and fully resolved by the parser, so they are
+ * taken as written.
+ */
+export function resolveMove(s: MachineState, ev: MoveEvent): { from: Pos; to: Pos } {
+  if (ev.fromArc) return { from: [ev.from[0], ev.from[1], ev.from[2]], to: [ev.to[0], ev.to[1], ev.to[2]] };
+  const cur = ev.frame === 'work' ? s.work : s.machine;
+  const from: Pos = [cur[0], cur[1], cur[2]];
+  const to: Pos = [cur[0], cur[1], cur[2]];
+  for (let i = 0; i < 3; i++) {
+    if (!ev.commanded[i]) continue;
+    const v = ev.values[i] ?? null;
+    if (v === null) {
+      to[i] = null;
+    } else if (ev.relative) {
+      const base = cur[i] ?? null;
+      to[i] = base === null ? null : base + v;
+    } else {
+      to[i] = v;
+    }
+  }
+  return { from, to };
+}
+
 /** The pure reducer. Never mutates its input. */
 export function applyEvent(s: MachineState, ev: GcodeEvent, setup: Setup): MachineState {
   switch (ev.kind) {
     case 'move': {
+      // Resolved against THIS state, not the parser's: see `resolveMove`.
+      const { to } = resolveMove(s, ev);
       if (ev.frame === 'work') {
         return {
           ...s,
-          work: [ev.to[0], ev.to[1], ev.to[2]],
+          work: to,
           // Only G54 is modelled: another WCS has an offset this emulator was not given.
-          machine: s.wcs === 0 ? workPosToMachine(withOrigin(setup, s), ev.to) : unknownPos(),
+          machine: s.wcs === 0 ? workPosToMachine(withOrigin(setup, s), to) : unknownPos(),
         };
       }
       return {
         ...s,
-        machine: [ev.to[0], ev.to[1], ev.to[2]],
-        work: s.wcs === 0 ? machinePosToWork(withOrigin(setup, s), ev.to) : (unknownPos()),
+        machine: to,
+        work: s.wcs === 0 ? machinePosToWork(withOrigin(setup, s), to) : unknownPos(),
       };
     }
     case 'tool-change': {
@@ -184,7 +220,7 @@ export function applyEvent(s: MachineState, ev: GcodeEvent, setup: Setup): Machi
       ];
       const next: MachineState = { ...s, wcsOrigin: o };
       // The machine position did not change; the work position it corresponds to did.
-      next.work = s.wcs === 0 ? machinePosToWork(withOrigin(setup, next), s.machine) : (unknownPos());
+      next.work = s.wcs === 0 ? machinePosToWork(withOrigin(setup, next), s.machine) : unknownPos();
       return next;
     }
     case 'home':
@@ -283,9 +319,11 @@ export function buildTimeline(parse: ParseResult, setup: Setup): Timeline {
           // the move enters stock, which needs the geometry (`/Simulation.md` §7.1).
           diag('warning', 'cut-spindle-off', i, m.line, 'a feed move with the spindle off. If it enters stock a volumetric simulation would draw it exactly like a correct cut; it is an error only then, which needs the geometry');
         }
-        // Cutting happens in work coordinates; a machine-frame cut converts first.
-        const toW = m.frame === 'work' ? m.to : machinePosToWork(withOrigin(setup, state), m.to);
-        const fromW = m.frame === 'work' ? m.from : machinePosToWork(withOrigin(setup, state), m.from);
+        // Cutting happens in work coordinates; a machine-frame cut converts first. Resolved
+        // against the RUNNER's state, not the parser's (see `resolveMove`).
+        const r = resolveMove(state, m);
+        const toW = m.frame === 'work' ? r.to : machinePosToWork(withOrigin(setup, state), r.to);
+        const fromW = m.frame === 'work' ? r.from : machinePosToWork(withOrigin(setup, state), r.from);
         const z = lowestKnownZ(toW[2], fromW[2]);
         if (toW[2] === null || z === null) {
           diag('error', 'cut-unknown-z', i, m.line, 'a cutting move to a Z the program never established: the emulator will not invent one');

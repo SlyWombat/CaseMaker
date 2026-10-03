@@ -248,6 +248,50 @@ describe('motion, units and modes', () => {
   });
 });
 
+describe('MoveEvent says which axes were COMMANDED, and what was written (review of #182)', () => {
+  it('a null in `to` is no longer ambiguous: commanded tells an unmentioned axis from an unknown base', () => {
+    const [a, b] = moves(parseGcode('G0 X1 Y2 Z3\nG91\nG1 Z-1 F100\n'));
+    expect(a?.commanded).toEqual([true, true, true]);
+    expect(a?.values).toEqual([1, 2, 3]);
+    expect(a?.relative).toBe(false);
+    expect(b?.commanded).toEqual([false, false, true]);
+    expect(b?.values).toEqual([null, null, -1]);
+    expect(b?.relative).toBe(true);
+  });
+
+  it('values are in MILLIMETRES, converted at ingest', () => {
+    expect(moves(parseGcode('G20\nG0 X1\n'))[0]?.values[0]).toBeCloseTo(25.4, 12);
+  });
+
+  it('a machine-frame move is never relative, even under G91', () => {
+    const m = moves(parseGcode('G91\nG53 G0 X5\n'))[0];
+    expect(m?.frame).toBe('machine');
+    expect(m?.relative).toBe(false);
+    expect(m?.commanded).toEqual([true, false, false]);
+  });
+
+  it('a relative move whose base the PARSER does not know still reports what was written', () => {
+    const m = moves(parseGcode('G91\nG1 X5 F100\n'))[0];
+    expect(m?.to[0]).toBeNull(); // the parser cannot compute it...
+    expect(m?.values[0]).toBe(5); // ...but a consumer that CAN is told the delta
+    expect(m?.relative).toBe(true);
+  });
+
+  it('tessellated arc points are resolved absolute and fully commanded', () => {
+    const arc = moves(parseGcode('G0 X0 Y0 Z0\nG91\nG2 X10 Y0 I5 J0 F100\n')).filter((m) => m.fromArc);
+    expect(arc.length).toBeGreaterThan(0);
+    for (const m of arc) {
+      expect(m.commanded).toEqual([true, true, true]);
+      expect(m.relative).toBe(false);
+      expect(m.values).toEqual(m.to);
+    }
+  });
+
+  it('G0 with no axes emits no move, so no empty `commanded` event exists', () => {
+    expect(moves(parseGcode('G0\n'))).toHaveLength(0);
+  });
+});
+
 describe('arcs, through the interpreter (§8)', () => {
   it('G2 semicircle: CW, centre start+(I,J), every segment flagged and on the arc line', () => {
     const r = parseGcode('G0 X0 Y0 Z0\nG2 X10 Y0 I5 J0 F100\n');

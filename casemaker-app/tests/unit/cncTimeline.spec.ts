@@ -2,7 +2,7 @@
 // Hand-written fixtures only; the vendor corpus is opt-in at the bottom.
 
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyEvent, buildTimeline, initialState, parseGcode, stubSetup, type Setup } from '@/engine/cnc';
@@ -90,9 +90,65 @@ describe('machine state: what the controller holds after each step', () => {
   it('the reducer never mutates its input', () => {
     const s0 = initialState(setupWith());
     const frozen = JSON.stringify(s0);
-    const ev: GcodeEvent = { kind: 'move', line: 1, mode: 'rapid', frame: 'work', from: [null, null, null], to: [1, 2, 3], a: null, feed: null, power: null, fromArc: false };
+    const ev: GcodeEvent = { kind: 'move', line: 1, mode: 'rapid', frame: 'work', from: [null, null, null], to: [1, 2, 3], a: null, feed: null, power: null, fromArc: false, commanded: [true, true, true], values: [1, 2, 3], relative: false };
     applyEvent(s0, ev, setupWith());
     expect(JSON.stringify(s0)).toBe(frozen);
+  });
+});
+
+describe('the runner knows MORE than the parser, and must not be overwritten by its nulls', () => {
+  // The parser cannot know the starting tool, so it treats `T1M6` as a real change and forgets
+  // Z. The runner, told the tool is already T1, correctly keeps it. These fixtures failed
+  // when the runner adopted the parser's `to` wholesale: the NEXT move's null Z overwrote
+  // the Z the runner had kept, and a known-good setup raised a false `cut-unknown-z`. They
+  // were found in review; a test that only looked right after the change could not see them.
+  it('a stated starting tool: Z survives the no-op M6 AND the move after it', () => {
+    const tl = run('G0 X1 Y2 Z3\nT1M6\nS1000 M3\nG1 X4 F100\n', { startingTool: 1 });
+    expect(tl.diagnostics.map((d) => d.code)).not.toContain('cut-unknown-z');
+    expect(tl.stateAt(3).work).toEqual([4, 2, 3]);
+  });
+
+  it('...whereas with the starting tool UNKNOWN the change is real and Z is genuinely lost', () => {
+    const tl = run('G0 X1 Y2 Z3\nT1M6\nS1000 M3\nG1 X4 F100\n', { startingTool: 'unknown' });
+    expect(tl.diagnostics.map((d) => d.code)).toContain('cut-unknown-z');
+    expect(tl.stateAt(3).work).toEqual([4, 2, null]);
+  });
+
+  it('a G53 move keeps the work X, Y it knows nothing about, and the derived work Z', () => {
+    // Before the fix the work position after the G53 Z move was [null, null, -6.81]: it lost
+    // X and Y as well as the next move's Z.
+    const tl = run('G0 X1 Y2 Z3\nG53 G0 Z-3\nS1000 M3\nG1 X9 F100\n');
+    expect(tl.stateAt(1).work[0]).toBe(1);
+    expect(tl.stateAt(1).work[1]).toBe(2);
+    expect(tl.stateAt(1).work[2]).toBeCloseTo(-3 - 3.81, 12); // machine Z -3, minus the 3.81 WCS height
+    expect(tl.diagnostics.map((d) => d.code)).not.toContain('cut-unknown-z');
+    expect(tl.stateAt(3).work[0]).toBe(9);
+    expect(tl.stateAt(3).work[1]).toBe(2);
+    expect(tl.stateAt(3).work[2]).toBeCloseTo(-6.81, 12);
+  });
+
+  it('a RELATIVE move resolves against the runner\'s base even when the parser\'s was unknown', () => {
+    // The parser forgot Z at the (to it, real) T1M6, so G91 G1 Z-1 has an unknown base THERE.
+    // The runner knows Z = 3, so the move lands at 2 and is a proper checkpoint.
+    const tl = run('G0 X1 Y2 Z3\nT1M6\nS1000 M3\nG91\nG1 Z-1 F100\n', { startingTool: 1 });
+    expect(tl.diagnostics.map((d) => d.code)).not.toContain('cut-unknown-z');
+    expect(tl.stateAt(tl.events.length - 1).work[2]).toBe(2);
+    expect(tl.checkpoints.map((c) => c.zKey)).toEqual([2000]);
+  });
+
+  it('a relative move from a base NOBODY knows stays unknown: nothing is invented', () => {
+    const tl = run('S1000 M3\nG91\nG1 Z-1 F100\n');
+    expect(tl.diagnostics.map((d) => d.code)).toContain('cut-unknown-z');
+  });
+
+  it('only the axes a line COMMANDED change; the rest are the runner\'s own', () => {
+    const tl = run('G0 X1 Y2 Z3\nG0 Y9\n');
+    expect(tl.stateAt(1).work).toEqual([1, 9, 3]);
+  });
+
+  it('a tessellated arc is taken as the parser resolved it', () => {
+    const tl = run('G0 X0 Y0 Z0\nS1000 M3\nG2 X10 Y0 I5 J0 F100\n');
+    expect(tl.stateAt(tl.events.length - 1).work).toEqual([10, 0, 0]);
   });
 });
 
@@ -318,15 +374,23 @@ describe.skipIf(!existsSync(CORPUS))('the runner on the vendor corpus', () => {
     expect(tl.diagnostics.filter((d) => d.code === 'cut-spindle-off').map((d) => d.severity)).toEqual(['warning', 'warning', 'warning']);
   });
 
-  it('no file in the corpus produces a state-level ERROR', () => {
+  it('NO file in the corpus produces a state-level ERROR: all of them, not a hand-picked few', () => {
+    // An earlier version looped over ten files chosen by eye. Whatever the hand picks is
+    // whatever the author already believes works; the gate is every file.
+    const walk = (d: string, out: string[] = []): string[] => {
+      for (const e of readdirSync(d)) {
+        const f = join(d, e);
+        if (statSync(f).isDirectory()) walk(f, out);
+        else if (f.endsWith('.nc')) out.push(f);
+      }
+      return out;
+    };
+    const files = walk(CORPUS);
+    expect(files).toHaveLength(26);
     const bad: string[] = [];
-    for (const rel of [
-      'LED/ABS-Base.nc', 'LED/ACRYLIC-Balloon.nc', 'LED/ALUMINUM-Button.nc', 'Relief/PirateShip.nc',
-      'Rotation/NefertitiRough.nc', 'Tests/fatigue-test-air.nc', 'Tests/flatness-test-air.nc',
-      'Tests/pcb-test-air.nc', 'Z1/TopClamp.nc', 'Laser/AudreyHepburnSmall.nc',
-    ]) {
-      const tl = buildTimeline(load(rel), setupWith());
-      for (const d of tl.diagnostics) if (d.severity === 'error') bad.push(`${rel}:${d.line} ${d.code}`);
+    for (const f of files) {
+      const tl = buildTimeline(parseGcode(readFileSync(f, 'latin1')), setupWith());
+      for (const d of tl.diagnostics) if (d.severity === 'error') bad.push(`${f.slice(CORPUS.length + 1)}:${d.line} ${d.code}`);
     }
     expect(bad).toEqual([]);
   });
