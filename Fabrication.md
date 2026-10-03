@@ -6,6 +6,11 @@ Status as of 2026-10-03. Decisions taken in conversation; nothing implemented ye
 document as it stood at commit `d4369d7`. The print-orientation flip (§7.2), the §7
 rewrite and decisions 19–24 all postdate it and have **not** been reviewed.
 
+**Companion documents.** `/Simulation.md` is the detailed design for toolpath simulation
+(#182), including the measured performance budget. `/Makera-Parity.md` is the capability
+inventory of Makera Studio and the gap list — read it before planning any CAM feature,
+because it is where the evidence for Studio's actual parameter surface lives.
+
 This is the plan for expanding Case Maker from "compile geometry, write an STL" to
 "compile geometry, then make it on a chosen machine" — initially a **Makera Z1**
 desktop CNC alongside the existing FDM path.
@@ -324,12 +329,28 @@ before and after.** #182. This is in V1, and it is the single highest-value thin
 can be built before the machine is touched: it needs no bridge, no probe and **no
 numbers from #165** — depth is an input, not a measurement.
 
-For a flat end mill at constant Z the swept volume is **exact**, with no dexel grid and
-no sampling. One cutting move is a capsule — `pHull` of two tool-radius circles at the
-move's endpoints — and `p-hull` already exists (`engine/compiler/profile.ts`). Union the
-capsules **per depth level in 2D**, then one `extrude` and one `difference` per level.
-Clipper2 unions thousands of short glyph segments cheaply; Manifold booleans do not, so
-that batching is the whole performance story.
+**Full design: `/Simulation.md`.** The summary, and two corrections to what this section
+said before it was measured:
+
+The swept volume is **exact**, with no dexel grid and no sampling — and not only for a
+flat end mill at constant Z. For any *convex* tool translated along a segment,
+`K ⊕ [a,b] = hull(K+a, K+b)`, and every Makera tool category except the thread mill is a
+convex solid of revolution (`/Makera-Parity.md` §3). So one rule covers flat, ball, bull,
+V, chamfer and drill, at any Z, ramps included.
+
+**Correction, from measurement.** This section previously claimed "Clipper2 unions
+thousands of short glyph segments cheaply; Manifold booleans do not". That is backwards.
+A single `CrossSection(allContours, 'Positive')` call is **quadratic** — 114 s at 8 000
+contours — while the Manifold boolean, after a `simplify(0.002)` that costs 5 ms and
+preserves area to three figures, costs **2 ms**. The fix is a chunked **pairwise union
+tree** with simplify at each level, which is linear: 1.4 s at 24 000 contours against
+29.8 s for the flat union. `/Simulation.md` §4 has the tables.
+
+**Correction, on scope.** Exact CSG is right for V1 but does not generalise to dense 3D:
+Studio's own `TopClamp.nc` spreads 9 618 cutting moves over **482 distinct Z levels**, and
+exact CSG needs an extrude and a boolean per level. That is the measured case for
+decision 2's dexel engine, so `/Simulation.md` §5 puts both behind one `Sweeper`
+interface from the start, and V1 implements only the exact one.
 
 The reason it is an oracle and not a picture: §7.5 predicts the engravable region
 *analytically*, as the morphological opening of the glyph. The simulator computes the
@@ -338,8 +359,10 @@ is a machine-free unit test — as is intersecting the simulated removal with th
 pocket void and asserting it empty. Volumes and bounding boxes snapshot cleanly, so none
 of it needs an eye or a screenshot.
 
-This is **not** the heightmap/dexel engine, which stays deferred (§9.1). Exact 2.5D CSG
-is enough for V1 because V1 cuts flat-bottomed pockets with a flat tool.
+**It simulates the `.nc`, not the toolpath IR**, so a sign flip or an origin error in the
+post-processor cannot pass through it, and so it can be validated against Studio's own
+output before any of our CAM exists. That drops its dependency from #172 to #174's
+parser. `/Simulation.md` §1.
 
 ### 5.7 Machine bridge — deferred out of V1
 
@@ -497,14 +520,33 @@ corner is a convenience rather than a reference.
 
 ### 7.4 What a V-bit does, and why V1 uses a flat end mill
 
-For an included angle θ, floor width at depth *d* is `w = 2·d·tan(θ/2)` — at 60°,
-`w = 1.155·d`. So reaching a 0.81 mm colour boundary needs a stroke at least 0.94 mm
-wide, and at 90° at least 1.62 mm. A 4 mm cap-height title has a stroke around 0.5 mm,
-so **it cannot change colour with a V-bit at any commanded depth.** V-carving derives
-depth from stroke width; a per-label depth becomes a clamp at best.
+**This section's arithmetic was wrong about the tools that exist, and the correction goes
+the other way.** It modelled a V-bit as an ideal 60° point, `w = 2·d·tan(θ/2)`, giving a
+0.94 mm minimum stroke at the 0.810 mm reveal depth and the conclusion that small text
+"cannot change colour with a V-bit at any commanded depth".
 
-"Depth controls colour" holds only for a **flat end mill pocketing the glyph region**,
-where depth is genuinely independent. Hence decision 14, and V-carve is V2.
+Makera's **non-metal** engraving bits are **30° included (half angle 15°) with a flat tip
+of 0.1–0.5 mm** — the 60° ones in the catalogue are the metal bits
+(`/Makera-Parity.md` §3.1). A truncated cone, not a point, so:
+
+```
+w(d) = tipDiameter + 2·d·tan(halfAngle)
+```
+
+A 0.1 mm tip at 15° gives **0.534 mm** at d = 0.810, not 0.94 mm. Meanwhile the smallest
+catalogued non-metal **flat** end mill is **1.0 mm**, which erases every stroke thinner
+than 1.0 mm outright (§7.5). **On reach, the V-bit beats the flat end for small text.**
+
+What survives, and what decision 14 now rests on: **a V-bit couples depth to stroke
+width**, so a per-label depth control stops meaning what the UI says — it becomes a clamp
+at best. "Depth controls colour" holds only for a **flat end mill pocketing the glyph
+region**, where depth is genuinely independent. That is the honest reason for decision 14,
+and V-carve stays V2.
+
+Still unmeasured: "a 4 mm cap-height title has a stroke around 0.5 mm" was a guess. Run
+§7.5's opening over the bundled fonts at r = 0.5 and at the V-bit's effective radius and
+report which strokes actually survive. If the user owns a 30° bit, one V-groove row added
+to #165 settles it on the same afternoon.
 
 ### 7.5 Tool radius silently deletes glyph detail
 
