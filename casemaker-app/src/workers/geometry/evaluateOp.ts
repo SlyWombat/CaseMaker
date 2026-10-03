@@ -1,6 +1,7 @@
 import type ManifoldModule from 'manifold-3d';
 
 import type { BuildOp, Profile } from '@/engine/compiler/buildPlan';
+import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 
 /**
  * The single BuildOp → Manifold evaluator.
@@ -34,7 +35,8 @@ export function executeProfile(tl: ManifoldToplevel, p: Profile): CrossSectionIn
     case 'p-rect':
       return CS.square(p.size, p.center ?? false);
     case 'p-circle':
-      return CS.circle(p.radius, p.segments ?? 0);
+      // 0 would mean Manifold's own default, which is 4 segments at r = 0.5 (#190).
+      return CS.circle(p.radius, p.segments ?? segmentsForRadius(p.radius));
     case 'p-union':
     case 'p-difference':
     case 'p-intersection':
@@ -50,12 +52,12 @@ export function executeProfile(tl: ManifoldToplevel, p: Profile): CrossSectionIn
     }
     case 'p-offset': {
       const child = executeProfile(tl, p.child);
-      const result = child.offset(
-        p.delta,
-        JOIN_TYPE[p.join ?? 'round'],
-        p.miterLimit ?? 2,
-        p.segments ?? 0,
-      );
+      const join = p.join ?? 'round';
+      // Only a round join draws arcs. Left at 0 for miter/square, where the count
+      // is ignored, so those paths are byte-identical to before. For a round join
+      // the radius of the arc IS |delta| (#190).
+      const arcSegments = p.segments ?? (join === 'round' ? segmentsForRadius(Math.abs(p.delta)) : 0);
+      const result = child.offset(p.delta, JOIN_TYPE[join], p.miterLimit ?? 2, arcSegments);
       child.delete();
       return result;
     }

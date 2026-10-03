@@ -470,10 +470,25 @@ the original outline, not by offsetting — and assert each lies inside the simu
 
 The two cannot be compared for exact equality: #171's prediction uses Clipper2 arc offsets
 while the sweep hulls tessellated circles and then simplifies, so every round corner leaves
-slivers. Compare in an **ε band**, and size it honestly — the tree applies `simplify(ε)` at
-**every level**, so the drift is `levels × ε` (about 3ε here), not ε; the inscribed 16-gon
-also under-removes by 0.010 mm **one-sidedly**, which is a bias rather than a tolerance.
-The band must exceed the sum:
+slivers. Compare in an **ε band**, and **derive it — never hand-set it.** The inputs are
+named constants, and #190 is why that matters: the offset's arc resolution used to be
+Manifold's default, which at r = 0.5 is **4 segments**, a chord error of 0.146 mm — about
+nine times a band someone would have picked by eye, and the failure would have prompted
+exactly the widening this section exists to prevent.
+
+```
+band  >=   levels × simplifyEps                    // the tree simplifies at every level
+         + 2 × ARC_CHORD_TOLERANCE_MM              // prediction and sweep are both inscribed
+                                                   //   polygons, so both bias inward; summed
+                                                   //   conservatively rather than assumed to cancel
+```
+
+`ARC_CHORD_TOLERANCE_MM` is 0.005 (`src/engine/compiler/arcResolution.ts`), shared by #171's
+offsets and the sweep's cap circles, so the band moves when the resolution does. With
+`simplifyEps` 0.002 and three levels that is **0.016 mm**. The sweep's caps must adopt the
+same constant when the sweeper is built: the 16-gon used in the probes (0.010 mm at r = 0.5)
+is a *different* tolerance and is the reason there were four unrelated ones for one job.
+The bias is one-sided, so it is a bias rather than a tolerance. The band must exceed the sum:
 
 - `difference(offset(predicted, −ε), simulated)` must be empty → the toolpath does not
   **under-cut**. This is what catches uncut corners and stepover gaps.
