@@ -250,7 +250,7 @@ accepted.
 | 16 | **Glyph profiles use `NonZero` fill, as an opt-in field** | Not a change to the global `EvenOdd` default. |
 | 17 | **No `Project.kind` union for V1** — `case.badge` as an optional field plus a `derivedKind()` helper | The old §5.1 premise was false. See §5.1. |
 | 18 | **V1 is a vertical slice, and several agreed decisions are explicitly deferred out of it** | Deferring is sequencing, not reversal. See §10.1. |
-| 19 | **Workholding is a printed nest, and it is a V1 deliverable** | See §10.3. |
+| 19 | **Workholding is a printed nest, and it is a V1 deliverable** | **OPEN as of 2026-10-03** — tape-down and the low-profile vise are both cheaper, and the nest's claimed advantage (backing the blank flat) is false for this part because the magnet recess is an air gap against any flat surface. §7.3. |
 | 20 | **Per-label depth is a two-state choice with a numeric override** | Two outcomes exist (top colour, bottom colour), so that is what the control should offer. Same reasoning as the X-ray toggle. |
 | 21 | **The app loads the object; depth limits come from the solid** | No hand-coded pocket rectangles. A void in the geometry produces a shallower limit automatically, for this part and any future one. §7.1. |
 | 22 | **The app models the printer's layer grid** | Layer height **and first-layer height** are inputs. The colour boundary and the depth limits sit on real layer lines, not ideal dimensions — because 0.810 mm is layer 4.05 and the difference matters, and after the flip the first layer *is* the engraved face. §7.1. |
@@ -617,7 +617,8 @@ type Workholding =
   | { kind: 'top-clamps';     clamps: { at: Vec2; footprint: Profile }[] }
   | { kind: 'vise';           jawFaces: [Plane, Plane]; jawHeight: Mm }
   | { kind: 'rotary-chuck';   jawDiameter: Mm; stickout: Mm }
-  // --- status under review: see "the vise question" below ---
+  | { kind: 'tape-down';      contact: Profile; shim?: Profile }
+  // --- status open: see "the fixture question" below ---
   | { kind: 'printed-nest';   nest: NodeId; seatClearance: Mm };
   // NOT built: vacuum bed. Not owned, nobody has asked.
 ```
@@ -652,30 +653,48 @@ candidate surfaces, score them, and emit the touches that resolve the residual:
 The point of decision 26 is that the plan is now an *output* of the model, so the vise and
 rotary cases do not each need a new hand-written sequence.
 
-#### The vise question — decision 19 may be superseded
+#### The fixture question — decision 19 is open, and there are three candidates
 
-**The low-profile vise is probably the right fixture for the badge, not a printed nest.**
-This follows from facts already in this document rather than from a preference:
+Decision 19 said "workholding is a printed nest, and it is a V1 deliverable". Two cheaper
+options exist, and the comparison is not what §7.6 and #175 assumed.
 
-- §7.6 and #175 reject clamping because the blank is "**3.8 mm thick, too thin to clamp
-  below the cut line without the clamp being in the tool's way**". A low-profile vise is
-  built for exactly that case — that is what "low-profile" means.
-- A **nest fixes nothing positionally** (decision 23, §7.3) and leaves ±0.15 mm of seat
-  clearance. A **vise fixes one face and rotation**, leaving almost no residual for the
-  probe to resolve. It is strictly the better datum.
-- The badge is 76.2 × 38.1 mm. Gripping the long edges leaves the entire engraved face
-  clear, and the part is machined pocket-down so the top face is the one being cut.
-- A nest has to be designed, printed and iterated for every part. A vise holds anything.
+| | XY datum | Hold | Cost |
+|---|---|---|---|
+| **Double-sided tape** to the table | **none** — probe X, Y and rotation | Continuous around the whole footprint; nothing above the part at all | A strip of tape |
+| **Low-profile vise** | **XY and rotation**, essentially no residual | Grips the two long edges only | Setup, nothing printed |
+| **Printed nest** | none; ±0.15 mm of seat clearance | Surrounds the part; held down by tape on the annulus | A print per part, designed and iterated |
 
-What the nest still does better: it backs the blank flat across its whole area, which a
-vise does not, and §9.2's unsupported membrane over the magnet pocket is the one place that
-could matter. **#165 Row A measures precisely that**, so the comparison is decidable rather
-than arguable.
+**Tape's apparent drawback is free here, and that is a real consequence of decision 24.**
+Tape is 0.1–0.2 mm thick and compresses unevenly, which would normally be a Z error — but
+cut depths come from **probing the engraved face**, not from any assumed stack-up (§7.2). So
+tape thickness is absorbed entirely by the Z probe and cannot reach the cut. Its real cost
+is the opposite end: tape supplies **no XY reference at all**, so X, Y and rotation must all
+be probed. That is precisely the plan decision 26's planner derives, so it is work already
+budgeted rather than a special case.
 
-**Decision 19 ("workholding is a printed nest, and it is a V1 deliverable") is therefore
-under review, pending #165.** If the vise wins, #175 drops out of V1 and the badge's
-registration becomes: vise fixes XY and rotation, probe Z on the engraved face, done — which
-is simpler than anything this document has proposed so far.
+Tape goes on the **aluminium table** (the `3D Probe Rod` page calls it that) or a sacrificial
+sheet on it — and on the annulus around the magnet recess, never across it.
+
+#### Correction: the membrane is unsupported in *all three*
+
+This document claimed the nest's advantage was backing the blank flat across its whole
+area. **Working it through, that is false for this part.** The magnet pocket is a recess in
+the badge's *bottom* face, and the badge is machined pocket-down, so the recess is an air
+gap against whatever is underneath — nest floor, vise air, or table. §7.6 already says the
+contact is "on the annulus around the pocket". So **no fixture backs the 1.51 mm membrane**
+unless something fills the recess:
+
+- a loose **shim** of the pocket's size, under tape or in the vise, or
+- the printed **support pad** in the nest floor (#175's open question).
+
+That makes membrane support an **independent axis**, not a reason to choose a fixture.
+Which is what collapses the nest's case: strip that advantage away and it fixes nothing
+positionally, needs a print per part, and is beaten by tape on simplicity and by the vise
+on datum quality.
+
+**#165 Row A measures how badly the unsupported membrane actually cuts**, so the shim
+question is decidable with evidence. Decision 19 stays open until then rather than being
+settled by argument.
 
 **What this does not settle — see #187 item 1.** Whether the probing happens in our `.nc`
 or in Studio's dialogs is still open, and the in-file route is constrained: Smoothieware has
