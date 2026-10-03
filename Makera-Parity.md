@@ -342,17 +342,17 @@ These are flagged, not decided:
 
 | Decision | Premised on | Status now |
 |---|---|---|
-| **Decision 4** — no laser, ever | *this* machine has no laser module | Other Z1 owners have the 5 W unit. "Never" should become "not for this machine, and not in V1". |
-| **§8** — "the Z1 only. No driver plugin API until someone asks" | one machine | A second machine is now foreseeable. §5.3's `MachineProfile` is the seam; it stays deferred, but the limit-clamping in §5.1 item 3 needs *some* machine object from the start. |
-| **§5.3** — one `Z1` constant until a second CNC exists | one machine | Carvera and Carvera Air are already rows in the same database. |
+| **Decision 4** — no laser, ever | *this* machine has no laser module | **Resolved 2026-10-03:** still out of scope — no laser strategies get written — but it becomes a **capability flag on the `MachineProfile`** (#184) rather than an assumption in the code. |
+| **§8** — "the Z1 only. No driver plugin API until someone asks" | one machine | **Resolved 2026-10-03:** support stays Z1-only, but the `MachineProfile` seam gets built now (decision 25, #184) so a second machine is configuration rather than a refactor. No driver plugin API. |
+| **§5.3** — one `Z1` constant until a second CNC exists | one machine | **Overridden 2026-10-03** — the profile is in V1 (#184). Carvera and Carvera Air are already rows in the same database, so its shape is known. |
 | **Demand-driven features** (`feedback_demand_driven_features`) | a single-user tool | Still right about *speculative infrastructure*; weaker about capabilities a Studio user already has and will immediately miss (tabs, ramping, stock-to-leave). |
 | **V-carve deferred to V2** | §7.4's 60°-point arithmetic | §3.1 — the arithmetic was wrong about the available tools. Still defer, for the depth-coupling reason, but say so honestly. |
 
-**The question this document cannot answer.** Does parity mean *Studio's full capability
-set on the Z1*, as a roadmap with V1 still the first slice? Or does it also mean the
-Carvera and Carvera Air, and the laser? The matrix above is written for the first reading.
-The second roughly doubles it and makes `MachineProfile` (§5.3) a near-term prerequisite
-rather than a deferral.
+**Answered, 2026-10-03.** Parity means **Studio's full capability set on the Z1** — the
+first reading, which is how the matrix above is written. No Carvera, no Carvera Air, no
+laser strategies. But the **`MachineProfile` gets built now** (decision 25, #184) rather
+than deferred, so that adding a machine later is configuration instead of a refactor, and
+so that machine limits have somewhere to be clamped from day one (§5.1 item 3).
 
 ---
 

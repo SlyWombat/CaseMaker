@@ -212,6 +212,7 @@ accepted.
 | 22 | **The app models the printer's layer grid** | Layer height **and first-layer height** are inputs. The colour boundary and the depth limits sit on real layer lines, not ideal dimensions — because 0.810 mm is layer 4.05 and the difference matters, and after the flip the first layer *is* the engraved face. §7.1. |
 | 23 | **Registration: probe everything** | Edge-find X/Y on two *straight* edges (the corners are R3.175 and make poor datums), then probe Z on the engraved face. The nest holds the part but is not a position reference. §7.3. |
 | 24 | **Thickness error is ignored, by design** | The blank prints engraved-face-down, so error lands on the back face. Cut depths come from the probed face plus model distances. Total thickness is **not** a job input. §7.2. |
+| 25 | **Build the `MachineProfile` now, even though the Z1 is the only machine** | Maintainer's call, 2026-10-03, overriding §5.3's deferral: pay for the seam once rather than recode later. Scope stays Z1-only; the profile is where machine limits get clamped and where "no laser on this machine" becomes a flag instead of an assumption. §5.3, #184. |
 
 ---
 
@@ -296,12 +297,33 @@ Two mechanics this document previously glossed over:
    vitest in node through the same wasm harness `scripts/export-sample.ts` already
    loads. The post (IR → `.nc` text) is then trivially snapshot-testable.
 
-### 5.3 One machine profile — deferred
+### 5.3 One machine profile — **in V1** (decision 25)
 
 Machine knowledge is scattered across `PRINTER_PRESETS` (`engine/compiler/rackFit.ts:37-44`)
-and a hardcoded `ASSUMED_NOZZLE` (`engine/compiler/fasteners.ts:303`). Unifying them
-behind a `process: 'fdm' | 'mill'` discriminant is correct, and it is **not V1** — a
-single `Z1` constant in one file is enough until a second CNC exists.
+and a hardcoded `ASSUMED_NOZZLE` (`engine/compiler/fasteners.ts:303`). Unifying them behind
+a `process: 'fdm' | 'mill'` discriminant is correct.
+
+**This document previously deferred it** — "a single `Z1` constant in one file is enough
+until a second CNC exists". The maintainer has overridden that: build the profile now, so
+that supporting a second machine later is configuration rather than a refactor. **#184.**
+
+Scope: **the Z1 is still the only machine we support.** The profile is the seam, not a
+portability project. It carries what the rest of the plan already needs to ask:
+
+- work volume, and whether a rotary module is fitted (⌀80 × 150 on the Z1);
+- **spindle and feed ceilings** — 13 000 RPM and 1 200 mm/min. These are not optional:
+  Makera's own tool table has no machine column and **32 rows exceed the Z1's spindle
+  ceiling** (`/Makera-Parity.md` §5.1), so every feed and speed must be clamped against
+  the profile before it reaches a toolpath;
+- `hasATC` / tool-slot count — `isATC=0` on the Z1, which is what makes the
+  `M490.1`/`M490.2` manual handshake the tool-change path (§2);
+- **capability flags for hardware we do not have**, laser and vacuum among them, so that
+  "this machine cannot do that" is a profile answer rather than an absence. Decision 4
+  stays in force as a *scope* decision — no laser strategies are being written — but it
+  stops being an assumption baked into the code.
+
+Carvera and Carvera Air are already rows in Makera's own `t_MachineType` alongside the Z1,
+so the profile's shape is known and does not have to be guessed.
 
 ### 5.4 Importer registry — deferred
 
@@ -609,7 +631,6 @@ each is recorded above and keeps its decision number.
 | **4th-axis fields in the IR** (decisions 3, 11) | Adding an `A` to a move record later is one line. Adding it now is a field nobody tests. |
 | **Image methods** (decision 5) | V1 is text. |
 | **Mesh import registry** (decision 6) | V1 is text; `assetImporter.ts` is fine as is. |
-| **`MachineProfile` unification** (§5.3) | One `Z1` constant until a second CNC exists. |
 | **Feeds/speeds from `makera_library.db`** (§3) | Hardcode the measured numbers from **#165**; read the DB when there are two tools. |
 | **Multi-tool `M490.1/.2` handshake** | V1 jobs are single-tool. The probe→cutter swap happens before the job starts. |
 | **V-carve** (§7.4) | V2. It is the thing that eventually gets small text to change colour, and it needs a medial-axis engine. |
@@ -672,6 +693,7 @@ physical engraved badge, `[F]` = follows.
 |---|---|
 | [P] | **#167** `case.badge` part type + `badge.ts` compiler (§5.1, §6) |
 | [P] | **#178** Layer-stack model: colour boundary + depth limits from the solid (§7.1) |
+| [P] | **#184** `MachineProfile` for the Z1: limits, capabilities, feed/speed clamping (§5.3) |
 | [P] | **#168** Per-node material tag + two-volume 3MF export (§6) |
 | [P] | **#169** Real glyph outlines, multi-font (§7.4) |
 | [P] | **#170** Badge-face labels: per-label font and depth, two-colour viewport (decision 20) |
@@ -694,7 +716,7 @@ physical engraved badge, `[F]` = follows.
 | [P] | **#176** First cut: V1 acceptance + Z-chain error measurement (§7.6) (`bench-test`) |
 
 **[F] Deferred**, each with its reasoning in §9.1: **#181** web/desktop build split
-(prerequisite for the bridge, not for V1) · `MachineProfile` unification ·
+(prerequisite for the bridge, not for V1) ·
 feeds/speeds from `makera_library.db` · WiFi bridge · `G32` option if #176 justifies
 it · V-carve · `Project.kind` · multi-tool jobs · importer registry · image methods ·
 heightmap engine · 4th axis.
