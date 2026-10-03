@@ -293,6 +293,85 @@ describe('arcs, through the interpreter (§8)', () => {
   });
 });
 
+describe('dialect spellings the vendor tooling actually writes (#186 checklist)', () => {
+  it('zero-padded codes are normal: M06, M03, M05, G00, G01', () => {
+    // Makera's samples use both `M6` and `M06`, `M3` and `M03`, `G1` and `G01`: 53 vs 6 and
+    // 101 vs 6 and 338k vs 142k lines respectively. A parser that matched the code as a
+    // STRING would silently skip half of every file.
+    const r = parseGcode('T1 M06\nM03 S12000\nG00 X1\nG01 X2 F100\nM05\n');
+    expect(hasErrors(r)).toBe(false);
+    expect(kinds(r)).toEqual(['tool-change', 'spindle', 'move', 'move', 'spindle']);
+    expect(r.events[1]).toMatchObject({ kind: 'spindle', state: 'cw', rpm: 12000 });
+    expect(r.events[4]).toMatchObject({ kind: 'spindle', state: 'off' });
+    expect(moves(r).map((m) => m.mode)).toEqual(['rapid', 'cut']);
+  });
+
+  it('zero-padded and unpadded spellings are the SAME event', () => {
+    const a = parseGcode('T1 M6\nM3 S9000\nG0 X1\nG1 X2 F50\nM5\n');
+    const b = parseGcode('T1 M06\nM03 S9000\nG00 X1\nG01 X2 F50\nM05\n');
+    expect(b.events.map((e) => ({ ...e, line: 0 }))).toEqual(a.events.map((e) => ({ ...e, line: 0 })));
+  });
+
+  it('G17 (plane) and G54 (work offset) are accepted, as on the opening line of most samples', () => {
+    // `G00 G17 G40 G21 G54` — the first line LightBurn and Studio both write.
+    const r = parseGcode('G00 G17 G40 G21 G54\nG90\nG0 X1\n');
+    expect(hasErrors(r)).toBe(false);
+    expect(r.events[0]).toMatchObject({ kind: 'wcs-select', wcs: 0 });
+    expect(moves(r)).toHaveLength(1);
+  });
+
+  it('G18 and G19 select the plane an arc is drawn in', () => {
+    const xy = parseGcode('G17\nG0 X0 Y0 Z0\nG3 X0 Y10 I0 J5 F100\n');
+    const xz = parseGcode('G18\nG0 X0 Y0 Z0\nG3 X10 Z0 I5 K0 F100\n');
+    expect(xy.summary.usesArcs && xz.summary.usesArcs).toBe(true);
+    // In G18 the arc is in XZ: Y never moves.
+    expect(moves(xz).filter((m) => m.fromArc).every((m) => m.to[1] === 0)).toBe(true);
+    expect(moves(xy).filter((m) => m.fromArc).every((m) => m.to[2] === 0)).toBe(true);
+  });
+
+  it('M851 / M852 (extended-port PWM) are accepted: the vendor FreeCAD post writes them', () => {
+    // Makera's own Z1 post emits `M851 S<pct>` before M7 and `M852` before M9 when its
+    // `ext_for_air` option is on. Refusing them would refuse the vendor's own output.
+    expect(codes(parseGcode('M851 S80\nM7\nM852\nM9\n'))).toEqual([]);
+  });
+
+  it('G41 / G42 (cutter compensation) are NOT accepted: the vendor post itself warns they are unsupported', () => {
+    // Evidence for keeping them errors: the same post raises "Tool radius compensation (G41)
+    // ... not supported by the Makera" when a job uses them.
+    expect(errors(parseGcode('G41 D1\nG42 D1\n'))).toEqual(['unknown-code', 'unknown-code']);
+  });
+});
+
+describe('policy defaults pinned by tests (#174 questions): change the assertion to change the policy', () => {
+  // Nobody answered the 16 design questions on #174. These are the defaults the parser
+  // implements, each pinned by a NAMED test below so the maintainer can overturn one by
+  // editing one assertion. They are decisions awaiting a yes, not decisions made.
+  it('Q3: numbers are STRICT: a space between a letter and its number is rejected, though strtof accepts it', () => {
+    const r = parseGcode('G1 X 5 F100\n');
+    expect(errors(r).length).toBeGreaterThan(0);
+  });
+  it('Q4: a lone F line is a warning, not an error (the severity split)', () => {
+    const r = parseGcode('G0 X1\nF500\nX5\n');
+    expect(r.diagnostics.find((d) => d.code === 'lone-f-switches-g1')?.severity).toBe('warning');
+  });
+  it('Q6: unknown position is null, never 0', () => {
+    expect(moves(parseGcode('G0 X5\n'))[0]?.from).toEqual([null, null, null]);
+  });
+  it('Q10: M0, M1 and M8 are errors: nothing read shows the Z1 implements them', () => {
+    expect(errors(parseGcode('M0\nM1\nM8\n'))).toEqual(['unknown-code', 'unknown-code', 'unknown-code']);
+  });
+  it('Q11: a laser job is FLAGGED by the parser, not refused (refusal is the verifier\'s, unbuilt)', () => {
+    const r = parseGcode('M321\nG1 X1 S0.5 F100\nM322\n');
+    expect(r.summary.laser).toBe(true);
+    expect(hasErrors(r)).toBe(false);
+  });
+  it('Q12: rotary A words are FLAGGED (info), not refused', () => {
+    const r = parseGcode('G1 X1 A90 F100\n');
+    expect(r.summary.usesRotary).toBe(true);
+    expect(hasErrors(r)).toBe(false);
+  });
+});
+
 describe('codes the machine does not know', () => {
   it('every unknown G or M code is an error NAMING THE LINE', () => {
     const r = parseGcode('G0 X1\nG999\nM777\nG81 Z-1\n');

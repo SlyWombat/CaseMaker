@@ -39,8 +39,8 @@ describe.skipIf(!existsSync(DIR))('Makera reference corpus (run `npm run referen
     return hit[1];
   };
 
-  it('has all 25 files', () => {
-    expect(files).toHaveLength(25);
+  it('has all 26 files: 25 from CarveraController plus the Z1 TopClamp release asset', () => {
+    expect(files).toHaveLength(26);
   });
 
   it('parses every file with ZERO errors: this is known-good vendor output', () => {
@@ -68,6 +68,27 @@ describe.skipIf(!existsSync(DIR))('Makera reference corpus (run `npm run referen
       }
     }
     expect(bad).toEqual([]);
+  });
+
+  it('Z1/TopClamp.nc: the ONLY Z1 sample and the only one with a ;@MKR| header', () => {
+    const r = get('Z1/TopClamp.nc');
+    expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(r.header?.records.map((x) => x.tag)).toEqual([
+      'BEGIN', 'SCHEMA', 'MACHINE', 'MATERIAL', 'STOCK', 'ORIGIN', 'CAM', 'UNIT', 'TOOL', 'TIME',
+      'TOOLPATH', 'TOOLPATH', 'TOOLPATH', 'END', 'TOOLPATH_START', 'TOOLPATH_START', 'TOOLPATH_START',
+    ]);
+    // Three TOOLPATH_START markers are the segment boundaries the emulator's checkpoints key on.
+    expect(r.events.filter((e) => e.kind === 'toolpath-start').map((e) => (e.kind === 'toolpath-start' ? e.number : -1))).toEqual([1, 2, 3]);
+    expect(r.summary).toMatchObject({ moves: 9632, cuts: 9607, rapids: 25, toolChanges: 1, usesArcs: false });
+    // It opens `T1 M6`, then `G0 X.. Y..` with NO Z: the first rapid must not get Z = 0.
+    const first = r.events.find((e) => e.kind === 'move');
+    expect(first?.kind === 'move' && first.from).toEqual([null, null, null]);
+    expect(first?.kind === 'move' && first.to[2]).toBeNull();
+    // The header unit CASE is not stable across Studio builds (`mm` in the locally installed
+    // copy, `MM` in this release). The parser carries it as written; consumers must not
+    // compare it case-sensitively.
+    const unit = r.header?.records.find((x) => x.tag === 'UNIT');
+    expect(unit?.fields['value']?.toLowerCase()).toBe('mm');
   });
 
   it('flags the laser jobs, which a mill simulation must refuse', () => {

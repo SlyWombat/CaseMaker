@@ -41,6 +41,10 @@ const NO_EFFECT_M = new Set([
   811, 812, // spindle fan
   821, 822, // light
   831, 832, 841, 842, // accessories
+  // Extended-port PWM. Makera's own FreeCAD post for the Z1 emits `M851 S<pct>` before `M7` and
+  // `M852` before `M9` when its `ext_for_air` option is on, so a file from that post would
+  // otherwise be refused for a code the vendor's own tooling writes.
+  851, 852,
 ]);
 
 /** `G40`, `G80` and `G94` are accepted and change nothing we model. */

@@ -35,10 +35,27 @@ const REPO = 'MakeraInc/CarveraController';
 const COMMIT = '3914c912452f83fbd5b5d90c730cb78795198438';
 const ROOT_IN_REPO = 'src/gcodes/Examples/';
 
+/**
+ * A SECOND source, and the only Z1-generated file in the corpus: Studio's own `TopClamp.nc`,
+ * the machine's first-job example, as published in the `1.4.6_sample` release of
+ * MakeraInc/CarveraProfiles (NO licence: all rights reserved). It is the only sample with a
+ * `;@MKR|` header, so without it the header path is outside the automated gate.
+ *
+ * Pinned by RELEASE TAG, size and git blob SHA. Note this is NOT byte-identical to the copy
+ * Studio installs locally: they differ by exactly one byte, `;@MKR|UNIT|value=mm` there and
+ * `value=MM` here. The header's unit CASE is inconsistent between Studio builds, so anything
+ * reading it must not compare case-sensitively.
+ */
+const RELEASE_REPO = 'MakeraInc/CarveraProfiles';
+const RELEASE_TAG = '1.4.6_sample';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const CORPUS_DIR = join(HERE, '..', 'reference-gcode');
 
-/** [path under Examples/, bytes, git blob sha1]. Sizes are the cheap first check. */
+/**
+ * [path, bytes, git blob sha1 prefix, source]. Sizes are the cheap first check. `source` is
+ * omitted for CarveraController's Examples/ and is `'release'` for the CarveraProfiles asset.
+ */
 export const MANIFEST = [
   ['LED/ABS-Base.nc', 52124, '46b4245238'],
   ['LED/ACRYLIC-Balloon.nc', 47854, 'c7001a7299'],
@@ -65,6 +82,8 @@ export const MANIFEST = [
   ['Tests/goto-pack-pos.nc', 53, 'e13b36431e'],
   ['Tests/laser-test-air.nc', 14772, 'da73dbfeee'],
   ['Tests/pcb-test-air.nc', 286571, '3e2de409e1'],
+  // Z1-generated, from the CarveraProfiles release (see RELEASE_REPO above).
+  ['Z1/TopClamp.nc', 214495, '1f96d8a6fe', 'release'],
 ];
 
 /** Git's blob hash: sha1("blob <size>\0" + content). What the GitHub tree reports. */
@@ -78,10 +97,12 @@ export function gitBlobSha1(buf) {
 const WARNING = `
   Reference G-code corpus -- READ THIS
   ------------------------------------
-  These files are Makera's, from ${REPO} (GPL-3.0). Case Maker is Apache-2.0.
+  These files are Makera's: from ${REPO} (GPL-3.0) and, for Z1/TopClamp.nc, from
+  ${RELEASE_REPO} (NO licence: all rights reserved). Case Maker is Apache-2.0.
   They are downloaded into a git-ignored directory and MUST NOT be committed,
   copied into src/, or embedded in a test as a literal. Hand-write fixtures.
-  All are Carvera-generated: evidence about the shared dialect, not about the Z1.
+  Only Z1/TopClamp.nc is Z1-generated; the rest are Carvera-generated: evidence about the
+  shared dialect, not about the Z1.
 `;
 
 async function main() {
@@ -91,7 +112,7 @@ async function main() {
   let kept = 0;
   const failures = [];
 
-  for (const [rel, size, shaPrefix] of MANIFEST) {
+  for (const [rel, size, shaPrefix, source] of MANIFEST) {
     const dest = join(CORPUS_DIR, rel);
     if (existsSync(dest)) {
       const have = readFileSync(dest);
@@ -101,10 +122,13 @@ async function main() {
       }
       console.log(`  ! ${rel}: present but does not match the manifest, refetching`);
     }
-    const url = `https://raw.githubusercontent.com/${REPO}/${COMMIT}/${ROOT_IN_REPO}${rel
-      .split('/')
-      .map(encodeURIComponent)
-      .join('/')}`;
+    const url =
+      source === 'release'
+        ? `https://github.com/${RELEASE_REPO}/releases/download/${RELEASE_TAG}/${encodeURIComponent(rel.split('/').pop())}`
+        : `https://raw.githubusercontent.com/${REPO}/${COMMIT}/${ROOT_IN_REPO}${rel
+            .split('/')
+            .map(encodeURIComponent)
+            .join('/')}`;
     let buf;
     try {
       const res = await fetch(url);
