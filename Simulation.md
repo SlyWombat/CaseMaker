@@ -52,7 +52,22 @@ interface Setup {
 
 `source` and `uncertainty` are not decoration. They keep the emulator honest about where
 the number came from, they let it draw the band the part might actually be within, and when
-real registration lands it fills the same two fields. **Nothing downstream changes.**
+real registration lands it fills the same two fields.
+
+**Correction: one transform is not enough.** This section claimed registration "produces
+exactly one thing". It does not — Studio's probing produces the **G54 work offset**, the WCS
+origin in machine coordinates, and our `.nc` carries no `G10` (§3.3). So the emulator needs
+**two** transforms: part→machine *and* WCS→machine. Stock subtraction happens in work
+coordinates; a `G53` move and the envelope check need machine coordinates; with one
+transform you can serve one or the other but not both. `uncertainty` as drawn is also the
+wrong quantity — the registration residual is WCS-relative-to-part, not the part's position
+on the bed. #191 adds `wcs` to `Setup` and fixes which quantity is stubbed.
+
+**And "nothing downstream changes" overstates it.** A real registration result can carry
+`rotationZ ≠ 0`, which a static `.nc` cannot compensate (Smoothieware has no variables). So
+the pipeline's real response is *refuse or re-seat*, and nobody owns that threshold yet.
+The stub does suggest the V1-shaped answer, though: type the probed readings in and
+**re-post with rotation baked into the geometry** — which needs no variables at all.
 
 Consequences, and they are large:
 
@@ -265,7 +280,39 @@ It prints `*** WRONG ***` and skips the measurement if that fails. Whatever ship
 real sweeper carries the same assertion as a unit test. This is the only reason the
 defect above is now a paragraph instead of a shipped algorithm.
 
-### 4.1 The load has to be a real toolpath
+### 4.1 The load still was not a real toolpath — second withdrawal
+
+> **The numbers below stand; two of the conclusions drawn from them do not.** The raster
+> generator wraps (`if (y > 28) y = 8`), so it emits **768 distinct segments** and the
+> 1 000 / 4 000 / 12 000 cases are 1.3× / 5.2× / **15.6× retraces of the identical path**.
+> Therefore:
+>
+> - **"Invariant to how finely the path is subdivided … a strong signal the sweep is
+>   geometrically right" is withdrawn.** Nothing was subdivided — the geometry was
+>   literally identical at every size, so identical area is a tautology, not evidence. (The
+>   sweep *is* right: independent point-sampling against true circles gives 1250.726 mm²
+>   against Clipper2's 1250.732 at 256-gon caps. That is the evidence; the invariance was
+>   not.)
+> - **§4.2's "the 3D stage stops growing with contour count" is withdrawn** for the same
+>   reason: the simplified region is the same polygon at every *n*.
+> - The 4 000 and 12 000 timings are Clipper2 on massively coincident edges, which is a
+>   degenerate sweep-line case rather than a bigger pocket. And every capsule is
+>   axis-aligned horizontal, which Clipper2 special-cases.
+> - "Contour-parallel raster" also conflates two strategies: a raster is zig-zag parallel
+>   lines, while #172 is contour-parallel offset loops.
+>
+> On a real glyph-offset load the review measured the tree at a **4× win** rather than 1.5×,
+> and the 3D stage at **139 ms** on 2 673 contours rather than 29 ms — the same order as the
+> 2D union, not negligible. **The budget conclusion survives** (well under a second for a
+> badge) but the shape of the cost does not. #191 replaces the load generator with glyph
+> offsets, and adds the assertion that would have caught this: count the **distinct**
+> segments the generator produced.
+>
+> This is the second time an unrepresentative synthetic load has produced a confident wrong
+> conclusion here. The lesson is the same as §4.0's and now applies to loads as well as
+> primitives: assert a property of the input before measuring anything with it.
+
+#### The measured figures, on the load described
 
 Figures: Manifold 3D wasm through this repo's harness, Windows node v24.19.0, 1 mm flat
 end mill (r = 0.5), 16-gon caps, one Z level, **contour-parallel raster over a 60 × 20 mm
@@ -458,7 +505,7 @@ The corpus, roughly in order of what it catches:
 
 | Input | What it exercises |
 |---|---|
-| **Makera's 25 sample `.nc` files** (#186) | Real vendor output across ABS, acrylic, aluminium and PCB; a 2.8 MB relief; two 4-axis files; and the dialect surprises — `T1M6` with no space, bare `G53`, parenthesis comments, `echo` lines |
+| **Makera's 25 sample `.nc` files** (#186) | Real vendor output across ABS, acrylic, aluminium and PCB, and the dialect surprises — `T1M6` with no space, bare `G53`, parenthesis comments, `echo` lines. **Split three ways: parse / simulate / refuse.** The 2.8 MB relief and the two 4-axis files **parse** but V1 cannot simulate them — dense 3D is the dexel case (§4.4) and rotary is out of scope (§9) |
 | **An existing Case Maker part**, engraved | A rack side or a case lid with a label milled into it — a part the compiler already produces, not a special-cased blank |
 | **Cylindrical stock** | `STOCK`'s `diameter` field implies it; the badge never will |
 | **The badge blank** | The regression oracle, and the only one with a known-good physical result |
@@ -468,7 +515,10 @@ And the ones that must **fail**, which matter more than the ones that pass:
 
 - `Laser/AudreyHepburn.nc` → refused, not mis-simulated as a mill job.
 - `goto-pack-pos.nc` → `X-295 Y-205` is a **Carvera** envelope, out of bounds on a Z1.
-- `atc-test.nc` → `T0M6`…`T6M6` on a machine with `isATC=0`.
+- `atc-test.nc` → **not a refusal.** §2 of `/Fabrication.md` says the manual handshake is
+  exactly what makes a multi-tool single `.nc` viable on this machine, and `TopClamp.nc`
+  (a Z1 job) opens with `T1 M6`. Seven tool changes are **seven pauses**, not an error.
+  A refusal needs a real reason — a change with no `M491` after it, for instance.
 - A label 2 mm from a **vise jaw** with a 3.175 mm cutter → fixture collision (§1.2).
 - A cut deeper than the tool's `shoulderLength` → holder collision.
 - A `G1` with the **spindle off**, and a `G0` that crosses the stock.

@@ -531,6 +531,7 @@ work envelope, which is 200 × 200 × 100. They are large enough to be mistaken 
   has an integrated camera**, confirmed by the maintainer and by independent reviews, though
   `Z1/QuickStart` never mentions it. Studio carries `OpenCamera`, `VideoStreamManager`,
   `VideoOverlayWidget` and `ws_video`. Documented purpose is monitoring and time-lapse; the
-  camera-to-machine calibration and whether Studio offers vision origin-setting are both
-  still unknown. `/Fabrication.md` §1 and §7.3.
+  camera-to-machine calibration is ours to measure (#189); Studio offers **no**
+  vision origin-setting — the view is a monitoring feed, confirmed 2026-10-03. **Where the
+  camera is mounted** — head or frame — is still unknown and decides #189's whole model. `/Fabrication.md` §1 and §7.3.
 - Are the empty `t_Custom*` tables reachable from Studio's UI, or dormant schema?

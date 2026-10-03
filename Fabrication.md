@@ -266,7 +266,7 @@ accepted.
 | 24 | **Thickness error is ignored, by design** | The blank prints engraved-face-down, so error lands on the back face. Cut depths come from the probed face plus model distances. Total thickness is **not** a job input. §7.2. |
 | 25 | **Build the `MachineProfile` now, even though the Z1 is the only machine** | Maintainer's call, 2026-10-03, overriding §5.3's deferral: pay for the seam once rather than recode later. Scope stays Z1-only; the profile is where machine limits get clamped and where "no laser on this machine" becomes a flag instead of an assumption. §5.3, #184. |
 | 26 | **Workholding is an explicit input, and the probe plan is derived from it** | Supersedes decision 23's fixed edge-find sequence. The part may be in a nest, under clamps, in the vise or in the rotary chuck; each answers reachable / obstructed / datum candidates / residual uncertainty, and the planner queries the compiled solid for touch points. §7.3, #188. |
-| 27 | **The blank spec makes the colour boundary slicer-independent** | Slicers sample each layer at its mid-plane, not its boundary, and the rule differs per slicer. So put the split on an exact layer multiple and give the pocket ceiling a one-layer conservative margin, rather than modelling one slicer's arithmetic. Costs a little depth band; removes a dependency on which slicer the user owns. #166, #178. |
+| 27 | **The blank spec makes the colour boundary slicer-independent** | Slicers sample each layer at its **mid-plane**, and the rule differs per slicer. So place the split and the pocket ceiling **exactly on layer lines**, where no mid-plane sampler is ambiguous. **Revised 2026-10-03:** the margin was pointed the wrong way — under mid-plane sampling at 0.2 mm the void starts at **1.6**, not 1.4, so the printed membrane is a layer *thicker* than nominal and a 1.4 ceiling gave away 0.2 mm of a ~0.6 mm band for nothing. Also "layer multiple" means **h₁ + k·h**, so the spec must *prescribe* first-layer height as well — Cura's 0.27 default puts 0.80 inside a layer again. Same mechanism as decision 22. #166, #178, #191. |
 
 ---
 
@@ -410,19 +410,22 @@ numbers from #165** — depth is an input, not a measurement.
 **Full design: `/Simulation.md`.** The summary, and two corrections to what this section
 said before it was measured:
 
-The swept volume is **exact**, with no dexel grid and no sampling — and not only for a
-flat end mill at constant Z. For any *convex* tool translated along a segment,
-`K ⊕ [a,b] = hull(K+a, K+b)`, and every Makera tool category except the thread mill is a
-convex solid of revolution (`/Makera-Parity.md` §3). So one rule covers flat, ball, bull,
-V, chamfer and drill, at any Z, ramps included.
+**V1's sweep is exact for a flat end mill at constant Z**, with no dexel grid and no
+sampling. The general rule — for any *convex* tool, `K ⊕ [a,b] = hull(K+a, K+b)`, and every
+Makera tool category except the thread mill is a convex solid of revolution
+(`/Makera-Parity.md` §3) — is correct mathematics but **not an affordable algorithm**: 1 600
+hull-moves take 40–119 s against Manifold. So it is recorded as the eventual shape and sits
+with the dexel decision, not in V1. Non-constant-Z moves, which Studio's own 2.5D pockets
+emit because they ramp in, use the conservative lowest-Z capsule and over-remove.
 
 **Performance: see `/Simulation.md` §4, and note the retraction there.** This section
 previously claimed "Clipper2 unions thousands of short glyph segments cheaply; Manifold
 booleans do not", then replaced it with the opposite — that a single Clipper2 union is
 quadratic. **Both statements were wrong**, the second because the probe behind it had a
 clockwise capsule rectangle that cancelled its own end discs under `Positive` fill, and a
-synthetic load confined to a 1.4 mm box. On a realistic raster the single call and the
-union tree are within 30 % of each other. The settled position is that `simplify()` before
+synthetic load confined to a 1.4 mm box. On a glyph-offset load the union tree is about
+**4×** the single call's speed — and the "realistic raster" that produced a 1.5× figure was
+itself defective, retracing 768 segments up to 15.6× (`/Simulation.md` §4.1). The settled position is that `simplify()` before
 extruding pays, the tree is modestly faster, and neither library is the villain — the full
 re-measurement lives in `/Simulation.md` §4.
 
@@ -626,18 +629,21 @@ type Workholding =
   | { kind: 'vise';           jawFaces: [Plane, Plane]; jawHeight: Mm }
   | { kind: 'rotary-chuck';   jawDiameter: Mm; stickout: Mm }
   | { kind: 'tape-down';      contact: Profile; shim?: Profile }
-
-// A datum source is anything that reduces what the probe must resolve.
-// The camera is one, with a coarse uncertainty and no Z at all.
-interface DatumSource { fixes: ('x' | 'y' | 'rotation' | 'z')[]; uncertainty: Mm }
   // --- status open: see "the fixture question" below ---
   | { kind: 'printed-nest';   nest: NodeId; seatClearance: Mm };
   // NOT built: vacuum bed. Not owned, nobody has asked.
 ```
 
-The four owned variants are in scope. The vacuum bed is deliberately absent — building a
+```ts
+// A datum source is anything that reduces what the probe must resolve.
+// The camera is one, with a coarse uncertainty and no Z at all.
+interface DatumSource { fixes: ('x' | 'y' | 'rotation' | 'z')[]; uncertainty: Mm }
+```
+
+The variants above are the owned ones. The vacuum bed is deliberately absent — building a
 variant for hardware nobody has is the speculative infrastructure this project has a
-standing rule against.
+standing rule against. **#188 and `/Simulation.md` §1.1 must carry this same list**; they
+currently disagree with each other and with this one (#191).
 
 Each variant has to answer the same four questions, and that is the whole interface:
 
@@ -707,14 +713,16 @@ yet. Setting it out plainly:
 
 | Fixture | What V1 must do to register it | Depends on |
 |---|---|---|
-| **Vise on the anchor pins** | **Set an origin, probe Z.** The jaws fix rotation mechanically; the anchor fixes the vise on the bed | Documented Studio features only — anchor-relative origin and automatic Z probing |
+| **Vise on the anchor pins** | Set an origin, **touch Y**, probe Z. The jaws fix X and rotation; Y slides along the jaw | Documented Studio features, plus one Y touch and the vise dimensions nobody has measured |
 | **Tape** | Probe X, **Y and rotation** blind | Whether Studio's work-origin dialog can do a two-point edge find **at all** — unknown (#187 item 1) |
 | **Printed nest** | Same as tape, plus a print per part | Same unknown |
 
-So the vise is the only option whose V1 registration needs **nothing unverified**. It also
-**de-risks #187 item 1 almost entirely**: if rotation is fixed by the jaws, V1 never needs
-rotation compensation, and the static-`.nc` limitation (no variables in Smoothieware, so no
-computed `G10 L2 P1`) stops mattering.
+So the vise needs **the least** that is unverified — not nothing, as this document claimed
+one revision ago. What survives, and it is the valuable part: **rotation is fixed
+mechanically by the jaws**, so V1 never needs rotation compensation and the static-`.nc`
+limitation (no variables in Smoothieware, hence no computed `G10 L2 P1`) stops mattering.
+That is the real de-risking of #187 item 1. The Y datum and the jaw dimensions are a caliper
+away.
 
 Tape remains the better long-term answer — camera coarse, probe fine, shim for the
 membrane, no fixture per part — and it is the one to revisit once #189 lands. The membrane
@@ -745,8 +753,29 @@ options exist, and the comparison is not what §7.6 and #175 assumed.
 | | XY datum | Hold | Cost |
 |---|---|---|---|
 | **Double-sided tape** to the table | **none** — probe X, Y and rotation | Continuous around the whole footprint; nothing above the part at all | A strip of tape |
-| **Low-profile vise** | **XY and rotation**, essentially no residual | Grips the two long edges only | Setup, nothing printed |
+| **Low-profile vise** | **X and rotation only** — see below | Grips two opposite edges | Setup, nothing printed |
 | **Printed nest** | none; ±0.15 mm of seat clearance | Surrounds the part; held down by tape on the annulus | A print per part, designed and iterated |
+
+> **Correction, from the vise's own quick-start page.** This table said the vise fixes
+> "XY and rotation, essentially no residual". It does not. The page states the **fixed jaw
+> is the LEFT jaw**, with a movable jaw opposite — so the part is referenced in **X** and in
+> **rotation**, and is free to **slide along the jaw in Y**. Y needs a touch or a mechanical
+> stop. Three more facts from the same page, all of which bear on §1.2's fixture-as-obstacle
+> check and none of which were accounted for:
+>
+> - **Slotted soft jaws by default, "suitable for thin workpieces"** — which is a point in
+>   the vise's favour for a 3.81 mm badge, but the slot is a **lip over the top-face edge**:
+>   an obstruction of unknown width, and its height against 3.81 mm decides whether the part
+>   is located in Z or tilt at all.
+> - **Jaw capacity is published nowhere.** The badge needs ≥ 38.1 mm across, or ≥ 76.2 mm
+>   the other way.
+> - Mounting is **two 4 × 11 mm locating pins and six M5×20 screws, and it requires removing
+>   the MDF wasteboard** — so the vise and tape-down are mutually exclusive setups, not two
+>   options you switch between freely. The fixed jaw's offset from Anchor 1 is also
+>   unpublished, so "anchor-relative origin" does not locate the part without a touch.
+>
+> **This needs a caliper and one photograph, not more argument** (#191): capacity, jaw
+> length, slot width/height/lip, and the fixed-jaw face to pin centres.
 
 **Tape's apparent drawback is free here, and that is a real consequence of decision 24.**
 Tape is 0.1–0.2 mm thick and compresses unevenly, which would normally be a Z error — but
