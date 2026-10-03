@@ -522,6 +522,10 @@ work envelope, which is 200 × 200 × 100. They are large enough to be mistaken 
 - What does the Z1 do at `T1 M6` when T1 is already loaded? Studio's file opens with it.
   Added to #165's side-quest.
 - Does `ORIGIN`'s `length` map to X or Y (§6.1)?
-- Which machine does the `[Video]` WebSocket in the logs belong to? The Z1 has no
-  documented camera.
+- ~~Which machine does the `[Video]` WebSocket in the logs belong to?~~ **Answered: the Z1
+  has an integrated camera**, confirmed by the maintainer and by independent reviews, though
+  `Z1/QuickStart` never mentions it. Studio carries `OpenCamera`, `VideoStreamManager`,
+  `VideoOverlayWidget` and `ws_video`. Documented purpose is monitoring and time-lapse; the
+  camera-to-machine calibration and whether Studio offers vision origin-setting are both
+  still unknown. `/Fabrication.md` §1 and §7.3.
 - Are the empty `t_Custom*` tables reachable from Studio's UI, or dormant schema?

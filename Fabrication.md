@@ -49,6 +49,14 @@ G-code semantics are LinuxCNC-flavoured and documented.
   hobby work, with real compromises in rigidity and precision.
 - **Low-profile vise** (confirmed 2026-10-03). Listed on `Z1/Accessories`. It matters more
   than it looks — see §7.3, where it may remove a V1 deliverable.
+- **An integrated camera** (confirmed 2026-10-03). Not in `Z1/QuickStart` at all, which is
+  why this document previously recorded "the Z1 has no documented camera" as an open
+  question against the `[Video]` WebSocket errors in Studio's logs. That was wrong. Studio
+  carries `OpenCamera`, `VideoStreamManager`, `VideoOverlayWidget`, `ws_video` and a
+  recording timer, the mobile Makera App shows the feed, and independent reviews confirm the
+  hardware.
+  **Its documented purpose is monitoring and time-lapse, not metrology** — see §7.3 for
+  what that does and does not buy.
 
 > ### ⚠ Three probes ship or are sold for this machine, and only one can touch off PLA
 >
@@ -618,6 +626,10 @@ type Workholding =
   | { kind: 'vise';           jawFaces: [Plane, Plane]; jawHeight: Mm }
   | { kind: 'rotary-chuck';   jawDiameter: Mm; stickout: Mm }
   | { kind: 'tape-down';      contact: Profile; shim?: Profile }
+
+// A datum source is anything that reduces what the probe must resolve.
+// The camera is one, with a coarse uncertainty and no Z at all.
+interface DatumSource { fixes: ('x' | 'y' | 'rotation' | 'z')[]; uncertainty: Mm }
   // --- status open: see "the fixture question" below ---
   | { kind: 'printed-nest';   nest: NodeId; seatClearance: Mm };
   // NOT built: vacuum bed. Not owned, nobody has asked.
@@ -635,6 +647,45 @@ Each variant has to answer the same four questions, and that is the whole interf
 | **Obstructed** | Clamp, jaw and bracket footprints, as keep-out profiles in the work frame |
 | **Datum candidates** | What this fixture *already* establishes, and how well — the anchor bracket fixes XY to the bed; a vise fixes one face and rotation; a chuck fixes the axis; a nest fixes nothing but holds the part still |
 | **Residual uncertainty** | What is left for the probe to resolve, with a number. A nest pocket cut at `+0.15` leaves ±0.15 mm of XY slop; a vise leaves essentially none across the jaws |
+
+#### The camera is a coarse datum, and that is worth a lot
+
+The machine has an integrated camera (§1). It cannot do the job of a probe and it should not
+try to — but it slots into the planner as **another datum source with a stated
+uncertainty**, which is a shape the model already has.
+
+What coarse vision buys, in order of value:
+
+1. **It makes a blind probe safe.** `G38.2` has to start from an assumed position and travel
+   until it touches. If the assumption is wrong the probe either misses the part entirely or
+   drives into it. A coarse fix beforehand turns a long blind travel into a short confident
+   one — which is exactly the "smart search" this problem wants, and it matters most for the
+   tape-down case, where there is no datum at all.
+2. **It answers "is the part even there, roughly where I think?"** before any motion. That
+   is a safety check nothing else in the plan provides.
+3. **It seeds rotation**, well enough to decide whether rotation compensation is needed at
+   all — which is the question that otherwise forces a two-touch edge find.
+
+What it cannot do: supply final precision, and **it cannot give Z at all.** The engraved
+face's height is what every cut depth references (§7.2), and a camera looking down cannot
+measure it. Z stays probed, always.
+
+**Unverified, and all of it load-bearing before any of the above is designed:**
+
+- **The camera-to-machine transform.** Position relative to the spindle, field of view,
+  resolution, whether it looks straight down, and lens distortion. Without a calibrated
+  pixel→machine mapping there is no vision registration, only a picture. Nothing found so
+  far documents any of it.
+- **Whether Studio exposes camera-based origin setting for the Z1.** Everything found
+  describes the work-origin flow as jog buttons plus the 3D Probe or Auto Probe, and the
+  camera as monitoring and time-lapse. The feature may simply not exist.
+- **Whether the stream is reachable by anything but Studio and the mobile app.** `ws_video`
+  suggests a WebSocket endpoint on the machine, which is a bridge-era question (§5.7, #181).
+
+**So for V1 the camera is an operator aid, not an app feature.** Reading the stream needs
+raw sockets the web build does not have, and using it for registration needs a calibration
+nobody has measured. It belongs in the planner's *interface* now — a datum source with an
+uncertainty — and in its implementation after the bridge.
 
 **The plan then falls out of geometry, not out of a rule.** Query the compiled solid for
 candidate surfaces, score them, and emit the touches that resolve the residual:
