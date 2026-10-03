@@ -224,6 +224,8 @@ From `GCodes/TopClamp.nc`, which is a Z1 job (`MACHINE|id=Z1`):
 - **No `G54` and no `G10`.** The file assumes the work coordinate system was already set
   by Studio's own probing workflow. Anything we emit has to either set it explicitly or
   document the same assumption — and our parser has to accept a file that doesn't.
+- **But `TopClamp.nc` is not representative**, and writing a parser against it alone would
+  be a mistake. §11.4 lists what the other 25 vendor sample files actually contain.
 
 ### 6.1 `ORIGIN` semantics — a hypothesis, not a fact
 
@@ -414,6 +416,44 @@ the provenance rule applies):
 - `Machine_Design_Files/Makera-Z1_Simplified_4Axis.step` — machine model.
 - `Sample_Files/NefertitiFinish.nc` — a **second** sample `.nc`, and a 3D finishing job, so
   a much harsher parser and simulator test case than `TopClamp.nc`.
+
+### 11.1.1 A corpus of 25 vendor reference `.nc` files
+
+`CarveraController/src/gcodes/Examples/` holds the machine's built-in examples — the ones
+`Z1/QuickStart` means by "File Storage → Examples". They span every strategy family, which
+no other source here does:
+
+| Directory | Files | Useful as |
+|---|---|---|
+| `LED/` | 10 — ABS, 5× acrylic, aluminium, 3× PCB | Real 2.5D and engraving jobs across materials |
+| `Laser/` | `AudreyHepburn.nc` (2.8 MB), small variant | A file our parser must **refuse**, not mis-simulate |
+| `Relief/` | `PirateShip.nc` (2.8 MB) | Dense 3D relief — the dexel case (§4.5 of `/Simulation.md`) |
+| `Rotation/` | `NefertitiFinish.nc` (2.6 MB), `NefertitiRough.nc` | **A-axis motion.** Distinct files despite matching byte counts |
+| `Tests/` | 10, from **53 bytes** up | Tiny, hand-sized parser fixtures |
+
+The `Tests/` files are the most immediately useful thing found all session: `atc-test.nc`
+is 75 bytes, `goto-pack-pos.nc` is 53, `flatness-test-air.nc` is 215. Also
+`Makerables`' official tutorials include **"Makera Badge — 2D Pattern"**, which is
+this project's job almost exactly.
+
+### 11.1.2 What those files prove about the dialect
+
+Reading three of the tiny ones overturns several things inferred from `TopClamp.nc`:
+
+- **`T1M6` with no space.** `atc-test.nc` is `T0M6` through `T6M6`. A whitespace-token
+  parser breaks here; **parse G-code words, not tokens.**
+- **`M06` and `M03`, not just `M6` and `M3`.** Both spellings appear.
+- **`G53` machine-coordinate moves are real and used.** `goto-pack-pos.nc` is nothing but
+  `G90 G0 G53 Z-3` / `G53 X-295 Y-205`. (Those coordinates are a Carvera envelope.)
+- **`G54` *is* emitted by some files**, and `G17` plane selection appears, so §6's
+  observation is about `TopClamp.nc` specifically and not about Makera files generally.
+- **Parenthesis comments**, `(OCT- 8-2024-3:01:33PM)`, alongside Studio's `;` form. And
+  `T1 M06()` — an empty comment immediately after the word.
+- **Trailing-decimal numbers**, `DIA 6.`, which a naive float parser rejects.
+- **Non-G-code console lines.** `atc-test.nc` opens with `echo ATC TEST Start...`. A parser
+  must tolerate lines that are not G-code at all.
+
+Every one of those is a cheap test case and an expensive surprise. #174 now carries them.
 
 ### 11.2 The 6000-vs-1200 velocity discrepancy — resolved
 
