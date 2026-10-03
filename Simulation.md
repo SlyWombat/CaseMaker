@@ -4,9 +4,15 @@ Status as of 2026-10-03. Design only; nothing implemented. Tracked by **#182**.
 
 Architecture context: `/Fabrication.md` §5.6. Capability context: `/Makera-Parity.md`.
 
-**What it does, in one sentence.** Sweep the selected tool along the toolpath, subtract
-the swept volume from the stock, and show the object before and after — so that a wrong
-`.nc` is something you *see*, not something you discover in PLA.
+**What it does, in one sentence.** Take a part, say how it is mounted and where it sits,
+then **execute the whole program visually** — every move, every tool change, material
+disappearing as the cutter passes — so that a wrong `.nc` is something you *watch* rather
+than something you discover in PLA.
+
+**It is an emulator, not a before/after snapshot.** An earlier draft of this document framed
+it as one subtraction producing a final state. That is the cheap half. The thing worth
+building runs the program: it holds machine state, pauses where the machine would pause, and
+shows the tool moving through the fixture as well as the stock.
 
 **Why it is worth a design document.** Every other number in the V1 plan is gated behind a
 bench experiment (`/Fabrication.md` §9.3). This is not: it takes depth as an input, needs
@@ -20,11 +26,80 @@ the algorithm twice.
 
 ---
 
-## 1. The one decision that shapes everything: simulate the file
+## 1. The two decisions that shape everything
 
-**V1 simulates the `.nc`, not the in-memory toolpath IR.**
+### 1.1 Placement is an input, not a problem to solve
 
-The deliverable the user holds is a file they upload through Makera Studio. Sweeping the IR
+**This is the decision that unblocks the whole feature**, and it was the thing quietly
+holding it up. Registration — probing, the camera, a vise's known geometry — produces
+exactly one thing: a **transform** saying where the part sits in machine coordinates. The
+emulator consumes that transform. It does not care how it was obtained.
+
+So **stub it.** Type the number in, and the emulator is buildable today:
+
+```ts
+interface Setup {
+  part:        Manifold | { stock: Profile; thickness: Mm };
+  workholding: Workholding;          // tape | vise | nest | clamps | chuck  (#188)
+  placement: {
+    origin:      Vec3;               // the part's model origin, in machine coords
+    rotationZ:   Degrees;
+    source:      'stub' | 'fixture' | 'probe' | 'camera';
+    uncertainty: Mm;                 // what the emulator should show as a tolerance band
+  };
+}
+```
+
+`source` and `uncertainty` are not decoration. They keep the emulator honest about where
+the number came from, they let it draw the band the part might actually be within, and when
+real registration lands it fills the same two fields. **Nothing downstream changes.**
+
+Consequences, and they are large:
+
+- **#182 no longer waits on #188**, on #187 item 1, or on deciding between tape, vise and
+  nest. Those decide what eventually *fills* `placement`, not whether the emulator works.
+- **The fixture still matters, for a different reason** — see §1.2. It is an obstacle.
+- The stub is also a **test fixture in its own right**: deliberately offset or rotate the
+  placement and watch the emulator predict the resulting scrap. That is a check no amount
+  of correct probing would give us.
+
+#### Machine state, and pausing where the machine pauses
+
+Executing a program means modelling what the controller holds, not just sweeping geometry:
+
+- **Active tool and its length offset.** `T<n> M6` switches the tool solid; `M491`
+  re-establishes TLO (`/Fabrication.md` §2).
+- **A virtual tool swap is a pause.** `M490.1` beeps and waits for the operator, `M490.2`
+  releases, `M600` suspends. The emulator **stops and prompts**, exactly where the machine
+  would — which is the only way to see that a program's tool sequence makes sense.
+  §9.1 defers multi-tool *jobs* from V1; it costs almost nothing to let the **emulator**
+  handle them, and Makera's own sample corpus requires it — `atc-test.nc` cycles `T0M6`
+  through `T6M6` (#186).
+- **Spindle and coolant state.** A cutting move with the spindle off is a bug a volumetric
+  oracle cannot see (#187), but a state machine catches it for free.
+- **Modal state and the WCS** — `G90`/`G91`, `G53`/`G54`, units, plane. The parser resolves
+  these; the emulator holds them.
+
+#### The fixture is an obstacle, and this is where collisions get caught
+
+Saying how the part is mounted buys more than a datum. **Vise jaws, clamp footprints and
+nest walls are solids**, and the emulator can check the tool — and the holder above it —
+against them.
+
+That matters because it catches two classes of failure nothing else in the plan does:
+
+- **Tool-into-fixture.** "This label is 4 mm from the jaw and the cutter is 1 mm — it will
+  hit." §7.6 worries about clamps being "in the tool's way"; this is how that stops being a
+  worry and becomes a check.
+- **Holder-into-part.** The shank, collet and spindle nose at depth. #187 found that the
+  numeric gate for this used the wrong field and that `shoulderLength` is **empty for every
+  engraver and chamfer** in the catalogue. A geometric check against the modelled holder is
+  strictly better than a missing number, and degrades to a refusal when the geometry is
+  unknown.
+
+### 1.2 Simulate the file, not the in-memory IR
+
+**V1 simulates the `.nc`, not the in-memory toolpath IR.** The deliverable the user holds is a file they upload through Makera Studio. Sweeping the IR
 is one level removed from that file: a Z sign flip, a wrong origin offset, a modal-state
 slip or a units bug in the post-processor (#173) would pass straight through an IR
 simulation and still ruin the part. A check one level removed from the assertion is not
@@ -376,7 +451,49 @@ checks nothing.
 
 ---
 
-## 8. Before and after, in the UI
+### 7.1 What we run it on — and the badge is the least of it
+
+A simulator validated only against the part it was written for is validated against nothing.
+The corpus, roughly in order of what it catches:
+
+| Input | What it exercises |
+|---|---|
+| **Makera's 25 sample `.nc` files** (#186) | Real vendor output across ABS, acrylic, aluminium and PCB; a 2.8 MB relief; two 4-axis files; and the dialect surprises — `T1M6` with no space, bare `G53`, parenthesis comments, `echo` lines |
+| **An existing Case Maker part**, engraved | A rack side or a case lid with a label milled into it — a part the compiler already produces, not a special-cased blank |
+| **Cylindrical stock** | `STOCK`'s `diameter` field implies it; the badge never will |
+| **The badge blank** | The regression oracle, and the only one with a known-good physical result |
+| **#165's ladder `.nc`** | Studio-generated, known intent by construction — the one genuinely independent check (§1.2) |
+
+And the ones that must **fail**, which matter more than the ones that pass:
+
+- `Laser/AudreyHepburn.nc` → refused, not mis-simulated as a mill job.
+- `goto-pack-pos.nc` → `X-295 Y-205` is a **Carvera** envelope, out of bounds on a Z1.
+- `atc-test.nc` → `T0M6`…`T6M6` on a machine with `isATC=0`.
+- A label 2 mm from a **vise jaw** with a 3.175 mm cutter → fixture collision (§1.2).
+- A cut deeper than the tool's `shoulderLength` → holder collision.
+- A `G1` with the **spindle off**, and a `G0` that crosses the stock.
+- A **deliberately offset or rotated `placement`** → the emulator predicts the scrap, which
+  is the test the stub makes possible (§1.1).
+
+## 8. Visual execution, and before/after, in the UI
+
+### 8.0 Playback has to be checkpointed, because per-frame booleans are impossible
+
+"Execute every tool action visually" cannot mean a Manifold boolean per frame — §4 measures
+one Z level at 0.7 s. The affordable structure, and the one real CAM simulators use:
+
+- **Precompute the removal as a cumulative sequence**, one solid per **checkpoint** — per Z
+  level, per toolpath, per tool change. Those are already what §4.3's algorithm produces.
+- **Scrubbing is then instant**: the stock at step *k* is `stock − union(removals[0..k])`,
+  and the unions are already computed. Seeking backwards is as cheap as forwards.
+- **Between checkpoints, animate the tool over a static stock.** Moving a tool mesh along a
+  polyline is free. The material does not visibly update mid-checkpoint, which is what every
+  CAM simulator does and nobody notices.
+- **Pause points are checkpoints by definition** — `M6`, `M490.1`, `M600` (§1.1). The
+  emulator stops with the tool shown, the next tool named, and the state it will resume in.
+
+So one compute pass, then free playback. **Do not** build it as incremental subtraction;
+that is the design that cannot be made fast later.
 
 Three objects exist after a run — **stock**, **result**, and **removed volume** — and all
 three are useful. The removed volume is the most informative and should be visible rather
@@ -423,15 +540,20 @@ about how the part will *look* beyond which colour volume a floor lands in.
 
 ## 10. Build order
 
-1. **`Move[]` type + G-code parser** (#174's front half) — pure, no geometry.
-2. **`toWorkFrame` + the frame tests** (§2), including the off-centre-label case.
-3. **`ExactSweeper`** (§4.4) with the measured algorithm, in the geometry worker.
-4. **Validation gate** (§6) — refusals, with the line named.
-5. **Run it on Studio's `.nc`**, including #165's ladder file before the ladder is cut.
-   This is the first point at which the whole thing is proven against third-party CAM.
-6. **The oracle tests** (§7), once #171 and #178 exist to compare against.
-7. **Round-trip against #173**, once the post-processor exists.
-8. **UI** (§8), after the mockup.
+1. **`Setup` + stubbed `placement`** (§1.1). First, because it is what unblocks the rest —
+   and it is a type, not an algorithm.
+2. **`Move[]` type + G-code parser** (#174's front half) — pure, no geometry.
+3. **Machine state machine** (§1.1): active tool, TLO, spindle, modal, WCS, and the pause
+   points. Pure, and testable against `atc-test.nc` at 75 bytes.
+4. **`toWorkFrame` + the frame tests** (§2), including the off-centre-label case.
+5. **`ExactSweeper`** (§4.3) with the measured algorithm, in the geometry worker.
+6. **Validation and collision gates** (§6, §1.2) — refusals, with the line named.
+7. **Run it on Makera's corpus** (§7.1, #186), including the files that must fail.
+8. **Checkpointed playback** (§8.0), then the UI after a mockup.
+9. **The oracle tests** (§7), once #171 and #178 exist to compare against.
+10. **Round-trip against #173**, once the post-processor exists.
 
-Steps 1–5 need nothing from #165, #166, #167, #171, #172, #173 or #178. They are available
-now.
+**Steps 1–8 need nothing from #165, #166, #167, #171, #172, #173, #178, #187 or #188.**
+Stubbing `placement` is what makes that true: every open question about probing, the camera
+and the fixture decides what eventually *fills* that field, not whether any of this works.
+This is the whole V1 critical path that is available today.
