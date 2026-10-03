@@ -47,6 +47,8 @@ G-code semantics are LinuxCNC-flavoured and documented.
   warning below: it is *not* the 3D Probe Rod.
 - **4th axis rotary module.** Work envelope ⌀80 × 150 mm. Belt-driven: fine for
   hobby work, with real compromises in rigidity and precision.
+- **Low-profile vise** (confirmed 2026-10-03). Listed on `Z1/Accessories`. It matters more
+  than it looks — see §7.3, where it may remove a V1 deliverable.
 
 > ### ⚠ Three probes ship or are sold for this machine, and only one can touch off PLA
 >
@@ -610,13 +612,19 @@ told where to touch.
 
 ```ts
 type Workholding =
+  // --- owned, in scope (confirmed 2026-10-03) ---
   | { kind: 'anchor-bracket'; anchor: 1 | 2; offset: Vec2 }   // native L-bracket
   | { kind: 'top-clamps';     clamps: { at: Vec2; footprint: Profile }[] }
   | { kind: 'vise';           jawFaces: [Plane, Plane]; jawHeight: Mm }
-  | { kind: 'printed-nest';   nest: NodeId; seatClearance: Mm }
   | { kind: 'rotary-chuck';   jawDiameter: Mm; stickout: Mm }
-  | { kind: 'vacuum-bed' };
+  // --- status under review: see "the vise question" below ---
+  | { kind: 'printed-nest';   nest: NodeId; seatClearance: Mm };
+  // NOT built: vacuum bed. Not owned, nobody has asked.
 ```
+
+The four owned variants are in scope. The vacuum bed is deliberately absent — building a
+variant for hardware nobody has is the speculative infrastructure this project has a
+standing rule against.
 
 Each variant has to answer the same four questions, and that is the whole interface:
 
@@ -641,12 +649,33 @@ candidate surfaces, score them, and emit the touches that resolve the residual:
 - If the residual cannot be resolved by any reachable surface, **say so and refuse** rather
   than registering against something that is not a reference.
 
-**For V1's badge specifically**, that derivation produces: nest on the anchor pins for a
-repeatable home, Z probed on the engraved face, and XY either taken from the anchor (±0.15
-mm, which is invisible on engraved text and leaves the magnet-pocket keep-out ~2.5 mm of
-margin) or refined by two edge touches if the engravability check (§7.5) shows the margin
-is tight. The point of decision 26 is that this is now an *output* of the model, so the
-rotary and vise cases do not each need a new hand-written sequence.
+The point of decision 26 is that the plan is now an *output* of the model, so the vise and
+rotary cases do not each need a new hand-written sequence.
+
+#### The vise question — decision 19 may be superseded
+
+**The low-profile vise is probably the right fixture for the badge, not a printed nest.**
+This follows from facts already in this document rather than from a preference:
+
+- §7.6 and #175 reject clamping because the blank is "**3.8 mm thick, too thin to clamp
+  below the cut line without the clamp being in the tool's way**". A low-profile vise is
+  built for exactly that case — that is what "low-profile" means.
+- A **nest fixes nothing positionally** (decision 23, §7.3) and leaves ±0.15 mm of seat
+  clearance. A **vise fixes one face and rotation**, leaving almost no residual for the
+  probe to resolve. It is strictly the better datum.
+- The badge is 76.2 × 38.1 mm. Gripping the long edges leaves the entire engraved face
+  clear, and the part is machined pocket-down so the top face is the one being cut.
+- A nest has to be designed, printed and iterated for every part. A vise holds anything.
+
+What the nest still does better: it backs the blank flat across its whole area, which a
+vise does not, and §9.2's unsupported membrane over the magnet pocket is the one place that
+could matter. **#165 Row A measures precisely that**, so the comparison is decidable rather
+than arguable.
+
+**Decision 19 ("workholding is a printed nest, and it is a V1 deliverable") is therefore
+under review, pending #165.** If the vise wins, #175 drops out of V1 and the badge's
+registration becomes: vise fixes XY and rotation, probe Z on the engraved face, done — which
+is simpler than anything this document has proposed so far.
 
 **What this does not settle — see #187 item 1.** Whether the probing happens in our `.nc`
 or in Studio's dialogs is still open, and the in-file route is constrained: Smoothieware has
@@ -654,12 +683,12 @@ no variables, so `G10 L2 P1` cannot take a computed offset and **rotation compen
 impossible in a static file.** A derived *plan* can be executed interactively today and
 emitted later when the bridge exists; the planner does not care which.
 
-**One correction on hardware.** The Z1's three probes — wired probe, 3D Probe Rod, and the
-separate Makera 3D Probe — are all **cabled** (§1); using one means unplugging the previous
-connector. The *wireless* probe is a Carvera part, which is why `M491` and `T0` talk about
-it in the shared firmware and why Studio's control panel has wireless-probe charging
-voltages. If a wireless probe is in play on this machine, that is new information and §1
-needs it.
+**Probe, confirmed 2026-10-03.** The one in use is the **separate, cabled Makera 3D
+Probe** — the only one of the three rated for non-conductive material, and therefore the
+only one that can touch off a PLA blank (§1). Using it means unplugging the wired-probe
+connector, which stays a step in §7.6's Z chain. The *wireless* probe is a Carvera part,
+which is why `M491` and `T0` reference it in the shared firmware and why Studio's control
+panel carries wireless-probe charging voltages; there is none on this machine.
 
 ### 7.4 What a V-bit does, and why V1 uses a flat end mill
 
