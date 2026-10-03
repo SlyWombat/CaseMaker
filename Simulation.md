@@ -549,7 +549,11 @@ And the ones that must **fail**, which matter more than the ones that pass:
   false errors on 6 vendor files.)
 - A label 2 mm from a **vise jaw** with a 3.175 mm cutter → fixture collision (§1.2).
 - A cut deeper than the tool's `shoulderLength` → holder collision.
-- A `G1` with the **spindle off**, and a `G0` that crosses the stock.
+- A `G0` that crosses the stock, and a feed move with the **spindle off that enters stock**.
+  (A feed move with the spindle off is **not** a failure by itself: the vendor's own
+  `fatigue-test-air.nc` opens with `G1 Z-50` / `G1 Z-61` under "(Height Test)" before its
+  first `M3`. The state machine reports it as a **warning**; it becomes an error only when
+  the geometry says the move is in stock.)
 - A **deliberately offset or rotated `placement`** → the emulator predicts the scrap, which
   is the test the stub makes possible (§1.1).
 
