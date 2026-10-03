@@ -443,6 +443,10 @@ regression oracle for #167, so it is read and never written.
 half angle, flute length, shoulder length. For a file simulation these are read **from the
 `TOOL` line**, which simultaneously tests our reading of the header. Where the tool comes
 from in our own UI is an open question (§9).
+**Built (`src/engine/cnc/tool.ts`):** the record, a reader for the `TOOL` line, and
+`cuttingRadiusForSweep`, which is the V1 gate — a **flat end mill only**, refused **by name**
+for a V-bit, a ball, a bull nose (a flat end with a corner radius), a missing type or a
+missing diameter. Simulating a V-bit as a flat end would draw a cut the machine will not make.
 
 **Validation — refuse, don't approximate.** This is the direct lesson of
 `/Makera-Parity.md` §8: Studio writes uninitialised doubles and `0xCCCCCCCC` into its own
