@@ -34,3 +34,7 @@ local-docs/
 # harnesses below. The harnesses are tracked; what they emit is not.
 qa-*-out/
 triage-*-out/
+
+# Makera's reference G-code corpus (#186). GPL-3.0 / unlicensed upstream, Apache-2.0
+# here: downloaded on demand by scripts/fetch-reference-gcode.mjs, NEVER committed.
+reference-gcode/
