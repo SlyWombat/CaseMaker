@@ -15,8 +15,9 @@ import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
 import type { CutParams } from '@/engine/cnc/feeds';
-import type { EngraveLabel } from '@/types/engraveJob';
-import { labelProfile } from '@/engine/cnc/engrave/partPlan';
+import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
+import type { EngraveLabel, EngraveShape } from '@/types/engraveJob';
+import { itemOperationName, labelProfile } from '@/engine/cnc/engrave/partPlan';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { executeProfile } from '@/workers/geometry/evaluateOp';
@@ -26,6 +27,16 @@ type Pt = [number, number];
 const TOOL = flatEndMill(1); // r = 0.5
 const R = 0.5;
 const PARAMS: CutParams = { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.4, stepOver: 0.4, air: false };
+
+/** The post's non-geometry context, only needed to prove the operation name reaches the `.nc`. */
+const CTX: PostContext = {
+  jobName: 'names',
+  stock: { length: 60, width: 40, thickness: 10 },
+  materialName: 'softwood',
+  zDatum: 'probed-top-face',
+  origin: 'topFrontLeft',
+  camVersion: '1.0.0',
+};
 
 function rectRegion(w: number, h: number, x = 0, y = 0): Polygons {
   return [
@@ -277,5 +288,61 @@ describe('generateEngrave (#172)', () => {
     const first = generateEngrave(tl, labels, TOOL, PARAMS).operations[0]!.moves.length;
     for (let i = 0; i < 100; i++) generateEngrave(tl, labels, TOOL, PARAMS);
     expect(generateEngrave(tl, labels, TOOL, PARAMS).operations[0]!.moves.length).toBe(first);
+  });
+});
+
+describe('operation names (#214 work item 4)', () => {
+  const base = { position: { x: 0, y: 0 }, rotation: 0, depth: 1, enabled: true };
+
+  it('words each shape kind with its size, and a label with its text', () => {
+    expect(itemOperationName(makeLabel({ text: 'CASE' }))).toBe('Engrave "CASE"');
+
+    const rect: EngraveShape = { ...base, id: 'r', kind: 'rect', width: 20, height: 10, cornerRadius: 0 };
+    expect(itemOperationName(rect)).toBe('Pocket rect 20×10');
+    // An optional user name is carried through, between the kind and its size.
+    expect(itemOperationName({ ...rect, name: 'Motor' })).toBe('Pocket rect "Motor" 20×10');
+
+    const circle: EngraveShape = { ...base, id: 'c', kind: 'circle', diameter: 6 };
+    expect(itemOperationName(circle)).toBe('Pocket circle ⌀6');
+
+    const slot: EngraveShape = { ...base, id: 's', kind: 'slot', length: 24, width: 8 };
+    expect(itemOperationName(slot)).toBe('Pocket slot 24×8');
+
+    const poly: EngraveShape = {
+      ...base,
+      id: 'p',
+      kind: 'polygon',
+      points: [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+        [0, 10],
+      ],
+    };
+    expect(itemOperationName(poly)).toBe('Pocket polygon (4 points)');
+  });
+
+  it("composes the region's ready-made name into the IR and the emitted .nc TOOLPATH line", () => {
+    const rect: EngraveShape = { ...base, id: 'r', kind: 'rect', width: 20, height: 10, cornerRadius: 0 };
+    // The polygons are naming-independent stand-ins: this test is about the name that reaches
+    // the program, not about pocketing a rectangle.
+    const regions: EngraveRegion[] = [
+      { id: 'r', text: '', name: itemOperationName(rect), depth: 1, polygons: rectRegion(20, 10, 20, 10) },
+      // No `name`: a label keeps the untouched `Engrave "<text>"` fallback.
+      { id: 'l', text: 'CASE', depth: 2, polygons: rectRegion(6, 4, 40, 10) },
+    ];
+    const ir = generateEngrave(tl, regions, TOOL, PARAMS);
+    expect(ir.operations.map((o) => o.name)).toContain('[T1]Pocket rect 20×10 1.0mm');
+    expect(ir.operations.map((o) => o.name)).toContain('[T1]Engrave "CASE" 2.0mm');
+
+    const posted = postZ1(ir, CTX, Z1);
+    expect(posted.ok).toBe(true);
+    if (!posted.ok) return;
+    const toolpathNames = posted.text
+      .split('\n')
+      .filter((line) => line.startsWith(';@MKR|TOOLPATH|'))
+      .map((line) => line.slice(line.indexOf('name=') + 'name='.length));
+    expect(toolpathNames).toContain('[T1]Pocket rect 20×10 1.0mm');
+    expect(toolpathNames).toContain('[T1]Engrave "CASE" 2.0mm');
   });
 });

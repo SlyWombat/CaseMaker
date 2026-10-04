@@ -9,6 +9,9 @@ import { PortMarkers } from './PortMarkers';
 import { BoardPlaceholderMesh } from './BoardPlaceholderMesh';
 import { HatPlaceholderMeshes } from './HatPlaceholderMeshes';
 import { isAssembledNodeId } from '@/engine/exporters/parts';
+import { isSimSceneActive, useSimStore } from '@/store/simStore';
+import { SimMeshes } from './SimMeshes';
+import { EngravePreview } from './EngravePreview';
 
 interface NodeMeshProps {
   id: string;
@@ -84,7 +87,11 @@ function colorForNode(id: string): string {
   return '#9a9aa8';
 }
 
-export function SceneMeshes() {
+/**
+ * The case's own meshes. Split out from `SceneMeshes` so the simulation branch can be an early
+ * `return` without putting the hooks below it behind a condition.
+ */
+function CaseMeshes() {
   const viewMode = useViewportStore((s) => s.viewMode);
   const shellRender = useViewportStore((s) => s.shellRender);
   const hiddenParts = useViewportStore((s) => s.hiddenParts);
@@ -186,4 +193,20 @@ export function SceneMeshes() {
       <PortMarkers />
     </group>
   );
+}
+
+/**
+ * The viewport's meshes (#197, #205): the simulation's while one is loaded, the engrave
+ * preview's while its section is open (and no simulation is up), and the case's otherwise.
+ * Each CNC view draws its OWN stock in the WORK frame, so the case's nodes are not drawn at all
+ * — a case rendered around a block of stock would be a lie about what is being cut.
+ */
+export function SceneMeshes() {
+  const simActive = useSimStore(isSimSceneActive);
+  // #205 — the engrave preview owns the viewport only while its section is open; a simulation
+  // that is still up takes precedence (the sim meshes are what the camera is framed on).
+  const engraveActive = useViewportStore((s) => s.activeSidebarSection === 'cnc-engrave');
+  if (simActive) return <SimMeshes />;
+  if (engraveActive) return <EngravePreview />;
+  return <CaseMeshes />;
 }

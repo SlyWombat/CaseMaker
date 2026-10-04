@@ -3,7 +3,7 @@ import type { MachineProfile } from '@/engine/cnc/machine';
 import { libraryTool } from '@/engine/cnc/toolLibrary';
 import type { Tool } from '@/engine/cnc/tool';
 import { viseEnvelope } from '@/engine/cnc/fixture';
-import { validateSacrificial } from '@/engine/cnc/sacrificial';
+import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import { stubSetup, type Setup, type Workholding } from '@/engine/cnc/setup';
 import { polygonSelfIntersects } from '@/engine/cnc/engrave/partPlan';
 import type { EngraveItem, EngraveJob } from '@/types/engraveJob';
@@ -87,16 +87,22 @@ export function jobTool(job: EngraveJob): Tool | null {
  * (model z = 0) up to the jaw tops, which stand `stockProud` below the top face:
  * `thickness − stockProud`.
  *
+ * SACRIFICIAL MATERIAL MOVES THE FACES (#213 §2): the jaws close on what is actually between
+ * them, so `viseJawShift` pushes the fixed face to `x = −shift.left` and the moving face to
+ * `x = length + shift.right`. With no sacrificial material the shift is zero and the faces sit
+ * on the part's own edges exactly as before.
+ *
  * The obstacle boxes themselves are #203's job, not this one.
  */
 export function toSetup(job: EngraveJob, machine: MachineProfile): Setup {
   const { length, width, thickness } = job.stock;
   const vise = job.workholding.vise;
+  const shift = viseJawShift(job.sacrificial);
   const workholding: Workholding = {
     kind: 'vise',
     jawFaces: [
-      { origin: [0, 0, 0], normal: [1, 0, 0] }, // fixed jaw: x = 0, face normal +X
-      { origin: [length, 0, 0], normal: [-1, 0, 0] }, // moving jaw: x = length, normal −X
+      { origin: [0 - shift.left, 0, 0], normal: [1, 0, 0] }, // fixed jaw face, normal +X
+      { origin: [length + shift.right, 0, 0], normal: [-1, 0, 0] }, // moving jaw face, normal −X
     ],
     jawHeight: thickness - vise.stockProud,
   };
@@ -106,8 +112,9 @@ export function toSetup(job: EngraveJob, machine: MachineProfile): Setup {
     // The default job's tool is number 1 (`flat-1.0`); the starting tool is stated because a
     // program cannot know the machine's active tool (/Simulation.md §1.1). The fixture is the
     // vise's obstacle envelope (#203), carried with its provenance so the emulator never
-    // mistakes a default for a measurement.
-    { startingTool: 1, fixture: viseEnvelope(job.stock, vise) },
+    // mistakes a default for a measurement. The sacrificial model rides along (#213) so the
+    // sweep can model it as a second body; absent, every pre-#213 caller is unchanged.
+    { startingTool: 1, fixture: viseEnvelope(job.stock, vise, job.sacrificial), sacrificial: job.sacrificial },
     machine,
   );
 }

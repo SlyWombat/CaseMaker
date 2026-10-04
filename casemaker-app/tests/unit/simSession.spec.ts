@@ -12,6 +12,7 @@ import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { STOCK_CACHE } from '@/workers/geometry/playback';
 import { capsuleArea, MAX_CHECKPOINTS } from '@/workers/geometry/sweep';
 import { parseGcode, setupFromHeader, stubSetup, libraryTool, type Setup } from '@/engine/cnc';
+import { presetJawStrips } from '@/engine/cnc/sacrificial';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { createFrameCoalescer } from '@/engine/jobs/frameCoalescer';
@@ -236,6 +237,95 @@ describe('frames: seeks in both directions, against cncPlayback.spec.ts\'s close
       expect(r.count).toBe(40);
       for (const k of [39, 0, 31, 32, 17, 39, 5, 38, 33]) expect(frame(session, k).k).toBe(k);
       session.dispose();
+    }
+  });
+});
+
+describe('#213: the sacrificial body is loaded, scrubbed and disposed', () => {
+  // The #204 blank: 100 x 60 x 12, with `presetJawStrips`' two 6 mm strips flushed to the top.
+  const SSLAB = { kind: 'prism' as const, outline: { kind: 'p-rect' as const, size: [100, 60] as [number, number] }, thickness: 12 };
+  const SHOLD = { kind: 'tape-down' as const, contact: SSLAB.outline };
+  const STRIPS = presetJawStrips();
+  const T3 = flatEndMill(3.175);
+  const strips = (o: Partial<Setup> = {}) => stubSetup(SSLAB, SHOLD, { sacrificial: STRIPS, ...o });
+  // X = 1 reaches 0.59 mm into the left strip, so the same stroke cuts part AND strip.
+  const STROKE = 'S1000 M3\nG0 X1 Y10 Z1\nG1 Z-5 F100\nG1 Y50\n';
+  const STRIPS_VOLUME = 8640; // two 6 x 60 x 12 strips
+
+  it('load reports the split, and ships the uncut strips as a mesh', () => {
+    const { session, r } = loaded(STROKE, strips(), T3);
+    expect(r.stats.removedFromSacrificial).toBeGreaterThan(0.1);
+    expect(r.stats.removedVolume).toBe(r.stats.removedFromPart);
+    expect(r.meshes.sacrificial).not.toBeNull();
+    const m = r.meshes.sacrificial as NodeMeshOutput;
+    expect(m.triangleCount).toBeGreaterThan(0);
+    expect(Math.abs(meshVolume(m) - STRIPS_VOLUME)).toBeLessThan(5);
+    session.dispose();
+  });
+
+  it('no sacrificial material: a null mesh, zero removed, a null frame body — the pre-#213 shape', () => {
+    const { session, r } = loaded(THREE);
+    expect(r.meshes.sacrificial).toBeNull();
+    expect(r.stats.removedFromSacrificial).toBe(0);
+    expect(frame(session, 0).sacrificial).toBeNull();
+    session.dispose();
+  });
+
+  it('frameAt cuts the strips with the same removal, so the body shrinks as the tool passes', () => {
+    const { session, r } = loaded(STROKE, strips(), T3);
+    const before = meshVolume(frame(session, -1).sacrificial as NodeMeshOutput);
+    const after = meshVolume(frame(session, 0).sacrificial as NodeMeshOutput);
+    expect(Math.abs(before - STRIPS_VOLUME)).toBeLessThan(5);
+    expect(after).toBeLessThan(before);
+    // What the frame lost is what the sweep reported as removed from the strips.
+    const lost = before - after;
+    expect(Math.abs(lost - r.stats.removedFromSacrificial)).toBeLessThan(r.stats.removedFromSacrificial * 0.05);
+    session.dispose();
+  });
+
+  it('a gouge into the strips comes back meshed, after the sweep has released the material body', () => {
+    // A rapid down into the left strip, outside the part: rapid-through-stock. The session
+    // meshes the gouge AFTER `sweepTimeline` has deleted the part∪sacrificial union it was built
+    // against, so this is the ONE MANIFOLD TRAP path with a second body.
+    const src = 'G0 X-3 Y30 Z5\nG0 Z-5\n';
+    const { session, r } = loaded(src, strips(), T3);
+    expect(r.diagnostics.map((d) => d.code)).toContain('rapid-through-stock');
+    expect(r.meshes.gouges.length).toBeGreaterThanOrEqual(1);
+    for (const g of r.meshes.gouges) expect(meshVolume(g.mesh)).toBeGreaterThan(0);
+    session.dispose();
+  });
+
+  it('scrubbing a cut that reaches the strips: the body only shrinks, and repeated seeks survive', () => {
+    // Three strokes at X = 1 (0.59 mm into the left strip), at three depths: three checkpoints,
+    // each cutting both bodies. Seeking down and back re-runs `sacrificial.subtract(cut)` on the
+    // materialised leaf every time.
+    const EDGE = [
+      'S1000 M3',
+      'G0 X1 Y10 Z1', 'G1 Z-0.5 F100', 'G1 Y50',
+      'G0 Z1', 'G0 X1 Y10', 'G1 Z-1.0', 'G1 Y50',
+      'G0 Z1', 'G0 X1 Y10', 'G1 Z-1.5', 'G1 Y50',
+    ].join('\n');
+    const { session, r } = loaded(EDGE, strips(), T3);
+    expect(r.count).toBe(3);
+    const seen = new Map<number, number>();
+    for (const k of [2, 0, 2, 1, 0, 1]) {
+      const v = meshVolume(frame(session, k).sacrificial as NodeMeshOutput);
+      if (seen.has(k)) expect(v).toBeCloseTo(seen.get(k) as number, 2);
+      seen.set(k, v);
+    }
+    const ordered = [...seen.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]);
+    for (let i = 1; i < ordered.length; i++) expect(ordered[i]!).toBeLessThanOrEqual((ordered[i - 1] as number) + 0.05);
+    session.dispose();
+  });
+
+  it('a sacrificial load disposes cleanly and round-trips: load -> frame -> dispose, twice', () => {
+    const session = createSimSession(tl);
+    for (let round = 0; round < 2; round++) {
+      const r = session.load(STROKE, strips(), T3, null);
+      if (!r.ok) throw new Error(JSON.stringify(r.diagnostics));
+      expect(meshVolume(frame(session, 0).sacrificial as NodeMeshOutput)).toBeGreaterThan(0);
+      session.dispose();
+      expect(session.loaded).toBe(false);
     }
   });
 });

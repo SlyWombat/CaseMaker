@@ -32,6 +32,7 @@ import { partToWork } from '@/engine/cnc/frames';
 import type { ObstacleBox, Setup } from '@/engine/cnc/setup';
 import type { MachineProfile } from '@/engine/cnc/machine';
 import { inflate } from '@/engine/cnc/fixture';
+import { hasSacrificial, sacrificialBoxes } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM, segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { executeProfile, type ManifoldToplevel } from './evaluateOp';
@@ -136,7 +137,12 @@ export interface SweepStats {
   airMovesClearedByConstruction: number;
   stockVolume: number;
   resultVolume: number;
+  /** Volume removed from the PART. Kept under its old name for existing consumers; equals `removedFromPart`. */
   removedVolume: number;
+  /** Volume removed from the part body (#213), intersected with the part stock. */
+  removedFromPart: number;
+  /** Volume removed from the sacrificial body (#213); 0 when the job has none. */
+  removedFromSacrificial: number;
   checkpointsSwept: number;
   checkpointsSkipped: number;
   contours: number;
@@ -159,6 +165,12 @@ export interface Gouge {
 export interface SweepResult {
   /** The stock in WORK coordinates, before any cut. */
   stock: ManifoldInstance;
+  /**
+   * The sacrificial material as one solid, WORK coordinates, before any cut (#213 §4); null
+   * when the job has none. A materialised LEAF, safe to subtract from on every playback seek.
+   * Caller-owned exactly like `stock`: delete it once.
+   */
+  sacrificial: ManifoldInstance | null;
   /** Work-frame Z of the stock's top face. */
   stockTopZ: number;
   /** Everything removed, as one solid; null if nothing was. */
@@ -406,6 +418,11 @@ export function boxSolid(tl: ManifoldToplevel, box: ObstacleBox): ManifoldInstan
  */
 export function checkAirMoves(
   tl: ManifoldToplevel,
+  /**
+   * The material a move is tested against (#213): the PART body, unioned with the sacrificial
+   * body by the caller when the job has one. "Material" still means the stock as it is at that
+   * step; a rapid through either body is `rapid-through-stock`.
+   */
   stock: ManifoldInstance,
   topZ: number,
   bedZ: number,
@@ -711,6 +728,27 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   if (isDiag(st)) return { ok: false, diagnostics: [st] };
   const { stock, topZ } = st;
 
+  // The sacrificial material as a SECOND body (#213 §4): the union of the job's boxes, in the
+  // work frame, materialised into a true LEAF (a mesh round-trip, the same trick `playback.ts`
+  // uses for anchors). A leaf shares nothing with a lazy tree, so the session may subtract from
+  // it on every seek without tripping the ONE MANIFOLD TRAP (playback.ts file comment). null
+  // when the job has none — and then every path below is byte-for-byte the pre-#213 sweep.
+  let sacrificial: ManifoldInstance | null = null;
+  if (setup.sacrificial && hasSacrificial(setup.sacrificial)) {
+    // The part occupies work X [0, L], Y [0, W], Z [-T, 0] by construction (`stockFromSetup`
+    // anchors the top-front-left corner at the work origin). Its bounding box is the stock size
+    // the pure `sacrificialBoxes` is expressed against.
+    const sb = stock.boundingBox();
+    const parts = sacrificialBoxes(
+      { length: sb.max[0] - sb.min[0], width: sb.max[1] - sb.min[1], thickness: sb.max[2] - sb.min[2] },
+      setup.sacrificial,
+    ).map((b) => boxSolid(tl, { id: b.id, label: b.id, min: b.min, max: b.max }));
+    const raw = parts.length === 1 ? (parts[0] as ManifoldInstance) : tl.Manifold.union(parts);
+    if (parts.length > 1) for (const p of parts) p.delete();
+    sacrificial = new tl.Manifold(raw.getMesh());
+    raw.delete();
+  }
+
   // The fixture as solids the tool must not hit (#204, /Simulation.md §1.1). Each box is grown
   // by the envelope's `uncertainty` before any check (decision 28): a shipped default is never
   // a measurement. One box per obstacle, PLUS their union for the checks — kept per-box so a
@@ -771,6 +809,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
     const elapsed = Math.round(performance.now() - t0);
     for (const s of solids) s.delete();
     disposeFixture();
+    sacrificial?.delete();
     stock.delete();
     return {
       ok: false,
@@ -884,9 +923,25 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   const deepest = swept.length ? topZ - Math.min(...swept.map((cp) => cp.z)) : null;
   const hg = holderGate(tool, deepest);
   if (hg) diagnostics.push(hg);
-  const bb = stock.boundingBox();
+  // The material the air moves are tested against: the part, plus the sacrificial body when
+  // the job has one (#213 §4). A rapid through the board breaks the cutter exactly as one
+  // through the part does, so both are `rapid-through-stock`. The recheck (subtract the
+  // per-checkpoint removal) then works unchanged: a cut removes material from either body.
+  // Materialised into a true LEAF (mesh round-trip): a leaf has no lazy children to flatten, so
+  // deleting it below cannot disturb the gouge solids that were built against it (ONE MANIFOLD
+  // TRAP, playback.ts).
+  let airMaterial: ManifoldInstance = stock;
+  if (sacrificial) {
+    const u = tl.Manifold.union([stock, sacrificial]);
+    airMaterial = new tl.Manifold(u.getMesh());
+    u.delete();
+  }
+  // "The bed" is what the bodies rest on: with an under-board that is the board's underside,
+  // so a rapid below IT is `rapid-below-bed` and one inside the board is `rapid-through-stock`.
+  const bb = airMaterial.boundingBox();
   const a0 = performance.now();
-  const air = checkAirMoves(tl, stock, topZ, bb.min[2], timeline.airMoves, timeline.checkpoints, radius, deadline, fixture, fixtureTop, (d) => fixtureDiag.push(d));
+  const air = checkAirMoves(tl, airMaterial, topZ, bb.min[2], timeline.airMoves, timeline.checkpoints, radius, deadline, fixture, fixtureTop, (d) => fixtureDiag.push(d));
+  if (airMaterial !== stock) airMaterial.delete();
   const msAir = performance.now() - a0;
   if (air.budgetExceeded) {
     for (const g of air.gouges) g.solid.delete();
@@ -923,6 +978,18 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   const resultVolume = result.volume();
   const msSubtract = performance.now() - c0;
 
+  // Split the removal between the two bodies (#213 §4). The PART's share is `stock − result`
+  // exactly as before — a cut that runs off the edge removes nothing more from the part, so the
+  // part's result is unchanged by sacrificial material. The SACRIFICIAL share is the removal
+  // intersected with the board/strips.
+  const removedFromPart = stockVolume - resultVolume;
+  let removedFromSacrificial = 0;
+  if (sacrificial && removal) {
+    const cut = removal.intersect(sacrificial);
+    removedFromSacrificial = cut.volume();
+    cut.delete();
+  }
+
   if (timeline.checkpoints.length === 0) {
     diagnostics.push({ severity: 'warning', code: 'nothing-to-sweep', message: 'the program has no cutting moves at a known position' });
   }
@@ -934,6 +1001,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
     ok: true,
     value: {
       stock,
+      sacrificial,
       stockTopZ: topZ,
       removal,
       result,
@@ -946,7 +1014,9 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         airMovesClearedByConstruction: air.cleared,
         stockVolume,
         resultVolume,
-        removedVolume: stockVolume - resultVolume,
+        removedVolume: removedFromPart,
+        removedFromPart,
+        removedFromSacrificial,
         checkpointsSwept: solids.length,
         checkpointsSkipped: skipped,
         contours,

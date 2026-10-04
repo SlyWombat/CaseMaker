@@ -10,7 +10,8 @@
 import * as Comlink from 'comlink';
 import type { Setup } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
-import type { SimWorkerApi, SimFrame, SimLoadResult } from '@/workers/sim.worker';
+import type { EngraveJob } from '@/types/engraveJob';
+import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview } from '@/workers/sim.worker';
 import { createFrameCoalescer } from './frameCoalescer';
 
 let simWorker: Worker | null = null;
@@ -122,3 +123,17 @@ export async function disposeSim(): Promise<void> {
 
 export const simStateAt = (step: number) => getSimApi().simStateAt(step);
 export const simToolPath = (from: number, to: number) => getSimApi().simToolPath(from, to);
+
+/**
+ * The whole path, with kinds and times, fetched once per load (#197). The four buffers are
+ * transferred, so the copy lives in the main thread from here on.
+ */
+export const simPath = (): Promise<SimPath> => getSimApi().simPath();
+
+/**
+ * The engrave preview (#205): the stock cut to each label's depth, its pocket floors and the
+ * vise jaws. `null` when `gen` is older than one the worker has already answered; mesh buffers
+ * are transferred. Independent of any loaded simulation program.
+ */
+export const engravePreview = (job: EngraveJob, gen: number): Promise<EngravePreview | null> =>
+  getSimApi().engravePreview(job, gen);

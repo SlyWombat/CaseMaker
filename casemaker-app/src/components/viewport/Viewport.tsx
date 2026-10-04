@@ -5,10 +5,20 @@ import * as THREE from 'three';
 import { GridFloor } from './GridFloor';
 import { SceneMeshes } from './SceneMeshes';
 import { ViewportToolbar } from './ViewportToolbar';
+import {
+  activeSceneBounds,
+  shouldReframe,
+  VIEWPORT_CAMERA_EVENT,
+  type SceneBox,
+  type ViewportCameraCommand,
+} from './viewportCamera';
 import { ensureZUp } from '@/engine/coords';
 import { useViewportStore, type ViewportCameraMode } from '@/store/viewportStore';
 import { useJobStore } from '@/store/jobStore';
-import { isAssembledNodeId } from '@/engine/exporters/parts';
+import { isSimSceneActive, useSimStore, type SimState } from '@/store/simStore';
+import { useEngravePreviewStore } from '@/store/engravePreviewStore';
+import type { EngravePreview } from '@/workers/sim/engravePreview';
+import { pathBounds } from './simGeometry';
 
 ensureZUp();
 
@@ -52,36 +62,47 @@ const VIEW_UP: Record<ViewportCameraMode, [number, number, number]> = {
   side: [0, 0, 1],
 };
 
-/** Centre + diagonal of everything currently in the scene, or null if empty. */
-function sceneBounds(
-  nodes: Map<string, { stats: { bbox: { min: number[]; max: number[] } } }>,
-): { center: THREE.Vector3; diag: number } | null {
-  const min = [Infinity, Infinity, Infinity];
-  const max = [-Infinity, -Infinity, -Infinity];
-  for (const [id, n] of nodes.entries()) {
-    if (isAssembledNodeId(id)) continue; // same geometry as the parts it fuses
-    for (let a = 0; a < 3; a++) {
-      if (n.stats.bbox.min[a]! < min[a]!) min[a] = n.stats.bbox.min[a]!;
-      if (n.stats.bbox.max[a]! > max[a]!) max[a] = n.stats.bbox.max[a]!;
-    }
-  }
-  if (!Number.isFinite(min[0]!)) return null;
-  const diag = Math.hypot(max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!);
-  if (diag <= 0) return null;
-  return {
-    center: new THREE.Vector3(
-      (min[0]! + max[0]!) / 2,
-      (min[1]! + max[1]!) / 2,
-      (min[2]! + max[2]!) / 2,
-    ),
-    diag,
-  };
-}
-
 /** How far back a perspective camera must sit to frame `diag` with margin. */
 function framingDistance(camera: THREE.PerspectiveCamera, diag: number): number {
   const fov = (camera.fov * Math.PI) / 180;
   return ((diag / 2) / Math.tan(fov / 2)) * 1.15;
+}
+
+/** The boxes the simulation currently draws: its stock, plus one per fixture obstacle (#204). */
+function simBoxesOf(s: SimState): SceneBox[] {
+  const boxes: SceneBox[] = [];
+  if (s.meshes) {
+    boxes.push(s.meshes.stock.bbox);
+    for (const f of s.meshes.fixture) boxes.push(f.mesh.bbox);
+  } else if (s.path) {
+    const b = pathBounds(s.path);
+    if (b) boxes.push(b);
+  }
+  return boxes;
+}
+
+/**
+ * The boxes the engrave preview draws (#205): its stock, plus one per vise jaw. An EMPTY list
+ * while the preview is still building — so `activeSceneBounds` frames nothing rather than the
+ * case, which the engrave branch of `SceneMeshes` is not drawing.
+ */
+function engraveBoxesOf(preview: EngravePreview | null): SceneBox[] {
+  if (!preview) return [];
+  return [preview.stock.bbox, ...preview.fixture.map((f) => f.mesh.bbox)];
+}
+
+/** `activeSceneBounds` over the live stores — for the controllers, which read non-reactively. */
+function activeSceneBoundsFromStores(): { center: THREE.Vector3; diag: number } | null {
+  const sim = useSimStore.getState();
+  const simActive = isSimSceneActive(sim);
+  // The engrave section owns the viewport exactly when no simulation does (#205); a simulation
+  // that is still up keeps the camera, so the two branches can never both be fenced.
+  const engraveActive = !simActive && useViewportStore.getState().activeSidebarSection === 'cnc-engrave';
+  return activeSceneBounds({
+    nodes: useJobStore.getState().nodes,
+    simBoxes: simActive ? simBoxesOf(sim) : null,
+    engraveBoxes: engraveActive ? engraveBoxesOf(useEngravePreviewStore.getState().preview) : null,
+  });
 }
 
 /**
@@ -105,7 +126,9 @@ function CameraModeController() {
     if (lastApplied.current === cameraMode) return;
     // Read the scene non-reactively: this must fire when the MODE changes, not
     // every time geometry recompiles, or it would yank the camera back mid-orbit.
-    const bounds = sceneBounds(useJobStore.getState().nodes);
+    // #197 §6 — the bounds of what is ON SCREEN, so a preset frames the simulation's
+    // stock (and vise jaws) rather than a case that is not being drawn.
+    const bounds = activeSceneBoundsFromStores();
     camera.up.set(...VIEW_UP[cameraMode]);
     if (bounds) {
       const dir = new THREE.Vector3(...VIEW_DIRS[cameraMode]).normalize();
@@ -141,21 +164,42 @@ function CameraModeController() {
  */
 function AutoFrame() {
   const nodes = useJobStore((s) => s.nodes);
+  // One identity per LOAD of a program (#197 §5): `meshes` is replaced by a load and never by a
+  // scrub, and a path-only session's `path` is the equivalent. `step` is deliberately not read,
+  // so scrubbing never re-frames.
+  const simSolids = useSimStore((s) => (isSimSceneActive(s) ? s.meshes ?? s.path : null));
+  // #205 — the engrave preview. Its object identity changes on EVERY rebuild (one per keystroke),
+  // so it is deliberately NOT the identity below: only opening/closing the section, and the first
+  // preview arriving, count as a change of what is on screen. Re-framing on each rebuild would
+  // yank the camera out from under the user mid-typing.
+  const engraveSection = useViewportStore((s) => s.activeSidebarSection === 'cnc-engrave');
+  const engravePreview = useEngravePreviewStore((s) => s.preview);
+  const engraveScene = engraveSection ? (engravePreview ? 'engrave-ready' : 'engrave-pending') : null;
   const { camera, controls } = useThree() as {
     camera: THREE.PerspectiveCamera;
     controls: { target: THREE.Vector3; update?: () => void } | null;
   };
   const lastDiag = useRef(0);
+  const lastSimSolids = useRef<unknown>(null);
+  const lastEngraveScene = useRef<string | null>(null);
   useEffect(() => {
+    // A LOAD of a program, the END of a simulation, and the engrave section opening (or its
+    // first preview arriving) all change what is on screen and are framed once whatever the
+    // size: the size rule alone would skip a stock whose diagonal happens to be close to the
+    // case's — exactly the "nothing happened when I loaded the file" bug when entering, and, on
+    // close, the case's own diagonal can pass the rule while the case sits somewhere else in the
+    // work frame, leaving the camera looking at nothing (#197 review).
+    const forced =
+      simSolids !== lastSimSolids.current || engraveScene !== lastEngraveScene.current;
+    lastSimSolids.current = simSolids;
+    lastEngraveScene.current = engraveScene;
     // Same bbox and same framing maths the presets use (issue #138), so the
     // two can never drift into disagreeing about where the model is.
-    const bounds = sceneBounds(nodes);
+    const bounds = activeSceneBoundsFromStores();
     if (!bounds) return;
     const { center, diag } = bounds;
-    // Re-frame only on a substantial size change (>35% either way).
-    if (lastDiag.current > 0 && diag < lastDiag.current * 1.35 && diag > lastDiag.current / 1.35) {
-      return;
-    }
+    // Re-frame on a forced transition, or on a substantial size change (>35% either way).
+    if (!shouldReframe(lastDiag.current, diag, forced)) return;
     lastDiag.current = diag;
     // Keep the canonical perspective direction; just move out far enough.
     const dir = new THREE.Vector3(...VIEW_DIRS.perspective).normalize();
@@ -165,11 +209,72 @@ function AutoFrame() {
       controls.update?.();
     }
     camera.lookAt(center);
-  }, [nodes, camera, controls]);
+  }, [nodes, simSolids, engraveScene, camera, controls]);
+  return null;
+}
+
+/** How much one Zoom click changes the camera's distance to the orbit target (#197 §7). */
+const ZOOM_FACTOR = 1.25;
+
+type OrbitControlsLike = {
+  target: THREE.Vector3;
+  minDistance: number;
+  maxDistance: number;
+  update?: () => void;
+};
+
+/**
+ * Issue #197 §7 — Zoom in / Zoom out / Fit. The buttons live on `ViewportToolbar`, OUTSIDE the
+ * Canvas, so they reach the camera through a window event: the stores hold no three objects, and
+ * this keeps every piece of camera maths (presets, framing, zoom) in one file.
+ */
+function ViewportCameraController() {
+  const { camera, controls } = useThree() as {
+    camera: THREE.PerspectiveCamera;
+    controls: OrbitControlsLike | null;
+  };
+  useEffect(() => {
+    const onCommand = (e: Event) => {
+      const command = (e as CustomEvent<ViewportCameraCommand>).detail;
+      if (!controls || !controls.target) return;
+      const target = controls.target;
+      const dir = camera.position.clone().sub(target);
+      const dist = dir.length();
+      if (dist < 1e-9) return;
+      dir.divideScalar(dist); // unit vector: from the target out to the camera
+      if (command === 'fit') {
+        const bounds = activeSceneBoundsFromStores();
+        if (!bounds) return;
+        // Fit keeps the view DIRECTION and re-runs the framing maths on what is on screen.
+        camera.position.copy(
+          bounds.center.clone().add(dir.multiplyScalar(framingDistance(camera, bounds.diag))),
+        );
+        target.copy(bounds.center);
+        camera.lookAt(bounds.center);
+        controls.update?.();
+        return;
+      }
+      const factor = command === 'zoom-in' ? 1 / ZOOM_FACTOR : ZOOM_FACTOR;
+      const next = THREE.MathUtils.clamp(
+        dist * factor,
+        controls.minDistance,
+        controls.maxDistance,
+      );
+      camera.position.copy(target).addScaledVector(dir, next);
+      controls.update?.();
+    };
+    window.addEventListener(VIEWPORT_CAMERA_EVENT, onCommand);
+    return () => window.removeEventListener(VIEWPORT_CAMERA_EVENT, onCommand);
+  }, [camera, controls]);
   return null;
 }
 
 export function Viewport() {
+  // The grid's plane is z = 0 — the stock's TOP face in the work frame — so it would slice
+  // through the middle of the simulation's stock, and z-fight the engrave preview's top face,
+  // which sits at exactly z = 0 too. Hidden while either CNC view owns the viewport (#197, #205).
+  const simActive = useSimStore(isSimSceneActive);
+  const engraveActive = useViewportStore((s) => s.activeSidebarSection === 'cnc-engrave');
   return (
     <div className="viewport-wrapper">
       <ViewportToolbar />
@@ -200,7 +305,8 @@ export function Viewport() {
         />
         <CameraModeController />
         <AutoFrame />
-        <GridFloor />
+        <ViewportCameraController />
+        {!simActive && !engraveActive && <GridFloor />}
         <SceneMeshes />
       </Canvas>
     </div>

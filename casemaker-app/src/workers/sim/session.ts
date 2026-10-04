@@ -6,7 +6,8 @@
  *   load(gcode, setup, tool, machineId)  -> diagnostics, summary, stats, plain checkpoint /
  *                                          pause / segment lists, and the stock, result,
  *                                          removal and gouge MESHES
- *   frameAt(k, gen)                      -> { stock, removalSoFar } meshes, or null if stale
+ *   frameAt(k, gen)                      -> { stock, removalSoFar, sacrificial } meshes, or null
+ *                                          if stale
  *   stateAt(step), toolPath(from, to)    -> on demand; per-step state is never shipped whole
  *   simPath()                            -> the whole path with kinds and times (#197)
  *   dispose()
@@ -89,7 +90,7 @@ export interface SimLoadOk {
   checkpoints: CheckpointInfo[];
   pauses: PausePoint[];
   segments: Segment[];
-  meshes: { stock: NodeMeshOutput; result: NodeMeshOutput; removal: NodeMeshOutput | null; gouges: SimGougeMesh[]; fixture: SimFixtureMesh[] };
+  meshes: { stock: NodeMeshOutput; result: NodeMeshOutput; removal: NodeMeshOutput | null; sacrificial: NodeMeshOutput | null; gouges: SimGougeMesh[]; fixture: SimFixtureMesh[] };
   /**
    * Where the fixture's dimensions came from (#204), present only when the setup models one.
    * A default is NOT a measurement; the viewport shows this so the shown jaws are not read as
@@ -150,6 +151,12 @@ export interface SimFrame {
   stock: NodeMeshOutput;
   /** Everything cut up to and including checkpoint k; null when nothing has been. */
   removalSoFar: NodeMeshOutput | null;
+  /**
+   * The sacrificial material as cut up to and including checkpoint k (#213); null when the job
+   * has none. Same two-body split as `load`: `sacrificial` uncut at k = -1, the board/strips
+   * minus the cumulative removal thereafter.
+   */
+  sacrificial: NodeMeshOutput | null;
 }
 
 /** A swept session: the geometry AND the path. */
@@ -200,6 +207,7 @@ export interface SimSessionHooks {
 /** Delete every handle a `SweepResult` owns, each exactly once. */
 export function disposeSweep(sweep: SweepResult): void {
   sweep.stock.delete();
+  sweep.sacrificial?.delete();
   sweep.result.delete();
   sweep.removal?.delete();
   for (const s of sweep.perCheckpoint) s?.delete();
@@ -271,6 +279,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         stock: meshOutputOf(sweep.stock),
         result: meshOutputOf(sweep.result),
         removal: sweep.removal ? meshOutputOf(sweep.removal) : null,
+        sacrificial: sweep.sacrificial ? meshOutputOf(sweep.sacrificial) : null,
         gouges: sweep.gouges.map((g): SimGougeMesh => ({ step: g.step, line: g.line, mesh: meshOutputOf(g.solid) })),
         fixture,
       };
@@ -321,7 +330,22 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // Both handles are the playback's and evictable: mesh them here, keep neither.
     const stock = meshOutputOf(l.playback.stockAt(kk));
     const removal = l.playback.removalAt(kk);
-    return { k: kk, stock, removalSoFar: removal ? meshOutputOf(removal) : null };
+    // The sacrificial material as cut so far (#213 §4): the cumulative removal clipped to the
+    // sacrificial body, subtracted from it. `sweep.sacrificial` is a materialised leaf (see its
+    // doc), so subtracting from it on every seek is safe. The two derived handles are ours.
+    let sacrificial: NodeMeshOutput | null = null;
+    if (l.sweep.sacrificial) {
+      if (removal) {
+        const cut = removal.intersect(l.sweep.sacrificial);
+        const left = l.sweep.sacrificial.subtract(cut);
+        sacrificial = meshOutputOf(left);
+        left.delete();
+        cut.delete();
+      } else {
+        sacrificial = meshOutputOf(l.sweep.sacrificial);
+      }
+    }
+    return { k: kk, stock, removalSoFar: removal ? meshOutputOf(removal) : null, sacrificial };
   };
 
   const stateAt = (step: number): MachineState | null => (live ? live.timeline.stateAt(Math.trunc(step)) : null);

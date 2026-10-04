@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { defaultEngraveJob, newEngraveLabelId } from '@/engine/cnc/engrave/defaults';
 import { todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
+import type { CutParams } from '@/engine/cnc/feeds';
 import type { EngraveJob, EngraveLabel, ViseParams } from '@/types/engraveJob';
 import { parseEngraveJob, type ParseEngraveJobResult } from './engraveJobSchema';
 import { useSettingsStore } from './settingsStore';
@@ -82,6 +83,13 @@ function newLabel(job: EngraveJob): EngraveLabel {
   };
 }
 
+/** The job with its feeds/speeds override removed entirely (#205). */
+function withoutCutOverride(job: EngraveJob): EngraveJob {
+  const next = { ...job };
+  delete next.cutOverride;
+  return next;
+}
+
 export interface EngraveJobState {
   job: EngraveJob;
   setStock: (patch: Partial<EngraveJob['stock']>) => void;
@@ -91,6 +99,11 @@ export interface EngraveJobState {
   removeLabel: (id: string) => void;
   setTool: (key: string) => void;
   setVise: (patch: Partial<ViseParams>) => void;
+  /**
+   * Merge a hand edit into the feeds/speeds override (#205). A key set to `undefined` clears
+   * just that field back to the computed value; `null` clears the whole override.
+   */
+  setCutOverride: (patch: Partial<CutParams> | null) => void;
   replace: (job: EngraveJob) => void;
   reset: () => void;
 }
@@ -146,6 +159,15 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         };
         return { ...job, workholding: { ...job.workholding, vise } };
       }),
+
+    // #205: hand edits sit ON TOP of the computed values, field by field. `undefined` clears one
+    // field; `null` clears the lot, so the panel can always get back to the table's values.
+    setCutOverride: (patch) =>
+      apply((job) =>
+        patch === null
+          ? withoutCutOverride(job)
+          : { ...job, cutOverride: { ...job.cutOverride, ...patch } },
+      ),
 
     replace: (job) => apply(() => job),
 

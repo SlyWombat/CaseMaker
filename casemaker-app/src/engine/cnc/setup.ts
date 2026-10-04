@@ -25,6 +25,7 @@
 
 import type { Profile } from '@/engine/compiler/profile';
 import type { Mm, Vec2, Vec3 } from '@/types/units';
+import type { Sacrificial } from '@/types/engraveJob';
 import type { MachineProfile } from './machine';
 
 export type Degrees = number;
@@ -156,6 +157,13 @@ export interface Setup {
    * every existing `stubSetup` caller keeps working unchanged.
    */
   fixture?: FixtureEnvelope;
+  /**
+   * The sacrificial material under/beside the part (#213), carried from the job so the sweep
+   * can model it as a SECOND body — the material the cutter may leave the part onto. Plain data
+   * (`sacrificialBoxes` turns it into work-frame boxes). Optional: absent means none, which is
+   * every pre-#213 caller and every job that does not use it.
+   */
+  sacrificial?: Sacrificial;
 }
 
 /**

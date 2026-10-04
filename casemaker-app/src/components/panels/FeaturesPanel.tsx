@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import * as opentype from 'opentype.js';
-import { BUNDLED_FONTS } from '@/engine/fonts/registry';
+import { FontPicker, WeightPicker } from '@/components/panels/FontPicker';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { listBuiltinDisplayIds } from '@/library/displays';
@@ -393,36 +393,19 @@ function TextLabelsSection() {
               </option>
             ))}
           </select>
-          <select
+          <FontPicker
             value={l.font}
-            onChange={(e) => patchTextLabel(l.id, { font: e.target.value })}
+            onChange={(font) => patchTextLabel(l.id, { font })}
+            customFonts={customFonts}
             aria-label={`Label ${l.id} font`}
             title="Typeface for the label."
-          >
-            {BUNDLED_FONTS.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.label}
-              </option>
-            ))}
-            {customFonts.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name} (embedded)
-              </option>
-            ))}
-            {!BUNDLED_FONTS.some((f) => f.id === l.font) &&
-              !customFonts.some((f) => f.id === l.font) && (
-                <option value={l.font}>{l.font} (missing - using sans)</option>
-              )}
-          </select>
-          <select
+          />
+          <WeightPicker
             value={l.weight}
-            onChange={(e) => patchTextLabel(l.id, { weight: e.target.value as 'regular' | 'bold' })}
+            onChange={(weight) => patchTextLabel(l.id, { weight })}
             aria-label={`Label ${l.id} weight`}
             title="Regular or bold (bundled fonts only; an embedded font is used as-is)."
-          >
-            <option value="regular">regular</option>
-            <option value="bold">bold</option>
-          </select>
+          />
           <button
             onClick={() => removeTextLabel(l.id)}
             title="Remove this label"

@@ -1,7 +1,8 @@
 import type { Mm, Vec3 } from '@/types/units';
-import type { ViseParams } from '@/types/engraveJob';
+import type { Sacrificial, ViseParams } from '@/types/engraveJob';
 import type { FixtureEnvelope, ObstacleBox } from './setup';
 import type { JobFinding } from './engrave/jobSetup';
+import { noneSacrificial, viseJawShift } from './sacrificial';
 
 /**
  * The fixture as an obstacle envelope (#203, decision 28, `/Simulation.md` §1.1).
@@ -95,28 +96,39 @@ export function viseForNewJob(saved?: ViseParams): ViseParams {
  * face on x = 0; the moving jaw sits at work X >= length with its face on x = length. Both
  * jaws' TOPS are at `Z = -stockProud` — below the stock's top face by however much the stock
  * stands proud. In Y the jaws span `[jawStartY, jawStartY + jawLength]`.
+ *
+ * `sacrificial` moves the FACES outward (#213 §2): when the job has material between the jaw
+ * and the part (`viseJawShift`), the fixed jaw's face moves from x = 0 to
+ * `−max(left strip thickness, under.overhang.left)` and the moving jaw's from x = L to
+ * `L + max(right strip thickness, under.overhang.right)`. The jaw BODY keeps its thickness, so
+ * the whole box translates outward. Absent (or no material) is the pre-#213 envelope exactly:
+ * faces on the part's own edges.
  */
 export function viseEnvelope(
   stock: { length: Mm; width: Mm; thickness: Mm },
   vise: ViseParams,
+  sacrificial: Sacrificial = noneSacrificial(),
 ): FixtureEnvelope {
   const { length, thickness } = stock;
   const jawMinY = vise.jawStartY;
   const jawMaxY = vise.jawStartY + vise.jawLength;
   const boxMinZ = -(thickness + VISE_BODY_DEPTH);
   const jawTopZ = -vise.stockProud;
+  const shift = viseJawShift(sacrificial);
   const boxes: ObstacleBox[] = [
     {
       id: 'vise-fixed-jaw',
       label: 'Vise fixed jaw (left)',
-      min: [-vise.fixedJawThickness, jawMinY, boxMinZ],
-      max: [0, jawMaxY, jawTopZ],
+      min: [-shift.left - vise.fixedJawThickness, jawMinY, boxMinZ],
+      // `0 - shift.left`, not `-shift.left`: the latter is `-0` when there is no shift, and a
+      // `-0` bound makes boxesOverlap's strict `<` comparisons and the tests disagree about zero.
+      max: [0 - shift.left, jawMaxY, jawTopZ],
     },
     {
       id: 'vise-moving-jaw',
       label: 'Vise moving jaw (right)',
-      min: [length, jawMinY, boxMinZ],
-      max: [length + vise.movingJawThickness, jawMaxY, jawTopZ],
+      min: [length + shift.right, jawMinY, boxMinZ],
+      max: [length + shift.right + vise.movingJawThickness, jawMaxY, jawTopZ],
     },
   ];
   // `measuredAt` is copied through with the provenance: the envelope must be able to say WHEN it

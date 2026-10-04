@@ -36,7 +36,7 @@ export interface PartPlan {
     thickness: Mm;
     keepOuts: { footprint: Profile; zCeiling: Mm }[];
   };
-  engraves: { id: string; profile: Profile; depth: Mm }[];
+  engraves: { id: string; name: string; profile: Profile; depth: Mm }[];
 }
 
 /**
@@ -65,6 +65,31 @@ export function labelProfile(label: EngraveLabel, customFonts: readonly CustomFo
 /** Is this item one of the shape kinds (#214) rather than a text label? */
 function isShape(item: EngraveItem): item is EngraveShape {
   return 'kind' in item;
+}
+
+/**
+ * The operation's display name for an item (#214, work item 4) — the DESCRIPTOR only, without
+ * the `[T#]` prefix or the depth suffix. `generateEngrave` composes those, so the name on the
+ * `;@MKR|TOOLPATH` line reads `[T1]Pocket rect 20×10 1.0mm`, `[T1]Pocket circle ⌀6 2.0mm`, ….
+ *
+ * It lives HERE, next to `itemProfile`, because the kind and size it words live on the item;
+ * the CAM layer receives the finished string on `EngraveRegion.name` and stays free of the
+ * document's shape fields. It deliberately parallels `itemLabel` (`jobSetup.ts`) but does not
+ * share its wording: a FINDING reads `Rectangle 20×10`, an OPERATION reads `Pocket rect 20×10`.
+ */
+export function itemOperationName(item: EngraveItem): string {
+  if (!isShape(item)) return `Engrave "${item.text}"`;
+  const named = item.name ? ` "${item.name}"` : '';
+  switch (item.kind) {
+    case 'rect':
+      return `Pocket rect${named} ${item.width}×${item.height}`;
+    case 'circle':
+      return `Pocket circle${named} ⌀${item.diameter}`;
+    case 'slot':
+      return `Pocket slot${named} ${item.length}×${item.width}`;
+    case 'polygon':
+      return `Pocket polygon${named} (${item.points.length} points)`;
+  }
 }
 
 /**
@@ -189,6 +214,9 @@ export function polygonSelfIntersects(points: readonly [number, number][]): bool
 export function toPartPlan(job: EngraveJob): PartPlan {
   const toEngrave = (item: EngraveItem) => ({
     id: item.id,
+    // The ready-made operation name (#214, work item 4), carried on the one funnel so the
+    // region builder can hand it to `generateEngrave` without re-deriving the shape.
+    name: itemOperationName(item),
     profile: itemProfile(item, job.customFonts),
     depth: item.depth,
   });

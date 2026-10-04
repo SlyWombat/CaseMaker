@@ -5,7 +5,26 @@ import {
   type ViewportCameraMode,
   type ViewportViewMode,
   type ShellRenderMode,
+  type SidebarSectionId,
 } from '@/store/viewportStore';
+import { isSimSceneActive, useSimStore, type SimLayers } from '@/store/simStore';
+import { dispatchViewportCamera } from './viewportCamera';
+
+/**
+ * Issue #197 §8 — a CNC section is one whose id starts `cnc-` (`cnc-sim` today, the engrave
+ * section from #205 next). Matching the prefix rather than listing ids means the engrave panel
+ * does not have to remember a second place to register itself.
+ */
+const isCncSection = (id: SidebarSectionId | null): boolean => id !== null && id.startsWith('cnc-');
+
+/** The layer toggles, in the mockup's order (#195), with the `simStore.layers` key each drives. */
+const LAYERS: { key: keyof SimLayers; label: string }[] = [
+  { key: 'removed', label: 'Removed' },
+  { key: 'path', label: 'Path' },
+  { key: 'rapids', label: 'Rapids' },
+  { key: 'tool', label: 'Tool' },
+  { key: 'fixture', label: 'Fixture' },
+];
 
 /**
  * Issue #86 — floating toolbar overlay on the viewport. Two groups:
@@ -13,6 +32,11 @@ import {
  * Top / Front / Side). Wires keyboard shortcuts (S/P/O for tools,
  * 1/2/3/4 for camera modes) gated against input focus so they don't
  * fire while the user types into a panel.
+ *
+ * Issue #197 added two more groups: a Zoom group (Zoom in / Zoom out /
+ * Fit, shortcuts +/−/F) in every mode, and the simulation's LAYER
+ * toggles, which replace the case-only view modes and the X-ray toggle
+ * while the viewport is in a CNC mode.
  *
  * Select is plumbed but inert until #83 lands the actual click-to-pick
  * hit-testing on the board / HAT meshes; in the meantime its `disabled`
@@ -70,6 +94,15 @@ export function ViewportToolbar() {
   const setViewMode = useViewportStore((s) => s.setViewMode);
   const shellRender = useViewportStore((s) => s.shellRender);
   const setShellRender = useViewportStore((s) => s.setShellRender);
+  const activeSection = useViewportStore((s) => s.activeSidebarSection);
+  const layers = useSimStore((s) => s.layers);
+  const toggleLayer = useSimStore((s) => s.toggleLayer);
+  const simActive = useSimStore(isSimSceneActive);
+
+  // Issue #197 §8 — a CNC mode is the CNC section being open (so the toggles are there as soon
+  // as the panel is, as the mockup shows) OR a simulation owning the viewport even after the
+  // user has switched to another section: the case-only groups mean nothing while it is up.
+  const cncMode = simActive || isCncSection(activeSection);
 
   // Keyboard shortcuts. Skip when the user is typing into a panel field.
   useEffect(() => {
@@ -104,6 +137,13 @@ export function ViewportToolbar() {
         setCameraMode('side');
       } else if (k === 'x') {
         setShellRender(useViewportStore.getState().shellRender === 'xray' ? 'solid' : 'xray');
+      } else if (k === '+' || k === '=') {
+        // Unshifted `=` is the same key as `+` on most layouts, so both work (#197 §7).
+        dispatchViewportCamera('zoom-in');
+      } else if (k === '-' || k === '_') {
+        dispatchViewportCamera('zoom-out');
+      } else if (k === 'f') {
+        dispatchViewportCamera('fit');
       } else {
         return;
       }
@@ -114,7 +154,13 @@ export function ViewportToolbar() {
   }, [setActiveTool, setCameraMode, setViewMode, setShellRender, showBoard]);
 
   return (
-    <div className="viewport-toolbar" data-testid="viewport-toolbar">
+    <div
+      className="viewport-toolbar"
+      data-testid="viewport-toolbar"
+      // The CNC groups make the toolbar wider than the case view's; wrapping beats overflowing
+      // the viewport on a narrow window. Inline, because the stylesheet is not a #197 file.
+      style={{ flexWrap: 'wrap', maxWidth: 'calc(100% - 24px)' }}
+    >
       <div className="viewport-toolbar__group" role="radiogroup" aria-label="Viewport tool">
         {TOOLS.map((t) => {
           const disabled = t.id === 'select' && !showBoard;
@@ -166,6 +212,73 @@ export function ViewportToolbar() {
           );
         })}
       </div>
+      {/* Issue #197 §7 — the zoom group is in EVERY mode: the case view wants it as much as
+          the CNC views do, so it is not behind the feature flag. */}
+      <div className="viewport-toolbar__group" aria-label="Zoom">
+        <button
+          type="button"
+          className="viewport-toolbar__btn viewport-toolbar__btn--text"
+          onClick={() => dispatchViewportCamera('zoom-in')}
+          aria-label="Zoom in"
+          title="Zoom in (+)"
+          data-testid="viewport-zoom-in"
+        >
+          Zoom in
+        </button>
+        <button
+          type="button"
+          className="viewport-toolbar__btn viewport-toolbar__btn--text"
+          onClick={() => dispatchViewportCamera('zoom-out')}
+          aria-label="Zoom out"
+          title="Zoom out (−)"
+          data-testid="viewport-zoom-out"
+        >
+          Zoom out
+        </button>
+        <button
+          type="button"
+          className="viewport-toolbar__btn viewport-toolbar__btn--text"
+          onClick={() => dispatchViewportCamera('fit')}
+          aria-label="Fit"
+          title="Fit — frame the stock and the vise jaws (F)"
+          data-testid="viewport-fit"
+        >
+          Fit
+        </button>
+      </div>
+      {cncMode ? (
+        // Real checkboxes, as the approved mockup drew them (#195). Styled inline because
+        // `src/styles/index.css` is not one of this issue's files; the values are the mockup's
+        // `.vp-layer` rule.
+        <div className="viewport-toolbar__group" role="group" aria-label="Layers" style={{ gap: 7 }}>
+          {LAYERS.map((l) => (
+            <label
+              key={l.key}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                fontSize: 10,
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={layers[l.key]}
+                onChange={() => toggleLayer(l.key)}
+                style={{ width: 11, height: 11, margin: 0, accentColor: 'var(--cm-color-primary)' }}
+                data-testid={`viewport-layer-${l.key}`}
+              />
+              {l.label}
+            </label>
+          ))}
+        </div>
+      ) : null}
+      {!cncMode && (
+      <>
       <div
         className="viewport-toolbar__group"
         role="radiogroup"
@@ -204,6 +317,8 @@ export function ViewportToolbar() {
           {shellRender === 'solid' ? '◼' : '◻'}
         </button>
       </div>
+      </>
+      )}
     </div>
   );
 }

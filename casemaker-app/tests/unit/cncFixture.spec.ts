@@ -35,10 +35,11 @@ import {
 } from '@/engine/cnc/fixture';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { noneSacrificial, presetJawStrips } from '@/engine/cnc/sacrificial';
 import { Z1 } from '@/engine/cnc/machine';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { ObstacleBox } from '@/engine/cnc/setup';
-import type { ViseParams } from '@/types/engraveJob';
+import type { Sacrificial, ViseParams } from '@/types/engraveJob';
 import type { Vec3 } from '@/types/units';
 
 const STOCK = { length: 100, width: 60, thickness: 12 };
@@ -148,6 +149,53 @@ describe('toSetup fills the fixture (#203)', () => {
     expect(setup.fixture!.boxes).toHaveLength(2);
     expect(setup.fixture!.source).toBe('default');
     expect(setup.fixture!.uncertainty).toBe(DEFAULT_VISE.uncertainty);
+  });
+});
+
+describe('viseEnvelope with sacrificial material (#213)', () => {
+  /** A 6 mm flush left strip, clamped between the fixed jaw and the part. */
+  const leftStrip = (): Sacrificial => ({
+    ...noneSacrificial(),
+    sides: { ...noneSacrificial().sides, left: { thickness: 6, height: 'flush' } },
+  });
+
+  it('moves the fixed jaw face out to x = −6 for a 6 mm left strip, keeping its thickness', () => {
+    const env = viseEnvelope(STOCK, DEFAULT_VISE, leftStrip());
+    const fixed = env.boxes[0]!;
+    expect(fixed.max[0]).toBe(-6);
+    // The whole box translates: the body keeps `fixedJawThickness`.
+    expect(fixed.min[0]).toBe(-6 - DEFAULT_VISE.fixedJawThickness);
+    // No right material: the moving jaw stays on the part's far edge.
+    expect(env.boxes[1]!.min[0]).toBe(STOCK.length);
+  });
+
+  it('takes the larger of the strip and the board overhang on each side', () => {
+    const s: Sacrificial = {
+      ...noneSacrificial(),
+      under: { thickness: 5, overhang: { left: 10, right: 2, front: 0, back: 0 }, attach: 'tape' },
+    };
+    const env = viseEnvelope(STOCK, DEFAULT_VISE, s);
+    expect(env.boxes[0]!.max[0]).toBe(-10);
+    expect(env.boxes[1]!.min[0]).toBe(STOCK.length + 2);
+  });
+
+  it('no sacrificial material is the pre-#213 envelope exactly (shift 0, no -0 bounds)', () => {
+    const env = viseEnvelope(STOCK, DEFAULT_VISE, noneSacrificial());
+    expect(env).toEqual(viseEnvelope(STOCK, DEFAULT_VISE));
+    expect(Object.is(env.boxes[0]!.max[0], -0)).toBe(false);
+    expect(Object.is(env.boxes[1]!.min[0], -0)).toBe(false);
+  });
+
+  it("toSetup moves the jaw faces and the fixture boxes with the shift", () => {
+    const job = { ...defaultEngraveJob(), sacrificial: presetJawStrips() };
+    const setup = toSetup(job, Z1);
+    if (setup.workholding.kind !== 'vise') throw new Error('expected a vise');
+    expect(setup.workholding.jawFaces[0]!.origin[0]).toBe(-6);
+    expect(setup.workholding.jawFaces[1]!.origin[0]).toBe(job.stock.length + 6);
+    expect(setup.fixture!.boxes[0]!.max[0]).toBe(-6);
+    expect(setup.fixture!.boxes[1]!.min[0]).toBe(job.stock.length + 6);
+    // The model rides onto the Setup so the sweep can model the second body.
+    expect(setup.sacrificial).toEqual(presetJawStrips());
   });
 });
 

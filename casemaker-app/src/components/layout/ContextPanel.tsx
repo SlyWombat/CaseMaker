@@ -10,6 +10,7 @@ import { AssetsPanel } from '@/components/panels/AssetsPanel';
 import { HatsPanel } from '@/components/panels/HatsPanel';
 import { FeaturesPanel } from '@/components/panels/FeaturesPanel';
 import { SimPanel } from '@/components/panels/SimPanel';
+import { EngravePanel } from '@/components/panels/EngravePanel';
 
 const SECTION_TITLES: Record<SidebarSectionId, string> = {
   board: 'Board',
@@ -21,6 +22,7 @@ const SECTION_TITLES: Record<SidebarSectionId, string> = {
   assets: 'External assets',
   export: 'Export',
   'cnc-sim': 'Simulate .nc',
+  'cnc-engrave': 'Engrave text',
 };
 
 function renderSection(id: SidebarSectionId): JSX.Element {
@@ -34,6 +36,7 @@ function renderSection(id: SidebarSectionId): JSX.Element {
     case 'assets':   return <AssetsPanel />;
     case 'export':   return <ExportPanel />;
     case 'cnc-sim':  return <SimPanel />;
+    case 'cnc-engrave': return <EngravePanel />;
   }
 }
 

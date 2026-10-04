@@ -19,6 +19,8 @@ function fakeClient(result: SimLoadResult): SimClient {
     setSimSinks: () => {},
     loadSim: async () => result,
     requestFrame: () => {},
+    // #197 — the store fetches the whole path after a successful or path-only load.
+    simPath: async () => ({ xyz: new Float32Array(0), step: new Uint32Array(0), kind: new Uint8Array(0), t: new Float32Array(0) }),
     disposeSim: async () => {},
   } as unknown as SimClient;
 }

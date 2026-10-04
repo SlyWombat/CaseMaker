@@ -43,11 +43,19 @@ import { pocketLoops, type OffsetFn, type Polygons } from './pocket';
  */
 export const MILLING = 'conventional' as const;
 
-/** One label's opened region (#201), ready to pocket. */
+/** One item's opened region (#201), ready to pocket. A text label or a shape pocket (#214). */
 export interface EngraveRegion {
   id: string;
-  /** The label's text, for the operation name and the `TOOLPATH` line. */
+  /** The label's text (empty for a shape). The FALLBACK operation name. */
   text: string;
+  /**
+   * The operation's ready-made display name, WITHOUT the `[T#]` prefix or the depth suffix —
+   * `Engrave "CASE"`, `Pocket rect 20×10`, `Pocket circle ⌀6` (#214). Built next to the item,
+   * where its kind and size are known (`itemOperationName`, `partPlan.ts`), so this layer stays
+   * free of the document's shape fields. When absent the name falls back to `Engrave "<text>"`,
+   * which keeps a text-only caller byte-identical.
+   */
+  name?: string;
   /** Positive mm. */
   depth: number;
   /** #201's opened polygons — outer CCW, holes CW. NOT re-derived here. */
@@ -240,9 +248,12 @@ export function generateEngrave(
 
   const operations: CamOperation[] = ordered.map((item, index) => {
     const moves = buildMoves(item, params);
+    // A shape's ready-made descriptor when the caller supplied one (#214); otherwise the
+    // label text, exactly as before, so a text-only caller's `.nc` is unchanged.
+    const descriptor = item.label.name ?? `Engrave "${item.label.text}"`;
     return {
       number: index + 1,
-      name: `[T${toolNumber}]Engrave "${item.label.text}" ${item.label.depth.toFixed(1)}mm`,
+      name: `[T${toolNumber}]${descriptor} ${item.label.depth.toFixed(1)}mm`,
       labelId: item.label.id,
       depth: item.label.depth,
       moves,

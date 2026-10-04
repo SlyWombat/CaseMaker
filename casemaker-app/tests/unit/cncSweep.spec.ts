@@ -21,6 +21,7 @@ import {
   type SweepOpts,
 } from '@/workers/geometry/sweep';
 import { buildTimeline, parseGcode, stubSetup, viseEnvelope, DEFAULT_VISE, Z1, type MachineProfile, type Setup, type Workholding } from '@/engine/cnc';
+import { presetJawStrips, sacrificialBoxes } from '@/engine/cnc/sacrificial';
 import { toSetup, jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { createSimSession } from '@/workers/sim/session';
@@ -887,6 +888,117 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
     expect(fixtureErrors).toEqual([]);
     // Z1.holder is null (#208): one warning, exactly, however many checkpoints.
     expect(out.value.diagnostics.filter((d) => d.code === 'holder-vs-fixture-unproven')).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// #213: the sacrificial material is a SECOND body. The same sweep models it, subtracts from
+// it, and splits the removal between the part and the board/strips. With no sacrificial
+// material every path above is the pre-#213 sweep, byte for byte.
+// ---------------------------------------------------------------------------------------
+describe('#213: the sacrificial material is a second body', () => {
+  // The #204 blank: 100 x 60 x 12. `presetJawStrips` gives 6 mm strips on both X faces, flushed
+  // to the part's top, so the left strip occupies X [-6, 0], Y [0, 60], Z [-12, 0].
+  const SSLAB = { kind: 'prism' as const, outline: { kind: 'p-rect' as const, size: [100, 60] as [number, number] }, thickness: 12 };
+  const SHOLD = { kind: 'tape-down' as const, contact: SSLAB.outline };
+  const SSTOCK = { length: 100, width: 60, thickness: 12 };
+  const STRIPS = presetJawStrips();
+  const T3 = flatEndMill(3.175); // radius 1.5875
+  const stripsSetup = (over: Partial<Setup> = {}): Setup => stubSetup(SSLAB, SHOLD, { sacrificial: STRIPS, ...over });
+  const plainSetup = (over: Partial<Setup> = {}): Setup => stubSetup(SSLAB, SHOLD, over);
+  /** One 40 mm stroke in Y at a constant X and depth. */
+  const stroke = (x: number, z: number) => `S1000 M3\nG0 X${x} Y10 Z1\nG1 Z${z} F100\nG1 Y50\n`;
+
+  it('models the strips: the returned body is their union, and null when there is none', () => {
+    const want = sacrificialBoxes(SSTOCK, STRIPS).reduce(
+      (sum, b) => sum + (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]),
+      0,
+    );
+    expect(want).toBe(8640); // two 6 x 60 x 12 strips
+    const { out } = sweep(stroke(50, -2), T3, stripsSetup());
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.sacrificial).not.toBeNull();
+    expect(out.value.sacrificial!.volume()).toBeCloseTo(want, 3);
+    const none = sweep(stroke(50, -2), T3, plainSetup());
+    if (!none.out.ok) throw new Error('refused');
+    expect(none.out.value.sacrificial).toBeNull();
+    expect(none.out.value.stats.removedFromSacrificial).toBe(0);
+  });
+
+  it("a stroke over the part's edge cuts the part AND the strip; the part's own removal is unchanged", () => {
+    // X = 1, r 1.5875: the tool edge reaches X = -0.59, 0.59 mm into the left strip, and cuts the
+    // part from X 0 to 2.59 over the 40 mm stroke.
+    const { out } = sweep(stroke(1, -5), T3, stripsSetup());
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    const none = sweep(stroke(1, -5), T3, plainSetup());
+    if (!none.out.ok) throw new Error('refused');
+    expect(out.value.stats.removedFromSacrificial).toBeGreaterThan(0.1);
+    expect(none.out.value.stats.removedFromSacrificial).toBe(0);
+    // The part's removal is `stock − result`, and neither knows about the strip, so it is the
+    // SAME number with and without sacrificial material.
+    expect(out.value.stats.removedFromPart).toBeCloseTo(none.out.value.stats.removedFromPart, 6);
+    // `removedVolume` keeps its old meaning: the part's share alone.
+    expect(out.value.stats.removedVolume).toBe(out.value.stats.removedFromPart);
+    // The part of the capsule column that lies in the left strip: ~25.5 mm² over 5 mm deep.
+    expect(out.value.stats.removedFromSacrificial).toBeGreaterThan(100);
+    expect(out.value.stats.removedFromSacrificial).toBeLessThan(160);
+  });
+
+  it('a rapid through a strip the part never reaches is rapid-through-stock', () => {
+    // X = -3 is inside the left strip (X -6..0) and outside the part (X 0..100); Z = -5 is below
+    // the strip's top at 0. Without sacrificial material the same rapid is in air beside the stock.
+    const program = 'G0 X-3 Y30 Z5\nG0 Z-5\n';
+    const withStrip = sweep(program, T3, stripsSetup());
+    if (!withStrip.out.ok) throw new Error(JSON.stringify(withStrip.out.diagnostics));
+    expect(withStrip.out.value.diagnostics.map((d) => d.code)).toContain('rapid-through-stock');
+    // The gouge is built against the part∪sacrificial material, which the sweep releases before
+    // it returns: meshing it here proves the solid outlives that release (ONE MANIFOLD TRAP).
+    const { gouges } = withStrip.out.value;
+    expect(gouges.length).toBeGreaterThanOrEqual(1);
+    for (const g of gouges) {
+      expect(g.solid.volume()).toBeGreaterThan(0);
+      expect(g.solid.getMesh().triVerts.length).toBeGreaterThan(0);
+      g.solid.delete();
+    }
+    const none = sweep(program, T3, plainSetup());
+    if (!none.out.ok) throw new Error('refused');
+    expect(none.out.value.diagnostics.map((d) => d.code)).not.toContain('rapid-through-stock');
+  });
+
+  it('the bed is what the bodies rest on: an under-board turns "below the bed" into "through the board"', () => {
+    const under = {
+      under: { thickness: 12, overhang: { left: 10, right: 10, front: 10, back: 10 }, attach: 'tape' as const },
+      sides: { left: null, right: null, front: null, back: null },
+      source: 'saved' as const,
+    };
+    // X = -5 is outside the part (X >= 0) and inside the board (X [-10, 110]); Z = -13 is 1 mm
+    // below the part's underside, inside the 12 mm board whose top is at -12.
+    const program = 'G0 X-5 Y30 Z5\nG0 Z-13\n';
+    const board = sweep(program, T3, stubSetup(SSLAB, SHOLD, { sacrificial: under }));
+    if (!board.out.ok) throw new Error(JSON.stringify(board.out.diagnostics));
+    const codes = board.out.value.diagnostics.map((d) => d.code);
+    expect(codes).toContain('rapid-through-stock');
+    expect(codes).not.toContain('rapid-below-bed');
+    // No board: the bed is the part's underside, and the same rapid is below it.
+    const none = sweep(program, T3, plainSetup());
+    if (!none.out.ok) throw new Error('refused');
+    expect(none.out.value.diagnostics.map((d) => d.code)).toContain('rapid-below-bed');
+  });
+
+  it('the fixture moves with the strips: the X = 1 stroke that cut the fixed jaw (#204) no longer does', () => {
+    const exact = { ...DEFAULT_VISE, uncertainty: 0 };
+    const plainFixture = (): Setup => stubSetup(SSLAB, SHOLD, { fixture: viseEnvelope(SSTOCK, exact) });
+    const stripFixture = (): Setup =>
+      stubSetup(SSLAB, SHOLD, { fixture: viseEnvelope(SSTOCK, exact, STRIPS), sacrificial: STRIPS });
+    // #204's must-fail stroke: the tool edge 0.59 mm outside the stock, over the fixed jaw.
+    const bad = sweep(stroke(1.0, -5), T3, plainFixture());
+    if (!bad.out.ok) throw new Error('refused');
+    expect(bad.out.value.diagnostics.map((d) => d.code)).toContain('tool-into-fixture');
+    // With a 6 mm strip the jaw face is at X = -6, well clear of the tool edge at -0.59: the
+    // material it now cuts is the sacrificial strip, which is not an obstacle.
+    const moved = sweep(stroke(1.0, -5), T3, stripFixture());
+    if (!moved.out.ok) throw new Error(JSON.stringify(moved.out.diagnostics));
+    expect(moved.out.value.diagnostics.map((d) => d.code)).not.toContain('tool-into-fixture');
   });
 });
 

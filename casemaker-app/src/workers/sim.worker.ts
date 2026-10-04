@@ -14,14 +14,25 @@
 import * as Comlink from 'comlink';
 import type { Setup } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
+import type { EngraveJob } from '@/types/engraveJob';
 import { getToplevel } from './geometry/ManifoldRuntime';
 import type { NodeMeshOutput } from './geometry/meshOutput';
-import { createSimSession, type SimFrame, type SimLoadResult, type SimSession } from './sim/session';
+import { createSimSession, type SimFrame, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
+import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 
 let session: SimSession | null = null;
 async function getSession(): Promise<SimSession> {
   session ??= createSimSession(await getToplevel());
   return session;
+}
+
+// The engrave preview (#205) lives in the same worker as the simulation — see the module doc
+// of `sim/engravePreview.ts` for why it is not the geometry worker. Its own toplevel-backed
+// object, independent of any loaded program.
+let previewer: EngravePreviewer | null = null;
+async function getPreviewer(): Promise<EngravePreviewer> {
+  previewer ??= createEngravePreviewer(await getToplevel());
+  return previewer;
 }
 
 function buffersOf(meshes: (NodeMeshOutput | null | undefined)[]): Transferable[] {
@@ -57,12 +68,26 @@ const api = {
     const p = (await getSession()).toolPath(fromStep, toStep);
     return Comlink.transfer(p, [p.buffer]);
   },
+  /** The whole path with kinds and times; every buffer is transferred (#197). */
+  async simPath(): Promise<SimPath> {
+    const p = (await getSession()).simPath();
+    return Comlink.transfer(p, [p.xyz.buffer, p.step.buffer, p.kind.buffer, p.t.buffer]);
+  },
   async simDispose(): Promise<void> {
     session?.dispose();
+  },
+  /**
+   * The engrave preview (#205): the stock cut to each label's depth, the pocket floors and the
+   * vise jaws. `null` when `gen` is stale. Every mesh buffer is transferred.
+   */
+  async engravePreview(job: EngraveJob, gen: number): Promise<EngravePreview | null> {
+    const p = (await getPreviewer()).engravePreview(job, gen);
+    if (!p) return null;
+    return Comlink.transfer(p, buffersOf([p.stock, ...p.floors.map((f) => f.mesh), ...p.fixture.map((f) => f.mesh)]));
   },
 };
 
 export type SimWorkerApi = typeof api;
-export type { SimFrame, SimLoadResult };
+export type { SimFrame, SimLoadResult, SimPath, EngravePreview };
 
 Comlink.expose(api);
