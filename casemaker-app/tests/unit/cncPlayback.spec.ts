@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { tl } from './helpers/manifoldExec';
-import { createPlayback } from '@/workers/geometry/playback';
+import { createPlayback, STOCK_CACHE } from '@/workers/geometry/playback';
 import { capsuleArea, sweepTimeline } from '@/workers/geometry/sweep';
 import { buildTimeline, parseGcode, stubSetup, type Setup } from '@/engine/cnc';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -160,5 +160,68 @@ describe('ownership', () => {
     expect(sweep.stock.volume()).toBeGreaterThan(0);
     expect(sweep.result.volume()).toBeGreaterThan(0);
     expect(sweep.perCheckpoint.every((s) => s === null || s.volume() > 0)).toBe(true);
+  });
+});
+
+describe('removalAt(k): the removed volume is geometry, not just a number (§8)', () => {
+
+  it('k = -1 and an empty checkpoint have no removal', () => {
+    const { playback } = run('S1000 M3\nG0 X10 Y10 Z1\nG1 Z-0.5 F100\nG1 X30\nG0 Z1\nG0 X10 Y30 Z2\nG1 X30\n');
+    expect(playback.removalAt(-1)).toBeNull();
+    expect(playback.removalAt(0)).not.toBeNull();
+    playback.dispose();
+    const none = run('G0 X1 Y1 Z1\n');
+    expect(none.playback.removalAt(0)).toBeNull();
+    none.playback.dispose();
+  });
+
+  it('intersected with the stock it has the volume removedVolumeAt(k) reports', () => {
+    const { playback, sweep } = run(THREE);
+    for (const k of [0, 1, 2]) {
+      const removal = playback.removalAt(k);
+      expect(removal).not.toBeNull();
+      const i = (removal as NonNullable<typeof removal>).intersect(sweep.stock);
+      expect(i.volume()).toBeCloseTo(playback.removedVolumeAt(k), 3);
+      i.delete();
+    }
+    playback.dispose();
+  });
+
+  it('containment is monotone in k: removal(k) lies inside removal(k+1), and not the reverse', () => {
+    const { playback } = run(THREE);
+    const r0 = playback.removalAt(0) as NonNullable<ReturnType<typeof playback.removalAt>>;
+    const r1 = playback.removalAt(1) as NonNullable<ReturnType<typeof playback.removalAt>>;
+    const r2 = playback.removalAt(2) as NonNullable<ReturnType<typeof playback.removalAt>>;
+    const outside = (a: typeof r0, b: typeof r0) => {
+      const d = a.subtract(b);
+      const v = d.volume();
+      d.delete();
+      return v;
+    };
+    expect(outside(r0, r1)).toBeLessThan(1e-3);
+    expect(outside(r1, r2)).toBeLessThan(1e-3);
+    expect(outside(r2, r1)).toBeGreaterThan(0.1);
+    expect(outside(r1, r0)).toBeGreaterThan(0.1);
+    playback.dispose();
+  });
+
+  it('is the same handle on a cache hit, and clamps past the end', () => {
+    const { playback } = run(THREE);
+    expect(playback.removalAt(1)).toBe(playback.removalAt(1));
+    expect(playback.removalAt(99)).toBe(playback.removalAt(2));
+    playback.dispose();
+  });
+
+  it('after the cache evicts k, asking again yields a fresh, correct solid (the old handle is not relied on)', () => {
+    const lines = ['S1000 M3'];
+    for (let i = 0; i < STOCK_CACHE + 3; i++) lines.push(`G0 X${5 + i * 8} Y10 Z1`, `G1 Z${(-0.2 * (i + 1)).toFixed(1)} F100`, `G1 X${5 + i * 8 + 4}`, 'G0 Z1');
+    const { playback, sweep } = run(lines.join('\n'));
+    const first = playback.removedVolumeAt(0);
+    for (let k = 1; k <= STOCK_CACHE; k++) playback.removalAt(k); // STOCK_CACHE more seeks evict k = 0
+    const again = playback.removalAt(0) as NonNullable<ReturnType<typeof playback.removalAt>>;
+    const i = again.intersect(sweep.stock);
+    expect(i.volume()).toBeCloseTo(first, 3);
+    i.delete();
+    playback.dispose();
   });
 });

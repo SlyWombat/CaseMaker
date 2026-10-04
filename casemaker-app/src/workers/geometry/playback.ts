@@ -25,8 +25,12 @@
  * moment should contain.
  *
  * The caller owns the playback and must `dispose()` it; it does not own the sweep result.
- * Every handle `stockAt` returns is the playback's, including the uncut stock (a clone, never
- * the sweep's own handle), so the caller never has to know which is which.
+ * Every handle `stockAt` and `removalAt` return is the playback's, including the uncut stock
+ * (a clone, never the sweep's own handle), so the caller never has to know which is which.
+ * Both are EVICTABLE: mesh them in the same call that asked for them, never store or delete
+ * them. `removalAt(k)` is the volume the stock lost (`/Simulation.md` §8: removed material is
+ * visible geometry), the very solid `stockAt(k)` subtracted — it overshoots the stock top by
+ * `OVERSHOOT_MM`, so intersect it with the stock to get what was actually cut.
  *
  * ONE MANIFOLD TRAP governs the shape of this code. A `translate()` of a LAZY boolean (an op
  * node) is a new node that SHARES the original's children; and when a same-op child's last
@@ -55,6 +59,12 @@ export interface Playback {
   readonly count: number;
   /** The stock after checkpoints 0..k. `k = -1` is the uncut stock. Owned by the playback; valid until the next `stockAt` evicts it or `dispose()`. */
   stockAt(k: number): ManifoldInstance;
+  /**
+   * Everything removed by checkpoints 0..k, as one solid, or null when nothing has been (k = -1,
+   * or no checkpoint up to k cut anything). Same ownership as `stockAt`: the playback's, valid
+   * until the stock cache evicts k or `dispose()`. Overshoots the stock top; see the file comment.
+   */
+  removalAt(k: number): ManifoldInstance | null;
   /** The checkpoint index "cut so far" at program step `step`, or -1 before the first cut. */
   checkpointAtStep(step: number): number;
   /** Removed volume after checkpoints 0..k; monotone non-decreasing in k. */
@@ -70,7 +80,8 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
   const anchors = new Map<number, ManifoldInstance | null>();
   let anchoredTo = -1;
   // Most-recently-used stocks, insertion order = age.
-  const stocks = new Map<number, ManifoldInstance>();
+  interface Frame { stock: ManifoldInstance; removal: ManifoldInstance | null }
+  const stocks = new Map<number, Frame>();
   const volumes = new Map<number, number>();
   let base: ManifoldInstance | null = null;
   const stockVolume = sweep.stock.volume();
@@ -108,12 +119,8 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
     return unionOwned(parts);
   };
 
-  const stockAt = (k: number): ManifoldInstance => {
-    if (k < 0 || count === 0) {
-      base ??= sweep.stock.translate([0, 0, 0]);
-      return base;
-    }
-    const kk = Math.min(k, count - 1);
+  /** The cached frame for checkpoint `kk` (0..count-1), computing it and evicting the oldest if need be. */
+  const frameAt = (kk: number): Frame => {
     const cached = stocks.get(kk);
     if (cached) {
       // Refresh its age.
@@ -121,16 +128,32 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
       stocks.set(kk, cached);
       return cached;
     }
+    // `c` is a per-seek chain used once, never an anchor, so keeping it alive (it is evaluated by
+    // the subtraction below and again when meshed) does not touch the trap in the file comment.
     const c = cumulativeTo(kk);
-    const s = c ? sweep.stock.subtract(c) : sweep.stock.translate([0, 0, 0]);
-    c?.delete();
-    stocks.set(kk, s);
+    const f: Frame = { stock: c ? sweep.stock.subtract(c) : sweep.stock.translate([0, 0, 0]), removal: c };
+    stocks.set(kk, f);
     if (stocks.size > STOCK_CACHE) {
       const oldest = stocks.keys().next().value as number;
-      stocks.get(oldest)?.delete();
+      const ev = stocks.get(oldest);
+      ev?.stock.delete();
+      ev?.removal?.delete();
       stocks.delete(oldest);
     }
-    return s;
+    return f;
+  };
+
+  const stockAt = (k: number): ManifoldInstance => {
+    if (k < 0 || count === 0) {
+      base ??= sweep.stock.translate([0, 0, 0]);
+      return base;
+    }
+    return frameAt(Math.min(k, count - 1)).stock;
+  };
+
+  const removalAt = (k: number): ManifoldInstance | null => {
+    if (k < 0 || count === 0) return null;
+    return frameAt(Math.min(k, count - 1)).removal;
   };
 
   const removedVolumeAt = (k: number): number => {
@@ -162,7 +185,10 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
 
   const dispose = (): void => {
     for (const a of anchors.values()) a?.delete();
-    for (const s of stocks.values()) s.delete();
+    for (const f of stocks.values()) {
+      f.stock.delete();
+      f.removal?.delete();
+    }
     base?.delete();
     anchors.clear();
     stocks.clear();
@@ -170,7 +196,7 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
     anchoredTo = -1;
   };
 
-  return { count, stockAt, checkpointAtStep, removedVolumeAt, dispose };
+  return { count, stockAt, removalAt, checkpointAtStep, removedVolumeAt, dispose };
 }
 
 /**
