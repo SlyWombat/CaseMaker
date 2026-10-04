@@ -25,6 +25,23 @@ async function downloadText(text: string, filename: string, mime: string): Promi
  *  filename + folder), with a graceful fallback to anchor-tag download
  *  for browsers that don't support it (Firefox/Safari → file lands in
  *  the default Downloads folder, no picker). */
+/**
+ * A filesystem-safe file name from arbitrary user text (#206). Same character rule the mesh
+ * exports use, plus trimming the leading/trailing underscores the rule can leave.
+ */
+export function sanitizeFileName(name: string): string {
+  const s = name.replace(/[^a-z0-9-_]+/gi, '_').replace(/^_+|_+$/g, '');
+  return s.length > 0 ? s : 'case';
+}
+
+/**
+ * Save plain text through the same path the mesh exports use (#206): the native picker when it
+ * exists, and the anchor download under E2E where the picker has no dialog to complete.
+ */
+export async function saveText(text: string, filename: string, mime: string): Promise<void> {
+  await downloadText(text, filename, mime);
+}
+
 async function saveBlob(blob: Blob, filename: string): Promise<void> {
   type SaveFilePicker = (opts: {
     suggestedName?: string;

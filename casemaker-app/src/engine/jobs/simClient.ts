@@ -11,7 +11,8 @@ import * as Comlink from 'comlink';
 import type { Setup } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveJob } from '@/types/engraveJob';
-import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview } from '@/workers/sim.worker';
+import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
+import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import { createFrameCoalescer } from './frameCoalescer';
 
 let simWorker: Worker | null = null;
@@ -156,3 +157,18 @@ export const simPath = (): Promise<SimPath> => getSimApi().simPath();
  */
 export const engravePreview = (job: EngraveJob, gen: number): Promise<EngravePreview | null> =>
   getSimApi().engravePreview(job, gen);
+
+/**
+ * Generate → verify, headless, in the sim worker (#206). Returns the exact `.nc` text and the
+ * opened regions the oracle compares the simulation against. No wasm handle crosses: the result
+ * is plain data.
+ */
+export const engraveGenerate = (job: EngraveJob): Promise<EngraveGenerated> =>
+  getSimApi().engraveGenerate(job);
+
+/**
+ * The volumetric oracle (#206 §3) over the program CURRENTLY loaded in the worker's session.
+ * Throws when no swept program is loaded — only call after a load that reported `ok`.
+ */
+export const simOracle = (predicted: OraclePredicted[]): Promise<OracleReport> =>
+  getSimApi().simOracle(predicted);

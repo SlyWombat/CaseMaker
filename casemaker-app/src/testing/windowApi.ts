@@ -24,6 +24,9 @@ import type { SmartCutoutDecision } from '@/engine/compiler/smartCutoutLayout';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { useSimStore, type SimLayers, type SimState } from '@/store/simStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngraveRunStore, saveBlocker, runErrorCodes } from '@/store/engraveRunStore';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
 import { libraryTool } from '@/engine/cnc/toolLibrary';
@@ -108,6 +111,28 @@ export interface CaseMakerTestApi {
    * reports what the store holds. Assertions on the material go through `getSimState`, never
    * through pixel colours.
    */
+  /**
+   * #206 — the engrave-run e2e surface. `engraveReset` puts the deterministic default job (#200)
+   * on screen and forgets any run, so a spec starts from a known state regardless of what earlier
+   * tests left in localStorage. `getEngraveRunState` reports the run's own words, so assertions
+   * never read pixels.
+   */
+  engraveReset(): void;
+  getEngraveRunState(): {
+    phase: string;
+    stale: boolean;
+    stage: string | null;
+    ok: boolean;
+    operations: number | null;
+    cuttingMoves: number | null;
+    verifyErrors: number;
+    simStatus: string | null;
+    oracleOk: boolean | null;
+    worst: { underCut: number; overCut: number } | null;
+    canSave: boolean;
+    saveReason: string | null;
+    error: string | null;
+  };
   simOpenText(name: string, text: string): void;
   simRun(): Promise<void>;
   simSetStep(step: number): Promise<void>;
@@ -324,6 +349,30 @@ export function installCaseMakerTestApi(): void {
         count: s.info?.count ?? 0,
         removedVolume: s.info?.stats.removedVolume ?? 0,
         errors: s.diagnostics.filter((d) => d.severity === 'error').length,
+      };
+    },
+    engraveReset() {
+      // The pure default job (#200), not `newDefaultJob()`: the latter reads the SAVED setup from
+      // settings, so a measured vise or sacrificial setup left by an earlier test would leak in.
+      useEngraveJobStore.getState().replace(defaultEngraveJob());
+      useEngraveRunStore.getState().reset();
+    },
+    getEngraveRunState() {
+      const r = useEngraveRunStore.getState();
+      return {
+        phase: r.phase,
+        stale: r.staleSince !== null,
+        stage: r.generated?.stage ?? null,
+        ok: r.generated?.ok ?? false,
+        operations: r.generated?.cam?.operations ?? null,
+        cuttingMoves: r.generated?.cam?.cuttingMoves ?? null,
+        verifyErrors: runErrorCodes(r).length,
+        simStatus: r.simStatus,
+        oracleOk: r.oracle?.ok ?? null,
+        worst: r.oracle ? { ...r.oracle.worst } : null,
+        canSave: saveBlocker(r) === null,
+        saveReason: saveBlocker(r),
+        error: r.error,
       };
     },
     simOpenText(name, text) {

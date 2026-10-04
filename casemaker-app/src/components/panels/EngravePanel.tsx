@@ -1,6 +1,8 @@
 import { useEffect, type CSSProperties, type JSX } from 'react';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
+import { useEngraveRunStore, requiredAckCodes, runErrorCodes, saveBlocker } from '@/store/engraveRunStore';
+import { saveText, sanitizeFileName } from '@/engine/exportTrigger';
 import { useSettingsStore } from '@/store/settingsStore';
 import { TOOL_LIBRARY, Z1 } from '@/engine/cnc';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -113,6 +115,30 @@ function sacrificialBadge(s: Sacrificial): string {
   return 'measured · this setup';
 }
 
+/** The four run rows' states (#206): a tick, a cross, a spinner, or nothing yet. */
+type RowState = 'tick' | 'cross' | 'pending' | 'idle';
+
+const ROW_MARK: Record<RowState, string> = { tick: '✓', cross: '✗', pending: '…', idle: '·' };
+const ROW_COLOR: Record<RowState, string> = { tick: '#8fd694', cross: '#f0b4ad', pending: '#c8d3de', idle: '#66707a' };
+
+/** "0:12" for a duration in seconds; the CAM's estimate is a rough number, not a promise. */
+function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** One of the four status rows (tick / cross / spinner + text). */
+function RunRow({ testid, state, text }: { testid: string; state: RowState; text: string }): JSX.Element {
+  return (
+    <div data-testid={testid} data-state={state} style={{ display: 'flex', gap: 6, fontSize: 12, color: '#c8d3de' }}>
+      <span aria-hidden style={{ color: ROW_COLOR[state], width: 12, textAlign: 'center', flexShrink: 0 }}>
+        {ROW_MARK[state]}
+      </span>
+      <span>{text}</span>
+    </div>
+  );
+}
+
 const OVERRIDE_FIELDS: readonly { key: keyof Omit<CutParams, 'air'>; label: string; unit: string }[] = [
   { key: 'rpm', label: 'spindle', unit: 'rpm' },
   { key: 'feed', label: 'feed', unit: 'mm/min' },
@@ -165,6 +191,73 @@ export function EngravePanel(): JSX.Element {
 
   const rec = preview?.recommendation ?? null;
   const recPick = rec?.key ? rec.candidates.find((c) => c.key === rec.key) ?? null : null;
+
+  // ---- the run (#206) ----------------------------------------------------------------------
+
+  const run = useEngraveRunStore();
+  const simEnabled = __FEATURE_SIM__;
+  const running = run.phase === 'generating' || run.phase === 'simulating' || run.phase === 'checking';
+
+  const verifyFindings = run.generated?.verify?.findings ?? [];
+  const verifyErrors = verifyFindings.filter((f) => f.severity === 'error').length;
+  const verifyWarnings = verifyFindings.filter((f) => f.severity === 'warning').length;
+  const simErrors = run.simDiagnostics.filter((d) => d.severity === 'error').length;
+  const simWarnings = run.simDiagnostics.filter((d) => d.severity === 'warning').length;
+  const runErrors = runErrorCodes(run);
+  const ackCodes = requiredAckCodes(run);
+  const saveBlockerText = saveBlocker(run);
+  const cam = run.generated?.cam ?? null;
+
+  const rowToolpath: RowState = cam ? 'tick' : run.phase === 'generating' ? 'pending' : run.generated ? 'cross' : 'idle';
+  const rowToolpathText = `Toolpath generated${
+    cam
+      ? ` (${cam.operations} operation${cam.operations === 1 ? '' : 's'}, ${cam.cuttingMoves} move${cam.cuttingMoves === 1 ? '' : 's'}, ~${formatDuration(cam.estimatedSeconds)})`
+      : run.phase === 'generating'
+        ? ' — working…'
+        : run.generated
+          ? ` — stopped at ${run.generated.stage}`
+          : ''
+  }`;
+
+  const rowVerified: RowState = run.generated?.verify
+    ? verifyErrors > 0
+      ? 'cross'
+      : 'tick'
+    : run.phase === 'generating'
+      ? 'pending'
+      : 'idle';
+  const rowVerifiedText = `Verified — ${
+    run.generated?.verify
+      ? `${verifyErrors} error${verifyErrors === 1 ? '' : 's'}, ${verifyWarnings} warning${verifyWarnings === 1 ? '' : 's'}`
+      : 'not verified yet'
+  }`;
+
+  const rowSimulated: RowState =
+    run.simStatus === 'ready' ? (simErrors > 0 ? 'cross' : 'tick') : run.phase === 'simulating' ? 'pending' : run.simStatus ? 'cross' : 'idle';
+  const rowSimulatedText = `Simulated — ${
+    run.simStatus === 'ready'
+      ? `${simErrors} error${simErrors === 1 ? '' : 's'}, ${simWarnings} warning${simWarnings === 1 ? '' : 's'}`
+      : run.simStatus
+        ? `the simulation was ${run.simStatus}`
+        : 'not simulated yet'
+  }`;
+
+  const rowOracle: RowState = run.oracle ? (run.oracle.ok ? 'tick' : 'cross') : run.phase === 'checking' ? 'pending' : 'idle';
+  const rowOracleText = `Matches prediction — ${
+    run.oracle
+      ? `worst under-cut ${run.oracle.worst.underCut.toFixed(4)} mm², over-cut ${run.oracle.worst.overCut.toFixed(4)} mm² (band ${run.oracle.band.toFixed(3)} mm)`
+      : 'not checked yet'
+  }`;
+
+  async function generate(): Promise<void> {
+    await run.generate();
+  }
+
+  async function saveProgram(): Promise<void> {
+    const nc = run.generated?.nc;
+    if (!nc || saveBlockerText !== null) return;
+    await saveText(nc, `${sanitizeFileName(job.name)}.nc`, 'text/plain');
+  }
 
   function saveAsMyVise(source: ViseParams['source']): void {
     setVise(source === 'default' ? {} : { source });
@@ -701,25 +794,78 @@ export function EngravePanel(): JSX.Element {
         </p>
       )}
 
-      {/* 8 — generate (the action itself is #206) */}
+      {/* 8 — generate → verify → simulate → oracle → save (#206) */}
       <h3 style={SUBHEAD}>Generate</h3>
       <div data-testid="engrave-generate-slot">
         <button
           type="button"
           data-testid="engrave-generate"
-          disabled={blocked}
-          title={blocked ? 'Fix the errors above first.' : 'Generate and verify the toolpath (#206).'}
+          disabled={blocked || running || !simEnabled}
+          title={
+            !simEnabled
+              ? 'This build has no simulation worker.'
+              : blocked
+                ? 'Fix the errors above first.'
+                : 'Generate, verify, simulate and check the toolpath (#206).'
+          }
           style={{ width: '100%', padding: 7 }}
+          onClick={() => void generate()}
         >
-          Generate toolpath
+          {running ? 'Working…' : 'Generate toolpath'}
         </button>
-        <p style={{ ...MUTED, ...(blocked ? { color: SEVERITY_COLOR.error } : null) }}>
-          {blockedByFeeds
-            ? 'Disabled — the cutting parameters above are refused.'
-            : errors.length > 0
-              ? `Disabled while ${errors.length} error${errors.length === 1 ? '' : 's'} ${errors.length === 1 ? 'is' : 'are'} outstanding.`
-              : 'Ready to generate and verify (#206).'}
-        </p>
+
+        {!blocked && (
+          <>
+            <div style={{ marginTop: 6 }} data-testid="engrave-run-rows">
+              <RunRow testid="engrave-run-toolpath" state={rowToolpath} text={rowToolpathText} />
+              <RunRow testid="engrave-run-verified" state={rowVerified} text={rowVerifiedText} />
+              <RunRow testid="engrave-run-simulated" state={rowSimulated} text={rowSimulatedText} />
+              <RunRow testid="engrave-run-oracle" state={rowOracle} text={rowOracleText} />
+            </div>
+
+            {runErrors.length > 0 && (
+              <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-run-errors">
+                {runErrors.length} error{runErrors.length === 1 ? '' : 's'} outstanding.
+              </p>
+            )}
+            {run.error && (
+              <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-run-error">
+                {run.error}
+              </p>
+            )}
+
+            {ackCodes.length > 0 && (
+              <label
+                style={{ display: 'block', marginTop: 6, fontSize: 12, color: '#c8d3de' }}
+                data-testid="engrave-ack-label"
+              >
+                <input
+                  type="checkbox"
+                  data-testid="engrave-ack"
+                  checked={run.acknowledged}
+                  onChange={(e) => run.setAcknowledged(e.target.checked)}
+                />{' '}
+                I have checked clearance to the vise and the tool&apos;s reach myself.
+              </label>
+            )}
+
+            <button
+              type="button"
+              data-testid="engrave-save"
+              disabled={saveBlockerText !== null}
+              title={saveBlockerText ?? 'Save the generated program for Makera Studio.'}
+              style={{ width: '100%', padding: 7, marginTop: 6 }}
+              onClick={() => void saveProgram()}
+            >
+              Save .nc…
+            </button>
+            {saveBlockerText !== null && (
+              <p style={MUTED} data-testid="engrave-save-blocked">
+                Save is disabled — {saveBlockerText}.
+              </p>
+            )}
+          </>
+        )}
       </div>
 
       {previewStatus === 'loading' && (

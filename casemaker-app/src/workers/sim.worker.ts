@@ -20,6 +20,8 @@ import { getToplevel } from './geometry/ManifoldRuntime';
 import type { NodeMeshOutput } from './geometry/meshOutput';
 import { createSimSession, type SimFrame, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
+import { engraveGenerate as runEngraveGenerate, type EngraveGenerated } from './sim/engraveGenerate';
+import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 
 let session: SimSession | null = null;
 async function getSession(): Promise<SimSession> {
@@ -98,9 +100,26 @@ const api = {
     if (!p) return null;
     return Comlink.transfer(p, buffersOf([p.stock, ...p.floors.map((f) => f.mesh), ...p.fixture.map((f) => f.mesh), ...p.sacrificial.map((s) => s.mesh)]));
   },
+  /**
+   * Generate → verify, headless (#206). Typesets labels through the synchronous `resolveFont`,
+   * so the keys this job's enabled labels need are loaded first (#180), exactly as
+   * `engravePreview` does. Returns the exact `.nc` text plus the opened regions the oracle needs.
+   */
+  async engraveGenerate(job: EngraveJob): Promise<EngraveGenerated> {
+    await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
+    return runEngraveGenerate(await getToplevel(), job);
+  },
+  /**
+   * The volumetric oracle (#206 §3) against the program CURRENTLY loaded in the session. The
+   * session owns the removal solid, so only the worker can run this. Throws when no swept
+   * program is loaded; the main thread only calls it after a successful load.
+   */
+  async simOracle(predicted: OraclePredicted[]): Promise<OracleReport> {
+    return (await getSession()).oracle(predicted);
+  },
 };
 
 export type SimWorkerApi = typeof api;
-export type { SimFrame, SimLoadResult, SimPath, EngravePreview };
+export type { SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated };
 
 Comlink.expose(api);

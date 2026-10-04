@@ -32,6 +32,7 @@ import { applyEvent, buildTimeline, parseGcode, MACHINES, type FixtureEnvelope, 
 
 import type { Mm } from '@/types/units';
 import type { Tool } from '@/engine/cnc/tool';
+import { computeOracle, oracleBand, type OraclePredicted, type OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
@@ -203,6 +204,15 @@ export interface SimSession {
   toolPath(fromStep: number, toStep: number): Float32Array;
   /** The whole path with kinds and times (#197). Empty arrays when nothing is loaded. */
   simPath(): SimPath;
+  /**
+   * The volumetric oracle (#206, `/Simulation.md` §7): compare the CURRENT sweep's cumulative
+   * removal against the CAM's `predicted` regions, level by level. The session owns the removal
+   * solid, so this is the only place the comparison can be made without shipping wasm handles.
+   *
+   * Throws when no SWEPT program is loaded (a path-only refusal owns no removal) — the caller
+   * only reaches this after a load that reported `ok`.
+   */
+  oracle(predicted: readonly OraclePredicted[]): OracleReport;
   dispose(): void;
   readonly loaded: boolean;
 }
@@ -365,6 +375,19 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     return { k: kk, stock, removalSoFar: removal ? meshOutputOf(removal) : null, sacrificial };
   };
 
+  /**
+   * The volumetric oracle (#206). The band is derived from the checkpoints' worst contour count,
+   * exactly as the sweep derives its own simplify budget (sweep.ts §562), so the two agree.
+   */
+  const oracle = (predicted: readonly OraclePredicted[]): OracleReport => {
+    const l = live;
+    if (!l || l.kind !== 'swept') throw new Error('oracle: no swept program is loaded');
+    const removal = l.sweep.removal;
+    if (!removal) throw new Error('oracle: the loaded program removed no material');
+    const contours = l.timeline.checkpoints.reduce((a, cp) => Math.max(a, cp.steps.length * 3), 0);
+    return computeOracle(tl, removal, predicted, oracleBand(contours));
+  };
+
   const stateAt = (step: number): MachineState | null => (live ? live.timeline.stateAt(Math.trunc(step)) : null);
 
   const toolPath = (fromStep: number, toStep: number): Float32Array => {
@@ -442,6 +465,6 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     };
   };
 
-  return { load, warmup, frameAt, stateAt, toolPath, simPath, dispose, get loaded() { return live !== null; } };
+  return { load, warmup, frameAt, stateAt, toolPath, simPath, oracle, dispose, get loaded() { return live !== null; } };
 }
 
