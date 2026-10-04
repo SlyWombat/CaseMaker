@@ -282,6 +282,141 @@ describe('sweeping a program against the slab: closed-form volumes', () => {
   });
 });
 
+describe('the must-FAIL list (§7.1): refusals and the gates that need the stock', () => {
+  it('a laser job is REFUSED, not drawn as a cut', () => {
+    const { out } = sweep('M321\nG0 X20 Y30 Z0\nG1 X40 S0.5 F100\nM322\n');
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.diagnostics[0]?.code).toBe('laser-job');
+  });
+
+  it('a rotary job is REFUSED in V1', () => {
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z0\nG1 X40 A90 F100\n');
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.diagnostics[0]?.code).toBe('rotary-job');
+  });
+
+  it('HOLDER: a cut deeper than the shoulder length is an error naming the tool', () => {
+    const t = flatEndMill(1, { shoulderLength: 2, fluteLength: 3 });
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-2.5 F100\nG1 X40\n', t);
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    const d = out.value.diagnostics.find((x) => x.code === 'holder-collision');
+    expect(d?.severity).toBe('error');
+    expect(d?.message).toMatch(/shoulder length of 2/);
+  });
+
+  it('HOLDER: shoulderLength governs; fluteLength is only the fallback', () => {
+    expect(sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-2.5 F100\nG1 X40\n', flatEndMill(1, { shoulderLength: null, fluteLength: 3 })).out.ok && true).toBe(true);
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-2.5 F100\nG1 X40\n', flatEndMill(1, { shoulderLength: null, fluteLength: 3 }));
+    if (!out.ok) throw new Error('refused');
+    expect(out.value.diagnostics.map((d) => d.code)).not.toContain('holder-collision');
+  });
+
+  it('HOLDER: with neither length stated the verdict is "cannot be proven", a warning, never a silent pass', () => {
+    // Makera's catalogue leaves shoulderLength empty for every engraver and chamfer. This is
+    // the "cannot be proven" row of the verification mockup.
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-0.6 F100\nG1 X40\n');
+    if (!out.ok) throw new Error('refused');
+    const d = out.value.diagnostics.find((x) => x.code === 'holder-unproven');
+    expect(d?.severity).toBe('warning');
+  });
+
+  it('a RAPID through the stock is an error; a rapid above it is nothing', () => {
+    const bad = sweep('G0 X20 Y30 Z1\nG0 Z-1\nG0 X40\n');
+    if (!bad.out.ok) throw new Error('refused');
+    expect(bad.out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock').map((d) => d.message)).toHaveLength(2);
+    const fine = sweep('G0 X20 Y30 Z5\nG0 X40\nG0 Z1\n');
+    if (!fine.out.ok) throw new Error('refused');
+    expect(fine.out.value.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(fine.out.value.stats.airMovesChecked).toBe(2);
+  });
+
+  it('REGRESSION (vendor file): a RETRACT from the end of a cut is NOT "through stock" — the tool is in the hole it just made', () => {
+    // 169 of 169 errors on ACRYLIC-Balloon.nc were `G0 Z2` retracts starting 0.3 mm deep in
+    // their own cut, measured against the UNCUT blank. Material means the stock at that step.
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-0.3 F100\nG1 X40\nG0 Z2\n');
+    if (!out.ok) throw new Error('refused');
+    expect(out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock')).toEqual([]);
+    expect(out.value.stats.airMovesRechecked).toBe(1); // it met the blank, and was re-tested
+  });
+
+  it('a retract from the end of an ARC leaves only numerical slivers, which are below the noise floor', () => {
+    // Four of the five residual vendor errors ended on a G2 segment: the retract disc and the
+    // simplified cut region disagree to the bit there. The floor is derived from the named
+    // tolerances, not picked.
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-0.3 F100\nG2 X30 Y40 I10 J0\nG0 Z2\n');
+    if (!out.ok) throw new Error('refused');
+    expect(out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock')).toEqual([]);
+  });
+
+  it('…but a genuine shallow graze is still an order of magnitude above the floor and IS caught', () => {
+    // A rapid 0.05 mm below the top over 20 mm: ~2 mm³ against a floor of ~0.2 mm³.
+    const { out } = sweep('G0 X20 Y30 Z1\nG0 Z-0.05\nG0 X40\n');
+    if (!out.ok) throw new Error('refused');
+    expect(out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('ORDER MATTERS: a rapid down into a pocket cut EARLIER is routine; into one cut only LATER is a crash', () => {
+    const pocket = 'S1000 M3\nG0 X20 Y30 Z1\nG1 Z-1 F100\nG1 X40\nG0 Z5\n';
+    const earlier = sweep(pocket + 'G0 X30\nG0 Z-0.5\n');
+    if (!earlier.out.ok) throw new Error('refused');
+    expect(earlier.out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock')).toEqual([]);
+    const later = sweep('S1000 M3\nG0 X30 Y30 Z5\nG0 Z-0.5\nG0 Z5\nG0 X20\nG1 Z-1 F100\nG1 X40\n');
+    if (!later.out.ok) throw new Error('refused');
+    // TWO errors, and both are right: the plunge (line 3) enters uncut material, and the
+    // retract (line 4) starts inside it — nothing was removed by a rapid, so it is still there.
+    const lines = later.out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock').map((d) => Number(/line (\d+)/.exec(d.message)?.[1]));
+    expect(lines).toEqual([3, 4]);
+  });
+
+  it('a rapid BELOW the bed is an error', () => {
+    const { out } = sweep('G0 X20 Y30 Z1\nG0 Z-6\n');
+    if (!out.ok) throw new Error('refused');
+    expect(out.value.diagnostics.map((d) => d.code)).toContain('rapid-below-bed');
+  });
+
+  it("THE RULE: a spindle-off feed move is nothing in air, an error near the material", () => {
+    // 2 mm above the stock top: more than the 1 mm margin away. Nothing.
+    const air = sweep('G0 X20 Y30 Z2\nG1 X40 F100\n');
+    if (!air.out.ok) throw new Error('refused');
+    expect(air.out.value.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    // 0.5 mm above the top: within the margin. Error.
+    const near = sweep('G0 X20 Y30 Z0.5\nG1 X40 F100\n');
+    if (!near.out.ok) throw new Error('refused');
+    expect(near.out.value.diagnostics.map((d) => d.code)).toContain('spindle-off-near-stock');
+    // Into the stock. Error, and it is NOT swept as a cut.
+    const into = sweep('G0 X20 Y30 Z1\nG1 Z-0.5 F100\nG1 X40\n');
+    if (!into.out.ok) throw new Error('refused');
+    expect(into.out.value.diagnostics.map((d) => d.code)).toContain('spindle-off-near-stock');
+    expect(into.out.value.stats.removedVolume).toBeCloseTo(0, 6);
+  });
+
+  it('THE RULE: a spindle-off feed move near the BED is an error', () => {
+    // The slab's bottom is at -5; a feed at -4.5 is within 1 mm of it. (It is also inside the
+    // stock; the bed check fires first and that is the one named.)
+    const { out } = sweep('G0 X20 Y30 Z1\nG1 Z-4.5 F100\n');
+    if (!out.ok) throw new Error('refused');
+    expect(out.value.diagnostics.map((d) => d.code)).toContain('spindle-off-near-bed');
+  });
+
+  it('the fixture is NOT checked yet, and the sweep says so rather than staying quiet', () => {
+    const vise: Setup = setup({ workholding: { kind: 'vise', jawFaces: [{ origin: [0, 0, 0], normal: [1, 0, 0] }, { origin: [1, 0, 0], normal: [-1, 0, 0] }], jawHeight: 8 } });
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-0.6 F100\nG1 X40\n', tool, vise);
+    if (!out.ok) throw new Error('refused');
+    expect(out.value.diagnostics.map((d) => d.code)).toContain('fixture-unchecked');
+  });
+
+  it('A MIS-REGISTERED PLACEMENT PREDICTS THE SCRAP: half the stroke off the stock removes half a capsule', () => {
+    // The stub is also a test fixture (/Simulation.md §1.1). Shift the part so its right edge
+    // sits at work X = 30: a stroke from 20 to 40 is half on, half off.
+    const s = setup({ placement: { origin: [-70, 0, 0], rotationZ: 0, source: 'stub' } });
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-0.6 F100\nG1 X40\n', tool, s);
+    if (!out.ok) throw new Error('refused');
+    const halfCapsule = 2 * R * 10 + ((N / 2) * R * R * Math.sin((2 * Math.PI) / N)) / 2;
+    const want = halfCapsule * 0.6;
+    expect(Math.abs(out.value.stats.removedVolume - want) / want).toBeLessThan(0.01);
+  });
+});
+
 describe('tools: V1 sweeps a flat end mill and refuses everything else BY NAME', () => {
   it.each([
     ['Flat End', 'flat'], ['flat end mill', 'flat'], ['Ball Nose', 'ball'], ['ball end mill', 'ball'],
@@ -385,6 +520,7 @@ describe.skipIf(!existsSync(CORPUS))('a real 2.5D vendor job sweeps end to end',
     const out = sweepTimeline(tl, timeline, flatEndMill(3.175), s);
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
     expect(out.value.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(out.value.stats.airMovesRechecked).toBeGreaterThan(100); // the retracts: met the blank, cleared on re-test
     expect(out.value.stats.removedVolume).toBeGreaterThan(0);
     expect(out.value.stats.resultVolume).toBeLessThan(out.value.stats.stockVolume);
     expect(out.value.stats.checkpointsSwept).toBeGreaterThan(5);

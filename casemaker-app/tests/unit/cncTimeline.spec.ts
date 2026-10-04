@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyEvent, buildTimeline, initialState, parseGcode, stubSetup, Z1, type Setup } from '@/engine/cnc';
+import { applyEvent, buildTimeline, initialState, parseGcode, stubSetup, Z1, DIAGNOSTIC_CAP, type Setup } from '@/engine/cnc';
 import type { GcodeEvent } from '@/engine/cnc/gcode';
 
 const part = { kind: 'prism' as const, outline: { kind: 'p-rect' as const, size: [76.2, 38.1] as [number, number] }, thickness: 3.81 };
@@ -436,10 +436,84 @@ describe('stateAt: scrubbing is exact at every snapshot boundary', () => {
   });
 });
 
+describe('the envelope check (#184): only with a machine, only on known axes, capped', () => {
+  it("goto-pack-pos.nc's Carvera coordinates are OUTSIDE the Z1's envelope", () => {
+    const tl = buildTimeline(parseGcode('G90 G0 G53 Z-3\nG53 G0 X-295 Y-205\nG53 Z-50\n'), setupWith(), Z1);
+    const errs = tl.diagnostics.filter((d) => d.code === 'outside-envelope');
+    expect(errs.map((d) => d.line)).toEqual([2, 3]);
+    expect(errs[0]?.severity).toBe('error');
+  });
+
+  it('a work-frame move is checked in MACHINE coordinates through the WCS', () => {
+    // Machine coordinates run negative on the Z1 (home to max, 0 there). The stub WCS at the
+    // machine origin puts any +X job off the bed; a realistic WCS at (-150, -150) does not.
+    const off = buildTimeline(parseGcode('G0 X10 Y10 Z-1\n'), setupWith(), Z1);
+    expect(off.diagnostics.map((d) => d.code)).toContain('outside-envelope');
+    const on = buildTimeline(parseGcode('G0 X10 Y10 Z-1\n'), setupWith({ wcs: { origin: [-150, -150, -10], source: 'stub', uncertainty: 0.05 } }), Z1);
+    expect(on.diagnostics.map((d) => d.code)).not.toContain('outside-envelope');
+  });
+
+  it('without a machine there is no envelope to check', () => {
+    expect(codes('G53 G0 X-295 Y-205\n')).not.toContain('outside-envelope');
+  });
+
+  it('unknown axes are not checked: only what the program established', () => {
+    const tl = buildTimeline(parseGcode('G53 G0 Z-3\n'), setupWith(), Z1);
+    expect(tl.diagnostics.map((d) => d.code)).not.toContain('outside-envelope');
+  });
+
+  it("the tool-change macro's own positions are inside the envelope", () => {
+    const tl = buildTimeline(parseGcode('G0 X-50 Y-60 Z-10\nT2M6\n'), setupWith({ startingTool: 1, wcs: { origin: [0, 0, 0], source: 'stub', uncertainty: 0 } }), Z1);
+    expect(tl.diagnostics.filter((d) => d.code === 'outside-envelope')).toEqual([]);
+  });
+
+  it('a job entirely off the bed gives DIAGNOSTIC_CAP errors and one "…and N more", not thousands', () => {
+    const lines: string[] = [];
+    for (let i = 0; i < 40; i++) lines.push(`G0 X${10 + i} Y10 Z-1`);
+    const tl = buildTimeline(parseGcode(lines.join('\n')), setupWith(), Z1);
+    expect(tl.diagnostics.filter((d) => d.code === 'outside-envelope')).toHaveLength(DIAGNOSTIC_CAP);
+    const more = tl.diagnostics.find((d) => d.code === 'outside-envelope-more');
+    expect(more?.message).toMatch(/and 15 more/);
+  });
+});
+
+describe('air moves: what the sweep checks against the stock and the bed', () => {
+  it('a rapid with both ends known is an air move; a spindle-off feed too; a cut is not', () => {
+    const tl = run('G0 X0 Y0 Z5\nG0 Z1\nG1 Z-1 F100\nS1000 M3\nG1 X5\n');
+    expect(tl.airMoves.map((m) => [m.line, m.kind])).toEqual([
+      [2, 'rapid'],
+      [3, 'feed-spindle-off'],
+    ]);
+    expect(tl.summary.cuttingMoves).toBe(1); // only the G1 X5, spindle on
+    expect(tl.summary.airMoves).toBe(2);
+  });
+
+  it('an air move from an UNKNOWN position is not collected: nothing can be checked', () => {
+    expect(run('G0 X0 Y0 Z5\n').airMoves).toHaveLength(0);
+  });
+
+  it('a spindle-off feed move is NOT a cut and makes no checkpoint', () => {
+    const tl = run('G0 X0 Y0 Z1\nG1 Z-1 F100\n');
+    expect(tl.checkpoints).toHaveLength(0);
+    expect(tl.airMoves[0]?.kind).toBe('feed-spindle-off');
+  });
+
+  it('laser-mode moves are neither cuts nor air moves; the job is flagged', () => {
+    const tl = run('M321\nG0 X0 Y0 Z0\nG1 X1 S0.5 F100\n');
+    expect(tl.summary.laser).toBe(true);
+    expect(tl.summary.cuttingMoves).toBe(0);
+    expect(tl.airMoves).toHaveLength(0);
+  });
+
+  it('an A word flags rotary', () => {
+    expect(run('G1 X1 A90 F100\n').summary.rotary).toBe(true);
+  });
+});
+
 describe('summary', () => {
   it('counts steps, segments, pauses, checkpoints and cutting moves', () => {
     const tl = run('T1M6\nS1000 M3\nG0 X0 Y0 Z0\nG1 Z-1 F100\nG1 X5\nG0 Z5\n', { startingTool: 'unknown' });
-    expect(tl.summary).toEqual({ steps: 6, segments: 1, pauses: 1, checkpoints: 1, cuttingMoves: 2, unsweptMoves: 0 });
+    expect(tl.summary).toEqual({ steps: 6, segments: 1, pauses: 1, checkpoints: 1, cuttingMoves: 2, unsweptMoves: 0, airMoves: 1, laser: false, rotary: false });
   });
 });
 

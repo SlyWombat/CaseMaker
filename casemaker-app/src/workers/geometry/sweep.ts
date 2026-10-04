@@ -26,7 +26,7 @@
  * toplevel the same way `evaluateOp` does. Everything it is given is plain data.
  */
 
-import type { Timeline, Checkpoint } from '@/engine/cnc/emulator/timeline';
+import type { Timeline, Checkpoint, AirMove } from '@/engine/cnc/emulator/timeline';
 import { partToWork } from '@/engine/cnc/frames';
 import type { Setup } from '@/engine/cnc/setup';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
@@ -43,6 +43,14 @@ export const CHUNK = 64;
 export const FANOUT = 8;
 /** Extrusions overshoot the stock top so the subtraction has no coplanar face to argue about. */
 export const OVERSHOOT_MM = 0.01;
+/**
+ * How close a spindle-off move may come to the material or the bed before it is a fault
+ * (the maintainer's rule, 2026-10-03: "unless getting near the material or vise/clamps/bed").
+ * Applied around the tool's radius and above and below the move's Z.
+ */
+export const PROXIMITY_MARGIN_MM = 1.0;
+/** Air moves checked individually; beyond this a job is summarised instead (each is a boolean). */
+export const MAX_AIR_CHECKS = 4000;
 
 export interface SweepDiagnostic {
   severity: 'error' | 'warning' | 'info';
@@ -52,6 +60,9 @@ export interface SweepDiagnostic {
 }
 
 export interface SweepStats {
+  airMovesChecked: number;
+  /** Air moves that met the uncut blank and were re-tested against the stock-so-far. */
+  airMovesRechecked: number;
   stockVolume: number;
   resultVolume: number;
   removedVolume: number;
@@ -185,6 +196,175 @@ export function checkpointRegion(tl: ManifoldToplevel, cp: Checkpoint, radius: n
 }
 
 /**
+ * Check the moves that cut nothing but can still be wrong (`/Simulation.md` §7.1):
+ *
+ *   rapid             through material, or below the bed             -> error
+ *   feed, spindle off within PROXIMITY_MARGIN_MM of material or bed  -> error (the rule)
+ *
+ * "Material" means THE STOCK AS IT IS AT THAT STEP, not the uncut blank. The first version
+ * tested against the uncut blank and flagged every retract in a real vendor job: a `G0 Z2`
+ * from the end of a cut starts 0.3 mm deep in the hole the tool has just made, and 169 of
+ * 169 errors on `ACRYLIC-Balloon.nc` were exactly that. A rapid down into a pocket cut by an
+ * EARLIER pass is routine; one into a pocket that will only be cut LATER is a crash. Order
+ * is the whole question, so the check is time-ordered.
+ *
+ * Cost: every air move gets one cheap boolean against the uncut stock, and only a HIT is
+ * re-tested against the stock minus everything cut before that step. That removal is built
+ * from per-checkpoint PREFIXES (the bucket's capsules with step < k), which only ever grow
+ * because air moves are visited in program order, so each capsule is unioned once.
+ *
+ * NOT checked: the fixture — its solids do not exist yet (#188); said in a diagnostic.
+ */
+export function checkAirMoves(
+  tl: ManifoldToplevel,
+  stock: ManifoldInstance,
+  topZ: number,
+  bedZ: number,
+  moves: AirMove[],
+  checkpoints: Checkpoint[],
+  radius: number,
+): { diagnostics: SweepDiagnostic[]; checked: number; rechecked: number } {
+  const diagnostics: SweepDiagnostic[] = [];
+  const nCap = segmentsForRadius(radius);
+  const nMargin = segmentsForRadius(radius + PROXIMITY_MARGIN_MM);
+  let checked = 0;
+  let rechecked = 0;
+
+  // Per-checkpoint prefixes: the part of each bucket cut before the step being examined.
+  interface Prefix { cp: Checkpoint; next: number; region: CrossSectionInstance | null; solid: ManifoldInstance | null; dirty: boolean }
+  const prefixes: Prefix[] = checkpoints.filter((cp) => cp.z < topZ).map((cp) => ({ cp, next: 0, region: null, solid: null, dirty: false }));
+  // A holder, not two `let`s: TypeScript narrows a `let x: T | null = null` to `null` across a
+  // closure's assignments, and the cleanup below then cannot call `.delete()` on it.
+  const held: { removed: ManifoldInstance | null; dirty: boolean } = { removed: null, dirty: false };
+
+  /** Everything cut before `step`, as one solid, or null if nothing was. */
+  const removedBefore = (step: number): ManifoldInstance | null => {
+    for (const pf of prefixes) {
+      const polys: Polygon[] = [];
+      while (pf.next < pf.cp.steps.length && (pf.cp.steps[pf.next] as number) < step) {
+        const q = pf.next * 4;
+        capsuleContours(pf.cp.xy[q] as number, pf.cp.xy[q + 1] as number, pf.cp.xy[q + 2] as number, pf.cp.xy[q + 3] as number, radius, nCap, polys);
+        pf.next++;
+      }
+      if (polys.length === 0) continue;
+      const slice = unionCapsules(tl, polys) as CrossSectionInstance;
+      if (pf.region) {
+        const u = tl.CrossSection.union([pf.region, slice]);
+        const s = u.simplify(SWEEP_SIMPLIFY_EPS_MM);
+        u.delete();
+        pf.region.delete();
+        slice.delete();
+        pf.region = s;
+      } else {
+        pf.region = slice;
+      }
+      pf.dirty = true;
+    }
+    for (const pf of prefixes) {
+      if (!pf.dirty || !pf.region) continue;
+      pf.solid?.delete();
+      const col = tl.Manifold.extrude(pf.region, topZ - pf.cp.z + OVERSHOOT_MM);
+      pf.solid = col.translate([0, 0, pf.cp.z]);
+      col.delete();
+      pf.dirty = false;
+      held.dirty = true;
+    }
+    if (held.dirty) {
+      held.removed?.delete();
+      const solids = prefixes.map((pf) => pf.solid).filter((x): x is ManifoldInstance => x !== null);
+      // NEVER alias a prefix's own solid: it is deleted on rebuild and again at cleanup, and a
+      // shared wasm handle deleted twice throws "instance already deleted". A single solid is
+      // cloned (a zero translate is a new handle); several are unioned into a new one.
+      held.removed = solids.length === 0 ? null : solids.length === 1 ? (solids[0] as ManifoldInstance).translate([0, 0, 0]) : tl.Manifold.union(solids);
+      held.dirty = false;
+    }
+    return held.removed;
+  };
+
+  for (const mv of moves) {
+    if (checked >= MAX_AIR_CHECKS) {
+      diagnostics.push({ severity: 'warning', code: 'air-moves-unchecked', message: `${moves.length - checked} air move(s) not checked: more than ${MAX_AIR_CHECKS} in the job` });
+      break;
+    }
+    checked++;
+    const spindleOff = mv.kind === 'feed-spindle-off';
+    const margin = spindleOff ? PROXIMITY_MARGIN_MM : 0;
+    const zLo = Math.min(mv.from[2], mv.to[2]) - margin;
+    const zHi = Math.max(mv.from[2], mv.to[2]) + margin;
+    if (zLo < bedZ) {
+      diagnostics.push(
+        spindleOff
+          ? { severity: 'error', code: 'spindle-off-near-bed', message: `line ${mv.line}: a feed move with the spindle off within ${PROXIMITY_MARGIN_MM} mm of the bed` }
+          : { severity: 'error', code: 'rapid-below-bed', message: `line ${mv.line}: a rapid to Z ${Math.min(mv.from[2], mv.to[2]).toFixed(3)}, below the bed at ${bedZ.toFixed(3)}` },
+      );
+      continue;
+    }
+    if (zLo >= topZ) continue; // entirely above the blank: nothing to hit
+    const polys: Polygon[] = [];
+    capsuleContours(mv.from[0], mv.from[1], mv.to[0], mv.to[1], radius + margin, spindleOff ? nMargin : nCap, polys);
+    const region = tl.CrossSection.ofPolygons(polys, 'Positive');
+    const col = tl.Manifold.extrude(region, Math.max(zHi - zLo, 1e-6));
+    region.delete();
+    const placed = col.translate([0, 0, zLo]);
+    col.delete();
+    const hit = placed.intersect(stock);
+    placed.delete();
+    // The noise floor: a boundary mismatch of (chord error + simplify drift) along the move's
+    // capsule perimeter, over its Z span, is the largest volume numerical slivers can reach.
+    // Below it, "overlap" is polygons disagreeing to the bit, not material: five retracts in a
+    // real vendor job left 0.000 mm³ of it where a cut ended on an arc segment. A genuine graze
+    // 0.05 mm deep over the same move is an order of magnitude above this floor.
+    const length = Math.hypot(mv.to[0] - mv.from[0], mv.to[1] - mv.from[1]);
+    const perimeter = 2 * length + 2 * Math.PI * (radius + margin);
+    const levels = SWEEP_TOLERANCES.simplifyLevels(checkpoints.reduce((a, cp) => Math.max(a, cp.steps.length * 3), 0));
+    const floor = (ARC_CHORD_TOLERANCE_MM + SWEEP_SIMPLIFY_EPS_MM * (1 + levels)) * perimeter * (zHi - zLo);
+    let vol = hit.volume();
+    if (vol > floor) {
+      // It meets the uncut blank. Does it meet what is STILL there at this step?
+      rechecked++;
+      const gone = removedBefore(mv.step);
+      if (gone) {
+        const remaining = hit.subtract(gone);
+        vol = remaining.volume();
+        remaining.delete();
+      }
+    }
+    hit.delete();
+    if (vol > floor) {
+      diagnostics.push(
+        spindleOff
+          ? { severity: 'error', code: 'spindle-off-near-stock', message: `line ${mv.line}: a feed move with the spindle off comes within ${PROXIMITY_MARGIN_MM} mm of material still present at that point in the program` }
+          : { severity: 'error', code: 'rapid-through-stock', message: `line ${mv.line}: a rapid passes through material still present at that point in the program (${vol >= 0.01 ? vol.toFixed(3) : vol.toExponential(2)} mm³)` },
+      );
+    }
+  }
+  for (const pf of prefixes) {
+    pf.region?.delete();
+    pf.solid?.delete();
+  }
+  held.removed?.delete();
+  return { diagnostics, checked, rechecked };
+}
+
+/**
+ * The holder gate (`/Simulation.md` §6): the deepest cut against the tool's shank limit.
+ * `shoulderLength` governs; `fluteLength` is the fallback. Makera's catalogue leaves
+ * shoulderLength EMPTY for every engraver and chamfer, so when both are missing the answer
+ * is "cannot be proven", as a warning — not a silent pass.
+ */
+export function holderGate(tool: Tool, deepestCutDepth: number | null): SweepDiagnostic | null {
+  if (deepestCutDepth === null) return null;
+  const limit = tool.shoulderLength ?? tool.fluteLength;
+  if (limit === null) {
+    return { severity: 'warning', code: 'holder-unproven', message: `the deepest cut is ${deepestCutDepth.toFixed(3)} mm below the stock top and tool "${tool.name}" states no shoulder or flute length: holder clearance cannot be proven` };
+  }
+  if (deepestCutDepth > limit) {
+    return { severity: 'error', code: 'holder-collision', message: `the deepest cut, ${deepestCutDepth.toFixed(3)} mm below the stock top, exceeds tool "${tool.name}"'s ${tool.shoulderLength !== null ? 'shoulder' : 'flute'} length of ${limit} mm: the shank would rub` };
+  }
+  return null;
+}
+
+/**
  * Sweep a whole timeline against the setup's stock with the given tool.
  *
  * Refuses (rather than approximating) a non-flat tool, an unsupported stock, and an empty
@@ -193,6 +373,8 @@ export function checkpointRegion(tl: ManifoldToplevel, cp: Checkpoint, radius: n
  */
 export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: Tool, setup: Setup): SweepOutcome {
   const diagnostics: SweepDiagnostic[] = [];
+  if (timeline.summary.laser) return { ok: false, diagnostics: [{ severity: 'error', code: 'laser-job', message: 'this is a laser job (M321): a mill simulation refuses it rather than drawing a cut' }] };
+  if (timeline.summary.rotary) return { ok: false, diagnostics: [{ severity: 'error', code: 'rotary-job', message: 'this job moves the A axis: V1 does not simulate rotary work (/Simulation.md §9)' }] };
   const rr = cuttingRadiusForSweep(tool);
   if (!rr.ok) return { ok: false, diagnostics: [{ severity: 'error', code: 'tool-refused', message: rr.reason }] };
   const radius = rr.radius;
@@ -242,14 +424,29 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
     }
   });
 
+  // The gates that need the stock: holder depth, and the air moves.
+  const swept = timeline.checkpoints.filter((cp) => cp.z < topZ);
+  const deepest = swept.length ? topZ - Math.min(...swept.map((cp) => cp.z)) : null;
+  const hg = holderGate(tool, deepest);
+  if (hg) diagnostics.push(hg);
+  const bb = stock.boundingBox();
+  const air = checkAirMoves(tl, stock, topZ, bb.min[2], timeline.airMoves, timeline.checkpoints, radius);
+  diagnostics.push(...air.diagnostics);
+  if (setup.workholding.kind !== 'tape-down' && setup.workholding.kind !== 'anchor-bracket') {
+    diagnostics.push({ severity: 'info', code: 'fixture-unchecked', message: `the ${setup.workholding.kind} is not modelled as an obstacle yet (#188): proximity to the fixture is NOT checked` });
+  }
+
   const c0 = performance.now();
   let removal: ManifoldInstance | null = null;
   let result: ManifoldInstance;
+  // The caller owns `stock`, `result`, `removal` and every `perCheckpoint` entry, and may
+  // delete each once. So none of them may alias another wasm handle: a lone checkpoint solid
+  // is CLONED into `removal`, and an uncut `result` is a clone of the stock, not the stock.
   if (solids.length > 0) {
-    removal = solids.length === 1 ? (solids[0] as ManifoldInstance) : tl.Manifold.union(solids);
+    removal = solids.length === 1 ? (solids[0] as ManifoldInstance).translate([0, 0, 0]) : tl.Manifold.union(solids);
     result = stock.subtract(removal);
   } else {
-    result = stock;
+    result = stock.translate([0, 0, 0]);
   }
   const stockVolume = stock.volume();
   const resultVolume = result.volume();
@@ -272,6 +469,8 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       perCheckpoint,
       radius,
       stats: {
+        airMovesChecked: air.checked,
+        airMovesRechecked: air.rechecked,
         stockVolume,
         resultVolume,
         removedVolume: stockVolume - resultVolume,

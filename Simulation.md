@@ -637,12 +637,21 @@ about how the part will *look* beyond which colour volume a floor lands in.
    its spec, the lowest-Z rule for ramps, and a real vendor 2.5D job swept end to end. The
    removal solids overshoot the stock top by 0.01 mm so the subtraction has no coplanar face;
    the volume identity is therefore `stock − (removal ∩ stock)`, not `stock − removal`.
-6. **Validation and collision gates** (§6, §1.2) — refusals, with the line named. The tool
-   and stock refusals exist; the envelope check (`insideEnvelope`, #184) is not yet wired in;
-   fixture collision and the spindle-off **proximity** check (maintainer's rule: a fault only
-   near the material, the fixture or the bed) are not started.
-7. **Run it on Makera's corpus** (§7.1, #186) — the parser and runner gates exist; the sweep
-   runs one real file. The must-FAIL list is not yet a test.
+6. ~~**Validation and collision gates**~~ **Done, except the fixture.** Refusals: tool (by
+   name), stock, laser job, rotary job. Gates: the envelope (#184, in the runner, machine
+   coordinates, capped at 25 diagnostics per code); the holder — `shoulderLength ?? fluteLength`,
+   and "**cannot be proven**" as a warning when both are missing; and the air moves — a rapid
+   through material or below the bed, and the maintainer's rule, a **spindle-off** feed move
+   within 1 mm of material or the bed. "Material" means **the stock as it is at that step**:
+   the first version measured against the uncut blank and flagged every retract in a real job
+   (169 of 169 errors were `G0 Z2` from the end of a cut). The check is time-ordered, built from
+   per-checkpoint prefixes that only grow. The hit threshold is the **geometric noise floor**
+   derived from the named tolerances, not a magic epsilon: a retract ending on an arc leaves
+   slivers below it; a 0.05 mm graze is an order of magnitude above it. **The fixture is not
+   modelled as an obstacle yet** (#188's solids), and the sweep says so in a diagnostic.
+7. ~~**Run it on Makera's corpus**~~ **Done for the gates that exist.** Parser, runner and
+   sweep each have a corpus test; `ACRYLIC-Balloon.nc` passes every gate above with zero
+   errors. Every item of §7.1's must-FAIL list is a test except fixture collision.
 8. **Checkpointed playback** (§8.0), then the UI after a mockup. Per-checkpoint solids exist
    (`SweepResult.perCheckpoint`); the cumulative-union scrub and the viewport are not built.
 9. **The oracle tests** (§7), once #171 and #178 exist to compare against.

@@ -26,7 +26,7 @@
 
 import { machinePosToWork, workPosToMachine } from '../frames';
 import type { GcodeEvent, MoveEvent, ParseResult, Pos, ProbeEvent, ToolChangeEvent } from '../gcode/types';
-import type { MachineProfile } from '../machine';
+import { insideEnvelope, type MachineProfile } from '../machine';
 import type { Setup } from '../setup';
 import type { Vec3 } from '@/types/units';
 
@@ -106,8 +106,27 @@ export interface TimelineDiagnostic {
   message: string;
 }
 
+/**
+ * A move that cuts nothing but can still be wrong: a rapid, or a feed move with the spindle
+ * off. Resolved in the WORK frame, only when both ends are fully known. The sweep checks
+ * them against the stock and the bed (`/Simulation.md` §7.1): a rapid through stock, and —
+ * the maintainer's rule — a spindle-off move that comes near the material, the fixture or
+ * the bed. In air they are nothing, and are not reported.
+ */
+export interface AirMove {
+  step: number;
+  line: number;
+  kind: 'rapid' | 'feed-spindle-off';
+  from: [number, number, number];
+  to: [number, number, number];
+}
+
+/** Diagnostics of one code beyond this many are folded into a single "…and N more". */
+export const DIAGNOSTIC_CAP = 25;
+
 export interface Timeline {
   events: GcodeEvent[];
+  airMoves: AirMove[];
   segments: Segment[];
   pauses: PausePoint[];
   checkpoints: Checkpoint[];
@@ -122,6 +141,11 @@ export interface Timeline {
     cuttingMoves: number;
     /** Cutting moves the sweep cannot place because the program never established their position. */
     unsweptMoves: number;
+    airMoves: number;
+    /** An `M321` ran: a laser job. The sweep refuses it. */
+    laser: boolean;
+    /** An A word moved: rotary work. V1's sweep refuses it. */
+    rotary: boolean;
   };
 }
 
@@ -346,9 +370,15 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
   let cuttingMoves = 0;
   let unswept = 0;
 
+  const counts = new Map<string, number>();
   const diag = (severity: TimelineDiagnostic['severity'], code: string, step: number, line: number, message: string): void => {
-    diagnostics.push({ severity, code, line, step, message });
+    const n = (counts.get(code) ?? 0) + 1;
+    counts.set(code, n);
+    if (n <= DIAGNOSTIC_CAP) diagnostics.push({ severity, code, line, step, message });
   };
+  const airMoves: AirMove[] = [];
+  let sawLaser = false;
+  let sawRotary = false;
 
   let state = initialState(setup);
   snapshots.push(state); // snapshot[0] is the state before step 0
@@ -398,6 +428,8 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
       const p: PausePoint = { step: i, kind: ev.reason, line: ev.line, fromTool: state.tool, toTool: null };
       pauses.push(p);
       boundary(i, p);
+    } else if (ev.kind === 'laser-mode' && ev.on) {
+      sawLaser = true;
     } else if (ev.kind === 'wcs-select' && ev.wcs !== 0 && !warnedWcs.has(ev.wcs)) {
       warnedWcs.add(ev.wcs);
       diag('warning', 'wcs-unmodelled', i, ev.line, `G${54 + ev.wcs} selects a work offset this emulator was not given; positions are unknown until G54 returns`);
@@ -406,18 +438,31 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
     // The reducer needs the state BEFORE the event; checks that depend on it run first.
     if (ev.kind === 'move') {
       const m: MoveEvent = ev;
-      if (m.mode === 'cut' && !state.laser) {
+      if (m.a !== null) sawRotary = true;
+      // Resolved against the RUNNER's state, not the parser's (see `resolveMove`), then put
+      // in both frames: cutting and proximity happen in WORK coordinates, the envelope check
+      // in MACHINE coordinates. Only G54 is modelled; under another WCS the mapping is unknown.
+      const r = resolveMove(state, m);
+      const cur = withOrigin(setup, state);
+      const mapped = state.wcs === 0;
+      const toW = m.frame === 'work' ? r.to : mapped ? machinePosToWork(cur, r.to) : unknownPos();
+      const fromW = m.frame === 'work' ? r.from : mapped ? machinePosToWork(cur, r.from) : unknownPos();
+      const toM = m.frame === 'machine' ? r.to : mapped ? workPosToMachine(cur, r.to) : unknownPos();
+      if (machine && !insideEnvelope(machine, toM)) {
+        diag('error', 'outside-envelope', i, m.line, `a move to machine (${toM.map((v) => (v === null ? '?' : v.toFixed(3))).join(', ')}) leaves the ${machine.name}'s envelope`);
+      }
+      const known = (p: Pos): p is [number, number, number] => p[0] !== null && p[1] !== null && p[2] !== null;
+      const isCut = m.mode === 'cut' && !state.laser && state.spindle !== 'off';
+      if (!isCut && !state.laser) {
+        // A rapid, or a feed move with the spindle off. Neither cuts; both can still be wrong,
+        // and only the geometry can say (the maintainer's rule: a spindle-off move is a fault
+        // only near the material, the fixture or the bed). Collected for the sweep.
+        if (known(fromW) && known(toW)) {
+          airMoves.push({ step: i, line: m.line, kind: m.mode === 'rapid' ? 'rapid' : 'feed-spindle-off', from: [fromW[0], fromW[1], fromW[2]], to: [toW[0], toW[1], toW[2]] });
+        }
+      }
+      if (isCut) {
         cuttingMoves++;
-        // NOT checked here: a feed move with the spindle off. The maintainer's rule
-        // (2026-10-03): it is neither an error nor a warning UNLESS the tool is near the
-        // material, the fixture or the bed, and nearness is geometry, which this state machine
-        // does not have. The vendor's own fatigue-test-air.nc feeds down with the spindle off
-        // in a "(Height Test)" before its first M3. The proximity check belongs to the sweep.
-        // Cutting happens in work coordinates; a machine-frame cut converts first. Resolved
-        // against the RUNNER's state, not the parser's (see `resolveMove`).
-        const r = resolveMove(state, m);
-        const toW = m.frame === 'work' ? r.to : machinePosToWork(withOrigin(setup, state), r.to);
-        const fromW = m.frame === 'work' ? r.from : machinePosToWork(withOrigin(setup, state), r.from);
         const z = lowestKnownZ(toW[2], fromW[2]);
         if (toW[2] === null || z === null) {
           // A WARNING, not an error: the machine knows where it is, the emulator was not told.
@@ -470,6 +515,11 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
     }
   }
   seg.end = events.length;
+  for (const [code, n] of counts) {
+    if (n > DIAGNOSTIC_CAP) {
+      diagnostics.push({ severity: 'info', code: `${code}-more`, line: 0, step: events.length, message: `…and ${n - DIAGNOSTIC_CAP} more '${code}' (${n} in all)` });
+    }
+  }
 
   const stateAt = (i: number): MachineState => {
     if (i < 0) return snapshots[0] as MachineState;
@@ -482,6 +532,7 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
 
   return {
     events,
+    airMoves,
     segments,
     pauses,
     checkpoints: order,
@@ -494,6 +545,9 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
       checkpoints: order.length,
       cuttingMoves,
       unsweptMoves: unswept,
+      airMoves: airMoves.length,
+      laser: sawLaser,
+      rotary: sawRotary,
     },
   };
 }
