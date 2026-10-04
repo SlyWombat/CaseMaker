@@ -5,8 +5,8 @@ import type { Tool } from '@/engine/cnc/tool';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import { stubSetup, type Setup, type Workholding } from '@/engine/cnc/setup';
-import { polygonSelfIntersects } from '@/engine/cnc/engrave/partPlan';
-import type { EngraveItem, EngraveJob } from '@/types/engraveJob';
+import { polygonSelfIntersects, resolveItems } from '@/engine/cnc/engrave/partPlan';
+import type { EngraveAnyItem, EngraveJob } from '@/types/engraveJob';
 
 /**
  * The two pure derivations that turn an `EngraveJob` into the emulator's inputs (#200).
@@ -35,6 +35,8 @@ export type JobFindingCode =
   | 'sacrificial-default'
   // Shape-specific (#214): a polygon that crosses itself is not a region.
   | 'polygon-self-intersecting'
+  // Combined shapes (#215): a reference that is missing, disabled, self or cyclic.
+  | 'item-reference'
   // Geometry-dependent findings: computed by the worker (#201), not `validateJob` — they
   // need the tool-opened region, which only exists once a CrossSection is evaluated. They
   // were `label-*`; #214 renamed them `item-*` (a shape is an item too) with the old names
@@ -52,8 +54,8 @@ export interface JobFinding {
   message: string;
 }
 
-/** A human name for an item, for finding messages: `Label "CASE"`, `Circle ⌀6`, … */
-export function itemLabel(item: EngraveItem): string {
+/** A human name for an item, for finding messages: `Label "CASE"`, `Circle ⌀6`, `Border …`. */
+export function itemLabel(item: EngraveAnyItem): string {
   if (!('kind' in item)) return `Label "${item.text}"`;
   const name = item.name ? ` "${item.name}"` : '';
   switch (item.kind) {
@@ -65,11 +67,17 @@ export function itemLabel(item: EngraveItem): string {
       return `Slot${name} ${item.length}×${item.width}`;
     case 'polygon':
       return `Polygon${name} (${item.points.length} points)`;
+    case 'border':
+      return `Border${name} ${item.width} wide`;
+    case 'frame':
+      return `Frame${name} ${item.width} wide`;
+    case 'cutaway':
+      return `Cutaway${name} (${item.islands.length} island${item.islands.length === 1 ? '' : 's'})`;
   }
 }
 
 /** Does this item produce any region at all? A shape always does; a label needs text. */
-function itemHasWork(item: EngraveItem): boolean {
+function itemHasWork(item: EngraveAnyItem): boolean {
   return 'kind' in item || item.text.trim().length > 0;
 }
 
@@ -125,7 +133,10 @@ export function toSetup(job: EngraveJob, machine: MachineProfile): Setup {
  */
 export function validateJob(job: EngraveJob): JobFinding[] {
   const findings: JobFinding[] = [];
-  const enabled: EngraveItem[] = [...job.labels, ...job.shapes].filter((item) => item.enabled);
+  const all: EngraveAnyItem[] = [...job.labels, ...job.shapes, ...(job.combined ?? [])];
+  // A construction item (#215) produces no cut of its own, so its depth is irrelevant and it
+  // must not be the reason a job reads as "has work".
+  const enabled: EngraveAnyItem[] = all.filter((item) => item.enabled && !item.construction);
   const { thickness } = job.stock;
   const floorAllowed = thickness - job.minFloor;
 
@@ -143,10 +154,32 @@ export function validateJob(job: EngraveJob): JobFinding[] {
     }
   }
 
+  // A frame/cutaway (#215) must name an item that exists, is enabled and forms no cycle.
+  // `resolveItems` reports one error per bad reference; here it becomes a finding.
+  for (const error of resolveItems(job).errors) {
+    const src = all.find((item) => item.id === error.itemId);
+    const who = src ? itemLabel(src) : `Item ${error.itemId}`;
+    const message =
+      error.reason === 'self'
+        ? `${who} references itself; a shape cannot be its own outline.`
+        : error.reason === 'missing'
+          ? `${who} references "${error.referencedId}", which is not in the job.`
+          : error.reason === 'disabled'
+            ? `${who} references "${error.referencedId}", which is disabled.`
+            : `${who} and "${error.referencedId}" reference each other in a cycle; ` +
+              'one of them must not depend on the other.';
+    findings.push({ severity: 'error', code: 'item-reference', labelId: error.itemId, message });
+  }
+
   // A self-intersecting polygon is not a region — the fill rule would invent one (#214). It is
   // reported so the worker drops the cut, rather than cutting whatever the crossing makes.
   for (const shape of job.shapes) {
-    if (shape.enabled && shape.kind === 'polygon' && polygonSelfIntersects(shape.points)) {
+    if (
+      shape.enabled &&
+      !shape.construction &&
+      shape.kind === 'polygon' &&
+      polygonSelfIntersects(shape.points)
+    ) {
       findings.push({
         severity: 'error',
         code: 'polygon-self-intersecting',
@@ -174,7 +207,7 @@ export function validateJob(job: EngraveJob): JobFinding[] {
 
   const deepest = enabled.reduce((max, item) => Math.max(max, item.depth), 0);
   if (job.workholding.vise.stockProud < deepest + 1) {
-    const deepestItem = enabled.reduce<EngraveItem | null>(
+    const deepestItem = enabled.reduce<EngraveAnyItem | null>(
       (deepestSoFar, item) => (!deepestSoFar || item.depth > deepestSoFar.depth ? item : deepestSoFar),
       null,
     );

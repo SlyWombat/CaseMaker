@@ -38,6 +38,11 @@ export interface EngraveLabel {
   /** Depth of this label's floor below the top face, mm. Positive. */
   depth: Mm;
   enabled: boolean;
+  /**
+   * Reference-only (#215): the item produces no cut of its own and exists only to be named by a
+   * `frame` or a `cutaway`. A label cleared as an ISLAND is the raised-text case.
+   */
+  construction?: boolean;
 }
 
 /**
@@ -56,6 +61,11 @@ export interface EngraveShapeBase {
   /** Depth of this pocket's floor below the top face, mm. Positive. */
   depth: Mm;
   enabled: boolean;
+  /**
+   * Reference-only (#215): the item produces no cut of its own and exists only to be named by a
+   * `frame` or a `cutaway`. Its profile still resolves, so it can be a target or an island.
+   */
+  construction?: boolean;
 }
 
 /** A rectangle pocket. `cornerRadius` 0 = sharp — the cutter rounds it anyway. */
@@ -92,6 +102,63 @@ export type EngraveShape =
   | EngraveCircleShape
   | EngraveSlotShape
   | EngravePolygonShape;
+
+/**
+ * The three COMBINED kinds (#215): shapes built from other shapes or from the stock outline,
+ * by union, difference and offset — not by a general boolean-expression editor.
+ *
+ * They are their own union, not extra members of `EngraveShape`, because they are DERIVED: a
+ * `border` follows the stock, a `frame` follows another item, a `cutaway` clears one item and
+ * leaves others standing. Their inherited `position`/`rotation` are IGNORED — the derived
+ * geometry is already in the stock frame, and there is nothing for a centre or an angle to
+ * move. `depth` and `enabled` still apply.
+ *
+ * `around`, `outer` and `islands` are item ids resolved by `resolveItems` (`partPlan.ts`). A
+ * reference that is missing, disabled or part of a cycle is a finding, never a crash — see
+ * `resolveItems`. A referenced item may be marked `construction: true` to suppress its own cut.
+ */
+export interface EngraveBorderShape extends EngraveShapeBase {
+  kind: 'border';
+  /** Distance from the stock outline in to the ring's outer edge, mm. */
+  inset: Mm;
+  /** Ring wall thickness, mm. */
+  width: Mm;
+}
+
+/** A ring following another item's outline (#215). */
+export interface EngraveFrameShape extends EngraveShapeBase {
+  kind: 'frame';
+  /** Id of the item whose outline the ring follows. */
+  around: string;
+  /** Clearance between the target outline and the ring's inner edge, mm. */
+  gap: Mm;
+  /** Ring wall thickness, mm. */
+  width: Mm;
+}
+
+/**
+ * A pocket cleared to `depth` with `islands` left standing (#215). A label island is raised
+ * text: the panel is cleared and the letters stay at full height.
+ */
+export interface EngraveCutawayShape extends EngraveShapeBase {
+  kind: 'cutaway';
+  /** Id of the item whose outline is cleared. */
+  outer: string;
+  /** Ids of items left standing inside the cleared area. */
+  islands: string[];
+}
+
+export type EngraveCombinedShape =
+  | EngraveBorderShape
+  | EngraveFrameShape
+  | EngraveCutawayShape;
+
+/**
+ * Every item that can appear in a plan's `engraves` (#215): a label, one of the four simple
+ * shapes, or one of the three combined kinds. `EngraveItem` stays label-or-simple-shape for the
+ * UI's exhaustive switches; the engine's wider type is this one.
+ */
+export type EngraveAnyItem = EngraveItem | EngraveCombinedShape;
 
 /**
  * What `itemProfile` accepts: a text label or a shape (#214). The document keeps them in two
@@ -176,6 +243,15 @@ export interface EngraveJob {
   labels: EngraveLabel[];
   /** Shape pockets (#214), each at its own depth. Empty for a text-only job. */
   shapes: EngraveShape[];
+  /**
+   * Combined shapes (#215): borders, frames and cut-aways built from other items or from the
+   * stock. A separate list, like `labels` and `shapes`, so the panel's exhaustive `EngraveShape`
+   * switch is untouched; all three lists funnel through the one `PartPlan` downstream.
+   *
+   * Optional so an existing job (and every literal that does not build one) is unchanged; the
+   * schema defaults it to empty on load.
+   */
+  combined?: EngraveCombinedShape[];
   /** Key into TOOL_LIBRARY. */
   toolKey: string;
   workholding: { kind: 'vise'; vise: ViseParams };

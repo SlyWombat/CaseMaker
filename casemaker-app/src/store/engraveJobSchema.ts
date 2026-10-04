@@ -48,6 +48,8 @@ const labelSchema = z.object({
   rotation: z.number().finite(),
   depth: z.number().finite().positive(),
   enabled: z.boolean(),
+  // Reference-only item (#215). Optional, so a pre-#215 job is unchanged.
+  construction: z.boolean().optional(),
 });
 
 /**
@@ -65,6 +67,8 @@ const shapeBaseSchema = z.object({
   rotation: z.number().finite(),
   depth: z.number().finite().positive(),
   enabled: z.boolean(),
+  // Reference-only item (#215). Optional, so a pre-#215 job is unchanged.
+  construction: z.boolean().optional(),
 });
 
 const shapeKindsSchema = z.discriminatedUnion('kind', [
@@ -110,6 +114,30 @@ const shapeSchema = shapeKindsSchema.superRefine((shape, ctx) => {
     });
   }
 });
+
+/**
+ * The three combined kinds (#215). Their dimensions are checked here (positive ring width,
+ * non-negative gap / inset); whether a NAMED reference exists, is enabled or forms a cycle is
+ * not a schema question — it is `resolveItems`'s job, reported as an `item-reference` finding.
+ */
+const combinedShapeSchema = z.discriminatedUnion('kind', [
+  shapeBaseSchema.extend({
+    kind: z.literal('border'),
+    inset: z.number().finite().nonnegative(),
+    width: z.number().finite().positive(),
+  }),
+  shapeBaseSchema.extend({
+    kind: z.literal('frame'),
+    around: z.string().min(1),
+    gap: z.number().finite().nonnegative(),
+    width: z.number().finite().positive(),
+  }),
+  shapeBaseSchema.extend({
+    kind: z.literal('cutaway'),
+    outer: z.string().min(1),
+    islands: z.array(z.string().min(1)),
+  }),
+]);
 
 const viseSchema = z.object({
   stockProud: z.number().finite(),
@@ -209,6 +237,10 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   // #214's shape pockets. Defaulted to empty so a v2 job written before shapes existed (and
   // the v1 transform below) still loads as a text-only job.
   shapes: z.array(shapeSchema).default([]),
+  // #215's combined shapes (border/frame/cutaway). OPTIONAL, not defaulted: a job that has
+  // none keeps no key, so an existing document round-trips byte-for-byte (the same reason
+  // `cutOverride` is optional). Consumers read it as `combined ?? []`.
+  combined: z.array(combinedShapeSchema).optional(),
 });
 
 export const engraveJobSchema = z
@@ -224,6 +256,8 @@ export const engraveJobSchema = z
           // …and no shapes (#214): every old label stays a label, so a version-1 job loads and
           // cuts byte-identically.
           shapes: [],
+          // …and no combined shapes (#215): the optional key is simply absent, so a v1 job
+          // round-trips byte-for-byte.
         }
       : job,
   );

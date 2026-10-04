@@ -17,7 +17,7 @@ import { engravableProfile } from '@/engine/cnc/engrave/engravable';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { itemLabel, jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { aabbOfProfile, pOffset, type Profile } from '@/engine/compiler/profile';
-import type { EngraveItem, EngraveJob, EngraveShape } from '@/types/engraveJob';
+import type { EngraveAnyItem, EngraveCombinedShape, EngraveJob, EngraveShape } from '@/types/engraveJob';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 
 /**
@@ -267,12 +267,16 @@ export function engravabilityFindings(
   return findings;
 }
 
-/** The item — label or shape — a measurement row names (#214). */
-function findItem(job: EngraveJob, id: string): EngraveItem | undefined {
-  return job.labels.find((l) => l.id === id) ?? job.shapes.find((s) => s.id === id);
+/** The item — label, shape or combined shape — a measurement row names (#214/#215). */
+function findItem(job: EngraveJob, id: string): EngraveAnyItem | undefined {
+  return (
+    job.labels.find((l) => l.id === id) ??
+    job.shapes.find((s) => s.id === id) ??
+    (job.combined ?? []).find((c) => c.id === id)
+  );
 }
 
-function isShapeItem(item: EngraveItem): item is EngraveShape {
+function isShapeItem(item: EngraveAnyItem): item is EngraveShape | EngraveCombinedShape {
   return 'kind' in item;
 }
 
@@ -282,12 +286,12 @@ function isShapeItem(item: EngraveItem): item is EngraveShape {
  * job-level `no-items` finding already says the job has nothing — it must not ALSO read as
  * `item-empty` (which would mean "the cutter is too big for this text").
  */
-function hasContent(item: EngraveItem): boolean {
+function hasContent(item: EngraveAnyItem): boolean {
   return 'kind' in item || item.text.trim().length > 0;
 }
 
 /** Why an item has no opened region at all. A circle smaller than the cutter reads as a hole. */
-function emptyMessage(item: EngraveItem, cutter: string): string {
+function emptyMessage(item: EngraveAnyItem, cutter: string): string {
   if (!isShapeItem(item)) {
     return `Label "${item.text}" has nothing this cutter can reach: every stroke is thinner than ${cutter}.`;
   }

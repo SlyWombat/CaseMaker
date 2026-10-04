@@ -19,7 +19,7 @@ import { feedsFor } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import type { EngraveItem, EngraveJob } from '@/types/engraveJob';
+import type { EngraveAnyItem, EngraveJob } from '@/types/engraveJob';
 import { LOST_DETAIL_RATIO, type LabelEngravability } from '@/workers/sim/engraveGeometry';
 
 /** Why a tool was dropped before measuring (#211: flat-ends only, and only cutters that exist). */
@@ -79,13 +79,17 @@ function qualifyingReason(pick: ToolCandidate): string {
     : 'Largest cutter that keeps every item intact (reach not recorded).';
 }
 
-/** The item (label or shape) a measurement row names, if the job still has it (#214). */
-function findItem(job: EngraveJob, id: string) {
-  return job.labels.find((l) => l.id === id) ?? job.shapes.find((s) => s.id === id);
+/** The item (label, shape or combined shape) a measurement row names, if the job still has it (#214/#215). */
+function findItem(job: EngraveJob, id: string): EngraveAnyItem | undefined {
+  return (
+    job.labels.find((l) => l.id === id) ??
+    job.shapes.find((s) => s.id === id) ??
+    (job.combined ?? []).find((c) => c.id === id)
+  );
 }
 
-/** A short human name for the worst item, without assuming it is a label (#214). */
-function itemName(item: EngraveItem): string {
+/** A short human name for the worst item, without assuming it is a label (#214/#215). */
+function itemName(item: EngraveAnyItem): string {
   if (!('kind' in item)) return `"${item.text}"`;
   switch (item.kind) {
     case 'rect':
@@ -96,6 +100,12 @@ function itemName(item: EngraveItem): string {
       return `the ${item.length}×${item.width} mm slot`;
     case 'polygon':
       return `the ${item.points.length}-point polygon`;
+    case 'border':
+      return `the ${item.width} mm border`;
+    case 'frame':
+      return `the ${item.width} mm frame`;
+    case 'cutaway':
+      return `the cut-away with ${item.islands.length} island${item.islands.length === 1 ? '' : 's'}`;
   }
 }
 
@@ -146,9 +156,9 @@ export function recommendTool(
   tools: readonly ToolLibraryEntry[],
   measure: (toolKey: string) => LabelEngravability[],
 ): ToolRecommendation {
-  // The deepest cut is over every enabled item — a shape can be the deepest thing in the job
-  // (#214), and the reach test below must see it.
-  const deepest = ([...job.labels, ...job.shapes] as EngraveItem[])
+  // The deepest cut is over every enabled item — a shape or combined shape can be the deepest
+  // thing in the job (#214/#215), and the reach test below must see it.
+  const deepest = ([...job.labels, ...job.shapes, ...(job.combined ?? [])] as EngraveAnyItem[])
     .filter((item) => item.enabled)
     .reduce((max, item) => Math.max(max, item.depth), 0);
 

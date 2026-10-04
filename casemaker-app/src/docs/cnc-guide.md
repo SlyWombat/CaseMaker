@@ -544,6 +544,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `depth-exceeds-stock` | error | An item cuts so deep the floor left under it is below the minimum. | Make it shallower or use thicker stock. |
 | `no-items` | error | The job has no enabled label with text or shape. Formerly `no-labels`. | Add one. |
 | `polygon-self-intersecting` | error | A polygon shape crosses itself, so the outline is not a simple region. | Fix the points so the outline does not cross itself. |
+| `item-reference` | error | A frame or cut-away names an item that is missing, disabled, or part of a cycle, so the ring or pocket cannot be built. | Point it at a real, enabled item that does not depend on it. |
 | `tool-missing` | error | The job names a tool that is not in the library. | Pick a real tool. |
 | `stock-proud-too-small` | warning | The blank stands too far below the jaw tops for the deepest cut, so the cutter would work below the jaws. | Seat the blank higher. |
 | `vise-default` | warning | The vise dimensions are unmeasured defaults, so collisions cannot be trusted. | Measure your vise. |
