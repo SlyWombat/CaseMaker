@@ -144,7 +144,12 @@ export interface AirMove {
   to: [number, number, number];
 }
 
-/** Diagnostics of one code beyond this many are folded into a single "…and N more". */
+/**
+ * Diagnostics of one code beyond this many are folded into a single "…and N more", which
+ * carries the WORST severity of the code it summarises (it was `info` once, which downgraded
+ * 25-plus `outside-envelope` errors to a line a UI could hide). The true count per code is
+ * `summary.diagnosticCounts`.
+ */
 export const DIAGNOSTIC_CAP = 25;
 
 export interface Timeline {
@@ -169,6 +174,8 @@ export interface Timeline {
     laser: boolean;
     /** An A word moved: rotary work. V1's sweep refuses it. */
     rotary: boolean;
+    /** The TRUE number of diagnostics raised per code, including those past `DIAGNOSTIC_CAP` that were folded away. */
+    diagnosticCounts: Record<string, number>;
   };
 }
 
@@ -515,9 +522,13 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
   let unswept = 0;
 
   const counts = new Map<string, number>();
+  const worst = new Map<string, TimelineDiagnostic['severity']>();
+  const rank = { info: 0, warning: 1, error: 2 } as const;
   const diag = (severity: TimelineDiagnostic['severity'], code: string, step: number, line: number, message: string): void => {
     const n = (counts.get(code) ?? 0) + 1;
     counts.set(code, n);
+    const w = worst.get(code);
+    if (w === undefined || rank[severity] > rank[w]) worst.set(code, severity);
     if (n <= DIAGNOSTIC_CAP) diagnostics.push({ severity, code, line, step, message });
   };
   const airMoves: AirMove[] = [];
@@ -673,7 +684,7 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
   seg.end = events.length;
   for (const [code, n] of counts) {
     if (n > DIAGNOSTIC_CAP) {
-      diagnostics.push({ severity: 'info', code: `${code}-more`, line: 0, step: events.length, message: `…and ${n - DIAGNOSTIC_CAP} more '${code}' (${n} in all)` });
+      diagnostics.push({ severity: worst.get(code) ?? 'info', code: `${code}-more`, line: 0, step: events.length, message: `…and ${n - DIAGNOSTIC_CAP} more '${code}' (${n} in all)` });
     }
   }
 
@@ -704,6 +715,7 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
       airMoves: airMoves.length,
       laser: sawLaser,
       rotary: sawRotary,
+      diagnosticCounts: Object.fromEntries(counts),
     },
   };
 }

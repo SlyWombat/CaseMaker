@@ -615,6 +615,19 @@ describe('the envelope check (#184): only with a machine, only on known axes, ca
     const more = tl.diagnostics.find((d) => d.code === 'outside-envelope-more');
     expect(more?.message).toMatch(/and 15 more/);
   });
+
+  it('the "…and N more" line INHERITS the severity of the code it summarises, and the true count is kept', () => {
+    // It was an `info` line, which downgraded 25-plus errors on 14 of the 26 corpus files.
+    const lines: string[] = [];
+    for (let i = 0; i < 30; i++) lines.push(`G0 X${10 + i} Y10 Z-1`);
+    const tl = buildTimeline(parseGcode(lines.join('\n')), setupWith(), Z1);
+    const more = tl.diagnostics.find((d) => d.code === 'outside-envelope-more');
+    expect(more?.severity).toBe('error');
+    expect(more?.message).toMatch(/and 5 more/);
+    expect(tl.summary.diagnosticCounts['outside-envelope']).toBe(30);
+    // Not folded, not counted twice: the "-more" line is not itself a counted diagnostic.
+    expect(tl.summary.diagnosticCounts['outside-envelope-more']).toBeUndefined();
+  });
 });
 
 describe('air moves: what the sweep checks against the stock and the bed', () => {
@@ -653,7 +666,7 @@ describe('air moves: what the sweep checks against the stock and the bed', () =>
 describe('summary', () => {
   it('counts steps, segments, pauses, checkpoints and cutting moves', () => {
     const tl = run('T1M6\nS1000 M3\nG0 X0 Y0 Z0\nG1 Z-1 F100\nG1 X5\nG0 Z5\n', { startingTool: 'unknown' });
-    expect(tl.summary).toEqual({ steps: 6, segments: 1, pauses: 1, checkpoints: 1, cuttingMoves: 2, unsweptMoves: 0, airMoves: 1, laser: false, rotary: false });
+    expect(tl.summary).toEqual({ steps: 6, segments: 1, pauses: 1, checkpoints: 1, cuttingMoves: 2, unsweptMoves: 0, airMoves: 1, laser: false, rotary: false, diagnosticCounts: { 'tool-change-ambiguous': 1 } });
   });
 });
 
