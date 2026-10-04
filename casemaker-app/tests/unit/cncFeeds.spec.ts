@@ -60,6 +60,14 @@ describe('feedsFor selects a row by cutting diameter', () => {
     expect(res.params.stepDown).toBe(1.0);
   });
 
+  it('a cutter exactly on the shared 1.6 mm boundary takes the FIRST (smaller-diameter) row', () => {
+    const res = feedsFor('softwood', flatEndMill(1.6), Z1);
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.entry).toBe(FEEDS_TABLE[0]);
+    expect(res.params.stepDown).toBe(0.5);
+  });
+
   it('a 6 mm cutter has no row: refused, never extrapolated', () => {
     const res = feedsFor('softwood', flatEndMill(6), Z1);
     expect(res.ok).toBe(false);
@@ -92,6 +100,15 @@ describe('feedsFor enforces step-over <= radius (#191)', () => {
     expect(atRadius.ok).toBe(true);
     if (!atRadius.ok) throw new Error(atRadius.reason);
     expect(atRadius.params.stepOver).toBe(0.5);
+  });
+
+  it('refuses a zero or negative step-over override as well as one past the radius', () => {
+    for (const stepOver of [0, -0.1]) {
+      const res = feedsFor('softwood', flatEndMill(1.0), Z1, { stepOver });
+      expect(res.ok, String(stepOver)).toBe(false);
+      if (res.ok) throw new Error('expected a refusal');
+      expect(res.reason).toContain('step-over');
+    }
   });
 });
 

@@ -57,9 +57,10 @@ const PROVENANCE =
  * the real one; the softwood/hardwood/MDF step-downs are conservative guesses for a 150 W
  * spindle, not measurements.
  *
- * Range tests are INCLUSIVE at both ends, so a diameter exactly on a shared boundary takes the
- * first matching row (the smaller cutter). 3.175 mm — the shank every sample tool uses — falls
- * in the 1.6-3.2 mm row.
+ * Range tests are INCLUSIVE at both ends, and the FIRST matching row wins. So a diameter
+ * exactly on a shared boundary — 1.6 mm between the 0.8-1.6 and 1.6-3.2 rows — takes the
+ * smaller-diameter row, which is the conservative side (a 1.6 mm cutter gets the 0.5 mm
+ * step-down, not 1.0). 3.175 mm — the shank every sample tool uses — falls in the 1.6-3.2 row.
  */
 export const FEEDS_TABLE: readonly FeedsEntry[] = [
   {
@@ -177,6 +178,7 @@ export function feedsFor(
   }
 
   if (params.stepDown <= 0) return { ok: false, reason: `step-down must be > 0, got ${params.stepDown} mm` };
+  if (params.stepOver <= 0) return { ok: false, reason: `step-over must be > 0, got ${params.stepOver} mm` };
   if (params.feed <= 0) return { ok: false, reason: `cutting feed must be > 0, got ${params.feed} mm/min` };
   if (params.plungeFeed <= 0) return { ok: false, reason: `plunge feed must be > 0, got ${params.plungeFeed} mm/min` };
   if (params.rpm <= 0) return { ok: false, reason: `spindle speed must be > 0, got ${params.rpm} RPM` };
