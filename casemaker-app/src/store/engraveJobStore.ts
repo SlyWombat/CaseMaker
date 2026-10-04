@@ -1,12 +1,7 @@
 import { create } from 'zustand';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
-import {
-  defaultEngraveJob,
-  newEngraveLabelId,
-  type EngraveJob,
-  type EngraveLabel,
-  type ViseParams,
-} from '@/types/engraveJob';
+import { defaultEngraveJob, newEngraveLabelId } from '@/engine/cnc/engrave/defaults';
+import type { EngraveJob, EngraveLabel, ViseParams } from '@/types/engraveJob';
 import { parseEngraveJob, type ParseEngraveJobResult } from './engraveJobSchema';
 
 /**

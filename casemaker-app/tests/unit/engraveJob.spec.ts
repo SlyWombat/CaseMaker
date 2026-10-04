@@ -19,7 +19,8 @@ const backing = new Map<string, string>();
   },
 } as Storage;
 
-import { defaultEngraveJob, type EngraveLabel } from '@/types/engraveJob';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import type { EngraveLabel } from '@/types/engraveJob';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { labelProfile, toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { jobTool, toSetup, validateJob } from '@/engine/cnc/engrave/jobSetup';
