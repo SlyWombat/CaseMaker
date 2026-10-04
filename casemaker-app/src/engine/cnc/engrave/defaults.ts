@@ -1,5 +1,6 @@
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { DEFAULT_VISE } from '@/engine/cnc/fixture';
+import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
 import { newId } from '@/utils/id';
 import type { EngraveJob, ViseParams } from '@/types/engraveJob';
 
@@ -17,6 +18,11 @@ import type { EngraveJob, ViseParams } from '@/types/engraveJob';
  */
 export function newEngraveLabelId(): string {
   return newId('lbl');
+}
+
+/** Fresh shape id (#214), a sibling of `newEngraveLabelId`; both are items downstream. */
+export function newEngraveShapeId(): string {
+  return newId('shp');
 }
 
 /**
@@ -48,7 +54,7 @@ export function newEngraveLabelId(): string {
  */
 export function defaultEngraveJob(vise: ViseParams = DEFAULT_VISE): EngraveJob {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     name: 'Untitled engrave job',
     stock: {
       length: 100, // X — a common hobby blank, fits the Z1's 200 mm X with vise room.
@@ -91,6 +97,8 @@ export function defaultEngraveJob(vise: ViseParams = DEFAULT_VISE): EngraveJob {
         enabled: true,
       },
     ],
+    // No shape pockets (#214): the shipped acceptance job is the three-label one (#209).
+    shapes: [],
     // The 1.0 mm flat end mill in TOOL_LIBRARY. Its lengths are `null` (unknown), so the
     // holder gate will say "cannot be proven" — #208 records the owned cutters' real lengths.
     toolKey: 'flat-1.0',
@@ -100,6 +108,9 @@ export function defaultEngraveJob(vise: ViseParams = DEFAULT_VISE): EngraveJob {
     },
     minFloor: 1.0,
     edgeMargin: 1.0,
+    // No sacrificial material: a job that does not use it behaves exactly as before (#213).
+    sacrificial: noneSacrificial(),
+    breakthrough: DEFAULT_BREAKTHROUGH,
     customFonts: [],
   };
 }

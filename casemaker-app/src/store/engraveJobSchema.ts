@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Z1 } from '@/engine/cnc/machine';
+import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
 import type { EngraveJob } from '@/types/engraveJob';
 
 /**
@@ -10,6 +11,11 @@ import type { EngraveJob } from '@/types/engraveJob';
  * newer-minor file still loads, with keys this version does not know dropped rather than
  * failing the whole job. That is the opposite of the refusal policy for UNTRUSTED tool input
  * (`/Simulation.md` §6): a job file is the user's own document, not a foreign one.
+ *
+ * #213 bumped the document to version 2 (sacrificial material + breakthrough). The union of
+ * versioned schemas plus a transform is the same forward-migration pattern as
+ * `projectSchema.ts`: a version-1 job on disk parses against v1 and is stamped to v2 with NO
+ * sacrificial material (`noneSacrificial()`) and the default breakthrough.
  */
 
 /**
@@ -44,6 +50,67 @@ const labelSchema = z.object({
   enabled: z.boolean(),
 });
 
+/**
+ * A shape pocket (#214). One discriminated union on `kind`, with the shared shape fields and
+ * the two cross-field bounds (`cornerRadius`, slot `length ≥ width`) as a `superRefine` — a
+ * plain union member cannot carry a refinement and still be a discriminant for
+ * `z.discriminatedUnion`. Bounds are the issue's: every dimension > 0, 3–500 polygon points.
+ */
+const polygonPointSchema = z.tuple([z.number().finite(), z.number().finite()]);
+
+const shapeBaseSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().optional(),
+  position: positionSchema,
+  rotation: z.number().finite(),
+  depth: z.number().finite().positive(),
+  enabled: z.boolean(),
+});
+
+const shapeKindsSchema = z.discriminatedUnion('kind', [
+  shapeBaseSchema.extend({
+    kind: z.literal('rect'),
+    width: z.number().finite().positive(),
+    height: z.number().finite().positive(),
+    cornerRadius: z.number().finite().nonnegative(),
+  }),
+  shapeBaseSchema.extend({
+    kind: z.literal('circle'),
+    diameter: z.number().finite().positive(),
+  }),
+  shapeBaseSchema.extend({
+    kind: z.literal('slot'),
+    length: z.number().finite().positive(),
+    width: z.number().finite().positive(),
+  }),
+  shapeBaseSchema.extend({
+    kind: z.literal('polygon'),
+    points: z.array(polygonPointSchema).min(3).max(500),
+  }),
+]);
+
+/**
+ * A polygon that crosses itself is not a region — the fill rule would invent one. The schema
+ * cannot decide it (that is a finding, #214) but the two length relationships can be checked
+ * here.
+ */
+const shapeSchema = shapeKindsSchema.superRefine((shape, ctx) => {
+  if (shape.kind === 'rect' && shape.cornerRadius > Math.min(shape.width, shape.height) / 2) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'cornerRadius must be ≤ min(width, height) / 2',
+      path: ['cornerRadius'],
+    });
+  }
+  if (shape.kind === 'slot' && shape.length < shape.width) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'slot length must be ≥ width',
+      path: ['length'],
+    });
+  }
+});
+
 const viseSchema = z.object({
   stockProud: z.number().finite(),
   fixedJawThickness: z.number().finite(),
@@ -54,6 +121,38 @@ const viseSchema = z.object({
   uncertainty: z.number().finite().nonnegative(),
   // Optional: a shipped default carries no date. Absent keys are preserved as absent.
   measuredAt: z.string().optional(),
+});
+
+/**
+ * One side strip (#213). `height` is 'flush' (level with the part's top) or a positive height
+ * from the part's bottom face, mm.
+ */
+const sacrificialSideSchema = z.object({
+  thickness: z.number().finite().positive(),
+  height: z.union([z.literal('flush'), z.number().finite().positive()]),
+});
+
+const sacrificialUnderSchema = z.object({
+  thickness: z.number().finite().positive(),
+  // 0 = flush; never negative.
+  overhang: z.object({
+    left: z.number().finite().nonnegative(),
+    right: z.number().finite().nonnegative(),
+    front: z.number().finite().nonnegative(),
+    back: z.number().finite().nonnegative(),
+  }),
+  attach: z.enum(['tape', 'glue', 'screws', 'loose']),
+});
+
+const sacrificialSchema = z.object({
+  under: sacrificialUnderSchema.nullable(),
+  sides: z.object({
+    left: sacrificialSideSchema.nullable(),
+    right: sacrificialSideSchema.nullable(),
+    front: sacrificialSideSchema.nullable(),
+    back: sacrificialSideSchema.nullable(),
+  }),
+  source: z.enum(['default', 'saved', 'measured']),
 });
 
 const stockSchema = z.object({
@@ -69,7 +168,23 @@ const customFontSchema = z.object({
   data: z.string(),
 });
 
-export const engraveJobSchema: z.ZodType<EngraveJob> = z.object({
+/**
+ * The user's hand edits to the feeds/speeds (#205), one optional key per `CutParams` field.
+ * Deliberately NOT `.positive()`: a bad number is a CUTTING mistake (`feedsFor` names it and
+ * refuses to cut), not a reason to fail loading the whole job file. Every key is optional, and
+ * an absent `cutOverride` means "use the computed values unchanged".
+ */
+const cutOverrideSchema = z.object({
+  rpm: z.number().finite().optional(),
+  feed: z.number().finite().optional(),
+  plungeFeed: z.number().finite().optional(),
+  stepDown: z.number().finite().optional(),
+  stepOver: z.number().finite().optional(),
+  air: z.boolean().optional(),
+});
+
+/** Version 1 (#200): the document before sacrificial material existed. */
+const engraveJobV1Schema = z.object({
   schemaVersion: z.literal(1),
   name: z.string(),
   stock: stockSchema,
@@ -83,6 +198,35 @@ export const engraveJobSchema: z.ZodType<EngraveJob> = z.object({
   edgeMargin: z.number().finite().nonnegative(),
   customFonts: z.array(customFontSchema),
 });
+
+/** Version 2 (#213): adds `sacrificial` and `breakthrough`. */
+const engraveJobV2Schema = engraveJobV1Schema.extend({
+  schemaVersion: z.literal(2),
+  sacrificial: sacrificialSchema,
+  breakthrough: z.number().finite().nonnegative(),
+  // #205's hand-override of the feeds/speeds. Optional, so a v2 job without it is unchanged.
+  cutOverride: cutOverrideSchema.optional(),
+  // #214's shape pockets. Defaulted to empty so a v2 job written before shapes existed (and
+  // the v1 transform below) still loads as a text-only job.
+  shapes: z.array(shapeSchema).default([]),
+});
+
+export const engraveJobSchema = z
+  .union([engraveJobV1Schema, engraveJobV2Schema])
+  .transform((job): EngraveJob =>
+    job.schemaVersion === 1
+      ? {
+          ...job,
+          schemaVersion: 2,
+          // An old job loads with no sacrificial material (#213): the default is none.
+          sacrificial: noneSacrificial(),
+          breakthrough: DEFAULT_BREAKTHROUGH,
+          // …and no shapes (#214): every old label stays a label, so a version-1 job loads and
+          // cuts byte-identically.
+          shapes: [],
+        }
+      : job,
+  );
 
 export type ParseEngraveJobResult =
   | { ok: true; job: EngraveJob }

@@ -326,6 +326,19 @@ are published nowhere, so the app will ship **unmeasured defaults** and say so. 
 will record your own: **Save as my vise** and **I just measured these**. Until you measure,
 `vise-default` is a standing warning and collisions cannot be trusted.
 
+**Sacrificial material (#213).** Alongside the vise you will be able to say what else is in
+the setup: a **board under the part**, and **strips beside it** — left and right, which sit
+between the jaw and the part and are clamped with it, and front and back, which only make
+sense on a board because nothing else holds them. The work origin and Z = 0 stay on the
+**part's** top face, so the board's thickness can never change a cut depth. With material
+declared, the app will let a cut run off the part's edge onto it and will move the jaws out to
+grip what is really there; the verifier's depth limit and the simulation both take it into
+account, and the simulation reports how much of the sacrificial material was cut. Until you
+enter your own sizes the dimensions are unmeasured defaults and `sacrificial-default` warns,
+exactly as for the vise. The **Engrave panel** controls for this (and the two presets, "Part
+on a larger board" and "Strips between the jaws") ship with #205; the engine — the boxes, the
+supported footprint and the validators — is #213.
+
 **5. Cutting parameters (#202).** Spindle speed, feed, plunge, step-down and step-over will
 be shown as **starting values, unmeasured** — not recommendations. Nothing has measured what
 this machine does in this wood yet (#209), so the numbers are a place to start, and the panel
@@ -519,17 +532,18 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `fixture-unchecked` | info | The fixture is not modelled as an obstacle yet, so proximity to it is **not** checked. | Model the vise (chapter 5). |
 | `nothing-to-sweep` | warning | The program has no cutting moves at a known position. | Check the program. |
 | `gaps` | warning | Some cutting moves could not be placed and are missing from the picture. | Read the `cut-unknown-*` rows. |
-| `label-empty` | error | A label has no text. | Type text or disable it. |
-| `label-chars-lost` | error | A label loses whole characters to the cutter's radius. | Increase the size or use a smaller cutter. |
-| `label-detail-lost` | warning | A label loses detail (thin strokes, inside corners) to the cutter's radius. | Increase the size or use a smaller cutter. |
-| `label-outside-stock` | error | A label hangs off the blank. | Move it back inside the edge margin. |
+| `item-empty` | error | An item has nothing the cutter can reach: a label has no text, or a shape (a hole, a slot) is smaller than the cutter. Formerly `label-empty`. | Type text, enlarge the shape, or disable it. |
+| `item-chars-lost` | error | A label loses whole characters to the cutter's radius. Formerly `label-chars-lost`. | Increase the size or use a smaller cutter. |
+| `item-detail-lost` | warning | An item loses detail (thin strokes, inside corners) to the cutter's radius. Formerly `label-detail-lost`. | Increase the size, enlarge the shape, or use a smaller cutter. |
+| `item-outside-stock` | error | An item hangs off the blank. Formerly `label-outside-stock`. | Move it back inside the edge margin. |
 
 **Checking the engraving job** (job):
 
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|
-| `depth-exceeds-stock` | error | A label cuts so deep the floor left under it is below the minimum. | Make it shallower or use thicker stock. |
-| `no-labels` | error | The job has no enabled label with text. | Add one. |
+| `depth-exceeds-stock` | error | An item cuts so deep the floor left under it is below the minimum. | Make it shallower or use thicker stock. |
+| `no-items` | error | The job has no enabled label with text or shape. Formerly `no-labels`. | Add one. |
+| `polygon-self-intersecting` | error | A polygon shape crosses itself, so the outline is not a simple region. | Fix the points so the outline does not cross itself. |
 | `tool-missing` | error | The job names a tool that is not in the library. | Pick a real tool. |
 | `stock-proud-too-small` | warning | The blank stands too far below the jaw tops for the deepest cut, so the cutter would work below the jaws. | Seat the blank higher. |
 | `vise-default` | warning | The vise dimensions are unmeasured defaults, so collisions cannot be trusted. | Measure your vise. |
@@ -537,6 +551,11 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `vise-stock-proud-exceeds-thickness` | error | The blank stands proud by more than its own thickness; the numbers do not add up. | Re-check the vise and stock numbers. |
 | `vise-grip-shallow` | warning | The jaws grip too little of the blank to hold it safely. | Seat the blank deeper, or use thicker stock. |
 | `vise-jaw-short` | warning | The jaws are shorter than the blank, so part of it is unsupported. | Check the jaw length. |
+| `side-strip-unsupported` | error | A front or back sacrificial strip has no board under the part to rest on. | Add a board under the part, or remove the strip. |
+| `strip-taller-than-part` | error | A sacrificial strip rises above the part's top face, where the first pass would hit it. | Make the strip flush with the part or shorter. |
+| `under-too-thin` | error | The board under the part is too thin to absorb the breakthrough a through-cut allows. | Use a thicker board. |
+| `under-loose` | warning | The part is only resting on the board and may move. | Tape, glue or screw it down. |
+| `sacrificial-default` | warning | The sacrificial dimensions are unmeasured defaults, so cut depths onto them cannot be trusted yet. | Enter your own board and strip sizes. |
 | `feed-clamped` | warning | The requested feed is above the machine's ceiling and was clamped down. | Expect a slower cut. |
 | `rpm-clamped` | warning | The requested spindle speed is above the Z1's 13 000 RPM and was clamped. | Expect a slower spindle. |
 | `feed-refused` | error | The requested feed is so far above the ceiling it was refused rather than clamped. | Use a sane feed. |
@@ -624,7 +643,7 @@ splits it, and a field with no `=` is kept rather than dropped.
 | Symptom | What it means |
 |---|---|
 | **Save is disabled** (engrave) | One of the three gates has not passed (#206). The failing row — Toolpath generated, Verified, Simulated — says which, with the reason beside it. Fix it and generate again. |
-| **My text disappeared** (engrave) | The cutter's radius opened the glyph and removed the stroke (#201). Read the `label-detail-lost` / `label-chars-lost` row; use a bigger size or a smaller cutter. |
+| **My text disappeared** (engrave) | The cutter's radius opened the glyph and removed the stroke (#201). Read the `item-detail-lost` / `item-chars-lost` row; use a bigger size or a smaller cutter. |
 | **The simulation says the cutter hits the vise** | A `holder-collision` or fixture finding (#203). The jaws and the blank's height above them disagree; re-check the vise numbers and how proud the blank sits. |
 | **The simulator refuses my file** | See the refusal banner's code: `laser-job`, `rotary-job`, `dense-3d-refused`, or `tool-refused`. Chapter 8.1 explains each. |
 | **The part came out mirrored / rotated / offset** | The work origin or the placement is wrong. The app's `placement: stub` badge means it assumed the position; on the machine, re-probe the origin. Also check `stock-axes-unverified` — which stock dimension runs along X is unverified. |

@@ -164,7 +164,7 @@ describe('validateJob (#200)', () => {
   it('errors when no enabled label has text', () => {
     const job = defaultEngraveJob();
     for (const l of job.labels) l.text = '   ';
-    expect(validateJob(job).some((f) => f.code === 'no-labels')).toBe(true);
+    expect(validateJob(job).some((f) => f.code === 'no-items')).toBe(true);
   });
 
   it('warns when the stock stands too little above the jaw tops for the deepest cut', () => {

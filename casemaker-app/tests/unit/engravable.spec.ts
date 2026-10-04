@@ -145,7 +145,7 @@ describe('suggestCapHeight (#201 review)', () => {
       { labelId: 'lbl-1', glyphArea: 10, openedArea: 1, ratio: 0.1, emptyChars: [], outsideArea: 0, polygons: [] },
     ];
     const detail = engravabilityFindings(job, m, () => 0.1).find(
-      (x) => x.code === 'label-detail-lost',
+      (x) => x.code === 'item-detail-lost',
     );
     expect(detail).toBeDefined();
     expect(detail!.message).toContain('choose a smaller cutter');
@@ -183,7 +183,7 @@ describe('measureLabels (#201)', () => {
     const smallM = measure(small, 1.0);
     expect(smallM[0]!.ratio).toBeLessThan(0.2);
     const smallF = engravabilityFindings(small, smallM, ratioAtFor(small, 1.0));
-    expect(smallF.some((f) => f.code === 'label-detail-lost' || f.code === 'label-chars-lost')).toBe(true);
+    expect(smallF.some((f) => f.code === 'item-detail-lost' || f.code === 'item-chars-lost')).toBe(true);
 
     const big = jobWith('CASE', 10);
     const bigM = measure(big, 1.0);
@@ -213,7 +213,7 @@ describe('engravabilityFindings (#201)', () => {
     job.toolKey = 'flat-3.175x12-metal';
     const m = measure(job, 3.175);
     const f = engravabilityFindings(job, m, ratioAtFor(job, 3.175));
-    expect(f.some((x) => x.code === 'label-empty' || x.code === 'label-chars-lost')).toBe(true);
+    expect(f.some((x) => x.code === 'item-empty' || x.code === 'item-chars-lost')).toBe(true);
   });
 
   it('flags a label hanging over the stock edge', () => {
@@ -221,7 +221,7 @@ describe('engravabilityFindings (#201)', () => {
     const m = measure(job, 1.0);
     expect(m[0]!.outsideArea).toBeGreaterThan(0);
     const f = engravabilityFindings(job, m, ratioAtFor(job, 1.0));
-    const outside = f.find((x) => x.code === 'label-outside-stock');
+    const outside = f.find((x) => x.code === 'item-outside-stock');
     expect(outside).toBeDefined();
     expect(outside!.message).toContain('mm²');
     expect(outside!.message).toContain('1 mm edge margin');
@@ -232,13 +232,13 @@ describe('engravabilityFindings (#201)', () => {
     const m = measure(job, 1.0);
     const f = engravabilityFindings(job, m, ratioAtFor(job, 1.0));
 
-    const empty = f.find((x) => x.code === 'label-empty');
+    const empty = f.find((x) => x.code === 'item-empty');
     if (empty) {
       expect(empty.message).toContain('CASE');
       expect(empty.message).toContain('nothing this cutter can reach');
     }
 
-    const detail = f.find((x) => x.code === 'label-detail-lost');
+    const detail = f.find((x) => x.code === 'item-detail-lost');
     expect(detail).toBeDefined();
     expect(detail!.severity).toBe('warning');
     expect(detail!.message).toContain('%');
@@ -251,7 +251,7 @@ describe('engravabilityFindings (#201)', () => {
     const job = jobWith('CASE', 10);
     job.toolKey = 'flat-3.175x12-metal';
     const m = measure(job, 3.175);
-    const empty = engravabilityFindings(job, m, ratioAtFor(job, 3.175)).find((x) => x.code === 'label-empty');
+    const empty = engravabilityFindings(job, m, ratioAtFor(job, 3.175)).find((x) => x.code === 'item-empty');
     if (empty) expect(empty.message).toContain('3.175');
   });
 });

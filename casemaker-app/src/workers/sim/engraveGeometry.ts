@@ -15,9 +15,9 @@
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { itemLabel, jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { aabbOfProfile, pOffset, type Profile } from '@/engine/compiler/profile';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveItem, EngraveJob, EngraveShape } from '@/types/engraveJob';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 
 /**
@@ -177,15 +177,16 @@ export function suggestCapHeight(
 export type LabelRatioAt = (labelId: string, size: number) => number;
 
 /**
- * Turn the measured losses into job findings (#201).
+ * Turn the measured losses into job findings (#201, #214).
  *
- * Codes and thresholds are the issue's table: `label-empty` and `label-chars-lost` are
- * errors, `label-detail-lost` a warning, `label-outside-stock` an error. They are members of
+ * Codes and thresholds are the issue's table, renamed `item-*` by #214 (a shape is an item
+ * too, and a shape has no characters): `item-empty` is an error, `item-chars-lost` an error,
+ * `item-detail-lost` a warning, `item-outside-stock` an error. They are members of
  * `JobFindingCode` (`jobSetup.ts`), so this returns `JobFinding[]` like `validateJob`.
  *
- * `label-detail-lost` is suppressed at `ratio === 0`: a fully-lost label is already the
- * `label-empty` error, and there is no partial detail left to recover. `ratioAt` is
- * consulted only for a label that reaches that branch.
+ * `item-detail-lost` is suppressed at `ratio === 0`: a fully-lost item is already the
+ * `item-empty` error, and there is no partial detail left to recover. `ratioAt` is consulted
+ * only for a LABEL — a shape has no cap height to suggest.
  */
 export function engravabilityFindings(
   job: EngraveJob,
@@ -197,57 +198,101 @@ export function engravabilityFindings(
   const diameter = tool?.tipDiameter ?? tool?.diameter ?? null;
   const cutter = diameter === null ? 'the cutter' : `a ${diameter} mm cutter`;
 
-  for (const label of m) {
-    const src = job.labels.find((l) => l.id === label.labelId);
-    const text = src?.text ?? '';
+  for (const row of m) {
+    const src = findItem(job, row.labelId);
+    const label = src && !isShapeItem(src) ? src : null;
+    const shape = src && isShapeItem(src) ? src : null;
 
-    if (text.trim().length > 0 && label.openedArea === 0) {
+    if (src && hasContent(src) && row.openedArea === 0) {
       findings.push({
         severity: 'error',
-        code: 'label-empty',
-        labelId: label.labelId,
-        message: `Label "${text}" has nothing this cutter can reach: every stroke is thinner than ${cutter}.`,
+        code: 'item-empty',
+        labelId: row.labelId,
+        message: emptyMessage(src, cutter),
       });
     }
 
-    if (label.emptyChars.length > 0) {
-      const list = label.emptyChars.map((c) => `"${c.char}" (index ${c.index})`).join(', ');
+    // Whole characters are a label-only loss: a shape has no glyphs to lose one at a time.
+    if (label && row.emptyChars.length > 0) {
+      const list = row.emptyChars.map((c) => `"${c.char}" (index ${c.index})`).join(', ');
       findings.push({
         severity: 'error',
-        code: 'label-chars-lost',
-        labelId: label.labelId,
+        code: 'item-chars-lost',
+        labelId: row.labelId,
         message: `Characters lost to ${cutter}: ${list}.`,
       });
     }
 
-    if (src && label.ratio > 0 && label.ratio < LOST_DETAIL_RATIO) {
-      const lostPct = (1 - label.ratio) * 100;
+    if (label && row.ratio > 0 && row.ratio < LOST_DETAIL_RATIO) {
+      const lostPct = (1 - row.ratio) * 100;
       // A measured suggestion, not a scaled one (#201 review): raise the cap height until
       // the re-measured opening keeps 90 % of its area, or say the cutter is too large.
-      const suggested = suggestCapHeight((size) => ratioAt(label.labelId, size), src.size);
+      const suggested = suggestCapHeight((size) => ratioAt(row.labelId, size), label.size);
       const hint =
         suggested === null
           ? 'this cutter is too large for this text — choose a smaller cutter'
           : `try ${suggested} mm or more`;
       findings.push({
         severity: 'warning',
-        code: 'label-detail-lost',
-        labelId: label.labelId,
-        message: `Label "${text}" loses ${lostPct.toFixed(0)}% of its area to ${cutter}; ${hint}.`,
+        code: 'item-detail-lost',
+        labelId: row.labelId,
+        message: `Label "${label.text}" loses ${lostPct.toFixed(0)}% of its area to ${cutter}; ${hint}.`,
+      });
+    } else if (shape && row.ratio > 0 && row.ratio < LOST_DETAIL_RATIO) {
+      // No cap height to offer: say so plainly and point at the two real choices (#214).
+      const lostPct = (1 - row.ratio) * 100;
+      findings.push({
+        severity: 'warning',
+        code: 'item-detail-lost',
+        labelId: row.labelId,
+        message:
+          `${itemLabel(shape)} loses ${lostPct.toFixed(0)}% of its area to ${cutter}; ` +
+          `use a smaller cutter or a larger shape.`,
       });
     }
 
-    if (label.outsideArea > OUTSIDE_AREA_TOLERANCE_MM2) {
+    if (row.outsideArea > OUTSIDE_AREA_TOLERANCE_MM2) {
+      const who = src ? itemLabel(src) : `Item ${row.labelId}`;
       findings.push({
         severity: 'error',
-        code: 'label-outside-stock',
-        labelId: label.labelId,
+        code: 'item-outside-stock',
+        labelId: row.labelId,
         message:
-          `Label "${text}" cuts ${label.outsideArea.toFixed(2)} mm² beyond the stock outline inset ` +
+          `${who} cuts ${row.outsideArea.toFixed(2)} mm² beyond the stock outline inset ` +
           `by the ${job.edgeMargin} mm edge margin.`,
       });
     }
   }
 
   return findings;
+}
+
+/** The item — label or shape — a measurement row names (#214). */
+function findItem(job: EngraveJob, id: string): EngraveItem | undefined {
+  return job.labels.find((l) => l.id === id) ?? job.shapes.find((s) => s.id === id);
+}
+
+function isShapeItem(item: EngraveItem): item is EngraveShape {
+  return 'kind' in item;
+}
+
+/**
+ * Does this item have anything to cut? A shape always does; a label only if it has non-space
+ * text. A whitespace label is kept in the plan (#201) and measures an empty opening, but the
+ * job-level `no-items` finding already says the job has nothing — it must not ALSO read as
+ * `item-empty` (which would mean "the cutter is too big for this text").
+ */
+function hasContent(item: EngraveItem): boolean {
+  return 'kind' in item || item.text.trim().length > 0;
+}
+
+/** Why an item has no opened region at all. A circle smaller than the cutter reads as a hole. */
+function emptyMessage(item: EngraveItem, cutter: string): string {
+  if (!isShapeItem(item)) {
+    return `Label "${item.text}" has nothing this cutter can reach: every stroke is thinner than ${cutter}.`;
+  }
+  if (item.kind === 'circle') {
+    return `A ${item.diameter} mm hole cannot be cut with ${cutter}: it is smaller than the cutter.`;
+  }
+  return `${itemLabel(item)} has nothing this cutter can reach: it is smaller than ${cutter}.`;
 }

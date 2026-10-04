@@ -19,7 +19,7 @@ import { feedsFor } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveItem, EngraveJob } from '@/types/engraveJob';
 import { LOST_DETAIL_RATIO, type LabelEngravability } from '@/workers/sim/engraveGeometry';
 
 /** Why a tool was dropped before measuring (#211: flat-ends only, and only cutters that exist). */
@@ -73,13 +73,34 @@ function bySmallest(a: ToolCandidate, b: ToolCandidate): number {
 function qualifyingReason(pick: ToolCandidate): string {
   // An unknown reach is not a refusal — the cutter is still recommended — but it is stated,
   // because a length nobody recorded cannot be checked against the holder gate.
+  // "every item" (#214), not "every label": a job may contain only shapes.
   return pick.reachKnown
-    ? 'Largest cutter that keeps every label intact.'
-    : 'Largest cutter that keeps every label intact (reach not recorded).';
+    ? 'Largest cutter that keeps every item intact.'
+    : 'Largest cutter that keeps every item intact (reach not recorded).';
+}
+
+/** The item (label or shape) a measurement row names, if the job still has it (#214). */
+function findItem(job: EngraveJob, id: string) {
+  return job.labels.find((l) => l.id === id) ?? job.shapes.find((s) => s.id === id);
+}
+
+/** A short human name for the worst item, without assuming it is a label (#214). */
+function itemName(item: EngraveItem): string {
+  if (!('kind' in item)) return `"${item.text}"`;
+  switch (item.kind) {
+    case 'rect':
+      return `the ${item.width}×${item.height} mm rectangle`;
+    case 'circle':
+      return `the ⌀${item.diameter} mm circle`;
+    case 'slot':
+      return `the ${item.length}×${item.width} mm slot`;
+    case 'polygon':
+      return `the ${item.points.length}-point polygon`;
+  }
 }
 
 /**
- * "Which labels lose what", naming the worst label.
+ * "Which items lose what", naming the worst item.
  *
  * NOTE (#211): the issue also asks this sentence to carry "the smallest cap height that would
  * let it qualify". That needs a re-measure at a larger cap height — `suggestCapHeight`'s
@@ -91,14 +112,17 @@ function qualifyingReason(pick: ToolCandidate): string {
 function compromiseReason(job: EngraveJob, pick: ToolCandidate): string {
   const worst = pick.worst;
   if (!worst) {
-    return `No cutter you have keeps every label intact; the smallest (${fmtDiameter(pick.diameter)} mm) is the closest.`;
+    return `No cutter you have keeps every item intact; the smallest (${fmtDiameter(pick.diameter)} mm) is the closest.`;
   }
-  const label = job.labels.find((l) => l.id === worst.labelId);
-  const name = label ? `"${label.text}"` : `label ${worst.labelId}`;
-  const at = label ? ` at ${label.size} mm` : '';
+  const item = findItem(job, worst.labelId);
+  const name = item ? itemName(item) : `item ${worst.labelId}`;
+  // A cap height only exists for a label (#214).
+  const at = item && !('kind' in item) ? ` at ${item.size} mm` : '';
   const lost = Math.round((1 - worst.ratio) * 100);
+  // Whole characters are a label-only loss; a shape has no glyphs to lose one at a time.
+  const isLabel = item === undefined || !('kind' in item);
   const chars =
-    worst.emptyChars > 0
+    isLabel && worst.emptyChars > 0
       ? ` and loses ${worst.emptyChars} character${worst.emptyChars === 1 ? '' : 's'} entirely`
       : '';
   return `No cutter you have can cut ${name}${at} without losing detail: the ${fmtDiameter(pick.diameter)} mm cutter loses ${lost} % of it${chars}.`;
@@ -122,9 +146,11 @@ export function recommendTool(
   tools: readonly ToolLibraryEntry[],
   measure: (toolKey: string) => LabelEngravability[],
 ): ToolRecommendation {
-  const deepest = job.labels
-    .filter((l) => l.enabled)
-    .reduce((max, l) => Math.max(max, l.depth), 0);
+  // The deepest cut is over every enabled item — a shape can be the deepest thing in the job
+  // (#214), and the reach test below must see it.
+  const deepest = ([...job.labels, ...job.shapes] as EngraveItem[])
+    .filter((item) => item.enabled)
+    .reduce((max, item) => Math.max(max, item.depth), 0);
 
   const candidates: ToolCandidate[] = tools.map((entry) => {
     const tool = entry.tool;

@@ -77,7 +77,7 @@ describe('recommendTool (#211)', () => {
     const rec = recommendTool(job, tools, measure);
     expect(rec.key).toBe('t2.0');
     expect(rec.compromise).toBe(false);
-    expect(rec.reason).toBe('Largest cutter that keeps every label intact.');
+    expect(rec.reason).toBe('Largest cutter that keeps every item intact.');
     expect(candidate(rec, 't2.0').qualifies).toBe(true);
     expect(candidate(rec, 't3.175').qualifies).toBe(false);
   });
