@@ -45,7 +45,9 @@ export type SidebarSectionId =
   | 'hats'
   | 'features'
   | 'assets'
-  | 'export';
+  | 'export'
+  // #196 — the CNC Simulate .nc panel (only present when `__FEATURE_SIM__`).
+  | 'cnc-sim';
 
 // Issue #91 — 4-way view-mode picker that drives lid lift + per-mesh
 // rendering:

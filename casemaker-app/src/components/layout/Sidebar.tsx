@@ -13,10 +13,22 @@ const SECTIONS: { id: SidebarSectionId; label: string; icon: string; hint: strin
   { id: 'export',   label: 'Export',          icon: '⬇️',  hint: 'Per-part Save + Save All' },
 ];
 
+// #196 — the CNC Simulate panel. Behind the compile-time flag, the same gate as the store and
+// worker it drives, so the electricrv.ca bundle carries no simulation UI.
+if (__FEATURE_SIM__) {
+  SECTIONS.push({
+    id: 'cnc-sim',
+    label: 'Simulate .nc',
+    icon: '🧪',
+    hint: 'Open a G-code file and watch it cut, before the machine does',
+  });
+}
+
 /** Sections that make sense for a rack project — everything else (boards,
  *  ports, HATs, board-case features) assumes a PCB in a shell. Rack fans
- *  live inside the rack panel itself. */
-const RACK_SECTION_IDS: SidebarSectionId[] = ['rack', 'export'];
+ *  live inside the rack panel itself. `cnc-sim` is included: a `.nc` file has
+ *  nothing to do with the open project. */
+const RACK_SECTION_IDS: SidebarSectionId[] = ['rack', 'export', 'cnc-sim'];
 
 export function Sidebar() {
   const welcomeMode = useProjectStore((s) => s.welcomeMode);
