@@ -11,6 +11,7 @@ import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { resolveFont, BUNDLED_FONTS } from '@/engine/fonts/registry';
 import { faceFrame } from '@/engine/coords';
 import { computeShellDims } from '@/engine/compiler/caseShell';
+import { computeLidDims } from '@/engine/compiler/lid';
 import { createDefaultProject } from '@/store/projectStore';
 import { parseProject, serializeProject } from '@/store/persistence';
 import type { TextLabel } from '@/types/textLabel';
@@ -171,7 +172,12 @@ describe('text labels on the case (issue #169)', () => {
       it(`${mode} on ${face}: reads left-to-right and upright from OUTSIDE, on the correct side of the wall`, () => {
         const project = createDefaultProject('rpi-4b');
         const ops = buildTextLabelOps([mk(face, mode)], project.board, project.case);
-        const group = mode === 'emboss' ? ops.additive : ops.subtractive;
+        // Issue #179 — a +z label belongs to the lid node (lid-local coords),
+        // not the shell; every other face stays on the shell.
+        const onLid = face === '+z';
+        const group = onLid
+          ? mode === 'emboss' ? ops.lidAdditive : ops.lidSubtractive
+          : mode === 'emboss' ? ops.additive : ops.subtractive;
         expect(group.length).toBe(1);
         const solid = executeOpSync(tl, group[0]!);
         const parts = solid.decompose();
@@ -187,7 +193,10 @@ describe('text labels on the case (issue #169)', () => {
         });
 
         const d = computeShellDims(project.board, project.case, [], () => undefined);
-        const frame = faceFrame(face, d.outerX, d.outerY, d.outerZ);
+        const frameZ = onLid
+          ? computeLidDims(project.board, project.case).z
+          : d.outerZ;
+        const frame = faceFrame(face, d.outerX, d.outerY, frameZ);
         const tall = info.slice().sort((a, b) => spanAlong(b, frame.vAxis) - spanAlong(a, frame.vAxis));
         const iPart = tall[0]!;
         const dotPart = tall[1]!;
@@ -213,7 +222,11 @@ describe('text labels on the case (issue #169)', () => {
         const lo = Math.min(outCoord(iPart.min), outCoord(iPart.max));
         const hi = Math.max(outCoord(iPart.min), outCoord(iPart.max));
         if (mode === 'emboss') {
-          expect(lo).toBeCloseTo(planeAt, 2);
+          // Issue #179 — the emboss base embeds a hair BELOW the face plane
+          // (volumetric overlap so the union fuses), and the ink still stands
+          // `depth` proud of the surface.
+          expect(lo).toBeLessThan(planeAt);
+          expect(lo).toBeGreaterThan(planeAt - 0.5);
           expect(hi).toBeCloseTo(planeAt + 0.6, 2);
         } else {
           expect(lo).toBeCloseTo(planeAt - 0.6, 2);

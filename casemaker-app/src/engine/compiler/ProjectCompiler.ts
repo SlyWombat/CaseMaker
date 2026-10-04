@@ -275,6 +275,15 @@ export function compileProject(project: Project): BuildPlan {
   if (ventCuts.lidCuts.length > 0) {
     lidOp = difference([lidOp, ...ventCuts.lidCuts]);
   }
+  // Issue #179 — `+z` text labels belong to the lid, not the shell. The
+  // ops are already in lid-LOCAL coords (built against the lid's outer top
+  // surface), so they join the lid op BEFORE the world-Z lift below.
+  if (textOps.lidAdditive.length > 0) {
+    lidOp = union([lidOp, ...textOps.lidAdditive]);
+  }
+  if (textOps.lidSubtractive.length > 0) {
+    lidOp = difference([lidOp, ...textOps.lidSubtractive]);
+  }
   // Groove cut into lid brim underside.
   if (flangeOps.lidSubtract) {
     lidOp = difference([lidOp, flangeOps.lidSubtract]);

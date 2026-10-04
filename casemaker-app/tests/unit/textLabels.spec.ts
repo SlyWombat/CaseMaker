@@ -48,7 +48,7 @@ describe('Marketing gap #16 — text engraving (real glyph outlines, #169)', () 
     expect(ops.additive.length).toBe(0);
   });
 
-  it('embossed label produces additive ops', () => {
+  it('embossed label produces additive ops (lid-targeted on +z, #179)', () => {
     const label: TextLabel = {
       id: 'lbl-1',
       text: 'X',
@@ -64,8 +64,32 @@ describe('Marketing gap #16 — text engraving (real glyph outlines, #169)', () 
     };
     const project = useProjectStore.getState().project;
     const ops = buildTextLabelOps([label], project.board, project.case);
-    expect(ops.additive.length).toBe(1);
+    // +z is the lid's outer top surface, so the op targets the lid node
+    // (issue #179) rather than the shell.
+    expect(ops.lidAdditive.length).toBe(1);
+    expect(ops.additive.length).toBe(0);
+    expect(ops.lidSubtractive.length).toBe(0);
     expect(ops.subtractive.length).toBe(0);
+  });
+
+  it('embossed label on a side face produces shell additive ops', () => {
+    const label: TextLabel = {
+      id: 'lbl-1',
+      text: 'X',
+      font: 'sans-default',
+      weight: 'regular',
+      size: 4,
+      face: '-y',
+      position: { u: 10, v: 4 },
+      rotation: 0,
+      depth: 0.6,
+      mode: 'emboss',
+      enabled: true,
+    };
+    const project = useProjectStore.getState().project;
+    const ops = buildTextLabelOps([label], project.board, project.case);
+    expect(ops.additive.length).toBe(1);
+    expect(ops.lidAdditive.length).toBe(0);
   });
 
   it('disabled label is skipped', () => {
