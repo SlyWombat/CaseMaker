@@ -29,6 +29,23 @@ export interface AxisRange {
   max: Mm;
 }
 
+/**
+ * The collet nut above the cutter (#191 item 4, #204): the widest thing above the tool, and
+ * what reaches a low-profile vise first. `null` on the profile means NOT MEASURED.
+ *
+ * A null holder is not an error: #182 decided an unknown holder is reported as "cannot be
+ * proven", never a refusal, or every tool would be refused (Makera's catalogue leaves lengths
+ * empty for every engraver). The fixture check degrades the same way.
+ */
+export interface HolderProfile {
+  /** The collet nut's diameter, mm. */
+  nutDiameter: Mm;
+  /** The collet nut's height, mm. */
+  nutLength: Mm;
+  /** Where the measurement came from (an owner's caliper, Maker's docs, ...). */
+  source: string;
+}
+
 export interface MachineProfile {
   id: string;
   name: string;
@@ -103,6 +120,12 @@ export interface MachineProfile {
     probeSlowFeed: number;
     probeRetract: Mm;
   };
+  /**
+   * The collet nut — the widest thing above the cutter (#204). `null` = not measured yet (#208),
+   * which makes the sweep say clearance "cannot be proven" rather than guess. Do not invent a
+   * number here: a guessed nut either hides a real crash or refuses a good tool.
+   */
+  holder: HolderProfile | null;
 }
 
 const ANCHOR1: Vec2 = [-192.4, -194.3];
@@ -142,6 +165,9 @@ export const Z1: MachineProfile = {
     probeSlowFeed: 100,
     probeRetract: 1,
   },
+  // PROVISIONAL (#208): the collet nut has never been measured. `null` is the honest value —
+  // it makes the fixture check warn "cannot be proven" instead of testing a made-up cylinder.
+  holder: null,
 };
 
 /** The only supported machine. A second one is configuration here, not a refactor elsewhere. */

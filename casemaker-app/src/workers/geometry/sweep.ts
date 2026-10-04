@@ -27,8 +27,11 @@
  */
 
 import type { Timeline, Checkpoint, AirMove } from '@/engine/cnc/emulator/timeline';
+import { DIAGNOSTIC_CAP } from '@/engine/cnc/emulator/timeline';
 import { partToWork } from '@/engine/cnc/frames';
-import type { Setup } from '@/engine/cnc/setup';
+import type { ObstacleBox, Setup } from '@/engine/cnc/setup';
+import type { MachineProfile } from '@/engine/cnc/machine';
+import { inflate } from '@/engine/cnc/fixture';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM, segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { executeProfile, type ManifoldToplevel } from './evaluateOp';
@@ -85,6 +88,40 @@ export interface SweepDiagnostic {
   code: string;
   message: string;
   checkpoint?: number;
+}
+
+/** A volume for a diagnostic, in mm³: three decimals for anything a person can see, else exponential. */
+export function formatVolume(v: number): string {
+  return v >= 0.01 ? v.toFixed(3) : v.toExponential(2);
+}
+
+/**
+ * Cap repeated diagnostics of one code, exactly as the timeline does (#204): keep the first
+ * `DIAGNOSTIC_CAP`, fold the rest into one `<code>-more` line, and remember the worst severity
+ * so the fold is never calmer than what it hid. `sweep.ts` had no repeated-code gate before;
+ * the fixture checks are the first that can fire once per checkpoint.
+ */
+class DiagnosticFolder {
+  private readonly counts = new Map<string, number>();
+  private readonly worst = new Map<string, SweepDiagnostic['severity']>();
+  private readonly kept: SweepDiagnostic[] = [];
+  private static readonly RANK = { info: 0, warning: 1, error: 2 } as const;
+  push(d: SweepDiagnostic): void {
+    const n = (this.counts.get(d.code) ?? 0) + 1;
+    this.counts.set(d.code, n);
+    const w = this.worst.get(d.code);
+    if (w === undefined || DiagnosticFolder.RANK[d.severity] > DiagnosticFolder.RANK[w]) this.worst.set(d.code, d.severity);
+    if (n <= DIAGNOSTIC_CAP) this.kept.push(d);
+  }
+  finish(): SweepDiagnostic[] {
+    const out = this.kept.slice();
+    for (const [code, n] of this.counts) {
+      if (n > DIAGNOSTIC_CAP) {
+        out.push({ severity: this.worst.get(code) ?? 'info', code: `${code}-more`, message: `…and ${n - DIAGNOSTIC_CAP} more '${code}' (${n} in all)` });
+      }
+    }
+    return out;
+  }
 }
 
 export interface SweepStats {
@@ -150,6 +187,12 @@ export interface SweepOpts {
   budgetMs?: number;
   /** Once per checkpoint, after its solid is built. `done` runs 1…total. */
   onProgress?: (done: number, total: number) => void;
+  /**
+   * The machine in use (#204). Its `holder` is the collet nut above the cutter, needed for the
+   * holder-into-fixture check. Absent, or `holder: null`, means the nut is unmeasured — the
+   * sweep says clearance "cannot be proven" rather than guessing a cylinder.
+   */
+  machine?: MachineProfile;
 }
 
 /** A counter-clockwise n-gon inscribed in the circle of radius r about (cx, cy). */
@@ -294,6 +337,19 @@ export function sweptToolBody(
 }
 
 /**
+ * An `ObstacleBox` as a Manifold, in the WORK frame (#204). The caller owns and deletes it.
+ * Used both for the inflated fixture solids the sweep tests against, and — un-inflated, by the
+ * session — for the boxes the viewport draws where the user said the jaws are.
+ */
+export function boxSolid(tl: ManifoldToplevel, box: ObstacleBox): ManifoldInstance {
+  const size: [number, number, number] = [box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]];
+  const c = tl.Manifold.cube(size, false);
+  const placed = c.translate(box.min);
+  c.delete();
+  return placed;
+}
+
+/**
  * Check the moves that cut nothing but can still be wrong (`/Simulation.md` §7.1):
  *
  *   rapid             through material, or below the bed             -> error
@@ -343,7 +399,10 @@ export function sweptToolBody(
  * One run each: this machine's spread is wide (Balloon's air gate has measured 4.1-6.9 s across
  * runs), so treat these as observations, not tight bounds.
  *
- * NOT checked: the fixture — its solids do not exist yet (#188); said in a diagnostic.
+ * NOT checked here: the fixture, when there is none (#204). When `setup.fixture` is present the
+ * caller passes the (inflated, unioned) fixture and each move's exact tool body is intersected
+ * with it as well — `rapid-into-fixture` / `feed-into-fixture`. `fixtureTop` widens `zTop` so a
+ * fixture that rises above the stock top is still covered.
  */
 export function checkAirMoves(
   tl: ManifoldToplevel,
@@ -355,12 +414,30 @@ export function checkAirMoves(
   radius: number,
   /** Wall-clock deadline from `performance.now()`, or null for none (#194). */
   deadline: number | null = null,
+  /** The fixture obstacles, pre-inflated and unioned, in the work frame (#204). null = none. */
+  fixture: ManifoldInstance | null = null,
+  /** The fixture's top Z, so the tool body rises far enough. -Infinity when there is none. */
+  fixtureTop = Number.NEGATIVE_INFINITY,
+  /** Where fixture diagnostics go, so they fold with the checkpoint and holder codes (#204). */
+  pushFixture: (d: SweepDiagnostic) => void = () => {},
 ): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number; cleared: number; budgetExceeded: boolean } {
   const diagnostics: SweepDiagnostic[] = [];
   const gouges: Gouge[] = [];
   const nCap = segmentsForRadius(radius);
   const nMargin = segmentsForRadius(radius + PROXIMITY_MARGIN_MM);
-  const zTop = topZ + OVERSHOOT_MM;
+  // Rise to whatever is taller, the stock top or the fixture (#204): a jaw below the top needs
+  // no extra height, but a box above it does, or the body would stop short of the collision.
+  const zTop = Math.max(topZ, fixtureTop) + OVERSHOOT_MM;
+  // "Entirely above everything that can be hit": the stock top, and the fixture when there is one.
+  const reachTop = fixture === null ? topZ : Math.max(topZ, fixtureTop);
+  // Whether the step-7 retract shortcut (below) is sound for this sweep (#204 follow-up). It is
+  // sound while the retract is contained in check (a)'s checkpoint column — and check (a) only
+  // tests a column that rises from the stock top, which contains the retract exactly when the
+  // fixture's top sits at or below the stock top. A fixture rising above the top is outside that
+  // column and can be hit by a retract the shortcut would wave through, so whenever one is
+  // present the shortcut is disabled and those rapids take the normal path instead: body built
+  // and tested against both stock and fixture. Computed once here, not per move.
+  const retractCoveredByColumn = fixture === null || fixtureTop <= topZ;
   let checked = 0;
   let rechecked = 0;
   let cleared = 0;
@@ -375,7 +452,9 @@ export function checkAirMoves(
   // from there up. So the end point of every swept cutting move is recorded here, keyed by its
   // event index (the same index space as `AirMove.step`); a rapid that lands on one is cleared
   // analytically. This is exact, not the noise floor: it is the fact the floor exists to
-  // tolerate, stated once instead of measured through tessellation slivers.
+  // tolerate, stated once instead of measured through tessellation slivers. It holds only while
+  // `retractCoveredByColumn` — see that flag: a fixture above the stock top escapes the column
+  // and must be tested like any other obstacle, so the shortcut is then disabled (#204 follow-up).
   const cutEndByStep = new Map<number, readonly [number, number, number]>();
   for (const cp of checkpoints) {
     if (cp.z >= topZ) continue; // not swept: its cuts removed nothing, so they prove nothing
@@ -481,12 +560,14 @@ export function checkAirMoves(
       );
       continue;
     }
-    if (zLo >= topZ) continue; // entirely above the blank: nothing to hit
+    if (zLo >= reachTop) continue; // entirely above the blank AND the fixture: nothing to hit
     // Step 7: a retract straight up out of the cut just made. The immediately preceding event
     // must be that cut (so any other move in between disqualifies it), X and Y must not change,
     // and the move must go +Z. Then it is inside the cut's own removal and needs neither a tool
-    // body nor a boolean. Every other move takes the geometric path below.
-    if (mv.kind === 'rapid' && mv.to[2] > mv.from[2] && mv.to[0] === mv.from[0] && mv.to[1] === mv.from[1]) {
+    // body nor a boolean. Every other move takes the geometric path below. Gated on
+    // `retractCoveredByColumn`: the argument needs the retract to stay inside the cut's column,
+    // which fails as soon as a fixture rises above the stock top (#204 follow-up).
+    if (retractCoveredByColumn && mv.kind === 'rapid' && mv.to[2] > mv.from[2] && mv.to[0] === mv.from[0] && mv.to[1] === mv.from[1]) {
       const end = cutEndByStep.get(mv.step - 1);
       if (end && mv.from[0] === end[0] && mv.from[1] === end[1] && mv.from[2] === end[2]) {
         cleared++;
@@ -503,6 +584,21 @@ export function checkAirMoves(
       zTop + margin,
     );
     const hit = body.intersect(stock);
+    // (b) The same exact tool body against the fixture (#204), before the body is deleted. Both
+    // solids are exact — the body a hull of cylinders, the fixture a union of boxes — so
+    // anything above float dust is real, no derived floor needed.
+    if (fixture !== null) {
+      const fhit = body.intersect(fixture);
+      const fvol = fhit.volume();
+      fhit.delete();
+      if (fvol > SLIVER_MM3) {
+        pushFixture(
+          spindleOff
+            ? { severity: 'error', code: 'feed-into-fixture', message: `line ${mv.line}: a feed move with the spindle off drives the tool ${formatVolume(fvol)} mm³ into the fixture` }
+            : { severity: 'error', code: 'rapid-into-fixture', message: `line ${mv.line}: a rapid drives the tool ${formatVolume(fvol)} mm³ into the fixture` },
+        );
+      }
+    }
     body.delete();
     let vol = hit.volume();
     // The solid that is actually in the way, for a rapid: what survives the re-test below.
@@ -615,6 +711,48 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   if (isDiag(st)) return { ok: false, diagnostics: [st] };
   const { stock, topZ } = st;
 
+  // The fixture as solids the tool must not hit (#204, /Simulation.md §1.1). Each box is grown
+  // by the envelope's `uncertainty` before any check (decision 28): a shipped default is never
+  // a measurement. One box per obstacle, PLUS their union for the checks — kept per-box so a
+  // message can name WHICH jaw. Built here and deleted on EVERY exit path below, refusals too.
+  const fixtureBoxes: { box: ObstacleBox; solid: ManifoldInstance }[] = [];
+  let fixture: ManifoldInstance | null = null;
+  let fixtureBB: Box | null = null;
+  let fixtureTop = Number.NEGATIVE_INFINITY;
+  if (setup.fixture && setup.fixture.boxes.length > 0) {
+    for (const raw of setup.fixture.boxes) {
+      const box = inflate(raw, setup.fixture.uncertainty);
+      fixtureBoxes.push({ box, solid: boxSolid(tl, box) });
+      fixtureTop = Math.max(fixtureTop, box.max[2]);
+    }
+    // A single box aliases `fixture`; the union is a separate handle only when there is more
+    // than one, so the delete below never touches a handle twice.
+    fixture = fixtureBoxes.length === 1 ? (fixtureBoxes[0] as { solid: ManifoldInstance }).solid : tl.Manifold.union(fixtureBoxes.map((b) => b.solid));
+    fixtureBB = fixture.boundingBox();
+  }
+  const disposeFixture = (): void => {
+    if (fixture && fixtureBoxes.length !== 1) fixture.delete();
+    fixture = null;
+    for (const b of fixtureBoxes) b.solid.delete();
+    fixtureBoxes.length = 0;
+  };
+  // The fixture diagnostics fold together (one bad label must not print 400 lines).
+  const fixtureDiag = new DiagnosticFolder();
+  const holder = opts?.machine?.holder ?? null;
+  const stickout = tool.stickout;
+  // (c-precondition) An unknown nut or stick-out is "cannot be proven", a warning — never a
+  // refusal (#182), or every tool with unstated lengths would be refused.
+  if (fixture) {
+    if (holder === null || stickout === null) {
+      fixtureDiag.push({
+        severity: 'warning',
+        code: 'holder-vs-fixture-unproven',
+        message: `the collet nut's size or the tool's stick-out is not known: clearance to the vise cannot be proven`,
+      });
+    }
+  }
+  const nutKnown = holder !== null && stickout !== null;
+
   const t0 = performance.now();
   const total = timeline.checkpoints.length;
   const deadline = opts?.budgetMs === undefined ? null : t0 + opts.budgetMs;
@@ -632,6 +770,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   const refuseBudget = (done: number): SweepOutcome => {
     const elapsed = Math.round(performance.now() - t0);
     for (const s of solids) s.delete();
+    disposeFixture();
     stock.delete();
     return {
       ok: false,
@@ -664,6 +803,30 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         skipped++;
       } else {
         const b = performance.now();
+        // (c) Holder into fixture (#204): the collet nut is a cylinder whose bottom face sits
+        // `stickout` above the tool tip, and its footprint is this checkpoint's own 2D region
+        // offset outward to the nut radius. Checked only when both the nut and the stick-out
+        // are known; otherwise the warning above stands and there is nothing to test.
+        if (fixture && nutKnown && holder && stickout !== null) {
+          const offsetBy = holder.nutDiameter / 2 - radius;
+          const nutRegion = region.offset(offsetBy, 'Round', 2, segmentsForRadius(Math.abs(offsetBy)));
+          const nutColumn = tl.Manifold.extrude(nutRegion, holder.nutLength);
+          nutRegion.delete();
+          const nutSolid = nutColumn.translate([0, 0, cp.z + stickout]);
+          nutColumn.delete();
+          const nutHit = nutSolid.intersect(fixture);
+          nutSolid.delete();
+          const nutVol = nutHit.volume();
+          nutHit.delete();
+          if (nutVol > SLIVER_MM3) {
+            fixtureDiag.push({
+              severity: 'error',
+              code: 'holder-into-fixture',
+              checkpoint: idx,
+              message: `checkpoint ${idx}: the collet nut (⌀${holder.nutDiameter} mm) at ${stickout} mm stick-out overlaps the fixture by ${formatVolume(nutVol)} mm³`,
+            });
+          }
+        }
         const height = topZ - cp.z + OVERSHOOT_MM;
         const column = tl.Manifold.extrude(region, height);
         region.delete();
@@ -674,6 +837,33 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         msExtrude += performance.now() - b;
         perCheckpoint.push(solid);
         solids.push(solid);
+        // (a) Cutter into fixture (#204): the removal column this checkpoint already built,
+        // intersected with the fixture. The jaws are below the stock top, so a column that rises
+        // from cp.z past the top already covers any fixture a cutting move can reach. Culled by
+        // bounding box, so a checkpoint nowhere near the vise costs one cheap test.
+        if (fixture && fixtureBB && boxesOverlap(solid.boundingBox(), fixtureBB)) {
+          const hit = solid.intersect(fixture);
+          const vol = hit.volume();
+          hit.delete();
+          if (vol > SLIVER_MM3) {
+            // Name the box: test each separately when the union intersects, so the message can
+            // say WHICH jaw.
+            let named: ObstacleBox | null = null;
+            let best = 0;
+            for (const fb of fixtureBoxes) {
+              const one = solid.intersect(fb.solid);
+              const v = one.volume();
+              one.delete();
+              if (v > best) { best = v; named = fb.box; }
+            }
+            fixtureDiag.push({
+              severity: 'error',
+              code: 'tool-into-fixture',
+              checkpoint: idx,
+              message: `checkpoint ${idx}: the cutter drives ${formatVolume(best > 0 ? best : vol)} mm³ into the fixture '${named?.label ?? '?'}' (${named?.id ?? '?'})`,
+            });
+          }
+        }
         if (cp.nonConstantZ) {
           diagnostics.push({ severity: 'info', code: 'ramp-over-removed', checkpoint: idx, message: `checkpoint ${idx} has moves that change Z; swept at its lowest Z, which removes more than the machine would (/Simulation.md §3.2)` });
         }
@@ -696,19 +886,26 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   if (hg) diagnostics.push(hg);
   const bb = stock.boundingBox();
   const a0 = performance.now();
-  const air = checkAirMoves(tl, stock, topZ, bb.min[2], timeline.airMoves, timeline.checkpoints, radius, deadline);
+  const air = checkAirMoves(tl, stock, topZ, bb.min[2], timeline.airMoves, timeline.checkpoints, radius, deadline, fixture, fixtureTop, (d) => fixtureDiag.push(d));
   const msAir = performance.now() - a0;
   if (air.budgetExceeded) {
     for (const g of air.gouges) g.solid.delete();
     return refuseBudget(done);
   }
   diagnostics.push(...air.diagnostics);
+  // The fixture checks fold together and go in after the stock gates, so the picture reads in
+  // the order the tool meets things.
+  diagnostics.push(...fixtureDiag.finish());
   if (air.gouges.length < air.diagnostics.filter((d) => d.code === 'rapid-through-stock').length) {
     diagnostics.push({ severity: 'info', code: 'gouges-truncated', message: `only the first ${MAX_GOUGES} rapids through the stock are returned as solids; the rest are reported but not drawn` });
   }
-  if (setup.workholding.kind !== 'tape-down' && setup.workholding.kind !== 'anchor-bracket') {
+  // When the fixture is modelled the checks above ran; only an absent fixture leaves the
+  // proximity unproven (#204).
+  if (!fixture && setup.workholding.kind !== 'tape-down' && setup.workholding.kind !== 'anchor-bracket') {
     diagnostics.push({ severity: 'info', code: 'fixture-unchecked', message: `the ${setup.workholding.kind} is not modelled as an obstacle yet (#188): proximity to the fixture is NOT checked` });
   }
+  // Every check against it is done; the fixture is not part of the result, so release it now.
+  disposeFixture();
 
   const c0 = performance.now();
   let removal: ManifoldInstance | null = null;

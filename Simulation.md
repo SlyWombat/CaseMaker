@@ -622,7 +622,9 @@ And the ones that must **fail**, which matter more than the ones that pass:
   *not* one: the firmware stops the spindle first, and Makera's own concatenated samples
   depend on it. (An earlier version of this paragraph said otherwise and the parser raised 7
   false errors on 6 vendor files.)
-- A label 2 mm from a **vise jaw** with a 3.175 mm cutter → fixture collision (§1.2).
+- A label 2 mm from a **vise jaw** with a 3.175 mm cutter → fixture collision (§1.2) — a test
+  now (`cncSweep.spec.ts`, #204): a stroke whose tool edge leaves the stock into the jaw's
+  0.9 mm × 40 mm face, at a depth below the jaw top, reports `tool-into-fixture` naming the jaw.
 - A cut deeper than the tool's `shoulderLength` → holder collision.
 - A `G0` that crosses the stock, and a spindle-off move that comes **near the material, the
   fixture or the bed** (a proximity test on the geometry — a spindle-off feed move in air is
@@ -782,7 +784,7 @@ about how the part will *look* beyond which colour volume a floor lands in.
    tested at all** (step 7): a +Z rapid from the exact end point of the immediately preceding
    cut, same X,Y, is counted in `airMovesClearedByConstruction` and cleared with no boolean,
    which is where the air gate's time went (§4.6).
-6. ~~**Validation and collision gates**~~ **Done, except the fixture.** Refusals: tool (by
+6. ~~**Validation and collision gates**~~ **Done.** Refusals: tool (by
    name), stock, laser job, rotary job. Gates: the envelope (#184, in the runner, machine
    coordinates, capped at 25 diagnostics per code); the holder — `shoulderLength ?? fluteLength`,
    and "**cannot be proven**" as a warning when both are missing; and the air moves — a rapid
@@ -796,11 +798,17 @@ about how the part will *look* beyond which colour volume a floor lands in.
    named tolerances, not a magic epsilon — scales with the depth the tool penetrates and
    applies only on the re-test against the simplified removal: a retract ending on an arc
    leaves slivers below it; a plunge to 0.3 mm from safe height is well above it (the first
-   floor scaled with the whole Z span and hid that plunge). **The fixture is not modelled as
-   an obstacle yet** (#188's solids), and the sweep says so in a diagnostic.
+   floor scaled with the whole Z span and hid that plunge). **The fixture (#204)** is the vise
+   as its two inflated obstacle boxes (`Setup.fixture`, #203): the cutter is checked against it
+   on every cutting move (`tool-into-fixture`, naming the jaw it hits) and on every air move
+   (`rapid-into-fixture` / `feed-into-fixture`, with the line number); the collet nut is
+   checked against it per checkpoint once `machine.holder` (#208) and the tool's stick-out are
+   both **known** (`holder-into-fixture`), and until then the sweep says clearance "cannot be
+   proven" — one `holder-vs-fixture-unproven` **warning**, never a refusal. The collision is
+   **reported, never subtracted**. Repeated codes fold at `DIAGNOSTIC_CAP`.
 7. ~~**Run it on Makera's corpus**~~ **Done for the gates that exist.** Parser, runner and
    sweep each have a corpus test; `ACRYLIC-Balloon.nc` passes every gate above with zero
-   errors. Every item of §7.1's must-FAIL list is a test except fixture collision.
+   errors. Every item of §7.1's must-FAIL list is a test.
 8. ~~**Checkpointed playback**~~ **Done** (`workers/geometry/playback.ts`): `stockAt(k)`,
    `checkpointAtStep`, `removedVolumeAt`, scrubbable both ways, bounded memory, causal
    checkpoints (§8.0). **The UI is not built**, and comes after a mockup.

@@ -56,6 +56,13 @@ describe('the Z1 profile', () => {
     expect(insideEnvelope(Z1, [Z1.toolChange.changePosition[0], Z1.toolChange.changePosition[1], Z1.toolChange.clearanceZ])).toBe(true);
   });
 
+  it('the collet nut is NOT measured yet (#208): holder is null, and that is deliberate', () => {
+    // #208 calipers the real nut. Filling this in is a MEASUREMENT, not a tidy-up, so it must
+    // touch this test: a filled holder changes the fixture check from "cannot be proven" to a
+    // geometric test, and the number has to be someone's.
+    expect(Z1.holder).toBeNull();
+  });
+
   it('the heights the head actually goes to are within travel; the probe TARGET is not, and that is recorded', () => {
     const { clearanceZ, safeZ, sensorZ } = Z1.toolChange;
     for (const z of [clearanceZ, safeZ]) {

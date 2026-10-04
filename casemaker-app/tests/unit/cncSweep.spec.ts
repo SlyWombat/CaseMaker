@@ -20,7 +20,10 @@ import {
   SWEEP_TOLERANCES,
   type SweepOpts,
 } from '@/workers/geometry/sweep';
-import { buildTimeline, parseGcode, stubSetup, type Setup } from '@/engine/cnc';
+import { buildTimeline, parseGcode, stubSetup, viseEnvelope, DEFAULT_VISE, Z1, type MachineProfile, type Setup, type Workholding } from '@/engine/cnc';
+import { toSetup, jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { createSimSession } from '@/workers/sim/session';
 import { flatEndMill, toolFromMkrRecord, cuttingRadiusForSweep, shapeFromType } from '@/engine/cnc/tool';
 import { parseMkrRecord } from '@/engine/cnc/gcode/mkrHeader';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
@@ -724,6 +727,166 @@ describe('#194: the time budget and progress are part of the contract', () => {
     const total = timeline.checkpoints.length;
     expect(total).toBe(3);
     expect(seen).toEqual([[1, total], [2, total], [3, total]]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// #204: the fixture and the holder. The fixture is `setup.fixture` (#203) — the vise's two
+// boxes, each grown by `uncertainty` and unioned — and the collet nut is `machine.holder`
+// (#208; unmeasured, so `null` on the Z1). Three checks, all against the tool's own geometry:
+// the cutter on a cutting move, the cutter on an air move, and the nut above it.
+// ---------------------------------------------------------------------------------------
+describe('#204: the fixture is an obstacle the sweep refuses to cut into', () => {
+  // 100 x 60 x 12: the default job's blank. Work origin on its top-front-left, so the stock
+  // occupies X [0,100], Y [0,60], Z [-12,0] and cuts are negative Z.
+  const FSLAB = { kind: 'prism' as const, outline: { kind: 'p-rect' as const, size: [100, 60] as [number, number] }, thickness: 12 };
+  const FSTOCK = { length: 100, width: 60, thickness: 12 };
+  // The issue's parameters: jaw tops at Z = -4 (stockProud 4), 15 mm jaws, jawStartY -10 and
+  // jawLength 80 so the jaws span Y -10..70; uncertainty 0 unless a test says otherwise.
+  const FVISE = { ...DEFAULT_VISE, uncertainty: 0 };
+  const T3 = flatEndMill(3.175); // radius 1.5875
+  /** A fixture job on the 12 mm blank: the default vise as its two inflated obstacle boxes. */
+  const fixtureSetup = (over: Partial<Setup> = {}, uncertainty = 0): Setup =>
+    stubSetup(FSLAB, HOLD, { fixture: viseEnvelope(FSTOCK, { ...FVISE, uncertainty }), ...over });
+  /** One stroke in Y from 10 to 50 at a constant X and depth (-Z), then clear. */
+  const stroke = (x: number, z: number) => `S1000 M3\nG0 X${x} Y10 Z1\nG1 Z${z} F100\nG1 Y50\n`;
+  const codesOf = (out: ReturnType<typeof sweep>['out']): string[] => {
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    return out.value.diagnostics.map((d) => d.code);
+  };
+
+  it('THE #182 MUST-FAIL CASE: a stroke whose edge leaves the stock and cuts the fixed jaw', () => {
+    // X = 2.5: the tool edge (r 1.5875) is 0.91 mm INSIDE the stock's left face — it never
+    // leaves the stock, so the cutter is not in the fixture. X = 1.0: the edge is 0.59 mm
+    // OUTSIDE the stock, at X = -0.59 over the fixed jaw (face x = 0, top Z = -4), at depth 5.
+    expect(codesOf(sweep(stroke(2.5, -5), T3, fixtureSetup()).out)).not.toContain('tool-into-fixture');
+
+    const { out } = sweep(stroke(1.0, -5), T3, fixtureSetup());
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    const d = out.value.diagnostics.find((x) => x.code === 'tool-into-fixture');
+    expect(d?.severity).toBe('error');
+    expect(d?.message).toContain('Vise fixed jaw');
+  });
+
+  it('the same stroke ABOVE the jaw top cuts air beside the stock: no fixture error', () => {
+    expect(codesOf(sweep(stroke(1.0, -3), T3, fixtureSetup()).out)).not.toContain('tool-into-fixture');
+  });
+
+  it('uncertainty matters: a default jaw grown by 2 mm reaches X = 2 and catches the stroke', () => {
+    // The X = 2.5 stroke of test 1 is clear of an exact jaw; grown by the default's 2 mm, the
+    // jaw's face reaches X = 2 and its top Z = -2, so the tool edge at 0.91 is now inside it.
+    const { out } = sweep(stroke(2.5, -5), T3, fixtureSetup({}, 2));
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.diagnostics.find((d) => d.code === 'tool-into-fixture')?.severity).toBe('error');
+  });
+
+  it('a RAPID through the jaw is rapid-into-fixture; the same rapid above it is nothing', () => {
+    // G0 along X at Z = -6 (below the jaw top), through the fixed jaw AND the stock.
+    const bad = sweep('G0 X-20 Y30 Z5\nG0 Z-6\nG0 X50\n', T3, fixtureSetup());
+    expect(codesOf(bad.out)).toContain('rapid-into-fixture');
+    expect(codesOf(bad.out)).toContain('rapid-through-stock'); // it goes through the stock too
+
+    // The same rapid at Z = 5 is above everything: neither.
+    const fine = sweep('G0 X-20 Y30 Z5\nG0 X50\n', T3, fixtureSetup());
+    expect(codesOf(fine.out)).not.toContain('rapid-into-fixture');
+    expect(codesOf(fine.out)).not.toContain('rapid-through-stock');
+  });
+
+  it('an UNMEASURED nut (machine.holder null) is exactly one warning, never a refusal', () => {
+    const program = 'S1000 M3\nG0 X20 Y10 Z1\nG1 Z-5 F100\nG1 Y50\nG0 Z1\nG0 X50\nG1 Z-6 F100\nG1 Y50\nG0 Z1\nG0 X80\nG1 Z-7 F100\nG1 Y50\n';
+    const { out, timeline } = sweep(program, T3, fixtureSetup());
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(timeline.checkpoints).toHaveLength(3); // three depths: three checkpoints
+    const warns = out.value.diagnostics.filter((d) => d.code === 'holder-vs-fixture-unproven');
+    expect(warns).toHaveLength(1);
+    expect(warns[0]?.severity).toBe('warning');
+  });
+
+  it('a MEASURED nut: clear at depth 5, in the jaw at depth 8', () => {
+    const machine: MachineProfile = { ...Z1, holder: { nutDiameter: 20, nutLength: 15, source: 'test' } };
+    const t = flatEndMill(3.175, { stickout: 3 }); // nut bottom sits 3 mm above the tip
+    // Depth 5: nut bottom Z = -2, above the jaw top at -4 → clear.
+    expect(codesOf(sweep(stroke(8, -5), t, fixtureSetup(), { machine }).out)).not.toContain('holder-into-fixture');
+    // Depth 8: nut bottom Z = -5, below -4, and its r-10 footprint reaches X = -2 over the jaw.
+    const { out } = sweep(stroke(8, -8), t, fixtureSetup(), { machine });
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.diagnostics.find((d) => d.code === 'holder-into-fixture')?.severity).toBe('error');
+  });
+
+  it('no fixture → fixture-unchecked; a modelled fixture → no such info', () => {
+    const viseWH: Workholding = {
+      kind: 'vise',
+      jawFaces: [
+        { origin: [0, 0, 0] as [number, number, number], normal: [1, 0, 0] as [number, number, number] },
+        { origin: [100, 0, 0] as [number, number, number], normal: [-1, 0, 0] as [number, number, number] },
+      ],
+      jawHeight: 8,
+    };
+    expect(codesOf(sweep(stroke(50, -2), T3, stubSetup(FSLAB, viseWH)).out)).toContain('fixture-unchecked');
+    expect(codesOf(sweep(stroke(50, -2), T3, fixtureSetup({ workholding: viseWH })).out)).not.toContain('fixture-unchecked');
+  });
+
+  it('no leak: the same fixture job sweeps 50 times', () => {
+    for (let i = 0; i < 50; i++) {
+      const { out } = sweep(stroke(1.0, -5), T3, fixtureSetup());
+      if (!out.ok) throw new Error(`run ${i}: ${JSON.stringify(out.diagnostics)}`);
+      // Each run's result is caller-owned; delete every handle once.
+      out.value.stock.delete();
+      out.value.result.delete();
+      out.value.removal?.delete();
+      for (const s of out.value.perCheckpoint) s?.delete();
+      for (const g of out.value.gouges) g.solid.delete();
+    }
+  });
+
+  it('the session ships the UN-INFLATED fixture boxes and their provenance (#204 item 5)', () => {
+    const session = createSimSession(tl);
+    const r = session.load(stroke(50, -2), fixtureSetup({}, 2), T3, null);
+    if (!r.ok) throw new Error(JSON.stringify(r.diagnostics));
+    expect(r.meshes.fixture.map((f) => f.id)).toEqual(['vise-fixed-jaw', 'vise-moving-jaw']);
+    expect(r.fixtureSource).toBe('default');
+    expect(r.fixtureUncertainty).toBe(2);
+    // What is DRAWN is where the user said the jaw is — un-inflated, its face on x = 0 — not
+    // the grown box the checks use (which reaches x = 2).
+    expect(r.meshes.fixture[0]!.mesh.bbox.max[0]).toBeCloseTo(0, 6);
+    session.dispose();
+  });
+
+  it('FOLLOW-UP: a fixture rising ABOVE the stock top DISABLES the retract shortcut', () => {
+    // A box over the cut's end point (60, 30) reaching Z = 10, well above the top at Z = 0.
+    // Check (a)'s checkpoint column stops at the stock top, so it cannot see this box; the
+    // step-7 shortcut would otherwise wave a retract through geometry the box can hit. With the
+    // shortcut disabled the retract is built and tested against stock AND fixture like any rapid.
+    const clamp: Setup = stubSetup(FSLAB, HOLD, {
+      fixture: { boxes: [{ id: 'top-clamp', label: 'Top clamp', min: [55, 25, 1], max: [65, 35, 10] }], source: 'default', uncertainty: 0 },
+    });
+    const program = 'S1000 M3\nG0 X50 Y30 Z1\nG1 Z-1 F100\nG1 X60\nG0 Z5\n';
+    const { out } = sweep(program, T3, clamp);
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.stats.airMovesClearedByConstruction).toBe(0);
+    expect(out.value.diagnostics.map((d) => d.code)).toContain('rapid-into-fixture');
+
+    // The same program with the standard vise — jaw tops at Z = -4, BELOW the stock top — takes
+    // the shortcut exactly as before: the flag is computed per sweep, and it stays on where the
+    // retract is provably inside the cut's column.
+    const vise = sweep(program, T3, fixtureSetup());
+    if (!vise.out.ok) throw new Error(JSON.stringify(vise.out.diagnostics));
+    expect(vise.out.value.stats.airMovesClearedByConstruction).toBe(1);
+    expect(vise.out.value.diagnostics.map((d) => d.code)).not.toContain('rapid-into-fixture');
+  });
+
+  it('ACCEPTANCE: the default engrave job sweeps with zero fixture errors and one unproven-nut warning', () => {
+    const job = defaultEngraveJob();
+    const s = toSetup(job, Z1);
+    const t = jobTool(job) ?? flatEndMill(1);
+    // A representative engrave path on the middle of the blank, clear of the jaws.
+    const program = 'S1000 M3\nG0 X30 Y20 Z1\nG1 Z-2 F100\nG1 X70\nG0 Z1\nG0 X30 Y40\nG1 Z-1 F100\nG1 X70\n';
+    const { out } = sweep(program, t, s, { machine: Z1 });
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    const fixtureErrors = out.value.diagnostics.filter((d) => ['tool-into-fixture', 'rapid-into-fixture', 'feed-into-fixture', 'holder-into-fixture'].includes(d.code));
+    expect(fixtureErrors).toEqual([]);
+    // Z1.holder is null (#208): one warning, exactly, however many checkpoints.
+    expect(out.value.diagnostics.filter((d) => d.code === 'holder-vs-fixture-unproven')).toHaveLength(1);
   });
 });
 

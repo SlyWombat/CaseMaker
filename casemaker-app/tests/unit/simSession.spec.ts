@@ -254,6 +254,38 @@ describe('stateAt and toolPath, on demand', () => {
   });
 });
 
+describe('simPath: the whole path, with kinds and times (#197)', () => {
+  // Issue #193's 9-line program. `startingTool: 1` makes `T1 M6` a no-op, so its only effects
+  // are the spindle start and the four moves.
+  const LINES_193 = ['G90 G21', 'T1 M6', 'S12000 M3', 'G0 X10 Y10 Z5', 'G1 Z-1 F200', 'G1 X30 F500', 'G0 Z5', 'M5', 'M02'].join('\n');
+
+  it('the #193 program: four vertices, kinds [0, 1, 1, 0], a 4.32 s clock', () => {
+    const { session } = loaded(LINES_193, setup({ startingTool: 1 }));
+    const p = session.simPath();
+    expect(Array.from(p.kind)).toEqual([0, 1, 1, 0]);
+    expect(p.xyz).toHaveLength(12);
+    const steps = Array.from(p.step);
+    for (let i = 1; i < steps.length; i++) expect(steps[i]!).toBeGreaterThan(steps[i - 1]!);
+    // The first rapid starts from an unknown position: a vertex, but no time on the clock.
+    expect(p.t[0]).toBe(0);
+    // 6 mm plunge at 200 mm/min = 1.8 s; 20 mm cut at 500 mm/min = 2.4 s;
+    // the retract is 6 mm at the 3000 mm/min DISPLAY rate = 0.12 s.
+    expect(p.t[1]).toBeCloseTo(1.8, 3);
+    expect(p.t[2]).toBeCloseTo(4.2, 3);
+    expect(p.t[3]).toBeCloseTo(4.32, 3);
+    session.dispose();
+  });
+
+  it('nothing loaded: four empty arrays, not a throw', () => {
+    const session = createSimSession(tl);
+    const p = session.simPath();
+    expect(p.xyz).toHaveLength(0);
+    expect(p.step).toHaveLength(0);
+    expect(p.kind).toHaveLength(0);
+    expect(p.t).toHaveLength(0);
+  });
+});
+
 describe('refusals: a refused SWEEP leaves a path-only session, even over a good one (#194)', () => {
   /**
    * Every refusal below is raised by the SWEEP, which runs after the runner has built the
@@ -331,6 +363,8 @@ describe('refusals: a refused SWEEP leaves a path-only session, even over a good
     const p = session.toolPath(0, last);
     expect(p.length).toBeGreaterThan(0);
     expect(p.length % 3).toBe(0);
+    // #197 — simPath works in path-only mode too: it is built from the timeline alone.
+    expect(session.simPath().xyz.length).toBeGreaterThan(0);
     expect(session.frameAt(0, ++gen)).toBeNull();
     session.dispose();
     expect(session.loaded).toBe(false);
@@ -492,6 +526,7 @@ describe('simStore: plain data and meshes, never jobStore.nodes', () => {
         return r;
       },
       requestFrame: (k: number) => { void gen; frames.request(k); },
+      simPath: async () => session.simPath(), // #197
       disposeSim: async () => { frames.reset(); session.dispose(); },
     } as unknown as SimClient;
   }
@@ -547,6 +582,7 @@ describe('simStore: plain data and meshes, never jobStore.nodes', () => {
         return session.load(...a);
       },
       requestFrame: () => {},
+      simPath: async () => session.simPath(), // #197
       disposeSim: async () => { session.dispose(); },
     } as unknown as SimClient;
     setSimClientLoader(async () => client);

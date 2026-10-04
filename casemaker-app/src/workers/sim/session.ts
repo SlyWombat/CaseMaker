@@ -8,6 +8,7 @@
  *                                          removal and gouge MESHES
  *   frameAt(k, gen)                      -> { stock, removalSoFar } meshes, or null if stale
  *   stateAt(step), toolPath(from, to)    -> on demand; per-step state is never shipped whole
+ *   simPath()                            -> the whole path with kinds and times (#197)
  *   dispose()
  *
  * OWNERSHIP, exactly. One session holds at most one loaded program. `load` disposes any
@@ -26,13 +27,14 @@
  * moves).
  */
 
-import { applyEvent, buildTimeline, parseGcode, MACHINES, type MachineState, type PausePoint, type Segment, type Setup, type Timeline } from '@/engine/cnc';
+import { applyEvent, buildTimeline, parseGcode, MACHINES, type FixtureEnvelope, type MachineState, type PausePoint, type Segment, type Setup, type Timeline } from '@/engine/cnc';
 
+import type { Mm } from '@/types/units';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
-import { sweepTimeline, type SweepDiagnostic, type SweepResult, type SweepStats } from '../geometry/sweep';
+import { boxSolid, sweepTimeline, type SweepDiagnostic, type SweepResult, type SweepStats } from '../geometry/sweep';
 
 export type DiagnosticSource = 'parser' | 'runner' | 'sweep';
 
@@ -64,6 +66,17 @@ export interface SimGougeMesh {
   mesh: NodeMeshOutput;
 }
 
+/**
+ * One obstacle the tool must not hit (#204, `/Simulation.md` §1.1). Mesh coordinates are the
+ * **un-inflated** box — where the user said the jaw is, not where the check grew it to. The
+ * viewport draws them translucent grey with the source in the label.
+ */
+export interface SimFixtureMesh {
+  id: string;
+  label: string;
+  mesh: NodeMeshOutput;
+}
+
 export interface SimLoadOk {
   ok: true;
   diagnostics: SimDiagnostic[];
@@ -76,7 +89,15 @@ export interface SimLoadOk {
   checkpoints: CheckpointInfo[];
   pauses: PausePoint[];
   segments: Segment[];
-  meshes: { stock: NodeMeshOutput; result: NodeMeshOutput; removal: NodeMeshOutput | null; gouges: SimGougeMesh[] };
+  meshes: { stock: NodeMeshOutput; result: NodeMeshOutput; removal: NodeMeshOutput | null; gouges: SimGougeMesh[]; fixture: SimFixtureMesh[] };
+  /**
+   * Where the fixture's dimensions came from (#204), present only when the setup models one.
+   * A default is NOT a measurement; the viewport shows this so the shown jaws are not read as
+   * exact. Optional so a setup with no `fixture` does not grow the load info's shape.
+   */
+  fixtureSource?: FixtureEnvelope['source'];
+  /** Every box was grown by this much before any check (#203, decision 28), mm. */
+  fixtureUncertainty?: Mm;
 }
 
 export interface SimLoadRefused {
@@ -96,6 +117,33 @@ export interface SimLoadRefused {
 }
 
 export type SimLoadResult = SimLoadOk | SimLoadRefused;
+
+/**
+ * The seek rate a RAPID is DRAWN at, mm/min (#197). A rapid has no feed in the file (#184), and
+ * the controller's real seek rate is not ours to state — so this is **for display only**: it
+ * gives the drawn path a time axis (#198) without claiming the machine's speed.
+ */
+export const DISPLAY_RAPID_MM_MIN = 3000;
+
+/**
+ * The whole tool path, with the kind and time of every move (#197, `/Simulation.md` §8). The
+ * viewport needs to know which segments cut and #198 needs time; `toolPath` returns bare
+ * positions and neither. One entry per MoveEvent whose position is FULLY known — a non-move
+ * step and a move that leaves an axis unknown produce no vertex.
+ */
+export interface SimPath {
+  /** Tool-tip position after each step whose position is fully known: [x, y, z, …], work frame. */
+  xyz: Float32Array;
+  /** The program step each vertex belongs to; strictly increasing. */
+  step: Uint32Array;
+  /**
+   * 0 = rapid, 1 = cutting feed (spindle on), 2 = feed with the spindle off. Vertex i's kind
+   * describes the move that ENDS at vertex i.
+   */
+  kind: Uint8Array;
+  /** Cumulative seconds at each vertex (see `simPath`). */
+  t: Float32Array;
+}
 
 export interface SimFrame {
   k: number;
@@ -134,6 +182,8 @@ export interface SimSession {
   stateAt(step: number): MachineState | null;
   /** Work-frame [x, y, z, …] of the tool after each step in [from, to] whose position is fully known. */
   toolPath(fromStep: number, toStep: number): Float32Array;
+  /** The whole path with kinds and times (#197). Empty arrays when nothing is loaded. */
+  simPath(): SimPath;
   dispose(): void;
   readonly loaded: boolean;
 }
@@ -189,7 +239,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       ...parse.diagnostics.map((d): SimDiagnostic => ({ source: 'parser', severity: d.severity, code: d.code, message: d.message, line: d.line })),
       ...timeline.diagnostics.map((d): SimDiagnostic => ({ source: 'runner', severity: d.severity, code: d.code, message: d.message, line: d.line, step: d.step })),
     ];
-    const out = sweepTimeline(tl, timeline, tool, setup, opts);
+    const out = sweepTimeline(tl, timeline, tool, setup, machine ? { ...opts, machine } : opts);
     if (!out.ok) {
       // The runner's work is cheap and worth keeping on its own: a refused sweep still yields
       // the path, the pauses and the segments, so the viewport can draw the path with no
@@ -208,11 +258,21 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     let playback: Playback | null = null;
     try {
       playback = createPlayback(tl, timeline, sweep);
+      // The fixture, drawn where the user SAID the jaws are (#204): the un-inflated boxes, so
+      // the picture is not the grown box the checks use. Built from the same `boxSolid` the
+      // sweep checks against, so the shown solid and the tested one can never disagree.
+      const fixture: SimFixtureMesh[] = [];
+      for (const box of setup.fixture?.boxes ?? []) {
+        const solid = boxSolid(tl, box);
+        fixture.push({ id: box.id, label: box.label, mesh: meshOutputOf(solid) });
+        solid.delete();
+      }
       const meshes = {
         stock: meshOutputOf(sweep.stock),
         result: meshOutputOf(sweep.result),
         removal: sweep.removal ? meshOutputOf(sweep.removal) : null,
         gouges: sweep.gouges.map((g): SimGougeMesh => ({ step: g.step, line: g.line, mesh: meshOutputOf(g.solid) })),
+        fixture,
       };
       diagnostics.push(...sweep.diagnostics.map(tagSweep));
       live = { kind: 'swept', sweep, playback, timeline, setup };
@@ -236,6 +296,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         pauses: timeline.pauses,
         segments: timeline.segments,
         meshes,
+        ...(setup.fixture ? { fixtureSource: setup.fixture.source, fixtureUncertainty: setup.fixture.uncertainty } : {}),
       };
     } catch (e) {
       // Nothing may leak, and a failed load leaves no session. Same order as `dispose`.
@@ -281,6 +342,61 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     return Float32Array.from(pts);
   };
 
-  return { load, frameAt, stateAt, toolPath, dispose, get loaded() { return live !== null; } };
+  /**
+   * One pass over `timeline.events`, building the path the viewport draws (#197). A vertex is
+   * emitted for each MoveEvent whose position is FULLY known after it; its kind is the move that
+   * ended there, and its `t` is the running time.
+   *
+   * Times (the issue's rule): a move over a fully-known span takes `distance / feed × 60` s using
+   * the move's own `feed` (mm/min) for a feed, and `DISPLAY_RAPID_MM_MIN` for a rapid. A move
+   * whose start or end is unknown, or a feed with no known feed value, takes 0 s — the first
+   * rapid of a program starts from an unknown position and so contributes nothing to the clock.
+   */
+  const simPath = (): SimPath => {
+    const empty = (): SimPath => ({
+      xyz: new Float32Array(0),
+      step: new Uint32Array(0),
+      kind: new Uint8Array(0),
+      t: new Float32Array(0),
+    });
+    const l = live;
+    if (!l || l.timeline.events.length === 0) return empty();
+    const events = l.timeline.events;
+    const xyz: number[] = [];
+    const step: number[] = [];
+    const kind: number[] = [];
+    const t: number[] = [];
+    let cum = 0;
+    let s = l.timeline.stateAt(-1); // the state before step 0
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i] as Parameters<typeof applyEvent>[1];
+      const from = s.work;
+      s = applyEvent(s, ev, l.setup);
+      if (ev.kind !== 'move') continue;
+      const [x, y, z] = s.work;
+      if (x === null || y === null || z === null) continue; // position not fully known: no vertex
+      let dt = 0;
+      const [fx, fy, fz] = from;
+      if (fx !== null && fy !== null && fz !== null) {
+        const dist = Math.hypot(x - fx, y - fy, z - fz);
+        if (ev.mode === 'rapid') dt = (dist / DISPLAY_RAPID_MM_MIN) * 60;
+        else if (ev.feed !== null) dt = (dist / ev.feed) * 60;
+        // else: a feed with no known feed value takes 0 s.
+      }
+      cum += dt;
+      xyz.push(x, y, z);
+      step.push(i);
+      t.push(cum);
+      kind.push(ev.mode === 'rapid' ? 0 : s.spindle === 'off' ? 2 : 1);
+    }
+    return {
+      xyz: Float32Array.from(xyz),
+      step: Uint32Array.from(step),
+      kind: Uint8Array.from(kind),
+      t: Float32Array.from(t),
+    };
+  };
+
+  return { load, frameAt, stateAt, toolPath, simPath, dispose, get loaded() { return live !== null; } };
 }
 
