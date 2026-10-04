@@ -255,7 +255,11 @@ half a disc — see §4's opening note. Assert the closed-form area (§4.0).
 
 - **A G0 above the stock removes nothing.** A G0 that intersects the stock **removes
   material in the simulation** — it is not merely flagged. The gouge must be visible;
-  #174 refuses the file separately.
+  #174 refuses the file separately. **Open (#182, raised by code review #4):** the V1 code
+  does the opposite of this sentence — the air-move gate reports `rapid-through-stock` with
+  the volume and the sweep removes nothing for it, because a rapid is not a cut in the
+  checkpoint model. Which the picture should show is a design question, not a bug; it is on
+  the issue and this bullet stays as written until it is answered (§9 item 5).
 - **The sweep is linear-only; the parser is not optional about arcs.** Studio's own output
   contains no arcs — 9 607 `G1`, 25 `G0`, zero `G2`/`G3` (`/Makera-Parity.md` §6) — and our
   IR is linear too, so it was tempting to treat arcs as a contingency. They are not:
@@ -415,7 +419,12 @@ unaffordable path.
 **V1's exactness claim is for a flat end mill at constant Z.** Non-constant-Z moves use the
 conservative rule — the capsule extruded from the move's lowest Z — which over-removes, so
 §7's over-cut oracle has to tolerate it. Hull-per-move moves next to the dexel decision in
-§5, not into V1.
+§5, not into V1 **for the picture**. The air-move **gate** is the exception, and affordable:
+it sweeps each *air* move, and each ramp it has to credit, as the exact hull of the tool at
+the move's two ends (a convex solid along a segment IS its hull), because a conservative
+rule there is wrong in the dangerous direction — crediting a ramp with material it has not
+reached lets a rapid through that material pass. Those hulls number in the hundreds per job
+(`MAX_AIR_CHECKS`), not the ten thousands measured above.
 
 ## 5. Two backends, one interface
 
@@ -586,8 +595,19 @@ one Z level at 0.7 s. The affordable structure, and the one real CAM simulators 
 - **Pause points are checkpoints by definition** — `M6`, `M490.1`, `M600` (§1.1). The
   emulator stops with the tool shown, the next tool named, and the state it will resume in.
 
-So one compute pass, then free playback. **Do not** build it as incremental subtraction;
-that is the design that cannot be made fast later.
+So one compute pass, then cheap playback — "free" was the first draft's word, and code
+review #4 showed the cost it hid: caching every cumulative union and every stock ran a
+719-checkpoint vendor job out of wasm memory. Memory is **bounded**: the cumulative union is
+kept at every 32nd checkpoint (materialised into a real mesh — a lazy union must not be
+reused, see the trap recorded in `playback.ts`), stocks live in a six-entry most-recently-used
+cache, and a seek costs at most 32 lazy unions and one subtraction. **Do not** build it as
+incremental subtraction; that is the design that cannot be made fast later.
+
+Checkpoints are **causal**: a checkpoint is one contiguous run of cuts at one (segment, Z),
+so leaving a Z and returning to it later is a *new* checkpoint and "everything cut so far"
+never includes a cut from later in the program. (Keyed on (segment, Z) alone — the first
+version — a return to an earlier Z was folded into the old checkpoint and playback showed it
+early.)
 
 Three objects exist after a run — **stock**, **result**, and **removed volume** — and all
 three are useful. The removed volume is the most informative and should be visible rather
@@ -629,6 +649,15 @@ about how the part will *look* beyond which colour volume a floor lands in.
    24 000. A full-face relief would be far larger.
 4. **Can the dexel backend share the `Move[]` type unchanged?** It should, but rotary adds
    an `A` component, and that is the field `/Fabrication.md` §9.1 deliberately deferred.
+5. **Should a rapid through material REMOVE it in the picture, or only be reported?** §3.3
+   says remove; the code reports (`rapid-through-stock`, with the volume) and removes nothing.
+   Raised by code review #4; on #182.
+6. **`MAX_CHECKPOINTS = 1000`** is a budget, not a measurement: the vendor's fatigue-test.nc
+   (108 744 runs) must be refused, ACRYLIC-Balloon.nc (10) must pass, and nothing between has
+   been timed. On #182.
+7. **Envelope −200 or −206?** The profile says 200 mm of travel; the shipped config has
+   `soft_endstop.enable false` and the review noted a −206 limit elsewhere. Unverified without
+   the machine.
 
 ---
 
@@ -637,13 +666,15 @@ about how the part will *look* beyond which colour volume a floor lands in.
 1. ~~**`Setup` + stubbed `placement`**~~ **Done** (`src/engine/cnc/setup.ts`, two transforms).
 2. ~~**G-code parser**~~ **Done** (`src/engine/cnc/gcode/`, zero errors on the 26-file corpus).
 3. ~~**Machine state machine**~~ **Done** (`emulator/timeline.ts`), including the tool-change
-   macro animated from the machine profile (#184) and checkpoints keyed by (segment, Z).
+   macro, `M491` and `G28` animated from the machine profile (#184), `G92` and `G10 L2/L20`
+   offsets as the firmware applies them, and checkpoints as causal runs at one (segment, Z).
 4. ~~**Frames**~~ **Done** (`frames.ts`), golden-number tested and mutation-checked.
 5. ~~**`ExactSweeper`**~~ **Done** (`src/workers/geometry/sweep.ts`): chunk-64 → simplify →
    8-way union tree → extrude → subtract, with the closed-form capsule gate asserted FIRST in
    its spec, the lowest-Z rule for ramps, and a real vendor 2.5D job swept end to end. The
    removal solids overshoot the stock top by 0.01 mm so the subtraction has no coplanar face;
-   the volume identity is therefore `stock − (removal ∩ stock)`, not `stock − removal`.
+   the volume identity is therefore `stock − (removal ∩ stock)`, not `stock − removal`. More
+   than `MAX_CHECKPOINTS` (1000) runs is refused as a dense/3D job (§9 item 6).
 6. ~~**Validation and collision gates**~~ **Done, except the fixture.** Refusals: tool (by
    name), stock, laser job, rotary job. Gates: the envelope (#184, in the runner, machine
    coordinates, capped at 25 diagnostics per code); the holder — `shoulderLength ?? fluteLength`,
@@ -652,15 +683,20 @@ about how the part will *look* beyond which colour volume a floor lands in.
    within 1 mm of material or the bed. "Material" means **the stock as it is at that step**:
    the first version measured against the uncut blank and flagged every retract in a real job
    (169 of 169 errors were `G0 Z2` from the end of a cut). The check is time-ordered, built from
-   per-checkpoint prefixes that only grow. The hit threshold is the **geometric noise floor**
-   derived from the named tolerances, not a magic epsilon: a retract ending on an arc leaves
-   slivers below it; a 0.05 mm graze is an order of magnitude above it. **The fixture is not
-   modelled as an obstacle yet** (#188's solids), and the sweep says so in a diagnostic.
+   per-checkpoint prefixes that only grow, and after code review #4 the tool body is swept
+   **exactly** along each air move (the hull of the tool at both ends, §4.5), prefixes credit a
+   ramp only with what it has reached, and the **geometric noise floor** — derived from the
+   named tolerances, not a magic epsilon — scales with the depth the tool penetrates and
+   applies only on the re-test against the simplified removal: a retract ending on an arc
+   leaves slivers below it; a plunge to 0.3 mm from safe height is well above it (the first
+   floor scaled with the whole Z span and hid that plunge). **The fixture is not modelled as
+   an obstacle yet** (#188's solids), and the sweep says so in a diagnostic.
 7. ~~**Run it on Makera's corpus**~~ **Done for the gates that exist.** Parser, runner and
    sweep each have a corpus test; `ACRYLIC-Balloon.nc` passes every gate above with zero
    errors. Every item of §7.1's must-FAIL list is a test except fixture collision.
-8. **Checkpointed playback** (§8.0), then the UI after a mockup. Per-checkpoint solids exist
-   (`SweepResult.perCheckpoint`); the cumulative-union scrub and the viewport are not built.
+8. ~~**Checkpointed playback**~~ **Done** (`workers/geometry/playback.ts`): `stockAt(k)`,
+   `checkpointAtStep`, `removedVolumeAt`, scrubbable both ways, bounded memory, causal
+   checkpoints (§8.0). **The UI is not built**, and comes after a mockup.
 9. **The oracle tests** (§7), once #171 and #178 exist to compare against.
 10. **Round-trip against #173**, once the post-processor exists.
 

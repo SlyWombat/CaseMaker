@@ -47,11 +47,16 @@ line and `M6` on the next, does nothing. A manual change (`isATC=0`) then runs a
 2. `G53 G0 X.. Y..` — move to the tool-change position
 3. `M490.1` — **wait for the operator**
 4. mark the spindle tool empty
-5. *(only if all axes are homed)* `G53 G0 Z<safe>`, `G53 G0 X<anchor1+181> Y<anchor1+181>` —
-   to the tool-length sensor in the far corner (a Z1/Z1 Pro coordinate)
-6. `G38.6 Z.. F<fast>`, `G91 G0 Z<retract>`, `G38.6 Z.. F<slow>` — probe the sensor twice
+5. *(only if all axes are homed)* `G53 G0 Z<clearance>`, `G53 G0 X<anchor1+181> Y<anchor1+181>` —
+   to the tool-length sensor in the far corner (a Z1/Z1 Pro coordinate). The manual-change
+   path calls `fill_cali_scripts(.., clear_z = true)`, so this traverse is at **`clearance_z`**
+   (−1), not `safe_z` (−20); the first version of this list said `safe`, and the emulator's
+   macro copied it until code review #4 read the call site.
+6. `G38.6 Z<toolrack_z> F<fast>`, `G91 G0 Z<retract>`, `G38.6 Z<−1−retract> F<slow>` — probe the
+   sensor twice (the second target is relative to the retracted position)
 7. `M493.1` — **save the new tool length offset**
-8. `G53 G0 Z<safe>`, then record the new tool number
+8. `G53 G0 Z<safe>`; then the completion path rapids to `clearance_z` and back to the saved
+   X,Y (next bullet), and records the new tool number
 
 Four things follow:
 
@@ -78,6 +83,13 @@ Four things follow:
   machine constant, `clearance_z`, a value for the machine profile (#184), not for the file.
   The next `G0 X.. Y..` then moves from a known X,Y and an unknown Z, which is what
   `TopClamp.nc` does.
+- **`M491` is the calibration half alone** — steps 5–8 from wherever the head is, then the
+  same return to the saved X,Y at `clearance_z`.
+- **`G28` is not "home".** `ATCHandler::on_gcode_received` sets `g28_triggered`, and the main
+  loop then rapids to `clearance_z` and on to `clearance_x, clearance_y` (−11.6, −14.6 on the
+  shipped Z1 config) — the "clearance position", with the comment *"G28 means goto clearance
+  position on CARVERA"*. With the machine profile the emulator animates both moves and the
+  head's position is known afterwards; without it, unknown.
 
 ## 3. The work coordinate system lives in the machine, not in the file
 
