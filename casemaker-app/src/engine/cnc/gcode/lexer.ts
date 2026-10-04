@@ -245,7 +245,7 @@ export function parseWords(
           severity: 'error',
           code: 'stray-text',
           line,
-          message: `letter '${letter}' is not followed by a number (found '${tail.trim() || 'end of command'}'); the firmware would hunt for a later '${letter}' instead of rejecting it`,
+          message: `letter '${letter}' is not followed by a number (found '${tail.trim() || 'end of command'}'); the firmware does not reject this — its get_value returns 0 when no later '${letter}' parses, so the machine would move to ${letter}0`,
         });
       }
       continue;

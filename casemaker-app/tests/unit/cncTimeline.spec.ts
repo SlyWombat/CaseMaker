@@ -157,6 +157,18 @@ describe('the runner knows MORE than the parser, and must not be overwritten by 
     const tl = run('G0 X0 Y0 Z0\nS1000 M3\nG2 X10 Y0 I5 J0 F100\n');
     expect(tl.stateAt(tl.events.length - 1).work).toEqual([10, 0, 0]);
   });
+
+  it('REGRESSION (review #4): an arc after a no-op M6 keeps the runner\'s Z and stays an arc', () => {
+    // The parser lost Z at `T1M6`; the runner, told T1 is active, did not. Arc points used to
+    // bypass resolveMove and overwrite the runner's Z with the parser's null — then the cut was
+    // "from unknown Z" and the sweep drew nothing. Now they resolve like any other move.
+    const tl = run('G0 X0 Y0 Z3\nT1M6\nS1000 M3\nG2 X10 Y0 I5 J0 F100\n', { startingTool: 1 });
+    const codes = tl.diagnostics.map((d) => d.code);
+    expect(codes).not.toContain('cut-unknown-z');
+    expect(codes).not.toContain('arc-from-unknown');
+    expect(tl.events.filter((e) => e.kind === 'move' && e.fromArc).length).toBeGreaterThan(1);
+    expect(tl.stateAt(tl.events.length - 1).work).toEqual([10, 0, 3]);
+  });
 });
 
 describe('tool changes and pauses (the emulator stops where the machine stops)', () => {

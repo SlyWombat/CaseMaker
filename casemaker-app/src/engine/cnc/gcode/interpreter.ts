@@ -28,7 +28,7 @@ import type { Diagnostic, Frame, GcodeEvent, MkrHeader, MkrRecord, MoveEvent, Pa
 
 const INCH = 25.4;
 
-/** A radius mismatch above this is reported: the firmware accepts it and runs a spiral. */
+/** A radius mismatch above this is reported: the firmware accepts it and runs a circle on the start radius, then one jump to the target. */
 const ARC_RADIUS_MISMATCH_WARN_MM = 0.01;
 
 /** Codes with no geometric effect that appear in the reference corpus. */
@@ -164,6 +164,27 @@ class Interp {
       }
     }
 
+    // Bare X/Y/Z/A/F lines inherit the last modal motion: the firmware prefixes `G<n> ` and
+    // re-dispatches the line. A lone F is prefixed G1, and because that sets the modal motion,
+    // it silently turns following bare lines into cuts. This happens BEFORE the hoist below,
+    // on the line with its comment still attached, because that is the firmware's order — so
+    // `X5 (G91 here)` is hoisted too (the review found the first version skipped it).
+    {
+      const c0 = s[0] as string;
+      if ('XYZAF'.indexOf(c0) !== -1) {
+        const g = c0 === 'F' ? 1 : this.motion;
+        if (c0 === 'F' && this.motion !== 1) {
+          this.diag(
+            'warning',
+            'lone-f-switches-g1',
+            lineNo,
+            `a line starting with F is prefixed G1 by the firmware, which makes G1 the modal motion${this.motion === 0 ? ' (it was G0: following bare X/Y/Z lines are now cutting moves)' : ''}`,
+          );
+        }
+        s = `G${g} ${s}`;
+      }
+    }
+
     // G90/G91 are HOISTED to the front of a G line, and the search runs over the WHOLE line
     // including its comment, before the comment is removed. A comment that merely mentions
     // G91 therefore changes the distance mode on the real machine.
@@ -202,21 +223,8 @@ class Interp {
     if (code.trim() === '') return;
     code = code.trimStart();
 
-    // Bare X/Y/Z/A/F lines inherit the last modal motion. A lone F is prefixed G1, and
-    // because that sets the modal motion, it silently turns following bare lines into cuts.
     const c0 = code[0] as string;
-    if ('XYZAF'.indexOf(c0) !== -1) {
-      const g = c0 === 'F' ? 1 : this.motion;
-      if (c0 === 'F' && this.motion !== 1) {
-        this.diag(
-          'warning',
-          'lone-f-switches-g1',
-          lineNo,
-          `a line starting with F is prefixed G1 by the firmware, which makes G1 the modal motion${this.motion === 0 ? ' (it was G0: following bare X/Y/Z lines are now cutting moves)' : ''}`,
-        );
-      }
-      code = `G${g} ${code}`;
-    } else if ('GMTS'.indexOf(c0) === -1) {
+    if ('GMTS'.indexOf(c0) === -1) {
       this.diag('warning', 'ignored-line', lineNo, `the firmware ignores a line starting with '${c0}'`);
       return;
     }
@@ -354,7 +362,9 @@ class Interp {
   /**
    * `G53` makes the NEXT motion use machine coordinates, on the same line. Either the next
    * command is `G0`/`G1`, or there is none and the G53 command's own axes use the last
-   * modal motion. Anything else is "Invalid G53" in the firmware and is ignored.
+   * modal motion — which the firmware lets be a G2/G3 (`modal_group_1 > 3` is its only
+   * check), so a bare `G53 X.. Y..` after an arc is an arc in machine coordinates. An
+   * explicit `G53 G2` on the same line is "Invalid G53" and ignored.
    */
   private handleG53(words: Word[], nextText: string | undefined, line: number): boolean {
     if (nextText !== undefined) {
@@ -371,10 +381,9 @@ class Interp {
       this.doMotion(nc as 0 | 1, nextWords, true, line);
       return true;
     }
-    if (this.motion > 1) {
-      this.diag('error', 'g53-invalid', line, 'G53 with no following G0/G1 reuses the last modal motion, which is an arc here');
-      return false;
-    }
+    // With nothing after it, G53 reuses the last modal motion — and the firmware allows a
+    // modal G2/G3 here (its check is `modal_group_1 > 3`), so this can be an ARC in machine
+    // coordinates. The first version refused it; the review read the source.
     this.doMotion(this.motion, words, true, line);
     return false;
   }
@@ -428,7 +437,7 @@ class Interp {
     }
 
     if (g >= 2) {
-      this.doArc(g === 2, words, target, commanded, values, relative, cur, frame, mcs, power, line);
+      this.doArc(g === 2, words, target, commanded, values, relative, cur, frame, power, line);
       return;
     }
 
@@ -494,7 +503,6 @@ class Interp {
     relative: boolean,
     cur: Pos,
     frame: Frame,
-    mcs: boolean,
     power: number | null,
     line: number,
   ): void {
@@ -507,10 +515,6 @@ class Interp {
       });
       this.commit(frame, target, commanded);
     };
-    if (mcs) {
-      this.diag('error', 'g53-invalid', line, 'G53 applies to G0/G1 only');
-      return;
-    }
     if (this.feed === null) {
       if (!this.warnedNoFeed) {
         this.warnedNoFeed = true;
@@ -528,20 +532,27 @@ class Interp {
       else if (w.letter === 'J') off[1] = w.value * this.scale;
       else if (w.letter === 'K') off[2] = w.value * this.scale;
     }
-    // Every axis the arc needs must be known: start, and the target on the plane.
-    const known = (p: Pos): p is [number, number, number] => p[0] !== null && p[1] !== null && p[2] !== null;
-    if (!known(cur) || !known(target)) {
+    // The arc needs its two PLANE axes known at both ends. The linear axis (Z for G17) only
+    // matters if the program commanded it; an XY arc at a Z the parser does not know — the
+    // usual case right after a tool change — is still a perfectly good arc, and its points
+    // carry Z as "not commanded" so a consumer that does know Z (the runner, told the
+    // starting tool) keeps its own. The first version demanded all three and emitted a
+    // straight chord after every no-op M6.
+    const [a0, a1, lin] = this.plane === 'XY' ? [0, 1, 2] : this.plane === 'XZ' ? [0, 2, 1] : [1, 2, 0];
+    const planeKnown = cur[a0] !== null && cur[a1] !== null && target[a0] !== null && target[a1] !== null;
+    const linCommanded = commanded[lin] as boolean;
+    if (!planeKnown || (linCommanded && (cur[lin] === null || target[lin] === null))) {
       this.diag('error', 'arc-from-unknown', line, 'an arc from or to a position the program has not established; emitted as a straight move with unknown axes');
       fallback();
       return;
     }
-    const res = tessellateArc({
-      start: [cur[0], cur[1], cur[2]],
-      end: [target[0], target[1], target[2]],
-      offsets: off,
-      plane: this.plane,
-      clockwise,
-    });
+    const linStart = cur[lin];
+    const linEnd = linCommanded ? (target[lin] as number) : linStart;
+    const start: [number, number, number] = [0, 0, 0];
+    const end: [number, number, number] = [0, 0, 0];
+    start[a0] = cur[a0] as number; start[a1] = cur[a1] as number; start[lin] = linStart ?? 0;
+    end[a0] = target[a0] as number; end[a1] = target[a1] as number; end[lin] = linEnd ?? 0;
+    const res = tessellateArc({ start, end, offsets: off, plane: this.plane, clockwise });
     if ('error' in res) {
       this.diag('error', 'arc-zero-radius', line, 'an arc whose I/J/K offsets give a zero radius');
       fallback();
@@ -552,22 +563,26 @@ class Interp {
         'warning',
         'arc-radius-mismatch',
         line,
-        `start radius ${res.radiusStart.toFixed(4)} mm differs from end radius ${res.radiusEnd.toFixed(4)} mm: the firmware does not reject this and runs a spiral`,
+        `start radius ${res.radiusStart.toFixed(4)} mm differs from end radius ${res.radiusEnd.toFixed(4)} mm: the firmware does not reject this; it runs a circle on the start radius and jumps to the target on the last segment`,
       );
     }
     let prev: Pos = [cur[0], cur[1], cur[2]];
+    const cmd: [boolean, boolean, boolean] = [false, false, false];
+    cmd[a0] = true; cmd[a1] = true; cmd[lin] = linCommanded;
     for (const p of res.points) {
       const to: Pos = [p[0], p[1], p[2]];
+      if (!linCommanded) to[lin] = linStart ?? null; // not commanded: unchanged, possibly unknown
       // Tessellated points are resolved ABSOLUTE coordinates in the parser's own frame of
-      // reference, so all three axes count as commanded and nothing is relative.
+      // reference, so the plane axes count as commanded and nothing is relative; the linear
+      // axis counts only if the program commanded it.
       this.pushMove('cut', frame, prev, to, power, true, line, {
-        commanded: [true, true, true],
-        values: [to[0], to[1], to[2]],
+        commanded: [cmd[0], cmd[1], cmd[2]],
+        values: [cmd[0] ? to[0] : null, cmd[1] ? to[1] : null, cmd[2] ? to[2] : null],
         relative: false,
       });
       prev = to;
     }
-    this.commit(frame, target, [true, true, true]);
+    this.commit(frame, target, [cmd[0], cmd[1], cmd[2]]);
   }
 
   // ---- M codes -----------------------------------------------------------

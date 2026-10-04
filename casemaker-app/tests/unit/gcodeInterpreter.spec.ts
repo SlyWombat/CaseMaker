@@ -138,6 +138,15 @@ describe('firmware hazards (§6) are reported, not silently obeyed', () => {
     expect(moves(r)[1]?.to[0]).toBe(5);
   });
 
+  it('REGRESSION (review #4): the hoist also runs on a BARE-AXIS line, after the G prefix', () => {
+    // The firmware prefixes `G<n> ` and re-dispatches the whole line, comment included, so
+    // the hoist sees it. The first version prefixed after stripping the comment and missed it.
+    const r = parseGcode('G0 X1\nG91\nX5 ; back to G90\nX1\n');
+    expect(errors(r)).toContain('comment-contains-g90-g91');
+    expect(moves(r)[1]?.to[0]).toBe(5);
+    expect(moves(r)[2]?.to[0]).toBe(1);
+  });
+
   it('text after a "(" comment is DISCARDED, not executed as RS274 would', () => {
     const r = parseGcode('G0 (hop) X5\n');
     expect(errors(r)).toEqual(['paren-comment-truncates']);
@@ -188,6 +197,20 @@ describe('G53 (§4)', () => {
     const r = parseGcode('G53 G2 X1\n');
     expect(errors(r)).toContain('g53-invalid');
     expect(moves(r)).toHaveLength(0);
+  });
+
+  it('REGRESSION (review #4): a BARE G53 after a modal G2 is an ARC in machine coordinates', () => {
+    // The firmware's only check is `modal_group_1 > 3`; a modal arc passes. The first version
+    // refused this as "an arc here", which is not what the machine does.
+    // The parser does not know the WCS, so it cannot know the arc's MACHINE-frame start and
+    // reports that honestly (`arc-from-unknown`, one straight machine-frame move) rather than
+    // the false `g53-invalid`. KNOWN LIMIT: the runner, which does know the WCS, receives the
+    // chord, not the arc; nobody writes this form, so it is documented, not solved.
+    const r = parseGcode('G0 X0 Y0 Z0\nG2 X10 Y0 I5 J0 F100\nG53 X0 Y0 I-5 J0\n');
+    expect(errors(r)).not.toContain('g53-invalid');
+    expect(errors(r)).toContain('arc-from-unknown');
+    const mcs = moves(r).filter((m) => m.frame === 'machine');
+    expect(mcs).toHaveLength(1);
   });
 
   it('a machine-frame move invalidates ONLY the work axes it moved', () => {
@@ -277,14 +300,33 @@ describe('MoveEvent says which axes were COMMANDED, and what was written (review
     expect(m?.relative).toBe(true);
   });
 
-  it('tessellated arc points are resolved absolute and fully commanded', () => {
+  it('tessellated arc points are resolved absolute; the plane axes are commanded, Z only if written', () => {
     const arc = moves(parseGcode('G0 X0 Y0 Z0\nG91\nG2 X10 Y0 I5 J0 F100\n')).filter((m) => m.fromArc);
     expect(arc.length).toBeGreaterThan(0);
     for (const m of arc) {
-      expect(m.commanded).toEqual([true, true, true]);
+      expect(m.commanded).toEqual([true, true, false]);
       expect(m.relative).toBe(false);
-      expect(m.values).toEqual(m.to);
+      expect(m.values).toEqual([m.to[0], m.to[1], null]);
+      expect(m.to[2]).toBe(0); // carried from the start, not interpolated
     }
+    const helix = moves(parseGcode('G0 X0 Y0 Z0\nG2 X10 Y0 Z-2 I5 J0 F100\n')).filter((m) => m.fromArc);
+    for (const m of helix) expect(m.commanded).toEqual([true, true, true]);
+  });
+
+  it('REGRESSION (review #4): an XY arc at a Z the PARSER lost to a tool change is still an arc', () => {
+    // The parser treats `T1M6` as real and forgets Z. The arc only needs X and Y; it must not
+    // be refused and must not collapse to a chord. Its points carry Z = null, uncommanded, so
+    // a runner that knows Z keeps its own.
+    const r = parseGcode('G0 X0 Y0 Z3\nT1M6\nS1000 M3\nG2 X10 Y0 I5 J0 F100\n');
+    expect(errors(r)).not.toContain('arc-from-unknown');
+    const arc = moves(r).filter((m) => m.fromArc);
+    expect(arc.length).toBeGreaterThan(1);
+    for (const m of arc) {
+      expect(m.to[2]).toBeNull();
+      expect(m.commanded[2]).toBe(false);
+    }
+    // ...but an arc that COMMANDS Z from an unknown Z is still refused: the helix has no base.
+    expect(errors(parseGcode('G0 X0 Y0 Z3\nT1M6\nG2 X10 Y0 Z-1 I5 J0 F100\n'))).toContain('arc-from-unknown');
   });
 
   it('G0 with no axes emits no move, so no empty `commanded` event exists', () => {

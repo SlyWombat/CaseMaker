@@ -189,11 +189,12 @@ export function isRealToolChange(s: MachineState, tool: number): boolean | null 
  * stays whatever the runner already holds. This also keeps a `G53` move from erasing the
  * work X and Y, which the machine-frame event knows nothing about.
  *
- * Tessellated arc points are already absolute and fully resolved by the parser, so they are
- * taken as written.
  */
 export function resolveMove(s: MachineState, ev: MoveEvent): { from: Pos; to: Pos } {
-  if (ev.fromArc) return { from: [ev.from[0], ev.from[1], ev.from[2]], to: [ev.to[0], ev.to[1], ev.to[2]] };
+  // Arc segments are ordinary absolute moves now: their `commanded` flags say which axes the
+  // program set (the linear axis of an XY arc often was not), so they go through the same
+  // path and the runner keeps its own Z. (An early return here once drew a chord after every
+  // no-op M6, because the parser's Z was unknown there and the runner's was not.)
   const cur = ev.frame === 'work' ? s.work : s.machine;
   const from: Pos = [cur[0], cur[1], cur[2]];
   const to: Pos = [cur[0], cur[1], cur[2]];
