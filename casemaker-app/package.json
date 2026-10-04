@@ -23,7 +23,8 @@
     "quota": "node scripts/cpanel-quota.mjs",
     "thread:coupon": "tsx --tsconfig tsconfig.scripts.json scripts/thread-coupon.ts",
     "docs:sync": "node scripts/sync-docs.mjs",
-    "reference-gcode:fetch": "node scripts/fetch-reference-gcode.mjs"
+    "reference-gcode:fetch": "node scripts/fetch-reference-gcode.mjs",
+    "check:sim-gate": "node scripts/check-sim-gate.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

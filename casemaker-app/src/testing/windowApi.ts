@@ -23,6 +23,10 @@ import { importStlFile } from '@/engine/import/assetImporter';
 import type { SmartCutoutDecision } from '@/engine/compiler/smartCutoutLayout';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useViewportStore } from '@/store/viewportStore';
+import { useSimStore } from '@/store/simStore';
+import { stubSetup, Z1 } from '@/engine/cnc';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { rectProfile } from '@/engine/compiler/profile';
 
 export interface SceneNodeSummary {
   id: string;
@@ -86,6 +90,13 @@ export interface CaseMakerTestApi {
   getLidVisible(): boolean;
   setLidVisible(v: boolean): void;
   setHatMountingPosition(placementId: string, mountingPositionId: string): Promise<void>;
+  /**
+   * #193 — prove the sim worker shell in a real `Worker`. Loads a program through
+   * `useSimStore`, waits for a terminal status, and reports what the store holds. The count and
+   * volume are plain store data, so this exercises `sim.worker.ts` + Comlink + the store, not
+   * just `session.ts` in-process.
+   */
+  simSmoke(gcode: string): Promise<{ status: string; count: number; removedVolume: number; errors: number }>;
 }
 
 export function installCaseMakerTestApi(): void {
@@ -230,6 +241,33 @@ export function installCaseMakerTestApi(): void {
       await waitForIdle();
     },
     getHats: () => useProjectStore.getState().project.hats,
+    async simSmoke(gcode) {
+      const setup = stubSetup(
+        { kind: 'prism', outline: rectProfile(40, 20), thickness: 5 },
+        { kind: 'tape-down', contact: rectProfile(40, 20) },
+        { startingTool: 1 },
+        Z1,
+      );
+      // Subscribe BEFORE loading. `loadProgram` sets `loading` synchronously and only reaches a
+      // terminal status across a worker round-trip, so nothing can be missed from here on.
+      const settled = new Promise<void>((resolve) => {
+        const unsubscribe = useSimStore.subscribe((s) => {
+          if (s.status === 'ready' || s.status === 'refused' || s.status === 'error') {
+            unsubscribe();
+            resolve();
+          }
+        });
+      });
+      void useSimStore.getState().loadProgram(gcode, setup, flatEndMill(3.175), Z1.id);
+      await settled;
+      const s = useSimStore.getState();
+      return {
+        status: s.status,
+        count: s.info?.count ?? 0,
+        removedVolume: s.info?.stats.removedVolume ?? 0,
+        errors: s.diagnostics.filter((d) => d.severity === 'error').length,
+      };
+    },
   };
 
   (window as unknown as { __caseMaker: CaseMakerTestApi }).__caseMaker = api;

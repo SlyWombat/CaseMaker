@@ -52,6 +52,7 @@ npm run lint         # eslint
 npm test             # vitest unit
 npm run test:e2e     # playwright E2E (requires installed Chromium)
 npm run build        # production bundle
+npm run check:sim-gate  # prod build: assert no CNC sim worker (#193; slow, pre-deploy only)
 ```
 
 > **Note:** On WSL, develop inside your Linux home (`~/casemaker-app`), not the Windows-mounted `/mnt/c/...` path. The `sharp` postinstall fails on the Windows mount.
@@ -118,6 +119,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ## Pull requests
 
 - Run `npm run lint && npm run typecheck && npm test && npm run test:e2e && npm run build` locally before pushing.
+- Before a production deploy, run `npm run check:sim-gate`: it builds with `DEPLOY_TARGET=electricrv` and fails if the CNC simulation worker or client entered the bundle (#193).
 - Keep PRs scoped to one logical change.
 - Include screenshots or a short clip if you touch the UI.
 - Update the [CHANGELOG](https://github.com/SlyWombat/CaseMaker/blob/main/CHANGELOG.md) under `[Unreleased]`.

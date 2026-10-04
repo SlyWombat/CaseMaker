@@ -108,6 +108,15 @@ export interface SimSession {
   readonly loaded: boolean;
 }
 
+/**
+ * Test seams for `createSimSession`. The teardown order below is by construction, not by type,
+ * so a spec needs a way to observe it rather than trust the comment: `onDispose` fires as each
+ * owned thing is released, `'playback'` first and `'sweep'` second.
+ */
+export interface SimSessionHooks {
+  onDispose?(what: 'playback' | 'sweep'): void;
+}
+
 /** Delete every handle a `SweepResult` owns, each exactly once. */
 export function disposeSweep(sweep: SweepResult): void {
   sweep.stock.delete();
@@ -121,7 +130,7 @@ const refuse = (code: string, message: string): SimLoadRefused => ({ ok: false, 
 
 const tagSweep = (d: SweepDiagnostic): SimDiagnostic => ({ source: 'sweep', severity: d.severity, code: d.code, message: d.message, ...(d.checkpoint !== undefined ? { checkpoint: d.checkpoint } : {}) });
 
-export function createSimSession(tl: ManifoldToplevel): SimSession {
+export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks): SimSession {
   let live: Live | null = null;
   let latestGen = Number.NEGATIVE_INFINITY;
 
@@ -131,7 +140,9 @@ export function createSimSession(tl: ManifoldToplevel): SimSession {
     if (!l) return;
     // Playback first: its anchors and cached unions are built over the sweep's solids.
     l.playback.dispose();
+    hooks?.onDispose?.('playback');
     disposeSweep(l.sweep);
+    hooks?.onDispose?.('sweep');
   };
 
   const load = (gcodeText: string, setup: Setup, tool: Tool, machineId: string | null): SimLoadResult => {
@@ -183,9 +194,13 @@ export function createSimSession(tl: ManifoldToplevel): SimSession {
         meshes,
       };
     } catch (e) {
-      // Nothing may leak, and a failed load leaves no session.
-      playback?.dispose();
+      // Nothing may leak, and a failed load leaves no session. Same order as `dispose`.
+      if (playback) {
+        playback.dispose();
+        hooks?.onDispose?.('playback');
+      }
       disposeSweep(sweep);
+      hooks?.onDispose?.('sweep');
       live = null;
       throw e;
     }

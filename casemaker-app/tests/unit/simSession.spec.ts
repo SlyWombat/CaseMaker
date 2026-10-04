@@ -304,6 +304,34 @@ describe('refusals: each leaves NO session, even over a good one', () => {
 });
 
 // ---------------------------------------------------------------------------------------
+// Teardown order. The playback is disposed before the sweep handles "by construction" — a
+// comment cannot fail — so it is observed here instead.
+// ---------------------------------------------------------------------------------------
+describe('dispose order: the playback goes first, then the sweep handles', () => {
+  it('a normal dispose() releases the playback, then the sweep', () => {
+    const seen: string[] = [];
+    const session = createSimSession(tl, { onDispose: (what) => seen.push(what) });
+    session.load(THREE, setup(), tool, null);
+    seen.length = 0; // the first load disposed nothing: there was no session yet
+    session.dispose();
+    expect(seen).toEqual(['playback', 'sweep']);
+    session.dispose(); // idempotent: nothing left to release, so nothing more is reported
+    expect(seen).toEqual(['playback', 'sweep']);
+  });
+
+  it('a second load() replaces a session in the same order', () => {
+    const seen: string[] = [];
+    const session = createSimSession(tl, { onDispose: (what) => seen.push(what) });
+    expect(session.load(THREE, setup(), tool, null).ok).toBe(true);
+    seen.length = 0;
+    const replaced = session.load(THREE, setup(), tool, null); // disposes the first, same order
+    expect(replaced.ok).toBe(true);
+    expect(seen).toEqual(['playback', 'sweep']);
+    session.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------------------
 // The coalescer: at most one in flight, newest k wins, stale dropped.
 // ---------------------------------------------------------------------------------------
 describe('frame coalescing: in-flight, not a timer', () => {
