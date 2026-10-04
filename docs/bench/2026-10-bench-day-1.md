@@ -469,6 +469,35 @@ asked by #165 and #176).
 
 **Goes to:** #173's open header question.
 
+### D1b — The `N` word: does the firmware execute a numbered line? (low priority)
+
+**Do.** In the air, spindle off, nothing in the collet. Send each line on its own — through
+Studio's console if it has one, otherwise as a short air file — and watch the head:
+
+| line | our parser predicts |
+|---|---|
+| `N10 G0 X5` | **ignored** — the number is stripped but the firmware keeps testing `N`, which matches none of its G/M/T/S branches |
+| `N10 X5` | **executes** — the remainder starts with `X` and survives via the bare-axis path |
+
+Does X move 5 mm in either case? Start from X0 so the move is visible.
+
+**Expected.** `interpreter.ts:146–165` reads `GcodeDispatch.cpp` as ignoring an `N`-numbered line
+and raises `n-line-ignored` — but that reading has never been checked on hardware, while the
+vendor's FreeCAD machine definition ships a `line_numbers` option that implies the opposite. Both
+cannot be true, and no file we hold settles it: `reference-gcode/` (26 files) has no `N` word.
+
+**Recorded:** _not yet run — did the head move? yes/no ×2._
+
+| Question | Answer |
+|---|---|
+| `N10 G0 X5` — did X move 5 mm? (yes/no) | |
+| `N10 X5` — did X move 5 mm? (yes/no) | |
+| Notes (anything shown on the screen) | |
+
+**Goes to:** #174's `n-line-ignored` reading. Low priority — whichever way it lands, the user-facing
+fix is the export wiring (#206: the verifier run on export, refusing to write), not the parser, so
+nothing waits on this.
+
 ### D2 — Preview origin and axes
 
 **Do.** In Studio's preview of D1: which corner is the origin, and which way do X and Y run
@@ -555,6 +584,7 @@ uncertainty 2 mm), so the app's collision check will warn.
 
 - **#187 item 1** closed with the B1 screenshot.
 - **`/Simulation.md` §9 item 7** closed or restated with C2's measured limit and B2's values.
+- **#174's `n-line-ignored` reading** confirmed or corrected by D1b.
 - Every `PROVISIONAL (#208)` marker in code replaced by a measured value with its date, or left
   PROVISIONAL with the reason it could not be measured — see the inventory below.
 
