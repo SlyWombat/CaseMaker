@@ -190,6 +190,28 @@ describe('generateEngrave (#172)', () => {
     expect(oAreas.some((a) => a > 0)).toBe(true);
   });
 
+  it('rings are cut innermost first: the first contour has the smallest box, the last the largest (9 x 4)', () => {
+    // One depth pass so the loops are exactly the rings, in cut order (#173 comment 3).
+    const params: CutParams = { ...PARAMS, stepDown: 1 };
+    const ir = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: rectRegion(10, 5) }], TOOL, params);
+    const loops = reconstructLoops(ir.operations[0]!.moves);
+    expect(loops.length).toBeGreaterThan(1);
+
+    const box = (pts: Pt[]): { w: number; h: number } => {
+      const xs = pts.map((p) => p[0]);
+      const ys = pts.map((p) => p[1]);
+      return { w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+    };
+    const boxes = loops.map(box);
+    const areas = boxes.map((b) => b.w * b.h);
+    // Innermost first: every ring is strictly larger in area than the one before it, and the
+    // outermost is the region eroded by the tool radius alone: (10-1) x (5-1) = 9 x 4.
+    for (let i = 1; i < areas.length; i++) expect(areas[i]!).toBeGreaterThan(areas[i - 1]!);
+    expect(boxes[0]!.w * boxes[0]!.h).toBe(Math.min(...areas));
+    expect(boxes[boxes.length - 1]!.w).toBeCloseTo(9, 6);
+    expect(boxes[boxes.length - 1]!.h).toBeCloseTo(4, 6);
+  });
+
   it('every feed uses the cutting or plunge feed, none above the Z1 cap; every XY rapid clears hopZ', () => {
     const region = rectRegion(10, 5);
     const ir = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], TOOL, PARAMS);
