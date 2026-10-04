@@ -1,0 +1,210 @@
+/*
+ * The operator run sheet's own stylesheet (#207).
+ *
+ * Kept beside `RunSheetView.tsx` rather than in `src/styles/index.css` because the sheet is a
+ * printable DOCUMENT, not app chrome: it is black-on-white on screen (so the print preview is
+ * what you see) and the `@media print` block hides the whole app and shows only the sheet.
+ */
+
+.run-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow: auto;
+  background: #0f1216;
+  padding: 16px;
+}
+
+.run-sheet-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 820px;
+  margin: 0 auto 12px;
+}
+
+.run-sheet {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 32px 36px;
+  background: #fff;
+  color: #111;
+  border-radius: 4px;
+  font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.run-sheet h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.run-sheet h2 {
+  margin: 18px 0 6px;
+  padding-bottom: 2px;
+  font-size: 15px;
+  border-bottom: 1px solid #ccc;
+}
+
+.run-sheet-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.run-sheet-meta dt {
+  display: inline;
+  font-weight: 600;
+  color: #444;
+}
+
+.run-sheet-meta dd {
+  display: inline;
+  margin: 0 0 0 4px;
+}
+
+.run-sheet-steps {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.run-sheet-step {
+  margin: 4px 0;
+}
+
+.run-sheet-step-bold .run-sheet-step-text {
+  font-weight: 700;
+}
+
+.run-sheet-step-value {
+  margin-left: 6px;
+}
+
+.run-sheet-record {
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+.run-sheet-record-label {
+  margin-right: 4px;
+  font-size: 11px;
+  color: #555;
+}
+
+.run-sheet-record-blank {
+  display: inline-block;
+  min-width: 120px;
+  height: 1em;
+  border-bottom: 1px solid #333;
+}
+
+.run-sheet-unverified {
+  display: block;
+  font-size: 11px;
+  font-style: normal;
+  color: #8a5a00;
+}
+
+.run-sheet-diagram {
+  max-width: 440px;
+  margin: 10px 0;
+}
+
+.run-sheet-svg {
+  width: 100%;
+  height: auto;
+}
+
+/* SVG internals. The viewBox is in millimetres, so stroke widths and font sizes are in mm too. */
+.run-sheet-stock {
+  fill: #fff;
+  stroke: #333;
+  stroke-width: 0.6;
+}
+
+.run-sheet-jaw {
+  fill: #d8d8d8;
+  stroke: #444;
+  stroke-width: 0.6;
+}
+
+.run-sheet-item {
+  fill: #cfe3ff;
+  stroke: #1a4b8c;
+  stroke-width: 0.5;
+}
+
+.run-sheet-item-depth {
+  font-size: 3px;
+  fill: #123;
+}
+
+.run-sheet-label {
+  font-size: 3px;
+  fill: #444;
+}
+
+.run-sheet-axis {
+  stroke: #a00;
+  stroke-width: 0.6;
+}
+
+.run-sheet-axis-label {
+  font-size: 4px;
+  font-weight: 700;
+  fill: #a00;
+}
+
+.run-sheet-arrowhead,
+.run-sheet-origin {
+  fill: #a00;
+}
+
+.run-sheet-origin-label {
+  font-size: 3px;
+  fill: #a00;
+}
+
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  /* Hide the app; show only the sheet. `visibility` (not `display`) keeps layout so the overlay
+     can be lifted to the page origin, and every ancestor stays laid out. */
+  body * {
+    visibility: hidden !important;
+  }
+
+  .run-sheet-overlay,
+  .run-sheet-overlay * {
+    visibility: visible !important;
+  }
+
+  .run-sheet-overlay {
+    position: absolute;
+    inset: 0;
+    overflow: visible;
+    padding: 0;
+    background: #fff;
+  }
+
+  .run-sheet-toolbar {
+    display: none !important;
+  }
+
+  .run-sheet {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+  }
+
+  .run-sheet-section {
+    break-inside: avoid;
+  }
+}

@@ -1,0 +1,261 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] = `
+{
+  "diagram": {
+    "items": [
+      {
+        "depth": 2,
+        "id": "label-0",
+        "max": [
+          73.14,
+          50.16,
+        ],
+        "min": [
+          26.860000000000003,
+          35.84,
+        ],
+        "name": "Engrave "CASE"",
+      },
+      {
+        "depth": 1,
+        "id": "label-1",
+        "max": [
+          76.69142857142857,
+          32,
+        ],
+        "min": [
+          23.30857142857143,
+          20,
+        ],
+        "name": "Engrave "MAKER"",
+      },
+      {
+        "depth": 0.5,
+        "id": "label-2",
+        "max": [
+          75.44,
+          15.234285714285715,
+        ],
+        "min": [
+          24.560000000000002,
+          4.765714285714285,
+        ],
+        "name": "Engrave "first chips"",
+      },
+    ],
+    "jaws": [
+      {
+        "id": "vise-fixed-jaw",
+        "label": "Fixed jaw (left)",
+        "max": [
+          0,
+          70,
+        ],
+        "min": [
+          -15,
+          -10,
+        ],
+      },
+      {
+        "id": "vise-moving-jaw",
+        "label": "Moving jaw (right)",
+        "max": [
+          115,
+          70,
+        ],
+        "min": [
+          100,
+          -10,
+        ],
+      },
+    ],
+    "origin": [
+      0,
+      0,
+    ],
+    "stock": {
+      "length": 100,
+      "width": 60,
+    },
+  },
+  "header": {
+    "estimatedTime": "1 min 35 s",
+    "estimatedTimeNote": "simulated — rapids not included",
+    "fileHash": "a377421c",
+    "fileName": "Untitled-engrave-job.nc",
+    "generatedOn": "2026-10-04",
+    "jobName": "Untitled engrave job",
+  },
+  "sections": [
+    {
+      "id": "need",
+      "steps": [
+        {
+          "text": "The blank. Measure it. If it differs by more than 0.5 mm in any dimension, change the job and regenerate — do not run this file.",
+          "value": "100 × 60 × 12 mm softwood",
+        },
+        {
+          "text": "The cutter — 1 mm flat end (assumed).",
+          "value": "⌀ 1 mm cutting",
+        },
+        {
+          "record": "flute length (mm) / stick-out (mm)",
+          "text": "Record the cutter's flute length and its stick-out from the collet.",
+        },
+        {
+          "text": "The Z1 low-profile vise, and the Makera 3D Probe — the one rated for non-conductive material, NOT the 3D Probe Rod that came in the box.",
+        },
+      ],
+      "title": "1 · What you need",
+    },
+    {
+      "id": "mount",
+      "steps": [
+        {
+          "text": "Remove the MDF wasteboard. Seat the vise on its two locating pins; fasten with six M5×20 screws.",
+          "unverified": "#208",
+        },
+        {
+          "text": "The fixed jaw is on the left.",
+          "unverified": "#208",
+        },
+      ],
+      "title": "2 · Mount the vise",
+    },
+    {
+      "id": "load",
+      "steps": [
+        {
+          "text": "The blank's length runs left–right between the jaws. The face to be engraved is up.",
+          "value": "100 mm",
+        },
+        {
+          "record": "measured stock proud (mm)",
+          "text": "The top face must stand 4 mm above the jaw tops. Record the measured value. If it is less than 3 mm, stop: the cutter would work below the jaw tops.",
+        },
+        {
+          "text": "Push the blank's front edge to where the file expects it: the front edge is 10 mm behind the front of the jaws.",
+        },
+        {
+          "text": "Tighten. Check the blank does not rock.",
+        },
+      ],
+      "title": "3 · Load the blank",
+    },
+    {
+      "id": "cutter",
+      "steps": [
+        {
+          "text": "Fit the cutter with its collar. Run tool-length calibration from Studio (M491).",
+          "unverified": "#208",
+        },
+        {
+          "text": "Do not skip this because the program contains T1 M6. If the machine already believes tool 1 is fitted, that line does nothing.",
+          "unverified": "#208",
+        },
+      ],
+      "title": "4 · Fit the cutter and measure its length",
+    },
+    {
+      "id": "origin",
+      "steps": [
+        {
+          "text": "X0: the blank's left face (against the fixed jaw).",
+          "unverified": "#208",
+        },
+        {
+          "text": "Y0: the blank's front edge.",
+          "unverified": "#208",
+        },
+        {
+          "text": "Z0: the blank's top face — probe it, or touch off on it.",
+          "unverified": "#208",
+        },
+        {
+          "text": "X0 Y0 Z0 is the top-front-left corner of the blank. Move there and check by eye before going on.",
+          "unverified": "#208",
+        },
+      ],
+      "title": "5 · Set the work origin",
+    },
+    {
+      "id": "dry-run",
+      "steps": [
+        {
+          "text": "Raise the work Z by 20 mm and run the whole file in the air. Watch that the cutter stays over the blank and clear of the jaws.",
+        },
+        {
+          "text": "Then restore Z to the work origin.",
+        },
+      ],
+      "title": "6 · Dry run",
+    },
+    {
+      "id": "cut",
+      "steps": [
+        {
+          "text": "Spindle, feed, plunge, passes and step-down. Air on.",
+          "value": "12000 RPM · 500 mm/min feed · 200 mm/min plunge · 2 × 0.5 mm passes · 0.45 mm step-over",
+        },
+        {
+          "text": "Engrave "CASE"",
+          "value": "2 mm deep",
+        },
+        {
+          "text": "Engrave "MAKER"",
+          "value": "1 mm deep",
+        },
+        {
+          "text": "Engrave "first chips"",
+          "value": "0.5 mm deep",
+        },
+        {
+          "text": "Stay at the machine. Stop it if the sound changes, the blank moves, or the cutter loads up.",
+        },
+      ],
+      "title": "7 · Cut",
+    },
+    {
+      "id": "warnings",
+      "steps": [
+        {
+          "bold": true,
+          "text": "Vise dimensions are unmeasured defaults (#208); collisions cannot be trusted yet.",
+        },
+      ],
+      "title": "8 · Warnings carried from the app",
+    },
+    {
+      "id": "record",
+      "steps": [
+        {
+          "record": "measured depth (mm)",
+          "text": "Measured floor depth — Engrave "CASE"",
+        },
+        {
+          "record": "measured depth (mm)",
+          "text": "Measured floor depth — Engrave "MAKER"",
+        },
+        {
+          "record": "measured depth (mm)",
+          "text": "Measured floor depth — Engrave "first chips"",
+        },
+        {
+          "record": "yes / no",
+          "text": "Is the text legible?",
+        },
+        {
+          "record": "clean / fuzzy / burnt",
+          "text": "Surface finish",
+        },
+        {
+          "record": "notes",
+          "text": "Anything that went wrong",
+        },
+      ],
+      "title": "9 · Record afterwards",
+    },
+  ],
+}
+`;
