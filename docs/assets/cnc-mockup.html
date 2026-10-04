@@ -1,0 +1,1852 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Case Maker — CNC UI mockup (#195)</title>
+<style>
+/* ---------------------------------------------------------------------------
+   Case Maker — CNC UI mockup (issue #195). Static, no JS, no network.
+   Colours and density copied from the running app:
+     Sidebar.tsx        nav buttons #1a1f25 / #2a2f36, active #243042 / #3a5a7a
+     styles/index.css   header #171f33, sidebar+context #131b2e, viewport #0d1014,
+                        status bar #14181c, controls #14181c on #e6e8eb
+     PlacementBanner    error #4a1d1d/#7a2828, warning #4a3e1d/#7a6828
+     RackPanel          card #161a20 border #2a2f36 radius 4 padding 8
+     tokens.css         industrial-parametric type + accent tokens
+--------------------------------------------------------------------------- */
+:root{
+  --surface:#0b1326;
+  --sc-low:#131b2e;      /* sidebar + context panel bg  (surface-container-low) */
+  --sc:#171f33;          /* app header bg                (surface-container)    */
+  --on-surface:#dae2fd;
+  --on-var:#c2c6d6;
+  --on-muted:#8c909f;
+  --outline:#424754;
+  --primary:#adc6ff;
+  --primary-container:#4d8eff;
+  --on-primary:#002e6a;
+  --secondary:#4edea3;   /* valid / ready   */
+  --tertiary:#ffb786;    /* warnings/accent */
+  --error:#ffb4ab;
+  /* hard-coded app greys */
+  --rail-btn:#1a1f25;
+  --rail-border:#2a2f36;
+  --rail-active:#243042;
+  --rail-active-border:#3a5a7a;
+  --rail-text:#d1d5db;
+  --control-bg:#14181c;
+  --control-text:#e6e8eb;
+  --viewport-bg:#0d1014;
+  --status-bg:#14181c;
+  --status-text:#8a94a4;
+  --card-bg:#161a20;
+  /* sim viewport layer colours, /Simulation.md §8 + #197 */
+  --stock:#c9a26b; --ghost:#ff5a36; --gouge:#ff0033;
+  --cut-done:#00e0ff; --rapid:#ffd400; --tool:#d0d4dc;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --display:"Space Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:#070b13;color:var(--on-surface);font-family:var(--body);}
+h1,h2,h3,h4{font-family:var(--display);letter-spacing:-.01em}
+main{padding:28px 28px 64px}
+.state{margin:0 0 40px}
+.state__label{font-size:14px;font-weight:600;color:#c8d3de;margin:0 0 8px;font-family:var(--mono)}
+.state__label b{color:var(--tertiary)}
+.state__note{font-size:12px;color:var(--on-muted);margin:0 0 10px;max-width:1440px}
+
+/* --- the 1440×900 app shell ---------------------------------------------- */
+.frame{
+  width:1440px;height:900px;position:relative;overflow:hidden;
+  display:grid;grid-template-rows:48px 1fr 28px;
+  background:var(--surface);border:1px solid #242b3a;border-radius:6px;
+  font-size:12px;
+}
+.app-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 16px;background:var(--sc);border-bottom:1px solid var(--outline);
+}
+.brand{display:flex;align-items:center;gap:10px}
+.brand__mark{
+  width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(140deg,#4d8eff,#2b3f66);color:#00204f;
+  font-family:var(--mono);font-size:12px;font-weight:700;
+}
+.brand h1{margin:0;font-size:16px;font-weight:600}
+.brand small{color:var(--on-muted);font-size:11px;font-family:var(--mono)}
+.toolbar-buttons{display:flex;gap:6px;align-items:center}
+.btn{
+  background:var(--control-bg);color:var(--control-text);border:1px solid var(--rail-border);
+  padding:4px 10px;border-radius:4px;font:inherit;font-size:12px;cursor:pointer;
+}
+.btn--ghost{background:transparent;border-color:transparent;color:var(--on-var)}
+.btn--ghost:hover{border-color:var(--rail-border)}
+.btn--primary{background:var(--primary-container);border-color:transparent;color:var(--on-primary);font-weight:600}
+.btn--danger{color:#f0b4ad;border-color:#7a2828;background:#2a1416}
+.btn--sm{padding:2px 8px;font-size:11px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+
+.app-main{display:grid;grid-template-columns:320px 1fr 360px;min-height:0;overflow:hidden}
+
+/* --- sidebar (Sidebar.tsx) ------------------------------------------------ */
+.sidebar{background:var(--sc-low);border-right:1px solid var(--outline);padding:8px;overflow:hidden}
+.nav{
+  display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;margin-bottom:4px;
+  background:var(--rail-btn);border:1px solid var(--rail-border);border-radius:4px;
+  color:var(--rail-text);font-size:13px;font-weight:500;text-align:left;cursor:pointer;font-family:var(--body);
+}
+.nav__icon{font-size:16px;width:18px;text-align:center}
+.nav--active{background:var(--rail-active);border-color:var(--rail-active-border);color:#cfe;font-weight:600}
+.nav__divider{
+  font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--on-muted);margin:12px 0 8px;padding:0 4px;display:flex;align-items:center;gap:8px;
+}
+.nav__divider::after{content:"";flex:1;height:1px;background:var(--outline);opacity:.7}
+
+/* --- viewport ------------------------------------------------------------- */
+.viewport-pane{position:relative;background:var(--viewport-bg);overflow:hidden}
+.scene-wrap{position:absolute;inset:0}
+.scene-wrap--with-transport{inset:0 0 78px 0}
+.scene{display:block;width:100%;height:100%}
+.vp-empty{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#5b6472;font-size:13px;font-family:var(--mono);text-align:center;padding:40px;
+}
+.layers{
+  position:absolute;top:42px;left:12px;z-index:4;background:rgba(23,31,51,.92);
+  border:1px solid var(--outline);border-radius:6px;padding:8px 10px;font-size:11px;backdrop-filter:blur(6px);
+}
+.layers h4{margin:0 0 6px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--on-muted);font-family:var(--mono)}
+.layers label{display:flex;align-items:center;gap:6px;margin:3px 0;color:var(--on-var);cursor:pointer}
+.layers .sw{width:10px;height:10px;border-radius:2px;flex:none}
+.legend{
+  position:absolute;left:12px;bottom:12px;z-index:4;background:rgba(23,31,51,.92);
+  border:1px solid var(--outline);border-radius:6px;padding:8px 10px;font-size:11px;backdrop-filter:blur(6px);
+}
+.legend h4{margin:0 0 6px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--on-muted);font-family:var(--mono)}
+.legend div{display:flex;align-items:center;gap:7px;margin:3px 0;color:var(--on-var)}
+.legend .sw{width:14px;height:10px;border-radius:2px;border:1px solid rgba(0,0,0,.4)}
+
+/* --- viewport toolbar (ViewportToolbar.tsx, #86; #195 review, #197) -------- */
+/* The app's real toolbar drawn across the top of the viewport: the tool group
+   (Select · Pan · Orbit), the camera group (Perspective · Top · Front · Side,
+   shortcuts 1–4) and — new here, #197 — a zoom group and the CNC layer toggles.
+   The case-only Complete/Exploded/Base/Lid group and the X-ray toggle are left
+   out in CNC modes: they mean nothing for a block of wood. */
+.vp-toolbar{
+  position:absolute;top:0;left:0;right:0;height:34px;z-index:6;
+  display:flex;align-items:center;gap:3px;flex-wrap:nowrap;overflow:hidden;
+  background:rgba(23,31,51,.94);border-bottom:1px solid var(--outline);
+  padding:3px 8px;backdrop-filter:blur(8px);
+}
+.vp-toolbar__group{display:flex;align-items:center;gap:2px;flex:none}
+.vp-toolbar__group+.vp-toolbar__group{border-left:1px solid var(--outline);padding-left:7px;margin-left:4px}
+.vp-tb{
+  background:transparent;border:1px solid transparent;color:var(--on-var);
+  padding:3px 6px;border-radius:4px;font:inherit;font-family:var(--display);font-size:10px;
+  letter-spacing:.04em;text-transform:uppercase;min-width:22px;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;
+}
+.vp-tb--icon{font-size:13px;text-transform:none;min-width:26px}
+.vp-tb--active{background:var(--primary-container);color:var(--on-primary)}
+.vp-toolbar__group--layers{gap:7px}
+.vp-layer{display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--on-var);white-space:nowrap;cursor:pointer}
+.vp-layer input{width:11px;height:11px;margin:0;accent-color:var(--cut-done)}
+
+/* --- transport bar (D, #198) ---------------------------------------------- */
+.transport{
+  position:absolute;left:0;right:0;bottom:0;height:78px;z-index:5;
+  background:rgba(17,23,36,.97);border-top:1px solid var(--outline);
+  padding:6px 12px 0;display:flex;flex-direction:column;gap:4px;
+}
+.transport__row{display:flex;align-items:center;gap:6px}
+.tbtn{
+  width:30px;height:26px;display:inline-flex;align-items:center;justify-content:center;
+  background:var(--control-bg);border:1px solid var(--rail-border);color:var(--control-text);
+  border-radius:4px;font-size:12px;cursor:pointer;padding:0;
+}
+.tbtn--play{background:var(--rail-active);border-color:var(--rail-active-border);color:#cfe}
+.tspeed{background:var(--control-bg);border:1px solid var(--rail-border);color:var(--control-text);border-radius:4px;font-size:11px;padding:3px 6px;font-family:var(--mono)}
+.scrub{flex:1;position:relative;height:26px;display:flex;align-items:center;margin:0 8px;min-width:0}
+.scrub__track{position:relative;width:100%;height:5px;background:#222a3d;border-radius:3px}
+.scrub__fill{position:absolute;left:0;top:0;bottom:0;width:36%;background:var(--cut-done);opacity:.55;border-radius:3px}
+.scrub__tick{position:absolute;top:-5px;width:2px;height:15px;background:var(--rapid);opacity:.85;border-radius:1px;transform:translateX(-1px)}
+.scrub__thumb{position:absolute;top:-6px;width:12px;height:17px;background:#eef2f8;border:1px solid #6b7688;border-radius:3px;transform:translateX(-6px);box-shadow:0 1px 3px rgba(0,0,0,.5)}
+.tread,.tstep{font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tread{color:var(--on-surface)}
+.tstep{color:var(--on-muted)}
+.transport__note{font-size:10px;color:#6c7585;font-family:var(--mono)}
+.pause-callout{
+  position:absolute;left:16px;bottom:88px;z-index:6;max-width:440px;
+  background:#4a3e1d;border:1px solid #7a6828;color:#f7eed4;
+  border-radius:6px;padding:8px 12px;font-size:12px;box-shadow:0 2px 10px rgba(0,0,0,.4);
+}
+.pause-callout strong{color:#ffdf8a}
+.pause-callout small{display:block;color:#d8c89a;font-size:10px;margin-top:2px;font-family:var(--mono)}
+
+/* --- context panel (ContextPanel.tsx) ------------------------------------- */
+.context-panel{background:var(--sc-low);border-left:1px solid var(--outline);padding:12px;overflow:hidden}
+.panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.panel-head h3{margin:0;font-size:15px;color:#d1d5db;font-weight:600}
+.panel-head .x{background:transparent;border:0;color:#9ca3af;font-size:18px;cursor:pointer;line-height:1}
+.panel-stack{display:block}
+.panel-subhead{
+  font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--on-muted);margin:14px 0 6px;padding-bottom:3px;border-bottom:1px solid var(--rail-border);
+  display:flex;align-items:center;justify-content:space-between;gap:6px;
+}
+.panel-subhead:first-child{margin-top:0}
+.hint{font-size:11px;color:var(--on-muted);line-height:1.45;margin:4px 0 0}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.fld{
+  background:var(--control-bg);color:var(--control-text);border:1px solid var(--rail-border);
+  border-radius:4px;padding:3px 6px;font:inherit;font-size:11px;min-width:0;width:100%;
+}
+.fld--num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.fld--text{font-family:var(--body)}
+select.fld{padding:3px 4px}
+.fld:focus{outline:none}
+.lf{display:grid;gap:2px;font-size:11px;margin-bottom:6px}
+.lf>span{color:var(--on-var)}
+.lf em{font-style:normal;color:var(--on-muted);font-size:10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 8px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:0 8px}
+.feeds{display:grid;grid-template-columns:1fr 1fr;gap:0 10px;font-size:10px}
+.feeds>div{display:flex;justify-content:space-between;gap:6px;border-bottom:1px solid #20262e;padding:2px 0}
+.feeds span{color:var(--on-muted)}
+.feeds b{font-weight:400;color:#e6e8eb;font-family:var(--mono)}
+.tag{
+  display:inline-block;font-family:var(--mono);font-size:9px;letter-spacing:.03em;
+  color:var(--secondary);border:1px solid color-mix(in srgb,var(--secondary) 45%,transparent);
+  border-radius:999px;padding:1px 6px;white-space:nowrap;
+}
+.tag--muted{color:var(--on-muted);border-color:var(--outline)}
+.tag--warn{color:var(--tertiary);border-color:color-mix(in srgb,var(--tertiary) 45%,transparent)}
+.badge{
+  display:inline-block;font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:999px;
+  border:1px solid var(--outline);color:var(--on-var);white-space:nowrap;text-transform:none;letter-spacing:0;
+}
+/* compact panels — fit the 360×~820 rail without scrolling */
+.context-panel .panel-subhead{margin:8px 0 4px}
+.context-panel .card{margin-bottom:5px}
+.context-panel .fld{padding:2px 5px;font-size:10px}
+.context-panel .ro th,.context-panel .ro td{padding:2px 4px;font-size:10px}
+.context-panel .lf{margin-bottom:4px}
+.context-panel .hint{margin-top:3px}
+.lbl-inline{display:flex;flex-wrap:wrap;gap:3px 9px;align-items:center;font-size:10px;color:var(--on-muted);margin-top:4px}
+.lbl-inline>label{display:flex;gap:3px;align-items:center}
+.lbl-inline input.fld{width:46px}
+.lbl-inline input[type=range]{width:60px;accent-color:var(--primary-container)}
+.badge--stub{border-color:color-mix(in srgb,var(--tertiary) 55%,transparent);color:var(--tertiary)}
+.badge-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0}
+
+.card{border:1px solid var(--rail-border);border-radius:4px;padding:8px;margin-bottom:6px;background:var(--card-bg)}
+.row{display:flex;gap:6px;align-items:center}
+.row--wrap{flex-wrap:wrap}
+.spacer{margin-left:auto}
+.icon-btn{
+  width:26px;height:26px;flex:none;display:inline-flex;align-items:center;justify-content:center;
+  background:var(--control-bg);border:1px solid var(--rail-border);color:var(--control-text);border-radius:4px;cursor:pointer;font-size:12px;padding:0;
+}
+
+/* banners (PlacementBanner.tsx) */
+.banner{border-radius:4px;padding:6px 10px;font-size:11px;line-height:1.4;margin:6px 0;border:1px solid}
+.banner__head{display:flex;gap:10px;font-weight:600;margin-bottom:3px;align-items:center}
+.banner__head .spacer{margin-left:auto;opacity:.75;font-weight:400}
+.banner--error{background:#4a1d1d;border-color:#7a2828;color:#f7d4d4}
+.banner--warning{background:#4a3e1d;border-color:#7a6828;color:#f7eed4}
+.banner ul{list-style:none;margin:0;padding:0}
+.banner li{margin:2px 0}
+.banner code{font-family:var(--mono);font-size:10px;opacity:.85}
+
+/* diagnostics grouped by source (#196 item 6) */
+.diaggrp{border:1px solid var(--rail-border);border-radius:4px;margin:6px 0;background:var(--card-bg)}
+.diaggrp>summary{
+  cursor:pointer;list-style:none;padding:5px 8px;font-family:var(--mono);font-size:10px;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--on-var);display:flex;gap:8px;align-items:center;
+}
+.diaggrp>summary::-webkit-details-marker{display:none}
+.diaggrp>summary .cnt{margin-left:auto;color:var(--on-muted)}
+.diag{padding:4px 8px;border-top:1px solid #20262e;font-size:11px;line-height:1.4;display:flex;gap:6px}
+.diag .sev{font-family:var(--mono);font-size:9px;text-transform:uppercase;flex:none;width:44px}
+.diag--error .sev{color:var(--error)}
+.diag--warning .sev{color:var(--tertiary)}
+.diag--info .sev{color:var(--on-muted)}
+.diag .code{font-family:var(--mono);color:var(--on-var);font-size:10px}
+.diag .ln{color:#6c7585;font-family:var(--mono);font-size:10px;margin-left:auto;flex:none}
+
+/* stock form with per-field provenance tag */
+.stockrow{display:grid;grid-template-columns:56px 1fr auto;gap:6px;align-items:center;margin-bottom:5px;font-size:11px}
+.stockrow>span:first-child{color:var(--on-var)}
+
+/* simulate panel specifics */
+.progress{height:8px;border-radius:4px;background:#222a3d;overflow:hidden;margin:8px 0 4px}
+.progress>i{display:block;height:100%;width:40%;background:linear-gradient(90deg,#4d8eff,#8fb4ff)}
+.tool-missing{border-color:#b4524c !important;box-shadow:0 0 0 1px rgba(180,82,76,.4)}
+.statgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin:6px 0}
+.stat{border:1px solid var(--rail-border);border-radius:4px;padding:6px;background:var(--card-bg)}
+.stat b{display:block;font-family:var(--mono);font-size:15px;color:#eef2f8;font-variant-numeric:tabular-nums}
+.stat span{font-size:10px;color:var(--on-muted);text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono)}
+.disclaimer{
+  font-size:11px;line-height:1.45;color:#d9c98a;border-left:3px solid var(--tertiary);
+  background:#221d10;border-radius:0 4px 4px 0;padding:6px 10px;margin:8px 0;
+}
+
+/* engrave panel specifics */
+.lbl-card{border:1px solid var(--rail-border);border-radius:4px;padding:7px;margin-bottom:6px;background:var(--card-bg)}
+.lbl-card .row>.fld--text{flex:1}
+.lbl-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px 8px;margin-top:6px}
+.cell{display:grid;gap:2px;font-size:11px}
+.cell>span{font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--on-muted)}
+.depthwrap{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px}
+.depthwrap input[type=range]{flex:1;accent-color:var(--primary-container);min-width:0}
+.depthwrap .fld--num{width:64px}
+.depthwrap .unit{color:var(--on-muted);font-size:10px}
+.ro{width:100%;border-collapse:collapse;font-size:11px}
+.ro th{text-align:left;color:var(--on-muted);font-weight:400;padding:3px 4px;width:90px}
+.ro td{padding:3px 4px;font-family:var(--mono);color:#e6e8eb;font-variant-numeric:tabular-nums}
+.ro tr{border-bottom:1px solid #20262e}
+.ro tr:last-child{border-bottom:0}
+.disc{border:1px solid var(--rail-border);border-radius:4px;padding:5px 8px;margin-top:6px;background:var(--card-bg)}
+.disc>summary{cursor:pointer;color:var(--on-var);font-size:11px}
+/* tool recommendation (#211) — candidate list inside the open "Why?" */
+.cand{display:flex;justify-content:space-between;gap:8px;font-size:10px;color:var(--on-var);padding:2px 0;border-bottom:1px solid #20262e}
+.cand:last-child{border-bottom:0}
+.cand b{font-weight:400;font-family:var(--mono);font-variant-numeric:tabular-nums;color:#e6e8eb}
+.cand .keep{color:var(--secondary)}
+.cand .lose{color:var(--tertiary)}
+.rec-use{display:flex;align-items:center;gap:8px;font-size:11px}
+.rec-use .btn{padding:1px 8px;white-space:nowrap;flex:none}
+.slot{
+  border:1px dashed var(--outline);border-radius:4px;padding:10px;margin-top:12px;text-align:center;
+  color:#6c7585;font-size:11px;font-family:var(--mono);
+}
+.status-rows{list-style:none;margin:6px 0 0;padding:0}
+.status-rows li{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid #20262e;font-size:11px}
+.status-rows li:last-child{border-bottom:0}
+.tick,.cross{width:16px;height:16px;flex:none;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;margin-top:1px;border:1px solid}
+.tick{color:#0c3;border-color:#2f6b4a;background:#12261c}
+.cross{color:#f0b4ad;border-color:#7a2828;background:#2a1416}
+.status-rows strong{font-weight:600;color:#e6e8eb;display:block}
+.status-rows em{font-style:normal;color:var(--on-muted);font-size:10px}
+.status-rows .ok{color:var(--secondary);font-weight:400}
+.btn-row{display:flex;gap:6px;margin-top:10px;align-items:center}
+
+/* --- status bar ----------------------------------------------------------- */
+.status-bar{
+  display:flex;justify-content:space-between;align-items:center;gap:12px;padding:0 12px;
+  background:var(--status-bg);border-top:1px solid var(--rail-border);font-size:11px;color:var(--status-text);
+  font-variant-numeric:tabular-nums;
+}
+.status-bar span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.status-bar .engine{margin-left:auto;display:flex;gap:14px;align-items:center}
+.status-bar .ver{font-family:var(--mono);font-size:10px;color:#6b7280}
+
+/* empty context-panel state (ContextPanel.tsx) */
+.empty h3{margin:0 0 10px;font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--on-surface)}
+.empty p{margin:0 0 10px;font-size:13px;line-height:1.5;color:var(--on-muted)}
+.empty .tip{font-size:11px;font-family:var(--mono);font-style:italic;color:#6c7585}
+</style>
+</head>
+<body>
+
+<!-- =====================================================================
+     Shared SVG scenes. Drawn once as <symbol>s and referenced with <use>,
+     so the file stays self-contained and every viewport is pixel-identical
+     where it should be.
+     ===================================================================== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#eef1f5"/><stop offset=".45" stop-color="#c6cbd3"/>
+      <stop offset="1" stop-color="#98a0ab"/>
+    </linearGradient>
+
+    <!-- stock + removed ghost + gouge + tool + path + vice jaws (ready state) -->
+    <symbol id="scene-cut" viewBox="0 0 900 560">
+      <!-- vice jaws, drawn behind the stock, tops lower than the stock top -->
+      <g fill="#9ca3af" fill-opacity="0.30" stroke="#c3cad4" stroke-opacity="0.55">
+        <polygon points="150,398 230,398 340,303 260,303"/>
+        <polygon points="150,398 230,398 230,458 150,458"/>
+        <polygon points="650,398 742,398 852,303 760,303"/>
+        <polygon points="650,398 742,398 742,458 650,458"/>
+      </g>
+      <!-- the stock -->
+      <polygon points="230,380 650,380 760,285 340,285" fill="#c9a26b" stroke="#6b5433" stroke-width="1"/>
+      <polygon points="230,380 650,380 650,440 230,440" fill="#b08a55" stroke="#6b5433" stroke-width="1"/>
+      <polygon points="650,380 760,285 760,345 650,440" fill="#97734a" stroke="#6b5433" stroke-width="1"/>
+      <!-- removed volume so far, translucent ghost -->
+      <polygon points="315,361 609,361 675,304 381,304" fill="var(--ghost)" fill-opacity="0.28" stroke="var(--ghost)" stroke-opacity="0.6"/>
+      <polygon points="321,367 615,367 681,310 387,310" fill="var(--ghost)" fill-opacity="0.16"/>
+      <!-- a rapid that met material: the gouge solid, alarm colour -->
+      <polygon points="302.7,335.4 680.7,335.4 687.3,329.7 309.3,329.7" fill="var(--gouge)" stroke="var(--gouge)"/>
+      <!-- path: cuts to come, dim -->
+      <polyline points="461.4,332.5 360.6,332.5 382.6,313.5 651.4,313.5" fill="none" stroke="var(--cut-done)" stroke-opacity="0.28" stroke-width="2"/>
+      <!-- path: cuts already made, bright -->
+      <polyline points="338.6,351.5 607.4,351.5 629.4,332.5 461.4,332.5" fill="none" stroke="var(--cut-done)" stroke-width="2.6"/>
+      <!-- rapids: third colour, dashed -->
+      <polyline points="470,332 470,180 700,240" fill="none" stroke="var(--rapid)" stroke-width="2" stroke-dasharray="7 5"/>
+      <!-- the tool: a cylinder at the current position -->
+      <g>
+        <path d="M454,248 L454,220 L486,220 L486,248 Z" fill="#aab0ba" stroke="#8a94a4" stroke-width="1"/>
+        <rect x="454" y="248" width="32" height="84" fill="url(#steel)"/>
+        <ellipse cx="470" cy="332" rx="16" ry="6" fill="#aab0ba" stroke="#8a94a4" stroke-width="1"/>
+        <ellipse cx="470" cy="248" rx="16" ry="6" fill="#e9ecf1" stroke="#8a94a4" stroke-width="1"/>
+      </g>
+      <!-- work origin marker (top-front-left corner) -->
+      <g stroke="#8c909f" stroke-width="1.4" fill="none">
+        <line x1="230" y1="380" x2="304" y2="380"/><polygon points="304,380 296,376 296,384" fill="#8c909f" stroke="none"/>
+        <line x1="230" y1="380" x2="272" y2="343"/><polygon points="272,343 271,352 279,348" fill="#8c909f" stroke="none"/>
+      </g>
+      <text x="310" y="384" fill="#8c909f" font-size="12" font-family="ui-monospace,monospace">X</text>
+      <text x="268" y="338" fill="#8c909f" font-size="12" font-family="ui-monospace,monospace">Y</text>
+      <!-- vice-source label -->
+      <text x="52" y="514" fill="#8c909f" font-size="12">Vise jaws</text>
+      <text x="52" y="530" fill="#6c7585" font-size="11">default — unmeasured</text>
+      <line x1="140" y1="508" x2="182" y2="452" stroke="#8c909f" stroke-width="1" stroke-dasharray="3 3"/>
+    </symbol>
+
+    <!-- the same scene, annotated, for the viewport detail sheet (C) -->
+    <symbol id="scene-cut-annotated" viewBox="0 0 1000 620">
+      <g transform="translate(50,30)"><use href="#scene-cut" width="900" height="560"/></g>
+      <g font-size="11" font-family="Inter,system-ui,sans-serif" fill="#dae2fd"
+         style="paint-order:stroke;stroke:#0d1014;stroke-width:5;stroke-linejoin:round">
+        <line x1="160" y1="126" x2="348" y2="328" stroke="#adc6ff" stroke-width="1" stroke-dasharray="3 3"/>
+        <circle cx="348" cy="328" r="4" fill="#adc6ff" stroke="none"/>
+        <text x="56" y="122">Stock — as cut so far · opaque</text>
+
+        <line x1="770" y1="86" x2="676" y2="322" stroke="#ff8a66" stroke-width="1" stroke-dasharray="3 3"/>
+        <circle cx="676" cy="322" r="4" fill="#ff8a66" stroke="none"/>
+        <text x="700" y="66">Removed volume so far</text>
+        <text x="700" y="82" fill="#b6bdc9">translucent ghost · toggle</text>
+
+        <line x1="150" y1="500" x2="372" y2="368" stroke="#ff5a66" stroke-width="1" stroke-dasharray="3 3"/>
+        <circle cx="372" cy="368" r="4" fill="#ff5a66" stroke="none"/>
+        <text x="56" y="512">Rapid-through-stock gouge — alarm colour</text>
+
+        <line x1="170" y1="196" x2="452" y2="296" stroke="#adc6ff" stroke-width="1" stroke-dasharray="3 3"/>
+        <circle cx="452" cy="296" r="4" fill="#adc6ff" stroke="none"/>
+        <text x="56" y="192">Tool — cylinder at the current position</text>
+
+        <line x1="820" y1="470" x2="656" y2="378" stroke="#00e0ff" stroke-width="1" stroke-dasharray="3 3"/>
+        <circle cx="656" cy="378" r="4" fill="#00e0ff" stroke="none"/>
+        <text x="700" y="486" fill="#8fe8ff">Path — cuts done · bright</text>
+
+        <line x1="330" y1="578" x2="446" y2="362" stroke="#00e0ff" stroke-width="1" stroke-dasharray="3 3"/>
+        <circle cx="446" cy="362" r="4" fill="#00e0ff" stroke="none"/>
+        <text x="300" y="590" fill="#8fe8ff">Path — cuts to come · dim</text>
+
+        <line x1="700" y1="196" x2="548" y2="214" stroke="#ffd400" stroke-width="1" stroke-dasharray="3 3"/>
+        <circle cx="548" cy="214" r="4" fill="#ffd400" stroke="none"/>
+        <text x="650" y="192" fill="#ffe066">Rapids — dashed, third colour</text>
+      </g>
+    </symbol>
+
+    <!-- refused / path-only: the path is drawn, the stock is not -->
+    <symbol id="scene-path-only" viewBox="0 0 900 560">
+      <polyline points="338.6,351.5 607.4,351.5 629.4,332.5 461.4,332.5" fill="none" stroke="var(--cut-done)" stroke-width="2.4"/>
+      <polyline points="461.4,332.5 360.6,332.5 382.6,313.5 651.4,313.5" fill="none" stroke="var(--cut-done)" stroke-opacity="0.28" stroke-width="2"/>
+      <polyline points="470,332 470,180 700,240" fill="none" stroke="var(--rapid)" stroke-width="2" stroke-dasharray="7 5"/>
+      <polyline points="470,180 250,220 250,380" fill="none" stroke="var(--rapid)" stroke-width="2" stroke-dasharray="7 5"/>
+      <g stroke="#8c909f" stroke-width="1.4" fill="none">
+        <line x1="230" y1="380" x2="304" y2="380"/><polygon points="304,380 296,376 296,384" fill="#8c909f" stroke="none"/>
+        <line x1="230" y1="380" x2="272" y2="343"/><polygon points="272,343 271,352 279,348" fill="#8c909f" stroke="none"/>
+      </g>
+      <text x="310" y="384" fill="#8c909f" font-size="12" font-family="ui-monospace,monospace">X</text>
+      <text x="268" y="338" fill="#8c909f" font-size="12" font-family="ui-monospace,monospace">Y</text>
+      <text x="230" y="500" fill="#6c7585" font-size="12">path-only — no stock drawn (refused job)</text>
+    </symbol>
+
+    <!-- the engrave preview: text cut into a block, floors coloured by depth -->
+    <symbol id="scene-engrave" viewBox="0 0 900 560">
+      <g fill="#9ca3af" fill-opacity="0.30" stroke="#c3cad4" stroke-opacity="0.55">
+        <polygon points="100,398 180,398 290,303 210,303"/>
+        <polygon points="100,398 180,398 180,458 100,458"/>
+        <polygon points="640,398 732,398 842,303 750,303"/>
+        <polygon points="640,398 732,398 732,458 640,458"/>
+      </g>
+      <polygon points="180,400 640,400 740,290 280,290" fill="#c9a26b" stroke="#6b5433" stroke-width="1"/>
+      <polygon points="180,400 640,400 640,470 180,470" fill="#b08a55" stroke="#6b5433" stroke-width="1"/>
+      <polygon points="640,400 740,290 740,360 640,470" fill="#97734a" stroke="#6b5433" stroke-width="1"/>
+      <!-- engraved floors: local mm on the top face, y into the screen -->
+      <!-- the inner scale(1,-1) points each glyph's ascender away from the viewer, so the
+           text reads correctly on the receding face instead of upside-down -->
+      <g transform="matrix(4.6,0,1.0,-1.1,180,400) scale(1,-1)" font-family="Inter,system-ui,sans-serif">
+        <!-- pocket wall / rim, then the floor colour = morphological opening -->
+        <text x="12" y="-30" font-size="18" fill="#5b4526" stroke="#5b4526" stroke-width="2.4" stroke-linejoin="round">MAKER</text>
+        <text x="12" y="-30" font-size="18" fill="#7a2e0e" stroke="#7a2e0e" stroke-width="1.3" stroke-linejoin="round">MAKER</text>
+        <text x="16" y="-60" font-size="15" fill="#5b4526" stroke="#5b4526" stroke-width="2.2" stroke-linejoin="round">CASE</text>
+        <text x="16" y="-60" font-size="15" fill="#e0954a" stroke="#e0954a" stroke-width="1.3" stroke-linejoin="round">CASE</text>
+        <text x="22" y="-86" font-size="13" fill="#5b4526" stroke="#5b4526" stroke-width="2" stroke-linejoin="round">2026</text>
+        <text x="22" y="-86" font-size="13" fill="#ffe08a" stroke="#ffe08a" stroke-width="1.3" stroke-linejoin="round">2026</text>
+      </g>
+      <!-- detail: the tool-opened inside corner, magnified -->
+      <g transform="translate(620,404)">
+        <rect x="0" y="0" width="250" height="132" rx="6" fill="#101622" stroke="#424754"/>
+        <text x="12" y="20" fill="#8c909f" font-size="11" font-family="ui-monospace,monospace">detail ×8 · inside corner</text>
+        <path d="M34,60 H146 A11,11 0 0 1 157,71 V94" fill="none" stroke="#7a2e0e" stroke-width="15" stroke-linecap="round"/>
+        <text x="12" y="114" fill="#8c909f" font-size="9">rounded at r = 0.5 mm — the tool-opened</text>
+        <text x="12" y="126" fill="#8c909f" font-size="9">shape, not the ideal glyph</text>
+      </g>
+      <!-- work origin marker -->
+      <g stroke="#8c909f" stroke-width="1.4" fill="none">
+        <line x1="180" y1="400" x2="254" y2="400"/><polygon points="254,400 246,396 246,404" fill="#8c909f" stroke="none"/>
+        <line x1="180" y1="400" x2="222" y2="363"/><polygon points="222,363 221,372 229,368" fill="#8c909f" stroke="none"/>
+      </g>
+      <text x="260" y="404" fill="#8c909f" font-size="12" font-family="ui-monospace,monospace">X</text>
+      <text x="218" y="358" fill="#8c909f" font-size="12" font-family="ui-monospace,monospace">Y</text>
+      <text x="30" y="524" fill="#8c909f" font-size="12">Fixed jaw on the left · stock 1.5 mm proud of the jaws</text>
+    </symbol>
+  </defs>
+</svg>
+
+<main>
+
+<!-- ===================================================================== A -->
+<section class="state" id="state-sidebar">
+  <h2 class="state__label"><b>A</b> · Sidebar — the two new entries under a CNC divider</h2>
+  <p class="state__note">Below “Export”: <b style="color:var(--tertiary)">Engrave text</b> and <b style="color:var(--tertiary)">Simulate .nc</b>, present in rack mode too. Button colours and density are the real <code>Sidebar.tsx</code> values.</p>
+  <div class="frame" id="shot-sidebar">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons">
+        <button class="btn btn--ghost">Import board</button>
+        <button class="btn btn--ghost">Docs</button>
+        <button class="btn btn--ghost" aria-label="Settings">⚙</button>
+      </div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav nav--active"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="vp-empty">case viewport — no simulation loaded</div>
+      </div>
+      <aside class="context-panel">
+        <div class="empty">
+          <h3>Selection</h3>
+          <p>Click a section in the left rail to edit it here, or click the host board, a HAT, or a feature in the viewport to edit its properties.</p>
+          <p class="tip">Tip: with the Select tool active, hover the 3D scene to see what you can pick.</p>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar">
+      <span class="ver">v0.9.4 · Case Maker</span>
+      <span class="engine"><span>engine: idle</span><span>0 parts</span></span>
+    </footer>
+  </div>
+</section>
+
+<!-- ===================================================================== B1 -->
+<section class="state" id="state-sim-idle">
+  <h2 class="state__label"><b>B1</b> · Simulate — idle</h2>
+  <p class="state__note">“Open .nc…” and a drop hint. Nothing else until a file is loaded.</p>
+  <div class="frame" id="shot-sim-idle">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav nav--active"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="vp-empty">open a .nc file to simulate it</div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Simulate .nc</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <button class="btn" style="width:100%;padding:8px">Open .nc…</button>
+          <div class="slot" style="margin-top:10px">Drop a .nc, .gcode, .cnc or .tap file here<br>(max 64 MB)</div>
+          <p class="hint">The file is parsed, run and swept in the app — nothing is uploaded, and nothing is sent to a machine.</p>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">v0.9.4 · Case Maker</span><span class="engine"><span>sim: idle</span><span>no file</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== B2 -->
+<section class="state" id="state-sim-tool-required">
+  <h2 class="state__label"><b>B2</b> · Simulate — tool required</h2>
+  <p class="state__note">Stock is prefilled from the file header (each field tagged “from file header”); the tool dropdown is empty and highlighted; <b>Simulate</b> is disabled.</p>
+  <div class="frame" id="shot-sim-tool-required">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav nav--active"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="vp-empty">choose the tool this program was written for</div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Simulate .nc</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <div class="card" style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:11px;color:#e6e8eb">TopClamp.nc</span>
+            <span class="tag tag--muted spacer">2.8 MB</span>
+            <button class="btn btn--sm">Open .nc…</button>
+          </div>
+
+          <div class="panel-subhead">Diagnostics</div>
+          <details class="diaggrp" open>
+            <summary>parser <span class="cnt">2 records read</span></summary>
+            <div class="diag diag--info"><span class="sev">info</span><span><code class="code">mkr-header</code> STOCK and ORIGIN records read; semantics from one square sample</span><span class="ln">line 4</span></div>
+          </details>
+          <details class="diaggrp" open>
+            <summary>runner <span class="cnt">1 warning</span></summary>
+            <div class="diag diag--warning"><span class="sev">warn</span><span><code class="code">tool-change-ambiguous</code> the starting tool was not stated, so whether T1 is a real change cannot be known; treated as one</span><span class="ln">line 27</span></div>
+          </details>
+
+          <div class="panel-subhead">Stock</div>
+          <div class="stockrow"><span>length X</span><input class="fld fld--num" value="100.0"><span class="tag">from file header</span></div>
+          <div class="stockrow"><span>width Y</span><input class="fld fld--num" value="100.0"><span class="tag">from file header</span></div>
+          <div class="stockrow"><span>thickness</span><input class="fld fld--num" value="5.0"><span class="tag">from file header</span></div>
+          <p class="hint">Z = 0 at the stock’s top face; material at negative Z.</p>
+
+          <div class="panel-subhead">Tool</div>
+          <select class="fld tool-missing">
+            <option>Choose the tool this program was written for…</option>
+            <option>3.175*12mm Flat End(Metal) — Ø 3.175 mm</option>
+            <option>1 mm flat end (assumed) — Ø 1.0 mm</option>
+          </select>
+          <p class="hint" style="color:#e0a19b">required — the header states T1 but not its geometry.</p>
+
+          <button class="btn btn--primary" style="width:100%;padding:8px;margin-top:12px" disabled>Simulate</button>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">sim · TopClamp.nc · placement: stub</span><span class="engine"><span>sim: tool required</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== B3 -->
+<section class="state" id="state-sim-running">
+  <h2 class="state__label"><b>B3</b> · Simulate — running</h2>
+  <p class="state__note">Progress “sweeping 4 / 10” and a <b>Cancel</b> button (terminates the worker, then disposes the session).</p>
+  <div class="frame" id="shot-sim-running">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav nav--active"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="vp-empty">sweeping — the stock appears when the sweep finishes</div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Simulate .nc</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <div class="card" style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:11px;color:#e6e8eb">TopClamp.nc</span>
+            <span class="tag tag--muted spacer">3 333 steps</span>
+          </div>
+          <div class="panel-subhead">Simulating</div>
+          <div class="progress"><i></i></div>
+          <div class="row"><span class="mono" style="font-size:12px;color:#e6e8eb">sweeping 4 / 10</span><span class="hint spacer" style="margin:0">checkpoints</span></div>
+          <p class="hint">Parsing and running are done; the sweep unions the cuts at each checkpoint. This is the slow part — a few seconds on a dense job.</p>
+          <button class="btn btn--danger" style="width:100%;padding:8px;margin-top:10px">Cancel</button>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">sim · TopClamp.nc · placement: stub</span><span class="engine"><span>sim: sweeping 4 / 10</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== B4 -->
+<section class="state" id="state-sim-ready">
+  <h2 class="state__label"><b>B4</b> · Simulate — ready <span style="color:var(--on-muted)">(panel; the viewport is C and the transport is D)</span></h2>
+  <p class="state__note">Stats, the <code>placement: stub</code> badge, diagnostics grouped parser / runner / sweep with true per-code counts, and the disclaimer verbatim.</p>
+  <div class="frame" id="shot-sim-ready">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav nav--active"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="scene-wrap scene-wrap--with-transport">
+          <svg class="scene" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"><use href="#scene-cut"/></svg>
+        </div>
+        <div class="layers">
+          <h4>Layers</h4>
+          <label><input type="checkbox" class="sw" style="accent-color:var(--stock)" checked>Stock</label>
+          <label><input type="checkbox" class="sw" style="accent-color:var(--ghost)" checked>Removed so far</label>
+          <label><input type="checkbox" class="sw" style="accent-color:var(--gouge)" checked>Gouges</label>
+          <label><input type="checkbox" class="sw" style="accent-color:var(--cut-done)" checked>Path — cuts</label>
+          <label><input type="checkbox" class="sw" style="accent-color:var(--rapid)" checked>Rapids</label>
+          <label><input type="checkbox" class="sw" style="accent-color:var(--tool)" checked>Tool</label>
+          <label><input type="checkbox" class="sw" style="accent-color:#9ca3af" checked>Fixture</label>
+        </div>
+        <div class="transport">
+          <div class="transport__row">
+            <button class="tbtn" title="Jump to start">⏮</button>
+            <button class="tbtn" title="Step back">◀</button>
+            <button class="tbtn tbtn--play" title="Play / pause">▶</button>
+            <button class="tbtn" title="Step forward">▶</button>
+            <button class="tbtn" title="Run to completion">⏭</button>
+            <select class="tspeed"><option>1×</option><option>5×</option><option selected>20×</option><option>100×</option></select>
+            <div class="scrub">
+              <div class="scrub__track">
+                <div class="scrub__fill" style="width:36%"></div>
+                <span class="scrub__tick" style="left:18%"></span>
+                <span class="scrub__tick" style="left:47%"></span>
+                <span class="scrub__tick" style="left:73%"></span>
+                <span class="scrub__thumb" style="left:36%"></span>
+              </div>
+            </div>
+            <span class="tread">0:41 / 2:18</span>
+            <span class="tstep">step 1 204 / 3 333 · line 1 251</span>
+          </div>
+          <div class="transport__note">Material updates at 10 points in this program — between them the tool moves over a static stock. Ticks are the program’s pause points.</div>
+        </div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Simulate .nc</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <div class="card" style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:11px;color:#e6e8eb">TopClamp.nc</span>
+            <span class="tag tag--muted spacer">2.8 MB</span>
+          </div>
+
+          <div class="panel-subhead">Result <span class="badge badge--stub" title="The part’s position on the bed is assumed, not measured.">placement: stub</span></div>
+          <div class="statgrid">
+            <div class="stat"><b>1 284.6</b><span>mm³ removed</span></div>
+            <div class="stat"><b>10</b><span>checkpoints</span></div>
+            <div class="stat"><b>0.84 s</b><span>sweep time</span></div>
+          </div>
+
+          <div class="panel-subhead">Diagnostics</div>
+          <details class="diaggrp" open>
+            <summary>parser <span class="cnt">1 info</span></summary>
+            <div class="diag diag--info"><span class="sev">info</span><span><code class="code">mkr-header</code> STOCK and ORIGIN records read; semantics from one square sample</span><span class="ln">line 4</span></div>
+          </details>
+          <details class="diaggrp" open>
+            <summary>runner <span class="cnt">312 errors · 4 warnings</span></summary>
+            <div class="diag diag--error"><span class="sev">error</span><span><code class="code">outside-envelope</code> 312 × a move leaves the Carvera Air’s envelope</span></div>
+            <div class="diag diag--warning"><span class="sev">warn</span><span><code class="code">cut-unknown-z</code> 4 × a cutting move at a Z the program never established: not swept</span></div>
+          </details>
+          <details class="diaggrp" open>
+            <summary>sweep <span class="cnt">1 warning</span></summary>
+            <div class="diag diag--warning"><span class="sev">warn</span><span><code class="code">fixture-unproven</code> the vise is not modelled as an obstacle yet (#188)</span></div>
+          </details>
+
+          <div class="disclaimer">This simulation assumes a rigid, ideal machine: no deflection, no runout, no Z-chain error, no chatter.</div>
+
+          <button class="btn" style="width:100%;padding:7px;margin-top:6px">Close simulation</button>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">sim · TopClamp.nc · placement: stub</span><span class="engine"><span>10 checkpoints</span><span>3 333 steps</span><span>1 284.6 mm³ removed</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== B5 -->
+<section class="state" id="state-sim-refused">
+  <h2 class="state__label"><b>B5</b> · Simulate — refused, path-only</h2>
+  <p class="state__note">A red banner carries the refusal. The tool path is still drawn in the viewport; no stock.</p>
+  <div class="frame" id="shot-sim-refused">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav nav--active"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="scene-wrap">
+          <svg class="scene" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"><use href="#scene-path-only"/></svg>
+        </div>
+        <div class="layers">
+          <h4>Layers</h4>
+          <label><input type="checkbox" class="sw" disabled>Stock</label>
+          <label><input type="checkbox" class="sw" style="accent-color:var(--cut-done)" checked>Path — cuts</label>
+          <label><input type="checkbox" class="sw" style="accent-color:var(--rapid)" checked>Rapids</label>
+          <label><input type="checkbox" class="sw" style="accent-color:var(--tool)" disabled>Tool</label>
+          <label><input type="checkbox" class="sw" style="accent-color:#9ca3af" disabled>Fixture</label>
+        </div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Simulate .nc</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <div class="card" style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:11px;color:#e6e8eb">relief-3d.nc</span>
+            <span class="tag tag--muted spacer">2.4 MB</span>
+            <button class="btn btn--sm">Open .nc…</button>
+          </div>
+          <div class="banner banner--error">
+            <div class="banner__head"><span>refused</span><span class="spacer">✕</span></div>
+            <ul>
+              <li><code>too-many-checkpoints</code> — <strong>482 Z levels — a 3D job V1 does not simulate.</strong></li>
+              <li class="hint" style="color:#e8bcb6">V1 sweeps a flat end mill at constant Z. A relief is neither, so nothing was swept and nothing is claimed.</li>
+            </ul>
+          </div>
+          <p class="hint">The tool path is drawn so the file can still be inspected; the stock is not, because the sweep that would produce it was refused.</p>
+          <button class="btn" style="width:100%;padding:7px;margin-top:8px">Close simulation</button>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">sim · relief-3d.nc · path only</span><span class="engine"><span>sim: refused</span><span>482 checkpoints &gt; 1 000 cap</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== C -->
+<section class="state" id="state-viewport-ready">
+  <h2 class="state__label"><b>C</b> · Viewport in the Ready state — layer detail</h2>
+  <p class="state__note">Stock opaque · removed-so-far a translucent ghost (toggle in the Layers panel) · a rapid-through-stock gouge in the alarm colour · the tool as a cylinder · path cuts bright ahead / dim to come · rapids dashed, third colour · vise jaws translucent grey labelled “default — unmeasured”.</p>
+  <div class="frame" id="shot-viewport-ready">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav nav--active"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="scene-wrap">
+          <svg class="scene" viewBox="0 0 1000 620" preserveAspectRatio="xMidYMid meet"><use href="#scene-cut-annotated"/></svg>
+        </div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Simulate .nc</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <div class="panel-subhead">Viewport layers</div>
+          <div class="card">
+            <label style="display:flex;gap:8px;align-items:center;font-size:11px;margin:2px 0"><input type="checkbox" checked>Stock — opaque, the material as cut so far</label>
+            <label style="display:flex;gap:8px;align-items:center;font-size:11px;margin:2px 0"><input type="checkbox" checked>Removed so far — ghost, depthWrite off so the stock shows through</label>
+            <label style="display:flex;gap:8px;align-items:center;font-size:11px;margin:2px 0"><input type="checkbox" checked>Gouges — drawn, never subtracted</label>
+            <label style="display:flex;gap:8px;align-items:center;font-size:11px;margin:2px 0"><input type="checkbox" checked>Tool path — cuts done bright, cuts to come dim, rapids dashed</label>
+            <label style="display:flex;gap:8px;align-items:center;font-size:11px;margin:2px 0"><input type="checkbox" checked>Tool — cylinder at the current position</label>
+            <label style="display:flex;gap:8px;align-items:center;font-size:11px;margin:2px 0"><input type="checkbox" checked>Fixture — the vise jaws</label>
+          </div>
+          <p class="hint">Colours: stock <span class="mono" style="color:var(--stock)">#c9a26b</span> · ghost <span class="mono" style="color:var(--ghost)">#ff5a36</span> · gouge <span class="mono" style="color:var(--gouge)">#ff0033</span> · cuts <span class="mono" style="color:var(--cut-done)">#00e0ff</span> · rapids <span class="mono" style="color:var(--rapid)">#ffd400</span>.</p>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">sim · TopClamp.nc · placement: stub</span><span class="engine"><span>layers: 7 shown</span><span>frame k = 4</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== D -->
+<section class="state" id="state-transport">
+  <h2 class="state__label"><b>D</b> · Transport bar — bottom of the viewport</h2>
+  <p class="state__note">Start / step back / play-pause / step forward / run-to-completion · speed 1× 5× 20× 100× · a <b>step-indexed</b> scrubber whose only tick marks are the program’s pause points · elapsed / total · “step N / M · line L”.</p>
+  <div class="frame" id="shot-transport">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav nav--active"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="scene-wrap scene-wrap--with-transport">
+          <svg class="scene" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"><use href="#scene-cut"/></svg>
+        </div>
+        <div class="transport">
+          <div class="transport__row">
+            <button class="tbtn" title="Jump to start">⏮</button>
+            <button class="tbtn" title="Step back">◀</button>
+            <button class="tbtn tbtn--play" title="Play / pause">▶</button>
+            <button class="tbtn" title="Step forward">▶</button>
+            <button class="tbtn" title="Run to completion">⏭</button>
+            <select class="tspeed"><option>1×</option><option>5×</option><option selected>20×</option><option>100×</option></select>
+            <div class="scrub">
+              <div class="scrub__track">
+                <div class="scrub__fill" style="width:36%"></div>
+                <span class="scrub__tick" style="left:18%"></span>
+                <span class="scrub__tick" style="left:47%"></span>
+                <span class="scrub__tick" style="left:73%"></span>
+                <span class="scrub__thumb" style="left:36%"></span>
+              </div>
+            </div>
+            <span class="tread">0:41 / 2:18</span>
+            <span class="tstep">step 1 204 / 3 333 · line 1 251</span>
+          </div>
+          <div class="transport__note">Material updates at 10 points in this program — between them the tool moves over a static stock. Ticks are the program’s pause points.</div>
+        </div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Transport</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <div class="card" style="font-size:11px;line-height:1.6">
+            <div class="row"><b style="width:96px;color:var(--on-muted);font-weight:400">⏮ / ⏭</div><span>start / run to completion</span></div>
+            <div class="row"><b style="width:96px;color:var(--on-muted);font-weight:400">◀ / ▶</b><span>one program step back / forward</span></div>
+            <div class="row"><b style="width:96px;color:var(--on-muted);font-weight:400">▶ / ⏸</b><span>play · pause</span></div>
+            <div class="row"><b style="width:96px;color:var(--on-muted);font-weight:400">speed</b><span>1× · 5× · 20× · 100× (wall-clock multiplier)</span></div>
+            <div class="row"><b style="width:96px;color:var(--on-muted);font-weight:400">scrubber</b><span>indexed by program step; the only ticks are pause points</span></div>
+          </div>
+          <p class="hint">Space plays/pauses, ←/→ step, Home/End jump, while the viewport has focus. The time read-out is <em>simulated</em> time — rapids use a display-only rate, so it is not a cycle-time estimate.</p>
+          <p class="hint">Material updates at checkpoints, not every frame: the tool moves smoothly over a static stock between them.</p>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">sim · TopClamp.nc · placement: stub</span><span class="engine"><span>step 1 204 / 3 333</span><span>0:41 / 2:18 simulated</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== D2 -->
+<section class="state" id="state-sim-paused">
+  <h2 class="state__label"><b>D2</b> · Transport — stopped at a pause point</h2>
+  <p class="state__note">Playback stops <b>at</b> the pause, not after it; the callout names the tool change and how to continue.</p>
+  <div class="frame" id="shot-sim-paused">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav nav--active"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="scene-wrap scene-wrap--with-transport">
+          <svg class="scene" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"><use href="#scene-cut"/></svg>
+        </div>
+        <div class="pause-callout">
+          <strong>Tool change: T1 → T2.</strong> Press play to continue.
+          <small>pause at step 1 204 · the stock shown is after the last cut before it</small>
+        </div>
+        <div class="transport">
+          <div class="transport__row">
+            <button class="tbtn" title="Jump to start">⏮</button>
+            <button class="tbtn" title="Step back">◀</button>
+            <button class="tbtn tbtn--play" title="Play / pause">▶</button>
+            <button class="tbtn" title="Step forward">▶</button>
+            <button class="tbtn" title="Run to completion">⏭</button>
+            <select class="tspeed"><option>1×</option><option>5×</option><option>20×</option><option>100×</option></select>
+            <div class="scrub">
+              <div class="scrub__track">
+                <div class="scrub__fill" style="width:36%"></div>
+                <span class="scrub__tick" style="left:18%"></span>
+                <span class="scrub__tick" style="left:36%"></span>
+                <span class="scrub__tick" style="left:47%"></span>
+                <span class="scrub__tick" style="left:73%"></span>
+                <span class="scrub__thumb" style="left:36%"></span>
+              </div>
+            </div>
+            <span class="tread">0:41 / 2:18</span>
+            <span class="tstep">step 1 204 / 3 333 · line 1 251</span>
+          </div>
+          <div class="transport__note">Material updates at 10 points in this program — between them the tool moves over a static stock. Ticks are the program’s pause points.</div>
+        </div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Simulate .nc</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <div class="banner banner--warning">
+            <div class="banner__head"><span>paused</span><span class="spacer">✕</span></div>
+            <ul><li><strong>Tool change: T1 → T2.</strong> Press play to continue.</li></ul>
+          </div>
+          <div class="statgrid">
+            <div class="stat"><b>1 204</b><span>step</span></div>
+            <div class="stat"><b>0:41</b><span>simulated</span></div>
+            <div class="stat"><b>k = 4</b><span>checkpoint</span></div>
+          </div>
+          <p class="hint">A virtual tool swap is a pause, not an error — the emulator stops where the machine would. Pressing play continues past it.</p>
+          <button class="btn" style="width:100%;padding:7px;margin-top:8px">Close simulation</button>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">sim · TopClamp.nc · placement: stub</span><span class="engine"><span>paused at step 1 204</span><span>T1 → T2</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== E1 -->
+<section class="state" id="state-engrave-editing">
+  <h2 class="state__label"><b>E1</b> · Engrave — editing</h2>
+  <p class="state__note">Sections in order: Stock · Labels · Tool · Vise · Feeds. Depth is a numeric field with a slider beside it — never a slider alone.</p>
+  <div class="frame" id="shot-engrave-editing">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav nav--active"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="scene-wrap">
+          <svg class="scene" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"><use href="#scene-engrave"/></svg>
+        </div>
+        <div class="legend">
+          <h4>Floor depth</h4>
+          <div><span class="sw" style="background:#ffe08a"></span>0.5 mm</div>
+          <div><span class="sw" style="background:#e0954a"></span>1.0 mm</div>
+          <div><span class="sw" style="background:#7a2e0e"></span>2.0 mm</div>
+        </div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Engrave text</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <div class="panel-subhead">Stock</div>
+          <div class="grid4">
+            <label class="lf"><span>length X <em>mm</em></span><input class="fld fld--num" value="100.0"></label>
+            <label class="lf"><span>width Y <em>mm</em></span><input class="fld fld--num" value="60.0"></label>
+            <label class="lf"><span>thickness <em>mm</em></span><input class="fld fld--num" value="12.0"></label>
+            <label class="lf"><span>material</span><select class="fld"><option>softwood</option><option selected>hardwood</option><option>MDF</option><option>PLA</option></select></label>
+          </div>
+          <p class="hint">X runs between the vise jaws. The fixed jaw is on the left.</p>
+
+          <div class="panel-subhead">Labels <span class="tag tag--muted">3</span></div>
+          <div class="lbl-card">
+            <div class="row"><input type="checkbox" checked><input class="fld fld--text" value="MAKER"><select class="fld" style="width:104px"><option>Inter</option><option>Space Grotesk</option><option>Playfair</option></select><button class="icon-btn">🗑</button></div>
+            <div class="lbl-inline"><label>cap<input class="fld fld--num" value="8.0"></label><label>X<input class="fld fld--num" value="12.0"></label><label>Y<input class="fld fld--num" value="20.0"></label><label>rot<input class="fld fld--num" value="0"></label><label>depth<input type="range" min="0" max="11" step="0.1" value="2"><input class="fld fld--num" value="2.0">mm</label></div>
+          </div>
+          <div class="lbl-card">
+            <div class="row"><input type="checkbox" checked><input class="fld fld--text" value="CASE"><select class="fld" style="width:104px"><option>Inter</option><option selected>Space Grotesk</option><option>Playfair</option></select><button class="icon-btn">🗑</button></div>
+            <div class="lbl-inline"><label>cap<input class="fld fld--num" value="6.0"></label><label>X<input class="fld fld--num" value="12.0"></label><label>Y<input class="fld fld--num" value="38.0"></label><label>rot<input class="fld fld--num" value="0"></label><label>depth<input type="range" min="0" max="11" step="0.1" value="1"><input class="fld fld--num" value="1.0">mm</label></div>
+          </div>
+          <div class="lbl-card">
+            <div class="row"><input type="checkbox" checked><input class="fld fld--text" value="2026"><select class="fld" style="width:104px"><option selected>Inter</option><option>Space Grotesk</option><option>Playfair</option></select><button class="icon-btn">🗑</button></div>
+            <div class="lbl-inline"><label>cap<input class="fld fld--num" value="5.0"></label><label>X<input class="fld fld--num" value="12.0"></label><label>Y<input class="fld fld--num" value="50.0"></label><label>rot<input class="fld fld--num" value="0"></label><label>depth<input type="range" min="0" max="11" step="0.1" value="0.5"><input class="fld fld--num" value="0.5">mm</label></div>
+          </div>
+          <button class="btn btn--sm">+ Add label</button>
+          <p class="hint">Depth keeps ≥ 1.0 mm floor — max 11.0 mm here.</p>
+
+          <div class="panel-subhead">Tool <span class="tag">recommended</span></div>
+          <select class="fld"><option selected>1.0 mm flat end — Ø 1.0 mm cutting</option><option>2.0 mm flat end — Ø 2.0 mm cutting</option><option>3.175 mm flat end — Ø 3.175 mm cutting</option></select>
+          <p class="hint">Largest cutter that keeps every label intact.</p>
+
+          <div class="panel-subhead">Vise <span class="badge">default · unmeasured</span></div>
+          <div class="grid3">
+            <label class="lf"><span>stock proud <em>mm</em></span><input class="fld fld--num" value="1.5"></label>
+            <label class="lf"><span>fixed jaw <em>mm</em></span><input class="fld fld--num" value="12.0"></label>
+            <label class="lf"><span>moving jaw <em>mm</em></span><input class="fld fld--num" value="12.0"></label>
+            <label class="lf"><span>jaw length <em>mm</em></span><input class="fld fld--num" value="80.0"></label>
+            <label class="lf"><span>jaw start Y <em>mm</em></span><input class="fld fld--num" value="-10.0"></label>
+            <label class="lf"><span>uncertainty <em>mm</em></span><input class="fld fld--num" value="0.5"></label>
+          </div>
+          <div class="btn-row"><button class="btn btn--sm">Save as my vise</button><button class="btn btn--sm">I just measured these</button></div>
+
+          <div class="panel-subhead">Feeds <span class="tag tag--warn">starting values — unmeasured</span></div>
+          <div class="feeds">
+            <div><span>spindle</span><b>10 000 rpm</b></div>
+            <div><span>feed</span><b>500 mm/min</b></div>
+            <div><span>plunge</span><b>150 mm/min</b></div>
+            <div><span>step-down</span><b>0.4 mm</b></div>
+            <div><span>step-over</span><b>0.5 mm</b></div>
+          </div>
+          <details class="disc"><summary>Override</summary>
+            <div class="grid2" style="margin-top:6px">
+              <label class="lf"><span>spindle <em>rpm</em></span><input class="fld fld--num" value="10000"></label>
+              <label class="lf"><span>feed <em>mm/min</em></span><input class="fld fld--num" value="500"></label>
+              <label class="lf"><span>plunge <em>mm/min</em></span><input class="fld fld--num" value="150"></label>
+              <label class="lf"><span>step-down <em>mm</em></span><input class="fld fld--num" value="0.4"></label>
+              <label class="lf"><span>step-over <em>mm</em></span><input class="fld fld--num" value="0.5"></label>
+            </div>
+          </details>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">engrave · badge.cmjob · hardwood 12 mm</span><span class="engine"><span>preview: 3 labels</span><span>0 errors</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== E1b -->
+<section class="state" id="state-engrave-tool-recommendation">
+  <h2 class="state__label"><b>E1b</b> · Engrave — Tool block: the recommendation</h2>
+  <p class="state__note">Per #211. E1 shows the default: the <b>recommended cutter already selected</b> with the reason sentence beneath it. Here the user has picked <b>another cutter</b>, so their choice is kept and the “Use it” line offers the recommendation back; the open <b>Why?</b> disclosure lists every candidate considered with its worst label and percentage. No tool-editing controls anywhere — a “My tools” inventory is a separate, deferred mockup (#212).</p>
+  <div class="frame" id="shot-engrave-tool-recommendation">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav nav--active"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="scene-wrap">
+          <svg class="scene" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"><use href="#scene-engrave"/></svg>
+        </div>
+        <div class="legend">
+          <h4>Floor depth</h4>
+          <div><span class="sw" style="background:#ffe08a"></span>0.5 mm — “2026”</div>
+          <div><span class="sw" style="background:#e0954a"></span>1.0 mm — “CASE”</div>
+          <div><span class="sw" style="background:#7a2e0e"></span>2.0 mm — “MAKER”</div>
+        </div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Engrave text</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <div class="panel-subhead">Stock</div>
+          <div class="grid4">
+            <label class="lf"><span>length X <em>mm</em></span><input class="fld fld--num" value="100.0"></label>
+            <label class="lf"><span>width Y <em>mm</em></span><input class="fld fld--num" value="60.0"></label>
+            <label class="lf"><span>thickness <em>mm</em></span><input class="fld fld--num" value="12.0"></label>
+            <label class="lf"><span>material</span><select class="fld"><option>softwood</option><option selected>hardwood</option><option>MDF</option><option>PLA</option></select></label>
+          </div>
+
+          <div class="panel-subhead">Labels <span class="tag tag--muted">2</span></div>
+          <div class="lbl-card">
+            <div class="row"><input type="checkbox" checked><input class="fld fld--text" value="MAKER"><select class="fld" style="width:104px"><option>Inter</option><option>Space Grotesk</option><option>Playfair</option></select><button class="icon-btn">🗑</button></div>
+            <div class="lbl-inline"><label>cap<input class="fld fld--num" value="8.0"></label><label>X<input class="fld fld--num" value="12.0"></label><label>Y<input class="fld fld--num" value="20.0"></label><label>rot<input class="fld fld--num" value="0"></label><label>depth<input type="range" min="0" max="11" step="0.1" value="2"><input class="fld fld--num" value="2.0">mm</label></div>
+          </div>
+          <div class="lbl-card">
+            <div class="row"><input type="checkbox" checked><input class="fld fld--text" value="CASE"><select class="fld" style="width:104px"><option>Inter</option><option selected>Space Grotesk</option><option>Playfair</option></select><button class="icon-btn">🗑</button></div>
+            <div class="lbl-inline"><label>cap<input class="fld fld--num" value="6.0"></label><label>X<input class="fld fld--num" value="12.0"></label><label>Y<input class="fld fld--num" value="38.0"></label><label>rot<input class="fld fld--num" value="0"></label><label>depth<input type="range" min="0" max="11" step="0.1" value="1"><input class="fld fld--num" value="1.0">mm</label></div>
+          </div>
+
+          <div class="panel-subhead">Tool <span class="tag tag--warn">recommended: 1.0 mm</span></div>
+          <select class="fld"><option>1.0 mm flat end — Ø 1.0 mm cutting</option><option>2.0 mm flat end — Ø 2.0 mm cutting</option><option selected>3.175 mm flat end — Ø 3.175 mm cutting</option></select>
+          <p class="hint">Largest cutter that keeps every label intact.</p>
+          <div class="banner banner--warning" style="margin:6px 0 0">
+            <ul><li class="rec-use">Recommended: 1.0 mm flat end — every label survives. <button class="btn btn--sm">Use it</button></li></ul>
+          </div>
+          <details class="disc" open>
+            <summary>Why? — 3 cutters considered</summary>
+            <div class="cand"><span>1.0 mm flat end</span><b class="keep">worst label “2026” · 100 % kept</b></div>
+            <div class="cand"><span>2.0 mm flat end</span><b class="lose">worst label “2026” · 68 % kept</b></div>
+            <div class="cand"><span>3.175 mm flat end</span><b class="lose">worst label “2026” · 41 % kept</b></div>
+          </details>
+
+          <div class="panel-subhead">Vise <span class="badge">default · unmeasured</span></div>
+          <div class="grid3">
+            <label class="lf"><span>stock proud <em>mm</em></span><input class="fld fld--num" value="1.5"></label>
+            <label class="lf"><span>fixed jaw <em>mm</em></span><input class="fld fld--num" value="12.0"></label>
+            <label class="lf"><span>moving jaw <em>mm</em></span><input class="fld fld--num" value="12.0"></label>
+            <label class="lf"><span>jaw length <em>mm</em></span><input class="fld fld--num" value="80.0"></label>
+            <label class="lf"><span>jaw start Y <em>mm</em></span><input class="fld fld--num" value="-10.0"></label>
+            <label class="lf"><span>uncertainty <em>mm</em></span><input class="fld fld--num" value="0.5"></label>
+          </div>
+          <div class="btn-row"><button class="btn btn--sm">Save as my vise</button><button class="btn btn--sm">I just measured these</button></div>
+
+          <div class="panel-subhead">Feeds <span class="tag tag--warn">starting values — unmeasured</span></div>
+          <div class="feeds">
+            <div><span>spindle</span><b>10 000 rpm</b></div>
+            <div><span>feed</span><b>500 mm/min</b></div>
+            <div><span>plunge</span><b>150 mm/min</b></div>
+            <div><span>step-down</span><b>0.4 mm</b></div>
+            <div><span>step-over</span><b>0.5 mm</b></div>
+          </div>
+          <details class="disc"><summary>Override</summary></details>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">engrave · badge.cmjob · hardwood 12 mm</span><span class="engine"><span>tool: 3.175 mm flat end</span><span>recommended: 1.0 mm</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== E2 -->
+<section class="state" id="state-engrave-findings">
+  <h2 class="state__label"><b>E2</b> · Engrave — findings</h2>
+  <p class="state__note">A warning banner for the label the cutter cannot reach, a red one for the label that breaks through the floor. Each also appears under the row it belongs to.</p>
+  <div class="frame" id="shot-engrave-findings">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav nav--active"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="scene-wrap">
+          <svg class="scene" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"><use href="#scene-engrave"/></svg>
+        </div>
+        <div class="legend">
+          <h4>Floor depth</h4>
+          <div><span class="sw" style="background:#ffe08a"></span>0.5 mm</div>
+          <div><span class="sw" style="background:#e0954a"></span>1.0 mm</div>
+          <div><span class="sw" style="background:#7a2e0e"></span>2.0 mm</div>
+        </div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Engrave text</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <div class="banner banner--warning">
+            <div class="banner__head"><span>warning · label “Maker”</span><span class="spacer">✕</span></div>
+            <ul><li><strong>“Maker” at 4 mm loses 96 % of its area with a 1.0 mm cutter — increase to 6 mm or more.</strong></li></ul>
+          </div>
+          <div class="banner banner--error">
+            <div class="banner__head"><span>error · label “Deep”</span><span class="spacer">✕</span></div>
+            <ul><li><strong>“Deep” at 11.5 mm leaves 0.5 mm of floor; the minimum is 1.0 mm.</strong></li></ul>
+          </div>
+
+          <div class="panel-subhead">Labels <span class="tag tag--muted">3</span></div>
+          <div class="lbl-card">
+            <div class="row"><input type="checkbox" checked><input class="fld fld--text" value="Maker"><select class="fld" style="width:110px"><option selected>Inter</option><option>Space Grotesk</option></select><button class="icon-btn">🗑</button></div>
+            <div class="lbl-inline"><label>cap<input class="fld fld--num" value="4.0" style="border-color:#7a2828;color:#f0b4ad"></label><label>X<input class="fld fld--num" value="12.0"></label><label>Y<input class="fld fld--num" value="20.0"></label><label>rot<input class="fld fld--num" value="0"></label><label>depth<input type="range" min="0" max="11" step="0.1" value="1"><input class="fld fld--num" value="1.0">mm</label></div>
+            <div class="banner banner--warning" style="margin:6px 0 0;font-size:10px"><ul><li>“Maker” at 4 mm loses 96 % of its area with a 1.0 mm cutter — increase to 6 mm or more.</li></ul></div>
+          </div>
+          <div class="lbl-card">
+            <div class="row"><input type="checkbox" checked><input class="fld fld--text" value="Deep"><select class="fld" style="width:110px"><option selected>Space Grotesk</option><option>Inter</option></select><button class="icon-btn">🗑</button></div>
+            <div class="lbl-inline"><label>cap<input class="fld fld--num" value="6.0"></label><label>X<input class="fld fld--num" value="12.0"></label><label>Y<input class="fld fld--num" value="40.0"></label><label>rot<input class="fld fld--num" value="0"></label><label>depth<input type="range" min="0" max="11" step="0.1" value="11.5"><input class="fld fld--num" value="11.5" style="border-color:#7a2828;color:#f0b4ad">mm</label></div>
+            <div class="banner banner--error" style="margin:6px 0 0;font-size:10px"><ul><li>“Deep” at 11.5 mm leaves 0.5 mm of floor; the minimum is 1.0 mm.</li></ul></div>
+          </div>
+          <button class="btn btn--sm">+ Add label</button>
+          <div class="slot">Generate — disabled while a label has an error (#206)</div>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">engrave · badge.cmjob · hardwood 12 mm</span><span class="engine"><span>preview: 3 labels</span><span style="color:#e0a19b">1 error</span><span>1 warning</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== E3 -->
+<section class="state" id="state-engrave-generated">
+  <h2 class="state__label"><b>E3</b> · Engrave — generated</h2>
+  <p class="state__note">Three status rows with ticks, an enabled <b>Save .nc…</b> and a <b>Run sheet</b>.</p>
+  <div class="frame" id="shot-engrave-generated">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav nav--active"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="scene-wrap">
+          <svg class="scene" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"><use href="#scene-engrave"/></svg>
+        </div>
+        <div class="legend">
+          <h4>Floor depth</h4>
+          <div><span class="sw" style="background:#ffe08a"></span>0.5 mm</div>
+          <div><span class="sw" style="background:#e0954a"></span>1.0 mm</div>
+          <div><span class="sw" style="background:#7a2e0e"></span>2.0 mm</div>
+        </div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Engrave text</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <div class="panel-subhead">Generate</div>
+          <ul class="status-rows">
+            <li><span class="tick">✓</span><div><strong>Toolpath generated</strong><em>3 operations · 412 moves · est. 3 min 20 s</em></div></li>
+            <li><span class="tick">✓</span><div><strong>Verified <span class="ok">(0 errors)</span></strong><em>1 warning · holder-unproven — the tool’s reach past the collet is unknown</em></div></li>
+            <li><span class="tick">✓</span><div><strong>Simulated <span class="ok">(0 errors)</span></strong><em>1 284.6 mm³ removed · matches the prediction within 0.02 mm²</em></div></li>
+          </ul>
+          <div class="btn-row"><button class="btn btn--primary">Save .nc…</button><button class="btn">Run sheet</button></div>
+          <p class="hint">Saves the exact text that was verified and simulated. The <code>holder-unproven</code> warning was acknowledged — tick the clearance box again if the job changes.</p>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">engrave · badge.cmjob · hardwood 12 mm</span><span class="engine"><span>generated</span><span>verified 0 errors</span><span>simulated 0 errors</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== E3b -->
+<section class="state" id="state-engrave-generated-blocked">
+  <h2 class="state__label"><b>E3b</b> · Engrave — generated, verification failed</h2>
+  <p class="state__note">The failing variant: a red cross on <b>Verified</b> and <b>Save .nc…</b> disabled with the reason beside it.</p>
+  <div class="frame" id="shot-engrave-generated-blocked">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav nav--active"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="scene-wrap">
+          <svg class="scene" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"><use href="#scene-engrave"/></svg>
+        </div>
+        <div class="legend">
+          <h4>Floor depth</h4>
+          <div><span class="sw" style="background:#ffe08a"></span>0.5 mm</div>
+          <div><span class="sw" style="background:#e0954a"></span>1.0 mm</div>
+          <div><span class="sw" style="background:#7a2e0e"></span>2.0 mm</div>
+        </div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Engrave text</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <div class="panel-subhead">Generate</div>
+          <ul class="status-rows">
+            <li><span class="tick">✓</span><div><strong>Toolpath generated</strong><em>3 operations · 412 moves · est. 3 min 20 s</em></div></li>
+            <li><span class="cross">✕</span><div><strong>Verified <span style="color:#f0b4ad">(1 error)</span></strong><em>the toolpath exits the stock by 0.40 mm near “MAKER” (line 318)</em></div></li>
+            <li><span class="tick">✓</span><div><strong>Simulated <span class="ok">(0 errors)</span></strong><em>1 284.6 mm³ removed</em></div></li>
+          </ul>
+          <div class="btn-row"><button class="btn btn--primary" disabled>Save .nc…</button><span class="hint" style="margin:0;color:#e0a19b">1 verification error — fix it and generate again</span></div>
+          <p class="hint">Nothing is written to disk until all three rows are ticks.</p>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">engrave · badge.cmjob · hardwood 12 mm</span><span class="engine"><span>generated</span><span style="color:#e0a19b">verified 1 error</span><span>simulated 0 errors</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== F -->
+<section class="state" id="state-engrave-viewport">
+  <h2 class="state__label"><b>F</b> · Engrave viewport — the cut floors</h2>
+  <p class="state__note">The stock with the engraved text cut into it: each label’s floor coloured by its depth (legend 0.5 / 1.0 / 2.0 mm), inside corners rounded at the tool radius — the tool-opened shape, not the ideal glyph.</p>
+  <div class="frame" id="shot-engrave-viewport">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v0.9.4</small></div>
+      <div class="toolbar-buttons"><button class="btn btn--ghost">Import board</button><button class="btn btn--ghost">Docs</button><button class="btn btn--ghost">⚙</button></div>
+    </header>
+    <div class="app-main">
+      <aside class="sidebar">
+        <button class="nav"><span class="nav__icon">🟦</span><span>Board</span></button>
+        <button class="nav"><span class="nav__icon">📦</span><span>Case parameters</span></button>
+        <button class="nav"><span class="nav__icon">🗄️</span><span>Mini rack</span></button>
+        <button class="nav"><span class="nav__icon">🔌</span><span>Port cutouts</span></button>
+        <button class="nav"><span class="nav__icon">🎩</span><span>HATs</span></button>
+        <button class="nav"><span class="nav__icon">⚙️</span><span>Features</span></button>
+        <button class="nav"><span class="nav__icon">📎</span><span>External assets</span></button>
+        <button class="nav"><span class="nav__icon">⬇️</span><span>Export</span></button>
+        <div class="nav__divider">CNC</div>
+        <button class="nav nav--active"><span class="nav__icon">🪵</span><span>Engrave text</span></button>
+        <button class="nav"><span class="nav__icon">🧪</span><span>Simulate .nc</span></button>
+      </aside>
+      <div class="viewport-pane">
+        <div class="vp-toolbar" role="toolbar" aria-label="Viewport">
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Viewport tool">
+            <button type="button" class="vp-tb vp-tb--icon" title="Select (S)" aria-label="Select">◎</button>
+            <button type="button" class="vp-tb vp-tb--icon" title="Pan (P)" aria-label="Pan">✥</button>
+            <button type="button" class="vp-tb vp-tb--icon vp-tb--active" title="Orbit (O)" aria-label="Orbit">↻</button>
+          </div>
+          <div class="vp-toolbar__group" role="radiogroup" aria-label="Camera mode">
+            <button type="button" class="vp-tb vp-tb--active" title="Perspective (1)">Perspective</button>
+            <button type="button" class="vp-tb" title="Top (2)">Top</button>
+            <button type="button" class="vp-tb" title="Front (3)">Front</button>
+            <button type="button" class="vp-tb" title="Side (4)">Side</button>
+          </div>
+          <div class="vp-toolbar__group" aria-label="Zoom">
+            <button type="button" class="vp-tb" title="Zoom in">Zoom in</button>
+            <button type="button" class="vp-tb" title="Zoom out">Zoom out</button>
+            <button type="button" class="vp-tb" title="Fit — frame the stock and the vise jaws">Fit</button>
+          </div>
+          <div class="vp-toolbar__group vp-toolbar__group--layers" aria-label="Layers">
+            <label class="vp-layer"><input type="checkbox" checked>Removed</label>
+            <label class="vp-layer"><input type="checkbox" checked>Path</label>
+            <label class="vp-layer"><input type="checkbox" checked>Rapids</label>
+            <label class="vp-layer"><input type="checkbox" checked>Tool</label>
+            <label class="vp-layer"><input type="checkbox" checked>Fixture</label>
+          </div>
+        </div>
+        <div class="scene-wrap">
+          <svg class="scene" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"><use href="#scene-engrave"/></svg>
+        </div>
+        <div class="legend">
+          <h4>Floor depth</h4>
+          <div><span class="sw" style="background:#ffe08a"></span>0.5 mm — “2026”</div>
+          <div><span class="sw" style="background:#e0954a"></span>1.0 mm — “CASE”</div>
+          <div><span class="sw" style="background:#7a2e0e"></span>2.0 mm — “MAKER”</div>
+        </div>
+      </div>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Engrave preview</h3><button class="x" aria-label="Close section editor">×</button></div>
+        <div class="panel-stack">
+          <p class="hint">Each floor is coloured on a fixed ramp from the shallowest (light) to the deepest (dark), so the same depth is the same colour in every job.</p>
+          <div class="card" style="font-size:11px;line-height:1.6">
+            <div class="row"><b style="width:70px;color:var(--on-muted);font-weight:400">stock</b><span>opaque, wood tone</span></div>
+            <div class="row"><b style="width:70px;color:var(--on-muted);font-weight:400">floors</b><span>one mesh per label, coloured by depth</span></div>
+            <div class="row"><b style="width:70px;color:var(--on-muted);font-weight:400">jaws</b><span>translucent grey, labelled with their source</span></div>
+            <div class="row"><b style="width:70px;color:var(--on-muted);font-weight:400">origin</b><span>axis marker at the work origin (top-front-left)</span></div>
+          </div>
+          <p class="hint">The preview is the <strong>opened</strong> region — the glyph grown and shrunk back by the cutter’s radius — so inside corners are rounded and strokes thinner than the cutter vanish.</p>
+        </div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">engrave · badge.cmjob · hardwood 12 mm</span><span class="engine"><span>preview: 3 labels</span><span>depths 0.5 / 1.0 / 2.0 mm</span></span></footer>
+  </div>
+</section>
+
+</main>
+</body>
+</html>
