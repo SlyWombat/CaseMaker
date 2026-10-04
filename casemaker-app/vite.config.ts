@@ -25,6 +25,12 @@ const BASE = process.env.DEPLOY_BASE ?? '/';
 const DEPLOY_TARGET = process.env.DEPLOY_TARGET ?? '';
 const DONATE_URL = process.env.DONATE_URL ?? '';
 
+// #182 — the CNC simulation (sim worker, client and store). A compile-time switch: ON by
+// default (dev, tests, Tauri, GitHub Pages), OFF for the electricrv.ca deploy, because `main`
+// goes to the live public site and the UI is gated on a mockup that does not exist yet. With
+// it off, the lazy `import()` behind it is dead code and the worker never enters the bundle.
+const FEATURE_SIM = DEPLOY_TARGET !== 'electricrv';
+
 // Issue #164 — electricrv.ca's shared, cookie-free page-view counter. Injected
 // into <head> only for the cPanel production deploy, the same gate as the Donate
 // button, so dev, tests, other static hosts and the Tauri desktop build never
@@ -48,6 +54,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(APP_VERSION),
     __DEPLOY_TARGET__: JSON.stringify(DEPLOY_TARGET),
     __DONATE_URL__: JSON.stringify(DONATE_URL),
+    __FEATURE_SIM__: JSON.stringify(FEATURE_SIM),
   },
   resolve: {
     alias: { '@': path.resolve(__dirname, 'src') },

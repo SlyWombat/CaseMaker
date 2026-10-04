@@ -8,3 +8,7 @@ declare const __APP_VERSION__: string;
 //   __DONATE_URL__    = Stripe Payment Link URL on production, "" elsewhere.
 declare const __DEPLOY_TARGET__: string;
 declare const __DONATE_URL__: string;
+
+// #182 — the CNC simulation. true everywhere except the electricrv.ca deploy
+// (DEPLOY_TARGET === 'electricrv'); see vite.config.ts.
+declare const __FEATURE_SIM__: boolean;
