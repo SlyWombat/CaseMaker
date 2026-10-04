@@ -158,8 +158,9 @@ So:
 - **The one genuinely independent validation available** is #165's ladder `.nc`, generated
   by Studio, whose intent is known by construction: twelve squares at six depths. Note that
   "validate against Studio's output" cannot mean `TopClamp.nc` — it has 482 distinct Z
-  levels (§4.4), so V1's `ExactSweeper` cannot run it at all, and there is no independent
-  model of it to compare against.
+  levels (§4.4) but only **609 causal runs**, so V1's `ExactSweeper` does attempt it (under
+  the 1 000 cap, §9 item 6) — it simply cannot be an oracle, because there is no independent
+  model of it to compare against. Counted over the whole corpus, 2026-10-04.
 - **It removes the hard dependency on #172.** Parser + sweep + stock can be built and
   validated first, against **Makera Studio's own output** — including the `.nc` Studio
   generates for #165's depth ladder, *before* that ladder is cut. The simulator gets
@@ -253,13 +254,15 @@ half a disc — see §4's opening note. Assert the closed-form area (§4.0).
 
 ### 3.3 Rapids, arcs and modal state
 
-- **A G0 above the stock removes nothing.** A G0 that intersects the stock **removes
-  material in the simulation** — it is not merely flagged. The gouge must be visible;
-  #174 refuses the file separately. **Open (#182, raised by code review #4):** the V1 code
-  does the opposite of this sentence — the air-move gate reports `rapid-through-stock` with
-  the volume and the sweep removes nothing for it, because a rapid is not a cut in the
-  checkpoint model. Which the picture should show is a design question, not a bug; it is on
-  the issue and this bullet stays as written until it is answered (§9 item 5).
+- **A G0 above the stock removes nothing.** A G0 that intersects the stock is **never
+  subtracted**: it is reported as an error and returned as a **gouge solid**, drawn but not
+  removed, so the stock is never credited with material a rapid passed through. **Decided
+  by code review #4 (q1), 2026-10-04**, against this document's first draft: subtracting
+  would draw a broken cutter or a stalled axis as a tidy cut, and it would destroy the
+  evidence, because a later air move through the same volume would then pass the
+  time-ordered gate. The gouge is already computed — `remaining = hit.subtract(gone)` in
+  `checkAirMoves` — and currently discarded once its volume is read; returning it as a
+  solid is on #182. #174 refuses the file separately.
 - **The sweep is linear-only; the parser is not optional about arcs.** Studio's own output
   contains no arcs — 9 607 `G1`, 25 `G0`, zero `G2`/`G3` (`/Makera-Parity.md` §6) — and our
   IR is linear too, so it was tempting to treat arcs as a contingency. They are not:
@@ -428,11 +431,17 @@ reached lets a rapid through that material pass. Those hulls number in the hundr
 
 ## 5. Two backends, one interface
 
+**Superseded by code review #4 (q8), 2026-10-04.** There is no `Move[]` type and the sweep
+neither takes nor returns a bare `Manifold`. What the two backends share is the `Timeline`:
+
 ```ts
 interface Sweeper {
-  sweep(moves: Move[], tool: Tool, stock: Manifold): SweepResult;
+  sweep(timeline: Timeline, tool: Tool, setup: Setup): SweepOutcome;
 }
 ```
+
+The dexel backend consumes the same `Timeline`; `MoveEvent.a` already exists, and rotary
+adds an `as` pair per move to `Checkpoint` alongside `zs`.
 
 - **`ExactSweeper` (V1)** — the pipeline in §4.4. Correct for 3-axis work with few Z levels:
   all of 2.5D, and 3D roughing where step-down levels are discrete.
@@ -592,8 +601,13 @@ one Z level at 0.7 s. The affordable structure, and the one real CAM simulators 
 - **Between checkpoints, animate the tool over a static stock.** Moving a tool mesh along a
   polyline is free. The material does not visibly update mid-checkpoint, which is what every
   CAM simulator does and nobody notices.
-- **Pause points are checkpoints by definition** — `M6`, `M490.1`, `M600` (§1.1). The
-  emulator stops with the tool shown, the next tool named, and the state it will resume in.
+- **Pause points are markers on the step bar**, not checkpoints — `M6`, `M490.1`, `M600`
+  (§1.1). In the code a pause opens a *segment*; a checkpoint is a run of cuts, so a pause
+  followed by no cut is not one (corrected by code review #4). The stock shown at a pause is
+  the stock after the last cut before it, and the emulator stops there with the tool shown,
+  the next tool named, and the state it will resume in. The scrubber is indexed by program
+  **step**, with pauses as its only markers; checkpoints are when the material updates, not
+  ticks on the bar.
 
 So one compute pass, then cheap playback — "free" was the first draft's word, and code
 review #4 showed the cost it hid: caching every cumulative union and every stock ran a
@@ -645,19 +659,34 @@ about how the part will *look* beyond which colour volume a floor lands in.
    deliberately uncut walls of 0.05, 0.01 and 0.003 mm all survive `simplify(0.002)` with
    unchanged contour counts; only sub-ε slivers that Clipper2 has already fragmented change.
    Reopens for V-carve, where the floor width is a function of depth.
-3. **Does the pairwise tree stay linear past 24 000 contours?** Measured at 8 000 and
-   24 000. A full-face relief would be far larger.
-4. **Can the dexel backend share the `Move[]` type unchanged?** It should, but rotary adds
-   an `A` component, and that is the field `/Fabrication.md` §9.1 deliberately deferred.
-5. **Should a rapid through material REMOVE it in the picture, or only be reported?** §3.3
-   says remove; the code reports (`rapid-through-stock`, with the volume) and removes nothing.
-   Raised by code review #4; on #182.
-6. **`MAX_CHECKPOINTS = 1000`** is a budget, not a measurement: the vendor's fatigue-test.nc
-   (108 744 runs) must be refused, ACRYLIC-Balloon.nc (10) must pass, and nothing between has
-   been timed. On #182.
-7. **Envelope −200 or −206?** The profile says 200 mm of travel; the shipped config has
-   `soft_endstop.enable false` and the review noted a −206 limit elsewhere. Unverified without
-   the machine.
+3. **Does the pairwise tree stay linear past 36 000 contours?** §4.1 measures it linear to
+   **36 000**, not 24 000 as this item first said. It gates nothing in V1: denser jobs are
+   refused before any union runs, and the largest single in-scope checkpoint in the whole
+   corpus is `ACRYLIC-Carvera.nc`'s **22 653 moves** in one checkpoint (measured
+   2026-10-04). A full-face relief would be far larger, and is refused.
+4. ~~**Can the dexel backend share the `Move[]` type unchanged?**~~ **Closed — the premise
+   was stale.** There is no `Move[]` type: the parser emits `GcodeEvent[]`, the runner emits
+   `Timeline`, and the sweep consumes `Timeline` (§5, corrected). `MoveEvent.a` already
+   exists and is tracked, so rotary needs one addition — an `as` pair per move on
+   `Checkpoint` — and nothing in V1 depends on it.
+5. ~~**Should a rapid through material REMOVE it in the picture?**~~ **Answered: no** (code
+   review #4 q1). It is never subtracted; it is reported and returned as a gouge solid that
+   is drawn. §3.3 is corrected to match, and returning the solid is on #182.
+6. **`MAX_CHECKPOINTS = 1000`** is a classifier, not a measurement. The vendor's
+   fatigue-test.nc must be refused — **685 200 causal runs**, not the 108 744 this item and
+   `sweep.ts` first quoted, which was the old (segment, Z) count — and ACRYLIC-Balloon.nc
+   (10) must pass. Nothing between has been **timed**, and causal runs are not Z levels:
+   `PCB-NO-UV-MASK.nc` has 9 distinct Z but 298 runs because it alternates between levels,
+   and `Tests/pcb-test-air.nc` has 912 (all counted 2026-10-04, `probe-checkpoints.mts`).
+   The accept criteria are a sweep under 10 s and a worst cold seek under 1 s with no wasm
+   OOM on the 912-run file. On #182.
+7. **Envelope −200 or −206?** The profile says 200 mm of travel. The firmware's own limits
+   are now sourced rather than "noted elsewhere" — `MakeraInc/MakeraZ1Firmware`
+   `src/configZ1.default:429-432` reads `soft_endstop.enable false`, `x_min -206.0`,
+   `y_min -206.0`, `z_min -102.0` — so the controller's limit is 6 mm (2 mm in Z) past the
+   vendor's figure **and is disabled**: nothing in the controller stops a move at either
+   number. Refusing at −200 is therefore the conservative side, and the band in
+   (−206, −200] is unverified without the machine.
 
 ---
 
