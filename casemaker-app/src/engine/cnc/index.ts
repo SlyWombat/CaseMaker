@@ -2,6 +2,9 @@
 export * from './setup';
 export * from './frames';
 export * from './machine';
+export * from './toolLibrary';
+export { setupFromHeader } from './setupFromHeader';
+export type { SetupFromHeader, HeaderDiagnostic, HeaderOriginCorner } from './setupFromHeader';
 export { buildTimeline, applyEvent, initialState, isRealToolChange, resolveMove, toolChangeMacro, tloCalibrateMacro, g28Clearance, DIAGNOSTIC_CAP } from './emulator/timeline';
 export type {
   AirMove,

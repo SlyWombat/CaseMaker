@@ -29,8 +29,11 @@ import type { MachineProfile } from './machine';
 
 export type Degrees = number;
 
-/** Where a registration number came from. A stub is typed in, not measured. */
-export type RegistrationSource = 'stub' | 'fixture' | 'probe' | 'camera';
+/**
+ * Where a registration number came from. A stub is typed in, not measured; a `header` value was
+ * read from an UNTRUSTED `;@MKR` header (`setupFromHeader`) and only ever prefills a form.
+ */
+export type RegistrationSource = 'stub' | 'fixture' | 'probe' | 'camera' | 'header';
 
 /** The workpiece, in its own authored frame (`/Simulation.md` §2). */
 export type PartSpec =
