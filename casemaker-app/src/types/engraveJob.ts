@@ -52,6 +52,11 @@ export interface ViseParams {
   source: 'default' | 'saved' | 'measured';
   /** How far the real jaws may differ from these numbers, mm. Obstacles are inflated by it. */
   uncertainty: Mm;
+  /**
+   * ISO date (`YYYY-MM-DD`) the numbers were measured on. Absent for a shipped default; set when
+   * the user records a measurement ("Save as my vise" / "I just measured these", #203).
+   */
+  measuredAt?: string;
 }
 
 export interface EngraveJob {

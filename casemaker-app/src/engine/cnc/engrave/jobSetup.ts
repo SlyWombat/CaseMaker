@@ -2,6 +2,7 @@ import { rectProfile } from '@/engine/compiler/profile';
 import type { MachineProfile } from '@/engine/cnc/machine';
 import { libraryTool } from '@/engine/cnc/toolLibrary';
 import type { Tool } from '@/engine/cnc/tool';
+import { viseEnvelope } from '@/engine/cnc/fixture';
 import { stubSetup, type Setup, type Workholding } from '@/engine/cnc/setup';
 import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
 
@@ -19,7 +20,17 @@ export type JobFindingCode =
   | 'no-labels'
   | 'tool-missing'
   | 'stock-proud-too-small'
-  | 'vise-default';
+  | 'vise-default'
+  | 'vise-stock-not-proud'
+  | 'vise-stock-proud-exceeds-thickness'
+  | 'vise-grip-shallow'
+  | 'vise-jaw-short'
+  // Geometry-dependent findings: computed by the worker (#201), not `validateJob` — they
+  // need the tool-opened glyph, which only exists once a CrossSection is evaluated.
+  | 'label-empty'
+  | 'label-chars-lost'
+  | 'label-detail-lost'
+  | 'label-outside-stock';
 
 export interface JobFinding {
   severity: 'error' | 'warning';
@@ -60,8 +71,10 @@ export function toSetup(job: EngraveJob, machine: MachineProfile): Setup {
     { kind: 'prism', outline: rectProfile(length, width), thickness },
     workholding,
     // The default job's tool is number 1 (`flat-1.0`); the starting tool is stated because a
-    // program cannot know the machine's active tool (/Simulation.md §1.1).
-    { startingTool: 1 },
+    // program cannot know the machine's active tool (/Simulation.md §1.1). The fixture is the
+    // vise's obstacle envelope (#203), carried with its provenance so the emulator never
+    // mistakes a default for a measurement.
+    { startingTool: 1, fixture: viseEnvelope(job.stock, vise) },
     machine,
   );
 }

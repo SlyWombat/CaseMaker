@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { defaultEngraveJob, newEngraveLabelId } from '@/engine/cnc/engrave/defaults';
+import { todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import type { EngraveJob, EngraveLabel, ViseParams } from '@/types/engraveJob';
 import { parseEngraveJob, type ParseEngraveJobResult } from './engraveJobSchema';
+import { useSettingsStore } from './settingsStore';
 
 /**
  * The `EngraveJob` store (#200). Persists to localStorage on every change, hydrates through
@@ -26,15 +28,24 @@ function persist(job: EngraveJob): void {
   }
 }
 
+/**
+ * A brand-new job, with its vise taken from the saved measurement in settings when one exists
+ * (#203, decision 28). The reading of `settings.fixtures.vise` happens HERE, in the store, so
+ * `defaultEngraveJob` stays a pure function of its argument (#203 review).
+ */
+function newDefaultJob(): EngraveJob {
+  return defaultEngraveJob(viseForNewJob(useSettingsStore.getState().fixtures.vise));
+}
+
 function loadJob(): EngraveJob {
-  if (typeof localStorage === 'undefined') return defaultEngraveJob();
+  if (typeof localStorage === 'undefined') return newDefaultJob();
   let raw: string | null = null;
   try {
     raw = localStorage.getItem(ENGRAVE_JOB_KEY);
   } catch {
-    return defaultEngraveJob();
+    return newDefaultJob();
   }
-  if (!raw) return defaultEngraveJob();
+  if (!raw) return newDefaultJob();
 
   let json: unknown;
   let parsed: ParseEngraveJobResult;
@@ -53,7 +64,7 @@ function loadJob(): EngraveJob {
   } catch {
     // ignore quota errors
   }
-  return defaultEngraveJob();
+  return newDefaultJob();
 }
 
 function newLabel(job: EngraveJob): EngraveLabel {
@@ -122,17 +133,22 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
 
     // Any edit to the vise makes it a SAVED value, unless the patch states its own source
     // (e.g. a re-probe writing `measured`). A default is not a measurement (decision 28).
+    // A non-default value records the day it was asserted ("I just measured these", #203),
+    // unless the patch already carries a date.
     setVise: (patch) =>
-      apply((job) => ({
-        ...job,
-        workholding: {
-          ...job.workholding,
-          vise: { ...job.workholding.vise, ...patch, source: patch.source ?? 'saved' },
-        },
-      })),
+      apply((job) => {
+        const source = patch.source ?? 'saved';
+        const vise: ViseParams = {
+          ...job.workholding.vise,
+          ...patch,
+          source,
+          ...(source !== 'default' && !patch.measuredAt ? { measuredAt: todayISODate() } : {}),
+        };
+        return { ...job, workholding: { ...job.workholding, vise } };
+      }),
 
     replace: (job) => apply(() => job),
 
-    reset: () => apply(() => defaultEngraveJob()),
+    reset: () => apply(() => newDefaultJob()),
   };
 });

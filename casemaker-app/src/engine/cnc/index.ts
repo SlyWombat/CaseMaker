@@ -2,6 +2,7 @@
 export * from './setup';
 export * from './frames';
 export * from './machine';
+export * from './fixture';
 export * from './toolLibrary';
 export { setupFromHeader } from './setupFromHeader';
 export type { SetupFromHeader, HeaderDiagnostic, HeaderOriginCorner } from './setupFromHeader';

@@ -114,12 +114,48 @@ export interface WorkOffset {
  */
 export type StartingTool = number | 'unknown';
 
+/**
+ * An axis-aligned box the tool must not enter, in the WORK frame, mm (#203). The work frame
+ * is the job frame: origin at the stock's top-front-left corner, +X to the right along the
+ * jaws' clamping direction, +Y away from the operator, Z = 0 on the top face.
+ */
+export interface ObstacleBox {
+  /** Stable id, e.g. 'vise-fixed-jaw'. */
+  id: string;
+  /** Human label, shown in the viewport and in diagnostics. */
+  label: string;
+  min: Vec3;
+  max: Vec3;
+}
+
+/**
+ * The fixture as solids the tool must not hit (#203, decision 28). This is NOT `Workholding`:
+ * `Workholding` says *how* the part is held; the envelope says *what is in the way*. It is an
+ * INPUT with provenance — a shipped default, a saved measurement, or a fresh measurement —
+ * never a catalogue lookup presented as truth.
+ */
+export interface FixtureEnvelope {
+  boxes: ObstacleBox[];
+  /** Where the dimensions came from. A default is NOT a measurement. */
+  source: 'default' | 'saved' | 'measured';
+  /** Every box is grown by this much on every side before any check, mm. */
+  uncertainty: Mm;
+  /** ISO date of the measurement, when source is 'saved' or 'measured'. */
+  measuredAt?: string;
+}
+
 export interface Setup {
   part: PartSpec;
   workholding: Workholding;
   placement: Placement;
   wcs: WorkOffset;
   startingTool: StartingTool;
+  /**
+   * The obstacle envelope, when the fixture is modelled. Optional (#203): an absent fixture
+   * means "not modelled", which the sweep reports as its `fixture-unchecked` diagnostic, and
+   * every existing `stubSetup` caller keeps working unchanged.
+   */
+  fixture?: FixtureEnvelope;
 }
 
 /**

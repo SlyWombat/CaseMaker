@@ -1,13 +1,25 @@
 import { create } from 'zustand';
+import { todayISODate } from '@/engine/cnc/fixture';
+import type { ViseParams } from '@/types/engraveJob';
 
 export type ExportLayoutMode = 'print-ready' | 'assembled';
 export type ExportFormat = 'stl-binary' | 'stl-ascii' | '3mf';
+
+/**
+ * Saved fixture measurements (#203, decision 28). A saved envelope is used until the setup
+ * changes; `source` and `uncertainty` travel with it so a default is never mistaken for a
+ * measurement. An absent `vise` means "use the shipped default".
+ */
+export interface FixturesSettings {
+  vise?: ViseParams;
+}
 
 export interface AppSettings {
   port: number;
   bindToAll: boolean;
   exportLayout: ExportLayoutMode;
   exportFormat: ExportFormat;
+  fixtures: FixturesSettings;
 }
 
 const SETTINGS_KEY = 'casemaker.settings.v1';
@@ -23,9 +35,46 @@ const DEFAULTS: AppSettings = {
   bindToAll: false,
   exportLayout: DEFAULT_EXPORT_LAYOUT,
   exportFormat: DEFAULT_EXPORT_FORMAT,
+  fixtures: {},
 };
 
 const VALID_FORMATS: ReadonlySet<ExportFormat> = new Set(['stl-binary', 'stl-ascii', '3mf']);
+const VALID_VISE_SOURCES: ReadonlySet<ViseParams['source']> = new Set(['default', 'saved', 'measured']);
+
+/**
+ * The saved fixture slice, validated on load. A payload that does not describe a whole vise is
+ * dropped rather than half-honoured: a partial obstacle envelope is more dangerous than none.
+ */
+function parseFixtures(raw: unknown): FixturesSettings {
+  if (typeof raw !== 'object' || raw === null) return {};
+  const vise = parseVise((raw as Record<string, unknown>).vise);
+  return vise ? { vise } : {};
+}
+
+function parseVise(raw: unknown): ViseParams | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const o = raw as Record<string, unknown>;
+  const source = o.source;
+  if (typeof source !== 'string' || !VALID_VISE_SOURCES.has(source as ViseParams['source'])) {
+    return undefined;
+  }
+  const nums = ['stockProud', 'fixedJawThickness', 'movingJawThickness', 'jawLength', 'jawStartY', 'uncertainty'] as const;
+  for (const key of nums) {
+    if (typeof o[key] !== 'number' || !Number.isFinite(o[key])) return undefined;
+  }
+  const measuredAt = o.measuredAt;
+  if (measuredAt !== undefined && typeof measuredAt !== 'string') return undefined;
+  return {
+    stockProud: o.stockProud as number,
+    fixedJawThickness: o.fixedJawThickness as number,
+    movingJawThickness: o.movingJawThickness as number,
+    jawLength: o.jawLength as number,
+    jawStartY: o.jawStartY as number,
+    source: source as ViseParams['source'],
+    uncertainty: o.uncertainty as number,
+    ...(measuredAt !== undefined ? { measuredAt } : {}),
+  };
+}
 
 function loadSettings(): AppSettings {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
@@ -46,6 +95,7 @@ function loadSettings(): AppSettings {
         typeof parsed.exportFormat === 'string' && VALID_FORMATS.has(parsed.exportFormat as ExportFormat)
           ? (parsed.exportFormat as ExportFormat)
           : DEFAULT_EXPORT_FORMAT,
+      fixtures: parseFixtures(parsed.fixtures),
     };
   } catch {
     return { ...DEFAULTS };
@@ -73,6 +123,10 @@ export interface SettingsState extends AppSettings {
   setBindToAll: (v: boolean) => void;
   setExportLayout: (mode: ExportLayoutMode) => void;
   setExportFormat: (fmt: ExportFormat) => void;
+  /** Save a vise measurement ("Save as my vise", #205), persisted with the rest of settings. */
+  setVise: (vise: ViseParams) => void;
+  /** Forget the saved vise and fall back to the shipped default. */
+  clearVise: () => void;
   resetSettings: () => void;
 }
 
@@ -96,6 +150,23 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     setExportFormat: (fmt) => {
       set({ exportFormat: fmt });
       persist({ ...get(), exportFormat: fmt });
+    },
+    // "Save as my vise" (#203): a non-default value records the day it was saved, unless the
+    // caller already stamped one. A persisted `default` is not a measurement and carries no date.
+    setVise: (vise) => {
+      const stamped: ViseParams =
+        vise.source !== 'default' && !vise.measuredAt
+          ? { ...vise, measuredAt: todayISODate() }
+          : vise;
+      const fixtures = { ...get().fixtures, vise: stamped };
+      set({ fixtures });
+      persist({ ...get(), fixtures });
+    },
+    clearVise: () => {
+      const fixtures = { ...get().fixtures };
+      delete fixtures.vise;
+      set({ fixtures });
+      persist({ ...get(), fixtures });
     },
     resetSettings: () => {
       const fresh = { ...DEFAULTS };

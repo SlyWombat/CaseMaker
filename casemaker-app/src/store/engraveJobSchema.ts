@@ -52,6 +52,8 @@ const viseSchema = z.object({
   jawStartY: z.number().finite(),
   source: z.enum(['default', 'saved', 'measured']),
   uncertainty: z.number().finite().nonnegative(),
+  // Optional: a shipped default carries no date. Absent keys are preserved as absent.
+  measuredAt: z.string().optional(),
 });
 
 const stockSchema = z.object({

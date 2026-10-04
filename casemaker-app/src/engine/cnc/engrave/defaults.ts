@@ -1,6 +1,7 @@
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
+import { DEFAULT_VISE } from '@/engine/cnc/fixture';
 import { newId } from '@/utils/id';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, ViseParams } from '@/types/engraveJob';
 
 /**
  * The default `EngraveJob` and its label-id helper (#200).
@@ -37,9 +38,15 @@ export function newEngraveLabelId(): string {
  *   toward the operator.
  *
  * PROVISIONAL, awaiting #208: the vise dimensions are published nowhere (/Fabrication.md
- * §7.3) and #208 measures them. `source: 'default'` says so and `validateJob` warns.
+ * §7.3), so `vise` defaults to `DEFAULT_VISE` from `fixture.ts` — the one place the five
+ * placeholder numbers live. `source: 'default'` says so and `validateJob` warns.
+ *
+ * `vise` is an OPTIONAL argument so this stays pure: `engraveJobStore` reads the saved
+ * measurement from settings and passes `viseForNewJob(settings.fixtures.vise)` in, and a
+ * caller with no saved measurement gets the shipped default. A copy is stored so patching the
+ * job cannot mutate `DEFAULT_VISE` (or the caller's object).
  */
-export function defaultEngraveJob(): EngraveJob {
+export function defaultEngraveJob(vise: ViseParams = DEFAULT_VISE): EngraveJob {
   return {
     schemaVersion: 1,
     name: 'Untitled engrave job',
@@ -89,15 +96,7 @@ export function defaultEngraveJob(): EngraveJob {
     toolKey: 'flat-1.0',
     workholding: {
       kind: 'vise',
-      vise: {
-        stockProud: 4,
-        fixedJawThickness: 15,
-        movingJawThickness: 15,
-        jawLength: 80,
-        jawStartY: -10,
-        source: 'default',
-        uncertainty: 2,
-      },
+      vise: { ...vise },
     },
     minFloor: 1.0,
     edgeMargin: 1.0,
