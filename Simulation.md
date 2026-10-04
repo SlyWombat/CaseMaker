@@ -446,7 +446,7 @@ measured through tessellation slivers — and every other air move keeps the geo
 Measured 2026-10-04, `scripts/sweep-timing.ts`, one quiet-machine run each, 3.175 mm flat end,
 machine Z1 unless noted (raw outputs in `casemaker-app/scripts/sweep-timing-out/194-after-post7/`):
 
-| file | checkpoints | sweep total | air gate | rechecked | cleared | worst cold seek | peak RSS |
+| file | checkpoints | sweep total | air gate | rechecked | cleared | worst cold seek (pre-#224) | peak RSS |
 |---|---|---|---|---|---|---|---|
 | `LED/ACRYLIC-Balloon.nc` (machine none) | 10 | 0.89 s | **3 ms** | 0 | 169 | 0.38 s | 215 MB |
 | `LED/PCB-NO-UV-MASK.nc` | 298 | 7.0 s | **7 ms** | 0 | 423 | 3.1 s | 418 MB |
@@ -469,8 +469,10 @@ of ramp hulls plus a 50.0 s final `Manifold.union(solids)`, which is the dexel b
 (§4.4), not a threshold's (#222) — after step 7 it returns a sweep instead of hanging, and the
 budget refuses it cleanly with the path still available.
 
-Cold seeks stay 3–7 s on the three PCB files at 298–912 checkpoints. That is a separate defect
-in playback's anchor chain, not the air gate, and is recorded in §8.0.
+Cold seeks stay 3–7 s on the three PCB files at 298–912 checkpoints — a separate defect in
+playback's anchor chain, not the air gate. **#224 has since fixed it** (worst cold seek now
+0.17–0.73 s, the anchor chain built during load; see §8.0), so the column above is the
+pre-#224 reading and the numbers below the table are the air-gate ones, unchanged by #224.
 
 ## 5. Two backends, one interface
 
@@ -657,19 +659,27 @@ one Z level at 0.7 s. The affordable structure, and the one real CAM simulators 
 So one compute pass, then cheap playback — "free" was the first draft's word, and code
 review #4 showed the cost it hid: caching every cumulative union and every stock ran a
 719-checkpoint vendor job out of wasm memory. Memory is **bounded**: the cumulative union is
-kept at every 32nd checkpoint (materialised into a real mesh — a lazy union must not be
+kept at every 16th checkpoint (materialised into a real mesh — a lazy union must not be
 reused, see the trap recorded in `playback.ts`), stocks live in a six-entry most-recently-used
-cache, and a seek costs at most 32 lazy unions and one subtraction. **Do not** build it as
+cache, and a seek costs at most 16 lazy unions and one subtraction. **Do not** build it as
 incremental subtraction; that is the design that cannot be made fast later.
 
-**A cold seek is seconds, not milliseconds, on the PCB files (#194, measured).** The first seek
+**A cold seek was seconds, not milliseconds, on the PCB files; #224 fixed it.** The first seek
 to a given checkpoint pays the anchor chain — rebuild from the nearest materialised anchor,
-up to 32 lazy unions plus a subtraction — so the cost grows with the checkpoint count: measured
-2026-10-04 (machine Z1, `scripts/sweep-timing.ts`), worst cold seek **0.4 s at 10 checkpoints**
-(Balloon), **3.1–4.1 s at 298** (PCB-NO-UV-MASK and PART2) and **7.0 s at 912** (pcb-test-air);
-`Z1/TopClamp.nc` was killed inside its seek phase. This is a defect in the anchor chain, not in
-the sweep, and is **not** fixed here — the retract fix (#194 step 7, §4.6) showed which files are
-now in scope, and it will be filed as its own issue.
+up to `ANCHOR_EVERY` lazy unions plus the subtraction every seek pays — so the cost grew with
+the checkpoint count: measured 2026-10-04 before the fix (machine Z1, `scripts/sweep-timing.ts`),
+worst cold seek **0.4 s at 10 checkpoints** (Balloon), **3.1–4.1 s at 298** (PCB-NO-UV-MASK and
+PART2) and **7.0 s at 912** (pcb-test-air); `Z1/TopClamp.nc` was killed inside its seek phase.
+
+The defect was structural, not in the sweep: the chain was built lazily by the **first scrub**,
+so that one scrub paid for the whole job. #224 fixes it three ways — the chain is now built
+during loading (`Playback.warmup()`, surfaced to the user as "preparing playback…") so no scrub
+pays for it; a seek to the last checkpoint returns the sweep's own `result`/`removal` instead of
+rebuilding the tail; and `ANCHOR_EVERY` is 16, not 32, halving the tail a seek must walk.
+Measured after (same harness, post-load, quiet machine), worst cold seek **0.17 s at 10**,
+**0.45 s and 0.73 s at 298**, **0.21 s at 912**, at peak RSS of 203/445/883/563 MB — at most
++17 % over before, inside the ≤+25 % budget. The per-setting numbers are recorded on
+`ANCHOR_EVERY` in `playback.ts`.
 
 Checkpoints are **causal**: a checkpoint is one contiguous run of cuts at one (segment, Z),
 so leaving a Z and returning to it later is a *new* checkpoint and "everything cut so far"
@@ -748,8 +758,9 @@ about how the part will *look* beyond which colour volume a floor lands in.
    10 runs (machine `none`, air gate 3 ms, removed volume unchanged at 8323.8 mm³) —
    **simulable**; `PCB-NO-UV-MASK.nc` 7.0 s, `PCB-UV-MASK(PART2).nc` 12.5 s and
    `pcb-test-air.nc` 11.4 s, their air gates 7/11/8 ms (down from 52.6 s / >120 s / 67.8 s and
-   from hanging) — **all simulable**, with cold seeks of 3.1/4.1/7.0 s that are a separate
-   playback defect (§8.0). `TopClamp.nc` still is **not**: 77.3 s, its cost the thousands of ramp
+   from hanging) — **all simulable**, with cold seeks of 3.1/4.1/7.0 s at the time of this run;
+   that was a separate playback defect, **since fixed by #224** (§8.0). `TopClamp.nc` still is
+   **not**: 77.3 s, its cost the thousands of ramp
    hulls and a 50.0 s final `Manifold.union(solids)` — the 3D case, the dexel backend's job
    (§4.4, #222), refused cleanly by the budget with the path still available. This machine's
    spread is wide, so these are observations, not tight bounds. A refused sweep is still not a

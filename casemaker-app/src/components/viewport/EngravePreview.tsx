@@ -7,8 +7,11 @@
  * negative Z — and the scene is Z-up, so the meshes are drawn as-is with NO transform (exactly
  * what `SimMeshes` does). Each pocket floor is coloured by its depth on a FIXED ramp so the same
  * depth reads the same everywhere; the vise jaws are translucent and never write depth (a
- * transparent mesh that wrote depth would hide the pocket behind it — issue #162). A legend lists
- * each distinct depth, and an axis marker sits at the work origin with X and Y labelled.
+ * transparent mesh that wrote depth would hide the pocket behind it — issue #162). The
+ * sacrificial material (#213) is drawn from the same boxes the sweep tests against, in a paler
+ * grey than the jaws so a strip between them reads as material and not as a third jaw. A legend
+ * lists each distinct depth and the sacrificial swatch, and an axis marker sits at the work
+ * origin with X and Y labelled.
  */
 
 import { useEffect, useMemo } from 'react';
@@ -18,7 +21,7 @@ import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { ViseParams } from '@/types/engraveJob';
-import { geometryFromMesh } from './simGeometry';
+import { geometryFromMesh, SACRIFICIAL_COLOR } from './simGeometry';
 import { depthColor } from './engraveRamp';
 
 /** The same neutral wood tone the simulation's stock uses (#197). */
@@ -76,6 +79,21 @@ function Jaw({ mesh, name }: { mesh: NodeMeshOutput; name: string }) {
   );
 }
 
+/**
+ * One piece of sacrificial material (#213): the board under the part or a strip beside it. Drawn
+ * OPAQUE in the paler grey — the material is what the cutter is meant to reach, so it reads as
+ * solid stock, unlike the translucent jaws behind it.
+ */
+function Sacrificial({ mesh, name, label }: { mesh: NodeMeshOutput; name: string; label: string }) {
+  const geom = useMeshGeometry(mesh);
+  if (!geom) return null;
+  return (
+    <mesh geometry={geom} name={name} userData={{ sacrificialLabel: label }}>
+      <meshStandardMaterial color={SACRIFICIAL_COLOR} flatShading metalness={0.05} roughness={0.8} />
+    </mesh>
+  );
+}
+
 /** Centre of a mesh's bbox, for anchoring a jaw's source label. */
 function centreOf(bbox: { min: readonly number[]; max: readonly number[] }): [number, number, number] {
   return [
@@ -117,6 +135,10 @@ export function EngravePreview() {
       <mesh geometry={stockGeom} name="engrave-stock">
         <meshStandardMaterial color={STOCK_COLOR} flatShading metalness={0.05} roughness={0.75} />
       </mesh>
+
+      {preview.sacrificial.map((s) => (
+        <Sacrificial key={s.id} mesh={s.mesh} name={`engrave-${s.id}`} label={s.label} />
+      ))}
 
       {preview.floors.map((f) => (
         <Floor key={f.labelId} mesh={f.mesh} labelId={f.labelId} color={depthColor(f.depth, maxDepth)} />
@@ -202,6 +224,24 @@ export function EngravePreview() {
                 {d.toFixed(1)} mm
               </div>
             ))
+          )}
+          {/* #213 — the sacrificial material is not a depth; it gets its own swatch. */}
+          {preview.sacrificial.length > 0 && (
+            <div
+              data-testid="engrave-legend-sacrificial"
+              style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}
+            >
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  background: SACRIFICIAL_COLOR,
+                  border: '1px solid #00000055',
+                  display: 'inline-block',
+                }}
+              />
+              sacrificial
+            </div>
           )}
         </div>
       </Html>

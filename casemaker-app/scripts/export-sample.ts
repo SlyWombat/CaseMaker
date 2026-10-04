@@ -5,7 +5,7 @@
 // the snap-fit calibration cube tracked by issue #2 and a representative
 // ESP32 DevKit V1 case with snap-fit lid.
 
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -13,6 +13,7 @@ import { createRequire } from 'node:module';
 import ManifoldModule from 'manifold-3d';
 
 import { compileProject } from '../src/engine/compiler/ProjectCompiler';
+import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '../src/engine/fonts/registry';
 import { executeOp } from '../src/workers/geometry/evaluateOp';
 import { createDefaultProject } from '../src/store/projectStore';
 import { buildBinaryStl } from '../src/workers/export/stlBinary';
@@ -26,6 +27,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..');
 const samplesDir = join(repoRoot, 'samples');
 mkdirSync(samplesDir, { recursive: true });
+
+// Issue #180 — bundled faces are static assets the app `fetch`es on first use. Under node a
+// `file:` URL is not fetchable, and the compiler typesets labels synchronously, so seed the
+// parsed-font cache from the TTFs on disk here (the same seam `tests/setup/fonts.ts` uses).
+// No shipped sample carries labels today, but seeding keeps a label-bearing sample compiling.
+const fontsDir = join(here, '..', 'src', 'engine', 'fonts', 'files');
+for (const key of BUNDLED_FONT_KEYS) {
+  const buf = readFileSync(join(fontsDir, `${key}.ttf`));
+  registerBundledFontBytes(key, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+}
 
 const require = createRequire(import.meta.url);
 const wasmPath = require.resolve('manifold-3d/manifold.wasm');

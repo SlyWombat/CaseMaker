@@ -67,11 +67,20 @@ export interface SimLoadOpts {
   budgetMs?: number;
   /** Checkpoints swept so far. Called from the worker as the sweep advances. */
   onProgress?: (done: number, total: number) => void;
+  /**
+   * Which stage of the load is running (#224): `sweep` while the sweep runs, then `playback`
+   * while the anchor chain is built up front. The UI shows the latter as "preparing playback…".
+   */
+  onPhase?: (phase: SimLoadPhase) => void;
 }
 
+/** The two stages of a load (#224). */
+export type SimLoadPhase = 'sweep' | 'playback';
+
 /**
- * Load a program. On success the anchor chain is warmed with ONE silent seek to the last
- * checkpoint, so the first real scrub does not pay for building it (§8.0).
+ * Load a program. The anchor chain is warmed up front (#224): after the sweep the worker builds
+ * every playback anchor while this promise is still pending, so the caller can show it as part
+ * of loading and the first real scrub does not pay for it.
  *
  * Raced against a timer (#194): the sim worker is the one place a wasm call can run for
  * minutes without yielding, so a load that overruns the budget is refused by terminating the
@@ -101,10 +110,20 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
   });
   try {
     const result = await Promise.race([
-      getSimApi().simLoad(gcodeText, setup, tool, machineId, sweepBudget, opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined),
+      getSimApi()
+        .simLoad(gcodeText, setup, tool, machineId, sweepBudget, opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined)
+        .then(async (r) => {
+          // #224: the warm-up is part of the load, not the first scrub. Awaiting `simWarmup`
+          // keeps this promise pending (so the UI stays "loading") until the anchor chain is
+          // built; only then does the caller go ready and accept scrubs.
+          if (r.ok && r.count > 0) {
+            opts?.onPhase?.('playback');
+            await getSimApi().simWarmup();
+          }
+          return r;
+        }),
       expired,
     ]);
-    if (result.ok && result.count > 0) frames.request(result.count - 1, { silent: true });
     return result;
   } finally {
     if (timer !== null) clearTimeout(timer);

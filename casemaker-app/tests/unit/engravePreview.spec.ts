@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { createEngravePreviewer } from '@/workers/sim/engravePreview';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { presetJawStrips, presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { EngraveJob, EngraveShape } from '@/types/engraveJob';
@@ -149,6 +150,67 @@ describe('engravePreview (#205)', () => {
     const fresh = previewer.engravePreview(job, 1000);
     expect(fresh).not.toBeNull();
     expect(previewer.engravePreview(job, 999)).toBeNull();
+  });
+});
+
+// #213 §5 — the preview draws the sacrificial material AND moves the jaws onto it, so the picture
+// matches what the sweep and the verifier will actually test against. Both assertions are on the
+// preview's own output (boxes flagged `sacrificial-*`, jaw bbox faces), not on a re-run of
+// `sacrificialBoxes`: the point is that the PREVIEW consumed them.
+describe('engravePreview — sacrificial material (#213)', () => {
+  // Its own previewer: the "null for an older generation" test above pins the shared one's
+  // latest generation to 1000, so a shared counter would make every `++gen` here stale.
+  const pv = createEngravePreviewer(tl);
+  let g = 0;
+  function preview(job: EngraveJob) {
+    const p = pv.engravePreview(job, ++g);
+    if (!p) throw new Error('the previewer refused a fresh generation');
+    return p;
+  }
+
+  it('draws no sacrificial bodies and keeps the jaws on the part with none', () => {
+    const job = defaultEngraveJob();
+    const L = job.stock.length;
+    const p = preview(job);
+    expect(p.sacrificial).toEqual([]);
+    // The fixed jaw's face is on x = 0; the moving jaw's is on x = L (the pre-#213 envelope).
+    expect(p.fixture[0]!.mesh.bbox.max[0]).toBe(0);
+    expect(p.fixture[1]!.mesh.bbox.min[0]).toBe(L);
+  });
+
+  it('draws the two strips and moves the jaws out by the strip thickness ("Strips between the jaws")', () => {
+    const job = defaultEngraveJob();
+    job.sacrificial = presetJawStrips();
+    const L = job.stock.length;
+    const p = preview(job);
+
+    // The strips are drawn, one mesh per box, in the work frame: left X[-6, 0], right X[L, L+6].
+    expect(p.sacrificial.map((s) => s.id)).toEqual(['sacrificial-left', 'sacrificial-right']);
+    for (const s of p.sacrificial) expect(meshVolume(s.mesh)).toBeGreaterThan(0);
+    expect(p.sacrificial[0]!.mesh.bbox).toMatchObject({ min: [-6, 0, -job.stock.thickness], max: [0, job.stock.width, 0] });
+    expect(p.sacrificial[1]!.mesh.bbox).toMatchObject({ min: [L, 0, -job.stock.thickness], max: [L + 6, job.stock.width, 0] });
+
+    // The 6 mm strips push both jaw faces out by 6 mm from the part's own edges.
+    expect(p.fixture[0]!.mesh.bbox.max[0]).toBe(-6);
+    expect(p.fixture[1]!.mesh.bbox.min[0]).toBe(L + 6);
+    // …and each jaw keeps its own thickness: the fixed jaw's far side is its thickness past the face.
+    expect(p.fixture[0]!.mesh.bbox.min[0]).toBe(-6 - job.workholding.vise.fixedJawThickness);
+  });
+
+  it('draws the under-board and moves the jaws out by its overhang ("Part on a larger board")', () => {
+    const job = defaultEngraveJob();
+    job.sacrificial = presetPartOnBoard();
+    const L = job.stock.length;
+    const p = preview(job);
+
+    expect(p.sacrificial.map((s) => s.id)).toEqual(['sacrificial-under']);
+    const under = p.sacrificial[0]!.mesh.bbox;
+    // 10 mm overhang all round, 12 mm below the part's underside.
+    expect(under).toMatchObject({ min: [-10, -10, -job.stock.thickness - 12], max: [L + 10, job.stock.width + 10, -job.stock.thickness] });
+
+    // The 10 mm overhang, not the (absent) strips, is what shifts the jaws.
+    expect(p.fixture[0]!.mesh.bbox.max[0]).toBe(-10);
+    expect(p.fixture[1]!.mesh.bbox.min[0]).toBe(L + 10);
   });
 });
 

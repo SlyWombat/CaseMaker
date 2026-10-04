@@ -144,6 +144,12 @@ export interface SimPath {
   kind: Uint8Array;
   /** Cumulative seconds at each vertex (see `simPath`). */
   t: Float32Array;
+  /**
+   * The 1-based source line each vertex's move came from (#198), so the transport can show
+   * "line L" without a per-step round-trip. Optional: a hand-built path in a spec need not
+   * carry it, and `simPath` always produces it.
+   */
+  line?: Uint32Array;
 }
 
 export interface SimFrame {
@@ -184,6 +190,12 @@ export interface SimLoadOpts {
 
 export interface SimSession {
   load(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult;
+  /**
+   * Build the playback anchor chain now (#224), off the scrub path. Called by the worker once
+   * the client has the load result, so the first real seek does not pay for it. No-op on a
+   * path-only or empty session.
+   */
+  warmup(): void;
   /** `null` when `gen` is older than one already seen, or when nothing is loaded. */
   frameAt(k: number, gen: number): SimFrame | null;
   stateAt(step: number): MachineState | null;
@@ -320,6 +332,11 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     }
   };
 
+  const warmup = (): void => {
+    const l = live;
+    if (l && l.kind === 'swept') l.playback.warmup();
+  };
+
   const frameAt = (k: number, gen: number): SimFrame | null => {
     if (gen < latestGen) return null;
     latestGen = gen;
@@ -382,6 +399,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       step: new Uint32Array(0),
       kind: new Uint8Array(0),
       t: new Float32Array(0),
+      line: new Uint32Array(0),
     });
     const l = live;
     if (!l || l.timeline.events.length === 0) return empty();
@@ -390,6 +408,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const step: number[] = [];
     const kind: number[] = [];
     const t: number[] = [];
+    const line: number[] = [];
     let cum = 0;
     let s = l.timeline.stateAt(-1); // the state before step 0
     for (let i = 0; i < events.length; i++) {
@@ -412,15 +431,17 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       step.push(i);
       t.push(cum);
       kind.push(ev.mode === 'rapid' ? 0 : s.spindle === 'off' ? 2 : 1);
+      line.push(ev.line);
     }
     return {
       xyz: Float32Array.from(xyz),
       step: Uint32Array.from(step),
       kind: Uint8Array.from(kind),
       t: Float32Array.from(t),
+      line: Uint32Array.from(line),
     };
   };
 
-  return { load, frameAt, stateAt, toolPath, simPath, dispose, get loaded() { return live !== null; } };
+  return { load, warmup, frameAt, stateAt, toolPath, simPath, dispose, get loaded() { return live !== null; } };
 }
 

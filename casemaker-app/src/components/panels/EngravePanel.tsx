@@ -6,8 +6,25 @@ import { TOOL_LIBRARY, Z1 } from '@/engine/cnc';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { feedsFor, type CutParams } from '@/engine/cnc/feeds';
+import {
+  defaultSacrificialSide,
+  defaultSacrificialUnder,
+  hasSacrificial,
+  noneSacrificial,
+  presetJawStrips,
+  presetPartOnBoard,
+} from '@/engine/cnc/sacrificial';
 import { EngraveLabelRow } from './EngraveLabelRow';
-import type { EngraveJob, StockMaterial, ViseParams } from '@/types/engraveJob';
+import { EngraveShapeRow } from './EngraveShapeRow';
+import type {
+  EngraveJob,
+  EngraveShape,
+  Sacrificial,
+  SacrificialSide,
+  SacrificialUnder,
+  StockMaterial,
+  ViseParams,
+} from '@/types/engraveJob';
 
 /**
  * The Engrave panel (#205): stock, labels, tool, vise, cutting parameters, findings, generate.
@@ -36,6 +53,24 @@ const TAG: CSSProperties = {
   fontWeight: 400,
 };
 const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a' };
+
+/** The kinds the panel can add with its "Add" control (#214): a label plus the four shapes. */
+const ADD_KINDS: readonly { value: EngraveShape['kind'] | 'label'; label: string }[] = [
+  { value: 'label', label: 'Label' },
+  { value: 'rect', label: 'Rectangle' },
+  { value: 'circle', label: 'Circle' },
+  { value: 'slot', label: 'Slot' },
+  { value: 'polygon', label: 'Polygon' },
+];
+
+const ATTACH_METHODS: readonly { value: SacrificialUnder['attach']; label: string }[] = [
+  { value: 'tape', label: 'tape' },
+  { value: 'glue', label: 'glue' },
+  { value: 'screws', label: 'screws' },
+  { value: 'loose', label: 'loose (a warning)' },
+];
+
+const STRIP_SIDES: readonly (keyof Sacrificial['sides'])[] = ['left', 'right', 'front', 'back'];
 
 const MATERIALS: readonly { value: StockMaterial; label: string }[] = [
   { value: 'softwood', label: 'softwood' },
@@ -66,6 +101,18 @@ function viseBadge(v: ViseParams): string {
   return 'measured · this setup';
 }
 
+/**
+ * Where the sacrificial numbers came from (#213, the same provenance rule as the vise). There
+ * is no `measuredAt` on `Sacrificial` — the type carries only `source` — so the badge names the
+ * source without a date.
+ */
+function sacrificialBadge(s: Sacrificial): string {
+  if (!hasSacrificial(s)) return 'none';
+  if (s.source === 'default') return 'default · unmeasured';
+  if (s.source === 'saved') return 'saved';
+  return 'measured · this setup';
+}
+
 const OVERRIDE_FIELDS: readonly { key: keyof Omit<CutParams, 'air'>; label: string; unit: string }[] = [
   { key: 'rpm', label: 'spindle', unit: 'rpm' },
   { key: 'feed', label: 'feed', unit: 'mm/min' },
@@ -80,8 +127,12 @@ export function EngravePanel(): JSX.Element {
   const addLabel = useEngraveJobStore((s) => s.addLabel);
   const updateLabel = useEngraveJobStore((s) => s.updateLabel);
   const removeLabel = useEngraveJobStore((s) => s.removeLabel);
+  const addShape = useEngraveJobStore((s) => s.addShape);
+  const updateShape = useEngraveJobStore((s) => s.updateShape);
+  const removeShape = useEngraveJobStore((s) => s.removeShape);
   const setTool = useEngraveJobStore((s) => s.setTool);
   const setVise = useEngraveJobStore((s) => s.setVise);
+  const setSacrificial = useEngraveJobStore((s) => s.setSacrificial);
   const setCutOverride = useEngraveJobStore((s) => s.setCutOverride);
 
   const preview = useEngravePreviewStore((s) => s.preview);
@@ -121,8 +172,51 @@ export function EngravePanel(): JSX.Element {
     useSettingsStore.getState().setVise(useEngraveJobStore.getState().job.workholding.vise);
   }
 
-  const stockNum = (key: 'length' | 'width' | 'thickness', label: string, title: string): JSX.Element => (
-    <label style={FIELD_LABEL}>
+  // ---- sacrificial material (#213) ---------------------------------------------------------
+
+  const sac = job.sacrificial;
+  const under = sac.under;
+
+  /** Apply a whole sacrificial model. An edit is the user asserting a setup: it is `'saved'`,
+   *  never a shipped `'default'` (decision 28) — a preset already carries `'saved'`. */
+  function applySacrificial(next: Sacrificial): void {
+    setSacrificial(next.source === 'default' && hasSacrificial(next) ? { ...next, source: 'saved' } : next);
+  }
+
+  function setUnder(under: SacrificialUnder | null): void {
+    applySacrificial({ ...sac, under });
+  }
+
+  function patchUnder(patch: Partial<SacrificialUnder>): void {
+    if (sac.under) applySacrificial({ ...sac, under: { ...sac.under, ...patch } });
+  }
+
+  function setSide(pos: keyof Sacrificial['sides'], strip: SacrificialSide | null): void {
+    applySacrificial({ ...sac, sides: { ...sac.sides, [pos]: strip } });
+  }
+
+  function patchSide(pos: keyof Sacrificial['sides'], patch: Partial<SacrificialSide>): void {
+    const strip = sac.sides[pos];
+    if (strip) setSide(pos, { ...strip, ...patch });
+  }
+
+  function saveAsMySacrificial(): void {
+    const stamped: Sacrificial = sac.source === 'default' ? { ...sac, source: 'saved' } : sac;
+    setSacrificial(stamped);
+    useSettingsStore.getState().setSacrificial(stamped);
+  }
+
+  // ---- item naming (labels and shapes are one list downstream, #214) ------------------------
+
+  /** A short name for an item id, for the recommendation's "worst item" line. */
+  function itemDisplay(id: string): string {
+    const item = [...job.labels, ...job.shapes].find((it) => it.id === id);
+    if (!item) return id;
+    if ('kind' in item) return item.name ?? item.kind;
+    return item.text;
+  }
+
+  const stockNum = (key: 'length' | 'width' | 'thickness', label: string, title: string): JSX.Element => (    <label style={FIELD_LABEL}>
       <span>{label}</span>
       <input
         type="number"
@@ -196,6 +290,33 @@ export function EngravePanel(): JSX.Element {
     </label>
   );
 
+  /** A sacrificial number field (#213): the same shape as the stock and vise inputs. */
+  const sacNum = (
+    testid: string,
+    label: string,
+    value: number,
+    title: string,
+    onCommit: (v: number) => void,
+  ): JSX.Element => (
+    <label key={testid} style={FIELD_LABEL}>
+      <span>{label}</span>
+      <input
+        type="number"
+        min={0}
+        step="any"
+        value={value}
+        data-testid={testid}
+        aria-label={`Sacrificial ${label}`}
+        title={title}
+        style={FIELD}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (Number.isFinite(v)) onCommit(v);
+        }}
+      />
+    </label>
+  );
+
   return (
     <div className="panel-stack" data-testid="engrave-panel">
       {/* 1 — stock */}
@@ -224,9 +345,12 @@ export function EngravePanel(): JSX.Element {
       </div>
       <p style={MUTED}>X runs between the vise jaws. The fixed jaw is on the left.</p>
 
-      {/* 2 — labels */}
+      {/* 2 — items: labels and shape pockets, one list (#214) */}
       <h3 style={SUBHEAD}>
-        Labels <span style={{ ...TAG, marginLeft: 4 }}>{job.labels.length}</span>
+        Items{' '}
+        <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-item-count">
+          {job.labels.length + job.shapes.length}
+        </span>
       </h3>
       {job.labels.map((label, i) => (
         <EngraveLabelRow
@@ -240,9 +364,38 @@ export function EngravePanel(): JSX.Element {
           onRemove={() => removeLabel(label.id)}
         />
       ))}
-      <button type="button" data-testid="engrave-add-label" onClick={() => addLabel()}>
-        + Add label
-      </button>
+      {job.shapes.map((shape, i) => (
+        <EngraveShapeRow
+          key={shape.id}
+          shape={shape}
+          index={i}
+          maxDepth={maxDepth}
+          findings={findingsFor(shape.id)}
+          onChange={(patch) => updateShape(shape.id, patch)}
+          onRemove={() => removeShape(shape.id)}
+        />
+      ))}
+      {/* The one "Add" control (#214 work item 5): a menu with the five kinds. The label entry
+          keeps the historic `engrave-add-label` test id (#205) as its own menu item, so the
+          pre-#214 label flow is still one click. */}
+      <details data-testid="engrave-add-menu" style={{ marginTop: 4 }}>
+        <summary style={{ cursor: 'pointer', fontSize: 12, color: '#c8d3de' }} data-testid="engrave-add-summary">
+          + Add…
+        </summary>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+          {ADD_KINDS.map((k) => (
+            <button
+              key={k.value}
+              type="button"
+              data-testid={`engrave-add-${k.value}`}
+              title={k.value === 'label' ? 'Add a text label.' : `Add a ${k.label.toLowerCase()} pocket.`}
+              onClick={() => (k.value === 'label' ? addLabel() : addShape(k.value as EngraveShape['kind']))}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+      </details>
       <p style={MUTED}>Depth keeps the {job.minFloor} mm minimum floor — at most {maxDepth} mm on this stock.</p>
 
       {/* 3 — tool */}
@@ -303,13 +456,12 @@ export function EngravePanel(): JSX.Element {
             </summary>
             <div style={{ marginTop: 4 }}>
               {rec.candidates.map((c) => {
-                const worst = c.worst ? job.labels.find((l) => l.id === c.worst!.labelId) : undefined;
                 const detail = c.excluded
                   ? c.excluded === 'not-flat'
                     ? 'not a flat end mill'
                     : 'no cutting parameters for this material'
                   : c.worst
-                    ? `worst label "${worst?.text ?? c.worst.labelId}" · ${Math.round(c.worst.ratio * 100)} % kept`
+                    ? `worst item "${itemDisplay(c.worst.labelId)}" · ${Math.round(c.worst.ratio * 100)} % kept`
                     : 'not measured';
                 return (
                   <div
@@ -328,7 +480,7 @@ export function EngravePanel(): JSX.Element {
       )}
       {!rec && previewStatus === 'loading' && (
         <p style={MUTED} data-testid="engrave-recommendation-pending">
-          Measuring which cutter keeps every label intact…
+          Measuring which cutter keeps every item intact…
         </p>
       )}
 
@@ -356,7 +508,129 @@ export function EngravePanel(): JSX.Element {
         </button>
       </div>
 
-      {/* 5 — cutting parameters */}
+      {/* 5 — sacrificial material (#213): a board under the part and/or strips beside it. */}
+      <h3 style={SUBHEAD}>
+        Sacrificial material{' '}
+        <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-sac-badge">
+          {sacrificialBadge(sac)}
+        </span>
+      </h3>
+      <p style={MUTED}>
+        Extra material the cutter may run onto, never onto air. The origin and Z0 stay on the
+        part’s top face, so a board under it cannot change a cut depth.
+      </p>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          data-testid="engrave-sac-preset-board"
+          title="A 12 mm board under the part, 10 mm proud all round, taped down."
+          onClick={() => applySacrificial(presetPartOnBoard())}
+        >
+          Part on a larger board
+        </button>
+        <button
+          type="button"
+          data-testid="engrave-sac-preset-strips"
+          title="6 mm strips between the jaws, left and right, flush with the part."
+          onClick={() => applySacrificial(presetJawStrips())}
+        >
+          Strips between the jaws
+        </button>
+      </div>
+
+      <label style={{ ...FIELD_LABEL, marginTop: 6 }}>
+        <input
+          type="checkbox"
+          checked={under !== null}
+          data-testid="engrave-sac-under"
+          aria-label="Board under the part"
+          title="A board the part sits on; the cutter may run into it."
+          onChange={(e) => setUnder(e.target.checked ? defaultSacrificialUnder() : null)}
+        />
+        <span>Board under the part</span>
+      </label>
+      {under && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          {sacNum('engrave-sac-under-thickness', 'thickness', under.thickness, 'Board thickness, mm. A breakthrough may not exceed this less 1 mm.', (v) => patchUnder({ thickness: v }))}
+          {sacNum('engrave-sac-under-overhang-left', 'overhang left', under.overhang.left, 'How far the board extends past the part on the fixed-jaw side, mm. 0 = flush.', (v) => patchUnder({ overhang: { ...under.overhang, left: v } }))}
+          {sacNum('engrave-sac-under-overhang-right', 'overhang right', under.overhang.right, 'How far the board extends past the part on the moving-jaw side, mm.', (v) => patchUnder({ overhang: { ...under.overhang, right: v } }))}
+          {sacNum('engrave-sac-under-overhang-front', 'overhang front', under.overhang.front, 'How far the board extends past the part toward the operator, mm.', (v) => patchUnder({ overhang: { ...under.overhang, front: v } }))}
+          {sacNum('engrave-sac-under-overhang-back', 'overhang back', under.overhang.back, 'How far the board extends past the part away from the operator, mm.', (v) => patchUnder({ overhang: { ...under.overhang, back: v } }))}
+          <label style={FIELD_LABEL}>
+            <span>attach</span>
+            <select
+              value={under.attach}
+              data-testid="engrave-sac-under-attach"
+              aria-label="How the part is fixed to the board"
+              title="Recorded for the run sheet; “loose” is a warning."
+              style={FIELD}
+              onChange={(e) => patchUnder({ attach: e.target.value as SacrificialUnder['attach'] })}
+            >
+              {ATTACH_METHODS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      <div style={{ marginTop: 6 }}>
+        {STRIP_SIDES.map((pos) => {
+          const strip = sac.sides[pos];
+          return (
+            <div key={pos} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+              <label style={FIELD_LABEL}>
+                <input
+                  type="checkbox"
+                  checked={strip !== null}
+                  data-testid={`engrave-sac-side-${pos}`}
+                  aria-label={`${pos} strip`}
+                  title={
+                    pos === 'left' || pos === 'right'
+                      ? 'A strip between the jaw and the part, clamped with it.'
+                      : 'A strip resting on the board at the front/back; needs the board.'
+                  }
+                  onChange={(e) => setSide(pos, e.target.checked ? defaultSacrificialSide() : null)}
+                />
+                <span>{pos} strip</span>
+              </label>
+              {strip && (
+                <>
+                  {sacNum(`engrave-sac-side-${pos}-thickness`, 'thickness', strip.thickness, 'Strip thickness away from the part, mm.', (v) => patchSide(pos, { thickness: v }))}
+                  <label style={FIELD_LABEL}>
+                    <input
+                      type="checkbox"
+                      checked={strip.height === 'flush'}
+                      data-testid={`engrave-sac-side-${pos}-flush`}
+                      aria-label={`${pos} strip flush with the part`}
+                      title="Same height as the part, or a height you set."
+                      onChange={(e) => patchSide(pos, { height: e.target.checked ? 'flush' : 6 })}
+                    />
+                    <span>flush</span>
+                  </label>
+                  {strip.height !== 'flush' &&
+                    sacNum(`engrave-sac-side-${pos}-height`, 'height', strip.height, 'Strip height from the part’s bottom, mm.', (v) => patchSide(pos, { height: v }))}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+        <button type="button" data-testid="engrave-sac-save" onClick={saveAsMySacrificial}>
+          Save as my setup
+        </button>
+        {hasSacrificial(sac) && (
+          <button type="button" data-testid="engrave-sac-clear" onClick={() => setSacrificial(noneSacrificial())}>
+            Remove all
+          </button>
+        )}
+      </div>
+
+      {/* 6 — cutting parameters */}
       <h3 style={SUBHEAD}>
         Cutting
         {feeds?.ok && (
@@ -402,7 +676,7 @@ export function EngravePanel(): JSX.Element {
         </details>
       )}
 
-      {/* 6 — findings on the job as a whole (a label's own findings sit under its row) */}
+      {/* 7 — findings on the job as a whole (a label's own findings sit under its row) */}
       {jobFindings.length > 0 && (
         <>
           <h3 style={SUBHEAD}>Findings</h3>
@@ -427,7 +701,7 @@ export function EngravePanel(): JSX.Element {
         </p>
       )}
 
-      {/* 7 — generate (the action itself is #206) */}
+      {/* 8 — generate (the action itself is #206) */}
       <h3 style={SUBHEAD}>Generate</h3>
       <div data-testid="engrave-generate-slot">
         <button

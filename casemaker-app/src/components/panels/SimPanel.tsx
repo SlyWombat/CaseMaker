@@ -107,6 +107,7 @@ export function SimPanel() {
   const diagnostics = useSimStore((s) => s.diagnostics);
   const info = useSimStore((s) => s.info);
   const progress = useSimStore((s) => s.progress);
+  const phase = useSimStore((s) => s.phase);
   const pathOnly = useSimStore((s) => s.pathOnly);
 
   const [startingTool, setStartingTool] = useState<StartingTool>('unknown');
@@ -329,17 +330,22 @@ export function SimPanel() {
             <div
               style={{
                 height: '100%',
-                width: progress && progress.total > 0 ? `${Math.round((progress.done / progress.total) * 100)}%` : '40%',
+                width: phase === 'playback' ? '100%' : progress && progress.total > 0 ? `${Math.round((progress.done / progress.total) * 100)}%` : '40%',
                 background: 'linear-gradient(90deg,#4d8eff,#8fb4ff)',
               }}
             />
           </div>
           <p style={{ ...MUTED, color: '#c8d3de' }}>
-            {progress && progress.total > 0 ? `sweeping ${progress.done} / ${progress.total} checkpoints` : 'sweeping…'}
+            {phase === 'playback'
+              ? 'preparing playback…'
+              : progress && progress.total > 0
+                ? `sweeping ${progress.done} / ${progress.total} checkpoints`
+                : 'sweeping…'}
           </p>
           <p style={MUTED}>
-            Parsing and running are done; the sweep unions the cuts at each checkpoint. This is the
-            slow part — a few seconds on a dense job.
+            {phase === 'playback'
+              ? 'The sweep is done; the playback anchors are being built so scrubbing is instant afterwards. A few seconds on a dense job.'
+              : 'Parsing and running are done; the sweep unions the cuts at each checkpoint. This is the slow part — a few seconds on a dense job.'}
           </p>
           <button type="button" data-testid="sim-cancel" onClick={() => void cancel()} style={{ width: '100%', padding: 8 }}>
             Cancel

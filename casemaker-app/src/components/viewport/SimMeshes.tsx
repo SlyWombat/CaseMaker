@@ -4,13 +4,27 @@
  * WORK frame — origin at the stock's top-front-left corner, +X right, +Y away from the operator,
  * Z = 0 at the stock's top face, material at negative Z — and the scene is Z-up, so they are
  * drawn as-is with NO transform (issue: "do not transform the meshes into machine coordinates").
+ *
+ * The sacrificial material (#213 §4) is the second body: the board/strips as cut so far, in a pale
+ * grey (#9ca3af, shared with the engrave preview). It is its OWN layer (`layers.sacrificial`,
+ * independent of the workholding "fixture" layer) with a matching toolbar toggle and a legend entry.
  */
 
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
+import { Html } from '@react-three/drei';
 import { useSimStore } from '@/store/simStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
-import { geometryFromMesh, segmentGeometry, splitPath, toolPositionAt, vertexIndexAtStep } from './simGeometry';
+import {
+  drawsSacrificial,
+  geometryFromMesh,
+  SACRIFICIAL_COLOR,
+  sacrificialMesh,
+  segmentGeometry,
+  splitPath,
+  toolPositionAt,
+  vertexIndexAtStep,
+} from './simGeometry';
 
 const STOCK_COLOR = '#c9a26b'; // a neutral wood tone
 const REMOVED_COLOR = '#ff5a36';
@@ -112,6 +126,12 @@ export function SimMeshes() {
 
   const stockGeom = useMeshGeometry(stockMesh);
   const removalGeom = useMeshGeometry(removalMesh);
+  // #213 §4 — the sacrificial material as cut so far, on its OWN layer (`layers.sacrificial`).
+  // Null when the job has none, so nothing is drawn; before the first frame lands the load's uncut
+  // body stands in, the same warm-up fallback the stock uses above. Independent of the workholding
+  // ("fixture") layer, so hiding the jaws never hides the material, and vice versa.
+  const sacrificialGeom = useMeshGeometry(sacrificialMesh(frame, meshes));
+  const showSacrificial = drawsSacrificial(layers, sacrificialGeom !== null);
 
   const split = useMemo(() => (path ? splitPath(path) : null), [path]);
   const cutSegments = split ? vertexIndexAtStep(split.cutStep, step) : 0;
@@ -134,6 +154,14 @@ export function SimMeshes() {
       {stockGeom && (
         <mesh geometry={stockGeom} name="sim-stock">
           <meshStandardMaterial color={STOCK_COLOR} flatShading metalness={0.05} roughness={0.75} />
+        </mesh>
+      )}
+
+      {showSacrificial && sacrificialGeom && (
+        // #213 §4 — the sacrificial material as cut. OPAQUE: it is stock the cutter is meant to
+        // reach, not a ghost.
+        <mesh geometry={sacrificialGeom} name="sim-sacrificial">
+          <meshStandardMaterial color={SACRIFICIAL_COLOR} flatShading metalness={0.05} roughness={0.8} />
         </mesh>
       )}
 
@@ -172,6 +200,42 @@ export function SimMeshes() {
 
       {layers.fixture &&
         meshes?.fixture.map((f) => <FixtureBox key={f.id} mesh={f.mesh} label={f.label} />)}
+
+      {showSacrificial && (
+        // #213 §4 — the legend entry for the pale grey, shown only while the material is drawn.
+        <Html fullscreen zIndexRange={[8, 0]}>
+          <div
+            data-testid="sim-legend-sacrificial"
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              background: 'rgba(20,25,30,0.82)',
+              border: '1px solid #2a2f36',
+              borderRadius: 4,
+              padding: '3px 6px',
+              color: '#d1d5db',
+              fontSize: 11,
+              lineHeight: 1.6,
+              pointerEvents: 'none',
+            }}
+          >
+            <span
+              style={{
+                width: 10,
+                height: 10,
+                background: SACRIFICIAL_COLOR,
+                border: '1px solid #00000055',
+                display: 'inline-block',
+              }}
+            />
+            sacrificial
+          </div>
+        </Html>
+      )}
     </group>
   );
 }

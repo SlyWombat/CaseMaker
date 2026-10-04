@@ -11,7 +11,7 @@ import { DEFAULT_SIM_LAYERS, useSimStore } from '@/store/simStore';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const LAYER_KEYS = ['removed', 'path', 'rapids', 'tool', 'fixture'] as const;
+const LAYER_KEYS = ['removed', 'path', 'rapids', 'tool', 'fixture', 'sacrificial'] as const;
 
 beforeEach(() => {
   cleanup();

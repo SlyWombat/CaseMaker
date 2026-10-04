@@ -24,6 +24,8 @@ const LAYERS: { key: keyof SimLayers; label: string }[] = [
   { key: 'rapids', label: 'Rapids' },
   { key: 'tool', label: 'Tool' },
   { key: 'fixture', label: 'Fixture' },
+  // #213 §4 — the sacrificial material, its own layer (independent of the workholding one).
+  { key: 'sacrificial', label: 'Sacrificial' },
 ];
 
 /**

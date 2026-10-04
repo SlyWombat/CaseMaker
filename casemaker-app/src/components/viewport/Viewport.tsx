@@ -4,6 +4,7 @@ import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 import { GridFloor } from './GridFloor';
 import { SceneMeshes } from './SceneMeshes';
+import { SimTransport } from './SimTransport';
 import { ViewportToolbar } from './ViewportToolbar';
 import {
   activeSceneBounds,
@@ -309,6 +310,9 @@ export function Viewport() {
         {!simActive && !engraveActive && <GridFloor />}
         <SceneMeshes />
       </Canvas>
+      {/* #198 — the transport rides over the bottom of the canvas while a simulation owns the
+          scene. It renders itself null otherwise, so no guard is needed here. */}
+      <SimTransport />
     </div>
   );
 }

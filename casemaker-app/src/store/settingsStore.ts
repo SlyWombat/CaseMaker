@@ -1,17 +1,19 @@
 import { create } from 'zustand';
 import { todayISODate } from '@/engine/cnc/fixture';
-import type { ViseParams } from '@/types/engraveJob';
+import type { Sacrificial, SacrificialSide, SacrificialUnder, ViseParams } from '@/types/engraveJob';
 
 export type ExportLayoutMode = 'print-ready' | 'assembled';
 export type ExportFormat = 'stl-binary' | 'stl-ascii' | '3mf';
 
 /**
- * Saved fixture measurements (#203, decision 28). A saved envelope is used until the setup
- * changes; `source` and `uncertainty` travel with it so a default is never mistaken for a
- * measurement. An absent `vise` means "use the shipped default".
+ * Saved fixture measurements (#203, #213, decision 28). A saved envelope is used until the
+ * setup changes; `source` and `uncertainty` travel with it so a default is never mistaken for
+ * a measurement. An absent `vise` means "use the shipped default"; an absent `sacrificial`
+ * means "no sacrificial material".
  */
 export interface FixturesSettings {
   vise?: ViseParams;
+  sacrificial?: Sacrificial;
 }
 
 export interface AppSettings {
@@ -40,15 +42,22 @@ const DEFAULTS: AppSettings = {
 
 const VALID_FORMATS: ReadonlySet<ExportFormat> = new Set(['stl-binary', 'stl-ascii', '3mf']);
 const VALID_VISE_SOURCES: ReadonlySet<ViseParams['source']> = new Set(['default', 'saved', 'measured']);
+const VALID_SAC_SOURCES: ReadonlySet<Sacrificial['source']> = new Set(['default', 'saved', 'measured']);
 
 /**
- * The saved fixture slice, validated on load. A payload that does not describe a whole vise is
- * dropped rather than half-honoured: a partial obstacle envelope is more dangerous than none.
+ * The saved fixture slice, validated on load. A payload that does not describe a whole vise —
+ * or a whole sacrificial setup — is dropped rather than half-honoured: a partial obstacle
+ * envelope is more dangerous than none.
  */
 function parseFixtures(raw: unknown): FixturesSettings {
   if (typeof raw !== 'object' || raw === null) return {};
-  const vise = parseVise((raw as Record<string, unknown>).vise);
-  return vise ? { vise } : {};
+  const r = raw as Record<string, unknown>;
+  const out: FixturesSettings = {};
+  const vise = parseVise(r.vise);
+  if (vise) out.vise = vise;
+  const sacrificial = parseSacrificial(r.sacrificial);
+  if (sacrificial) out.sacrificial = sacrificial;
+  return out;
 }
 
 function parseVise(raw: unknown): ViseParams | undefined {
@@ -74,6 +83,78 @@ function parseVise(raw: unknown): ViseParams | undefined {
     uncertainty: o.uncertainty as number,
     ...(measuredAt !== undefined ? { measuredAt } : {}),
   };
+}
+
+/** A finite number meeting the positivity rule, or undefined. */
+function numOr(v: unknown, positive: boolean): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) && (positive ? v > 0 : v >= 0) ? v : undefined;
+}
+
+/**
+ * Validate one side strip (#213). `undefined` = the payload is not a strip (drop the whole
+ * setup); `null` = a legal "no strip here".
+ */
+function parseSide(raw: unknown): SacrificialSide | null | undefined {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'object') return undefined;
+  const o = raw as Record<string, unknown>;
+  const thickness = numOr(o.thickness, true);
+  if (thickness === undefined) return undefined;
+  const height = o.height;
+  if (height === 'flush') return { thickness, height };
+  const h = numOr(height, true);
+  return h === undefined ? undefined : { thickness, height: h };
+}
+
+/**
+ * Validate a saved sacrificial setup (#213). Dropped whole when anything is off, matching the
+ * vise rule: a partial obstacle model is more dangerous than none. An absent payload (the
+ * common case) is "no sacrificial material", not an error.
+ */
+function parseSacrificial(raw: unknown): Sacrificial | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'object') return undefined;
+  const o = raw as Record<string, unknown>;
+  const source = o.source;
+  if (typeof source !== 'string' || !VALID_SAC_SOURCES.has(source as Sacrificial['source'])) {
+    return undefined;
+  }
+
+  let under: SacrificialUnder | null = null;
+  if (o.under !== null && o.under !== undefined) {
+    if (typeof o.under !== 'object') return undefined;
+    const u = o.under as Record<string, unknown>;
+    if (typeof u.overhang !== 'object' || u.overhang === null) return undefined;
+    const ov = u.overhang as Record<string, unknown>;
+    const thickness = numOr(u.thickness, true);
+    const left = numOr(ov.left, false);
+    const right = numOr(ov.right, false);
+    const front = numOr(ov.front, false);
+    const back = numOr(ov.back, false);
+    const attach = u.attach;
+    if (
+      thickness === undefined ||
+      left === undefined ||
+      right === undefined ||
+      front === undefined ||
+      back === undefined ||
+      (attach !== 'tape' && attach !== 'glue' && attach !== 'screws' && attach !== 'loose')
+    ) {
+      return undefined;
+    }
+    under = { thickness, overhang: { left, right, front, back }, attach };
+  }
+
+  if (typeof o.sides !== 'object' || o.sides === null) return undefined;
+  const sr = o.sides as Record<string, unknown>;
+  const sides: Sacrificial['sides'] = { left: null, right: null, front: null, back: null };
+  for (const pos of ['left', 'right', 'front', 'back'] as const) {
+    const side = parseSide(sr[pos]);
+    if (side === undefined) return undefined;
+    sides[pos] = side;
+  }
+
+  return { under, sides, source: source as Sacrificial['source'] };
 }
 
 function loadSettings(): AppSettings {
@@ -127,6 +208,10 @@ export interface SettingsState extends AppSettings {
   setVise: (vise: ViseParams) => void;
   /** Forget the saved vise and fall back to the shipped default. */
   clearVise: () => void;
+  /** Save a sacrificial setup ("Save as my setup", #213), persisted with the rest of settings. */
+  setSacrificial: (sacrificial: Sacrificial) => void;
+  /** Forget the saved sacrificial setup; a new job then starts with none. */
+  clearSacrificial: () => void;
   resetSettings: () => void;
 }
 
@@ -165,6 +250,19 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     clearVise: () => {
       const fixtures = { ...get().fixtures };
       delete fixtures.vise;
+      set({ fixtures });
+      persist({ ...get(), fixtures });
+    },
+    // "Save as my setup" (#213): remembered verbatim, provenance and all, so a saved setup
+    // still says whether it was measured or only asserted.
+    setSacrificial: (sacrificial) => {
+      const fixtures = { ...get().fixtures, sacrificial };
+      set({ fixtures });
+      persist({ ...get(), fixtures });
+    },
+    clearSacrificial: () => {
+      const fixtures = { ...get().fixtures };
+      delete fixtures.sacrificial;
       set({ fixtures });
       persist({ ...get(), fixtures });
     },

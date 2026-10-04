@@ -15,6 +15,7 @@ import * as Comlink from 'comlink';
 import type { Setup } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveJob } from '@/types/engraveJob';
+import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { getToplevel } from './geometry/ManifoldRuntime';
 import type { NodeMeshOutput } from './geometry/meshOutput';
 import { createSimSession, type SimFrame, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
@@ -61,6 +62,13 @@ const api = {
     const f = (await getSession()).frameAt(k, gen);
     return f ? Comlink.transfer(f, buffersOf([f.stock, f.removalSoFar])) : null;
   },
+  /**
+   * Build the playback anchor chain now (#224). Awaiting this is the "preparing playback…" part
+   * of a load: it may take seconds on a large program, and afterwards the first scrub is cheap.
+   */
+  async simWarmup(): Promise<void> {
+    (await getSession()).warmup();
+  },
   async simStateAt(step: number) {
     return (await getSession()).stateAt(step);
   },
@@ -68,22 +76,27 @@ const api = {
     const p = (await getSession()).toolPath(fromStep, toStep);
     return Comlink.transfer(p, [p.buffer]);
   },
-  /** The whole path with kinds and times; every buffer is transferred (#197). */
+  /** The whole path with kinds and times; every buffer is transferred (#197, #198). */
   async simPath(): Promise<SimPath> {
     const p = (await getSession()).simPath();
-    return Comlink.transfer(p, [p.xyz.buffer, p.step.buffer, p.kind.buffer, p.t.buffer]);
+    return Comlink.transfer(p, [p.xyz.buffer, p.step.buffer, p.kind.buffer, p.t.buffer, ...(p.line ? [p.line.buffer] : [])]);
   },
   async simDispose(): Promise<void> {
     session?.dispose();
   },
   /**
-   * The engrave preview (#205): the stock cut to each label's depth, the pocket floors and the
-   * vise jaws. `null` when `gen` is stale. Every mesh buffer is transferred.
+   * The engrave preview (#205): the stock cut to each label's depth, the pocket floors, the
+   * vise jaws and the sacrificial material (#213). `null` when `gen` is stale. Every mesh
+   * buffer is transferred.
    */
   async engravePreview(job: EngraveJob, gen: number): Promise<EngravePreview | null> {
+    // Issue #180 — the preview typesets labels through the synchronous `resolveFont`, and the
+    // bundled faces are static assets now, so load the keys this job's enabled labels need
+    // first. A shapes-only job (or one with every label disabled/empty) passes `[]`.
+    await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
     const p = (await getPreviewer()).engravePreview(job, gen);
     if (!p) return null;
-    return Comlink.transfer(p, buffersOf([p.stock, ...p.floors.map((f) => f.mesh), ...p.fixture.map((f) => f.mesh)]));
+    return Comlink.transfer(p, buffersOf([p.stock, ...p.floors.map((f) => f.mesh), ...p.fixture.map((f) => f.mesh), ...p.sacrificial.map((s) => s.mesh)]));
   },
 };
 

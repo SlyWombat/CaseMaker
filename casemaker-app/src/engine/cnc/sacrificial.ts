@@ -1,6 +1,6 @@
 import { pTranslate, pUnion, rectProfile, type Profile } from '@/engine/compiler/profile';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import type { EngraveJob, Sacrificial, SacrificialSide } from '@/types/engraveJob';
+import type { EngraveJob, Sacrificial, SacrificialSide, SacrificialUnder } from '@/types/engraveJob';
 import type { Mm, Vec3 } from '@/types/units';
 
 /**
@@ -57,6 +57,47 @@ export function noneSacrificial(): Sacrificial {
     under: null,
     sides: { left: null, right: null, front: null, back: null },
     source: 'default',
+  };
+}
+
+/**
+ * The under-board the panel's "Board under the part" toggle creates (#213 §5). A neutral
+ * starting point for a user who then types their own numbers: a 12 mm board flush with the
+ * part (overhang 0), taped down. PROVISIONAL: 12 mm is common hobby board stock, and the
+ * toggle's numbers are the user's assertion (`source` becomes `'saved'` in the panel).
+ */
+export function defaultSacrificialUnder(): SacrificialUnder {
+  return {
+    thickness: 12,
+    overhang: { left: 0, right: 0, front: 0, back: 0 },
+    attach: 'tape',
+  };
+}
+
+/** The strip the panel's per-side toggle creates (#213 §5): 6 mm, flush — the preset's strip. */
+export function defaultSacrificialSide(): SacrificialSide {
+  return { thickness: 6, height: 'flush' };
+}
+
+/**
+ * The sacrificial model a NEW job starts from: the saved setup from settings when one exists,
+ * otherwise none (#213 §5). The same seam as `viseForNewJob` (#203) — the store resolves it, so
+ * `defaultEngraveJob` stays a pure function of its arguments. A deep copy is returned so
+ * patching the job cannot mutate the settings object.
+ */
+export function sacrificialForNewJob(saved?: Sacrificial): Sacrificial {
+  if (!saved) return noneSacrificial();
+  return {
+    under: saved.under
+      ? { thickness: saved.under.thickness, overhang: { ...saved.under.overhang }, attach: saved.under.attach }
+      : null,
+    sides: {
+      left: saved.sides.left ? { ...saved.sides.left } : null,
+      right: saved.sides.right ? { ...saved.sides.right } : null,
+      front: saved.sides.front ? { ...saved.sides.front } : null,
+      back: saved.sides.back ? { ...saved.sides.back } : null,
+    },
+    source: saved.source,
   };
 }
 

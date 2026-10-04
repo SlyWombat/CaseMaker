@@ -150,6 +150,31 @@ describe('checkpointAtStep: the picture at a program step is "everything cut so 
   });
 });
 
+describe('#224: warm-up builds the anchor chain off the scrub path', () => {
+  it('warmup() is idempotent, and a seek after it is still correct', () => {
+    // 20 checkpoints — more than one ANCHOR_EVERY span, so warmup has an anchor to build.
+    const lines = ['S1000 M3'];
+    for (let i = 0; i < 20; i++) lines.push(`G0 X${5 + i * 4} Y10 Z1`, `G1 Z${(-0.1 * (i + 1)).toFixed(1)} F100`, `G1 X${5 + i * 4 + 3}`, 'G0 Z1');
+    const { playback, sweep } = run(lines.join('\n'));
+    expect(playback.count).toBe(20);
+    playback.warmup();
+    playback.warmup(); // idempotent: the chain is already built
+    let expected = 0;
+    for (let i = 0; i <= 19; i++) expected += capsuleArea(3, R, N) * 0.1 * (i + 1);
+    expect(playback.removedVolumeAt(19)).toBeCloseTo(expected, 0);
+    expect(playback.removedVolumeAt(19)).toBeCloseTo(sweep.stats.removedVolume, 3);
+    expect(() => playback.dispose()).not.toThrow();
+    expect(sweep.result.volume()).toBeGreaterThan(0); // the sweep's handle was not the playback's to delete
+  });
+
+  it("a seek to the last checkpoint returns the sweep's own result and removal, not a recomputation", () => {
+    const { playback, sweep } = run(THREE);
+    expect(playback.stockAt(2)).toBe(sweep.result);
+    expect(playback.removalAt(2)).toBe(sweep.removal);
+    playback.dispose();
+  });
+});
+
 describe('ownership', () => {
   it('dispose() deletes every cached handle exactly once, and the sweep result survives it', () => {
     const { playback, sweep } = run(THREE);

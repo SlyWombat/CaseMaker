@@ -8,6 +8,16 @@ import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { CheckpointInfo, SimPath } from '@/workers/sim/session';
 
 /**
+ * The sacrificial material's colour (#213 §4) — the board under the part and the strips beside it.
+ * A PALER neighbour of the fixture grey (`SimMeshes`' `FIXTURE_COLOR` / `EngravePreview`'s
+ * `JAW_COLOR`, both `#4b5563`), so a strip clamped between the jaws reads as the material the
+ * cutter is allowed to reach, not as a third jaw. ONE constant, shared by the simulation
+ * (`SimMeshes`) and the panel preview (`EngravePreview`), so the two CNC views cannot drift apart.
+ * PROVISIONAL (#213): still the first place it is named; fold into a shared palette when one exists.
+ */
+export const SACRIFICIAL_COLOR = '#9ca3af';
+
+/**
  * A mesh as the worker returns it → a three `BufferGeometry`, the same way `bufferToGeometry`
  * builds the case's meshes (`SceneMeshes.tsx`): a position attribute, an index, and vertex
  * normals. The caller owns the returned geometry and must `dispose()` it.
@@ -123,6 +133,30 @@ export function pathBounds(path: SimPath): { min: [number, number, number]; max:
     }
   }
   return { min, max };
+}
+
+/**
+ * The sacrificial body to draw for the current view (#213 §4): the material as cut so far, or null
+ * when the job has none. Prefers the frame delivered for the current checkpoint (the body as cut
+ * up to `k`) and falls back to the load's uncut body (`meshes.sacrificial`) before the first frame
+ * lands — the same warm-up fallback `SimMeshes` uses for the stock. Both sources are null exactly
+ * when the job has no sacrificial material, so the layer is present iff the material is.
+ */
+export function sacrificialMesh(
+  frame: { sacrificial: NodeMeshOutput | null } | null,
+  meshes: { sacrificial: NodeMeshOutput | null } | null,
+): NodeMeshOutput | null {
+  return frame?.sacrificial ?? meshes?.sacrificial ?? null;
+}
+
+/**
+ * Whether the sacrificial body is drawn (#213 §4): its OWN layer, independent of the workholding
+ * (`fixture`) layer. The `layers` type deliberately omits `fixture`, so this cannot read it — the
+ * two toggles are independent by construction, and turning the fixture off never hides the
+ * material. Nothing is drawn when the job has none (`meshPresent` false), whatever the layer says.
+ */
+export function drawsSacrificial(layers: { sacrificial: boolean }, meshPresent: boolean): boolean {
+  return layers.sacrificial && meshPresent;
 }
 
 /**

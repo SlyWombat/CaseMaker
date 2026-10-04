@@ -5,11 +5,14 @@ import { describe, it, expect } from 'vitest';
 
 import {
   DEFAULT_BREAKTHROUGH,
+  defaultSacrificialSide,
+  defaultSacrificialUnder,
   hasSacrificial,
   noneSacrificial,
   presetJawStrips,
   presetPartOnBoard,
   sacrificialBoxes,
+  sacrificialForNewJob,
   stripHeight,
   supportedFootprint,
   validateSacrificial,
@@ -221,8 +224,34 @@ describe('presets (#213)', () => {
   });
 });
 
-describe('EngraveJob schema migration (#213)', () => {
-  it('the default job is version 2 with no sacrificial material', () => {
+describe('panel defaults and the new-job seam (#213)', () => {
+  it('defaultSacrificialUnder is a 12 mm flush taped board', () => {
+    expect(defaultSacrificialUnder()).toEqual({
+      thickness: 12,
+      overhang: { left: 0, right: 0, front: 0, back: 0 },
+      attach: 'tape',
+    });
+  });
+
+  it('defaultSacrificialSide is a 6 mm flush strip', () => {
+    expect(defaultSacrificialSide()).toEqual({ thickness: 6, height: 'flush' });
+  });
+
+  it('sacrificialForNewJob is none with no saved setup', () => {
+    expect(sacrificialForNewJob()).toEqual(noneSacrificial());
+  });
+
+  it('sacrificialForNewJob deep-copies the saved setup it is handed', () => {
+    const saved = presetJawStrips();
+    const copy = sacrificialForNewJob(saved);
+    expect(copy).toEqual(saved);
+    // Patching the new job's copy must not reach back into the saved settings object.
+    copy.sides.left!.thickness = 99;
+    expect(saved.sides.left!.thickness).toBe(6);
+  });
+});
+
+describe('EngraveJob schema migration (#213)', () => {  it('the default job is version 2 with no sacrificial material', () => {
     const job = defaultEngraveJob();
     expect(job.schemaVersion).toBe(2);
     expect(job.sacrificial).toEqual(noneSacrificial());

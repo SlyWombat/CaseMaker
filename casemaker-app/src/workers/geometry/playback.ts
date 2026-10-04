@@ -17,7 +17,9 @@
  * every `ANCHOR_EVERY`-th checkpoint (each is the previous anchor plus a few solids, built
  * forward once), and stocks live in a small most-recently-used cache. A seek costs at most
  * `ANCHOR_EVERY` lazy unions plus one subtraction; a seek back to a recently shown frame is
- * free.
+ * free. #224: `warmup()` builds the whole anchor chain during loading (the client shows it as
+ * "preparing playback…"), so the first user scrub does not pay for it, and a seek to the last
+ * checkpoint returns the sweep's own `result` / `removal` instead of rebuilding the tail.
  *
  * Playback is indexed two ways: by CHECKPOINT (what the scrubber bar shows) and by program
  * STEP (what the event list shows). A step maps to the last checkpoint whose first cutting
@@ -49,8 +51,15 @@ import type { SweepResult } from './sweep';
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
 
-/** Cumulative unions kept at every this-many checkpoints. */
-export const ANCHOR_EVERY = 32;
+/**
+ * Cumulative unions kept at every this-many checkpoints. Was 32 (#194). #224 measured, with the
+ * chain built during loading, that 32 left a post-load worst cold seek of 1.3-1.6 s on
+ * PCB-UV-MASK PART2 — the ≤32-solid union chain onto one anchor plus the ~0.4 s subtraction that
+ * every seek pays. At 16 PART2's worst is 0.73 s; the extra anchors cost +14 % peak RSS
+ * (772→883 MB, the issue's budget is +25 %) and the 912-checkpoint pcb-test-air still measures
+ * 0.21 s at +17 %. See /Simulation.md §8.0.
+ */
+export const ANCHOR_EVERY = 16;
 /** Stocks kept, most recently used. */
 export const STOCK_CACHE = 6;
 
@@ -69,6 +78,14 @@ export interface Playback {
   checkpointAtStep(step: number): number;
   /** Removed volume after checkpoints 0..k; monotone non-decreasing in k. */
   removedVolumeAt(k: number): number;
+  /**
+   * Build the WHOLE anchor chain now (#224), up to the last anchor at or below `count-1`,
+   * materialised. A cold seek that would otherwise walk the chain (`count-1` builds every
+   * anchor, 3-7 s on the PCB corpus) pays for it here instead, off the scrub path: `session.load`
+   * calls this so the client can show it as part of loading, and the first real scrub is cheap.
+   * Idempotent — anchors already built are reused.
+   */
+  warmup(): void;
   dispose(): void;
 }
 
@@ -92,9 +109,11 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
 
   const isAnchor = (k: number): boolean => k % ANCHOR_EVERY === ANCHOR_EVERY - 1;
 
-  /** removal[0] ∪ … ∪ removal[k], as a NEW handle the caller owns, or null if nothing was removed. */
-  const cumulativeTo = (k: number): ManifoldInstance | null => {
-    // Advance the anchor chain as far as needed, without evaluating anything (unions are lazy).
+  /**
+   * Build every anchor up to the last one at or below `k` (#224). The unions here are lazy but
+   * `materialise` forces each into a leaf, so the chain is walked and meshed once, forward.
+   */
+  const buildAnchorsTo = (k: number): void => {
     while (anchoredTo < k && anchoredTo + ANCHOR_EVERY <= k) {
       const next = anchoredTo + ANCHOR_EVERY;
       const prev = anchoredTo >= 0 ? anchors.get(anchoredTo) ?? null : null;
@@ -108,6 +127,12 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
       anchors.set(next, materialise(tl, unionOwned(parts)));
       anchoredTo = next;
     }
+  };
+
+  /** removal[0] ∪ … ∪ removal[k], as a NEW handle the caller owns, or null if nothing was removed. */
+  const cumulativeTo = (k: number): ManifoldInstance | null => {
+    // Advance the anchor chain as far as needed, without evaluating anything (unions are lazy).
+    buildAnchorsTo(k);
     const a = isAnchor(k) || k === anchoredTo ? k : Math.floor((k + 1) / ANCHOR_EVERY) * ANCHOR_EVERY - 1;
     const start = anchors.has(a) ? (anchors.get(a) ?? null) : null;
     const from = anchors.has(a) ? a : -1;
@@ -121,6 +146,12 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
 
   /** The cached frame for checkpoint `kk` (0..count-1), computing it and evicting the oldest if need be. */
   const frameAt = (kk: number): Frame => {
+    // #224: the sweep already holds the final stock (`result`) and the final cumulative removal
+    // (`removal`) — it built and evaluated both to report their volumes. Return them for the last
+    // frame instead of rebuilding the tail chain and subtracting again. NOT cached and NEVER
+    // deleted here: these are the sweep's handles, freed by the session (`disposeSweep`). The
+    // identity tests rely on this being the same handle every time.
+    if (kk === count - 1) return { stock: sweep.result, removal: sweep.removal };
     const cached = stocks.get(kk);
     if (cached) {
       // Refresh its age.
@@ -183,6 +214,11 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
     return ans;
   };
 
+  /** Build the whole anchor chain now (#224); see the interface doc. No-op once built (or empty). */
+  const warmup = (): void => {
+    if (count > 0) buildAnchorsTo(count - 1);
+  };
+
   const dispose = (): void => {
     for (const a of anchors.values()) a?.delete();
     for (const f of stocks.values()) {
@@ -196,7 +232,7 @@ export function createPlayback(tl: ManifoldToplevel, timeline: Timeline, sweep: 
     anchoredTo = -1;
   };
 
-  return { count, stockAt, removalAt, checkpointAtStep, removedVolumeAt, dispose };
+  return { count, stockAt, removalAt, checkpointAtStep, removedVolumeAt, warmup, dispose };
 }
 
 /**

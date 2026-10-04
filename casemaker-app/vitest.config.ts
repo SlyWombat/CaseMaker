@@ -17,6 +17,9 @@ export default defineConfig({
     testTimeout: 180_000,
     hookTimeout: 60_000,
     include: ['tests/unit/**/*.spec.ts', 'tests/unit/**/*.spec.tsx'],
+    // Seeds the bundled-font cache from the TTFs on disk (issue #180) — specs typeset labels
+    // synchronously and have no `fetch` seam, so the six faces must be pre-parsed.
+    setupFiles: ['./tests/setup/fonts.ts'],
     globals: false,
     coverage: { reporter: ['text', 'html'] },
   },

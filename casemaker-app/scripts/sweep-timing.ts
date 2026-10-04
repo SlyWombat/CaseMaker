@@ -14,7 +14,17 @@
  *   - runs `sweepTimeline` and prints `stats.ms`, peak RSS, and the checkpoint / distinct-Z
  *     counts,
  *   - then runs `createPlayback` and seven `stockAt` seeks (-1, 0, count/4, count/2,
- *     3·count/4, count-1, count/2 again), printing each seek's time.
+ *     3·count/4, count-1, count/2 again), printing each seek's time SPLIT BY STAGE (#224):
+ *     the anchor chain built, the final ≤ANCHOR_EVERY unions, the subtraction, and the mesh
+ *     the client actually ships (`meshOutputOf`). The split needs no playback hook: inside
+ *     `stockAt` the ONLY evaluated work is the anchor materialisation — the final union chain
+ *     and the subtraction are lazy — so that call's time IS the anchor build. Forcing
+ *     `removalAt(k).numTri()` then evaluates the ≤ANCHOR_EVERY unions alone, and
+ *     `stockAt(k).numTri()` the subtraction alone.
+ *   - then repeats the seeks on a FRESH playback whose anchor chain is built up front with
+ *     `playback.warmup()` — the post-sweep "preparing playback…" stage `session.load` now pays.
+ *     Its `warmup` time is reported, and the worst COLD seek after it is the #224 acceptance
+ *     number (a scrub once loading has finished).
  *
  * WHY A CHILD PROCESS. `sweepTimeline` is a synchronous wasm call: once it is inside one
  * boolean nothing on that thread can interrupt it, so a wall-clock budget cannot be enforced
@@ -155,6 +165,7 @@ async function runChild(args: Args): Promise<void> {
   if (args.machine !== 'none' && !machine) throw new Error(`unknown machine "${args.machine}"; known: ${Object.keys(MACHINES).join(', ')}`);
   const { sweepTimeline } = await import('@/workers/geometry/sweep');
   const { createPlayback } = await import('@/workers/geometry/playback');
+  const { meshOutputOf } = await import('@/workers/geometry/meshOutput');
   const { flatEndMill } = await import('@/engine/cnc/tool');
   type SweepTimeline = typeof import('@/workers/geometry/sweep').sweepTimeline;
 
@@ -266,17 +277,77 @@ async function runChild(args: Args): Promise<void> {
   ];
   let worstCold = 0;
   let worstLabel = '';
+  const stage = { build: 0, union: 0, subtract: 0, mesh: 0 };
   seq.forEach(([label, k], i) => {
-    const a = performance.now();
+    // Stage split (see the file header): stockAt evaluates only the anchor materialisation;
+    // the final union chain and the subtraction it constructs are lazy.
+    const a0 = performance.now();
     const stock = playback.stockAt(k);
-    void stock.numTri(); // force the lazy union+subtract (playback does not evaluate it)
-    const ms = performance.now() - a;
+    const a1 = performance.now();
+    const removal = playback.removalAt(k);
+    if (removal) void removal.numTri(); // force the final ≤ANCHOR_EVERY unions alone
+    const a2 = performance.now();
+    void stock.numTri(); // force the subtraction (the removal union is now evaluated)
+    const a3 = performance.now();
+    const mesh = meshOutputOf(stock); // what the client actually ships
+    const a4 = performance.now();
+    const build = a1 - a0, union = a2 - a1, subtract = a3 - a2, meshMs = a4 - a3;
+    const ms = a4 - a0;
     const warm = i > 0 && seq.slice(0, i).some(([, kk]) => kk === k);
+    if (!warm) {
+      stage.build += build;
+      stage.union += union;
+      stage.subtract += subtract;
+      stage.mesh += meshMs;
+    }
     if (!warm && ms > worstCold) { worstCold = ms; worstLabel = label; }
-    console.log(`# seek ${label.padEnd(16)} k=${String(k).padStart(5)}  ${ms.toFixed(0)}ms${warm ? ' (warm)' : ''}  rss=${rssMb().toFixed(0)}MB`);
+    console.log(`# seek ${label.padEnd(16)} k=${String(k).padStart(5)}  ${ms.toFixed(0)}ms${warm ? ' (warm)' : ''}  rss=${rssMb().toFixed(0)}MB  tri=${mesh.triangleCount}`);
+    console.log(`#     anchors=${build.toFixed(0)}ms  unions=${union.toFixed(0)}ms  subtract=${subtract.toFixed(0)}ms  mesh=${meshMs.toFixed(0)}ms`);
   });
+  console.log(`# cold-seek stage totals: anchors=${stage.build.toFixed(0)}ms  unions=${stage.union.toFixed(0)}ms  subtract=${stage.subtract.toFixed(0)}ms  mesh=${stage.mesh.toFixed(0)}ms`);
 
   playback.dispose();
+
+  // ---- #224: the cost the CLIENT now pays, with the anchor chain built during loading.
+  // A fresh playback, `warmup()` first (exactly what `session.load` does before it goes ready),
+  // then the same seeks. The warm-up time here IS the post-sweep "preparing playback…" stage;
+  // the seeks after it are what a scrub costs once loading has finished (the acceptance bar).
+  const warm = createPlayback(tl, timeline, v);
+  const w0 = performance.now();
+  warm.warmup();
+  const warmupMs = performance.now() - w0;
+  let worstPost = 0;
+  let worstPostLabel = '';
+  const postStage = { build: 0, union: 0, subtract: 0, mesh: 0 };
+  console.log(`\n# post-load (warmup builds the anchor chain): warmup=${warmupMs.toFixed(0)}ms  rss=${rssMb().toFixed(0)}MB`);
+  seq.forEach(([label, k], i) => {
+    const a0 = performance.now();
+    const stock = warm.stockAt(k);
+    const a1 = performance.now();
+    const removal = warm.removalAt(k);
+    if (removal) void removal.numTri();
+    const a2 = performance.now();
+    void stock.numTri();
+    const a3 = performance.now();
+    void meshOutputOf(stock);
+    const a4 = performance.now();
+    const build = a1 - a0, union = a2 - a1, subtract = a3 - a2, meshMs = a4 - a3;
+    const ms = a4 - a0;
+    const isWarm = i > 0 && seq.slice(0, i).some(([, kk]) => kk === k);
+    if (!isWarm) {
+      postStage.build += build;
+      postStage.union += union;
+      postStage.subtract += subtract;
+      postStage.mesh += meshMs;
+    }
+    if (!isWarm && ms > worstPost) { worstPost = ms; worstPostLabel = label; }
+    console.log(`# seek* ${label.padEnd(15)} k=${String(k).padStart(5)}  ${ms.toFixed(0)}ms${isWarm ? ' (warm)' : ''}  anchors=${build.toFixed(0)}ms  unions=${union.toFixed(0)}ms  subtract=${subtract.toFixed(0)}ms  mesh=${meshMs.toFixed(0)}ms`);
+  });
+  console.log(`# post-load stage totals: anchors=${postStage.build.toFixed(0)}ms  unions=${postStage.union.toFixed(0)}ms  subtract=${postStage.subtract.toFixed(0)}ms  mesh=${postStage.mesh.toFixed(0)}ms`);
+  const rssAfterPost = rssMb();
+  if (rssAfterPost > peakRss) peakRss = rssAfterPost;
+  warm.dispose();
+
   v.stock.delete();
   v.result.delete();
   v.removal?.delete();
@@ -286,11 +357,14 @@ async function runChild(args: Args): Promise<void> {
   const totalMs = performance.now() - t0;
   if (rssMb() > peakRss) peakRss = rssMb();
   const okSweep = v.stats.ms.total <= 10_000;
-  const okSeek = worstCold <= 1_000;
+  // The acceptance bar (#224) is the seek a user pays AFTER loading: the anchor chain is built
+  // during loading now, so `worstPost` is the number that matters, not `worstCold`.
+  const okSeek = worstPost <= 1_000;
   const okRss = peakRss <= 1_536; // 1.5 GB
   console.log(`\n# VERDICT ${okSweep && okSeek && okRss ? 'ACCEPT (simulable)' : 'REFUSE (not simulable)'}`);
   console.log(`#   sweep ${v.stats.ms.total.toFixed(0)}ms ${okSweep ? '<=' : '>'} 10s: ${okSweep ? 'ok' : 'FAIL'}`);
-  console.log(`#   worst cold seek ${worstCold.toFixed(0)}ms (${worstLabel}) ${okSeek ? '<=' : '>'} 1s: ${okSeek ? 'ok' : 'FAIL'}`);
+  console.log(`#   worst cold seek (raw, no warm-up) ${worstCold.toFixed(0)}ms (${worstLabel})`);
+  console.log(`#   worst COLD seek post-load ${worstPost.toFixed(0)}ms (${worstPostLabel}) ${okSeek ? '<=' : '>'} 1s: ${okSeek ? 'ok' : 'FAIL'}`);
   console.log(`#   peak RSS ~${peakRss.toFixed(0)}MB ${okRss ? '<=' : '>'} 1.5GB: ${okRss ? 'ok' : 'FAIL'}`);
   console.log(`# total wall ${totalMs.toFixed(0)}ms`);
   process.exitCode = 0;

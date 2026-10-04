@@ -1,6 +1,7 @@
 /**
  * The engrave preview (#205): the stock with every enabled label's OPENED region cut to its
- * own depth, the floor of each pocket, and the vise jaws — evaluated in the sim worker.
+ * own depth, the floor of each pocket, the vise jaws and the sacrificial material (#213) —
+ * evaluated in the sim worker.
  *
  * Why the sim worker and not the geometry worker (`/Simulation.md`, #205): the preview needs
  * Manifold (profile evaluation, extrusion) and it is driven on a 150 ms debounce by the panel,
@@ -24,6 +25,7 @@ import type { EngraveJob } from '@/types/engraveJob';
 import { toPartPlan, labelProfile } from '@/engine/cnc/engrave/partPlan';
 import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { viseEnvelope, validateVise } from '@/engine/cnc/fixture';
+import { sacrificialBoxes, type SacrificialBox } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
 import { recommendTool, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
@@ -48,6 +50,15 @@ type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
  */
 export const FLOOR_THICKNESS_MM = 0.02;
 
+/** Words for each sacrificial piece (#213), so the viewport can name what it draws. */
+const SACRIFICIAL_LABEL: Record<SacrificialBox['id'], string> = {
+  under: 'Sacrificial board under the part',
+  left: 'Sacrificial strip (left)',
+  right: 'Sacrificial strip (right)',
+  front: 'Sacrificial strip (front)',
+  back: 'Sacrificial strip (back)',
+};
+
 /** One label's pocket floor, for colouring by depth. Work frame. */
 export interface EngravePreviewFloor {
   labelId: string;
@@ -63,6 +74,17 @@ export interface EngravePreviewFixture {
   mesh: NodeMeshOutput;
 }
 
+/**
+ * One piece of sacrificial material (#213), drawn where the user SAID it is: the board under the
+ * part or a strip beside it, from `sacrificialBoxes`. The `id` is the box id prefixed
+ * `sacrificial-` so it can never collide with a jaw id, and `label` names the piece in words.
+ */
+export interface EngravePreviewSacrificial {
+  id: string;
+  label: string;
+  mesh: NodeMeshOutput;
+}
+
 /** Everything the panel and the viewport need for one job, as plain data + mesh buffers. */
 export interface EngravePreview {
   /** The stock with every enabled, error-free label's opened region cut to its depth. Work frame. */
@@ -71,6 +93,8 @@ export interface EngravePreview {
   floors: EngravePreviewFloor[];
   /** The vise jaws (un-inflated), from `viseEnvelope`. */
   fixture: EngravePreviewFixture[];
+  /** The sacrificial material (#213), from `sacrificialBoxes`; empty when the job has none. */
+  sacrificial: EngravePreviewSacrificial[];
   /** Per-label measurements, without the (large) polygons: the findings carry the rest. */
   engravability: Omit<LabelEngravability, 'polygons'>[];
   /** `validateJob` + `validateVise` + `engravabilityFindings`, concatenated. */
@@ -243,12 +267,25 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     const stockMesh = meshOutputOf(stock);
     stock.delete();
 
-    const fixture: EngravePreviewFixture[] = viseEnvelope(job.stock, job.workholding.vise).boxes.map(
+    const fixture: EngravePreviewFixture[] = viseEnvelope(job.stock, job.workholding.vise, job.sacrificial).boxes.map(
       (box) => {
         const solid = boxSolid(tl, box);
         const mesh = meshOutputOf(solid);
         solid.delete();
         return { id: box.id, label: box.label, mesh };
+      },
+    );
+
+    // The sacrificial material (#213), one mesh per box, from the same `sacrificialBoxes` the
+    // sweep and the verifier consume — never hand-computed here. Each box is an axis-aligned
+    // solid, so `boxSolid` (the sweep's own builder) is the right constructor and there is no
+    // union to materialise (no ONE MANIFOLD TRAP path).
+    const sacrificial: EngravePreviewSacrificial[] = sacrificialBoxes(job.stock, job.sacrificial).map(
+      (box) => {
+        const solid = boxSolid(tl, { id: box.id, label: SACRIFICIAL_LABEL[box.id], min: box.min, max: box.max });
+        const mesh = meshOutputOf(solid);
+        solid.delete();
+        return { id: `sacrificial-${box.id}`, label: SACRIFICIAL_LABEL[box.id], mesh };
       },
     );
 
@@ -266,6 +303,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       stock: stockMesh,
       floors,
       fixture,
+      sacrificial,
       engravability: measured.map(({ polygons: _polygons, ...rest }) => rest),
       findings,
       recommendation: {
