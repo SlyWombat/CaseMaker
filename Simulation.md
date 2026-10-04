@@ -107,9 +107,14 @@ Executing a program means modelling what the controller holds, not just sweeping
 
 #### The fixture is an obstacle, and this is where collisions get caught
 
-Saying how the part is mounted buys more than a datum. **Vise jaws, clamp footprints and
-nest walls are solids**, and the emulator can check the tool — and the holder above it —
-against them.
+Saying how the part is mounted buys more than a datum. **Whatever is holding the part is a
+solid in the tool's way**, and the emulator can check the tool — and the holder above it —
+against it. But those solids are **not** looked up from a catalogue of vise and clamp
+dimensions (decision 28, `/Fabrication.md` §7.3): a user may have discard material between
+the jaws, a spacer, a clamp from another kit. They are **measured** — probed, later seen by
+the camera — and carried as an `obstacles` input with `source` and `uncertainty`, stubbed
+until the probing exists, exactly as placement is. The `Workholding` variants say how the
+part is held; they do not supply geometry.
 
 That matters because it catches two classes of failure nothing else in the plan does:
 

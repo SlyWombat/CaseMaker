@@ -267,6 +267,7 @@ accepted.
 | 25 | **Build the `MachineProfile` now, even though the Z1 is the only machine** | Maintainer's call, 2026-10-03, overriding §5.3's deferral: pay for the seam once rather than recode later. Scope stays Z1-only; the profile is where machine limits get clamped and where "no laser on this machine" becomes a flag instead of an assumption. §5.3, #184. |
 | 26 | **Workholding is an explicit input, and the probe plan is derived from it** | Supersedes decision 23's fixed edge-find sequence. The part may be in a nest, under clamps, in the vise or in the rotary chuck; each answers reachable / obstructed / datum candidates / residual uncertainty, and the planner queries the compiled solid for touch points. §7.3, #188. |
 | 27 | **The blank spec makes the colour boundary slicer-independent** | Slicers sample each layer at its **mid-plane**, and the rule differs per slicer. So place the split and the pocket ceiling **exactly on layer lines**, where no mid-plane sampler is ambiguous. **Revised 2026-10-03:** the margin was pointed the wrong way — under mid-plane sampling at 0.2 mm the void starts at **1.6**, not 1.4, so the printed membrane is a layer *thicker* than nominal and a 1.4 ceiling gave away 0.2 mm of a ~0.6 mm band for nothing. Also "layer multiple" means **h₁ + k·h**, so the spec must *prescribe* first-layer height as well — Cura's 0.27 default puts 0.80 inside a layer again. Same mechanism as decision 22. #166, #178, #191. |
+| 28 | **Fixture geometry is MEASURED, never catalogued** | Maintainer's rule, 2026-10-03: do not hard-code dimensions for a vise or clamp-down hardware. What is actually in the tool's way is whatever the user put there — discard material between the jaws, spacers, a different clamp — so the obstacle envelope comes from **probing** (and later the camera), carried as an input with `source` and `uncertainty` exactly like placement, and stubbed until the probing exists. The `Workholding` variants still say *how* the part is held (for the datum questions); they do not supply obstacle solids. Retires the "caliper the vise" task for the emulator's purposes. §7.3, #188, #182. |
 
 ---
 
@@ -744,6 +745,16 @@ candidate surfaces, score them, and emit the touches that resolve the residual:
 
 The point of decision 26 is that the plan is now an *output* of the model, so the vise and
 rotary cases do not each need a new hand-written sequence.
+
+**Obstacles are measured, not looked up (decision 28).** The four questions above include
+"what is obstructed", and the first draft of this section imagined answering it from the
+fixture's catalogue dimensions — jaw height, clamp footprint. The maintainer's rule is that
+this is wrong: a user may have discard material between the jaws, a spacer under the part, a
+clamp from another kit. The only honest source for what the tool must not hit is to **probe
+it**: touch the tops and inner faces of whatever is holding the part, and carry the result
+as an obstacle envelope with a `source` and an `uncertainty`, stubbed until the probing
+exists — the same shape as placement, for the same reason. So the probe plan has a second
+job besides registering the part: **mapping the fixture's clear envelope**.
 
 #### The fixture question — decision 19 is open, and there are three candidates
 
