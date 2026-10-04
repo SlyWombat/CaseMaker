@@ -583,7 +583,7 @@ The bias is one-sided, so it is a bias rather than a tolerance. The band must ex
   **non-empty** for a deliberately over-deep label. That is #178's depth-limit map checked
   against geometry rather than against itself.
 - `sweep(ir) ≡ sweep(parse(post(ir)))` within ε → the post-processor (§1).
-- A **G0 that crosses the stock** must appear as removed material.
+- A **G0 that crosses the stock** must be reported as an error and returned as a **gouge solid** whose volume equals the reported volume — drawn, never subtracted (§3.3).
 - An oversized tool must produce a visibly empty or mangled result for small text — the
   honest form of #171's warning.
 
