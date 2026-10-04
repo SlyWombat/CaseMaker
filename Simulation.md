@@ -111,10 +111,12 @@ Saying how the part is mounted buys more than a datum. **Whatever is holding the
 solid in the tool's way**, and the emulator can check the tool — and the holder above it —
 against it. But those solids are **not** looked up from a catalogue of vise and clamp
 dimensions (decision 28, `/Fabrication.md` §7.3): a user may have discard material between
-the jaws, a spacer, a clamp from another kit. They are **measured** — probed, later seen by
-the camera — and carried as an `obstacles` input with `source` and `uncertainty`, stubbed
-until the probing exists, exactly as placement is. The `Workholding` variants say how the
-part is held; they do not supply geometry.
+the jaws, a spacer, a clamp from another kit. They are an **`obstacles` input with
+provenance** — a shipped default for known hardware, a saved measurement from a previous
+probe of this setup, or a fresh probe (later the camera) — carried with `source` and
+`uncertainty` exactly as placement is, so a default is never mistaken for a measurement. Not
+every job needs a probe; a default or saved envelope stands until the setup changes. The
+`Workholding` variants say how the part is held; the obstacle envelope is a separate input.
 
 That matters because it catches two classes of failure nothing else in the plan does:
 
