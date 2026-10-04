@@ -158,9 +158,10 @@ So:
 - **The one genuinely independent validation available** is #165's ladder `.nc`, generated
   by Studio, whose intent is known by construction: twelve squares at six depths. Note that
   "validate against Studio's output" cannot mean `TopClamp.nc` — it has 482 distinct Z
-  levels (§4.4) but only **609 causal runs**, so V1's `ExactSweeper` does attempt it (under
-  the 1 000 cap, §9 item 6) — it simply cannot be an oracle, because there is no independent
-  model of it to compare against. Counted over the whole corpus, 2026-10-04.
+  levels (§4.4) but only **609 causal runs**, so it passes the 1 000-checkpoint cap and
+  `ExactSweeper` starts on it; measured 2026-10-04 it then takes **106.8 s**, and the time
+  budget refuses it (§9 item 6). It could not be an oracle either way, because there is no
+  independent model of it to compare against. Counted over the whole corpus, 2026-10-04.
 - **It removes the hard dependency on #172.** Parser + sweep + stock can be built and
   validated first, against **Makera Studio's own output** — including the `.nc` Studio
   generates for #165's depth ladder, *before* that ladder is cut. The simulator gets
@@ -672,14 +673,37 @@ about how the part will *look* beyond which colour volume a floor lands in.
 5. ~~**Should a rapid through material REMOVE it in the picture?**~~ **Answered: no** (code
    review #4 q1). It is never subtracted; it is reported and returned as a gouge solid that
    is drawn. §3.3 is corrected to match, and returning the solid is on #182.
-6. **`MAX_CHECKPOINTS = 1000`** is a classifier, not a measurement. The vendor's
-   fatigue-test.nc must be refused — **685 200 causal runs**, not the 108 744 this item and
-   `sweep.ts` first quoted, which was the old (segment, Z) count — and ACRYLIC-Balloon.nc
-   (10) must pass. Nothing between has been **timed**, and causal runs are not Z levels:
-   `PCB-NO-UV-MASK.nc` has 9 distinct Z but 298 runs because it alternates between levels,
-   and `Tests/pcb-test-air.nc` has 912 (all counted 2026-10-04, `probe-checkpoints.mts`).
-   The accept criteria are a sweep under 10 s and a worst cold seek under 1 s with no wasm
-   OOM on the 912-run file. On #182.
+6. **The classifier is the wall clock; `MAX_CHECKPOINTS = 1000` is a memory guard.**
+   The vendor's fatigue-test.nc must be refused — **685 200 causal runs**, not the 108 744
+   this item and `sweep.ts` first quoted, which was the old (segment, Z) count — and
+   ACRYLIC-Balloon.nc (10) must pass. Causal runs are not Z levels: `PCB-NO-UV-MASK.nc` has
+   9 distinct Z but 298 runs because it alternates between levels, and `Tests/pcb-test-air.nc`
+   has 912 (all counted 2026-10-04, `probe-checkpoints.mts`).
+   **A second classifier on distinct Z levels (`MAX_Z_LEVELS = 64`) was proposed here and
+   withdrawn** (#194): the runs it would have refused have 9 and 8 distinct Z, and they hang
+   for the same reason TopClamp's 482 do, so Z levels separate nothing that timing does not.
+   What replaces it: a budget checked between checkpoints and between rechecks **inside** the
+   sweep, refusing `sweep-budget-exceeded` with the elapsed time and the checkpoint it
+   reached; and, because one boolean cannot be interrupted from inside, a **hard stop on the
+   client** — `simClient.loadSim` races the load against `SIM_BUDGET_MS = 60 000` and
+   terminates the worker on expiry, which frees every wasm handle with it. Measured
+   2026-10-04 in one quiet-machine run of `scripts/sweep-timing.ts` (3.175 mm flat end, 120 s
+   harness budget, outputs in `casemaker-app/scripts/sweep-timing-out/194-after/`):
+   `ACRYLIC-Balloon.nc` 5.1 s for 10 runs (machine `none`), worst cold seek 0.42 s —
+   **simulable**; `PCB-NO-UV-MASK.nc` 60.6 s for 298 (air gate 52.6 s, final subtract 6.3 s),
+   `pcb-test-air.nc` 80.0 s for 912 (air gate 67.8 s, subtract 9.6 s), `TopClamp.nc` 106.8 s for
+   609 (air gate 54.1 s, subtract 50.9 s) — all refused by the budget;
+   `PCB-UV-MASK(PART2).nc` (298) did not finish inside 120 s at all, stalling in the air gate at
+   599 of 610 air moves with peak RSS 805 MB. This machine's spread is wide — Balloon's air gate
+   alone has measured 4.1–6.9 s across runs — so these are observations, not tight bounds. The
+   accept bar (sweep ≤ 10 s, worst cold seek ≤ 1 s, peak RSS ≤ 1.5 GB) is still not met by any of
+   the four: after #194 the **air gate**, not the level count, is the dominant stage at 53–68 s on
+   three of them, and on TopClamp the final `Manifold.union(solids)` is co-dominant at 50.9 s,
+   with cold seeks of 3.2 s and 7.4 s on two files. (TopClamp's air gate spends 54.1 s on only 28
+   air moves, so there the cost is building the prefixes, not rechecking them.) That is
+   the dexel backend's job (§4.4) and is not V1. A refused sweep is still not a dead end: the
+   runner's timeline is kept (the session goes **path-only**), so the viewport draws the
+   toolpath with no material and `stateAt`/`toolPath` work. On #182, #194.
 7. **Envelope −200 or −206?** The profile says 200 mm of travel. The firmware's own limits
    are now sourced rather than "noted elsewhere" — `MakeraInc/MakeraZ1Firmware`
    `src/configZ1.default:429-432` reads `soft_endstop.enable false`, `x_min -206.0`,
@@ -703,7 +727,9 @@ about how the part will *look* beyond which colour volume a floor lands in.
    its spec, the lowest-Z rule for ramps, and a real vendor 2.5D job swept end to end. The
    removal solids overshoot the stock top by 0.01 mm so the subtraction has no coplanar face;
    the volume identity is therefore `stock − (removal ∩ stock)`, not `stock − removal`. More
-   than `MAX_CHECKPOINTS` (1000) runs is refused as a dense/3D job (§9 item 6).
+   than `MAX_CHECKPOINTS` (1000) runs is refused as a dense/3D job; a sweep that passes that
+   cap and then exceeds the wall-clock budget is refused `sweep-budget-exceeded`, naming how
+   far it got, with the path still returned (§9 item 6, #194).
 6. ~~**Validation and collision gates**~~ **Done, except the fixture.** Refusals: tool (by
    name), stock, laser job, rotary job. Gates: the envelope (#184, in the runner, machine
    coordinates, capped at 25 diagnostics per code); the holder — `shoulderLength ?? fluteLength`,

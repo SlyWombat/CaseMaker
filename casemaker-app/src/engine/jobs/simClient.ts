@@ -47,14 +47,67 @@ export function setSimSinks(onFrame: ((k: number, frame: SimFrame) => void) | nu
 }
 
 /**
+ * Hard stop for one load, ms (#194). `sweepTimeline` is one synchronous call, so nothing can
+ * interrupt it from the main thread: past this the only cancel is `terminateSim()`.
+ */
+export const SIM_BUDGET_MS = 60_000;
+
+/**
+ * How far the worker's own budget sits BELOW the hard stop (#194). The sweep checks its
+ * deadline between checkpoints, so a budget below the stop lets it refuse cleanly — with a
+ * "checkpoint N of M" message and without killing the worker — while the hard stop remains for
+ * a single wasm call that overran in between. A decision taken where the issue was silent.
+ */
+const SIM_BUDGET_GRACE_MS = 5_000;
+
+/** What `loadSim` accepts on top of its arguments (#194). */
+export interface SimLoadOpts {
+  /** Wall-clock limit for this load, ms. Defaults to `SIM_BUDGET_MS`. */
+  budgetMs?: number;
+  /** Checkpoints swept so far. Called from the worker as the sweep advances. */
+  onProgress?: (done: number, total: number) => void;
+}
+
+/**
  * Load a program. On success the anchor chain is warmed with ONE silent seek to the last
  * checkpoint, so the first real scrub does not pay for building it (§8.0).
+ *
+ * Raced against a timer (#194): the sim worker is the one place a wasm call can run for
+ * minutes without yielding, so a load that overruns the budget is refused by terminating the
+ * worker — which frees every handle it owned with it, so there is nothing to clean up here.
  */
-export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null): Promise<SimLoadResult> {
+export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): Promise<SimLoadResult> {
   frames.reset();
-  const result = await getSimApi().simLoad(gcodeText, setup, tool, machineId);
-  if (result.ok && result.count > 0) frames.request(result.count - 1, { silent: true });
-  return result;
+  const budgetMs = opts?.budgetMs ?? SIM_BUDGET_MS;
+  const sweepBudget = Math.max(1, budgetMs - SIM_BUDGET_GRACE_MS);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const expired = new Promise<SimLoadResult>((resolve) => {
+    timer = setTimeout(() => {
+      terminateSim();
+      resolve({
+        ok: false,
+        pathOnly: false,
+        diagnostics: [
+          {
+            source: 'sweep',
+            severity: 'error',
+            code: 'sweep-budget-exceeded',
+            message: `the simulation was stopped after ${Math.round(budgetMs / 1000)} s: this program is too slow to simulate at this size (/Simulation.md §4.4). Try again with a longer limit`,
+          },
+        ],
+      });
+    }, budgetMs);
+  });
+  try {
+    const result = await Promise.race([
+      getSimApi().simLoad(gcodeText, setup, tool, machineId, sweepBudget, opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined),
+      expired,
+    ]);
+    if (result.ok && result.count > 0) frames.request(result.count - 1, { silent: true });
+    return result;
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
 }
 
 /** Ask for checkpoint k (-1 = uncut). Coalesced: at most one in flight, newest k wins. */

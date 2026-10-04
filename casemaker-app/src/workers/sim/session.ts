@@ -11,7 +11,10 @@
  *   dispose()
  *
  * OWNERSHIP, exactly. One session holds at most one loaded program. `load` disposes any
- * existing one first, and a REFUSED load leaves none. The session owns the `SweepResult`
+ * existing one first. A REFUSED load leaves a session only when the RUNNER succeeded and the
+ * SWEEP refused: the timeline is kept (PATH-ONLY), `stateAt` and `toolPath` work, `frameAt`
+ * returns null, and such a session owns NO wasm handle at all. A refusal before the timeline
+ * exists (an unknown machine) leaves nothing. A loaded session owns the `SweepResult`
  * (`stock`, `result`, `removal`, every non-null `perCheckpoint[i]`, every gouge) AND the
  * `Playback` — `createPlayback` does not own the sweep result. `dispose` runs
  * `playback.dispose()` and THEN deletes the sweep handles, in that order: the playback holds
@@ -79,6 +82,17 @@ export interface SimLoadOk {
 export interface SimLoadRefused {
   ok: false;
   diagnostics: SimDiagnostic[];
+  /**
+   * True when the runner succeeded and only the SWEEP refused: the cheap half is still here —
+   * `summary`, `pauses` and `segments` are present, `stateAt` and `toolPath` work, and
+   * `frameAt` returns null, so the viewport can draw the path with no material (#194). False
+   * when there is no timeline to keep (an unknown machine).
+   */
+  pathOnly: boolean;
+  /** Present only when `pathOnly`. */
+  summary?: Timeline['summary'];
+  pauses?: PausePoint[];
+  segments?: Segment[];
 }
 
 export type SimLoadResult = SimLoadOk | SimLoadRefused;
@@ -90,15 +104,31 @@ export interface SimFrame {
   removalSoFar: NodeMeshOutput | null;
 }
 
-interface Live {
+/** A swept session: the geometry AND the path. */
+interface LiveSwept {
+  kind: 'swept';
   sweep: SweepResult;
   playback: Playback;
   timeline: Timeline;
   setup: Setup;
 }
+/** A refused sweep keeps the runner's work: the path is drawable, the material is not (#194). */
+interface LivePath {
+  kind: 'path';
+  timeline: Timeline;
+  setup: Setup;
+}
+type Live = LiveSwept | LivePath;
+
+/** What `load` will accept on top of its arguments (#194). */
+export interface SimLoadOpts {
+  /** Wall clock for the sweep itself; the client's timer is the hard stop. */
+  budgetMs?: number;
+  onProgress?: (done: number, total: number) => void;
+}
 
 export interface SimSession {
-  load(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null): SimLoadResult;
+  load(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult;
   /** `null` when `gen` is older than one already seen, or when nothing is loaded. */
   frameAt(k: number, gen: number): SimFrame | null;
   stateAt(step: number): MachineState | null;
@@ -126,7 +156,7 @@ export function disposeSweep(sweep: SweepResult): void {
   for (const g of sweep.gouges) g.solid.delete();
 }
 
-const refuse = (code: string, message: string): SimLoadRefused => ({ ok: false, diagnostics: [{ source: 'sweep', severity: 'error', code, message }] });
+const refuse = (code: string, message: string): SimLoadRefused => ({ ok: false, pathOnly: false, diagnostics: [{ source: 'sweep', severity: 'error', code, message }] });
 
 const tagSweep = (d: SweepDiagnostic): SimDiagnostic => ({ source: 'sweep', severity: d.severity, code: d.code, message: d.message, ...(d.checkpoint !== undefined ? { checkpoint: d.checkpoint } : {}) });
 
@@ -138,6 +168,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const l = live;
     live = null;
     if (!l) return;
+    if (l.kind === 'path') return; // owns no wasm handle at all
     // Playback first: its anchors and cached unions are built over the sweep's solids.
     l.playback.dispose();
     hooks?.onDispose?.('playback');
@@ -145,7 +176,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     hooks?.onDispose?.('sweep');
   };
 
-  const load = (gcodeText: string, setup: Setup, tool: Tool, machineId: string | null): SimLoadResult => {
+  const load = (gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult => {
     dispose();
     let machine;
     if (machineId !== null) {
@@ -158,8 +189,21 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       ...parse.diagnostics.map((d): SimDiagnostic => ({ source: 'parser', severity: d.severity, code: d.code, message: d.message, line: d.line })),
       ...timeline.diagnostics.map((d): SimDiagnostic => ({ source: 'runner', severity: d.severity, code: d.code, message: d.message, line: d.line, step: d.step })),
     ];
-    const out = sweepTimeline(tl, timeline, tool, setup);
-    if (!out.ok) return { ok: false, diagnostics: [...diagnostics, ...out.diagnostics.map(tagSweep)] };
+    const out = sweepTimeline(tl, timeline, tool, setup, opts);
+    if (!out.ok) {
+      // The runner's work is cheap and worth keeping on its own: a refused sweep still yields
+      // the path, the pauses and the segments, so the viewport can draw the path with no
+      // material. This session owns no wasm handle (#194).
+      live = { kind: 'path', timeline, setup };
+      return {
+        ok: false,
+        pathOnly: true,
+        diagnostics: [...diagnostics, ...out.diagnostics.map(tagSweep)],
+        summary: timeline.summary,
+        pauses: timeline.pauses,
+        segments: timeline.segments,
+      };
+    }
     const sweep = out.value;
     let playback: Playback | null = null;
     try {
@@ -171,7 +215,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         gouges: sweep.gouges.map((g): SimGougeMesh => ({ step: g.step, line: g.line, mesh: meshOutputOf(g.solid) })),
       };
       diagnostics.push(...sweep.diagnostics.map(tagSweep));
-      live = { sweep, playback, timeline, setup };
+      live = { kind: 'swept', sweep, playback, timeline, setup };
       return {
         ok: true,
         diagnostics,
@@ -210,7 +254,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     if (gen < latestGen) return null;
     latestGen = gen;
     const l = live;
-    if (!l) return null;
+    if (!l || l.kind !== 'swept') return null;
     if (!Number.isFinite(k)) throw new RangeError(`checkpoint index must be a finite number, got ${k}`);
     const kk = Math.max(-1, Math.min(l.playback.count - 1, Math.trunc(k)));
     // Both handles are the playback's and evictable: mesh them here, keep neither.

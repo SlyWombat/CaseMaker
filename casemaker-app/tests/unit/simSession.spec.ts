@@ -15,6 +15,7 @@ import { parseGcode, setupFromHeader, stubSetup, libraryTool, type Setup } from 
 import { flatEndMill } from '@/engine/cnc/tool';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { createFrameCoalescer } from '@/engine/jobs/frameCoalescer';
+import { loadSim, terminateSim } from '@/engine/jobs/simClient';
 import { setSimClientLoader, useSimStore, type SimClient } from '@/store/simStore';
 
 const SLAB = { kind: 'prism' as const, outline: { kind: 'p-rect' as const, size: [100, 60] as [number, number] }, thickness: 5 };
@@ -253,14 +254,27 @@ describe('stateAt and toolPath, on demand', () => {
   });
 });
 
-describe('refusals: each leaves NO session, even over a good one', () => {
+describe('refusals: a refused SWEEP leaves a path-only session, even over a good one (#194)', () => {
+  /**
+   * Every refusal below is raised by the SWEEP, which runs after the runner has built the
+   * timeline — and the timeline is the cheap half. So the session is kept PATH-ONLY: the path,
+   * the pauses and the segments are all still there, `stateAt` and `toolPath` work, and
+   * `frameAt` returns null because there is no material. All three halves are asserted together
+   * so none can drift. An unknown machine is the exception: there is no timeline to keep.
+   */
   const refusal = (src: string, s: Setup, t = tool, machine: string | null = null) => {
     const session = createSimSession(tl);
     expect(session.load(THREE, setup(), tool, null).ok).toBe(true);
     const r = session.load(src, s, t, machine);
     expect(r.ok).toBe(false);
-    expect(session.loaded).toBe(false);
-    expect(session.frameAt(0, ++gen)).toBeNull();
+    if (!r.ok) {
+      expect(r.pathOnly).toBe(true);
+      expect(r.summary).toBeDefined();
+      expect(r.pauses).toBeDefined();
+      expect(r.segments).toBeDefined();
+    }
+    expect(session.loaded).toBe(true); // a path-only session is still a session
+    expect(session.frameAt(0, ++gen)).toBeNull(); // but there is no material to show
     return r.diagnostics;
   };
 
@@ -293,7 +307,38 @@ describe('refusals: each leaves NO session, even over a good one', () => {
     expect(sweepCodes(refusal(THREE, setup({ part: { ...SLAB, thickness: 0 } })))).toEqual(['stock-invalid']);
   });
 
-  it('an unknown machine id', () => expect(refusal(THREE, setup(), tool, 'Carvera')[0]?.code).toBe('machine-unknown'));
+  it('an unknown machine id leaves NOTHING: there is no timeline to keep', () => {
+    const session = createSimSession(tl);
+    const r = session.load(THREE, setup(), tool, 'Carvera');
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.pathOnly).toBe(false);
+    expect(r.summary).toBeUndefined();
+    expect(session.loaded).toBe(false);
+    expect(session.stateAt(0)).toBeNull();
+    expect(session.toolPath(0, 99)).toHaveLength(0);
+    expect(r.diagnostics[0]?.code).toBe('machine-unknown');
+  });
+
+  it('a path-only session still gives the path, and a load after it is unaffected', () => {
+    const session = createSimSession(tl);
+    const r = session.load('M321\nG0 X20 Y30 Z0\nG1 X40 S0.5 F100\nM322\n', setup(), tool, null);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    const last = (r.summary?.steps ?? 0) - 1;
+    expect(last).toBeGreaterThan(0);
+    expect(session.stateAt(last)).not.toBeNull();
+    const p = session.toolPath(0, last);
+    expect(p.length).toBeGreaterThan(0);
+    expect(p.length % 3).toBe(0);
+    expect(session.frameAt(0, ++gen)).toBeNull();
+    session.dispose();
+    expect(session.loaded).toBe(false);
+    // A path-only session owns no wasm handle, so replacing it is just a new load.
+    expect(session.load(THREE, setup(), tool, null).ok).toBe(true);
+    expect(session.loaded).toBe(true);
+    session.dispose();
+  });
 
   it('a refusal still carries the parser diagnostics that preceded it', () => {
     const session = createSimSession(tl);
@@ -486,6 +531,80 @@ describe('simStore: plain data and meshes, never jobStore.nodes', () => {
 
   it('is not the job store: it exports no `nodes`', () => {
     expect('nodes' in useSimStore.getState()).toBe(false);
+  });
+
+  it('#194: progress is observable while loading, and a retry re-runs the SAME file with double the limit', async () => {
+    const session = createSimSession(tl);
+    const seen: { budgetMs?: number; progress: boolean }[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const client = {
+      setSimSinks: () => {},
+      loadSim: async (...a: Parameters<typeof session.load>) => {
+        seen.push({ budgetMs: a[4]?.budgetMs, progress: a[4]?.onProgress !== undefined });
+        a[4]?.onProgress?.(2, 5);
+        await gate; // hold the load open, so the store's progress is observable mid-flight
+        return session.load(...a);
+      },
+      requestFrame: () => {},
+      disposeSim: async () => { session.dispose(); },
+    } as unknown as SimClient;
+    setSimClientLoader(async () => client);
+    const store = useSimStore;
+    const p = store.getState().loadProgram(THREE, setup(), tool, null);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(store.getState().status).toBe('loading');
+    expect(store.getState().progress).toEqual({ done: 2, total: 5 });
+    release();
+    await p;
+    expect(store.getState().status).toBe('ready');
+    expect(store.getState().progress).toBeNull(); // nothing is loading any more
+    expect(store.getState().pathOnly).toBe(false);
+    expect(seen).toEqual([{ budgetMs: 60_000, progress: true }]);
+
+    // The user's "try again with a longer limit": same file, twice the wall clock.
+    await store.getState().retryWithLongerBudget();
+    expect(seen).toEqual([{ budgetMs: 60_000, progress: true }, { budgetMs: 120_000, progress: true }]);
+    expect(store.getState().status).toBe('ready');
+    await store.getState().dispose();
+    expect(store.getState().budgetMs).toBe(60_000); // a fresh session starts at the default again
+    setSimClientLoader(null);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// #194: the client's hard stop. `sweepTimeline` is ONE synchronous call, so a load that
+// overruns cannot be interrupted from the main thread: terminating the worker is the cancel,
+// and it frees every wasm handle the worker owned with it.
+// ---------------------------------------------------------------------------------------
+describe('simClient: an overrunning load is stopped by the clock', () => {
+  class SilentWorker {
+    static terminated = 0;
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    postMessage(): void {} // never answers: only the timer can end the load
+    terminate(): void { SilentWorker.terminated++; }
+  }
+
+  it('the budget expires, the worker is terminated exactly once, and the refusal names the code', async () => {
+    const g = globalThis as unknown as { Worker: unknown };
+    const real = g.Worker;
+    SilentWorker.terminated = 0;
+    g.Worker = SilentWorker;
+    try {
+      const r = await loadSim(THREE, setup(), tool, null, { budgetMs: 25 });
+      expect(r.ok).toBe(false);
+      if (r.ok) return;
+      // NOT path-only: killing the worker takes the timeline with it, so there is no path
+      // either. A path-only refusal only happens when the SWEEP refused and the worker lived.
+      expect(r.pathOnly).toBe(false);
+      expect(r.diagnostics[0]?.code).toBe('sweep-budget-exceeded');
+      expect(r.diagnostics[0]?.message).toMatch(/stopped after/);
+      expect(SilentWorker.terminated).toBe(1);
+    } finally {
+      g.Worker = real;
+      terminateSim();
+    }
   });
 });
 

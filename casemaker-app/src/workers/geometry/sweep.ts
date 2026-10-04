@@ -36,6 +36,16 @@ import { executeProfile, type ManifoldToplevel } from './evaluateOp';
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
 type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
 type Polygon = [number, number][];
+type Box = ReturnType<ManifoldInstance['boundingBox']>;
+
+/**
+ * Axis-aligned box overlap, TOUCHING COUNTED AS OVERLAPPING (#194). Used to cull the parts a
+ * recheck has to subtract: a part that merely touches the move's box must be kept, because
+ * culling is only sound in the direction that keeps more.
+ */
+function boxesOverlap(a: Box, b: Box): boolean {
+  return a.min[0] <= b.max[0] && b.min[0] <= a.max[0] && a.min[1] <= b.max[1] && b.min[1] <= a.max[1] && a.min[2] <= b.max[2] && b.min[2] <= a.max[2];
+}
 
 /** Capsules per 2D union chunk. Measured to be the right order; see /Simulation.md §4.3. */
 export const CHUNK = 64;
@@ -122,6 +132,19 @@ export interface SweepResult {
 }
 
 export type SweepOutcome = { ok: true; value: SweepResult } | { ok: false; diagnostics: SweepDiagnostic[] };
+
+/** A sweep that must not run forever (#194). */
+export interface SweepOpts {
+  /**
+   * Wall clock in ms, counted from the start of the checkpoint loop. Checked between
+   * checkpoints and between air-move rechecks — the finest grain a synchronous wasm call
+   * allows, so this is an early exit, not a hard bound on a single call. The HARD bound is
+   * the client's timer, which terminates the worker (#194).
+   */
+  budgetMs?: number;
+  /** Once per checkpoint, after its solid is built. `done` runs 1…total. */
+  onProgress?: (done: number, total: number) => void;
+}
 
 /** A counter-clockwise n-gon inscribed in the circle of radius r about (cx, cy). */
 export function circlePolygon(cx: number, cy: number, r: number, n: number): Polygon {
@@ -277,14 +300,36 @@ export function sweptToolBody(
  * EARLIER pass is routine; one into a pocket that will only be cut LATER is a crash. Order
  * is the whole question, so the check is time-ordered.
  *
- * Cost: every air move gets one boolean against the uncut stock, and only a HIT is re-tested
- * against the stock minus everything cut before that step. That removal is built from
+ * Cost (#194, measured): every air move gets one boolean against the uncut stock, and only a
+ * HIT is re-tested against the removal that can reach it. That removal is built from
  * per-checkpoint PREFIXES (the moves with step < k), which only ever grow because air moves
- * are visited in program order, so each cut is added once (the removal itself is rebuilt
- * from the prefix solids when one grows — see the note inside). Within a prefix, constant-Z moves are grouped by their OWN Z and
- * swept as 2D capsule columns; a move whose Z changes is swept as the exact hull of the tool
- * at both ends — NOT at the checkpoint's lowest Z, which would credit a ramp with material it
- * has not reached and let a rapid through that material pass.
+ * are visited in program order. Within a prefix, constant-Z moves are grouped by their OWN Z
+ * and swept as 2D capsule columns; a move whose Z changes is swept as the exact hull of the
+ * tool at both ends — NOT at the checkpoint's lowest Z, which would credit a ramp with
+ * material it has not reached and let a rapid through that material pass.
+ *
+ * The re-test is LOCAL. The question is "is there still material where THIS ONE MOVE passes",
+ * so only the parts whose bounding box overlaps the move can change the answer. Each part
+ * records its box when it is made, and the re-test subtracts the union of the overlapping
+ * ones alone. What this replaced kept ONE running union of every part and rebuilt it on every
+ * recheck, so Manifold re-evaluated the whole program's removal to answer a question about a
+ * few cubic millimetres: 6.3 s of Balloon's 7.6 s sweep, and past the 120 s budget on all four
+ * files measured in #194. There is no running union now.
+ *
+ * What that bought, measured 2026-10-04 in one quiet-machine run of the corpus (scripts/
+ * sweep-timing.ts, machine Z1, 3.175 mm flat end, outputs left in scripts/sweep-timing-out/
+ * 194-after): the air gate is BOUNDED rather than unbounded. Three of the four files that used to
+ * run past 120 s now RETURN a sweep — 60.6 s for PCB-NO-UV-MASK (298 checkpoints), 80.0 s for
+ * pcb-test-air (912) and 106.8 s for TopClamp (609) — and the fourth, PCB-UV-MASK PART2, still
+ * exceeds 120 s inside the air gate. It did NOT make them simulable (the accept bar is 10 s), so
+ * the time budget, not this rewrite, is what refuses them. On Balloon it is a wash: 4.2 s against
+ * the recorded 4.1 s. On TopClamp the FINAL `Manifold.union(solids)` over all columns is
+ * co-dominant at 50.9 s — and TopClamp's air gate costs 54.1 s for only 28 air moves, so there
+ * the prefix construction, not the rechecks, is what the gate spends. The playback anchor chain
+ * still costs seconds per cold seek (3.2 s and 7.4 s worst on two of the files).
+ *
+ * One run each: this machine's spread is wide (Balloon's air gate has measured 4.1-6.9 s across
+ * runs), so treat these as observations, not tight bounds.
  *
  * NOT checked: the fixture — its solids do not exist yet (#188); said in a diagnostic.
  */
@@ -296,7 +341,9 @@ export function checkAirMoves(
   moves: AirMove[],
   checkpoints: Checkpoint[],
   radius: number,
-): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number } {
+  /** Wall-clock deadline from `performance.now()`, or null for none (#194). */
+  deadline: number | null = null,
+): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number; budgetExceeded: boolean } {
   const diagnostics: SweepDiagnostic[] = [];
   const gouges: Gouge[] = [];
   const nCap = segmentsForRadius(radius);
@@ -304,20 +351,21 @@ export function checkAirMoves(
   const zTop = topZ + OVERSHOOT_MM;
   let checked = 0;
   let rechecked = 0;
+  let budgetExceeded = false;
+  const overBudget = (): boolean => deadline !== null && performance.now() > deadline;
 
   // Per-checkpoint prefixes. Constant-Z moves accumulate into one 2D region per distinct Z
   // (`groups`); ramps become individual hull solids. Every solid made here is owned here.
-  interface Group { z: number; region: CrossSectionInstance | null; solid: ManifoldInstance | null; pending: Polygon[] }
-  interface Prefix { cp: Checkpoint; next: number; groups: Map<number, Group>; ramps: ManifoldInstance[] }
+  interface Group { z: number; region: CrossSectionInstance | null; solid: ManifoldInstance | null; box: Box | null; pending: Polygon[] }
+  interface Ramp { solid: ManifoldInstance; box: Box }
+  interface Prefix { cp: Checkpoint; next: number; groups: Map<number, Group>; ramps: Ramp[] }
   const prefixes: Prefix[] = checkpoints.filter((cp) => cp.z < topZ).map((cp) => ({ cp, next: 0, groups: new Map(), ramps: [] }));
-  // A holder, not a `let`: TypeScript narrows a `let x: T | null = null` to `null` across a
-  // closure's assignments, and the cleanup below then cannot call `.delete()` on it.
-  const held: { removed: ManifoldInstance | null } = { removed: null };
+  // Columns replaced by a larger one, and ramp solids: deleted at the end, never now (a lazy
+  // subtract may still refer to them until it is forced).
   const retired: ManifoldInstance[] = [];
 
-  /** Everything cut before `step`, as one solid, or null if nothing was. */
-  const removedBefore = (step: number): ManifoldInstance | null => {
-    const fresh: ManifoldInstance[] = [];
+  /** Bring every prefix up to `step`: every move before it now exists as a part with a box. */
+  const advanceTo = (step: number): void => {
     for (const pf of prefixes) {
       const touched: Group[] = [];
       while (pf.next < pf.cp.steps.length && (pf.cp.steps[pf.next] as number) < step) {
@@ -332,15 +380,14 @@ export function checkAirMoves(
         if (Math.min(z0, z1) >= topZ) continue;
         if (z0 !== z1 && (x0 !== x1 || y0 !== y1)) {
           const ramp = sweptToolBody(tl, [x0, y0, z0], [x1, y1, z1], radius, nCap, zTop);
-          pf.ramps.push(ramp);
-          fresh.push(ramp);
+          pf.ramps.push({ solid: ramp, box: ramp.boundingBox() });
           continue;
         }
         const z = Math.min(z0, z1);
         const key = Math.round(z * 1000);
         let g = pf.groups.get(key);
         if (!g) {
-          g = { z, region: null, solid: null, pending: [] };
+          g = { z, region: null, solid: null, box: null, pending: [] };
           pf.groups.set(key, g);
         }
         if (g.pending.length === 0) touched.push(g);
@@ -362,31 +409,28 @@ export function checkAirMoves(
         const col = tl.Manifold.extrude(g.region, zTop - g.z);
         const solid = col.translate([0, 0, g.z]);
         col.delete();
-        // The old column is a subset of the new one and already inside `held.removed`; it is
-        // retired (deleted at the end, never now: a lazy union may still refer to it).
+        // The old column is a subset of the new one, so it can never overlap a move that the
+        // new one does not: replacing it cannot lose a hit. Retired, not deleted now — a lazy
+        // subtract may still refer to it until it is forced.
         if (g.solid) retired.push(g.solid);
         g.solid = solid;
-        fresh.push(solid);
+        g.box = solid.boundingBox();
       }
     }
-    if (fresh.length > 0) {
-      // Rebuild the running removal from the CURRENT group columns and ramps. Extending it
-      // instead — union(old removal, new column) — was tried: the new column is a superset of
-      // the old one, the two share every face, and 169 such coplanar unions took 135 s where
-      // this rebuild takes 4 s on the same vendor file. Lazy evaluation makes the rebuild a
-      // tree over the parts, not a re-walk of history.
-      const parts: ManifoldInstance[] = [];
-      for (const pf of prefixes) {
-        for (const g of pf.groups.values()) if (g.solid) parts.push(g.solid);
-        for (const r of pf.ramps) parts.push(r);
-      }
-      // NEVER alias a part: each is deleted at cleanup, and a shared wasm handle deleted twice
-      // throws "instance already deleted". A single part is cloned; several are unioned.
-      const next = parts.length === 1 ? (parts[0] as ManifoldInstance).translate([0, 0, 0]) : tl.Manifold.union(parts);
-      if (held.removed) retired.push(held.removed);
-      held.removed = next;
+  };
+
+  /**
+   * The parts that exist now whose box could reach `box`. Everything else cannot change the
+   * answer, so the subtract below never looks at it. This is the whole of #194's fix: a move
+   * crosses a few millimetres, and the parts it can meet are the ones whose boxes it touches.
+   */
+  const overlapping = (box: Box): ManifoldInstance[] => {
+    const out: ManifoldInstance[] = [];
+    for (const pf of prefixes) {
+      for (const g of pf.groups.values()) if (g.solid && g.box && boxesOverlap(g.box, box)) out.push(g.solid);
+      for (const r of pf.ramps) if (boxesOverlap(r.box, box)) out.push(r.solid);
     }
-    return held.removed;
+    return out;
   };
 
   const levels = SWEEP_TOLERANCES.simplifyLevels(checkpoints.reduce((a, cp) => Math.max(a, cp.steps.length * 3), 0));
@@ -426,10 +470,15 @@ export function checkAirMoves(
     if (vol > SLIVER_MM3) {
       // It meets the uncut blank. Does it meet what is STILL there at this step?
       rechecked++;
-      const gone = removedBefore(mv.step);
-      if (gone) {
-        const remaining = hit.subtract(gone);
-        vol = remaining.volume(); // forces evaluation; the solid outlives `gone`, which is deleted below (see the gouge test)
+      advanceTo(mv.step);
+      const reachable = overlapping(hit.boundingBox());
+      if (reachable.length > 0) {
+        // Only the parts that can reach this move. One part is subtracted directly; several are
+        // unioned first, and that temporary union is deleted as soon as the subtract is forced.
+        const scope = reachable.length === 1 ? (reachable[0] as ManifoldInstance) : tl.Manifold.union(reachable);
+        const remaining = hit.subtract(scope);
+        vol = remaining.volume(); // forces evaluation, so `scope` can be deleted here
+        if (reachable.length > 1) scope.delete();
         // The noise floor applies HERE, where the removal is a simplified union: a boundary
         // mismatch of (chord error + simplify drift) along the move's footprint perimeter,
         // over the depth the tool PENETRATES the stock, is the largest volume numerical slivers
@@ -444,7 +493,8 @@ export function checkAirMoves(
         if (vol > 0 && !spindleOff) gouge = remaining;
         else remaining.delete();
       } else if (!spindleOff) {
-        // Nothing has been cut yet: the whole overlap with the blank is the gouge.
+        // No part that was cut before this move can reach it, so nothing removed the material
+        // the move passes through: the whole overlap with the blank is the gouge.
         gouge = hit.translate([0, 0, 0]);
       }
     } else {
@@ -462,17 +512,22 @@ export function checkAirMoves(
       if (vol > 0 && gouges.length < MAX_GOUGES) gouges.push({ step: mv.step, line: mv.line, solid: gouge });
       else gouge.delete();
     }
+    // Between rechecks is as fine-grained as this can be: one synchronous call cannot be
+    // interrupted from inside, so the client's timer is what bounds a single overrun (#194).
+    if (overBudget()) {
+      budgetExceeded = true;
+      break;
+    }
   }
   for (const pf of prefixes) {
     for (const g of pf.groups.values()) {
       g.region?.delete();
       g.solid?.delete();
     }
-    for (const r of pf.ramps) r.delete();
+    for (const r of pf.ramps) r.solid.delete();
   }
   for (const r of retired) r.delete();
-  held.removed?.delete();
-  return { diagnostics, gouges, checked, rechecked };
+  return { diagnostics, gouges, checked, rechecked, budgetExceeded };
 }
 
 /**
@@ -498,9 +553,10 @@ export function holderGate(tool: Tool, deepestCutDepth: number | null): SweepDia
  *
  * Refuses (rather than approximating) a non-flat tool, an unsupported stock, and an empty
  * program. Diagnostics name the checkpoint. The caller owns every Manifold in the result and
- * must `delete()` them.
+ * must `delete()` them — including on the `sweep-budget-exceeded` refusal, which deletes
+ * everything it built before it returns (#194).
  */
-export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: Tool, setup: Setup): SweepOutcome {
+export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: Tool, setup: Setup, opts?: SweepOpts): SweepOutcome {
   const diagnostics: SweepDiagnostic[] = [];
   if (timeline.summary.laser) return { ok: false, diagnostics: [{ severity: 'error', code: 'laser-job', message: 'this is a laser job (M321): a mill simulation refuses it rather than drawing a cut' }] };
   if (timeline.summary.rotary) return { ok: false, diagnostics: [{ severity: 'error', code: 'rotary-job', message: 'this job moves the A axis: V1 does not simulate rotary work (/Simulation.md §9)' }] };
@@ -519,45 +575,78 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   const { stock, topZ } = st;
 
   const t0 = performance.now();
+  const total = timeline.checkpoints.length;
+  const deadline = opts?.budgetMs === undefined ? null : t0 + opts.budgetMs;
+  const overBudget = (): boolean => deadline !== null && performance.now() > deadline;
   let msUnion = 0;
   let msExtrude = 0;
   let contours = 0;
   let skipped = 0;
   const perCheckpoint: (ManifoldInstance | null)[] = [];
   const solids: ManifoldInstance[] = [];
+  /**
+   * Give up without leaking. `perCheckpoint` aliases `solids`, so deleting `solids` covers
+   * both; `stock` is the only other handle alive at either call site.
+   */
+  const refuseBudget = (done: number): SweepOutcome => {
+    const elapsed = Math.round(performance.now() - t0);
+    for (const s of solids) s.delete();
+    stock.delete();
+    return {
+      ok: false,
+      diagnostics: [
+        {
+          severity: 'error',
+          code: 'sweep-budget-exceeded',
+          message: `the sweep stopped after ${elapsed} ms, at checkpoint ${done} of ${total}: this program is too slow to simulate at this size (/Simulation.md §4.4). Raise the time limit and try again`,
+        },
+      ],
+    };
+  };
 
-  timeline.checkpoints.forEach((cp, idx) => {
+  let budgetHit = false;
+  let done = 0;
+  for (let idx = 0; idx < total; idx++) {
+    const cp = timeline.checkpoints[idx] as Checkpoint;
     // A checkpoint at or above the top of the stock removes nothing: the vendor's rotary files
     // feed at Z = +30 over a cylinder, and a stub prism has nothing there.
     if (cp.z >= topZ) {
       perCheckpoint.push(null);
       skipped++;
-      return;
+    } else {
+      const a = performance.now();
+      const { region, contours: c } = checkpointRegion(tl, cp, radius);
+      contours += c;
+      msUnion += performance.now() - a;
+      if (!region) {
+        perCheckpoint.push(null);
+        skipped++;
+      } else {
+        const b = performance.now();
+        const height = topZ - cp.z + OVERSHOOT_MM;
+        const column = tl.Manifold.extrude(region, height);
+        region.delete();
+        const solid = column.translate([0, 0, cp.z]);
+        column.delete();
+        // Force evaluation so the timing is real (Manifold is lazy).
+        void solid.numTri();
+        msExtrude += performance.now() - b;
+        perCheckpoint.push(solid);
+        solids.push(solid);
+        if (cp.nonConstantZ) {
+          diagnostics.push({ severity: 'info', code: 'ramp-over-removed', checkpoint: idx, message: `checkpoint ${idx} has moves that change Z; swept at its lowest Z, which removes more than the machine would (/Simulation.md §3.2)` });
+        }
+      }
     }
-    const a = performance.now();
-    const { region, contours: c } = checkpointRegion(tl, cp, radius);
-    contours += c;
-    msUnion += performance.now() - a;
-    if (!region) {
-      perCheckpoint.push(null);
-      skipped++;
-      return;
+    done = idx + 1;
+    opts?.onProgress?.(done, total);
+    // Between checkpoints is as fine-grained as this can be: a wasm call is not interruptible.
+    if (overBudget()) {
+      budgetHit = true;
+      break;
     }
-    const b = performance.now();
-    const height = topZ - cp.z + OVERSHOOT_MM;
-    const column = tl.Manifold.extrude(region, height);
-    region.delete();
-    const solid = column.translate([0, 0, cp.z]);
-    column.delete();
-    // Force evaluation so the timing is real (Manifold is lazy).
-    void solid.numTri();
-    msExtrude += performance.now() - b;
-    perCheckpoint.push(solid);
-    solids.push(solid);
-    if (cp.nonConstantZ) {
-      diagnostics.push({ severity: 'info', code: 'ramp-over-removed', checkpoint: idx, message: `checkpoint ${idx} has moves that change Z; swept at its lowest Z, which removes more than the machine would (/Simulation.md §3.2)` });
-    }
-  });
+  }
+  if (budgetHit) return refuseBudget(done);
 
   // The gates that need the stock: holder depth, and the air moves.
   const swept = timeline.checkpoints.filter((cp) => cp.z < topZ);
@@ -566,8 +655,12 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   if (hg) diagnostics.push(hg);
   const bb = stock.boundingBox();
   const a0 = performance.now();
-  const air = checkAirMoves(tl, stock, topZ, bb.min[2], timeline.airMoves, timeline.checkpoints, radius);
+  const air = checkAirMoves(tl, stock, topZ, bb.min[2], timeline.airMoves, timeline.checkpoints, radius, deadline);
   const msAir = performance.now() - a0;
+  if (air.budgetExceeded) {
+    for (const g of air.gouges) g.solid.delete();
+    return refuseBudget(done);
+  }
   diagnostics.push(...air.diagnostics);
   if (air.gouges.length < air.diagnostics.filter((d) => d.code === 'rapid-through-stock').length) {
     diagnostics.push({ severity: 'info', code: 'gouges-truncated', message: `only the first ${MAX_GOUGES} rapids through the stock are returned as solids; the rest are reported but not drawn` });

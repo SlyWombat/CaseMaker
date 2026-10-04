@@ -31,9 +31,16 @@ function buffersOf(meshes: (NodeMeshOutput | null | undefined)[]): Transferable[
 }
 
 const api = {
-  /** Disposes any existing session first; a refused load leaves none. */
-  async simLoad(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null): Promise<SimLoadResult> {
-    const result = (await getSession()).load(gcodeText, setup, tool, machineId);
+  /**
+   * Disposes any existing session first. A refused load leaves none — except when the runner
+   * succeeded and only the sweep refused, in which case the session is PATH-ONLY: `toolPath`
+   * works and `simFrameAt` returns null (#194).
+   *
+   * `onProgress` must arrive as a `Comlink.proxy`. The sweep is one synchronous call, but each
+   * callback it makes posts a message immediately, so the main thread sees them as they happen.
+   */
+  async simLoad(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, budgetMs?: number, onProgress?: (done: number, total: number) => void): Promise<SimLoadResult> {
+    const result = (await getSession()).load(gcodeText, setup, tool, machineId, { budgetMs, onProgress });
     if (!result.ok) return result;
     const m = result.meshes;
     return Comlink.transfer(result, buffersOf([m.stock, m.result, m.removal, ...m.gouges.map((g) => g.mesh)]));

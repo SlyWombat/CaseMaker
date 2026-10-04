@@ -18,6 +18,7 @@ import {
   stockFromSetup,
   unionCapsules,
   SWEEP_TOLERANCES,
+  type SweepOpts,
 } from '@/workers/geometry/sweep';
 import { buildTimeline, parseGcode, stubSetup, type Setup } from '@/engine/cnc';
 import { flatEndMill, toolFromMkrRecord, cuttingRadiusForSweep, shapeFromType } from '@/engine/cnc/tool';
@@ -50,10 +51,18 @@ const R = 0.5; // a 1 mm flat end mill
 const N = segmentsForRadius(R);
 const tool = flatEndMill(2 * R);
 
+/** Three strokes at three depths: three checkpoints, one per run of cuts at one (segment, Z). */
+const THREE = [
+  'S1000 M3',
+  'G0 X10 Y10 Z1', 'G1 Z-0.5 F100', 'G1 X30',
+  'G0 Z1', 'G0 X10 Y30', 'G1 Z-1.0', 'G1 X30',
+  'G0 Z1', 'G0 X10 Y50', 'G1 Z-1.5', 'G1 X30',
+].join('\n');
+
 /** Run a program against the slab and return the volume removed plus the outcome. */
-function sweep(src: string, t = tool, s = setup()) {
+function sweep(src: string, t = tool, s = setup(), opts?: SweepOpts) {
   const timeline = buildTimeline(parseGcode(src), s);
-  const out = sweepTimeline(tl, timeline, t, s);
+  const out = sweepTimeline(tl, timeline, t, s, opts);
   return { out, timeline };
 }
 
@@ -589,6 +598,70 @@ describe('performance smoke: the measured budget holds', () => {
 });
 
 // ---------------------------------------------------------------------------------------
+// #194: the recheck is LOCAL. Every test above exercises the air gate's ANSWERS, and they are
+// unchanged; these exercise its COST, which is what the issue was about — the old design
+// subtracted one global running union rebuilt on every recheck, so a question about a few
+// cubic millimetres forced the whole program's removal to be evaluated.
+// ---------------------------------------------------------------------------------------
+describe('#194: a recheck consults only the removal its own move can meet', () => {
+  const errs = (src: string) => {
+    const { out } = sweep(src);
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    return out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock').map((d) => Number(/line (\d+)/.exec(d.message)?.[1]));
+  };
+
+  it('40 well-separated pockets with a retract after each: every retract cleared, and cheap', () => {
+    const lines = ['S1000 M3'];
+    for (let i = 0; i < 40; i++) {
+      const x = 5 + (i % 8) * 11;
+      const y = 5 + Math.floor(i / 8) * 13;
+      lines.push(`G0 X${x} Y${y} Z1`, `G1 Z-0.5 F100`, `G1 X${x + 6}`, 'G0 Z1');
+    }
+    const { out } = sweep(lines.join('\n') + '\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock')).toEqual([]);
+    expect(out.value.stats.airMovesRechecked).toBeGreaterThanOrEqual(40);
+    // Generous: the point is an ORDER, not a budget. The old design's number on this program
+    // is not recorded; on TopClamp one recheck ran past 33 s.
+    expect(out.value.stats.ms.airCheck).toBeLessThan(1500);
+  });
+
+  it('a rapid through material a DISTANT pocket did not remove is still an error — culling must not turn a miss into a pass', () => {
+    // The pocket is at X 60..70; the rapid at X 20 is 40 mm from anything it cut. The two solids'
+    // boxes do not overlap, so the recheck sees no removal and must report the crash.
+    const pocket = 'S1000 M3\nG0 X60 Y30 Z1\nG1 Z-1 F100\nG1 X70\nG0 Z5\nG0 X20\n';
+    expect(errs(pocket + 'G0 Z-0.5\n')).toEqual([7]);
+  });
+
+  it('a rapid through material an OVERLAPPING earlier cut removed is still cleared', () => {
+    const pocket = 'S1000 M3\nG0 X60 Y30 Z1\nG1 Z-1 F100\nG1 X70\nG0 Z5\nG0 X60\n';
+    expect(errs(pocket + 'G0 X70 Z-0.9\n')).toEqual([]);
+  });
+});
+
+describe('#194: the time budget and progress are part of the contract', () => {
+  it('budgetMs: 0 is refused with sweep-budget-exceeded, and a later sweep on the same wasm heap still works', () => {
+    const { out } = sweep(THREE, tool, setup(), { budgetMs: 0 });
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.diagnostics[0]?.code).toBe('sweep-budget-exceeded');
+    expect(out.diagnostics[0]?.message).toMatch(/checkpoint 1 of 3/);
+    // The refusal deleted every handle it had created; if it had not, this would throw or hang.
+    const after = sweep(THREE);
+    expect(after.out.ok).toBe(true);
+  });
+
+  it('onProgress is called once per checkpoint, in order, ending at (total, total)', () => {
+    const seen: [number, number][] = [];
+    const { out, timeline } = sweep(THREE, tool, setup(), { onProgress: (done, total) => seen.push([done, total]) });
+    expect(out.ok).toBe(true);
+    const total = timeline.checkpoints.length;
+    expect(total).toBe(3);
+    expect(seen).toEqual([[1, total], [2, total], [3, total]]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
 // OPT-IN: a real vendor file (`npm run reference-gcode:fetch`). Skipped when absent.
 // ---------------------------------------------------------------------------------------
 const CORPUS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'reference-gcode');
@@ -624,5 +697,11 @@ describe.skipIf(!existsSync(CORPUS))('a real 2.5D vendor job sweeps end to end',
     expect(out.value.stats.resultVolume).toBeLessThan(out.value.stats.stockVolume);
     expect(out.value.stats.checkpointsSwept).toBeGreaterThan(5);
     expect(out.value.stats.ms.total).toBeLessThan(120_000);
+    // #194 asked for the air gate to get 3x cheaper here (it was 6.3 s of this file's 7.6 s
+    // sweep). IT DID NOT: measured after the local-recheck rewrite, airCheck is 4.1-6.9 s across
+    // three harness runs of this file — the same order, and this machine's run-to-run spread is
+    // wider than the difference. The finding is on the issue. So this is a non-regression guard,
+    // deliberately loose, NOT the target the issue set. Opt-in: it needs the corpus present.
+    expect(out.value.stats.ms.airCheck).toBeLessThan(12_000);
   });
 });
