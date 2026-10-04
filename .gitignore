@@ -27,3 +27,7 @@ Thumbs.db
 .env.local
 .env.*.local
 .claude/
+
+# Competitor/market research staging — local copies of vendor docs (2026-10-04).
+# Remove this ignore (or whitelist just the summaries) once the research is written up.
+docs/market-research/
