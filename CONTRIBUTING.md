@@ -59,7 +59,7 @@ npm run check:sim-gate  # prod build: assert no CNC sim worker (#193; slow, pre-
 
 ## Editing the docs
 
-Five documents exist **twice**, because each has to be readable from two places:
+Six documents exist **twice**, because each has to be readable from two places:
 
 | Edit this | Mirrored to |
 | :--- | :--- |
@@ -68,6 +68,7 @@ Five documents exist **twice**, because each has to be readable from two places:
 | `casemaker-app/src/docs/user-manual.md` | `docs/user-manual.md` |
 | `casemaker-app/src/docs/technical-reference.md` | `docs/technical-reference.md` |
 | `casemaker-app/src/docs/getting-started.md` | `docs/getting-started.md` |
+| `casemaker-app/src/docs/cnc-guide.md` | `docs/cnc-guide.md` |
 
 The direction is not arbitrary. `CHANGELOG` and `CONTRIBUTING` belong at the
 repo root where GitHub looks for them; the three manuals belong in
@@ -79,6 +80,8 @@ Edit the left column, then:
 ```bash
 cd casemaker-app && npm run docs:sync
 ```
+
+A CNC change that adds a diagnostic code or changes what the user sees updates `cnc-guide.md` in the same PR.
 
 `tests/unit/docsMirror.spec.ts` fails if a mirror is stale, and names which
 file to copy which way. It is worth having: the copy of this file that shipped

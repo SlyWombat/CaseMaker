@@ -1,4 +1,4 @@
-// Five documents exist in two places, and the copies had drifted badly enough
+// Six documents exist in two places, and the copies had drifted badly enough
 // to ship wrong instructions: the CONTRIBUTING inside the app was four months
 // old and told contributors to register boards in a file that no longer has an
 // import list, and the in-app CHANGELOG still listed April's issues under
@@ -33,7 +33,7 @@ describe('documentation mirrors', () => {
     // Otherwise a document can go stale in the app with nothing to catch it.
     const index = readFileSync(join(ROOT, 'casemaker-app/src/docs/index.ts'), 'utf8');
     const served = [...index.matchAll(/from '\.\/([\w.-]+\.md)\?raw'/g)].map((m) => m[1]!);
-    expect(served.length, 'index.ts should import five docs').toBe(5);
+    expect(served.length, 'index.ts should import six docs').toBe(6);
     for (const name of served) {
       const path = `casemaker-app/src/docs/${name}`;
       const listed = DOC_PAIRS.some((p) => p.canonical === path || p.mirror === path);

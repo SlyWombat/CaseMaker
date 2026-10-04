@@ -3,6 +3,7 @@ import userManualRaw from './user-manual.md?raw';
 import technicalReferenceRaw from './technical-reference.md?raw';
 import changelogRaw from './CHANGELOG.md?raw';
 import contributingRaw from './CONTRIBUTING.md?raw';
+import cncGuideRaw from './cnc-guide.md?raw';
 
 export interface DocEntry {
   id: string;
@@ -10,12 +11,19 @@ export interface DocEntry {
   source: string;
 }
 
+// The CNC guide is listed only when the CNC simulation is built in: the public site
+// switches the CNC UI off, and it must not offer a guide to screens that are not there.
+const cncDocs: DocEntry[] = __FEATURE_SIM__
+  ? [{ id: 'cnc-guide', title: 'CNC Guide', source: cncGuideRaw }]
+  : [];
+
 export const DOCS: ReadonlyArray<DocEntry> = [
   { id: 'user-manual', title: 'User Manual', source: userManualRaw },
   { id: 'getting-started', title: 'Getting Started', source: gettingStartedRaw },
   { id: 'technical-reference', title: 'Technical Reference', source: technicalReferenceRaw },
   { id: 'changelog', title: 'Changelog', source: changelogRaw },
   { id: 'contributing', title: 'Contributing', source: contributingRaw },
+  ...cncDocs,
 ];
 
 export function findDoc(id: string): DocEntry | undefined {

@@ -1,6 +1,6 @@
 // Keep the two copies of each document identical.
 //
-// Five documents exist twice, and the duplication is not an accident:
+// Six documents exist twice, and the duplication is not an accident:
 //
 //   - `CHANGELOG.md` and `CONTRIBUTING.md` belong at the REPO ROOT, where
 //     GitHub looks for them.
@@ -41,6 +41,7 @@ export const DOC_PAIRS = [
     mirror: 'docs/technical-reference.md',
   },
   { canonical: 'casemaker-app/src/docs/getting-started.md', mirror: 'docs/getting-started.md' },
+  { canonical: 'casemaker-app/src/docs/cnc-guide.md', mirror: 'docs/cnc-guide.md' },
 ];
 
 /**

@@ -1,0 +1,23 @@
+{
+  "_comment": "GitHub issue states for the issues named in casemaker-app/src/docs/cnc-guide.md's status lines. tests/unit/cncGuide.spec.ts reads this so it can check 'no issue named in a Planned status is closed' without calling the network. Update the state here when an issue closes (and flip the matching status line in the guide, in the same PR).",
+  "issues": {
+    "165": "open",
+    "174": "open",
+    "181": "open",
+    "185": "open",
+    "189": "open",
+    "194": "open",
+    "196": "open",
+    "197": "open",
+    "198": "open",
+    "199": "open",
+    "200": "open",
+    "201": "open",
+    "202": "open",
+    "203": "open",
+    "204": "open",
+    "205": "open",
+    "206": "open",
+    "207": "open"
+  }
+}

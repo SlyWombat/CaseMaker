@@ -2,16 +2,18 @@ import { describe, it, expect } from 'vitest';
 import { DOCS, findDoc } from '@/docs';
 
 describe('docs registry', () => {
-  it('exposes the five core documents', () => {
+  it('exposes the six core documents', () => {
     const ids = DOCS.map((d) => d.id);
     // Order matches DocsModal nav (#74): User Manual is the in-app default,
-    // so it leads the list.
+    // so it leads the list. The CNC guide is present because `__FEATURE_SIM__`
+    // is true in the vitest config; it is withheld from the public build.
     expect(ids).toEqual([
       'user-manual',
       'getting-started',
       'technical-reference',
       'changelog',
       'contributing',
+      'cnc-guide',
     ]);
   });
 
