@@ -284,18 +284,24 @@ class Interp {
         return false;
       }
       case 10: {
+        // The firmware acts only on `G10 L2|L20 P..`; anything else falls through silently
+        // (Robot.cpp: `has_letter('L') && (L == 2 || L == 20) && has_letter('P')`).
         const l = this.word(words, 'L');
-        if (!l || l.value !== 2) {
-          this.diag('warning', 'unsupported-g10', line, 'only G10 L2 (set a work offset) is modelled');
+        const p = this.word(words, 'P');
+        if (!l || (l.value !== 2 && l.value !== 20)) {
+          this.diag('warning', 'unsupported-g10', line, 'only G10 L2 / L20 (set a work offset) does anything on this firmware; ignored');
           return false;
         }
-        const p = this.word(words, 'P');
+        if (!p) {
+          this.diag('warning', 'g10-without-p', line, 'G10 without a P word is IGNORED by the firmware (P0 = the current offset, P1 = G54)');
+          return false;
+        }
         const vals: Pos = [null, null, null];
         for (const w of words) {
           const idx = AXIS_INDEX[w.letter];
           if (idx !== undefined) vals[idx] = w.value * this.scale;
         }
-        this.events.push({ kind: 'wcs-set', line, l: l.value, p: p ? p.value : null, values: vals });
+        this.events.push({ kind: 'wcs-set', line, l: l.value as 2 | 20, p: p.value, values: vals });
         // The offset changes the work↔machine mapping; the work position is now unknown.
         this.work = [null, null, null];
         return false;
@@ -335,15 +341,32 @@ class Interp {
       case 90: this.absolute = true; return false;
       case 91: this.absolute = false; return false;
       case 92: {
-        this.events.push({ kind: 'offset-set', line, subcode: sub });
-        if (sub === 0) {
-          // G92 states "the current position IS these values": those axes become known.
+        const vals: Pos = [null, null, null];
+        let anyArg = false;
+        for (const w of words) {
+          if (w.letter === 'G') continue;
+          anyArg = true;
+          const idx = AXIS_INDEX[w.letter];
+          if (idx !== undefined) vals[idx] = w.value * this.scale;
+        }
+        // Robot.cpp: `.1`, `.2` and a bare `G92` reset the offset; `.3` sets it raw; `.4` is
+        // a manual homing that REDEFINES the machine position; `.5` is a laser offset; else
+        // the offset is shifted so the current position reads as the given values.
+        const reset = sub === 1 || sub === 2 || (sub === 0 && !anyArg);
+        this.events.push({ kind: 'offset-set', line, subcode: sub, values: vals, reset });
+        if (sub === 0 && anyArg) {
+          // "The current position IS these values": those axes become known.
           for (const w of words) {
             const idx = AXIS_INDEX[w.letter];
             if (idx !== undefined) this.work[idx] = w.value * this.scale;
             else if (w.letter === 'A') this.a = w.value;
           }
-        } else {
+        } else if (sub === 4) {
+          this.diag('warning', 'g92-4-manual-home', line, 'G92.4 redefines the MACHINE position itself; nothing the emulator was told about the setup holds after it');
+          this.unknownPosition();
+        } else if (sub !== 5) {
+          // The offset changed but the parser does not know the WCS, so the work position
+          // it maps to is unknown now.
           this.work = [null, null, null];
         }
         return false;

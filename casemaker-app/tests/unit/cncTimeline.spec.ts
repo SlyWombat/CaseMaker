@@ -13,6 +13,11 @@ const hold = { kind: 'tape-down' as const, contact: part.outline };
 const setupWith = (o: Partial<Setup> = {}): Setup => stubSetup(part, hold, o);
 const run = (src: string, o: Partial<Setup> = {}) => buildTimeline(parseGcode(src), setupWith(o));
 const codes = (src: string, o: Partial<Setup> = {}) => run(src, o).diagnostics.map((d) => d.code);
+/** Positions through the 3.81 mm stub accumulate float noise; compare to 1e-9, nulls exactly. */
+const expectPos = (actual: readonly (number | null)[], expected: readonly (number | null)[]): void => {
+  expect(actual).toHaveLength(expected.length);
+  expected.forEach((e, i) => (e === null ? expect(actual[i]).toBeNull() : expect(actual[i]).toBeCloseTo(e, 9)));
+};
 
 describe('machine state: what the controller holds after each step', () => {
   it('starts from the setup: starting tool, spindle off, nothing known', () => {
@@ -61,8 +66,67 @@ describe('machine state: what the controller holds after each step', () => {
     expect(tl.stateAt(1).machine).toEqual([-299, -208, -47]);
   });
 
-  it('G10 L2 for an offset OTHER than G54 is ignored, not guessed', () => {
-    expect(run('G10L2P1X-9Y-9Z-9\n').stateAt(0).wcsOrigin).toEqual([0, 0, 3.81]);
+  it('REGRESSION (review #4): P1 is G54 — the firmware does `--n` — and P2 is another offset, ignored', () => {
+    expect(run('G10L2P1X-9Y-9Z-9\n').stateAt(0).wcsOrigin).toEqual([-9, -9, -9]);
+    const other = run('G10L2P2X-9Y-9Z-9\n');
+    expect(other.stateAt(0).wcsOrigin).toEqual([0, 0, 3.81]);
+    expect(other.diagnostics.map((d) => d.code)).toContain('wcs-set-unmodelled');
+  });
+
+  it('G10 without P is ignored by the firmware, so the parser emits nothing and the runner sees nothing', () => {
+    const tl = run('G10L2X-9Y-9Z-9\nG0 X1 Y2 Z3\n');
+    expect(tl.stateAt(tl.events.length - 1).wcsOrigin).toEqual([0, 0, 3.81]);
+    expectPos(tl.stateAt(tl.events.length - 1).machine, [1, 2, 6.81]);
+  });
+
+  it('G10 L20 sets the offset so the CURRENT position reads as the given values', () => {
+    // At work (1, 2, 3) = machine (1, 2, 6.81), "read as (0, 0, 0)" puts the origin at the head.
+    const tl = run('G0 X1 Y2 Z3\nG10L20P1X0Y0Z0\nG0 X5\n');
+    expectPos(tl.stateAt(1).wcsOrigin, [1, 2, 6.81]);
+    expect(tl.stateAt(1).work).toEqual([0, 0, 0]);
+    expectPos(tl.stateAt(2).machine, [6, 2, 6.81]);
+  });
+
+  it('G10 L20 from an unknown position leaves that origin axis unknown — and everything through it', () => {
+    const s = run('G0 X1\nG10L20P1X0Y0Z0\n').stateAt(1);
+    expect(s.wcsOrigin).toEqual([1, null, null]);
+    expect(s.work).toEqual([0, null, null]);
+  });
+
+  describe('G92 shifts an offset the frame maths must carry (review #4: it was ignored)', () => {
+    it('G92 X.. Y.. Z..: the current position READS as the values; the machine does not move', () => {
+      const tl = run('G0 X10 Y20 Z3\nG92 X0 Y0 Z0\nG0 X5\n');
+      expect(tl.stateAt(1).work).toEqual([0, 0, 0]);
+      expectPos(tl.stateAt(1).machine, [10, 20, 6.81]);
+      expectPos(tl.stateAt(1).g92, [-10, -20, -3]); // g92 = v − machine + origin: 0 − 6.81 + 3.81
+      // A later move is in the SHIFTED frame: work X5 is machine X15.
+      expectPos(tl.stateAt(2).machine, [15, 20, 6.81]);
+    });
+
+    it('a bare G92, G92.1 and G92.2 RESET the offset: the work position jumps back', () => {
+      for (const reset of ['G92', 'G92.1', 'G92.2']) {
+        const tl = run(`G0 X10 Y20 Z3\nG92 X0 Y0 Z0\n${reset}\n`);
+        expect(tl.stateAt(2).g92, reset).toEqual([0, 0, 0]);
+        expectPos(tl.stateAt(2).work, [10, 20, 3]);
+      }
+    });
+
+    it('G92.3 sets the offset to the raw values', () => {
+      expect(run('G92.3 X1 Y2 Z3\n').stateAt(0).g92).toEqual([1, 2, 3]);
+    });
+
+    it('G92.4 is a manual homing: the MACHINE position is redefined, so nothing is known, and it warns', () => {
+      const tl = run('G0 X1 Y2 Z3\nG92.4 X0 Y0 Z0\n');
+      expect(tl.stateAt(1).machine).toEqual([null, null, null]);
+      expect(tl.diagnostics.map((d) => d.code)).toContain('g92-4-manual-home');
+    });
+
+    it('a shift from an UNKNOWN position: the work axis is the value written, the offset is unknown', () => {
+      const s = run('G92 X0\n').stateAt(0);
+      expect(s.work[0]).toBe(0);
+      expect(s.g92[0]).toBeNull();
+      expect(s.machine[0]).toBeNull();
+    });
   });
 
   it('G28 and M491 make the whole position unknown again', () => {
@@ -235,8 +299,8 @@ describe('the tool-change macro, animated from the machine profile (#182 Q14, #1
     const synth = tl.events.filter((e) => e.synthetic === 'tool-change-macro');
     expect(synth.map((e) => e.kind)).toEqual([
       'move', 'move', // lift to clearance Z, park at the change position
-      'move', 'move', // safe Z, to the sensor
-      'probe', 'probe', 'tlo-calibrate', // probe twice, save the offset
+      'move', // to the sensor, AT clearance Z (fill_cali_scripts with clear_z = true)
+      'probe', 'move', 'probe', 'tlo-calibrate', // probe fast, retract, probe slow, save the offset
       'move', 'move', 'move', // safe Z, clearance Z, back to the saved X,Y
     ]);
     // Every synthetic step carries the M6 line, and is a machine-frame rapid.
@@ -263,9 +327,13 @@ describe('the tool-change macro, animated from the machine profile (#182 Q14, #1
     expect(steps[first]).toEqual([-50, -60, tc.clearanceZ]);
     expect(steps[first + 1]).toEqual([tc.changePosition[0], tc.changePosition[1], tc.clearanceZ]);
     expect(tl.events[first + 2]?.kind).toBe('tool-change');
-    expect(steps[first + 3]).toEqual([tc.changePosition[0], tc.changePosition[1], tc.safeZ]);
-    expect(steps[first + 4]).toEqual([tc.sensor[0], tc.sensor[1], tc.safeZ]);
-    expect(steps[first + 5]).toEqual([tc.sensor[0], tc.sensor[1], null]); // after the probe: Z is at contact
+    // REGRESSION (review #4): the traverse to the sensor is at CLEARANCE Z, not safe Z.
+    expect(steps[first + 3]).toEqual([tc.sensor[0], tc.sensor[1], tc.clearanceZ]);
+    expect(steps[first + 4]).toEqual([tc.sensor[0], tc.sensor[1], null]); // after the fast probe: Z is at contact
+    expect(steps[first + 5]).toEqual([tc.sensor[0], tc.sensor[1], null]); // the 1 mm retract from an unknown Z is unknown
+    expect(steps[first + 6]).toEqual([tc.sensor[0], tc.sensor[1], null]); // after the slow probe
+    expect(steps[first + 8]).toEqual([tc.sensor[0], tc.sensor[1], tc.safeZ]);
+    expect(steps[first + 9]).toEqual([tc.sensor[0], tc.sensor[1], tc.clearanceZ]);
     expect(steps[first + 10]).toEqual([-50, -60, tc.clearanceZ]); // back to the saved X,Y, at clearance
   });
 
@@ -278,6 +346,26 @@ describe('the tool-change macro, animated from the machine profile (#182 Q14, #1
     expect(s.work[1]).toBeCloseTo(-60, 12);
     expect(s.work[2]).toBeCloseTo(M.toolChange.clearanceZ - 3.81, 12);
     expect(tl.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  });
+
+  it('G28 with a profile is "go to the clearance position": Z first, then X,Y — all three known after', () => {
+    const tl = buildTimeline(parseGcode('G0 X-50 Y-60 Z-10\nG28\nG0 X-55\n'), setupWith(), M);
+    const synth = tl.events.filter((e) => e.synthetic === 'g28-clearance');
+    expect(synth.map((e) => e.kind)).toEqual(['move', 'move']);
+    const home = tl.events.findIndex((e) => e.kind === 'home');
+    expect(tl.events[home]).toMatchObject({ expanded: true });
+    expect(tl.stateAt(home + 1).machine).toEqual([-50, -60, M.toolChange.clearanceZ]);
+    expect(tl.stateAt(home + 2).machine).toEqual([M.toolChange.clearanceXY[0], M.toolChange.clearanceXY[1], M.toolChange.clearanceZ]);
+    expect(tl.diagnostics.map((d) => d.code)).not.toContain('cut-unknown-z');
+  });
+
+  it('M491 with a profile is the calibration half of the macro, returning to where it started', () => {
+    const tl = buildTimeline(parseGcode('G0 X-50 Y-60 Z-10\nM491\nG0 X-55\n'), setupWith(), M);
+    const synth = tl.events.filter((e) => e.synthetic === 'tlo-calibrate');
+    expect(synth.map((e) => e.kind)).toEqual(['move', 'move', 'probe', 'move', 'probe', 'tlo-calibrate', 'move', 'move', 'move']);
+    const last = tl.events.length - 1;
+    expect(tl.stateAt(last - 1).machine).toEqual([-50, -60, M.toolChange.clearanceZ]);
+    expect(tl.stateAt(last).work[0]).toBeCloseTo(-55, 12);
   });
 
   it('a NO-OP change inserts nothing, with or without a profile', () => {
@@ -293,6 +381,21 @@ describe('the tool-change macro, animated from the machine profile (#182 Q14, #1
   it('synthetic moves never make checkpoints: they are rapids, not cuts', () => {
     const tl = buildTimeline(parseGcode('S1000 M3\nG1 X1 Y1 Z-1 F100\nT2M6\n'), setupWith({ startingTool: 1 }), M);
     expect(tl.summary.checkpoints).toBe(1);
+  });
+});
+
+describe('stubSetup with a machine (review #4: the default stub sat at the Z1\'s origin, outside its envelope)', () => {
+  it('places the part inside the envelope: a whole job runs with no outside-envelope error', () => {
+    const setup = stubSetup(part, hold, { startingTool: 1 }, Z1);
+    const tl = buildTimeline(parseGcode('G0 X0 Y0 Z5\nS1000 M3\nG1 Z-0.5 F100\nG1 X70 Y30\nG0 Z5\nG28\n'), setup, Z1);
+    expect(tl.diagnostics.filter((d) => d.code === 'outside-envelope')).toEqual([]);
+    expect(setup.wcs.origin[2]).toBe(Z1.toolChange.safeZ);
+    expect(setup.placement.origin[2]).toBeCloseTo(Z1.toolChange.safeZ - part.thickness, 12);
+  });
+
+  it('...whereas the machine-less stub does leave it on the first +X move', () => {
+    const tl = buildTimeline(parseGcode('G0 X1 Y0 Z5\n'), stubSetup(part, hold), Z1);
+    expect(tl.diagnostics.map((d) => d.code)).toContain('outside-envelope');
   });
 });
 

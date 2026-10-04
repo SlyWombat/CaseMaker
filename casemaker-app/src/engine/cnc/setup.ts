@@ -25,6 +25,7 @@
 
 import type { Profile } from '@/engine/compiler/profile';
 import type { Mm, Vec2, Vec3 } from '@/types/units';
+import type { MachineProfile } from './machine';
 
 export type Degrees = number;
 
@@ -122,15 +123,24 @@ export interface Setup {
  * The reference setup for a part that sits with its model origin at the machine origin and
  * is registered exactly: the simplest valid stub, and what tests start from.
  */
-export function stubSetup(part: PartSpec, workholding: Workholding, overrides: Partial<Setup> = {}): Setup {
+export function stubSetup(part: PartSpec, workholding: Workholding, overrides: Partial<Setup> = {}, machine?: MachineProfile): Setup {
   const zTop = part.kind === 'prism' ? part.thickness : part.kind === 'cylinder' ? part.diameter / 2 : 0;
+  // Without a machine the stub sits at the machine origin, which is fine for the frame
+  // maths and useless on a real Z1, whose origin is the far top corner of a NEGATIVE
+  // envelope (every +X move would leave it). With one, the model origin goes to the centre
+  // of the envelope and the top face to the profile's safe Z — a height that is, by the
+  // firmware's own definition, above any work. It is still a stub: a real placement comes
+  // from probing (decisions 26 and 28).
+  const at: Vec3 = machine
+    ? [(machine.envelope.x.min + machine.envelope.x.max) / 2, (machine.envelope.y.min + machine.envelope.y.max) / 2, machine.toolChange.safeZ - zTop]
+    : [0, 0, 0];
   return {
     part,
     workholding,
-    placement: { origin: [0, 0, 0], rotationZ: 0, source: 'stub' },
+    placement: { origin: at, rotationZ: 0, source: 'stub' },
     // The work origin on the top face directly above the model origin, as Studio's
     // `topFrontLeft` does for a part whose front-left corner is its model origin.
-    wcs: { origin: [0, 0, zTop], source: 'stub', uncertainty: 0.05 },
+    wcs: { origin: [at[0], at[1], at[2] + zTop], source: 'stub', uncertainty: 0.05 },
     startingTool: 'unknown',
     ...overrides,
   };

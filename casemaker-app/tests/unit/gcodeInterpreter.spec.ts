@@ -262,6 +262,21 @@ describe('motion, units and modes', () => {
     expect(r.events[0]).toMatchObject({ kind: 'wcs-set', l: 2, p: 0, values: [-300, -210, -50] });
   });
 
+  it('G10 L20 is carried too; G10 without P is a warning and NO event (the firmware ignores it)', () => {
+    expect(parseGcode('G10L20P1X0\n').events[0]).toMatchObject({ kind: 'wcs-set', l: 20, p: 1 });
+    const r = parseGcode('G10L2X0\n');
+    expect(r.events).toHaveLength(0);
+    expect(r.diagnostics.map((d) => d.code)).toContain('g10-without-p');
+  });
+
+  it('G92 carries its values and says whether it is a reset', () => {
+    expect(parseGcode('G92 X1 Y2\n').events[0]).toMatchObject({ kind: 'offset-set', subcode: 0, values: [1, 2, null], reset: false });
+    expect(parseGcode('G92\n').events[0]).toMatchObject({ kind: 'offset-set', reset: true });
+    expect(parseGcode('G92.1\n').events[0]).toMatchObject({ kind: 'offset-set', subcode: 1, reset: true });
+    expect(parseGcode('G92.3 X1\n').events[0]).toMatchObject({ kind: 'offset-set', subcode: 3, reset: false, values: [1, null, null] });
+    expect(parseGcode('G92.4 X0\n').diagnostics.map((d) => d.code)).toContain('g92-4-manual-home');
+  });
+
   it('G4, G28, G38.x, G54..G59 and G92.x produce events', () => {
     const r = parseGcode('G4 P1\nG28\nG38.2 Z-5 F50\nG55\nG92.4A0S0\n');
     expect(kinds(r)).toEqual(['dwell', 'home', 'probe', 'wcs-select', 'offset-set']);

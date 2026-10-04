@@ -78,11 +78,16 @@ export interface MachineProfile {
    * (`/Z1-Firmware-Dialect.md` §2); the numbers from the shipped config.
    */
   toolChange: {
-    /** Z the head lifts to before moving to the change position, and returns to afterwards. */
+    /**
+     * Z the head lifts to before moving to the change position, traverses to the sensor at
+     * (`fill_cali_scripts(.., clear_z = true)` on the manual-change path), and returns to.
+     */
     clearanceZ: Mm;
+    /** XY of the "clearance position" `G28` and the completion of a change go to (`clearance_x/y`). */
+    clearanceXY: Vec2;
     /** XY the head parks at while the operator swaps the tool. */
     changePosition: Vec2;
-    /** Z used while moving to and from the tool-length sensor with a tool clamped. */
+    /** Z the head lifts to right after the length probe, before the final lift to clearance. */
     safeZ: Mm;
     /** XY of the tool-length sensor: `anchor1 + 181` on each axis, hard-coded for the Z1. */
     sensor: Vec2;
@@ -128,6 +133,7 @@ export const Z1: MachineProfile = {
   anchor2: [ANCHOR1[0] + 88.5, ANCHOR1[1] + 45.0],
   toolChange: {
     clearanceZ: -1.0,
+    clearanceXY: [-11.6, -14.6],
     changePosition: [ANCHOR1[0] + 48.78 + 132, ANCHOR1[1] + 179.74],
     safeZ: -20.0,
     sensor: [ANCHOR1[0] + 181, ANCHOR1[1] + 181],

@@ -2,7 +2,7 @@
 export * from './setup';
 export * from './frames';
 export * from './machine';
-export { buildTimeline, applyEvent, initialState, isRealToolChange, resolveMove, toolChangeMacro, DIAGNOSTIC_CAP } from './emulator/timeline';
+export { buildTimeline, applyEvent, initialState, isRealToolChange, resolveMove, toolChangeMacro, tloCalibrateMacro, g28Clearance, DIAGNOSTIC_CAP } from './emulator/timeline';
 export type {
   AirMove,
   Checkpoint,

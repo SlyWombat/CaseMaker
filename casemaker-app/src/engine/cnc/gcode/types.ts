@@ -45,10 +45,12 @@ export interface BaseEvent {
   line: number;
   /**
    * Set by the RUNNER, never the parser, on steps it inserted that are not in the program:
-   * the head movement of the firmware's manual tool-change macro (#182, Q14). They carry
-   * the `M6` line. The parser's own events never have this field.
+   * the head movement of the firmware's manual tool-change macro (#182, Q14), of an `M491`
+   * calibration, or of `G28` (which on this firmware is "go to the clearance position").
+   * They carry the line of the command that caused them. The parser's own events never
+   * have this field.
    */
-  synthetic?: 'tool-change-macro';
+  synthetic?: 'tool-change-macro' | 'tlo-calibrate' | 'g28-clearance';
 }
 
 export interface MoveEvent extends BaseEvent {
@@ -136,6 +138,8 @@ export interface DwellEvent extends BaseEvent {
 
 export interface HomeEvent extends BaseEvent {
   kind: 'home';
+  /** Set by the runner when it inserted the clearance moves `G28` performs (needs a profile). */
+  expanded?: boolean;
 }
 
 export interface ProbeEvent extends BaseEvent {
@@ -147,6 +151,8 @@ export interface ProbeEvent extends BaseEvent {
 
 export interface TloCalibrateEvent extends BaseEvent {
   kind: 'tlo-calibrate';
+  /** Set by the runner when it inserted the head movement of the `M491` calibration macro. */
+  expanded?: boolean;
 }
 
 export interface WcsSelectEvent extends BaseEvent {
@@ -157,9 +163,14 @@ export interface WcsSelectEvent extends BaseEvent {
 
 export interface WcsSetEvent extends BaseEvent {
   kind: 'wcs-set';
-  /** `G10 L2` writes a work offset into the controller. Raw words, not applied. */
-  l: number | null;
-  p: number | null;
+  /**
+   * `G10 L2 Pn` writes work offset n into the controller as MACHINE coordinates; `L20` sets
+   * it so the current position READS as the given values. `P0` is the current offset,
+   * `P1` is G54 (the firmware does `--n`). The parser carries the words; the runner applies
+   * them. A G10 without P never reaches here: the firmware ignores it.
+   */
+  l: 2 | 20;
+  p: number;
   values: Pos;
 }
 
@@ -167,6 +178,13 @@ export interface OffsetSetEvent extends BaseEvent {
   kind: 'offset-set';
   /** `G92` family, the subcode as written (`G92.4` is 4). */
   subcode: number;
+  /**
+   * `G92 X.. Y.. Z..` shifts the G92 offset so the current position reads as these values.
+   * `G92` with no axes, `G92.1` and `G92.2` RESET the offset (`reset`); `G92.3` sets it to
+   * the raw values; `G92.4` is a manual homing that redefines the MACHINE position itself.
+   */
+  values: Pos;
+  reset: boolean;
 }
 
 export interface LaserModeEvent extends BaseEvent {

@@ -24,11 +24,9 @@
  * clearance. Those are the verifier's, and need #184's machine profile.
  */
 
-import { machinePosToWork, workPosToMachine } from '../frames';
-import type { GcodeEvent, MoveEvent, ParseResult, Pos, ProbeEvent, ToolChangeEvent } from '../gcode/types';
+import type { GcodeEvent, HomeEvent, MoveEvent, ParseResult, Pos, ProbeEvent, TloCalibrateEvent, ToolChangeEvent } from '../gcode/types';
 import { insideEnvelope, type MachineProfile } from '../machine';
 import type { Setup } from '../setup';
-import type { Vec3 } from '@/types/units';
 
 export type ToolState = number | 'unknown';
 
@@ -42,8 +40,17 @@ export interface MachineState {
   laser: boolean;
   /** Selected work coordinate system, 0 = G54. Only G54 is modelled. */
   wcs: number;
-  /** The work origin in machine coordinates. Starts at `setup.wcs.origin`; `G10 L2 P0` moves it. */
-  wcsOrigin: Vec3;
+  /**
+   * The G54 origin in machine coordinates. Starts at `setup.wcs.origin`; `G10 L2 P0|P1`
+   * moves it, and `L20` from an unknown position leaves an axis unknown.
+   */
+  wcsOrigin: Pos;
+  /**
+   * The G92 offset (Robot.cpp `g92_offset`): work = machine − wcsOrigin + g92. Starts at 0;
+   * `G92 X..` shifts it, `G92` / `.1` / `.2` reset it. An axis shifted from an unknown
+   * position is unknown, and so is every position that depends on it.
+   */
+  g92: Pos;
   work: Pos;
   machine: Pos;
   /** Rotary axis, tracked only. */
@@ -161,15 +168,39 @@ export function initialState(setup: Setup): MachineState {
     laser: false,
     wcs: 0,
     wcsOrigin: [setup.wcs.origin[0], setup.wcs.origin[1], setup.wcs.origin[2]],
+    g92: [0, 0, 0],
     work: [null, null, null],
     machine: [null, null, null],
     a: null,
   };
 }
 
-/** A setup whose work origin is the state's CURRENT one, so frame conversion tracks `G10`. */
-function withOrigin(setup: Setup, s: MachineState): Setup {
-  return { ...setup, wcs: { ...setup.wcs, origin: s.wcsOrigin } };
+/**
+ * Work → machine through the state's CURRENT offsets (the firmware's `wcs2mcs`, without the
+ * tool offset, which the runner never sees applied). A work offset is a pure translation, so
+ * each axis converts on its own and an unknown offset axis makes that axis unknown.
+ */
+function toMachinePos(s: MachineState, w: Pos): Pos {
+  const out: Pos = [null, null, null];
+  for (let i = 0; i < 3; i++) {
+    const v = w[i] ?? null;
+    const o = s.wcsOrigin[i] ?? null;
+    const g = s.g92[i] ?? null;
+    out[i] = v === null || o === null || g === null ? null : v + o - g;
+  }
+  return out;
+}
+
+/** Machine → work (`mcs2wcs`): work = machine − wcsOrigin + g92. */
+function toWorkPos(s: MachineState, m: Pos): Pos {
+  const out: Pos = [null, null, null];
+  for (let i = 0; i < 3; i++) {
+    const v = m[i] ?? null;
+    const o = s.wcsOrigin[i] ?? null;
+    const g = s.g92[i] ?? null;
+    out[i] = v === null || o === null || g === null ? null : v - o + g;
+  }
+  return out;
 }
 
 /** Is this a `tool-change` that really changes the tool? Null when it cannot be known. */
@@ -214,7 +245,7 @@ export function resolveMove(s: MachineState, ev: MoveEvent): { from: Pos; to: Po
 }
 
 /** The pure reducer. Never mutates its input. */
-export function applyEvent(s: MachineState, ev: GcodeEvent, setup: Setup): MachineState {
+export function applyEvent(s: MachineState, ev: GcodeEvent, _setup: Setup): MachineState {
   switch (ev.kind) {
     case 'move': {
       // Resolved against THIS state, not the parser's: see `resolveMove`.
@@ -225,13 +256,13 @@ export function applyEvent(s: MachineState, ev: GcodeEvent, setup: Setup): Machi
           a: ev.a,
           work: to,
           // Only G54 is modelled: another WCS has an offset this emulator was not given.
-          machine: s.wcs === 0 ? workPosToMachine(withOrigin(setup, s), to) : unknownPos(),
+          machine: s.wcs === 0 ? toMachinePos(s, to) : unknownPos(),
         };
       }
       return {
         ...s,
         machine: to,
-        work: s.wcs === 0 ? machinePosToWork(withOrigin(setup, s), to) : unknownPos(),
+        work: s.wcs === 0 ? toWorkPos(s, to) : unknownPos(),
       };
     }
     case 'tool-change': {
@@ -262,17 +293,63 @@ export function applyEvent(s: MachineState, ev: GcodeEvent, setup: Setup): Machi
       // A different WCS means a different offset: the work position can no longer be mapped.
       return ev.wcs === s.wcs ? s : { ...s, wcs: ev.wcs, work: unknownPos() };
     case 'wcs-set': {
-      // `G10 L2 P0` writes the G54 offset INTO THE CONTROLLER, in machine coordinates. A file
-      // that sets it overrides the stubbed one for the axes it names.
-      if (ev.p !== 0 && ev.p !== null) return s;
-      const o: Vec3 = [
-        ev.values[0] ?? s.wcsOrigin[0],
-        ev.values[1] ?? s.wcsOrigin[1],
-        ev.values[2] ?? s.wcsOrigin[2],
-      ];
+      // `G10 L2 Pn` writes offset n INTO THE CONTROLLER. Robot.cpp: `P0` means the current
+      // offset, otherwise `--n`, so P1 is G54 and P2 is G55. Only G54 is modelled; a write to
+      // any other offset is ignored, not guessed (the first version applied P0 only and
+      // treated P1 as "another offset" — backwards).
+      const n = ev.p === 0 ? s.wcs : ev.p - 1;
+      if (n !== 0) return s;
+      const o: Pos = [s.wcsOrigin[0], s.wcsOrigin[1], s.wcsOrigin[2]];
+      for (let i = 0; i < 3; i++) {
+        const v = ev.values[i] ?? null;
+        if (v === null) continue;
+        if (ev.l === 2) {
+          o[i] = v; // the offset IS this machine coordinate
+        } else {
+          // L20: the current position must READ as v, so origin = machine + g92 − v; from an
+          // unknown machine position the new origin is unknown.
+          const m = s.machine[i] ?? null;
+          const g = s.g92[i] ?? null;
+          o[i] = m === null || g === null ? null : m + g - v;
+        }
+      }
       const next: MachineState = { ...s, wcsOrigin: o };
       // The machine position did not change; the work position it corresponds to did.
-      next.work = s.wcs === 0 ? machinePosToWork(withOrigin(setup, next), s.machine) : unknownPos();
+      next.work = s.wcs === 0 ? toWorkPos(next, s.machine) : unknownPos();
+      return next;
+    }
+    case 'offset-set': {
+      // G92 (Robot.cpp case 92). `.5` is a laser offset and changes no position.
+      if (ev.subcode === 5) return s;
+      if (ev.subcode === 4) {
+        // Manual homing: the MACHINE position itself is redefined. Nothing the setup said
+        // about where the part is relative to machine zero holds any more.
+        return { ...s, work: unknownPos(), machine: unknownPos() };
+      }
+      let g92: Pos;
+      if (ev.reset) {
+        g92 = [0, 0, 0];
+      } else if (ev.subcode === 3) {
+        g92 = [ev.values[0] ?? 0, ev.values[1] ?? 0, ev.values[2] ?? 0];
+      } else {
+        // Shift so the current position reads as the given values: g92 += v − work, i.e.
+        // g92 = v − machine + origin. From an unknown machine position the axis is unknown.
+        g92 = [s.g92[0], s.g92[1], s.g92[2]];
+        for (let i = 0; i < 3; i++) {
+          const v = ev.values[i] ?? null;
+          if (v === null) continue;
+          const m = s.machine[i] ?? null;
+          const o = s.wcsOrigin[i] ?? null;
+          g92[i] = m === null || o === null ? null : v - m + o;
+        }
+      }
+      const next: MachineState = { ...s, g92 };
+      // The machine position did not change. The work position did — and for a shifted axis
+      // it is exactly the value written, known even when the machine position is not.
+      next.work = s.wcs === 0 ? toWorkPos(next, s.machine) : unknownPos();
+      if (!ev.reset && ev.subcode === 0 && s.wcs === 0) {
+        for (let i = 0; i < 3; i++) if (ev.values[i] !== null) next.work[i] = ev.values[i] ?? null;
+      }
       return next;
     }
     case 'probe': {
@@ -291,6 +368,9 @@ export function applyEvent(s: MachineState, ev: GcodeEvent, setup: Setup): Machi
     }
     case 'home':
     case 'tlo-calibrate':
+      // With a profile the runner inserted the head movement these perform and the moves
+      // own the position; without one, where the head ends up is not known.
+      if (ev.expanded) return s;
       return { ...s, work: unknownPos(), machine: unknownPos() };
     case 'program-end':
       // M2/M30 reset the work offset to G54.
@@ -307,56 +387,103 @@ function lowestKnownZ(a: number | null, b: number | null): number | null {
 }
 
 /**
- * The firmware's manual tool-change macro, as synthetic machine-frame steps (#182, Q14).
- * Read from `fill_change_scripts`, `fill_cali_scripts` and the completion path of
+ * The firmware's macros, as synthetic machine-frame steps (#182, Q14). Read from
+ * `fill_change_scripts`, `fill_cali_scripts` and the completion path of `on_main_loop` in
  * `ATCHandler.cpp` (`/Z1-Firmware-Dialect.md` §2); the positions are the profile's.
  *
- *   lift to clearance Z -> park at the change position -> [M490.1: operator swaps the tool]
- *   -> safe Z -> to the tool-length sensor -> probe down fast, retract, probe slow
- *   -> save the offset -> safe Z -> clearance Z -> back to the saved X,Y
+ * Manual tool change (`M6`, `isATC = 0`; change and calibration both with `clear_z = true`):
  *
- * The probe stops at the tool tip's contact, a height the program cannot know, so Z is
- * unknown between the probe and the next rapid. After the macro the head is at the saved
- * X,Y and `clearanceZ`: all three axes KNOWN, which is strictly more than the un-expanded
- * change (Z unknown) can say.
+ *   lift to clearance Z -> park at the change position -> [M490.1: operator swaps the tool]
+ *   -> to the tool-length sensor AT CLEARANCE Z -> probe down fast -> retract `probeRetract`
+ *   -> probe slow -> save the offset -> safe Z -> clearance Z -> back to the saved X,Y
+ *
+ * (The first version traversed to the sensor at safe Z; the source says clearance Z, and the
+ * review caught it.) The probe stops at the tool tip's contact, a height the program cannot
+ * know, so Z is unknown from the probe until the lift to safe Z. After the macro the head is
+ * at the saved X,Y and `clearanceZ`: all three axes KNOWN, which is strictly more than the
+ * un-expanded change (Z unknown) can say.
+ *
+ * `M491` is the calibration half alone, from the current position, with the same return.
+ * `G28` is "go to the clearance position": lift to clearance Z, then X,Y to `clearanceXY`.
  */
-export function toolChangeMacro(ev: ToolChangeEvent, before: MachineState, m: MachineProfile): GcodeEvent[] {
-  const tc = m.toolChange;
-  const base = { line: ev.line, synthetic: 'tool-change-macro' as const };
-  const mv = (from: Pos, to: Pos, commanded: [boolean, boolean, boolean]): MoveEvent => ({
+type SyntheticKind = NonNullable<GcodeEvent['synthetic']>;
+
+function syntheticMove(base: { line: number; synthetic: SyntheticKind }, a: number | null) {
+  return (from: Pos, to: Pos, commanded: [boolean, boolean, boolean], relative = false): MoveEvent => ({
     kind: 'move',
     ...base,
     mode: 'rapid',
     frame: 'machine',
     from,
     to,
-    a: before.a ?? null,
+    a,
     feed: null,
     power: null,
     fromArc: false,
     commanded,
     values: [commanded[0] ? to[0] : null, commanded[1] ? to[1] : null, commanded[2] ? to[2] : null],
-    relative: false,
+    relative,
   });
+}
+
+/** `fill_cali_scripts(.., clear_z = true)` plus the completion path: from `at`, back to `saved` X,Y. */
+function calibrationSteps(base: { line: number; synthetic: SyntheticKind }, a: number | null, at: Pos, saved: Pos, m: MachineProfile): GcodeEvent[] {
+  const tc = m.toolChange;
+  const mv = syntheticMove(base, a);
   const probe = (target: Pos): ProbeEvent => ({ kind: 'probe', ...base, subcode: 6, target });
+  const atClear: Pos = [at[0], at[1], tc.clearanceZ];
+  const sensorAtClear: Pos = [tc.sensor[0], tc.sensor[1], tc.clearanceZ];
+  const sensorUnknownZ: Pos = [tc.sensor[0], tc.sensor[1], null];
+  const sensorAtSafe: Pos = [tc.sensor[0], tc.sensor[1], tc.safeZ];
+  const retract: Pos = [null, null, tc.probeRetract];
+  const steps: GcodeEvent[] = [];
+  if (at[2] !== tc.clearanceZ) steps.push(mv(at, atClear, [false, false, true]));
+  steps.push(
+    mv(atClear, sensorAtClear, [true, true, false]),
+    probe([null, null, tc.sensorZ]),
+    // `G91 G0 Z<retract>`: a relative lift from the contact height, which is unknown.
+    { ...mv(sensorUnknownZ, sensorUnknownZ, [false, false, true], true), values: retract },
+    probe([null, null, tc.sensorZ]),
+    { kind: 'tlo-calibrate', ...base, expanded: true },
+    mv(sensorUnknownZ, sensorAtSafe, [false, false, true]),
+    mv(sensorAtSafe, sensorAtClear, [false, false, true]),
+    mv(sensorAtClear, [saved[0], saved[1], tc.clearanceZ], [true, true, false]),
+  );
+  return steps;
+}
+
+export function toolChangeMacro(ev: ToolChangeEvent, before: MachineState, m: MachineProfile): GcodeEvent[] {
+  const tc = m.toolChange;
+  const base = { line: ev.line, synthetic: 'tool-change-macro' as const };
+  const mv = syntheticMove(base, before.a ?? null);
   const saved = before.machine;
   const atClear: Pos = [saved[0], saved[1], tc.clearanceZ];
   const parked: Pos = [tc.changePosition[0], tc.changePosition[1], tc.clearanceZ];
-  const safeOverPark: Pos = [parked[0], parked[1], tc.safeZ];
-  const sensorAtSafe: Pos = [tc.sensor[0], tc.sensor[1], tc.safeZ];
-  const sensorUnknownZ: Pos = [tc.sensor[0], tc.sensor[1], null];
   return [
     mv(saved, atClear, [false, false, true]),
     mv(atClear, parked, [true, true, false]),
     { ...ev, expanded: true },
-    mv(parked, safeOverPark, [false, false, true]),
-    mv(safeOverPark, sensorAtSafe, [true, true, false]),
-    probe([null, null, tc.sensorZ]),
-    probe([null, null, tc.sensorZ]),
-    { kind: 'tlo-calibrate', ...base },
-    mv(sensorUnknownZ, sensorAtSafe, [false, false, true]),
-    mv(sensorAtSafe, [tc.sensor[0], tc.sensor[1], tc.clearanceZ], [false, false, true]),
-    mv([tc.sensor[0], tc.sensor[1], tc.clearanceZ], atClear, [true, true, false]),
+    ...calibrationSteps(base, before.a ?? null, parked, saved, m),
+  ];
+}
+
+/** `M491`: re-measure the tool length from wherever the head is, then return. */
+export function tloCalibrateMacro(ev: TloCalibrateEvent, before: MachineState, m: MachineProfile): GcodeEvent[] {
+  const base = { line: ev.line, synthetic: 'tlo-calibrate' as const };
+  return [{ ...ev, expanded: true }, ...calibrationSteps(base, before.a ?? null, before.machine, before.machine, m)];
+}
+
+/** `G28` on this firmware: lift to clearance Z, then X,Y to the clearance position. */
+export function g28Clearance(ev: HomeEvent, before: MachineState, m: MachineProfile): GcodeEvent[] {
+  const tc = m.toolChange;
+  const base = { line: ev.line, synthetic: 'g28-clearance' as const };
+  const mv = syntheticMove(base, before.a ?? null);
+  const cur = before.machine;
+  const atClear: Pos = [cur[0], cur[1], tc.clearanceZ];
+  return [
+    { ...ev, expanded: true },
+    mv(cur, atClear, [false, false, true]),
+    mv(atClear, [tc.clearanceXY[0], tc.clearanceXY[1], tc.clearanceZ], [true, true, false]),
   ];
 }
 
@@ -429,6 +556,10 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
       const p: PausePoint = { step: i, kind: ev.reason, line: ev.line, fromTool: state.tool, toTool: null };
       pauses.push(p);
       boundary(i, p);
+    } else if (ev.kind === 'offset-set' && ev.subcode === 4) {
+      diag('warning', 'g92-4-manual-home', i, ev.line, "G92.4 redefines the machine position: the setup's placement no longer holds, positions are unknown from here");
+    } else if (ev.kind === 'wcs-set' && (ev.p === 0 ? state.wcs : ev.p - 1) !== 0) {
+      diag('warning', 'wcs-set-unmodelled', i, ev.line, `G10 L${ev.l} P${ev.p} writes an offset other than G54, which this emulator does not model; ignored`);
     } else if (ev.kind === 'laser-mode' && ev.on) {
       sawLaser = true;
     } else if (ev.kind === 'wcs-select' && ev.wcs !== 0 && !warnedWcs.has(ev.wcs)) {
@@ -444,11 +575,10 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
       // in both frames: cutting and proximity happen in WORK coordinates, the envelope check
       // in MACHINE coordinates. Only G54 is modelled; under another WCS the mapping is unknown.
       const r = resolveMove(state, m);
-      const cur = withOrigin(setup, state);
       const mapped = state.wcs === 0;
-      const toW = m.frame === 'work' ? r.to : mapped ? machinePosToWork(cur, r.to) : unknownPos();
-      const fromW = m.frame === 'work' ? r.from : mapped ? machinePosToWork(cur, r.from) : unknownPos();
-      const toM = m.frame === 'machine' ? r.to : mapped ? workPosToMachine(cur, r.to) : unknownPos();
+      const toW = m.frame === 'work' ? r.to : mapped ? toWorkPos(state, r.to) : unknownPos();
+      const fromW = m.frame === 'work' ? r.from : mapped ? toWorkPos(state, r.from) : unknownPos();
+      const toM = m.frame === 'machine' ? r.to : mapped ? toMachinePos(state, r.to) : unknownPos();
       if (machine && !insideEnvelope(machine, toM)) {
         diag('error', 'outside-envelope', i, m.line, `a move to machine (${toM.map((v) => (v === null ? '?' : v.toFixed(3))).join(', ')}) leaves the ${machine.name}'s envelope`);
       }
@@ -509,8 +639,14 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
   };
 
   for (const src of parse.events) {
-    if (src.kind === 'tool-change' && machine && !machine.hasATC && isRealToolChange(state, src.tool) !== false) {
+    if (!machine) {
+      process(src);
+    } else if (src.kind === 'tool-change' && !machine.hasATC && isRealToolChange(state, src.tool) !== false) {
       for (const step of toolChangeMacro(src, state, machine)) process(step);
+    } else if (src.kind === 'tlo-calibrate') {
+      for (const step of tloCalibrateMacro(src, state, machine)) process(step);
+    } else if (src.kind === 'home') {
+      for (const step of g28Clearance(src, state, machine)) process(step);
     } else {
       process(src);
     }
