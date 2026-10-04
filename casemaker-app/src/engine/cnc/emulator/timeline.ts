@@ -88,6 +88,22 @@ export interface Checkpoint {
   zKey: number;
   /** The Z in mm that bucket stands for: the LOWEST Z of any move in it. */
   z: number;
+  /**
+   * Position in program order. A checkpoint is one CONTIGUOUS run of cuts at one (segment,
+   * Z): when the program leaves a Z and comes back to it, that is a NEW checkpoint, so the
+   * list is causal — everything in checkpoint k happened before anything in k+1. (The first
+   * version keyed on (segment, Z) alone and a return to an earlier Z was folded into the old
+   * checkpoint, so playback at a step in between showed cuts that had not happened yet.)
+   */
+  run: number;
+  /**
+   * Per move, the Z at each end in the work frame: [z0, z1, ...], one pair per entry of
+   * `steps`. A start Z the program never established is stored as the end Z (a plunge). The
+   * air-move gate sweeps a move whose ends differ as the exact hull of the tool at both
+   * ends, instead of this checkpoint's lowest Z, which would credit a ramp with material it
+   * has not reached yet.
+   */
+  zs: number[];
   /** Step indices of the cutting moves, in program order. */
   steps: number[];
   /**
@@ -492,7 +508,7 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
   const diagnostics: TimelineDiagnostic[] = [];
   const segments: Segment[] = [];
   const pauses: PausePoint[] = [];
-  const buckets = new Map<string, Checkpoint>();
+  let current: Checkpoint | null = null;
   const order: Checkpoint[] = [];
   const snapshots: MachineState[] = [];
   let cuttingMoves = 0;
@@ -603,13 +619,14 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
           diag('warning', 'cut-unknown-z', i, m.line, 'a cutting move at a Z the program never established: not swept, the emulator will not invent one (the picture has a gap here)');
         } else {
           const zKey = Math.round(z * 1000);
-          const key = `${seg.index}:${zKey}`;
-          let cp = buckets.get(key);
+          // Reuse the bucket only while the program is STILL at this (segment, Z): a return
+          // to it later is a new, later checkpoint (see `Checkpoint.run`).
+          let cp = current && current.segment === seg.index && current.zKey === zKey ? current : null;
           if (!cp) {
-            cp = { segment: seg.index, zKey, z, steps: [], xy: [], nonConstantZ: false };
-            buckets.set(key, cp);
+            cp = { segment: seg.index, zKey, z, run: order.length, steps: [], xy: [], zs: [], nonConstantZ: false };
             order.push(cp);
           }
+          current = cp;
           if (toW[0] === null || toW[1] === null) {
             unswept++;
             diag('warning', 'cut-unknown-xy', i, m.line, 'a cutting move to an X or Y the program never established: not swept, nothing can be invented for it (the picture has a gap here)');
@@ -621,12 +638,14 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: Machin
             }
             cp.steps.push(i);
             cp.xy.push(fromKnown ? (fromW[0] as number) : toW[0], fromKnown ? (fromW[1] as number) : toW[1], toW[0], toW[1]);
+            cp.zs.push(fromKnown && fromW[2] !== null ? fromW[2] : toW[2], toW[2]);
+            // A RAMP changes Z while travelling in X,Y; the lowest-Z rule over-removes along
+            // it, and the picture says so. A vertical plunge (no X,Y travel) is not a ramp: the
+            // column from its lowest end up is exactly what the tool removes, so it is not
+            // flagged (the first version flagged every plunge inside a bucket). A move whose
+            // start Z is unknown cannot be called a ramp either.
+            if (fromKnown && fromW[2] !== null && toW[2] !== fromW[2] && (fromW[0] !== toW[0] || fromW[1] !== toW[1])) cp.nonConstantZ = true;
           }
-          // Non-constant only when BOTH ends are known and differ. A move whose start Z is
-          // unknown (a plunge from the tool-change clearance height) is not a ramp: it is a
-          // vertical column from its known end up, which is exactly what the lowest-Z rule
-          // removes, so calling it non-constant would flag a plain plunge as an over-removal.
-          if (fromW[2] !== null && toW[2] !== fromW[2]) cp.nonConstantZ = true;
           if (z < cp.z) cp.z = z;
         }
       }

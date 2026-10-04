@@ -51,6 +51,18 @@ export const OVERSHOOT_MM = 0.01;
 export const PROXIMITY_MARGIN_MM = 1.0;
 /** Air moves checked individually; beyond this a job is summarised instead (each is a boolean). */
 export const MAX_AIR_CHECKS = 4000;
+/**
+ * Checkpoints the 2.5D sweep will take on. A program with more distinct (segment, Z) runs
+ * than this is a 3D or dense job (`/Simulation.md` §4.4, §9): the vendor's fatigue-test.nc
+ * has 108 744 and ran the wasm heap out before the first subtraction. Refused by name, with
+ * the count, rather than attempted. PROVISIONAL — a budget, not a measurement (#182).
+ */
+export const MAX_CHECKPOINTS = 1000;
+/**
+ * Below this an intersection with the UNCUT blank is floating-point dust, not material: the
+ * blank and the air solid are both exact polygons, so a real overlap is far larger.
+ */
+export const SLIVER_MM3 = 1e-6;
 
 export interface SweepDiagnostic {
   severity: 'error' | 'warning' | 'info';
@@ -69,7 +81,7 @@ export interface SweepStats {
   checkpointsSwept: number;
   checkpointsSkipped: number;
   contours: number;
-  ms: { union2d: number; extrude: number; subtract: number; total: number };
+  ms: { union2d: number; extrude: number; subtract: number; airCheck: number; total: number };
 }
 
 export interface SweepResult {
@@ -196,6 +208,42 @@ export function checkpointRegion(tl: ManifoldToplevel, cp: Checkpoint, radius: n
 }
 
 /**
+ * The tool's body — a flat end mill is a cylinder from its tip up — swept along one straight
+ * move, EXACTLY: the swept volume of a convex solid along a segment is the convex hull of
+ * its two end placements. Each end's cylinder rises to `zTop`, which is above every point of
+ * interest (the stock top plus the overshoot), so the hull covers the tool everywhere it is
+ * below the top; whatever it covers above the top is harmless, because every consumer
+ * intersects the result with the stock.
+ *
+ * This replaces the first version's capsule prism from the move's lowest Z to its highest,
+ * which was wrong in both directions: a diagonal descent into a pocket was tested as if the
+ * tool were at its final depth along the WHOLE move (a false crash), and a horizontal move
+ * was a 1 µm sheet with a zero noise floor (false slivers). Both ends `null`-free.
+ */
+export function sweptToolBody(
+  tl: ManifoldToplevel,
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+  radius: number,
+  n: number,
+  zTop: number,
+): ManifoldInstance {
+  const cylAt = (x: number, y: number, z: number): ManifoldInstance => {
+    const c = tl.Manifold.cylinder(Math.max(zTop - z, 1e-6), radius, radius, n, false);
+    const placed = c.translate([x, y, z]);
+    c.delete();
+    return placed;
+  };
+  const a = cylAt(from[0], from[1], from[2]);
+  if (from[0] === to[0] && from[1] === to[1] && from[2] === to[2]) return a;
+  const b = cylAt(to[0], to[1], to[2]);
+  const h = tl.Manifold.hull([a, b]);
+  a.delete();
+  b.delete();
+  return h;
+}
+
+/**
  * Check the moves that cut nothing but can still be wrong (`/Simulation.md` §7.1):
  *
  *   rapid             through material, or below the bed             -> error
@@ -208,10 +256,14 @@ export function checkpointRegion(tl: ManifoldToplevel, cp: Checkpoint, radius: n
  * EARLIER pass is routine; one into a pocket that will only be cut LATER is a crash. Order
  * is the whole question, so the check is time-ordered.
  *
- * Cost: every air move gets one cheap boolean against the uncut stock, and only a HIT is
- * re-tested against the stock minus everything cut before that step. That removal is built
- * from per-checkpoint PREFIXES (the bucket's capsules with step < k), which only ever grow
- * because air moves are visited in program order, so each capsule is unioned once.
+ * Cost: every air move gets one boolean against the uncut stock, and only a HIT is re-tested
+ * against the stock minus everything cut before that step. That removal is built from
+ * per-checkpoint PREFIXES (the moves with step < k), which only ever grow because air moves
+ * are visited in program order, so each cut is added once (the removal itself is rebuilt
+ * from the prefix solids when one grows — see the note inside). Within a prefix, constant-Z moves are grouped by their OWN Z and
+ * swept as 2D capsule columns; a move whose Z changes is swept as the exact hull of the tool
+ * at both ends — NOT at the checkpoint's lowest Z, which would credit a ramp with material it
+ * has not reached and let a rapid through that material pass.
  *
  * NOT checked: the fixture — its solids do not exist yet (#188); said in a diagnostic.
  */
@@ -227,60 +279,95 @@ export function checkAirMoves(
   const diagnostics: SweepDiagnostic[] = [];
   const nCap = segmentsForRadius(radius);
   const nMargin = segmentsForRadius(radius + PROXIMITY_MARGIN_MM);
+  const zTop = topZ + OVERSHOOT_MM;
   let checked = 0;
   let rechecked = 0;
 
-  // Per-checkpoint prefixes: the part of each bucket cut before the step being examined.
-  interface Prefix { cp: Checkpoint; next: number; region: CrossSectionInstance | null; solid: ManifoldInstance | null; dirty: boolean }
-  const prefixes: Prefix[] = checkpoints.filter((cp) => cp.z < topZ).map((cp) => ({ cp, next: 0, region: null, solid: null, dirty: false }));
-  // A holder, not two `let`s: TypeScript narrows a `let x: T | null = null` to `null` across a
+  // Per-checkpoint prefixes. Constant-Z moves accumulate into one 2D region per distinct Z
+  // (`groups`); ramps become individual hull solids. Every solid made here is owned here.
+  interface Group { z: number; region: CrossSectionInstance | null; solid: ManifoldInstance | null; pending: Polygon[] }
+  interface Prefix { cp: Checkpoint; next: number; groups: Map<number, Group>; ramps: ManifoldInstance[] }
+  const prefixes: Prefix[] = checkpoints.filter((cp) => cp.z < topZ).map((cp) => ({ cp, next: 0, groups: new Map(), ramps: [] }));
+  // A holder, not a `let`: TypeScript narrows a `let x: T | null = null` to `null` across a
   // closure's assignments, and the cleanup below then cannot call `.delete()` on it.
-  const held: { removed: ManifoldInstance | null; dirty: boolean } = { removed: null, dirty: false };
+  const held: { removed: ManifoldInstance | null } = { removed: null };
+  const retired: ManifoldInstance[] = [];
 
   /** Everything cut before `step`, as one solid, or null if nothing was. */
   const removedBefore = (step: number): ManifoldInstance | null => {
+    const fresh: ManifoldInstance[] = [];
     for (const pf of prefixes) {
-      const polys: Polygon[] = [];
+      const touched: Group[] = [];
       while (pf.next < pf.cp.steps.length && (pf.cp.steps[pf.next] as number) < step) {
         const q = pf.next * 4;
-        capsuleContours(pf.cp.xy[q] as number, pf.cp.xy[q + 1] as number, pf.cp.xy[q + 2] as number, pf.cp.xy[q + 3] as number, radius, nCap, polys);
+        const x0 = pf.cp.xy[q] as number;
+        const y0 = pf.cp.xy[q + 1] as number;
+        const x1 = pf.cp.xy[q + 2] as number;
+        const y1 = pf.cp.xy[q + 3] as number;
+        const z0 = pf.cp.zs[pf.next * 2] ?? pf.cp.z;
+        const z1 = pf.cp.zs[pf.next * 2 + 1] ?? pf.cp.z;
         pf.next++;
+        if (Math.min(z0, z1) >= topZ) continue;
+        if (z0 !== z1 && (x0 !== x1 || y0 !== y1)) {
+          const ramp = sweptToolBody(tl, [x0, y0, z0], [x1, y1, z1], radius, nCap, zTop);
+          pf.ramps.push(ramp);
+          fresh.push(ramp);
+          continue;
+        }
+        const z = Math.min(z0, z1);
+        const key = Math.round(z * 1000);
+        let g = pf.groups.get(key);
+        if (!g) {
+          g = { z, region: null, solid: null, pending: [] };
+          pf.groups.set(key, g);
+        }
+        if (g.pending.length === 0) touched.push(g);
+        capsuleContours(x0, y0, x1, y1, radius, nCap, g.pending);
       }
-      if (polys.length === 0) continue;
-      const slice = unionCapsules(tl, polys) as CrossSectionInstance;
-      if (pf.region) {
-        const u = tl.CrossSection.union([pf.region, slice]);
-        const s = u.simplify(SWEEP_SIMPLIFY_EPS_MM);
-        u.delete();
-        pf.region.delete();
-        slice.delete();
-        pf.region = s;
-      } else {
-        pf.region = slice;
+      for (const g of touched) {
+        const slice = unionCapsules(tl, g.pending) as CrossSectionInstance;
+        g.pending = [];
+        if (g.region) {
+          const u = tl.CrossSection.union([g.region, slice]);
+          const s = u.simplify(SWEEP_SIMPLIFY_EPS_MM);
+          u.delete();
+          g.region.delete();
+          slice.delete();
+          g.region = s;
+        } else {
+          g.region = slice;
+        }
+        const col = tl.Manifold.extrude(g.region, zTop - g.z);
+        const solid = col.translate([0, 0, g.z]);
+        col.delete();
+        // The old column is a subset of the new one and already inside `held.removed`; it is
+        // retired (deleted at the end, never now: a lazy union may still refer to it).
+        if (g.solid) retired.push(g.solid);
+        g.solid = solid;
+        fresh.push(solid);
       }
-      pf.dirty = true;
     }
-    for (const pf of prefixes) {
-      if (!pf.dirty || !pf.region) continue;
-      pf.solid?.delete();
-      const col = tl.Manifold.extrude(pf.region, topZ - pf.cp.z + OVERSHOOT_MM);
-      pf.solid = col.translate([0, 0, pf.cp.z]);
-      col.delete();
-      pf.dirty = false;
-      held.dirty = true;
-    }
-    if (held.dirty) {
-      held.removed?.delete();
-      const solids = prefixes.map((pf) => pf.solid).filter((x): x is ManifoldInstance => x !== null);
-      // NEVER alias a prefix's own solid: it is deleted on rebuild and again at cleanup, and a
-      // shared wasm handle deleted twice throws "instance already deleted". A single solid is
-      // cloned (a zero translate is a new handle); several are unioned into a new one.
-      held.removed = solids.length === 0 ? null : solids.length === 1 ? (solids[0] as ManifoldInstance).translate([0, 0, 0]) : tl.Manifold.union(solids);
-      held.dirty = false;
+    if (fresh.length > 0) {
+      // Rebuild the running removal from the CURRENT group columns and ramps. Extending it
+      // instead — union(old removal, new column) — was tried: the new column is a superset of
+      // the old one, the two share every face, and 169 such coplanar unions took 135 s where
+      // this rebuild takes 4 s on the same vendor file. Lazy evaluation makes the rebuild a
+      // tree over the parts, not a re-walk of history.
+      const parts: ManifoldInstance[] = [];
+      for (const pf of prefixes) {
+        for (const g of pf.groups.values()) if (g.solid) parts.push(g.solid);
+        for (const r of pf.ramps) parts.push(r);
+      }
+      // NEVER alias a part: each is deleted at cleanup, and a shared wasm handle deleted twice
+      // throws "instance already deleted". A single part is cloned; several are unioned.
+      const next = parts.length === 1 ? (parts[0] as ManifoldInstance).translate([0, 0, 0]) : tl.Manifold.union(parts);
+      if (held.removed) retired.push(held.removed);
+      held.removed = next;
     }
     return held.removed;
   };
 
+  const levels = SWEEP_TOLERANCES.simplifyLevels(checkpoints.reduce((a, cp) => Math.max(a, cp.steps.length * 3), 0));
   for (const mv of moves) {
     if (checked >= MAX_AIR_CHECKS) {
       diagnostics.push({ severity: 'warning', code: 'air-moves-unchecked', message: `${moves.length - checked} air move(s) not checked: more than ${MAX_AIR_CHECKS} in the job` });
@@ -290,7 +377,6 @@ export function checkAirMoves(
     const spindleOff = mv.kind === 'feed-spindle-off';
     const margin = spindleOff ? PROXIMITY_MARGIN_MM : 0;
     const zLo = Math.min(mv.from[2], mv.to[2]) - margin;
-    const zHi = Math.max(mv.from[2], mv.to[2]) + margin;
     if (zLo < bedZ) {
       diagnostics.push(
         spindleOff
@@ -300,26 +386,20 @@ export function checkAirMoves(
       continue;
     }
     if (zLo >= topZ) continue; // entirely above the blank: nothing to hit
-    const polys: Polygon[] = [];
-    capsuleContours(mv.from[0], mv.from[1], mv.to[0], mv.to[1], radius + margin, spindleOff ? nMargin : nCap, polys);
-    const region = tl.CrossSection.ofPolygons(polys, 'Positive');
-    const col = tl.Manifold.extrude(region, Math.max(zHi - zLo, 1e-6));
-    region.delete();
-    const placed = col.translate([0, 0, zLo]);
-    col.delete();
-    const hit = placed.intersect(stock);
-    placed.delete();
-    // The noise floor: a boundary mismatch of (chord error + simplify drift) along the move's
-    // capsule perimeter, over its Z span, is the largest volume numerical slivers can reach.
-    // Below it, "overlap" is polygons disagreeing to the bit, not material: five retracts in a
-    // real vendor job left 0.000 mm³ of it where a cut ended on an arc segment. A genuine graze
-    // 0.05 mm deep over the same move is an order of magnitude above this floor.
-    const length = Math.hypot(mv.to[0] - mv.from[0], mv.to[1] - mv.from[1]);
-    const perimeter = 2 * length + 2 * Math.PI * (radius + margin);
-    const levels = SWEEP_TOLERANCES.simplifyLevels(checkpoints.reduce((a, cp) => Math.max(a, cp.steps.length * 3), 0));
-    const floor = (ARC_CHORD_TOLERANCE_MM + SWEEP_SIMPLIFY_EPS_MM * (1 + levels)) * perimeter * (zHi - zLo);
+    // The tool body (grown by the margin for the proximity rule) swept along the move.
+    const body = sweptToolBody(
+      tl,
+      [mv.from[0], mv.from[1], mv.from[2] - margin],
+      [mv.to[0], mv.to[1], mv.to[2] - margin],
+      radius + margin,
+      spindleOff ? nMargin : nCap,
+      zTop + margin,
+    );
+    const hit = body.intersect(stock);
+    body.delete();
     let vol = hit.volume();
-    if (vol > floor) {
+    // Against the uncut blank both solids are exact, so anything beyond float dust is real.
+    if (vol > SLIVER_MM3) {
       // It meets the uncut blank. Does it meet what is STILL there at this step?
       rechecked++;
       const gone = removedBefore(mv.step);
@@ -327,10 +407,23 @@ export function checkAirMoves(
         const remaining = hit.subtract(gone);
         vol = remaining.volume();
         remaining.delete();
+        // The noise floor applies HERE, where the removal is a simplified union: a boundary
+        // mismatch of (chord error + simplify drift) along the move's footprint perimeter,
+        // over the depth the tool PENETRATES the stock, is the largest volume numerical slivers
+        // can reach. Below it, "overlap" is polygons disagreeing to the bit, not material. The
+        // first version scaled the floor by the move's whole Z span, so a plunge from 5 mm up
+        // to 0.3 mm deep had a floor five times its own volume and was never reported.
+        const length = Math.hypot(mv.to[0] - mv.from[0], mv.to[1] - mv.from[1]);
+        const perimeter = 2 * length + 2 * Math.PI * (radius + margin);
+        const penetration = Math.min(topZ, Math.max(mv.from[2], mv.to[2])) - zLo + OVERSHOOT_MM;
+        const floor = (ARC_CHORD_TOLERANCE_MM + SWEEP_SIMPLIFY_EPS_MM * (1 + levels)) * perimeter * penetration;
+        if (vol <= floor) vol = 0;
       }
+    } else {
+      vol = 0;
     }
     hit.delete();
-    if (vol > floor) {
+    if (vol > 0) {
       diagnostics.push(
         spindleOff
           ? { severity: 'error', code: 'spindle-off-near-stock', message: `line ${mv.line}: a feed move with the spindle off comes within ${PROXIMITY_MARGIN_MM} mm of material still present at that point in the program` }
@@ -339,9 +432,13 @@ export function checkAirMoves(
     }
   }
   for (const pf of prefixes) {
-    pf.region?.delete();
-    pf.solid?.delete();
+    for (const g of pf.groups.values()) {
+      g.region?.delete();
+      g.solid?.delete();
+    }
+    for (const r of pf.ramps) r.delete();
   }
+  for (const r of retired) r.delete();
   held.removed?.delete();
   return { diagnostics, checked, rechecked };
 }
@@ -379,6 +476,12 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   if (!rr.ok) return { ok: false, diagnostics: [{ severity: 'error', code: 'tool-refused', message: rr.reason }] };
   const radius = rr.radius;
 
+  if (timeline.checkpoints.length > MAX_CHECKPOINTS) {
+    return {
+      ok: false,
+      diagnostics: [{ severity: 'error', code: 'dense-3d-refused', message: `this program cuts at ${timeline.checkpoints.length} distinct (segment, Z) runs, more than the ${MAX_CHECKPOINTS} the 2.5D sweep takes on: a 3D or dense job V1 does not simulate (/Simulation.md §4.4, §9)` }],
+    };
+  }
   const st = stockFromSetup(tl, setup);
   if (isDiag(st)) return { ok: false, diagnostics: [st] };
   const { stock, topZ } = st;
@@ -430,7 +533,9 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   const hg = holderGate(tool, deepest);
   if (hg) diagnostics.push(hg);
   const bb = stock.boundingBox();
+  const a0 = performance.now();
   const air = checkAirMoves(tl, stock, topZ, bb.min[2], timeline.airMoves, timeline.checkpoints, radius);
+  const msAir = performance.now() - a0;
   diagnostics.push(...air.diagnostics);
   if (setup.workholding.kind !== 'tape-down' && setup.workholding.kind !== 'anchor-bracket') {
     diagnostics.push({ severity: 'info', code: 'fixture-unchecked', message: `the ${setup.workholding.kind} is not modelled as an obstacle yet (#188): proximity to the fixture is NOT checked` });
@@ -477,7 +582,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         checkpointsSwept: solids.length,
         checkpointsSkipped: skipped,
         contours,
-        ms: { union2d: msUnion, extrude: msExtrude, subtract: msSubtract, total: performance.now() - t0 },
+        ms: { union2d: msUnion, extrude: msExtrude, subtract: msSubtract, airCheck: msAir, total: performance.now() - t0 },
       },
       diagnostics,
     },

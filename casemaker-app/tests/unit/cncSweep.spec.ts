@@ -417,6 +417,66 @@ describe('the must-FAIL list (§7.1): refusals and the gates that need the stock
   });
 });
 
+describe('the air-move gate after code review #4: the tool body is swept EXACTLY, and the floor is honest', () => {
+  const errs = (src: string) => {
+    const { out } = sweep(src);
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    return out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock').map((d) => Number(/line (\d+)/.exec(d.message)?.[1]));
+  };
+
+  it('REGRESSION: a plunge from safe height to 0.3 mm deep IS a crash — the old floor scaled with the whole Z span and hid it', () => {
+    // Volume π r² × 0.31 ≈ 0.24 mm³. The old floor: tolerance × perimeter × 5.3 mm ≈ 0.18 mm³
+    // against the uncut blank; marginal at r = 0.5 and hidden outright for shallower plunges.
+    expect(errs('G0 X20 Y30 Z5\nG0 Z-0.3\n')).toEqual([2]);
+    expect(errs('G0 X20 Y30 Z5\nG0 Z-0.05\n')).toEqual([2]);
+  });
+
+  it('REGRESSION: a horizontal rapid along a slot it has already cut is NOT an error — the old check was a 1 µm sheet with a zero floor', () => {
+    const slot = 'S1000 M3\nG0 X20 Y30 Z1\nG1 Z-1 F100\nG1 X40\nG0 Z5\nG0 X20\n';
+    expect(errs(slot + 'G0 Z-1\nG0 X40\n')).toEqual([]);
+    // ...and 0.2 mm BELOW the slot floor it is one, over the whole length.
+    expect(errs(slot + 'G0 Z-1.2\nG0 X40\n')).toEqual([7, 8]);
+  });
+
+  it('REGRESSION: a DIAGONAL descent into a pocket is swept as the hull of the tool at both ends, not as a box at its final depth', () => {
+    // Pocket at X 60..70, 1 mm deep. The rapid descends from (20, 30, 5) to (65, 30, -0.3): the
+    // tool is below the top only over the last ~2.5 mm of travel, all of it inside the pocket.
+    // The old box put the tool at -0.3 along ALL 45 mm — a false crash through solid stock.
+    const pocket = 'S1000 M3\nG0 X60 Y30 Z1\nG1 Z-1 F100\nG1 X70\nG0 Z5\nG0 X20\n';
+    expect(errs(pocket + 'G0 X65 Z-0.3\n')).toEqual([]);
+    // Aim it 10 mm short of the pocket instead and the last stretch is through solid: error.
+    expect(errs(pocket + 'G0 X50 Z-0.3\n')).toEqual([7]);
+  });
+
+  it('REGRESSION: a RAMP is credited only with what it has reached — a rapid into material the ramp left behind IS a crash', () => {
+    // A ramp from Z 0 at X 20 to Z -1 at X 40. At X 22 it was ~0.1 mm deep; a rapid to -0.9 there
+    // hits ~0.8 mm of material. The old prefix used the checkpoint's lowest Z along the whole
+    // ramp and let this pass. At X 39 the ramp was ~0.95 mm deep: a rapid to -0.9 is clear.
+    const ramp = 'S1000 M3\nG0 X20 Y30 Z0\nG1 X40 Z-1 F100\nG0 Z5\n';
+    expect(errs(ramp + 'G0 X22\nG0 Z-0.9\n')).toEqual([6]);
+    expect(errs(ramp + 'G0 X39\nG0 Z-0.9\n')).toEqual([]);
+  });
+
+  it('a vertical plunge inside a bucket is not a "ramp" and is not flagged as over-removed', () => {
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z0\nG1 Z-1 F100\nG1 X40\n');
+    if (!out.ok) throw new Error('refused');
+    expect(out.value.diagnostics.map((d) => d.code)).not.toContain('ramp-over-removed');
+    expect(out.value.stats.removedVolume).toBeCloseTo(capsuleArea(20, R, N) * 1, 1);
+  });
+
+  it('a 3D / dense job is REFUSED by name with its count, before any geometry is built', () => {
+    // 1 001 cuts, each at its own Z: 1 001 checkpoints. The vendor fatigue-test.nc has 108 744.
+    const lines = ['S1000 M3', 'G0 X20 Y30 Z1'];
+    for (let i = 0; i <= 1000; i++) lines.push(`G1 X${20 + (i % 2) * 10} Z${(-0.001 * (i + 1)).toFixed(3)} F100`);
+    const { out, timeline } = sweep(lines.join('\n') + '\n');
+    expect(timeline.checkpoints.length).toBeGreaterThan(1000);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.diagnostics[0]?.code).toBe('dense-3d-refused');
+    expect(out.diagnostics[0]?.message).toContain(String(timeline.checkpoints.length));
+  });
+});
+
 describe('tools: V1 sweeps a flat end mill and refuses everything else BY NAME', () => {
   it.each([
     ['Flat End', 'flat'], ['flat end mill', 'flat'], ['Ball Nose', 'ball'], ['ball end mill', 'ball'],

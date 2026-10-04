@@ -384,6 +384,31 @@ describe('the tool-change macro, animated from the machine profile (#182 Q14, #1
   });
 });
 
+describe('checkpoints are CAUSAL runs (review #4: a return to an earlier Z was folded into the old checkpoint)', () => {
+  it('leaving a Z and coming back to it is a NEW checkpoint, in program order', () => {
+    const tl = run('S1000 M3\nG0 X10 Y10 Z1\nG1 Z-0.5 F100\nG1 X30\nG1 Z-1.0\nG1 X10\nG1 Z-0.5\nG1 Y30\n');
+    expect(tl.checkpoints.map((c) => c.z)).toEqual([-0.5, -1.0, -0.5]);
+    expect(tl.checkpoints.map((c) => c.run)).toEqual([0, 1, 2]);
+    // Every checkpoint's steps come after all of the previous one's.
+    for (let k = 1; k < tl.checkpoints.length; k++) {
+      const prev = tl.checkpoints[k - 1]!.steps;
+      expect(tl.checkpoints[k]!.steps[0]!).toBeGreaterThan(prev[prev.length - 1]!);
+    }
+  });
+
+  it('carries each move\'s own Z pair, with an unknown start stored as the end (a plunge)', () => {
+    const tl = run('S1000 M3\nG0 X10 Y10 Z1\nG1 Z-0.5 F100\nG1 X30 Z-1\n');
+    // The plunge ends at -0.5; the ramp ends at -1, so it is its own (lower) checkpoint.
+    expect(tl.checkpoints[0]!.zs).toEqual([1, -0.5]);
+    expect(tl.checkpoints[0]!.nonConstantZ).toBe(false);
+    const cp = tl.checkpoints[1]!;
+    expect(cp.zs).toEqual([-0.5, -1]);
+    expect(cp.nonConstantZ).toBe(true); // it travels in X while changing Z
+    const plunge = run('S1000 M3\nG0 X10 Y10 Z1\nG1 Z-0.5 F100\nG1 X30\n').checkpoints[0]!;
+    expect(plunge.nonConstantZ).toBe(false); // a vertical plunge is not a ramp
+  });
+});
+
 describe('stubSetup with a machine (review #4: the default stub sat at the Z1\'s origin, outside its envelope)', () => {
   it('places the part inside the envelope: a whole job runs with no outside-envelope error', () => {
     const setup = stubSetup(part, hold, { startingTool: 1 }, Z1);

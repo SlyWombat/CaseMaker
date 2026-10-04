@@ -20,7 +20,7 @@ function run(src: string, o: Partial<Setup> = {}) {
   const timeline = buildTimeline(parseGcode(src), setup);
   const out = sweepTimeline(tl, timeline, tool, setup);
   if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
-  return { timeline, sweep: out.value, playback: createPlayback(timeline, out.value) };
+  return { timeline, sweep: out.value, playback: createPlayback(tl, timeline, out.value) };
 }
 
 // Three strokes at three depths, each in a fresh place so their volumes simply add.
@@ -82,12 +82,54 @@ describe('stockAt(k)', () => {
     playback.dispose();
   });
 
-  it('with no checkpoints at all, every k is the stock', () => {
+  it('with no checkpoints at all, every k is the stock — as the playback\'s OWN clone, never the sweep\'s handle', () => {
+    // Review #4: returning `sweep.stock` itself made the caller guess which handles it owned.
     const { playback, sweep } = run('G0 X1 Y1 Z1\n');
     expect(playback.count).toBe(0);
-    expect(playback.stockAt(0)).toBe(sweep.stock);
+    const s = playback.stockAt(0);
+    expect(s).not.toBe(sweep.stock);
+    expect(s.volume()).toBeCloseTo(sweep.stock.volume(), 6);
+    expect(playback.stockAt(-1)).toBe(s);
     expect(playback.removedVolumeAt(5)).toBe(0);
     playback.dispose();
+    expect(sweep.stock.volume()).toBeGreaterThan(0);
+  });
+});
+
+describe('causality and bounded memory (review #4)', () => {
+  it('a return to an earlier Z is a later checkpoint: the picture at k never shows a cut from after k', () => {
+    // Z -0.5 at Y 10, then Z -1.0 at Y 30, then BACK to Z -0.5 at Y 50. With (segment, Z) keys
+    // the third stroke joined the first checkpoint, and stockAt(0) already showed it.
+    const { playback } = run([
+      'S1000 M3',
+      'G0 X10 Y10 Z1', 'G1 Z-0.5 F100', 'G1 X30',
+      'G0 Z1', 'G0 X10 Y30', 'G1 Z-1.0', 'G1 X30',
+      'G0 Z1', 'G0 X10 Y50', 'G1 Z-0.5', 'G1 X30',
+    ].join('\n'));
+    expect(playback.count).toBe(3);
+    expect(playback.removedVolumeAt(0)).toBeCloseTo(V(0.5), 1);
+    expect(playback.removedVolumeAt(1)).toBeCloseTo(V(0.5) + V(1.0), 1);
+    expect(playback.removedVolumeAt(2)).toBeCloseTo(V(0.5) * 2 + V(1.0), 1);
+    playback.dispose();
+  });
+
+  it('many checkpoints: scrubbing everywhere, in both directions, stays correct and disposes cleanly', () => {
+    // 40 strokes at 40 depths, more than one anchor span and far more than the stock cache.
+    const lines = ['S1000 M3'];
+    for (let i = 0; i < 40; i++) {
+      const x = 5 + (i % 8) * 12;
+      const y = 5 + Math.floor(i / 8) * 11;
+      lines.push(`G0 X${x} Y${y} Z1`, `G1 Z${(-0.1 * (i + 1)).toFixed(1)} F100`, `G1 X${x + 6}`, 'G0 Z1');
+    }
+    const { playback, sweep } = run(lines.join('\n'));
+    expect(playback.count).toBe(40);
+    const expected = (k: number) => { let v = 0; for (let i = 0; i <= k; i++) v += capsuleArea(6, R, N) * 0.1 * (i + 1); return v; };
+    for (const k of [39, 0, 31, 32, 17, 39, 5, 38, 33]) expect(playback.removedVolumeAt(k)).toBeCloseTo(expected(k), 0);
+    // Anchors are materialised through a mesh round-trip, which re-merges vertices: agreement
+    // with the sweep's single union is to ~1e-4 mm³ on ~550 mm³, not to the bit.
+    expect(playback.removedVolumeAt(39)).toBeCloseTo(sweep.stats.removedVolume, 3);
+    expect(() => playback.dispose()).not.toThrow();
+    expect(sweep.result.volume()).toBeGreaterThan(0);
   });
 });
 
