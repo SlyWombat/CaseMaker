@@ -243,7 +243,7 @@ async function runChild(args: Args): Promise<void> {
   if (rssAfterSweep > peakRss) peakRss = rssAfterSweep;
   console.log(`\n# sweep OK   total=${v.stats.ms.total.toFixed(0)}ms  swept=${v.stats.checkpointsSwept}  skipped=${v.stats.checkpointsSkipped}  contours=${v.stats.contours}`);
   console.log(`#   union2d=${v.stats.ms.union2d.toFixed(0)}ms  extrude=${v.stats.ms.extrude.toFixed(0)}ms  airCheck=${v.stats.ms.airCheck.toFixed(0)}ms  subtract=${v.stats.ms.subtract.toFixed(0)}ms`);
-  console.log(`#   airMoves checked=${v.stats.airMovesChecked} rechecked=${v.stats.airMovesRechecked}  stockVol=${v.stats.stockVolume.toFixed(1)} removedVol=${v.stats.removedVolume.toFixed(1)}`);
+  console.log(`#   airMoves checked=${v.stats.airMovesChecked} rechecked=${v.stats.airMovesRechecked} clearedByConstruction=${v.stats.airMovesClearedByConstruction}  stockVol=${v.stats.stockVolume.toFixed(1)} removedVol=${v.stats.removedVolume.toFixed(1)}`);
   console.log(`#   rss=${rssAfterSweep.toFixed(0)}MB  peakRss~${peakRss.toFixed(0)}MB  (whole run ${sweepMs.toFixed(0)}ms)`);
   const errs = v.diagnostics.filter((d) => d.severity === 'error');
   const errCodes = [...new Set(errs.map((d) => d.code))];

@@ -91,6 +91,12 @@ export interface SweepStats {
   airMovesChecked: number;
   /** Air moves that met the uncut blank and were re-tested against the stock-so-far. */
   airMovesRechecked: number;
+  /**
+   * Air moves proved in air analytically, with no boolean at all (#194 step 7): a rapid that
+   * leaves X and Y alone and moves only +Z out of the exact end point of the immediately
+   * preceding cutting move. The extremely common `G0 Z<n>` retract.
+   */
+  airMovesClearedByConstruction: number;
   stockVolume: number;
   resultVolume: number;
   removedVolume: number;
@@ -300,8 +306,14 @@ export function sweptToolBody(
  * EARLIER pass is routine; one into a pocket that will only be cut LATER is a crash. Order
  * is the whole question, so the check is time-ordered.
  *
- * Cost (#194, measured): every air move gets one boolean against the uncut stock, and only a
- * HIT is re-tested against the removal that can reach it. That removal is built from
+ * A move that is provably in air is not tested at all (#194 step 7): a retract straight up out
+ * of the cut just made — same X,Y, +Z, the immediately preceding event being that cut — is
+ * counted in `airMovesClearedByConstruction` and skipped before any tool body is built. On the
+ * vendor files this is most of the air moves, because the vendor retracts after every cut
+ * (`G0 Z<n>`), and each was one boolean against the accumulated removal.
+ *
+ * Cost (#194, measured): every OTHER air move gets one boolean against the uncut stock, and
+ * only a HIT is re-tested against the removal that can reach it. That removal is built from
  * per-checkpoint PREFIXES (the moves with step < k), which only ever grow because air moves
  * are visited in program order. Within a prefix, constant-Z moves are grouped by their OWN Z
  * and swept as 2D capsule columns; a move whose Z changes is swept as the exact hull of the
@@ -343,7 +355,7 @@ export function checkAirMoves(
   radius: number,
   /** Wall-clock deadline from `performance.now()`, or null for none (#194). */
   deadline: number | null = null,
-): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number; budgetExceeded: boolean } {
+): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number; cleared: number; budgetExceeded: boolean } {
   const diagnostics: SweepDiagnostic[] = [];
   const gouges: Gouge[] = [];
   const nCap = segmentsForRadius(radius);
@@ -351,8 +363,26 @@ export function checkAirMoves(
   const zTop = topZ + OVERSHOOT_MM;
   let checked = 0;
   let rechecked = 0;
+  let cleared = 0;
   let budgetExceeded = false;
   const overBudget = (): boolean => deadline !== null && performance.now() > deadline;
+
+  // #194 step 7. Most air moves are a retract straight up out of the cut just made, and that
+  // move needs no geometry: if its IMMEDIATELY PRECEDING event is the cut, it leaves X and Y
+  // alone, and it moves only +Z, it travels inside that cut's own removal. The cut's removal is
+  // the tool's own cross-section at that X,Y — its constant-Z column, or a ramp's hull —
+  // extruded from the cut's Z to above the stock top, and the retract is that same cross-section
+  // from there up. So the end point of every swept cutting move is recorded here, keyed by its
+  // event index (the same index space as `AirMove.step`); a rapid that lands on one is cleared
+  // analytically. This is exact, not the noise floor: it is the fact the floor exists to
+  // tolerate, stated once instead of measured through tessellation slivers.
+  const cutEndByStep = new Map<number, readonly [number, number, number]>();
+  for (const cp of checkpoints) {
+    if (cp.z >= topZ) continue; // not swept: its cuts removed nothing, so they prove nothing
+    for (let k = 0; k < cp.steps.length; k++) {
+      cutEndByStep.set(cp.steps[k] as number, [cp.xy[k * 4 + 2] as number, cp.xy[k * 4 + 3] as number, cp.zs[k * 2 + 1] as number]);
+    }
+  }
 
   // Per-checkpoint prefixes. Constant-Z moves accumulate into one 2D region per distinct Z
   // (`groups`); ramps become individual hull solids. Every solid made here is owned here.
@@ -452,6 +482,17 @@ export function checkAirMoves(
       continue;
     }
     if (zLo >= topZ) continue; // entirely above the blank: nothing to hit
+    // Step 7: a retract straight up out of the cut just made. The immediately preceding event
+    // must be that cut (so any other move in between disqualifies it), X and Y must not change,
+    // and the move must go +Z. Then it is inside the cut's own removal and needs neither a tool
+    // body nor a boolean. Every other move takes the geometric path below.
+    if (mv.kind === 'rapid' && mv.to[2] > mv.from[2] && mv.to[0] === mv.from[0] && mv.to[1] === mv.from[1]) {
+      const end = cutEndByStep.get(mv.step - 1);
+      if (end && mv.from[0] === end[0] && mv.from[1] === end[1] && mv.from[2] === end[2]) {
+        cleared++;
+        continue;
+      }
+    }
     // The tool body (grown by the margin for the proximity rule) swept along the move.
     const body = sweptToolBody(
       tl,
@@ -527,7 +568,7 @@ export function checkAirMoves(
     for (const r of pf.ramps) r.solid.delete();
   }
   for (const r of retired) r.delete();
-  return { diagnostics, gouges, checked, rechecked, budgetExceeded };
+  return { diagnostics, gouges, checked, rechecked, cleared, budgetExceeded };
 }
 
 /**
@@ -705,6 +746,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       stats: {
         airMovesChecked: air.checked,
         airMovesRechecked: air.rechecked,
+        airMovesClearedByConstruction: air.cleared,
         stockVolume,
         resultVolume,
         removedVolume: stockVolume - resultVolume,

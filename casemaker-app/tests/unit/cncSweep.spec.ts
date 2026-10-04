@@ -381,10 +381,14 @@ describe('the must-FAIL list (§7.1): refusals and the gates that need the stock
   it('REGRESSION (vendor file): a RETRACT from the end of a cut is NOT "through stock" — the tool is in the hole it just made', () => {
     // 169 of 169 errors on ACRYLIC-Balloon.nc were `G0 Z2` retracts starting 0.3 mm deep in
     // their own cut, measured against the UNCUT blank. Material means the stock at that step.
+    // #194 step 7: the retract is now proved in air ANALYTICALLY — +Z from the exact end point
+    // of the immediately preceding cut, same X,Y — so it never builds a tool body or runs a
+    // boolean at all. It was the single most common air move in every vendor file.
     const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-0.3 F100\nG1 X40\nG0 Z2\n');
     if (!out.ok) throw new Error('refused');
     expect(out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock')).toEqual([]);
-    expect(out.value.stats.airMovesRechecked).toBe(1); // it met the blank, and was re-tested
+    expect(out.value.stats.airMovesClearedByConstruction).toBe(1);
+    expect(out.value.stats.airMovesRechecked).toBe(0); // no uncut-blank boolean was needed
   });
 
   it('a retract from the end of an ARC leaves only numerical slivers, which are below the noise floor', () => {
@@ -610,7 +614,7 @@ describe('#194: a recheck consults only the removal its own move can meet', () =
     return out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock').map((d) => Number(/line (\d+)/.exec(d.message)?.[1]));
   };
 
-  it('40 well-separated pockets with a retract after each: every retract cleared, and cheap', () => {
+  it('40 well-separated pockets with a retract after each: every retract cleared by construction, and cheap', () => {
     const lines = ['S1000 M3'];
     for (let i = 0; i < 40; i++) {
       const x = 5 + (i % 8) * 11;
@@ -620,7 +624,10 @@ describe('#194: a recheck consults only the removal its own move can meet', () =
     const { out } = sweep(lines.join('\n') + '\n');
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
     expect(out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock')).toEqual([]);
-    expect(out.value.stats.airMovesRechecked).toBeGreaterThanOrEqual(40);
+    // #194 step 7: each `G0 Z1` is +Z at the cut's own end point, right after the cut, so all
+    // 40 are proved in air with NO boolean; not one reaches the uncut-blank test or a recheck.
+    expect(out.value.stats.airMovesClearedByConstruction).toBe(40);
+    expect(out.value.stats.airMovesRechecked).toBe(0);
     // Generous: the point is an ORDER, not a budget. The old design's number on this program
     // is not recorded; on TopClamp one recheck ran past 33 s.
     expect(out.value.stats.ms.airCheck).toBeLessThan(1500);
@@ -636,6 +643,65 @@ describe('#194: a recheck consults only the removal its own move can meet', () =
   it('a rapid through material an OVERLAPPING earlier cut removed is still cleared', () => {
     const pocket = 'S1000 M3\nG0 X60 Y30 Z1\nG1 Z-1 F100\nG1 X70\nG0 Z5\nG0 X60\n';
     expect(errs(pocket + 'G0 X70 Z-0.9\n')).toEqual([]);
+  });
+});
+
+// #194 step 7: a retract that is provably in air is not tested at all. The guard rails below
+// each pin one clause of the rule: exact end point, same X,Y, +Z, and the immediately preceding
+// event being the cut. Anything that fails one of them takes the full geometric path.
+describe('#194 step 7: a retract provably in air needs no boolean', () => {
+  /** One 20 mm slot at Z -1: its last cutting move ends at (40, 30, -1). */
+  const CUT = 'S1000 M3\nG0 X20 Y30 Z1\nG1 Z-1 F100\nG1 X40\n';
+
+  it('a +Z retract from the cut\'s own end point at the same X,Y is cleared by construction', () => {
+    const { out } = sweep(CUT + 'G0 Z2\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock')).toEqual([]);
+    expect(out.value.stats.airMovesClearedByConstruction).toBe(1);
+    expect(out.value.stats.airMovesRechecked).toBe(0);
+  });
+
+  it('the SAME retract with any X,Y change, however small, takes the normal path', () => {
+    // +0.001 mm in X: the tool body is no longer the cut's own column, so it is swept and tested.
+    const { out } = sweep(CUT + 'G0 X40.001 Z2\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.stats.airMovesClearedByConstruction).toBe(0);
+    expect(out.value.stats.airMovesRechecked).toBe(1); // met the blank, and was cleared on the re-test
+    expect(out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock')).toEqual([]);
+  });
+
+  it('a -Z rapid at the cut\'s end point (below the cut floor) is NOT cleared, and is still an error', () => {
+    const { out } = sweep(CUT + 'G0 Z-1.5\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.stats.airMovesClearedByConstruction).toBe(0);
+    expect(out.value.diagnostics.map((d) => d.code)).toContain('rapid-through-stock');
+  });
+
+  it('a retract after a SPINDLE-OFF feed takes the normal path', () => {
+    // M5 makes the zero-length `G1` a spindle-off air move; the `G0 Z2` after it has a feed,
+    // not a cut, as its immediately preceding event, so it is not cleared by construction.
+    const { out } = sweep(CUT + 'M5\nG1 X40 Y30 F100\nG0 Z2\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.stats.airMovesClearedByConstruction).toBe(0);
+    expect(out.value.stats.airMovesRechecked).toBeGreaterThanOrEqual(1);
+  });
+
+  it('a retract after a move whose position was unknown (an unswept cut) takes the normal path', () => {
+    // The cut at a Z the program never established is a gap, not a checkpoint, so it proves
+    // nothing; the following rapid is not even collectible as an air move (Z unknown).
+    const { out, timeline } = sweep('S1000 M3\nG1 X40 F100\nG0 Z2\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(timeline.summary.unsweptMoves).toBe(1);
+    expect(out.value.stats.airMovesClearedByConstruction).toBe(0);
+  });
+
+  it('a rapid starting where a cut ended but not the NEXT move (another move intervened) takes the normal path', () => {
+    // A zero-length rapid sits between the cut and the retract, so the retract's immediately
+    // preceding event is a rapid, not the cut — it must not be cleared by construction. (This
+    // is the clause that makes "immediately preceding" strict.)
+    const { out } = sweep(CUT + 'G0 Z-1\nG0 Z2\n');
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.stats.airMovesClearedByConstruction).toBe(0);
   });
 });
 
@@ -692,16 +758,18 @@ describe.skipIf(!existsSync(CORPUS))('a real 2.5D vendor job sweeps end to end',
     const out = sweepTimeline(tl, timeline, flatEndMill(3.175), s);
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
     expect(out.value.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
-    expect(out.value.stats.airMovesRechecked).toBeGreaterThan(100); // the retracts: met the blank, cleared on re-test
+    // #194 step 7: the file's retracts are `G0 Z<n>` from the end of the cut just made, so they
+    // are all cleared ANALYTICALLY now — the airMovesRechecked count collapses to near zero and
+    // the air gate stops being where the sweep's time goes. Removed volume is produced by the
+    // per-checkpoint sweep, which step 7 does not touch, so it is unchanged.
+    expect(out.value.stats.airMovesClearedByConstruction).toBeGreaterThan(150); // the retracts
+    expect(out.value.stats.airMovesRechecked).toBeLessThan(10); // near zero, and every one clear
     expect(out.value.stats.removedVolume).toBeGreaterThan(0);
     expect(out.value.stats.resultVolume).toBeLessThan(out.value.stats.stockVolume);
     expect(out.value.stats.checkpointsSwept).toBeGreaterThan(5);
     expect(out.value.stats.ms.total).toBeLessThan(120_000);
-    // #194 asked for the air gate to get 3x cheaper here (it was 6.3 s of this file's 7.6 s
-    // sweep). IT DID NOT: measured after the local-recheck rewrite, airCheck is 4.1-6.9 s across
-    // three harness runs of this file — the same order, and this machine's run-to-run spread is
-    // wider than the difference. The finding is on the issue. So this is a non-regression guard,
-    // deliberately loose, NOT the target the issue set. Opt-in: it needs the corpus present.
+    // Non-regression, deliberately loose, and now far below the bar: with the retracts gone the
+    // gate is a few hundred ms on this file. Opt-in: it needs the corpus present.
     expect(out.value.stats.ms.airCheck).toBeLessThan(12_000);
   });
 });

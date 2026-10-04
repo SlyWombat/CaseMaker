@@ -159,8 +159,9 @@ So:
   by Studio, whose intent is known by construction: twelve squares at six depths. Note that
   "validate against Studio's output" cannot mean `TopClamp.nc` — it has 482 distinct Z
   levels (§4.4) but only **609 causal runs**, so it passes the 1 000-checkpoint cap and
-  `ExactSweeper` starts on it; measured 2026-10-04 it then takes **106.8 s**, and the time
-  budget refuses it (§9 item 6). It could not be an oracle either way, because there is no
+  `ExactSweeper` starts on it; measured 2026-10-04, after #194 step 7, it then takes **77.3 s**
+  (thousands of ramp hulls plus a 50 s final `union`), and the time budget refuses it
+  (§9 item 6). It could not be an oracle either way, because there is no
   independent model of it to compare against. Counted over the whole corpus, 2026-10-04.
 - **It removes the hard dependency on #172.** Parser + sweep + stock can be built and
   validated first, against **Makera Studio's own output** — including the `.nc` Studio
@@ -430,6 +431,47 @@ rule there is wrong in the dangerous direction — crediting a ramp with materia
 reached lets a rapid through that material pass. Those hulls number in the hundreds per job
 (`MAX_AIR_CHECKS`), not the ten thousands measured above.
 
+### 4.6 The corpus after the retract fix (#194 step 7), and the accept criterion
+
+The air gate's cost was never the *removal union*; it was **the number of rechecks** (§9 item 6).
+Almost every recheck was the same move — the retract straight up out of the cut just made — and
+that move is provably in air with no geometry at all: a **+Z rapid from the exact end point of
+the immediately preceding cut, leaving X and Y alone**, travels inside that cut's own removal
+(the cut's constant-Z column, or a ramp's hull, is the tool's own cross-section at that X,Y
+extruded from the cut's Z to above the stock top). `checkAirMoves` now clears it by construction
+and counts it in `stats.airMovesClearedByConstruction`, building no tool body and running no
+boolean. It is exact — the same fact the noise floor exists to tolerate, stated once instead of
+measured through tessellation slivers — and every other air move keeps the geometric path.
+
+Measured 2026-10-04, `scripts/sweep-timing.ts`, one quiet-machine run each, 3.175 mm flat end,
+machine Z1 unless noted (raw outputs in `casemaker-app/scripts/sweep-timing-out/194-after-post7/`):
+
+| file | checkpoints | sweep total | air gate | rechecked | cleared | worst cold seek | peak RSS |
+|---|---|---|---|---|---|---|---|
+| `LED/ACRYLIC-Balloon.nc` (machine none) | 10 | 0.89 s | **3 ms** | 0 | 169 | 0.38 s | 215 MB |
+| `LED/PCB-NO-UV-MASK.nc` | 298 | 7.0 s | **7 ms** | 0 | 423 | 3.1 s | 418 MB |
+| `LED/PCB-UV-MASK(PART2).nc` | 298 | 12.5 s | **11 ms** | 0 | 360 | 4.1 s | 772 MB |
+| `Tests/pcb-test-air.nc` | 912 | 11.4 s | **8 ms** | 0 | 143 | 7.0 s | 486 MB |
+| `Z1/TopClamp.nc` | 609 | 77.3 s | 25.9 s | 5 | 6 | (killed in seek) | 567 MB |
+
+The same harness read air gates of 4.1 s (Balloon) and 52.6 s / >120 s / 67.8 s / 54.1 s on the
+four corpus files before this change, so the retract fix removes 99 %+ of the gate wherever
+retracts dominate. Balloon's removed volume is **unchanged at 8323.8 mm³**; that is the
+behaviour-preservation check — the per-checkpoint sweep, which produces the volume, is untouched.
+
+**The accept criterion changes with the measurements.** "Sweep ≤ 10 s" was the original
+aspiration, not a requirement; the operative limit is the one the code enforces: **a job is
+simulable if it completes inside the budget** — the in-sweep check and, as the hard backstop,
+`simClient`'s `SIM_BUDGET_MS = 60 000` (§9 item 6). By that limit Balloon, PCB-NO-UV-MASK,
+PCB-UV-MASK(PART2) and pcb-test-air are all **simulable**: the three PCB files went from "ran
+past 120 s / hung" to 7–12.5 s. `Z1/TopClamp.nc` is not, and will not be: its 77.3 s is thousands
+of ramp hulls plus a 50.0 s final `Manifold.union(solids)`, which is the dexel backend's job
+(§4.4), not a threshold's (#222) — after step 7 it returns a sweep instead of hanging, and the
+budget refuses it cleanly with the path still available.
+
+Cold seeks stay 3–7 s on the three PCB files at 298–912 checkpoints. That is a separate defect
+in playback's anchor chain, not the air gate, and is recorded in §8.0.
+
 ## 5. Two backends, one interface
 
 **Superseded by code review #4 (q8), 2026-10-04.** There is no `Move[]` type and the sweep
@@ -618,6 +660,15 @@ reused, see the trap recorded in `playback.ts`), stocks live in a six-entry most
 cache, and a seek costs at most 32 lazy unions and one subtraction. **Do not** build it as
 incremental subtraction; that is the design that cannot be made fast later.
 
+**A cold seek is seconds, not milliseconds, on the PCB files (#194, measured).** The first seek
+to a given checkpoint pays the anchor chain — rebuild from the nearest materialised anchor,
+up to 32 lazy unions plus a subtraction — so the cost grows with the checkpoint count: measured
+2026-10-04 (machine Z1, `scripts/sweep-timing.ts`), worst cold seek **0.4 s at 10 checkpoints**
+(Balloon), **3.1–4.1 s at 298** (PCB-NO-UV-MASK and PART2) and **7.0 s at 912** (pcb-test-air);
+`Z1/TopClamp.nc` was killed inside its seek phase. This is a defect in the anchor chain, not in
+the sweep, and is **not** fixed here — the retract fix (#194 step 7, §4.6) showed which files are
+now in scope, and it will be filed as its own issue.
+
 Checkpoints are **causal**: a checkpoint is one contiguous run of cuts at one (segment, Z),
 so leaving a Z and returning to it later is a *new* checkpoint and "everything cut so far"
 never includes a cut from later in the program. (Keyed on (segment, Z) alone — the first
@@ -686,24 +737,22 @@ about how the part will *look* beyond which colour volume a floor lands in.
    sweep, refusing `sweep-budget-exceeded` with the elapsed time and the checkpoint it
    reached; and, because one boolean cannot be interrupted from inside, a **hard stop on the
    client** — `simClient.loadSim` races the load against `SIM_BUDGET_MS = 60 000` and
-   terminates the worker on expiry, which frees every wasm handle with it. Measured
-   2026-10-04 in one quiet-machine run of `scripts/sweep-timing.ts` (3.175 mm flat end, 120 s
-   harness budget, outputs in `casemaker-app/scripts/sweep-timing-out/194-after/`):
-   `ACRYLIC-Balloon.nc` 5.1 s for 10 runs (machine `none`), worst cold seek 0.42 s —
-   **simulable**; `PCB-NO-UV-MASK.nc` 60.6 s for 298 (air gate 52.6 s, final subtract 6.3 s),
-   `pcb-test-air.nc` 80.0 s for 912 (air gate 67.8 s, subtract 9.6 s), `TopClamp.nc` 106.8 s for
-   609 (air gate 54.1 s, subtract 50.9 s) — all refused by the budget;
-   `PCB-UV-MASK(PART2).nc` (298) did not finish inside 120 s at all, stalling in the air gate at
-   599 of 610 air moves with peak RSS 805 MB. This machine's spread is wide — Balloon's air gate
-   alone has measured 4.1–6.9 s across runs — so these are observations, not tight bounds. The
-   accept bar (sweep ≤ 10 s, worst cold seek ≤ 1 s, peak RSS ≤ 1.5 GB) is still not met by any of
-   the four: after #194 the **air gate**, not the level count, is the dominant stage at 53–68 s on
-   three of them, and on TopClamp the final `Manifold.union(solids)` is co-dominant at 50.9 s,
-   with cold seeks of 3.2 s and 7.4 s on two files. (TopClamp's air gate spends 54.1 s on only 28
-   air moves, so there the cost is building the prefixes, not rechecking them.) That is
-   the dexel backend's job (§4.4) and is not V1. A refused sweep is still not a dead end: the
-   runner's timeline is kept (the session goes **path-only**), so the viewport draws the
-   toolpath with no material and `stateAt`/`toolPath` work. On #182, #194.
+   terminates the worker on expiry, which frees every wasm handle with it. **The classifier is
+   the budget — a job is simulable if it completes inside it**; the "sweep ≤ 10 s" bar was an
+   aspiration and is withdrawn. #194 step 7 then removed the air gate's cost outright: a retract
+   is proved in air with no boolean (§4.6). Measured 2026-10-04 in one quiet-machine run of
+   `scripts/sweep-timing.ts` (3.175 mm flat end, 120 s harness budget, outputs in
+   `casemaker-app/scripts/sweep-timing-out/194-after-post7/`): `ACRYLIC-Balloon.nc` 0.89 s for
+   10 runs (machine `none`, air gate 3 ms, removed volume unchanged at 8323.8 mm³) —
+   **simulable**; `PCB-NO-UV-MASK.nc` 7.0 s, `PCB-UV-MASK(PART2).nc` 12.5 s and
+   `pcb-test-air.nc` 11.4 s, their air gates 7/11/8 ms (down from 52.6 s / >120 s / 67.8 s and
+   from hanging) — **all simulable**, with cold seeks of 3.1/4.1/7.0 s that are a separate
+   playback defect (§8.0). `TopClamp.nc` still is **not**: 77.3 s, its cost the thousands of ramp
+   hulls and a 50.0 s final `Manifold.union(solids)` — the 3D case, the dexel backend's job
+   (§4.4, #222), refused cleanly by the budget with the path still available. This machine's
+   spread is wide, so these are observations, not tight bounds. A refused sweep is still not a
+   dead end: the runner's timeline is kept (the session goes **path-only**), so the viewport draws
+   the toolpath with no material and `stateAt`/`toolPath` work. On #182, #194.
 7. **Envelope −200 or −206?** The profile says 200 mm of travel. The firmware's own limits
    are now sourced rather than "noted elsewhere" — `MakeraInc/MakeraZ1Firmware`
    `src/configZ1.default:429-432` reads `soft_endstop.enable false`, `x_min -206.0`,
@@ -729,7 +778,10 @@ about how the part will *look* beyond which colour volume a floor lands in.
    the volume identity is therefore `stock − (removal ∩ stock)`, not `stock − removal`. More
    than `MAX_CHECKPOINTS` (1000) runs is refused as a dense/3D job; a sweep that passes that
    cap and then exceeds the wall-clock budget is refused `sweep-budget-exceeded`, naming how
-   far it got, with the path still returned (§9 item 6, #194).
+   far it got, with the path still returned (§9 item 6, #194). A **retract proved in air is not
+   tested at all** (step 7): a +Z rapid from the exact end point of the immediately preceding
+   cut, same X,Y, is counted in `airMovesClearedByConstruction` and cleared with no boolean,
+   which is where the air gate's time went (§4.6).
 6. ~~**Validation and collision gates**~~ **Done, except the fixture.** Refusals: tool (by
    name), stock, laser job, rotary job. Gates: the envelope (#184, in the runner, machine
    coordinates, capped at 25 diagnostics per code); the holder — `shoulderLength ?? fluteLength`,
