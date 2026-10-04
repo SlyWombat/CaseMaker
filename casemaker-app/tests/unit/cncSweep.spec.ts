@@ -323,11 +323,50 @@ describe('the must-FAIL list (§7.1): refusals and the gates that need the stock
   it('a RAPID through the stock is an error; a rapid above it is nothing', () => {
     const bad = sweep('G0 X20 Y30 Z1\nG0 Z-1\nG0 X40\n');
     if (!bad.out.ok) throw new Error('refused');
-    expect(bad.out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock').map((d) => d.message)).toHaveLength(2);
+    const msgs = bad.out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock').map((d) => d.message);
+    expect(msgs).toHaveLength(2);
+    // Each rapid is also RETURNED as a solid the viewport can draw (code review #4 q1): its
+    // volume is the one the diagnostic reports, and nothing was subtracted from the stock.
+    const { gouges, stats } = bad.out.value;
+    expect(gouges).toHaveLength(2);
+    expect(gouges.map((g) => g.line)).toEqual([2, 3]);
+    gouges.forEach((g, i) => {
+      const reported = Number(/\(([\d.]+) mm³\)/.exec(msgs[i] as string)?.[1]);
+      expect(g.solid.volume()).toBeCloseTo(reported, 2);
+      expect(g.solid.volume()).toBeGreaterThan(0);
+    });
+    expect(stats.removedVolume).toBe(0);
+    gouges.forEach((g) => g.solid.delete());
     const fine = sweep('G0 X20 Y30 Z5\nG0 X40\nG0 Z1\n');
     if (!fine.out.ok) throw new Error('refused');
     expect(fine.out.value.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
     expect(fine.out.value.stats.airMovesChecked).toBe(2);
+  });
+
+  it('a gouge AFTER a cut keeps only the material still there: the solid outlives the removal it was subtracted from', () => {
+    // The slot is cut first, then a rapid at Z -0.5 runs across it along Y. Its overlap with the
+    // UNCUT blank includes the slot; the gouge must not, and it is built from `hit.subtract(gone)`
+    // where `gone` is deleted before the sweep returns (the branch the no-prior-cut tests skip).
+    const { out } = sweep('S1000 M3\nG0 X20 Y30 Z1\nG1 Z-1 F100\nG1 X40\nG0 Z1\nG0 X30 Y25\nG0 Z-0.5\nG0 Y35\n');
+    if (!out.ok) throw new Error('refused');
+    const msgs = out.value.diagnostics.filter((d) => d.code === 'rapid-through-stock').map((d) => d.message);
+    const { gouges } = out.value;
+    expect(gouges).toHaveLength(msgs.length);
+    expect(gouges.length).toBeGreaterThanOrEqual(2); // the plunge, and the run across
+    const along = gouges[gouges.length - 1]!;
+    const reported = Number(/\(([\d.]+) mm³\)/.exec(msgs[msgs.length - 1] as string)?.[1]);
+    expect(along.solid.volume()).toBeCloseTo(reported, 2);
+    // The footprint of the whole run (an 10 mm capsule) over 0.5 mm of depth, less the ~1 mm x 1 mm
+    // of it that is already slot: nothing like the full overlap with the uncut blank.
+    const full = capsuleArea(10, R, N) * 0.5;
+    expect(along.solid.volume()).toBeLessThan(full - 0.3);
+    expect(along.solid.volume()).toBeGreaterThan(full - 0.7);
+    // The solid is still good after everything the sweep deleted: mesh it, then delete it once.
+    const mesh = along.solid.getMesh();
+    expect(mesh.triVerts.length).toBeGreaterThan(0);
+    gouges.forEach((g) => g.solid.delete());
+    expect(out.value.stats.removedVolume).toBeGreaterThan(0);
+    expect(out.value.result.volume()).toBeGreaterThan(0);
   });
 
   it('REGRESSION (vendor file): a RETRACT from the end of a cut is NOT "through stock" — the tool is in the hole it just made', () => {
@@ -465,7 +504,7 @@ describe('the air-move gate after code review #4: the tool body is swept EXACTLY
   });
 
   it('a 3D / dense job is REFUSED by name with its count, before any geometry is built', () => {
-    // 1 001 cuts, each at its own Z: 1 001 checkpoints. The vendor fatigue-test.nc has 108 744.
+    // 1 001 cuts, each at its own Z: 1 001 checkpoints. The vendor fatigue-test.nc has 685 200.
     const lines = ['S1000 M3', 'G0 X20 Y30 Z1'];
     for (let i = 0; i <= 1000; i++) lines.push(`G1 X${20 + (i % 2) * 10} Z${(-0.001 * (i + 1)).toFixed(3)} F100`);
     const { out, timeline } = sweep(lines.join('\n') + '\n');

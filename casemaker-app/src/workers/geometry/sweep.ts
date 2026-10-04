@@ -51,11 +51,17 @@ export const OVERSHOOT_MM = 0.01;
 export const PROXIMITY_MARGIN_MM = 1.0;
 /** Air moves checked individually; beyond this a job is summarised instead (each is a boolean). */
 export const MAX_AIR_CHECKS = 4000;
+/** Gouge solids kept; beyond this a rapid is still reported, just not drawn (memory, and the transfer to the viewport). */
+export const MAX_GOUGES = 200;
 /**
- * Checkpoints the 2.5D sweep will take on. A program with more distinct (segment, Z) runs
- * than this is a 3D or dense job (`/Simulation.md` §4.4, §9): the vendor's fatigue-test.nc
- * has 108 744 and ran the wasm heap out before the first subtraction. Refused by name, with
- * the count, rather than attempted. PROVISIONAL — a budget, not a measurement (#182).
+ * Checkpoints the 2.5D sweep will take on. A program with more causal runs of cuts at one
+ * (segment, Z) than this is a 3D or dense job (`/Simulation.md` §4.4, §9): the vendor's
+ * fatigue-test.nc has 685 200 and ran the wasm heap out before the first subtraction.
+ * (The 108 744 quoted here before 2026-10-04 was the OLD (segment, Z) count, taken before
+ * checkpoints became causal runs; recounted with `probe-checkpoints.mts`.) Refused by name,
+ * with the count, rather than attempted. A CLASSIFIER, not a timed budget: causal runs are
+ * not Z levels — PCB-NO-UV-MASK.nc has 9 distinct Z but 298 runs — and nothing between
+ * Balloon's 10 and the refusals has been timed (#182).
  */
 export const MAX_CHECKPOINTS = 1000;
 /**
@@ -84,6 +90,19 @@ export interface SweepStats {
   ms: { union2d: number; extrude: number; subtract: number; airCheck: number; total: number };
 }
 
+/**
+ * A rapid that passes through material still present at that step (`/Simulation.md` §9 q5).
+ * It is NEVER subtracted from the stock — the picture does not show the machine eating the
+ * part — but the solid it would have removed is kept, so the viewport can draw it. Work
+ * frame; caller-owned exactly like `perCheckpoint`.
+ */
+export interface Gouge {
+  step: number;
+  line: number;
+  /** The tool body swept along the rapid, intersected with the stock as it was at `step`. */
+  solid: ManifoldInstance;
+}
+
 export interface SweepResult {
   /** The stock in WORK coordinates, before any cut. */
   stock: ManifoldInstance;
@@ -95,6 +114,8 @@ export interface SweepResult {
   result: ManifoldInstance;
   /** One solid per timeline checkpoint, in order; null where the checkpoint removed nothing. Playback scrubs on these. */
   perCheckpoint: (ManifoldInstance | null)[];
+  /** One per rapid-through-stock diagnostic, up to `MAX_GOUGES`; caller-owned, delete each once. */
+  gouges: Gouge[];
   radius: number;
   stats: SweepStats;
   diagnostics: SweepDiagnostic[];
@@ -275,8 +296,9 @@ export function checkAirMoves(
   moves: AirMove[],
   checkpoints: Checkpoint[],
   radius: number,
-): { diagnostics: SweepDiagnostic[]; checked: number; rechecked: number } {
+): { diagnostics: SweepDiagnostic[]; gouges: Gouge[]; checked: number; rechecked: number } {
   const diagnostics: SweepDiagnostic[] = [];
+  const gouges: Gouge[] = [];
   const nCap = segmentsForRadius(radius);
   const nMargin = segmentsForRadius(radius + PROXIMITY_MARGIN_MM);
   const zTop = topZ + OVERSHOOT_MM;
@@ -398,6 +420,8 @@ export function checkAirMoves(
     const hit = body.intersect(stock);
     body.delete();
     let vol = hit.volume();
+    // The solid that is actually in the way, for a rapid: what survives the re-test below.
+    let gouge: ManifoldInstance | null = null;
     // Against the uncut blank both solids are exact, so anything beyond float dust is real.
     if (vol > SLIVER_MM3) {
       // It meets the uncut blank. Does it meet what is STILL there at this step?
@@ -405,8 +429,7 @@ export function checkAirMoves(
       const gone = removedBefore(mv.step);
       if (gone) {
         const remaining = hit.subtract(gone);
-        vol = remaining.volume();
-        remaining.delete();
+        vol = remaining.volume(); // forces evaluation; the solid outlives `gone`, which is deleted below (see the gouge test)
         // The noise floor applies HERE, where the removal is a simplified union: a boundary
         // mismatch of (chord error + simplify drift) along the move's footprint perimeter,
         // over the depth the tool PENETRATES the stock, is the largest volume numerical slivers
@@ -418,6 +441,11 @@ export function checkAirMoves(
         const penetration = Math.min(topZ, Math.max(mv.from[2], mv.to[2])) - zLo + OVERSHOOT_MM;
         const floor = (ARC_CHORD_TOLERANCE_MM + SWEEP_SIMPLIFY_EPS_MM * (1 + levels)) * perimeter * penetration;
         if (vol <= floor) vol = 0;
+        if (vol > 0 && !spindleOff) gouge = remaining;
+        else remaining.delete();
+      } else if (!spindleOff) {
+        // Nothing has been cut yet: the whole overlap with the blank is the gouge.
+        gouge = hit.translate([0, 0, 0]);
       }
     } else {
       vol = 0;
@@ -430,6 +458,10 @@ export function checkAirMoves(
           : { severity: 'error', code: 'rapid-through-stock', message: `line ${mv.line}: a rapid passes through material still present at that point in the program (${vol >= 0.01 ? vol.toFixed(3) : vol.toExponential(2)} mm³)` },
       );
     }
+    if (gouge) {
+      if (vol > 0 && gouges.length < MAX_GOUGES) gouges.push({ step: mv.step, line: mv.line, solid: gouge });
+      else gouge.delete();
+    }
   }
   for (const pf of prefixes) {
     for (const g of pf.groups.values()) {
@@ -440,7 +472,7 @@ export function checkAirMoves(
   }
   for (const r of retired) r.delete();
   held.removed?.delete();
-  return { diagnostics, checked, rechecked };
+  return { diagnostics, gouges, checked, rechecked };
 }
 
 /**
@@ -479,7 +511,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   if (timeline.checkpoints.length > MAX_CHECKPOINTS) {
     return {
       ok: false,
-      diagnostics: [{ severity: 'error', code: 'dense-3d-refused', message: `this program cuts at ${timeline.checkpoints.length} distinct (segment, Z) runs, more than the ${MAX_CHECKPOINTS} the 2.5D sweep takes on: a 3D or dense job V1 does not simulate (/Simulation.md §4.4, §9)` }],
+      diagnostics: [{ severity: 'error', code: 'dense-3d-refused', message: `this program cuts in ${timeline.checkpoints.length} separate runs of cuts at one (segment, Z), more than the ${MAX_CHECKPOINTS} the 2.5D sweep takes on: a 3D or dense job V1 does not simulate (/Simulation.md §4.4, §9)` }],
     };
   }
   const st = stockFromSetup(tl, setup);
@@ -537,6 +569,9 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   const air = checkAirMoves(tl, stock, topZ, bb.min[2], timeline.airMoves, timeline.checkpoints, radius);
   const msAir = performance.now() - a0;
   diagnostics.push(...air.diagnostics);
+  if (air.gouges.length < air.diagnostics.filter((d) => d.code === 'rapid-through-stock').length) {
+    diagnostics.push({ severity: 'info', code: 'gouges-truncated', message: `only the first ${MAX_GOUGES} rapids through the stock are returned as solids; the rest are reported but not drawn` });
+  }
   if (setup.workholding.kind !== 'tape-down' && setup.workholding.kind !== 'anchor-bracket') {
     diagnostics.push({ severity: 'info', code: 'fixture-unchecked', message: `the ${setup.workholding.kind} is not modelled as an obstacle yet (#188): proximity to the fixture is NOT checked` });
   }
@@ -572,6 +607,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       removal,
       result,
       perCheckpoint,
+      gouges: air.gouges,
       radius,
       stats: {
         airMovesChecked: air.checked,
