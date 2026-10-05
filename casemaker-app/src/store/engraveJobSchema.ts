@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Z1 } from '@/engine/cnc/machine';
 import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
+import { MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS } from '@/engine/import/outlineTypes';
 import type { EngraveJob } from '@/types/engraveJob';
 
 /**
@@ -138,6 +139,34 @@ const combinedShapeSchema = z.discriminatedUnion('kind', [
     islands: z.array(z.string().min(1)),
   }),
 ]);
+
+/**
+ * An imported vector outline (#217). It shares the shape base but is NOT a member of the
+ * `EngraveShape` union: it is its own list on the job (`vectors`), like `combined` (#215) and
+ * `traces` (#219), so the panel's exhaustive simple-shape switch and the hand-built shape editor
+ * do not have to learn a kind whose geometry comes from a file. The caps are the importer's
+ * (`MAX_OUTLINE_CONTOURS`, `MAX_OUTLINE_POINTS`) so a refusable file is also an unloadable job.
+ */
+const vectorSchema = shapeBaseSchema
+  .extend({
+    kind: z.literal('vector'),
+    sourceName: z.string().min(1),
+    contours: z.array(z.array(polygonPointSchema).min(3)).min(1).max(MAX_OUTLINE_CONTOURS),
+    fillRule: z.enum(['NonZero', 'EvenOdd']),
+    width: z.number().finite().positive(),
+    height: z.number().finite().positive(),
+  })
+  .superRefine((v, ctx) => {
+    let points = 0;
+    for (const ring of v.contours) points += ring.length;
+    if (points > MAX_OUTLINE_POINTS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `outline has ${points} points; the limit is ${MAX_OUTLINE_POINTS}`,
+        path: ['contours'],
+      });
+    }
+  });
 
 /**
  * Single-line traces (#219): a free polyline and a single-stroke text label. They share the trace
@@ -312,6 +341,9 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   combined: z.array(combinedShapeSchema).optional(),
   // #219's single-line traces. OPTIONAL for the same byte-for-byte reason as `combined`.
   traces: z.array(traceSchema).optional(),
+  // #217's imported vector outlines. OPTIONAL, not defaulted: a job with none keeps no key, so a
+  // pre-#217 document round-trips byte-for-byte (the same reason `combined` and `traces` are).
+  vectors: z.array(vectorSchema).optional(),
   // #246/#254's per-field provenance. OPTIONAL, not defaulted: a job that has never had a
   // cutting override or a guided setup applied carries no key.
   sources: jobSourcesSchema.optional(),

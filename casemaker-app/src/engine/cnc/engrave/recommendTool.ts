@@ -84,7 +84,8 @@ function findItem(job: EngraveJob, id: string): EngraveAnyItem | undefined {
   return (
     job.labels.find((l) => l.id === id) ??
     job.shapes.find((s) => s.id === id) ??
-    (job.combined ?? []).find((c) => c.id === id)
+    (job.combined ?? []).find((c) => c.id === id) ??
+    (job.vectors ?? []).find((v) => v.id === id)
   );
 }
 
@@ -106,6 +107,9 @@ function itemName(item: EngraveAnyItem): string {
       return `the ${item.width} mm frame`;
     case 'cutaway':
       return `the cut-away with ${item.islands.length} island${item.islands.length === 1 ? '' : 's'}`;
+    // Imported vector outline (#217), now a member of `EngraveAnyItem`.
+    case 'vector':
+      return `the imported outline ${item.width}×${item.height} mm`;
   }
 }
 

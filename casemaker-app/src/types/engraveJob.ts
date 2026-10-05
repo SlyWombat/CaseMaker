@@ -131,6 +131,37 @@ export type EngraveShape =
   | EngraveSlotShape
   | EngravePolygonShape;
 
+/** The winding a vector outline's contours are read with (#217) — Manifold's two fill rules. */
+export type VectorFillRule = 'NonZero' | 'EvenOdd';
+
+/**
+ * An imported vector outline (#217): an SVG or DXF traced to flattened contours, in mm.
+ *
+ * The file is parsed ONCE at import and only the flattened result is kept — the source file is
+ * not stored. `contours` are rings relative to `position` (origin at their bounding-box centre,
+ * exactly like a polygon's `points`), already in mm; `width`/`height` are the size the panel
+ * shows, and the contours are what cuts. The rings carry their own winding, so `fillRule` says
+ * how to read a hole: `NonZero` for font/SVG outlines that wind outer and inner rings opposite,
+ * `EvenOdd` for SVG's evenodd.
+ *
+ * It lives in its OWN list (`EngraveJob.vectors`), like `combined` (#215) and `traces` (#219),
+ * so the panel's exhaustive `EngraveShape` switch and the hand-built shape editor are untouched.
+ * It funnels through the SAME `itemProfile`/`toPartPlan`/`PartPlan` pipeline as every other
+ * region item, and is an `EngraveAnyItem`, so a `frame`/`cutaway` may name it.
+ */
+export interface EngraveVectorShape extends EngraveShapeBase {
+  kind: 'vector';
+  /** The imported file's name, shown in operations and findings. The file itself is not kept. */
+  sourceName: string;
+  /** Flattened rings, mm, relative to `position` (origin at their bbox centre). */
+  contours: [Mm, Mm][][];
+  /** How the rings' winding is read: outer/inner opposite (NonZero) or even-odd. */
+  fillRule: VectorFillRule;
+  /** Bounding size in mm, for the panel. The contours are already in mm. */
+  width: Mm;
+  height: Mm;
+}
+
 /**
  * The three COMBINED kinds (#215): shapes built from other shapes or from the stock outline,
  * by union, difference and offset — not by a general boolean-expression editor.
@@ -231,11 +262,11 @@ export interface EngraveStrokeLabelItem extends EngraveTraceBase {
 export type EngraveTraceItem = EngraveLineItem | EngraveStrokeLabelItem;
 
 /**
- * Every item that can appear in a plan's `engraves` (#215): a label, one of the four simple
- * shapes, or one of the three combined kinds. `EngraveItem` stays label-or-simple-shape for the
- * UI's exhaustive switches; the engine's wider type is this one.
+ * Every item that can appear in a plan's `engraves` (#215, #217): a label, one of the four simple
+ * shapes, one of the three combined kinds, or an imported vector outline. `EngraveItem` stays
+ * label-or-simple-shape for the UI's exhaustive switches; the engine's wider type is this one.
  */
-export type EngraveAnyItem = EngraveItem | EngraveCombinedShape;
+export type EngraveAnyItem = EngraveItem | EngraveCombinedShape | EngraveVectorShape;
 
 /**
  * What `itemProfile` accepts: a text label or a shape (#214). The document keeps them in two
@@ -338,6 +369,15 @@ export interface EngraveJob {
    * schema keeps it absent (not defaulted) so a pre-#219 document round-trips byte-for-byte.
    */
   traces?: EngraveTraceItem[];
+  /**
+   * Imported vector outlines (#217): SVG/DXF traces, flattened to mm at import. A separate list,
+   * like `combined` and `traces`, so the simple-shape editor and its exhaustive switch are
+   * untouched; they funnel into `engraves` through `itemProfile` like every other region item.
+   *
+   * Optional, so a pre-#217 document round-trips byte-for-byte; the schema keeps it absent (not
+   * defaulted) for the same reason as `combined` and `traces`.
+   */
+  vectors?: EngraveVectorShape[];
   /** Key into TOOL_LIBRARY. */
   toolKey: string;
   workholding: { kind: 'vise'; vise: ViseParams };

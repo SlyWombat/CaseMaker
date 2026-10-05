@@ -17,7 +17,13 @@ import { engravableProfile } from '@/engine/cnc/engrave/engravable';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { itemLabel, jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { aabbOfProfile, pOffset, type Profile } from '@/engine/compiler/profile';
-import type { EngraveAnyItem, EngraveCombinedShape, EngraveJob, EngraveShape } from '@/types/engraveJob';
+import type {
+  EngraveAnyItem,
+  EngraveCombinedShape,
+  EngraveJob,
+  EngraveShape,
+  EngraveVectorShape,
+} from '@/types/engraveJob';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 
 /**
@@ -267,16 +273,19 @@ export function engravabilityFindings(
   return findings;
 }
 
-/** The item — label, shape or combined shape — a measurement row names (#214/#215). */
+/** The item — label, shape, combined shape or imported vector — a measurement row names (#214/#215/#217). */
 function findItem(job: EngraveJob, id: string): EngraveAnyItem | undefined {
   return (
     job.labels.find((l) => l.id === id) ??
     job.shapes.find((s) => s.id === id) ??
-    (job.combined ?? []).find((c) => c.id === id)
+    (job.combined ?? []).find((c) => c.id === id) ??
+    (job.vectors ?? []).find((v) => v.id === id)
   );
 }
 
-function isShapeItem(item: EngraveAnyItem): item is EngraveShape | EngraveCombinedShape {
+function isShapeItem(
+  item: EngraveAnyItem,
+): item is EngraveShape | EngraveCombinedShape | EngraveVectorShape {
   return 'kind' in item;
 }
 

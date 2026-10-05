@@ -23,6 +23,7 @@ import type {
   EngraveLabel,
   EngraveShape,
   EngraveTraceItem,
+  EngraveVectorShape,
 } from '@/types/engraveJob';
 import type { CustomFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
@@ -79,8 +80,11 @@ export function labelProfile(label: EngraveLabel, customFonts: readonly CustomFo
   return pTranslate([label.position.x, label.position.y], rotated);
 }
 
-/** Is this item one of the shape kinds (#214/#215) rather than a text label? */
-function isShape(item: EngraveAnyItem): item is EngraveShape | EngraveCombinedShape {
+/** The region item kinds: the simple shapes (#214), the combined kinds (#215) and vectors (#217). */
+type EngraveRegionItem = EngraveShape | EngraveCombinedShape | EngraveVectorShape;
+
+/** Is this item one of the shape kinds (#214/#215/#217) rather than a text label? */
+function isShape(item: EngraveAnyItem): item is EngraveRegionItem {
   return 'kind' in item;
 }
 
@@ -131,7 +135,12 @@ export interface ResolvedItems {
  * Items with no references keep their document order, so a pre-#215 job's plan is unchanged.
  */
 export function resolveItems(job: EngraveJob): ResolvedItems {
-  const all: EngraveAnyItem[] = [...job.labels, ...job.shapes, ...(job.combined ?? [])];
+  const all: EngraveAnyItem[] = [
+    ...job.labels,
+    ...job.shapes,
+    ...(job.combined ?? []),
+    ...(job.vectors ?? []),
+  ];
   const byId = new Map<string, EngraveAnyItem>();
   for (const item of all) if (!byId.has(item.id)) byId.set(item.id, item);
 
@@ -229,21 +238,27 @@ export function itemOperationName(item: EngraveAnyItem): string {
       return `Pocket frame${named} ${item.width} wide, ${item.gap} gap`;
     case 'cutaway':
       return `Pocket cutaway${named} (${item.islands.length} island${item.islands.length === 1 ? '' : 's'})`;
+    case 'vector': {
+      const n = item.contours.length;
+      return `Pocket outline${named} (${n} contour${n === 1 ? '' : 's'}, ${item.width}×${item.height}mm)`;
+    }
   }
 }
 
 /**
- * A shape pocket (#214) as a `Profile`, centred on the ORIGIN and unrotated: the caller places
- * it. Every round primitive gets an EXPLICIT segment count from `segmentsForRadius` (#190),
- * because Manifold's default at a small radius is 4 segments and a "round" shape would land as
- * a square.
+ * A shape pocket (#214) or imported outline (#217) as a `Profile`, centred on the ORIGIN and
+ * unrotated: the caller places it. Every round primitive gets an EXPLICIT segment count from
+ * `segmentsForRadius` (#190), because Manifold's default at a small radius is 4 segments and a
+ * "round" shape would land as a square.
  *
  * - rect: `rectProfile` (already centred) or a shifted `roundedRect` (its bbox-min is at 0,0).
  * - circle: centred on the origin by construction.
  * - slot: the hull of two end discs at ±(L/2 − r) — straight sides, round ends.
  * - polygon: the points as given, relative to `position` (so the origin IS `position`).
+ * - vector: the imported rings as given (already mm, already centred), with their own fill rule —
+ *   `NonZero` keeps an SVG's oppositely-wound holes, `EvenOdd` makes every enclosed ring a hole.
  */
-function shapeProfile(shape: EngraveShape): Profile {
+function shapeProfile(shape: EngraveShape | EngraveVectorShape): Profile {
   switch (shape.kind) {
     case 'rect': {
       const { width, height, cornerRadius } = shape;
@@ -265,6 +280,8 @@ function shapeProfile(shape: EngraveShape): Profile {
     }
     case 'polygon':
       return poly(shape.points.map(([x, y]) => [x, y] as [number, number]));
+    case 'vector':
+      return { kind: 'p-poly', contours: shape.contours, fillRule: shape.fillRule };
   }
 }
 

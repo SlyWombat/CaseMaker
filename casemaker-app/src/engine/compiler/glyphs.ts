@@ -1,5 +1,6 @@
 import type { Font } from 'opentype.js';
 import type { Vec2 } from '@/types';
+import { flattenCubic, flattenQuadratic } from './curveFlatten';
 import type { Profile } from './profile';
 
 /** A parsed OpenType/TrueType font (opentype.js). */
@@ -29,22 +30,6 @@ export function capHeightEm(font: ParsedFont): number {
     for (const y of [c.y, c.y1, c.y2]) if (y !== undefined && -y > top) top = -y;
   }
   return top > 0 ? top / upm : 0.7;
-}
-
-/** Subdivisions needed so a quadratic stays within `tol` of its chord polyline. */
-function quadSegments(p0: Vec2, p1: Vec2, p2: Vec2, tol: number): number {
-  // Max deviation of a quadratic from its chord = |p0 - 2p1 + p2| / 4; the
-  // polyline error scales as 1/n^2.
-  const dev = Math.hypot(p0[0] - 2 * p1[0] + p2[0], p0[1] - 2 * p1[1] + p2[1]) / 4;
-  return Math.max(1, Math.ceil(Math.sqrt(dev / tol)));
-}
-
-/** Same idea for a cubic: |B''| <= 6 * max(|p0-2p1+p2|, |p1-2p2+p3|), error <= max|B''| / (8 n^2). */
-function cubicSegments(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, tol: number): number {
-  const d1 = Math.hypot(p0[0] - 2 * p1[0] + p2[0], p0[1] - 2 * p1[1] + p2[1]);
-  const d2 = Math.hypot(p1[0] - 2 * p2[0] + p3[0], p1[1] - 2 * p2[1] + p3[1]);
-  const dev = (3 / 4) * Math.max(d1, d2);
-  return Math.max(1, Math.ceil(Math.sqrt(dev / tol)));
 }
 
 /**
@@ -98,37 +83,19 @@ export function glyphProfile(
         push(c.x!, c.y!);
         break;
       case 'Q': {
-        const p0 = cur;
-        const p1: Vec2 = [c.x1!, c.y1!];
-        const p2: Vec2 = [c.x!, c.y!];
-        const n = quadSegments(p0, p1, p2, GLYPH_CHORD_TOLERANCE_MM);
-        for (let i = 1; i <= n; i++) {
-          const t = i / n;
-          const a = (1 - t) * (1 - t);
-          const b = 2 * (1 - t) * t;
-          const d = t * t;
-          push(a * p0[0] + b * p1[0] + d * p2[0], a * p0[1] + b * p1[1] + d * p2[1]);
-        }
+        const pts = flattenQuadratic(cur, [c.x1!, c.y1!], [c.x!, c.y!], GLYPH_CHORD_TOLERANCE_MM);
+        for (const [x, y] of pts) push(x, y);
         break;
       }
       case 'C': {
-        const p0 = cur;
-        const p1: Vec2 = [c.x1!, c.y1!];
-        const p2: Vec2 = [c.x2!, c.y2!];
-        const p3: Vec2 = [c.x!, c.y!];
-        const n = cubicSegments(p0, p1, p2, p3, GLYPH_CHORD_TOLERANCE_MM);
-        for (let i = 1; i <= n; i++) {
-          const t = i / n;
-          const u = 1 - t;
-          const a = u * u * u;
-          const b = 3 * u * u * t;
-          const d = 3 * u * t * t;
-          const e = t * t * t;
-          push(
-            a * p0[0] + b * p1[0] + d * p2[0] + e * p3[0],
-            a * p0[1] + b * p1[1] + d * p2[1] + e * p3[1],
-          );
-        }
+        const pts = flattenCubic(
+          cur,
+          [c.x1!, c.y1!],
+          [c.x2!, c.y2!],
+          [c.x!, c.y!],
+          GLYPH_CHORD_TOLERANCE_MM,
+        );
+        for (const [x, y] of pts) push(x, y);
         break;
       }
       case 'Z':
