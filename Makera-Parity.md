@@ -793,6 +793,16 @@ exists it is stated; where none is, the refusal is meant to hold.
   measured numbers travel between machines, and anything the wizard learns from the machine
   is recorded with `source` like every other fact. The refusal narrows to "no wizard as the
   *home* for machine facts"; it stops being "no guided setup at all".
+
+  **R1 conflated two different things, and only one of them was ever refusable.** A
+  *machine* first-run wizard is the gated half above. A **job setup flow** — what are you
+  holding it in, what is the material, what size is the blank, which cutter is fitted — needs
+  no machine, no bridge and no connection, and it is wanted **now**: decision 26 already makes
+  workholding an explicit input that the probe plan derives from, and #231's dogfood found the
+  first real job needing a hand override of `stockProud` that nothing pointed at. Filed as
+  **#254** (CNC-2.1). The part of R1 that survives both halves is narrow and worth keeping:
+  **no flow owns machine facts** — the profile stays code with provenance, measured numbers
+  stay settings that travel via #247, and a flow reads them rather than holding them.
 - **R2 — VC's operator-editable time scale factor.** A knob over a model we can measure
   instead (A1). **So we should not.**
 - **R3 — PN's Industry / Intuitive dialect switch, or any second vocabulary**
