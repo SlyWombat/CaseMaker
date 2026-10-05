@@ -3,6 +3,7 @@ import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { defaultEngraveJob, newEngraveLabelId, newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
 import { todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
+import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type {
   EngraveBorderShape,
@@ -11,12 +12,14 @@ import type {
   EngraveCutawayShape,
   EngraveFrameShape,
   EngraveJob,
+  EngraveJobSources,
   EngraveLabel,
   EngravePolygonShape,
   EngraveRectShape,
   EngraveShape,
   EngraveShapeBase,
   EngraveSlotShape,
+  FieldSource,
   Sacrificial,
   ViseParams,
 } from '@/types/engraveJob';
@@ -121,11 +124,27 @@ function newLabel(job: EngraveJob): EngraveLabel {
   };
 }
 
-/** The job with its feeds/speeds override removed entirely (#205). */
+/** The job with its feeds/speeds override removed entirely (#205), provenance included (#246). */
 function withoutCutOverride(job: EngraveJob): EngraveJob {
   const next = { ...job };
   delete next.cutOverride;
+  if (next.sources) {
+    const { cut: _cut, ...rest } = next.sources;
+    if (Object.keys(rest).length > 0) next.sources = rest;
+    else delete next.sources;
+  }
   return next;
+}
+
+/** The job with a source stamped on each of `keys` in `sources.stock` (#254). */
+function withStockSource(
+  job: EngraveJob,
+  keys: readonly (keyof EngraveJob['stock'])[],
+  source: FieldSource,
+): EngraveJobSources {
+  const stock = { ...(job.sources?.stock ?? {}) };
+  for (const key of keys) stock[key] = source;
+  return { ...(job.sources ?? {}), stock };
 }
 
 /**
@@ -182,12 +201,14 @@ function newCombined(kind: EngraveCombinedShape['kind'], job: EngraveJob): Engra
 
 export interface EngraveJobState {
   job: EngraveJob;
-  setStock: (patch: Partial<EngraveJob['stock']>) => void;
+  /** Merge a stock edit and stamp each edited field's source (#254). Defaults to `'user'`. */
+  setStock: (patch: Partial<EngraveJob['stock']>, source?: FieldSource) => void;
   /** Add a default label and return its id. */
   addLabel: () => string;
   updateLabel: (id: string, patch: Partial<EngraveLabel>) => void;
   removeLabel: (id: string) => void;
-  setTool: (key: string) => void;
+  /** Set the cutter and stamp its source (#254). Defaults to `'user'`. */
+  setTool: (key: string, source?: FieldSource) => void;
   setVise: (patch: Partial<ViseParams>) => void;
   /** Add a default shape of `kind` (#214) and return its id. */
   addShape: (kind: EngraveShape['kind']) => string;
@@ -209,9 +230,17 @@ export interface EngraveJobState {
   setSacrificial: (sacrificial: Sacrificial) => void;
   /**
    * Merge a hand edit into the feeds/speeds override (#205). A key set to `undefined` clears
-   * just that field back to the computed value; `null` clears the whole override.
+   * just that field back to the computed value; `null` clears the whole override. The source
+   * (#246) defaults to `'user'` — the panel passes `'measured'` for a bench value.
    */
-  setCutOverride: (patch: Partial<CutParams> | null) => void;
+  setCutOverride: (patch: Partial<CutParams> | null, source?: FieldSource) => void;
+  /**
+   * Re-tag one existing override field's provenance (#246): the panel's "measured" toggle. Has
+   * no effect on a field the job does not override — the source is the value's, not a label.
+   */
+  setCutOverrideSource: (key: keyof CutParams, source: FieldSource) => void;
+  /** Apply a whole guided job setup in one write, stamping every value's source (#254). */
+  applySetup: (answers: SetupAnswers) => void;
   replace: (job: EngraveJob) => void;
   reset: () => void;
 }
@@ -225,7 +254,13 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
   return {
     job: loadJob(),
 
-    setStock: (patch) => apply((job) => ({ ...job, stock: { ...job.stock, ...patch } })),
+    setStock: (patch, source = 'user') =>
+      apply((job) => {
+        const keys = (Object.keys(patch) as (keyof EngraveJob['stock'])[]).filter(
+          (k) => patch[k] !== undefined,
+        );
+        return { ...job, stock: { ...job.stock, ...patch }, sources: withStockSource(job, keys, source) };
+      }),
 
     addLabel: () => {
       const label = newLabel(get().job);
@@ -250,7 +285,8 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
 
     removeLabel: (id) => apply((job) => ({ ...job, labels: job.labels.filter((l) => l.id !== id) })),
 
-    setTool: (key) => apply((job) => ({ ...job, toolKey: key })),
+    setTool: (key, source = 'user') =>
+      apply((job) => ({ ...job, toolKey: key, sources: { ...(job.sources ?? {}), tool: source } })),
 
     addShape: (kind) => {
       const shape = newShape(kind, get().job);
@@ -319,13 +355,30 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       }),
 
     // #205: hand edits sit ON TOP of the computed values, field by field. `undefined` clears one
-    // field; `null` clears the lot, so the panel can always get back to the table's values.
-    setCutOverride: (patch) =>
-      apply((job) =>
-        patch === null
-          ? withoutCutOverride(job)
-          : { ...job, cutOverride: { ...job.cutOverride, ...patch } },
-      ),
+    // field; `null` clears the lot, so the panel can always get back to the table's values. The
+    // per-field source (#246) travels with the value: setting one records where it came from,
+    // clearing one drops its tag, so a computed field never keeps a stale "measured" label.
+    setCutOverride: (patch, source = 'user') =>
+      apply((job) => {
+        if (patch === null) return withoutCutOverride(job);
+        const cutOverride = { ...job.cutOverride, ...patch };
+        const cut = { ...(job.sources?.cut ?? {}) };
+        for (const key of Object.keys(patch) as (keyof CutParams)[]) {
+          if (patch[key] === undefined) delete cut[key];
+          else cut[key] = source;
+        }
+        return { ...job, cutOverride, sources: { ...(job.sources ?? {}), cut } };
+      }),
+
+    setCutOverrideSource: (key, source) =>
+      apply((job) => {
+        const cut = { ...(job.sources?.cut ?? {}) };
+        if (job.cutOverride?.[key] === undefined) delete cut[key];
+        else cut[key] = source;
+        return { ...job, sources: { ...(job.sources ?? {}), cut } };
+      }),
+
+    applySetup: (answers) => apply((job) => applyAnswers(job, answers)),
 
     replace: (job) => apply(() => job),
 

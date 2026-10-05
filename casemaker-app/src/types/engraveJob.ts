@@ -24,6 +24,34 @@ import type { CutParams } from '@/engine/cnc/feeds';
 
 export type StockMaterial = 'softwood' | 'hardwood' | 'mdf' | 'pla';
 
+/**
+ * Where an asserted value came from (#246, and the same provenance rule as the vise and the
+ * sacrificial setup — decision 28: never a hard-coded truth, but the source says which).
+ *
+ * - `computed` — the feeds table produced it (`feedsFor`); no one typed it. Only meaningful for
+ *   `cutOverride`.
+ * - `user` — typed in the panel or answered in the guided job setup (#254). A typed value is
+ *   not more trustworthy for having gone through a flow.
+ * - `measured` — taken at the bench with calipers or a test cut (#208). Visibly different from
+ *   `user`, so a typed number never reads as a bench reading.
+ */
+export type FieldSource = 'computed' | 'user' | 'measured';
+
+/**
+ * Per-field provenance for the job's asserted values (#246 cutting overrides, #254 guided job
+ * setup). Absent on the whole object means "nothing has been asserted" — the shipped defaults,
+ * which are untagged and unmeasured. A key absent WITHIN a map means that one field is still the
+ * shipped default.
+ */
+export interface EngraveJobSources {
+  /** Which stock fields were asserted, and how (#254). Absent = the shipped default blank. */
+  stock?: Partial<Record<'length' | 'width' | 'thickness' | 'material', FieldSource>>;
+  /** Provenance of `toolKey` (#254). Absent = the shipped default cutter. */
+  tool?: FieldSource;
+  /** Per-field provenance for `cutOverride` (#246). Absent = computed from the feeds table. */
+  cut?: Partial<Record<keyof CutParams, FieldSource>>;
+}
+
 export interface EngraveLabel {
   id: string;
   text: string;
@@ -330,5 +358,10 @@ export interface EngraveJob {
    * always shown next to it, so an override is visibly a departure from the starting values.
    */
   cutOverride?: Partial<CutParams>;
+  /**
+   * Where the asserted values came from (#246/#254). Optional: a job that has never had a setup
+   * applied carries no key, so a pre-#246 document round-trips byte-for-byte.
+   */
+  sources?: EngraveJobSources;
   customFonts: CustomFont[];
 }

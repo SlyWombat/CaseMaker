@@ -342,6 +342,9 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
         findings: [],
         stats: { lines: 2, cuttingMoves: 1, deepestZ: -2, bbox: { min: [0, 0, -2], max: [1, 1, 0] } },
       },
+      // #244 — the frame file is slot 5's; this fixture only needs the type satisfied.
+      frameNc: null,
+      frameVerify: null,
       predicted: [],
       errors: [],
     };

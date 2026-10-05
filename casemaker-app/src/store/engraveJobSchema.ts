@@ -252,6 +252,34 @@ const cutOverrideSchema = z.object({
   air: z.boolean().optional(),
 });
 
+/**
+ * Where an asserted value came from (#246/#254). The same three states as `FieldSource`. Every
+ * key is optional, so a job that asserts nothing carries no `sources` key at all and round-trips.
+ */
+const fieldSourceSchema = z.enum(['computed', 'user', 'measured']);
+
+const jobSourcesSchema = z.object({
+  stock: z
+    .object({
+      length: fieldSourceSchema.optional(),
+      width: fieldSourceSchema.optional(),
+      thickness: fieldSourceSchema.optional(),
+      material: fieldSourceSchema.optional(),
+    })
+    .optional(),
+  tool: fieldSourceSchema.optional(),
+  cut: z
+    .object({
+      rpm: fieldSourceSchema.optional(),
+      feed: fieldSourceSchema.optional(),
+      plungeFeed: fieldSourceSchema.optional(),
+      stepDown: fieldSourceSchema.optional(),
+      stepOver: fieldSourceSchema.optional(),
+      air: fieldSourceSchema.optional(),
+    })
+    .optional(),
+});
+
 /** Version 1 (#200): the document before sacrificial material existed. */
 const engraveJobV1Schema = z.object({
   schemaVersion: z.literal(1),
@@ -284,6 +312,9 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   combined: z.array(combinedShapeSchema).optional(),
   // #219's single-line traces. OPTIONAL for the same byte-for-byte reason as `combined`.
   traces: z.array(traceSchema).optional(),
+  // #246/#254's per-field provenance. OPTIONAL, not defaulted: a job that has never had a
+  // cutting override or a guided setup applied carries no key.
+  sources: jobSourcesSchema.optional(),
 });
 
 export const engraveJobSchema = z

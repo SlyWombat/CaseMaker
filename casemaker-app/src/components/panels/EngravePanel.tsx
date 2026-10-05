@@ -10,6 +10,7 @@ import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobS
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { feedsFor, type CutParams } from '@/engine/cnc/feeds';
+import { MATERIAL_OPTIONS } from '@/engine/cnc/engrave/setupFlow';
 import {
   defaultSacrificialSide,
   defaultSacrificialUnder,
@@ -21,12 +22,14 @@ import {
 import { EngraveLabelRow } from './EngraveLabelRow';
 import { EngraveShapeRow } from './EngraveShapeRow';
 import { EngraveCombinedRow } from './EngraveCombinedRow';
+import { EngraveSetupFlow } from './EngraveSetupFlow';
 import { RunSheetView } from './RunSheetView';
 import type {
   EngraveAnyItem,
   EngraveCombinedShape,
   EngraveJob,
   EngraveShape,
+  FieldSource,
   Sacrificial,
   SacrificialSide,
   SacrificialUnder,
@@ -62,6 +65,33 @@ const TAG: CSSProperties = {
 };
 const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a' };
 
+/**
+ * The visible word for a value's source (#246/#254): a typed number reads "typed", never looking
+ * like a bench reading, and a computed feed says so. `measured` is the one that gets a colour.
+ */
+const SOURCE_LABEL: Record<FieldSource, string> = { computed: 'computed', user: 'typed', measured: 'measured' };
+const SOURCE_COLOR: Record<FieldSource, string> = { computed: '#9aa4b0', user: '#9aa4b0', measured: '#9fd19b' };
+
+/** The tag that shows a field's provenance (#246/#254), or null when nothing was asserted. */
+function SourceTag({ source, testid }: { source: FieldSource; testid: string }): JSX.Element {
+  return (
+    <span
+      style={{ ...TAG, color: SOURCE_COLOR[source], borderColor: source === 'measured' ? '#3a5a3a' : '#2a2f36' }}
+      data-testid={testid}
+      data-source={source}
+      title={
+        source === 'computed'
+          ? 'Computed from the feeds table — no one typed this.'
+          : source === 'measured'
+            ? 'Taken at the bench (#208).'
+            : 'Typed here — not more trustworthy for that.'
+      }
+    >
+      {SOURCE_LABEL[source]}
+    </span>
+  );
+}
+
 /** The kinds the panel can add with its "Add" control (#214): a label plus the four shapes. */
 const ADD_KINDS: readonly { value: EngraveShape['kind'] | 'label'; label: string }[] = [
   { value: 'label', label: 'Label' },
@@ -95,13 +125,6 @@ const ATTACH_METHODS: readonly { value: SacrificialUnder['attach']; label: strin
 ];
 
 const STRIP_SIDES: readonly (keyof Sacrificial['sides'])[] = ['left', 'right', 'front', 'back'];
-
-const MATERIALS: readonly { value: StockMaterial; label: string }[] = [
-  { value: 'softwood', label: 'softwood' },
-  { value: 'hardwood', label: 'hardwood' },
-  { value: 'mdf', label: 'MDF' },
-  { value: 'pla', label: 'PLA' },
-];
 
 /** 1 -> "1.0", 3.175 -> "3.175". The same formatting `recommendTool` uses in its reasons. */
 function fmtDiameter(d: number): string {
@@ -185,6 +208,7 @@ export function EngravePanel(): JSX.Element {
   const setVise = useEngraveJobStore((s) => s.setVise);
   const setSacrificial = useEngraveJobStore((s) => s.setSacrificial);
   const setCutOverride = useEngraveJobStore((s) => s.setCutOverride);
+  const setCutOverrideSource = useEngraveJobStore((s) => s.setCutOverrideSource);
 
   const preview = useEngravePreviewStore((s) => s.preview);
   const previewStatus = useEngravePreviewStore((s) => s.status);
@@ -227,6 +251,8 @@ export function EngravePanel(): JSX.Element {
   // shown as an overlay (#207). A stale result is not offered: the sheet would describe a job the
   // user has since changed.
   const [sheet, setSheet] = useState<RunSheet | null>(null);
+  // The guided job setup (#254) is a path into this panel, not a gate in front of it.
+  const [setupOpen, setSetupOpen] = useState(false);
   const runSheetReady = run.generated !== null && run.generated.verify !== null && run.generated.nc !== null;
   const runSheetBlocked = run.staleSince !== null;
 
@@ -368,24 +394,29 @@ export function EngravePanel(): JSX.Element {
   const combinedCount = job.combined?.length ?? 0;
   const hasReferenceable = job.labels.length + job.shapes.length + combinedCount > 0;
 
-  const stockNum = (key: 'length' | 'width' | 'thickness', label: string, title: string): JSX.Element => (    <label style={FIELD_LABEL}>
-      <span>{label}</span>
-      <input
-        type="number"
-        min={0}
-        step="any"
-        value={job.stock[key]}
-        data-testid={`engrave-stock-${key}`}
-        aria-label={`Stock ${label}`}
-        title={title}
-        style={FIELD}
-        onChange={(e) => {
-          const v = Number(e.target.value);
-          if (Number.isFinite(v)) setStock({ [key]: v } as Partial<EngraveJob['stock']>);
-        }}
-      />
-    </label>
-  );
+  const stockNum = (key: 'length' | 'width' | 'thickness', label: string, title: string): JSX.Element => {
+    const src = job.sources?.stock?.[key];
+    return (
+      <label style={FIELD_LABEL}>
+        <span>{label}</span>
+        <input
+          type="number"
+          min={0}
+          step="any"
+          value={job.stock[key]}
+          data-testid={`engrave-stock-${key}`}
+          aria-label={`Stock ${label}`}
+          title={title}
+          style={FIELD}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v)) setStock({ [key]: v } as Partial<EngraveJob['stock']>);
+          }}
+        />
+        {src && <SourceTag source={src} testid={`engrave-stock-${key}-source`} />}
+      </label>
+    );
+  };
 
   const viseNum = (
     key: 'stockProud' | 'fixedJawThickness' | 'movingJawThickness' | 'jawLength' | 'jawStartY' | 'uncertainty',
@@ -417,6 +448,35 @@ export function EngravePanel(): JSX.Element {
     </div>
   );
 
+  /**
+   * The source of one cutting override (#246): `computed` when the box shows the feeds table's
+   * value untouched, otherwise the tag the value was stamped with. The tag is the toggle — a
+   * typed value can be declared a bench measurement and back, so a measured feed is visible and
+   * reversible, and never silently relabelled by a regenerate.
+   */
+  const overrideSourceTag = (key: keyof Omit<CutParams, 'air'>): JSX.Element => {
+    const src: FieldSource = job.cutOverride?.[key] === undefined ? 'computed' : job.sources?.cut?.[key] ?? 'user';
+    if (src === 'computed') return <SourceTag source="computed" testid={`engrave-override-${key}-source`} />;
+    return (
+      <button
+        type="button"
+        data-testid={`engrave-override-${key}-source`}
+        data-source={src}
+        aria-pressed={src === 'measured'}
+        title="Click to mark this value as a bench measurement (#208), or back to typed."
+        style={{
+          ...TAG,
+          cursor: 'pointer',
+          color: SOURCE_COLOR[src],
+          borderColor: src === 'measured' ? '#3a5a3a' : '#2a2f36',
+        }}
+        onClick={() => setCutOverrideSource(key, src === 'measured' ? 'user' : 'measured')}
+      >
+        {SOURCE_LABEL[src]}
+      </button>
+    );
+  };
+
   const overrideNum = (key: keyof Omit<CutParams, 'air'>, label: string, unit: string): JSX.Element => (
     <label key={key} style={FIELD_LABEL}>
       <span>
@@ -439,6 +499,7 @@ export function EngravePanel(): JSX.Element {
           }
         }}
       />
+      {overrideSourceTag(key)}
     </label>
   );
 
@@ -471,6 +532,18 @@ export function EngravePanel(): JSX.Element {
 
   return (
     <div className="panel-stack" data-testid="engrave-panel">
+      {/* The guided job setup (#254): a path INTO this panel. A new job can be set up from here
+          without hunting through the fields below; skipping it leaves every field as it was. */}
+      <button
+        type="button"
+        data-testid="engrave-setup-open"
+        title="Answer workholding, material, blank and cutter in order — then return here."
+        style={{ width: '100%', padding: 6 }}
+        onClick={() => setSetupOpen(true)}
+      >
+        Set up this job…
+      </button>
+
       {/* 1 — stock */}
       <h3 style={SUBHEAD}>Stock</h3>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
@@ -487,12 +560,15 @@ export function EngravePanel(): JSX.Element {
             style={FIELD}
             onChange={(e) => setStock({ material: e.target.value as StockMaterial })}
           >
-            {MATERIALS.map((m) => (
+            {MATERIAL_OPTIONS.map((m) => (
               <option key={m.value} value={m.value}>
                 {m.label}
               </option>
             ))}
           </select>
+          {job.sources?.stock?.material && (
+            <SourceTag source={job.sources.stock.material} testid="engrave-stock-material-source" />
+          )}
         </label>
       </div>
       <p style={MUTED}>X runs between the vise jaws. The fixed jaw is on the left.</p>
@@ -608,6 +684,7 @@ export function EngravePanel(): JSX.Element {
           </option>
         ))}
       </select>
+      {job.sources?.tool && <SourceTag source={job.sources.tool} testid="engrave-tool-source" />}
       {diameter !== null && (
         <p style={MUTED} data-testid="engrave-thin-strokes">
           Strokes thinner than {fmtDiameter(diameter)} mm cannot be cut — the cutter opens them away entirely.
@@ -980,6 +1057,7 @@ export function EngravePanel(): JSX.Element {
       </div>
 
       {sheet && <RunSheetView sheet={sheet} onClose={() => setSheet(null)} />}
+      {setupOpen && <EngraveSetupFlow onClose={() => setSetupOpen(false)} />}
 
       {previewStatus === 'loading' && (
         <p style={{ ...MUTED, opacity: 0.7 }} data-testid="engrave-preview-loading">
