@@ -1,7 +1,8 @@
 # Makera Studio — capability parity review
 
-Status as of 2026-10-03; §13 added 2026-10-04. Nothing here is implemented; this document is
-the inventory and the gap list that `/Fabrication.md` plans against.
+Status as of 2026-10-03; §13 added 2026-10-04; §14 added 2026-10-05. Nothing here is
+implemented; this document is the inventory and the gap list that `/Fabrication.md` plans
+against.
 
 **Why this document exists.** The brief changed: Case Maker's CNC side is no longer "get
 one badge cut on one Z1", it is software other people will rely on. That makes Makera
@@ -153,9 +154,9 @@ strategy names, because they are what makes an operation usable.
 |---|---|---|
 | **Depth** | `startDepth`, `endDepth`, `stepDown` (on tool), `finishStepDown`, `enablelastlayer` | V1 needs start/end/stepDown; finishing pass later |
 | **Clearance** | `safeZ`, `startX/Y/Z`, `bEnableStartPosition` | **V1** (#173) |
-| **Ramping** | `useRamping`, `rampingType`, `angle`, `rampingZ`, `rampingdistance` | planned — V1 plunges |
-| **Tabs / bridges** | `supportTabs`, `tabsDistance`, `tabsHeight`, `tabsLayout`, `tabsShape`, `tabsWidth` (2D/3D Contour only) | planned — needed the moment we cut parts free |
-| **Stock to leave** | `radial_allowance`, `axial_allowance`, `machining_allowance`, `finshing[]` *(sic)* | planned |
+| **Ramping** | `useRamping`, `rampingType`, `angle`, `rampingZ`, `rampingdistance` | **refused for now, with a reopen gate** — §14.4 R16. V1 plunges, and a plunge is what the sweep simulates exactly |
+| **Tabs / bridges** | `supportTabs`, `tabsDistance`, `tabsHeight`, `tabsLayout`, `tabsShape`, `tabsWidth` (2D/3D Contour only) | **#218** (CNC-2.1) — needed the moment we cut parts free |
+| **Stock to leave** | `radial_allowance`, `axial_allowance`, `machining_allowance`, `finshing[]` *(sic)* | milestone material, gated on #209's finish — §14.3 M3 |
 | **Pocket shape** | `pocket_strategy`, `path_direction`, `direction`, `parallel_angle`, `position_offset`, `toolcontainment` | **V1** needs contour-parallel; the rest planned |
 | **Contour side** | `contourPosition`, `offset`, `workDirection` | planned |
 | **Peck drilling** | `retract_distance`, `retract_position`, `retract_z` | planned with drilling |
@@ -368,6 +369,11 @@ says about the machine-profile abstraction. It does **not** change this answer �
 stays Z1-only, and the study is evidence *for* that. What it adds: the `MachineProfile`
 *type* must be shaped for a field wider than a 3-axis mill, and the gap list re-orders
 toward "the machine knowing itself". Read §13 before treating §10 as settled.
+
+**Refreshed 2026-10-05.** **§14** reads the whole study against the roadmap (#236): what to
+act on, what deserves a milestone, what is refused on the record, and which numbered
+decisions in `/Fabrication.md` the evidence now argues against. The scope answer is still
+unchanged.
 
 ---
 
@@ -591,3 +597,333 @@ item, and #228 supplies the evidence for that priority.
 documentation-level — no competitor app was run — while the Makera claims are file-level
 (`UI-PATTERNS.md`, "What this list does not say"). Treat §13 as a *scope and shape* input,
 not as a capability audit of any named product.
+
+---
+
+## 14. The corpus read against the roadmap (#236)
+
+Read 2026-10-05: `docs/market-research/FEATURE-MATRIX.md`, `UI-PATTERNS.md`, `SOURCES.md`
+and all 18 vendor notes, against the open issues, the six CNC milestones, `/Fabrication.md`'s
+28 numbered decisions, §13 above and `/Simulation.md`. §13 took one slice (the machine-profile
+shape); this section takes the rest. **The corpus is gitignored**, so every conclusion that
+matters is written here, with the load-bearing fact beside its citation, and the citation is
+for a reader who has the corpus on disk. Every line below ends in a consequence. Rotary
+findings are not here — they belong to #235.
+
+Vendor codes are `FEATURE-MATRIX.md` §0's: C3 Carbide 3D, BT Bantam, SM Snapmaker, IV Easel,
+RG Roland, TM Tormach PathPilot, SC gSender, OB OpenBuilds, GM Candle, SP Shaper, ST Stepcraft,
+VC Vectric, CV Carveco, ES Estlcam, AD Fusion, LB LightBurn/MillMage, OF Onefinity, PN Kinetic
+Control; MKS/MKC are Makera Studio / Makera CAM Beta.
+
+### 14.1 What the matrix says, cell by cell, against what we have
+
+| Capability (`FEATURE-MATRIX.md`) | The field | Us | Verdict |
+|---|---|---|---|
+| 2D pocket, contour, drill (§2.C) | Y almost everywhere | pocket shipped (#172); contour/cut-out #218; drill #220 | covered |
+| Tabs / bridges (§2.C) | Y: C3, CV all tiers, VC, ES?, AD, LB, MKC; `?` for IV after the evidence audit | #218 | covered |
+| Ramping (§2.C) | Y: C3 Pro, IV Starter, CV all tiers, VC, AD, LB, MKC | none | **absent by choice** — §14.4 R16 |
+| Stock-to-leave / finish pass (§2.C) | Y: TM, VC, CV all tiers, AD, LB | none | **absent** — §14.3 M3 |
+| V-carve (§2.C) | Y in 9 columns; MKS `P` (type 5 ships no config, §2.1) | #221, gated on #185 | covered, deferred |
+| 3D relief (§2.C) | Y mostly in paid tiers (C3 Pro, IV Pro, LB Pro) | #222 | covered, deferred |
+| Thread milling (§2.C) | MKS, MKC, VC, ES, AD | not planned (§2) | **refused** — R14 |
+| Nesting (§2.C) | Pro tiers only: VC Pro, CV Plus, LB Pro | none | **refused** — R15 |
+| Toolpath templates (§2.C) | VC Pro, CV Plus/Pro, LB Ops Library, IV Pro Toolbox (a cut-settings library, not an op template) | the `EngraveJob` document *is* the template (`docs/bench/*.job.json`) | **refused** — R7 |
+| Custom tool library (§2.C) | Y nearly everywhere | `TOOL_LIBRARY` code-level; #212 inventory | covered |
+| Feeds database (§2.C) | Y nearly everywhere; only TM computes from material + tool with provenance | `feeds.ts`, every row `unmeasured`, clamped by `clampToMachine` | covered; the readback loop is missing — §14.7 |
+| Plugin / scripting (§2.C) | SC macros, OB inject API, GM JS debugger, VC gadgets — all senders | none | **refused** — R11 |
+| Material-removal simulation (§2.D) | Y in 11 columns; MKS `P` (unwired), MKC `N` | exact sweep, checkpointed playback (#182, #193–#199) | **ahead** |
+| Collision / gouge check (§2.D) | only C3 and BT; BT warns without blocking | fixture, holder, gouge, spindle-off-near-material, envelope — errors, not warnings | **ahead** |
+| Machining-time estimate (§2.D) | IV, TM (learned), SC (on file load, no machine), VC (scale factor), LB | cutting-only, three different numbers — §14.2 A1 | **mis-scoped** |
+| Setup / run sheet (§2.F) | only VC and CV | #207 shipped | covered |
+| First-run wizard, jog, homing, overrides, pendant, MDI (§2.E) | Y in most senders | none — we do not drive the machine (decision 10, §9.1) | **refused until the bridge** — R1, R10 |
+| Job queue (§2.F) | **N or ? in every column**; TM's "job" is a conversational step | none | **refused** — R9 |
+| G-code viewer (§2.F) | Y in 11 columns; TM colours the executing line | diagnostics say `line N`; nothing shows the text | **absent** — A5 |
+| Job history / statistics (§2.F) | SC rich; PN, TM partial | run-sheet §9 record blanks, read by hand (#209) | **absent** — §14.7 |
+| Resume / start-from-line (§2.E, UI §8) | SC with accessory state, IV Pro, OF, TM | none | **absent** — M2 |
+| Camera (§2.F) | load-bearing only at SP and LB; MKS monitoring only | #189 | covered |
+| Import: SVG / DXF / STL / STEP / Gerber (§2.B) | SVG Y in 13 columns incl. free tiers; STL 9, mostly paid; STEP 3; Gerber 4 | #217 (SVG, DXF); mesh for CNC with #222 | covered; **decision 6's order is inverted** — §14.5 |
+| Image trace (§2.B) | Y in 8 columns; ES machines QR codes | decision 5, no issue | **absent** — M5 |
+| Parametric modelling (§2.B) | AD only | the whole app | **ahead** |
+| Open source / offline / no account (§2.A) | 3 open; MKC gates first run on a purchase email | Apache-2.0, browser, local-first | ahead; keep it — R19, R20 |
+
+### 14.2 Act on now
+
+Each is cheap, changes something already built or already scheduled, and needs no machine.
+
+- **A1 — One time estimate, everywhere, with its assumptions named.** The field states the job
+  time before the run: SC computes it on file load with no machine connected
+  (`UI-PATTERNS.md` §3; `notes/sienci.md` feature inventory), VC from path length and feeds,
+  TM learns it from the previous run and shows it on load (`notes/tormach.md`, "Run time is
+  estimated and remembered", PP-1500/PP-2257). We have **three** numbers: `estimateSeconds`
+  (`cam/ir.ts`) counts feed moves only; the post writes that cutting-only figure into
+  `;@MKR|TIME|seconds=` (`post/z1.ts`), which the machine's screen shows as the job time
+  (`/Fabrication.md` §2); the run sheet labels it "simulated — rapids not included"; the
+  transport counts rapids at `DISPLAY_RAPID_MM_MIN = 3000` (`workers/sim/session.ts`); the
+  Simulate panel shows no time at all. **So we should** compute one estimate — cutting time
+  plus rapids at one named PROVISIONAL rapid rate (the display constant is already that
+  number; #208 D3 times an air run and calibrates it) — show it in the Simulate panel on load,
+  in the Engrave panel's Generate row and on the run sheet, and write *that* into `TIME` with
+  the assumption in a header comment. This does not collide with §11.2's "no `maxRapid`
+  field": §11.2 refuses to *command* a rapid rate (`F` on `G0`); an estimate's assumed rate is
+  a labelled assumption, which the transport already makes. **So we should not** add VC's
+  user-editable scale factor (a knob; the project rule is fix the default) — the honest
+  correction is TM's: the run sheet §9 already records wall-clock time, and once #209 records
+  it, "last measured" belongs beside the estimate.
+- **A2 — Say what the simulation did not look at.** BT names its blind spots — *"The software
+  doesn't yet have warnings for every potential type of collision… Fixturing collisions…
+  Material collisions"* — and MillMage's setup wizard says workholding is not in the safe
+  height (`UI-PATTERNS.md` §5). Our disclaimer is physics only ("rigid, ideal machine: no
+  deflection, no runout, no Z-chain error, no chatter"). The geometry the sweep does not see:
+  the spindle body, head and gantry (#204: "do not model the spindle body"); anything on the
+  bed other than the declared vise and sacrificial stack — the anchor bracket, clamps, the
+  probe cable; and the collet nut while `Z1.holder` is `null`. **So we should** add one
+  sentence to the disclaimer in the Simulate panel, the Engrave panel's Simulated row and run
+  sheet §8 listing that geometry, so a green result cannot be read as "nothing can be hit".
+- **A3 — A framing file beside the job.** LB ships two framing modes (bounding box and
+  rubber band), SC traces the job's extents, SP's Aircut pilots the design at negative depth,
+  C3 offers rapid positioning to corners (`UI-PATTERNS.md` §6). Our run sheet §6 says "raise
+  Z by 20 mm and run the whole file in the air" — a full-length air run to answer a question
+  that takes seconds. The hull of every cutting move is already computed by the sweep. **So we
+  should** emit `<job>-frame.nc` beside `<job>.nc`: spindle off, rapid to `hopZ`, trace the
+  toolpath's hull at `hopZ`, return, `M02` — passed through the same verifier and simulator
+  (no cut moves; spindle-off feeds far above material, so no `spindle-off-near-material`) —
+  and make run sheet §6 "run the frame file first; the full air run only if the frame
+  surprised you". The first bench trip keeps the air run (#208 D4): it is the only check of
+  the lowest point against the jaws.
+- **A4 — Suggested vs supplied, on the cutting fields.** TM colours a DRO green when the value
+  is the controller's suggestion and white once the operator overwrites it
+  (`notes/tormach.md`, feeds and speeds, p. 123; `UI-PATTERNS.md` runners-up). We already do
+  this in the Simulate panel — `FieldSource: 'header' | 'user' | 'default'` (#196) — and not
+  in the Engrave panel's Cutting override (#205), where a table value and a typed override
+  look the same. **So we should** tag each cutting field with its source using the same
+  convention, with the row's `status` (`unmeasured` / `measured`) as a third state, so that a
+  row #209 makes `measured` reads differently from one the operator overrode.
+- **A5 — A read-only G-code pane synced to the scrubber.** Eleven of twenty products show the
+  program text; TM colours the executing line orange and the start line green
+  (`FEATURE-MATRIX.md` §2.F; `notes/tormach.md`, "Job setup / restart aids", pp. 41–45). Our
+  diagnostics carry `line N` and nothing shows line N. **So we should** add a read-only pane
+  that follows the transport step and jumps on a diagnostic click. **So we should not** make
+  it editable — R8.
+- **A6 — Export and import the user's own measurements as one file.** SC exports firmware
+  settings *"so you have it on hand"*; BT's tool library imports and exports `.json`; ST's
+  installer treats each attachment as an installed profile (`UI-PATTERNS.md` §1;
+  `notes/bantam.md` §4). Ours: `settingsStore.fixtures` holds the saved vise and sacrificial
+  stack in one browser's `localStorage`; #212 plans inventory export separately; `Z1.holder`
+  and the soft-endstop values will be bench-measured. The maintainer works on two machines.
+  **So we should** add one "my machine" export/import — fixtures, inventory when it exists,
+  measured holder and endstop overrides — as JSON with every `source` / `measuredAt` field
+  intact. **So we should not** build a first-run wizard around it — R1.
+
+### 14.3 Milestone material
+
+- **M1 — Test coupons: parameter sweeps the app writes, sheets and reads back.** LB ships a
+  *Material Test Generator* — *"a 10x10 grid of boxes with varying Power and Speed. Use the
+  Param dropdown to select different parameters to test"* — as a first-class feature, reusable
+  through its material library (`UI-PATTERNS.md` runners-up; `notes/lightburn.md` §3). Every
+  bench issue we have is that feature done by hand: #165's depth ladder was built by a one-off
+  script (`scripts/bench-files.ts`; #231 item 1, "no scriptable job → `.nc` path"), #185 is a
+  V-groove ladder, #209 is three depths, #208 D1 is three air strokes. Every `feeds.ts` row is
+  `unmeasured`, and run sheet §9's record blanks have nowhere to go but a bench markdown. The
+  FDM side already has the same idea as #157 (fit coupons). *Entry:* #209 done, so the first
+  real numbers exist and the paper record form is proven. *Exit:* a `coupon` job kind (a
+  labelled grid varying one of depth / feed / step-over / rpm / step-down, labelled on the part
+  and on the sheet); a committed scripted path job → `.nc` + sheet (closes #231 item 1); and a
+  readback form whose entries flip a feeds row to `measured` with date and coupon id as its
+  provenance. **So we should** make this a milestone — proposed **CNC-2.2 "Measured, not
+  assumed"** — rather than another script.
+- **M2 — Restart from a step, as a generated file.** SC's start-from-line *"look[s] through the
+  whole g-code file up to where you want to resume… what accessories were turned on, the power
+  of a spindle or laser"*; IV Pro has resume carve; OF has Jump to Line and power-loss
+  recovery; TM has *Set a New Start Line* with four lead-in behaviours and logs the last
+  executed line "in case a program must be restarted from the middle" (`UI-PATTERNS.md` §8;
+  `notes/tormach.md`). The hard part SC describes is what our `Timeline` already holds at every
+  step — spindle, air, tool, WCS (`/Simulation.md` §1.1). We do not drive the machine, so
+  resume is a second `.nc`: a literal prefix (`G90 G21`, `T<n> M6`, `S M3`, `M7`, `G0` to
+  `hopZ` then XY) and the tail from step *k*. Two Z1 facts make it safe: Smoothieware has no
+  variables, so the prefix must be literal anyway, and `M6` re-measures tool length, which is
+  exactly what a broken-bit restart needs (`/Z1-Firmware-Dialect.md` §2). *Entry:* #209 — the
+  first real job is the first one that can stop. *Exit:* "Restart from this step" on any
+  loaded program, writing `<file>-from-L<n>.nc` through the same generate → verify → simulate
+  gate (#206), with a run-sheet addendum. **So we should** schedule it in CNC-2.2, not before.
+- **M3 — A finish pass on floors and walls (stock-to-leave).** Y for TM, VC, CV (all tiers:
+  *"Perform a finishing pass around the design to ensure clean and smooth edges after rough
+  cutting"*, `notes/carveco.md` second pass), AD, LB; §4 above has had it as "planned" since
+  2026-10-03 with no issue. *Entry:* #209 reports fuzzy or torn finish at the step-over used,
+  or #176's two-colour reveal needs a cleaner floor. *Exit:* a `finish` option — a final
+  full-depth wall pass at a named allowance and a floor pass at reduced step-over, both
+  constant-Z and so exact in the sweep. **So we should** hold it for that evidence rather than
+  build it on an assumption about finish.
+- **M4 — A batch of parts from a list (demand-gated).** VC's *production plate engraving
+  (CSV/text merge)* (`notes/vectric.md`, feature inventory) is exactly what a badge maker does
+  twenty times. *Entry:* #176 (the first badge) done **and someone asks** — the project's
+  demand-driven rule. *Exit:* one job plus a list → N `.nc` files and N run-sheet pages, one
+  blank per job; not nesting (R15). **So we should** write it down and wait for the ask.
+- **M5 — Vector trace of an image (decision 5's first half).** Image trace is Y in eight
+  columns, free-tier in most; ES machines pictures *and QR codes* (`FEATURE-MATRIX.md` §2.B).
+  Decision 5 names two image methods and neither has an issue. *Entry:* #217 landed — the
+  traced result is just another profile import. *Exit:* raster → profile as an import source
+  with the opening check (#201) applied to the result; the greyscale-relief half waits for
+  #222. **So we should** sequence trace into CNC-2.1's follow-on and relief into CNC-4.
+
+### 14.4 Refused, on the record
+
+Each with the reason, so it does not come back in six months. Where a reopen condition
+exists it is stated; where none is, the refusal is meant to hold.
+
+- **R1 — A first-run machine-setup wizard** (`UI-PATTERNS.md` §1: C3's *Setup New Machine*,
+  BT's tab rail, LB/MillMage's project setup). It exists to connect, home, test switches and
+  configure a tool setter; we neither connect nor home, there is one machine, and the
+  questions it would ask are #208's bench measurements, which no wizard can take for you. The
+  profile is code with provenance per field (`machine.ts`); the user's numbers are settings
+  with `source`. **So we should not** build one; A6 is the half worth having.
+- **R2 — VC's operator-editable time scale factor.** A knob over a model we can measure
+  instead (A1). **So we should not.**
+- **R3 — PN's Industry / Intuitive dialect switch, or any second vocabulary**
+  (`UI-PATTERNS.md` §7). Two wordings are two things to keep true; the CNC guide already chose
+  plain words with a glossary (`cnc-guide.md` §8.5). **So we should not.**
+- **R4 — RG's "Better surface finish / Faster cutting time" radio, or any quality/speed
+  preset over the feeds table** (`UI-PATTERNS.md` §7). Every row is `unmeasured`; a preset over
+  unmeasured numbers is a promise. *Reopen:* two `measured` rows per material exist (M1).
+  **So we should not** before then.
+- **R5 — Community cut settings** (IV Pro, `UI-PATTERNS.md` §4). No server, local-first; and a
+  shared number without the machine, cutter and measurement attached is the Makera table's
+  failure in another form — 32 rows above the Z1's ceiling (§5.1). **So we should not.**
+- **R6 — Bundling a vendor tool catalogue** (IV's "roughly 600 bits from five brands", C3's
+  store library, `UI-PATTERNS.md` §4). Licence (`/Fabrication.md` §3: read, never copy) and
+  #212's rule: the picker lists tools you own. **So we should not.**
+- **R7 — A toolpath / operations template library** (VC templates, CV Plus/Pro, MillMage
+  Operations Library). The `EngraveJob` file is the template, and the app's template mechanism
+  is already declarative JSON. **So we should not** add a second preset system.
+- **R8 — In-app G-code editing** (`FEATURE-MATRIX.md` §2.F: editors in 11 columns). The file is
+  the output of generate → verify → simulate (#206); an edit after the gate voids the gate, and
+  #209 already forbids fixing a depth by hand at the machine. **So we should not**; a viewer
+  (A5) is a different thing.
+- **R9 — A job queue.** Nobody in the sample has one — `N` or `?` in every column; TM's "job"
+  is a conversational step inside one program (`FEATURE-MATRIX.md` §2.E note) — and we do not
+  send. **So we should not.**
+- **R10 — Jog, DRO, homing, overrides, pendant/gamepad, MDI console in the app**
+  (`FEATURE-MATRIX.md` §2.E). Bridge-era by decision 10 and §9.1, bound by `/Fabrication.md`
+  §8's safety rules; the bridge issue decides what the bridge exposes. **So we should not**
+  carry any of it as a design now.
+- **R11 — A plugin or scripting API, or macros** (GM's JS window with a debugger, SC macros,
+  OB's inject API, VC gadgets). Three of twenty have one and all are senders;
+  `/Fabrication.md` §8: no driver plugin API until someone asks. **So we should not.**
+- **R12 — Gerber / PCB isolation routing** (MKC, BT subscription, AD, ES outlines). A different
+  product; Case Maker builds *around* boards. **So we should not**, absent demand.
+- **R13 — STEP / IGES import** (MKC, RG, AD). Needs a B-rep kernel; our geometry is Manifold
+  meshes and Clipper2 profiles, and mesh import already serves cases. *Reopen:* a case consumer
+  appears. **So we should not** otherwise.
+- **R14 — Thread milling** (MKS, MKC, VC, ES, AD). No thread mill is owned, threads in printed
+  parts are inserts and screws (#140), and a 150 W spindle in PLA is not where it earns its
+  keep. **So we should not.**
+- **R15 — True-shape nesting and tiling** (VC Pro, CV Plus, LB Pro, C3 Pro tiling). A 200 × 200
+  bed and one blank in the vise; the FDM side's print-ready layout already handles multi-part;
+  a batch (M4) is N jobs, not one nested job. **So we should not.**
+- **R16 — Ramping and helical entry in our own CAM, for now** (CV all tiers, IV Starter, C3
+  Pro, MKC, VC, AD, LB). A plunge is exact in the sweep; a ramp is swept conservatively and
+  over-removes (`/Simulation.md` §3.2), which widens the oracle's over-cut tolerance for every
+  job that uses it. At a 1 mm cutter and 0.3–1.0 mm step-down in wood and PLA the plunge load
+  is small. *Reopen:* #209 shows plunge marks or an entry-broken cutter, or #222 makes
+  non-constant-Z moves exact. **So we should not** write it before then; §4 now says so
+  instead of "planned".
+- **R17 — The camera as monitor, time-lapse or dashcam** (TM's E-stop loop recording, SM's AI
+  monitoring, MKS's feed). Studio and the Makera App already monitor; our camera work is
+  metrology only (§9, #189). **So we should not.**
+- **R18 — UI localisation now** (LB's 25 translations, PN's language switch). The guide and
+  the diagnostic reference are rewritten weekly. *Reopen:* `cnc-guide.md` §8.1 stable for a
+  release. **So we should not** add i18n plumbing before that.
+- **R19 — A cloud simulator or an account** (TM's PathPilot HUB; MKC's purchase-email gate;
+  IV). Two vendors in this sample have vanished or exited (`FEATURE-MATRIX.md` §4 finding 1),
+  and our simulator already runs in the browser. **So we should not.**
+- **R20 — Feature tiers** (IV's one carve per week, C3 Pro, CV Plus). Apache-2.0, and #181's
+  rule: honest UI, not teased UI. **So we should not.**
+
+### 14.5 Where the field contradicts a numbered decision
+
+Named for the owner of `/Fabrication.md`; this document does not edit that file.
+
+- **Decision 6 — "Mesh import only to start (STL/3MF/OBJ), behind a pluggable registry."**
+  For 2.5D CAM the universal import is the profile, not the mesh: SVG is `Y` in 13 of 20
+  columns including every free tier, STL in 9 and mostly paid (`FEATURE-MATRIX.md` §2.B).
+  Our own CNC pipeline agrees — "CAM must consume profiles and a target Z, never a mesh"
+  (`/Fabrication.md` §5.2) — and the issues already invert the decision: #217 (SVG then DXF)
+  is CNC-2.1, mesh for CNC is #222 in CNC-4. **It should become:** *CNC import is profiles
+  first — SVG, then DXF (#217); mesh for the CNC side arrives with the dexel engine (#222).
+  The case-side mesh importer is unchanged.* Decision 6 was taken in the printing frame and
+  the CNC side needs its own sentence.
+- **Decision 19 — "Workholding is a printed nest, and it is a V1 deliverable" (OPEN).** The
+  bench settles it, not the corpus, but the corpus is one-sided: every enclosed desktop mill in
+  the sample ships or sells a mechanical fixture with a probing routine named after it — BT's
+  *L-Bracket Location* and *Rectangular Outer Corner* (`notes/bantam.md` §4), C3's low-profile
+  vise with BitZero's *Corner* cycle (`notes/carbide3d.md`), SP's Workstation — and none
+  documents a printed per-part nest. CNC-2 is already vise-first. **It should become:** *V1
+  workholding is the low-profile vise; the nest is not a deliverable; #175 reopens only if
+  #176 shows the vise cannot hold the 3.81 mm badge.*
+- **§9.1 — "Feeds/speeds from `makera_library.db`: read the DB when there are two tools."**
+  The DB has no PLA or PETG, no machine column and 32 rows above the Z1's ceiling (§5.1); the
+  field's best practice is TM's — compute from material and tool in the app, mark which values
+  are suggested (`notes/tormach.md`, pp. 122–124) — which `feeds.ts` with `status` already is.
+  **It should become:** *the DB is a prefill source for the desktop tool inventory (#212,
+  resolver case 2) and never the feeds source.*
+- **Decision 9 — "First real job is a 3D-printed blank."** Housekeeping, not a corpus
+  finding: CNC-2's first chips are wood in the vise (#209); the badge is CNC-3. **It should
+  read** "first *badge* job".
+- **Decision 5 — two image methods.** Not contradicted; mis-sequenced. Trace is free-tier and
+  near-universal, relief is paid-tier and 3D (`FEATURE-MATRIX.md` §2.B). **It should say**
+  trace first, with #217; relief with #222 (M5).
+
+**Checked and standing, stronger for it:** decision 4 (the vendor itself routes Z1 laser work
+to LightBurn — `SOURCES.md`, Makera table, `software/LightBurn`; a flag, not code); decision 10
+(USB is the field's default but Makera publishes both streams; the transport seam stands);
+decision 12 (the sample's only bed-levelling heightmap is GM's, built for PCB isolation —
+`notes/genmitsu.md`; TM's probing is workpiece and tool setting, not bed levelling — decision
+24's probed face makes `G32` unnecessary); decision 14 (gated on #185, honest reason intact);
+decision 20 (SP's depth presets and RG's two-way radio are the same instinct); decision 26
+(BT's named probing routines are the derivation, done by hand); decision 28 (LB redoes camera
+alignment whenever the camera moves — provenance with an invalidation rule); decision 25 and
+§13 (done); §8's "no plugin API" (R11).
+
+### 14.6 The ten UI patterns: copy, inherit for nothing, or conflict
+
+| `UI-PATTERNS.md` | Verdict | Where it lands |
+|---|---|---|
+| §1 wizard + exportable profile | **inherit for nothing** as a wizard; **copy** the export/import | A6, R1 |
+| §2 scrubbable simulation | **done** — step-indexed transport, pauses as the only ticks (#198); CV's per-toolpath simulate is covered by per-label floors in the preview | — |
+| §3 time before the run | **copy**, and it **conflicts** with §11.2 until "estimate ≠ command" is stated | A1, R2 |
+| §4 feeds from machine + material | **done** (`clampToMachine`, `feeds.ts`); **copy** TM's suggested/supplied; **refuse** community settings and vendor catalogues | A4, R5, R6 |
+| §5 clearance asked and checked | **done, stronger than any vendor** (verifier rule 9, fixture and holder gates, gouge solids); **copy** BT's blind-spot sentence | A2 |
+| §6 confirm where it lands | **copy** as a framing file; SP's Aircut is run sheet §6's Z+20; **conflicts** with run sheet §6 as written | A3 |
+| §7 plain language first | **done** by project values (two-state depth, override disclosure); **refuse** the dialect switch and the quality radio; **conflicts** with the guide's one vocabulary | R3, R4 |
+| §8 resume with accessory state | **milestone**, as a generated file — **conflicts** with "we do not drive the machine" unless done that way; the render-failure half is already the worker architecture | M2 |
+| §9 printable run sheet | **done** (#207); **copy** the unit — break the sheet at a tool change or a side when #218/#215 and multi-tool arrive; **refuse** VC's logo branding | later |
+| §10 camera locates the part | **covered** (#189); LB's redo-on-move is decision 28 | — |
+
+### 14.7 The one thing the corpus says we are ignoring
+
+**The parameter-test generator (M1).** Every cutting number in the app is `unmeasured`; four
+bench issues (#165, #185, #208 D1, #209) are hand-built parameter sweeps; the one real job
+generated so far needed a private script; and the run sheet ends in record blanks that are
+transcribed into markdown by hand. LightBurn ships that whole loop as a product feature
+(`UI-PATTERNS.md` runners-up, row 1), and the project already recognised the same primitive on
+the printing side as #157. It needs no machine, no bridge, no new geometry — a grid of items
+the engrave pipeline already cuts, a label per cell, and a form whose answers become the
+provenance of a feeds row. It is the mechanism by which "replace from #209" stops being a
+comment in `feeds.ts`.
+
+### 14.8 Proposed issues and milestones — listed, not filed
+
+| Proposed | Milestone | From |
+|---|---|---|
+| sim/engrave: one time estimate (cutting + rapids at a named PROVISIONAL rate), in the panel, the sheet and `TIME` | CNC-2 | A1 |
+| sim: the disclaimer names the geometry the sweep did not see | CNC-2 | A2 |
+| engrave: emit `<job>-frame.nc` and make run sheet §6 use it | CNC-2 | A3 |
+| engrave: `FieldSource` on the Cutting override fields, with `measured` as a third state | CNC-2.1 | A4 |
+| sim: read-only G-code pane synced to the transport; diagnostics jump to their line | CNC-1 | A5 |
+| settings: "my machine" export/import (fixtures, inventory, measured overrides) | CNC-2.1 | A6 |
+| **CNC-2.2 "Measured, not assumed"** (new milestone) — entry: #209 done; exit: feeds rows flipped to `measured` through coupons, a restart file proven on a bench stop | — | M1, M2 |
+| coupon job kind + scripted job → `.nc` + sheet (closes #231 item 1) + readback to `feeds.ts` | CNC-2.2 | M1 |
+| sim: restart from a step as a generated, gated `.nc` | CNC-2.2 | M2 |
+| cam: finish pass on floors and walls — entry gated on #209's finish | CNC-3 | M3 |
+| engrave: batch from a list — demand-gated | after #176 | M4 |
+| import: raster → profile trace, after #217 | CNC-2.1 follow-on | M5 |
+| docs: `/Fabrication.md` decisions 6, 9, 19 and the §9.1 DB row, as §14.5 states them | — | §14.5 |
