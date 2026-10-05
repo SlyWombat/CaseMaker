@@ -770,39 +770,42 @@ Each is cheap, changes something already built or already scheduled, and needs n
 Each with the reason, so it does not come back in six months. Where a reopen condition
 exists it is stated; where none is, the refusal is meant to hold.
 
-- **R1 — A first-run machine-setup wizard** (`UI-PATTERNS.md` §1: C3's *Setup New Machine*,
-  BT's tab rail, LB/MillMage's project setup). It exists to connect, home, test switches and
-  configure a tool setter. Today we do none of those: the web build physically cannot open a
-  socket, there is one machine, and the questions a wizard would ask are #208's bench
-  measurements, which no dialog can take for you. The profile is code with provenance per
-  field (`machine.ts`); the user's numbers are settings with `source`, and a wizard would add
-  a third place for a machine fact to live, filled by typing. **So we should not** build one
-  now; A6 is the half worth having.
+- **R1 — not "no wizard". Rewritten 2026-10-05 after three maintainer corrections, because the
+  original entry named a *mechanism* instead of a *reason* and over-refused.**
+  (`UI-PATTERNS.md` §1: C3's *Setup New Machine*, BT's tab rail, LB/MillMage's project setup.)
 
-  **Reopen gate — the bridge, and it is a *when*, not an *if*.** §5.7 of `/Fabrication.md` is
-  explicit: the bridge is **Tauri-only**, WiFi, developed and tested from Windows, and
-  deferred on *sequencing* rather than risk — Makera publish their own controller client, so
-  the protocol is readable and the job is smaller than first assumed. The moment the desktop
-  build connects, *connect / discover / confirm-this-is-the-right-machine* (`M482.5` for the
-  IP, `M482.4` for the MAC) and *home* become real first-run steps that only a guided flow
-  can carry, and this refusal stops applying to them. **Reopen when #181's platform seam
-  lands and the bridge is on the board (CNC-4).**
+  Sort a guided flow by what it asks about, and only one of the three is refused:
 
-  What does **not** come back with it: the measurement half. A bridged wizard still cannot
-  caliper a vise or probe a blank, so #208's rows stay bench work, A6 (#247) stays the way
-  measured numbers travel between machines, and anything the wizard learns from the machine
-  is recorded with `source` like every other fact. The refusal narrows to "no wizard as the
-  *home* for machine facts"; it stops being "no guided setup at all".
+  1. **Job setup — not refused, wanted now, and web-capable.** What are you holding it in,
+     what is the material, what size is the blank, which cutter is fitted. No machine, no
+     socket, no bridge: it is panel work and it runs in the browser exactly as it runs on the
+     desktop. Decision 26 already makes workholding an explicit input the probe plan derives
+     from, and #231's dogfood found the first real job needing a hand override of
+     `DEFAULT_VISE.stockProud` that nothing in the panel pointed at. **So we should** build
+     it — **#254** (CNC-2.1).
+  2. **Telling the app about your machine and your kit — not refused either, and also
+     web-capable.** Which machine, the vise you measured, the cutters you own, the overrides
+     from a bench session, imported from the JSON of A6 (**#247**). None of it needs a
+     connection; it is typing and file import, which a browser does.
+  3. **Connect, discover, home, test switches, configure a tool setter — absent, not
+     refused.** These steps have nothing to drive until the bridge exists. `/Fabrication.md`
+     §5.7 is explicit that the bridge is **Tauri-only**, WiFi, developed from Windows, and
+     deferred on *sequencing* rather than risk — Makera publish their own controller client,
+     so the protocol is readable. When #181's platform seam lands and the bridge is on the
+     board (CNC-4), *connect / discover / confirm-this-is-the-right-machine* (`M482.5` → IP,
+     `M482.4` → MAC) and *home* become real first-run steps a guided flow should carry, **on
+     the desktop build only**. The web build keeps 1 and 2 and simply does not show 3.
 
-  **R1 conflated two different things, and only one of them was ever refusable.** A
-  *machine* first-run wizard is the gated half above. A **job setup flow** — what are you
-  holding it in, what is the material, what size is the blank, which cutter is fitted — needs
-  no machine, no bridge and no connection, and it is wanted **now**: decision 26 already makes
-  workholding an explicit input that the probe plan derives from, and #231's dogfood found the
-  first real job needing a hand override of `stockProud` that nothing pointed at. Filed as
-  **#254** (CNC-2.1). The part of R1 that survives both halves is narrow and worth keeping:
-  **no flow owns machine facts** — the profile stays code with provenance, measured numbers
-  stay settings that travel via #247, and a flow reads them rather than holding them.
+  **What is actually refused, and it is the only durable part:** **no flow owns machine
+  facts.** The profile stays code with provenance per field (`machine.ts`); a measured number
+  stays a setting with its `source` and travels via #247; a flow *reads and writes those
+  stores* rather than becoming a third home for the same fact, filled by typing and
+  indistinguishable from a measurement. And no dialog can caliper a vise or probe a blank, so
+  #208's rows remain bench work however many steps the flow has.
+
+  **The lesson for the rest of this list:** a refusal phrased as a mechanism ("a wizard")
+  will over-refuse. Phrase it as the reason. **R10 is the next entry to re-read on those
+  grounds.**
 - **R2 — VC's operator-editable time scale factor.** A knob over a model we can measure
   instead (A1). **So we should not.**
 - **R3 — PN's Industry / Intuitive dialect switch, or any second vocabulary**
