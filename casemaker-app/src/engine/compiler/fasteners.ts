@@ -621,9 +621,12 @@ export function screwStarter(o: ScrewStarterOptions): BuildOp {
  *
  * A PRESS-in magnet wants a different fit, and the sign may be an INTERFERENCE
  * (a pocket smaller than the disc) rather than a gap. That is exactly what the
- * coupon has to decide; until it does, pass `diameter` explicitly instead of
- * trusting a row here. The magnet coupon is a follow-up, not in this change;
- * scripts/pilot-coupon.ts is the pattern it should copy.
+ * coupon decides: `npm run magnet:coupon` (issue #152) prints a ladder of pocket
+ * diameters from 0.25 mm interference to 1.25 mm loose, in both layer
+ * orientations, so the shipped glue fit is bracketed on BOTH sides. Until one
+ * comes back driven with a real magnet, pass `diameter` explicitly instead of
+ * trusting a row here, and leave every row `derived`. The +0.4 depth gap is NOT
+ * on that ladder — it needs a second coupon.
  */
 
 /** Radial clearance the default pockets carry: (pocket Ø − disc Ø) / 2, mm. */

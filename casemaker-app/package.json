@@ -22,6 +22,8 @@
     "deploy": "node scripts/deploy-cpanel.mjs",
     "quota": "node scripts/cpanel-quota.mjs",
     "thread:coupon": "tsx --tsconfig tsconfig.scripts.json scripts/thread-coupon.ts",
+    "magnet:coupon": "tsx --tsconfig tsconfig.scripts.json scripts/magnet-coupon.ts",
+    "fit:coupon": "tsx --tsconfig tsconfig.scripts.json scripts/fit-coupon.ts",
     "docs:sync": "node scripts/sync-docs.mjs",
     "reference-gcode:fetch": "node scripts/fetch-reference-gcode.mjs",
     "check:sim-gate": "node scripts/check-sim-gate.mjs"
