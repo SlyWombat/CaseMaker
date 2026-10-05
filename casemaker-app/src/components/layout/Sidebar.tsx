@@ -1,6 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore, type SidebarSectionId } from '@/store/viewportStore';
+
+/** Phone breakpoint, matching the welcome screen's ≤640px block. Below it the
+ *  left rail is an off-canvas drawer instead of a fixed 320px column, which
+ *  otherwise leaves the 3D viewport a ~70px sliver (issue #134). */
+const COMPACT_MAX_W = 640;
 
 const SECTIONS: { id: SidebarSectionId; label: string; icon: string; hint: string }[] = [
   { id: 'board',    label: 'Board',           icon: '🟦', hint: 'Host PCB profile, mounting holes, components' },
@@ -45,6 +50,22 @@ export function Sidebar() {
   const rackMode = useProjectStore((s) => s.project?.case.rack?.enabled === true);
   const activeSection = useViewportStore((s) => s.activeSidebarSection);
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
+  // Phone-width drawer (issue #134). Mirrors ContextPanel's compact pattern:
+  // the rail leaves the grid, a fixed handle toggles it, and a section tap
+  // hands off to the right-rail drawer (which auto-opens on the same change).
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [isCompact, setIsCompact] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth <= COMPACT_MAX_W : false,
+  );
+
+  useEffect(() => {
+    function onResize() {
+      setIsCompact(window.innerWidth <= COMPACT_MAX_W);
+    }
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   // A stale active section (e.g. HATs was open when the rack got enabled)
   // would leave the right rail showing an inapplicable panel.
   useEffect(() => {
@@ -60,40 +81,68 @@ export function Sidebar() {
   // editor in the right rail (ContextPanel). Mutually exclusive with
   // viewport geometry selection — clicking either switches the right
   // rail to host that thing.
+  const onSelect = (id: SidebarSectionId, isActive: boolean) => {
+    setSection(isActive ? null : id);
+    // On a phone, get out of the way: the section editor is a full-height
+    // drawer on the other edge, so leaving the rail up would bury the scene.
+    if (isCompact) setDrawerOpen(false);
+  };
+  const className = [
+    'sidebar',
+    isCompact ? 'sidebar--drawer' : '',
+    isCompact ? (drawerOpen ? 'sidebar--open' : 'sidebar--closed') : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   return (
-    <aside className="sidebar" style={{ padding: 8 }}>
-      {sections.map((s) => {
-        const isActive = activeSection === s.id;
-        return (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => setSection(isActive ? null : s.id)}
-            data-testid={`sidebar-button-${s.id}`}
-            aria-pressed={isActive}
-            title={s.hint}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              width: '100%',
-              padding: '10px 12px',
-              marginBottom: 4,
-              background: isActive ? '#243042' : '#1a1f25',
-              border: `1px solid ${isActive ? '#3a5a7a' : '#2a2f36'}`,
-              borderRadius: 4,
-              color: isActive ? '#cfe' : '#d1d5db',
-              fontSize: 13,
-              fontWeight: isActive ? 600 : 500,
-              textAlign: 'left',
-              cursor: 'pointer',
-            }}
-          >
-            <span aria-hidden style={{ fontSize: 16 }}>{s.icon}</span>
-            <span>{s.label}</span>
-          </button>
-        );
-      })}
-    </aside>
+    <>
+      {isCompact && (
+        <button
+          type="button"
+          className="sidebar__handle"
+          onClick={() => setDrawerOpen((v) => !v)}
+          aria-label={drawerOpen ? 'Close sections' : 'Open sections'}
+          aria-expanded={drawerOpen}
+          title={drawerOpen ? 'Close sections (◂)' : 'Open sections (☰)'}
+          data-testid="sidebar-handle"
+        >
+          {drawerOpen ? '◂' : '☰'}
+        </button>
+      )}
+      <aside className={className} data-testid="sidebar" aria-label="Sections" style={{ padding: 8 }}>
+        {sections.map((s) => {
+          const isActive = activeSection === s.id;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => onSelect(s.id, isActive)}
+              data-testid={`sidebar-button-${s.id}`}
+              aria-pressed={isActive}
+              title={s.hint}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                width: '100%',
+                padding: '10px 12px',
+                marginBottom: 4,
+                background: isActive ? '#243042' : '#1a1f25',
+                border: `1px solid ${isActive ? '#3a5a7a' : '#2a2f36'}`,
+                borderRadius: 4,
+                color: isActive ? '#cfe' : '#d1d5db',
+                fontSize: 13,
+                fontWeight: isActive ? 600 : 500,
+                textAlign: 'left',
+                cursor: 'pointer',
+              }}
+            >
+              <span aria-hidden style={{ fontSize: 16 }}>{s.icon}</span>
+              <span>{s.label}</span>
+            </button>
+          );
+        })}
+      </aside>
+    </>
   );
 }

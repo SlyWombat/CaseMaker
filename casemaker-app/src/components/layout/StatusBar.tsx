@@ -15,7 +15,7 @@ export function StatusBar() {
       <span className="status-bar__engine">
         <span>{status === 'rebuilding' ? 'Rebuilding…' : status === 'error' ? `Error: ${error}` : 'Ready'}</span>
         {stats && (
-          <span>
+          <span className="status-bar__stats">
             tris: {stats.triangleCount} · verts: {stats.vertexCount} · bbox{' '}
             {stats.bbox.min.map((v) => v.toFixed(1)).join(',')} → {stats.bbox.max.map((v) => v.toFixed(1)).join(',')} ·{' '}
             {duration.toFixed(0)}ms
