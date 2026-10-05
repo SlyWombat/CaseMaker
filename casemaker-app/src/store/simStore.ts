@@ -12,7 +12,9 @@
 
 import { create } from 'zustand';
 import type { PausePoint, Setup } from '@/engine/cnc';
+import { MACHINES, Z1 } from '@/engine/cnc/machine';
 import { stepAtTime, timeAtStep, totalTime } from '@/engine/cnc/playbackClock';
+import { generateRestart as buildRestart, stockFromSetup, type RestartResult } from '@/engine/cnc/restart';
 import type { Tool } from '@/engine/cnc/tool';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
 import type { SimDiagnostic, SimFrame, SimLoadOk, SimPath } from '@/workers/sim/session';
@@ -109,11 +111,25 @@ export interface SimState {
   phase: SimLoadPhase | null;
   /** True when the runner succeeded and only the sweep refused: the path is drawable, no material (#194). */
   pathOnly: boolean;
+  /**
+   * The last restart generated for the loaded program (#249), or null. Cleared by every load so
+   * a restart always belongs to the program on screen. The generated `.nc` is not stored here —
+   * only what the panel needs to show it.
+   */
+  restart: RestartResult | null;
   /** The limit the next `loadProgram` uses, ms; `retryWithLongerBudget` doubles it (#194). */
   budgetMs: number;
   loadProgram(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null): Promise<void>;
   /** Run the last load again with twice the time limit (#194). No-op when nothing has been loaded. */
   retryWithLongerBudget(): Promise<void>;
+  /**
+   * Generate a restart `.nc` for the loaded program, resuming at `step` (default: the current
+   * step). Differs from the run only in refusing when the resume state cannot be re-established;
+   * the result is stored in `restart` (#249). No-op when nothing has been loaded.
+   */
+  generateRestart(opts?: { step?: number; baseName?: string }): void;
+  /** Discard the generated restart (#249). */
+  clearRestart(): void;
   /** Show checkpoint k (-1 = uncut). Coalesced by the client. */
   seek(k: number): void;
   /**
@@ -178,6 +194,7 @@ const EMPTY = {
   progress: null,
   phase: null,
   pathOnly: false,
+  restart: null as RestartResult | null,
 };
 let loadSeq = 0;
 /** The arguments of the most recent load, so `retryWithLongerBudget` can run it again (#194). */
@@ -258,6 +275,43 @@ export const useSimStore = create<SimState>()((set, get) => {
     async retryWithLongerBudget() {
       if (!lastLoad) return;
       await run(lastLoad, get().budgetMs * 2);
+    },
+    generateRestart(opts) {
+      const s = get();
+      if (!lastLoad || s.stepCount <= 0) return;
+      const at = Math.trunc(opts?.step ?? s.step);
+      const stock = stockFromSetup(lastLoad.setup);
+      if (stock === null) {
+        set({
+          restart: {
+            ok: false,
+            nc: null,
+            fileName: null,
+            resume: null,
+            verify: null,
+            errors: ['the simulated setup has no rectangular stock to verify the restart against'],
+            runSheet: [],
+          },
+        });
+        return;
+      }
+      // A restart re-lowers the ORIGINAL text through the same pure halves the verifier uses, so
+      // it never needs the wasm sweep the client holds — only the text, the setup and the tool.
+      const machine = MACHINES[lastLoad.machineId ?? ''] ?? Z1;
+      set({
+        restart: buildRestart({
+          gcodeText: lastLoad.gcodeText,
+          setup: lastLoad.setup,
+          tool: lastLoad.tool,
+          machine,
+          step: at,
+          stock,
+          baseName: opts?.baseName,
+        }),
+      });
+    },
+    clearRestart() {
+      set({ restart: null });
     },
     seek(k) {
       if (get().status !== 'ready') return;

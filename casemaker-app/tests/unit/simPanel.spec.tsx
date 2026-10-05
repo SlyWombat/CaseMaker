@@ -6,7 +6,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { SimPanel } from '@/components/panels/SimPanel';
 import { setSimClientLoader, useSimStore, type SimClient } from '@/store/simStore';
-import { useSimSetupStore } from '@/store/simSetupStore';
+import { DEFAULT_STOCK, buildSimSetup, useSimSetupStore } from '@/store/simSetupStore';
+import { RESTART_TOOL_LENGTH_NOTE } from '@/engine/cnc/restart';
+import { parseGcode } from '@/engine/cnc/gcode';
+import { buildTimeline } from '@/engine/cnc/emulator/timeline';
+import { Z1 } from '@/engine/cnc/machine';
 import type { SimDiagnostic, SimLoadResult } from '@/workers/sim/session';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -62,6 +66,48 @@ const READY_COVERED = {
   meshes: { stock: {}, result: {}, removal: null, gouges: [], fixture: [{ id: 'jaw1', label: 'vise-jaw-front', mesh: {} }] },
   fixtureSource: 'default',
   fixtureUncertainty: 0.5,
+} as unknown as SimLoadResult;
+
+// --- #249 restart ---------------------------------------------------------------------------
+/** A two-stroke job in our own dialect, for the restart generator. */
+const RESTART_PROGRAM = [
+  'G90 G21',
+  'T1 M6',
+  'M7',
+  'S12000 M3',
+  'G0 X2 Y2 Z5',
+  'G0 Z1',
+  'G1 Z-1 F200',
+  'G1 X10 Y2',
+  'G1 X10 Y6',
+  'G1 X2 Y6',
+  'G0 Z15',
+  'M9',
+  'M5',
+  'G28',
+  'M02',
+].join('\n');
+/** The panel builds its setup from the default stock and a chosen starting tool (T1 here). */
+const RESTART_TL = buildTimeline(parseGcode(RESTART_PROGRAM), buildSimSetup(DEFAULT_STOCK, 1), Z1);
+const RESTART_STEP = (() => {
+  for (let i = 0; i < RESTART_TL.events.length; i++) {
+    const e = RESTART_TL.events[i];
+    if (e === undefined || e.kind !== 'move' || e.synthetic !== undefined) continue;
+    const w = RESTART_TL.stateAt(i).work;
+    if (w[0] === 10 && w[1] === 2 && w[2] === -1) return i;
+  }
+  throw new Error('the resume move was not found in the fixture program');
+})();
+
+const READY_RESTART = {
+  ok: true,
+  diagnostics: [],
+  summary: { steps: RESTART_TL.events.length, diagnosticCounts: {} },
+  pauses: [],
+  checkpoints: [],
+  stats: { removedVolume: 10, ms: { total: 50 } },
+  count: 2,
+  meshes: { stock: {}, result: {}, removal: null, gouges: [] },
 } as unknown as SimLoadResult;
 
 /** The runner produced a path and the sweep refused: a path-only session (#194). */
@@ -187,5 +233,47 @@ describe('SimPanel', () => {
 
     fireEvent.click(screen.getByTestId('sim-diag-jump-sweep-rapid-into-fixture'));
     expect(screen.getByTestId('sim-gcode-jump').getAttribute('data-line')).toBe('3');
+  });
+
+  it('generates a restart at the current step and offers it for saving (#249)', async () => {
+    setSimClientLoader(async () => fakeClient(READY_RESTART));
+    useSimSetupStore.getState().openFile('job.nc', RESTART_PROGRAM);
+    act(() => useSimSetupStore.getState().setTool(CHOSEN_TOOL));
+    render(<SimPanel />);
+    // T1 M6 is a no-op only when the machine already holds T1; pick that so the resume is exact.
+    fireEvent.change(screen.getByTestId('sim-starting-tool'), { target: { value: '1' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sim-simulate'));
+    });
+    await screen.findByTestId('sim-result');
+
+    act(() => useSimStore.getState().setStep(RESTART_STEP));
+    fireEvent.click(screen.getByTestId('sim-restart-generate'));
+    await screen.findByTestId('sim-restart-result');
+    expect(screen.getByTestId('sim-restart-runsheet').textContent).toContain('expected length');
+    expect(screen.getByTestId('sim-restart-runsheet').textContent).toContain(RESTART_TOOL_LENGTH_NOTE);
+    expect(screen.getByTestId('sim-restart-save').textContent).toContain(`job-restart-step${RESTART_STEP}.nc`);
+    expect(screen.queryByTestId('sim-restart-refused')).toBeNull();
+  });
+
+  it('shows a refused restart with the verifier’s reason, and no save button (#249)', async () => {
+    setSimClientLoader(async () => fakeClient(READY_RESTART));
+    // 11.5 mm deep in the 10 mm default stock: the verifier refuses the generated file.
+    useSimSetupStore.getState().openFile('deep.nc', RESTART_PROGRAM.replace('G1 Z-1 F200', 'G1 Z-11.5 F200'));
+    act(() => useSimSetupStore.getState().setTool(CHOSEN_TOOL));
+    render(<SimPanel />);
+    fireEvent.change(screen.getByTestId('sim-starting-tool'), { target: { value: '1' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sim-simulate'));
+    });
+    await screen.findByTestId('sim-result');
+
+    act(() => useSimStore.getState().setStep(RESTART_STEP));
+    fireEvent.click(screen.getByTestId('sim-restart-generate'));
+    const refused = await screen.findByTestId('sim-restart-refused');
+    expect(refused.textContent).toContain('cut-too-deep');
+    expect(screen.queryByTestId('sim-restart-save')).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 import { useState, type CSSProperties, type DragEvent, type JSX } from 'react';
 import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
-import { useSimStore } from '@/store/simStore';
+import { isSimSceneActive, useSimStore } from '@/store/simStore';
 import { TOOL_LIBRARY, Z1 } from '@/engine/cnc';
 import { libraryTool } from '@/engine/cnc/toolLibrary';
 import type { StartingTool } from '@/engine/cnc';
@@ -101,6 +101,18 @@ const LINELINK: CSSProperties = {
   cursor: 'pointer',
   textDecoration: 'underline dotted',
 };
+/** Save a generated restart `.nc`. Plain text, unlike SettingsMenu's JSON export. */
+function downloadNc(text: string, filename: string): void {
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 export function SimPanel() {
   const fileName = useSimSetupStore((s) => s.fileName);
@@ -123,6 +135,9 @@ export function SimPanel() {
   const phase = useSimStore((s) => s.phase);
   const pathOnly = useSimStore((s) => s.pathOnly);
   const meshes = useSimStore((s) => s.meshes);
+  const step = useSimStore((s) => s.step);
+  const stepCount = useSimStore((s) => s.stepCount);
+  const restart = useSimStore((s) => s.restart);
 
   const [startingTool, setStartingTool] = useState<StartingTool>('unknown');
   const [fileError, setFileError] = useState<string | null>(null);
@@ -157,6 +172,8 @@ export function SimPanel() {
     setFileError(null);
     setStartingTool('unknown');
     setJump(null);
+    // A restart belongs to the program on screen: opening another one drops it.
+    useSimStore.getState().clearRestart();
     openFile(name, text);
   }
 
@@ -488,6 +505,78 @@ export function SimPanel() {
             <button type="button" data-testid="sim-retry" onClick={() => void useSimStore.getState().retryWithLongerBudget()} style={{ width: '100%', padding: 7, marginTop: 6 }}>
               Try again with a longer limit
             </button>
+          )}
+        </div>
+      )}
+
+      {/* 6b — restart from a step (#249): a generated, verified `.nc`, not a controller command. */}
+      {isSimSceneActive({ status, pathOnly }) && gcodeText !== null && (
+        <div data-testid="sim-restart" style={{ marginTop: 12 }}>
+          <h3 style={SUBHEAD}>Restart from a step</h3>
+          <p style={MUTED}>
+            Generate a <code>.nc</code> that resumes at step {step} of {Math.max(0, stepCount - 1)}. It
+            restores the spindle, air and position, approaches safely, then runs the file’s own remaining
+            moves. It is checked by the same verifier as any other program — no exemption.
+          </p>
+          <button
+            type="button"
+            data-testid="sim-restart-generate"
+            onClick={() => useSimStore.getState().generateRestart({ baseName: fileName ?? undefined })}
+            style={{ width: '100%', padding: 7 }}
+          >
+            Generate restart .nc at step {step}
+          </button>
+
+          {restart && restart.ok && restart.nc !== null && (
+            <div
+              data-testid="sim-restart-result"
+              style={{ marginTop: 8, border: '1px solid #2a4a2a', background: '#12200f', borderRadius: 4, padding: 8 }}
+            >
+              <div style={{ fontSize: 12, color: '#b6e0a8', fontWeight: 600, marginBottom: 4 }} data-testid="sim-restart-ok">
+                restart ready — {restart.fileName}
+              </div>
+              <ul data-testid="sim-restart-runsheet" style={{ margin: 0, paddingLeft: 16 }}>
+                {restart.runSheet.map((line, i) => (
+                  <li key={i} style={{ fontSize: 11, color: '#cbe0c2', lineHeight: 1.45, margin: '3px 0' }}>
+                    {line}
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                data-testid="sim-restart-save"
+                onClick={() => downloadNc(restart.nc as string, restart.fileName as string)}
+                style={{ width: '100%', padding: 7, marginTop: 6 }}
+              >
+                Save {restart.fileName}
+              </button>
+            </div>
+          )}
+
+          {restart && !restart.ok && (
+            <div
+              data-testid="sim-restart-refused"
+              style={{ marginTop: 8, border: '1px solid #7a2828', background: '#2a1416', borderRadius: 4, padding: 8 }}
+            >
+              <div style={{ fontSize: 12, color: '#f0b4ad', fontWeight: 600, marginBottom: 4 }}>
+                restart refused — do not run it
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 16 }}>
+                {restart.errors.map((m, i) => (
+                  <li key={i} style={{ fontSize: 11, color: '#e8bcb6', lineHeight: 1.45 }}>
+                    {m}
+                  </li>
+                ))}
+                {(restart.verify?.findings ?? [])
+                  .filter((f) => f.severity === 'error')
+                  .map((f, i) => (
+                    <li key={`v${i}`} style={{ fontSize: 11, color: '#e8bcb6', lineHeight: 1.45 }}>
+                      <code>{f.code}</code> {f.message}
+                      {f.line !== null && <span> (line {f.line})</span>}
+                    </li>
+                  ))}
+              </ul>
+            </div>
           )}
         </div>
       )}
