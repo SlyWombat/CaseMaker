@@ -1,10 +1,10 @@
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { itemOperationName, itemProfile } from '@/engine/cnc/engrave/partPlan';
+import { toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import type { FeedsResult } from '@/engine/cnc/feeds';
 import { viseJawShift } from '@/engine/cnc/sacrificial';
 import type { VerifyReport } from '@/engine/cnc/verify';
-import type { EngraveItem, EngraveJob, ViseParams } from '@/types/engraveJob';
+import type { EngraveJob, ViseParams } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
 /**
@@ -204,11 +204,6 @@ export function runSheetFileName(jobName: string): string {
   return `${cleaned || 'engrave-job'}.nc`;
 }
 
-/** A short human name for an item, used on the sheet's cut lines. */
-function itemName(item: EngraveItem): string {
-  return itemOperationName(item);
-}
-
 // ---------------------------------------------------------------------------------------------
 // SHA-256 (sync, browser and Node — no Web Crypto, whose digest is async)
 // ---------------------------------------------------------------------------------------------
@@ -299,14 +294,15 @@ export function sha256Hex(input: string): string {
 // The builder
 // ---------------------------------------------------------------------------------------------
 
-/** Every enabled item, labels first then shapes — the order `toPartPlan` uses. */
-function enabledItems(job: EngraveJob): EngraveItem[] {
-  return [...job.labels, ...job.shapes].filter((item) => item.enabled);
-}
-
-/** The deepest enabled item's depth, or 0 when there is none. */
-function deepestDepth(job: EngraveJob): Mm {
-  return enabledItems(job).reduce((max, item) => Math.max(max, item.depth), 0);
+/**
+ * Every item that will actually cut (#214/#215), in plan order and with its resolved stock-frame
+ * profile. `toPartPlan` is the one funnel all three item lists go through, so a `border`, `frame`
+ * or `cutaway` is here too, while a `construction` item, a broken reference and a
+ * self-intersecting polygon — none of which produces a region — are absent. The sheet therefore
+ * describes exactly the cuts the `.nc` makes, no more and no fewer.
+ */
+function cutItems(job: EngraveJob): PartPlan['engraves'] {
+  return toPartPlan(job).engraves;
 }
 
 /** One sentence for the sacrificial setup (#213), or null when there is none. */
@@ -332,21 +328,32 @@ function sacrificialSummary(job: EngraveJob): string | null {
   return parts.length === 0 ? null : parts.join(', and ');
 }
 
-/** The top-view origin diagram's plain geometry, derived from the job. */
-function buildDiagram(job: EngraveJob): RunSheetDiagram {
+/** The top-view origin diagram's plain geometry, derived from the job and its cut regions. */
+function buildDiagram(job: EngraveJob, cut: PartPlan['engraves']): RunSheetDiagram {
   const { length, width } = job.stock;
   const vise = job.workholding.vise;
   const shift = viseJawShift(job.sacrificial);
   const jawMinY = vise.jawStartY;
   const jawMaxY = vise.jawStartY + vise.jawLength;
 
+  // `aabbOfProfile` keeps the un-shrunk box for a NEGATIVE offset (it will not guess how far a
+  // concave region pulls in), so a `border` — an inward offset of the stock — would otherwise draw
+  // as the whole blank. The stock outline is a known rectangle, so a border's true outer edge is
+  // `inset` in from every side (#215).
+  const borderInset = new Map<string, Mm>();
+  for (const c of job.combined ?? []) if (c.kind === 'border') borderInset.set(c.id, c.inset);
+
   const items: RunSheetDiagramItem[] = [];
-  for (const item of enabledItems(job)) {
-    const box = aabbOfProfile(itemProfile(item, job.customFonts));
-    if (!box) continue; // empty text: no region, no rectangle
+  for (const item of cut) {
+    const inset = borderInset.get(item.id);
+    const box =
+      inset !== undefined
+        ? { min: [inset, inset] as [Mm, Mm], max: [length - inset, width - inset] as [Mm, Mm] }
+        : aabbOfProfile(item.profile);
+    if (!box) continue; // empty region (e.g. whitespace-only text): no rectangle
     items.push({
       id: item.id,
-      name: itemName(item),
+      name: item.name,
       min: [box.min[0], box.min[1]],
       max: [box.max[0], box.max[1]],
       depth: item.depth,
@@ -389,8 +396,8 @@ export function buildRunSheet(
 ): RunSheet {
   const { length, width, thickness, material } = job.stock;
   const vise = job.workholding.vise;
-  const items = enabledItems(job);
-  const deepest = deepestDepth(job);
+  const items = cutItems(job);
+  const deepest = items.reduce((max, item) => Math.max(max, item.depth), 0);
   const stopBelow = deepest + 1; // #207 section 3: below the deepest cut + 1 mm the cutter is under the jaw tops
   const tool = jobTool(job);
   const diameter = tool ? cuttingDiameter(tool) : null;
@@ -509,7 +516,7 @@ export function buildRunSheet(
     cutSteps.push({ text: 'Cutting parameters were not resolved for this job.' });
   }
   for (const item of items) {
-    cutSteps.push({ text: itemName(item), value: `${fmtNum(item.depth)} mm deep` });
+    cutSteps.push({ text: item.name, value: `${fmtNum(item.depth)} mm deep` });
   }
   cutSteps.push({
     text: 'Stay at the machine. Stop it if the sound changes, the blank moves, or the cutter loads up.',
@@ -548,7 +555,7 @@ export function buildRunSheet(
 
   // ---- 9 · Record afterwards -----------------------------------------------------------------
   const recordSteps: RunSheetStep[] = items.map((item) => ({
-    text: `Measured floor depth — ${itemName(item)}`,
+    text: `Measured floor depth — ${item.name}`,
     record: 'measured depth (mm)',
   }));
   recordSteps.push(
@@ -570,7 +577,7 @@ export function buildRunSheet(
       { id: 'warnings', title: '8 · Warnings carried from the app', steps: warnings },
       { id: 'record', title: '9 · Record afterwards', steps: recordSteps },
     ],
-    diagram: buildDiagram(job),
+    diagram: buildDiagram(job, items),
   };
 }
 

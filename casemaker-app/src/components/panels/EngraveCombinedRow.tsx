@@ -1,12 +1,7 @@
 import type { CSSProperties, JSX } from 'react';
 import { itemLabel, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import type {
-  EngraveAnyItem,
-  EngraveBorderShape,
-  EngraveCombinedShape,
-  EngraveCutawayShape,
-  EngraveFrameShape,
-} from '@/types/engraveJob';
+import type { CombinedPatch } from '@/store/engraveJobStore';
+import type { EngraveAnyItem, EngraveCombinedShape } from '@/types/engraveJob';
 
 /**
  * One COMBINED item of an engrave job (#215, work item 3): a border, a frame or a cut-away.
@@ -56,13 +51,9 @@ const KIND_LABEL: Record<EngraveCombinedShape['kind'], string> = {
 };
 
 /**
- * A hand edit to one combined shape (#215). Every field is optional and every kind's fields are
- * present, so a row can patch just what it changed without naming the discriminant; the kind is
- * never patched (remove and re-add instead) — the same shape `ShapePatch` uses (#214).
+ * A hand edit to one combined shape is `CombinedPatch` (#215), defined in the store beside
+ * `ShapePatch` so the store's `updateCombined` and this row share one type.
  */
-export type CombinedPatch = Partial<Omit<EngraveBorderShape, 'kind'>> &
-  Partial<Omit<EngraveFrameShape, 'kind'>> &
-  Partial<Omit<EngraveCutawayShape, 'kind'>>;
 
 export interface EngraveCombinedRowProps {
   shape: EngraveCombinedShape;

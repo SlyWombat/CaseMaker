@@ -229,4 +229,50 @@ describe('engraveJobStore (#200)', () => {
     expect(useEngraveJobStore.getState().job.stock.length).toBe(100); // default
     expect(localStorage.getItem(`${KEY}.rejected`)).toBe('{not valid json');
   });
+
+  // #215 gap 2: combined items get their own add/update/remove actions rather than the panel
+  // rebuilding the whole job and going through `replace()`.
+  it('adds, updates and removes a combined item through the store (#215)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    const id = s().addCombined('border');
+    expect(id).toBeTruthy();
+    expect(s().job.combined).toHaveLength(1);
+    const border = s().job.combined![0]!;
+    expect(border.kind).toBe('border');
+
+    s().updateCombined(id!, { depth: 1.5, inset: 4 });
+    expect(s().job.combined![0]).toMatchObject({ depth: 1.5, inset: 4 });
+
+    // The edit is persisted, so a reload keeps it.
+    expect(JSON.parse(localStorage.getItem(KEY)!).combined[0].inset).toBe(4);
+
+    s().removeCombined(id!);
+    expect(s().job.combined).toEqual([]);
+  });
+
+  it('addCombined returns null for a frame or cut-away with nothing to reference (#215)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    s().replace({ ...s().job, labels: [], shapes: [], combined: [] });
+
+    expect(s().addCombined('frame')).toBeNull();
+    expect(s().addCombined('cutaway')).toBeNull();
+    expect(s().job.combined).toEqual([]);
+    // A border follows the stock, so it needs no reference and is always addable.
+    expect(s().addCombined('border')).toBeTruthy();
+  });
+
+  it('a frame defaults to the first item as its target (#215)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    const id = s().addCombined('frame');
+    const frame = s().job.combined![0]!;
+    expect(frame.kind === 'frame' && frame.around).toBe(s().job.labels[0]!.id);
+    expect(id).toBe(frame.id);
+  });
 });

@@ -139,6 +139,17 @@ export function EngraveLabelRow({
       </div>
 
       <div style={LABEL_INLINE}>
+        <label style={FIELD_LABEL}>
+          <input
+            type="checkbox"
+            checked={label.construction === true}
+            data-testid={`engrave-label-construction-${index}`}
+            aria-label={`Label ${index + 1} reference only`}
+            title="Reference only: this label is not cut. It can still be named by a frame, or left as a cut-away island — that is how raised text is made."
+            onChange={(e) => onChange({ construction: e.target.checked ? true : undefined })}
+          />
+          <span>reference only</span>
+        </label>
         {num('size', 'cap', 'Cap height, mm — the size the cutter has to reach through.')}
         {positionNum('x')}
         {positionNum('y')}

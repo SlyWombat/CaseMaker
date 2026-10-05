@@ -8,7 +8,6 @@ import { TOOL_LIBRARY, Z1 } from '@/engine/cnc';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
-import { newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
 import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { feedsFor, type CutParams } from '@/engine/cnc/feeds';
 import {
@@ -21,7 +20,7 @@ import {
 } from '@/engine/cnc/sacrificial';
 import { EngraveLabelRow } from './EngraveLabelRow';
 import { EngraveShapeRow } from './EngraveShapeRow';
-import { EngraveCombinedRow, type CombinedPatch } from './EngraveCombinedRow';
+import { EngraveCombinedRow } from './EngraveCombinedRow';
 import { RunSheetView } from './RunSheetView';
 import type {
   EngraveAnyItem,
@@ -86,30 +85,6 @@ const ADD_COMBINED_KINDS: readonly { value: EngraveCombinedShape['kind']; label:
 /** Every item of the job, in the order `toPartPlan` walks them (#214/#215). */
 function allItems(job: EngraveJob): EngraveAnyItem[] {
   return [...job.labels, ...job.shapes, ...(job.combined ?? [])];
-}
-
-/** A default combined item (#215) centred like a new shape, or null when it needs a reference
- *  and the job has no other item to name. Every number is valid against the schema. */
-function newCombinedShape(
-  kind: EngraveCombinedShape['kind'],
-  job: EngraveJob,
-): EngraveCombinedShape | null {
-  const base = {
-    id: newEngraveShapeId(),
-    position: { x: job.stock.length / 2, y: job.stock.width / 2 },
-    rotation: 0,
-    depth: 0.5,
-    enabled: true,
-  };
-  const first = allItems(job)[0] ?? null;
-  switch (kind) {
-    case 'border':
-      return { ...base, kind: 'border', inset: 3, width: 2 };
-    case 'frame':
-      return first ? { ...base, kind: 'frame', around: first.id, gap: 1, width: 2 } : null;
-    case 'cutaway':
-      return first ? { ...base, kind: 'cutaway', outer: first.id, islands: [] } : null;
-  }
 }
 
 const ATTACH_METHODS: readonly { value: SacrificialUnder['attach']; label: string }[] = [
@@ -203,6 +178,9 @@ export function EngravePanel(): JSX.Element {
   const addShape = useEngraveJobStore((s) => s.addShape);
   const updateShape = useEngraveJobStore((s) => s.updateShape);
   const removeShape = useEngraveJobStore((s) => s.removeShape);
+  const addCombined = useEngraveJobStore((s) => s.addCombined);
+  const updateCombined = useEngraveJobStore((s) => s.updateCombined);
+  const removeCombined = useEngraveJobStore((s) => s.removeCombined);
   const setTool = useEngraveJobStore((s) => s.setTool);
   const setVise = useEngraveJobStore((s) => s.setVise);
   const setSacrificial = useEngraveJobStore((s) => s.setSacrificial);
@@ -378,28 +356,8 @@ export function EngravePanel(): JSX.Element {
 
   // ---- combined shapes (#215 work item 3) --------------------------------------------------
   //
-  // `combined` is a list of its own on the job, and the store has no combined actions this batch
-  // (they live outside this slot's column). The store's public `replace` is the seam: a mutation
-  // rebuilds the job with a new `combined` list and hands it back, so persistence and the run's
-  // staleness subscription see an ordinary job change.
-
-  function mutateCombined(mutate: (list: EngraveCombinedShape[]) => EngraveCombinedShape[]): void {
-    const store = useEngraveJobStore.getState();
-    store.replace({ ...store.job, combined: mutate(store.job.combined ?? []) });
-  }
-
-  function addCombined(kind: EngraveCombinedShape['kind']): void {
-    const item = newCombinedShape(kind, useEngraveJobStore.getState().job);
-    if (item) mutateCombined((list) => [...list, item]);
-  }
-
-  function updateCombined(id: string, patch: CombinedPatch): void {
-    mutateCombined((list) => list.map((c) => (c.id === id ? ({ ...c, ...patch } as EngraveCombinedShape) : c)));
-  }
-
-  function removeCombined(id: string): void {
-    mutateCombined((list) => list.filter((c) => c.id !== id));
-  }
+  // `combined` is its own list on the job and now has its own store actions (#215 gap 2), so a
+  // mutation is an ordinary job change: persistence and the run's staleness subscription see it.
 
   /** Every item a combined shape could name, except itself. A bad pick is an `item-reference`
    *  finding (#215), not something the picker hides. */

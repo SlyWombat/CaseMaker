@@ -297,6 +297,32 @@ describe('EngravePanel — combined shapes (#215)', () => {
     fireEvent.click(screen.getByTestId('engrave-combined-remove-0'));
     expect(useEngraveJobStore.getState().job.combined).toEqual([]);
   });
+
+  // #215 gap 1: nothing set `construction: true`, so raised text (a cut-away with a label island)
+  // could not be built through the panel. The label and shape rows each own the control now.
+  it('marks a label reference-only, so a cut-away can leave it standing as raised text', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-cutaway'));
+    const labelId = useEngraveJobStore.getState().job.labels[0]!.id;
+    fireEvent.click(screen.getByTestId(`engrave-combined-island-0-${labelId}`));
+    fireEvent.click(screen.getByTestId('engrave-label-construction-0'));
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.labels[0]!.construction).toBe(true);
+    const cut = job.combined![0]!;
+    expect(cut.kind === 'cutaway' && cut.islands).toEqual([labelId]);
+
+    // Unchecking clears the flag again (undefined, not a lingering false).
+    fireEvent.click(screen.getByTestId('engrave-label-construction-0'));
+    expect(useEngraveJobStore.getState().job.labels[0]!.construction).toBeFalsy();
+  });
+
+  it('marks a shape reference-only', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-rect'));
+    fireEvent.click(screen.getByTestId('engrave-shape-construction-0'));
+    expect(useEngraveJobStore.getState().job.shapes[0]!.construction).toBe(true);
+  });
 });
 
 // #207's mount: the "Run sheet" button opens the printable sheet for a generated, verified job,

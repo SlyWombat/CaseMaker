@@ -5,7 +5,11 @@ import { todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type {
+  EngraveBorderShape,
   EngraveCircleShape,
+  EngraveCombinedShape,
+  EngraveCutawayShape,
+  EngraveFrameShape,
   EngraveJob,
   EngraveLabel,
   EngravePolygonShape,
@@ -38,6 +42,15 @@ export type ShapePatch = Partial<Omit<EngraveRectShape, 'kind'>> &
   Partial<Omit<EngraveCircleShape, 'kind'>> &
   Partial<Omit<EngraveSlotShape, 'kind'>> &
   Partial<Omit<EngravePolygonShape, 'kind'>>;
+
+/**
+ * A hand edit to one combined item (#215). The same shape as `ShapePatch`: every field optional
+ * and every kind's fields present, so a row can patch just what it changed without naming the
+ * discriminant; the `kind` is never patched (remove and re-add instead).
+ */
+export type CombinedPatch = Partial<Omit<EngraveBorderShape, 'kind'>> &
+  Partial<Omit<EngraveFrameShape, 'kind'>> &
+  Partial<Omit<EngraveCutawayShape, 'kind'>>;
 
 export const ENGRAVE_JOB_KEY = 'casemaker.engraveJob.v1';
 /** Where a payload that failed validation is parked so it is not silently lost. */
@@ -142,6 +155,31 @@ function newShape(kind: EngraveShape['kind'], job: EngraveJob): EngraveShape {
   }
 }
 
+/**
+ * A default combined item of the given kind (#215), centred like a new shape; every number is
+ * valid against the schema. A `frame`/`cutaway` names another item, so this returns null when
+ * the job has nothing to reference — the panel disables that button rather than creating an
+ * item whose reference the schema would reject on the next load.
+ */
+function newCombined(kind: EngraveCombinedShape['kind'], job: EngraveJob): EngraveCombinedShape | null {
+  const base: EngraveShapeBase = {
+    id: newEngraveShapeId(),
+    position: { x: job.stock.length / 2, y: job.stock.width / 2 },
+    rotation: 0,
+    depth: 0.5,
+    enabled: true,
+  };
+  const first = [...job.labels, ...job.shapes, ...(job.combined ?? [])][0] ?? null;
+  switch (kind) {
+    case 'border':
+      return { ...base, kind: 'border', inset: 3, width: 2 };
+    case 'frame':
+      return first ? { ...base, kind: 'frame', around: first.id, gap: 1, width: 2 } : null;
+    case 'cutaway':
+      return first ? { ...base, kind: 'cutaway', outer: first.id, islands: [] } : null;
+  }
+}
+
 export interface EngraveJobState {
   job: EngraveJob;
   setStock: (patch: Partial<EngraveJob['stock']>) => void;
@@ -156,6 +194,14 @@ export interface EngraveJobState {
   /** Merge a hand edit into one shape (#214). A partial `position` is merged, not replaced. */
   updateShape: (id: string, patch: ShapePatch) => void;
   removeShape: (id: string) => void;
+  /**
+   * Add a default combined item of `kind` (#215) and return its id, or null when the kind needs a
+   * reference the job cannot supply (a frame or cut-away on an empty job).
+   */
+  addCombined: (kind: EngraveCombinedShape['kind']) => string | null;
+  /** Merge a hand edit into one combined item (#215). A partial `position` is merged, not replaced. */
+  updateCombined: (id: string, patch: CombinedPatch) => void;
+  removeCombined: (id: string) => void;
   /**
    * Replace the sacrificial material model (#213). The caller owns `source`: the panel passes
    * `'saved'` for an edit it made, a preset carries its own, `noneSacrificial()` clears it.
@@ -228,6 +274,31 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       })),
 
     removeShape: (id) => apply((job) => ({ ...job, shapes: job.shapes.filter((s) => s.id !== id) })),
+
+    addCombined: (kind) => {
+      const item = newCombined(kind, get().job);
+      if (!item) return null;
+      apply((job) => ({ ...job, combined: [...(job.combined ?? []), item] }));
+      return item.id;
+    },
+
+    updateCombined: (id, patch) =>
+      apply((job) => ({
+        ...job,
+        combined: (job.combined ?? []).map((c) =>
+          c.id === id
+            ? ({
+                ...c,
+                ...patch,
+                // Merge a partial position rather than replacing the whole object.
+                position: patch.position ? { ...c.position, ...patch.position } : c.position,
+              } as EngraveCombinedShape)
+            : c,
+        ),
+      })),
+
+    removeCombined: (id) =>
+      apply((job) => ({ ...job, combined: (job.combined ?? []).filter((c) => c.id !== id) })),
 
     setSacrificial: (sacrificial) => apply((job) => ({ ...job, sacrificial })),
 

@@ -222,6 +222,17 @@ export function EngraveShapeRow({
       )}
 
       <div style={ROW_INLINE}>
+        <label style={FIELD_LABEL}>
+          <input
+            type="checkbox"
+            checked={shape.construction === true}
+            data-testid={`engrave-shape-construction-${index}`}
+            aria-label={`Shape ${index + 1} reference only`}
+            title="Reference only: this shape is not cut. It can still be named by a frame or a cut-away — as a cut-away island it is left standing."
+            onChange={(e) => onChange({ construction: e.target.checked ? true : undefined })}
+          />
+          <span>reference only</span>
+        </label>
         {positionNum('x')}
         {positionNum('y')}
         {numField('rotation', 'rot', 'Degrees counter-clockwise about the shape centre.')}

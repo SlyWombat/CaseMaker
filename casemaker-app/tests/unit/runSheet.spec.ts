@@ -199,6 +199,84 @@ describe('runSheet (#207)', () => {
     expect(runSheetFileName('   ')).toBe('engrave-job.nc');
   });
 
+  // #215 gap 3: `enabledItems`/`deepestDepth`/`buildDiagram` ignored `job.combined`, so a border
+  // or cut-away reached neither the operator's cut lines nor the diagram. The sheet now reads the
+  // one `toPartPlan` funnel, so combined items are present and construction/broken items are not.
+  it('gives a combined border its cut line and diagram box (#215)', () => {
+    const job = defaultEngraveJob();
+    job.labels = [];
+    job.shapes = [];
+    job.combined = [
+      {
+        id: 'border',
+        kind: 'border',
+        position: { x: 50, y: 30 },
+        rotation: 0,
+        depth: 1.5,
+        enabled: true,
+        inset: 3,
+        width: 2,
+      },
+    ];
+    const sheet = sheetFor(job);
+    expect(section(sheet, 'cut').steps.some((s) => s.text.includes('border'))).toBe(true);
+    expect(section(sheet, 'cut').steps.some((s) => s.value?.includes('1.5 mm deep'))).toBe(true);
+    expect(sheet.diagram.items.map((i) => i.id)).toEqual(['border']);
+    // inset 3 on a 100 × 60 blank: outer edge at (3, 3)–(97, 57).
+    const box = sheet.diagram.items[0]!;
+    expect(box.min[0]).toBeCloseTo(3, 6);
+    expect(box.min[1]).toBeCloseTo(3, 6);
+    expect(box.max[0]).toBeCloseTo(97, 6);
+    expect(box.max[1]).toBeCloseTo(57, 6);
+  });
+
+  it('leaves a construction item off the cut lines, the diagram and the depth threshold (#215)', () => {
+    const job = defaultEngraveJob();
+    // A construction label at 9 mm deep: it is only a reference for the cut-away and cuts nothing.
+    job.labels = [{ ...job.labels[0]!, id: 'island', text: 'X', depth: 9, construction: true }];
+    job.shapes = [];
+    job.combined = [
+      {
+        id: 'panel',
+        kind: 'cutaway',
+        position: { x: 50, y: 30 },
+        rotation: 0,
+        depth: 1,
+        enabled: true,
+        outer: 'island',
+        islands: [],
+      },
+    ];
+    const sheet = sheetFor(job);
+    expect(sheet.diagram.items.map((i) => i.id)).toEqual(['panel']);
+    expect(section(sheet, 'cut').steps.some((s) => s.text.includes('"X"'))).toBe(false);
+    expect(section(sheet, 'cut').steps.some((s) => s.text.includes('cutaway'))).toBe(true);
+    // The threshold follows the cut-away's 1 mm, not the construction label's 9 mm.
+    expect(section(sheet, 'load').steps.find((s) => s.text.includes('stop'))!.text).toContain('2 mm');
+  });
+
+  it('drops an item whose reference is broken from the sheet (#215)', () => {
+    const job = defaultEngraveJob();
+    job.labels = [];
+    job.shapes = [];
+    job.combined = [
+      {
+        id: 'frame',
+        kind: 'frame',
+        position: { x: 50, y: 30 },
+        rotation: 0,
+        depth: 1,
+        enabled: true,
+        around: 'does-not-exist',
+        gap: 1,
+        width: 2,
+      },
+    ];
+    const sheet = sheetFor(job);
+    expect(sheet.diagram.items).toEqual([]);
+    expect(section(sheet, 'cut').steps.some((s) => s.text.includes('frame'))).toBe(false);
+  });
+
   it('formats a cutting time', () => {
     expect(formatDuration(0)).toBe('0 s');
     expect(formatDuration(95)).toBe('1 min 35 s');
