@@ -3,7 +3,13 @@
 // The visibility pulldown + export modal both read this list.
 
 import { describe, it, expect } from 'vitest';
-import { enumerateParts, partsByCategory } from '@/engine/exporters/parts';
+import {
+  enumerateParts,
+  partsByCategory,
+  partForId,
+  printMetaForId,
+  PRINT_FLIP_NODE_IDS,
+} from '@/engine/exporters/parts';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { findTemplate } from '@/library/templates';
 import { createDefaultProject } from '@/store/projectStore';
@@ -68,5 +74,88 @@ describe('Part registry (#120)', () => {
   it('returns empty list for null/undefined plan', () => {
     expect(enumerateParts(null)).toEqual([]);
     expect(enumerateParts(undefined)).toEqual([]);
+  });
+
+  // Issue #154 — the print table is the single source of the flip, for the
+  // exporter (PRINT_FLIP_NODE_IDS) and the UI (partForId().printOrientation).
+  // These two used to disagree on the fused racks: the exporter flipped them
+  // while the metadata said they did not need flipping.
+  it('the flip table and partForId agree for every known id (#154 drift regression)', () => {
+    const IDS = [
+      'stand',
+      'wall-body',
+      'wall-plate',
+      'shell',
+      'lid',
+      'gasket',
+      'hinge-pin',
+      'latch-arm-0',
+      'latch-pin-0',
+      'rack-side-left',
+      'rack-side-right',
+      'rack-top',
+      'rack-bottom',
+      'rack-wall-cleat',
+      'rack-wall-spacer',
+      'rack-assembled-frame',
+      'rack-assembled-all',
+      'rack-blank-0',
+      'rack-shelf-0',
+      'rack-keystone-0',
+      'rack-cable-tray-0',
+      'bumper-0',
+      'some-unknown-node',
+    ];
+    for (const id of IDS) {
+      const inFlipSet = PRINT_FLIP_NODE_IDS.includes(id);
+      expect(partForId(id).printOrientation.flipForPrint, `flip disagreement for ${id}`).toBe(
+        inFlipSet,
+      );
+      expect(printMetaForId(id).flipForPrint, `meta disagreement for ${id}`).toBe(inFlipSet);
+    }
+  });
+
+  it('flips exactly the lid, the bottom plate and the two fused racks', () => {
+    expect([...PRINT_FLIP_NODE_IDS].sort()).toEqual(
+      ['lid', 'rack-assembled-all', 'rack-assembled-frame', 'rack-bottom'].sort(),
+    );
+    // The top plate is the bottom plate turned over, so it is already
+    // counterbore-up as modelled and must NOT be flipped.
+    expect(PRINT_FLIP_NODE_IDS).not.toContain('rack-top');
+  });
+
+  it('the fused racks report flipForPrint=true (was the drift bug)', () => {
+    for (const id of ['rack-assembled-frame', 'rack-assembled-all']) {
+      expect(partForId(id).printOrientation.flipForPrint, id).toBe(true);
+    }
+  });
+
+  it('carries structured supports, with a why whenever supports are needed (#154)', () => {
+    expect(partForId('shell').supports).toBe('none');
+    expect(partForId('gasket').supports).toBe('none');
+
+    const frame = partForId('rack-assembled-frame');
+    expect(frame.supports).toBe('buildplate-only');
+    expect(frame.supportWhy).toBeTruthy();
+
+    const whole = partForId('rack-assembled-all');
+    expect(whole.supports).toBe('full');
+    expect(whole.supportWhy).toBeTruthy();
+
+    // Every id family too — a support call with no reason is the doc-drift
+    // problem this issue is fixing.
+    for (const id of ['shell', 'lid', 'rack-assembled-frame', 'rack-assembled-all', 'rack-shelf-0']) {
+      const meta = printMetaForId(id);
+      if (meta.supports !== 'none') expect(meta.supportWhy, id).toBeTruthy();
+    }
+  });
+
+  it('suggests walls/infill only where the part is structural (#154)', () => {
+    const shelf = partForId('rack-shelf-0');
+    expect(shelf.walls).toBeGreaterThan(0);
+    expect(shelf.infill).toBeGreaterThan(0);
+    // A faceplate is not load-bearing; no suggestion should be invented.
+    expect(partForId('rack-blank-0').walls).toBeUndefined();
+    expect(partForId('rack-blank-0').infill).toBeUndefined();
   });
 });

@@ -3,6 +3,7 @@ import {
   computePartTransforms,
   applyPartTransform,
   applyLayoutToMeshes,
+  PRINT_FLIP_NODE_IDS,
 } from '@/engine/exportLayout';
 import type { MeshNode } from '@/types';
 
@@ -62,6 +63,16 @@ describe('export layout', () => {
     expect(tA.translate[1]).toBeCloseTo(0, 4);
     // b should wrap onto a new row (Y > 0)
     expect(tB.translate[1]).toBeGreaterThan(0);
+  });
+
+  it('re-exports the one print-table flip set, fused racks included (#154)', () => {
+    // The list is derived in @/engine/exporters/parts; the exporter keys off
+    // this re-export, and partForId reports the same flags.
+    expect(PRINT_FLIP_NODE_IDS).toContain('lid');
+    expect(PRINT_FLIP_NODE_IDS).toContain('rack-bottom');
+    expect(PRINT_FLIP_NODE_IDS).toContain('rack-assembled-frame');
+    expect(PRINT_FLIP_NODE_IDS).toContain('rack-assembled-all');
+    expect(PRINT_FLIP_NODE_IDS).not.toContain('rack-top');
   });
 
   it('reverses triangle winding when a part is flipped', () => {

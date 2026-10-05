@@ -1,6 +1,20 @@
 import type { MeshNode } from '@/types';
+import { PRINT_FLIP_NODE_IDS } from '@/engine/exporters/parts';
 
 export type ExportLayoutMode = 'print-ready' | 'assembled';
+
+/**
+ * Parts that must be turned over to print cleanly.
+ *
+ * Issue #154 — this is no longer a hand-kept list. It is re-exported from the
+ * single id-keyed print table in `@/engine/exporters/parts`, so the flip the
+ * exporter bakes into the buffer and the `flipForPrint` the UI reports come
+ * from the same entry. They used to disagree: every `rack-*` id except
+ * `rack-bottom` was reported un-flipped while the exporter flipped the fused
+ * frames. The rationale for each entry (lid ceiling-down; rack counterbores
+ * up; fused frames inverted off their four stacking feet) lives with the table.
+ */
+export { PRINT_FLIP_NODE_IDS };
 
 export interface PartTransform {
   /** rotate by 180° about this local axis before translating; null = no rotation */
@@ -14,39 +28,6 @@ export interface LayoutOptions {
   /** Nodes whose assembly orientation is upside-down for printing. */
   flipNodeIds?: ReadonlyArray<string>;
 }
-
-/**
- * Parts that must be turned over to print cleanly.
- *
- * The lid prints ceiling-down.
- *
- * The rack plates print COUNTERBORE-UP, and that is the whole reason this
- * entry exists. Each tab screw's head bears on the floor of its counterbore;
- * printed the other way up that floor is a downward-facing ceiling spanning
- * the bore — it bridges, droops, and gives the head nothing flat to seat on.
- * Turned over, the same floor is an ordinary supported top surface.
- *
- * In assembly the BOTTOM plate has its counterbored face pointing down at the
- * underside of the rack, so it is the one that needs turning. The TOP plate is
- * that same part already rotated 180 degrees, so its counterbores face up and
- * it is correct as-modelled. Both therefore reach the bed in the SAME
- * orientation, which is right — they are one printed part.
- *
- * This entry has now flipped twice. It is set by which way the counterbores
- * face, nothing else; re-derive it from that if the joint changes again.
- */
-export const PRINT_FLIP_NODE_IDS: ReadonlyArray<string> = [
-  'lid',
-  'rack-bottom',
-  // The fused frames print UPSIDE DOWN. As they stand in the rack the four
-  // stacking feet are the only thing touching — 2.3% of the footprint — and
-  // the whole bottom plate bridges 5 mm above the bed, so a slicer supports
-  // the entire underside. That is not a hypothetical: it happened on the first
-  // one printed. Turned over, the top plate and rails give a 31% first layer
-  // and nothing bridges.
-  'rack-assembled-frame',
-  'rack-assembled-all',
-];
 
 const DEFAULTS: Required<LayoutOptions> = {
   gap: 5,

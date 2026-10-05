@@ -40,9 +40,63 @@ export type BuildOp =
   /** Convex hull of the children — blends bosses into walls in one call. */
   | { kind: 'hull'; children: BuildOp[] };
 
+/** Issue #154 — how much slicer support a part needs. */
+export type SupportRequirement =
+  /** Every overhang is self-supporting or faces up. */
+  | 'none'
+  /** Supports are needed, but every one can grow from the build plate (no
+   *  support-on-support) — e.g. reachable through an open frame. */
+  | 'buildplate-only'
+  /** Supports inside enclosed geometry, where they must build on support
+   *  rather than reaching the plate. */
+  | 'full';
+
+/**
+ * Issue #154 — print guidance that travels with a part, so the knowledge stops
+ * living in a doc or the maintainer's head. The single source of truth is the
+ * id-keyed table in `@/engine/exporters/parts`; this interface is the shape the
+ * export path and (optionally) `BuildNode`s carry.
+ *
+ * The fields are all metadata about the PRINT, never about the geometry. The
+ * orientation itself is applied by `applyLayoutToMeshes` from the same table's
+ * `flipForPrint` flag, so the two cannot drift.
+ */
+export interface PrintMeta {
+  /** Euler degrees applied before laying the part on the print bed. */
+  rotation: Vec3;
+  /** True when the part must be turned over (180° about X) to print. */
+  flipForPrint: boolean;
+  /** Slicer support required. */
+  supports: SupportRequirement;
+  /** One-line reason for the `supports` value; required whenever it is not
+   *  `'none'` (a support call with no why is the doc-drift problem again). */
+  supportWhy?: string;
+  /** Suggested wall loops, where the part is structural. A starting point,
+   *  not a measured value. */
+  walls?: number;
+  /** Suggested infill percent, where the part is structural. */
+  infill?: number;
+  /** Human-readable orientation instruction (no claim about what the exported
+   *  file contains — that depends on the layout mode, see `exportedFlipNote`). */
+  hint: string;
+  /** Appended by `printOrientationHint` when the part is flipped in the
+   *  print-ready layout — the sentence "the file already comes this way up".
+   *  Only true there; the assembled layout skips the flip. */
+  exportedFlipNote?: string;
+}
+
 export interface BuildNode {
   id: string;
   op: BuildOp;
+  /**
+   * Issue #154 — per-node print guidance, optional so compiler modules that
+   * have not been annotated yet still type-check. Shape left for #168: it adds
+   * `material` as a SIBLING on BuildNode (`material?: 'rigid' | 'flex'`), not a
+   * field inside PrintMeta — material is a property of the part, PrintMeta is
+   * about the print job. The id-keyed table in `@/engine/exporters/parts`
+   * remains the source of truth; this field is the per-node override hook.
+   */
+  print?: PrintMeta;
 }
 
 export interface BuildPlan {
