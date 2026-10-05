@@ -11,13 +11,22 @@ const CATEGORY_LABELS: Record<PartCategory, string> = {
   accessory: 'Accessories',
 };
 
+interface Props {
+  /**
+   * Issue #134 — phone widths. The parts button sits near the right edge of a
+   * 390px bar, so a `left: 0` panel would run 27px past the screen; anchoring
+   * it to the right edge keeps it on-screen. Desktop is unchanged.
+   */
+  compact?: boolean;
+}
+
 /**
  * Issue #120 — visibility pulldown that lists every top-level node in the
  * current BuildPlan with a checkbox. Replaces the Show-board / Show-lid
  * toggles in the Toolbar. Categories: Case → Gasket → Fasteners →
  * Accessories.
  */
-export function PartsMenu() {
+export function PartsMenu({ compact = false }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   // Subscribe to the Map ref (only changes when nodes are added/removed),
@@ -65,7 +74,8 @@ export function PartsMenu() {
           style={{
             position: 'absolute',
             top: '100%',
-            left: 0,
+            left: compact ? 'auto' : 0,
+            right: compact ? 0 : 'auto',
             zIndex: 100,
             background: '#14181c',
             border: '1px solid #2a2f36',

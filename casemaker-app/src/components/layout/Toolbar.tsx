@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   useProjectStore,
   undoProject,
@@ -25,6 +25,29 @@ const FORMAT_LABEL: Record<string, string> = {
   '3mf': '3MF',
 };
 
+/** Phone breakpoint, matching the workspace's ≤640px block (#134). */
+const COMPACT_MAX_W = 640;
+
+/**
+ * Issue #134 — below this breakpoint the header toolbar collapses its
+ * secondary controls behind a ⋯ overflow menu. The full row is ~654px of
+ * content; in a 390px window that left Save / Save as / Load / Export /
+ * Parts / Docs / settings off-screen behind a silent horizontal swipe.
+ */
+function useIsCompactBar(): boolean {
+  const [isCompact, setIsCompact] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth <= COMPACT_MAX_W : false,
+  );
+  useEffect(() => {
+    function onResize(): void {
+      setIsCompact(window.innerWidth <= COMPACT_MAX_W);
+    }
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return isCompact;
+}
+
 export function Toolbar() {
   const project = useProjectStore((s) => s.project);
   const setProject = useProjectStore((s) => s.setProject);
@@ -43,6 +66,10 @@ export function Toolbar() {
   const [docsOpen, setDocsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  // Issue #134 — the ⋯ overflow menu, phone widths only.
+  const overflowRef = useRef<HTMLDivElement | null>(null);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const isCompactBar = useIsCompactBar();
   // Issue #70 — remember the last file handle so subsequent saves overwrite
   // in place. Reset whenever the user picks "Save as…" or loads a new file.
   const fileHandleRef = useRef<ProjectFileHandle>(null);
@@ -51,6 +78,17 @@ export function Toolbar() {
   // L-key shortcut for lid show/hide is now part of the view-mode picker
   // (#91 — Shift+1..4 cycles Complete / Exploded / Base / Lid). The
   // legacy single toggle is retired alongside the toolbar button.
+
+  // Dismiss the ⋯ menu on an outside tap (same pattern as PartsMenu).
+  useEffect(() => {
+    if (!overflowOpen) return;
+    const onDoc = (e: MouseEvent): void => {
+      if (!overflowRef.current) return;
+      if (!overflowRef.current.contains(e.target as Node)) setOverflowOpen(false);
+    };
+    window.addEventListener('mousedown', onDoc);
+    return () => window.removeEventListener('mousedown', onDoc);
+  }, [overflowOpen]);
 
   const onSave = useCallback(async () => {
     if (!fsaAvailable) {
@@ -133,68 +171,173 @@ export function Toolbar() {
     setExportOpen(true);
   }, []);
 
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+
+  // One node per control, rendered in exactly one place per layout. Desktop
+  // keeps the original left-to-right order; below the breakpoint the primary
+  // controls stay inline and the rest move into the ⋯ menu.
+  const newBtn = (
+    <button
+      onClick={onNew}
+      data-testid="new-project"
+      title="Start a new project (returns to the board / template picker)"
+    >
+      ✨ New
+    </button>
+  );
+  const undoBtn = (
+    <button onClick={undoProject} data-testid="undo-btn" title="Undo (Ctrl+Z)">
+      ↶ Undo
+    </button>
+  );
+  const redoBtn = (
+    <button onClick={redoProject} data-testid="redo-btn" title="Redo (Ctrl+Shift+Z)">
+      ↷ Redo
+    </button>
+  );
+  const saveBtn = (
+    <button
+      onClick={onSave}
+      data-testid="save-project"
+      disabled={welcomeMode}
+      title={
+        welcomeMode
+          ? 'Pick a board or template first'
+          : fsaAvailable
+            ? 'Save project (.caseproj.json) — overwrites the open file after first Save As'
+            : 'Save project — downloads .caseproj.json to your Downloads folder'
+      }
+    >
+      💾 Save
+    </button>
+  );
+  const saveAsBtn = fsaAvailable ? (
+    <button
+      onClick={onSaveAs}
+      data-testid="save-project-as"
+      disabled={welcomeMode}
+      title={
+        welcomeMode
+          ? 'Pick a board or template first'
+          : 'Save the project to a new .caseproj.json file (pick filename + folder)'
+      }
+    >
+      💾 Save as…
+    </button>
+  ) : null;
+  const loadBtn = (
+    <button
+      onClick={onLoadClick}
+      data-testid="load-project"
+      title="Load a project from a .caseproj.json file"
+    >
+      📂 Load
+    </button>
+  );
+  const exportBtn = (
+    <button
+      onClick={onExport}
+      disabled={welcomeMode}
+      data-testid="export-default"
+      title={
+        welcomeMode
+          ? 'Pick a board or template first'
+          : `Open the export modal — per-part thumbnails + Save All (current format: ${FORMAT_LABEL[exportFormat] ?? exportFormat}, change in ⚙)`
+      }
+    >
+      ⬇ Export…
+    </button>
+  );
+  const docsBtn = (
+    <button
+      onClick={() => setDocsOpen(true)}
+      data-testid="docs-open"
+      title="Open the User Manual"
+    >
+      📖 Docs
+    </button>
+  );
+  const settingsMenu = settingsOpen ? <SettingsMenu onClose={closeSettings} /> : null;
+
   return (
     <div className="toolbar-buttons">
-      <button
-        onClick={onNew}
-        data-testid="new-project"
-        title="Start a new project (returns to the board / template picker)"
-      >
-        ✨ New
-      </button>
-      <button onClick={undoProject} data-testid="undo-btn" title="Undo (Ctrl+Z)">
-        ↶ Undo
-      </button>
-      <button onClick={redoProject} data-testid="redo-btn" title="Redo (Ctrl+Shift+Z)">
-        ↷ Redo
-      </button>
-      <button
-        onClick={onSave}
-        data-testid="save-project"
-        disabled={welcomeMode}
-        title={
-          welcomeMode
-            ? 'Pick a board or template first'
-            : fsaAvailable
-              ? 'Save project (.caseproj.json) — overwrites the open file after first Save As'
-              : 'Save project — downloads .caseproj.json to your Downloads folder'
-        }
-      >
-        💾 Save
-      </button>
-      {fsaAvailable && (
-        <button
-          onClick={onSaveAs}
-          data-testid="save-project-as"
-          disabled={welcomeMode}
-          title={
-            welcomeMode
-              ? 'Pick a board or template first'
-              : 'Save the project to a new .caseproj.json file (pick filename + folder)'
-          }
-        >
-          💾 Save as…
-        </button>
+      {isCompactBar ? (
+        <>
+          {undoBtn}
+          {redoBtn}
+          {saveBtn}
+          {/* Issue #120 — Parts keeps its own popover; it stays inline rather
+              than nesting a popover inside the ⋯ menu. */}
+          <PartsMenu compact />
+          <div className="toolbar-overflow" ref={overflowRef}>
+            <button
+              type="button"
+              className="toolbar-overflow__toggle"
+              onClick={() => setOverflowOpen((v) => !v)}
+              data-testid="toolbar-overflow-toggle"
+              aria-label="More actions"
+              aria-haspopup="menu"
+              aria-expanded={overflowOpen}
+              title="More actions — New, Save as, Load, Export, Docs, settings"
+            >
+              ⋯
+            </button>
+            {overflowOpen && (
+              <div className="toolbar-overflow__panel" role="menu" data-testid="toolbar-overflow-panel">
+                {newBtn}
+                {saveAsBtn}
+                {loadBtn}
+                {exportBtn}
+                {docsBtn}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOverflowOpen(false);
+                    setSettingsOpen(true);
+                  }}
+                  data-testid="settings-open"
+                  aria-haspopup="dialog"
+                  aria-expanded={settingsOpen}
+                  title="App settings"
+                >
+                  ⚙ Settings
+                </button>
+              </div>
+            )}
+            {settingsMenu}
+          </div>
+        </>
+      ) : (
+        <>
+          {newBtn}
+          {undoBtn}
+          {redoBtn}
+          {saveBtn}
+          {saveAsBtn}
+          {loadBtn}
+          {exportBtn}
+          {/* Issue #120 — Parts pulldown replaces the Show-board toggle. Lists
+              every top-level node in the current BuildPlan (case, lid, gasket,
+              fasteners, accessories) with per-part visibility checkboxes. The
+              host-board visibility is no longer split out — it's a separate
+              rendering layer that the view-mode picker covers via base-only
+              mode. */}
+          <PartsMenu />
+          {docsBtn}
+          <div className="toolbar-settings-wrap">
+            <button
+              onClick={() => setSettingsOpen((v) => !v)}
+              data-testid="settings-open"
+              title="App settings"
+              aria-haspopup="dialog"
+              aria-expanded={settingsOpen}
+            >
+              ⚙
+            </button>
+            {settingsMenu}
+          </div>
+        </>
       )}
-      <button
-        onClick={onLoadClick}
-        data-testid="load-project"
-        title="Load a project from a .caseproj.json file"
-      >
-        📂 Load
-      </button>
-      <button
-        onClick={onExport}
-        disabled={welcomeMode}
-        data-testid="export-default"
-        title={
-          welcomeMode
-            ? 'Pick a board or template first'
-            : `Open the export modal — per-part thumbnails + Save All (current format: ${FORMAT_LABEL[exportFormat] ?? exportFormat}, change in ⚙)`
-        }
-      >
-        ⬇ Export…
-      </button>
       <input
         ref={fileInput}
         type="file"
@@ -202,32 +345,6 @@ export function Toolbar() {
         onChange={onFileChange}
         data-testid="load-project-input"
       />
-      {/* Issue #120 — Parts pulldown replaces the Show-board toggle. Lists
-          every top-level node in the current BuildPlan (case, lid, gasket,
-          fasteners, accessories) with per-part visibility checkboxes. The
-          host-board visibility is no longer split out — it's a separate
-          rendering layer that the view-mode picker covers via base-only
-          mode. */}
-      <PartsMenu />
-      <button
-        onClick={() => setDocsOpen(true)}
-        data-testid="docs-open"
-        title="Open the User Manual"
-      >
-        📖 Docs
-      </button>
-      <div className="toolbar-settings-wrap">
-        <button
-          onClick={() => setSettingsOpen((v) => !v)}
-          data-testid="settings-open"
-          title="App settings"
-          aria-haspopup="dialog"
-          aria-expanded={settingsOpen}
-        >
-          ⚙
-        </button>
-        {settingsOpen && <SettingsMenu onClose={() => setSettingsOpen(false)} />}
-      </div>
       {error && <span style={{ color: '#ff8888', fontSize: 12 }}>{error}</span>}
       {docsOpen && <DocsModal initialId="user-manual" onClose={() => setDocsOpen(false)} />}
       {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}

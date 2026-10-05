@@ -27,10 +27,30 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      // The phone specs get their own project (#134) so their viewport lives
+      // here rather than in a per-file `test.use`.
+      testIgnore: /mobile\//,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1024, height: 768 },
         deviceScaleFactor: 1,
+        launchOptions: {
+          args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
+        },
+      },
+    },
+    {
+      // Issue #134 — the mobile profile, matching the `mobile/` spec directory.
+      // iPhone-13-class: 390×844 at dpr 2 with touch, so phone-width
+      // regressions surface in CI instead of on a real handset.
+      name: 'mobile-chromium',
+      testMatch: /mobile\/.*\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 2,
+        isMobile: true,
+        hasTouch: true,
         launchOptions: {
           args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
         },
