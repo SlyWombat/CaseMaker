@@ -212,7 +212,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
 
     const findings = dedupeFindings([
       ...validateJob(job),
-      ...validateVise(job.stock, job.workholding.vise),
+      ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
       ...engFindings,
     ]);
 

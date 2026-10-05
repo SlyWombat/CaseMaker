@@ -26,6 +26,7 @@ import {
   GRIP_MIN,
   VISE_BODY_DEPTH,
   boxesOverlap,
+  defaultStockProud,
   inflate,
   todayISODate,
   uncertaintyFor,
@@ -354,5 +355,103 @@ describe('measuredAt: the day a measurement was taken (#203 review)', () => {
     expect(vise.source).toBe('saved');
     expect(vise.measuredAt).toBe('2026-09-01');
     expect(vise.stockProud).toBe(saved.stockProud);
+  });
+});
+
+// #231 item 2 — `stockProud` is a job input (`ViseParams.stockProud`), and a NEW job resolves
+// its default from the stock instead of the flat 4 mm that exceeds a thin blank and refuses it.
+describe('stockProud: a job input with an honest default (#231 item 2)', () => {
+  // The 3.81 mm badge blank #165 cuts: a flat 4 mm lies above the whole blank.
+  const BADGE = { length: 76.2, width: 38.1, thickness: 3.81 };
+
+  it('derives the default proud from the stock: half the thickness, capped at the shipped 4 mm', () => {
+    expect(defaultStockProud(12)).toBe(4); // the default blank: unchanged, the shipped 4 mm
+    expect(defaultStockProud(8)).toBe(4);
+    expect(defaultStockProud(6)).toBe(3);
+    expect(defaultStockProud(3.81)).toBeCloseTo(1.905, 9);
+  });
+
+  it('the shipped DEFAULT_VISE still refuses the badge blank — the gap this closes', () => {
+    const findings = validateVise(BADGE, DEFAULT_VISE);
+    expect(findings.some((f) => f.code === 'vise-stock-proud-exceeds-thickness')).toBe(true);
+  });
+
+  it('a new job on the badge blank gets an honest proud and is not refused', () => {
+    const vise = viseForNewJob(undefined, BADGE);
+    expect(vise.stockProud).toBeCloseTo(1.905, 9);
+    // Still unmeasured: the source, and so the `vise-default` warning, are unchanged.
+    expect(vise.source).toBe('default');
+    const codes = validateVise(BADGE, vise).map((f) => f.code);
+    expect(codes).not.toContain('vise-stock-proud-exceeds-thickness');
+    expect(codes).not.toContain('vise-stock-not-proud');
+  });
+
+  it('never re-derives a saved or measured vise, even one that would refuse the stock', () => {
+    const saved: ViseParams = { ...DEFAULT_VISE, source: 'saved', uncertainty: 0.5, stockProud: 5 };
+    expect(viseForNewJob(saved, BADGE).stockProud).toBe(5);
+    expect(viseForNewJob(saved, BADGE)).not.toBe(saved); // still a copy
+  });
+
+  it('no stock given keeps the shipped working height, so every caller before #231 is unchanged', () => {
+    expect(viseForNewJob()).toEqual(DEFAULT_VISE);
+    expect(viseForNewJob()).not.toBe(DEFAULT_VISE);
+  });
+});
+
+// #213 §2 — `vise-grip-shallow` judges what the jaws ACTUALLY grip: a strip between the jaw and
+// the part, or an under-board whose overhang carries the jaw face out past the part. The
+// threshold (`GRIP_MIN`) is left alone; only the height it is compared against changes.
+describe('validateVise grip on the sacrificial stack (#213 §2)', () => {
+  const THIN = { length: 76.2, width: 38.1, thickness: 3.81 };
+  // A hand-set proud on the thin blank: grip 0.81 mm, so shallow with nothing else in the vise.
+  const thinVise: ViseParams = { ...DEFAULT_VISE, stockProud: 3.0, source: 'saved', uncertainty: 0.5 };
+  const underBoard = (
+    thickness: number,
+    overhang = { left: 10, right: 10, front: 0, back: 0 },
+  ): Sacrificial => ({ ...noneSacrificial(), under: { thickness, overhang, attach: 'tape' } });
+  const sideStrips = (thickness: number, height: 'flush' | number): Sacrificial => ({
+    ...noneSacrificial(),
+    sides: { left: { thickness, height }, right: { thickness, height }, front: null, back: null },
+  });
+
+  it('judges the raw stock when there is no sacrificial material', () => {
+    const finding = validateVise(THIN, thinVise, noneSacrificial()).find(
+      (f) => f.code === 'vise-grip-shallow',
+    );
+    expect(finding).toBeDefined();
+    expect(finding!.message).toContain('of the stock'); // the pre-#213 wording, kept
+    expect(finding!.message).toContain('0.81 mm');
+  });
+
+  it('a BOARD under the part carries the jaws: grip becomes the board thickness', () => {
+    const codes = validateVise(THIN, thinVise, underBoard(12)).map((f) => f.code);
+    expect(codes).not.toContain('vise-grip-shallow'); // 12 mm gripped, not 0.81
+  });
+
+  it('a thin board is what is gripped, and the warning names its thickness', () => {
+    const finding = validateVise(THIN, thinVise, underBoard(2)).find(
+      (f) => f.code === 'vise-grip-shallow',
+    );
+    expect(finding).toBeDefined();
+    expect(finding!.message).toContain('2 mm');
+    expect(finding!.message).toContain('the material between the jaws');
+  });
+
+  it('an overhang on one side only leaves the other jaw on the thin part: the weaker side governs', () => {
+    const s = underBoard(12, { left: 10, right: 0, front: 0, back: 0 });
+    expect(validateVise(THIN, thinVise, s).some((f) => f.code === 'vise-grip-shallow')).toBe(true);
+  });
+
+  it('a flush strip cannot deepen the grip: the jaw top still caps it at thickness − proud', () => {
+    const codes = validateVise(THIN, thinVise, sideStrips(6, 'flush')).map((f) => f.code);
+    expect(codes).toContain('vise-grip-shallow'); // same 0.81 mm as the bare part
+  });
+
+  it('a short strip is gripped over its own height, not the part’s', () => {
+    const finding = validateVise(STOCK, DEFAULT_VISE, sideStrips(6, 2)).find(
+      (f) => f.code === 'vise-grip-shallow',
+    );
+    expect(finding).toBeDefined();
+    expect(finding!.message).toContain('2 mm'); // not the part's 8 mm (12 − 4)
   });
 });
