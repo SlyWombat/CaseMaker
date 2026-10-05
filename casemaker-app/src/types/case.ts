@@ -198,6 +198,49 @@ export const VENT_SURFACES: ReadonlyArray<VentSurface> = [
   'right',
 ];
 
+/**
+ * Issue #152 — disc magnet sizes the pocket table covers, as
+ * outside-diameter × thickness in mm. Defined HERE rather than in
+ * `engine/compiler/fasteners.ts` because a stored project has to name a magnet
+ * and `types/` must not reach up into the engine; the table in `fasteners.ts`
+ * re-exports this union.
+ */
+export type MagnetSize = '6x2' | '8x3' | '10x2';
+
+/**
+ * How a disc is held in its pocket.
+ *  - 'glue'    : a slip-fit pocket + adhesive. The table's default.
+ *  - 'press'   : an interference pocket, the disc pressed in and held by
+ *                friction. Not a table number yet — PROVISIONAL until a coupon
+ *                settles the fit (see `fasteners.ts`'s MAGNETS note).
+ *  - 'captured': a thin printed membrane left over/under the pocket so the
+ *                disc cannot fall out. The caller must know print orientation;
+ *                the membrane is a bridge.
+ */
+export type MagnetRetention = 'glue' | 'press' | 'captured';
+
+/**
+ * Issue #152 — one magnet pocket cut into a case face, for retaining a
+ * removable part (name plate, tool holder, a lid that must NOT latch). The
+ * pocket geometry comes from the MAGNETS table in `engine/compiler/fasteners`;
+ * this is only WHERE it goes. Same placement frame as `CustomCutout`.
+ */
+export interface MagnetPocket {
+  id: string;
+  /** Face the pocket is cut into. */
+  face: CaseFace;
+  /** Position on the face, in mm from the (uMin, vMin) corner of that face. */
+  u: Mm;
+  v: Mm;
+  /** Which disc the pocket takes. */
+  size: MagnetSize;
+  /** Default 'glue'. See {@link MagnetRetention} — all fits are PROVISIONAL. */
+  retention?: MagnetRetention;
+  enabled: boolean;
+  /** User-facing label shown in the editor (e.g. "nameplate magnet"). */
+  label?: string;
+}
+
 export interface VentilationParams {
   enabled: boolean;
   pattern: VentilationPattern;
@@ -296,6 +339,13 @@ export interface CaseParameters {
    * so legacy projects load with no migration; missing field = empty list.
    */
   customCutouts?: CustomCutout[];
+  /**
+   * Issue #152 — disc-magnet pockets for magnetic retention. Optional so
+   * legacy projects load with no migration; missing field = empty list. No
+   * geometry is emitted until an archetype consumes it (the primitive exists
+   * in `engine/compiler/fasteners`, but nothing calls it yet).
+   */
+  magnetPockets?: MagnetPocket[];
   /**
    * Issue #92 — optional barrel hinge on a side face. Only one hinge per
    * case in v1; multi-hinge support is deferred. Missing/disabled = no hinge

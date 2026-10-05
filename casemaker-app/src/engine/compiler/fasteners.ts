@@ -1,6 +1,11 @@
-import type { Vec2, Vec3, Facing } from '@/types';
+import type { Vec2, Vec3, Facing, MagnetSize } from '@/types';
 import { cylinder, extrude, rotate, translate, union, type BuildOp } from './buildPlan';
 import { circleProfile, poly, pUnion } from './profile';
+
+// The size union is defined beside `case.magnetPockets` (types/case.ts) so the
+// stored project can name a magnet without types/ reaching up into engine/.
+// Re-exported here because this is where a caller looks for it.
+export type { MagnetSize };
 
 /**
  * Issue #140 — ONE way to describe a screw hole.
@@ -584,4 +589,124 @@ export function screwStarter(o: ScrewStarterOptions): BuildOp {
           seg,
         );
   return translate(o.at, orient(o.axis ?? '+z', translate([0, 0, -OVER], body)));
+}
+
+// ---------------------------------------------------------------------------
+// Magnets
+// ---------------------------------------------------------------------------
+
+/*
+ * Issue #152 — a disc magnet and the blind pocket that holds it.
+ *
+ * This is the primitive half of the issue; swappable name plates, tool holders
+ * and lids-that-shouldn't-latch all want the same pocket, but none of those
+ * archetypes exist yet, so nothing calls it today — it ships as a table, a
+ * cutting op, and this provenance note, with no caller until something asks.
+ *
+ * Same provenance idiom as FastenerSpec: `source: 'coupon'` means the pocket
+ * was printed and a real magnet pressed into it; `'derived'` means the number
+ * is arithmetic off the disc and has never touched a printer. **Every row below
+ * is `'derived'`.** The M5 pilot (#140) is the standing reminder of what
+ * arithmetic alone is worth — the 0.8 × major rule everyone quotes missed the
+ * printed optimum by nearly a millimetre — so a fit number here is a
+ * hypothesis until a coupon settles it, not a spec.
+ *
+ * Where the numbers come from:
+ *  - Disc diameters and thicknesses are the common neodymium sizes the reviewed
+ *    system uses: 6×2, 8×3, 10×2 (/Toolbox.md construct 7).
+ *  - The pocket is that system's own printed number for a 6×2 disc, 6.5 × 2.4
+ *    (/Toolbox.md, "Generator parameter list" item 8) — a slip/glue fit: 0.25
+ *    of radial clearance per side and 0.4 of extra depth.
+ *  - That +0.25/+0.4 rule is then extrapolated to the other two sizes. One data
+ *    point is not a rule: treat 8×3 and 10×2 as the weakest numbers in the file.
+ *
+ * A PRESS-in magnet wants a different fit, and the sign may be an INTERFERENCE
+ * (a pocket smaller than the disc) rather than a gap. That is exactly what the
+ * coupon has to decide; until it does, pass `diameter` explicitly instead of
+ * trusting a row here. The magnet coupon is a follow-up, not in this change;
+ * scripts/pilot-coupon.ts is the pattern it should copy.
+ */
+
+/** Radial clearance the default pockets carry: (pocket Ø − disc Ø) / 2, mm. */
+export const MAGNET_GLUE_GAP = 0.25;
+
+/** Extra pocket depth beyond the disc, so it seats below the mouth. */
+export const MAGNET_DEPTH_GAP = 0.4;
+
+export interface MagnetSpec {
+  /** Nominal disc outside diameter, mm. */
+  d: number;
+  /** Nominal disc thickness, mm. */
+  h: number;
+  /** Blind pocket the disc drops into, at the table's glue fit. */
+  pocket: { d: number; h: number };
+  /** `coupon` = printed and measured; `derived` = arithmetic only. */
+  source: 'coupon' | 'derived';
+}
+
+/** The pocket table. Every row is PROVISIONAL — see the note above. */
+export const MAGNETS: Readonly<Record<MagnetSize, MagnetSpec>> = {
+  '6x2': { d: 6, h: 2, pocket: { d: 6.5, h: 2.4 }, source: 'derived' },
+  '8x3': { d: 8, h: 3, pocket: { d: 8.5, h: 3.4 }, source: 'derived' },
+  '10x2': { d: 10, h: 2, pocket: { d: 10.5, h: 2.4 }, source: 'derived' },
+};
+
+/** Pocket diameter for a size at the table's glue fit, mm. */
+export function magnetPocketDiameter(size: MagnetSize): number {
+  return MAGNETS[size].pocket.d;
+}
+
+/** Pocket depth for a size at the table's glue fit, mm. */
+export function magnetPocketDepth(size: MagnetSize): number {
+  return MAGNETS[size].pocket.h;
+}
+
+export interface MagnetPocketOptions {
+  size: MagnetSize;
+  /** Centre of the pocket on the ENTRY face — where the magnet goes in. */
+  at: Vec3;
+  /** Direction the pocket is cut, into the material. Default '+z'. */
+  axis?: Facing;
+  /**
+   * Pocket diameter, mm. Defaults to the table (a glue fit). Pass the coupon's
+   * number here for a press fit, including a negative-clearance one.
+   */
+  diameter?: number;
+  /** Pocket depth from the entry face, mm. Defaults to the table. */
+  depth?: number;
+  /** Material available along the axis, if the pocket must be floor-limited. */
+  material?: number;
+  /** Solid to leave under the pocket so it never breaks through. Default 1. */
+  floor?: number;
+  segments?: number;
+}
+
+/**
+ * The blind pocket a disc magnet sits in — a cutting op to SUBTRACT.
+ *
+ * Unlike `screwHole`, there is no head/recess distinction: a magnet pocket is
+ * one cylinder and its whole job is to hold the disc. What it does share with
+ * `screwHole` is that the floor under it is a PRINT-ORIENTATION question, not
+ * this function's business: a pocket whose ceiling faces down is a bridge, and
+ * only the caller knows which way its part prints (see `exportLayout`'s
+ * `PRINT_FLIP_NODE_IDS`). A thin `floor` (below a couple of layers) is only
+ * sensible as a print-in-place capture membrane for exactly that reason.
+ */
+export function magnetPocket(o: MagnetPocketOptions): BuildOp {
+  const spec = MAGNETS[o.size];
+  const seg = o.segments ?? 32;
+  const d = o.diameter ?? spec.pocket.d;
+  const floor = o.floor ?? DEFAULT_FLOOR;
+  const limit = o.material !== undefined ? Math.max(0, o.material - floor) : Infinity;
+  const depth = Math.min(o.depth ?? spec.pocket.h, limit);
+  if (depth <= 0) {
+    throw new Error(
+      `magnetPocket: no room for a ${o.size} pocket — ${o.material} mm of material ` +
+        `leaves less than the ${floor} mm floor`,
+    );
+  }
+  // Cut from just above the entry face so the mouth is clean, and stop `depth`
+  // below it. The floor is whatever is left between pocket and far face.
+  const body = translate([0, 0, -OVER], cylinder(depth + OVER, d / 2, seg));
+  return translate(o.at, orient(o.axis ?? '+z', body));
 }

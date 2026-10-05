@@ -235,6 +235,24 @@ export const caseParamsSchema = z.object({
       }),
     )
     .optional(),
+  // Issue #152 — magnet pockets cut into a face for magnetic retention.
+  // Optional so legacy projects load with no migration (v7 hinge precedent);
+  // a missing field is treated as an empty list. Geometry lives in
+  // engine/compiler/fasteners' MAGNETS table, not here.
+  magnetPockets: z
+    .array(
+      z.object({
+        id: z.string(),
+        face: z.enum(['+x', '-x', '+y', '-y', '+z', '-z']),
+        u: z.number(),
+        v: z.number(),
+        size: z.enum(['6x2', '8x3', '10x2']),
+        retention: z.enum(['glue', 'press', 'captured']).optional(),
+        enabled: z.boolean(),
+        label: z.string().optional(),
+      }),
+    )
+    .optional(),
   // Issue #92 — optional barrel hinge. Side faces only; one per case in v1.
   // Missing on disk = no hinge emitted.
   hinge: z
@@ -472,6 +490,17 @@ const projectV8Schema = projectV7Schema.extend({
   customFonts: z.array(customFontSchema).default([]),
 });
 
+// Issue #152 — v9 adds the optional `case.magnetPockets` field. Like the v7
+// hinge bump it is purely additive (the field is `.optional()` on
+// caseParamsSchema, which every version embeds), so the wire format stays
+// backwards-compatible; the bump is bookkeeping for "this project understands
+// magnet pockets." A v8 project on disk parses against v8, then this transform
+// stamps schemaVersion: 9 — `magnetPockets` is simply absent (undefined, no
+// pockets emitted).
+const projectV9Schema = projectV8Schema.extend({
+  schemaVersion: z.literal(9),
+});
+
 export const projectSchema = z
   .union([
     projectV1Schema,
@@ -482,12 +511,13 @@ export const projectSchema = z
     projectV6Schema,
     projectV7Schema,
     projectV8Schema,
+    projectV9Schema,
   ])
   .transform((p) => {
     if (p.schemaVersion === 1) {
       return {
         ...p,
-        schemaVersion: 8 as const,
+        schemaVersion: 9 as const,
         customFonts: [],
         hats: [],
         customHats: [],
@@ -502,7 +532,7 @@ export const projectSchema = z
     if (p.schemaVersion === 2) {
       return {
         ...p,
-        schemaVersion: 8 as const,
+        schemaVersion: 9 as const,
         customFonts: [],
         mountingFeatures: [],
         display: null,
@@ -515,7 +545,7 @@ export const projectSchema = z
     if (p.schemaVersion === 3) {
       return {
         ...p,
-        schemaVersion: 8 as const,
+        schemaVersion: 9 as const,
         customFonts: [],
         fanMounts: [],
         textLabels: [],
@@ -525,7 +555,7 @@ export const projectSchema = z
     if (p.schemaVersion === 4) {
       return {
         ...p,
-        schemaVersion: 8 as const,
+        schemaVersion: 9 as const,
         customFonts: [],
         antennas: [],
       };
@@ -533,15 +563,20 @@ export const projectSchema = z
     if (p.schemaVersion === 5) {
       // mountingFeatures items already have mountClass filled by the
       // mountingFeatureSchema default at parse time; just stamp the version.
-      return { ...p, schemaVersion: 8 as const, customFonts: [] };
+      return { ...p, schemaVersion: 9 as const, customFonts: [] };
     }
     if (p.schemaVersion === 6) {
       // v6 → v7 is a pure version bump — `hinge` is optional and absent on
       // legacy projects, so the parsed object already has the right shape.
-      return { ...p, schemaVersion: 8 as const, customFonts: [] };
+      return { ...p, schemaVersion: 9 as const, customFonts: [] };
     }
     if (p.schemaVersion === 7) {
-      return { ...p, schemaVersion: 8 as const, customFonts: [] };
+      return { ...p, schemaVersion: 9 as const, customFonts: [] };
+    }
+    if (p.schemaVersion === 8) {
+      // v8 → v9 is a pure version bump — `magnetPockets` is optional and
+      // absent on legacy projects, so the parsed object already has the shape.
+      return { ...p, schemaVersion: 9 as const };
     }
     return p;
   });
