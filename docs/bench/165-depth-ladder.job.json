@@ -1,0 +1,220 @@
+{
+  "schemaVersion": 2,
+  "name": "165 depth ladder",
+  "stock": {
+    "length": 76.2,
+    "width": 38.1,
+    "thickness": 3.81,
+    "material": "pla"
+  },
+  "labels": [],
+  "shapes": [
+    {
+      "id": "shp-a-0.6",
+      "kind": "rect",
+      "name": "A over pocket 0.6",
+      "position": {
+        "x": 20.6,
+        "y": 19.05
+      },
+      "rotation": 0,
+      "depth": 0.6,
+      "enabled": true,
+      "width": 5,
+      "height": 5,
+      "cornerRadius": 0
+    },
+    {
+      "id": "shp-a-0.8",
+      "kind": "rect",
+      "name": "A over pocket 0.8",
+      "position": {
+        "x": 27.6,
+        "y": 19.05
+      },
+      "rotation": 0,
+      "depth": 0.8,
+      "enabled": true,
+      "width": 5,
+      "height": 5,
+      "cornerRadius": 0
+    },
+    {
+      "id": "shp-a-1",
+      "kind": "rect",
+      "name": "A over pocket 1.0",
+      "position": {
+        "x": 34.6,
+        "y": 19.05
+      },
+      "rotation": 0,
+      "depth": 1,
+      "enabled": true,
+      "width": 5,
+      "height": 5,
+      "cornerRadius": 0
+    },
+    {
+      "id": "shp-a-1.2",
+      "kind": "rect",
+      "name": "A over pocket 1.2",
+      "position": {
+        "x": 41.6,
+        "y": 19.05
+      },
+      "rotation": 0,
+      "depth": 1.2,
+      "enabled": true,
+      "width": 5,
+      "height": 5,
+      "cornerRadius": 0
+    },
+    {
+      "id": "shp-a-1.4",
+      "kind": "rect",
+      "name": "A over pocket 1.4",
+      "position": {
+        "x": 48.6,
+        "y": 19.05
+      },
+      "rotation": 0,
+      "depth": 1.4,
+      "enabled": true,
+      "width": 5,
+      "height": 5,
+      "cornerRadius": 0
+    },
+    {
+      "id": "shp-a-1.6",
+      "kind": "rect",
+      "name": "A over pocket 1.6",
+      "position": {
+        "x": 55.6,
+        "y": 19.05
+      },
+      "rotation": 0,
+      "depth": 1.6,
+      "enabled": true,
+      "width": 5,
+      "height": 5,
+      "cornerRadius": 0
+    },
+    {
+      "id": "shp-b-0.6",
+      "kind": "rect",
+      "name": "B clear 0.6",
+      "position": {
+        "x": 20.6,
+        "y": 31.05
+      },
+      "rotation": 0,
+      "depth": 0.6,
+      "enabled": true,
+      "width": 5,
+      "height": 5,
+      "cornerRadius": 0
+    },
+    {
+      "id": "shp-b-0.8",
+      "kind": "rect",
+      "name": "B clear 0.8",
+      "position": {
+        "x": 27.6,
+        "y": 31.05
+      },
+      "rotation": 0,
+      "depth": 0.8,
+      "enabled": true,
+      "width": 5,
+      "height": 5,
+      "cornerRadius": 0
+    },
+    {
+      "id": "shp-b-1",
+      "kind": "rect",
+      "name": "B clear 1.0",
+      "position": {
+        "x": 34.6,
+        "y": 31.05
+      },
+      "rotation": 0,
+      "depth": 1,
+      "enabled": true,
+      "width": 5,
+      "height": 5,
+      "cornerRadius": 0
+    },
+    {
+      "id": "shp-b-1.2",
+      "kind": "rect",
+      "name": "B clear 1.2",
+      "position": {
+        "x": 41.6,
+        "y": 31.05
+      },
+      "rotation": 0,
+      "depth": 1.2,
+      "enabled": true,
+      "width": 5,
+      "height": 5,
+      "cornerRadius": 0
+    },
+    {
+      "id": "shp-b-1.4",
+      "kind": "rect",
+      "name": "B clear 1.4",
+      "position": {
+        "x": 48.6,
+        "y": 31.05
+      },
+      "rotation": 0,
+      "depth": 1.4,
+      "enabled": true,
+      "width": 5,
+      "height": 5,
+      "cornerRadius": 0
+    },
+    {
+      "id": "shp-b-1.6",
+      "kind": "rect",
+      "name": "B clear 1.6",
+      "position": {
+        "x": 55.6,
+        "y": 31.05
+      },
+      "rotation": 0,
+      "depth": 1.6,
+      "enabled": true,
+      "width": 5,
+      "height": 5,
+      "cornerRadius": 0
+    }
+  ],
+  "workholding": {
+    "kind": "vise",
+    "vise": {
+      "stockProud": 3,
+      "fixedJawThickness": 15,
+      "movingJawThickness": 15,
+      "jawLength": 80,
+      "jawStartY": -10,
+      "source": "default",
+      "uncertainty": 2
+    }
+  },
+  "toolKey": "flat-1.0",
+  "minFloor": 1,
+  "edgeMargin": 1,
+  "sacrificial": {
+    "under": null,
+    "sides": {
+      "left": null,
+      "right": null,
+      "front": null,
+      "back": null
+    },
+    "source": "default"
+  },
+  "breakthrough": 0.3,
+  "customFonts": []
+}
