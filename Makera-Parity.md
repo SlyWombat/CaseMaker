@@ -635,7 +635,7 @@ Control; MKS/MKC are Makera Studio / Makera CAM Beta.
 | Collision / gouge check (§2.D) | only C3 and BT; BT warns without blocking | fixture, holder, gouge, spindle-off-near-material, envelope — errors, not warnings | **ahead** |
 | Machining-time estimate (§2.D) | IV, TM (learned), SC (on file load, no machine), VC (scale factor), LB | cutting-only, three different numbers — §14.2 A1 | **mis-scoped** |
 | Setup / run sheet (§2.F) | only VC and CV | #207 shipped | covered |
-| First-run wizard, jog, homing, overrides, pendant, MDI (§2.E) | Y in most senders | none — we do not drive the machine (decision 10, §9.1) | **refused until the bridge** — R1, R10 |
+| First-run wizard, jog, homing, overrides, pendant, MDI (§2.E) | Y in most senders | none — the web build cannot open a socket; the desktop build will (§5.7, #181) | **refused until the bridge, then reopened for the connect/home half** — R1, R10 |
 | Job queue (§2.F) | **N or ? in every column**; TM's "job" is a conversational step | none | **refused** — R9 |
 | G-code viewer (§2.F) | Y in 11 columns; TM colours the executing line | diagnostics say `line N`; nothing shows the text | **absent** — A5 |
 | Job history / statistics (§2.F) | SC rich; PN, TM partial | run-sheet §9 record blanks, read by hand (#209) | **absent** — §14.7 |
@@ -772,10 +772,27 @@ exists it is stated; where none is, the refusal is meant to hold.
 
 - **R1 — A first-run machine-setup wizard** (`UI-PATTERNS.md` §1: C3's *Setup New Machine*,
   BT's tab rail, LB/MillMage's project setup). It exists to connect, home, test switches and
-  configure a tool setter; we neither connect nor home, there is one machine, and the
-  questions it would ask are #208's bench measurements, which no wizard can take for you. The
-  profile is code with provenance per field (`machine.ts`); the user's numbers are settings
-  with `source`. **So we should not** build one; A6 is the half worth having.
+  configure a tool setter. Today we do none of those: the web build physically cannot open a
+  socket, there is one machine, and the questions a wizard would ask are #208's bench
+  measurements, which no dialog can take for you. The profile is code with provenance per
+  field (`machine.ts`); the user's numbers are settings with `source`, and a wizard would add
+  a third place for a machine fact to live, filled by typing. **So we should not** build one
+  now; A6 is the half worth having.
+
+  **Reopen gate — the bridge, and it is a *when*, not an *if*.** §5.7 of `/Fabrication.md` is
+  explicit: the bridge is **Tauri-only**, WiFi, developed and tested from Windows, and
+  deferred on *sequencing* rather than risk — Makera publish their own controller client, so
+  the protocol is readable and the job is smaller than first assumed. The moment the desktop
+  build connects, *connect / discover / confirm-this-is-the-right-machine* (`M482.5` for the
+  IP, `M482.4` for the MAC) and *home* become real first-run steps that only a guided flow
+  can carry, and this refusal stops applying to them. **Reopen when #181's platform seam
+  lands and the bridge is on the board (CNC-4).**
+
+  What does **not** come back with it: the measurement half. A bridged wizard still cannot
+  caliper a vise or probe a blank, so #208's rows stay bench work, A6 (#247) stays the way
+  measured numbers travel between machines, and anything the wizard learns from the machine
+  is recorded with `source` like every other fact. The refusal narrows to "no wizard as the
+  *home* for machine facts"; it stops being "no guided setup at all".
 - **R2 — VC's operator-editable time scale factor.** A knob over a model we can measure
   instead (A1). **So we should not.**
 - **R3 — PN's Industry / Intuitive dialect switch, or any second vocabulary**
@@ -887,7 +904,7 @@ alignment whenever the camera moves — provenance with an invalidation rule); d
 
 | `UI-PATTERNS.md` | Verdict | Where it lands |
 |---|---|---|
-| §1 wizard + exportable profile | **inherit for nothing** as a wizard; **copy** the export/import | A6, R1 |
+| §1 wizard + exportable profile | **inherit for nothing** as a wizard *today*; **copy** the export/import; revisit the guided-setup half when the desktop build connects | A6, R1 |
 | §2 scrubbable simulation | **done** — step-indexed transport, pauses as the only ticks (#198); CV's per-toolpath simulate is covered by per-label floors in the preview | — |
 | §3 time before the run | **copy**, and it **conflicts** with §11.2 until "estimate ≠ command" is stated | A1, R2 |
 | §4 feeds from machine + material | **done** (`clampToMachine`, `feeds.ts`); **copy** TM's suggested/supplied; **refuse** community settings and vendor catalogues | A4, R5, R6 |
