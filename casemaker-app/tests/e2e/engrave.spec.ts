@@ -106,3 +106,39 @@ test("the saved .nc, reloaded as a stranger's file, removes the same volume", as
   // Same bytes, same header-declared stock and tool ⇒ the same removed volume.
   expect(reloaded.removedVolume).toBeCloseTo(inApp.removedVolume, 3);
 });
+
+// #207's mount: "Run sheet" opens the printable operator sheet for a generated, verified job.
+// The sheet is a DOCUMENT — it names the file Save writes, and under print media the app's
+// chrome (the sheet's own toolbar included) is hidden so only the sheet reaches the paper.
+test('the run sheet opens for a verified job, names the saved file, and prints without chrome', async ({ cm, page }) => {
+  await cm.ready();
+  await openEngravePanel(page);
+
+  // Nothing generated yet: the sheet is not offered.
+  await expect(page.getByTestId('engrave-run-sheet')).toBeDisabled();
+
+  await page.getByTestId('engrave-generate').click();
+  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+  await page.getByTestId('engrave-ack').check();
+  await expect(page.getByTestId('engrave-run-sheet')).toBeEnabled();
+
+  // The name Save writes…
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByTestId('engrave-save').click();
+  const suggested = (await downloadPromise).suggestedFilename();
+  expect(suggested).toMatch(/\.nc$/);
+
+  // …is the name the sheet prints.
+  await page.getByTestId('engrave-run-sheet').click();
+  const sheet = page.getByTestId('run-sheet');
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toContainText(suggested);
+
+  // The print preview shows the sheet and hides the app chrome (the sheet's own toolbar too).
+  await page.emulateMedia({ media: 'print' });
+  await expect(sheet).toBeVisible();
+  await expect(page.getByTestId('run-sheet-print')).toBeHidden();
+  await expect(page.getByTestId('sidebar-button-cnc-engrave')).toBeHidden();
+  await page.emulateMedia({ media: 'screen' });
+  await expect(page.getByTestId('sidebar-button-cnc-engrave')).toBeVisible();
+});

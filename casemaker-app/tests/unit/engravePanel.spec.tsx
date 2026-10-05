@@ -4,10 +4,11 @@
 // worker (`setEngravePreviewClientLoader`); the pure `validateJob` and `feedsFor` are what the
 // assertions below actually exercise.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EngravePanel } from '@/components/panels/EngravePanel';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
   setEngravePreviewClientLoader,
@@ -16,6 +17,13 @@ import {
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
+import { runSheetFileName } from '@/engine/cnc/engrave/runSheet';
+import { saveText } from '@/engine/exportTrigger';
+import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
+
+// The save path is the thing under test (#207): mock it so a test can read the file name the
+// panel hands it, without a real download. EngravePanel imports only `saveText` from here.
+vi.mock('@/engine/exportTrigger', () => ({ saveText: vi.fn() }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -207,5 +215,166 @@ describe('EngravePanel — sacrificial material (#213)', () => {
     expect(useEngraveJobStore.getState().job.sacrificial).toEqual(presetJawStrips());
     // …and it is shown, so the seam is wired to the UI, not just the store.
     expect((screen.getByTestId('engrave-sac-side-left') as HTMLInputElement).checked).toBe(true);
+  });
+});
+
+// #215 work item 3: panel rows for the three combined kinds, with a picker for the referenced
+// item. The engine half (profile algebra, resolveItems, the item-reference finding) is in; these
+// assert the UI produces the right document and surfaces the finding.
+describe('EngravePanel — combined shapes (#215)', () => {
+  it('adds a border row with inset and width, and counts it as an item', () => {
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-item-count').textContent).toBe('3');
+
+    fireEvent.click(screen.getByTestId('engrave-add-border'));
+    const job = useEngraveJobStore.getState().job;
+    expect(job.combined).toHaveLength(1);
+    expect(job.combined![0]!.kind).toBe('border');
+    expect(screen.getByTestId('engrave-combined-row-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-combined-inset-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-combined-width-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-item-count').textContent).toBe('4');
+  });
+
+  it('adds a frame referencing the first item, and the picker changes the target', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-frame'));
+
+    const job = useEngraveJobStore.getState().job;
+    const frame = job.combined![0]!;
+    expect(frame.kind).toBe('frame');
+    // The default target is the first item, so the new frame is valid on creation.
+    expect(frame.kind === 'frame' && frame.around).toBe(job.labels[0]!.id);
+
+    const second = job.labels[1]!.id;
+    fireEvent.change(screen.getByTestId('engrave-combined-around-0'), { target: { value: second } });
+    const updated = useEngraveJobStore.getState().job.combined![0]!;
+    expect(updated.kind === 'frame' && updated.around).toBe(second);
+  });
+
+  it('adds a cut-away whose islands are chosen with checkboxes', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-cutaway'));
+
+    const start = useEngraveJobStore.getState().job;
+    expect(start.combined![0]!.kind).toBe('cutaway');
+    expect(start.combined![0]!.kind === 'cutaway' && start.combined![0]!.islands).toEqual([]);
+
+    const islandId = start.labels[1]!.id;
+    fireEvent.click(screen.getByTestId(`engrave-combined-island-0-${islandId}`));
+    const after = useEngraveJobStore.getState().job.combined![0]!;
+    expect(after.kind === 'cutaway' && after.islands).toEqual([islandId]);
+
+    // Unchecking removes it again.
+    fireEvent.click(screen.getByTestId(`engrave-combined-island-0-${islandId}`));
+    const cleared = useEngraveJobStore.getState().job.combined![0]!;
+    expect(cleared.kind === 'cutaway' && cleared.islands).toEqual([]);
+  });
+
+  it('disables frame and cut-away on an empty job but not a border', () => {
+    act(() => {
+      const job = useEngraveJobStore.getState().job;
+      useEngraveJobStore.getState().replace({ ...job, labels: [], shapes: [], combined: [] });
+    });
+    render(<EngravePanel />);
+    expect((screen.getByTestId('engrave-add-border') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId('engrave-add-frame') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('engrave-add-cutaway') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('reports a broken reference under its row and gates Generate', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-frame'));
+    // The frame names labels[0]; remove that label so the reference dangles.
+    fireEvent.click(screen.getByTestId('engrave-label-remove-0'));
+    expect(screen.getByTestId('engrave-combined-finding-0-item-reference')).toBeTruthy();
+    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('removes a combined item', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-border'));
+    fireEvent.click(screen.getByTestId('engrave-combined-remove-0'));
+    expect(useEngraveJobStore.getState().job.combined).toEqual([]);
+  });
+});
+
+// #207's mount: the "Run sheet" button opens the printable sheet for a generated, verified job,
+// and the file it names is the file Save writes.
+describe('EngravePanel — the run sheet mount (#207)', () => {
+  /** A generated + verified result the panel can open the sheet for. */
+  function readyGenerated(nc: string): EngraveGenerated {
+    return {
+      ok: true,
+      stage: 'done',
+      findings: [],
+      feeds: null,
+      cam: { operations: 1, cuttingMoves: 10, estimatedSeconds: 5, passes: 2 },
+      nc,
+      verify: {
+        ok: true,
+        findings: [],
+        stats: { lines: 2, cuttingMoves: 1, deepestZ: -2, bbox: { min: [0, 0, -2], max: [1, 1, 0] } },
+      },
+      predicted: [],
+      errors: [],
+    };
+  }
+
+  beforeEach(() => {
+    useEngraveRunStore.getState().reset();
+    vi.mocked(saveText).mockClear();
+  });
+
+  it('is disabled until a job has generated and verified', () => {
+    render(<EngravePanel />);
+    expect((screen.getByTestId('engrave-run-sheet') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('opens the sheet for a verified job, and Save writes the sheet’s file name', async () => {
+    render(<EngravePanel />);
+    const nc = ';@MKR|BEGIN\nG21 G90\nM02';
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: readyGenerated(nc),
+        simStatus: 'ready',
+        simDiagnostics: [],
+        oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+        phase: 'ready',
+        acknowledged: true,
+      });
+    });
+
+    const button = screen.getByTestId('engrave-run-sheet') as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+
+    // Opening the sheet awaits the bundled fonts (the diagram typesets each label), so the
+    // overlay appears on a later tick rather than synchronously.
+    const sheet = await screen.findByTestId('run-sheet');
+    const expected = runSheetFileName(useEngraveJobStore.getState().job.name);
+    expect(expected).toBe('Untitled-engrave-job.nc');
+    expect(sheet.textContent).toContain(expected);
+
+    // Save's file name is the sheet's, not the mesh-export sanitiser's — asserted, not trusted.
+    fireEvent.click(screen.getByTestId('engrave-save'));
+    await waitFor(() => expect(vi.mocked(saveText)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(saveText).mock.calls[0]![0]).toBe(nc);
+    expect(vi.mocked(saveText).mock.calls[0]![1]).toBe(expected);
+  });
+
+  it('refuses the sheet once the job is stale', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: readyGenerated(';@MKR|BEGIN\nM02'),
+        simStatus: 'ready',
+        oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+        phase: 'ready',
+        acknowledged: true,
+        staleSince: Date.now(),
+      });
+    });
+    expect((screen.getByTestId('engrave-run-sheet') as HTMLButtonElement).disabled).toBe(true);
   });
 });

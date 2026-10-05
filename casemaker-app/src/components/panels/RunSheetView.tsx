@@ -1,4 +1,5 @@
 import type { JSX } from 'react';
+import { createPortal } from 'react-dom';
 import {
   runSheetDiagramSvg,
   type RunSheet,
@@ -11,8 +12,11 @@ import './runSheet.css';
  * produces. It is a plain renderer: no state, no stores, no fetching. The sheet data is passed
  * in; the caller decides which generated job it belongs to.
  *
- * The mount is a follow-up (#207): slot 1 owns `EngravePanel.tsx`, so the one-line "Run sheet"
- * button is NOT added here. This component is what that button will open.
+ * The overlay is PORTALED to `document.body`. The panel that mounts it lives in the context
+ * rail, which is a `position: fixed` drawer with a `transform` below 1366 px (#93 Phase 4a); a
+ * transformed ancestor would otherwise become the containing block for this overlay's fixed
+ * position and trap the sheet inside a 360 px column. A portal keeps the sheet full-page on
+ * screen and, more importantly, keeps the print preview a page rather than a drawer.
  *
  * EVERY `unverified` STEP SHOWS ITS TAG. An operator must be able to tell a confirmed step from an
  * assumption, so the marker is rendered from the data, never left to prose.
@@ -42,7 +46,7 @@ function StepBody({ step }: { step: RunSheetStep }): JSX.Element {
 }
 
 export function RunSheetView({ sheet, onClose }: { sheet: RunSheet; onClose?: () => void }): JSX.Element {
-  return (
+  return createPortal(
     <div className="run-sheet-overlay" data-testid="run-sheet">
       <div className="run-sheet-toolbar">
         <button type="button" data-testid="run-sheet-print" onClick={() => window.print()}>
@@ -104,6 +108,7 @@ export function RunSheetView({ sheet, onClose }: { sheet: RunSheet; onClose?: ()
           </section>
         ))}
       </article>
-    </div>
+    </div>,
+    document.body,
   );
 }
