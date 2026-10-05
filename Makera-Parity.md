@@ -1,7 +1,7 @@
 # Makera Studio — capability parity review
 
-Status as of 2026-10-03. Nothing here is implemented; this document is the inventory
-and the gap list that `/Fabrication.md` plans against.
+Status as of 2026-10-03; §13 added 2026-10-04. Nothing here is implemented; this document is
+the inventory and the gap list that `/Fabrication.md` plans against.
 
 **Why this document exists.** The brief changed: Case Maker's CNC side is no longer "get
 one badge cut on one Z1", it is software other people will rely on. That makes Makera
@@ -363,6 +363,12 @@ laser strategies. But the **`MachineProfile` gets built now** (decision 25, #184
 than deferred, so that adding a machine later is configuration instead of a refactor, and
 so that machine limits have somewhere to be clamped from day one (§5.1 item 3).
 
+**Refreshed 2026-10-04.** #228's multi-vendor study has landed; **§13** folds in what it
+says about the machine-profile abstraction. It does **not** change this answer — the scope
+stays Z1-only, and the study is evidence *for* that. What it adds: the `MachineProfile`
+*type* must be shaped for a field wider than a 3-axis mill, and the gap list re-orders
+toward "the machine knowing itself". Read §13 before treating §10 as settled.
+
 ---
 
 ## 11. Documentation sources
@@ -537,3 +543,51 @@ work envelope, which is 200 × 200 × 100. They are large enough to be mistaken 
   vision origin-setting — the view is a monitoring feed, confirmed 2026-10-03. **Where the
   camera is mounted** — head or frame — is still unknown and decides #189's whole model. `/Fabrication.md` §1 and §7.3.
 - Are the empty `t_Custom*` tables reachable from Studio's UI, or dormant schema?
+
+---
+
+## 13. The wider field — what the multi-vendor study changes (#228)
+
+`docs/market-research/` (local, gitignored — `FEATURE-MATRIX.md`, `UI-PATTERNS.md`,
+`SOURCES.md`) is #228's survey of 37 machine models and 20 software products across the
+desktop-CNC field. It is a **second benchmark alongside Studio**: §2–§9 above stay the
+incumbent's inventory, and nothing here re-derives the study. What it changes is §10.
+
+**It confirms Z1-only — twice over.** Makera's newer software, **CAM Beta v0.2.0**, is a
+better CAM than Studio (layers, Trace Image, 2D/3D thread milling, PCB import) and serves
+**Carvera / Carvera Air only**, gated behind purchase-email verification: a Z1 owner cannot
+onboard it and is stranded on Studio's legacy CAM (`FEATURE-MATRIX.md` §3.2–§3.3). And the
+field is **contracting**: Bantam Tools has left CNC entirely and `openbuilds.com` no longer
+resolves (`FEATURE-MATRIX.md` §4 finding 1). "Parity means Studio's full capability set on
+the Z1" is not weakened by looking outward; it is the only supported reading.
+
+**It tells us how to shape the seam — which §10 asserted without evidence.** The field is
+wider than "3-axis mill": 3-axis routers, a 5-axis mill with tool-centre-point control
+(Penta / Pocket NC), a handheld CNC whose camera *is* the positioning system (Shaper Origin),
+a lathe control (PathPilot), laser-first software (LightBurn / MillMage) and 3-in-1
+module-swappers (Snapmaker). `FEATURE-MATRIX.md` §4 finding 2 states the consequence:
+
+> A machine-profile abstraction (#184) that models only "3-axis mill with a spindle" will
+> not cover it.
+
+So the **scope** stays one machine, but the **type** must not bake a mill into its shape.
+Anything a lathe, a laser or a handheld would falsify — a spindle RPM ceiling, a Z axis, a
+single tool — must be a capability flag, a dialect field or optional data, never a structural
+assumption. Decision 25 already points `MachineProfile` this way; §13 records *why* it must,
+and gives #184 a wider field to check the shape against.
+
+**It re-orders the gap list.** The recurring gap across the ten patterns is not strategies —
+it is **the machine knowing itself**: a machine profile the user owns (wizard-created,
+exported, re-imported), feeds clamped to the selected machine rather than a static table,
+clearance heights that are *checked* rather than documented, time estimated from the real
+toolpath, resume-from-line with accessory state replayed, and a printable run sheet
+(`UI-PATTERNS.md`, esp. §1, §4, §5, §9). Four of the ten map directly onto work already in
+flight (`/Simulation.md`, the below-PCB-clearance rule, `runSheet.ts` / `RunSheetView.tsx`);
+the tenth is #189. The strategy gaps in §2 remain real, but they are not what a Studio user
+misses *first* — §8.1 item 2 ("clamp to the selected machine") is the higher-value parity
+item, and #228 supplies the evidence for that priority.
+
+**The evidence is asymmetric, and the study says so.** Every competitor claim is
+documentation-level — no competitor app was run — while the Makera claims are file-level
+(`UI-PATTERNS.md`, "What this list does not say"). Treat §13 as a *scope and shape* input,
+not as a capability audit of any named product.
