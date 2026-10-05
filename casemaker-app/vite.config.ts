@@ -85,6 +85,11 @@ export default defineConfig({
       },
     },
   },
-  server: { fs: { allow: ['..'] }, port: DEFAULT_PORT, strictPort: false },
+  // #226 — bind the dev server to IPv4 loopback explicitly. Left unset, Vite binds `localhost`,
+  // which on this machine resolves to `::1` first, so Playwright's `http://127.0.0.1:5173`
+  // webServer probe never gets an answer and its 120 s timeout expires before a test runs.
+  // The e2e webServer and every manual run since #199 already use 127.0.0.1; this makes the
+  // default agree with them (and lets `reuseExistingServer` see a hand-started server too).
+  server: { host: '127.0.0.1', fs: { allow: ['..'] }, port: DEFAULT_PORT, strictPort: false },
   preview: { port: DEFAULT_PORT, strictPort: false },
 });
