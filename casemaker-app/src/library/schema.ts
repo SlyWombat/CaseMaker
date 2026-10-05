@@ -211,6 +211,12 @@ export const boardProfileSchema = z.object({
   clonedFrom: z.string().min(1).optional(),
   visualAssets: visualAssetsSchema.optional(),
   verified: z.boolean().optional(),
+  // #128 — per-board version carried by a community index. Optional and
+  // additive (built-ins leave it absent). The update flow compares an index's
+  // value against the cached copy to flag boards that changed upstream, so a
+  // publisher bumps it whenever the board's data changes. String or number so
+  // an index can use "1.2.0" or a monotonic counter.
+  version: z.union([z.string().min(1), z.number()]).optional(),
   builtin: z.boolean(),
 });
 

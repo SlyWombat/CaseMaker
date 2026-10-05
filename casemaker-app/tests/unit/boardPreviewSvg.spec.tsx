@@ -46,9 +46,10 @@ describe('#130 — BoardPreviewSvg', () => {
     expect(container.querySelector('img')).toBeNull();
   });
 
-  it('shows the top photo, licence and source when topImage is present', () => {
+  it('shows the top photo, licence and source in the rail variant', () => {
     const { container } = render(
       <BoardPreviewSvg
+        variant="rail"
         board={board({
           visualAssets: {
             topImage: '/board-assets/foo/top.png',
@@ -66,6 +67,23 @@ describe('#130 — BoardPreviewSvg', () => {
     const credit = container.querySelector('[data-testid="board-preview-credit"]');
     expect(credit?.textContent).toContain('CC-BY-SA-4.0');
     expect(credit?.textContent).toContain('https://example.com/foo');
+  });
+
+  it('shows the photo but omits the licence caption in the card variant (the default)', () => {
+    const { container } = render(
+      <BoardPreviewSvg
+        board={board({
+          visualAssets: {
+            topImage: '/board-assets/foo/top.png',
+            license: 'CC-BY-SA-4.0',
+            sourceUrl: 'https://example.com/foo',
+          },
+        })}
+      />,
+    );
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('/board-assets/foo/top.png');
+    // The credit belongs with the rail's provenance, not the small tile.
+    expect(container.querySelector('[data-testid="board-preview-credit"]')).toBeNull();
   });
 
   it('falls back to the SVG if the photo fails to load', () => {

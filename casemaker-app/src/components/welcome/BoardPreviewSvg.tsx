@@ -10,8 +10,13 @@ import type { BoardProfile, BoardComponent, ComponentKind } from '@/types';
  *
  * #130 — when the profile carries a `visualAssets.topImage` (a bundled or
  * community-hosted photo), that photo is shown instead, with the licence and
- * source beside it; the SVG stays the fallback for every board without one,
- * and also takes over again if the image fails to load.
+ * source beside it in the rail; the SVG stays the fallback for every board
+ * without one, and also takes over again if the image fails to load.
+ *
+ * `variant` splits the two call sites: `'rail'` (the detail pane) adds the
+ * licence + source caption under the photo, `'card'` (the small grid tile,
+ * the default) shows the photo bare — the caption would be unreadable at card
+ * size and belongs with the rail's provenance.
  */
 
 interface KindStyle {
@@ -189,9 +194,13 @@ const CREDIT_STYLE: CSSProperties = {
 export function BoardPreviewSvg({
   board,
   className,
+  variant = 'card',
 }: {
   board: BoardProfile;
   className?: string;
+  /** `'rail'` shows the licence/source caption under a photo; `'card'` (the
+   * default) is the small grid tile and shows the photo bare. */
+  variant?: 'card' | 'rail';
 }) {
   const uid = useId();
   const assets = board.visualAssets;
@@ -211,10 +220,12 @@ export function BoardPreviewSvg({
           onError={() => setImageFailed(true)}
           style={IMAGE_STYLE}
         />
-        <span style={CREDIT_STYLE} data-testid="board-preview-credit">
-          {assets.license}
-          {assets.sourceUrl ? ` · ${assets.sourceUrl}` : ''}
-        </span>
+        {variant === 'rail' && (
+          <span style={CREDIT_STYLE} data-testid="board-preview-credit">
+            {assets.license}
+            {assets.sourceUrl ? ` · ${assets.sourceUrl}` : ''}
+          </span>
+        )}
       </span>
     );
   }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { builtinBoards, getBuiltinBoard } from '@/library';
-import { getBoard, listBoards, shadowedIdsForSource } from '@/library/registry';
+import { getBoard, listBoards, shadowedIdsForSource, diffBoardVersions } from '@/library/registry';
 import { listTemplates, findTemplateByBoardAcrossSources } from '@/library/templateRegistry';
 import { useLibraryStore } from '@/store/libraryStore';
 import { localBoardProfileSchema } from '@/library/schema';
@@ -310,7 +310,6 @@ describe('remote sources', () => {
     const { source } = await useLibraryStore.getState().addRemoteSource('https://example.com/i.json');
     expect(shadowedIdsForSource(source!.id)).toEqual(['rpi-4b']);
   });
-
   it('index templates[] register and resolve across sources (#126)', async () => {
     stubFetch({
       name: 'Community',
@@ -385,5 +384,43 @@ describe('remote sources', () => {
       .addLocalBoard({ ...sampleBoard(), futureFeatureField: { x: 1 } });
     expect(result.ok).toBe(true);
     expect(result.warnings.join(' ')).toMatch(/futureFeatureField/);
+  });
+});
+
+describe('#128 — diffBoardVersions (the update-check core)', () => {
+  it('reports an updated board when the index bumps its version', () => {
+    expect(
+      diffBoardVersions(
+        [
+          { id: 'a', version: 1 },
+          { id: 'b', version: 2 },
+        ],
+        [
+          { id: 'a', version: 1 },
+          { id: 'b', version: 3 },
+        ],
+      ),
+    ).toEqual([{ id: 'b', from: '2', to: '3', kind: 'updated' }]);
+  });
+
+  it('treats string and number forms of the same version as equal', () => {
+    expect(diffBoardVersions([{ id: 'a', version: 3 }], [{ id: 'a', version: '3' }])).toEqual([]);
+  });
+
+  it('reports ids the index added and dropped, sorted by id', () => {
+    expect(diffBoardVersions([{ id: 'gone', version: 1 }], [{ id: 'fresh', version: 1 }])).toEqual([
+      { id: 'fresh', to: '1', kind: 'new' },
+      { id: 'gone', from: '1', kind: 'removed' },
+    ]);
+  });
+
+  it('treats two unversioned copies of a board as unchanged (version is the contract)', () => {
+    expect(diffBoardVersions([{ id: 'a' }], [{ id: 'a' }])).toEqual([]);
+  });
+
+  it('flags a version appearing where the cached copy had none', () => {
+    expect(diffBoardVersions([{ id: 'a' }], [{ id: 'a', version: 2 }])).toEqual([
+      { id: 'a', to: '2', kind: 'updated' },
+    ]);
   });
 });

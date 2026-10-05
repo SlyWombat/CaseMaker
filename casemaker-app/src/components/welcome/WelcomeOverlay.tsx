@@ -9,6 +9,7 @@ import {
 } from '@/library/templateRegistry';
 import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
 import { BoardPreviewSvg } from './BoardPreviewSvg';
+import { BoardPreview3d } from './BoardPreview3d';
 import { SourcesPanel } from './SourcesPanel';
 import type { BoardProfile, ComponentKind } from '@/types';
 
@@ -384,7 +385,7 @@ export function WelcomeOverlay() {
                           aria-pressed={selectedId === board.id}
                         >
                           <div className="wb-card__preview">
-                            <BoardPreviewSvg board={board} />
+                            <BoardPreviewSvg board={board} variant="card" />
                           </div>
                           <div className="wb-card__name">{board.name}</div>
                           <div className="wb-card__mfr">{board.manufacturer}</div>
@@ -464,7 +465,14 @@ export function WelcomeOverlay() {
             {selected ? (
               <div className="wb-detail" data-testid="welcome-detail">
                 <div className="wb-detail__preview">
-                  <BoardPreviewSvg board={selected.board} />
+                  {selected.board.visualAssets?.glb ? (
+                    <BoardPreview3d
+                      board={selected.board}
+                      fallback={<BoardPreviewSvg board={selected.board} variant="rail" />}
+                    />
+                  ) : (
+                    <BoardPreviewSvg board={selected.board} variant="rail" />
+                  )}
                 </div>
                 <h2 className="wb-detail__name">{selected.board.name}</h2>
                 <div className="wb-detail__mfr">
@@ -565,12 +573,18 @@ export function WelcomeOverlay() {
 
                 {(selected.board.source ||
                   selected.board.crossReference ||
-                  selected.board.measurementMethod) && (
+                  selected.board.measurementMethod ||
+                  selected.board.version !== undefined) && (
                   <>
                     <h3>Provenance</h3>
                     <ul className="wb-provenance">
                       {selected.board.verified && (
                         <li>✓ A printed case from this profile has been verified to fit.</li>
+                      )}
+                      {selected.board.version !== undefined && (
+                        <li data-testid="welcome-board-version">
+                          Profile version {String(selected.board.version)}
+                        </li>
                       )}
                       {selected.board.measurementMethod && (
                         <li>{MEASUREMENT_BADGES[selected.board.measurementMethod]?.title}</li>

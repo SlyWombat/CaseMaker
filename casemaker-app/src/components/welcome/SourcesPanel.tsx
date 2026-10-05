@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { useLibraryStore, type RemoteSource } from '@/store/libraryStore';
 import { builtinBoards } from '@/library';
-import { shadowedIdsForSource } from '@/library/registry';
+import { shadowedIdsForSource, diffBoardVersions, type BoardVersionChange } from '@/library/registry';
 
 /** Official community index (github.com/SlyWombat/casemaker-library). */
 const COMMUNITY_SOURCE_URL = 'https://slywombat.github.io/casemaker-library/index.json';
+
+/** Same per-index size cap the store enforces on a full fetch (#132). */
+const MAX_INDEX_BYTES = 5 * 1024 * 1024;
 
 /** Tooltip behind a source's "N invalid skipped" (#132): which entries failed
  * and why. Falls back to the bare count for caches written before the detail
@@ -19,6 +22,55 @@ function invalidDetail(s: RemoteSource): string {
   const more = count - shown.length;
   if (more > 0) lines.push(`…and ${more} more`);
   return lines.join('\n');
+}
+
+/** #128 — read just the `{id, version}` pairs an index advertises. Deliberately
+ * lenient: the update check only needs the version contract, so an entry the
+ * board schema would reject is simply skipped here (the store's full fetch
+ * still validates it). The size cap mirrors the store's so a hostile URL can't
+ * make the check read a huge body. */
+async function fetchBoardVersions(
+  url: string,
+): Promise<Array<{ id: string; version?: string | number }>> {
+  const res = await fetch(url, { headers: { accept: 'application/json' } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const text = await res.text();
+  if (text.length > MAX_INDEX_BYTES) throw new Error('index too large');
+  const doc: unknown = JSON.parse(text);
+  const boards =
+    Array.isArray(doc)
+      ? doc
+      : doc && typeof doc === 'object' && Array.isArray((doc as { boards?: unknown }).boards)
+        ? (doc as { boards: unknown[] }).boards
+        : null;
+  if (!boards) throw new Error('not a board index');
+  const out: Array<{ id: string; version?: string | number }> = [];
+  for (const entry of boards) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { id, version } = entry as { id?: unknown; version?: unknown };
+    if (typeof id !== 'string' || id.length === 0) continue;
+    const v = typeof version === 'string' || typeof version === 'number' ? version : undefined;
+    out.push(v === undefined ? { id } : { id, version: v });
+  }
+  return out;
+}
+
+/** One line per changed board, for the badge's title tooltip. */
+function changeDetail(changes: BoardVersionChange[]): string {
+  return changes
+    .map((c) => {
+      if (c.kind === 'new') return `${c.id}: new upstream`;
+      if (c.kind === 'removed') return `${c.id}: removed upstream`;
+      return `${c.id}: ${c.from ?? '(unversioned)'} → ${c.to ?? '(unversioned)'}`;
+    })
+    .join('\n');
+}
+
+/** Outcome of one source's update check. */
+interface UpdateCheck {
+  ok: boolean;
+  changes?: BoardVersionChange[];
+  error?: string;
 }
 
 /**
@@ -42,6 +94,39 @@ export function SourcesPanel() {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [checks, setChecks] = useState<Record<string, UpdateCheck>>({});
+
+  /** #128 — fetch the index and diff its per-board versions against the cache,
+   * so the panel can offer a refresh instead of replacing silently. The check
+   * is read-only; "↻ Refresh" applies it. */
+  const onCheck = async (s: RemoteSource) => {
+    if (checkingId) return;
+    setCheckingId(s.id);
+    try {
+      const incoming = await fetchBoardVersions(s.url);
+      setChecks((c) => ({
+        ...c,
+        [s.id]: { ok: true, changes: diffBoardVersions(s.boards, incoming) },
+      }));
+    } catch (err) {
+      setChecks((c) => ({
+        ...c,
+        [s.id]: { ok: false, error: err instanceof Error ? err.message : String(err) },
+      }));
+    } finally {
+      setCheckingId(null);
+    }
+  };
+
+  /** A refresh (or a fresh check) invalidates the previous result. */
+  const clearCheck = (id: string) =>
+    setChecks((c) => {
+      if (!(id in c)) return c;
+      const next = { ...c };
+      delete next[id];
+      return next;
+    });
 
   const onAdd = async () => {
     if (!url.trim() || busy) return;
@@ -97,13 +182,48 @@ export function SourcesPanel() {
                   </span>
                 ) : null;
               })()}
+              {(() => {
+                const check = checks[s.id];
+                if (!check) return null;
+                if (!check.ok) {
+                  return (
+                    <span className="wb-source__err" data-testid={`welcome-source-updates-${s.id}`}>
+                      {' '}· update check failed: {check.error}
+                    </span>
+                  );
+                }
+                const n = check.changes?.length ?? 0;
+                if (n === 0) {
+                  return <span data-testid={`welcome-source-updates-${s.id}`}> · up to date</span>;
+                }
+                return (
+                  <span
+                    data-testid={`welcome-source-updates-${s.id}`}
+                    title={changeDetail(check.changes ?? [])}
+                  >
+                    {' '}· {n} changed upstream — Refresh to update
+                  </span>
+                );
+              })()}
               {s.fetchedAt && ` · fetched ${new Date(s.fetchedAt).toLocaleDateString()}`}
               {s.error && <span className="wb-source__err"> · refresh failed: {s.error}</span>}
             </span>
             <span className="wb-source__actions">
               <button
                 className="wb-btn wb-btn--ghost"
-                onClick={() => void refreshRemoteSource(s.id)}
+                onClick={() => void onCheck(s)}
+                disabled={checkingId === s.id}
+                title="Compare the cached boards against the index upstream"
+                data-testid={`welcome-source-check-${s.id}`}
+              >
+                {checkingId === s.id ? '…' : 'Check'}
+              </button>
+              <button
+                className="wb-btn wb-btn--ghost"
+                onClick={() => {
+                  clearCheck(s.id);
+                  void refreshRemoteSource(s.id);
+                }}
                 disabled={refreshing.includes(s.id)}
                 title="Re-fetch this source's board index"
               >

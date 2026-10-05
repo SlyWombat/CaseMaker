@@ -231,6 +231,11 @@ export interface BoardProfile {
   /** Community-library curator flag: a case printed from this profile has
    * been physically verified to fit. Drives the ✓ badge + sort priority. */
   verified?: boolean;
+  /** #128 — per-board version from a community index (string or number).
+   * Bump it when the board's data changes; the app compares it against the
+   * cached copy to flag boards that changed upstream. Built-ins leave it
+   * absent, and an absent version on both sides counts as unchanged. */
+  version?: string | number;
   builtin: boolean;
   /** Issue #71 — set when this profile is a clone of a built-in. HAT
    * compatibility checks accept the clonedFrom id as well as `id` so users

@@ -76,3 +76,65 @@ export function getBoard(id: string): BoardProfile | undefined {
   }
   return undefined;
 }
+
+/** #128 — one board whose upstream index disagrees with the cached copy. */
+export interface BoardVersionChange {
+  id: string;
+  /** Version in the local cache (absent = never seen / unversioned). */
+  from?: string;
+  /** Version the index now advertises (absent = no version recorded). */
+  to?: string;
+  kind: 'new' | 'updated' | 'removed';
+}
+
+/** Board versions may be a string or a number; compare their text form so a
+ * JSON `3` and `"3"` are the same version. */
+function normVersion(v: string | number | undefined): string | undefined {
+  return v === undefined ? undefined : String(v);
+}
+
+/**
+ * #128 — diff the boards cached for a remote source against the board entries
+ * an index advertises right now (id + version only). Underpins the
+ * "N boards changed upstream — refresh" offer in the Sources panel, so a
+ * refresh no longer replaces the whole source's cache silently.
+ *
+ *  - `updated` — the id is on both sides with a different version;
+ *  - `new`     — the index has an id the cache doesn't;
+ *  - `removed` — the cache has an id the index dropped.
+ *
+ * A board whose version is absent on both sides counts as unchanged: the
+ * version is the publisher's declared contract, and with none recorded the
+ * conditional-refresh path (ETag / Last-Modified 304) is what detects a
+ * whole-index change. The function is pure so the panel's network probe stays
+ * a thin fetch.
+ */
+export function diffBoardVersions(
+  cached: ReadonlyArray<{ id: string; version?: string | number }>,
+  incoming: ReadonlyArray<{ id: string; version?: string | number }>,
+): BoardVersionChange[] {
+  const from = new Map(cached.map((b) => [b.id, normVersion(b.version)]));
+  const to = new Map(incoming.map((b) => [b.id, normVersion(b.version)]));
+  const changes: BoardVersionChange[] = [];
+  for (const [id, v] of to) {
+    if (!from.has(id)) {
+      changes.push({ id, ...(v !== undefined ? { to: v } : {}), kind: 'new' });
+      continue;
+    }
+    const f = from.get(id);
+    if (f !== v) {
+      changes.push({
+        id,
+        ...(f !== undefined ? { from: f } : {}),
+        ...(v !== undefined ? { to: v } : {}),
+        kind: 'updated',
+      });
+    }
+  }
+  for (const [id, v] of from) {
+    if (!to.has(id)) {
+      changes.push({ id, ...(v !== undefined ? { from: v } : {}), kind: 'removed' });
+    }
+  }
+  return changes.sort((a, b) => a.id.localeCompare(b.id));
+}

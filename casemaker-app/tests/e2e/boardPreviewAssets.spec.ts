@@ -25,6 +25,8 @@ function boardJson(visualAssets: Record<string, string>, id = 'e2e-photo-board')
     components: [],
     defaultStandoffHeight: 3,
     recommendedZClearance: 12,
+    // #128 — a community board's per-board version, shown in the rail.
+    version: 3,
     visualAssets,
   });
 }
@@ -65,6 +67,9 @@ test('imported board with a photo shows it, with licence and source, in the rail
   const credit = detail.getByTestId('board-preview-credit');
   await expect(credit).toContainText('CC0-1.0');
   await expect(credit).toContainText('https://example.org/boards/e2e-photo-board');
+
+  // #128 — the community board's version shows in the rail's provenance.
+  await expect(detail.getByTestId('welcome-board-version')).toContainText('Profile version 3');
 
   // Visual record for the session (written to the temp dir, not the repo).
   await detail.screenshot({ path: path.join(os.tmpdir(), 'slot5-board-photo-rail.png') });
