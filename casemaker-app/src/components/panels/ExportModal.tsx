@@ -30,6 +30,18 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+/** Issue #154 — the structured print guidance on its own line: how much slicer
+ *  support the part needs, plus the wall/infill suggestion where it is
+ *  structural. The long-form why lives in the PRINT-NOTES sidecar. */
+function printSupportSummary(part: ProjectPart): string {
+  const support = part.supports === 'none' ? 'no supports' : `supports: ${part.supports}`;
+  const bits = [support];
+  if (part.walls !== undefined || part.infill !== undefined) {
+    bits.push(`${part.walls ?? '—'} walls, ${part.infill ?? '—'}% infill`);
+  }
+  return `Slicer: ${bits.join(' · ')}`;
+}
+
 /** Issue #120 phase 3 — persistent export modal. Lists every part in the
  *  current BuildPlan with a per-part Save button, plus a "Save all in one"
  *  footer button that uses the existing layout-assembling export pipeline.
@@ -39,6 +51,7 @@ export function ExportModal({ onClose }: ExportModalProps) {
   const project = useProjectStore((s) => s.project);
   const exportFormat = useSettingsStore((s) => s.exportFormat);
   const setExportFormat = useSettingsStore((s) => s.setExportFormat);
+  const exportLayout = useSettingsStore((s) => s.exportLayout);
   const hardware = hardwareForProject(project);
   const [busy, setBusy] = useState<string | null>(null);
   const [recent, setRecent] = useState<{ id: string; filename: string; bytes: number } | null>(null);
@@ -206,6 +219,9 @@ export function ExportModal({ onClose }: ExportModalProps) {
                       <div style={{ fontSize: 11, color: '#86b8d2', marginTop: 2 }}>
                         🛠 {printOrientationHint(p)}
                       </div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>
+                        {printSupportSummary(p)}
+                      </div>
                     </div>
                     <button
                       onClick={() => onSavePart(p)}
@@ -220,7 +236,13 @@ export function ExportModal({ onClose }: ExportModalProps) {
               </div>
             ))}
             <div style={{ borderTop: '1px solid #2a2f36', marginTop: 12, paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 11, color: '#9ca3af' }}>Includes a print-optimized layout (lid flipped, parts spaced).</span>
+              <span style={{ fontSize: 11, color: '#9ca3af' }} data-testid="export-layout-note">
+                {exportLayout === 'print-ready'
+                  ? 'Print-ready layout: lid flipped, parts spaced on the bed.'
+                  : 'Assembled layout: parts keep their assembly orientation — no print-ready flip.'}
+                <br />
+                Save all also writes a PRINT-NOTES.txt alongside the parts.
+              </span>
               <button
                 onClick={onSaveAll}
                 disabled={busy !== null}

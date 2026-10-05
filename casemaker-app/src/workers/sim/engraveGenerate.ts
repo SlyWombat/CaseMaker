@@ -25,6 +25,12 @@
  */
 
 import type { EngraveItem, EngraveJob } from '@/types/engraveJob';
+// package.json version for the post's `;@MKR|CAM|v=` header. Read from package.json directly
+// rather than Vite's `__APP_VERSION__` define: Vite replaces the define at build time, but a
+// headless run under `tsx`/Node (the bench-file generator, CI) has no such define and used to
+// fall back to `dev`, so a generated-then-committed `.nc` was not byte-identical to the app's
+// own save (#231 item 4). package.json is the single source in every environment.
+import { version as CAM_VERSION } from '../../../package.json';
 import { Z1 } from '@/engine/cnc/machine';
 import { feedsFor, type FeedsResult } from '@/engine/cnc/feeds';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
@@ -43,13 +49,6 @@ import {
   type PerCharGlyph,
 } from './engraveGeometry';
 import type { OraclePredicted } from '@/engine/cnc/engrave/oracle';
-
-/**
- * package.json version for the post's header. Vite defines `__APP_VERSION__` at build time;
- * a Node spec has no such define, so `typeof` guards the reference (which never throws for an
- * undeclared global) and the header carries `dev` instead of failing the whole run.
- */
-const CAM_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev';
 
 /** The stage that stopped the pipeline, or `done` when everything passed. */
 export type EngraveStage = 'findings' | 'feeds' | 'cam' | 'post' | 'verify' | 'done';

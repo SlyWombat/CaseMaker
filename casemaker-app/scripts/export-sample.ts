@@ -19,6 +19,8 @@ import { createDefaultProject } from '../src/store/projectStore';
 import { buildBinaryStl } from '../src/workers/export/stlBinary';
 import { autoPortsForBoard } from '../src/engine/compiler/portFactory';
 import { applyLayoutToMeshes, PRINT_FLIP_NODE_IDS } from '../src/engine/exportLayout';
+import { partForId } from '../src/engine/exporters/parts';
+import { printNotesText } from '../src/engine/exporters/printNotes';
 import { defaultSnapCatchesForCase } from '../src/engine/compiler/snapCatches';
 import { findTemplate } from '../src/library/templates';
 import type { Project, BoardProfile, MeshNode } from '../src/types';
@@ -238,6 +240,14 @@ for (const sample of SAMPLES) {
   const buf = buildBinaryStl(laid.map((m) => ({ positions: m.positions, indices: m.indices })));
   const path = join(samplesDir, sample.filename);
   writeFileSync(path, Buffer.from(buf));
+  // Issue #154 — the print guidance reaches the file the user actually gets.
+  // The sample is laid out print-ready (above), so the sidecar says the parts
+  // are already turned over.
+  const notesPath = join(samplesDir, sample.filename.replace(/\.stl$/i, '') + '-PRINT-NOTES.txt');
+  writeFileSync(
+    notesPath,
+    printNotesText(laid.map((m) => partForId(m.id)), 'print-ready'),
+  );
   const tris = rawMeshes.reduce((s, m) => s + m.triCount, 0);
   totalTris += tris;
   console.log(`${sample.filename}  ${tris} triangles  ${(buf.byteLength / 1024).toFixed(1)} KB`);

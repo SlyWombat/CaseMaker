@@ -4,9 +4,14 @@ import { useSettingsStore, type ExportFormat } from '@/store/settingsStore';
 import { exportStlBinary, exportStlAscii, exportThreeMf } from '@/engine/jobs/workerClient';
 import { scheduleImmediate, waitForIdle } from '@/engine/jobs/JobScheduler';
 import type { StlMeshInput } from '@/workers/export/stlBinary';
-import { applyLayoutToMeshes, PRINT_FLIP_NODE_IDS } from '@/engine/exportLayout';
+import {
+  applyLayoutToMeshes,
+  PRINT_FLIP_NODE_IDS,
+  type ExportLayoutMode,
+} from '@/engine/exportLayout';
 import type { MeshNode } from '@/types';
-import { isAssembledNodeId } from '@/engine/exporters/parts';
+import { isAssembledNodeId, partForId } from '@/engine/exporters/parts';
+import { printNotesText } from '@/engine/exporters/printNotes';
 
 export type { ExportFormat };
 
@@ -95,6 +100,12 @@ export interface ExportMeshGroups {
   main: StlMeshInput[];
   /** TPU gasket — separate file, separate material (#108). */
   gasket: StlMeshInput | null;
+  /** Node ids of the meshes in `main`, in the same order. Kept so the #154
+   *  print-notes sidecar can name exactly what is in the files (an id is not
+   *  retained on `StlMeshInput`). */
+  mainIds: string[];
+  /** Node id of `gasket` when present. */
+  gasketId: string | null;
 }
 
 export function meshNodesForExport(): ExportMeshGroups {
@@ -118,6 +129,8 @@ export function meshNodesForExport(): ExportMeshGroups {
     return {
       main: main.map(toMesh),
       gasket: gasketNode ? toMesh(gasketNode) : null,
+      mainIds: main.map((n) => n.id),
+      gasketId: gasketNode ? gasketNode.id : null,
     };
   }
   // Print-ready: lay main parts out flat, lid flipped, side-by-side along +X.
@@ -125,7 +138,23 @@ export function meshNodesForExport(): ExportMeshGroups {
   return {
     main: laid.map((m) => ({ positions: m.positions, indices: m.indices })),
     gasket: gasketNode ? toMesh(gasketNode) : null,
+    mainIds: laid.map((m) => m.id),
+    gasketId: gasketNode ? gasketNode.id : null,
   };
+}
+
+/**
+ * Issue #154 — the PRINT-NOTES sidecar text for the meshes about to be
+ * written. Pure: it needs only the exported ids and the layout mode, so the
+ * sidecar's content is testable without a DOM or the build worker. `mainIds` /
+ * `gasketId` are kept on the groups for exactly this.
+ */
+export function printNotesForGroups(
+  groups: ExportMeshGroups,
+  layoutMode: ExportLayoutMode,
+): string {
+  const ids = [...groups.mainIds, ...(groups.gasketId ? [groups.gasketId] : [])];
+  return printNotesText(ids.map((id) => partForId(id)), layoutMode);
 }
 
 /**
@@ -264,10 +293,26 @@ export async function triggerExport(format: ExportFormat): Promise<void> {
     }
   } else {
     // 3MF: bundle everything in one file. Slicers that read 3MF can split
-    // by object group at print time. No sidecar needed — the 3MF carries
-    // its own metadata.
+    // by object group at print time. The 3MF does NOT carry the print
+    // guidance — `threeMf.ts` writes only an `Application` metadata tag —
+    // so the sidecar below is emitted here too (#154).
     const all = [...groups.main, ...(groups.gasket ? [groups.gasket] : [])];
     const buf = await exportThreeMf(all);
     await downloadArrayBuffer(buf, `${safeName}.3mf`, 'model/3mf');
+  }
+
+  // Issue #154 — the print notes sidecar. The plan already carries the
+  // orientation/supports/walls metadata; this is where it reaches the file the
+  // user downloads, for ALL three format branches. It must describe the parts
+  // actually written (assembled racks are excluded above) and must know the
+  // layout mode, because the flip is skipped in `assembled` mode.
+  const exportedCount = groups.mainIds.length + (groups.gasketId ? 1 : 0);
+  if (exportedCount > 0) {
+    const layoutMode = useSettingsStore.getState().exportLayout;
+    await downloadText(
+      printNotesForGroups(groups, layoutMode),
+      `${safeName}-PRINT-NOTES.txt`,
+      'text/plain',
+    );
   }
 }

@@ -7,6 +7,8 @@ import { describe, it, expect } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { CAM_ID, CAM_NAME } from '@/engine/cnc/post/z1';
+import { version as APP_VERSION } from '../../package.json';
 import type { EngraveJob } from '@/types/engraveJob';
 
 describe('engraveGenerate (#206)', () => {
@@ -23,6 +25,14 @@ describe('engraveGenerate (#206)', () => {
     expect(g.cam).not.toBeNull();
     expect(g.cam!.operations).toBe(3); // three enabled labels
     expect(g.cam!.cuttingMoves).toBeGreaterThan(0);
+  });
+
+  it('stamps the real package version into the CAM header, never dev (#231 item 4)', () => {
+    const g = engraveGenerate(tl, defaultEngraveJob());
+    expect(g.nc).not.toBeNull();
+    // The exact header line the app writes; a headless run must match it byte for byte.
+    expect(g.nc).toContain(`;@MKR|CAM|id=${CAM_ID}|name=${CAM_NAME}|v=${APP_VERSION}`);
+    expect(g.nc).not.toContain('v=dev');
   });
 
   it('is pure: the same job produces byte-identical nc', () => {
