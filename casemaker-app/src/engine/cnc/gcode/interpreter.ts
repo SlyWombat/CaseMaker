@@ -341,6 +341,22 @@ class Interp {
       case 90: this.absolute = true; return false;
       case 91: this.absolute = false; return false;
       case 92: {
+        // The firmware's ROTARY UNWIND (#237, `/Rotary.md` §1.2): `G92.4 A<v> S<n>` (or `R<n>`)
+        // shrinks A by whole turns — A becomes the value modulo 360 — and leaves X, Y and Z
+        // alone. It is NOT the manual homing the other `G92.4` form is, so it must be detected
+        // BEFORE the generic offset-set lowering below, which would forget XYZ.
+        const aWord = words.find((w) => w.letter === 'A');
+        if (sub === 4 && aWord) {
+          const sWord = words.find((w) => w.letter === 'S');
+          const rWord = words.find((w) => w.letter === 'R');
+          if (sWord || rWord) {
+            const value = (sWord ?? rWord)!.value;
+            this.events.push({ kind: 'rotary-unwind', line, mode: sWord ? 'shrink' : 'reset', a: aWord.value, value });
+            // A becomes its value mod 360 (the sign convention is unverified; /Rotary.md §9).
+            this.a = ((aWord.value % 360) + 360) % 360;
+            return false;
+          }
+        }
         const vals: Pos = [null, null, null];
         let anyArg = false;
         for (const w of words) {
@@ -349,9 +365,10 @@ class Interp {
           const idx = AXIS_INDEX[w.letter];
           if (idx !== undefined) vals[idx] = w.value * this.scale;
         }
-        // Robot.cpp: `.1`, `.2` and a bare `G92` reset the offset; `.3` sets it raw; `.4` is
-        // a manual homing that REDEFINES the machine position; `.5` is a laser offset; else
-        // the offset is shifted so the current position reads as the given values.
+        // Robot.cpp: `.1`, `.2` and a bare `G92` reset the offset; `.3` sets it raw; `.4` WITH
+        // AXIS WORDS is a manual homing that REDEFINES the machine position (the rotary form is
+        // handled above); `.5` is a laser offset; else the offset is shifted so the current
+        // position reads as the given values.
         const reset = sub === 1 || sub === 2 || (sub === 0 && !anyArg);
         this.events.push({ kind: 'offset-set', line, subcode: sub, values: vals, reset });
         if (sub === 0 && anyArg) {

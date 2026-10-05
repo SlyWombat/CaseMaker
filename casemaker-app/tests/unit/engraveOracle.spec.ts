@@ -98,6 +98,7 @@ describe('engraveOracle (#206 §3)', () => {
     expect(passes.length).toBeGreaterThan(1);
 
     const ir: ToolpathIR = {
+      frame: 'flat',
       tool,
       toolNumber: 1,
       spindleRpm: 12000,

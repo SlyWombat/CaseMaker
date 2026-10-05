@@ -375,6 +375,14 @@ export function applyEvent(s: MachineState, ev: GcodeEvent, _setup: Setup): Mach
       }
       return next;
     }
+    case 'rotary-unwind': {
+      // G92.4 A S/R (#237, `/Rotary.md` §1.2): the firmware shrinks A by whole turns, keeping
+      // its value modulo 360, and does NOT touch X, Y or Z — unlike `offset-set` subcode 4,
+      // which redefines the machine position and forgets them. The sign convention for the
+      // residue is unverified (`/Rotary.md` §9), so take the non-negative one.
+      const a = ((ev.a % 360) + 360) % 360;
+      return { ...s, a };
+    }
     case 'probe': {
       // A probe moves only the axes it names, and stops early, at contact: those axes are
       // unknown afterwards and the others are exactly where they were. (A Z probe at the

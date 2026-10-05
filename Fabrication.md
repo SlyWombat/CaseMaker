@@ -46,7 +46,14 @@ G-code semantics are LinuxCNC-flavoured and documented.
 - **The Makera 3D Probe** — a separate accessory, and the one that matters. See the
   warning below: it is *not* the 3D Probe Rod.
 - **4th axis rotary module.** Work envelope ⌀80 × 150 mm. Belt-driven: fine for
-  hobby work, with real compromises in rigidity and precision.
+  hobby work, with real compromises in rigidity and precision. **Mounting and shipped
+  config (`/Rotary.md` §1.2, §1.4):** mounts on the two 4 × 11 mm locating pins and three
+  M5×10 screws **after removing the MDF wasteboard** — so rotary and tape-down are
+  mutually exclusive setups, sharing the vise's pin datum; three-jaw chuck with **reverse
+  jaws fitted by default**; tailstock with an adjustment knob. `configZ1.default` gives
+  `88.889 steps/°` (32 000 steps/turn), `3600 °/min` (60 °/s, 10 rpm), `360 °/s²` and
+  `home_to_min` with a real endstop — **read from the repository, not measured on the
+  device** (the same `worksize_x 300` boilerplate caveat as `/Makera-Parity.md` §11.3).
 - **Low-profile vise** (confirmed 2026-10-03). Listed on `Z1/Accessories`. It matters more
   than it looks — see §7.3, where it may remove a V1 deliverable.
 - **An integrated camera** (confirmed 2026-10-03). Not in `Z1/QuickStart` at all, which is
@@ -242,15 +249,15 @@ accepted.
 |---|---|---|
 | 1 | **True 3D surfacing** eventually, not 2.5D only | Not in V1 — see §10. |
 | 2 | **In-house heightmap/dexel engine** when 3D arrives | §5.5 states what it cannot do. |
-| 3 | **Design for the 4th axis** | We own the module (⌀80 × 150 mm). Superseded for V1 by decision 18. |
+| 3 | **Design for the 4th axis** | We own the module (⌀80 × 150 mm). Superseded for V1 by decision 18. **Design in `/Rotary.md` (decisions R1–R12).** |
 | 4 | **No laser, ever (on this machine)** | Removes `M321`–`M325` and two strategy families. |
-| 5 | **Images get two user-selectable methods** | Vector trace and greyscale relief. Not in V1 — V1 is text. |
-| 6 | **Mesh import only to start (STL/3MF/OBJ)** | Behind a pluggable registry. Not needed for V1. |
+| 5 | **Images get two user-selectable methods** | Vector trace and greyscale relief. Not in V1 — V1 is text. **Resequenced 2026-10-05:** trace first, with #217; relief with the dexel engine (#222). `/Makera-Parity.md` §14.5. |
+| 6 | **Mesh import only to start (STL/3MF/OBJ)** | Behind a pluggable registry. Not needed for V1. **CNC scope added 2026-10-05:** CNC import is **profiles first** — SVG, then DXF (#217); mesh for the CNC side arrives with the dexel engine (#222). The case-side mesh importer is unchanged. `/Makera-Parity.md` §14.5. |
 | 7 | **Stock setup = corner find + Z touch-off, `G32` autolevel, model cross-check** | **Superseded in all three parts** — by decision 23 (edge-find on flats, not a corner), decision 12 (`G32` out) and decision 24 (no thickness cross-check). |
 | 8 | **We have both the wired probe and the Makera 3D Probe** | Non-conductive probing is available, so PLA can be probed. |
-| 9 | **First real job is a 3D-printed blank (PLA/PETG)** | The badge, literally. |
+| 9 | **First real job is a 3D-printed blank (PLA/PETG)** | The badge. **Reworded 2026-10-05:** the first *badge* job; CNC-2's first chips are wood in the vise (#209) and the badge is CNC-3. `/Makera-Parity.md` §14.5. |
 | 10 | **Transport is WiFi** | Still the chosen transport. **Not in V1** — see §10.1. |
-| 11 | **4th axis: designed for, not built** | See decision 18. |
+| 11 | **4th axis: designed for, not built** | See decision 18. **Design in `/Rotary.md` (decisions R1–R12).** |
 | 12 | **The depth window is bed-referenced; `G32` is not an input.** | See §7. **The clause "measured stock thickness is the required input" is superseded by decision 24** — after the flip, total thickness is not a job input at all. "Bed-referenced" survives and is strengthened: the printer's bed face *is* the engraved face. |
 | 13 | **The blank must be printed 100 % infill, and its spec is part of the depth model** | See §7. |
 | 14 | **V1 cuts with a flat end mill, not a V-bit** | A V-bit couples depth to stroke width, so per-label depth stops meaning what the UI says. V-carve is V2. |
@@ -258,7 +265,7 @@ accepted.
 | 16 | **Glyph profiles use `NonZero` fill, as an opt-in field** | Not a change to the global `EvenOdd` default. |
 | 17 | **No `Project.kind` union for V1** — `case.badge` as an optional field plus a `derivedKind()` helper | The old §5.1 premise was false. See §5.1. |
 | 18 | **V1 is a vertical slice, and several agreed decisions are explicitly deferred out of it** | Deferring is sequencing, not reversal. See §10.1. |
-| 19 | **Workholding is a printed nest, and it is a V1 deliverable** | **OPEN as of 2026-10-03** — tape-down and the low-profile vise are both cheaper, and the nest's claimed advantage (backing the blank flat) is false for this part because the magnet recess is an air gap against any flat surface. §7.3. |
+| 19 | **V1 workholding is the low-profile vise; the printed nest is not a deliverable** | **Decided 2026-10-05**, closing the open question of 2026-10-03: the nest's claimed advantage (backing the blank flat) is false for this part — the magnet recess is an air gap against any flat surface. Every enclosed desktop mill in the sample ships a mechanical fixture with a probing routine named after it (Bantam's L-Bracket Location, Carbide's vise + BitZero Corner, Shaper's Workstation) and none documents a printed per-part nest; CNC-2 is already vise-first. #175 reopens only if #176 shows the vise cannot hold the 3.81 mm badge. §7.3, `/Makera-Parity.md` §14.5. |
 | 20 | **Per-label depth is a two-state choice with a numeric override** | Two outcomes exist (top colour, bottom colour), so that is what the control should offer. Same reasoning as the X-ray toggle. |
 | 21 | **The app loads the object; depth limits come from the solid** | No hand-coded pocket rectangles. A void in the geometry produces a shallower limit automatically, for this part and any future one. §7.1. |
 | 22 | **The app models the printer's layer grid** | Layer height **and first-layer height** are inputs. The colour boundary and the depth limits sit on real layer lines, not ideal dimensions — because 0.810 mm is layer 4.05 and the difference matters, and after the flip the first layer *is* the engraved face. §7.1. |
@@ -398,8 +405,17 @@ drop-radius; the stock simulator becomes a cylinder. Studio's
 a `haveTailTop` flag, consistent with a reparameterisation rather than a different
 engine.
 
-What this approach cannot do in either coordinate system: undercuts, and simultaneous
-4-axis motion. The A axis indexes or wraps; it does not interpolate with X/Y/Z.
+What this approach cannot do in either coordinate system: undercuts, and a tool that
+leaves the plane through the axis. **Correction (`/Rotary.md` §1.1, measured against
+Makera's own files):** A interpolates freely with X and Z — `Rotation/Nefertiti*.nc` are
+helices, A and X turning together in 3 885 of 4 547 cutting moves and A and Z in 89 198.
+The constraint that makes a radius-over-(A, X) model legitimate is not "A does not
+interpolate" but that **the tool axis always intersects the rotary axis** (Y ≡ 0, no
+tilt). What the heightmap cannot do is a tool that leaves the plane through the axis
+(Y ≠ 0, tilt) or a cut that crosses the axis (Z ≤ 0); both stay refused. The firmware
+scales rotary feed from the work-frame radius — `r = √(Y_wcs² + Z_wcs²)`, the target's
+distance from the work origin — so the rotary work origin must lie **on** the axis
+(`/Rotary.md` §1.2, R6).
 
 ### 5.6 Simulation is the pre-hardware oracle
 
@@ -925,10 +941,10 @@ each is recorded above and keeps its decision number.
 | **WiFi machine bridge** (decision 10) | Studio already uploads over WiFi. A protocol reverse-engineer plus a Windows-only dev loop on the critical path buys nothing a working `.nc` doesn't. |
 | **`G32` autolevel** (decision 7) | §7.1 — it addresses the wrong error. Re-add only if **#176** shows warp matters after clamping in the nest. |
 | **Heightmap/dexel engine** (decision 2) | Nothing in V1 is 3D. **#182** does exact 2.5D stock simulation with CSG, and **#174** re-parses the output — between them that is the stock check V1 actually needs, with no sampled grid. |
-| **4th-axis fields in the IR** (decisions 3, 11) | Adding an `A` to a move record later is one line. Adding it now is a field nobody tests. |
+| **4th-axis fields in the IR** (decisions 3, 11) | Adding an `A` to a move record later is one line. Adding it now is a field nobody tests. **Confirmed by `/Rotary.md` R5** — A stays out of `Pos`/`commanded`/`values`; the three R-0 reservations (`ToolpathIR.frame`, the second `zDatum`, the cylinder WCS on the axis) are the recorded exception. |
 | **Image methods** (decision 5) | V1 is text. |
 | **Mesh import registry** (decision 6) | V1 is text; `assetImporter.ts` is fine as is. |
-| **Feeds/speeds from `makera_library.db`** (§3) | Hardcode the measured numbers from **#165**; read the DB when there are two tools. |
+| **Feeds/speeds from `makera_library.db`** (§3) | **Corrected 2026-10-05:** the DB is a **prefill source for the tool inventory (#212), never the feeds source** — it has no PLA or PETG, no machine column, and 32 rows above the Z1's spindle ceiling. Hardcode the measured numbers from **#165**; read the DB only to prefill tool geometry. `/Makera-Parity.md` §14.5. |
 | **Multi-tool `M490.1/.2` handshake** | V1 jobs are single-tool. The probe→cutter swap happens before the job starts. |
 | **V-carve** (§7.4) | V2. It is the thing that eventually gets small text to change colour, and it needs a medial-axis engine. |
 | **`Project.kind` union** (decision 17) | §5.1 — not on the critical path, and the flags are already the derivation. |

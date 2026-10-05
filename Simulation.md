@@ -194,6 +194,9 @@ and shared by one function.
 - **Every frame test uses an off-centre label near one corner.** A centred badge is
   symmetric under exactly the mirrors and sign flips most likely to be wrong — the same
   family of bug as the KiCad Y-down board layout error.
+- **A rotary job has its own work frame** — origin on the rotary axis, work Z = radius,
+  Y ≡ 0, X along the axis (`/Rotary.md` R6, read from the firmware's own feed arithmetic).
+  It is not the prism frame with an `A` word added, and it gets its own golden-number test.
 
 ---
 
@@ -485,15 +488,19 @@ interface Sweeper {
 }
 ```
 
-The dexel backend consumes the same `Timeline`; `MoveEvent.a` already exists, and rotary
-adds an `as` pair per move to `Checkpoint` alongside `zs`.
+The dexel backend consumes the same `Timeline`; `MoveEvent.a` already exists. **Corrected
+(`/Rotary.md` §3.2, decision R4):** rotary adds a **single `a: number | null`** to `Checkpoint`,
+constant within the run (the run breaks when A changes); the per-move A is the column engine's
+record, not the checkpoint's — an `as` pair per move is withdrawn.
 
 - **`ExactSweeper` (V1)** — the pipeline in §4.4. Correct for 3-axis work with few Z levels:
   all of 2.5D, and 3D roughing where step-down levels are discrete.
 - **`DexelSweeper` (deferred, decision 2)** — for dense ramping 3D (§4.5) and for rotary,
   where A-axis moves rotate the stock and the sampling grid becomes (A, X) with radius as
-  the sampled value (`/Fabrication.md` §5.5). The A axis indexes or wraps; it never
-  interpolates with X/Y/Z, which is what makes the reparameterisation legitimate.
+  the sampled value (`/Fabrication.md` §5.5). **Corrected (`/Rotary.md` §1.1):** the tool axis
+  always intersects the rotary axis (Y = 0), which is what makes the reparameterisation
+  legitimate; A interpolates with X and Z, in tens of thousands of the vendor's own moves. A
+  cut crossing the axis (Z ≤ 0) is refused (`/Rotary.md` §4.3).
 
 V1 builds `ExactSweeper` only, but the interface exists from the start so the dexel work is
 an addition rather than a rewrite. Choose the backend from the Z-level count, and say which
@@ -604,7 +611,7 @@ The corpus, roughly in order of what it catches:
 
 | Input | What it exercises |
 |---|---|
-| **Makera's 25 sample `.nc` files** (#186) | Real vendor output across ABS, acrylic, aluminium and PCB, and the dialect surprises — `T1M6` with no space, bare `G53`, parenthesis comments, `echo` lines. **Split three ways: parse / simulate / refuse.** The 2.8 MB relief and the two 4-axis files **parse** but V1 cannot simulate them — dense 3D is the dexel case (§4.4) and rotary is out of scope (§9) |
+| **Makera's 25 sample `.nc` files** (#186) | Real vendor output across ABS, acrylic, aluminium and PCB, and the dialect surprises — `T1M6` with no space, bare `G53`, parenthesis comments, `echo` lines. **Split three ways: parse / simulate / refuse.** The 2.8 MB relief and the two 4-axis files **parse** but V1 cannot simulate them — dense 3D is the dexel case (§4.4) and rotary is out of scope (§9). **Measured (`/Rotary.md` §1.1):** the two `Rotation/` files are helices — A interpolates with X (3 885 moves) and with Z (89 198); A unwinds to −153 720°, Z reaches −5.0 (the cutter crosses the axis), and both end on `G92.4A0S0`. `Tests/4th-test-air.nc` is the roughing file with `T6` |
 | **An existing Case Maker part**, engraved | A rack side or a case lid with a label milled into it — a part the compiler already produces, not a special-cased blank |
 | **Cylindrical stock** | `STOCK`'s `diameter` field implies it; the badge never will |
 | **The badge blank** | The regression oracle, and the only one with a known-good physical result |
@@ -731,8 +738,9 @@ about how the part will *look* beyond which colour volume a floor lands in.
 4. ~~**Can the dexel backend share the `Move[]` type unchanged?**~~ **Closed — the premise
    was stale.** There is no `Move[]` type: the parser emits `GcodeEvent[]`, the runner emits
    `Timeline`, and the sweep consumes `Timeline` (§5, corrected). `MoveEvent.a` already
-   exists and is tracked, so rotary needs one addition — an `as` pair per move on
-   `Checkpoint` — and nothing in V1 depends on it.
+   exists and is tracked, so rotary needs one addition — **a single `a` on `Checkpoint`,
+   constant within the run, which breaks when A changes** (`/Rotary.md` R4; the `as` pair
+   per move is withdrawn) — and nothing in V1 depends on it.
 5. ~~**Should a rapid through material REMOVE it in the picture?**~~ **Answered: no** (code
    review #4 q1). It is never subtracted; it is reported and returned as a gouge solid that
    is drawn. §3.3 is corrected to match, and returning the solid is on #182.

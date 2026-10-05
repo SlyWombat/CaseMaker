@@ -277,12 +277,21 @@ describe('motion, units and modes', () => {
     expect(parseGcode('G92.4 X0\n').diagnostics.map((d) => d.code)).toContain('g92-4-manual-home');
   });
 
+  it('G92.4 A S/R is the rotary unwind, not a manual home (#237)', () => {
+    // `S` drops whole turns; `R` resets. Both keep the value modulo 360 and leave XYZ alone.
+    expect(parseGcode('G92.4 A-153720 S0\n').events[0]).toMatchObject({ kind: 'rotary-unwind', mode: 'shrink', a: -153720, value: 0 });
+    expect(parseGcode('G92.4 A10 R5\n').events[0]).toMatchObject({ kind: 'rotary-unwind', mode: 'reset', a: 10, value: 5 });
+    // A bare `G92.4` with only axis words is still the manual homing it always was.
+    expect(parseGcode('G92.4 X0\n').events[0]).toMatchObject({ kind: 'offset-set', subcode: 4 });
+    expect(parseGcode('G92.4 X0\n').diagnostics.map((d) => d.code)).toContain('g92-4-manual-home');
+  });
+
   it('G4, G28, G38.x, G54..G59 and G92.x produce events', () => {
     const r = parseGcode('G4 P1\nG28\nG38.2 Z-5 F50\nG55\nG92.4A0S0\n');
-    expect(kinds(r)).toEqual(['dwell', 'home', 'probe', 'wcs-select', 'offset-set']);
+    expect(kinds(r)).toEqual(['dwell', 'home', 'probe', 'wcs-select', 'rotary-unwind']);
     expect(r.events[2]).toMatchObject({ kind: 'probe', subcode: 2 });
     expect(r.events[3]).toMatchObject({ kind: 'wcs-select', wcs: 1 });
-    expect(r.events[4]).toMatchObject({ kind: 'offset-set', subcode: 4 });
+    expect(r.events[4]).toMatchObject({ kind: 'rotary-unwind', mode: 'shrink', a: 0, value: 0 });
   });
 });
 

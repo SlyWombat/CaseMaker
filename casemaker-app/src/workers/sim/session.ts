@@ -29,6 +29,7 @@
  */
 
 import { applyEvent, buildTimeline, parseGcode, MACHINES, type FixtureEnvelope, type MachineState, type PausePoint, type Segment, type Setup, type Timeline } from '@/engine/cnc';
+import { ASSUMED_RAPID_MM_MIN } from '@/engine/cnc/cam/ir';
 
 import type { Mm } from '@/types/units';
 import type { Tool } from '@/engine/cnc/tool';
@@ -121,11 +122,12 @@ export interface SimLoadRefused {
 export type SimLoadResult = SimLoadOk | SimLoadRefused;
 
 /**
- * The seek rate a RAPID is DRAWN at, mm/min (#197). A rapid has no feed in the file (#184), and
- * the controller's real seek rate is not ours to state — so this is **for display only**: it
- * gives the drawn path a time axis (#198) without claiming the machine's speed.
+ * The seek rate a RAPID is DRAWN at, mm/min (#197), AND the rate the cycle estimate assumes
+ * (#242). Both are now the ONE named constant `ASSUMED_RAPID_MM_MIN`, so the drawn timeline and
+ * the run sheet's estimate cannot drift apart. It stays an ASSUMPTION, never a claim about the
+ * controller's real seek rate (#208 D3 calibrates it).
  */
-export const DISPLAY_RAPID_MM_MIN = 3000;
+export const DISPLAY_RAPID_MM_MIN = ASSUMED_RAPID_MM_MIN;
 
 /**
  * The whole tool path, with the kind and time of every move (#197, `/Simulation.md` §8). The

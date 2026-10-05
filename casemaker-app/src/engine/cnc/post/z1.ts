@@ -25,15 +25,19 @@
  */
 
 import type { CamMove, ToolpathIR } from '../cam/ir';
+import { estimateIRCycleSeconds, ASSUMED_RAPID_MM_MIN } from '../cam/ir';
 import type { MachineProfile } from '../machine';
 import { formatFixed, sanitizeMkrValue } from './format';
 
 /**
  * The context the post cannot get from the IR alone (#173).
  *
- * `zDatum` is deliberately the ONLY legal value as a literal type: posting requires stating
- * that every Z is measured from the probed top face, so the old failure mode — silently
- * assuming the face is at Z0 — is a type error, not a runtime accident.
+ * `zDatum` is deliberately a literal type: posting requires stating the datum every Z is
+ * measured from, so the old failure mode — silently assuming the face is at Z0 — is a type
+ * error, not a runtime accident. There are exactly two legal values (#237, `/Rotary.md` §3.3):
+ * `'probed-top-face'` for the flat frame, and `'rotary-axis'` for the rotary frame (Z = radius
+ * from the axis). The second exists so "Z is radius" is expressible rather than smuggled; the
+ * flat post still refuses to write it (R-3 adds rotary posting).
  */
 export interface PostContext {
   jobName: string;
@@ -41,8 +45,8 @@ export interface PostContext {
   stock: { length: number; width: number; thickness: number };
   /** Free text for the `MKR MATERIAL` line. */
   materialName: string;
-  /** The datum every Z in the file is measured from. There is exactly one legal value. */
-  zDatum: 'probed-top-face';
+  /** The datum every Z in the file is measured from. Two legal values; see above. */
+  zDatum: 'probed-top-face' | 'rotary-axis';
   /** Where X0 Y0 is. V1 supports one. */
   origin: 'topFrontLeft';
   /** package.json version. */
@@ -77,8 +81,9 @@ function mkr(tag: string, ...fields: string[]): string {
  * `zDatum` must be the probed top face. Refuses when the IR has no non-empty operation, a
  * move has a non-finite coordinate, a feed is outside `(0, machine.maxCutFeed]`, the spindle
  * speed is above `machine.maxRpm`, a cutting move sits above the stock but below `hopZ` (a
- * cut in the air is a CAM bug), or the machine has an automatic tool changer (this post
- * writes the manual-change dialect only).
+ * cut in the air is a CAM bug), the machine has an automatic tool changer (this post writes
+ * the manual-change dialect only), or the IR is not the flat frame (#237: a rotary-frame IR,
+ * or the `'rotary-axis'` datum, cannot be posted by the flat dialect).
  */
 export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MachineProfile): PostResult {
   const errors: string[] = [];
@@ -89,6 +94,20 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MachineProfile
   const ops = ir.operations.filter((op) => op.moves.length > 0);
   if (ops.length === 0) {
     errors.push('the toolpath IR has no operation with any moves: nothing to post');
+  }
+
+  // A rotary-frame IR must not flow through this post unnoticed (#237): every Z in the flat
+  // dialect is measured from the probed top face, but a rotary IR's Z is the radius from the
+  // axis, so the two Zs are different quantities. There is no rotary posting until R-3.
+  if (ir.frame === 'rotary') {
+    errors.push(
+      'the toolpath IR is a ROTARY-frame IR (work Z = radius from the axis); this post writes the flat 3-axis dialect only (#237 R-0; R-3 adds rotary posting)',
+    );
+  }
+  if (ctx.zDatum === 'rotary-axis') {
+    errors.push(
+      "zDatum 'rotary-axis' is not postable: this post measures every Z from the probed top face (#237 R-0; R-3 adds rotary posting)",
+    );
   }
 
   if (machine.hasATC) {
@@ -160,7 +179,10 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MachineProfile
       `angle=${numberOrZero(ir.tool.angle)}`,
       `halfAngle=${numberOrZero(ir.tool.halfAngle)}`,
     ),
-    mkr('TIME', `seconds=${Math.round(ir.operations.reduce((s, op) => s + op.estimatedSeconds, 0))}`),
+    mkr('TIME', `seconds=${Math.round(estimateIRCycleSeconds(ir))}`),
+    // #242: the machine's screen shows the figure above as the job time, so say what it assumes.
+    // A `;` comment (not a `;@MKR` record), so the header reader ignores it but the operator does not.
+    `; cycle estimate: cutting + rapids at an assumed ${ASSUMED_RAPID_MM_MIN} mm/min (PROVISIONAL, #208 D3 calibrates)`,
     ...ops.map((op, i) => mkr('TOOLPATH', `number=${i + 1}`, `tool_number=${ir.toolNumber}`, `name=${sanitizeMkrValue(op.name)}`)),
     ';@MKR|END',
   ];

@@ -179,12 +179,15 @@ the page is JS-rendered and the first fetch returned only its title):
 | machine-frame moves drop A | `applyEvent` copies `ev.a` only on the work-frame branch | `emulator/timeline.ts` `applyEvent` case `'move'` |
 | the sweep **refuses** by name | `if (timeline.summary.rotary) return { ok: false, … code: 'rotary-job' }` | `workers/geometry/sweep.ts:716`; tests `cncSweep.spec.ts:305`, `simSession.spec.ts:405`, `gcodeCorpus.spec.ts:100` |
 | checkpoints are keyed on (segment, Z) | a change in A does not open a new run; `zs` carries a Z pair per move | `emulator/timeline.ts` `Checkpoint`, the run-splitter |
-| the IR has no `A` | documented as deliberate | `cam/ir.ts` header |
+| the IR has no `A` | documented as deliberate; `ToolpathIR.frame` (`'flat'`/`'rotary'`) is the R-0 discriminant | `cam/ir.ts` header |
+| the post refuses the rotary frame | `frame === 'rotary'` and `zDatum === 'rotary-axis'` are errors until R-3 | `post/z1.ts` `postZ1` |
+| the profile carries the module | `MachineProfile.rotary` (axis/parent/envelope/steps/rates/homing/unwind), `configZ1.default` figures, `source` flagged unverified | `machine.ts` `RotaryProfile`, `Z1.rotary` |
+| `G92.4 A S/R` is a rotary unwind | lowers to a `rotary-unwind` event (mode + a + value), X/Y/Z left intact; bare `G92.4` stays a manual home | `gcode/interpreter.ts`, `gcode/types.ts`, `emulator/timeline.ts` |
 | the post emits X/Y/Z/F only | sticky formatted words | `post/z1.ts` `emit` |
 | the verifier **refuses any `A`** | `PARAM_LETTERS = {T,S,F,X,Y,Z}` → `not-our-dialect` | `verify.ts` |
-| `PartSpec` `cylinder` | `{ diameter, length }` — no axis, no chuck end; `stubSetup` puts the WCS on **top** of the cylinder (`zTop = diameter / 2`) | `setup.ts` `stubSetup`, `machinePlacement` |
+| `PartSpec` `cylinder` | `{ diameter, length }` — no axis, no chuck end; **R-0 fix:** `stubSetup`'s cylinder WCS is now on the **axis** (`at[2]`), not the top face (§3.3, R6) | `setup.ts` `stubSetup`, `machinePlacement` |
 | `Workholding` `rotary-chuck` | `{ jawDiameter, stickout }` | `setup.ts` |
-| `MachineProfile.capabilities.rotary` | a boolean; no envelope, limits, steps or datum | `machine.ts` |
+| `MachineProfile.capabilities.rotary` | the boolean stays; **R-0 adds `MachineProfile.rotary`** with the envelope, limits, steps and unwind as sourced data | `machine.ts` |
 | frames | translation-only `workToMachine`; `engravedFaceWorkZ` is `null` for a cylinder | `frames.ts` |
 | viewport | work-frame meshes drawn untransformed; `SimPath.xyz` is a Float32 triple per vertex; camera bounds from the stock bbox; `GridFloor` hidden in CNC mode | `SimMeshes.tsx`, `simGeometry.ts`, `viewportCamera.ts`, `Viewport.tsx` |
 | transport | step-indexed, pause ticks only, material at checkpoints | `SimTransport.tsx`, `playbackClock.ts` |

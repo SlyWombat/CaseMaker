@@ -92,6 +92,17 @@ describe('the Z1 profile', () => {
     expect(Z1.holder).toBeNull();
   });
 
+  it('states the 4th axis as SOURCED data, flagged shipped-default (#237 R-0, /Rotary.md §3.5)', () => {
+    // The rotary profile exists so the A-axis numbers are data with provenance, not constants
+    // typed at a call site. It is not a measurement: `source` says where each number came from.
+    expect(Z1.rotary).toBeDefined();
+    expect(Z1.rotary).toMatchObject({ axis: 'A', parent: 'y', homing: 'home_to_min', unwind: 'G92.4 A S' });
+    expect(Z1.rotary?.stepsPerDegree).toBeCloseTo(88.888889, 6);
+    expect(Z1.rotary?.envelope).toEqual({ diameter: 80, length: 150 });
+    expect(Z1.rotary?.source).toContain('configZ1.default');
+    expect(Z1.rotary?.source).toMatch(/unverified/i);
+  });
+
   it('the heights the head actually goes to are within travel; the probe TARGET is not, and that is recorded', () => {
     const { clearanceZ, safeZ, sensorZ } = Z1.toolChange;
     for (const z of [clearanceZ, safeZ]) {
@@ -208,5 +219,13 @@ describe('profile schemas (#184 work item 1)', () => {
     expect(machineProfileSchema.safeParse(noEndstop).success).toBe(false);
     // hasATC is a literal false on the type (#183, Z1-only): a profile with an ATC is not one.
     expect(machineProfileSchema.safeParse({ ...Z1, hasATC: true }).success).toBe(false);
+  });
+
+  it('carries the rotary profile as optional sourced data (#237)', () => {
+    // Optional: a flat mill states no 4th axis. Present: every field is a sourced literal.
+    const { rotary: _rotary, ...flat } = Z1;
+    expect(machineProfileSchema.safeParse(flat).success).toBe(true);
+    expect(machineProfileSchema.safeParse(Z1).success).toBe(true);
+    expect(machineProfileSchema.safeParse({ ...Z1, rotary: { ...Z1.rotary, axis: 'B' } }).success).toBe(false);
   });
 });

@@ -35,6 +35,7 @@ function operation(number: number, name: string, labelId: string, depth: number,
 
 function makeIr(operations: CamOperation[], over: Partial<ToolpathIR> = {}): ToolpathIR {
   return {
+    frame: 'flat',
     tool: flatEndMill(1),
     toolNumber: 1,
     spindleRpm: 12000,
@@ -107,7 +108,8 @@ describe('postZ1 (#173)', () => {
       ;@MKR|CAM|id=CaseMaker|name=Case Maker|v=1.0.0
       ;@MKR|UNIT|value=MM
       ;@MKR|TOOL|number=1|id=0|name=1 mm flat end|type=Flat End|handlediameter=3.175|sticklength=0|shoulderlength=0|flutelength=0|diameter=1|tipdiameter=1|cornerradius=0|angle=0|halfAngle=0
-      ;@MKR|TIME|seconds=2
+      ;@MKR|TIME|seconds=3
+      ; cycle estimate: cutting + rapids at an assumed 3000 mm/min (PROVISIONAL, #208 D3 calibrates)
       ;@MKR|TOOLPATH|number=1|tool_number=1|name=[T1]Engrave "A" 1.0mm
       ;@MKR|TOOLPATH|number=2|tool_number=1|name=[T1]Engrave "B" 0.5mm
       ;@MKR|END
@@ -273,6 +275,19 @@ describe('postZ1 (#173)', () => {
     const airCut = postZ1(makeIr([operation(1, 'a', 'a', 1, [rapid(0, 0, 1), cut(0, 0, 0.5, 200)])]), CTX, Z1);
     expect(airCut.ok).toBe(false);
     if (!airCut.ok) expect(airCut.errors.join(' ')).toMatch(/air/i);
+
+    // #237: a rotary-frame IR, or the rotary Z datum, is not postable by the flat dialect.
+    const rotaryFrame = postZ1(
+      makeIr([operation(1, 'a', 'a', 1, [rapid(0, 0, 1), cut(0, 0, -1, 200)])], { frame: 'rotary' }),
+      CTX,
+      Z1,
+    );
+    expect(rotaryFrame.ok).toBe(false);
+    if (!rotaryFrame.ok) expect(rotaryFrame.errors.join(' ')).toMatch(/ROTARY-frame/i);
+
+    const rotaryDatum = postZ1(TWO_OP, { ...CTX, zDatum: 'rotary-axis' }, Z1);
+    expect(rotaryDatum.ok).toBe(false);
+    if (!rotaryDatum.ok) expect(rotaryDatum.errors.join(' ')).toMatch(/rotary-axis/i);
   });
 
   it('ends on Studio\'s own closing lines', () => {

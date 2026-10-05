@@ -12,6 +12,7 @@
 
 import { useEffect, type CSSProperties } from 'react';
 import { advance, lineAtStep, totalTime } from '@/engine/cnc/playbackClock';
+import { ASSUMED_RAPID_MM_MIN } from '@/engine/cnc/cam/ir';
 import { isSimSceneActive, SIM_SPEEDS, useSimStore, type SimSpeed } from '@/store/simStore';
 import type { PausePoint, ToolState } from '@/engine/cnc';
 
@@ -286,7 +287,11 @@ function TransportBar() {
             ))}
           </div>
         </div>
-        <span data-testid="sim-time" style={READOUT} title="Simulated time — rapids use a display-only rate, so this is not a cycle-time estimate.">
+        <span
+          data-testid="sim-time"
+          style={READOUT}
+          title={`Simulated time — rapids are timed at an assumed ${ASSUMED_RAPID_MM_MIN} mm/min (the same rate the run sheet's estimate assumes), so this is playback, not a measured cycle time.`}
+        >
           {formatTime(seconds)} / {formatTime(total)} simulated
         </span>
         <span data-testid="sim-step" style={READOUT_MUTED}>

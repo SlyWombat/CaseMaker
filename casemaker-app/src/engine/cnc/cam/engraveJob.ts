@@ -30,7 +30,7 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { CutParams } from '../feeds';
 import { cuttingRadiusForSweep, type Tool } from '../tool';
-import { estimateSeconds, HOP_Z, SAFE_Z, type CamMove, type CamOperation, type ToolpathIR } from './ir';
+import { estimateCycleSeconds, HOP_Z, SAFE_Z, type CamMove, type CamOperation, type ToolpathIR } from './ir';
 import { pocketLoops, type OffsetFn, type Polygons } from './pocket';
 
 /**
@@ -257,11 +257,13 @@ export function generateEngrave(
       labelId: item.label.id,
       depth: item.label.depth,
       moves,
-      estimatedSeconds: estimateSeconds(moves),
+      estimatedSeconds: estimateCycleSeconds(moves),
     };
   });
 
   return {
+    // The 3-axis work frame. A rotary IR has its own frame (#237); nothing emits one yet.
+    frame: 'flat',
     tool,
     toolNumber,
     spindleRpm: params.rpm,

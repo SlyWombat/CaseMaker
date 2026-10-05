@@ -121,6 +121,16 @@ describe('machine state: what the controller holds after each step', () => {
       expect(tl.diagnostics.map((d) => d.code)).toContain('g92-4-manual-home');
     });
 
+    it('G92.4 A S is a rotary unwind: A drops whole turns and X, Y, Z are untouched (#237)', () => {
+      const tl = run('G0 X1 Y2 Z3 A720\nG92.4 A720 S0\n');
+      const before = tl.stateAt(0);
+      const after = tl.stateAt(1);
+      expect(after.a).toBe(0); // 720 mod 360
+      expectPos(after.work, before.work);
+      expectPos(after.machine, before.machine);
+      expect(tl.diagnostics.map((d) => d.code)).not.toContain('g92-4-manual-home');
+    });
+
     it('a shift from an UNKNOWN position: the work axis is the value written, the offset is unknown', () => {
       const s = run('G92 X0\n').stateAt(0);
       expect(s.work[0]).toBe(0);

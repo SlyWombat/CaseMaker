@@ -181,10 +181,31 @@ export interface OffsetSetEvent extends BaseEvent {
   /**
    * `G92 X.. Y.. Z..` shifts the G92 offset so the current position reads as these values.
    * `G92` with no axes, `G92.1` and `G92.2` RESET the offset (`reset`); `G92.3` sets it to
-   * the raw values; `G92.4` is a manual homing that redefines the MACHINE position itself.
+   * the raw values; `G92.4` with axis words is a manual homing that redefines the MACHINE
+   * position itself. The other `G92.4` form — `G92.4 A<v> S<n>`/`R<n>` — is NOT this event;
+   * it lowers to {@link RotaryUnwindEvent} (#237, `/Rotary.md` §1.2).
    */
   values: Pos;
   reset: boolean;
+}
+
+/**
+ * The firmware's rotary unwind (#237, `/Rotary.md` §1.2): `G92.4 A<v> S<n>` (or `R<n>`).
+ *
+ * The firmware shrinks the A position by whole turns — the value modulo 360 is kept, the turns
+ * are dropped (`S`), or A is reset to the value modulo 360 (`R`). X, Y and Z are NOT touched.
+ * Distinct from a manual home: the old parser read EVERY `G92.4` as a manual home and forgot
+ * XYZ, which is the wrong semantics for the rotary form — harmless at end-of-program (where the
+ * vendor's files use it, `G92.4A0S0`), a position-losing trap mid-program.
+ */
+export interface RotaryUnwindEvent extends BaseEvent {
+  kind: 'rotary-unwind';
+  /** `S` drops whole turns (`'shrink'`); `R` resets (`'reset'`). Both keep A mod 360. */
+  mode: 'shrink' | 'reset';
+  /** The `A` value as written, degrees. */
+  a: number;
+  /** The `S` or `R` word's value. */
+  value: number;
 }
 
 export interface LaserModeEvent extends BaseEvent {
@@ -215,6 +236,7 @@ export type GcodeEvent =
   | WcsSelectEvent
   | WcsSetEvent
   | OffsetSetEvent
+  | RotaryUnwindEvent
   | LaserModeEvent
   | MarkerEvent
   | ProgramEndEvent;

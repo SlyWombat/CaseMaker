@@ -88,6 +88,41 @@ export interface SoftEndstop {
   source: string;
 }
 
+/**
+ * The optional 4th-axis module's profile (#237, `/Rotary.md` §3.5), sourced in the
+ * {@link SoftEndstop} pattern: `undefined` means no module fitted.
+ *
+ * Every figure here is a READING of Makera's shipped config (`src/configZ1.default`) and
+ * database (`t_MachineType` — the ⌀80 × 150 envelope), never of the device, so `source` says
+ * so. R-1 measures the module at the bench and replaces them with `source: 'measured'` values
+ * (`/Rotary.md` §9).
+ *
+ * DELIBERATELY NO ANGULAR TRAVEL LIMITS. A is unwound — the vendor's own files run to
+ * −153 720° and reset with `G92.4 A0 S0` — so none exist; a limit here would be an invented
+ * constraint (`/Rotary.md` §6.3). `capabilities.rotary` stays as "a module exists"; this block
+ * says what it is.
+ */
+export interface RotaryProfile {
+  /** The axis name. The module's is `A` (the stock's rotation about X). */
+  axis: 'A';
+  /** The machine axis the module is parented to (`Makera_Z1.fcm`). */
+  parent: 'y';
+  /** The stock envelope the module accepts, mm (`t_MachineType`). */
+  envelope: { diameter: Mm; length: Mm };
+  /** Steps per degree of A. Shipped 88.888889 = 32 000 steps per turn. */
+  stepsPerDegree: number;
+  /** Max A rate, °/min. Shipped 3600 = 60 °/s = 10 rpm. */
+  maxRate: number;
+  /** A acceleration, °/s². Shipped 360. */
+  acceleration: number;
+  /** Direction the shipped config homes A (`delta_homing_direction`). */
+  homing: 'home_to_min';
+  /** The firmware's rotary unwind, the code the vendor's own files end with. */
+  unwind: 'G92.4 A S';
+  /** Where every figure above came from. A shipped default is not a measurement. */
+  source: string;
+}
+
 export interface MachineProfile extends MachineIdentity {
   /** A mill. The only process with a spindle and a tool change (#183: Z1-only). */
   process: 'mill';
@@ -169,6 +204,11 @@ export interface MachineProfile extends MachineIdentity {
    * number here: a guessed nut either hides a real crash or refuses a good tool.
    */
   holder: HolderProfile | null;
+  /**
+   * The 4th-axis module, when one is fitted (#237). `undefined` means none. Sourced data, not a
+   * measurement — see {@link RotaryProfile}.
+   */
+  rotary?: RotaryProfile;
 }
 
 /**
@@ -238,6 +278,19 @@ export const Z1: MachineProfile = {
   // PROVISIONAL (#208): the collet nut has never been measured. `null` is the honest value —
   // it makes the fixture check warn "cannot be proven" instead of testing a made-up cylinder.
   holder: null,
+  // The shipped 4th-axis figures (#237, /Rotary.md §3.5). A reading of configZ1.default, not
+  // the device; the ⌀80 x 150 envelope is from t_MachineType. R-1 replaces all of it.
+  rotary: {
+    axis: 'A',
+    parent: 'y',
+    envelope: { diameter: 80, length: 150 },
+    stepsPerDegree: 88.888889,
+    maxRate: 3600,
+    acceleration: 360,
+    homing: 'home_to_min',
+    unwind: 'G92.4 A S',
+    source: 'configZ1.default (shipped default, unverified)',
+  },
 };
 
 /** The only supported MILL machine. A second one is configuration here, not a refactor elsewhere. */
@@ -366,6 +419,19 @@ const holderSchema = z.object({
   source: z.string().min(1),
 });
 
+/** The optional 4th-axis module (#237). A shipped default is carried as sourced data. */
+const rotarySchema = z.object({
+  axis: z.literal('A'),
+  parent: z.literal('y'),
+  envelope: z.object({ diameter: finite.positive(), length: finite.positive() }),
+  stepsPerDegree: finite.positive(),
+  maxRate: finite.positive(),
+  acceleration: finite.positive(),
+  homing: z.literal('home_to_min'),
+  unwind: z.literal('G92.4 A S'),
+  source: z.string().min(1),
+});
+
 export const machineProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -402,6 +468,7 @@ export const machineProfileSchema = z.object({
     probeRetract: finite,
   }),
   holder: holderSchema.nullable(),
+  rotary: rotarySchema.optional(),
 });
 
 export const printerProfileSchema = z.object({

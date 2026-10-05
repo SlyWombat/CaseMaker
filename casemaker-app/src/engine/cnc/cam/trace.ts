@@ -28,7 +28,7 @@ import type { CutParams } from '../feeds';
 import { cuttingRadiusForSweep, type Tool } from '../tool';
 import { zPasses } from './engraveJob';
 import {
-  estimateSeconds,
+  estimateCycleSeconds,
   HOP_Z,
   SAFE_Z,
   type CamMove,
@@ -166,11 +166,13 @@ export function generateTrace(
       labelId: trace.id,
       depth: trace.depth,
       moves,
-      estimatedSeconds: estimateSeconds(moves),
+      estimatedSeconds: estimateCycleSeconds(moves),
     };
   });
 
   return {
+    // The 3-axis work frame. A rotary IR has its own frame (#237); nothing emits one yet.
+    frame: 'flat',
     tool,
     toolNumber,
     spindleRpm: params.rpm,

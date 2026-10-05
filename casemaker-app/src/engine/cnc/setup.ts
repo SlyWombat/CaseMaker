@@ -200,6 +200,15 @@ function machinePlacement(part: PartSpec, machine: MachineProfile, zTop: Mm): Ve
 /**
  * The reference setup for a part that sits with its model origin at the machine origin and
  * is registered exactly: the simplest valid stub, and what tests start from.
+ *
+ * THE WORK ORIGIN'S Z DIFFERS BY PART KIND (#237, `/Rotary.md` R6). For a prism it is the top
+ * face directly above the model origin, as Studio's `topFrontLeft` does. For a CYLINDER it is on
+ * the AXIS, not the top face: the firmware computes rotary feed from `√(Y_wcs² + Z_wcs²)`, so work
+ * Z in a rotary job IS the radius from the axis, and a WCS on the top face makes the machine
+ * compute the wrong surface speed on every move. The model origin already sits on the axis (the
+ * top is `diameter / 2` above it, which is what `machinePlacement` fits to the safe height), so
+ * the cylinder's origin Z is the axis Z. Y ≡ 0 on the axis is the same statement in Y, and the
+ * placed `at[1]` is already it.
  */
 export function stubSetup(part: PartSpec, workholding: Workholding, overrides: Partial<Setup> = {}, machine?: MachineProfile): Setup {
   const zTop = part.kind === 'prism' ? part.thickness : part.kind === 'cylinder' ? part.diameter / 2 : 0;
@@ -213,9 +222,12 @@ export function stubSetup(part: PartSpec, workholding: Workholding, overrides: P
     part,
     workholding,
     placement: { origin: at, rotationZ: 0, source: 'stub' },
-    // The work origin on the top face directly above the model origin, as Studio's
-    // `topFrontLeft` does for a part whose front-left corner is its model origin.
-    wcs: { origin: [at[0], at[1], at[2] + zTop], source: 'stub', uncertainty: 0.05 },
+    // The work origin: on the axis for a cylinder (#237), on the top face for a prism.
+    wcs: {
+      origin: [at[0], at[1], part.kind === 'cylinder' ? at[2] : at[2] + zTop],
+      source: 'stub',
+      uncertainty: 0.05,
+    },
     startingTool: 'unknown',
     ...overrides,
   };
