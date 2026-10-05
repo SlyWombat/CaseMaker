@@ -6,6 +6,8 @@ import { libraryTool } from '@/engine/cnc/toolLibrary';
 import type { StartingTool } from '@/engine/cnc';
 import type { DiagnosticSource, SimDiagnostic } from '@/workers/sim/session';
 import { MAX_TEXT_FILE_BYTES, openTextFile } from '@/utils/openTextFile';
+import { GcodePane } from '@/components/panels/GcodePane';
+import { coverageDisclaimer, type SimRunOutcome } from '@/components/panels/simCoverage';
 
 /**
  * The Simulate panel (#196): open a `.nc`, confirm the stock and the tool, run the sweep, and
@@ -88,6 +90,17 @@ const TAG: CSSProperties = {
   padding: '1px 4px',
   whiteSpace: 'nowrap',
 };
+const DISCLAIM: CSSProperties = { ...MUTED, color: '#c8d3de', borderTop: '1px solid #2a2f36', paddingTop: 6 };
+/** A diagnostic's line, clickable to reveal it in the G-code pane (#245). */
+const LINELINK: CSSProperties = {
+  font: 'inherit',
+  color: '#8fb4ff',
+  background: 'transparent',
+  border: 0,
+  padding: '0 2px',
+  cursor: 'pointer',
+  textDecoration: 'underline dotted',
+};
 
 export function SimPanel() {
   const fileName = useSimSetupStore((s) => s.fileName);
@@ -109,18 +122,41 @@ export function SimPanel() {
   const progress = useSimStore((s) => s.progress);
   const phase = useSimStore((s) => s.phase);
   const pathOnly = useSimStore((s) => s.pathOnly);
+  const meshes = useSimStore((s) => s.meshes);
 
   const [startingTool, setStartingTool] = useState<StartingTool>('unknown');
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  /** A diagnostic's line the user asked to reveal in the G-code pane (#245). */
+  const [jump, setJump] = useState<{ line: number; seq: number } | null>(null);
 
   const tool = toolKey ? libraryTool(toolKey) : null;
   const loading = status === 'loading';
   const canSimulate = gcodeText !== null && tool !== null && !loading;
 
+  // #243 — the blind-spot sentence, assembled from what this run actually carried: the fixture
+  // obstacles it was given (#204), whether sacrificial material was modelled, the machine's own
+  // holder (null on the Z1, so the collet nut is unmodelled), and the "cannot be proven" codes
+  // the sweep raised. The physics caveat stays a constant; this half changes per run.
+  const outcome: SimRunOutcome = status === 'ready' ? 'swept' : pathOnly ? 'path-only' : 'refused';
+  const coverage = coverageDisclaimer({
+    outcome,
+    fixtureLabels: (meshes?.fixture ?? []).map((f) => f.label),
+    fixtureSource: info?.fixtureSource,
+    sacrificialModelled: meshes?.sacrificial != null,
+    holderKnown: Z1.holder !== null,
+    toolName: tool?.name ?? null,
+    codes: diagnostics.map((d) => d.code),
+  });
+
+  function jumpToLine(line: number): void {
+    setJump((j) => ({ line, seq: (j?.seq ?? 0) + 1 }));
+  }
+
   function loadFile(name: string, text: string): void {
     setFileError(null);
     setStartingTool('unknown');
+    setJump(null);
     openFile(name, text);
   }
 
@@ -163,6 +199,7 @@ export function SimPanel() {
     resetSetup();
     setStartingTool('unknown');
     setFileError(null);
+    setJump(null);
   }
 
   const stockRow = (key: keyof typeof stock, label: string): JSX.Element => (
@@ -185,21 +222,34 @@ export function SimPanel() {
     </div>
   );
 
-  const diagRow = (row: DiagRow): JSX.Element => (
-    <div
-      key={`${row.source}:${row.code}`}
-      data-testid={`sim-diag-${row.source}-${row.code}`}
-      style={{ display: 'flex', gap: 6, fontSize: 12, lineHeight: 1.45, margin: '3px 0', color: '#d1d5db' }}
-    >
-      <span style={{ color: SEVERITY_COLOR[row.severity], flexShrink: 0 }}>●</span>
-      <span>
-        <code style={{ color: SEVERITY_COLOR[row.severity] }}>{row.code}</code>{' '}
-        {row.count > 1 && <strong>{row.count} × </strong>}
-        {row.message}
-        {row.line !== undefined && <span style={MUTED}> line {row.line}</span>}
-      </span>
-    </div>
-  );
+  const diagRow = (row: DiagRow): JSX.Element => {
+    const line = row.line;
+    return (
+      <div
+        key={`${row.source}:${row.code}`}
+        data-testid={`sim-diag-${row.source}-${row.code}`}
+        style={{ display: 'flex', gap: 6, fontSize: 12, lineHeight: 1.45, margin: '3px 0', color: '#d1d5db' }}
+      >
+        <span style={{ color: SEVERITY_COLOR[row.severity], flexShrink: 0 }}>●</span>
+        <span>
+          <code style={{ color: SEVERITY_COLOR[row.severity] }}>{row.code}</code>{' '}
+          {row.count > 1 && <strong>{row.count} × </strong>}
+          {row.message}
+          {line !== undefined && (
+            <button
+              type="button"
+              data-testid={`sim-diag-jump-${row.source}-${row.code}`}
+              onClick={() => jumpToLine(line)}
+              title={row.count > 1 ? 'Show the first of these lines in the G-code pane' : 'Show this line in the G-code pane'}
+              style={LINELINK}
+            >
+              line {line}
+            </button>
+          )}
+        </span>
+      </div>
+    );
+  };
 
   const grouped = status === 'ready' ? groupDiagnostics(diagnostics, info?.summary.diagnosticCounts ?? {}) : null;
 
@@ -393,10 +443,13 @@ export function SimPanel() {
             </div>
           )}
 
-          {/* 7 — the disclaimer */}
-          <p data-testid="sim-disclaimer" style={{ ...MUTED, color: '#c8d3de', borderTop: '1px solid #2a2f36', paddingTop: 6 }}>
-            {DISCLAIMER}
-          </p>
+          {/* 7 — the disclaimer: the constant physics caveat, then the run's own blind spots (#243) */}
+          <div data-testid="sim-disclaimer" style={DISCLAIM}>
+            <div>{DISCLAIMER}</div>
+            {coverage.map((sentence, i) => (
+              <div key={i}>{sentence}</div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -411,19 +464,30 @@ export function SimPanel() {
             {diagnostics.map((d, i) => (
               <li key={i} style={{ fontSize: 12, color: '#e8bcb6', lineHeight: 1.45 }}>
                 <code>{d.code}</code> {d.message}
+                {d.line !== undefined && (
+                  <button
+                    type="button"
+                    data-testid={`sim-refusal-jump-${d.code}`}
+                    onClick={() => jumpToLine(d.line as number)}
+                    title="Show this line in the G-code pane"
+                    style={{ ...LINELINK, color: '#f0b4ad' }}
+                  >
+                    line {d.line}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
+          {/* #243 — a path-only or refused run says so in the same place as a ready one. */}
+          <div data-testid="sim-disclaimer" style={{ ...DISCLAIM, color: '#e8bcb6', borderTopColor: '#5a2a2a' }}>
+            {coverage.map((sentence, i) => (
+              <div key={i}>{sentence}</div>
+            ))}
+          </div>
           {pathOnly && (
-            <>
-              <p style={{ ...MUTED, color: '#e8bcb6' }}>
-                The tool path is drawn so the file can still be inspected; the stock is not, because
-                the sweep that would produce it was refused.
-              </p>
-              <button type="button" data-testid="sim-retry" onClick={() => void useSimStore.getState().retryWithLongerBudget()} style={{ width: '100%', padding: 7 }}>
-                Try again with a longer limit
-              </button>
-            </>
+            <button type="button" data-testid="sim-retry" onClick={() => void useSimStore.getState().retryWithLongerBudget()} style={{ width: '100%', padding: 7, marginTop: 6 }}>
+              Try again with a longer limit
+            </button>
           )}
         </div>
       )}
@@ -431,6 +495,16 @@ export function SimPanel() {
       {status === 'error' && (
         <div data-testid="sim-error" style={{ marginTop: 10, border: '1px solid #7a2828', background: '#2a1416', borderRadius: 4, padding: 8, color: '#f0b4ad', fontSize: 12 }}>
           {error ?? 'the simulation failed'}
+        </div>
+      )}
+
+      {/* 9 — the read-only G-code pane (#245), synced to the transport */}
+      {gcodeText !== null && (
+        <div data-testid="sim-gcode-section" style={{ marginTop: 12 }}>
+          <h3 style={SUBHEAD}>
+            G-code <span style={TAG}>read-only</span>
+          </h3>
+          <GcodePane text={gcodeText} jumpLine={jump?.line ?? null} jumpSeq={jump?.seq ?? 0} />
         </div>
       )}
 
