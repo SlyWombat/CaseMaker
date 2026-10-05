@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "dev:desktop": "vite --mode desktop",
+    "build:desktop": "tsc -b && vite build --mode desktop",
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc -b --noEmit && tsc --noEmit -p tsconfig.tests.json",
@@ -26,7 +28,8 @@
     "fit:coupon": "tsx --tsconfig tsconfig.scripts.json scripts/fit-coupon.ts",
     "docs:sync": "node scripts/sync-docs.mjs",
     "reference-gcode:fetch": "node scripts/fetch-reference-gcode.mjs",
-    "check:sim-gate": "node scripts/check-sim-gate.mjs"
+    "check:sim-gate": "node scripts/check-sim-gate.mjs",
+    "check:platform-gate": "node tools/check-platform-gate.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

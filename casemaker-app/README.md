@@ -1,5 +1,27 @@
 # React + TypeScript + Vite
 
+## Building (web and desktop)
+
+The app has two build targets, split by what a browser physically cannot do (raw sockets, the
+local filesystem, the embedded server). The switch is `BUILD_TARGET` — or its cross-platform
+equivalent `--mode desktop`, used by the `tauri:*` scripts — read in `vite.config.ts` and surfaced
+through `src/platform/capabilities.ts` (#181).
+
+- **Web (default):** `npm run build` → `dist/`, and `npm run dev` for the dev server. This is what
+  `npm run deploy` ships to electricrv.ca; it never sets the desktop target.
+- **Desktop:** `npm run tauri:build` (Tauri's `beforeBuildCommand` runs `npm run build:desktop`);
+  `npm run tauri:dev` uses `npm run dev:desktop`. A desktop build must never come from the plain
+  `build` script.
+
+Desktop-only modules live under `src/platform/desktop/` and are reached only through an
+`await import()` inside a `canX` guard, so they never enter the web bundle.
+`npm run check:platform-gate` builds the web target and fails if one leaks in. Both targets build
+without flipping OS, but `node_modules` is OS-specific — one OS per checkout (`CLAUDE.md`).
+
+**CI has never run on this repo** — the workflows live under `casemaker-app/.github`, not the repo
+root, so nothing is automated and every gate is a manual run: `npm run typecheck`, `npm run lint`,
+`npm run check:sim-gate`, `npm run check:platform-gate`, and `npx vitest run tests/unit`.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

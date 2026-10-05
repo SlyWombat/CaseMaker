@@ -47,49 +47,60 @@ function analyticsTag(): Plugin {
   };
 }
 
-export default defineConfig({
-  base: BASE,
-  plugins: [react(), wasm(), analyticsTag()],
-  define: {
-    __APP_VERSION__: JSON.stringify(APP_VERSION),
-    __DEPLOY_TARGET__: JSON.stringify(DEPLOY_TARGET),
-    __DONATE_URL__: JSON.stringify(DONATE_URL),
-    __FEATURE_SIM__: JSON.stringify(FEATURE_SIM),
-  },
-  resolve: {
-    alias: { '@': path.resolve(__dirname, 'src') },
-  },
-  worker: {
-    format: 'es',
-    plugins: () => [wasm()],
-  },
-  optimizeDeps: { exclude: ['manifold-3d'] },
-  build: {
-    target: 'es2022',
-    sourcemap: true,
-    chunkSizeWarningLimit: 800,
-    rolldownOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('three')) return 'vendor-three';
-            if (id.includes('manifold-3d')) return 'vendor-manifold';
-            if (id.includes('@react-three/drei')) return 'vendor-drei';
-            if (id.includes('@react-three/fiber')) return 'vendor-r3f';
-            if (id.includes('react-dom')) return 'vendor-react';
-            if (id.includes('react/')) return 'vendor-react';
-            if (id.includes('zustand') || id.includes('zundo') || id.includes('immer')) return 'vendor-state';
-            if (id.includes('zod')) return 'vendor-zod';
-          }
+export default defineConfig(({ mode }) => {
+  // Issue #181 — the platform seam's single build-time switch. 'web' unless the build explicitly
+  // asks for the desktop target, so the default `npm run build` and the electricrv.ca `npm run
+  // deploy` are unaffected. `BUILD_TARGET` in the environment wins when set; `--mode desktop` is
+  // the cross-platform equivalent, used by the tauri:* npm scripts because a bare
+  // `BUILD_TARGET=desktop npm …` never works in Windows cmd/PowerShell. Either way the value ends
+  // up in `__BUILD_TARGET__`, which src/platform/capabilities.ts reads.
+  const BUILD_TARGET = process.env.BUILD_TARGET ?? (mode === 'desktop' ? 'desktop' : 'web');
+
+  return {
+    base: BASE,
+    plugins: [react(), wasm(), analyticsTag()],
+    define: {
+      __APP_VERSION__: JSON.stringify(APP_VERSION),
+      __DEPLOY_TARGET__: JSON.stringify(DEPLOY_TARGET),
+      __DONATE_URL__: JSON.stringify(DONATE_URL),
+      __FEATURE_SIM__: JSON.stringify(FEATURE_SIM),
+      __BUILD_TARGET__: JSON.stringify(BUILD_TARGET),
+    },
+    resolve: {
+      alias: { '@': path.resolve(__dirname, 'src') },
+    },
+    worker: {
+      format: 'es',
+      plugins: () => [wasm()],
+    },
+    optimizeDeps: { exclude: ['manifold-3d'] },
+    build: {
+      target: 'es2022',
+      sourcemap: true,
+      chunkSizeWarningLimit: 800,
+      rolldownOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('three')) return 'vendor-three';
+              if (id.includes('manifold-3d')) return 'vendor-manifold';
+              if (id.includes('@react-three/drei')) return 'vendor-drei';
+              if (id.includes('@react-three/fiber')) return 'vendor-r3f';
+              if (id.includes('react-dom')) return 'vendor-react';
+              if (id.includes('react/')) return 'vendor-react';
+              if (id.includes('zustand') || id.includes('zundo') || id.includes('immer')) return 'vendor-state';
+              if (id.includes('zod')) return 'vendor-zod';
+            }
+          },
         },
       },
     },
-  },
-  // #226 — bind the dev server to IPv4 loopback explicitly. Left unset, Vite binds `localhost`,
-  // which on this machine resolves to `::1` first, so Playwright's `http://127.0.0.1:5173`
-  // webServer probe never gets an answer and its 120 s timeout expires before a test runs.
-  // The e2e webServer and every manual run since #199 already use 127.0.0.1; this makes the
-  // default agree with them (and lets `reuseExistingServer` see a hand-started server too).
-  server: { host: '127.0.0.1', fs: { allow: ['..'] }, port: DEFAULT_PORT, strictPort: false },
-  preview: { port: DEFAULT_PORT, strictPort: false },
+    // #226 — bind the dev server to IPv4 loopback explicitly. Left unset, Vite binds `localhost`,
+    // which on this machine resolves to `::1` first, so Playwright's `http://127.0.0.1:5173`
+    // webServer probe never gets an answer and its 120 s timeout expires before a test runs.
+    // The e2e webServer and every manual run since #199 already use 127.0.0.1; this makes the
+    // default agree with them (and lets `reuseExistingServer` see a hand-started server too).
+    server: { host: '127.0.0.1', fs: { allow: ['..'] }, port: DEFAULT_PORT, strictPort: false },
+    preview: { port: DEFAULT_PORT, strictPort: false },
+  };
 });

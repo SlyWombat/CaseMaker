@@ -4,16 +4,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useSettingsStore, type ExportFormat, type ExportLayoutMode } from '@/store/settingsStore';
+import { canRunLocalServer } from '@/platform/capabilities';
 import {
   MY_MACHINE_FILENAME,
   parseMyMachineFile,
   serializeMyMachineFile,
 } from '@/store/myMachineFile';
-
-function isTauri(): boolean {
-  // Tauri 2 injects __TAURI_INTERNALS__ into window.
-  return typeof window !== 'undefined' && (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== undefined;
-}
 
 /** Anchor-tag download for the "my machine" JSON — the same fallback the project save uses. */
 function downloadText(text: string, filename: string): void {
@@ -47,7 +43,9 @@ export function SettingsMenu({ onClose }: Props) {
   const [transfer, setTransfer] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
   const importInput = useRef<HTMLInputElement | null>(null);
-  const showServerControls = isTauri();
+  // #181 — the embedded-server controls are a desktop capability, not a runtime property of the
+  // window. `canRunLocalServer` is a build-time constant, so the web build never even carries them.
+  const showServerControls = canRunLocalServer;
 
   const onExportMachine = () => {
     const text = serializeMyMachineFile(useSettingsStore.getState().fixtures);
