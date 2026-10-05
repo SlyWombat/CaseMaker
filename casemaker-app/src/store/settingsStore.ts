@@ -157,6 +157,35 @@ function parseSacrificial(raw: unknown): Sacrificial | undefined {
   return { under, sides, source: source as Sacrificial['source'] };
 }
 
+/**
+ * Validate a fixtures record for the "my machine" import (#247). Stricter than `parseFixtures`:
+ * a section that is PRESENT but malformed refuses the WHOLE record with a reason, instead of
+ * dropping just that section. Decision 28's whole-or-nothing rule, applied to a shared file —
+ * a half-applied machine profile is worse than none. An absent section stays legal.
+ */
+export type FixturesParseResult =
+  | { ok: true; fixtures: FixturesSettings }
+  | { ok: false; reason: string };
+
+export function parseFixturesStrict(raw: unknown): FixturesParseResult {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { ok: false, reason: 'the fixtures record is not an object' };
+  }
+  const r = raw as Record<string, unknown>;
+  const out: FixturesSettings = {};
+  if (r.vise !== undefined && r.vise !== null) {
+    const vise = parseVise(r.vise);
+    if (!vise) return { ok: false, reason: 'the saved vise is incomplete or malformed' };
+    out.vise = vise;
+  }
+  if (r.sacrificial !== undefined && r.sacrificial !== null) {
+    const sacrificial = parseSacrificial(r.sacrificial);
+    if (!sacrificial) return { ok: false, reason: 'the saved sacrificial setup is incomplete or malformed' };
+    out.sacrificial = sacrificial;
+  }
+  return { ok: true, fixtures: out };
+}
+
 function loadSettings(): AppSettings {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
     return { ...DEFAULTS };
@@ -212,6 +241,11 @@ export interface SettingsState extends AppSettings {
   setSacrificial: (sacrificial: Sacrificial) => void;
   /** Forget the saved sacrificial setup; a new job then starts with none. */
   clearSacrificial: () => void;
+  /**
+   * Replace the whole saved-fixture slice in one step (#247) — what a validated "my machine"
+   * import does. The caller has already validated the record; this persists it verbatim.
+   */
+  replaceFixtures: (fixtures: FixturesSettings) => void;
   resetSettings: () => void;
 }
 
@@ -263,6 +297,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     clearSacrificial: () => {
       const fixtures = { ...get().fixtures };
       delete fixtures.sacrificial;
+      set({ fixtures });
+      persist({ ...get(), fixtures });
+    },
+    replaceFixtures: (fixtures) => {
       set({ fixtures });
       persist({ ...get(), fixtures });
     },
