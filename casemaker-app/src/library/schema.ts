@@ -46,7 +46,53 @@ const componentSchema = z.object({
   cutoutMargin: z.number().nonnegative().optional(),
   cutoutShape: cutoutShapeSchema.optional(),
   fixtureId: z.string().min(1).optional(),
+  // #130 — silkscreen legend for `kind: 'text-label'` components (the picker's
+  // top view draws it). Optional and additive: existing files are unaffected.
+  text: z.string().min(1).optional(),
 });
+
+/**
+ * #130 — per-board visual assets. A board may ship a GLB model and/or
+ * top/side photos, either bundled under `public/` (built-in boards) or
+ * referenced by absolute URL (community boards hosted in the library repo).
+ *
+ * Licensed material: an asset may be present ONLY when the licence that
+ * permits redistributing it and a URL naming its source are recorded too —
+ * this is the machine-checkable half of the rule in `src/docs/board-assets.md`
+ * ("never bundle non-redistributable assets"). Enforcement is deliberate and
+ * load-bearing: built-in boards are validated at import, and local/remote
+ * community boards are validated on import (`localBoardProfileSchema`), so a
+ * profile that ships a photo without a licence is rejected rather than
+ * silently vendored. The `npm test` run in CI therefore gates every asset.
+ */
+const visualAssetsSchema = z
+  .object({
+    glb: z.string().min(1).optional(),
+    topImage: z.string().min(1).optional(),
+    sideImage: z.string().min(1).optional(),
+    license: z.string().min(1).optional(),
+    sourceUrl: z.string().url().optional(),
+  })
+  .superRefine((assets, ctx) => {
+    const hasAsset = Boolean(assets.glb || assets.topImage || assets.sideImage);
+    if (!hasAsset) return;
+    if (!assets.license) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['license'],
+        message:
+          'visualAssets.license is required when glb/topImage/sideImage is present — record the redistribution licence (see src/docs/board-assets.md)',
+      });
+    }
+    if (!assets.sourceUrl) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['sourceUrl'],
+        message:
+          'visualAssets.sourceUrl is required when glb/topImage/sideImage is present — record where the asset came from',
+      });
+    }
+  });
 
 export const boardProfileSchema = z.object({
   // Board-profile format version. Optional (absent = 1) so every existing
@@ -163,15 +209,7 @@ export const boardProfileSchema = z.object({
   datasheetRevision: z.string().optional(),
   measurementMethod: z.enum(['datasheet', 'open-source-cad', 'physical-measurement']).optional(),
   clonedFrom: z.string().min(1).optional(),
-  visualAssets: z
-    .object({
-      glb: z.string().optional(),
-      topImage: z.string().optional(),
-      sideImage: z.string().optional(),
-      license: z.string().optional(),
-      sourceUrl: z.string().url().optional(),
-    })
-    .optional(),
+  visualAssets: visualAssetsSchema.optional(),
   verified: z.boolean().optional(),
   builtin: z.boolean(),
 });

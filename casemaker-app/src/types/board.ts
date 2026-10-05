@@ -39,6 +39,11 @@ export interface BoardComponent {
   /** Optional procedural-fixture id (e.g. 'xlr-3', 'audio-jack-3-5'). When
    * absent, the placeholder falls back to the component's `kind`-based shape. */
   fixtureId?: string;
+  /** Silkscreen string, meaningful only for `kind: 'text-label'` components —
+   * a printed legend such as "GPIO", "DIGITAL" or "PWR". Rendered in the
+   * picker's data-driven top view (#130); informational only, it never feeds
+   * the cutout pipeline. Absent → the label draws nothing (as before). */
+  text?: string;
 }
 
 /** A thin cantilever snap clip that retains a secondary board's edge. */
@@ -156,15 +161,21 @@ export type MeasurementMethod =
   | 'physical-measurement';
 
 export interface BoardVisualAssets {
-  /** Path under public/ to a glTF/GLB 3D model. */
+  /** glTF/GLB 3D model: a path under `public/` for a bundled built-in board
+   * (e.g. `/board-assets/rpi-4b/model.glb`), or an absolute URL for a
+   * community board whose assets live in the library repo (#130). */
   glb?: string;
-  /** Path under public/ to a top-down PNG/JPG. */
+  /** Top-down PNG/JPG — same path-or-absolute-URL rules as `glb`. Shown in
+   * the board picker in place of the synthesised SVG when present. */
   topImage?: string;
-  /** Path under public/ to a side-view PNG/JPG. */
+  /** Side-view PNG/JPG — same path-or-absolute-URL rules as `glb`. */
   sideImage?: string;
-  /** SPDX expression or URL to manufacturer license. */
+  /** SPDX expression or URL to manufacturer license. REQUIRED whenever any
+   * of glb/topImage/sideImage is present (enforced by the schema): licensed
+   * material may not ship without a nameable redistribution licence. */
   license?: string;
-  /** Source of the assets (e.g. manufacturer doc URL). */
+  /** Where the assets came from (e.g. manufacturer doc URL). REQUIRED
+   * whenever any asset is present, alongside `license`. */
   sourceUrl?: string;
 }
 

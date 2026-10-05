@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, useState, type CSSProperties } from 'react';
 import type { BoardProfile, BoardComponent, ComponentKind } from '@/types';
 
 /**
@@ -7,6 +7,11 @@ import type { BoardProfile, BoardComponent, ComponentKind } from '@/types';
  * connector family — so every board (builtin, imported, hand-authored) gets
  * an honest visual with zero bundled artwork. Underside (-z) components are
  * drawn dashed + translucent, the way you'd see them through the board.
+ *
+ * #130 — when the profile carries a `visualAssets.topImage` (a bundled or
+ * community-hosted photo), that photo is shown instead, with the licence and
+ * source beside it; the SVG stays the fallback for every board without one,
+ * and also takes over again if the image fails to load.
  */
 
 interface KindStyle {
@@ -37,6 +42,22 @@ const KIND_STYLES: Record<ComponentKind, KindStyle> = {
 
 const PIN_PITCH = 2.54;
 
+/** Physical shell colours for the round fixtures — the component's `kind` is
+ * usually 'custom' for these, so the generic palette would draw them grey. */
+const ROUND_FIXTURE_STYLES: Record<string, KindStyle> = {
+  'xlr-3': { fill: '#222222', stroke: '#4a5162' },
+  'audio-jack-3-5': { fill: '#1c1c1c', stroke: '#565c69' },
+};
+
+/** Kinds whose real-world part is round, so a top view should be a circle. */
+const ROUND_KINDS = new Set<ComponentKind>(['barrel-jack', 'antenna-connector']);
+
+const XLR_PIN_COUNT = 3;
+
+function isRoundConnector(c: BoardComponent): boolean {
+  return (c.fixtureId && c.fixtureId in ROUND_FIXTURE_STYLES) || ROUND_KINDS.has(c.kind);
+}
+
 function isUnderside(c: BoardComponent): boolean {
   return c.facing === '-z' || c.position.z < 0;
 }
@@ -65,6 +86,106 @@ function HeaderPins({ c, toY }: { c: BoardComponent; toY: (y: number, h: number)
   return <g>{dots}</g>;
 }
 
+/**
+ * Round connector in top view: a circle sized to the component's bounding box,
+ * with the fixture-specific detail that makes it recognisable — XLR-3's three
+ * gold pins, a 3.5 mm jack's dark bore, a barrel jack's centre hole.
+ */
+function RoundConnector({
+  c,
+  style,
+  strokeWidth,
+  under,
+}: {
+  c: BoardComponent;
+  style: KindStyle;
+  strokeWidth: number;
+  under: boolean;
+}) {
+  const r = Math.min(c.size.x, c.size.y) / 2;
+  const cx = c.position.x + c.size.x / 2;
+  const cy = -c.position.y - c.size.y / 2;
+  const fixture = c.fixtureId ?? '';
+  // A 3.5 mm jack and a barrel jack both read as a dark recess in the middle.
+  const boreR = fixture === 'audio-jack-3-5' ? r * 0.45 : c.kind === 'barrel-jack' ? r * 0.45 : 0;
+  const pins = fixture === 'xlr-3' ? XLR_PIN_COUNT : 0;
+  return (
+    <g opacity={under ? 0.5 : 1}>
+      <circle
+        cx={cx}
+        cy={cy}
+        r={r}
+        fill={style.fill}
+        stroke={style.stroke}
+        strokeWidth={strokeWidth}
+        strokeDasharray={under ? `${strokeWidth * 3} ${strokeWidth * 2}` : undefined}
+      />
+      {boreR > 0 && <circle cx={cx} cy={cy} r={boreR} fill="#0b1326" />}
+      {pins > 0 &&
+        Array.from({ length: pins }, (_, i) => {
+          const theta = (Math.PI * 2 * i) / pins - Math.PI / 2;
+          return (
+            <circle
+              key={i}
+              cx={cx + Math.cos(theta) * r * 0.42}
+              cy={cy + Math.sin(theta) * r * 0.42}
+              r={Math.max(0.3, r * 0.2)}
+              fill="#d4af37"
+            />
+          );
+        })}
+    </g>
+  );
+}
+
+/** Silkscreen legend for a `text-label` component. Sized to fit the
+ * component's box (average glyph advance ≈ 0.6 em) so it never spills. */
+function SilkscreenLabel({ c }: { c: BoardComponent }) {
+  const text = c.text?.trim();
+  if (!text) return null;
+  return (
+    <text
+      x={c.position.x + c.size.x / 2}
+      y={-c.position.y - c.size.y / 2}
+      textAnchor="middle"
+      dominantBaseline="central"
+      fontFamily="ui-monospace, monospace"
+      fontSize={Math.min(c.size.y * 0.9, (c.size.x * 1.6) / text.length)}
+      fill="#dfe7dc"
+    >
+      {text}
+    </text>
+  );
+}
+
+const IMAGE_WRAP_STYLE: CSSProperties = {
+  width: '100%',
+  height: '100%',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 4,
+  minHeight: 0,
+};
+const IMAGE_STYLE: CSSProperties = {
+  flex: '1 1 auto',
+  minHeight: 0,
+  maxWidth: '100%',
+  objectFit: 'contain',
+  borderRadius: 4,
+};
+const CREDIT_STYLE: CSSProperties = {
+  flex: '0 0 auto',
+  fontSize: 9,
+  lineHeight: 1.2,
+  opacity: 0.65,
+  maxWidth: '100%',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
 export function BoardPreviewSvg({
   board,
   className,
@@ -73,6 +194,31 @@ export function BoardPreviewSvg({
   className?: string;
 }) {
   const uid = useId();
+  const assets = board.visualAssets;
+  const [imageFailed, setImageFailed] = useState(false);
+
+  // #130 — a real photo beats the synthesised view. Falls back to the SVG on
+  // error (offline, 404, a licence-less community URL that moved) so the card
+  // never renders blank.
+  if (assets?.topImage && !imageFailed) {
+    return (
+      <span className={className} style={IMAGE_WRAP_STYLE} data-testid="board-preview-image">
+        <img
+          src={assets.topImage}
+          alt={`Top view of ${board.name}`}
+          loading="lazy"
+          decoding="async"
+          onError={() => setImageFailed(true)}
+          style={IMAGE_STYLE}
+        />
+        <span style={CREDIT_STYLE} data-testid="board-preview-credit">
+          {assets.license}
+          {assets.sourceUrl ? ` · ${assets.sourceUrl}` : ''}
+        </span>
+      </span>
+    );
+  }
+
   const pcb = board.pcb.size;
 
   // Bounds include connector overhang (negative positions / past-edge sizes).
@@ -152,7 +298,7 @@ export function BoardPreviewSvg({
       {/* Components */}
       {sorted.map((c) => {
         const style = KIND_STYLES[c.kind] ?? KIND_STYLES.custom;
-        if (c.kind === 'text-label') return null;
+        if (c.kind === 'text-label') return <SilkscreenLabel key={c.id} c={c} />;
         const under = isUnderside(c);
         const y = toY(c.position.y, c.size.y);
         if (c.kind === 'fan-mount') {
@@ -166,6 +312,17 @@ export function BoardPreviewSvg({
               stroke={style.stroke}
               strokeWidth={vb.w * 0.006}
               strokeDasharray={`${vb.w * 0.015} ${vb.w * 0.01}`}
+            />
+          );
+        }
+        if (isRoundConnector(c)) {
+          return (
+            <RoundConnector
+              key={c.id}
+              c={c}
+              style={ROUND_FIXTURE_STYLES[c.fixtureId ?? ''] ?? style}
+              strokeWidth={vb.w * 0.005}
+              under={under}
             />
           );
         }

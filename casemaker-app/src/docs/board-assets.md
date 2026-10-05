@@ -14,6 +14,8 @@ For each board, find the most authoritative artifact in this order:
 
 Store under `public/board-assets/<board-id>/{model.glb,top.png,side.png,LICENSE.md}`. The `LICENSE.md` MUST name the source URL and the redistribution terms (CC-BY-SA, manufacturer's redistribution clause, etc.). Never bundle non-redistributable assets.
 
+The `visualAssets` schema enforces this: a `glb`, `topImage` or `sideImage` present without both `license` and `sourceUrl` fails validation, which rejects the board at load (built-ins at import, community boards on import) and fails CI via `npm test`. Community boards may point at absolute asset URLs instead of `public/` paths.
+
 ## Per-board status
 
 | Board ID | License-cleared | Source | Notes |
