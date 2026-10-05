@@ -1,4 +1,5 @@
 import type { RackParams } from '@/types';
+import { PRINTER_PROFILES } from '@/engine/cnc/machine';
 import type { PlacementIssue } from './placementValidator';
 import {
   computeRackDims,
@@ -34,14 +35,19 @@ export interface PrinterPreset {
   z: number;
 }
 
-export const PRINTER_PRESETS: PrinterPreset[] = [
-  { id: 'a1-mini', name: 'Bambu A1 mini (180³)', x: 180, y: 180, z: 180 },
-  { id: 'prusa-mini', name: 'Prusa MINI+ (180³)', x: 180, y: 180, z: 180 },
-  { id: 'ender-3', name: 'Ender-3 class (220×220×250)', x: 220, y: 220, z: 250 },
-  { id: 'prusa-mk4', name: 'Prusa MK4/MK3 (250×210×220)', x: 250, y: 210, z: 220 },
-  { id: 'bambu-256', name: 'Bambu X1/P1/A1 (256³)', x: 256, y: 256, z: 256 },
-  { id: 'prusa-xl', name: 'Prusa XL (360³)', x: 360, y: 360, z: 360 },
-];
+/**
+ * The printer picker's rows. These machines now live on the machine profile (#184,
+ * `PRINTER_PROFILES` in `engine/cnc/machine.ts`); this is the flat shape the stored
+ * `rack.printer` and the panel already speak, derived so the bed volumes have ONE source.
+ * The ids and names are unchanged, so a saved project's `printer.preset` still resolves.
+ */
+export const PRINTER_PRESETS: PrinterPreset[] = PRINTER_PROFILES.map((p) => ({
+  id: p.id,
+  name: p.name,
+  x: p.buildVolume.x,
+  y: p.buildVolume.y,
+  z: p.buildVolume.z,
+}));
 
 /**
  * Does a p×q rectangle fit on an a×b bed, allowing 90° and diagonal

@@ -22,11 +22,33 @@
  * Nothing here has been verified on hardware.
  */
 
+import { z } from 'zod';
 import type { Mm, Vec2 } from '@/types/units';
 
 export interface AxisRange {
   min: Mm;
   max: Mm;
+}
+
+/**
+ * Every machine we model is one of these (#184, and #228's lesson).
+ *
+ * The multi-vendor study (#228) found that an abstraction modelling only "3-axis mill with a
+ * spindle" does not survive contact with the field — a lathe, a camera-located router and a
+ * laser-first machine are all in scope for "CNC software". So the shared contract is ONLY the
+ * identity and this discriminator. Everything process-specific hangs off the process's own
+ * subtype: a mill's spindle ceiling, tool change and holder live on `MachineProfile`; a
+ * printer's build volume and nozzle live on `PrinterProfile`. A future laser or lathe is a new
+ * subtype, not a field added to every machine. Within a process, capabilities are FLAGS (what
+ * hardware is fitted) and dialect is DATA (what the controller accepts), never structure.
+ */
+export type MachineProcess = 'fdm' | 'mill';
+
+/** The identity and process discriminator every machine shares. */
+export interface MachineIdentity {
+  id: string;
+  name: string;
+  process: MachineProcess;
 }
 
 /**
@@ -46,9 +68,28 @@ export interface HolderProfile {
   source: string;
 }
 
-export interface MachineProfile {
-  id: string;
-  name: string;
+/**
+ * The controller's soft endstops (`configZ1.default:429-432`), sourced rather than argued
+ * (#192 question 5, measured at the bench by #208 B2). On the shipped Z1 they are DISABLED and
+ * the limit sits **6 mm (2 mm in Z) past the vendor's 200/200/100 figure** — so nothing in the
+ * controller stops a move at either number, and the band `(−206, −200]` is unverified without
+ * the machine.
+ *
+ * This is RECORDED, not enforced: `insideEnvelope` keeps using `envelope` (the conservative
+ * −200/−200/−100), because refusing at a limit the machine does not actually enforce would be
+ * inventing a constraint. When B2 runs, only the values change.
+ */
+export interface SoftEndstop {
+  enabled: boolean;
+  xMin: Mm;
+  yMin: Mm;
+  zMin: Mm;
+  /** Where the numbers came from. */
+  source: string;
+}
+
+export interface MachineProfile extends MachineIdentity {
+  /** A mill. The only process with a spindle and a tool change (#183: Z1-only). */
   process: 'mill';
   /**
    * The work envelope in MACHINE coordinates. The Z1 homes to MAX on every axis and loads
@@ -68,6 +109,8 @@ export interface MachineProfile {
   /** `isATC=0`: a manual tool change, which is what makes `M490.1`/`M490.2` the tool-change path. */
   hasATC: false;
   toolSlots: 0;
+  /** Sourced. Disabled, and past the vendor figure — see {@link SoftEndstop}. Not read by `insideEnvelope`. */
+  softEndstop: SoftEndstop;
   capabilities: {
     /** Optional 4th-axis module. Owned; not simulated in V1. */
     rotary: boolean;
@@ -128,6 +171,24 @@ export interface MachineProfile {
   holder: HolderProfile | null;
 }
 
+/**
+ * A consumer FDM printer (#184, work item 4): the other half of the `MachineProfile`
+ * abstraction, behind the same `process` discriminant so printers and mills are the same kind
+ * of thing. This is what used to be `PRINTER_PRESETS` in `rackFit.ts`, plus the nozzle width
+ * that used to be `ASSUMED_NOZZLE` in `fasteners.ts` — the last machine numbers outside the
+ * profile.
+ *
+ * A printer's work volume is POSITIVE extents (`0..x`), unlike the mill's negative machine
+ * frame, so it is a separate field rather than the mill's `envelope`.
+ */
+export interface PrinterProfile extends MachineIdentity {
+  process: 'fdm';
+  /** Build volume, mm, as positive extents. */
+  buildVolume: { x: number; y: number; z: number };
+  /** Installed nozzle width, mm — the line width the slicer lays down. */
+  nozzle: number;
+}
+
 const ANCHOR1: Vec2 = [-192.4, -194.3];
 
 /**
@@ -150,6 +211,15 @@ export const Z1: MachineProfile = {
   maxRpm: 13000,
   hasATC: false,
   toolSlots: 0,
+  // Sourced, DISABLED, and 6 mm (2 mm in Z) past the vendor's own 200/200/100: the shipped
+  // config's limit, not one the controller enforces. `envelope` stays the conservative figure.
+  softEndstop: {
+    enabled: false,
+    xMin: -206.0,
+    yMin: -206.0,
+    zMin: -102.0,
+    source: 'configZ1.default:429-432 (shipped default; the device values are owed by #208 B2)',
+  },
   capabilities: { rotary: true, laser: false, air: true, vacuum: false },
   dialect: { acceptsArcs: true, cannedCycles: false, grblMode: true, axisPrecision: 3, feedPrecision: 2 },
   anchor1: ANCHOR1,
@@ -170,8 +240,41 @@ export const Z1: MachineProfile = {
   holder: null,
 };
 
-/** The only supported machine. A second one is configuration here, not a refactor elsewhere. */
+/** The only supported MILL machine. A second one is configuration here, not a refactor elsewhere. */
 export const MACHINES: Readonly<Record<string, MachineProfile>> = { Z1 };
+
+/**
+ * The nozzle width assumed when the printer is not named. Nearly every consumer FDM machine
+ * ships with a 0.4 mm nozzle, and the profile carries no per-job printer for the case and rack
+ * compilers to read yet, so `preThreadPrintable` falls back to this. Moved here from
+ * `fasteners.ts` (it is a machine number, and #184's acceptance greps for it outside the
+ * profile). A real line-width setting, when one lands, replaces this in one place.
+ */
+export const ASSUMED_NOZZLE = 0.4;
+
+/**
+ * The consumer printers the rack fit-checker offers. Bed volumes, byte-identical ids and names
+ * to the old `PRINTER_PRESETS`, so a stored `rack.printer.preset` keeps resolving; `nozzle` is
+ * the addition this fold buys. Not supported machines to execute against — only fit volumes.
+ */
+export const PRINTER_PROFILES: readonly PrinterProfile[] = [
+  { id: 'a1-mini', name: 'Bambu A1 mini (180³)', process: 'fdm', buildVolume: { x: 180, y: 180, z: 180 }, nozzle: ASSUMED_NOZZLE },
+  { id: 'prusa-mini', name: 'Prusa MINI+ (180³)', process: 'fdm', buildVolume: { x: 180, y: 180, z: 180 }, nozzle: ASSUMED_NOZZLE },
+  { id: 'ender-3', name: 'Ender-3 class (220×220×250)', process: 'fdm', buildVolume: { x: 220, y: 220, z: 250 }, nozzle: ASSUMED_NOZZLE },
+  { id: 'prusa-mk4', name: 'Prusa MK4/MK3 (250×210×220)', process: 'fdm', buildVolume: { x: 250, y: 210, z: 220 }, nozzle: ASSUMED_NOZZLE },
+  { id: 'bambu-256', name: 'Bambu X1/P1/A1 (256³)', process: 'fdm', buildVolume: { x: 256, y: 256, z: 256 }, nozzle: ASSUMED_NOZZLE },
+  { id: 'prusa-xl', name: 'Prusa XL (360³)', process: 'fdm', buildVolume: { x: 360, y: 360, z: 360 }, nozzle: ASSUMED_NOZZLE },
+];
+
+/**
+ * A machine of either process. The union is what makes the discriminant useful: a caller that
+ * only needs the identity can take a `Machine`, and a caller that needs a spindle ceiling takes
+ * a `MachineProfile` and is told at compile time it is a mill.
+ */
+export type Machine = MachineProfile | PrinterProfile;
+
+/** Every machine we know, of any process (#184). */
+export const ALL_MACHINES: readonly Machine[] = [Z1, ...PRINTER_PROFILES];
 
 export interface ClampDiagnostic {
   severity: 'error' | 'warning';
@@ -232,3 +335,82 @@ export function insideEnvelope(machine: MachineProfile, p: [number | null, numbe
   const ok = (v: number | null, r: AxisRange): boolean => v === null || (v >= r.min && v <= r.max);
   return ok(p[0], e.x) && ok(p[1], e.y) && ok(p[2], e.z);
 }
+
+// ---------------------------------------------------------------------------
+// Schemas (#184, work item 1)
+// ---------------------------------------------------------------------------
+//
+// The profiles are code constants today, so nothing parses them yet; the schema exists because
+// `src/store/projectSchema.ts` strips unknown keys, so the moment a profile is loaded from
+// outside the code (a project, an import, a second machine) an unvalidated shape would silently
+// lose fields. Same pattern as `toolLibrary.ts`: validate rather than trust.
+//
+// `hasATC: z.literal(false)` and `toolSlots: z.literal(0)` are deliberate, not laziness: the
+// type itself promises a manual-change mill (#183, Z1-only), so a profile with an ATC is not a
+// profile this schema accepts. A machine that has one adds a subtype, not a looser literal.
+
+const finite = z.number().finite();
+const vec2 = z.tuple([finite, finite]);
+
+const softEndstopSchema = z.object({
+  enabled: z.boolean(),
+  xMin: finite,
+  yMin: finite,
+  zMin: finite,
+  source: z.string().min(1),
+});
+
+const holderSchema = z.object({
+  nutDiameter: finite.positive(),
+  nutLength: finite.positive(),
+  source: z.string().min(1),
+});
+
+export const machineProfileSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  process: z.literal('mill'),
+  envelope: z.object({
+    x: z.object({ min: finite, max: finite }),
+    y: z.object({ min: finite, max: finite }),
+    z: z.object({ min: finite, max: finite }),
+  }),
+  maxCutFeed: finite.positive(),
+  maxRpm: finite.positive(),
+  hasATC: z.literal(false),
+  toolSlots: z.literal(0),
+  softEndstop: softEndstopSchema,
+  capabilities: z.object({ rotary: z.boolean(), laser: z.boolean(), air: z.boolean(), vacuum: z.boolean() }),
+  dialect: z.object({
+    acceptsArcs: z.boolean(),
+    cannedCycles: z.boolean(),
+    grblMode: z.boolean(),
+    axisPrecision: z.number().int().positive(),
+    feedPrecision: z.number().int().positive(),
+  }),
+  anchor1: vec2,
+  anchor2: vec2,
+  toolChange: z.object({
+    clearanceZ: finite,
+    clearanceXY: vec2,
+    changePosition: vec2,
+    safeZ: finite,
+    sensor: vec2,
+    sensorZ: finite,
+    probeFastFeed: finite.positive(),
+    probeSlowFeed: finite.positive(),
+    probeRetract: finite,
+  }),
+  holder: holderSchema.nullable(),
+});
+
+export const printerProfileSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  process: z.literal('fdm'),
+  buildVolume: z.object({ x: finite.positive(), y: finite.positive(), z: finite.positive() }),
+  nozzle: finite.positive(),
+});
+
+/** Any machine, discriminated on `process`. */
+export const machineSchema = z.discriminatedUnion('process', [machineProfileSchema, printerProfileSchema]);

@@ -3,7 +3,20 @@
 // deliberate, and pin the one internal consistency check available without the machine.
 
 import { describe, it, expect } from 'vitest';
-import { Z1, MACHINES, clampToMachine, insideEnvelope, CLAMP_REFUSE_FRACTION } from '@/engine/cnc/machine';
+import {
+  Z1,
+  MACHINES,
+  ALL_MACHINES,
+  PRINTER_PROFILES,
+  ASSUMED_NOZZLE,
+  clampToMachine,
+  insideEnvelope,
+  machineSchema,
+  machineProfileSchema,
+  printerProfileSchema,
+  CLAMP_REFUSE_FRACTION,
+  type Machine,
+} from '@/engine/cnc/machine';
 
 describe('the Z1 profile', () => {
   it('is the only supported machine (#183: Z1 only, no Carvera, no plugin API)', () => {
@@ -54,6 +67,22 @@ describe('the Z1 profile', () => {
     expect(Z1.toolChange.sensor).toEqual([Z1.anchor1[0] + 181, Z1.anchor1[1] + 181]);
     expect(insideEnvelope(Z1, [Z1.toolChange.sensor[0], Z1.toolChange.sensor[1], Z1.toolChange.safeZ])).toBe(true);
     expect(insideEnvelope(Z1, [Z1.toolChange.changePosition[0], Z1.toolChange.changePosition[1], Z1.toolChange.clearanceZ])).toBe(true);
+  });
+
+  it('records the soft endstops as SOURCED and DISABLED, past the vendor figure (#192 q5, #208 B2)', () => {
+    // The shipped config's limit, not one the controller enforces. `envelope` stays the
+    // conservative 200/200/100 because the band (-206, -200] is unverified without the machine.
+    expect(Z1.softEndstop).toEqual({
+      enabled: false,
+      xMin: -206.0,
+      yMin: -206.0,
+      zMin: -102.0,
+      source: expect.stringContaining('#208 B2'),
+    });
+    expect(Z1.softEndstop.xMin).toBeLessThan(Z1.envelope.x.min);
+    expect(Z1.softEndstop.zMin).toBeLessThan(Z1.envelope.z.min);
+    // Sourced data only: it does not move the envelope the simulator refuses at.
+    expect(Z1.envelope.x.min).toBe(-200);
   });
 
   it('the collet nut is NOT measured yet (#208): holder is null, and that is deliberate', () => {
@@ -125,5 +154,59 @@ describe('insideEnvelope', () => {
     expect(insideEnvelope(Z1, [-100, null, -50])).toBe(true);
     expect(insideEnvelope(Z1, [5, null, null])).toBe(false); // +X is beyond home
     expect(insideEnvelope(Z1, [-295, -205, -3])).toBe(false); // goto-pack-pos.nc: a Carvera envelope
+  });
+});
+
+describe('one machine abstraction, two processes (#184, #228)', () => {
+  it('discriminates mills and printers by `process`, and both are a Machine', () => {
+    const machines: Machine[] = [Z1, ...PRINTER_PROFILES];
+    expect(machines.every((m) => m.process === 'mill' || m.process === 'fdm')).toBe(true);
+    expect(ALL_MACHINES).toHaveLength(1 + PRINTER_PROFILES.length);
+    // The mill's spindle facts hang off the mill subtype only: a printer has no maxRpm.
+    expect('maxRpm' in PRINTER_PROFILES[0]!).toBe(false);
+  });
+
+  it('carries the six printer presets, ids and names unchanged, now with a nozzle', () => {
+    expect(PRINTER_PROFILES.map((p) => p.id)).toEqual([
+      'a1-mini',
+      'prusa-mini',
+      'ender-3',
+      'prusa-mk4',
+      'bambu-256',
+      'prusa-xl',
+    ]);
+    for (const p of PRINTER_PROFILES) {
+      expect(p.process).toBe('fdm');
+      expect(p.buildVolume.x).toBeGreaterThan(0);
+      expect(p.buildVolume.y).toBeGreaterThan(0);
+      expect(p.buildVolume.z).toBeGreaterThan(0);
+      expect(p.nozzle).toBe(ASSUMED_NOZZLE);
+    }
+  });
+
+  it('keeps the assumed nozzle on the profile, where the acceptance grep finds it alone', () => {
+    expect(ASSUMED_NOZZLE).toBe(0.4);
+  });
+});
+
+describe('profile schemas (#184 work item 1)', () => {
+  it('round-trips the Z1 through its schema, and through the discriminated union', () => {
+    const parsed: Machine = machineProfileSchema.parse(Z1);
+    expect(parsed).toEqual(Z1);
+    expect(machineSchema.parse(Z1)).toEqual(Z1);
+  });
+
+  it('parses every printer profile', () => {
+    for (const p of PRINTER_PROFILES) {
+      expect(printerProfileSchema.parse(p)).toEqual(p);
+      expect(machineSchema.parse(p)).toEqual(p);
+    }
+  });
+
+  it('refuses a mill missing the sourced soft endstops, or claiming an ATC', () => {
+    const noEndstop = Object.fromEntries(Object.entries(Z1).filter(([k]) => k !== 'softEndstop'));
+    expect(machineProfileSchema.safeParse(noEndstop).success).toBe(false);
+    // hasATC is a literal false on the type (#183, Z1-only): a profile with an ATC is not one.
+    expect(machineProfileSchema.safeParse({ ...Z1, hasATC: true }).success).toBe(false);
   });
 });

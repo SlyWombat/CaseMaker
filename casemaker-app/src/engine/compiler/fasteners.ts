@@ -1,4 +1,5 @@
 import type { Vec2, Vec3, Facing, MagnetSize } from '@/types';
+import { ASSUMED_NOZZLE } from '@/engine/cnc/machine';
 import { cylinder, extrude, rotate, translate, union, type BuildOp } from './buildPlan';
 import { circleProfile, poly, pUnion } from './profile';
 
@@ -298,14 +299,12 @@ export function minEngagement(size: FastenerSize): number {
 // ---------------------------------------------------------------------------
 
 /**
- * Nozzle width assumed when deciding whether a thread can print.
- *
- * There is no printer line-width in project state — the printer presets carry
- * bed volume only — so this is the 0.4 mm nozzle nearly every consumer FDM
- * machine ships with. If a line-width setting ever lands, this is the one place
- * that has to read it.
+ * Nozzle width assumed when deciding whether a thread can print. Now a machine number, so it
+ * belongs on the machine profile (#184): the value lives with the FDM machines in
+ * `engine/cnc/machine.ts`, and is re-exported here so callers keep finding it where the
+ * threads are. Change it there, not here.
  */
-export const ASSUMED_NOZZLE = 0.4;
+export { ASSUMED_NOZZLE };
 
 /**
  * Radial clearance between the modelled thread and the screw.
