@@ -135,16 +135,30 @@ describe('registry resolution across sources', () => {
 describe('remote sources', () => {
   const indexDoc = { name: 'Community Boards', boards: [sampleBoard('community-board')] };
 
-  function stubFetch(payload: unknown, ok = true, status = 200): void {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({
-        ok,
-        status,
-        text: async () => JSON.stringify(payload),
-        json: async () => payload,
-      })),
+  function stubFetch(
+    payload: unknown,
+    ok = true,
+    status = 200,
+    headers: Record<string, string> = {},
+  ) {
+    const lower = Object.fromEntries(
+      Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v] as const),
     );
+    const fn = vi.fn(async () => ({
+      ok,
+      status,
+      headers: { get: (k: string) => lower[k.toLowerCase()] ?? null },
+      text: async () => JSON.stringify(payload),
+      json: async () => payload,
+    }));
+    vi.stubGlobal('fetch', fn);
+    return fn;
+  }
+
+  /** Headers the last fetch() call was made with. */
+  function lastFetchHeaders(fn: ReturnType<typeof stubFetch>): Record<string, string> {
+    const call = fn.mock.calls.at(-1) as unknown as [string, RequestInit];
+    return (call?.[1]?.headers ?? {}) as Record<string, string>;
   }
 
   it('addRemoteSource fetches, validates, and registers boards', async () => {
@@ -208,6 +222,87 @@ describe('remote sources', () => {
     expect(result.ok).toBe(true);
     expect(result.source?.boards).toHaveLength(1);
     expect(result.source?.invalidCount).toBe(1);
+  });
+
+  it('keeps per-board failure detail, not just a count (#132)', async () => {
+    stubFetch({ boards: [sampleBoard('good-board'), { id: 'broken', name: 'Broken' }, { name: 'no id' }] });
+    const result = await useLibraryStore.getState().addRemoteSource('https://example.com/i.json');
+    expect(result.source?.invalidCount).toBe(2);
+    expect(result.source?.invalidBoards).toHaveLength(2);
+    // The first failure names the entry and its position in the index.
+    expect(result.source?.invalidBoards?.[0]).toMatchObject({ index: 1, id: 'broken' });
+    expect(result.source?.invalidBoards?.[0]?.reason.length).toBeGreaterThan(0);
+    // An entry with no usable id still gets an entry, position-anchored.
+    expect(result.source?.invalidBoards?.[1]).toMatchObject({ index: 2 });
+    expect(result.source?.invalidBoards?.[1]?.id).toBeUndefined();
+  });
+
+  it('caps stored failure detail but keeps the honest count (#132)', async () => {
+    const broken = Array.from({ length: 30 }, (_, i) => ({ id: `bad-${i}` }));
+    stubFetch({ boards: [sampleBoard('good-board'), ...broken] });
+    const result = await useLibraryStore.getState().addRemoteSource('https://example.com/i.json');
+    expect(result.source?.invalidCount).toBe(30);
+    expect(result.source?.invalidBoards).toHaveLength(25);
+  });
+
+  it('rejects an over-cap index from its declared size before reading the body (#132)', async () => {
+    stubFetch({ boards: [] }, true, 200, { 'Content-Length': String(6 * 1024 * 1024) });
+    const result = await useLibraryStore.getState().addRemoteSource('https://example.com/huge.json');
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/too large/i);
+    expect(useLibraryStore.getState().remoteSources).toHaveLength(0);
+  });
+
+  it('replays the ETag as If-None-Match and keeps cached boards on a 304 (#132)', async () => {
+    stubFetch(indexDoc, true, 200, { ETag: '"v1"' });
+    const { source } = await useLibraryStore.getState().addRemoteSource('https://example.com/i.json');
+    expect(source?.etag).toBe('"v1"');
+    expect(source?.boards).toHaveLength(1);
+    const before = source!.fetchedAt;
+
+    // Upstream unchanged: a bodiless 304.
+    const refreshFn = stubFetch(null, false, 304);
+    await useLibraryStore.getState().refreshRemoteSource(source!.id);
+
+    const refreshed = useLibraryStore
+      .getState()
+      .remoteSources.find((s) => s.id === source!.id)!;
+    expect(lastFetchHeaders(refreshFn)).toMatchObject({ 'If-None-Match': '"v1"' });
+    expect(refreshed.boards).toHaveLength(1); // cache survived the 304
+    expect(refreshed.error).toBeUndefined();
+    expect(Date.parse(refreshed.fetchedAt!)).toBeGreaterThanOrEqual(Date.parse(before!));
+  });
+
+  it('falls back to If-Modified-Since when only Last-Modified was exposed (#132)', async () => {
+    const stamp = 'Wed, 01 Oct 2025 00:00:00 GMT';
+    stubFetch(indexDoc, true, 200, { 'Last-Modified': stamp });
+    const { source } = await useLibraryStore.getState().addRemoteSource('https://example.com/i.json');
+    expect(source?.lastModified).toBe(stamp);
+
+    const refreshFn = stubFetch(null, false, 304);
+    await useLibraryStore.getState().refreshRemoteSource(source!.id);
+    expect(lastFetchHeaders(refreshFn)).toMatchObject({ 'If-Modified-Since': stamp });
+  });
+
+  it('a 200 refresh replaces cached boards and validators (#132)', async () => {
+    stubFetch(indexDoc, true, 200, { ETag: '"v1"' });
+    const { source } = await useLibraryStore.getState().addRemoteSource('https://example.com/i.json');
+
+    stubFetch({ name: 'Community Boards', boards: [sampleBoard('community-board-2')] }, true, 200, {
+      ETag: '"v2"',
+    });
+    await useLibraryStore.getState().refreshRemoteSource(source!.id);
+
+    const refreshed = useLibraryStore.getState().remoteSources.find((s) => s.id === source!.id)!;
+    expect(refreshed.etag).toBe('"v2"');
+    expect(refreshed.boards.map((b) => b.id)).toEqual(['community-board-2']);
+  });
+
+  it('rejects a 304 on a first fetch — there is no cache to fall back on (#132)', async () => {
+    stubFetch(null, false, 304);
+    const result = await useLibraryStore.getState().addRemoteSource('https://example.com/i.json');
+    expect(result.ok).toBe(false);
+    expect(useLibraryStore.getState().remoteSources).toHaveLength(0);
   });
 
   it('shadowedIdsForSource reports remote ids hidden by higher tiers (#128)', async () => {

@@ -1,10 +1,25 @@
 import { useState } from 'react';
-import { useLibraryStore } from '@/store/libraryStore';
+import { useLibraryStore, type RemoteSource } from '@/store/libraryStore';
 import { builtinBoards } from '@/library';
 import { shadowedIdsForSource } from '@/library/registry';
 
 /** Official community index (github.com/SlyWombat/casemaker-library). */
 const COMMUNITY_SOURCE_URL = 'https://slywombat.github.io/casemaker-library/index.json';
+
+/** Tooltip behind a source's "N invalid skipped" (#132): which entries failed
+ * and why. Falls back to the bare count for caches written before the detail
+ * existed, or when a hostile index pushed failures past the stored cap. */
+function invalidDetail(s: RemoteSource): string {
+  const count = s.invalidCount ?? 0;
+  const shown = s.invalidBoards ?? [];
+  if (shown.length === 0) {
+    return `${count} ${count === 1 ? 'entry' : 'entries'} failed board validation`;
+  }
+  const lines = shown.map((i) => `#${i.index + 1}${i.id ? ` (${i.id})` : ''}: ${i.reason}`);
+  const more = count - shown.length;
+  if (more > 0) lines.push(`…and ${more} more`);
+  return lines.join('\n');
+}
 
 /**
  * Board-source manager, shown inline under the welcome header. Lists the
@@ -66,7 +81,14 @@ export function SourcesPanel() {
             <span className="wb-source__meta">
               {s.boards.length} boards
               {s.templates.length > 0 && ` + ${s.templates.length} templates`}
-              {typeof s.invalidCount === 'number' && s.invalidCount > 0 && ` (${s.invalidCount} invalid skipped)`}
+              {typeof s.invalidCount === 'number' && s.invalidCount > 0 && (
+                <span
+                  data-testid={`welcome-source-invalid-${s.id}`}
+                  title={invalidDetail(s)}
+                >
+                  {' '}· {s.invalidCount} invalid skipped
+                </span>
+              )}
               {(() => {
                 const shadowed = shadowedIdsForSource(s.id);
                 return shadowed.length > 0 ? (

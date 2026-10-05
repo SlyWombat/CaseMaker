@@ -22,6 +22,16 @@ import { templateSpecSchema, type TemplateSpec } from '@/library/templates/templ
 
 const LIBRARY_KEY = 'casemaker.library.v1';
 
+/** One board entry an index shipped that failed validation (#132). */
+export interface ValidationIssue {
+  /** Position of the entry in the index's boards[] array (0-based). */
+  index: number;
+  /** The entry's id, when it was an object carrying a readable one. */
+  id?: string;
+  /** First validation problem, path-anchored when the schema reported one. */
+  reason: string;
+}
+
 export interface RemoteSource {
   id: string;
   url: string;
@@ -35,7 +45,21 @@ export interface RemoteSource {
   error?: string;
   /** Boards in the last fetched index that failed validation. */
   invalidCount?: number;
+  /** Detail for the first MAX_VALIDATION_ISSUES of those failures (#132).
+   * The count stays the honest total; this list is deliberately capped so a
+   * hostile index can't bloat the persisted cache. */
+  invalidBoards?: ValidationIssue[];
+  /** Validators from the last 200 OK, replayed as If-None-Match /
+   * If-Modified-Since so an unchanged index costs a 304 (#132). */
+  etag?: string;
+  lastModified?: string;
 }
+
+const validationIssueSchema = z.object({
+  index: z.number(),
+  id: z.string().optional(),
+  reason: z.string(),
+});
 
 const storedLibrarySchema = z.object({
   boards: z.array(z.unknown()).default([]),
@@ -52,6 +76,9 @@ const storedLibrarySchema = z.object({
         fetchedAt: z.string().nullable(),
         error: z.string().optional(),
         invalidCount: z.number().optional(),
+        invalidBoards: z.array(validationIssueSchema).optional(),
+        etag: z.string().optional(),
+        lastModified: z.string().optional(),
       }),
     )
     .default([]),
@@ -96,15 +123,34 @@ export interface ImportResult {
   error?: string;
 }
 
-function validateBoards(raw: unknown[]): { boards: BoardProfile[]; invalidCount: number } {
+function validateBoards(raw: unknown[]): {
+  boards: BoardProfile[];
+  invalidCount: number;
+  issues: ValidationIssue[];
+} {
   const boards: BoardProfile[] = [];
-  let invalidCount = 0;
-  for (const entry of raw) {
+  const issues: ValidationIssue[] = [];
+  for (const [index, entry] of raw.entries()) {
     const result = localBoardProfileSchema.safeParse(entry);
-    if (result.success) boards.push(result.data as BoardProfile);
-    else invalidCount += 1;
+    if (result.success) {
+      boards.push(result.data as BoardProfile);
+      continue;
+    }
+    if (issues.length < MAX_VALIDATION_ISSUES) {
+      const first = result.error.issues[0];
+      const where = first && first.path.length ? `${first.path.join('.')}: ` : '';
+      const id =
+        entry && typeof entry === 'object' && typeof (entry as { id?: unknown }).id === 'string'
+          ? (entry as { id: string }).id
+          : undefined;
+      issues.push({
+        index,
+        ...(id ? { id } : {}),
+        reason: `${where}${first?.message ?? 'failed validation'}`,
+      });
+    }
   }
-  return { boards, invalidCount };
+  return { boards, invalidCount: raw.length - boards.length, issues };
 }
 
 function loadLibrary(): {
@@ -204,15 +250,49 @@ export interface LibraryState {
  * quota (#132): 5 MB of JSON, 500 boards per source. */
 const MAX_INDEX_BYTES = 5 * 1024 * 1024;
 const MAX_BOARDS_PER_SOURCE = 500;
+/** How many per-board failures we keep detail for (#132). */
+const MAX_VALIDATION_ISSUES = 25;
 
-async function fetchIndex(url: string): Promise<{
+interface IndexFetch {
+  /** Upstream answered 304 — the cached boards are still current. */
+  notModified: boolean;
   boards: BoardProfile[];
   templates: TemplateSpec[];
   invalidCount: number;
+  invalidBoards: ValidationIssue[];
   name?: string;
-}> {
-  const res = await fetch(url, { headers: { accept: 'application/json' } });
+  etag?: string;
+  lastModified?: string;
+}
+
+async function fetchIndex(
+  url: string,
+  cached?: { etag?: string; lastModified?: string },
+): Promise<IndexFetch> {
+  // Conditional request: an unchanged index answers 304 instead of being
+  // re-downloaded and re-parsed. Last-Modified is a CORS-safelisted response
+  // header, so If-Modified-Since works cross-origin; ETag is not safelisted —
+  // we only hold one when the server exposed it via Access-Control-Expose-Headers,
+  // and otherwise fall back to the date.
+  const headers: Record<string, string> = { accept: 'application/json' };
+  if (cached?.etag) headers['If-None-Match'] = cached.etag;
+  else if (cached?.lastModified) headers['If-Modified-Since'] = cached.lastModified;
+
+  const res = await fetch(url, { headers });
+  // A 304 only means "your cache is current" when we actually sent a
+  // validator. An unconditional fetch answered 304 has nothing to fall back on
+  // and falls through to the HTTP error below.
+  if (res.status === 304 && (cached?.etag || cached?.lastModified)) {
+    return { notModified: true, boards: [], templates: [], invalidCount: 0, invalidBoards: [] };
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  // Enforce the size cap before parsing (#132): a declared Content-Length
+  // rejects without even reading the body, and the text-length check still
+  // catches servers that omit or understate it.
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > MAX_INDEX_BYTES) {
+    throw new Error(`index too large (${(declared / 1e6).toFixed(1)} MB > 5 MB cap)`);
+  }
   const text = await res.text();
   if (text.length > MAX_INDEX_BYTES) {
     throw new Error(`index too large (${(text.length / 1e6).toFixed(1)} MB > 5 MB cap)`);
@@ -227,7 +307,7 @@ async function fetchIndex(url: string): Promise<{
   if (rawBoards.length > MAX_BOARDS_PER_SOURCE) {
     throw new Error(`index lists ${rawBoards.length} boards (> ${MAX_BOARDS_PER_SOURCE} cap)`);
   }
-  const { boards, invalidCount } = validateBoards(rawBoards);
+  const { boards, invalidCount, issues } = validateBoards(rawBoards);
   const { templates, invalid: invalidTpl } = validateTemplates(rawTemplates);
   if (boards.length === 0) {
     throw new Error(
@@ -236,7 +316,16 @@ async function fetchIndex(url: string): Promise<{
         : 'index contains no boards',
     );
   }
-  return { boards, templates, invalidCount: invalidCount + invalidTpl, name };
+  return {
+    notModified: false,
+    boards,
+    templates,
+    invalidCount: invalidCount + invalidTpl,
+    invalidBoards: issues,
+    name,
+    etag: res.headers.get('etag') ?? undefined,
+    lastModified: res.headers.get('last-modified') ?? undefined,
+  };
 }
 
 /** Refresh enabled sources whose cache is older than 7 days (#132).
@@ -362,7 +451,8 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
       return { ok: false, error: 'That source is already added.' };
     }
     try {
-      const { boards, templates, invalidCount, name } = await fetchIndex(trimmed);
+      const { boards, templates, invalidCount, invalidBoards, name, etag, lastModified } =
+        await fetchIndex(trimmed);
       const sources = get().remoteSources;
       const source: RemoteSource = {
         id: sourceIdFromUrl(trimmed, sources),
@@ -373,6 +463,9 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
         templates,
         fetchedAt: new Date().toISOString(),
         invalidCount,
+        invalidBoards,
+        etag,
+        lastModified,
       };
       const next = [...sources, source];
       set({ remoteSources: next });
@@ -391,20 +484,29 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     if (!source || get().refreshing.includes(id)) return;
     set({ refreshing: [...get().refreshing, id] });
     try {
-      const { boards, templates, invalidCount, name } = await fetchIndex(source.url);
-      const next = get().remoteSources.map((s) =>
-        s.id === id
-          ? {
-              ...s,
-              boards,
-              templates,
-              invalidCount,
-              label: name ?? s.label,
-              fetchedAt: new Date().toISOString(),
-              error: undefined,
-            }
-          : s,
-      );
+      const index = await fetchIndex(source.url, {
+        etag: source.etag,
+        lastModified: source.lastModified,
+      });
+      const next = get().remoteSources.map((s) => {
+        if (s.id !== id) return s;
+        if (index.notModified) {
+          // Unchanged upstream — keep the cached boards, just record the check.
+          return { ...s, fetchedAt: new Date().toISOString(), error: undefined };
+        }
+        return {
+          ...s,
+          boards: index.boards,
+          templates: index.templates,
+          invalidCount: index.invalidCount,
+          invalidBoards: index.invalidBoards,
+          label: index.name ?? s.label,
+          fetchedAt: new Date().toISOString(),
+          error: undefined,
+          etag: index.etag,
+          lastModified: index.lastModified,
+        };
+      });
       set({ remoteSources: next });
       persist(get().localBoards, get().localTemplates, next);
     } catch (err) {
