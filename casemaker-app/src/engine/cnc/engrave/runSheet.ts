@@ -1,3 +1,4 @@
+import { ASSUMED_RAPID_MM_MIN } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -37,7 +38,8 @@ import type { Mm } from '@/types/units';
 
 /**
  * The CAM summary #206 returns on `EngraveGenerated.cam`. Structural, so the real object is
- * assignable. `estimatedSeconds` is the cutting time only — rapids are not in it.
+ * assignable. `estimatedSeconds` is the CYCLE estimate — cutting PLUS rapids at
+ * `ASSUMED_RAPID_MM_MIN` (#242).
  */
 export interface RunSheetCamSummary {
   operations: number;
@@ -134,6 +136,14 @@ export interface RunSheetDiagram {
   items: RunSheetDiagramItem[];
 }
 
+/**
+ * The note beside the header's time estimate (#242). The number is a CYCLE estimate — cutting
+ * plus rapids at `ASSUMED_RAPID_MM_MIN` — so it is a planning figure, not a measured cycle time.
+ * Built from the constant so the printed rate cannot drift from the one the estimate uses.
+ */
+export const RAPID_ASSUMPTION_NOTE =
+  `cutting + rapids at an assumed ${ASSUMED_RAPID_MM_MIN} mm/min — a planning estimate, not a measured cycle time.`;
+
 export interface RunSheetHeader {
   jobName: string;
   /** ISO date (`YYYY-MM-DD`) the sheet was generated. */
@@ -142,9 +152,9 @@ export interface RunSheetHeader {
   fileName: string;
   /** First 8 hex of SHA-256 of the `.nc` text, so the sheet can be matched to the file. */
   fileHash: string;
-  /** Formatted cutting time, from `generated.cam.estimatedSeconds`. */
+  /** Formatted cycle estimate, from `generated.cam.estimatedSeconds`. */
   estimatedTime: string;
-  /** Always 'simulated — rapids not included'. */
+  /** Always `RAPID_ASSUMPTION_NOTE` — says the number is a planning estimate (#242). */
   estimatedTimeNote: string;
 }
 
@@ -176,7 +186,7 @@ function cuttingDiameter(tool: NonNullable<ReturnType<typeof jobTool>>): number 
   return tool.tipDiameter ?? tool.diameter;
 }
 
-/** '2 min 35 s'. Cutting time only; the note beside it says rapids are not included. */
+/** '2 min 35 s'. Formats the seconds it is given; `estimatedTimeNote` says what they are. */
 export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   const h = Math.floor(s / 3600);
@@ -185,6 +195,23 @@ export function formatDuration(seconds: number): string {
   if (h > 0) return `${h} h ${m} min`;
   if (m > 0) return `${m} min ${sec} s`;
   return `${sec} s`;
+}
+
+/**
+ * The height the frame file traces at, mm above the top face (#244). This is #207 §6's 20 mm air
+ * clearance, now baked into the generated frame file instead of an offset the operator sets and
+ * must remember to clear: the trace cannot be run at the wrong Z. Fixed, not derived from the
+ * job — tall enough to clear the cutter holder over the default stock.
+ */
+export const FRAME_Z: Mm = 20;
+
+/**
+ * The frame file's name (#244): the job's own file name with `-frame` before the extension, so
+ * it sits beside the job and cannot be confused with it. Shares `runSheetFileName`'s sanitiser,
+ * so the sheet and the saved file can never disagree about what the file is called.
+ */
+export function runSheetFrameFileName(jobName: string): string {
+  return `${runSheetFileName(jobName).slice(0, -'.nc'.length)}-frame.nc`;
 }
 
 /**
@@ -409,7 +436,7 @@ export function buildRunSheet(
     fileName: runSheetFileName(job.name),
     fileHash: nc === null ? '' : sha256Hex(nc).slice(0, 8),
     estimatedTime: generated.cam ? formatDuration(generated.cam.estimatedSeconds) : 'unknown',
-    estimatedTimeNote: 'simulated — rapids not included',
+    estimatedTimeNote: RAPID_ASSUMPTION_NOTE,
   };
 
   // ---- 1 · What you need ---------------------------------------------------------------------
@@ -492,14 +519,21 @@ export function buildRunSheet(
   ];
 
   // ---- 6 · Dry run ---------------------------------------------------------------------------
-  // The 20 mm air clearance is the figure #207 specifies; it is not derived from the job.
+  // #244 — the frame file replaces the manual "raise Z by 20 mm" offset. Its Z is baked in, so
+  // there is nothing for the operator to set (or to forget to clear), and it is a separate file,
+  // so it cannot be confused with the job. The 20 mm height itself is `FRAME_Z` above, the figure
+  // #207 specified.
   const dryRunSteps: RunSheetStep[] = [
     {
       text:
-        'Raise the work Z by 20 mm and run the whole file in the air. Watch that the cutter stays ' +
-        'over the blank and clear of the jaws.',
+        `Load ${runSheetFrameFileName(job.name)} and run it. The cutter traces the job's outline in ` +
+        `the air, ${fmtNum(FRAME_Z)} mm above the work — no Z offset to set. Watch that the trace ` +
+        'stays over the blank and clear of the jaws.',
+      value: `${fmtNum(FRAME_Z)} mm above the work`,
     },
-    { text: 'Then restore Z to the work origin.' },
+    {
+      text: `If the trace is not where the job should land, stop and change the job. Otherwise load ${header.fileName} and cut.`,
+    },
   ];
 
   // ---- 7 · Cut -------------------------------------------------------------------------------

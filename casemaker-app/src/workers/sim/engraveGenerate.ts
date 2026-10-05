@@ -7,6 +7,7 @@
  *   cam      (#172)            → the toolpath IR, off the SAME opened polygons stage 1 measured
  *   post     (#173)            → the `.nc` text
  *   verify   (#174)            → the text, re-parsed and checked against the depth limit
+ *   frame    (#244)            → the same toolpath traced in the air, a second `.nc` file
  *
  * Each stage stops the pipeline on an error and reports which stage stopped it. What gets
  * verified is the TEXT, never the IR (`/Simulation.md` §1.2): `verifyProgram` parses the bytes
@@ -31,15 +32,18 @@ import type { EngraveItem, EngraveJob } from '@/types/engraveJob';
 // fall back to `dev`, so a generated-then-committed `.nc` was not byte-identical to the app's
 // own save (#231 item 4). package.json is the single source in every environment.
 import { version as CAM_VERSION } from '../../../package.json';
-import { Z1 } from '@/engine/cnc/machine';
+import { Z1, type MachineProfile } from '@/engine/cnc/machine';
 import { feedsFor, type FeedsResult } from '@/engine/cnc/feeds';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { toPartPlan, labelProfile } from '@/engine/cnc/engrave/partPlan';
 import { jobTool, toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
+import { estimateCycleSeconds, HOP_Z, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
-import { stockDepthLimit, verifyProgram, type VerifyReport } from '@/engine/cnc/verify';
+import { FRAME_Z } from '@/engine/cnc/engrave/runSheet';
+import type { Setup } from '@/engine/cnc/setup';
+import { stockDepthLimit, verifyProgram, type DepthLimit, type VerifyReport } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import {
   engravabilityFindings,
@@ -81,6 +85,15 @@ export interface EngraveGenerated {
   nc: string | null;
   /** #174. */
   verify: VerifyReport | null;
+  /**
+   * #244 — the frame file: a tiny air trace of the job's XY extent at `FRAME_Z`, emitted as
+   * `<job>-frame.nc` beside the job. Null when the run never reached the post (nothing to
+   * trace) or the job was refused. It is produced by THIS gated action, from the same toolpath,
+   * and checked below by the same verifier.
+   */
+  frameNc: string | null;
+  /** #244 — `verifyProgram`'s report on `frameNc`, or null when no frame was produced. */
+  frameVerify: VerifyReport | null;
   /** The opened regions the CAM cut and the oracle must match (#206 §3). */
   predicted: OraclePredicted[];
   /** Stage refusals, in stage order. Empty on a clean run. */
@@ -156,7 +169,14 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob): EngraveRe
   const measured = radius === null ? [] : measureLabels(tl, plan, radius, job.edgeMargin, perChar);
   const engFindings = radius === null ? [] : engravabilityFindings(job, measured, ratioAtFor(tl, job, radius));
 
-  const findings = dedupeFindings([...validateJob(job), ...validateVise(job.stock, job.workholding.vise), ...engFindings]);
+  // `job.sacrificial` is threaded so the generate path's `vise-grip-shallow` judges what the
+  // jaws actually grip (#213 §2), not the raw stock: the argument `validateVise` has accepted
+  // since `454110a` but this call never passed.
+  const findings = dedupeFindings([
+    ...validateJob(job),
+    ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
+    ...engFindings,
+  ]);
 
   const byId = new Map(measured.map((m) => [m.labelId, m] as const));
   const itemById = new Map<string, EngraveItem>();
@@ -194,6 +214,81 @@ function summarize(ir: ReturnType<typeof generateEngrave>): EngraveCamSummary {
   return { operations: ir.operations.length, cuttingMoves, estimatedSeconds, passes };
 }
 
+/**
+ * The XY trace of the job's cut footprint (#244), as a closed rectangle of RAPID moves at
+ * height `z`: `(minX,minY) → (maxX,minY) → (maxX,maxY) → (minX,maxY) → (minX,minY)`. The
+ * extent is every positioned move endpoint in the toolpath, GROWN BY THE CUTTER RADIUS so the
+ * trace is the cutter's footprint, not just its centre path. Null when the toolpath has no
+ * positioned move — nothing to trace. Pure, so the geometry is tested without wasm.
+ */
+export function frameCorners(ir: ToolpathIR, radius: number, z: number): CamMove[] | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const op of ir.operations) {
+    for (const m of op.moves) {
+      if (!Number.isFinite(m.x) || !Number.isFinite(m.y)) continue;
+      minX = Math.min(minX, m.x);
+      maxX = Math.max(maxX, m.x);
+      minY = Math.min(minY, m.y);
+      maxY = Math.max(maxY, m.y);
+    }
+  }
+  if (!Number.isFinite(minX)) return null;
+  const x0 = minX - radius;
+  const x1 = maxX + radius;
+  const y0 = minY - radius;
+  const y1 = maxY + radius;
+  return [
+    { kind: 'rapid', x: x0, y: y0, z },
+    { kind: 'rapid', x: x1, y: y0, z },
+    { kind: 'rapid', x: x1, y: y1, z },
+    { kind: 'rapid', x: x0, y: y1, z },
+    { kind: 'rapid', x: x0, y: y0, z },
+  ];
+}
+
+/**
+ * The frame file's program (#244): the corner trace, posted by the SAME post (#173) and checked
+ * by the SAME verifier (#174) as the job. Rapids only — it cuts nothing — so the verifier's cut
+ * checks have nothing to flag; the point is that the dialect, the preamble and the ending are
+ * the post's own, never a hand-written second dialect the machine might refuse. Returns the
+ * posted text plus its verify report, or the reason it could not be produced.
+ */
+function frameProgram(
+  ir: ToolpathIR,
+  ctx: PostContext,
+  machine: MachineProfile,
+  setup: Setup,
+  tool: Tool,
+  limit: DepthLimit,
+): { nc: string; verify: VerifyReport } | { error: string } {
+  const radius = cuttingRadiusForSweep(tool);
+  const moves = frameCorners(ir, radius.ok ? radius.radius : 0, FRAME_Z);
+  if (moves === null) return { error: 'the toolpath has no positioned move to trace' };
+  const frameIr: ToolpathIR = {
+    frame: 'flat', // the frame trace is a flat-frame air move; no rotary frame exists yet (#237)
+    tool: ir.tool,
+    toolNumber: ir.toolNumber,
+    spindleRpm: ir.spindleRpm,
+    air: ir.air,
+    // The trace IS the safe height: the preamble retracts to FRAME_Z and every trace rapid is at
+    // FRAME_Z, so there is no operator offset to set or clear. `hopZ` stays HOP_Z (the job's own
+    // rapid floor): the post's fixed ending retracts to Z15 and homes, so the frame's verifier
+    // must not demand a rapid floor above the post's own ending.
+    safeZ: FRAME_Z,
+    hopZ: HOP_Z,
+    operations: [
+      { number: 1, name: 'Frame trace', labelId: '', depth: 0, moves, estimatedSeconds: estimateCycleSeconds(moves) },
+    ],
+  };
+  const posted = postZ1(frameIr, ctx, machine);
+  if (!posted.ok) return { error: posted.errors.join('; ') };
+  const verify = verifyProgram(posted.text, { setup, machine, tool, depthLimit: limit, minRapidZ: frameIr.hopZ });
+  return { nc: posted.text, verify };
+}
+
 export function engraveGenerate(tl: ManifoldToplevel, job: EngraveJob): EngraveGenerated {
   const { regions, predicted, tool, radius, findings } = engraveRegions(tl, job);
   const errors: EngraveFailure[] = [];
@@ -208,6 +303,8 @@ export function engraveGenerate(tl: ManifoldToplevel, job: EngraveJob): EngraveG
       cam: null,
       nc: null,
       verify: null,
+      frameNc: null,
+      frameVerify: null,
       predicted,
       errors,
     };
@@ -256,17 +353,38 @@ export function engraveGenerate(tl: ManifoldToplevel, job: EngraveJob): EngraveG
     { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
     job.minFloor,
   );
-  const verify = verifyProgram(nc, {
-    setup: toSetup(job, Z1),
-    machine: Z1,
-    tool,
-    depthLimit: limit,
-    minRapidZ: ir.hopZ,
-  });
+  const setup = toSetup(job, Z1);
+  const verify = verifyProgram(nc, { setup, machine: Z1, tool, depthLimit: limit, minRapidZ: ir.hopZ });
   if (verify.findings.some((f) => f.severity === 'error')) {
     errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
-    return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, predicted, errors };
+    return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
   }
 
-  return { ok: true, stage: 'done', findings, feeds, cam, nc, verify, predicted, errors };
+  // 6. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
+  // THIS gated action from the same toolpath, and checked by the SAME verifier — a frame the
+  // operator cannot run at the wrong Z, because the Z is in the file.
+  const frame = frameProgram(ir, ctx, Z1, setup, tool, limit);
+  if ('error' in frame) {
+    errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
+    return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
+  }
+  const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
+  if (frameErrors.length > 0) {
+    errors.push({ stage: 'verify', message: `the frame file has ${frameErrors.length} verifier error(s)` });
+    return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, predicted, errors };
+  }
+
+  return {
+    ok: true,
+    stage: 'done',
+    findings,
+    feeds,
+    cam,
+    nc,
+    verify,
+    frameNc: frame.nc,
+    frameVerify: frame.verify,
+    predicted,
+    errors,
+  };
 }

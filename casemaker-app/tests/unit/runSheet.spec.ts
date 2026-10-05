@@ -11,8 +11,11 @@ import { describe, it, expect } from 'vitest';
 import {
   buildRunSheet,
   formatDuration,
+  FRAME_Z,
+  RAPID_ASSUMPTION_NOTE,
   runSheetDiagramSvg,
   runSheetFileName,
+  runSheetFrameFileName,
   sha256Hex,
   type RunSheet,
   type RunSheetGenerated,
@@ -74,7 +77,11 @@ describe('runSheet (#207)', () => {
     expect(sheet.header.fileHash).toBe(sha256Hex(NC).slice(0, 8));
     expect(sheet.header.fileHash).toHaveLength(8);
     expect(sheet.header.estimatedTime).toBe('1 min 35 s');
-    expect(sheet.header.estimatedTimeNote).toBe('simulated — rapids not included');
+    // #242: the note names the cycle estimate and the assumed rapid rate, so the printed number
+    // cannot be mistaken for a measured cycle time.
+    expect(sheet.header.estimatedTimeNote).toBe(RAPID_ASSUMPTION_NOTE);
+    expect(sheet.header.estimatedTimeNote).toContain('cutting + rapids');
+    expect(sheet.header.estimatedTimeNote).toContain('3000 mm/min');
   });
 
   it('carries the stock, the three depths, stockProud, the feeds and the hash', () => {
@@ -197,6 +204,26 @@ describe('runSheet (#207)', () => {
     expect(runSheetFileName('Untitled engrave job')).toBe('Untitled-engrave-job.nc');
     expect(runSheetFileName('  /weird///name  ')).toBe('weird-name.nc');
     expect(runSheetFileName('   ')).toBe('engrave-job.nc');
+  });
+
+  // #244 — the frame file sits beside the job, named from the same sanitiser so the two can
+  // never disagree or be confused.
+  it('names the frame file beside the job', () => {
+    expect(runSheetFrameFileName('Untitled engrave job')).toBe('Untitled-engrave-job-frame.nc');
+    expect(runSheetFrameFileName('  /weird///name  ')).toBe('weird-name-frame.nc');
+    expect(runSheetFrameFileName('   ')).toBe('engrave-job-frame.nc');
+  });
+
+  // #244 — §6 no longer tells the operator to raise Z by hand; it names the generated frame file.
+  it('section 6 runs the frame file, not a manual Z offset', () => {
+    const job = defaultEngraveJob();
+    const dryRun = section(sheetFor(job), 'dry-run');
+    const all = dryRun.steps.map((s) => s.text).join(' ');
+    expect(all).toContain(runSheetFrameFileName(job.name));
+    expect(all).toContain(`${FRAME_Z} mm above the work`);
+    expect(all).toContain(runSheetFileName(job.name)); // the job file to cut afterwards
+    expect(all).not.toContain('Raise the work Z');
+    expect(all).not.toContain('restore Z');
   });
 
   // #215 gap 3: `enabledItems`/`deepestDepth`/`buildDiagram` ignored `job.combined`, so a border

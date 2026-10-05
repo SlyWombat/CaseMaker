@@ -134,6 +134,10 @@ test('the run sheet opens for a verified job, names the saved file, and prints w
   await expect(sheet).toBeVisible();
   await expect(sheet).toContainText(suggested);
 
+  // #244 — §6 names the generated frame file instead of telling the operator to raise Z by hand.
+  await expect(sheet).toContainText('-frame.nc');
+  await expect(sheet).not.toContainText('Raise the work Z');
+
   // The print preview shows the sheet and hides the app chrome (the sheet's own toolbar too).
   await page.emulateMedia({ media: 'print' });
   await expect(sheet).toBeVisible();

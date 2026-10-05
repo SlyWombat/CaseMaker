@@ -12,6 +12,7 @@ import {
 import type { MeshNode } from '@/types';
 import { isAssembledNodeId, partForId } from '@/engine/exporters/parts';
 import { printNotesText } from '@/engine/exporters/printNotes';
+import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 
 export type { ExportFormat };
 
@@ -45,6 +46,22 @@ export function sanitizeFileName(name: string): string {
  */
 export async function saveText(text: string, filename: string, mime: string): Promise<void> {
   await downloadText(text, filename, mime);
+}
+
+/**
+ * Save the engrave job AND its frame file together (#244). The job is written under the name the
+ * run sheet prints; the frame file sits beside it with `-frame` before the extension, so the two
+ * cannot be confused. The frame is the SAME generate (#206) output as the job — never re-derived
+ * here — so what is written is exactly what was verified. A null `frameNc` (a run that never
+ * reached the post) writes the job only.
+ */
+export async function saveEngraveProgram(
+  nc: string,
+  frameNc: string | null,
+  jobName: string,
+): Promise<void> {
+  await saveText(nc, runSheetFileName(jobName), 'text/plain');
+  if (frameNc !== null) await saveText(frameNc, runSheetFrameFileName(jobName), 'text/plain');
 }
 
 async function saveBlob(blob: Blob, filename: string): Promise<void> {

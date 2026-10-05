@@ -76,7 +76,7 @@ export function RunSheetView({ sheet, onClose }: { sheet: RunSheet; onClose?: ()
               <dd>{sheet.header.fileHash}</dd>
             </div>
             <div>
-              <dt>Estimated cutting time</dt>
+              <dt>Estimated cycle time</dt>
               <dd>
                 {sheet.header.estimatedTime} <em>({sheet.header.estimatedTimeNote})</em>
               </dd>

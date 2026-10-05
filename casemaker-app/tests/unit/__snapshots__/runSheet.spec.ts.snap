@@ -81,7 +81,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
   },
   "header": {
     "estimatedTime": "1 min 35 s",
-    "estimatedTimeNote": "simulated — rapids not included",
+    "estimatedTimeNote": "cutting + rapids at an assumed 3000 mm/min — a planning estimate, not a measured cycle time.",
     "fileHash": "a377421c",
     "fileName": "Untitled-engrave-job.nc",
     "generatedOn": "2026-10-04",
@@ -183,10 +183,11 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "id": "dry-run",
       "steps": [
         {
-          "text": "Raise the work Z by 20 mm and run the whole file in the air. Watch that the cutter stays over the blank and clear of the jaws.",
+          "text": "Load Untitled-engrave-job-frame.nc and run it. The cutter traces the job's outline in the air, 20 mm above the work — no Z offset to set. Watch that the trace stays over the blank and clear of the jaws.",
+          "value": "20 mm above the work",
         },
         {
-          "text": "Then restore Z to the work origin.",
+          "text": "If the trace is not where the job should land, stop and change the job. Otherwise load Untitled-engrave-job.nc and cut.",
         },
       ],
       "title": "6 · Dry run",

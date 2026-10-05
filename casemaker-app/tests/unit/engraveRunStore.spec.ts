@@ -23,6 +23,8 @@ const NOTHING: EngraveGenerated = {
   cam: null,
   nc: null,
   verify: null,
+  frameNc: null,
+  frameVerify: null,
   predicted: [],
   errors: [],
 };
@@ -50,6 +52,8 @@ function clean(): EngraveGenerated {
     cam: { operations: 1, cuttingMoves: 10, estimatedSeconds: 5, passes: 2 },
     nc: 'G90\nM02',
     verify: null,
+    frameNc: null,
+    frameVerify: null,
     predicted: [],
     errors: [],
   };

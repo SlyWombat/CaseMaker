@@ -23,8 +23,10 @@ import {
   triggerExport,
   printNotesForGroups,
   meshNodesForExport,
+  saveEngraveProgram,
   type ExportMeshGroups,
 } from '@/engine/exportTrigger';
+import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import { useJobStore } from '@/store/jobStore';
 import { useProjectStore, createDefaultProject } from '@/store/projectStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -117,5 +119,20 @@ describe('export sidecar (#154)', () => {
     const names = downloads.map((d) => d.name);
     expect(names).toContain('My_Case.3mf');
     expect(names).toContain('My_Case-PRINT-NOTES.txt');
+  });
+});
+
+describe('engrave job + frame save (#244)', () => {
+  it('writes the frame file beside the job', async () => {
+    await saveEngraveProgram(';@MKR|BEGIN\nM02\n', ';@MKR|BEGIN\nG0 Z20\nM02\n', 'Untitled engrave job');
+    expect(downloads.map((d) => d.name)).toEqual([
+      runSheetFileName('Untitled engrave job'),
+      runSheetFrameFileName('Untitled engrave job'),
+    ]);
+  });
+
+  it('writes the job alone when there is no frame (a run that never reached the post)', async () => {
+    await saveEngraveProgram(';@MKR|BEGIN\nM02\n', null, 'Untitled engrave job');
+    expect(downloads.map((d) => d.name)).toEqual([runSheetFileName('Untitled engrave job')]);
   });
 });
