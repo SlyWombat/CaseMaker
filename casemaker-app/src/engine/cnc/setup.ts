@@ -23,10 +23,10 @@
  * (The first sketch put a live `Manifold` in `part`, which cannot be posted to a worker.)
  */
 
-import type { Profile } from '@/engine/compiler/profile';
+import { aabbOfProfile, type Profile } from '@/engine/compiler/profile';
 import type { Mm, Vec2, Vec3 } from '@/types/units';
 import type { Sacrificial } from '@/types/engraveJob';
-import type { MachineProfile } from './machine';
+import type { AxisRange, MachineProfile } from './machine';
 
 export type Degrees = number;
 
@@ -167,6 +167,37 @@ export interface Setup {
 }
 
 /**
+ * The part's XY bounding box in its own model frame, when the geometry is known here. Only the
+ * prism states its XY outline; a cylinder's axis and a compiled node are not resolvable without
+ * the compiler, so those fall back to the origin-at-centre stub (below).
+ */
+function modelBounds(part: PartSpec): { min: Vec2; max: Vec2 } | null {
+  return part.kind === 'prism' ? aabbOfProfile(part.outline) : null;
+}
+
+/**
+ * Where the stub places a part on a machine (#196 decision (a)). The first version pinned the
+ * model ORIGIN at the envelope's centre, which is only right for a part whose origin is its
+ * centre: a `rectProfile` part has its origin at its front-left corner, so half of it (and any
+ * program written against that corner) hangs off the envelope's +X/+Y faces. This fits the
+ * part's own work-frame EXTENT — its bounding box — inside the envelope instead: the box's
+ * centre goes to the envelope's centre, so the origin lands half an extent below/left of it.
+ *
+ * Fitting is not the same as suppressing the check (`insideEnvelope` still runs): a part, or a
+ * program reaching past it, that is genuinely larger than the envelope still reports
+ * `outside-envelope`.
+ */
+function machinePlacement(part: PartSpec, machine: MachineProfile, zTop: Mm): Vec3 {
+  const centre = (r: AxisRange): Mm => (r.min + r.max) / 2;
+  const b = modelBounds(part);
+  const x = b ? centre(machine.envelope.x) - (b.min[0] + b.max[0]) / 2 : centre(machine.envelope.x);
+  const y = b ? centre(machine.envelope.y) - (b.min[1] + b.max[1]) / 2 : centre(machine.envelope.y);
+  // The top face goes to the profile's safe Z — a height that is, by the firmware's own
+  // definition, above any work. The XY placement is the stub that #196 decision (a) fixes.
+  return [x, y, machine.toolChange.safeZ - zTop];
+}
+
+/**
  * The reference setup for a part that sits with its model origin at the machine origin and
  * is registered exactly: the simplest valid stub, and what tests start from.
  */
@@ -174,13 +205,10 @@ export function stubSetup(part: PartSpec, workholding: Workholding, overrides: P
   const zTop = part.kind === 'prism' ? part.thickness : part.kind === 'cylinder' ? part.diameter / 2 : 0;
   // Without a machine the stub sits at the machine origin, which is fine for the frame
   // maths and useless on a real Z1, whose origin is the far top corner of a NEGATIVE
-  // envelope (every +X move would leave it). With one, the model origin goes to the centre
-  // of the envelope and the top face to the profile's safe Z — a height that is, by the
-  // firmware's own definition, above any work. It is still a stub: a real placement comes
-  // from probing (decisions 26 and 28).
-  const at: Vec3 = machine
-    ? [(machine.envelope.x.min + machine.envelope.x.max) / 2, (machine.envelope.y.min + machine.envelope.y.max) / 2, machine.toolChange.safeZ - zTop]
-    : [0, 0, 0];
+  // envelope (every +X move would leave it). With one, the part's extent is fitted inside the
+  // envelope (see `machinePlacement`). It is still a stub: a real placement comes from probing
+  // (decisions 26 and 28).
+  const at: Vec3 = machine ? machinePlacement(part, machine, zTop) : [0, 0, 0];
   return {
     part,
     workholding,

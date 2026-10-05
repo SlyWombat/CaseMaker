@@ -3,8 +3,7 @@
 // the approved #195 mockup (`docs/assets/cnc-mockup-*.png`); it asserts only that the surface
 // is on screen, never that pixels match. Remove or fold into #199/#206 once committed.
 //
-// Run (Windows side, Vite started by hand on 127.0.0.1 per #226):
-//   VITE_E2E=1 npx vite --port 5173 --strictPort --host 127.0.0.1
+// Run (Playwright starts its own dev server, #226):
 //   npx playwright test tests/e2e/slot5-closeout-qa.spec.ts
 
 import { readFileSync } from 'node:fs';
@@ -26,6 +25,9 @@ const readVendor = (testInfo: TestInfo, rel: string): string | null => {
 const shot = (name: string): string => join(process.cwd(), '..', 'docs', 'assets', name);
 
 test.use({ viewport: { width: 1440, height: 900 } });
+// The vendor sim and the engrave preview both run the wasm worker under swiftshader; a full
+// run takes tens of seconds, and longer under a loaded multi-session machine.
+test.setTimeout(240_000);
 
 async function loadBoardAndSection(page: Page, section: string): Promise<void> {
   await page.evaluate(async () => {
@@ -162,12 +164,13 @@ test('acceptance #196: ACRYLIC-Balloon.nc simulates to a result; TopClamp.nc pre
   const diagText = await page.getByTestId('sim-diagnostics').innerText().catch(() => '(none)');
   console.log('DIAG #196 balloon elapsed=%dms status=%s count=%d removed=%d errorCodes=%j\n%s',
     elapsed, sim.status, sim.count, sim.removedVolume, sim.errorCodes, diagText);
-  // #196 acceptance 1 also asks for ZERO errors. This file does not reach that: with the panel's
-  // stub placement (model origin at the envelope centre, `buildSimSetup` → `stubSetup(..., Z1)`)
-  // its work-frame Y reaches ~135 mm, so ~1797 moves land past the Z1 envelope's y=0 face
-  // (first at machine (-39.253, 34.880, -18.000)). Logged, not asserted, so the suite stays green;
-  // the finding lives in the #196 comment. It DOES produce a result (positive removed volume).
+  // #196 acceptance 1: a result, with ZERO errors. Fixed by decision (a) — the stub now fits
+  // the work-frame extent inside the envelope (the panel's `buildSimSetup` → `stubSetup(..., Z1)`
+  // places the 100 x 100 default stock at machine (-150, -150), so this file's ~147 mm of work
+  // Y lands at machine Y ≈ -3.4 instead of +35). The result is still a real one (positive
+  // removed volume), not a suppressed check.
   expect(sim.status).toBe('ready');
   expect(sim.removedVolume).toBeGreaterThan(0);
+  expect(sim.errorCodes).toEqual([]);
   await page.screenshot({ path: shot('slot5-sim-balloon.png') });
 });

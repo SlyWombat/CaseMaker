@@ -3,7 +3,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { buildSimSetup, DEFAULT_STOCK, useSimSetupStore } from '@/store/simSetupStore';
-import { Z1 } from '@/engine/cnc';
+import { buildTimeline, parseGcode, Z1 } from '@/engine/cnc';
 
 // Verbatim from reference-gcode/Z1/TopClamp.nc (also in tests/unit/cncSetupFromHeader.spec.ts).
 const STOCK = ';@MKR|STOCK|id=cuboid|length=100|width=100|height=5|diameter=1';
@@ -84,13 +84,32 @@ describe('buildSimSetup', () => {
       contact: { kind: 'p-rect', size: [100, 80], center: false },
     });
     expect(setup.startingTool).toBe('unknown');
-    // The Z1 stub centres the part in the envelope — the placement is assumed, not measured.
+    // #196 decision (a): the Z1 stub fits the part's EXTENT inside the envelope, not the model
+    // origin at the envelope's centre. For a 100 x 80 part on the 200 x 200 Z1 the bbox centre
+    // goes to (-100, -100), so the front-left origin lands at (-150, -140).
     expect(setup.placement.source).toBe('stub');
-    expect(setup.placement.origin[0]).toBe((Z1.envelope.x.min + Z1.envelope.x.max) / 2);
+    expect(setup.placement.origin).toEqual([-150, -140, Z1.toolChange.safeZ - 6]);
+    expect(setup.wcs.origin).toEqual([-150, -140, Z1.toolChange.safeZ]);
   });
 
   it('honours an explicit starting tool', () => {
     expect(buildSimSetup(DEFAULT_STOCK, 1).startingTool).toBe(1);
     expect(buildSimSetup(DEFAULT_STOCK, -1).startingTool).toBe(-1);
+  });
+});
+
+// #196 decision (a), both directions, through the runner that does the envelope check.
+describe('the Z1 stub fits the work frame inside the envelope', () => {
+  it('a program written inside its own stock runs with no outside-envelope error', () => {
+    const setup = buildSimSetup({ length: 60, width: 30, thickness: 6 }, 1);
+    const tl = buildTimeline(parseGcode('G0 X5 Y5 Z5\nS1000 M3\nG1 Z-1 F100\nG1 X55 Y25\nG0 Z5\n'), setup, Z1);
+    expect(tl.diagnostics.filter((d) => d.code === 'outside-envelope')).toEqual([]);
+  });
+
+  it('a program genuinely larger than the envelope still fails', () => {
+    // Work X 250 maps to machine X = -130 + 250 = +120, past the Z1's x = 0 face.
+    const setup = buildSimSetup({ length: 60, width: 30, thickness: 6 }, 1);
+    const tl = buildTimeline(parseGcode('G0 X250 Y5 Z5\n'), setup, Z1);
+    expect(tl.diagnostics.map((d) => d.code)).toContain('outside-envelope');
   });
 });
