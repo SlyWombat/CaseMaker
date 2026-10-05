@@ -3,8 +3,13 @@ import { aabbOfProfile } from '@/engine/compiler/profile';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import type { FeedsResult } from '@/engine/cnc/feeds';
-import { viseJawShift } from '@/engine/cnc/sacrificial';
+import { viseEnvelope } from '@/engine/cnc/fixture';
+import { Z1 } from '@/engine/cnc/machine';
+import { hasSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import type { VerifyReport } from '@/engine/cnc/verify';
+// #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
+// re-worded, so the sheet and the panel cannot disagree about what the sweep did not see.
+import { coverageDisclaimer, type SimCoverageInput, type SimRunOutcome } from '@/components/panels/simCoverage';
 import type { EngraveJob, ViseParams } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
@@ -78,6 +83,13 @@ export interface RunSheetSimDiagnostic {
 /** What the sheet needs from a simulation run. A `SimLoadResult` (either variant) satisfies it. */
 export interface RunSheetSim {
   diagnostics: readonly RunSheetSimDiagnostic[];
+  /**
+   * #243 — what the load reached: a full sweep, a path-only refusal, or a refusal before the
+   * path. Omitted means `'swept'`, which is what the panel's generate → simulate action leaves
+   * when it gets this far; a caller that saw a refusal says so and the sheet prints the
+   * blind-spot sentence the same way the Simulate panel does.
+   */
+  outcome?: SimRunOutcome;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -415,6 +427,33 @@ function isViseDefault(vise: ViseParams): boolean {
   return vise.source === 'default';
 }
 
+/**
+ * #243 — the coverage input, assembled from what THIS job and THIS run carry, never from prose.
+ * The panel builds the same structure from its own state (`SimPanel.tsx`); here every field comes
+ * from the job the file was generated for and the diagnostics the run produced, so a sheet that
+ * was printed for a run cannot claim coverage that run did not have.
+ *
+ * The fixture is the vise envelope `toSetup` hands the sweep (`viseEnvelope`), so the obstacles
+ * the sheet names ARE the ones the sweep was given. `holderKnown` is the machine's own answer
+ * (`Z1.holder` is null), and the tool name comes from the job's cutter.
+ */
+function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunSheetSim | null): SimCoverageInput {
+  const codes = new Set<string>();
+  for (const f of generated.findings) codes.add(f.code);
+  for (const f of generated.verify?.findings ?? []) codes.add(f.code);
+  for (const d of sim?.diagnostics ?? []) codes.add(d.code);
+  const envelope = viseEnvelope(job.stock, job.workholding.vise, job.sacrificial);
+  return {
+    outcome: sim?.outcome ?? 'swept',
+    fixtureLabels: envelope.boxes.map((b) => b.label),
+    fixtureSource: envelope.source,
+    sacrificialModelled: hasSacrificial(job.sacrificial),
+    holderKnown: Z1.holder !== null,
+    toolName: jobTool(job)?.name ?? null,
+    codes: [...codes],
+  };
+}
+
 export function buildRunSheet(
   job: EngraveJob,
   generated: RunSheetGenerated,
@@ -577,6 +616,11 @@ export function buildRunSheet(
     for (const d of sim.diagnostics) {
       if (d.severity === 'warning') pushWarning(d.code, d.message);
     }
+    // #243 — the coverage sentence, from the same builder the Simulate panel prints: which
+    // geometry the sweep was given and which it never saw, and whether this run swept at all.
+    // It appears whenever a simulation is part of the run (a `sim` is passed), never when the
+    // caller says there was none.
+    for (const sentence of coverageDisclaimer(coverageFor(job, generated, sim))) pushWarning('coverage', sentence);
   }
   // "If the vise dimensions are unmeasured defaults, this section opens with that, in bold."
   const viseIndex = warnings.findIndex((s) => s.text.includes('unmeasured defaults'));

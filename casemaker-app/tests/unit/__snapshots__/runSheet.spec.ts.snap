@@ -224,6 +224,15 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
           "bold": true,
           "text": "Vise dimensions are unmeasured defaults (#208); collisions cannot be trusted yet.",
         },
+        {
+          "text": "Checked: the tool against the stock and the modelled fixture (Vise fixed jaw (left), Vise moving jaw (right)).",
+        },
+        {
+          "text": "Not checked: the spindle body, head and gantry; anything on the bed other than the declared stock, workholding and sacrificial material; the collet nut, which this machine states no dimensions for.",
+        },
+        {
+          "text": "The modelled fixture is a shipped default, not a measurement.",
+        },
       ],
       "title": "8 · Warnings carried from the app",
     },

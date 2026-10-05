@@ -62,6 +62,13 @@ export interface EngraveRunState {
   simDiagnostics: SimDiagnostic[];
   /** The terminal status of that load, or null before it ran. */
   simStatus: SimStatus | null;
+  /**
+   * True when that load was PATH-ONLY — the sweep was refused and only the tool path is drawn
+   * (#194). Captured here, not read back from `simStore` at render time, so the coverage
+   * sentence (#243) describes the run this panel actually performed, not whatever the Simulate
+   * panel loaded afterwards.
+   */
+  pathOnly: boolean;
   phase: EngraveRunPhase;
   /** The clearance acknowledgement (see `ACKNOWLEDGE_CODES`), reset on every Generate. */
   acknowledged: boolean;
@@ -126,6 +133,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     oracle: null,
     simDiagnostics: [] as SimDiagnostic[],
     simStatus: null as SimStatus | null,
+    pathOnly: false,
     acknowledged: false,
     staleSince: null as number | null,
     error: null as string | null,
@@ -177,10 +185,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 
     const sim = useSimStore.getState();
     if (sim.status !== 'ready') {
-      set({ phase: 'blocked', simStatus: sim.status, simDiagnostics: sim.diagnostics, error: sim.status === 'error' ? sim.error : null });
+      set({ phase: 'blocked', simStatus: sim.status, simDiagnostics: sim.diagnostics, pathOnly: sim.pathOnly, error: sim.status === 'error' ? sim.error : null });
       return;
     }
-    set({ phase: 'checking', simStatus: sim.status, simDiagnostics: sim.diagnostics });
+    set({ phase: 'checking', simStatus: sim.status, simDiagnostics: sim.diagnostics, pathOnly: sim.pathOnly });
 
     try {
       const oracle = await client.simOracle(generated.predicted);
@@ -196,6 +204,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     oracle: null,
     simDiagnostics: [],
     simStatus: null,
+    pathOnly: false,
     phase: 'idle',
     acknowledged: false,
     staleSince: null,

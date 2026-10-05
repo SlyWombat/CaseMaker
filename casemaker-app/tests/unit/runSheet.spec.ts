@@ -167,6 +167,29 @@ describe('runSheet (#207)', () => {
     expect(warnings.some((t) => t.includes('not a warning'))).toBe(false);
   });
 
+  // #243 — the run sheet's §8 carries the Simulate panel's own coverage sentence, from the
+  // imported builder, so the operator reads what the sweep saw and did NOT see. Every clause
+  // comes from what this job and run carried, not from prose.
+  it('carries the run coverage sentence in section 8 (#243)', () => {
+    const job = defaultEngraveJob();
+    const warnings = section(sheetFor(job), 'warnings').steps.map((s) => s.text);
+    // The vise envelope `toSetup` hands the sweep is named as the fixture it checked.
+    expect(warnings.some((t) => t.startsWith('Checked: the tool against the stock and the modelled fixture'))).toBe(true);
+    expect(warnings.some((t) => t.includes('Vise fixed jaw (left)'))).toBe(true);
+    // Z1 states no holder, so the collet nut is named as unmodelled — the exact blind spot A2
+    // calls out — and the fixture being the shipped default is said, not implied.
+    expect(warnings.some((t) => t.includes('the collet nut'))).toBe(true);
+    expect(warnings.some((t) => t.includes('shipped default, not a measurement'))).toBe(true);
+  });
+
+  it('says a path-only run swept no geometry (#243)', () => {
+    const job = defaultEngraveJob();
+    const sim: RunSheetSim = { diagnostics: [], outcome: 'path-only' };
+    const warnings = section(buildRunSheet(job, stubGenerated(job), sim, NOW), 'warnings').steps.map((s) => s.text);
+    expect(warnings.some((t) => t.includes('path-only'))).toBe(true);
+    expect(warnings.some((t) => t.startsWith('Checked:'))).toBe(false);
+  });
+
   it('excludes disabled labels from the cut lines and the diagram', () => {
     const job = defaultEngraveJob();
     job.labels[1]!.enabled = false;
