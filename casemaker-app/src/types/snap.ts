@@ -2,6 +2,44 @@ import type { Mm } from './units';
 
 export type SnapWall = '+x' | '-x' | '+y' | '-y';
 
+/**
+ * Issue #153 — print-fit variant for a printed mating interface.
+ *
+ * Every snap/joint fit in the repo used to be one number chosen by us, but
+ * printers vary. A variant lets the user pick a fit without recalibrating:
+ *
+ *   'tight'    : the as-designed engagement — NO added relief. This is also
+ *                what an absent fit resolves to, so legacy projects keep
+ *                byte-identical geometry.
+ *   'standard' : +0.10 mm of relief.
+ *   'loose'    : +0.25 mm of relief.
+ *
+ * The relief is applied to the CUT (the hole / the mating pocket), never to
+ * both printed halves at once — relief on both cancels — and never along the
+ * retention axis, so the snap click still lands at the same Z. FDM cannot
+ * print clearance BELOW nominal reliably, so the ladder only ever LOOSENS:
+ * 'tight' is the shipped number, not a negative relief.
+ */
+export type FitVariant = 'tight' | 'standard' | 'loose';
+
+export const FIT_VARIANTS: ReadonlyArray<FitVariant> = ['tight', 'standard', 'loose'];
+
+/**
+ * Relief (mm) each variant adds to the cut. `undefined` (no fit set) resolves
+ * to the 'tight' rung — the as-designed number — so a project that never
+ * chose a fit compiles exactly as it did before #153.
+ */
+export const FIT_RELIEF_MM: Record<FitVariant, number> = {
+  tight: 0,
+  standard: 0.1,
+  loose: 0.25,
+};
+
+/** Added relief (mm) for a fit variant; `undefined` = 0 (legacy, 'tight'). */
+export function fitRelief(fit: FitVariant | undefined): number {
+  return FIT_RELIEF_MM[fit ?? 'tight'];
+}
+
 /** Issue #69 — barb cross-sections trade off insertion vs. retention force.
  *
  *   hook            — rectangular barb (current). High retention, sloped insertion.
@@ -50,6 +88,11 @@ export interface SnapCatch {
    * so users can record their preferred mix.
    */
   cantileverOn?: CantileverOn;
+  /**
+   * Issue #153 — per-feature override of the case-level `fit`. Absent =
+   * inherit `CaseParameters.fit`. See {@link FitVariant}.
+   */
+  fit?: FitVariant;
 }
 
 /**

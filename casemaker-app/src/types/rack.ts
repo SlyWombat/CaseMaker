@@ -1,4 +1,5 @@
 import type { Mm } from './units';
+import type { FitVariant } from './snap';
 
 /**
  * Parametric 10"-class mini rack (emulates "Mini Rack" by Meuon, Printables
@@ -98,6 +99,12 @@ export interface RackParams {
    * the standard round opening + 4-bolt pattern for its size cut through.
    */
   fans?: RackFan[];
+  /**
+   * Issue #153 — print-fit variant for the plate-tab ledges (the top/bottom
+   * plates drop into them). Absent = 'tight' (the as-designed `TAB_SLACK`),
+   * so legacy racks compile unchanged. See {@link FitVariant}.
+   */
+  fit?: FitVariant;
 }
 
 export interface RackFan {

@@ -5,6 +5,10 @@ import { displayProfileSchema } from '@/library/displaySchema';
 
 const xyzSchema = z.object({ x: z.number(), y: z.number(), z: z.number() });
 
+/** Issue #153 — print-fit variant (see `types/snap.ts`). Shared by the
+ *  case-level default, the per-catch override, and the rack. */
+const fitVariantSchema = z.enum(['tight', 'standard', 'loose']);
+
 export const caseParamsSchema = z.object({
   wallThickness: z.number().positive(),
   floorThickness: z.number().positive(),
@@ -31,6 +35,11 @@ export const caseParamsSchema = z.object({
   boardRetention: z.enum(['screws', 'snap', 'press-fit', 'none']).optional(),
   extraCavityZ: z.number().nonnegative().optional(),
   snapType: z.enum(['barb', 'full-lid']).optional(),
+  // Issue #153 — project-level print-fit variant for the snap interfaces
+  // (snap catches + board snap clips). Optional so legacy projects load
+  // unchanged (v7 hinge precedent); absent resolves to 'tight' (the
+  // as-designed number) at the compiler boundary.
+  fit: fitVariantSchema.optional(),
   ventilation: z.object({
     // Issue #75 — surfaces the vent pattern is cut into. Optional so legacy
     // projects load with no migration; compiler defaults to ['back'].
@@ -115,6 +124,8 @@ export const caseParamsSchema = z.object({
           }),
         )
         .optional(),
+      // Issue #153 — plate-tab ledge fit. Optional; absent = 'tight'.
+      fit: fitVariantSchema.optional(),
     })
     .optional(),
   stand: z
@@ -214,6 +225,8 @@ export const caseParamsSchema = z.object({
         // legacy projects load with the implicit 'lid' default; geometry
         // dispatch keys off the .default() at parse time.
         cantileverOn: z.enum(['lid', 'case']).default('lid'),
+        // Issue #153 — per-catch fit override; absent inherits case.fit.
+        fit: fitVariantSchema.optional(),
       }),
     )
     .optional(),
@@ -495,10 +508,21 @@ const projectV8Schema = projectV7Schema.extend({
 // caseParamsSchema, which every version embeds), so the wire format stays
 // backwards-compatible; the bump is bookkeeping for "this project understands
 // magnet pockets." A v8 project on disk parses against v8, then this transform
-// stamps schemaVersion: 9 — `magnetPockets` is simply absent (undefined, no
+// stamps schemaVersion: 10 — `magnetPockets` is simply absent (undefined, no
 // pockets emitted).
 const projectV9Schema = projectV8Schema.extend({
   schemaVersion: z.literal(9),
+});
+
+// Issue #153 — v10 adds the optional `case.fit`, per-`SnapCatch.fit`, and
+// `case.rack.fit` fields (fit variants). Like the v7 hinge bump it is purely
+// additive (all three live on schemas every version embeds as `.optional()`),
+// so the wire format stays backwards-compatible; the bump is bookkeeping for
+// "this project understands fit variants." A v9 project on disk parses against
+// v9, then this transform stamps schemaVersion: 10 — every `fit` is simply
+// absent (undefined, resolving to 'tight' at the compiler boundary).
+const projectV10Schema = projectV9Schema.extend({
+  schemaVersion: z.literal(10),
 });
 
 export const projectSchema = z
@@ -512,12 +536,13 @@ export const projectSchema = z
     projectV7Schema,
     projectV8Schema,
     projectV9Schema,
+    projectV10Schema,
   ])
   .transform((p) => {
     if (p.schemaVersion === 1) {
       return {
         ...p,
-        schemaVersion: 9 as const,
+        schemaVersion: 10 as const,
         customFonts: [],
         hats: [],
         customHats: [],
@@ -532,7 +557,7 @@ export const projectSchema = z
     if (p.schemaVersion === 2) {
       return {
         ...p,
-        schemaVersion: 9 as const,
+        schemaVersion: 10 as const,
         customFonts: [],
         mountingFeatures: [],
         display: null,
@@ -545,7 +570,7 @@ export const projectSchema = z
     if (p.schemaVersion === 3) {
       return {
         ...p,
-        schemaVersion: 9 as const,
+        schemaVersion: 10 as const,
         customFonts: [],
         fanMounts: [],
         textLabels: [],
@@ -555,7 +580,7 @@ export const projectSchema = z
     if (p.schemaVersion === 4) {
       return {
         ...p,
-        schemaVersion: 9 as const,
+        schemaVersion: 10 as const,
         customFonts: [],
         antennas: [],
       };
@@ -563,20 +588,25 @@ export const projectSchema = z
     if (p.schemaVersion === 5) {
       // mountingFeatures items already have mountClass filled by the
       // mountingFeatureSchema default at parse time; just stamp the version.
-      return { ...p, schemaVersion: 9 as const, customFonts: [] };
+      return { ...p, schemaVersion: 10 as const, customFonts: [] };
     }
     if (p.schemaVersion === 6) {
       // v6 → v7 is a pure version bump — `hinge` is optional and absent on
       // legacy projects, so the parsed object already has the right shape.
-      return { ...p, schemaVersion: 9 as const, customFonts: [] };
+      return { ...p, schemaVersion: 10 as const, customFonts: [] };
     }
     if (p.schemaVersion === 7) {
-      return { ...p, schemaVersion: 9 as const, customFonts: [] };
+      return { ...p, schemaVersion: 10 as const, customFonts: [] };
     }
     if (p.schemaVersion === 8) {
       // v8 → v9 is a pure version bump — `magnetPockets` is optional and
       // absent on legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 9 as const };
+      return { ...p, schemaVersion: 10 as const };
+    }
+    if (p.schemaVersion === 9) {
+      // v9 → v10 is a pure version bump — the `fit` fields are optional and
+      // absent on legacy projects, so the parsed object already has the shape.
+      return { ...p, schemaVersion: 10 as const };
     }
     return p;
   });

@@ -1,6 +1,14 @@
 import type { Mm } from './units';
-import type { SnapCatch } from './snap';
+import type { SnapCatch, FitVariant } from './snap';
 import type { RackParams } from './rack';
+
+/**
+ * Issue #153 — `FitVariant` lives with the snap types (`types/snap.ts`)
+ * because a fit is a snap/joint concept; re-exported here so feature code
+ * that already imports from `types/case` can name it.
+ */
+export type { FitVariant } from './snap';
+export { FIT_VARIANTS, FIT_RELIEF_MM, fitRelief } from './snap';
 
 /**
  * Issue #92 — barrel-hinge feature for snap-fit / flat-lid cases.
@@ -334,6 +342,13 @@ export interface CaseParameters {
    * Only meaningful when joint === 'snap-fit'.
    */
   snapType?: SnapType;
+  /**
+   * Issue #153 — project-level print-fit variant for the snap interfaces
+   * (snap catches + board snap clips). Absent = 'tight' (the as-designed
+   * number), so legacy projects load and compile unchanged. A `SnapCatch`
+   * may override it per catch. See {@link FitVariant}.
+   */
+  fit?: FitVariant;
   /**
    * Issue #76 — freeform cutouts placed by hand on any case face. Optional
    * so legacy projects load with no migration; missing field = empty list.

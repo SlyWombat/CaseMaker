@@ -1,4 +1,5 @@
 import type { Mm, RackParams, RackAccessory } from '@/types';
+import { fitRelief } from '@/types/snap';
 import {
   cube,
   cylinder,
@@ -436,6 +437,11 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     return translate([a, y, z], cube([b - a, dy, dz]));
   };
 
+  // Issue #153 — the plate-tab ledges loosen with the rack's fit variant.
+  // Absent fit = 'tight' = the as-designed TAB_SLACK (0.3), so legacy racks
+  // compile unchanged. Relief only ever widens the ledge (looser).
+  const tabSlack = TAB_SLACK + fitRelief(rack.fit);
+
   const solid: BuildOp[] = [
     // Panel body spans z FOOT_H..H_TOP; stacking feet hang below at both ends.
     box(0, SIDE_T, 0, FOOT_H, depth, bodyH),
@@ -539,8 +545,8 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   const tabAxis = xAt(tabEdge - TAB_SCREW_INSET);
   const screwYs = new Set(plateScrewYs(depth));
   for (const ty of plateTabYs(depth)) {
-    const y0 = ty - TAB_LEN / 2 - TAB_SLACK;
-    const dy = TAB_LEN + 2 * TAB_SLACK;
+    const y0 = ty - TAB_LEN / 2 - tabSlack;
+    const dy = TAB_LEN + 2 * tabSlack;
     // Bottom: the ledge is only as deep as the tab, so the rail ABOVE it stays
     // solid — that is what the bottom screw threads into, driven UP from
     // underneath. Downward is not an option here: there are only 19 mm of rack
@@ -548,10 +554,10 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     // straight out through the foot. Going up instead reaches the rail and the
     // web above it, and lands the head in the same outer-face counterbore the
     // top plate uses.
-    cuts.push(box(tabEdge - TAB_REACH - TAB_SLACK, SIDE_T + OVER, y0, FOOT_H, dy, TAB_T));
+    cuts.push(box(tabEdge - TAB_REACH - tabSlack, SIDE_T + OVER, y0, FOOT_H, dy, TAB_T));
     // Top: only as deep as the tab, so the rail below stays solid to bite.
     cuts.push(
-      box(tabEdge - TAB_REACH - TAB_SLACK, SIDE_T + OVER, y0, H_TOP - TAB_T, dy, TAB_T + OVER),
+      box(tabEdge - TAB_REACH - tabSlack, SIDE_T + OVER, y0, H_TOP - TAB_T, dy, TAB_T + OVER),
     );
     if (!screwYs.has(ty)) continue; // mid tab bears the deck, takes no screw
     // A millimetre deeper than the screw reaches: a screw that bottoms out
@@ -837,11 +843,11 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   // ...and the tab ledges: a vertical fan strip spans rail-to-rail, so one landing on a
   // ledge would fill it right back in.
   for (const ty of plateTabYs(depth)) {
-    const y0 = ty - TAB_LEN / 2 - TAB_SLACK;
-    const dy = TAB_LEN + 2 * TAB_SLACK;
-    fanCuts.push(box(tabEdge - TAB_REACH - TAB_SLACK, SIDE_T + OVER, y0, FOOT_H, dy, TAB_T));
+    const y0 = ty - TAB_LEN / 2 - tabSlack;
+    const dy = TAB_LEN + 2 * tabSlack;
+    fanCuts.push(box(tabEdge - TAB_REACH - tabSlack, SIDE_T + OVER, y0, FOOT_H, dy, TAB_T));
     fanCuts.push(
-      box(tabEdge - TAB_REACH - TAB_SLACK, SIDE_T + OVER, y0, H_TOP - TAB_T, dy, TAB_T + OVER),
+      box(tabEdge - TAB_REACH - tabSlack, SIDE_T + OVER, y0, H_TOP - TAB_T, dy, TAB_T + OVER),
     );
   }
   const [sx0, sx1] = xr(0, SIDE_T);

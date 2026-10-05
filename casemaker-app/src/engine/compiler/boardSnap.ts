@@ -1,5 +1,6 @@
 import type { BoardProfile, CaseParameters, HatPlacement, HatProfile } from '@/types';
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
+import { fitRelief } from '@/types/snap';
 import { cavityClearance, cavityOriginXY } from '@/engine/coords';
 import { cube, translate, mesh, type BuildOp } from './buildPlan';
 
@@ -103,6 +104,12 @@ export function buildBoardSnapOps(
   }
   const wall = params.wallThickness;
   const cl = cavityClearance(params);
+  // Issue #153 — board clips mate a PURCHASED PCB, so the relief is one-sided
+  // (there is no second printed half for it to cancel against). A looser fit
+  // widens the lateral gap to the PCB edge; the Z jaw clearance is untouched.
+  const relief = fitRelief(params.fit);
+  const clipFit = CLIP_FIT + relief;
+  const shoulderFit = SHOULDER_FIT + relief;
   const origin = cavityOriginXY(params);
   const pcbTopZ = params.floorThickness + board.defaultStandoffHeight + board.pcb.size.z;
   const botZ = pcbTopZ + FINGER_CLEARANCE_Z;
@@ -168,7 +175,7 @@ export function buildBoardSnapOps(
     const fused = sign < 0 ? back <= wallN + 1e-3 : back >= wallN - 1e-3;
     // Outboard extent: embed into the wall when fused, else the rib's own back.
     const outer = fused ? back + sign * EMBED : back;
-    const spineInner = edgeN + sign * CLIP_FIT; // just outboard of the PCB edge
+    const spineInner = edgeN + sign * clipFit; // just outboard of the PCB edge
     const jawInner = edgeN - sign * (reach ?? overhang); // in under/over the edge
     const t0 = center - width / 2;
     const box = (nA: number, nB: number, z0: number, z1: number): BuildOp => {
@@ -228,10 +235,10 @@ export function buildBoardSnapOps(
   if (shoulder) {
     const z0 = params.floorThickness;
     const z1 = botZ;
-    const openXLo = pcbXMin - SHOULDER_FIT;
-    const openXHi = pcbXMax + SHOULDER_FIT;
-    const openYLo = pcbYMin - SHOULDER_FIT;
-    const openYHi = pcbYMax + SHOULDER_FIT;
+    const openXLo = pcbXMin - shoulderFit;
+    const openXHi = pcbXMax + shoulderFit;
+    const openYLo = pcbYMin - shoulderFit;
+    const openYHi = pcbYMax + shoulderFit;
     // Embed toward a wall for fusion; a standalone rib needs no embed.
     const eXLo = backXLo <= wallInnerXMin + 1e-3 ? backXLo - EMBED : backXLo;
     const eXHi = backXHi >= wallInnerXMax - 1e-3 ? backXHi + EMBED : backXHi;

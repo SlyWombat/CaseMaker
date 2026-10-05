@@ -12,9 +12,10 @@ import type {
   SealParams,
   RuggedParams,
   Latch,
+  FitVariant,
 } from '@/types';
 import { newId } from '@/utils/id';
-import { VENT_SURFACES } from '@/types';
+import { VENT_SURFACES, FIT_VARIANTS } from '@/types';
 import { LabelledField } from '@/components/ui/LabelledField';
 import { resolveInsertSpec } from '@/engine/compiler/bosses';
 
@@ -42,6 +43,14 @@ const INSERT_OPTIONS: { value: InsertType; label: string; hint: string }[] = [
   { value: 'heat-set-m3', label: 'Heat-set M3', hint: 'Heat-set M3 brass insert melted into the boss.' },
   { value: 'pass-through', label: 'Pass-through', hint: 'Open hole sized for an M2.5 screw shaft — no thread engagement.' },
 ];
+
+/** Issue #153 — UI copy per fit ladder rung, keyed so FIT_VARIANTS drives the
+ *  option order and this file cannot drift from the ladder. */
+const FIT_COPY: Record<FitVariant, { label: string; hint: string }> = {
+  tight: { label: 'Tight (as designed)', hint: 'No added relief — the shipped engagement. Pick this on a well-tuned printer.' },
+  standard: { label: 'Standard', hint: 'Adds 0.10 mm of relief so the parts drop in on a normal printer.' },
+  loose: { label: 'Loose', hint: 'Adds 0.25 mm — pick this if your printer over-extrudes or the first print was too tight.' },
+};
 
 interface SliderProps {
   label: string;
@@ -393,6 +402,30 @@ export function CasePanel() {
           ))}
         </div>
       </div>
+      {/* Issue #153 — print-fit variant for the snap interfaces (snap catches
+          + board snap clips). Only shown when a fit-sensitive snap is active.
+          'tight' is the as-designed number, so the default changes nothing. */}
+      {(params.joint === 'snap-fit' || params.boardRetention === 'snap') && (
+        <div className="joint-row">
+          <label className="joint-label" htmlFor="case-fit" title="Issue #153 — how much print relief the snap interfaces get. Start at Tight; go looser if the print came out too tight to seat.">
+            Snap fit
+          </label>
+          <select
+            id="case-fit"
+            value={params.fit ?? 'tight'}
+            onChange={(e) => patch({ fit: e.target.value as FitVariant })}
+            data-testid="case-fit"
+            title="Print-fit variant applied to the snap interfaces."
+            aria-label="Snap fit variant"
+          >
+            {FIT_VARIANTS.map((v) => (
+              <option key={v} value={v} title={FIT_COPY[v].hint}>
+                {FIT_COPY[v].label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {/* Issue #98 — Boss-insert type applies when a screw actually drives
           into a boss. Issue #162: that is EITHER a screw-down lid OR
           boardRetention='screws' — gating on the joint alone hid the control

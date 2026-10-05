@@ -8,7 +8,7 @@ import type {
   BarbType,
 } from '@/types';
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
-import { SNAP_DEFAULTS } from '@/types/snap';
+import { SNAP_DEFAULTS, fitRelief } from '@/types/snap';
 import { cavityClearance } from '@/engine/coords';
 import { cube, cylinder, mesh, rotate, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
@@ -210,6 +210,12 @@ interface HookTabFrame {
   /** Wall geometry (for the tapered-tip mesh winding). */
   wallAxis: 'x' | 'y';
   wallNormalSign: 1 | -1;
+  /**
+   * Issue #153 — how far the barb extends into the wall material (mm). Held on
+   * the frame (not read from the constant in `buildHookTaperedTip`) so a
+   * relieved subtract can deepen the hole without touching the lid tab.
+   */
+  barbProtrusion: number;
 }
 
 function computeHookTabFrame(
@@ -308,6 +314,7 @@ function computeHookTabFrame(
     lidPlateBottomZ_world,
     armBotZ_local, barbTopZ_local, barbBodyBotZ_local, barbTipBotZ_local,
     wallAxis, wallNormalSign,
+    barbProtrusion: HOOK_BARB_PROTRUSION,
   };
 }
 
@@ -361,14 +368,14 @@ function buildHookTaperedTip(frame: HookTabFrame): BuildOp {
   // (coplanar contact alone does not). The tip's TOP face also extends UP
   // into the body by HOOK_TAB_EMBED for the same reason.
   // A: arm-side, top of taper      → (0,                                0, barbBodyBotZ + EMBED)
-  // B: outboard, top of taper      → (0,         HOOK_BARB_PROTRUSION, barbBodyBotZ + EMBED)
+  // B: outboard, top of taper      → (0,        frame.barbProtrusion,  barbBodyBotZ + EMBED)
   // C: arm-side, tip               → (0,                                0, barbTipBotZ)
   // arm-side n offset = -EMBED  (negative n = into the arm, opposite of "into wall")
   pushVert(0,                    -HOOK_TAB_EMBED,         frame.barbBodyBotZ_local + HOOK_TAB_EMBED);  // 0  Af
-  pushVert(0,                    HOOK_BARB_PROTRUSION,    frame.barbBodyBotZ_local + HOOK_TAB_EMBED);  // 1  Bf
+  pushVert(0,                    frame.barbProtrusion,    frame.barbBodyBotZ_local + HOOK_TAB_EMBED);  // 1  Bf
   pushVert(0,                    -HOOK_TAB_EMBED,         frame.barbTipBotZ_local);   // 2  Cf
   pushVert(armWidth,             -HOOK_TAB_EMBED,         frame.barbBodyBotZ_local + HOOK_TAB_EMBED);  // 3  Ab
-  pushVert(armWidth,             HOOK_BARB_PROTRUSION,    frame.barbBodyBotZ_local + HOOK_TAB_EMBED);  // 4  Bb
+  pushVert(armWidth,             frame.barbProtrusion,    frame.barbBodyBotZ_local + HOOK_TAB_EMBED);  // 4  Bb
   pushVert(armWidth,             -HOOK_TAB_EMBED,         frame.barbTipBotZ_local);   // 5  Cb
   // Reference winding (verified by cross-products of every face giving the
   // expected outward normal for the (axis, sign) parity-positive case):
@@ -453,18 +460,76 @@ function buildHookTab(frame: HookTabFrame): BuildOp {
   return union([arm, body, tip]);
 }
 
+/**
+ * Issue #153 — inflate the TAB FRAME used for the wall SUBTRACT so the snap
+ * hole is relieved on the two engagement axes, and only those:
+ *
+ *   • LATERAL (wall tangent)  — the hole widens by `relief` (half each side),
+ *     giving the seated tab lateral play and easing insertion.
+ *   • PROTRUSION (wall normal) — the hole deepens INTO the wall by `relief`,
+ *     so the (unchanged) barb no longer bears on the hole floor.
+ *
+ * The Z extents are copied verbatim: `barbTopZ_local` must not move, or the
+ * catch face shifts and the click lands at a different height — the global
+ * scale failure this feature exists to avoid. Relief is applied to the CUT
+ * only, never to the lid tab (`buildHookTab` on the un-relieved frame), since
+ * relief on both printed halves cancels.
+ *
+ * `relief <= 0` returns the frame unchanged, so the default ('tight', and any
+ * legacy project) compiles byte-identically to pre-#153.
+ */
+function relieveFrame(frame: HookTabFrame, relief: number): HookTabFrame {
+  if (relief <= 0) return frame;
+  const half = relief / 2;
+  const next: HookTabFrame = { ...frame };
+  if (frame.wallAxis === 'x') {
+    // Tangent = Y. Widen the arm channel and the barb body in Y, centred.
+    next.armOriginY = frame.armOriginY - half;
+    next.armSizeY = frame.armSizeY + relief;
+    next.barbBodyOriginY = frame.barbBodyOriginY - half;
+    next.barbBodySizeY = frame.barbBodySizeY + relief;
+    // Protrusion = X, into the wall (the side opposite the arm).
+    if (frame.wallNormalSign === -1) {
+      // -x wall: wall material is at smaller X; deepen the barb's min-X face.
+      next.barbBodyOriginX = frame.barbBodyOriginX - relief;
+      next.barbBodySizeX = frame.barbBodySizeX + relief;
+    } else {
+      // +x wall: wall material is at larger X; deepen the barb's max-X face.
+      next.barbBodySizeX = frame.barbBodySizeX + relief;
+    }
+  } else {
+    // Tangent = X, protrusion = Y.
+    next.armOriginX = frame.armOriginX - half;
+    next.armSizeX = frame.armSizeX + relief;
+    next.barbBodyOriginX = frame.barbBodyOriginX - half;
+    next.barbBodySizeX = frame.barbBodySizeX + relief;
+    if (frame.wallNormalSign === -1) {
+      next.barbBodyOriginY = frame.barbBodyOriginY - relief;
+      next.barbBodySizeY = frame.barbBodySizeY + relief;
+    } else {
+      next.barbBodySizeY = frame.barbBodySizeY + relief;
+    }
+  }
+  next.barbProtrusion = frame.barbProtrusion + relief;
+  return next;
+}
+
 /** Subtract-from-shell volume = the full barb (body + taper) in seated
  *  position. The arm itself is NOT subtracted — it stays in the cavity
  *  during insertion via elastic flex. Subtracting the body+taper carves
  *  the snap hole; the wall material above z=barbTopZ becomes the catch
  *  ledge that engages the barb's flat top on retention. The cavity-side
  *  portion of the body (between arm outer face and inner wall surface,
- *  if any) is already empty so the subtraction is a no-op there. */
-function buildHookTabWallSubtract(frame: HookTabFrame): BuildOp {
+ *  if any) is already empty so the subtraction is a no-op there.
+ *
+ *  Issue #153 — `relief` inflates the cut on the lateral + protrusion axes
+ *  (see {@link relieveFrame}); the lid tab is built from the un-relieved
+ *  frame so only the hole grows. */
+function buildHookTabWallSubtract(frame: HookTabFrame, relief: number): BuildOp {
   // Reuse buildHookTab so the subtraction shape matches the tab exactly
   // (including the arm + the embed slop). The tab is in lid-local Z, so
   // shift it UP into world Z by lidPlateBottomZ_world for the shell op.
-  return translate([0, 0, frame.lidPlateBottomZ_world], buildHookTab(frame));
+  return translate([0, 0, frame.lidPlateBottomZ_world], buildHookTab(relieveFrame(frame, relief)));
 }
 
 type HatResolver = (id: string) => HatProfile | undefined;
@@ -1005,10 +1070,13 @@ export function buildSnapCatch(
   // is SUBTRACTED from the shell to create the snap hole. No additive lip.
   if (barbType === 'hook') {
     const tabFrame = computeHookTabFrame(c, params, dims);
+    // Issue #153 — per-catch fit overrides the case-level fit; absent on both
+    // = 'tight' (0 relief), so legacy geometry is unchanged.
+    const relief = fitRelief(c.fit ?? params.fit);
     return {
       lip: null,
       armBarb: buildHookTab(tabFrame),
-      wallPocket: buildHookTabWallSubtract(tabFrame),
+      wallPocket: buildHookTabWallSubtract(tabFrame, relief),
     };
   }
   // Other barb types — additive lip on the case wall, separate barb on

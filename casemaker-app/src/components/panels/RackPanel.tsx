@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useProjectStore } from '@/store/projectStore';
-import type { RackParams, RackAccessory, RackAccessoryType } from '@/types';
+import type { RackParams, RackAccessory, RackAccessoryType, FitVariant } from '@/types';
+import { FIT_VARIANTS } from '@/types';
 import { LabelledField } from '@/components/ui/LabelledField';
 import {
   PRINTER_PRESETS,
@@ -52,8 +53,15 @@ const DEFAULT_RACK: RackParams = {
   accessories: [],
 };
 
-const ACCESSORY_LABELS: { value: RackAccessoryType; label: string; hint: string }[] = [
-  { value: 'blank', label: 'Blank faceplate', hint: 'Solid N-slot plate for drilling or custom cutouts.' },
+/** Issue #153 — labels for the fit ladder, keyed by FitVariant so a new rung
+ *  is a build error here until it gets copy. */
+const RACK_FIT_LABEL: Record<FitVariant, string> = {
+  tight: 'Tight (as designed)',
+  standard: 'Standard',
+  loose: 'Loose',
+};
+
+const ACCESSORY_LABELS: { value: RackAccessoryType; label: string; hint: string }[] = [  { value: 'blank', label: 'Blank faceplate', hint: 'Solid N-slot plate for drilling or custom cutouts.' },
   { value: 'shelf', label: 'Vented shelf', hint: 'Open-front shelf; 86 mm short (pairs back-to-back) or 123 mm long (adds rear screws).' },
   { value: 'keystone', label: 'Keystone patch plate', hint: 'Standard keystone jacks (never scaled); count auto-fits the rack width at 30 mm pitch.' },
   { value: 'cable-tray', label: 'Cable tray', hint: 'Comb-finger tray for cable routing and tie-wraps; occupies 2 slots.' },
@@ -254,6 +262,24 @@ export function RackPanel() {
         Overall: {Math.round(dims.width)} × {Math.round(dims.depth)} × {Math.round(dims.totalH)} mm
         — {usedSlots}/{dims.slots} slots used
       </p>
+
+      <LabelledField
+        label="Snap fit"
+        hint="Issue #153 — how much print relief the plate-tab ledges get. Tight is the as-designed number; go looser if the top/bottom plates were too tight to seat. Only ever loosens — the tab position does not move."
+      >
+        <select
+          value={rack.fit ?? 'tight'}
+          data-testid="rack-fit"
+          aria-label="Rack snap fit variant"
+          onChange={(e) => update({ fit: e.target.value as FitVariant })}
+        >
+          {FIT_VARIANTS.map((v) => (
+            <option key={v} value={v}>
+              {RACK_FIT_LABEL[v]}
+            </option>
+          ))}
+        </select>
+      </LabelledField>
 
       <h3 className="panel-subhead">Printer</h3>
       <LabelledField
