@@ -203,7 +203,10 @@ export function SimMeshes() {
 
       {showSacrificial && (
         // #213 §4 — the legend entry for the pale grey, shown only while the material is drawn.
-        <Html fullscreen zIndexRange={[8, 0]}>
+        // #229 — `style` reaches the fullscreen Html's wrapper (a non-transform Html gets its
+        // pointer-events from there, not from the `pointerEvents` prop); without it the
+        // viewport-sized wrapper swallows clicks meant for the toolbar below it.
+        <Html fullscreen zIndexRange={[8, 0]} style={{ pointerEvents: 'none' }}>
           <div
             data-testid="sim-legend-sacrificial"
             style={{

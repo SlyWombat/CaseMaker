@@ -65,6 +65,42 @@ describe('activeSceneBounds', () => {
       activeSceneBounds({ nodes: nodes([['shell', [[0, 0, 0], [10, 10, 10]]]]), simBoxes: [] }),
     ).toBeNull();
   });
+
+  // #205, and the bounds half of #229's acceptance — while the engrave section owns the viewport,
+  // Top / Fit / zoom must frame the ENGRAVE PREVIEW (its stock and jaws), never the case, which
+  // `SceneMeshes` is not drawing.
+  it('frames the engrave preview stock and jaws, ignoring the case entirely', () => {
+    const bounds = activeSceneBounds({
+      nodes: nodes([['shell', [[-1000, -1000, -1000], [1000, 1000, 1000]]]]),
+      simBoxes: null,
+      engraveBoxes: [
+        { min: [0, 0, -10], max: [80, 50, 0] }, // the stock
+        { min: [0, -15, -10], max: [80, 0, 0] }, // a vise jaw, outside the stock in -Y
+      ],
+    });
+    expect(bounds!.center.toArray()).toEqual([40, 17.5, -5]);
+    expect(bounds!.diag).toBeCloseTo(Math.hypot(80, 65, 10), 5);
+  });
+
+  it('an open engrave section with no preview yet frames nothing, not the case', () => {
+    // `!= null` (not truthiness): an empty list still takes the engrave branch.
+    expect(
+      activeSceneBounds({
+        nodes: nodes([['shell', [[0, 0, 0], [10, 10, 10]]]]),
+        simBoxes: null,
+        engraveBoxes: [],
+      }),
+    ).toBeNull();
+  });
+
+  it('a simulation still up takes the sim bounds over the engrave preview', () => {
+    const bounds = activeSceneBounds({
+      nodes: nodes([['shell', [[-1000, -1000, -1000], [1000, 1000, 1000]]]]),
+      simBoxes: [{ min: [0, 0, -5], max: [100, 60, 0] }],
+      engraveBoxes: [{ min: [0, 0, -10], max: [10, 10, 0] }],
+    });
+    expect(bounds!.center.toArray()).toEqual([50, 30, -2.5]);
+  });
 });
 
 // Issue #197 review, fix 3 — "closing a simulation can leave the camera looking at nothing".

@@ -110,6 +110,15 @@ const AXIS_LABEL = {
   textShadow: '0 0 3px #000',
 } as const;
 
+/**
+ * #229 — every label here is read-only, so the drei `Html` wrapper must never take pointer
+ * events. A non-`transform` `Html` renders an inner div sized to the canvas with
+ * `pointer-events:auto` (drei's `pointerEvents` prop only applies in the transform branch), and
+ * `fullscreen` makes that div cover the whole viewport at the toolbar's own z-index — so the
+ * legend was swallowing the Top/Fit/zoom clicks. `style` reaches that wrapper, the prop does not.
+ */
+const NON_INTERACTIVE = { pointerEvents: 'none' } as const;
+
 export function EngravePreview() {
   const preview = useEngravePreviewStore((s) => s.preview);
   const stock = useEngraveJobStore((s) => s.job.stock);
@@ -158,12 +167,12 @@ export function EngravePreview() {
           <boxGeometry args={[0.4, axisLen, 0.4]} />
           <meshBasicMaterial color="#30a46c" />
         </mesh>
-        <Html position={[axisLen, 0, 0]} center>
+        <Html position={[axisLen, 0, 0]} center style={NON_INTERACTIVE}>
           <span data-testid="engrave-axis-x" style={AXIS_LABEL}>
             X
           </span>
         </Html>
-        <Html position={[0, axisLen, 0]} center>
+        <Html position={[0, axisLen, 0]} center style={NON_INTERACTIVE}>
           <span data-testid="engrave-axis-y" style={AXIS_LABEL}>
             Y
           </span>
@@ -171,7 +180,7 @@ export function EngravePreview() {
       </group>
 
       {fixedJaw && (
-        <Html position={centreOf(fixedJaw.mesh.bbox)} center>
+        <Html position={centreOf(fixedJaw.mesh.bbox)} center style={NON_INTERACTIVE}>
           <span
             data-testid="engrave-jaw-source"
             style={{
@@ -189,7 +198,7 @@ export function EngravePreview() {
       )}
 
       {/* Screen-fixed legend: each distinct depth and the colour the floors use for it. */}
-      <Html fullscreen zIndexRange={[8, 0]}>
+      <Html fullscreen zIndexRange={[8, 0]} style={NON_INTERACTIVE}>
         <div
           data-testid="engrave-preview-legend"
           style={{
