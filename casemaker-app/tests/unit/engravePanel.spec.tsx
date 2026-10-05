@@ -407,3 +407,92 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     expect((screen.getByTestId('engrave-run-sheet') as HTMLButtonElement).disabled).toBe(true);
   });
 });
+
+// #219's panel: the two single-line kinds in the Add menu, their editors, and the finding the
+// pure validator raises when a trace's strokes merge under the cutter.
+describe('EngravePanel — single-line traces (#219)', () => {
+  it('adds a Line and a Single-line text from the Add menu', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-line'));
+    expect(useEngraveJobStore.getState().job.traces![0]!.kind).toBe('line');
+    expect(screen.getByTestId('engrave-trace-row-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-trace-points-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-trace-closed-0')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('engrave-add-stroke-label'));
+    expect(useEngraveJobStore.getState().job.traces![1]!.kind).toBe('stroke-label');
+    expect(screen.getByTestId('engrave-trace-row-1')).toBeTruthy();
+    expect(screen.getByTestId('engrave-trace-text-1')).toBeTruthy();
+    expect(screen.getByTestId('engrave-trace-font-1')).toBeTruthy();
+    // Traces count as items (#219), alongside the three default labels.
+    expect(screen.getByTestId('engrave-item-count').textContent).toBe('5');
+  });
+
+  it('commits points only when the path is a valid polyline', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-line'));
+    // One point is not a line: the job keeps the valid default path.
+    fireEvent.change(screen.getByTestId('engrave-trace-points-0'), { target: { value: '1, 2' } });
+    const after = useEngraveJobStore.getState().job.traces![0]!;
+    expect(after.kind === 'line' && after.points.length).toBe(2);
+    // Three points commit.
+    fireEvent.change(screen.getByTestId('engrave-trace-points-0'), {
+      target: { value: '0, 0\n10, 0\n10, 10' },
+    });
+    const done = useEngraveJobStore.getState().job.traces![0]!;
+    expect(done.kind === 'line' && done.points.length).toBe(3);
+  });
+
+  it('warns (not errors) when a trace’s strokes merge, and leaves Generate enabled', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-line'));
+    // Two parallel segments 0.8 mm apart under the 1.0 mm cutter (r = 0.5).
+    fireEvent.change(screen.getByTestId('engrave-trace-points-0'), {
+      target: { value: '-5, 0\n5, 0\n5, 0.8\n-5, 0.8' },
+    });
+    expect(screen.getByTestId('engrave-trace-finding-0-trace-self-overlap')).toBeTruthy();
+    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('removes a trace', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-line'));
+    fireEvent.click(screen.getByTestId('engrave-trace-remove-0'));
+    expect(useEngraveJobStore.getState().job.traces).toEqual([]);
+  });
+});
+
+// #243 §14.2 A2: the Simulated row carries the same blind-spot sentence the Simulate panel
+// builds — imported from `simCoverage`, never written again, so the two cannot disagree.
+describe('EngravePanel — the Simulated row’s coverage sentence (#243)', () => {
+  beforeEach(() => {
+    useEngraveRunStore.getState().reset();
+  });
+
+  it('names the geometry the sweep saw and did not see for a swept run', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({ simStatus: 'ready', pathOnly: false, simDiagnostics: [] });
+    });
+    const cov = screen.getByTestId('engrave-sim-coverage').textContent ?? '';
+    expect(cov).toContain('Checked: the tool against the stock');
+    // The Z1 states no holder, so the collet nut is named as a blind spot.
+    expect(cov).toContain('the collet nut');
+  });
+
+  it('says so in the same place when the run was path-only', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({ simStatus: 'refused', pathOnly: true, simDiagnostics: [] });
+    });
+    expect(screen.getByTestId('engrave-sim-coverage').textContent ?? '').toMatch(/path-only/);
+  });
+
+  it('says nothing was swept when the run was refused outright', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({ simStatus: 'refused', pathOnly: false, simDiagnostics: [] });
+    });
+    expect(screen.getByTestId('engrave-sim-coverage').textContent ?? '').toContain('Nothing was swept');
+  });
+});

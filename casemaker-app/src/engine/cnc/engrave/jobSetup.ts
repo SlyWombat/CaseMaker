@@ -1,12 +1,17 @@
 import { rectProfile } from '@/engine/compiler/profile';
 import type { MachineProfile } from '@/engine/cnc/machine';
 import { libraryTool } from '@/engine/cnc/toolLibrary';
-import type { Tool } from '@/engine/cnc/tool';
+import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import { stubSetup, type Setup, type Workholding } from '@/engine/cnc/setup';
-import { polygonSelfIntersects, resolveItems } from '@/engine/cnc/engrave/partPlan';
-import type { EngraveAnyItem, EngraveJob } from '@/types/engraveJob';
+import {
+  polygonSelfIntersects,
+  resolveItems,
+  traceOperationName,
+  traceSelfOverlapFindings,
+} from '@/engine/cnc/engrave/partPlan';
+import type { EngraveAnyItem, EngraveJob, EngraveTraceItem } from '@/types/engraveJob';
 
 /**
  * The two pure derivations that turn an `EngraveJob` into the emulator's inputs (#200).
@@ -44,7 +49,12 @@ export type JobFindingCode =
   | 'item-empty'
   | 'item-chars-lost'
   | 'item-detail-lost'
-  | 'item-outside-stock';
+  | 'item-outside-stock'
+  // Single-line traces (#219). `trace-self-overlap` is raised here; `trace-outside-stock` needs
+  // the swept region intersected with the stock, which only the worker evaluates (#201). Both
+  // are part of `TraceFindingCode` in `partPlan.ts`, where the geometry that detects them lives.
+  | 'trace-self-overlap'
+  | 'trace-outside-stock';
 
 export interface JobFinding {
   severity: 'error' | 'warning';
@@ -73,12 +83,20 @@ export function itemLabel(item: EngraveAnyItem): string {
       return `Frame${name} ${item.width} wide`;
     case 'cutaway':
       return `Cutaway${name} (${item.islands.length} island${item.islands.length === 1 ? '' : 's'})`;
+    // Imported vector outline (#217), part of `EngraveAnyItem` so a frame/cut-away may name it.
+    case 'vector':
+      return `Imported vector${name} "${item.sourceName}" ${item.width}×${item.height}`;
   }
 }
 
 /** Does this item produce any region at all? A shape always does; a label needs text. */
 function itemHasWork(item: EngraveAnyItem): boolean {
   return 'kind' in item || item.text.trim().length > 0;
+}
+
+/** Does this trace produce any cut? A line needs two points; a stroke label needs text (#219). */
+function traceHasWork(trace: EngraveTraceItem): boolean {
+  return trace.kind === 'line' ? trace.points.length >= 2 : trace.text.trim().length > 0;
 }
 
 /** The tool the job names, or null when `toolKey` is not in `TOOL_LIBRARY`. */
@@ -133,10 +151,17 @@ export function toSetup(job: EngraveJob, machine: MachineProfile): Setup {
  */
 export function validateJob(job: EngraveJob): JobFinding[] {
   const findings: JobFinding[] = [];
-  const all: EngraveAnyItem[] = [...job.labels, ...job.shapes, ...(job.combined ?? [])];
+  const all: EngraveAnyItem[] = [
+    ...job.labels,
+    ...job.shapes,
+    ...(job.combined ?? []),
+    ...(job.vectors ?? []),
+  ];
   // A construction item (#215) produces no cut of its own, so its depth is irrelevant and it
   // must not be the reason a job reads as "has work".
   const enabled: EngraveAnyItem[] = all.filter((item) => item.enabled && !item.construction);
+  // Traces (#219) are a separate list and carry their own depth and enable flag.
+  const enabledTraces: EngraveTraceItem[] = (job.traces ?? []).filter((t) => t.enabled && !t.construction);
   const { thickness } = job.stock;
   const floorAllowed = thickness - job.minFloor;
 
@@ -149,6 +174,20 @@ export function validateJob(job: EngraveJob): JobFinding[] {
         labelId: item.id,
         message:
           `${itemLabel(item)} cuts ${item.depth} mm deep; only ${remaining} mm of floor ` +
+          `would remain on a ${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
+      });
+    }
+  }
+
+  for (const trace of enabledTraces) {
+    if (trace.depth > floorAllowed) {
+      const remaining = thickness - trace.depth;
+      findings.push({
+        severity: 'error',
+        code: 'depth-exceeds-stock',
+        labelId: trace.id,
+        message:
+          `${traceOperationName(trace)} cuts ${trace.depth} mm deep; only ${remaining} mm of floor ` +
           `would remain on a ${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
       });
     }
@@ -189,11 +228,11 @@ export function validateJob(job: EngraveJob): JobFinding[] {
     }
   }
 
-  if (!enabled.some(itemHasWork)) {
+  if (!enabled.some(itemHasWork) && !enabledTraces.some(traceHasWork)) {
     findings.push({
       severity: 'error',
       code: 'no-items',
-      message: 'The job has no enabled label with text or shape.',
+      message: 'The job has no enabled label with text, shape or trace.',
     });
   }
 
@@ -205,12 +244,14 @@ export function validateJob(job: EngraveJob): JobFinding[] {
     });
   }
 
-  const deepest = enabled.reduce((max, item) => Math.max(max, item.depth), 0);
+  // The deepest cut across BOTH region items and traces, so an unmodelled-tall trace is reported
+  // with the same clearance warning as a deep pocket.
+  const deepestItem = [...enabled, ...enabledTraces].reduce<{ id: string; depth: number } | null>(
+    (deepestSoFar, item) => (!deepestSoFar || item.depth > deepestSoFar.depth ? { id: item.id, depth: item.depth } : deepestSoFar),
+    null,
+  );
+  const deepest = deepestItem?.depth ?? 0;
   if (job.workholding.vise.stockProud < deepest + 1) {
-    const deepestItem = enabled.reduce<EngraveAnyItem | null>(
-      (deepestSoFar, item) => (!deepestSoFar || item.depth > deepestSoFar.depth ? item : deepestSoFar),
-      null,
-    );
     findings.push({
       severity: 'warning',
       code: 'stock-proud-too-small',
@@ -229,6 +270,15 @@ export function validateJob(job: EngraveJob): JobFinding[] {
       code: 'vise-default',
       message: 'Vise dimensions are unmeasured defaults (#208); collisions cannot be trusted yet.',
     });
+  }
+
+  // A trace whose cutter-swept strokes come closer than the cutter width fills in (#219): the
+  // letters merge. A warning, not an error — the cut still exists, it is just not what was drawn.
+  // It needs the cutter's radius, so it is skipped when the job names no usable flat cutter.
+  const tool = jobTool(job);
+  if (tool) {
+    const r = cuttingRadiusForSweep(tool);
+    if (r.ok) findings.push(...traceSelfOverlapFindings(job, r.radius));
   }
 
   findings.push(...validateSacrificial(job));

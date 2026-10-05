@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
-import { defaultEngraveJob, newEngraveLabelId, newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
+import { DEFAULT_STROKE_FONT_ID } from '@/engine/fonts/stroke/strokeFont';
+import {
+  defaultEngraveJob,
+  newEngraveLabelId,
+  newEngraveShapeId,
+  newEngraveTraceId,
+} from '@/engine/cnc/engrave/defaults';
 import { todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
@@ -14,11 +20,14 @@ import type {
   EngraveJob,
   EngraveJobSources,
   EngraveLabel,
+  EngraveLineItem,
   EngravePolygonShape,
   EngraveRectShape,
   EngraveShape,
   EngraveShapeBase,
   EngraveSlotShape,
+  EngraveStrokeLabelItem,
+  EngraveTraceItem,
   FieldSource,
   Sacrificial,
   ViseParams,
@@ -54,6 +63,14 @@ export type ShapePatch = Partial<Omit<EngraveRectShape, 'kind'>> &
 export type CombinedPatch = Partial<Omit<EngraveBorderShape, 'kind'>> &
   Partial<Omit<EngraveFrameShape, 'kind'>> &
   Partial<Omit<EngraveCutawayShape, 'kind'>>;
+
+/**
+ * A hand edit to one trace item (#219). The same shape as `ShapePatch`: every field optional and
+ * both kinds' fields present, so a row can patch just what it changed without naming the
+ * discriminant; the `kind` is never patched (a line does not become a stroke label in place).
+ */
+export type TracePatch = Partial<Omit<EngraveLineItem, 'kind'>> &
+  Partial<Omit<EngraveStrokeLabelItem, 'kind'>>;
 
 export const ENGRAVE_JOB_KEY = 'casemaker.engraveJob.v1';
 /** Where a payload that failed validation is parked so it is not silently lost. */
@@ -199,6 +216,26 @@ function newCombined(kind: EngraveCombinedShape['kind'], job: EngraveJob): Engra
   }
 }
 
+/**
+ * A default trace of the given kind (#219), centred on the stock like a new shape; every number
+ * is valid against the schema. A `line` is a short open polyline the user redraws; a
+ * `stroke-label` uses the one bundled single-stroke face at the default cap height.
+ */
+function newTrace(kind: EngraveTraceItem['kind'], job: EngraveJob): EngraveTraceItem {
+  const base = {
+    id: newEngraveTraceId(),
+    position: { x: job.stock.length / 2, y: job.stock.width / 2 },
+    rotation: 0,
+    depth: 0.5,
+    enabled: true,
+  };
+  if (kind === 'line') {
+    // A 20 mm horizontal line through the centre; the row editor replaces the points.
+    return { ...base, kind: 'line', points: [[-10, 0], [10, 0]], closed: false };
+  }
+  return { ...base, kind: 'stroke-label', text: 'Line', font: DEFAULT_STROKE_FONT_ID, size: 8 };
+}
+
 export interface EngraveJobState {
   job: EngraveJob;
   /** Merge a stock edit and stamp each edited field's source (#254). Defaults to `'user'`. */
@@ -223,6 +260,11 @@ export interface EngraveJobState {
   /** Merge a hand edit into one combined item (#215). A partial `position` is merged, not replaced. */
   updateCombined: (id: string, patch: CombinedPatch) => void;
   removeCombined: (id: string) => void;
+  /** Add a default trace of `kind` (#219) and return its id. */
+  addTrace: (kind: EngraveTraceItem['kind']) => string;
+  /** Merge a hand edit into one trace (#219). A partial `position` is merged, not replaced. */
+  updateTrace: (id: string, patch: TracePatch) => void;
+  removeTrace: (id: string) => void;
   /**
    * Replace the sacrificial material model (#213). The caller owns `source`: the panel passes
    * `'saved'` for an edit it made, a preset carries its own, `noneSacrificial()` clears it.
@@ -335,6 +377,30 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
 
     removeCombined: (id) =>
       apply((job) => ({ ...job, combined: (job.combined ?? []).filter((c) => c.id !== id) })),
+
+    addTrace: (kind) => {
+      const trace = newTrace(kind, get().job);
+      apply((job) => ({ ...job, traces: [...(job.traces ?? []), trace] }));
+      return trace.id;
+    },
+
+    updateTrace: (id, patch) =>
+      apply((job) => ({
+        ...job,
+        traces: (job.traces ?? []).map((trace) =>
+          trace.id === id
+            ? ({
+                ...trace,
+                ...patch,
+                // Merge a partial position rather than replacing the whole object.
+                position: patch.position ? { ...trace.position, ...patch.position } : trace.position,
+              } as EngraveTraceItem)
+            : trace,
+        ),
+      })),
+
+    removeTrace: (id) =>
+      apply((job) => ({ ...job, traces: (job.traces ?? []).filter((t) => t.id !== id) })),
 
     setSacrificial: (sacrificial) => apply((job) => ({ ...job, sacrificial })),
 

@@ -25,6 +25,11 @@ export function newEngraveShapeId(): string {
   return newId('shp');
 }
 
+/** Fresh trace id (#219). A trace is its own kind of item, so it gets its own prefix. */
+export function newEngraveTraceId(): string {
+  return newId('trc');
+}
+
 /**
  * The CNC-2 acceptance job (#209): three labels at three depths on a softwood blank.
  *

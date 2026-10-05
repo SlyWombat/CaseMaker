@@ -173,6 +173,39 @@ describe('validateJob (#200)', () => {
     job.workholding.vise.source = 'saved';
     expect(validateJob(job).some((f) => f.code === 'stock-proud-too-small')).toBe(true);
   });
+
+  // #219: a trace is work too, so a job of traces alone is not "no items"; its own findings
+  // (a stroke that merges under the cutter, a depth past the floor) are raised here.
+  it('treats an enabled trace as work, so a trace-only job is not “no items” (#219)', () => {
+    const job = defaultEngraveJob();
+    job.labels = [];
+    job.shapes = [];
+    job.traces = [
+      { id: 'tr', kind: 'line', position: { x: 50, y: 30 }, rotation: 0, depth: 0.5, enabled: true, points: [[0, 0], [10, 0]], closed: false },
+    ];
+    expect(validateJob(job).some((f) => f.code === 'no-items')).toBe(false);
+  });
+
+  it('warns when a trace’s strokes merge under the cutter (#219)', () => {
+    const job = defaultEngraveJob(); // flat-1.0 -> r = 0.5, so strokes closer than 1.0 mm merge
+    job.traces = [
+      { id: 'tr', kind: 'line', position: { x: 50, y: 30 }, rotation: 0, depth: 0.5, enabled: true, points: [[-5, 0], [5, 0], [5, 0.8], [-5, 0.8]], closed: false },
+    ];
+    const f = validateJob(job).find((x) => x.code === 'trace-self-overlap');
+    expect(f).toBeTruthy();
+    expect(f!.severity).toBe('warning');
+    expect(f!.labelId).toBe('tr');
+  });
+
+  it('errors when a trace is deeper than the floor allows (#219)', () => {
+    const job = defaultEngraveJob(); // 12 mm stock, minFloor 1 -> 11 mm allowed
+    job.traces = [
+      { id: 'tr', kind: 'line', position: { x: 50, y: 30 }, rotation: 0, depth: 11.5, enabled: true, points: [[0, 0], [10, 0]], closed: false },
+    ];
+    const f = validateJob(job).find((x) => x.code === 'depth-exceeds-stock' && x.labelId === 'tr');
+    expect(f).toBeTruthy();
+    expect(f!.severity).toBe('error');
+  });
 });
 
 describe('toSetup (#200)', () => {
@@ -274,5 +307,41 @@ describe('engraveJobStore (#200)', () => {
     const frame = s().job.combined![0]!;
     expect(frame.kind === 'frame' && frame.around).toBe(s().job.labels[0]!.id);
     expect(id).toBe(frame.id);
+  });
+
+  // #219: traces get their own add/update/remove actions, like combined items and shapes.
+  it('adds, updates and removes a trace through the store (#219)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    const id = s().addTrace('line');
+    expect(id).toBeTruthy();
+    expect(s().job.traces).toHaveLength(1);
+    expect(s().job.traces![0]!.kind).toBe('line');
+
+    s().updateTrace(id, { depth: 1.2, points: [[0, 0], [10, 0], [10, 10]] });
+    const updated = s().job.traces![0]!;
+    expect(updated).toMatchObject({ depth: 1.2 });
+    expect(updated.kind === 'line' && updated.points.length).toBe(3);
+
+    // The edit is persisted, so a reload keeps it.
+    expect(JSON.parse(localStorage.getItem(KEY)!).traces[0].depth).toBe(1.2);
+
+    s().removeTrace(id);
+    expect(s().job.traces).toEqual([]);
+  });
+
+  it('adds a single-line text trace with the bundled stroke font (#219)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    const id = s().addTrace('stroke-label');
+    const t = s().job.traces![0]!;
+    expect(t.kind).toBe('stroke-label');
+    expect(id).toBe(t.id);
+    // A single-stroke face, not an outline font (#219's "Do not trace outline fonts").
+    expect(t.kind === 'stroke-label' && t.font.length > 0).toBe(true);
   });
 });

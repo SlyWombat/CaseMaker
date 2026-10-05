@@ -22,8 +22,11 @@ import {
 import { EngraveLabelRow } from './EngraveLabelRow';
 import { EngraveShapeRow } from './EngraveShapeRow';
 import { EngraveCombinedRow } from './EngraveCombinedRow';
+import { EngraveTraceRow } from './EngraveTraceRow';
 import { EngraveSetupFlow } from './EngraveSetupFlow';
 import { RunSheetView } from './RunSheetView';
+import { coverageDisclaimer, type SimRunOutcome } from './simCoverage';
+import { viseEnvelope } from '@/engine/cnc/fixture';
 import type {
   EngraveAnyItem,
   EngraveCombinedShape,
@@ -110,6 +113,17 @@ const ADD_COMBINED_KINDS: readonly { value: EngraveCombinedShape['kind']; label:
   { value: 'border', label: 'Border', needsRef: false },
   { value: 'frame', label: 'Frame', needsRef: true },
   { value: 'cutaway', label: 'Cut-away', needsRef: true },
+];
+
+/**
+ * The two TRACE kinds (#219), added from the same menu but to `job.traces`. A trace is a
+ * single-line cut — the cutter's centre follows the path, so the groove is exactly the cutter's
+ * width — which is how fine script and hairlines are engraved. It needs no reference, so both
+ * entries are always available.
+ */
+const ADD_TRACE_KINDS: readonly { value: 'line' | 'stroke-label'; label: string }[] = [
+  { value: 'line', label: 'Line' },
+  { value: 'stroke-label', label: 'Single-line text' },
 ];
 
 /** Every item of the job, in the order `toPartPlan` walks them (#214/#215). */
@@ -204,6 +218,9 @@ export function EngravePanel(): JSX.Element {
   const addCombined = useEngraveJobStore((s) => s.addCombined);
   const updateCombined = useEngraveJobStore((s) => s.updateCombined);
   const removeCombined = useEngraveJobStore((s) => s.removeCombined);
+  const addTrace = useEngraveJobStore((s) => s.addTrace);
+  const updateTrace = useEngraveJobStore((s) => s.updateTrace);
+  const removeTrace = useEngraveJobStore((s) => s.removeTrace);
   const setTool = useEngraveJobStore((s) => s.setTool);
   const setVise = useEngraveJobStore((s) => s.setVise);
   const setSacrificial = useEngraveJobStore((s) => s.setSacrificial);
@@ -276,6 +293,24 @@ export function EngravePanel(): JSX.Element {
   const ackCodes = requiredAckCodes(run);
   const saveBlockerText = saveBlocker(run);
   const cam = run.generated?.cam ?? null;
+
+  // #243 (§14.2 A2) — the blind-spot half of the Simulated row. The SAME pure builder the
+  // Simulate panel uses, fed from THIS run rather than re-written: the fixture the setup
+  // modelled, whether sacrificial material was included, the machine's own holder (null on the
+  // Z1, so the collet nut is unmodelled), and the codes the sweep raised. Importing it is what
+  // keeps the two panels from disagreeing about what the sweep saw.
+  const simCoverage: string[] =
+    run.simStatus === null
+      ? []
+      : coverageDisclaimer({
+          outcome: (run.simStatus === 'ready' ? 'swept' : run.pathOnly ? 'path-only' : 'refused') as SimRunOutcome,
+          fixtureLabels: viseEnvelope(job.stock, job.workholding.vise, job.sacrificial).boxes.map((b) => b.label),
+          fixtureSource: job.workholding.vise.source,
+          sacrificialModelled: hasSacrificial(job.sacrificial),
+          holderKnown: Z1.holder !== null,
+          toolName: toolEntry?.tool.name ?? null,
+          codes: run.simDiagnostics.map((d) => d.code),
+        });
 
   const rowToolpath: RowState = cam ? 'tick' : run.phase === 'generating' ? 'pending' : run.generated ? 'cross' : 'idle';
   const rowToolpathText = `Toolpath generated${
@@ -375,9 +410,10 @@ export function EngravePanel(): JSX.Element {
   /** A short name for an item id, for the recommendation's "worst item" line. */
   function itemDisplay(id: string): string {
     const item = allItems(job).find((it) => it.id === id);
-    if (!item) return id;
-    if ('kind' in item) return item.name ?? item.kind;
-    return item.text;
+    if (item) return 'kind' in item ? item.name ?? item.kind : item.text;
+    const trace = (job.traces ?? []).find((t) => t.id === id);
+    if (trace) return trace.name ?? (trace.kind === 'line' ? 'Line' : `Text "${trace.text}"`);
+    return id;
   }
 
   // ---- combined shapes (#215 work item 3) --------------------------------------------------
@@ -392,6 +428,7 @@ export function EngravePanel(): JSX.Element {
   }
 
   const combinedCount = job.combined?.length ?? 0;
+  const traceCount = job.traces?.length ?? 0;
   const hasReferenceable = job.labels.length + job.shapes.length + combinedCount > 0;
 
   const stockNum = (key: 'length' | 'width' | 'thickness', label: string, title: string): JSX.Element => {
@@ -577,7 +614,7 @@ export function EngravePanel(): JSX.Element {
       <h3 style={SUBHEAD}>
         Items{' '}
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-item-count">
-          {job.labels.length + job.shapes.length + combinedCount}
+          {job.labels.length + job.shapes.length + combinedCount + traceCount}
         </span>
       </h3>
       {job.labels.map((label, i) => (
@@ -615,6 +652,17 @@ export function EngravePanel(): JSX.Element {
           onRemove={() => removeCombined(shape.id)}
         />
       ))}
+      {(job.traces ?? []).map((trace, i) => (
+        <EngraveTraceRow
+          key={trace.id}
+          trace={trace}
+          index={i}
+          maxDepth={maxDepth}
+          findings={findingsFor(trace.id)}
+          onChange={(patch) => updateTrace(trace.id, patch)}
+          onRemove={() => removeTrace(trace.id)}
+        />
+      ))}
       {/* The one "Add" control (#214 work item 5): a menu with the five kinds. The label entry
           keeps the historic `engrave-add-label` test id (#205) as its own menu item, so the
           pre-#214 label flow is still one click. #215 adds the three combined kinds, which need
@@ -650,6 +698,24 @@ export function EngravePanel(): JSX.Element {
                   : `Add a ${k.label.toLowerCase()} built from other items.`
               }
               onClick={() => addCombined(k.value)}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
+          <span style={{ ...MUTED, margin: 0 }}>single-line:</span>
+          {ADD_TRACE_KINDS.map((k) => (
+            <button
+              key={k.value}
+              type="button"
+              data-testid={`engrave-add-${k.value}`}
+              title={
+                k.value === 'line'
+                  ? 'Add a polyline the cutter traces — the groove is exactly the cutter’s width.'
+                  : 'Add text in a single-stroke font, traced as a line rather than pocketed.'
+              }
+              onClick={() => addTrace(k.value)}
             >
               {k.label}
             </button>
@@ -988,6 +1054,18 @@ export function EngravePanel(): JSX.Element {
               <RunRow testid="engrave-run-toolpath" state={rowToolpath} text={rowToolpathText} />
               <RunRow testid="engrave-run-verified" state={rowVerified} text={rowVerifiedText} />
               <RunRow testid="engrave-run-simulated" state={rowSimulated} text={rowSimulatedText} />
+              {simCoverage.length > 0 && (
+                <div
+                  data-testid="engrave-sim-coverage"
+                  style={{ margin: '2px 0 4px 18px', display: 'flex', flexDirection: 'column', gap: 2 }}
+                >
+                  {simCoverage.map((line, i) => (
+                    <span key={i} style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.45 }}>
+                      {line}
+                    </span>
+                  ))}
+                </div>
+              )}
               <RunRow testid="engrave-run-oracle" state={rowOracle} text={rowOracleText} />
             </div>
 
