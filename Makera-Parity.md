@@ -64,7 +64,7 @@ configs cover every value from 0 to 14 **except 5**.
 | 8 | 3D Contour | yes | deferred |
 | 9 | 2D Thread mill | yes | not planned |
 | 10 | 3D Drilling | yes | planned |
-| 11 | Rotation Relief | yes | deferred (decisions 3, 11) |
+| 11 | Rotation Relief | yes | **designed in `/Rotary.md` (#235); class R of three** — our classes are W (wrap), I (indexed) and R (axis-crossing relief). Makera ship only R; W is the gap in the incumbent's offering. Decisions 3 and 11 stand; the design is what they were waiting for |
 | 12 | 3D Thread mill | yes | not planned |
 | 13 | 2D Chamfer | yes | planned |
 | 14 | 3D Chamfer | yes | planned |
@@ -173,7 +173,12 @@ Several thread-mill fields are named in pinyin (`luoJu` pitch, `jiaJiao` include
 ## 5. Stock, materials and feeds
 
 - **Stock**: `STOCK|id=cuboid|length|width|height|diameter`. The `diameter` field implies
-  a cylinder stock type for rotary work. Case Maker: cuboid in V1.
+  a cylinder stock type for rotary work. Case Maker: cuboid in V1. Makera's CAM asks for the
+  stock **shape — Square or Round — at project setup** (`/Rotary.md` §1.3), which is where the
+  `diameter` field comes from; **we have never seen a `;@MKR|STOCK` record for round stock**,
+  so the field order and whether `length/width/height` are still written beside `diameter` are
+  both unverified. A rotary job's `STOCK` record is a thing to capture at the bench (#238)
+  before the post writes one.
 - **Materials**: `t_MaterialList` has **15** entries — PCB, 6061 and 7075 aluminium,
   Bakelite, Delrin, Brass, Carbon Fiber, Acrylic, Polycarbonate, Copper, Epoxy Tooling,
   Synthetic Stone, ABS, Hardwood, Softwood. `t_MaterialSpecs` adds 189 purchasable stock
@@ -252,6 +257,13 @@ laser, external output, light, air, tool-sensor power, probe laser, wireless-pro
 charging and anti-static; probe fast/slow/return speeds, probe height and max travel;
 rotary module X/Y/Z offsets, max A speed and acceleration; laser power limits and a
 "Laser Clustering" workaround.
+
+> **The "rotary module X/Y/Z offsets" strings are the module's datum**, and the wiki says that
+> datum is *preset*: *"The 4th-axis zero point is preset in the software at the center of the
+> right edge of the spindle"* (`/Rotary.md` §1.4). So those three strings are what a fitted
+> module would write, and whether the preset is good enough to use as a `fixture` source or has
+> to be probed at every mounting is **#238's measurement**, not a reading we can take from the
+> string list.
 
 Relevant only to the deferred bridge (`/Fabrication.md` §5.7). It is recorded here because
 it is the surface a bridge would have to cover, and because it shows how much of Studio's
@@ -445,7 +457,7 @@ no other source here does:
 | `LED/` | 10 — ABS, 5× acrylic, aluminium, 3× PCB | Real 2.5D and engraving jobs across materials |
 | `Laser/` | `AudreyHepburn.nc` (2.8 MB), small variant | A file our parser must **refuse**, not mis-simulate |
 | `Relief/` | `PirateShip.nc` (2.8 MB) | Dense 3D relief — the dexel case (§4.5 of `/Simulation.md`) |
-| `Rotation/` | `NefertitiFinish.nc` (2.6 MB), `NefertitiRough.nc` | **A-axis motion.** Distinct files despite matching byte counts |
+| `Rotation/` | `NefertitiFinish.nc` (2.6 MB), `NefertitiRough.nc` | **A-axis motion**, measured 2026-10-05 (`/Rotary.md` §1.1). Rough: 5 063 moves, a helix — X and A interpolate in 3 885 of 4 547 cuts. Finish: 100 519 moves, **Z and A interpolate in 89 198** of them. **Y is 0 throughout in both** — the tool stays over the axis, and that, not "A never interpolates", is the real constraint. **Z is referenced to the rotary axis** (radius, not depth below a face) and reaches **−5.00** in the finish file, i.e. it crosses the axis. A is unwound to **−153 720°** and reset with `G92.4A0S0`. Distinct files despite matching byte counts; `Tests/4th-test-air.nc` is byte-identical to the rough file but for `T6M6` |
 | `Tests/` | 10, from **53 bytes** up | Tiny, hand-sized parser fixtures |
 
 The `Tests/` files are the most immediately useful thing found all session: `atc-test.nc`
@@ -490,6 +502,14 @@ own config (`src/configZ1.default`) names them explicitly:
 So `maxFeedRate: 1200` is the **cutting** ceiling — the largest `F` Studio will write on a
 `G1` — and FreeCAD's `max_velocity` is an **axis traverse** figure, which caps rapids.
 Both can be true at once, and in stock Smoothieware the seek rate is 3× the feed rate.
+
+> **Correction (2026-10-05, `/Rotary.md` §1.2).** The block above is the stock Smoothieware
+> default. Makera's **shipped** `configZ1.default` reads `#default_seek_rate 2000`, not 3000 —
+> so the 3× relationship is not what this machine ships with. **Neither number is a device
+> figure**: both lines are commented out, so the firmware is using its compiled-in default
+> until something sets it. Treat 2000 and 3000 alike — as readings of a file, not of hardware —
+> and get the real traverse rate from #208 D3's timed air run, which is also what calibrates
+> `ASSUMED_RAPID_MM_MIN` (#242).
 
 **Neither 6000 nor those firmware numbers are Z1 figures.** Every rate line in
 `configZ1.default` is commented out, so the firmware uses its compiled-in defaults, and
