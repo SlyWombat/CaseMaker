@@ -1039,9 +1039,11 @@ heightmap engine · 4th axis.
 sample files before our CAM core exists. It cross-checks #171 and #178 once those land, and
 it is what makes the `.nc` trustworthy without cutting.
 
-#165 and #166 gate everything numeric. **#178 gates #171, #172 and #174** — all three
-ask it for depth limits rather than carrying rules of their own. #175 needs only #167.
-#176 needs all of them.
+#165 and #166 gate everything numeric. **#178 gates #171 and #172** — both ask it for
+depth limits rather than carrying rules of their own. **#174 no longer needs it gated**:
+its deepest-cut check takes an injected `DepthLimit`, so CNC-2 passes `thickness − minFloor`
+(wood has no layer stack) and the badge passes #178's `maxDepthAt`, the same verifier either
+way (#174, rescoped 2026-10-03). #175 needs only #167. #176 needs all of them.
 
 ### 9.4 Still unverified
 

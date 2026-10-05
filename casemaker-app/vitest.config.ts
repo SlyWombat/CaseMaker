@@ -2,7 +2,9 @@ import { defineConfig } from 'vitest/config';
 import path from 'node:path';
 
 export default defineConfig({
-  define: { __FEATURE_SIM__: 'true' },
+  // #181 — the unit tests run the web target, matching the default build. Without this the
+  // `__BUILD_TARGET__` reference in src/platform/capabilities.ts would be an undeclared global.
+  define: { __FEATURE_SIM__: 'true', __BUILD_TARGET__: JSON.stringify('web') },
   resolve: {
     alias: { '@': path.resolve(__dirname, 'src') },
   },
