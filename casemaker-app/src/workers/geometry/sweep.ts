@@ -147,6 +147,21 @@ export interface SweepStats {
   checkpointsSkipped: number;
   contours: number;
   ms: { union2d: number; extrude: number; subtract: number; airCheck: number; total: number };
+  /**
+   * Which backend produced these numbers (#239, `/Rotary.md` §5.5). Absent means the EXACT 2.5D
+   * sweep, whose numbers carry no sampling error; `'column'` means the sampled column engine,
+   * whose every number is only meaningful together with `resolution`. Set explicitly by the
+   * column engine so a reader never has to guess which confidence to attach.
+   */
+  engine?: 'exact' | 'column';
+  /**
+   * The column engine's sampled grid (#239): spacing along the stock axis (`dx`, mm) and around
+   * it (`dThetaDeg`, degrees). Present only when `engine === 'column'`. A column-engine number
+   * without this is meaningless — the grid IS the resolution the answer is good to.
+   */
+  resolution?: { dx: number; dThetaDeg: number };
+  /** Column engine only (#239): column-writes performed by the sweep — the §4.4 `min` op count. */
+  columnOps?: number;
 }
 
 /**
@@ -713,7 +728,7 @@ export function holderGate(tool: Tool, deepestCutDepth: number | null): SweepDia
 export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: Tool, setup: Setup, opts?: SweepOpts): SweepOutcome {
   const diagnostics: SweepDiagnostic[] = [];
   if (timeline.summary.laser) return { ok: false, diagnostics: [{ severity: 'error', code: 'laser-job', message: 'this is a laser job (M321): a mill simulation refuses it rather than drawing a cut' }] };
-  if (timeline.summary.rotary) return { ok: false, diagnostics: [{ severity: 'error', code: 'rotary-job', message: 'this job moves the A axis: V1 does not simulate rotary work (/Simulation.md §9)' }] };
+  if (timeline.summary.rotary) return { ok: false, diagnostics: [{ severity: 'error', code: 'rotary-job', message: 'this job moves the A axis: the EXACT 2.5D sweep does not take rotary work — a rotary job is swept by the column engine instead (/Rotary.md §4.1, §4.7)' }] };
   const rr = cuttingRadiusForSweep(tool);
   if (!rr.ok) return { ok: false, diagnostics: [{ severity: 'error', code: 'tool-refused', message: rr.reason }] };
   const radius = rr.radius;

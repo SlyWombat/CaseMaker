@@ -38,6 +38,7 @@ import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
 import { boxSolid, sweepTimeline, type SweepDiagnostic, type SweepResult, type SweepStats } from '../geometry/sweep';
+import { columnSweep, type ColumnSweepOk } from '../geometry/columnEngine';
 
 export type DiagnosticSource = 'parser' | 'runner' | 'sweep';
 
@@ -182,7 +183,19 @@ interface LivePath {
   timeline: Timeline;
   setup: Setup;
 }
-type Live = LiveSwept | LivePath;
+/**
+ * A ROTARY job, swept by the column engine (#239, `/Rotary.md` §4.1). It owns no wasm handle:
+ * every mesh it hands out is plain buffers built from the grid, so there is nothing for
+ * `dispose` to delete and no playback anchor chain to warm. The exact sweeper's `rotary-job`
+ * refusal is never reached from here — the timeline's `rotary` flag routes the load.
+ */
+interface LiveColumn {
+  kind: 'column';
+  column: ColumnSweepOk;
+  timeline: Timeline;
+  setup: Setup;
+}
+type Live = LiveSwept | LivePath | LiveColumn;
 
 /** What `load` will accept on top of its arguments (#194). */
 export interface SimLoadOpts {
@@ -250,7 +263,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const l = live;
     live = null;
     if (!l) return;
-    if (l.kind === 'path') return; // owns no wasm handle at all
+    if (l.kind === 'path' || l.kind === 'column') return; // owns no wasm handle at all
     // Playback first: its anchors and cached unions are built over the sweep's solids.
     l.playback.dispose();
     hooks?.onDispose?.('playback');
@@ -271,6 +284,59 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       ...parse.diagnostics.map((d): SimDiagnostic => ({ source: 'parser', severity: d.severity, code: d.code, message: d.message, line: d.line })),
       ...timeline.diagnostics.map((d): SimDiagnostic => ({ source: 'runner', severity: d.severity, code: d.code, message: d.message, line: d.line, step: d.step })),
     ];
+    // A rotary job is swept by the COLUMN engine (#239, `/Rotary.md` §4.1), never the exact
+    // 2.5D sweeper: the exact one refuses it by name and its `MAX_CHECKPOINTS` gate would refuse
+    // the vendor files as dense 3D anyway. Routing here also means the dense-3D classifier never
+    // applies to a rotary job, whose checkpoint count is expected to exceed it.
+    if (timeline.summary.rotary) {
+      const col = columnSweep(timeline, tool, setup, opts);
+      if (!col.ok) {
+        // Same contract as a refused exact sweep (#194): keep the runner's work, draw the path,
+        // show no material. A rotary refusal owns no wasm handle.
+        live = { kind: 'path', timeline, setup };
+        return {
+          ok: false,
+          pathOnly: true,
+          diagnostics: [...diagnostics, ...col.diagnostics.map(tagSweep)],
+          summary: timeline.summary,
+          pauses: timeline.pauses,
+          segments: timeline.segments,
+        };
+      }
+      const fixture: SimFixtureMesh[] = [];
+      for (const box of setup.fixture?.boxes ?? []) {
+        const solid = boxSolid(tl, box);
+        fixture.push({ id: box.id, label: box.label, mesh: meshOutputOf(solid) });
+        solid.delete();
+      }
+      diagnostics.push(...col.diagnostics.map(tagSweep));
+      live = { kind: 'column', column: col, timeline, setup };
+      return {
+        ok: true,
+        diagnostics,
+        summary: timeline.summary,
+        stats: col.stats,
+        stockTopZ: col.stockTopZ,
+        radius: col.radius,
+        count: col.count,
+        checkpoints: timeline.checkpoints.map((cp): CheckpointInfo => ({
+          segment: cp.segment,
+          z: cp.z,
+          run: cp.run,
+          firstStep: cp.steps[0] as number,
+          lastStep: cp.steps[cp.steps.length - 1] as number,
+          moveCount: cp.steps.length,
+          nonConstantZ: cp.nonConstantZ,
+        })),
+        pauses: timeline.pauses,
+        segments: timeline.segments,
+        // No removal ghost and no gouge solids from the column engine yet: the grid IS the
+        // material, so `frameAt` regenerates the stock surface instead (§4.4). A gouge is still
+        // reported as a diagnostic; only its drawn solid is pending.
+        meshes: { stock: col.stock, result: col.result, removal: null, sacrificial: null, gouges: [], fixture },
+        ...(setup.fixture ? { fixtureSource: setup.fixture.source, fixtureUncertainty: setup.fixture.uncertainty } : {}),
+      };
+    }
     const out = sweepTimeline(tl, timeline, tool, setup, machine ? { ...opts, machine } : opts);
     if (!out.ok) {
       // The runner's work is cheap and worth keeping on its own: a refused sweep still yields
@@ -353,8 +419,14 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     if (gen < latestGen) return null;
     latestGen = gen;
     const l = live;
-    if (!l || l.kind !== 'swept') return null;
+    if (!l || l.kind === 'path') return null;
     if (!Number.isFinite(k)) throw new RangeError(`checkpoint index must be a finite number, got ${k}`);
+    if (l.kind === 'column') {
+      // The column engine regenerates the surface straight from the grid — no booleans, no
+      // removal ghost (#239, `/Rotary.md` §4.4). Both are null by construction.
+      const kc = Math.max(-1, Math.min(l.column.count - 1, Math.trunc(k)));
+      return { k: kc, stock: l.column.meshAt(kc), removalSoFar: null, sacrificial: null };
+    }
     const kk = Math.max(-1, Math.min(l.playback.count - 1, Math.trunc(k)));
     // Both handles are the playback's and evictable: mesh them here, keep neither.
     const stock = meshOutputOf(l.playback.stockAt(kk));

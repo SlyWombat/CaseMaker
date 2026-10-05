@@ -523,7 +523,10 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `holder-unproven` | warning | The cutter's reach past the collet is unknown, so holder clearance cannot be proven. | Record the cutter's shoulder/flute length. |
 | `holder-collision` | error | The cut is deeper than the cutter's shoulder/flute length: the shank would rub. | Use a longer cutter or a shallower cut. |
 | `laser-job` | error | A laser job (`M321`); a mill simulation refuses it. | Simulate it elsewhere. |
-| `rotary-job` | error | The job moves the A axis; V1 does not simulate rotary work. | Not supported in V1. |
+| `rotary-job` | error | The exact 2.5D sweep was handed a job that moves the A axis; rotary work is swept by the column engine instead. Only a direct caller of the exact sweep sees this. | Nothing to do — a rotary job loads the column engine. |
+| `rotary-stock` | error | A rotary job needs cylindrical stock; the setup's blank is not a cylinder, so the column engine cannot hold it. | Use a cylindrical blank for a rotary job. |
+| `axis-crossing` | error | A rotary cut reaches the axis (the cutter tip at radius Z ≤ 0); a single-valued radius column cannot represent a cut that crosses the axis. | Keep the cutter off the axis (a negative Z in the rotary work frame). |
+| `axis-clamped` | warning | A rotary cut dipped just past the axis and was clamped to it; the far-side hollow is not modelled. | Keep the cutter off the axis, or accept the clamped picture. |
 | `tool-refused` | error | The selected tool shape is not a flat end mill, which is all V1 sweeps. | Pick a flat end mill. |
 | `dense-3d-refused` | error | Too many separate cut runs at one (segment, Z): a 3D or dense job the 2.5D sweep will not take on. | — |
 | `sweep-budget-exceeded` | error | The sweep would take longer than the allowed budget, so it was stopped. | Retry with a longer limit, or simplify the job. |

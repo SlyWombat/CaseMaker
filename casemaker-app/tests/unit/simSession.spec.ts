@@ -402,7 +402,9 @@ describe('refusals: a refused SWEEP leaves a path-only session, even over a good
 
   const sweepCodes = (d: { source: string; code: string }[]) => d.filter((x) => x.source === 'sweep').map((x) => x.code);
   it('a laser job', () => expect(sweepCodes(refusal('M321\nG0 X20 Y30 Z0\nG1 X40 S0.5 F100\nM322\n', setup()))).toEqual(['laser-job']));
-  it('a rotary job', () => expect(sweepCodes(refusal('S1000 M3\nG0 X20 Y30 Z0\nG1 X40 A90 F100\n', setup()))).toEqual(['rotary-job']));
+  // A rotary job now routes to the COLUMN engine (#239); with this prism blank it refuses the
+  // stock, not the job. The cylinder/axis-crossing paths live in simSessionRotary.spec.ts.
+  it('a rotary job', () => expect(sweepCodes(refusal('S1000 M3\nG0 X20 Y30 Z0\nG1 X40 A90 F100\n', setup()))).toEqual(['rotary-stock']));
 
   it(`more than ${MAX_CHECKPOINTS} checkpoints`, () => {
     const lines = ['S1000 M3'];
