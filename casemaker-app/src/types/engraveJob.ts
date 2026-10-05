@@ -154,6 +154,55 @@ export type EngraveCombinedShape =
   | EngraveCutawayShape;
 
 /**
+ * A single-stroke font id (`engine/fonts/stroke/strokeFont.ts`). A stroke font is a set of open
+ * polylines, not outlines, so tracing it cuts the letter as one cutter-wide line (#219).
+ */
+export type StrokeFontId = string;
+
+/**
+ * The fields every TRACE item shares (#219). A trace is not a region: it is one or more open or
+ * closed polylines the cutter follows, its centre on the line, so a stroke is exactly the
+ * cutter's width. They live in their own list (`EngraveJob.traces`) and reach `PartPlan.traces`,
+ * never `PartPlan.engraves`, because the region pipeline (#201's opening) would erase a line.
+ *
+ * `position` is the origin `points` are relative to (a line) or the text's bounding-box centre (a
+ * stroke label); `rotation` is about that point. `construction` is carried for symmetry with the
+ * region items even though nothing references a trace today.
+ */
+export interface EngraveTraceBase {
+  id: string;
+  /** Optional human name, shown in operations and findings. */
+  name?: string;
+  position: { x: Mm; y: Mm };
+  rotation: number;
+  /** Depth of the traced line below the top face, mm. Positive. */
+  depth: Mm;
+  enabled: boolean;
+  /** Reference-only (#215): reserved for symmetry; a trace produces its cut unless true. */
+  construction?: boolean;
+}
+
+/** A free polyline the cutter traces, its centre following the points (#219). */
+export interface EngraveLineItem extends EngraveTraceBase {
+  kind: 'line';
+  /** Path points relative to `position`, mm. */
+  points: [Mm, Mm][];
+  /** Close the ring (feed back to the first point with no retract) — for borders and outlines. */
+  closed: boolean;
+}
+
+/** Text rendered in a single-stroke font and traced (#219). `font` must be a `StrokeFontId`. */
+export interface EngraveStrokeLabelItem extends EngraveTraceBase {
+  kind: 'stroke-label';
+  text: string;
+  font: StrokeFontId;
+  /** Cap height, mm — the same meaning as `EngraveLabel.size`. */
+  size: Mm;
+}
+
+export type EngraveTraceItem = EngraveLineItem | EngraveStrokeLabelItem;
+
+/**
  * Every item that can appear in a plan's `engraves` (#215): a label, one of the four simple
  * shapes, or one of the three combined kinds. `EngraveItem` stays label-or-simple-shape for the
  * UI's exhaustive switches; the engine's wider type is this one.
@@ -252,6 +301,15 @@ export interface EngraveJob {
    * schema defaults it to empty on load.
    */
   combined?: EngraveCombinedShape[];
+  /**
+   * Single-line traces (#219): free polylines and single-stroke text. A separate list, like
+   * `combined`, so the region pipeline and every exhaustive region-item switch is untouched; they
+   * funnel into `PartPlan.traces`, a sibling of `engraves`.
+   *
+   * Optional, so an existing job (and every literal that does not build one) is unchanged; the
+   * schema keeps it absent (not defaulted) so a pre-#219 document round-trips byte-for-byte.
+   */
+  traces?: EngraveTraceItem[];
   /** Key into TOOL_LIBRARY. */
   toolKey: string;
   workholding: { kind: 'vise'; vise: ViseParams };

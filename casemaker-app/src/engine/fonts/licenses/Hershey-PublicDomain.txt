@@ -1,0 +1,30 @@
+Hershey Fonts — licence and use terms
+=====================================
+
+The Hershey Fonts were originally created by Dr. A. V. Hershey while working
+at the U. S. National Bureau of Standards. They are in the public domain.
+
+The format of the font data in this distribution was originally created by:
+
+    James Hurt
+    Cognition, Inc.
+    900 Technology Park Drive
+    Billerica, MA 01821
+    (mit-eddie!ci-dandelion!hurt)
+
+The Hershey Fonts are in the public domain, and this distribution may be used
+by anyone for any purpose, commercial or otherwise, providing that:
+
+  1. The acknowledgements above are distributed with the font data.
+
+  2. The font data is not converted into the format distributed by the U.S.
+     NTIS (which organization holds the rights to the distribution and use of
+     the font data in that particular format).
+
+Case Maker bundles the coordinate data of the "rowmans" (Roman simplex) face,
+in the James Hurt distribution format, at
+  src/engine/fonts/stroke/hersheySimplex.ts
+and distributes the acknowledgements above in the repository-root NOTICE.
+
+Source: https://github.com/kamalmostafa/hershey-fonts
+        (hershey-fonts/rowmans.jhf; see also hershey-fonts/hershey.txt)

@@ -34,6 +34,26 @@ renamed or altered, so the Reserved Font Name provisions are not engaged.
 Glyph outlines extracted from them for engraving are output geometry, not a
 distribution of the Font Software.
 
+Bundled stroke font (single-line engraving)
+-------------------------------------------
+
+The single-line engraving feature bundles the coordinate data of the Hershey
+Roman Simplex ("rowmans") face, in the James Hurt distribution format, at
+casemaker-app/src/engine/fonts/stroke/hersheySimplex.ts.
+
+  The Hershey Fonts were originally created by Dr. A. V. Hershey while working
+  at the U. S. National Bureau of Standards. They are in the public domain.
+
+  The format of the font data in this distribution was originally created by
+  James Hurt, Cognition, Inc., 900 Technology Park Drive, Billerica, MA 01821.
+
+The full use terms are kept in
+casemaker-app/src/engine/fonts/licenses/Hershey-PublicDomain.txt. The data is
+used for any purpose under the public-domain terms above, with these
+acknowledgements distributed alongside it, and is not converted into the
+U.S. NTIS format. Source: https://github.com/kamalmostafa/hershey-fonts
+(hershey-fonts/rowmans.jhf).
+
 Third-party libraries
 ---------------------
 

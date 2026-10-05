@@ -139,6 +139,47 @@ const combinedShapeSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
+/**
+ * Single-line traces (#219): a free polyline and a single-stroke text label. They share the trace
+ * base (position/rotation/depth/enabled) with the shape kinds but are their OWN union — a trace is
+ * not a region, so it never reaches `engraves` or the region-item switches. `points` is capped at
+ * 5 000 (a hand-drawn path, not a spline dump); a CLOSED ring needs at least 3 points.
+ */
+const traceBaseSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().optional(),
+  position: positionSchema,
+  rotation: z.number().finite(),
+  depth: z.number().finite().positive(),
+  enabled: z.boolean(),
+  construction: z.boolean().optional(),
+});
+
+const traceKindsSchema = z.discriminatedUnion('kind', [
+  traceBaseSchema.extend({
+    kind: z.literal('line'),
+    points: z.array(polygonPointSchema).min(2).max(5000),
+    closed: z.boolean(),
+  }),
+  traceBaseSchema.extend({
+    kind: z.literal('stroke-label'),
+    text: z.string().max(MAX_TEXT_LENGTH),
+    font: z.string().min(1),
+    size: z.number().finite().min(1).max(MAX_LABEL_SIZE),
+  }),
+]);
+
+/** A closed line needs three points to bound any path; an open line needs two. */
+const traceSchema = traceKindsSchema.superRefine((trace, ctx) => {
+  if (trace.kind === 'line' && trace.closed && trace.points.length < 3) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'a closed line needs at least 3 points',
+      path: ['points'],
+    });
+  }
+});
+
 const viseSchema = z.object({
   stockProud: z.number().finite(),
   fixedJawThickness: z.number().finite(),
@@ -241,6 +282,8 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   // none keeps no key, so an existing document round-trips byte-for-byte (the same reason
   // `cutOverride` is optional). Consumers read it as `combined ?? []`.
   combined: z.array(combinedShapeSchema).optional(),
+  // #219's single-line traces. OPTIONAL for the same byte-for-byte reason as `combined`.
+  traces: z.array(traceSchema).optional(),
 });
 
 export const engraveJobSchema = z

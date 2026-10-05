@@ -458,7 +458,7 @@ strokes a flat end mill cannot — but it needs a medial-axis engine, and it is 
 
 ### 8.1 Every diagnostic the app can raise
 
-> **Status: Partly available** — every code the engine raises today is listed; rows marked *planned* arrive with #174, #194 and #204.
+> **Status: Partly available** — every code the engine raises today is listed; rows marked *planned* arrive with #174, #194, #204 and #219.
 
 You will see these short kebab-case codes in the diagnostics list and in the refusal banner.
 The severity is **error** (the app refuses or the cut is unsafe), **warning** (it proceeded,
@@ -536,6 +536,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `item-chars-lost` | error | A label loses whole characters to the cutter's radius. Formerly `label-chars-lost`. | Increase the size or use a smaller cutter. |
 | `item-detail-lost` | warning | An item loses detail (thin strokes, inside corners) to the cutter's radius. Formerly `label-detail-lost`. | Increase the size, enlarge the shape, or use a smaller cutter. |
 | `item-outside-stock` | error | An item hangs off the blank. Formerly `label-outside-stock`. | Move it back inside the edge margin. |
+| `trace-outside-stock` | error | A single-line trace runs off the blank (#219). | Move it back inside the stock. |
 
 **Checking the engraving job** (job):
 
@@ -545,6 +546,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `no-items` | error | The job has no enabled label with text or shape. Formerly `no-labels`. | Add one. |
 | `polygon-self-intersecting` | error | A polygon shape crosses itself, so the outline is not a simple region. | Fix the points so the outline does not cross itself. |
 | `item-reference` | error | A frame or cut-away names an item that is missing, disabled, or part of a cycle, so the ring or pocket cannot be built. | Point it at a real, enabled item that does not depend on it. |
+| `trace-self-overlap` | warning | Two strokes of a single-line trace come closer than the cutter is wide, so the cut fills in (#219). | Space the lines apart, or use a smaller cutter. |
 | `tool-missing` | error | The job names a tool that is not in the library. | Pick a real tool. |
 | `stock-proud-too-small` | warning | The blank stands too far below the jaw tops for the deepest cut, so the cutter would work below the jaws. | Seat the blank higher. |
 | `vise-default` | warning | The vise dimensions are unmeasured defaults, so collisions cannot be trusted. | Measure your vise. |
