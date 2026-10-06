@@ -652,7 +652,7 @@ type Workholding =
   | { kind: 'rotary-chuck';   jawDiameter: Mm; stickout: Mm }
   | { kind: 'tape-down';      contact: Profile; shim?: Profile }
   // --- status open: see "the fixture question" below ---
-  | { kind: 'printed-nest';   nest: NodeId; seatClearance: Mm };
+  | { kind: 'printed-nest';   nest: string; seatClearance: Mm };
   // NOT built: vacuum bed. Not owned, nobody has asked.
 ```
 

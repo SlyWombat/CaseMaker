@@ -40,7 +40,7 @@ So **stub it.** Type the number in, and the emulator is buildable today:
 ```ts
 interface Setup {
   part:        Manifold | { stock: Profile; thickness: Mm };
-  workholding: Workholding;          // tape | vise | nest | clamps | chuck  (#188)
+  workholding: Workholding;          // six kinds, one union — setup.ts is the source (#191)
   placement: {
     origin:      Vec3;               // the part's model origin, in machine coords
     rotationZ:   Degrees;
