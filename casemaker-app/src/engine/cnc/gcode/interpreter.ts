@@ -264,6 +264,31 @@ class Interp {
     return false;
   }
 
+  /**
+   * `G90.1` / `G91.1`, the arc-centre-mode pair in RS274. **The Z1 has neither**:
+   * `/Z1-Firmware-Dialect.md` §8 records "there is no `R` form and no `G90.1`/`G91.1`", and
+   * §9's count over the 25-file corpus finds no `G90.1` and only plain `G91`.
+   *
+   * The parser must not quietly read it as the plain `G90`/`G91` distance mode, which is what
+   * it used to do: `codeParts` splits the subcode and the switch matched `case 91` on it, so a
+   * `G91.1` silently turned every following move incremental (#191 §9).
+   *
+   * What the FIRMWARE does with the string is UNVERIFIED — the code is absent from the corpus,
+   * and the review that established the missing arc-centre mode did not test the dispatcher on
+   * it, so whether it matches its `G91` prefix is a guess. The honest reading is therefore to
+   * leave the modal state UNCHANGED and raise an error, so the file is refused rather than run
+   * on a guess. Our post never writes it; the verifier's `not-our-dialect` whitelist would
+   * reject it anyway.
+   */
+  private arcCentreMode(text: string, line: number): void {
+    this.diag(
+      'error',
+      'no-arc-centre-mode',
+      line,
+      `G${text} is the arc-centre-mode pair, and this firmware has no arc-centre mode (no G90.1/G91.1): I/J/K are always incremental from the start point whatever the distance mode says. The distance mode is left UNCHANGED — whether the firmware itself matches the plain code's prefix on that string is unverified. Treat the file as foreign.`,
+    );
+  }
+
   private word(words: Word[], letter: string): Word | undefined {
     return words.find((w) => w.letter === letter);
   }
@@ -338,8 +363,20 @@ class Interp {
         this.wcs = n;
         return false;
       }
-      case 90: this.absolute = true; return false;
-      case 91: this.absolute = false; return false;
+      case 90:
+        if (sub !== 0) {
+          this.arcCentreMode(gw.text, line);
+          return false;
+        }
+        this.absolute = true;
+        return false;
+      case 91:
+        if (sub !== 0) {
+          this.arcCentreMode(gw.text, line);
+          return false;
+        }
+        this.absolute = false;
+        return false;
       case 92: {
         // The firmware's ROTARY UNWIND (#237, `/Rotary.md` §1.2): `G92.4 A<v> S<n>` (or `R<n>`)
         // shrinks A by whole turns — A becomes the value modulo 360 — and leaves X, Y and Z

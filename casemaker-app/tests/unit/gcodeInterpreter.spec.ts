@@ -430,6 +430,24 @@ describe('dialect spellings the vendor tooling actually writes (#186 checklist)'
     expect(moves(r)).toHaveLength(1);
   });
 
+  it('REGRESSION (review #3 §9): G91.1 does NOT select the distance mode — there is no arc-centre mode', () => {
+    // `codeParts` splits the subcode, and the switch matched `case 91` on it, so a `G91.1`
+    // silently made every following move INCREMENTAL — a code `/Z1-Firmware-Dialect.md` §8
+    // says this firmware does not have ("there is no `R` form and no `G90.1`/`G91.1`"; the
+    // 25-file corpus contains no `G90.1`, and `G91` only plain).
+    const r = parseGcode('G0 X10\nG91.1\nG1 X5 F100\n');
+    expect(errors(r)).toContain('no-arc-centre-mode');
+    // Distance mode UNCHANGED, so X5 is absolute: 5, not 10 + 5.
+    expect(moves(r).at(-1)?.to[0]).toBe(5);
+  });
+
+  it('...and G90.1 does not restore it either', () => {
+    const r = parseGcode('G0 X10\nG91\nG90.1\nG1 X5 F100\n');
+    expect(errors(r)).toContain('no-arc-centre-mode');
+    // Still incremental, as G91 left it: 10 + 5.
+    expect(moves(r).at(-1)?.to[0]).toBe(15);
+  });
+
   it('G18 and G19 select the plane an arc is drawn in', () => {
     const xy = parseGcode('G17\nG0 X0 Y0 Z0\nG3 X0 Y10 I0 J5 F100\n');
     const xz = parseGcode('G18\nG0 X0 Y0 Z0\nG3 X10 Z0 I5 K0 F100\n');

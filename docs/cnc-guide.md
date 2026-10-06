@@ -503,6 +503,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `arc-from-unknown` | error | An arc starts or ends somewhere the program never established. | Establish the position first. |
 | `arc-r-unsupported` | error | The firmware has no radius-form (`R`) arcs; only `I`/`J`/`K`. | Convert to `I`/`J`/`K`. |
 | `arc-radius-mismatch` | warning | The arc's start and end do not sit at the same radius from its centre. | Check the offsets. |
+| `no-arc-centre-mode` | error | `G90.1`/`G91.1` are the arc-centre-mode pair, and this firmware has no arc-centre mode: `I`/`J`/`K` are always incremental. The distance mode is left unchanged, not reinterpreted. | Use plain `G90`/`G91`; this is not our post's output. |
 | `atc-self-check` | warning | A bare `M490` is the ATC motor self-check, which this machine (no ATC) does not have. | Remove it. |
 | `rotary-axis` | info | An `A` word: the rotary axis is tracked but not interpreted. | V1 does not simulate rotary work. |
 
@@ -631,7 +632,9 @@ semantics are LinuxCNC-flavoured.
 
 **What it refuses:** inverse-time feed, canned cycles, radius-form (`R`) arcs, and anything
 on an `A` axis (rotary). A laser job or a rotary job is refused outright rather than drawn as
-a cut.
+a cut. `G90.1`/`G91.1` are refused too — the firmware has no arc-centre mode, so the code
+cannot mean what RS274 says; the distance mode is deliberately left unchanged and the file is
+reported (`no-arc-centre-mode`).
 
 ### 8.3 The `;@MKR|` file header
 

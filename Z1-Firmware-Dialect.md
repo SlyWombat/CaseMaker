@@ -147,7 +147,11 @@ saying the firmware would have taken it.
 ## 8. Arcs: IJK only, incremental, and the firmware does not validate them
 
 - The centre is `start + (I, J, K)` — **always incremental**, whatever `G90`/`G91` says.
-- There is **no `R` form** and no `G90.1`/`G91.1`. An arc with `R` is not an arc here.
+- There is **no `R` form** and no `G90.1`/`G91.1`. An arc with `R` is not an arc here. What the
+  dispatcher does with the string `G91.1` is **unverified** (absent from the corpus), so the
+  parser (`no-arc-centre-mode`) leaves the distance mode **unchanged** and raises an error:
+  reading it as the plain `G91`, which the first version did, silently made every following
+  move incremental (#191 §9).
 - Angular travel is the CCW angle start→end about the centre from `atan2`. If start and end
   coincide in the plane it is a **full circle**, ±2π.
 - **`G18` flips the sense** (`if the linear axis is Y, clockwise = !clockwise`) because the XZ
