@@ -210,7 +210,11 @@ export const boardProfileSchema = z.object({
   measurementMethod: z.enum(['datasheet', 'open-source-cad', 'physical-measurement']).optional(),
   clonedFrom: z.string().min(1).optional(),
   visualAssets: visualAssetsSchema.optional(),
-  verified: z.boolean().optional(),
+  // No `verified` tier (#128). A badge saying a third-party profile is
+  // "verified" would claim we audited dimensions we cannot audit; the picker
+  // states a board's ORIGIN instead. An index that still carries the old
+  // key is not rejected — this object strips unknown keys (see board.ts).
+
   // #128 — per-board version carried by a community index. Optional and
   // additive (built-ins leave it absent). The update flow compares an index's
   // value against the cached copy to flag boards that changed upstream, so a
@@ -239,13 +243,25 @@ export const localBoardProfileSchema = boardProfileSchema
 export type BoardProfileInput = z.infer<typeof boardProfileSchema>;
 
 /**
+ * Field names that were once in the schema and are deliberately gone. An
+ * import carrying one is not "authored for a newer Case Maker" — the field
+ * was retired on purpose — so it must stay quiet while a genuinely unknown
+ * key still warns.
+ *
+ * `verified` is the #128 community "✓ printed" tier: a curator-set flag whose
+ * badge claimed a printed fit, dropped because we cannot audit a third
+ * party's dimensions.
+ */
+const RETIRED_BOARD_KEYS = new Set(['verified']);
+
+/**
  * Top-level keys of `raw` the board schema doesn't know (#129). Zod parsing
  * silently STRIPS unknown keys, so a board authored against a newer Case
  * Maker would lose fields without a trace — surface them as import warnings
- * instead.
+ * instead. Retired keys are known-by-absence and are not surfaced.
  */
 export function unknownBoardKeys(raw: unknown): string[] {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return [];
   const known = new Set(Object.keys(boardProfileSchema.shape));
-  return Object.keys(raw).filter((k) => !known.has(k));
+  return Object.keys(raw).filter((k) => !known.has(k) && !RETIRED_BOARD_KEYS.has(k));
 }

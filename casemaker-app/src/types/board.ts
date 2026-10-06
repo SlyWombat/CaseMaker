@@ -228,9 +228,6 @@ export interface BoardProfile {
   enclosure?: EnclosureModule;
   measurementMethod?: MeasurementMethod;
   visualAssets?: BoardVisualAssets;
-  /** Community-library curator flag: a case printed from this profile has
-   * been physically verified to fit. Drives the ✓ badge + sort priority. */
-  verified?: boolean;
   /** #128 — per-board version from a community index (string or number).
    * Bump it when the board's data changes; the app compares it against the
    * cached copy to flag boards that changed upstream. Built-ins leave it

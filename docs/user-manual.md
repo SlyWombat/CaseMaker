@@ -27,13 +27,18 @@ The picker's catalog merges three source tiers, resolved in priority order:
   `{name, boards, templates}`), managed under **Sources**. The official
   community library is offered one click away; sources cache locally so the
   picker works offline, refresh weekly in the background, and can be
-  disabled or removed at any time. Boards with a **✓ printed** badge have
-  been physically verified to fit by a library maintainer.
+  disabled or removed at any time.
+
+Every card carries its **origin** — **BUILT-IN**, **LOCAL**, or the name of
+the online source it came from — so a board you added is never mistaken for
+one bundled with the app. The detail rail repeats it in words.
 
 > **No fit guarantee:** profiles are measured by humans and printers vary —
 > treat the first print of any case as a test article and check critical
-> dimensions against your real board first. The **✓ printed** badge means at
-> least one confirmed fit, not a promise for your hardware.
+> dimensions against your real board first. The picker states a profile's
+> origin and how its dimensions were measured; neither is a promise for your
+> hardware. There is deliberately no "verified" badge, because we cannot
+> audit a third-party profile's accuracy.
 
 If two sources provide the same board id, the higher tier wins and the
 Sources panel shows what's shadowed. Projects embed a full copy of their

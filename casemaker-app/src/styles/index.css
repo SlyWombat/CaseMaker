@@ -1508,10 +1508,10 @@ body, html, #root {
   margin-top: var(--cm-space-1);
 }
 
-.wb-badge--verified {
-  color: var(--cm-color-secondary);
-  border-color: color-mix(in srgb, var(--cm-color-secondary) 50%, transparent);
-  font-weight: 700;
+/* Origin chip (#128). "Built-in" is the majority case and says least, so it
+   stays the quietest of the three; LOCAL and the source chip carry colour. */
+.wb-badge--builtin {
+  opacity: 0.7;
 }
 
 @media (max-width: 1080px) {

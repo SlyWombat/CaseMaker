@@ -32,7 +32,7 @@ The library grows by contribution, and provenance is taken seriously (dimensions
 claude "Fetch https://raw.githubusercontent.com/SlyWombat/casemaker-library/main/AGENT.md and follow it to help me contribute my board"
 ```
 
-Prefer to do it by hand? See [casemaker-library](https://github.com/SlyWombat/casemaker-library#contributing-a-board). Boards a maintainer has physically print-verified get a **✓ printed** badge in the picker.
+Prefer to do it by hand? See [casemaker-library](https://github.com/SlyWombat/casemaker-library#contributing-a-board). Every board in the picker states its origin — **built-in**, **local** (imported by you), or the online source it was fetched from — and its measurement method. There is deliberately no "verified" badge: we cannot audit a third-party profile's accuracy, so the app reports provenance rather than a verdict.
 
 ## Documentation
 
@@ -70,8 +70,9 @@ maintained by humans — **there is no guarantee a generated case will print
 correctly or fit your board**. Printer calibration, filament shrinkage,
 board revisions, and profile errors all affect fit. Treat your first print
 of any case as a test article, and verify critical dimensions against your
-actual board before committing to a long print. Boards marked **✓ printed**
-have had at least one confirmed fit, but your hardware may still differ.
+actual board before committing to a long print. Each profile's origin and
+measurement method are shown in the picker, but neither is a promise for
+your hardware.
 
 ## License
 

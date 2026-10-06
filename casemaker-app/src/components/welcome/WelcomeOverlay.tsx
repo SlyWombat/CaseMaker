@@ -115,12 +115,11 @@ export function WelcomeOverlay() {
         board.id.toLowerCase().includes(q)
       );
     });
-    // Verified tier (#128): unverified remote boards list after everything
-    // else; builtins/locals/verified-remotes keep their relative order.
-    return filteredList.sort(
-      (a, b) => Number(a.origin.kind === 'remote' && !a.board.verified) -
-        Number(b.origin.kind === 'remote' && !b.board.verified),
-    );
+    // No re-ordering: registry order is built-in, then local, then remote in
+    // the order the sources were added. A board's origin is stated on its card
+    // and in the rail; it is never a reason to rank one board above another
+    // (#128 — provenance, not a quality verdict).
+    return filteredList;
   }, [entries, search, sourceFilter, manufacturer]);
 
   const selected: RegisteredBoard | null = useMemo(
@@ -399,27 +398,27 @@ export function WelcomeOverlay() {
                                   ★
                                 </span>
                               )}
-                              {origin.kind === 'local' && (
-                                <span className="wb-badge wb-badge--local" title="From your local library">
-                                  LOCAL
-                                </span>
-                              )}
-                              {origin.kind === 'remote' && (
-                                <span
-                                  className="wb-badge wb-badge--remote"
-                                  title={`From online source “${origin.sourceLabel}”`}
-                                >
-                                  ⛁ {origin.sourceLabel}
-                                </span>
-                              )}
-                              {board.verified && (
-                                <span
-                                  className="wb-badge wb-badge--verified"
-                                  title="A case printed from this profile has been physically verified to fit"
-                                >
-                                  ✓ printed
-                                </span>
-                              )}
+                              {/* Every card states its ORIGIN (#128): bundled with
+                                  the app, added by you, or fetched from an online
+                                  source. Provenance, never a verdict on quality. */}
+                              <span
+                                className={`wb-badge wb-badge--${origin.kind === 'builtin' ? 'builtin' : origin.kind}`}
+                                data-testid={`welcome-origin-${board.id}`}
+                                data-origin={origin.kind}
+                                title={
+                                  origin.kind === 'builtin'
+                                    ? 'Bundled with the app'
+                                    : origin.kind === 'local'
+                                      ? 'Added by you — imported JSON, stored in this browser'
+                                      : `From online source “${origin.sourceLabel}”`
+                                }
+                              >
+                                {origin.kind === 'builtin'
+                                  ? 'BUILT-IN'
+                                  : origin.kind === 'local'
+                                    ? 'LOCAL'
+                                    : `⛁ ${origin.sourceLabel}`}
+                              </span>
                               {badge && (
                                 <span className="wb-badge" title={badge.title}>
                                   {badge.label}
@@ -475,8 +474,9 @@ export function WelcomeOverlay() {
                   )}
                 </div>
                 <h2 className="wb-detail__name">{selected.board.name}</h2>
-                <div className="wb-detail__mfr">
+                <div className="wb-detail__mfr" data-testid="welcome-detail-origin" data-origin={selected.origin.kind}>
                   {selected.board.manufacturer}
+                  {selected.origin.kind === 'builtin' && ' · built in'}
                   {selected.origin.kind === 'remote' && ` · via ${selected.origin.sourceLabel}`}
                   {selected.origin.kind === 'local' && ' · your library'}
                 </div>
@@ -578,9 +578,6 @@ export function WelcomeOverlay() {
                   <>
                     <h3>Provenance</h3>
                     <ul className="wb-provenance">
-                      {selected.board.verified && (
-                        <li>✓ A printed case from this profile has been verified to fit.</li>
-                      )}
                       {selected.board.version !== undefined && (
                         <li data-testid="welcome-board-version">
                           Profile version {String(selected.board.version)}
