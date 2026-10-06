@@ -664,8 +664,9 @@ interface DatumSource { fixes: ('x' | 'y' | 'rotation' | 'z')[]; uncertainty: Mm
 
 The variants above are the owned ones. The vacuum bed is deliberately absent — building a
 variant for hardware nobody has is the speculative infrastructure this project has a
-standing rule against. **#188 and `/Simulation.md` §1.1 must carry this same list**; they
-currently disagree with each other and with this one (#191).
+standing rule against. **The single source is now the `Workholding` union in
+`src/engine/cnc/setup.ts`**, with this section and `/Simulation.md` §1.1 pointing at it; the
+three no longer each carry their own copy (#191).
 
 Each variant has to answer the same four questions, and that is the whole interface:
 
@@ -766,6 +767,47 @@ candidate surfaces, score them, and emit the touches that resolve the residual:
 
 The point of decision 26 is that the plan is now an *output* of the model, so the vise and
 rotary cases do not each need a new hand-written sequence.
+
+#### The planner, as implemented (#188)
+
+`src/engine/cnc/probePlan.ts` holds the derivation. It is pure and kernel-free — it takes the
+compiled outline and the `Workholding`, and returns either a `ProbePlan` or a refusal. Nothing
+under `src/` calls it yet; it is the engine the UI will drive, and its spec
+(`tests/unit/cncProbePlan.spec.ts`) is the acceptance.
+
+**Every variant answers the same four questions and nothing branches per case in the caller.**
+What each one contributes, per axis:
+
+| Workholding | Already fixed (datum) | Residual it leaves | Obstructions it adds |
+|---|---|---|---|
+| `anchor-bracket` | x, y, rotation | 0.05 mm | none modelled (the bracket envelope is a decision-28 input) |
+| `vise` | x, rotation — the **fixed (left) jaw** | 0.05 mm; **y open** | one keep-out per jaw face, from the inward normal |
+| `rotary-chuck` | x, y — the axis | 0.05 mm; rotation *inherently* closed for an axisymmetric part | none modelled |
+| `tape-down` | **nothing** | all three open | none — nothing is above the part |
+| `top-clamps` | **nothing** | all three open | one keep-out per clamp footprint |
+| `printed-nest` | **nothing** — it holds the part still, it does not locate it | its `seatClearance` (the ±0.15 mm) | none |
+
+The invariants that make the derivation honest:
+
+- **Per-axis residual versus tolerance.** An axis is probed when what the fixture leaves open
+  on it exceeds the job's tolerance. A nest whose `seatClearance` is already inside tolerance
+  therefore yields **Z alone** — `touches: []`, `probeZ: true` — which is the ±0.15 mm badge
+  case, and this is where #175 reads that number from rather than asserting a datum corner.
+- **Rotation is probed only when the fixture leaves it open** and the part is not axisymmetric;
+  when a fixture does fix it (the jaws, the bracket, the chuck's axis) the plan says so, and a
+  static `.nc` never needs rotation compensation (§7.3, #187 item 1).
+- **Z is always probed**, on the engraved face (§7.2) — no variant supplies it.
+- **Refusal names the obstruction.** When no reachable straight edge can resolve an open axis,
+  the plan refuses rather than returning a touch inside the fixture — with the clamp or jaw
+  that is in the way named in the message.
+- **Straight edges come from querying the outline**, so a radiused corner shortens the datum
+  it belongs to (the badge's R3.175 corners leave ~31.75 mm of the 38.1 mm side) instead of
+  being a special case.
+- **Where Clipper2 is required, the planner says so.** The outline may be handed in as
+  polygons (as the worker produces) or as a profile; a profile made only of point maths —
+  rect, circle, translate, rotate, mirror — is evaluated in-module, while an offset or boolean
+  node (a `roundedRect` is two nested offsets) returns `null` and the plan refuses with
+  `no-outline`. Offsetting is not re-implemented here.
 
 **Obstacles are measured, not looked up (decision 28).** The four questions above include
 "what is obstructed", and the first draft of this section imagined answering it from the
