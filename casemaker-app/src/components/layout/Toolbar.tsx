@@ -25,14 +25,24 @@ const FORMAT_LABEL: Record<string, string> = {
   '3mf': '3MF',
 };
 
-/** Phone breakpoint, matching the workspace's ≤640px block (#134). */
-const COMPACT_MAX_W = 640;
+/** Tablet breakpoint — the widest window the full row does NOT fit cleanly in
+ *  (#134). Measured: the row plus the wordmark needs ~848px before it even
+ *  stops overflowing, and the buttons only stop wrapping their labels (52px
+ *  tall instead of 71px) from 900px. Below it the toolbar collapses. */
+const COMPACT_MAX_W = 900;
 
 /**
  * Issue #134 — below this breakpoint the header toolbar collapses its
- * secondary controls behind a ⋯ overflow menu. The full row is ~654px of
- * content; in a 390px window that left Save / Save as / Load / Export /
- * Parts / Docs / settings off-screen behind a silent horizontal swipe.
+ * secondary controls behind a ⋯ overflow menu. The full row is ~890px of
+ * content; at 390px that left Save / Save as / Load / Export / Parts / Docs /
+ * settings off-screen behind a silent horizontal swipe, and at 641–900px the
+ * header became a scroll container, which clipped the settings popover to the
+ * 48px bar and hid the same controls just as silently. Phones (≤640px) also
+ * drop the wordmark — see the .app-header__logo rule in index.css.
+ *
+ * This deliberately sits a little above the 848px the row needs to stop
+ * overflowing: between 848 and 900 nothing is hidden, but every button label
+ * wraps to two lines inside a 48px bar.
  */
 function useIsCompactBar(): boolean {
   const [isCompact, setIsCompact] = useState(() =>

@@ -27,9 +27,9 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      // The phone specs get their own project (#134) so their viewport lives
-      // here rather than in a per-file `test.use`.
-      testIgnore: /mobile\//,
+      // The phone and tablet specs get their own projects (#134) so their
+      // viewports live here rather than in a per-file `test.use`.
+      testIgnore: /mobile\/|tablet\//,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1024, height: 768 },
@@ -50,6 +50,22 @@ export default defineConfig({
         viewport: { width: 390, height: 844 },
         deviceScaleFactor: 2,
         isMobile: true,
+        hasTouch: true,
+        launchOptions: {
+          args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
+        },
+      },
+    },
+    {
+      // Issue #134 — the tablet band, 641–900px, where the full toolbar does
+      // not fit but the window is too wide to be a phone. 768×1024 is the iPad
+      // portrait case; the spec sweeps 641 and 900 on top of it.
+      name: 'tablet-chromium',
+      testMatch: /tablet\/.*\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 768, height: 1024 },
+        deviceScaleFactor: 1,
         hasTouch: true,
         launchOptions: {
           args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],

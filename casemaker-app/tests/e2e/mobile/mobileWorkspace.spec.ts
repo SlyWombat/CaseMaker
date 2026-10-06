@@ -78,3 +78,65 @@ test('the phone header exposes every control without a hidden swipe (#134)', asy
     await expect(page.getByTestId(id)).toBeVisible();
   }
 });
+
+/**
+ * The section panels at phone width — the item #134 left open ("the panels at
+ * phone width remain unmeasured"). Each one fills the drawer (390px), so the
+ * question is whether anything inside overflows it, and whether a field that
+ * is meant to show its whole value actually does. The mounting-hole table was
+ * the one that did not: the X input measured 46.7px for 50px of text, so
+ * "22.86" painted as "22.8" against the Ø glyph beside it.
+ */
+test('every section panel fits the phone without clipping a field (#134)', async ({ cm, page }) => {
+  await cm.ready();
+  await page.getByTestId('welcome-search').fill('sht31');
+  await page.getByTestId('welcome-board-adafruit-sht31d').click();
+  await page.getByTestId('welcome-generate').click();
+  await page.waitForSelector('[data-testid="sidebar"]', { timeout: 30_000 });
+  await page.evaluate(async () => { await window.__caseMaker!.waitForIdle(); });
+
+  const sections = ['board', 'case', 'ports', 'hats', 'features', 'assets', 'export'];
+  for (const id of sections) {
+    // The open context drawer covers the rail handle, so put it away first.
+    // Read the class, not isVisible(): the closed drawer is translated off to
+    // the right rather than hidden, so its close button still reports visible.
+    const panel = page.getByTestId('context-panel');
+    if ((await panel.getAttribute('class'))?.includes('context-panel--open')) {
+      await page.locator('.context-panel__close').click();
+      await expect(panel).toHaveClass(/context-panel--closed/);
+    }
+    const sideX = await page.getByTestId('sidebar').evaluate((el) => el.getBoundingClientRect().x);
+    if (sideX < 0) await page.getByTestId('sidebar-handle').click();
+    await page.getByTestId(`sidebar-button-${id}`).click();
+    await expect(page.getByTestId(`context-section-${id}`)).toBeVisible();
+
+    const r = await page.evaluate(() => {
+      const panel = document.querySelector('[data-testid="context-panel"]') as HTMLElement;
+      const pr = panel.getBoundingClientRect();
+      const overflows: string[] = [];
+      const clipped: string[] = [];
+      for (const el of panel.querySelectorAll('*')) {
+        const b = el.getBoundingClientRect();
+        if (b.width <= 1 && b.height <= 1) continue; // screen-reader-only spans
+        if (b.right - pr.right > 1 && !el.classList.contains('labelled-field__hint-sr')) {
+          overflows.push(`${el.tagName.toLowerCase()}.${el.className} → +${(b.right - pr.right).toFixed(1)}px`);
+        }
+        // A numeric field the user is meant to READ: its value must fit.
+        if (el instanceof HTMLInputElement && el.classList.contains('numeric-input') && el.scrollWidth > el.clientWidth) {
+          clipped.push(`${el.getAttribute('data-testid') ?? el.className} "${el.value}" ${el.clientWidth}px for ${el.scrollWidth}px`);
+        }
+      }
+      return {
+        panelOverflow: panel.scrollWidth - panel.clientWidth,
+        docOverflow: document.documentElement.scrollWidth - window.innerWidth,
+        overflows: overflows.slice(0, 8),
+        clipped: clipped.slice(0, 8),
+      };
+    });
+
+    expect(r.panelOverflow, `${id} panel scrolls sideways`).toBeLessThanOrEqual(0);
+    expect(r.docOverflow, `${id} pushed the page sideways`).toBeLessThanOrEqual(0);
+    expect(r.overflows, `${id} content past the panel's right edge`).toEqual([]);
+    expect(r.clipped, `${id} numeric field clips its value`).toEqual([]);
+  }
+});

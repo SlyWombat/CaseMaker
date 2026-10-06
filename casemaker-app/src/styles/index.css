@@ -34,14 +34,12 @@ body, html, #root {
   background: var(--cm-color-surface-container);
   border-bottom: var(--cm-border-1);
 }
-/* Tablets (#134): above the phone breakpoint the full toolbar still does not
-   fit below ~848px. A scroll container contributes no min-content width, so
-   the header stays at the window width instead of forcing shrink-to-fit.
-   Phones (≤640px) collapse the toolbar into a ⋯ overflow menu instead and must
-   NOT clip their popovers, so the scroller is scoped above that breakpoint. */
-@media (min-width: 641px) and (max-width: 900px) {
-  .app-header { overflow-x: auto; }
-}
+/* Tablets (#134): the header must never be a scroll container. `overflow-x:
+   auto` computes `overflow-y: auto` as well, and the settings popover (267px)
+   inside a 48px bar then gets clipped to the bar — it opened to nothing at
+   641–900px, and the row it was hiding in scrolled silently instead. Below
+   900px the toolbar collapses into the ⋯ overflow menu instead
+   (see COMPACT_MAX_W in Toolbar.tsx), so nothing overflows to scroll. */
 .app-header h1 {
   margin: 0;
   font-size: var(--cm-text-h2-size);
@@ -80,14 +78,10 @@ body, html, #root {
 @media (max-width: 640px) {
   .app-main { grid-template-columns: 1fr; }
   .viewport-pane { min-width: 0; }
-  /* The wordmark is the widest thing in the bar and the toolbar needs its
-     width; below 640px the toolbar collapses into a ⋯ overflow menu
-     (.toolbar-overflow), which the wordmark would push off-screen. */
+  /* The wordmark is the widest thing in the bar. From 641px up it fits beside
+     the collapsed ⋯ toolbar; below 640px the two together would push the ⋯
+     menu off-screen, so the wordmark goes. */
   .app-header__logo { display: none; }
-  /* The toolbar now fits without scrolling; leaving overflow:auto on would
-     clip the ⋯ menu, the parts panel and the settings popover to the 48px
-     header box. */
-  .app-header { overflow: visible; }
   /* The 360px drawer plus its padding is 393px wide — 3px past a 390px screen.
      At phone width it should just fill the screen (the doubled class beats the
      base rule, which is declared later in this file). */
@@ -1559,6 +1553,19 @@ body, html, #root {
 .hole-table button {
   padding: 2px 6px;
   font-size: 11px;
+}
+/* Issue #134 — the row had to fit the hole id, "X", the value and three more
+   controls on one line, and the browser paid for it out of the X input: at
+   drawer width it measured 46.7px for 50px of text and clipped "22.86". The
+   id takes the first line and the three inputs the second, which also gives
+   the inputs room. The table only ever renders in the 360–390px context
+   panel, so this is unconditional rather than a phone breakpoint. */
+.hole-table .cell-label {
+  flex-wrap: wrap;
+}
+.hole-table .cell-label__row {
+  flex-basis: 100%;
+  margin-right: 0;
 }
 
 .assets-list {
