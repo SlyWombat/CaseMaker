@@ -29,6 +29,36 @@ Compare `src/types/rack.ts`, which can cite "Mini Rack by Meuon, Printables
   per #147 it will NOT be interoperable with ToolStack parts (arbitrary
   parametric dimensions, our own connector).
 
+### Provenance — do not target
+
+The field survey ([#156](https://github.com/SlyWombat/CaseMaker/issues/156))
+found a second system that fails this gate, and it is the likeliest to tempt
+someone, because it is large, active and looks like community open content.
+
+- **Multiboard** ([multiboard.io/license](http://www.multiboard.io/license)) is
+  proprietary and **revocable**. Commercial use needs a paid subscription
+  (capped at $50k/yr in sales); a remix must be distributed under the same terms
+  *and* grants Multiboard LTD an irrevocable, sub-licensable, worldwide licence
+  to it; and the licence **can be withdrawn or cancelled at any time**. That last
+  clause is the disqualifier — output generated from it could be retroactively
+  unlicensed. Do not target it, and do not commit its parts.
+
+That is the same rule as ToolStack above, with a sharper reason: ToolStack is
+merely unlicensed, whereas Multiboard's terms can change under already-shipped
+output.
+
+**The sanctioned open alternative is
+[openGrid](https://github.com/openGrid-3D/)** — a 28 mm grid under **CC-BY 4.0**,
+explicitly cross-compatible with Gridfinity, Multiboard, HSW, GOEWS and Skadis.
+CC-BY is a licence we already satisfy the way `src/types/rack.ts` satisfies
+Meuon's, so if a mount or storage grid is ever built, that is the target.
+
+**Gridfinity** (42 mm XY, 7 mm Z) is usable with care rather than by default: its
+MIT claim rests on the author's April 2023 statement, not a licence in the spec
+repository, and the ecosystem's *implementations* carry their own licences that
+must be checked independently of the standard's. Never copy an implementation on
+the strength of the standard's licence.
+
 ## The interoperability grid
 
 Three footprints × three shared module heights. Footprints and heights measured
