@@ -112,6 +112,13 @@ const PRINT_TABLE: Record<string, PrintMeta> = {
   'wall-plate': flat(
     'Print flat, wall-side face DOWN on the bed — the snap fingers point up and print without supports',
   ),
+  // Issue #151 — the pocket carrier. As modelled IS its print orientation: the
+  // back plate lies on the bed, the floor and both walls rise off it, and the
+  // wall-screw counterbores face up. Nothing overhangs. Mounted, the part is
+  // that same solid turned 90°, plate to the wall.
+  'pocket-tray': flat(
+    'Print flat, as modelled — back plate on the bed, the pocket walls rising. Counterbores face up. No supports',
+  ),
   // Issue #158 — the tool-insert holder plate. As modelled the pocket mouths
   // face up, which is also its print orientation: every pocket is a vertical
   // bore or a widening chamfer, so nothing overhangs and no supports are
@@ -297,6 +304,9 @@ function describePart(
   }
   if (id === 'wall-plate') {
     return { displayName: 'Wall mount — wall plate', material: 'rigid', category: 'case' };
+  }
+  if (id === 'pocket-tray') {
+    return { displayName: 'Wall shelf — pocket carrier', material: 'rigid', category: 'case' };
   }
   if (id === 'shell') {
     return { displayName: 'Case body', material: 'rigid', category: 'case' };

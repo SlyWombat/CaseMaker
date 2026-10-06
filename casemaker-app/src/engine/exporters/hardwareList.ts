@@ -4,6 +4,7 @@ import { accessorySlots, computeRackDims, earScrewsPerSide, plateScrewYs, resolv
 import { clearanceDiameter, pilotDiameter } from '@/engine/compiler/fasteners';
 import { HARDWARE_SCREW } from '@/engine/compiler/hinges';
 import { derivedKind } from '@/engine/compiler/archetype';
+import { computePocketDims } from '@/engine/compiler/stand';
 
 /**
  * The list quotes diameters, so it reads them from the same table the geometry
@@ -125,6 +126,21 @@ export function hardwareForProject(project: Project): HardwareItem[] {
   const stand = c.stand;
   const enc = project.board.enclosure;
   if (kind === 'stand' && stand && enc) {
+    // Pocket carrier (#151): the module is not screwed to anything — it nests.
+    // The only hardware is what hangs the tray on the wall, and that is the
+    // user's own, so this counts holes rather than naming a fastener.
+    if ((stand.mount ?? 'desk') === 'pocket') {
+      // Two screws per ear, or one on a plate too short to spread them — the
+      // count comes from the same dims the holes are cut from.
+      const screws = 2 * (computePocketDims(project.board, stand)?.earScrewYs.length ?? 0);
+      items.push({
+        id: 'pocket-wall-screws',
+        label: `${screws} × wall screws + anchors (#8 / 4 mm pan heads, ~40 mm)`,
+        count: screws,
+        note: 'Through the tray’s two ears into the wall, up the plate. Anchors unless you hit a stud. Heads sit in the counterbores, facing the room. The module just nests in the pocket; nothing fastens it.',
+      });
+      return items; // the pocket has no frame screws, no lid, no cavity
+    }
     const holes = project.board.mountingHoles?.length ?? 0;
     if (holes > 0) {
       const holeDia = project.board.mountingHoles[0]!.diameter; // Ø2 on the Guition panel

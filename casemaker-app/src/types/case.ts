@@ -436,8 +436,16 @@ export interface StandParams {
    *          thickness, bezelMargin = column width margin per side beyond the
    *          channel cavity, openingClearance = bracket-to-channel fit
    *          clearance per side.
+   * 'pocket': one part — a wall-mounted SHELF the finished module nests into:
+   *          back plate with a wall-screw ear each side, a floor and two walls
+   *          forming the pocket, 45° lead-ins at the mouth. Retention is
+   *          gravity + the walls, so the module's face stays fully visible
+   *          (there is no front lip). Sized from the module's own envelope;
+   *          only openingClearance is reused (the nesting fit per side). The
+   *          tray is one 4 mm gauge + fixed wall-fixing sizes (see
+   *          rack.ts WALL_SCREW_D) — deliberately not tunable.
    */
-  mount?: 'desk' | 'wall' | 'slider';
+  mount?: 'desk' | 'wall' | 'slider' | 'pocket';
   /** Backward lean of the screen from vertical, in degrees. Wall mount: 0. */
   tiltAngleDeg: number;
   /** Frame plate thickness (must exceed bossHeight + a few mm of screw land). */

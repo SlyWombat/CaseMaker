@@ -227,8 +227,15 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
         const plan = compileProject(c.build());
         const ids = plan.nodes.map((n) => n.id);
         // Desk → one fused part. Wall → the body and the plate it snaps onto.
+        // Pocket → the one shelf the module nests into.
         const mount = c.build().case.stand?.mount ?? 'desk';
-        expect(ids).toEqual(mount === 'wall' ? ['wall-body', 'wall-plate'] : ['stand']);
+        expect(ids).toEqual(
+          mount === 'wall'
+            ? ['wall-body', 'wall-plate']
+            : mount === 'pocket'
+              ? ['pocket-tray']
+              : ['stand'],
+        );
         for (const n of plan.nodes) {
           assertWellFormed(n.op, `${c.label} ${n.id}`);
           // aabbOfOp (not the local bboxOf) — bboxOf counts subtractive cutters,

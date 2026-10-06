@@ -10,6 +10,8 @@ import {
   union,
   type BuildOp,
 } from './buildPlan';
+import { screwHole } from './fasteners';
+import { WALL_HEAD_D, WALL_HEAD_RECESS, WALL_SCREW_D } from './rack';
 
 /**
  * Desk stand for a finished display module (BoardProfile.enclosure).
@@ -106,6 +108,41 @@ function triPrismX(
     0, 1, 4, 0, 4, 3, // side a-b
     1, 2, 5, 1, 5, 4, // side b-c
     2, 0, 3, 2, 3, 5, // side c-a
+  ];
+  return mesh(new Float32Array(positions), new Uint32Array(tris));
+}
+
+/**
+ * Triangular prism extruded along Y, from a triangle given in the (x, z)
+ * plane. Same purpose as `triPrismX` (closed, outward-facing solid whatever
+ * the caller's vertex order) — but the caps are wound differently, because a
+ * triangle CCW in (x, z) has its natural normal along −y, not +y. Verified by
+ * volume in the pocket-carrier spec.
+ */
+function triPrismY(
+  tri: readonly [[number, number], [number, number], [number, number]], // three (x, z) pairs
+  yMin: number,
+  yMax: number,
+): BuildOp {
+  const a = tri[0];
+  let b = tri[1];
+  let c = tri[2];
+  // Force CCW in (x, z) so the caps' winding below is consistent.
+  const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  if (cross < 0) {
+    const swap = b;
+    b = c;
+    c = swap;
+  }
+  const positions: number[] = [];
+  for (const [x, z] of [a, b, c]) positions.push(x, yMin, z); // 0,1,2
+  for (const [x, z] of [a, b, c]) positions.push(x, yMax, z); // 3,4,5
+  const tris = [
+    0, 1, 2, // -y cap
+    3, 5, 4, // +y cap
+    0, 4, 1, 0, 3, 4, // side a-b
+    1, 4, 5, 1, 5, 2, // side b-c
+    2, 3, 0, 2, 5, 3, // side c-a
   ];
   return mesh(new Float32Array(positions), new Uint32Array(tris));
 }
@@ -310,6 +347,23 @@ export function standModulePlacement(
   if ((stand.mount ?? 'desk') === 'wall') {
     const D = stand.shroudDepth ?? WALL_DEFAULTS.shroudDepth;
     return { frameOffset, rotXDeg: 0, worldOffset: [0, 0, D] };
+  }
+  if ((stand.mount ?? 'desk') === 'pocket') {
+    const d = computePocketDims(board, stand);
+    if (!d) return null;
+    // The tray's own frame: the pocket's floor face is at z = plateT and its
+    // inner left face at x = earReach + plateT (the ear, then the wall). The
+    // module nests with its bottom edge on the floor and its back against the
+    // plate — standing up, not leaning — and Ry(180) turns its face out of the
+    // pocket, for the same reason it turns the module's face out of the desk
+    // frame (see mirrorX).
+    const fit = (d.innerW - board.pcb.size.x) / 2;
+    const innerX0 = d.earReach + d.plateT;
+    return {
+      frameOffset: [innerX0 + fit + board.pcb.size.x, d.plateT, d.plateT + d.moduleD],
+      rotXDeg: 0,
+      worldOffset: [0, 0, 0],
+    };
   }
   return {
     frameOffset,
@@ -740,9 +794,224 @@ function buildWallPlate(board: BoardProfile, stand: StandParams): BuildOp {
   return union(parts);
 }
 
+// ---- Pocket carrier (wall shelf, #151) -------------------------------------
+// A carrier pocket: a wall-mounted tray the finished module NESTS into. Not a
+// frame and not a joint — "dumb and effective", like the reviewed system's
+// wall shelf (ToolStack review #147). Retention is gravity plus three walls;
+// the module's own face stays fully visible, so there is deliberately NO front
+// lip: nothing would block a straight forward pull, and nothing should.
+//
+// The geometry comes from the module's outer envelope alone: the pocket hugs
+// the module's outline (its front flange — the same `pcb.size` outline the
+// desk frame is built on) and its depth is the module's own thickness plus
+// finger room at the mouth. Everything else follows from the pocket.
+//
+// Local frame (this part's own print frame, first octant):
+//   x: 0 = the plate's left edge (over the ear)   y: 0 = the plate's bottom edge
+//   z: 0 = the WALL (the plate's rear face), z = T = the pocket's floor face,
+//      mouth at T + pocketDepth
+// so the part datums on the wall plane exactly like the wall-mount parts.
+//
+// Print orientation: AS MODELLED. The plate lies on the bed and the three
+// walls rise off it as walls — no supports, no flip, counterbores facing up.
+// Mounted, the part is that same solid turned 90°: the print's floor becomes
+// the shelf, the plate's rear face becomes the wall.
+
+/** One gauge for the plate, walls, floor and ribs — the rack's ear/gusset
+ *  gauge (EAR_T). A pocket is not a place for a thickness knob. */
+const POCKET_T = 4;
+/** Nesting fit per side, when the caller asks for less than this. */
+const POCKET_MIN_FIT = 0.3;
+/** Pocket depth past the module's own thickness: finger room to lift it out. */
+const POCKET_LIFT = 10;
+/** 45° entry chamfer at the pocket mouth. */
+const POCKET_LEAD = 3;
+/** How far each ear reaches out past the side wall, for its wall screw. */
+const POCKET_EAR_REACH = 18;
+/** 45° rib leg, outboard of each side wall. Kept under the ear's own reach
+ *  (see the cap at its use) so a rib can never poke past the plate's edge. */
+const POCKET_RIB_LEG = 16;
+/** Overlap bites, so the ribs fuse to the plate, the wall AND the floor. */
+const POCKET_BITE = 1;
+/** Plate height at which an ear earns a second wall screw. One screw per ear
+ *  is a hinge; two spread up the plate cannot let the tray swing. */
+const POCKET_TWO_SCREW_H = 60;
+
+export interface PocketDims {
+  /** Pocket opening: the module's outline + the fit, per side. */
+  innerW: number;
+  innerH: number;
+  /** The module's own thickness: front flange + the deepest thing behind it. */
+  moduleD: number;
+  /** Floor face to mouth. */
+  pocketD: number;
+  /** Back plate + walls (one gauge). */
+  plateT: number;
+  earReach: number;
+  /** Back plate outline, ears included. */
+  plateW: number;
+  plateH: number;
+  /** Wall screws: x of each ear's hole (mirrored), and their ys up the plate. */
+  earScrewX: number;
+  earScrewYs: number[];
+}
+
+export function computePocketDims(board: BoardProfile, stand: StandParams): PocketDims | null {
+  const enc = board.enclosure;
+  if (!enc) return null;
+  const fit = Math.max(POCKET_MIN_FIT, stand.openingClearance);
+  const innerW = board.pcb.size.x + 2 * fit;
+  const innerH = board.pcb.size.y + 2 * fit;
+  const moduleD = enc.flangeThickness + Math.max(enc.body.depth, enc.bossHeight);
+  const plateT = POCKET_T;
+  const plateW = innerW + 2 * (plateT + POCKET_EAR_REACH);
+  const plateH = innerH + plateT;
+  const n = plateH >= POCKET_TWO_SCREW_H ? 2 : 1;
+  const earScrewYs = Array.from({ length: n }, (_, i) => (plateH * (i + 1)) / (n + 1));
+  return {
+    innerW,
+    innerH,
+    moduleD,
+    pocketD: moduleD + POCKET_LIFT,
+    plateT,
+    earReach: POCKET_EAR_REACH,
+    plateW,
+    plateH,
+    // The centre of each ear — so hole and its mirror land in the same spot on
+    // both sides.
+    earScrewX: POCKET_EAR_REACH / 2,
+    earScrewYs,
+  };
+}
+
+/**
+ * Build the pocket carrier: one wall shelf — back plate with a screw ear each
+ * side, a floor and two walls around the pocket, 45° lead-ins at the mouth,
+ * and a rib outboard of each wall. Null when the board isn't a finished
+ * module (there's no envelope to size a pocket from).
+ */
+export function buildPocketOp(board: BoardProfile, stand: StandParams): BuildOp | null {
+  const d = computePocketDims(board, stand);
+  if (!d) return null;
+  const T = d.plateT;
+  const mouth = T + d.pocketD;
+
+  // ---- Solid: plate (ears included), then the tray box it carries ---------
+  // The tray box is floor + both walls in one piece: the cavity cut below
+  // leaves exactly those three. It starts POCKET_BITE inside the plate so the
+  // union is a genuine overlap, not a touching contact.
+  const plate = cube([d.plateW, d.plateH, T]);
+  // `earReach` is the plate's overhang PAST the wall's outer face, so the tray
+  // box starts right at the ear's outer edge and both ears come out the same
+  // width. (Starting it at T + earReach instead would leave the left ear T
+  // wider than the right, and mirror the wall screw into the wall.)
+  const wx0 = d.earReach; // left wall's outer face
+  const trayW = d.innerW + 2 * T;
+  const tray = translate(
+    [wx0, 0, T - POCKET_BITE],
+    cube([trayW, d.plateH, d.pocketD + POCKET_BITE]),
+  );
+
+  // ---- Cavity, and the 45° lead-ins at its mouth --------------------------
+  const innerX0 = wx0 + T;
+  const innerX1 = innerX0 + d.innerW;
+  const cavity = translate([innerX0, T, T], cube([d.innerW, d.innerH, d.pocketD + OVER]));
+  const lead = POCKET_LEAD;
+  // Sides: triangle in (x, z), down the wall's full height.
+  const leadLeft = triPrismY(
+    [
+      [innerX0, mouth - lead],
+      [innerX0, mouth],
+      [innerX0 - lead, mouth],
+    ],
+    T,
+    d.plateH + OVER,
+  );
+  const leadRight = triPrismY(
+    [
+      [innerX1, mouth - lead],
+      [innerX1, mouth],
+      [innerX1 + lead, mouth],
+    ],
+    T,
+    d.plateH + OVER,
+  );
+  // Floor: the same chamfer across the tray's width, so the module's bottom
+  // edge rides in instead of catching on the floor's front lip.
+  const leadFloor = triPrismX(
+    [
+      [T, mouth - lead],
+      [T, mouth],
+      [T - lead, mouth],
+    ],
+    wx0,
+    wx0 + trayW,
+  );
+
+  // ---- Ribs: one 45° web per side, in the plate/wall corner ---------------
+  // They sit at floor level — where the module's weight bends the wall away
+  // from the plate — and are skipped when the ear screws come down far enough
+  // to share that band.
+  const ribs: BuildOp[] = [];
+  const lowestScrew = Math.min(...d.earScrewYs);
+  if (lowestScrew - WALL_HEAD_D / 2 > 2 * T + POCKET_BITE) {
+    const B = POCKET_BITE;
+    // A longer leg would leave the plate's outline, and the plate's outline —
+    // ears included — is the part's. Cap it at the ear's own reach.
+    const leg = Math.min(POCKET_RIB_LEG, d.earReach - 2 * B);
+    const rib = (xWall: number, dir: 1 | -1): BuildOp =>
+      triPrismY(
+        [
+          [xWall + dir * B, T - B],
+          [xWall + dir * B, T + leg],
+          [xWall - dir * leg, T - B],
+        ],
+        0,
+        2 * T,
+      );
+    ribs.push(rib(wx0, 1), rib(wx0 + trayW, -1));
+  }
+
+  // ---- The user's own wall screws, through the ear of each side -----------
+  // Same fixings the rack's wall-mount ears take (WALL_SCREW_D / WALL_HEAD_D),
+  // for the same reason: whatever goes into the wall is whatever they have.
+  const cuts: BuildOp[] = [];
+  for (const sx of [d.earScrewX, d.plateW - d.earScrewX]) {
+    for (const sy of d.earScrewYs) {
+      cuts.push(
+        screwHole({
+          size: 'M4',
+          // Entry face is the plate's FRONT — the head faces the room, and the
+          // screw travels back through the plate into the wall.
+          at: [sx, sy, T],
+          axis: '-z',
+          through: T + OVER,
+          clearanceD: WALL_SCREW_D,
+          head: 'socket-cap',
+          headD: WALL_HEAD_D,
+          recess: WALL_HEAD_RECESS,
+          material: T,
+          segments: 24,
+          recessSegments: 32,
+        }),
+      );
+    }
+  }
+
+  return difference([
+    union([plate, tray, ...ribs]),
+    cavity,
+    leadLeft,
+    leadRight,
+    leadFloor,
+    ...cuts,
+  ]);
+}
+
 /**
  * The stand's print parts. Desk → one fused part. Wall → the body and the
- * wall plate it snaps onto. Null when the board isn't a finished module.
+ * wall plate it snaps onto. Pocket → the wall shelf the module nests in.
+ * Null when the board isn't a finished module.
  */
 export function buildStandNodes(
   board: BoardProfile,
@@ -755,6 +1024,10 @@ export function buildStandNodes(
       { id: 'wall-body', op: buildWallBody(board, stand) },
       { id: 'wall-plate', op: buildWallPlate(board, stand) },
     ];
+  }
+  if (mount === 'pocket') {
+    const op = buildPocketOp(board, stand);
+    return op ? [{ id: 'pocket-tray', op }] : null;
   }
   const op = mount === 'slider' ? buildSliderStandOp(board, stand) : buildStandOp(board, stand);
   return op ? [{ id: 'stand', op }] : null;

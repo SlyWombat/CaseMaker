@@ -1,0 +1,36 @@
+{
+  "id": "guition-pocket-shelf",
+  "order": 131,
+  "boardId": "guition-jc4880p443c",
+  "name": "Guition 4.3\" panel — wall shelf",
+  "description": "A wall shelf for the Guition JC4880P443C. One part: a back plate with a screw ear each side, a floor and two side walls that hold the finished module, and 45° lead-ins at the mouth so it drops in instead of catching. The module is not fastened — it nests, standing up with its face out and fully visible, and lifts straight out to service. The pocket is sized from the module's own envelope.",
+  "estPrintMinutes": 200,
+  "projectName": "Guition 4.3\" panel — wall shelf",
+  "casePatch": {
+    "stand": {
+      "enabled": true,
+      "mount": "pocket",
+      "tiltAngleDeg": 0,
+      "frameThickness": 10,
+      "bezelMargin": 5,
+      "openingClearance": 0.4,
+      "screwHoleDiameter": 2.4,
+      "baseDepth": 55,
+      "baseThickness": 5,
+      "gussetThickness": 6,
+      "gussetHeightFraction": 0.55
+    },
+    "bosses": {
+      "enabled": false,
+      "insertType": "self-tap",
+      "outerDiameter": 5,
+      "holeDiameter": 2.5
+    },
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  },
+  "ports": "none"
+}

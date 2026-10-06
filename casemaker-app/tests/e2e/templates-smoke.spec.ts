@@ -24,6 +24,7 @@ const TEMPLATE_IDS = [
   'mini-rack-10in',
   'snap-fit-test',
   'badge-blank',
+  'guition-pocket-shelf',
 ] as const;
 
 /**
@@ -57,6 +58,9 @@ const ASSEMBLY_TEMPLATE_NODES: Record<string, string[]> = {
   // The badge is two parts bonded at the colour split, so it has no shell/lid
   // to spot-check either.
   'badge-blank': ['badge-bottom', 'badge-top'],
+  // A stand compiles to its own part, not a shell + lid. The pocket shelf is
+  // one piece — pin it, so a compile that drops the tray fails here.
+  'guition-pocket-shelf': ['pocket-tray'],
 };
 
 const KNOWN_BROKEN: Record<string, number> = {

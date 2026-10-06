@@ -322,9 +322,14 @@ const KS_PITCH = 30;
 /** Wall mount — ears. */
 const EAR_REACH = 28;
 const EAR_T = 4;
-const WALL_SCREW_D = 4.5;
-const WALL_HEAD_D = 9.6;
-const WALL_HEAD_RECESS = 2;
+/**
+ * The user's own wall fixings (#8 / 4 mm pan heads). Exported because the
+ * stand's pocket carrier (#151) hangs on the same screws: two carriers of the
+ * same weight on the same wall should want the same hole.
+ */
+export const WALL_SCREW_D = 4.5;
+export const WALL_HEAD_D = 9.6;
+export const WALL_HEAD_RECESS = 2;
 const GUSSET_T = 4;
 /** Wall mount — french cleat. Chunky on purpose: the 15×40 profile keeps
  *  the hook step and bevel legible at rack scale and adds bearing area. */
