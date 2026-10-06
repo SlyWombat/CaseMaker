@@ -115,7 +115,14 @@ describe('Waterproof gasket (#107)', () => {
       },
     };
     const plan = compileProject(sealedProject);
-    expect(plan.nodes.find((n) => n.id === 'gasket')).toBeDefined();
+    const gasket = plan.nodes.find((n) => n.id === 'gasket');
+    expect(gasket).toBeDefined();
+    // Issue #168 — the gasket is what the export path splits into its own file,
+    // and it says so itself now. This replaces the old "the exporter special-
+    // cases the id `gasket`" coupling: the export side is keyed off this flag
+    // (see `meshNodesForExport`), so the two have to agree or the gasket lands
+    // in the main STL and prints in the wrong filament.
+    expect(gasket!.material).toEqual({ separateFile: true });
     // Unsealed projects still don't have a gasket node.
     const unsealed = compileProject({ ...project, case: { ...project.case, wallThickness: 5 } });
     expect(unsealed.nodes.find((n) => n.id === 'gasket')).toBeUndefined();

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { unzipSync } from 'fflate';
 
 import {
   BADGE_BOTTOM_NODE_ID,
@@ -9,6 +10,7 @@ import {
   badgeOutline,
   buildBadgeNodes,
 } from '@/engine/compiler/badge';
+import { buildThreeMf } from '@/workers/export/threeMf';
 import { derivedKind } from '@/engine/compiler/archetype';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { defaultBadgeParams, badgeParamsProblem, type BadgeParams } from '@/types/badge';
@@ -237,5 +239,77 @@ describe('#167 — archetype dispatch', () => {
     const issue = plan.placementReport!.issues.find((i) => i.kind === 'badge-config');
     expect(issue, 'a badge-config issue is reported').toBeDefined();
     expect(issue!.severity).toBe('error');
+  });
+});
+
+/**
+ * Issue #168 — a two-colour badge is only "ready to print" if the slicer can
+ * tell the two colours apart. The geometry above is unchanged by that; this is
+ * the part that makes the exported file a multi-material object rather than two
+ * loose ones.
+ */
+describe('#168 — the badge carries its tools to the slicer', () => {
+  const b = defaultBadgeParams();
+
+  /** The compiled nodes' geometry as the export path sees it. */
+  function meshInputs(plan: ReturnType<typeof compileProject>) {
+    return plan.nodes.map((n) => {
+      const m = exec(n.op);
+      try {
+        const mesh = m.getMesh();
+        const numProp = mesh.numProp;
+        const numVert = mesh.vertProperties.length / numProp;
+        const positions = new Float32Array(numVert * 3);
+        for (let i = 0; i < numVert; i++) {
+          for (let k = 0; k < 3; k++) positions[i * 3 + k] = mesh.vertProperties[i * numProp + k]!;
+        }
+        return {
+          positions,
+          indices: new Uint32Array(mesh.triVerts),
+          material: n.material,
+          name: n.id,
+          triangles: mesh.triVerts.length / 3,
+        };
+      } finally {
+        m.delete();
+      }
+    });
+  }
+
+  it('tags each colour with its own tool, straight off BadgeParams', () => {
+    const custom = defaultBadgeParams({ bottomExtruder: 4, topExtruder: 1 });
+    expect(buildBadgeNodes(custom)!.map((n) => n.material?.extruder)).toEqual([4, 1]);
+    expect(buildBadgeNodes(b)!.map((n) => n.material?.extruder)).toEqual([2, 3]);
+  });
+
+  it('compiles to a 3MF the slicer reads as one two-part object', () => {
+    const plan = compileProject(findTemplate('badge-blank')!.build());
+    const meshes = meshInputs(plan);
+    const zip = unzipSync(
+      new Uint8Array(buildThreeMf(meshes, { objectName: 'badge-blank' })),
+    );
+    const model = new TextDecoder().decode(zip['3D/3dmodel.model']!);
+    const config = new TextDecoder().decode(zip['Metadata/Slic3r_PE_model.config']!);
+
+    expect(model.match(/<object /g)?.length, 'one object, not two').toBe(1);
+    expect(config).toContain('<metadata type="object" key="name" value="badge-blank"/>');
+    expect(config).toContain('<volume firstid="0"');
+    // The split is the bottom band's own triangle count — the number that
+    // breaks silently if the two ever stop being emitted from one outline.
+    expect(config).toContain(`<volume firstid="${meshes[0]!.triangles}"`);
+    expect(config).toContain('key="name" value="badge-bottom"');
+    expect(config).toContain('key="name" value="badge-top"');
+    // 2 for the bottom colour, 3 for the top — the oracle's `--ext 2 3`.
+    expect(config).toContain('<metadata type="volume" key="extruder" value="2"/>');
+    expect(config).toContain('<metadata type="volume" key="extruder" value="3"/>');
+  });
+
+  it('a single badge half exported alone still says which tool it is', () => {
+    const plan = compileProject(findTemplate('badge-blank')!.build());
+    const [bottomMesh] = meshInputs(plan);
+    const zip = unzipSync(new Uint8Array(buildThreeMf([bottomMesh!])));
+    const config = new TextDecoder().decode(zip['Metadata/Slic3r_PE_model.config']!);
+    expect(config).toContain('<volume firstid="0"');
+    expect(config).toContain('<metadata type="volume" key="extruder" value="2"/>');
   });
 });

@@ -325,11 +325,13 @@ export function compileProject(project: Project): BuildPlan {
 
   // Issue #108 — gasket body is its own top-level node so the export
   // pipeline emits it as a separate STL (printed in TPU 95A, not the
-  // case body's PLA/PETG). The export pipeline keys off the `gasket`
-  // node id.
+  // case body's PLA/PETG). Issue #168 moved the "which node goes in its
+  // own file" decision off the node id and onto `material.separateFile`:
+  // the export path no longer hard-codes a special case, and the flag sits
+  // on the node where the reason for it is.
   const gasketBody = buildGasketBody(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   if (gasketBody) {
-    nodes.push({ id: 'gasket', op: gasketBody });
+    nodes.push({ id: 'gasket', op: gasketBody, material: { separateFile: true } });
   }
   // Issue #109 — Pelican-style latch arms + print-in-place pins each
   // become their own top-level node so they print as free parts.

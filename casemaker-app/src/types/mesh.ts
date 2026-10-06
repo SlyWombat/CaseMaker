@@ -18,10 +18,38 @@ export interface MeshStats {
   componentCount?: number;
 }
 
+/**
+ * Issue #168 — what the SLICER needs to know about a part beyond its geometry.
+ *
+ * Careful with the word "material": `partForId` in `@/engine/exporters/parts`
+ * already reports a `material: 'rigid' | 'flex'` for the parts table, meaning
+ * the FILAMENT CLASS (print the gasket in TPU). This is the other half — the
+ * assignment a multi-material machine needs: which tool prints it, at what
+ * infill, and whether it belongs in the main file at all. Both can be true of
+ * the same part and neither implies the other, so they are deliberately
+ * separate fields rather than one wider enum.
+ *
+ * Every field is optional and absent means today's behaviour exactly, so a
+ * project that says nothing here exports byte-identically to before #168.
+ */
+export interface NodeMaterial {
+  /** 1-based tool/extruder index, as the slicer counts them. */
+  extruder?: number;
+  /** Object-level `fill_density`, in the slicer's own units (`'15%'`). */
+  fillDensity?: string;
+  /** Write this part as its own file rather than in the main bundle (#108). */
+  separateFile?: boolean;
+}
+
 export interface MeshNode {
   id: string;
   buffer: MeshBuffer;
   stats: MeshStats;
+  /**
+   * Issue #168 — copied from the `BuildNode` this mesh was built from, so the
+   * export path can group and tag parts without re-deriving anything from ids.
+   */
+  material?: NodeMaterial;
 }
 
 export interface BuildResult {

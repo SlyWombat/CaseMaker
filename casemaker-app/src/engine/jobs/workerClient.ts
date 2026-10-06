@@ -2,6 +2,7 @@ import * as Comlink from 'comlink';
 import type { GeometryWorkerApi, BuildOutputWire } from '@/workers/geometry.worker';
 import type { ExportWorkerApi } from '@/workers/export.worker';
 import type { StlMeshInput } from '@/workers/export/stlBinary';
+import type { ThreeMfOptions } from '@/workers/export/threeMf';
 import { transferListForPlan } from '@/engine/compiler/buildPlan';
 
 let geomWorker: Worker | null = null;
@@ -54,6 +55,9 @@ export async function exportStlAscii(meshes: StlMeshInput[]): Promise<string> {
   return getExportApi().exportStlAscii(meshes);
 }
 
-export async function exportThreeMf(meshes: StlMeshInput[]): Promise<ArrayBuffer> {
-  return getExportApi().exportThreeMf(meshes);
+export async function exportThreeMf(
+  meshes: StlMeshInput[],
+  opts: ThreeMfOptions = {},
+): Promise<ArrayBuffer> {
+  return getExportApi().exportThreeMf(meshes, opts);
 }

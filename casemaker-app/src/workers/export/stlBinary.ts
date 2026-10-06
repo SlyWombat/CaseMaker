@@ -1,6 +1,17 @@
+import type { NodeMaterial } from '@/types';
+
 export interface StlMeshInput {
   positions: Float32Array;
   indices: Uint32Array;
+  /**
+   * Issue #168 — slicer assignment, set only for parts that are not just
+   * another piece of the same rigid print. The 3MF writer is the only consumer;
+   * the STL writers ignore it (an STL has nowhere to put it — which is the
+   * whole reason the two-colour badge needs the 3MF).
+   */
+  material?: NodeMaterial;
+  /** Volume label for the multi-material object in the 3MF (#168). */
+  name?: string;
 }
 
 export function buildBinaryStl(meshes: StlMeshInput[]): ArrayBuffer {

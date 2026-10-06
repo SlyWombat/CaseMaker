@@ -41,9 +41,17 @@ async function dispatch(project: Project, myGen: number): Promise<void> {
     const plan = compileProject(project);
     const result = await buildGeometry(plan, myGen);
     if (!result || myGen !== currentGeneration) return;
+    // Issue #168 — the slicer assignment travels with the part. The worker
+    // ships geometry only, so take it from the plan being built (the worker
+    // walks `plan.nodes` in order and echoes each id back, but matching on the
+    // id is what makes that an implementation detail rather than a contract).
+    const materialById = new Map(
+      plan.nodes.filter((n) => n.material).map((n) => [n.id, n.material!] as const),
+    );
     const nodes: MeshNode[] = result.nodes.map((n) => ({
       id: n.id,
       buffer: { positions: n.positions, indices: n.indices },
+      material: materialById.get(n.id),
       stats: {
         vertexCount: n.vertexCount,
         triangleCount: n.triangleCount,

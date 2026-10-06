@@ -1,4 +1,4 @@
-import type { Vec3, Vec2, Facing } from '@/types';
+import type { Vec3, Vec2, Facing, NodeMaterial } from '@/types';
 import { aabbOfProfile, type Profile } from './profile';
 
 export type { Profile } from './profile';
@@ -90,13 +90,23 @@ export interface BuildNode {
   op: BuildOp;
   /**
    * Issue #154 — per-node print guidance, optional so compiler modules that
-   * have not been annotated yet still type-check. Shape left for #168: it adds
-   * `material` as a SIBLING on BuildNode (`material?: 'rigid' | 'flex'`), not a
-   * field inside PrintMeta — material is a property of the part, PrintMeta is
-   * about the print job. The id-keyed table in `@/engine/exporters/parts`
-   * remains the source of truth; this field is the per-node override hook.
+   * have not been annotated yet still type-check. The id-keyed table in
+   * `@/engine/exporters/parts` remains the source of truth for what a part
+   * recommends; this field is the per-node override hook.
    */
   print?: PrintMeta;
+  /**
+   * Issue #168 — slicer assignment (tool, infill, own-file), a SIBLING of
+   * `print` rather than a field inside it: `print` is about the print JOB,
+   * this is about the part's place in a multi-material one. It has to be set
+   * by the compiler rather than read from the id-keyed table, because the
+   * values are project parameters (the badge's two extruders come from
+   * `BadgeParams`), not constants per part type.
+   *
+   * Carried through to `MeshNode.material` at the geometry boundary, which is
+   * where the export path picks it up.
+   */
+  material?: NodeMaterial;
 }
 
 export interface BuildPlan {

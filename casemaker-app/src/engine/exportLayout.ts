@@ -1,4 +1,4 @@
-import type { MeshNode } from '@/types';
+import type { MeshNode, NodeMaterial } from '@/types';
 import { PRINT_FLIP_NODE_IDS } from '@/engine/exporters/parts';
 
 export type ExportLayoutMode = 'print-ready' | 'assembled';
@@ -171,6 +171,9 @@ export interface LaidOutMesh {
   id: string;
   positions: Float32Array;
   indices: Uint32Array;
+  /** Issue #168 — carried through untouched: laying a part out flat does not
+   *  change which tool prints it. */
+  material?: NodeMaterial;
 }
 
 export function applyLayoutToMeshes(
@@ -180,14 +183,21 @@ export function applyLayoutToMeshes(
   const transforms = computePartTransforms(nodes, opts);
   return nodes.map((n) => {
     const t = transforms.get(n.id);
-    if (!t) return { id: n.id, positions: n.buffer.positions, indices: n.buffer.indices };
+    if (!t) {
+      return {
+        id: n.id,
+        positions: n.buffer.positions,
+        indices: n.buffer.indices,
+        material: n.material,
+      };
+    }
     const positions = applyPartTransform(n.buffer.positions, t);
     // If we flipped on X (negates Y and Z), winding is inverted — fix indices.
     const indices =
       t.flipAxis === null
         ? n.buffer.indices
         : reverseTriangleWinding(n.buffer.indices);
-    return { id: n.id, positions, indices };
+    return { id: n.id, positions, indices, material: n.material };
   });
 }
 

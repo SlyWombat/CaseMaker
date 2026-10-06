@@ -103,11 +103,10 @@ async function saveBlob(blob: Blob, filename: string): Promise<void> {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** Issue #108 — node id for the TPU gasket. The export pipeline pulls
- *  this node out of the main mesh bundle and emits it as a separate STL
- *  so the user prints it in flex filament. */
-const GASKET_NODE_ID = 'gasket';
-
+/** Issue #108 — the TPU gasket is pulled out of the main bundle and written as
+ *  its own file. Issue #168 — this is no longer keyed off the node id: the node
+ *  says so itself, via `material.separateFile`, which is also where the gasket's
+ *  reason for being separate (a different filament) is recorded. */
 export function meshesForExport(): StlMeshInput[] {
   return meshNodesForExport().main;
 }
@@ -115,7 +114,10 @@ export function meshesForExport(): StlMeshInput[] {
 export interface ExportMeshGroups {
   /** Main case body parts (case + lid + hinge-pin etc.) — same material. */
   main: StlMeshInput[];
-  /** TPU gasket — separate file, separate material (#108). */
+  /** The part written as its own file, currently only the TPU gasket (#108).
+   *  One slot: the export path writes it under a `-gasket` name and pairs it
+   *  with the gasket slicer hints, so a second separate-file part would need a
+   *  real multi-file path rather than a second flag. */
   gasket: StlMeshInput | null;
   /** Node ids of the meshes in `main`, in the same order. Kept so the #154
    *  print-notes sidecar can name exactly what is in the files (an id is not
@@ -135,12 +137,16 @@ export function meshNodesForExport(): ExportMeshGroups {
     // made from. Including them in Save All would hand you the whole rack
     // twice — once in pieces, once welded.
     if (isAssembledNodeId(n.id)) continue;
-    if (n.id === GASKET_NODE_ID) gasketNode = n;
+    if (n.material?.separateFile) gasketNode = n;
     else main.push(n);
   }
   const toMesh = (n: MeshNode): StlMeshInput => ({
     positions: n.buffer.positions,
     indices: n.buffer.indices,
+    material: n.material,
+    // The node id doubles as the volume label inside a multi-material 3MF
+    // object (#168), so PrusaSlicer's part list names what it is showing.
+    name: n.id,
   });
   if (layoutMode === 'assembled') {
     return {
@@ -153,7 +159,12 @@ export function meshNodesForExport(): ExportMeshGroups {
   // Print-ready: lay main parts out flat, lid flipped, side-by-side along +X.
   const laid = applyLayoutToMeshes(main, { flipNodeIds: PRINT_FLIP_NODE_IDS });
   return {
-    main: laid.map((m) => ({ positions: m.positions, indices: m.indices })),
+    main: laid.map((m) => ({
+      positions: m.positions,
+      indices: m.indices,
+      material: m.material,
+      name: m.id,
+    })),
     gasket: gasketNode ? toMesh(gasketNode) : null,
     mainIds: laid.map((m) => m.id),
     gasketId: gasketNode ? gasketNode.id : null,
@@ -200,8 +211,13 @@ export async function exportSinglePart(
   // AND corrects the triangle winding a flip inverts.
   const [laid] = applyLayoutToMeshes([node]);
   const mesh: StlMeshInput = laid
-    ? { positions: laid.positions, indices: laid.indices }
-    : { positions: node.buffer.positions, indices: node.buffer.indices };
+    ? { positions: laid.positions, indices: laid.indices, material: laid.material, name: nodeId }
+    : {
+        positions: node.buffer.positions,
+        indices: node.buffer.indices,
+        material: node.material,
+        name: nodeId,
+      };
   const safeProject = project.name.replace(/[^a-z0-9-_]+/gi, '_');
   const safePart = nodeId.replace(/[^a-z0-9-_]+/gi, '_');
   const baseName = `${safeProject}-${safePart}`;
@@ -217,7 +233,7 @@ export async function exportSinglePart(
     await downloadText(text, filename, 'model/stl');
     return { filename, bytes: new Blob([text]).size };
   }
-  const buf = await exportThreeMf([mesh]);
+  const buf = await exportThreeMf([mesh], { objectName: `${project.name} — ${nodeId}` });
   const filename = `${baseName}.3mf`;
   await downloadArrayBuffer(buf, filename, 'model/3mf');
   return { filename, bytes: buf.byteLength };
@@ -313,8 +329,13 @@ export async function triggerExport(format: ExportFormat): Promise<void> {
     // by object group at print time. The 3MF does NOT carry the print
     // guidance — `threeMf.ts` writes only an `Application` metadata tag —
     // so the sidecar below is emitted here too (#154).
+    //
+    // Issue #168 — it DOES now carry the slicer assignment, for parts that
+    // have one (the badge's two colours). Those parts arrive as a single
+    // multi-material object with a `Slic3r_PE_model.config` sidecar, so the
+    // two-colour badge opens ready to print instead of as two loose objects.
     const all = [...groups.main, ...(groups.gasket ? [groups.gasket] : [])];
-    const buf = await exportThreeMf(all);
+    const buf = await exportThreeMf(all, { objectName: project.name });
     await downloadArrayBuffer(buf, `${safeName}.3mf`, 'model/3mf');
   }
 

@@ -32,13 +32,14 @@ import { useProjectStore, createDefaultProject } from '@/store/projectStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import type { MeshNode } from '@/types';
 
-function node(id: string, z = 0): MeshNode {
+function node(id: string, z = 0, material?: MeshNode['material']): MeshNode {
   return {
     id,
     buffer: {
       positions: new Float32Array([0, 0, z, 10, 0, z, 0, 10, z]),
       indices: new Uint32Array([0, 1, 2]),
     },
+    material,
     stats: { vertexCount: 3, triangleCount: 1, bbox: { min: [0, 0, z], max: [10, 10, z] } },
   };
 }
@@ -79,7 +80,7 @@ describe('export sidecar (#154)', () => {
         ['shell', node('shell')],
         ['lid', node('lid', 4)],
         ['rack-assembled-frame', node('rack-assembled-frame')],
-        ['gasket', node('gasket')],
+        ['gasket', node('gasket', 0, { separateFile: true })],
       ]),
     });
     const groups = meshNodesForExport();
@@ -87,6 +88,46 @@ describe('export sidecar (#154)', () => {
     expect(groups.mainIds).toEqual(['shell', 'lid']);
     expect(groups.gasketId).toBe('gasket');
     expect(groups.mainIds.length).toBe(groups.main.length);
+  });
+
+  // Issue #168 — the split is driven by what the part says about itself, not by
+  // its name. Same node id, no flag: it stays in the bundle.
+  it('a separate-file part is split out by its own flag, not by being called gasket', () => {
+    useJobStore.setState({
+      nodes: new Map([
+        ['shell', node('shell')],
+        ['gasket', node('gasket')],
+      ]),
+    });
+    expect(meshNodesForExport().gasketId).toBeNull();
+
+    useJobStore.setState({
+      nodes: new Map([
+        ['shell', node('shell')],
+        ['some-future-flex-part', node('some-future-flex-part', 0, { separateFile: true })],
+      ]),
+    });
+    expect(meshNodesForExport().gasketId).toBe('some-future-flex-part');
+  });
+
+  // Issue #168 — the slicer assignment rides along with the geometry, in both
+  // layout modes, and the node id comes with it as the volume label.
+  it('carries material and the volume name onto the exported meshes', () => {
+    useJobStore.setState({
+      nodes: new Map([
+        ['badge-bottom', node('badge-bottom', 0, { extruder: 2 })],
+        ['badge-top', node('badge-top', 3, { extruder: 3 })],
+      ]),
+    });
+    for (const mode of ['print-ready', 'assembled'] as const) {
+      useSettingsStore.setState({ exportLayout: mode });
+      const { main } = meshNodesForExport();
+      expect(main.map((m) => [m.name, m.material?.extruder])).toEqual([
+        ['badge-bottom', 2],
+        ['badge-top', 3],
+      ]);
+    }
+    useSettingsStore.setState({ exportLayout: 'print-ready' });
   });
 
   it('the sidecar text is layout-aware and names the parts being written', () => {

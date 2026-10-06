@@ -63,10 +63,18 @@ export function buildBadgeNodes(b: BadgeParams): BuildNode[] | null {
     : bottom;
 
   return [
-    { id: BADGE_BOTTOM_NODE_ID, op: bottomOp },
+    {
+      id: BADGE_BOTTOM_NODE_ID,
+      op: bottomOp,
+      // Issue #168 — which tool prints each colour. The values have been on
+      // `BadgeParams` since #167 because the oracle takes them as `--ext 2 3`;
+      // this is where they stop being documentation and reach the slicer.
+      material: { extruder: b.bottomExtruder },
+    },
     {
       id: BADGE_TOP_NODE_ID,
       op: translate([0, 0, b.splitHeight], extrude(outline, b.thickness - b.splitHeight)),
+      material: { extruder: b.topExtruder },
     },
   ];
 }

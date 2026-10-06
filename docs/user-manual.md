@@ -136,7 +136,7 @@ Three formats:
 | :--- | :--- |
 | **STL (binary)** | Default for slicers — smallest file size, fastest to write. |
 | **STL (ASCII)** | Human-readable; useful for diffs and source-control inspection. |
-| **3MF** | Modern open format, supports units (mm), required by some slicers. |
+| **3MF** | Modern open format, supports units (mm), required by some slicers. Carries the slicer assignment too: a two-colour badge opens as **one object whose two parts are already on their own extruders**, so there is nothing to pair up by hand. |
 
 > **Note:** Always **press Export, not browser-Save** — the on-screen mesh isn't directly the export. Triggering Export forces a flush + rebuild + worker call.
 

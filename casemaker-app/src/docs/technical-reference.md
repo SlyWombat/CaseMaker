@@ -122,7 +122,7 @@ The compiler is 38 modules. Grouped by what they build:
 | :--- | :--- |
 | `stlBinary.ts` | `buildBinaryStl(meshes) → ArrayBuffer` |
 | `stlAscii.ts` | `buildAsciiStl(meshes, solidName) → string` |
-| `threeMf.ts` | `buildThreeMf(meshes) → ArrayBuffer` (fflate-zipped) |
+| `threeMf.ts` | `buildThreeMf(meshes, opts?) → ArrayBuffer` (fflate-zipped). Parts carrying `material` become one multi-material object plus a `Metadata/Slic3r_PE_model.config` sidecar (#168); with none, the output is byte-identical to a plain object-per-mesh file. |
 
 ### State stores — `src/store/`
 
