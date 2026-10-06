@@ -46,9 +46,17 @@ export function LabelledField({
   // aria-describedby. If multiple children are passed (rare; e.g. a slider
   // with twin inputs), we leave them alone — the calling component is then
   // responsible for wiring up its own ids.
-  const child = Children.only(children);
+  //
+  // This read `Children.only(children)`, which does not "leave them alone" at
+  // all: it THROWS on anything but exactly one child. The tool-insert panel's
+  // Pockets field passes three (a summary line, the item rows, the add
+  // buttons) and took the whole panel down with it, while this comment claimed
+  // the opposite (#267). Counting first is what the contract always said.
+  const child: ReactNode = Children.count(children) === 1 ? Children.only(children) : null;
   let inputId: string | undefined;
-  let decoratedChild: ReactNode = child;
+  // `child` is null for anything but exactly one child — then the children go
+  // through untouched, which is the whole point.
+  let decoratedChild: ReactNode = child ?? children;
   if (isValidElement<{ id?: string; title?: string; 'aria-describedby'?: string }>(child)) {
     inputId = child.props.id ?? generatedId;
     const existingDescribedBy = child.props['aria-describedby'];
