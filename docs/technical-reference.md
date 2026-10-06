@@ -212,6 +212,20 @@ clamping posts, hinge knuckles, latch arms — must reach the inner ceiling at
 fused by Manifold and comes back as a separate body; both runs at this were #121 (lid
 knuckles) and #125 (cavity-mode snap-fit), and clamping posts were the third (#117).
 
+**The case side of that list (#263).** A case knuckle's centreline sits
+`knuckleOuterDiameter/2` out from the wall, so its cross-section is *tangent* to the
+outer face — a line, not a volume. On a clamshell the alignment flange happens to sit
+behind that line and Manifold fuses the run; on a recessed lid the rim is a thin
+upstanding band with nothing behind the knuckles, and the shell decomposed into the
+body plus one loose knuckle per case position. `buildKnuckleCaseFairing` adds the
+case-side mirror of #121's tab: a cube spanning exactly the knuckle's own u-length,
+reaching `min(1 mm, wall/2)` into the wall and out to the knuckle axis, banded
+±`knuckleOuterDiameter/4` about that axis. Each of those three bounds is load-bearing —
+half a wall is what keeps the pad out of the cavity, half a radius is what keeps it
+inside the cylinder's own silhouette, and the u-length is what keeps it from bridging
+across the gap to the neighbouring knuckle. By construction the pad's top lands
+`knuckleR/2` below the lid's seating plane, so it cannot foul the closed lid on any wall.
+
 **The channel may not consume the wall it is cut into (#264).** A gasket as wide as
 the wall leaves no material outboard (or inboard) of the cut, and on a recessed-lid
 case that cut is the only thing joining the rim band to the body — the shell compiled

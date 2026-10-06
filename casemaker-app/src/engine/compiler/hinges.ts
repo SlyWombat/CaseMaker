@@ -9,7 +9,7 @@ import type {
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
 import { cube, cylinder, difference, rotate, translate, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
-import { faceFrame } from '../coords';
+import { faceFrame, type FaceFrame } from '../coords';
 import { computeLidDims } from './lid';
 import { clampHinge } from './featureScale';
 import { FASTENERS } from './fasteners';
@@ -260,6 +260,10 @@ function buildKnuckle(
   return translate(origin, orientAlongFaceU(cyl, hinge.face));
 }
 
+/** How far the #121/#263 fairings reach into the solid they are bridging to.
+ *  One millimetre is enough for manifold to fuse on rather than touch. */
+const FAIRING_INTO_WALL = 1.0;
+
 /** Issue #121 — small "fairing tab" cube that bridges the lid knuckle's
  *  top arc with the lid plate's underside, giving manifold a volumetric
  *  overlap to fuse instead of single-line contact. Returns null when the
@@ -278,7 +282,7 @@ function buildKnuckleLidFairing(
   knuckleLen: number,
 ): BuildOp | null {
   const knuckleR = hinge.knuckleOuterDiameter / 2;
-  const FAIRING_BELOW = 1.0; // overlap into the cylinder
+  const FAIRING_BELOW = FAIRING_INTO_WALL; // overlap into the cylinder
   const FAIRING_ABOVE = 0.5; // overlap into the lid plate
   const fairingHeight = FAIRING_BELOW + FAIRING_ABOVE;
   // Cube dims in the local frame: u along the knuckle axis (= knuckleLen),
@@ -313,6 +317,65 @@ function buildKnuckleLidFairing(
   const xOff = isPmY ? 0 : nOffset;
   const yOff = isPmY ? nOffset : 0;
   return translate([origin[0] + xOff, origin[1] + yOff, zMin], cubeOp);
+}
+
+/** Issue #263 — the case-side counterpart of the #121 fairing.
+ *
+ *  A case knuckle's centreline sits `knuckleR` out from the outer face, so the
+ *  cylinder's cross-section is TANGENT to the wall: the two share a line, not a
+ *  volume. On a clamshell that line falls inside the alignment flange and
+ *  manifold fuses them anyway; on a recessed lid the rim is a thin upstanding
+ *  band with nothing behind the knuckles, and the shell decomposes into a body
+ *  plus one loose knuckle per case position.
+ *
+ *  The fix is #121's shape: a cube spanning the knuckle's own u-extent, reaching
+ *  `depth` INTO the wall along the face normal and out to the knuckle axis. It
+ *  overlaps the wall by `depth` (≤ half the wall, so it can never break through
+ *  into the cavity) and the cylinder everywhere the circle is taller than the
+ *  cube's z-band. Most of the cube is buried in one or the other; what shows on
+ *  the print is a thin fillet where the knuckle meets the case, which is what a
+ *  real hinge looks like anyway.
+ */
+function buildKnuckleCaseFairing(
+  hinge: HingeFeature,
+  origin: [number, number, number],
+  knuckleLen: number,
+  frame: FaceFrame,
+  wallThickness: number,
+): BuildOp | null {
+  const knuckleR = hinge.knuckleOuterDiameter / 2;
+  const depth = Math.min(FAIRING_INTO_WALL, wallThickness / 2);
+  if (depth <= 0.05) return null;
+  // The band about the axis is half the knuckle's own silhouette, so the pad
+  // never reaches past the cylinder in z; clamping the bottom at the case floor
+  // keeps it inside the part even on a very shallow case.
+  const halfZ = Math.max(0.5, knuckleR * 0.5);
+  const zMin = Math.max(0, origin[2] - halfZ);
+  const zMax = origin[2] + halfZ;
+  if (zMax - zMin <= 0.2) return null;
+
+  // `origin` is the knuckle axis start: frame.origin + uAxis·uMin + outward·R.
+  // u and outward are different world axes (u is horizontal, outward is the face
+  // normal), so origin already carries the correct u and the correct n (= R).
+  const out = frame.outwardAxis;
+  const nIdx: 0 | 1 = out[0] !== 0 ? 0 : 1;
+  const uIdx: 0 | 1 = nIdx === 0 ? 1 : 0;
+
+  const size: [number, number, number] = [0, 0, 0];
+  const minCorner: [number, number, number] = [0, 0, 0];
+  // u: exactly the knuckle's span — never far enough to bridge to its neighbour.
+  const uEnd = origin[uIdx] + frame.uAxis[uIdx] * knuckleLen;
+  minCorner[uIdx] = Math.min(origin[uIdx], uEnd);
+  size[uIdx] = knuckleLen;
+  // n: from `depth` inside the wall out to the knuckle axis. The face plane is
+  // frame.origin on that axis; the axis is knuckleR out from it.
+  const nFace = frame.origin[nIdx] - out[nIdx] * depth;
+  const nAxis = origin[nIdx];
+  minCorner[nIdx] = Math.min(nFace, nAxis);
+  size[nIdx] = Math.abs(nAxis - nFace);
+  minCorner[2] = zMin;
+  size[2] = zMax - zMin;
+  return translate(minCorner, cube(size, false));
 }
 
 /** Build the through-hole subtractive cylinder spanning the full hinge axis. */
@@ -478,6 +541,19 @@ export function buildHingeOps(
       caseAdditive.push(
         buildKnuckle(hinge, [startX, startY, startZ], layout.knuckleLen),
       );
+      // Issue #263 — fairing tab between the wall face and the knuckle's
+      // tangent line of contact. On a recessed lid there is no flange behind
+      // the knuckle for manifold to bridge to and the shell splits into loose
+      // knuckles; this gives the union a volume to fuse on (the same trick
+      // #121 uses on the lid side).
+      const caseFairing = buildKnuckleCaseFairing(
+        hinge,
+        [startX, startY, startZ],
+        layout.knuckleLen,
+        frame,
+        params.wallThickness,
+      );
+      if (caseFairing) caseAdditive.push(caseFairing);
     } else {
       // Odd indices belong to the lid. ProjectCompiler translates the lid
       // op by [0, 0, lidDims.zPosition] before emitting it, so to land at
