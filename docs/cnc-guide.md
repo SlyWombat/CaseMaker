@@ -385,7 +385,13 @@ cutter have vanished. That is what the cutter will actually make, not an idealis
 
 **8. Print the run sheet (#207).** A **Run sheet** lists, on one page, the cutter, the work
 origin, the stock, the feeds and the steps to follow at the machine, so you are not reading a
-phone next to a spinning cutter. When the job declares sacrificial material (#213) the loading
+phone next to a spinning cutter. Its work-origin section is **derived from how the part is
+held** (#272, decision 26), not written out by hand: it says what the jaws already reference and
+to what accuracy, names each edge to touch on the blank in physical words ("the back edge — the
+one furthest from you, about 19 mm along from the left end"), and reports the residual the
+registration leaves. If no reachable edge can resolve an axis, it prints the refusal and names
+what is in the way instead of a sequence it cannot stand behind. When the job declares
+sacrificial material (#213) the loading
 section also carries a **side view** of the assembly — the jaws at the faces they really clamp,
 the board, the strips and the part, each at its own thickness, with Z = 0 drawn on the *part's*
 top face so the datum cannot be probed on the board by mistake.
@@ -545,7 +551,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `sweep-budget-exceeded` | error | The sweep would take longer than the allowed budget, so it was stopped. | Retry with a longer limit, or simplify the job. |
 | `ramp-over-removed` | info | A checkpoint changes Z; it was swept at its lowest Z, removing more than the machine would. | Expect a slightly pessimistic picture. |
 | `gouges-truncated` | info | Only the first few gouges are drawn; the rest are reported, not drawn. | Read the other diagnostics. |
-| `fixture-unchecked` | info | The fixture is not modelled as an obstacle yet, so proximity to it is **not** checked. | Model the vise (chapter 5). |
+| `fixture-unchecked` | info | The fixture is not modelled as an obstacle, so the cutter's proximity to it is **not** checked. The message names what is in the way — the vise's jaws, a clamp. Nothing is reported for a fixture that puts nothing over the part (tape-down, a nest wall outside the outline). | Model the vise (chapter 5). |
 | `nothing-to-sweep` | warning | The program has no cutting moves at a known position. | Check the program. |
 | `gaps` | warning | Some cutting moves could not be placed and are missing from the picture. | Read the `cut-unknown-*` rows. |
 | `item-empty` | error | An item has nothing the cutter can reach: a label has no text, or a shape (a hole, a slot) is smaller than the cutter. Formerly `label-empty`. | Type text, enlarge the shape, or disable it. |
@@ -585,8 +591,9 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `feed-refused` | error | The requested feed is so far above the ceiling it was refused rather than clamped. | Use a sane feed. |
 | `rpm-refused` | error | The requested spindle speed is so far above the ceiling it was refused. | Use a sane spindle speed. |
 
-**Planning the probe** (probe plan — #188; the planner is engine-only for now, so no screen
-raises these yet):
+**Planning the probe** (probe plan — #188). The run sheet's work-origin section is this plan,
+printed (#272); the codes below are raised by no screen yet — a refusal reaches the sheet as the
+step's text:
 
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|

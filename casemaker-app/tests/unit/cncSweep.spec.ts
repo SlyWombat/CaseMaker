@@ -28,7 +28,7 @@ import { createSimSession } from '@/workers/sim/session';
 import { flatEndMill, toolFromMkrRecord, cuttingRadiusForSweep, shapeFromType } from '@/engine/cnc/tool';
 import { parseMkrRecord } from '@/engine/cnc/gcode/mkrHeader';
 import { segmentsForRadius, SWEEP_SIMPLIFY_EPS_MM } from '@/engine/compiler/arcResolution';
-import { roundedRect } from '@/engine/compiler/profile';
+import { rectProfile, roundedRect } from '@/engine/compiler/profile';
 
 type Poly = [number, number][];
 const area = (polys: Poly[]) => {
@@ -825,6 +825,34 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
     };
     expect(codesOf(sweep(stroke(50, -2), T3, stubSetup(FSLAB, viseWH)).out)).toContain('fixture-unchecked');
     expect(codesOf(sweep(stroke(50, -2), T3, fixtureSetup({ workholding: viseWH })).out)).not.toContain('fixture-unchecked');
+  });
+
+  // #272 — whether there is anything in the cutter's way is the probe planner's answer, asked here
+  // rather than kept as a list of workholding kinds. The vise still reports (its jaws are named);
+  // a nest wall, a chuck outside the part's ends and a tape-down job report nothing, because the
+  // planner says nothing of theirs stands over the part.
+  it('names what is in the way, and stays quiet when the planner says nothing is', () => {
+    const viseWH: Workholding = {
+      kind: 'vise',
+      jawFaces: [
+        { origin: [0, 0, 0] as [number, number, number], normal: [1, 0, 0] as [number, number, number] },
+        { origin: [100, 0, 0] as [number, number, number], normal: [-1, 0, 0] as [number, number, number] },
+      ],
+      jawHeight: 8,
+    };
+    const viseOut = sweep(stroke(50, -2), T3, stubSetup(FSLAB, viseWH)).out;
+    if (!viseOut.ok) throw new Error('refused');
+    const reported = viseOut.value.diagnostics.find((d) => d.code === 'fixture-unchecked');
+    expect(reported?.message).toContain('vise jaw 1, vise jaw 2');
+    expect(reported?.message).toContain('(#204)');
+
+    for (const hold of [
+      { kind: 'printed-nest', nest: 'badge-blank', seatClearance: 0.15 },
+      { kind: 'rotary-chuck', jawDiameter: 80, stickout: 10 },
+      { kind: 'tape-down', contact: rectProfile(20, 20) },
+    ] as Workholding[]) {
+      expect(codesOf(sweep(stroke(50, -2), T3, stubSetup(FSLAB, hold)).out), hold.kind).not.toContain('fixture-unchecked');
+    }
   });
 
   it('no leak: the same fixture job sweeps 50 times', () => {

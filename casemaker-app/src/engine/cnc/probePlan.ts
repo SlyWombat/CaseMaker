@@ -404,6 +404,23 @@ function obstructionsOf(w: Workholding, notes: string[]): Obstruction[] {
   }
 }
 
+/**
+ * The fixture features that stand in the way of a reachable surface, by label — the planner's
+ * answer to "what is in the way", exported for callers that are not planning a touch (#272).
+ * `sweep.ts` asks it, so the sweep's `fixture-unchecked` names what it cannot check instead of
+ * keeping its own list of workholding kinds.
+ *
+ * An EMPTY LIST IS A REAL ANSWER, not a failure: nothing is above the part at all (`tape-down`),
+ * or the body stands outside the part's own footprint (a nest wall, a chuck outside the axial
+ * ends, an anchor bracket's unmodelled footprint). `notes` carries the same caveats
+ * `planProbing` would put in a plan, so a footprint this kernel-free module cannot evaluate is
+ * reported rather than silently dropped (decision 28).
+ */
+export function obstructionLabels(workholding: Workholding): { labels: string[]; notes: string[] } {
+  const notes: string[] = [];
+  return { labels: obstructionsOf(workholding, notes).map((o) => o.label), notes };
+}
+
 // ---- The planner ------------------------------------------------------------
 
 type Pick = { edge: Edge; points: Vec2[] };

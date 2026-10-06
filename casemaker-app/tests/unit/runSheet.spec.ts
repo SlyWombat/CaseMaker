@@ -335,6 +335,49 @@ describe('runSheet (#207)', () => {
     expect(formatDuration(3700)).toBe('1 h 1 min');
   });
 
+  // #272 — §5 is DERIVED from the workholding and the blank (decision 26), not the hand-written
+  // edge find decision 26 superseded. The sequence, the datum it starts from and the residual it
+  // leaves all come from `planProbing`; the section's job is to say them in physical words.
+  describe('section 5 — the work origin is derived from the workholding (#272)', () => {
+    const origin = (job: EngraveJob) => section(sheetFor(job), 'origin').steps.map((s) => s.text);
+
+    it('names the datum the jaws supply, then one step per touch, then the residual', () => {
+      const texts = origin(defaultEngraveJob());
+      expect(texts[0]).toBe('The vise already references X and rotation to within ±0.05 mm, before any touch.');
+
+      const touches = texts.filter((t) => t.startsWith('Touch '));
+      // The job states no XY tolerance, so every axis the vise leaves open is resolved: a pair on
+      // one straight edge for position + rotation, then one closing touch on a perpendicular edge.
+      expect(touches).toHaveLength(3);
+      expect(touches[0]).toContain('this gives position and rotation');
+      expect(touches[2]).toContain('this gives X');
+      // Physical landmarks, not coordinates: which side, and how far along it from a named end.
+      for (const t of touches) expect(t).toMatch(/the (front|back|left|right) edge — the one /);
+      for (const t of touches) expect(t).toMatch(/mm (along it from the |from the )(left|front) end|middle/);
+
+      expect(texts.some((t) => t.startsWith('X0 Y0 Z0 is the top-front-left corner'))).toBe(true);
+      expect(texts.find((t) => t.startsWith('X0 Y0 Z0'))).toContain('±0.02 mm in X and Y');
+    });
+
+    it('carries the planner’s own caveats — the static-.nc rotation limit and why Z is probed', () => {
+      const texts = origin(defaultEngraveJob()).join(' ');
+      expect(texts).toContain('a static .nc cannot compensate it');
+      expect(texts).toContain('Z is always probed on the engraved face');
+    });
+
+    it('prints a refusal as a refusal, rather than a sequence it cannot stand behind', () => {
+      // A blank with no edge long enough for the probe: every side is well under the planner's
+      // 2× tip-diameter minimum, so no axis can be resolved and the plan refuses.
+      const job = defaultEngraveJob();
+      job.stock = { length: 1, width: 1, thickness: 3, material: 'pla' };
+      const texts = origin(job);
+      expect(texts).toHaveLength(1);
+      expect(texts[0]).toContain('cannot be registered as set up');
+      expect(texts[0]).toContain('no reachable straight edge');
+      expect(texts.some((t) => t.startsWith('Touch '))).toBe(false);
+    });
+  });
+
   // #213 §6 — the side view of the setup. It is present ONLY when there is sacrificial material,
   // so a job that does not use it keeps the sheet (and this file's snapshot) byte-identical.
   describe('the stack-up elevation (#213 §6)', () => {
@@ -445,7 +488,10 @@ describe('runSheet (#207)', () => {
       const origin = section(sheet, 'origin').steps.map((s) => s.text).join(' ');
       expect(origin).toContain("Z0: the PART's top face");
       expect(origin).toContain('NOT the board');
-      expect(origin).toContain("X0: the part's left face");
+      // #272 — X0/Y0 are no longer hand-written prose: the section is derived from the workholding,
+      // and a board under the part shifts the jaw FACES without changing what they reference, so
+      // the datum sentence is the same one a job without a board gets.
+      expect(origin).toContain('The vise already references X and rotation');
     });
 
     it('names which jaw each strip is gripped by', () => {

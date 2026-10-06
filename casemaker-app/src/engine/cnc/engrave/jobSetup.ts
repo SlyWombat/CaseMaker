@@ -118,33 +118,42 @@ export function jobTool(job: EngraveJob): Tool | null {
 }
 
 /**
- * The part, its workholding and the work origin, for the emulator.
+ * How the job holds the part, in the PART frame — the ONE authority for the vise's jaw faces
+ * (#188/decision 26). Both the emulator (`toSetup`, below) and the registration plan
+ * (`engrave/registration.ts`) read this, so a jaw face can never be derived twice and disagree.
  *
- * The vise's two jaw faces are in the PART frame: the fixed jaw is the plane x = 0 with
- * normal +X (the fixed jaw is on the left, /Fabrication.md §7.3), the moving jaw is
- * x = length with normal −X. `jawHeight` is measured from the stock's seated bottom
- * (model z = 0) up to the jaw tops, which stand `stockProud` below the top face:
- * `thickness − stockProud`.
+ * The fixed jaw is the plane x = 0 with normal +X (the fixed jaw is on the left,
+ * /Fabrication.md §7.3); the moving jaw is x = length with normal −X. `jawHeight` is measured
+ * from the stock's seated bottom (model z = 0) up to the jaw tops, which stand `stockProud`
+ * below the top face: `thickness − stockProud`.
  *
  * SACRIFICIAL MATERIAL MOVES THE FACES (#213 §2): the jaws close on what is actually between
  * them, so `viseJawShift` pushes the fixed face to `x = −shift.left` and the moving face to
  * `x = length + shift.right`. With no sacrificial material the shift is zero and the faces sit
  * on the part's own edges exactly as before.
+ */
+export function workholdingFor(job: EngraveJob): Workholding {
+  const { length, thickness } = job.stock;
+  const shift = viseJawShift(job.sacrificial);
+  return {
+    kind: 'vise',
+    jawFaces: [
+      { origin: [0 - shift.left, 0, 0], normal: [1, 0, 0] }, // fixed jaw face, normal +X
+      { origin: [length + shift.right, 0, 0], normal: [-1, 0, 0] }, // moving jaw face, normal −X
+    ],
+    jawHeight: thickness - job.workholding.vise.stockProud,
+  };
+}
+
+/**
+ * The part, its workholding and the work origin, for the emulator.
  *
  * The obstacle boxes themselves are #203's job, not this one.
  */
 export function toSetup(job: EngraveJob, machine: MillProfile): Setup {
   const { length, width, thickness } = job.stock;
   const vise = job.workholding.vise;
-  const shift = viseJawShift(job.sacrificial);
-  const workholding: Workholding = {
-    kind: 'vise',
-    jawFaces: [
-      { origin: [0 - shift.left, 0, 0], normal: [1, 0, 0] }, // fixed jaw face, normal +X
-      { origin: [length + shift.right, 0, 0], normal: [-1, 0, 0] }, // moving jaw face, normal −X
-    ],
-    jawHeight: thickness - vise.stockProud,
-  };
+  const workholding = workholdingFor(job);
   return stubSetup(
     { kind: 'prism', outline: rectProfile(length, width), thickness },
     workholding,

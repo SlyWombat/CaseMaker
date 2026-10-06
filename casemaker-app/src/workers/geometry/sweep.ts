@@ -34,6 +34,7 @@ import type { MillProfile } from '@/engine/cnc/machine';
 import { inflate } from '@/engine/cnc/fixture';
 import { hasSacrificial, sacrificialBoxes } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
+import { obstructionLabels } from '@/engine/cnc/probePlan';
 import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM, segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { executeProfile, type ManifoldToplevel } from './evaluateOp';
 
@@ -970,9 +971,20 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
     diagnostics.push({ severity: 'info', code: 'gouges-truncated', message: `only the first ${MAX_GOUGES} rapids through the stock are returned as solids; the rest are reported but not drawn` });
   }
   // When the fixture is modelled the checks above ran; only an absent fixture leaves the
-  // proximity unproven (#204).
-  if (!fixture && setup.workholding.kind !== 'tape-down' && setup.workholding.kind !== 'anchor-bracket') {
-    diagnostics.push({ severity: 'info', code: 'fixture-unchecked', message: `the ${setup.workholding.kind} is not modelled as an obstacle yet (#188): proximity to the fixture is NOT checked` });
+  // proximity unproven (#204 — the obstacle ENVELOPE, not the probe plan, so the old citation of
+  // #188 was wrong). #272: whether this workholding puts anything in the way at all is the probe
+  // planner's question, asked here instead of a list of kinds kept in this file. An empty answer
+  // is real: a tape-down job has nothing above the part, and a nest wall or a chuck body stands
+  // outside the part's own footprint, so neither belongs in an "unchecked" report.
+  if (!fixture) {
+    const { labels } = obstructionLabels(setup.workholding);
+    if (labels.length > 0) {
+      diagnostics.push({
+        severity: 'info',
+        code: 'fixture-unchecked',
+        message: `the ${setup.workholding.kind} is not modelled as an obstacle yet (#204): the cutter's proximity to ${labels.join(', ')} is NOT checked`,
+      });
+    }
   }
   // Every check against it is done; the fixture is not part of the result, so release it now.
   disposeFixture();

@@ -162,11 +162,19 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "id": "origin",
       "steps": [
         {
-          "text": "X0: the blank's left face (against the fixed jaw).",
+          "text": "The vise already references X and rotation to within ±0.05 mm, before any touch.",
           "unverified": "#208",
         },
         {
-          "text": "Y0: the blank's front edge.",
+          "text": "Touch 1 of 3: the front edge — the one nearest you, about 25 mm along it from the left end — this gives position and rotation.",
+          "unverified": "#208",
+        },
+        {
+          "text": "Touch 2 of 3: the front edge — the one nearest you, about 75 mm along it from the left end — this gives rotation.",
+          "unverified": "#208",
+        },
+        {
+          "text": "Touch 3 of 3: the right edge — the one against the moving jaw, at about its middle, 30 mm from the front end — this gives X.",
           "unverified": "#208",
         },
         {
@@ -174,7 +182,15 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
           "unverified": "#208",
         },
         {
-          "text": "X0 Y0 Z0 is the top-front-left corner of the blank. Move there and check by eye before going on.",
+          "text": "X0 Y0 Z0 is the top-front-left corner of the blank. That leaves the work origin within ±0.02 mm in X and Y and ±0.02° in rotation. Move there and check by eye before going on.",
+          "unverified": "#208",
+        },
+        {
+          "text": "Rotation is measured, and a static .nc cannot compensate it (Smoothieware has no variables, §7.3 / #187 item 1): apply it in Studio's dialogs, or re-post with the rotation baked into the geometry",
+          "unverified": "#208",
+        },
+        {
+          "text": "Z is always probed on the engraved face (§7.2): no fixture can supply it",
           "unverified": "#208",
         },
       ],

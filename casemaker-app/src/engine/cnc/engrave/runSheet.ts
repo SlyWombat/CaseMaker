@@ -2,6 +2,7 @@ import { ASSUMED_RAPID_MM_MIN } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { keepOutLimit, keepOutMembrane, toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
+import { axesWord, describeTouch, kindWord, readsWord, registrationFor } from '@/engine/cnc/engrave/registration';
 import type { FeedsResult } from '@/engine/cnc/feeds';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
 import { Z1 } from '@/engine/cnc/machine';
@@ -636,6 +637,85 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
   };
 }
 
+/** A leading letter, uppercased — the planner's notes are clauses, the sheet prints sentences. */
+function sentence(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * §5 — how the work origin is set, DERIVED from how the part is held (#272, decision 26).
+ *
+ * The sequence this replaced was decision 23's hand-written edge find, which decision 26
+ * superseded: it named the left face and the front edge, said "check by eye", and could not say
+ * what the jaws already reference, which axes are still open, or what is left uncertain
+ * afterwards. `planProbing` answers all of it from the blank and the workholding, so the sheet
+ * prints the plan rather than a rule that is correct for one fixture only.
+ *
+ * A REFUSAL IS A STEP. When no reachable straight edge can resolve an open axis the plan refuses
+ * and names the clamp or jaw that is in the way — the one thing the old sequence could never say,
+ * because it would have sent the probe to a face the fixture covers.
+ *
+ * #213 §6 — with sacrificial material the X and Y faces are still the PART's (the work frame does
+ * not move; §"Frame — unchanged"), and Z0 is the PART's top face, never the board's. A board under
+ * the part reaches a cut depth only if Z is probed on the wrong face, so the step says which face
+ * it means whenever there is a board to confuse it with.
+ */
+function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string): RunSheetStep[] {
+  const { length, width } = job.stock;
+  const plan = registrationFor(job);
+
+  if ('refuse' in plan) {
+    return [
+      {
+        text:
+          `This job cannot be registered as set up: ${plan.message}. Move the fixture or the part, ` +
+          'probe by hand, or change the workholding — do not run this file until X0, Y0 and Z0 are ' +
+          'known.',
+        bold: true,
+        unverified,
+      },
+    ];
+  }
+
+  const steps: RunSheetStep[] = [];
+  // What the fixture supplies before any touch. Stated first, because it is what makes the rest of
+  // the sequence as short as it is.
+  for (const d of plan.datums) {
+    steps.push({
+      text: `The ${kindWord(job.workholding.kind)} already references ${axesWord(d.fixes)} to within ±${fmtNum(d.uncertainty)} mm, before any touch.`,
+      unverified,
+    });
+  }
+  // One step per touch, in the plan's own order: rotation's pair first, then whatever the pair did
+  // not settle. Named physically, never by coordinate alone.
+  plan.touches.forEach((t, i) => {
+    const words = describeTouch(t, length, width);
+    steps.push({
+      text: `Touch ${i + 1} of ${plan.touches.length}: ${words.edge}, ${words.where} — this gives ${readsWord(t)}.`,
+      unverified,
+    });
+  });
+  steps.push({
+    text: onBoard
+      ? "Z0: the PART's top face — probe it, or touch off on it. NOT the board's top face."
+      : "Z0: the blank's top face — probe it, or touch off on it.",
+    unverified,
+  });
+  steps.push({
+    text:
+      `X0 Y0 Z0 is the top-front-left corner of the ${onBoard ? 'part' : 'blank'}. That leaves the ` +
+      `work origin within ±${fmtNum(plan.residual)} mm in X and Y` +
+      (plan.rotationResidual > 0 ? ` and ±${fmtNum(plan.rotationResidual)}° in rotation` : '') +
+      '. Move there and check by eye before going on.',
+    unverified,
+  });
+  // The planner's own caveats — the static-`.nc` rotation limitation, why Z is always probed, and
+  // where a footprint could not be resolved. Verbatim but for the leading letter: the planner
+  // writes notes as clauses, and the sheet prints sentences.
+  for (const note of plan.notes) steps.push({ text: sentence(note), unverified });
+  return steps;
+}
+
 export function buildRunSheet(
   job: EngraveJob,
   generated: RunSheetGenerated,
@@ -772,24 +852,7 @@ export function buildRunSheet(
   ];
 
   // ---- 5 · Set the work origin (⚠ #208) ------------------------------------------------------
-  // #213 §6 — with sacrificial material the X and Y faces are still the PART's (the work frame
-  // does not move; §"Frame — unchanged"), and Z0 is the PART's top face, never the board's. A
-  // board under the part reaches a cut depth only if Z is probed on the wrong face, so the sheet
-  // says which face it means whenever there is a board to confuse it with.
-  const originSteps: RunSheetStep[] = [
-    { text: `X0: the ${onBoard ? "part's" : "blank's"} left face (against the fixed jaw).`, unverified: UNVERIFIED },
-    { text: `Y0: the ${onBoard ? "part's" : "blank's"} front edge.`, unverified: UNVERIFIED },
-    {
-      text: onBoard
-        ? "Z0: the PART's top face — probe it, or touch off on it. NOT the board's top face."
-        : "Z0: the blank's top face — probe it, or touch off on it.",
-      unverified: UNVERIFIED,
-    },
-    {
-      text: `X0 Y0 Z0 is the top-front-left corner of the ${onBoard ? 'part' : 'blank'}. Move there and check by eye before going on.`,
-      unverified: UNVERIFIED,
-    },
-  ];
+  const originSteps = registrationSteps(job, onBoard, UNVERIFIED);
 
   // ---- 6 · Dry run ---------------------------------------------------------------------------
   // #244 — the frame file replaces the manual "raise Z by 20 mm" offset. Its Z is baked in, so
