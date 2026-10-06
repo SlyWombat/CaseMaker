@@ -58,6 +58,7 @@ All dimensions in **millimeters**. Coordinate frame is **Z-up**; the PCB sits at
 | `internalClearance` | 0.5 mm | 0–3 | Gap between PCB edge and inner cavity wall |
 | `zClearance` | 5.0 mm | 0–50 | Headroom above the PCB top — bump for HATs/heatsinks |
 | `joint` | `flat-lid` | enum | One of `flat-lid`, `snap-fit`, `sliding`, `screw-down` |
+| `fit` | `tight` | enum | Print-fit variant for the snap interfaces (snap catches + board snap clips), and for the rack's plate-tab ledges: `tight` (the as-designed number), `standard` (+0.10 mm relief) or `loose` (+0.25 mm). Shown only when a snap interface is active. The relief is added to the mating **cut** — never to both printed halves, which would cancel — and never along the retention axis, so the snap still clicks at the same height. Print the coupon (`npm run fit:coupon`) before trusting a grade. |
 | `bosses.enabled` | `true` | bool | Whether to generate mounting bosses at the board's hole positions |
 | `bosses.insertType` | `self-tap` | enum | `self-tap`, `heat-set-m2.5`, `heat-set-m3`, `pass-through` |
 | `bosses.outerDiameter` | 5.0 mm | — | Outer diameter of each boss; auto-grows to keep ≥1 mm wall around the hole |
@@ -139,6 +140,8 @@ Three formats:
 | **3MF** | Modern open format, supports units (mm), required by some slicers. Carries the slicer assignment too: a two-colour badge opens as **one object whose two parts are already on their own extruders**, so there is nothing to pair up by hand. |
 
 > **Note:** Always **press Export, not browser-Save** — the on-screen mesh isn't directly the export. Triggering Export forces a flush + rebuild + worker call.
+
+**The file name carries the fit grade.** When the project's snap fit is not the default, every file an export writes is suffixed with it — `mycase-loose.stl`, `mycase-loose-PRINT-NOTES.txt`, `mycase-lid-loose.stl` — and the print notes repeat what that grade means. So printing two grades and keeping whichever seats needs no renaming by hand. A `tight` fit (the default) adds nothing, which is why projects saved before the setting existed get exactly the names they always did.
 
 ## Save / load projects
 

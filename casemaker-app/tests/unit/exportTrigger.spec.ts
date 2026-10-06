@@ -21,11 +21,16 @@ vi.mock('@/engine/jobs/JobScheduler', () => ({
 
 import {
   triggerExport,
+  exportSinglePart,
+  exportFitGrade,
   printNotesForGroups,
   meshNodesForExport,
   saveEngraveProgram,
   type ExportMeshGroups,
 } from '@/engine/exportTrigger';
+import { defaultInsert } from '@/engine/compiler/insert';
+import type { CaseParameters, Project, RackParams } from '@/types';
+import type { FitVariant } from '@/types/snap';
 import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import { useJobStore } from '@/store/jobStore';
 import { useProjectStore, createDefaultProject } from '@/store/projectStore';
@@ -175,5 +180,87 @@ describe('engrave job + frame save (#244)', () => {
   it('writes the job alone when there is no frame (a run that never reached the post)', async () => {
     await saveEngraveProgram(';@MKR|BEGIN\nM02\n', null, 'Untitled engrave job');
     expect(downloads.map((d) => d.name)).toEqual([runSheetFileName('Untitled engrave job')]);
+  });
+});
+
+// Issue #153, step 6 — a user who prints two fit grades needs the files to say
+// which is which, and the fit is a project-level choice, so the project names
+// the file. The rule reads the same two conditions the panel's select is shown
+// under, so a name never claims a grade the export does not have.
+describe('export name carries the print-fit grade (#153)', () => {
+  const project = (): Project => useProjectStore.getState().project;
+  const setCase = (patch: Partial<CaseParameters>): void => {
+    useProjectStore.setState({ project: { ...project(), case: { ...project().case, ...patch } } });
+  };
+  const setRackFit = (fit: FitVariant | undefined): void => {
+    // The naming rule reads only `enabled` and `fit`; the rest of the rack
+    // params belong to the compiler, which this spec does not run.
+    setCase({ rack: { enabled: true, fit } as unknown as RackParams });
+  };
+
+  it('is silent for the default project — tight IS the as-designed number', () => {
+    expect(exportFitGrade(project())).toBeNull();
+  });
+
+  it('names a relieved shell snap, and a relieved board clip', () => {
+    setCase({ joint: 'snap-fit', fit: 'loose' });
+    expect(exportFitGrade(project())).toBe('loose');
+    setCase({ joint: 'screw-down', boardRetention: 'snap', fit: 'standard' });
+    expect(exportFitGrade(project())).toBe('standard');
+  });
+
+  it('stays silent when the fit is set but nothing in the project is relieved', () => {
+    // A leftover setting must not put a grade on a file that has no snap.
+    setCase({ joint: 'screw-down', boardRetention: 'screws', fit: 'loose' });
+    expect(exportFitGrade(project())).toBeNull();
+    setCase({ joint: 'snap-fit', fit: 'tight' });
+    expect(exportFitGrade(project())).toBeNull();
+  });
+
+  it('reads the rack archetype off the rack, not the shell', () => {
+    setRackFit('loose');
+    setCase({ joint: 'snap-fit', fit: 'standard' }); // must be ignored: rack wins
+    expect(exportFitGrade(project())).toBe('loose');
+    setRackFit(undefined);
+    expect(exportFitGrade(project())).toBeNull();
+  });
+
+  it('never names a grade on an archetype with no mating interface', () => {
+    setCase({ insert: defaultInsert(), fit: 'loose' });
+    expect(exportFitGrade(project())).toBeNull();
+  });
+
+  it('suffixes the mesh, the notes sidecar and a single part alike', async () => {
+    setCase({ joint: 'snap-fit', fit: 'loose' });
+    useJobStore.setState({ nodes: new Map([['shell', node('shell')], ['lid', node('lid', 4)]]) });
+    await triggerExport('stl-binary');
+    expect(downloads.map((d) => d.name)).toEqual([
+      'My_Case-loose.stl',
+      'My_Case-loose-PRINT-NOTES.txt',
+    ]);
+
+    downloads = [];
+    const result = await exportSinglePart('lid', 'stl-binary');
+    expect(result?.filename).toBe('My_Case-lid-loose.stl');
+  });
+
+  it('says what the grade means in the notes, since the slicer shows only the name', async () => {
+    setCase({ joint: 'snap-fit', fit: 'loose' });
+    useJobStore.setState({ nodes: new Map([['shell', node('shell')]]) });
+    await triggerExport('stl-binary');
+    const notes = downloads.find((d) => d.name.endsWith('-PRINT-NOTES.txt'))?.blob;
+    const text = await notes!.text();
+    expect(text).toContain('Snap fit:    loose');
+    expect(text).toContain('0.25 mm');
+  });
+
+  it('leaves the notes unsuffixed and unqualified at the default grade', () => {
+    const groups: ExportMeshGroups = {
+      main: [],
+      gasket: null,
+      mainIds: ['shell'],
+      gasketId: null,
+    };
+    expect(printNotesForGroups(groups, 'print-ready')).not.toContain('Snap fit');
   });
 });

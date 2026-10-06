@@ -9,7 +9,9 @@ import {
   PRINT_FLIP_NODE_IDS,
   type ExportLayoutMode,
 } from '@/engine/exportLayout';
-import type { MeshNode } from '@/types';
+import type { MeshNode, Project } from '@/types';
+import type { FitVariant } from '@/types/snap';
+import { derivedKind } from '@/engine/compiler/archetype';
 import { isAlternativeNode, partForId } from '@/engine/exporters/parts';
 import { printNotesText } from '@/engine/exporters/printNotes';
 import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
@@ -38,6 +40,43 @@ async function downloadText(text: string, filename: string, mime: string): Promi
 export function sanitizeFileName(name: string): string {
   const s = name.replace(/[^a-z0-9-_]+/gi, '_').replace(/^_+|_+$/g, '');
   return s.length > 0 ? s : 'case';
+}
+
+/**
+ * Issue #153, step 6 — the print-fit grade this export actually carries, or
+ * `null` when nothing in it is relieved.
+ *
+ * The fit is a project-level choice, so the project names the file: a user who
+ * prints two grades needs the files to say which is which (`case-loose.stl`),
+ * and the whole point of the variants is printing both and keeping the one
+ * that fits. Only the two RELIEVED grades suffix a name — `tight` is the
+ * as-designed number, so a project that never touched the setting (and every
+ * project saved before #153) keeps the exact file name it always had.
+ *
+ * Mirrors `compileProject`'s dispatch: a rack compiles to rack parts and reads
+ * its own `rack.fit`; a shell reads `case.fit`, and only when a relieved snap
+ * interface is actually in play — the same pair of conditions that shows the
+ * panel's "Snap fit" select. A stand / badge / insert has no snap interface, so
+ * it never carries a grade. A per-`SnapCatch` override is deliberately NOT
+ * reflected: it is advanced and unexposed, and a name that reported it would
+ * have to name several grades at once.
+ */
+export function exportFitGrade(project: Project): FitVariant | null {
+  const kind = derivedKind(project);
+  const relieved = (fit: FitVariant | undefined): FitVariant | null =>
+    fit === 'standard' || fit === 'loose' ? fit : null;
+  if (kind === 'rack') return relieved(project.case.rack?.fit);
+  if (kind !== 'shell') return null;
+  const { joint, boardRetention, fit } = project.case;
+  if (joint !== 'snap-fit' && boardRetention !== 'snap') return null;
+  return relieved(fit);
+}
+
+/** `-loose` / `-standard`, or `''` — spliced into every file name an export
+ *  writes, so the mesh, the gasket, the 3MF and the print notes all agree. */
+function fitSuffix(project: Project): string {
+  const grade = exportFitGrade(project);
+  return grade ? `-${grade}` : '';
 }
 
 /**
@@ -180,9 +219,10 @@ export function meshNodesForExport(): ExportMeshGroups {
 export function printNotesForGroups(
   groups: ExportMeshGroups,
   layoutMode: ExportLayoutMode,
+  fit: FitVariant | null = null,
 ): string {
   const ids = [...groups.mainIds, ...(groups.gasketId ? [groups.gasketId] : [])];
-  return printNotesText(ids.map((id) => partForId(id)), layoutMode);
+  return printNotesText(ids.map((id) => partForId(id)), layoutMode, fit);
 }
 
 /**
@@ -220,7 +260,7 @@ export async function exportSinglePart(
       };
   const safeProject = project.name.replace(/[^a-z0-9-_]+/gi, '_');
   const safePart = nodeId.replace(/[^a-z0-9-_]+/gi, '_');
-  const baseName = `${safeProject}-${safePart}`;
+  const baseName = `${safeProject}-${safePart}${fitSuffix(project)}`;
   if (format === 'stl-binary') {
     const buf = await exportStlBinary([mesh]);
     const filename = `${baseName}.stl`;
@@ -298,7 +338,9 @@ export async function triggerExport(format: ExportFormat): Promise<void> {
   if (groups.main.length === 0 && !groups.gasket) {
     throw new Error('No mesh available to export');
   }
-  const safeName = project.name.replace(/[^a-z0-9-_]+/gi, '_');
+  // Issue #153 — the fit grade rides in the name, so the STL, the gasket, the
+  // 3MF and the notes sidecar all say which variant was printed.
+  const safeName = project.name.replace(/[^a-z0-9-_]+/gi, '_') + fitSuffix(project);
   if (format === 'stl-binary') {
     if (groups.main.length > 0) {
       const buf = await exportStlBinary(groups.main);
@@ -348,7 +390,7 @@ export async function triggerExport(format: ExportFormat): Promise<void> {
   if (exportedCount > 0) {
     const layoutMode = useSettingsStore.getState().exportLayout;
     await downloadText(
-      printNotesForGroups(groups, layoutMode),
+      printNotesForGroups(groups, layoutMode, exportFitGrade(project)),
       `${safeName}-PRINT-NOTES.txt`,
       'text/plain',
     );

@@ -1,4 +1,5 @@
 import type { ExportLayoutMode } from '@/engine/exportLayout';
+import { fitRelief, type FitVariant } from '@/types/snap';
 import {
   printMetaForId,
   type ProjectPart,
@@ -27,6 +28,7 @@ import {
 export function printNotesText(
   parts: readonly ProjectPart[],
   layoutMode: ExportLayoutMode,
+  fit: FitVariant | null = null,
 ): string {
   const lines: string[] = [];
   lines.push('CaseMaker — print notes');
@@ -38,6 +40,18 @@ export function printNotesText(
       : 'Layout: ASSEMBLED. The print-ready flip is NOT applied — parts export in their assembly orientation. Turn over any part marked FLIP below.',
   );
   lines.push('');
+  // Issue #153 — a relieved fit is a property of the file's geometry (the
+  // mating cut is bigger than as-designed), and it is the one thing in these
+  // notes that is a CHOICE rather than a fact about the part. The name says
+  // which grade; this says what that means, because the slicer shows the name
+  // and not this file. Omitted entirely for the default, so a project that
+  // never chose a fit gets the notes it always got.
+  if (fit) {
+    lines.push(
+      `Snap fit:    ${fit} — the mating cut is relieved by ${fitRelief(fit)} mm. Print this grade and a tighter one, then keep whichever seats.`,
+    );
+    lines.push('');
+  }
   lines.push(
     'The STL geometry is authoritative; these notes only say how to place and slice it.',
   );

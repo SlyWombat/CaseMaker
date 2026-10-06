@@ -135,6 +135,8 @@ The compiler is 43 modules. Grouped by what they build:
 | `stlAscii.ts` | `buildAsciiStl(meshes, solidName) → string` |
 | `threeMf.ts` | `buildThreeMf(meshes, opts?) → ArrayBuffer` (fflate-zipped). Parts carrying `material` become one multi-material object plus a `Metadata/Slic3r_PE_model.config` sidecar (#168); with none, the output is byte-identical to a plain object-per-mesh file. |
 
+`exportTrigger.ts::exportFitGrade` decides whether a name carries a print-fit grade (#153, step 6). It mirrors `compileProject`'s dispatch — a rack reads its own `rack.fit`, a shell reads `case.fit` and only when a relieved snap interface is in play — so a name can never claim a grade the export does not have (`tight` is silent, and a stand/badge/insert never carries one). The same grade reaches the `-PRINT-NOTES.txt` sidecar, which spells out what it means.
+
 ### State stores — `src/store/`
 
 | Store | Responsibility |
