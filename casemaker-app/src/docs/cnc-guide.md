@@ -330,14 +330,15 @@ will record your own: **Save as my vise** and **I just measured these**. Until y
 the setup: a **board under the part**, and **strips beside it** — left and right, which sit
 between the jaw and the part and are clamped with it, and front and back, which only make
 sense on a board because nothing else holds them. The work origin and Z = 0 stay on the
-**part's** top face, so the board's thickness can never change a cut depth. With material
-declared, the app will let a cut run off the part's edge onto it and will move the jaws out to
-grip what is really there; the verifier's depth limit and the simulation both take it into
-account, and the simulation reports how much of the sacrificial material was cut. Until you
-enter your own sizes the dimensions are unmeasured defaults and `sacrificial-default` warns,
-exactly as for the vise. The **Engrave panel** controls for this (and the two presets, "Part
-on a larger board" and "Strips between the jaws") ship with #205; the engine — the boxes, the
-supported footprint and the validators — is #213.
+**part's** top face, so the board's thickness can never change a cut depth. Where material is
+declared beside the part, an item may now run off the part's edge onto it — up to the edge
+margin short of the sacrificial material's own outer edge — and the verifier's depth limit
+follows the same footprint: `thickness − minFloor` over the part, the strip's height over a
+strip, `thickness + breakthrough` over a board's overhang, and 0 over air. Until you enter your
+own sizes the dimensions are unmeasured defaults and `sacrificial-default` warns, exactly as for
+the vise. The **Engrave panel** controls for this (and the two presets, "Part on a larger
+board" and "Strips between the jaws") ship with #205; the two-body simulation that reports how
+much of the sacrificial material was cut is #193/#204.
 
 **5. Cutting parameters (#202).** Spindle speed, feed, plunge, step-down and step-over will
 be shown as **starting values, unmeasured** — not recommendations. Nothing has measured what
@@ -539,7 +540,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `item-empty` | error | An item has nothing the cutter can reach: a label has no text, or a shape (a hole, a slot) is smaller than the cutter. Formerly `label-empty`. | Type text, enlarge the shape, or disable it. |
 | `item-chars-lost` | error | A label loses whole characters to the cutter's radius. Formerly `label-chars-lost`. | Increase the size or use a smaller cutter. |
 | `item-detail-lost` | warning | An item loses detail (thin strokes, inside corners) to the cutter's radius. Formerly `label-detail-lost`. | Increase the size, enlarge the shape, or use a smaller cutter. |
-| `item-outside-stock` | error | An item hangs off the blank. Formerly `label-outside-stock`. | Move it back inside the edge margin. |
+| `item-outside-stock` | error | An item hangs off the blank, or off the sacrificial material beside it (#213). Formerly `label-outside-stock`. | Move it back inside the edge margin, or declare a strip or board under the overhang. |
 | `trace-outside-stock` | error | A single-line trace runs off the blank (#219). | Move it back inside the stock. |
 
 **Checking the engraving job** (job):

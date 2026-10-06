@@ -60,7 +60,7 @@ export interface LabelEngravability {
   ratio: number;
   /** Characters (by index and character) whose opened region is empty. */
   emptyChars: { index: number; char: string }[];
-  /** Area of the opened region lying outside the stock outline inset by `edgeMargin`, mm². */
+  /** Area of the opened region lying outside the supported footprint inset by `edgeMargin`, mm². */
   outsideArea: number;
   /** The opened region as plain polygons, work-frame XY — what #172 pockets and what the preview draws. */
   polygons: [number, number][][];
@@ -69,10 +69,14 @@ export interface LabelEngravability {
 /**
  * Evaluate each of `plan.engraves` and its opening, and measure what is lost.
  *
- * `edgeMargin` insets the stock outline; anything cut beyond that inset is reported in
- * `outsideArea`. `perChar(labelId)` supplies one `{char, profile}` per character of the
- * label, built by the caller with `labelProfile` on a single-character label at the same
- * size — kerning does not matter for an emptiness test. Whitespace characters are skipped.
+ * `edgeMargin` insets the SUPPORTED FOOTPRINT (`plan.stock.supported`, #213 §3) — the part
+ * outline ∪ any sacrificial material beside it; anything cut beyond that inset is reported in
+ * `outsideArea`. With no sacrificial material the supported footprint is the part outline, so
+ * today's rule holds unchanged; with a strip or board beside the part, an item may run over the
+ * part's edge onto it, up to the margin from the sacrificial material's own outer edge.
+ * `perChar(labelId)` supplies one `{char, profile}` per character of the label, built by the
+ * caller with `labelProfile` on a single-character label at the same size — kerning does not
+ * matter for an emptiness test. Whitespace characters are skipped.
  *
  * Every `CrossSection` created here (glyph, opening, stock inset, per-character opening) is
  * deleted exactly once.
@@ -85,10 +89,12 @@ export function measureLabels(
   perChar: (labelId: string) => PerCharGlyph[],
 ): LabelEngravability[] {
   const CS = tl.CrossSection;
-  // The safe region: the stock outline eroded by the edge margin. Erosion of a rectangle is
-  // an inset rectangle; the round join only draws arcs on an OUTWARD offset, so a convex
-  // outline insets without rounding its corners.
-  const stockInset = executeProfile(tl, pOffset(plan.stock.outline, -edgeMargin));
+  // The safe region: the SUPPORTED FOOTPRINT eroded by the edge margin (#213 §3). With no
+  // sacrificial material that footprint is the part outline, so this is today's check; with a
+  // strip or board beside the part it is the union, which is what lets an item run over an edge.
+  // The round join only draws arcs on an OUTWARD offset, so a convex outline insets without
+  // rounding its corners.
+  const stockInset = executeProfile(tl, pOffset(plan.stock.supported, -edgeMargin));
   const out: LabelEngravability[] = [];
   try {
     for (const engrave of plan.engraves) {
@@ -264,7 +270,7 @@ export function engravabilityFindings(
         code: 'item-outside-stock',
         labelId: row.labelId,
         message:
-          `${who} cuts ${row.outsideArea.toFixed(2)} mm² beyond the stock outline inset ` +
+          `${who} cuts ${row.outsideArea.toFixed(2)} mm² beyond the supported material inset ` +
           `by the ${job.edgeMargin} mm edge margin.`,
       });
     }

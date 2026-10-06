@@ -29,7 +29,9 @@ import type {
 } from '@/types/engraveJob';
 import type { CustomFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
+import { supportedFootprint } from '@/engine/cnc/sacrificial';
 import type { DepthLimit } from '@/engine/cnc/verify';
+import { sacrificialDepthLimit } from '@/engine/cnc/verify';
 
 /**
  * `PartPlan` is the seam #172 specified (`/Fabrication.md` §5.2): profiles and a target Z,
@@ -47,6 +49,13 @@ import type { DepthLimit } from '@/engine/cnc/verify';
 export interface PartPlan {
   stock: {
     outline: Profile;
+    /**
+     * The PART OUTLINE ∪ every sacrificial footprint (#213 §3) — where the cutter has material
+     * under it at all. With no sacrificial material this IS `outline`. The engravability check
+     * measures an item's breach against THIS (inset by `edgeMargin`), so an item may run off the
+     * part's edge exactly where there is strip or board beside it.
+     */
+    supported: Profile;
     thickness: Mm;
     /** Under-surface voids, in the stock XY frame; `zCeiling` is PART-frame z from the bottom. */
     keepOuts: { id: string; name: string; footprint: Profile; zCeiling: Mm }[];
@@ -862,17 +871,30 @@ export function keepOutLimitAt(job: EngraveJob, x: Mm, y: Mm): Mm | null {
 }
 
 /**
- * The job's depth limit as #174's verifier takes it: 0 outside the stock rectangle, the stock's
- * `thickness − minFloor` inside, and shallower where an under-surface void leaves a thinner
- * membrane (#231 item 3). A job with no keep-outs gets exactly the CNC-2 `stockDepthLimit` it
- * had before — the same numbers, from the same source.
+ * The job's depth limit as #174's verifier takes it. It is the MINIMUM of two limits, and the
+ * whole point is that there is exactly one function that composes them:
+ *
+ *   - `sacrificialDepthLimit` (#213 §3) — `thickness − minFloor` over the part, the strip's
+ *     height over a side strip, `thickness + breakthrough` over an under-board's overhang, and
+ *     `0` over air. With no sacrificial material it collapses to the CNC-2 `stockDepthLimit`,
+ *     so a job that does not use sacrificial material gets the exact numbers it had before.
+ *   - the under-surface voids (#231 item 3) — a thinner membrane over a declared void.
+ *
+ * The two are independent: a void is a fact about the blank, the sacrificial material a fact
+ * about the setup. Whichever is shallower at a point wins.
+ *
+ * A through-cut (#218) is not wired yet, so `through` is left false here; when #218 lands, the
+ * flag comes from the job and this is the one place it is threaded from.
  */
 export function jobDepthLimit(job: EngraveJob): DepthLimit {
-  const stockLimit = job.stock.thickness - job.minFloor;
+  const sacrificial = sacrificialDepthLimit(job.stock, job.sacrificial, {
+    minFloor: job.minFloor,
+    breakthrough: job.breakthrough,
+  });
   return (x, y) => {
-    if (x < 0 || x > job.stock.length || y < 0 || y > job.stock.width) return 0;
+    const base = sacrificial(x, y);
     const local = keepOutLimitAt(job, x, y);
-    return local === null ? stockLimit : Math.min(stockLimit, local);
+    return local === null ? base : Math.min(base, local);
   };
 }
 
@@ -961,6 +983,7 @@ export function toPartPlan(job: EngraveJob): PartPlan {
   return {
     stock: {
       outline: stockOutline,
+      supported: supportedFootprint(job.stock, job.sacrificial),
       thickness: job.stock.thickness,
       keepOuts,
     },
