@@ -462,6 +462,58 @@ describe('EngravePanel — single-line traces (#219)', () => {
   });
 });
 
+// #220's panel half (#260): the two drill kinds in the Add menu, their editors, and the refusal
+// the pure validator raises for a through hole until #218 lands.
+describe('EngravePanel — plunge drills (#260)', () => {
+  it('adds a Hole and a Hole array from the Add menu', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-drill'));
+    expect(useEngraveJobStore.getState().job.drills![0]!.kind).toBe('drill');
+    expect(screen.getByTestId('engrave-drill-row-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-drill-depth-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-drill-through-0')).toBeTruthy();
+    // A single hole has no lattice.
+    expect(screen.queryByTestId('engrave-drill-count-x-0')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('engrave-add-drill-array'));
+    expect(useEngraveJobStore.getState().job.drills![1]!.kind).toBe('drill-array');
+    expect(screen.getByTestId('engrave-drill-row-1')).toBeTruthy();
+    expect(screen.getByTestId('engrave-drill-count-x-1')).toBeTruthy();
+    expect(screen.getByTestId('engrave-drill-pitch-y-1')).toBeTruthy();
+    // Drills count as items, alongside the three default labels.
+    expect(screen.getByTestId('engrave-item-count').textContent).toBe('5');
+  });
+
+  it('commits a count only when it is a whole number', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-drill-array'));
+    // A fractional count would be refused by the schema, so the row keeps the default 2.
+    fireEvent.change(screen.getByTestId('engrave-drill-count-x-0'), { target: { value: '1.5' } });
+    const after = useEngraveJobStore.getState().job.drills![0]!;
+    expect(after.kind === 'drill-array' && after.count.x).toBe(2);
+    fireEvent.change(screen.getByTestId('engrave-drill-count-x-0'), { target: { value: '3' } });
+    const done = useEngraveJobStore.getState().job.drills![0]!;
+    expect(done.kind === 'drill-array' && done.count.x).toBe(3);
+  });
+
+  it('refuses a through hole and disables Generate, naming #218', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-drill'));
+    fireEvent.click(screen.getByTestId('engrave-drill-through-0'));
+    expect(useEngraveJobStore.getState().job.drills![0]!.through).toBe(true);
+    const finding = screen.getByTestId('engrave-drill-finding-0-drill-through-unavailable');
+    expect(finding.textContent).toContain('#218');
+    expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('removes a drill', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-drill'));
+    fireEvent.click(screen.getByTestId('engrave-drill-remove-0'));
+    expect(useEngraveJobStore.getState().job.drills).toEqual([]);
+  });
+});
+
 // #243 §14.2 A2: the Simulated row carries the same blind-spot sentence the Simulate panel
 // builds — imported from `simCoverage`, never written again, so the two cannot disagree.
 describe('EngravePanel — the Simulated row’s coverage sentence (#243)', () => {

@@ -24,6 +24,7 @@ import {
 import { EngraveLabelRow } from './EngraveLabelRow';
 import { EngraveShapeRow } from './EngraveShapeRow';
 import { EngraveCombinedRow } from './EngraveCombinedRow';
+import { EngraveDrillRow } from './EngraveDrillRow';
 import { EngraveTraceRow } from './EngraveTraceRow';
 import { EngraveVectorRow } from './EngraveVectorRow';
 import { EngraveImportDialog } from './EngraveImportDialog';
@@ -130,6 +131,16 @@ const ADD_TRACE_KINDS: readonly { value: 'line' | 'stroke-label'; label: string 
   { value: 'stroke-label', label: 'Single-line text' },
 ];
 
+/**
+ * The two DRILL kinds (#220, added by the panel in #260), added from the same menu but to
+ * `job.drills`. A drill is its own list, like `traces`: it is not a region, so it never reaches
+ * the shape editor or the `engraves` pipeline. Neither entry needs a reference.
+ */
+const ADD_DRILL_KINDS: readonly { value: 'drill' | 'drill-array'; label: string }[] = [
+  { value: 'drill', label: 'Hole' },
+  { value: 'drill-array', label: 'Hole array' },
+];
+
 /** Every item of the job, in the order `toPartPlan` walks them (#214/#215/#217). Imported
  *  vector outlines are `EngraveAnyItem`s too, so a frame or a cut-away may name one. */
 function allItems(job: EngraveJob): EngraveAnyItem[] {
@@ -226,6 +237,9 @@ export function EngravePanel(): JSX.Element {
   const addTrace = useEngraveJobStore((s) => s.addTrace);
   const updateTrace = useEngraveJobStore((s) => s.updateTrace);
   const removeTrace = useEngraveJobStore((s) => s.removeTrace);
+  const addDrill = useEngraveJobStore((s) => s.addDrill);
+  const updateDrill = useEngraveJobStore((s) => s.updateDrill);
+  const removeDrill = useEngraveJobStore((s) => s.removeDrill);
   const addVector = useEngraveJobStore((s) => s.addVector);
   const updateVector = useEngraveJobStore((s) => s.updateVector);
   const removeVector = useEngraveJobStore((s) => s.removeVector);
@@ -479,6 +493,7 @@ export function EngravePanel(): JSX.Element {
 
   const combinedCount = job.combined?.length ?? 0;
   const traceCount = job.traces?.length ?? 0;
+  const drillCount = job.drills?.length ?? 0;
   const vectorCount = job.vectors?.length ?? 0;
   const hasReferenceable = job.labels.length + job.shapes.length + combinedCount + vectorCount > 0;
 
@@ -665,7 +680,7 @@ export function EngravePanel(): JSX.Element {
       <h3 style={SUBHEAD}>
         Items{' '}
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-item-count">
-          {job.labels.length + job.shapes.length + combinedCount + traceCount + vectorCount}
+          {job.labels.length + job.shapes.length + combinedCount + traceCount + drillCount + vectorCount}
         </span>
       </h3>
       {job.labels.map((label, i) => (
@@ -712,6 +727,17 @@ export function EngravePanel(): JSX.Element {
           findings={findingsFor(trace.id)}
           onChange={(patch) => updateTrace(trace.id, patch)}
           onRemove={() => removeTrace(trace.id)}
+        />
+      ))}
+      {(job.drills ?? []).map((drill, i) => (
+        <EngraveDrillRow
+          key={drill.id}
+          drill={drill}
+          index={i}
+          maxDepth={maxDepth}
+          findings={findingsFor(drill.id)}
+          onChange={(patch) => updateDrill(drill.id, patch)}
+          onRemove={() => removeDrill(drill.id)}
         />
       ))}
       {(job.vectors ?? []).map((shape, i) => (
@@ -778,6 +804,24 @@ export function EngravePanel(): JSX.Element {
                   : 'Add text in a single-stroke font, traced as a line rather than pocketed.'
               }
               onClick={() => addTrace(k.value)}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
+          <span style={{ ...MUTED, margin: 0 }}>holes:</span>
+          {ADD_DRILL_KINDS.map((k) => (
+            <button
+              key={k.value}
+              type="button"
+              data-testid={`engrave-add-${k.value}`}
+              title={
+                k.value === 'drill'
+                  ? 'Add one plunge-drilled hole, exactly the cutter’s diameter.'
+                  : 'Add a rectangular array of plunge-drilled holes.'
+              }
+              onClick={() => addDrill(k.value)}
             >
               {k.label}
             </button>

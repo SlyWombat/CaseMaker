@@ -3,6 +3,7 @@ import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { DEFAULT_STROKE_FONT_ID } from '@/engine/fonts/stroke/strokeFont';
 import {
   defaultEngraveJob,
+  newEngraveDrillId,
   newEngraveLabelId,
   newEngraveShapeId,
   newEngraveTraceId,
@@ -16,6 +17,9 @@ import type {
   EngraveCircleShape,
   EngraveCombinedShape,
   EngraveCutawayShape,
+  EngraveDrill,
+  EngraveDrillArrayItem,
+  EngraveDrillItem,
   EngraveFrameShape,
   EngraveJob,
   EngraveJobSources,
@@ -82,6 +86,15 @@ export type TracePatch = Partial<Omit<EngraveLineItem, 'kind'>> &
 export type VectorPatch = Partial<
   Pick<EngraveVectorShape, 'name' | 'position' | 'rotation' | 'depth' | 'enabled' | 'construction'>
 >;
+
+/**
+ * A hand edit to one plunge drill (#220). Every optional field of both kinds is present, so a
+ * row patches just what it changed without naming the discriminant — the same shape as
+ * `TracePatch`. `count` and `pitch` are whole objects of their own (a partial one would be a
+ * different lattice), so a row sends them together.
+ */
+export type DrillPatch = Partial<Omit<EngraveDrillItem, 'kind'>> &
+  Partial<Omit<EngraveDrillArrayItem, 'kind'>>;
 
 export const ENGRAVE_JOB_KEY = 'casemaker.engraveJob.v1';
 /** Where a payload that failed validation is parked so it is not silently lost. */
@@ -247,6 +260,27 @@ function newTrace(kind: EngraveTraceItem['kind'], job: EngraveJob): EngraveTrace
   return { ...base, kind: 'stroke-label', text: 'Line', font: DEFAULT_STROKE_FONT_ID, size: 8 };
 }
 
+/**
+ * A brand-new plunge drill (#220), centred on the stock at a 1 mm depth — the same `0.5`-class
+ * starting depth the other items use, comfortably inside the 12 mm default blank. An array
+ * starts as a 2 × 2 lattice at 10 mm pitch, which the row editor then replaces. There is no
+ * diameter: the hole IS the cutter's (#220), so a new drill just needs somewhere to be.
+ */
+function newDrill(kind: EngraveDrill['kind'], job: EngraveJob): EngraveDrill {
+  const base = {
+    id: newEngraveDrillId(),
+    position: { x: job.stock.length / 2, y: job.stock.width / 2 },
+    rotation: 0,
+    depth: 1.0,
+    enabled: true,
+    through: false,
+  };
+  if (kind === 'drill-array') {
+    return { ...base, kind: 'drill-array', count: { x: 2, y: 2 }, pitch: { x: 10, y: 10 } };
+  }
+  return { ...base, kind: 'drill' };
+}
+
 export interface EngraveJobState {
   job: EngraveJob;
   /** Merge a stock edit and stamp each edited field's source (#254). Defaults to `'user'`. */
@@ -276,6 +310,11 @@ export interface EngraveJobState {
   /** Merge a hand edit into one trace (#219). A partial `position` is merged, not replaced. */
   updateTrace: (id: string, patch: TracePatch) => void;
   removeTrace: (id: string) => void;
+  /** Add a default plunge drill of `kind` (#220) and return its id. */
+  addDrill: (kind: EngraveDrill['kind']) => string;
+  /** Merge a hand edit into one drill (#220). A partial `position` is merged, not replaced. */
+  updateDrill: (id: string, patch: DrillPatch) => void;
+  removeDrill: (id: string) => void;
   /**
    * Add an imported vector outline (#217) and return its id. The shape is built by the panel
    * from an accepted `OutlineImport` (via `toVectorShape`), because only the panel holds the
@@ -421,6 +460,30 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
 
     removeTrace: (id) =>
       apply((job) => ({ ...job, traces: (job.traces ?? []).filter((t) => t.id !== id) })),
+
+    addDrill: (kind) => {
+      const drill = newDrill(kind, get().job);
+      apply((job) => ({ ...job, drills: [...(job.drills ?? []), drill] }));
+      return drill.id;
+    },
+
+    updateDrill: (id, patch) =>
+      apply((job) => ({
+        ...job,
+        drills: (job.drills ?? []).map((drill) =>
+          drill.id === id
+            ? ({
+                ...drill,
+                ...patch,
+                // Merge a partial position rather than replacing the whole object.
+                position: patch.position ? { ...drill.position, ...patch.position } : drill.position,
+              } as EngraveDrill)
+            : drill,
+        ),
+      })),
+
+    removeDrill: (id) =>
+      apply((job) => ({ ...job, drills: (job.drills ?? []).filter((d) => d.id !== id) })),
 
     addVector: (shape) => {
       apply((job) => ({ ...job, vectors: [...(job.vectors ?? []), shape] }));

@@ -30,6 +30,11 @@ export function newEngraveTraceId(): string {
   return newId('trc');
 }
 
+/** Fresh drill id (#220). A drill is its own kind of item, so it gets its own prefix. */
+export function newEngraveDrillId(): string {
+  return newId('drl');
+}
+
 /**
  * The CNC-2 acceptance job (#209): three labels at three depths on a softwood blank.
  *

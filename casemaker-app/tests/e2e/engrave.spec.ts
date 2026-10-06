@@ -107,6 +107,28 @@ test("the saved .nc, reloaded as a stranger's file, removes the same volume", as
   expect(reloaded.removedVolume).toBeCloseTo(inApp.removedVolume, 3);
 });
 
+// #260 — the drill half of #220 is reachable from the panel, not only by hand-editing a job:
+// a hole added in the Add menu is cut as an operation of its own beside the three labels.
+test('a hole added in the panel is cut as its own operation', async ({ cm, page }) => {
+  await cm.ready();
+  await openEngravePanel(page);
+
+  await page.getByTestId('engrave-add-summary').click();
+  await page.getByTestId('engrave-add-drill').click();
+  await expect(page.getByTestId('engrave-drill-row-0')).toBeVisible();
+  // The hole is exactly the cutter's — the row says so rather than offering a diameter.
+  await expect(page.getByTestId('engrave-drill-row-0')).toContainText('the cutter’s diameter');
+
+  await page.getByTestId('engrave-generate').click();
+  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+
+  const state = await page.evaluate(() => window.__caseMaker!.getEngraveRunState());
+  expect(state.ok).toBe(true);
+  expect(state.stage).toBe('done');
+  expect(state.verifyErrors).toBe(0);
+  expect(state.operations).toBe(4); // three labels + the one hole
+});
+
 // #207's mount: "Run sheet" opens the printable operator sheet for a generated, verified job.
 // The sheet is a DOCUMENT — it names the file Save writes, and under print media the app's
 // chrome (the sheet's own toolbar included) is hidden so only the sheet reaches the paper.
