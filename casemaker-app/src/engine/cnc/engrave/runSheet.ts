@@ -69,6 +69,12 @@ export interface RunSheetGenerated {
   /** The exact text to be saved; the file name's hash and the file's existence come from it. */
   nc: string | null;
   verify: VerifyReport | null;
+  /**
+   * The frame program that will be saved BESIDE the job (#244), or null when the run never reached
+   * it. §6 says which file to load for the dry run, so the sheet has to know whether that file
+   * exists (#273) — the app only writes a frame it actually produced.
+   */
+  frameNc: string | null;
 }
 
 /**
@@ -859,18 +865,35 @@ export function buildRunSheet(
   // there is nothing for the operator to set (or to forget to clear), and it is a separate file,
   // so it cannot be confused with the job. The 20 mm height itself is `FRAME_Z` above, the figure
   // #207 specified.
-  const dryRunSteps: RunSheetStep[] = [
-    {
-      text:
-        `Load ${runSheetFrameFileName(job.name)} and run it. The cutter traces the job's outline in ` +
-        `the air, ${fmtNum(FRAME_Z)} mm above the work — no Z offset to set. Watch that the trace ` +
-        'stays over the blank and clear of the jaws.',
-      value: `${fmtNum(FRAME_Z)} mm above the work`,
-    },
-    {
-      text: `If the trace is not where the job should land, stop and change the job. Otherwise load ${header.fileName} and cut.`,
-    },
-  ];
+  //
+  // A null `frameNc` is not hypothetical (#273): a job program the verifier refuses comes back
+  // with `nc` and `verify` populated but NO frame (the frame is derived after both gates), and
+  // the sheet opens on exactly that — it is only blocked when the job has since changed. Telling
+  // the operator here to load a file that was never produced is worse than saying nothing, so the
+  // step is replaced rather than augmented.
+  const dryRunSteps: RunSheetStep[] =
+    generated.frameNc === null
+      ? [
+          {
+            text:
+              'There is no frame file for this job: the program above did not pass verification, so ' +
+              'the trace was never produced. Do not run this file — clear the errors, regenerate, and ' +
+              'the frame comes back with the program.',
+            bold: true,
+          },
+        ]
+      : [
+          {
+            text:
+              `Load ${runSheetFrameFileName(job.name)} and run it. The cutter traces the job's outline in ` +
+              `the air, ${fmtNum(FRAME_Z)} mm above the work — no Z offset to set. Watch that the trace ` +
+              'stays over the blank and clear of the jaws.',
+            value: `${fmtNum(FRAME_Z)} mm above the work`,
+          },
+          {
+            text: `If the trace is not where the job should land, stop and change the job. Otherwise load ${header.fileName} and cut.`,
+          },
+        ];
 
   // ---- 7 · Cut -------------------------------------------------------------------------------
   const cutSteps: RunSheetStep[] = [];

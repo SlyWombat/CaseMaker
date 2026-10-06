@@ -3,14 +3,14 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveRunStore, requiredAckCodes, runErrorCodes, saveBlocker } from '@/store/engraveRunStore';
-import { saveText } from '@/engine/exportTrigger';
+import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { useSettingsStore } from '@/store/settingsStore';
 import { TOOL_LIBRARY, Z1 } from '@/engine/cnc';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { keepOutLimit, keepOutMembrane } from '@/engine/cnc/engrave/partPlan';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
-import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
+import { buildRunSheet, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { feedsFor, type CutParams } from '@/engine/cnc/feeds';
 import { MATERIAL_OPTIONS } from '@/engine/cnc/engrave/setupFlow';
 import {
@@ -435,11 +435,12 @@ export function EngravePanel(): JSX.Element {
   }
 
   async function saveProgram(): Promise<void> {
-    const nc = run.generated?.nc;
-    if (!nc || saveBlockerText !== null) return;
-    // The run sheet prints this exact name (#207), so both come from `runSheetFileName` — the
-    // sheet and the saved file can never disagree about what the file is called.
-    await saveText(nc, runSheetFileName(job.name), 'text/plain');
+    const generated = run.generated;
+    if (!generated?.nc || saveBlockerText !== null) return;
+    // BOTH files, through the one helper that names them (#207, #244): the run sheet's dry run
+    // sends the operator to `<job>-frame.nc`, so the frame has to be written here or §6 is a
+    // dead step. The frame is the verified generate output — never re-derived (#244).
+    await saveEngraveProgram(generated.nc, generated.frameNc, job.name);
   }
 
   function saveAsMyVise(source: ViseParams['source']): void {

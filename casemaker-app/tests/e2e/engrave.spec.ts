@@ -144,11 +144,16 @@ test('the run sheet opens for a verified job, names the saved file, and prints w
   await page.getByTestId('engrave-ack').check();
   await expect(page.getByTestId('engrave-run-sheet')).toBeEnabled();
 
-  // The name Save writes…
-  const downloadPromise = page.waitForEvent('download');
+  // Save writes BOTH files (#273): the job, then the frame beside it. Awaiting only the first
+  // download is what let the frame go missing unnoticed.
+  const downloads: string[] = [];
+  page.on('download', (d) => downloads.push(d.suggestedFilename()));
   await page.getByTestId('engrave-save').click();
-  const suggested = (await downloadPromise).suggestedFilename();
+  await expect.poll(() => downloads.length).toBe(2);
+  const suggested = downloads[0]!;
   expect(suggested).toMatch(/\.nc$/);
+  expect(suggested).not.toContain('-frame.nc');
+  expect(downloads[1]).toBe(suggested.replace(/\.nc$/, '-frame.nc'));
 
   // …is the name the sheet prints.
   await page.getByTestId('engrave-run-sheet').click();
@@ -156,8 +161,9 @@ test('the run sheet opens for a verified job, names the saved file, and prints w
   await expect(sheet).toBeVisible();
   await expect(sheet).toContainText(suggested);
 
-  // #244 — §6 names the generated frame file instead of telling the operator to raise Z by hand.
-  await expect(sheet).toContainText('-frame.nc');
+  // #244 — §6 names the generated frame file instead of telling the operator to raise Z by hand,
+  // and #273 makes that name the file Save just wrote.
+  await expect(sheet).toContainText(downloads[1]!);
   await expect(sheet).not.toContainText('Raise the work Z');
 
   // The print preview shows the sheet and hides the app chrome (the sheet's own toolbar too).

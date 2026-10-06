@@ -22,13 +22,13 @@ import { defaultBadgeParams, type BadgeParams } from '@/types/badge';
 import { useProjectStore } from '@/store/projectStore';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
-import { runSheetFileName } from '@/engine/cnc/engrave/runSheet';
-import { saveText } from '@/engine/exportTrigger';
+import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
+import { saveEngraveProgram } from '@/engine/exportTrigger';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 
-// The save path is the thing under test (#207): mock it so a test can read the file name the
-// panel hands it, without a real download. EngravePanel imports only `saveText` from here.
-vi.mock('@/engine/exportTrigger', () => ({ saveText: vi.fn() }));
+// The save path is the thing under test (#207): mock it so a test can read the files the panel
+// hands it, without a real download. EngravePanel imports only `saveEngraveProgram` from here.
+vi.mock('@/engine/exportTrigger', () => ({ saveEngraveProgram: vi.fn() }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -347,8 +347,9 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
         findings: [],
         stats: { lines: 2, cuttingMoves: 1, deepestZ: -2, bbox: { min: [0, 0, -2], max: [1, 1, 0] } },
       },
-      // #244 — the frame file is slot 5's; this fixture only needs the type satisfied.
-      frameNc: null,
+      // #244 — a run that reached `ok` always has the frame (§5 of engraveGenerate), and Save must
+      // write BOTH files (#273): the sheet's dry run loads this one by name.
+      frameNc: `${nc}\n;frame\n`,
       frameVerify: null,
       predicted: [],
       errors: [],
@@ -357,7 +358,7 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
 
   beforeEach(() => {
     useEngraveRunStore.getState().reset();
-    vi.mocked(saveText).mockClear();
+    vi.mocked(saveEngraveProgram).mockClear();
   });
 
   it('is disabled until a job has generated and verified', () => {
@@ -391,10 +392,18 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     expect(sheet.textContent).toContain(expected);
 
     // Save's file name is the sheet's, not the mesh-export sanitiser's — asserted, not trusted.
+    // And it writes the FRAME too (#273): §6 sends the operator to that file by name, so the panel
+    // that writes one without the other would make the dry run a dead step.
     fireEvent.click(screen.getByTestId('engrave-save'));
-    await waitFor(() => expect(vi.mocked(saveText)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(saveText).mock.calls[0]![0]).toBe(nc);
-    expect(vi.mocked(saveText).mock.calls[0]![1]).toBe(expected);
+    await waitFor(() => expect(vi.mocked(saveEngraveProgram)).toHaveBeenCalledTimes(1));
+    const [savedNc, savedFrame, savedName] = vi.mocked(saveEngraveProgram).mock.calls[0]!;
+    expect(savedNc).toBe(nc);
+    expect(savedName).toBe(useEngraveJobStore.getState().job.name);
+    // The frame the panel hands over is the run's own verified one — never re-derived here.
+    expect(savedFrame).toBe(useEngraveRunStore.getState().generated!.frameNc);
+    expect(runSheetFrameFileName(savedName)).toBe('Untitled-engrave-job-frame.nc');
+    // §6 and the saved file agree about the name, which is the whole point of the shared sanitiser.
+    expect(sheet.textContent).toContain(runSheetFrameFileName(savedName));
   });
 
   it('refuses the sheet once the job is stale', () => {

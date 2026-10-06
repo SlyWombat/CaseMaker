@@ -39,7 +39,7 @@ const NC = [';@MKR|BEGIN', 'G21 G90', 'T1 M6', 'S12000', 'G1 Z-2.000 F200', 'G1 
 const NO_SIM: RunSheetSim = { diagnostics: [] };
 
 /** The generated half #206 will return, stubbed from the job (the issue's "stub the generated half"). */
-function stubGenerated(job: EngraveJob, nc: string = NC): RunSheetGenerated {
+function stubGenerated(job: EngraveJob, nc: string = NC, frame = true): RunSheetGenerated {
   const tool = jobTool(job);
   return {
     findings: validateJob(job),
@@ -51,6 +51,9 @@ function stubGenerated(job: EngraveJob, nc: string = NC): RunSheetGenerated {
       findings: [],
       stats: { lines: 9, cuttingMoves: 2, deepestZ: -2, bbox: { min: [0, 0, -2], max: [10, 10, 0] } },
     },
+    // The frame the app saves beside the job (#244); §6 names it. `frame: false` is the run that
+    // never reached the frame — the program failed verification, so no frame exists (#273).
+    frameNc: frame ? `${nc}\n;frame\n` : null,
   };
 }
 
@@ -249,6 +252,21 @@ describe('runSheet (#207)', () => {
     expect(all).toContain(runSheetFileName(job.name)); // the job file to cut afterwards
     expect(all).not.toContain('Raise the work Z');
     expect(all).not.toContain('restore Z');
+  });
+
+  // #273 — a job program the verifier refuses comes back with `nc` and `verify` but NO frame, and
+  // the sheet still opens on it (only a stale job is blocked). Sending the operator to a file that
+  // was never written is worse than saying nothing.
+  it('section 6 does not send the operator after a frame file that was never written', () => {
+    const job = defaultEngraveJob();
+    const sheet = buildRunSheet(job, stubGenerated(job, NC, false), NO_SIM, NOW);
+    const all = section(sheet, 'dry-run').steps.map((s) => s.text).join(' ');
+    expect(all).not.toContain(runSheetFrameFileName(job.name));
+    expect(all).toContain('no frame file');
+    expect(all).toContain('Do not run this file');
+    // The section is one bold warning, not a warning plus the steps that assume a frame.
+    expect(section(sheet, 'dry-run').steps).toHaveLength(1);
+    expect(section(sheet, 'dry-run').steps[0]!.bold).toBe(true);
   });
 
   // #215 gap 3: `enabledItems`/`deepestDepth`/`buildDiagram` ignored `job.combined`, so a border

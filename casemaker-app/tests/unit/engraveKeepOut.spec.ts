@@ -35,7 +35,7 @@ function jobWithKeepOut(keepOut: EngraveKeepOut = rectKeepOut()): EngraveJob {
   return { ...defaultEngraveJob(), keepOuts: [keepOut] };
 }
 
-const NO_GENERATED: RunSheetGenerated = { findings: [], feeds: null, cam: null, nc: null, verify: null };
+const NO_GENERATED: RunSheetGenerated = { findings: [], feeds: null, cam: null, nc: null, verify: null, frameNc: null };
 
 describe('EngraveKeepOut schema (#231)', () => {
   it('round-trips a job that carries every keep-out kind', () => {

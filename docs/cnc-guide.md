@@ -365,6 +365,11 @@ stay disabled while any gate fails, with the reason beside it. This is the answe
 Save disabled?"* in the troubleshooting table: one of the three checks has not passed, and
 the failing row says which.
 
+**Saving writes two files, not one** (#244, #273): the job itself, and `<job>-frame.nc` beside
+it — the same toolpath traced in the air, 20 mm up, with the height baked into the file. The
+run sheet's dry-run step sends you to that frame file by name, so the two always arrive
+together. Nothing is re-derived at save time: the frame is the one the verifier already passed.
+
 ![All three checks passed; Save and Run sheet are enabled](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-engrave-generated.png)
 
 *Design mockup — not the shipped screen.*

@@ -30,6 +30,7 @@ function sheetFor(job: EngraveJob): RunSheet {
       findings: [],
       stats: { lines: 9, cuttingMoves: 2, deepestZ: -2, bbox: { min: [0, 0, -2], max: [10, 10, 0] } },
     },
+    frameNc: `${NC}\n;frame\n`,
   };
   return buildRunSheet(job, generated, { diagnostics: [] }, NOW);
 }
