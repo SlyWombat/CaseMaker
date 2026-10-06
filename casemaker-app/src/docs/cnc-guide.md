@@ -551,6 +551,10 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `polygon-self-intersecting` | error | A polygon shape crosses itself, so the outline is not a simple region. | Fix the points so the outline does not cross itself. |
 | `item-reference` | error | A frame or cut-away names an item that is missing, disabled, or part of a cycle, so the ring or pocket cannot be built. | Point it at a real, enabled item that does not depend on it. |
 | `trace-self-overlap` | warning | Two strokes of a single-line trace come closer than the cutter is wide, so the cut fills in (#219). | Space the lines apart, or use a smaller cutter. |
+| `drill-outside-stock` | error | A plunge-drilled hole's rim reaches past the edge of the blank (#220). | Move the hole back inside the stock. |
+| `plunge-unproven` | warning/error | The job drills, but nothing recorded says the cutter is centre-cutting, so a straight plunge cannot be proven safe (#220). An error when the tool is recorded as NOT centre-cutting. | Use a centre-cutting end mill; #208 A1 records it for owned cutters. |
+| `drill-too-deep` | error | A hole is deeper than the cutter's flute, so chips cannot clear (#220). | Drill shallower, or use a cutter with a longer flute. |
+| `drill-through-unavailable` | error | The hole is asked to cut all the way through, which needs a sacrificial board (#213) and the through-cut rules (#218) that are not in yet (#220). | Drill to a floor instead, or wait for the through-cut work. |
 | `tool-missing` | error | The job names a tool that is not in the library. | Pick a real tool. |
 | `stock-proud-too-small` | warning | The blank stands too far below the jaw tops for the deepest cut, so the cutter would work below the jaws. | Seat the blank higher. |
 | `vise-default` | warning | The vise dimensions are unmeasured defaults, so collisions cannot be trusted. | Measure your vise. |

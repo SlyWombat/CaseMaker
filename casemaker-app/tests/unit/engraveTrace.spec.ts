@@ -33,7 +33,7 @@ type Pt = [number, number];
 
 const TOOL = flatEndMill(1); // r = 0.5
 const R = 0.5;
-const PARAMS: CutParams = { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.4, stepOver: 0.4, air: false };
+const PARAMS: CutParams = { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.4, stepOver: 0.4, peck: 1, air: false };
 const CTX: PostContext = {
   jobName: 'trace',
   stock: { length: 100, width: 60, thickness: 12 },

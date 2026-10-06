@@ -34,6 +34,13 @@ export interface CutParams {
   plungeFeed: number; // mm/min, Z-
   stepDown: number; // mm per depth pass
   stepOver: number; // mm between contour-parallel loops
+  /**
+   * Peck depth for plunge drilling (#220), mm — how far the feed goes before the tool rapids
+   * out to clear chips. Only drilling reads it; pocketing has no use for it. Resolved from the
+   * row's `peckFraction` times the cutter diameter, PROVISIONAL at one diameter until a real
+   * peck cycle measures it (#208/#209).
+   */
+  peck: number;
   /** M7. */
   air: boolean;
 }
@@ -71,8 +78,11 @@ export interface FeedsEntry {
   /** Applies to flat end mills with cutting diameter in [minDiameter, maxDiameter], mm. */
   minDiameter: number;
   maxDiameter: number;
-  /** `stepOverFraction` is a fraction of the cutter DIAMETER, resolved in `feedsFor`. */
-  params: Omit<CutParams, 'stepOver'> & { stepOverFraction: number };
+  /**
+   * `stepOverFraction` and `peckFraction` are fractions of the cutter DIAMETER, resolved in
+   * `feedsFor`: a row states them per-diameter so one row covers a range of cutters.
+   */
+  params: Omit<CutParams, 'stepOver' | 'peck'> & { stepOverFraction: number; peckFraction: number };
   status: 'unmeasured' | 'measured';
   provenance: string;
   /**
@@ -102,7 +112,7 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     material: 'softwood',
     minDiameter: 0.8,
     maxDiameter: 1.6,
-    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.5, stepOverFraction: 0.45, air: true },
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.5, stepOverFraction: 0.45, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance: PROVENANCE,
   },
@@ -110,7 +120,7 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     material: 'softwood',
     minDiameter: 1.6,
     maxDiameter: 3.2,
-    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: 0.45, air: true },
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: 0.45, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance: PROVENANCE,
   },
@@ -118,7 +128,7 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     material: 'hardwood',
     minDiameter: 0.8,
     maxDiameter: 1.6,
-    params: { rpm: 12000, feed: 400, plungeFeed: 150, stepDown: 0.3, stepOverFraction: 0.45, air: true },
+    params: { rpm: 12000, feed: 400, plungeFeed: 150, stepDown: 0.3, stepOverFraction: 0.45, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance: PROVENANCE,
   },
@@ -126,7 +136,7 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     material: 'hardwood',
     minDiameter: 1.6,
     maxDiameter: 3.2,
-    params: { rpm: 12000, feed: 400, plungeFeed: 150, stepDown: 0.6, stepOverFraction: 0.45, air: true },
+    params: { rpm: 12000, feed: 400, plungeFeed: 150, stepDown: 0.6, stepOverFraction: 0.45, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance: PROVENANCE,
   },
@@ -134,7 +144,7 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     material: 'mdf',
     minDiameter: 0.8,
     maxDiameter: 1.6,
-    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.5, stepOverFraction: 0.45, air: true },
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.5, stepOverFraction: 0.45, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance: PROVENANCE,
   },
@@ -142,7 +152,7 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     material: 'mdf',
     minDiameter: 1.6,
     maxDiameter: 3.2,
-    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: 0.45, air: true },
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: 0.45, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance: PROVENANCE,
   },
@@ -150,7 +160,7 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     material: 'pla',
     minDiameter: 0.8,
     maxDiameter: 1.6,
-    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.3, stepOverFraction: 0.45, air: true },
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.3, stepOverFraction: 0.45, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance: PROVENANCE,
   },
@@ -283,6 +293,7 @@ export function feedsFor(
     plungeFeed: entry.params.plungeFeed,
     stepDown: entry.params.stepDown,
     stepOver: entry.params.stepOverFraction * diameter,
+    peck: entry.params.peckFraction * diameter,
     air: entry.params.air,
   };
 
@@ -292,6 +303,7 @@ export function feedsFor(
     if (override.plungeFeed !== undefined) params.plungeFeed = override.plungeFeed;
     if (override.stepDown !== undefined) params.stepDown = override.stepDown;
     if (override.stepOver !== undefined) params.stepOver = override.stepOver;
+    if (override.peck !== undefined) params.peck = override.peck;
     if (override.air !== undefined) params.air = override.air;
   }
 
@@ -305,6 +317,7 @@ export function feedsFor(
   }
 
   if (params.stepDown <= 0) return { ok: false, reason: `step-down must be > 0, got ${params.stepDown} mm` };
+  if (params.peck <= 0) return { ok: false, reason: `peck depth must be > 0, got ${params.peck} mm` };
   if (params.stepOver <= 0) return { ok: false, reason: `step-over must be > 0, got ${params.stepOver} mm` };
   if (params.feed <= 0) return { ok: false, reason: `cutting feed must be > 0, got ${params.feed} mm/min` };
   if (params.plungeFeed <= 0) return { ok: false, reason: `plunge feed must be > 0, got ${params.plungeFeed} mm/min` };

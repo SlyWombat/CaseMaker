@@ -226,6 +226,33 @@ const keepOutBaseSchema = z.object({
   zCeiling: z.number().finite().positive(),
 });
 
+/**
+ * Plunge drills (#220): one hole, or a rectangular array of the same hole. They share a base with
+ * the other items (position/rotation/depth/enabled) but are their OWN union — a drill is not a
+ * region, so it never reaches `engraves`. There is deliberately no `diameter`: the hole IS the
+ * cutter's diameter (a bigger hole is a circle pocket, #214). `count` is whole numbers ≥ 1, and
+ * `pitch` is positive; the plain drill ignores `rotation`, an array rotates its lattice about
+ * `position`.
+ */
+const drillBaseSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().optional(),
+  position: positionSchema,
+  rotation: z.number().finite(),
+  depth: z.number().finite().positive(),
+  enabled: z.boolean(),
+  through: z.boolean(),
+});
+
+const drillSchema = z.discriminatedUnion('kind', [
+  drillBaseSchema.extend({ kind: z.literal('drill') }),
+  drillBaseSchema.extend({
+    kind: z.literal('drill-array'),
+    count: z.object({ x: z.number().int().min(1), y: z.number().int().min(1) }),
+    pitch: z.object({ x: z.number().finite().positive(), y: z.number().finite().positive() }),
+  }),
+]);
+
 const keepOutSchema = z
   .discriminatedUnion('kind', [
     keepOutBaseSchema.extend({
@@ -334,6 +361,8 @@ const cutOverrideSchema = z.object({
   plungeFeed: z.number().finite().optional(),
   stepDown: z.number().finite().optional(),
   stepOver: z.number().finite().optional(),
+  // #220: the peck depth for plunge drilling, mm.
+  peck: z.number().finite().optional(),
   air: z.boolean().optional(),
 });
 
@@ -403,6 +432,8 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   // #231 item 3's under-surface voids. OPTIONAL, not defaulted: a job with none keeps no key, so
   // a pre-#231 document round-trips byte-for-byte (the same reason `combined`/`traces`/`vectors`).
   keepOuts: z.array(keepOutSchema).optional(),
+  // #220's plunge drills. OPTIONAL for the same byte-for-byte reason as `combined`.
+  drills: z.array(drillSchema).optional(),
   // #246/#254's per-field provenance. OPTIONAL, not defaulted: a job that has never had a
   // cutting override or a guided setup applied carries no key.
   sources: jobSourcesSchema.optional(),

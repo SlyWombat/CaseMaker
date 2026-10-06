@@ -19,6 +19,7 @@ import { strokeGlyphPaths } from '@/engine/fonts/stroke/strokeFont';
 import type {
   EngraveAnyItem,
   EngraveCombinedShape,
+  EngraveDrill,
   EngraveJob,
   EngraveKeepOut,
   EngraveLabel,
@@ -62,6 +63,14 @@ export interface PartPlan {
    * one per pen stroke); `closed[i]` says whether `paths[i]` returns to its first point.
    */
   traces: { id: string; name: string; paths: [Mm, Mm][][]; closed: boolean[]; depth: Mm }[];
+  /**
+   * PLUNGE DRILLS (#220), a third sibling of `engraves`/`traces`. A drill is not a region: the
+   * cutter goes straight down at fixed XY and the hole is the cutter's own diameter, so there is
+   * no profile to carry — just the hole centres. `name` is the tool-independent part of the
+   * operation name (`Drill "port"`, `Drill 3×2 @10×10`); the region builder appends the diameter,
+   * which only it knows, the way it already appends the depth.
+   */
+  drills: { id: string; name: string; holes: [Mm, Mm][]; depth: Mm; through: boolean }[];
 }
 
 /**
@@ -525,6 +534,45 @@ export function traceOperationName(item: EngraveTraceItem): string {
   return `Trace text "${item.text}"${named}`;
 }
 
+/* ---------------------------------------------------------------------------------------------
+ * Plunge drills (#220)
+ * -------------------------------------------------------------------------------------------*/
+
+/**
+ * The hole centres of a drill item, in the job frame — one point for a `drill`, the whole lattice
+ * for a `drill-array`. The lattice is laid out in the item's own frame (`i·pitch.x`, `j·pitch.y`)
+ * and then rotated about `position` and translated, so the array's origin is its first hole and
+ * `rotation` turns the grid without moving that first hole.
+ *
+ * The count is floored and clamped at 1: the schema rejects a fractional or zero count, but a
+ * hand-edited file that slipped one through gets one hole rather than a NaN coordinate.
+ */
+export function drillHoles(drill: EngraveDrill): [Mm, Mm][] {
+  if (drill.kind === 'drill') return [[drill.position.x, drill.position.y]];
+  const nx = Math.max(1, Math.floor(drill.count.x));
+  const ny = Math.max(1, Math.floor(drill.count.y));
+  const holes: [Mm, Mm][] = [];
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const [rx, ry] = rotateAboutOrigin([i * drill.pitch.x, j * drill.pitch.y], drill.rotation);
+      holes.push([rx + drill.position.x, ry + drill.position.y]);
+    }
+  }
+  return holes;
+}
+
+/**
+ * The operation's display name for a drill — the DESCRIPTOR only, without the `[T#]` prefix, the
+ * diameter or the depth suffix, exactly as `itemOperationName` contracts. The diameter is not
+ * known here (`toPartPlan` is tool-agnostic), so the region builder appends it: the `;@MKR|TOOLPATH`
+ * line reads `[T1]Drill "port" ⌀3.175 2.0mm`.
+ */
+export function drillOperationName(drill: EngraveDrill): string {
+  const named = drill.name ? ` "${drill.name}"` : '';
+  if (drill.kind === 'drill') return `Drill${named}`;
+  return `Drill${named} ${drill.count.x}×${drill.count.y} @${drill.pitch.x}×${drill.pitch.y}`;
+}
+
 /**
  * The region a trace's cutter SWEEPS: the union of radius-`r` discs centred at every path point —
  * the capsules of its segments plus a cap at each free end. This is a trace's PREDICTED region for
@@ -887,6 +935,21 @@ export function toPartPlan(job: EngraveJob): PartPlan {
     traces.push({ id: item.id, name: traceOperationName(item), paths, closed, depth: item.depth });
   }
 
+  // Plunge drills (#220) are a third sibling list: hole centres only, no profile and no region
+  // pipeline. A disabled drill is skipped, like a disabled region item; `through` is carried
+  // through for the region builder, which turns it into the local stock thickness.
+  const drills: PartPlan['drills'] = [];
+  for (const item of job.drills ?? []) {
+    if (!item.enabled) continue;
+    drills.push({
+      id: item.id,
+      name: drillOperationName(item),
+      holes: drillHoles(item),
+      depth: item.depth,
+      through: item.through,
+    });
+  }
+
   // Under-surface voids (#231): a disabled void reserves nothing. `zCeiling` is copied straight
   // through in the frame #178's layer stack reads (PART-frame z from the bottom face).
   const keepOuts: PartPlan['stock']['keepOuts'] = [];
@@ -903,5 +966,6 @@ export function toPartPlan(job: EngraveJob): PartPlan {
     },
     engraves,
     traces,
+    drills,
   };
 }

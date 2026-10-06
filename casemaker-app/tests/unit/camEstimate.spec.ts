@@ -80,7 +80,7 @@ describe('estimateCycleSeconds (#242)', () => {
 
 describe('generateTrace populates the cycle estimate (#242, #219)', () => {
   it("each operation's estimatedSeconds is estimateCycleSeconds of its own moves", () => {
-    const params = { rpm: 12000, feed: 400, plungeFeed: 100, stepDown: 1, stepOver: 0.4, air: false };
+    const params = { rpm: 12000, feed: 400, plungeFeed: 100, stepDown: 1, stepOver: 0.4, peck: 1, air: false };
     const traces: TracePaths[] = [
       { id: 'l1', paths: [[[0, 0], [10, 0], [10, 5]]], closed: [false], depth: 1 },
     ];

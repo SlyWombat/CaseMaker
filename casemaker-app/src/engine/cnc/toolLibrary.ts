@@ -33,6 +33,11 @@ export const ToolSchema = z.object({
   fluteLength: finiteOrNull,
   shoulderLength: finiteOrNull,
   stickout: finiteOrNull,
+  /**
+   * Not a `;@MKR|TOOL` field (#220): a list saved before it existed parses with `null` —
+   * UNKNOWN, the same as an absent header field, never `false`.
+   */
+  centreCutting: z.boolean().nullable().default(null),
 });
 
 export const ToolLibraryEntrySchema = z.object({
@@ -72,6 +77,9 @@ export const TOOL_LIBRARY: readonly ToolLibraryEntry[] = [
       fluteLength: 12,
       shoulderLength: 12,
       stickout: 0,
+      // The header has no such field, and Makera's catalogue does not state it (#220). Unknown,
+      // so a job that drills with this cutter gets `plunge-unproven` rather than a silent plunge.
+      centreCutting: null,
     },
     provenance: 'the TOOL line of Makera sample Z1/TopClamp.nc',
   },

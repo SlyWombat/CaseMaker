@@ -6,12 +6,14 @@ import { viseEnvelope } from '@/engine/cnc/fixture';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import { stubSetup, type Setup, type Workholding } from '@/engine/cnc/setup';
 import {
+  drillHoles,
+  drillOperationName,
   polygonSelfIntersects,
   resolveItems,
   traceOperationName,
   traceSelfOverlapFindings,
 } from '@/engine/cnc/engrave/partPlan';
-import type { EngraveAnyItem, EngraveJob, EngraveTraceItem } from '@/types/engraveJob';
+import type { EngraveAnyItem, EngraveDrill, EngraveJob, EngraveTraceItem } from '@/types/engraveJob';
 
 /**
  * The two pure derivations that turn an `EngraveJob` into the emulator's inputs (#200).
@@ -54,7 +56,12 @@ export type JobFindingCode =
   // the swept region intersected with the stock, which only the worker evaluates (#201). Both
   // are part of `TraceFindingCode` in `partPlan.ts`, where the geometry that detects them lives.
   | 'trace-self-overlap'
-  | 'trace-outside-stock';
+  | 'trace-outside-stock'
+  // Plunge drills (#220). All four are checks on the job as data plus the resolved tool.
+  | 'drill-outside-stock'
+  | 'plunge-unproven'
+  | 'drill-too-deep'
+  | 'drill-through-unavailable';
 
 export interface JobFinding {
   severity: 'error' | 'warning';
@@ -162,6 +169,9 @@ export function validateJob(job: EngraveJob): JobFinding[] {
   const enabled: EngraveAnyItem[] = all.filter((item) => item.enabled && !item.construction);
   // Traces (#219) are a separate list and carry their own depth and enable flag.
   const enabledTraces: EngraveTraceItem[] = (job.traces ?? []).filter((t) => t.enabled && !t.construction);
+  // Plunge drills (#220) are a third list. A drill has no `construction`; a disabled one does
+  // nothing.
+  const enabledDrills: EngraveDrill[] = (job.drills ?? []).filter((d) => d.enabled);
   const { thickness } = job.stock;
   const floorAllowed = thickness - job.minFloor;
 
@@ -190,6 +200,96 @@ export function validateJob(job: EngraveJob): JobFinding[] {
           `${traceOperationName(trace)} cuts ${trace.depth} mm deep; only ${remaining} mm of floor ` +
           `would remain on a ${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
       });
+    }
+  }
+
+  // Plunge drills (#220): depth, reach, stock containment, a centre-cutting tool and the
+  // through-cut gate. The tool is resolved once here; `drill-outside-stock` and the
+  // centre-cutting check need its radius, and skip cleanly when the job names no flat cutter
+  // (the `tool-missing`/feeds stage reports that instead).
+  const drillTool = jobTool(job);
+  const drillRadiusResult = drillTool ? cuttingRadiusForSweep(drillTool) : null;
+  const drillRadius = drillRadiusResult && drillRadiusResult.ok ? drillRadiusResult.radius : null;
+  const { length, width } = job.stock;
+  for (const drill of enabledDrills) {
+    const who = drillOperationName(drill);
+    if (drill.through) {
+      findings.push({
+        severity: 'error',
+        code: 'drill-through-unavailable',
+        labelId: drill.id,
+        message:
+          `${who} asks to cut through the blank, which needs a sacrificial board (#213) and the ` +
+          `through-cut depth rules (#218); neither is in yet, so the hole is refused rather than ` +
+          `cut into the vise.`,
+      });
+    } else if (drill.depth > floorAllowed) {
+      const remaining = thickness - drill.depth;
+      findings.push({
+        severity: 'error',
+        code: 'depth-exceeds-stock',
+        labelId: drill.id,
+        message:
+          `${who} drills ${drill.depth} mm deep; only ${remaining} mm of floor would remain on a ` +
+          `${thickness} mm stock, below the ${job.minFloor} mm minimum.`,
+      });
+    }
+    // A hole is a disc of the cutter's radius, so it is off the stock when its RIM crosses an
+    // edge, not just its centre.
+    if (drillRadius !== null) {
+      for (const [hx, hy] of drillHoles(drill)) {
+        if (hx - drillRadius < 0 || hx + drillRadius > length || hy - drillRadius < 0 || hy + drillRadius > width) {
+          findings.push({
+            severity: 'error',
+            code: 'drill-outside-stock',
+            labelId: drill.id,
+            message:
+              `${who} has a hole centred at (${hx}, ${hy}) mm whose rim reaches past the stock ` +
+              `edge; the cutter must stay on the blank.`,
+          });
+          break; // one finding per item is enough
+        }
+      }
+    }
+  }
+
+  // A plunge needs a CENTRE-CUTTING cutter. The tool record does not carry the field (#220), so
+  // a parsed or generic tool is `null` — unknown. That is a WARNING with the uncertainty named,
+  // never a silent plunge; a tool explicitly recorded as not centre-cutting is an ERROR.
+  if (enabledDrills.length > 0 && drillTool) {
+    if (drillTool.centreCutting === false) {
+      findings.push({
+        severity: 'error',
+        code: 'plunge-unproven',
+        labelId: enabledDrills[0]!.id,
+        message:
+          `The job drills, but "${drillTool.name}" is recorded as NOT centre-cutting: it cannot ` +
+          `plunge straight down without a pilot hole.`,
+      });
+    } else if (drillTool.centreCutting === null) {
+      findings.push({
+        severity: 'warning',
+        code: 'plunge-unproven',
+        labelId: enabledDrills[0]!.id,
+        message:
+          `The job drills, but nothing recorded for "${drillTool.name}" says it is centre-cutting ` +
+          `(the .nc header has no such field, #220); #208 A1 settles it for cutters that are owned.`,
+      });
+    }
+    // A peck must fit inside the flute: beyond it the chips have nowhere to go.
+    if (drillTool.fluteLength !== null && drillTool.fluteLength > 0) {
+      for (const drill of enabledDrills) {
+        if (!drill.through && drill.depth > drillTool.fluteLength) {
+          findings.push({
+            severity: 'error',
+            code: 'drill-too-deep',
+            labelId: drill.id,
+            message:
+              `${drillOperationName(drill)} drills ${drill.depth} mm, past the ${drillTool.fluteLength} mm ` +
+              `flute of "${drillTool.name}": once the flutes are buried, chips cannot clear.`,
+          });
+        }
+      }
     }
   }
 
@@ -228,11 +328,11 @@ export function validateJob(job: EngraveJob): JobFinding[] {
     }
   }
 
-  if (!enabled.some(itemHasWork) && !enabledTraces.some(traceHasWork)) {
+  if (!enabled.some(itemHasWork) && !enabledTraces.some(traceHasWork) && enabledDrills.length === 0) {
     findings.push({
       severity: 'error',
       code: 'no-items',
-      message: 'The job has no enabled label with text, shape or trace.',
+      message: 'The job has no enabled label with text, shape, trace or drilled hole.',
     });
   }
 
@@ -244,10 +344,15 @@ export function validateJob(job: EngraveJob): JobFinding[] {
     });
   }
 
-  // The deepest cut across BOTH region items and traces, so an unmodelled-tall trace is reported
-  // with the same clearance warning as a deep pocket.
-  const deepestItem = [...enabled, ...enabledTraces].reduce<{ id: string; depth: number } | null>(
-    (deepestSoFar, item) => (!deepestSoFar || item.depth > deepestSoFar.depth ? { id: item.id, depth: item.depth } : deepestSoFar),
+  // The deepest cut across region items, traces AND drills, so any of them is reported with the
+  // same jaw-clearance warning.
+  const candidateDepths: { id: string; depth: number }[] = [
+    ...enabled.map((item) => ({ id: item.id, depth: item.depth })),
+    ...enabledTraces.map((trace) => ({ id: trace.id, depth: trace.depth })),
+    ...enabledDrills.map((drill) => ({ id: drill.id, depth: drill.depth })),
+  ];
+  const deepestItem = candidateDepths.reduce<{ id: string; depth: number } | null>(
+    (deepestSoFar, item) => (!deepestSoFar || item.depth > deepestSoFar.depth ? item : deepestSoFar),
     null,
   );
   const deepest = deepestItem?.depth ?? 0;

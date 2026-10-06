@@ -131,6 +131,52 @@ export type EngraveShape =
   | EngraveSlotShape
   | EngravePolygonShape;
 
+/**
+ * The fields every DRILL item shares (#220).
+ *
+ * A drill is not a region: the cutter goes straight down at one XY and the hole is the cutter's
+ * OWN diameter — there is nothing to offset or spiral, and no diameter to offer (a bigger hole
+ * is a circle pocket, #214). So it lives in its OWN list (`EngraveJob.drills`), like `traces`,
+ * and reaches `PartPlan.drills`, never `engraves`.
+ *
+ * `position` is the first hole's centre; a `drill-array` grows its lattice in +X/+Y from there.
+ * `rotation` is IGNORED by a plain `drill` (a round hole has no orientation) and rotates the
+ * pitch lattice about `position` for an array — the same convention as every other item.
+ */
+export interface EngraveDrillBase {
+  id: string;
+  /** Optional human name, shown in operations and findings. */
+  name?: string;
+  position: { x: Mm; y: Mm };
+  rotation: number;
+  /** Depth of the hole's flat floor below the top face, mm. Positive; ignored when `through`. */
+  depth: Mm;
+  enabled: boolean;
+  /**
+   * Cut all the way through the blank. NOT AVAILABLE YET: a through hole is only permitted
+   * where a sacrificial board exists (#213) and its depth is a rule of the through-cut work
+   * (#218), so a job that asks for one is REFUSED with `drill-through-unavailable` rather than
+   * cutting into the vise.
+   */
+  through: boolean;
+}
+
+/** One plunge-drilled hole at `position`: the cutter's own diameter, its floor at `depth`. */
+export interface EngraveDrillItem extends EngraveDrillBase {
+  kind: 'drill';
+}
+
+/** A rectangular grid of the same hole: `count.x × count.y` holes at `pitch` spacing. */
+export interface EngraveDrillArrayItem extends EngraveDrillBase {
+  kind: 'drill-array';
+  /** Holes along X and Y. Whole numbers ≥ 1. */
+  count: { x: number; y: number };
+  /** Spacing between neighbouring holes, mm. Both > 0. */
+  pitch: { x: Mm; y: Mm };
+}
+
+export type EngraveDrill = EngraveDrillItem | EngraveDrillArrayItem;
+
 /** The winding a vector outline's contours are read with (#217) — Manifold's two fill rules. */
 export type VectorFillRule = 'NonZero' | 'EvenOdd';
 
@@ -453,6 +499,16 @@ export interface EngraveJob {
    * `job.keepOuts ?? []`.
    */
   keepOuts?: EngraveKeepOut[];
+  /**
+   * Plunge-drilled holes (#220). A separate list, like `combined`/`traces`/`vectors`/`keepOuts`,
+   * so the region pipelines and every exhaustive item switch are untouched; `toPartPlan` carries
+   * them to `PartPlan.drills` and CAM writes a peck cycle for each hole.
+   *
+   * Optional, so a pre-#220 document round-trips byte-for-byte; the schema keeps it absent (not
+   * defaulted) for the same reason as `combined`, `traces`, `vectors` and `keepOuts`. Consumers
+   * read `job.drills ?? []`.
+   */
+  drills?: EngraveDrill[];
   /** Key into TOOL_LIBRARY. */
   toolKey: string;
   workholding: { kind: 'vise'; vise: ViseParams };

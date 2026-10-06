@@ -26,6 +26,7 @@
  */
 
 import type { EngraveItem, EngraveJob } from '@/types/engraveJob';
+import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 // package.json version for the post's `;@MKR|CAM|v=` header. Read from package.json directly
 // rather than Vite's `__APP_VERSION__` define: Vite replaces the define at build time, but a
 // headless run under `tsx`/Node (the bench-file generator, CI) has no such define and used to
@@ -39,6 +40,7 @@ import { toPartPlan, labelProfile, jobDepthLimit } from '@/engine/cnc/engrave/pa
 import { jobTool, toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
+import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { estimateCycleSeconds, HOP_Z, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { FRAME_Z } from '@/engine/cnc/engrave/runSheet';
@@ -159,6 +161,23 @@ export interface EngraveRegions {
   findings: JobFinding[];
 }
 
+/**
+ * The disc a plunge drill opens at one hole: radius `r`, polygonized with the same segment count
+ * `segmentsForRadius` picks everywhere else (#190). The holes are unioned so a dense array whose
+ * discs overlap still yields one region per drill item rather than double-counted overlap — the
+ * oracle and the preview both compare against a single region.
+ */
+function drillPolygons(tl: ManifoldToplevel, holes: readonly [number, number][], radius: number): Polygons {
+  const CS = tl.CrossSection;
+  const discs = holes.map(([x, y]) => CS.circle(radius, segmentsForRadius(radius)).translate([x, y]));
+  if (discs.length === 0) return [];
+  const union = discs.length === 1 ? discs[0]! : CS.union(discs);
+  if (discs.length > 1) discs.forEach((d) => d.delete());
+  const polygons = union.toPolygons() as Polygons;
+  union.delete();
+  return polygons;
+}
+
 export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob): EngraveRegions {
   const plan = toPartPlan(job);
   const perChar = perCharFor(job);
@@ -190,6 +209,24 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob): EngraveRe
     depth: e.depth,
     polygons: byId.get(e.id)?.polygons ?? [],
   }));
+
+  // Plunge drills (#220): a region whose cut is the cutter's own disc per hole, so the preview
+  // and the oracle see it exactly as the CAM will cut it. A `through` hole is refused by
+  // `drill-through-unavailable` before the pipeline reaches CAM, so it contributes no region —
+  // but a job that still carried one here would cut a floor, never break through.
+  for (const d of plan.drills) {
+    if (d.through) continue;
+    regions.push({
+      id: d.id,
+      text: '',
+      // The diameter is only known once the tool is resolved, so the region builder appends it —
+      // the same division of labour `toPartPlan` documents (#220).
+      name: radius === null ? d.name : `${d.name} ⌀${radius * 2}`,
+      depth: d.depth,
+      polygons: radius === null ? [] : drillPolygons(tl, d.holes, radius),
+      drill: { holes: d.holes.map(([x, y]) => [x, y] as [number, number]) },
+    });
+  }
 
   const predicted: OraclePredicted[] = regions.map((r2) => ({ depth: r2.depth, polygons: r2.polygons }));
 

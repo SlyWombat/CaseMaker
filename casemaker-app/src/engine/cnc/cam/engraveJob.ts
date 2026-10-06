@@ -30,6 +30,7 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { CutParams } from '../feeds';
 import { cuttingRadiusForSweep, type Tool } from '../tool';
+import { drillMoves, orderHolesNearest } from './drill';
 import { estimateCycleSeconds, HOP_Z, SAFE_Z, type CamMove, type CamOperation, type ToolpathIR } from './ir';
 import { pocketLoops, type OffsetFn, type Polygons } from './pocket';
 
@@ -60,6 +61,14 @@ export interface EngraveRegion {
   depth: number;
   /** #201's opened polygons — outer CCW, holes CW. NOT re-derived here. */
   polygons: Polygons;
+  /**
+   * A PLUNGE DRILL (#220), present only on a drilled region. The hole CENTRES, in the stock
+   * frame — one point for a `drill`, the whole lattice for a `drill-array`. Present => this
+   * region is drilled, not pocketed: `polygons` is the union of cutter-radius discs (built by
+   * the region builder for preview and oracle only) and CAM emits `drillMoves` instead of the
+   * pocket loop. `depth` is the hole's flat floor.
+   */
+  drill?: { holes: [number, number][] };
 }
 
 /**
@@ -139,6 +148,8 @@ interface Prepared {
   rings: Polygons[];
   passes: number[];
   firstCut: [number, number];
+  /** A drilled region's moves, computed at prepare time (#220). Present => `buildMoves` is not used. */
+  drillMoves?: CamMove[];
 }
 
 /** Greedy nearest-neighbour from (0, 0) on each label's first cutting point; ties by `labelId`. */
@@ -234,6 +245,19 @@ export function generateEngrave(
   const offset = makeClipperOffset(tl);
 
   const prepared: Prepared[] = labels.map((label) => {
+    if (label.drill) {
+      // Drilled region (#220): no rings to pocket. The holes are visited nearest-neighbour and
+      // the FIRST becomes the operation's first cutting point, so the ordering and the emitted
+      // path agree exactly as they do for a pocket.
+      const holes = orderHolesNearest(label.drill.holes);
+      return {
+        label,
+        rings: [],
+        passes: [],
+        firstCut: holes[0] ?? [0, 0],
+        drillMoves: drillMoves(holes, label.depth, params.peck, params),
+      };
+    }
     const rings = pocketLoops(label.polygons, toolRadius, params.stepOver, offset);
     return {
       label,
@@ -244,10 +268,18 @@ export function generateEngrave(
   });
 
   const strategies: Record<'nearest', (items: readonly Prepared[]) => Prepared[]> = { nearest: orderNearest };
-  const ordered = strategies[order](prepared);
+  // Drills run FIRST, before any cut-out (#220 work item 4): a peck cycle leaves the blank
+  // unweakened, whereas a finished cut-out can let the part shift under the tape. Within each
+  // group the ordering is unchanged, so a job with no drills is byte-identical to before.
+  const drilled = prepared.filter((p) => p.drillMoves !== undefined);
+  const pocketed = prepared.filter((p) => p.drillMoves === undefined);
+  const ordered =
+    drilled.length === 0
+      ? strategies[order](prepared)
+      : [...strategies[order](drilled), ...strategies[order](pocketed)];
 
   const operations: CamOperation[] = ordered.map((item, index) => {
-    const moves = buildMoves(item, params);
+    const moves = item.drillMoves ?? buildMoves(item, params);
     // A shape's ready-made descriptor when the caller supplied one (#214); otherwise the
     // label text, exactly as before, so a text-only caller's `.nc` is unchanged.
     const descriptor = item.label.name ?? `Engrave "${item.label.text}"`;

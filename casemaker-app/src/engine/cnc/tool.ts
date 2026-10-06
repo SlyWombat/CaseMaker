@@ -38,6 +38,14 @@ export interface Tool {
   /** Length to the shoulder: the shank-collision limit. EMPTY for every engraver and chamfer in Makera's catalogue. */
   shoulderLength: number | null;
   stickout: number | null;
+  /**
+   * Can this cutter plunge straight down without a pilot hole? Only a CENTRE-CUTTING end mill
+   * can, and the `.nc` header does not say (#220). Not a field of `MkrRecord`, so a tool parsed
+   * from a file is always `null` — unknown, never a guess. A `null` on a job that drills raises
+   * `plunge-unproven` (#220): the cut is offered with the uncertainty named, and #208 A1 records
+   * the answer for cutters that are actually owned.
+   */
+  centreCutting: boolean | null;
 }
 
 /** Studio's `type=` vocabulary, from the binary's string table (`/Makera-Parity.md` §12). */
@@ -74,6 +82,8 @@ export function toolFromMkrRecord(rec: MkrRecord): Tool {
     fluteLength: mkrNumber(rec, 'flutelength'),
     shoulderLength: mkrNumber(rec, 'shoulderlength'),
     stickout: mkrNumber(rec, 'sticklength') ?? mkrNumber(rec, 'stickout'),
+    // The header says nothing about it, so a parsed tool is UNKNOWN, not "not centre-cutting".
+    centreCutting: null,
   };
 }
 
@@ -94,6 +104,9 @@ export function flatEndMill(cuttingDiameter: number, opts: Partial<Tool> = {}): 
     fluteLength: null,
     shoulderLength: null,
     stickout: null,
+    // A generic flat end mill is not proven centre-cutting either: `flatEndMill` is the
+    // simulation's assumed cutter, not a catalogue entry with a stated geometry.
+    centreCutting: null,
     ...opts,
   };
 }
