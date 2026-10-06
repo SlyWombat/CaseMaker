@@ -194,6 +194,18 @@ const PRINT_PATTERNS: PrintPattern[] = [
     meta: flat('Lay flat — TPU 95A flexible bumper'),
   },
   {
+    // Issue #150 — the peg family. Printed in assembly orientation the tenons
+    // hang below a wall that has nothing under most of itself, so it would need
+    // supports the whole way along. On its side the wall is a flat plate and the
+    // tenons come out horizontal — no overhang, and the wall's layers run across
+    // the span, which is the direction a divider is loaded.
+    test: (id) => id.startsWith('divider-peg-'),
+    meta: flat(
+      'Lay it on its SIDE — wall face on the bed, tenons pointing sideways. The wall prints as flat layers and nothing overhangs',
+      { rotation: [90, 0, 0] },
+    ),
+  },
+  {
     test: (id) => /^rack-(blank|keystone)-\d+$/.test(id),
     meta: flat(
       'Front face DOWN on the bed — the end ribs and keystone bosses rise behind it, no supports needed',
@@ -337,6 +349,10 @@ function describePart(
   if (id.startsWith('bumper-')) {
     const suffix = id.slice('bumper-'.length);
     return { displayName: `Bumper ${suffix}`, material: 'flex', category: 'accessory' };
+  }
+  if (id.startsWith('divider-peg-')) {
+    const suffix = id.slice('divider-peg-'.length);
+    return { displayName: `Divider peg ${suffix}`, material: 'rigid', category: 'accessory' };
   }
   // Unknown node — best-effort fallback. Display the raw id; treat as rigid.
   return {

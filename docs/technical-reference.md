@@ -42,7 +42,7 @@ For developers extending Case Maker. Audience: TypeScript + React + a passing ac
 
 ### Engine compiler — `src/engine/compiler/`
 
-The compiler is 38 modules. Grouped by what they build:
+The compiler is 40 modules. Grouped by what they build:
 
 **Core pipeline**
 
@@ -79,6 +79,13 @@ The compiler is 38 modules. Grouped by what they build:
 | `alignmentFlange.ts` | `buildAlignmentFlange` | Lip that locates the lid on the shell |
 | `boardSnap.ts` | `buildBoardSnapOps` | Two-jaw clips that hold a PCB without screws |
 | `validation.ts` | `validateScrewDownAlignment` | Refuse joints whose fixings cannot line up |
+
+**Interior organisation**
+
+| Module | Exports | Purpose |
+| :--- | :--- | :--- |
+| `holeGrid.ts` | `holeGridPocket(outline, opts) → Profile`, `holeGridCentres`, `holeGridProblem` | Issue #150 — the interior socket lattice: square sockets on a fixed pitch, clipped inside a margin and kept clear of bosses. Pure profile math. See **Interior grids** below |
+| `dividerPegs.ts` | `buildDividerPegOps`, `buildDividerPegOp`, `pegWidth`, `dividerPegProblem` | Issue #150 — drop-in divider pegs sized to a grid: one wall plate with a tenon under each end, width quoted in hole spans |
 
 **Boards and add-ons**
 
@@ -255,6 +262,46 @@ line quietly gets you `self-tap`.
 is the one number here that has **not** been printed. `npm run thread:coupon`
 prints a ladder of fits for exactly that reason. Until one comes back, no
 structural joint should move from `self-tap` to `pre-threaded`.
+
+## Interior grids
+
+`holeGrid.ts` draws a lattice of square sockets into any 2D outline;
+`dividerPegs.ts` builds the drop-in parts that land in it (#150). Both are
+primitives — they take an outline and parameters and return a `Profile` or a
+`BuildOp`, with no host of their own.
+
+**The numbers are measured, not chosen.** The reviewed ToolStack system's
+drawer floors carry **5.0 × 5.0 mm sockets on a 12.0 mm pitch**, both axes,
+measured on a physical unit (`/Toolbox.md`, "Interface 3 of 3"). Pitch and
+socket are dimensions of that part, so copying them is fair.
+
+**The fit is not measured, and it is labelled as such.** `PEG_TENON_FIT`
+(0.3 mm, socket minus tenon) and `PEG_TENON_BOTTOM_GAP` (0.4 mm) are ours, and
+neither has been printed here. They are the two numbers in `dividerPegs.ts`
+marked PROVISIONAL; #153's fit variants are where they should get a measured
+value. Everything else in the module is derived from the grid.
+
+**Widths are quoted in hole spans**, which is how the source system quotes
+them. `pegWidth(spans, pitch, ear)` is `(spans − 1) × pitch + 2 × ear`, with
+`PEG_WIDTH_EAR = 4.8` derived from the measured pegs — 21.6 spanning 2 holes and
+33.6 spanning 3 both give 4.8. The 5-hole peg measures 56.6, which the same rule
+would put at 57.6; the 1.0 mm discrepancy is recorded in the constant rather
+than averaged into it, and pinned by a test.
+
+**Anchor the lattice at the outline's bbox, never its centre.** A bbox-anchored
+lattice is stable: growing a cavity by a few millimetres adds sockets at the far
+edge and leaves every existing one exactly where it was, so a divider printed
+for it yesterday still fits. A centred lattice shifts by half a pitch whenever
+the cavity grows an odd number of millimetres.
+
+**Host status.** Neither module has a caller yet, deliberately. The two hosts
+the issue names are both blocked: the rack cable tray is 4 mm and already fully
+drained by its lightening lattice, and the case floor is auto-sized to the PCB,
+so the board footprint and its bosses leave only the `internalClearance` margin
+— on a stock 0.5 mm there is nowhere to put a socket. The host that actually
+wants a bare gridded floor is the toolbox archetype, which is still a go/no-go
+(#155); shipping the host-less primitive is what lets that decision be made
+with something in hand.
 
 ## CI
 
