@@ -49,6 +49,90 @@ const NO_RESOLVE_DISPLAY: DisplayResolver = () => undefined;
  *       channel (1.0) + leaves 0.5 mm pressing tongue ⇒ correct preload.
  */
 
+/**
+ * Issue #264 — the minimum web of case wall that survives on each side of the
+ * gasket channel.
+ *
+ * A channel as wide as the wall it is cut into leaves no material outboard (or
+ * inboard) of itself: the cut runs from the case's outer face to the cavity
+ * face. In recess mode the rim it is cut into is only `lidThickness` tall, so
+ * that full-width cut is the ONLY connection between the rim band above it and
+ * the body below — the band floats and the shell decomposes into two bodies
+ * instead of one printed part.
+ *
+ * 0.4 mm is one nozzle width: the thinnest web that is a wall rather than a
+ * knife edge. It is deliberately smaller than the 0.8 mm first proposed in
+ * #264 — `wallThickness` defaults to 2, so a 0.8 mm web would clamp the default
+ * 4 mm gasket to 0.4 mm and refuse the seal on every stock project, which is
+ * the same silence (a channel that is never cut) this fix exists to end.
+ */
+export const MIN_SEAL_WEB = 0.4;
+
+/** Narrowest ring that is still a ring; below this there is no seal to build. */
+export const MIN_SEAL_RING_WIDTH = 0.5;
+
+/** Widest channel a wall of `wall` can hold with both webs left intact. */
+export function maxSealRingWidth(wall: number): number {
+  return wall - 2 * MIN_SEAL_WEB;
+}
+
+/** Cross-section width of the lid tongue for a ring of `ringWidth`, or null
+ *  when the configured clearance leaves too little tongue to build. */
+export function sealTongueWidth(ringWidth: number, clearance: number): number | null {
+  const width = ringWidth - 2 * clearance;
+  return width > MIN_SEAL_RING_WIDTH ? width : null;
+}
+
+/** What the seal section should tell the user about the gasket it asked for. */
+export interface SealFitNote {
+  /** Gasket width asked for, mm. */
+  requested: number;
+  /** Channel — and gasket — width the wall can hold, mm. 0 = no channel. */
+  delivered: number;
+  /** Wall left outboard and inboard of the channel, mm. */
+  web: number;
+  /** `wallThickness` at which `requested` would be delivered as asked, mm. */
+  wallForRequest: number;
+  /** The lid tongue cannot be built at the configured gasket clearance. */
+  tongueTooNarrow: boolean;
+}
+
+/**
+ * Issue #264 — what the panel says about this seal, derived from the numbers
+ * the geometry uses so the two cannot disagree. Null when the gasket fits the
+ * wall as asked and the tongue is buildable — i.e. nothing worth saying.
+ *
+ * Three honest answers, and all of them are better than the silence this
+ * replaces: the channel is narrower than asked (the wall cannot hold it), there
+ * is no channel at all (the wall is thinner than its two webs), or the tongue
+ * is missing because the clearance ate it.
+ */
+export function sealFitNote(params: CaseParameters): SealFitNote | null {
+  const seal = params.seal;
+  if (!seal?.enabled) return null;
+  const wall = params.wallThickness;
+  const clearance = seal.gasketClearance ?? 0.2;
+  const available = maxSealRingWidth(wall);
+  if (available >= seal.width) {
+    if (sealTongueWidth(seal.width, clearance) !== null) return null;
+    return {
+      requested: seal.width,
+      delivered: seal.width,
+      web: (wall - seal.width) / 2,
+      wallForRequest: wall,
+      tongueTooNarrow: true,
+    };
+  }
+  const delivered = available < MIN_SEAL_RING_WIDTH ? 0 : available;
+  return {
+    requested: seal.width,
+    delivered,
+    web: delivered > 0 ? (wall - delivered) / 2 : wall,
+    wallForRequest: seal.width + 2 * MIN_SEAL_WEB,
+    tongueTooNarrow: delivered > 0 && sealTongueWidth(delivered, clearance) === null,
+  };
+}
+
 export interface SealRingDims {
   /** World-coord X corner of the OUTER ring rectangle (rim top, lid plane). */
   outerCornerX: number;
@@ -85,6 +169,12 @@ export function computeChannelAndTongue(seal: NonNullable<CaseParameters['seal']
  *
  * For the lid tongue, offset by an additional `tongueClearance` so it
  * sits WITHIN the case ring without binding (the gasket fills the gap).
+ *
+ * Issue #264 — the requested width is CLAMPED to what the wall can hold with
+ * `MIN_SEAL_WEB` left on each side, so the channel can never consume the whole
+ * wall. `ringWidth` is what the channel, the gasket body and the tongue are all
+ * built from, so clamping here keeps the three consistent; `sealFitNote()` is
+ * the panel's view of the same clamp, so the warning and the geometry agree.
  */
 export function computeSealRing(
   board: BoardProfile,
@@ -97,14 +187,17 @@ export function computeSealRing(
   if (!params.seal?.enabled) return null;
   const dims = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
   const { wallThickness: wall } = params;
-  const ringWidth = params.seal.width;
-  // Centerline of the gasket ring sits centered in the wall material:
-  // outer ring outer edge = wall/2 - ringWidth/2 from the case outer face.
-  const outerOffset = wall / 2 - ringWidth / 2;
-  if (outerOffset < 0) {
-    // Wall too thin for the gasket — caller surfaces this via the validator.
+  const available = maxSealRingWidth(wall);
+  if (available < MIN_SEAL_RING_WIDTH) {
+    // Wall thinner than the two webs — no channel to cut. `sealFitNote()`
+    // turns this into a sentence for the panel rather than a silent no-op.
     return null;
   }
+  const ringWidth = Math.min(params.seal.width, available);
+  // Centerline of the gasket ring sits centered in the wall material:
+  // outer ring outer edge = wall/2 - ringWidth/2 from the case outer face,
+  // which the clamp above holds at ≥ MIN_SEAL_WEB.
+  const outerOffset = wall / 2 - ringWidth / 2;
   return {
     outerCornerX: outerOffset,
     outerCornerY: outerOffset,
@@ -192,8 +285,10 @@ export function buildSealTongue(
   // Issue #113 — `seal.gasketClearance` overrides the default 0.2 so the
   // user can tune for their printer's elephant-foot / overcure behavior.
   const tongueClearance = params.seal!.gasketClearance ?? 0.2;
-  const tongueRingWidth = ring.ringWidth - 2 * tongueClearance;
-  if (tongueRingWidth <= 0.5) return null; // gasket too narrow for a tongue
+  // Same arithmetic `sealFitNote()` reports on, so "no tongue is built" in the
+  // panel and a null here are the same event.
+  const tongueRingWidth = sealTongueWidth(ring.ringWidth, tongueClearance);
+  if (tongueRingWidth === null) return null; // gasket too narrow for a tongue
   const outerInset = tongueClearance;
   const outerWidth = ring.outerWidth - 2 * outerInset;
   const outerHeight = ring.outerHeight - 2 * outerInset;

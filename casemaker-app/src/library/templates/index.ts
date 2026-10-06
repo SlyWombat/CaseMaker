@@ -93,11 +93,14 @@ function protectiveCase(): Project {
   p.case.joint = 'flat-lid';
   p.case.ventilation = { enabled: false, pattern: 'none', coverage: 0 };
   p.case.bosses.enabled = false;
-  // Issue #107 — gasket
+  // Issue #107 — gasket. Issue #264: the width is 2.5, not 4. A 4 mm gasket in
+  // this template's 4 mm wall left the channel only its two 0.4 mm minimum
+  // webs — printable, but a rim that thin is the wrong thing to ship as a
+  // starting point. 2.5 mm leaves 0.75 mm either side of the channel.
   p.case.seal = {
     enabled: true,
     profile: 'flat',
-    width: 4,
+    width: 2.5,
     depth: 2,
     compressionFactor: 0.25,
     gasketMaterial: 'tpu',

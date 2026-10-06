@@ -76,7 +76,7 @@ The compiler is 43 modules. Grouped by what they build:
 | `snapCatches.ts` | `defaultSnapCatchesForCase`, `buildSnapCatch`, `buildSnapCatchOps` | Cantilever arm + barb, and the mating pockets |
 | `latches.ts` / `latchProtection.ts` | `buildLatchOps`, `protectiveRibPositions` | Draw latches, and the ribs that stop them snagging |
 | `hinges.ts` | `buildHingeOps` | Knuckle-and-pin hinges |
-| `seal.ts` | `computeChannelAndTongue`, `computeSealRing`, `buildSealChannel` | Gasket channel + tongue for sealed cases |
+| `seal.ts` | `computeChannelAndTongue`, `computeSealRing`, `buildSealChannel`, `sealFitNote`, `MIN_SEAL_WEB` | Gasket channel + tongue, and the clamp that stops the channel eating the wall (#264) |
 | `alignmentFlange.ts` | `buildAlignmentFlange` | Lip that locates the lid on the shell |
 | `boardSnap.ts` | `buildBoardSnapOps` | Two-jaw clips that hold a PCB without screws |
 | `validation.ts` | `validateScrewDownAlignment` | Refuse joints whose fixings cannot line up |
@@ -211,6 +211,28 @@ clamping posts, hinge knuckles, latch arms — must reach the inner ceiling at
 `lidLocal.z = lidCavityHeight`, not `0`. Geometry that only *touches* its host is not
 fused by Manifold and comes back as a separate body; both runs at this were #121 (lid
 knuckles) and #125 (cavity-mode snap-fit), and clamping posts were the third (#117).
+
+**The channel may not consume the wall it is cut into (#264).** A gasket as wide as
+the wall leaves no material outboard (or inboard) of the cut, and on a recessed-lid
+case that cut is the only thing joining the rim band to the body — the shell compiled
+to a body plus a floating ring. `computeSealRing` now clamps the requested width to
+`wall − 2 × MIN_SEAL_WEB` (0.4 mm, one nozzle width) and centres the ring in what is
+left, so a channel always has a web on each side. The gasket body and the lid tongue
+are built from that same clamped `ringWidth`, so all three stay consistent. 0.4 mm and
+not a larger web because `wallThickness` defaults to 2: a bigger floor would clamp the
+default gasket to nothing and put the feature back to being silently inert.
+
+The clamp also fixed a second silence: with the stock 2 mm wall and the 4 mm gasket
+`defaultSeal()` used to return, the ring was null and ticking "Waterproof gasket" cut
+no channel at all with nothing on screen saying so. It now cuts a 1.2 mm channel and
+says so.
+
+**The panel reads the same arithmetic.** `sealFitNote()` answers "what will this
+gasket actually be?" — `null` when the request fits as asked and the tongue survives
+the clearance, otherwise the requested vs delivered width, the web, the wall that would
+deliver the request, and whether the tongue was eaten. `CasePanel` renders it as an
+amber note under the field; the geometry consults the same functions, so the sentence
+and the solid cannot disagree.
 
 ## Print bed, alternatives and split parts
 

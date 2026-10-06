@@ -19,6 +19,7 @@ import { VENT_SURFACES, FIT_VARIANTS } from '@/types';
 import { LabelledField } from '@/components/ui/LabelledField';
 import { resolveInsertSpec } from '@/engine/compiler/bosses';
 import { CLAMSHELL_MIN_CAVITY } from '@/engine/compiler/lidMode';
+import { MIN_SEAL_RING_WIDTH, MIN_SEAL_WEB, sealFitNote } from '@/engine/compiler/seal';
 
 const JOINT_OPTIONS: { value: JointType; label: string; hint: string }[] = [
   {
@@ -909,6 +910,45 @@ interface SealSectionProps {
   patch: (p: Partial<CaseParameters>) => void;
 }
 
+/**
+ * Issue #264 — what the channel will actually BE, said out loud.
+ *
+ * Three things used to happen in silence, and each one ends with a seal that
+ * cannot work: a gasket wider than the wall was not cut at all (the default
+ * 4 mm gasket in the default 2 mm wall), a gasket as wide as the wall was cut
+ * straight through it (a recessed-lid shell came apart into a body and a
+ * floating rim band), and a clearance wide enough to eat the tongue left the
+ * lid with nothing to press the gasket with. All three are reported here, from
+ * the same numbers the geometry is built from.
+ */
+function SealFitNoteLine({ params }: { params: CaseParameters }) {
+  const note = sealFitNote(params);
+  if (!note) return null;
+  const seal = params.seal!;
+  const clearance = seal.gasketClearance ?? 0.2;
+  const wall = params.wallThickness;
+  const parts: string[] = [];
+  if (note.delivered === 0) {
+    parts.push(
+      `A ${wall} mm wall has no room for a gasket channel: it keeps a ${MIN_SEAL_WEB} mm web on each side, and there is nothing left between them. No channel is cut — raise Wall thickness, or turn the gasket off.`,
+    );
+  } else if (note.delivered < note.requested) {
+    parts.push(
+      `A ${note.requested} mm gasket does not fit a ${wall} mm wall — the channel keeps a ${note.web.toFixed(2)} mm web on each side, so the channel and the gasket are ${note.delivered.toFixed(2)} mm wide. Raise Wall thickness to ${note.wallForRequest.toFixed(1)} mm to get ${note.requested} mm.`,
+    );
+  }
+  if (note.tongueTooNarrow) {
+    parts.push(
+      `The lid tongue needs more than ${MIN_SEAL_RING_WIDTH} mm after ${clearance} mm of clearance on each side, so the lid gets no tongue and nothing presses the gasket. Reduce Gasket clearance.`,
+    );
+  }
+  return (
+    <p className="seal-fit-note" data-testid="seal-fit-note">
+      ⚠ {parts.join(' ')}
+    </p>
+  );
+}
+
 function defaultSeal(): SealParams {
   return {
     enabled: true,
@@ -1013,9 +1053,14 @@ function SealSection({ params, patch }: SealSectionProps) {
               </p>
             </div>
           )}
-          <LabelledField label="Gasket width" unit="mm" hint="Cross-section width (or O-ring diameter). Must be < wall thickness.">
+          <LabelledField
+            label="Gasket width"
+            unit="mm"
+            hint={`Cross-section width (or O-ring diameter). A channel keeps a ${MIN_SEAL_WEB} mm web of wall on each side, so the most a wall can hold is its thickness minus ${2 * MIN_SEAL_WEB} mm.`}
+          >
             <input type="number" step={0.5} min={2} max={10} value={seal.width} onChange={(e) => updateSeal({ width: Number(e.target.value) })} className="numeric-input" data-testid="seal-width" />
           </LabelledField>
+          <SealFitNoteLine params={params} />
           <LabelledField label="Gasket depth" unit="mm" hint="Uncompressed thickness.">
             <input type="number" step={0.5} min={1} max={6} value={seal.depth} onChange={(e) => updateSeal({ depth: Number(e.target.value) })} className="numeric-input" data-testid="seal-depth" />
           </LabelledField>

@@ -4,17 +4,43 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  MIN_SEAL_RING_WIDTH,
+  MIN_SEAL_WEB,
   computeSealRing,
   computeSealLoopPath,
   computeChannelAndTongue,
   buildSealChannel,
   buildSealTongue,
   buildGasketBody,
+  maxSealRingWidth,
+  sealFitNote,
+  sealTongueWidth,
 } from '@/engine/compiler/seal';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { computeShellDims } from '@/engine/compiler/caseShell';
+import { intersection, cube, translate, type BuildOp } from '@/engine/compiler/buildPlan';
 import { createDefaultProject } from '@/store/projectStore';
 import type { CaseParameters } from '@/types';
+import { exec } from './helpers/manifoldExec';
+
+/** Positive-volume bodies in a solid. `decompose()` counts sealed voids as
+ *  components too (negative volume), and they are not printed parts. */
+function bodies(op: BuildOp): number {
+  const m = exec(op);
+  const n = m.decompose().filter((c) => c.volume() > 0).length;
+  m.delete();
+  return n;
+}
+
+/** Volume of `op` ∩ a `size` cube centred on `p` — full volume ⇒ material
+ *  there, 0 ⇒ void. The cube has to fit inside the feature being probed: the
+ *  channel is 0.8 mm tall, so a 1 mm cube straddles its floor. */
+function probeMaterial(op: BuildOp, p: [number, number, number], size = 1): number {
+  const hit = exec(intersection([op, translate(p, cube([size, size, size], true))]));
+  const v = hit.volume();
+  hit.delete();
+  return v;
+}
 
 const SEAL: NonNullable<CaseParameters['seal']> = {
   enabled: true,
@@ -32,7 +58,9 @@ describe('Waterproof gasket (#107)', () => {
     expect(ring).toBeNull();
   });
 
-  it('computeSealRing returns null when wall is too thin for the gasket width', () => {
+  it('computeSealRing returns null when the wall is thinner than its two webs', () => {
+    // Issue #264 — the test is no longer "the gasket is wider than the wall"
+    // (that is clamped now); it is "there is no room for any channel at all".
     const project = createDefaultProject('rpi-4b');
     const ring = computeSealRing(
       project.board,
@@ -180,5 +208,115 @@ describe('Waterproof gasket (#107)', () => {
     const { channelDepth } = computeChannelAndTongue(SEAL);
     const rimTopZ = dims.outerZ - params.lidThickness;
     expect(loop!.centerlineZ).toBeCloseTo(rimTopZ - channelDepth / 2, 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #264 — the channel may not consume the wall it is cut into.
+//
+// A channel as wide as the wall leaves a zero-width surface where the case
+// outer face was. Nothing about that is visible in a cross-section: the ring is
+// where it always was, just wider. What it does is show up in the SOLID — on a
+// recessed-lid case the cut runs through the only material joining the rim band
+// to the body, and the shell decomposes into two bodies. The first test below
+// is the issue's own repro, run through the production evaluator.
+// ---------------------------------------------------------------------------
+describe('the channel cannot consume the wall (#264)', () => {
+  const SEALED = (over: Partial<CaseParameters> = {}): CaseParameters => {
+    const base = createDefaultProject('rpi-4b');
+    return {
+      ...base.case,
+      wallThickness: 4,
+      lidThickness: 4,
+      lidRecess: true,
+      seal: { ...SEAL },
+      ...over,
+    };
+  };
+  const resolve = (): undefined => undefined;
+
+  it('a gasket as wide as the wall leaves ONE printed shell, not two', () => {
+    // The repro: wall 4, gasket 4. Before the clamp this was a body plus a
+    // floating rim band 0.8 mm above it — the rim was held on only through the
+    // channel cut, which of course removed it.
+    const project = createDefaultProject('rpi-4b');
+    const plan = compileProject({ ...project, case: SEALED() });
+    const shell = plan.nodes.find((n) => n.id === 'shell')!;
+    expect(bodies(shell.op)).toBe(1);
+  });
+
+  it('clamps the ring to what the wall can hold and keeps a web on each side', () => {
+    const project = createDefaultProject('rpi-4b');
+    const ring = computeSealRing(project.board, SEALED(), project.hats ?? [], resolve)!;
+    // wall 4 − 2 × 0.4 mm of web = 3.2 mm of channel, centred: 0.4 either side.
+    expect(ring.ringWidth).toBeCloseTo(3.2, 6);
+    expect(ring.outerCornerX).toBeCloseTo(MIN_SEAL_WEB, 6);
+    expect(maxSealRingWidth(4)).toBeCloseTo(3.2, 6);
+  });
+
+  it('cuts a channel on the stock 2 mm wall instead of silently cutting nothing', () => {
+    // The default project is wall 2 with `defaultSeal()`'s 4 mm gasket, which
+    // used to be a null ring — ticking "Waterproof gasket" built no channel at
+    // all, with nothing on screen saying so.
+    const project = createDefaultProject('rpi-4b');
+    const params = SEALED({ wallThickness: 2, lidThickness: 3, seal: { ...SEAL } });
+    const ring = computeSealRing(project.board, params, project.hats ?? [], resolve)!;
+    expect(ring.ringWidth).toBeCloseTo(1.2, 6);
+    expect(buildSealChannel(project.board, params, project.hats ?? [], resolve)).not.toBeNull();
+    expect(buildSealTongue(project.board, params, project.hats ?? [], resolve)).not.toBeNull();
+  });
+
+  it('builds the gasket body into the channel it was cut for', () => {
+    // The gasket is a separate part (#108), so "the clamp fixed the case" is
+    // only half the claim: the ring the user prints has to land in the channel
+    // that is left for it. Probe the middle of the wall at the rim on the -x
+    // side: void in the shell, material in the gasket.
+    const project = createDefaultProject('rpi-4b');
+    const params = SEALED();
+    const dims = computeShellDims(project.board, params, project.hats ?? [], resolve);
+    const rimTopZ = dims.outerZ - params.lidThickness;
+    const { channelDepth } = computeChannelAndTongue(params.seal!);
+    const plan = compileProject({ ...project, case: params });
+    const shell = plan.nodes.find((n) => n.id === 'shell')!;
+    const gasket = buildGasketBody(project.board, params, project.hats ?? [], resolve)!;
+    const midY = dims.outerY / 2;
+    const inChannel: [number, number, number] = [2, midY, rimTopZ - channelDepth / 2 + 0.1];
+    expect(probeMaterial(shell.op, inChannel, 0.4)).toBe(0);
+    expect(probeMaterial(gasket, inChannel, 0.4)).toBeGreaterThan(0);
+  });
+
+  it('reports what the wall could not hold, and what it would take', () => {
+    // The panel reads this; the geometry reads the same clamp, so the sentence
+    // and the solid cannot disagree.
+    expect(sealFitNote(SEALED({ wallThickness: 5 }))).toBeNull();
+    expect(sealFitNote(SEALED({ wallThickness: 2, seal: { ...SEAL } }))).toEqual({
+      requested: 4,
+      delivered: 1.2,
+      web: MIN_SEAL_WEB,
+      wallForRequest: 4.8,
+      tongueTooNarrow: false,
+    });
+    // Thinner than the two webs: there is no channel to cut at all.
+    expect(sealFitNote(SEALED({ wallThickness: 1, seal: { ...SEAL } }))).toEqual({
+      requested: 4,
+      delivered: 0,
+      web: 1,
+      wallForRequest: 4.8,
+      tongueTooNarrow: false,
+    });
+    // And the third silent failure: a clearance wide enough to eat the tongue.
+    const wide = SEALED({ wallThickness: 5, seal: { ...SEAL, gasketClearance: 2 } });
+    expect(sealTongueWidth(4, 2)).toBeNull();
+    expect(sealFitNote(wide)).toEqual({
+      requested: 4,
+      delivered: 4,
+      web: 0.5,
+      wallForRequest: 5,
+      tongueTooNarrow: true,
+    });
+    expect(buildSealTongue(createDefaultProject('rpi-4b').board, wide, [], resolve)).toBeNull();
+    // The threshold itself, so it is a stated number rather than a magic one.
+    expect(sealTongueWidth(MIN_SEAL_RING_WIDTH, 0)).toBeNull();
+    expect(sealTongueWidth(MIN_SEAL_RING_WIDTH + 0.01, 0)).toBeCloseTo(0.51, 6);
   });
 });

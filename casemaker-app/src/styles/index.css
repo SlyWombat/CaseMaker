@@ -511,6 +511,19 @@ body, html, #root {
   color: #f7eed4;
   border: 1px solid #7a6828;
 }
+/* Issue #264 — the seal section's answer to "what will this gasket actually
+ * be?". Same amber as a warning banner: the case still compiles, but the seal
+ * is not the one that was asked for. */
+.seal-fit-note {
+  margin: 4px 0 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: #4a3e1d;
+  color: #f7eed4;
+  border: 1px solid #7a6828;
+  font-size: 11px;
+  line-height: 1.4;
+}
 .placement-banner__head {
   display: flex;
   gap: 10px;
