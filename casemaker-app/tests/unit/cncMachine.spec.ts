@@ -56,11 +56,23 @@ describe('the Z1 profile', () => {
   });
 
   it('CONSISTENCY CHECK: the tool-change position computed from anchor1 + toolrack offsets lands on the config\'s own clearance_x/y', () => {
-    // ATCHandler parks at anchor1 + toolrack_offset + (132, 0); configZ1.default separately
-    // lists clearance_x/y = (-11.6, -14.6). They agree to the config's rounding, which is the
-    // one cross-check available without the machine.
+    // ATCHandler parks at anchor1 + toolrack_offset + (132, 0); the config separately lists
+    // clearance_x/y = (-11.6, -14.6). They agree to the config's rounding. That was the one
+    // cross-check available without the machine; it is now hardware-confirmed as well —
+    // `config-get sd coordinate.clearance_x` returns -11.6, and C1 watched `G28` stop at
+    // X -11.600, Y -14.600.
     expect(Z1.toolChange.changePosition[0]).toBeCloseTo(-11.6, 1);
     expect(Z1.toolChange.changePosition[1]).toBeCloseTo(-14.6, 1);
+  });
+
+  it('clearance Z is MEASURED, not read from the shipped config (#208 B6, #276)', () => {
+    // `coordinate.clearance_z` reads -3.0 on the machine; this profile carried -1.0 from a
+    // reading of configZ1.default, and the group was miscredited to `atc.*` as well. Two
+    // independent confirmations: C1 sent `G28` and the head stopped at machine Z -3.000, and
+    // -1.0 is also the post-homing rest Z (B4) — a clearance of -1.0 would have meant `G28`
+    // did not move Z at all, and it moved 2 mm.
+    expect(Z1.toolChange.clearanceZ).toBe(-3.0);
+    expect(Z1.toolChange.clearanceXY).toEqual([-11.6, -14.6]);
   });
 
   it('the tool-length sensor is anchor1 + 181 on each axis, inside the envelope', () => {
@@ -69,19 +81,20 @@ describe('the Z1 profile', () => {
     expect(insideEnvelope(Z1, [Z1.toolChange.changePosition[0], Z1.toolChange.changePosition[1], Z1.toolChange.clearanceZ])).toBe(true);
   });
 
-  it('records the soft endstops as SOURCED and DISABLED, past the vendor figure (#192 q5, #208 B2)', () => {
-    // The shipped config's limit, not one the controller enforces. `envelope` stays the
-    // conservative 200/200/100 because the band (-206, -200] is unverified without the machine.
+  it('records the soft endstops as MEASURED and ENABLED, past the vendor figure (#192 q5, #208 B2)', () => {
+    // Read off the machine, not the shipped default. `config-get` said `enable true` and
+    // `x_min −207.00`, where configZ1.default said `false` and `-206.0` — so the config has
+    // been changed on this machine or drifted from the default it was read from.
     expect(Z1.softEndstop).toEqual({
-      enabled: false,
-      xMin: -206.0,
+      enabled: true,
+      xMin: -207.0,
       yMin: -206.0,
       zMin: -102.0,
       source: expect.stringContaining('#208 B2'),
     });
     expect(Z1.softEndstop.xMin).toBeLessThan(Z1.envelope.x.min);
     expect(Z1.softEndstop.zMin).toBeLessThan(Z1.envelope.z.min);
-    // Sourced data only: it does not move the envelope the simulator refuses at.
+    // Measured data only: it does not move the envelope the simulator refuses at.
     expect(Z1.envelope.x.min).toBe(-200);
   });
 

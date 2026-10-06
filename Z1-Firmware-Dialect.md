@@ -50,8 +50,9 @@ line and `M6` on the next, does nothing. A manual change (`isATC=0`) then runs a
 5. *(only if all axes are homed)* `G53 G0 Z<clearance>`, `G53 G0 X<anchor1+181> Y<anchor1+181>` —
    to the tool-length sensor in the far corner (a Z1/Z1 Pro coordinate). The manual-change
    path calls `fill_cali_scripts(.., clear_z = true)`, so this traverse is at **`clearance_z`**
-   (−1), not `safe_z` (−20); the first version of this list said `safe`, and the emulator's
-   macro copied it until code review #4 read the call site.
+   (**−3.0**, read on the machine — see the note at the end of this section), not `safe_z` (−20);
+   the first version of this list said `safe`, and the emulator's macro copied it until code
+   review #4 read the call site.
 6. `G38.6 Z<toolrack_z> F<fast>`, `G91 G0 Z<retract>`, `G38.6 Z<−1−retract> F<slow>` — probe the
    sensor twice (the second target is relative to the retracted position)
 7. `M493.1` — **save the new tool length offset**
@@ -90,6 +91,24 @@ Four things follow:
   shipped Z1 config) — the "clearance position", with the comment *"G28 means goto clearance
   position on CARVERA"*. With the machine profile the emulator animates both moves and the
   head's position is known afterwards; without it, unknown.
+
+**OBSERVED 2026-10-06 — `G28` run on the machine, machine coordinates, `MPos`:**
+
+```
+[12:50:59] G28
+[12:50:59] ok
+[12:50:59] G28 means goto clearance position on CARVERA
+```
+
+The head stopped at machine **X −11.600, Y −14.600, Z −3.000**. All three are confirmed against the
+controller's own config — `config-get sd coordinate.clearance_x` returns `-11.6` and
+`coordinate.clearance_z` returns `-3.0` (bench item **B6**) — and the quoted comment is confirmed
+*character for character*; the controller prints it unprompted.
+
+**So this bullet is now hardware-confirmed throughout, and `clearance_z` is −3.0** — not the −1.0
+that was read from the shipped config, and not `atc.*` but `coordinate.*`. The giveaway was that
+−1.0 is also B4's post-homing rest Z, which would have left `G28` not moving Z at all, when it
+moved 2 mm. #276, closed.
 
 ## 3. The work coordinate system lives in the machine, not in the file
 

@@ -1,10 +1,15 @@
 # The Z1 network protocol, as the bridge implements it
 
-Status as of 2026-10-05. **Nothing here is verified against the machine.** It is a written
-description of the *interoperability facts* of Makera's controller protocol, produced so the bridge
-can be implemented from this document rather than with the vendor's source open beside it. The
-implementation lives in `casemaker-app/src/platform/desktop/` (protocol) and
-`casemaker-app/src-tauri/src/machine.rs` (transport).
+Status as of 2026-10-06. It is a written description of the *interoperability facts* of Makera's
+controller protocol, produced so the bridge can be implemented from this document rather than with
+the vendor's source open beside it. The implementation lives in
+`casemaker-app/src/platform/desktop/` (protocol) and `casemaker-app/src-tauri/src/machine.rs`
+(transport).
+
+**First contact was made on 2026-10-06** against a real machine (`Makera_Z1_010290`, firmware
+speaking the framed protocol) through `casemaker-app/tools/z1/` — a Node implementation of the same
+transport seam, driving this same `protocol.ts`. Discovery, §4 identify and §6 status are now
+**OBSERVED**; the rest of this document is still unverified, and each section says which it is.
 
 ## Provenance, and the licence constraint
 
@@ -37,8 +42,10 @@ read from a program and never confirmed on hardware; #208/#209's bench work is w
 
 Provenance: `configZ1.default` lines 83–85 (`wifi.tcp_port 2222`, `wifi.udp_send_port 3333`,
 `wifi.udp_recv_port 4444`); `WIFIStream.py` constants `TCP_PORT = 2222`, `UDP_PORT = 3333`.
-`wifi.machine_name CARVERA_AIR_01001` on the same config's line 450 is the template the discovery
-name follows.
+`wifi.machine_name CARVERA_AIR_01001` on the same config's line 450 was taken to be the template
+the discovery name follows. **OBSERVED 2026-10-06: it is not.** The machine broadcasts
+`Makera_Z1_010290`, so the shipped template does not describe the name a Z1 actually announces —
+the real form is `Makera_Z1_<serial>`. Ports 2222/3333 are as documented.
 
 **The web build cannot do this.** No browser opens a raw TCP or UDP socket; the desktop (Tauri)
 build is the only one where this code is reachable at all. The `canDriveMachine` capability in
@@ -56,15 +63,32 @@ listening window resets on each datagram received.
 Each datagram is **UTF-8, comma-separated**, at most 128 bytes:
 
 ```
-<name>,<ip>,<tcp-port>,<busy>
+<name>,<ip>,<tcp-port>,<busy>,<state>
 ```
 
-- field 0 — machine name, e.g. `CARVERA_AIR_01001`. Also the de-duplication key: the first
+- field 0 — machine name, e.g. `Makera_Z1_010290`. Also the de-duplication key: the first
   datagram for a given name wins.
 - field 1 — the machine's IP address (the address to connect to).
 - field 2 — the TCP command port (`2222` in the shipped config).
 - field 3 — `1` means busy, anything else means not busy.
+- field 4 — **a textual state**, present on the real machine and undocumented until first contact.
 - A datagram with **four fields or fewer** is discarded (the client requires `len(fields) > 3`).
+
+**OBSERVED 2026-10-06 — the real datagram has five fields, not four:**
+
+```
+Makera_Z1_010290,192.168.10.43,2222,0,Idle
+```
+
+Field 4 carried `Idle` while the machine sat untouched and `busy` was `0`. The two agree, but field
+4 is a *string* where field 3 is a flag, and no other state value has been seen — so what the
+vocabulary is, and whether the two ever disagree, is open (#275). It is recorded here as observed,
+not explained. Our parser ignores trailing fields rather than rejecting the machine, so it read
+this datagram correctly as shipped; only this description was wrong.
+
+**OBSERVED:** the machine broadcasts continuously at roughly **3 per second**. The listening window
+is therefore bounded by the listener, not by the machine — the published client's 3 s wait was
+never sizing a one-shot announcement, and is ample.
 
 Our parser is deliberately tolerant: it requires a non-empty name and IP, defaults the port to
 2222 when the field is missing or not a number, and treats any value other than `1` as not busy.
@@ -163,6 +187,20 @@ and extracts the first IPv4-shaped token for the IP and the first MAC-shaped tok
 (six colon- or dash-separated hex pairs) for the MAC. A reply in which neither is found is reported
 as *unidentified*, never guessed.
 
+**OBSERVED 2026-10-06 — one text frame per command, `STA param[<n>]:<value>` with a trailing
+newline:**
+
+```
+M482.5  ->  "STA param[5]:192.168.10.43\n"
+M482.4  ->  "STA param[4]:E0-72-A1-CF-6F-EC\n"
+```
+
+Both values matched the host the bridge had connected to (the same MAC `e0:72:a1:cf:6f:ec` as the
+ARP entry), which is the whole point of the exchange. The MAC is **uppercase, dash-separated** on
+the wire; our extractor normalises it to lowercase colon form as documented. The tolerant
+extraction above was kept rather than replaced with an exact parse: it read these replies correctly
+without having been written for them, and a fixed format would only be more brittle.
+
 ## 5. File upload (current firmware)
 
 Filenames are sent with spaces replaced by byte `0x01` and backslashes turned into forward slashes,
@@ -201,11 +239,155 @@ There is no bypass: the type it takes is one the verifier alone produces, and th
 re-checks the report's `ok` flag before opening a socket. This is CNC-2's architecture, and it is
 enforced in `machineBridge.ts`, not merely documented.
 
+### Reading a file back — the console `cat`
+
+Read from the Z1 firmware's own console command table
+(`src/modules/utils/simpleshell/SimpleShell.cpp`), 2026-10-06. **Not yet run on the machine.**
+
+The controller's shell exposes **`cat`**, and its own `help` prints the form: `cat file [limit] [-e]
+[-d 10]` — filename first, then an optional count of lines. It opens the file, streams it to the
+requesting stream in fixed-size chunks, and stops once it has emitted `limit` newlines if a limit was
+given. A missing file prints `File not found: <name>`.
+
+A console line is sent as a **`0xA2`** frame carrying the text — the same envelope §4's `M482.5`
+uses, already observed answered on this machine (B0). So a file is read with one frame and no
+handshake at all.
+
+**Why not the `0xB0` transfer.** Studio sends `download /sd/config.txt` on every connect (bench item
+B5), so a framed download command plainly exists — but it is **not** served by the main board: in the
+firmware read here, `upload` and `download` are commented out of the shell's command table and
+`Player::download_command` has an empty body. The framed download is therefore answered by the ESP32
+link module, **whose firmware Makera does not publish**. Its reply sequence is not documented
+anywhere we can read, and §5 describes only the direction where the *client* is the sender. A
+receiver-side handshake would be invented, not derived. `cat` is the direction we can justify from
+source, and it returns exactly the bytes we want.
+
+**Safety.** A read, and nothing else: no motion, no write, no G-code, and it is the only console
+command the bridge sends other than §4's two identify queries and §6's `?`. The bridge constrains the
+**path** it will send to a plain absolute path (`/`, letters, digits, `.`, `_`, `-`), so a caller
+cannot smuggle a second word or a second command into the line — the shell splits on whitespace, and
+a space is not in that set.
+
+**Observed 2026-10-06 — and `cat` does not work on this machine.** `cat /sd/config.txt` answers
+`File not found: /sd/config.txt`, through the bridge and typed by hand into Studio alike, and the same
+for `/sd/config`, `/sd`, `/sd/gcodes` and `/local/config.txt`. The framing is not at fault: the manual
+attempt in Studio returns the identical message. **The file is not at fault either** — `md5sum
+/sd/config.txt` returned `00ceac76d7a4930bac754795b388f34b` for the same path, and `config-get sd <key>`
+reads values out of it. So `cat` alone fails, on a file two other commands read, and the published
+source (where `cat` and `md5sum` reduce to the same string and the same `fopen`) does not explain it.
+**Left unexplained rather than guessed at** — see §9.
+
+### Reading a configuration key — `config-get`
+
+**Run on the machine, 2026-10-06. This is the configuration channel that works.**
+
+`config-get` takes a key and an optional source. Both call sites are a `0xA2` console frame, one line,
+no handshake, exactly like `cat`.
+
+| Sent | Reply | Meaning |
+| --- | --- | --- |
+| `config-get <key>` | `cached: <key> is set to <value>` | the **effective** value |
+| `config-get <key>` | `cached: <key> is not in config` | not in the merged cache |
+| `config-get <source> <key>` | `<source>: <key> is set to <value>` | that one source's value |
+| `config-get <source> <key>` | `<source>: <key> is not in config` | that source does not carry it |
+| `config-get <source> <key>` | *nothing at all* | **no source by that name** |
+
+Three properties of this command are load-bearing, and each was established by running it rather than
+by reading the firmware:
+
+1. **Silence means "no such source", not "busy".** The firmware's loop over its configuration sources
+   has no `else` branch (`Configurator::config_get_command`), so a name it does not carry produces no
+   output whatsoever — not an error line. Observed identically for `firm` and for a deliberately bogus
+   name. A timeout here is a permanent answer and retrying will not change it. This is the opposite of
+   `config-set`, which *does* print `<source> source does not exist`; the asymmetry is the vendor's.
+2. **Only `sd` answers on this machine.** `firm` behaves exactly like an unknown source, so the
+   compiled-in defaults are not reachable over this channel.
+3. **`sd` is an override file, not the configuration.** `/sd/config.txt` holds the keys the vendor
+   chose to set; a key missing from it is not unset, it is simply not overridden there. Every other
+   value on the machine comes from the firmware's compiled-in defaults, which we cannot read.
+
+**The two forms are not interchangeable, and on this machine only the named source answers.** The
+effective-value form looks like the better default — it needs no knowledge of which file a key lives
+in — but it answered `is not in config` for keys `config-get sd` reads correctly, so the merged cache
+is not populated for the shell on this build. The bridge's reader exposes both; the bench harness
+sends `sd` unless told otherwise.
+
+**Safety.** A read, and nothing else — `config-get` never `config-set`. Nothing in this repo may
+change a value on the machine. As with a read path, the bridge constrains the **key** (and the source)
+to a fixed alphabet rather than escaping it, so a caller cannot smuggle a second word into the line.
+
+### The framed download, as the Studio client does it
+
+Read out of `MakeraStudio.exe` (2026-10-06). Studio is a native Qt/C++ binary, not Electron, so its
+transfer code is legible as strings and log format lines. This is what the **client** does. **None of
+it has been observed on the wire** — the machine's half is still inferred from what the client
+expects — so it is a derived sequence, not a measured one. The bridge implements none of it, and
+should not until the machine's replies have been seen.
+
+- **It is not XMODEM.** Studio's class is named `XMODEM` and it logs `Cancelling XMODEM modem
+  directly`, but there is no SOH/STX, no 128/1024-byte block and no ACK/NAK. `CHECK_FOOTER: invalid
+  frame end, expected 0x55AA, got 0x…` puts the blocks in the same `0x8668`/`0x55AA` envelope as
+  every other frame (§3). "XMODEM" here means stop-and-wait blocks with a per-block retry. Do not
+  reach for an XMODEM library.
+- Framing states: `WAIT_HEADER` → `READ_LENGTH` → `READ_DATA` → `CHECK_FOOTER`.
+- Message types: `FILE_VIEW`, `FILE_DATA`, `FILE_MD5`, `FILE_END`, and a bare `RETRY`.
+- It is started by a console line, **`download <remote path>`** — Studio's own vocabulary matches
+  ours: its download writes `localFileTmp` and then promotes it to `localFile`, and its
+  `upload <path>` is the PC-to-card direction (`upload /sd/firmware.bin`).
+- **The sender sends the view.** `VIEW sent, total packets=`, `DATA received before VIEW,
+  calculating file info and sending VIEW`, `Device re-requested VIEW, resending VIEW data
+  (packetno=`. A view carries the file's shape — packet count and packet size (`Invalid total_packet
+  count`, `packet_size=`) — and goes out when the first data request arrives if it has not already.
+- **The receiver drives.** It asks for a block by sequence number and writes that request to the
+  stream (`recv: stream write failed at seq=`). Sequence numbers are 1-based; a request for `seq <= 0`
+  is refused (`Device requested invalid seq <= 0`).
+- **`RETRY` is the peer's "I did not get that."** `recv: device sent RETRY, resending last request`
+  on the receive side, `Received RETRY, resending last command` on the send side. A duplicate request
+  for the same sequence is answered the same way.
+- **Completion is chatty, and gives up.** After the last packet the sender sends `FILE_END`; if the
+  peer keeps asking, it re-sends up to three times — `sent FILE_END 3 times without device
+  confirmation`, `… after completion, device keeps requesting data` — and then fails. A send that
+  hears nothing for 9 s aborts (`send: no response for 9s, aborting`).
+- **The machine can abort or interrupt mid-transfer**: `recv: transmission canceled by machine`,
+  `recv: alarm info received during transfer`. A cancel is reported, never retried.
+- **MD5 short-circuits the whole transfer.** `The file's MD5 comparison is successful. No need to
+  download the file.` — the client hashes the remote file first, using the same `md5sum` the console
+  answers, and skips a transfer whose result it already has.
+- The receive state machine is `WAIT_FILE_VIEW → READ_FILE_DATA` and `WAIT_MD5 → WAIT_FILE_VIEW`, so
+  one session carries a view, its data, an MD5, and then possibly another file. `Ignoring command <
+  FILE_MD5` while sending, and `Received MD5 echo from device (acknowledgment), ignoring`, say an
+  echoed MD5 is an acknowledgement and not a request.
+- **Payloads can be compressed.** A bundled `QuickLZCLI.exe` and `quicklz_progress_%1.tmp` sit on the
+  transfer path, and `ftype == lz`, `Type_download_lz`, `the machine is decompress the nc file!` and
+  `RemoteDecompressing…` say the machine will take a QuickLZ blob and decompress it. Whether a `.nc`
+  sent by §5's raw upload matches what this machine expects for that file type is **unverified** —
+  see §9.
+
+**Why this still does not unlock a download path.** It answers the question §9 used to leave open,
+but only for the half that was never the obstacle: knowing what the client expects is not the same as
+knowing what the machine emits, and a receiver written against an unobserved sender is exactly the
+invention §9's rule forbids. It would also buy nothing now — the config question it was wanted for was
+answered by `config-get sd <key>`, and `/sd/config.txt` is the file that is *missing* the compiled-in
+defaults, not the file that holds them.
+
 ## 6. Status — `?`
 
 Status is a single `0xA1` frame carrying `0x3F` (`?`). The machine replies with one or more `0x81`
 frames whose text is the controller's status line. The bridge returns that text **verbatim** and
 says so when no reply arrives, rather than inventing a machine state.
+
+**OBSERVED 2026-10-06 — one frame, one line, standard Marlin-style fields:**
+
+```
+<Idle|MPos:-1.0000,-1.0000,-1.0000,0.0000,0.0000|WPos:147.4000,123.8000,57.6325,0.0000,0.0000|F:0.0,2000.0,100.0|S:0.0,10000.0,100.0,0,20.9,22.5,0,0,0,0|T:6,-17.696,-1|L:0, 0, 0, 0.0,100.0|C:3,1,0,1|E:0,0,0,684,7610|OTA:0,0>
+```
+
+Read as observations, not as a specification: the frame arrived as type `0x81`, `MPos` is
+**negative** while idle (consistent with `Z1.envelope`'s −200…0 / −100…0 convention, §B4 of
+`docs/bench/2026-10-bench-day-1.md`), `F` and `S` carry three values each, and `T:6,-17.696,-1`
+appears to carry an active tool number and an offset. **No field of this line is parsed by the
+bridge** — it is surfaced verbatim, and that is exactly why it can be recorded here without a
+parser being invented for it.
 
 ## 7. Transport interface
 
@@ -230,8 +412,12 @@ touching callers.
   identify, upload and status calls each run only when the caller asks for them. There is no
   polling loop and no background connection.
 - **No motion without a file.** Jog, DRO, MDI and the pendant are out of the first pass
-  (`/Fabrication.md` §14.4 R10). This bridge can upload a verified `.nc` and report status; it
-  cannot move an axis on its own.
+  (`/Fabrication.md` §14.4 R10). This bridge can upload a verified `.nc`, report status, read a file
+  off the card and read the machine's own configuration; it cannot move an axis on its own. Each read
+  (§5) is a console command, not an MDI box: the caller passes a **path** or a **key**, the bridge
+  builds the one command itself and refuses anything outside a plain path's or a plain key's alphabet.
+  The distinction matters — a free-text console box would be the MDI the rule forbids, arriving by the
+  side door, whereas a checked parameter cannot become a second command.
 - The single-byte e-stop byte is **not** wired: an e-stop that travels over the same socket the
   bridge is mid-transfer on is worse than useless. The physical stop is the stop.
 - A machine refusal is surfaced as a refusal. The upload result has an explicit *refused* outcome
@@ -241,7 +427,13 @@ touching callers.
 
 | Question | Status | Closes when |
 |---|---|---|
-| `M482.5`/`M482.4` literal reply format | PROVISIONAL | First run against the machine (#209). |
-| Does the Z1 ship current or legacy firmware? | Assumed current | First connect; a legacy reply that does not parse is the signal. |
-| UDP 3333 broadcast reachability on Windows | Unverified | First discovery run from the Windows build. |
+| `M482.5`/`M482.4` literal reply format | **OBSERVED 2026-10-06** — `STA param[<n>]:<value>` (§4) | **closed** |
+| Does the Z1 ship current or legacy firmware? | **OBSERVED 2026-10-06 — current.** The framed protocol of §3/§5 was spoken and answered; a legacy machine would have needed newline-terminated text. | **closed** |
+| UDP 3333 broadcast reachability on Windows | **OBSERVED 2026-10-06 — Windows yes, WSL no.** ~3 datagrams/s arrived in a Windows-side listener; 0 arrived in a WSL listener over 45 s, with `networkingMode=Mirrored` set. The constraint is not NAT, and mirrored networking does not lift it. | **closed** |
+| What field 4 of the discovery datagram means | **OBSERVED once** (`Idle`); vocabulary unknown | More states, or the field disagreeing with `busy`. See #275. |
 | Real packet acceptance / refused-file behaviour | Unverified | First upload of a real verified `.nc`. |
+| Reading a file back with the console `cat` (§5) | **RUN 2026-10-06 — the mechanism works, `cat` does not.** The framing is right: the same command typed into Studio returns the same `File not found`, so the reply was read correctly. `md5sum /sd/config.txt` then returned a hash (`00ceac76d7a4930bac754795b388f34b`) for the identical path, which rules out both "the file is not there" and "the shell cannot open files". **So `cat` alone fails, on a file `md5sum` and `config-get` both read.** In the published source the two commands reduce to the same string and the same `fopen`, so this build's `cat` is not the published `cat`. | Someone reads the running build, or a captured exchange shows what the machine does with the command. **Unresolved on purpose**: the published source cannot explain it, and an explanation invented past the source is worth less than none. Not blocking — nothing in the product needs file *contents* from the console. |
+| `config-get`'s effective-value form (§5) | **RUN 2026-10-06 — the one-argument form answers, but with an empty cache.** Every key tried came back `cached: <key> is not in config`, including keys `config-get sd` reads correctly, so the merged cache is not populated for the shell on this build. | Not blocking: the named-source form is the one the bridge uses. Revisit only if reading a key that exists solely in the firmware's compiled-in defaults becomes necessary — which, per the row below, it may. |
+| Reading the firmware's compiled-in defaults | **BLOCKED 2026-10-06.** The `firm` source is registered unconditionally in `Config.cpp` but is answered with silence on this machine, so the compiled-in defaults are unreachable over `config-get`. Keys absent from `/sd/config.txt` — every `alpha_*`/`beta_*`/`gamma_*` axis key among them — cannot be read at all. | Either the vendor's `/sd/config.txt` is obtained whole (see the `cat` row), or the values are measured at the machine instead of read. |
+| Why Studio's `download /sd/config.txt` works though the main board's `download` is a stub | **HALF-ANSWERED 2026-10-06.** The client side is no longer a mystery: `MakeraStudio.exe` is native Qt/C++, and its transfer code reads as a stop-and-wait block protocol inside the same `0x8668`/`0x55AA` envelope — messages `FILE_VIEW`/`FILE_DATA`/`FILE_MD5`/`FILE_END`/`RETRY`, receiver-driven by sequence number, `FILE_END` retried three times then abandoned, a 9 s send-side abort, and an MD5 pre-check that skips the transfer outright. The whole sequence is in §5. | **The machine's half is still inferred from the client's expectations, never observed**, so a receive path stays unwritten — which is now a choice rather than a gap: the config question this row was opened for was answered by `config-get sd <key>` (§5). Closes if a capture of a real download shows what the machine emits. |
+| Whether §5's raw upload matches what the machine wants for a `.nc` | **UNVERIFIED 2026-10-06.** Studio's transfer path carries QuickLZ (`QuickLZCLI.exe`, `ftype == lz`, `the machine is decompress the nc file!`), so at least one direction moves `.nc` payloads compressed. §5 sends the file raw. | The first real upload of a verified `.nc` — the same event that closes the row above it. If the machine refuses a raw upload, this is why. |

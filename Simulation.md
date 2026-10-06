@@ -784,13 +784,15 @@ about how the part will *look* beyond which colour volume a floor lands in.
    spread is wide, so these are observations, not tight bounds. A refused sweep is still not a
    dead end: the runner's timeline is kept (the session goes **path-only**), so the viewport draws
    the toolpath with no material and `stateAt`/`toolPath` work. On #182, #194.
-7. **Envelope −200 or −206?** The profile says 200 mm of travel. The firmware's own limits
-   are now sourced rather than "noted elsewhere" — `MakeraInc/MakeraZ1Firmware`
-   `src/configZ1.default:429-432` reads `soft_endstop.enable false`, `x_min -206.0`,
-   `y_min -206.0`, `z_min -102.0` — so the controller's limit is 6 mm (2 mm in Z) past the
-   vendor's figure **and is disabled**: nothing in the controller stops a move at either
-   number. Refusing at −200 is therefore the conservative side, and the band in
-   (−206, −200] is unverified without the machine.
+7. **Envelope −200 or −207?** The profile says 200 mm of travel. **Measured on the machine**,
+   not read from the firmware — #208 B2 (2026-10-06) ran `config-get sd` and got
+   `soft_endstop.enable true`, `x_min -207.00`, `y_min -206.0`, `z_min -102.0`. The shipped
+   `src/configZ1.default:429-432` says `false`, `-206.0`, `-206.0`, `-102.0`, so the config
+   has been changed on this machine or has drifted from the default it was read from.
+   **The endstops are ENABLED** — the earlier reading here said they were disabled, and that
+   claim is withdrawn — and X reaches **7 mm** past the vendor's figure, not 6. Refusing at
+   −200 remains the conservative side of a limit the controller really does hold; the band
+   (−207, −200] is reachable by hand but lies outside the declared work area.
 
 ---
 

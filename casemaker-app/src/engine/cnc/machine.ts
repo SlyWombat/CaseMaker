@@ -69,15 +69,19 @@ export interface HolderProfile {
 }
 
 /**
- * The controller's soft endstops (`configZ1.default:429-432`), sourced rather than argued
- * (#192 question 5, measured at the bench by #208 B2). On the shipped Z1 they are DISABLED and
- * the limit sits **6 mm (2 mm in Z) past the vendor's 200/200/100 figure** — so nothing in the
- * controller stops a move at either number, and the band `(−206, −200]` is unverified without
- * the machine.
+ * The controller's soft endstops — **MEASURED on the machine** (#192 question 5, #208 B2,
+ * 2026-10-06).
  *
- * This is RECORDED, not enforced: `insideEnvelope` keeps using `envelope` (the conservative
- * −200/−200/−100), because refusing at a limit the machine does not actually enforce would be
- * inventing a constraint. When B2 runs, only the values change.
+ * The shipped config (`configZ1.default:429-432`) read `false / −206.0 / −206.0 / −102.0`. The
+ * machine disagrees on **two of the four**: `config-get` returned `enable true` and
+ * `x_min −207.00`, with `y_min −206.0` and `z_min −102.0` as documented. So the endstops are
+ * **ENABLED** — the config has been changed on this machine, or drifted from the shipped default
+ * — and nothing may assume the controller will let a move run past them.
+ *
+ * This is RECORDED, not enforced: `insideEnvelope` keeps using `envelope`, the conservative
+ * −200/−200/−100. That is now the cautious side of a limit the machine really does hold, rather
+ * than the only limit there is: the band `(−207, −200]` is reachable by hand but lies outside the
+ * declared work area, so refusing there is a choice rather than an invention.
  */
 export interface SoftEndstop {
   enabled: boolean;
@@ -176,6 +180,10 @@ export interface MillProfile extends MachineIdentity {
     /**
      * Z the head lifts to before moving to the change position, traverses to the sensor at
      * (`fill_cali_scripts(.., clear_z = true)` on the manual-change path), and returns to.
+     *
+     * **Measured**: `coordinate.clearance_z` is `-3.0` on the machine (#208 B6), not the `-1.0`
+     * this profile carried from a reading of the shipped config. The old value was also B4's
+     * homed rest Z, which would have meant `G28` did not move Z at all; it moves 2 mm.
      */
     clearanceZ: Mm;
     /** XY of the "clearance position" `G28` and the completion of a change go to (`clearance_x/y`). */
@@ -229,18 +237,66 @@ export interface PrinterProfile extends MachineIdentity {
   nozzle: number;
 }
 
+/**
+ * The bed's native XY datum, machine coordinates.
+ *
+ * **These are the firmware's SHIPPED DEFAULTS, and this machine is calibrated away from them.**
+ * `configZ1.default:405-406` carries exactly these numbers; `config-get sd coordinate.anchor1_x`
+ * and `.anchor1_y` read **(−190.89, −193.83)** out of the machine's own `/sd/config.txt` (#208 B6,
+ * 2026-10-06) — 1.51 mm and 0.47 mm away (#279).
+ *
+ * An earlier version of this note argued for keeping them on the grounds that `changePosition` lands
+ * on the config's `clearance_x` (−11.6; it computes −11.62) only with these numbers, and that the
+ * machine's anchor moves it to −10.09. **That argument was wrong, and why it was wrong is worth
+ * keeping.** `clearance` and `anchor1` are the two *opposite corners of the work area*, not links in
+ * a derived chain: `ATCHandler::fill_Autoclean_scripts` sweeps X back and forth between `clearance_x`
+ * and `anchor1_x`, and Y between `clearance_y` and `anchor1_y`. Two independent config keys that
+ * happen to sit 0.02 mm apart under the shipped defaults are a coincidence, and a coincidence cannot
+ * confirm a constant.
+ *
+ * What is actually true: `/sd/config.txt` is a *calibration* of the shipped defaults, and it has
+ * moved several keys together — this anchor, `toolrack_offset_y` (179.74 → 181),
+ * `rotation_offset_{x,y}` (12.0/85.5 → −7.5/69.0), `clearance_z` (−1.0 → −3.0) — while
+ * `anchor2_offset` (88.5, 45.0) and `toolrack_offset_x` (48.8) are untouched. So nothing here says
+ * the profile's anchor is *wrong*; what it says is that this profile describes a stock Z1 and this
+ * machine is not one. Whether the profile should carry the machine's read instead of the vendor's
+ * default is **#279's** open question, and it is not a cosmetic one: `sensor` and `changePosition`
+ * derive from this constant, and the emulator drives a predicted tool-length probe to them.
+ */
 const ANCHOR1: Vec2 = [-192.4, -194.3];
 
 /**
  * The Makera Z1.
  *
  * `t_MachineType`: 200 x 200 x 100, 1200 mm/min, 13 000 RPM, isATC = 0, rotary ⌀80 x 150.
- * `configZ1.default` (`coordinate.*`, `atc.*`): anchors, clearance, safe Z, sensor.
- * `ATCHandler.cpp`: the Z1's sensor position is `anchor1 + 181`, and its change position is
- * `anchor1 + toolrack_offset + (132, 0)` — which with the shipped offsets (48.78, 179.74)
- * lands on (-11.62, -14.56), the config's own `clearance_x/y` (-11.6, -14.6) to within the
- * rounding of the config. That agreement is the one internal consistency check available
- * without the machine.
+ *
+ * `coordinate.*`, **read on the machine** (`config-get sd`, 2026-10-06): `clearance_x` = `-11.6`
+ * and `clearance_z` = `-3.0` — both exactly where bench item C1 watched `G28` stop, so the group
+ * name and the values are hardware-confirmed. `atc.*` holds neither (it answers *"not in config"*),
+ * so the earlier note crediting it was wrong. Everything the anchors, safe Z and sensor need is
+ * under `coordinate.*`, and as of 2026-10-06 it has all been read — see the table below.
+ *
+ * `ATCHandler.cpp`: the Z1's sensor position is `anchor1 + 181` on each axis (line 266), and its
+ * change position is `anchor1 + toolrack_offset + (132, 0)` (line 134) — the shipped defaults put
+ * that at (-11.62, -14.56), which is *not* a consistency check on the anchor; see `ANCHOR1`.
+ *
+ * | Key | Shipped default | Read off the machine |
+ * |---|---|---|
+ * | `coordinate.anchor1_x` / `_y` | -192.4 / -194.3 | **-190.89 / -193.83** |
+ * | `coordinate.anchor2_offset_x` / `_y` | 88.5 / 45.0 | 88.5 / 45.0 |
+ * | `coordinate.toolrack_offset_x` / `_y` | 48.78 / 179.74 | **48.8 / 181** |
+ * | `coordinate.toolrack_z` | (not in the default file) | -108 |
+ * | `coordinate.clearance_x` / `_y` / `_z` | -11.6 / -14.6 / -1.0 | -11.6 / -14.6 / **-3.0** |
+ * | `coordinate.rotation_offset_x` / `_y` / `_z` | 12.0 / 85.5 / — | **-7.5 / 69.0 / 17.0** |
+ * | `coordinate.worksize_x` / `_y` | (not in the default file) | 200.0 / 200.0 |
+ *
+ * `toolrack_z` = **-108** is where `sensorZ` below comes from — the constant the profile had
+ * credited to an unread key. `worksize` = 200 x 200 independently restates the vendor's own figure,
+ * and `anchor2_offset` matching to the digit says the anchor *frame* is intact on this machine; only
+ * its origin has been calibrated.
+ *
+ * The bolded values are the calibration. Whether this profile should carry them or the vendor's
+ * defaults is **#279**.
  */
 export const Z1: MillProfile = {
   id: 'Z1',
@@ -251,21 +307,27 @@ export const Z1: MillProfile = {
   maxRpm: 13000,
   hasATC: false,
   toolSlots: 0,
-  // Sourced, DISABLED, and 6 mm (2 mm in Z) past the vendor's own 200/200/100: the shipped
-  // config's limit, not one the controller enforces. `envelope` stays the conservative figure.
+  // MEASURED (#208 B2, 2026-10-06): ENABLED, at −207/−206/−102 — 7/6/2 mm past the vendor's own
+  // 200/200/100, and enforced. `envelope` stays the conservative figure.
   softEndstop: {
-    enabled: false,
-    xMin: -206.0,
+    enabled: true,
+    xMin: -207.0,
     yMin: -206.0,
     zMin: -102.0,
-    source: 'configZ1.default:429-432 (shipped default; the device values are owed by #208 B2)',
+    source: 'config-get sd, read on the machine (#208 B2, 2026-10-06)',
   },
   capabilities: { rotary: true, laser: false, air: true, vacuum: false },
   dialect: { acceptsArcs: true, cannedCycles: false, grblMode: true, axisPrecision: 3, feedPrecision: 2 },
   anchor1: ANCHOR1,
   anchor2: [ANCHOR1[0] + 88.5, ANCHOR1[1] + 45.0],
+  // Every value here now has a read behind it (#208 B6, 2026-10-06). `clearanceXY`/`clearanceZ` come
+  // from `coordinate.clearance_*`; `sensorZ` from `coordinate.toolrack_z` (-108, exact); the four
+  // probe/height numbers from the `atc.*` group, which does exist and does agree — `atc.safe_z_mm`
+  // -20.0, `atc.probe.fast_rate_mm_m` 500, `atc.probe.slow_rate_mm_m` 100 and `atc.probe.retract_mm`
+  // 1, all matching this block digit for digit. `changePosition` and `sensor` are computed from
+  // `ANCHOR1` per the firmware, so they inherit whatever #279 decides.
   toolChange: {
-    clearanceZ: -1.0,
+    clearanceZ: -3.0,
     clearanceXY: [-11.6, -14.6],
     changePosition: [ANCHOR1[0] + 48.78 + 132, ANCHOR1[1] + 179.74],
     safeZ: -20.0,

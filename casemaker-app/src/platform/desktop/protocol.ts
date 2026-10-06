@@ -540,6 +540,239 @@ export async function runUpload(
 }
 
 // ---------------------------------------------------------------------------
+// Reading a file back (§5 — the console `cat`)
+// ---------------------------------------------------------------------------
+
+export type ReadFileOutcome =
+  | { ok: true; text: string; frames: number }
+  | { ok: false; reason: 'bad-path' | 'not-found' | 'timeout' | 'error'; detail: string; text: string };
+
+export interface ReadFileOptions {
+  /** Stop after this many lines — the shell's own second parameter. Omit for the whole file. */
+  limit?: number;
+  /** How long to keep collecting output. A large file needs longer than a one-line reply. */
+  windowMs?: number;
+}
+
+/**
+ * A path the shell can be trusted with. The command line is whitespace-separated and the path is
+ * pasted into it, so a space (or anything that isn't a plain path character) would let a caller turn
+ * one read into a second command. Refused rather than escaped: there is nothing here worth escaping.
+ */
+const READABLE_PATH = /^\/[A-Za-z0-9._/-]*$/;
+
+/**
+ * Read a file off the machine's card with the controller's own console `cat` (Z1-Bridge-Protocol.md
+ * §5). One frame out, text back — no handshake, no packet sequence, and nothing but a read.
+ *
+ * The reply is returned verbatim, including the shell's `File not found:` line when the path is
+ * wrong; that case is also reported as a `not-found` reason so a caller need not match on prose.
+ */
+export async function runReadFile(
+  transport: MachineTransport,
+  conn: number,
+  path: string,
+  opts: ReadFileOptions = {},
+): Promise<ReadFileOutcome> {
+  const windowMs = opts.windowMs ?? 4000;
+  if (!READABLE_PATH.test(path)) {
+    return {
+      ok: false,
+      reason: 'bad-path',
+      detail: `refusing to send ${JSON.stringify(path)}: a readable path is absolute and made of A-Z a-z 0-9 . _ - /`,
+      text: '',
+    };
+  }
+  if (opts.limit !== undefined && (!Number.isInteger(opts.limit) || opts.limit <= 0)) {
+    return { ok: false, reason: 'error', detail: `invalid line limit ${opts.limit}`, text: '' };
+  }
+
+  const command = opts.limit === undefined ? `cat ${path}` : `cat ${path} ${opts.limit}`;
+  const channel = new FrameChannel(transport, conn);
+  await transport.tcpWrite(conn, encodeFrame(PTYPE_CTRL_MULTI, utf8(command)));
+  const frames = await channel.drain(windowMs);
+
+  // Console output arrives as reply frames; anything the machine echoes back at us is not output.
+  const text = frames
+    .filter((f) => f.type >= 0x80)
+    .map((f) => decodeText(f.data))
+    .join('');
+
+  if (/^File not found:/m.test(text)) {
+    return { ok: false, reason: 'not-found', detail: text.trim(), text };
+  }
+  if (text.length === 0) {
+    return {
+      ok: false,
+      reason: 'timeout',
+      detail: `no console output within ${windowMs} ms of sending \`${command}\``,
+      text: '',
+    };
+  }
+  return { ok: true, text, frames: frames.length };
+}
+
+export type Md5SumOutcome =
+  | { ok: true; md5: string; path: string; text: string }
+  | { ok: false; reason: 'bad-path' | 'not-found' | 'timeout' | 'unparsed'; detail: string; text: string };
+
+export interface Md5SumOptions {
+  /** One short line comes back; this is the quiet-window timeout, not a transfer budget. */
+  windowMs?: number;
+}
+
+/**
+ * Ask the controller to hash a file **it** holds (Z1-Bridge-Protocol.md §5).
+ *
+ * This is the read that does not move bytes: the machine computes the digest and returns 32
+ * characters. It is the independent half of an upload check — §5 verifies a `.nc` with the bridge's
+ * own handshake and MD5, and this asks the controller what *it* ended up with, so a fault on our side
+ * of the wire cannot make both agree.
+ *
+ * **A quirk of this firmware, recorded rather than smoothed over:** the reply is the digest and the
+ * filename run together with no separator — observed on the machine 2026-10-06 as
+ * `00ceac76d7a4930bac754795b388f34b/sd/config.txt`. So the digest is taken from the *start of the
+ * line*, not by splitting on whitespace, and the `path` returned is the one the caller asked for
+ * rather than anything re-parsed out of the echo.
+ *
+ * The path is checked against the same alphabet a read uses, for the same reason: this line is built
+ * by concatenation and the shell splits it on whitespace.
+ */
+export async function runMd5Sum(
+  transport: MachineTransport,
+  conn: number,
+  path: string,
+  opts: Md5SumOptions = {},
+): Promise<Md5SumOutcome> {
+  const windowMs = opts.windowMs ?? 2000;
+  if (!READABLE_PATH.test(path)) {
+    return {
+      ok: false,
+      reason: 'bad-path',
+      detail: `refusing to send ${JSON.stringify(path)}: a readable path is absolute and made of A-Z a-z 0-9 . _ - /`,
+      text: '',
+    };
+  }
+
+  const command = `md5sum ${path}`;
+  const channel = new FrameChannel(transport, conn);
+  await transport.tcpWrite(conn, encodeFrame(PTYPE_CTRL_MULTI, utf8(command)));
+  const frames = await channel.drain(windowMs);
+  const text = frames
+    .filter((f) => f.type >= 0x80)
+    .map((f) => decodeText(f.data))
+    .join('');
+
+  // Two spellings, both read off the machine: `cat` says `File not found: <path>` and `md5sum` says
+  // `Error: file not found [<path>]`. Matched case-insensitively and without the wrapper, because the
+  // only thing worth keying on is the phrase, and a third spelling would otherwise read as success.
+  if (/^(?:error: )?file not found/im.test(text)) {
+    return { ok: false, reason: 'not-found', detail: text.trim(), text };
+  }
+  if (text.length === 0) {
+    return { ok: false, reason: 'timeout', detail: `no reply to \`${command}\``, text: '' };
+  }
+  // Anchor to the line start: the digest is followed immediately by the path, so there is no
+  // separator to split on and a bare 32-hex search could match inside the filename.
+  const match = /^([0-9a-f]{32})/m.exec(text);
+  if (match === null) {
+    return { ok: false, reason: 'unparsed', detail: `no digest in the reply: ${text.trim()}`, text };
+  }
+  return { ok: true, md5: match[1] ?? '', path, text };
+}
+
+// ---------------------------------------------------------------------------
+// The machine's own configuration (§5 — `config-get`)
+// ---------------------------------------------------------------------------
+
+export type ReadConfigKeyOutcome =
+  | { ok: true; value: string; text: string }
+  | { ok: false; reason: 'not-in-config' | 'bad-request' | 'timeout'; detail: string; text: string };
+
+export interface ReadConfigKeyOptions {
+  /**
+   * A configuration source to read from, or omitted for the effective value.
+   *
+   * Omitted, the query is `config-get <key>` — one argument — and the firmware answers from its
+   * **merged** cache with a `cached:` prefix. That is the value the machine is actually running, and
+   * it is the right default: it needs no knowledge of which file a key happens to live in.
+   *
+   * Named, the query is `config-get <source> <key>` and the firmware reads that one file. `sd` is
+   * `/sd/config.txt`, which on a Z1 is the vendor's *override* file rather than the whole
+   * configuration — so a key missing from `sd` is not unset, it is simply not overridden there.
+   */
+  source?: string;
+  /** Small: one key is one short line, and §6's status poll answers in about the same time. */
+  windowMs?: number;
+}
+
+/** A configuration source name ("sd", "local") and a key ("coordinate.anchor1_x"). */
+const CONFIG_SOURCE = /^[a-z]+$/;
+const CONFIG_KEY = /^[A-Za-z0-9_.]+$/;
+
+/**
+ * Ask the controller what one of its own configuration keys is set to (Z1-Bridge-Protocol.md §5).
+ *
+ * **This is the only configuration channel this firmware answers.** Read on the machine on
+ * 2026-10-06: `cat /sd/config.txt` reports `File not found` for a path `config-get` reads values out
+ * of, and `config-get-all` — which would dump the whole file — returns nothing when typed at it. So
+ * keys are read one at a time, by name.
+ *
+ * Replies are `<label>: <key> is set to <value>` and `<label>: <key> is not in config`, where the
+ * label is `cached` for an effective-value query and the source's own name otherwise. Both are
+ * returned verbatim so a caller can read what the machine actually said.
+ *
+ * **Silence is not a slow machine.** The firmware's source loop has no `else`, so naming a source
+ * the controller does not carry produces *no output at all* rather than an error — observed on
+ * 2026-10-06 for both `firm` and a deliberately bogus name. A timeout here therefore means the query
+ * was not understood; it does not mean the machine is busy, and retrying it will not help.
+ *
+ * The source and the key are **pattern-checked** rather than escaped, for the same reason a read
+ * path is: this line is assembled by string concatenation and the shell splits it on whitespace, so
+ * anything outside those alphabets could turn one query into two commands.
+ */
+export async function readConfigKey(
+  transport: MachineTransport,
+  conn: number,
+  key: string,
+  opts: ReadConfigKeyOptions = {},
+): Promise<ReadConfigKeyOutcome> {
+  const windowMs = opts.windowMs ?? 2000;
+  const source = opts.source;
+  if (!CONFIG_KEY.test(key) || (source !== undefined && !CONFIG_SOURCE.test(source))) {
+    return {
+      ok: false,
+      reason: 'bad-request',
+      detail: `refusing to send source ${JSON.stringify(source ?? null)} / key ${JSON.stringify(key)}: a source is lowercase letters, a key is A-Z a-z 0-9 . _`,
+      text: '',
+    };
+  }
+
+  const command = source === undefined ? `config-get ${key}` : `config-get ${source} ${key}`;
+  const label = source ?? 'cached';
+  const channel = new FrameChannel(transport, conn);
+  await transport.tcpWrite(conn, encodeFrame(PTYPE_CTRL_MULTI, utf8(command)));
+  const frames = await channel.drain(windowMs);
+  const text = frames
+    .filter((f) => f.type >= 0x80)
+    .map((f) => decodeText(f.data))
+    .join('');
+
+  if (text.length === 0) {
+    return { ok: false, reason: 'timeout', detail: `no reply to \`${command}\``, text: '' };
+  }
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`^${label}: ${escaped} is not in config`, 'm').test(text)) {
+    return { ok: false, reason: 'not-in-config', detail: text.trim(), text };
+  }
+  const match = new RegExp(`^${label}: ${escaped} is set to (.*)$`, 'm').exec(text);
+  if (match === null) {
+    return { ok: false, reason: 'not-in-config', detail: `unrecognised reply: ${text.trim()}`, text };
+  }
+  return { ok: true, value: (match[1] ?? '').trim(), text };
+}
+
+// ---------------------------------------------------------------------------
 // MD5 (§5 — the handshake digest)
 // ---------------------------------------------------------------------------
 

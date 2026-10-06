@@ -17,6 +17,9 @@ import {
   readU32be,
   runDiscovery,
   runIdentify,
+  readConfigKey,
+  runMd5Sum,
+  runReadFile,
   runStatus,
   runUpload,
   u32be,
@@ -32,6 +35,9 @@ import {
   PTYPE_FILE_VIEW,
   type Frame,
   type MachineTransport,
+  type Md5SumOutcome,
+  type ReadConfigKeyOutcome,
+  type ReadFileOutcome,
 } from '@/platform/desktop/protocol';
 
 const EMPTY = new Uint8Array(0);
@@ -322,6 +328,272 @@ describe('#255 protocol — file upload', () => {
     const first = decodeAll(transport.writes)[0];
     // Space becomes 0x01 (a raw space would split the command).
     expect(decodeText(first?.data ?? EMPTY)).toBe(`upload my\u0001badge.nc\n`);
+  });
+});
+
+describe('#255 protocol — reading a file back', () => {
+  /** Narrow a read outcome to its failure branch, so the assertions below can name a reason. */
+  function failed(read: ReadFileOutcome): Extract<ReadFileOutcome, { ok: false }> {
+    if (read.ok) throw new Error(`expected a failure, got ${JSON.stringify(read)}`);
+    return read;
+  }
+
+  it('asks for the file with the console `cat` and returns the text verbatim', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('# config.txt\r\nacceleration 3000\r\n')), EMPTY);
+    const read = await runReadFile(transport, 1, '/sd/config.txt', { windowMs: 10 });
+    expect(read).toEqual({ ok: true, text: '# config.txt\r\nacceleration 3000\r\n', frames: 1 });
+
+    const sent = decodeAll(transport.writes);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.type).toBe(PTYPE_CTRL_MULTI);
+    expect(decodeText(sent[0]?.data ?? EMPTY)).toBe('cat /sd/config.txt');
+  });
+
+  it('passes a line limit as the shell\'s own second word', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('# config.txt\r\n')), EMPTY);
+    await runReadFile(transport, 1, '/sd/config.txt', { limit: 40, windowMs: 10 });
+    const sent = decodeAll(transport.writes);
+    expect(decodeText(sent[0]?.data ?? EMPTY)).toBe('cat /sd/config.txt 40');
+  });
+
+  it('joins a file that arrives as more than one frame, in order', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(0x81, utf8('# config.txt\r\n')),
+      encodeFrame(0x81, utf8('acceleration 3000\r\n')),
+      EMPTY,
+    );
+    const read = await runReadFile(transport, 1, '/sd/config.txt', { windowMs: 10 });
+    expect(read).toEqual({ ok: true, text: '# config.txt\r\nacceleration 3000\r\n', frames: 2 });
+  });
+
+  it('refuses a path that could smuggle a second word or command, and sends nothing', async () => {
+    for (const path of ['/sd/config.txt; rm -rf /sd', '/sd/config.txt 40', 'relative.txt', '/sd/a\nb', '/sd/$HOME']) {
+      const transport = new FakeTransport();
+      const read = failed(await runReadFile(transport, 1, path, { windowMs: 10 }));
+      expect(read.reason, path).toBe('bad-path');
+      // The point of the guard: a refused path never reaches the wire.
+      expect(transport.writes, path).toHaveLength(0);
+    }
+  });
+
+  it('reports the shell\'s own message as not-found rather than as content', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('File not found: /sd/nope.txt\r\n')), EMPTY);
+    const read = failed(await runReadFile(transport, 1, '/sd/nope.txt', { windowMs: 10 }));
+    expect(read.reason).toBe('not-found');
+    expect(read.text).toContain('File not found: /sd/nope.txt');
+  });
+
+  it('reports an empty window as a timeout, not as an empty file', async () => {
+    const transport = new FakeTransport();
+    const read = failed(await runReadFile(transport, 1, '/sd/config.txt', { windowMs: 10 }));
+    expect(read.reason).toBe('timeout');
+  });
+
+  it('ignores the machine\'s own echo of what we sent', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x02, utf8('cat /sd/config.txt')), EMPTY);
+    const read = failed(await runReadFile(transport, 1, '/sd/config.txt', { windowMs: 10 }));
+    expect(read.reason).toBe('timeout');
+  });
+});
+
+describe('#255 protocol — hashing a file the machine holds', () => {
+  /** Narrow an outcome to its failure branch, so the assertions below can name a reason. */
+  function failed(sum: Md5SumOutcome): Extract<Md5SumOutcome, { ok: false }> {
+    if (sum.ok) throw new Error(`expected a failure, got ${JSON.stringify(sum)}`);
+    return sum;
+  }
+
+  it('sends one `md5sum` line and reads the digest the machine reports', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(0x81, utf8('00ceac76d7a4930bac754795b388f34b/sd/config.txt\r\n')),
+      EMPTY,
+    );
+    const sum = await runMd5Sum(transport, 1, '/sd/config.txt', { windowMs: 10 });
+    expect(sum.ok).toBe(true);
+    if (!sum.ok) return;
+    expect(sum.md5).toBe('00ceac76d7a4930bac754795b388f34b');
+    expect(sum.path).toBe('/sd/config.txt');
+
+    const sent = decodeAll(transport.writes);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.type).toBe(PTYPE_CTRL_MULTI);
+    expect(decodeText(sent[0]?.data ?? EMPTY)).toBe('md5sum /sd/config.txt');
+  });
+
+  it('takes the digest from the line start, not from a 32-hex run inside the filename', async () => {
+    // The firmware runs the digest and the path together with no separator. A filename that is
+    // itself 32 hex characters must not be mistaken for the digest.
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(0x81, utf8('00ceac76d7a4930bac754795b388f34b/sd/deadbeefdeadbeefdeadbeefdeadbeef.nc\r\n')),
+      EMPTY,
+    );
+    const sum = await runMd5Sum(transport, 1, '/sd/deadbeefdeadbeefdeadbeefdeadbeef.nc', { windowMs: 10 });
+    expect(sum.ok).toBe(true);
+    if (!sum.ok) return;
+    expect(sum.md5).toBe('00ceac76d7a4930bac754795b388f34b');
+  });
+
+  it('joins a digest split across frames', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(0x81, utf8('00ceac76d7a4930ba')),
+      encodeFrame(0x81, utf8('c754795b388f34b/sd/config.txt\r\n')),
+      EMPTY,
+    );
+    const sum = await runMd5Sum(transport, 1, '/sd/config.txt', { windowMs: 10 });
+    expect(sum.ok).toBe(true);
+    if (!sum.ok) return;
+    expect(sum.md5).toBe('00ceac76d7a4930bac754795b388f34b');
+  });
+
+  it('refuses a path that could smuggle a second word or command, and sends nothing', async () => {
+    for (const path of ['/sd/a; rm -rf /sd', '/sd/a b', 'relative.txt', '/sd/a\nb', '/sd/$HOME']) {
+      const transport = new FakeTransport();
+      const sum = failed(await runMd5Sum(transport, 1, path, { windowMs: 10 }));
+      expect(sum.reason, path).toBe('bad-path');
+      // The point of the guard: a refused path never reaches the wire.
+      expect(transport.writes, path).toHaveLength(0);
+    }
+  });
+
+  it('reports the shell\'s own message as not-found rather than as a digest', async () => {
+    // Verbatim from the machine, 2026-10-06 — `md5sum` spells this differently from `cat`, which
+    // says `File not found: /sd/nope.txt`. Both must land on not-found.
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('Error: file not found [/sd/nope.txt]\r\n')), EMPTY);
+    const sum = failed(await runMd5Sum(transport, 1, '/sd/nope.txt', { windowMs: 10 }));
+    expect(sum.reason).toBe('not-found');
+    expect(sum.text).toContain('file not found');
+  });
+
+  it('reads `cat`\'s spelling of the same failure identically', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('File not found: /sd/nope.txt\r\n')), EMPTY);
+    const sum = failed(await runMd5Sum(transport, 1, '/sd/nope.txt', { windowMs: 10 }));
+    expect(sum.reason).toBe('not-found');
+  });
+
+  it('reports a reply with no digest as unparsed, not as a digest of nothing', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('error:Unsupported command - md5sum\r\n')), EMPTY);
+    const sum = failed(await runMd5Sum(transport, 1, '/sd/config.txt', { windowMs: 10 }));
+    expect(sum.reason).toBe('unparsed');
+  });
+
+  it('reports an empty window as a timeout', async () => {
+    const transport = new FakeTransport();
+    const sum = failed(await runMd5Sum(transport, 1, '/sd/config.txt', { windowMs: 10 }));
+    expect(sum.reason).toBe('timeout');
+  });
+});
+
+describe('#255 protocol — reading one configuration key', () => {
+  /** Narrow an outcome to its failure branch, so the assertions below can name a reason. */
+  function failed(read: ReadConfigKeyOutcome): Extract<ReadConfigKeyOutcome, { ok: false }> {
+    if (read.ok) throw new Error(`expected a failure, got ${JSON.stringify(read)}`);
+    return read;
+  }
+
+  it('asks for the effective value with a one-argument `config-get` and reads it back', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('cached: coordinate.anchor1_x is set to -190.89\n')), EMPTY);
+    const read = await readConfigKey(transport, 1, 'coordinate.anchor1_x', { windowMs: 10 });
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.value).toBe('-190.89');
+
+    const sent = decodeAll(transport.writes);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.type).toBe(PTYPE_CTRL_MULTI);
+    expect(decodeText(sent[0]?.data ?? EMPTY)).toBe('config-get coordinate.anchor1_x');
+  });
+
+  it('reads one named source when asked to, and expects that source\'s own prefix', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('sd: soft_endstop.enable is set to true\n')), EMPTY);
+    const read = await readConfigKey(transport, 1, 'soft_endstop.enable', { source: 'sd', windowMs: 10 });
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.value).toBe('true');
+    const sent = decodeAll(transport.writes);
+    expect(decodeText(sent[0]?.data ?? EMPTY)).toBe('config-get sd soft_endstop.enable');
+  });
+
+  it('does not accept a cached answer as a named source\'s answer, nor the reverse', async () => {
+    // The label is part of the reply's meaning: `cached` is the merged value, `sd` is the file's.
+    // A reply carrying the wrong label must not be read as an answer to the question that was asked.
+    const a = new FakeTransport();
+    a.queueRead(encodeFrame(0x81, utf8('cached: soft_endstop.enable is set to true\n')), EMPTY);
+    expect(failed(await readConfigKey(a, 1, 'soft_endstop.enable', { source: 'sd', windowMs: 10 })).reason).toBe(
+      'not-in-config',
+    );
+
+    const b = new FakeTransport();
+    b.queueRead(encodeFrame(0x81, utf8('sd: soft_endstop.enable is set to true\n')), EMPTY);
+    expect(failed(await readConfigKey(b, 1, 'soft_endstop.enable', { windowMs: 10 })).reason).toBe('not-in-config');
+  });
+
+  it('reports a key the machine does not carry as not-in-config, not as a value', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('cached: coordinate.anchor2_x is not in config\n')), EMPTY);
+    const read = failed(await readConfigKey(transport, 1, 'coordinate.anchor2_x', { windowMs: 10 }));
+    expect(read.reason).toBe('not-in-config');
+    expect(read.detail).toContain('is not in config');
+  });
+
+  it('keeps a value whole when it contains spaces, and joins frames that split it', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(0x81, utf8('cached: coordinate.')),
+      encodeFrame(0x81, utf8('anchor1_x is set to 112.500 250.000\n')),
+      EMPTY,
+    );
+    const read = await readConfigKey(transport, 1, 'coordinate.anchor1_x', { windowMs: 10 });
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.value).toBe('112.500 250.000');
+  });
+
+  it('refuses a source or key that could smuggle a second word or command, and sends nothing', async () => {
+    const bad: Array<{ key: string; source?: string }> = [
+      { key: 'coordinate.anchor1_x soft_endstop.enable' },
+      { key: 'coordinate.anchor1_x;rm -rf /sd' },
+      { key: 'coordinate.anchor1_x\nconfig-set sd x 1' },
+      { key: 'coordinate/anchor1_x' },
+      { key: 'coordinate.anchor1_x', source: 'sd; rm -rf /sd' },
+      { key: 'coordinate.anchor1_x', source: 'sd extra' },
+      { key: 'coordinate.anchor1_x', source: 'SD' },
+      { key: 'coordinate.anchor1_x', source: '' },
+    ];
+    for (const { key, source } of bad) {
+      const transport = new FakeTransport();
+      const read = failed(await readConfigKey(transport, 1, key, { source, windowMs: 10 }));
+      expect(read.reason, `${source ?? '-'} ${key}`).toBe('bad-request');
+      // The point of the guard: a refused query never reaches the wire.
+      expect(transport.writes, `${source ?? '-'} ${key}`).toHaveLength(0);
+    }
+  });
+
+  it('reports an empty window as a timeout, not as a value', async () => {
+    const transport = new FakeTransport();
+    const read = failed(await readConfigKey(transport, 1, 'coordinate.anchor1_x', { windowMs: 10 }));
+    expect(read.reason).toBe('timeout');
+  });
+
+  it('does not accept another key\'s answer for the key that was asked for', async () => {
+    const transport = new FakeTransport();
+    // Reading `anchor2_x` must not be answered by a line about `anchor1_x`; both regexes are anchored.
+    transport.queueRead(encodeFrame(0x81, utf8('cached: coordinate.anchor1_x is set to -190.89\n')), EMPTY);
+    const read = failed(await readConfigKey(transport, 1, 'coordinate.anchor2_x', { windowMs: 10 }));
+    expect(read.reason).toBe('not-in-config');
+    expect(read.detail).toContain('unrecognised reply');
   });
 });
 
