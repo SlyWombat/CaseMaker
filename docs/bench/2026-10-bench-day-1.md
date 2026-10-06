@@ -698,28 +698,49 @@ the clearance corner: from B4's (−1.000, −1.000, −1.000) the move is 10.6 
 X, Y and Z. `G28` is a short trip to a known-safe spot, not a return to the far corner — which is
 exactly why it is safe to use as a first motion test.
 
-**Goes to:** `Z1.toolChange.clearanceXY` / `clearanceZ`. XY **confirmed**; Z open, #276.
+**Goes to:** `Z1.toolChange.clearanceXY` / `clearanceZ` — **both confirmed**, `machine.ts` now carries
+−3.0 as measured. **#276 closed.** (This line read "Z open, #276" until B6 settled it the same
+session.)
 
-### C2 — The real travel limits (−200 or −206?)
+### C2 — The real travel limits (does the soft limit hold?)
 
-**Do.** `G53 G0 X-200 Y-200` then `G53 G0 Z-100`, slowly, hand on the stop. Did it get there?
-Then jog each axis 0.5 mm at a time past it, toward −206 / −206 / −102, and note where it stalls
-or stops.
+*Rewritten 2026-10-06 after B6. The question changed: B6 read the soft endstops off the machine, so
+this is no longer "what is the limit" — it is "can the limit be trusted."*
 
-**Expected.** The profile's envelope stops at −200 / −200 / −100 (`machine.ts:148`); the firmware
-config's soft limits are −206 / −206 / −102 and **disabled**, so the band (−206, −200] is
-unverified without the machine (`/Simulation.md` §9 item 7).
+**Do.** `G53 G0 X-200 Y-200` then `G53 G0 Z-100`, slowly, hand on the stop. Did it get there? Then
+jog each axis 0.5 mm at a time past it, toward the soft limit, and note what the controller does.
+
+**Expected — measured, not read (B6, 2026-10-06).** `config-get sd` returned
+`soft_endstop.enable true`, `x_min -207.00`, `y_min -206.0`, `z_min -102.0`. So the controller holds
+a limit 7 mm (X), 6 mm (Y) and 2 mm (Z) past the vendor's declared work area of 200 / 200 / 100 —
+**and it is ENABLED.** The earlier note here said "disabled"; that came from the *shipped*
+`configZ1.default`, which reads `false` / `-206.0`, and it is withdrawn. This machine's config has
+been changed or has drifted from the default it was read from.
+
+Two questions, and the second is the one worth the trip:
+
+1. Does the axis physically reach the soft limit, or bind short of it?
+2. **Does the controller refuse cleanly at the limit** — a message and no motion — or does it
+   grind, stall, or accept the move and lose steps?
+
+**Why it matters.** `/Simulation.md` §9 item 7 refuses at −200. That refusal is the conservative side
+of a real limit only if the declared 200 mm is *inside* what the machine will actually do, which B6
+now says it is. But if the axis binds before −207, the usable travel is **less** than the machine
+declares and the envelope should shrink rather than stay. Reading the config cannot tell the
+difference; only a move can.
 
 **Recorded:** _not yet run — the real limits._
 
 | Field | X | Y | Z |
 |---|---|---|---|
 | Reached −200 / −200 / −100? (yes/no) | | | |
-| Hard stop / stall position (machine coords) | | | |
+| Where the controller actually stopped (machine coords) | | | |
+| What it did at the limit — message / clean refusal / stall / nothing | | | |
 
 Notes:
 
-**Goes to:** `/Simulation.md` §9 item 7 — closes the −200 vs −206 question.
+**Goes to:** `/Simulation.md` §9 item 7 — closes the −200 vs −207 question, and answers whether the
+refusal at −200 is conservative or merely round.
 
 ### C3 — Does the camera image follow the move?
 
