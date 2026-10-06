@@ -369,6 +369,8 @@ export interface EngraveJobState {
   addKeepOut: (kind: EngraveKeepOut['kind']) => string;
   /** Merge a hand edit into one void (#271). A partial `position` is merged, not replaced. */
   updateKeepOut: (id: string, patch: KeepOutPatch) => void;
+  /** Declare `keepOut` outright, replacing any void already declared under its id (#271). */
+  upsertKeepOut: (keepOut: EngraveKeepOut) => void;
   removeKeepOut: (id: string) => void;
   /**
    * Add an imported vector outline (#217) and return its id. The shape is built by the panel
@@ -560,6 +562,18 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             : ko,
         ),
       })),
+
+    // A whole void, not a patch: the badge derivation (#271) builds one and must land on the SAME
+    // void every time it is applied, so an existing one under that id is replaced rather than
+    // duplicated. The position is a whole object here, so there is nothing to merge.
+    upsertKeepOut: (keepOut) =>
+      apply((job) => {
+        const existing = job.keepOuts ?? [];
+        const next = existing.some((k) => k.id === keepOut.id)
+          ? existing.map((k) => (k.id === keepOut.id ? keepOut : k))
+          : [...existing, keepOut];
+        return { ...job, keepOuts: next };
+      }),
 
     removeKeepOut: (id) =>
       apply((job) => ({ ...job, keepOuts: (job.keepOuts ?? []).filter((k) => k.id !== id) })),

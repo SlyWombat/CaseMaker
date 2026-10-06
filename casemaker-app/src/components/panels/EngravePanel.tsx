@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties, type JSX } from 'react';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveRunStore, requiredAckCodes, runErrorCodes, saveBlocker } from '@/store/engraveRunStore';
 import { saveText } from '@/engine/exportTrigger';
@@ -23,6 +24,7 @@ import {
   type TraceOptions,
 } from '@/engine/import/outlineImport';
 import { newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
+import { BADGE_POCKET_KEEP_OUT_ID, badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import {
   defaultSacrificialSide,
   defaultSacrificialUnder,
@@ -270,6 +272,7 @@ export function EngravePanel(): JSX.Element {
   const removeDrill = useEngraveJobStore((s) => s.removeDrill);
   const addKeepOut = useEngraveJobStore((s) => s.addKeepOut);
   const updateKeepOut = useEngraveJobStore((s) => s.updateKeepOut);
+  const upsertKeepOut = useEngraveJobStore((s) => s.upsertKeepOut);
   const removeKeepOut = useEngraveJobStore((s) => s.removeKeepOut);
   const addVector = useEngraveJobStore((s) => s.addVector);
   const updateVector = useEngraveJobStore((s) => s.updateVector);
@@ -306,6 +309,25 @@ export function EngravePanel(): JSX.Element {
   const maxDepth = job.stock.thickness - job.minFloor;
   // The declared under-surface voids (#271). One row each, under the stock they are a fact about.
   const keepOuts = job.keepOuts ?? [];
+
+  // #271 route 1 — the blank this job is for is usually already in the project as `case.badge`,
+  // and the one void V1 needs (the magnet pocket) is the badge's own. Reading it here cannot get
+  // it wrong; retyping 45 × 13 × 2.3 into a keep-out row can. `badgeBlankFor` is pure and only
+  // describes what the badge IS — the writes below are the store's.
+  const badge = useProjectStore((s) => s.project.case.badge);
+  const badgeUsable = badge !== undefined && badge.enabled;
+  const [blankNotes, setBlankNotes] = useState<string[] | null>(null);
+
+  function useBadgeBlank(): void {
+    if (!badge) return;
+    const blank = badgeBlankFor(badge);
+    setStock(blank.stock, 'computed');
+    // A badge with no pocket must also CLEAR a pocket stamped by a previous press — but only the
+    // one the badge owns. A void the user typed has a `ko-…` id and is never touched.
+    if (blank.pocket) upsertKeepOut(blank.pocket);
+    else if (keepOuts.some((k) => k.id === BADGE_POCKET_KEEP_OUT_ID)) removeKeepOut(BADGE_POCKET_KEEP_OUT_ID);
+    setBlankNotes(blank.notes);
+  }
   const errors = findings.filter((f) => f.severity === 'error');
   const blockedByFeeds = feeds !== null && !feeds.ok;
   const blocked = errors.length > 0 || blockedByFeeds;
@@ -728,6 +750,32 @@ export function EngravePanel(): JSX.Element {
 
       {/* 1 — stock */}
       <h3 style={SUBHEAD}>Stock</h3>
+      {/* #271 route 1 — take the blank from the project's badge rather than typing it. Sets the
+          stock and declares the magnet pocket in one press; every other field is left alone, so a
+          label that no longer fits the smaller blank is reported (not silently moved). */}
+      <button
+        type="button"
+        data-testid="engrave-stock-from-badge"
+        disabled={!badgeUsable}
+        title={
+          badgeUsable
+            ? 'Set the stock to the badge’s blank and declare its magnet pocket. Nothing else in the job changes.'
+            : 'This project has no enabled badge, so there is no blank to take.'
+        }
+        style={{ width: '100%', padding: 4 }}
+        onClick={useBadgeBlank}
+      >
+        Use the badge blank
+      </button>
+      {blankNotes && (
+        <div data-testid="engrave-badge-notes">
+          {blankNotes.map((note, i) => (
+            <p key={i} style={MUTED} data-testid={`engrave-badge-note-${i}`}>
+              {note}
+            </p>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
         {stockNum('length', 'length X', 'Stock X — it runs between the vise jaws.')}
         {stockNum('width', 'width Y', 'Stock Y — away from the operator.')}

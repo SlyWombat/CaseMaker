@@ -17,6 +17,9 @@ import {
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
+import { BADGE_POCKET_KEEP_OUT_ID } from '@/engine/cnc/engrave/fromBadge';
+import { defaultBadgeParams, type BadgeParams } from '@/types/badge';
+import { useProjectStore } from '@/store/projectStore';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
 import { runSheetFileName } from '@/engine/cnc/engrave/runSheet';
@@ -682,5 +685,87 @@ describe('EngravePanel — under-surface voids (#271)', () => {
       job.stock.thickness - job.minFloor,
       6,
     );
+  });
+});
+
+// #271 route 1 — the blank is already in the project, so the panel must not ask for it again.
+// These tests set `case.badge` on the project, press the button, and read back BOTH the job the
+// store now holds and the limit `jobDepthLimit` derives from it: a button that changed the stock
+// but not the limit (or the reverse) would pass an assertion on either one alone.
+describe('EngravePanel — the badge blank (#271 route 1)', () => {
+  /** Put a badge on the project (or take it off, with `undefined`). */
+  function setBadge(badge: BadgeParams | undefined): void {
+    act(() => {
+      const store = useProjectStore.getState();
+      if (badge) store.patchCase({ badge });
+      else {
+        const nextCase = { ...store.project.case };
+        delete nextCase.badge;
+        useProjectStore.setState({ project: { ...store.project, case: nextCase } });
+      }
+    });
+  }
+
+  afterEach(() => setBadge(undefined));
+
+  it('offers the button only when the project has an enabled badge', () => {
+    render(<EngravePanel />);
+    const button = (): HTMLButtonElement => screen.getByTestId('engrave-stock-from-badge') as HTMLButtonElement;
+    expect(button().disabled).toBe(true);
+
+    // A badge that exists but is switched off is not a badge project.
+    setBadge(defaultBadgeParams({ enabled: false }));
+    expect(button().disabled).toBe(true);
+
+    setBadge(defaultBadgeParams());
+    expect(button().disabled).toBe(false);
+  });
+
+  it('takes the stock and the magnet pocket from the badge in one press', () => {
+    setBadge(defaultBadgeParams());
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-stock-from-badge'));
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.stock).toEqual({ length: 76.2, width: 38.1, thickness: 3.81, material: 'pla' });
+    expect((screen.getByTestId('engrave-stock-length') as HTMLInputElement).value).toBe('76.2');
+    // The numbers are the model's, not something someone typed here (decision 28's question).
+    expect(screen.getByTestId('engrave-stock-length-source').dataset.source).toBe('computed');
+
+    // The void is declared, drawn as a row, and stated as a consequence.
+    expect(job.keepOuts!.map((k) => k.id)).toEqual([BADGE_POCKET_KEEP_OUT_ID]);
+    expect(screen.getByTestId('engrave-keepout-count').textContent?.trim()).toBe('1');
+    expect(screen.getByTestId('engrave-keepout-membrane-0').textContent).toContain('1.51');
+
+    // 1.51 mm of membrane over the pocket, less the 1 mm minimum floor.
+    const limit = jobDepthLimit(job);
+    expect(limit(38.1, 19.05)).toBeCloseTo(0.51, 6);
+    expect(limit(5, 5)).toBeCloseTo(2.81, 6);
+    expect(screen.getByTestId('engrave-badge-notes')).toBeTruthy();
+  });
+
+  it('lands on the same void when it is pressed twice', () => {
+    setBadge(defaultBadgeParams());
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-stock-from-badge'));
+    fireEvent.click(screen.getByTestId('engrave-stock-from-badge'));
+    expect(useEngraveJobStore.getState().job.keepOuts).toHaveLength(1);
+  });
+
+  it('removes the void IT stamped when the badge has no pocket — and never one the user typed', () => {
+    setBadge(defaultBadgeParams());
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-stock-from-badge'));
+    // A void of the user's own, beside the stamped one.
+    fireEvent.click(screen.getByTestId('engrave-add-keepout-circle'));
+    expect(useEngraveJobStore.getState().job.keepOuts).toHaveLength(2);
+
+    setBadge(defaultBadgeParams({ magnetPocket: null }));
+    fireEvent.click(screen.getByTestId('engrave-stock-from-badge'));
+
+    const ids = useEngraveJobStore.getState().job.keepOuts!.map((k) => k.id);
+    expect(ids).toHaveLength(1);
+    expect(ids[0]).not.toBe(BADGE_POCKET_KEEP_OUT_ID);
+    expect(ids[0]!.startsWith('ko-')).toBe(true);
   });
 });
