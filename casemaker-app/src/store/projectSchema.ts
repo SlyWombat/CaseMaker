@@ -5,6 +5,15 @@ import { displayProfileSchema } from '@/library/displaySchema';
 
 const xyzSchema = z.object({ x: z.number(), y: z.number(), z: z.number() });
 
+/** Issue #148 — the bed, shared by `Project.printer` (the new home) and the
+ *  deprecated `case.rack.printer` (the old one). Both must parse. */
+const printerVolumeSchema = z.object({
+  preset: z.string().optional(),
+  x: z.number().positive(),
+  y: z.number().positive(),
+  z: z.number().positive(),
+});
+
 /** Issue #153 — print-fit variant (see `types/snap.ts`). Shared by the
  *  case-level default, the per-catch override, and the rack. */
 const fitVariantSchema = z.enum(['tight', 'standard', 'loose']);
@@ -76,14 +85,9 @@ export const caseParamsSchema = z.object({
       width: z.number().positive(),
       depth: z.number().positive(),
       slots: z.number().int().min(2).max(40),
-      printer: z
-        .object({
-          preset: z.string().optional(),
-          x: z.number().positive(),
-          y: z.number().positive(),
-          z: z.number().positive(),
-        })
-        .optional(),
+      // Deprecated home (#148) — the bed now lives on the project; still parsed
+      // so pre-#148 files load, and `resolvePrinter` reads it as a fallback.
+      printer: printerVolumeSchema.optional(),
       wallMount: z.enum(['none', 'ears', 'cleat', 'keyhole']).optional(),
       assembledExport: z.boolean().optional(),
       floorRibs: z.boolean().optional(),
@@ -250,6 +254,10 @@ export const caseParamsSchema = z.object({
       }),
     )
     .optional(),
+  // Issue #148 — offer a bolted split of the shell when it is over the bed.
+  // Optional (v14 stamps it absent), so legacy projects load unchanged and a
+  // project that never asks for the split builds none of its geometry.
+  splitForPrint: z.boolean().optional(),
   // Issue #152 — magnet pockets cut into a face for magnetic retention.
   // Optional so legacy projects load with no migration (v7 hinge precedent);
   // a missing field is treated as an empty list. Geometry lives in
@@ -611,6 +619,16 @@ const projectV13Schema = projectV12Schema.extend({
   schemaVersion: z.literal(13),
 });
 
+// Issue #148 — v14 moves the printer build volume from the rack archetype up to
+// the project, so the shell (and anything else that has to fit a bed) can
+// fit-check without a rack. Purely additive: `printer` is optional and the old
+// `case.rack.printer` still parses, so the transform is a version bump — see
+// `resolvePrinter` for the read-through that makes both homes work.
+const projectV14Schema = projectV13Schema.extend({
+  schemaVersion: z.literal(14),
+  printer: printerVolumeSchema.optional(),
+});
+
 export const projectSchema = z
   .union([
     projectV1Schema,
@@ -626,12 +644,13 @@ export const projectSchema = z
     projectV11Schema,
     projectV12Schema,
     projectV13Schema,
+    projectV14Schema,
   ])
   .transform((p) => {
     if (p.schemaVersion === 1) {
       return {
         ...p,
-        schemaVersion: 13 as const,
+        schemaVersion: 14 as const,
         customFonts: [],
         hats: [],
         customHats: [],
@@ -646,7 +665,7 @@ export const projectSchema = z
     if (p.schemaVersion === 2) {
       return {
         ...p,
-        schemaVersion: 13 as const,
+        schemaVersion: 14 as const,
         customFonts: [],
         mountingFeatures: [],
         display: null,
@@ -659,7 +678,7 @@ export const projectSchema = z
     if (p.schemaVersion === 3) {
       return {
         ...p,
-        schemaVersion: 13 as const,
+        schemaVersion: 14 as const,
         customFonts: [],
         fanMounts: [],
         textLabels: [],
@@ -669,7 +688,7 @@ export const projectSchema = z
     if (p.schemaVersion === 4) {
       return {
         ...p,
-        schemaVersion: 13 as const,
+        schemaVersion: 14 as const,
         customFonts: [],
         antennas: [],
       };
@@ -677,40 +696,47 @@ export const projectSchema = z
     if (p.schemaVersion === 5) {
       // mountingFeatures items already have mountClass filled by the
       // mountingFeatureSchema default at parse time; just stamp the version.
-      return { ...p, schemaVersion: 13 as const, customFonts: [] };
+      return { ...p, schemaVersion: 14 as const, customFonts: [] };
     }
     if (p.schemaVersion === 6) {
       // v6 → v7 is a pure version bump — `hinge` is optional and absent on
       // legacy projects, so the parsed object already has the right shape.
-      return { ...p, schemaVersion: 13 as const, customFonts: [] };
+      return { ...p, schemaVersion: 14 as const, customFonts: [] };
     }
     if (p.schemaVersion === 7) {
-      return { ...p, schemaVersion: 13 as const, customFonts: [] };
+      return { ...p, schemaVersion: 14 as const, customFonts: [] };
     }
     if (p.schemaVersion === 8) {
       // v8 → v9 is a pure version bump — `magnetPockets` is optional and
       // absent on legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 13 as const };
+      return { ...p, schemaVersion: 14 as const };
     }
     if (p.schemaVersion === 9) {
       // v9 → v10 is a pure version bump — the `fit` fields are optional and
       // absent on legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 13 as const };
+      return { ...p, schemaVersion: 14 as const };
     }
     if (p.schemaVersion === 10) {
       // v10 → v11 is a pure version bump — `badge` is optional and absent on
       // legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 13 as const };
+      return { ...p, schemaVersion: 14 as const };
     }
     if (p.schemaVersion === 11) {
       // v11 → v12 is a pure version bump — `insert` is optional and absent on
       // legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 13 as const };
+      return { ...p, schemaVersion: 14 as const };
     }
     if (p.schemaVersion === 12) {
-      // v12 → v13 is a pure version bump — `seal.mode` is optional and absent
-      // on legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 13 as const };
+      // v12 → v13 → v14 are pure version bumps — `seal.mode` and the hoisted
+      // `printer` are both optional and absent on legacy projects, so the
+      // parsed object already has the shape.
+      return { ...p, schemaVersion: 14 as const };
+    }
+    if (p.schemaVersion === 13) {
+      // v13 → v14 is a pure version bump: `printer` is optional. A project
+      // written before the move still carries its bed on `case.rack.printer`,
+      // and `resolvePrinter` reads both, so no field is rewritten here.
+      return { ...p, schemaVersion: 14 as const };
     }
     return p;
   });

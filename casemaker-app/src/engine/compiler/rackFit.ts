@@ -1,4 +1,5 @@
-import type { RackParams } from '@/types';
+import type { Project, RackParams } from '@/types';
+import type { PrinterVolume } from '@/types/printer';
 import { PRINTER_PROFILES } from '@/engine/cnc/machine';
 import type { PlacementIssue } from './placementValidator';
 import {
@@ -48,6 +49,33 @@ export const PRINTER_PRESETS: PrinterPreset[] = PRINTER_PROFILES.map((p) => ({
   y: p.buildVolume.y,
   z: p.buildVolume.z,
 }));
+
+/**
+ * The bed a project starts on when the user enables the rack archetype and has
+ * not chosen one (issue #148).
+ *
+ * Read off the preset table rather than hard-coded, so the sample rack's
+ * 252 × 250 × 275 mm envelope (which needs the XL) and the numbers it is
+ * checked against can never drift apart. It lives here, next to the table,
+ * rather than in the picker component — a module that exports a component may
+ * not also export a value without breaking fast refresh.
+ */
+export const DEFAULT_PRINTER: PrinterVolume = (() => {
+  const p = PRINTER_PRESETS.find((x) => x.id === 'prusa-xl') ?? PRINTER_PRESETS[0]!;
+  return { preset: p.id, x: p.x, y: p.y, z: p.z };
+})();
+
+/**
+ * The bed this project is printed on, from either home.
+ *
+ * Issue #148 moved it to `Project.printer` so the shell and future archetypes
+ * can fit-check, not only the rack. Projects written before the move still
+ * carry it on `case.rack.printer`; read it through here so both work, and so
+ * there is exactly one place that knows about the old home.
+ */
+export function resolvePrinter(project: Project | null | undefined): PrinterVolume | undefined {
+  return project?.printer ?? project?.case?.rack?.printer;
+}
 
 /**
  * Does a p×q rectangle fit on an a×b bed, allowing 90° and diagonal
@@ -185,7 +213,10 @@ export function maxRackSlotsForBed(depth: number, bedX: number, bedY: number): n
  * placement issues: one error per non-fitting part plus a summary suggestion,
  * and the wall-mount load guidance when relevant.
  */
-export function validateRackFit(rack: RackParams): PlacementIssue[] {
+export function validateRackFit(
+  rack: RackParams,
+  printerOverride?: PrinterVolume,
+): PlacementIssue[] {
   const issues: PlacementIssue[] = [];
   const dims = computeRackDims(rack);
 
@@ -252,7 +283,9 @@ export function validateRackFit(rack: RackParams): PlacementIssue[] {
     }
   }
 
-  const printer = rack.printer;
+  // #148 — the project-level bed wins; the rack's own copy is the legacy
+  // fallback so a caller that still holds only `RackParams` keeps working.
+  const printer = printerOverride ?? rack.printer;
   if (!printer) return issues;
 
   const blocked: string[] = [];

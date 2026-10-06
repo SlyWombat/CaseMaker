@@ -1,4 +1,5 @@
 import type { Mm, BBox } from './units';
+import type { NodeVariant } from './variant';
 
 export interface MeshBuffer {
   positions: Float32Array;
@@ -50,6 +51,12 @@ export interface MeshNode {
    * export path can group and tag parts without re-deriving anything from ids.
    */
   material?: NodeMaterial;
+  /**
+   * Issue #148 — copied from the `BuildNode` too, and for the same reason:
+   * whether this node is an alternative to other parts is a property of the
+   * node, not something to guess back out of its id at each call site.
+   */
+  variant?: NodeVariant;
 }
 
 export interface BuildResult {

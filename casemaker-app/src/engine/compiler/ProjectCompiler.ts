@@ -1,5 +1,5 @@
 import type { Project, HatProfile } from '@/types';
-import type { Aabb, BuildPlan, BuildNode, BuildOp } from './buildPlan';
+import type { Aabb, BuildPlan, BuildNode, BuildOp, SplitOffer } from './buildPlan';
 import { union, difference, translate, aabbOfOp } from './buildPlan';
 import { buildOuterShell } from './caseShell';
 import { computeBossPlacements, buildBossesUnion, buildLidBosses } from './bosses';
@@ -25,6 +25,14 @@ import { buildHingeOps } from './hinges';
 import { buildCustomCutouts } from './customCutouts';
 import { buildStandNodes } from './stand';
 import { buildRackNodes } from './rack';
+import { rectFitsBed, resolvePrinter } from './rackFit';
+import {
+  DEFAULT_SPLIT_SCREW,
+  LUG_LAP,
+  buildShellSplit,
+  canSplitShell,
+  planShellJoint,
+} from './shellSplit';
 import { buildBadgeNodes } from './badge';
 import { buildInsertNodes } from './insert';
 import { derivedKind } from './archetype';
@@ -67,7 +75,7 @@ export function compileProject(project: Project): BuildPlan {
   // this branch never falls through.
   if (kind === 'rack' && caseParams.rack) {
     return {
-      nodes: buildRackNodes(caseParams.rack),
+      nodes: buildRackNodes(caseParams.rack, resolvePrinter(project)),
       placementReport: validatePlacements(project),
       smartCutoutDecisions: [],
     };
@@ -248,6 +256,95 @@ export function compileProject(project: Project): BuildPlan {
 
   const nodes: BuildNode[] = [{ id: 'shell', op: shellOp }];
 
+  // Issue #148 — a bolted split of the shell, for a project whose bed the shell
+  // does not fit.
+  //
+  // The DECISION is made on every compile where the shell does not fit the bed
+  // (footprint or height), and
+  // reported as `splitOffer`; only the GEOMETRY is gated on `splitForPrint`.
+  // That split exists because the two halves cost very different things: bounds
+  // and seam placement are metadata arithmetic (`aabbOfOp` never evaluates
+  // Manifold), while the cuts and their laps are real work. So the export modal
+  // can offer the split the ENGINE can actually deliver — an offer derived from
+  // "the shell is bigger than the bed" instead would appear whenever the box
+  // overruns, including when every seam is blocked by the case's own board
+  // bosses, and the user would tick a box that builds nothing.
+  //
+  // A SEALED shell is refused rather than warned about: the seam cuts the
+  // gasket channel and gives away the drop resistance #107/#108 were for.
+  //
+  // The seam is kept out of the features a case would be ruined by cutting in
+  // two — ports, vents, bosses, latches, hinges, snaps, displays, fan mounts.
+  // Deliberately NOT keep-outs: the perimeter brim, the rugged ribs and feet,
+  // and engraved labels. Every one of those spans a whole face, so a keep-out
+  // built from its bounding box would forbid every seam there is; the seam
+  // crosses them (as it must) and the user sees that in the preview.
+  const splitPrinter = resolvePrinter(project);
+  const shellBounds = splitPrinter ? aabbOfOp(shellOp) : null;
+  let splitOffer: SplitOffer | undefined;
+  if (shellBounds && splitPrinter) {
+    const splitWidth = shellBounds.max[0] - shellBounds.min[0];
+    const splitDepth = shellBounds.max[1] - shellBounds.min[1];
+    const splitHeight = shellBounds.max[2] - shellBounds.min[2];
+    const overBed = !rectFitsBed(splitWidth, splitDepth, splitPrinter.x, splitPrinter.y);
+    // Height is reported on its own: a shell that fits the bed flat but is too
+    // TALL is a problem the user would otherwise meet at the slicer, and no
+    // seam can help it, so "split is not the answer" is exactly what they need
+    // to hear.
+    if (splitHeight > splitPrinter.z) {
+      splitOffer = { state: 'tooTall' };
+    } else if (overBed) {
+      const keepOut: Aabb[] = [
+        ...portCutOps,
+        ...ventCuts.shellCuts,
+        ...bossOps,
+        ...latchOps.caseAdditive,
+        ...hingeOps.caseAdditive,
+        ...hingeOps.subtractive,
+        ...latchOps.caseSubtract,
+        ...snapOps.shellAdd,
+        ...boardSnapOps.caseAdditive,
+        ...secondaryMountOps.caseAdditive,
+        ...featureOps.additive,
+        ...displayOps.additive,
+        ...displayOps.subtractive,
+        ...fanOps.additive,
+        ...fanOps.subtractive,
+        ...assetOps.unionOps,
+      ]
+        .map(aabbOfOp)
+        .filter((b): b is Aabb => b !== null);
+      const request = {
+        shellOp,
+        bounds: shellBounds,
+        printer: splitPrinter,
+        keepOut,
+      };
+      if (!canSplitShell(caseParams.seal?.enabled === true)) {
+        splitOffer = { state: 'sealed' };
+      } else {
+        // The plan is what the builder would work out anyway, so it is handed
+        // over rather than recomputed.
+        const joint = planShellJoint(request);
+        if (!joint) {
+          splitOffer = { state: 'blocked' };
+        } else {
+          const screwLabel = `${DEFAULT_SPLIT_SCREW}×${LUG_LAP * 2} socket cap`;
+          splitOffer = {
+            state: 'available',
+            pieces: joint.pieces.length,
+            screws: joint.screwCount,
+            screwLabel,
+          };
+          if (caseParams.splitForPrint === true) {
+            const split = buildShellSplit(request, joint);
+            if (split) nodes.push(...split.nodes);
+          }
+        }
+      }
+    }
+  }
+
   let lidOp = buildLid(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   const lidDims = computeLidDims(board, caseParams, hats ?? [], resolveHat, display, resolveDisplay);
   // Issue #104 — top-position bosses fuse with the lid mesh, anchored to
@@ -365,5 +462,10 @@ export function compileProject(project: Project): BuildPlan {
   }
 
   const placementReport = validatePlacements(project);
-  return { nodes, placementReport, smartCutoutDecisions: smartLayout.decisions };
+  return {
+    nodes,
+    placementReport,
+    smartCutoutDecisions: smartLayout.decisions,
+    splitOffer,
+  };
 }

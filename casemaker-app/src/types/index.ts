@@ -7,6 +7,8 @@ export * from './insert';
 export * from './port';
 export * from './mesh';
 export * from './project';
+export * from './printer';
+export * from './variant';
 export * from './hat';
 export * from './snap';
 export * from './antenna';

@@ -430,6 +430,15 @@ export interface CaseParameters {
    * non-positive plate dimension yields no geometry at all.
    */
   insert?: InsertParams;
+  /**
+   * Issue #148 — offer a bolted split of the case SHELL when it is too big for
+   * the project's bed. Absent/false means nothing is built: the split costs two
+   * to four intersection cuts plus a row of bolted laps on every compile, which
+   * is a price a slider drag should not pay for an export most projects never
+   * take. Same reasoning as the rack's `assembledExport`, in the other
+   * direction — that one is gated on the part FITTING, this one on it not.
+   */
+  splitForPrint?: boolean;
 }
 
 /**

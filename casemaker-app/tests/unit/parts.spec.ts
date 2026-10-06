@@ -104,6 +104,11 @@ describe('Part registry (#120)', () => {
       'rack-keystone-0',
       'rack-cable-tray-0',
       'bumper-0',
+      // Issue #148 — a split piece is named for its grid cell, so the table
+      // has to match it by pattern. It prints AS MODELLED: floor on the bed
+      // with the joint laps hanging below it, supported from the plate.
+      'shell-split-a1',
+      'shell-split-b2',
       'some-unknown-node',
     ];
     for (const id of IDS) {

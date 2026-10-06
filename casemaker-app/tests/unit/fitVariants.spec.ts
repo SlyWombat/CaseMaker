@@ -179,7 +179,7 @@ describe('Issue #153 — the fit fields survive the schema (v10)', () => {
     ];
     original.case.rack = miniRack;
     const parsed = parseProject(serializeProject(original));
-    expect(parsed.schemaVersion).toBe(13);
+    expect(parsed.schemaVersion).toBe(14);
     expect(parsed.case.fit).toBe('loose');
     expect(parsed.case.snapCatches![0]!.fit).toBe('tight');
     expect(parsed.case.rack!.fit).toBe('standard');
@@ -187,7 +187,7 @@ describe('Issue #153 — the fit fields survive the schema (v10)', () => {
 
   it('leaves fit undefined when a project never chose one', () => {
     const parsed = parseProject(serializeProject(createDefaultProject('rpi-4b')));
-    expect(parsed.schemaVersion).toBe(13);
+    expect(parsed.schemaVersion).toBe(14);
     expect(parsed.case.fit).toBeUndefined();
     expect(parsed.case.rack?.fit).toBeUndefined();
   });
@@ -195,7 +195,7 @@ describe('Issue #153 — the fit fields survive the schema (v10)', () => {
   it('loads a v9 project, stamps it v10, and has no fit', () => {
     const v9 = { ...createDefaultProject('rpi-4b'), schemaVersion: 9 };
     const parsed = parseProject(JSON.stringify(v9));
-    expect(parsed.schemaVersion).toBe(13);
+    expect(parsed.schemaVersion).toBe(14);
     expect(parsed.case.fit).toBeUndefined();
   });
 });

@@ -283,7 +283,7 @@ describe('project schema v8 (issue #169)', () => {
     } as Record<string, unknown>;
     delete v7.customFonts;
     const parsed = parseProject(JSON.stringify(v7));
-    expect(parsed.schemaVersion).toBe(13);
+    expect(parsed.schemaVersion).toBe(14);
     expect(parsed.customFonts).toEqual([]);
     expect(parsed.textLabels.map((l) => l.font)).toEqual(['sans-default', 'mono-default']);
     const plan = compileProject(parsed);

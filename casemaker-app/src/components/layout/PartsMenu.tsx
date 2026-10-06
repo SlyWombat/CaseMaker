@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useJobStore } from '@/store/jobStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { partsForIds, partsByCategory, type PartCategory } from '@/engine/exporters/parts';
-import { isAssembledNodeId } from '@/engine/exporters/parts';
+import { isAlternativeNode } from '@/engine/exporters/parts';
 
 const CATEGORY_LABELS: Record<PartCategory, string> = {
   case: 'Case',
@@ -36,7 +36,9 @@ export function PartsMenu({ compact = false }: Props) {
   // (memory: Zustand `?? []` selector trap).
   const nodes = useJobStore((s) => s.nodes);
   // Not a separate part — an alternative way to print the ones already listed.
-  const nodeIds = Array.from(nodes.keys()).filter((id) => !isAssembledNodeId(id));
+  const nodeIds = Array.from(nodes.values())
+    .filter((n) => !isAlternativeNode(n))
+    .map((n) => n.id);
   const hiddenParts = useViewportStore((s) => s.hiddenParts);
   const togglePart = useViewportStore((s) => s.togglePartVisible);
   const showAllParts = useViewportStore((s) => s.showAllParts);

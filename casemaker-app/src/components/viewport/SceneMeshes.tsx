@@ -9,7 +9,7 @@ import { ExternalAssetMeshes } from './ExternalAssetMeshes';
 import { PortMarkers } from './PortMarkers';
 import { BoardPlaceholderMesh } from './BoardPlaceholderMesh';
 import { HatPlaceholderMeshes } from './HatPlaceholderMeshes';
-import { isAssembledNodeId } from '@/engine/exporters/parts';
+import { isAlternativeNode } from '@/engine/exporters/parts';
 import { isSimSceneActive, useSimStore } from '@/store/simStore';
 import { SimMeshes } from './SimMeshes';
 import { EngravePreview } from './EngravePreview';
@@ -108,7 +108,10 @@ function CaseMeshes() {
   const nodes = useJobStore((s) => s.nodes);
   // The assembled one-piece exports are alternatives to the separate parts,
   // made of the same geometry — rendering them would z-fight the whole rack.
-  const nodeIds = Array.from(nodes.keys()).filter((id) => !isAssembledNodeId(id));
+  // Same for a bed-split shell (#148), whose pieces cover the shell exactly.
+  const nodeIds = Array.from(nodes.values())
+    .filter((n) => !isAlternativeNode(n))
+    .map((n) => n.id);
   const explodedLift = useExplodedLift();
   const showShell = viewMode !== 'lid-only';
   const showLidMesh = viewMode !== 'base-only';

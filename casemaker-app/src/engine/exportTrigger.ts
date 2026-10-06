@@ -10,7 +10,7 @@ import {
   type ExportLayoutMode,
 } from '@/engine/exportLayout';
 import type { MeshNode } from '@/types';
-import { isAssembledNodeId, partForId } from '@/engine/exporters/parts';
+import { isAlternativeNode, partForId } from '@/engine/exporters/parts';
 import { printNotesText } from '@/engine/exporters/printNotes';
 import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 
@@ -136,7 +136,7 @@ export function meshNodesForExport(): ExportMeshGroups {
     // The fused one-piece rack exports are alternatives to the parts they are
     // made from. Including them in Save All would hand you the whole rack
     // twice — once in pieces, once welded.
-    if (isAssembledNodeId(n.id)) continue;
+    if (isAlternativeNode(n)) continue;
     if (n.material?.separateFile) gasketNode = n;
     else main.push(n);
   }

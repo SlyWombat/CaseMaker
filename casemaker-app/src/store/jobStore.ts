@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { MeshNode, MeshStats } from '@/types';
 import type { PlacementReport } from '@/engine/compiler/placementValidator';
 import type { SmartCutoutDecision } from '@/engine/compiler/smartCutoutLayout';
+import type { SplitOffer } from '@/engine/compiler/buildPlan';
 
 export type JobStatus = 'idle' | 'rebuilding' | 'error';
 
@@ -20,6 +21,13 @@ export interface JobState {
    */
   placementReport: PlacementReport | null;
   smartCutoutDecisions: SmartCutoutDecision[];
+  /**
+   * Issue #148 — the split the current bed can have, as the COMPILER decided
+   * it, or null when the shell fits. The export modal reads the offer from
+   * here rather than re-deriving it from the mesh bounds: only the compiler
+   * knows the case's own keep-outs, and only it can say whether a seam exists.
+   */
+  splitOffer: SplitOffer | null;
   setStatus: (status: JobStatus, error?: string | null) => void;
   applyResult: (
     generation: number,
@@ -30,6 +38,7 @@ export interface JobState {
     diagnostics?: {
       placementReport?: PlacementReport;
       smartCutoutDecisions?: SmartCutoutDecision[];
+      splitOffer?: SplitOffer;
     },
   ) => void;
 }
@@ -44,6 +53,7 @@ export const useJobStore = create<JobState>()((set) => ({
   lastDiag: null,
   placementReport: null,
   smartCutoutDecisions: [],
+  splitOffer: null,
   setStatus: (status, error = null) => set({ status, error }),
   applyResult: (generation, nodes, combinedStats, durationMs, diag, diagnostics) =>
     set(() => {
@@ -59,6 +69,7 @@ export const useJobStore = create<JobState>()((set) => ({
         lastDiag: diag ?? null,
         placementReport: diagnostics?.placementReport ?? null,
         smartCutoutDecisions: diagnostics?.smartCutoutDecisions ?? [],
+        splitOffer: diagnostics?.splitOffer ?? null,
       };
     }),
 }));

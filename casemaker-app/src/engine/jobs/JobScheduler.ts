@@ -48,10 +48,17 @@ async function dispatch(project: Project, myGen: number): Promise<void> {
     const materialById = new Map(
       plan.nodes.filter((n) => n.material).map((n) => [n.id, n.material!] as const),
     );
+    // #148 — same reasoning as `material`: "is this an alternative to other
+    // parts?" is a fact about the node, and the mesh layer needs it to keep
+    // alternatives out of the scene and out of Save All.
+    const variantById = new Map(
+      plan.nodes.filter((n) => n.variant).map((n) => [n.id, n.variant!] as const),
+    );
     const nodes: MeshNode[] = result.nodes.map((n) => ({
       id: n.id,
       buffer: { positions: n.positions, indices: n.indices },
       material: materialById.get(n.id),
+      variant: variantById.get(n.id),
       stats: {
         vertexCount: n.vertexCount,
         triangleCount: n.triangleCount,
@@ -69,6 +76,7 @@ async function dispatch(project: Project, myGen: number): Promise<void> {
     job.applyResult(myGen, nodes, combined, result.durationMs, result.diag, {
       placementReport: plan.placementReport,
       smartCutoutDecisions: plan.smartCutoutDecisions,
+      splitOffer: plan.splitOffer,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

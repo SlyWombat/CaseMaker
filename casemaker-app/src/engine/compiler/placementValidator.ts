@@ -13,7 +13,7 @@ import { computeHatBaseZ } from './hats';
 import { transformPlacementPorts } from './hatOrientation';
 import { getBuiltinHat } from '@/library/hats';
 import { getBuiltinDisplay } from '@/library/displays';
-import { validateRackFit } from './rackFit';
+import { resolvePrinter, validateRackFit } from './rackFit';
 import { derivedKind } from './archetype';
 import { badgeParamsProblem } from '@/types/badge';
 
@@ -396,7 +396,7 @@ export function validatePlacements(project: Project): PlacementReport {
   // below are all vacuous. Its own validation covers printer fit, slot
   // budget, and wall-mount guidance.
   if (kind === 'rack' && project.case.rack) {
-    const issues = validateRackFit(project.case.rack);
+    const issues = validateRackFit(project.case.rack, resolvePrinter(project));
     return {
       issues,
       errorCount: issues.filter((i) => i.severity === 'error').length,

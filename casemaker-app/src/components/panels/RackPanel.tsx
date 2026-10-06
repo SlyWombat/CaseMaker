@@ -4,10 +4,11 @@ import type { RackParams, RackAccessory, RackAccessoryType, FitVariant } from '@
 import { FIT_VARIANTS } from '@/types';
 import { LabelledField } from '@/components/ui/LabelledField';
 import {
-  PRINTER_PRESETS,
+  DEFAULT_PRINTER,
   maxRackWidthForBed,
   maxRackDepthForBed,
   maxRackSlotsForBed,
+  resolvePrinter,
 } from '@/engine/compiler/rackFit';
 import {
   computeRackDims,
@@ -19,6 +20,7 @@ import {
 } from '@/engine/compiler/rack';
 import { newId } from '@/utils/id';
 import { derivedKind } from '@/engine/compiler/archetype';
+import { PrinterField } from '@/components/ui/PrinterField';
 
 /**
  * Rack archetype editor (see types/rack.ts). IMPORTANT: patchCase validates
@@ -49,7 +51,6 @@ const DEFAULT_RACK: RackParams = {
   width: 252,
   depth: 250,
   slots: 16,
-  printer: { preset: 'prusa-xl', x: 360, y: 360, z: 360 },
   wallMount: 'none',
   accessories: [],
 };
@@ -90,6 +91,7 @@ const WALL_MOUNT_OPTIONS: { value: NonNullable<RackParams['wallMount']>; label: 
 export function RackPanel() {
   const project = useProjectStore((s) => s.project);
   const patchCase = useProjectStore((s) => s.patchCase);
+  const setPrinter = useProjectStore((s) => s.setPrinter);
   const archetype = useProjectStore((s) => derivedKind(s.project));
   const rack = project?.case.rack;
 
@@ -108,7 +110,13 @@ export function RackPanel() {
         <button
           type="button"
           data-testid="rack-enable"
-          onClick={() => patchCase({ rack: { ...DEFAULT_RACK } })}
+          onClick={() => {
+            // #148 — seed the project's bed too, or the fresh rack has nothing
+            // to be fit-checked against. Existing beds are left alone: the
+            // printer is the user's, not the rack's.
+            if (!resolvePrinter(project)) setPrinter({ ...DEFAULT_PRINTER });
+            patchCase({ rack: { ...DEFAULT_RACK } });
+          }}
         >
           Enable mini-rack project
         </button>
@@ -122,19 +130,21 @@ export function RackPanel() {
   const dims = computeRackDims(rack);
   const spaces = accessorySpaces(rack);
   const usedSlots = (rack.accessories ?? []).reduce((s, a) => s + accessorySlots(a), 0);
-  const presetId = rack.printer?.preset ?? 'custom';
+  // Issue #148 — the bed lives on the project now; `resolvePrinter` still finds
+  // one saved on the rack before the move.
+  const printer = resolvePrinter(project);
 
   // Slider ceilings from the printer's build volume. Never below the current
   // value so the handle doesn't jump when a smaller printer is picked — the
   // fit banner flags oversize instead.
-  const printerMaxW = rack.printer
-    ? Math.min(400, maxRackWidthForBed(rack.printer.x, rack.printer.y))
+  const printerMaxW = printer
+    ? Math.min(400, maxRackWidthForBed(printer.x, printer.y))
     : 400;
-  const printerMaxD = rack.printer
-    ? Math.min(400, maxRackDepthForBed(rack.width, rack.slots, rack.printer.x, rack.printer.y))
+  const printerMaxD = printer
+    ? Math.min(400, maxRackDepthForBed(rack.width, rack.slots, printer.x, printer.y))
     : 400;
-  const printerMaxS = rack.printer
-    ? maxRackSlotsForBed(rack.depth, rack.printer.x, rack.printer.y)
+  const printerMaxS = printer
+    ? maxRackSlotsForBed(rack.depth, printer.x, printer.y)
     : 40;
   const sliderMaxW = Math.max(printerMaxW, Math.ceil(rack.width));
   const sliderMaxD = Math.max(printerMaxD, Math.ceil(rack.depth));
@@ -143,15 +153,6 @@ export function RackPanel() {
   const mmForSlots = (s: number): number => Math.round(5 + s * SLOT_PITCH + 11);
   const slotsForMm = (mm: number): number =>
     Math.min(40, Math.max(2, Math.round((mm - 16) / SLOT_PITCH)));
-
-  const setPreset = (id: string): void => {
-    if (id === 'custom') {
-      update({ printer: { ...(rack.printer ?? { x: 220, y: 220, z: 250 }), preset: undefined } });
-      return;
-    }
-    const p = PRINTER_PRESETS.find((x) => x.id === id);
-    if (p) update({ printer: { preset: p.id, x: p.x, y: p.y, z: p.z } });
-  };
 
   const setAccessory = (i: number, next: RackAccessory): void => {
     const list = [...(rack.accessories ?? [])];
@@ -284,39 +285,12 @@ export function RackPanel() {
       </LabelledField>
 
       <h3 className="panel-subhead">Printer</h3>
-      <LabelledField
-        label="Printer"
-        hint="Every part is checked against this build volume (flat or diagonal placement); blockers appear in the banner with achievable sizes."
-      >
-        <select value={presetId} data-testid="rack-printer-preset" onChange={(e) => setPreset(e.target.value)}>
-          {PRINTER_PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-          <option value="custom">Custom…</option>
-        </select>
-      </LabelledField>
-      {presetId === 'custom' && rack.printer && (
-        <div style={{ display: 'flex', gap: 6 }}>
-          {(['x', 'y', 'z'] as const).map((axis) => (
-            <LabelledField key={axis} label={axis.toUpperCase()} unit="mm" inline>
-              <input
-                type="number"
-                min={80}
-                max={1000}
-                value={rack.printer![axis]}
-                data-testid={`rack-printer-${axis}`}
-                onChange={(e) =>
-                  update({ printer: { ...rack.printer!, [axis]: Number(e.target.value) } })
-                }
-              />
-            </LabelledField>
-          ))}
-        </div>
-      )}
+      <PrinterField
+        testIdPrefix="rack-printer"
+        hint="The project's bed (#148) — saved with the project, so every archetype checks its parts against the same volume. Every rack part is checked against it (flat or diagonal placement); blockers appear in the banner with achievable sizes."
+      />
 
-      {rackFitsWhole(rack) && (
+      {rackFitsWhole(rack, printer) && (
         <label
           style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, fontSize: 13 }}
         >

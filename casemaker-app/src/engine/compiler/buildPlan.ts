@@ -1,7 +1,8 @@
-import type { Vec3, Vec2, Facing, NodeMaterial } from '@/types';
+import type { Vec3, Vec2, Facing, NodeMaterial, NodeVariant } from '@/types';
 import { aabbOfProfile, type Profile } from './profile';
 
 export type { Profile } from './profile';
+export type { NodeVariant } from '@/types/variant';
 export * from './profile';
 
 export type BuildOp =
@@ -107,10 +108,39 @@ export interface BuildNode {
    * where the export path picks it up.
    */
   material?: NodeMaterial;
+  /** Issue #148 — set when this node is an alternative to named parts. */
+  variant?: NodeVariant;
+}
+
+/**
+ * Issue #148 — what a split of the case shell can do for the project's bed.
+ *
+ * Present only when the shell does NOT fit the bed — in footprint or in
+ * height; a shell that fits has nothing to be offered. Computed from the same
+ * bounds and keep-outs the geometry uses, so the export offer and the parts
+ * that get built cannot disagree.
+ *
+ * `blocked` is the state that matters most: the shell is over the bed in
+ * footprint, but no seam clears the case's own board bosses, ports or latches,
+ * so there is nothing honest to offer. `tooTall` is the other refusal — a
+ * vertical seam cannot help a part over the bed's height — and it is reported
+ * whether or not the footprint fits, because a shell that will not print is
+ * worth saying out loud.
+ */
+export interface SplitOffer {
+  state: 'available' | 'tooTall' | 'sealed' | 'blocked';
+  /** Piece count when `state === 'available'`. */
+  pieces?: number;
+  /** Screws the joint takes, counted once per seam site. */
+  screws?: number;
+  /** e.g. `M3×16 socket cap`. */
+  screwLabel?: string;
 }
 
 export interface BuildPlan {
   nodes: BuildNode[];
+  /** Issue #148 — the shell split this bed can (or cannot) have. */
+  splitOffer?: SplitOffer;
   /** Issue #37 — placement validator findings; consumers may show a banner. */
   placementReport?: import('./placementValidator').PlacementReport;
   /**

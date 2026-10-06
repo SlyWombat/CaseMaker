@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { useJobStore } from '@/store/jobStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useSettingsStore, type ExportFormat } from '@/store/settingsStore';
 import { partsForIds, partsByCategory, printOrientationHint, type PartCategory, type ProjectPart } from '@/engine/exporters/parts';
 import { exportSinglePart, triggerExport } from '@/engine/exportTrigger';
 import { hardwareForProject } from '@/engine/exporters/hardwareList';
+import { resolvePrinter } from '@/engine/compiler/rackFit';
+import { PrinterField } from '@/components/ui/PrinterField';
 import { PartThumbnail } from './PartThumbnail';
 
 interface ExportModalProps {
@@ -157,6 +159,8 @@ export function ExportModal({ onClose }: ExportModalProps) {
           </select>
         </div>
 
+        <PrintBedBlock />
+
         {hardware.length > 0 && (
           <div
             data-testid="export-hardware-list"
@@ -275,6 +279,105 @@ export function ExportModal({ onClose }: ExportModalProps) {
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Footnote styling for the offer's explanation. */
+const NOTE_STYLE: CSSProperties = {
+  display: 'block',
+  color: '#9aa4b0',
+  fontSize: 11,
+  lineHeight: 1.45,
+};
+
+/**
+ * Issue #148 — the bed, and the split offer that follows from it.
+ *
+ * The offer is made HERE, at the export, rather than in the case panel, because
+ * this is the list the pieces would join and the moment the user is looking for
+ * a part that will not fit. It is an OFFER: the whole shell stays on the list,
+ * and nothing is built until the box is ticked — a split costs intersection
+ * cuts and a row of bolted laps on every compile.
+ *
+ * The offer itself is the COMPILER's answer (`splitOffer` on the job), not a
+ * re-derivation from the mesh bounds. Measuring the box only says "over the
+ * bed"; whether a seam exists at all depends on the case's own board bosses,
+ * ports and latches, which no consumer of the mesh can see. Asking the bounds
+ * is how a box gets ticked that builds nothing.
+ */
+function PrintBedBlock(): ReactElement {
+  const project = useProjectStore((s) => s.project);
+  const patchCase = useProjectStore((s) => s.patchCase);
+  const nodes = useJobStore((s) => s.nodes);
+  const offer = useJobStore((s) => s.splitOffer);
+  const printer = resolvePrinter(project);
+
+  const box = nodes.get('shell')?.stats.bbox;
+  const w = box ? box.max[0]! - box.min[0]! : 0;
+  const d = box ? box.max[1]! - box.min[1]! : 0;
+  const h = box ? box.max[2]! - box.min[2]! : 0;
+  const on = project.case?.splitForPrint === true;
+  const size = `${Math.round(w)} × ${Math.round(d)} × ${Math.round(h)} mm`;
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <PrinterField testIdPrefix="export-printer" />
+      {offer && printer && (
+        <div
+          data-testid="export-split-offer"
+          style={{
+            marginTop: 8,
+            padding: '8px 10px',
+            background: '#1a1f25',
+            border: '1px solid #3a4a2a',
+            borderRadius: 4,
+            fontSize: 12,
+            lineHeight: 1.45,
+          }}
+        >
+          {offer.state === 'tooTall' ? (
+            <span>
+              The case body measures {size} and this bed is {Math.round(printer.z)} mm tall. A split
+              seam is vertical, so it cannot help a part that is over the bed&rsquo;s height — the
+              case has to be re-laid on its side, made shorter, or printed on a bigger machine.
+            </span>
+          ) : offer.state === 'sealed' ? (
+            <span>
+              The case body does not fit this bed, but the shell is SEALED: a seam would cut
+              straight through the gasket channel and give away the drop resistance the seal is
+              for. Turn the seal off if you would rather have the split.
+            </span>
+          ) : offer.state === 'blocked' ? (
+            <span>
+              The case body measures {size} and does not fit this bed, and no seam clears the
+              case&rsquo;s own features — the board bosses, port cutouts and latches leave no line
+              across it that can be cut. The case has to be made smaller or printed on a bigger
+              machine.
+            </span>
+          ) : (
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <input
+                type="checkbox"
+                data-testid="export-split-toggle"
+                checked={on}
+                onChange={(e) => patchCase({ splitForPrint: e.target.checked })}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                Split the case body for this bed
+                <span style={NOTE_STYLE}>
+                  {Math.round(w)} × {Math.round(d)} mm does not fit {printer.x} × {printer.y} mm.
+                  Adds {offer.pieces} cut {offer.pieces === 1 ? 'piece' : 'pieces'} below
+                  {offer.screws ? `, bolted back together with ${offer.screws}× ${offer.screwLabel}` : ''}
+                  , each carrying its side of the seam laps. The uncut case body stays on the list
+                  — the split is an offer, not a replacement.
+                </span>
+              </span>
+            </label>
+          )}
+        </div>
+      )}
     </div>
   );
 }

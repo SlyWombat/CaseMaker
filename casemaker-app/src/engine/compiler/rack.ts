@@ -1,4 +1,5 @@
 import type { Mm, RackParams, RackAccessory } from '@/types';
+import type { PrinterVolume } from '@/types/printer';
 import { fitRelief } from '@/types/snap';
 import {
   cube,
@@ -1501,8 +1502,10 @@ export function earScrewsPerSide(bodyH: number): number {
  * clear. Shared by the compiler and the panel so the offer and the checkbox
  * can never disagree.
  */
-export function rackFitsWhole(rack: RackParams): boolean {
-  const printer = rack.printer;
+export function rackFitsWhole(rack: RackParams, printerOverride?: PrinterVolume): boolean {
+  // #148 — the bed lives on the project now; `rack.printer` is the legacy
+  // fallback for a caller that holds only the rack params.
+  const printer = printerOverride ?? rack.printer;
   if (!printer) return false;
   const { width, depth, totalH } = computeRackDims(rack);
   const onBed =
@@ -1660,9 +1663,10 @@ function assembledNodes(
   dims: RackDims,
   built: BuildNode[],
   accessoryOps: BuildOp[],
+  printer?: PrinterVolume,
 ): BuildNode[] {
   const { width, depth } = dims;
-  if (!rack.assembledExport || !rackFitsWhole(rack)) return [];
+  if (!rack.assembledExport || !rackFitsWhole(rack, printer)) return [];
 
   const FRAME_IDS = ['rack-side-left', 'rack-side-right', 'rack-bottom', 'rack-top'];
   const frameOps = built.filter((n) => FRAME_IDS.includes(n.id)).map((n) => n.op);
@@ -1687,7 +1691,13 @@ function assembledNodes(
   }
 
   const out: BuildNode[] = [
-    { id: 'rack-assembled-frame', op: union([...frameOps, ...plateWelds]) },
+    {
+      id: 'rack-assembled-frame',
+      op: union([...frameOps, ...plateWelds]),
+      // #148 — spelled as a variant rather than left to the id prefix, so the
+      // "alternative, not a part" rule has one implementation.
+      variant: { replaces: FRAME_IDS, label: 'Rack frame, welded — one piece' },
+    },
   ];
 
   if (accessoryOps.length > 0) {
@@ -1709,6 +1719,10 @@ function assembledNodes(
     out.push({
       id: 'rack-assembled-all',
       op: union([...frameOps, ...plateWelds, ...accessoryOps, ...welds]),
+      variant: {
+        replaces: [...FRAME_IDS, ...built.filter((n) => !FRAME_IDS.includes(n.id)).map((n) => n.id)],
+        label: 'Whole rack, welded — one piece',
+      },
     });
   }
   return out;
@@ -1790,7 +1804,7 @@ export function accessorySpaces(rack: RackParams): AccessorySpace[] {
 
 /** Compile the whole rack to one BuildNode per printable part, positioned in
  *  assembly space so the viewport previews the assembled rack. */
-export function buildRackNodes(rack: RackParams): BuildNode[] {
+export function buildRackNodes(rack: RackParams, printer?: PrinterVolume): BuildNode[] {
   const dims = computeRackDims(rack);
   // One local for both the build and the notch depth: the notches have to cut
   // as deep as the ribs actually reach, so these two must never drift apart.
@@ -1851,7 +1865,7 @@ export function buildRackNodes(rack: RackParams): BuildNode[] {
     nodes.push({ id: `rack-${acc.type}-${i}`, op: placed });
   });
 
-  nodes.push(...assembledNodes(rack, dims, nodes, accessoryOps));
+  nodes.push(...assembledNodes(rack, dims, nodes, accessoryOps, printer));
 
   if (rack.wallMount === 'cleat') {
     const seatZ = FOOT_H + dims.bodyH - CLEAT_SEAT_DROP;

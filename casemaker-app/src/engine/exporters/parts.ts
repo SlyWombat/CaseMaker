@@ -3,6 +3,7 @@ import type {
   PrintMeta,
   SupportRequirement,
 } from '@/engine/compiler/buildPlan';
+import type { NodeVariant } from '@/types/variant';
 
 export type { PrintMeta, SupportRequirement } from '@/engine/compiler/buildPlan';
 
@@ -45,9 +46,28 @@ export interface PrintOrientation {
  * list, but must be kept out of the 3D view (they would sit exactly on top of
  * the parts they are made from) and out of Save All (which would hand you the
  * rack twice over).
+ *
+ * Issue #148 — new alternatives declare themselves with `BuildNode.variant`
+ * instead, so the rule is "is this node an alternative?" rather than "does its
+ * id start with a magic string". This predicate is kept for the rack nodes
+ * authored before that field existed and as the id-only fallback; both rack
+ * assembled nodes also set `variant` now, so either test answers correctly.
  */
 export function isAssembledNodeId(id: string): boolean {
   return id.startsWith('rack-assembled-');
+}
+
+/**
+ * Is this node an ALTERNATIVE to other parts rather than a part of its own?
+ * Kept out of the viewport, the parts list and Save All, but still offered in
+ * the export list. Prefers the node's own `variant` flag (#148); falls back to
+ * the legacy rack id prefix so older plans keep filtering.
+ */
+export function isAlternativeNode(
+  node: { id: string; variant?: NodeVariant } | null | undefined,
+): boolean {
+  if (!node) return false;
+  return node.variant !== undefined || isAssembledNodeId(node.id);
 }
 
 export interface ProjectPart {
@@ -194,6 +214,23 @@ interface PrintPattern {
 }
 
 const PRINT_PATTERNS: PrintPattern[] = [
+  // Issue #148 — a split piece of the shell. It prints the same way up as the
+  // whole shell (floor on the bed, cavity up), but the joint laps hang ~8 mm
+  // below the floor, so the piece stands on its laps and the floor's underside
+  // is a face the slicer has to reach under. Support from the build plate only
+  // — nothing needs support on support. NOT flipped: printed mouth-down the
+  // cavity's ceiling would bridge the whole box instead.
+  {
+    test: (id) => id.startsWith('shell-split-'),
+    meta: flat(
+      'Print right-side up, EXACTLY as the whole shell would be — floor on the bed, cavity up. The joint laps hang below the floor, so the piece stands on them and the slicer puts support under the floor around them; that support grows from the build plate and pulls out in one piece',
+      {
+        supports: 'buildplate-only',
+        supportWhy:
+          "The laps hold the floor ~8 mm off the bed, so every square millimetre of the piece's underside is an overhang. All of it is reachable from the build plate — there is no cavity underneath to trap support in.",
+      },
+    ),
+  },
   {
     test: (id) => id.startsWith('latch-arm-'),
     meta: flat('Lay flat — knuckle and cam hook face up'),
@@ -310,6 +347,17 @@ function describePart(
   }
   if (id === 'shell') {
     return { displayName: 'Case body', material: 'rigid', category: 'case' };
+  }
+  // Issue #148 — one printed piece of a shell split, bolted back together
+  // around the seam. The suffix is the piece's grid cell: a letter for X, a
+  // 1-based number for Y (`shell-split-a1`), which is what the user needs to
+  // tell the pieces apart on the plate and match them to the seam.
+  if (id.startsWith('shell-split-')) {
+    return {
+      displayName: `Case body — piece ${id.slice('shell-split-'.length).toUpperCase()} (split for the bed)`,
+      material: 'rigid',
+      category: 'case',
+    };
   }
   if (id === 'lid') {
     return { displayName: 'Lid', material: 'rigid', category: 'case' };

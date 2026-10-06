@@ -42,7 +42,7 @@ For developers extending Case Maker. Audience: TypeScript + React + a passing ac
 
 ### Engine compiler — `src/engine/compiler/`
 
-The compiler is 41 modules. Grouped by what they build:
+The compiler is 43 modules. Grouped by what they build:
 
 **Core pipeline**
 
@@ -104,7 +104,7 @@ The compiler is 41 modules. Grouped by what they build:
 | Module | Exports | Purpose |
 | :--- | :--- | :--- |
 | `rack.ts` | `buildRackNodes`, `computeRackDims`, `accessorySpaces`, `cableNotchGeometry` | The parametric mini-rack: sides, plates, shelves, trays, faceplates. See [Mini-Rack.md](https://github.com/SlyWombat/CaseMaker/blob/main/Mini-Rack.md) |
-| `rackFit.ts` | `rectFitsBed`, `rackPartFootprints`, `maxRackWidthForBed` | Printer-fit checks: does every rack part land on the bed? |
+| `rackFit.ts` | `rectFitsBed`, `resolvePrinter`, `rackPartFootprints`, `maxRackWidthForBed`, `PRINTER_PRESETS` | Printer-fit checks: does every rack part land on the bed? Also the one place the project's bed is read (`resolvePrinter`) and the test every split layout is judged by |
 | `stand.ts` | `computeStandDims`, `buildEdgeChannels`, `standModulePlacement`, `computePocketDims`, `buildPocketOp` | Desk and bench stands — and (issue #151) the `mount: 'pocket'` wall shelf: one part, a back plate with a screw ear each side, a floor and two walls the finished module nests into, sized from the module's own envelope and sharing `rack.ts`'s wall-fixing sizes |
 | `insert.ts` | `buildInsertNodes`, `buildInsertOp`, `insertGrid`, `insertLayout`, `insertProblem`, `pocketRadius`, `roundPocketCutter` | Issue #158 — the tool-insert holder: one plate of round (socket-OD) and hex (across-flats) pockets on a centred uniform grid, sized to the user's own tools. Plate 120 × 80 × 6 by default, with `clearance`, `chamfer`, `floor` and `pitchGap` all exposed; the pocket layout is pure and wasm-free, so only the subtracted solid needs an evaluator. `roundPocketCutter` is the round pocket as a standalone primitive, so the `insert-pocket` fit coupon cuts the shipped pocket instead of a copy of it |
 | `rugged.ts` | `buildRuggedOps` | Corner bumpers and impact ribs |
@@ -114,6 +114,8 @@ The compiler is 41 modules. Grouped by what they build:
 
 | Module | Exports | Purpose |
 | :--- | :--- | :--- |
+| `splitPart.ts` | `planSeams`, `splitBySeams`, `seamScrewCount`, `seamScrewSites`, `jointClearanceHole`, `jointStarterHole`, `jointHoleDiameters` | Issue #148 — where to cut a part too big for the bed, the cut itself, and both halves of the bolted joint. Archetype-blind. See **Print bed, alternatives and split parts** below |
+| `shellSplit.ts` | `planShellJoint`, `buildShellSplit`, `canSplitShell`, `pieceId`, `LUG_DROP`, `LUG_LAP`, `DEFAULT_SPLIT_SCREW` | Issue #148 — the case shell's half: the joint as arithmetic (`planShellJoint`), the same joint as geometry (`buildShellSplit`), and the refusal to cut a sealed shell |
 | `placementValidator.ts` | `validatePlacements` | Overlapping cutouts, off-PCB holes, HAT collisions — surfaced as a `PlacementReport` on the plan |
 | `smartCutoutLayout.ts` | `applySmartCutoutLayout` | Nudge crowded cutouts apart rather than merging them |
 | `featureScale.ts` | `clampLatch`, `clampHinge` | Keep features printable as the case shrinks |
@@ -138,7 +140,7 @@ The compiler is 41 modules. Grouped by what they build:
 | Store | Responsibility |
 | :--- | :--- |
 | `projectStore.ts` | The parametric `Project`. Wrapped in zundo `temporal` for undo/redo. |
-| `jobStore.ts` | Latest build status, mesh nodes, mesh stats, last error, last diag. |
+| `jobStore.ts` | Latest build status, mesh nodes, mesh stats, last error, last diag, and the compiler's `splitOffer` (#148). |
 | `viewportStore.ts` | UI-only viewport state (showLid/Grid, selectedPortId). |
 | `settingsStore.ts` | App settings (port, bindToAll). localStorage-persisted. |
 
@@ -209,6 +211,82 @@ clamping posts, hinge knuckles, latch arms — must reach the inner ceiling at
 `lidLocal.z = lidCavityHeight`, not `0`. Geometry that only *touches* its host is not
 fused by Manifold and comes back as a separate body; both runs at this were #121 (lid
 knuckles) and #125 (cavity-mode snap-fit), and clamping posts were the third (#117).
+
+## Print bed, alternatives and split parts
+
+**The bed lives on the `Project`** (`project.printer?: PrinterVolume`), not on an
+archetype. Until #148 the only copy was `case.rack.printer`, which meant a case or a
+badge could not be fit-checked at all. Read it through `resolvePrinter(project)`
+(`rackFit.ts`), which falls back to `case.rack.printer` so projects saved before the
+move keep working; never read `project.printer` directly. A preset stores its numbers
+(`x`/`y`/`z` are authoritative, `preset` is only "which row filled them in"), so a
+project keeps its bed when a preset's figures change. The picker is one component
+(`components/ui/PrinterField.tsx`) rendered in both RackPanel and the export modal, so
+the two homes cannot drift; `DEFAULT_PRINTER` (the XL a fresh rack starts on) lives
+next to `PRINTER_PRESETS` in `rackFit.ts`, derived from the table rather than restated.
+
+**`NodeVariant` marks a node as an ALTERNATIVE**, not a part of its own
+(`types/variant.ts`): `{ replaces: string[]; label: string }`. Two things produce one —
+the rack welded into a single piece (`isAssembledNodeId` predates the flag and is kept
+as a fallback) and a shell cut into bed-sized pieces. `isAlternativeNode(node)`
+(`exporters/parts.ts`) is the single predicate: the viewport (`SceneMeshes`,
+`viewportCamera`), the parts list (`PartsMenu`) and Save All (`exportTrigger`) all skip
+alternatives — they sit exactly on top of the part they replace — while the export
+modal still lists them by name. The uncut part is never removed.
+
+**The offer is the ENGINE's answer.** Every compile in which the shell does not fit
+the bed — in footprint or in height — reports `plan.splitOffer`
+(`{ state, pieces?, screws?, screwLabel? }`), which the JobScheduler carries to
+`jobStore.splitOffer` and the export modal renders. `state` is one of `available`,
+`tooTall`, `sealed` or `blocked`. This is the fourth state that matters: the box can
+overrun the bed and still have **no legal seam** — the rpi-4b on a 60 × 60 bed is
+exactly that, its board bosses leaving no line across the depth — so the modal is
+forbidden from deriving the offer from the mesh bounds it can see. Measuring the box
+only says "over the bed"; whether a seam exists depends on the case's own keep-outs,
+which only the compiler holds. **Deciding is cheap and building is not**: the whole
+decision — bounds (`aabbOfOp` never evaluates Manifold), keep-outs and seam placement
+— is metadata arithmetic, so it runs on every compile, while the cuts and laps stay
+behind `case.splitForPrint`. The heights are reported even when the footprint fits: a
+body that will not print is worth saying out loud.
+
+**Splitting is offered, never automatic.** `compiler/splitPart.ts` is
+archetype-blind: given a solid in print orientation, its `Aabb`, the bed and a list of
+keep-out `Aabb`s, `planSeams()` decides *where* to cut and returns null rather than
+guessing. It refuses a part taller than the bed (a seam is vertical — Z is not ours to
+cut), cuts the axis that overshoots more when one seam will do, goes to a quadrant only
+when a half still will not fit, and walks the seam off a keep-out by `KEEP_OUT_MARGIN`
+while keeping both pieces at least `MIN_PIECE_SPAN` long. Each candidate layout is
+checked with `rectFitsBed`, the rack's own fit test, so a piece that only fits
+diagonally is accepted exactly as the rack accepts one. `splitBySeams()` does the cut
+with one intersection per grid cell and returns each piece's `cell` and `ranges`.
+`seamScrewCount()` is `ceil(length / SPLIT_SEAM_PITCH)` with a floor of two — the
+reviewed systems' own counts track the seam (7 on a ≈250 mm housing seam) and so does
+this. Both halves of a joint go through `jointClearanceHole` / `jointStarterHole`, so
+the clearance, the pilot and the head seat are always the shared table's.
+
+**The archetype supplies the joint's material**, because only it knows which side of
+its own solid is free air. `compiler/shellSplit.ts` is the case shell's half, and it is
+split in two for the same reason the compiler is: `planShellJoint()` answers *what the
+joint would be* — seams, pieces and one `LugSite` per screw per piece — with no
+geometry at all, and `buildShellSplit(req, plan?)` turns that plan into the ops. The
+compiler calls the planner on every compile to decide what to offer and hands the plan
+to the builder when the split is actually asked for, so the offer and the geometry
+cannot disagree about where a screw goes. The joint itself: a row of
+lugs on the **underside of the floor**, each straddling the seam — the low piece
+carries the clearance hole with a flush head seat, the high piece a blind pilot, and
+one M3×16 socket cap pulls them together (16 mm under the head = 8 through + 8
+engaged, and `minEngagement('M3') = 6 ≤ 8`). Under the floor is the only side of a
+shell that is always empty: the cavity is the board's, and the walls hold the PCB to
+within a hair. The lap therefore hangs `LUG_DROP` below the floor and is embedded
+`LUG_EMBED` into it so the union has real volume (the #119 lesson). **The whole thing
+is PROVISIONAL** — every number in that module is CHOSEN and unmeasured, which is why
+the split is behind `case.splitForPrint` and refused outright for a sealed shell
+(`canSplitShell`): the seam cuts the gasket channel and gives away the drop resistance
+#107/#108 were for. Pieces print **as modelled** — floor on the bed, laps hanging
+below, support from the build plate — which the part's own row in the export list
+says; it is a `PRINT_PATTERNS` entry, not a `PRINT_TABLE` key, because split ids are
+dynamic. The lid is not offered a split yet: its underside faces the board, so "which
+side is free" depends on the board's height.
 
 ## Op tree shape
 

@@ -13,6 +13,7 @@ import type {
   HatPlacement,
 } from '@/types';
 import type { MountingFeature } from '@/types/mounting';
+import type { PrinterVolume } from '@/types/printer';
 import { getBoard } from '@/library/registry';
 import { getBuiltinHat } from '@/library/hats';
 import { newId } from '@/utils/id';
@@ -65,7 +66,7 @@ export function createDefaultProject(boardId = DEFAULT_BOARD_ID): Project {
   cloned.clonedFrom = board.id;
   delete cloned.source;
   return {
-    schemaVersion: 13,
+    schemaVersion: 14,
     id: newId('proj'),
     name: `${board.name} Case`,
     createdAt: now,
@@ -105,6 +106,8 @@ export interface ProjectState {
   showWelcome: () => void;
   setProject: (p: Project) => void;
   patchCase: (patch: Partial<CaseParameters>) => void;
+  /** Issue #148 — the bed this project prints on. `undefined` clears it. */
+  setPrinter: (printer: PrinterVolume | undefined) => void;
   loadBuiltinBoard: (boardId: string) => void;
   addPort: (port: PortPlacement) => void;
   removePort: (portId: string) => void;
@@ -255,6 +258,17 @@ export const useProjectStore = create<ProjectState>()(
             }),
           };
           }),
+        setPrinter: (printer) =>
+          set((s) => ({
+            project: produce(s.project, (draft) => {
+              // #148 — the bed lives on the project so every archetype can
+              // fit-check. The rack's legacy copy is cleared at the same time,
+              // so the two homes can never disagree about which bed this is.
+              draft.printer = printer;
+              if (draft.case?.rack) draft.case.rack.printer = undefined;
+              draft.modifiedAt = new Date(0).toISOString();
+            }),
+          })),
         loadBuiltinBoard: (boardId) =>
           set(() => ({ project: createDefaultProject(boardId), welcomeMode: false })),
         addPort: (port) =>

@@ -8,6 +8,7 @@ import type { DisplayProfile, DisplayPlacement } from './display';
 import type { FanMount } from './fan';
 import type { TextLabel, CustomFont } from './textLabel';
 import type { AntennaPlacement } from './antenna';
+import type { PrinterVolume } from './printer';
 
 export interface ExternalAsset {
   id: string;
@@ -22,7 +23,8 @@ export interface ExternalAsset {
   visibility: 'reference' | 'subtract' | 'union';
 }
 
-export type ProjectSchemaVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
+export type ProjectSchemaVersion =
+  | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14;
 
 export interface Project {
   schemaVersion: ProjectSchemaVersion;
@@ -47,4 +49,13 @@ export interface Project {
   antennas: AntennaPlacement[];
   /** User-supplied fonts embedded for text labels (issue #169, schemaVersion 8+). */
   customFonts: CustomFont[];
+  /**
+   * The bed this project is printed on (issue #148, schemaVersion 14+).
+   *
+   * Optional: absent means "no fit checking", exactly as an absent
+   * `case.rack.printer` did. Read it through `resolvePrinter`, never directly —
+   * that is what keeps projects written before the move (which carry the bed on
+   * `case.rack.printer`) working.
+   */
+  printer?: PrinterVolume;
 }

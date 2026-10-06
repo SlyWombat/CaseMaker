@@ -9,7 +9,8 @@
  */
 
 import * as THREE from 'three';
-import { isAssembledNodeId } from '@/engine/exporters/parts';
+import type { NodeVariant } from '@/types/variant';
+import { isAlternativeNode } from '@/engine/exporters/parts';
 
 /** An axis-aligned box, as every `NodeMeshOutput.bbox` is: one min and one max per axis. */
 export type SceneBox = { min: readonly number[]; max: readonly number[] };
@@ -36,12 +37,14 @@ export interface SceneBoundsInput {
 
 /** Centre + diagonal of everything currently in the scene, or null if empty. */
 function sceneBounds(
-  nodes: Map<string, { stats: { bbox: SceneBox } }>,
+  nodes: Map<string, { stats: { bbox: SceneBox }; variant?: NodeVariant }>,
 ): { center: THREE.Vector3; diag: number } | null {
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
   for (const [id, n] of nodes.entries()) {
-    if (isAssembledNodeId(id)) continue; // same geometry as the parts it fuses
+    // The map is keyed by id, so the id is not on the value — hand the
+    // predicate both halves of what it needs.
+    if (isAlternativeNode({ id, variant: n.variant })) continue; // same geometry as what it fuses
     for (let a = 0; a < 3; a++) {
       if (n.stats.bbox.min[a]! < min[a]!) min[a] = n.stats.bbox.min[a]!;
       if (n.stats.bbox.max[a]! > max[a]!) max[a] = n.stats.bbox.max[a]!;

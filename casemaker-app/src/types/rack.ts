@@ -1,5 +1,6 @@
 import type { Mm } from './units';
 import type { FitVariant } from './snap';
+import type { PrinterVolume } from './printer';
 
 /**
  * Parametric 10"-class mini rack (emulates "Mini Rack" by Meuon, Printables
@@ -30,10 +31,14 @@ export interface RackParams {
   slots: number;
   /**
    * Printer build volume for the per-part fit check (see rackFit.ts).
-   * `preset` is informational (which preset filled in x/y/z); the numbers
-   * are authoritative. Absent = no fit checking.
+   *
+   * DEPRECATED HOME (#148): the bed moved to `Project.printer`, because every
+   * archetype needs it, not just the rack. This field is still parsed and still
+   * read — `resolvePrinter` falls back to it — so projects written before the
+   * move keep fit-checking, and old files can be opened and re-saved. New
+   * writes go to `Project.printer`; nothing should set this one.
    */
-  printer?: { preset?: string; x: Mm; y: Mm; z: Mm };
+  printer?: PrinterVolume;
   /**
    * Offer the fused one-piece exports (see assembledNodes in rack.ts).
    *
