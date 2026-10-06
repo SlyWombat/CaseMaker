@@ -11,7 +11,9 @@
  * sacrificial material (#213) is drawn from the same boxes the sweep tests against, in a paler
  * grey than the jaws so a strip between them reads as material and not as a third jaw. A legend
  * lists each distinct depth and the sacrificial swatch, and an axis marker sits at the work
- * origin with X and Y labelled.
+ * origin with X and Y labelled. Each declared under-surface void (#271) is outlined in amber ON
+ * the top face — the void itself is interior to solid material — and labelled with the deepest
+ * cut it permits.
  */
 
 import { useEffect, useMemo } from 'react';
@@ -94,6 +96,92 @@ function Sacrificial({ mesh, name, label }: { mesh: NodeMeshOutput; name: string
   );
 }
 
+/**
+ * The under-surface voids (#271) are drawn as an OUTLINE on the top face, never as a solid at the
+ * void's ceiling: the ceiling is interior to solid material, so a body drawn there would be
+ * inside the stock mesh and invisible. What matters to the eye is where on the face the void
+ * lies — the region a label must be placed clear of — and how deep a cut may go there.
+ *
+ * The amber is the same warning tone the panel's findings use, because that is what the outline
+ * means: cut over it and the job is warned, cut too deep over it and the verifier refuses.
+ */
+const VOID_COLOR = '#e0c07a';
+/** How far above the top face the outline floats, mm — clear of the surface's own geometry. */
+const VOID_LIFT = 0.05;
+
+/** Line segments for every ring of one void, floating just above the stock's top face. */
+function voidGeometry(rings: readonly (readonly [number, number][])[], z: number): THREE.BufferGeometry {
+  const pts: number[] = [];
+  for (const ring of rings) {
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i]!;
+      const b = ring[(i + 1) % ring.length]!;
+      pts.push(a[0], a[1], z, b[0], b[1], z);
+    }
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return geom;
+}
+
+/** Where a void's label hangs: the mean of its outer ring's points. */
+function ringCentre(ring: readonly (readonly [number, number][])[]): [number, number] | null {
+  const pts = ring[0];
+  if (!pts || pts.length === 0) return null;
+  let x = 0;
+  let y = 0;
+  for (const p of pts) {
+    x += p[0];
+    y += p[1];
+  }
+  return [x / pts.length, y / pts.length];
+}
+
+/** One declared void: its footprint outlined on the face, with what it leaves above it. */
+function Void({
+  id,
+  rings,
+  name,
+  membrane,
+  limit,
+}: {
+  id: string;
+  rings: [number, number][][];
+  name: string;
+  membrane: number;
+  limit: number;
+}) {
+  const geom = useMemo(() => voidGeometry(rings, VOID_LIFT), [rings]);
+  useEffect(() => () => geom.dispose(), [geom]);
+  const centre = ringCentre(rings);
+  const words = limit <= 0 ? 'no cut keeps the floor' : `≤ ${limit.toFixed(2)} mm deep`;
+  return (
+    <>
+      <lineSegments geometry={geom} name={`engrave-void-outline-${id}`} userData={{ engraveVoid: id }}>
+        <lineBasicMaterial color={VOID_COLOR} />
+      </lineSegments>
+      {centre && (
+        <Html position={[centre[0], centre[1], VOID_LIFT]} center style={NON_INTERACTIVE}>
+          <span
+            data-testid={`engrave-void-label-${id}`}
+            style={{
+              fontSize: 10,
+              color: VOID_COLOR,
+              background: 'rgba(20,25,30,0.7)',
+              borderRadius: 3,
+              padding: '1px 4px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            void: {name || 'unnamed'} · {words}
+            {limit > 0 ? '' : ` (${membrane.toFixed(2)} mm left)`}
+          </span>
+        </Html>
+      )}
+    </>
+  );
+}
+
 /** Centre of a mesh's bbox, for anchoring a jaw's source label. */
 function centreOf(bbox: { min: readonly number[]; max: readonly number[] }): [number, number, number] {
   return [
@@ -151,6 +239,10 @@ export function EngravePreview() {
 
       {preview.floors.map((f) => (
         <Floor key={f.labelId} mesh={f.mesh} labelId={f.labelId} color={depthColor(f.depth, maxDepth)} />
+      ))}
+
+      {preview.voids.map((v) => (
+        <Void key={v.id} id={v.id} rings={v.rings} name={v.name} membrane={v.membrane} limit={v.limit} />
       ))}
 
       {preview.fixture.map((jaw) => (
@@ -250,6 +342,24 @@ export function EngravePreview() {
                 }}
               />
               sacrificial
+            </div>
+          )}
+          {/* #271 — a void is not a depth either: it is a region of the face the cut must respect. */}
+          {preview.voids.length > 0 && (
+            <div
+              data-testid="engrave-legend-void"
+              style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}
+            >
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  border: `2px solid ${VOID_COLOR}`,
+                  display: 'inline-block',
+                  boxSizing: 'border-box',
+                }}
+              />
+              void under the face
             </div>
           )}
         </div>

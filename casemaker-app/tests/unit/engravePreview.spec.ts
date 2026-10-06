@@ -300,3 +300,89 @@ describe('the depth ramp (#205)', () => {
     expect(mid).not.toBe(DEEP_COLOR);
   });
 });
+
+// #271 — the void the panel declares must reach the PREVIEW, or the outline the user places a
+// label against is not the region the depth limit refuses over. The rings are asserted as a
+// footprint (a bbox off the returned plain numbers), not by re-evaluating the profile here: the
+// point is that the worker resolved `keepOutProfile` and shipped it.
+describe('engravePreview — declared under-surface voids (#271)', () => {
+  // Its own previewer: the tests above pin the shared one’s latest generation.
+  const pv = createEngravePreviewer(tl);
+  let g = 0;
+  function preview(job: EngraveJob) {
+    const p = pv.engravePreview(job, ++g);
+    if (!p) throw new Error('the previewer refused a fresh generation');
+    return p;
+  }
+
+  /** The bounding box of every ring of one void, as the viewport would see them. */
+  function ringBBox(rings: [number, number][][]) {
+    const xs = rings.flat().map(([x]) => x);
+    const ys = rings.flat().map(([, y]) => y);
+    return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+  }
+
+  it('outlines the footprint and states what the ceiling leaves', () => {
+    const job = defaultEngraveJob();
+    job.keepOuts = [
+      {
+        id: 'pocket',
+        name: 'Magnet pocket',
+        kind: 'rect',
+        position: { x: 50, y: 30 },
+        rotation: 0,
+        enabled: true,
+        zCeiling: 10,
+        width: 30,
+        height: 20,
+        cornerRadius: 0,
+      },
+    ];
+    const p = preview(job);
+
+    expect(p.voids).toHaveLength(1);
+    const v = p.voids[0]!;
+    expect(v.id).toBe('pocket');
+    expect(v.name).toBe('Magnet pocket');
+    // 12 mm blank, ceiling 10: 2 mm of material left, 1 mm of cut under the 1 mm minimum floor.
+    expect(v.membrane).toBeCloseTo(2, 6);
+    expect(v.limit).toBeCloseTo(1, 6);
+    // The rings ARE the footprint: 30 × 20 centred on (50, 30) in the work frame.
+    expect(ringBBox(v.rings)).toMatchObject({ minX: 35, maxX: 65, minY: 20, maxY: 40 });
+  });
+
+  it('resolves the arc kinds too, and drops a disabled void', () => {
+    const job = defaultEngraveJob();
+    job.keepOuts = [
+      {
+        id: 'hole',
+        kind: 'circle',
+        position: { x: 20, y: 20 },
+        rotation: 0,
+        enabled: false,
+        zCeiling: 3,
+        diameter: 8,
+      },
+      {
+        id: 'slot',
+        kind: 'slot',
+        position: { x: 70, y: 40 },
+        rotation: 0,
+        enabled: true,
+        zCeiling: 3,
+        length: 20,
+        width: 6,
+      },
+    ];
+    const p = preview(job);
+
+    // A disabled void reserves nothing, so it is not drawn — the same list `toPartPlan` filters.
+    expect(p.voids.map((v) => v.id)).toEqual(['slot']);
+    const bbox = ringBBox(p.voids[0]!.rings);
+    expect(bbox.minX).toBeCloseTo(60, 6);
+    expect(bbox.maxX).toBeCloseTo(80, 6);
+    expect(bbox.minY).toBeCloseTo(37, 6);
+    expect(bbox.maxY).toBeCloseTo(43, 6);
+    expect(p.voids[0]!.limit).toBeCloseTo(12 - 3 - 1, 6);
+  });
+});

@@ -7,6 +7,7 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { TOOL_LIBRARY, Z1 } from '@/engine/cnc';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { keepOutLimit, keepOutMembrane } from '@/engine/cnc/engrave/partPlan';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { feedsFor, type CutParams } from '@/engine/cnc/feeds';
@@ -31,6 +32,7 @@ import {
   presetPartOnBoard,
 } from '@/engine/cnc/sacrificial';
 import { EngraveLabelRow } from './EngraveLabelRow';
+import { EngraveKeepOutRow } from './EngraveKeepOutRow';
 import { EngraveShapeRow } from './EngraveShapeRow';
 import { EngraveCombinedRow } from './EngraveCombinedRow';
 import { EngraveDrillRow } from './EngraveDrillRow';
@@ -45,6 +47,7 @@ import type {
   EngraveAnyItem,
   EngraveCombinedShape,
   EngraveJob,
+  EngraveKeepOut,
   EngraveShape,
   FieldSource,
   Sacrificial,
@@ -69,6 +72,8 @@ import type {
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const SUBHEAD: CSSProperties = { margin: '12px 0 4px', fontSize: 12, fontWeight: 600, color: '#c8d3de' };
+/** A heading under one of the numbered sections — the voids live under Stock (#271). */
+const SUBSUB: CSSProperties = { margin: '10px 0 2px', fontSize: 11, fontWeight: 600, color: '#9aa4b0' };
 const FIELD: CSSProperties = { width: 74 };
 const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa4b0' };
 const TAG: CSSProperties = {
@@ -148,6 +153,20 @@ const ADD_TRACE_KINDS: readonly { value: 'line' | 'stroke-label'; label: string 
 const ADD_DRILL_KINDS: readonly { value: 'drill' | 'drill-array'; label: string }[] = [
   { value: 'drill', label: 'Hole' },
   { value: 'drill-array', label: 'Hole array' },
+];
+
+/**
+ * The four VOID kinds (#271), added to `job.keepOuts` from the Stock section — NOT from the
+ * Items "+ Add…" menu. A void is a fact about the blank, not something the cutter makes: the
+ * menu's other entries all become cut operations, and putting a void among them would invite
+ * exactly the reading this row exists to prevent. So the voids have their own list, their own
+ * label, and their own add buttons, next to the stock dimensions they are a fact about.
+ */
+const ADD_KEEPOUT_KINDS: readonly { value: EngraveKeepOut['kind']; label: string }[] = [
+  { value: 'rect', label: 'Rectangle' },
+  { value: 'circle', label: 'Circle' },
+  { value: 'slot', label: 'Slot' },
+  { value: 'polygon', label: 'Polygon' },
 ];
 
 /** Every item of the job, in the order `toPartPlan` walks them (#214/#215/#217). Imported
@@ -249,6 +268,9 @@ export function EngravePanel(): JSX.Element {
   const addDrill = useEngraveJobStore((s) => s.addDrill);
   const updateDrill = useEngraveJobStore((s) => s.updateDrill);
   const removeDrill = useEngraveJobStore((s) => s.removeDrill);
+  const addKeepOut = useEngraveJobStore((s) => s.addKeepOut);
+  const updateKeepOut = useEngraveJobStore((s) => s.updateKeepOut);
+  const removeKeepOut = useEngraveJobStore((s) => s.removeKeepOut);
   const addVector = useEngraveJobStore((s) => s.addVector);
   const updateVector = useEngraveJobStore((s) => s.updateVector);
   const removeVector = useEngraveJobStore((s) => s.removeVector);
@@ -282,6 +304,8 @@ export function EngravePanel(): JSX.Element {
   const params: CutParams | null = feeds && feeds.ok ? feeds.params : null;
 
   const maxDepth = job.stock.thickness - job.minFloor;
+  // The declared under-surface voids (#271). One row each, under the stock they are a fact about.
+  const keepOuts = job.keepOuts ?? [];
   const errors = findings.filter((f) => f.severity === 'error');
   const blockedByFeeds = feeds !== null && !feeds.ok;
   const blocked = errors.length > 0 || blockedByFeeds;
@@ -730,6 +754,48 @@ export function EngravePanel(): JSX.Element {
         </label>
       </div>
       <p style={MUTED}>X runs between the vise jaws. The fixed jaw is on the left.</p>
+
+      {/* 1b — the voids the blank already has (#271). These are what `jobDepthLimit` reads, so
+          the depth limit, the `item-over-void` warning and the run sheet's §1 list all speak of
+          a void only if it is declared here. */}
+      <h4 style={SUBSUB}>
+        Voids under the face{' '}
+        <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-keepout-count">
+          {keepOuts.length}
+        </span>
+      </h4>
+      <p style={MUTED}>
+        A pocket the blank already has, cut into its <strong>bottom</strong> face. The ceiling is
+        measured up from that face — the opposite direction from every depth in this panel. The
+        job refuses any cut that would break through the material left over one.
+      </p>
+      {keepOuts.map((ko, i) => (
+        <EngraveKeepOutRow
+          key={ko.id}
+          keepOut={ko}
+          index={i}
+          thickness={job.stock.thickness}
+          membrane={keepOutMembrane(job, ko.zCeiling)}
+          limit={keepOutLimit(job, keepOutMembrane(job, ko.zCeiling))}
+          findings={findingsFor(ko.id)}
+          onChange={(patch) => updateKeepOut(ko.id, patch)}
+          onRemove={() => removeKeepOut(ko.id)}
+        />
+      ))}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
+        <span style={{ ...MUTED, margin: 0 }}>add a void:</span>
+        {ADD_KEEPOUT_KINDS.map((k) => (
+          <button
+            key={k.value}
+            type="button"
+            data-testid={`engrave-add-keepout-${k.value}`}
+            title={`Declare a ${k.label.toLowerCase()} pocket in the blank's bottom face — the depth limit will respect it.`}
+            onClick={() => addKeepOut(k.value)}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
 
       {/* 2 — items: labels, shape pockets and combined shapes, one list (#214/#215) */}
       <h3 style={SUBHEAD}>

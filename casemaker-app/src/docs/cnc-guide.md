@@ -704,4 +704,12 @@ splits it, and a field with no `=` is kept rather than dropped.
 - **Opened region** — the area a cutter of a given radius can actually reach: the glyph grown
   and shrunk back by the radius. Strokes thinner than the diameter vanish; inside corners
   round to the radius.
+- **Under-surface void** — a pocket the blank already has, cut into its **bottom** face: the
+  magnet pocket of a badge blank is the one V1 works with. You declare it under **Stock** in the
+  Engrave panel — its footprint and its **ceiling**, measured *up* from the bottom face, the
+  opposite direction from every depth in the panel. What is left above the ceiling is the
+  **membrane**, and a cut over the void is allowed only as deep as the membrane less the minimum
+  floor. A cut that merely overlaps the void is warned (`item-over-void`); one deep enough to
+  break through is refused (`cut-too-deep`). An unmeasured void is not reserved at all — a job
+  that declares none cuts as it always did.
 - **TLO** — tool length offset: the measured length of the fitted cutter, reset by `M491`.

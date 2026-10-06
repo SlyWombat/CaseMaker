@@ -36,6 +36,14 @@ export function newEngraveDrillId(): string {
 }
 
 /**
+ * Fresh under-surface void id (#271). A void is NOT an item — it is a fact about the blank, so it
+ * lives in its own list with its own prefix and never reaches the `engraves` pipeline.
+ */
+export function newEngraveKeepOutId(): string {
+  return newId('ko');
+}
+
+/**
  * The CNC-2 acceptance job (#209): three labels at three depths on a softwood blank.
  *
  * Every number carries its reason:

@@ -22,7 +22,8 @@
  */
 
 import type { EngraveJob } from '@/types/engraveJob';
-import { toPartPlan, labelProfile } from '@/engine/cnc/engrave/partPlan';
+import type { Mm } from '@/types/units';
+import { toPartPlan, keepOutLimit, keepOutMembrane, labelProfile } from '@/engine/cnc/engrave/partPlan';
 import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { viseEnvelope, validateVise } from '@/engine/cnc/fixture';
 import { sacrificialBoxes, type SacrificialBox } from '@/engine/cnc/sacrificial';
@@ -87,6 +88,29 @@ export interface EngravePreviewSacrificial {
   mesh: NodeMeshOutput;
 }
 
+/**
+ * One declared under-surface void (#271): its footprint as plain rings, plus the two numbers the
+ * panel and the viewport state about it.
+ *
+ * The rings are traced ON THE TOP FACE, not at the void's ceiling: the ceiling is interior to
+ * solid material, so a contour drawn there would be inside the stock mesh and invisible. What the
+ * user needs to see is where on the face the void lies — the thing a label must be placed clear
+ * of — and the label says how deep a cut may go there. The rings ARE the footprint, so a body
+ * drawn at the ceiling and this outline can never disagree about where the void is.
+ */
+export interface EngravePreviewVoid {
+  id: string;
+  name: string;
+  /** The void's ceiling, mm from the blank's BOTTOM face (the `EngraveKeepOut` datum). */
+  zCeiling: Mm;
+  /** `keepOutMembrane(job, zCeiling)`: solid left above it, mm. */
+  membrane: Mm;
+  /** `keepOutLimit(job, membrane)`: the deepest cut over it that keeps `minFloor`, mm. */
+  limit: Mm;
+  /** Footprint contours in the work frame, one entry per ring (a hole is its own ring). */
+  rings: [number, number][][];
+}
+
 /** Everything the panel and the viewport need for one job, as plain data + mesh buffers. */
 export interface EngravePreview {
   /** The stock with every enabled, error-free label's opened region cut to its depth. Work frame. */
@@ -97,6 +121,8 @@ export interface EngravePreview {
   fixture: EngravePreviewFixture[];
   /** The sacrificial material (#213), from `sacrificialBoxes`; empty when the job has none. */
   sacrificial: EngravePreviewSacrificial[];
+  /** The declared under-surface voids (#271), enabled ones only; empty when the job has none. */
+  voids: EngravePreviewVoid[];
   /** Per-label measurements, without the (large) polygons: the findings carry the rest. */
   engravability: Omit<LabelEngravability, 'polygons'>[];
   /** `validateJob` + `validateVise` + `engravabilityFindings`, concatenated. */
@@ -294,6 +320,26 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       },
     );
 
+    // The declared under-surface voids (#271). `plan.stock.keepOuts` already drops the disabled
+    // ones, so what is drawn is exactly what `jobDepthLimit` reserves — a void the user switched
+    // off is not in this list and not in the limit either. Each footprint is evaluated once here;
+    // `keepOutFindings` evaluates its own copy for the warning, and both come from the same
+    // `keepOutProfile`, so the outline and the warning name the same region.
+    const voids: EngravePreviewVoid[] = plan.stock.keepOuts.map((ko) => {
+      const footprintCS = executeProfile(tl, ko.footprint);
+      const rings = footprintCS.toPolygons() as [number, number][][];
+      footprintCS.delete();
+      const membrane = keepOutMembrane(job, ko.zCeiling);
+      return {
+        id: ko.id,
+        name: ko.name,
+        zCeiling: ko.zCeiling,
+        membrane,
+        limit: keepOutLimit(job, membrane),
+        rings,
+      };
+    });
+
     // #211's rule, measured with each candidate's OWN radius. `TOOL_LIBRARY` is two cutters, so
     // the "early stop for long lists" rule (measure in ascending diameter, stop after the first
     // failure that follows a pass) does not apply yet: until the list is long, measure them all.
@@ -309,6 +355,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       floors,
       fixture,
       sacrificial,
+      voids,
       engravability: measured.map(({ polygons: _polygons, ...rest }) => rest),
       findings,
       recommendation: {

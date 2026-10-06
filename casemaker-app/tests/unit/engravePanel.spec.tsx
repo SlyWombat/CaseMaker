@@ -16,6 +16,8 @@ import {
   type EngravePreviewClient,
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
+import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
 import { runSheetFileName } from '@/engine/cnc/engrave/runSheet';
 import { saveText } from '@/engine/exportTrigger';
@@ -576,5 +578,109 @@ describe('EngravePanel — the Simulated row’s coverage sentence (#243)', () =
       useEngraveRunStore.setState({ simStatus: 'refused', pathOnly: false, simDiagnostics: [] });
     });
     expect(screen.getByTestId('engrave-sim-coverage').textContent ?? '').toContain('Nothing was swept');
+  });
+});
+
+// #271 — the under-surface void PRODUCER. Everything downstream of `job.keepOuts` existed and was
+// tested; nothing could write one, so the depth limit, the `item-over-void` warning and the run
+// sheet's §1 list were all unreachable from the app. These tests drive the row that writes it and
+// then ask `jobDepthLimit` — the single owner of the limit, the function #174's verifier refuses
+// against — what the job now permits. A UI assertion alone would not prove the void reached the
+// limit; a store assertion alone would not prove there is a way to write it.
+describe('EngravePanel — under-surface voids (#271)', () => {
+  it('adds a void from the Stock section and it round-trips through the schema', () => {
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-keepout-count').textContent?.trim()).toBe('0');
+    expect(screen.queryByTestId('engrave-keepout-row-0')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('engrave-add-keepout-rect'));
+
+    expect(screen.getByTestId('engrave-keepout-count').textContent?.trim()).toBe('1');
+    expect(screen.getByTestId('engrave-keepout-row-0')).toBeTruthy();
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.keepOuts).toHaveLength(1);
+    const ko = job.keepOuts![0]!;
+    expect(ko.kind).toBe('rect');
+    expect(ko.enabled).toBe(true);
+    // Half of the 12 mm default blank, rounded to 0.1 — a neutral starting ceiling, not a guess.
+    expect(ko.zCeiling).toBe(6);
+
+    // The default must LOAD: the schema rejects the whole document if one field is out of range.
+    const reparsed = parseEngraveJob(JSON.parse(JSON.stringify(job)) as unknown);
+    expect(reparsed.ok).toBe(true);
+    if (reparsed.ok) expect(reparsed.job.keepOuts).toHaveLength(1);
+  });
+
+  it('states the membrane the ceiling leaves, and what it permits as the ceiling moves', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-keepout-rect'));
+
+    // 12 mm blank, minFloor 1 mm, ceiling 6: 6.00 mm of material left, 5.00 mm of cut allowed.
+    const readout = screen.getByTestId('engrave-keepout-membrane-0').textContent ?? '';
+    expect(readout).toContain('6.00');
+    expect(readout).toContain('5.00');
+
+    // The ceiling is measured UP from the bottom face, so a HIGHER ceiling leaves LESS material.
+    fireEvent.change(screen.getByTestId('engrave-keepout-zceiling-0'), { target: { value: '10' } });
+    const higher = screen.getByTestId('engrave-keepout-membrane-0').textContent ?? '';
+    expect(higher).toContain('2.00');
+    expect(higher).toContain('1.00');
+    expect(useEngraveJobStore.getState().job.keepOuts![0]!.zCeiling).toBe(10);
+
+    // A ceiling at the top face is not inside the blank: it says so instead of promising a cut.
+    fireEvent.change(screen.getByTestId('engrave-keepout-zceiling-0'), { target: { value: '12' } });
+    expect(screen.getByTestId('engrave-keepout-membrane-0').textContent).toMatch(/not inside a 12 mm blank/);
+  });
+
+  it('writes a void the depth limit actually reads, and only over its footprint', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-keepout-rect'));
+    fireEvent.change(screen.getByTestId('engrave-keepout-zceiling-0'), { target: { value: '10' } });
+    fireEvent.change(screen.getByTestId('engrave-keepout-name-0'), { target: { value: 'Magnet pocket' } });
+
+    const job = useEngraveJobStore.getState().job;
+    const ko = job.keepOuts![0]!;
+    const limit = jobDepthLimit(job);
+    // Inside the 20 × 10 footprint centred on the blank: the membrane less the floor (2 − 1).
+    expect(limit(ko.position.x, ko.position.y)).toBeCloseTo(1, 6);
+    // Well clear of it: the stock's own limit, untouched by the void.
+    expect(limit(2, 2)).toBeCloseTo(job.stock.thickness - job.minFloor, 6);
+    // The name reaches the job too — the run sheet and the warning both print it.
+    expect(ko.name).toBe('Magnet pocket');
+  });
+
+  it('edits the footprint, renames and removes a void', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-keepout-circle'));
+    fireEvent.change(screen.getByTestId('engrave-keepout-diameter-0'), { target: { value: '12' } });
+    fireEvent.change(screen.getByTestId('engrave-keepout-x-0'), { target: { value: '30' } });
+
+    const ko = useEngraveJobStore.getState().job.keepOuts![0]!;
+    expect(ko.kind === 'circle' && ko.diameter).toBe(12);
+    expect(ko.position.x).toBe(30);
+    // The other axis is untouched — a partial position patch merges.
+    expect(ko.position.y).toBe(useEngraveJobStore.getState().job.stock.width / 2);
+
+    fireEvent.click(screen.getByTestId('engrave-keepout-remove-0'));
+    expect(useEngraveJobStore.getState().job.keepOuts).toEqual([]);
+    expect(screen.getByTestId('engrave-keepout-count').textContent?.trim()).toBe('0');
+  });
+
+  it('keeps a disabled void in the job but out of the depth limit', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-keepout-rect'));
+    fireEvent.change(screen.getByTestId('engrave-keepout-zceiling-0'), { target: { value: '10' } });
+    fireEvent.click(screen.getByTestId('engrave-keepout-enabled-0'));
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.keepOuts).toHaveLength(1);
+    expect(job.keepOuts![0]!.enabled).toBe(false);
+    // The blank still has the pocket; the job simply reserves nothing for it.
+    const limit = jobDepthLimit(job);
+    expect(limit(job.keepOuts![0]!.position.x, job.keepOuts![0]!.position.y)).toBeCloseTo(
+      job.stock.thickness - job.minFloor,
+      6,
+    );
   });
 });

@@ -4,6 +4,7 @@ import { DEFAULT_STROKE_FONT_ID } from '@/engine/fonts/stroke/strokeFont';
 import {
   defaultEngraveJob,
   newEngraveDrillId,
+  newEngraveKeepOutId,
   newEngraveLabelId,
   newEngraveShapeId,
   newEngraveTraceId,
@@ -23,6 +24,11 @@ import type {
   EngraveFrameShape,
   EngraveJob,
   EngraveJobSources,
+  EngraveKeepOut,
+  EngraveKeepOutCircle,
+  EngraveKeepOutPolygon,
+  EngraveKeepOutRect,
+  EngraveKeepOutSlot,
   EngraveLabel,
   EngraveLineItem,
   EngravePolygonShape,
@@ -95,6 +101,16 @@ export type VectorPatch = Partial<
  */
 export type DrillPatch = Partial<Omit<EngraveDrillItem, 'kind'>> &
   Partial<Omit<EngraveDrillArrayItem, 'kind'>>;
+
+/**
+ * A hand edit to one under-surface void (#271). The same shape as `ShapePatch` — every optional
+ * field of all four kinds, so a row patches just what it changed without naming the
+ * discriminant, and the `kind` is never patched (remove and re-add instead).
+ */
+export type KeepOutPatch = Partial<Omit<EngraveKeepOutRect, 'kind'>> &
+  Partial<Omit<EngraveKeepOutCircle, 'kind'>> &
+  Partial<Omit<EngraveKeepOutSlot, 'kind'>> &
+  Partial<Omit<EngraveKeepOutPolygon, 'kind'>>;
 
 export const ENGRAVE_JOB_KEY = 'casemaker.engraveJob.v1';
 /** Where a payload that failed validation is parked so it is not silently lost. */
@@ -281,6 +297,36 @@ function newDrill(kind: EngraveDrill['kind'], job: EngraveJob): EngraveDrill {
   return { ...base, kind: 'drill' };
 }
 
+/**
+ * A default under-surface void of the given kind (#271), centred on the stock like a new shape.
+ *
+ * `zCeiling` is HALF the blank's thickness, rounded to 0.1 mm: a neutral place to start that
+ * always leaves a membrane to reason about, and the row states what it leaves in millimetres. It
+ * is NOT a guess at the user's pocket — the void it describes is one they already cut, and the
+ * number is theirs to correct. Every value is valid against the schema (`zCeiling` positive, a
+ * rect's corner radius, a slot's length ≥ width).
+ */
+function newKeepOut(kind: EngraveKeepOut['kind'], job: EngraveJob): EngraveKeepOut {
+  const base = {
+    id: newEngraveKeepOutId(),
+    position: { x: job.stock.length / 2, y: job.stock.width / 2 },
+    rotation: 0,
+    enabled: true,
+    zCeiling: Math.max(0.1, Math.round((job.stock.thickness / 2) * 10) / 10),
+  };
+  switch (kind) {
+    case 'rect':
+      return { ...base, kind: 'rect', width: 20, height: 10, cornerRadius: 0 };
+    case 'circle':
+      return { ...base, kind: 'circle', diameter: 8 };
+    case 'slot':
+      return { ...base, kind: 'slot', length: 24, width: 8 };
+    case 'polygon':
+      // A 20 × 10 ring at the centre; the row editor replaces the points.
+      return { ...base, kind: 'polygon', points: [[-10, -5], [10, -5], [10, 5], [-10, 5]] };
+  }
+}
+
 export interface EngraveJobState {
   job: EngraveJob;
   /** Merge a stock edit and stamp each edited field's source (#254). Defaults to `'user'`. */
@@ -315,6 +361,15 @@ export interface EngraveJobState {
   /** Merge a hand edit into one drill (#220). A partial `position` is merged, not replaced. */
   updateDrill: (id: string, patch: DrillPatch) => void;
   removeDrill: (id: string) => void;
+  /**
+   * Declare an under-surface void of `kind` (#271) and return its id. A void is a fact about the
+   * blank, not an item: it is never cut, and it is what `jobDepthLimit` reads to refuse a cut
+   * that would break through the membrane above it.
+   */
+  addKeepOut: (kind: EngraveKeepOut['kind']) => string;
+  /** Merge a hand edit into one void (#271). A partial `position` is merged, not replaced. */
+  updateKeepOut: (id: string, patch: KeepOutPatch) => void;
+  removeKeepOut: (id: string) => void;
   /**
    * Add an imported vector outline (#217) and return its id. The shape is built by the panel
    * from an accepted `OutlineImport` (via `toVectorShape`), because only the panel holds the
@@ -484,6 +539,30 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
 
     removeDrill: (id) =>
       apply((job) => ({ ...job, drills: (job.drills ?? []).filter((d) => d.id !== id) })),
+
+    addKeepOut: (kind) => {
+      const keepOut = newKeepOut(kind, get().job);
+      apply((job) => ({ ...job, keepOuts: [...(job.keepOuts ?? []), keepOut] }));
+      return keepOut.id;
+    },
+
+    updateKeepOut: (id, patch) =>
+      apply((job) => ({
+        ...job,
+        keepOuts: (job.keepOuts ?? []).map((ko) =>
+          ko.id === id
+            ? ({
+                ...ko,
+                ...patch,
+                // Merge a partial position rather than replacing the whole object.
+                position: patch.position ? { ...ko.position, ...patch.position } : ko.position,
+              } as EngraveKeepOut)
+            : ko,
+        ),
+      })),
+
+    removeKeepOut: (id) =>
+      apply((job) => ({ ...job, keepOuts: (job.keepOuts ?? []).filter((k) => k.id !== id) })),
 
     addVector: (shape) => {
       apply((job) => ({ ...job, vectors: [...(job.vectors ?? []), shape] }));
