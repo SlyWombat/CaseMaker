@@ -58,7 +58,12 @@ const EMBED = 0.5;                // mm — fuse with wall material
 // the wall is far, e.g. across an antenna-clearance gap). The jaw opening is
 // pcb.z + FINGER_CLEARANCE_Z — the board edge sits captured in the middle.
 const CLIP_SHELF_T = 1.6;         // mm — bottom-jaw shelf thickness
-const CLIP_FIT = 0.15;            // mm — lateral gap between spine face and PCB edge
+/**
+ * Lateral gap between the clip's spine face and the PCB edge, mm — the number
+ * #153's fit relief is added to, and the one the board-snap fit coupon (#157)
+ * ladders and names, so it is exported rather than duplicated.
+ */
+export const CLIP_FIT = 0.15;
 
 // Seat-shoulder (board.retentionShoulder). A raised rim around the cavity
 // perimeter that brings the walls IN to the PCB/glass footprint over the

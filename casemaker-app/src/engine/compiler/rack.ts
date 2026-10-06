@@ -50,8 +50,12 @@ export const SLOT_PITCH = 16.5;
 export const SIDE_T = 15;
 /** Height margin below the first / above the last slot. */
 const END_MARGIN = 5.5;
-/** Stacking feet under the side panels. */
-const FOOT_H = 5;
+/**
+ * Stacking feet under the side panels, mm. Exported because it is the plate's
+ * underside as well as the foot's top — the bottom plate tab lands on it — so
+ * the #157 fit coupon needs it to place its slice (see `rackTabCouponPlan`).
+ */
+export const FOOT_H = 5;
 const FOOT_LEN = 30;
 const FOOT_INSET = 4;
 /**
@@ -266,7 +270,13 @@ const TAB_LEN = 22;
  * seat for a screw head to bear on.
  */
 export const TAB_T = PLATE_T;
-const TAB_SLACK = 0.3;
+/**
+ * As-designed clearance between the plate tab and its ledge, mm — the number
+ * #153's fit relief is added to, and the one the rack-tab fit coupon (#157)
+ * ladders and names, so it is exported rather than duplicated. The tab is the
+ * same width and depth on both axes, so this one number is the whole gap.
+ */
+export const TAB_SLACK = 0.3;
 /** How far a tab overlaps the deck it grows out of, to avoid a coplanar seam. */
 const TAB_MERGE = 0.5;
 /**

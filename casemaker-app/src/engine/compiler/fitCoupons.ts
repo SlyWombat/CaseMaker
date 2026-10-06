@@ -30,15 +30,30 @@
  * both render through here.
  */
 
-import type { BoardProfile, CaseParameters, MagnetSize } from '@/types';
+import type { BoardProfile, CaseParameters, MagnetSize, RackParams, SnapCatch, Vec3 } from '@/types';
 import { MAGNETS, MAGNET_GLUE_GAP, magnetPocket } from './fasteners';
-import { buildBoardSnapOps } from './boardSnap';
+import { CLIP_FIT, buildBoardSnapOps } from './boardSnap';
+import { cavityOriginXY } from '@/engine/coords';
 import { defaultInsert, roundPocketCutter } from './insert';
+import {
+  FOOT_H,
+  SIDE_T,
+  TAB_REACH,
+  TAB_T,
+  buildRackNodes,
+  computeRackDims,
+  plateTabYs,
+} from './rack';
+import { FIT_VARIANTS, SNAP_DEFAULTS, fitRelief } from '@/types/snap';
+import { buildSnapCatch, defaultSnapCatchesForCase } from './snapCatches';
+import { computeShellDims } from './caseShell';
+import { lidIsRecessed } from './lidMode';
 import {
   aabbOfOp,
   cube,
   difference,
   intersection,
+  rotate,
   translate,
   union,
   type BuildOp,
@@ -269,81 +284,714 @@ export const COUPON_PARAMS: CaseParameters = {
   bosses: { enabled: false, insertType: 'self-tap', outerDiameter: 5, holeDiameter: 2.5 },
 } as CaseParameters;
 
+/** Half the band each clip is slabbed to, mm — a finger is FINGER_W = 10 wide,
+ *  so 14 covers it with margin. */
+const CLIP_HALF_W = 7;
+/** Slab depth, mm — a thin band at the LOW-Y wall; the +Y clip is 40 mm away. */
+const SLAB_DEPTH = 12;
+/** Slab overshoot past the clip's own faces, mm (also the plinth's inset). */
+const SLAB_MARGIN = 1;
+const PLINTH_T = 2;
+const PLINTH_D = 16;
+/** Centre-to-centre column spacing, and the clear gap to the gauge, mm. */
+const COL_PITCH = 18;
+const GAUGE_X = 16;
+const GAUGE_GAP = 6;
+/** Label baseline above the slab's front edge, and the engraving depth, mm. */
+const LABEL_Y = 4.5;
+const LABEL_DEPTH = 0.6;
+
 /**
- * The board-snap clip coupon: ONE two-jaw clip, lifted off the compiler's own
- * `buildBoardSnapOps` output (not re-drawn here), plus a printed PCB-edge gauge
- * the clip grips. Two printed bodies on purpose — a fit coupon tests the
- * interface, so the mating half has to come off the bed as its own piece.
+ * Where every column of the board-snap coupon lands: the slab each clip is cut
+ * from, the stride between columns, and the world→coupon offset that moves a
+ * slabbed clip (and its plinth and label) into place.
  *
- * The clip is the -y wall's: the coupon clips the compiler's four clips down to
- * a slab around the low-Y wall and keeps whatever the compiler emitted. If the
+ * Exported because a ladder is only proven by MEASURING it: the specs walk each
+ * rung's jaw with the same offsets the builder used, so what they measure is the
+ * printed part, not the intent. Positions come from the compiler's own clip
+ * bounds and `cavityOriginXY` — never hand-copied numbers.
+ */
+export interface BoardSnapCouponPlan {
+  board: BoardProfile;
+  params: CaseParameters;
+  /** World min corner and size of the slab every column's clip is cut from. */
+  slabMin: Vec3;
+  slabSize: Vec3;
+  /** Centre-to-centre column spacing, mm. */
+  stride: number;
+  /** PRINTED coupon x of each column's clip centre — also its label's centre. */
+  columnX: number[];
+  /** World → coupon for a rung: coupon = world − slabMin + (rung · stride, 0, 0). */
+  shift: (rung: number) => Vec3;
+  /** World point inside the −y jaw opening: the PCB's low-Y edge at
+   *  mid-thickness. The spine's inner face stands CLIP_FIT + relief outboard of
+   *  it, so the jaw gap is measurable by walking −y from here. */
+  jawProbe: Vec3;
+  /** Coupon z of the plinth top face the rung labels are engraved into, and the
+   *  y of their baseline (text runs along +x from x = the column centre). */
+  labelFaceZ: number;
+  labelY0: number;
+  /** The PCB-edge gauge's coupon-space origin and size. */
+  gaugeOrigin: Vec3;
+  gaugeSize: Vec3;
+  dims: { x: number; y: number; z: number };
+}
+
+export function boardSnapCouponPlan(
+  board: BoardProfile = COUPON_BOARD,
+  params: CaseParameters = COUPON_PARAMS,
+): BoardSnapCouponPlan {
+  const ops = buildBoardSnapOps(board, params).caseAdditive;
+  if (ops.length === 0) {
+    throw new Error(
+      'boardSnapCouponPlan: the board/params produced no snap clips — ' +
+        'boardRetention must be "snap" and the footprint must be big enough',
+    );
+  }
+  const bb = aabbOfOp(union(ops));
+  if (!bb) throw new Error('boardSnapCouponPlan: clip ops have no bounds');
+  const xMid = (bb.min[0] + bb.max[0]) / 2;
+  // -y wall: low Y, centred on X. Slab a little past the wall for a clean cut.
+  // The SLAB's min corner is the coupon origin for every clip column, so the
+  // plinth and the labels move with it rather than with the clip's own bounds.
+  const slabMin: Vec3 = [xMid - CLIP_HALF_W, bb.min[1] - SLAB_MARGIN, bb.min[2] - SLAB_MARGIN];
+  const slabSize: Vec3 = [
+    2 * CLIP_HALF_W,
+    SLAB_DEPTH,
+    bb.max[2] - bb.min[2] + 2 * SLAB_MARGIN,
+  ];
+  const lastX = (FIT_VARIANTS.length - 1) * COL_PITCH;
+  const gaugeY = board.pcb.size.y > 30 ? 24 : board.pcb.size.y - 4;
+  // The jaw opening sits between the shelf's top face (the board's underside)
+  // and the finger, so mid-thickness is inside it whatever the rung.
+  const origin = cavityOriginXY(params);
+  return {
+    board,
+    params,
+    slabMin,
+    slabSize,
+    stride: COL_PITCH,
+    columnX: FIT_VARIANTS.map((_, i) => i * COL_PITCH + CLIP_HALF_W),
+    shift: (rung) => [rung * COL_PITCH - slabMin[0], -slabMin[1], -slabMin[2]],
+    jawProbe: [
+      xMid,
+      origin.y + (board.retentionFootprint?.y ?? 0),
+      params.floorThickness + board.defaultStandoffHeight + board.pcb.size.z / 2,
+    ],
+    labelFaceZ: SLAB_MARGIN + PLINTH_T + 0.01,
+    labelY0: SLAB_MARGIN + LABEL_Y,
+    gaugeOrigin: [lastX + 2 * CLIP_HALF_W + GAUGE_GAP, SLAB_MARGIN + 2, 0],
+    gaugeSize: [GAUGE_X, gaugeY, board.pcb.size.z],
+    // Explicit extents, not aabbOfOp: each clip is an INTERSECTION, whose
+    // conservative AABB is the FULL four-clip bound and would over-report the bar.
+    dims: {
+      x: lastX + 2 * CLIP_HALF_W + GAUGE_GAP + GAUGE_X,
+      y: Math.max(SLAB_DEPTH, SLAB_MARGIN + PLINTH_D, SLAB_MARGIN + 2 + gaugeY),
+      z: Math.max(
+        bb.max[2] - bb.min[2] + SLAB_MARGIN,
+        SLAB_MARGIN + PLINTH_T,
+        board.pcb.size.z,
+      ),
+    },
+  };
+}
+
+/**
+ * The board-snap clip coupon: ONE two-jaw clip per #153 fit rung, lifted off
+ * the compiler's own `buildBoardSnapOps` output (not re-drawn here), plus ONE
+ * printed PCB-edge gauge the clips grip.
+ *
+ * The clip is the -y wall's: the coupon slabs the compiler's four clips down to
+ * a band around the low-Y wall and keeps whatever the compiler emitted. If the
  * compiler's clip geometry changes, this coupon changes with it.
+ *
+ * The relief is one-sided here — a case clip mates a PURCHASED PCB, so there is
+ * no second printed half for it to cancel against — and it widens only the
+ * lateral gap (`CLIP_FIT + relief`); the Z jaw opening stays cut for the board.
+ * So one gauge tests all three clips, the same way one lid tab tests three
+ * snap-catch sockets.
  */
 export function buildBoardSnapClipCoupon(
   label?: Labeler,
   board: BoardProfile = COUPON_BOARD,
   params: CaseParameters = COUPON_PARAMS,
 ): FitCouponBuild {
-  const ops = buildBoardSnapOps(board, params).caseAdditive;
-  if (ops.length === 0) {
+  const plan = boardSnapCouponPlan(board, params);
+  const slab = cube(plan.slabSize);
+
+  const bodies: BuildOp[] = [];
+  const cuts: BuildOp[] = [];
+  const columns: CouponColumn[] = [];
+  FIT_VARIANTS.forEach((fit, i) => {
+    const opsFor = buildBoardSnapOps(board, { ...params, fit }).caseAdditive;
+    const clip = translate(
+      plan.shift(i),
+      intersection([union(opsFor), translate(plan.slabMin, slab)]),
+    );
+    // A base plinth grounds the clip (its spine already reaches the floor) to a
+    // printable slab, and gives the label somewhere to sit.
+    const base = translate(
+      [i * plan.stride, SLAB_MARGIN, SLAB_MARGIN],
+      cube([2 * CLIP_HALF_W, PLINTH_D, PLINTH_T]),
+    );
+    bodies.push(union([clip, base]));
+
+    const relief = fitRelief(fit);
+    const text = hundredthsLabel(relief);
+    if (label) {
+      // The rung is the RELIEF (#153's ladder), not the absolute jaw gap: every
+      // rung is a named variant the project can be set to, and the same 0 / 10 /
+      // 25 reads on the snap-catch and rack coupons too.
+      cuts.push(
+        ...label(
+          text,
+          i * plan.stride + CLIP_HALF_W,
+          plan.labelY0,
+          plan.labelFaceZ,
+          LABEL_DEPTH,
+        ),
+      );
+    }
+    columns.push({
+      x: i * plan.stride + CLIP_HALF_W,
+      value: relief,
+      label: text,
+      shipped: relief === 0,
+    });
+  });
+
+  // The gauge: a board-thickness bar the user slides into each jaw in turn.
+  // Printed beside the last column (separate body) so the fit is a fit, not a
+  // fusion, and shared, because the jaw's Z opening does not move with the rung.
+  const gauge = translate(plan.gaugeOrigin, cube(plan.gaugeSize));
+
+  return {
+    op: difference([union([...bodies, gauge]), ...cuts]),
+    dims: plan.dims,
+    columns,
+    bodies: FIT_VARIANTS.length + 1,
+    settles:
+      `the two-jaw board clip (boardSnap.ts CLIP_FIT = ${CLIP_FIT} mm between ` +
+      'spine face and PCB edge) + fitRelief(#153): which grade — a 0.15 / 0.25 / ' +
+      '0.40 mm gap — lets a 1.6 mm board edge cam the jaw aside, snap in and ' +
+      'still be held?',
+    provenance:
+      'PROVISIONAL — the ladder is #153’s and no board has been clipped into a ' +
+      'loosened jaw to prove it. The clips are the compiler’s own geometry, slabbed ' +
+      'down to the -y wall; the plinths and the gauge are coupon scaffolding. The ' +
+      'gauge is cut to the board’s stated thickness, so a pass is also a check that ' +
+      'the Z jaw opening (pcb.z + FINGER_CLEARANCE_Z) accepts THIS board — if the ' +
+      'gauge will not enter, the rung is not the problem.',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Snap-catch hook: socket + tab (issue #157; the ladder is #153's)
+// ---------------------------------------------------------------------------
+
+/**
+ * Solid wall printed BEHIND the real wall band, mm (#157).
+ *
+ * Two jobs. It carries the engraved rung labels, which need a 7 mm glyph box
+ * clear of the socket; and it turns a 2 mm wall into something you can hold
+ * while pressing a tab into it. 11 mm is the width a two-digit label needs
+ * (2 · 4.2 + 1.4 = 9.8) with a millimetre of face either side.
+ */
+export const SNAP_COUPON_BACKING = 11;
+
+/** Solid wall printed BELOW the socket, mm — the sill the tab's tip lands on. */
+export const SNAP_COUPON_SILL = 4;
+
+/** Solid wall printed past the outermost column, mm. */
+export const SNAP_COUPON_END = 6;
+
+/** Centre-to-centre column spacing, mm — wide enough for the labels to miss. */
+export const SNAP_COUPON_PITCH = 18;
+
+/** Engraving depth for the rung labels, mm. */
+const SNAP_COUPON_ENGRAVE = 0.8;
+
+/**
+ * Glyph box height, mm — `GLYPH_H` in `scripts/coupon-glyphs.ts`, which owns
+ * the seven-segment digits and cannot be imported from `src/` (see the module
+ * note). The labels are CENTRED on a face of known size, so a drift here moves
+ * the digits rather than dropping them off the coupon.
+ */
+const COUPON_GLYPH_H = 7;
+
+/** Clear space between the socket bar and the tab that presses into it, mm. */
+const SNAP_COUPON_TAB_GAP = 8;
+
+/** The tab's plate stub: overhang past the arm, and thickness, mm (#157). */
+const SNAP_COUPON_STUB_OVERHANG = 3;
+const SNAP_COUPON_STUB_T = 3;
+
+/** Where a catch's wall material sits. Read off the shell dims the compiler
+ *  computed — this never re-derives the envelope it is cutting into. */
+interface CouponWallBand {
+  /** World axis (0 = x, 1 = y) the wall's normal runs along; the other is tangent. */
+  nIdx: 0 | 1;
+  tIdx: 0 | 1;
+  /** +1 when the wall's outward normal points along +axis (the +x / +y walls). */
+  outSign: 1 | -1;
+  /** Coordinates of the wall's outer and inner faces on the normal axis. */
+  wallOuter: number;
+  wallInner: number;
+}
+
+function couponWallBand(c: SnapCatch, outerX: number, outerY: number, wall: number): CouponWallBand {
+  switch (c.wall) {
+    case '-x':
+      return { nIdx: 0, tIdx: 1, outSign: -1, wallOuter: 0, wallInner: wall };
+    case '+x':
+      return { nIdx: 0, tIdx: 1, outSign: 1, wallOuter: outerX, wallInner: outerX - wall };
+    case '-y':
+      return { nIdx: 1, tIdx: 0, outSign: -1, wallOuter: 0, wallInner: wall };
+    case '+y':
+      return { nIdx: 1, tIdx: 0, outSign: 1, wallOuter: outerY, wallInner: outerY - wall };
+  }
+}
+
+/** The coupon's frame, in the catch's own world coordinates: everything the
+ *  builder and the specs need to agree on, computed once. */
+export interface SnapCatchCouponPlan {
+  nIdx: 0 | 1;
+  tIdx: 0 | 1;
+  outSign: 1 | -1;
+  wallOuter: number;
+  wallInner: number;
+  /** The catch's own position along the wall — the middle column. */
+  uPosition: number;
+  /** Column centres along the tangent axis, one per #153 fit rung. */
+  columnU: number[];
+  /** The bar's top face: the real wall's top, where the lid plate seats. */
+  barTopZ: number;
+  barBottomZ: number;
+  /** Normal-axis coordinate the rung labels are centred on (the backing). */
+  labelN: number;
+  /** Z band the hook's cut spans — the socket plus the arm's reach below it. */
+  cutZ: [number, number];
+  /** Tangent extent of the bar. */
+  barU: [number, number];
+  /** Normal extent of the bar: real wall plus the backing behind it. */
+  barN: [number, number];
+  /** World min/max corners of the bar block. The bar is printed at the coupon's
+   *  own origin, so a world point `p` prints at `p − barMin` — the one mapping a
+   *  spec needs to walk the socket ladder on the meshed part. */
+  barMin: Vec3;
+  barMax: Vec3;
+}
+
+/** An axis-aligned box from two opposite world corners. */
+function boxBetween(min: Vec3, max: Vec3): BuildOp {
+  return translate(min, cube([max[0] - min[0], max[1] - min[1], max[2] - min[2]], false));
+}
+
+/**
+ * The hook catch's wall subtract, in world coordinates, with its bounds (#157).
+ *
+ * This is the compiler's own cut — `buildSnapCatch`'s `wallPocket` — never a
+ * re-drawn socket, so the coupon cannot certify a fit the case does not have.
+ * The bounds are the CUT's, not the wall's share of it: an intersection is
+ * bounded by its first child (`aabbOfOp`), so the arm's 1 mm of reach below the
+ * barb is inside them. That is a millimetre of sill, not a fit dimension — the
+ * socket itself is measured off the meshed coupon in `fitCoupons.spec.ts`.
+ */
+function hookCutBounds(
+  c: SnapCatch,
+  board: BoardProfile,
+  params: CaseParameters,
+): { cut: BuildOp; z: [number, number] } {
+  const cut = buildSnapCatch(c, board, params)?.wallPocket;
+  if (!cut) {
     throw new Error(
-      'buildBoardSnapClipCoupon: the board/params produced no snap clips — ' +
-        'boardRetention must be "snap" and the footprint must be big enough',
+      'snapCatchCouponPlan: this catch has no wall socket to ladder — only the ' +
+        "default 'hook' design is relieved by #153 (see the coupon's provenance)",
     );
   }
-  const all = union(ops);
-  const bb = aabbOfOp(all);
-  if (!bb) throw new Error('buildBoardSnapClipCoupon: clip ops have no bounds');
-  const xMid = (bb.min[0] + bb.max[0]) / 2;
-  const clipHalfW = 7; // a finger is FINGER_W = 10 wide; 14 covers it with margin
-  const SLAB_DEPTH = 12; // a thin band at the LOW-Y wall — the +Y clip is 40 mm away
-  // -y wall: low Y, centred on X. Slab a little past the wall for a clean cut.
-  const SLAB = cube([2 * clipHalfW, SLAB_DEPTH, bb.max[2] - bb.min[2] + 2]);
-  const clip = intersection([
-    all,
-    translate([xMid - clipHalfW, bb.min[1] - 1, bb.min[2] - 1], SLAB),
-  ]);
-  // A base plinth grounds the clip (its spine already reaches the floor) to a
-  // printable slab, and gives the label somewhere to sit.
-  const PLINTH_T = 2;
-  const plinth = cube([2 * clipHalfW, 16, PLINTH_T]);
-  const base = translate([xMid - clipHalfW, bb.min[1], 0], plinth);
-  // Label the PCB thickness the jaw is cut for: 1.6 mm -> "16". The glyphs are
-  // digits only, so this is the one number on a single-fit coupon that reads.
-  const labelOps = label
-    ? label(board.pcb.size.z.toFixed(1).replace('.', ''), xMid, 4.5, PLINTH_T + 0.01, 0.6)
-    : [];
+  const bb = aabbOfOp(cut);
+  if (!bb) throw new Error('snapCatchCouponPlan: the socket cut has no bounds');
+  return { cut, z: [bb.min[2], bb.max[2]] };
+}
 
-  // The gauge: a board-thickness bar the user slides into the jaw. Printed
-  // beside the clip (separate body) so the fit is a fit, not a fusion.
-  const GAUGE_X = 16;
-  const gauge = translate(
-    [xMid + clipHalfW + 6, bb.min[1] + 2, 0],
-    cube([GAUGE_X, board.pcb.size.y > 30 ? 24 : board.pcb.size.y - 4, board.pcb.size.z]),
+export function snapCatchCouponPlan(
+  board: BoardProfile = COUPON_BOARD,
+  params: CaseParameters = COUPON_PARAMS,
+): SnapCatchCouponPlan {
+  const dims = computeShellDims(board, params, [], () => undefined);
+  const catches = defaultSnapCatchesForCase(board, params, [], () => undefined);
+  const c = catches.find((k) => k.wall === '-y') ?? catches[0];
+  if (!c) throw new Error('snapCatchCouponPlan: this board/parameters produce no snap catches');
+  const band = couponWallBand(c, dims.outerX, dims.outerY, params.wallThickness);
+  const { z: cutZ } = hookCutBounds(c, board, params);
+
+  const mid = (FIT_VARIANTS.length - 1) / 2;
+  const columnU = FIT_VARIANTS.map((_, i) => c.uPosition + (i - mid) * SNAP_COUPON_PITCH);
+  const halfU = SNAP_DEFAULTS.armWidth / 2 + SNAP_COUPON_END;
+  const backingFace = band.wallOuter + band.outSign * SNAP_COUPON_BACKING;
+  // The wall's top is where the lid plate seats: `computeHookTabFrame` in
+  // snapCatches.ts decides the same plane with the same predicate, and the
+  // tab's plate stub lands on it.
+  const barTopZ = lidIsRecessed(params) ? dims.outerZ - params.lidThickness : dims.outerZ;
+  const barU: [number, number] = [columnU[0]! - halfU, columnU[columnU.length - 1]! + halfU];
+  const barN: [number, number] = [
+    Math.min(backingFace, band.wallInner),
+    Math.max(backingFace, band.wallInner),
+  ];
+  // The sockets are cut strictly inside this block (the deepest reach is the
+  // arm's, and the sill below it is part of the block), so its corners are also
+  // the difference's. Cutting the bar and walking the ladder both start here.
+  const barMin: Vec3 = [0, 0, 0];
+  const barMax: Vec3 = [0, 0, 0];
+  barMin[band.nIdx] = barN[0];
+  barMax[band.nIdx] = barN[1];
+  barMin[band.tIdx] = barU[0];
+  barMax[band.tIdx] = barU[1];
+  barMin[2] = cutZ[0] - SNAP_COUPON_SILL;
+  barMax[2] = barTopZ;
+  return {
+    nIdx: band.nIdx,
+    tIdx: band.tIdx,
+    outSign: band.outSign,
+    wallOuter: band.wallOuter,
+    wallInner: band.wallInner,
+    uPosition: c.uPosition,
+    columnU,
+    barTopZ,
+    barBottomZ: cutZ[0] - SNAP_COUPON_SILL,
+    labelN: band.wallOuter + band.outSign * (SNAP_COUPON_BACKING / 2),
+    cutZ,
+    barU,
+    barN,
+    barMin,
+    barMax,
+  };
+}
+
+/**
+ * The snap-catch coupon (#157): ONE wall bar carrying a socket per #153 fit
+ * rung, plus ONE tab.
+ *
+ * Both halves come from `buildSnapCatch`, the compiler's own function, at the
+ * rung under test — the socket is the real subtract, the tab is the real lid
+ * tab. #153's relief widens and deepens the CUT only, and the tab is built from
+ * the un-relieved frame, so a single printed tab is the honest test of all
+ * three sockets: whatever clicks in and holds is the fit that ships.
+ *
+ * The tab is printed with a stub of the lid plate it hangs from, flipped stub-
+ * down so it stands on the bed — which is also how the real lid prints (the
+ * export layout flips it). Press each socket in turn: the rung that clicks and
+ * does not rattle is the answer.
+ */
+export function buildSnapCatchCoupon(
+  label?: Labeler,
+  board: BoardProfile = COUPON_BOARD,
+  params: CaseParameters = COUPON_PARAMS,
+): FitCouponBuild {
+  const plan = snapCatchCouponPlan(board, params);
+  const catches = defaultSnapCatchesForCase(board, params, [], () => undefined);
+  const c = catches.find((k) => k.wall === '-y') ?? catches[0]!;
+  const tight = buildSnapCatch(c, board, params);
+  if (!tight) throw new Error('buildSnapCatchCoupon: the sample catch did not build');
+
+  const barBlock = boxBetween(plan.barMin, plan.barMax);
+
+  const cuts: BuildOp[] = [];
+  const columns: CouponColumn[] = [];
+  FIT_VARIANTS.forEach((fit, i) => {
+    const u = plan.columnU[i]!;
+    const g = buildSnapCatch({ ...c, fit }, board, params);
+    const socket = g?.wallPocket;
+    if (!socket) throw new Error(`buildSnapCatchCoupon: no socket for fit "${fit}"`);
+    const delta: Vec3 = [0, 0, 0];
+    delta[plan.tIdx] = u - plan.uPosition;
+    cuts.push(translate(delta, socket));
+
+    const relief = fitRelief(fit);
+    const text = hundredthsLabel(relief);
+    if (label) {
+      // The glyph box is centred on the backing (never over the socket) and on
+      // the column's own position along the wall.
+      const cx = plan.nIdx === 1 ? u : plan.labelN;
+      const y0 = (plan.nIdx === 1 ? plan.labelN : u) - COUPON_GLYPH_H / 2;
+      cuts.push(...label(text, cx, y0, plan.barTopZ, SNAP_COUPON_ENGRAVE));
+    }
+    columns.push({ x: 0, value: relief, label: text, shipped: relief === 0 });
+  });
+  const barOp = difference([barBlock, ...cuts]);
+
+  // The lid half: the compiler's tab plus a stub of the plate it hangs from,
+  // flipped stub-down. `rotate` is a proper rotation, so nothing is mirrored.
+  const tabBB = aabbOfOp(tight.armBarb);
+  if (!tabBB) throw new Error('buildSnapCatchCoupon: the tab has no bounds');
+  const stub = translate(
+    [tabBB.min[0] - SNAP_COUPON_STUB_OVERHANG, tabBB.min[1] - SNAP_COUPON_STUB_OVERHANG, 0],
+    cube(
+      [
+        tabBB.max[0] - tabBB.min[0] + 2 * SNAP_COUPON_STUB_OVERHANG,
+        tabBB.max[1] - tabBB.min[1] + 2 * SNAP_COUPON_STUB_OVERHANG,
+        SNAP_COUPON_STUB_T,
+      ],
+      false,
+    ),
+  );
+  const tabInWorld = translate([0, 0, plan.barTopZ], rotate([180, 0, 0], union([tight.armBarb, stub])));
+  const tabBB2 = aabbOfOp(tabInWorld);
+  if (!tabBB2) throw new Error('buildSnapCatchCoupon: the placed tab has no bounds');
+
+  const barBB = aabbOfOp(barOp);
+  if (!barBB) throw new Error('buildSnapCatchCoupon: the bar has no bounds');
+  const bar = translate([-barBB.min[0], -barBB.min[1], -barBB.min[2]], barOp);
+  const barW = barBB.max[0] - barBB.min[0];
+  const barD = barBB.max[1] - barBB.min[1];
+  const tabW = tabBB2.max[0] - tabBB2.min[0];
+  const tabD = tabBB2.max[1] - tabBB2.min[1];
+  const tab = translate(
+    [barW + SNAP_COUPON_TAB_GAP - tabBB2.min[0], -tabBB2.min[1], -tabBB2.min[2]],
+    tabInWorld,
   );
 
-  const bodyA = difference([union([clip, base]), ...labelOps]);
-  const op = union([bodyA, gauge]);
-  // Explicit extents, not aabbOfOp: the clip is an INTERSECTION, whose
-  // conservative AABB is the FULL four-clip bound and would over-report the bar.
-  const gaugeY = board.pcb.size.y > 30 ? 24 : board.pcb.size.y - 4;
-  const dims = {
-    x: 2 * clipHalfW + 6 + GAUGE_X,
-    y: Math.max(16, 2 + gaugeY),
-    z: bb.max[2],
-  };
+  // `columns[].x` is the PRINTED x of each rung's label, which for the ±y walls
+  // is the socket's own column: the catch-world coordinates the plan works in
+  // are shifted onto the bed above, and a spec probing the meshed op needs the
+  // printed one. The bar's normal axis is x for the ±x walls, and there the
+  // columns run along y instead — the plan carries those coordinates.
+  columns.forEach((col, i) => {
+    const worldX = plan.nIdx === 1 ? plan.columnU[i]! : plan.labelN;
+    col.x = worldX - barBB.min[0];
+  });
+
+  const barH = barBB.max[2] - barBB.min[2];
   return {
-    op,
-    dims,
-    columns: [],
+    op: union([bar, tab]),
+    dims: {
+      x: barW + SNAP_COUPON_TAB_GAP + tabW,
+      y: Math.max(barD, tabD),
+      z: Math.max(barH, tabBB2.max[2] - tabBB2.min[2]),
+    },
+    columns,
     bodies: 2,
     settles:
-      'the two-jaw board clip (boardSnap.ts FINGER_OVERHANG / CLIP_FIT): ' +
-      'does a 1.6 mm board edge snap in and hold?',
+      'snapCatches.ts buildHookTabWallSubtract relief (#153): which grade — ' +
+      '0 / 0.10 / 0.25 mm — lets the hook tab click into its socket and still ' +
+      'hold the lid down',
     provenance:
-      'PROVISIONAL — the clip is built from the compiler, but the fit is a fixed ' +
-      'constant (no ladder yet; that needs #153 fit variants). A printed gauge that ' +
-      'clicks and holds is the pass; report which way it fails if it does not.',
+      'PROVISIONAL — the ladder is #153’s, and NO fit grade has been printed ' +
+      'against a real catch. The socket and the tab are both the compiler’s own ' +
+      'geometry; the plate stub on the tab and the backing behind the wall are ' +
+      'coupon scaffolding, not mating surfaces. Only the default hook design is ' +
+      'relieved, so this coupon certifies the hook and nothing else: the lip ' +
+      'barb types (asymmetric-ramp, symmetric-ramp, half-round, ball-socket) ' +
+      'still carry a fixed fit and would need their own relief to be laddered.',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Rack plate tab + ledge (issue #157; the ladder is #153's)
+// ---------------------------------------------------------------------------
+
+/**
+ * The rack the coupon slices one corner from, mm. Any rack has the same corner
+ * joint — `plateTabYs` is a function of depth alone and every tab dimension is
+ * a fixed constant — so the coupon takes one small frame and says so.
+ *
+ * `depth` stays under `MID_BAR_MIN_DEPTH` so `plateTabYs` returns the two END
+ * tabs only: the joint the load goes through, and the one whose ledge is cut
+ * clean through the rail.
+ */
+export const RACK_COUPON_RACK: RackParams = { enabled: true, width: 200, depth: 130, slots: 3 };
+
+/** Half the assembly-y window a slice keeps around the tab centre, mm. The tab
+ *  and its ledge are 22 mm long and the ledge's lightening keep-out 4 mm wider
+ *  than that, so 14 mm either side puts the slice's own walls in solid rail. */
+const RACK_COUPON_HALF_WINDOW = 14;
+
+/** Rail kept above the ledge slot, mm. The slice's top face ends here because
+ *  `buildSide`'s ledge keep-out does: 2 mm higher and the outer-face lightening
+ *  pocket has taken the outer half of the face, which is no place to engrave. */
+const RACK_COUPON_PAD = 2;
+
+/** Deck kept inboard of the tab, mm — enough to hold the gauge by. */
+const RACK_COUPON_DECK = 12;
+
+/** Clearance the tab slice leaves outboard of the tab, mm. */
+const RACK_COUPON_CLEAR = 2;
+
+/** Centre-to-centre spacing of the ledge slices, mm. */
+const RACK_COUPON_PITCH = 22;
+
+/** Clear space between the ledge row and the tab gauge, mm. */
+const RACK_COUPON_GAP = 8;
+
+/** Engraving depth for the rung labels, mm. */
+const RACK_COUPON_ENGRAVE = 0.8;
+
+/** Baseline of a rung label along the slice, mm. The tab screw's starter hole
+ *  opens onto the same top face at the tab centre, so the digits stay clear of
+ *  it (a 7 mm glyph box from here ends 4 mm short). */
+const RACK_COUPON_LABEL_Y = 3;
+
+/**
+ * Everything the builder and the specs need to agree on for the rack coupon
+ * (#157), computed once: the slabs each piece is cut from, and where the slab's
+ * min corner lands on the bed.
+ */
+export interface RackTabCouponPlan {
+  rack: RackParams;
+  /** Assembly y of the corner tab the coupon slices (`plateTabYs[0]`). */
+  tabY: number;
+  /** Assembly z of the plate's underside — the tab's seating plane, and the
+   *  bottom plate's own z datum. */
+  plateZ: number;
+  /** Assembly-space slabs, as `[min, max]`: the ledge slice, and the tab. */
+  ledgeSlab: [Vec3, Vec3];
+  tabSlab: [Vec3, Vec3];
+  /** PRINTED x of each rung's ledge slice. */
+  columnX: number[];
+  /** Assembly → coupon offset for rung `rung`'s ledge slice. */
+  ledgeShift: (rung: number) => Vec3;
+  /** The tab gauge is FLIPPED about x first, as the real plate prints
+   *  (counterbore up, never open onto the bed), so its coupon coordinates are
+   *  `(x, -y, -z) + tabShift`. */
+  tabShift: Vec3;
+  /** The top face the rung labels are engraved into, coupon z. */
+  labelZ: number;
+  /** Slice extents, mm. */
+  ledgeSize: Vec3;
+  tabSize: Vec3;
+  dims: { x: number; y: number; z: number };
+}
+
+/** The rack's own part, by the id `buildRackNodes` gives it — never re-drawn. */
+function rackPart(rack: RackParams, id: string): BuildOp {
+  const node = buildRackNodes(rack).find((n) => n.id === id);
+  if (!node) throw new Error(`rackTabCoupon: the compiler emitted no "${id}" part`);
+  return node.op;
+}
+
+/** Where a sliced piece's slab min corner lands for the origin `at`, with the
+ *  slab's own bounds mirrored when the piece is flipped. */
+function pieceShift(slab: [Vec3, Vec3], at: [number, number], turnOver: boolean): Vec3 {
+  const m: Vec3 = turnOver ? [slab[0][0], -slab[1][1], -slab[1][2]] : slab[0];
+  return [at[0] - m[0], at[1] - m[1], -m[2]];
+}
+
+/** Cut `part` with an axis-aligned slab and drop the piece on the bed so the
+ *  slab's min corner sits at `at` (x, y) — flipped about x first when that is
+ *  the way the real part reaches the bed. The slab is a query, not a drawing:
+ *  everything the coupon prints is the compiler's own geometry, clipped. */
+function slicePiece(
+  part: BuildOp,
+  slab: [Vec3, Vec3],
+  at: [number, number],
+  turnOver = false,
+): BuildOp {
+  const cut = intersection([part, boxBetween(slab[0], slab[1])]);
+  return translate(pieceShift(slab, at, turnOver), turnOver ? rotate([180, 0, 0], cut) : cut);
+}
+
+export function rackTabCouponPlan(rack: RackParams = RACK_COUPON_RACK): RackTabCouponPlan {
+  const dims = computeRackDims(rack);
+  const tabY = plateTabYs(dims.depth)[0]!;
+  const yMin = tabY - RACK_COUPON_HALF_WINDOW;
+  const yMax = tabY + RACK_COUPON_HALF_WINDOW;
+  // The tab's band is `FOOT_H .. FOOT_H + TAB_T`: `buildPlate` grows the tabs
+  // from its own z = 0 and `buildRackNodes` seats that at FOOT_H.
+  const ledgeSlab: [Vec3, Vec3] = [
+    [0, yMin, 0],
+    [SIDE_T, yMax, FOOT_H + TAB_T + RACK_COUPON_PAD],
+  ];
+  const tabSlab: [Vec3, Vec3] = [
+    [SIDE_T - TAB_REACH - RACK_COUPON_CLEAR, yMin, FOOT_H],
+    [SIDE_T + RACK_COUPON_DECK, yMax, FOOT_H + TAB_T],
+  ];
+  const ledgeSize: Vec3 = [SIDE_T, yMax - yMin, FOOT_H + TAB_T + RACK_COUPON_PAD];
+  const tabSize: Vec3 = [
+    tabSlab[1][0] - tabSlab[0][0],
+    yMax - yMin,
+    TAB_T,
+  ];
+  const rowW = (FIT_VARIANTS.length - 1) * RACK_COUPON_PITCH + SIDE_T;
+  const tabAt: [number, number] = [rowW + RACK_COUPON_GAP, 0];
+  return {
+    rack,
+    tabY,
+    plateZ: FOOT_H,
+    ledgeSlab,
+    tabSlab,
+    columnX: FIT_VARIANTS.map((_, i) => i * RACK_COUPON_PITCH),
+    ledgeShift: (rung) => pieceShift(ledgeSlab, [rung * RACK_COUPON_PITCH, 0], false),
+    tabShift: pieceShift(tabSlab, tabAt, true),
+    labelZ: ledgeSlab[1][2],
+    ledgeSize,
+    tabSize,
+    dims: {
+      x: tabAt[0] + tabSize[0],
+      y: yMax - yMin,
+      z: Math.max(ledgeSize[2], tabSize[2]),
+    },
+  };
+}
+
+/**
+ * The rack plate-tab coupon (#157): THREE ledge slices, one per #153 fit rung,
+ * plus ONE plate tab.
+ *
+ * Both halves are the compiler's own parts, cut with a slab: the ledges are
+ * `rack-side-left` compiled at the rung under test, the tab is `rack-bottom` —
+ * the same plate for every rung, because `buildSide` applies the relief to the
+ * LEDGE only and the plate's tabs never move. One printed tab therefore tests
+ * all three ledges honestly: whichever the tab slides into and still holds the
+ * deck down is the grade that ships.
+ *
+ * The tab is printed with its deck stub down, counterbore UP — the orientation
+ * the real plate prints in (`buildPlate`: printed the other way the tab's
+ * counterbore opens onto the bed and its head seat becomes a bridge).
+ */
+export function buildRackTabCoupon(
+  label?: Labeler,
+  rack: RackParams = RACK_COUPON_RACK,
+): FitCouponBuild {
+  const plan = rackTabCouponPlan(rack);
+  const bodies: BuildOp[] = [];
+  const cuts: BuildOp[] = [];
+  const columns: CouponColumn[] = [];
+
+  FIT_VARIANTS.forEach((fit, i) => {
+    const at: [number, number] = [plan.columnX[i]!, 0];
+    bodies.push(slicePiece(rackPart({ ...rack, fit }, 'rack-side-left'), plan.ledgeSlab, at));
+    const relief = fitRelief(fit);
+    const text = hundredthsLabel(relief);
+    if (label) {
+      cuts.push(
+        ...label(text, at[0] + SIDE_T / 2, RACK_COUPON_LABEL_Y, plan.labelZ, RACK_COUPON_ENGRAVE),
+      );
+    }
+    columns.push({ x: at[0] + SIDE_T / 2, value: relief, label: text, shipped: relief === 0 });
+  });
+
+  const tabAt: [number, number] = [plan.dims.x - plan.tabSize[0], 0];
+  bodies.push(slicePiece(rackPart(rack, 'rack-bottom'), plan.tabSlab, tabAt, true));
+
+  return {
+    op: difference([union(bodies), ...cuts]),
+    dims: plan.dims,
+    columns,
+    bodies: FIT_VARIANTS.length + 1,
+    settles:
+      'rack.ts TAB_SLACK + fitRelief(rack.fit) (#153): which grade — 0 / 0.10 / ' +
+      '0.25 mm — lets the plate tab slide into its bottom ledge and still stop ' +
+      'the deck shifting',
+    provenance:
+      'PROVISIONAL — the ladder is #153’s, and no rack has been assembled with a ' +
+      'loosened ledge to prove it. Both halves are the compiler’s own parts cut ' +
+      'with a slab, so the coupon cannot certify a slot the panel does not have; ' +
+      'the slice windows are coupon scaffolding, not mating surfaces. What it does ' +
+      'NOT cover: the same ledge is cut at the rack TOP with `TAB_T + OVER` of ' +
+      'depth (the coupon slices the bottom one), the plate is also carried by a ' +
+      'mid tab on racks deeper than MID_BAR_MIN_DEPTH, and nothing here tests the ' +
+      'M5 that pins the tab (its starter hole and head access are both in the ' +
+      'slice, but a print is not a torque test).',
   };
 }
 
@@ -575,6 +1223,16 @@ export const FIT_COUPONS: readonly FitCouponSpec[] = [
     id: 'board-snap',
     title: 'Board-snap two-jaw clip + PCB-edge gauge',
     build: (label) => buildBoardSnapClipCoupon(label),
+  },
+  {
+    id: 'snap-catch',
+    title: 'Snap-catch hook: socket ladder + tab',
+    build: (label) => buildSnapCatchCoupon(label),
+  },
+  {
+    id: 'rack-tab',
+    title: 'Rack plate tab + ledge ladder, with the plate tab',
+    build: (label) => buildRackTabCoupon(label),
   },
   {
     id: 'insert-pocket',

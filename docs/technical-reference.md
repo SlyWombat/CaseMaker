@@ -458,8 +458,15 @@ and `--list` prints the ids.
 | id | settles |
 | :--- | :--- |
 | `magnet-6x2`, `magnet-8x3`, `magnet-10x2` | the magnet pocket diameter, as a clearance ladder cut in two print orientations |
-| `board-snap` | the two-jaw board clip, with a PCB-edge gauge as a second printed body |
+| `board-snap` | `boardSnap.ts`'s `CLIP_FIT` (the spine-to-PCB-edge gap) laddered by #153's `fitRelief`, one clipped two-jaw clip per rung, plus a gauge cut to the board's own thickness to check the Z jaw opening accepts it |
+| `snap-catch` | `snapCatches.ts`'s hook socket, laddered by #153 — the tab and the socket wall are both the compiler's geometry, the barb pocket is measured off the mesh |
+| `rack-tab` | `rack.ts`'s `TAB_SLACK` (plate tab in its ledge), laddered by #153; both halves are the compiler's own parts cut with a slab, so the tab prints counterbore-up |
 | `insert-pocket` | the tool-insert pocket's `clearance` and `chamfer`, as two ladders of Ø10 pockets in one bar |
+
+The three #153-laddered coupons (`board-snap`, `snap-catch`, `rack-tab`) each print
+**one mating half per rung** and a shared other half, because the relief moves only
+the cut side: the tight rung is the shipped part byte-for-byte, and each later rung
+carries exactly `fitRelief(fit)` more clearance than it.
 
 **A coupon is not a redrawing.** Each one is built from the same builder the
 compiler uses — `magnetPocket`, `buildBoardSnapOps`, `roundPocketCutter` — so a
