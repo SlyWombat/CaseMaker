@@ -584,6 +584,20 @@ uncertainty 2 mm), so the app's collision check will warn.
   | #165 ladder run this session? (yes/no) | |
   | Notes | |
 
+- **The printer's first-layer Z-offset** (#187 item 6, filed as its own issue). No motion and no
+  trip needed — read it out of the slicer profile that printed the blank, and record it beside the
+  colour-change layer #165 step 1 measures, so the two can be checked against each other.
+
+  Decision 24 treats the probed engraved face as Z0, and `layerStack.ts` puts the model's first
+  layer on the bed; a `z_offset` (or elephant-foot compensation) in the printer profile lifts the
+  real first layer off the bed and moves the colour boundary by that amount relative to the probed
+  face, with no diagnostic. The question is only whether the offset is zero.
+
+  | Field | Value |
+  |---|---|
+  | Printer profile's first-layer `z_offset`, mm (0 = decision 24 holds) | |
+  | Slicer + version it was read from | |
+
 ---
 
 ## After the session — where the results land
