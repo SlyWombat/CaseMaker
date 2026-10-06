@@ -9,8 +9,9 @@ import { Center, OrbitControls, useGLTF } from '@react-three/drei';
  * chunk does not drag in `three` / `@react-three/fiber` / `@react-three/drei`:
  * the wrapper `lazy()`-loads this module only when a board carries a GLB and
  * the runtime has a WebGL context. No board ships a GLB yet (see
- * `src/docs/board-assets.md` — every candidate licence is still pending), so
- * this path is unexercised in the app today; it is here for when one lands.
+ * `src/docs/board-assets.md` — the licences are recorded, but no asset is
+ * bundled), so this path is unexercised in the app today; it is here for when
+ * one lands.
  */
 
 function GltfModel({ url }: { url: string }) {

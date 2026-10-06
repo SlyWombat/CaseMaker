@@ -14,24 +14,41 @@ For each board, find the most authoritative artifact in this order:
 
 Store under `public/board-assets/<board-id>/{model.glb,top.png,side.png,LICENSE.md}`. The `LICENSE.md` MUST name the source URL and the redistribution terms (CC-BY-SA, manufacturer's redistribution clause, etc.). Never bundle non-redistributable assets.
 
+A `LICENSE.md` sitting alone, with no model or image beside it, is not a mistake — it records a
+verdict of *no* or *not cleared*, and is what stops that verdict being re-researched. Every board in
+the table below has one.
+
 The `visualAssets` schema enforces this: a `glb`, `topImage` or `sideImage` present without both `license` and `sourceUrl` fails validation, which rejects the board at load (built-ins at import, community boards on import) and fails CI via `npm test`. Community boards may point at absolute asset URLs instead of `public/` paths.
 
 ## Per-board status
 
-| Board ID | License-cleared | Source | Notes |
+All twelve boards were researched on **2026-10-06**, and every verdict — including every "no" — is
+recorded with the clause that decides it, its source URL, and the date read, in
+`public/board-assets/<board-id>/LICENSE.md`. An unrecorded "no" gets re-researched by the next
+person, so a negative row here is a result, not a gap.
+
+| Board ID | Verdict | Licence that decides it | What we could ship |
 |---|---|---|---|
-| `rpi-4b` | _pending_ | https://www.raspberrypi.com/products/raspberry-pi-4-model-b/specifications/ | Raspberry Pi STEP files exist in their docs site; check Raspberry Pi Trading Ltd. T&C for redistribution. |
-| `rpi-5` | _pending_ | https://www.raspberrypi.com/products/raspberry-pi-5/ | |
-| `rpi-zero-2w` | _pending_ | https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/ | |
-| `rpi-pico` | _pending_ | https://www.raspberrypi.com/products/raspberry-pi-pico/ | |
-| `arduino-uno-r3` | _pending_ | https://store.arduino.cc/products/arduino-uno-rev3 | EAGLE / KiCad files are CC-BY-SA. Convert to GLB. |
-| `arduino-giga-r1-wifi` | _pending_ | https://store.arduino.cc/products/giga-r1-wifi | |
-| `esp32-devkit-v1` | _pending_ | DOIT 30-pin clone — manufacturer assets unavailable; consider hand-modeling or skip |
-| `teensy-41` | _pending_ | https://www.pjrc.com/store/teensy41.html | PJRC publishes mechanical drawings. |
-| `jetson-nano-b01` | _pending_ | https://developer.nvidia.com/embedded/jetson-nano-developer-kit | NVIDIA carrier board — check redistribution clause. |
-| `beaglebone-black` | _pending_ | https://github.com/beagleboard/beaglebone-black | Open-hardware; CAD redistributable. |
-| `microbit-v2` | _pending_ | https://tech.microbit.org/hardware/2-1-revision/ | |
-| `m5stack-core2` | _pending_ | https://docs.m5stack.com/en/core/core2 | M5Stack publishes glTF for some products. |
+| `rpi-5` | **cleared** | MIT — © 2026 Raspberry Pi Ltd (shipped in the archive) | Official STEP → convert to GLB. |
+| `m5stack-core2` | **cleared** | MIT — © 2021 M5Stack | Official `Core2.stl` → convert to GLB. |
+| `arduino-uno-r3` | **cleared** (design files) | CC BY-SA 4.0 (shipped in the archive) | No official 3D model; official photo, or a GLB derived from the EAGLE files. Stays CC BY-SA. |
+| `arduino-giga-r1-wifi` | CAD cleared; **STEP not** | CC BY-SA 4.0 (CAD) · none stated (STEP) | Same as the Uno; the published STEP carries no notice, so hold on that file. |
+| `beaglebone-black` | design files cleared | CC BY-SA 3.0 (System Reference Manual) | No 3D model published — nothing to ship. |
+| `microbit-v2` | schematic cleared | CC BY-SA 4.0 | No 3D model of the retail board — the reference design is a *different* board. |
+| `rpi-pico` | **not cleared** | none — the STEP archive ships no notice | Hold. Raspberry Pi's newer packages (Pi 5, Pico 2) do ship an MIT `LICENSE.txt`; re-check. |
+| `jetson-nano-b01` | **not cleared** | unreadable — gated behind an NVIDIA account | Hold. Docs/files sit in the Jetson Download Center; no grant is published outside it. |
+| `rpi-4b` | no asset | CC BY-ND 4.0 (drawings) | No STEP is published; the drawing is NoDerivatives, so it cannot become an image or a GLB. |
+| `rpi-zero-2w` | no asset | CC BY-ND 4.0 (drawings) | Same as the 4B. |
+| `esp32-devkit-v1` | no asset | — (maker reserves all rights; publishes nothing) | DOIT clone: hand-model it, or ship the synthesised placeholder. |
+| `teensy-41` | no asset | none stated | PJRC publishes no CAD; only forum-contributed models exist. |
+
+**What is shippable today:** two boards with a manufacturer model and a clear licence
+(`rpi-5`, `m5stack-core2`) plus two with official photography under CC BY-SA (`arduino-uno-r3`,
+`arduino-giga-r1-wifi`). Nothing is bundled yet — see "Adding assets for a new board" below.
+
+Two rows are deliberately unresolved rather than refused: `rpi-pico` and `jetson-nano-b01` are held
+because the terms could not be read, not because they forbid us. If either clearance is obtained, its
+record flips and the asset ships with the same gate as everything else.
 
 ## How the toggle works
 
@@ -42,7 +59,14 @@ The `visualAssets` schema enforces this: a `glb`, `topImage` or `sideImage` pres
 
 ## Adding assets for a new board
 
-1. Verify license terms — record in `public/board-assets/<id>/LICENSE.md`.
+The clearance comes first and is recorded whether the answer is yes or no — an unrecorded "no" is
+re-researched by the next person.
+
+1. **Read the terms, don't assume them.** Find the clause that actually permits or forbids
+   redistribution — the sentence itself, not a summary of the page — and record it in
+   `public/board-assets/<id>/LICENSE.md` with its source URL and the date read. For a bundled
+   archive the licence is often *inside* the download: the Raspberry Pi and Arduino STEP/CAD
+   packages both ship their own `LICENSE.txt`, which is stronger evidence than any web page.
 2. Place files under `public/board-assets/<id>/`.
 3. Add `visualAssets` to the JSON profile:
    ```json

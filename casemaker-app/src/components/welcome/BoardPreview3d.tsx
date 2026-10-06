@@ -9,9 +9,10 @@ import type { BoardProfile } from '@/types';
  *
  * The three.js renderer lives in `BoardPreview3dCanvas` and is `lazy()`-loaded
  * only when this path is taken, so the welcome screen's main chunk stays free
- * of `three` / react-three. No board carries a GLB yet — every candidate
- * licence in `src/docs/board-assets.md` is still pending, and this repo bundles
- * only licence-cleared assets — so this is the mount point, not a shipped view.
+ * of `three` / react-three. No board carries a GLB yet — the per-board licences
+ * are now researched and recorded in `src/docs/board-assets.md`, but nothing is
+ * bundled, and this repo ships only licence-cleared assets — so this is the
+ * mount point, not a shipped view.
  */
 
 const LazyCanvas = lazy(() =>
