@@ -671,6 +671,11 @@ const HINGE_STYLE_OPTIONS: { value: HingeStyle; label: string; hint: string }[] 
     label: 'Pip pivot',
     hint: 'Two short pivot bosses near the ends, no centerline pin. Lid clips on. Suitable only for shallow cases (< 80 mm). (#110)',
   },
+  {
+    value: 'hardware-screw',
+    label: 'Two screws',
+    hint: 'Two M3×8 screws, one at each end of the hinge edge — no printed pin. Robust for big or heavy lids that are opened often. The bosses sit at the ends of the face and are sized for the screw, so the hinge length above does not apply. (#114)',
+  },
 ];
 
 const HINGE_FACE_OPTIONS: { value: HingeFeature['face']; label: string }[] = [
@@ -698,6 +703,9 @@ function HingeSection({ params, patch }: HingeSectionProps) {
     setHinge({ ...hinge, ...p });
   };
   const enabled = !!hinge?.enabled;
+  // Issue #114 — the two-screw style fixes the count, the positioning and the run
+  // length from the screw geometry, so those controls are shown but inert.
+  const screwHinge = hinge?.style === 'hardware-screw';
   // Dropdown current value: 'none' if disabled, otherwise the style.
   const dropdownValue: HingeDropdownValue = enabled ? hinge!.style : 'none';
   const onDropdownChange = (next: HingeDropdownValue): void => {
@@ -764,13 +772,16 @@ function HingeSection({ params, patch }: HingeSectionProps) {
           <LabelledField
             label="Knuckle count"
             unit="count"
-            hint="Total knuckle slots. Odd, ≥3. Even indices are case-attached; odd indices are lid-attached."
+            hint={screwHinge
+              ? 'Fixed at 4 for the two-screw style: one case + one lid knuckle at each end of the face. (#114)'
+              : 'Total knuckle slots. Odd, ≥3. Even indices are case-attached; odd indices are lid-attached.'}
           >
             <input
               type="number"
               min={3}
               step={2}
               value={hinge.numKnuckles}
+              disabled={screwHinge}
               onChange={(e) =>
                 updateHinge({ numKnuckles: Math.max(3, Number(e.target.value) || 3) })
               }
@@ -796,36 +807,46 @@ function HingeSection({ params, patch }: HingeSectionProps) {
               className="numeric-input"
             />
           </LabelledField>
-          <LabelledField
-            label="Pin Ø"
-            unit="mm"
-            hint="Pin / through-hole nominal diameter. 3 mm fits an M3 screw or brass rod."
-          >
-            <input
-              type="number"
-              min={1}
-              max={6}
-              step={0.1}
-              value={hinge.pinDiameter}
-              onChange={(e) =>
-                updateHinge({ pinDiameter: Number(e.target.value) || 3 })
-              }
-              data-testid="hinge-pin-d"
-              className="numeric-input"
-            />
-          </LabelledField>
+          {/* Issue #114 — the two-screw style is closed by M3 screws, not a pin,
+              so there is no pin diameter to choose and no pin to print. */}
+          {!screwHinge && (
+            <LabelledField
+              label="Pin Ø"
+              unit="mm"
+              hint="Pin / through-hole nominal diameter. 3 mm fits an M3 screw or brass rod."
+            >
+              <input
+                type="number"
+                min={1}
+                max={6}
+                step={0.1}
+                value={hinge.pinDiameter}
+                onChange={(e) =>
+                  updateHinge({ pinDiameter: Number(e.target.value) || 3 })
+                }
+                data-testid="hinge-pin-d"
+                className="numeric-input"
+              />
+            </LabelledField>
+          )}
+          {/* Issue #114 — the two-screw bosses sit flush with the two ends of the
+              face and are sized from the screw, so neither the positioning mode
+              nor the run length means anything for that style. The controls stay
+              visible (so switching styles back does not lose the stored values)
+              but are inert. */}
           <div className="joint-row">
             <span className="joint-label" id="hinge-positioning-label">
               Positioning
             </span>
             <div className="joint-buttons" role="radiogroup" aria-labelledby="hinge-positioning-label">
               {HINGE_POSITIONING_OPTIONS.map((opt) => (
-                <label key={opt.value} title={opt.hint}>
+                <label key={opt.value} title={screwHinge ? 'Fixed for the two-screw style: the bosses sit at the ends of the face. (#114)' : opt.hint}>
                   <input
                     type="radio"
                     name="hinge-positioning"
                     value={opt.value}
                     checked={hinge.positioning === opt.value}
+                    disabled={screwHinge}
                     onChange={() => updateHinge({ positioning: opt.value })}
                     data-testid={`hinge-positioning-${opt.value}`}
                     aria-label={`${opt.label} — ${opt.hint}`}
@@ -838,7 +859,9 @@ function HingeSection({ params, patch }: HingeSectionProps) {
           <LabelledField
             label="Hinge length"
             unit="mm"
-            hint="Total length of the knuckle run, including clearances."
+            hint={screwHinge
+              ? 'Not used by the two-screw style — the bosses sit at the ends of the face. (#114)'
+              : 'Total length of the knuckle run, including clearances.'}
           >
             <input
               type="number"
@@ -846,6 +869,7 @@ function HingeSection({ params, patch }: HingeSectionProps) {
               max={200}
               step={1}
               value={hinge.hingeLength}
+              disabled={screwHinge}
               onChange={(e) =>
                 updateHinge({ hingeLength: Number(e.target.value) || 60 })
               }

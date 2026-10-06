@@ -12,6 +12,7 @@ import { computeShellDims } from './caseShell';
 import { faceFrame } from '../coords';
 import { computeLidDims } from './lid';
 import { clampHinge } from './featureScale';
+import { FASTENERS } from './fasteners';
 
 type HatResolver = (id: string) => HatProfile | undefined;
 const NO_HATS: HatPlacement[] = [];
@@ -88,6 +89,26 @@ const EMPTY_OPS: HingeOps = {
 const PIN_HOLE_TOLERANCE = 0.1;
 
 /**
+ * Issue #114 — the screw the `hardware-screw` style is built around.
+ *
+ * The published design this style comes from (Whity's Rugged Box, Printables 258431) closes its
+ * hinge with two short M3 screws instead of one pin down the middle. Only M3 is in scope — #114
+ * defers M2.5 / M4 — so there is deliberately no `screwSize` field to hold a single value.
+ *
+ * `length` is the screw's under-head length: the two knuckles it closes plus `engage` of proud
+ * thread across the far face. Everything geometric about the style is derived from these three
+ * numbers, so the bores and the hardware list cannot drift apart.
+ */
+export const HARDWARE_SCREW = {
+  size: 'M3' as const,
+  length: 8,
+  engage: 1,
+} as const;
+
+/** Printable wall around the screw's clearance bore in a pivot boss (mm). */
+const MIN_SCREW_BOSS_WALL = 1.5;
+
+/**
  * Map the face's u-axis to a rotation that aligns +Z (cylinder primitive
  * axis) with that direction. cylinder() runs along +Z; we orient it along
  * the in-plane u-direction of the chosen hinge face.
@@ -125,6 +146,23 @@ function normalizeHingeForStyle(hinge: HingeFeature): HingeFeature {
     // Two captive pivot bosses near the ends; no centerline pin.
     return { ...hinge, numKnuckles: 3, pinMode: 'separate' };
   }
+  if (hinge.style === 'hardware-screw') {
+    // Issue #114 — four knuckles: two pivot pairs, one at each end of the face.
+    // There is no pin of any kind; the screws are the pivots. `pinMode` is left
+    // on 'separate' so nothing downstream tries to print a pin that isn't there.
+    //
+    // The knuckle OD also has to clear the screw's clearance bore
+    // (M3 normal = 3.4 mm) with a printable wall on each side, which is more
+    // than MIN_KNUCKLE_OD guarantees; raise it here rather than in clampHinge,
+    // which has no idea which screw this style is built around.
+    const minOD = FASTENERS[HARDWARE_SCREW.size].clearance.normal + 2 * MIN_SCREW_BOSS_WALL;
+    return {
+      ...hinge,
+      numKnuckles: 4,
+      pinMode: 'separate',
+      knuckleOuterDiameter: Math.max(hinge.knuckleOuterDiameter, minOD),
+    };
+  }
   return hinge;
 }
 
@@ -135,12 +173,10 @@ function normalizeHingeForStyle(hinge: HingeFeature): HingeFeature {
  * Returns also the face-length so the caller can clamp `hingeLength`.
  */
 interface AxisLayout {
-  /** u-position of the FIRST knuckle's u-min edge along the face. */
-  uStart: number;
-  /** Length of one knuckle along u. */
+  /** u-position of every knuckle's u-min edge along the face. Length = N. */
+  positions: number[];
+  /** Length of one knuckle along u (the same for every knuckle). */
   knuckleLen: number;
-  /** Spacing along u between consecutive knuckle u-min edges (knuckleLen + clearance). */
-  pitch: number;
   /** Face length along u; for clamping diagnostics. */
   faceLen: number;
 }
@@ -151,6 +187,33 @@ function computeAxisLayout(
 ): AxisLayout {
   const N = Math.max(3, Math.floor(hinge.numKnuckles));
   const clearance = Math.max(0, hinge.knuckleClearance);
+
+  // Issue #114 — hardware-screw does NOT distribute knuckles across
+  // `hingeLength`. Its two screws are 8 mm long, so each pivot pair is a short
+  // cluster the screw can actually close, and the clusters sit flush with the
+  // two ends of the face — that leverage is the whole reason to choose this
+  // style. `hingeLength` and `positioning` therefore do not size it.
+  if (hinge.style === 'hardware-screw') {
+    const perCluster = Math.max(1, Math.floor(N / 2));
+    const knuckleLen = Math.max(
+      1.5,
+      (HARDWARE_SCREW.length - HARDWARE_SCREW.engage - (perCluster - 1) * clearance) /
+        perCluster,
+    );
+    const cluster = perCluster * knuckleLen + (perCluster - 1) * clearance;
+    // A face too short to hold both clusters with a gap between them would
+    // merge them into one long boss, which is no longer this hinge. Fall back
+    // to the spread layout — still two screws, just closer together.
+    if (2 * perCluster === N && 2 * cluster + clearance <= faceLen) {
+      const positions: number[] = [];
+      for (let i = 0; i < perCluster; i++) positions.push(i * (knuckleLen + clearance));
+      for (let i = 0; i < perCluster; i++) {
+        positions.push(faceLen - cluster + i * (knuckleLen + clearance));
+      }
+      return { positions, knuckleLen, faceLen };
+    }
+  }
+
   // Knuckle length: the (hingeLength - (N-1)*clearance) total divided across N
   // segments. clearance is the gap between consecutive knuckles.
   const totalSlots = Math.max(1, hinge.hingeLength - (N - 1) * clearance);
@@ -159,7 +222,8 @@ function computeAxisLayout(
   // Positioning: 'centered' is the default; 'continuous' stretches the whole
   // hingeLength to span the face (we still respect hingeLength as authored
   // and just place the run with u-start at 0); 'pair-at-ends' falls back to
-  // centered in v1 — see the issue body's vague spec; flagged as follow-up.
+  // centered in v1 for the knuckle styles — see the issue body's vague spec;
+  // flagged as follow-up. (Only `hardware-screw` above splits into pairs.)
   let uStart: number;
   switch (hinge.positioning as HingePositioning) {
     case 'continuous':
@@ -175,7 +239,11 @@ function computeAxisLayout(
       uStart = (faceLen - hinge.hingeLength) / 2;
       break;
   }
-  return { uStart, knuckleLen, pitch, faceLen };
+  return {
+    positions: Array.from({ length: N }, (_, i) => uStart + i * pitch),
+    knuckleLen,
+    faceLen,
+  };
 }
 
 /** Build a single knuckle solid placed at the given (x, y, z) origin —
@@ -288,6 +356,43 @@ function buildPrintInPlacePin(
   return translate(axisStart, orientAlongFaceU(cyl, hinge.face));
 }
 
+/**
+ * Issue #114 — the radius of the bore through one knuckle of a hardware-screw hinge.
+ *
+ * The two knuckles of a pair CANNOT both be threaded: a screw biting into the case knuckle and
+ * the lid knuckle alike would lock the lid shut, and there would be no hinge. The screw is
+ * driven from outside, so its head bears on the OUTER knuckle and its thread bites that same
+ * knuckle; the inner knuckle is a running clearance and the lid turns on the plain shank.
+ * Indices 0 and N-1 are the outer knuckles of the two pairs.
+ */
+function screwBoreRadius(index: number, N: number): number {
+  const outer = index === 0 || index === N - 1;
+  const spec = FASTENERS[HARDWARE_SCREW.size];
+  // Thread-FORMING pilot, not the machine-screw one: this style is specified around a
+  // self-tapping screw (#114), and the two numbers are different sizes for a reason
+  // (see the note over `machinePilot` in fasteners.ts).
+  return (outer ? spec.pilotForming : spec.clearance.normal) / 2;
+}
+
+/** Issue #114 — a bore spanning exactly ONE knuckle, for the per-screw hinge. A
+ *  half-mm overshoot at each end gives the boolean a clean exit; for the shell's
+ *  case knuckles the overshoot lands in the gap beside the boss, which is air. */
+function buildKnuckleBore(
+  hinge: HingeFeature,
+  origin: [number, number, number],
+  knuckleLen: number,
+  radius: number,
+): BuildOp {
+  const overshoot = 0.5;
+  const cyl = cylinder(knuckleLen + 2 * overshoot, radius, 24);
+  return translate(
+    [origin[0] - overshoot * dirX(hinge.face),
+     origin[1] - overshoot * dirY(hinge.face),
+     origin[2]],
+    orientAlongFaceU(cyl, hinge.face),
+  );
+}
+
 /** Sign of the u-axis in world X. +y/-y faces have uAxis = +x → 1; ±x → 0. */
 function dirX(face: HingeFeature['face']): number {
   return face === '+y' || face === '-y' ? 1 : 0;
@@ -352,13 +457,17 @@ export function buildHingeOps(
   const N = Math.max(3, Math.floor(hinge.numKnuckles));
 
   // Single shared through-hole world-space anchor (used by both the shell
-  // subtractive and a lid-local mirror that pre-drills the lid knuckles).
-  const holeStartX = frame.origin[0] + frame.uAxis[0] * layout.uStart + outX;
-  const holeStartY = frame.origin[1] + frame.uAxis[1] * layout.uStart + outY;
+  // subtractive and a lid-local mirror that pre-drills the lid knuckles). The
+  // hardware-screw style drills per knuckle instead and does not use it.
+  // `positions` always holds exactly N entries (computeAxisLayout builds it that
+  // way), so indexing it inside the 0..N loops below is safe.
+  const positions = layout.positions;
+  const holeStartX = frame.origin[0] + frame.uAxis[0] * positions[0]! + outX;
+  const holeStartY = frame.origin[1] + frame.uAxis[1] * positions[0]! + outY;
   const lidLocalAxisZ = axisZ - lidDims.zPosition;
 
   for (let i = 0; i < N; i++) {
-    const uMin = layout.uStart + i * layout.pitch;
+    const uMin = positions[i]!;
     // World-coord start of THIS knuckle: frame.origin + uAxis*uMin + outward*knuckleR,
     // at axis Z in world.
     const startX = frame.origin[0] + frame.uAxis[0] * uMin + outX;
@@ -383,10 +492,18 @@ export function buildHingeOps(
         [startX, startY, lidLocalAxisZ],
         layout.knuckleLen,
       );
-      const holeForLid = buildThroughHole(
-        hinge,
-        [holeStartX, holeStartY, lidLocalAxisZ],
-      );
+      // Issue #114 — a hardware-screw lid knuckle is bored by ITS OWN screw and
+      // only over its own length; the other styles use one cylinder down the
+      // whole hinge.
+      const holeForLid =
+        hinge.style === 'hardware-screw'
+          ? buildKnuckleBore(
+              hinge,
+              [startX, startY, lidLocalAxisZ],
+              layout.knuckleLen,
+              screwBoreRadius(i, N),
+            )
+          : buildThroughHole(hinge, [holeStartX, holeStartY, lidLocalAxisZ]);
       lidAdditive.push(difference([knuckle, holeForLid]));
       // Issue #121 — fairing tab between the lid knuckle's top and the
       // lid plate's underside. Without this they touch at exactly
@@ -406,8 +523,29 @@ export function buildHingeOps(
     }
   }
 
-  // Shell-side through-hole (subtracted from the unified shell op).
-  subtractive.push(buildThroughHole(hinge, [holeStartX, holeStartY, axisZ]));
+  if (hinge.style === 'hardware-screw') {
+    // Issue #114 — two independent short bores, one per CASE knuckle (the even
+    // indices), instead of one bore down the whole face. These are the two
+    // "through-holes" the style has; the lid's knuckles are bored locally above.
+    for (let i = 0; i < N; i += 2) {
+      const uMin = positions[i]!;
+      subtractive.push(
+        buildKnuckleBore(
+          hinge,
+          [
+            frame.origin[0] + frame.uAxis[0] * uMin + outX,
+            frame.origin[1] + frame.uAxis[1] * uMin + outY,
+            axisZ,
+          ],
+          layout.knuckleLen,
+          screwBoreRadius(i, N),
+        ),
+      );
+    }
+  } else {
+    // Shell-side through-hole (subtracted from the unified shell op).
+    subtractive.push(buildThroughHole(hinge, [holeStartX, holeStartY, axisZ]));
+  }
 
   // Issue #110 — pin generation for the new styles maps to existing modes:
   //   piano-continuous + piano-segmented: same as external-pin or

@@ -34,7 +34,13 @@ export type HingeStyle =
   | 'piano-segmented'
   /** Issue #110 — pip-pivot: two short pivot bosses near the ends, no
    *  centerline pin. Lid clips on. Only suitable for shallow cases. */
-  | 'pip-pivot';
+  | 'pip-pivot'
+  /** Issue #114 — hardware-screw: two short pivot bosses, one at each end of
+   *  the hinge face, each closed by its own M3 self-tapping screw instead of a
+   *  continuous pin. For big / heavy lids that are opened often (Whity's Rugged
+   *  Box). No pin node is emitted; `hingeLength` does not size this style — the
+   *  bosses sit at the face ends and are sized for the screw. */
+  | 'hardware-screw';
 export type HingePinMode = 'separate' | 'print-in-place';
 export type HingePositioning = 'continuous' | 'pair-at-ends' | 'centered';
 

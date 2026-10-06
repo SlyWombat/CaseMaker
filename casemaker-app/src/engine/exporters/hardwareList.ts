@@ -2,6 +2,7 @@ import type { Project } from '@/types';
 import { computeBossPlacements } from '@/engine/compiler/bosses';
 import { accessorySlots, computeRackDims, earScrewsPerSide, plateScrewYs, resolveShelfDepth, FAN_SCREW_D, LONG_SHELF } from '@/engine/compiler/rack';
 import { clearanceDiameter, pilotDiameter } from '@/engine/compiler/fasteners';
+import { HARDWARE_SCREW } from '@/engine/compiler/hinges';
 
 /**
  * The list quotes diameters, so it reads them from the same table the geometry
@@ -204,10 +205,21 @@ export function hardwareForProject(project: Project): HardwareItem[] {
     });
   }
 
-  // ----- Hinge pin (only when the user picked an external pin) -----
+  // ----- Hinge pin, or the two screws that replace it -----
   if (c.hinge?.enabled) {
     const h = c.hinge;
-    if (h.style === 'external-pin' || h.pinMode === 'separate') {
+    if (h.style === 'hardware-screw') {
+      // Issue #114 — two short screws ARE the pivot; there is no pin and no
+      // printed pin node. The length is not a guess: the boss geometry derives
+      // its knuckle length from exactly this screw, so any other length would
+      // disagree with the part (see HARDWARE_SCREW in hinges.ts).
+      items.push({
+        id: 'hinge-screws',
+        label: `${HARDWARE_SCREW.size} × ${HARDWARE_SCREW.length} mm self-tapping screw — hinge pivot`,
+        count: 2,
+        note: 'One at each end of the hinge face, driven in from the end once the lid is on. The head seats on the outermost knuckle and the thread bites that same knuckle; the mating knuckle is bored to clearance and turns on the plain shank. Because the knuckles alternate case/lid, one screw is held by the case and the other by the lid.',
+      });
+    } else if (h.style === 'external-pin' || h.pinMode === 'separate') {
       items.push({
         id: 'hinge-pin',
         label: `${h.pinDiameter.toFixed(1)} mm pin or threaded rod — hinge axle`,

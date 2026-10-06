@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildHingeOps } from '@/engine/compiler/hinges';
+import { buildHingeOps, HARDWARE_SCREW } from '@/engine/compiler/hinges';
+import { FASTENERS } from '@/engine/compiler/fasteners';
+import { hardwareForProject } from '@/engine/exporters/hardwareList';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { createDefaultProject } from '@/store/projectStore';
 import { computeShellDims } from '@/engine/compiler/caseShell';
@@ -330,5 +332,185 @@ describe('Issue #92 — schema migration v6 → v7 (now stamps v8, see #169)', (
     };
     const round = parseProject(serializeProject(project));
     expect(round.case.hinge).toEqual(project.case.hinge);
+  });
+});
+
+describe('Issue #114 — hardware-screw hinge (two M3 screws, no pin)', () => {
+  // The style is built around one screw, so the pair it closes is sized from
+  // it: (length − engage − clearance) / 2 knuckles. Keep the arithmetic here so
+  // a change to the screw shows up as a failing expectation, not a silent shift.
+  const CLEAR = 0.4;
+  const KNUCKLE_LEN = (HARDWARE_SCREW.length - HARDWARE_SCREW.engage - CLEAR) / 2;
+  const CLUSTER = 2 * KNUCKLE_LEN + CLEAR;
+  // Thread-forming pilot in the outer (screw-head-side) knuckle, a running
+  // clearance in the inner one — the half of the pair the lid pivots on.
+  const PILOT_R = FASTENERS[HARDWARE_SCREW.size].pilotForming / 2;
+  const CLEAR_R = FASTENERS[HARDWARE_SCREW.size].clearance.normal / 2;
+
+  function screwHinge(overrides: Partial<HingeFeature> = {}): HingeFeature {
+    return defaultHinge({ style: 'hardware-screw', ...overrides });
+  }
+
+  /** Walk down the single-subtree spine of an op to its bottom solid. */
+  function bottom(op: BuildOp): BuildOp {
+    let cur: BuildOp = op;
+    for (;;) {
+      if (cur.kind === 'difference') cur = cur.children[0]!;
+      else if (cur.kind === 'translate' || cur.kind === 'rotate') cur = cur.child;
+      else return cur;
+    }
+  }
+
+  function bottomCylinder(op: BuildOp): Extract<BuildOp, { kind: 'cylinder' }> {
+    const c = bottom(op);
+    if (c.kind !== 'cylinder') throw new Error(`expected a cylinder, got ${c.kind}`);
+    return c;
+  }
+
+  /** The placement translate at the bottom of a spine (translate may sit under a rotate). */
+  function placement(op: BuildOp): Extract<BuildOp, { kind: 'translate' }> {
+    let cur: BuildOp = op;
+    for (;;) {
+      if (cur.kind === 'translate') return cur;
+      if (cur.kind === 'difference') cur = cur.children[0]!;
+      else if (cur.kind === 'rotate') cur = cur.child;
+      else throw new Error(`no placement under ${cur.kind}`);
+    }
+  }
+
+  /** The u-offset (world X on a ±y face) of each op's placement, in list order. */
+  function uOffsets(ops: BuildOp[]): number[] {
+    return ops.map((op) => placement(op).offset[0]!);
+  }
+
+  function dimsFor(board: BoardProfile, hinge: HingeFeature) {
+    return computeShellDims(board, { ...baseCase, hinge }, [], () => undefined);
+  }
+
+  it('puts one pivot pair at each end of the face, with the middle of the face empty', () => {
+    const board = makeBoard(100, 80);
+    const hinge = screwHinge();
+    const ops = buildHingeOps(hinge, board, baseCase);
+    const faceLen = dimsFor(board, hinge).outerX;
+    const us = uOffsets(ops.caseAdditive);
+
+    expect(us).toHaveLength(2);
+    expect(us[0]).toBeCloseTo(0, 6);
+    // The second cluster ends flush with the far end of the face.
+    expect(us[1]).toBeCloseTo(faceLen - CLUSTER, 6);
+    // Nothing of the hinge lives in the middle half of the face — that is the
+    // point of the style, and it is where `hingeLength` would have put knuckles.
+    for (const u of us) {
+      expect(Math.abs(u - faceLen / 2)).toBeGreaterThan(faceLen / 4);
+    }
+  });
+
+  it('emits four knuckles: two case, two lid, each pair 7.0 mm long for an 8 mm screw', () => {
+    const board = makeBoard(100, 80);
+    const ops = buildHingeOps(screwHinge(), board, baseCase);
+    expect(ops.caseAdditive).toHaveLength(2);
+    // Each lid knuckle is a difference + a fairing cube that ties it to the lid.
+    expect(ops.lidAdditive).toHaveLength(2 * 2);
+    // The lid's fairing cubes live beside the knuckles in the same list; take
+    // the first child of each difference, which is the knuckle itself.
+    const knuckles = [
+      ...ops.caseAdditive,
+      ...ops.lidAdditive.filter((o) => o.kind === 'difference').map((o) => o.children[0]!),
+    ];
+    for (const op of knuckles) {
+      expect(bottomCylinder(op).height).toBeCloseTo(KNUCKLE_LEN, 6);
+    }
+    // The two lid knuckles, in order, sit just past their case neighbours.
+    const lidUs = uOffsets(ops.lidAdditive.filter((o) => o.kind === 'difference'));
+    expect(lidUs[0]).toBeCloseTo(KNUCKLE_LEN + CLEAR, 6);
+  });
+
+  it('the two screws share one axis, and each pair gets two bores — pilot outside, clearance inside', () => {
+    const board = makeBoard(100, 80);
+    const ops = buildHingeOps(screwHinge(), board, baseCase);
+    // Exactly two through-holes, not the one long centreline bore.
+    expect(ops.subtractive).toHaveLength(2);
+
+    const [left, right] = ops.subtractive;
+    // Left pair: the OUTER knuckle (index 0, case) is threaded…
+    expect(bottomCylinder(left!).radiusLow).toBeCloseTo(PILOT_R, 6);
+    // …and the right pair's outer knuckle is the LID's (index 3), so the case
+    // knuckle there (index 2) is the clearance side.
+    expect(bottomCylinder(right!).radiusLow).toBeCloseTo(CLEAR_R, 6);
+
+    // The lid knuckles are bored the other way round, and share the axis.
+    const lidCyls = ops.lidAdditive
+      .filter((o) => o.kind === 'difference')
+      .map((o) => bottomCylinder(o.children[1]!));
+    expect(lidCyls[0]!.radiusLow).toBeCloseTo(CLEAR_R, 6); // index 1, inner
+    expect(lidCyls[1]!.radiusLow).toBeCloseTo(PILOT_R, 6); // index 3, outer
+
+    // Same Y and Z for both bores: one hinge axis, two screws along it.
+    const yz = ops.subtractive.map((o) => [placement(o).offset[1], placement(o).offset[2]]);
+    expect(yz[0]).toEqual(yz[1]);
+  });
+
+  it('emits no pin at all, even when pinMode asks for a print-in-place one', () => {
+    const board = makeBoard(100, 80);
+    const ops = buildHingeOps(screwHinge({ pinMode: 'print-in-place' }), board, baseCase);
+    expect(ops.pinNode).toBeNull();
+  });
+
+  it('ignores hingeLength and positioning — the screws are what size it', () => {
+    const board = makeBoard(100, 80);
+    const short = buildHingeOps(
+      screwHinge({ hingeLength: 15, positioning: 'continuous' }),
+      board,
+      baseCase,
+    );
+    const long = buildHingeOps(
+      screwHinge({ hingeLength: 200, positioning: 'centered' }),
+      board,
+      baseCase,
+    );
+    expect(uOffsets(short.caseAdditive)).toEqual(uOffsets(long.caseAdditive));
+  });
+
+  it('keeps two pairs on a face too short to separate them, rather than merging into one boss', () => {
+    const board = makeBoard(20, 20);
+    const hinge = screwHinge();
+    const ops = buildHingeOps(hinge, board, baseCase);
+    expect(ops.caseAdditive).toHaveLength(2);
+    expect(ops.subtractive).toHaveLength(2);
+    const us = uOffsets(ops.caseAdditive);
+    // Whether they fit at the ends or fall back to a spread, they stay distinct.
+    expect(Math.abs(us[0]! - us[1]!)).toBeGreaterThan(0);
+  });
+
+  it('compiles to shell + lid with no hinge-pin node, and no diagnostics', () => {
+    const project = createDefaultProject('rpi-4b');
+    project.case.joint = 'flat-lid';
+    project.case.hinge = screwHinge();
+    const plan = compileProject(project);
+    expect(plan.nodes.find((n) => n.id === 'shell')).toBeDefined();
+    expect(plan.nodes.find((n) => n.id === 'lid')).toBeDefined();
+    expect(plan.nodes.find((n) => n.id === 'hinge-pin')).toBeUndefined();
+  });
+
+  it('bills two M3×8 screws and no pin', () => {
+    const project = createDefaultProject('rpi-4b');
+    project.case.hinge = screwHinge();
+    const items = hardwareForProject(project);
+    const screws = items.find((i) => i.id === 'hinge-screws');
+    expect(screws).toBeDefined();
+    expect(screws!.count).toBe(2);
+    expect(screws!.label).toContain(`${HARDWARE_SCREW.size} × ${HARDWARE_SCREW.length} mm`);
+    // The note must not call out one part as the threaded one: the knuckles alternate
+    // case/lid, so the screw at one end is held by the case and the one at the other by
+    // the lid (see screwBoreRadius). It says which KNUCKLE is threaded, not which part.
+    expect(screws!.note).toContain('outermost knuckle');
+    expect(screws!.note).toContain('one screw is held by the case and the other by the lid');
+    expect(items.find((i) => i.id === 'hinge-pin')).toBeUndefined();
+    // And the other styles still bill a pin, not screws.
+    const pip = createDefaultProject('rpi-4b');
+    pip.case.hinge = defaultHinge({ style: 'external-pin' });
+    const pipItems = hardwareForProject(pip);
+    expect(pipItems.find((i) => i.id === 'hinge-pin')).toBeDefined();
+    expect(pipItems.find((i) => i.id === 'hinge-screws')).toBeUndefined();
   });
 });

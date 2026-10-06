@@ -278,6 +278,10 @@ export const caseParamsSchema = z.object({
         'piano-continuous',
         'piano-segmented',
         'pip-pivot',
+        // Issue #114 — two M3 screws, one at each end of the face. Widening
+        // this enum needs no schema bump: no older file can contain the value,
+        // so every existing project still parses unchanged.
+        'hardware-screw',
       ]),
       face: z.enum(['+x', '-x', '+y', '-y']),
       numKnuckles: z.number().int().min(3),
