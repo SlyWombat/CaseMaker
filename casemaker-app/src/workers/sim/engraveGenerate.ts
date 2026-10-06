@@ -193,7 +193,7 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob): EngraveRe
   // #171 — a WARNING only, and only for a job that declares a void (`keepOutFindings` returns
   // early otherwise, so a void-free job pays nothing here). A cut deep enough to breach the
   // membrane stays the verifier's `cut-too-deep`, which owns the layer-aligned depth limit.
-  const voidFindings = keepOutFindings(tl, job, plan, engraveCutRegions(plan, measured));
+  const voidFindings = keepOutFindings(tl, job, plan, engraveCutRegions(plan, measured), radius);
 
   // `job.sacrificial` is threaded so the generate path's `vise-grip-shallow` judges what the
   // jaws actually grip (#213 §2), not the raw stock: the argument `validateVise` has accepted

@@ -13,7 +13,7 @@
  */
 
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
-import { keepOutLimit, keepOutMembrane } from '@/engine/cnc/engrave/partPlan';
+import { keepOutLimit, keepOutMembrane, traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { itemLabel, jobTool } from '@/engine/cnc/engrave/jobSetup';
@@ -333,6 +333,36 @@ export function engraveCutRegions(plan: PartPlan, measured: readonly LabelEngrav
 }
 
 /**
+ * The cuts a void check reads for SINGLE-LINE TRACES (#270): one `CutRegion` per trace, its region
+ * the path swept by the cutter. `traceSweptProfile` is the same shape the oracle predicts with, so
+ * the warning and the simulation cannot disagree about where a trace cuts.
+ *
+ * A trace IS warned about, unlike a drill (#220). The reason the drill is exempt does not apply
+ * here: a trace is a single pass, so it has no pocketed floor, but the advice the warning carries —
+ * move the cut clear, it costs nothing — is exactly the advice that helps. Material over a void is
+ * an unsupported membrane whatever the depth, so a traced line crossing one will chatter.
+ *
+ * `toolRadius` is null when the job has no usable cutter, in which case there is nothing to sweep
+ * and the list is empty — the same "no cutter, nothing measured" rule `measureLabels` follows.
+ */
+export function traceCutRegions(
+  tl: ManifoldToplevel,
+  plan: PartPlan,
+  toolRadius: number | null,
+): CutRegion[] {
+  if (toolRadius === null || toolRadius <= 0 || plan.traces.length === 0) return [];
+  return plan.traces.map((t) => {
+    const cs = executeProfile(tl, traceSweptProfile(t.paths, t.closed, toolRadius));
+    try {
+      // `toPolygons()` returns each contour as [x, y][]; the same shape `measureLabels` produces.
+      return { id: t.id, name: t.name, depth: t.depth, polygons: cs.toPolygons() as [number, number][][] };
+    } finally {
+      cs.delete();
+    }
+  });
+}
+
+/**
  * Warn about every cut that sits over an under-surface void (#171).
  *
  * One finding, not two: a cut deep enough to breach the membrane is refused as `cut-too-deep` by
@@ -350,16 +380,28 @@ export function engraveCutRegions(plan: PartPlan, measured: readonly LabelEngrav
  * Each cut yields at most one finding, about the void with the SHALLOWEST limit among those it
  * covers: the same "worst void wins" rule `keepOutLimitAt` and the run sheet's `keepOutOver` use,
  * so the banner and the sheet name the same void.
+ *
+ * `regions` are the engrave regions (`engraveCutRegions`); single-line traces are swept from the
+ * plan here instead (#270), so a caller does not have to remember they exist. Drills are still
+ * absent (#220) — see `engraveCutRegions`.
  */
 export function keepOutFindings(
   tl: ManifoldToplevel,
   job: EngraveJob,
   plan: PartPlan,
   regions: readonly CutRegion[],
+  toolRadius: number | null,
 ): JobFinding[] {
+  // A void-free job is the common case and pays for nothing more than this line (#171): the trace
+  // regions below need the toplevel to sweep, and sweeping them for a job with no voids to check
+  // against would be pure waste on #205's debounce.
   if (plan.stock.keepOuts.length === 0) return [];
   const CS = tl.CrossSection;
   const findings: JobFinding[] = [];
+  // #270 — traces reach the void check here rather than through `engraveCutRegions`, because their
+  // region is a swept path rather than a measured opening. Built only once the job is known to
+  // declare a void, so the early return above still holds.
+  const all: readonly CutRegion[] = [...regions, ...traceCutRegions(tl, plan, toolRadius)];
 
   // Each void footprint is evaluated ONCE, not once per cut: a blank carries a handful of voids
   // and a job dozens of cuts, and every evaluation is a Clipper2 op (#205 runs this on a debounce).
@@ -369,7 +411,7 @@ export function keepOutFindings(
   });
 
   try {
-    for (const region of regions) {
+    for (const region of all) {
       if (region.polygons.length === 0) continue;
       const cut = CS.ofPolygons(region.polygons, 'Positive');
       try {

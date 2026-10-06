@@ -116,6 +116,47 @@ describe('engravePreview (#205)', () => {
     expect(over[0]!.message).toContain('Magnet pocket');
   });
 
+  // #270 — the panel half of the trace check: `keepOutFindings` sweeps the trace itself, and the
+  // preview passes it the same radius the run does, so a trace crossing a void is warned about
+  // while the line is being placed rather than only after Generate.
+  it('warns about a TRACE over the void in the live preview too (#270)', () => {
+    const job = defaultEngraveJob();
+    job.labels = [];
+    job.shapes = [];
+    job.traces = [
+      {
+        kind: 'line',
+        id: 'tr',
+        position: { x: 35, y: 30 },
+        rotation: 0,
+        points: [
+          [0, 0],
+          [30, 0],
+        ],
+        closed: false,
+        depth: 0.8,
+        enabled: true,
+      },
+    ];
+    job.keepOuts = [
+      {
+        id: 'pocket',
+        name: 'Magnet pocket',
+        kind: 'rect',
+        position: { x: 50, y: 30 },
+        rotation: 0,
+        enabled: true,
+        zCeiling: 10,
+        width: 30,
+        height: 20,
+        cornerRadius: 0,
+      },
+    ];
+    const over = preview(job).findings.filter((f) => f.code === 'item-over-void');
+    expect(over).toHaveLength(1);
+    expect(over[0]!.labelId).toBe('tr');
+  });
+
   it('reports the tool recommendation with the compromise size suggestion appended', () => {
     const job = defaultEngraveJob();
     // A 4 mm label cannot survive the 3.175 mm cutter, so the compromise message gains the

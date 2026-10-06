@@ -12,7 +12,7 @@ import { version as APP_VERSION } from '../../package.json';
 import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
-import type { EngraveJob, EngraveKeepOut } from '@/types/engraveJob';
+import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveTraceItem } from '@/types/engraveJob';
 
 describe('engraveGenerate (#206)', () => {
   it('takes the default job all the way to a clean .nc', () => {
@@ -226,6 +226,78 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     expect(over).toBeTruthy();
     expect(over!.labelId).toBe('over');
     expect(over!.message).toContain('CASE');
+  });
+
+  // #270 — a TRACE over a void warns, for the same reason a region does: the membrane has nothing
+  // under it, so a pass across it chatters however shallow. The advice the sentence carries — move
+  // the cut clear — is exactly what a one-line trace can do, which is why the drill exemption
+  // below does not reach it.
+  /** A two-point horizontal trace from `at`, 30 mm long, in the stock frame. */
+  const traceLine = (at: { x: number; y: number }): EngraveTraceItem => ({
+    kind: 'line',
+    id: 'tr',
+    position: at,
+    rotation: 0,
+    points: [
+      [0, 0],
+      [30, 0],
+    ],
+    closed: false,
+    depth: 0.8,
+    enabled: true,
+  });
+  /** The same depth, drilled straight into the void's centre. */
+  const drillOver: EngraveDrill = {
+    kind: 'drill',
+    id: 'd',
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    depth: 0.8,
+    through: false,
+    enabled: true,
+  };
+
+  it('warns for a TRACE crossing the void (#270)', () => {
+    // x 35…65 across the pocket's 35…65, at its centreline.
+    const g = engraveGenerate(tl, {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      traces: [traceLine({ x: 35, y: 30 })],
+      keepOuts: [pocket],
+    });
+    const over = g.findings.filter((f) => f.code === 'item-over-void');
+    expect(over).toHaveLength(1);
+    expect(over[0]!.severity).toBe('warning');
+    expect(over[0]!.labelId).toBe('tr');
+    expect(over[0]!.message).toContain('Magnet pocket');
+    // Named the way the operations list names it, not as a bare id.
+    expect(over[0]!.message).toContain('Trace line');
+  });
+
+  it('leaves the same trace unwarned when it is clear of the void (#270)', () => {
+    // Moved to y 52, behind the pocket's 20…40 — the only difference is where the line sits.
+    const g = engraveGenerate(tl, {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      traces: [traceLine({ x: 35, y: 52 })],
+      keepOuts: [pocket],
+    });
+    expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
+  });
+
+  it('does NOT warn for a drill over the void — the #220 exemption, pinned (#270)', () => {
+    // A drill into the pocket is a breach the VERIFIER owns (`cut-too-deep`); this warning is about
+    // the finish of a pocketed floor, and a drilled hole has none. #270 asked for this to stay.
+    const g = engraveGenerate(tl, {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      drills: [drillOver],
+      keepOuts: [pocket],
+    });
+    expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
   });
 });
 

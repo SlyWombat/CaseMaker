@@ -243,8 +243,9 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
       ...engFindings,
       // #171 — the same warning the run raises, off the same shared region builder, so the
-      // panel shows it while the label is being placed rather than only after Generate.
-      ...keepOutFindings(tl, job, plan, engraveCutRegions(plan, measured)),
+      // panel shows it while the label is being placed rather than only after Generate. The
+      // radius goes in so a trace's swept region can be built too (#270); it is null-safe.
+      ...keepOutFindings(tl, job, plan, engraveCutRegions(plan, measured), radius?.ok ? radius.radius : null),
     ]);
 
     // A label whose findings include an error is left out of the cut — the stock is drawn
