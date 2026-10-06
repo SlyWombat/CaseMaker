@@ -342,6 +342,10 @@ export const caseParamsSchema = z.object({
       chamfer: z.number().nonnegative(),
       floor: z.number().nonnegative(),
       pitchGap: z.number().nonnegative(),
+      // Issue #262 — tool retention. Optional and absent = 'friction', the
+      // geometry every project saved before it existed has, so no migration.
+      retention: z.enum(['friction', 'magnet']).optional(),
+      magnetSize: z.enum(['6x2', '8x3', '10x2']).optional(),
       items: z.array(
         z.object({
           id: z.string(),

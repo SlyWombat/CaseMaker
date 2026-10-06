@@ -1,6 +1,12 @@
 import type React from 'react';
 import { useProjectStore } from '@/store/projectStore';
-import type { InsertItem, InsertParams, InsertPocketShape } from '@/types';
+import type {
+  InsertItem,
+  InsertParams,
+  InsertPocketShape,
+  InsertRetention,
+  MagnetSize,
+} from '@/types';
 import { LabelledField } from '@/components/ui/LabelledField';
 import { derivedKind } from '@/engine/compiler/archetype';
 import {
@@ -8,6 +14,9 @@ import {
   insertGrid,
   insertLayout,
   insertProblem,
+  magnetFloorThickness,
+  magnetSizeOf,
+  retentionOf,
 } from '@/engine/compiler/insert';
 import { newId } from '@/utils/id';
 
@@ -95,6 +104,10 @@ export function InsertPanel() {
   const problem = insertProblem(insert);
   const grid = insertGrid(insert);
   const placed = insertLayout(insert).length;
+  const retention = retentionOf(insert);
+  // The plate a magnet floor needs, or null at friction. Shown live so the
+  // number is there before the user makes it a problem.
+  const magnetNeeds = magnetFloorThickness(insert);
 
   return (
     <div className="panel-stack" data-testid="insert-panel">
@@ -210,6 +223,44 @@ export function InsertPanel() {
               onChange={(e) => update({ pitchGap: Number(e.target.value) })}
             />
           </label>
+        </div>
+      </LabelledField>
+
+      <LabelledField
+        label="Retention"
+        hint="How the tools are held. Friction is the pocket wall alone; a magnet floor cuts a disc pocket under every pocket, so a steel shank is pulled down as well as gripped. The plate then has to carry the deepest pocket, the disc, and a 1 mm web under it — thicken it and the problem goes away."
+      >
+        <div style={ROW}>
+          <select
+            value={retention}
+            data-testid="insert-retention"
+            aria-label="Tool retention"
+            onChange={(e) => update({ retention: e.target.value as InsertRetention })}
+          >
+            <option value="friction">Friction</option>
+            <option value="magnet">Magnet</option>
+          </select>
+          {retention === 'magnet' && (
+            <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <span style={{ fontSize: 12 }}>Disc</span>
+              <select
+                value={magnetSizeOf(insert)}
+                data-testid="insert-magnet-size"
+                aria-label="Magnet size"
+                onChange={(e) => update({ magnetSize: e.target.value as MagnetSize })}
+              >
+                <option value="6x2">6 × 2</option>
+                <option value="8x3">8 × 3</option>
+                <option value="10x2">10 × 2</option>
+              </select>
+            </label>
+          )}
+          {magnetNeeds !== null && (
+            <span style={HINT} data-testid="insert-magnet-needs">
+              Needs {Math.round(magnetNeeds * 100) / 100} mm of plate; this one is{' '}
+              {insert.thickness} mm.
+            </span>
+          )}
         </div>
       </LabelledField>
 

@@ -7,7 +7,7 @@
 // controls reach the project through the store.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { InsertPanel } from '@/components/panels/InsertPanel';
 import { defaultInsert } from '@/engine/compiler/insert';
 import { createDefaultProject, useProjectStore } from '@/store/projectStore';
@@ -30,5 +30,36 @@ describe('InsertPanel (#267)', () => {
     expect(screen.getByTestId('insert-summary')).toBeTruthy();
     expect(screen.getByTestId('insert-item-0')).toBeTruthy();
     expect(screen.getByTestId('insert-add-round')).toBeTruthy();
+  });
+});
+
+// Issue #262, item 2 — the retention control. The geometry and the numbers are
+// `insert.spec.ts`'s; this proves the panel puts them on screen and writes the
+// choice back to the project.
+describe('InsertPanel — magnet retention (#262)', () => {
+  it('starts at friction, with no disc to choose and no magnet budget to report', () => {
+    seed(defaultInsert());
+    render(<InsertPanel />);
+    expect((screen.getByTestId('insert-retention') as HTMLSelectElement).value).toBe('friction');
+    expect(screen.queryByTestId('insert-magnet-size')).toBeNull();
+    expect(screen.queryByTestId('insert-magnet-needs')).toBeNull();
+  });
+
+  it('shows the disc and the plate it needs, and says the default plate is short', () => {
+    seed({ ...defaultInsert(), retention: 'magnet' });
+    render(<InsertPanel />);
+    expect(screen.getByTestId('insert-magnet-size')).toBeTruthy();
+    // 4.5 mm pocket + 2.4 mm disc + 1 mm web = 7.9, against a 6 mm plate.
+    expect(screen.getByTestId('insert-magnet-needs').textContent).toContain('7.9 mm');
+    expect(screen.getByTestId('insert-problem').textContent).toContain('needs a 7.9 mm plate');
+  });
+
+  it('writes the retention and the disc to the project', () => {
+    seed(defaultInsert());
+    render(<InsertPanel />);
+    fireEvent.change(screen.getByTestId('insert-retention'), { target: { value: 'magnet' } });
+    expect(useProjectStore.getState().project.case.insert?.retention).toBe('magnet');
+    fireEvent.change(screen.getByTestId('insert-magnet-size'), { target: { value: '8x3' } });
+    expect(useProjectStore.getState().project.case.insert?.magnetSize).toBe('8x3');
   });
 });

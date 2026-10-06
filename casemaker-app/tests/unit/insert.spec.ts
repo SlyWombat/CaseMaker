@@ -15,8 +15,13 @@ import {
   insertGrid,
   insertLayout,
   insertProblem,
+  magnetDepth,
+  magnetFloorThickness,
+  magnetSizeOf,
   pocketRadius,
+  retentionOf,
 } from '@/engine/compiler/insert';
+import type { InsertParams } from '@/types';
 import { cube, intersection, translate, type BuildOp } from '@/engine/compiler/buildPlan';
 import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { PRINT_FLIP_NODE_IDS, partForId, printMetaForId } from '@/engine/exporters/parts';
@@ -205,5 +210,95 @@ describe('#158 — case.insert through the schema and the compiler', () => {
     project.case.insert = defaultInsert();
     const plan = compileProject(project);
     expect(plan.nodes.map((n) => n.id)).toEqual(['insert-plate']);
+  });
+});
+
+// Issue #262, item 2 — the retention enum's first rung: a disc pocket under
+// every pocket, cut with `fasteners.ts`'s `magnetPocket` (#152, which until now
+// had only its own coupon as a consumer). The failures worth testing are the
+// silent ones: a disc pocket that eats through the plate's underside, and one
+// that opens into its neighbour's.
+describe('#262 — magnet-floor retention', () => {
+  /** The default plate with magnets on. 8 mm, not the default 6: the default
+   *  4.5 mm pocket needs 7.9 mm of plate before the disc has a web under it. */
+  const magnet = (patch: Partial<InsertParams> = {}): InsertParams => ({
+    ...defaultInsert(),
+    retention: 'magnet',
+    thickness: 8,
+    ...patch,
+  });
+
+  it('reads absent retention as friction, and an unset disc as 6x2', () => {
+    expect(retentionOf(defaultInsert())).toBe('friction');
+    expect(magnetDepth(defaultInsert())).toBe(0);
+    expect(magnetFloorThickness(defaultInsert())).toBeNull();
+    expect(magnetSizeOf({ ...defaultInsert(), retention: 'magnet' })).toBe('6x2');
+  });
+
+  it('sizes the floor as the deepest pocket + the disc + the web', () => {
+    // 4.5 pocket + 2.4 disc pocket (6x2) + 1 web = 7.9; an 8x3 disc + 1.
+    expect(magnetFloorThickness(magnet())).toBeCloseTo(7.9, 6);
+    expect(magnetFloorThickness(magnet({ magnetSize: '8x3' }))).toBeCloseTo(8.9, 6);
+    expect(insertProblem(magnet())).toBeNull();
+  });
+
+  it('refuses a plate too thin for the disc under its deepest pocket', () => {
+    // The default 6 mm plate: a legal FRICTION plate, an impossible magnet one.
+    const thin = magnet({ thickness: 6 });
+    expect(insertProblem(thin)).toMatch(/needs a 7.9 mm plate/);
+    expect(insertProblem(thin)).toMatch(/this one is 6 mm/);
+    // 7.9 exactly is enough — the web is what has to survive, not more.
+    expect(insertProblem(magnet({ thickness: 7.9 }))).toBeNull();
+  });
+
+  it('refuses a disc pocket wider than the pitch, which would merge with the next', () => {
+    // One ⌀8 pocket + 0.25 clearance = an 8.25 mm pitch with no gap, and a
+    // 10x2 disc pocket is ⌀10.5 — two of those cut as a single slot.
+    const items = [{ id: 'i', shape: 'round' as const, size: 8, depth: 4.5 }];
+    const merged = magnet({ items, magnetSize: '10x2', pitchGap: 0 });
+    expect(insertProblem(merged)).toMatch(/merge/);
+    expect(insertProblem({ ...merged, pitchGap: 3 })).toBeNull();
+  });
+
+  it('cuts the disc below the pocket floor, never into the bore', () => {
+    const withoutDisc = buildInsertOp({ ...magnet(), retention: 'friction' })!;
+    const withDisc = buildInsertOp(magnet())!;
+    expect(shells(withDisc)).toBe(1);
+
+    // The extra metal removed is a Ø6.5 × 2.4 disc. The cutter is a 32-sided
+    // prism, which under-fills a circle by ~0.6%, so the band is 2% wide.
+    const disc = Math.PI * (6.5 / 2) ** 2 * 2.4;
+    const removed = volume(withoutDisc) - volume(withDisc);
+    expect(removed / disc).toBeGreaterThan(0.98);
+    expect(removed / disc).toBeLessThan(1.001);
+
+    // The pocket floor is at 3.5 (8 mm plate, 4.5 mm pocket). 0.1 mm above it
+    // the two plates are the same bore; down at 1.5 only the magnet plate has
+    // been cut — which is what makes the disc the tool's FLOOR, not its depth.
+    const slab = (z: number) => translate([-1, -1, z], cube([122, 82, 0.3]));
+    const inDisc = (op: BuildOp) => volume(intersection([op, slab(1.5)]));
+    const inBore = (op: BuildOp) => volume(intersection([op, slab(3.6)]));
+    expect(inDisc(withDisc)).toBeLessThan(inDisc(withoutDisc));
+    expect(inBore(withDisc)).toBeCloseTo(inBore(withoutDisc), 0);
+  });
+
+  it('leaves the plate whole rather than cut through to its underside', () => {
+    // No room for the disc and its web: the cut is skipped, not clamped into a
+    // through-hole (and `magnetPocket` must not throw out of the build while
+    // the user is mid-edit). The plate is then exactly the friction one.
+    const thin = magnet({ thickness: 6 });
+    expect(insertProblem(thin)).not.toBeNull();
+    expect(volume(buildInsertOp(thin)!)).toBeCloseTo(
+      volume(buildInsertOp({ ...thin, retention: 'friction' })!),
+      3,
+    );
+  });
+
+  it('round-trips retention and the disc size through the schema', () => {
+    const original = createDefaultProject('rpi-4b');
+    original.case.insert = magnet({ magnetSize: '8x3' });
+    const parsed = parseProject(serializeProject(original));
+    expect(parsed.case.insert?.retention).toBe('magnet');
+    expect(parsed.case.insert).toEqual(original.case.insert);
   });
 });

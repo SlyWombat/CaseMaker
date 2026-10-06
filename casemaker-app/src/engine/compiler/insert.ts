@@ -1,5 +1,10 @@
 import type { Vec2 } from '@/types';
-import type { InsertItem, InsertParams } from '@/types';
+import type {
+  InsertItem,
+  InsertParams,
+  InsertRetention,
+  MagnetSize,
+} from '@/types';
 import { circleProfile, poly, rectProfile, roundedRect, type Profile } from './profile';
 import {
   cylinder,
@@ -11,6 +16,7 @@ import {
   type BuildOp,
 } from './buildPlan';
 import { segmentsForRadius } from './arcResolution';
+import { magnetPocket, magnetPocketDepth, magnetPocketDiameter } from './fasteners';
 
 /**
  * Issue #158 — the tool-insert holder archetype's geometry.
@@ -29,10 +35,21 @@ import { segmentsForRadius } from './arcResolution';
  * `chamfer` and `floor` are all the user's to change, and the panel exposes
  * them; the friction fit is the one a coupon should settle (#157), exactly as
  * #140 did for the M5 pilot.
+ *
+ * Issue #262 — `retention: 'magnet'` adds a disc pocket under every pocket,
+ * cut DOWNWARD from the pocket's floor with `fasteners.ts`'s `magnetPocket`
+ * (#152), so the disc finishes flush with the floor the tool rests on. The
+ * plate then has to carry pocket + disc + a web under that, which is the one
+ * new constraint the user can trip (`magnetFloorThickness`).
  */
 
 /** Minimum material from a pocket's edge to the plate's side, mm. */
 const WALL_EDGE = 3;
+
+/** Solid left under a magnet pocket, mm. The same floor `fasteners.ts`
+ *  defaults to, passed explicitly so the two cannot drift apart: a thinner web
+ *  than this and the disc breaks through the plate's underside. */
+const MAGNET_WEB = 1;
 
 const SQRT3 = Math.sqrt(3);
 
@@ -41,7 +58,9 @@ const SQRT3 = Math.sqrt(3);
  *  The pocket is `thickness − floor` deep, i.e. exactly what `starterItem` in
  *  the panel would add: a default that its own `insertProblem` rejects (a
  *  deeper pocket leaving less than the stated floor) would greet the user with
- *  an error the moment they enabled the archetype. */
+ *  an error the moment they enabled the archetype. That is also why it stays
+ *  friction-retained: a 6 mm plate cannot carry a 4.5 mm pocket AND a disc
+ *  under it, and the panel's magnet option says so in the same terms. */
 export function defaultInsert(): InsertParams {
   return {
     enabled: true,
@@ -68,6 +87,39 @@ export function defaultInsert(): InsertParams {
 export function pocketRadius(item: InsertItem, clearance: number): number {
   const s = item.size + clearance;
   return item.shape === 'round' ? s / 2 : s / SQRT3;
+}
+
+/** The retention in force. Absent = `friction`: the geometry every project
+ *  saved before #262 has, so an old file prints exactly what it always did. */
+export function retentionOf(insert: InsertParams): InsertRetention {
+  return insert.retention ?? 'friction';
+}
+
+/** The disc cut under each pocket when retention is `magnet`. */
+export function magnetSizeOf(insert: InsertParams): MagnetSize {
+  return insert.magnetSize ?? '6x2';
+}
+
+/** How far the disc pocket reaches below each pocket's floor, mm — 0 when the
+ *  tools are held by friction alone. */
+export function magnetDepth(insert: InsertParams): number {
+  return retentionOf(insert) === 'magnet' ? magnetPocketDepth(magnetSizeOf(insert)) : 0;
+}
+
+/**
+ * The thickness a magnet floor needs — deepest pocket + disc pocket + web — or
+ * null when there is nothing to fit.
+ *
+ * Exported so the panel and `insertProblem` state the same number in the same
+ * terms: this is the one constraint the user can trip that the pocket depth
+ * check alone does not catch (a 4.5 mm pocket in a 6 mm plate is a legal
+ * friction plate and an impossible magnet one).
+ */
+export function magnetFloorThickness(insert: InsertParams): number | null {
+  const depth = magnetDepth(insert);
+  if (depth === 0 || insert.items.length === 0) return null;
+  const deepest = Math.max(...insert.items.map((it) => it.depth));
+  return deepest + depth + MAGNET_WEB;
 }
 
 /** Regular hexagon profile with across-flats = `acrossFlats`, centred on the origin. */
@@ -169,13 +221,31 @@ export function insertProblem(insert: InsertParams): string | null {
     }
   }
 
-  const { cols, rows } = insertGrid(insert);
+  const needThickness = magnetFloorThickness(insert);
+  if (needThickness !== null && needThickness > insert.thickness + 1e-9) {
+    return (
+      `A ${magnetSizeOf(insert)} magnet floor needs a ${round2(needThickness)} mm plate` +
+      ` (pocket + disc + ${MAGNET_WEB} mm web); this one is ${insert.thickness} mm`
+    );
+  }
+
+  const { cols, rows, pitch } = insertGrid(insert);
   if (cols < 1) {
     const r = Math.max(0, ...insert.items.map((it) => pocketRadius(it, insert.clearance)));
     return `A ${insert.width} mm plate is too narrow for a ${round2(2 * r)} mm pocket`;
   }
   if (cols * rows < insert.items.length) {
     return `The plate holds ${cols * rows} pockets, not ${insert.items.length}`;
+  }
+  // A disc pocket wider than the pitch would open into its neighbour's and the
+  // two would cut as one slot — geometry the user did not ask for, and no other
+  // check catches it (the pitch itself is legal at any gap down to zero).
+  const discD = magnetPocketDiameter(magnetSizeOf(insert));
+  if (magnetDepth(insert) > 0 && pitch > 0 && discD > pitch + 1e-9) {
+    return (
+      `A ${round2(discD)} mm magnet pocket is wider than the ${round2(pitch)} mm pitch —` +
+      ' adjacent magnets would merge; widen the pitch gap or pick a smaller disc'
+    );
   }
   return null;
 }
@@ -246,7 +316,32 @@ export function buildInsertOp(insert: InsertParams): BuildOp | null {
     ({ item }) => item.size > 0 && item.depth > 0,
   );
   if (placements.length === 0) return plate;
-  const cutters = placements.map(({ item, cx, cy }) => pocketCutter(item, insert, cx, cy));
+  const cutters: BuildOp[] = placements.map(({ item, cx, cy }) =>
+    pocketCutter(item, insert, cx, cy),
+  );
+  const disc = magnetDepth(insert);
+  if (disc > 0) {
+    const size = magnetSizeOf(insert);
+    for (const { item, cx, cy } of placements) {
+      // The slab under this pocket's floor is what the disc pocket cuts into.
+      const slab = insert.thickness - item.depth;
+      // No room for the disc AND its web: skip the cut rather than break
+      // through the plate — or throw out of `magnetPocket`, which would take
+      // the whole viewport down mid-edit. `insertProblem` reports the number.
+      if (slab - disc < MAGNET_WEB - 1e-9) continue;
+      cutters.push(
+        magnetPocket({
+          size,
+          // Entry face = the pocket's floor, so the disc finishes flush with
+          // the surface the tool rests on and eats none of its depth.
+          at: [cx, cy, slab],
+          axis: '-z',
+          material: slab,
+          floor: MAGNET_WEB,
+        }),
+      );
+    }
+  }
   return difference([plate, ...cutters]);
 }
 
