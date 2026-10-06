@@ -25,6 +25,8 @@ import { buildHingeOps } from './hinges';
 import { buildCustomCutouts } from './customCutouts';
 import { buildStandNodes } from './stand';
 import { buildRackNodes } from './rack';
+import { buildBadgeNodes } from './badge';
+import { derivedKind } from './archetype';
 import { validatePlacements } from './placementValidator';
 import { getBuiltinHat } from '@/library/hats';
 import { getBuiltinDisplay } from '@/library/displays';
@@ -55,11 +57,14 @@ export function compileProject(project: Project): BuildPlan {
   } = project;
   const resolveHat = makeHatResolver(project);
   const resolveDisplay = makeDisplayResolver(project);
+  // Issue #167 — one place decides which archetype this is; the three branches
+  // below used to each read their own `enabled` flag.
+  const kind = derivedKind(project);
 
   // Mini-rack archetype: an assembly of side panels + plates + accessories,
   // no PCB and no shell at all. Unlike the stand it needs no board data, so
   // this branch never falls through.
-  if (caseParams.rack?.enabled) {
+  if (kind === 'rack' && caseParams.rack) {
     return {
       nodes: buildRackNodes(caseParams.rack),
       placementReport: validatePlacements(project),
@@ -70,7 +75,7 @@ export function compileProject(project: Project): BuildPlan {
   // Desk-stand archetype: a frame + tilted foot, no cavity and no lid. Every
   // feature compiler below assumes a box shell around a PCB, so the stand
   // takes its own path rather than trying to make fourteen of them no-op.
-  if (caseParams.stand?.enabled) {
+  if (kind === 'stand' && caseParams.stand) {
     const standNodes = buildStandNodes(board, caseParams.stand);
     if (standNodes) {
       return {
@@ -83,6 +88,20 @@ export function compileProject(project: Project): BuildPlan {
     }
     // Board isn't a finished enclosure module — fall through to the normal
     // shell so the user still gets geometry rather than an empty viewport.
+  }
+
+  // Name-badge archetype (issue #167): the whole project is the two-colour
+  // badge blank — two parts, no cavity, no lid, no board. Like the stand, an
+  // unbuildable parameter set falls through rather than emptying the viewport.
+  if (kind === 'badge' && caseParams.badge) {
+    const badgeNodes = buildBadgeNodes(caseParams.badge);
+    if (badgeNodes) {
+      return {
+        nodes: badgeNodes,
+        placementReport: validatePlacements(project),
+        smartCutoutDecisions: [],
+      };
+    }
   }
 
   // Issue #105 — pass display so the shell envelope grows when the display

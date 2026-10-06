@@ -14,6 +14,8 @@ import { transformPlacementPorts } from './hatOrientation';
 import { getBuiltinHat } from '@/library/hats';
 import { getBuiltinDisplay } from '@/library/displays';
 import { validateRackFit } from './rackFit';
+import { derivedKind } from './archetype';
+import { badgeParamsProblem } from '@/types/badge';
 
 /**
  * Issue #37 — cross-cutting validation that catches overlap, off-PCB, and
@@ -39,7 +41,9 @@ export type PlacementIssueKind =
   // Rack archetype: a part exceeds the configured printer's build volume.
   | 'printer-fit'
   // Rack archetype: configuration problems (slot overflow, mount guidance).
-  | 'rack-config';
+  | 'rack-config'
+  // Badge archetype (issue #167): the badge's own parameter constraints.
+  | 'badge-config';
 
 export interface PlacementIssue {
   severity: PlacementSeverity;
@@ -386,11 +390,29 @@ function buildFaceRects(
 }
 
 export function validatePlacements(project: Project): PlacementReport {
+  const kind = derivedKind(project);
+
   // Rack archetype: no shell, no walls, no ports — the box-oriented checks
   // below are all vacuous. Its own validation covers printer fit, slot
   // budget, and wall-mount guidance.
-  if (project.case.rack?.enabled) {
+  if (kind === 'rack' && project.case.rack) {
     const issues = validateRackFit(project.case.rack);
+    return {
+      issues,
+      errorCount: issues.filter((i) => i.severity === 'error').length,
+      warningCount: issues.filter((i) => i.severity === 'warning').length,
+    };
+  }
+
+  // Badge archetype (issue #167): likewise nothing below applies — there is no
+  // board, no shell, no port. The only thing that can be wrong is the badge's
+  // own parameters, which are the oracle script's two assertions
+  // (`make_badge.py:33-34`) surfaced rather than thrown.
+  if (kind === 'badge' && project.case.badge) {
+    const problem = badgeParamsProblem(project.case.badge);
+    const issues: PlacementIssue[] = problem
+      ? [{ severity: 'error', kind: 'badge-config', involves: ['badge'], message: problem }]
+      : [];
     return {
       issues,
       errorCount: issues.filter((i) => i.severity === 'error').length,

@@ -101,11 +101,19 @@ function isRack(build: () => Project): boolean {
   return build().case.rack?.enabled === true;
 }
 
+/** The badge archetype (issue #167) is likewise a two-part assembly with no
+ * shell and no lid; badge.spec.ts owns its geometry. Invariant 10 pins the
+ * node set here alongside the other archetypes. */
+function isBadge(build: () => Project): boolean {
+  return build().case.badge?.enabled === true;
+}
+
 describe('compiler invariants (#58) — matrix of boards × templates', () => {
   const allCases = projectsToTest();
-  const cases = allCases.filter((c) => !isStand(c.build) && !isRack(c.build));
+  const cases = allCases.filter((c) => !isStand(c.build) && !isRack(c.build) && !isBadge(c.build));
   const standCases = allCases.filter((c) => isStand(c.build));
   const rackCases = allCases.filter((c) => isRack(c.build));
+  const badgeCases = allCases.filter((c) => isBadge(c.build));
 
   describe('Invariant 1: BuildPlan emits at LEAST shell + lid; optionally extra named parts', () => {
     // Some templates legitimately add extra top-level nodes:
@@ -251,6 +259,29 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
           const bb = aabbOfOp(n.op)!;
           expect(bb.min[2], `${c.label} ${n.id} sits above the floor`).toBeGreaterThanOrEqual(-0.01);
         }
+      });
+    }
+  });
+
+  // Badge archetype (issue #167): two colour bands of one outline, bonded at
+  // the split plane. Well-formed, exactly two parts, and both share the same
+  // XY footprint — the property the bond depends on.
+  describe('Invariant 10: badge archetype emits two congruent colour bands', () => {
+    for (const c of badgeCases) {
+      it(`${c.label}: badge parts well-formed and congruent`, () => {
+        const plan = compileProject(c.build());
+        expect(plan.nodes.map((n) => n.id)).toEqual(['badge-bottom', 'badge-top']);
+        const bottom = aabbOfOp(plan.nodes[0]!.op)!;
+        const top = aabbOfOp(plan.nodes[1]!.op)!;
+        for (const n of plan.nodes) assertWellFormed(n.op, `${c.label} ${n.id}`);
+        // Same outline, so same XY box; the bands stack from z = 0 with no gap
+        // and no overlap — the bottom's top face IS the top's bottom face.
+        expect(bottom.min[0]).toBeCloseTo(top.min[0], 6);
+        expect(bottom.max[0]).toBeCloseTo(top.max[0], 6);
+        expect(bottom.min[1]).toBeCloseTo(top.min[1], 6);
+        expect(bottom.max[1]).toBeCloseTo(top.max[1], 6);
+        expect(bottom.min[2]).toBeCloseTo(0, 6);
+        expect(bottom.max[2]).toBeCloseTo(top.min[2], 6);
       });
     }
   });

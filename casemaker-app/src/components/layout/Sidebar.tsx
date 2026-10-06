@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore, type SidebarSectionId } from '@/store/viewportStore';
+import { derivedKind, type Archetype } from '@/engine/compiler/archetype';
 
 /** Phone breakpoint, matching the welcome screen's ≤640px block. Below it the
  *  left rail is an off-canvas drawer instead of a fixed 320px column, which
@@ -45,9 +46,22 @@ if (__FEATURE_SIM__) {
  *  the open project. */
 const RACK_SECTION_IDS: SidebarSectionId[] = ['rack', 'export', 'cnc-sim', 'cnc-engrave'];
 
+/** Same idea for the name-badge archetype (issue #167): no board, no shell,
+ *  no ports — but unlike a rack the badge IS the thing the engrave editor
+ *  drives, so that panel stays and the rack's own section does not. */
+const BADGE_SECTION_IDS: SidebarSectionId[] = ['export', 'cnc-sim', 'cnc-engrave'];
+
+/** The section ids the current archetype offers — the full list for a shell. */
+function sectionIdsFor(archetype: Archetype): SidebarSectionId[] | null {
+  if (archetype === 'rack') return RACK_SECTION_IDS;
+  if (archetype === 'badge') return BADGE_SECTION_IDS;
+  return null;
+}
+
 export function Sidebar() {
   const welcomeMode = useProjectStore((s) => s.welcomeMode);
-  const rackMode = useProjectStore((s) => s.project?.case.rack?.enabled === true);
+  const archetype = useProjectStore((s) => derivedKind(s.project));
+  const rackMode = archetype === 'rack';
   const activeSection = useViewportStore((s) => s.activeSidebarSection);
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
   // Phone-width drawer (issue #134). Mirrors ContextPanel's compact pattern:
@@ -66,17 +80,19 @@ export function Sidebar() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  const allowedIds = sectionIdsFor(archetype);
+
   // A stale active section (e.g. HATs was open when the rack got enabled)
   // would leave the right rail showing an inapplicable panel.
   useEffect(() => {
-    if (rackMode && activeSection && !RACK_SECTION_IDS.includes(activeSection)) {
-      setSection('rack');
+    if (allowedIds && activeSection && !allowedIds.includes(activeSection)) {
+      setSection(rackMode ? 'rack' : 'export');
     }
-  }, [rackMode, activeSection, setSection]);
+  }, [allowedIds, rackMode, activeSection, setSection]);
   if (welcomeMode) {
     return <aside className="sidebar" />;
   }
-  const sections = rackMode ? SECTIONS.filter((s) => RACK_SECTION_IDS.includes(s.id)) : SECTIONS;
+  const sections = allowedIds ? SECTIONS.filter((s) => allowedIds.includes(s.id)) : SECTIONS;
   // Sidebar is now an INDEX of sections. Clicking a section opens its
   // editor in the right rail (ContextPanel). Mutually exclusive with
   // viewport geometry selection — clicking either switches the right

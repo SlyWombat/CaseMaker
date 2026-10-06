@@ -4,6 +4,7 @@ import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { cavityOriginXY } from '@/engine/coords';
 import { standModulePlacement } from '@/engine/compiler/stand';
+import { derivedKind } from '@/engine/compiler/archetype';
 import { buildBoardPlaceholderGroup } from '@/engine/scene/boardPlaceholder';
 
 /**
@@ -22,6 +23,7 @@ import { buildBoardPlaceholderGroup } from '@/engine/scene/boardPlaceholder';
 export function BoardPlaceholderMesh() {
   const board = useProjectStore((s) => s.project.board);
   const params = useProjectStore((s) => s.project.case);
+  const archetype = useProjectStore((s) => derivedKind(s.project));
   const showBoard = useViewportStore((s) => s.showBoard);
 
   const group = useMemo(() => {
@@ -30,7 +32,7 @@ export function BoardPlaceholderMesh() {
     // in board coords and drop it onto the frame with the same placement the
     // geometry compiler uses — otherwise it renders flat on the foot, which is
     // where the module very much is not.
-    const stand = params.stand;
+    const stand = archetype === 'stand' ? params.stand : undefined;
     const placement = stand?.enabled ? standModulePlacement(board, stand) : null;
     if (placement) {
       const g = buildBoardPlaceholderGroup(board, { origin: { x: 0, y: 0, z: 0 } });
@@ -52,6 +54,7 @@ export function BoardPlaceholderMesh() {
     });
   }, [
     board,
+    archetype,
     params.stand,
     params.wallThickness,
     params.internalClearance,

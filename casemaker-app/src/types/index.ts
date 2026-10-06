@@ -2,6 +2,7 @@ export * from './units';
 export * from './board';
 export * from './case';
 export * from './rack';
+export * from './badge';
 export * from './port';
 export * from './mesh';
 export * from './project';

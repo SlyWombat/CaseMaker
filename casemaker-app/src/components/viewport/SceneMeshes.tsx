@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { useJobStore } from '@/store/jobStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { useProjectStore } from '@/store/projectStore';
+import { derivedKind } from '@/engine/compiler/archetype';
 import { bufferToGeometry } from '@/engine/scene/meshFromBuffer';
 import { ExternalAssetMeshes } from './ExternalAssetMeshes';
 import { PortMarkers } from './PortMarkers';
@@ -96,11 +97,12 @@ function CaseMeshes() {
   const shellRender = useViewportStore((s) => s.shellRender);
   const hiddenParts = useViewportStore((s) => s.hiddenParts);
   const latches = useProjectStore((s) => s.project.case.latches);
-  // A rack has no host PCB. The rack archetype replaces the case/lid pipeline
-  // entirely, but a project still carries a board, so the placeholder PCB and
-  // its HATs kept rendering — a green board sitting inside the rack, part of
-  // nothing and printed by nothing.
-  const rackMode = useProjectStore((s) => s.project.case.rack?.enabled === true);
+  // A rack has no host PCB, and neither does a badge. Those archetypes replace
+  // the case/lid pipeline entirely, but a project still carries a board, so the
+  // placeholder PCB and its HATs kept rendering — a green board sitting inside
+  // the rack, part of nothing and printed by nothing.
+  const archetype = useProjectStore((s) => derivedKind(s.project));
+  const noHostBoard = archetype === 'rack' || archetype === 'badge';
   // Subscribe to the Map ref; derive ids in the body. See PartsMenu for the
   // explanation of the Zustand `?? []` selector trap.
   const nodes = useJobStore((s) => s.nodes);
@@ -187,8 +189,8 @@ function CaseMeshes() {
         }
         return mesh;
       })}
-      {showShell && !rackMode && <BoardPlaceholderMesh />}
-      {showShell && !rackMode && <HatPlaceholderMeshes />}
+      {showShell && !noHostBoard && <BoardPlaceholderMesh />}
+      {showShell && !noHostBoard && <HatPlaceholderMeshes />}
       <ExternalAssetMeshes />
       <PortMarkers />
     </group>

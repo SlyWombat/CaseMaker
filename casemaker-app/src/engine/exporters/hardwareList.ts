@@ -3,6 +3,7 @@ import { computeBossPlacements } from '@/engine/compiler/bosses';
 import { accessorySlots, computeRackDims, earScrewsPerSide, plateScrewYs, resolveShelfDepth, FAN_SCREW_D, LONG_SHELF } from '@/engine/compiler/rack';
 import { clearanceDiameter, pilotDiameter } from '@/engine/compiler/fasteners';
 import { HARDWARE_SCREW } from '@/engine/compiler/hinges';
+import { derivedKind } from '@/engine/compiler/archetype';
 
 /**
  * The list quotes diameters, so it reads them from the same table the geometry
@@ -34,6 +35,7 @@ export interface HardwareItem {
 export function hardwareForProject(project: Project): HardwareItem[] {
   const items: HardwareItem[] = [];
   const c = project.case;
+  const kind = derivedKind(project);
 
   // ----- Mini rack ----------------------------------------------------------
   // Two different screw jobs, and users kept asking which was which:
@@ -46,7 +48,7 @@ export function hardwareForProject(project: Project): HardwareItem[] {
   // Without accessories fitted, the plate tab screws are all that holds the
   // frame square.
   const rack = c.rack;
-  if (rack?.enabled) {
+  if (kind === 'rack' && rack) {
     let frontScrews = 0;
     let rearScrews = 0;
     for (const acc of rack.accessories ?? []) {
@@ -122,7 +124,7 @@ export function hardwareForProject(project: Project): HardwareItem[] {
   // the boss pocket, then threads into the boss.
   const stand = c.stand;
   const enc = project.board.enclosure;
-  if (stand?.enabled && enc) {
+  if (kind === 'stand' && stand && enc) {
     const holes = project.board.mountingHoles?.length ?? 0;
     if (holes > 0) {
       const holeDia = project.board.mountingHoles[0]!.diameter; // Ø2 on the Guition panel
@@ -150,6 +152,13 @@ export function hardwareForProject(project: Project): HardwareItem[] {
     }
     return items; // a stand has no lid, no cavity, no gasket — nothing else applies
   }
+
+  // ----- Name badge (issue #167) --------------------------------------------
+  // A two-colour badge is two printed parts bonded at the colour split — no
+  // screws, no inserts, no gasket. The magnet pocket takes a magnet, not
+  // hardware, and the pocket's size IS the oracle's number rather than a
+  // magnet datasheet, so nothing here would be honest to print.
+  if (kind === 'badge') return items;
 
   // ----- Screws into the bosses --------------------------------------------
   // Two independent retention paths share the same threaded boss/insert:

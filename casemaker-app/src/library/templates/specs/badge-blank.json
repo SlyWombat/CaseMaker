@@ -1,0 +1,32 @@
+{
+  "id": "badge-blank",
+  "order": 170,
+  "name": "Name badge blank (two-colour)",
+  "description": "The 76 × 38 mm two-colour name-badge blank, ported from samples/badge-blank/make_badge.py: a magnet pocket in the back colour and a plain engraved face on the top colour. Engrave the name in the Engrave-text panel, then machine it on the CNC.",
+  "estPrintMinutes": 35,
+  "projectName": "Name badge blank",
+  "emptyBoard": {
+    "id": "badge-blank-outline",
+    "name": "Badge blank (76.2 × 38.1 mm)",
+    "x": 76.2,
+    "y": 38.1
+  },
+  "casePatch": {
+    "badge": {
+      "enabled": true,
+      "width": 76.2,
+      "height": 38.1,
+      "thickness": 3.81,
+      "cornerRadius": 3.175,
+      "splitHeight": 3,
+      "magnetPocket": {
+        "length": 45,
+        "width": 13,
+        "depth": 2.3
+      },
+      "bottomExtruder": 2,
+      "topExtruder": 3
+    }
+  },
+  "ports": "none"
+}

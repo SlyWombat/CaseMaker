@@ -1,6 +1,7 @@
 import type { Mm } from './units';
 import type { SnapCatch, FitVariant } from './snap';
 import type { RackParams } from './rack';
+import type { BadgeParams } from './badge';
 
 /**
  * Issue #153 — `FitVariant` lives with the snap types (`types/snap.ts`)
@@ -389,6 +390,14 @@ export interface CaseParameters {
    * board data at all (templates use `emptyBoard`).
    */
   rack?: RackParams;
+  /**
+   * Issue #167 — two-colour name-badge archetype (see types/badge.ts). When
+   * enabled, the project compiles to the badge BLANK — two nodes, one per
+   * extruder colour — instead of a shell+lid box. Like `rack` and `stand` it
+   * bypasses the whole shell/lid/boss/vent pipeline, and like `rack` it needs
+   * no real board data (the template uses `emptyBoard`).
+   */
+  badge?: BadgeParams;
 }
 
 /**

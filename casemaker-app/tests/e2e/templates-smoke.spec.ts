@@ -23,6 +23,7 @@ const TEMPLATE_IDS = [
   'esp32-dev-tray',
   'mini-rack-10in',
   'snap-fit-test',
+  'badge-blank',
 ] as const;
 
 /**
@@ -53,6 +54,9 @@ const TEMPLATE_IDS = [
  *  shell/lid spot-check. */
 const ASSEMBLY_TEMPLATE_NODES: Record<string, string[]> = {
   'mini-rack-10in': ['rack-side-left', 'rack-side-right', 'rack-bottom', 'rack-top'],
+  // The badge is two parts bonded at the colour split, so it has no shell/lid
+  // to spot-check either.
+  'badge-blank': ['badge-bottom', 'badge-top'],
 };
 
 const KNOWN_BROKEN: Record<string, number> = {

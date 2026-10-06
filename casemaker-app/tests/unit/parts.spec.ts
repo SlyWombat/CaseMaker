@@ -115,9 +115,16 @@ describe('Part registry (#120)', () => {
     }
   });
 
-  it('flips exactly the lid, the bottom plate and the two fused racks', () => {
+  it('flips exactly the lid, the bottom plate, the two fused racks and both badge parts', () => {
     expect([...PRINT_FLIP_NODE_IDS].sort()).toEqual(
-      ['lid', 'rack-assembled-all', 'rack-assembled-frame', 'rack-bottom'].sort(),
+      [
+        'lid',
+        'rack-assembled-all',
+        'rack-assembled-frame',
+        'rack-bottom',
+        'badge-bottom',
+        'badge-top',
+      ].sort(),
     );
     // The top plate is the bottom plate turned over, so it is already
     // counterbore-up as modelled and must NOT be flipped.

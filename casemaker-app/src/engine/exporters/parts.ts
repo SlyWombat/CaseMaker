@@ -154,6 +154,22 @@ const PRINT_TABLE: Record<string, PrintMeta> = {
       exportedFlipNote: 'The exported file already comes this way up — drop it straight in.',
     },
   ),
+  'badge-bottom': flat(
+    'Print FLIPPED — the magnet pocket opens UPWARD, so its roof prints on the layer below instead of bridging 45 × 13 mm over the void. The bottom colour',
+    {
+      flipForPrint: true,
+      exportedFlipNote:
+        'The exported file already comes this way up — drop it straight in. Print the TOP colour separately and bond the two at the flat face.',
+    },
+  ),
+  'badge-top': flat(
+    'Print FLIPPED — engraved face DOWN on the bed, so the engraved detail is the first layer and the split face stays flat. The top colour',
+    {
+      flipForPrint: true,
+      exportedFlipNote:
+        'The exported file already comes this way up — drop it straight in. Print the BOTTOM colour separately and bond the two at the flat face.',
+    },
+  ),
 };
 
 /** Id families (rack accessories, latch arms/pins, bumpers). None of these
@@ -272,6 +288,16 @@ function describePart(
   }
   if (id === 'hinge-pin') {
     return { displayName: 'Hinge pin', material: 'rigid', category: 'fastener' };
+  }
+  if (id === 'badge-bottom') {
+    return { displayName: 'Badge blank — BOTTOM colour', material: 'rigid', category: 'case' };
+  }
+  if (id === 'badge-top') {
+    return {
+      displayName: 'Badge blank — TOP colour (engraved face)',
+      material: 'rigid',
+      category: 'case',
+    };
   }
   if (id.startsWith('latch-arm-')) {
     const suffix = id.slice('latch-arm-'.length);

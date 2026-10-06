@@ -584,6 +584,14 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `feed-refused` | error | The requested feed is so far above the ceiling it was refused rather than clamped. | Use a sane feed. |
 | `rpm-refused` | error | The requested spindle speed is so far above the ceiling it was refused. | Use a sane spindle speed. |
 
+**Planning the probe** (probe plan — #188; the planner is engine-only for now, so no screen
+raises these yet):
+
+| Code | Severity | What it means in plain words | What to do |
+|---|---|---|---|
+| `no-outline` | error | The part's outline needs a geometry kernel to evaluate (a boolean or offset shape), and the planner is kernel-free, so it has nothing to measure against. | Nothing you can do from the app — this is a wiring gap the caller closes by evaluating the outline in the worker first. |
+| `no-reachable-edge` | error | On an axis the fixture leaves open, that axis still has a straight edge long enough and clear of the fixture. The message names the obstruction. | Move or remove whatever the message names — that is what is sitting on the edge. |
+
 **Reading the file header** (form prefill only; these never change the sweep):
 
 | Code | Severity | What it means in plain words | What to do |

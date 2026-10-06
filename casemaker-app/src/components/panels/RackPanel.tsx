@@ -18,6 +18,7 @@ import {
   SLOT_PITCH,
 } from '@/engine/compiler/rack';
 import { newId } from '@/utils/id';
+import { derivedKind } from '@/engine/compiler/archetype';
 
 /**
  * Rack archetype editor (see types/rack.ts). IMPORTANT: patchCase validates
@@ -89,11 +90,12 @@ const WALL_MOUNT_OPTIONS: { value: NonNullable<RackParams['wallMount']>; label: 
 export function RackPanel() {
   const project = useProjectStore((s) => s.project);
   const patchCase = useProjectStore((s) => s.patchCase);
+  const archetype = useProjectStore((s) => derivedKind(s.project));
   const rack = project?.case.rack;
 
   if (!project) return null;
 
-  if (!rack?.enabled) {
+  if (archetype !== 'rack' || !rack) {
     return (
       <div className="panel-stack" data-testid="rack-panel-disabled">
         <p style={{ fontSize: 13, lineHeight: 1.5, color: '#9aa4b0' }}>

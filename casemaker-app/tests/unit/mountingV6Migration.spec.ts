@@ -3,12 +3,12 @@ import { parseProject, serializeProject } from '@/store/persistence';
 import { createDefaultProject } from '@/store/projectStore';
 
 describe('mounting features v6 schema migration (#80)', () => {
-  it("createDefaultProject stamps schemaVersion: 10", () => {
+  it("createDefaultProject stamps schemaVersion: 11", () => {
     const p = createDefaultProject('rpi-4b');
-    expect(p.schemaVersion).toBe(10);
+    expect(p.schemaVersion).toBe(11);
   });
 
-  it('a v5-shaped project on disk loads, stamps schemaVersion: 10, and fills mountClass on every feature', () => {
+  it('a v5-shaped project on disk loads, stamps schemaVersion: 11, and fills mountClass on every feature', () => {
     const v5OnDisk = {
       schemaVersion: 5,
       id: 'p1',
@@ -49,7 +49,7 @@ describe('mounting features v6 schema migration (#80)', () => {
       antennas: [],
     };
     const parsed = parseProject(JSON.stringify(v5OnDisk));
-    expect(parsed.schemaVersion).toBe(10);
+    expect(parsed.schemaVersion).toBe(11);
     expect(parsed.mountingFeatures).toHaveLength(2);
     for (const f of parsed.mountingFeatures) {
       expect(f.mountClass).toBe('external');
