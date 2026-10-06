@@ -224,20 +224,20 @@ describe('case.magnetPockets through the schema', () => {
       { id: 'mag-2', face: '-x', u: 5, v: 5, size: '10x2', enabled: false },
     ];
     const parsed = parseProject(serializeProject(original));
-    expect(parsed.schemaVersion).toBe(11);
+    expect(parsed.schemaVersion).toBe(12);
     expect(parsed.case.magnetPockets).toEqual(original.case.magnetPockets);
   });
 
   it('leaves the field undefined when a project has no pockets', () => {
     const parsed = parseProject(serializeProject(createDefaultProject('rpi-4b')));
-    expect(parsed.schemaVersion).toBe(11);
+    expect(parsed.schemaVersion).toBe(12);
     expect(parsed.case.magnetPockets).toBeUndefined();
   });
 
   it('loads a v8 project, stamps it v9, and has no pockets', () => {
     const v8 = { ...createDefaultProject('rpi-4b'), schemaVersion: 8 };
     const parsed = parseProject(JSON.stringify(v8));
-    expect(parsed.schemaVersion).toBe(11);
+    expect(parsed.schemaVersion).toBe(12);
     expect(parsed.case.magnetPockets).toBeUndefined();
   });
 });

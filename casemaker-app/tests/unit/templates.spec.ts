@@ -32,10 +32,10 @@ describe('Marketing gap #15 — project templates', () => {
   it('each template builds a current-version Project that round-trips through parseProject', () => {
     for (const tpl of TEMPLATES) {
       const project = tpl.build();
-      expect(project.schemaVersion).toBe(11);
+      expect(project.schemaVersion).toBe(12);
       const text = serializeProject(project);
       const parsed = parseProject(text);
-      expect(parsed.schemaVersion).toBe(11);
+      expect(parsed.schemaVersion).toBe(12);
       expect(parsed.board.id).toBe(project.board.id);
     }
   });

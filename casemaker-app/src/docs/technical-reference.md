@@ -42,7 +42,7 @@ For developers extending Case Maker. Audience: TypeScript + React + a passing ac
 
 ### Engine compiler — `src/engine/compiler/`
 
-The compiler is 40 modules. Grouped by what they build:
+The compiler is 41 modules. Grouped by what they build:
 
 **Core pipeline**
 
@@ -105,6 +105,7 @@ The compiler is 40 modules. Grouped by what they build:
 | `rack.ts` | `buildRackNodes`, `computeRackDims`, `accessorySpaces`, `cableNotchGeometry` | The parametric mini-rack: sides, plates, shelves, trays, faceplates. See [Mini-Rack.md](https://github.com/SlyWombat/CaseMaker/blob/main/Mini-Rack.md) |
 | `rackFit.ts` | `rectFitsBed`, `rackPartFootprints`, `maxRackWidthForBed` | Printer-fit checks: does every rack part land on the bed? |
 | `stand.ts` | `computeStandDims`, `buildEdgeChannels`, `standModulePlacement` | Desk and bench stands |
+| `insert.ts` | `buildInsertNodes`, `buildInsertOp`, `insertGrid`, `insertLayout`, `insertProblem`, `pocketRadius` | Issue #158 — the tool-insert holder: one plate of round (socket-OD) and hex (across-flats) pockets on a centred uniform grid, sized to the user's own tools. Plate 120 × 80 × 6 by default, with `clearance`, `chamfer`, `floor` and `pitchGap` all exposed; the pocket layout is pure and wasm-free, so only the subtracted solid needs an evaluator |
 | `rugged.ts` | `buildRuggedOps` | Corner bumpers and impact ribs |
 | `mountingFeatures.ts` | `buildMountingFeatureOps`, `endFlangesPreset`, `fourCornerScrewTabs` | How the finished case attaches to the world: tabs, flanges, VESA |
 

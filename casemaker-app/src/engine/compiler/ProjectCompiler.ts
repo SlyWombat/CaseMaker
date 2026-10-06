@@ -26,6 +26,7 @@ import { buildCustomCutouts } from './customCutouts';
 import { buildStandNodes } from './stand';
 import { buildRackNodes } from './rack';
 import { buildBadgeNodes } from './badge';
+import { buildInsertNodes } from './insert';
 import { derivedKind } from './archetype';
 import { validatePlacements } from './placementValidator';
 import { getBuiltinHat } from '@/library/hats';
@@ -98,6 +99,22 @@ export function compileProject(project: Project): BuildPlan {
     if (badgeNodes) {
       return {
         nodes: badgeNodes,
+        placementReport: validatePlacements(project),
+        smartCutoutDecisions: [],
+      };
+    }
+  }
+
+  // Tool-insert archetype (issue #158): a single pocketed plate — no cavity,
+  // no lid, no board. It builds whenever the plate has extent, so it only
+  // falls through on a non-positive dimension (a hand-edited project), never
+  // on an empty or over-full item list: those still yield a plate carrying the
+  // pockets that fit, with `insertProblem` naming the rest for the panel.
+  if (kind === 'insert' && caseParams.insert) {
+    const insertNodes = buildInsertNodes(caseParams.insert);
+    if (insertNodes) {
+      return {
+        nodes: insertNodes,
         placementReport: validatePlacements(project),
         smartCutoutDecisions: [],
       };

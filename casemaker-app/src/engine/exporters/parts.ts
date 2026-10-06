@@ -112,6 +112,12 @@ const PRINT_TABLE: Record<string, PrintMeta> = {
   'wall-plate': flat(
     'Print flat, wall-side face DOWN on the bed — the snap fingers point up and print without supports',
   ),
+  // Issue #158 — the tool-insert holder plate. As modelled the pocket mouths
+  // face up, which is also its print orientation: every pocket is a vertical
+  // bore or a widening chamfer, so nothing overhangs and no supports are
+  // needed. Layer lines then run across the pockets, the direction a socket is
+  // pushed in.
+  'insert-plate': flat('Print flat, pocket mouths UP, as modelled — no supports'),
   'rack-side-left': flat(
     'Lay FLAT, inner face down (the face with the plate tab ledges). Wall-mount ears/gussets then rise as self-supporting walls. Strongest layer direction for the screw columns',
   ),
@@ -278,6 +284,9 @@ function describePart(
 ): { displayName: string; material: PartMaterial; category: PartCategory } {
   if (id === 'stand') {
     return { displayName: 'Desk stand (frame + foot)', material: 'rigid', category: 'case' };
+  }
+  if (id === 'insert-plate') {
+    return { displayName: 'Tool insert plate', material: 'rigid', category: 'case' };
   }
   if (id === 'wall-body') {
     return {

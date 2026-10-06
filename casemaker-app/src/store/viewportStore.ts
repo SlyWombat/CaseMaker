@@ -41,6 +41,8 @@ export type SidebarSectionId =
   | 'board'
   | 'case'
   | 'rack'
+  // #158 — the tool-insert holder archetype's editor.
+  | 'insert'
   | 'ports'
   | 'hats'
   | 'features'

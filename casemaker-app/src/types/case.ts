@@ -2,6 +2,7 @@ import type { Mm } from './units';
 import type { SnapCatch, FitVariant } from './snap';
 import type { RackParams } from './rack';
 import type { BadgeParams } from './badge';
+import type { InsertParams } from './insert';
 
 /**
  * Issue #153 — `FitVariant` lives with the snap types (`types/snap.ts`)
@@ -398,6 +399,17 @@ export interface CaseParameters {
    * no real board data (the template uses `emptyBoard`).
    */
   badge?: BadgeParams;
+  /**
+   * Issue #158 — parametric tool-insert holder archetype (see types/insert.ts).
+   * When enabled, the project compiles to a single INSERT PLATE — a slab with a
+   * grid of pockets sized to the user's own tools — instead of a shell+lid box.
+   * Like `rack` it needs no board data (the template uses `emptyBoard`); unlike
+   * `stand` and `badge` it does not fall through for an empty or over-full item
+   * list — those still yield a plate (blank, or carrying the items that fit),
+   * with `insertProblem` naming what is wrong for the panel. Only a
+   * non-positive plate dimension yields no geometry at all.
+   */
+  insert?: InsertParams;
 }
 
 /**

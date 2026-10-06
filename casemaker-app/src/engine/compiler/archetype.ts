@@ -12,12 +12,12 @@ import type { Project } from '@/types';
  *
  * `shell` is the default: the board-in-a-box path the other three bypass.
  */
-export type Archetype = 'rack' | 'stand' | 'badge' | 'shell';
+export type Archetype = 'rack' | 'stand' | 'badge' | 'insert' | 'shell';
 
 /**
  * The archetype a project compiles to. Precedence is rack > stand > badge >
- * shell — each archetype is mutually exclusive by construction (only one
- * `enabled` flag is ever set by the UI), so the order only matters for a
+ * insert > shell — each archetype is mutually exclusive by construction (only
+ * one `enabled` flag is ever set by the UI), so the order only matters for a
  * hand-edited project that sets two.
  *
  * Callers that need the stand's own fall-through — `buildStandNodes` returns
@@ -36,5 +36,6 @@ export function derivedKind(project: Project | null | undefined): Archetype {
   if (c?.rack?.enabled) return 'rack';
   if (c?.stand?.enabled) return 'stand';
   if (c?.badge?.enabled) return 'badge';
+  if (c?.insert?.enabled) return 'insert';
   return 'shell';
 }

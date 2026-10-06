@@ -12,6 +12,7 @@ const SECTIONS: { id: SidebarSectionId; label: string; icon: string; hint: strin
   { id: 'board',    label: 'Board',           icon: '🟦', hint: 'Host PCB profile, mounting holes, components' },
   { id: 'case',     label: 'Case parameters', icon: '📦', hint: 'Walls, lid, joint, seal, latches, hinge, rugged exterior' },
   { id: 'rack',     label: 'Mini rack',       icon: '🗄️', hint: 'Parametric 10"-class network rack — resize to your printer, shelves, keystone plates, wall mount' },
+  { id: 'insert',   label: 'Tool insert',     icon: '🧰', hint: 'Parametric tool-insert holder — a plate of round and hex pockets sized to your own sockets, bits, wrenches and drivers' },
   { id: 'ports',    label: 'Port cutouts',    icon: '🔌', hint: 'USB, HDMI, audio, custom port openings' },
   { id: 'hats',     label: 'HATs',            icon: '🎩', hint: 'HAT placements stacked above the host board' },
   { id: 'features', label: 'Features',        icon: '⚙️',  hint: 'Snap catches, mounting features, fans, antennas, displays, text labels' },
@@ -51,10 +52,16 @@ const RACK_SECTION_IDS: SidebarSectionId[] = ['rack', 'export', 'cnc-sim', 'cnc-
  *  drives, so that panel stays and the rack's own section does not. */
 const BADGE_SECTION_IDS: SidebarSectionId[] = ['export', 'cnc-sim', 'cnc-engrave'];
 
+/** Same idea for the tool-insert archetype (issue #158): a plate of pockets
+ *  has no board, no ports and no shell features, but it is a plain printed
+ *  part so it keeps the Export section. */
+const INSERT_SECTION_IDS: SidebarSectionId[] = ['insert', 'export', 'cnc-sim', 'cnc-engrave'];
+
 /** The section ids the current archetype offers — the full list for a shell. */
 function sectionIdsFor(archetype: Archetype): SidebarSectionId[] | null {
   if (archetype === 'rack') return RACK_SECTION_IDS;
   if (archetype === 'badge') return BADGE_SECTION_IDS;
+  if (archetype === 'insert') return INSERT_SECTION_IDS;
   return null;
 }
 
