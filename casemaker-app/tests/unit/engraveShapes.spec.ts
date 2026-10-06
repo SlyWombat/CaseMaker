@@ -24,6 +24,10 @@ import { generateEngrave } from '@/engine/cnc/cam/engraveJob';
 import { feedsFor } from '@/engine/cnc/feeds';
 import { libraryTool } from '@/engine/cnc/toolLibrary';
 import { Z1 } from '@/engine/cnc/machine';
+import { createSimSession } from '@/workers/sim/session';
+import { engraveGenerate } from '@/workers/sim/engraveGenerate';
+import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type {
   EngraveCircleShape,
   EngraveJob,
@@ -297,4 +301,57 @@ describe('a mixed job funnels through one PartPlan (#214)', () => {
     const job = shapeJob(circle({ enabled: false }));
     expect(toPartPlan(job).engraves).toHaveLength(0);
   });
+});
+
+/** Rebuild a solid from a meshed sweep result so its volume can be read (`Mesh` is a plain holder,
+ *  nothing to `delete()`; the bytes are copied in). */
+function meshSolid(mesh: NodeMeshOutput) {
+  return new tl.Manifold(
+    new tl.Mesh({ numProp: 3, vertProperties: mesh.positions, triVerts: mesh.indices }),
+  );
+}
+
+describe('⌀6 circle end to end (#214): generate → verify → simulate → oracle', () => {
+  // The issue's last outstanding test. A ⌀6 disc under a ⌀3.175 flat end mill is the case where
+  // the cutter CAN clear the whole shape — its centre is confined to ⌀2.825 and the tool's own
+  // disc then reaches ⌀6 — so unlike a rectangle there is no unreachable corner, and the only gap
+  // between the plan and π·3² is the polygonisation both the plan and the sweep share.
+  it('removes the opened area to a flat floor at the asked depth, and the oracle agrees', () => {
+    const job = shapeJob(circle({ id: 'c6', diameter: 6, depth: 2, name: 'port' }), {
+      toolKey: 'flat-3.175x12-metal',
+    });
+
+    const g = engraveGenerate(tl, job);
+    expect(g.errors).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.nc).not.toBeNull();
+    expect(g.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(g.predicted).toHaveLength(1);
+
+    // The opened region the CAM cut and the oracle will be compared against.
+    const planned = tl.CrossSection.ofPolygons(g.predicted[0]!.polygons);
+    const plannedArea = planned.area();
+    planned.delete();
+    expect(Math.abs(plannedArea - Math.PI * 9) / (Math.PI * 9)).toBeLessThan(0.01);
+
+    const tool = jobTool(job);
+    if (tool === null) throw new Error('flat-3.175x12-metal is not in the tool library');
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(g.nc as string, toSetup(job, Z1), tool, Z1.id);
+      if (!load.ok) throw new Error(`simulation refused: ${JSON.stringify(load.diagnostics)}`);
+      expect(load.meshes.removal).not.toBeNull();
+
+      // Removed volume is stated from the OPENED area, not from π·3²·2: the rim is polygonised, so
+      // the swept solid is the plan's area × the depth to a flat floor, to within 1 %.
+      const removed = meshSolid(load.meshes.removal as NodeMeshOutput);
+      const volume = removed.volume();
+      removed.delete();
+      expect(Math.abs(volume - plannedArea * 2) / (plannedArea * 2)).toBeLessThan(0.01);
+
+      expect(session.oracle(g.predicted).ok).toBe(true);
+    } finally {
+      session.dispose();
+    }
+  }, 30_000);
 });
