@@ -157,6 +157,8 @@ export const caseParamsSchema = z.object({
       depth: z.number().positive(),
       compressionFactor: z.number().min(0.1).max(0.4),
       gasketMaterial: z.enum(['tpu', 'eva', 'epdm']),
+      // Issue #117 — closure style. Absent = 'recess' (issued #30 behaviour).
+      mode: z.enum(['recess', 'clamshell']).optional(),
       // Issue #113 — per-printer gasket clearance tolerance.
       gasketClearance: z.number().nonnegative().max(1).optional(),
     })
@@ -592,10 +594,21 @@ const projectV11Schema = projectV10Schema.extend({
 // `.optional()`, which every version embeds), so the wire format stays
 // backwards-compatible; the bump is bookkeeping for "this project understands
 // the tool-insert archetype." A v11 project on disk parses against v11, then
-// the transform below stamps schemaVersion: 12 — `insert` is simply absent
+// the transform below stamps schemaVersion: 13 — `insert` is simply absent
 // (undefined, no insert plate emitted).
 const projectV12Schema = projectV11Schema.extend({
   schemaVersion: z.literal(12),
+});
+
+// Issue #117 — v13 adds the optional `case.seal.mode` field. Like the v7 hinge
+// bump it is purely additive (the field lives on the seal schema every version
+// embeds, as `.optional()`), so the wire format stays backwards-compatible; the
+// bump is bookkeeping for "this project understands clamshell closure." A v12
+// project on disk parses against v12, then the transform below stamps
+// schemaVersion: 13 — `seal.mode` is simply absent (undefined, which the
+// compiler reads as 'recess').
+const projectV13Schema = projectV12Schema.extend({
+  schemaVersion: z.literal(13),
 });
 
 export const projectSchema = z
@@ -612,12 +625,13 @@ export const projectSchema = z
     projectV10Schema,
     projectV11Schema,
     projectV12Schema,
+    projectV13Schema,
   ])
   .transform((p) => {
     if (p.schemaVersion === 1) {
       return {
         ...p,
-        schemaVersion: 12 as const,
+        schemaVersion: 13 as const,
         customFonts: [],
         hats: [],
         customHats: [],
@@ -632,7 +646,7 @@ export const projectSchema = z
     if (p.schemaVersion === 2) {
       return {
         ...p,
-        schemaVersion: 12 as const,
+        schemaVersion: 13 as const,
         customFonts: [],
         mountingFeatures: [],
         display: null,
@@ -645,7 +659,7 @@ export const projectSchema = z
     if (p.schemaVersion === 3) {
       return {
         ...p,
-        schemaVersion: 12 as const,
+        schemaVersion: 13 as const,
         customFonts: [],
         fanMounts: [],
         textLabels: [],
@@ -655,7 +669,7 @@ export const projectSchema = z
     if (p.schemaVersion === 4) {
       return {
         ...p,
-        schemaVersion: 12 as const,
+        schemaVersion: 13 as const,
         customFonts: [],
         antennas: [],
       };
@@ -663,35 +677,40 @@ export const projectSchema = z
     if (p.schemaVersion === 5) {
       // mountingFeatures items already have mountClass filled by the
       // mountingFeatureSchema default at parse time; just stamp the version.
-      return { ...p, schemaVersion: 12 as const, customFonts: [] };
+      return { ...p, schemaVersion: 13 as const, customFonts: [] };
     }
     if (p.schemaVersion === 6) {
       // v6 → v7 is a pure version bump — `hinge` is optional and absent on
       // legacy projects, so the parsed object already has the right shape.
-      return { ...p, schemaVersion: 12 as const, customFonts: [] };
+      return { ...p, schemaVersion: 13 as const, customFonts: [] };
     }
     if (p.schemaVersion === 7) {
-      return { ...p, schemaVersion: 12 as const, customFonts: [] };
+      return { ...p, schemaVersion: 13 as const, customFonts: [] };
     }
     if (p.schemaVersion === 8) {
       // v8 → v9 is a pure version bump — `magnetPockets` is optional and
       // absent on legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 12 as const };
+      return { ...p, schemaVersion: 13 as const };
     }
     if (p.schemaVersion === 9) {
       // v9 → v10 is a pure version bump — the `fit` fields are optional and
       // absent on legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 12 as const };
+      return { ...p, schemaVersion: 13 as const };
     }
     if (p.schemaVersion === 10) {
       // v10 → v11 is a pure version bump — `badge` is optional and absent on
       // legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 12 as const };
+      return { ...p, schemaVersion: 13 as const };
     }
     if (p.schemaVersion === 11) {
       // v11 → v12 is a pure version bump — `insert` is optional and absent on
       // legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 12 as const };
+      return { ...p, schemaVersion: 13 as const };
+    }
+    if (p.schemaVersion === 12) {
+      // v12 → v13 is a pure version bump — `seal.mode` is optional and absent
+      // on legacy projects, so the parsed object already has the shape.
+      return { ...p, schemaVersion: 13 as const };
     }
     return p;
   });

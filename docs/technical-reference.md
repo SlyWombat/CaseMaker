@@ -58,6 +58,7 @@ The compiler is 41 modules. Grouped by what they build:
 | Module | Exports | Purpose |
 | :--- | :--- | :--- |
 | `caseShell.ts` | `buildOuterShell`, `computeShellDims`, `computeStackedHatHeight` | Outer hollow box + cavity dims |
+| `lidMode.ts` | `isClamshell`, `lidIsRecessed`, `lidCavityHeight`, `CLAMSHELL_MIN_CAVITY` | The one answer to "which closure is this?" — see **Closure modes** below |
 | `lid.ts` | `buildLid`, `buildFlatLid`, `buildSnapFitLid`, `buildSlidingLid`, `buildScrewDownLid`, `computeLidDims`, `computeRecessDims` | All four joint variants, including the sliding rails |
 | `bosses.ts` | `computeBossPlacements`, `buildBossesUnion`, `resolveInsertSpec`, `getScrewClearanceDiameter` | Mounting boss geometry + insert variant resolution |
 | `ports.ts` | `buildPortCutoutOp`, `buildPortCutoutsForProject` | Per-port wall-piercing cutouts |
@@ -180,6 +181,34 @@ Goal: ship a new built-in board (e.g. Teensy 4.1) so users can pick it from the 
 3. (Optional) Add additive geometry in `ProjectCompiler.ts` if the joint needs shell-side features (sliding rails, screw posts, etc.).
 4. Add a radio entry in `JOINT_OPTIONS` in `src/components/panels/CasePanel.tsx`.
 5. Extend `tests/unit/joints.spec.ts` with an op-tree-shape assertion and `tests/e2e/joints.spec.ts` with a bbox/triangle delta assertion.
+
+## Closure modes
+
+Two ways for the lid to meet the case, selected by `seal.mode` (issue #117):
+
+| `seal.mode` | Lid | Where the lid sits | Gasket |
+| :--- | :--- | :--- | :--- |
+| `'recess'` (default, and what an absent `mode` means) | a plate, `lidThickness` tall | drops into a pocket in the case rim, flush | channel in the rim, tongue on the lid underside |
+| `'clamshell'` | a hollow box, same `outerX × outerY` footprint, `lidThickness + lidCavityHeight` tall | sits **on** the rim; assembled height is `outerZ + lid.z` | same channel/tongue, straddling the plane where the halves meet |
+
+**`lidMode.ts` is the only place that decides.** Ten compiler modules used to ask
+`params.lidRecess` directly, and `lidCavityHeight` separately; both readings now come
+from one leaf module that imports nothing but `@/types`, so no two of them can
+disagree. When `seal.mode` is absent — every project written before v13 — the helpers
+return exactly what each module computed on its own before, which is why the change is
+inert for legacy projects.
+
+**A clamshell lid is a box by definition.** Asking for `'clamshell'` overrides
+`lidRecess` (the two contradict) and floors the cavity at `CLAMSHELL_MIN_CAVITY`
+(3 mm) when the user has not set one — otherwise `lidCavityHeight: 0` would quietly
+produce the thin plate the mode exists to avoid. The existing `lidCavityHeight` control
+*is* the lid-depth knob; there is no second one.
+
+**A hollow lid moves the surfaces that attach to it.** Anything hung off the lid —
+clamping posts, hinge knuckles, latch arms — must reach the inner ceiling at
+`lidLocal.z = lidCavityHeight`, not `0`. Geometry that only *touches* its host is not
+fused by Manifold and comes back as a separate body; both runs at this were #121 (lid
+knuckles) and #125 (cavity-mode snap-fit), and clamping posts were the third (#117).
 
 ## Op tree shape
 

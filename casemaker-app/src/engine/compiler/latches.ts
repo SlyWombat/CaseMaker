@@ -8,6 +8,7 @@ import type {
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
 import { cube, cylinder, difference, roundedRectPrism, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
+import { lidIsRecessed, lidCavityHeight } from './lidMode';
 import { pinSpanU, pinCapSpanU, LATCH_PIN_CAP_R } from './latchProtection';
 import { clampLatch } from './featureScale';
 
@@ -114,7 +115,7 @@ export function buildLatchOps(
   if (!latches || latches.length === 0) return EMPTY;
   // Pelican-standard requires lidRecess=false. If the project is misconfigured,
   // skip the latches (don't crash). The placement validator should warn.
-  if (params.lidRecess) return EMPTY;
+  if (lidIsRecessed(params)) return EMPTY;
   const dims = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
   const out: LatchOps = {
     lidAdditive: [], caseAdditive: [], caseSubtract: [], armNodes: [], pinNodes: [],
@@ -234,7 +235,7 @@ function buildOneLatch(
   //     the lid wall.
   //   • Flat lid: the lid is a thin plate at z=lidPlateBottomZ; we extend
   //     a short tab UP from the plate top to give the striker an anchor.
-  const lidShellMode = (params.lidCavityHeight ?? 0) > 0;
+  const lidShellMode = lidCavityHeight(params) > 0;
   let strikerAxisN: number;
   let strikerZ: number;
   let tabInnerN: number;

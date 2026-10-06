@@ -144,8 +144,28 @@ export type SealProfile = 'flat' | 'o-ring';
 /** Issue #107 — gasket material, drives slicer hint sidecar in #108. */
 export type SealGasketMaterial = 'tpu' | 'eva' | 'epdm';
 
+/**
+ * Issue #117 — how the two halves close.
+ *
+ *  - `'recess'` — tray + plate. The lid is a thin plate that drops into a
+ *    pocket cut into the rim; the gasket sits in a channel in the rim top.
+ *    (The original, and the default.)
+ *  - `'clamshell'` — two boxes meeting at the rim. The lid is a full-
+ *    footprint shell of its own, sitting ON the rim, with the gasket
+ *    sandwiched between the two mating flanges. Pelican / Whity "Rugged
+ *    Box" style. A `'clamshell'` lid is never recessed, by definition.
+ */
+export type SealMode = 'recess' | 'clamshell';
+
 export interface SealParams {
   enabled: boolean;
+  /**
+   * Issue #117 — closure style. Absent = `'recess'`, so legacy projects
+   * load and compile unchanged. `'clamshell'` overrides `lidRecess` (the
+   * lid is a box by definition) and guarantees the lid has a cavity, so a
+   * project cannot silently get a thin plate where it asked for a box.
+   */
+  mode?: SealMode;
   profile: SealProfile;
   /** Gasket cross-section width (or O-ring diameter). */
   width: Mm;

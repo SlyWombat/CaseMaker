@@ -8,6 +8,7 @@ import type {
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
 import { cube, cylinder, rotate, translate, type Aabb, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
+import { lidCavityHeight } from './lidMode';
 
 type HatResolver = (id: string) => HatProfile | undefined;
 const NO_HATS: HatPlacement[] = [];
@@ -415,7 +416,7 @@ export function buildVentilationCutouts(
   const coverage = clamp01(params.ventilation.coverage);
   const shellCuts: BuildOp[] = [];
   const lidCuts: BuildOp[] = [];
-  const lidTotalZ = params.lidThickness + (params.lidCavityHeight ?? 0);
+  const lidTotalZ = params.lidThickness + lidCavityHeight(params);
   for (const s of surfaces) {
     const frame = frameFor(
       s,

@@ -7,6 +7,7 @@ import type {
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
 import { cube, cylinder, difference, mesh, rotate, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
+import { lidIsRecessed, lidCavityHeight } from './lidMode';
 import {
   cornerSign,
   protectiveRibPositions,
@@ -77,9 +78,9 @@ export function buildRuggedOps(
   // Pelican-style: lid is a hollow shell with its own walls. Top corner
   // caps + upper-half ribs belong on the LID (not on the case rim) so
   // the rugged exterior wraps the assembled case continuously.
-  const lidCavityHeight = params.lidCavityHeight ?? 0;
-  const lidShellMode = lidCavityHeight > 0 && !params.lidRecess;
-  const lidTotalZ = params.lidThickness + lidCavityHeight;
+  const lidCavity = lidCavityHeight(params);
+  const lidShellMode = lidCavity > 0 && !lidIsRecessed(params);
+  const lidTotalZ = params.lidThickness + lidCavity;
 
   if (params.rugged.corners.enabled) {
     const c = buildCornerBumpers(dims, params, lidShellMode, lidTotalZ);

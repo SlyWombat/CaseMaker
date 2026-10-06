@@ -2,6 +2,7 @@ import type { BoardProfile, CaseParameters, HatPlacement, HatProfile } from '@/t
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
 import { cube, difference, roundedRectPrism, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
+import { lidIsRecessed, lidCavityHeight } from './lidMode';
 
 type HatResolver = (id: string) => HatProfile | undefined;
 const NO_HATS: HatPlacement[] = [];
@@ -72,8 +73,8 @@ export function buildAlignmentFlange(
 ): AlignmentFlangeOps {
   // Only meaningful for non-recessed shell lids — recessed lids align via
   // the recess pocket; flat plate lids have nowhere to host a groove.
-  if (params.lidRecess) return EMPTY;
-  if ((params.lidCavityHeight ?? 0) <= 0) return EMPTY;
+  if (lidIsRecessed(params)) return EMPTY;
+  if (lidCavityHeight(params) <= 0) return EMPTY;
   const dims = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
 
   // Flange depth matches the wall-rib depth so the brim outline is flush

@@ -4,6 +4,7 @@ import { cube, cylinder, difference, roundedRectPrism, translate, union, type Bu
 import { computeShellDims } from './caseShell';
 import { computeBossPlacements, getScrewClearanceDiameter } from './bosses';
 import { computeHatBaseZ } from './hats';
+import { lidCavityHeight, lidIsRecessed } from './lidMode';
 
 // Issue #46 — local helper so the lid layer doesn't need every callsite to
 // pass `() => undefined`; lid.ts can simply forward the project's resolver.
@@ -14,6 +15,9 @@ type DisplayResolver = (id: string) => DisplayProfile | undefined;
 const NO_RESOLVE_DISPLAY: DisplayResolver = () => undefined;
 
 const LID_POST_BOARD_CLEARANCE = 0.3;
+// Issue #117 — how far a clamping post runs past the ceiling's underside on a
+// hollow-box lid, so the two share volume instead of meeting face-to-face.
+const POST_CEILING_EMBED = 0.5;
 const RECESS_LEDGE = 1; // shelf the lid sits on
 const RECESS_CLEARANCE = 0.2; // gap on each side between lid edge and pocket wall
 
@@ -33,7 +37,8 @@ export interface LidDims {
 /**
  * Recessed-lid pocket dimensions (issue #30). The lid drops into the top of
  * the case, sitting on a 1mm horizontal ledge with a small clearance around
- * the perimeter. Returns null when lidRecess is disabled.
+ * the perimeter. Returns null when the lid isn't recessed — which includes
+ * every clamshell project (#117), whose lid sits ON the rim.
  */
 export function computeRecessDims(
   board: BoardProfile,
@@ -43,7 +48,7 @@ export function computeRecessDims(
   display: DisplayPlacement | null | undefined = null,
   resolveDisplay: DisplayResolver = NO_RESOLVE_DISPLAY,
 ): { pocketX: number; pocketY: number; pocketZ: number; ledge: number; clearance: number } | null {
-  if (!params.lidRecess) return null;
+  if (!lidIsRecessed(params)) return null;
   const dims = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
   const offset = Math.max(0.5, params.wallThickness - 0.5);
   return {
@@ -78,10 +83,12 @@ export function computeLidDims(
       liftAboveShell: 6,
     };
   }
-  // Pelican-style shell lid (lidCavityHeight > 0): the lid is a hollow box
+  // Pelican-style shell lid (cavity height > 0): the lid is a hollow box
   // with side walls extending UP from the bottom plate, closed by a top
-  // panel of `lidThickness`. Total Z = lidThickness + lidCavityHeight.
-  const cavityHeight = params.lidCavityHeight ?? 0;
+  // panel of `lidThickness`. Total Z = lidThickness + cavity height. A
+  // clamshell lid (#117) is always this branch, with a cavity floor when
+  // the user hasn't set one.
+  const cavityHeight = lidCavityHeight(params);
   return {
     x: dims.outerX,
     y: dims.outerY,
@@ -144,13 +151,29 @@ function buildLidPosts(
   const postPlacements = hasLidAnchored
     ? []
     : placements.filter((b) => b.position === 'bottom');
+  // Issue #117 — a hollow-box lid (clamshell, or any lid with a cavity) has
+  // its inner ceiling at lid-local z = cavityHeight, not at z = 0. A post
+  // that stops at 0 ends in mid-air inside the cavity, and Manifold then
+  // hands back a lid split into [plate, post, post, …] — the parts would
+  // never print attached. Run each post up into the ceiling and overlap it
+  // so the two share volume. A flat lid has cavityHeight = 0 and this is a
+  // no-op.
+  const cavityHeight = lidCavityHeight(params);
+  const postTopLocal = cavityHeight > 0 ? cavityHeight + POST_CEILING_EMBED : 0;
   const posts: BuildOp[] = postPlacements.map((b) =>
-    translate([b.x, b.y, -postLength], cylinder(postLength, b.outerDiameter / 2, 32)),
+    translate(
+      [b.x, b.y, -postLength],
+      cylinder(postLength + postTopLocal, b.outerDiameter / 2, 32),
+    ),
   );
   const holes: BuildOp[] =
     screwDia > 0
       ? postPlacements.map((b) => {
-          const totalH = params.lidThickness + postLength + 1;
+          // The clearance hole has to follow the post through the cavity and
+          // out the far side of the ceiling panel, or the screw has nowhere
+          // to enter.
+          const totalH =
+            params.lidThickness + postLength + postTopLocal + 1;
           return translate(
             [b.x, b.y, -postLength - 0.5],
             cylinder(totalH, screwDia / 2, 24),
@@ -183,7 +206,7 @@ function buildLidBody(
   resolveDisplay: DisplayResolver,
 ): BuildOp {
   const lid = computeLidDims(board, params, hats, resolveHat, display, resolveDisplay);
-  const cavityHeight = params.lidCavityHeight ?? 0;
+  const cavityHeight = lidCavityHeight(params);
   const outerR = lidOuterCornerRadius(params);
   if (cavityHeight <= 0) {
     return roundedRectPrism(lid.x, lid.y, lid.z, outerR);
@@ -449,7 +472,7 @@ export function buildLid(
   // proper pocket-centered XY origin so it nests cleanly. Posts /
   // holes / lip are already in world coords (computed via
   // cavityOriginXY) so they don't need offsetting.
-  if (params.lidRecess) {
+  if (lidIsRecessed(params)) {
     const lid = computeLidDims(board, params, hats, resolveHat, display, resolveDisplay);
     const recess = computeRecessDims(board, params, hats, resolveHat, display, resolveDisplay)!;
     const recessOffset = Math.max(0.5, params.wallThickness - 0.5);

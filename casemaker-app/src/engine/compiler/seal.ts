@@ -12,6 +12,7 @@ import {
   type BuildOp,
 } from './buildPlan';
 import { computeShellDims } from './caseShell';
+import { lidIsRecessed } from './lidMode';
 
 type HatResolver = (id: string) => HatProfile | undefined;
 const NO_HATS: HatPlacement[] = [];
@@ -155,7 +156,7 @@ export function buildSealChannel(
   // a non-recessed lid; z = outerZ - lidThickness for a recessed lid). The
   // channel extends DOWN into the rim by `channelDepth`. Add `overshoot`
   // both above and below so the boolean cut is clean.
-  const rimTopZ = params.lidRecess ? dims.outerZ - params.lidThickness : dims.outerZ;
+  const rimTopZ = lidIsRecessed(params) ? dims.outerZ - params.lidThickness : dims.outerZ;
   const channelTopZ = rimTopZ + overshoot;
   const channelBottomZ = channelTopZ - totalDepth;
   return translate(
@@ -216,7 +217,7 @@ export function buildSealTongue(
   // Tongue spans z = [tongueBottomZ, tongueBottomZ + tongueTotalHeight].
   // Top extends EMBED past lidUndersideZ INTO the lid plate so they share
   // volume. Visible protrusion below the lid plate = tongueHeight (unchanged).
-  const lidUndersideZ = params.lidRecess
+  const lidUndersideZ = lidIsRecessed(params)
     ? dims.outerZ - params.lidThickness
     : dims.outerZ;
   const tongueBottomZ = lidUndersideZ - tongueHeight;
@@ -267,7 +268,7 @@ export function buildGasketBody(
   // Gasket sits at the centerline Z, extends ±depth/2 in z. Print orientation
   // is the user's job; we emit the assembled position so the user can verify
   // fit visually before laying it flat for printing.
-  const rimTopZ = params.lidRecess ? dims.outerZ - params.lidThickness : dims.outerZ;
+  const rimTopZ = lidIsRecessed(params) ? dims.outerZ - params.lidThickness : dims.outerZ;
   const { channelDepth } = computeChannelAndTongue(seal);
   const gasketBottomZ = rimTopZ - channelDepth - seal.depth + channelDepth;
   // bottomZ = rimTopZ - depth (gasket sits ON the rim with its bottom
@@ -307,7 +308,7 @@ export function computeSealLoopPath(
   if (!ring) return null;
   const { channelDepth } = computeChannelAndTongue(params.seal!);
   const dims = computeShellDims(board, params, hats, resolveHat, display, resolveDisplay);
-  const rimTopZ = params.lidRecess ? dims.outerZ - params.lidThickness : dims.outerZ;
+  const rimTopZ = lidIsRecessed(params) ? dims.outerZ - params.lidThickness : dims.outerZ;
   return {
     outerCornerX: ring.outerCornerX,
     outerCornerY: ring.outerCornerY,

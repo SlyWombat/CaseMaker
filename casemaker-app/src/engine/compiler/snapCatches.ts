@@ -12,6 +12,7 @@ import { SNAP_DEFAULTS, fitRelief } from '@/types/snap';
 import { cavityClearance } from '@/engine/coords';
 import { cube, cylinder, mesh, rotate, translate, union, type BuildOp } from './buildPlan';
 import { computeShellDims } from './caseShell';
+import { lidIsRecessed } from './lidMode';
 
 /**
  * Issue #75 / #90 / followup — inside-wall snap lip. Trapezoidal prism with
@@ -224,10 +225,10 @@ function computeHookTabFrame(
   dims: { outerX: number; outerY: number; outerZ: number },
 ): HookTabFrame {
   const { wallThickness: wall } = params;
-  const lidPlateBottomZ_world = params.lidRecess
+  const lidPlateBottomZ_world = lidIsRecessed(params)
     ? dims.outerZ - params.lidThickness
     : dims.outerZ;
-  const pocketBotZ_world = params.lidRecess
+  const pocketBotZ_world = lidIsRecessed(params)
     ? dims.outerZ - (params.lidThickness + 0.5)
     : Infinity;
   // Barb top must be (a) below lid plate by HOOK_TOP_MARGIN and (b) below
@@ -1085,7 +1086,7 @@ export function buildSnapCatch(
   //   LIP_HEIGHT      = armLength - barbLength
   const { armLength, barbLength } = SNAP_DEFAULTS;
   const LIP_HEIGHT = armLength - barbLength;
-  const lipTopZ = params.lidRecess ? dims.outerZ - params.lidThickness : dims.outerZ;
+  const lipTopZ = lidIsRecessed(params) ? dims.outerZ - params.lidThickness : dims.outerZ;
   const lipBottomZ = lipTopZ - LIP_HEIGHT;
   const frame = computeWallFrame(c, params, dims.outerX, dims.outerY, lipBottomZ);
   const builders = BARB_REGISTRY[barbType];

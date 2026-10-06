@@ -18,6 +18,7 @@ import { newId } from '@/utils/id';
 import { VENT_SURFACES, FIT_VARIANTS } from '@/types';
 import { LabelledField } from '@/components/ui/LabelledField';
 import { resolveInsertSpec } from '@/engine/compiler/bosses';
+import { CLAMSHELL_MIN_CAVITY } from '@/engine/compiler/lidMode';
 
 const JOINT_OPTIONS: { value: JointType; label: string; hint: string }[] = [
   {
@@ -175,6 +176,9 @@ export function CasePanel() {
   const board = useProjectStore((s) => s.project.board);
   const patch = useProjectStore((s) => s.patchCase);
   const set = (key: keyof CaseParameters) => (v: number) => patch({ [key]: v } as Partial<CaseParameters>);
+  // Issue #117 — a clamshell lid sits on the rim, so the Recessed-lid
+  // checkbox below is locked off while that mode is selected.
+  const clamshell = params.seal?.mode === 'clamshell';
 
   return (
     <div className="panel">
@@ -360,16 +364,20 @@ export function CasePanel() {
       {/* Issue #98 — Recessed-lid hidden for flat-lid joint (no joint
           hardware = no pocket to drop into). Snap-fit + screw-down show it. */}
       {params.joint !== 'flat-lid' && (
-        <label className="vent-row" title="If enabled, the lid drops into a pocket flush with the rim — gives a cleaner look but uses more material.">
+        <label className="vent-row" title={clamshell ? 'Clamshell closure: the lid sits ON the rim, so it is never recessed. Switch Lid mode to recess in the seal section to change this.' : 'If enabled, the lid drops into a pocket flush with the rim — gives a cleaner look but uses more material.'}>
           <input
             type="checkbox"
-            checked={params.lidRecess ?? false}
+            // A clamshell lid sits on the rim by definition (#117), so the
+            // mode owns this flag: show it off and locked rather than
+            // letting the two disagree.
+            checked={!clamshell && (params.lidRecess ?? false)}
+            disabled={clamshell}
             onChange={(e) => patch({ lidRecess: e.target.checked })}
             data-testid="lid-recess"
             aria-label="Recessed lid"
             title="If enabled, the lid drops into a pocket flush with the rim."
           />
-          <span>Recessed lid (drops into a pocket flush with the rim)</span>
+          <span>Recessed lid (drops into a pocket flush with the rim){clamshell ? ' — off: the lid sits on the rim' : ''}</span>
         </label>
       )}
       {/* Board retention — INDEPENDENT from the lid joint above. The user
@@ -975,6 +983,36 @@ function SealSection({ params, patch }: SealSectionProps) {
               ))}
             </div>
           </div>
+          {/* Issue #117 — how the two halves close. Two named closures
+              instead of asking the user to reason about the Recessed-lid
+              checkbox and the Lid cavity height slider together: a
+              clamshell lid sits on the rim (never recessed) and is always a
+              box, so picking it cannot leave a thin plate behind. */}
+          <div className="joint-row">
+            <span className="joint-label" id="seal-mode-label" title="Recess: the lid is a plate that drops into a pocket in the rim. Clamshell: two boxes meeting at the rim, gasket between the flanges — Pelican / Whity style.">Lid mode</span>
+            <div className="joint-buttons" role="radiogroup" aria-labelledby="seal-mode-label">
+              {(['recess', 'clamshell'] as const).map((m) => (
+                <label key={m} title={m === 'clamshell' ? 'Two boxes meeting at the rim; the lid sits ON the rim and is never recessed. Prints its own deep lid, no supports.' : 'Tray + plate: the lid drops into a pocket cut into the rim.'}>
+                  <input
+                    type="radio"
+                    name="seal-mode"
+                    value={m}
+                    checked={(seal.mode ?? 'recess') === m}
+                    onChange={() => updateSeal({ mode: m })}
+                    data-testid={`seal-mode-${m}`}
+                  />
+                  <span>{m}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          {seal.mode === 'clamshell' && (
+            <div className="labelled-field__hint" style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0', lineHeight: 1.45 }}>
+              <p style={{ margin: 0 }}>
+                The lid is a full-footprint box on the rim, so <em>Recessed lid</em> above is off and the gasket sits between the two mating flanges. Its depth is the <em>Lid cavity height</em>; if that is 0 the lid gets a {CLAMSHELL_MIN_CAVITY} mm cavity so it is still a box rather than a plate.
+              </p>
+            </div>
+          )}
           <LabelledField label="Gasket width" unit="mm" hint="Cross-section width (or O-ring diameter). Must be < wall thickness.">
             <input type="number" step={0.5} min={2} max={10} value={seal.width} onChange={(e) => updateSeal({ width: Number(e.target.value) })} className="numeric-input" data-testid="seal-width" />
           </LabelledField>

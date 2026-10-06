@@ -2,6 +2,7 @@ import type { CaseParameters, BoardProfile, HatPlacement, HatProfile } from '@/t
 import type { DisplayPlacement, DisplayProfile } from '@/types/display';
 import { cavityClearance } from '@/engine/coords';
 import { difference, roundedRectPrism, translate, type BuildOp } from './buildPlan';
+import { lidIsRecessed } from './lidMode';
 
 export interface ShellDims {
   outerX: number;
@@ -123,7 +124,8 @@ export function computeShellDims(
   const cavityZ = board.defaultStandoffHeight + pcb.z + baseClearance + extra;
   // When the lid is recessed (issue #30), the case envelope extends above the
   // cavity by lidThickness + 1mm ledge so the lid drops in flush with the rim.
-  const recessExtra = params.lidRecess ? params.lidThickness + 1 : 0;
+  // A clamshell lid (#117) sits ON the rim instead, so it takes no recess.
+  const recessExtra = lidIsRecessed(params) ? params.lidThickness + 1 : 0;
   return {
     outerX: cavityX + 2 * wall,
     outerY: cavityY + 2 * wall,
@@ -167,7 +169,7 @@ export function buildOuterShell(
     roundedRectPrism(dims.cavityX, dims.cavityY, dims.cavityZ + overshoot, innerR),
   );
 
-  if (params.lidRecess) {
+  if (lidIsRecessed(params)) {
     // Recess pocket: oversized rectangular cut at the top to receive the lid,
     // sitting on a 1mm ledge above the cavity (issue #30). The pocket itself
     // is rounded too — outer-rim radius matches the case envelope so the lid
