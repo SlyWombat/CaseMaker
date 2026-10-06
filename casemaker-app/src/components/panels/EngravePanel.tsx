@@ -11,7 +11,16 @@ import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { feedsFor, type CutParams } from '@/engine/cnc/feeds';
 import { MATERIAL_OPTIONS } from '@/engine/cnc/engrave/setupFlow';
-import { importOutlineFromDisk, toVectorShape, type OutlineImport } from '@/engine/import/outlineImport';
+import {
+  TRACE_DEFAULTS,
+  importOutlineFromDisk,
+  importRasterFromDisk,
+  toVectorShape,
+  traceRaster,
+  type OutlineImport,
+  type RasterImage,
+  type TraceOptions,
+} from '@/engine/import/outlineImport';
 import { newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
 import {
   defaultSacrificialSide,
@@ -437,6 +446,18 @@ export function EngravePanel(): JSX.Element {
   const [pendingOutline, setPendingOutline] = useState<OutlineImport | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  // Traced bitmaps (#252) keep their PIXELS, not just the parsed outline: every trace control
+  // re-traces from them. The options are held here rather than in the dialog so they survive a
+  // re-render of it, and they stay as the user last set them for the next picture.
+  const [pendingImage, setPendingImage] = useState<RasterImage | null>(null);
+  const [traceOptions, setTraceOptions] = useState<Required<TraceOptions>>(() => ({ ...TRACE_DEFAULTS }));
+  const [traceError, setTraceError] = useState<string | null>(null);
+
+  function closeImport(): void {
+    setPendingOutline(null);
+    setPendingImage(null);
+    setTraceError(null);
+  }
 
   async function importOutline(): Promise<void> {
     setImportError(null);
@@ -448,11 +469,45 @@ export function EngravePanel(): JSX.Element {
         setImportError(result.error);
         return;
       }
+      setPendingImage(null);
       setPendingOutline(result.outline);
     } catch (e) {
       setImportError(e instanceof Error ? e.message : String(e));
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function importImage(): Promise<void> {
+    setImportError(null);
+    setImporting(true);
+    try {
+      const result = await importRasterFromDisk(traceOptions);
+      if (result === null) return; // the picker was cancelled
+      if (!result.ok) {
+        setImportError(result.error);
+        return;
+      }
+      setPendingImage(result.image);
+      setPendingOutline(result.outline);
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  /** A trace control moved: re-trace the pixels the user already picked and redraw the dialog. */
+  function retrace(patch: Partial<TraceOptions>): void {
+    const next = { ...traceOptions, ...patch };
+    setTraceOptions(next);
+    if (!pendingImage) return;
+    const result = traceRaster(pendingImage, next, pendingOutline?.sourceName ?? 'image');
+    if (result.ok) {
+      setPendingOutline(result.outline);
+      setTraceError(null);
+    } else {
+      setTraceError(result.error);
     }
   }
 
@@ -466,7 +521,7 @@ export function EngravePanel(): JSX.Element {
         name: outline.sourceName,
       }),
     );
-    setPendingOutline(null);
+    closeImport();
   }
 
   // ---- item naming (labels, shapes and combined shapes are one list downstream, #214/#215) ---
@@ -828,7 +883,8 @@ export function EngravePanel(): JSX.Element {
           ))}
         </div>
         {/* #217: import an SVG or DXF as a filled cut region. The file is parsed once; the
-            contour list is what the job keeps. */}
+            contour list is what the job keeps. #252: trace a bitmap to the same kind of thing —
+            the picture is thresholded and its boundaries become the contours. */}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
           <span style={{ ...MUTED, margin: 0 }}>from a file:</span>
           <button
@@ -839,6 +895,15 @@ export function EngravePanel(): JSX.Element {
             onClick={() => void importOutline()}
           >
             {importing ? 'Reading…' : 'Import outline…'}
+          </button>
+          <button
+            type="button"
+            data-testid="engrave-add-trace-image"
+            disabled={importing}
+            title="Trace a bitmap — PNG, JPEG, GIF, WebP or BMP — into a cut region. Threshold, despeckle and corner smoothing are live in the dialog."
+            onClick={() => void importImage()}
+          >
+            {importing ? 'Reading…' : 'Trace image…'}
           </button>
         </div>
         {importError && (
@@ -1265,8 +1330,17 @@ export function EngravePanel(): JSX.Element {
         <EngraveImportDialog
           outline={pendingOutline}
           cutterDiameter={diameter}
+          trace={
+            pendingImage && {
+              options: traceOptions,
+              onChange: retrace,
+              imageWidth: pendingImage.width,
+              imageHeight: pendingImage.height,
+              error: traceError,
+            }
+          }
           onAccept={acceptOutline}
-          onClose={() => setPendingOutline(null)}
+          onClose={closeImport}
         />
       )}
 

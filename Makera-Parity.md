@@ -662,7 +662,7 @@ Control; MKS/MKC are Makera Studio / Makera CAM Beta.
 | Resume / start-from-line (§2.E, UI §8) | SC with accessory state, IV Pro, OF, TM | none | **absent** — M2 |
 | Camera (§2.F) | load-bearing only at SP and LB; MKS monitoring only | #189 | covered |
 | Import: SVG / DXF / STL / STEP / Gerber (§2.B) | SVG Y in 13 columns incl. free tiers; STL 9, mostly paid; STEP 3; Gerber 4 | #217 (SVG, DXF); mesh for CNC with #222 | covered; **decision 6's order is inverted** — §14.5 |
-| Image trace (§2.B) | Y in 8 columns; ES machines QR codes | decision 5, no issue | **absent** — M5 |
+| Image trace (§2.B) | Y in 8 columns; ES machines QR codes | #252 — a bitmap traced to a cut profile in the import dialog; relief still #222 | **trace covered** — decision 5's first half; the greyscale-relief half waits for #222 (M5) |
 | Parametric modelling (§2.B) | AD only | the whole app | **ahead** |
 | Open source / offline / no account (§2.A) | 3 open; MKC gates first run on a purchase email | Apache-2.0, browser, local-first | ahead; keep it — R19, R20 |
 
@@ -778,12 +778,15 @@ Each is cheap, changes something already built or already scheduled, and needs n
   twenty times. *Entry:* #176 (the first badge) done **and someone asks** — the project's
   demand-driven rule. *Exit:* one job plus a list → N `.nc` files and N run-sheet pages, one
   blank per job; not nesting (R15). **So we should** write it down and wait for the ask.
-- **M5 — Vector trace of an image (decision 5's first half).** Image trace is Y in eight
-  columns, free-tier in most; ES machines pictures *and QR codes* (`FEATURE-MATRIX.md` §2.B).
-  Decision 5 names two image methods and neither has an issue. *Entry:* #217 landed — the
-  traced result is just another profile import. *Exit:* raster → profile as an import source
-  with the opening check (#201) applied to the result; the greyscale-relief half waits for
-  #222. **So we should** sequence trace into CNC-2.1's follow-on and relief into CNC-4.
+- **M5 — Vector trace of an image (decision 5's first half) — TRACE LANDED, #252.** Image trace
+  is Y in eight columns, free-tier in most; ES machines pictures *and QR codes*
+  (`FEATURE-MATRIX.md` §2.B). *Entry:* #217 landed — the traced result is just another profile
+  import. *Exit:* raster → profile as an import source with the opening check (#201) applied to
+  the result — **met**: the Engrave panel's "Trace image…" thresholds a bitmap to rings in mm and
+  hands them to the same dialog, `partPlan` and opening check an SVG gets, with live threshold,
+  despeckle and corner-smoothing controls and the assumed 96 px/inch scale on screen. What is
+  left of M5 is the greyscale-**relief** half, which waits for #222. **So we should** sequence
+  relief into CNC-4.
 
 ### 14.4 Refused, on the record
 
@@ -975,5 +978,5 @@ comment in `feeds.ts`.
 | sim: restart from a step as a generated, gated `.nc` | CNC-2.2 | M2 |
 | cam: finish pass on floors and walls — entry gated on #209's finish | CNC-3 | M3 |
 | engrave: batch from a list — demand-gated | after #176 | M4 |
-| import: raster → profile trace, after #217 | CNC-2.1 follow-on | M5 |
+| import: raster → profile trace, after #217 | CNC-2.1 follow-on | M5 — filed as #252 and shipped |
 | docs: `/Fabrication.md` decisions 6, 9, 19 and the §9.1 DB row, as §14.5 states them | — | §14.5 |

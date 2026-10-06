@@ -1,6 +1,11 @@
 import { useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { createPortal } from 'react-dom';
-import { scaleOutlineToWidth, type OutlineImport } from '@/engine/import/outlineImport';
+import {
+  TRACE_DEFAULTS,
+  scaleOutlineToWidth,
+  type OutlineImport,
+  type TraceOptions,
+} from '@/engine/import/outlineImport';
 import type { Mm } from '@/types/units';
 
 /**
@@ -78,9 +83,32 @@ const ERROR: CSSProperties = {
 /** Points drawn in the thumbnail before contours are decimated — a preview, not the geometry. */
 const PREVIEW_MAX_POINTS = 4000;
 
+/** The trace controls' frame (#252) — its own colour, so it reads as the picture's settings. */
+const TRACE_BOX: CSSProperties = {
+  border: '1px solid #2a3d4a',
+  background: '#141c22',
+  borderRadius: 4,
+  padding: 6,
+  margin: '6px 0',
+  color: '#c8d3de',
+  lineHeight: 1.5,
+};
+
 /** "12.5" for 12.5, "12.00" for 12 — two decimals is enough to spot a 3 mm-vs-3 m mistake. */
 function fmtMm(n: number): string {
   return n.toFixed(2);
+}
+
+/** A whole number of pixels from a field; a bad entry keeps the last good value. */
+function wholePx(text: string, fallback: number): number {
+  const n = Number(text);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : fallback;
+}
+
+/** A pixel tolerance from a field; a bad entry keeps the last good value. */
+function px(text: string, fallback: number): number {
+  const n = Number(text);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
 /**
@@ -96,11 +124,29 @@ function ringToPath(ring: readonly [Mm, Mm][], stride: number): string {
   return `${d}Z`;
 }
 
+/**
+ * The tracer's controls, present only for a traced bitmap (#252). The panel owns the options and
+ * the pixels; this dialog only shows them and calls back, so the preview and the final size below
+ * always describe the CURRENT trace — a control that changed the numbers but not the picture would
+ * be worse than no control at all.
+ */
+export interface TracePanel {
+  options: Required<TraceOptions>;
+  onChange: (patch: Partial<TraceOptions>) => void;
+  /** Source pixels, so the scale line the controls are read against can be shown. */
+  imageWidth: number;
+  imageHeight: number;
+  /** A re-trace the tracer refused (a cap exceeded) — shown, not swallowed. */
+  error: string | null;
+}
+
 export interface EngraveImportDialogProps {
   /** The accepted parse; its contours are mm, its bounding-box centre already at the origin. */
   outline: OutlineImport;
   /** Cutting diameter of the current cutter (mm), or null when the job has none yet. */
   cutterDiameter: number | null;
+  /** Trace controls, for a raster source. Absent for an SVG or DXF. */
+  trace?: TracePanel | null;
   /** Called with the final (possibly rescaled) outline when the user adds it. */
   onAccept: (outline: OutlineImport) => void;
   onClose: () => void;
@@ -109,13 +155,25 @@ export interface EngraveImportDialogProps {
 export function EngraveImportDialog({
   outline,
   cutterDiameter,
+  trace = null,
   onAccept,
   onClose,
 }: EngraveImportDialogProps): JSX.Element {
-  const [targetWidth, setTargetWidth] = useState<string>(() => fmtMm(outline.width));
+  // `null` means "follow whatever the source measured", so a re-trace from the controls updates
+  // the target width with the new geometry. Typing in the field pins it, which is what a user who
+  // typed a number expects.
+  //
+  // Untyped, the scale is the identity on the outline's OWN width — not on the two-decimal string
+  // shown — so adding an untouched import keeps the geometry to the last bit rather than snapping
+  // it to 0.01 mm.
+  const [typedWidth, setTypedWidth] = useState<string | null>(null);
+  const targetWidth = typedWidth ?? fmtMm(outline.width);
 
-  const parsedTarget = Number(targetWidth);
-  const targetValid = targetWidth.trim() !== '' && Number.isFinite(parsedTarget) && parsedTarget > 0;
+  const parsedTarget = typedWidth === null ? outline.width : Number(typedWidth);
+  const targetValid =
+    typedWidth === null
+      ? outline.width > 0
+      : typedWidth.trim() !== '' && Number.isFinite(parsedTarget) && parsedTarget > 0;
   const scaled = useMemo(
     () => (targetValid ? scaleOutlineToWidth(outline, parsedTarget) : outline),
     [outline, targetValid, parsedTarget],
@@ -142,10 +200,12 @@ export function EngraveImportDialog({
       : '0 0 10 10';
 
   return createPortal(
-    <div data-testid="engrave-import-dialog" role="dialog" aria-label="Import a vector outline" style={OVERLAY}>
+    <div data-testid="engrave-import-dialog" role="dialog" aria-label="Import or trace an outline" style={OVERLAY}>
       <div style={BOX}>
+        {/* The title names what the user did: a traced picture is not an imported drawing, and
+            the two arrive at the same outline by different routes. */}
         <h3 style={{ margin: '0 0 6px', fontSize: 13, color: '#c8d3de' }}>
-          Import outline — {outline.sourceName}
+          {outline.format === 'raster' ? 'Trace image' : 'Import outline'} — {outline.sourceName}
         </h3>
         <p style={MUTED}>
           {outline.format.toUpperCase()} · {outline.contours.length} closed shape
@@ -174,6 +234,84 @@ export function EngraveImportDialog({
           </svg>
         </div>
 
+        {/* The trace controls (#252). Everything above this line — the ring count, the preview —
+            redraws as they move, because the panel re-traces and hands the result back down. */}
+        {trace && (
+          <div data-testid="engrave-trace-controls" style={TRACE_BOX}>
+            <b style={{ fontSize: 11 }}>Trace — what counts as ink</b>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <label style={{ ...FIELD_LABEL, flex: '0 0 auto' }} htmlFor="engrave-trace-threshold">
+                threshold
+              </label>
+              <input
+                id="engrave-trace-threshold"
+                type="range"
+                min={0}
+                max={255}
+                step={1}
+                value={trace.options.threshold}
+                data-testid="engrave-trace-threshold"
+                aria-label="Trace threshold"
+                title={`Pixels darker than this become the cut region (default ${TRACE_DEFAULTS.threshold}).`}
+                style={{ flex: 1 }}
+                onChange={(e) => trace.onChange({ threshold: Number(e.target.value) })}
+              />
+              <b data-testid="engrave-trace-threshold-value" style={{ fontSize: 12, minWidth: 24, textAlign: 'right' }}>
+                {trace.options.threshold}
+              </b>
+            </div>
+            <label style={{ ...FIELD_LABEL, marginTop: 4, display: 'flex' }}>
+              <input
+                type="checkbox"
+                checked={trace.options.invert}
+                data-testid="engrave-trace-invert"
+                onChange={(e) => trace.onChange({ invert: e.target.checked })}
+              />
+              <span>the light pixels are the ink — white artwork on a dark background</span>
+            </label>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 6 }}>
+              <label style={FIELD_LABEL}>
+                <span>despeckle</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={trace.options.despeckle}
+                  data-testid="engrave-trace-despeckle"
+                  aria-label="Despeckle: smallest blob to keep, in pixels"
+                  title="Blobs — and pinholes — smaller than this many pixels are dropped before tracing."
+                  style={{ width: 56 }}
+                  onChange={(e) => trace.onChange({ despeckle: wholePx(e.target.value, trace.options.despeckle) })}
+                />
+                <span>px</span>
+              </label>
+              <label style={FIELD_LABEL}>
+                <span>corner simplify</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.25}
+                  value={trace.options.simplify}
+                  data-testid="engrave-trace-simplify"
+                  aria-label="Corner simplification tolerance in pixels"
+                  title="Straightens the pixel staircase. Higher is smoother and rounds off fine corners."
+                  style={{ width: 56 }}
+                  onChange={(e) => trace.onChange({ simplify: px(e.target.value, trace.options.simplify) })}
+                />
+                <span>px</span>
+              </label>
+            </div>
+            <p style={MUTED} data-testid="engrave-trace-scale">
+              {trace.imageWidth} × {trace.imageHeight} px source, at 0.26 mm per pixel.
+            </p>
+            {trace.error && (
+              <p style={{ ...MUTED, color: '#f0b4ad' }} data-testid="engrave-trace-error">
+                {trace.error}
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Units — the failure this dialog exists to prevent. */}
         {unitNotes.length > 0 && (
           <div data-testid="engrave-import-unit-warning" style={WARN}>
@@ -190,6 +328,12 @@ export function EngraveImportDialog({
             Nothing to cut — this file has no closed, filled shapes. A stroked line has no area
             (that is the single-line trace feature); convert text to outlines in the drawing
             program first.
+            {outline.format === 'raster' && (
+              <div style={{ marginTop: 4 }}>
+                For a traced picture that means the threshold found no ink: move it towards the
+                artwork's ink, or turn on the light-pixels switch for white artwork on dark.
+              </div>
+            )}
           </div>
         )}
 
@@ -211,7 +355,7 @@ export function EngraveImportDialog({
             aria-label="Target width in millimetres"
             title="The outline is scaled uniformly to this width, keeping its aspect ratio."
             style={{ width: 90 }}
-            onChange={(e) => setTargetWidth(e.target.value)}
+            onChange={(e) => setTypedWidth(e.target.value)}
           />
           <span>mm — keeps the aspect ratio</span>
         </label>

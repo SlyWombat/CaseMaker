@@ -21,6 +21,13 @@ export type { OutlineImport, OutlineParseResult, OutlineFormat, OutlineFillRule 
 export { MAX_OUTLINE_FILE_BYTES, MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS, scaleOutlineToWidth } from './outlineTypes';
 export { parseSvgOutline } from './svgOutline';
 export { parseDxfOutline } from './dxfOutline';
+// Raster tracing (#252) is the third format, and by the time an `OutlineImport` exists the
+// caller cannot tell which of the three it came from. Its door and its options re-export here so
+// the panel has one import site, exactly as it does for the two vector parsers.
+export type { RasterImage, TraceOptions } from './rasterOutline';
+export { TRACE_DEFAULTS, MM_PER_PX, traceRaster } from './rasterOutline';
+export { importRasterFromDisk, RASTER_EXTENSIONS, setRasterDecodeLoader } from './imageDecode';
+export type { RasterImportResult, RasterDecoder } from './imageDecode';
 
 /** Dispatch by extension: `.svg` and `.dxf` only. The name is stamped onto the result. */
 export function parseOutlineFile(text: string, fileName: string): OutlineParseResult {

@@ -9,7 +9,11 @@ import type { Mm } from '@/types';
  * type-only one).
  */
 
-export type OutlineFormat = 'svg' | 'dxf';
+/**
+ * Where an outline came from. `svg`/`dxf` are the vector parsers (#217); `raster` is a traced
+ * bitmap (#252) — the same rings by the time anyone downstream sees them.
+ */
+export type OutlineFormat = 'svg' | 'dxf' | 'raster';
 
 /** The winding rule an imported outline is read with — the two `Profile` fill rules SVG uses. */
 export type OutlineFillRule = 'NonZero' | 'EvenOdd';
