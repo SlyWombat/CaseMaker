@@ -295,6 +295,31 @@ export function minEngagement(size: FastenerSize): number {
 }
 
 // ---------------------------------------------------------------------------
+// T-slot extrusion (issue #151)
+// ---------------------------------------------------------------------------
+
+/**
+ * The 20-series T-slot interface a printed bracket bolts to — the two numbers
+ * our holes depend on, and nothing else.
+ *
+ * Nothing in this joint is threaded by us: a T-nut slides into the slot and
+ * stays captive there, so the printed part supplies a plain CLEARANCE hole on
+ * the slot's centreline and the nut side of the joint is bought, not modelled.
+ *
+ * There is deliberately no slot profile here (no width, no depth). Those only
+ * matter to something that enters the slot, and our part never does — the nut
+ * does. The second half of #151 (a slide-in carrier or a locating tongue) is
+ * the first thing that would need them, and then they belong here.
+ */
+export const TSLOT_NUT_SIZE: FastenerSize = 'M5';
+/**
+ * Slot-line pitch on a 20-series face, mm: one centred slot on a 2020 face,
+ * two on a 2040, three on a 2060. Also the spacing of a bolt PAIR that is
+ * meant to straddle those lines rather than sit along one slot.
+ */
+export const TSLOT_20_PITCH = 20;
+
+// ---------------------------------------------------------------------------
 // Modelled threads
 // ---------------------------------------------------------------------------
 

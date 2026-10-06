@@ -107,7 +107,7 @@ The compiler is 41 modules. Grouped by what they build:
 | `stand.ts` | `computeStandDims`, `buildEdgeChannels`, `standModulePlacement` | Desk and bench stands |
 | `insert.ts` | `buildInsertNodes`, `buildInsertOp`, `insertGrid`, `insertLayout`, `insertProblem`, `pocketRadius` | Issue #158 — the tool-insert holder: one plate of round (socket-OD) and hex (across-flats) pockets on a centred uniform grid, sized to the user's own tools. Plate 120 × 80 × 6 by default, with `clearance`, `chamfer`, `floor` and `pitchGap` all exposed; the pocket layout is pure and wasm-free, so only the subtracted solid needs an evaluator |
 | `rugged.ts` | `buildRuggedOps` | Corner bumpers and impact ribs |
-| `mountingFeatures.ts` | `buildMountingFeatureOps`, `endFlangesPreset`, `fourCornerScrewTabs` | How the finished case attaches to the world: tabs, flanges, VESA |
+| `mountingFeatures.ts` | `buildMountingFeatureOps`, `endFlangesPreset`, `fourCornerScrewTabs`, `extrusionMountPreset` | How the finished case attaches to the world: tabs, flanges, VESA, and (issue #151) bolt holes for a T-nut captive in 20-series T-slot extrusion — through-holes only, so no printed part changes |
 
 **Layout and guards**
 

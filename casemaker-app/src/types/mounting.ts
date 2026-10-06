@@ -14,6 +14,7 @@ export type MountingFeatureType =
   | 'end-flange'        // rounded + ribbed Hammond-style screw-down flange (#80)
   | 'zip-tie-slot'
   | 'vesa-mount'
+  | 'extrusion-mount'   // bolt holes for a T-nut in 20-series T-slot extrusion (#151)
   // Internal — board-side fixturing.
   | 'aligned-standoff'  // post on the inside floor at a board mount-hole xy (#80)
   | 'saddle';           // pinch-style cradle ridge (#80)

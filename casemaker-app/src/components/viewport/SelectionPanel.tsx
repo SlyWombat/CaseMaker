@@ -813,6 +813,47 @@ function MountingFeatureDetail({
         </>
       )}
 
+      {feature.type === 'extrusion-mount' && (
+        <>
+          <FieldRow label="Bolts">
+            <input type="number" min={1} step={1} className="numeric-input selection-panel__input" value={getNum('count', 2)} onChange={(e) => patchParam('count', Math.max(1, Math.round(Number(e.target.value))))} data-testid={`feature-${feature.id}-count`} aria-label="Bolt count" />
+          </FieldRow>
+          <FieldRow label="Pitch (mm)">
+            <input type="number" min={0} step={1} className="numeric-input selection-panel__input" value={getNum('pitch', 20)} onChange={(e) => patchParam('pitch', Number(e.target.value))} data-testid={`feature-${feature.id}-pitch`} aria-label="Bolt pitch (mm)" />
+          </FieldRow>
+          <FieldRow label="Bolt line">
+            <select
+              className="selection-panel__input"
+              value={params.along === 'v' ? 'v' : 'u'}
+              onChange={(e) => patchParam('along', e.target.value)}
+              data-testid={`feature-${feature.id}-along`}
+              aria-label="Bolt line direction"
+              title="Which in-plane axis the bolts are spaced along. One slot takes any spacing along it; a wide face used across two or three slot lines wants a 20 mm pitch."
+            >
+              <option value="u">along u</option>
+              <option value="v">along v</option>
+            </select>
+          </FieldRow>
+          <FieldRow label="Head counterbore">
+            <input
+              type="checkbox"
+              checked={getNum('flush', 0) !== 0}
+              onChange={(e) => patchParam('flush', e.target.checked ? 1 : 0)}
+              data-testid={`feature-${feature.id}-flush`}
+              aria-label="Counterbore the head"
+              title="Seat a button head flush on the INSIDE of the case. Off cuts a plain clearance hole."
+            />
+          </FieldRow>
+          <p className="selection-panel__hint">
+            M5 clearance holes for a T-nut captive in the extrusion slot. The nut
+            is outside the wall, so the screw goes in from inside the case — mount
+            the base to the frame before the board and lid go on. Flush seats the
+            head in whatever wall thickness is left above the floor, so a thin
+            wall leaves the head proud rather than opening through.
+          </p>
+        </>
+      )}
+
       {(feature.type === 'aligned-standoff' || feature.type === 'saddle') && (
         <p className="selection-panel__hint">
           Internal-mount geometry is a follow-up (#80 slice 4 deferred). The

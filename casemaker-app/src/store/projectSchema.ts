@@ -406,6 +406,7 @@ const mountingFeatureSchema = z.object({
     'end-flange',
     'zip-tie-slot',
     'vesa-mount',
+    'extrusion-mount',
     'aligned-standoff',
     'saddle',
   ]),

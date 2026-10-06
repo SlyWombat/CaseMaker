@@ -453,6 +453,13 @@ function MountingSection() {
         >
           + End flanges (left/right)
         </button>
+        <button
+          onClick={() => applyPreset('extrusion-mount-2020')}
+          data-testid="preset-extrusion-mount"
+          title="Two M5 bolt holes on a 20 mm pitch for bolting the case to 20-series T-slot extrusion (2020/2040/2060), with a T-nut captive in the slot."
+        >
+          + 2020 extrusion
+        </button>
         <button onClick={() => applyPreset('rear-vesa-100')} title="Add VESA 100×100 mounting hole pattern on the back.">
           + VESA 100
         </button>

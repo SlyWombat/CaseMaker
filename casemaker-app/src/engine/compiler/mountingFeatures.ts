@@ -9,7 +9,9 @@ import type { DisplayPlacement, DisplayProfile } from '@/types/display';
 import { axisCylinder, cube, cylinder, mesh, rotate, translate, type BuildOp } from './buildPlan';
 import type { Facing } from '@/types';
 import { computeShellDims } from './caseShell';
-import { faceFrame, type FaceFrame } from '@/engine/coords';
+import { faceFrame, placeOnFace, type FaceFrame, type Vec3 } from '@/engine/coords';
+import { screwHole, TSLOT_20_PITCH, TSLOT_NUT_SIZE } from './fasteners';
+import { newId } from '@/utils/id';
 
 type DisplayResolver = (id: string) => DisplayProfile | undefined;
 const NO_RESOLVE_DISPLAY: DisplayResolver = () => undefined;
@@ -203,6 +205,82 @@ function generateVesaMount(
   return { additive: [], subtractive: subs };
 }
 
+/** The `Facing` an axis-aligned unit vector points along. */
+function facingOf(v: Vec3): Facing {
+  if (v[0] !== 0) return v[0] > 0 ? '+x' : '-x';
+  if (v[1] !== 0) return v[1] > 0 ? '+y' : '-y';
+  return v[2] > 0 ? '+z' : '-z';
+}
+
+/**
+ * Issue #151 — bolt holes for a T-nut captive in 20-series T-slot extrusion.
+ *
+ * The extrusion's slotted face lies flat against the case wall, which fixes the
+ * order of the joint and is worth stating plainly: the nut is captive in the
+ * slot OUTSIDE the wall, the screw comes from INSIDE the case, and a
+ * counterbored head therefore seats on the wall's INNER face. That is not an
+ * arbitrary choice — with the extrusion on the outside there is nowhere else
+ * for the head to go. It makes this a bench joint: base onto the frame first,
+ * board and lid after. Being a through-hole in a wall the user picks, it
+ * composes with any archetype that has walls.
+ *
+ * `count` holes lie on a line along one in-plane axis (`along`, default u) at
+ * `pitch`. One slot takes any spacing along it; a wide (2040/2060) face used
+ * across its slots wants `pitch` = {@link TSLOT_20_PITCH}, one bolt per slot
+ * line. Which of the two the user has is not something the feature can infer —
+ * the same 20 mm pair is "two bolts down one slot" on a 2020 and "a bolt in
+ * each slot" on a 2040.
+ *
+ * The counterbore is OFF by default and that default is the point:
+ *
+ *   • A plain clearance hole is symmetric, so it is right however the user ends
+ *     up assembling, and it costs no material and cuts nothing that prints as a
+ *     bridge.
+ *   • A flush button head wants its full 3.0 mm of head height, which a case
+ *     wall does not have. `screwHole` clamps the cut to `wallThickness − floor`
+ *     when it is handed `material`, so asking for flush on a thin wall leaves
+ *     the head PROUD rather than punching through the wall — a shallower seat
+ *     than asked for, never a hole in the part.
+ *   • On a downward-facing inner face that seat is a bridge. The panel says so;
+ *     the user asks for it knowingly.
+ */
+function generateExtrusionMount(
+  feature: MountingFeature,
+  frame: FaceFrame,
+  caseParams: CaseParameters,
+): { additive: BuildOp[]; subtractive: BuildOp[] } {
+  const count = Math.max(1, Math.round(num(feature.params, 'count', 2)));
+  const pitch = Math.max(0, num(feature.params, 'pitch', TSLOT_20_PITCH));
+  const along = feature.params.along === 'v' ? 'v' : 'u';
+  const flush = num(feature.params, 'flush', 0) !== 0;
+  const wall = caseParams.wallThickness;
+  const outward = facingOf(frame.outwardAxis);
+
+  const subs: BuildOp[] = [];
+  for (let i = 0; i < count; i++) {
+    const offset = (i - (count - 1) / 2) * pitch;
+    const u = along === 'u' ? feature.position.u + offset : feature.position.u;
+    const v = along === 'v' ? feature.position.v + offset : feature.position.v;
+    subs.push(
+      screwHole({
+        size: TSLOT_NUT_SIZE,
+        // Entry face is the INNER wall — the head's side, see above.
+        at: placeOnFace(frame, u, v, -wall),
+        // The screw travels out through the wall, into the slot.
+        axis: outward,
+        // A full wall plus 1 mm of exit overshoot. The entry end already gets
+        // `screwHole`'s own overshoot, and the exact figure is a
+        // boolean-cleanliness number, not a fit.
+        through: wall + 1,
+        head: 'button',
+        recess: flush ? 'flush' : 'none',
+        material: wall,
+      }),
+    );
+  }
+  return { additive: [], subtractive: subs };
+}
+
 export function buildMountingFeatureOps(
   features: MountingFeature[] | undefined,
   board: BoardProfile,
@@ -231,6 +309,9 @@ export function buildMountingFeatureOps(
         break;
       case 'vesa-mount':
         group = generateVesaMount(feature, frame);
+        break;
+      case 'extrusion-mount':
+        group = generateExtrusionMount(feature, frame, params);
         break;
       // Internal mounts (slice 4) — no-op until generators land.
       case 'aligned-standoff':
@@ -589,4 +670,37 @@ export function fourCornerScrewTabs(
     enabled: true,
     presetId,
   }));
+}
+
+/**
+ * Preset for #151: one extrusion mount on the case back (+y).
+ *
+ * Two bolts on the 20 mm slot pitch, centred on the face and running along +u
+ * (the case's width) — i.e. a horizontal rail. That is the arrangement for a
+ * 2040/2060 back face (a bolt in each slot line) and a perfectly sane one for a
+ * 2020 (a pair down the single slot at the same spacing), so the default does
+ * not have to know which extrusion the user owns.
+ *
+ * The id is random, unlike `fourCornerScrewTabs`' index-derived ones: applying
+ * this preset twice must not produce two features sharing an id, which the
+ * selection and patch paths key on.
+ */
+export function extrusionMountPreset(
+  outerX: number,
+  outerZ: number,
+  presetId = 'extrusion-mount-2020',
+): MountingFeature[] {
+  return [
+    {
+      id: `${presetId}-${newId()}`,
+      type: 'extrusion-mount',
+      mountClass: 'external',
+      face: '+y',
+      position: { u: outerX / 2, v: outerZ / 2 },
+      rotation: 0,
+      params: { count: 2, pitch: TSLOT_20_PITCH, along: 'u', flush: 0 },
+      enabled: true,
+      presetId,
+    },
+  ];
 }
