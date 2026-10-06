@@ -108,12 +108,22 @@ function isBadge(build: () => Project): boolean {
   return build().case.badge?.enabled === true;
 }
 
+/** The tool-insert archetype (#158) is a single pocketed plate with no board,
+ * no cavity and no lid; insert.spec.ts owns its geometry. Invariant 11 pins
+ * the node set here alongside the other archetypes. */
+function isInsert(build: () => Project): boolean {
+  return build().case.insert?.enabled === true;
+}
+
 describe('compiler invariants (#58) — matrix of boards × templates', () => {
   const allCases = projectsToTest();
-  const cases = allCases.filter((c) => !isStand(c.build) && !isRack(c.build) && !isBadge(c.build));
+  const cases = allCases.filter(
+    (c) => !isStand(c.build) && !isRack(c.build) && !isBadge(c.build) && !isInsert(c.build),
+  );
   const standCases = allCases.filter((c) => isStand(c.build));
   const rackCases = allCases.filter((c) => isRack(c.build));
   const badgeCases = allCases.filter((c) => isBadge(c.build));
+  const insertCases = allCases.filter((c) => isInsert(c.build));
 
   describe('Invariant 1: BuildPlan emits at LEAST shell + lid; optionally extra named parts', () => {
     // Some templates legitimately add extra top-level nodes:
@@ -289,6 +299,25 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
         expect(bottom.max[1]).toBeCloseTo(top.max[1], 6);
         expect(bottom.min[2]).toBeCloseTo(0, 6);
         expect(bottom.max[2]).toBeCloseTo(top.min[2], 6);
+      });
+    }
+  });
+
+  // Insert archetype (#158): one plate, pockets subtracted, grounded on the
+  // bed. The plan carries `insertProblem` nowhere — the node is the plate, and
+  // a plate with a pocket the tool cannot reach is still a plate.
+  describe('Invariant 11: tool-insert archetype emits one grounded plate', () => {
+    for (const c of insertCases) {
+      it(`${c.label}: insert plate well-formed and grounded`, () => {
+        const plan = compileProject(c.build());
+        expect(plan.nodes.map((n) => n.id)).toEqual(['insert-plate']);
+        for (const n of plan.nodes) {
+          assertWellFormed(n.op, `${c.label} ${n.id}`);
+          const bb = aabbOfOp(n.op)!;
+          // The plate is extruded from z = 0 — it lies on the bed.
+          expect(bb.min[2]).toBeGreaterThanOrEqual(-0.01);
+          expect(bb.min[2]).toBeLessThanOrEqual(0.01);
+        }
       });
     }
   });

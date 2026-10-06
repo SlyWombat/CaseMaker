@@ -25,6 +25,7 @@ describe('Marketing gap #15 — project templates', () => {
       'mini-rack-10in',
       'snap-fit-test',
       'protective-case',
+      'tool-insert',
       'large-box-200',
       'badge-blank',
     ]);

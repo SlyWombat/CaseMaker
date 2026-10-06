@@ -25,6 +25,7 @@ const TEMPLATE_IDS = [
   'snap-fit-test',
   'badge-blank',
   'guition-pocket-shelf',
+  'tool-insert',
 ] as const;
 
 /**
@@ -61,6 +62,8 @@ const ASSEMBLY_TEMPLATE_NODES: Record<string, string[]> = {
   // A stand compiles to its own part, not a shell + lid. The pocket shelf is
   // one piece — pin it, so a compile that drops the tray fails here.
   'guition-pocket-shelf': ['pocket-tray'],
+  // The tool insert is likewise one plate, not a shell + lid.
+  'tool-insert': ['insert-plate'],
 };
 
 const KNOWN_BROKEN: Record<string, number> = {

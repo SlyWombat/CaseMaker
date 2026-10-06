@@ -1,0 +1,40 @@
+{
+  "id": "tool-insert",
+  "order": 155,
+  "name": "Tool insert — pocketed plate",
+  "description": "A plate of round and hex pockets on a uniform centred grid, sized to your own tools — sockets, bits, wrenches, drivers. Starts as the 120 × 80 × 6 mm default with one pocket; add the rest in the Tool insert panel, which names any item the plate cannot hold. Plate width, depth, thickness, clearance, chamfer, floor and pitch gap are all yours to set.",
+  "estPrintMinutes": 75,
+  "projectName": "Tool insert",
+  "emptyBoard": {
+    "id": "tool-insert-plate",
+    "name": "Tool insert (no host board)",
+    "x": 120,
+    "y": 80
+  },
+  "casePatch": {
+    "insert": {
+      "enabled": true,
+      "width": 120,
+      "depth": 80,
+      "thickness": 6,
+      "cornerRadius": 4,
+      "clearance": 0.25,
+      "chamfer": 0.8,
+      "floor": 1.5,
+      "pitchGap": 3,
+      "items": [{ "id": "item-1", "shape": "round", "size": 10, "depth": 4.5 }]
+    },
+    "bosses": {
+      "enabled": false,
+      "insertType": "self-tap",
+      "outerDiameter": 5,
+      "holeDiameter": 2.5
+    },
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  },
+  "ports": "none"
+}
