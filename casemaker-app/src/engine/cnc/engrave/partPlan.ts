@@ -20,6 +20,7 @@ import type {
   EngraveAnyItem,
   EngraveCombinedShape,
   EngraveJob,
+  EngraveKeepOut,
   EngraveLabel,
   EngraveShape,
   EngraveTraceItem,
@@ -27,6 +28,7 @@ import type {
 } from '@/types/engraveJob';
 import type { CustomFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
+import type { DepthLimit } from '@/engine/cnc/verify';
 
 /**
  * `PartPlan` is the seam #172 specified (`/Fabrication.md` §5.2): profiles and a target Z,
@@ -35,13 +37,18 @@ import type { Mm } from '@/types/units';
  *
  * Two differences from the §5.2 sketch (#200):
  *  - `split` is omitted: wood has no colour layers. The badge adds it back in CNC-3.
- *  - `keepOuts` is `[]` for a solid block — no magnet pocket to reserve.
+ *
+ * `keepOuts` is NOT empty any more (#231 item 3): a job that declares an under-surface void
+ * (#165's magnet pocket) carries it here, as the same `{ footprint, zCeiling }` #178's layer
+ * stack reads. `id`/`name` are carried too — a structural superset of `LayerStackKeepOut` — so a
+ * consumer (the run sheet) can name the void it is limiting around.
  */
 export interface PartPlan {
   stock: {
     outline: Profile;
     thickness: Mm;
-    keepOuts: { footprint: Profile; zCeiling: Mm }[];
+    /** Under-surface voids, in the stock XY frame; `zCeiling` is PART-frame z from the bottom. */
+    keepOuts: { id: string; name: string; footprint: Profile; zCeiling: Mm }[];
   };
   engraves: { id: string; name: string; profile: Profile; depth: Mm }[];
   /**
@@ -257,8 +264,11 @@ export function itemOperationName(item: EngraveAnyItem): string {
  * - polygon: the points as given, relative to `position` (so the origin IS `position`).
  * - vector: the imported rings as given (already mm, already centred), with their own fill rule —
  *   `NonZero` keeps an SVG's oppositely-wound holes, `EvenOdd` makes every enclosed ring a hole.
+ *
+ * A keep-out footprint (#231) is one of the four simple kinds, so it lands here too — the void
+ * profile and an engraved rect share one implementation.
  */
-function shapeProfile(shape: EngraveShape | EngraveVectorShape): Profile {
+function shapeProfile(shape: EngraveShape | EngraveVectorShape | EngraveKeepOut): Profile {
   switch (shape.kind) {
     case 'rect': {
       const { width, height, cornerRadius } = shape;
@@ -727,6 +737,97 @@ export function traceSelfOverlapFindings(
   return out;
 }
 
+/* ---------------------------------------------------------------------------------------------
+ * Under-surface voids (#231 item 3)
+ *
+ * A keep-out is a declarative void (#165's magnet pocket), so its geometry is a fact the job
+ * holds, not an inference from a mesh: the depth limit it implies can be computed analytically,
+ * with no layer stack and no wasm. These helpers are the analytic twin of #178's `maxDepthAt`
+ * (which does the same from the compiled solid, on the printer's layer grid) for the CNC-2 wood
+ * path, where there is no layer grid to slice.
+ * -------------------------------------------------------------------------------------------*/
+
+/** The point at (x, y) expressed in a keep-out's own frame (origin at `position`, axes un-rotated). */
+function keepOutLocalPoint(ko: EngraveKeepOut, x: Mm, y: Mm): [number, number] {
+  const dx = x - ko.position.x;
+  const dy = y - ko.position.y;
+  if (ko.rotation === 0) return [dx, dy];
+  const a = (-ko.rotation * Math.PI) / 180;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return [dx * c - dy * s, dx * s + dy * c];
+}
+
+/** The void's footprint as a placed `Profile` in the stock frame — rotated about its centre, then translated. */
+function keepOutProfile(ko: EngraveKeepOut): Profile {
+  return pTranslate([ko.position.x, ko.position.y], pRotate(ko.rotation, shapeProfile(ko)));
+}
+
+/** Even-odd point-in-polygon, over one ring of points already in the keep-out's frame. */
+function pointInRing(points: readonly [Mm, Mm][], x: number, y: number): boolean {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [xi, yi] = points[i]!;
+    const [xj, yj] = points[j]!;
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Is the stock-frame point (x, y) over this void's footprint? The rect test uses the FULL
+ * bounding rectangle and ignores the corner radius: calling a point in a rounded-off corner
+ * "over the void" can only make the depth limit shallower, which is the safe direction.
+ */
+export function pointInKeepOut(ko: EngraveKeepOut, x: Mm, y: Mm): boolean {
+  const [lx, ly] = keepOutLocalPoint(ko, x, y);
+  switch (ko.kind) {
+    case 'rect':
+      return Math.abs(lx) <= ko.width / 2 && Math.abs(ly) <= ko.height / 2;
+    case 'circle':
+      return lx * lx + ly * ly <= (ko.diameter / 2) ** 2;
+    case 'slot': {
+      const r = ko.width / 2;
+      const half = Math.max(0, ko.length / 2 - r);
+      const nearestX = Math.max(-half, Math.min(half, lx));
+      return (lx - nearestX) ** 2 + ly * ly <= r * r;
+    }
+    case 'polygon':
+      return pointInRing(ko.points, lx, ly);
+  }
+}
+
+/**
+ * The deepest cut an enabled under-surface void permits at (x, y), or null when none covers it.
+ * The membrane over the void is `stock.thickness − zCeiling` thick and `minFloor` of it must
+ * remain, so the limit is that minus `minFloor`, never below 0. When two voids overlap, the
+ * shallowest limit wins.
+ */
+export function keepOutLimitAt(job: EngraveJob, x: Mm, y: Mm): Mm | null {
+  let found: Mm | null = null;
+  for (const ko of job.keepOuts ?? []) {
+    if (!ko.enabled || !pointInKeepOut(ko, x, y)) continue;
+    const limit = Math.max(0, job.stock.thickness - ko.zCeiling - job.minFloor);
+    found = found === null ? limit : Math.min(found, limit);
+  }
+  return found;
+}
+
+/**
+ * The job's depth limit as #174's verifier takes it: 0 outside the stock rectangle, the stock's
+ * `thickness − minFloor` inside, and shallower where an under-surface void leaves a thinner
+ * membrane (#231 item 3). A job with no keep-outs gets exactly the CNC-2 `stockDepthLimit` it
+ * had before — the same numbers, from the same source.
+ */
+export function jobDepthLimit(job: EngraveJob): DepthLimit {
+  const stockLimit = job.stock.thickness - job.minFloor;
+  return (x, y) => {
+    if (x < 0 || x > job.stock.length || y < 0 || y > job.stock.width) return 0;
+    const local = keepOutLimitAt(job, x, y);
+    return local === null ? stockLimit : Math.min(stockLimit, local);
+  };
+}
+
 /**
  * The pure derivation every downstream consumer reads. The stock outline is
  * `rectProfile(length, width)` with its FRONT-LEFT corner at the origin — the job frame IS
@@ -786,11 +887,19 @@ export function toPartPlan(job: EngraveJob): PartPlan {
     traces.push({ id: item.id, name: traceOperationName(item), paths, closed, depth: item.depth });
   }
 
+  // Under-surface voids (#231): a disabled void reserves nothing. `zCeiling` is copied straight
+  // through in the frame #178's layer stack reads (PART-frame z from the bottom face).
+  const keepOuts: PartPlan['stock']['keepOuts'] = [];
+  for (const ko of job.keepOuts ?? []) {
+    if (!ko.enabled) continue;
+    keepOuts.push({ id: ko.id, name: ko.name ?? '', footprint: keepOutProfile(ko), zCeiling: ko.zCeiling });
+  }
+
   return {
     stock: {
       outline: stockOutline,
       thickness: job.stock.thickness,
-      keepOuts: [],
+      keepOuts,
     },
     engraves,
     traces,

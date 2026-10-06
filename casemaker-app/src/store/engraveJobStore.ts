@@ -28,6 +28,7 @@ import type {
   EngraveSlotShape,
   EngraveStrokeLabelItem,
   EngraveTraceItem,
+  EngraveVectorShape,
   FieldSource,
   Sacrificial,
   ViseParams,
@@ -71,6 +72,16 @@ export type CombinedPatch = Partial<Omit<EngraveBorderShape, 'kind'>> &
  */
 export type TracePatch = Partial<Omit<EngraveLineItem, 'kind'>> &
   Partial<Omit<EngraveStrokeLabelItem, 'kind'>>;
+
+/**
+ * A hand edit to one imported vector (#217). Unlike `ShapePatch`, this CANNOT touch the
+ * geometry: a vector's `contours` are the flattened file, and a partial edit of them is not a
+ * shape. Sizing is the import dialog's job (`scaleOutlineToWidth`), before the item exists;
+ * once added, only placement, depth, name and flags are editable, exactly as the row offers.
+ */
+export type VectorPatch = Partial<
+  Pick<EngraveVectorShape, 'name' | 'position' | 'rotation' | 'depth' | 'enabled' | 'construction'>
+>;
 
 export const ENGRAVE_JOB_KEY = 'casemaker.engraveJob.v1';
 /** Where a payload that failed validation is parked so it is not silently lost. */
@@ -205,7 +216,7 @@ function newCombined(kind: EngraveCombinedShape['kind'], job: EngraveJob): Engra
     depth: 0.5,
     enabled: true,
   };
-  const first = [...job.labels, ...job.shapes, ...(job.combined ?? [])][0] ?? null;
+  const first = [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])][0] ?? null;
   switch (kind) {
     case 'border':
       return { ...base, kind: 'border', inset: 3, width: 2 };
@@ -265,6 +276,15 @@ export interface EngraveJobState {
   /** Merge a hand edit into one trace (#219). A partial `position` is merged, not replaced. */
   updateTrace: (id: string, patch: TracePatch) => void;
   removeTrace: (id: string) => void;
+  /**
+   * Add an imported vector outline (#217) and return its id. The shape is built by the panel
+   * from an accepted `OutlineImport` (via `toVectorShape`), because only the panel holds the
+   * placement fields the import dialog settled on.
+   */
+  addVector: (shape: EngraveVectorShape) => string;
+  /** Merge a hand edit into one vector (#217). A partial `position` is merged, not replaced. */
+  updateVector: (id: string, patch: VectorPatch) => void;
+  removeVector: (id: string) => void;
   /**
    * Replace the sacrificial material model (#213). The caller owns `source`: the panel passes
    * `'saved'` for an edit it made, a preset carries its own, `noneSacrificial()` clears it.
@@ -401,6 +421,29 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
 
     removeTrace: (id) =>
       apply((job) => ({ ...job, traces: (job.traces ?? []).filter((t) => t.id !== id) })),
+
+    addVector: (shape) => {
+      apply((job) => ({ ...job, vectors: [...(job.vectors ?? []), shape] }));
+      return shape.id;
+    },
+
+    updateVector: (id, patch) =>
+      apply((job) => ({
+        ...job,
+        vectors: (job.vectors ?? []).map((v) =>
+          v.id === id
+            ? {
+                ...v,
+                ...patch,
+                // Merge a partial position rather than replacing the whole object.
+                position: patch.position ? { ...v.position, ...patch.position } : v.position,
+              }
+            : v,
+        ),
+      })),
+
+    removeVector: (id) =>
+      apply((job) => ({ ...job, vectors: (job.vectors ?? []).filter((v) => v.id !== id) })),
 
     setSacrificial: (sacrificial) => apply((job) => ({ ...job, sacrificial })),
 

@@ -11,6 +11,8 @@ import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { feedsFor, type CutParams } from '@/engine/cnc/feeds';
 import { MATERIAL_OPTIONS } from '@/engine/cnc/engrave/setupFlow';
+import { importOutlineFromDisk, toVectorShape, type OutlineImport } from '@/engine/import/outlineImport';
+import { newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
 import {
   defaultSacrificialSide,
   defaultSacrificialUnder,
@@ -23,6 +25,8 @@ import { EngraveLabelRow } from './EngraveLabelRow';
 import { EngraveShapeRow } from './EngraveShapeRow';
 import { EngraveCombinedRow } from './EngraveCombinedRow';
 import { EngraveTraceRow } from './EngraveTraceRow';
+import { EngraveVectorRow } from './EngraveVectorRow';
+import { EngraveImportDialog } from './EngraveImportDialog';
 import { EngraveSetupFlow } from './EngraveSetupFlow';
 import { RunSheetView } from './RunSheetView';
 import { coverageDisclaimer, type SimRunOutcome } from './simCoverage';
@@ -126,9 +130,10 @@ const ADD_TRACE_KINDS: readonly { value: 'line' | 'stroke-label'; label: string 
   { value: 'stroke-label', label: 'Single-line text' },
 ];
 
-/** Every item of the job, in the order `toPartPlan` walks them (#214/#215). */
+/** Every item of the job, in the order `toPartPlan` walks them (#214/#215/#217). Imported
+ *  vector outlines are `EngraveAnyItem`s too, so a frame or a cut-away may name one. */
 function allItems(job: EngraveJob): EngraveAnyItem[] {
-  return [...job.labels, ...job.shapes, ...(job.combined ?? [])];
+  return [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])];
 }
 
 const ATTACH_METHODS: readonly { value: SacrificialUnder['attach']; label: string }[] = [
@@ -221,6 +226,9 @@ export function EngravePanel(): JSX.Element {
   const addTrace = useEngraveJobStore((s) => s.addTrace);
   const updateTrace = useEngraveJobStore((s) => s.updateTrace);
   const removeTrace = useEngraveJobStore((s) => s.removeTrace);
+  const addVector = useEngraveJobStore((s) => s.addVector);
+  const updateVector = useEngraveJobStore((s) => s.updateVector);
+  const removeVector = useEngraveJobStore((s) => s.removeVector);
   const setTool = useEngraveJobStore((s) => s.setTool);
   const setVise = useEngraveJobStore((s) => s.setVise);
   const setSacrificial = useEngraveJobStore((s) => s.setSacrificial);
@@ -405,6 +413,48 @@ export function EngravePanel(): JSX.Element {
     useSettingsStore.getState().setSacrificial(stamped);
   }
 
+  // ---- imported vector outlines (#217) -----------------------------------------------------
+  //
+  // The SVG/DXF parsers live in the engine and are reached through `openTextFile` (#196); this
+  // is the panel end of it. A parsed outline is held until the user accepts it, so the size the
+  // dialog shows is the size that lands in the job — the assumed-unit warning and the width
+  // control exist precisely so an outline does not arrive at 3 mm or 3 m unremarked.
+
+  const [pendingOutline, setPendingOutline] = useState<OutlineImport | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  async function importOutline(): Promise<void> {
+    setImportError(null);
+    setImporting(true);
+    try {
+      const result = await importOutlineFromDisk();
+      if (result === null) return; // the picker was cancelled
+      if (!result.ok) {
+        setImportError(result.error);
+        return;
+      }
+      setPendingOutline(result.outline);
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  /** The dialog's accepted (possibly rescaled) outline becomes a job item centred on the stock. */
+  function acceptOutline(outline: OutlineImport): void {
+    addVector(
+      toVectorShape(outline, {
+        id: newEngraveShapeId(),
+        position: { x: job.stock.length / 2, y: job.stock.width / 2 },
+        depth: 0.5,
+        name: outline.sourceName,
+      }),
+    );
+    setPendingOutline(null);
+  }
+
   // ---- item naming (labels, shapes and combined shapes are one list downstream, #214/#215) ---
 
   /** A short name for an item id, for the recommendation's "worst item" line. */
@@ -429,7 +479,8 @@ export function EngravePanel(): JSX.Element {
 
   const combinedCount = job.combined?.length ?? 0;
   const traceCount = job.traces?.length ?? 0;
-  const hasReferenceable = job.labels.length + job.shapes.length + combinedCount > 0;
+  const vectorCount = job.vectors?.length ?? 0;
+  const hasReferenceable = job.labels.length + job.shapes.length + combinedCount + vectorCount > 0;
 
   const stockNum = (key: 'length' | 'width' | 'thickness', label: string, title: string): JSX.Element => {
     const src = job.sources?.stock?.[key];
@@ -614,7 +665,7 @@ export function EngravePanel(): JSX.Element {
       <h3 style={SUBHEAD}>
         Items{' '}
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-item-count">
-          {job.labels.length + job.shapes.length + combinedCount + traceCount}
+          {job.labels.length + job.shapes.length + combinedCount + traceCount + vectorCount}
         </span>
       </h3>
       {job.labels.map((label, i) => (
@@ -661,6 +712,17 @@ export function EngravePanel(): JSX.Element {
           findings={findingsFor(trace.id)}
           onChange={(patch) => updateTrace(trace.id, patch)}
           onRemove={() => removeTrace(trace.id)}
+        />
+      ))}
+      {(job.vectors ?? []).map((shape, i) => (
+        <EngraveVectorRow
+          key={shape.id}
+          shape={shape}
+          index={i}
+          maxDepth={maxDepth}
+          findings={findingsFor(shape.id)}
+          onChange={(patch) => updateVector(shape.id, patch)}
+          onRemove={() => removeVector(shape.id)}
         />
       ))}
       {/* The one "Add" control (#214 work item 5): a menu with the five kinds. The label entry
@@ -721,6 +783,25 @@ export function EngravePanel(): JSX.Element {
             </button>
           ))}
         </div>
+        {/* #217: import an SVG or DXF as a filled cut region. The file is parsed once; the
+            contour list is what the job keeps. */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4, alignItems: 'center' }}>
+          <span style={{ ...MUTED, margin: 0 }}>from a file:</span>
+          <button
+            type="button"
+            data-testid="engrave-add-import-outline"
+            disabled={importing}
+            title="Import a closed, filled SVG or DXF outline as a pocket. Strokes, text and images are reported, not dropped."
+            onClick={() => void importOutline()}
+          >
+            {importing ? 'Reading…' : 'Import outline…'}
+          </button>
+        </div>
+        {importError && (
+          <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-import-error">
+            {importError}
+          </p>
+        )}
       </details>
       <p style={MUTED}>Depth keeps the {job.minFloor} mm minimum floor — at most {maxDepth} mm on this stock.</p>
 
@@ -1136,6 +1217,14 @@ export function EngravePanel(): JSX.Element {
 
       {sheet && <RunSheetView sheet={sheet} onClose={() => setSheet(null)} />}
       {setupOpen && <EngraveSetupFlow onClose={() => setSetupOpen(false)} />}
+      {pendingOutline && (
+        <EngraveImportDialog
+          outline={pendingOutline}
+          cutterDiameter={diameter}
+          onAccept={acceptOutline}
+          onClose={() => setPendingOutline(null)}
+        />
+      )}
 
       {previewStatus === 'loading' && (
         <p style={{ ...MUTED, opacity: 0.7 }} data-testid="engrave-preview-loading">

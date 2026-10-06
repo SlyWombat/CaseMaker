@@ -24,8 +24,8 @@
  * fed straight into `engraveGenerate` by `scripts/engrave-job.ts`.
  */
 
-import type { CutParams } from '@/engine/cnc/feeds';
-import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
+import type { CutParams, FeedsMeasurement } from '@/engine/cnc/feeds';
+import type { EngraveJob, EngraveLabel, StockMaterial } from '@/types/engraveJob';
 import type { TextFont, TextWeight } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
 
@@ -68,6 +68,148 @@ export interface CouponProgram {
   /** A one-line description for the run sheet / console receipt. */
   description: string;
   job: EngraveJob;
+}
+
+// ---------------------------------------------------------------------------------------------
+// #248 item 3 — the coupon record and its readback into `feeds.ts`
+// ---------------------------------------------------------------------------------------------
+
+/** What the operator saw at the bench. `broke` covers a broken cutter or a burnt/ruined cell. */
+export type CouponVerdict = 'ok' | 'poor' | 'broke';
+
+/**
+ * One program's row in a coupon record. The first five fields are written by
+ * `scripts/engrave-job.ts`; the last three are what the operator fills after the cut.
+ */
+export interface CouponRecordRow {
+  program: string;
+  /** The parameter value(s) this program tested. One value unless it is a depth/multi-cell program. */
+  values: number[];
+  ncFile: string;
+  sheetFile: string;
+  hash: string;
+  /** The operator's verdict. `null` = not run yet. */
+  verdict: CouponVerdict | null;
+  /** Mark the ONE program whose value should be adopted into `feeds.ts`. */
+  chosen: boolean;
+  note: string;
+}
+
+/**
+ * The machine-readable verdict file `scripts/engrave-job.ts --coupon` writes and the operator
+ * fills in (#248 item 3). `scripts/feeds-readback.ts` turns a completed one into a
+ * `FeedsMeasurement` and folds it into `feeds.ts` — the round trip, with no hand-editing.
+ */
+export interface CouponRecord {
+  /** The coupon spec id (`<id>-coupon-record.json`). */
+  coupon: string;
+  title: string;
+  parameter: CouponParam;
+  material: StockMaterial;
+  toolKey: string;
+  /** The coupon tool's cutting diameter, mm — selects the feeds row. */
+  cuttingDiameter: number;
+  /** ISO date the coupon files were generated. */
+  generatedOn: string;
+  /** ISO date the coupon was CUT: the measurement's date. Required for a readback. */
+  cutOn: string | null;
+  /**
+   * Any `cutOverride` the BASE job carried. A non-empty one for a field other than the swept
+   * parameter means the coupon did not test the feeds row's own value, so the readback refuses.
+   */
+  baseOverride: Partial<CutParams>;
+  note: string;
+  programs: CouponRecordRow[];
+}
+
+export type MeasurementResult =
+  | { ok: true; measurement: FeedsMeasurement }
+  | { ok: false; reason: string };
+
+/** The coupon parameters that are a column of the feeds table. `depth` is not (see `feeds.ts`). */
+const MEASURABLE: FeedsMeasurement['parameter'][] = ['feed', 'rpm', 'stepDown', 'stepOver'];
+
+/**
+ * Turn a completed coupon record into the measurement that flips a feeds row (#248 item 3).
+ * Pure, and strict: it refuses rather than guessing. The value adopted is the marked program's
+ * single value — or the only program that cut `ok` — and every refusal names what to fix.
+ */
+export function measurementFromRecord(record: CouponRecord, recordPath?: string): MeasurementResult {
+  if (!MEASURABLE.includes(record.parameter as FeedsMeasurement['parameter'])) {
+    const reason =
+      record.parameter === 'depth'
+        ? 'a depth coupon measures the job’s achievable depth, not a feeds-table field (#165 records that in /Fabrication.md §7.2); there is nothing to write into feeds.ts'
+        : `coupon parameter "${String(record.parameter)}" is not a feeds-table field`;
+    return { ok: false, reason };
+  }
+  const parameter = record.parameter as FeedsMeasurement['parameter'];
+
+  if (typeof record.cuttingDiameter !== 'number' || !(record.cuttingDiameter > 0)) {
+    return { ok: false, reason: 'the record has no positive cuttingDiameter, so no feeds row can be selected' };
+  }
+  if (typeof record.cutOn !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(record.cutOn)) {
+    return { ok: false, reason: 'the record has no cutOn date (YYYY-MM-DD) — a measured row must carry its date' };
+  }
+  if (!Array.isArray(record.programs)) {
+    return { ok: false, reason: 'the record has no programs array' };
+  }
+
+  const extra = Object.keys(record.baseOverride ?? {}).filter((k) => k !== parameter);
+  if (extra.length > 0) {
+    return {
+      ok: false,
+      reason:
+        `the base job overrode ${extra.join(', ')}, so this coupon did not test the feeds row’s own ` +
+        `${extra.length > 1 ? 'values' : 'value'}; adopt the override and re-cut from the row instead`,
+    };
+  }
+
+  const badlyChosen = record.programs.filter((p) => p.chosen && p.verdict !== 'ok');
+  if (badlyChosen.length > 0) {
+    return {
+      ok: false,
+      reason: `program(s) ${badlyChosen.map((p) => p.program).join(', ')} are marked chosen but did not cut ok`,
+    };
+  }
+
+  const ok = record.programs.filter((p) => p.verdict === 'ok');
+  if (ok.length === 0) return { ok: false, reason: 'no program has verdict "ok" — nothing has been measured' };
+  const marked = ok.filter((p) => p.chosen);
+  if (marked.length > 1) {
+    return { ok: false, reason: `${marked.length} programs are marked chosen; mark exactly one` };
+  }
+  const winner = marked.length === 1 ? marked[0]! : ok.length === 1 ? ok[0]! : null;
+  if (winner === null) {
+    return { ok: false, reason: `${ok.length} programs cut ok; mark the one to adopt with "chosen": true` };
+  }
+  if (winner.values.length !== 1) {
+    return {
+      ok: false,
+      reason: `program "${winner.program}" tested ${winner.values.length} values; a feeds row takes one — this is a multi-cell (depth-ladder style) record`,
+    };
+  }
+
+  const value = winner.values[0]!;
+  if (!(value > 0)) return { ok: false, reason: `the chosen value ${value} must be positive` };
+  if (parameter === 'stepOver' && value > record.cuttingDiameter / 2 + 1e-9) {
+    return {
+      ok: false,
+      reason: `step-over ${value} mm exceeds the ${record.cuttingDiameter / 2} mm radius of the ${record.cuttingDiameter} mm cutter (#191)`,
+    };
+  }
+
+  return {
+    ok: true,
+    measurement: {
+      material: record.material,
+      diameter: record.cuttingDiameter,
+      parameter,
+      value,
+      on: record.cutOn,
+      coupon: record.coupon,
+      ...(recordPath !== undefined ? { record: recordPath } : {}),
+    },
+  };
 }
 
 /** `2` for 2.0, `0.45` for 0.45 — trailing zeros trimmed, three decimals at most. */

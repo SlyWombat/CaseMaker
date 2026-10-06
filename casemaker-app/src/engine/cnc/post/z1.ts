@@ -18,7 +18,7 @@
  * sits at the back face (decision 24). `PostContext.zDatum` is a required literal for exactly
  * this reason: a caller cannot post a file without stating the datum the Zs are measured from.
  *
- * PROVENANCE. Every machine number comes from the `MachineProfile` (#184); nothing about the
+ * PROVENANCE. Every machine number comes from the `MillProfile` (#184); nothing about the
  * machine is typed here. The STRUCTURE — the header field list, the body order, the ending —
  * is written from `/Fabrication.md` §2 and the issue's implementation spec, which read it off
  * Studio's one Z1-generated sample. No vendor line is copied into this file.
@@ -26,7 +26,7 @@
 
 import type { CamMove, ToolpathIR } from '../cam/ir';
 import { estimateIRCycleSeconds, ASSUMED_RAPID_MM_MIN } from '../cam/ir';
-import type { MachineProfile } from '../machine';
+import type { MillProfile } from '../machine';
 import { formatFixed, sanitizeMkrValue } from './format';
 
 /**
@@ -85,7 +85,7 @@ function mkr(tag: string, ...fields: string[]): string {
  * the manual-change dialect only), or the IR is not the flat frame (#237: a rotary-frame IR,
  * or the `'rotary-axis'` datum, cannot be posted by the flat dialect).
  */
-export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MachineProfile): PostResult {
+export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): PostResult {
   const errors: string[] = [];
 
   // An operation with no moves is SKIPPED, not refused: `generateEngrave` emits one for a

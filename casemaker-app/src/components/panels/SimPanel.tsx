@@ -91,6 +91,10 @@ const TAG: CSSProperties = {
   whiteSpace: 'nowrap',
 };
 const DISCLAIM: CSSProperties = { ...MUTED, color: '#c8d3de', borderTop: '1px solid #2a2f36', paddingTop: 6 };
+const BACKEND_TITLE =
+  "Which simulation backend swept this job. 'exact' is the 2.5D boolean sweeper; 'column' is the sampled grid engine (#239/#222), whose numbers all carry a resolution.";
+/** A clamped rotary cut, shown with the result (#239, decision R8). */
+const CLAMPED: CSSProperties = { fontSize: 11, color: '#e8c98a', background: '#2a2113', border: '1px solid #5a4520', borderRadius: 4, padding: '5px 7px', marginTop: 8, lineHeight: 1.45 };
 /** A diagnostic's line, clickable to reveal it in the G-code pane (#245). */
 const LINELINK: CSSProperties = {
   font: 'inherit',
@@ -428,6 +432,10 @@ export function SimPanel() {
             <span data-testid="sim-placement-badge" title={STUB_TITLE} style={TAG}>
               placement: stub
             </span>
+            {/* Which backend swept this job (#222): the exact 2.5D sweeper or the column engine. */}
+            <span data-testid="sim-backend" title={BACKEND_TITLE} style={TAG}>
+              backend: {info.stats.engine ?? 'exact'}
+            </span>
           </h3>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <div>
@@ -440,6 +448,16 @@ export function SimPanel() {
               <b>{(info.stats.ms.total / 1000).toFixed(2)} s</b> <span style={MUTED}>sweep time</span>
             </div>
           </div>
+
+          {/* A clamped cut did not come out the depth asked for — shown with the result, not only in
+              diagnostics (#239, decision R8). */}
+          {info.axisClamped && (
+            <div data-testid="sim-axis-clamped" style={CLAMPED}>
+              {info.axisClamped.count} cut{info.axisClamped.count === 1 ? '' : 's'} crossed the rotary axis within one tool
+              radius and {info.axisClamped.count === 1 ? 'was' : 'were'} clamped to it (deepest {info.axisClamped.deepestZ.toFixed(3)} mm
+              below the axis) — the cut did not come out the depth the program asked for.
+            </div>
+          )}
 
           {/* 6 — diagnostics */}
           {grouped && diagnostics.length > 0 && (

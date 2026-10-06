@@ -28,12 +28,14 @@
  * `/Fabrication.md` §7.2. `VerifyContext.minRapidZ` is the IR's `hopZ`.
  */
 
+import type { Sacrificial } from '@/types/engraveJob';
 import type { Vec3 } from '@/types/units';
 import { parseGcode } from './gcode';
 import { classifyLine, stripComment } from './gcode/lexer';
 import type { MoveEvent, ParseResult, Pos } from './gcode/types';
 import { applyEvent, buildTimeline, initialState, type MachineState } from './emulator/timeline';
-import type { MachineProfile } from './machine';
+import type { MillProfile } from './machine';
+import { sacrificialBoxes, type SacrificialBox } from './sacrificial';
 import type { Setup } from './setup';
 import { cuttingRadiusForSweep, type Tool } from './tool';
 
@@ -43,7 +45,7 @@ export type DepthLimit = (x: number, y: number) => number;
 export interface VerifyContext {
   /** `toSetup(job, machine)` — #200. Carries the G54 origin and the starting tool. */
   setup: Setup;
-  machine: MachineProfile;
+  machine: MillProfile;
   tool: Tool;
   depthLimit: DepthLimit;
   /** Z at or above which XY rapids are allowed, work frame. The IR's hopZ. */
@@ -76,6 +78,71 @@ export interface VerifyReport {
 export function stockDepthLimit(stock: { length: number; width: number; thickness: number }, minFloor: number): DepthLimit {
   const limit = stock.thickness - minFloor;
   return (x, y) => (x >= 0 && x <= stock.length && y >= 0 && y <= stock.width ? limit : 0);
+}
+
+/** The stock a sacrificial setup is expressed against. Same shape `stockDepthLimit` takes. */
+export interface StockDims {
+  length: number;
+  width: number;
+  thickness: number;
+}
+
+export interface SacrificialLimitOptions {
+  /** CNC-2's floor over the part: the deepest cut there is `thickness − minFloor`. */
+  minFloor: number;
+  /** The job's `breakthrough`, mm: how far a cut may pass below the part's underside (#213/#218). */
+  breakthrough: number;
+  /**
+   * True where the item being checked cuts THROUGH the part (#218). The seam only: #218 passes
+   * it; nothing generates through-cuts yet, so the default is false. Over the part it turns the
+   * limit from `thickness − minFloor` into `thickness + breakthrough` when a board is present.
+   */
+  through?: boolean;
+}
+
+/** Is a work-frame XY inside an axis-aligned sacrificial box's XY footprint? Inclusive edges. */
+function insideBox(b: SacrificialBox, x: number, y: number): boolean {
+  return x >= b.min[0] && x <= b.max[0] && y >= b.min[1] && y <= b.max[1];
+}
+
+/**
+ * The verifier's `DepthLimit` for a job with sacrificial material (#213 §3). It is positive over
+ * `supportedFootprint` and `0` over air, so check 5's `cut-outside-stock` — which asks whether
+ * `depthLimit ≤ 0` at the tool's four edge points — means exactly "the cutter left the supported
+ * region": it may run off the part onto sacrificial material, never into air.
+ *
+ * The table (#213 §3), all work-frame mm below the part's top face (Z = 0), `T` = part thickness:
+ *
+ *   over the part         `T − minFloor`, or `T + breakthrough` for a through-cut with a board;
+ *   over a side strip     `T` — the strip's full height down to the part's underside, so cutting
+ *                         the strip away is allowed — plus `breakthrough` where a board lies under
+ *                         the point;
+ *   over board overhang   `T + breakthrough` — the cutter is in air above the board down to the
+ *                         part's underside, then may break through into the board;
+ *   anywhere else         `0`.
+ *
+ * With `noneSacrificial()` this is exactly `stockDepthLimit(stock, minFloor)`. Pure data, no wasm:
+ * every region here is an axis-aligned box, so containment is arithmetic and the verifier stays
+ * cheap enough to run on the whole file (see the module comment).
+ */
+export function sacrificialDepthLimit(stock: StockDims, s: Sacrificial, opts: SacrificialLimitOptions): DepthLimit {
+  const { length: L, width: W, thickness: T } = stock;
+  const { minFloor, breakthrough } = opts;
+  const through = opts.through ?? false;
+  const partLimit = through && s.under !== null ? T + breakthrough : T - minFloor;
+
+  const boxes = sacrificialBoxes(stock, s);
+  const under = boxes.find((b) => b.id === 'under') ?? null;
+  const sides = boxes.filter((b) => b.id !== 'under');
+
+  return (x, y) => {
+    if (x >= 0 && x <= L && y >= 0 && y <= W) return partLimit;
+    for (const b of sides) {
+      if (insideBox(b, x, y)) return T + (under !== null && insideBox(under, x, y) ? breakthrough : 0);
+    }
+    if (under !== null && insideBox(under, x, y)) return T + breakthrough;
+    return 0;
+  };
 }
 
 /** The words our post-processor (#173) may write. Anything else is `not-our-dialect`. */
@@ -269,7 +336,9 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         }
 
         // ---- 5. cut-outside-stock. The tool EDGE, not just the centre: depthLimit must be
-        // above 0 at the four points ±r in X and Y.
+        // above 0 at the four points ±r in X and Y. With a sacrificial setup the limit is
+        // `sacrificialDepthLimit`, positive over `supportedFootprint` (#213), so this is "the
+        // cutter left the part onto air", not "it touched anything but the part".
         let outside: { x: number; y: number } | null = null;
         for (const p of [fromW, toW]) {
           if (p[0] === null || p[1] === null) continue;

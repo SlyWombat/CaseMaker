@@ -25,7 +25,7 @@
  */
 
 import type { GcodeEvent, HomeEvent, MoveEvent, ParseResult, Pos, ProbeEvent, TloCalibrateEvent, ToolChangeEvent } from '../gcode/types';
-import { insideEnvelope, type MachineProfile } from '../machine';
+import { insideEnvelope, type MillProfile } from '../machine';
 import type { Setup } from '../setup';
 
 export type ToolState = number | 'unknown';
@@ -458,7 +458,7 @@ function syntheticMove(base: { line: number; synthetic: SyntheticKind }, a: numb
 }
 
 /** `fill_cali_scripts(.., clear_z = true)` plus the completion path: from `at`, back to `saved` X,Y. */
-function calibrationSteps(base: { line: number; synthetic: SyntheticKind }, a: number | null, at: Pos, saved: Pos, m: MachineProfile): GcodeEvent[] {
+function calibrationSteps(base: { line: number; synthetic: SyntheticKind }, a: number | null, at: Pos, saved: Pos, m: MillProfile): GcodeEvent[] {
   const tc = m.toolChange;
   const mv = syntheticMove(base, a);
   const probe = (target: Pos): ProbeEvent => ({ kind: 'probe', ...base, subcode: 6, target });
@@ -483,7 +483,7 @@ function calibrationSteps(base: { line: number; synthetic: SyntheticKind }, a: n
   return steps;
 }
 
-export function toolChangeMacro(ev: ToolChangeEvent, before: MachineState, m: MachineProfile): GcodeEvent[] {
+export function toolChangeMacro(ev: ToolChangeEvent, before: MachineState, m: MillProfile): GcodeEvent[] {
   const tc = m.toolChange;
   const base = { line: ev.line, synthetic: 'tool-change-macro' as const };
   const mv = syntheticMove(base, before.a ?? null);
@@ -499,13 +499,13 @@ export function toolChangeMacro(ev: ToolChangeEvent, before: MachineState, m: Ma
 }
 
 /** `M491`: re-measure the tool length from wherever the head is, then return. */
-export function tloCalibrateMacro(ev: TloCalibrateEvent, before: MachineState, m: MachineProfile): GcodeEvent[] {
+export function tloCalibrateMacro(ev: TloCalibrateEvent, before: MachineState, m: MillProfile): GcodeEvent[] {
   const base = { line: ev.line, synthetic: 'tlo-calibrate' as const };
   return [{ ...ev, expanded: true }, ...calibrationSteps(base, before.a ?? null, before.machine, before.machine, m)];
 }
 
 /** `G28` on this firmware: lift to clearance Z, then X,Y to the clearance position. */
-export function g28Clearance(ev: HomeEvent, before: MachineState, m: MachineProfile): GcodeEvent[] {
+export function g28Clearance(ev: HomeEvent, before: MachineState, m: MillProfile): GcodeEvent[] {
   const tc = m.toolChange;
   const base = { line: ev.line, synthetic: 'g28-clearance' as const };
   const mv = syntheticMove(base, before.a ?? null);
@@ -518,7 +518,7 @@ export function g28Clearance(ev: HomeEvent, before: MachineState, m: MachineProf
   ];
 }
 
-export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MachineProfile): Timeline {
+export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillProfile): Timeline {
   const events: GcodeEvent[] = [];
   const diagnostics: TimelineDiagnostic[] = [];
   const segments: Segment[] = [];

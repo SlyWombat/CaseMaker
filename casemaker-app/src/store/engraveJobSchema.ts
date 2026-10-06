@@ -209,6 +209,62 @@ const traceSchema = traceKindsSchema.superRefine((trace, ctx) => {
   }
 });
 
+/**
+ * An under-surface void (#231 item 3). Its geometry mirrors the simple shapes but it carries
+ * `zCeiling` (the void's ceiling in PART-frame z from the blank's bottom face) instead of a cut
+ * `depth`, and it has no `construction` — a void is a fact about the blank, not an instruction.
+ * The two cross-field bounds the simple shapes check (a rect's corner radius, a slot's length)
+ * are checked here the same way; whether `zCeiling` fits under the stock's thickness is a fact
+ * about the specific blank, not a schema question (a too-tall void simply yields no cut).
+ */
+const keepOutBaseSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().optional(),
+  position: positionSchema,
+  rotation: z.number().finite(),
+  enabled: z.boolean(),
+  zCeiling: z.number().finite().positive(),
+});
+
+const keepOutSchema = z
+  .discriminatedUnion('kind', [
+    keepOutBaseSchema.extend({
+      kind: z.literal('rect'),
+      width: z.number().finite().positive(),
+      height: z.number().finite().positive(),
+      cornerRadius: z.number().finite().nonnegative(),
+    }),
+    keepOutBaseSchema.extend({
+      kind: z.literal('circle'),
+      diameter: z.number().finite().positive(),
+    }),
+    keepOutBaseSchema.extend({
+      kind: z.literal('slot'),
+      length: z.number().finite().positive(),
+      width: z.number().finite().positive(),
+    }),
+    keepOutBaseSchema.extend({
+      kind: z.literal('polygon'),
+      points: z.array(polygonPointSchema).min(3).max(500),
+    }),
+  ])
+  .superRefine((ko, ctx) => {
+    if (ko.kind === 'rect' && ko.cornerRadius > Math.min(ko.width, ko.height) / 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'cornerRadius must be ≤ min(width, height) / 2',
+        path: ['cornerRadius'],
+      });
+    }
+    if (ko.kind === 'slot' && ko.length < ko.width) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'slot length must be ≥ width',
+        path: ['length'],
+      });
+    }
+  });
+
 const viseSchema = z.object({
   stockProud: z.number().finite(),
   fixedJawThickness: z.number().finite(),
@@ -344,6 +400,9 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   // #217's imported vector outlines. OPTIONAL, not defaulted: a job with none keeps no key, so a
   // pre-#217 document round-trips byte-for-byte (the same reason `combined` and `traces` are).
   vectors: z.array(vectorSchema).optional(),
+  // #231 item 3's under-surface voids. OPTIONAL, not defaulted: a job with none keeps no key, so
+  // a pre-#231 document round-trips byte-for-byte (the same reason `combined`/`traces`/`vectors`).
+  keepOuts: z.array(keepOutSchema).optional(),
   // #246/#254's per-field provenance. OPTIONAL, not defaulted: a job that has never had a
   // cutting override or a guided setup applied carries no key.
   sources: jobSourcesSchema.optional(),

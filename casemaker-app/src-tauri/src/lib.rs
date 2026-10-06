@@ -2,6 +2,7 @@ use clap::Parser;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod config;
+mod machine;
 mod server;
 
 #[derive(Debug, Parser)]
@@ -94,6 +95,16 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // #255 — the machine bridge's raw-socket transport. The sockets live in Rust; the protocol
+        // lives in TypeScript under the `canDriveMachine` guard. See Z1-Bridge-Protocol.md §7.
+        .manage(machine::MachineTransport::default())
+        .invoke_handler(tauri::generate_handler![
+            machine::machine_udp_listen,
+            machine::machine_tcp_connect,
+            machine::machine_tcp_write,
+            machine::machine_tcp_read,
+            machine::machine_tcp_close,
+        ])
         .setup(move |app| {
             let url = WebviewUrl::External(window_url.parse()?);
             let _window = WebviewWindowBuilder::new(app, "main", url)

@@ -46,6 +46,17 @@ const READY = {
   meshes: { stock: {}, result: {}, removal: null, gouges: [] },
 } as unknown as SimLoadResult;
 
+/** A column-engine load (#222/#239) that also carried a clamped rotary cut. */
+const READY_COLUMN = {
+  ok: true,
+  diagnostics: [],
+  summary: { diagnosticCounts: {} },
+  stats: { engine: 'column', removedVolume: 20, ms: { total: 30 }, resolution: { dx: 0.1, dThetaDeg: 0.25 } },
+  count: 5,
+  axisClamped: { count: 4, deepestZ: -0.7 },
+  meshes: { stock: {}, result: {}, removal: null, gouges: [] },
+} as unknown as SimLoadResult;
+
 const REFUSED = {
   ok: false,
   pathOnly: false,
@@ -187,6 +198,37 @@ describe('SimPanel', () => {
     });
     await screen.findByTestId('sim-result');
     expect(screen.getByTestId('sim-disclaimer').textContent).toContain('rigid, ideal machine');
+  });
+
+  it('names the backend that ran, and defaults to the exact sweeper (#222)', async () => {
+    setSimClientLoader(async () => fakeClient(READY));
+    openPlainFile();
+    act(() => useSimSetupStore.getState().setTool(CHOSEN_TOOL));
+    render(<SimPanel />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sim-simulate'));
+    });
+    await screen.findByTestId('sim-result');
+    // READY carries no `stats.engine`, so the badge reads the exact default.
+    expect(screen.getByTestId('sim-backend').textContent).toContain('exact');
+    expect(screen.queryByTestId('sim-axis-clamped')).toBeNull();
+  });
+
+  it('surfaces the clamped rotary count with the result, not only in diagnostics (#239)', async () => {
+    setSimClientLoader(async () => fakeClient(READY_COLUMN));
+    openPlainFile();
+    act(() => useSimSetupStore.getState().setTool(CHOSEN_TOOL));
+    render(<SimPanel />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sim-simulate'));
+    });
+    await screen.findByTestId('sim-result');
+    expect(screen.getByTestId('sim-backend').textContent).toContain('column');
+    const clamped = screen.getByTestId('sim-axis-clamped').textContent ?? '';
+    expect(clamped).toContain('4');
+    expect(clamped).toContain('clamped');
   });
 
   it('names the geometry this run did not check (#243)', async () => {

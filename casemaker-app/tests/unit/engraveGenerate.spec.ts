@@ -12,7 +12,7 @@ import { version as APP_VERSION } from '../../package.json';
 import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, EngraveKeepOut } from '@/types/engraveJob';
 
 describe('engraveGenerate (#206)', () => {
   it('takes the default job all the way to a clean .nc', () => {
@@ -96,6 +96,76 @@ describe('engraveGenerate (#206)', () => {
     const withBoard: EngraveJob = { ...shallow, sacrificial: presetPartOnBoard() };
     const withCodes = engraveRegions(tl, withBoard).findings.map((f) => f.code);
     expect(withCodes).not.toContain('vise-grip-shallow');
+  });
+});
+
+describe('an under-surface void limits the cut (#231 item 3)', () => {
+  // A 12 mm blank with a 2 mm membrane over a pocket: the void's ceiling is at z 10 from the
+  // bottom face, so minFloor 1 leaves a deepest cut of 1.0 mm over it. `toPartPlan` turns the
+  // void into `stock.keepOuts`, and `jobDepthLimit` is what the verifier is handed.
+  const pocket: EngraveKeepOut = {
+    id: 'pocket',
+    name: 'Magnet pocket',
+    kind: 'rect',
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    enabled: true,
+    zCeiling: 10,
+    width: 30,
+    height: 20,
+    cornerRadius: 0,
+  };
+  const shapeA = (depth: number) => ({
+    id: 'a',
+    name: 'A',
+    kind: 'rect' as const,
+    position: { x: 50, y: 30 },
+    rotation: 0,
+    depth,
+    enabled: true,
+    width: 10,
+    height: 10,
+    cornerRadius: 0,
+  });
+  const shapeB = {
+    id: 'b',
+    name: 'B',
+    kind: 'rect' as const,
+    position: { x: 85, y: 30 },
+    rotation: 0,
+    depth: 2.0,
+    enabled: true,
+    width: 10,
+    height: 10,
+    cornerRadius: 0,
+  };
+  const job = (aDepth: number, keepOuts?: EngraveKeepOut[]): EngraveJob => ({
+    ...defaultEngraveJob(),
+    labels: [],
+    shapes: [shapeA(aDepth), shapeB],
+    ...(keepOuts ? { keepOuts } : {}),
+  });
+
+  it('refuses a cut past the membrane, flagged at verify on the TEXT', () => {
+    const g = engraveGenerate(tl, job(1.5, [pocket]));
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('verify');
+    // The text existed — it is the verifier, re-reading the posted bytes, that refused it.
+    expect(g.nc).not.toBeNull();
+    expect(g.verify!.findings.some((f) => f.code === 'cut-too-deep' && f.severity === 'error')).toBe(true);
+  });
+
+  it('passes the same cut when it stays within the membrane', () => {
+    const g = engraveGenerate(tl, job(0.8, [pocket]));
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    expect(g.verify!.findings.some((f) => f.code === 'cut-too-deep')).toBe(false);
+  });
+
+  it('passes the same cut when the job carries no void', () => {
+    const g = engraveGenerate(tl, job(1.5));
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
   });
 });
 

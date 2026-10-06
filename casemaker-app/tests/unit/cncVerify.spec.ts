@@ -9,14 +9,21 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { verifyProgram, stockDepthLimit, type VerifyContext } from '@/engine/cnc/verify';
+import { verifyProgram, stockDepthLimit, sacrificialDepthLimit, type VerifyContext } from '@/engine/cnc/verify';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
 import { stubSetup } from '@/engine/cnc/setup';
-import { rectProfile } from '@/engine/compiler/profile';
+import { rectProfile, aabbOfProfile } from '@/engine/compiler/profile';
 import { HOP_Z } from '@/engine/cnc/cam/ir';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import {
+  noneSacrificial,
+  presetJawStrips,
+  presetPartOnBoard,
+  sacrificialBoxes,
+  supportedFootprint,
+} from '@/engine/cnc/sacrificial';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_NC = join(HERE, 'fixtures', 'default-job.nc');
@@ -212,5 +219,87 @@ describe('cncVerify (#174): the checks', () => {
     console.log(`[#174] verifyProgram on 10 000 moves: ${ms.toFixed(1)} ms (under load)`);
     expect(report.stats.cuttingMoves).toBeGreaterThanOrEqual(10000);
     expect(ms).toBeLessThan(500);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// #213: the depth limit over sacrificial material, and the cut-outside-stock rule that reads it.
+// ---------------------------------------------------------------------------------------------
+
+describe('sacrificialDepthLimit (#213 §3): the depth table', () => {
+  const STOCK = { length: 20, width: 10, thickness: 5 };
+  const OPTS = { minFloor: 1, breakthrough: 0.3 };
+
+  it('with no sacrificial material is exactly stockDepthLimit', () => {
+    const a = sacrificialDepthLimit(STOCK, noneSacrificial(), OPTS);
+    const b = stockDepthLimit(STOCK, OPTS.minFloor);
+    for (const [x, y] of [[-1, 5], [0, 0], [10, 5], [19.99, 9.99], [20, 5], [10, 10], [10, 11], [30, -3]] as [number, number][]) {
+      expect(a(x, y)).toBe(b(x, y));
+    }
+  });
+
+  it('over the part is thickness − minFloor; over a flush strip its height; over air 0', () => {
+    const limit = sacrificialDepthLimit(STOCK, presetJawStrips(), OPTS); // left+right 6 mm, flush, no board
+    expect(limit(10, 5)).toBe(4); // T − minFloor
+    expect(limit(-3, 5)).toBe(5); // flush strip height = T
+    expect(limit(23, 5)).toBe(5); // right strip
+    expect(limit(-7, 5)).toBe(0); // beyond the left strip
+    expect(limit(10, 12)).toBe(0); // beyond the part in Y
+  });
+
+  it('over board overhang is thickness + breakthrough; the part stays thickness − minFloor without a through-cut', () => {
+    const limit = sacrificialDepthLimit(STOCK, presetPartOnBoard(), OPTS); // 12 mm board, 10 mm overhang all round
+    expect(limit(10, 5)).toBe(4); // part
+    expect(limit(-5, 5)).toBe(5.3); // board overhang
+    expect(limit(-5, -5)).toBe(5.3); // board corner
+    expect(limit(-11, 5)).toBe(0); // beyond the board
+  });
+
+  it('a through-cut makes the part limit thickness + breakthrough, but only with a board', () => {
+    const withBoard = sacrificialDepthLimit(STOCK, presetPartOnBoard(), { ...OPTS, through: true });
+    expect(withBoard(10, 5)).toBe(5.3);
+    const noBoard = sacrificialDepthLimit(STOCK, noneSacrificial(), { ...OPTS, through: true });
+    expect(noBoard(10, 5)).toBe(4);
+  });
+
+  it('the positive region is exactly supportedFootprint (#213 §3)', () => {
+    const s = presetPartOnBoard();
+    const limit = sacrificialDepthLimit(STOCK, s, OPTS);
+    const { length: L, width: W } = STOCK;
+    const boxes = sacrificialBoxes(STOCK, s);
+    const inFootprint = (x: number, y: number): boolean =>
+      (x >= 0 && x <= L && y >= 0 && y <= W) ||
+      boxes.some((b) => x >= b.min[0] && x <= b.max[0] && y >= b.min[1] && y <= b.max[1]);
+    for (let x = -12; x <= 32; x += 0.5) {
+      for (let y = -12; y <= 22; y += 1) {
+        expect(limit(x, y) > 0).toBe(inFootprint(x, y));
+      }
+    }
+    const bb = aabbOfProfile(supportedFootprint(STOCK, s))!;
+    expect(bb.min).toEqual([-10, -10]);
+    expect(bb.max).toEqual([30, 20]);
+  });
+});
+
+describe('cut-outside-stock against supportedFootprint (#213 §3)', () => {
+  const STOCK = { length: 20, width: 10, thickness: 5 };
+  // A stroke from X = 17 to X = 23: it runs 3 mm past the part's right edge at X = 20.
+  const PAST_EDGE = ['G90 G21', 'T1 M6', 'M7', 'S12000 M3', 'G0 X17 Y5', 'G1 Z-1 F200', 'G1 X23', 'M5', 'M02'].join('\n');
+
+  it('with no sacrificial material, 3 mm past the edge is refused at the tool edge', () => {
+    expect(codes(ctxFor(), PAST_EDGE)).toContain('cut-outside-stock');
+  });
+
+  it('with a 6 mm right strip the same stroke passes: the cutter is on sacrificial material, not air', () => {
+    const depthLimit = sacrificialDepthLimit(STOCK, presetJawStrips(), { minFloor: 1, breakthrough: 0.3 });
+    const report = verifyProgram(PAST_EDGE, ctxFor({ depthLimit }));
+    expect(report.findings.filter((f) => f.code === 'cut-outside-stock')).toEqual([]);
+    expect(report.ok).toBe(true);
+  });
+
+  it('a stroke that leaves the strip too is still cut-outside-stock', () => {
+    const depthLimit = sacrificialDepthLimit(STOCK, presetJawStrips(), { minFloor: 1, breakthrough: 0.3 });
+    const pastStrip = ['G90 G21', 'T1 M6', 'M7', 'S12000 M3', 'G0 X23 Y5', 'G1 Z-1 F200', 'G1 X30', 'M5', 'M02'].join('\n');
+    expect(codes(ctxFor({ depthLimit }), pastStrip)).toContain('cut-outside-stock');
   });
 });

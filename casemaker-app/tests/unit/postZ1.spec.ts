@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { estimateSeconds, type CamMove, type CamOperation, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { flatEndMill, cuttingRadiusForSweep } from '@/engine/cnc/tool';
-import { Z1, type MachineProfile } from '@/engine/cnc/machine';
+import { Z1, type MillProfile } from '@/engine/cnc/machine';
 import { postZ1, FINAL_RETRACT_Z, type PostContext } from '@/engine/cnc/post/z1';
 import { formatFixed, sanitizeMkrValue } from '@/engine/cnc/post/format';
 import { parseMkrRecord } from '@/engine/cnc/gcode/mkrHeader';
@@ -266,7 +266,7 @@ describe('postZ1 (#173)', () => {
     if (!nan.ok) expect(nan.errors.join(' ')).toMatch(/non-finite/i);
 
     // `hasATC` is the profile's literal `false`; this post only writes the manual dialect.
-    const atc = { ...Z1, hasATC: true } as unknown as MachineProfile;
+    const atc = { ...Z1, hasATC: true } as unknown as MillProfile;
     const atcResult = postZ1(TWO_OP, CTX, atc);
     expect(atcResult.ok).toBe(false);
     if (!atcResult.ok) expect(atcResult.errors.join(' ')).toMatch(/tool changer/i);

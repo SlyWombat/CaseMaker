@@ -20,7 +20,7 @@ import {
   SWEEP_TOLERANCES,
   type SweepOpts,
 } from '@/workers/geometry/sweep';
-import { buildTimeline, parseGcode, stubSetup, viseEnvelope, DEFAULT_VISE, Z1, type MachineProfile, type Setup, type Workholding } from '@/engine/cnc';
+import { buildTimeline, parseGcode, stubSetup, viseEnvelope, DEFAULT_VISE, Z1, type MillProfile, type Setup, type Workholding } from '@/engine/cnc';
 import { presetJawStrips, sacrificialBoxes } from '@/engine/cnc/sacrificial';
 import { toSetup, jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -804,7 +804,7 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
   });
 
   it('a MEASURED nut: clear at depth 5, in the jaw at depth 8', () => {
-    const machine: MachineProfile = { ...Z1, holder: { nutDiameter: 20, nutLength: 15, source: 'test' } };
+    const machine: MillProfile = { ...Z1, holder: { nutDiameter: 20, nutLength: 15, source: 'test' } };
     const t = flatEndMill(3.175, { stickout: 3 }); // nut bottom sits 3 mm above the tip
     // Depth 5: nut bottom Z = -2, above the jaw top at -4 → clear.
     expect(codesOf(sweep(stroke(8, -5), t, fixtureSetup(), { machine }).out)).not.toContain('holder-into-fixture');

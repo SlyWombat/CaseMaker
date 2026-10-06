@@ -32,10 +32,10 @@ import type { EngraveItem, EngraveJob } from '@/types/engraveJob';
 // fall back to `dev`, so a generated-then-committed `.nc` was not byte-identical to the app's
 // own save (#231 item 4). package.json is the single source in every environment.
 import { version as CAM_VERSION } from '../../../package.json';
-import { Z1, type MachineProfile } from '@/engine/cnc/machine';
+import { Z1, type MillProfile } from '@/engine/cnc/machine';
 import { feedsFor, type FeedsResult } from '@/engine/cnc/feeds';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
-import { toPartPlan, labelProfile } from '@/engine/cnc/engrave/partPlan';
+import { toPartPlan, labelProfile, jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import { jobTool, toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
@@ -43,7 +43,7 @@ import { estimateCycleSeconds, HOP_Z, type CamMove, type ToolpathIR } from '@/en
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { FRAME_Z } from '@/engine/cnc/engrave/runSheet';
 import type { Setup } from '@/engine/cnc/setup';
-import { stockDepthLimit, verifyProgram, type DepthLimit, type VerifyReport } from '@/engine/cnc/verify';
+import { verifyProgram, type DepthLimit, type VerifyReport } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import {
   engravabilityFindings,
@@ -259,7 +259,7 @@ export function frameCorners(ir: ToolpathIR, radius: number, z: number): CamMove
 function frameProgram(
   ir: ToolpathIR,
   ctx: PostContext,
-  machine: MachineProfile,
+  machine: MillProfile,
   setup: Setup,
   tool: Tool,
   limit: DepthLimit,
@@ -348,11 +348,9 @@ export function engraveGenerate(tl: ManifoldToplevel, job: EngraveJob): EngraveG
     return stop('post', { feeds, message: e instanceof Error ? e.message : String(e) });
   }
 
-  // 5. the verifier (#174) on the TEXT, with the CNC-2 depth limit.
-  const limit = stockDepthLimit(
-    { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
-    job.minFloor,
-  );
+  // 5. the verifier (#174) on the TEXT, with the depth limit the JOB implies: the CNC-2 stock
+  // limit, tightened where an under-surface void leaves a thinner membrane (#231 item 3).
+  const limit = jobDepthLimit(job);
   const setup = toSetup(job, Z1);
   const verify = verifyProgram(nc, { setup, machine: Z1, tool, depthLimit: limit, minRapidZ: ir.hopZ });
   if (verify.findings.some((f) => f.severity === 'error')) {

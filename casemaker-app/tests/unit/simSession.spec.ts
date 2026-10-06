@@ -105,7 +105,7 @@ describe('what a load returns', () => {
   it('plain data and transferable meshes: no wasm handle, no events, no per-step state', () => {
     const { session, r } = loaded(THREE);
     expect(r.count).toBe(3);
-    expect(Object.keys(r).sort()).toEqual(['checkpoints', 'count', 'diagnostics', 'meshes', 'ok', 'pauses', 'radius', 'segments', 'stats', 'stockTopZ', 'summary']);
+    expect(Object.keys(r).sort()).toEqual(['axisClamped', 'checkpoints', 'count', 'diagnostics', 'meshes', 'ok', 'pauses', 'radius', 'segments', 'stats', 'stockTopZ', 'summary']);
     expect(() => structuredClone({ ...r, meshes: undefined })).not.toThrow();
     const all = [r.meshes.stock, r.meshes.result, r.meshes.removal, ...r.meshes.gouges.map((g) => g.mesh)].filter((m): m is NodeMeshOutput => m !== null);
     expect(all).toHaveLength(3);

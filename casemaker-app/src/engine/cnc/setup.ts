@@ -26,7 +26,7 @@
 import { aabbOfProfile, type Profile } from '@/engine/compiler/profile';
 import type { Mm, Vec2, Vec3 } from '@/types/units';
 import type { Sacrificial } from '@/types/engraveJob';
-import type { AxisRange, MachineProfile } from './machine';
+import type { AxisRange, MillProfile } from './machine';
 
 export type Degrees = number;
 
@@ -187,7 +187,7 @@ function modelBounds(part: PartSpec): { min: Vec2; max: Vec2 } | null {
  * program reaching past it, that is genuinely larger than the envelope still reports
  * `outside-envelope`.
  */
-function machinePlacement(part: PartSpec, machine: MachineProfile, zTop: Mm): Vec3 {
+function machinePlacement(part: PartSpec, machine: MillProfile, zTop: Mm): Vec3 {
   const centre = (r: AxisRange): Mm => (r.min + r.max) / 2;
   const b = modelBounds(part);
   const x = b ? centre(machine.envelope.x) - (b.min[0] + b.max[0]) / 2 : centre(machine.envelope.x);
@@ -210,7 +210,7 @@ function machinePlacement(part: PartSpec, machine: MachineProfile, zTop: Mm): Ve
  * the cylinder's origin Z is the axis Z. Y ≡ 0 on the axis is the same statement in Y, and the
  * placed `at[1]` is already it.
  */
-export function stubSetup(part: PartSpec, workholding: Workholding, overrides: Partial<Setup> = {}, machine?: MachineProfile): Setup {
+export function stubSetup(part: PartSpec, workholding: Workholding, overrides: Partial<Setup> = {}, machine?: MillProfile): Setup {
   const zTop = part.kind === 'prism' ? part.thickness : part.kind === 'cylinder' ? part.diameter / 2 : 0;
   // Without a machine the stub sits at the machine origin, which is fine for the frame
   // maths and useless on a real Z1, whose origin is the far top corner of a NEGATIVE

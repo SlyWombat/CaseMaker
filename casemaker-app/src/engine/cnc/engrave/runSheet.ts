@@ -136,6 +136,20 @@ export interface RunSheetDiagramJaw {
   max: [Mm, Mm];
 }
 
+/**
+ * An under-surface void's footprint on the diagram, in the STOCK frame, mm (#231 item 3). Drawn
+ * dashed, because it is not a cut — it is material MISSING under the top face. `solidThickness`
+ * is the material left over it (`stock.thickness − zCeiling`), the number the operator must not
+ * cut through.
+ */
+export interface RunSheetDiagramKeepOut {
+  id: string;
+  name: string;
+  min: [Mm, Mm];
+  max: [Mm, Mm];
+  solidThickness: Mm;
+}
+
 /** Everything the top-view origin diagram needs — plain geometry, no markup. */
 export interface RunSheetDiagram {
   /** The stock outline: X × Y, front-left at the origin. */
@@ -146,6 +160,8 @@ export interface RunSheetDiagram {
   origin: [Mm, Mm];
   /** Every enabled item that has a region, with its bounding box and depth. */
   items: RunSheetDiagramItem[];
+  /** Enabled under-surface voids, as their footprints (#231 item 3). Empty for a solid blank. */
+  keepOuts: RunSheetDiagramKeepOut[];
 }
 
 /**
@@ -334,14 +350,29 @@ export function sha256Hex(input: string): string {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Every item that will actually cut (#214/#215), in plan order and with its resolved stock-frame
- * profile. `toPartPlan` is the one funnel all three item lists go through, so a `border`, `frame`
- * or `cutaway` is here too, while a `construction` item, a broken reference and a
- * self-intersecting polygon — none of which produces a region — are absent. The sheet therefore
- * describes exactly the cuts the `.nc` makes, no more and no fewer.
+ * The void a cut item's extent sits over, or null. Both the item and the void are reduced to
+ * their stock-frame bounding boxes (`buildDiagram` has them), because the sheet is pure — no
+ * wasm, so no exact region intersection — and a box overlap is the CONSERVATIVE test: it may
+ * name a void whose footprint does not quite reach the item, but it never misses one that does.
+ * When several voids overlap the item, the one with the shallowest limit wins.
  */
-function cutItems(job: EngraveJob): PartPlan['engraves'] {
-  return toPartPlan(job).engraves;
+function keepOutOver(
+  job: EngraveJob,
+  box: { min: [Mm, Mm]; max: [Mm, Mm] } | undefined,
+  keepOuts: readonly RunSheetDiagramKeepOut[],
+): RunSheetDiagramKeepOut | null {
+  if (!box) return null;
+  let worst: RunSheetDiagramKeepOut | null = null;
+  let worstLimit = Infinity;
+  for (const ko of keepOuts) {
+    if (!boxesOverlap(box, ko)) continue;
+    const limit = keepOutLimit(job, ko.solidThickness);
+    if (limit < worstLimit) {
+      worstLimit = limit;
+      worst = ko;
+    }
+  }
+  return worst;
 }
 
 /** One sentence for the sacrificial setup (#213), or null when there is none. */
@@ -367,8 +398,25 @@ function sacrificialSummary(job: EngraveJob): string | null {
   return parts.length === 0 ? null : parts.join(', and ');
 }
 
-/** The top-view origin diagram's plain geometry, derived from the job and its cut regions. */
-function buildDiagram(job: EngraveJob, cut: PartPlan['engraves']): RunSheetDiagram {
+/** Bounding-box overlap, touching counted — the sheet's conservative "sits over" test (#231). */
+function boxesOverlap(a: { min: [Mm, Mm]; max: [Mm, Mm] }, b: { min: [Mm, Mm]; max: [Mm, Mm] }): boolean {
+  return a.min[0] <= b.max[0] && a.max[0] >= b.min[0] && a.min[1] <= b.max[1] && a.max[1] >= b.min[1];
+}
+
+/** The solid material left over a void, mm — what the cutter must not go through (#231). A void
+ * whose ceiling pokes above the top face leaves none; clamped so the sheet never prints a negative
+ * thickness (the depth limit is 0 over it either way). */
+function keepOutSolidThickness(job: EngraveJob, zCeiling: Mm): Mm {
+  return Math.max(0, job.stock.thickness - zCeiling);
+}
+
+/** The deepest cut a void permits, mm — its membrane less `minFloor`, never below 0 (#231). */
+function keepOutLimit(job: EngraveJob, solidThickness: Mm): Mm {
+  return Math.max(0, solidThickness - job.minFloor);
+}
+
+/** The top-view origin diagram's plain geometry, derived from the job and its plan. */
+function buildDiagram(job: EngraveJob, plan: PartPlan): RunSheetDiagram {
   const { length, width } = job.stock;
   const vise = job.workholding.vise;
   const shift = viseJawShift(job.sacrificial);
@@ -383,7 +431,7 @@ function buildDiagram(job: EngraveJob, cut: PartPlan['engraves']): RunSheetDiagr
   for (const c of job.combined ?? []) if (c.kind === 'border') borderInset.set(c.id, c.inset);
 
   const items: RunSheetDiagramItem[] = [];
-  for (const item of cut) {
+  for (const item of plan.engraves) {
     const inset = borderInset.get(item.id);
     const box =
       inset !== undefined
@@ -396,6 +444,20 @@ function buildDiagram(job: EngraveJob, cut: PartPlan['engraves']): RunSheetDiagr
       min: [box.min[0], box.min[1]],
       max: [box.max[0], box.max[1]],
       depth: item.depth,
+    });
+  }
+
+  // #231 — an under-surface void's footprint, as the stock-frame box the operator sees it in.
+  const keepOuts: RunSheetDiagramKeepOut[] = [];
+  for (const ko of plan.stock.keepOuts) {
+    const box = aabbOfProfile(ko.footprint);
+    if (!box) continue;
+    keepOuts.push({
+      id: ko.id,
+      name: ko.name || ko.id,
+      min: [box.min[0], box.min[1]],
+      max: [box.max[0], box.max[1]],
+      solidThickness: keepOutSolidThickness(job, ko.zCeiling),
     });
   }
 
@@ -419,6 +481,7 @@ function buildDiagram(job: EngraveJob, cut: PartPlan['engraves']): RunSheetDiagr
     ],
     origin: [0, 0],
     items,
+    keepOuts,
   };
 }
 
@@ -462,7 +525,14 @@ export function buildRunSheet(
 ): RunSheet {
   const { length, width, thickness, material } = job.stock;
   const vise = job.workholding.vise;
-  const items = cutItems(job);
+  // The one funnel all three item lists go through (#214/#215), so a `border`/`frame`/`cutaway`
+  // is here too while a `construction` item, a broken reference and a self-intersecting polygon
+  // are absent: the sheet describes exactly the cuts the `.nc` makes. `keepOuts` comes off the
+  // same plan, so the diagram and the depth notes cannot disagree about where the voids are.
+  const plan = toPartPlan(job);
+  const items = plan.engraves;
+  const diagram = buildDiagram(job, plan);
+  const itemBox = new Map(diagram.items.map((i) => [i.id, i] as const));
   const deepest = items.reduce((max, item) => Math.max(max, item.depth), 0);
   const stopBelow = deepest + 1; // #207 section 3: below the deepest cut + 1 mm the cutter is under the jaw tops
   const tool = jobTool(job);
@@ -502,6 +572,16 @@ export function buildRunSheet(
   ];
   const sac = sacrificialSummary(job);
   if (sac !== null) needSteps.push({ text: 'Sacrificial material:', value: sac });
+  // #231 item 3 — an under-surface void is a property of the blank the operator must know about
+  // before probing Z, so each one is stated up front with the material left over it.
+  for (const ko of diagram.keepOuts) {
+    needSteps.push({
+      text:
+        `Under-surface void — ${ko.name}. The blank is only ${fmtNum(ko.solidThickness)} mm thick ` +
+        'over it: do not cut through.',
+      value: `deepest cut ${fmtNum(keepOutLimit(job, ko.solidThickness))} mm`,
+    });
+  }
 
   // ---- 2 · Mount the vise (⚠ #208) -----------------------------------------------------------
   const UNVERIFIED = '#208';
@@ -589,7 +669,16 @@ export function buildRunSheet(
     cutSteps.push({ text: 'Cutting parameters were not resolved for this job.' });
   }
   for (const item of items) {
-    cutSteps.push({ text: item.name, value: `${fmtNum(item.depth)} mm deep` });
+    // #231 item 3 — say which cut sits over a void, and the depth the material there allows,
+    // so the item name no longer has to smuggle the distinction onto the sheet.
+    const over = keepOutOver(job, itemBox.get(item.id), diagram.keepOuts);
+    const note = over
+      ? ` — over "${over.name}", only ${fmtNum(over.solidThickness)} mm of material` +
+        (item.depth > keepOutLimit(job, over.solidThickness)
+          ? ` (DEEPER than the ${fmtNum(keepOutLimit(job, over.solidThickness))} mm the void allows)`
+          : ` (deepest cut there ${fmtNum(keepOutLimit(job, over.solidThickness))} mm)`)
+      : '';
+    cutSteps.push({ text: `${item.name}${note}`, value: `${fmtNum(item.depth)} mm deep` });
   }
   cutSteps.push({
     text: 'Stay at the machine. Stop it if the sound changes, the blank moves, or the cutter loads up.',
@@ -655,7 +744,7 @@ export function buildRunSheet(
       { id: 'warnings', title: '8 · Warnings carried from the app', steps: warnings },
       { id: 'record', title: '9 · Record afterwards', steps: recordSteps },
     ],
-    diagram: buildDiagram(job, items),
+    diagram,
   };
 }
 
@@ -697,6 +786,10 @@ export function runSheetDiagramSvg(diagram: RunSheetDiagram): string {
     xs.push(item.min[0], item.max[0]);
     ys.push(item.min[1], item.max[1]);
   }
+  for (const ko of diagram.keepOuts) {
+    xs.push(ko.min[0], ko.max[0]);
+    ys.push(ko.min[1], ko.max[1]);
+  }
   const xmin = Math.min(...xs) - DIAGRAM_PAD;
   const xmax = Math.max(...xs) + DIAGRAM_PAD;
   const ymin = Math.min(...ys) - DIAGRAM_PAD;
@@ -733,6 +826,27 @@ export function runSheetDiagramSvg(diagram: RunSheetDiagram): string {
     parts.push(
       `<text class="run-sheet-label" x="${(jaw.min[0] + jaw.max[0]) / 2}" y="${-((jaw.min[1] + jaw.max[1]) / 2)}" ` +
         `text-anchor="middle">${escapeXml(jaw.label)}</text>`,
+    );
+  }
+
+  // #231 — the under-surface voids, drawn DASHED (they are missing material, not cuts) and
+  // BEFORE the items so an item's box stays legible over the void. The presentation is inline
+  // because the sheet's own CSS lives in the panel (owned by another slot) and this SVG must
+  // render correctly from `runSheet.ts` alone.
+  for (const ko of diagram.keepOuts) {
+    parts.push(
+      rect(
+        ko.min,
+        ko.max,
+        'run-sheet-keepout',
+        `data-keepout-id="${escapeXml(ko.id)}" fill="none" stroke="#a00" stroke-width="0.5" stroke-dasharray="2 1.2"`,
+      ),
+    );
+    const cx = (ko.min[0] + ko.max[0]) / 2;
+    const cy = -((ko.min[1] + ko.max[1]) / 2);
+    parts.push(
+      `<text class="run-sheet-keepout-label" x="${cx}" y="${cy}" text-anchor="middle" font-size="3" fill="#a00">` +
+        `${escapeXml(ko.name)} · ${fmtNum(ko.solidThickness)} mm over</text>`,
     );
   }
 

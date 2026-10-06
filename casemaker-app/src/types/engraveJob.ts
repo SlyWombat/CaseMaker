@@ -275,6 +275,70 @@ export type EngraveAnyItem = EngraveItem | EngraveCombinedShape | EngraveVectorS
  */
 export type EngraveItem = EngraveLabel | EngraveShape;
 
+/**
+ * An under-surface VOID the job must respect (#231 item 3): a pocket or cavity in the blank's
+ * BOTTOM face — the magnet pocket of #165's badge is the case it was built for. #178's
+ * `maxDepthAt` computes the safe cut depth from the compiled solid; this is where a JOB says
+ * what void is there, so `toPartPlan` can carry it (`PartPlan.stock.keepOuts`) and
+ * `engraveGenerate` can refuse a cut deeper than the material left over it allows.
+ *
+ * The four kinds mirror `EngraveShape`'s geometry (flat, the same `kind` discriminants) but are
+ * their OWN union in their OWN list (`EngraveJob.keepOuts`), like `combined`/`traces`/`vectors`:
+ * the panel's exhaustive engrave switches and the item pipelines are untouched. `position` is
+ * the footprint's centre; `rotation` is about it — the same convention as every other item.
+ */
+export interface EngraveKeepOutBase {
+  id: string;
+  /** Optional human name, shown on the run sheet; a void needs no name. */
+  name?: string;
+  /** Footprint centre, mm from the stock's front-left corner (polygon: origin of `points`). */
+  position: { x: Mm; y: Mm };
+  /** Degrees counter-clockwise about `position`. */
+  rotation: number;
+  enabled: boolean;
+  /**
+   * The void's ceiling measured from a DIFFERENT datum than every `depth` in this document:
+   * PART-frame z from the blank's BOTTOM face (z = 0 at the bottom, `stock.thickness` at the
+   * engraved face). The void spans from the bottom face up to this height, so the solid
+   * MEMBRANE the cutter must not break through is `stock.thickness − zCeiling` thick. A pocket
+   * "2.3 mm deep in the bottom" has `zCeiling: 2.3`.
+   *
+   * This is the SAME number and the SAME frame `PartPlan.stock.keepOuts[].zCeiling` and
+   * `LayerStackKeepOut.zCeiling` carry (#178), copied straight through so the badge's layer
+   * stack and this job's depth limit cannot disagree about where the void's ceiling is.
+   */
+  zCeiling: Mm;
+}
+
+export interface EngraveKeepOutRect extends EngraveKeepOutBase {
+  kind: 'rect';
+  width: Mm;
+  height: Mm;
+  cornerRadius: Mm;
+}
+
+export interface EngraveKeepOutCircle extends EngraveKeepOutBase {
+  kind: 'circle';
+  diameter: Mm;
+}
+
+export interface EngraveKeepOutSlot extends EngraveKeepOutBase {
+  kind: 'slot';
+  length: Mm;
+  width: Mm;
+}
+
+export interface EngraveKeepOutPolygon extends EngraveKeepOutBase {
+  kind: 'polygon';
+  points: [Mm, Mm][];
+}
+
+export type EngraveKeepOut =
+  | EngraveKeepOutRect
+  | EngraveKeepOutCircle
+  | EngraveKeepOutSlot
+  | EngraveKeepOutPolygon;
+
 export interface ViseParams {
   /** How far the stock's top face stands above the jaw tops, mm. */
   stockProud: Mm;
@@ -378,6 +442,17 @@ export interface EngraveJob {
    * defaulted) for the same reason as `combined` and `traces`.
    */
   vectors?: EngraveVectorShape[];
+  /**
+   * Under-surface voids (#231 item 3): pockets or cavities in the blank's bottom face that the
+   * job must not cut through. A separate list, like `combined`/`traces`/`vectors`, so the item
+   * pipelines and the panel's exhaustive switches are untouched; `toPartPlan` carries them to
+   * `PartPlan.stock.keepOuts` and the generated depth limit, and the run sheet names them.
+   *
+   * Optional, so a pre-#231 document round-trips byte-for-byte; the schema keeps it absent (not
+   * defaulted) for the same reason as `combined`, `traces` and `vectors`. Consumers read
+   * `job.keepOuts ?? []`.
+   */
+  keepOuts?: EngraveKeepOut[];
   /** Key into TOOL_LIBRARY. */
   toolKey: string;
   workholding: { kind: 'vise'; vise: ViseParams };

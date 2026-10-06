@@ -88,6 +88,13 @@ export interface SimLoadOk {
   stats: SweepStats;
   stockTopZ: number;
   radius: number;
+  /**
+   * How many cutting moves dipped past the rotary axis within one tool radius and were clamped to
+   * it, with the deepest such Z (#239, decision R8) — `null` when none did. Carried here, OUTSIDE
+   * `diagnostics`, so the panel can show it where a user reads the result: a clamped cut did not
+   * come out the depth that was asked for.
+   */
+  axisClamped: { count: number; deepestZ: number } | null;
   /** Number of checkpoints: valid `simFrameAt` indices are -1 … count-1. */
   count: number;
   checkpoints: CheckpointInfo[];
@@ -318,6 +325,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         stats: col.stats,
         stockTopZ: col.stockTopZ,
         radius: col.radius,
+        axisClamped: col.axisClamped,
         count: col.count,
         checkpoints: timeline.checkpoints.map((cp): CheckpointInfo => ({
           segment: cp.segment,
@@ -382,6 +390,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         stats: sweep.stats,
         stockTopZ: sweep.stockTopZ,
         radius: sweep.radius,
+        axisClamped: null,
         count: playback.count,
         checkpoints: timeline.checkpoints.map((cp): CheckpointInfo => ({
           segment: cp.segment,

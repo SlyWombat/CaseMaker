@@ -1,5 +1,5 @@
 import { rectProfile } from '@/engine/compiler/profile';
-import type { MachineProfile } from '@/engine/cnc/machine';
+import type { MillProfile } from '@/engine/cnc/machine';
 import { libraryTool } from '@/engine/cnc/toolLibrary';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { viseEnvelope } from '@/engine/cnc/fixture';
@@ -120,7 +120,7 @@ export function jobTool(job: EngraveJob): Tool | null {
  *
  * The obstacle boxes themselves are #203's job, not this one.
  */
-export function toSetup(job: EngraveJob, machine: MachineProfile): Setup {
+export function toSetup(job: EngraveJob, machine: MillProfile): Setup {
   const { length, width, thickness } = job.stock;
   const vise = job.workholding.vise;
   const shift = viseJawShift(job.sacrificial);

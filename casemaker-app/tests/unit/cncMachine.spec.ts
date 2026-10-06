@@ -12,7 +12,7 @@ import {
   clampToMachine,
   insideEnvelope,
   machineSchema,
-  machineProfileSchema,
+  millProfileSchema,
   printerProfileSchema,
   CLAMP_REFUSE_FRACTION,
   type Machine,
@@ -202,7 +202,7 @@ describe('one machine abstraction, two processes (#184, #228)', () => {
 
 describe('profile schemas (#184 work item 1)', () => {
   it('round-trips the Z1 through its schema, and through the discriminated union', () => {
-    const parsed: Machine = machineProfileSchema.parse(Z1);
+    const parsed: Machine = millProfileSchema.parse(Z1);
     expect(parsed).toEqual(Z1);
     expect(machineSchema.parse(Z1)).toEqual(Z1);
   });
@@ -216,16 +216,16 @@ describe('profile schemas (#184 work item 1)', () => {
 
   it('refuses a mill missing the sourced soft endstops, or claiming an ATC', () => {
     const noEndstop = Object.fromEntries(Object.entries(Z1).filter(([k]) => k !== 'softEndstop'));
-    expect(machineProfileSchema.safeParse(noEndstop).success).toBe(false);
+    expect(millProfileSchema.safeParse(noEndstop).success).toBe(false);
     // hasATC is a literal false on the type (#183, Z1-only): a profile with an ATC is not one.
-    expect(machineProfileSchema.safeParse({ ...Z1, hasATC: true }).success).toBe(false);
+    expect(millProfileSchema.safeParse({ ...Z1, hasATC: true }).success).toBe(false);
   });
 
   it('carries the rotary profile as optional sourced data (#237)', () => {
     // Optional: a flat mill states no 4th axis. Present: every field is a sourced literal.
     const { rotary: _rotary, ...flat } = Z1;
-    expect(machineProfileSchema.safeParse(flat).success).toBe(true);
-    expect(machineProfileSchema.safeParse(Z1).success).toBe(true);
-    expect(machineProfileSchema.safeParse({ ...Z1, rotary: { ...Z1.rotary, axis: 'B' } }).success).toBe(false);
+    expect(millProfileSchema.safeParse(flat).success).toBe(true);
+    expect(millProfileSchema.safeParse(Z1).success).toBe(true);
+    expect(millProfileSchema.safeParse({ ...Z1, rotary: { ...Z1.rotary, axis: 'B' } }).success).toBe(false);
   });
 });

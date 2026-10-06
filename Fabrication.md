@@ -1,6 +1,11 @@
 # Fabrication — driving a CNC as well as a 3D printer
 
-Status as of 2026-10-03. Decisions taken in conversation; nothing implemented yet.
+Status as of 2026-10-05. The plan below is the design of record; the CNC side is now
+**partly built**, and the code — not this document — is the record of what has landed. The
+build-order ledger is `/Simulation.md` §10; the modules are `src/engine/cnc/` (`machine.ts`,
+`tool.ts`, `toolLibrary.ts`, `feeds.ts`, `setup.ts`, `verify.ts`, `layerStack.ts`, `cam/`,
+`post/z1.ts`, `gcode/`, `emulator/timeline.ts`) and `src/workers/geometry/` (`sweep.ts`,
+`columnEngine.ts`). Sections below that describe something still unbuilt say so in place.
 
 **Review scope.** Fable's adversarial review produced decisions 12–18 and covers this
 document as it stood at commit `d4369d7`. The print-orientation flip (§7.2), the §7

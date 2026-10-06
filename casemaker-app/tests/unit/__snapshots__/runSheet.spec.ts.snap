@@ -70,6 +70,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
         ],
       },
     ],
+    "keepOuts": [],
     "origin": [
       0,
       0,

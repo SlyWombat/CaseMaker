@@ -37,7 +37,7 @@ export interface AxisRange {
  * spindle" does not survive contact with the field — a lathe, a camera-located router and a
  * laser-first machine are all in scope for "CNC software". So the shared contract is ONLY the
  * identity and this discriminator. Everything process-specific hangs off the process's own
- * subtype: a mill's spindle ceiling, tool change and holder live on `MachineProfile`; a
+ * subtype: a mill's spindle ceiling, tool change and holder live on `MillProfile`; a
  * printer's build volume and nozzle live on `PrinterProfile`. A future laser or lathe is a new
  * subtype, not a field added to every machine. Within a process, capabilities are FLAGS (what
  * hardware is fitted) and dialect is DATA (what the controller accepts), never structure.
@@ -123,7 +123,7 @@ export interface RotaryProfile {
   source: string;
 }
 
-export interface MachineProfile extends MachineIdentity {
+export interface MillProfile extends MachineIdentity {
   /** A mill. The only process with a spindle and a tool change (#183: Z1-only). */
   process: 'mill';
   /**
@@ -212,7 +212,7 @@ export interface MachineProfile extends MachineIdentity {
 }
 
 /**
- * A consumer FDM printer (#184, work item 4): the other half of the `MachineProfile`
+ * A consumer FDM printer (#184, work item 4): the other half of the `MillProfile`
  * abstraction, behind the same `process` discriminant so printers and mills are the same kind
  * of thing. This is what used to be `PRINTER_PRESETS` in `rackFit.ts`, plus the nozzle width
  * that used to be `ASSUMED_NOZZLE` in `fasteners.ts` — the last machine numbers outside the
@@ -242,7 +242,7 @@ const ANCHOR1: Vec2 = [-192.4, -194.3];
  * rounding of the config. That agreement is the one internal consistency check available
  * without the machine.
  */
-export const Z1: MachineProfile = {
+export const Z1: MillProfile = {
   id: 'Z1',
   name: 'Makera Z1',
   process: 'mill',
@@ -294,7 +294,7 @@ export const Z1: MachineProfile = {
 };
 
 /** The only supported MILL machine. A second one is configuration here, not a refactor elsewhere. */
-export const MACHINES: Readonly<Record<string, MachineProfile>> = { Z1 };
+export const MACHINES: Readonly<Record<string, MillProfile>> = { Z1 };
 
 /**
  * The nozzle width assumed when the printer is not named. Nearly every consumer FDM machine
@@ -322,9 +322,9 @@ export const PRINTER_PROFILES: readonly PrinterProfile[] = [
 /**
  * A machine of either process. The union is what makes the discriminant useful: a caller that
  * only needs the identity can take a `Machine`, and a caller that needs a spindle ceiling takes
- * a `MachineProfile` and is told at compile time it is a mill.
+ * a `MillProfile` and is told at compile time it is a mill.
  */
-export type Machine = MachineProfile | PrinterProfile;
+export type Machine = MillProfile | PrinterProfile;
 
 /** Every machine we know, of any process (#184). */
 export const ALL_MACHINES: readonly Machine[] = [Z1, ...PRINTER_PROFILES];
@@ -353,7 +353,7 @@ export const CLAMP_REFUSE_FRACTION = 0.5;
  * toolpath. Clamps a modest overage and says so; refuses a gross one; passes `null` through
  * untouched (an unset value is the caller's problem, not a limit violation).
  */
-export function clampToMachine(feed: number | null, rpm: number | null, machine: MachineProfile): ClampResult {
+export function clampToMachine(feed: number | null, rpm: number | null, machine: MillProfile): ClampResult {
   const diagnostics: ClampDiagnostic[] = [];
   const one = (value: number | null, limit: number, what: 'feed' | 'rpm', unit: string): number | null => {
     if (value === null) return null;
@@ -383,7 +383,7 @@ export function clampToMachine(feed: number | null, rpm: number | null, machine:
 }
 
 /** Is a MACHINE-coordinate point inside the envelope? Unknown axes are not checked. */
-export function insideEnvelope(machine: MachineProfile, p: [number | null, number | null, number | null]): boolean {
+export function insideEnvelope(machine: MillProfile, p: [number | null, number | null, number | null]): boolean {
   const e = machine.envelope;
   const ok = (v: number | null, r: AxisRange): boolean => v === null || (v >= r.min && v <= r.max);
   return ok(p[0], e.x) && ok(p[1], e.y) && ok(p[2], e.z);
@@ -432,7 +432,7 @@ const rotarySchema = z.object({
   source: z.string().min(1),
 });
 
-export const machineProfileSchema = z.object({
+export const millProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   process: z.literal('mill'),
@@ -480,4 +480,4 @@ export const printerProfileSchema = z.object({
 });
 
 /** Any machine, discriminated on `process`. */
-export const machineSchema = z.discriminatedUnion('process', [machineProfileSchema, printerProfileSchema]);
+export const machineSchema = z.discriminatedUnion('process', [millProfileSchema, printerProfileSchema]);

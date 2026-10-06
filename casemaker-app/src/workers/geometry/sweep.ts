@@ -30,7 +30,7 @@ import type { Timeline, Checkpoint, AirMove } from '@/engine/cnc/emulator/timeli
 import { DIAGNOSTIC_CAP } from '@/engine/cnc/emulator/timeline';
 import { partToWork } from '@/engine/cnc/frames';
 import type { ObstacleBox, Setup } from '@/engine/cnc/setup';
-import type { MachineProfile } from '@/engine/cnc/machine';
+import type { MillProfile } from '@/engine/cnc/machine';
 import { inflate } from '@/engine/cnc/fixture';
 import { hasSacrificial, sacrificialBoxes } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
@@ -219,7 +219,7 @@ export interface SweepOpts {
    * holder-into-fixture check. Absent, or `holder: null`, means the nut is unmeasured — the
    * sweep says clearance "cannot be proven" rather than guessing a cylinder.
    */
-  machine?: MachineProfile;
+  machine?: MillProfile;
 }
 
 /** A counter-clockwise n-gon inscribed in the circle of radius r about (cx, cy). */

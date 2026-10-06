@@ -14,6 +14,8 @@ const tool = flatEndMill(3.175);
 
 const WRAPPED = ['S1000 M3', 'G0 X0 Y0 Z30 A0', 'G1 Z5 F100', 'G1 A360 F500', 'G0 Z30'].join('\n');
 const CROSSING = ['S1000 M3', 'G0 X0 Y0 Z5 A0', 'G1 X2 F100', 'G1 Z-2 F100', 'G1 A360 F500'].join('\n');
+/** A shallow dip inside the tool radius: clamped and continued, not refused (#239, R8). */
+const CLAMPED = ['S1000 M3', 'G0 X0 Y0 Z30 A0', 'G1 Z5 F100', 'G1 A360 F500', 'G1 Z-0.5 F50', 'G1 A720 F500', 'G0 Z30'].join('\n');
 
 describe('session routing — rotary', () => {
   it('loads a rotary job through the column engine, not the exact sweeper', () => {
@@ -31,8 +33,22 @@ describe('session routing — rotary', () => {
     // The grid IS the material: no removal ghost, no gouge solids yet.
     expect(ok.meshes.removal).toBeNull();
     expect(ok.meshes.gouges).toEqual([]);
+    // Nothing dipped past the axis, so no clamp is carried.
+    expect(ok.axisClamped).toBeNull();
     // The clock works whether or not the material does.
     expect(ok.checkpoints.length).toBeGreaterThan(0);
+  });
+
+  it('carries a clamped shallow dip to the caller, outside diagnostics', () => {
+    const s = createSimSession(tl);
+    const r = s.load(CLAMPED, setup(), tool, null);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const ok = r as SimLoadOk;
+    expect(ok.axisClamped).not.toBeNull();
+    expect(ok.axisClamped?.count).toBeGreaterThanOrEqual(1);
+    expect(ok.axisClamped?.deepestZ).toBeLessThan(0);
+    s.dispose();
   });
 
   it('frames the uncut stock and the last checkpoint without a wasm handle', () => {

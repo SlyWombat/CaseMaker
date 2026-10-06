@@ -36,7 +36,7 @@ import { HOP_Z } from './cam/ir';
 import { parseGcode } from './gcode';
 import type { GcodeEvent } from './gcode/types';
 import { buildTimeline, isRealToolChange, type MachineState, type Timeline } from './emulator/timeline';
-import type { MachineProfile } from './machine';
+import type { MillProfile } from './machine';
 import { CAM_ID, CAM_NAME, FINAL_RETRACT_Z } from './post/z1';
 import { formatFixed, sanitizeMkrValue } from './post/format';
 import type { Setup } from './setup';
@@ -93,7 +93,7 @@ export interface RestartInput {
   setup: Setup;
   tool: Tool;
   /** The machine the program is simulated/verified on (the Z1's profile). */
-  machine: MachineProfile;
+  machine: MillProfile;
   /**
    * Resume AT this program step (the step index the transport shows). The state after `step − 1`
    * is restored, then the original's events from `step` onward are re-emitted verbatim.
