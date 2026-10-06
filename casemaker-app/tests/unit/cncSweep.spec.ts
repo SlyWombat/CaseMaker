@@ -27,7 +27,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { createSimSession } from '@/workers/sim/session';
 import { flatEndMill, toolFromMkrRecord, cuttingRadiusForSweep, shapeFromType } from '@/engine/cnc/tool';
 import { parseMkrRecord } from '@/engine/cnc/gcode/mkrHeader';
-import { segmentsForRadius } from '@/engine/compiler/arcResolution';
+import { segmentsForRadius, SWEEP_SIMPLIFY_EPS_MM } from '@/engine/compiler/arcResolution';
 import { roundedRect } from '@/engine/compiler/profile';
 
 type Poly = [number, number][];
@@ -1046,5 +1046,171 @@ describe.skipIf(!existsSync(CORPUS))('a real 2.5D vendor job sweeps end to end',
     // Non-regression, deliberately loose, and now far below the bar: with the retracts gone the
     // gate is a few hundred ms on this file. Opt-in: it needs the corpus present.
     expect(out.value.stats.ms.airCheck).toBeLessThan(12_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #269 item 1: the rule the whole epsilon band rests on
+// ---------------------------------------------------------------------------
+
+/**
+ * `SWEEP_SIMPLIFY_EPS_MM` is one named constant, and `oracle.ts` derives the entire band from it
+ * as `levels * eps + 2 * chord`. That derivation is sound only if `CrossSection.simplify` never
+ * moves the outline by more than `eps` — i.e. it is Clipper2's `SimplifyPaths`, a LOCAL test
+ * against the line through a vertex's two neighbours and nothing more.
+ *
+ * It would not be sound if `simplify` were instead a Ramer-Douglas-Peucker over OPEN paths: a
+ * recursive chord test can cut a contour far further than one epsilon from the removed point,
+ * and an open-path reading would re-cut a closed contour from its endpoints.
+ *
+ * The binding's own doc comment states the local rule
+ * (`node_modules/manifold-3d/manifold-encapsulated-types.d.ts:264-277`: vertices go when they lie
+ * "less than the specified distance epsilon from an imaginary line that passes through its two
+ * adjacent vertices"). #187 item 6 recorded this as believed but unconfirmed, so these tests pin
+ * the PROPERTY rather than the sentence — the property is what the band spends.
+ */
+describe('#269: simplify is local vertex removal with a displacement bounded by eps', () => {
+  const EPS = SWEEP_SIMPLIFY_EPS_MM;
+
+  /** A 20 x 20 square (area 400, CCW) whose bottom edge is `teeth` sawteeth of height `a`. */
+  function sawtoothSquare(a: number, teeth = 20): Poly {
+    const step = 20 / teeth;
+    const p: Poly = [];
+    for (let i = 0; i < teeth; i++) {
+      p.push([i * step, 0], [(i + 0.5) * step, a]);
+    }
+    p.push([20, 0], [20, 20], [0, 20]);
+    return p;
+  }
+
+  /**
+   * The region as the sweep sees it: unioned, then simplified at `eps` — the sweep's own by
+   * default, or `null` for the union alone, which is the control that says whether a difference
+   * is simplify's doing or the union's.
+   */
+  function region(polys: Poly[], eps: number | null = EPS) {
+    const cs = tl.CrossSection.ofPolygons(polys, 'Positive');
+    const out = eps === null ? cs : cs.simplify(eps);
+    const result = {
+      polys: out.toPolygons() as Poly[],
+      contours: out.numContour(),
+      verts: out.numVert(),
+      area: out.area(),
+    };
+    if (out !== cs) out.delete();
+    cs.delete();
+    return result;
+  }
+
+  /** Shortest distance from `p` to the closed outline `poly`. */
+  function distanceToOutline(p: [number, number], poly: Poly): number {
+    let best = Infinity;
+    for (let i = 0; i < poly.length; i++) {
+      const [ax, ay] = poly[i]!;
+      const [bx, by] = poly[(i + 1) % poly.length]!;
+      const vx = bx - ax;
+      const vy = by - ay;
+      const wx = p[0] - ax;
+      const wy = p[1] - ay;
+      const len2 = vx * vx + vy * vy;
+      const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, (wx * vx + wy * vy) / len2));
+      best = Math.min(best, Math.hypot(wx - t * vx, wy - t * vy));
+    }
+    return best;
+  }
+
+  function perimeter(poly: Poly): number {
+    let s = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const [x0, y0] = poly[i]!;
+      const [x1, y1] = poly[(i + 1) % poly.length]!;
+      s += Math.hypot(x1 - x0, y1 - y0);
+    }
+    return s;
+  }
+
+  it('a run shallower than eps is taken off, and the straight edge restored', () => {
+    const a = EPS / 2; // 0.001 mm teeth
+    const src = sawtoothSquare(a);
+    // The teeth are really in the input: 20 of them, each two half-triangles, so the region
+    // sits 10 * a short of the square by area. Without this the test could pass on a collapsed
+    // input, which is exactly how the capsule gate was fooled (#187). The tolerance is 1e-5,
+    // not 1e-9: the union runs on Clipper2's integer grid, which costs ~2e-8 mm^2 here.
+    expect(area([src])).toBeCloseTo(400 - 10 * a, 5);
+
+    const s = region([src]);
+    expect(s.contours).toBe(1);
+    expect(s.verts).toBe(4);
+    expect(s.area).toBeCloseTo(400, 5);
+  });
+
+  it('a run five times deeper than eps survives, vertex for vertex', () => {
+    const a = EPS * 5; // 0.01 mm teeth — the thin uncut walls of the #191 review
+    const src = sawtoothSquare(a);
+    expect(src.length).toBe(43); // 20 valleys + 20 peaks + the three further corners
+    // Control: the union on its own keeps all 43, so what comes back below is simplify's doing.
+    expect(region([src], null).verts).toBe(43);
+
+    const s = region([src]);
+    expect(s.contours).toBe(1);
+    expect(s.verts).toBe(43);
+    expect(s.area).toBeCloseTo(400 - 10 * a, 5);
+  });
+
+  it('never moves a removed vertex further than eps from what comes out', () => {
+    const a = EPS / 2;
+    const src = sawtoothSquare(a);
+    const s = region([src]);
+    const out = s.polys[0]!;
+    let worst = 0;
+    for (const v of src) worst = Math.max(worst, distanceToOutline(v, out));
+    // The bound the band spends, per level...
+    expect(worst).toBeLessThanOrEqual(EPS);
+    // ...and the teeth really were removed rather than being absent to begin with: the
+    // deepest of them sits at exactly a from the restored straight edge.
+    expect(worst).toBeCloseTo(a, 9);
+  });
+
+  it('moves no more area than eps x perimeter, on a shape with nothing BUT sub-eps detail', () => {
+    // A 256-gon at r = 5: its own sagitta (5 * (1 - cos(pi/256)) = 3.8e-4 mm) is well under
+    // eps, so a local rule will take vertices off it at every step. If a single call could
+    // cascade past one eps of displacement the area would break this budget, and the band
+    // would need a per-level factor it does not have.
+    const src = circlePolygon(0, 0, 5, 256);
+    const raw = area([src]);
+    const s = region([src]);
+    const out = s.polys[0]!;
+    expect(s.contours).toBe(1);
+    // It really did simplify: 256 -> 152 vertices, measured 2026-10-06. One pass takes roughly
+    // every other vertex off a curve whose sagitta is under eps, because each removal doubles
+    // the sagitta its neighbours are judged against, and then stops.
+    expect(s.verts).toBeGreaterThan(100);
+    expect(s.verts).toBeLessThan(200);
+    // ...and the area it moved is inside the budget: 0.0192 mm^2 of the 0.0628 mm^2 that
+    // eps x perimeter allows, measured the same day. That 31% is the whole claim of the band.
+    expect(Math.abs(s.area - raw)).toBeLessThanOrEqual(EPS * perimeter(out));
+    for (const v of src) expect(distanceToOutline(v, out)).toBeLessThanOrEqual(EPS);
+    // And in the other direction: it cuts corners, it does not invent them. Every vertex of
+    // the result is one of the input's, so together with the bound above the two outlines are
+    // a Hausdorff distance of eps or less — which is exactly what the band claims.
+    for (const v of out) {
+      expect(src.some((w) => Math.hypot(w[0] - v[0], w[1] - v[1]) < 1e-6)).toBe(true);
+    }
+  });
+
+  it('keeps the contour closed: one contour, positive winding, no endpoint anchoring', () => {
+    const src = sawtoothSquare(EPS * 5);
+    const s = region([src]);
+    expect(s.contours).toBe(1);
+    const out = s.polys[0]!;
+    expect(out.length).toBe(s.verts); // one contour, so the vertex count IS its length
+    expect(signedArea(out)).toBeGreaterThan(0); // CCW in, CCW out: not re-cut as a path
+
+    // A closed-path rule cannot care where the contour starts; RDP on an open path is
+    // anchored to its endpoints, so rotating the start vertex would change the answer.
+    const rotated = [...src.slice(23), ...src.slice(0, 23)];
+    const r = region([rotated]);
+    expect(r.verts).toBe(s.verts);
+    expect(r.area).toBeCloseTo(s.area, 9);
   });
 });

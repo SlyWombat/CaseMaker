@@ -385,6 +385,16 @@ deliberately left uncut walls of 0.05, 0.01 and 0.003 mm all survive it with unc
 contour counts. Only sub-ε slivers, which Clipper2 has already fragmented, change. §9's
 open question 2 is closed for V1 and reopens for V-carve.
 
+**Why that is safe, and not just what was tried** (#269). Manifold's `CrossSection.simplify`
+is Clipper2's `SimplifyPaths`: a **local** test, where a vertex goes only if it lies within ε
+of the line through its two neighbours, on a **closed** path. It therefore never moves the
+outline by more than ε, and it only ever cuts corners — it invents no vertices — so a level's
+displacement is bounded by ε in both directions. That bound is the one §7's band spends as
+`levels × ε`. `tests/unit/cncSweep.spec.ts` holds the behaviour directly: teeth 0.5 ε deep
+disappear into the restored straight edge with the area closed back to exactly 400 mm², teeth
+5 ε deep survive vertex for vertex, and on a 256-gon one pass drops 104 of 256 vertices while
+moving 0.0192 mm² of the 0.0628 mm² that ε × perimeter allows.
+
 ### 4.3 The algorithm, and the budget
 
 ```
