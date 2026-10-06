@@ -855,16 +855,34 @@ export function pointInKeepOut(ko: EngraveKeepOut, x: Mm, y: Mm): boolean {
 }
 
 /**
+ * The solid material a void leaves above it, mm — `stock.thickness − zCeiling`, never below 0
+ * (#231). A void whose ceiling pokes above the top face leaves none, and the sheet must not
+ * print a negative thickness. One owner for the formula: the run sheet's diagram (whose
+ * `solidThickness` field is this number), the analytic depth limit below and the worker's void
+ * findings (#171) all read it.
+ */
+export function keepOutMembrane(job: EngraveJob, zCeiling: Mm): Mm {
+  return Math.max(0, job.stock.thickness - zCeiling);
+}
+
+/**
+ * The deepest cut a void permits, mm — its membrane less `minFloor`, never below 0 (#231). At a
+ * cut of exactly this depth `minFloor` of material is left, which is the floor the job asked for;
+ * one micron deeper and there is less.
+ */
+export function keepOutLimit(job: EngraveJob, membraneThickness: Mm): Mm {
+  return Math.max(0, membraneThickness - job.minFloor);
+}
+
+/**
  * The deepest cut an enabled under-surface void permits at (x, y), or null when none covers it.
- * The membrane over the void is `stock.thickness − zCeiling` thick and `minFloor` of it must
- * remain, so the limit is that minus `minFloor`, never below 0. When two voids overlap, the
- * shallowest limit wins.
+ * When two voids overlap, the shallowest limit wins.
  */
 export function keepOutLimitAt(job: EngraveJob, x: Mm, y: Mm): Mm | null {
   let found: Mm | null = null;
   for (const ko of job.keepOuts ?? []) {
     if (!ko.enabled || !pointInKeepOut(ko, x, y)) continue;
-    const limit = Math.max(0, job.stock.thickness - ko.zCeiling - job.minFloor);
+    const limit = keepOutLimit(job, keepOutMembrane(job, ko.zCeiling));
     found = found === null ? limit : Math.min(found, limit);
   }
   return found;

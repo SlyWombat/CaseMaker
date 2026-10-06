@@ -33,7 +33,9 @@ import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evalua
 import { boxSolid, OVERSHOOT_MM } from '@/workers/geometry/sweep';
 import { meshOutputOf, type NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import {
+  engraveCutRegions,
   engravabilityFindings,
+  keepOutFindings,
   measureLabels,
   suggestCapHeight,
   type LabelEngravability,
@@ -214,6 +216,9 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       ...validateJob(job),
       ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
       ...engFindings,
+      // #171 — the same warning the run raises, off the same shared region builder, so the
+      // panel shows it while the label is being placed rather than only after Generate.
+      ...keepOutFindings(tl, job, plan, engraveCutRegions(plan, measured)),
     ]);
 
     // A label whose findings include an error is left out of the cut — the stock is drawn

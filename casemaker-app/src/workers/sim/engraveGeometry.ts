@@ -13,6 +13,7 @@
  */
 
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
+import { keepOutLimit, keepOutMembrane } from '@/engine/cnc/engrave/partPlan';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { itemLabel, jobTool } from '@/engine/cnc/engrave/jobSetup';
@@ -276,6 +277,136 @@ export function engravabilityFindings(
     }
   }
 
+  return findings;
+}
+
+/**
+ * Surface area below which an overlap is the two regions sharing an edge rather than covering
+ * each other, mm² (#171). Same order as `OUTSIDE_AREA_TOLERANCE_MM2` and far above the ~1e-8 mm²
+ * Clipper2 noise floor `ofPolygons` leaves behind.
+ */
+export const VOID_OVERLAP_AREA_MM2 = 0.01;
+
+/** The verifier's own slack on a depth comparison — `verify.ts` step 4 uses the same 1e-6 mm. */
+export const DEPTH_EPS_MM = 1e-6;
+
+/**
+ * A cut, reduced to what the void checks read (#171): what it is, how deep it goes and the region
+ * it removes. Structural rather than imported — `EngraveRegion` (`cam/engraveJob.ts`) satisfies
+ * it — so a worker-sim module need not reach into `cam/`, and `engraveCutRegions` below is the
+ * one place a caller builds these from an evaluated plan.
+ */
+export interface CutRegion {
+  id: string;
+  /** The operation's display name; the fallback when no document item carries the id. */
+  name?: string;
+  /** Positive mm below the top face. */
+  depth: number;
+  polygons: [number, number][][];
+}
+
+/** A number for a finding sentence, rounded to the micron so a float artefact never prints. */
+function fmtMm(v: number): string {
+  return String(Math.round(v * 1000) / 1000);
+}
+
+/**
+ * The cuts a void check reads: one `CutRegion` per engrave, carrying the SAME opened polygons
+ * `measureLabels` produced — so the check, the CAM and the live preview cannot disagree about
+ * where a cut is. A whitespace label has none and is skipped by `polygons.length === 0`.
+ *
+ * Shared by the preview and the run because BOTH must report the same warning (#171): a warning
+ * the live panel hides until Generate is a warning the user never sees while placing the label.
+ *
+ * Drills (#220) are deliberately absent. A plunge into a magnet pocket is a BREACH, which the
+ * verifier already refuses as `cut-too-deep`; the warning here is about the finish of a pocketed
+ * floor, which a drilled hole does not have.
+ */
+export function engraveCutRegions(plan: PartPlan, measured: readonly LabelEngravability[]): CutRegion[] {
+  const byId = new Map(measured.map((m) => [m.labelId, m] as const));
+  return plan.engraves.map((e) => ({
+    id: e.id,
+    name: e.name,
+    depth: e.depth,
+    polygons: byId.get(e.id)?.polygons ?? [],
+  }));
+}
+
+/**
+ * Warn about every cut that sits over an under-surface void (#171).
+ *
+ * One finding, not two: a cut deep enough to breach the membrane is refused as `cut-too-deep` by
+ * the VERIFIER, against the LAYER-ALIGNED limit #178's stack supplies, and that refusal's own
+ * advice is to move the cut clear. Computing a second breach test here would mean a second owner
+ * of the same depth limit at a different resolution — the two could disagree by a layer — so this
+ * raises the WARNING only, suppressed where the cut has already breached (the depth the verifier
+ * will refuse) to keep one fact to one finding.
+ *
+ * The warning is not a lesser error; it is a different fact. The blank is printed flipped, so the
+ * material over a void is an unsupported membrane however shallow the cut — that is
+ * `/Fabrication.md` §7.2's chatter, and it is true at 0.1 mm. `region.depth` here is only used to
+ * hand the case to the verifier; the membrane thickness is what the sentence reports.
+ *
+ * Each cut yields at most one finding, about the void with the SHALLOWEST limit among those it
+ * covers: the same "worst void wins" rule `keepOutLimitAt` and the run sheet's `keepOutOver` use,
+ * so the banner and the sheet name the same void.
+ */
+export function keepOutFindings(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  plan: PartPlan,
+  regions: readonly CutRegion[],
+): JobFinding[] {
+  if (plan.stock.keepOuts.length === 0) return [];
+  const CS = tl.CrossSection;
+  const findings: JobFinding[] = [];
+
+  // Each void footprint is evaluated ONCE, not once per cut: a blank carries a handful of voids
+  // and a job dozens of cuts, and every evaluation is a Clipper2 op (#205 runs this on a debounce).
+  const voids = plan.stock.keepOuts.map((ko) => {
+    const membrane = keepOutMembrane(job, ko.zCeiling);
+    return { name: ko.name, cs: executeProfile(tl, ko.footprint), membrane, limit: keepOutLimit(job, membrane) };
+  });
+
+  try {
+    for (const region of regions) {
+      if (region.polygons.length === 0) continue;
+      const cut = CS.ofPolygons(region.polygons, 'Positive');
+      try {
+        let worst: { name: string; membrane: number; limit: number } | null = null;
+        for (const void_ of voids) {
+          const overlap = CS.intersection([cut, void_.cs]);
+          const area = overlap.area();
+          overlap.delete();
+          if (area <= VOID_OVERLAP_AREA_MM2) continue;
+          // `<=`: at equal limits the first void named stays, which for a job whose voids are
+          // declared in document order is the earlier one — stable, and never a silent re-pick.
+          if (worst === null || void_.limit < worst.limit) worst = void_;
+        }
+        if (worst === null) continue;
+
+        // A breach is the verifier's refusal, on the real text and the layer-aligned limit; the
+        // user reads the advice to move the cut clear there. Saying it twice is noise.
+        if (region.depth > worst.limit + DEPTH_EPS_MM) continue;
+
+        const src = findItem(job, region.id);
+        const who = src ? itemLabel(src) : region.name || `Item ${region.id}`;
+        findings.push({
+          severity: 'warning',
+          code: 'item-over-void',
+          labelId: region.id,
+          message:
+            `${who} cuts ${fmtMm(region.depth)} mm deep over "${worst.name}" — a ` +
+            `${fmtMm(worst.membrane)} mm membrane with nothing under it — so expect chatter and a ` +
+            `rough finish there. Moving the cut clear of the void will finish better.`,
+        });
+      } finally {
+        cut.delete();
+      }
+    }
+  } finally {
+    for (const v of voids) v.cs.delete();
+  }
   return findings;
 }
 

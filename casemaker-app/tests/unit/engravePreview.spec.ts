@@ -83,6 +83,39 @@ describe('engravePreview (#205)', () => {
     expect(Math.abs(meshVolume(p.stock) - uncut)).toBeLessThan(uncut * 0.001);
   });
 
+  // #171 — the void warning has to reach the LIVE panel, not only the run: the user places the
+  // label with it on screen. The preview and `engraveGenerate` share `engraveCutRegions` and
+  // `keepOutFindings`, so this pins the panel half of that pair.
+  it('warns about a cut over a declared void, and only for the cut that covers it (#171)', () => {
+    const job = defaultEngraveJob();
+    const [case_, maker] = job.labels;
+    // Size 8 keeps both boxes small enough to sit clearly inside / clearly outside the void.
+    job.labels = [
+      { ...case_!, id: 'over', size: 8, position: { x: 50, y: 30 }, depth: 0.8 }, // inside the void
+      { ...maker!, id: 'clear', size: 8, position: { x: 50, y: 52 }, depth: 0.8 }, // behind it
+    ];
+    job.keepOuts = [
+      {
+        id: 'pocket',
+        name: 'Magnet pocket',
+        kind: 'rect',
+        position: { x: 50, y: 30 },
+        rotation: 0,
+        enabled: true,
+        zCeiling: 10,
+        width: 30,
+        height: 20,
+        cornerRadius: 0,
+      },
+    ];
+
+    const over = preview(job).findings.filter((f) => f.code === 'item-over-void');
+    expect(over).toHaveLength(1);
+    expect(over[0]!.severity).toBe('warning');
+    expect(over[0]!.labelId).toBe('over');
+    expect(over[0]!.message).toContain('Magnet pocket');
+  });
+
   it('reports the tool recommendation with the compromise size suggestion appended', () => {
     const job = defaultEngraveJob();
     // A 4 mm label cannot survive the 3.175 mm cutter, so the compromise message gains the

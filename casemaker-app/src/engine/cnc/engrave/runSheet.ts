@@ -1,7 +1,7 @@
 import { ASSUMED_RAPID_MM_MIN } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
+import { keepOutLimit, keepOutMembrane, toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import type { FeedsResult } from '@/engine/cnc/feeds';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
 import { Z1 } from '@/engine/cnc/machine';
@@ -441,18 +441,6 @@ function boxesOverlap(a: { min: [Mm, Mm]; max: [Mm, Mm] }, b: { min: [Mm, Mm]; m
   return a.min[0] <= b.max[0] && a.max[0] >= b.min[0] && a.min[1] <= b.max[1] && a.max[1] >= b.min[1];
 }
 
-/** The solid material left over a void, mm — what the cutter must not go through (#231). A void
- * whose ceiling pokes above the top face leaves none; clamped so the sheet never prints a negative
- * thickness (the depth limit is 0 over it either way). */
-function keepOutSolidThickness(job: EngraveJob, zCeiling: Mm): Mm {
-  return Math.max(0, job.stock.thickness - zCeiling);
-}
-
-/** The deepest cut a void permits, mm — its membrane less `minFloor`, never below 0 (#231). */
-function keepOutLimit(job: EngraveJob, solidThickness: Mm): Mm {
-  return Math.max(0, solidThickness - job.minFloor);
-}
-
 /**
  * The side view of the setup (#213 §6), or null when the job has no sacrificial material. Every
  * box is placed from the same model the rest of the pipeline uses: the strips come from their own
@@ -588,7 +576,7 @@ function buildDiagram(job: EngraveJob, plan: PartPlan): RunSheetDiagram {
       name: ko.name || ko.id,
       min: [box.min[0], box.min[1]],
       max: [box.max[0], box.max[1]],
-      solidThickness: keepOutSolidThickness(job, ko.zCeiling),
+      solidThickness: keepOutMembrane(job, ko.zCeiling),
     });
   }
 

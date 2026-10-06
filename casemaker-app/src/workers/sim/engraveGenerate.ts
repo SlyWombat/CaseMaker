@@ -48,7 +48,9 @@ import type { Setup } from '@/engine/cnc/setup';
 import { verifyProgram, type DepthLimit, type VerifyReport } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import {
+  engraveCutRegions,
   engravabilityFindings,
+  keepOutFindings,
   measureLabels,
   type LabelEngravability,
   type LabelRatioAt,
@@ -188,6 +190,11 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob): EngraveRe
   const measured = radius === null ? [] : measureLabels(tl, plan, radius, job.edgeMargin, perChar);
   const engFindings = radius === null ? [] : engravabilityFindings(job, measured, ratioAtFor(tl, job, radius));
 
+  // #171 — a WARNING only, and only for a job that declares a void (`keepOutFindings` returns
+  // early otherwise, so a void-free job pays nothing here). A cut deep enough to breach the
+  // membrane stays the verifier's `cut-too-deep`, which owns the layer-aligned depth limit.
+  const voidFindings = keepOutFindings(tl, job, plan, engraveCutRegions(plan, measured));
+
   // `job.sacrificial` is threaded so the generate path's `vise-grip-shallow` judges what the
   // jaws actually grip (#213 §2), not the raw stock: the argument `validateVise` has accepted
   // since `454110a` but this call never passed.
@@ -195,6 +202,7 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob): EngraveRe
     ...validateJob(job),
     ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
     ...engFindings,
+    ...voidFindings,
   ]);
 
   const byId = new Map(measured.map((m) => [m.labelId, m] as const));

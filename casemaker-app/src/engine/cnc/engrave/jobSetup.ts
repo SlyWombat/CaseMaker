@@ -52,6 +52,12 @@ export type JobFindingCode =
   | 'item-chars-lost'
   | 'item-detail-lost'
   | 'item-outside-stock'
+  // Under-surface voids (#171, built on #231's keep-outs). The warning for cutting over a
+  // membrane that spans an unsupported void: a fact about OVERLAP, not depth — the material has
+  // nothing under it however shallow the cut. There is deliberately no error twin here: a cut
+  // deep enough to breach is `cut-too-deep`, raised by the verifier against the layer-aligned
+  // limit, and a second limit computed at this stage would be a second owner of that number.
+  | 'item-over-void'
   // Single-line traces (#219). `trace-self-overlap` is raised here; `trace-outside-stock` needs
   // the swept region intersected with the stock, which only the worker evaluates (#201). Both
   // are part of `TraceFindingCode` in `partPlan.ts`, where the geometry that detects them lives.

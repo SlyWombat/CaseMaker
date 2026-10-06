@@ -127,22 +127,24 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     height: 10,
     cornerRadius: 0,
   });
-  const shapeB = {
+  // Shape B is clear of the pocket (x 80…90 against the pocket's 35…65): the same depth over
+  // solid stock. It is the control for every case below.
+  const shapeB = (depth: number) => ({
     id: 'b',
     name: 'B',
     kind: 'rect' as const,
     position: { x: 85, y: 30 },
     rotation: 0,
-    depth: 2.0,
+    depth,
     enabled: true,
     width: 10,
     height: 10,
     cornerRadius: 0,
-  };
+  });
   const job = (aDepth: number, keepOuts?: EngraveKeepOut[]): EngraveJob => ({
     ...defaultEngraveJob(),
     labels: [],
-    shapes: [shapeA(aDepth), shapeB],
+    shapes: [shapeA(aDepth), shapeB(2.0)],
     ...(keepOuts ? { keepOuts } : {}),
   });
 
@@ -153,6 +155,9 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     // The text existed — it is the verifier, re-reading the posted bytes, that refused it.
     expect(g.nc).not.toBeNull();
     expect(g.verify!.findings.some((f) => f.code === 'cut-too-deep' && f.severity === 'error')).toBe(true);
+    // #171: the breach is the verifier's one finding. The chatter warning is suppressed over it,
+    // so the user reads the refusal and its advice once, not twice.
+    expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
   });
 
   it('passes the same cut when it stays within the membrane', () => {
@@ -166,6 +171,61 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
     const g = engraveGenerate(tl, job(1.5));
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
+    expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
+  });
+
+  // #171: the warning is about OVERLAP, not depth, so a cut well within the membrane still gets
+  // it — the blank is printed flipped, so there is nothing under that material at any depth.
+  it('warns over the void at a safe depth, and names only the cut that covers it (#171)', () => {
+    const g = engraveGenerate(tl, job(0.8, [pocket]));
+    expect(g.ok).toBe(true); // a warning is not a refusal
+    const warnings = g.findings.filter((f) => f.code === 'item-over-void');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.severity).toBe('warning');
+    expect(warnings[0]!.labelId).toBe('a');
+    expect(warnings[0]!.message).toContain('Magnet pocket');
+    expect(warnings[0]!.message).toContain('2 mm membrane');
+  });
+
+  it('does not object to the same depth clear of the void (#171)', () => {
+    // The acceptance pair: 1.5 mm over the membrane is refused, and the same 1.5 mm cut on solid
+    // stock is not — the depth alone is never the problem.
+    const clear: EngraveJob = {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [shapeB(1.5)],
+      keepOuts: [pocket],
+    };
+    const g = engraveGenerate(tl, clear);
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
+  });
+
+  it('warns for a LABEL over the void too — the item kind makes no difference (#171)', () => {
+    const jobWithLabel: EngraveJob = {
+      ...defaultEngraveJob(),
+      labels: [
+        {
+          id: 'over',
+          text: 'CASE',
+          font: 'sans-default',
+          weight: 'bold',
+          size: 10,
+          position: { x: 50, y: 30 },
+          rotation: 0,
+          depth: 0.8,
+          enabled: true,
+        },
+      ],
+      shapes: [],
+      keepOuts: [pocket],
+    };
+    const g = engraveGenerate(tl, jobWithLabel);
+    const over = g.findings.find((f) => f.code === 'item-over-void');
+    expect(over).toBeTruthy();
+    expect(over!.labelId).toBe('over');
+    expect(over!.message).toContain('CASE');
   });
 });
 
