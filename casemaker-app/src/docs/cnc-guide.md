@@ -326,19 +326,26 @@ are published nowhere, so the app will ship **unmeasured defaults** and say so. 
 will record your own: **Save as my vise** and **I just measured these**. Until you measure,
 `vise-default` is a standing warning and collisions cannot be trusted.
 
-**Sacrificial material (#213).** Alongside the vise you will be able to say what else is in
-the setup: a **board under the part**, and **strips beside it** — left and right, which sit
-between the jaw and the part and are clamped with it, and front and back, which only make
-sense on a board because nothing else holds them. The work origin and Z = 0 stay on the
-**part's** top face, so the board's thickness can never change a cut depth. Where material is
-declared beside the part, an item may now run off the part's edge onto it — up to the edge
-margin short of the sacrificial material's own outer edge — and the verifier's depth limit
-follows the same footprint: `thickness − minFloor` over the part, the strip's height over a
-strip, `thickness + breakthrough` over a board's overhang, and 0 over air. Until you enter your
-own sizes the dimensions are unmeasured defaults and `sacrificial-default` warns, exactly as for
-the vise. The **Engrave panel** controls for this (and the two presets, "Part on a larger
-board" and "Strips between the jaws") ship with #205; the two-body simulation that reports how
-much of the sacrificial material was cut is #193/#204.
+**Sacrificial material (#213).** Alongside the vise you can say what else is in the setup: a
+**board under the part**, and **strips beside it** — left and right, which sit between the jaw
+and the part and are clamped with it, and front and back, which only make sense on a board
+because nothing else holds them. The **Engrave panel** has the controls, under *Sacrificial
+material*, with a source badge and **Save as my setup**, and two one-click presets for the two
+setups people actually build: **"Part on a larger board"** and **"Strips between the jaws"**.
+
+The work origin and Z = 0 stay on the **part's** top face, so the board's thickness can never
+change a cut depth — and the run sheet says so in as many words when a board is in the stack.
+Where material is declared beside the part, an item may run off the part's edge onto it — up to
+the edge margin short of the sacrificial material's own outer edge — and the verifier's depth
+limit follows the same supported footprint: `thickness − minFloor` over the part, the strip's
+height over a strip, `thickness + breakthrough` over a board's overhang, and 0 over air. The
+jaws move out to grip the strips or the board's overhang, so what the collider checks is what
+the vise really holds.
+
+The simulation sweeps the sacrificial material as a **second body** and says in its disclaimer
+that it modelled it; the run sheet gains a **side view** of the assembly (see step 8). Until you
+enter your own sizes the dimensions are unmeasured defaults and `sacrificial-default` warns,
+exactly as for the vise.
 
 **5. Cutting parameters (#202).** Spindle speed, feed, plunge, step-down and step-over will
 be shown as **starting values, unmeasured** — not recommendations. Nothing has measured what
@@ -376,9 +383,12 @@ cutter have vanished. That is what the cutter will actually make, not an idealis
 
 *Design mockup — not the shipped screen.*
 
-**8. Print the run sheet (#207).** A **Run sheet** will list, on one page, the cutter, the
-work origin, the stock, the feeds and the steps to follow at the machine, so you are not
-reading a phone next to a spinning cutter.
+**8. Print the run sheet (#207).** A **Run sheet** lists, on one page, the cutter, the work
+origin, the stock, the feeds and the steps to follow at the machine, so you are not reading a
+phone next to a spinning cutter. When the job declares sacrificial material (#213) the loading
+section also carries a **side view** of the assembly — the jaws at the faces they really clamp,
+the board, the strips and the part, each at its own thickness, with Z = 0 drawn on the *part's*
+top face so the datum cannot be probed on the board by mistake.
 
 > **Placeholder — no capture yet.** The run-sheet screen has no mockup; it is designed in
 > #207. A screenshot will go here when it ships.

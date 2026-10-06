@@ -159,6 +159,40 @@
   fill: #a00;
 }
 
+/* The stack-up elevation (#213 §6). Same mm viewBox as the origin diagram, so these sizes are
+   in mm too; the tone is the one the viewport uses for sacrificial material. */
+.run-sheet-stackup {
+  margin-top: 4px;
+}
+
+.run-sheet-stackup-part {
+  fill: #cfe3ff;
+  stroke: #1a4b8c;
+  stroke-width: 0.6;
+}
+
+.run-sheet-stackup-sacrificial {
+  fill: #f0e6cc;
+  stroke: #8a6a1a;
+  stroke-width: 0.6;
+}
+
+.run-sheet-stackup-label {
+  font-size: 2.6px;
+  fill: #333;
+}
+
+.run-sheet-stackup-datum {
+  stroke: #a00;
+  stroke-width: 0.5;
+  stroke-dasharray: 2 1.2;
+}
+
+.run-sheet-stackup-datum-label {
+  font-size: 2.6px;
+  fill: #a00;
+}
+
 .run-sheet-arrowhead,
 .run-sheet-origin {
   fill: #a00;

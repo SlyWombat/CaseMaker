@@ -3,9 +3,9 @@ import { aabbOfProfile } from '@/engine/compiler/profile';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import type { FeedsResult } from '@/engine/cnc/feeds';
-import { viseEnvelope } from '@/engine/cnc/fixture';
+import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
 import { Z1 } from '@/engine/cnc/machine';
-import { hasSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
+import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
 import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
 // re-worded, so the sheet and the panel cannot disagree about what the sweep did not see.
@@ -165,6 +165,39 @@ export interface RunSheetDiagram {
 }
 
 /**
+ * One solid on the stack-up elevation (#213 §6), in the X–Z plane of the WORK frame. X runs left
+ * to right between the jaws; Z is the job's Z, so the part's top face is Z = 0 and everything
+ * below it is negative. `dimension` is the box's own size, already formatted for the operator.
+ */
+export interface RunSheetStackUpBox {
+  id: string;
+  label: string;
+  minX: Mm;
+  maxX: Mm;
+  minZ: Mm;
+  maxZ: Mm;
+  /** The dimension printed on the box, e.g. `'12 mm'`; null for a jaw, whose size is not the point. */
+  dimension: string | null;
+  /** True for the board and the strips — drawn in the paler sacrificial tone. */
+  sacrificial: boolean;
+}
+
+/**
+ * The side view of the setup (#213 §6): jaws, strips, board and part, each at its own thickness,
+ * so the operator can see what the jaws actually bear on and that Z0 is the PART's top face, not
+ * the board's. Present only when the job has sacrificial material — a job without any is drawn by
+ * the top-view origin diagram alone, and its sheet is unchanged.
+ *
+ * It is an X–Z ELEVATION, not a section: front and back strips lie behind the part in this view
+ * and are named by `sacrificialSummary` in section 1 rather than drawn here.
+ */
+export interface RunSheetStackUp {
+  boxes: RunSheetStackUpBox[];
+  /** Z of the part's top face — the datum plane the operator probes. Always 0. */
+  datumZ: Mm;
+}
+
+/**
  * The note beside the header's time estimate (#242). The number is a CYCLE estimate — cutting
  * plus rapids at `ASSUMED_RAPID_MM_MIN` — so it is a planning figure, not a measured cycle time.
  * Built from the constant so the printed rate cannot drift from the one the estimate uses.
@@ -191,6 +224,11 @@ export interface RunSheet {
   sections: RunSheetSection[];
   /** Placed inside section 5 in the view. */
   diagram: RunSheetDiagram;
+  /**
+   * The side view of the setup, placed inside section 3 (#213 §6). ABSENT when the job has no
+   * sacrificial material, so a job that does not use it produces a byte-identical sheet.
+   */
+  stackUp?: RunSheetStackUp;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -415,6 +453,99 @@ function keepOutLimit(job: EngraveJob, solidThickness: Mm): Mm {
   return Math.max(0, solidThickness - job.minFloor);
 }
 
+/**
+ * The side view of the setup (#213 §6), or null when the job has no sacrificial material. Every
+ * box is placed from the same model the rest of the pipeline uses: the strips come from their own
+ * `thickness`/`height` (`stripHeight`), the board from `under.thickness`/`overhang`, the jaws from
+ * `viseJawShift` + `viseEnvelope`'s own body depth. Nothing here is hand-placed.
+ *
+ * The left/right strips are the ones BETWEEN the jaw and the part, so this elevation shows them.
+ * Front and back strips sit behind the part in this view (different Y, same X span); they are named
+ * by `sacrificialSummary` in section 1 instead, not drawn.
+ */
+function buildStackUp(job: EngraveJob): RunSheetStackUp | null {
+  if (!hasSacrificial(job.sacrificial)) return null;
+
+  const { length, thickness } = job.stock;
+  const { under, sides } = job.sacrificial;
+  const vise = job.workholding.vise;
+  const shift = viseJawShift(job.sacrificial);
+  const jawTopZ = -vise.stockProud;
+  const jawBottomZ = -(thickness + VISE_BODY_DEPTH);
+  const mm = (n: number): string => `${fmtNum(n)} mm`;
+
+  const boxes: RunSheetStackUpBox[] = [];
+
+  // The board first, so the strips and the part draw over it.
+  if (under) {
+    boxes.push({
+      id: 'sacrificial-under',
+      label: 'board',
+      minX: -under.overhang.left,
+      maxX: length + under.overhang.right,
+      minZ: -(thickness + under.thickness),
+      maxZ: -thickness,
+      dimension: mm(under.thickness),
+      sacrificial: true,
+    });
+  }
+
+  // The jaws, at their shifted faces — the same faces `viseEnvelope` collides against.
+  boxes.push(
+    {
+      id: 'vise-fixed-jaw',
+      label: 'fixed jaw (left)',
+      minX: -shift.left - vise.fixedJawThickness,
+      maxX: -shift.left,
+      minZ: jawBottomZ,
+      maxZ: jawTopZ,
+      dimension: null,
+      sacrificial: false,
+    },
+    {
+      id: 'vise-moving-jaw',
+      label: 'moving jaw (right)',
+      minX: length + shift.right,
+      maxX: length + shift.right + vise.movingJawThickness,
+      minZ: jawBottomZ,
+      maxZ: jawTopZ,
+      dimension: null,
+      sacrificial: false,
+    },
+  );
+
+  for (const pos of ['left', 'right'] as const) {
+    const strip = sides[pos];
+    if (!strip) continue;
+    const height = stripHeight(strip, thickness);
+    boxes.push({
+      id: `sacrificial-${pos}`,
+      label: `${pos} strip`,
+      // Left strips run from the part's left edge outward; right strips outward from its right.
+      minX: pos === 'left' ? -strip.thickness : length,
+      maxX: pos === 'left' ? 0 : length + strip.thickness,
+      minZ: -thickness,
+      maxZ: -thickness + height,
+      dimension: mm(strip.thickness),
+      sacrificial: true,
+    });
+  }
+
+  // The part last: drawn on top, and its top face is the datum line.
+  boxes.push({
+    id: 'part',
+    label: 'part',
+    minX: 0,
+    maxX: length,
+    minZ: -thickness,
+    maxZ: 0,
+    dimension: mm(thickness),
+    sacrificial: false,
+  });
+
+  return { boxes, datumZ: 0 };
+}
+
 /** The top-view origin diagram's plain geometry, derived from the job and its plan. */
 function buildDiagram(job: EngraveJob, plan: PartPlan): RunSheetDiagram {
   const { length, width } = job.stock;
@@ -532,6 +663,7 @@ export function buildRunSheet(
   const plan = toPartPlan(job);
   const items = plan.engraves;
   const diagram = buildDiagram(job, plan);
+  const stackUp = buildStackUp(job);
   const itemBox = new Map(diagram.items.map((i) => [i.id, i] as const));
   const deepest = items.reduce((max, item) => Math.max(max, item.depth), 0);
   const stopBelow = deepest + 1; // #207 section 3: below the deepest cut + 1 mm the cutter is under the jaw tops
@@ -595,14 +727,39 @@ export function buildRunSheet(
 
   // ---- 3 · Load the blank --------------------------------------------------------------------
   const frontGap = -vise.jawStartY;
+  // #213 §6 — `under` drives both the assembly steps in §3 and the wording of §5's datum: with a
+  // board in the stack "the blank" is ambiguous, so those steps say "the part" and NAME the board
+  // as the face Z0 must not be probed on. Without one, the sheet says what it always said.
+  const under = job.sacrificial.under;
+  const onBoard = under !== null;
   const loadSteps: RunSheetStep[] = [
+    // #213 §6 — with sacrificial material the thing loaded is an assembly, and the order matters:
+    // the part is fixed to the board/strips BEFORE it goes between the jaws, and the strips sit
+    // between the jaw face and the part so the jaws bear on them, not on the part.
+    ...(under
+      ? [
+          {
+            text: `Fix the part to the board before loading — the board goes in with it.`,
+            value: `${fmtNum(under.thickness)} mm board, fixed with ${under.attach}`,
+          } as RunSheetStep,
+        ]
+      : []),
+    ...(['left', 'right'] as const)
+      .filter((pos) => job.sacrificial.sides[pos] !== null)
+      .map((pos): RunSheetStep => {
+        const strip = job.sacrificial.sides[pos]!;
+        return {
+          text: `Put the ${pos} strip between the ${pos === 'left' ? 'fixed' : 'moving'} jaw and the part — the jaw clamps the strip, not the part.`,
+          value: `${fmtNum(strip.thickness)} mm strip`,
+        };
+      }),
     {
       text: "The blank's length runs left–right between the jaws. The face to be engraved is up.",
       value: `${fmtNum(length)} mm`,
     },
     {
       text:
-        `The top face must stand ${fmtNum(vise.stockProud)} mm above the jaw tops. Record the measured ` +
+        `The ${onBoard ? "part's " : ''}top face must stand ${fmtNum(vise.stockProud)} mm above the jaw tops. Record the measured ` +
         `value. If it is less than ${fmtNum(stopBelow)} mm, stop: the cutter would work below the jaw tops.`,
       record: 'measured stock proud (mm)',
     },
@@ -627,12 +784,21 @@ export function buildRunSheet(
   ];
 
   // ---- 5 · Set the work origin (⚠ #208) ------------------------------------------------------
+  // #213 §6 — with sacrificial material the X and Y faces are still the PART's (the work frame
+  // does not move; §"Frame — unchanged"), and Z0 is the PART's top face, never the board's. A
+  // board under the part reaches a cut depth only if Z is probed on the wrong face, so the sheet
+  // says which face it means whenever there is a board to confuse it with.
   const originSteps: RunSheetStep[] = [
-    { text: "X0: the blank's left face (against the fixed jaw).", unverified: UNVERIFIED },
-    { text: "Y0: the blank's front edge.", unverified: UNVERIFIED },
-    { text: "Z0: the blank's top face — probe it, or touch off on it.", unverified: UNVERIFIED },
+    { text: `X0: the ${onBoard ? "part's" : "blank's"} left face (against the fixed jaw).`, unverified: UNVERIFIED },
+    { text: `Y0: the ${onBoard ? "part's" : "blank's"} front edge.`, unverified: UNVERIFIED },
     {
-      text: 'X0 Y0 Z0 is the top-front-left corner of the blank. Move there and check by eye before going on.',
+      text: onBoard
+        ? "Z0: the PART's top face — probe it, or touch off on it. NOT the board's top face."
+        : "Z0: the blank's top face — probe it, or touch off on it.",
+      unverified: UNVERIFIED,
+    },
+    {
+      text: `X0 Y0 Z0 is the top-front-left corner of the ${onBoard ? 'part' : 'blank'}. Move there and check by eye before going on.`,
       unverified: UNVERIFIED,
     },
   ];
@@ -745,6 +911,9 @@ export function buildRunSheet(
       { id: 'record', title: '9 · Record afterwards', steps: recordSteps },
     ],
     diagram,
+    // Absent rather than null for a job without sacrificial material, so its sheet — and the
+    // snapshot of it — is byte-identical to before this field existed.
+    ...(stackUp ? { stackUp } : null),
   };
 }
 
@@ -884,6 +1053,83 @@ export function runSheetDiagramSvg(diagram: RunSheetDiagram): string {
         `${fmtNum(item.depth)} mm</text>`,
     );
   }
+
+  parts.push('</svg>');
+  return parts.join('');
+}
+
+// ---------------------------------------------------------------------------------------------
+// The stack-up elevation, as SVG (#213 §6)
+// ---------------------------------------------------------------------------------------------
+
+/** Margin around the stack-up, mm. */
+const STACKUP_PAD = 6;
+
+/**
+ * The side view of the setup, so the operator can see the assembly they are about to clamp: the
+ * jaws at their shifted faces, the board under the part, the strips between the jaw and the part,
+ * each with its own thickness, and the Z = 0 datum on the PART's top face.
+ *
+ * Pure string output, like the origin diagram, so the whole sheet is testable without a DOM. X is
+ * the job's X (left to right); the viewBox anchors at `-zmax` because SVG y runs down and the job's
+ * Z runs up, so the part's top face (Z = 0) is at the TOP of the drawing.
+ *
+ * A box taller than it is wide (a jaw, a narrow strip) gets its label rotated 90°, or the text
+ * would be wider than the box it names.
+ */
+export function runSheetStackUpSvg(stackUp: RunSheetStackUp): string {
+  const xs: number[] = [];
+  const zs: number[] = [stackUp.datumZ];
+  for (const b of stackUp.boxes) {
+    xs.push(b.minX, b.maxX);
+    zs.push(b.minZ, b.maxZ);
+  }
+  const xmin = Math.min(...xs) - STACKUP_PAD;
+  const xmax = Math.max(...xs) + STACKUP_PAD;
+  const zmin = Math.min(...zs) - STACKUP_PAD;
+  const zmax = Math.max(...zs) + STACKUP_PAD;
+
+  const parts: string[] = [];
+  parts.push(
+    `<svg xmlns="${SVG_NS}" viewBox="${xmin} ${-zmax} ${xmax - xmin} ${zmax - zmin}" ` +
+      `class="run-sheet-svg run-sheet-stackup" role="img" ` +
+      `aria-label="Side view of the setup: the vise jaws, the sacrificial board and strips, and the part">`,
+  );
+
+  for (const b of stackUp.boxes) {
+    const w = b.maxX - b.minX;
+    const h = b.maxZ - b.minZ;
+    const cls = b.sacrificial
+      ? 'run-sheet-stackup-sacrificial'
+      : b.id.startsWith('vise-')
+        ? 'run-sheet-jaw'
+        : 'run-sheet-stackup-part';
+    const title = b.dimension === null ? b.label : `${b.label} — ${b.dimension}`;
+    parts.push(
+      `<rect data-stackup-id="${escapeXml(b.id)}" class="${cls}" x="${b.minX}" y="${-b.maxZ}" ` +
+        `width="${w}" height="${h}"><title>${escapeXml(title)}</title></rect>`,
+    );
+
+    const cx = (b.minX + b.maxX) / 2;
+    const cy = -((b.minZ + b.maxZ) / 2);
+    const text = b.dimension === null ? b.label : `${b.label} · ${b.dimension}`;
+    // Rotate when the box is taller than wide, so the label fits inside what it names.
+    const transform = h > w ? ` transform="rotate(-90 ${cx} ${cy})"` : '';
+    parts.push(
+      `<text class="run-sheet-stackup-label" x="${cx}" y="${cy}" text-anchor="middle" ` +
+        `dominant-baseline="central"${transform}>${escapeXml(text)}</text>`,
+    );
+  }
+
+  // The datum: Z0 on the part's top face. Drawn last so it reads over every box.
+  parts.push(
+    `<line class="run-sheet-stackup-datum" x1="${xmin}" y1="${-stackUp.datumZ}" ` +
+      `x2="${xmax}" y2="${-stackUp.datumZ}" />`,
+  );
+  parts.push(
+    `<text class="run-sheet-stackup-datum-label" x="${xmin + 1}" y="${-stackUp.datumZ - 1.2}">` +
+      `Z0 — the part's top face</text>`,
+  );
 
   parts.push('</svg>');
   return parts.join('');

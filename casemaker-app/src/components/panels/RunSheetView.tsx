@@ -2,6 +2,7 @@ import type { JSX } from 'react';
 import { createPortal } from 'react-dom';
 import {
   runSheetDiagramSvg,
+  runSheetStackUpSvg,
   type RunSheet,
   type RunSheetStep,
 } from '@/engine/cnc/engrave/runSheet';
@@ -103,6 +104,15 @@ export function RunSheetView({ sheet, onClose }: { sheet: RunSheet; onClose?: ()
                 data-testid="run-sheet-diagram"
                 // Pure string output from `runSheet.ts`; no user HTML, only generated geometry.
                 dangerouslySetInnerHTML={{ __html: runSheetDiagramSvg(sheet.diagram) }}
+              />
+            )}
+            {/* #213 §6 — the side view of the assembly, under the section that builds it. Present
+                only when the job has sacrificial material, so a plain wood job shows one diagram. */}
+            {section.id === 'load' && sheet.stackUp !== undefined && (
+              <div
+                className="run-sheet-diagram"
+                data-testid="run-sheet-stackup"
+                dangerouslySetInnerHTML={{ __html: runSheetStackUpSvg(sheet.stackUp) }}
               />
             )}
           </section>

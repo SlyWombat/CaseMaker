@@ -16,17 +16,19 @@ import {
   runSheetDiagramSvg,
   runSheetFileName,
   runSheetFrameFileName,
+  runSheetStackUpSvg,
   sha256Hex,
   type RunSheet,
   type RunSheetGenerated,
   type RunSheetSim,
+  type RunSheetStackUp,
 } from '@/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { feedsFor } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc';
 import { DEFAULT_VISE } from '@/engine/cnc/fixture';
-import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
+import { presetJawStrips, presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import type { EngraveJob } from '@/types/engraveJob';
 
 const NOW = new Date('2026-10-04T00:00:00Z');
@@ -331,6 +333,128 @@ describe('runSheet (#207)', () => {
     expect(formatDuration(0)).toBe('0 s');
     expect(formatDuration(95)).toBe('1 min 35 s');
     expect(formatDuration(3700)).toBe('1 h 1 min');
+  });
+
+  // #213 §6 — the side view of the setup. It is present ONLY when there is sacrificial material,
+  // so a job that does not use it keeps the sheet (and this file's snapshot) byte-identical.
+  describe('the stack-up elevation (#213 §6)', () => {
+    /** A box of the sheet's stack-up by id, asserting the stack-up is there at all. */
+    const box = (stackUp: RunSheetStackUp | undefined, id: string) => {
+      expect(stackUp, 'stack-up present').toBeTruthy();
+      const b = stackUp!.boxes.find((x) => x.id === id);
+      expect(b, `stack-up box ${id}`).toBeTruthy();
+      return b!;
+    };
+
+    it('is absent from a job with no sacrificial material, and its sheet is unchanged', () => {
+      const sheet = sheetFor(defaultEngraveJob());
+      expect(sheet.stackUp).toBeUndefined();
+      expect('stackUp' in sheet).toBe(false);
+      // The wording is the pre-#213 sheet's, untouched.
+      expect(JSON.stringify(sheet)).toContain("Z0: the blank's top face");
+      expect(JSON.stringify(sheet)).not.toContain('Fix the part to the board');
+    });
+
+    it('draws the board, the jaws at its overhang, and the part on top', () => {
+      const job = defaultEngraveJob();
+      job.sacrificial = presetPartOnBoard(); // 12 mm board, 10 mm overhang all round
+      const s = sheetFor(job).stackUp!;
+      expect(s.datumZ).toBe(0);
+
+      const under = box(s, 'sacrificial-under');
+      expect([under.minX, under.maxX, under.minZ, under.maxZ]).toEqual([-10, 110, -24, -12]);
+      expect(under.dimension).toBe('12 mm');
+      expect(under.sacrificial).toBe(true);
+
+      // The jaws grip the BOARD's overhang, so their faces move out to ±10 past the part.
+      expect(box(s, 'vise-fixed-jaw').maxX).toBe(-10);
+      expect(box(s, 'vise-moving-jaw').minX).toBe(110);
+
+      // The part sits on the board, its top face at Z0.
+      const part = box(s, 'part');
+      expect([part.minX, part.maxX, part.minZ, part.maxZ]).toEqual([0, 100, -12, 0]);
+      expect(part.sacrificial).toBe(false);
+      expect(part.dimension).toBe('12 mm');
+    });
+
+    it('draws a strip between each jaw and the part, flush with the part top', () => {
+      const job = defaultEngraveJob();
+      job.sacrificial = presetJawStrips(); // 6 mm, flush, left and right
+      const s = sheetFor(job).stackUp!;
+
+      const left = box(s, 'sacrificial-left');
+      expect([left.minX, left.maxX, left.minZ, left.maxZ]).toEqual([-6, 0, -12, 0]);
+      expect(left.dimension).toBe('6 mm');
+      const right = box(s, 'sacrificial-right');
+      expect([right.minX, right.maxX, right.minZ, right.maxZ]).toEqual([100, 106, -12, 0]);
+
+      // The jaws bear on the strips.
+      expect(box(s, 'vise-fixed-jaw').maxX).toBe(-6);
+      expect(box(s, 'vise-moving-jaw').minX).toBe(106);
+      // No board, so no board box.
+      expect(s.boxes.some((b) => b.id === 'sacrificial-under')).toBe(false);
+    });
+
+    it('does not draw a front or back strip — it lies behind the part in this view', () => {
+      const job = defaultEngraveJob();
+      job.sacrificial = {
+        ...presetPartOnBoard(),
+        sides: {
+          left: null,
+          right: null,
+          front: { thickness: 6, height: 'flush' },
+          back: { thickness: 6, height: 'flush' },
+        },
+      };
+      const sheet = sheetFor(job);
+      expect(sheet.stackUp!.boxes.map((b) => b.id)).toEqual([
+        'sacrificial-under',
+        'vise-fixed-jaw',
+        'vise-moving-jaw',
+        'part',
+      ]);
+      // They are still named for the operator, in section 1's summary (its `value`, where the
+      // one-line description of the sacrificial material lives).
+      expect(section(sheet, 'need').steps.some((s) => s.value?.includes('front strip') === true)).toBe(true);
+    });
+
+    it('renders one rect per box, each dimension, and the Z0 datum on the SVG', () => {
+      const job = defaultEngraveJob();
+      job.sacrificial = presetPartOnBoard();
+      const svg = runSheetStackUpSvg(sheetFor(job).stackUp!);
+      expect((svg.match(/data-stackup-id="/g) ?? []).length).toBe(4);
+      expect(svg).toContain('board · 12 mm');
+      expect(svg).toContain('part · 12 mm');
+      expect(svg).toContain('fixed jaw (left)');
+      expect(svg).toContain("Z0 — the part's top face");
+      // The viewBox is in millimetres and flipped: Z runs up the page, so its TOP edge is -zmax.
+      // X spans the board (−10) and the fixed jaw (−25) with the 6 mm margin → −31; the drawing is
+      // 6 mm above the part's top face → the viewBox starts at −6.
+      expect(svg).toContain('viewBox="-31 -6 162 44"');
+    });
+
+    it('tells the operator to fix the part to the board, and that Z0 is the PART, not the board', () => {
+      const job = defaultEngraveJob();
+      job.sacrificial = presetPartOnBoard();
+      const sheet = sheetFor(job);
+
+      const load = section(sheet, 'load').steps.map((s) => s.text).join(' ');
+      expect(load).toContain('Fix the part to the board before loading');
+      expect(load).toContain("The part's top face must stand");
+
+      const origin = section(sheet, 'origin').steps.map((s) => s.text).join(' ');
+      expect(origin).toContain("Z0: the PART's top face");
+      expect(origin).toContain('NOT the board');
+      expect(origin).toContain("X0: the part's left face");
+    });
+
+    it('names which jaw each strip is gripped by', () => {
+      const job = defaultEngraveJob();
+      job.sacrificial = presetJawStrips();
+      const load = section(sheetFor(job), 'load').steps.map((s) => s.text).join(' ');
+      expect(load).toContain('Put the left strip between the fixed jaw and the part');
+      expect(load).toContain('Put the right strip between the moving jaw and the part');
+    });
   });
 
   it('snapshots the whole RunSheet for the default job', () => {
