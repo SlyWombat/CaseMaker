@@ -14,8 +14,9 @@
  *   • the ladder (which fit values go on the coupon) is exported so the specs
  *     and the scripts agree on it,
  *   • the printable slice is built from the SAME primitives the compiler uses
- *     (`magnetPocket`, `buildBoardSnapOps`), so a coupon cannot drift from the
- *     feature it certifies — it is the feature, clipped and laid out flat,
+ *     (`magnetPocket`, `buildBoardSnapOps`, `roundPocketCutter`), so a coupon
+ *     cannot drift from the feature it certifies — it is the feature, clipped
+ *     and laid out flat,
  *   • the seven-segment labels are INJECTED (`Labeler`), because the engraver
  *     lives in `scripts/coupon-glyphs.ts` and `src/` must not reach into
  *     `scripts/`.
@@ -32,6 +33,7 @@
 import type { BoardProfile, CaseParameters, MagnetSize } from '@/types';
 import { MAGNETS, MAGNET_GLUE_GAP, magnetPocket } from './fasteners';
 import { buildBoardSnapOps } from './boardSnap';
+import { defaultInsert, roundPocketCutter } from './insert';
 import {
   aabbOfOp,
   cube,
@@ -346,6 +348,214 @@ export function buildBoardSnapClipCoupon(
 }
 
 // ---------------------------------------------------------------------------
+// Tool-insert pocket (issue #158; #262 item 5)
+// ---------------------------------------------------------------------------
+
+/** The tool shank the coupon's pockets are cut for, mm.
+ *
+ *  `defaultInsert()`'s starter item is a Ø10 round pocket, so a Ø10 shank is
+ *  the one tool the shipped defaults already claim to hold. Holding it FIXED is
+ *  what makes every label mean one thing: each column's number is a fit value,
+ *  never a tool size. */
+export const INSERT_COUPON_TOOL_D = 10;
+
+/** Rungs on each ladder. */
+export const INSERT_FIT_STEPS = 7;
+export const INSERT_CHAMFER_STEPS = 7;
+
+/** Clearance ladder step, mm. */
+export const INSERT_CLEARANCE_STEP = 0.1;
+
+/** Chamfer ladder step, mm. */
+export const INSERT_CHAMFER_STEP = 0.2;
+
+/**
+ * Pocket depth and plate thickness the coupon is cut at, mm.
+ *
+ *  Deliberately NOT the shipped defaults (6 / 4.5 / 1.5): the coupon holds the
+ *  depth constant — as the magnet coupon does — so the only thing a fit result
+ *  can be blamed on is the number on the ladder. 6 mm of bore is enough for a
+ *  shank to be felt to wobble or not; 4 mm of floor is enough to be pressed on.
+ */
+const COUPON_POCKET_DEPTH = 6;
+const COUPON_THICKNESS = 10;
+
+/** The insert's shipped friction fit, diametral (pocket Ø − tool Ø), mm. */
+export function shippedInsertClearance(): number {
+  return defaultInsert().clearance;
+}
+
+/** The insert's shipped entry chamfer, mm. */
+export function shippedInsertChamfer(): number {
+  return defaultInsert().chamfer;
+}
+
+/**
+ * The clearance ladder, mm — pocket Ø minus tool Ø.
+ *
+ * NOT centred on the shipped value the way the magnet ladder is. The shipped
+ * 0.25 is a guess the insert file itself calls one, and the reviewed generators
+ * fit socket-OD pockets at +0.6, so the answer is far more likely to be LOOSER
+ * than what ships: the ladder spends four of its seven rungs above 0.25 and two
+ * below. That is the pilot coupon's shape (#140) — "is the optimum above us?" —
+ * rather than the magnet ladder's symmetric bracket, and the asymmetry is the
+ * one honest thing to encode when the shipped number is unmeasured.
+ *
+ * It cannot go negative. A magnet can be pressed in and left there; a tool has
+ * to come back OUT, and `insertProblem` rejects a negative clearance anyway.
+ */
+export function insertClearanceLadder(): number[] {
+  const first = Math.max(0, shippedInsertClearance() - 2 * INSERT_CLEARANCE_STEP);
+  return Array.from({ length: INSERT_FIT_STEPS }, (_, i) =>
+    r2(first + i * INSERT_CLEARANCE_STEP),
+  );
+}
+
+/**
+ * The chamfer ladder, mm — 0 (a hard edge, the control) up in 0.2 steps.
+ *
+ * Anchored at ZERO rather than centred on the shipped 0.8, for the same reason
+ * the clearance ladder stops at 0: `insertProblem` rejects a negative chamfer
+ * and entry ease only ever rises with it, so three centred rungs would be
+ * numbers the compiler refuses to build. The shipped 0.8 lands on rung 4 of 7.
+ */
+export function insertChamferLadder(): number[] {
+  return Array.from({ length: INSERT_CHAMFER_STEPS }, (_, i) => r2(i * INSERT_CHAMFER_STEP));
+}
+
+/** Digits for a label: the value in hundredths, digits only, e.g. 0.25 -> "25". */
+function hundredthsLabel(value: number): string {
+  return (value * 100).toFixed(0);
+}
+
+/**
+ * Column and row layout for the insert coupon — one source the builder, the
+ * spec's probes and the printed part all read, so a layout tweak cannot desync
+ * them. Two rows of `INSERT_FIT_STEPS` pockets: the upper row ladders the
+ * clearance, the lower row the chamfer.
+ */
+export function insertCouponLayout(): {
+  barX: number;
+  barY: number;
+  barZ: number;
+  col: number;
+  x0: number;
+  clearanceY: number;
+  chamferY: number;
+  clearanceLabelY: number;
+  chamferLabelY: number;
+  pocketDepth: number;
+  engrave: number;
+  columns: number;
+} {
+  const maxR = (INSERT_COUPON_TOOL_D + Math.max(...insertClearanceLadder())) / 2;
+  // The pitch clears the widest engraved LABEL, not just the widest pocket: a
+  // three-digit string is 3·4.2 + 2·1.4 = 15.4 mm wide, so a pitch sized to the
+  // pocket alone (2·maxR + 4) would run the neighbouring labels together.
+  const col = Math.max(2 * maxR + 4, 18);
+  const x0 = maxR + 6;
+  const clearanceY = 38;
+  const chamferY = 16;
+  // Baseline offset below a row's pocket centres, so the 7 mm glyphs clear the
+  // bore wall they sit under.
+  const labelGap = 9;
+  return {
+    barX: 2 * x0 + col * (INSERT_FIT_STEPS - 1),
+    barY: clearanceY + maxR + 6,
+    barZ: COUPON_THICKNESS,
+    col,
+    x0,
+    clearanceY,
+    chamferY,
+    clearanceLabelY: clearanceY - maxR - labelGap,
+    chamferLabelY: 2,
+    pocketDepth: COUPON_POCKET_DEPTH,
+    engrave: 0.8,
+    columns: INSERT_FIT_STEPS,
+  };
+}
+
+/**
+ * The tool-insert pocket coupon: a bar with two ladders of blind pockets in its
+ * top face, cut with the compiler's own `roundPocketCutter`.
+ *
+ * The upper row ladders the diametral CLEARANCE with the entry chamfer held at
+ * the shipped value; its labels are the clearance in hundredths ("25" = 0.25 mm
+ * of clearance). The lower row ladders the CHAMFER with the clearance held at
+ * the shipped value; its labels are the chamfer in hundredths ("80" = 0.8 mm).
+ * The two rows do not share a number system on purpose — a diameter label would
+ * be identical across the whole of the lower row — and only the upper row's
+ * rungs reach `FitCouponBuild.columns`, because that is the ladder the `shipped`
+ * flag means anything for.
+ *
+ * A printed pass is the operator sliding a real Ø10 shank (a drill bit, a hex
+ * key, a 1/4" driver) into each hole and reporting the smallest one it enters
+ * and the smallest one that still grips without rattle. Those are not the same
+ * number, which is the whole point of a ladder.
+ */
+export function buildInsertPocketCoupon(label?: Labeler): FitCouponBuild {
+  const L = insertCouponLayout();
+  const shippedClearance = shippedInsertClearance();
+  const shippedChamfer = shippedInsertChamfer();
+  const floorZ = L.barZ - L.pocketDepth;
+
+  const cuts: BuildOp[] = [];
+  const columns: CouponColumn[] = [];
+
+  // Upper row — the clearance ladder, chamfer held at the shipped value.
+  insertClearanceLadder().forEach((clearance, i) => {
+    const cx = L.x0 + i * L.col;
+    cuts.push(
+      translate(
+        [cx, L.clearanceY, floorZ],
+        roundPocketCutter(INSERT_COUPON_TOOL_D + clearance, L.pocketDepth, shippedChamfer),
+      ),
+    );
+    const text = hundredthsLabel(clearance);
+    if (label) cuts.push(...label(text, cx, L.clearanceLabelY, L.barZ, L.engrave));
+    columns.push({
+      x: cx,
+      value: clearance,
+      label: text,
+      shipped: Math.abs(clearance - shippedClearance) < 1e-9,
+    });
+  });
+
+  // Lower row — the chamfer ladder, clearance held at the shipped value.
+  insertChamferLadder().forEach((chamfer, i) => {
+    const cx = L.x0 + i * L.col;
+    cuts.push(
+      translate(
+        [cx, L.chamferY, floorZ],
+        roundPocketCutter(INSERT_COUPON_TOOL_D + shippedClearance, L.pocketDepth, chamfer),
+      ),
+    );
+    if (label) {
+      cuts.push(...label(hundredthsLabel(chamfer), cx, L.chamferLabelY, L.barZ, L.engrave));
+    }
+  });
+
+  const op = difference([cube([L.barX, L.barY, L.barZ]), ...cuts]);
+  return {
+    op,
+    dims: { x: L.barX, y: L.barY, z: L.barZ },
+    columns,
+    bodies: 1,
+    settles:
+      `insert.ts defaultInsert().clearance (currently ${shippedClearance}) — the ` +
+      `diametral grip a round pocket holds a Ø${INSERT_COUPON_TOOL_D} tool shank with; ` +
+      `the lower row ladders the entry chamfer (currently ${shippedChamfer})`,
+    provenance:
+      'PROVISIONAL — every insert fit number is a default, not a measurement ' +
+      '(clearance 0.25, chamfer 0.8, floor 1.5, pitchGap 3) and no tool insert has been ' +
+      'printed here. Upper-row labels are the clearance ×100; lower-row labels are the ' +
+      'chamfer ×100. A printed pass reports the smallest hole a real shank enters and the ' +
+      'smallest that still holds it without rattle; print a second coupon if the best rung ' +
+      'is at either end of a ladder.',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -365,6 +575,11 @@ export const FIT_COUPONS: readonly FitCouponSpec[] = [
     id: 'board-snap',
     title: 'Board-snap two-jaw clip + PCB-edge gauge',
     build: (label) => buildBoardSnapClipCoupon(label),
+  },
+  {
+    id: 'insert-pocket',
+    title: `Tool-insert pocket Ø${INSERT_COUPON_TOOL_D} — clearance + chamfer ladder`,
+    build: (label) => buildInsertPocketCoupon(label),
   },
 ];
 

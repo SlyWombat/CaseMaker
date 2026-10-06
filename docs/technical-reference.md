@@ -106,7 +106,7 @@ The compiler is 41 modules. Grouped by what they build:
 | `rack.ts` | `buildRackNodes`, `computeRackDims`, `accessorySpaces`, `cableNotchGeometry` | The parametric mini-rack: sides, plates, shelves, trays, faceplates. See [Mini-Rack.md](https://github.com/SlyWombat/CaseMaker/blob/main/Mini-Rack.md) |
 | `rackFit.ts` | `rectFitsBed`, `rackPartFootprints`, `maxRackWidthForBed` | Printer-fit checks: does every rack part land on the bed? |
 | `stand.ts` | `computeStandDims`, `buildEdgeChannels`, `standModulePlacement`, `computePocketDims`, `buildPocketOp` | Desk and bench stands — and (issue #151) the `mount: 'pocket'` wall shelf: one part, a back plate with a screw ear each side, a floor and two walls the finished module nests into, sized from the module's own envelope and sharing `rack.ts`'s wall-fixing sizes |
-| `insert.ts` | `buildInsertNodes`, `buildInsertOp`, `insertGrid`, `insertLayout`, `insertProblem`, `pocketRadius` | Issue #158 — the tool-insert holder: one plate of round (socket-OD) and hex (across-flats) pockets on a centred uniform grid, sized to the user's own tools. Plate 120 × 80 × 6 by default, with `clearance`, `chamfer`, `floor` and `pitchGap` all exposed; the pocket layout is pure and wasm-free, so only the subtracted solid needs an evaluator |
+| `insert.ts` | `buildInsertNodes`, `buildInsertOp`, `insertGrid`, `insertLayout`, `insertProblem`, `pocketRadius`, `roundPocketCutter` | Issue #158 — the tool-insert holder: one plate of round (socket-OD) and hex (across-flats) pockets on a centred uniform grid, sized to the user's own tools. Plate 120 × 80 × 6 by default, with `clearance`, `chamfer`, `floor` and `pitchGap` all exposed; the pocket layout is pure and wasm-free, so only the subtracted solid needs an evaluator. `roundPocketCutter` is the round pocket as a standalone primitive, so the `insert-pocket` fit coupon cuts the shipped pocket instead of a copy of it |
 | `rugged.ts` | `buildRuggedOps` | Corner bumpers and impact ribs |
 | `mountingFeatures.ts` | `buildMountingFeatureOps`, `endFlangesPreset`, `fourCornerScrewTabs`, `extrusionMountPreset` | How the finished case attaches to the world: tabs, flanges, VESA, and (issue #151) bolt holes for a T-nut captive in 20-series T-slot extrusion — through-holes only, so no printed part changes |
 
@@ -332,6 +332,30 @@ so the board footprint and its bosses leave only the `internalClearance` margin
 wants a bare gridded floor is the toolbox archetype, which is still a go/no-go
 (#155); shipping the host-less primitive is what lets that decision be made
 with something in hand.
+
+## Fit coupons
+
+Every fit-critical interface can be printed on its own before the part that uses
+it — the lesson of #140, where arithmetic sent the M5 pilot to 4.0–4.3 mm and a
+printed coupon came back at 4.8. `fitCoupons.ts` is the registry;
+`npm run fit:coupon` renders all of it, `npm run fit:coupon -- <id>` one of it,
+and `--list` prints the ids.
+
+| id | settles |
+| :--- | :--- |
+| `magnet-6x2`, `magnet-8x3`, `magnet-10x2` | the magnet pocket diameter, as a clearance ladder cut in two print orientations |
+| `board-snap` | the two-jaw board clip, with a PCB-edge gauge as a second printed body |
+| `insert-pocket` | the tool-insert pocket's `clearance` and `chamfer`, as two ladders of Ø10 pockets in one bar |
+
+**A coupon is not a redrawing.** Each one is built from the same builder the
+compiler uses — `magnetPocket`, `buildBoardSnapOps`, `roundPocketCutter` — so a
+coupon cannot certify a feature the compiler no longer draws. That is also why
+the coupon geometry lives in `src/` rather than in the script that writes it.
+
+**Printing one is the measurement.** The code does not adopt the winning rung;
+the operator prints, drives or measures, reports back, and a follow-up flips that
+number to measured. Every coupon therefore carries a PROVISIONAL note naming what
+is still a guess.
 
 ## CI
 

@@ -13,13 +13,22 @@
 import { describe, it, expect } from 'vitest';
 import {
   MAGNET_FIT_STEPS,
+  INSERT_FIT_STEPS,
+  INSERT_CHAMFER_STEPS,
+  INSERT_COUPON_TOOL_D,
   FIT_COUPONS,
   buildFitCoupon,
   buildMagnetCoupon,
   buildBoardSnapClipCoupon,
+  buildInsertPocketCoupon,
+  insertChamferLadder,
+  insertClearanceLadder,
+  insertCouponLayout,
   magnetCouponLayout,
   magnetFitLadder,
   magnetPocketDiameterFor,
+  shippedInsertChamfer,
+  shippedInsertClearance,
   shippedMagnetClearance,
   type FitCouponBuild,
 } from '@/engine/compiler/fitCoupons';
@@ -138,14 +147,137 @@ describe('board-snap clip coupon', () => {
   });
 });
 
+describe('tool-insert pocket coupon (#158 / #262 item 5)', () => {
+  it('the clearance ladder is non-negative, monotonic, and shipped lands on one rung', () => {
+    const ladder = insertClearanceLadder();
+    expect(ladder.length).toBe(INSERT_FIT_STEPS);
+    for (let i = 0; i < ladder.length; i++) {
+      // A tool has to come back OUT: unlike the magnet ladder this one may not
+      // step into interference, which `insertProblem` would reject anyway.
+      expect(ladder[i]!, `rung ${i} is non-negative`).toBeGreaterThanOrEqual(0);
+      if (i > 0) expect(ladder[i]!, `rung ${i} > rung ${i - 1}`).toBeGreaterThan(ladder[i - 1]!);
+    }
+    expect(ladder.filter((c) => c === shippedInsertClearance()).length).toBe(1);
+    // Pilot shape, not bracket: the shipped guess is unmeasured and the reviewed
+    // generators use a larger clearance, so more rungs sit above it than below.
+    const at = ladder.indexOf(shippedInsertClearance());
+    expect(ladder.length - 1 - at, 'more rungs above shipped than below').toBeGreaterThan(at);
+  });
+
+  it('the chamfer ladder is anchored at a hard edge, with shipped on rung 4', () => {
+    const ladder = insertChamferLadder();
+    expect(ladder.length).toBe(INSERT_CHAMFER_STEPS);
+    expect(ladder[0], 'rung 0 is a hard edge, the control').toBe(0);
+    for (let i = 1; i < ladder.length; i++) {
+      expect(ladder[i]!).toBeGreaterThan(ladder[i - 1]!);
+    }
+    // The ladder is anchored at 0 rather than centred, so the shipped value has
+    // to be found at a fixed rung — and this assertion is what catches
+    // `defaultInsert().chamfer` moving out from under the layout.
+    expect(ladder[4]).toBeCloseTo(shippedInsertChamfer(), 5);
+  });
+
+  it('cuts one blind pocket per rung of each ladder, at the ladder diameter', () => {
+    const built = buildInsertPocketCoupon();
+    expect(built.bodies).toBe(1);
+    expect(built.columns.length, 'columns describe the clearance ladder').toBe(INSERT_FIT_STEPS);
+    expect(built.columns.filter((c) => c.shipped).length, 'one shipped rung').toBe(1);
+
+    const L = insertCouponLayout();
+    const m = exec(built.op);
+    try {
+      expect(m.decompose().length, 'one printed body').toBe(1);
+      expect(m.genus(), 'blind pockets are dimples, not handles').toBe(0);
+      const midZ = L.barZ - L.pocketDepth / 2;
+      const shippedR = (INSERT_COUPON_TOOL_D + shippedInsertClearance()) / 2;
+
+      // Upper row — the bore is the ladder diameter, the floor under it is solid.
+      for (const col of built.columns) {
+        const r = (INSERT_COUPON_TOOL_D + col.value) / 2;
+        expect(solidAt(m, [col.x, L.clearanceY, midZ]), `${col.label} bore is void`).toBe(false);
+        expect(
+          solidAt(m, [col.x + r + 1, L.clearanceY, midZ]),
+          `${col.label} wall outside the bore`,
+        ).toBe(true);
+        expect(
+          solidAt(m, [col.x, L.clearanceY, L.barZ - L.pocketDepth - 1.5]),
+          `${col.label} floor`,
+        ).toBe(true);
+      }
+
+      // Lower row — the same bore for every rung, only the entry flare changes.
+      // Probe the two ENDS of the ladder 0.5 mm outside the bore and a hair
+      // below the top face: a hard edge leaves material there, the widest flare
+      // (1.2 mm) has opened well past it. The middle rungs sit within half a
+      // 0.2 mm step of each other, which is finer than a mesh probe can resolve
+      // — those are read off the printed part, not off the mesh.
+      insertChamferLadder().forEach((chamfer, i) => {
+        const x = L.x0 + i * L.col;
+        expect(solidAt(m, [x, L.chamferY, midZ]), `chamfer ${chamfer} bore is void`).toBe(false);
+        expect(
+          solidAt(m, [x, L.chamferY, L.barZ - L.pocketDepth - 1.5]),
+          `chamfer ${chamfer} floor`,
+        ).toBe(true);
+      });
+      const probeOut = shippedR + 0.5;
+      const mouthZ = L.barZ - 0.1;
+      expect(
+        solidAt(m, [L.x0 + probeOut, L.chamferY, mouthZ], 0.1),
+        'a hard edge leaves material 0.5 mm outside the bore',
+      ).toBe(true);
+      const widestX = L.x0 + (INSERT_CHAMFER_STEPS - 1) * L.col;
+      expect(
+        solidAt(m, [widestX + probeOut, L.chamferY, mouthZ], 0.1),
+        'the widest flare has cut past that point',
+      ).toBe(false);
+    } finally {
+      m.delete();
+    }
+  });
+
+  it('engraves a label per rung of BOTH rows, in different number systems', () => {
+    const calls: string[] = [];
+    const spy = (text: string) => {
+      calls.push(text);
+      return [];
+    };
+    buildInsertPocketCoupon(spy);
+    expect(calls.length).toBe(INSERT_FIT_STEPS + INSERT_CHAMFER_STEPS);
+    // Upper row labels the clearance ×100; lower row the chamfer ×100.
+    expect(calls).toContain('25'); // shipped clearance 0.25
+    expect(calls).toContain('80'); // shipped chamfer 0.8
+    expect(calls).toContain('0'); // the hard edge
+  });
+
+  it('keeps the bar on a small bed and the label rows clear of the bores', () => {
+    const L = insertCouponLayout();
+    expect(L.barX).toBeLessThan(180);
+    expect(L.barY).toBeLessThan(80);
+    // Labels are 7 mm tall from their baseline; they must not run into the row
+    // of bores above them, nor off the bar.
+    const r = (INSERT_COUPON_TOOL_D + shippedInsertClearance()) / 2;
+    expect(L.clearanceLabelY + 7).toBeLessThan(L.clearanceY - r);
+    expect(L.clearanceLabelY).toBeGreaterThan(L.chamferY + r);
+    expect(L.chamferLabelY + 7).toBeLessThan(L.chamferY - r);
+    expect(L.chamferLabelY).toBeGreaterThanOrEqual(0);
+  });
+});
+
 describe('registry', () => {
-  it('lists every magnet size and the board-snap coupon', () => {
+  it('lists every magnet size, the board-snap coupon and the insert coupon', () => {
     const ids = FIT_COUPONS.map((c) => c.id);
-    expect(ids).toEqual(['magnet-6x2', 'magnet-8x3', 'magnet-10x2', 'board-snap']);
+    expect(ids).toEqual([
+      'magnet-6x2',
+      'magnet-8x3',
+      'magnet-10x2',
+      'board-snap',
+      'insert-pocket',
+    ]);
   });
 
   it('buildFitCoupon resolves by id and rejects an unknown one', () => {
     expect(buildFitCoupon('magnet-8x3').columns.length).toBe(MAGNET_FIT_STEPS);
+    expect(buildFitCoupon('insert-pocket').columns.length).toBe(INSERT_FIT_STEPS);
     expect(() => buildFitCoupon('nope')).toThrow(/unknown fit coupon/);
   });
 });

@@ -185,31 +185,46 @@ function round2(n: number): number {
 }
 
 /**
+ * One ROUND pocket's cutting op, anchored at the pocket FLOOR on its own axis:
+ * the straight bore runs z ∈ [0, `depth`] and the entry flare caps it, rising
+ * 1:1 from the bore radius and reaching `radius + chamfer` at z = `depth`. A
+ * caller places it with a single `translate([cx, cy, floorZ], …)`.
+ *
+ * Exported because this is the INTERFACE, not an implementation detail. The fit
+ * coupons (#157) cut their ladder with the pocket the compiler ships — the same
+ * discipline `magnetPocket` and `buildBoardSnapOps` follow — so a coupon cannot
+ * certify a pocket this file no longer draws. It is also what a future pocket
+ * carrier (#151) needs to cut a tool footprint into a wall.
+ *
+ * The chamfer is clamped to the depth so a shallow pocket cannot have its flare
+ * eat the floor, and to zero because a negative flare is meaningless.
+ */
+export function roundPocketCutter(diameter: number, depth: number, chamfer: number): BuildOp {
+  const r = diameter / 2;
+  const c = Math.min(Math.max(chamfer, 0), depth);
+  const bore = cylinder(depth, r, segmentsForRadius(r));
+  if (c <= 0) return bore;
+  const flare = extrude(circleProfile(r, segmentsForRadius(r)), c, {
+    scaleTop: (r + c) / r,
+  });
+  return union([bore, translate([0, 0, depth - c], flare)]);
+}
+
+/**
  * One pocket's cutting op at (cx, cy), in the plate's frame.
  *
  * Round pockets get their entry chamfer as a conical flare unioned onto the
  * straight bore; hex pockets are cut straight, because a tapered hexagon is a
- * different (rotational) fit and no bit needs one. The chamfer is clamped to
- * the pocket depth so a shallow pocket cannot have its flare eat the floor.
+ * different (rotational) fit and no bit needs one.
  */
 function pocketCutter(item: InsertItem, insert: InsertParams, cx: number, cy: number): BuildOp {
   const s = item.size + insert.clearance;
   const zBase = insert.thickness - item.depth;
   const body =
     item.shape === 'round'
-      ? cylinder(item.depth, s / 2, segmentsForRadius(s / 2))
+      ? roundPocketCutter(s, item.depth, insert.chamfer)
       : extrude(hexProfile(s), item.depth);
-  const parts: BuildOp[] = [translate([cx, cy, zBase], body)];
-
-  const chamfer = Math.min(insert.chamfer, item.depth);
-  if (item.shape === 'round' && chamfer > 0) {
-    const r = s / 2;
-    const flare = extrude(circleProfile(r, segmentsForRadius(r)), chamfer, {
-      scaleTop: (r + chamfer) / r,
-    });
-    parts.push(translate([cx, cy, insert.thickness - chamfer], flare));
-  }
-  return parts.length === 1 ? parts[0]! : union(parts);
+  return translate([cx, cy, zBase], body);
 }
 
 /**
