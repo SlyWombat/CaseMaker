@@ -406,6 +406,36 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     });
     expect((screen.getByTestId('engrave-run-sheet') as HTMLButtonElement).disabled).toBe(true);
   });
+
+  // #174's last owed cover: a VERIFIER refusal is not a job-validation error, so it cannot gate
+  // the Generate button — it can only shut Save, and it must say why. The store half (a real
+  // `cut-too-deep` produced by the real pipeline) is `engraveRunVerify.spec.ts`; this is the
+  // same result as the panel renders it.
+  it('keeps Save shut and names the reason when the verifier refused the file (#174)', () => {
+    const refused: EngraveGenerated = {
+      ...readyGenerated(';@MKR|BEGIN\nG21 G90\nG1 Z-1.5 F200\nM02'),
+      ok: false,
+      stage: 'verify',
+      verify: {
+        ok: false,
+        findings: [
+          { severity: 'error', code: 'cut-too-deep', line: 3, message: 'cuts to -1.5 mm; only 1 mm is allowed' },
+        ],
+        stats: { lines: 3, cuttingMoves: 1, deepestZ: -1.5, bbox: { min: [0, 0, -1.5], max: [1, 1, 0] } },
+      },
+      errors: [{ stage: 'verify', message: '1 verifier error(s)' }],
+    };
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({ generated: refused, simStatus: null, phase: 'blocked' });
+    });
+
+    expect((screen.getByTestId('engrave-save') as HTMLButtonElement).disabled).toBe(true);
+    // The button's own tooltip carries the reason, and the line under it spells it out.
+    expect(screen.getByTestId('engrave-save')!.getAttribute('title')).toContain('1 error outstanding');
+    expect(screen.getByTestId('engrave-save-blocked').textContent).toContain('1 error outstanding');
+    expect(screen.getByTestId('engrave-run-errors').textContent).toContain('1 error outstanding');
+  });
 });
 
 // #219's panel: the two single-line kinds in the Add menu, their editors, and the finding the
