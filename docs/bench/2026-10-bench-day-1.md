@@ -6,14 +6,19 @@ Sections A–C move nothing (A–C run with the spindle off and **nothing in the
 air-only; the real cut is E and belongs to #209. Nothing here cuts material except the last,
 optional step.
 
-**Status: runbook, not yet run.** Every **Expected** value below is a *reading* of the code or
-a document — never a measurement of this machine. Every **Recorded** form is **blank** until the
-session fills it in at the machine. When the machine disagrees with a document, the machine is
-right and the document changes.
+**Status: partly run — 2026-10-06 and 2026-10-07.** Every **Expected** value below is a *reading*
+of the code or a document — never a measurement of this machine. Every **Recorded** form is
+**blank** until the session fills it in at the machine. When the machine disagrees with a
+document, the machine is right and the document changes.
 
-*One exception, 2026-10-06:* **B0** was recorded before the session, over the network, with the
-machine idle and nothing sent but two identify queries and a status poll. It is marked **RUN** in
-place; every other **Recorded** form is still blank, and A–E are as they were.
+*What has run so far:* **B0, B2, B4 (partial), B5, B6, B7, B8, B9, C1** on 2026-10-06/07, **A7
+(one cutter)** and **D1 (partial)** on 2026-10-07. Everything else is still blank. B0 was recorded
+before the first session, over the network, with nothing sent but two identify queries and a status
+poll. Two items have been **parked** rather than left looking merely un-run — **C2** (blocked, see
+its own note) and **D1**'s header question — and both say so in place.
+
+*Added 2026-10-07 after the fact:* **D0**, which is Studio's Machining Wizard. It was not in this
+runbook when the session started, and it is the reason D1 could not run as written.
 
 **Photographs** go under `docs/bench/img/`, named per item (`A3-vise-top.jpg`, …).
 
@@ -942,6 +947,14 @@ without moving XY.
 **Expected.** The 3D Probe is rated for non-conductive material, so it should trigger on wood;
 its repeatability has never been measured (`/Fabrication.md` §1, §7.6).
 
+> **Partial, 2026-10-07 — two hits, 0.017 mm apart, and they count for less than they look.**
+> The D1 session's auto-Z-probe triggered twice at one point, reported as
+> `[PRB:-118.400,-109.800,-65.135:1]` at `F500` and `[PRB:…,-65.118:1]` at `F100`
+> (`docs/bench/img/D1-probe-cycle-mdi-log.png`). That is **one point, twice, on an unidentified
+> surface** — the bed or the vise, not wood, and not five repeats. It is the first probe figure this
+> machine has produced and it is the right order of magnitude for C4 to be worth running properly;
+> it is **not** C4's answer. The five-repeats-on-wood procedure below still stands.
+
 **Recorded:** _not yet run — 5 Z values; spread = probe repeatability._
 
 | Run | Z reading (machine coords, mm) |
@@ -1001,6 +1014,13 @@ two-point edge find at all is unknown (see B1).
 **Expected.** The firmware does **nothing** — no change, no calibration
 (`/Z1-Firmware-Dialect.md` §2). This is the no-op rule #207 section 4 warns about.
 
+> **Informed but not answered, 2026-10-07.** The D1 session changed tools twice — cutter → Probe and
+> back — and each time the machine **stopped and waited for an operator** (`M490.1`, with a dialog:
+> *"Tool Change Required … Then press Confirm to continue"*), then ran an `M49x` block and reported
+> `Done ATC`. That is a change to a *different* tool, which is not C7's case, so the no-op rule
+> still has no hardware behind it. Worth knowing before running C7 that a real change **blocks**,
+> so C7's "did anything move?" should be answered at the dialog, not after it.
+
 **Recorded:** _not yet run — yes/no._
 
 | Field | Value |
@@ -1013,6 +1033,64 @@ two-point edge find at all is unknown (see B1).
 ---
 
 ## D · Run files — in the air first
+
+### D0 — Studio's Machining Wizard (added 2026-10-07)
+
+**Not in the runbook when the session started, and it changes D1's premise.** Studio does not run a
+`.nc` when you press Start. It opens a **five-step wizard**, and nothing is machined until the last
+step is confirmed.
+
+```
+Set Stock  →  Set Origin  →  Auto Probe  →  Assist Options  →  Run
+```
+
+**What each step carries** (observed 2026-10-07, screenshots below):
+
+| Step | Controls seen |
+|---|---|
+| **Set Stock** | a bed map labelled `200.0 × 200.0 mm`, with the **L-bracket / anchor system drawn to scale** and ✕ clamp markers; radio `Anchor1` / `Custom`; *"Place the stock on the work bed and secure it firmly. We recommend using the anchor system and L-Bracket for quick and accurate positioning."* |
+| **Set Origin** | `Relative to: Anchor1`, `X Offset` `42.490`, `Y Offset` `69.030`; buttons `Same As CAM` and `Set Origin with 3D Probe`; radio `Apply Settings`; toggle `Auto-Scan Machining Area` + `Scan Now` |
+| **Auto Probe** | toggle `Auto Workpiece Leveling` (`Clearance Height: 5`, `X Points: 3`, `Y Points: 3`); toggle `Auto Z-Height Probing` (`Relative to: Path Origin`, `X Offset: 20.000`, `Y Offset: 7.000`) |
+| **Assist Options** | five switches: `Auto Vacuum`, `Auto Blow`, `Auto Bed Clean`, `Anti-Static`, `Auto Time-Lapse` |
+| **Run** | a summary of every setting above, then `Run` |
+
+Evidence: `docs/bench/img/D0-wizard-1-set-stock.png`, `…-2-set-origin.png`,
+`…-2-scan-now-mdi-log.png`, `…-3-auto-probe.png`, `…-4-assist-options.png`,
+`…-4-assist-toggled-mdi-log.png`, `…-5-run-summary.png`.
+
+**Four behaviours worth building on later:**
+
+- **`Path Origin` means the toolpath's origin, not the work origin.** Verified by arithmetic rather
+  than by reading it: the probe was configured `(20.000, 7.000) from Path Origin`, and the machine
+  probed at **machine (−118.400, −109.800)** = **work (30.000, 15.000)** once the unchanged
+  148.400 / 124.800 offsets are removed. 30 − 20 = 10 and 15 − 7 = 8, so Path Origin is work
+  **(10, 8)** — the lower-left corner of the toolpath bounding box, which is exactly where this
+  file's first stroke starts. It also explains the red `Z Probe` marker drawn at the centre of the
+  green toolpath rectangle.
+- **One setting carries three labels.** The pre-run checkbox, `Auto-Scan Machining Area` at the
+  origin step, and `Scan Margin` on the summary are the same switch. Names like that are how a
+  bridge gets wired to the wrong thing.
+- **The wizard interposes an operator confirmation before it moves.** `Run` refuses to start until
+  a person confirms, in a dialog, that the spindle holds the probe — *"Click the button below only
+  after verification. If not, change to the probe first."* (`D1-tool-confirmation.png`.) The
+  vendor's own client enforces *verify the physical machine before it moves*, which is
+  `/Fabrication.md` §8's rule arriving as software. **The interlock held rather than silently
+  probing**, which is the right design and worth copying.
+- **The vendor recommends surface probing for our headline job.** `Auto Workpiece Leveling`'s own
+  help text: *"Enable Auto Leveling for uneven surfaces or shallow cuts (<0.5 mm), especially for
+  fine machining such as PCB and engraving bi-color sheet."* That is V1 — multi-font depth
+  engraving on bi-colour sheet — named by Makera as the reason the feature exists. It makes **C4
+  (probe repeatability)** the number that decides whether V1 needs levelling, not a curiosity.
+
+**What the wizard is worth to the roadmap.** It is the closest thing to a specification of the
+*setup* half of a job that we have: placement, origin, surface finding and post-job assists, as the
+vendor models them. The bridge's first pass does none of it (`Z1-Bridge-Protocol.md` §8), and this
+is now a written record of what "none of it" is.
+
+**Recorded 2026-10-07.** Walked end to end with a bare bed, no blank and an empty collet. It
+probed, moved and changed tools; it was stopped before the cut. See D1.
+
+---
 
 ### D1 — Air program: does the machine take it, and does it read our header?
 
@@ -1029,17 +1107,47 @@ strokes at Z −0.5 / −1 / −2, header `TIME seconds=30` and
 (`post/z1.ts:58`) — whether the machine accepts a non-Studio id is the open question (#173; also
 asked by #165 and #176).
 
-**Recorded:** _not yet run — Yes/no ×3 + screenshot of the machine screen._
+**Recorded 2026-10-07 — PARTIAL. The premise above was wrong; the run was stopped on purpose.**
+
+*The "Do" line says "upload it, does Studio accept and preview it". It does both — and then it opens
+the wizard in **D0**, which requires a clamped stock before it will machine. This session had a bare
+bed, no blank and an empty collet, so D1 got as far as a real probing cycle and no further. The run
+was stopped at the tool-change prompt rather than confirmed.*
 
 | Question | Answer |
 |---|---|
-| Studio accepted the file? (yes/no) | |
-| Studio previewed it? (yes/no) | |
-| Machine screen showed our `CAM` header's stock, tool and time? (yes/no) | |
-| Screenshot (`docs/bench/img/…`) | |
-| Notes (anything on the screen that differed) | |
+| Studio accepted the file? | **yes** — listed as `208-D1-three-strokes-air.nc` in *Processing progress*, filename intact |
+| Studio previewed it? | **yes** — the Monitor panel rendered the three strokes |
+| Did anything show our `CAM` header's stock, tool and time? | **no, and there is no screen to show it on** — the Z1 has no panel of its own (confirmed at the bench), and Studio displays none of the three. The `Run` summary shows setup state instead, and `Processing progress` read `Remain 0m` against our header's `TIME seconds=30`. **This cell was mis-worded: it implied a display that does not exist.** |
+| Screenshot | `docs/bench/img/D1-file-loaded.png`, `D1-pre-run-options.png`, `D1-tool-confirmation.png`, `D1-probe-cycle-mdi-log.png` |
+| Notes | See below — the wizard, the tool changes, the probe cycle, and a **changed machine state the next session must know about**. |
 
-**Goes to:** #173's open header question.
+**What the file did do, and it was more than a preview.** `Scan Now` sent the head around the
+perimeter of the toolpath bounding box at machine Z −3.000, and the Auto-Z-Probe cycle ran a real
+`G38.2` probe. The full command transcript — `M49x` tool-change codes, the probe, `[PRB:…]`, `G10
+L20 P0 Z0.000` — is in `D1-probe-cycle-mdi-log.png` and written up in
+**`/Z1-Firmware-Dialect.md` §11**, which is where dialect facts belong rather than here.
+
+**⚠️ The machine's state changed, and it outlives the session.** The auto-Z-probe set the work
+coordinate system from its trigger (`G10 L20`):
+
+| | before 2026-10-07 | after |
+|---|---|---|
+| X / Y work offset | 148.400 / 124.800 | **unchanged** |
+| Z work offset | 58.633 | **65.118** |
+| Tool length offset | −17.696 | **0.0** |
+| Active tool | cutter | **`Probe`** |
+
+Z 65.118 is exactly the probed surface. **Any job set up against the old Z0 is now wrong by
+6.5 mm**, and the controller believes the probe is loaded. The five `Assist Options` were also all
+switched **on** (they were off before) — see `Z1-Firmware-Dialect.md` §11.3 for the codes and
+§11.4 for what is not yet known about whether they persist.
+
+**Goes to:** #173's open header question — **still open, and now differently shaped.** It cannot be
+answered by reading a screen: there is no machine panel, and Studio shows stock, tool and time
+nowhere — not in the preview, not in the `Run` summary, not in `Processing progress`. The remaining
+question is whether a *non-Studio* `CAM|id` is **accepted**, which is behavioural: run a job with
+ours and see whether Studio or the controller objects.
 
 ### D1b — The `N` word: does the firmware execute a numbered line? (low priority)
 
@@ -1079,19 +1187,32 @@ relative to the stock? Sketch it.
 stock; `ORIGIN x/y/z` states the origin relative to the stock's **centre** (front = −Y). That
 `length` maps to X is unproven — one square sample (`/Makera-Parity.md` §6.1; `post/z1.ts:141-144`).
 
-**Recorded:** _not yet run — a sketch._
+**Recorded 2026-10-07 — ANSWERED, from Studio's own rendering of this file's geometry.** The evidence
+is the wizard's bed map (`docs/bench/img/D0-wizard-3-auto-probe.png`), measured against its own
+`200.0 × 200.0 mm` label at ≈4.575 px/mm. This is a *screenshot* reading, so it is strong evidence
+rather than a measurement — but two independent numbers agree with the hypothesis.
 
 | Field | Value |
 |---|---|
-| Origin corner (sketch or name) | |
-| X direction relative to stock | |
-| Y direction relative to stock | |
-| `length` maps to X? (yes/no/unknown) | |
+| Origin corner | **front-left** (`ORIGIN x=-30 y=-15` on a 60 × 30 stock *is* the front-left corner, centre-relative) |
+| X direction relative to stock | **positive into the stock**, along the 60 mm dimension |
+| Y direction relative to stock | **positive into the stock**, along the 30 mm dimension |
+| `length` maps to X? | **yes** — the toolpath rectangle measured ≈41 × 14 mm against the strokes' X 10→50 (**40**) and Y 8→22 (**14**) |
 
-Sketch: `docs/bench/img/D2-origin-axes.jpg` (or paste an ASCII sketch here)
+- The **`Work Origin` dot** sits ≈**10 mm** to the −X of the toolpath rectangle's near corner.
+  The file's first stroke starts at **X10**. That matches to within a pixel.
+- The same Y figure reads 5–6 mm against an expected **8** — the one number that does not agree
+  cleanly, and it is at the edge of what a screenshot can resolve. Recorded as approximate rather
+  than rounded into agreement.
+- **D0 corroborates it independently**: the wizard's `Path Origin` resolves to work **(10, 8)** —
+  the lower-left of the toolpath bounding box, which is where stroke 1 begins, and only consistent
+  with the origin being the stock's front-left corner.
 
-**Goes to:** `/Makera-Parity.md` §6.1 — the `topFrontLeft` / "front = −Y" hypothesis, and whether
-`length` is X.
+Sketch: `docs/bench/img/D0-wizard-3-auto-probe.png` (the bed map; the blue dot is the origin)
+
+**Goes to:** `/Makera-Parity.md` §6.1 — the `topFrontLeft` / "front = −Y" hypothesis **holds**, and
+`length` **is** X. Still worth confirming with calipers on a real blank in A3/A5, since this reading
+comes from a rendered map rather than the machine.
 
 ### D3 — Time the air run
 
@@ -1185,6 +1306,35 @@ uncertainty 2 mm), so the app's collision check will warn.
 - **#174's `n-line-ignored` reading** confirmed or corrected by D1b.
 - Every `PROVISIONAL (#208)` marker in code replaced by a measured value with its date, or left
   PROVISIONAL with the reason it could not be measured — see the inventory below.
+
+### What actually landed, 2026-10-07
+
+This section is the honest ledger, because most of what tonight produced was **not** on the list
+above — it was found by walking into a wizard this runbook did not know existed.
+
+| Landed in | What |
+|---|---|
+| **`/Z1-Firmware-Dialect.md` §11** (new) | The dialect document's **first hardware-observed section**: §2's `M49x` macro seen running (`M490.1` confirmed as the operator wait), the probe cycle (`G38.2`, `[PRB:x,y,z:n]`, `G10 L20 P0`), and the `M331`/`M951` mode family. |
+| **`Z1-Bridge-Protocol.md` §9** | Two rows: how a console command is acknowledged (observed indirectly, from the client's log), and whether the bridge must model the accessory modes (open, and deliberately outside the first pass). |
+| **#283** (new) | The accessory modes are not air. `machine.ts` models only `M7`/`M9`, and no `M7`/`M9` appeared in the traffic. Includes the one-at-a-time toggle test that would turn an inferred mapping into an observed one. |
+| **#255**, comment | Studio runs a file through a five-step wizard, so *uploading a `.nc` is not the same as being able to run it*. No scope change proposed; recorded so the gap is written down. |
+| **#212**, comment | A7's first cutter decodes to a QR slug, not a catalogue id. |
+| **D0** (new item) | The wizard itself, step by step, with screenshots. |
+| **D2** | Answered — origin is the stock's front-left, `length` is X, and X/Y run positive into the stock. |
+| **D1** | Partially answered, with the premise corrected and the machine-state change recorded. |
+| **C4** | A partial figure (two hits 0.017 mm apart) marked explicitly as *not* C4's answer. |
+| **D3** | **Not run.** The stopwatch number #281 is waiting for was not taken — the run was stopped before the cut. |
+
+**Still owed from the 2026-10-07 trip, and cheap to get next time:** the five probe repeats on wood
+(C4), what the `Set Stock` step does with `Custom` selected (D0), and whether the assist modes
+survive a power cycle (`/Z1-Firmware-Dialect.md` §11.4).
+
+**Struck from that list, 2026-10-07:** "the machine screen's `CAM` header readout". **The Z1 has no
+panel of its own** — confirmed at the bench. The expectation came from `Fabrication.md` §2, which
+said the "machine UI reads material, stock, time estimate and thumbnail" from the header; that line
+has been corrected in place. Nothing in Studio displays the three either, so #173's `CAM|id=`
+fallback is a *behavioural* question — run a job with our id and see whether anything objects — and
+D1 as written could never have answered it by inspection.
 
 ## PROVISIONAL (#208) inventory — what this session is meant to replace
 

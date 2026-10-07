@@ -189,8 +189,7 @@ This is the whole reason multi-tool jobs stay on the table. It also means a job 
 *n* separate files the operator has to launch in the right order.
 
 ### Output file format
-Studio's `.nc` carries a self-documenting header, which the machine UI reads for
-material, stock, time estimate and thumbnail. We emit the same (see
+Studio's `.nc` carries a self-documenting header. We emit the same (see
 `%APPDATA%/MakeraStudio/GCodes/TopClamp.nc` for a full example):
 
 ```
@@ -216,6 +215,17 @@ G0 Z15 / M9 / M05 / G28 / M02
 
 Origin defaults to the stock's **top-front-left** corner: it matches Studio's
 `ORIGIN type_name=topFrontLeft`, and it is a landmark you can see on the part.
+
+**What reads that header is an open question, and earlier text here overstated it.** An
+earlier revision said the "machine UI reads material, stock, time estimate and thumbnail"
+from it. Bench session 2026-10-07 found **the Z1 has no panel of its own**, and nothing in
+Studio was seen to display any of the three: `Processing progress` lists the filename and
+progress only, and the wizard's `Run` summary (`docs/bench/2026-10-bench-day-1.md`, D0)
+shows the setup state — origin, probe, assists — not stock, tool or time. It showed
+`Remain 0m` for a file whose header says `TIME seconds=30`. So the header is *written* by
+Studio and its fields are real, but no display surface for them has been found, and the
+`CAM|id=` fallback question (#173) can only be settled by **running** a job with our id and
+seeing whether anything objects — not by reading a screen.
 
 ---
 

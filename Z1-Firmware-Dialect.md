@@ -1,10 +1,13 @@
 # The Z1's G-code dialect, from the firmware
 
-Status as of 2026-10-03. Every claim below is read from `MakeraInc/MakeraZ1Firmware`
+Status as of 2026-10-03, with a hardware-observation section added 2026-10-07 (**§11**). Every
+claim in §1–§10 is read from `MakeraInc/MakeraZ1Firmware`
 (`src/modules/communication/GcodeDispatch.cpp`, `utils/Gcode.cpp`, `robot/Robot.cpp`,
-`tools/atc/ATCHandler.cpp`) or counted in Makera's own sample corpus (#186). **None of it is
-verified on hardware.** Where the firmware and standard RS274/NGC disagree, the firmware is
-what runs, so this is what the parser (#174) and the emulator (#182) model.
+`tools/atc/ATCHandler.cpp`) or counted in Makera's own sample corpus (#186). **None of §1–§10 is
+verified on hardware — the firmware has not been run.** Where the firmware and standard RS274/NGC
+disagree, the firmware is what runs, so this is what the parser (#174) and the emulator (#182)
+model. §11 is the exception and says so: it is what a real machine was *seen to do*, and it is the
+only observed material in this document.
 
 **Provenance.** The firmware is a Smoothieware fork and `GPL-3.0`. This document records
 *behaviour* — interoperability facts — and quotes no code. Nothing here is copied from it.
@@ -237,4 +240,104 @@ Accessory codes with no geometric effect, all Carvera-era: `M106`/`M107` (fan), 
 
 - `ROUND_NEAR_HALF`, applied to every computed target, is defined outside the files read; the
   quantisation it applies is unknown. It does not affect the parser, which does not round.
-- Everything here is a reading of source. The firmware has **not been run**.
+- Everything in §1–§10 is a reading of source. The firmware has **not been run** — for what the
+  machine was actually seen to do, see §11, which is a separate and much smaller body of evidence.
+
+## 11. Observed on hardware, 2026-10-07
+
+**The only observed section of this document.** Everything above is a reading of the firmware's
+source; on 2026-10-07 a real Z1 (`Makera_Z1_010290`) was driven through Makera's own client and
+its command traffic was read.
+
+**Provenance, stated precisely, because it bounds what these facts are worth.** What follows is
+what *Studio's own MDI log displayed as sent and received* during a Machining Wizard run — **not a
+capture off the wire.** The commands are therefore certain to be what the client sent; the replies
+(`ok`, `Done ATC`, `[PRB:…]`) are as the client renders them, which is one level removed from the
+bytes. Nothing here comes from the firmware's source, and no code was read to produce it.
+
+### 11.1 §2's `M49x` macro, seen running
+
+§2 lists a manual tool change as a macro over `M490.1` (*wait for the operator*) and `M493.1`
+(*save the new tool length offset*) — read from source and never executed. Both halves of that were
+watched happening:
+
+| What §2 predicted from source | What the log shows |
+|---|---|
+| `M490.1` — **wait for the operator** | **`M490.1`**, and the operator dialog appeared exactly there |
+| `G53 G0 Z<clearance>`, `clearance_z` = **−3.0** | **`G53 G0 Z-3.000`**, repeatedly, across two separate operations |
+
+`M490.1` is the strongest single confirmation here: the machine stopped, and Studio put up *"Tool
+Change Required — Please change to: Tool T1(3.175 flat). Then press Confirm to continue."* A macro
+that blocks on an operator was, until now, only a reading of a source file.
+
+The same blocks also named the rest of the family — **`M492.3`, `M493.2 T0`, `M494.0`, `M494.2`,
+`M497.2`, `M497.4`** — sent as a group, each answered `ok`, closed by **`Done ATC`**. §2 gives
+roles to `M490.1` and `M493.1` only. The rest are **codes with no §2 role**: observed, and not
+explained. They are not guessed at here.
+
+### 11.2 Probing: `G38.2`, `[PRB:…]`, and `G10 L20`
+
+The wizard's auto-Z-probe ran this, verbatim:
+
+```
+G38.2 Z-108.000 F500.000
+[PRB:-118.400,-109.800,-65.135:1]
+G91 G0 Z1.000
+G38.2 Z-2.000 F100.000
+[PRB:-118.400,-109.800,-65.118:1]
+G10 L20 P0 Z0.000
+G91 G0 Z1.000
+```
+
+Three facts, none of them in §1–§10:
+
+- **A probe trigger is reported as `[PRB:x,y,z:n]`** — machine coordinates, and `:1`, which is
+  grbl's success flag. §10 records that the Z1 runs in **grbl mode**; this is that showing up in
+  traffic.
+- **The pattern is a fast approach (`F500`), a 1 mm retract, then a slow re-probe (`F100`)** — and
+  the two triggers landed **0.017 mm apart** (−65.135, −65.118). That is one point on an
+  unidentified surface, not a repeatability measurement, but it is the first probe figure this
+  machine has produced.
+- **`G10 L20 P0 Z0.000` sets the work coordinate system from the trigger.** Auto-Z-probe does not
+  merely measure — it **moves the machine's Z zero**. On this machine the G54 Z offset went
+  58.633 → **65.118**, exactly the probed Z, and the tool length offset was zeroed (−0.073 → 0.0)
+  in the same sequence.
+
+Note the code difference from §2: the tool-length-sensor path there is **`G38.6`**, while workpiece
+probing here is **`G38.2`**. Two different probes, two different codes.
+
+### 11.3 A mode family: `M331`, and one silent code
+
+Toggling the wizard's five "assist" switches sent these, each with Studio's own description:
+
+| Studio's description | Code |
+|---|---|
+| `turning auto bed cleaning mode on` | `M331.2` |
+| `turning auto blowing mode on` | `M331.1` |
+| `turning static electricity removal mode on` | `M331.4` |
+| `turning extend out mode on` | `M331` |
+| *(no description, and no `ok`)* | `M951` |
+
+**`M331` is a mode family with a decimal sub-index** — a shape nothing in §1–§10 has, and none of
+these codes appears in the source reading. Which switch maps to bare `M331` is **inferred by
+elimination, not observed**: four of the variants describe themselves, which leaves `M951` for the
+camera time-lapse and bare `M331` ("extend out") for the vacuum. **Toggling one at a time settles
+it**, and has not been done.
+
+`M951` also **answered nothing**, where every other command answered `ok`, with a seven-second gap
+to the next command. Unexplained.
+
+**This matters beyond curiosity.** `machine.ts` models the Z1's only accessory as **air
+(`M7`/`M9`)** and records the internal vacuum as Carvera-only. Studio's own wording says this
+machine has bed cleaning, blowing, static removal and "extend out" as four separable modes. **No
+`M7` or `M9` appears anywhere in the traffic read.**
+
+### 11.4 What §11 does not settle
+
+- **§2's `T1 M6` on an already-active tool** was not reached — the wizard's changes were to and
+  from the probe, never a no-op change. The source reading stands unverified on hardware.
+- **The roles of the `M49x` codes** beyond `M490.1` remain unread.
+- **Whether the assist modes persist across a power cycle** is unasked. All five were off before
+  the session and all five on after it.
+- **Nothing was captured off the wire.** A capture would make all of the above first-hand; the
+  client's own log is what made any of it visible at all.
