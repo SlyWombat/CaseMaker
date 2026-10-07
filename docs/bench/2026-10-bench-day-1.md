@@ -215,18 +215,46 @@ there). Decode each with a phone.
 (12 digits, **not** a valid UPC-A — its check digit would be 5, not 2; #212). Our post emits
 `id=<tool.id ?? 0>` (`post/z1.ts:150`); the `three-strokes.nc` fixture uses `id=0`.
 
-**Recorded:** _not yet run — per cutter: the symbology (QR / Code 128 / EAN / UPC…) and the exact
-decoded text, beside that cutter's A1 row. Flag any value equal to `112111313812`._
+**Recorded 2026-10-07 — ONE CUTTER. A7 is not complete.**
 
-| Cutter # (from A1) | Symbology (QR/Code 128/EAN/UPC…) | Exact decoded text | Equals `112111313812`? |
+**It is a QR code, and it says `C1-BIT-BALL-NOSE-1-4`.** That is a readable slug, not a number:
+not the 12-digit catalogue id, not a retail EAN/UPC, and not a URL. Label photo:
+`docs/bench/img/a7-makera-carvera-ball-nose-1-4-label.png`.
+
+Decoded offline from the photo — 24 independent successes across crop, scale and threshold variants,
+all returning the identical string, so this is not a single lucky misread. (OpenCV's
+`QRCodeDetector`; nothing was sent anywhere.)
+
+**Two caveats before this is generalised.**
+
+1. **The label is branded MAKERA CARVERA, not Z1.** This is a Carvera-line cutter, and the `C1-`
+   prefix may be that family's. Whether Z1-badged cutters use the same scheme is **untested** — a
+   Z1 cutter's label is the obvious next photograph.
+2. **One label proves one label.** A7 asks for every cutter; this settles the *symbology* question
+   and the *shape* of the payload, not the whole vocabulary.
+
+**What it means for #212.** The issue's three-way table ("catalogue id / retail barcode / URL") has
+a fourth answer it did not list: **a human-readable product slug**. Three consequences:
+
+- The 12-digit `id=112111313812` in `TopClamp.nc`'s header is **not** what the label carries, so the
+  slug→geometry mapping is still open — either `makera_library.db` is keyed by the slug, or there is
+  a mapping we have not seen. That is a desktop-build question (#181).
+- **The slug is parseable**, which #212's "prefill anything parseable from the decoded text" step can
+  actually use: `BALL-NOSE` is the cutter type and `1-4` reads as 1/4 in (6.35 mm). Worth confirming
+  against the cutter's measured geometry in A1 rather than assuming.
+- A QR of this size in a photograph is exactly what the browser's `BarcodeDetector` API is for, which
+  is what #212 already proposes. This does not change that design.
+
+| Cutter # (from A1) | Symbology | Exact decoded text | Equals `112111313812`? |
 |---|---|---|---|
-| | | | |
+| A1 not yet run | **QR** | `C1-BIT-BALL-NOSE-1-4` | no |
 | | | | |
 | | | | |
 | | | | |
 | | | | |
 
-**Goes to:** #212 — the tool inventory cannot be designed until it is known what the code encodes.
+**Goes to:** #212 — the symbology and payload shape are now known for one cutter; the remaining A7
+rows decide whether either generalises.
 
 ---
 
@@ -826,14 +854,25 @@ the bench to drive a soft-limit test is exactly what that rule is shaped to prev
 The capability that unblocks it is **`/Makera-Parity.md` §14.4 R10** — jog / DRO / MDI in the app —
 which is *refused until the bridge* and named there as gated on **#255** (`bridge: drive the Z1 from
 the desktop build — discover, identify, upload a verified .nc`), in milestone **#9, "Local build:
-what the browser cannot do."** Two things to know about that pointer:
+what the browser cannot do."** Three things to know about that pointer:
 
 - **#255 is the gate, not the delivery.** Its first pass excludes jog, DRO, MDI and the pendant by
   name — "and anything that moves the machine from the app without a file."
-- **R10 has no issue of its own.** Milestone **#4, "CNC-4: Bridge, camera, V-carve (deferred)"** is
-  what its title suggests a bridge issue would live in, and #255 calls out that it contains none.
+- **R10 needs no issue of its own — #255 already carries it.** Verified 2026-10-07 by reading #255:
+  it names R10 twice, once as that scope exclusion and once under *"What this unblocks when it
+  lands"* — "refused today *because* there is no bridge, with this as the named gate." An earlier
+  version of this block said R10 was un-filed and therefore un-pointable; that was true but
+  misleading, and it is withdrawn. Milestone **#4, "CNC-4: Bridge, camera, V-carve (deferred)"** is
+  where the title suggests a bridge issue would live, and #255 calls out that it contains none — but
+  R10 does not need one.
+- **The demand is on the record.** [#255's comment of 2026-10-07](https://github.com/SlyWombat/CaseMaker/issues/255#issuecomment-6047006144)
+  is the bench moment that parked this item written down where the refusal lives: the user at the
+  machine, motion needed, the bridge refusing by design, **no scope change proposed.**
 
-So until R10 is filed and built, C2 runs only when a person is standing at Studio's keyboard.
+And the item is **runnable without any of it.** `/Fabrication.md` §8 requires a person at the machine
+for motion in the first place, so remote motion was never C2's sanctioned path — and C2 tests the
+*machine*, not our software. Studio can drive the axes by hand. Waiting on #255 is a choice, not a
+constraint.
 
 **Do — X and Y only.** With Z at the top of its travel (`G53 G0 Z-1`; nothing on the bed can be in
 the way of a sideways move there), `G53 G0 X-200 Y-200`, hand near the stop. Did it get there? Then
