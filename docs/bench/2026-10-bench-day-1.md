@@ -1034,6 +1034,14 @@ Sketch: `docs/bench/img/D2-origin-axes.jpg` (or paste an ASCII sketch here)
 **Expected.** Compare with the simulation's "simulated time" — this calibrates
 `DISPLAY_RAPID_MM_MIN` (3000 mm/min, `src/workers/sim/session.ts:127`; #197).
 
+**Run it expecting the estimate to come in LOW (#281).** B9 read the controller's own rates, and the
+3000 assumption does not survive them: `default_seek_rate` is **2000**, `alpha_max_rate` and
+`beta_max_rate` cap X and Y at **1200**, `gamma_max_rate` caps Z at **600**, and `acceleration = 150`
+is not modelled at all. So a rapid is planned at roughly **1200 mm/min on X/Y**, not 3000, and every
+move is timed as if it reached that rate instantly. Both errors point the same way. **A stopwatch
+reading longer than the sheet's estimate is the expected result, not a fault** — record the ratio
+either way, since the whole point is that this is the measurement and the config is only a reading.
+
 **Recorded:** _not yet run — wall-clock seconds._
 
 | Field | Value |
@@ -1042,7 +1050,7 @@ Sketch: `docs/bench/img/D2-origin-axes.jpg` (or paste an ASCII sketch here)
 | Simulation's "simulated time" (s) | |
 | Ratio / difference | |
 
-**Goes to:** #197.
+**Goes to:** #197; the rapid assumption itself is **#281**.
 
 ### D4 — Air-run the default engrave job
 
