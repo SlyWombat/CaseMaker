@@ -751,6 +751,17 @@ Each is cheap, changes something already built or already scheduled, and needs n
   readback form whose entries flip a feeds row to `measured` with date and coupon id as its
   provenance. **So we should** make this a milestone — proposed **CNC-2.2 "Measured, not
   assumed"** — rather than another script.
+
+  **Filed as CNC-2.2 and tracked by #284. Status 2026-10-07: the exit above is built, and the
+  entry above is not met.** #248 shipped all three deliverables — the coupon job kind, the
+  scripted job → `.nc` path (closing #231 item 1) and the readback form — so M1's exit is
+  satisfied. But M1's entry is "**#209 done**", and #209 has not cut, so nothing has been
+  measured: all seven rows of `feeds.ts` still read `status: 'unmeasured'` and the
+  machine-written region is still empty. #284 exists so the milestone cannot be counted as
+  complete while its own test is unmet — the count is what was wrong, not the closure.
+  `scripts/feeds-readback.ts`'s own header puts it exactly: *"Nothing here measures anything:
+  it only applies a result a person recorded."*
+
 - **M2 — Restart from a step, as a generated file.** SC's start-from-line *"look[s] through the
   whole g-code file up to where you want to resume… what accessories were turned on, the power
   of a spindle or laser"*; IV Pro has resume carve; OF has Jump to Line and power-loss
@@ -765,6 +776,11 @@ Each is cheap, changes something already built or already scheduled, and needs n
   first real job is the first one that can stop. *Exit:* "Restart from this step" on any
   loaded program, writing `<file>-from-L<n>.nc` through the same generate → verify → simulate
   gate (#206), with a run-sheet addendum. **So we should** schedule it in CNC-2.2, not before.
+
+  **Built as #249 — and the same shape as M1 above.** The exit is a deliverable and it exists;
+  M2's entry is "*#209 — the first real job is the first one that can stop*", and no job has
+  stopped, so the restart file has never met a real interruption. **#284** tracks both halves of
+  that gap.
 - **M3 — A finish pass on floors and walls (stock-to-leave).** Y for TM, VC, CV (all tiers:
   *"Perform a finishing pass around the design to ensure clean and smooth edges after rough
   cutting"*, `notes/carveco.md` second pass), AD, LB; §4 above has had it as "planned" since
