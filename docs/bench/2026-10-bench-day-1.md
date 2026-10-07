@@ -817,8 +817,34 @@ session.)
 *Rewritten 2026-10-06 after B6. The question changed: B6 read the soft endstops off the machine, so
 this is no longer "what is the limit" — it is "can the limit be trusted."*
 
-**Do.** `G53 G0 X-200 Y-200` then `G53 G0 Z-100`, slowly, hand on the stop. Did it get there? Then
-jog each axis 0.5 mm at a time past it, toward the soft limit, and note what the controller does.
+**PARKED 2026-10-07 — blocked, not deferred.** The moves have to be typed into Studio's MDI *at the
+machine*, and the bench harness cannot send motion. That is deliberate rather than a gap: `tools/z1/`
+has no G-code passthrough, no jog and no MDI, and `Z1-Bridge-Protocol.md` §8 says the bridge "can
+upload a verified `.nc` and report status; it cannot move an axis on its own." Adding a passthrough at
+the bench to drive a soft-limit test is exactly what that rule is shaped to prevent.
+
+The capability that unblocks it is **`/Makera-Parity.md` §14.4 R10** — jog / DRO / MDI in the app —
+which is *refused until the bridge* and named there as gated on **#255** (`bridge: drive the Z1 from
+the desktop build — discover, identify, upload a verified .nc`), in milestone **#9, "Local build:
+what the browser cannot do."** Two things to know about that pointer:
+
+- **#255 is the gate, not the delivery.** Its first pass excludes jog, DRO, MDI and the pendant by
+  name — "and anything that moves the machine from the app without a file."
+- **R10 has no issue of its own.** Milestone **#4, "CNC-4: Bridge, camera, V-carve (deferred)"** is
+  what its title suggests a bridge issue would live in, and #255 calls out that it contains none.
+
+So until R10 is filed and built, C2 runs only when a person is standing at Studio's keyboard.
+
+**Do — X and Y only.** With Z at the top of its travel (`G53 G0 Z-1`; nothing on the bed can be in
+the way of a sideways move there), `G53 G0 X-200 Y-200`, hand near the stop. Did it get there? Then
+`G91` and step toward the limit in 5 mm bites, noting the MPos after each, until the axis stops making
+progress — and note what the console says when it does. Then `G90`.
+
+**Z is NOT run, on purpose (2026-10-07).** C2 as first written said `G53 G0 Z-100`, which assumes a
+bare bed. Z −100 is the **bottom of travel**, and the vise stays mounted, so the spindle nose would
+reach the vise long before the axis reached anything and the reading would be about the vise.
+Settling Z needs the vise off, or XY parked somewhere the vise is not — a separate trip, and no
+reason to disturb the setup for it.
 
 **Expected — measured, not read (B6, 2026-10-06).** `config-get sd` returned
 `soft_endstop.enable true`, `x_min -207.00`, `y_min -206.0`, `z_min -102.0`. So the controller holds
@@ -839,18 +865,19 @@ now says it is. But if the axis binds before −207, the usable travel is **less
 declares and the envelope should shrink rather than stay. Reading the config cannot tell the
 difference; only a move can.
 
-**Recorded:** _not yet run — the real limits._
+**Recorded:** _not yet run — blocked on R10 / #255, see above._
 
 | Field | X | Y | Z |
 |---|---|---|---|
-| Reached −200 / −200 / −100? (yes/no) | | | |
+| Reached −200 / −200 / −100? (yes/no) | | | **not run on purpose** |
 | Where the controller actually stopped (machine coords) | | | |
 | What it did at the limit — message / clean refusal / stall / nothing | | | |
 
 Notes:
 
-**Goes to:** `/Simulation.md` §9 item 7 — closes the −200 vs −207 question, and answers whether the
-refusal at −200 is conservative or merely round.
+**Goes to:** `/Simulation.md` §9 item 7 — closes the −200 vs −207 question for **X and Y only**, and
+answers whether the refusal at −200 is conservative or merely round there. **Z stays open**, and the
+soft limit that matters for Z (−102) is the one we cannot reach with the vise on the bed.
 
 ### C3 — Does the camera image follow the move?
 
