@@ -66,7 +66,7 @@ export function createDefaultProject(boardId = DEFAULT_BOARD_ID): Project {
   cloned.clonedFrom = board.id;
   delete cloned.source;
   return {
-    schemaVersion: 14,
+    schemaVersion: 15,
     id: newId('proj'),
     name: `${board.name} Case`,
     createdAt: now,

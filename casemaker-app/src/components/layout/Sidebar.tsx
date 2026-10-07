@@ -57,11 +57,20 @@ const BADGE_SECTION_IDS: SidebarSectionId[] = ['export', 'cnc-sim', 'cnc-engrave
  *  part so it keeps the Export section. */
 const INSERT_SECTION_IDS: SidebarSectionId[] = ['insert', 'export', 'cnc-sim', 'cnc-engrave'];
 
+/** Same idea for the bare-blank archetype (issue #280): the project IS the
+ *  blank, so there is no board, no shell and no ports — but it is the thing the
+ *  engrave editor drives, which is the whole point of the archetype. Identical
+ *  rail to the badge today; kept as its own constant so each archetype's rule
+ *  is named where it lives and the two can diverge without one edit silently
+ *  changing the other's rail. */
+const BLANK_SECTION_IDS: SidebarSectionId[] = ['export', 'cnc-sim', 'cnc-engrave'];
+
 /** The section ids the current archetype offers — the full list for a shell. */
 function sectionIdsFor(archetype: Archetype): SidebarSectionId[] | null {
   if (archetype === 'rack') return RACK_SECTION_IDS;
   if (archetype === 'badge') return BADGE_SECTION_IDS;
   if (archetype === 'insert') return INSERT_SECTION_IDS;
+  if (archetype === 'blank') return BLANK_SECTION_IDS;
   return null;
 }
 

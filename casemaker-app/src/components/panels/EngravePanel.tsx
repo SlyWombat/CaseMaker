@@ -25,6 +25,7 @@ import {
 } from '@/engine/import/outlineImport';
 import { newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
 import { BADGE_POCKET_KEEP_OUT_ID, badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
+import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import {
   defaultSacrificialSide,
   defaultSacrificialUnder,
@@ -327,6 +328,21 @@ export function EngravePanel(): JSX.Element {
     if (blank.pocket) upsertKeepOut(blank.pocket);
     else if (keepOuts.some((k) => k.id === BADGE_POCKET_KEEP_OUT_ID)) removeKeepOut(BADGE_POCKET_KEEP_OUT_ID);
     setBlankNotes(blank.notes);
+  }
+
+  // Issue #280 — the bare-blank archetype's twin of the badge button. A `case.blank` is the
+  // stock itself, so taking it across is dimensions only: the material is the user's answer and
+  // a blank cannot know it (#280's "a machine we have no profile for is never given another's
+  // numbers" rule, applied to the material). No void handling — a blank declares none.
+  const blankPart = useProjectStore((s) => s.project.case.blank);
+  const blankPartUsable = blankPart !== undefined && blankPart.enabled;
+  const [blankPartNotes, setBlankPartNotes] = useState<string[] | null>(null);
+
+  function useBlankStock(): void {
+    if (!blankPart) return;
+    const b = blankStockFor(blankPart);
+    setStock(b.stock, 'computed');
+    setBlankPartNotes(b.notes);
   }
   const errors = findings.filter((f) => f.severity === 'error');
   const blockedByFeeds = feeds !== null && !feeds.ok;
@@ -772,6 +788,31 @@ export function EngravePanel(): JSX.Element {
         <div data-testid="engrave-badge-notes">
           {blankNotes.map((note, i) => (
             <p key={i} style={MUTED} data-testid={`engrave-badge-note-${i}`}>
+              {note}
+            </p>
+          ))}
+        </div>
+      )}
+      {/* #280 — the blank archetype's twin of the badge button above. Dimensions only: a blank
+          does not know its material, so this leaves `stock.material` exactly as it is. */}
+      <button
+        type="button"
+        data-testid="engrave-stock-from-blank"
+        disabled={!blankPartUsable}
+        title={
+          blankPartUsable
+            ? 'Set the stock to the blank’s size. The material stays as you set it — a blank does not know what it is made of.'
+            : 'This project has no enabled blank, so there is no blank to take.'
+        }
+        style={{ width: '100%', padding: 4 }}
+        onClick={useBlankStock}
+      >
+        Use the blank
+      </button>
+      {blankPartNotes && (
+        <div data-testid="engrave-blank-notes">
+          {blankPartNotes.map((note, i) => (
+            <p key={i} style={MUTED} data-testid={`engrave-blank-note-${i}`}>
               {note}
             </p>
           ))}

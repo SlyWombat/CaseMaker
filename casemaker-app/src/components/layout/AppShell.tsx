@@ -5,10 +5,12 @@ import { Toolbar } from './Toolbar';
 import { PlacementBanner } from './PlacementBanner';
 import { FloatersBanner } from './FloatersBanner';
 import { WelcomeOverlay } from '../welcome/WelcomeOverlay';
+import { StartWizard } from '../welcome/StartWizard';
 import { ContextPanel } from './ContextPanel';
 import { Viewport } from '@/components/viewport/Viewport';
 import { useRebuildOnProjectChange } from '@/hooks/useRebuildOnProjectChange';
 import { undoProject, redoProject, useProjectStore } from '@/store/projectStore';
+import { useStartWizardStore } from '@/store/startWizardStore';
 
 function useUndoRedoShortcuts(): void {
   useEffect(() => {
@@ -32,6 +34,9 @@ export function AppShell() {
   useRebuildOnProjectChange();
   useUndoRedoShortcuts();
   const welcomeMode = useProjectStore((s) => s.welcomeMode);
+  // #280 — the wizard mounts HERE, not inside the welcome overlay: its step 2 creates the project,
+  // which flips `welcomeMode` off and unmounts the overlay the wizard was launched from.
+  const wizardOpen = useStartWizardStore((s) => s.open);
   // Issue #59 — board visualization cycle removed; no fallback banner needed.
   return (
     <div className="app-shell">
@@ -57,6 +62,7 @@ export function AppShell() {
             <ContextPanel />
           </>
         )}
+        {wizardOpen && <StartWizard />}
       </main>
       <StatusBar />
     </div>

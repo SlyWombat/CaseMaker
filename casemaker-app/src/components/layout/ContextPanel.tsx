@@ -58,9 +58,19 @@ export function ContextPanel() {
   const selection = useViewportStore((s) => s.selection);
   const activeSection = useViewportStore((s) => s.activeSidebarSection);
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [isCompact, setIsCompact] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth < 1366 : false,
+  );
+  // Issue #280 — the auto-open rule below fires on a *change* of input, so a panel that MOUNTS
+  // with a section already active (the startup wizard sets the section and then the shell swaps
+  // this panel in) would leave the drawer shut on a compact viewport: a highlighted rail button
+  // with nothing beside it, which is the #274 "no way in" complaint one step later. Start open in
+  // that case, by the same condition.
+  const [drawerOpen, setDrawerOpen] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.innerWidth < 1366 &&
+      (selection !== null || activeSection !== null),
   );
 
   useEffect(() => {

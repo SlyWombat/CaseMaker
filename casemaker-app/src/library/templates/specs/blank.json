@@ -1,0 +1,35 @@
+{
+  "id": "blank",
+  "order": 175,
+  "name": "Blank — just cut something",
+  "description": "A bare blank and nothing else: no enclosure, no board, no cavity, no lid. The project IS the stock you are about to machine. Engrave on it in the Engrave-text panel — text, shapes, drills, imported outlines — and simulate the result before the machine runs. For a two-colour badge with a magnet pocket, use the Name badge template instead.",
+  "estPrintMinutes": 25,
+  "projectName": "Blank",
+  "emptyBoard": {
+    "id": "blank-stock",
+    "name": "Blank (no host board)",
+    "x": 100,
+    "y": 60
+  },
+  "casePatch": {
+    "blank": {
+      "enabled": true,
+      "width": 100,
+      "height": 60,
+      "thickness": 12,
+      "cornerRadius": 3
+    },
+    "bosses": {
+      "enabled": false,
+      "insertType": "self-tap",
+      "outerDiameter": 5,
+      "holeDiameter": 2.5
+    },
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  },
+  "ports": "none"
+}

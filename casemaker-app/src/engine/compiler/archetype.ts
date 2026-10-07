@@ -12,13 +12,18 @@ import type { Project } from '@/types';
  *
  * `shell` is the default: the board-in-a-box path the other three bypass.
  */
-export type Archetype = 'rack' | 'stand' | 'badge' | 'insert' | 'shell';
+export type Archetype = 'rack' | 'stand' | 'badge' | 'insert' | 'blank' | 'shell';
 
 /**
  * The archetype a project compiles to. Precedence is rack > stand > badge >
- * insert > shell — each archetype is mutually exclusive by construction (only
- * one `enabled` flag is ever set by the UI), so the order only matters for a
- * hand-edited project that sets two.
+ * insert > blank > shell — each archetype is mutually exclusive by construction
+ * (only one `enabled` flag is ever set by the UI), so the order only matters for
+ * a hand-edited project that sets two.
+ *
+ * `blank` is checked LAST (#280) because it is the weakest claim on the
+ * project: "just cut something" carries no board, no cavity and no lid, so any
+ * richer shape a project also declares should win and the blank only takes
+ * over when it is the only flag set.
  *
  * Callers that need the stand's own fall-through — `buildStandNodes` returns
  * `null` when the board is not a finished enclosure module, and the compiler
@@ -37,5 +42,6 @@ export function derivedKind(project: Project | null | undefined): Archetype {
   if (c?.stand?.enabled) return 'stand';
   if (c?.badge?.enabled) return 'badge';
   if (c?.insert?.enabled) return 'insert';
+  if (c?.blank?.enabled) return 'blank';
   return 'shell';
 }

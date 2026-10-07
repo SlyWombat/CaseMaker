@@ -16,6 +16,7 @@ import { getBuiltinDisplay } from '@/library/displays';
 import { resolvePrinter, validateRackFit } from './rackFit';
 import { derivedKind } from './archetype';
 import { badgeParamsProblem } from '@/types/badge';
+import { blankParamsProblem } from '@/types/blank';
 
 /**
  * Issue #37 — cross-cutting validation that catches overlap, off-PCB, and
@@ -43,7 +44,9 @@ export type PlacementIssueKind =
   // Rack archetype: configuration problems (slot overflow, mount guidance).
   | 'rack-config'
   // Badge archetype (issue #167): the badge's own parameter constraints.
-  | 'badge-config';
+  | 'badge-config'
+  // Blank archetype (issue #280): the blank's own parameter constraints.
+  | 'blank-config';
 
 export interface PlacementIssue {
   severity: PlacementSeverity;
@@ -412,6 +415,22 @@ export function validatePlacements(project: Project): PlacementReport {
     const problem = badgeParamsProblem(project.case.badge);
     const issues: PlacementIssue[] = problem
       ? [{ severity: 'error', kind: 'badge-config', involves: ['badge'], message: problem }]
+      : [];
+    return {
+      issues,
+      errorCount: issues.filter((i) => i.severity === 'error').length,
+      warningCount: issues.filter((i) => i.severity === 'warning').length,
+    };
+  }
+
+  // Bare-blank archetype (issue #280): nothing below applies either — no board,
+  // no shell, no port. The only thing that can be wrong is the blank's own
+  // parameters, and a non-positive dimension falls through to the shell rather
+  // than reaching here.
+  if (kind === 'blank' && project.case.blank) {
+    const problem = blankParamsProblem(project.case.blank);
+    const issues: PlacementIssue[] = problem
+      ? [{ severity: 'error', kind: 'blank-config', involves: ['blank'], message: problem }]
       : [];
     return {
       issues,

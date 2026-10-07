@@ -176,6 +176,11 @@ export function hardwareForProject(project: Project): HardwareItem[] {
   // magnet datasheet, so nothing here would be honest to print.
   if (kind === 'badge') return items;
 
+  // ----- Bare blank (issue #280) --------------------------------------------
+  // One plate and nothing else: no bosses, no lid, no screws, no gasket. Like
+  // the badge, there is nothing here it would be honest to add.
+  if (kind === 'blank') return items;
+
   // ----- Screws into the bosses --------------------------------------------
   // Two independent retention paths share the same threaded boss/insert:
   //   (a) LID screws — when joint='screw-down': screw goes from the top

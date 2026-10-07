@@ -356,6 +356,20 @@ export const caseParamsSchema = z.object({
       ),
     })
     .optional(),
+  // Issue #280 — bare-blank archetype (types/blank.ts). Optional so legacy
+  // projects load unchanged (the v7 hinge precedent); absent/disabled = normal
+  // shell+lid box. A single `blank` node: one plate, no board, no cavity, no
+  // lid. Without this entry the field would be SILENTLY STRIPPED on load — a
+  // TypeScript type alone does not make it survive a round trip.
+  blank: z
+    .object({
+      enabled: z.boolean(),
+      width: z.number().positive(),
+      height: z.number().positive(),
+      thickness: z.number().positive(),
+      cornerRadius: z.number().nonnegative(),
+    })
+    .optional(),
 });
 
 const portPlacementSchema = z.object({
@@ -633,6 +647,14 @@ const projectV14Schema = projectV13Schema.extend({
   printer: printerVolumeSchema.optional(),
 });
 
+// Issue #280 — v15 adds the bare-blank archetype. Purely additive: `case.blank`
+// is optional (it lives on `caseParamsSchema`, which every version extends) and
+// absent on every project saved before it, so the transform is a version bump
+// with no field rewriting.
+const projectV15Schema = projectV14Schema.extend({
+  schemaVersion: z.literal(15),
+});
+
 export const projectSchema = z
   .union([
     projectV1Schema,
@@ -649,12 +671,13 @@ export const projectSchema = z
     projectV12Schema,
     projectV13Schema,
     projectV14Schema,
+    projectV15Schema,
   ])
   .transform((p) => {
     if (p.schemaVersion === 1) {
       return {
         ...p,
-        schemaVersion: 14 as const,
+        schemaVersion: 15 as const,
         customFonts: [],
         hats: [],
         customHats: [],
@@ -669,7 +692,7 @@ export const projectSchema = z
     if (p.schemaVersion === 2) {
       return {
         ...p,
-        schemaVersion: 14 as const,
+        schemaVersion: 15 as const,
         customFonts: [],
         mountingFeatures: [],
         display: null,
@@ -682,7 +705,7 @@ export const projectSchema = z
     if (p.schemaVersion === 3) {
       return {
         ...p,
-        schemaVersion: 14 as const,
+        schemaVersion: 15 as const,
         customFonts: [],
         fanMounts: [],
         textLabels: [],
@@ -692,7 +715,7 @@ export const projectSchema = z
     if (p.schemaVersion === 4) {
       return {
         ...p,
-        schemaVersion: 14 as const,
+        schemaVersion: 15 as const,
         customFonts: [],
         antennas: [],
       };
@@ -700,47 +723,53 @@ export const projectSchema = z
     if (p.schemaVersion === 5) {
       // mountingFeatures items already have mountClass filled by the
       // mountingFeatureSchema default at parse time; just stamp the version.
-      return { ...p, schemaVersion: 14 as const, customFonts: [] };
+      return { ...p, schemaVersion: 15 as const, customFonts: [] };
     }
     if (p.schemaVersion === 6) {
       // v6 → v7 is a pure version bump — `hinge` is optional and absent on
       // legacy projects, so the parsed object already has the right shape.
-      return { ...p, schemaVersion: 14 as const, customFonts: [] };
+      return { ...p, schemaVersion: 15 as const, customFonts: [] };
     }
     if (p.schemaVersion === 7) {
-      return { ...p, schemaVersion: 14 as const, customFonts: [] };
+      return { ...p, schemaVersion: 15 as const, customFonts: [] };
     }
     if (p.schemaVersion === 8) {
       // v8 → v9 is a pure version bump — `magnetPockets` is optional and
       // absent on legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 14 as const };
+      return { ...p, schemaVersion: 15 as const };
     }
     if (p.schemaVersion === 9) {
       // v9 → v10 is a pure version bump — the `fit` fields are optional and
       // absent on legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 14 as const };
+      return { ...p, schemaVersion: 15 as const };
     }
     if (p.schemaVersion === 10) {
       // v10 → v11 is a pure version bump — `badge` is optional and absent on
       // legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 14 as const };
+      return { ...p, schemaVersion: 15 as const };
     }
     if (p.schemaVersion === 11) {
       // v11 → v12 is a pure version bump — `insert` is optional and absent on
       // legacy projects, so the parsed object already has the shape.
-      return { ...p, schemaVersion: 14 as const };
+      return { ...p, schemaVersion: 15 as const };
     }
     if (p.schemaVersion === 12) {
-      // v12 → v13 → v14 are pure version bumps — `seal.mode` and the hoisted
-      // `printer` are both optional and absent on legacy projects, so the
+      // v12 → v15 are pure version bumps — `seal.mode`, the hoisted `printer`
+      // and `blank` are all optional and absent on legacy projects, so the
       // parsed object already has the shape.
-      return { ...p, schemaVersion: 14 as const };
+      return { ...p, schemaVersion: 15 as const };
     }
     if (p.schemaVersion === 13) {
-      // v13 → v14 is a pure version bump: `printer` is optional. A project
-      // written before the move still carries its bed on `case.rack.printer`,
-      // and `resolvePrinter` reads both, so no field is rewritten here.
-      return { ...p, schemaVersion: 14 as const };
+      // v13 → v15 is a pure version bump: `printer` and `blank` are optional.
+      // A project written before the move still carries its bed on
+      // `case.rack.printer`, and `resolvePrinter` reads both, so no field is
+      // rewritten here.
+      return { ...p, schemaVersion: 15 as const };
+    }
+    if (p.schemaVersion === 14) {
+      // v14 → v15 is a pure version bump — `blank` is optional and absent on
+      // every project saved before the archetype existed.
+      return { ...p, schemaVersion: 15 as const };
     }
     return p;
   });

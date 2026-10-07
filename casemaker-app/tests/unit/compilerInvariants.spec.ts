@@ -115,15 +115,28 @@ function isInsert(build: () => Project): boolean {
   return build().case.insert?.enabled === true;
 }
 
+/** The bare-blank archetype (#280) is one plate and nothing else — no board,
+ * no cavity, no lid; blank.spec.ts owns its geometry. Invariant 12 pins the
+ * node set here alongside the other archetypes. */
+function isBlank(build: () => Project): boolean {
+  return build().case.blank?.enabled === true;
+}
+
 describe('compiler invariants (#58) — matrix of boards × templates', () => {
   const allCases = projectsToTest();
   const cases = allCases.filter(
-    (c) => !isStand(c.build) && !isRack(c.build) && !isBadge(c.build) && !isInsert(c.build),
+    (c) =>
+      !isStand(c.build) &&
+      !isRack(c.build) &&
+      !isBadge(c.build) &&
+      !isInsert(c.build) &&
+      !isBlank(c.build),
   );
   const standCases = allCases.filter((c) => isStand(c.build));
   const rackCases = allCases.filter((c) => isRack(c.build));
   const badgeCases = allCases.filter((c) => isBadge(c.build));
   const insertCases = allCases.filter((c) => isInsert(c.build));
+  const blankCases = allCases.filter((c) => isBlank(c.build));
 
   describe('Invariant 1: BuildPlan emits at LEAST shell + lid; optionally extra named parts', () => {
     // Some templates legitimately add extra top-level nodes:
@@ -317,6 +330,27 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
           // The plate is extruded from z = 0 — it lies on the bed.
           expect(bb.min[2]).toBeGreaterThanOrEqual(-0.01);
           expect(bb.min[2]).toBeLessThanOrEqual(0.01);
+        }
+      });
+    }
+  });
+
+  // Bare-blank archetype (#280): one plate, centred on the XY origin, grounded
+  // on the bed. The centring is the contract `fromBlank.ts` relies on to place
+  // the job's stock, so it is pinned here rather than only in blank.spec.ts.
+  describe('Invariant 12: bare-blank archetype emits one centred grounded plate', () => {
+    for (const c of blankCases) {
+      it(`${c.label}: blank plate well-formed, centred and grounded`, () => {
+        const plan = compileProject(c.build());
+        expect(plan.nodes.map((n) => n.id)).toEqual(['blank']);
+        for (const n of plan.nodes) {
+          assertWellFormed(n.op, `${c.label} ${n.id}`);
+          const bb = aabbOfOp(n.op)!;
+          expect(bb.min[2]).toBeGreaterThanOrEqual(-0.01);
+          expect(bb.min[2]).toBeLessThanOrEqual(0.01);
+          // Centred on the origin: the XY box is symmetric about (0, 0).
+          expect(bb.min[0] + bb.max[0]).toBeCloseTo(0, 6);
+          expect(bb.min[1] + bb.max[1]).toBeCloseTo(0, 6);
         }
       });
     }

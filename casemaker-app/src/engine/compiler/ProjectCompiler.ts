@@ -35,6 +35,7 @@ import {
 } from './shellSplit';
 import { buildBadgeNodes } from './badge';
 import { buildInsertNodes } from './insert';
+import { buildBlankNodes } from './blank';
 import { derivedKind } from './archetype';
 import { validatePlacements } from './placementValidator';
 import { getBuiltinHat } from '@/library/hats';
@@ -123,6 +124,20 @@ export function compileProject(project: Project): BuildPlan {
     if (insertNodes) {
       return {
         nodes: insertNodes,
+        placementReport: validatePlacements(project),
+        smartCutoutDecisions: [],
+      };
+    }
+  }
+
+  // Bare-blank archetype (issue #280): the whole project is the blank — one
+  // part, no cavity, no lid, no board. Like the badge, an unbuildable parameter
+  // set falls through rather than emptying the viewport.
+  if (kind === 'blank' && caseParams.blank) {
+    const blankNodes = buildBlankNodes(caseParams.blank);
+    if (blankNodes) {
+      return {
+        nodes: blankNodes,
         placementReport: validatePlacements(project),
         smartCutoutDecisions: [],
       };

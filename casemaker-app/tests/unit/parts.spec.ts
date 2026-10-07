@@ -162,6 +162,16 @@ describe('Part registry (#120)', () => {
     }
   });
 
+  // Issue #280 — the bare blank is a plain slab: it prints AS MODELLED, either face up, so it
+  // must NOT be in the flip set (the set is asserted exactly above).
+  it('the blank prints as modelled, with no flip and no invented supports (#280)', () => {
+    expect(PRINT_FLIP_NODE_IDS).not.toContain('blank');
+    const blank = partForId('blank');
+    expect(blank.printOrientation.flipForPrint).toBe(false);
+    expect(blank.supports).toBe('none');
+    expect(blank.displayName).toBe('Blank');
+  });
+
   it('suggests walls/infill only where the part is structural (#154)', () => {
     const shelf = partForId('rack-shelf-0');
     expect(shelf.walls).toBeGreaterThan(0);

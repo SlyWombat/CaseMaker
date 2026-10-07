@@ -203,6 +203,9 @@ const PRINT_TABLE: Record<string, PrintMeta> = {
         'The exported file already comes this way up — drop it straight in. Print the BOTTOM colour separately and bond the two at the flat face.',
     },
   ),
+  // Issue #280 — the bare blank. It is a plain slab with no pocket and no
+  // colour split, so it prints as-modelled either way up; nothing to flip.
+  blank: flat('Print flat — a plain slab, so face up or down is the same part'),
 };
 
 /** Id families (rack accessories, latch arms/pins, bumpers). None of these
@@ -377,6 +380,9 @@ function describePart(
       material: 'rigid',
       category: 'case',
     };
+  }
+  if (id === 'blank') {
+    return { displayName: 'Blank', material: 'rigid', category: 'case' };
   }
   if (id.startsWith('latch-arm-')) {
     const suffix = id.slice('latch-arm-'.length);

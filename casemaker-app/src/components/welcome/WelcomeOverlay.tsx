@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProjectStore, clearHistory } from '@/store/projectStore';
 import { useLibraryStore, refreshStaleSources, type ImportResult } from '@/store/libraryStore';
+import { useStartWizardStore } from '@/store/startWizardStore';
 import { listBoards, type RegisteredBoard } from '@/library/registry';
 import {
   listTemplates,
@@ -75,6 +76,7 @@ export function WelcomeOverlay() {
   const addLocalTemplate = useLibraryStore((s) => s.addLocalTemplate);
   const removeLocalBoard = useLibraryStore((s) => s.removeLocalBoard);
   const exportLocalBoard = useLibraryStore((s) => s.exportLocalBoard);
+  const openWizard = useStartWizardStore((s) => s.openWizard);
 
   const [search, setSearch] = useState('');
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
@@ -218,6 +220,17 @@ export function WelcomeOverlay() {
             </p>
           </div>
           <div className="wb-header__actions">
+            {/* #274 / #280 — the way IN. Every card on this screen creates a project first, so a
+                cutting job with no enclosure had no door: the engrave and simulate panels are
+                sidebar sections, and a sidebar only exists once a project does. */}
+            <button
+              className="wb-btn wb-btn--primary"
+              onClick={openWizard}
+              data-testid="welcome-start-cnc"
+              title="Check for a machine, pick what you are making, then set up the cut"
+            >
+              🪚 Set up a cutting job…
+            </button>
             <button
               className={`wb-btn wb-btn--ghost ${sourcesOpen ? 'wb-btn--toggled' : ''}`}
               onClick={() => setSourcesOpen((v) => !v)}

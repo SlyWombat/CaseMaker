@@ -292,14 +292,14 @@ describe('Issue #117 — clamshell seal mode', () => {
     delete (legacyJson.case as { seal?: unknown }).seal;
 
     const migrated = parseProject(JSON.stringify(legacyJson));
-    expect(migrated.schemaVersion).toBe(14);
+    expect(migrated.schemaVersion).toBe(15);
     expect(migrated.case.seal?.mode).toBeUndefined();
     expect(lidIsRecessed(migrated.case)).toBe(true);
     expect(isClamshell(migrated.case)).toBe(false);
 
     // A clamshell project keeps its mode through a save/load cycle.
     const roundTripped = parseProject(serializeProject(makeProject(clamshellCase())));
-    expect(roundTripped.schemaVersion).toBe(14);
+    expect(roundTripped.schemaVersion).toBe(15);
     expect(roundTripped.case.seal?.mode).toBe('clamshell');
     expect(lidCavityHeight(roundTripped.case)).toBe(CLAMSHELL_MIN_CAVITY);
   });

@@ -97,12 +97,13 @@ function CaseMeshes() {
   const shellRender = useViewportStore((s) => s.shellRender);
   const hiddenParts = useViewportStore((s) => s.hiddenParts);
   const latches = useProjectStore((s) => s.project.case.latches);
-  // A rack has no host PCB, and neither does a badge. Those archetypes replace
-  // the case/lid pipeline entirely, but a project still carries a board, so the
-  // placeholder PCB and its HATs kept rendering — a green board sitting inside
-  // the rack, part of nothing and printed by nothing.
+  // A rack has no host PCB, and neither does a badge or a bare blank. Those
+  // archetypes replace the case/lid pipeline entirely, but a project still
+  // carries a board, so the placeholder PCB and its HATs kept rendering — a
+  // green board sitting inside the rack, part of nothing and printed by
+  // nothing.
   const archetype = useProjectStore((s) => derivedKind(s.project));
-  const noHostBoard = archetype === 'rack' || archetype === 'badge';
+  const noHostBoard = archetype === 'rack' || archetype === 'badge' || archetype === 'blank';
   // Subscribe to the Map ref; derive ids in the body. See PartsMenu for the
   // explanation of the Zustand `?? []` selector trap.
   const nodes = useJobStore((s) => s.nodes);

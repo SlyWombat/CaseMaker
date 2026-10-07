@@ -3,6 +3,7 @@ import type { SnapCatch, FitVariant } from './snap';
 import type { RackParams } from './rack';
 import type { BadgeParams } from './badge';
 import type { InsertParams } from './insert';
+import type { BlankParams } from './blank';
 
 /**
  * Issue #153 — `FitVariant` lives with the snap types (`types/snap.ts`)
@@ -430,6 +431,17 @@ export interface CaseParameters {
    * non-positive plate dimension yields no geometry at all.
    */
   insert?: InsertParams;
+  /**
+   * Issue #280 — the bare-blank archetype (see types/blank.ts). When enabled
+   * the project compiles to a single BLANK node — one plate, no board, no
+   * shell, no cavity, no lid — the part the Engrave panel drives. It is the
+   * weakest archetype claim, so it is checked LAST: a project that also sets
+   * `badge`/`insert`/`stand`/`rack` builds that richer shape instead. Like
+   * `rack` and `badge` it needs no board data (the template uses
+   * `emptyBoard`); unlike `insert` it has no items to place, so a
+   * non-positive dimension is the only way it yields no geometry.
+   */
+  blank?: BlankParams;
   /**
    * Issue #148 — offer a bolted split of the case SHELL when it is too big for
    * the project's bed. Absent/false means nothing is built: the split costs two
