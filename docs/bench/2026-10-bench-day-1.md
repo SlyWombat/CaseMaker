@@ -563,12 +563,18 @@ the shipped defaults, and it moved *several* keys together: both anchors, `toolr
 that `machine.ts` describes a **stock Z1** and this machine is not one. **#279** is that question, now
 with the full table to decide on rather than one number.
 
-**Keys absent from `/sd/config.txt` are not unset, and cannot be read at all.** Every
-`alpha_*`/`beta_*`/`gamma_*` axis key answers *not in config* — because `/sd/config.txt` is an
-override file, and everything it omits comes from the firmware's compiled-in defaults. The `firm`
-source that would give those is **answered with silence** on this machine (see `Z1-Bridge-Protocol.md`
-§5). So machine travel limits, steps/mm and homing rates remain **unread, and cannot be read over
-this channel.**
+**Keys absent from `/sd/config.txt` are not unset, and cannot be read at all.** A key the file omits
+falls through to the firmware's compiled-in default, and the `firm` source that would give that is
+**answered with silence** on this machine (see `Z1-Bridge-Protocol.md` §5). So machine travel limits,
+steps/mm and homing rates remain **unread, and cannot be read over this channel.**
+
+> **CORRECTED 2026-10-07 (bench B9).** This paragraph read *"Every `alpha_*`/`beta_*`/`gamma_*` axis
+> key answers not in config"*, and that is **false**. A full sweep of the firmware's own key list
+> found three of them **do** answer: `alpha_max_rate = 1200.0`, `beta_max_rate = 1200.0`,
+> `gamma_max_rate = 600.0` — the vendor put them in `/sd/config.txt`. The readable/unreadable split
+> is **per key, not per group**, and the group-shaped claim was an over-generalisation from the pin
+> and travel keys, which genuinely are absent. `alpha_steps_per_mm`, `alpha_min_endstop`,
+> `alpha_max_travel` and the rest still answer *not in config*.
 
 **Goes to:** `Z1.toolChange.clearanceZ` — **now −3.0** in `src/engine/cnc/machine.ts`, pinned by
 `cncMachine.spec.ts`; **#276 closed**. `Z1.anchor1` is **left at the shipped default** with the
@@ -654,6 +660,110 @@ wanted: the config question this was opened for was closed by `config-get sd <ke
 is the file that is *missing* the compiled-in defaults, not the file that holds them.
 
 The full sequence is in `Z1-Bridge-Protocol.md` §5, "The framed download, as the Studio client does it".
+
+### B9 — The whole of `/sd/config.txt`, key by key (added 2026-10-07)
+
+*Read-only, no motion. The file cannot be opened — `cat` refuses every path on this build (B7) and no
+download path is implemented (§5) — so it was **reconstructed**: every key the firmware's shipped
+`configZ1.default` names, asked for one at a time with `config-get sd <key>`.*
+
+**`wifi.*` was skipped on purpose.** `/sd/config.txt` is exactly the kind of file that holds an SSID
+and a password, and this record is committed. Two keys went unasked for that reason and are recorded
+as unasked, not as absent.
+
+**72 keys answer. 162 answer `not in config`. Zero failed any other way** — no timeouts, no unparsed
+replies — so this is the complete picture rather than a partial one. Full record:
+`docs/bench/2026-10-07-config-sweep.json`.
+
+**Read it as a calibration, not a specification.** The machine is a stock Z1 whose card file has been
+filled in; the ~162 keys it omits fall through to firmware defaults we cannot reach.
+
+| Group | In the file |
+|---|---|
+| `coordinate.*` | 17 |
+| `atc.*` | 13 |
+| `laser_module_*` | 7 |
+| `temperatureswitch.*` | 5 |
+| `zprobe.*` | 5 |
+| `soft_endstop.*` | 4 |
+| `delta_*`, `epsilon_*` | 4 |
+| `alpha_/beta_/gamma_max_rate` | 3 |
+| `power.*`, `spindle.*`, `switch.*` | 6 |
+| single keys | 8 |
+
+#### Against the shipped default: 16 real changes, and the file is a subset
+
+The sweep is only half the evidence. Every value was compared with the firmware's shipped
+`configZ1.default` (233 keys), which turns "what does the file say" into **"what did the vendor
+change."** The answer is unusually clean:
+
+- **0 keys in the file that are not in the shipped default.** The file is a strict subset.
+- **54 keys identical** to the shipped default — written in, but nothing was changed.
+- **18 differ — of which 2 are cosmetic** (`default_seek_rate 2000 → 2000.0`,
+  `temperature_control.spindle.max_temp 70 → 70.0`; same number, a decimal point added).
+
+So **16 substantive calibrations**, and they are worth reading as a group:
+
+| Key | Shipped | This machine | |
+|---|---|---|---|
+| `coordinate.worksize_x` | **300.0** | **200.0** | the Carvera's bed, overridden |
+| `coordinate.worksize_y` | 200.0 | 200.0 | *unchanged* |
+| `coordinate.anchor1_x` / `_y` | −192.4 / −194.3 | −190.89 / −193.83 | B6 |
+| `coordinate.clearance_z` | −1.0 | −3.0 | B6, C1 |
+| `coordinate.rotation_offset_x/y/z` | 12.0 / 85.5 / 23.0 | −7.5 / 69.0 / 17.0 | all three, the rotary |
+| `coordinate.toolrack_offset_x` / `_y` | 48.78 / 179.74 | 48.8 / 181 | |
+| `atc.action_mm` | 1.6 | 1.7 | |
+| `soft_endstop.enable` | **false** | **true** | B2 |
+| `soft_endstop.x_min` | −206.0 | −207.00 | B2 |
+| `spindle.control_smoothing` | 0.1 | 2.5 | |
+| `temperatureswitch.spindle.threshold_temp` | 35.0 | 60.0 | |
+| `temperatureswitch.spindle.cooldown_power_step` | 10.0 | 2.0 | |
+| `sd_ok` | false | true | |
+
+**`worksize_x` is the one to look at.** The shipped default carries **300**, which is not a Z1
+number — it is the family the firmware descends from, and the vendor's own comment already calls the
+controller CARVERA. So the Z1's declared 200 mm is not inherited, it is **chosen**, keyed in on this
+machine; `worksize_y` was already 200 and needed no change. That is a strong argument that the 200 in
+`machine.ts`'s envelope is the vendor's real figure rather than a rounded profile number — and it
+still says nothing about what the axis does past it, which is C2.
+
+**Two of these were already in `machine.ts` as shipped values and are now measured**:
+`clearance_z` (B6) and `anchor1` (B6, #279).
+
+**A trap to avoid.** The file carries 7 `laser_module_*` keys — and all 7 are **identical to the
+shipped default**. They are inherited stock config, not evidence that a laser is fitted.
+`capabilities.laser: false` stands, and this sweep neither supports nor contradicts it.
+
+**What it confirms.**
+
+- `maxCutFeed: 1200` in `machine.ts` lands exactly on `alpha_max_rate` / `beta_max_rate = 1200.0`.
+- `RotaryProfile`'s `maxRate: 3600` and `acceleration: 360` are the file's `delta_max_rate` and
+  `delta_acceleration`, digit for digit. Two values that were "shipped default" now have a read
+  behind them.
+- The declared work area is the machine's own: `coordinate.worksize_x` / `_y` = 200.0 / 200.0.
+
+**What is new.**
+
+- `zprobe.fast_feedrate = 5`, `slow_feedrate = 1.5`, `return_feedrate = 20`, `probe_height = 2`,
+  `max_z = 100`. C4 and C5 both probe; these are the rates the machine will actually use, and until
+  now nothing in the repo held them.
+- `coordinate.anchor_length = 100.0`, `anchor_width = 15.0` — the anchor bracket's own size, never
+  read before.
+- Motion timing: `acceleration = 150`, `default_feed_rate = 1000`, `default_seek_rate = 2000`,
+  and the three `*_max_rate`. **D3 times an air run against the simulator's prediction, and this is
+  the first evidence for that model.** `MillProfile` has no X/Y/Z rate or acceleration field to put
+  them in — `maxCutFeed` is a *ceiling on what we ask for*, not the machine's own limit — so that is
+  a decision, not a gap to fill quietly.
+- `spindle.default_rpm = 10000` against the profile's `maxRpm: 13000`. Not a contradiction —
+  a default is not a maximum — but 13000 still has **no read behind it**, and the file's
+  `spindle.*` group does not carry a maximum.
+
+**What it does not settle.** Steps/mm, homing rates, endstop pins and `alpha_max_travel` are all
+absent from the file, so they stay unreachable (see the corrected note in B6). Travel limits remain
+unread for the same reason — which is what C2 is for.
+
+**Goes to:** `docs/bench/2026-10-07-config-sweep.json`; the `alpha_*`/`beta_*`/`gamma_*` correction in
+B6; `Z1-Bridge-Protocol.md` §9.
 
 ---
 
