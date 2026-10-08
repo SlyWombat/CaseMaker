@@ -11,6 +11,10 @@ import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobS
 import { keepOutLimit, keepOutMembrane } from '@/engine/cnc/engrave/partPlan';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { buildRunSheet, type RunSheet } from '@/engine/cnc/engrave/runSheet';
+import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
+import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
+import { useRunRecordStore } from '@/store/runRecordStore';
+import { openTextFile } from '@/utils/openTextFile';
 import { feedsFor, type CutParams } from '@/engine/cnc/feeds';
 import { MATERIAL_OPTIONS } from '@/engine/cnc/engrave/setupFlow';
 import {
@@ -363,6 +367,11 @@ export function EngravePanel(): JSX.Element {
   const [sheet, setSheet] = useState<RunSheet | null>(null);
   // The guided job setup (#254) is a path into this panel, not a gate in front of it.
   const [setupOpen, setSetupOpen] = useState(false);
+  // #277 — the last measured run of THIS job's program, out of the record files this browser has
+  // been handed (the panel's own "Open run record…", plus whatever the readback committed).
+  const importedRecords = useRunRecordStore((s) => s.imported);
+  const [recordMessage, setRecordMessage] = useState<string | null>(null);
+  const lastMeasured = lastTimedRun(job.name, allRuns(importedRecords));
   const runSheetReady = run.generated !== null && run.generated.verify !== null && run.generated.nc !== null;
   const runSheetBlocked = run.staleSince !== null;
 
@@ -456,7 +465,44 @@ export function EngravePanel(): JSX.Element {
     // BOTH files, through the one helper that names them (#207, #244): the run sheet's dry run
     // sends the operator to `<job>-frame.nc`, so the frame has to be written here or §6 is a
     // dead step. The frame is the verified generate output — never re-derived (#244).
-    await saveEngraveProgram(generated.nc, generated.frameNc, job.name);
+    //
+    // #277 — and the run record that goes with them, `buildRunRecord`'s own file: the §9 rows as
+    // data with the measured half blank. The app does not drive the machine (decision 10), so it
+    // cannot know a wall clock or a measured floor depth, and it writes `null` for both rather
+    // than a guess dressed as a reading.
+    //
+    // The record reads §9 off `toPartPlan`, which typesets every label — so the main thread's font
+    // cache has to be seeded first, exactly as `openRunSheet` does above (#180). The two `.nc`s do
+    // not need it, but they are written in the same breath.
+    await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
+    await saveEngraveProgram(
+      generated.nc,
+      generated.frameNc,
+      job.name,
+      serializeRunRecord(buildRunRecord(job, generated)),
+    );
+  }
+
+  /**
+   * #277 — open a filled run record and keep it for this browser. The same `parseRunRecord` the
+   * readback script uses, so the panel and the script accept and refuse exactly the same files; a
+   * record whose readings carry no date is refused here with the reason the script would print.
+   */
+  async function openRunRecord(): Promise<void> {
+    const file = await openTextFile({ description: 'Run record', extensions: ['.json'] });
+    if (!file) return;
+    const result = useRunRecordStore.getState().openText(file.text);
+    if (!result.ok) {
+      setRecordMessage(`${file.name} was not opened — ${result.reason}`);
+      return;
+    }
+    // A record with nothing measured in it is a legitimate file — it is the one Save writes — but
+    // saying "cut null" would read as a bug rather than as "you have not filled this in yet".
+    setRecordMessage(
+      isMeasuredRun(result.run)
+        ? `Opened the record for ${result.run.ncFile}, cut ${result.run.cutOn}.`
+        : `Opened the record for ${result.run.ncFile} — nothing measured in it yet.`,
+    );
   }
 
   function saveAsMyVise(source: ViseParams['source']): void {
@@ -1398,6 +1444,18 @@ export function EngravePanel(): JSX.Element {
           <>
             <div style={{ marginTop: 6 }} data-testid="engrave-run-rows">
               <RunRow testid="engrave-run-toolpath" state={rowToolpath} text={rowToolpathText} />
+              {/* #277 — what the last measured run of this program actually took, from a record
+                  file a person filled in. It sits BESIDE the estimate, never in place of it: the
+                  `~` above is still the planning figure, and this is a reading with a date. */}
+              {lastMeasured && lastMeasured.minutes !== null && (
+                <p
+                  data-testid="engrave-last-measured"
+                  style={{ margin: '2px 0 4px 18px', fontSize: 11, color: '#9aa4b0', lineHeight: 1.45 }}
+                >
+                  Last measured run: {formatDuration(lastMeasured.minutes * 60)} on {lastMeasured.cutOn} — a
+                  bench reading, not the estimate above.
+                </p>
+              )}
               <RunRow testid="engrave-run-verified" state={rowVerified} text={rowVerifiedText} />
               <RunRow testid="engrave-run-simulated" state={rowSimulated} text={rowSimulatedText} />
               {simCoverage.length > 0 && (
@@ -1477,6 +1535,24 @@ export function EngravePanel(): JSX.Element {
               Run sheet…
             </button>
           </>
+        )}
+
+        {/* #277 — the record a previous run of this job left beside its `.nc`, brought back in.
+            Offered whether or not the job on screen has generated: it is about a run that already
+            happened, and the estimate's "last measured" line is what it feeds. */}
+        <button
+          type="button"
+          data-testid="engrave-open-record"
+          title="Open the run record saved beside a previous run's .nc, and show its measured wall clock beside the estimate."
+          style={{ width: '100%', padding: 7, marginTop: 6 }}
+          onClick={() => void openRunRecord()}
+        >
+          Open run record…
+        </button>
+        {recordMessage !== null && (
+          <p style={MUTED} data-testid="engrave-record-message">
+            {recordMessage}
+          </p>
         )}
       </div>
 

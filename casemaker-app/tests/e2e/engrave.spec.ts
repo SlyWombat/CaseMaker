@@ -6,7 +6,7 @@
 // never pixel colours.
 
 import { readFileSync } from 'node:fs';
-import type { Page } from '@playwright/test';
+import type { Download, Page } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
 
 /** Load a board (which shows the sidebar) and open the Engrave panel on the deterministic job. */
@@ -167,16 +167,18 @@ test('the run sheet opens for a verified job, names the saved file, and prints w
   await page.getByTestId('engrave-ack').check();
   await expect(page.getByTestId('engrave-run-sheet')).toBeEnabled();
 
-  // Save writes BOTH files (#273): the job, then the frame beside it. Awaiting only the first
-  // download is what let the frame go missing unnoticed.
+  // Save writes THREE files (#273, #277): the job, the frame beside it, then the run record. Awaiting
+  // only the first download is what let the frame go missing unnoticed.
   const downloads: string[] = [];
   page.on('download', (d) => downloads.push(d.suggestedFilename()));
   await page.getByTestId('engrave-save').click();
-  await expect.poll(() => downloads.length).toBe(2);
+  await expect.poll(() => downloads.length).toBe(3);
   const suggested = downloads[0]!;
   expect(suggested).toMatch(/\.nc$/);
   expect(suggested).not.toContain('-frame.nc');
   expect(downloads[1]).toBe(suggested.replace(/\.nc$/, '-frame.nc'));
+  // The record sits beside the program, named after it, and cannot be mistaken for it.
+  expect(downloads[2]).toBe(suggested.replace(/\.nc$/, '-run.json'));
 
   // …is the name the sheet prints.
   await page.getByTestId('engrave-run-sheet').click();
@@ -196,4 +198,79 @@ test('the run sheet opens for a verified job, names the saved file, and prints w
   await expect(page.getByTestId('sidebar-button-cnc-engrave')).toBeHidden();
   await page.emulateMedia({ media: 'screen' });
   await expect(page.getByTestId('sidebar-button-cnc-engrave')).toBeVisible();
+});
+
+// #277 — the round trip. Save writes a run record beside the program with its measured half BLANK;
+// the bench fills it in; opening it puts the measured wall clock BESIDE the cycle estimate, never in
+// place of it. The file is the app's own download, filled in exactly as the operator would, so this
+// is the whole flow and not a fixture.
+test('a filled run record shows its measured run beside the estimate', async ({ cm, page }) => {
+  await cm.ready();
+  await openEngravePanel(page);
+
+  await page.getByTestId('engrave-generate').click();
+  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
+  await page.getByTestId('engrave-ack').check();
+  await expect(page.getByTestId('engrave-save')).toBeEnabled();
+
+  const downloads: { name: string; file: Download }[] = [];
+  page.on('download', (d) => downloads.push({ name: d.suggestedFilename(), file: d }));
+  await page.getByTestId('engrave-save').click();
+  await expect.poll(() => downloads.length).toBe(3);
+
+  const ncFile = downloads[0]!.name;
+  const record = downloads.find((d) => d.name.endsWith('-run.json'))!;
+  const text = readFileSync((await record.file.path())!, 'utf8');
+  const blank = JSON.parse(text);
+
+  // What the app wrote: everything it can know, and NOTHING it cannot. Not a zero, not a guess.
+  expect(blank.kind).toBe('casemaker-run');
+  expect(blank.ncFile).toBe(ncFile);
+  expect(blank.cutOn).toBeNull();
+  expect(blank.minutes).toBeNull();
+  expect(blank.legible).toBeNull();
+  expect(blank.finish).toBeNull();
+  expect(blank.stockProudMm).toBeNull();
+  expect(blank.cutter).toEqual({ fluteLengthMm: null, stickOutMm: null });
+  expect(blank.ncHash).toMatch(/^[0-9a-f]{8}$/);
+  // One blank per §9 depth row, and there is at least one — the sheet asks for them, so the file
+  // has somewhere to answer.
+  expect(blank.depths.length).toBeGreaterThan(0);
+  expect(blank.depths.every((d: { measured: number | null }) => d.measured === null)).toBe(true);
+
+  // Opening the untouched file is not an error — it is simply not a result, and nothing shows.
+  const asSaved = await page.evaluate((t) => window.__caseMaker!.openRunRecordText(t), text);
+  expect(asSaved.ok).toBe(true);
+  await expect(page.getByTestId('engrave-last-measured')).toBeHidden();
+
+  // The bench fills it in: the date the job was cut, and the wall clock it took.
+  const filled = { ...blank, cutOn: '2026-10-05', minutes: 12.5 };
+  const opened = await page.evaluate(
+    (t) => window.__caseMaker!.openRunRecordText(t),
+    JSON.stringify(filled),
+  );
+  expect(opened.ok).toBe(true);
+  expect(opened.ncFile).toBe(ncFile);
+
+  // The reading appears, with its duration and its date…
+  const measured = page.getByTestId('engrave-last-measured');
+  await expect(measured).toBeVisible();
+  await expect(measured).toContainText('12:30');
+  await expect(measured).toContainText('2026-10-05');
+
+  // …and the estimate above it is untouched. This is the whole point of the feature: the measured
+  // figure sits beside the planning figure, and neither one replaces the other.
+  const estimate = await page.getByTestId('engrave-run-toolpath').textContent();
+  expect(estimate).not.toContain('12:30');
+  expect(estimate).toMatch(/~\d+:\d\d/);
+
+  // The rule, end to end: the same readings with the date deleted are refused, and the line stays
+  // as it was. A measurement with no date is a number nobody can place.
+  const undated = await page.evaluate(
+    (t) => window.__caseMaker!.openRunRecordText(t),
+    JSON.stringify({ ...filled, cutOn: null }),
+  );
+  expect(undated.ok).toBe(false);
+  expect(undated.reason).toContain('no cutOn date');
+  await expect(measured).toContainText('12:30');
 });

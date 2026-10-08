@@ -15,6 +15,7 @@ import { derivedKind } from '@/engine/compiler/archetype';
 import { isAlternativeNode, partForId } from '@/engine/exporters/parts';
 import { printNotesText } from '@/engine/exporters/printNotes';
 import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
+import { runRecordFileName } from '@/engine/cnc/engrave/runRecord';
 
 export type { ExportFormat };
 
@@ -93,14 +94,22 @@ export async function saveText(text: string, filename: string, mime: string): Pr
  * cannot be confused. The frame is the SAME generate (#206) output as the job — never re-derived
  * here — so what is written is exactly what was verified. A null `frameNc` (a run that never
  * reached the post) writes the job only.
+ *
+ * #277 — a third file goes with them: the run record (`<job>-run.json`), the §9 record as data
+ * with its measured half blank. It is written HERE, beside the program, because a record of a run
+ * belongs with the file that was cut and nowhere else; the operator fills it in at the bench and
+ * `scripts/run-readback.ts` (or the panel's "Open run record…") brings it back. A null
+ * `runRecord` writes the two programs and no record.
  */
 export async function saveEngraveProgram(
   nc: string,
   frameNc: string | null,
   jobName: string,
+  runRecord: string | null = null,
 ): Promise<void> {
   await saveText(nc, runSheetFileName(jobName), 'text/plain');
   if (frameNc !== null) await saveText(frameNc, runSheetFrameFileName(jobName), 'text/plain');
+  if (runRecord !== null) await saveText(runRecord, runRecordFileName(jobName), 'application/json');
 }
 
 async function saveBlob(blob: Blob, filename: string): Promise<void> {

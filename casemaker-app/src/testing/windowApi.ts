@@ -26,6 +26,7 @@ import { useViewportStore } from '@/store/viewportStore';
 import { useSimStore, type SimLayers, type SimState } from '@/store/simStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRunStore, saveBlocker, runErrorCodes } from '@/store/engraveRunStore';
+import { useRunRecordStore } from '@/store/runRecordStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
@@ -133,6 +134,13 @@ export interface CaseMakerTestApi {
     saveReason: string | null;
     error: string | null;
   };
+  /**
+   * #277 — the run-record half of the engrave e2e surface. `openRunRecordText` hands the app the
+   * text of a run record file, exactly as the panel's "Open run record…" does, so a spec can drive
+   * the whole round trip: Save, fill the record, open it, read the measured line beside the
+   * estimate. It returns the same result the panel shows, so a spec can assert a REFUSAL too.
+   */
+  openRunRecordText(text: string): { ok: boolean; reason: string | null; ncFile: string | null };
   simOpenText(name: string, text: string): void;
   simRun(): Promise<void>;
   simSetStep(step: number): Promise<void>;
@@ -356,6 +364,15 @@ export function installCaseMakerTestApi(): void {
       // settings, so a measured vise or sacrificial setup left by an earlier test would leak in.
       useEngraveJobStore.getState().replace(defaultEngraveJob());
       useEngraveRunStore.getState().reset();
+      // #277 — records opened by an earlier test live in localStorage, where they would otherwise
+      // put a "last measured" line under a later test's estimate.
+      useRunRecordStore.getState().clear();
+    },
+    openRunRecordText(text) {
+      const result = useRunRecordStore.getState().openText(text);
+      return result.ok
+        ? { ok: true, reason: null, ncFile: result.run.ncFile }
+        : { ok: false, reason: result.reason, ncFile: null };
     },
     getEngraveRunState() {
       const r = useEngraveRunStore.getState();

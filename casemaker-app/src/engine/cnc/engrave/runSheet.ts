@@ -288,6 +288,17 @@ export function runSheetFrameFileName(jobName: string): string {
 }
 
 /**
+ * §9's per-item rows (#277): every cut item, in the order section 7 lists them, with the depth the
+ * program was posted at. The printed sheet's "measured depth" blanks and the run record file's
+ * `depths` array are both built from this one list, so a filled record can never answer a row the
+ * sheet did not ask — the same single-funnel trick `toPartPlan` plays for the diagram and the
+ * depth notes. It is the CALLER's plan, not a second `toPartPlan` call, so the two cannot diverge.
+ */
+export function recordDepths(plan: PartPlan): { id: string; name: string; depth: Mm }[] {
+  return plan.engraves.map((item) => ({ id: item.id, name: item.name, depth: item.depth }));
+}
+
+/**
  * The `.nc` file name for a job: the job name with runs of anything but letters, digits, `-`, `_`
  * and `.` collapsed to `-`, trimmed, plus `.nc`. Empty after cleaning falls back to
  * `engrave-job.nc`.
@@ -961,7 +972,9 @@ export function buildRunSheet(
   if (warnings.length === 0) warnings.push({ text: 'No warnings were raised.' });
 
   // ---- 9 · Record afterwards -----------------------------------------------------------------
-  const recordSteps: RunSheetStep[] = items.map((item) => ({
+  // #277 — the same list the run record file's `depths` array is built from, so the blanks printed
+  // here and the fields the readback answers are one list.
+  const recordSteps: RunSheetStep[] = recordDepths(plan).map((item) => ({
     text: `Measured floor depth — ${item.name}`,
     record: 'measured depth (mm)',
   }));
