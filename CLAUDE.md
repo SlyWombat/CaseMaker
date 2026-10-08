@@ -49,8 +49,8 @@ Run it from WSL (it calls the Windows harness itself):
 
 ```sh
 casemaker-app/tools/z1/power.sh on        # --wait <seconds>, default 180; --dry-run to rehearse
-casemaker-app/tools/z1/power.sh on --cycle  # the machine switches itself OFF after idling, with the plug
-                                            # still on; only a plug cycle boots it again (found 2026-10-08)
+casemaker-app/tools/z1/power.sh on --cycle  # plug already on but the machine silent: it sometimes fails to
+                                            # join the network at power-up, and only a plug cycle brings it back
 casemaker-app/tools/z1/power.sh off
 casemaker-app/tools/z1/power.sh status
 ```

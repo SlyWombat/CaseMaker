@@ -476,7 +476,7 @@ connected. Everything below is observed on `Makera_Z1_010290`:
 | Frames | **Binary** WebSocket messages, one complete **baseline JPEG (`FFD8 FFE0`) per message, 640 × 480**, ~16 KB each, at **~10 per second** (12 frames in 1.1 s). They keep coming until the socket closes. |
 | Stop | Close the socket. (Studio's strings also carry text messages for **time-lapse playback** — `total_frames`, `frame_period_us`, `from_frame`, a "play response" — not exercised.) |
 | Port 80 | The same module serves a leftover demo web page (`<title>Tank</title>`, Vue, `"ESP32 Camera Stream"`), whose bundle names `:81/ws` and `:82/ws_video`. **Port 81 is refused**; port 80 is of no use to us. |
-| Availability | Ports 80 and 82 open with the machine, a few seconds after 2222. **A machine that has switched itself off after idling answers on none of them** (see `tools/z1/power.sh --cycle`). |
+| Availability | Ports 80 and 82 open with the machine, a few seconds after 2222. **A powered machine that has not made its network connection (it sometimes fails to at power-up) answers on none of them** (see `tools/z1/power.sh on --cycle`). |
 | Where it points | The first frame (`docs/bench/img/camera-2026-10-08-first-frame.jpg`) shows the X rail and the bed plate under the machine's green light. Head- vs frame-mounted (bench A6) is still open: two frames around one commanded move settle it. |
 
 What this changes:

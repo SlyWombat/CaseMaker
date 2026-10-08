@@ -12,10 +12,11 @@
 #   1. the command port (2222) accepts a TCP connection;
 #   2. the status line comes back (read through tools/z1/z1.mjs, which has to run on Windows).
 #
-# THE MACHINE SWITCHES ITSELF OFF after sitting idle (observed 2026-10-08: on and Idle at 11:3x UTC,
-# silent on every port by ~13:00 with the plug still on, and no plug-on could wake it). A plug that is
-# already on therefore proves nothing. `on --cycle` switches the plug off, waits, and on again, which
-# is the only remote way to boot it from that state; plain `on` says so when it times out that way.
+# A POWERED MACHINE CAN BE SILENT. Observed 2026-10-08: on and answering at 11:4x UTC, then silent on
+# every port by ~13:00 with the plug still on. The maintainer's experience is that the machine
+# sometimes fails to make its network connection at power-up; why it dropped this time is not known.
+# Either way a plug that is already on proves nothing, and `on --cycle` (plug off, wait, on again) is
+# the only remote way back; plain `on` says so when it times out with the plug already on.
 #
 # On a timeout the plug is LEFT ON. A machine that is slow to boot is not a reason to cut its mains,
 # and the exit code plus the last thing seen say where it stopped.
@@ -99,7 +100,7 @@ case "$cmd" in
       if port_open; then
         say "machine already answers on $HOST:$PORT; no cycle needed"
       else
-        say "plug is on but the machine is silent (it switches itself off when idle): cycling the plug"
+        say "plug is on but the machine is silent on $HOST:$PORT: cycling the plug"
         plug_set off || die "Home Assistant refused turn_off"
         [ "$dry" -eq 1 ] || sleep 10
         before=off
@@ -116,7 +117,7 @@ case "$cmd" in
     until port_open; do
       if [ "$SECONDS" -ge "$deadline" ]; then
         hint=""
-        [ "$cycle" -eq 0 ] && hint=" If the plug was already on, the machine has probably switched itself off while idle: re-run with --cycle."
+        [ "$cycle" -eq 0 ] && hint=" The plug was already on: the machine may have failed to join the network (it sometimes does at power-up) - re-run with --cycle."
         die "plug is ON but $HOST:$PORT never accepted a connection in ${wait_s}s (left powered).$hint" 3
       fi
       sleep 3
