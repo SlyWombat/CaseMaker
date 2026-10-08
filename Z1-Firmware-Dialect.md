@@ -367,7 +367,7 @@ blank is probeable with it). Head at machine −118.4, −109.8, **Z −3.0**; t
 |---|---|
 | Z descended at F300 and the move ended at **MPos Z −53.0** — exactly **50 mm of travel** from −3.0 | **The probe target is a relative distance**, whatever the distance mode says. Under `G90` with the G54 offset in force, work Z −50 would have been machine −115; under "machine" reading it would have been −50. It was neither. (Smoothieware heritage: its probe takes the axis words as travel.) |
 | State at the end: **`Alarm`** at Z −53.0; `G53 G0 Z-3` refused with `error:Alarm lock` until `$X` | **A miss is an Alarm**, not an `ok`. Position is kept; `$X` → `[Caution: Unlocked]` clears it; a plain `G53 G0 Z-3` then raises the head. |
-| The console reply to `G38.2` **arrived only when the move had finished** (~13 s), past the 3 s first-reply window, so its text was not captured | A probe line must be sent with a reply window longer than the move (`z1.mjs send … --first-reply 60000`). The `[PRB:…:0]` / alarm text of a miss is therefore **still unrecorded**. |
+| The console reply to `G38.2` **arrived only when the move had finished** (~13 s), past the 3 s first-reply window, so its text was not captured that time | A probe line must be sent with a reply window longer than the move (`z1.mjs send … --first-reply 60000`). **Captured later the same day:** a miss replies **`[PRB:-193.400,-140.000,-63.000:0]`** (the end-of-travel position, flag **`:0`**), then **`ALARM: Probe fail`**, then `ok`. |
 
 Consequence for every probe we ever post: **size the Z word as travel, never as a target** — the
 distance from the start height to a little past the expected surface — and expect an Alarm, not a
@@ -396,4 +396,27 @@ Head at machine −168.4, −140.0, start Z −3.0, over the badge blank in the 
   for 52.7 mm); a 60 s first-reply window captured every one.
 - The blank's top face is at **machine Z −55.708** at this XY today (the G54 Z zero the wizard left
   on 2026-10-07 was at −65.118 — a different surface, 9.4 mm lower).
+
+### 11.8 Observed 2026-10-08 — the blank's shape, probed against the vise (#293, #191 item 10)
+
+Same wired probe, slow (F100) triggers after a fast approach, machine coordinates. The badge blank
+(`165-depth-ladder`, 76.2 × 38.1 × 3.81 mm, two-colour PLA) sits on the jaw shelf with its **38 mm
+side along X** (left edge ≈ −180.5, right ≈ −142) and its 76 mm side along Y (+Y end ≈ −106).
+
+**The vise's fixed jaw top, along Y at X −186** (the reference, maintainer's suggestion):
+Y −170 → −56.944, −160 → −56.929, −140 → −56.909, −120 → −56.885, −110 → −56.875.
+A straight line to **2 µm**, rising **0.068 mm over 60 mm** (1.1 µm/mm) toward +Y.
+
+**The blank across its width, along X at Y −140:** −178.4 → −55.855, −173.4 → −55.775,
+−168.4 → −55.705, −163.4 → −55.697, −158.4 → −55.748, −153.4 → −55.835, −148.4 → −55.930,
+−143.4 → −56.025. **A smooth dome, highest near X −165, 0.33 mm lower at the right edge, 0.16 mm
+lower 13 mm in from the left edge.** (−183.4 and −188.4 read −56.91: the jaw top; −193.4 is a miss.)
+
+**The blank along its length, at X −163.4, minus the jaw line:** Y −170 → 1.144, −160 → 1.209,
+−140 → 1.211, −120 → 1.107, −110 → 1.070 mm above the jaw. **Domed along the length too, by
+0.07–0.14 mm over ±30 mm.** The 3 × 3 grid at ±10 mm in Y agreed with this to 0.03 mm.
+
+So the face we probe — the face that was printed against the bed, now uppermost — is **convex by
+~0.3 mm across the width and ~0.1 mm along the length**, the shape a cooling print takes when its
+corners lift. The jaw shelf holds it; the blank itself is not flat.
 

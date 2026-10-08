@@ -1034,6 +1034,14 @@ slow (F100) triggers **−55.708, −55.707, −55.708, −55.708, −55.708** �
 (F300) **−55.710 … −55.714**, spread 0.004 mm, reading 2–6 µm deep. The 3D Probe on wood — C4's own
 question — is still open; this is the wired probe's figure on the blank we actually engrave.
 
+**Blank flatness, same sitting (#191 item 10, the vise case).** 3 × 3 grid, an X line and a Y line
+on the blank, and a Y line on the **fixed jaw's top** as the reference (`/Z1-Firmware-Dialect.md`
+§11.8). The jaw is straight to 2 µm with 0.068 mm of rise over 60 mm. The blank is **domed: ~0.33 mm
+centre-to-edge across its 38 mm width, ~0.1 mm along its 76 mm length** — the printed-against-the-bed
+face, now up, is convex. A single centre probe therefore over-reads the surface by up to 0.3 mm at
+the width edges, which is of the order of the two-colour boundary's tolerance (#166, decision 12).
+Frames: `docs/bench/img/293-s2-over-blank.jpg`, `293-s2-probe-over-fixed-jaw.jpg`.
+
 **Recorded:** _not yet run — 5 Z values; spread = probe repeatability._
 
 | Run | Z reading (machine coords, mm) |
