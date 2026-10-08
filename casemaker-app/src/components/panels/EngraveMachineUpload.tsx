@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type JSX } from 'react';
+import { useState, type CSSProperties, type JSX } from 'react';
 import type { MachineObservation } from '@/platform/machineProbe';
 import { programBytes, uploadProgram, type MachineUploadResult } from '@/platform/machineUpload';
 import type { VerifyReport } from '@/engine/cnc/verify';
@@ -119,10 +119,10 @@ export function EngraveMachineUpload({
           : null);
 
   // A confirmation belongs to the gate that opened it (#295): once the run is blocked it is closed
-  // for good, so a later un-blocking cannot bring back a box nobody pressed.
-  useEffect(() => {
-    if (blocked !== null && stage === 'confirm') setStage('idle');
-  }, [blocked, stage]);
+  // for good, so a later un-blocking cannot bring back a box nobody pressed. Adjusted during render
+  // (guarded, so it settles in one extra pass) rather than in an effect, which would paint the stale
+  // box for a frame first.
+  if (blocked !== null && stage === 'confirm') setStage('idle');
 
   const bytes = program === null ? 0 : programBytes(program.nc).length;
 
