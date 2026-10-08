@@ -72,7 +72,26 @@ diameter, overall length, flute count. Photograph them together with a ruler.
 - `flat-1.0` — 1.0 mm flat end, **diameter only**; lengths unknown (`toolLibrary.ts:78-84`,
   `/Simulation.md` §4). This is the current default cutter (`engrave/defaults.ts:104`).
 
-**Recorded:** _not yet run — table (type, cutting ⌀, flute length, shank ⌀, overall length, flutes)._
+**Recorded 2026-10-08 — the set, photographed boxed; nothing measured yet.** The maintainer laid out
+every cutter that came with the machine: `docs/bench/img/a1-all-cutters-boxed.jpg`. **38 by my count
+from the photo** (to be confirmed by hand), in five colour-coded box groups, **every one branded
+MAKERA CARVERA** — there is no Z1-badged cutter in the set (A7). Readable from the photo, label by
+label still to come:
+
+| Box colour | Count (photo) | What the one legible label says |
+|---|---|---|
+| green | 1 | *Spiral "O" Single Flute Bit for Metal — 1/8" shank, 1 mm × 3 mm* — the closest thing to `flat-1.0`, the app's default cutter |
+| blue | 5 | *Two Flute Ball Nose Bit for Metal — 1/8"…* |
+| orange | 7 | *…Flute Engraving…* (V-bits, by the family) |
+| yellow | 17 + 8 | not legible at this distance |
+
+Every label carries the same QR-plus-text layout as the one decoded on 2026-10-07, so one close-up per
+group, labels square to the camera, decodes all 38 slugs and reads the human line under each. The
+table below is still the measured record and is still empty: a boxed catalogue cutter's geometry
+comes from its catalogue row (#307, `g_ID`), and A1's calipers become a **spot check** of that row
+rather than the only source.
+
+**Recorded:** _measurements not yet taken — table (type, cutting ⌀, flute length, shank ⌀, overall length, flutes)._
 
 | # | Type (flat/ball/V/drill) | Cutting ⌀ (mm) | Flute length (mm) | Shank ⌀ (mm) | Overall length (mm) | Flutes | Notes |
 |---|---|---|---|---|---|---|---|
@@ -83,7 +102,8 @@ diameter, overall length, flute count. Photograph them together with a ruler.
 | 5 | | | | | | | |
 | 6 | | | | | | | |
 
-Photo of all cutters with a ruler: `docs/bench/img/` _______________
+Photo of all cutters with a ruler: `docs/bench/img/a1-all-cutters-boxed.jpg` (boxed, no ruler — the
+boxes are the catalogue's; a ruler shot waits for the unboxed spot check)
 
 **Goes to:** `src/engine/cnc/toolLibrary.ts` — one entry per **flat end mill**,
 `provenance: 'measured, bench day 1'`; other shapes listed in this file only. This also decides
@@ -264,7 +284,10 @@ library database was dumped read-only (`docs/bench/2026-10-08-makera-library-sch
 slug **online**. There is also no 1/4-inch (6.35 mm) ball nose in the catalogue by name — its ball
 noses are 3.175, 4 and 6 mm. So "either the DB is keyed by the slug, or there is a mapping we have
 not seen" now reads: **there is a mapping, and it is a network one we do not hold.** The remaining
-A7 row is the **Z1-badged** label.
+A7 row was the **Z1-badged** label — **and there is none to photograph (2026-10-08, A1's photo): every
+cutter that came with the Z1 is branded MAKERA CARVERA.** Caveat 1 above therefore closes the other
+way: the `C1-` Carvera scheme is the only scheme this machine's cutters carry. What is still open is
+the vocabulary — one close-up per box group decodes the other 37 slugs.
 
 | Cutter # (from A1) | Symbology | Exact decoded text | Equals `112111313812`? |
 |---|---|---|---|
