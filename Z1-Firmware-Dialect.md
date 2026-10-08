@@ -357,3 +357,20 @@ Typed through `tools/z1/z1.mjs send` (one framed console line per command, trace
 
 Two status-line details seen only in Alarm: an `H:10` field appears, and the `C:` field's last value flips from `1` to `0`.
 
+### 11.6 Observed 2026-10-08 — a probe move that finds nothing (#293 Stage 2)
+
+Wired probe fitted (a mechanical touch probe: it triggers on contact, not conductivity — so a printed
+blank is probeable with it). Head at machine −118.4, −109.8, **Z −3.0**; the nearest surface below
+(the vise's back jaw) at about Z −65. Sent `G38.2 Z-50 F300` with `G90` in force:
+
+| Observed | Meaning |
+|---|---|
+| Z descended at F300 and the move ended at **MPos Z −53.0** — exactly **50 mm of travel** from −3.0 | **The probe target is a relative distance**, whatever the distance mode says. Under `G90` with the G54 offset in force, work Z −50 would have been machine −115; under "machine" reading it would have been −50. It was neither. (Smoothieware heritage: its probe takes the axis words as travel.) |
+| State at the end: **`Alarm`** at Z −53.0; `G53 G0 Z-3` refused with `error:Alarm lock` until `$X` | **A miss is an Alarm**, not an `ok`. Position is kept; `$X` → `[Caution: Unlocked]` clears it; a plain `G53 G0 Z-3` then raises the head. |
+| The console reply to `G38.2` **arrived only when the move had finished** (~13 s), past the 3 s first-reply window, so its text was not captured | A probe line must be sent with a reply window longer than the move (`z1.mjs send … --first-reply 60000`). The `[PRB:…:0]` / alarm text of a miss is therefore **still unrecorded**. |
+
+Consequence for every probe we ever post: **size the Z word as travel, never as a target** — the
+distance from the start height to a little past the expected surface — and expect an Alarm, not a
+soft-limit refusal, if it finds nothing (yesterday's wizard sent `G38.2 Z-108`, 6 mm past
+`soft_endstop.z_min`, and it ran).
+

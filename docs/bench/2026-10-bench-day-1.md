@@ -915,7 +915,10 @@ at ~1100–1400 mm/min on both axes (#281). Z not run (vise mounted).
 
 **#275 (partial):** the broadcast still said `busy: false` during a `Run`. **#304:** no drop during
 this 24-minute session, with a status poll every ~1.3 s throughout; the earlier two drops were with
-nothing connected. **Camera:** the module replays its last frame to a new client (§10 of the bridge
+nothing connected. **Stage 2 so far (wired probe, mechanical touch tip — photo
+`docs/bench/img/293-s2-wired-probe-over-vise.jpg`):** a miss test `G38.2 Z-50 F300` from Z −3 over the
+vise's back edge ran 50 mm and ended in **Alarm at Z −53** — the Z word is *travel*, a miss is an
+Alarm, and the reply only comes when the move ends (`/Z1-Firmware-Dialect.md` §11.6). **Camera:** the module replays its last frame to a new client (§10 of the bridge
 protocol), so every single frame taken today shows the *previous* position — A6 is not answered by
 these frames; `camera.mjs` now skips the first.
 
