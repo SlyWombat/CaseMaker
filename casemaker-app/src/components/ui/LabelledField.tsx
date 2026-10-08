@@ -51,8 +51,18 @@ export function LabelledField({
   // all: it THROWS on anything but exactly one child. The tool-insert panel's
   // Pockets field passes three (a summary line, the item rows, the add
   // buttons) and took the whole panel down with it, while this comment claimed
-  // the opposite (#267). Counting first is what the contract always said.
-  const child: ReactNode = Children.count(children) === 1 ? Children.only(children) : null;
+  // the opposite (#267).
+  //
+  // The first fix counted first — `Children.count(children) === 1` — and that
+  // is not equivalent either, because the two functions disagree about arrays:
+  // `count` traverses them (so `[<div/>, []]` counts as ONE) while `only`
+  // rejects an array however short. A field whose children include a list in
+  // its empty state — the toolbox panel's Dividers, whose peg rows are a
+  // `.map()` — therefore passed the guard and threw anyway. `Children.toArray`
+  // is the one function that flattens nested arrays and drops null/false/empty
+  // ones, so its length is what both halves of the contract actually mean.
+  const kids = Children.toArray(children);
+  const child: ReactNode = kids.length === 1 ? kids[0] : null;
   let inputId: string | undefined;
   // `child` is null for anything but exactly one child — then the children go
   // through untouched, which is the whole point.
