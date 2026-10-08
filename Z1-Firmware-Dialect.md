@@ -374,3 +374,26 @@ distance from the start height to a little past the expected surface — and exp
 soft-limit refusal, if it finds nothing (yesterday's wizard sent `G38.2 Z-108`, 6 mm past
 `soft_endstop.z_min`, and it ran).
 
+### 11.7 Observed 2026-10-08 — five touches on the printed blank with the wired probe (C4)
+
+Head at machine −168.4, −140.0, start Z −3.0, over the badge blank in the vise. Cycle, five times:
+`G38.2 Z-70 F300` → `G91 G0 Z1` → `G38.2 Z-2 F100` → `G90` → `G53 G0 Z-3`. Replies verbatim:
+
+| # | fast (F300) | slow (F100) |
+|---|---|---|
+| 1 | `[PRB:-168.400,-140.000,-55.711:1]` | `[PRB:-168.400,-140.000,-55.708:1]` |
+| 2 | `[PRB:…,-55.714:1]` | `[PRB:…,-55.707:1]` |
+| 3 | `[PRB:…,-55.712:1]` | `[PRB:…,-55.708:1]` |
+| 4 | `[PRB:…,-55.710:1]` | `[PRB:…,-55.708:1]` |
+| 5 | `[PRB:…,-55.713:1]` | `[PRB:…,-55.708:1]` |
+
+- Each `[PRB:…:1]` is followed by `ok`, and the state after a trigger is **`Idle`**, position held at
+  the trigger (MPos agrees with the PRB value to the fourth decimal). No Alarm, no `$X` needed.
+- **Slow spread 0.001 mm; fast spread 0.004 mm; fast reads 0.002–0.006 mm deeper than slow** — the
+  overshoot at F300. The wizard's fast-then-slow pair is therefore the right shape, and the slow
+  figure is the one to use.
+- The trigger line is the reply to the `G38.2` itself and arrives when the move stops (fast: ~11 s
+  for 52.7 mm); a 60 s first-reply window captured every one.
+- The blank's top face is at **machine Z −55.708** at this XY today (the G54 Z zero the wizard left
+  on 2026-10-07 was at −65.118 — a different surface, 9.4 mm lower).
+

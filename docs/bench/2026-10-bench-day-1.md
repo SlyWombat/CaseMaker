@@ -1027,6 +1027,13 @@ its repeatability has never been measured (`/Fabrication.md` §1, §7.6).
 > machine has produced and it is the right order of magnitude for C4 to be worth running properly;
 > it is **not** C4's answer. The five-repeats-on-wood procedure below still stands.
 
+**Recorded 2026-10-08 — on the printed blank, with the WIRED probe (not the 3D Probe, not wood).**
+The wired probe is a mechanical touch tip (it triggers on contact, so PLA is fine). Five fast/slow
+pairs at machine −168.4, −140.0, in the vise (`/Z1-Firmware-Dialect.md` §11.7):
+slow (F100) triggers **−55.708, −55.707, −55.708, −55.708, −55.708** → **spread 0.001 mm**; fast
+(F300) **−55.710 … −55.714**, spread 0.004 mm, reading 2–6 µm deep. The 3D Probe on wood — C4's own
+question — is still open; this is the wired probe's figure on the blank we actually engrave.
+
 **Recorded:** _not yet run — 5 Z values; spread = probe repeatability._
 
 | Run | Z reading (machine coords, mm) |
