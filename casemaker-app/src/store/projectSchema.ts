@@ -382,6 +382,31 @@ export const caseParamsSchema = z.object({
       depth: z.number().positive(),
       height: z.number().positive(),
       grid: z.boolean(),
+      // Issue #150 — the drop-in dividers standing in the bin. Optional and
+      // needing NO version bump: a v16 project has no `pegs` key at all, which
+      // reads back as `undefined`, which the panel and `buildToolboxNodes` both
+      // treat as "none" (`p.pegs ?? []`). So absent and empty mean the same
+      // thing and neither is a migration.
+      //
+      // These bounds are structural only — "a positive number", matching the
+      // sibling width/depth/height — and nothing more. Whether a span lands on
+      // the lattice, fits the floor, or lets a wall clear the ledge is
+      // `toolboxPegProblem`'s call, next to the constants it depends on, not a
+      // second copy of the geometry buried in a schema. That split is not
+      // cosmetic: a rejected patch here would have to silence the panel, where
+      // the predicate can say WHICH divider is wrong and why.
+      pegs: z
+        .array(
+          z.object({
+            id: z.string(),
+            spans: z.number().positive(),
+            height: z.number().positive(),
+            thickness: z.number().positive(),
+            axis: z.enum(['x', 'y']),
+            enabled: z.boolean(),
+          }),
+        )
+        .optional(),
     })
     .optional(),
 });

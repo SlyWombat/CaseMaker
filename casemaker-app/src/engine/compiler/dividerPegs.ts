@@ -87,6 +87,13 @@ export function pegWidth(spans: number, pitch: number, ear = PEG_WIDTH_EAR): num
 /** Why these numbers cannot make a peg, or null when they can. */
 export function dividerPegProblem(spec: DividerPegSpec, ctx: DividerPegContext): string | null {
   if (!(spec.spans >= 1)) return 'A peg must span at least one hole';
+  // WHOLES ONLY. The tenons sit `(spans − 1)` pitches apart, so a fractional
+  // span puts them BETWEEN holes: the peg would stand on the floor with its
+  // tenons jammed against socket walls rather than sitting in them, and the
+  // panel would draw it as if it were fine. There is no half socket.
+  if (!Number.isInteger(spec.spans)) {
+    return `Peg ${spec.id}: ${spec.spans} holes is not a whole number of holes`;
+  }
   if (!(spec.height > 0)) return `Peg ${spec.id}: height must be greater than zero`;
   if (!(spec.thickness > 0)) return `Peg ${spec.id}: thickness must be greater than zero`;
   const fit = ctx.tenonFit ?? PEG_TENON_FIT;

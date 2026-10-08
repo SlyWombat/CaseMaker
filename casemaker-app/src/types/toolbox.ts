@@ -4,23 +4,33 @@ import type { Mm } from './units';
  * Issue #155 — the stacking-toolbox archetype: bins and lids that register on
  * each other with no connector at all.
  *
- * PROVENANCE (clean-room — this is the discharge of #155's own gate, and the
- * form `types/rack.ts:5-23` already models):
+ * PROVENANCE. The module geometry is clean-room; the FLOOR SOCKET INTERFACE is
+ * not, and the split is deliberate — see below.
  *
  *   The requirements here are derived from `/Toolbox.md`, which is a functional
  *   review of the commercial field (Systainer, Packout, ToughSystem, Sortimo,
  *   Makita MakPac, …) plus a list of what a stacking box must do. No geometry
- *   from any of those systems is reproduced. Every number in this file and in
- *   `engine/compiler/toolbox.ts` is ours, chosen to satisfy a stated
- *   requirement, and NONE of them is a measurement taken from a reviewed
- *   product — in particular the ToolStack system's own figures (its 5 × 5 grid
- *   on a 12 mm pitch, its 45° slider, its 13 mm / 6 mm skirt) are not reused.
+ *   from any of those systems is reproduced: the foot, the seating ledge, the
+ *   flare and the whole stacking joint are ours, chosen to satisfy a stated
+ *   requirement, and none of them is a measurement taken from a reviewed
+ *   product. The ToolStack system's 45° slider and its 13 mm / 6 mm skirt are
+ *   not reused, and neither is any exterior dimension.
  *
- *   The licence position that made this the plan of record: ToolStack ships
- *   without a licence, so it may not be copied; Multiboard's is revocable, so
- *   no dimension of it should be depended on either; openGrid is CC-BY and
- *   safe to *study*. "Clean-room, or properly attributed CC-BY" — we took the
- *   first option, which is why there is nothing to attribute.
+ *   Its 5 × 5 mm socket lattice on a 12 mm pitch IS reused — a reversal of this
+ *   file's original position, made 2026-10-07 when the floor grid stopped being
+ *   host-less. The reasoning is `holeGrid.ts`'s, and it is the same one #150
+ *   turned on: a hole pitch and a socket size are the dimensions of a mating
+ *   part interface, which is a functional fact about the drawing rather than a
+ *   design we reproduce, and copying them is what lets a third-party accessory
+ *   or a printed divider fit. The tenon FIT is a different matter — that is a
+ *   hypothesis about the user's printer and it stays PROVISIONAL in
+ *   `dividerPegs.ts`. No compatibility is CLAIMED anywhere in the app: the grid
+ *   is described by its own numbers, never as "fits ToolStack".
+ *
+ *   The licence position that made the clean-room route the plan of record still
+ *   governs everything else: ToolStack ships without a licence, so its geometry
+ *   may not be copied; Multiboard's is revocable, so no dimension of it should be
+ *   depended on either; openGrid is CC-BY and safe to *study*.
  *
  * Frame — and this one is load-bearing, so it is written down:
  *
@@ -63,8 +73,36 @@ export interface ToolboxParams {
   depth: Mm;
   /** External module height, seating plane to rim, mm — the free variable. */
   height: Mm;
-  /** Drop-in hole grid through the bin's floor (pegs, partitions). */
+  /** The blind socket grid in the bin's floor — the mount for `pegs`. */
   grid: boolean;
+  /** Drop-in dividers standing in the bin. Absent or empty means none. */
+  pegs?: ToolboxPeg[];
+}
+
+/**
+ * A drop-in divider: a flat wall standing in the bin, held down by two square
+ * tenons that plug into the floor's sockets.
+ *
+ * `spans` is the peg's own unit — how many SOCKET PITCHES apart its two tenons
+ * are — so a divider is sized in holes rather than millimetres and stays right
+ * when the pitch or the bin changes. `spans: 4` builds a wall whose tenons sit
+ * four pitches apart; the wall is a little wider than that, because each end
+ * carries an ear out to the socket's far edge (see `dividerPegs.ts`).
+ *
+ * The geometry is `dividerPegs.ts`'s and is shared with the drawer-pegs work in
+ * #150; this is only what a toolbox divider IS.
+ */
+export interface ToolboxPeg {
+  id: string;
+  /** Socket pitches between the two tenons. At least 1. */
+  spans: number;
+  /** Wall height above the floor, mm. */
+  height: Mm;
+  /** Wall thickness, mm. */
+  thickness: Mm;
+  /** Which way the wall runs: `'x'` across the width, `'y'` across the depth. */
+  axis: 'x' | 'y';
+  enabled: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,12 +136,21 @@ export const TOOLBOX_FIT_CLEAR: Mm = 0.3;
 export const TOOLBOX_LEDGE_W: Mm = 6.0;
 /** Height of the lid module, mm — floor plus a 12 mm recess. */
 export const TOOLBOX_LID_H: Mm = 16.0;
-/** Drop-in hole pitch, mm. */
-export const TOOLBOX_GRID_PITCH: Mm = 25.0;
-/** Drop-in hole diameter, mm. */
-export const TOOLBOX_GRID_HOLE: Mm = 5.0;
-/** Material kept between the nearest hole edge and the foot's cavity wall, mm. */
+/** Material kept between the nearest socket edge and the foot's cavity wall, mm. */
 export const TOOLBOX_GRID_GAP: Mm = 1.0;
+/**
+ * How deep the floor's sockets are cut, mm.
+ *
+ * Half the floor, so a socket leaves `TOOLBOX_FLOOR_T / 2` of material beneath
+ * it and the bin stays sealed. DEEP is the load-bearing number for this grid,
+ * not pitch: at a 12 mm pitch a 5 × 5 socket fills only 17% of its cell, so what
+ * sets the floor's remaining section is how far down it goes.
+ *
+ * The dividers are built around it — `dividerPegs.ts` reaches `socketDepth` less
+ * its own bottom gap — so changing this moves the tenon, not just the hole.
+ * PROVISIONAL: nothing here has been printed, and #153 owns the fit.
+ */
+export const TOOLBOX_GRID_DEPTH: Mm = 2.0;
 
 /** Inset of the foot's OUTER face from the module's outer face, mm. */
 export const TOOLBOX_FOOT_INSET: Mm = TOOLBOX_WALL_T + TOOLBOX_FIT_CLEAR;
@@ -126,15 +173,19 @@ export const TOOLBOX_MIN_PLAN: Mm = 2 * (TOOLBOX_FOOT_CAVITY_INSET + TOOLBOX_LED
  */
 export const TOOLBOX_MIN_HEIGHT: Mm = TOOLBOX_FOOT_H + TOOLBOX_FOOT_INSET;
 /**
- * Inset of the nearest hole CENTRE from the module's outer face, mm.
+ * Inset of the nearest socket EDGE from the module's outer face, mm.
  *
  * The floor grid must not break into the foot's wall — the two features share
- * the floor, and a hole under the wall would leave it overhanging a notch. A
- * grid hole is only safe once its whole outline clears the foot's cavity face
- * by `TOOLBOX_GRID_GAP`.
+ * the floor, and a socket under the wall would leave it overhanging a notch. A
+ * socket is only safe once its whole outline clears the foot's cavity face by
+ * `TOOLBOX_GRID_GAP`.
+ *
+ * Measured to the EDGE, which is what `HoleGridOptions.margin` means; that
+ * function adds half a socket itself before placing centres. The effective
+ * inset is therefore unchanged from the old centre-measured constant (this plus
+ * half a socket), so the lattice sits exactly where it used to.
  */
-export const TOOLBOX_GRID_MARGIN: Mm =
-  TOOLBOX_FOOT_CAVITY_INSET + TOOLBOX_GRID_GAP + TOOLBOX_GRID_HOLE / 2;
+export const TOOLBOX_GRID_MARGIN: Mm = TOOLBOX_FOOT_CAVITY_INSET + TOOLBOX_GRID_GAP;
 
 /**
  * The starter module: 300 × 200 × 110 mm with the floor grid on.
@@ -151,6 +202,38 @@ export function defaultToolboxParams(overrides: Partial<ToolboxParams> = {}): To
     depth: 200,
     height: 110,
     grid: true,
+    pegs: [],
+    ...overrides,
+  };
+}
+
+/** Wall thickness of a new divider, mm — stiff enough to divide, thin enough
+ *  that two of them plus their sockets fit a 12 mm cell. */
+export const TOOLBOX_PEG_THICKNESS: Mm = 2.4;
+
+/**
+ * A divider with the defaults filled in; the caller mints the `id` and the
+ * height.
+ *
+ * The height is a REQUIRED argument rather than a default here on purpose. How
+ * tall a divider may stand depends on the seating ledge, which is geometry —
+ * and geometry lives in `engine/compiler/toolbox.ts`, not in the types. The
+ * panel passes `toolboxPegHeadroom(...)` from there, so there is one formula
+ * rather than one here and another beside the module.
+ */
+export function defaultToolboxPeg(
+  id: string,
+  spans: number,
+  height: Mm,
+  overrides: Partial<Omit<ToolboxPeg, 'id'>> = {},
+): ToolboxPeg {
+  return {
+    id,
+    spans,
+    height,
+    thickness: TOOLBOX_PEG_THICKNESS,
+    axis: 'x',
+    enabled: true,
     ...overrides,
   };
 }

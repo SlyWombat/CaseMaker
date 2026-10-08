@@ -184,6 +184,11 @@ describe('#150 — divider pegs', () => {
   it('refuses specs that cannot make a peg', () => {
     expect(buildDividerPegOp({ ...PEG, spans: 0 }, CTX)).toBeNull();
     expect(buildDividerPegOp({ ...PEG, height: 0 }, CTX)).toBeNull();
+    // A fractional span is not a smaller peg, it is a DIFFERENT peg: the tenons
+    // would sit half a pitch off the lattice, so they land on the floor between
+    // two sockets rather than in one.
+    expect(buildDividerPegOp({ ...PEG, spans: 2.5 }, CTX)).toBeNull();
+    expect(dividerPegProblem({ ...PEG, spans: 2.5 }, CTX)).toMatch(/whole number/);
     expect(dividerPegProblem({ ...PEG, thickness: 0 }, CTX)).toMatch(/thickness/);
     // A fit as wide as the socket leaves no tenon.
     expect(dividerPegProblem(PEG, { ...CTX, tenonFit: 5 })).toMatch(/no tenon/);

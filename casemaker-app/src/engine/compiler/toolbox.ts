@@ -4,9 +4,9 @@ import {
   TOOLBOX_FOOT_CAVITY_INSET,
   TOOLBOX_FOOT_H,
   TOOLBOX_FOOT_INSET,
-  TOOLBOX_GRID_HOLE,
+  TOOLBOX_GRID_DEPTH,
+  TOOLBOX_GRID_GAP,
   TOOLBOX_GRID_MARGIN,
-  TOOLBOX_GRID_PITCH,
   TOOLBOX_LEAD_IN,
   TOOLBOX_LEDGE_W,
   TOOLBOX_LID_H,
@@ -14,17 +14,26 @@ import {
   toolboxParamsProblem,
   type Mm,
   type ToolboxParams,
+  type ToolboxPeg,
 } from '@/types';
 import {
-  cylinder,
   difference,
   extrude,
+  rotate,
   translate,
   union,
   type BuildNode,
   type BuildOp,
 } from './buildPlan';
 import { rectProfile, type Profile } from './profile';
+import {
+  HOLE_GRID_PITCH,
+  HOLE_GRID_SOCKET,
+  holeGridCentres,
+  holeGridPocket,
+  type HoleGridOptions,
+} from './holeGrid';
+import { PEG_WIDTH_EAR, buildDividerPegOp } from './dividerPegs';
 
 /**
  * Issue #155 — the stacking-toolbox archetype: one module builder, used twice.
@@ -33,8 +42,12 @@ import { rectProfile, type Profile } from './profile';
  * read that header first. Two things worth repeating here because they explain
  * every line below:
  *
- *   - clean-room: the numbers are ours, derived from the requirements in
- *     `/Toolbox.md`, not measured off any reviewed product;
+ *   - clean-room except for the floor's socket interface: the module — foot,
+ *     ledge, flare, stacking joint — is ours, derived from the requirements in
+ *     `/Toolbox.md`; the floor grid is the MEASURED 5 × 5 on 12 mm lattice from
+ *     `holeGrid.ts`, reused on purpose (see that file's header, and
+ *     `types/toolbox.ts` for the licensing reasoning). No compatibility with
+ *     any reviewed product is claimed anywhere;
  *   - the registration FOOT points up in print orientation. It is the module's
  *     own flat base, inset `TOOLBOX_FOOT_INSET`, which drops into the module
  *     below and lands on that module's seating LEDGE. A skirt hanging *below*
@@ -92,11 +105,13 @@ export interface ToolboxDims {
    * far in from the module's outer face it reaches.
    */
   seat: { z: Mm; innerInset: Mm };
-  /** The floor grid, or `null` when it is off or nothing fits. */
+  /** The floor socket grid, or `null` when it is off or nothing fits. */
   grid: {
     pitch: Mm;
-    hole: Mm;
-    centreInset: Mm;
+    /** Side of one square socket, mm. */
+    socket: Mm;
+    /** How deep each socket is cut into the floor, mm. */
+    depth: Mm;
     columns: number;
     rows: number;
     holes: GridHole[];
@@ -121,37 +136,48 @@ export function seatingLedge(height: Mm): { z: Mm; innerInset: Mm; ring: boolean
 }
 
 /**
- * The hole centres on a `pitch` grid, symmetric about the origin, whose OUTLINE
- * clears the foot's wall on every side.
+ * The lattice the bin's floor carries, as one `HoleGridOptions`.
  *
- * Symmetric rather than corner-anchored: the module is centred, so an anchored
- * grid would drift off-centre as the plan changes, and two modules of different
- * sizes would stop sharing a common hole line — which is the whole point of a
+ * Kept in one place because four callers must agree on it exactly: the holes
+ * the panel counts, the pocket the floor is cut with, the limits a divider is
+ * checked against, and the context its tenons are built from. A second copy
+ * here is a second thing to keep in step.
+ *
+ * `anchor: 'centre'` is the toolbox's own requirement, not a default — see
+ * `toolboxGridHoles` and `HoleGridAnchor`.
+ */
+function toolboxGridOptions(): HoleGridOptions {
+  return {
+    pitch: HOLE_GRID_PITCH,
+    socket: HOLE_GRID_SOCKET,
+    margin: TOOLBOX_GRID_MARGIN,
+    anchor: 'centre',
+  };
+}
+
+/**
+ * The socket centres in the bin's floor: symmetric about the module's centre,
+ * with an ODD count, so the lattice is anchored on the centre line at whole
+ * multiples of the pitch.
+ *
+ * Symmetric rather than corner-anchored (which is `holeGridCentres`' default,
+ * for a one-off cavity): the module is centred, so a corner-anchored grid would
+ * drift off-centre as the plan changes, and two modules of different sizes
+ * would stop sharing a common hole line — which is the whole point of a
  * drop-in grid you can hang a partition from.
  *
- * The count is deliberately taken to the nearest ODD number. An even count has
- * no hole on the centre line, so its holes sit at ±half a pitch — the lattice
- * would still be square, but every hole would be 12.5 mm off the module's own
- * centre and two modules whose counts differed parity would share no hole line
- * at all. Odd keeps the lattice anchored on the centre, at whole multiples of
- * the pitch, which is what makes a partition fit two different-sized modules.
+ * Odd is the part that needs saying. An even count has no socket on the centre
+ * line, so its sockets sit at ±half a pitch: still square, but every one of
+ * them is half a pitch off the module's own centre, and two modules whose
+ * counts differed in parity would share no hole line at all. Odd keeps the
+ * lattice on the centre, at whole multiples of the pitch, which is what makes
+ * one divider fit two different-sized modules.
  */
 export function toolboxGridHoles(width: Mm, depth: Mm): GridHole[] {
-  const spanX = width - 2 * TOOLBOX_GRID_MARGIN;
-  const spanY = depth - 2 * TOOLBOX_GRID_MARGIN;
-  if (spanX < 0 || spanY < 0) return [];
-  const columns = 2 * Math.floor(spanX / (2 * TOOLBOX_GRID_PITCH)) + 1;
-  const rows = 2 * Math.floor(spanY / (2 * TOOLBOX_GRID_PITCH)) + 1;
-  const holes: GridHole[] = [];
-  for (let c = 0; c < columns; c++) {
-    for (let r = 0; r < rows; r++) {
-      holes.push({
-        x: (c - (columns - 1) / 2) * TOOLBOX_GRID_PITCH,
-        y: (r - (rows - 1) / 2) * TOOLBOX_GRID_PITCH,
-      });
-    }
-  }
-  return holes;
+  return holeGridCentres(centredRect(width, depth), toolboxGridOptions()).map(([x, y]) => ({
+    x,
+    y,
+  }));
 }
 
 /** A centred rectangle profile of the given plan. */
@@ -321,14 +347,24 @@ export function buildToolboxModule(
   let op = difference([moduleOuterSolid(width, depth, height), cavityCutter(width, depth, height)]);
   if (ledge.ring) op = union([op, seatingLedgeOps(width, depth, ledge.z)]);
 
-  const holes = opts.grid ? toolboxGridHoles(width, depth) : [];
-  if (holes.length > 0) {
-    // One cut per hole, through the whole floor with a little overhang at both
-    // ends so neither face keeps a zero-thickness skin.
-    const cutters = holes.map((h) =>
-      translate([h.x, h.y, -1], cylinder(TOOLBOX_FLOOR_T + 2, TOOLBOX_GRID_HOLE / 2, 24)),
-    );
-    op = difference([op, ...cutters]);
+  if (opts.grid && toolboxGridHoles(width, depth).length > 0) {
+    // BLIND, not through, and that is the whole point of the feature: the
+    // socket is what a divider's tenon seats ON. A hole through the floor
+    // gives the tenon nothing to bottom out on, so the divider's height would
+    // be set by its plate resting on the floor, and the tenon would poke into
+    // the module below — which for a stack is the cavity of the bin underneath.
+    // It also leaves the bin sealed, which a toolbox wants.
+    //
+    // Cut from the floor's TOP face down `TOOLBOX_GRID_DEPTH`, so the pocket
+    // runs z = FLOOR_T - DEPTH .. FLOOR_T and keeps half the floor under it.
+    const pocket = holeGridPocket(centredRect(width, depth), toolboxGridOptions());
+    op = difference([
+      op,
+      translate(
+        [0, 0, TOOLBOX_FLOOR_T - TOOLBOX_GRID_DEPTH],
+        extrude(pocket, TOOLBOX_GRID_DEPTH),
+      ),
+    ]);
   }
 
   return op;
@@ -365,9 +401,9 @@ export function computeToolboxDims(
     grid:
       holes.length > 0
         ? {
-            pitch: TOOLBOX_GRID_PITCH,
-            hole: TOOLBOX_GRID_HOLE,
-            centreInset: TOOLBOX_GRID_MARGIN,
+            pitch: HOLE_GRID_PITCH,
+            socket: HOLE_GRID_SOCKET,
+            depth: TOOLBOX_GRID_DEPTH,
             columns,
             rows,
             holes,
@@ -377,8 +413,147 @@ export function computeToolboxDims(
 }
 
 /**
- * The two printed parts: the bin, and a lid which is the SAME module at
- * `TOOLBOX_LID_H`.
+ * How far from the module's centre a divider's END may reach, mm.
+ *
+ * NOT the same as the grid's own limit, and the difference is the foot. A
+ * socket only has to clear the wall with its own outline — but a peg's plate
+ * runs on `PEG_WIDTH_EAR` past its outer tenon before it ends, and at floor
+ * level the wall it has to clear is the FOOT CAVITY face at
+ * `TOOLBOX_FOOT_CAVITY_INSET`, not the thinner wall above the flare. So the
+ * outermost socket column takes a socket and not a divider: a peg hung there
+ * buries its end in the wall.
+ *
+ * The second bound is the seating ledge, which is what makes the LID's stack
+ * work: it reaches `TOOLBOX_LEDGE_W` in from the cavity wall at the rim, so a
+ * divider standing further out than its inner edge would foul the module above
+ * as it lands. Keeping the ends inboard of the ledge also means a divider can
+ * be as tall as the ledge — `toolboxPegProblem` allows exactly that — without
+ * ever meeting the ledge's 45° underside, because the ledge does not reach
+ * where the divider stands.
+ *
+ * On the default 300 × 200 floor neither bound costs anything: the ear still
+ * clears at the 11th column out and the lattice is 11 columns either side, so
+ * the grid count is unchanged. It bites on a small module, where a divider has
+ * to be shorter-waisted than the socket count alone would suggest.
+ */
+function pegReach(width: Mm, depth: Mm): { x: Mm; y: Mm } {
+  const keep = Math.max(
+    TOOLBOX_FOOT_CAVITY_INSET + PEG_WIDTH_EAR + TOOLBOX_GRID_GAP,
+    TOOLBOX_WALL_T + TOOLBOX_LEDGE_W + TOOLBOX_GRID_GAP,
+  );
+  return { x: width / 2 - keep, y: depth / 2 - keep };
+}
+
+/** The furthest tenon offset from the centre, in whole pitches, that is still
+ *  in reach — the peg's own limit, not the lattice's. */
+function maxPegIndex(reach: Mm): number {
+  return Math.floor(reach / HOLE_GRID_PITCH + 1e-9);
+}
+
+/** The widest divider that fits across an axis, in sockets. Always odd, and at
+ *  least 1 when the grid fits at all — the panel uses it to bound the input. */
+export function toolboxPegSpanLimit(p: ToolboxParams, axis: 'x' | 'y'): number {
+  return 2 * maxPegIndex(pegReach(p.width, p.depth)[axis]) + 1;
+}
+
+/**
+ * The highest a divider may stand above the bin's floor, mm — the cavity up to
+ * the seating ledge, which is as tall as the bin's interior actually is.
+ *
+ * Exported because the panel needs the same number to seed a new divider's
+ * height: the alternative is the panel deriving "the ledge, minus the floor"
+ * itself, which is the same formula written twice.
+ */
+export function toolboxPegHeadroom(p: ToolboxParams): Mm {
+  return seatingLedge(p.height).z - TOOLBOX_FLOOR_T;
+}
+
+/**
+ * Why one divider will not build, or `null` when it will.
+ *
+ * DELIBERATELY NOT folded into `toolboxParamsProblem`. That predicate gates the
+ * WHOLE module — a non-null result makes `buildToolboxModule` return null and
+ * the toolbox vanishes from the viewport. A divider with an impossible span
+ * must drop the DIVIDER, not the bin it stands in, so this is a second
+ * predicate, reported by the panel and consulted by `buildToolboxNodes` before
+ * it emits a node.
+ */
+export function toolboxPegProblem(peg: ToolboxPeg, p: ToolboxParams): string | null {
+  // The grid is a property of the BIN, not of this divider, so this one reason
+  // carries no id — every divider in a grid-less bin would say the same thing,
+  // and `toolboxPegProblems` collapses it to one line.
+  if (!p.grid) return 'The floor grid is off, so a divider has no sockets to plug into';
+  if (!(peg.spans >= 1)) return `Divider ${peg.id}: it must span at least one socket`;
+  // A socket is the unit, so a fractional span is meaningless — and it is
+  // REACHABLE: the panel's span input steps by one but a typed `2.5` passes
+  // React's `Number()`. Caught here as well as in `dividerPegProblem` because
+  // this predicate is what the panel reads; without it the divider would simply
+  // vanish from the viewport with nothing said, since the builder drops a peg
+  // whose op comes back null.
+  if (!Number.isInteger(peg.spans)) {
+    return `Divider ${peg.id}: ${peg.spans} sockets is not a whole number of sockets — its tenons would land between the holes`;
+  }
+  const across = peg.axis === 'x' ? 'width' : 'depth';
+  const limit = maxPegIndex(pegReach(p.width, p.depth)[peg.axis]);
+  // floor(spans / 2) is the outermost tenon's offset in pitches, for either
+  // parity: odd spans put the tenons on whole pitches either side of the
+  // module's centre, even ones half a pitch off it, and both reach the same
+  // distance out.
+  if (Math.floor(peg.spans / 2) > limit) {
+    return `Divider ${peg.id}: ${peg.spans} sockets across the ${across} runs past the floor's usable sockets — at most ${2 * limit + 1} fit`;
+  }
+  if (!(peg.height > 0)) return `Divider ${peg.id}: height must be greater than zero`;
+  const headroom = toolboxPegHeadroom(p);
+  if (peg.height > headroom) {
+    return `Divider ${peg.id}: ${peg.height} mm stands above the ${Math.round(headroom)} mm the bin holds under its seating ledge`;
+  }
+  if (!(peg.thickness > 0)) return `Divider ${peg.id}: thickness must be greater than zero`;
+  return null;
+}
+
+/**
+ * Every divider's reason for not building, in list order — `[]` when they all
+ * build. The panel's form of `toolboxPegProblem`, and the only thing it and the
+ * builder both read, so a divider that is reported is exactly one that is not
+ * emitted.
+ */
+export function toolboxPegProblems(p: ToolboxParams): string[] {
+  const reasons = (p.pegs ?? [])
+    .map((peg) => toolboxPegProblem(peg, p))
+    .filter((reason): reason is string => reason !== null);
+  // Every other reason names its divider, so the only duplicate a Set can
+  // collapse is the grid one — which is one fact about the bin, not one per
+  // divider.
+  return [...new Set(reasons)];
+}
+
+/**
+ * Where a divider sits in the bin, and whether it is turned across the width.
+ *
+ * The peg is built in its own frame with the wall along X and centred on the
+ * origin, so an `'x'` divider needs no turn and a `'y'` one takes a quarter
+ * turn about Z. Either way the placement is `TOOLBOX_FLOOR_T`, the floor's top
+ * face: the peg's wall starts at its own z = 0 and its tenons hang below it.
+ *
+ * The offset along the wall is the interesting part. The tenons sit
+ * `(spans - 1) / 2` pitches either side of the peg's own centre and the sockets
+ * are on whole pitches from the module's centre, so an ODD span centres the
+ * divider on the module and an EVEN one has no choice but to sit half a pitch
+ * off — that is the only position where both tenons find a socket. It looks
+ * like an off-by-one and is not, which is why it is written down.
+ */
+function pegPlacement(peg: ToolboxPeg): { offset: [Mm, Mm, Mm]; spin: boolean } {
+  const spin = peg.axis === 'y';
+  const along = peg.spans % 2 === 1 ? 0 : HOLE_GRID_PITCH / 2;
+  return {
+    offset: spin ? [0, along, TOOLBOX_FLOOR_T] : [along, 0, TOOLBOX_FLOOR_T],
+    spin,
+  };
+}
+
+/**
+ * The parts a toolbox prints: the bin, a lid which is the SAME module at
+ * `TOOLBOX_LID_H`, and one free node per enabled divider.
  *
  * The lid is deliberately not a dead-flat cap. A cap has to present a seating
  * surface for the next module up and a rim to square it against; a plain plate
@@ -403,8 +578,37 @@ export function buildToolboxNodes(p: ToolboxParams): BuildNode[] | null {
   const bin = buildToolboxModule(p, p.height, { grid: p.grid });
   const lid = buildToolboxModule(p, TOOLBOX_LID_H, { grid: false });
   if (!bin || !lid) return null;
-  return [
+
+  const nodes: BuildNode[] = [
     { id: TOOLBOX_BIN_NODE_ID, op: bin },
     { id: TOOLBOX_LID_NODE_ID, op: translate([0, 0, seatingLedge(p.height).z], lid) },
   ];
+
+  // The dividers, as their OWN top-level nodes — free pieces you drop into the
+  // finished bin, for the same reason `dividerPegs.ts` emits pegs separately:
+  // fusing one into the bin would make it un-printable as something you take
+  // out. The print layout re-lays every node by its own bounding box, so an
+  // assembly position here is a picture, not a print position.
+  //
+  // Skipped when `toolboxPegProblem` objects, which is exactly when the panel
+  // reports a reason — so the two never disagree about what exists.
+  for (const peg of p.pegs ?? []) {
+    if (!peg.enabled) continue;
+    if (toolboxPegProblem(peg, p) !== null) continue;
+    const op = buildDividerPegOp(
+      { id: peg.id, spans: peg.spans, height: peg.height, thickness: peg.thickness, enabled: true },
+      {
+        grid: { pitch: HOLE_GRID_PITCH, socket: HOLE_GRID_SOCKET },
+        socketDepth: TOOLBOX_GRID_DEPTH,
+      },
+    );
+    if (!op) continue;
+    const { offset, spin } = pegPlacement(peg);
+    nodes.push({
+      id: `divider-peg-${peg.id}`,
+      op: translate(offset, spin ? rotate([0, 0, 90], op) : op),
+    });
+  }
+
+  return nodes;
 }
