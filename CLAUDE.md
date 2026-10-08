@@ -41,6 +41,18 @@ $HA -X POST /api/services/switch/turn_on  -d '{"entity_id":"switch.makera_cnc"}'
 $HA -X POST /api/services/switch/turn_off -d '{"entity_id":"switch.makera_cnc"}'
 ```
 
+`casemaker-app/tools/z1/power.sh` wraps this and does the part a bare curl does not: `on` waits for
+the controller to **come online** (command port 2222 accepts, then the `?` status line answers) and
+exits non-zero if it does not, leaving the plug on; `off` refuses unless the machine is `Idle`
+(`--force` overrides; an unreachable machine is switched off with a warning). `status` reads both.
+Run it from WSL (it calls the Windows harness itself):
+
+```sh
+casemaker-app/tools/z1/power.sh on        # --wait <seconds>, default 180; --dry-run to rehearse
+casemaker-app/tools/z1/power.sh off
+casemaker-app/tools/z1/power.sh status
+```
+
 Switching it is a **physical** act, not a code change: check the state before toggling, and never
 cut power while a job is running. The machine itself is at `192.168.10.43`; the bench harness is
 `casemaker-app/tools/z1/` (run from Windows).
