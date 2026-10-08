@@ -2,7 +2,7 @@
 # Bench power for the Makera Z1: switch the Home Assistant plug, then CHECK the machine followed.
 #
 #   tools/z1/power.sh status
-#   tools/z1/power.sh on  [--wait <seconds>] [--dry-run]
+#   tools/z1/power.sh on  [--wait <seconds>] [--cycle] [--dry-run]
 #   tools/z1/power.sh off [--force] [--dry-run]
 #
 # `on` is not done when the plug clicks. It is done when the controller has booted, joined the LAN
@@ -11,6 +11,11 @@
 #
 #   1. the command port (2222) accepts a TCP connection;
 #   2. the status line comes back (read through tools/z1/z1.mjs, which has to run on Windows).
+#
+# THE MACHINE SWITCHES ITSELF OFF after sitting idle (observed 2026-10-08: on and Idle at 11:3x UTC,
+# silent on every port by ~13:00 with the plug still on, and no plug-on could wake it). A plug that is
+# already on therefore proves nothing. `on --cycle` switches the plug off, waits, and on again, which
+# is the only remote way to boot it from that state; plain `on` says so when it times out that way.
 #
 # On a timeout the plug is LEFT ON. A machine that is slow to boot is not a reason to cut its mains,
 # and the exit code plus the last thing seen say where it stopped.
@@ -38,10 +43,12 @@ cmd="${1:-}"
 wait_s=180
 force=0
 dry=0
+cycle=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --wait) wait_s="${2:?--wait needs a number of seconds}"; shift 2 ;;
     --force) force=1; shift ;;
+    --cycle) cycle=1; shift ;;
     --dry-run) dry=1; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -88,6 +95,16 @@ case "$cmd" in
   on)
     before="$(plug_state)"; [ -n "$before" ] || die "could not read $ENTITY from Home Assistant"
     say "plug is $before"
+    if [ "$before" = "on" ] && [ "$cycle" -eq 1 ]; then
+      if port_open; then
+        say "machine already answers on $HOST:$PORT; no cycle needed"
+      else
+        say "plug is on but the machine is silent (it switches itself off when idle): cycling the plug"
+        plug_set off || die "Home Assistant refused turn_off"
+        [ "$dry" -eq 1 ] || sleep 10
+        before=off
+      fi
+    fi
     if [ "$before" != "on" ]; then
       plug_set on || die "Home Assistant refused turn_on"
       [ "$dry" -eq 1 ] || say "plug switched on"
@@ -97,7 +114,11 @@ case "$cmd" in
     deadline=$((SECONDS + wait_s))
     say "waiting up to ${wait_s}s for $HOST:$PORT ..."
     until port_open; do
-      [ "$SECONDS" -lt "$deadline" ] || die "plug is ON but $HOST:$PORT never accepted a connection in ${wait_s}s (left powered)" 3
+      if [ "$SECONDS" -ge "$deadline" ]; then
+        hint=""
+        [ "$cycle" -eq 0 ] && hint=" If the plug was already on, the machine has probably switched itself off while idle: re-run with --cycle."
+        die "plug is ON but $HOST:$PORT never accepted a connection in ${wait_s}s (left powered).$hint" 3
+      fi
       sleep 3
     done
     say "command port is accepting connections after $((SECONDS - (deadline - wait_s)))s"
