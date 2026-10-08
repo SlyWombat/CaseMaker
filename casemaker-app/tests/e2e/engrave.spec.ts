@@ -129,6 +129,29 @@ test('a hole added in the panel is cut as its own operation', async ({ cm, page 
   expect(state.operations).toBe(4); // three labels + the one hole
 });
 
+// #288 — the previewed blank drew only the REGION items, so a drilled hole was cut by the program
+// and missing from the picture. The viewport's legend is built from `preview.floors`, and a floor
+// exists only for a cut that was drawn — so a hole at a depth none of the three labels shares can
+// only reach the legend if the preview drew it. The three label depths are 2.0, 1.0 and 0.5.
+test('a drilled hole reaches the preview, not only the program (#288)', async ({ cm, page }) => {
+  await cm.ready();
+  await openEngravePanel(page);
+
+  // The labels' own depths are on the legend before anything is added…
+  await expect(page.getByTestId('engrave-preview-legend')).toBeVisible();
+  for (const d of ['2', '1', '0.5']) await expect(page.getByTestId(`engrave-legend-${d}`)).toBeVisible();
+  await expect(page.getByTestId('engrave-legend-3.5')).toHaveCount(0);
+
+  await page.getByTestId('engrave-add-summary').click();
+  await page.getByTestId('engrave-add-drill').click();
+  await expect(page.getByTestId('engrave-drill-row-0')).toBeVisible();
+  await page.getByTestId('engrave-drill-depth-0').fill('3.5');
+
+  // …and the hole's own depth joins them, which it can only do through a drawn floor.
+  await expect(page.getByTestId('engrave-legend-3.5')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('engrave-legend-3.5')).toContainText('3.5 mm');
+});
+
 // #207's mount: "Run sheet" opens the printable operator sheet for a generated, verified job.
 // The sheet is a DOCUMENT — it names the file Save writes, and under print media the app's
 // chrome (the sheet's own toolbar included) is hidden so only the sheet reaches the paper.

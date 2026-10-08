@@ -56,6 +56,7 @@ import {
   keepOutFindings,
   measureLabels,
   traceCutRegions,
+  type CutRegion,
   type LabelEngravability,
   type LabelRatioAt,
   type PerCharGlyph,
@@ -156,14 +157,27 @@ function regionText(item: EngraveItem | undefined): string {
 }
 
 /**
- * The measured opening of a job: the plan, its engravability measurements and the ready-to-cut
- * regions. Exported so `engraveOracle.spec.ts` can build a bad-step-over toolpath off the SAME
- * polygons `engraveGenerate` would have cut, without re-deriving them.
+ * The measured opening of a job: the plan, its engravability measurements, the ready-to-cut regions
+ * and every cut the program makes. Exported so `engraveOracle.spec.ts` can build a bad-step-over
+ * toolpath off the SAME polygons `engraveGenerate` would have cut, without re-deriving them — and so
+ * `engravePreview` can DRAW those same polygons instead of measuring a second set of its own (#288).
  */
 export interface EngraveRegions {
   plan: ReturnType<typeof toPartPlan>;
   measured: LabelEngravability[];
+  /** What the REGION CAM is handed: labels, shapes and drills (#220). Traces are not here — see `cuts`. */
   regions: EngraveRegion[];
+  /**
+   * EVERY cut the program makes, in cutting order, one entry per item (#288): the region CAM's own
+   * list above, then the single-line traces, which are CAM'd separately (`generateTrace`) and so are
+   * deliberately absent from `regions` — a swept line is not a pocketed region.
+   *
+   * This is the ONE list the oracle's prediction and the preview's picture are both built from, so a
+   * class added here reaches the prediction, the picture and the program together, and a class left
+   * out is missing from all three loudly rather than from the picture quietly (#288: the preview
+   * walked `plan.engraves` on its own, so it never drew a drill's hole or a trace's groove).
+   */
+  cuts: CutRegion[];
   predicted: OraclePredicted[];
   tool: Tool | null;
   radius: number | null;
@@ -243,17 +257,18 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob): EngraveRe
     });
   }
 
-  const predicted: OraclePredicted[] = regions.map((r2) => ({ depth: r2.depth, polygons: r2.polygons }));
-
   // #287 — a single-line trace cuts the region its cutter SWEEPS (#270): one entry per trace, at
-  // the trace's own floor. The oracle compares the SIMULATION against `predicted` and refuses a
-  // file whose cut is outside it, so a trace left out of this list would read as an over-cut and
-  // refuse a correct program. The builder is the same `traceCutRegions` the void warning uses, so
-  // the warning and the oracle cannot disagree about where a trace cuts. Empty — a no-op — when
-  // the job has no trace or no usable cutter, the same "nothing measured" rule as above.
-  for (const t of traceCutRegions(tl, plan, radius)) predicted.push({ depth: t.depth, polygons: t.polygons });
+  // the trace's own floor. The builder is the same `traceCutRegions` the void warning uses, so the
+  // warning, the oracle and the picture cannot disagree about where a trace cuts. Empty — a no-op —
+  // when the job has no trace or no usable cutter, the same "nothing measured" rule as above.
+  //
+  // The list is `cuts` rather than a private array because it is the ONE place the cut classes are
+  // enumerated (#288): the prediction below and `engravePreview`'s picture are both its projection,
+  // so a fourth class (#218's cut-outs) lands in the program, the oracle and the preview together.
+  const cuts: CutRegion[] = [...regions, ...traceCutRegions(tl, plan, radius)];
+  const predicted: OraclePredicted[] = cuts.map((c) => ({ depth: c.depth, polygons: c.polygons }));
 
-  return { plan, measured, regions, predicted, tool, radius, findings };
+  return { plan, measured, regions, cuts, predicted, tool, radius, findings };
 }
 
 /** Count what the panel reports: operations, cutting moves, estimated seconds, depth passes. */

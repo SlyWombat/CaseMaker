@@ -1,6 +1,7 @@
 /**
- * The engrave preview (#205): the stock with every enabled label's OPENED region cut to its
- * own depth, the floor of each pocket, the vise jaws and the sacrificial material (#213) —
+ * The engrave preview (#205): the stock with EVERY cut the program will make removed to its own
+ * depth — a label's or shape's opened region, a drill's holes (#220), a trace's swept groove
+ * (#219/#287) — the floor of each cut, the vise jaws and the sacrificial material (#213) —
  * evaluated in the sim worker.
  *
  * Why the sim worker and not the geometry worker (`/Simulation.md`, #205): the preview needs
@@ -17,6 +18,12 @@
  * that region and its polygons; the preview reuses those polygons so the drawn cut and the
  * findings can never disagree about which cutter was measured.
  *
+ * #288 — the cuts are not re-derived here at all: `engraveRegions` is called and the picture is
+ * built from ITS `cuts`, the same list the oracle's prediction is a projection of. The preview used
+ * to walk `plan.engraves` on its own, which is why a drilled hole and a traced groove were cut by
+ * the program and absent from the picture. Now the classes are enumerated in exactly one place, and
+ * a class that reaches the program reaches the picture with it.
+ *
  * Ownership: every `CrossSection` and `Manifold` created here is `.delete()`d exactly once,
  * following `sweep.ts`. The only things that leave are `NodeMeshOutput` buffers and plain data.
  */
@@ -24,8 +31,8 @@
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 import { toPartPlan, keepOutLimit, keepOutMembrane, labelProfile } from '@/engine/cnc/engrave/partPlan';
-import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { viseEnvelope, validateVise } from '@/engine/cnc/fixture';
+import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { viseEnvelope } from '@/engine/cnc/fixture';
 import { sacrificialBoxes, type SacrificialBox } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
@@ -34,15 +41,13 @@ import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evalua
 import { boxSolid, OVERSHOOT_MM } from '@/workers/geometry/sweep';
 import { meshOutputOf, type NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import {
-  engraveCutRegions,
-  engravabilityFindings,
-  keepOutFindings,
   measureLabels,
   suggestCapHeight,
   type LabelEngravability,
   type LabelRatioAt,
   type PerCharGlyph,
 } from './engraveGeometry';
+import { engraveRegions } from './engraveGenerate';
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
 
@@ -113,9 +118,9 @@ export interface EngravePreviewVoid {
 
 /** Everything the panel and the viewport need for one job, as plain data + mesh buffers. */
 export interface EngravePreview {
-  /** The stock with every enabled, error-free label's opened region cut to its depth. Work frame. */
+  /** The stock with every enabled, error-free cut removed to its own depth (#288). Work frame. */
   stock: NodeMeshOutput;
-  /** One mesh per cut label: the floor of its pocket. */
+  /** One mesh per cut — label, shape, drill or trace: the bottom it leaves at its depth. */
   floors: EngravePreviewFloor[];
   /** The vise jaws (un-inflated), from `viseEnvelope`. */
   fixture: EngravePreviewFixture[];
@@ -125,7 +130,7 @@ export interface EngravePreview {
   voids: EngravePreviewVoid[];
   /** Per-label measurements, without the (large) polygons: the findings carry the rest. */
   engravability: Omit<LabelEngravability, 'polygons'>[];
-  /** `validateJob` + `validateVise` + `engravabilityFindings`, concatenated. */
+  /** `engraveRegions`' findings — `validateJob` + `validateVise` + engravability + the #171 void warning (#288). */
   findings: JobFinding[];
   /** #211's cutter recommendation, with the compromise message completed here (see below). */
   recommendation: ToolRecommendation;
@@ -176,24 +181,6 @@ function ratioAtFor(
 }
 
 /**
- * Drop exact duplicate findings. `validateJob` and `validateVise` both raise `vise-default`
- * for an unmeasured vise, and the issue asks for both validators' output concatenated: the
- * job-level list is the union, not every validator's copy. Distinct messages (even with the
- * same code) are kept — only byte-identical findings collapse.
- */
-function dedupeFindings(findings: readonly JobFinding[]): JobFinding[] {
-  const seen = new Set<string>();
-  const out: JobFinding[] = [];
-  for (const f of findings) {
-    const key = `${f.severity}|${f.code}|${f.labelId ?? ''}|${f.message}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(f);
-  }
-  return out;
-}
-
-/**
  * #211's `recommendTool` deliberately left the size suggestion out of its compromise message
  * (it has no way to re-measure at a larger cap height). The worker can: compose #201's
  * `suggestCapHeight` for the worst label with the recommended cutter's radius and append
@@ -223,30 +210,14 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     if (gen < latestGen) return null;
     latestGen = gen;
 
-    const plan = toPartPlan(job);
+    // #288 — the measurement, the findings and the cuts ALL come from `engraveRegions`, the same
+    // call `engraveGenerate` makes, so the picture is drawn from the polygons the CAM is handed and
+    // a second, drifting measurement cannot exist. That includes the #171 void warning the panel
+    // shows while the label is being placed (#270's trace sweep included) — it is the run's own
+    // list, not a copy of it. `perChar` stays local: `recommendTool` re-measures at each candidate
+    // cutter's own radius below, which is the preview's own question and no other module's.
     const perChar = perCharFor(job);
-    const tool = jobTool(job);
-    const radius = tool ? cuttingRadiusForSweep(tool) : null;
-    // Measure with `jobTool(job)`'s radius and nothing else (#201), so a finding's message and
-    // its measurement can never name different cutters. A job with no usable cutter measures
-    // nothing and still returns a preview (with `tool-missing` among the findings).
-    const measured =
-      radius && radius.ok ? measureLabels(tl, plan, radius.radius, job.edgeMargin, perChar) : [];
-
-    const engFindings =
-      radius && radius.ok
-        ? engravabilityFindings(job, measured, ratioAtFor(tl, job, radius.radius))
-        : [];
-
-    const findings = dedupeFindings([
-      ...validateJob(job),
-      ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
-      ...engFindings,
-      // #171 — the same warning the run raises, off the same shared region builder, so the
-      // panel shows it while the label is being placed rather than only after Generate. The
-      // radius goes in so a trace's swept region can be built too (#270); it is null-safe.
-      ...keepOutFindings(tl, job, plan, engraveCutRegions(plan, measured), radius?.ok ? radius.radius : null),
-    ]);
+    const { plan, measured, cuts, findings } = engraveRegions(tl, job);
 
     // A label whose findings include an error is left out of the cut — the stock is drawn
     // uncut there — but its row and findings are still reported (the issue's rule).
@@ -261,38 +232,46 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     const placedStock = stockBody.translate([0, 0, -job.stock.thickness]);
     stockBody.delete();
 
-    const byId = new Map(measured.map((m) => [m.labelId, m] as const));
-    const cuts: ManifoldInstance[] = [];
+    const cutBodies: ManifoldInstance[] = [];
     const floors: EngravePreviewFloor[] = [];
 
-    for (const engrave of plan.engraves) {
-      const row = byId.get(engrave.id);
-      if (!row || row.polygons.length === 0) continue;
-      if (errored.has(engrave.id)) continue;
+    // One pass over `cuts` — labels, shapes (#214), drills (#220) and traces (#219) alike. Each
+    // carries its own polygons and its own depth already, so this loop is about Manifold, not about
+    // item kinds: a class added to `cuts` is drawn without anything here changing (#288).
+    //
+    // A cut whose item has an ERROR finding is left out — the "drawn uncut, still reported" rule
+    // below — and every class reports with `labelId` set to the item's own id, drills and traces
+    // included (`jobSetup.ts`), so one `errored` set covers them all.
+    for (const cut of cuts) {
+      if (cut.polygons.length === 0) continue;
+      if (errored.has(cut.id)) continue;
 
-      const openedCS = executeProfile(tl, { kind: 'p-poly', contours: row.polygons });
+      const openedCS = executeProfile(tl, { kind: 'p-poly', contours: cut.polygons });
 
       // The cut: the opened region from −depth up PAST the top face (OVERSHOOT_MM, `sweep.ts`),
       // so the subtraction never has a coplanar face at Z = 0 to fight with.
-      const cutBody = tl.Manifold.extrude(openedCS, engrave.depth + OVERSHOOT_MM);
-      cuts.push(cutBody.translate([0, 0, -engrave.depth]));
+      const cutBody = tl.Manifold.extrude(openedCS, cut.depth + OVERSHOOT_MM);
+      cutBodies.push(cutBody.translate([0, 0, -cut.depth]));
       cutBody.delete();
 
-      // The floor: the same opened region as a sliver sitting at the pocket floor.
+      // The floor: the same opened region as a sliver at the cut's bottom. A drill and a trace have
+      // one too — a plunge and a swept flat end mill both leave a FLAT bottom at `depth`, which is
+      // exactly what a pocketed region leaves — so `floors` stays "the bottom of every cut" and the
+      // viewport's depth ramp gives a groove the same colour treatment a pocket gets.
       const floorBody = tl.Manifold.extrude(openedCS, FLOOR_THICKNESS_MM);
-      const floorSolid = floorBody.translate([0, 0, -engrave.depth]);
+      const floorSolid = floorBody.translate([0, 0, -cut.depth]);
       floorBody.delete();
-      floors.push({ labelId: engrave.id, depth: engrave.depth, mesh: meshOutputOf(floorSolid) });
+      floors.push({ labelId: cut.id, depth: cut.depth, mesh: meshOutputOf(floorSolid) });
       floorSolid.delete();
 
       openedCS.delete();
     }
 
     let stock: ManifoldInstance;
-    if (cuts.length > 0) {
-      stock = tl.Manifold.difference([placedStock, ...cuts]);
+    if (cutBodies.length > 0) {
+      stock = tl.Manifold.difference([placedStock, ...cutBodies]);
       placedStock.delete();
-      for (const c of cuts) c.delete();
+      for (const c of cutBodies) c.delete();
     } else {
       stock = placedStock;
     }

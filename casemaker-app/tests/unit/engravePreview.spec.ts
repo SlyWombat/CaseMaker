@@ -9,8 +9,13 @@
 import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
-import { createEngravePreviewer } from '@/workers/sim/engravePreview';
+import { createEngravePreviewer, FLOOR_THICKNESS_MM } from '@/workers/sim/engravePreview';
+import { engraveRegions } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
+import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
+import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { presetJawStrips, presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -285,6 +290,157 @@ describe('engravePreview — sacrificial material (#213)', () => {
     // The 10 mm overhang, not the (absent) strips, is what shifts the jaws.
     expect(p.fixture[0]!.mesh.bbox.max[0]).toBe(-10);
     expect(p.fixture[1]!.mesh.bbox.min[0]).toBe(L + 10);
+  });
+});
+
+// #288 — the picture drew only `plan.engraves`, so a plunge drill (#220) and a single-line trace
+// (#219) were cut by the program and absent from the previewed blank. Each test's control is
+// `plan.engraves` itself: the item's id is NOT in that list, which is exactly why the old loop could
+// not have drawn it however long it ran.
+describe('engravePreview — drills and traces are in the picture (#288)', () => {
+  // Its own previewer: the tests above pin the shared one's latest generation.
+  const pv = createEngravePreviewer(tl);
+  let g = 0;
+  function preview(job: EngraveJob) {
+    const p = pv.engravePreview(job, ++g);
+    if (!p) throw new Error('the previewer refused a fresh generation');
+    return p;
+  }
+
+  /** The default job's cutter radius — asserted, not assumed, so a library change cannot hide here. */
+  const R = (() => {
+    const r = cuttingRadiusForSweep(jobTool(defaultEngraveJob())!);
+    if (!r.ok) throw new Error('the default job’s cutter is not sweepable');
+    return r.radius;
+  })();
+
+  /** Area of the regular n-gon `segmentsForRadius` polygonizes a disc of radius `r` into. */
+  function discArea(r: number): number {
+    const n = segmentsForRadius(r);
+    return (n / 2) * r * r * Math.sin((2 * Math.PI) / n);
+  }
+
+  /** `uncut − removed`, off the drawn mesh — the preview's own account of what it cut. */
+  function removedVolume(job: EngraveJob, p: ReturnType<typeof preview>): number {
+    return job.stock.length * job.stock.width * job.stock.thickness - meshVolume(p.stock);
+  }
+
+  /** One shallow label, so the drill's and the trace's own volume stands out against it. */
+  function oneLabelJob(): EngraveJob {
+    const job = defaultEngraveJob();
+    job.labels = [{ ...job.labels[0]!, id: 'lbl', depth: 0.5 }];
+    return job;
+  }
+
+  it('cuts a drill’s hole to its depth, and draws its floor', () => {
+    const job = oneLabelJob();
+    job.drills = [
+      {
+        kind: 'drill',
+        id: 'd1',
+        name: 'Magnet',
+        position: { x: 20, y: 20 }, // clear of the label: the volumes below are summed, not unioned
+        rotation: 0,
+        depth: 3,
+        enabled: true,
+        through: false,
+      },
+    ];
+    const p = preview(job);
+
+    // The control: a drill is not a region item, so `plan.engraves` never carried it.
+    expect(toPartPlan(job).engraves.map((e) => e.id)).toEqual(['lbl']);
+
+    const floor = p.floors.find((f) => f.labelId === 'd1');
+    expect(floor).toBeDefined();
+    expect(floor!.depth).toBe(3);
+    // The floor IS the hole's cross-section: a prism of the cutter's own disc, so its mesh measures
+    // the drawn hole against the closed form rather than against another run of this code.
+    expect(meshVolume(floor!.mesh) / FLOOR_THICKNESS_MM).toBeCloseTo(discArea(R), 3);
+
+    // …and the stock lost the label's region plus the hole, at their own depths.
+    const labelArea = p.engravability.find((row) => row.labelId === 'lbl')!.openedArea;
+    const expected = labelArea * 0.5 + discArea(R) * 3;
+    expect(Math.abs(removedVolume(job, p) - expected) / expected).toBeLessThan(0.01);
+  });
+
+  it('cuts a trace’s swept groove to its depth, and draws its floor', () => {
+    const job = oneLabelJob();
+    job.traces = [
+      {
+        kind: 'line',
+        id: 'tr',
+        position: { x: 20, y: 30 },
+        rotation: 0,
+        points: [
+          [0, 0],
+          [30, 0],
+        ],
+        closed: false,
+        depth: 2,
+        enabled: true,
+      },
+    ];
+    const p = preview(job);
+
+    // The control: nor is a trace — it is CAM'd by `generateTrace`, never pocketed as a region.
+    expect(toPartPlan(job).engraves.map((e) => e.id)).toEqual(['lbl']);
+
+    const floor = p.floors.find((f) => f.labelId === 'tr');
+    expect(floor).toBeDefined();
+    expect(floor!.depth).toBe(2);
+    // The groove is the cutter's SWEEP, not the centre line: a 30 mm line under a r = 0.5 cutter is
+    // a 30 × 1 mm capsule, 30 + πr² ≈ 30.79 mm² (polygonized, so a shade under).
+    const grooveArea = meshVolume(floor!.mesh) / FLOOR_THICKNESS_MM;
+    const capsule = 30 * (2 * R) + Math.PI * R * R;
+    expect(Math.abs(grooveArea - capsule) / capsule).toBeLessThan(0.02);
+
+    const labelArea = p.engravability.find((row) => row.labelId === 'lbl')!.openedArea;
+    const expected = labelArea * 0.5 + capsule * 2;
+    expect(Math.abs(removedVolume(job, p) - expected) / expected).toBeLessThan(0.03);
+  });
+
+  // The anti-drift test #288 is about: `engraveRegions().cuts` is the one list the prediction, the
+  // program and the picture share, so this fails the moment a class reaches `cuts` undrawn (or a
+  // drawn class is dropped from `cuts`) — which is the shape of the bug being fixed.
+  it('draws exactly the cuts `engraveRegions` lists — one floor each, in that order', () => {
+    const job = oneLabelJob();
+    job.shapes = [
+      {
+        id: 'hole',
+        kind: 'circle',
+        position: { x: 50, y: 30 },
+        rotation: 0,
+        depth: 0.8,
+        enabled: true,
+        diameter: 20,
+      },
+    ];
+    job.drills = [
+      { kind: 'drill', id: 'd1', name: 'Magnet', position: { x: 20, y: 20 }, rotation: 0, depth: 3, enabled: true, through: false },
+    ];
+    job.traces = [
+      {
+        kind: 'line',
+        id: 'tr',
+        position: { x: 20, y: 10 },
+        rotation: 0,
+        points: [
+          [0, 0],
+          [10, 0],
+        ],
+        closed: false,
+        depth: 1.5,
+        enabled: true,
+      },
+    ];
+
+    const cutIds = engraveRegions(tl, job).cuts.map((c) => c.id);
+    expect(cutIds).toEqual(['lbl', 'hole', 'd1', 'tr']); // regions in plan order, then the traces
+
+    const p = preview(job);
+    expect(p.floors.map((f) => f.labelId)).toEqual(cutIds);
+    for (const floor of p.floors) expect(meshVolume(floor.mesh)).toBeGreaterThan(0);
   });
 });
 
