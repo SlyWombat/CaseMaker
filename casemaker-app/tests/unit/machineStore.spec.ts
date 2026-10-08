@@ -29,20 +29,22 @@ beforeEach(() => {
 
 describe('#280 — machineStore', () => {
   it('keeps the machine a found probe reported, with no numbers of its own', () => {
-    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation() });
+    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation(), calibration: null });
     const s = useMachineStore.getState();
     expect(s.outcome).toBe('found');
     expect(s.machine?.profileId).toBe('Z1');
     expect(s.reason).toBeNull();
     expect(s.checkedAt).not.toBeNull();
-    // The store carries the IDENTITY; every machine number stays in `engine/cnc/machine.ts`.
+    // The store carries the IDENTITY; every machine number stays in `engine/cnc/machine.ts`, and
+    // the machine's own frame (#279) belongs to `settingsStore.machineCalibration`, where its
+    // source and date travel with it — NOT to a store that says it holds no numbers.
     expect(Object.keys(s.machine!).sort()).toEqual([
       'busy', 'host', 'ip', 'mac', 'name', 'notes', 'observedAt', 'port', 'profileId', 'status',
     ]);
   });
 
   it('each non-found outcome clears the machine and keeps the reason where there is one', () => {
-    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation() });
+    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation(), calibration: null });
 
     useMachineStore.getState().setProbeResult({ kind: 'not-found' });
     expect(useMachineStore.getState().machine).toBeNull();
@@ -59,7 +61,7 @@ describe('#280 — machineStore', () => {
   });
 
   it('forget drops the machine but keeps the record of when we last looked', () => {
-    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation() });
+    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation(), calibration: null });
     const checkedAt = useMachineStore.getState().checkedAt;
     useMachineStore.getState().forget();
     expect(useMachineStore.getState().machine).toBeNull();
@@ -68,7 +70,7 @@ describe('#280 — machineStore', () => {
   });
 
   it('reloads the machine from storage', async () => {
-    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation() });
+    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation(), calibration: null });
     vi.resetModules();
     const fresh = await import('@/store/machineStore');
     const s = fresh.useMachineStore.getState();

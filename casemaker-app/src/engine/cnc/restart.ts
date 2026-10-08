@@ -22,9 +22,10 @@
  * so in plain words ({@link RESTART_TOOL_LENGTH_NOTE}).
  *
  * COOLANT. The Z1 dialect our post writes has no coolant word (the verifier's whitelist is
- * `M2 M3 M5 M6 M7 M9`); its single modelled accessory is AIR (`M7`/`M9`), which is what
+ * `M2 M3 M5 M6 M7 M9`); the single accessory it models is AIR (`M7`/`M9`), which is what
  * `MachineState.air` tracks. There is no `M8` to lose, and this generator refuses rather than
- * invent one.
+ * invent one. The MACHINE has more — a `M331.x` mode family and `M951` (#283) — but the post
+ * drives none of them, so none of them appears in a generated file.
  *
  * Pure: no React, no wasm, no worker. `parseGcode` + `buildTimeline` are the same pure halves
  * the verifier uses, so the restart and the file it came from can never disagree about a move.
@@ -440,7 +441,7 @@ function buildRunSheet(
   lines.push(RESTART_TOOL_LENGTH_NOTE);
   lines.push('The moves after the resume step are the original file’s own, re-emitted unchanged; nothing was re-planned.');
   lines.push(
-    'This dialect’s only accessory is air (M7/M9); coolant is not modelled and is not in this file.',
+    'The only accessory this program uses is air (M7/M9); coolant is not modelled and is not in this file.',
   );
   if (verify !== null) {
     if (ok) lines.push('The verifier passed this file under the same rules as any other program.');

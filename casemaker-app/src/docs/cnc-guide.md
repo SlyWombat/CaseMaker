@@ -620,6 +620,17 @@ step's text:
 | `origin-unchecked` | warning | The origin cannot be cross-checked without a valid stock. | Type the stock first. |
 | `origin-semantics-unverified` | warning | The origin's numbers do not match the expected corner for this stock. | Set the origin on the machine. |
 
+**Which coordinate frame is in force** (machine calibration — #279). Raised by the app rather
+than by a program: the machine's own `coordinate.*` positions decide where the head parks and where
+the tool-length probe is predicted to touch off, and a stock machine's shipped defaults are not
+what a machine on a bench has been trammed to:
+
+| Code | Severity | What it means in plain words | What to do |
+|---|---|---|---|
+| `machine-calibrated-frame` | info | Positions come from this machine's own configuration, read from it, with the date it was read. | Nothing — this is the good state. |
+| `machine-vendor-frame` | warning | Positions are the vendor's shipped defaults for a STOCK Z1: this machine's own configuration has not been read, and a machine that has been trammed keeps its anchors — and so its tool-length sensor and change position — elsewhere. | Run the machine check in the start wizard with the machine on the network. |
+| `machine-calibration-ignored` | warning | A saved calibration was read from a DIFFERENT machine (its own id is in the message), so it is deliberately not used here. | Check which machine this job is set for. |
+
 *Planned rows (not in the app yet):* the CAM verifier (#174) will add its own codes
 (`parse-error`, `not-our-dialect`, `cut-too-deep`, `cut-outside-stock`, `spindle-off-cut`,
 `feed-too-high`, `rapid-too-low`, and others); the runner (#194) will add

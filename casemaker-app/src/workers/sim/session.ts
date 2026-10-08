@@ -28,7 +28,7 @@
  * moves).
  */
 
-import { applyEvent, buildTimeline, parseGcode, MACHINES, type FixtureEnvelope, type MachineState, type PausePoint, type Segment, type Setup, type Timeline } from '@/engine/cnc';
+import { applyEvent, buildTimeline, parseGcode, resolveMachine, MACHINES, type FixtureEnvelope, type MachineCalibration, type MachineState, type PausePoint, type Segment, type Setup, type Timeline } from '@/engine/cnc';
 import { ASSUMED_RAPID_MM_MIN } from '@/engine/cnc/cam/ir';
 
 import type { Mm } from '@/types/units';
@@ -209,6 +209,15 @@ export interface SimLoadOpts {
   /** Wall clock for the sweep itself; the client's timer is the hard stop. */
   budgetMs?: number;
   onProgress?: (done: number, total: number) => void;
+  /**
+   * The machine's own coordinate frame, if one has been read from it (#279). Resolved against
+   * the profile named by `machineId` — the timeline animates a predicted tool-length probe
+   * toward `sensor`, and on a calibrated machine that is not the vendor's position.
+   *
+   * A calibration belonging to a DIFFERENT machine is ignored by `resolveMachine`, so a stale
+   * saved record can never aim this machine's probe at another one's numbers.
+   */
+  calibration?: MachineCalibration | null;
 }
 
 export interface SimSession {
@@ -282,8 +291,12 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     dispose();
     let machine;
     if (machineId !== null) {
-      machine = MACHINES[machineId];
-      if (!machine) return refuse('machine-unknown', `unknown machine "${machineId}"; known: ${Object.keys(MACHINES).join(', ')}`);
+      const base = MACHINES[machineId];
+      if (!base) return refuse('machine-unknown', `unknown machine "${machineId}"; known: ${Object.keys(MACHINES).join(', ')}`);
+      // The saved read of THIS machine's frame, if there is one (#279). The lookup above is by
+      // the CALLER's id, so an unknown id still refuses by name rather than falling back to a
+      // profile with the machine's calibration quietly laid over it.
+      machine = resolveMachine(base, opts?.calibration);
     }
     const parse = parseGcode(gcodeText);
     const timeline = buildTimeline(parse, setup, machine);

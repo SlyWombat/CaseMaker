@@ -18,7 +18,7 @@ import type { EngraveJob } from '@/types/engraveJob';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { getToplevel } from './geometry/ManifoldRuntime';
 import type { NodeMeshOutput } from './geometry/meshOutput';
-import { createSimSession, type SimFrame, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
+import { createSimSession, type SimFrame, type SimLoadOpts, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import { engraveGenerate as runEngraveGenerate, type EngraveGenerated } from './sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
@@ -50,11 +50,16 @@ const api = {
    * succeeded and only the sweep refused, in which case the session is PATH-ONLY: `toolPath`
    * works and `simFrameAt` returns null (#194).
    *
-   * `onProgress` must arrive as a `Comlink.proxy`. The sweep is one synchronous call, but each
-   * callback it makes posts a message immediately, so the main thread sees them as they happen.
+   * `onProgress` must arrive as a `Comlink.proxy` AND as its own argument. The sweep is one
+   * synchronous call, but each callback it makes posts a message immediately, so the main thread
+   * sees them as they happen — and Comlink cannot carry a proxy nested inside `opts`, because
+   * `toWireValue` does not recurse (comlink.mjs:310, see `simClient.loadSim`).
+   *
+   * `opts.calibration` (#279) is a plain record and crosses the boundary by structured clone —
+   * it is data about a machine, not a handle.
    */
-  async simLoad(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, budgetMs?: number, onProgress?: (done: number, total: number) => void): Promise<SimLoadResult> {
-    const result = (await getSession()).load(gcodeText, setup, tool, machineId, { budgetMs, onProgress });
+  async simLoad(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts, onProgress?: (done: number, total: number) => void): Promise<SimLoadResult> {
+    const result = (await getSession()).load(gcodeText, setup, tool, machineId, { ...opts, onProgress });
     if (!result.ok) return result;
     const m = result.meshes;
     return Comlink.transfer(result, buffersOf([m.stock, m.result, m.removal, ...m.gouges.map((g) => g.mesh)]));

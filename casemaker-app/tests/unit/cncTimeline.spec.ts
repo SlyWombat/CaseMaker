@@ -5,8 +5,9 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyEvent, buildTimeline, initialState, parseGcode, stubSetup, Z1, DIAGNOSTIC_CAP, type Setup } from '@/engine/cnc';
+import { applyEvent, buildTimeline, initialState, parseGcode, resolveMachine, stubSetup, Z1, DIAGNOSTIC_CAP, type Setup } from '@/engine/cnc';
 import type { GcodeEvent } from '@/engine/cnc/gcode';
+import { Z1_BENCH_CALIBRATION } from './fixtures/z1Frame';
 
 const part = { kind: 'prism' as const, outline: { kind: 'p-rect' as const, size: [76.2, 38.1] as [number, number] }, thickness: 3.81 };
 const hold = { kind: 'tape-down' as const, contact: part.outline };
@@ -345,6 +346,26 @@ describe('the tool-change macro, animated from the machine profile (#182 Q14, #1
     expect(steps[first + 8]).toEqual([tc.sensor[0], tc.sensor[1], tc.safeZ]);
     expect(steps[first + 9]).toEqual([tc.sensor[0], tc.sensor[1], tc.clearanceZ]);
     expect(steps[first + 10]).toEqual([-50, -60, tc.clearanceZ]); // back to the saved X,Y, at clearance
+  });
+
+  it('resolves the machine through its own saved frame, so the probe aims at THIS machine\'s sensor (#279)', () => {
+    // The record test in cncCalibration.spec.ts proves the saved numbers are right; this proves the
+    // RUNNER uses them, which is the claim that matters. `resolveMachine` is what `session.load`
+    // applies to the profile before the timeline is built, so animating through it is the same path
+    // a real program takes.
+    const resolved = resolveMachine(M, Z1_BENCH_CALIBRATION);
+    const tl = buildTimeline(parseGcode(prog), setupWith({ startingTool: 1 }), resolved);
+    const steps = tl.events.map((_, i) => tl.stateAt(i).machine);
+    const first = tl.events.findIndex((e) => e.synthetic === 'tool-change-macro');
+
+    const tc = resolved.toolChange;
+    // The probe target moved with the machine: the bench Z1's anchor1 is 1.51 mm off the vendor's
+    // on X, and the sensor is anchor1 + 181, so the sensor moves by exactly that.
+    expect(steps[first + 3]).toEqual([tc.sensor[0], tc.sensor[1], tc.clearanceZ]);
+    expect(tc.sensor[0]).toBeCloseTo(-9.89, 6);
+    expect(tc.sensor[0] - M.toolChange.sensor[0]).toBeCloseTo(1.51, 2);
+    // And the vendor profile is untouched: resolution is per call, never a mutation (#279).
+    expect(M.toolChange.sensor[0]).toBeCloseTo(-11.4, 6);
   });
 
   it('after the macro ALL THREE axes are known, so the next move is drawable', () => {

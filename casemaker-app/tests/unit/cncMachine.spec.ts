@@ -55,14 +55,21 @@ describe('the Z1 profile', () => {
     expect(Z1.dialect).toEqual({ acceptsArcs: true, cannedCycles: false, grblMode: true, axisPrecision: 3, feedPrecision: 2 });
   });
 
-  it('CONSISTENCY CHECK: the tool-change position computed from anchor1 + toolrack offsets lands on the config\'s own clearance_x/y', () => {
+  it('the change position is NOT the clearance position — they coincide only on a stock machine (#279)', () => {
     // ATCHandler parks at anchor1 + toolrack_offset + (132, 0); the config separately lists
-    // clearance_x/y = (-11.6, -14.6). They agree to the config's rounding. That was the one
-    // cross-check available without the machine; it is now hardware-confirmed as well —
-    // `config-get sd coordinate.clearance_x` returns -11.6, and C1 watched `G28` stop at
-    // X -11.600, Y -14.600.
+    // clearance_x/y = (-11.6, -14.6). Under the shipped defaults the two land 0.2 mm apart, and an
+    // earlier version of this test read that as a cross-check. It is not one: the agreement is a
+    // COINCIDENCE. `clearance` and `anchor1` are the two OPPOSITE CORNERS of the work area
+    // (`fill_Autoclean_scripts` sweeps between them), so nothing requires the arithmetic to reach
+    // the same place. `clearance_x` is hardware-confirmed (C1 watched `G28` stop at X -11.600) —
+    // that confirms clearance, not this sum.
+    //
+    // On the bench machine, whose anchor1 has moved 1.51 mm on X, the two DIVERGE by 1.5/1.8 mm,
+    // which is what a calibration record is for (#279; the drift assertions live in
+    // cncCalibration.spec.ts). The two are separate numbers that happen to sit close together here.
     expect(Z1.toolChange.changePosition[0]).toBeCloseTo(-11.6, 1);
     expect(Z1.toolChange.changePosition[1]).toBeCloseTo(-14.6, 1);
+    expect(Z1.toolChange.changePosition).not.toEqual(Z1.toolChange.clearanceXY);
   });
 
   it('clearance Z is MEASURED, not read from the shipped config (#208 B6, #276)', () => {

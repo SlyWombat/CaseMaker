@@ -18,6 +18,7 @@ import type { VerifyReport } from '@/engine/cnc/verify';
 import {
   COMMAND_TCP_PORT,
   DISCOVERY_UDP_PORT,
+  readConfigKey,
   runDiscovery,
   runIdentify,
   runStatus,
@@ -124,6 +125,63 @@ export async function status(
   const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? 3000);
   try {
     return await runStatus(transport, conn, { windowMs: opts.windowMs });
+  } finally {
+    await closeQuietly(transport, conn);
+  }
+}
+
+/** What one configuration key answered. `value` is the controller's text, verbatim. */
+export interface ConfigReadOutcome {
+  key: string;
+  ok: boolean;
+  /** The controller's own text (`"-190.89"`, `"true"`), or null when it did not answer. */
+  value: string | null;
+  /** `not-in-config` / `bad-request` / `timeout`, or `''` when it answered. */
+  reason: string;
+  detail: string;
+}
+
+/**
+ * Read configuration keys from the machine's own `/sd/config.txt` (#279).
+ *
+ * The app's own path to `config-get`, added because #279 needs it and the app could not previously
+ * reach it at all: `readConfigKey` existed in `protocol.ts` and was exercised by the bench harness,
+ * which imports the protocol module directly — but the BRIDGE never exposed it, so nothing in the
+ * app could ask a machine about its own frame.
+ *
+ * ONE connection for the whole list, one `config-get sd <key>` per key, in order — the shape
+ * `tools/z1/z1.mjs config` uses, and the reason this takes a list rather than being called once per
+ * key: a calibration is fourteen keys, and fourteen connects would make the check unusable.
+ *
+ * `source` defaults to `sd`, NOT the one-argument effective form. On this build the merged cache
+ * answers `not in config` for keys `sd` reads correctly (measured 2026-10-06, Z1-Bridge-Protocol
+ * §5), so the effective form would silently produce an incomplete read.
+ *
+ * A key that did not answer is returned as a refusal with its reason rather than omitted, so the
+ * caller can say WHICH key stopped the read — an absent key and an unread key look identical in a
+ * record with holes in it.
+ */
+export async function readConfigValues(
+  target: MachineTarget,
+  keys: readonly string[],
+  opts: BridgeOptions & { source?: string; windowMs?: number } = {},
+): Promise<ConfigReadOutcome[]> {
+  const transport = transportOf(opts);
+  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? 3000);
+  try {
+    const out: ConfigReadOutcome[] = [];
+    for (const key of keys) {
+      const r = await readConfigKey(transport, conn, key, {
+        source: opts.source ?? 'sd',
+        windowMs: opts.windowMs,
+      });
+      out.push(
+        r.ok
+          ? { key, ok: true, value: r.value, reason: '', detail: '' }
+          : { key, ok: false, value: null, reason: r.reason, detail: r.detail },
+      );
+    }
+    return out;
   } finally {
     await closeQuietly(transport, conn);
   }

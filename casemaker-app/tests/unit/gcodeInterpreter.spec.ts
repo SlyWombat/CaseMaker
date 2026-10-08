@@ -515,6 +515,15 @@ describe('codes the machine does not know', () => {
     expect(codes(parseGcode('M811\nM812\nM331\nM332\nM106\nM220 S100\n'))).toEqual([]);
   });
 
+  it('the #331 mode family parses at every sub-index Studio uses (#283)', () => {
+    // The family the bench session observed in Studio's own MDI log (/Z1-Firmware-Dialect.md
+    // §11.3): bed cleaning (`.2`), blowing (`.1`), static removal (`.4`), extend-out (bare `331`),
+    // and 332 as the off side. `M951` (time-lapse) is deliberately NOT accepted — its semantics
+    // are unexplained, so it stays an unknown code rather than earning a silent pass by guesswork.
+    expect(codes(parseGcode('M331\nM331.1\nM331.2\nM331.4\nM332\n'))).toEqual([]);
+    expect(errors(parseGcode('M951\n'))).toEqual(['unknown-code']);
+  });
+
   it('M0, M1 and M8 are NOT accepted: nothing read shows the Z1 implements them', () => {
     expect(errors(parseGcode('M0\nM1\nM8\n'))).toEqual(['unknown-code', 'unknown-code', 'unknown-code']);
   });

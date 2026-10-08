@@ -35,7 +35,12 @@ const ARC_RADIUS_MISMATCH_WARN_MM = 0.01;
 const NO_EFFECT_M = new Set([
   106, 107, // fan
   220, 223, // feed / spindle override (change time, not geometry)
-  331, 332, // auto vacuum
+  // #331.x is a MODE FAMILY, not a vacuum: Studio toggles bed cleaning (`.2`), blowing (`.1`),
+  // static removal (`.4`) and extend-out (bare `331`), with 332 the off side. Earlier comments
+  // here called it "auto vacuum", which named only the bare form — the family is observed in
+  // Studio's own MDI log, 2026-10-07 (#283, `/Z1-Firmware-Dialect.md` §11.3). None has a
+  // geometric effect, so the whole family is accepted silently.
+  331, 332,
   497, // UI state flag, no motion
   801, 802, // vacuum (Carvera)
   811, 812, // spindle fan

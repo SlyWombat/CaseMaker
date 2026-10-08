@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { todayISODate } from '@/engine/cnc/fixture';
+import { parseMachineCalibration, type MachineCalibration } from '@/engine/cnc/calibration';
 import type { Sacrificial, SacrificialSide, SacrificialUnder, ViseParams } from '@/types/engraveJob';
 
 export type ExportLayoutMode = 'print-ready' | 'assembled';
@@ -22,6 +23,13 @@ export interface AppSettings {
   exportLayout: ExportLayoutMode;
   exportFormat: ExportFormat;
   fixtures: FixturesSettings;
+  /**
+   * The machine's own coordinate frame, read from it (#279). Decision 28's saved tier, for a
+   * MACHINE rather than a fixture: absent means the shipped profile's vendor defaults are in
+   * force, present means these numbers win. `MACHINES` is never mutated — the resolution happens
+   * per call, in `resolveMachine`.
+   */
+  machineCalibration?: MachineCalibration;
 }
 
 const SETTINGS_KEY = 'casemaker.settings.v1';
@@ -206,10 +214,24 @@ function loadSettings(): AppSettings {
           ? (parsed.exportFormat as ExportFormat)
           : DEFAULT_EXPORT_FORMAT,
       fixtures: parseFixtures(parsed.fixtures),
+      ...pickCalibration(parsed.machineCalibration),
     };
   } catch {
     return { ...DEFAULTS };
   }
+}
+
+/**
+ * The saved machine calibration, or nothing (#279). A malformed record is DROPPED rather than
+ * half-honoured — the same whole-or-nothing rule `parseVise` follows, and for a sharper reason:
+ * a frame with one vendor value left in it would be a machine of its own, and every position
+ * derived from it would be quietly wrong. Dropping it falls back to the shipped profile, which
+ * is what ran before any of this existed, and `machineCalibrationNotice` then says so out loud.
+ */
+function pickCalibration(raw: unknown): { machineCalibration?: MachineCalibration } {
+  if (raw === undefined || raw === null) return {};
+  const parsed = parseMachineCalibration(raw);
+  return parsed.ok ? { machineCalibration: parsed.calibration } : {};
 }
 
 function clampPort(n: unknown): number {
@@ -246,6 +268,10 @@ export interface SettingsState extends AppSettings {
    * import does. The caller has already validated the record; this persists it verbatim.
    */
   replaceFixtures: (fixtures: FixturesSettings) => void;
+  /** Save the machine's own coordinate frame, read from it (#279). Persisted with the rest. */
+  setMachineCalibration: (calibration: MachineCalibration) => void;
+  /** Forget it and go back to the profile's vendor defaults. */
+  clearMachineCalibration: () => void;
   resetSettings: () => void;
 }
 
@@ -304,9 +330,24 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       set({ fixtures });
       persist({ ...get(), fixtures });
     },
+    // Saved verbatim, provenance and all (#279): the record has to keep saying WHICH machine and
+    // WHEN, or a year-old read becomes an assertion about a machine that has since been trammed.
+    setMachineCalibration: (machineCalibration) => {
+      set({ machineCalibration });
+      persist({ ...get(), machineCalibration });
+    },
+    clearMachineCalibration: () => {
+      const next = { ...get() };
+      delete next.machineCalibration;
+      set({ machineCalibration: undefined });
+      persist(next);
+    },
     resetSettings: () => {
       const fresh = { ...DEFAULTS };
-      set(fresh);
+      // Zustand's `set` MERGES, so a key `DEFAULTS` does not carry would survive a reset. The
+      // machine's saved frame (#279) is one: it has to go back to "nothing read" like every other
+      // setting, or "reset" would leave a calibration in force that nothing on screen claims.
+      set({ ...fresh, machineCalibration: undefined });
       persist(fresh);
     },
   };

@@ -8,7 +8,7 @@
  */
 
 import * as Comlink from 'comlink';
-import type { Setup } from '@/engine/cnc';
+import type { MachineCalibration, Setup } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
@@ -73,6 +73,12 @@ export interface SimLoadOpts {
    * while the anchor chain is built up front. The UI shows the latter as "preparing playback…".
    */
   onPhase?: (phase: SimLoadPhase) => void;
+  /**
+   * The machine's own coordinate frame, if one has been read from it (#279). The runner puts the
+   * predicted tool-length probe where THIS machine says the sensor is rather than the vendor's
+   * position. A record for a different machine is ignored by `resolveMachine`.
+   */
+  calibration?: MachineCalibration | null;
 }
 
 /** The two stages of a load (#224). */
@@ -112,7 +118,19 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
   try {
     const result = await Promise.race([
       getSimApi()
-        .simLoad(gcodeText, setup, tool, machineId, sweepBudget, opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined)
+        .simLoad(
+          gcodeText,
+          setup,
+          tool,
+          machineId,
+          // The DATA travels in one object; the callback does not. `Comlink.proxy` marks a function
+          // so `toWireValue` can swap it for a message port — but that function is not recursive
+          // (comlink.mjs:310), so a proxy nested in a plain object is never recognised, falls
+          // through as RAW, and the raw function reaches `postMessage`: "could not be cloned".
+          // Only a TOP-LEVEL argument can carry a proxy, which is why `onProgress` is its own.
+          { budgetMs: sweepBudget, calibration: opts?.calibration ?? null },
+          opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined,
+        )
         .then(async (r) => {
           // #224: the warm-up is part of the load, not the first scrub. Awaiting `simWarmup`
           // keeps this promise pending (so the UI stays "loading") until the anchor chain is

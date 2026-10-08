@@ -19,6 +19,13 @@
  *     Z1's numbers. A second vendor's machine discovered tomorrow must produce a truthful answer
  *     rather than a guess (Makera-Parity §13, the multi-vendor lesson in #228).
  *
+ * THE FOURTH QUESTION (#279). A machine we KNOW is also asked what its own coordinate frame is set
+ * to — `config-get sd <key>`, once per key — because the vendor's `configZ1.default` is a STOCK Z1
+ * and a machine on a bench has been trammed since (measured 2026-10-06: `anchor1` is 1.51 mm from
+ * the shipped default on X, which moves both the tool-length sensor and the change position). What
+ * comes back is a {@link MachineCalibration} with its source and date attached, or a note saying
+ * why it could not be read. This module only READS: nothing here writes a setting to a machine.
+ *
  * THE DESKTOP-ONLY BOUNDARY. The real client reaches the bridge through `loadMachineBridge()`,
  * whose `await import()` sits behind `canDriveMachine` inside `capabilities.ts` — never a
  * top-level import here, or the bridge leaks into the web bundle and `npm run check:platform-gate`
@@ -31,6 +38,7 @@
  * it. Only the socket is faked, because a socket is the one thing a unit test cannot have.
  */
 
+import { CALIBRATION_KEY_LIST, calibrationFromReplies, type MachineCalibration } from '@/engine/cnc/calibration';
 import { loadMachineBridge } from './capabilities';
 
 /**
@@ -68,13 +76,29 @@ export interface MachineStatusSummary {
 }
 
 /**
+ * What a configuration read established (#279). `values` holds only the keys the controller
+ * answered, verbatim; `failures` names the rest with the controller's own reason, so a read that
+ * stopped short can say WHICH key stopped it rather than reporting a count.
+ */
+export interface ConfigReadSummary {
+  values: Map<string, string>;
+  failures: Array<{ key: string; reason: string; detail: string }>;
+}
+
+/**
  * The socket-facing half of the bridge. Every method is the bridge's own signature restated, so
- * the real client is a pass-through and the fake in a test is three functions.
+ * the real client is a pass-through and the fake in a test is four functions.
  */
 export interface MachineProbeClient {
   discover(opts: { windowMs?: number }): Promise<DiscoveredMachineSummary[]>;
   identify(target: { host: string; port?: number }): Promise<MachineIdentitySummary>;
   status(target: { host: string; port?: number }): Promise<MachineStatusSummary>;
+  /** Read configuration keys from the machine's own config (#279). One connection for the list. */
+  readConfig(
+    target: { host: string; port?: number },
+    keys: readonly string[],
+    opts: { source: string },
+  ): Promise<ConfigReadSummary>;
 }
 
 export interface MachineProbeOptions {
@@ -116,9 +140,32 @@ export interface MachineObservation {
   notes: string[];
 }
 
+/**
+ * The configuration source a machine's own frame is read from. `sd` is `/sd/config.txt`, the file a
+ * Z1's calibration actually lives in (Z1-Bridge-Protocol §5), and the bench harness's default.
+ *
+ * Named here rather than left to the bridge's default because this string is what
+ * `calibrationFromReplies` writes into the saved record's `source` — a record that said `sd` while
+ * reading something else would be a provenance claim that is false.
+ */
+const FRAME_SOURCE = 'sd';
+
 /** The four answers, and there are deliberately four: see {@link profileForDiscoveredName}'s rule. */
 export type MachineProbeResult =
-  | { kind: 'found'; observation: MachineObservation }
+  | {
+      kind: 'found';
+      observation: MachineObservation;
+      /**
+       * The machine's own coordinate frame, read during the check (#279, decision 28's measured
+       * tier). Null when it could not be read — which is a normal answer, not a failure: the
+       * shipped profile's vendor defaults then stay in force and `notes` says why.
+       *
+       * It is a PEER of `observation` rather than a field on it on purpose. `machineStore`'s rule
+       * is that the store holds the connection INSTANCE and not the machine's numbers; the frame's
+       * durable home is `settingsStore.machineCalibration`, where its provenance travels with it.
+       */
+      calibration: MachineCalibration | null;
+    }
   /** The search ran and nothing answered. Normal: the wizard carries on. */
   | { kind: 'not-found' }
   /** This build cannot open a raw socket — the web build, or a dev browser. `reason` says so. */
@@ -165,6 +212,16 @@ async function loadRealClient(): Promise<MachineProbeClient> {
     discover: (opts) => bridge.discover({ windowMs: opts.windowMs }),
     identify: (target) => bridge.identify(target),
     status: (target) => bridge.status(target),
+    readConfig: async (target, keys, opts) => {
+      const outcomes = await bridge.readConfigValues(target, keys, { source: opts.source });
+      const values = new Map<string, string>();
+      const failures: ConfigReadSummary['failures'] = [];
+      for (const o of outcomes) {
+        if (o.ok && o.value !== null) values.set(o.key, o.value);
+        else failures.push({ key: o.key, reason: o.reason, detail: o.detail });
+      }
+      return { values, failures };
+    },
   };
 }
 
@@ -206,15 +263,13 @@ export async function probeMachine(opts: MachineProbeOptions = {}): Promise<Mach
   if (opts.host !== undefined) {
     const host = opts.host.trim();
     if (host.length === 0) return { kind: 'error', detail: 'no address was given' };
-    return {
-      kind: 'found',
-      observation: await observe(client, {
-        name: null,
-        host,
-        port: opts.port ?? DEFAULT_COMMAND_PORT,
-        busy: null,
-      }),
-    };
+    const { observation, calibration } = await observe(client, {
+      name: null,
+      host,
+      port: opts.port ?? DEFAULT_COMMAND_PORT,
+      busy: null,
+    });
+    return { kind: 'found', observation, calibration };
   }
 
   let found: DiscoveredMachineSummary[];
@@ -226,15 +281,13 @@ export async function probeMachine(opts: MachineProbeOptions = {}): Promise<Mach
 
   const first = found[0];
   if (first === undefined) return { kind: 'not-found' };
-  return {
-    kind: 'found',
-    observation: await observe(client, {
-      name: first.name,
-      host: first.host,
-      port: first.port,
-      busy: first.busy,
-    }),
-  };
+  const { observation, calibration } = await observe(client, {
+    name: first.name,
+    host: first.host,
+    port: first.port,
+    busy: first.busy,
+  });
+  return { kind: 'found', observation, calibration };
 }
 
 /** What the check knows before it connects: everything from the broadcast, or a typed address. */
@@ -245,12 +298,20 @@ interface Reached {
   busy: boolean | null;
 }
 
+/** What one check established about a machine we reached. */
+interface Observation {
+  observation: MachineObservation;
+  calibration: MachineCalibration | null;
+}
+
 /**
- * Ask a reached address to identify itself and to say what it is doing. Both answers are optional
- * and their absence is a note, not a failure: the machine is already found.
+ * Ask a reached address to identify itself, to say what it is doing, and — for a machine we know —
+ * for its own coordinate frame. Every answer is optional and its absence is a note, not a failure:
+ * the machine is already found.
  */
-async function observe(client: MachineProbeClient, reached: Reached): Promise<MachineObservation> {
+async function observe(client: MachineProbeClient, reached: Reached): Promise<Observation> {
   const target = { host: reached.host, port: reached.port };
+  const observedAt = new Date().toISOString();
   const notes: string[] = [];
 
   let ip: string | null = null;
@@ -275,6 +336,7 @@ async function observe(client: MachineProbeClient, reached: Reached): Promise<Ma
   }
 
   const profileId = reached.name === null ? null : profileForDiscoveredName(reached.name);
+  const calibration = await readFrame(client, target, profileId, observedAt, notes);
   // Notes record what the controller FAILED to tell us — not a restatement of what the panel
   // already says. "Nothing here knows this machine" is a sentence the panel owns and prints for
   // both paths (announced and typed), so it is deliberately not also a note: in the browser that
@@ -288,15 +350,73 @@ async function observe(client: MachineProbeClient, reached: Reached): Promise<Ma
   }
 
   return {
-    name: reached.name,
-    host: reached.host,
-    port: reached.port,
-    busy: reached.busy,
-    ip,
-    mac,
-    status,
-    profileId,
-    observedAt: new Date().toISOString(),
-    notes,
+    observation: {
+      name: reached.name,
+      host: reached.host,
+      port: reached.port,
+      busy: reached.busy,
+      ip,
+      mac,
+      status,
+      profileId,
+      observedAt,
+      notes,
+    },
+    calibration,
   };
+}
+
+/**
+ * Ask a machine we KNOW for its own coordinate frame (#279), and hand it back as a record — or as
+ * a note saying why not.
+ *
+ * Three refusals, each deliberate:
+ *
+ *  - **A machine we do not know is not asked.** `profileId === null` means this identity resolves
+ *    to no profile of ours, and `coordinate.anchor1_x` is a Z1's key, not a universal one. Sending
+ *    it anyway would be the "assume it is a Z1" guess that `profileForDiscoveredName` exists to
+ *    refuse, and a second vendor's machine could answer it with something that means something
+ *    else entirely.
+ *  - **A read that did not complete is not applied.** One key missing or unreadable drops the
+ *    WHOLE frame (`calibrationFromReplies`), for the reason a half-read vise is refused: a frame
+ *    with one vendor value left in it is a machine of its own, and every position derived from it
+ *    would be quietly wrong.
+ *  - **A read that failed does not clear a saved one.** A timeout during this check says nothing
+ *    about whether the record saved last week is still right, and silently reverting the machine to
+ *    the vendor's defaults on a flaky socket would be the worst possible answer. The note says the
+ *    read failed; `machineCalibrationNotice` still says which frame is actually in force.
+ */
+async function readFrame(
+  client: MachineProbeClient,
+  target: { host: string; port: number },
+  profileId: string | null,
+  measuredAt: string,
+  notes: string[],
+): Promise<MachineCalibration | null> {
+  if (profileId === null) return null;
+
+  let summary: ConfigReadSummary;
+  try {
+    summary = await client.readConfig(target, CALIBRATION_KEY_LIST, { source: FRAME_SOURCE });
+  } catch (e) {
+    notes.push(
+      `The machine's own coordinate frame could not be read (${reasonOf(e)}). Positions stay the ` +
+        `vendor's defaults (#279).`,
+    );
+    return null;
+  }
+
+  const read = calibrationFromReplies(summary.values, { machineId: profileId, measuredAt, host: target.host });
+  if (!read.ok) {
+    const parts: string[] = [];
+    if (read.missing.length > 0) parts.push(`no answer for ${read.missing.join(', ')}`);
+    if (read.malformed.length > 0) parts.push(`unreadable: ${read.malformed.join(', ')}`);
+    notes.push(
+      `The machine's coordinate frame was not read completely — ${parts.join('; ')}. Nothing was ` +
+        `applied: a half-read frame would be a machine of its own, so positions stay the vendor's ` +
+        `defaults (#279).`,
+    );
+    return null;
+  }
+  return read.calibration;
 }

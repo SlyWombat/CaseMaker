@@ -2,6 +2,9 @@
 export * from './setup';
 export * from './frames';
 export * from './machine';
+export * from './calibration';
+// #189 — the camera calibration target's geometry, art and mill job (no camera needed).
+export * from './camera';
 export * from './fixture';
 export * from './toolLibrary';
 export { setupFromHeader } from './setupFromHeader';

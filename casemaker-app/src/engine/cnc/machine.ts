@@ -155,8 +155,21 @@ export interface MillProfile extends MachineIdentity {
     rotary: boolean;
     /** No laser module on this machine. A FLAG, so the absence is a fact rather than silence. */
     laser: boolean;
-    /** `M7`/`M9` air. The internal vacuum (`M801`/`M802`) is Carvera-only. */
+    /**
+     * `M7`/`M9` air. These two flags are the accessory surface OUR POST drives, not the
+     * machine's whole one — the Z1 also answers a mode family (`M331.2` bed cleaning, `M331.1`
+     * blowing, `M331.4` static removal, `M331` extend-out) plus `M951` time-lapse, none of which
+     * this app emits or reads (#283; observed in Studio's own MDI log 2026-10-07, recorded at
+     * `/Z1-Firmware-Dialect.md` §11.3). Whether `M7` selects air on this machine is exactly what
+     * the traffic read could not settle: no `M7`/`M9` appeared in it at all.
+     */
     air: boolean;
+    /**
+     * The Carvera's internal vacuum is `M801`/`M802`, which this controller does not take. The
+     * Z1's own suction story is the `M331` "extend out" mode, which the log renders as *Auto
+     * Vacuum* — but that mapping is inferred by elimination, not observed, so it is not a `true`
+     * here. See #283.
+     */
     vacuum: boolean;
   };
   dialect: {
@@ -192,7 +205,7 @@ export interface MillProfile extends MachineIdentity {
     changePosition: Vec2;
     /** Z the head lifts to right after the length probe, before the final lift to clearance. */
     safeZ: Mm;
-    /** XY of the tool-length sensor: `anchor1 + 181` on each axis, hard-coded for the Z1. */
+    /** XY of the tool-length sensor: `anchor1 + 181` on each axis. See {@link SENSOR_OFFSET_FROM_ANCHOR1}. */
     sensor: Vec2;
     /**
      * Z the probe move is commanded TOWARD. It stops early, at the tool tip's contact, and
@@ -238,12 +251,92 @@ export interface PrinterProfile extends MachineIdentity {
 }
 
 /**
- * The bed's native XY datum, machine coordinates.
+ * The controller's `coordinate.*` group, in the controller's own vocabulary, mm (#279).
  *
- * **These are the firmware's SHIPPED DEFAULTS, and this machine is calibrated away from them.**
- * `configZ1.default:405-406` carries exactly these numbers; `config-get sd coordinate.anchor1_x`
- * and `.anchor1_y` read **(−190.89, −193.83)** out of the machine's own `/sd/config.txt` (#208 B6,
- * 2026-10-06) — 1.51 mm and 0.47 mm away (#279).
+ * This is DATA, not decoration. Every position the tool-change macro drives to is derived from
+ * these six keys by {@link deriveCoordinateFrame}, so a machine whose configuration has been
+ * calibrated away from the shipped default is a different VALUE of this object rather than a
+ * second copy of the formula. That is what makes {@link Z1_FRAME} replaceable: `calibration.ts`
+ * holds a machine's own read of exactly this object, and nothing downstream has to know which
+ * one it was handed.
+ *
+ * The field names are the firmware's own key names, so a read can be checked against them one
+ * for one — and a key that is missing from one of them is a key we have not read, not a key the
+ * machine does not have.
+ */
+export interface CoordinateFrame {
+  /** `coordinate.anchor1_x` / `_y`. The bed's native XY datum, and the origin of the rest. */
+  anchor1: Vec2;
+  /** `coordinate.anchor2_offset_x` / `_y`. The second anchor, RELATIVE to `anchor1`. */
+  anchor2Offset: Vec2;
+  /** `coordinate.toolrack_offset_x` / `_y`. The manual tool-change park offset from `anchor1`. */
+  toolrackOffset: Vec2;
+  /** `coordinate.clearance_x` / `_y`. Where `G28` and the end of a change put X and Y. */
+  clearanceXY: Vec2;
+  /** `coordinate.clearance_z`. The Z the head lifts to before any clearance traverse. */
+  clearanceZ: Mm;
+  /**
+   * `coordinate.toolrack_z`. The Z the tool-length probe is commanded TOWARD — it stops early,
+   * at the tool tip's contact, so this is a direction and a bound rather than a position.
+   */
+  toolrackZ: Mm;
+}
+
+/**
+ * How far past `anchor1`, on each axis, the Z1's tool-length sensor sits, mm: 181
+ * (`ATCHandler.cpp:266`, hard-coded for this model — the same number on X and Y, which is why
+ * it is one constant and not a `Vec2`).
+ */
+export const SENSOR_OFFSET_FROM_ANCHOR1 = 181;
+
+/**
+ * The +X the manual change macro adds on top of `toolrack_offset_x`, mm (`ATCHandler.cpp:134`).
+ * A fixed reach from the tool rack's own corner, not a clearance figure.
+ */
+export const CHANGE_POSITION_EXTRA_X = 132;
+
+/** The positions the tool-change macro is driven to, every one derived from a frame. */
+export interface DerivedDatums {
+  /** The second anchor, `anchor1 + anchor2Offset`. */
+  anchor2: Vec2;
+  /** The tool-length sensor, `anchor1 + 181` on each axis. */
+  sensor: Vec2;
+  /** Where the head parks for a manual change, `anchor1 + toolrackOffset + (132, 0)`. */
+  changePosition: Vec2;
+}
+
+/**
+ * Derive the positions the head is actually driven to from the frame the controller holds.
+ *
+ * **ONE formula, two callers**: the shipped `Z1` below, and a machine's own read
+ * (`calibration.ts`). While this was inline arithmetic inside the `Z1` literal, an override had
+ * nowhere to put itself except a duplicated expression — and a duplicated derivation is how two
+ * numbers that must agree stop agreeing.
+ *
+ * These three are the DERIVED positions. `clearanceXY`, `clearanceZ` and `sensorZ` are config
+ * keys in their own right and are read from the frame directly; in particular
+ * `clearance` and `anchor1` are the two *opposite corners of the work area*, not links in a
+ * chain (`ATCHandler::fill_Autoclean_scripts` sweeps between them), so a change position that
+ * lands on `clearance_x` is a coincidence of the shipped defaults rather than a check.
+ */
+export function deriveCoordinateFrame(frame: CoordinateFrame): DerivedDatums {
+  const [ax, ay] = frame.anchor1;
+  const [c2x, c2y] = frame.anchor2Offset;
+  const [tx, ty] = frame.toolrackOffset;
+  return {
+    anchor2: [ax + c2x, ay + c2y],
+    sensor: [ax + SENSOR_OFFSET_FROM_ANCHOR1, ay + SENSOR_OFFSET_FROM_ANCHOR1],
+    changePosition: [ax + tx + CHANGE_POSITION_EXTRA_X, ay + ty],
+  };
+}
+
+/**
+ * The coordinate frame the shipped `Z1` profile carries, one value per `coordinate.*` key.
+ *
+ * **The anchors are the firmware's SHIPPED DEFAULTS, and this machine is calibrated away from
+ * them.** `configZ1.default:405-406` carries exactly these numbers; `config-get sd
+ * coordinate.anchor1_x` and `.anchor1_y` read **(−190.89, −193.83)** out of the machine's own
+ * `/sd/config.txt` (#208 B6, 2026-10-06) — 1.51 mm and 0.47 mm away (#279).
  *
  * An earlier version of this note argued for keeping them on the grounds that `changePosition` lands
  * on the config's `clearance_x` (−11.6; it computes −11.62) only with these numbers, and that the
@@ -259,11 +352,40 @@ export interface PrinterProfile extends MachineIdentity {
  * `rotation_offset_{x,y}` (12.0/85.5 → −7.5/69.0), `clearance_z` (−1.0 → −3.0) — while
  * `anchor2_offset` (88.5, 45.0) and `toolrack_offset_x` (48.8) are untouched. So nothing here says
  * the profile's anchor is *wrong*; what it says is that this profile describes a stock Z1 and this
- * machine is not one. Whether the profile should carry the machine's read instead of the vendor's
- * default is **#279's** open question, and it is not a cosmetic one: `sensor` and `changePosition`
- * derive from this constant, and the emulator drives a predicted tool-length probe to them.
+ * machine is not one.
+ *
+ * **#279 decided how that is handled: default + override.** This constant is the DEFAULT half —
+ * the profile a stock Z1 gets, which is what every user without a calibration should be running —
+ * and `calibration.ts` is the override half, holding a machine's own read of this same object. The
+ * anchors stay the vendor's on purpose: pasting one machine's calibration into the shipped profile
+ * would aim every other Z1's probe 1.5 mm off, which is option 2 and was rejected.
+ *
+ * **This frame is not purely the vendor's file, and saying so is part of the fix.** Four of the six
+ * keys are `configZ1.default`'s; the two Z values are this repo's own machine reads, because the
+ * vendor file cannot supply them honestly:
+ *
+ *  - `clearanceZ` is **−3.0**, read on the machine (#208 B6), where `configZ1.default` says −1.0 —
+ *    and −1.0 is also B4's post-homing rest Z, which would have meant `G28` moved no Z at all. C1
+ *    watched it move 2 mm, to −3.000.
+ *  - `toolrackZ` is **−108**, read on the machine (#208 B7). The vendor file has no such key; −108
+ *    is Carvera-Air boilerplate the firmware uses as "all the way down", past this machine's own Z
+ *    travel.
+ *
+ * So the profile as shipped was *already* part vendor and part measurement, and was silent about
+ * which. That is the confusion this constant ends: every value below is traceable, and a machine
+ * that disagrees supplies a whole frame rather than three borrowed numbers.
  */
-const ANCHOR1: Vec2 = [-192.4, -194.3];
+export const Z1_FRAME: CoordinateFrame = {
+  anchor1: [-192.4, -194.3], // configZ1.default:405-406
+  anchor2Offset: [88.5, 45.0], // configZ1.default; identical on the machine (#208 B7)
+  toolrackOffset: [48.78, 179.74], // configZ1.default; the machine reads 48.8 / 181 (#208 B7)
+  clearanceXY: [-11.6, -14.6], // configZ1.default; identical on the machine, and C1 watched G28 stop here
+  clearanceZ: -3.0, // READ on the machine (#208 B6); configZ1.default says -1.0
+  toolrackZ: -108, // READ on the machine (#208 B7); absent from configZ1.default
+};
+
+/** The shipped frame's derived positions. `deriveCoordinateFrame` is the only thing that makes them. */
+const Z1_DATUMS = deriveCoordinateFrame(Z1_FRAME);
 
 /**
  * The Makera Z1.
@@ -278,7 +400,7 @@ const ANCHOR1: Vec2 = [-192.4, -194.3];
  *
  * `ATCHandler.cpp`: the Z1's sensor position is `anchor1 + 181` on each axis (line 266), and its
  * change position is `anchor1 + toolrack_offset + (132, 0)` (line 134) — the shipped defaults put
- * that at (-11.62, -14.56), which is *not* a consistency check on the anchor; see `ANCHOR1`.
+ * that at (-11.62, -14.56), which is *not* a consistency check on the anchor; see {@link Z1_FRAME}.
  *
  * | Key | Shipped default | Read off the machine |
  * |---|---|---|
@@ -295,8 +417,10 @@ const ANCHOR1: Vec2 = [-192.4, -194.3];
  * and `anchor2_offset` matching to the digit says the anchor *frame* is intact on this machine; only
  * its origin has been calibrated.
  *
- * The bolded values are the calibration. Whether this profile should carry them or the vendor's
- * defaults is **#279**.
+ * The bolded values are this machine's calibration. **#279 decided what to do with them: the
+ * shipped profile keeps the vendor's defaults (see {@link Z1_FRAME}) and a read like this one is
+ * held separately, as a saved record with provenance, in `calibration.ts`.** Nothing below is
+ * typed twice: every position in `toolChange` that the firmware derives, is derived here.
  */
 export const Z1: MillProfile = {
   id: 'Z1',
@@ -318,21 +442,20 @@ export const Z1: MillProfile = {
   },
   capabilities: { rotary: true, laser: false, air: true, vacuum: false },
   dialect: { acceptsArcs: true, cannedCycles: false, grblMode: true, axisPrecision: 3, feedPrecision: 2 },
-  anchor1: ANCHOR1,
-  anchor2: [ANCHOR1[0] + 88.5, ANCHOR1[1] + 45.0],
-  // Every value here now has a read behind it (#208 B6, 2026-10-06). `clearanceXY`/`clearanceZ` come
-  // from `coordinate.clearance_*`; `sensorZ` from `coordinate.toolrack_z` (-108, exact); the four
-  // probe/height numbers from the `atc.*` group, which does exist and does agree — `atc.safe_z_mm`
-  // -20.0, `atc.probe.fast_rate_mm_m` 500, `atc.probe.slow_rate_mm_m` 100 and `atc.probe.retract_mm`
-  // 1, all matching this block digit for digit. `changePosition` and `sensor` are computed from
-  // `ANCHOR1` per the firmware, so they inherit whatever #279 decides.
+  // The frame and its derivations, not the numbers themselves: `Z1_DATUMS` is
+  // `deriveCoordinateFrame(Z1_FRAME)` and is the only thing that computes a position (#279).
+  anchor1: Z1_FRAME.anchor1,
+  anchor2: Z1_DATUMS.anchor2,
+  // The four probe/height numbers come from the `atc.*` group, which does exist and does agree —
+  // `atc.safe_z_mm` -20.0, `atc.probe.fast_rate_mm_m` 500, `atc.probe.slow_rate_mm_m` 100 and
+  // `atc.probe.retract_mm` 1, all matching this block digit for digit (#208 B6, 2026-10-06).
   toolChange: {
-    clearanceZ: -3.0,
-    clearanceXY: [-11.6, -14.6],
-    changePosition: [ANCHOR1[0] + 48.78 + 132, ANCHOR1[1] + 179.74],
+    clearanceZ: Z1_FRAME.clearanceZ,
+    clearanceXY: Z1_FRAME.clearanceXY,
+    changePosition: Z1_DATUMS.changePosition,
     safeZ: -20.0,
-    sensor: [ANCHOR1[0] + 181, ANCHOR1[1] + 181],
-    sensorZ: -108,
+    sensor: Z1_DATUMS.sensor,
+    sensorZ: Z1_FRAME.toolrackZ,
     probeFastFeed: 500,
     probeSlowFeed: 100,
     probeRetract: 1,

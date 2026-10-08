@@ -11,8 +11,10 @@
  */
 
 import { create } from 'zustand';
-import type { PausePoint, Setup } from '@/engine/cnc';
+import type { MachineCalibration, PausePoint, Setup } from '@/engine/cnc';
+import { resolveMachine } from '@/engine/cnc/calibration';
 import { MACHINES, Z1 } from '@/engine/cnc/machine';
+import { useSettingsStore } from '@/store/settingsStore';
 import { stepAtTime, timeAtStep, totalTime } from '@/engine/cnc/playbackClock';
 import { generateRestart as buildRestart, stockFromSetup, type RestartResult } from '@/engine/cnc/restart';
 import type { Tool } from '@/engine/cnc/tool';
@@ -197,11 +199,25 @@ const EMPTY = {
   restart: null as RestartResult | null,
 };
 let loadSeq = 0;
-/** The arguments of the most recent load, so `retryWithLongerBudget` can run it again (#194). */
-let lastLoad: { gcodeText: string; setup: Setup; tool: Tool; machineId: string | null } | null = null;
+/**
+ * The arguments of the most recent load, so `retryWithLongerBudget` can run it again (#194), and
+ * so `generateRestart` verifies against the same machine (#279).
+ *
+ * `calibration` is read from the settings store ONCE, at the load, and kept for the later restart
+ * for the same reason `machine` is: a restart has to be lowered through the profile the job was
+ * simulated on, and re-reading a setting mid-session could silently swap the frame underneath it.
+ */
+interface LoadArgs {
+  gcodeText: string;
+  setup: Setup;
+  tool: Tool;
+  machineId: string | null;
+  calibration: MachineCalibration | null;
+}
+let lastLoad: LoadArgs | null = null;
 
 export const useSimStore = create<SimState>()((set, get) => {
-  async function run(args: { gcodeText: string; setup: Setup; tool: Tool; machineId: string | null }, budgetMs: number): Promise<void> {
+  async function run(args: LoadArgs, budgetMs: number): Promise<void> {
     const mine = ++loadSeq;
     set({ ...EMPTY, status: 'loading', budgetMs, phase: 'sweep' });
     try {
@@ -222,6 +238,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         onPhase: (phase) => {
           if (mine === loadSeq) set({ phase });
         },
+        calibration: args.calibration,
       });
       if (mine !== loadSeq) return; // superseded by a newer load or a dispose
       if (!r.ok) {
@@ -269,7 +286,11 @@ export const useSimStore = create<SimState>()((set, get) => {
     ...EMPTY,
     budgetMs: DEFAULT_SIM_BUDGET_MS,
     async loadProgram(gcodeText, setup, tool, machineId) {
-      lastLoad = { gcodeText, setup, tool, machineId };
+      // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
+      // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
+      // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
+      const calibration = useSettingsStore.getState().machineCalibration ?? null;
+      lastLoad = { gcodeText, setup, tool, machineId, calibration };
       await run(lastLoad, get().budgetMs);
     },
     async retryWithLongerBudget() {
@@ -297,7 +318,7 @@ export const useSimStore = create<SimState>()((set, get) => {
       }
       // A restart re-lowers the ORIGINAL text through the same pure halves the verifier uses, so
       // it never needs the wasm sweep the client holds — only the text, the setup and the tool.
-      const machine = MACHINES[lastLoad.machineId ?? ''] ?? Z1;
+      const machine = resolveMachine(MACHINES[lastLoad.machineId ?? ''] ?? Z1, lastLoad.calibration);
       set({
         restart: buildRestart({
           gcodeText: lastLoad.gcodeText,
