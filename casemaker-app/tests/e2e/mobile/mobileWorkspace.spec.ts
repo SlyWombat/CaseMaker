@@ -140,3 +140,56 @@ test('every section panel fits the phone without clipping a field (#134)', async
     expect(r.clipped, `${id} numeric field clips its value`).toEqual([]);
   }
 });
+
+/**
+ * #282 — the Part panel, in the same drawer as every other section, on the archetype that carries
+ * the most controls. It is the newest panel and the only one whose rail section a shell project
+ * cannot reach, so it is opened through the wizard rather than the board cards above; the same two
+ * questions apply, and the same three-button preset row (#134's overflow, twice over) is in it.
+ */
+test('the Part panel fits the phone, and its numbers reach the part (#282)', async ({ cm, page }) => {
+  await cm.ready();
+  await page.getByTestId('welcome-start-cnc').click();
+  await page.getByTestId('start-wizard-check').click();
+  await page.getByTestId('start-wizard-next').click();
+  await page.waitForSelector('[data-testid="start-wizard-step-job"]');
+  await page.getByTestId('start-wizard-job-badge-blank').click();
+  await page.waitForTimeout(300);
+  if ((await page.locator('[data-testid="engrave-setup-close"]').count()) > 0) {
+    await page.getByTestId('engrave-setup-close').click();
+  }
+  await page.waitForSelector('[data-testid="sidebar"]', { timeout: 30_000 });
+  await page.evaluate(async () => { await window.__caseMaker!.waitForIdle(); });
+
+  // The wizard can leave the right-hand drawer open, and an open drawer covers the rail handle.
+  const panel = page.getByTestId('context-panel');
+  if ((await panel.getAttribute('class'))?.includes('context-panel--open')) {
+    await page.locator('.context-panel__close').click();
+    await expect(panel).toHaveClass(/context-panel--closed/);
+  }
+  await page.getByTestId('sidebar-handle').click();
+  await page.getByTestId('sidebar-button-part').click();
+  await expect(page.getByTestId('context-section-part')).toBeVisible();
+
+  const r = await page.evaluate(() => {
+    const p = document.querySelector('[data-testid="context-panel"]') as HTMLElement;
+    const pr = p.getBoundingClientRect();
+    const bad: string[] = [];
+    for (const el of p.querySelectorAll('*')) {
+      const b = el.getBoundingClientRect();
+      if (b.width <= 1 && b.height <= 1) continue;
+      if (b.right - pr.right > 1) bad.push(`${el.tagName.toLowerCase()}.${el.className} → +${(b.right - pr.right).toFixed(1)}px`);
+    }
+    return { panelOverflow: p.scrollWidth - p.clientWidth, docOverflow: document.documentElement.scrollWidth - window.innerWidth, bad: bad.slice(0, 8) };
+  });
+  expect(r.panelOverflow, 'the Part panel scrolls sideways').toBeLessThanOrEqual(0);
+  expect(r.docOverflow, 'the Part panel pushed the page sideways').toBeLessThanOrEqual(0);
+  expect(r.bad, 'content past the panel’s right edge').toEqual([]);
+
+  // ... and the phone is not a read-only view of it: the edit reaches the compiled part.
+  await page.getByTestId('badge-width').fill('60');
+  await page.evaluate(async () => { await window.__caseMaker!.waitForIdle(); });
+  const bbox = await page.evaluate(() => window.__caseMaker!.getMeshStats('all')!.bbox);
+  expect(bbox.min[0]).toBeCloseTo(-30, 3);
+  expect(bbox.max[0]).toBeCloseTo(30, 3);
+});

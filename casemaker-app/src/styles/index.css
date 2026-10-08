@@ -586,6 +586,10 @@ body, html, #root {
   align-items: center;
   margin: 3px 0;
   font-size: 11px;
+  /* #134 — the quick-add preset row is wider than a phone panel and used to scroll
+     sideways, pushing "+ VESA 75" 6 px past the panel edge (mobileWorkspace.spec.ts).
+     A row that fits still renders on one line, so this is a no-op on desktop. */
+  flex-wrap: wrap;
 }
 .features-row select,
 .features-row input[type='text'],
