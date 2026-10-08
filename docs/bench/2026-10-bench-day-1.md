@@ -1283,6 +1283,19 @@ uncertainty 2 mm), so the app's collision check will warn.
   | #165 ladder run this session? (yes/no) | |
   | Notes | |
 
+- **The tape tilt** (#191 item 10) — four Z touches at the four corners of a taped blank, which
+  sizes the one Z error a single touch cannot see (`/Fabrication.md` §7.3, §7.6). Its run sheet is
+  `docs/bench/191-tape-tilt-run-sheet.md`: no `.nc`, no cutter, four touches and a subtraction.
+  **It needs C4's repeatability in the same sitting** — a spread at or below the probe's own noise
+  is not a tilt — and it is the one item here that **cannot share the vise's setup**: tape-down and
+  the vise are mutually exclusive fixtures (§7.3).
+
+  | Field | Value |
+  |---|---|
+  | Tape tilt measured? (yes/no) | |
+  | Spread across the blank (max − min), mm | |
+  | C4 repeatability this session, mm | |
+
 - **The printer's first-layer Z-offset** (#187 item 6, filed as its own issue). No motion and no
   trip needed — read it out of the slicer profile that printed the blank, and record it beside the
   colour-change layer #165 step 1 measures, so the two can be checked against each other.
