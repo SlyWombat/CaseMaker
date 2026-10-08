@@ -416,7 +416,12 @@ lower 13 mm in from the left edge.** (−183.4 and −188.4 read −56.91: the j
 −140 → 1.211, −120 → 1.107, −110 → 1.070 mm above the jaw. **Domed along the length too, by
 0.07–0.14 mm over ±30 mm.** The 3 × 3 grid at ±10 mm in Y agreed with this to 0.03 mm.
 
+**The moving jaw's top, along Y at X −136** (6 mm right of it is already a miss — the top is narrow
+there): Y −170 → −56.905, −160 → −56.896, −140 → −56.885, −120 → −56.867, −110 → −56.863. Against
+the fixed jaw at the same Y it is **12–39 µm higher** (+0.039, +0.033, +0.024, +0.018, +0.012), so the
+two jaw tops are parallel to within **27 µm over 60 mm** in Y and level to ~25 µm over the 50 mm
+between them in X. The vise is flat and level to a few hundredths; the blank's 0.3 mm is the blank's.
+
 So the face we probe — the face that was printed against the bed, now uppermost — is **convex by
 ~0.3 mm across the width and ~0.1 mm along the length**, the shape a cooling print takes when its
 corners lift. The jaw shelf holds it; the blank itself is not flat.
-

@@ -1036,7 +1036,7 @@ question — is still open; this is the wired probe's figure on the blank we act
 
 **Blank flatness, same sitting (#191 item 10, the vise case).** 3 × 3 grid, an X line and a Y line
 on the blank, and a Y line on the **fixed jaw's top** as the reference (`/Z1-Firmware-Dialect.md`
-§11.8). The jaw is straight to 2 µm with 0.068 mm of rise over 60 mm. The blank is **domed: ~0.33 mm
+§11.8). The fixed jaw is straight to 2 µm with 0.068 mm of rise over 60 mm; the **moving jaw** (X −136) is 12–39 µm higher and parallel to it within 27 µm over 60 mm. The blank is **domed: ~0.33 mm
 centre-to-edge across its 38 mm width, ~0.1 mm along its 76 mm length** — the printed-against-the-bed
 face, now up, is convex. A single centre probe therefore over-reads the surface by up to 0.3 mm at
 the width edges, which is of the order of the two-colour boundary's tolerance (#166, decision 12).
