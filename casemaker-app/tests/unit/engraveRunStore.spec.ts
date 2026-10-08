@@ -95,7 +95,7 @@ describe('engraveRunStore (#206)', () => {
     expect(saveBlocker(view({ generated: withError, simStatus: 'ready' }))).toContain('error');
 
     expect(saveBlocker(view({ generated: okGen, simStatus: 'ready', oracle: { ok: false, band: 0.016, levels: [], worst: { underCut: 2, overCut: 0 } } }))).toBe('the simulation does not match the prediction');
-    expect(saveBlocker(view({ generated: okGen, staleSince: Date.now(), simStatus: 'ready' }))).toBe('the job changed since it was generated');
+    expect(saveBlocker(view({ generated: okGen, staleSince: Date.now(), simStatus: 'ready' }))).toBe('the job or the machine frame changed since it was generated');
   });
 
   // #255 — Upload must never be reachable where Save is not. The two gates are separate functions
@@ -158,13 +158,13 @@ describe('engraveRunStore (#206)', () => {
 
     useEngraveJobStore.getState().setStock({ length: 120 });
     expect(useEngraveRunStore.getState().staleSince).not.toBeNull();
-    expect(saveBlocker(useEngraveRunStore.getState())).toBe('the job changed since it was generated');
+    expect(saveBlocker(useEngraveRunStore.getState())).toBe('the job or the machine frame changed since it was generated');
   });
 
   // #297: the generator (post, verifier, frame file) and the simulation must judge ONE machine. The
   // saved frame is read once per run and handed to both; a change to the saved frame while the
   // generator is working must not reach the simulation load of the same run.
-  it('hands the same saved frame to the generator and to the simulation load, read once (#297)', async () => {
+  it('hands the generator the frame read when Generate started, and calls the run stale if it changes mid-run (#297, #301)', async () => {
     const read = calibrationFromReplies(new Map(Object.entries(Z1_FRAME_REPLIES)), {
       machineId: 'Z1',
       measuredAt: '2026-10-06T13:01:11.000Z',
@@ -176,11 +176,11 @@ describe('engraveRunStore (#206)', () => {
 
     useSettingsStore.setState({ machineCalibration: first });
     let generatedWith: MachineCalibration | null | undefined;
-    let loadedWith: MachineCalibration | null | undefined;
+    let loads = 0;
     const realLoad = useSimStore.getState().loadProgram;
     useSimStore.setState({
-      loadProgram: async (_nc, _setup, _tool, _id, calibration) => {
-        loadedWith = calibration;
+      loadProgram: async () => {
+        loads += 1;
       },
     });
     setEngraveRunClientLoader(async () => ({
@@ -199,7 +199,67 @@ describe('engraveRunStore (#206)', () => {
       useSettingsStore.setState({ machineCalibration: undefined });
     }
     expect(generatedWith).toBe(first);
-    expect(loadedWith).toBe(first);
+    // The result describes the old frame, so it is stale and is never simulated against the new one.
+    expect(useEngraveRunStore.getState().staleSince).not.toBeNull();
+    expect(loads).toBe(0);
+  });
+
+  it('hands the simulation load the very frame the generator got (#297)', async () => {
+    const read = calibrationFromReplies(new Map(Object.entries(Z1_FRAME_REPLIES)), {
+      machineId: 'Z1',
+      measuredAt: '2026-10-06T13:01:11.000Z',
+      host: '192.168.10.43',
+    });
+    if (!read.ok) throw new Error('the fixture should read');
+    useSettingsStore.setState({ machineCalibration: read.calibration });
+    let generatedWith: MachineCalibration | null | undefined;
+    let loadedWith: MachineCalibration | null | undefined;
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({
+      loadProgram: async (_nc, _setup, _tool, _id, calibration) => {
+        loadedWith = calibration;
+      },
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async (_job, calibration) => {
+        generatedWith = calibration;
+        return clean();
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    try {
+      await useEngraveRunStore.getState().generate();
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+      useSettingsStore.setState({ machineCalibration: undefined });
+    }
+    expect(generatedWith).toBe(read.calibration);
+    expect(loadedWith).toBe(read.calibration);
+  });
+
+  // #301: the same rule Save already enforces for an edited job, for the machine's frame.
+  it('marks a held result stale when the saved machine frame changes afterwards (#301)', async () => {
+    useSettingsStore.setState({ machineCalibration: undefined });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => NOTHING,
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    await useEngraveRunStore.getState().generate();
+    expect(useEngraveRunStore.getState().staleSince).toBeNull();
+
+    const read = calibrationFromReplies(new Map(Object.entries(Z1_FRAME_REPLIES)), {
+      machineId: 'Z1',
+      measuredAt: '2026-10-06T13:01:11.000Z',
+      host: '192.168.10.43',
+    });
+    if (!read.ok) throw new Error('the fixture should read');
+    useSettingsStore.getState().setMachineCalibration(read.calibration);
+    try {
+      expect(useEngraveRunStore.getState().staleSince).not.toBeNull();
+      expect(saveBlocker(useEngraveRunStore.getState())).toBe('the job or the machine frame changed since it was generated');
+    } finally {
+      useSettingsStore.setState({ machineCalibration: undefined });
+    }
   });
 
   it('passes "no saved frame" as null to both, not as a fresh read (#297)', async () => {

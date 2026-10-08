@@ -198,7 +198,7 @@ describe('#295 EngraveMachineUpload — the gate is asked again at the second pr
     expect(screen.getByTestId('engrave-upload-confirm')).toBeTruthy();
 
     // The job changes while the confirmation is open: the run's own blocker comes up.
-    rerender(<EngraveMachineUpload {...props({ blocker: 'the job changed since it was generated' })} />);
+    rerender(<EngraveMachineUpload {...props({ blocker: 'the job or the machine frame changed since it was generated' })} />);
     await waitFor(() => expect(screen.queryByTestId('engrave-upload-confirm')).toBeNull());
     expect(uploads).toBe(0);
 

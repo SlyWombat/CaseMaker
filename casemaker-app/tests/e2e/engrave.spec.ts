@@ -73,7 +73,7 @@ test('editing the job after Generate makes the result stale and blocks Save', as
   await depth.blur();
 
   await expect(page.getByTestId('engrave-save')).toBeDisabled();
-  await expect(page.getByTestId('engrave-save-blocked')).toContainText('the job changed since it was generated');
+  await expect(page.getByTestId('engrave-save-blocked')).toContainText('the job or the machine frame changed since it was generated');
 });
 
 test("the saved .nc, reloaded as a stranger's file, removes the same volume", async ({ cm, page }) => {

@@ -116,7 +116,7 @@ export function runErrorCodes(v: EngraveRunView): string[] {
  */
 export function saveBlocker(v: EngraveRunView): string | null {
   if (!v.generated) return 'Generate first.';
-  if (v.staleSince !== null) return 'the job changed since it was generated';
+  if (v.staleSince !== null) return 'the job or the machine frame changed since it was generated';
   const errors = runErrorCodes(v);
   if (errors.length > 0) return `${errors.length} error${errors.length === 1 ? '' : 's'} outstanding`;
   if (v.phase === 'generating' || v.phase === 'simulating' || v.phase === 'checking') return 'the run is still going';
@@ -185,8 +185,11 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     }
     if (mine !== seq) return;
 
-    // The job may have been edited while generating: the result already describes an older job.
-    const stale = useEngraveJobStore.getState().job !== job;
+    // The job may have been edited while generating: the result already describes an older job. So
+    // may the machine's saved frame (#301): the result was generated against the one read above.
+    const stale =
+      useEngraveJobStore.getState().job !== job ||
+      (useSettingsStore.getState().machineCalibration ?? null) !== calibration;
     if (stale) {
       set({ generated, phase: 'blocked', staleSince: Date.now() });
       return;
@@ -253,6 +256,18 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 // fresh Generate.
 useEngraveJobStore.subscribe((state, prev) => {
   if (state.job === prev.job) return;
+  markStale();
+});
+
+// So does a change to the machine's saved frame (#301). The program was posted, verified and
+// simulated against the frame read when Generate started (#297); a different frame is a different
+// machine, and Save and Upload must not carry on offering the old result.
+useSettingsStore.subscribe((state, prev) => {
+  if (state.machineCalibration === prev.machineCalibration) return;
+  markStale();
+});
+
+function markStale(): void {
   const s = useEngraveRunStore.getState();
   if (s.generated && s.staleSince === null) useEngraveRunStore.setState({ staleSince: Date.now() });
-});
+}
