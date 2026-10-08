@@ -891,6 +891,34 @@ The procedure is **#293 Stage 1** (it folds this item in as step 6), and it now 
 — the last pair answers A6 for free. §8 is unchanged: a person at the machine, hand near the stop.
 The park note below is kept as the record of why it waited.
 
+**Recorded 2026-10-08 (#293 Stage 1, 13:28–13:52 UTC).** Vise mounted, wired probe fitted, collet
+empty, spindle 0, Z −3.0 (clearance) throughout; every line through `z1.mjs send`, trace
+`docs/bench/traces/2026-10-08-console.log`. Directions are the maintainer's, standing at the front.
+
+| Command | MPos before | MPos after | Direction moved (vs. the sign) | What the console said |
+|---|---|---|---|---|
+| `G28` | −1, −1, −1 (homed) | −11.6, −14.6, −3.0 | collet ends over the depth sensor, **back-right** | `ok` / `G28 means goto clearance position on CARVERA` |
+| `G53 G0 X-100` | −11.6, −14.6 | −100, −14.6 | **left** (X− = head left) | `ok` |
+| `G53 G0 Y-100` | −100, −14.6 | −100, −100 | **bed moved back**, away from the operator (Y− = tool toward the front of the work) | `ok` |
+| `G53 G0 X-180`, `G53 G0 Y-180` | −100, −100 | −180, −180 | left; bed back | `ok` |
+| `G91`; `G1 X-5 F300` × 5 | −180 | **−205** | left, 5 mm each, all Idle | `ok` each |
+| `G1 X-5 F300` (6th, → −210; `x_min` −207) | −205 | **−205, no motion** | — | `ok` then `error:Soft Endstop X was exceeded - reset or $X or M999 required`; state **Alarm**; **beep + red blink on the head** |
+| `$X`, `G90` | | | | `[Caution: Unlocked]` / `ok`; `G90` had been refused with `error:Alarm lock` while in Alarm |
+| `G1 Y-5 F300` × 5, then a 6th (→ −210; `y_min` −206) | −180 | **−205**, 6th refused, no motion | bed back | same refusal, `… Soft Endstop Y …`, Alarm |
+| `G28` | −205, −205 | −11.6, −14.6, −3.0 | | `ok`; ≤ 12.8 s for the diagonal |
+
+**C2's two answers.** (1) The soft limit **holds**: the controller checks the destination before
+moving and **refuses cleanly** — a message, an Alarm, no motion, no grind. (2) Whether the axis
+*physically* reaches −207/−206 is **not tested** — the last accepted step was −205 on both axes and
+the refused step would have gone to −210; a 2 mm bite from −205 would answer it. Rapid rate sampled
+at ~1100–1400 mm/min on both axes (#281). Z not run (vise mounted).
+
+**#275 (partial):** the broadcast still said `busy: false` during a `Run`. **#304:** no drop during
+this 24-minute session, with a status poll every ~1.3 s throughout; the earlier two drops were with
+nothing connected. **Camera:** the module replays its last frame to a new client (§10 of the bridge
+protocol), so every single frame taken today shows the *previous* position — A6 is not answered by
+these frames; `camera.mjs` now skips the first.
+
 **PARKED 2026-10-07 — blocked, not deferred.** The moves have to be typed into Studio's MDI *at the
 machine*, and the bench harness cannot send motion. That is deliberate rather than a gap: `tools/z1/`
 has no G-code passthrough, no jog and no MDI, and `Z1-Bridge-Protocol.md` §8 says the bridge "can

@@ -474,6 +474,7 @@ connected. Everything below is observed on `Makera_Z1_010290`:
 | Endpoint | `ws://<host>:82/ws_video` — a plain WebSocket (RFC 6455 handshake, `101 Switching Protocols`). |
 | Start | The client sends the **text** message `start_stream` once connected. Nothing arrives before it. |
 | Frames | **Binary** WebSocket messages, one complete **baseline JPEG (`FFD8 FFE0`) per message, 640 × 480**, ~16 KB each, at **~10 per second** (12 frames in 1.1 s). They keep coming until the socket closes. |
+| **First frame is stale** | On `start_stream` the module first replays the **last frame it encoded for the previous client** (2026-10-08: a burst's first frame was byte-identical to a capture taken before a 25 mm bed move; the third frame showed the move). A capture must discard it; `camera.mjs` skips one by default. |
 | Stop | Close the socket. (Studio's strings also carry text messages for **time-lapse playback** — `total_frames`, `frame_period_us`, `from_frame`, a "play response" — not exercised.) |
 | Port 80 | The same module serves a leftover demo web page (`<title>Tank</title>`, Vue, `"ESP32 Camera Stream"`), whose bundle names `:81/ws` and `:82/ws_video`. **Port 81 is refused**; port 80 is of no use to us. |
 | Availability | Ports 80 and 82 open with the machine, a few seconds after 2222. **A powered machine that has not made its network connection (it sometimes fails to at power-up) answers on none of them** (see `tools/z1/power.sh on --cycle`). |

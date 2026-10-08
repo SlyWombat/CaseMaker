@@ -341,3 +341,19 @@ machine has bed cleaning, blowing, static removal and "extend out" as four separ
   the session and all five on after it.
 - **Nothing was captured off the wire.** A capture would make all of the above first-hand; the
   client's own log is what made any of it visible at all.
+
+### 11.5 Observed 2026-10-08 — the first moves we chose (#293), and the soft limit refusing
+
+Typed through `tools/z1/z1.mjs send` (one framed console line per command, trace in
+`docs/bench/traces/2026-10-08-console.log`); the machine's replies verbatim:
+
+| Sent | Reply | Note |
+|---|---|---|
+| `G28` | `ok` then `G28 means goto clearance position on CARVERA` | Two reply frames. Lands on `coordinate.clearance_*`: MPos −11.6, −14.6, −3.0. From −205, −205 it took ≤ 12.8 s (a diagonal rapid). |
+| `G53 G0 X-100` | `ok` | Status `Run` while moving, `Idle` after. ~1100–1400 mm/min sampled mid-move (#281). |
+| `G91` / `G90` | `ok` | `G90` is **refused with `error:Alarm lock`** while in Alarm — unlock first. |
+| `G1 X-5 F300` at MPos X −205 (would reach −210; `soft_endstop.x_min` is −207) | `ok` **then** `error:Soft Endstop X was exceeded - reset or $X or M999 required` | **No motion**, position held at −205, state `<Alarm\|…\|H:10\|…>`. The machine **beeps and the head's light blinks red** (the only indicator — the Z1 has no display). Same for Y (`y_min` −206, held at −205). The soft limit is checked against the *destination* before motion starts: a clean refusal, not a stall. |
+| `$X` | `[Caution: Unlocked]` then `ok` | Clears the Alarm; state back to `Idle`, position kept. |
+
+Two status-line details seen only in Alarm: an `H:10` field appears, and the `C:` field's last value flips from `1` to `0`.
+

@@ -73,7 +73,7 @@ function usage() {
   node tools/z1/z1.mjs read     <host> <path> [--limit <lines>] [--window <ms>] [--out <file>]
   node tools/z1/z1.mjs md5      <host> <path> [<path> ...] [--window <ms>] [--json]
   node tools/z1/z1.mjs config   <host> <key> [<key> ...] [--source <name>] [--effective] [--json]
-  node tools/z1/z1.mjs camera   <host> [--out <file-or-dir>] [--count <n>] [--every <ms>] [--port <n>]
+  node tools/z1/z1.mjs camera   <host> [--out <file-or-dir>] [--count <n>] [--every <ms>] [--skip <n>] [--port <n>]
 
 \`config\` reads from source \`sd\` by default, one \`config-get sd <key>\` per key. \`--effective\` asks for
 the merged cache instead (one \`config-get <key>\`) — but on this machine that cache answers
@@ -173,6 +173,8 @@ async function main() {
   if (cmd === 'camera') {
     const count = num(flags.count, 1);
     const everyMs = num(flags.every, 0);
+    // The module replays its LAST frame to a new client first (camera.mjs); skip it by default.
+    const skip = num(flags.skip, 1);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const here = dirname(fileURLToPath(import.meta.url));
     const defaultOut = resolve(here, '..', '..', '..', 'docs', 'bench', 'img', count === 1 ? `camera-${stamp}.jpg` : `camera-${stamp}`);
@@ -183,6 +185,7 @@ async function main() {
       port: num(flags.port, CAMERA_PORT),
       count,
       everyMs,
+      skip,
       onFrame: (jpeg, n) => {
         const path = count === 1 ? out : resolve(out, `frame-${String(n).padStart(4, '0')}.jpg`);
         saveFrame(path, jpeg);
