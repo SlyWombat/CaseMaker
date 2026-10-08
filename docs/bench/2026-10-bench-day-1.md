@@ -95,7 +95,7 @@ Photo of all cutters with a ruler: `docs/bench/img/` _______________
 collar, measure stick-out from the nut face to the tool tip.
 
 **Expected.** `Z1.holder` is `null` — "PROVISIONAL (#208): the collet nut has never been
-measured" (`machine.ts:168-170`), so the fixture gate reports "cannot be proven". Tool
+measured" (`machine.ts:463-465`), so the fixture gate reports "cannot be proven". Tool
 `stickout`: `0` for the TopClamp sample, `null` for `flat-1.0` (`toolLibrary.ts`). Bit collars
 set ~12 mm shank protrusion by default (`/Fabrication.md` §1).
 
@@ -124,8 +124,8 @@ from above and from the front with a ruler in frame.
 
 **Expected (every value is a placeholder).** `DEFAULT_VISE` — `stockProud 4`,
 `fixedJawThickness 15`, `movingJawThickness 15`, `jawLength 80`, `jawStartY −10`
-(`fixture.ts:70-78`); `VISE_BODY_DEPTH 20` (`fixture.ts:36`); `GRIP_MIN 3` (`fixture.ts:43`);
-uncertainty bands 2 mm (default) / 0.5 mm (saved) (`fixture.ts:56-58`). Known from the vise's
+(`fixture.ts:101-105`); `VISE_BODY_DEPTH 20` (`fixture.ts:36`); `GRIP_MIN 3` (`fixture.ts:43`);
+uncertainty bands 2 mm (default) / 0.5 mm (saved) (`fixture.ts:55-58`). Known from the vise's
 quick-start page: the **fixed jaw is the LEFT jaw**; it mounts on **two 4 × 11 mm locating pins
 and six M5×20 screws, MDF wasteboard removed**; soft jaws are slotted ("suitable for thin
 workpieces"); the slot is a **lip over the top-face edge**; the fixed jaw's offset from the
@@ -260,6 +260,34 @@ a fourth answer it did not list: **a human-readable product slug**. Three conseq
 
 **Goes to:** #212 — the symbology and payload shape are now known for one cutter; the remaining A7
 rows decide whether either generalises.
+
+### A8 — Caliper the Makera 3D Probe's tip
+
+**Do.** Measure the diameter of the probe's touching tip (the ball or stylus end that contacts the
+work) with calipers, at its widest. Photograph it against the scale. Note which probe it is — the
+**Makera 3D Probe**, not the 3D Probe Rod, and not the wired Z-only probe the machine ships with;
+they are three different parts (`/Fabrication.md` §1) — and if the tip is a ball on a stem, the
+stem diameter too.
+
+**Expected.** Unknown. Makera publishes no figure. The code assumes **3 mm** — "the common ball for a
+probe of this class" (`engrave/registration.ts:43`, `PROBE_SPEC` at `:57`; `cncProbePlan.spec.ts`
+used the same). The tip sets how far a touch stands off a corner and how short an edge may be, so
+the plan's *edges and axes* are sound whatever it is, but the millimetre along them is nominal until
+this is measured. Nothing in A1–A7 measures it: A1 is cutters, and the probe is not one.
+
+**Recorded:** _not yet run — one number + one photo._
+
+| Field | Value |
+|---|---|
+| Probe (3D Probe / 3D Probe Rod / wired Z-only) | |
+| Tip diameter, mm (widest) | |
+| Stem diameter, mm (if a ball on a stem) | |
+
+Photo: `docs/bench/img/A8-probe-tip.jpg`
+
+**Goes to:** `PROBE_SPEC.tipDiameter` in `engrave/registration.ts`, replacing 3 and its
+`PROVISIONAL (#208)` note; #188 (the probe plan's stand-off). Pin it with a `cncProbePlan.spec.ts`
+case so a changed tip moves the planned touch points.
 
 ---
 
@@ -1382,13 +1410,14 @@ D1 as written could never have answered it by inspection.
 
 | Marker (value) | File:line | Resolved by |
 |---|---|---|
-| `holder: null` | `machine.ts:168-170` | A2 |
+| `holder: null` | `machine.ts:463-465` | A2 |
 | `VISE_BODY_DEPTH = 20` | `fixture.ts:36` | A3 |
 | `GRIP_MIN = 3` | `fixture.ts:43` | A3 / A5 |
 | `DEFAULT_UNCERTAINTY = 2`, `SAVED_UNCERTAINTY = 0.5` | `fixture.ts:55-58` | A3 |
-| `DEFAULT_VISE` five numbers | `fixture.ts:70-78` | A3 |
-| `vise-grip-shallow` message | `fixture.ts:211` | A5 |
-| "vise dimensions … awaiting #208" | `engrave/defaults.ts:46` | A3 |
+| `DEFAULT_VISE` five numbers | `fixture.ts:101-105` | A3 |
+| `vise-grip-shallow` message | `fixture.ts:290` | A5 |
+| "vise dimensions … awaiting #208" | `engrave/defaults.ts:64` | A3 |
+| `PROBE_SPEC = { tipDiameter: 3 }` (the Makera 3D Probe's tip) | `engrave/registration.ts:43,57` | A8 |
 
 Other `PROVISIONAL` markers in the tree are **not** #208's: `#205` (EngravePreview.tsx:28),
 `#197` (SimMeshes.tsx:21), `#213` / `#218` (`sacrificial.ts:22,66`; `engraveJob.ts:190`).
