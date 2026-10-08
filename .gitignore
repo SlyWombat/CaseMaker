@@ -31,3 +31,9 @@ Thumbs.db
 # Competitor/market research staging — local copies of vendor docs (2026-10-04).
 # Remove this ignore (or whitelist just the summaries) once the research is written up.
 docs/market-research/
+
+# Vendor PDFs downloaded for reading, not for redistribution (2026-10-07).
+# Makera-Parity.md cites docs/makera/CARVERA_EXAMPLES_2026.02.pdf; the citation is
+# ours, the 8 MB Carvera-branded document is theirs. Keep it local, like the
+# market-research staging above and the un-committed reference-gcode corpus.
+docs/makera/

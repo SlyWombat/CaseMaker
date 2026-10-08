@@ -10,6 +10,9 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+# Keep-before/keep-after snapshots of dist used to compare builds by eye —
+# `dist/` alone does not match `dist-180-before/` (2026-10-07).
+dist-*/
 *.local
 
 # Issue #71 — operator notes that reference host-specific account names,
