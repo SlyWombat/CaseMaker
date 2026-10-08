@@ -12,7 +12,7 @@ import { version as APP_VERSION } from '../../package.json';
 import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
-import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveTraceItem } from '@/types/engraveJob';
+import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLineItem, EngraveTraceItem } from '@/types/engraveJob';
 
 describe('engraveGenerate (#206)', () => {
   it('takes the default job all the way to a clean .nc', () => {
@@ -298,6 +298,98 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
       keepOuts: [pocket],
     });
     expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
+  });
+});
+
+// #287 — a single-line trace (#219) used to reach every gate except the CAM, so a job with one
+// generated a program that cut everything BUT the trace: no warning, no refusal, and a run sheet
+// implying otherwise. These pin the wiring that fixes it.
+describe('a trace item reaches the program (#287)', () => {
+  /** A two-point horizontal trace 30 mm long starting at `x`, 0.8 mm deep. */
+  const traceLine = (x: number): EngraveLineItem => ({
+    kind: 'line',
+    id: 'tr',
+    position: { x, y: 30 },
+    rotation: 0,
+    points: [
+      [0, 0],
+      [30, 0],
+    ],
+    closed: false,
+    depth: 0.8,
+    enabled: true,
+  });
+
+  const jobWithTrace = (): EngraveJob => {
+    const base = defaultEngraveJob();
+    return { ...base, labels: [base.labels[0]!], shapes: [], traces: [traceLine(10)] };
+  };
+
+  it('emits an operation for the trace, appended after the region operations', () => {
+    const g = engraveGenerate(tl, jobWithTrace());
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    // One label region + one trace: the trace is not silently dropped.
+    expect(g.cam!.operations).toBe(2);
+    expect(g.cam!.cuttingMoves).toBeGreaterThan(0);
+    expect(g.nc).toContain('Engrave "CASE"');
+    // Named the way `traceOperationName` words it, with the depth `generateTrace` appends.
+    expect(g.nc).toContain('Trace line (2 points) 0.8mm');
+    expect(g.nc!.indexOf('Trace line')).toBeGreaterThan(g.nc!.indexOf('Engrave "CASE"'));
+    // The verifier reads the posted text, so it sees the trace moves too.
+    expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+  });
+
+  it('predicts the trace cutter SWEEP, or the oracle would read its own groove as an over-cut', () => {
+    const g = engraveGenerate(tl, jobWithTrace());
+    // A 30 mm capsule on a 1.0 mm cutter: 30 + π·0.5² ≈ 30.785 mm², minus the polygonisation of
+    // the two round caps — so a band, not a closed form to the last digit.
+    const trace = g.predicted.find((p) => Math.abs(p.depth - 0.8) < 1e-9);
+    expect(trace).toBeDefined();
+    const cs = tl.CrossSection.ofPolygons(trace!.polygons);
+    const area = cs.area();
+    cs.delete();
+    expect(area).toBeGreaterThan(30);
+    expect(area).toBeLessThan(31);
+    // ...and the label's own region is predicted too, so the two depths both appear.
+    expect(g.predicted.some((p) => Math.abs(p.depth - 2.0) < 1e-9)).toBe(true);
+  });
+
+  it('leaves a job with no traces alone', () => {
+    // The identity the byte-identity of every pre-#287 program rests on: no trace, no extra
+    // operation, no extra predicted level.
+    const g = engraveGenerate(tl, defaultEngraveJob());
+    expect(g.cam!.operations).toBe(3);
+    expect(g.predicted).toHaveLength(3);
+    expect(g.nc).not.toContain('Trace');
+  });
+
+  // The tests above would all pass if the trace's moves went somewhere arbitrary. The verifier's
+  // own parse of the posted text gives the program's depth and move count, so this pins WHERE the
+  // cut lands: a trace-only job (no region items at all — which the post used to refuse outright)
+  // must carry the trace's own endpoints at the item's depth, negative Z.
+  it('cuts the trace where the item says, at the item depth', () => {
+    const g = engraveGenerate(tl, {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      // 15 mm long from x 80 to 95 at y 10, 0.8 mm deep: the whole job, so every coordinate in
+      // the program belongs to the trace (the extent check below is why).
+      traces: [{ ...traceLine(80), position: { x: 80, y: 10 }, points: [[0, 0], [15, 0]] }],
+    });
+    expect(g.ok).toBe(true);
+    expect(g.nc).not.toBeNull();
+    expect(g.cam!.operations).toBe(1);
+    // The endpoints, as the machine reads them. The post trims trailing zeros, so `X95` is the
+    // whole program's far end; the lookahead keeps `X950` out of the match.
+    expect(g.nc).toMatch(/X80(?![.\d])/);
+    expect(g.nc).toMatch(/X95(?![.\d])/);
+    expect(g.nc).toMatch(/Y10(?![.\d])/);
+    // Cut BELOW the top face (work Z is negative down) to the item's depth. The program's bbox is
+    // not usable here: the post's own ending is `G28`, a machine home, which the verifier counts
+    // as a move and which reaches far past the work.
+    expect(g.verify!.stats.deepestZ).toBeCloseTo(-0.8, 6);
+    expect(g.verify!.stats.cuttingMoves).toBeGreaterThan(0);
   });
 });
 

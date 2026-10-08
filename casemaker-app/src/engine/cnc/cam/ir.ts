@@ -160,3 +160,50 @@ export function estimateCycleSeconds(moves: readonly CamMove[], rapidMmPerMin: n
 export function estimateIRCycleSeconds(ir: ToolpathIR, rapidMmPerMin: number = ASSUMED_RAPID_MM_MIN): number {
   return ir.operations.reduce((s, op) => s + estimateCycleSeconds(op.moves, rapidMmPerMin), 0);
 }
+
+/** The machine state two IRs must share for their moves to belong to one program. */
+const SHARED_HEADER = ['frame', 'toolNumber', 'spindleRpm', 'air', 'safeZ', 'hopZ'] as const;
+
+/** Throw unless `a` and `b` describe the same machine state — see `concatToolpathIR`. */
+function assertSameMachine(a: ToolpathIR, b: ToolpathIR): void {
+  for (const key of SHARED_HEADER) {
+    if (a[key] !== b[key]) {
+      throw new Error(
+        `concatToolpathIR: the two toolpaths disagree on ${key} (${String(a[key])} vs ${String(b[key])})`,
+      );
+    }
+  }
+  // The cutter is a flat record of scalars, so its JSON is a faithful identity; the reference
+  // check first keeps the common case — the same `Tool` object passed to both CAM calls — cheap.
+  if (a.tool !== b.tool && JSON.stringify(a.tool) !== JSON.stringify(b.tool)) {
+    throw new Error('concatToolpathIR: the two toolpaths were cut with different tools');
+  }
+}
+
+/**
+ * Two IRs as ONE program, operations renumbered from 1 (#219/#287).
+ *
+ * The CAM is two modules with two entry points: `generateEngrave` builds the region operations
+ * (pockets and drills) and `generateTrace` builds the single-line traces. Each numbers its
+ * operations from 1 because each is usable alone (`cam/trace.ts` states that contract), but the
+ * program the machine runs is ONE list, so the caller that runs both — the worker
+ * `engraveGenerate` — joins them here rather than either module knowing the other exists. The
+ * renumbering keeps the merge honest about `CamOperation.number`'s own "1-based, in cutting order"
+ * contract; the post renumbers positionally regardless, so a naive concat would not change today's
+ * `.nc`, it would just leave an IR that lies about itself.
+ *
+ * The two IRs must describe the same machine state, or the moves of one would be posted under the
+ * other's spindle or safe height and the difference would be silent: the frame, tool, tool
+ * number, spindle, air, safe height and hop height are asserted equal, and a mismatch THROWS
+ * rather than picking a winner. Operations are joined in the order given — the CALLER decides
+ * what runs first, because that is a scheduling decision (a drill before a cut-out, #220), not a
+ * property of the move list.
+ *
+ * `b` with no operations (a job with no traces, #287) yields `a`'s operations unchanged: the
+ * renumbering is then a no-op, so such a job's `.nc` stays byte-identical to the one-module one.
+ */
+export function concatToolpathIR(a: ToolpathIR, b: ToolpathIR): ToolpathIR {
+  assertSameMachine(a, b);
+  const operations = [...a.operations, ...b.operations].map((op, index) => ({ ...op, number: index + 1 }));
+  return { ...a, operations };
+}

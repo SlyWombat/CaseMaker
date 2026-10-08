@@ -146,4 +146,61 @@ describe('engraveOracle (#206 §3)', () => {
     expect(oracleBand(1000)).toBeCloseTo(levelsFor1000 * SWEEP_SIMPLIFY_EPS_MM + 2 * ARC_CHORD_TOLERANCE_MM, 12);
     expect(oracleBand(1000)).toBeCloseTo(0.016, 12); // the value /Simulation.md §7 works out
   });
+
+  // #287 — a single-line trace (#219) used to contribute no move to the program at all. Now that
+  // it does, the prediction has to carry its swept region too: the oracle judges the simulation at
+  // each PREDICTED depth, so a trace missing from `predicted` leaves its groove unlooked-at (and,
+  // where a shallower item sets the level, unaccounted for). The second half of this test is the
+  // proof the entry is load-bearing — the same program, judged against the prediction WITHOUT the
+  // trace, is refused with the whole groove reported as over-cut.
+  it('passes a single-line trace, and would refuse it if the trace were not predicted (#287)', () => {
+    // The trace is the DEEPEST item in the job, so its floor is a level of its own — the level the
+    // control below removes.
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      labels: [{ ...base.labels[0]!, depth: 0.5 }],
+      shapes: [],
+      traces: [
+        {
+          kind: 'line',
+          id: 'tr',
+          position: { x: 30, y: 10 },
+          rotation: 0,
+          points: [
+            [0, 0],
+            [30, 0],
+          ],
+          closed: false,
+          depth: 1.5,
+          enabled: true,
+        },
+      ],
+    };
+    const g = engraveGenerate(tl, job);
+    expect(g.ok).toBe(true);
+    expect(g.nc).not.toBeNull();
+    expect(g.nc).toContain('Trace line (2 points) 1.5mm');
+
+    const tool = jobTool(job)!;
+    const session = load(job, g.nc!, tool);
+    try {
+      const report = session.oracle(g.predicted);
+      // Two levels, ascending: the label's 0.5 mm floor and the trace's 1.5 mm one.
+      expect(report.levels.map((l) => l.z)).toEqual([-0.5, -1.5]);
+      // The groove really was cut — a 30 mm capsule on a 1.0 mm cutter is ~30.8 mm².
+      expect(report.levels[1]!.simulatedArea).toBeGreaterThan(30);
+      expect(report.ok).toBe(true);
+      expect(over(report)).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+      expect(under(report)).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+
+      // The control: drop the trace from the prediction and the SAME program is refused, with the
+      // whole groove reported as over-cut at the label's level. This is the mismatch #287 feared.
+      const blind = session.oracle(g.predicted.filter((p) => Math.abs(p.depth - 1.5) > 1e-9));
+      expect(blind.ok).toBe(false);
+      expect(over(blind)).toBeGreaterThan(30);
+    } finally {
+      session.dispose();
+    }
+  });
 });

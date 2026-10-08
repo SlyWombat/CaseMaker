@@ -4,7 +4,9 @@
  *
  *   findings (#200/#201/#203)  → the job as data, the vise, and the tool-opened geometry
  *   feeds    (#202)            → the cutting parameters for the material and the cutter
- *   cam      (#172)            → the toolpath IR, off the SAME opened polygons stage 1 measured
+ *   cam      (#172)            → the toolpath IR: the region operations off the SAME opened
+ *                                polygons stage 1 measured, then the single-line traces (#219)
+ *                                appended as their own operations (#287)
  *   post     (#173)            → the `.nc` text
  *   verify   (#174)            → the text, re-parsed and checked against the depth limit
  *   frame    (#244)            → the same toolpath traced in the air, a second `.nc` file
@@ -40,8 +42,9 @@ import { toPartPlan, labelProfile, jobDepthLimit } from '@/engine/cnc/engrave/pa
 import { jobTool, toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
+import { generateTrace } from '@/engine/cnc/cam/trace';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { estimateCycleSeconds, HOP_Z, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { concatToolpathIR, estimateCycleSeconds, HOP_Z, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { FRAME_Z } from '@/engine/cnc/engrave/runSheet';
 import type { Setup } from '@/engine/cnc/setup';
@@ -52,6 +55,7 @@ import {
   engravabilityFindings,
   keepOutFindings,
   measureLabels,
+  traceCutRegions,
   type LabelEngravability,
   type LabelRatioAt,
   type PerCharGlyph,
@@ -98,7 +102,10 @@ export interface EngraveGenerated {
   frameNc: string | null;
   /** #244 — `verifyProgram`'s report on `frameNc`, or null when no frame was produced. */
   frameVerify: VerifyReport | null;
-  /** The opened regions the CAM cut and the oracle must match (#206 §3). */
+  /**
+   * The regions the CAM cut and the oracle must match (#206 §3): each region item's opened
+   * polygons, each drill's discs, and — since #287 — each single-line trace's swept region.
+   */
   predicted: OraclePredicted[];
   /** Stage refusals, in stage order. Empty on a clean run. */
   errors: EngraveFailure[];
@@ -238,6 +245,14 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob): EngraveRe
 
   const predicted: OraclePredicted[] = regions.map((r2) => ({ depth: r2.depth, polygons: r2.polygons }));
 
+  // #287 — a single-line trace cuts the region its cutter SWEEPS (#270): one entry per trace, at
+  // the trace's own floor. The oracle compares the SIMULATION against `predicted` and refuses a
+  // file whose cut is outside it, so a trace left out of this list would read as an over-cut and
+  // refuse a correct program. The builder is the same `traceCutRegions` the void warning uses, so
+  // the warning and the oracle cannot disagree about where a trace cuts. Empty — a no-op — when
+  // the job has no trace or no usable cutter, the same "nothing measured" rule as above.
+  for (const t of traceCutRegions(tl, plan, radius)) predicted.push({ depth: t.depth, polygons: t.polygons });
+
   return { plan, measured, regions, predicted, tool, radius, findings };
 }
 
@@ -335,7 +350,7 @@ function frameProgram(
 }
 
 export function engraveGenerate(tl: ManifoldToplevel, job: EngraveJob): EngraveGenerated {
-  const { regions, predicted, tool, radius, findings } = engraveRegions(tl, job);
+  const { plan, regions, predicted, tool, radius, findings } = engraveRegions(tl, job);
   const errors: EngraveFailure[] = [];
 
   const stop = (stage: EngraveStage, extra?: { feeds?: FeedsResult | null; message?: string }): EngraveGenerated => {
@@ -370,6 +385,21 @@ export function engraveGenerate(tl: ManifoldToplevel, job: EngraveJob): EngraveG
   let ir: ReturnType<typeof generateEngrave>;
   try {
     ir = generateEngrave(tl, regions, tool, feeds.params);
+    // #287 — single-line traces (#219) are their own CAM: the cutter's centre follows the path,
+    // so there is no region to open, no offset and no pocketing. They are appended AFTER the
+    // region operations, so a trace can shift no pocket's ordering, and a job with none joins an
+    // empty list — the renumbering is a no-op, so its `.nc` is byte-identical to before. Both
+    // calls are inside this `try` so a trace CAM refusal reports the same `cam` stage a region
+    // refusal does.
+    //
+    // ORDERING, for whoever adds a class inside `generateEngrave` next (#218's cut-outs are the
+    // one already planned): the classes here end up drills → pockets → cut-outs → traces. Drills
+    // lead for the reason `generateEngrave` states (#220: a peck cycle leaves the blank
+    // unweakened). A trace wants to be cut BEFORE a cut-out releases the part, so #218 should
+    // place traces ahead of its cut-out class rather than leaving this append at the end — a
+    // released part can shift under the tape, which is exactly what the drills-first rule avoids.
+    const traceIr = generateTrace(plan.traces, tool, feeds.params);
+    if (traceIr.operations.length > 0) ir = concatToolpathIR(ir, traceIr);
   } catch (e) {
     return stop('cam', { feeds, message: e instanceof Error ? e.message : String(e) });
   }
