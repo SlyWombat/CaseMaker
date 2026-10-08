@@ -69,6 +69,26 @@ describe('#280 — machineStore', () => {
     expect(useMachineStore.getState().checkedAt).toBe(checkedAt);
   });
 
+  it('noteLiveStatus refreshes busy, status and the moment, and nothing about who the machine is (#296)', () => {
+    useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation({ busy: false }), calibration: null });
+    const before = useMachineStore.getState().machine!;
+    useMachineStore.getState().noteLiveStatus({ busy: true, status: '<Run|MPos:1,2,3>' });
+    const after = useMachineStore.getState().machine!;
+    expect(after.busy).toBe(true);
+    expect(after.status).toBe('<Run|MPos:1,2,3>');
+    expect(after.observedAt >= before.observedAt).toBe(true);
+    expect(after.host).toBe(before.host);
+    expect(after.profileId).toBe(before.profileId);
+    // Kept across a reload, like every other write to this store.
+    expect(JSON.parse(localStorage.getItem(MACHINE_STORAGE_KEY)!).machine.busy).toBe(true);
+  });
+
+  it('noteLiveStatus with no remembered machine does nothing', () => {
+    useMachineStore.getState().forget();
+    useMachineStore.getState().noteLiveStatus({ busy: true, status: '<Run>' });
+    expect(useMachineStore.getState().machine).toBeNull();
+  });
+
   it('reloads the machine from storage', async () => {
     useMachineStore.getState().setProbeResult({ kind: 'found', observation: observation(), calibration: null });
     vi.resetModules();

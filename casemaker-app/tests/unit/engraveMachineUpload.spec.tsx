@@ -27,6 +27,7 @@ afterEach(() => {
 
 beforeEach(() => {
   setMachineUploadLoader(async () => ({
+    status: IDLE,
     upload: async () => ({ ok: true, bytes: 41, packets: 1, alreadyPresent: false }),
   }));
 });
@@ -49,6 +50,8 @@ const MACHINE: MachineObservation = {
   observedAt: '2026-10-06T21:14:00.000Z',
   notes: [],
 };
+
+const IDLE = async () => ({ ok: true, text: '<Idle|MPos:0,0,0>' });
 
 const NC = ';@MKR|BEGIN\nG21 G90\nM02\n';
 
@@ -128,6 +131,7 @@ describe('#255 EngraveMachineUpload — the second press', () => {
   it('writes nothing when the confirmation is cancelled', async () => {
     let uploads = 0;
     setMachineUploadLoader(async () => ({
+    status: IDLE,
       upload: async () => {
         uploads += 1;
         return { ok: true, bytes: 1, packets: 1, alreadyPresent: false };
@@ -145,6 +149,7 @@ describe('#255 EngraveMachineUpload — the second press', () => {
   it('sends on the second press and reports what the machine did', async () => {
     const seen: Array<{ host: string; port: number; filename: string }> = [];
     setMachineUploadLoader(async () => ({
+    status: IDLE,
       upload: async (target, program) => {
         seen.push({ host: target.host, port: target.port, filename: program.filename });
         return { ok: true, bytes: 41, packets: 2, alreadyPresent: false };
@@ -165,6 +170,7 @@ describe('#255 EngraveMachineUpload — the second press', () => {
 
   it('shows a machine’s refusal as a result, not as a crash', async () => {
     setMachineUploadLoader(async () => ({
+    status: IDLE,
       upload: async () => ({ ok: false, reason: 'refused', detail: 'the machine rejected the transfer (file cancel)' }),
     }));
     render(<EngraveMachineUpload {...props()} />);
@@ -178,17 +184,68 @@ describe('#255 EngraveMachineUpload — the second press', () => {
   });
 });
 
+describe('#295 EngraveMachineUpload — the gate is asked again at the second press', () => {
+  it('writes nothing, and closes the box, when the run went stale after the first press', async () => {
+    let uploads = 0;
+    setMachineUploadLoader(async () => ({
+      status: IDLE,
+      upload: async () => {
+        uploads += 1;
+        return { ok: true, bytes: 1, packets: 1, alreadyPresent: false };
+      },
+    }));
+    const { rerender } = render(<EngraveMachineUpload {...props()} />);
+    fireEvent.click(button());
+    expect(screen.getByTestId('engrave-upload-confirm')).toBeTruthy();
+
+    // The job changes while the confirmation is open: the run's own blocker comes up.
+    rerender(<EngraveMachineUpload {...props({ blocker: 'the job changed since it was generated' })} />);
+    await waitFor(() => expect(screen.queryByTestId('engrave-upload-confirm')).toBeNull());
+    expect(uploads).toBe(0);
+
+    // And clearing the blocker later does not resurrect a box nobody pressed.
+    rerender(<EngraveMachineUpload {...props()} />);
+    expect(screen.queryByTestId('engrave-upload-confirm')).toBeNull();
+    expect(uploads).toBe(0);
+  });
+});
+
+describe('#296 EngraveMachineUpload — a machine that is not idle now', () => {
+  it('shows the refusal and hands the live status back to be remembered', async () => {
+    let uploads = 0;
+    const told: Array<{ busy: boolean; status: string }> = [];
+    setMachineUploadLoader(async () => ({
+      status: async () => ({ ok: true, text: '<Run|MPos:1,2,3>' }),
+      upload: async () => {
+        uploads += 1;
+        return { ok: true, bytes: 1, packets: 1, alreadyPresent: false };
+      },
+    }));
+    render(<EngraveMachineUpload {...props({ onLiveStatus: (l) => told.push(l) })} />);
+    fireEvent.click(button());
+    fireEvent.click(screen.getByTestId('engrave-upload-confirm-send'));
+
+    await waitFor(() => expect(screen.getByTestId('engrave-upload-result')).toBeTruthy());
+    const result = screen.getByTestId('engrave-upload-result');
+    expect(result.getAttribute('data-state')).toBe('busy');
+    expect(result.textContent).toContain('not idle');
+    expect(uploads).toBe(0);
+    expect(told).toEqual([{ busy: true, status: '<Run|MPos:1,2,3>' }]);
+  });
+});
+
 describe('#255 EngraveMachineUpload — the sentence for each outcome', () => {
   const cases: Array<[MachineUploadResult, string]> = [
     [{ kind: 'uploaded', filename: 'job.nc', bytes: 41, packets: 2, alreadyPresent: false }, 'received job.nc'],
     [{ kind: 'uploaded', filename: 'job.nc', bytes: 41, packets: 0, alreadyPresent: true }, 'already had job.nc'],
     [{ kind: 'refused', filename: 'job.nc', detail: 'nope' }, 'declined job.nc'],
+    [{ kind: 'busy', filename: 'job.nc', detail: 'the machine reports Run, not Idle', status: '<Run>' }, 'not idle'],
     [{ kind: 'timeout', filename: 'job.nc', detail: 'silent' }, 'timed out'],
     [{ kind: 'error', filename: 'job.nc', detail: 'socket died' }, 'was not uploaded'],
     [{ kind: 'unavailable', filename: 'job.nc', reason: 'web build' }, 'cannot reach a machine'],
   ];
 
-  it('states what happened for every one of the five outcomes', () => {
+  it('states what happened for every one of the six outcomes', () => {
     for (const [result, expected] of cases) {
       expect(describeUpload(result, 'The Z1')).toContain(expected);
     }

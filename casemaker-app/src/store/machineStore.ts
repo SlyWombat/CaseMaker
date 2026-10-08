@@ -42,6 +42,12 @@ export interface MachineState {
   checkedAt: string | null;
   /** Record one probe result. The single write path: the probe produces, the store keeps. */
   setProbeResult: (result: MachineProbeResult) => void;
+  /**
+   * Fold in what the machine said when it was asked LIVE (#296) — the upload's idle check. Only
+   * `busy`, `status` and `observedAt` change: the identity and the coordinate frame are still the
+   * wizard's record. A no-op when no machine is remembered, because there is nothing to refresh.
+   */
+  noteLiveStatus: (live: { busy: boolean; status: string }) => void;
   /** Forget the machine entirely — a new check, or the user saying "not this one". */
   forget: () => void;
 }
@@ -128,6 +134,19 @@ export const useMachineStore = create<MachineState>()((set, get) => ({
       outcome: result.kind,
       reason: result.kind === 'unavailable' ? result.reason : result.kind === 'error' ? result.detail : null,
       checkedAt: new Date().toISOString(),
+    };
+    set(slice);
+    persist(slice);
+  },
+
+  noteLiveStatus: ({ busy, status }) => {
+    const current = get().machine;
+    if (current === null) return;
+    const slice: MachineSlice = {
+      machine: { ...current, busy, status, observedAt: new Date().toISOString() },
+      outcome: get().outcome,
+      reason: get().reason,
+      checkedAt: get().checkedAt,
     };
     set(slice);
     persist(slice);

@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useState, type CSSProperties, type JSX } from 'react';
 import type { MachineObservation } from '@/platform/machineProbe';
 import { programBytes, uploadProgram, type MachineUploadResult } from '@/platform/machineUpload';
 import type { VerifyReport } from '@/engine/cnc/verify';
@@ -52,6 +52,11 @@ export interface EngraveMachineUploadProps {
   program: { nc: string; verify: VerifyReport } | null;
   /** The name the machine will receive — `runSheetFileName(job.name)`, so it matches the run sheet. */
   filename: string;
+  /**
+   * Told what the machine said when the upload asked it live and it was not idle (#296), so the
+   * stored observation stops claiming otherwise. Optional: a test, or a host with no store, may omit it.
+   */
+  onLiveStatus?: (live: { busy: boolean; status: string }) => void;
 }
 
 /** ISO → something a person reads, or the raw string when it will not parse. Never "Invalid Date". */
@@ -73,6 +78,8 @@ export function describeUpload(result: MachineUploadResult, label: string): stri
         : `${label} received ${result.filename} — ${result.bytes} bytes in ${result.packets} packets.`;
     case 'refused':
       return `${label} declined ${result.filename}: ${result.detail}`;
+    case 'busy':
+      return `${label} is not idle — ${result.detail}. Wait for it to finish, then upload again.`;
     case 'timeout':
       return `The transfer of ${result.filename} timed out: ${result.detail}`;
     case 'error':
@@ -92,6 +99,7 @@ export function EngraveMachineUpload({
   machine,
   program,
   filename,
+  onLiveStatus,
 }: EngraveMachineUploadProps): JSX.Element {
   const [stage, setStage] = useState<'idle' | 'confirm' | 'sending'>('idle');
   const [result, setResult] = useState<MachineUploadResult | null>(null);
@@ -110,16 +118,30 @@ export function EngraveMachineUpload({
           ? 'no program has been generated'
           : null);
 
+  // A confirmation belongs to the gate that opened it (#295): once the run is blocked it is closed
+  // for good, so a later un-blocking cannot bring back a box nobody pressed.
+  useEffect(() => {
+    if (blocked !== null && stage === 'confirm') setStage('idle');
+  }, [blocked, stage]);
+
   const bytes = program === null ? 0 : programBytes(program.nc).length;
 
   async function send(): Promise<void> {
-    if (machine === null || program === null) return;
+    // The gate is asked AGAIN at the second press (#295). The first press opened this confirmation
+    // under a `blocked` that was null then; the job can go stale, or an acknowledgement be
+    // unticked, while the box is open, and the one button that writes to the machine must not be the
+    // one that remembers an older answer.
+    if (blocked !== null || machine === null || program === null) {
+      setStage('idle');
+      return;
+    }
     setStage('sending');
     // `uploadProgram` does not throw; the await is only for the result.
     const outcome = await uploadProgram(
       { host: machine.host, port: machine.port },
       { filename, nc: program.nc, verify: program.verify },
     );
+    if (outcome.kind === 'busy') onLiveStatus?.({ busy: true, status: outcome.status });
     setResult(outcome);
     setStage('idle');
   }
@@ -158,7 +180,7 @@ export function EngraveMachineUpload({
         </p>
       )}
 
-      {stage === 'confirm' && machine !== null && program !== null && (
+      {stage === 'confirm' && blocked === null && machine !== null && program !== null && (
         <div style={CONFIRM} data-testid="engrave-upload-confirm">
           <p style={CONFIRM_TEXT}>
             Send <strong>{filename}</strong> ({bytes} bytes) to <strong>{label}</strong> at{' '}

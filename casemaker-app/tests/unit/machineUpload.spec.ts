@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   programBytes,
   setMachineUploadLoader,
+  controllerState,
   uploadProgram,
   type MachineUploadClient,
   type UploadAttempt,
@@ -41,6 +42,7 @@ const BAD_REPORT: VerifyReport = { ...OK_REPORT, ok: false, findings: LYING_REPO
 /** A transport that answers exactly as scripted. */
 function fakeClient(over: Partial<MachineUploadClient> = {}): MachineUploadClient {
   return {
+    status: over.status ?? (async () => ({ ok: true, text: '<Idle|MPos:0,0,0>' })),
     upload: over.upload ?? (async () => ({ ok: true, bytes: 3, packets: 1, alreadyPresent: false })),
   };
 }
@@ -193,5 +195,81 @@ describe('#255 programBytes', () => {
     expect(programBytes(nc).length).toBe(11);
     expect(Array.from(programBytes(nc).slice(2, 4))).toEqual([0x63, 0x61]); // 'c', 'a'
     expect(Array.from(programBytes(nc).slice(5, 7))).toEqual([0xc3, 0xa9]); // 'é'
+  });
+});
+
+describe('#296 uploadProgram — the machine is asked NOW, not remembered', () => {
+  const run = () => uploadProgram(TARGET, { filename: 'job.nc', nc: 'M02', verify: OK_REPORT });
+
+  it('sends nothing to a machine that is running, and says what it reported', async () => {
+    let uploads = 0;
+    use(
+      fakeClient({
+        status: async () => ({ ok: true, text: '<Run|MPos:1,2,3>' }),
+        upload: async () => {
+          uploads += 1;
+          return { ok: true, bytes: 3, packets: 1, alreadyPresent: false };
+        },
+      }),
+    );
+    const result = await run();
+    expect(result.kind).toBe('busy');
+    if (result.kind !== 'busy') return;
+    expect(result.status).toBe('<Run|MPos:1,2,3>');
+    expect(result.detail).toContain('Run');
+    expect(uploads).toBe(0);
+  });
+
+  it.each(['Hold', 'Alarm', 'Home', 'Door'])('treats %s as not idle', async (state) => {
+    use(fakeClient({ status: async () => ({ ok: true, text: `<${state}|MPos:0,0,0>` }) }));
+    expect((await run()).kind).toBe('busy');
+  });
+
+  it('refuses when the machine does not answer — silence is not permission', async () => {
+    let uploads = 0;
+    use(
+      fakeClient({
+        status: async () => ({ ok: false, text: null }),
+        upload: async () => {
+          uploads += 1;
+          return { ok: true, bytes: 3, packets: 1, alreadyPresent: false };
+        },
+      }),
+    );
+    const result = await run();
+    expect(result.kind).toBe('error');
+    if (result.kind !== 'error') return;
+    expect(result.detail).toContain('could not confirm the machine is idle');
+    expect(uploads).toBe(0);
+  });
+
+  it('refuses a status line it cannot read, and one that throws', async () => {
+    use(fakeClient({ status: async () => ({ ok: true, text: 'ok' }) }));
+    const unreadable = await run();
+    expect(unreadable.kind).toBe('error');
+
+    use(
+      fakeClient({
+        status: async () => {
+          throw new Error('connect ETIMEDOUT');
+        },
+      }),
+    );
+    const thrown = await run();
+    expect(thrown.kind).toBe('error');
+    if (thrown.kind !== 'error') return;
+    expect(thrown.detail).toContain('ETIMEDOUT');
+  });
+
+  it('uploads when the machine says Idle', async () => {
+    use(fakeClient());
+    expect((await run()).kind).toBe('uploaded');
+  });
+
+  it('reads the state word out of a real status line', () => {
+    expect(controllerState('<Idle|MPos:-1.0000,-1.0000,-1.0000|WPos:147.4,123.8,57.6>')).toBe('Idle');
+    expect(controllerState('<Run>')).toBe('Run');
+    expect(controllerState('Idle')).toBeNull();
+    expect(controllerState(null)).toBeNull();
   });
 });

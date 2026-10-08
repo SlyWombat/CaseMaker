@@ -401,6 +401,7 @@ export function EngravePanel(): JSX.Element {
   // note), so Save and Upload state one rule between them rather than two that agree by luck.
   const uploadBlockerText = uploadBlocker(run);
   const machine = useMachineStore((s) => s.machine);
+  const noteLiveStatus = useMachineStore((s) => s.noteLiveStatus);
   // Both halves or neither: the gate is a statement about the report, so a `nc` without one is not
   // a program this panel may offer to send.
   const uploadable =
@@ -1538,6 +1539,7 @@ export function EngravePanel(): JSX.Element {
                 machine={machine}
                 program={uploadable}
                 filename={runSheetFileName(job.name)}
+                onLiveStatus={noteLiveStatus}
               />
             )}
 

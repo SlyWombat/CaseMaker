@@ -48,8 +48,34 @@ export type UploadAttempt =
   | { ok: true; bytes: number; packets: number; alreadyPresent: boolean }
   | { ok: false; reason: 'refused' | 'timeout' | 'error'; detail: string };
 
-/** The socket-facing half of the upload. One method, so the fake in a test is one function. */
+/**
+ * The controller's answer to `?`, restated for the same reason {@link UploadAttempt} is: the bridge's
+ * `MachineStatus` cannot be imported here without pulling the desktop protocol into the web bundle.
+ */
+export interface MachineStatusReading {
+  ok: boolean;
+  text: string | null;
+}
+
+/**
+ * The controller's state word from a status line — `Idle` from `<Idle|MPos:…>` — or null when the
+ * text does not look like one. The leading `<` and the `|` or `>` after the word are the shape that
+ * was read off the machine (`docs/bench/2026-10-bench-day-1.md`); anything else is "unknown", and
+ * unknown is never read as idle.
+ */
+export function controllerState(text: string | null): string | null {
+  if (text === null) return null;
+  const m = /^\s*<\s*([A-Za-z]+)\s*[|>]/m.exec(text);
+  return m === null ? null : (m[1] ?? null);
+}
+
+/** The socket-facing half of the upload: one status read, one transfer. */
 export interface MachineUploadClient {
+  /**
+   * Ask the machine what it is doing NOW (#296). Required, not optional: a client with no way to
+   * ask would make the idle check silently skip, which is the stale-memory gate it replaces.
+   */
+  status(target: MachineUploadTarget): Promise<MachineStatusReading>;
   upload(
     target: MachineUploadTarget,
     /** The program as it will be sent: bytes, and the report that gated them. */
@@ -58,12 +84,13 @@ export interface MachineUploadClient {
 }
 
 /**
- * What one upload did. Five answers, and the split between them is the useful part:
+ * What one upload did. Six answers, and the split between them is the useful part:
  *
  *   - `uploaded` — the machine took the file. `alreadyPresent` means it declined the transfer
  *     because it already held an identical file (the MD5 step matched), which is a success with a
  *     different sentence, not a failure.
  *   - `refused` — the machine was offered the file and declined it. A result about the machine.
+ *   - `busy` — nothing was sent: the machine, asked just now, did not say it was idle (#296).
  *   - `timeout` / `error` — the socket failed, or the exchange went somewhere the protocol does not
  *     allow. A result about the network.
  *   - `unavailable` — nothing was attempted, because this build cannot reach a machine at all.
@@ -75,6 +102,9 @@ export interface MachineUploadClient {
 export type MachineUploadResult =
   | { kind: 'uploaded'; filename: string; bytes: number; packets: number; alreadyPresent: boolean }
   | { kind: 'refused'; filename: string; detail: string }
+  // The machine was asked just before the transfer and was not idle (#296). `status` is its line,
+  // verbatim, so the panel can show what the controller said and refresh its stored observation.
+  | { kind: 'busy'; filename: string; detail: string; status: string }
   | { kind: 'timeout'; filename: string; detail: string }
   | { kind: 'error'; filename: string; detail: string }
   | { kind: 'unavailable'; filename: string; reason: string };
@@ -92,6 +122,10 @@ export function programBytes(nc: string): Uint8Array {
 async function loadRealClient(): Promise<MachineUploadClient> {
   const bridge = await loadMachineBridge();
   return {
+    status: async (target) => {
+      const reading = await bridge.status(target);
+      return { ok: reading.ok, text: reading.text };
+    },
     upload: async (target, program) => {
       const verified = bridge.asVerifiedProgram(program.filename, program.content, program.report);
       if (verified === null) {
@@ -118,7 +152,7 @@ function reasonOf(e: unknown): string {
 }
 
 /**
- * Send a verified program to a machine. Never throws: every failure is one of the five outcomes,
+ * Send a verified program to a machine. Never throws: every failure is one of the six outcomes,
  * because the panel has to render a failure as readily as a success.
  *
  * The order matters and is the point of the module: gate first, load the bridge second, connect
@@ -141,6 +175,27 @@ export async function uploadProgram(
   } catch (e) {
     // The web build's answer, and the reason is the guard's own sentence rather than a generic one.
     return { kind: 'unavailable', filename, reason: reasonOf(e) };
+  }
+
+  // Ask the machine what it is doing NOW (#296). The wizard's record of `busy` can be days old, and
+  // a write to `/sd/gcodes/` while the controller is reading that file is the one thing here that
+  // could disturb a cut. Only an explicit Idle passes: busy, silence and an unreadable line all
+  // refuse, because "I could not tell" is not permission.
+  let reading: MachineStatusReading;
+  try {
+    reading = await client.status(target);
+  } catch (e) {
+    return { kind: 'error', filename, detail: `could not confirm the machine is idle before writing: ${reasonOf(e)}` };
+  }
+  if (!reading.ok || reading.text === null) {
+    return { kind: 'error', filename, detail: 'could not confirm the machine is idle before writing: it did not answer a status request' };
+  }
+  const state = controllerState(reading.text);
+  if (state === null) {
+    return { kind: 'error', filename, detail: `could not confirm the machine is idle before writing: its status line was not readable (${reading.text})` };
+  }
+  if (state.toLowerCase() !== 'idle') {
+    return { kind: 'busy', filename, detail: `the machine reports ${state}, not Idle — nothing was sent`, status: reading.text };
   }
 
   let attempt: UploadAttempt;
