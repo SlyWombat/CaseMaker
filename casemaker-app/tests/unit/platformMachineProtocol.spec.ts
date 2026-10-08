@@ -27,6 +27,8 @@ import {
   PTYPE_CTRL_MULTI,
   PTYPE_CTRL_SINGLE,
   PTYPE_FILE_CANCEL,
+  consoleProblem,
+  openConsole,
   PTYPE_FILE_DATA,
   PTYPE_FILE_END,
   PTYPE_FILE_MD5,
@@ -705,5 +707,94 @@ describe('#255 protocol — MD5', () => {
     expect(md5Hex(utf8('12345678901234567890123456789012345678901234567890123456789012345678901234567890'))).toBe(
       '57edf4a22be3c955ac49da2e2107b67a',
     );
+  });
+});
+
+describe('#302 console — the guards', () => {
+  it.each(['G28', 'G53 G0 X-50 Y-50', 'G91', '?', 'M5', 'config-get sd coordinate.anchor1_x'])('lets %s through', (line) => {
+    expect(consoleProblem(line)).toBeNull();
+  });
+
+  it.each([
+    ['config-set sd coordinate.anchor1_x 1', 'configuration'],
+    ['rm /sd/config.txt', 'card'],
+    ['mv /sd/a /sd/b', 'card'],
+    ['reset', 'reflashes'],
+    ['dfu', 'reflashes'],
+    ['upload /sd/x.nc', 'verified-program'],
+    ['!', 'realtime'],
+    ['~', 'realtime'],
+  ])('refuses %s', (line, why) => {
+    expect(consoleProblem(line)).toContain(why);
+  });
+
+  it('refuses control characters, an empty line and an over-long one', () => {
+    expect(consoleProblem('G0 X1\nG0 X2')).not.toBeNull();
+    expect(consoleProblem('G0\u0001X1')).not.toBeNull();
+    expect(consoleProblem('')).not.toBeNull();
+    expect(consoleProblem('G'.repeat(201))).not.toBeNull();
+    expect(consoleProblem('G'.repeat(200))).toBeNull();
+  });
+});
+
+describe('#302 console — a session', () => {
+  it('sends a refused line nowhere', async () => {
+    const transport = new FakeTransport();
+    const out = await openConsole(transport, 1).send('config-set sd x 1');
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.reason).toBe('refused');
+    expect(transport.writes).toHaveLength(0);
+  });
+
+  it('sends a line as one console frame and returns every reply frame, in order', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('ok\r\n')), encodeFrame(0x81, utf8('Info: homed\r\n')));
+    const out = await openConsole(transport, 1).send('G28', { firstReplyMs: 50, quietMs: 20 });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.text).toBe('ok\r\nInfo: homed\r\n');
+    expect(out.frames).toBe(2);
+    const sent = decodeAll(transport.writes);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.type).toBe(PTYPE_CTRL_MULTI);
+    expect(decodeText(sent[0]?.data ?? EMPTY)).toBe('G28');
+  });
+
+  it('sends ? as the single status byte, as runStatus does', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('<Idle|MPos:0,0,0>')));
+    const out = await openConsole(transport, 1).send('?', { firstReplyMs: 50, quietMs: 20 });
+    expect(out.ok).toBe(true);
+    const sent = decodeAll(transport.writes)[0];
+    expect(sent?.type).toBe(PTYPE_CTRL_SINGLE);
+    expect(Array.from(sent?.data ?? EMPTY)).toEqual([0x3f]);
+  });
+
+  it('reports silence as a timeout naming the line, not as success', async () => {
+    const transport = new FakeTransport();
+    const out = await openConsole(transport, 1).send('G4 P0', { firstReplyMs: 30 });
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.reason).toBe('timeout');
+    expect(out.detail).toContain('G4 P0');
+  });
+
+  it('keeps bytes that arrived with one line for the next (one channel per session)', async () => {
+    const transport = new FakeTransport();
+    // Two frames land in ONE chunk: the first answers G0, the second is the next line's reply.
+    transport.queueRead(
+      new Uint8Array([...encodeFrame(0x81, utf8('ok')), ...encodeFrame(0x81, utf8('<Idle|MPos:1,1,1>'))]),
+    );
+    const session = openConsole(transport, 1);
+    const first = await session.send('G0 X1', { firstReplyMs: 50, quietMs: 20 });
+    expect(first.ok && first.text).toBe('ok<Idle|MPos:1,1,1>');
+  });
+
+  it('ignores a non-reply frame crossing the exchange', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x10, utf8('noise')), encodeFrame(0x81, utf8('ok')));
+    const out = await openConsole(transport, 1).send('M5', { firstReplyMs: 50, quietMs: 20 });
+    expect(out.ok && out.text).toBe('ok');
   });
 });

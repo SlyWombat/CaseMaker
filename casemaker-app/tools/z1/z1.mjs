@@ -15,11 +15,12 @@
 //   node tools/z1/z1.mjs read     192.168.10.43 /sd/config.txt
 //   node tools/z1/z1.mjs config   192.168.10.43 coordinate.anchor1_x soft_endstop.x_min
 //
-// SAFETY (Z1-Bridge-Protocol.md §8, /Fabrication.md §8). Everything here is read-only: listen for the
-// machine's broadcast, ask it who it is, ask for its status, read a file off its card and ask what
-// its own configuration keys are set to. There is no G-code passthrough, no jog, no MDI and no upload
-// path here on purpose — motion arrives with a file that has passed the verifier (#174/#206),
-// through the app, not through a bench script.
+// SAFETY (Z1-Bridge-Protocol.md §8, /Fabrication.md §8). Everything here is read-only EXCEPT `send` and
+// `console` (#302, added 2026-10-08 when R10 was reopened), which send a line the person at the machine
+// typed, through the bridge's guards, and record it (the guards: protocol.ts `consoleProblem`). The
+// read-only commands: listen for the machine's broadcast, ask it who it is, ask for its status, read a
+// file off its card and ask what its own configuration keys are set to. There is still no upload path
+// here — a program reaches the card through the app's verified-upload gate (#174/#206), not a script.
 //
 // The two commands added on 2026-10-06 were `read` and `config`, and both went in through
 // `protocol.ts` as *parameters* rather than as a console-command box: the bridge builds the single
@@ -29,12 +30,15 @@
 // `config` only ever *reads*: `config-get`, never `config-set`. Nothing in this repo may change a
 // value on the machine, and this script has no path that would.
 
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createInterface } from 'node:readline/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createNodeTransport } from './transport.node.mjs';
 import * as P from '../../src/platform/desktop/protocol.ts';
 
 /** Flags that never take a value. Without this, `--effective <key>` swallows the key as its value. */
-const BOOLEAN_FLAGS = new Set(['json', 'help', 'effective']);
+const BOOLEAN_FLAGS = new Set(['json', 'help', 'effective', 'i-am-at-the-machine']);
 
 function parseArgs(argv) {
   const positional = [];
@@ -60,7 +64,7 @@ function parseArgs(argv) {
 const num = (v, fallback) => (v === undefined ? fallback : Number(v));
 
 function usage() {
-  console.log(`z1 — bench harness for the Makera Z1 (read-only)
+  console.log(`z1 — bench harness for the Makera Z1 (reads, plus a guarded console — see the end)
 
   node tools/z1/z1.mjs discover [--window <ms>] [--json]
   node tools/z1/z1.mjs identify <host> [--port <n>] [--json]
@@ -82,7 +86,45 @@ this is what the controller says it ended up with.
 Sends nothing to the machine except the two identify queries, the status poll, the one \`cat\` line a
 read needs, one \`config-get\` line per key asked for and one \`md5sum\` line per path asked about.
 \`read\` and \`md5\` take an absolute path on the controller's card and nothing else; \`config\` takes
-configuration keys and nothing else.`);
+configuration keys and nothing else.
+
+MOTION AND THE CONSOLE (#302). Two commands send a line you typed, which can move the machine:
+
+  node tools/z1/z1.mjs send    <host> "<line>" --i-am-at-the-machine [--trace <file>]
+  node tools/z1/z1.mjs console <host> [--i-am-at-the-machine] [--trace <file>]
+
+\`send\` refuses to run without --i-am-at-the-machine (/Fabrication.md §8: motion needs a person at
+the machine). \`console\` asks for it once, in words, before the first line. Both go through the
+bridge's guards (protocol.ts \`consoleProblem\`): one printable line; no config-set, no card writes,
+no reset or flashing; the realtime bytes are not wired — the physical stop is the stop. Every line
+sent and every reply is appended to a trace file (default docs/bench/traces/<date>-console.log), so a
+session is a recorded trace. Nothing polls, repeats or queues.`);
+}
+
+/** The trace file for a session: one dated file per day unless --trace says otherwise. */
+function tracePath(flags) {
+  if (typeof flags.trace === 'string') return resolve(flags.trace);
+  const day = new Date().toISOString().slice(0, 10);
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'docs', 'bench', 'traces', `${day}-console.log`);
+}
+
+function trace(file, text) {
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, text);
+}
+
+/** Send one line through an open console session, echo and record both sides. */
+async function sendTraced(session, file, line, flags) {
+  const at = new Date().toISOString();
+  const out = await session.send(line, {
+    firstReplyMs: num(flags['first-reply'], 3000),
+    quietMs: num(flags.quiet, 800),
+    maxMs: num(flags.max, 15000),
+  });
+  const body = out.ok ? out.text.replace(/\r/g, '').trimEnd() : `[${out.reason}] ${out.detail}`;
+  trace(file, `${at}  > ${line}\n${body.split('\n').map((l) => `    ${l}`).join('\n')}\n${out.ok ? `    (${out.frames} frame(s), ${out.elapsedMs} ms)\n` : ''}`);
+  console.log(body.length > 0 ? body : '(no reply text)');
+  return out;
 }
 
 async function main() {
@@ -120,15 +162,67 @@ async function main() {
     process.exit(2);
   }
   const port = num(flags.port, P.COMMAND_TCP_PORT);
-  if (cmd !== 'identify' && cmd !== 'status' && cmd !== 'read' && cmd !== 'config' && cmd !== 'md5') {
+  if (cmd !== 'identify' && cmd !== 'status' && cmd !== 'read' && cmd !== 'config' && cmd !== 'md5' && cmd !== 'send' && cmd !== 'console') {
     console.error(`unknown command: ${cmd}`);
     usage();
     process.exit(2);
   }
 
+  // The console commands are checked BEFORE a socket is opened: refusing costs no connection.
+  if (cmd === 'send' && flags['i-am-at-the-machine'] !== true) {
+    console.error('send moves hardware. Re-run with --i-am-at-the-machine once you are at the machine with your hand near the stop (/Fabrication.md §8).');
+    process.exit(2);
+  }
+  if (cmd === 'send') {
+    const line = positional[2];
+    const problem = line === undefined ? 'send needs a line, e.g. send 192.168.10.43 "G28" --i-am-at-the-machine' : P.consoleProblem(line);
+    if (problem !== null) {
+      console.error(problem);
+      process.exit(2);
+    }
+  }
+
   const conn = await transport.tcpConnect(host, port, num(flags.timeout, 3000));
   try {
-    if (cmd === 'identify') {
+    if (cmd === 'send') {
+      const file = tracePath(flags);
+      const out = await sendTraced(P.openConsole(transport, conn), file, positional[2], flags);
+      process.stderr.write(`trace: ${file}\n`);
+      if (!out.ok) process.exitCode = 1;
+    } else if (cmd === 'console') {
+      const file = tracePath(flags);
+      // A line iterator rather than `rl.question`: it ends cleanly when stdin does (a piped script, or
+      // Ctrl-D), where `question` would wait forever.
+      const rl = createInterface({ input: process.stdin });
+      const lines = rl[Symbol.asyncIterator]();
+      const ask = async (prompt) => {
+        process.stderr.write(prompt);
+        const next = await lines.next();
+        return next.done ? null : next.value;
+      };
+      try {
+        if (flags['i-am-at-the-machine'] !== true) {
+          const answer = await ask('Lines you type here can MOVE the machine. Type "I am at the machine" to continue: ');
+          if (answer === null || answer.trim().toLowerCase() !== 'i am at the machine') {
+            console.error('\nnot confirmed; nothing was sent.');
+            process.exit(2);
+          }
+        }
+        trace(file, `\n=== console session ${new Date().toISOString()} ${host}:${port} ===\n`);
+        process.stderr.write(`connected to ${host}:${port}. One line per Enter; "exit" or Ctrl-D to leave. The physical stop is the stop.\ntrace: ${file}\n`);
+        const session = P.openConsole(transport, conn);
+        for (;;) {
+          const raw = await ask('z1> ');
+          if (raw === null) break;
+          const line = raw.trim();
+          if (line === '') continue;
+          if (line === 'exit' || line === 'quit') break;
+          await sendTraced(session, file, line, flags);
+        }
+      } finally {
+        rl.close();
+      }
+    } else if (cmd === 'identify') {
       const id = await P.runIdentify(transport, conn, host, { windowMs: num(flags.window, 1500) });
       if (asJson) {
         console.log(JSON.stringify(id, null, 2));

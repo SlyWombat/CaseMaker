@@ -426,13 +426,18 @@ touching callers.
 - **Nothing is sent without an explicit user action.** Discovery listens passively; the connect,
   identify, upload and status calls each run only when the caller asks for them. There is no
   polling loop and no background connection.
-- **No motion without a file.** Jog, DRO, MDI and the pendant are out of the first pass
-  (`/Fabrication.md` §14.4 R10). This bridge can upload a verified `.nc`, report status, read a file
-  off the card and read the machine's own configuration; it cannot move an axis on its own. Each read
+- **Motion is typed by a person, or arrives with a verified file.** Until 2026-10-08 this said "no
+  motion without a file" and kept the console out of the first pass (`/Fabrication.md` §14.4 R10).
+  That was a scoping decision, not a firmware limit, and it was reopened for a **typed console**
+  (#302): `consoleProblem` / `openConsole` / the bridge's `sendConsoleLine`. It sends one line the
+  caller was asked to send, never on its own, and refuses `config-set`, card writes, resets and the
+  realtime bytes. A DRO, pendant and overrides are still out. The bridge can also upload a verified
+  `.nc`, report status, read a file off the card and read the machine's own configuration. Each read
   (§5) is a console command, not an MDI box: the caller passes a **path** or a **key**, the bridge
   builds the one command itself and refuses anything outside a plain path's or a plain key's alphabet.
-  The distinction matters — a free-text console box would be the MDI the rule forbids, arriving by the
-  side door, whereas a checked parameter cannot become a second command.
+  The distinction still matters for the READS: a checked parameter cannot become a second command. The
+  console is the deliberate exception (#302): free text, but one guarded line, explicit send, a person
+  at the machine, and a recorded trace.
 - The single-byte e-stop byte is **not** wired: an e-stop that travels over the same socket the
   bridge is mid-transfer on is worse than useless. The physical stop is the stop.
 - A machine refusal is surfaced as a refusal. The upload result has an explicit *refused* outcome

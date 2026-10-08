@@ -655,7 +655,7 @@ Control; MKS/MKC are Makera Studio / Makera CAM Beta.
 | Collision / gouge check (§2.D) | only C3 and BT; BT warns without blocking | fixture, holder, gouge, spindle-off-near-material, envelope — errors, not warnings | **ahead** |
 | Machining-time estimate (§2.D) | IV, TM (learned), SC (on file load, no machine), VC (scale factor), LB | cutting-only, three different numbers — §14.2 A1 | **mis-scoped** |
 | Setup / run sheet (§2.F) | only VC and CV | #207 shipped | covered |
-| First-run wizard, jog, homing, overrides, pendant, MDI (§2.E) | Y in most senders | none — the web build cannot open a socket; the desktop build will (§5.7, #181) | **refused until the bridge, then reopened for the connect/home half** — R1, R10 |
+| First-run wizard, jog, homing, overrides, pendant, MDI (§2.E) | Y in most senders | none — the web build cannot open a socket; the desktop build will (§5.7, #181) | **refused until the bridge, then reopened — a typed console (#302), 2026-10-08**; DRO, pendant, overrides still refused — R1, R10 |
 | Job queue (§2.F) | **N or ? in every column**; TM's "job" is a conversational step | none | **refused** — R9 |
 | G-code viewer (§2.F) | Y in 11 columns; TM colours the executing line | diagnostics say `line N`; nothing shows the text | **absent** — A5 |
 | Job history / statistics (§2.F) | SC rich; PN, TM partial | run-sheet §9 record blanks, read by hand (#209) | **absent** — §14.7 |
@@ -872,8 +872,12 @@ exists it is stated; where none is, the refusal is meant to hold.
   send. **So we should not.**
 - **R10 — Jog, DRO, homing, overrides, pendant/gamepad, MDI console in the app**
   (`FEATURE-MATRIX.md` §2.E). Bridge-era by decision 10 and §9.1, bound by `/Fabrication.md`
-  §8's safety rules; the bridge issue decides what the bridge exposes. **So we should not**
-  carry any of it as a design now.
+  §8's safety rules; the bridge issue decides what the bridge exposes. **REOPENED 2026-10-08 for
+  a typed console (#302):** the maintainer decided the bridge may carry one, and that we run our
+  own sequence rather than Studio's wizard. It is a guarded one-line console (explicit send, a
+  person at the machine, no config or card writes, realtime bytes unwired), first in
+  `tools/z1`, then an app panel. **Still not designed:** a DRO, pendant/gamepad, overrides, and a
+  "run this file" button — each waits for its own decision.
 - **R11 — A plugin or scripting API, or macros** (GM's JS window with a debugger, SC macros,
   OB's inject API, VC gadgets). Three of twenty have one and all are senders;
   `/Fabrication.md` §8: no driver plugin API until someone asks. **So we should not.**

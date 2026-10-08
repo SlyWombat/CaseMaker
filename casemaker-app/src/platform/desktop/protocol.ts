@@ -972,3 +972,120 @@ function wordHex(word: number): string {
   for (let i = 0; i < 4; i++) out += (bytes[i] ?? 0).toString(16).padStart(2, '0');
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Console (#302) — one typed line, the controller's reply
+// ---------------------------------------------------------------------------
+
+/**
+ * Why this exists. `Makera-Parity.md` R10 and §8 used to say "no jog, MDI or console in the app". That
+ * was a scoping decision made before the bridge existed, and the maintainer reopened it on 2026-10-08
+ * (#302). What did NOT change is §8's safety rule: nothing is sent without an explicit user action,
+ * and motion needs a person at the machine. So this is a console and not a passthrough: one line per
+ * call, from a caller that was asked to send it, through the guards below.
+ *
+ * The guards are at the sink, the same place `READABLE_PATH` guards `cat` and `md5sum`: every caller —
+ * the bench harness today, an app panel later — gets the same answer to "may this line be sent".
+ */
+
+/** One printable-ASCII line. No control characters, so a newline can never end the command early. */
+const CONSOLE_LINE = /^[\x20-\x7e]{1,200}$/;
+
+/**
+ * Lines refused outright. They are the ways a console line writes to the machine's configuration or
+ * its card, or reaches the firmware rather than the job — "nothing in this repo may change a value on
+ * the machine" (the harness's own rule) still stands. Motion, spindle, probe and status lines are NOT
+ * here: those are what a console is for, and the person at the machine is the safeguard.
+ */
+const CONSOLE_DENY: ReadonlyArray<{ pattern: RegExp; why: string }> = [
+  { pattern: /^\s*config-set\b/i, why: 'it changes a configuration value on the machine' },
+  { pattern: /^\s*(rm|mv|format|mkdir|truncate)\b/i, why: 'it changes the machine’s card' },
+  { pattern: /^\s*(reset|dfu|flash|upgrade|reboot|restart)\b/i, why: 'it resets or reflashes the controller' },
+  { pattern: /^\s*(upload|download)\b/i, why: 'transfers go through the verified-program upload, not the console' },
+  // The realtime bytes travel on their own and are deliberately unwired (§8): the physical stop is the stop.
+  { pattern: /^\s*[!~]\s*$/, why: 'realtime hold/resume bytes are not wired (Z1-Bridge-Protocol.md §8)' },
+];
+
+/** Why a line may not be sent, or null when it may. Pure, so a UI can ask before it connects. */
+export function consoleProblem(line: string): string | null {
+  if (!CONSOLE_LINE.test(line)) {
+    return 'a console line is one line of printable ASCII, 1 to 200 characters';
+  }
+  for (const rule of CONSOLE_DENY) {
+    if (rule.pattern.test(line)) return `refusing ${JSON.stringify(line)}: ${rule.why}`;
+  }
+  return null;
+}
+
+export interface ConsoleOptions {
+  /** How long to wait for the FIRST reply frame. Default 3000. */
+  firstReplyMs?: number;
+  /** Quiet time after the last frame that ends the reply. Default 800. */
+  quietMs?: number;
+  /** Hard ceiling on one line, however chatty. Default 15000. */
+  maxMs?: number;
+}
+
+export type ConsoleOutcome =
+  | { ok: true; line: string; text: string; frames: number; elapsedMs: number }
+  | { ok: false; reason: 'refused' | 'timeout'; line: string; detail: string; text: string };
+
+/** A console on one open connection; its channel survives from line to line. */
+export interface ConsoleSession {
+  send(line: string, opts?: ConsoleOptions): Promise<ConsoleOutcome>;
+}
+
+/**
+ * Open a console on an already-connected socket. The session owns ONE frame channel, because a reply
+ * can straddle two lines (a move's "ok" arrives after the next prompt) and a fresh decoder per line
+ * would drop the bytes between them.
+ *
+ * `?` goes out as the single status byte, exactly as {@link runStatus} sends it; every other line is
+ * one multi-byte console frame.
+ */
+export function openConsole(transport: MachineTransport, conn: number): ConsoleSession {
+  const channel = new FrameChannel(transport, conn);
+  return {
+    async send(line, opts = {}) {
+      const problem = consoleProblem(line);
+      if (problem !== null) return { ok: false, reason: 'refused', line, detail: problem, text: '' };
+
+      const firstReplyMs = opts.firstReplyMs ?? 3000;
+      const quietMs = opts.quietMs ?? 800;
+      const maxMs = opts.maxMs ?? 15000;
+
+      const frame =
+        line.trim() === '?'
+          ? encodeFrame(PTYPE_CTRL_SINGLE, new Uint8Array([STATUS_POLL_BYTE]))
+          : encodeFrame(PTYPE_CTRL_MULTI, utf8(line));
+      const started = Date.now();
+      await transport.tcpWrite(conn, frame);
+
+      const parts: string[] = [];
+      let frames = 0;
+      let wait = firstReplyMs;
+      for (;;) {
+        const remaining = maxMs - (Date.now() - started);
+        if (remaining <= 0) break;
+        const next = await channel.next(Math.min(wait, remaining));
+        if (next === null) break;
+        if (next.type < 0x80) continue; // not a reply to a console line
+        parts.push(decodeText(next.data));
+        frames++;
+        wait = quietMs; // once it has started talking, a short silence ends the reply
+      }
+      const text = parts.join('');
+      const elapsedMs = Date.now() - started;
+      if (frames === 0) {
+        return {
+          ok: false,
+          reason: 'timeout',
+          line,
+          detail: `no reply within ${firstReplyMs} ms of sending ${JSON.stringify(line)}`,
+          text: '',
+        };
+      }
+      return { ok: true, line, text, frames, elapsedMs };
+    },
+  };
+}

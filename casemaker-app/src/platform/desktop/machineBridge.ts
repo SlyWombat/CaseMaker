@@ -23,12 +23,16 @@ import {
   COMMAND_TCP_PORT,
   DISCOVERY_UDP_PORT,
   GCODE_DIR,
+  consoleProblem,
+  openConsole,
   readConfigKey,
   runDiscovery,
   runIdentify,
   runStatus,
   runUpload,
   uploadPath,
+  type ConsoleOptions,
+  type ConsoleOutcome,
   type DiscoveredMachine,
   type MachineIdentity,
   type MachineStatus,
@@ -39,7 +43,10 @@ import { tauriTransport } from './transport';
 
 export const DESKTOP_ONLY_MARKER = 'casemaker-desktop-bridge-v1';
 
+export { consoleProblem } from './protocol';
 export type {
+  ConsoleOptions,
+  ConsoleOutcome,
   DiscoveredMachine,
   MachineIdentity,
   MachineStatus,
@@ -235,6 +242,33 @@ export async function uploadVerifiedProgram(
       packetSize: opts.packetSize,
       inactivityMs: opts.inactivityMs,
     });
+  } finally {
+    await closeQuietly(transport, conn);
+  }
+}
+
+/**
+ * Send ONE typed line to the machine's console and return what it said (#302).
+ *
+ * The caller is asking for exactly this line, now — there is no queue and no repeat — and the guards
+ * (`consoleProblem`) run before a socket is opened, so a refused line costs no connection. A caller
+ * with several lines to send in order, such as an interactive console, keeps a connection with
+ * `openConsole` itself so replies that straddle two lines are not lost; this is the one-shot form.
+ *
+ * Motion needs a person at the machine (`/Fabrication.md` §8). That is the caller's to establish and
+ * is not something this function can check.
+ */
+export async function sendConsoleLine(
+  target: MachineTarget,
+  line: string,
+  opts: BridgeOptions & ConsoleOptions = {},
+): Promise<ConsoleOutcome> {
+  const problem = consoleProblem(line);
+  if (problem !== null) return { ok: false, reason: 'refused', line, detail: problem, text: '' };
+  const transport = transportOf(opts);
+  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? 3000);
+  try {
+    return await openConsole(transport, conn).send(line, opts);
   } finally {
     await closeQuietly(transport, conn);
   }
