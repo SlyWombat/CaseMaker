@@ -22,11 +22,13 @@ import { programUploadProblem } from '@/engine/cnc/uploadGate';
 import {
   COMMAND_TCP_PORT,
   DISCOVERY_UDP_PORT,
+  GCODE_DIR,
   readConfigKey,
   runDiscovery,
   runIdentify,
   runStatus,
   runUpload,
+  uploadPath,
   type DiscoveredMachine,
   type MachineIdentity,
   type MachineStatus,
@@ -200,11 +202,14 @@ export async function readConfigValues(
  * gate refuses was never uploaded — nothing was sent, and the answer is the gate's own sentence.
  * A program the MACHINE refuses was offered and declined, which is a fact about the machine and
  * comes back with the controller's own detail (`refused` / `timeout` / `error`).
+ *
+ * The program lands at `<directory>/<filename>`, defaulting to the machine's own job directory.
+ * See {@link GCODE_DIR} for why that is measured rather than assumed.
  */
 export async function uploadVerifiedProgram(
   target: MachineTarget,
   program: VerifiedProgram,
-  opts: BridgeOptions & { packetSize?: number; inactivityMs?: number } = {},
+  opts: BridgeOptions & { packetSize?: number; inactivityMs?: number; directory?: string } = {},
 ): Promise<UploadOutcome> {
   // The null guards are for a caller that reached us from plain JS: the type says `VerifiedProgram`
   // and cannot be, but `program.report` is read below and a crash here would be an unhandled
@@ -217,10 +222,16 @@ export async function uploadVerifiedProgram(
     return { ok: false, reason: 'error', detail: `refused: ${problem}` };
   }
 
+  // `program.filename` is the name the verifier saw; the machine needs a PATH. The directory is a
+  // parameter with a measured default rather than a constant baked in, because which directory a
+  // given machine wants is a fact about that machine — but the default is the one Studio itself
+  // uses, and the one the first live upload was accepted into.
+  const destination = uploadPath(opts.directory ?? GCODE_DIR, program.filename);
+
   const transport = transportOf(opts);
   const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? 3000);
   try {
-    return await runUpload(transport, conn, program.filename, program.content, {
+    return await runUpload(transport, conn, destination, program.content, {
       packetSize: opts.packetSize,
       inactivityMs: opts.inactivityMs,
     });

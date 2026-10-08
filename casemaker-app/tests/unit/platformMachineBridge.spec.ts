@@ -18,12 +18,16 @@ import {
   type VerifiedProgram,
 } from '@/platform/desktop/machineBridge';
 import {
+  decodeText,
   encodeFrame,
+  FrameDecoder,
   PTYPE_FILE_DATA,
   PTYPE_FILE_END,
+  PTYPE_FILE_START,
   PTYPE_FILE_VIEW,
   u32be,
   utf8,
+  type Frame,
   type MachineTransport,
 } from '@/platform/desktop/protocol';
 import type { VerifyReport } from '@/engine/cnc/verify';
@@ -42,6 +46,13 @@ const badReport: VerifyReport = {
   findings: [{ severity: 'error', code: 'cut-too-deep', line: 3, message: 'a cutting move is too deep' }],
   stats: { lines: 1, cuttingMoves: 1, deepestZ: -5, bbox: { min: [0, 0, -5], max: [1, 1, 0] } },
 };
+
+/** One frame per write in this fake, so a fresh decoder per write is enough. */
+function decodeAll(writes: Uint8Array[]): Frame[] {
+  const out: Frame[] = [];
+  for (const write of writes) out.push(...new FrameDecoder().push(write));
+  return out;
+}
 
 class FakeTransport implements MachineTransport {
   writes: Uint8Array[] = [];
@@ -129,6 +140,45 @@ describe('#255 machine bridge — actions', () => {
     expect(outcome).toEqual({ ok: true, bytes: 3, packets: 1, alreadyPresent: false });
     expect(transport.connects).toBe(1);
     expect(transport.closed).toEqual([1]);
+  });
+
+  it('names the destination as an absolute path under the job directory', async () => {
+    // The first live upload (2026-10-07) sent the bare name and the machine answered
+    // `Error: failed to open file [/165-depth-ladder.nc]!` — it resolved the name against the card
+    // root. The gate is in `runUpload`; this pins that the BRIDGE hands it a path, since the bridge
+    // builds that path itself and a regression here would be invisible to every other test.
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(PTYPE_FILE_VIEW, EMPTY),
+      encodeFrame(PTYPE_FILE_END, EMPTY),
+    );
+    const program = asVerifiedProgram('badge.nc', CONTENT, okReport);
+    if (program === null) throw new Error('expected a verified program');
+
+    await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, {
+      transport,
+      packetSize: 8,
+    });
+
+    const start = decodeAll(transport.writes).find((f) => f.type === PTYPE_FILE_START);
+    expect(start).toBeDefined();
+    expect(decodeText(start!.data)).toBe('upload /sd/gcodes/badge.nc\n');
+  });
+
+  it('honours a caller-chosen directory instead of the default', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(PTYPE_FILE_VIEW, EMPTY), encodeFrame(PTYPE_FILE_END, EMPTY));
+    const program = asVerifiedProgram('badge.nc', CONTENT, okReport);
+    if (program === null) throw new Error('expected a verified program');
+
+    await uploadVerifiedProgram({ host: '10.0.0.1', port: 2222 }, program, {
+      transport,
+      packetSize: 8,
+      directory: '/sd/gcodes/sub/',
+    });
+
+    const start = decodeAll(transport.writes).find((f) => f.type === PTYPE_FILE_START);
+    expect(decodeText(start!.data)).toBe('upload /sd/gcodes/sub/badge.nc\n');
   });
 
   it('discovers on UDP 3333 by default', async () => {

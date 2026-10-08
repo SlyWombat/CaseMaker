@@ -1338,6 +1338,35 @@ above — it was found by walking into a wizard this runbook did not know existe
 | **C4** | A partial figure (two hits 0.017 mm apart) marked explicitly as *not* C4's answer. |
 | **D3** | **Not run.** The stopwatch number #281 is waiting for was not taken — the run was stopped before the cut. |
 
+### The first upload, 2026-10-07 — a new item the runbook did not have
+
+Not a runbook item: **#255's upload path was exercised against the machine for the first time**, and
+it is the one thing tonight that *wrote* to the controller rather than reading it. A verified
+28 668-byte engrave program (`165-depth-ladder`, `md5 6e9b97a9b51c3561f3c44150fb1b92ba`) went from
+the app's own bridge — `asVerifiedProgram` and `uploadVerifiedProgram`, not a bench script — over
+`tools/z1/transport.node.mjs`, which implements the same five-call `MachineTransport` seam the Tauri
+transport does. **The Rust socket layer is not covered by this**; the protocol is what was proved.
+
+| What | Result |
+|---|---|
+| Raw, uncompressed transfer of a `.nc` | **Accepted.** 4 × 8192-byte packets, `0xB4` `ok`, `Info: upload success: /sd/gcodes/165-depth-ladder.nc.` — §9's QuickLZ question closes: §5's raw upload is what this machine wants. |
+| Did the card really get the bytes? | **Yes, checked three ways.** Our `md5Hex`, PowerShell `Get-FileHash`, and the machine's own `md5sum /sd/gcodes/165-depth-ladder.nc` all return `6e9b97…92ba`. The `ok` alone was not taken as evidence. |
+| A bare filename as the upload target | **Resolved against the card root and refused**: `Error: failed to open file [/165-depth-ladder.nc]!` The target must be absolute; `/sd/gcodes` is the directory Studio uses. |
+| Re-offering a file the card already holds, byte for byte | **Transferred again in full — the machine does not MD5-shortcut an upload.** The "MD5 match → cancel" behaviour is the client's, not this firmware's. |
+| A refusal, reported | **`Error: failed to open file [/sd/does-not-exist/165-depth-ladder.nc]!` now comes back as `refused` with that sentence verbatim.** See below — it did not, before tonight. |
+
+**The defect this trip found, and why it mattered.** On the first attempt the bridge read a
+pre-data `0xB5` as "the machine already has this file" and returned
+`{"ok":true,"packets":0,"alreadyPresent":true}` for a transfer the machine had **refused** — its
+`0xB5` carried `Error: failed to open file`, and an operator would have been told the program was
+on the machine when it was not. This is the shape of failure the repo's own rule warns about: the
+reported success was one level removed from the fact. The fix is that a cancel is *checked, never
+assumed* — the bridge asks the machine to hash the path it just offered and claims `alreadyPresent`
+only on a matching digest. Filed as **#291**.
+
+`/sd/gcodes/165-depth-ladder.nc` is on the card and will stay there. **It is inert**: a file on the
+card does nothing until Studio's Machining Wizard is driven by hand at the machine (D0).
+
 **Still owed from the 2026-10-07 trip, and cheap to get next time:** the five probe repeats on wood
 (C4), what the `Set Stock` step does with `Custom` selected (D0), and whether the assist modes
 survive a power cycle (`/Z1-Firmware-Dialect.md` §11.4).

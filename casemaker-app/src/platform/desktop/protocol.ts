@@ -422,12 +422,45 @@ export interface UploadOptions {
 }
 
 /**
- * Turn a filename into the transport name the machine expects: spaces become byte 0x01 and
- * backslashes become forward slashes (Z1-Bridge-Protocol.md §5). A trailing newline is added by
- * the caller before framing.
+ * The machine's job directory. Studio asks for it on every connect (`ls -e -s /sd/gcodes`,
+ * recorded in `docs/bench/2026-10-bench-day-1.md`), and it is where a `.nc` has to land.
+ *
+ * This is a MEASURED value, not a guessed one. The first live upload (2026-10-07) sent a bare
+ * `165-depth-ladder.nc`, which the machine resolved to the card root and answered with
+ * `Error: failed to open file [/165-depth-ladder.nc]!`. The same bytes to
+ * `/sd/gcodes/165-depth-ladder.nc` were accepted with `Info: upload success: ...`. An upload
+ * destination is therefore a full absolute path, and this is the directory half of it.
  */
-export function encodeTransferName(filename: string): string {
-  return filename.replace(/\\/g, '/').replace(/ /g, '\u0001');
+export const GCODE_DIR = '/sd/gcodes';
+
+/**
+ * A path the machine can be given to WRITE. Two things are required, and the first was learned the
+ * hard way:
+ *
+ * - **Absolute.** A bare name is not refused by the machine — it is resolved against the card root
+ *   and fails there, which is how the first live upload (2026-10-07) came back as
+ *   `Error: failed to open file [/165-depth-ladder.nc]!`.
+ * - **No control characters.** The name is written into an `upload <name>` line whose framing is a
+ *   trailing newline, so a newline inside the name would end the command early.
+ *
+ * Spaces are deliberately ALLOWED here, unlike {@link READABLE_PATH}'s alphabet: §5 encodes them as
+ * byte `0x01` precisely so a path may contain one, and {@link encodeTransferName} does that. A guard
+ * that banned them would quietly disable a documented part of the protocol to no benefit.
+ */
+const WRITABLE_PATH = /^\/[A-Za-z0-9._/ -]*$/;
+
+/** Join a directory and a file name into the absolute path an upload needs. */
+export function uploadPath(directory: string, filename: string): string {
+  return `${directory.replace(/\/+$/, '')}/${filename}`;
+}
+
+/**
+ * Turn a path into the transport name the machine expects: spaces become byte 0x01 and backslashes
+ * become forward slashes (Z1-Bridge-Protocol.md §5). A trailing newline is added by the caller
+ * before framing.
+ */
+export function encodeTransferName(path: string): string {
+  return path.replace(/\\/g, '/').replace(/ /g, '\u0001');
 }
 
 /**
@@ -438,7 +471,7 @@ export function encodeTransferName(filename: string): string {
 export async function runUpload(
   transport: MachineTransport,
   conn: number,
-  filename: string,
+  path: string,
   content: Uint8Array,
   opts: UploadOptions = {},
 ): Promise<UploadOutcome> {
@@ -447,10 +480,21 @@ export async function runUpload(
   if (!Number.isInteger(packetSize) || packetSize <= 0) {
     return { ok: false, reason: 'error', detail: `invalid packet size ${packetSize}` };
   }
+  // The destination is a full path, and it has to be. A bare name is not rejected by the machine —
+  // it is silently resolved against the card root and then fails there, which is how the first live
+  // upload (2026-10-07) came back as `Error: failed to open file [/165-depth-ladder.nc]!`. Refusing
+  // here turns that into a sentence the caller can act on, before a socket is opened.
+  if (!WRITABLE_PATH.test(path)) {
+    return {
+      ok: false,
+      reason: 'error',
+      detail: `refusing to upload to ${JSON.stringify(path)}: a writable path is absolute and made of A-Z a-z 0-9 . _ - /`,
+    };
+  }
 
   const channel = new FrameChannel(transport, conn);
 
-  const startFrame = encodeFrame(PTYPE_FILE_START, utf8(`upload ${encodeTransferName(filename)}\n`));
+  const startFrame = encodeFrame(PTYPE_FILE_START, utf8(`upload ${encodeTransferName(path)}\n`));
   await transport.tcpWrite(conn, startFrame);
 
   const md5Frame = encodeFrame(PTYPE_FILE_MD5, utf8(md5Hex(content)));
@@ -482,14 +526,33 @@ export async function runUpload(
     if (type < PTYPE_FILE_MD5) continue; // a status/info frame crossed the transfer; ignore it
 
     if (type === PTYPE_FILE_CANCEL) {
+      // A cancel is the machine's word for two different things (§5): "I already hold this exact
+      // file" and "I am refusing this transfer". The frame does not say which, and the first live
+      // upload (2026-10-07) showed what assuming costs — the machine answered `Error: failed to
+      // open file [...]!` and the bridge reported a successful upload, because it read every
+      // pre-data cancel as a match. An operator would have been told the file was on the machine
+      // when it was not.
+      //
+      // So the claim is CHECKED rather than assumed: the machine is asked to hash the very path we
+      // just offered, and "already present" is returned only when the digest is the one we sent.
+      // Anything else is a refusal, carrying the machine's own words. The check runs on THIS
+      // channel: a second one would hold a second decoder and race this one for the same socket.
+      const said = decodeText(frame.data).trim();
       if (!requested) {
-        // A cancel after the MD5 step means the machine already holds an identical file.
-        return { ok: true, bytes: content.length, packets: 0, alreadyPresent: true };
+        const existing = await md5ViaChannel(transport, conn, channel, path, inactivityMs);
+        if (existing.ok && existing.md5 === md5Hex(content)) {
+          return { ok: true, bytes: content.length, packets: 0, alreadyPresent: true };
+        }
+        return {
+          ok: false,
+          reason: 'refused',
+          detail: said.length > 0 ? said : 'the machine cancelled the transfer without saying why',
+        };
       }
       return {
         ok: false,
         reason: 'refused',
-        detail: 'the machine rejected the transfer (file cancel)',
+        detail: said.length > 0 ? said : 'the machine rejected the transfer (file cancel)',
       };
     }
 
@@ -661,9 +724,24 @@ export async function runMd5Sum(
     };
   }
 
-  const command = `md5sum ${path}`;
-  const channel = new FrameChannel(transport, conn);
-  await transport.tcpWrite(conn, encodeFrame(PTYPE_CTRL_MULTI, utf8(command)));
+  return md5ViaChannel(transport, conn, new FrameChannel(transport, conn), path, windowMs);
+}
+
+/**
+ * Send `md5sum <path>` on an EXISTING frame channel and read the reply.
+ *
+ * Split out for `runUpload`, which has to ask this question in the middle of its own exchange and
+ * cannot open a second channel to do it: {@link FrameChannel} owns a private decoder, so two of
+ * them on one socket would each consume bytes the other needs.
+ */
+async function md5ViaChannel(
+  transport: MachineTransport,
+  conn: number,
+  channel: FrameChannel,
+  path: string,
+  windowMs: number,
+): Promise<Md5SumOutcome> {
+  await transport.tcpWrite(conn, encodeFrame(PTYPE_CTRL_MULTI, utf8(`md5sum ${path}`)));
   const frames = await channel.drain(windowMs);
   const text = frames
     .filter((f) => f.type >= 0x80)
@@ -677,7 +755,7 @@ export async function runMd5Sum(
     return { ok: false, reason: 'not-found', detail: text.trim(), text };
   }
   if (text.length === 0) {
-    return { ok: false, reason: 'timeout', detail: `no reply to \`${command}\``, text: '' };
+    return { ok: false, reason: 'timeout', detail: `no reply to \`md5sum ${path}\``, text: '' };
   }
   // Anchor to the line start: the digest is followed immediately by the path, so there is no
   // separator to split on and a bare 32-hex search could match inside the filename.

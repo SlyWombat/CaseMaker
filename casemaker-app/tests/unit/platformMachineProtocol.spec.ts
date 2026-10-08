@@ -247,12 +247,12 @@ describe('#255 protocol — file upload', () => {
       dataRequest(3),
       encodeFrame(PTYPE_FILE_END, EMPTY),
     );
-    const outcome = await runUpload(transport, 1, 'badge.nc', content, { packetSize, inactivityMs: 50 });
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 50 });
     expect(outcome).toEqual({ ok: true, bytes: 9, packets: 3, alreadyPresent: false });
 
     const frames = decodeAll(transport.writes);
     expect(frames[0]?.type).toBe(PTYPE_FILE_START);
-    expect(decodeText(frames[0]?.data ?? EMPTY)).toBe('upload badge.nc\n');
+    expect(decodeText(frames[0]?.data ?? EMPTY)).toBe('upload /sd/gcodes/badge.nc\n');
     expect(frames[1]?.type).toBe(PTYPE_FILE_MD5);
     expect(decodeText(frames[1]?.data ?? EMPTY)).toBe(md5Hex(content));
 
@@ -272,11 +272,67 @@ describe('#255 protocol — file upload', () => {
     expect(Array.from(d3.slice(4))).toEqual([90]);
   });
 
-  it('treats a cancel before any data request as "already present"', async () => {
+  it('returns "already present" for a pre-data cancel only once the machine confirms the digest', async () => {
     const transport = new FakeTransport();
-    transport.queueRead(encodeFrame(PTYPE_FILE_CANCEL, EMPTY));
-    const outcome = await runUpload(transport, 1, 'badge.nc', content, { packetSize, inactivityMs: 50 });
+    transport.queueRead(
+      encodeFrame(PTYPE_FILE_CANCEL, EMPTY),
+      // The machine runs the digest into the path with no separator (the §5 quirk `runMd5Sum` reads).
+      encodeFrame(0x90, utf8(`${md5Hex(content)}/sd/gcodes/badge.nc`)),
+    );
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 50 });
     expect(outcome).toEqual({ ok: true, bytes: 9, packets: 0, alreadyPresent: true });
+    // The claim was CHECKED, not assumed — that round trip is the whole point of this fix.
+    const asked = decodeAll(transport.writes).at(-1);
+    expect(decodeText(asked?.data ?? EMPTY)).toBe('md5sum /sd/gcodes/badge.nc');
+  });
+
+  // The live run on 2026-10-07 found this: the machine answered a bare-name upload with
+  // `Error: failed to open file [/165-depth-ladder.nc]!` and the bridge reported a SUCCESSFUL
+  // UPLOAD, because every pre-data cancel was read as "already present". An operator is told the
+  // file is on the machine when it is not. Both halves are pinned here: the machine's words reach
+  // the caller, and the missing file is what decides.
+  it('reports a pre-data cancel as a REFUSAL when the machine does not hold that file', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(PTYPE_FILE_CANCEL, utf8('Error: failed to open file [/165-depth-ladder.nc]!\r\n')),
+      encodeFrame(0x90, utf8('Error: file not found [/165-depth-ladder.nc]')),
+    );
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 50 });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe('refused');
+    expect(outcome.detail).toContain('failed to open file');
+  });
+
+  it('reports a pre-data cancel as a refusal when the file there is a DIFFERENT file', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(PTYPE_FILE_CANCEL, EMPTY),
+      // The path exists and hashes cleanly — it just is not the program we offered.
+      encodeFrame(0x90, utf8(`${md5Hex(new Uint8Array([1, 2, 3]))}/sd/gcodes/badge.nc`)),
+    );
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 50 });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe('refused');
+    expect(outcome.detail).toContain('without saying why');
+  });
+
+  it('refuses a destination that is not an absolute path, before opening the transfer', async () => {
+    const transport = new FakeTransport();
+    const outcome = await runUpload(transport, 1, 'badge.nc', content, { packetSize, inactivityMs: 50 });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.detail).toContain('absolute');
+    // Nothing was sent at all — this is caught before the machine hears about it.
+    expect(transport.writes).toHaveLength(0);
+  });
+
+  it('refuses a destination carrying a newline, which would end the command early', async () => {
+    const transport = new FakeTransport();
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge\nx.nc', content, { packetSize, inactivityMs: 50 });
+    expect(outcome.ok).toBe(false);
+    expect(transport.writes).toHaveLength(0);
   });
 
   it('reports a cancel after data began as a refusal, with no retry', async () => {
@@ -284,14 +340,13 @@ describe('#255 protocol — file upload', () => {
     transport.queueRead(
       encodeFrame(PTYPE_FILE_VIEW, EMPTY),
       dataRequest(1),
-      encodeFrame(PTYPE_FILE_CANCEL, EMPTY),
+      encodeFrame(PTYPE_FILE_CANCEL, utf8('Error: disk full\r\n')),
     );
-    const outcome = await runUpload(transport, 1, 'badge.nc', content, { packetSize, inactivityMs: 50 });
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 50 });
     expect(outcome.ok).toBe(false);
-    if (!outcome.ok) {
-      expect(outcome.reason).toBe('refused');
-      expect(outcome.detail).toMatch(/rejected|refus/i);
-    }
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe('refused');
+    expect(outcome.detail).toContain('disk full');
   });
 
   it('re-sends the exact previous data frame on a retry', async () => {
@@ -303,7 +358,7 @@ describe('#255 protocol — file upload', () => {
       dataRequest(2),
       encodeFrame(PTYPE_FILE_END, EMPTY),
     );
-    const outcome = await runUpload(transport, 1, 'badge.nc', content, { packetSize, inactivityMs: 50 });
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 50 });
     expect(outcome.ok).toBe(true);
     const frames = decodeAll(transport.writes);
     const dataFrames = frames.filter((f) => f.type === PTYPE_FILE_DATA);
@@ -314,7 +369,7 @@ describe('#255 protocol — file upload', () => {
 
   it('cancels and reports a timeout when the machine goes quiet', async () => {
     const transport = new FakeTransport();
-    const outcome = await runUpload(transport, 1, 'badge.nc', content, { packetSize, inactivityMs: 20 });
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 20 });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.reason).toBe('timeout');
     const last = decodeAll(transport.writes).at(-1);
@@ -324,10 +379,10 @@ describe('#255 protocol — file upload', () => {
   it('encodes a transfer name the way the machine expects', async () => {
     const transport = new FakeTransport();
     transport.queueRead(encodeFrame(PTYPE_FILE_CANCEL, EMPTY));
-    await runUpload(transport, 1, 'my badge.nc', new Uint8Array([1]), { packetSize, inactivityMs: 20 });
+    await runUpload(transport, 1, '/sd/gcodes/my badge.nc', new Uint8Array([1]), { packetSize, inactivityMs: 20 });
     const first = decodeAll(transport.writes)[0];
     // Space becomes 0x01 (a raw space would split the command).
-    expect(decodeText(first?.data ?? EMPTY)).toBe(`upload my\u0001badge.nc\n`);
+    expect(decodeText(first?.data ?? EMPTY)).toBe(`upload /sd/gcodes/my\u0001badge.nc\n`);
   });
 });
 
