@@ -52,12 +52,18 @@ export function BoardPlaceholderMesh() {
     return buildBoardPlaceholderGroup(board, {
       origin: { x: xy.x, y: xy.y, z: floor + standoff },
     });
+  // Deliberately NOT `params`: that is every case edit, and each one would rebuild these THREE
+  // groups (slider ticks included). The list is the fields `cavityOriginXY`, `standModulePlacement`
+  // and the floor/standoff sum read; add to it if one of them starts reading another.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     board,
     archetype,
-    // The whole case: `cavityOriginXY` and `standModulePlacement` read it, and a list of the fields
-    // they happen to read today goes stale the day one of them reads another.
-    params,
+    params.stand,
+    params.wallThickness,
+    params.internalClearance,
+    params.clearanceTweaks,
+    params.floorThickness,
   ]);
 
   // Issue #59 — boardVisualization cycle removed; board visibility is just

@@ -121,6 +121,7 @@ describe('#255 uploadProgram — the transport', () => {
       bytes: nc.length,
       packets: 2,
       alreadyPresent: false,
+      status: '<Idle|MPos:0,0,0>',
     });
   });
 

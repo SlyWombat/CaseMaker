@@ -15,7 +15,7 @@ export function describeUpload(result: MachineUploadResult, label: string): stri
     case 'refused':
       return `${label} declined ${result.filename}: ${result.detail}`;
     case 'busy':
-      return `${label} is not idle — ${result.detail}. Wait for it to finish, then upload again.`;
+      return `${label} is busy: ${result.detail}. Wait for it to finish, then press Upload again.`;
     case 'timeout':
       return `The transfer of ${result.filename} timed out: ${result.detail}`;
     case 'error':

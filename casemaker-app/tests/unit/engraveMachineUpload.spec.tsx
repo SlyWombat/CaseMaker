@@ -100,10 +100,9 @@ describe('#255 EngraveMachineUpload — when it will not send', () => {
     expect(screen.getByTestId('engrave-upload-blocked').textContent).toContain('the simulation does not match the prediction');
   });
 
-  it('refuses to overwrite a file on a machine that said it is busy', () => {
+  it('does not let the wizard’s remembered "busy" shut the button — the upload asks the machine live (#296)', () => {
     render(<EngraveMachineUpload {...props({ machine: { ...MACHINE, busy: true } })} />);
-    expect(button().disabled).toBe(true);
-    expect(screen.getByTestId('engrave-upload-blocked').textContent).toContain('busy');
+    expect(button().disabled).toBe(false);
   });
 
   it('shuts when the run has no program', () => {
@@ -228,18 +227,34 @@ describe('#296 EngraveMachineUpload — a machine that is not idle now', () => {
     await waitFor(() => expect(screen.getByTestId('engrave-upload-result')).toBeTruthy());
     const result = screen.getByTestId('engrave-upload-result');
     expect(result.getAttribute('data-state')).toBe('busy');
-    expect(result.textContent).toContain('not idle');
+    expect(result.textContent).toContain('busy');
     expect(uploads).toBe(0);
     expect(told).toEqual([{ busy: true, status: '<Run|MPos:1,2,3>' }]);
   });
 });
 
+describe('#296 EngraveMachineUpload — the live answer replaces the remembered one', () => {
+  it('lets a machine remembered as busy be uploaded to, and records that it was idle', async () => {
+    const told: Array<{ busy: boolean; status: string }> = [];
+    render(
+      <EngraveMachineUpload
+        {...props({ machine: { ...MACHINE, busy: true }, onLiveStatus: (l) => told.push(l) })}
+      />,
+    );
+    fireEvent.click(button());
+    fireEvent.click(screen.getByTestId('engrave-upload-confirm-send'));
+    await waitFor(() => expect(screen.getByTestId('engrave-upload-result')).toBeTruthy());
+    expect(screen.getByTestId('engrave-upload-result').getAttribute('data-state')).toBe('uploaded');
+    expect(told).toEqual([{ busy: false, status: '<Idle|MPos:0,0,0>' }]);
+  });
+});
+
 describe('#255 EngraveMachineUpload — the sentence for each outcome', () => {
   const cases: Array<[MachineUploadResult, string]> = [
-    [{ kind: 'uploaded', filename: 'job.nc', bytes: 41, packets: 2, alreadyPresent: false }, 'received job.nc'],
-    [{ kind: 'uploaded', filename: 'job.nc', bytes: 41, packets: 0, alreadyPresent: true }, 'already had job.nc'],
+    [{ kind: 'uploaded', filename: 'job.nc', bytes: 41, packets: 2, alreadyPresent: false, status: '<Idle>' }, 'received job.nc'],
+    [{ kind: 'uploaded', filename: 'job.nc', bytes: 41, packets: 0, alreadyPresent: true, status: '<Idle>' }, 'already had job.nc'],
     [{ kind: 'refused', filename: 'job.nc', detail: 'nope' }, 'declined job.nc'],
-    [{ kind: 'busy', filename: 'job.nc', detail: 'the machine reports Run, not Idle', status: '<Run>' }, 'not idle'],
+    [{ kind: 'busy', filename: 'job.nc', detail: 'it reports Run rather than Idle, so nothing was sent', status: '<Run>' }, 'is busy'],
     [{ kind: 'timeout', filename: 'job.nc', detail: 'silent' }, 'timed out'],
     [{ kind: 'error', filename: 'job.nc', detail: 'socket died' }, 'was not uploaded'],
     [{ kind: 'unavailable', filename: 'job.nc', reason: 'web build' }, 'cannot reach a machine'],

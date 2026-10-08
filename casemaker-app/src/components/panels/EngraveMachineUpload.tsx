@@ -84,16 +84,16 @@ export function EngraveMachineUpload({
   const label = machine === null ? 'the machine' : (machine.name ?? machine.host);
 
   // Order matters, and matches `uploadBlocker`'s own reasoning: the run's trust first, then whether
-  // there is anywhere to send it, then whether the machine wants it right now.
+  // there is anywhere to send it. Whether the machine is busy is NOT a clause here (#296): the wizard's
+  // `busy` is a memory, and a memory that blocks the button could never be cleared by the very check
+  // that now asks the machine. The upload asks it live; this panel only shows what it last heard.
   const blocked =
     blocker ??
     (machine === null
       ? 'no machine has been reached'
-      : machine.busy === true
-        ? 'the machine reported it is busy'
-        : program === null
-          ? 'no program has been generated'
-          : null);
+      : program === null
+        ? 'no program has been generated'
+        : null);
 
   // A confirmation belongs to the gate that opened it (#295): once the run is blocked it is closed
   // for good, so a later un-blocking cannot bring back a box nobody pressed. Adjusted during render
@@ -118,7 +118,10 @@ export function EngraveMachineUpload({
       { host: machine.host, port: machine.port },
       { filename, nc: program.nc, verify: program.verify },
     );
+    // What the machine said NOW replaces what the wizard remembered, in both directions: a busy answer
+    // marks it busy, and an upload that went through implies it was idle.
     if (outcome.kind === 'busy') onLiveStatus?.({ busy: true, status: outcome.status });
+    else if (outcome.kind === 'uploaded') onLiveStatus?.({ busy: false, status: outcome.status });
     setResult(outcome);
     setStage('idle');
   }

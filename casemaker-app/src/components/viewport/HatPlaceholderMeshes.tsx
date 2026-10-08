@@ -46,10 +46,15 @@ export function HatPlaceholderMeshes() {
       out.push({ placementId: placement.id, group });
     }
     return out;
+  // Deliberately NOT `params` (see BoardPlaceholderMesh): the list is the fields `cavityOriginXY`
+  // and `computeHatBaseZ` read.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     board,
-    // The whole case: `cavityOriginXY` and `computeHatBaseZ` read it (see BoardPlaceholderMesh).
-    params,
+    params.wallThickness,
+    params.internalClearance,
+    params.clearanceTweaks,
+    params.floorThickness,
     hats,
     customHats,
   ]);

@@ -100,7 +100,7 @@ export interface MachineUploadClient {
  * telling the operator less than it knows.
  */
 export type MachineUploadResult =
-  | { kind: 'uploaded'; filename: string; bytes: number; packets: number; alreadyPresent: boolean }
+  | { kind: 'uploaded'; filename: string; bytes: number; packets: number; alreadyPresent: boolean; status: string }
   | { kind: 'refused'; filename: string; detail: string }
   // The machine was asked just before the transfer and was not idle (#296). `status` is its line,
   // verbatim, so the panel can show what the controller said and refresh its stored observation.
@@ -195,7 +195,7 @@ export async function uploadProgram(
     return { kind: 'error', filename, detail: `could not confirm the machine is idle before writing: its status line was not readable (${reading.text})` };
   }
   if (state.toLowerCase() !== 'idle') {
-    return { kind: 'busy', filename, detail: `the machine reports ${state}, not Idle — nothing was sent`, status: reading.text };
+    return { kind: 'busy', filename, detail: `it reports ${state} rather than Idle, so nothing was sent`, status: reading.text };
   }
 
   let attempt: UploadAttempt;
@@ -212,6 +212,8 @@ export async function uploadProgram(
       bytes: attempt.bytes,
       packets: attempt.packets,
       alreadyPresent: attempt.alreadyPresent,
+      // The idle line that let the transfer start, so the caller can refresh what it remembers.
+      status: reading.text,
     };
   }
   // The transport's own three reasons are ours too, so the mapping is the reason itself rather
