@@ -24,3 +24,23 @@ The app lives in `casemaker-app/` (React + Vite + TypeScript, **Tauri** desktop 
 - Playwright browsers: `npx playwright install` (Windows) or
   `npx playwright install --with-deps chromium` (WSL, needs sudo).
 - Back up via the git remote, not OneDrive.
+
+## Bench power — the Makera CNC plug (2026-10-07)
+
+The Z1's mains runs through a Home Assistant smart plug: **`switch.makera_cnc`** ("Makera CNC",
+device class `outlet`). **Turn it on before any hardware-based activity and off when finished** —
+an air run, a cut, a config sweep, anything that expects the machine to answer on the LAN.
+
+It is driven through the HomeAssistant checkout's `ha-api.sh`, which resolves the admin token on
+`kdocker2` over SSH and never prints it. No token goes on a command line:
+
+```sh
+HA=/mnt/c/Projects/HomeAssistant/scripts/ha-api.sh
+$HA /api/states/switch.makera_cnc          # what it is set to right now
+$HA -X POST /api/services/switch/turn_on  -d '{"entity_id":"switch.makera_cnc"}'
+$HA -X POST /api/services/switch/turn_off -d '{"entity_id":"switch.makera_cnc"}'
+```
+
+Switching it is a **physical** act, not a code change: check the state before toggling, and never
+cut power while a job is running. The machine itself is at `192.168.10.43`; the bench harness is
+`casemaker-app/tools/z1/` (run from Windows).
