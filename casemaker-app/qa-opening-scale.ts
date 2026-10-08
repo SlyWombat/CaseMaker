@@ -8,18 +8,16 @@
 // Run (Windows, from casemaker-app):
 //   npx tsx --tsconfig tsconfig.scripts.json qa-opening-scale.mjs
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 import ManifoldModule from 'manifold-3d';
-import { BUNDLED_FONTS, registerBundledFontBytes } from '@/engine/fonts/registry';
+import { registerBundledFontBytes } from '@/engine/fonts/registry';
 import { BUNDLED_FONT_URLS } from '@/engine/fonts/fontAssets';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { labelProfile, toPartPlan } from '@/engine/cnc/engrave/partPlan';
+import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { measureLabels } from '@/workers/sim/engraveGeometry';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
 for (const [key, url] of Object.entries(BUNDLED_FONT_URLS)) {
   const b = readFileSync(fileURLToPath(url));
   registerBundledFontBytes(key, b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));

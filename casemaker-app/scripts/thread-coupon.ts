@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import ManifoldModule from 'manifold-3d';
 
-import { cube, difference, translate, union, type BuildOp } from '../src/engine/compiler/buildPlan';
+import { cube, difference, union, type BuildOp } from '../src/engine/compiler/buildPlan';
 import {
   FASTENERS,
   THREAD_FIT,

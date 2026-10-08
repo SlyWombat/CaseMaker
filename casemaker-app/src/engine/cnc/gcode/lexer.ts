@@ -135,7 +135,7 @@ export function splitCommands(input: string): string[] {
   let rest = input;
   while (rest.length > 0) {
     const first = rest[0];
-    let cut = -1;
+    let cut: number;
     if (first === 'G') {
       const hasS = findFrom(rest, 'S', 2) !== -1;
       const hasM = findFrom(rest, 'M', 2) !== -1;

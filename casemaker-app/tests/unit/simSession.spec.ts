@@ -604,7 +604,7 @@ describe('simStore: plain data and meshes, never jobStore.nodes', () => {
   function fakeClient(): SimClient {
     const session = createSimSession(tl);
     let sink: ((k: number, f: SimFrame) => void) | null = null;
-    let gen = 0;
+    const gen = 0;
     const frames = createFrameCoalescer<SimFrame>({
       fetch: async (k, g) => session.frameAt(k, g),
       deliver: (k, f) => sink?.(k, f),

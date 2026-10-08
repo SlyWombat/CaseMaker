@@ -42,7 +42,7 @@ export function extractMeasuredRuns(source: string, path?: string): RunRecord[] 
   try {
     return JSON.parse(m[1]!) as RunRecord[];
   } catch (e) {
-    throw new Error(`the measured region is not valid JSON: ${(e as Error).message}`);
+    throw new Error(`the measured region is not valid JSON: ${(e as Error).message}`, { cause: e });
   }
 }
 

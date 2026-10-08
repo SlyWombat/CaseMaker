@@ -55,11 +55,9 @@ export function BoardPlaceholderMesh() {
   }, [
     board,
     archetype,
-    params.stand,
-    params.wallThickness,
-    params.internalClearance,
-    params.clearanceTweaks,
-    params.floorThickness,
+    // The whole case: `cavityOriginXY` and `standModulePlacement` read it, and a list of the fields
+    // they happen to read today goes stale the day one of them reads another.
+    params,
   ]);
 
   // Issue #59 — boardVisualization cycle removed; board visibility is just

@@ -2,6 +2,7 @@ import { useState, type CSSProperties, type JSX } from 'react';
 import type { MachineObservation } from '@/platform/machineProbe';
 import { programBytes, uploadProgram, type MachineUploadResult } from '@/platform/machineUpload';
 import type { VerifyReport } from '@/engine/cnc/verify';
+import { describeUpload } from './engraveUploadCopy';
 
 /**
  * #255 — send the verified program to the machine, from beside Save in the engrave panel.
@@ -63,30 +64,6 @@ export interface EngraveMachineUploadProps {
 function reachedWhen(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
-}
-
-/**
- * The sentence for one result. Exported because it is the part worth testing: the panel's honesty
- * about what happened is copy, and copy that drifts from the outcome is how a refusal starts
- * reading as a success.
- */
-export function describeUpload(result: MachineUploadResult, label: string): string {
-  switch (result.kind) {
-    case 'uploaded':
-      return result.alreadyPresent
-        ? `${label} already had ${result.filename} — the same file, byte for byte, so no data was sent.`
-        : `${label} received ${result.filename} — ${result.bytes} bytes in ${result.packets} packets.`;
-    case 'refused':
-      return `${label} declined ${result.filename}: ${result.detail}`;
-    case 'busy':
-      return `${label} is not idle — ${result.detail}. Wait for it to finish, then upload again.`;
-    case 'timeout':
-      return `The transfer of ${result.filename} timed out: ${result.detail}`;
-    case 'error':
-      return `${result.filename} was not uploaded — ${result.detail}.`;
-    case 'unavailable':
-      return `This build cannot reach a machine: ${result.reason}`;
-  }
 }
 
 /** Whether a result reads as a failure the operator should act on. */

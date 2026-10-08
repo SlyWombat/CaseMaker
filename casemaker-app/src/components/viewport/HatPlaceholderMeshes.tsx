@@ -48,10 +48,8 @@ export function HatPlaceholderMeshes() {
     return out;
   }, [
     board,
-    params.wallThickness,
-    params.internalClearance,
-    params.clearanceTweaks,
-    params.floorThickness,
+    // The whole case: `cavityOriginXY` and `computeHatBaseZ` read it (see BoardPlaceholderMesh).
+    params,
     hats,
     customHats,
   ]);

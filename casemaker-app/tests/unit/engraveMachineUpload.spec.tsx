@@ -8,9 +8,9 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
   EngraveMachineUpload,
-  describeUpload,
   type EngraveMachineUploadProps,
 } from '@/components/panels/EngraveMachineUpload';
+import { describeUpload } from '@/components/panels/engraveUploadCopy';
 import {
   setMachineUploadLoader,
   type MachineUploadResult,

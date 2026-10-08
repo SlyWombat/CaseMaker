@@ -92,8 +92,11 @@ export function WelcomeOverlay() {
   }, []);
 
   // Store slices in deps: registry reads the store, re-list on change.
+  // The slices are not read inside the callbacks: they are the signal that the registry changed.
+  /* eslint-disable react-hooks/exhaustive-deps */
   const entries = useMemo(() => listBoards(), [localBoards, remoteSources]);
   const allTemplates = useMemo(() => listTemplates(), [remoteSources, localTemplates, localBoards]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const manufacturers = useMemo(() => {
     const set = new Set(entries.map((e) => e.board.manufacturer));
