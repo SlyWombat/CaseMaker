@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseGcode, setupFromHeader, TOOL_LIBRARY, ToolLibrarySchema, ToolSchema, libraryTool } from '@/engine/cnc';
+import { parseGcode, setupFromHeader, TOOL_LIBRARY, ToolLibrarySchema, ToolSchema, resolveTool } from '@/engine/cnc';
 import type { MkrHeader } from '@/engine/cnc/gcode';
 import { parseMkrRecord } from '@/engine/cnc/gcode/mkrHeader';
 import { cuttingRadiusForSweep, flatEndMill, toolFromMkrRecord } from '@/engine/cnc/tool';
@@ -159,18 +159,18 @@ describe('the tool library', () => {
 
   it("carries TopClamp's TOOL line exactly: the library entry IS the header's tool", () => {
     const fromHeader = toolFromMkrRecord(parseMkrRecord(TOOL, 1) as NonNullable<ReturnType<typeof parseMkrRecord>>);
-    expect(libraryTool('flat-3.175x12-metal')).toEqual(fromHeader);
+    expect(resolveTool('flat-3.175x12-metal')).toEqual(fromHeader);
   });
 
   it('both seeded tools are flat end mills the sweep accepts, at their stated diameters', () => {
-    const r1 = cuttingRadiusForSweep(libraryTool('flat-3.175x12-metal') as NonNullable<ReturnType<typeof libraryTool>>);
-    const r2 = cuttingRadiusForSweep(libraryTool('flat-1.0') as NonNullable<ReturnType<typeof libraryTool>>);
+    const r1 = cuttingRadiusForSweep(resolveTool('flat-3.175x12-metal') as NonNullable<ReturnType<typeof resolveTool>>);
+    const r2 = cuttingRadiusForSweep(resolveTool('flat-1.0') as NonNullable<ReturnType<typeof resolveTool>>);
     expect(r1).toEqual({ ok: true, radius: 3.175 / 2 });
     expect(r2).toEqual({ ok: true, radius: 0.5 });
   });
 
   it('does not invent lengths for the assumed 1 mm tool', () => {
-    const t = libraryTool('flat-1.0');
+    const t = resolveTool('flat-1.0');
     expect(t?.fluteLength).toBeNull();
     expect(t?.shoulderLength).toBeNull();
   });
@@ -188,10 +188,10 @@ describe('the tool library', () => {
     expect(ToolSchema.safeParse({ ...flatEndMill(3), shape: 'spherical' }).success).toBe(false);
   });
 
-  it('libraryTool returns a copy and null for an unknown key', () => {
-    const a = libraryTool('flat-1.0') as NonNullable<ReturnType<typeof libraryTool>>;
+  it('resolveTool returns a copy and null for an unknown key', () => {
+    const a = resolveTool('flat-1.0') as NonNullable<ReturnType<typeof resolveTool>>;
     a.name = 'mutated';
-    expect(libraryTool('flat-1.0')?.name).not.toBe('mutated');
-    expect(libraryTool('nope')).toBeNull();
+    expect(resolveTool('flat-1.0')?.name).not.toBe('mutated');
+    expect(resolveTool('nope')).toBeNull();
   });
 });

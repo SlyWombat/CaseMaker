@@ -31,6 +31,7 @@ import { GCODE_DIR, md5Hex } from '../src/platform/desktop/protocol.ts';
 import { createNodeTransport } from '../tools/z1/transport.node.mjs';
 import { engraveGenerate } from '../src/workers/sim/engraveGenerate';
 import { runSheetFileName } from '../src/engine/cnc/engrave/runSheet';
+import { jobTool } from '../src/engine/cnc/engrave/jobSetup';
 import { parseEngraveJob } from '../src/store/engraveJobSchema';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '../src/engine/fonts/registry';
 
@@ -59,7 +60,7 @@ if (!parsed.ok) {
   process.exit(2);
 }
 const job = parsed.job;
-const generated = engraveGenerate(tl, job);
+const generated = engraveGenerate(tl, job, jobTool(job));
 
 console.log(`job      : ${job.name}`);
 console.log(`stage    : ${generated.stage}   ok: ${generated.ok}`);

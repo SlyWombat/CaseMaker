@@ -35,7 +35,8 @@ import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import { sacrificialBoxes, type SacrificialBox } from '@/engine/cnc/sacrificial';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
-import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
+import { toolForJob } from '@/engine/cnc/toolRegistry';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { recommendTool, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { boxSolid, OVERSHOOT_MM } from '@/workers/geometry/sweep';
@@ -141,8 +142,14 @@ export interface EngravePreviewer {
   /**
    * Build the preview for `job`, or `null` when `gen` is older than one already seen
    * (the same stale-generation rule as `frameAt` in `session.ts`).
+   *
+   * `tools` is the resolved tool REGISTRY snapshot, handed in because this runs inside the sim
+   * worker, where no store and no module state of the app's is visible (#305). It answers two
+   * questions at once: which cutter the job names (`toolForJob`, the job's own snapshot first)
+   * and what the recommendation (#211) may rank — one list, so the panel's picker and the
+   * recommendation it reads beside can never be listing two different sets of cutters.
    */
-  engravePreview(job: EngraveJob, gen: number): EngravePreview | null;
+  engravePreview(job: EngraveJob, tools: readonly ToolLibraryEntry[], gen: number): EngravePreview | null;
 }
 
 /** `perChar` for a job: one single-character glyph profile per character, in text order. */
@@ -187,13 +194,18 @@ function ratioAtFor(
  * "Try N mm or more" — or "Choose a smaller cutter." when no tried size reaches the ratio.
  * No other path computes a size (#211 review).
  */
-function completeCompromiseReason(tl: ManifoldToplevel, job: EngraveJob, rec: ToolRecommendation): string {
+function completeCompromiseReason(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  rec: ToolRecommendation,
+  tools: readonly ToolLibraryEntry[],
+): string {
   if (!rec.compromise || rec.key === null) return rec.reason;
   const pick = rec.candidates.find((c) => c.key === rec.key);
   const worst = pick?.worst;
   if (!worst) return rec.reason;
   const label = job.labels.find((l) => l.id === worst.labelId);
-  const entry = TOOL_LIBRARY.find((e) => e.key === rec.key);
+  const entry = tools.find((e) => e.key === rec.key);
   if (!label || !entry) return rec.reason;
   const r = cuttingRadiusForSweep(entry.tool);
   if (!r.ok) return rec.reason;
@@ -206,7 +218,7 @@ function completeCompromiseReason(tl: ManifoldToplevel, job: EngraveJob, rec: To
 export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
   let latestGen = Number.NEGATIVE_INFINITY;
 
-  const engravePreview = (job: EngraveJob, gen: number): EngravePreview | null => {
+  const engravePreview = (job: EngraveJob, tools: readonly ToolLibraryEntry[], gen: number): EngravePreview | null => {
     if (gen < latestGen) return null;
     latestGen = gen;
 
@@ -217,7 +229,10 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // list, not a copy of it. `perChar` stays local: `recommendTool` re-measures at each candidate
     // cutter's own radius below, which is the preview's own question and no other module's.
     const perChar = perCharFor(job);
-    const { plan, measured, cuts, findings } = engraveRegions(tl, job);
+    // The job's own snapshot wins over its key's entry (design point 2, #305), resolved against
+    // the list the main thread sent — the worker has no registry of its own to read.
+    const tool = toolForJob(job, tools);
+    const { plan, measured, cuts, findings } = engraveRegions(tl, job, tool);
 
     // A label whose findings include an error is left out of the cut — the stock is drawn
     // uncut there — but its row and findings are still reported (the issue's rule).
@@ -320,11 +335,13 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       };
     });
 
-    // #211's rule, measured with each candidate's OWN radius. `TOOL_LIBRARY` is two cutters, so
-    // the "early stop for long lists" rule (measure in ascending diameter, stop after the first
-    // failure that follows a pass) does not apply yet: until the list is long, measure them all.
-    const recommendation = recommendTool(job, TOOL_LIBRARY, (key) => {
-      const entry = TOOL_LIBRARY.find((e) => e.key === key);
+    // #211's rule, measured with each candidate's OWN radius, over the list the caller sent —
+    // the same list the picker offers (#305), so a recommendation can never point at a cutter
+    // the user cannot choose. With the built-ins alone that is two cutters, so the "early stop
+    // for long lists" rule (measure in ascending diameter, stop after the first failure that
+    // follows a pass) does not apply yet: until the list is long, measure them all.
+    const recommendation = recommendTool(job, tools, (key) => {
+      const entry = tools.find((e) => e.key === key);
       if (!entry) return [];
       const r = cuttingRadiusForSweep(entry.tool);
       return r.ok ? measureLabels(tl, plan, r.radius, job.edgeMargin, perChar) : [];
@@ -340,7 +357,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       findings,
       recommendation: {
         ...recommendation,
-        reason: completeCompromiseReason(tl, job, recommendation),
+        reason: completeCompromiseReason(tl, job, recommendation, tools),
       },
     };
   };

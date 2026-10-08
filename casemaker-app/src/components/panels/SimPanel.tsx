@@ -1,8 +1,8 @@
 import { useState, type CSSProperties, type DragEvent, type JSX } from 'react';
 import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
 import { isSimSceneActive, useSimStore } from '@/store/simStore';
-import { TOOL_LIBRARY, Z1 } from '@/engine/cnc';
-import { libraryTool } from '@/engine/cnc/toolLibrary';
+import { resolveTool, Z1 } from '@/engine/cnc';
+import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { StartingTool } from '@/engine/cnc';
 import type { DiagnosticSource, SimDiagnostic } from '@/workers/sim/session';
 import { MAX_TEXT_FILE_BYTES, openTextFile } from '@/utils/openTextFile';
@@ -149,7 +149,8 @@ export function SimPanel() {
   /** A diagnostic's line the user asked to reveal in the G-code pane (#245). */
   const [jump, setJump] = useState<{ line: number; seq: number } | null>(null);
 
-  const tool = toolKey ? libraryTool(toolKey) : null;
+  const tools = useToolRegistry();
+  const tool = toolKey ? resolveTool(toolKey) : null;
   const loading = status === 'loading';
   const canSimulate = gcodeText !== null && tool !== null && !loading;
 
@@ -341,7 +342,7 @@ export function SimPanel() {
         <option value="" disabled>
           Choose the tool this program was written for…
         </option>
-        {TOOL_LIBRARY.map((e) => (
+        {tools.map((e) => (
           <option key={e.key} value={e.key} title={e.provenance}>
             {e.tool.name}
           </option>

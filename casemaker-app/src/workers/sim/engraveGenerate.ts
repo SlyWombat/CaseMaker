@@ -40,7 +40,7 @@ import { resolveMachine, type MachineCalibration } from '@/engine/cnc/calibratio
 import { feedsFor, type FeedsResult } from '@/engine/cnc/feeds';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { toPartPlan, labelProfile, jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
-import { jobTool, toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
 import { generateTrace } from '@/engine/cnc/cam/trace';
@@ -202,15 +202,21 @@ function drillPolygons(tl: ManifoldToplevel, holes: readonly [number, number][],
   return polygons;
 }
 
-export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob): EngraveRegions {
+/**
+ * `tool` is HANDED IN (#305): this is worker-side, where neither the job store nor the tool
+ * registry is visible, so the caller resolves it — `jobTool(job)` on the main thread, or
+ * `toolForJob(job, tools)` from the list the preview was sent. One `Tool` object then feeds the
+ * measurement, the findings, the CAM and the verifier, so the run can never disagree with itself
+ * about which cutter it used.
+ */
+export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob, tool: Tool | null): EngraveRegions {
   const plan = toPartPlan(job);
   const perChar = perCharFor(job);
-  const tool = jobTool(job);
   const r = tool ? cuttingRadiusForSweep(tool) : null;
   const radius = r && r.ok ? r.radius : null;
 
   const measured = radius === null ? [] : measureLabels(tl, plan, radius, job.edgeMargin, perChar);
-  const engFindings = radius === null ? [] : engravabilityFindings(job, measured, ratioAtFor(tl, job, radius));
+  const engFindings = radius === null ? [] : engravabilityFindings(job, measured, ratioAtFor(tl, job, radius), tool);
 
   // #171 — a WARNING only, and only for a job that declares a void (`keepOutFindings` returns
   // early otherwise, so a void-free job pays nothing here). A cut deep enough to breach the
@@ -368,6 +374,12 @@ function frameProgram(
 /**
  * Generate, post and verify one engrave job.
  *
+ * `tool` is the resolved cutter, HANDED IN (#305): this runs in the sim worker, where neither the
+ * job store nor the tool registry can be read, so the caller resolves it (`jobTool(job)` on the
+ * main thread) and the same object reaches the findings, the feeds, the CAM, the post and the
+ * verifier. `null` is not an error to swallow — it stops at the feeds stage with "the job has no
+ * usable cutter", which is exactly what `tool-missing` says above it.
+ *
  * `calibration` is the machine's own frame, if the user has one saved (#279). The machine is resolved
  * from it ONCE here (#297) and that one object feeds the feeds, the post, the setup, the verifier and
  * the frame file — the same object the caller loads the simulation with. Before this, the verifier
@@ -377,10 +389,11 @@ function frameProgram(
 export function engraveGenerate(
   tl: ManifoldToplevel,
   job: EngraveJob,
+  tool: Tool | null,
   calibration: MachineCalibration | null = null,
 ): EngraveGenerated {
   const mill = resolveMachine(Z1, calibration);
-  const { plan, regions, predicted, tool, radius, findings } = engraveRegions(tl, job);
+  const { plan, regions, predicted, radius, findings } = engraveRegions(tl, job, tool);
   const errors: EngraveFailure[] = [];
 
   const stop = (stage: EngraveStage, extra?: { feeds?: FeedsResult | null; message?: string }): EngraveGenerated => {

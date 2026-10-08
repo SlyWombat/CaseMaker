@@ -88,7 +88,9 @@ describe('engraveRunStore — a verifier refusal stops the run (#174)', () => {
     useEngraveRunStore.getState().reset();
     simOracle.mockClear();
     setEngraveRunClientLoader(async () => ({
-      engraveGenerate: async (job) => engraveGenerate(tl, job),
+      // Forward the cutter the store resolved (#305): the fake stands in for the client, so it
+      // must not resolve one of its own.
+      engraveGenerate: async (job, tool) => engraveGenerate(tl, job, tool),
       simOracle,
     }));
     setSimClientLoader(async () => refusingSimClient());

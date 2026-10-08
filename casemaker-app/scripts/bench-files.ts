@@ -106,7 +106,7 @@ function ladderJob(): EngraveJob {
 }
 
 const job = ladderJob();
-const generated = engraveGenerate(tl, job);
+const generated = engraveGenerate(tl, job, jobTool(job));
 if (!generated.ok || generated.nc === null) {
   console.error(JSON.stringify({ stage: generated.stage, errors: generated.errors, findings: generated.findings }, null, 2));
   throw new Error(`#165 ladder did not generate (stopped at ${generated.stage})`);

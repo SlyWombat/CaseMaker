@@ -8,7 +8,8 @@ import { canDriveMachine } from '@/platform/capabilities';
 import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { useSettingsStore } from '@/store/settingsStore';
-import { TOOL_LIBRARY, Z1 } from '@/engine/cnc';
+import { Z1 } from '@/engine/cnc';
+import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { keepOutLimit, keepOutMembrane } from '@/engine/cnc/engrave/partPlan';
@@ -308,8 +309,11 @@ export function EngravePanel(): JSX.Element {
   const jobFindings = findings.filter((f) => f.labelId === undefined);
   const findingsFor = (labelId: string): JobFinding[] => findings.filter((f) => f.labelId === labelId);
 
+  // #305 — the snapshot the resolver reads, so the list here and the tool everything else uses
+  // can never come from two different places.
+  const tools = useToolRegistry();
   const tool = jobTool(job);
-  const toolEntry = TOOL_LIBRARY.find((e) => e.key === job.toolKey) ?? null;
+  const toolEntry = tools.find((e) => e.key === job.toolKey) ?? null;
   const diameter = toolEntry ? entryDiameter(toolEntry) : null;
   const feeds = tool ? feedsFor(job.stock.material, tool, Z1, job.cutOverride) : null;
   const params: CutParams | null = feeds && feeds.ok ? feeds.params : null;
@@ -1150,7 +1154,7 @@ export function EngravePanel(): JSX.Element {
         <option value="" disabled>
           Choose a cutter…
         </option>
-        {TOOL_LIBRARY.map((e) => (
+        {tools.map((e) => (
           <option key={e.key} value={e.key} title={e.provenance}>
             {toolOptionLabel(e)}
           </option>

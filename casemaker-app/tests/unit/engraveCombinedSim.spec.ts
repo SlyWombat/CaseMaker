@@ -13,8 +13,9 @@
 import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
+import { generate } from './helpers/engravePipeline';
 import { createSimSession, type SimLoadOk, type SimSession } from '@/workers/sim/session';
-import { engraveGenerate, type EngraveGenerated } from '@/workers/sim/engraveGenerate';
+import { type EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
@@ -142,7 +143,7 @@ function overlapJob(): EngraveJob {
 
 /** Generate, verify and load a job through the real session; every error gate must be clean. */
 function run(job: EngraveJob): { g: EngraveGenerated; session: SimSession; load: SimLoadOk } {
-  const g = engraveGenerate(tl, job);
+  const g = generate(tl, job);
   expect(g.errors).toEqual([]);
   expect(g.ok).toBe(true);
   expect(g.nc).not.toBeNull();

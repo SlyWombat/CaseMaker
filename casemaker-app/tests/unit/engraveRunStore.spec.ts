@@ -184,7 +184,7 @@ describe('engraveRunStore (#206)', () => {
       },
     });
     setEngraveRunClientLoader(async () => ({
-      engraveGenerate: async (_job, calibration) => {
+      engraveGenerate: async (_job, _tool, calibration) => {
         generatedWith = calibration;
         // The user saves a new frame while the worker is generating.
         useSettingsStore.setState({ machineCalibration: second });
@@ -221,7 +221,7 @@ describe('engraveRunStore (#206)', () => {
       },
     });
     setEngraveRunClientLoader(async () => ({
-      engraveGenerate: async (_job, calibration) => {
+      engraveGenerate: async (_job, _tool, calibration) => {
         generatedWith = calibration;
         return clean();
       },
@@ -273,7 +273,7 @@ describe('engraveRunStore (#206)', () => {
       },
     });
     setEngraveRunClientLoader(async () => ({
-      engraveGenerate: async (_job, calibration) => {
+      engraveGenerate: async (_job, _tool, calibration) => {
         generatedWith = calibration;
         return clean();
       },

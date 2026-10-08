@@ -11,8 +11,9 @@
  * `engravabilityFindings` must not disagree about what "keeps the detail" means.
  *
  * In the worker (#205) `measure` is `measureLabels(tl, plan, radius, …)` bound to the
- * candidate's own radius, computed once per job edit beside the preview. The candidate list
- * is the picker's list (`TOOL_LIBRARY` today, the local inventory once #212 exists).
+ * candidate's own radius, computed once per job edit beside the preview. The candidate list is
+ * HANDED IN (#305), not read from a module: the worker is sent the registry snapshot the picker
+ * is showing, so the two cannot disagree about which cutters exist.
  */
 
 import { feedsFor } from '@/engine/cnc/feeds';

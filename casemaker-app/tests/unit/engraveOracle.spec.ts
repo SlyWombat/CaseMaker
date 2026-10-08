@@ -8,8 +8,8 @@
 import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
+import { generate } from './helpers/engravePipeline';
 import { createSimSession, type SimSession } from '@/workers/sim/session';
-import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import {
   ORACLE_AREA_FLOOR,
@@ -51,7 +51,7 @@ const over = (p: OracleReport) => p.worst.overCut;
 describe('engraveOracle (#206 §3)', () => {
   it('passes the default job, every level inside the band', () => {
     const job = defaultEngraveJob();
-    const g = engraveGenerate(tl, job);
+    const g = generate(tl, job);
     expect(g.nc).not.toBeNull();
     const tool = jobTool(job)!;
     const session = load(job, g.nc!, tool);
@@ -122,7 +122,7 @@ describe('engraveOracle (#206 §3)', () => {
 
   it('catches an over-cut: shifting every X by +0.5 mm', () => {
     const job = defaultEngraveJob();
-    const g = engraveGenerate(tl, job);
+    const g = generate(tl, job);
     expect(g.nc).not.toBeNull();
     // Only the emitted X words: every header field is lowercase (`x=`), so this cannot touch the
     // header. A move that omits X keeps the modal value, so the whole path shifts together.
@@ -177,7 +177,7 @@ describe('engraveOracle (#206 §3)', () => {
         },
       ],
     };
-    const g = engraveGenerate(tl, job);
+    const g = generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();
     expect(g.nc).toContain('Trace line (2 points) 1.5mm');

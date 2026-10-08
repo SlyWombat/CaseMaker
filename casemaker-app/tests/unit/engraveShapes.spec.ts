@@ -9,12 +9,13 @@
 import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
+import { generate, engravability } from './helpers/engravePipeline';
 import {
   itemProfile,
   polygonSelfIntersects,
   toPartPlan,
 } from '@/engine/cnc/engrave/partPlan';
-import { engravabilityFindings, measureLabels } from '@/workers/sim/engraveGeometry';
+import { measureLabels } from '@/workers/sim/engraveGeometry';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -22,10 +23,9 @@ import { aabbOfProfile, type Profile } from '@/engine/compiler/profile';
 import { executeProfile } from '@/workers/geometry/evaluateOp';
 import { generateEngrave } from '@/engine/cnc/cam/engraveJob';
 import { feedsFor } from '@/engine/cnc/feeds';
-import { libraryTool } from '@/engine/cnc/toolLibrary';
+import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { Z1 } from '@/engine/cnc/machine';
 import { createSimSession } from '@/workers/sim/session';
-import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type {
@@ -226,7 +226,7 @@ describe('shapes reach the engravability check (#214)', () => {
     const job = shapeJob(circle({ diameter: 2, depth: 1 }), { toolKey: 'flat-3.175x12-metal' });
     const m = measureLabels(tl, toPartPlan(job), 3.175 / 2, job.edgeMargin, () => []);
     expect(m[0]!.openedArea).toBe(0);
-    const f = engravabilityFindings(job, m, () => 0);
+    const f = engravability(job, m, () => 0);
     const empty = f.find((x) => x.code === 'item-empty');
     expect(empty).toBeDefined();
     expect(empty!.message).toBe(
@@ -241,9 +241,9 @@ describe('shapes reach the engravability check (#214)', () => {
     const m = measureLabels(tl, toPartPlan(job), 3.175 / 2, job.edgeMargin, () => []);
     expect(m[0]!.openedArea).toBeGreaterThan(0);
     expect(m[0]!.polygons.length).toBeGreaterThan(0);
-    expect(engravabilityFindings(job, m, () => 1)).toHaveLength(0);
+    expect(engravability(job, m, () => 1)).toHaveLength(0);
 
-    const tool = libraryTool('flat-3.175x12-metal')!;
+    const tool = resolveTool('flat-3.175x12-metal')!;
     const feeds = feedsFor(job.stock.material, tool, Z1);
     expect(feeds.ok).toBe(true);
     if (!feeds.ok) return;
@@ -258,7 +258,7 @@ describe('shapes reach the engravability check (#214)', () => {
   });
 
   it('a shape smaller than the cutter is reported by its plain name, not as a label', () => {
-    const f = engravabilityFindings(
+    const f = engravability(
       shapeJob(circle({ id: 'c2', diameter: 2, name: 'drain' })),
       [
         {
@@ -321,7 +321,7 @@ describe('⌀6 circle end to end (#214): generate → verify → simulate → or
       toolKey: 'flat-3.175x12-metal',
     });
 
-    const g = engraveGenerate(tl, job);
+    const g = generate(tl, job);
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.nc).not.toBeNull();

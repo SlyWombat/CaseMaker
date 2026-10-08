@@ -16,6 +16,7 @@
 
 import { create } from 'zustand';
 import type { EngraveJob } from '@/types/engraveJob';
+import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { SimDiagnostic } from '@/workers/sim/session';
@@ -32,7 +33,11 @@ export type EngraveRunPhase = 'idle' | 'generating' | 'simulating' | 'checking' 
 
 /** The two worker calls the run needs. */
 export type EngraveRunClient = {
-  engraveGenerate: (job: EngraveJob, calibration?: MachineCalibration | null) => Promise<EngraveGenerated>;
+  engraveGenerate: (
+    job: EngraveJob,
+    tool: Tool | null,
+    calibration?: MachineCalibration | null,
+  ) => Promise<EngraveGenerated>;
   simOracle: (predicted: OraclePredicted[]) => Promise<OracleReport>;
 };
 
@@ -174,11 +179,16 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // to the saved frame and leave the gate and the sim judging different machines for one .nc.
     const calibration = useSettingsStore.getState().machineCalibration ?? null;
 
+    // The cutter, resolved ONCE on this side (#305): the sim worker cannot see the registry, so
+    // it is sent the `Tool` — and the same object then loads the simulation below, so the gate
+    // and the sweep cannot judge the job with two different cutters.
+    const tool = jobTool(job);
+
     let client: EngraveRunClient;
     let generated: EngraveGenerated;
     try {
       client = await clientLoader();
-      generated = await client.engraveGenerate(job, calibration);
+      generated = await client.engraveGenerate(job, tool, calibration);
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
       return;
@@ -201,7 +211,6 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       return;
     }
 
-    const tool = jobTool(job);
     if (!tool) {
       set({ phase: 'blocked', error: 'the job has no usable cutter' });
       return;

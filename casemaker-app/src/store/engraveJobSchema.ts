@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Z1 } from '@/engine/cnc/machine';
+import { ToolSchema } from '@/engine/cnc/toolLibrary';
 import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
 import { MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS } from '@/engine/import/outlineTypes';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -437,6 +438,12 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   // #246/#254's per-field provenance. OPTIONAL, not defaulted: a job that has never had a
   // cutting override or a guided setup applied carries no key.
   sources: jobSourcesSchema.optional(),
+  // #305's snapshot of the cutter the job was written with. OPTIONAL, not defaulted, for the
+  // same byte-for-byte reason as `combined`/`traces`/`vectors`/`keepOuts`/`drills`, and nullable
+  // so a snapshot that could not be taken stays an explicit null. Validated by the SAME
+  // `ToolSchema` the library entries use, so a job file cannot smuggle in a tool shape the
+  // sweeper would then have to defend against.
+  tool: ToolSchema.nullish(),
 });
 
 export const engraveJobSchema = z

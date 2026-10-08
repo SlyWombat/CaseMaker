@@ -12,6 +12,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
+import { engravability } from './helpers/engravePipeline';
 import {
   itemProfile,
   itemReferences,
@@ -20,7 +21,7 @@ import {
   toPartPlan,
 } from '@/engine/cnc/engrave/partPlan';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
-import { engravabilityFindings, measureLabels } from '@/workers/sim/engraveGeometry';
+import { measureLabels } from '@/workers/sim/engraveGeometry';
 import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -292,7 +293,7 @@ describe('combined shapes reach the engravability check (#215)', () => {
     const m = measureLabels(tl, toPartPlan(job), 3.175 / 2, job.edgeMargin, () => []);
     const row = m.find((x) => x.labelId === 'f')!;
     expect(row.openedArea).toBe(0);
-    const f = engravabilityFindings(job, m, () => 0).find((x) => x.code === 'item-empty');
+    const f = engravability(job, m, () => 0).find((x) => x.code === 'item-empty');
     expect(f).toBeDefined();
     expect(f!.labelId).toBe('f');
   });
@@ -312,7 +313,7 @@ describe('combined shapes reach the engravability check (#215)', () => {
     const row = m.find((x) => x.labelId === 'c')!;
     expect(row.ratio).toBeGreaterThan(0);
     expect(row.ratio).toBeLessThan(0.9);
-    const f = engravabilityFindings(job, m, () => 0).find((x) => x.code === 'item-detail-lost');
+    const f = engravability(job, m, () => 0).find((x) => x.code === 'item-detail-lost');
     expect(f).toBeDefined();
     expect(f!.labelId).toBe('c');
   });

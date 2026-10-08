@@ -11,8 +11,8 @@
 import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
+import { generate, regions as cutRegions } from './helpers/engravePipeline';
 import { createSimSession, type SimLoadOk, type SimSession } from '@/workers/sim/session';
-import { engraveGenerate, engraveRegions } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool, toSetup, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { feedsFor } from '@/engine/cnc/feeds';
@@ -50,7 +50,7 @@ function singleHole(): EngraveJob {
 
 /** The toolpath IR for a drill job, off the SAME regions the app would generate. */
 function drillIr(job: EngraveJob) {
-  const { regions, tool } = engraveRegions(tl, job);
+  const { regions, tool } = cutRegions(tl, job);
   if (tool === null) throw new Error(`${TOOL_KEY} is not in the tool library`);
   const feeds = feedsFor(job.stock.material, tool, Z1, job.cutOverride);
   if (!feeds.ok) throw new Error(feeds.reason);
@@ -80,7 +80,7 @@ describe('drill CAM (#220)', () => {
   });
 
   it('posts no canned cycle: no G81, G82 or G83 anywhere in the file', () => {
-    const g = engraveGenerate(tl, singleHole());
+    const g = generate(tl, singleHole());
     expect(g.errors).toEqual([]);
     expect(g.nc).not.toBeNull();
     expect(/\bG8[123]\b/.test(g.nc as string)).toBe(false);
@@ -88,7 +88,7 @@ describe('drill CAM (#220)', () => {
 
   it('simulates removal equal to π r² × 4, and the peck re-entries raise no rapid-through-stock', () => {
     const job = singleHole();
-    const g = engraveGenerate(tl, job);
+    const g = generate(tl, job);
     expect(g.errors).toEqual([]);
     expect(g.ok).toBe(true);
     expect(g.verify?.findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -156,7 +156,7 @@ describe('drill CAM (#220)', () => {
   });
 
   it('refuses to drill with a tool that is not a flat end mill, naming the shape', () => {
-    const { regions } = engraveRegions(tl, singleHole());
+    const { regions } = cutRegions(tl, singleHole());
     const ball = flatEndMill(3.175, { shape: 'ball', typeText: 'Ball End' });
     const feeds = feedsFor('softwood', ball, Z1);
     // The feeds table refuses a ball cutter before CAM even runs; the CAM refusal is the belt

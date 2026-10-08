@@ -1,6 +1,6 @@
 import { rectProfile } from '@/engine/compiler/profile';
 import type { MillProfile } from '@/engine/cnc/machine';
-import { libraryTool } from '@/engine/cnc/toolLibrary';
+import { getTools, toolForJob } from '@/engine/cnc/toolRegistry';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
@@ -112,9 +112,21 @@ function traceHasWork(trace: EngraveTraceItem): boolean {
   return trace.kind === 'line' ? trace.points.length >= 2 : trace.text.trim().length > 0;
 }
 
-/** The tool the job names, or null when `toolKey` is not in `TOOL_LIBRARY`. */
+/**
+ * The tool the job names, or null. Three steps, in order (#305 design point 2):
+ *
+ *   1. the job's OWN snapshot (`job.tool`), so a job reopened while the service is absent still
+ *      generates, verifies and simulates — and so a cutter re-collared since the job was written
+ *      does not silently re-prove it at a new stick-out;
+ *   2. the registry entry `job.toolKey` names — the built-ins always, a catalogue or inventory
+ *      tier when one is loaded;
+ *   3. null, which leaves the holder gate saying "cannot be proven" exactly as it does today.
+ *
+ * The workers cannot call this: no store is visible inside them. They are handed the resolved
+ * `Tool` (or the list, for the recommendation) and read `toolForJob` themselves.
+ */
 export function jobTool(job: EngraveJob): Tool | null {
-  return libraryTool(job.toolKey);
+  return toolForJob(job, getTools());
 }
 
 /**

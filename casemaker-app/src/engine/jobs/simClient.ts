@@ -10,6 +10,7 @@
 import * as Comlink from 'comlink';
 import type { MachineCalibration, Setup } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
@@ -172,17 +173,31 @@ export const simPath = (): Promise<SimPath> => getSimApi().simPath();
  * The engrave preview (#205): the stock cut to each label's depth, its pocket floors and the
  * vise jaws. `null` when `gen` is older than one the worker has already answered; mesh buffers
  * are transferred. Independent of any loaded simulation program.
+ *
+ * `tools` is the resolved registry snapshot (#305): the worker cannot read the app's module
+ * state, so the list it resolves and recommends from is sent with the job. Plain data, like the
+ * `Tool` `simLoad` takes.
  */
-export const engravePreview = (job: EngraveJob, gen: number): Promise<EngravePreview | null> =>
-  getSimApi().engravePreview(job, gen);
+export const engravePreview = (
+  job: EngraveJob,
+  tools: readonly ToolLibraryEntry[],
+  gen: number,
+): Promise<EngravePreview | null> => getSimApi().engravePreview(job, tools, gen);
 
 /**
  * Generate → verify, headless, in the sim worker (#206). Returns the exact `.nc` text and the
  * opened regions the oracle compares the simulation against. No wasm handle crosses: the result
  * is plain data.
+ *
+ * `tool` is the caller's resolved cutter (#305) — `jobTool(job)` on this side, because the
+ * worker cannot resolve it. The same object is what the caller then loads the simulation with,
+ * so the gate and the sweep judge one cutter and not two.
  */
-export const engraveGenerate = (job: EngraveJob, calibration?: MachineCalibration | null): Promise<EngraveGenerated> =>
-  getSimApi().engraveGenerate(job, calibration ?? null);
+export const engraveGenerate = (
+  job: EngraveJob,
+  tool: Tool | null,
+  calibration?: MachineCalibration | null,
+): Promise<EngraveGenerated> => getSimApi().engraveGenerate(job, tool, calibration ?? null);
 
 /**
  * The volumetric oracle (#206 §3) over the program CURRENTLY loaded in the worker's session.

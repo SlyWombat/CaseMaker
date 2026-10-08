@@ -11,7 +11,7 @@ import { createSimSession, type SimFrame, type SimLoadOk } from '@/workers/sim/s
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { STOCK_CACHE } from '@/workers/geometry/playback';
 import { capsuleArea, MAX_CHECKPOINTS } from '@/workers/geometry/sweep';
-import { parseGcode, setupFromHeader, stubSetup, libraryTool, type Setup } from '@/engine/cnc';
+import { parseGcode, setupFromHeader, stubSetup, resolveTool, type Setup } from '@/engine/cnc';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
@@ -762,7 +762,7 @@ describe.skipIf(!existsSync(join(CORPUS, 'LED/ACRYLIC-Balloon.nc')))('a real cor
     const s = stubSetup(part, { kind: 'tape-down', contact: part.outline });
     s.placement = { origin: [minX - 5, minY - 5, 0], rotationZ: 0, source: 'stub' };
     s.wcs = { origin: [0, 0, thickness], source: 'stub', uncertainty: 0.05 };
-    const t = libraryTool('flat-3.175x12-metal');
+    const t = resolveTool('flat-3.175x12-metal');
     if (!t) throw new Error('tool missing');
 
     const session = createSimSession(tl);

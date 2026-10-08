@@ -11,6 +11,7 @@ import {
 } from '@/engine/cnc/engrave/defaults';
 import { todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
+import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type {
@@ -444,7 +445,15 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     removeLabel: (id) => apply((job) => ({ ...job, labels: job.labels.filter((l) => l.id !== id) })),
 
     setTool: (key, source = 'user') =>
-      apply((job) => ({ ...job, toolKey: key, sources: { ...(job.sources ?? {}), tool: source } })),
+      apply((job) => ({
+        ...job,
+        toolKey: key,
+        // #305 design point 2 — snapshot the materialised cutter beside its key, so the job is
+        // still reproducible when the tier that key names is not loaded (the built-ins always
+        // are, which is why `resolveTool` is enough here and no failure is possible for them).
+        tool: resolveTool(key),
+        sources: { ...(job.sources ?? {}), tool: source },
+      })),
 
     addShape: (kind) => {
       const shape = newShape(kind, get().job);

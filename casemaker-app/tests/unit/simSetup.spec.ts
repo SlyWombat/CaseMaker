@@ -55,10 +55,32 @@ describe('simSetupStore.openFile', () => {
   });
 
   it('a header tool with no library match is "tool required", not a guess', () => {
-    const odd = TOOL.replace('type=Flat End', 'type=Ball End');
+    // Unmatched on BOTH keys the matcher has (#305): an id no entry carries, and a shape +
+    // diameter nothing lists. Either one alone now resolves on its own — see the two below.
+    const odd = TOOL.replace('id=112111313812', 'id=999999999999')
+      .replace('type=Flat End', 'type=Ball End')
+      .replace(/diameter=3\.175/g, 'diameter=6.35')
+      .replace('tipdiameter=3.175', 'tipdiameter=6.35');
     useSimSetupStore.getState().openFile('ball.nc', headerText(STOCK, odd));
     expect(useSimSetupStore.getState().toolKey).toBeNull();
     expect(useSimSetupStore.getState().toolSource).toBeNull();
+  });
+
+  it('matches on the header id first, so two same-size flats cannot tie (#305)', () => {
+    // The id is the file's own statement of which catalogue cutter it was cut with, and it beats
+    // the type text — which is a display string, not a key.
+    const odd = TOOL.replace('type=Flat End', 'type=Ball End');
+    useSimSetupStore.getState().openFile('odd.nc', headerText(STOCK, odd));
+    expect(useSimSetupStore.getState().toolKey).toBe('flat-3.175x12-metal');
+    expect(useSimSetupStore.getState().toolSource).toBe('header');
+  });
+
+  it('falls back to shape + diameter when the id is one nothing knows', () => {
+    // The same cutter, named by a clone's id (or one from a catalogue we do not hold): the
+    // geometry still identifies the builtin row.
+    const odd = TOOL.replace('id=112111313812', 'id=999999999999');
+    useSimSetupStore.getState().openFile('clone.nc', headerText(STOCK, odd));
+    expect(useSimSetupStore.getState().toolKey).toBe('flat-3.175x12-metal');
   });
 
   it('reopening a file resets a user-edited stock back to the new header', () => {

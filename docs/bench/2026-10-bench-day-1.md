@@ -111,30 +111,47 @@ boxes are the catalogue's; a ruler shot waits for the unboxed spot check)
 
 ### A2 — Collet nut and stick-out
 
-**Do.** Caliper the collet nut: outside diameter and height. With a cutter fitted using its
-collar, measure stick-out from the nut face to the tool tip.
+**Do.** Caliper the collet nut: outside diameter and height. Then fit a cutter with its
+**collar** and caliper the collar as well — its outside diameter, its height, and how far it sits
+from the nut face — because the collar is the thing that fixes the protrusion, so its geometry is
+what makes a stick-out repeatable across tool changes rather than a number that happens to be
+right today. Measure stick-out from the nut face to the tool tip. Photograph the collar seated on
+a shank with a ruler in frame: the placement is what has to be reproduced, not just the length.
 
 **Expected.** `Z1.holder` is `null` — "PROVISIONAL (#208): the collet nut has never been
-measured" (`machine.ts:463-465`), so the fixture gate reports "cannot be proven". Tool
-`stickout`: `0` for the TopClamp sample, `null` for `flat-1.0` (`toolLibrary.ts`). Bit collars
-set ~12 mm shank protrusion by default (`/Fabrication.md` §1).
+measured" (`machine.ts:463-465`), so the fixture gate reports "cannot be proven". **Tool
+`stickout`: `null` for every entry** — the header's `sticklength=0` means *unset* and parses to
+`null`, deliberately not `0` (#305 design point 1; `tool.ts` `stickoutFromRecord`), and `flat-1.0`
+carries no lengths at all. Bit collars set ~12 mm exposed length by default
+(`/Fabrication.md` §1), and `Tool.stickout` is *that* exposure, not a catalogue figure
+(`/Fabrication.md` §1). Do not transcribe the ~12 mm default as a measurement: the number that
+goes into the library is the one the calipers read.
 
-**Recorded:** _not yet run — nut ⌀, nut height, stick-out (3 numbers)._
+**Recorded:** _not yet run — nut ⌀, nut height, collar ⌀, collar height, collar-to-nut gap,_
+_stick-out (6 numbers)._
 
 | Field | Value |
 |---|---|
 | Collet nut outside ⌀ (mm) | |
 | Collet nut height (mm) | |
+| Collar outside ⌀ (mm) | |
+| Collar height (mm) | |
+| Collar face → nut face (mm) | |
 | Stick-out, nut face → tool tip (mm) | |
 
-Stick-out per cutter, if it differs from the collar default (cutter # from A1):
+Stick-out per cutter, if it differs from the collar default (cutter # from A1). Re-measure it
+whenever a cutter is re-collared: a new length invalidates a saved job's stick-out, which is why
+the job keeps the `Tool` it was generated with (#305 design point 2).
 
 | Cutter # | Stick-out (mm) |
 |---|---|
 | | |
 | | |
 
-**Goes to:** `Z1.holder` in `src/engine/cnc/machine.ts` (#204) and each tool's `stickout`.
+**Goes to:** `Z1.holder` in `src/engine/cnc/machine.ts` (#204) and each owned cutter's `stickout`
+in `src/engine/cnc/toolLibrary.ts` — as the exposure that cutter is **collared to**, which is
+per-installation and not a catalogue figure (`/Fabrication.md` §1, #305 design point 1). #212's
+inventory item carries its own materialised snapshot of the same value.
 
 ### A3 — Caliper the vise
 

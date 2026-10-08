@@ -16,7 +16,8 @@ import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { keepOutLimit, keepOutMembrane, traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { itemLabel, jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { itemLabel } from '@/engine/cnc/engrave/jobSetup';
+import type { Tool } from '@/engine/cnc/tool';
 import { aabbOfProfile, pOffset, type Profile } from '@/engine/compiler/profile';
 import type {
   EngraveAnyItem,
@@ -200,14 +201,19 @@ export type LabelRatioAt = (labelId: string, size: number) => number;
  * `item-detail-lost` is suppressed at `ratio === 0`: a fully-lost item is already the
  * `item-empty` error, and there is no partial detail left to recover. `ratioAt` is consulted
  * only for a LABEL — a shape has no cap height to suggest.
+ *
+ * `tool` is HANDED IN, not resolved here (#305): this module is worker-side, where no store and
+ * no registry is visible. The caller resolves it on the main thread (`jobTool`) or from the list
+ * it passed (`toolForJob`) and the same `Tool` object then feeds the measurement, the messages
+ * and the CAM, so a finding can never name a cutter the sweep did not use.
  */
 export function engravabilityFindings(
   job: EngraveJob,
   m: LabelEngravability[],
   ratioAt: LabelRatioAt,
+  tool: Tool | null,
 ): JobFinding[] {
   const findings: JobFinding[] = [];
-  const tool = jobTool(job);
   const diameter = tool?.tipDiameter ?? tool?.diameter ?? null;
   const cutter = diameter === null ? 'the cutter' : `a ${diameter} mm cutter`;
 

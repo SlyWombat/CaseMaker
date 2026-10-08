@@ -14,6 +14,7 @@
 import * as Comlink from 'comlink';
 import type { Setup, MachineCalibration } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob } from '@/types/engraveJob';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { getToplevel } from './geometry/ManifoldRuntime';
@@ -95,13 +96,17 @@ const api = {
    * The engrave preview (#205): the stock cut to each label's depth, the pocket floors, the
    * vise jaws and the sacrificial material (#213). `null` when `gen` is stale. Every mesh
    * buffer is transferred.
+   *
+   * `tools` is the caller's tool registry snapshot (#305) and crosses by structured clone, like
+   * the `Tool` `simLoad` takes: the worker cannot see the app's module state, so the list it
+   * measures and recommends from has to be sent to it.
    */
-  async engravePreview(job: EngraveJob, gen: number): Promise<EngravePreview | null> {
+  async engravePreview(job: EngraveJob, tools: readonly ToolLibraryEntry[], gen: number): Promise<EngravePreview | null> {
     // Issue #180 — the preview typesets labels through the synchronous `resolveFont`, and the
     // bundled faces are static assets now, so load the keys this job's enabled labels need
     // first. A shapes-only job (or one with every label disabled/empty) passes `[]`.
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    const p = (await getPreviewer()).engravePreview(job, gen);
+    const p = (await getPreviewer()).engravePreview(job, tools, gen);
     if (!p) return null;
     return Comlink.transfer(p, buffersOf([p.stock, ...p.floors.map((f) => f.mesh), ...p.fixture.map((f) => f.mesh), ...p.sacrificial.map((s) => s.mesh)]));
   },
@@ -109,10 +114,15 @@ const api = {
    * Generate → verify, headless (#206). Typesets labels through the synchronous `resolveFont`,
    * so the keys this job's enabled labels need are loaded first (#180), exactly as
    * `engravePreview` does. Returns the exact `.nc` text plus the opened regions the oracle needs.
+   *
+   * `tool` is the RESOLVED cutter (#305), sent from the main thread for the same reason `tools`
+   * is above: no store and no registry is visible in here. `null` stops the pipeline at the
+   * feeds stage with the same message `tool-missing` produces, so a caller that got it wrong
+   * hears about it rather than getting a program cut with a phantom cutter.
    */
-  async engraveGenerate(job: EngraveJob, calibration?: MachineCalibration | null): Promise<EngraveGenerated> {
+  async engraveGenerate(job: EngraveJob, tool: Tool | null, calibration?: MachineCalibration | null): Promise<EngraveGenerated> {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    return runEngraveGenerate(await getToplevel(), job, calibration ?? null);
+    return runEngraveGenerate(await getToplevel(), job, tool, calibration ?? null);
   },
   /**
    * The volumetric oracle (#206 §3) against the program CURRENTLY loaded in the session. The

@@ -14,12 +14,18 @@
 import { create } from 'zustand';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
+import { getTools } from '@/engine/cnc/toolRegistry';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { useEngraveJobStore } from './engraveJobStore';
 
 export type EngravePreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export type EngravePreviewClient = {
-  engravePreview: (job: EngraveJob, gen: number) => Promise<EngravePreview | null>;
+  engravePreview: (
+    job: EngraveJob,
+    tools: readonly ToolLibraryEntry[],
+    gen: number,
+  ) => Promise<EngravePreview | null>;
 };
 
 const loadClient = async (): Promise<EngravePreviewClient> => {
@@ -58,7 +64,9 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
     set({ status: 'loading', error: null });
     try {
       const client = await clientLoader();
-      const preview = await client.engravePreview(job, mine);
+      // The registry snapshot read HERE, at request time, not at module load (#305): the list the
+      // worker measures and recommends from is the one the panel's picker is showing.
+      const preview = await client.engravePreview(job, getTools(), mine);
       if (mine !== seq) return; // superseded by a newer request
       // `preview === null` means the worker saw a newer generation already; keep the last one.
       if (preview) set({ preview, status: 'ready' });

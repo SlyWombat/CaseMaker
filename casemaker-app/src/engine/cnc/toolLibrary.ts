@@ -6,6 +6,11 @@
  * as the `;@MKR|TOOL` record (`Tool`), plus where each row came from. Plain data, with a Zod
  * schema so a list imported later is validated rather than trusted.
  *
+ * `TOOL_LIBRARY` is the `builtin` tier of the tool registry (#305) and stays one PERMANENTLY —
+ * the shipped default job names `flat-1.0` (`engrave/defaults.ts:120`), so a job has to resolve
+ * with no service at all, and a later tier must not be able to take that away. Resolving a key is
+ * `toolRegistry.resolveTool`, which is the only place a key becomes a `Tool`.
+ *
  * V1 sweeps FLAT end mills only. Nothing here enforces that: the refusal lives in
  * `cuttingRadiusForSweep` and applies to whatever tool is SELECTED, so a ball or a V-bit can
  * be listed (and one day swept) without anyone being able to simulate it as a flat end by
@@ -14,7 +19,7 @@
  */
 
 import { z } from 'zod';
-import { flatEndMill, type Tool } from './tool';
+import { flatEndMill } from './tool';
 
 const finiteOrNull = z.number().finite().nullable();
 
@@ -76,7 +81,11 @@ export const TOOL_LIBRARY: readonly ToolLibraryEntry[] = [
       halfAngle: 0,
       fluteLength: 12,
       shoulderLength: 12,
-      stickout: 0,
+      // A COLLARED bit: the stick-out is whatever the Bit Collar Installer set on it, and nobody
+      // has measured this one. The header's `sticklength=0` means "unset", the same statement the
+      // catalogue makes with an empty `cutterStickoutLength` (#305 design point 1) — so this is
+      // null, not the 0 that would put the collet nut at the tool tip once A2 measures the nut.
+      stickout: null,
       // The header has no such field, and Makera's catalogue does not state it (#220). Unknown,
       // so a job that drills with this cutter gets `plunge-unproven` rather than a silent plunge.
       centreCutting: null,
@@ -92,7 +101,5 @@ export const TOOL_LIBRARY: readonly ToolLibraryEntry[] = [
   },
 ];
 
-export function libraryTool(key: string): Tool | null {
-  const e = TOOL_LIBRARY.find((t) => t.key === key);
-  return e ? { ...e.tool } : null;
-}
+// Resolving a key is `toolRegistry.resolveTool` (#305) — this module owns the builtin tier and
+// its schema, and nothing else, so the one resolver has one home.

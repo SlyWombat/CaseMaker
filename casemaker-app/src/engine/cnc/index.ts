@@ -7,6 +7,9 @@ export * from './calibration';
 export * from './camera';
 export * from './fixture';
 export * from './toolLibrary';
+// #305 — the one resolver every consumer asks, over the built-ins plus whatever a later tier
+// supplies. Exported AFTER `toolLibrary` so its `resolveTool`/`getTools` are the names callers see.
+export * from './toolRegistry';
 export { setupFromHeader } from './setupFromHeader';
 export type { SetupFromHeader, HeaderDiagnostic, HeaderOriginCorner } from './setupFromHeader';
 export { buildTimeline, applyEvent, initialState, isRealToolChange, resolveMove, toolChangeMacro, tloCalibrateMacro, g28Clearance, DIAGNOSTIC_CAP } from './emulator/timeline';

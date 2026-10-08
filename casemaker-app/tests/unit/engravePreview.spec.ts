@@ -9,8 +9,8 @@
 import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
+import { preview, regions } from './helpers/engravePipeline';
 import { createEngravePreviewer, FLOOR_THICKNESS_MM } from '@/workers/sim/engravePreview';
-import { engraveRegions } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -43,8 +43,8 @@ function meshVolume(m: NodeMeshOutput): number {
 const previewer = createEngravePreviewer(tl);
 let gen = 0;
 /** One preview, on a fresh generation so nothing is ever stale. */
-function preview(job: EngraveJob) {
-  const p = previewer.engravePreview(job, ++gen);
+function buildPreview(job: EngraveJob) {
+  const p = preview(previewer, job, ++gen);
   if (!p) throw new Error('the previewer refused a fresh generation');
   return p;
 }
@@ -52,7 +52,7 @@ function preview(job: EngraveJob) {
 describe('engravePreview (#205)', () => {
   it('cuts the default job to Σ(openedArea × depth) of the uncut prism', () => {
     const job = defaultEngraveJob();
-    const p = preview(job);
+    const p = buildPreview(job);
     const uncut = job.stock.length * job.stock.width * job.stock.thickness;
     const expected = p.engravability.reduce((sum, row) => {
       const depth = job.labels.find((l) => l.id === row.labelId)?.depth ?? 0;
@@ -65,13 +65,13 @@ describe('engravePreview (#205)', () => {
   });
 
   it('returns one floor mesh per cut label, at that label’s own depth', () => {
-    const p = preview(defaultEngraveJob());
+    const p = buildPreview(defaultEngraveJob());
     expect(p.floors.map((f) => f.depth)).toEqual([2.0, 1.0, 0.5]);
     for (const floor of p.floors) expect(meshVolume(floor.mesh)).toBeGreaterThan(0);
   });
 
   it('draws the two vise jaws', () => {
-    const p = preview(defaultEngraveJob());
+    const p = buildPreview(defaultEngraveJob());
     expect(p.fixture.map((f) => f.id)).toEqual(['vise-fixed-jaw', 'vise-moving-jaw']);
     for (const jaw of p.fixture) expect(meshVolume(jaw.mesh)).toBeGreaterThan(0);
   });
@@ -79,7 +79,7 @@ describe('engravePreview (#205)', () => {
   it('leaves a label that is too deep out of the cut and reports it', () => {
     const job = defaultEngraveJob();
     job.labels = [{ ...job.labels[0]!, id: 'too-deep', text: 'DEEP', depth: 11.5 }];
-    const p = preview(job);
+    const p = buildPreview(job);
     const uncut = job.stock.length * job.stock.width * job.stock.thickness;
 
     expect(p.findings.some((f) => f.code === 'depth-exceeds-stock' && f.severity === 'error')).toBe(true);
@@ -114,7 +114,7 @@ describe('engravePreview (#205)', () => {
       },
     ];
 
-    const over = preview(job).findings.filter((f) => f.code === 'item-over-void');
+    const over = buildPreview(job).findings.filter((f) => f.code === 'item-over-void');
     expect(over).toHaveLength(1);
     expect(over[0]!.severity).toBe('warning');
     expect(over[0]!.labelId).toBe('over');
@@ -157,7 +157,7 @@ describe('engravePreview (#205)', () => {
         cornerRadius: 0,
       },
     ];
-    const over = preview(job).findings.filter((f) => f.code === 'item-over-void');
+    const over = buildPreview(job).findings.filter((f) => f.code === 'item-over-void');
     expect(over).toHaveLength(1);
     expect(over[0]!.labelId).toBe('tr');
   });
@@ -168,7 +168,7 @@ describe('engravePreview (#205)', () => {
     // measured cap-height suggestion (#201's suggestCapHeight, composed in the worker).
     job.labels = [{ ...job.labels[0]!, text: 'MAKER', size: 4, depth: 1 }];
     job.toolKey = 'flat-3.175x12-metal';
-    const p = preview(job);
+    const p = buildPreview(job);
     expect(p.recommendation.key).toBe('flat-1.0');
     expect(p.recommendation.compromise).toBe(true);
     expect(p.recommendation.reason).toMatch(/Try \d+ mm or more\.|Choose a smaller cutter\./);
@@ -195,7 +195,7 @@ describe('engravePreview (#205)', () => {
         diameter: 20,
       },
     ];
-    const p = preview(job);
+    const p = buildPreview(job);
     const hole = p.floors.find((f) => f.labelId === 'hole');
     expect(hole).toBeDefined();
     expect(hole!.depth).toBe(0.8);
@@ -218,7 +218,7 @@ describe('engravePreview (#205)', () => {
       height: 1.2,
       cornerRadius: 0,
     };
-    const p2 = preview({ ...job, toolKey: 'flat-1.0', labels: [], shapes: [sq] });
+    const p2 = buildPreview({ ...job, toolKey: 'flat-1.0', labels: [], shapes: [sq] });
     expect(p2.floors.some((f) => f.labelId === 'sq')).toBe(true);
     expect(p2.recommendation.compromise).toBe(true);
     expect(p2.recommendation.reason).toMatch(/loses/);
@@ -226,9 +226,9 @@ describe('engravePreview (#205)', () => {
 
   it('returns null when the generation is older than one already answered', () => {
     const job = defaultEngraveJob();
-    const fresh = previewer.engravePreview(job, 1000);
+    const fresh = preview(previewer, job, 1000);
     expect(fresh).not.toBeNull();
-    expect(previewer.engravePreview(job, 999)).toBeNull();
+    expect(preview(previewer, job, 999)).toBeNull();
   });
 });
 
@@ -241,8 +241,8 @@ describe('engravePreview — sacrificial material (#213)', () => {
   // latest generation to 1000, so a shared counter would make every `++gen` here stale.
   const pv = createEngravePreviewer(tl);
   let g = 0;
-  function preview(job: EngraveJob) {
-    const p = pv.engravePreview(job, ++g);
+  function buildPreview(job: EngraveJob) {
+    const p = preview(pv, job, ++g);
     if (!p) throw new Error('the previewer refused a fresh generation');
     return p;
   }
@@ -250,7 +250,7 @@ describe('engravePreview — sacrificial material (#213)', () => {
   it('draws no sacrificial bodies and keeps the jaws on the part with none', () => {
     const job = defaultEngraveJob();
     const L = job.stock.length;
-    const p = preview(job);
+    const p = buildPreview(job);
     expect(p.sacrificial).toEqual([]);
     // The fixed jaw's face is on x = 0; the moving jaw's is on x = L (the pre-#213 envelope).
     expect(p.fixture[0]!.mesh.bbox.max[0]).toBe(0);
@@ -261,7 +261,7 @@ describe('engravePreview — sacrificial material (#213)', () => {
     const job = defaultEngraveJob();
     job.sacrificial = presetJawStrips();
     const L = job.stock.length;
-    const p = preview(job);
+    const p = buildPreview(job);
 
     // The strips are drawn, one mesh per box, in the work frame: left X[-6, 0], right X[L, L+6].
     expect(p.sacrificial.map((s) => s.id)).toEqual(['sacrificial-left', 'sacrificial-right']);
@@ -280,7 +280,7 @@ describe('engravePreview — sacrificial material (#213)', () => {
     const job = defaultEngraveJob();
     job.sacrificial = presetPartOnBoard();
     const L = job.stock.length;
-    const p = preview(job);
+    const p = buildPreview(job);
 
     expect(p.sacrificial.map((s) => s.id)).toEqual(['sacrificial-under']);
     const under = p.sacrificial[0]!.mesh.bbox;
@@ -301,8 +301,8 @@ describe('engravePreview — drills and traces are in the picture (#288)', () =>
   // Its own previewer: the tests above pin the shared one's latest generation.
   const pv = createEngravePreviewer(tl);
   let g = 0;
-  function preview(job: EngraveJob) {
-    const p = pv.engravePreview(job, ++g);
+  function buildPreview(job: EngraveJob) {
+    const p = preview(pv, job, ++g);
     if (!p) throw new Error('the previewer refused a fresh generation');
     return p;
   }
@@ -321,7 +321,7 @@ describe('engravePreview — drills and traces are in the picture (#288)', () =>
   }
 
   /** `uncut − removed`, off the drawn mesh — the preview's own account of what it cut. */
-  function removedVolume(job: EngraveJob, p: ReturnType<typeof preview>): number {
+  function removedVolume(job: EngraveJob, p: ReturnType<typeof buildPreview>): number {
     return job.stock.length * job.stock.width * job.stock.thickness - meshVolume(p.stock);
   }
 
@@ -346,7 +346,7 @@ describe('engravePreview — drills and traces are in the picture (#288)', () =>
         through: false,
       },
     ];
-    const p = preview(job);
+    const p = buildPreview(job);
 
     // The control: a drill is not a region item, so `plan.engraves` never carried it.
     expect(toPartPlan(job).engraves.map((e) => e.id)).toEqual(['lbl']);
@@ -381,7 +381,7 @@ describe('engravePreview — drills and traces are in the picture (#288)', () =>
         enabled: true,
       },
     ];
-    const p = preview(job);
+    const p = buildPreview(job);
 
     // The control: nor is a trace — it is CAM'd by `generateTrace`, never pocketed as a region.
     expect(toPartPlan(job).engraves.map((e) => e.id)).toEqual(['lbl']);
@@ -435,10 +435,10 @@ describe('engravePreview — drills and traces are in the picture (#288)', () =>
       },
     ];
 
-    const cutIds = engraveRegions(tl, job).cuts.map((c) => c.id);
+    const cutIds = regions(tl, job).cuts.map((c) => c.id);
     expect(cutIds).toEqual(['lbl', 'hole', 'd1', 'tr']); // regions in plan order, then the traces
 
-    const p = preview(job);
+    const p = buildPreview(job);
     expect(p.floors.map((f) => f.labelId)).toEqual(cutIds);
     for (const floor of p.floors) expect(meshVolume(floor.mesh)).toBeGreaterThan(0);
   });
@@ -506,8 +506,8 @@ describe('engravePreview — declared under-surface voids (#271)', () => {
   // Its own previewer: the tests above pin the shared one’s latest generation.
   const pv = createEngravePreviewer(tl);
   let g = 0;
-  function preview(job: EngraveJob) {
-    const p = pv.engravePreview(job, ++g);
+  function buildPreview(job: EngraveJob) {
+    const p = preview(pv, job, ++g);
     if (!p) throw new Error('the previewer refused a fresh generation');
     return p;
   }
@@ -535,7 +535,7 @@ describe('engravePreview — declared under-surface voids (#271)', () => {
         cornerRadius: 0,
       },
     ];
-    const p = preview(job);
+    const p = buildPreview(job);
 
     expect(p.voids).toHaveLength(1);
     const v = p.voids[0]!;
@@ -571,7 +571,7 @@ describe('engravePreview — declared under-surface voids (#271)', () => {
         width: 6,
       },
     ];
-    const p = preview(job);
+    const p = buildPreview(job);
 
     // A disabled void reserves nothing, so it is not drawn — the same list `toPartPlan` filters.
     expect(p.voids.map((v) => v.id)).toEqual(['slot']);

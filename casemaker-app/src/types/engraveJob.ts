@@ -1,6 +1,7 @@
 import type { Mm } from './units';
 import type { TextFont, TextWeight, CustomFont } from './textLabel';
 import type { CutParams } from '@/engine/cnc/feeds';
+import type { Tool } from '@/engine/cnc/tool';
 
 /**
  * The CNC-2 job document (#200): a rectangular blank of wood held in the vise with text
@@ -509,8 +510,23 @@ export interface EngraveJob {
    * read `job.drills ?? []`.
    */
   drills?: EngraveDrill[];
-  /** Key into TOOL_LIBRARY. */
+  /**
+   * The key of the cutter this job is written for — a builtin (`flat-1.0`), or a later registry
+   * tier's key (`cat:`, `user:`, `inv:`). A PLAIN STRING, so no saved job has ever needed
+   * migrating when a tier was added (#305).
+   */
   toolKey: string;
+  /**
+   * The materialised cutter this job was written with (#305 design point 2) — the same
+   * provenance discipline the fixture obstacles use (decision 28), and the reason a job reopened
+   * while the catalogue service is absent can still be generated, verified and simulated.
+   *
+   * OPTIONAL, and absent until the cutter is picked: a document written before this field
+   * existed round-trips byte-for-byte. `jobTool` reads it FIRST, ahead of the registry entry
+   * `toolKey` names, so re-collaring a bit does not silently re-prove an old job at a new
+   * stick-out.
+   */
+  tool?: Tool | null;
   workholding: { kind: 'vise'; vise: ViseParams };
   /** Material that must remain under the deepest cut, mm. */
   minFloor: Mm;

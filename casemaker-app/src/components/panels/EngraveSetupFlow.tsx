@@ -1,6 +1,6 @@
 import { useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { createPortal } from 'react-dom';
-import { TOOL_LIBRARY } from '@/engine/cnc';
+import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import {
@@ -77,6 +77,9 @@ function FindingRow({ finding, testid }: { finding: JobFinding; testid: string }
 export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Element {
   const job = useEngraveJobStore((s) => s.job);
   const applySetup = useEngraveJobStore((s) => s.applySetup);
+  // #305 — the resolved list, not `TOOL_LIBRARY`. `body()` is a plain function called from this
+  // render, so the hook has to be here rather than beside the select it feeds.
+  const tools = useToolRegistry();
 
   // The answers are seeded once, from the job as it stands, so the flow is re-enterable and
   // "same as last job" is a no-op. They are a draft until Finish writes them.
@@ -219,7 +222,7 @@ export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Elem
               style={{ width: '100%' }}
               onChange={(e) => setAnswers((a) => withToolAnswer(a, e.target.value))}
             >
-              {TOOL_LIBRARY.map((e) => {
+              {tools.map((e) => {
                 const d = entryDiameter(e);
                 return (
                   <option key={e.key} value={e.key} title={e.provenance}>

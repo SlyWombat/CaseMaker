@@ -167,7 +167,7 @@ type JobResult = JobFiles | { ok: false };
  * pipeline stops; a stopped job is a document to fix, not a file to hand the machine.
  */
 function runJob(job: EngraveJob, outDir: string, opts: { writeJobDocument: boolean; note: string }): JobResult {
-  const generated = engraveGenerate(tl, job);
+  const generated = engraveGenerate(tl, job, jobTool(job));
   if (!generated.ok || generated.nc === null) {
     console.error(`\n${job.name}`);
     console.error(

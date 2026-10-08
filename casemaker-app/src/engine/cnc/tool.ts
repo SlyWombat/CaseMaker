@@ -63,6 +63,20 @@ export function shapeFromType(typeText: string): ToolShape {
   return 'unknown';
 }
 
+/**
+ * The file's stick-out, or null. `sticklength` is the exposed length the Bit Collar Installer set
+ * on the bit (#305 design point 1) — not a catalogue field, which is why Makera's own database
+ * leaves `cutterStickoutLength` empty. The file format writes `sticklength=0` for "unset" (Studio
+ * does it for every bit whose collar nobody measured), and a 0 mm stick-out is impossible for a
+ * cutter whose shoulder alone is 12 mm, so a non-positive value is UNKNOWN. It matters: the
+ * holder gate treats a null as "cannot be proven", while a 0 would put the modelled collet nut at
+ * the tool tip and manufacture `holder-into-fixture` errors out of nothing.
+ */
+function stickoutFromRecord(rec: MkrRecord): number | null {
+  const v = mkrNumber(rec, 'sticklength') ?? mkrNumber(rec, 'stickout');
+  return v !== null && v > 0 ? v : null;
+}
+
 /** Build a Tool from a `;@MKR|TOOL|...` record. Never throws; missing fields are null. */
 export function toolFromMkrRecord(rec: MkrRecord): Tool {
   const f = rec.fields;
@@ -81,7 +95,7 @@ export function toolFromMkrRecord(rec: MkrRecord): Tool {
     halfAngle: mkrNumber(rec, 'halfAngle') ?? mkrNumber(rec, 'halfangle'),
     fluteLength: mkrNumber(rec, 'flutelength'),
     shoulderLength: mkrNumber(rec, 'shoulderlength'),
-    stickout: mkrNumber(rec, 'sticklength') ?? mkrNumber(rec, 'stickout'),
+    stickout: stickoutFromRecord(rec),
     // The header says nothing about it, so a parsed tool is UNKNOWN, not "not centre-cutting".
     centreCutting: null,
   };

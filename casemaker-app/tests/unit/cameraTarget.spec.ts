@@ -6,9 +6,9 @@
 import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
+import { generate } from './helpers/engravePipeline';
 import { Z1 } from '@/engine/cnc/machine';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import {
   CAMERA_TARGET_MARGIN,
   cameraFiducialCutCount,
@@ -301,7 +301,7 @@ describe('cameraFiducialJob (#189)', () => {
 
   it('generates: the app accepts the job and writes a clean .nc', () => {
     const job = cameraFiducialJob(cameraTargetFor(), defaultEngraveJob());
-    const g = engraveGenerate(tl, job);
+    const g = generate(tl, job);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.nc).not.toBeNull();

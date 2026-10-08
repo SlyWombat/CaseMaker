@@ -105,6 +105,15 @@ see §7.3 for why probing is still the plan, and what would change that.
 (~12 mm by default) so that stickout is repeatable across tool changes. That is one of
 the three unquantified terms in §7.6's Z chain, and the machine ships with a jig for it.
 
+**So `Tool.stickout` is the exposure the collar was set to, and it is an installation
+property, not a catalogue one** (settled in #305, design point 1). Makera's catalogue carries
+`cutterStickoutLength` and stores `''` for the 3.175 mm flat — unset, the same statement a
+`.nc` header makes with `sticklength=0`, which therefore parses to `null` and never to `0`.
+The consequence to keep in mind everywhere: re-collaring or re-measuring a cutter changes the
+length a saved job was generated through, which is why a job snapshots the `Tool` it was
+written with rather than resolving it fresh. Bench task A2 measures it
+(`docs/bench/2026-10-bench-day-1.md`).
+
 **There is a Z1 Pro.** `Z1/QuickStart` is written throughout for "Makera Z1（Z1&Z1Pro）",
 but `t_MachineType` has only one `Makera Z1` row. Whether the Pro differs in any figure
 this document relies on is **unknown** — #184 should not hard-code a single Z1 identity
@@ -210,6 +219,8 @@ Studio's `.nc` carries a self-documenting header. We emit the same (see
                                                  ; turns out to require Studio's
 ;@MKR|UNIT|value=mm
 ;@MKR|TOOL|number=|id=|name=|type=|diameter=|...
+;@CM|TOOL|key=<our registry key>   ; ours, not Studio's — see "Naming our own
+                                   ; cutter" below; it follows the TOOL line it names
 ;@MKR|TIME|seconds=
 ;@MKR|TOOLPATH|number=|tool_number=|name=
 ;@MKR|END
@@ -232,6 +243,41 @@ shows the setup state — origin, probe, assists — not stock, tool or time. It
 Studio and its fields are real, but no display surface for them has been found, and the
 `CAM|id=` fallback question (#173) can only be settled by **running** a job with our id and
 seeing whether anything objects — not by reading a screen.
+
+### Naming our own cutter: the `;@CM|TOOL` line
+
+Studio's `TOOL` record names a catalogue cutter by `id=` — the catalogue's `g_ID`
+(`/Makera-Parity.md` §3.2). A **clone** (a cutter the user owns, materialised rather than
+pointed at a base row, #212) must not inherit that id, so the post writes `id=` empty there.
+A file posted with a clone therefore names no cutter any tier can identify, and matching falls
+to shape + diameter — which **already ties for two 3.175 mm flats**.
+
+So the post writes one extra line, immediately after the `;@MKR|TOOL` line it belongs to:
+
+```
+;@CM|TOOL|key=<toolKey>
+```
+
+- **`;@CM|` is our prefix, not Makera's.** To everything else it is a `;` comment: Studio
+  ignores it, and our own lexer reads any `;`-start that is not `;@MKR|` as a comment
+  (`gcode/lexer.ts:44`), so it becomes no header record and raises no diagnostic. It is
+  deliberately *not* a `;@MKR|` tag: that namespace is the vendor's, a tag we invented in it
+  could collide with one they add, and a vendor reading our file would be reading a record
+  that is not theirs.
+- **`key=` is the registry key**, namespaced as everywhere else (`flat-1.0`, `cat:…`,
+  `user:…`, `inv:…`) — the same string `EngraveJob.toolKey` holds and
+  `ToolLibraryEntrySchema.key` validates.
+- **One key per line, `|`-terminated like the rest.** The reader takes everything after
+  `key=` to the end of the line, so `=` inside a key is unambiguous and `|` is not: the
+  writer **refuses a key containing `|`** rather than escaping it. Keys are ours to generate
+  (`ToolLibraryEntrySchema.key` is only `min(1)`), so this is a guard, not a feature.
+- **Read back in this order: this key → `id=` (`g_ID`) → shape + diameter.** `matchRegistryTool`
+  gained the `id=` step in #305; the key step is #309's, and this line is why that step has to
+  come FIRST — an `id=` that a clone could not carry cannot outrank a key we wrote ourselves.
+- **The key only, on purpose.** The `;@MKR|TOOL` record beside it already carries the whole
+  geometry, and `sticklength=` already carries the installed stick-out, so a second copy here
+  would be a second thing to keep true. (The format is settled here because #309 depends on it;
+  nothing writes the line yet.)
 
 ---
 

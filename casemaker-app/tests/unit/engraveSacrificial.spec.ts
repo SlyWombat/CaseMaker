@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
-import { engraveGenerate, engraveRegions } from '@/workers/sim/engraveGenerate';
+import { generate, regions } from './helpers/engravePipeline';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import { noneSacrificial, presetJawStrips } from '@/engine/cnc/sacrificial';
@@ -86,14 +86,14 @@ describe('an item may run over an edge onto sacrificial material (#213 §3)', ()
   };
 
   it('refuses it on bare stock: item-outside-stock, stopped at findings', () => {
-    const g = engraveGenerate(tl, overEdge());
+    const g = generate(tl, overEdge());
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.findings.some((f) => f.code === 'item-outside-stock' && f.severity === 'error')).toBe(true);
   });
 
   it('generates and verifies it cleanly with 6 mm strips between the jaws', () => {
-    const g = engraveGenerate(tl, overEdge({ sacrificial: presetJawStrips() }));
+    const g = generate(tl, overEdge({ sacrificial: presetJawStrips() }));
     expect(g.errors).toEqual([]);
     expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
     expect(g.ok).toBe(true);
@@ -105,7 +105,7 @@ describe('an item may run over an edge onto sacrificial material (#213 §3)', ()
   });
 
   it('still refuses it when it runs past the strip too', () => {
-    const g = engraveGenerate(tl, overEdge({ sacrificial: presetJawStrips(), labels: [
+    const g = generate(tl, overEdge({ sacrificial: presetJawStrips(), labels: [
       { ...overEdge().labels[0]!, position: { x: 110, y: 30 } },
     ] }));
     expect(g.ok).toBe(false);
@@ -114,9 +114,9 @@ describe('an item may run over an edge onto sacrificial material (#213 §3)', ()
   });
 
   it('the supported footprint the geometry check reads is the part outline with no material', () => {
-    const plan = engraveRegions(tl, overEdge()).plan;
+    const plan = regions(tl, overEdge()).plan;
     // With no sacrificial material, `supported` IS the part outline: same area, same bounds.
-    const bare = engraveRegions(tl, job()).plan.stock;
+    const bare = regions(tl, job()).plan.stock;
     expect(bare.supported).toEqual(bare.outline);
     expect(plan.stock.supported.kind).toBe('p-rect');
   });

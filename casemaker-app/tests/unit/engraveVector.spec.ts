@@ -8,11 +8,11 @@
 import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
+import { generate } from './helpers/engravePipeline';
 import { itemOperationName, itemProfile, resolveItems, toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
-import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { createSimSession } from '@/workers/sim/session';
 import { Z1 } from '@/engine/cnc/machine';
 import { executeProfile } from '@/workers/geometry/evaluateOp';
@@ -185,7 +185,7 @@ describe('EngraveVectorShape (#217): end to end', () => {
       shapes: [],
       vectors: [vector([squareRing(0, 0, 10)], 'NonZero', { depth: 1 })],
     };
-    const g = engraveGenerate(tl, job);
+    const g = generate(tl, job);
     expect(
       g.nc,
       JSON.stringify({ stage: g.stage, errors: g.errors, findings: g.findings }),

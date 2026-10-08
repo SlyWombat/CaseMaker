@@ -10,7 +10,7 @@
  */
 
 import { create } from 'zustand';
-import { parseGcode, setupFromHeader, stubSetup, TOOL_LIBRARY, Z1 } from '@/engine/cnc';
+import { getTools, parseGcode, setupFromHeader, stubSetup, Z1 } from '@/engine/cnc';
 import { toolFromMkrRecord, type Tool } from '@/engine/cnc/tool';
 import { rectProfile } from '@/engine/compiler/profile';
 import type { Setup, StartingTool } from '@/engine/cnc';
@@ -37,7 +37,7 @@ export interface SimSetupState {
   gcodeText: string | null;
   stock: SimStock;
   stockSource: { length: FieldSource; width: FieldSource; thickness: FieldSource };
-  /** Key into `TOOL_LIBRARY`; null = "tool required". */
+  /** A tool registry key (#305); null = "tool required". */
   toolKey: string | null;
   toolSource: FieldSource | null;
   headerDiagnostics: SimHeaderDiagnostic[];
@@ -69,11 +69,28 @@ function cuttingDiameter(tool: Tool): number | null {
   return tool.tipDiameter ?? tool.diameter;
 }
 
-/** The `TOOL_LIBRARY` entry matching a header tool by shape and cutting diameter (within 0.01 mm). */
-function matchLibraryTool(tool: Tool): string | null {
+/**
+ * The registry entry matching a header tool (#305). The header's `id=` is the catalogue's `g_ID`
+ * (`/Makera-Parity.md` §3.2), so it is tried FIRST: shape + diameter alone ties for two 3.175 mm
+ * flats and would pick whichever came first in the list. The id is what the file itself asserts
+ * the cutter was — and a clone may not inherit it (#212), which is exactly why #309 has to add a
+ * step above this one rather than below it.
+ *
+ * Falls back to shape + cutting diameter within 0.01 mm — the rule `cuttingRadiusForSweep` uses,
+ * and the only one that can match a file written for a cutter no tier knows.
+ *
+ * #309 prepends one step: a Case Maker comment line naming our key, for a clone the post cannot
+ * give a vendor `g_ID` to (design point 3).
+ */
+function matchRegistryTool(tool: Tool): string | null {
+  const entries = getTools();
+  if (tool.id !== null) {
+    const byId = entries.find((e) => e.tool.id !== null && e.tool.id === tool.id);
+    if (byId) return byId.key;
+  }
   const d = cuttingDiameter(tool);
   if (d === null) return null;
-  const entry = TOOL_LIBRARY.find((e) => {
+  const entry = entries.find((e) => {
     if (e.tool.shape !== tool.shape) return false;
     const ed = cuttingDiameter(e.tool);
     return ed !== null && Math.abs(ed - d) <= 0.01;
@@ -100,7 +117,7 @@ export const useSimSetupStore = create<SimSetupState>()((set) => ({
     }
 
     const toolRecord = parsed.header?.records.find((r) => r.tag === 'TOOL');
-    const toolKey = toolRecord ? matchLibraryTool(toolFromMkrRecord(toolRecord)) : null;
+    const toolKey = toolRecord ? matchRegistryTool(toolFromMkrRecord(toolRecord)) : null;
 
     set({
       fileName: name,

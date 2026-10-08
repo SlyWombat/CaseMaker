@@ -5,7 +5,8 @@
 import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
-import { engraveGenerate, engraveRegions, frameCorners } from '@/workers/sim/engraveGenerate';
+import { generate, regions } from './helpers/engravePipeline';
+import { frameCorners } from '@/workers/sim/engraveGenerate';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { CAM_ID, CAM_NAME } from '@/engine/cnc/post/z1';
 import { version as APP_VERSION } from '../../package.json';
@@ -27,8 +28,8 @@ describe('engraveGenerate with a saved machine frame (#297)', () => {
   it('still produces a clean program, and the same .nc, under the saved frame', () => {
     // The frame moves where M6, G28 and the probe go IN MACHINE COORDINATES. It must not move a
     // single work-coordinate cut, so the text a user saves is the same bytes either way.
-    const without = engraveGenerate(tl, defaultEngraveJob());
-    const withFrame = engraveGenerate(tl, defaultEngraveJob(), read.calibration);
+    const without = generate(tl, defaultEngraveJob());
+    const withFrame = generate(tl, defaultEngraveJob(), read.calibration);
     expect(withFrame.ok).toBe(true);
     expect(withFrame.nc).toBe(without.nc);
     expect(withFrame.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -36,15 +37,15 @@ describe('engraveGenerate with a saved machine frame (#297)', () => {
 
   it('ignores a frame saved for a different machine, exactly as the simulation does', () => {
     const other = { ...read.calibration, machineId: 'Z1-other' };
-    const g = engraveGenerate(tl, defaultEngraveJob(), other);
+    const g = generate(tl, defaultEngraveJob(), other);
     expect(g.ok).toBe(true);
-    expect(g.nc).toBe(engraveGenerate(tl, defaultEngraveJob()).nc);
+    expect(g.nc).toBe(generate(tl, defaultEngraveJob()).nc);
   });
 });
 
 describe('engraveGenerate (#206)', () => {
   it('takes the default job all the way to a clean .nc', () => {
-    const g = engraveGenerate(tl, defaultEngraveJob());
+    const g = generate(tl, defaultEngraveJob());
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.nc).not.toBeNull();
@@ -59,7 +60,7 @@ describe('engraveGenerate (#206)', () => {
   });
 
   it('stamps the real package version into the CAM header, never dev (#231 item 4)', () => {
-    const g = engraveGenerate(tl, defaultEngraveJob());
+    const g = generate(tl, defaultEngraveJob());
     expect(g.nc).not.toBeNull();
     // The exact header line the app writes; a headless run must match it byte for byte.
     expect(g.nc).toContain(`;@MKR|CAM|id=${CAM_ID}|name=${CAM_NAME}|v=${APP_VERSION}`);
@@ -68,8 +69,8 @@ describe('engraveGenerate (#206)', () => {
 
   it('is pure: the same job produces byte-identical nc', () => {
     const job = defaultEngraveJob();
-    const a = engraveGenerate(tl, job);
-    const b = engraveGenerate(tl, structuredClone(job) as EngraveJob);
+    const a = generate(tl, job);
+    const b = generate(tl, structuredClone(job) as EngraveJob);
     expect(a.nc).not.toBeNull();
     expect(a.nc).toBe(b.nc);
   });
@@ -80,7 +81,7 @@ describe('engraveGenerate (#206)', () => {
       ...job,
       labels: job.labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)),
     };
-    const g = engraveGenerate(tl, deep);
+    const g = generate(tl, deep);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.nc).toBeNull();
@@ -89,7 +90,7 @@ describe('engraveGenerate (#206)', () => {
 
   it('stops at feeds for a step-over past the cutter radius (#191)', () => {
     const job: EngraveJob = { ...defaultEngraveJob(), cutOverride: { stepOver: 0.6 } }; // radius is 0.5
-    const g = engraveGenerate(tl, job);
+    const g = generate(tl, job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('feeds');
     expect(g.nc).toBeNull();
@@ -99,7 +100,7 @@ describe('engraveGenerate (#206)', () => {
 
   it('stops at findings when the cutter is too large for the text', () => {
     const job: EngraveJob = { ...defaultEngraveJob(), toolKey: 'flat-3.175x12-metal' };
-    const g = engraveGenerate(tl, job);
+    const g = generate(tl, job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.nc).toBeNull();
@@ -116,13 +117,13 @@ describe('engraveGenerate (#206)', () => {
       ...base,
       workholding: { ...base.workholding, vise: { ...base.workholding.vise, stockProud: 10 } },
     };
-    const without = engraveRegions(tl, shallow).findings.map((f) => f.code);
+    const without = regions(tl, shallow).findings.map((f) => f.code);
     expect(without).toContain('vise-grip-shallow');
 
     // A 12 mm under-board with 10 mm overhang is what the jaws bear on, so the grip is the
     // board's thickness and the warning clears — only if the argument is threaded.
     const withBoard: EngraveJob = { ...shallow, sacrificial: presetPartOnBoard() };
-    const withCodes = engraveRegions(tl, withBoard).findings.map((f) => f.code);
+    const withCodes = regions(tl, withBoard).findings.map((f) => f.code);
     expect(withCodes).not.toContain('vise-grip-shallow');
   });
 });
@@ -177,7 +178,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
   });
 
   it('refuses a cut past the membrane, flagged at verify on the TEXT', () => {
-    const g = engraveGenerate(tl, job(1.5, [pocket]));
+    const g = generate(tl, job(1.5, [pocket]));
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('verify');
     // The text existed — it is the verifier, re-reading the posted bytes, that refused it.
@@ -189,14 +190,14 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
   });
 
   it('passes the same cut when it stays within the membrane', () => {
-    const g = engraveGenerate(tl, job(0.8, [pocket]));
+    const g = generate(tl, job(0.8, [pocket]));
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.verify!.findings.some((f) => f.code === 'cut-too-deep')).toBe(false);
   });
 
   it('passes the same cut when the job carries no void', () => {
-    const g = engraveGenerate(tl, job(1.5));
+    const g = generate(tl, job(1.5));
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
@@ -205,7 +206,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
   // #171: the warning is about OVERLAP, not depth, so a cut well within the membrane still gets
   // it — the blank is printed flipped, so there is nothing under that material at any depth.
   it('warns over the void at a safe depth, and names only the cut that covers it (#171)', () => {
-    const g = engraveGenerate(tl, job(0.8, [pocket]));
+    const g = generate(tl, job(0.8, [pocket]));
     expect(g.ok).toBe(true); // a warning is not a refusal
     const warnings = g.findings.filter((f) => f.code === 'item-over-void');
     expect(warnings).toHaveLength(1);
@@ -224,7 +225,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
       shapes: [shapeB(1.5)],
       keepOuts: [pocket],
     };
-    const g = engraveGenerate(tl, clear);
+    const g = generate(tl, clear);
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
@@ -249,7 +250,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
       shapes: [],
       keepOuts: [pocket],
     };
-    const g = engraveGenerate(tl, jobWithLabel);
+    const g = generate(tl, jobWithLabel);
     const over = g.findings.find((f) => f.code === 'item-over-void');
     expect(over).toBeTruthy();
     expect(over!.labelId).toBe('over');
@@ -287,7 +288,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
 
   it('warns for a TRACE crossing the void (#270)', () => {
     // x 35…65 across the pocket's 35…65, at its centreline.
-    const g = engraveGenerate(tl, {
+    const g = generate(tl, {
       ...defaultEngraveJob(),
       labels: [],
       shapes: [],
@@ -305,7 +306,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
 
   it('leaves the same trace unwarned when it is clear of the void (#270)', () => {
     // Moved to y 52, behind the pocket's 20…40 — the only difference is where the line sits.
-    const g = engraveGenerate(tl, {
+    const g = generate(tl, {
       ...defaultEngraveJob(),
       labels: [],
       shapes: [],
@@ -318,7 +319,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
   it('does NOT warn for a drill over the void — the #220 exemption, pinned (#270)', () => {
     // A drill into the pocket is a breach the VERIFIER owns (`cut-too-deep`); this warning is about
     // the finish of a pocketed floor, and a drilled hole has none. #270 asked for this to stay.
-    const g = engraveGenerate(tl, {
+    const g = generate(tl, {
       ...defaultEngraveJob(),
       labels: [],
       shapes: [],
@@ -354,7 +355,7 @@ describe('a trace item reaches the program (#287)', () => {
   };
 
   it('emits an operation for the trace, appended after the region operations', () => {
-    const g = engraveGenerate(tl, jobWithTrace());
+    const g = generate(tl, jobWithTrace());
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     // One label region + one trace: the trace is not silently dropped.
@@ -369,7 +370,7 @@ describe('a trace item reaches the program (#287)', () => {
   });
 
   it('predicts the trace cutter SWEEP, or the oracle would read its own groove as an over-cut', () => {
-    const g = engraveGenerate(tl, jobWithTrace());
+    const g = generate(tl, jobWithTrace());
     // A 30 mm capsule on a 1.0 mm cutter: 30 + π·0.5² ≈ 30.785 mm², minus the polygonisation of
     // the two round caps — so a band, not a closed form to the last digit.
     const trace = g.predicted.find((p) => Math.abs(p.depth - 0.8) < 1e-9);
@@ -386,7 +387,7 @@ describe('a trace item reaches the program (#287)', () => {
   it('leaves a job with no traces alone', () => {
     // The identity the byte-identity of every pre-#287 program rests on: no trace, no extra
     // operation, no extra predicted level.
-    const g = engraveGenerate(tl, defaultEngraveJob());
+    const g = generate(tl, defaultEngraveJob());
     expect(g.cam!.operations).toBe(3);
     expect(g.predicted).toHaveLength(3);
     expect(g.nc).not.toContain('Trace');
@@ -397,7 +398,7 @@ describe('a trace item reaches the program (#287)', () => {
   // cut lands: a trace-only job (no region items at all — which the post used to refuse outright)
   // must carry the trace's own endpoints at the item's depth, negative Z.
   it('cuts the trace where the item says, at the item depth', () => {
-    const g = engraveGenerate(tl, {
+    const g = generate(tl, {
       ...defaultEngraveJob(),
       labels: [],
       shapes: [],
@@ -459,7 +460,7 @@ describe('the frame file (#244)', () => {
   });
 
   it('produces a verified frame program beside a clean job', () => {
-    const g = engraveGenerate(tl, defaultEngraveJob());
+    const g = generate(tl, defaultEngraveJob());
     expect(g.ok).toBe(true);
     expect(g.frameNc).not.toBeNull();
     expect(g.frameNc!.startsWith(';@MKR|BEGIN')).toBe(true);
@@ -479,7 +480,7 @@ describe('the frame file (#244)', () => {
       ...defaultEngraveJob(),
       labels: defaultEngraveJob().labels.map((l, i) => (i === 0 ? { ...l, depth: 11.5 } : l)),
     };
-    const g = engraveGenerate(tl, deep);
+    const g = generate(tl, deep);
     expect(g.ok).toBe(false);
     expect(g.frameNc).toBeNull();
     expect(g.frameVerify).toBeNull();

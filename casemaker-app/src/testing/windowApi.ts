@@ -30,7 +30,7 @@ import { useRunRecordStore } from '@/store/runRecordStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
-import { libraryTool } from '@/engine/cnc/toolLibrary';
+import { resolveTool } from '@/engine/cnc/toolRegistry';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { stubSetup, Z1 } from '@/engine/cnc';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -397,7 +397,7 @@ export function installCaseMakerTestApi(): void {
     },
     async simRun() {
       const setupState = useSimSetupStore.getState();
-      const tool = setupState.toolKey ? libraryTool(setupState.toolKey) : null;
+      const tool = setupState.toolKey ? resolveTool(setupState.toolKey) : null;
       if (!setupState.gcodeText || !tool) return;
       // Subscribe BEFORE loading: `loadProgram` sets `loading` synchronously and only reaches a
       // terminal status across a worker round-trip, so no transition can be missed from here on.

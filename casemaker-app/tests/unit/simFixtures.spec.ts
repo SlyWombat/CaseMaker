@@ -15,7 +15,7 @@ import { tl } from './helpers/manifoldExec';
 import { createSimSession, type SimLoadOk } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { capsuleArea } from '@/workers/geometry/sweep';
-import { parseGcode, setupFromHeader, stubSetup, Z1, libraryTool, type Setup } from '@/engine/cnc';
+import { parseGcode, setupFromHeader, stubSetup, Z1, resolveTool, type Setup } from '@/engine/cnc';
 import { toolFromMkrRecord, type Tool } from '@/engine/cnc/tool';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 
@@ -126,7 +126,7 @@ describe('#199 fixture: three-strokes.nc is three strokes, nothing else', () => 
     expect(tool.shape).toBe('flat');
     expect(tool.tipDiameter).toBe(3.175);
     expect(tool.diameter).toBe(3.175);
-    const lib = libraryTool('flat-3.175x12-metal');
+    const lib = resolveTool('flat-3.175x12-metal');
     expect(lib).not.toBeNull();
     expect(lib?.tipDiameter).toBe(tool.tipDiameter);
     expect(lib?.shape).toBe(tool.shape);
