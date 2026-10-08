@@ -40,7 +40,8 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
   await page.getByTestId('engrave-setup-close').click();
   await expect(page.getByTestId('engrave-setup-flow')).toHaveCount(0);
 
-  // The blank's rail: Export and the two CNC panels, and nothing board-shaped.
+  // The blank's rail: Part, Export and the two CNC panels, and nothing board-shaped.
+  await expect(page.getByTestId('sidebar-button-part')).toBeVisible();
   await expect(page.getByTestId('sidebar-button-export')).toBeVisible();
   await expect(page.getByTestId('sidebar-button-cnc-engrave')).toBeVisible();
   await expect(page.getByTestId('sidebar-button-cnc-sim')).toBeVisible();
@@ -68,6 +69,28 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
     window.__caseMaker!.getSceneGraph().map((n) => n.id),
   );
   expect(graph).toEqual(['blank']);
+
+  // #282 — the blank's own parameters, editable at last. The corner radius is the one #282 called
+  // unreachable by ANY route: no bridge carried it, and no section could hold it.
+  await page.getByTestId('sidebar-button-part').click();
+  await expect(page.getByTestId('part-panel')).toBeVisible();
+  await expect(page.getByTestId('blank-corner-radius')).toHaveValue('3');
+
+  await page.getByTestId('blank-corner-radius').fill('12');
+  await expect(page.getByTestId('part-summary')).toContainText('R12');
+  await page.evaluate(async () => {
+    await window.__caseMaker!.waitForIdle();
+  });
+  // Still one piece, and a rounded one: the radius removed no geometry, it added facets.
+  const rounded = await page.evaluate(() =>
+    window.__caseMaker!.getSceneGraph().map((n) => n.id),
+  );
+  expect(rounded).toEqual(['blank']);
+  await expect(page.getByTestId('part-summary')).toContainText('100 × 60 × 12');
+
+  // ...and an impossible one is a stated reason, not a blank panel.
+  await page.getByTestId('blank-corner-radius').fill('40');
+  await expect(page.getByTestId('part-problem')).toContainText('too big for a 100 × 60 mm blank');
 });
 
 test('the wizard opens over an empty welcome screen and closes without making anything', async ({ cm, page }) => {

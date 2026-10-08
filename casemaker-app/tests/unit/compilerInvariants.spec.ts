@@ -5,6 +5,7 @@ import { listBuiltinBoardIds } from '@/library';
 import { TEMPLATES } from '@/library/templates';
 import { computeShellDims } from '@/engine/compiler/caseShell';
 import { aabbOfOp } from '@/engine/compiler/buildPlan';
+import { seatingLedge } from '@/engine/compiler/toolbox';
 import type { BuildOp, BuildPlan, Profile } from '@/engine/compiler/buildPlan';
 import type { Project } from '@/types';
 
@@ -122,6 +123,14 @@ function isBlank(build: () => Project): boolean {
   return build().case.blank?.enabled === true;
 }
 
+/** The stacking-toolbox archetype (#155) is a bin and a lid that register on
+ * each other — no board, no shell; toolbox.spec.ts owns its geometry.
+ * Invariant 13 pins the node set and the print-orientation contract here
+ * alongside the other archetypes. */
+function isToolbox(build: () => Project): boolean {
+  return build().case.toolbox?.enabled === true;
+}
+
 describe('compiler invariants (#58) — matrix of boards × templates', () => {
   const allCases = projectsToTest();
   const cases = allCases.filter(
@@ -130,13 +139,15 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
       !isRack(c.build) &&
       !isBadge(c.build) &&
       !isInsert(c.build) &&
-      !isBlank(c.build),
+      !isBlank(c.build) &&
+      !isToolbox(c.build),
   );
   const standCases = allCases.filter((c) => isStand(c.build));
   const rackCases = allCases.filter((c) => isRack(c.build));
   const badgeCases = allCases.filter((c) => isBadge(c.build));
   const insertCases = allCases.filter((c) => isInsert(c.build));
   const blankCases = allCases.filter((c) => isBlank(c.build));
+  const toolboxCases = allCases.filter((c) => isToolbox(c.build));
 
   describe('Invariant 1: BuildPlan emits at LEAST shell + lid; optionally extra named parts', () => {
     // Some templates legitimately add extra top-level nodes:
@@ -352,6 +363,42 @@ describe('compiler invariants (#58) — matrix of boards × templates', () => {
           expect(bb.min[0] + bb.max[0]).toBeCloseTo(0, 6);
           expect(bb.min[1] + bb.max[1]).toBeCloseTo(0, 6);
         }
+      });
+    }
+  });
+
+  // Stacking-toolbox archetype (#155): a bin and a lid, emitted in ASSEMBLY
+  // space as `buildRackNodes` does. The bin is the bottom module, so it sits on
+  // the bed at z = 0 and nothing hangs below it — the seating plane IS the
+  // print-bed face for this archetype, which is what makes a below-the-plate
+  // skirt impossible and is the reason the registration is a foot. The lid is
+  // the module that seats on the bin, so it is NOT grounded: it belongs at the
+  // bin's seating ledge, and pinning that here is what stops a future refactor
+  // from dropping it back to the origin where it renders inside the bin's foot.
+  describe('Invariant 13: toolbox archetype emits a seated bin and lid', () => {
+    for (const c of toolboxCases) {
+      it(`${c.label}: bin grounded on the bed, lid seated on its ledge`, () => {
+        const project = c.build();
+        const plan = compileProject(project);
+        expect(plan.nodes.map((n) => n.id)).toEqual(['toolbox-bin', 'toolbox-lid']);
+        for (const n of plan.nodes) {
+          assertWellFormed(n.op, `${c.label} ${n.id}`);
+          const bb = aabbOfOp(n.op)!;
+          // Centred on the origin, so the module's own plan is its footprint.
+          expect(bb.min[0] + bb.max[0]).toBeCloseTo(0, 6);
+          expect(bb.min[1] + bb.max[1]).toBeCloseTo(0, 6);
+          expect(bb.max[2] - bb.min[2]).toBeGreaterThan(0);
+        }
+        const [bin, lid] = plan.nodes.map((n) => aabbOfOp(n.op)!);
+        expect(bin!.min[2]).toBeGreaterThanOrEqual(-0.01);
+        expect(bin!.min[2]).toBeLessThanOrEqual(0.01);
+        const seat = seatingLedge(project.case.toolbox!.height);
+        expect(lid!.min[2]).toBeCloseTo(seat.z, 6);
+        expect(lid!.min[2]).toBeGreaterThanOrEqual(0);
+        // The lid seats INSIDE the bin's plan and rises above the bin's rim —
+        // the 4 mm an empty module's foot does not reach.
+        expect(lid!.max[2]).toBeGreaterThan(bin!.max[2]);
+        expect(lid!.max[2] - lid!.min[2]).toBeLessThan(bin!.max[2] - bin!.min[2]);
       });
     }
   });

@@ -9,11 +9,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { StartWizard } from '@/components/welcome/StartWizard';
-import { setMachineProbeLoader, type MachineProbeClient } from '@/platform/machineProbe';
+import { setMachineProbeLoader, type ConfigReadSummary, type MachineProbeClient } from '@/platform/machineProbe';
+import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { createDefaultProject, useProjectStore } from '@/store/projectStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
 import { useViewportStore } from '@/store/viewportStore';
 
@@ -23,11 +25,25 @@ vi.mock('@/engine/jobs/JobScheduler', () => ({ scheduleImmediate: vi.fn(async ()
 
 function fakeClient(over: Partial<MachineProbeClient> = {}): MachineProbeClient {
   return {
-    discover: async () => [],
-    identify: async () => ({ ip: '192.168.10.43', mac: 'aa:bb:cc:dd:ee:ff' }),
-    status: async () => ({ ok: true, text: 'Idle' }),
-    ...over,
+    discover: over.discover ?? (async () => []),
+    identify: over.identify ?? (async () => ({ ip: '192.168.10.43', mac: 'aa:bb:cc:dd:ee:ff' })),
+    status: over.status ?? (async () => ({ ok: true, text: 'Idle' })),
+    // A machine that also answers its own frame (#279), as the bench Z1 does: the wizard's check
+    // reads it, and these tests assert what the panel then says about which frame is in force.
+    readConfig: over.readConfig ?? (async (_target, keys) => answersFor(keys)),
   };
+}
+
+/** The bench machine's answers for `keys`; anything the transcript does not carry is a refusal. */
+function answersFor(keys: readonly string[]): ConfigReadSummary {
+  const values = new Map<string, string>();
+  const failures: ConfigReadSummary['failures'] = [];
+  for (const key of keys) {
+    const value = Z1_FRAME_REPLIES[key];
+    if (value !== undefined) values.set(key, value);
+    else failures.push({ key, reason: 'not-in-config', detail: 'no answer for this key' });
+  }
+  return { values, failures };
 }
 
 function useClient(client: MachineProbeClient): void {
@@ -37,6 +53,9 @@ function useClient(client: MachineProbeClient): void {
 beforeEach(() => {
   cleanup();
   resetMachineStore();
+  // The check writes the machine's own frame into settings (#279), so each test starts with no
+  // saved frame rather than inheriting the previous one's.
+  useSettingsStore.getState().resetSettings();
   resetStartWizard();
   useProjectStore.setState({ project: createDefaultProject('rpi-4b'), welcomeMode: true });
   useViewportStore.setState({ activeSidebarSection: null, selection: null });
@@ -76,6 +95,50 @@ describe('#280 — step 1, the machine check', () => {
     expect(screen.getByTestId('start-wizard-machine-profile').textContent).toContain('Makera Z1');
     expect(screen.getByTestId('start-wizard-machine-profile').textContent).toContain('13000 rpm');
     expect(screen.queryByTestId('start-wizard-machine-unknown')).toBeNull();
+  });
+
+  it("saves the machine's own frame and says which frame is in force (#279)", async () => {
+    useClient(
+      fakeClient({
+        discover: async () => [
+          { name: 'Makera_Z1_010290', host: '192.168.10.43', port: 2222, busy: false },
+        ],
+      }),
+    );
+    render(<StartWizard />);
+    fireEvent.click(screen.getByTestId('start-wizard-check'));
+
+    await screen.findByTestId('start-wizard-machine-state');
+    const frame = screen.getByTestId('start-wizard-machine-frame');
+    expect(frame.getAttribute('data-state')).toBe('machine-calibrated-frame');
+    expect(frame.textContent).toContain('192.168.10.43');
+
+    // Saved with its provenance, and with the MACHINE's numbers rather than the vendor's: the
+    // bench Z1's anchor1 is 1.51 mm from `configZ1.default`, which is the whole of #279.
+    const saved = useSettingsStore.getState().machineCalibration;
+    expect(saved?.machineId).toBe('Z1');
+    expect(saved?.frame.anchor1).toEqual([-190.89, -193.83]);
+  });
+
+  it('warns that the vendor’s defaults are in force when the frame could not be read (#279)', async () => {
+    useClient(
+      fakeClient({
+        discover: async () => [
+          { name: 'Makera_Z1_010290', host: '192.168.10.43', port: 2222, busy: false },
+        ],
+        readConfig: async () => {
+          throw new Error('connect timeout');
+        },
+      }),
+    );
+    render(<StartWizard />);
+    fireEvent.click(screen.getByTestId('start-wizard-check'));
+
+    await screen.findByTestId('start-wizard-machine-state');
+    expect(screen.getByTestId('start-wizard-machine-frame').getAttribute('data-state')).toBe(
+      'machine-vendor-frame',
+    );
+    expect(useSettingsStore.getState().machineCalibration).toBeUndefined();
   });
 
   it('reports an unknown machine as unknown, with no numbers', async () => {

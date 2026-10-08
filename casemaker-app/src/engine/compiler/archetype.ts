@@ -12,13 +12,18 @@ import type { Project } from '@/types';
  *
  * `shell` is the default: the board-in-a-box path the other three bypass.
  */
-export type Archetype = 'rack' | 'stand' | 'badge' | 'insert' | 'blank' | 'shell';
+export type Archetype = 'rack' | 'stand' | 'toolbox' | 'badge' | 'insert' | 'blank' | 'shell';
 
 /**
- * The archetype a project compiles to. Precedence is rack > stand > badge >
- * insert > blank > shell — each archetype is mutually exclusive by construction
- * (only one `enabled` flag is ever set by the UI), so the order only matters for
- * a hand-edited project that sets two.
+ * The archetype a project compiles to. Precedence is rack > stand > toolbox >
+ * badge > insert > blank > shell — each archetype is mutually exclusive by
+ * construction (only one `enabled` flag is ever set by the UI), so the order
+ * only matters for a hand-edited project that sets two.
+ *
+ * `toolbox` (#155) sits between the two established assemblies and the
+ * board-less parts: a stacking module is a full cavity-and-lid shape, so it
+ * beats badge/insert/blank, but rack and stand are richer multi-part
+ * assemblies and keep the top of the order.
  *
  * `blank` is checked LAST (#280) because it is the weakest claim on the
  * project: "just cut something" carries no board, no cavity and no lid, so any
@@ -40,6 +45,7 @@ export function derivedKind(project: Project | null | undefined): Archetype {
   const c = project?.case;
   if (c?.rack?.enabled) return 'rack';
   if (c?.stand?.enabled) return 'stand';
+  if (c?.toolbox?.enabled) return 'toolbox';
   if (c?.badge?.enabled) return 'badge';
   if (c?.insert?.enabled) return 'insert';
   if (c?.blank?.enabled) return 'blank';

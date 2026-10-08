@@ -43,6 +43,11 @@ export type SidebarSectionId =
   | 'rack'
   // #158 — the tool-insert holder archetype's editor.
   | 'insert'
+  // #155 — the stacking-toolbox archetype's editor.
+  | 'toolbox'
+  // #282 — the board-less part archetypes' editor (a name badge or a bare blank). In the rail
+  // only for those two, because `case.badge`/`case.blank` are the whole part.
+  | 'part'
   | 'ports'
   | 'hats'
   | 'features'

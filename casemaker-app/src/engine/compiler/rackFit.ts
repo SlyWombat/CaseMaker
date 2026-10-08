@@ -98,7 +98,7 @@ export function rectFitsBed(p0: number, q0: number, a0: number, b0: number): boo
   return need <= b + 1e-9;
 }
 
-interface PartFootprint {
+export interface PartFootprint {
   id: string;
   label: string;
   /** Bed footprint in the part's print orientation. */
@@ -106,6 +106,37 @@ interface PartFootprint {
   fy: number;
   /** Print height. */
   fz: number;
+}
+
+/**
+ * The generic per-part bed check (extracted for #155): one `printer-fit` error
+ * for every part that does not fit the bed, straight or diagonally, or that is
+ * too tall. Shared by every assembly archetype, so the rack and the toolbox
+ * report the same way — and so a third one is a list of footprints, not a
+ * third copy of this loop.
+ *
+ * Not exported from the barrel: it is rackFit's, and archetype fit modules
+ * import it directly.
+ */
+export function validateFootprints(
+  footprints: readonly PartFootprint[],
+  printer: PrinterVolume,
+): PlacementIssue[] {
+  const issues: PlacementIssue[] = [];
+  for (const part of footprints) {
+    const fitsBed = rectFitsBed(part.fx, part.fy, printer.x, printer.y);
+    const fitsZ = part.fz <= printer.z;
+    if (fitsBed && fitsZ) continue;
+    issues.push({
+      severity: 'error',
+      kind: 'printer-fit',
+      involves: [part.id],
+      message: `${part.label} needs ${Math.ceil(part.fx)}×${Math.ceil(part.fy)}×${Math.ceil(part.fz)} mm but the printer bed is ${printer.x}×${printer.y}×${printer.z} mm${
+        fitsBed ? '' : ' (even placed diagonally)'
+      }.`,
+    });
+  }
+  return issues;
 }
 
 /** Per-part print footprints for the current rack configuration. */
@@ -288,21 +319,10 @@ export function validateRackFit(
   const printer = printerOverride ?? rack.printer;
   if (!printer) return issues;
 
-  const blocked: string[] = [];
-  for (const part of rackPartFootprints(rack)) {
-    const fitsBed = rectFitsBed(part.fx, part.fy, printer.x, printer.y);
-    const fitsZ = part.fz <= printer.z;
-    if (fitsBed && fitsZ) continue;
-    blocked.push(part.label);
-    issues.push({
-      severity: 'error',
-      kind: 'printer-fit',
-      involves: [part.id],
-      message: `${part.label} needs ${Math.ceil(part.fx)}×${Math.ceil(part.fy)}×${Math.ceil(part.fz)} mm but the printer bed is ${printer.x}×${printer.y}×${printer.z} mm${
-        fitsBed ? '' : ' (even placed diagonally)'
-      }.`,
-    });
-  }
+  const footprints = rackPartFootprints(rack);
+  const fitIssues = validateFootprints(footprints, printer);
+  issues.push(...fitIssues);
+  const blocked = fitIssues.map((i) => i.message);
   if (blocked.length > 0) {
     const maxW = maxRackWidthForBed(printer.x, printer.y);
     const maxS = maxRackSlotsForBed(Math.min(dims.depth, maxW), printer.x, printer.y);

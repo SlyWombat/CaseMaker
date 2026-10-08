@@ -36,6 +36,7 @@ import {
 import { buildBadgeNodes } from './badge';
 import { buildInsertNodes } from './insert';
 import { buildBlankNodes } from './blank';
+import { buildToolboxNodes } from './toolbox';
 import { derivedKind } from './archetype';
 import { validatePlacements } from './placementValidator';
 import { getBuiltinHat } from '@/library/hats';
@@ -98,6 +99,21 @@ export function compileProject(project: Project): BuildPlan {
     }
     // Board isn't a finished enclosure module — fall through to the normal
     // shell so the user still gets geometry rather than an empty viewport.
+  }
+
+  // Stacking-toolbox archetype (issue #155): the project is a MODULE FAMILY —
+  // a bin and a shallow lid, each a single printed part, no cavity shell and no
+  // board. Like the badge, an unbuildable parameter set falls through rather
+  // than emptying the viewport.
+  if (kind === 'toolbox' && caseParams.toolbox) {
+    const toolboxNodes = buildToolboxNodes(caseParams.toolbox);
+    if (toolboxNodes) {
+      return {
+        nodes: toolboxNodes,
+        placementReport: validatePlacements(project),
+        smartCutoutDecisions: [],
+      };
+    }
   }
 
   // Name-badge archetype (issue #167): the whole project is the two-colour

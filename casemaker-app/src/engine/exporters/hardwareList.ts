@@ -181,6 +181,14 @@ export function hardwareForProject(project: Project): HardwareItem[] {
   // the badge, there is nothing here it would be honest to add.
   if (kind === 'blank') return items;
 
+  // ----- Stacking toolbox (issue #155) --------------------------------------
+  // Two printed modules that register on each other with no connector at all
+  // — that is the whole point of the archetype. No bosses, no lid screws, no
+  // board, no gasket, no inserts; anything below would bill the user for
+  // hardware that has nowhere to go. The only thing a toolbox could honestly
+  // want is a magnet or a latch, and v1 has neither.
+  if (kind === 'toolbox') return items;
+
   // ----- Screws into the bosses --------------------------------------------
   // Two independent retention paths share the same threaded boss/insert:
   //   (a) LID screws — when joint='screw-down': screw goes from the top

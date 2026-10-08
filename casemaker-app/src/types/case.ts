@@ -4,6 +4,7 @@ import type { RackParams } from './rack';
 import type { BadgeParams } from './badge';
 import type { InsertParams } from './insert';
 import type { BlankParams } from './blank';
+import type { ToolboxParams } from './toolbox';
 
 /**
  * Issue #153 — `FitVariant` lives with the snap types (`types/snap.ts`)
@@ -442,6 +443,19 @@ export interface CaseParameters {
    * non-positive dimension is the only way it yields no geometry.
    */
   blank?: BlankParams;
+  /**
+   * Issue #155 — stacking-toolbox archetype (see types/toolbox.ts). When
+   * enabled the project compiles to a MODULE FAMILY — a bin and a shallow lid,
+   * each a single printed part — instead of a shell+lid box. Like `rack` and
+   * `stand` it bypasses the whole shell/lid/boss/vent pipeline and needs no
+   * board data (the template uses `emptyBoard`).
+   *
+   * Precedence sits between the two established assemblies and the board-less
+   * parts: a toolbox is a full cavity-and-lid shape, so it outranks
+   * `badge`/`insert`/`blank`, while `rack`/`stand` are richer assemblies and
+   * win. `z = 0` is the seating plane, not the bed — see the type's own header.
+   */
+  toolbox?: ToolboxParams;
   /**
    * Issue #148 — offer a bolted split of the case SHELL when it is too big for
    * the project's bed. Absent/false means nothing is built: the split costs two

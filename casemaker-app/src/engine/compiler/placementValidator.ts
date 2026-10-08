@@ -17,6 +17,8 @@ import { resolvePrinter, validateRackFit } from './rackFit';
 import { derivedKind } from './archetype';
 import { badgeParamsProblem } from '@/types/badge';
 import { blankParamsProblem } from '@/types/blank';
+import { toolboxParamsProblem } from '@/types/toolbox';
+import { validateToolboxFit } from './toolboxFit';
 
 /**
  * Issue #37 — cross-cutting validation that catches overlap, off-PCB, and
@@ -46,7 +48,9 @@ export type PlacementIssueKind =
   // Badge archetype (issue #167): the badge's own parameter constraints.
   | 'badge-config'
   // Blank archetype (issue #280): the blank's own parameter constraints.
-  | 'blank-config';
+  | 'blank-config'
+  // Toolbox archetype (issue #155): the toolbox's own parameter constraints.
+  | 'toolbox-config';
 
 export interface PlacementIssue {
   severity: PlacementSeverity;
@@ -416,6 +420,24 @@ export function validatePlacements(project: Project): PlacementReport {
     const issues: PlacementIssue[] = problem
       ? [{ severity: 'error', kind: 'badge-config', involves: ['badge'], message: problem }]
       : [];
+    return {
+      issues,
+      errorCount: issues.filter((i) => i.severity === 'error').length,
+      warningCount: issues.filter((i) => i.severity === 'warning').length,
+    };
+  }
+
+  // Toolbox archetype (issue #155): nothing below applies either — no board,
+  // no shell, no port. Two things can be wrong here: the module's own
+  // parameters, and whether the module fits the printer it is going on. The
+  // second is a real thing to say up front, because a 300 mm bin on a 220 mm
+  // bed is a valid model that cannot be printed.
+  if (kind === 'toolbox' && project.case.toolbox) {
+    const toolbox = project.case.toolbox;
+    const problem = toolboxParamsProblem(toolbox);
+    const issues: PlacementIssue[] = problem
+      ? [{ severity: 'error', kind: 'toolbox-config', involves: ['toolbox'], message: problem }]
+      : validateToolboxFit(toolbox, resolvePrinter(project));
     return {
       issues,
       errorCount: issues.filter((i) => i.severity === 'error').length,

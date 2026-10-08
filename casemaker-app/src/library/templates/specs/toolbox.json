@@ -1,0 +1,35 @@
+{
+  "id": "toolbox",
+  "order": 178,
+  "name": "Stacking toolbox",
+  "description": "A bin and a lid that register on each other with no connector at all: the bin's inset base drops into the module below and lands on a seating ledge inside it, so a stack comes out square with nothing to bolt. Modules of different heights still line up, and the bin's floor takes a drop-in hole grid for pegs and partitions. 300 × 200 mm is the classic euro-container footprint and prints on a small bed.",
+  "estPrintMinutes": 240,
+  "projectName": "Toolbox",
+  "emptyBoard": {
+    "id": "toolbox-stock",
+    "name": "Stacking toolbox (no host board)",
+    "x": 300,
+    "y": 200
+  },
+  "casePatch": {
+    "toolbox": {
+      "enabled": true,
+      "width": 300,
+      "depth": 200,
+      "height": 110,
+      "grid": true
+    },
+    "bosses": {
+      "enabled": false,
+      "insertType": "self-tap",
+      "outerDiameter": 5,
+      "holeDiameter": 2.5
+    },
+    "ventilation": {
+      "enabled": false,
+      "pattern": "none",
+      "coverage": 0
+    }
+  },
+  "ports": "none"
+}

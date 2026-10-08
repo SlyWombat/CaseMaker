@@ -27,6 +27,7 @@ const TEMPLATE_IDS = [
   'guition-pocket-shelf',
   'tool-insert',
   'blank',
+  'toolbox',
 ] as const;
 
 /**
@@ -67,6 +68,9 @@ const ASSEMBLY_TEMPLATE_NODES: Record<string, string[]> = {
   'tool-insert': ['insert-plate'],
   // Issue #280 — the bare blank is one plate too: no board, no cavity, no lid.
   blank: ['blank'],
+  // Issue #155 — a toolbox is a bin and a lid, registering on each other with
+  // no connector rather than a shell that closes on a board.
+  toolbox: ['toolbox-bin', 'toolbox-lid'],
 };
 
 const KNOWN_BROKEN: Record<string, number> = {

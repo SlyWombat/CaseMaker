@@ -11,7 +11,7 @@ describe('project persistence', () => {
     expect(parsed.board.id).toBe(original.board.id);
     expect(parsed.case).toEqual(original.case);
     expect(parsed.ports.length).toBe(original.ports.length);
-    expect(parsed.schemaVersion).toBe(15);
+    expect(parsed.schemaVersion).toBe(16);
   });
 
   it('rejects malformed JSON', () => {
@@ -38,7 +38,7 @@ describe('project persistence', () => {
     const v1 = { ...raw, schemaVersion: 1 };
     const text = JSON.stringify(v1);
     const parsed = parseProject(text);
-    expect(parsed.schemaVersion).toBe(15);
+    expect(parsed.schemaVersion).toBe(16);
     expect(parsed.hats).toEqual([]);
     expect(parsed.customHats).toEqual([]);
     expect(parsed.mountingFeatures).toEqual([]);
@@ -58,7 +58,7 @@ describe('project persistence', () => {
     const v2 = { ...raw, schemaVersion: 2 };
     const text = JSON.stringify(v2);
     const parsed = parseProject(text);
-    expect(parsed.schemaVersion).toBe(15);
+    expect(parsed.schemaVersion).toBe(16);
     expect(parsed.mountingFeatures).toEqual([]);
     expect(parsed.display).toBeNull();
   });

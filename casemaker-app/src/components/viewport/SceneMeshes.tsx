@@ -50,6 +50,14 @@ function NodeMesh({ id, color, opacity = 1 }: NodeMeshProps) {
 }
 
 /**
+ * How far a toolbox's lid comes off its bin in the exploded view. A stacking
+ * module is up to 300 mm across, so the shell/lid formula's millimetre gap does
+ * not read as a separation at all — roughly the rack's own 25 mm lateral pull,
+ * along the axis this archetype actually comes apart on.
+ */
+const TOOLBOX_EXPLODED_LIFT = 40;
+
+/**
  * Issue #91 — exploded-lift formula. Targets a 2 mm gap between the deepest
  * lid-attached protrusion (snap arm tip, lid post tip, etc.) and the
  * shell's top surface. Reads bboxes from the worker output, so the gap is
@@ -97,13 +105,17 @@ function CaseMeshes() {
   const shellRender = useViewportStore((s) => s.shellRender);
   const hiddenParts = useViewportStore((s) => s.hiddenParts);
   const latches = useProjectStore((s) => s.project.case.latches);
-  // A rack has no host PCB, and neither does a badge or a bare blank. Those
-  // archetypes replace the case/lid pipeline entirely, but a project still
-  // carries a board, so the placeholder PCB and its HATs kept rendering — a
-  // green board sitting inside the rack, part of nothing and printed by
-  // nothing.
+  // A rack has no host PCB, and neither does a badge, a bare blank or a
+  // toolbox. Those archetypes replace the case/lid pipeline entirely, but a
+  // project still carries a board, so the placeholder PCB and its HATs kept
+  // rendering — a green board sitting inside the rack, part of nothing and
+  // printed by nothing.
   const archetype = useProjectStore((s) => derivedKind(s.project));
-  const noHostBoard = archetype === 'rack' || archetype === 'badge' || archetype === 'blank';
+  const noHostBoard =
+    archetype === 'rack' ||
+    archetype === 'badge' ||
+    archetype === 'blank' ||
+    archetype === 'toolbox';
   // Subscribe to the Map ref; derive ids in the body. See PartsMenu for the
   // explanation of the Zustand `?? []` selector trap.
   const nodes = useJobStore((s) => s.nodes);
@@ -156,6 +168,14 @@ function CaseMeshes() {
     if (id === 'rack-side-right') return [+lateral, 0, 0];
     if (id === 'rack-top') return [0, 0, lift];
     if (id === 'rack-bottom') return [0, 0, -lift / 2];
+    // Toolbox (#155): the lid is the module that seats on the bin, so it comes
+    // off straight up the stacking axis — the only direction it moves at all.
+    // The bin stays on the bed, as the bottom module of a stack does.
+    //
+    // `lift` is the shell/lid formula's, and a toolbox has neither node, so it
+    // arrives here as the 8 mm fallback: a hairline on a 300 mm module that
+    // reads as "the lid is still on". Take the larger of the two.
+    if (id === 'toolbox-lid') return [0, 0, Math.max(lift, TOOLBOX_EXPLODED_LIFT)];
     // Wall parts pull well clear toward the wall side so the sides' cleat
     // hooks — and the strips they seat on — read as separate pieces.
     if (id === 'rack-wall-cleat' || id === 'rack-wall-spacer') return [0, lateral + 35, 0];

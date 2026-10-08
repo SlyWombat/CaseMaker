@@ -1,9 +1,12 @@
 import { useState, type CSSProperties, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { MACHINES } from '@/engine/cnc/machine';
+import { machineCalibrationNotice } from '@/engine/cnc/calibration';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import { canDriveMachine } from '@/platform/capabilities';
 import { probeMachine, type MachineObservation } from '@/platform/machineProbe';
+import type { MachineCalibration } from '@/engine/cnc/calibration';
+import { useSettingsStore } from '@/store/settingsStore';
 import { findTemplateAcrossSources } from '@/library/templateRegistry';
 import { scheduleImmediate } from '@/engine/jobs/JobScheduler';
 import { useProjectStore, clearHistory } from '@/store/projectStore';
@@ -57,12 +60,19 @@ const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, 
 const NOTE: CSSProperties = { ...MUTED, borderLeft: '2px solid #3a5a7a', paddingLeft: 6 };
 
 /**
- * Step 2's five project types, in the order the question makes sense: the things you print, then
+ * Step 2's six project types, in the order the question makes sense: the things you print, then
  * the two that are cut. Each is an existing template id — nothing here invents a second way to make
  * a project, and a spec that is renamed or missing simply drops out of the list rather than
  * breaking the wizard.
  */
-const JOB_TYPE_IDS = ['protective-case', 'mini-rack-10in', 'tool-insert', 'badge-blank', 'blank'] as const;
+const JOB_TYPE_IDS = [
+  'protective-case',
+  'mini-rack-10in',
+  'tool-insert',
+  'toolbox',
+  'badge-blank',
+  'blank',
+] as const;
 
 type Step = 'machine' | 'job' | 'setup';
 
@@ -80,10 +90,13 @@ function MachineAnswer({
   outcome,
   machine,
   reason,
+  calibration,
 }: {
   outcome: MachineCheckOutcome;
   machine: MachineObservation | null;
   reason: string | null;
+  /** The saved frame for this machine, if there is one (#279). */
+  calibration?: MachineCalibration | null;
 }): JSX.Element {
   if (outcome === 'not-found') {
     return (
@@ -110,6 +123,7 @@ function MachineAnswer({
   if (outcome !== 'found' || machine === null) return <></>;
 
   const profile = machine.profileId !== null ? MACHINES[machine.profileId] : undefined;
+  const frameNotice = profile === undefined ? null : machineCalibrationNotice(profile, calibration);
   return (
     <div data-testid="start-wizard-machine-state" data-state="found">
       <p style={{ ...MUTED, color: '#cfe', margin: '6px 0 2px' }} data-testid="start-wizard-machine-name">
@@ -128,12 +142,24 @@ function MachineAnswer({
         </li>
       </ul>
       {profile ? (
-        <p style={MUTED} data-testid="start-wizard-machine-profile">
-          {profile.name} — {span(profile.envelope.x.min, profile.envelope.x.max)} ×{' '}
-          {span(profile.envelope.y.min, profile.envelope.y.max)} ×{' '}
-          {span(profile.envelope.z.min, profile.envelope.z.max)} mm work area, spindle to{' '}
-          {profile.maxRpm} rpm. Feeds and speeds are clamped to these.
-        </p>
+        <>
+          <p style={MUTED} data-testid="start-wizard-machine-profile">
+            {profile.name} — {span(profile.envelope.x.min, profile.envelope.x.max)} ×{' '}
+            {span(profile.envelope.y.min, profile.envelope.y.max)} ×{' '}
+            {span(profile.envelope.z.min, profile.envelope.z.max)} mm work area, spindle to{' '}
+            {profile.maxRpm} rpm. Feeds and speeds are clamped to these.
+          </p>
+          {/* Which frame is in force, and where its numbers came from (#279, decision 28). A
+              warning here is the honest state, not a defect: the vendor's defaults are what ran
+              before any of this existed, and saying so beats a blank. */}
+          <p
+            data-testid="start-wizard-machine-frame"
+            data-state={frameNotice?.code}
+            style={frameNotice?.severity === 'warning' ? NOTE : MUTED}
+          >
+            {frameNotice?.message}
+          </p>
+        </>
       ) : (
         <p style={MUTED} data-testid="start-wizard-machine-unknown">
           This machine is not one the app knows, so its work area and limits are unknown — it is
@@ -178,6 +204,8 @@ export function StartWizard(): JSX.Element {
   const setProbeResult = useMachineStore((s) => s.setProbeResult);
   const setProject = useProjectStore((s) => s.setProject);
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
+  const savedCalibration = useSettingsStore((s) => s.machineCalibration);
+  const setMachineCalibration = useSettingsStore((s) => s.setMachineCalibration);
 
   const [step, setStep] = useState<Step>('machine');
   const [busy, setBusy] = useState(false);
@@ -188,7 +216,14 @@ export function StartWizard(): JSX.Element {
   async function runCheck(host?: string): Promise<void> {
     setBusy(true);
     try {
-      setProbeResult(await probeMachine(host === undefined ? {} : { host }));
+      const result = await probeMachine(host === undefined ? {} : { host });
+      setProbeResult(result);
+      // The machine's own coordinate frame, saved where its provenance lives (#279). Only a
+      // COMPLETE read ever produces one, so this cannot half-apply; a read that failed leaves the
+      // previously saved record in force and the probe's notes say what went wrong.
+      if (result.kind === 'found' && result.calibration !== null) {
+        setMachineCalibration(result.calibration);
+      }
     } finally {
       setBusy(false);
     }
@@ -281,11 +316,16 @@ export function StartWizard(): JSX.Element {
             </div>
             {busy && (
               <p style={MUTED} data-testid="start-wizard-machine-busy">
-                Listening for a machine…
+                Listening for a machine, then reading its own configuration…
               </p>
             )}
             {!busy && outcome !== null && (
-              <MachineAnswer outcome={outcome} machine={machine} reason={reason} />
+              <MachineAnswer
+                outcome={outcome}
+                machine={machine}
+                reason={reason}
+                calibration={savedCalibration}
+              />
             )}
           </div>
         )}

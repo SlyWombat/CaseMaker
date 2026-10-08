@@ -195,13 +195,13 @@ describe('#158 — case.insert through the schema and the compiler', () => {
     const original = createDefaultProject('rpi-4b');
     original.case.insert = defaultInsert();
     const parsed = parseProject(serializeProject(original));
-    expect(parsed.schemaVersion).toBe(15);
+    expect(parsed.schemaVersion).toBe(16);
     expect(parsed.case.insert).toEqual(original.case.insert);
   });
 
   it('leaves the field undefined when a project has no insert', () => {
     const parsed = parseProject(serializeProject(createDefaultProject('rpi-4b')));
-    expect(parsed.schemaVersion).toBe(15);
+    expect(parsed.schemaVersion).toBe(16);
     expect(parsed.case.insert).toBeUndefined();
   });
 

@@ -206,6 +206,14 @@ const PRINT_TABLE: Record<string, PrintMeta> = {
   // Issue #280 — the bare blank. It is a plain slab with no pocket and no
   // colour split, so it prints as-modelled either way up; nothing to flip.
   blank: flat('Print flat — a plain slab, so face up or down is the same part'),
+
+  // Issue #155 — the toolbox module. A module is DESIGNED with `z = 0` as both
+  // the seating plane and the print-bed face, so there is nothing to flip: the
+  // foot, the flare and the rim are all above the bed exactly as the stack
+  // wants them. Flipping would put the flare's 45° on the underside as an
+  // unsupported overhang and bury the seating face.
+  'toolbox-bin': flat('Print flat — the module sits on the bed exactly as it stacks'),
+  'toolbox-lid': flat('Print flat — the lid is the same module, so it prints like one'),
 };
 
 /** Id families (rack accessories, latch arms/pins, bumpers). None of these
@@ -383,6 +391,12 @@ function describePart(
   }
   if (id === 'blank') {
     return { displayName: 'Blank', material: 'rigid', category: 'case' };
+  }
+  if (id === 'toolbox-bin') {
+    return { displayName: 'Toolbox bin', material: 'rigid', category: 'case' };
+  }
+  if (id === 'toolbox-lid') {
+    return { displayName: 'Toolbox lid', material: 'rigid', category: 'case' };
   }
   if (id.startsWith('latch-arm-')) {
     const suffix = id.slice('latch-arm-'.length);
