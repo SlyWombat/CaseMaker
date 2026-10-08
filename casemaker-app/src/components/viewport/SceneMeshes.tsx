@@ -10,6 +10,7 @@ import { PortMarkers } from './PortMarkers';
 import { BoardPlaceholderMesh } from './BoardPlaceholderMesh';
 import { HatPlaceholderMeshes } from './HatPlaceholderMeshes';
 import { isAlternativeNode } from '@/engine/exporters/parts';
+import { TOOLBOX_BIN_NODE_ID, TOOLBOX_LID_NODE_ID } from '@/engine/compiler/toolbox';
 import { isSimSceneActive, useSimStore } from '@/store/simStore';
 import { SimMeshes } from './SimMeshes';
 import { EngravePreview } from './EngravePreview';
@@ -84,6 +85,15 @@ function colorForNode(id: string): string {
   if (id === 'hinge-pin') return '#c0a060';
   if (id.startsWith('latch-arm-')) return '#b09080';
   if (id.startsWith('bumper-')) return '#7a7a82';
+  // Toolbox (#155): the bin and the lid ARE this archetype's shell and lid, and
+  // they take the same two blues. Without a branch they fell through to the
+  // accessory grey along with everything else, so the whole module rendered as
+  // one featureless mass — which is how a lid that would not come off, and a
+  // floor grid that could not be seen, both went unnoticed for as long as they
+  // did. The dividers (#150) are accessories, in the shelf green.
+  if (id === TOOLBOX_BIN_NODE_ID) return '#88a4cc';
+  if (id === TOOLBOX_LID_NODE_ID) return '#a8b8d0';
+  if (id.startsWith('divider-peg-')) return '#8fb0a0';
   // Rack assembly: structural frame blue-grey, accessories differentiated
   // so the stacked faceplates read as separate parts.
   if (id.startsWith('rack-side-')) return '#88a4cc';
@@ -126,6 +136,21 @@ function CaseMeshes() {
     .filter((n) => !isAlternativeNode(n))
     .map((n) => n.id);
   const explodedLift = useExplodedLift();
+  // Issue #155 — the toolbox replaces the case/lid pipeline with `toolbox-bin`
+  // and `toolbox-lid`, so the id checks below, written for the shell archetype,
+  // silently matched nothing on it: `base-only` did not take the lid off, and
+  // the x-ray toggle did nothing at all. The toolbox's own floor grid and the
+  // dividers that plug into it therefore sat behind an opaque lid with no way
+  // to see either — a design feature the viewport could not show.
+  //
+  // Derived from the archetype rather than added as a second literal pair, so
+  // an archetype that brings its own bin and lid declares them in one place,
+  // and taking the ids from the compiler's own constants: hand-spelled
+  // literals are what let the two drift apart with no type error to catch it.
+  // `explodedOffsetFor` already knew the toolbox has neither node; that
+  // knowledge is what this generalises.
+  const shellId = archetype === 'toolbox' ? TOOLBOX_BIN_NODE_ID : 'shell';
+  const lidId = archetype === 'toolbox' ? TOOLBOX_LID_NODE_ID : 'lid';
   const showShell = viewMode !== 'lid-only';
   const showLidMesh = viewMode !== 'base-only';
   const lift = viewMode === 'exploded' ? explodedLift : 0;
@@ -193,8 +218,8 @@ function CaseMeshes() {
     <group>
       {nodeIds.map((id) => {
         if (hiddenParts.has(id)) return null;
-        if (id === 'shell' && !showShell) return null;
-        if (id === 'lid' && !showLidMesh) return null;
+        if (id === shellId && !showShell) return null;
+        if (id === lidId && !showLidMesh) return null;
         const color = colorForNode(id);
         const offset = explodedOffsetFor(id);
         const isLifted = (offset[0] !== 0 || offset[1] !== 0 || offset[2] !== 0);
@@ -202,7 +227,7 @@ function CaseMeshes() {
         // as the object it will print as (wall thickness, vents, chamfers).
         // Anything that is not the shell or lid is opaque in both modes.
         const opacity =
-          shellRender === 'solid' ? 1 : id === 'shell' ? 0.55 : id === 'lid' ? 0.6 : 1;
+          shellRender === 'solid' ? 1 : id === shellId ? 0.55 : id === lidId ? 0.6 : 1;
         const mesh = <NodeMesh key={id} id={id} color={color} opacity={opacity} />;
         if (isLifted) {
           return (
