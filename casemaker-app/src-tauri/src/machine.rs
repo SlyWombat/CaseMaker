@@ -11,17 +11,93 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use tauri::State;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpStream, UdpSocket};
+use tokio::sync::{watch, Mutex};
 use tokio::time::{timeout, Duration, Instant};
+
+/// One open connection, split so a read and a write never wait on each other (#299).
+///
+/// The halves have their OWN locks, and the registry lock (below) is held only to find or remove an
+/// entry — never across an `await` on the socket. Before this, `machine_tcp_read` held the single
+/// registry lock for its whole timeout: an upload waiting nine seconds for a packet request blocked
+/// every other call on every connection, including the `machine_tcp_close` that was meant to abort it.
+struct Conn {
+    reader: Mutex<OwnedReadHalf>,
+    writer: Mutex<OwnedWriteHalf>,
+    /// Flipped to `true` by `close`. A read in progress selects on it, so closing ends the read now
+    /// instead of after its timeout. A `watch` rather than a `Notify`: a read that begins after the
+    /// close still sees `true`, where a notification would have been missed.
+    closed: watch::Sender<bool>,
+}
 
 /// Live TCP connections, keyed by an id handed to the TypeScript side. One per explicit action.
 #[derive(Default)]
 pub struct MachineTransport {
-    conns: tokio::sync::Mutex<HashMap<u64, TcpStream>>,
+    conns: Mutex<HashMap<u64, Arc<Conn>>>,
     next_id: AtomicU64,
+}
+
+impl MachineTransport {
+    /// Take ownership of a connected stream and return its id.
+    async fn adopt(&self, stream: TcpStream) -> u64 {
+        let (r, w) = stream.into_split();
+        let (closed, _) = watch::channel(false);
+        let conn = Arc::new(Conn { reader: Mutex::new(r), writer: Mutex::new(w), closed });
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        self.conns.lock().await.insert(id, conn);
+        id
+    }
+
+    /// Find a connection. The registry lock is released before the caller touches the socket.
+    async fn get(&self, conn: u64) -> Result<Arc<Conn>, String> {
+        self.conns
+            .lock()
+            .await
+            .get(&conn)
+            .cloned()
+            .ok_or_else(|| format!("unknown connection {conn}"))
+    }
+
+    async fn write(&self, conn: u64, data: &[u8]) -> Result<(), String> {
+        let c = self.get(conn).await?;
+        let mut w = c.writer.lock().await;
+        w.write_all(data).await.map_err(|e| format!("write failed: {e}"))?;
+        w.flush().await.map_err(|e| format!("flush failed: {e}"))?;
+        Ok(())
+    }
+
+    async fn read(&self, conn: u64, max: usize, timeout_ms: u64) -> Result<Vec<u8>, String> {
+        let c = self.get(conn).await?;
+        let mut closed = c.closed.subscribe();
+        let mut r = c.reader.lock().await;
+        let mut buf = vec![0u8; max.max(1)];
+        tokio::select! {
+            // `wait_for` checks the current value first, so a close that already happened wins.
+            _ = closed.wait_for(|v| *v) => Err("the connection was closed".to_string()),
+            read = timeout(Duration::from_millis(timeout_ms.max(1)), r.read(&mut buf)) => match read {
+                Ok(Ok(0)) => Err("the machine closed the connection".to_string()),
+                Ok(Ok(n)) => {
+                    buf.truncate(n);
+                    Ok(buf)
+                }
+                Ok(Err(e)) => Err(format!("read failed: {e}")),
+                Err(_) => Ok(Vec::new()), // no data within the timeout
+            },
+        }
+    }
+
+    async fn close(&self, conn: u64) {
+        // Remove first, so no new call can find it; then wake any read that is already waiting.
+        let removed = self.conns.lock().await.remove(&conn);
+        if let Some(c) = removed {
+            let _ = c.closed.send(true);
+        }
+    }
 }
 
 /// Listen on `0.0.0.0:port` for `window_ms` and return each datagram as a UTF-8 string.
@@ -76,9 +152,7 @@ pub async fn machine_tcp_connect(
     // Small framed commands and their replies: Nagle would add latency for no benefit.
     stream.set_nodelay(true).map_err(|e| format!("could not configure the connection: {e}"))?;
 
-    let id = state.next_id.fetch_add(1, Ordering::Relaxed);
-    state.conns.lock().await.insert(id, stream);
-    Ok(id)
+    Ok(state.adopt(stream).await)
 }
 
 /// Write bytes to an open connection.
@@ -88,16 +162,7 @@ pub async fn machine_tcp_write(
     conn: u64,
     data: Vec<u8>,
 ) -> Result<(), String> {
-    let mut conns = state.conns.lock().await;
-    let stream = conns
-        .get_mut(&conn)
-        .ok_or_else(|| format!("unknown connection {conn}"))?;
-    stream
-        .write_all(&data)
-        .await
-        .map_err(|e| format!("write failed: {e}"))?;
-    stream.flush().await.map_err(|e| format!("flush failed: {e}"))?;
-    Ok(())
+    state.write(conn, &data).await
 }
 
 /// Read up to `max` bytes, waiting up to `timeout_ms`.
@@ -112,25 +177,107 @@ pub async fn machine_tcp_read(
     max: usize,
     timeout_ms: u64,
 ) -> Result<Vec<u8>, String> {
-    let mut conns = state.conns.lock().await;
-    let stream = conns
-        .get_mut(&conn)
-        .ok_or_else(|| format!("unknown connection {conn}"))?;
-    let mut buf = vec![0u8; max.max(1)];
-    match timeout(Duration::from_millis(timeout_ms.max(1)), stream.read(&mut buf)).await {
-        Ok(Ok(0)) => Err("the machine closed the connection".to_string()),
-        Ok(Ok(n)) => {
-            buf.truncate(n);
-            Ok(buf)
-        }
-        Ok(Err(e)) => Err(format!("read failed: {e}")),
-        Err(_) => Ok(Vec::new()), // no data within the timeout
-    }
+    state.read(conn, max, timeout_ms).await
 }
 
 /// Close and forget a connection.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn machine_tcp_close(state: State<'_, MachineTransport>, conn: u64) -> Result<(), String> {
-    state.conns.lock().await.remove(&conn);
+    state.close(conn).await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+
+    /// A connected pair: the transport holds the client end, the test holds the server end.
+    async fn pair(t: &MachineTransport) -> (u64, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (client, server) = tokio::join!(TcpStream::connect(addr), listener.accept());
+        (t.adopt(client.unwrap()).await, server.unwrap().0)
+    }
+
+    // #299: closing a connection ends a read that is waiting on it, now — not after its timeout.
+    #[tokio::test]
+    async fn close_ends_a_pending_read_at_once() {
+        let t = Arc::new(MachineTransport::default());
+        let (id, _server) = pair(&t).await;
+
+        let reader = {
+            let t = t.clone();
+            tokio::spawn(async move { t.read(id, 64, 9_000).await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await; // let the read start waiting
+
+        let started = Instant::now();
+        t.close(id).await;
+        let outcome = timeout(Duration::from_secs(2), reader).await.expect("the read did not end").unwrap();
+
+        assert!(outcome.is_err(), "a closed connection is an error, not an empty read");
+        assert!(started.elapsed() < Duration::from_secs(1), "close waited out the read's timeout");
+    }
+
+    // #299: a read in progress does not hold anything another connection needs.
+    #[tokio::test]
+    async fn a_pending_read_does_not_block_another_connection() {
+        let t = Arc::new(MachineTransport::default());
+        let (slow, _slow_server) = pair(&t).await;
+        let (other, mut other_server) = pair(&t).await;
+
+        let _pending = {
+            let t = t.clone();
+            tokio::spawn(async move { t.read(slow, 64, 9_000).await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let started = Instant::now();
+        t.write(other, b"ping").await.unwrap();
+        let mut got = [0u8; 4];
+        timeout(Duration::from_secs(1), other_server.read_exact(&mut got)).await.unwrap().unwrap();
+        assert_eq!(&got, b"ping");
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    // #299: nor does it block a write on the SAME connection — an upload writes while it waits.
+    #[tokio::test]
+    async fn a_pending_read_does_not_block_a_write_on_the_same_connection() {
+        let t = Arc::new(MachineTransport::default());
+        let (id, mut server) = pair(&t).await;
+
+        let _pending = {
+            let t = t.clone();
+            tokio::spawn(async move { t.read(id, 64, 9_000).await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        t.write(id, b"data").await.unwrap();
+        let mut got = [0u8; 4];
+        timeout(Duration::from_secs(1), server.read_exact(&mut got)).await.unwrap().unwrap();
+        assert_eq!(&got, b"data");
+    }
+
+    #[tokio::test]
+    async fn reads_what_arrives_and_reports_silence_as_empty() {
+        let t = MachineTransport::default();
+        let (id, mut server) = pair(&t).await;
+
+        assert_eq!(t.read(id, 64, 50).await.unwrap(), Vec::<u8>::new());
+        server.write_all(b"hello").await.unwrap();
+        assert_eq!(t.read(id, 64, 1_000).await.unwrap(), b"hello".to_vec());
+        drop(server);
+        assert!(t.read(id, 64, 1_000).await.unwrap_err().contains("closed the connection"));
+    }
+
+    #[tokio::test]
+    async fn a_closed_or_unknown_connection_is_an_error() {
+        let t = MachineTransport::default();
+        let (id, _server) = pair(&t).await;
+        t.close(id).await;
+        assert!(t.read(id, 64, 50).await.unwrap_err().contains("unknown connection"));
+        assert!(t.write(id, b"x").await.unwrap_err().contains("unknown connection"));
+        t.close(id).await; // closing twice is not an error
+    }
 }

@@ -29,6 +29,11 @@ dirs = "5"
 log = "0.4"
 env_logger = "0.11"
 
+[dev-dependencies]
+# `config.rs`'s tests have used this since the first commit without it ever being declared, so
+# `cargo test --lib` did not compile at all until now (found while testing #299).
+tempfile = "3"
+
 [profile.release]
 panic = "abort"
 codegen-units = 1
