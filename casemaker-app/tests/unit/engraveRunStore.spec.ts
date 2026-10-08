@@ -7,6 +7,7 @@ import {
   useEngraveRunStore,
   setEngraveRunClientLoader,
   saveBlocker,
+  uploadBlocker,
   requiredAckCodes,
   runErrorCodes,
   type EngraveRunView,
@@ -91,6 +92,52 @@ describe('engraveRunStore (#206)', () => {
 
     expect(saveBlocker(view({ generated: okGen, simStatus: 'ready', oracle: { ok: false, band: 0.016, levels: [], worst: { underCut: 2, overCut: 0 } } }))).toBe('the simulation does not match the prediction');
     expect(saveBlocker(view({ generated: okGen, staleSince: Date.now(), simStatus: 'ready' }))).toBe('the job changed since it was generated');
+  });
+
+  // #255 — Upload must never be reachable where Save is not. The two gates are separate functions
+  // because Upload has one more clause, so the direction of that difference is asserted rather
+  // than assumed: every reason Save is shut is a reason Upload is shut.
+  it('never lets Upload be weaker than Save', () => {
+    const okGen: EngraveGenerated = {
+      ...clean(),
+      verify: { ok: true, findings: [], stats: { lines: 1, cuttingMoves: 1, deepestZ: -1, bbox: { min: [0, 0, -1], max: [1, 1, 0] } } },
+    };
+    const ready = { simStatus: 'ready' as const, oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } } };
+    const views: EngraveRunView[] = [
+      view({ generated: okGen, ...ready }), // clear: this is the one the loop below compares against
+      view(), // nothing generated
+      view({ generated: clean() }), // generated, but the simulation never finished
+      view({ generated: okGen, ...ready, staleSince: Date.now() }),
+      view({ generated: { ...okGen, findings: [{ severity: 'error', code: 'item-empty', message: 'x' }] }, ...ready }),
+      view({ generated: okGen, simStatus: 'ready', oracle: { ok: false, band: 0.016, levels: [], worst: { underCut: 2, overCut: 0 } } }),
+      view({ generated: okGen, simStatus: 'ready' }), // the oracle never ran
+      view({ generated: okGen, ...ready, phase: 'generating' }),
+      view({ generated: okGen, ...ready, acknowledged: false, simDiagnostics: [{ severity: 'warning', code: 'vise-default', message: 'x' }] as EngraveRunView['simDiagnostics'] }),
+    ];
+    // At least one of them has to be genuinely clear, or the loop below proves nothing.
+    expect(views.some((v) => saveBlocker(v) === null)).toBe(true);
+
+    for (const v of views) {
+      if (saveBlocker(v) !== null) {
+        expect(uploadBlocker(v)).toBe(saveBlocker(v));
+      } else {
+        // Save is allowed; Upload is allowed too, unless the report is missing.
+        expect(uploadBlocker(v)).toBeNull();
+      }
+    }
+  });
+
+  it('shuts Upload — and only Upload — when the program carries no verifier report', () => {
+    const noReport: EngraveGenerated = { ...clean(), verify: null };
+    const v = view({
+      generated: noReport,
+      simStatus: 'ready',
+      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+    });
+    // Save has nothing to complain about: `runErrorCodes` reads `verify?.findings ?? []`, so an
+    // absent report contributes no errors. That is exactly why Upload needs its own clause.
+    expect(saveBlocker(v)).toBeNull();
+    expect(uploadBlocker(v)).toBe('the program carries no verifier report');
   });
 
   it('marks a generated result stale as soon as the job is edited', async () => {

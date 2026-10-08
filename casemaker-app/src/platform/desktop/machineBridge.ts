@@ -13,8 +13,12 @@
 // entry point takes a `VerifiedProgram`, which only `asVerifiedProgram` produces, and it re-checks
 // the report at runtime before opening a socket. There is no "send anyway" path and no flag to add
 // one. If a caller ever needs to bypass this, the answer is to fix what the verifier found.
+//
+// The rule itself is stated once, in `engine/cnc/uploadGate.ts`, because the web-side upload client
+// asks the same question before it reaches for this module and the two answers must not drift.
 
 import type { VerifyReport } from '@/engine/cnc/verify';
+import { programUploadProblem } from '@/engine/cnc/uploadGate';
 import {
   COMMAND_TCP_PORT,
   DISCOVERY_UDP_PORT,
@@ -73,17 +77,18 @@ export interface VerifiedProgram {
 
 /**
  * Gate a program for upload. Returns null — never a partial object — when the report is not `ok`,
- * carries any error finding, or the filename is not a `.nc`. The runtime check mirrors the type so
- * a forged object cannot slip past the upload entry point either.
+ * carries any error finding, or the filename is not a `.nc`.
+ *
+ * The clauses themselves are `programUploadProblem`'s (`engine/cnc/uploadGate.ts`), which the
+ * web-side upload client asks too — so "the app will not send this" and "this type refuses it" are
+ * one decision rather than two that happen to agree today.
  */
 export function asVerifiedProgram(
   filename: string,
   content: Uint8Array,
   report: VerifyReport,
 ): VerifiedProgram | null {
-  if (!report.ok) return null;
-  if (report.findings.some((finding) => finding.severity === 'error')) return null;
-  if (!/\.nc$/i.test(filename)) return null;
+  if (programUploadProblem(filename, report) !== null) return null;
   return { filename, content, report };
 }
 
@@ -190,24 +195,26 @@ export async function readConfigValues(
 /**
  * Upload a verified `.nc`. Refuses anything that is not a `VerifiedProgram` and re-checks the
  * report before touching the socket. A refusal from the machine is returned as a refusal.
+ *
+ * The line between the two refusals is deliberate, and it is about WHO decided. A program the
+ * gate refuses was never uploaded — nothing was sent, and the answer is the gate's own sentence.
+ * A program the MACHINE refuses was offered and declined, which is a fact about the machine and
+ * comes back with the controller's own detail (`refused` / `timeout` / `error`).
  */
 export async function uploadVerifiedProgram(
   target: MachineTarget,
   program: VerifiedProgram,
   opts: BridgeOptions & { packetSize?: number; inactivityMs?: number } = {},
 ): Promise<UploadOutcome> {
-  if (
-    program === null ||
-    program === undefined ||
-    program.report === null ||
-    program.report === undefined ||
-    !program.report.ok ||
-    program.report.findings.some((finding) => finding.severity === 'error')
-  ) {
+  // The null guards are for a caller that reached us from plain JS: the type says `VerifiedProgram`
+  // and cannot be, but `program.report` is read below and a crash here would be an unhandled
+  // rejection rather than the refusal this function promises.
+  if (program === null || program === undefined || program.report === null || program.report === undefined) {
     return { ok: false, reason: 'error', detail: 'refused: the program has not passed the verifier' };
   }
-  if (!/\.nc$/i.test(program.filename)) {
-    return { ok: false, reason: 'error', detail: `refused: '${program.filename}' is not a .nc program` };
+  const problem = programUploadProblem(program.filename, program.report);
+  if (problem !== null) {
+    return { ok: false, reason: 'error', detail: `refused: ${problem}` };
   }
 
   const transport = transportOf(opts);

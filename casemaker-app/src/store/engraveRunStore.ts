@@ -126,6 +126,28 @@ export function saveBlocker(v: EngraveRunView): string | null {
   return null;
 }
 
+/**
+ * Why uploading to the machine is disabled, or null when it is allowed (#255).
+ *
+ * **Never weaker than {@link saveBlocker}** — every reason Save is blocked is a reason Upload is
+ * blocked, and the first line here is what makes that true rather than a coincidence of the two
+ * lists happening to agree. That direction is the safe one: a program nobody may keep is certainly
+ * not one to send.
+ *
+ * The one clause it adds is the verifier's report having to EXIST. `saveBlocker` does not need it —
+ * `runErrorCodes` reads `generated.verify?.findings ?? []`, so an absent report contributes no
+ * errors and a program with no report would slip through. Uploading does need it: the upload gate
+ * is a statement about a report (`programUploadProblem`), and there is no such statement to make
+ * without one. Reachable only from a hand-edited store, and answered with a sentence rather than a
+ * crash.
+ */
+export function uploadBlocker(v: EngraveRunView): string | null {
+  const save = saveBlocker(v);
+  if (save !== null) return save;
+  if (!v.generated?.verify) return 'the program carries no verifier report';
+  return null;
+}
+
 let seq = 0;
 
 export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {

@@ -2,7 +2,10 @@ import { useEffect, useState, type CSSProperties, type JSX } from 'react';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
-import { useEngraveRunStore, requiredAckCodes, runErrorCodes, saveBlocker } from '@/store/engraveRunStore';
+import { useEngraveRunStore, requiredAckCodes, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
+import { useMachineStore } from '@/store/machineStore';
+import { canDriveMachine } from '@/platform/capabilities';
+import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { useSettingsStore } from '@/store/settingsStore';
 import { TOOL_LIBRARY, Z1 } from '@/engine/cnc';
@@ -10,7 +13,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { keepOutLimit, keepOutMembrane } from '@/engine/cnc/engrave/partPlan';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
-import { buildRunSheet, type RunSheet } from '@/engine/cnc/engrave/runSheet';
+import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
@@ -394,6 +397,16 @@ export function EngravePanel(): JSX.Element {
   const runErrors = runErrorCodes(run);
   const ackCodes = requiredAckCodes(run);
   const saveBlockerText = saveBlocker(run);
+  // #255 — the machine upload. `uploadBlocker` is never weaker than `saveBlocker` (see its own
+  // note), so Save and Upload state one rule between them rather than two that agree by luck.
+  const uploadBlockerText = uploadBlocker(run);
+  const machine = useMachineStore((s) => s.machine);
+  // Both halves or neither: the gate is a statement about the report, so a `nc` without one is not
+  // a program this panel may offer to send.
+  const uploadable =
+    run.generated !== null && run.generated.nc !== null && run.generated.verify !== null
+      ? { nc: run.generated.nc, verify: run.generated.verify }
+      : null;
   const cam = run.generated?.cam ?? null;
 
   // #243 (§14.2 A2) — the blind-spot half of the Simulated row. The SAME pure builder the
@@ -1513,6 +1526,19 @@ export function EngravePanel(): JSX.Element {
               <p style={MUTED} data-testid="engrave-save-blocked">
                 Save is disabled — {saveBlockerText}.
               </p>
+            )}
+
+            {/* #255 — hand the verified program to the machine. Desktop build only: `canDriveMachine`
+                folds to false in the web build, so this block is dead code there and the bridge
+                never enters the web bundle. The filename is the one Save writes, so the file on the
+                machine's card and the one in the operator's run sheet are named the same thing. */}
+            {canDriveMachine && (
+              <EngraveMachineUpload
+                blocker={uploadBlockerText}
+                machine={machine}
+                program={uploadable}
+                filename={runSheetFileName(job.name)}
+              />
             )}
 
             {/* The operator run sheet (#207): printable, built from this job and the verified

@@ -341,8 +341,15 @@ export function extractMac(text: string): string | null {
 }
 
 /**
- * Send `M482.5` then `M482.4` and read the replies. The literal reply format is PROVISIONAL
- * (Z1-Bridge-Protocol.md §9), so the return keeps the raw text alongside the extracted values.
+ * Send `M482.5` then `M482.4` and read the replies.
+ *
+ * The reply format is no longer provisional: it was OBSERVED on hardware at bench B0 on 2026-10-06
+ * and the row is closed (`Z1-Bridge-Protocol.md` §4, §9; `docs/bench/2026-10-bench-day-1.md`) —
+ * `M482.5` answers `STA param[5]:<ip>` and `M482.4` answers `STA param[4]:<mac with dashes>`. The
+ * extraction below is written to those replies. The return still keeps the raw text alongside the
+ * extracted values, because the parser is deliberately lenient (`extractIpv4` / `extractMac` take a
+ * plausible value out of whatever arrived) and a reply that does not match the observed shape
+ * should be readable rather than silently dropped.
  */
 export async function runIdentify(
   transport: MachineTransport,

@@ -6,11 +6,11 @@
 // builds the web target into a temp outDir and asserts the desktop module's marker string is
 // absent from every emitted file. It exits non-zero and names the offending file otherwise.
 //
-// It also builds the desktop target and reports whether the marker made it in. Today nothing calls
-// `loadMachineBridge`, so the loader is tree-shaken and the marker is absent from BOTH builds —
-// exactly the "trivially true until a consumer imports it" state #193's sim-gate opened in. The
-// check stays honest because it fails the moment a top-level (un-guarded) import leaks the module
-// into the web build; #255 must RE-RUN it when it wires the real bridge caller.
+// It also builds the desktop target and reports whether the marker made it in. That half is
+// informational, but it is no longer vacuous: `machineProbe.ts` (#280) and `machineUpload.ts`
+// (#255) both call `loadMachineBridge()`, so the desktop build should carry the marker and the web
+// build must not. The web half is the one that gates — it fails the moment a top-level (unguarded)
+// import leaks the module into the web bundle.
 //
 // Not wired into `npm test`: a production build is slow. Run it with `npm run check:platform-gate`.
 
@@ -98,8 +98,9 @@ try {
   console.log(
     present
       ? `check:platform-gate — desktop build carries "${MARKER}" (boundary exercised)`
-      : `check:platform-gate — note: desktop build does not carry "${MARKER}" yet; ` +
-        'loadMachineBridge has no caller and is tree-shaken until #255.',
+      : `check:platform-gate — NOTE: desktop build does not carry "${MARKER}". That is not a failure ` +
+        '(every caller may legitimately be behind a guard the desktop build also folds away), but it ' +
+        'does mean the informational half proved nothing this run.',
   );
 } finally {
   if (desktop) rmSync(desktop.outDir, { recursive: true, force: true });

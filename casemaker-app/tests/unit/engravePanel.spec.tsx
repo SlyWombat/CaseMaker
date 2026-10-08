@@ -384,6 +384,13 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
     expect(button.disabled).toBe(false);
     fireEvent.click(button);
 
+    // #255 — this is a WEB build (`vitest.config.ts` defines `__BUILD_TARGET__` as 'web'), so the
+    // upload control is not merely disabled: it is not in the tree at all. Asserted HERE, on a run
+    // where Save and the run sheet are both live, because at that point the `{!blocked && …}` branch
+    // is rendering and an absent testid means something. Anywhere earlier it would be trivially true.
+    expect(screen.queryByTestId('engrave-upload')).toBeNull();
+    expect(screen.queryByTestId('engrave-upload-panel')).toBeNull();
+
     // Opening the sheet awaits the bundled fonts (the diagram typesets each label), so the
     // overlay appears on a later tick rather than synchronously.
     const sheet = await screen.findByTestId('run-sheet');
