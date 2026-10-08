@@ -256,6 +256,16 @@ a fourth answer it did not list: **a human-readable product slug**. Three conseq
 - A QR of this size in a photograph is exactly what the browser's `BarcodeDetector` API is for, which
   is what #212 already proposes. This does not change that design.
 
+**Recorded 2026-10-08 — the first of the two open questions is closed, from the DB (#307).** The
+library database was dumped read-only (`docs/bench/2026-10-08-makera-library-schema.md`). The slug
+`C1-BIT-BALL-NOSE-1-4` **appears nowhere in it** — every text column of every table was searched for
+`C1-BIT` and `BALL-NOSE`. The one table shaped to bridge a slug to a `g_ID` is **`t_SkuMapping`**
+(`g_ID ↔ Shopify sku`, with `shopifyRegion` and `url`), and it is **empty**, so Studio resolves the
+slug **online**. There is also no 1/4-inch (6.35 mm) ball nose in the catalogue by name — its ball
+noses are 3.175, 4 and 6 mm. So "either the DB is keyed by the slug, or there is a mapping we have
+not seen" now reads: **there is a mapping, and it is a network one we do not hold.** The remaining
+A7 row is the **Z1-badged** label.
+
 | Cutter # (from A1) | Symbology | Exact decoded text | Equals `112111313812`? |
 |---|---|---|---|
 | A1 not yet run | **QR** | `C1-BIT-BALL-NOSE-1-4` | no |
@@ -455,6 +465,11 @@ assumed rather than proven until the Home button is pressed and the reading repe
 consistent with everything seen, but the expected `0` on every axis is wrong: the machine sits at
 **−1.000**, not 0. A 1 mm back-off after the switch trips is the obvious reading, and it is
 consistent with C1's Z (see below). One deliberate re-home closes this.
+
+**Repeated 2026-10-08, 15:25 UTC.** The same power-on homing, read through our console this time:
+during homing the status is `<Home|MPos:0.0000,0.0000,3.1009,…>`, and the first `Idle` after it
+reads `MPos:-1.0000,-1.0000,-1.0000`. Same figure, second power cycle — still the power-on homing,
+not a deliberate `$H`, so the premise above stands as stated.
 
 **Goes to:** confirms the envelope's sign convention (`Z1.envelope`); the −1 offset goes with
 `machine.ts`'s homing comment.
@@ -981,15 +996,26 @@ now says it is. But if the axis binds before −207, the usable travel is **less
 declares and the envelope should shrink rather than stay. Reading the config cannot tell the
 difference; only a move can.
 
-**Recorded:** _not yet run — blocked on R10 / #255, see above._
+**Recorded 2026-10-08 — RUN, X and Y, through our own console (`tools/z1/z1.mjs send`, #293).**
+The refusal half was taken in the morning (Stage 1: `G1 X-5` from −205 → `error:Soft Endstop X was
+exceeded`, no motion, beep + red blink, `$X` clears it; same on Y). The reach half was taken at
+15:26 UTC with the wired probe in the collet and Z at clearance (−3.0): each axis alone, `G53 G0
+X-205` then `X-207`, and `G53 G0 Y-204` then `Y-206`, the other axis parked at its clearance value.
 
 | Field | X | Y | Z |
 |---|---|---|---|
-| Reached −200 / −200 / −100? (yes/no) | | | **not run on purpose** |
-| Where the controller actually stopped (machine coords) | | | |
-| What it did at the limit — message / clean refusal / stall / nothing | | | |
+| Reached −200 / −200 / −100? (yes/no) | **yes — and −207.000** | **yes — and −206.000** | **not run on purpose** |
+| Where the controller actually stopped (machine coords) | **−207.000**, `ok`, `Idle` — exactly `soft_endstop.x_min`; the 2 mm step from −205 took 2.4 s send-to-Idle | **−206.000**, `ok`, `Idle` — exactly `soft_endstop.y_min`; 2.6 s | — |
+| What it did at the limit — message / clean refusal / stall / nothing | **nothing** at −207 (no beep, no blink, no message); one step beyond is the **clean refusal** above | same | — |
 
-Notes:
+Notes: the usable travel is therefore **not less** than the machine declares: both axes physically
+reach the configured soft limit, 7 mm (X) and 6 mm (Y) past the vendor's 200, and the controller
+neither binds nor loses position on the way (MPos read back exactly, and `G28` afterwards landed on
+−11.6 / −14.6 / −3.0 as always). `/Simulation.md` §9 item 7's refusal at −200 is conservative by
+exactly those margins. Frames `293-s3-x-207.jpg`, `293-s3-y-206.jpg`, `293-s3-back-at-clearance.jpg`
+show the **bed** at each limit (the camera looks at the bed from the left wall; the head is out of
+frame), so the MPos line is the evidence of position and the frames are the evidence that the bed
+moved. Trace: `docs/bench/traces/2026-10-08-console.log`.
 
 **Goes to:** `/Simulation.md` §9 item 7 — closes the −200 vs −207 question for **X and Y only**, and
 answers whether the refusal at −200 is conservative or merely round there. **Z stays open**, and the

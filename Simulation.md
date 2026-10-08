@@ -792,7 +792,11 @@ about how the part will *look* beyond which colour volume a floor lands in.
    **The endstops are ENABLED** — the earlier reading here said they were disabled, and that
    claim is withdrawn — and X reaches **7 mm** past the vendor's figure, not 6. Refusing at
    −200 remains the conservative side of a limit the controller really does hold; the band
-   (−207, −200] is reachable by hand but lies outside the declared work area.
+   (−207, −200] is reachable by hand but lies outside the declared work area. **Driven there
+   2026-10-08** (#293, runbook C2): `G53 G0 X-207` and `G53 G0 Y-206` each answered `ok` and
+   landed on exactly −207.000 / −206.000, `Idle`, no refusal — the limit value is a legal
+   destination and one step past it is a clean `error:Soft Endstop` with no motion. The axes
+   reach what the config says; the −200 refusal is conservative by 7 mm and 6 mm. Z untested.
 
 ---
 

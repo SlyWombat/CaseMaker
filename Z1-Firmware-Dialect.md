@@ -354,6 +354,7 @@ Typed through `tools/z1/z1.mjs send` (one framed console line per command, trace
 | `G91` / `G90` | `ok` | `G90` is **refused with `error:Alarm lock`** while in Alarm — unlock first. |
 | `G1 X-5 F300` at MPos X −205 (would reach −210; `soft_endstop.x_min` is −207) | `ok` **then** `error:Soft Endstop X was exceeded - reset or $X or M999 required` | **No motion**, position held at −205, state `<Alarm\|…\|H:10\|…>`. The machine **beeps and the head's light blinks red** (the only indicator — the Z1 has no display). Same for Y (`y_min` −206, held at −205). The soft limit is checked against the *destination* before motion starts: a clean refusal, not a stall. |
 | `$X` | `[Caution: Unlocked]` then `ok` | Clears the Alarm; state back to `Idle`, position kept. |
+| `G53 G0 X-207` from −205 (afternoon; `soft_endstop.x_min` is −207.00) | `ok` | **Reached exactly −207.000**, `Idle`, no beep, no blink: the limit value itself is a legal destination, and the axis gets there (2.4 s send-to-Idle for 2 mm, polling included). `G53 G0 Y-206` likewise reached −206.000. The soft-limit check is `destination < min`, not `<=`. |
 
 Two status-line details seen only in Alarm: an `H:10` field appears, and the `C:` field's last value flips from `1` to `0`.
 
