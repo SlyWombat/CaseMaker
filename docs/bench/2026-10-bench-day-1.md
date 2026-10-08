@@ -308,6 +308,11 @@ work) with calipers, at its widest. Photograph it against the scale. Note which 
 they are three different parts (`/Fabrication.md` §1) — and if the tip is a ball on a stem, the
 stem diameter too.
 
+> **Superseded 2026-10-08.** The 3D Probe is not the touch-off probe — the wired probe is
+> (`/Fabrication.md` §7.3, revised) — so the tip that `registration.ts:43`'s 3 mm assumption
+> stands in for is the **wired probe's**. Caliper that one instead, same fields; the 3D Probe's
+> tip only matters if it is ever fitted.
+
 **Expected.** Unknown. Makera publishes no figure. The code assumes **3 mm** — "the common ball for a
 probe of this class" (`engrave/registration.ts:43`, `PROBE_SPEC` at `:57`; `cncProbePlan.spec.ts`
 used the same). The tip sets how far a touch stands off a corner and how short an edge may be, so
@@ -1065,6 +1070,11 @@ shift, or only the spindle within a still image?
 **Do.** Fit the **Makera 3D Probe**. Probe the top of a **wood** blank in Z. Repeat five times
 without moving XY.
 
+> **Superseded 2026-10-08.** There is no wood job — the part is the printed PLA blank — and the
+> **wired probe** is the touch-off probe in use (`/Fabrication.md` §7.3, revised): a mechanical
+> tip that triggers on PLA, recorded below with a 0.001 mm slow spread. The 3D Probe run this row
+> asked for is not needed; C4's figure is the wired-probe one.
+
 **Expected.** The 3D Probe is rated for non-conductive material, so it should trigger on wood;
 its repeatability has never been measured (`/Fabrication.md` §1, §7.6).
 
@@ -1091,17 +1101,7 @@ face, now up, is convex. A single centre probe therefore over-reads the surface 
 the width edges, which is of the order of the two-colour boundary's tolerance (#166, decision 12).
 Frames: `docs/bench/img/293-s2-over-blank.jpg`, `293-s2-probe-over-fixed-jaw.jpg`.
 
-**Recorded:** _not yet run — 5 Z values; spread = probe repeatability._
-
-| Run | Z reading (machine coords, mm) |
-|---|---|
-| 1 | |
-| 2 | |
-| 3 | |
-| 4 | |
-| 5 | |
-| Spread (max − min) | |
-| Triggered on wood? (yes/no) | |
+**Recorded (3D Probe on wood):** _superseded — not needed, see above._
 
 **Goes to:** `/Fabrication.md` §7.6.
 

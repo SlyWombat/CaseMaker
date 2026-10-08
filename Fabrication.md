@@ -78,13 +78,17 @@ G-code semantics are LinuxCNC-flavoured and documented.
 >
 > | | Probes | Materials |
 > |---|---|---|
-> | **Wired probe** (in the box) | Z only, plus surface levelling and area scanning | not stated |
+> | **Wired probe** (in the box) | Z only, plus surface levelling and area scanning | not stated by Makera — **measured 2026-10-08: a mechanical touch tip that triggers on PLA**, five touches on the printed blank with a 0.001 mm slow spread (`/Z1-Firmware-Dialect.md` §11.7, #293). |
 > | **3D Probe Rod** (in the box) | X, Y and Z | **CONDUCTIVE ONLY.** "The workpiece must be electrically connected to the aluminum table via locating pins, screws, or other conductive methods" (`Z1/QuickStart`) |
 > | **Makera 3D Probe** (separate accessory, **the user owns this one**) | X, Y and Z | "both conductive and non-conductive materials" (`Makera-Accessories/Makera-3D-Probe`) |
 >
 > So **decision 8 and §7.3 stand — but only because the user owns the separate 3D
 > Probe.** The rod that came in the box cannot do it. #165 still verifies it on PLA
 > rather than taking the page's word for it.
+>
+> **Revised 2026-10-08.** The bench settled it the other way: the **wired probe** touches
+> PLA (it is a mechanical tip, not a conductive one) and repeats to 1 µm on the blank, so it
+> is the touch-off probe in use and the 3D Probe is held in reserve. §7.3, decision 8.
 
 ### Workholding, as the machine does it natively
 `Z1/QuickStart` documents an **anchor-based system** this document had not accounted
@@ -119,7 +123,9 @@ without noting it.
   Vacuum Bed, Low-Profile Vise and Ionizer); the user has confirmed owning it.
 - Using it is itself a tool change: remove cutter → fit probe → unplug wired probe
   connector → plug 3D probe → probe → swap back → `M491`. §7.6 explains why that
-  chain's repeatability needs measuring.
+  chain's repeatability needs measuring. **Superseded 2026-10-08:** the wired probe is the
+  touch-off probe (§7.3), so nothing is unplugged or re-plugged; the chain is probe touch →
+  hand swap to the cutter → `M491`, and two of its three terms are now measured (§7.6).
 - The **wired** probe *is* documented after all: `Z1/QuickStart` says it "supports
   automatic Z-axis probing, surface leveling, and machining area scanning", and that with
   the anchor system "it enables easy XYZ positioning". What it does **not** state is
@@ -282,7 +288,7 @@ accepted.
 | 5 | **Images get two user-selectable methods** | Vector trace and greyscale relief. Not in V1 — V1 is text. **Resequenced 2026-10-05:** trace first, with #217; relief with the dexel engine (#222). `/Makera-Parity.md` §14.5. |
 | 6 | **Mesh import only to start (STL/3MF/OBJ)** | Behind a pluggable registry. Not needed for V1. **CNC scope added 2026-10-05:** CNC import is **profiles first** — SVG, then DXF (#217); mesh for the CNC side arrives with the dexel engine (#222). The case-side mesh importer is unchanged. `/Makera-Parity.md` §14.5. |
 | 7 | **Stock setup = corner find + Z touch-off, `G32` autolevel, model cross-check** | **Superseded in all three parts** — by decision 23 (edge-find on flats, not a corner), decision 12 (`G32` out) and decision 24 (no thickness cross-check). |
-| 8 | **We have both the wired probe and the Makera 3D Probe** | Non-conductive probing is available, so PLA can be probed. |
+| 8 | **We have both the wired probe and the Makera 3D Probe** | Non-conductive probing is available, so PLA can be probed. **Revised 2026-10-08:** the *wired* probe does it — a mechanical touch tip, measured on the blank, 0.001 mm — so it is the one in use; the 3D Probe stays in reserve (§7.3, #293). |
 | 9 | **First real job is a 3D-printed blank (PLA/PETG)** | The badge. **Reworded 2026-10-05:** the first *badge* job; CNC-2's first chips are wood in the vise (#209) and the badge is CNC-3. `/Makera-Parity.md` §14.5. |
 | 10 | **Transport is WiFi** | Still the chosen transport. **Not in V1** — see §10.1. |
 | 11 | **4th axis: designed for, not built** | See decision 18. **Design in `/Rotary.md` (decisions R1–R12).** |
@@ -945,12 +951,18 @@ no variables, so `G10 L2 P1` cannot take a computed offset and **rotation compen
 impossible in a static file.** A derived *plan* can be executed interactively today and
 emitted later when the bridge exists; the planner does not care which.
 
-**Probe, confirmed 2026-10-03.** The one in use is the **separate, cabled Makera 3D
-Probe** — the only one of the three rated for non-conductive material, and therefore the
-only one that can touch off a PLA blank (§1). Using it means unplugging the wired-probe
-connector, which stays a step in §7.6's Z chain. The *wireless* probe is a Carvera part,
-which is why `M491` and `T0` reference it in the shared firmware and why Studio's control
-panel carries wireless-probe charging voltages; there is none on this machine.
+**Probe, revised 2026-10-08 (was "confirmed 2026-10-03": the separate Makera 3D Probe).**
+The one in use is the **wired probe that ships with the machine.** The 2026-10-03 reading
+rested on Makera's pages, which rate only the 3D Probe for non-conductive material; the bench
+showed the wired probe is a *mechanical* touch tip — it registers on contact, conductive or
+not — and it touched the PLA blank five times with a 0.001 mm slow spread and mapped the
+blank's dome against the vise (`/Z1-Firmware-Dialect.md` §11.7–11.8, #293). So nothing is
+unplugged for a touch-off, the 3D Probe is held in reserve, and the runbook's C4/A8 rows for
+it are superseded. The *wireless* probe is a Carvera part, which is why `M491` and `T0`
+reference it in the shared firmware and why Studio's control panel carries wireless-probe
+charging voltages; there is none on this machine — and with tool 0 active, `M491` ends in
+the wireless-probe check `ERROR: Probe dead or not set` (`/Z1-Firmware-Dialect.md` §11.9),
+which is why a cutter must be registered as `T1` first.
 
 ### 7.4 What a V-bit does, and why V1 uses a flat end mill
 
@@ -1028,7 +1040,11 @@ The model settles geometry. These need the machine:
 
 - **The Z chain across a tool change.** Probe fitted → hand swap → `M491` → cutter.
   Probe repeatability plus `M491` repeatability plus collet seating has never been
-  quantified. #176 measures it by cutting a step and calipering it.
+  quantified. #176 measures it by cutting a step and calipering it. **Two of the three
+  terms measured 2026-10-08:** the wired probe's touch repeats to **0.001 mm** on the blank
+  (`/Z1-Firmware-Dialect.md` §11.7) and `M491` to **0.001 mm** on the sensor (#208 C6).
+  Collet seating — the probe out, the cutter in — is the term that remains, and #176's step
+  cut is still what closes it.
 - **Chatter over the pocket.** Engraving inside the pocket footprint cuts a ~1.5 mm
   membrane spanning an unsupported void. Expect deflection and poor finish there at
   *any* depth. The layer stack correctly permits the cut; it cannot predict the finish.
