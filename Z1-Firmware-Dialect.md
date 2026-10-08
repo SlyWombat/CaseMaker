@@ -426,3 +426,89 @@ between them in X. The vise is flat and level to a few hundredths; the blank's 0
 So the face we probe — the face that was printed against the bed, now uppermost — is **convex by
 ~0.3 mm across the width and ~0.1 mm along the length**, the shape a cooling print takes when its
 corners lift. The jaw shelf holds it; the blank itself is not flat.
+### 11.9 Observed 2026-10-08 — `M491` typed with tool 0 active: the whole macro, and why it ends in Alarm (#208 C6)
+
+Three runs, through our console, head starting at clearance, a 1 mm two-flute ball nose fitted in the
+collet with its collar, the wired probe plugged in and seated in its holder (the second and third runs;
+the first run had it unseated, which changed nothing). Status `T:0,0.000,-1` before the first run.
+The controller echoes each line of the macro to the console as it runs it, so this is verbatim:
+
+```
+M491
+ok
+M494.1                       ok
+M497.3                       ok
+G53 G0 Z-3.000               ok
+G53 G0 X-9.890 Y-12.830      ok        <- anchor1 + 181 on each axis (B6), the tool-length sensor
+G38.6 Z-108.000 F500.000     [PRB:-9.890,-12.830,-85.801:1]  ok
+G91 G0 Z1.000                ok
+G38.6 Z-2.000 F100.000       [PRB:-9.890,-12.830,-85.781:1]  ok
+M493.1                       ok        <- status T field becomes T:0,-9.757,-1
+G53 G0 Z-20.000              ok
+M492.3                       ERROR: Probe dead or not set, please charge or set first!   ok
+```
+
+then `<Alarm|…|H:12|C:3,1,0,0>` with the head at Z −20 over the sensor. Three things this settles:
+
+- **§2's steps 5–8 are exactly what `M491` runs**, including the `clearance_z` traverse at −3.0, the
+  two-touch probe (fast 500 → retract 1 → slow 100, the slow target relative to the retracted
+  position), `M493.1` saving the offset, and the lift to `safe_z` −20. Before the probe it emits
+  `M494.1` and `M497.3` (UI-state flags, no motion).
+- **`M492.3` is the wireless-probe health check, and it runs because the active tool is 0.** On this
+  firmware tool 0 is "the probe" (`/Fabrication.md` §2), `M491` keys off `active_tool == 0`, and the
+  check fails on a Z1 because there is no wireless probe to charge. **`H:12` is that halt.** It fires
+  *after* the offset has been saved, so the calibration itself is complete; `$X` clears it with the
+  offset kept (`T:0,-9.757,-1` survives the unlock), and `G28` returns to clearance normally.
+- **The sensor's trigger height repeats to the micrometre.** Slow touches: **−85.781, −85.781,
+  −85.781** (spread 0.000 mm); fast touches −85.801, −85.795, −85.798 (spread 0.006, reading
+  14–20 µm deep, the same sign and size as the wired probe's fast/slow gap in §11.7). The saved
+  offset was −9.757 each time. The cutter's ball tip is what touched; the sensor is a sprung button,
+  and nothing was harmed.
+
+The reply arrives in one burst only when the console stays open past the macro: with the default
+800 ms quiet window the session closed after `M492.3` and the error text was lost twice. A line that
+starts a macro needs `--quiet` of tens of seconds, or the error goes unseen.
+
+**Then with a cutter number active — observed the same afternoon.** `T1 M6` typed with tool 0 active:
+
+```
+T1 M6
+Please change the tool to: T1
+ok
+G53 G0 Z-3.000               ok
+G53 G0 X-10.090 Y-12.830     ok        <- the manual change position: 0.2 mm in X from the sensor
+M497.2                       ok
+M490.1                       ok        <- status now <Tool|…|T:0,-9.757,1|…>: waiting, third T field = the tool asked for
+```
+
+The machine sat in state **`Tool`** until `M490.2` was typed — the "carry on" half of the handshake,
+which is what Studio's Confirm button must send:
+
+```
+M490.2
+ok
+M493.2 T-1                   ok        <- mark the spindle empty
+M497.3                       ok
+G53 G0 Z-3.000  /  G53 G0 X-9.890 Y-12.830            ok
+G38.6 Z-108.000 F500.000     [PRB:-9.890,-12.830,-85.788:1]  ok
+G91 G0 Z1.000                ok
+G38.6 Z-2.000 F100.000       [PRB:-9.890,-12.830,-85.775:1]  ok
+M493.1                       ok
+G53 G0 Z-20.000              ok
+M493.2 T1                    ok        <- record tool 1
+M494.2                       ok
+Done ATC                               <- head then back at (-11.6, -14.6, -3.0), status T:1,-9.752,1
+```
+
+`M491` with **T1 active** is the same macro minus the tool bookkeeping and minus the probe check:
+`M497.3`, the two moves, the two touches, `M493.1`, `G53 G0 Z-20`, `Done ATC`, head back at the saved
+X,Y at `clearance_z` — 33.5 s per run, five runs, slow touch **−85.775 ×5**, saved offset −9.752/−9.751.
+And `T1 M6` with T1 already active answers `ok` and does **nothing** — no echo, no motion, offset
+untouched — which is §2's no-op rule, now observed (runbook C7).
+
+So the roles, now observed rather than read: `M490.1` wait / `M490.2` carry on; `M492.3` wireless-probe
+check (tool 0 only); `M493.1` save offset; `M493.2 T<n>` set the active tool number (−1 = empty);
+`M494.1` / `M494.2` and `M497.2` / `M497.3` are UI-state flags around the sequence; `Done ATC` closes
+every macro. The third value of the status `T:` field is the tool number a pending change is waiting
+for (1 while waiting for T1; −1 otherwise).
+

@@ -1130,16 +1130,33 @@ two-point edge find at all is unknown (see B1).
 **Expected.** `M491` resets TLO for the current tool and is **not** ATC-gated (`/Fabrication.md`
 §2); the `M491` term of the Z chain has never been quantified (§7.6).
 
-**Recorded:** _not yet run — 5 TLO values._
+**Recorded 2026-10-08 — RUN, through our console (`tools/z1/z1.mjs send`).** Cutter: the 1 mm ×
+4 mm two-flute ball nose (A1, yellow box, QR `C1-BIT-BALL-NOSE-1-4`), fitted with its collar; collet
+nut and stick-out **not calipered** (A2 still open). Every `M491` echoes its macro to the console, so
+the two `[PRB:…]` touches and the saved offset (`T:` field of the status line) were read directly;
+`/Z1-Firmware-Dialect.md` §11.9 has the verbatim sequence.
 
-| Run | TLO value (mm) |
-|---|---|
-| 1 | |
-| 2 | |
-| 3 | |
-| 4 | |
-| 5 | |
-| Spread (max − min) | |
+**First, three runs with tool 0 active** (`T:0`, the state after power-up): each calibrated and saved,
+then halted with `ERROR: Probe dead or not set, please charge or set first!` (`H:12`) — the firmware's
+wireless-probe check, which runs because tool 0 means "the probe". Slow touches −85.781 ×3, offset
+−9.757 ×3. Then `T1 M6` + `M490.2` registered the cutter as tool 1 (one more calibration: −85.775,
+offset −9.752), and the five runs below are with **T1 active**, which is a real job's state. No alarm,
+`Done ATC` each time, head back at clearance (−11.6, −14.6, −3.0) each time, 33.5 s per run.
+
+| Run | Fast touch `G38.6 Z-108 F500` | Slow touch `G38.6 Z-2 F100` | TLO value (mm) |
+|---|---|---|---|
+| 1 | −85.793 | **−85.775** | **−9.752** |
+| 2 | −85.793 | **−85.775** | **−9.751** |
+| 3 | −85.788 | **−85.775** | **−9.752** |
+| 4 | −85.789 | **−85.775** | **−9.751** |
+| 5 | −85.794 | **−85.775** | **−9.751** |
+| Spread (max − min) | 0.006 | **0.000** | **0.001** (the status line rounds to 1 µm) |
+
+The slow touch moved from −85.781 (the three tool-0 runs, first minutes after fitting) to −85.775 (all
+six runs after `T1 M6`), 6 µm, and the offset with it; observed, not explained — the cutter bedding in
+the collet after its first touches is one reading, the fitted tool number is another, and nothing here
+separates them. The `M491` term of the Z chain is therefore **≤ 0.001 mm run-to-run** on this sensor
+with this cutter; the fast touch alone would be 20 µm worse, which is why the macro probes twice.
 
 **Goes to:** the `M491` term of the Z chain (`/Fabrication.md` §7.6).
 
@@ -1157,12 +1174,20 @@ two-point edge find at all is unknown (see B1).
 > still has no hardware behind it. Worth knowing before running C7 that a real change **blocks**,
 > so C7's "did anything move?" should be answered at the dialog, not after it.
 
-**Recorded:** _not yet run — yes/no._
+**Recorded 2026-10-08 — RUN.** With T1 active and calibrated (C6), `T1 M6` from the console at
+16:18:19 UTC.
 
 | Field | Value |
 |---|---|
-| Did anything move? (yes/no) | |
-| If yes, what | |
+| Did anything move? (yes/no) | **no** |
+| If yes, what | — the reply was a single `ok`, no macro echoed, no `Please change the tool` line, state stayed `Idle` at clearance for the 13 s watched, and `T:1,-9.751,1` was unchanged: no change and **no recalibration**, exactly §2's no-op rule. |
+
+For contrast, the same line with tool 0 active (minutes earlier) ran the full change: `Please change
+the tool to: T1`, lift, `G53 G0 X-10.090 Y-12.830` (the change position — 0.2 mm in X from the
+sensor), `M497.2`, `M490.1`, then state **`Tool`** with the status `T:0,-9.757,1` (the third field
+is the tool being waited for) until `M490.2` carried it on through the sensor to `M493.2 T1`,
+`M494.2`, `Done ATC`. So #207 section 4's warning stands: a job that opens with `T1 M6` does nothing
+if T1 is already active, and a full, blocking change if it is not.
 
 **Goes to:** #207 section 4.
 
