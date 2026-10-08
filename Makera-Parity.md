@@ -91,8 +91,10 @@ Also present, with no shipped config: `AVCustom3DStrategy`, `AVCustom4DStrategy`
 
 ## 3. The tool model
 
-`t_MakeraCutterList` holds 129 catalogued cutters in 16 groups. A tool's identity is
-`cutterCategoryId`, which is the same integer the config files call `toolType`.
+`t_MakeraCutterList` holds 129 catalogued cutters in 16 groups. A tool's **type** is
+`cutterCategoryId`, which is the same integer the config files call `toolType`. (Its **row
+identity** is not that integer but `cutterId`, a UUID — see §3.2, which is §3 written from the
+real database rather than from the prose.)
 
 | id | Category | Catalogued | Geometry that defines it |
 |---|---|---|---|
@@ -143,6 +145,73 @@ bundled fonts at r = 0.5 (1 mm flat) and at the V-bit's effective radius and rep
 which strokes survive. If the user owns a 30° bit, one extra V-groove row in #165
 settles it on the same afternoon.
 
+### 3.2 The real schema, verbatim — from the install, 2026-10-08 (#307)
+
+Everything above reads the fields out of camelCase prose and the Studio project files. The database
+those fields live in was dumped **read-only** on 2026-10-08 — method and full evidence in
+`docs/bench/2026-10-08-makera-library-schema.md`, raw dump in #307's evidence comment. The column
+names are real, and they correct the prose in three places.
+
+**`t_MakeraCutterList`** — 129 rows, primary key `cutterId`:
+
+```
+cutterId TEXT, groupId TEXT, cutterName TEXT, cutterNumber INTEGER,
+cutterCategoryId INTEGER, cutterDiameter REAL, cutterStickoutLength REAL,
+cutterShoulderLength REAL, cutterFluteLength REAL, cutterMaxDiameter REAL,
+cutterTipDiameter REAL, cutterCornerRadius REAL, cutterAngle REAL,
+cutterHalfAngle REAL, threadSpecification REAL, pitch REAL, threadAngle REAL,
+drillDiameter REAL, sellProduct INTEGER, g_ID TEXT, metalDuty INTEGER,
+lastUpdateDate TEXT
+```
+
+**Corrections to §3's opening.**
+
+- **The row identity is `cutterId`, a time-ordered (v7-shaped) UUID** (`019c049a-8169-…`), not
+  `cutterCategoryId`. That integer is the **type** (the table below), the same one the config files
+  call `toolType`; many cutters share it.
+- **The 12-digit `id=112111313812` in `TopClamp.nc`'s header is the `g_ID` column**, a second,
+  separate natural key. All 129 rows carry a 12-character `g_ID` and `sellProduct = 1`.
+- `cutterStickoutLength` is a REAL column that holds an **empty string** (`''`, not NULL) for the
+  3.175 mm flat — the same `''`-means-unset convention the other optional geometry columns use. An
+  importer must read `''` as unset, never as `0`.
+- **The QR slug `C1-BIT-BALL-NOSE-1-4` is nowhere in the file.** Every text column of every table
+  was searched for `C1-BIT` and `BALL-NOSE`; the catalogue has no 1/4-inch (6.35 mm) ball nose by
+  name either — its ball noses are 3.175, 4 and 6 mm. So the code scanned and the tool named in the
+  file are **not the same identifier**, which is the whole of §3.3.
+
+**The feeds table and the join.** `t_MakeraCutterProperties` — 1 328 rows, PK `propertiesId`:
+
+```
+propertiesId TEXT, materialId TEXT, cutterID TEXT, spindleSpeed INTEGER,
+feedRate INTEGER, plungeFeedRate REAL, stepDown REAL, stepOver REAL,
+stepOverPercent REAL, coolant INTEGER
+```
+
+**Join key: `t_MakeraCutterProperties.cutterID` → `t_MakeraCutterList.cutterId`** (a `LEFT JOIN`
+finds **0** orphan property rows) and **`t_MakeraCutterProperties.materialId` →
+`t_MaterialList.materialID`** (also 0 orphans). One row per material the cutter is rated for; the
+3.175 mm flat carries 13.
+
+**The `t_Custom*` / `t_Customer*` model — this is decision 30's "clone".** `t_CustomCutterList` is a
+**full copy of the catalogue's columns minus `g_ID`**: a user tool is *materialised* and holds **no
+pointer to a base row**, and `t_CustomerCutterProperties` mirrors the feeds columns plus
+`lastUpdateDate`. Studio has no diff table — a materialised tool is the only way a user tool
+outlives its base. (Both empty in this install.)
+
+### 3.3 What the code scanned is not what the file names — open
+
+A7 decoded one cutter's label to `C1-BIT-BALL-NOSE-1-4` (`docs/bench/2026-10-bench-day-1.md` § A7).
+That slug is a human-readable product name, it is absent from the database, and the header `id`
+(`g_ID`) is a 12-digit number the label does not carry. The one table shaped to bridge them is
+**`t_SkuMapping`** — `skuMappingID, mappingDuty, g_ID, shopifyRegion, sku, url, removeFlag,
+lastUpdateDate`, i.e. a `g_ID ↔ Shopify sku` map — and it is **empty in this install**: Studio
+resolves the slug **online**, which the web build cannot do (#212, #181). So the scan design cannot
+assume the slug is a local key; it must treat "the decoded text" and "the tool in the file" as two
+identifiers with a link we do not yet hold. **Closed 2026-10-08:** there is no Z1-badged cutter to
+photograph — every cutter that came with the machine is branded MAKERA CARVERA
+(`docs/bench/img/a1-all-cutters-boxed.jpg`, runbook A1), so the `C1-` scheme is the only one this
+machine's cutters carry. What stays open is the **vocabulary**, not the scheme: the other slugs.
+
 ---
 
 ## 4. Shared operation parameters
@@ -182,12 +251,25 @@ Several thread-mill fields are named in pinyin (`luoJu` pitch, `jiaJiao` include
 - **Materials**: `t_MaterialList` has **15** entries — PCB, 6061 and 7075 aluminium,
   Bakelite, Delrin, Brass, Carbon Fiber, Acrylic, Polycarbonate, Copper, Epoxy Tooling,
   Synthetic Stone, ABS, Hardwood, Softwood. `t_MaterialSpecs` adds 189 purchasable stock
-  sizes.
+  sizes. **Real columns, 2026-10-08 (#307):** `t_MaterialList` is `materialID` (PK),
+  `materialCategoryID` → **`t_MaterialCategory`** (6 rows: Wood, Plastic, Aluminum Alloys,
+  Copper Alloys, PCB, Composites, each with a `metalDuty` flag), `materialSubcategoryName`,
+  `lastUpdateDate`. `t_MaterialSpecs` is `materialSpecsID` (PK), `materialID` (FK),
+  `materialName`, `materialShape`, `length, width, height, diameter`, `g_ID`; the shape is
+  `'R'` (rectangular block, 137) or `'C'` (round bar, 52), and its `g_ID` is a **16-digit**
+  code — not the cutter's 12 — that encodes the stock dims (`1511001150100002` = 1.5 mm PCB,
+  100 × 150). Only ~10 materials appear in the specs table; the rest are feeds-only.
 - **Feeds**: `t_MakeraCutterProperties`, 1 328 rows keyed material × cutter, giving
   spindle speed, feed, plunge feed, step-down, step-over (% and mm) and coolant.
+  **Real columns, 2026-10-08 (#307):** PK `propertiesId`; the two FKs are `cutterID` →
+  `t_MakeraCutterList.cutterId` — **this is the join key** — and `materialId` →
+  `t_MaterialList.materialID`; then `spindleSpeed, feedRate, plungeFeedRate, stepDown,
+  stepOver, stepOverPercent, coolant`.
 - **Customisation**: `t_Custom*` and `t_Customer*` tables exist for user tools, groups,
   properties, materials and specs. All are **empty** in this install, so the schema
-  supports user-defined tooling but nothing here shows the UI for it.
+  supports user-defined tooling but nothing here shows the UI for it. **2026-10-08 (#307):**
+  `t_CustomCutterList` is the catalogue's columns **minus `g_ID`** — a *materialised* user
+  tool with no base pointer, which is exactly decision 30's clone model; see §3.2.
 
 ### 5.1 Three facts about that data that change our plan
 
@@ -195,7 +277,9 @@ Several thread-mill fields are named in pinyin (`luoJu` pitch, `jiaJiao` include
    or a generic "plastic". V1's blank is PLA. So Studio's feeds table **has no row for
    the material of our first job**, and `/Fabrication.md` §9.1's "hardcode the measured
    numbers from #165" is not a shortcut — for PLA it is the only source. Reading the DB
-   can never answer it.
+   can never answer it. **Confirmed by dumping the real rows, 2026-10-08 (#307):** the
+   only plastics present are ABS, Acrylic, Delrin, Polycarbonate and Bakelite — no PLA,
+   PETG, PET or nylon.
 2. **For small non-metal flat ends, the 1 328-row matrix is barely differentiated.**
    Across the catalogued non-metal flat ends of 2 mm and under, the (speed, feed, plunge,
    step-down, step-over) tuples collapse to **two** distinct values — the second differing

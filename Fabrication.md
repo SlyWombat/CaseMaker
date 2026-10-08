@@ -248,6 +248,15 @@ copy into this repo** (we ship LICENSE/NOTICE and care about provenance).
   laser ones we're ignoring). Useful as a checked-against reference, not a spec
   to copy.
 
+**Verbatim schema, 2026-10-08 (#307).** The real column names, the primary key (`cutterId`, a
+v7-shaped UUID — *not* `cutterCategoryId`, which is the type), the join key
+(`t_MakeraCutterProperties.cutterID → t_MakeraCutterList.cutterId`, 0 orphans), and one real row per
+table are recorded in `docs/bench/2026-10-08-makera-library-schema.md`; the summary correction to
+the prose above is in `/Makera-Parity.md` §3.2/§3.3 and §5. Two facts a reader of this section needs:
+`cutterStickoutLength` uses `''` (empty string) for "unset", and **the scanned QR slug
+(`C1-BIT-BALL-NOSE-1-4`) is not in the database** — the `g_ID ↔ sku` map (`t_SkuMapping`) is empty,
+so Studio resolves it online (#212, #307).
+
 ### Known-buggy baseline
 Makera Studio 0.1.2.0 ("Beta") has needed local patching to run on this machine;
 `MakeraStudio.exe.orig` sits beside the patched binary in the install — **keep
