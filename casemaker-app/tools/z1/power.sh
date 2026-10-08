@@ -68,7 +68,7 @@ port_open() { timeout 3 bash -c "exec 3<>/dev/tcp/$HOST/$PORT" 2>/dev/null; }
 status_line() {
   powershell.exe -NoProfile -Command \
     "Set-Location '$(wslpath -w "$APP_DIR")'; node tools/z1/z1.mjs status $HOST --port $PORT" 2>/dev/null |
-    tr -d '\r' | grep -m1 -E '<[A-Za-z]+[|>]'
+    tr -d '\r' | grep -m1 -E '<[A-Za-z]+[|>]' | sed -e 's/^[^<]*//' -e 's/"[[:space:]]*$//'
 }
 
 state_word() { sed -n 's/.*<\([A-Za-z]*\)[|>].*/\1/p' <<<"$1" | head -1; }
