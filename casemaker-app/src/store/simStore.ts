@@ -121,7 +121,12 @@ export interface SimState {
   restart: RestartResult | null;
   /** The limit the next `loadProgram` uses, ms; `retryWithLongerBudget` doubles it (#194). */
   budgetMs: number;
-  loadProgram(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null): Promise<void>;
+  /**
+   * `calibration` is the saved frame the caller already resolved its OWN machine with (#297). Omit it
+   * and the store reads the settings itself, once; pass it (including `null`, meaning "none") and that
+   * exact answer is the one simulated, so a caller that also generated against it cannot be split.
+   */
+  loadProgram(gcodeText: string, setup: Setup, tool: Tool, machineId: string | null, calibration?: MachineCalibration | null): Promise<void>;
   /** Run the last load again with twice the time limit (#194). No-op when nothing has been loaded. */
   retryWithLongerBudget(): Promise<void>;
   /**
@@ -285,11 +290,12 @@ export const useSimStore = create<SimState>()((set, get) => {
   return {
     ...EMPTY,
     budgetMs: DEFAULT_SIM_BUDGET_MS,
-    async loadProgram(gcodeText, setup, tool, machineId) {
+    async loadProgram(gcodeText, setup, tool, machineId, calibrationOverride) {
       // The saved read of the machine's own frame, if the user has one (#279). Resolved HERE so
       // every load path — a panel, the engrave run, the QA harness — simulates the same machine,
       // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
-      const calibration = useSettingsStore.getState().machineCalibration ?? null;
+      const calibration =
+        calibrationOverride !== undefined ? calibrationOverride : (useSettingsStore.getState().machineCalibration ?? null);
       lastLoad = { gcodeText, setup, tool, machineId, calibration };
       await run(lastLoad, get().budgetMs);
     },

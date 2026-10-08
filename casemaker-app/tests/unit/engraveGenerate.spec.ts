@@ -10,9 +10,37 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { CAM_ID, CAM_NAME } from '@/engine/cnc/post/z1';
 import { version as APP_VERSION } from '../../package.json';
 import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
+import { calibrationFromReplies } from '@/engine/cnc/calibration';
+import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLineItem, EngraveTraceItem } from '@/types/engraveJob';
+
+describe('engraveGenerate with a saved machine frame (#297)', () => {
+  const read = calibrationFromReplies(new Map(Object.entries(Z1_FRAME_REPLIES)), {
+    machineId: 'Z1',
+    measuredAt: '2026-10-06T13:01:11.000Z',
+    host: '192.168.10.43',
+  });
+  if (!read.ok) throw new Error('the fixture should read');
+
+  it('still produces a clean program, and the same .nc, under the saved frame', () => {
+    // The frame moves where M6, G28 and the probe go IN MACHINE COORDINATES. It must not move a
+    // single work-coordinate cut, so the text a user saves is the same bytes either way.
+    const without = engraveGenerate(tl, defaultEngraveJob());
+    const withFrame = engraveGenerate(tl, defaultEngraveJob(), read.calibration);
+    expect(withFrame.ok).toBe(true);
+    expect(withFrame.nc).toBe(without.nc);
+    expect(withFrame.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+  });
+
+  it('ignores a frame saved for a different machine, exactly as the simulation does', () => {
+    const other = { ...read.calibration, machineId: 'Z1-other' };
+    const g = engraveGenerate(tl, defaultEngraveJob(), other);
+    expect(g.ok).toBe(true);
+    expect(g.nc).toBe(engraveGenerate(tl, defaultEngraveJob()).nc);
+  });
+});
 
 describe('engraveGenerate (#206)', () => {
   it('takes the default job all the way to a clean .nc', () => {

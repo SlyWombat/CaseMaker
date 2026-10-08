@@ -12,7 +12,7 @@
  */
 
 import * as Comlink from 'comlink';
-import type { Setup } from '@/engine/cnc';
+import type { Setup, MachineCalibration } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveJob } from '@/types/engraveJob';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
@@ -110,9 +110,9 @@ const api = {
    * so the keys this job's enabled labels need are loaded first (#180), exactly as
    * `engravePreview` does. Returns the exact `.nc` text plus the opened regions the oracle needs.
    */
-  async engraveGenerate(job: EngraveJob): Promise<EngraveGenerated> {
+  async engraveGenerate(job: EngraveJob, calibration?: MachineCalibration | null): Promise<EngraveGenerated> {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    return runEngraveGenerate(await getToplevel(), job);
+    return runEngraveGenerate(await getToplevel(), job, calibration ?? null);
   },
   /**
    * The volumetric oracle (#206 §3) against the program CURRENTLY loaded in the session. The

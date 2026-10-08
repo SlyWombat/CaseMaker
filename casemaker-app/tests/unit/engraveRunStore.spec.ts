@@ -15,6 +15,10 @@ import {
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
+import { useSimStore } from '@/store/simStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import { calibrationFromReplies, type MachineCalibration } from '@/engine/cnc';
+import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
 
 const NOTHING: EngraveGenerated = {
   ok: false,
@@ -155,5 +159,72 @@ describe('engraveRunStore (#206)', () => {
     useEngraveJobStore.getState().setStock({ length: 120 });
     expect(useEngraveRunStore.getState().staleSince).not.toBeNull();
     expect(saveBlocker(useEngraveRunStore.getState())).toBe('the job changed since it was generated');
+  });
+
+  // #297: the generator (post, verifier, frame file) and the simulation must judge ONE machine. The
+  // saved frame is read once per run and handed to both; a change to the saved frame while the
+  // generator is working must not reach the simulation load of the same run.
+  it('hands the same saved frame to the generator and to the simulation load, read once (#297)', async () => {
+    const read = calibrationFromReplies(new Map(Object.entries(Z1_FRAME_REPLIES)), {
+      machineId: 'Z1',
+      measuredAt: '2026-10-06T13:01:11.000Z',
+      host: '192.168.10.43',
+    });
+    if (!read.ok) throw new Error('the fixture should read');
+    const first: MachineCalibration = read.calibration;
+    const second: MachineCalibration = { ...first, source: 'a different read, saved mid-run' };
+
+    useSettingsStore.setState({ machineCalibration: first });
+    let generatedWith: MachineCalibration | null | undefined;
+    let loadedWith: MachineCalibration | null | undefined;
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({
+      loadProgram: async (_nc, _setup, _tool, _id, calibration) => {
+        loadedWith = calibration;
+      },
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async (_job, calibration) => {
+        generatedWith = calibration;
+        // The user saves a new frame while the worker is generating.
+        useSettingsStore.setState({ machineCalibration: second });
+        return clean();
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    try {
+      await useEngraveRunStore.getState().generate();
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+      useSettingsStore.setState({ machineCalibration: undefined });
+    }
+    expect(generatedWith).toBe(first);
+    expect(loadedWith).toBe(first);
+  });
+
+  it('passes "no saved frame" as null to both, not as a fresh read (#297)', async () => {
+    useSettingsStore.setState({ machineCalibration: undefined });
+    let generatedWith: MachineCalibration | null | undefined = undefined;
+    let loadedWith: MachineCalibration | null | undefined = undefined;
+    const realLoad = useSimStore.getState().loadProgram;
+    useSimStore.setState({
+      loadProgram: async (_nc, _setup, _tool, _id, calibration) => {
+        loadedWith = calibration;
+      },
+    });
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async (_job, calibration) => {
+        generatedWith = calibration;
+        return clean();
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    try {
+      await useEngraveRunStore.getState().generate();
+    } finally {
+      useSimStore.setState({ loadProgram: realLoad });
+    }
+    expect(generatedWith).toBeNull();
+    expect(loadedWith).toBeNull();
   });
 });

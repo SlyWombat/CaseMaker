@@ -36,6 +36,7 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 // own save (#231 item 4). package.json is the single source in every environment.
 import { version as CAM_VERSION } from '../../../package.json';
 import { Z1, type MillProfile } from '@/engine/cnc/machine';
+import { resolveMachine, type MachineCalibration } from '@/engine/cnc/calibration';
 import { feedsFor, type FeedsResult } from '@/engine/cnc/feeds';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { toPartPlan, labelProfile, jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
@@ -364,7 +365,21 @@ function frameProgram(
   return { nc: posted.text, verify };
 }
 
-export function engraveGenerate(tl: ManifoldToplevel, job: EngraveJob): EngraveGenerated {
+/**
+ * Generate, post and verify one engrave job.
+ *
+ * `calibration` is the machine's own frame, if the user has one saved (#279). The machine is resolved
+ * from it ONCE here (#297) and that one object feeds the feeds, the post, the setup, the verifier and
+ * the frame file — the same object the caller loads the simulation with. Before this, the verifier
+ * expanded `M6`, `G28` and the probe cycle against the vendor's anchors while the simulation expanded
+ * them against the calibrated ones, so the gate and the sim judged two different machines for one .nc.
+ */
+export function engraveGenerate(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  calibration: MachineCalibration | null = null,
+): EngraveGenerated {
+  const mill = resolveMachine(Z1, calibration);
   const { plan, regions, predicted, tool, radius, findings } = engraveRegions(tl, job);
   const errors: EngraveFailure[] = [];
 
@@ -393,7 +408,7 @@ export function engraveGenerate(tl: ManifoldToplevel, job: EngraveJob): EngraveG
   if (tool === null || radius === null) {
     return stop('feeds', { message: radius === null && tool !== null ? 'the job tool is not a flat end mill V1 can sweep' : 'the job has no usable cutter' });
   }
-  const feeds = feedsFor(job.stock.material, tool, Z1, job.cutOverride);
+  const feeds = feedsFor(job.stock.material, tool, mill, job.cutOverride);
   if (!feeds.ok) return stop('feeds', { feeds, message: feeds.reason });
 
   // 3. the CAM core (#172), on the SAME opened polygons stage 1 measured.
@@ -431,7 +446,7 @@ export function engraveGenerate(tl: ManifoldToplevel, job: EngraveJob): EngraveG
   };
   let nc: string;
   try {
-    const posted = postZ1(ir, ctx, Z1);
+    const posted = postZ1(ir, ctx, mill);
     if (!posted.ok) return stop('post', { feeds, message: posted.errors.join('; ') });
     nc = posted.text;
   } catch (e) {
@@ -441,8 +456,8 @@ export function engraveGenerate(tl: ManifoldToplevel, job: EngraveJob): EngraveG
   // 5. the verifier (#174) on the TEXT, with the depth limit the JOB implies: the CNC-2 stock
   // limit, tightened where an under-surface void leaves a thinner membrane (#231 item 3).
   const limit = jobDepthLimit(job);
-  const setup = toSetup(job, Z1);
-  const verify = verifyProgram(nc, { setup, machine: Z1, tool, depthLimit: limit, minRapidZ: ir.hopZ });
+  const setup = toSetup(job, mill);
+  const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ: ir.hopZ });
   if (verify.findings.some((f) => f.severity === 'error')) {
     errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
     return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
@@ -451,7 +466,7 @@ export function engraveGenerate(tl: ManifoldToplevel, job: EngraveJob): EngraveG
   // 6. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
   // THIS gated action from the same toolpath, and checked by the SAME verifier — a frame the
   // operator cannot run at the wrong Z, because the Z is in the file.
-  const frame = frameProgram(ir, ctx, Z1, setup, tool, limit);
+  const frame = frameProgram(ir, ctx, mill, setup, tool, limit);
   if ('error' in frame) {
     errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
     return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };

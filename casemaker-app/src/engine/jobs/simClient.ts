@@ -181,8 +181,8 @@ export const engravePreview = (job: EngraveJob, gen: number): Promise<EngravePre
  * opened regions the oracle compares the simulation against. No wasm handle crosses: the result
  * is plain data.
  */
-export const engraveGenerate = (job: EngraveJob): Promise<EngraveGenerated> =>
-  getSimApi().engraveGenerate(job);
+export const engraveGenerate = (job: EngraveJob, calibration?: MachineCalibration | null): Promise<EngraveGenerated> =>
+  getSimApi().engraveGenerate(job, calibration ?? null);
 
 /**
  * The volumetric oracle (#206 §3) over the program CURRENTLY loaded in the worker's session.

@@ -22,6 +22,9 @@ import type { SimDiagnostic } from '@/workers/sim/session';
 import type { SimStatus } from './simStore';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { Z1 } from '@/engine/cnc/machine';
+import { resolveMachine } from '@/engine/cnc/calibration';
+import type { MachineCalibration } from '@/engine/cnc';
+import { useSettingsStore } from './settingsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSimStore } from './simStore';
 
@@ -29,7 +32,7 @@ export type EngraveRunPhase = 'idle' | 'generating' | 'simulating' | 'checking' 
 
 /** The two worker calls the run needs. */
 export type EngraveRunClient = {
-  engraveGenerate: (job: EngraveJob) => Promise<EngraveGenerated>;
+  engraveGenerate: (job: EngraveJob, calibration?: MachineCalibration | null) => Promise<EngraveGenerated>;
   simOracle: (predicted: OraclePredicted[]) => Promise<OracleReport>;
 };
 
@@ -166,11 +169,16 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     const mine = ++seq;
     set({ ...empty, phase: 'generating', generated: get().generated });
 
+    // ONE machine per run (#297): the saved frame is read once, here, and handed to the generator
+    // (post, verify, frame file) and to the simulation load below. Two reads could straddle a change
+    // to the saved frame and leave the gate and the sim judging different machines for one .nc.
+    const calibration = useSettingsStore.getState().machineCalibration ?? null;
+
     let client: EngraveRunClient;
     let generated: EngraveGenerated;
     try {
       client = await clientLoader();
-      generated = await client.engraveGenerate(job);
+      generated = await client.engraveGenerate(job, calibration);
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
       return;
@@ -198,7 +206,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 
     set({ phase: 'simulating' });
     try {
-      await useSimStore.getState().loadProgram(generated.nc, toSetup(job, Z1), tool, Z1.id);
+      await useSimStore.getState().loadProgram(generated.nc, toSetup(job, resolveMachine(Z1, calibration)), tool, Z1.id, calibration);
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
       return;
