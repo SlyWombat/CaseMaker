@@ -174,7 +174,7 @@ async function main() {
     const count = num(flags.count, 1);
     const everyMs = num(flags.every, 0);
     // The module replays its LAST frame to a new client first (camera.mjs); skip it by default.
-    const skip = num(flags.skip, 1);
+    const skip = num(flags.skip, 3);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const here = dirname(fileURLToPath(import.meta.url));
     const defaultOut = resolve(here, '..', '..', '..', 'docs', 'bench', 'img', count === 1 ? `camera-${stamp}.jpg` : `camera-${stamp}`);

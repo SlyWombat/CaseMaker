@@ -8,8 +8,9 @@
 //   - port 80 on the same module serves a leftover demo web page ("Tank"); port 81 is refused.
 //   - THE FIRST FRAME IS STALE: on `start_stream` the module replays the last frame it encoded for the
 //     previous client (seen 2026-10-08 — a burst's first frame was byte-identical to a capture taken
-//     before a 25 mm bed move; the third showed the move). `captureFrames` therefore discards `skip`
-//     frames (default 1) before counting. A single-frame capture is the SECOND frame off the wire.
+//     before a 25 mm bed move; the third showed the move; a later capture with ONE frame skipped was
+//     still stale, a six-frame burst was live from its second). `captureFrames` therefore discards
+//     `skip` frames (default 3) before counting: a single-frame capture is the FOURTH off the wire.
 // Studio's strings also show text messages for time-lapse PLAYBACK (`total_frames`,
 // `frame_period_us`, `from_frame`); those are not used here.
 //
@@ -30,7 +31,7 @@ export const CAMERA_START = 'start_stream';
  * each JPEG as a Buffer. Resolves when the count is reached; rejects on a socket error or when no
  * frame arrives within `firstFrameMs`.
  */
-export function captureFrames({ host, port = CAMERA_PORT, count = 1, everyMs = 0, skip = 1, firstFrameMs = 8000, onFrame }) {
+export function captureFrames({ host, port = CAMERA_PORT, count = 1, everyMs = 0, skip = 3, firstFrameMs = 8000, onFrame }) {
   return new Promise((resolve, reject) => {
     const url = `ws://${host}:${port}${CAMERA_PATH}`;
     const ws = new WebSocket(url);

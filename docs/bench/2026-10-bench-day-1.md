@@ -211,7 +211,7 @@ is on the head.
 
 | Field | Value |
 |---|---|
-| Mounted on (head / frame) | _open — two frames around one move_ |
+| Mounted on (head / frame) | **Frame — on the left side wall of the enclosure** (maintainer, 2026-10-08). Fixed camera; the bed and the vise move through its view in Y, the head in X. The frames could not show this because the module replays its last frame to a new client (bridge protocol §10). |
 
 Photo: `docs/bench/img/A6-camera.jpg` (of the mount, by hand)
 
