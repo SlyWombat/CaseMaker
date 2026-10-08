@@ -200,9 +200,19 @@ function joinSegments(segments: Segment[], tol: number): { rings: Vec2[][]; open
         const s = remaining[i]!;
         const first = s.points[0]!;
         const last = s.points[s.points.length - 1]!;
+        // The points to add, in the order they are added, EXCLUDING the one that coincides with the
+        // anchor. Which order is a fact about the side being extended (#294): at the START the new
+        // points are prepended, so they must read toward the anchor; at the END they are appended, so
+        // they must read away from it. A two-point LINE hides the difference — both orders are the
+        // same one point — but an ARC does not, and a loop with an arc in it is every filleted outline.
         let joined: Vec2[] | null = null;
-        if (near(last, anchor, tol)) joined = s.points.slice(0, -1);
-        else if (near(first, anchor, tol)) joined = s.points.slice().reverse().slice(0, -1);
+        if (near(last, anchor, tol)) {
+          // The segment ends at the anchor: it reads toward it as stored, away from it reversed.
+          joined = at === 'start' ? s.points.slice(0, -1) : s.points.slice(0, -1).reverse();
+        } else if (near(first, anchor, tol)) {
+          // The segment begins at the anchor: it reads away from it as stored, toward it reversed.
+          joined = at === 'start' ? s.points.slice(1).reverse() : s.points.slice(1);
+        }
         if (!joined) continue;
         if (at === 'end') chain.push(...joined);
         else chain.unshift(...joined);

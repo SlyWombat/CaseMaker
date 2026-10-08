@@ -50,6 +50,10 @@ function line(x1: number, y1: number, x2: number, y2: number): (string | number)
   return [0, 'LINE', 10, x1, 20, y1, 11, x2, 21, y2];
 }
 
+function arc(cx: number, cy: number, r: number, a0: number, a1: number): (string | number)[] {
+  return [0, 'ARC', 10, cx, 20, cy, 40, r, 50, a0, 51, a1];
+}
+
 function circle(cx: number, cy: number, r: number): (string | number)[] {
   return [0, 'CIRCLE', 10, cx, 20, cy, 40, r];
 }
@@ -94,6 +98,59 @@ describe('parseDxfOutline (#217): geometry', () => {
     const r = ok(parseDxfOutline(dxf(entities, 4)));
     expect(r.contours).toHaveLength(1);
     expect(ringArea(r.contours[0]!)).toBeCloseTo(100, 6);
+  });
+
+  // #294: a closed loop that CONTAINS AN ARC — every filleted outline a CAD package exports. The
+  // joiner appended an arc's points in the wrong order when it extended the chain's end, so the
+  // loop never closed and imported as nothing. A line-only chain cannot see the difference.
+  describe('a 20 × 10 rounded rectangle (r = 2) of 4 LINEs and 4 ARCs (#294)', () => {
+    const exact = 200 - (4 - Math.PI) * 4; // 196.566…
+
+    const lines = {
+      bottom: line(2, 0, 18, 0),
+      right: line(20, 2, 20, 8),
+      top: line(18, 10, 2, 10),
+      left: line(0, 8, 0, 2),
+    };
+
+    it('closes into one ring when the end angles are written as 360 / 90 / 180 / 270', () => {
+      const entities = [
+        ...lines.bottom, ...arc(18, 2, 2, 270, 360),
+        ...lines.right, ...arc(18, 8, 2, 0, 90),
+        ...lines.top, ...arc(2, 8, 2, 90, 180),
+        ...lines.left, ...arc(2, 2, 2, 180, 270),
+      ];
+      const r = ok(parseDxfOutline(dxf(entities, 4)));
+      expect(r.contours).toHaveLength(1);
+      expect(Math.abs(ringArea(r.contours[0]!) - exact)).toBeLessThan(0.5);
+      expect(r.notes.some((n) => /open LINE\/ARC chain/i.test(n))).toBe(false);
+    });
+
+    it('closes when an arc wraps through 0° (270 → 0), as CAD packages write it', () => {
+      const entities = [
+        ...lines.bottom, ...arc(18, 2, 2, 270, 0),
+        ...lines.right, ...arc(18, 8, 2, 0, 90),
+        ...lines.top, ...arc(2, 8, 2, 90, 180),
+        ...lines.left, ...arc(2, 2, 2, 180, 270),
+      ];
+      const r = ok(parseDxfOutline(dxf(entities, 4)));
+      expect(r.contours).toHaveLength(1);
+      expect(Math.abs(ringArea(r.contours[0]!) - exact)).toBeLessThan(0.5);
+    });
+
+    it('closes whatever order the entities are written in, so both ends of the chain get extended', () => {
+      const parts = [
+        arc(2, 2, 2, 180, 270), lines.top, arc(18, 8, 2, 0, 90), lines.bottom,
+        arc(2, 8, 2, 90, 180), lines.right, arc(18, 2, 2, 270, 360), lines.left,
+      ];
+      // Every rotation of the list, so no single start segment is doing the work.
+      for (let k = 0; k < parts.length; k++) {
+        const rotated = [...parts.slice(k), ...parts.slice(0, k)].flat();
+        const r = ok(parseDxfOutline(dxf(rotated, 4)));
+        expect(r.contours, `rotation ${k}`).toHaveLength(1);
+        expect(Math.abs(ringArea(r.contours[0]!) - exact), `rotation ${k}`).toBeLessThan(0.5);
+      }
+    });
   });
 
   it('a LWPOLYLINE bulge adds arc points', () => {
