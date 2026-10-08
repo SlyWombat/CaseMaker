@@ -1,3 +1,4 @@
+use crate::house::{house_dir, HouseStore};
 use axum::{
     body::Body,
     extract::Path as AxumPath,
@@ -8,6 +9,7 @@ use axum::{
 };
 use rust_embed::RustEmbed;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
+use std::sync::Arc;
 use tokio::sync::oneshot;
 
 #[derive(RustEmbed)]
@@ -31,7 +33,9 @@ pub struct ServerHandle {
     pub bind_addr: IpAddr,
 }
 
-/// Start the static-asset HTTP server on a background tokio task.
+/// Start the HTTP server on a background tokio task: the SPA's static assets, and the house service
+/// under `/api/v1` (#306). Both are served from this one listener, because a second port would need
+/// its own discovery on the client and its own firewall story on Windows for no gain.
 ///
 /// Returns the actually-bound port (which may differ from `requested_port`
 /// if it was taken). The returned receiver fires when the server stops.
@@ -80,7 +84,11 @@ pub fn start(
     };
 
     let (tx, rx) = oneshot::channel::<()>();
-    let app = router();
+    // The house's data, loaded once at start-up. `open` never fails — a directory that is not there
+    // yet is a house with no tools, and a file that cannot be read is reported by `/api/v1/health`
+    // rather than by refusing to serve the UI.
+    let store = Arc::new(HouseStore::open(house_dir()));
+    let app = router(store);
 
     std::thread::Builder::new()
         .name("casemaker-http".into())
@@ -115,8 +123,16 @@ pub fn start(
     Ok((handle, rx))
 }
 
-fn router() -> Router {
+/// The whole surface, in one router: the house service's API first, then the SPA's assets.
+///
+/// The ORDER is the point (#306). `serve_asset` answers any path it does not know with
+/// `index.html` and status 200, so a client probing `/api/v1/health` on a server without the API
+/// merged in would get a perfectly successful-looking HTML response. `house_api::routes` owns every
+/// `/api/v1/…` path including a JSON 404 for the ones it does not have, and it is merged BEFORE the
+/// `/*path` fallback is registered. The test below pins that against this exact router.
+fn router(store: Arc<HouseStore>) -> Router {
     Router::new()
+        .merge(crate::house_api::routes(store))
         .route("/", get(serve_root))
         .route("/*path", get(serve_path))
 }
@@ -145,11 +161,18 @@ connect-src 'self' ws: wss: tauri: ipc: http://ipc.localhost";
 fn serve_asset(path: &str) -> Response<Body> {
     // Strip leading slashes; fall back to index.html for SPA routes.
     let trimmed = path.trim_start_matches('/');
-    let primary = if trimmed.is_empty() { "index.html" } else { trimmed };
-    let asset = Assets::get(primary).or_else(|| Assets::get("index.html"));
+    let requested = if trimmed.is_empty() { "index.html" } else { trimmed };
+    // Which asset ANSWERS, paired with its own name — because the content type has to describe the
+    // bytes being served and not the path that was asked for. `/tools/3` is answered with
+    // `index.html`, and guessing the type from the request labelled it `application/octet-stream`:
+    // a browser downloads a file it was told is binary rather than running the app (#306's tests
+    // caught this while proving the fallback cannot lie about `/api/…`).
+    let asset = Assets::get(requested)
+        .map(|content| (requested, content))
+        .or_else(|| Assets::get("index.html").map(|content| ("index.html", content)));
     match asset {
-        Some(content) => {
-            let mime = mime_guess::from_path(primary).first_or_octet_stream();
+        Some((served, content)) => {
+            let mime = mime_guess::from_path(served).first_or_octet_stream();
             let header_val = HeaderValue::from_str(mime.as_ref())
                 .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
             let mut resp = Response::new(Body::from(content.data.into_owned()));
@@ -169,6 +192,79 @@ fn serve_asset(path: &str) -> Response<Body> {
             let mut resp = Response::new(Body::from("not found"));
             *resp.status_mut() = StatusCode::NOT_FOUND;
             resp
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    use tower::ServiceExt;
+
+    /// The REAL router — API merged, SPA wildcard registered after it — because the thing under test
+    /// is precisely how those two interact.
+    fn app() -> (TempDir, Router) {
+        let dir = TempDir::new().unwrap();
+        let store = Arc::new(HouseStore::open(dir.path().to_path_buf()));
+        (dir, router(store))
+    }
+
+    fn get(uri: &str) -> Request<Body> {
+        Request::builder().uri(uri).body(Body::empty()).unwrap()
+    }
+
+    async fn body_json(res: Response<Body>) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+        serde_json::from_slice(&bytes).expect("a JSON body")
+    }
+
+    fn content_type(res: &Response<Body>) -> String {
+        res.headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn the_spa_fallback_cannot_answer_for_the_api() {
+        // The trap this test exists for: without the API merged in ahead of it, `/*path` answers
+        // `/api/v1/health` with index.html and status 200, and a probe reads that as "present".
+        let (_dir, app) = app();
+        let res = app.clone().oneshot(get("/api/v1/health")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(
+            content_type(&res).starts_with("application/json"),
+            "/api/v1/health was answered with {:?}",
+            content_type(&res)
+        );
+        assert_eq!(body_json(res).await["ok"], serde_json::json!(true));
+
+        // And a path the API does NOT own is a JSON 404, not a 200 carrying index.html.
+        let res = app.clone().oneshot(get("/api/v1/nope")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+        assert!(content_type(&res).starts_with("application/json"));
+        assert!(body_json(res).await["error"].is_string());
+    }
+
+    #[tokio::test]
+    async fn the_api_reads_the_store_and_the_spa_still_serves_pages() {
+        let (_dir, app) = app();
+        // An empty house is an empty list, not an error and not index.html.
+        let res = app.clone().oneshot(get("/api/v1/tools")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await, serde_json::json!([]));
+
+        // The fallback is untouched: a deep link into the SPA still gets the page.
+        for uri in ["/", "/tools/anything"] {
+            let res = app.clone().oneshot(get(uri)).await.unwrap();
+            assert_eq!(res.status(), StatusCode::OK, "{uri}");
+            assert!(
+                content_type(&res).starts_with("text/html"),
+                "{uri} was answered with {:?}",
+                content_type(&res)
+            );
         }
     }
 }

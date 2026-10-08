@@ -2,6 +2,8 @@ use clap::Parser;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod config;
+mod house;
+mod house_api;
 mod machine;
 mod server;
 

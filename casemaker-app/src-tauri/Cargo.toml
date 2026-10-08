@@ -19,8 +19,13 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "io-util", "time"] }
-axum = { version = "0.7", default-features = false, features = ["http1", "tokio"] }
-tower = "0.5"
+# `json` is for the house service (#306): `axum::Json` and the JSON error bodies. Without it the
+# extractor and the response type are simply not in the crate. `original-uri` is the same service's
+# 404, which names the path it refused rather than answering "not found" to a typo.
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "original-uri", "tokio"] }
+# `util` is `ServiceExt::oneshot`, which is how the route tests drive the real router in-process
+# rather than binding a socket and racing it.
+tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["set-header", "trace"] }
 mime_guess = "2"
 rust-embed = { version = "8", features = ["debug-embed", "include-exclude"] }

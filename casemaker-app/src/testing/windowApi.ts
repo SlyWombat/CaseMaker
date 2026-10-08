@@ -30,7 +30,8 @@ import { useRunRecordStore } from '@/store/runRecordStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
-import { resolveTool } from '@/engine/cnc/toolRegistry';
+import { getTools, resolveTool } from '@/engine/cnc/toolRegistry';
+import { useToolRegistryStore, type HouseStatus } from '@/store/toolRegistryStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { stubSetup, Z1 } from '@/engine/cnc';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -154,6 +155,21 @@ export interface CaseMakerTestApi {
     gougeCount: number;
     pathVertexCount: number;
     visibleLayers: SimLayers;
+  };
+  /**
+   * #306 — what the app concluded about a house service, and what that did to the tool list. The
+   * probe's outcome is otherwise invisible in a browser: an absent service is a quiet fallback,
+   * not a rendered message, so a spec would have nothing to assert but pixels. `registryKeys` is
+   * what every picker reads (`getTools()`), `houseKeys` only the tiers the service supplied — so a
+   * single call proves both the conclusion and its effect on the registry.
+   */
+  getToolRegistry(): {
+    status: HouseStatus;
+    error: string | null;
+    /** The last validator `GET /api/v1/tools` returned, or null if it was never read. */
+    etag: string | null;
+    houseKeys: string[];
+    registryKeys: string[];
   };
 }
 
@@ -443,6 +459,16 @@ export function installCaseMakerTestApi(): void {
         gougeCount: s.meshes?.gouges.length ?? 0,
         pathVertexCount: s.path?.step.length ?? 0,
         visibleLayers: s.layers,
+      };
+    },
+    getToolRegistry() {
+      const s = useToolRegistryStore.getState();
+      return {
+        status: s.status,
+        error: s.error,
+        etag: s.etag,
+        houseKeys: s.entries.map((e) => e.key),
+        registryKeys: getTools().map((e) => e.key),
       };
     },
   };

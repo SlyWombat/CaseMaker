@@ -357,7 +357,7 @@ accepted.
 | 28 | **Fixture geometry is measured — with defaults and saved measurements as the starting point** | Maintainer's rule, 2026-10-03: do not hard-code vise or clamp dimensions *as the truth*. What is in the tool's way is whatever the user put there — discard material between the jaws, spacers, a different clamp — so the obstacle envelope is an **input with provenance**: a shipped **default** for known hardware, a **saved** measurement from a previous probe, or a **fresh probe** (later the camera). "It may not have to be done every job, and defaults are useful": a default or saved envelope is used until the setup changes, and `source` + `uncertainty` say which it is, so the emulator never mistakes a default for a measurement. The `Workholding` variants say *how* the part is held; the obstacle envelope is a separate input. §7.3, #188, #182. |
 | 29 | **The house owns tools, not the machine** | Maintainer's call, 2026-10-08: cutters outlive the machine they were bought for and are shared across machines, so an inventory scoped to a machine is scoped to the wrong thing. `t_MakeraCutterList` is one *source* of tool definitions, never the owner. This is decision 25's argument (pay for the seam once) applied to the other axis: the seam is between *house* and *machine*, and it is paid for before there is a second machine. #212, #311. |
 | 30 | **Catalogue rows are immutable; divergence is a clone** | Maintainer's rule, 2026-10-08: *"the core database tools cannot be changed, you can only clone to make speed changes."* So the imported catalogue is a read-only tier replaced wholesale on a re-sync, and everything the user owns is a **clone** — a `user_tool` holding the **fully materialised `Tool`** plus `base: {cutterId, g_ID, syncedAt}` and a **display-only** `overrides` diff of the fields that differ. Materialising rather than storing only the diff is the load-bearing half (the diff is never the source of a value): the clone keeps working when Makera discontinues the cutter or a re-sync drops its base row, and the diff is still there to render *"speed 9000 → 6000 (cloned)"*. Same discipline as decision 28 and `myMachineFile.ts` — values **and** their provenance, so a round trip cannot turn a measurement into a default. Physical possession is a *third*, separate record (`quantity`, scanned codes, `addedAt`) that points at a definition; a scan of a code that already exists offers `quantity + 1` and never a second row. #212, #305, #308, #309. |
-| 31 | **The house service — the bridge — is the source of truth for house state** | Maintainer's call, 2026-10-08: *"a bridge is required for any printing, so the bridge should keep the database; it should sync to any web instance."* The desktop UI and a browser on the LAN read and write the same stores over `/api/v1`, so per-browser `localStorage` owns nothing house-scoped. The hosted HTTPS app at electricrv.ca **cannot** reach a plain-HTTP service (mixed content is hard-blocked), so "sync to any web instance" means the clients the service itself serves, and the hosted app stays on the built-ins (#212). **With no bridge reachable the Tools scope is absent and the pickers fall back to `TOOL_LIBRARY`** — no offline cache and no reconcile, so the degradation is visible instead of silently divergent. Reaching a bridge is a **runtime fact, not a build target**: a browser on the LAN is the *web* build and still talks to a bridge, so `canRunLocalServer`/`canReadLocalFiles` gate *hosting and syncing*, never *reaching*; `machineProbe.ts` is the model (one configured URL, one probe, four honest answers, unreachable is a normal outcome). Tiered versioned JSON on disk, not SQLite — the schemas stay in Zod, nothing needs a query, and the API is the contract if that ever changes. §5.7, #306, #312. |
+| 31 | **The house service — the bridge — is the source of truth for house state** | Maintainer's call, 2026-10-08: *"a bridge is required for any printing, so the bridge should keep the database; it should sync to any web instance."* The desktop UI and a browser on the LAN read and write the same stores over `/api/v1`, so per-browser `localStorage` owns nothing house-scoped. The hosted HTTPS app at electricrv.ca **cannot** reach a plain-HTTP service (mixed content is hard-blocked), so "sync to any web instance" means the clients the service itself serves, and the hosted app stays on the built-ins (#212). **With no bridge reachable the Tools scope is absent and the pickers fall back to `TOOL_LIBRARY`** — no offline cache and no reconcile, so the degradation is visible instead of silently divergent. Reaching a bridge is a **runtime fact, not a build target**: a browser on the LAN is the *web* build and still talks to a bridge, so `canRunLocalServer`/`canReadLocalFiles` gate *hosting and syncing*, never *reaching*; `machineProbe.ts` is the model (one configured URL, one probe, four honest answers, unreachable is a normal outcome). Tiered versioned JSON on disk, not SQLite — the schemas stay in Zod, nothing needs a query, and the API is the contract if that ever changes. §5.7, #306, #312. **Naming (#306):** in code, comments and the rest of this document this is the **house service**; "the bridge" in the quote above is the maintainer's word, and it already means the machine bridge (§5.7, #255), so `houseClient`/`house.rs`/`ToolRegistryStore` and `loadMachineBridge`/`machineProbe`/`machine.rs` never collide in a grep. |
 | 32 | **Feeds from `makera_library.db` are a catalogue tier *below* measurement** | Maintainer's call, 2026-10-08, correcting §9.1's 2026-10-05 line. The three objections in `/Makera-Parity.md` §5.1 — no PLA or PETG, no machine column, 32 rows above the Z1's ceiling — are reasons the table cannot be a **source**, not reasons it is useless. Adopted as a tier under the precedence `measured → job override → user feed → catalogue → unmeasured`, clamped through `clampToMachine`, each row carrying a `FieldSource` so a vendor number never reads as a measurement (decision 28's discipline, applied to feeds). It is genuinely useful for **wood** — CNC-2's material, #209 — and **can never serve the badge job at all**, because PLA has no row. A speed change is a `user_feed` row, not a clone. §9.1, #310. |
 
 ---
@@ -609,6 +609,52 @@ reading Makera Studio's SQLite to import the tool catalogue (decision 30) — an
 its store are not the bridge.** They share a process and nothing else, so the house
 service is buildable and testable long before the socket protocol is, and nothing in
 decisions 29–32 waits on the deferral above. #306, #308.
+
+**Implemented 2026-10-08 (#306).** The server now serves the house service on `/api/v1`:
+`GET /health` (a document version, whether a catalogue is present, and one sentence per file it
+could not read), `GET /tools` (a `ToolLibraryEntry[]` — the ONE shape the workers need), `POST` /
+`PATCH` / `DELETE` on `/tools` and `/inventory`, and `GET /export` / `POST /import` for the "my
+machine" file (#247). `src-tauri/src/house.rs` holds the two documents — `house.json` (the user's
+own tools and inventory) and `catalogue.json` (Makera's rows, read now and written only by a sync,
+#308) — under `dirs::data_dir()/casemaker/`, each written atomically (temp file, flush, rename)
+under a `tokio::sync::RwLock`, each GET carrying an `ETag` derived from the bytes actually served so
+a 304 cannot mean anything but "byte-identical". The client is `platform/houseClient.ts` — a
+same-origin `fetch`, deliberately **not** behind `canRunLocalServer`, because a LAN browser is the
+web build and still reaches the service — plus `store/toolRegistryStore.ts`, which pushes the tiers
+above the built-ins into stage 0's snapshot with `setRegistry`. The client implements the **read**
+path only: the write endpoints exist and are tested, but their users (scan, clone, sync) are
+#309/#311's, and a write path with no UI in front of it is untestable in the way that matters.
+
+**Three traps, kept because each one cost time.** (1) **The SPA fallback answers `200` with
+`index.html`**, so an unmounted API path would look like a healthy service: `/api/v1` is merged
+*before* `/*path`, anything else under it is a JSON `404`, `server.rs`'s tests pin both against the
+real router, and the client only believes a JSON body that passes the same Zod schema the built-in
+list is written to. (2) **A key this service stores must be namespaced** (`cat:`/`user:` — never
+`flat-1.0`, which is the client's permanent built-in tier) **and must not contain `|`**, the one
+character `;@CM|TOOL|key=` cannot carry (§2, #305). Both are refused at the door rather than
+sanitised, so a bad key is a visible 4xx and not a silent rename. (3) **A document that does not
+parse is preserved, never overwritten.** Its reason travels in `/health` and every write is refused
+until it is dealt with by hand: the alternative — start empty, then save over it — destroys the
+user's own tool list to recover from a truncated write, which is not a recovery.
+
+**Verified in a browser, 2026-10-08 (#306)** — `qa-306-house.mjs`, four scenarios, all green. The
+web build and the desktop build each run against their own dev server with nothing stubbed: both
+ask, both are told `absent` by an origin that is not the service, and both keep the built-ins in the
+registry *and* in the Simulate panel's tool picker. Against a stubbed service answering health and
+one `user:` cutter, the app reports `present`, the registry becomes the built-ins plus that tier, and
+the cutter is selectable in the picker (photographed, not inferred). Against a static host answering
+`404 text/html`, `absent` again, with the reason naming what actually answered. **The two builds
+answering identically is the evidence for decision 31's rule** — reaching is a runtime fact, not a
+build target — and it is why no `canRunLocalServer` guard stands in front of the probe even though a
+probe at a host with no service is a request that cannot succeed. The assertions read a new
+`__caseMaker.getToolRegistry()` hook (status, the reason sentence, the validator, and both key
+lists), so none of them is inferred from pixels.
+
+**The observed cost of that rule, reported rather than papered over.** When nothing answers the
+health request, the browser logs its own `404` line for it: present in the first run, absent from
+later ones, so the QA script allows that one pattern by text and fails on anything else. Gating the
+probe on the build target would remove the line and the wasted request — a three-line change — but it
+would also break the LAN browser the rule exists for, so it stands.
 
 ---
 
