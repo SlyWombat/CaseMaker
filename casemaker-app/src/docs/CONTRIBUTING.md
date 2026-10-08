@@ -46,7 +46,7 @@ See [Getting Started](https://github.com/SlyWombat/CaseMaker/blob/main/casemaker
 ```bash
 cd casemaker-app
 npm ci
-npm run dev          # start the Vite dev server on localhost:8000
+npm run dev          # start the Vite dev server on 127.0.0.1:5173
 npm run typecheck    # tsc --noEmit
 npm run lint         # eslint
 npm test             # vitest unit

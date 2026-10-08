@@ -100,7 +100,13 @@ export default defineConfig(({ mode }) => {
     // webServer probe never gets an answer and its 120 s timeout expires before a test runs.
     // The e2e webServer and every manual run since #199 already use 127.0.0.1; this makes the
     // default agree with them (and lets `reuseExistingServer` see a hand-started server too).
-    server: { host: '127.0.0.1', fs: { allow: ['..'] }, port: DEFAULT_PORT, strictPort: false },
+    //
+    // #292 — in DESKTOP mode the port is strict. `tauri dev` is told one fixed address
+    // (`devUrl` in src-tauri/tauri.conf.json, 127.0.0.1:5173) and hangs forever if vite quietly
+    // moves to 5174 because 5173 was busy; failing loudly is the only useful answer there. Web
+    // mode keeps the lenient default that the Playwright runs and hand-started servers rely on.
+    // CASEMAKER_PORT therefore only applies to web mode: change `devUrl` with it for desktop.
+    server: { host: '127.0.0.1', fs: { allow: ['..'] }, port: DEFAULT_PORT, strictPort: mode === 'desktop' },
     preview: { port: DEFAULT_PORT, strictPort: false },
   };
 });
