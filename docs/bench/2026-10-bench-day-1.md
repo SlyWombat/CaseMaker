@@ -884,6 +884,13 @@ session.)
 *Rewritten 2026-10-06 after B6. The question changed: B6 read the soft endstops off the machine, so
 this is no longer "what is the limit" — it is "can the limit be trusted."*
 
+**UN-PARKED 2026-10-08.** R10 was reopened (#302): `tools/z1/z1.mjs console <host>` sends one typed
+line at a time, through the bridge's guards, and records every line and reply to `docs/bench/traces/`.
+The procedure is **#293 Stage 1** (it folds this item in as step 6), and it now takes a camera frame
+(`tools/z1/z1.mjs camera`, #286) at the as-found position, at clearance, and after the first X/Y move
+— the last pair answers A6 for free. §8 is unchanged: a person at the machine, hand near the stop.
+The park note below is kept as the record of why it waited.
+
 **PARKED 2026-10-07 — blocked, not deferred.** The moves have to be typed into Studio's MDI *at the
 machine*, and the bench harness cannot send motion. That is deliberate rather than a gap: `tools/z1/`
 has no G-code passthrough, no jog and no MDI, and `Z1-Bridge-Protocol.md` §8 says the bridge "can
