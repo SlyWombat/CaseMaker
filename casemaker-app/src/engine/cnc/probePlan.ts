@@ -38,7 +38,14 @@ import type { DatumSource, Workholding } from './setup';
 
 const EPS = 1e-9;
 
-/** A touch's own repeatability: ball-contact scatter, mm. What is left after a touch. */
+/**
+ * A touch's own repeatability: ball-contact scatter, mm. What is left after a touch.
+ *
+ * Still the 3D Probe's assumed figure for X, Y and Z. MEASURED 2026-10-08 for the WIRED probe in Z
+ * only: five slow (F100) touches on the printed blank in the vise triggered within 0.001 mm of each
+ * other, fast (F300) within 0.004 mm and 2–6 µm deep (`/Z1-Firmware-Dialect.md` §11.7, runbook C4).
+ * 0.02 stays as the conservative value until the 3D Probe is measured the same way.
+ */
 export const PROBE_RESIDUAL_MM = 0.02;
 
 /**
