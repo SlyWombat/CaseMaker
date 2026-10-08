@@ -312,6 +312,10 @@ under that row will say what to do — *"‘Maker' at 4 mm loses 96 % of its are
 cutter — increase to 6 mm or more."* When a label breaks through the floor, an error, not a
 warning, and Generate stays disabled until it is fixed.
 
+Today that list holds the app's two built-in cutters, and the recommendation chooses between
+them. Once the cutter registry lands (#212, §7), it holds **the cutters you own** and the same
+recommendation ranks those — including the ones you added yourself.
+
 ![The cutter recommendation with its reason](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-engrave-tool-recommendation.png)
 
 *Design mockup — not the shipped screen.*
@@ -450,11 +454,11 @@ describes what the feature is and what has to be true first. See also CNC-3 #165
 
 ---
 
-## 7 · Later — CNC-4
+## 7 · Later — CNC-4 and CNC-6
 
-> **Status: Planned** — CNC-4 (#181, #185, #189). None of these is started.
+> **Status: Planned** — CNC-4 (#181, #185, #189) and CNC-6 (#212). None of these is started.
 
-Three things are on the far side of this work, and none of them is in the app.
+Four things are on the far side of this work, and none of them is in the app.
 
 **Sending the job to the machine (#181).** A bridge that uploads the `.nc` to the Z1 over
 WiFi and starts it, so you do not open Studio at all. This is the "one flag for the user"
@@ -470,6 +474,20 @@ confident position instead of a blind one. Not started.
 **V-carving small text (#185).** A V-bit couples depth to stroke width, so it can reach
 strokes a flat end mill cannot — but it needs a medial-axis engine, and it is V2 by decision
 (`/Fabrication.md` §7.4). Not started.
+
+**Keeping track of your own cutters (#212).** Today the app knows **two** cutters, and both
+are shipped assumptions — the 1 mm flat end is literally named *"1 mm flat end (assumed)"*.
+The plan is a registry of the cutters **you actually own**: Makera Studio's own cutter list
+imported as a read-only catalogue to pick from, your cutters added by scanning the label on
+the box or typing the code printed on it, and any change you want — a slower speed, a
+different reach out of the collet — made by **copying** a catalogue entry rather than editing
+it, because a vendor's numbers are not yours to rewrite. Cutters belong to the **house**, not
+to a machine: they outlive the machine they were bought for and get shared between machines.
+So the list lives in the small local service the desktop app already runs, which means a
+browser on your own network sees the same cutters; with nothing running, the app quietly
+falls back to the two built-ins rather than showing you a list it cannot vouch for. None of
+it is started, and no screen gets written until a mockup is agreed — the same rule the
+Simulate chapter followed. See #212 for the whole picture, #311 for the screen.
 
 ---
 
@@ -686,7 +704,7 @@ A record is a tag followed by `key=value` fields separated by `|`:
 |---|---|---|
 | `STOCK` | `id`, `length`, `width`, `height` | Prefills the stock dimensions (cuboid only). |
 | `ORIGIN` | `type_name`, `x`, `y`, `z` | A corner preset hint, cross-checked against the stock. |
-| `TOOL` | `number`, `id`, `name`, `type`, `diameter`, … | Matches a file to a library tool. |
+| `TOOL` | `number`, `id`, `name`, `type`, `diameter`, … | Matches a file to a tool in the library — the built-ins today, the cutters you registered once #212 lands (§7). |
 
 The full sequence Studio writes is `BEGIN`, `SCHEMA`, `MACHINE`, `MATERIAL`, `STOCK`,
 `ORIGIN`, `CAM`, `UNIT`, `TOOL`, `TIME`, `TOOLPATH`, `END` (`/Fabrication.md` §2). The

@@ -208,6 +208,15 @@ Several thread-mill fields are named in pinyin (`luoJu` pitch, `jiaJiao` include
    machine's limits itself. Max feed in the table is 1 200 mm/min, which happens to equal
    the Z1's ceiling exactly, so feed never exceeds it — by coincidence, not by design.
 
+**Settled 2026-10-08 (`/Fabrication.md` decision 32, #212).** These three facts were used
+to justify *"never the feeds source"*; the maintainer has since asked for the table, and the
+reading that reconciles the two is **a catalogue tier below measurement** — imported,
+clamped through `clampToMachine`, with a measured row always winning and each row carrying a
+`FieldSource` so a vendor number can never read as a measurement. The three facts are not
+weakened by that: they are precisely why it is a tier and not a source, and why the row for
+PLA is still absent — for the badge job, `#165`'s measured numbers remain the only source in
+existence. See §14.5 for the original recommendation.
+
 ---
 
 ## 6. Output format
@@ -937,7 +946,9 @@ Named for the owner of `/Fabrication.md`; this document does not edit that file.
   field's best practice is TM's — compute from material and tool in the app, mark which values
   are suggested (`notes/tormach.md`, pp. 122–124) — which `feeds.ts` with `status` already is.
   **It should become:** *the DB is a prefill source for the desktop tool inventory (#212,
-  resolver case 2) and never the feeds source.*
+  resolver case 2) and never the feeds source.* **Updated 2026-10-08:** the second half of
+  that was superseded — see §5.1. It is a feeds *tier below measurement*, not a feeds
+  source; the distinction is what keeps all three facts above intact.
 - **Decision 9 — "First real job is a 3D-printed blank."** Housekeeping, not a corpus
   finding: CNC-2's first chips are wood in the vise (#209); the badge is CNC-3. **It should
   read** "first *badge* job".
