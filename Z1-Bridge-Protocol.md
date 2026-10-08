@@ -461,3 +461,32 @@ touching callers.
 | Whether §5's raw upload matches what the machine wants for a `.nc` | **ANSWERED 2026-10-07 — raw is accepted, this direction needs no compression.** A plain, uncompressed `.nc` was transferred by §5's own sequence and acknowledged `ok`, and the file the card ended up holding hashes to the bytes that were sent. So the QuickLZ path Studio carries (`QuickLZCLI.exe`, `ftype == lz`, `the machine is decompress the nc file!`) is **not a precondition** for uploading: the receiver takes the file uncompressed, for at least this size and this path. What that leaves unmeasured is the shape of the compressed case — whether `ftype == lz` is Studio choosing to compress, or the machine demanding it above some size. | **closed for the upload question**, which is what it was opened for. Reopens only if a transfer is refused for size, and then with the refusal in hand rather than in anticipation of it. |
 | How the machine acknowledges a console command | **OBSERVED INDIRECTLY 2026-10-07.** Makera's own client renders every command it sends followed by a bare **`ok`**, and a completed multi-step macro as **`Done ATC`**; a probe trigger comes back as **`[PRB:x,y,z:1]`**. Read from the client's MDI log, **not from the wire** — the command half is certain (the client sent it), the reply half is one level removed. The dialect and the codes are in `/Z1-Firmware-Dialect.md` §11. | A wire capture. Not blocking: nothing in the bridge parses a reply it has not seen, and `?` status (§6) is the reply the bridge actually depends on. |
 | Whether the bridge must model the **accessory modes** at all | **OPEN 2026-10-07.** The machine carries a mode family — `M331`, `M331.1`, `M331.2`, `M331.4`, `M951` — controlling bed cleaning, blowing, static removal, an "extend out" mode and camera time-lapse (`/Z1-Firmware-Dialect.md` §11.3). `machine.ts` models the Z1's only accessory as **air (`M7`/`M9`)**, and **no `M7` or `M9` appeared in the traffic read.** | Deciding whether the bridge reproduces these modes or leaves them to the machine's own client. Note this is *not* on the first pass: `§8` keeps the bridge to "upload a verified `.nc` and report status". The row exists so the gap is written down rather than discovered later. |
+
+## 10. The camera — its own server, not the command channel (OBSERVED 2026-10-08)
+
+The integrated camera is **not** behind TCP 2222. It is an **ESP32 camera module on the machine with
+its own web server**, found by reading Makera Studio's own strings (`ws://%1:82/ws_video`,
+`[Video] Connected, sending start_stream`) and then confirmed against the machine with Studio **not**
+connected. Everything below is observed on `Makera_Z1_010290`:
+
+| Fact | Observed |
+|---|---|
+| Endpoint | `ws://<host>:82/ws_video` — a plain WebSocket (RFC 6455 handshake, `101 Switching Protocols`). |
+| Start | The client sends the **text** message `start_stream` once connected. Nothing arrives before it. |
+| Frames | **Binary** WebSocket messages, one complete **baseline JPEG (`FFD8 FFE0`) per message, 640 × 480**, ~16 KB each, at **~10 per second** (12 frames in 1.1 s). They keep coming until the socket closes. |
+| Stop | Close the socket. (Studio's strings also carry text messages for **time-lapse playback** — `total_frames`, `frame_period_us`, `from_frame`, a "play response" — not exercised.) |
+| Port 80 | The same module serves a leftover demo web page (`<title>Tank</title>`, Vue, `"ESP32 Camera Stream"`), whose bundle names `:81/ws` and `:82/ws_video`. **Port 81 is refused**; port 80 is of no use to us. |
+| Availability | Ports 80 and 82 open with the machine, a few seconds after 2222. **A machine that has switched itself off after idling answers on none of them** (see `tools/z1/power.sh --cycle`). |
+| Where it points | The first frame (`docs/bench/img/camera-2026-10-08-first-frame.jpg`) shows the X rail and the bed plate under the machine's green light. Head- vs frame-mounted (bench A6) is still open: two frames around one commanded move settle it. |
+
+What this changes:
+
+- **#286's gate is weaker than written.** The capture half of the camera work was gated on #181's raw
+  socket. A WebSocket needs no raw socket: the Tauri webview (loaded from `http://127.0.0.1`) can open
+  `ws://<host>:82/ws_video` directly, and so can Node. Only the **web** build is blocked, by mixed
+  content (`https://` page, `ws://` socket), not by capability.
+- The bench harness can now take frames: `node tools/z1/z1.mjs camera <host> [--count N --every ms]`
+  (`tools/z1/camera.mjs`). It moves nothing and writes nothing on the machine.
+- §8 is unchanged: the stream is a read, and the camera is on its own server, so a transfer or a
+  console line on 2222 and a video socket on 82 never share a socket.
+

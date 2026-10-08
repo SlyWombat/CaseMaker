@@ -729,8 +729,11 @@ measure it. Z stays probed, always.
   origin-setting overlay.** So there is nothing to lean on and nothing to imitate: vision
   registration is entirely ours to build (#189), and it is a capability Studio has the
   hardware for and does not use.
-- **Whether the stream is reachable by anything but Studio and the mobile app.** `ws_video`
-  suggests a WebSocket endpoint on the machine, which is a bridge-era question (§5.7, #181).
+- **Whether the stream is reachable by anything but Studio and the mobile app.** **Answered
+  2026-10-08: yes.** It is a plain WebSocket on the machine's own ESP32 camera module,
+  `ws://<host>:82/ws_video`, that sends 640 × 480 JPEG frames at ~10/s after a `start_stream` text
+  message; `/Z1-Bridge-Protocol.md` §10 has the record and `tools/z1/z1.mjs camera` captures it.
+  No raw socket is needed, so only the https web build is kept out (mixed content), not the desktop.
 
 **So for V1 the camera contributes nothing to registration.** Studio will not position with
 it, reading the stream needs raw sockets the web build does not have (§5.7, #181), and the

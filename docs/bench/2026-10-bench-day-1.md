@@ -201,15 +201,21 @@ warns when grip (`thickness − stockProud`) < `GRIP_MIN` 3 mm (`fixture.ts:184-
 with no origin-setting overlay (`/Fabrication.md` §1, §7.3). Head- vs frame-mounted is unknown
 and it decides the whole calibration model (#189; `/Fabrication.md` §7.3 / #191 item 5).
 
-**Recorded:** _not yet run — one word + photo._
+**Recorded 2026-10-08 — the camera's own view, not yet the mount.** The stream was reached from the
+bench harness (`node tools/z1/z1.mjs camera 192.168.10.43`; `/Z1-Bridge-Protocol.md` §10): 640 × 480
+JPEG, ~10 frames/s, machine idle at the homed position. First frame:
+`docs/bench/img/camera-2026-10-08-first-frame.jpg` — the X rail and the bed plate under the green
+light. Whether that view moves with the head is exactly the open question: **take one frame before
+and one after #293's first X/Y move** and compare — if the bed plate shifts in the picture, the camera
+is on the head.
 
 | Field | Value |
 |---|---|
-| Mounted on (head / frame) | |
+| Mounted on (head / frame) | _open — two frames around one move_ |
 
-Photo: `docs/bench/img/A6-camera.jpg`
+Photo: `docs/bench/img/A6-camera.jpg` (of the mount, by hand)
 
-**Goes to:** #189.
+**Goes to:** #189, #286.
 
 ### A7 — Barcodes on the cutters
 

@@ -36,6 +36,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createNodeTransport } from './transport.node.mjs';
 import * as P from '../../src/platform/desktop/protocol.ts';
+import { CAMERA_PORT, captureFrames, saveFrame } from './camera.mjs';
 
 /** Flags that never take a value. Without this, `--effective <key>` swallows the key as its value. */
 const BOOLEAN_FLAGS = new Set(['json', 'help', 'effective', 'i-am-at-the-machine']);
@@ -64,7 +65,7 @@ function parseArgs(argv) {
 const num = (v, fallback) => (v === undefined ? fallback : Number(v));
 
 function usage() {
-  console.log(`z1 — bench harness for the Makera Z1 (reads, plus a guarded console — see the end)
+  console.log(`z1 — bench harness for the Makera Z1 (reads, the camera, plus a guarded console — see the end)
 
   node tools/z1/z1.mjs discover [--window <ms>] [--json]
   node tools/z1/z1.mjs identify <host> [--port <n>] [--json]
@@ -72,6 +73,7 @@ function usage() {
   node tools/z1/z1.mjs read     <host> <path> [--limit <lines>] [--window <ms>] [--out <file>]
   node tools/z1/z1.mjs md5      <host> <path> [<path> ...] [--window <ms>] [--json]
   node tools/z1/z1.mjs config   <host> <key> [<key> ...] [--source <name>] [--effective] [--json]
+  node tools/z1/z1.mjs camera   <host> [--out <file-or-dir>] [--count <n>] [--every <ms>] [--port <n>]
 
 \`config\` reads from source \`sd\` by default, one \`config-get sd <key>\` per key. \`--effective\` asks for
 the merged cache instead (one \`config-get <key>\`) — but on this machine that cache answers
@@ -87,6 +89,11 @@ Sends nothing to the machine except the two identify queries, the status poll, t
 read needs, one \`config-get\` line per key asked for and one \`md5sum\` line per path asked about.
 \`read\` and \`md5\` take an absolute path on the controller's card and nothing else; \`config\` takes
 configuration keys and nothing else.
+
+\`camera\` saves JPEG frames from the machine's camera (its own ESP32 module, ws://<host>:82/ws_video —
+see camera.mjs). One frame to --out (default docs/bench/img/camera-<timestamp>.jpg); with --count N
+the frames go into --out as a directory, --every <ms> apart. It moves nothing and writes nothing on
+the machine. A frame before and after a move is the cheapest answer to A6 (head- or frame-mounted).
 
 MOTION AND THE CONSOLE (#302). Two commands send a line you typed, which can move the machine:
 
@@ -161,6 +168,31 @@ async function main() {
     usage();
     process.exit(2);
   }
+
+  // The camera is not on the command channel: its own server, its own port, no transport seam.
+  if (cmd === 'camera') {
+    const count = num(flags.count, 1);
+    const everyMs = num(flags.every, 0);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const here = dirname(fileURLToPath(import.meta.url));
+    const defaultOut = resolve(here, '..', '..', '..', 'docs', 'bench', 'img', count === 1 ? `camera-${stamp}.jpg` : `camera-${stamp}`);
+    const out = typeof flags.out === 'string' ? resolve(flags.out) : defaultOut;
+    process.stderr.write(`camera: ${count} frame(s) from ws://${host}:${num(flags.port, CAMERA_PORT)}/ws_video — no motion, no write on the machine...\n`);
+    const result = await captureFrames({
+      host,
+      port: num(flags.port, CAMERA_PORT),
+      count,
+      everyMs,
+      onFrame: (jpeg, n) => {
+        const path = count === 1 ? out : resolve(out, `frame-${String(n).padStart(4, '0')}.jpg`);
+        saveFrame(path, jpeg);
+        console.log(`${path}  ${jpeg.length} bytes`);
+      },
+    });
+    process.stderr.write(`${result.frames} frame(s) saved.\n`);
+    return;
+  }
+
   const port = num(flags.port, P.COMMAND_TCP_PORT);
   if (cmd !== 'identify' && cmd !== 'status' && cmd !== 'read' && cmd !== 'config' && cmd !== 'md5' && cmd !== 'send' && cmd !== 'console') {
     console.error(`unknown command: ${cmd}`);
