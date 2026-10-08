@@ -57,6 +57,8 @@ class FakeTransport implements MachineTransport {
   closed: number[] = [];
   listenPort: number | null = null;
   listenWindow = 0;
+  /** The timeout each `tcpRead` was asked for — how a spec sees which window a caller chose. */
+  readTimeouts: number[] = [];
 
   queueRead(...chunks: Uint8Array[]): void {
     this.reads.push(...chunks);
@@ -74,7 +76,8 @@ class FakeTransport implements MachineTransport {
   async tcpWrite(_conn: number, data: Uint8Array): Promise<void> {
     this.writes.push(data);
   }
-  async tcpRead(_conn: number, _max: number, _timeoutMs: number): Promise<Uint8Array> {
+  async tcpRead(_conn: number, _max: number, timeoutMs: number): Promise<Uint8Array> {
+    this.readTimeouts.push(timeoutMs);
     return this.reads.shift() ?? EMPTY;
   }
   async tcpClose(conn: number): Promise<void> {
@@ -316,6 +319,47 @@ describe('#255 protocol — file upload', () => {
     if (outcome.ok) return;
     expect(outcome.reason).toBe('refused');
     expect(outcome.detail).toContain('without saying why');
+  });
+
+  // #300: the refusal's md5 reply is one line. It used to be drained for the transfer's whole
+  // inactivity budget, so every refusal cost the operator nine seconds.
+  it('asks for the pre-data md5 reply with the short window, not the transfer inactivity budget (#300)', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(PTYPE_FILE_CANCEL, utf8('Error: failed to open file [/sd/gcodes/badge.nc]!\r\n')),
+      encodeFrame(0x90, utf8('Error: file not found [/sd/gcodes/badge.nc]')),
+    );
+    await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 9000 });
+    // The first read is the transfer's (9000); every read after the cancel is the md5 answer's.
+    expect(transport.readTimeouts[0]).toBeGreaterThan(8000);
+    expect(transport.readTimeouts.slice(1).every((t) => t <= 2000)).toBe(true);
+  });
+
+  it('stops reading the md5 reply as soon as the answer is complete (#300)', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(PTYPE_FILE_CANCEL, EMPTY),
+      encodeFrame(0x90, utf8(`${md5Hex(content)}/sd/gcodes/badge.nc`)),
+      // A frame that must NOT be consumed: if the read ran out the window it would be swallowed.
+      encodeFrame(0x90, utf8('trailing')),
+    );
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', content, { packetSize, inactivityMs: 9000 });
+    expect(outcome).toEqual({ ok: true, bytes: 9, packets: 0, alreadyPresent: true });
+    expect(transport.reads).toHaveLength(1);
+  });
+
+  // #298: WRITABLE_PATH allows a space (it travels as 0x01), `md5sum` does not — it splits on it and
+  // hashes `/sd/gcodes/my`. The claim "already present" is then unmakeable, so it is not made.
+  it('does not send md5sum a path with a space, and says the claim could not be checked (#298)', async () => {
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(PTYPE_FILE_CANCEL, EMPTY));
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/my part.nc', content, { packetSize, inactivityMs: 50 });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe('refused');
+    expect(outcome.detail).toContain('could not be checked');
+    const sentMd5sum = decodeAll(transport.writes).some((f) => decodeText(f.data).startsWith('md5sum'));
+    expect(sentMd5sum).toBe(false);
   });
 
   it('refuses a destination that is not an absolute path, before opening the transfer', async () => {

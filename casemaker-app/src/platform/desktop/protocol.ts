@@ -419,7 +419,12 @@ export interface UploadOptions {
   packetSize?: number;
   /** Inactivity window: no frame at all for this long cancels the transfer (§5). */
   inactivityMs?: number;
+  /** How long to wait for the machine's answer to the pre-data `md5sum` re-check (#300). */
+  md5WindowMs?: number;
 }
+
+/** The longest a one-line `md5sum` reply is waited for; `runMd5Sum`'s default window too. */
+const MD5_WINDOW_MS = 2000;
 
 /**
  * The machine's job directory. Studio asks for it on every connect (`ls -e -s /sd/gcodes`,
@@ -539,15 +544,26 @@ export async function runUpload(
       // channel: a second one would hold a second decoder and race this one for the same socket.
       const said = decodeText(frame.data).trim();
       if (!requested) {
-        const existing = await md5ViaChannel(transport, conn, channel, path, inactivityMs);
+        const refusedDetail = said.length > 0 ? said : 'the machine cancelled the transfer without saying why';
+        // A path with a space is a legal upload destination (§5 encodes it as 0x01) but not a legal
+        // `md5sum` argument: the controller splits on the space and hashes the wrong file (#298).
+        // The "already present" claim then cannot be checked, so it is not made — and the caller is
+        // told why, rather than reading a bare refusal for a file that may well be on the card.
+        if (!READABLE_PATH.test(path)) {
+          return {
+            ok: false,
+            reason: 'refused',
+            detail: `${refusedDetail} (whether the machine already holds this file could not be checked: its path has characters md5sum cannot take)`,
+          };
+        }
+        // The refusal's reply is one line and arrives at once, so the window here is the SHORT one
+        // `runMd5Sum` uses, not the transfer's inactivity budget (#300): a refusal must not make the
+        // operator wait out nine seconds of a transfer that never began.
+        const existing = await md5ViaChannel(transport, conn, channel, path, opts.md5WindowMs ?? MD5_WINDOW_MS);
         if (existing.ok && existing.md5 === md5Hex(content)) {
           return { ok: true, bytes: content.length, packets: 0, alreadyPresent: true };
         }
-        return {
-          ok: false,
-          reason: 'refused',
-          detail: said.length > 0 ? said : 'the machine cancelled the transfer without saying why',
-        };
+        return { ok: false, reason: 'refused', detail: refusedDetail };
       }
       return {
         ok: false,
@@ -714,7 +730,7 @@ export async function runMd5Sum(
   path: string,
   opts: Md5SumOptions = {},
 ): Promise<Md5SumOutcome> {
-  const windowMs = opts.windowMs ?? 2000;
+  const windowMs = opts.windowMs ?? MD5_WINDOW_MS;
   if (!READABLE_PATH.test(path)) {
     return {
       ok: false,
@@ -741,17 +757,36 @@ async function md5ViaChannel(
   path: string,
   windowMs: number,
 ): Promise<Md5SumOutcome> {
+  // The sink guards itself (#298): an unquoted space would send `md5sum` a different file than the
+  // one asked about, and every caller must get the same answer to "may this path be sent".
+  if (!READABLE_PATH.test(path)) {
+    return {
+      ok: false,
+      reason: 'bad-path',
+      detail: `refusing to send ${JSON.stringify(path)}: a readable path is absolute and made of A-Z a-z 0-9 . _ - /`,
+      text: '',
+    };
+  }
   await transport.tcpWrite(conn, encodeFrame(PTYPE_CTRL_MULTI, utf8(`md5sum ${path}`)));
-  const frames = await channel.drain(windowMs);
-  const text = frames
-    .filter((f) => f.type >= 0x80)
-    .map((f) => decodeText(f.data))
-    .join('');
+
+  // Read until the answer is COMPLETE, not until the window closes (#300). The reply is one line, so
+  // the window is only the upper bound for a machine that says nothing.
+  let text = '';
+  const deadline = Date.now() + windowMs;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const frame = await channel.next(remaining);
+    if (frame === null) break;
+    if (frame.type < 0x80) continue;
+    text += decodeText(frame.data);
+    if (MD5_NOT_FOUND.test(text) || MD5_DIGEST.test(text)) break;
+  }
 
   // Two spellings, both read off the machine: `cat` says `File not found: <path>` and `md5sum` says
   // `Error: file not found [<path>]`. Matched case-insensitively and without the wrapper, because the
   // only thing worth keying on is the phrase, and a third spelling would otherwise read as success.
-  if (/^(?:error: )?file not found/im.test(text)) {
+  if (MD5_NOT_FOUND.test(text)) {
     return { ok: false, reason: 'not-found', detail: text.trim(), text };
   }
   if (text.length === 0) {
@@ -759,12 +794,15 @@ async function md5ViaChannel(
   }
   // Anchor to the line start: the digest is followed immediately by the path, so there is no
   // separator to split on and a bare 32-hex search could match inside the filename.
-  const match = /^([0-9a-f]{32})/m.exec(text);
+  const match = MD5_DIGEST.exec(text);
   if (match === null) {
     return { ok: false, reason: 'unparsed', detail: `no digest in the reply: ${text.trim()}`, text };
   }
   return { ok: true, md5: match[1] ?? '', path, text };
 }
+
+const MD5_NOT_FOUND = /^(?:error: )?file not found/im;
+const MD5_DIGEST = /^([0-9a-f]{32})/m;
 
 // ---------------------------------------------------------------------------
 // The machine's own configuration (§5 — `config-get`)
@@ -822,7 +860,7 @@ export async function readConfigKey(
   key: string,
   opts: ReadConfigKeyOptions = {},
 ): Promise<ReadConfigKeyOutcome> {
-  const windowMs = opts.windowMs ?? 2000;
+  const windowMs = opts.windowMs ?? MD5_WINDOW_MS;
   const source = opts.source;
   if (!CONFIG_KEY.test(key) || (source !== undefined && !CONFIG_SOURCE.test(source))) {
     return {
