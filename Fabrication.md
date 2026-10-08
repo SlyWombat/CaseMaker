@@ -111,7 +111,12 @@ property, not a catalogue one** (settled in #305, design point 1). Makera's cata
 `.nc` header makes with `sticklength=0`, which therefore parses to `null` and never to `0`.
 The consequence to keep in mind everywhere: re-collaring or re-measuring a cutter changes the
 length a saved job was generated through, which is why a job snapshots the `Tool` it was
-written with rather than resolving it fresh. Bench task A2 measures it
+written with rather than resolving it fresh. It is **not** a sweep input, though (#314,
+2026-10-08): the nut-to-tip distance depends on how deep the shank went into the collet *this*
+time, which is why the machine probes the tip at every change, and the collet-nut clearance
+check needs only the cutter's **shoulder length** — the nut face can be no closer to the tip
+than that at any seating, so for a part proud of its jaws the nut is proven clear by the depth
+gate alone. Bench task A2, which asked for calipers on the nut and stick-out, is superseded
 (`docs/bench/2026-10-bench-day-1.md`).
 
 **There is a Z1 Pro.** `Z1/QuickStart` is written throughout for "Makera Z1（Z1&Z1Pro）",

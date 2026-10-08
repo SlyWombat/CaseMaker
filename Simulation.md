@@ -840,7 +840,11 @@ about how the part will *look* beyond which colour volume a floor lands in.
    checked against it per checkpoint once `machine.holder` (#208) and the tool's stick-out are
    both **known** (`holder-into-fixture`), and until then the sweep says clearance "cannot be
    proven" — one `holder-vs-fixture-unproven` **warning**, never a refusal. The collision is
-   **reported, never subtracted**. Repeated codes fold at `DIAGNOSTIC_CAP`.
+   **reported, never subtracted**. Repeated codes fold at `DIAGNOSTIC_CAP`. **Revised by #314
+   (2026-10-08):** the stick-out is not knowable across fittings and is not needed — the nut face
+   is at least the cutter's shoulder length above the tip at any seating, so with the depth gated
+   there the nut cannot reach anything below the stock top; the warning is to fire only for an
+   obstacle that rises above the stock, and the nut is then placed at `tip + shoulderLength`.
 7. ~~**Run it on Makera's corpus**~~ **Done for the gates that exist.** Parser, runner and
    sweep each have a corpus test; `ACRYLIC-Balloon.nc` passes every gate above with zero
    errors. Every item of §7.1's must-FAIL list is a test.

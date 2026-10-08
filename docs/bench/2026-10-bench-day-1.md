@@ -127,31 +127,27 @@ carries no lengths at all. Bit collars set ~12 mm exposed length by default
 (`/Fabrication.md` §1). Do not transcribe the ~12 mm default as a measurement: the number that
 goes into the library is the one the calipers read.
 
-**Recorded:** _not yet run — nut ⌀, nut height, collar ⌀, collar height, collar-to-nut gap,_
-_stick-out (6 numbers)._
+> **Superseded 2026-10-08 (#314).** Not measured, and not going to be. The maintainer's objection
+> at the machine: the nut-to-tip distance depends on how deep the shank was pushed into the collet
+> *this* time, so no caliper reading survives the next fitting — the machine probes the tip
+> (`M491`) at every tool change for exactly that reason, and the app never sets a tool's Z. What
+> a cutter *does* state is its **shoulder length** (tip → full shank, `cutterShoulderLength`): a
+> property of the cutter, not of the fitting, and the depth it supports. The sweep already
+> refuses a cut deeper than it (`holderGate`, `holder-collision`). Since the collet grips the
+> shank and never the flutes, the nut face is at least the shoulder length above the tip at any
+> seating; with the depth gated there, the nut face stays at or above the stock top, and in the
+> vise nothing stands above the stock top. **The nut cannot reach a jaw. Its diameter and height
+> do not enter.** The nut only matters for an obstacle that rises above the stock (a toe clamp,
+> the rotary chuck), and even then its worst-case face is `tip + shoulderLength`, which needs no
+> stick-out. #314 makes the sweep say so instead of warning "cannot be proven" on every job.
+>
+> For the cutter in the collet (A1, the 3.175×1×4 mm ball nose) the catalogue states shoulder =
+> flute = **4.0 mm**; the catalogue's 1 mm *metal* ball nose is the 3 mm row, and which of the
+> two the green box is will come from its QR slug in CNC-6, not from a photo. A text engraving
+> is a fraction of either. `Tool.stickout` stays in the registry as "what the collar was set
+> to" for a job's own record (#305 design point 1), but it is no longer a sweep input.
 
-| Field | Value |
-|---|---|
-| Collet nut outside ⌀ (mm) | |
-| Collet nut height (mm) | |
-| Collar outside ⌀ (mm) | |
-| Collar height (mm) | |
-| Collar face → nut face (mm) | |
-| Stick-out, nut face → tool tip (mm) | |
-
-Stick-out per cutter, if it differs from the collar default (cutter # from A1). Re-measure it
-whenever a cutter is re-collared: a new length invalidates a saved job's stick-out, which is why
-the job keeps the `Tool` it was generated with (#305 design point 2).
-
-| Cutter # | Stick-out (mm) |
-|---|---|
-| | |
-| | |
-
-**Goes to:** `Z1.holder` in `src/engine/cnc/machine.ts` (#204) and each owned cutter's `stickout`
-in `src/engine/cnc/toolLibrary.ts` — as the exposure that cutter is **collared to**, which is
-per-installation and not a catalogue figure (`/Fabrication.md` §1, #305 design point 1). #212's
-inventory item carries its own materialised snapshot of the same value.
+**Recorded:** _superseded — nothing to caliper. See #314._
 
 ### A3 — Caliper the vise
 
@@ -1560,7 +1556,7 @@ D1 as written could never have answered it by inspection.
 
 | Marker (value) | File:line | Resolved by |
 |---|---|---|
-| `holder: null` | `machine.ts:463-465` | A2 |
+| `holder: null` | `machine.ts:463-465` | ~~A2~~ superseded: #314 (needed only for an obstacle above the stock top; no caliper) |
 | `VISE_BODY_DEPTH = 20` | `fixture.ts:36` | A3 |
 | `GRIP_MIN = 3` | `fixture.ts:43` | A3 / A5 |
 | `DEFAULT_UNCERTAINTY = 2`, `SAVED_UNCERTAINTY = 0.5` | `fixture.ts:55-58` | A3 |
