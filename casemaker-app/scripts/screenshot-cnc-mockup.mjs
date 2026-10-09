@@ -36,6 +36,10 @@ const STATES = [
   ['shot-engrave-generated', 'cnc-mockup-engrave-generated.png'],
   ['shot-engrave-generated-blocked', 'cnc-mockup-engrave-generated-blocked.png'],
   ['shot-engrave-viewport', 'cnc-mockup-engrave-viewport.png'],
+  ['shot-manage-tools', 'cnc-mockup-manage-tools.png'],
+  ['shot-manage-register', 'cnc-mockup-manage-register.png'],
+  ['shot-manage-absent', 'cnc-mockup-manage-absent.png'],
+  ['shot-manage-machines', 'cnc-mockup-manage-machines.png'],
 ];
 
 const browser = await chromium.launch();

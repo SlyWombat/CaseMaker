@@ -349,6 +349,71 @@ select.fld{padding:3px 4px}
 .empty h3{margin:0 0 10px;font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--on-surface)}
 .empty p{margin:0 0 10px;font-size:13px;line-height:1.5;color:var(--on-muted)}
 .empty .tip{font-size:11px;font-family:var(--mono);font-style:italic;color:#6c7585}
+
+/* --- Manage mode (G, #311): a third mode beside the project shell and the welcome overlay --- */
+/* Not a sidebar section: sections are per-project and this surface must exist with no project
+   open. Same header, same status bar; the middle is a scopes rail, a list and the detail rail. */
+.manage .btn{white-space:nowrap}
+.btn--mode{background:var(--rail-active);border-color:var(--rail-active-border);color:#cfe;font-weight:600}
+.manage{display:grid;grid-template-columns:220px 1fr 360px;min-height:0;overflow:hidden}
+.mrail{background:var(--sc-low);border-right:1px solid var(--outline);padding:8px;display:flex;flex-direction:column;overflow:hidden}
+.mrail .nav{padding:8px 10px}
+.nav--later{opacity:.45;cursor:not-allowed}
+.nav__count{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--on-muted)}
+.nav em{margin-left:auto;font-style:normal;font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--on-muted)}
+.dot{width:8px;height:8px;border-radius:50%;margin-left:auto;flex:none;border:1px solid rgba(0,0,0,.4)}
+.dot--ok{background:var(--secondary)} .dot--off{background:#5b6472} .dot--warn{background:var(--tertiary)}
+.mrail__foot{margin-top:auto;font-family:var(--mono);font-size:10px;color:var(--on-muted);line-height:1.5;padding:6px 4px 0;border-top:1px solid var(--rail-border)}
+.mrail__foot b{color:var(--secondary);font-weight:400}
+.mrail__foot .off{color:var(--tertiary)}
+.mmain{padding:14px 18px;overflow:hidden;display:flex;flex-direction:column;min-height:0;background:var(--surface)}
+.mhead{display:flex;align-items:flex-start;gap:14px;margin-bottom:10px}
+.mhead h3{margin:0 0 3px;font-size:17px;color:#e6e8eb}
+.mhead p{margin:0;font-size:11px;color:var(--on-muted);max-width:620px;line-height:1.45}
+.mhead .btn-row{margin:0 0 0 auto;flex:none}
+.mfilter{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.mfilter .fld{width:260px}
+.chip{white-space:nowrap;font-family:var(--mono);font-size:10px;padding:2px 9px;border-radius:999px;border:1px solid var(--outline);color:var(--on-var);background:transparent;cursor:pointer}
+.chip--on{background:var(--rail-active);border-color:var(--rail-active-border);color:#cfe}
+.mcount{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--on-muted)}
+.tbl{width:100%;border-collapse:collapse;font-size:11px;background:var(--card-bg);border:1px solid var(--rail-border);border-radius:4px}
+.tbl th{white-space:nowrap;text-align:left;font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--on-muted);font-weight:400;padding:6px 8px;border-bottom:1px solid var(--outline);background:#121722}
+.tbl td{padding:5px 8px;border-bottom:1px solid #20262e;color:#e6e8eb;vertical-align:middle;white-space:nowrap}
+.tbl td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.tbl th.num{text-align:right}
+.tbl td.dim{color:var(--on-muted)}
+.tbl tr.sel td{background:var(--rail-active)}
+.tbl tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--primary-container)}
+.tbl tr.grp td{background:#0f1420;color:var(--on-var);font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:5px 8px}
+.tbl tr.grp td small{text-transform:none;letter-spacing:0;color:var(--on-muted);margin-left:8px}
+.tbl tr.more td{color:var(--on-muted);font-family:var(--mono);font-size:10px;text-align:center}
+.tbl .nm{font-weight:500}
+.tbl .nm small{display:block;font-weight:400;color:var(--on-muted);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:380px}
+.tag--own{color:var(--primary);border-color:color-mix(in srgb,var(--primary) 45%,transparent)}
+.tag--cat{color:var(--on-var);border-color:var(--outline)}
+.tag--bi{color:var(--on-muted);border-color:var(--outline);border-style:dashed}
+.code{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:10px;color:var(--on-var);background:#0f1420;border:1px solid var(--rail-border);border-radius:3px;padding:1px 6px}
+.code i{font-style:normal;font-size:9px;color:var(--on-muted);letter-spacing:.08em}
+.mempty{border:1px dashed var(--outline);border-radius:6px;padding:28px 32px;max-width:720px;margin:24px auto;color:var(--on-var);font-size:12px;line-height:1.55}
+.mempty h4{margin:0 0 8px;font-size:14px;color:#e6e8eb}
+.mempty p{margin:0 0 8px}
+.mempty .why{font-family:var(--mono);font-size:10px;color:var(--on-muted);background:#0f1420;border:1px solid var(--rail-border);border-radius:4px;padding:6px 8px;margin:8px 0}
+.door{display:flex;gap:0;border:1px solid var(--rail-border);border-radius:4px;overflow:hidden;margin:6px 0 8px}
+.door button{flex:1;background:var(--control-bg);border:0;border-right:1px solid var(--rail-border);color:var(--on-var);padding:5px 0;font:inherit;font-size:11px;cursor:pointer}
+.door button:last-child{border-right:0}
+.door .on{background:var(--rail-active);color:#cfe;font-weight:600}
+.cand--radio{display:grid;grid-template-columns:14px 1fr auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid #20262e;font-size:11px}
+.cand--radio:last-child{border-bottom:0}
+.cand--radio input{margin:0;accent-color:var(--primary-container)}
+.cand--radio small{color:var(--on-muted);font-family:var(--mono);font-size:10px}
+.mcard{border:1px solid var(--rail-border);border-radius:4px;background:var(--card-bg);padding:12px 14px;margin-bottom:10px}
+.mcard h4{margin:0 0 2px;font-size:14px;color:#e6e8eb;display:flex;align-items:center;gap:8px}
+.mcard .sub{font-family:var(--mono);font-size:10px;color:var(--on-muted);margin-bottom:8px}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:4px 10px;font-size:11px;align-items:start}
+.kv span{color:var(--on-muted)}
+.kv b{font-weight:400;font-family:var(--mono);font-variant-numeric:tabular-nums;color:#e6e8eb;white-space:normal;overflow-wrap:anywhere;line-height:1.45}
+.kv .ok{color:var(--secondary)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 </style>
 </head>
 <body>
@@ -1844,6 +1909,337 @@ select.fld{padding:3px 4px}
       </aside>
     </div>
     <footer class="status-bar"><span class="ver">engrave · badge.cmjob · hardwood 12 mm</span><span class="engine"><span>preview: 3 labels</span><span>depths 0.5 / 1.0 / 2.0 mm</span></span></footer>
+  </div>
+</section>
+
+
+<!-- ===================================================================== G1 -->
+<section class="state" id="state-manage-tools">
+  <h2 class="state__label"><b>G1</b> · Manage — House → Tools, the house service present</h2>
+  <p class="state__note">Per #311 (tracking #212). A <b>third mode</b> beside the project shell and the welcome overlay, entered from <b>🧰 Manage</b> next to ✨ New in the toolbar — not a sidebar section, because sections are per-project and this must open with no project. Left: the scopes rail, <b>House</b> (Tools; Materials reserved, not built) and <b>Machines</b>. Middle: every definition the registry resolves, <b>grouped by tier</b> so the label is never ambiguous — <b>owned</b> (the inventory, <code>inv:</code>), <b>yours</b> (<code>user:</code>), <b>Makera catalogue</b> (<code>cat:</code>, read-only, “clone to change”), <b>built-in</b> (the two permanent entries, one of them literally “(assumed)”). Right: the selected row. Catalogue rows are Makera's data and are shown exactly as synced; the one measured thing a clone can add is a stick-out, and nothing here invents one (#314: it is not a sweep input anyway). Names, dimensions and dates below are the real rows from the maintainer's Studio library and this week's bench.</p>
+  <div class="frame" id="shot-manage-tools">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v1.0.0</small></div>
+      <div class="toolbar-buttons">
+        <button class="btn btn--ghost">✨ New</button>
+        <button class="btn btn--ghost btn--mode" title="The house's tools and the machines — no project needed">🧰 Manage</button>
+        <button class="btn btn--ghost">Import board</button>
+        <button class="btn btn--ghost">Docs</button>
+        <button class="btn btn--ghost" aria-label="Settings">⚙</button>
+      </div>
+    </header>
+    <div class="manage">
+      <aside class="mrail">
+        <div class="nav__divider">House</div>
+        <button class="nav nav--active"><span class="nav__icon">🧰</span><span>Tools</span><span class="nav__count">133</span></button>
+        <button class="nav nav--later" disabled><span class="nav__icon">🧱</span><span>Materials</span><em>later</em></button>
+        <div class="nav__divider">Machines</div>
+        <button class="nav"><span class="nav__icon">🛠️</span><span>Z1 · 192.168.10.43</span><span class="dot dot--ok" title="Idle, checked 06:58"></span></button>
+        <div class="mrail__foot">house service · <b>present</b><br>this build's own origin<br>catalogue synced 2026-10-09 07:12 · 129 rows<br>schema v1 · no problems</div>
+      </aside>
+      <section class="mmain">
+        <div class="mhead">
+          <div>
+            <h3>Tools</h3>
+            <p>Every cutter a job can name, and where each definition came from. Makera's rows are read-only — clone one to rename it or to record what you measured. The built-ins are always here, service or not.</p>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn--primary">＋ Register ▾</button>
+            <button class="btn">Clone</button>
+            <button class="btn" title="Re-read Makera Studio's own library on this PC into the catalogue tier (#308)">Sync catalogue</button>
+            <button class="btn">Export</button>
+            <button class="btn">Import</button>
+          </div>
+        </div>
+        <div class="mfilter">
+          <input class="fld fld--text" placeholder="Search name, code or size…" value="">
+          <button class="chip chip--on">all</button><button class="chip">owned</button><button class="chip">yours</button><button class="chip">catalogue</button><button class="chip">built-in</button>
+          <span class="mcount">133 definitions · 1 owned · 1 yours · 129 catalogue · 2 built-in</span>
+        </div>
+        <table class="tbl">
+          <thead><tr><th style="width:36%">Name</th><th>Shape</th><th class="num">Tip ⌀</th><th class="num">Shank</th><th class="num">Flute</th><th class="num">Shoulder</th><th class="num">Stick-out</th><th class="num">Qty</th><th>From</th></tr></thead>
+          <tbody>
+            <tr class="grp"><td colspan="9">Owned <small>the inventory — a physical cutter, with the code on its box</small></td></tr>
+            <tr class="sel"><td class="nm">3.175*1*4mm Ball Nose<small>green box · fitted as T1 on 2026-10-08 · <span class="code"><i>QR</i>C1-BIT-BALL-NOSE-1-4</span></small></td><td>ball</td><td class="num">1.0</td><td class="num">3.175</td><td class="num">4.0</td><td class="num">4.0</td><td class="num dim">—</td><td class="num">1</td><td><span class="tag tag--own">owned</span></td></tr>
+            <tr class="grp"><td colspan="9">Yours <small>your own definitions — typed, or cloned from a catalogue row</small></td></tr>
+            <tr><td class="nm">1 mm ball nose — green box, collared<small>cloned from Makera catalogue “3.175*1*4mm Ball Nose” on 2026-10-09 · name changed</small></td><td>ball</td><td class="num">1.0</td><td class="num">3.175</td><td class="num">4.0</td><td class="num">4.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag">yours</span></td></tr>
+            <tr class="grp"><td colspan="9">Makera catalogue <small>129 rows read from Makera Studio's library on this PC · read-only · clone to change</small></td></tr>
+            <tr><td class="nm">3.175*1*3mm Ball Nose(Metal)</td><td>ball</td><td class="num">1.0</td><td class="num">3.175</td><td class="num">3.0</td><td class="num">3.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--cat">catalogue</span></td></tr>
+            <tr><td class="nm">3.175*1*4mm Ball Nose</td><td>ball</td><td class="num">1.0</td><td class="num">3.175</td><td class="num">4.0</td><td class="num">4.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--cat">catalogue</span></td></tr>
+            <tr><td class="nm">3.175*1.5*4.5mm Ball Nose(Metal)</td><td>ball</td><td class="num">1.5</td><td class="num">3.175</td><td class="num">4.5</td><td class="num">4.5</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--cat">catalogue</span></td></tr>
+            <tr><td class="nm">3.175*1.5*8mm Ball Nose</td><td>ball</td><td class="num">1.5</td><td class="num">3.175</td><td class="num">8.0</td><td class="num">8.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--cat">catalogue</span></td></tr>
+            <tr><td class="nm">3.175*2*6mm Ball Nose(Metal)</td><td>ball</td><td class="num">2.0</td><td class="num">3.175</td><td class="num">6.0</td><td class="num">6.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--cat">catalogue</span></td></tr>
+            <tr><td class="nm">3.175*2*12mm Ball Nose</td><td>ball</td><td class="num">2.0</td><td class="num">3.175</td><td class="num">12.0</td><td class="num">12.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--cat">catalogue</span></td></tr>
+            <tr><td class="nm">3.175*12mm Flat End(Metal)</td><td>flat</td><td class="num">3.175</td><td class="num">3.175</td><td class="num">12.0</td><td class="num">12.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--cat">catalogue</span></td></tr>
+            <tr><td class="nm">6*1*30.5mm Ball Nose Engraving</td><td>ball</td><td class="num">1.0</td><td class="num">6.0</td><td class="num">30.5</td><td class="num">30.5</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--cat">catalogue</span></td></tr>
+            <tr class="more"><td colspan="9">… 121 more catalogue rows — search or scroll</td></tr>
+            <tr class="grp"><td colspan="9">Built-in <small>permanent — the pickers resolve these with no service, no file and no network</small></td></tr>
+            <tr><td class="nm">3.175*12mm Flat End(Metal)<small>the TOOL line of Makera sample Z1/TopClamp.nc</small></td><td>flat</td><td class="num">3.175</td><td class="num">3.175</td><td class="num">12.0</td><td class="num">12.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--bi">built-in</span></td></tr>
+            <tr><td class="nm">1 mm flat end (assumed)<small>a shipped assumption, not a cutter anyone owns</small></td><td>flat</td><td class="num">1.0</td><td class="num">3.175</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--bi">built-in</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>3.175*1*4mm Ball Nose</h3><button class="x" aria-label="Close">×</button></div>
+        <div class="badge-row"><span class="tag tag--own">owned · ×1</span><span class="code"><i>QR</i>C1-BIT-BALL-NOSE-1-4</span></div>
+        <p class="hint">A physical cutter. Its definition is Makera's catalogue row, exactly as synced on 2026-10-09 — read-only here. Clone it to rename it or to record a measured stick-out.</p>
+        <div class="panel-subhead">Definition <span class="tag tag--cat">catalogue</span></div>
+        <table class="ro">
+          <tr><th>shape</th><td>ball · 2 flutes</td></tr>
+          <tr><th>tip ⌀</th><td>1.0 mm</td></tr>
+          <tr><th>shank ⌀</th><td>3.175 mm</td></tr>
+          <tr><th>flute length</th><td>4.0 mm</td></tr>
+          <tr><th>shoulder length</th><td>4.0 mm <span class="dim" style="font-family:var(--body);color:var(--on-muted)">— the depth it supports (#314)</span></td></tr>
+          <tr><th>stick-out</th><td>— <span style="font-family:var(--body);color:var(--on-muted)">unset; the machine probes the tip</span></td></tr>
+          <tr><th>centre-cutting</th><td>— <span style="font-family:var(--body);color:var(--on-muted)">unknown (#220)</span></td></tr>
+          <tr><th>catalogue id</th><td>131012103804</td></tr>
+        </table>
+        <div class="btn-row"><button class="btn btn--sm">Clone to change</button></div>
+        <div class="panel-subhead">Inventory</div>
+        <div class="grid2">
+          <label class="lf"><span>quantity</span><input class="fld fld--num" value="1"></label>
+          <label class="lf"><span>added</span><input class="fld" value="2026-10-08" readonly></label>
+        </div>
+        <label class="lf"><span>notes</span><input class="fld fld--text" value="green box · fitted as T1 2026-10-08"></label>
+        <div class="panel-subhead">Codes</div>
+        <div class="row"><span class="code"><i>QR</i>C1-BIT-BALL-NOSE-1-4</span><span class="spacer"></span><button class="btn btn--sm btn--ghost">＋ add a code</button></div>
+        <p class="hint">Scanning this code again finds this row. Codes are local; nothing is looked up online (#212).</p>
+        <div class="btn-row"><span class="spacer"></span><button class="btn btn--sm btn--danger">Remove from inventory</button></div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">manage · house: present · 133 definitions</span><span class="engine"><span>catalogue synced 2026-10-09 07:12</span><span>Z1: Idle</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== G2 -->
+<section class="state" id="state-manage-register">
+  <h2 class="state__label"><b>G2</b> · Manage — Register a cutter: the three doors</h2>
+  <p class="state__note">Per #309, which waits on this frame. <b>Register</b> opens in the detail rail with three doors — <b>Scan</b>, <b>Catalogue</b>, <b>Type</b>. Scan is the default: the field takes a barcode scanner's keystrokes or a typed code. The honest state of the match is drawn, not hidden: Makera's own code→row table (<code>t_SkuMapping</code>) is <b>empty</b> on this install (#307), so a box code matches by the name it encodes, and <code>BALL-NOSE-1-4</code> fits two rows — the user picks. <b>Catalogue</b> is a search over the 129 synced rows; <b>Type</b> is the form, every length optional and <code>null</code> when blank (never 0). Registering adds an <b>owned</b> row; the definition stays Makera's.</p>
+  <div class="frame" id="shot-manage-register">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v1.0.0</small></div>
+      <div class="toolbar-buttons">
+        <button class="btn btn--ghost">✨ New</button>
+        <button class="btn btn--ghost btn--mode">🧰 Manage</button>
+        <button class="btn btn--ghost">Import board</button>
+        <button class="btn btn--ghost">Docs</button>
+        <button class="btn btn--ghost" aria-label="Settings">⚙</button>
+      </div>
+    </header>
+    <div class="manage">
+      <aside class="mrail">
+        <div class="nav__divider">House</div>
+        <button class="nav nav--active"><span class="nav__icon">🧰</span><span>Tools</span><span class="nav__count">133</span></button>
+        <button class="nav nav--later" disabled><span class="nav__icon">🧱</span><span>Materials</span><em>later</em></button>
+        <div class="nav__divider">Machines</div>
+        <button class="nav"><span class="nav__icon">🛠️</span><span>Z1 · 192.168.10.43</span><span class="dot dot--ok"></span></button>
+        <div class="mrail__foot">house service · <b>present</b><br>this build's own origin<br>catalogue synced 2026-10-09 07:12 · 129 rows<br>schema v1 · no problems</div>
+      </aside>
+      <section class="mmain">
+        <div class="mhead">
+          <div>
+            <h3>Tools</h3>
+            <p>Every cutter a job can name, and where each definition came from. Makera's rows are read-only — clone one to rename it or to record what you measured. The built-ins are always here, service or not.</p>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn--primary" style="box-shadow:0 0 0 2px rgba(77,142,255,.35)">＋ Register ▾</button>
+            <button class="btn" disabled>Clone</button>
+            <button class="btn">Sync catalogue</button>
+            <button class="btn">Export</button>
+            <button class="btn">Import</button>
+          </div>
+        </div>
+        <div class="mfilter">
+          <input class="fld fld--text" placeholder="Search name, code or size…" value="">
+          <button class="chip chip--on">all</button><button class="chip">owned</button><button class="chip">yours</button><button class="chip">catalogue</button><button class="chip">built-in</button>
+          <span class="mcount">133 definitions · 1 owned · 1 yours · 129 catalogue · 2 built-in</span>
+        </div>
+        <table class="tbl">
+          <thead><tr><th style="width:36%">Name</th><th>Shape</th><th class="num">Tip ⌀</th><th class="num">Shank</th><th class="num">Flute</th><th class="num">Shoulder</th><th class="num">Stick-out</th><th class="num">Qty</th><th>From</th></tr></thead>
+          <tbody>
+            <tr class="grp"><td colspan="9">Owned <small>the inventory — a physical cutter, with the code on its box</small></td></tr>
+            <tr><td class="nm">3.175*1*4mm Ball Nose<small>green box · fitted as T1 on 2026-10-08 · <span class="code"><i>QR</i>C1-BIT-BALL-NOSE-1-4</span></small></td><td>ball</td><td class="num">1.0</td><td class="num">3.175</td><td class="num">4.0</td><td class="num">4.0</td><td class="num dim">—</td><td class="num">1</td><td><span class="tag tag--own">owned</span></td></tr>
+            <tr class="grp"><td colspan="9">Yours <small>your own definitions — typed, or cloned from a catalogue row</small></td></tr>
+            <tr><td class="nm">1 mm ball nose — green box, collared<small>cloned from Makera catalogue “3.175*1*4mm Ball Nose” on 2026-10-09 · name changed</small></td><td>ball</td><td class="num">1.0</td><td class="num">3.175</td><td class="num">4.0</td><td class="num">4.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag">yours</span></td></tr>
+            <tr class="grp"><td colspan="9">Makera catalogue <small>129 rows · read-only · clone to change</small></td></tr>
+            <tr><td class="nm">3.175*1*3mm Ball Nose(Metal)</td><td>ball</td><td class="num">1.0</td><td class="num">3.175</td><td class="num">3.0</td><td class="num">3.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--cat">catalogue</span></td></tr>
+            <tr><td class="nm">3.175*1*4mm Ball Nose</td><td>ball</td><td class="num">1.0</td><td class="num">3.175</td><td class="num">4.0</td><td class="num">4.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--cat">catalogue</span></td></tr>
+            <tr><td class="nm">3.175*1.5*4.5mm Ball Nose(Metal)</td><td>ball</td><td class="num">1.5</td><td class="num">3.175</td><td class="num">4.5</td><td class="num">4.5</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--cat">catalogue</span></td></tr>
+            <tr><td class="nm">3.175*1.5*8mm Ball Nose</td><td>ball</td><td class="num">1.5</td><td class="num">3.175</td><td class="num">8.0</td><td class="num">8.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--cat">catalogue</span></td></tr>
+            <tr class="more"><td colspan="9">… 125 more catalogue rows</td></tr>
+            <tr class="grp"><td colspan="9">Built-in <small>permanent</small></td></tr>
+            <tr><td class="nm">3.175*12mm Flat End(Metal)<small>the TOOL line of Makera sample Z1/TopClamp.nc</small></td><td>flat</td><td class="num">3.175</td><td class="num">3.175</td><td class="num">12.0</td><td class="num">12.0</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--bi">built-in</span></td></tr>
+            <tr><td class="nm">1 mm flat end (assumed)<small>a shipped assumption, not a cutter anyone owns</small></td><td>flat</td><td class="num">1.0</td><td class="num">3.175</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">·</td><td><span class="tag tag--bi">built-in</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Register a cutter</h3><button class="x" aria-label="Close">×</button></div>
+        <div class="door"><button class="on">Scan</button><button>Catalogue</button><button>Type</button></div>
+        <label class="lf"><span>the code on the box <em>scanner or keyboard</em></span><input class="fld fld--text mono" value="C1-BIT-BALL-NOSE-1-4" style="font-size:12px;padding:5px 7px;border-color:var(--rail-active-border)"></label>
+        <p class="hint">Read as a Makera box code: <b>ball nose, 1 mm, 4 mm</b>. Makera's own code→row table is empty on this install (#307), so the match is by name and <b>two rows fit</b> — pick the one on the label.</p>
+        <div class="panel-subhead">Match</div>
+        <div class="card" style="padding:4px 8px">
+          <label class="cand--radio"><input type="radio" name="m" checked><span>3.175*1*4mm Ball Nose</span><small>flute 4.0 · shoulder 4.0</small></label>
+          <label class="cand--radio"><input type="radio" name="m"><span>3.175*1*3mm Ball Nose(Metal)</span><small>flute 3.0 · shoulder 3.0</small></label>
+        </div>
+        <p class="hint">Not on the list? <a style="color:var(--primary)">Search the catalogue</a> or <a style="color:var(--primary)">type it</a>.</p>
+        <div class="panel-subhead">Inventory</div>
+        <div class="grid2">
+          <label class="lf"><span>quantity</span><input class="fld fld--num" value="1"></label>
+          <label class="lf"><span>box colour <em>optional</em></span><input class="fld fld--text" value="green"></label>
+        </div>
+        <label class="lf"><span>notes <em>optional</em></span><input class="fld fld--text" placeholder="where it lives, what it is for"></label>
+        <div class="btn-row"><button class="btn btn--primary">Add to inventory</button><span class="hint" style="margin:0">creates an <b>owned</b> row; the definition stays Makera's</span></div>
+        <div class="slot">Catalogue door: a search over the 129 synced rows.<br>Type door: the form — name, shape, tip ⌀, shank ⌀, flute, shoulder; blank = unknown, never 0.</div>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">manage · house: present · 133 definitions</span><span class="engine"><span>catalogue synced 2026-10-09 07:12</span><span>Z1: Idle</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== G3 -->
+<section class="state" id="state-manage-absent">
+  <h2 class="state__label"><b>G3</b> · Manage — no house service: Tools is absent, not broken</h2>
+  <p class="state__note">The web deployment, or a desktop build whose service did not start. The rail keeps the House heading, but <b>Tools is not a broken list</b>: the scope says in one sentence why there is no service — the probe's own reason, verbatim from <code>toolRegistryStore</code> — and that the <b>built-ins are still in every picker</b>, so a job can be written, verified and simulated regardless (#212 decision 5: “hide tools; fall back to built-ins”). Same treatment the Start wizard gives an unfound machine. Decision 31 is stated where it bites: a hosted HTTPS app cannot reach a service on this PC; the desktop build carries its own. <b>Machines</b> is unaffected.</p>
+  <div class="frame" id="shot-manage-absent">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v1.0.0</small></div>
+      <div class="toolbar-buttons">
+        <button class="btn btn--ghost">✨ New</button>
+        <button class="btn btn--ghost btn--mode">🧰 Manage</button>
+        <button class="btn btn--ghost">Import board</button>
+        <button class="btn btn--ghost">Docs</button>
+        <button class="btn btn--ghost" aria-label="Settings">⚙</button>
+      </div>
+    </header>
+    <div class="manage">
+      <aside class="mrail">
+        <div class="nav__divider">House</div>
+        <button class="nav nav--active"><span class="nav__icon">🧰</span><span>Tools</span><span class="dot dot--off" title="no house service"></span></button>
+        <button class="nav nav--later" disabled><span class="nav__icon">🧱</span><span>Materials</span><em>later</em></button>
+        <div class="nav__divider">Machines</div>
+        <button class="nav"><span class="nav__icon">🛠️</span><span>Z1 · 192.168.10.43</span><span class="dot dot--off" title="not checked in this build"></span></button>
+        <div class="mrail__foot">house service · <span class="off">absent</span><br>https://electricrv.ca/casemaker<br>built-ins only: 2</div>
+      </aside>
+      <section class="mmain">
+        <div class="mhead">
+          <div>
+            <h3>Tools</h3>
+            <p>Every cutter a job can name, and where each definition came from.</p>
+          </div>
+        </div>
+        <div class="mempty">
+          <h4>No house service here</h4>
+          <p>The house — your own cutters, the inventory and the Makera catalogue — lives in a small service the <b>desktop build</b> runs on your PC. This page is served from a web host, which has no such service, and a hosted page cannot reach one on your machine either.</p>
+          <div class="why">the origin answered /api/v1/health with HTML (status 200, text/html), not JSON — a static host, not the house service</div>
+          <p>Nothing is lost. The <b>two built-in cutters</b> are in every picker, and a job can be written, verified and simulated with them. Open the same project in the desktop build to see the house.</p>
+          <div class="btn-row"><button class="btn">Check again</button><button class="btn btn--ghost">What the desktop build adds →</button></div>
+        </div>
+      </section>
+      <aside class="context-panel">
+        <div class="empty">
+          <h3>Built-in</h3>
+          <p>The two definitions that need no service. Read-only; one is literally an assumption.</p>
+        </div>
+        <table class="tbl" style="font-size:10px">
+          <tbody>
+            <tr><td class="nm">3.175*12mm Flat End(Metal)<small>Makera sample Z1/TopClamp.nc</small></td><td><span class="tag tag--bi">built-in</span></td></tr>
+            <tr><td class="nm">1 mm flat end (assumed)<small>no lengths stated</small></td><td><span class="tag tag--bi">built-in</span></td></tr>
+          </tbody>
+        </table>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">manage · house: absent · built-ins only</span><span class="engine"><span>web build</span></span></footer>
+  </div>
+</section>
+
+<!-- ===================================================================== G4 -->
+<section class="state" id="state-manage-machines">
+  <h2 class="state__label"><b>G4</b> · Manage — Machines: the Z1, its connection and its profile</h2>
+  <p class="state__note">One card per machine the app has seen. The check is the Start wizard's step 1 (#280, <code>probeMachine</code>) — this is where the result <b>lives</b> when no project is open, not a second copy of the wizard. What is drawn is the <b>record of a moment</b>: the status line verbatim, the time it was read, the profile the identity resolved to. “My machine” export/import is Settings’ #247 file (<code>casemaker-my-machine.json</code>), moved here where it belongs; the catalogue never goes into it (#212 “do not”). The profile block shows the machine's own numbers with their source, the same provenance discipline as the fixture (decision 28).</p>
+  <div class="frame" id="shot-manage-machines">
+    <header class="app-header">
+      <div class="brand"><span class="brand__mark">CM</span><h1>Case Maker</h1><small>v1.0.0</small></div>
+      <div class="toolbar-buttons">
+        <button class="btn btn--ghost">✨ New</button>
+        <button class="btn btn--ghost btn--mode">🧰 Manage</button>
+        <button class="btn btn--ghost">Import board</button>
+        <button class="btn btn--ghost">Docs</button>
+        <button class="btn btn--ghost" aria-label="Settings">⚙</button>
+      </div>
+    </header>
+    <div class="manage">
+      <aside class="mrail">
+        <div class="nav__divider">House</div>
+        <button class="nav"><span class="nav__icon">🧰</span><span>Tools</span><span class="nav__count">133</span></button>
+        <button class="nav nav--later" disabled><span class="nav__icon">🧱</span><span>Materials</span><em>later</em></button>
+        <div class="nav__divider">Machines</div>
+        <button class="nav nav--active"><span class="nav__icon">🛠️</span><span>Z1 · 192.168.10.43</span><span class="dot dot--ok"></span></button>
+        <div class="mrail__foot">house service · <b>present</b><br>this build's own origin<br>catalogue synced 2026-10-09 07:12 · 129 rows</div>
+      </aside>
+      <section class="mmain">
+        <div class="mhead">
+          <div>
+            <h3>Machines</h3>
+            <p>The machines this app has reached, each as it answered last time. A check asks the network; the machine answers or it does not.</p>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn--primary">Check for a machine</button>
+            <input class="fld fld--text mono" placeholder="192.168.1.50" style="width:130px">
+            <button class="btn">Connect</button>
+          </div>
+        </div>
+        <div class="mcard">
+          <h4>Makera Z1 <span class="tag">found</span><span class="badge">profile: Z1</span></h4>
+          <div class="sub">192.168.10.43 : 2222 · checked 2026-10-09 06:58 · a record of that moment, not a standing claim</div>
+          <div class="two">
+            <div class="kv">
+              <span>status line</span><b>&lt;Idle|MPos:-11.600,-14.600,-3.000|…|T:1,-9.751,1&gt;</b>
+              <span>state</span><b class="ok">Idle</b>
+              <span>active tool · offset</span><b>T1 · −9.751 mm (M491, 2026-10-08)</b>
+              <span>mac</span><b>— as broadcast</b>
+              <span>busy</span><b>no</b>
+            </div>
+            <div class="kv">
+              <span>profile</span><b>Z1 — from the controller's own config dump (#208 B6)</b>
+              <span>work envelope X · Y · Z</span><b>0 → −207 · 0 → −206 · 0 → −100 mm (soft limits, reached 2026-10-08)</b>
+              <span>tool-length sensor</span><b>X −9.890 · Y −12.830 (anchor + 181)</b>
+              <span>clearance</span><b>X −11.6 · Y −14.6 · Z −3.0</b>
+              <span>collet nut</span><b>not modelled — not needed for a vise job (#314)</b>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn--sm">Check again</button>
+            <button class="btn btn--sm">Export my machine</button>
+            <button class="btn btn--sm">Import</button>
+            <span class="spacer"></span>
+            <button class="btn btn--sm btn--danger">Forget this machine</button>
+          </div>
+        </div>
+        <div class="mcard" style="opacity:.75">
+          <h4>Printers <span class="tag tag--muted">from the profile list</span></h4>
+          <div class="sub">the printer profiles the Export modal already uses — listed here for completeness, nothing to connect to</div>
+          <div class="kv"><span>profiles</span><b>Bambu A1 mini · Prusa MINI+ · Ender-3 class · Prusa MK4/MK3 · Bambu X1/P1/A1 · Prusa XL</b></div>
+        </div>
+      </section>
+      <aside class="context-panel">
+        <div class="panel-head"><h3>Z1 · last check</h3></div>
+        <p class="hint">Everything here was read from the machine at 06:58. Nothing is edited on this rail: the machine owns these numbers, and “Forget” is the only write.</p>
+        <div class="panel-subhead">Calibration read back</div>
+        <table class="ro">
+          <tr><th>anchor 1</th><td>X −190.9 · Y −193.8 <span style="font-family:var(--body);color:var(--on-muted)">(TLS − 181, §11.9)</span></td></tr>
+          <tr><th>TLS probe</th><td>fast 500 · slow 100 · retract 1</td></tr>
+          <tr><th>touch-off probe</th><td>wired tip (§7.3, revised)</td></tr>
+          <tr><th>4th axis</th><td>off</td></tr>
+        </table>
+        <div class="panel-subhead">What a job gets from this</div>
+        <p class="hint">The envelope gate, the tool-change positions and the probe feeds in every <code>.nc</code> this app writes for it — the numbers the file is verified against (#184, #208).</p>
+        <div class="panel-subhead">Bench power</div>
+        <p class="hint">Not here. The plug is a physical act and stays with the person at the machine (<code>tools/z1/power.sh</code>).</p>
+      </aside>
+    </div>
+    <footer class="status-bar"><span class="ver">manage · machines: 1 found</span><span class="engine"><span>Z1: Idle · T1</span><span>checked 06:58</span></span></footer>
   </div>
 </section>
 
