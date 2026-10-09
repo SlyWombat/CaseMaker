@@ -301,6 +301,23 @@ weakened by that: they are precisely why it is a tier and not a source, and why 
 PLA is still absent — for the badge job, `#165`'s measured numbers remain the only source in
 existence. See §14.5 for the original recommendation.
 
+**Implemented 2026-10-09 (#310), and a fourth fact about the data.** The tier serves
+`spindleSpeed`, `feedRate`, `plungeFeedRate` and `stepDown` — and **not** the vendor's
+step-over, which turns out to be unusable by a contour-parallel sweep: `stepOverPercent` is a
+fraction of the **tip** diameter, and for **every flat end mill in wood it is 63 %** (measured:
+`stepOver` 2.0 mm on the 3.175 mm `112111313812`, 0.63 mm on the 1 mm flat, 3.78 mm on the
+6 mm). #191 refuses any step-over above the tool **radius**, so importing the vendor's number
+would refuse every flat-end wood row — the tier's own best material, and CNC-2's. Their
+percentage describes their pocketing strategy; ours stays 45 %. The material map is exactly
+two rows (`Hardwood → hardwood`, `Softwood → softwood`) and refuses every other vendor name,
+so `MDF` — a material this app has and the vendor files cutters under — gets nothing, which is
+fact 1 with a second example. The tier is also **keyed on the cutter**: a catalogue row is
+looked up by `Tool.id`, which is the vendor's `g_ID`, so the built-in `flat-3.175x12-metal`
+inherits Makera's wood numbers while `flat-1.0` (no `g_ID`) and user cutters do not. It **does
+not widen coverage**: a 6 mm cutter is still refused before the catalogue is consulted, because
+every wood row of the starting table stops at 3.2 mm and a row must supply our step-over and
+peck as well as the vendor's four numbers.
+
 ---
 
 ## 6. Output format

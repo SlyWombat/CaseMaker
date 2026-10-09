@@ -661,6 +661,153 @@ later ones, so the QA script allows that one pattern by text and fails on anythi
 probe on the build target would remove the line and the wasted request — a three-line change — but it
 would also break the LAN browser the rule exists for, so it stands.
 
+**Implemented 2026-10-08 (#308): the catalogue tier, imported from Makera Studio's own database.**
+`src-tauri/src/catalogue.rs` is the reader and `POST /api/v1/catalogue/sync` is the only way in — no
+body, no arguments, and the vendor path is a `HouseStore` *constructor* argument
+(`HouseStore::open_with(dir, studio_db)`) rather than a request parameter, so the endpoint is not an
+arbitrary-file-read primitive and a test can point it at a fixture. It writes `catalogue.json` —
+`{kind, schemaVersion, syncedAt, tools: CatalogueEntry[]}` — next to `house.json`, and answers with a
+report: `total`, `added`/`removed`/`changed` (the `cat:` keys), `unchanged`, and a `notes` array.
+`GET /api/v1/tools` then serves the catalogue tier ahead of the user's own, both in the one
+`ToolLibraryEntry` shape every picker already reads, so stage 0 needed no change to hold it.
+
+**Read only, and read from a copy.** Studio's file belongs to a running application, so the reader
+takes a scratch copy in the temp directory and opens *that* `SQLITE_OPEN_READ_ONLY`, never taking a
+lock on the original, never creating a `-wal` or `-journal` beside it, and removing the copy
+afterwards. "We do not touch their file" is therefore structural rather than a promise — the only
+syscall pointed at their path is `fs::copy`'s read — and the real-install test asserts the original's
+FNV-1a digest is unchanged, because that is a claim about bytes. **This is not a `canReadLocalFiles`
+path.** That flag decides whether a build may *offer* the "read Studio's install" affordance; reading
+the file is a runtime fact about where the service is running, exactly as reaching the service is
+(decision 31), so the desktop app and a LAN browser served by it get the same catalogue and the web
+build gets none because there is no service to ask (#306's client implements the read path only;
+the sync's UI is #311's).
+
+**Four traps, each of which cost real time.** (1) **`''` is not `NULL` and not zero.** Every geometry
+column is nullable in practice and Studio writes `''` into REAL columns to mean "unset"; SQLite keeps
+`''` as TEXT, so a plain `get::<Option<f64>>` FAILS on exactly the rows that matter — every ball
+nose, every engraver, every thread mill. Reading through `rusqlite`'s `ValueRef` and treating an
+empty or unparseable string as "not stated" is what makes those rows importable at all, and it is
+why the served value is `null` rather than a zero nobody stated. (2) **A ball nose states its ball in
+two different places.** Category 0 puts the ball diameter in `cutterMaxDiameter` and its radius in
+`cutterCornerRadius`; category 7 puts only the radius there and its `cutterMaxDiameter` is the 6 mm
+SHANK — so the tip diameter is read from the column when stated and otherwise derived as 2 × the
+corner radius, for **categories 0 and 7 only**. A bull nose (4) is deliberately excluded: there the
+corner radius is a corner, not a ball. (3) **The category name is nowhere in the database.**
+`t_CutterCategory` is EMPTY in the real install, so the id→name→shape table is `/Makera-Parity.md`
+§3's — and because a `cat:` cutter's `type=` text is written into a job's `.nc` header and re-read
+through the client's `shapeFromType`, a spec (`tests/unit/catalogueTypeNames.spec.ts`) pins those
+eight names against the eight shapes, since the Rust table and the TS function cannot import each
+other and a disagreement would import a cutter and then refuse it for a reason that has nothing to do
+with the cutter. (4) **A key is `cat:<cutterId>` and never a `g_ID`.** The UUID is what a re-sync
+diffs on; the `g_ID` is not inherited by a clone (#309's `Origin.id`).
+
+**What a re-sync diffs on, and the one document that may be replaced.** `contentHash` covers every
+column a served row reads — the honest definition, since a column that reaches the entry must report
+its change — with `lastUpdateDate` deliberately excluded: it is a vendor workflow stamp, not
+geometry, so it is kept as a hint in `CatalogueExtras` and a re-sync that sees only a newer stamp
+reports the row unchanged. The extras (`drillDiameter`, `pitch`, `threadAngle`,
+`threadSpecification`, `metalDuty`, `sellProduct`, the group it was filed under) ride *beside* the
+tool and never on the wire, because #212 says **do not widen `Tool`** — what the CAM view cannot
+carry does not belong in the shape the workers structured-clone. `catalogue.json` is also the one
+deliberate exception to §5.7's preserve rule: a sync REPLACES a `catalogue.json` that cannot be read
+and says so in its notes, because that file is reproducible and the sync is its only recovery, while
+`house.json` — the user's own — keeps the refuse-and-preserve rule untouched. A sync that would
+EMPTY a non-empty catalogue (an import that found no cutters) is refused rather than applied, and a
+row that cannot be served refuses the whole sync and names it. `HOUSE_SCHEMA_VERSION` stays 1: no
+released build ever wrote a `catalogue.json`, so the shape below it was still free to change.
+
+**Verified against the real install, 2026-10-08.** `cargo test --lib -- --ignored` runs the whole
+path — read, map, validate, write, serve — against this machine's own Studio library: 129 rows, all
+129 added, no notes, and the category counts `0→18, 1→45, 2→3, 3→22, 5→30, 6→8, 7→3` matching §3's
+table exactly. A second sync reports 129 unchanged, changes nothing, and `/api/v1/tools` is
+byte-identical before and after; the vendor database's digest is byte-identical too. One cutter has
+an independent source — `TOOL_LIBRARY`'s `flat-3.175x12-metal` is verbatim from the `;@MKR|TOOL` line
+of Makera's own `TopClamp.nc` — and the served row agrees with it field for field, with exactly three
+exceptions worth knowing: the header writes `cornerradius=0|angle=0|halfAngle=0` because it has no
+way to leave a field out, while the database stores `''` for the same unstated values, so the
+catalogue serves `null` where the built-in carries `0`. Neither is a wrong geometry for a flat end
+mill, and only the `null` one avoids claiming the vendor said something it did not. The browser QA
+(`qa-308-catalogue.mjs`) then feeds the service's own answer — the bytes the ignored test writes out,
+not a hand-written stand-in — through the client: the whole catalogue passes the Zod schema (one bad
+row would take the entire tier down, since the array is parsed as one document), the picker lists
+`2 built-in + 129`, and the catalogue's flat end mill sweeps the fixture program, while its ball nose
+is refused **by name** — `tool-refused … is type "Ball Nose" (ball)` — which is the check that the
+`type=` text and the shape arrived intact rather than defaulted. `npm run check:platform-gate` still
+passes: the reader is Rust in the desktop binary, so nothing vendor-derived is in the web bundle, and
+no vendor row is committed to this repository — the sync writes to the user's own data directory, and
+"my machine" export (`/export`) carries `house.json` only.
+
+**Implemented 2026-10-09 (#310, decision 32): the feed matrix as a tier below measurement.** The
+same reader that imports the cutters imports `t_MakeraCutterProperties` — 1 328 rows over the 129
+cutters, joined on `t_MakeraCutterProperties.cutterID → t_MakeraCutterList.cutterId` and filed under
+`t_MaterialList.materialSubcategoryName` — and serves it as a **second document**,
+`GET /api/v1/feeds`, a plain array with its own `ETag`. Second on purpose: 1 328 rows against the
+cutters' 129, so a client that wants only the cutters should not parse it, a malformed feed row costs
+the feeds tier and not the whole house, and a re-sync that moves one number does not invalidate the
+tool list. `Health` carries `feedRows` beside `hasCatalogue`, because a `catalogue.json` written by
+#308 loads fine but holds no rows — `hasCatalogue: true, feedRows: 0` is a state a user should be
+able to *see*, and a re-sync is what fixes it. On the client the tier is a module-level snapshot,
+`setFeedCatalogue(rows)`, **empty by default**: the Node scripts, the coupon readback and every
+existing test see exactly the table they saw before, and `toolRegistryStore` fills it only after a
+usable tool list has arrived, clearing it when `/feeds` is absent or unreadable.
+
+**Four numbers, and the step-over deliberately not among them.** Makera states
+`spindleSpeed`/`feedRate`/`plungeFeedRate`/`stepDown` and also its own `stepOver`/`stepOverPercent`;
+only the first four are adopted. `stepOverPercent` is a fraction of the **tip** diameter, and for
+**every flat end mill in wood it is 63 %** — measured: `stepOver` 2.0 mm on the 3.175 mm
+`112111313812`, 0.63 mm on the 1 mm flat, 3.78 mm on the 6 mm. #191 refuses any step-over above the
+tool **radius**, because our contour-parallel sweep leaves an uncut spine down the middle of a stroke
+above 50 %, so importing the vendor's number would refuse every flat-end wood row in the table — the
+tier's own best material. Their percentage describes *their* pocketing strategy, not ours; step-over,
+peck and air stay this app's (a conservative 45 %). This is the one place the tier is narrower than
+the data, and it is a decision rather than an omission.
+
+**Keyed on the cutter, never on the diameter.** A catalogue row is looked up by `Tool.id`, which
+**is** the vendor's `g_ID` — so the built-in `flat-3.175x12-metal` (`id: '112111313812'`) inherits
+Makera's wood row, while `flat-1.0` (no id) and every cutter of the user's own do not, even at a
+diameter the matrix covers. The material map is **exactly two rows**, `Hardwood → hardwood` and
+`Softwood → softwood`, matched with `hasOwnProperty` so `toString` is not hardwood, and **anything
+else is refused rather than guessed at** — including `MDF`, a material this app *has* and the vendor
+files its cutters under. PLA is not in `t_MaterialList` at all, so §9.1's badge job can never be
+served by this tier: #165's measured numbers remain its only source, exactly as §5.1 of
+`/Makera-Parity.md` says. Precedence is decision 32's, and "a catalogue row never overrides a measured
+row" is a unit test rather than a comment — `feedsFor` takes an optional table so a spec can fold a
+real coupon verdict through `applyMeasurements` and prove the catalogue is not even consulted when a
+field is measured. Everything the catalogue supplies still passes through `clampToMachine`: the
+vendor's 15 000 RPM rows — 32 of them — resolve to the Z1's 13 000 with an `rpm-clamped` warning
+rather than being dropped or edited, a made-up 24 000 is refused, and a feed above 1 200 mm/min is
+clamped like any other number.
+
+**It does not widen coverage, and that is worth saying where the tier is.** The catalogue sits above
+the starting table as a source of better *numbers*; it is not a source of *rows*. A 6 mm cutter —
+every wood row of `UNMEASURED_FEEDS_TABLE` stops at 3.2 mm — is refused before the catalogue is
+consulted, so a catalogue row for a 6 mm cutter changes nothing today. The reason the ranges stay the
+table's is that a row supplies our step-over and peck too, and no vendor states those; widening them
+is its own decision with its own evidence (a bench measurement per diameter), not a side effect of
+importing a matrix. The pinned behaviour — *a cutter no row covers is refused, never extrapolated* —
+is unchanged.
+
+**Verified 2026-10-09.** `cargo test --lib`: 55 pass. The ignored real-install gate now asserts the
+feed half against Studio's own library — **1 328 rows**, 15 materials including both woods and
+neither PLA nor MDF, every row naming a cutter the service also serves, and the TopClamp cutter
+carrying one row per material — and it writes the rows into the same fixture `qa-308` reads, so the
+browser sees the real matrix rather than a stand-in. `npm run typecheck`, `npx eslint` on the changed
+files, and both halves of `npm run check:platform-gate` are clean; 57 targeted vitest tests pass.
+`qa-310-feeds.mjs` then drives the panel in a real browser against the real rows, four scenarios, all
+green and photographed: a hardwood job on the built-in 3.175 mm flat shows **10 000 rpm / 1 000 mm/min
+/ 300 mm/min plunge / 1 mm step-down** tagged `Makera` under the badge *"Makera's catalogue — not
+measured"* while step-over stays this app's 1.42875 mm; the same geometry with no vendor id, and the
+same cutter in a material the vendor does not file it under, both show the starting values; a matrix
+patched to 15 000 rpm resolves to 13 000 in the field the operator reads; and with `/feeds` answering
+404 the cutters still arrive and the panel is back to the starting table — every field `computed`,
+the hardwood feed 400 mm/min, nothing claiming Makera.
+
+**One gap, found while verifying, filed rather than quietly carried (#317).** `feedsFor` returns clamp
+diagnostics and the panel renders none of them, so a catalogue row clamped from 15 000 to 13 000 is
+silent in the UI — the number is right and the user is not told it moved. It is a pre-existing gap
+(the panel never rendered `diagnostics`), not a regression, and #310's acceptance holds without it.
+
 ---
 
 ## 6. The geometry, ported

@@ -31,12 +31,19 @@ export type StockMaterial = 'softwood' | 'hardwood' | 'mdf' | 'pla';
  *
  * - `computed` — the feeds table produced it (`feedsFor`); no one typed it. Only meaningful for
  *   `cutOverride`.
+ * - `catalogue` — Makera's own catalogue supplied it (#310): a starting number for a cutter the
+ *   vendor sells, read out of their database and clamped to this machine. A vendor's number is
+ *   not a measurement of anything here, so it gets a word of its own rather than being folded
+ *   into `computed` — the panel says "Makera's catalogue", never "measured".
  * - `user` — typed in the panel or answered in the guided job setup (#254). A typed value is
  *   not more trustworthy for having gone through a flow.
  * - `measured` — taken at the bench with calipers or a test cut (#208). Visibly different from
  *   `user`, so a typed number never reads as a bench reading.
+ *
+ * The sim's own `FieldSource` (`store/simSetupStore.ts`) is a DIFFERENT type — `header | user |
+ * default`, about a file's `;@MKR|TOOL` header — and is not this one (#310).
  */
-export type FieldSource = 'computed' | 'user' | 'measured';
+export type FieldSource = 'computed' | 'catalogue' | 'user' | 'measured';
 
 /**
  * Per-field provenance for the job's asserted values (#246 cutting overrides, #254 guided job

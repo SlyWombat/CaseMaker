@@ -17,8 +17,8 @@
 // TWO DOCUMENTS, because the tiers have different lifetimes. `catalogue.json` is Makera's list,
 // replaced wholesale by a sync and never user-owned; `house.json` is the user's own tools and
 // inventory, which a sync must never touch. Separate files make that invariant structural rather
-// than a promise. **This module reads `catalogue.json` but never writes it** — the writer is the
-// sync endpoint, and a sync endpoint is #308's.
+// than a promise. `catalogue.rs` is the reader that fills the first one (#308); its type is
+// {@link crate::catalogue::CatalogueDoc}, and `HouseStore::sync_catalogue` is what replaces it.
 //
 // THE BUILTINS ARE NOT IN HERE. `TOOL_LIBRARY` (`engine/cnc/toolLibrary.ts`) is the client's
 // permanent `builtin` tier (#305) and the client merges it, so `GET /api/v1/tools` carries only the
@@ -34,12 +34,17 @@
 // read, the store serves an empty house with the reason in `GET /api/v1/health` and refuses every
 // write until the file is dealt with by hand. The alternative — start empty, then save over it —
 // destroys the user's own tool list to recover from a truncated write, which is not a recovery.
-//
+// **The catalogue is the exception, and deliberately so** (#308): it holds vendor rows whose only
+// copy is Makera's database, so a sync REPLACES an unreadable `catalogue.json` and says in its
+// report that it did. Refusing would make a corrupt file a permanent block on the one operation
+// that can heal it, and there is no user data in there to lose.
+
 // NO VENDOR DATA IS EVER COMMITTED OR EXPORTED. `catalogue.json` lives on the user's machine, read
 // from their own install (#308); the export endpoint emits the HOUSE document only, so a "my
 // machine" file carried between two computers (#247) can never smuggle Makera's table with it
 // (`/Fabrication.md` §3, #186).
 
+use crate::catalogue::{CatalogueDoc, SyncReport, CATALOGUE_KIND};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
@@ -49,8 +54,6 @@ use tokio::sync::RwLock;
 /// Magic string that says "this is a Case Maker house file", not some other JSON. Same discipline
 /// as `store/myMachineFile.ts`: an import refuses a document whose kind or version it does not know.
 pub const HOUSE_KIND: &str = "casemaker-house";
-/// The catalogue document's kind. Makera's rows, held locally and never committed (#186).
-pub const CATALOGUE_KIND: &str = "casemaker-catalogue";
 /// Bump when either document's shape changes incompatibly; loading refuses unknown versions.
 pub const HOUSE_SCHEMA_VERSION: u32 = 1;
 pub const HOUSE_FILE: &str = "house.json";
@@ -130,8 +133,10 @@ pub struct Tool {
 impl Tool {
     /// Refuse a tool that cannot be served: an empty name fails `ToolSchema`'s `min(1)`, and a
     /// non-finite number has no JSON representation at all — `serde_json` would fail mid-response
-    /// rather than at the door, which is the wrong place to find out.
-    fn validate(&self) -> Result<(), HouseError> {
+    /// rather than at the door, which is the wrong place to find out. `pub(crate)` because the
+    /// catalogue import (`catalogue.rs`) builds a `Tool` from a vendor row and must be held to the
+    /// same rule as a hand-typed one.
+    pub(crate) fn validate(&self) -> Result<(), HouseError> {
         if self.name.trim().is_empty() {
             return Err(HouseError::BadEntry("the tool has no name".into()));
         }
@@ -213,6 +218,19 @@ impl From<&UserTool> for ToolLibraryEntry {
     }
 }
 
+/// A catalogue row is served to the client as the same shape as every other tier: the `extras` and
+/// the `contentHash` are the sync's bookkeeping and do not go on the wire, where the client's
+/// `ToolLibraryEntrySchema` is the only thing that reads.
+impl From<&crate::catalogue::CatalogueEntry> for ToolLibraryEntry {
+    fn from(e: &crate::catalogue::CatalogueEntry) -> Self {
+        ToolLibraryEntry {
+            key: e.key.clone(),
+            tool: e.tool.clone(),
+            provenance: e.provenance.clone(),
+        }
+    }
+}
+
 /// A code printed on a cutter or its packaging (#309): the symbology the scanner named, and the
 /// text it decoded to. `symbology` is kept because the same value can arrive as a QR slug
 /// (`C1-BIT-BALL-NOSE-1-4`) or as typed text, and only the first is evidence of a label.
@@ -284,32 +302,6 @@ impl Default for HouseDoc {
     }
 }
 
-/// `catalogue.json` — Makera's list as #308 imported it, local to this machine and never committed
-/// (`/Fabrication.md` §3, #186). Read here, written only by the sync.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CatalogueDoc {
-    pub kind: String,
-    pub schema_version: u32,
-    /// When the sync ran, or `null` for a file with no rows. Provenance, never a freshness claim:
-    /// what a row says is what matters, not how old the file is.
-    #[serde(default)]
-    pub synced_at: Option<String>,
-    #[serde(default)]
-    pub tools: Vec<ToolLibraryEntry>,
-}
-
-impl Default for CatalogueDoc {
-    fn default() -> Self {
-        CatalogueDoc {
-            kind: CATALOGUE_KIND.to_string(),
-            schema_version: HOUSE_SCHEMA_VERSION,
-            synced_at: None,
-            tools: Vec::new(),
-        }
-    }
-}
-
 /// What `GET /api/v1/health` answers (#306's shape).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -317,6 +309,10 @@ pub struct Health {
     pub ok: bool,
     pub schema_version: u32,
     pub has_catalogue: bool,
+    /// How many feed rows the stored catalogue holds (#310). A catalogue synced before the feed tier
+    /// existed reports `has_catalogue: true` with `feedRows: 0`, which is exactly the state a re-sync
+    /// fixes — so the two numbers answer different questions and a client shows both.
+    pub feed_rows: usize,
     pub catalogue_synced_at: Option<String>,
     /// One sentence per document that could not be read. A non-empty list is also why writes are
     /// refused: the store will not overwrite a file it could not understand.
@@ -378,7 +374,9 @@ fn validate_key(key: &str) -> Result<(), HouseError> {
 /// FNV-1a, 64-bit: a content validator, not a security hash. Written here rather than pulled in as a
 /// dependency because the only requirement is "the same bytes give the same string", and an
 /// `ETag` that changed without the bytes changing would only cost a 200 where a 304 was possible.
-fn fnv1a_hex(bytes: &[u8]) -> String {
+/// `pub(crate)` because the catalogue import (#308) uses the same function for its `contentHash`:
+/// one hash in this crate, so "the same bytes" means the same thing wherever it is asked.
+pub(crate) fn fnv1a_hex(bytes: &[u8]) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {
         h ^= u64::from(*b);
@@ -466,6 +464,10 @@ struct Inner {
 /// The house's data, in memory and on disk. One per process, held in the router's state.
 pub struct HouseStore {
     dir: PathBuf,
+    /// Where Makera Studio's library is expected to be. Held here rather than resolved per request
+    /// so that a sync reads a path the process decided on, not one a caller supplied: the endpoint
+    /// takes no arguments, and this is the seam a test points at a fixture (#308).
+    studio_db: Option<PathBuf>,
     inner: RwLock<Inner>,
 }
 
@@ -477,6 +479,12 @@ impl HouseStore {
     /// refusal to start. Refusing to start would take the whole app with it — this is the same
     /// process that serves the UI.
     pub fn open(dir: PathBuf) -> HouseStore {
+        Self::open_with(dir, crate::catalogue::studio_db_path())
+    }
+
+    /// The same, with the vendor database named explicitly — `None` for a platform with no data
+    /// directory to look in, and a fixture path in tests.
+    pub fn open_with(dir: PathBuf, studio_db: Option<PathBuf>) -> HouseStore {
         let (house, house_problem) = match read_doc::<HouseDoc>(&dir.join(HOUSE_FILE), HOUSE_KIND) {
             Ok(Some(doc)) => (doc, None),
             Ok(None) => (HouseDoc::default(), None),
@@ -496,6 +504,7 @@ impl HouseStore {
             };
         HouseStore {
             dir,
+            studio_db,
             inner: RwLock::new(Inner {
                 house,
                 catalogue,
@@ -511,6 +520,7 @@ impl HouseStore {
             ok: true,
             schema_version: HOUSE_SCHEMA_VERSION,
             has_catalogue: !inner.catalogue.tools.is_empty(),
+            feed_rows: inner.catalogue.feeds.len(),
             catalogue_synced_at: inner.catalogue.synced_at.clone(),
             problems: [&inner.house_problem, &inner.catalogue_problem]
                 .iter()
@@ -524,9 +534,21 @@ impl HouseStore {
     /// the one they went out of their way to define.
     pub async fn tools(&self) -> Result<(Vec<u8>, String), HouseError> {
         let inner = self.inner.read().await;
-        let mut entries: Vec<ToolLibraryEntry> = inner.catalogue.tools.clone();
+        let mut entries: Vec<ToolLibraryEntry> =
+            inner.catalogue.tools.iter().map(ToolLibraryEntry::from).collect();
         entries.extend(inner.house.tools.iter().map(ToolLibraryEntry::from));
         let bytes = json_bytes(&entries)?;
+        let etag = etag_for(&bytes);
+        Ok((bytes, etag))
+    }
+
+    /// Makera's feed matrix (#310), with its `ETag`. A plain array of the vendor's rows, exactly as
+    /// the sync read them (`catalogue.rs`): a SECOND document rather than a field on `/tools`,
+    /// because it is 1 328 rows against the cutters' 129 and a client that wants only the cutters
+    /// should not parse it. An empty array is a catalogue with no starting numbers — a normal answer.
+    pub async fn feeds(&self) -> Result<(Vec<u8>, String), HouseError> {
+        let inner = self.inner.read().await;
+        let bytes = json_bytes(&inner.catalogue.feeds)?;
         let etag = etag_for(&bytes);
         Ok((bytes, etag))
     }
@@ -646,6 +668,90 @@ impl HouseStore {
             .map_err(|e| HouseError::Io(format!("could not serialize the house: {e}")))
     }
 
+    /// Import Makera's catalogue from Studio's own library, replacing the `cat:` tier wholesale
+    /// (#308).
+    ///
+    /// THE USER'S HOUSE IS NOT TOUCHED. `house.json` is a different file, read and written by other
+    /// methods only, so "a re-sync leaves every `user_tool` and `inventory_item` byte-identical" is
+    /// structural rather than a promise — and a clone that was materialised out of a catalogue row
+    /// survives that row being dropped, because the clone holds its own `Tool` (#212).
+    ///
+    /// WHAT IT REFUSES. A vendor file that is not there, a row that cannot be served, and an import
+    /// that is EMPTY while the stored catalogue has rows: Makera publishes 129 cutters, so an empty
+    /// read is a read that went wrong, and replacing a good list with it is the one way this
+    /// operation can lose something. A sync that changes nothing is not a failure: it writes the
+    /// same rows with a fresh `syncedAt` and reports no additions, removals or changes.
+    pub async fn sync_catalogue(&self) -> Result<SyncReport, HouseError> {
+        let Some(path) = self.studio_db.clone() else {
+            return Err(HouseError::NotFound(
+                "this platform has no data directory, so Makera Studio's library cannot be \
+                 located"
+                    .into(),
+            ));
+        };
+        // The database is read OUTSIDE the lock, and on a blocking thread: `rusqlite` is a
+        // synchronous library and a 14 MB copy is not something to hold a `RwLock` across. The read
+        // is the slow part and it needs nothing from the store.
+        let source = path.clone();
+        let imported = tokio::task::spawn_blocking(move || crate::catalogue::read_all(&source))
+            .await
+            .map_err(|e| HouseError::Io(format!("the catalogue read did not finish: {e}")))?
+            .map_err(|e| match e.contains("is not there") {
+                true => HouseError::NotFound(e),
+                false => HouseError::Refused(e),
+            })?;
+
+        let mut inner = self.inner.write().await;
+        if imported.entries.is_empty() && !inner.catalogue.tools.is_empty() {
+            return Err(HouseError::Refused(format!(
+                "{}: no cutters were found in it, and the catalogue already holds rows — refusing \
+                 to replace a good list with an empty one",
+                path.display()
+            )));
+        }
+        // Everything is checked before anything is written: a sync either replaces the tier whole
+        // or leaves it exactly as it was.
+        for entry in &imported.entries {
+            entry
+                .validate()
+                .map_err(|e| HouseError::BadEntry(format!("{}: {e}", path.display())))?;
+        }
+
+        let change = crate::catalogue::diff(&inner.catalogue.tools, &imported.entries);
+        let synced_at = crate::catalogue::now_iso();
+        let mut notes = imported.notes;
+        if let Some(problem) = inner.catalogue_problem.take() {
+            notes.push(format!(
+                "the previous catalogue file could not be read ({problem}) — this sync replaced it"
+            ));
+        }
+
+        let doc = CatalogueDoc {
+            synced_at: Some(synced_at.clone()),
+            tools: imported.entries,
+            feeds: imported.feeds,
+            ..CatalogueDoc::default()
+        };
+        let bytes = serde_json::to_vec_pretty(&doc)
+            .map_err(|e| HouseError::Io(format!("could not serialize the catalogue: {e}")))?;
+        write_atomic(&self.dir.join(CATALOGUE_FILE), &bytes)?;
+
+        let report = SyncReport {
+            source: path.display().to_string(),
+            synced_at: Some(synced_at),
+            total: doc.tools.len(),
+            unchanged: change.unchanged,
+            added: change.added,
+            removed: change.removed,
+            changed: change.changed,
+            feed_rows: doc.feeds.len(),
+            notes,
+        };
+        inner.catalogue = doc;
+        inner.catalogue_problem = None;
+        Ok(report)
+    }
+
     /// Replace the house from an exported document. WHOLE-OR-NOTHING (decision 28): the document is
     /// parsed and version-checked before anything is touched, so a truncated or foreign file is
     /// refused with a reason and the store is left exactly as it was.
@@ -743,6 +849,24 @@ mod tests {
         (dir, store)
     }
 
+    /// A cutter row as a sync would leave it (#308). `catalogue.rs` is what turns a vendor row into
+    /// one of these; built by hand here on purpose, because the store must not care where a tier's
+    /// rows came from — only that they are shaped like the ones it serves.
+    fn a_catalogue_entry(cutter_id: &str) -> crate::catalogue::CatalogueEntry {
+        crate::catalogue::CatalogueEntry {
+            key: format!("cat:{cutter_id}"),
+            tool: a_tool("3.175*12mm Flat End(Metal)"),
+            provenance: "Makera catalogue 112111313812".to_string(),
+            content_hash: "0f0f0f0f0f0f0f0f".to_string(),
+            extras: crate::catalogue::CatalogueExtras {
+                cutter_id: cutter_id.to_string(),
+                category_id: 1,
+                category_name: "Flat End".to_string(),
+                ..Default::default()
+            },
+        }
+    }
+
     #[tokio::test]
     async fn a_fresh_house_is_empty_and_healthy() {
         let (_dir, store) = store();
@@ -824,14 +948,10 @@ mod tests {
     #[tokio::test]
     async fn the_catalogue_is_served_before_the_users_own() {
         let dir = TempDir::new().unwrap();
-        // Written by hand here: #306 reads this file and #308 is what writes it.
+        // Written by hand here: `HouseStore::sync_catalogue` is what writes it in anger (#308).
         let catalogue = CatalogueDoc {
             synced_at: Some("2026-10-08T12:00:00.000Z".to_string()),
-            tools: vec![ToolLibraryEntry {
-                key: "cat:112111313812".to_string(),
-                tool: a_tool("3.175*12mm Flat End(Metal)"),
-                provenance: "Makera catalogue 112111313812".to_string(),
-            }],
+            tools: vec![a_catalogue_entry("019c049a-8169-7a1e-ace2-28e03809ce44")],
             ..CatalogueDoc::default()
         };
         fs::write(
@@ -846,8 +966,13 @@ mod tests {
         let entries: Vec<ToolLibraryEntry> = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(
             entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
-            vec!["cat:112111313812", "user:abc"]
+            vec!["cat:019c049a-8169-7a1e-ace2-28e03809ce44", "user:abc"]
         );
+        // The extras and the hash stay on disk: the wire shape is the client's schema, and the
+        // sync's bookkeeping is nobody else's business.
+        let raw: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(raw[0].get("extras").is_none(), "{raw}");
+        assert!(raw[0].get("contentHash").is_none(), "{raw}");
         let h = store.health().await;
         assert!(h.has_catalogue);
         assert_eq!(h.catalogue_synced_at.as_deref(), Some("2026-10-08T12:00:00.000Z"));
@@ -1000,11 +1125,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let catalogue = CatalogueDoc {
             synced_at: Some("2026-10-08T12:00:00.000Z".to_string()),
-            tools: vec![ToolLibraryEntry {
-                key: "cat:112111313812".to_string(),
-                tool: a_tool("3.175*12mm Flat End(Metal)"),
-                provenance: "Makera catalogue 112111313812".to_string(),
-            }],
+            tools: vec![a_catalogue_entry("019c049a-8169-7a1e-ace2-28e03809ce44")],
             ..CatalogueDoc::default()
         };
         fs::write(
@@ -1018,7 +1139,10 @@ mod tests {
 
         let exported = store.export().await.unwrap();
         let text = String::from_utf8(exported.clone()).unwrap();
-        assert!(!text.contains("cat:112111313812"), "vendor rows must not leave the machine");
+        assert!(
+            !text.contains("019c049a-8169-7a1e-ace2-28e03809ce44"),
+            "vendor rows must not leave the machine"
+        );
 
         // Into a house that never saw either tier.
         let other = TempDir::new().unwrap();
@@ -1053,5 +1177,183 @@ mod tests {
         assert_eq!(etag_for(b"[]"), etag_for(b"[]"));
         assert_ne!(etag_for(b"[]"), etag_for(b"[ ]"));
         assert!(etag_for(b"[]").starts_with('"') && etag_for(b"[]").ends_with('"'));
+    }
+
+    // — the catalogue sync (#308) -----------------------------------------------------------------
+
+    /// A store over `dir`, syncing from `db`. The vendor path is a constructor argument rather than
+    /// a request parameter, so a test can point at a fixture without the endpoint growing a way to
+    /// name an arbitrary file.
+    fn store_syncing(dir: &TempDir, db: &std::path::Path) -> HouseStore {
+        HouseStore::open_with(dir.path().to_path_buf(), Some(db.to_path_buf()))
+    }
+
+    fn a_library(dir: &TempDir) -> std::path::PathBuf {
+        let path = crate::catalogue::fixture::temp_db(dir.path());
+        let conn = crate::catalogue::fixture::db(&path);
+        crate::catalogue::fixture::put(
+            &conn,
+            &crate::catalogue::fixture::Cutter {
+                diameter: Some(3.175),
+                tip: Some(3.175),
+                ..crate::catalogue::fixture::Cutter::new("3.175*12mm Flat End(Metal)", 1)
+            },
+        );
+        crate::catalogue::fixture::put(
+            &conn,
+            &crate::catalogue::fixture::Cutter {
+                diameter: Some(3.175),
+                max_diameter: Some(1.0),
+                corner: Some(0.5),
+                ..crate::catalogue::fixture::Cutter::new("3.175*1*3mm Ball Nose(Metal)", 0)
+            },
+        );
+        path
+    }
+
+    #[tokio::test]
+    async fn a_sync_imports_the_catalogue_and_leaves_the_house_byte_identical() {
+        let dir = TempDir::new().unwrap();
+        let db = a_library(&dir);
+        let store = store_syncing(&dir, &db);
+        store.create_tool(an_entry("user:abc")).await.unwrap();
+        store.create_inventory(an_item("inv-1")).await.unwrap();
+        let house_before = fs::read(dir.path().join(HOUSE_FILE)).unwrap();
+
+        let report = store.sync_catalogue().await.unwrap();
+        assert_eq!(report.total, 2);
+        assert_eq!(report.added.len(), 2);
+        assert_eq!(report.removed.len(), 0);
+        assert_eq!(report.changed.len(), 0);
+        assert_eq!(report.unchanged, 0);
+        assert_eq!(report.source, db.display().to_string());
+        assert!(report.synced_at.as_deref().unwrap().ends_with('Z'));
+        assert!(report.notes.is_empty(), "{:?}", report.notes);
+
+        // The acceptance criterion, checked as bytes rather than as intent: the user's own file is
+        // not rewritten by a sync — not reformatted, not touched at all.
+        assert_eq!(fs::read(dir.path().join(HOUSE_FILE)).unwrap(), house_before);
+
+        // And the tiers are served together, catalogue first, in the vendor's order.
+        let (bytes, _) = store.tools().await.unwrap();
+        let entries: Vec<ToolLibraryEntry> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert!(entries[0].key.starts_with("cat:"), "{}", entries[0].key);
+        assert_eq!(entries[2].key, "user:abc");
+        assert_eq!(entries[0].tool.name, "3.175*1*3mm Ball Nose(Metal)");
+
+        let h = store.health().await;
+        assert!(h.has_catalogue);
+        assert!(h.problems.is_empty(), "{:?}", h.problems);
+        assert_eq!(h.catalogue_synced_at, report.synced_at);
+        // The file is the source of truth across a restart, as every other write here is.
+        let reopened = store_syncing(&dir, &db);
+        assert!(reopened.health().await.has_catalogue);
+    }
+
+    #[tokio::test]
+    async fn a_second_sync_changes_nothing_and_says_so() {
+        let dir = TempDir::new().unwrap();
+        let db = a_library(&dir);
+        let store = store_syncing(&dir, &db);
+        store.sync_catalogue().await.unwrap();
+        let (served, etag) = store.tools().await.unwrap();
+
+        let again = store.sync_catalogue().await.unwrap();
+        assert_eq!(again.added.len(), 0);
+        assert_eq!(again.removed.len(), 0);
+        assert_eq!(again.changed.len(), 0);
+        assert_eq!(again.unchanged, again.total);
+        // Idempotent where it matters: what the client gets back is the same list with the same
+        // validator, so no picker is made to re-read anything.
+        let (served_again, etag_again) = store.tools().await.unwrap();
+        assert_eq!(served, served_again);
+        assert_eq!(etag, etag_again);
+    }
+
+    #[tokio::test]
+    async fn a_sync_replaces_a_catalogue_file_that_cannot_be_read() {
+        // The exception to the house's preserve-never-overwrite rule, and the reason for it: the
+        // catalogue's only copy is Makera's database, so the sync is the recovery. Refusing would
+        // leave a corrupt file as a permanent block on the one operation that can heal it.
+        let dir = TempDir::new().unwrap();
+        let db = a_library(&dir);
+        fs::write(dir.path().join(CATALOGUE_FILE), b"{ this is not json").unwrap();
+        let store = store_syncing(&dir, &db);
+        assert_eq!(store.health().await.problems.len(), 1);
+
+        let report = store.sync_catalogue().await.unwrap();
+        assert_eq!(report.total, 2);
+        assert!(
+            report.notes.iter().any(|n| n.contains("could not be read")),
+            "{:?}",
+            report.notes
+        );
+        assert!(store.health().await.problems.is_empty());
+        assert!(store.health().await.has_catalogue);
+    }
+
+    #[tokio::test]
+    async fn a_sync_that_would_lose_the_catalogue_is_refused() {
+        let dir = TempDir::new().unwrap();
+        let db = a_library(&dir);
+        let store = store_syncing(&dir, &db);
+        store.sync_catalogue().await.unwrap();
+        let before = fs::read(dir.path().join(CATALOGUE_FILE)).unwrap();
+
+        // A well-formed database with no cutters in it: an import of nothing, over a catalogue that
+        // has rows. Makera publishes 129 of them, so this is a read that went wrong.
+        let empty_dir = TempDir::new().unwrap();
+        let empty = crate::catalogue::fixture::temp_db(empty_dir.path());
+        crate::catalogue::fixture::db(&empty);
+        let store = store_syncing(&dir, &empty);
+        let err = store.sync_catalogue().await.unwrap_err();
+        assert!(matches!(err, HouseError::Refused(_)), "{err:?}");
+        assert!(err.to_string().contains("no cutters"), "{err}");
+        assert_eq!(fs::read(dir.path().join(CATALOGUE_FILE)).unwrap(), before);
+        assert!(store.health().await.has_catalogue, "the old rows are still served");
+    }
+
+    #[tokio::test]
+    async fn a_row_that_cannot_be_served_refuses_the_whole_sync() {
+        let dir = TempDir::new().unwrap();
+        let db = a_library(&dir);
+        let store = store_syncing(&dir, &db);
+        store.sync_catalogue().await.unwrap();
+        let before = fs::read(dir.path().join(CATALOGUE_FILE)).unwrap();
+
+        // A row with no name: `ToolSchema` would refuse it at the client, so it is refused here,
+        // and refusing it means the sync imports nothing rather than importing a cut-down list.
+        let other = TempDir::new().unwrap();
+        let db = crate::catalogue::fixture::temp_db(other.path());
+        let conn = crate::catalogue::fixture::db(&db);
+        crate::catalogue::fixture::put(
+            &conn,
+            &crate::catalogue::fixture::Cutter {
+                diameter: Some(3.175),
+                ..crate::catalogue::fixture::Cutter::new("   ", 1)
+            },
+        );
+        drop(conn);
+
+        let store = store_syncing(&dir, &db);
+        let err = store.sync_catalogue().await.unwrap_err();
+        assert!(matches!(err, HouseError::BadEntry(_)), "{err:?}");
+        assert!(err.to_string().contains("no name"), "{err}");
+        assert_eq!(fs::read(dir.path().join(CATALOGUE_FILE)).unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn a_sync_with_nowhere_to_read_from_says_so() {
+        let dir = TempDir::new().unwrap();
+        let store = HouseStore::open_with(dir.path().to_path_buf(), None);
+        let err = store.sync_catalogue().await.unwrap_err();
+        assert!(matches!(err, HouseError::NotFound(_)), "{err:?}");
+
+        let missing = dir.path().join("nowhere.db");
+        let store = HouseStore::open_with(dir.path().to_path_buf(), Some(missing));
+        let err = store.sync_catalogue().await.unwrap_err();
+        assert!(matches!(err, HouseError::NotFound(_)), "{err:?}");
+        assert!(err.to_string().contains("nowhere.db"), "{err}");
     }
 }

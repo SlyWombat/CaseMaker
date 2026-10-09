@@ -31,11 +31,11 @@
  * and nothing here blocks: a probe that hangs on a dead socket gives up after
  * {@link DEFAULT_TIMEOUT_MS} and says so.
  *
- * READ-ONLY FOR NOW. `GET /api/v1/health` and `GET /api/v1/tools` are the whole client. The
- * service's write endpoints (register a cutter, clone from the catalogue, import a house file)
- * exist and are tested on the Rust side, but their client arrives with the UI that drives them
- * (#309/#311) — a write path with no user in front of it is untestable in the way that matters.
- * `GET /api/v1/inventory` is likewise the service's, waiting for #309's reader.
+ * READ-ONLY FOR NOW. `GET /api/v1/health`, `GET /api/v1/tools` and `GET /api/v1/feeds` (#310) are
+ * the whole client. The service's write endpoints (register a cutter, clone from the catalogue,
+ * import a house file) exist and are tested on the Rust side, but their client arrives with the UI
+ * that drives them (#309/#311) — a write path with no user in front of it is untestable in the way
+ * that matters. `GET /api/v1/inventory` is likewise the service's, waiting for #309's reader.
  *
  * NO VENDOR DATA, ANYWHERE. What this client receives is the user's own tiers plus whatever their
  * own machine's catalogue holds. Nothing it fetches is committed to the repo and nothing it fetches
@@ -44,6 +44,7 @@
 
 import { z } from 'zod';
 import { ToolLibrarySchema, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { FeedCatalogueSchema, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 
 /**
  * The API root under the page's origin. Matches `house_api.rs`'s route prefix, and is the one
@@ -76,6 +77,13 @@ const HouseHealthSchema = z.object({
   schemaVersion: z.number().int(),
   /** Whether a Makera catalogue has been imported (#308). False is normal on a fresh machine. */
   hasCatalogue: z.boolean(),
+  /**
+   * How many feed rows the stored catalogue holds (#310). Defaulted rather than required, so a
+   * service that predates the feed tier still answers "present" instead of failing this build's
+   * parse — the absence of the field IS the zero. A catalogue imported before #310 therefore
+   * reports `hasCatalogue: true` with `feedRows: 0`, which is exactly the state a re-sync fixes.
+   */
+  feedRows: z.number().int().nonnegative().default(0),
   catalogueSyncedAt: z.string().nullable(),
   /**
    * One sentence per document the service could not read. Non-empty means it will refuse writes —
@@ -110,10 +118,18 @@ export type HouseTools =
   | { kind: 'absent'; reason: string }
   | { kind: 'error'; detail: string };
 
-/** The house service, as the store sees it. Two methods, both reads. */
+/** What a feed-catalogue read concluded (#310). The same four outcomes, its own validator. */
+export type HouseFeeds =
+  | { kind: 'ok'; etag: string | null; rows: FeedCatalogueRow[] }
+  | { kind: 'unchanged' }
+  | { kind: 'absent'; reason: string }
+  | { kind: 'error'; detail: string };
+
+/** The house service, as the store sees it. Three methods, all reads. */
 export interface HouseClient {
   probe(opts?: HouseRequestOptions): Promise<HouseProbe>;
   tools(etag: string | null, opts?: HouseRequestOptions): Promise<HouseTools>;
+  feeds(etag: string | null, opts?: HouseRequestOptions): Promise<HouseFeeds>;
 }
 
 /**
@@ -268,6 +284,40 @@ const realClient: HouseClient = {
     }
     return { kind: 'ok', etag: res.etag, entries: parsed.data };
   },
+
+  // #310. Deliberately a SEPARATE document from the tool list rather than a field on it: the two
+  // are read for different reasons, the feed matrix is 1 328 rows against the cutters' 129, and a
+  // build that wants only the cutters should not have to parse the matrix. It also gives the rows
+  // their own validator, so a malformed feed row costs the feeds tier and not the whole house.
+  async feeds(etag, opts = {}) {
+    const root = (opts.base ?? houseBaseUrl()).replace(/\/+$/, '');
+    let res: RawResponse;
+    try {
+      res = await get('/feeds', { ...opts, etag });
+    } catch (e) {
+      return { kind: 'error', detail: reasonOf(e) };
+    }
+    if (res.status === 304) return { kind: 'unchanged' };
+    // 404 is a service that has not synced since the feed tier existed, and also every static host.
+    // Either way there is no catalogue here, which is a normal answer, not a failure.
+    if (res.status !== 200) return { kind: 'absent', reason: notTheService(root, res) };
+    if (!isJson(res.contentType)) return { kind: 'absent', reason: notTheService(root, res) };
+
+    let json: unknown;
+    try {
+      json = JSON.parse(res.text);
+    } catch {
+      return { kind: 'error', detail: `${root}${HOUSE_API_PATH}/feeds is not readable JSON` };
+    }
+    const parsed = FeedCatalogueSchema.safeParse(json);
+    if (!parsed.success) {
+      return {
+        kind: 'error',
+        detail: `the house service's feed catalogue does not match this build: ${firstIssue(parsed.error)}`,
+      };
+    }
+    return { kind: 'ok', etag: res.etag, rows: parsed.data };
+  },
 };
 
 function firstIssue(error: z.ZodError): string {
@@ -306,6 +356,22 @@ export async function houseTools(
 ): Promise<HouseTools> {
   try {
     return await (await clientFactory()).tools(etag, opts);
+  } catch (e) {
+    return { kind: 'error', detail: reasonOf(e) };
+  }
+}
+
+/**
+ * Read the machine's own feed catalogue (#310). Same contract as {@link houseTools}, including the
+ * ETag: rows are the vendor's, and re-reading 1 328 of them on every store refresh would be the
+ * cost this endpoint's validator exists to avoid.
+ */
+export async function houseFeeds(
+  etag: string | null,
+  opts?: HouseRequestOptions,
+): Promise<HouseFeeds> {
+  try {
+    return await (await clientFactory()).feeds(etag, opts);
   } catch (e) {
     return { kind: 'error', detail: reasonOf(e) };
   }

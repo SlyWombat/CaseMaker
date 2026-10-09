@@ -1,6 +1,7 @@
 use clap::Parser;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
+mod catalogue;
 mod config;
 mod house;
 mod house_api;

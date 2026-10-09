@@ -11,6 +11,13 @@
  * of them is "the service is not here" while the other is "the service is here and you own no
  * extra cutters". They are two different facts about the world, so they are two requests.
  *
+ * THE FEED CATALOGUE IS A THIRD REQUEST AND A SECOND SNAPSHOT (#310). `GET /api/v1/feeds` is read
+ * only AFTER the tool list, and its rows go straight into `engine/cnc/feeds.ts`'s snapshot rather
+ * than being held here — the matrix is read by `feedsFor`, not rendered, so what this store keeps is
+ * the count. The order is not cosmetic: catalogue rows are keyed by cutter id, and without the
+ * cutters they name not one of them is reachable. Its failure is reported separately from `error`,
+ * because a cutter list with no starting numbers is a perfectly usable house.
+ *
  * THE THREE STATES, AND WHAT THEY MEAN. `present` is "the registry came from a house service";
  * `absent` is every outcome that is not a service — a web deployment, whose own origin has none; a
  * static host answering 404; a page answering instead of JSON — and `error` is a service this build
@@ -34,12 +41,13 @@
 
 import { create } from 'zustand';
 import { setRegistry } from '@/engine/cnc/toolRegistry';
+import { clearFeedCatalogue, setFeedCatalogue } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import {
+  houseFeeds,
   houseTools,
   probeHouse,
   type HouseHealth,
-  type HouseProbe,
   type HouseRequestOptions,
 } from '@/platform/houseClient';
 
@@ -60,6 +68,20 @@ export interface ToolRegistryState {
   /** The last validator received, for the next read's `If-None-Match`. */
   etag: string | null;
   /**
+   * How many catalogue feed rows are loaded into the feeds engine (#310). The rows themselves are
+   * in `engine/cnc/feeds.ts`; this is the count a "N starting rows from this machine" line needs,
+   * not a second copy of a 1 328-row matrix.
+   */
+  feedCount: number;
+  /** The feed document's validator, for the next read's `If-None-Match`. */
+  feedEtag: string | null;
+  /**
+   * Why the catalogue is not loaded, when the service had one to offer and the read failed.
+   * Deliberately not `error`: that one is about the registry, and a house whose cutters read fine
+   * but whose feed matrix did not is a usable house with a gap, not a house that is gone.
+   */
+  feedError: string | null;
+  /**
    * Probe the house service and push what it has into the registry. Safe to call any number of
    * times; concurrent calls share one run rather than racing (`main.tsx` mounts under StrictMode,
    * whose effects run twice in development).
@@ -69,9 +91,9 @@ export interface ToolRegistryState {
   reset: () => void;
 }
 
-/** Why a probe that is not `present` says what it says. */
-function reasonFor(probe: Exclude<HouseProbe, { kind: 'present' }>): string {
-  return probe.kind === 'absent' ? probe.reason : probe.detail;
+/** Why a probe, a tool read or a feed read that is not `ok` says what it says. */
+function reasonFor(outcome: { kind: 'absent'; reason: string } | { kind: 'error'; detail: string }) {
+  return outcome.kind === 'absent' ? outcome.reason : outcome.detail;
 }
 
 /** The in-flight refresh, so a double-mount is one request. */
@@ -83,6 +105,9 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
   health: null,
   error: null,
   etag: null,
+  feedCount: 0,
+  feedEtag: null,
+  feedError: null,
 
   refresh: (opts) => {
     if (inFlight) return inFlight;
@@ -91,17 +116,23 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
       const probe = await probeHouse(opts);
       if (probe.kind !== 'present') {
         setRegistry([]);
-        set({ status: 'absent', entries: [], health: null, error: reasonFor(probe), etag: null });
+        clearFeedCatalogue();
+        set({
+          status: 'absent',
+          entries: [],
+          health: null,
+          error: reasonFor(probe),
+          etag: null,
+          feedCount: 0,
+          feedEtag: null,
+          feedError: null,
+        });
         return;
       }
       const read = await houseTools(get().etag, opts);
-      if (read.kind === 'unchanged') {
-        // The list is byte-identical to the one already in the registry; only the probe is new.
-        set({ status: 'present', health: probe.health, error: null });
-        return;
-      }
-      if (read.kind !== 'ok') {
+      if (read.kind !== 'ok' && read.kind !== 'unchanged') {
         setRegistry([]);
+        clearFeedCatalogue();
         set({
           status: 'absent',
           entries: [],
@@ -110,16 +141,46 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
           health: probe.health,
           error: reasonFor(read),
           etag: null,
+          feedCount: 0,
+          feedEtag: null,
+          feedError: null,
         });
         return;
       }
-      setRegistry(read.entries);
+      // `unchanged` is a 304: what is already in the registry is byte-identical to what the service
+      // holds, so the tool tier and its validator stay exactly as they are.
+      if (read.kind === 'ok') setRegistry(read.entries);
+      const tools =
+        read.kind === 'ok'
+          ? { entries: read.entries, etag: read.etag }
+          : { entries: get().entries, etag: get().etag };
+
+      // The catalogue is read second, and only once there IS a tool list: its rows are keyed by
+      // cutter id, so without the cutters they name not one of them could ever be reached.
+      const feeds = await houseFeeds(get().feedEtag, opts);
+      let feed: { count: number; etag: string | null; error: string | null };
+      if (feeds.kind === 'ok') {
+        setFeedCatalogue(feeds.rows);
+        feed = { count: feeds.rows.length, etag: feeds.etag, error: null };
+      } else if (feeds.kind === 'unchanged') {
+        feed = { count: get().feedCount, etag: get().feedEtag, error: null };
+      } else {
+        // Same rule as the tool list: a catalogue from a service we can no longer read is a claim
+        // about a machine we cannot see, so it is dropped — with the reason kept, so the gap is
+        // visible rather than looking like a service that simply has no rows.
+        clearFeedCatalogue();
+        feed = { count: 0, etag: null, error: reasonFor(feeds) };
+      }
+
       set({
         status: 'present',
-        entries: read.entries,
+        entries: tools.entries,
         health: probe.health,
         error: null,
-        etag: read.etag,
+        etag: tools.etag,
+        feedCount: feed.count,
+        feedEtag: feed.etag,
+        feedError: feed.error,
       });
     })().finally(() => {
       inFlight = null;
@@ -129,6 +190,16 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
 
   reset: () => {
     setRegistry([]);
-    set({ status: 'checking', entries: [], health: null, error: null, etag: null });
+    clearFeedCatalogue();
+    set({
+      status: 'checking',
+      entries: [],
+      health: null,
+      error: null,
+      etag: null,
+      feedCount: 0,
+      feedEtag: null,
+      feedError: null,
+    });
   },
 }));

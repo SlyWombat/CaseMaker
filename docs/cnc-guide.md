@@ -352,9 +352,14 @@ enter your own sizes the dimensions are unmeasured defaults and `sacrificial-def
 exactly as for the vise.
 
 **5. Cutting parameters (#202).** Spindle speed, feed, plunge, step-down and step-over will
-be shown as **starting values, unmeasured** — not recommendations. Nothing has measured what
-this machine does in this wood yet (#209), so the numbers are a place to start, and the panel
-will say exactly that. You can override each one.
+be shown with **where the number came from**, and none of it is a recommendation. Where
+Makera's own library has a row for your cutter and your material, the panel starts from
+**their** numbers: the four fields are tagged `Makera` and the section is labelled
+**"Makera's catalogue — not measured"** (#310), clamped to the Z1 — a 15 000 RPM row arrives
+as 13 000, and a row far above the ceiling is refused outright. Where the library has no row
+— PLA, the badge job's material, has none at all — the panel keeps **"starting values —
+unmeasured"**. Step-over is always the app's own 45 %, never the catalogue's 63 % of the tip
+(#191). You can override each one.
 
 **6. Generate — the three checks (#206).** Pressing **Generate** will produce the toolpath
 and then run three gates, each a row with a tick or a cross:
@@ -723,6 +728,7 @@ splits it, and a field with no `=` is kept rather than dropped.
 | **The simulator refuses my file** | See the refusal banner's code: `laser-job`, `rotary-job`, `dense-3d-refused`, or `tool-refused`. Chapter 8.1 explains each. |
 | **The part came out mirrored / rotated / offset** | The work origin or the placement is wrong. The app's `placement: stub` badge means it assumed the position; on the machine, re-probe the origin. Also check `stock-axes-unverified` — which stock dimension runs along X is unverified. |
 | **Why does it say "starting values, unmeasured"?** | No feed or speed has been measured on this machine in this wood yet (#209). They are a place to start, not a recommendation. |
+| **Why does it say "Makera's catalogue — not measured"?** | Makera's own library has a row for your cutter and material, so the panel starts from their numbers instead of ours (#310). Still not a measurement *of this machine* — and still clamped to its 13 000 RPM ceiling. Cut a coupon and the bench's reading replaces it. |
 
 ### 8.5 Glossary
 

@@ -368,10 +368,13 @@ const cutOverrideSchema = z.object({
 });
 
 /**
- * Where an asserted value came from (#246/#254). The same three states as `FieldSource`. Every
- * key is optional, so a job that asserts nothing carries no `sources` key at all and round-trips.
+ * Where an asserted value came from (#246/#254/#310). The same four states as `FieldSource` —
+ * `catalogue` is Makera's own starting number for a cutter they sell, and it is here because a job
+ * that adopts one must round-trip it: without this key the Zod object would STRIP it on load and
+ * the value would come back reading `computed`. Every key is optional, so a job that asserts
+ * nothing carries no `sources` key at all and round-trips.
  */
-const fieldSourceSchema = z.enum(['computed', 'user', 'measured']);
+const fieldSourceSchema = z.enum(['computed', 'catalogue', 'user', 'measured']);
 
 const jobSourcesSchema = z.object({
   stock: z
@@ -390,6 +393,10 @@ const jobSourcesSchema = z.object({
       plungeFeed: fieldSourceSchema.optional(),
       stepDown: fieldSourceSchema.optional(),
       stepOver: fieldSourceSchema.optional(),
+      // `peck` was missing here while `EngraveJobSources.cut` has had it all along (#220 added the
+      // field to `CutParams`), so a job that stamped the peck's source lost the stamp on load.
+      // Found fixing the same object for #310.
+      peck: fieldSourceSchema.optional(),
       air: fieldSourceSchema.optional(),
     })
     .optional(),

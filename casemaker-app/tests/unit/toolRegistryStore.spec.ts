@@ -4,11 +4,13 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getTools, resetRegistry } from '@/engine/cnc/toolRegistry';
+import { feedCatalogueRows, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import {
   setHouseClientLoader,
   HOUSE_SCHEMA_VERSION,
   type HouseClient,
+  type HouseFeeds,
   type HouseHealth,
   type HouseProbe,
   type HouseTools,
@@ -19,6 +21,7 @@ const HEALTH: HouseHealth = {
   ok: true,
   schemaVersion: HOUSE_SCHEMA_VERSION,
   hasCatalogue: false,
+  feedRows: 0,
   catalogueSyncedAt: null,
   problems: [],
 };
@@ -45,10 +48,21 @@ const USER: ToolLibraryEntry = {
   },
 };
 
+/** One catalogue row, for a cutter the fixture's tool list actually names. */
+const FEED_ROW: FeedCatalogueRow = {
+  cutterId: '112111313812',
+  material: 'Hardwood',
+  rpm: 12000,
+  feed: 900,
+  plungeFeed: 300,
+  stepDown: 1.2,
+};
+
 /** A fake client that records what it was asked, so the store's calls can be asserted. */
 function fakeClient(opts: {
   probe: HouseProbe;
   tools?: (etag: string | null) => HouseTools;
+  feeds?: (etag: string | null) => HouseFeeds;
   log?: string[];
 }): HouseClient {
   return {
@@ -59,6 +73,11 @@ function fakeClient(opts: {
     tools: async (etag) => {
       opts.log?.push(`tools:${etag ?? '-'}`);
       return opts.tools ? opts.tools(etag) : { kind: 'ok', etag: '"e1"', entries: [USER] };
+    },
+    feeds: async (etag) => {
+      opts.log?.push(`feeds:${etag ?? '-'}`);
+      // The default is a service that answers, with no catalogue rows: the fresh-machine case.
+      return opts.feeds ? opts.feeds(etag) : { kind: 'ok', etag: '"f1"', rows: [] };
     },
   };
 }
@@ -110,10 +129,79 @@ describe('refresh against a house service', () => {
     expect(state().entries).toEqual([USER]);
 
     await state().refresh();
-    expect(log).toEqual(['probe', 'tools:-', 'probe', 'tools:"e1"']);
+    expect(log).toEqual(['probe', 'tools:-', 'feeds:-', 'probe', 'tools:"e1"', 'feeds:"f1"']);
     expect(state().status).toBe('present');
     expect(state().entries).toEqual([USER]);
     expect(getTools().map((e) => e.key)).toContain('user:1a2b3c4d5e');
+  });
+});
+
+describe('the feed catalogue (#310)', () => {
+  it('pushes the service’s rows into the feeds engine and counts them', async () => {
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: { ...HEALTH, feedRows: 1 }, base: '' },
+        feeds: () => ({ kind: 'ok', etag: '"f1"', rows: [FEED_ROW] }),
+      }),
+    );
+    await state().refresh();
+
+    // The rows live in `engine/cnc/feeds.ts` — the module `feedsFor` reads — not in this store.
+    expect(feedCatalogueRows()).toEqual([FEED_ROW]);
+    expect(state().feedCount).toBe(1);
+    expect(state().feedEtag).toBe('"f1"');
+    expect(state().feedError).toBeNull();
+  });
+
+  it('a catalogue the service could not read is dropped, with the reason, and the registry stands', async () => {
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        feeds: () => ({ kind: 'absent', reason: 'GET /api/v1/feeds answered 404' }),
+      }),
+    );
+    await state().refresh();
+
+    // A usable house with a gap: the cutters are fine, so this is not `error`.
+    expect(state().status).toBe('present');
+    expect(state().error).toBeNull();
+    expect(state().feedError).toContain('404');
+    expect(feedCatalogueRows()).toEqual([]);
+    expect(state().feedCount).toBe(0);
+  });
+
+  it('losing the service drops the catalogue with it', async () => {
+    let present = true;
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: present
+          ? { kind: 'present', health: HEALTH, base: '' }
+          : { kind: 'absent', reason: 'the page answered with text/html, not the house service' },
+        feeds: () => ({ kind: 'ok', etag: '"f1"', rows: [FEED_ROW] }),
+      }),
+    );
+    await state().refresh();
+    expect(feedCatalogueRows()).toEqual([FEED_ROW]);
+
+    present = false;
+    await state().refresh();
+    // A catalogue from a machine we can no longer see is the same kind of claim as its tool list.
+    expect(feedCatalogueRows()).toEqual([]);
+    expect(state().feedCount).toBe(0);
+    expect(state().feedEtag).toBeNull();
+  });
+
+  it('a 304 on the catalogue keeps the rows already loaded', async () => {
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        feeds: (etag) => (etag ? { kind: 'unchanged' } : { kind: 'ok', etag: '"f1"', rows: [FEED_ROW] }),
+      }),
+    );
+    await state().refresh();
+    await state().refresh();
+    expect(feedCatalogueRows()).toEqual([FEED_ROW]);
+    expect(state().feedCount).toBe(1);
   });
 });
 

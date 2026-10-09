@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   houseBaseUrl,
+  houseFeeds,
   houseTools,
   probeHouse,
   setHouseClientLoader,
@@ -52,6 +53,7 @@ const HEALTH = {
   ok: true,
   schemaVersion: HOUSE_SCHEMA_VERSION,
   hasCatalogue: false,
+  feedRows: 0,
   catalogueSyncedAt: null,
   problems: [],
 };
@@ -211,6 +213,59 @@ describe('houseTools', () => {
   });
 });
 
+describe('houseFeeds (#310)', () => {
+  const ROW = {
+    cutterId: '112111313812',
+    material: 'Hardwood',
+    rpm: 12000,
+    feed: 900,
+    plungeFeed: 300,
+    stepDown: 1.2,
+  };
+
+  it('reads the rows, carries the validator, and treats a 304 as unchanged', async () => {
+    const calls = stubFetch(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify([ROW]),
+      etag: '"fnv1a-feed"',
+    }));
+    expect(await houseFeeds(null, { base: BASE })).toEqual({
+      kind: 'ok',
+      etag: '"fnv1a-feed"',
+      rows: [ROW],
+    });
+    expect(calls[0]!.url).toBe(`${BASE}${HOUSE_API_PATH}/feeds`);
+    expect(calls[0]!.headers['If-None-Match']).toBeUndefined();
+
+    expect(await houseFeeds('"fnv1a-feed"', { base: BASE })).toMatchObject({ kind: 'ok' });
+    expect(calls[1]!.headers['If-None-Match']).toBe('"fnv1a-feed"');
+
+    stubFetch(() => ({ status: 304 }));
+    expect(await houseFeeds('"fnv1a-feed"', { base: BASE })).toEqual({ kind: 'unchanged' });
+  });
+
+  it('is absent for a page or a host with no feed endpoint — a normal answer, not an error', async () => {
+    stubFetch(() => ({ status: 404, contentType: 'text/html', body: 'not found' }));
+    expect((await houseFeeds(null, { base: BASE })).kind).toBe('absent');
+
+    stubFetch(() => ({ contentType: 'text/html', body: '<!doctype html>' }));
+    expect((await houseFeeds(null, { base: BASE })).kind).toBe('absent');
+  });
+
+  it('is an error when a row is not the shape this build reads', async () => {
+    // `rpm` as a string is exactly the kind of plausible-but-wrong row that must not reach the
+    // engine: `feedsFor` would put it on the wire as a spindle speed.
+    stubFetch(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify([{ ...ROW, rpm: '12000' }]),
+    }));
+    const read = await houseFeeds(null, { base: BASE });
+    expect(read.kind).toBe('error');
+    if (read.kind !== 'error') throw new Error('unreachable');
+    expect(read.detail).toContain('feed catalogue');
+  });
+});
+
 describe('the loader seam', () => {
   it('swaps the client for every caller, and null restores the real one', async () => {
     const seen: Array<string | null> = [];
@@ -220,6 +275,7 @@ describe('the loader seam', () => {
         seen.push(etag);
         return { kind: 'unchanged' };
       },
+      feeds: async () => ({ kind: 'absent', reason: 'fake' }),
     };
     setHouseClientLoader(async () => fake);
     expect(await probeHouse({ base: BASE })).toEqual({ kind: 'absent', reason: 'fake' });

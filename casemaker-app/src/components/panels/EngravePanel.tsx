@@ -102,22 +102,41 @@ const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad
  * The visible word for a value's source (#246/#254): a typed number reads "typed", never looking
  * like a bench reading, and a computed feed says so. `measured` is the one that gets a colour.
  */
-const SOURCE_LABEL: Record<FieldSource, string> = { computed: 'computed', user: 'typed', measured: 'measured' };
-const SOURCE_COLOR: Record<FieldSource, string> = { computed: '#9aa4b0', user: '#9aa4b0', measured: '#9fd19b' };
+const SOURCE_LABEL: Record<FieldSource, string> = {
+  computed: 'computed',
+  // Makera's own number for a cutter they sell (#310). Short, because it sits in a row of tags.
+  catalogue: 'Makera',
+  user: 'typed',
+  measured: 'measured',
+};
+const SOURCE_COLOR: Record<FieldSource, string> = {
+  computed: '#9aa4b0',
+  // Amber, deliberately neither the grey of a computed value nor the green of a bench reading: a
+  // vendor's starting number is a third thing (#310).
+  catalogue: '#d0b26a',
+  user: '#9aa4b0',
+  measured: '#9fd19b',
+};
 
 /** The tag that shows a field's provenance (#246/#254), or null when nothing was asserted. */
 function SourceTag({ source, testid }: { source: FieldSource; testid: string }): JSX.Element {
   return (
     <span
-      style={{ ...TAG, color: SOURCE_COLOR[source], borderColor: source === 'measured' ? '#3a5a3a' : '#2a2f36' }}
+      style={{
+        ...TAG,
+        color: SOURCE_COLOR[source],
+        borderColor: source === 'measured' ? '#3a5a3a' : source === 'catalogue' ? '#5a4a28' : '#2a2f36',
+      }}
       data-testid={testid}
       data-source={source}
       title={
         source === 'computed'
           ? 'Computed from the feeds table — no one typed this.'
-          : source === 'measured'
-            ? 'Taken at the bench (#208).'
-            : 'Typed here — not more trustworthy for that.'
+          : source === 'catalogue'
+            ? "Makera's catalogue (#310) — their starting number for this cutter, not a measurement of this machine."
+            : source === 'measured'
+              ? 'Taken at the bench (#208).'
+              : 'Typed here — not more trustworthy for that.'
       }
     >
       {SOURCE_LABEL[source]}
@@ -734,13 +753,19 @@ export function EngravePanel(): JSX.Element {
   );
 
   /**
-   * The source of one cutting override (#246): `computed` when the box shows the feeds table's
-   * value untouched, otherwise the tag the value was stamped with. The tag is the toggle — a
-   * typed value can be declared a bench measurement and back, so a measured feed is visible and
-   * reversible, and never silently relabelled by a regenerate.
+   * The source of one cutting value (#246): with no override, where the RESOLVED number came from —
+   * the feeds table, a coupon's measurement, or Makera's catalogue (#310); with an override, the tag
+   * the value was stamped with. Only a stamped value gets the toggle: a typed value can be declared
+   * a bench measurement and back, so a measured feed is visible and reversible, while a value nobody
+   * asserted has nothing to toggle.
    */
   const overrideSourceTag = (key: keyof Omit<CutParams, 'air'>): JSX.Element => {
-    const src: FieldSource = job.cutOverride?.[key] === undefined ? 'computed' : job.sources?.cut?.[key] ?? 'user';
+    const asserted = job.cutOverride?.[key] !== undefined;
+    if (!asserted) {
+      const resolved: FieldSource = feeds?.ok ? feeds.sources[key] : 'computed';
+      return <SourceTag source={resolved} testid={`engrave-override-${key}-source`} />;
+    }
+    const src: FieldSource = job.sources?.cut?.[key] ?? 'user';
     if (src === 'computed') return <SourceTag source="computed" testid={`engrave-override-${key}-source`} />;
     return (
       <button
@@ -1372,11 +1397,22 @@ export function EngravePanel(): JSX.Element {
         Cutting
         {feeds?.ok && (
           <span
-            style={{ ...TAG, marginLeft: 4 }}
-            title={feeds.entry.provenance}
+            style={{
+              ...TAG,
+              marginLeft: 4,
+              // The row's own colours, so "Makera's numbers" never reads as a bench reading and a
+              // measured row never reads as a starting point (#310, the same rule as field tags).
+              color: SOURCE_COLOR[feeds.catalogue ? 'catalogue' : feeds.entry.status === 'measured' ? 'measured' : 'computed'],
+            }}
+            title={feeds.provenance}
             data-testid="engrave-feeds-status"
+            data-source={feeds.catalogue ? 'catalogue' : feeds.entry.status}
           >
-            {feeds.entry.status === 'unmeasured' ? 'starting values — unmeasured' : 'measured'}
+            {feeds.catalogue
+              ? "Makera's catalogue — not measured"
+              : feeds.entry.status === 'unmeasured'
+                ? 'starting values — unmeasured'
+                : 'measured'}
           </span>
         )}
       </h3>

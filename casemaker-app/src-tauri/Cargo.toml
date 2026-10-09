@@ -33,6 +33,14 @@ clap = { version = "4", features = ["derive"] }
 dirs = "5"
 log = "0.4"
 env_logger = "0.11"
+# The Makera catalogue import (#308) is the only reader of Studio's SQLite library. `bundled`
+# compiles SQLite from source rather than linking whatever the host has: the same reader then works
+# on every platform this ships for, and the C toolchain it needs is already required to build the
+# rest of the app. The connection is opened READ_ONLY, over a copy (see `catalogue.rs`).
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+# One `syncedAt` timestamp. Taken as a dependency rather than hand-rolling civil-date arithmetic,
+# which is a place to be quietly wrong about a value the user reads.
+chrono = "0.4.45"
 
 [dev-dependencies]
 # `config.rs`'s tests have used this since the first commit without it ever being declared, so
