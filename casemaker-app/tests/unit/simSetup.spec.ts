@@ -113,6 +113,30 @@ describe('simSetupStore.openFile', () => {
     expect(s.stockSource).toEqual({ length: 'header', width: 'header', thickness: 'header' });
   });
 
+  it('warns, naming both cutters, when the file’s TOOL record disagrees with the one the user chose (#338)', () => {
+    // The choice is kept (#315) — and the disagreement is said, because the sweep is about to be
+    // drawn for a 1 mm cutter against a file written for a 3.175 mm one.
+    useSimSetupStore.getState().setTool('flat-1.0');
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    const s = useSimSetupStore.getState();
+    expect(s.toolKey).toBe('flat-1.0');
+    expect(s.toolSource).toBe('user');
+    expect(s.headerDiagnostics).toHaveLength(1);
+    expect(s.headerDiagnostics[0]!.severity).toBe('warning');
+    expect(s.headerDiagnostics[0]!.message).toContain('3.175*12mm Flat End(Metal) (flat-3.175x12-metal)');
+    expect(s.headerDiagnostics[0]!.message).toContain('flat-1.0');
+    expect(s.headerDiagnostics[0]!.message).toContain('Reset');
+  });
+
+  it('adds nothing when the file’s TOOL record names the cutter the user already chose (#338)', () => {
+    useSimSetupStore.getState().setTool('flat-3.175x12-metal');
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    const s = useSimSetupStore.getState();
+    expect(s.toolKey).toBe('flat-3.175x12-metal');
+    expect(s.toolSource).toBe('user');
+    expect(s.headerDiagnostics).toEqual([]);
+  });
+
   it('keeps a chosen cutter even when the file it opens states no tool at all (#315)', () => {
     useSimSetupStore.getState().setTool('flat-1.0');
     useSimSetupStore.getState().openFile('plain.nc', 'G0 X0 Y0\n');

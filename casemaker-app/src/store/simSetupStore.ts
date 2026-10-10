@@ -11,6 +11,10 @@
  * tool and takes the header's stock, and the other way round — a fresh file supplies whatever the
  * user has not claimed, and nothing they have.
  *
+ * Keeping the user's cutter is not the same as hiding the file's (#338): when the two name
+ * different registry entries, `headerDiagnostics` gains a warning naming both, so a sweep valid
+ * for the 1 mm cutter is never silently shown against a file written for a 3.175 mm one.
+ *
  * Not persisted, and plain zustand — no immer needed.
  */
 
@@ -106,6 +110,12 @@ function matchRegistryTool(tool: Tool): string | null {
   return entry ? entry.key : null;
 }
 
+/** `3.175*12mm Flat End(Metal) (flat-3.175x12-metal)` — the entry's name with its key, or the bare key. */
+function describeTool(key: string): string {
+  const entry = getTools().find((e) => e.key === key);
+  return entry ? `${entry.tool.name} (${key})` : key;
+}
+
 export const useSimSetupStore = create<SimSetupState>()((set) => ({
   ...EMPTY,
   openFile(name, text) {
@@ -140,6 +150,21 @@ export const useSimSetupStore = create<SimSetupState>()((set) => ({
         stockSource[field] = headerSource[field];
       }
       const keepTool = s.toolSource === 'user';
+      const headerDiagnostics: SimHeaderDiagnostic[] = fromHeader.diagnostics.map((d) => ({
+        severity: d.severity,
+        message: d.message,
+      }));
+      // The user's cutter wins, but a file that names a DIFFERENT one must say so (#338): the
+      // sweep is about to be drawn for a cutter the file was not written for. A file naming the
+      // same entry, or none the registry knows, adds nothing.
+      if (keepTool && s.toolKey !== null && headerToolKey !== null && headerToolKey !== s.toolKey) {
+        headerDiagnostics.push({
+          severity: 'warning',
+          message:
+            `the file's TOOL record names ${describeTool(headerToolKey)}; your choice of ` +
+            `${describeTool(s.toolKey)} was kept — Reset to take the file's`,
+        });
+      }
       return {
         fileName: name,
         gcodeText: text,
@@ -147,7 +172,7 @@ export const useSimSetupStore = create<SimSetupState>()((set) => ({
         stockSource,
         toolKey: keepTool ? s.toolKey : headerToolKey,
         toolSource: keepTool ? 'user' : headerToolKey ? 'header' : null,
-        headerDiagnostics: fromHeader.diagnostics.map((d) => ({ severity: d.severity, message: d.message })),
+        headerDiagnostics,
       };
     });
   },
