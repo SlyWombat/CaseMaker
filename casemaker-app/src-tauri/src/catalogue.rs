@@ -9,9 +9,24 @@
 // SQLITE_OPEN_READ_ONLY, over a **scratch copy** of Studio's file rather than the file itself. That
 // is not belt-and-braces: `makera_library.db` belongs to a running application, and this service
 // must never take a lock on it, never create a `-journal` or `-wal` beside it, and never leave it
-// altered in any way. Copying first makes "we do not touch their file" structural — the only syscall
-// this module makes against their path is `fs::copy`'s read. The copy is removed afterwards, best
+// altered in any way. Copying first makes "we do not touch their file" structural — the only syscalls
+// this module makes against their path are a `metadata` of the sidecars it might have and `fs::copy`'s
+// read, and neither of those takes a lock or writes a byte. The copy is removed afterwards, best
 // effort; a leftover copy in the temp directory is not a document anybody reads.
+//
+// AND THE COPY IS VERIFIED, BECAUSE A TORN ONE PARSES (#327). A bare copy of a database that is being
+// written can be torn, and the tear worth refusing is not the one that fails to open: it is the one
+// that opens and answers with FEWER ROWS, where every missing cutter is reported `removed` and its
+// feed rows go with it. So there are checks on both sides of the copy. A `-journal` or `-wal` with
+// anything in it beside Studio's library means the main file is behind its own writes — rollback mode
+// keeps the ORIGINAL pages in the journal while the main file already carries the new ones, and WAL
+// keeps new commits in `-wal` until a checkpoint — so the sync refuses and says so, with the one piece
+// of advice that fixes it (an EMPTY sidecar is the at-rest state `journal_mode=PERSIST` leaves, and is
+// not a pending write). And `PRAGMA integrity_check`, SQLite's own full verification, runs on the copy
+// before a single row is read from it. An `immutable=1` URI open would suppress the copy's sidecars
+// too, and is not used: a `file:` URI has to be hand-escaped for a Windows temp path (`C:\Users\…`
+// with a space in it), and a mis-escaped one fails the whole sync — so the copy is opened by path and
+// its sidecars are removed by name instead.
 //
 // THIS IS NOT `canReadLocalFiles` (#306's flag). That flag decides whether a build may *offer* the
 // "read Studio's install on this computer" affordance. Reading the file is a runtime fact about
@@ -60,9 +75,20 @@
 // tier there: `engine/cnc/feeds.ts` puts it below a measured row and refuses every material name
 // this app has no stock for. The row is keyed by the CUTTER (`g_ID`, i.e. `Tool.id`) rather than by
 // a diameter range, so it attaches to Makera's cutter wherever it appears — including the built-in
-// `flat-3.175x12-metal`, which IS `112111313812`. A row that names no cutter, or that leaves one of
-// its four numbers empty, is DROPPED rather than served short: the client validates the document as
-// one array, so one bad row would cost the whole tier. Dropping it costs one row and is reported.
+// `flat-3.175x12-metal`, which IS `112111313812`. A row that names no cutter, that leaves one of its
+// four numbers empty, or that states a number no cut can use — a `0` or a negative (Studio writes
+// `''` for "unset" but a `0` in a numeric column it never filled is a real `0` here, #325), or a
+// NON-FINITE one, which `num()` can produce because Rust's `f64` parse accepts "inf" and serde_json
+// writes that as `null` (#326) — is DROPPED rather than served short: the client validates the
+// document as one array, so one bad row would cost the whole tier, and it validates each number as
+// positive AND finite. Dropping it costs one row and is reported.
+//
+// AND THE TABLE ITSELF (#326). `t_MakeraCutterProperties` not being in the database at all is a
+// catalogue with no starting numbers: an empty matrix, and no note. Every OTHER way that query can
+// fail — a renamed column, a torn copy, a missing join table — is a read that went WRONG and comes
+// back as a sentence. The alternative, which this once did, is the worst shape a sync can have: it
+// SUCCEEDS, writes `feeds: []` over 1 328 rows, reports `feedRows: 0` with empty notes, and the
+// panel quietly falls back to the starting table with nothing telling the user why.
 //
 // WHY THE FEED ROWS ARE NOT DIFFED LIKE THE CUTTERS. They have no content hash: the ETag over the
 // served bytes is what tells a client they changed, and the report's `feedRows` count is what tells
@@ -330,34 +356,148 @@ pub struct Imported {
 ///
 /// Fails with a sentence rather than an empty list whenever the file is missing, is not a Makera
 /// library, or has a shape this build does not understand — a sync that silently imported nothing
-/// would be indistinguishable from "Makera never changed anything".
+/// would be indistinguishable from "Makera never changed anything". Since #327 that list also holds the
+/// two ways a copy can be a LIE: a `-journal` or `-wal` with something in it beside the vendor's own
+/// file (the main file is behind its own writes, so a copy of it alone is missing a transaction), and
+/// a copy that does not pass `PRAGMA integrity_check`.
 pub fn read_all(db: &Path) -> Result<Imported, String> {
+    read_all_in(db, &std::env::temp_dir())
+}
+
+/// The same read, with the directory the scratch copy is made in named explicitly.
+///
+/// The seam is for tests (#327), and it is the same sort as `HouseStore::open_with`'s vendor path: a
+/// test asserting "a read leaves nothing behind" can only make that claim about a directory nothing
+/// else is using. Every test in this binary reads in parallel, so a copy that is alive in another
+/// thread at the instant the process-wide temp directory is listed is not a leak — while a copy made
+/// in the test's own directory and not removed is exactly one.
+fn read_all_in(db: &Path, scratch_dir: &Path) -> Result<Imported, String> {
     if !db.exists() {
         return Err(format!(
             "{}: Makera Studio's library is not there",
             db.display()
         ));
     }
-    let copy = scratch_path();
+    if let Some(sidecar) = pending_write_beside(db) {
+        return Err(format!(
+            "{}: {} is beside it, so the database holds a transaction that has not reached the main \
+             file — a copy taken now would be missing it, and the cutters it touches would be \
+             reported removed. Open Makera Studio and close it again, then sync",
+            db.display(),
+            sidecar
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| sidecar.display().to_string())
+        ));
+    }
+    let copy = scratch_path(scratch_dir);
     std::fs::copy(db, &copy)
         .map_err(|e| format!("{}: could not be read: {e}", db.display()))?;
     let read = read_copy(&copy, db);
     // The copy is ours and is not a document: leave nothing behind, and never let a failure to
-    // remove it change the answer.
-    let _ = std::fs::remove_file(&copy);
+    // remove it change the answer. The sidecars go too (#327): a read-only open of a database in WAL
+    // mode creates `-wal` and `-shm` beside it, and the cleanup that removed only the copy left those
+    // in the temp directory for good.
+    for suffix in ["", "-journal", "-wal", "-shm"] {
+        let mut os = copy.as_os_str().to_os_string();
+        os.push(suffix);
+        let _ = std::fs::remove_file(PathBuf::from(os));
+    }
     read
+}
+
+/// The `-journal` or `-wal` beside Studio's library, when it says the main file is behind (#327).
+///
+/// Both journal modes keep the not-yet-committed part of a write in a sidecar: rollback mode holds the
+/// ORIGINAL pages in `-journal` while the main file already carries the new ones, and WAL mode holds
+/// new commits in `-wal` until a checkpoint. A bare copy takes the main file alone, so while either
+/// exists the copy is a database that is missing whatever the sidecar has — and missing silently,
+/// which is the shape this whole module refuses.
+///
+/// A ZERO-LENGTH sidecar is NOT a pending write: `journal_mode=PERSIST` leaves an empty `-journal`
+/// behind after every commit and a fully checkpointed `-wal` can be empty too, so size is the test
+/// and the at-rest states are not refused.
+fn pending_write_beside(db: &Path) -> Option<PathBuf> {
+    ["-journal", "-wal"].into_iter().find_map(|suffix| {
+        let mut os = db.as_os_str().to_os_string();
+        os.push(suffix);
+        let sidecar = PathBuf::from(os);
+        match std::fs::metadata(&sidecar) {
+            Ok(m) if m.len() > 0 => Some(sidecar),
+            _ => None,
+        }
+    })
 }
 
 static COPY_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// A name no other sync in this process can be using. Two syncs at once would otherwise read each
 /// other's half-written copy, which is a data error a user could not diagnose.
-fn scratch_path() -> PathBuf {
+fn scratch_path(dir: &Path) -> PathBuf {
     let n = COPY_SEQ.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "casemaker-studio-{}-{n}.db",
-        std::process::id()
-    ))
+    dir.join(format!("casemaker-studio-{}-{n}.db", std::process::id()))
+}
+
+/// The refusal for a copy that cannot be trusted to be a whole database (#327), in ONE wording
+/// whether it was `PRAGMA integrity_check` that found the damage or the first query that could not
+/// read a page — from here the two are the same fact.
+fn torn(source: &Path, why: impl std::fmt::Display) -> String {
+    format!(
+        "{}: the copy did not verify, so reading it would import a partial catalogue ({why})",
+        source.display()
+    )
+}
+
+/// Does this error mean the FILE could not be read, rather than simply not holding our tables?
+///
+/// The distinction is the difference between "you pointed me at the wrong file" and "this file is
+/// damaged" (#327): a valid SQLite database that has never heard of Makera answers with "no such
+/// table" and is refused as the wrong file, while a torn copy answers with a corruption code and is
+/// refused as a copy that did not verify. Without this, a half-written library is reported as "not a
+/// Makera Studio library", which sends the user looking for an entirely different problem.
+fn unreadable(e: &rusqlite::Error) -> bool {
+    matches!(
+        e,
+        rusqlite::Error::SqliteFailure(err, _)
+            if matches!(
+                err.code,
+                rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase
+            )
+    )
+}
+
+/// Verify a copy before anything is read out of it (#327).
+///
+/// A bare `fs::copy` of a live database can be a TORN database, and the bad tear is not the one that
+/// fails to open or fails to query — it is the one that parses and answers with FEWER ROWS, because
+/// every cutter that went missing is then reported `removed` and its feed rows go with it, silently,
+/// until somebody happens to re-sync. `integrity_check` is SQLite's own full verification and so a
+/// superset of the `quick_check` #327 named: the difference between them is the index-versus-table
+/// cross-check and the UNIQUE checks, and an index whose entries disagree with its table is exactly
+/// what a main file written without its journal looks like — with this module's own SELECTs joining
+/// through the `t_MakeraCutterList.cutterId` primary-key index, a `quick_check`-clean copy can still
+/// answer the wrong rows.
+///
+/// Both the pragma failing and the pragma reporting are refusals, worded the same way, because from
+/// here they are the same fact: this copy is not a database to import a catalogue from.
+fn verify_copy(conn: &rusqlite::Connection, source: &Path) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("PRAGMA integrity_check")
+        .map_err(|e| torn(source, e))?;
+    let problems: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(|e| torn(source, e))?
+        .collect::<rusqlite::Result<Vec<String>>>()
+        .map_err(|e| torn(source, e))?;
+    if problems.len() == 1 && problems[0].eq_ignore_ascii_case("ok") {
+        return Ok(());
+    }
+    let why = match problems.split_first() {
+        Some((first, [])) => first.clone(),
+        Some((first, rest)) => format!("{first}, and {} more", rest.len()),
+        None => "no result".to_string(),
+    };
+    Err(torn(source, why))
 }
 
 fn read_copy(copy: &Path, source: &Path) -> Result<Imported, String> {
@@ -367,12 +507,17 @@ fn read_copy(copy: &Path, source: &Path) -> Result<Imported, String> {
     )
     .map_err(|e| format!("{}: could not be opened: {e}", source.display()))?;
 
-    let mut stmt = conn.prepare(SELECT_CUTTERS).map_err(|e| {
-        format!(
+    let mut stmt = conn.prepare(SELECT_CUTTERS).map_err(|e| match unreadable(&e) {
+        // A copy the first query cannot even read is refused as damage, not as the wrong file
+        // (#327): the two need different things from the user, and only one of them is their mistake.
+        true => torn(source, e),
+        false => format!(
             "{}: this is not a Makera Studio library ({e})",
             source.display()
-        )
+        ),
     })?;
+    // Verified before a row is read from it (#327).
+    verify_copy(&conn, source)?;
     let rows = stmt
         .query_map([], Row::from_sql)
         .map_err(|e| format!("{}: {e}", source.display()))?;
@@ -416,15 +561,31 @@ fn read_copy(copy: &Path, source: &Path) -> Result<Imported, String> {
 
 /// The feed matrix (#310), in catalogue order.
 ///
-/// A row is served only when it is COMPLETE: a cutter id, a material name and all four numbers. The
-/// real install has none of these gaps, and the check is here because the client validates the
-/// document as one array — a single null would cost the entire feed tier, where dropping the row
-/// costs one number that no cutter can be given anyway. What was dropped is named in a note.
+/// A row is served only when it is COMPLETE AND USABLE: a cutter id, a material name, and four
+/// numbers that are each a positive finite number. The check is here because the client validates the
+/// document as one array AND every number in it as positive and finite (#325, #326) — a single null,
+/// a single `0`, or a single `inf` would cost the entire feed tier, where dropping the row costs one
+/// row that no cutter could be given anyway. What was dropped is named in a note.
+///
+/// A row that is merely ABSURD is served, not dropped: 32 of Makera's rows state 15 000 RPM on a
+/// 13 000 RPM spindle, which is a real vendor number for a real cutter, and `feedsFor` clamps it and
+/// says so. Positive-and-finite is the line drawn here, because it is the line the client's schema
+/// draws; what to do about a number the machine cannot run is the resolver's business, not the
+/// reader's.
+///
+/// A FAILED QUERY IS NOT AN EMPTY TABLE (#326). The two are told apart by asking what the error says,
+/// because they are not distinguishable by code — a missing table and a missing column are both
+/// `SQLITE_ERROR` — and the check is deliberately for the ONE table whose absence is legitimate.
 fn read_feeds(conn: &rusqlite::Connection, source: &Path) -> Result<(Vec<FeedRow>, Option<String>), String> {
-    // `t_MakeraCutterProperties` is absent from a database that never held feeds. That is not a
-    // failure to report: it is a catalogue with no starting numbers.
-    let Ok(mut stmt) = conn.prepare(SELECT_FEEDS) else {
-        return Ok((Vec::new(), None));
+    let mut stmt = match conn.prepare(SELECT_FEEDS) {
+        Ok(stmt) => stmt,
+        Err(e) if absent_feed_table(&e) => return Ok((Vec::new(), None)),
+        Err(e) => {
+            return Err(format!(
+                "{}: the feed matrix could not be read ({e})",
+                source.display()
+            ))
+        }
     };
     let rows = stmt
         .query_map([], |r| {
@@ -445,7 +606,16 @@ fn read_feeds(conn: &rusqlite::Connection, source: &Path) -> Result<(Vec<FeedRow
         let (cutter_id, material, rpm, feed, plunge_feed, step_down) =
             row.map_err(|e| format!("{}: {e}", source.display()))?;
         match (cutter_id, material, rpm, feed, plunge_feed, step_down) {
-            (Some(cutter_id), Some(material), Some(rpm), Some(feed), Some(plunge_feed), Some(step_down)) => {
+            // Every number POSITIVE AND FINITE (#325, #326): `num()` reads Studio's `0` as a
+            // perfectly good `0.0`, and it also reads the TEXT `inf` — Rust's `f64` parse accepts it
+            // — which is a number no cut can use and one serde_json would write as `null`. Servable
+            // is not the same question as sane: an absurd-but-positive row goes through (the doc
+            // above), and `feedsFor` decides what to do with it.
+            (Some(cutter_id), Some(material), Some(rpm), Some(feed), Some(plunge_feed), Some(step_down))
+                if [rpm, feed, plunge_feed, step_down]
+                    .iter()
+                    .all(|n| n.is_finite() && *n > 0.0) =>
+            {
                 feeds.push(FeedRow {
                     cutter_id,
                     material,
@@ -453,18 +623,38 @@ fn read_feeds(conn: &rusqlite::Connection, source: &Path) -> Result<(Vec<FeedRow
                     feed,
                     plunge_feed,
                     step_down,
-                })
+                });
             }
             _ => incomplete += 1,
         }
     }
     let note = (incomplete > 0).then(|| {
         format!(
-            "{incomplete} feed rows name no cutter or leave one of their four numbers empty: they \
-             are not served"
+            "{incomplete} feed rows name no cutter, leave one of their four numbers empty, or state \
+             a number that is not positive and finite: they are not served"
         )
     });
     Ok((feeds, note))
+}
+
+/// Is this prepare error the ONE benign case: `t_MakeraCutterProperties` simply not being in the
+/// database (#326)?
+///
+/// A catalogue that never held feeds is a catalogue, and `read_feeds` answers it with an empty matrix
+/// and no note. Everything else the query can fail on is a read that went wrong and must be said out
+/// loud — a renamed column, a torn copy, a `t_MaterialList` that is not there either.
+///
+/// THE MESSAGE IS THE DISCRIMINATOR, and that is a measured fact rather than a preference: SQLite
+/// reports "no such table" and "no such column" with the SAME code (`SQLITE_ERROR`, which rusqlite
+/// maps to `ErrorCode::Unknown`), so the code cannot tell the benign case from the dangerous one. The
+/// table is named in the match, so a missing JOIN table — which would empty the matrix with no note
+/// at all — is refused rather than swallowed.
+fn absent_feed_table(e: &rusqlite::Error) -> bool {
+    matches!(
+        e,
+        rusqlite::Error::SqliteFailure(_, Some(m))
+            if m.contains("no such table") && m.contains("t_MakeraCutterProperties")
+    )
 }
 
 /// The one SELECT (#308). A LEFT JOIN for the group's name and one more for its parent's: the
@@ -629,7 +819,7 @@ impl Row {
                 Some(g) => format!("Makera catalogue {g}"),
                 None => format!("Makera catalogue {}", self.cutter_id),
             },
-            content_hash: crate::house::fnv1a_hex(self.canonical().as_bytes()),
+            content_hash: crate::etag::fnv1a_hex(self.canonical().as_bytes()),
             extras: CatalogueExtras {
                 cutter_id: self.cutter_id.clone(),
                 category_id: self.category.unwrap_or(-1),
@@ -966,6 +1156,13 @@ mod tests {
             .unwrap_or_else(|| panic!("{name} was not imported"))
     }
 
+    /// A SQLite sidecar beside `db` — `makera_library.db-journal`, `…-wal`, `…-shm`.
+    fn sidecar_of(db: &Path, suffix: &str) -> PathBuf {
+        let mut os = db.as_os_str().to_os_string();
+        os.push(suffix);
+        PathBuf::from(os)
+    }
+
     #[test]
     fn every_category_maps_to_the_geometry_the_cam_view_uses() {
         let (_dir, path) = a_library();
@@ -1142,8 +1339,11 @@ mod tests {
         let before = std::fs::read(&path).unwrap();
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
 
-        read_all(&path).unwrap();
-        read_all(&path).unwrap();
+        // The scratch copy is made in this test's OWN directory (#327). It is the same directory the
+        // vendor's fixture lives in, so the listing below reports the copy and any `-journal`, `-wal`
+        // or `-shm` beside it as well: one assertion, no race with the tests reading in parallel.
+        read_all_in(&path, dir.path()).unwrap();
+        read_all_in(&path, dir.path()).unwrap();
 
         assert_eq!(std::fs::read(&path).unwrap(), before);
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), modified);
@@ -1153,13 +1353,6 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
             .collect();
         assert_eq!(names, vec!["makera_library.db".to_string()], "{names:?}");
-        // And the scratch copy is gone: one temp file per read, none left behind.
-        let leftovers: Vec<String> = std::fs::read_dir(std::env::temp_dir())
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
-            .filter(|n| n.starts_with(&format!("casemaker-studio-{}-", std::process::id())))
-            .collect();
-        assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 
     #[test]
@@ -1176,6 +1369,15 @@ mod tests {
         let missing = dir.path().join("nowhere.db");
         let err = read_all(&missing).unwrap_err();
         assert!(err.contains("is not there"), "{err}");
+
+        // A file that is not a database at all gets a DIFFERENT answer (#327): a valid database that
+        // has never heard of Makera is the wrong file, and a file whose pages cannot be read at all is
+        // damage. Telling a user the second thing is the first sends them looking for the wrong fix.
+        let garbage = dir.path().join("a-sentence.db");
+        std::fs::write(&garbage, b"this is not a database, it is a sentence").unwrap();
+        let err = read_all(&garbage).unwrap_err();
+        assert!(err.contains("did not verify"), "{err}");
+        assert!(!err.contains("not a Makera Studio library"), "{err}");
     }
 
     #[test]
@@ -1227,6 +1429,50 @@ mod tests {
         let change = diff(&first, &second);
         assert_eq!(change.unchanged, 1);
         assert_eq!(change.changed, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_library_with_a_pending_write_beside_it_is_refused_rather_than_copied() {
+        // #327. Rollback mode holds the ORIGINAL pages in `-journal` while the main file already
+        // carries the new ones, and WAL holds commits in `-wal` until a checkpoint — so a copy of the
+        // main file ALONE can be a database missing a transaction, and the cutters it holds arrive as
+        // `removed`.
+        let (_dir, path) = a_library();
+        let journal = sidecar_of(&path, "-journal");
+        std::fs::write(&journal, b"the pages this transaction replaced").unwrap();
+
+        let err = read_all(&path).unwrap_err();
+        assert!(err.contains("makera_library.db-journal"), "{err}");
+        assert!(err.contains("reported removed"), "the consequence must be stated: {err}");
+
+        // An EMPTY sidecar is the at-rest state rather than a pending write: `journal_mode=PERSIST`
+        // leaves an empty journal behind after every commit, and a checkpointed `-wal` can be empty
+        // too. Size is the test, so a Studio that leaves files about still syncs.
+        std::fs::write(&journal, b"").unwrap();
+        assert_eq!(read_all(&path).unwrap().entries.len(), 8);
+
+        std::fs::remove_file(&journal).unwrap();
+        let wal = sidecar_of(&path, "-wal");
+        std::fs::write(&wal, b"").unwrap();
+        assert_eq!(read_all(&path).unwrap().entries.len(), 8, "a checkpointed WAL is not a pending write");
+
+        std::fs::write(&wal, b"frames").unwrap();
+        let err = read_all(&path).unwrap_err();
+        assert!(err.contains("makera_library.db-wal"), "{err}");
+    }
+
+    #[test]
+    fn a_torn_copy_is_refused_rather_than_read_short() {
+        // The half the sidecar check cannot see: the copy is short or malformed for a reason that is
+        // not a sidecar — a write landed mid-copy, or the disk truncated it. The outcome to refuse is
+        // the one that still parses, because that is the one that reports cutters as `removed`.
+        let (_dir, path) = a_library();
+        let full = std::fs::read(&path).unwrap();
+        std::fs::write(&path, &full[..full.len() / 2]).unwrap();
+
+        let err = read_all(&path).unwrap_err();
+        assert!(err.contains("did not verify"), "{err}");
+        assert!(err.contains("partial catalogue"), "{err}");
     }
 
     #[test]
@@ -1357,6 +1603,135 @@ mod tests {
         assert!(imported.feeds.is_empty(), "{:?}", imported.feeds);
         assert!(imported.notes[0].contains("3 feed rows"), "{}", imported.notes[0]);
         assert_eq!(imported.entries.len(), 1);
+    }
+
+    #[test]
+    fn a_row_that_states_a_number_no_cut_can_use_is_dropped_and_named() {
+        // #325. Studio writes a `0` into a numeric column it never filled, and `num()` reads it as a
+        // perfectly good `0.0` — so the row would be served, and the client's schema (positive, not
+        // merely finite) would refuse the WHOLE array over it. A zero or a negative is therefore not
+        // served, exactly like an empty cell.
+        let (_dir, path, _g_id) = a_library_with_feeds();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE t_MakeraCutterProperties SET feedRate = 0 WHERE propertiesId = 'prop-1'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE t_MakeraCutterProperties SET stepDown = -0.4 WHERE propertiesId = 'prop-2'",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let imported = read_all(&path).unwrap();
+        assert_eq!(imported.feeds.len(), 1, "the rows with usable numbers are served");
+        assert_eq!(imported.feeds[0].material, "6061 Aluminum");
+        assert_eq!(imported.notes.len(), 1, "{:?}", imported.notes);
+        assert!(imported.notes[0].contains("2 feed rows"), "{}", imported.notes[0]);
+        assert!(
+            imported.notes[0].contains("not positive"),
+            "the note must say WHICH rule dropped them: {}",
+            imported.notes[0]
+        );
+
+        // The other side of the line: an ABSURD-but-positive number is served, not dropped. 32 of
+        // Makera's own rows state 15 000 RPM on a 13 000 RPM spindle — a real vendor number for a
+        // real cutter — and `feedsFor` clamps it and says so.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE t_MakeraCutterProperties SET spindleSpeed = 24000 WHERE propertiesId = 'prop-3'",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let imported = read_all(&path).unwrap();
+        let served: Vec<f64> = imported
+            .feeds
+            .iter()
+            .filter(|r| r.material == "6061 Aluminum")
+            .map(|r| r.rpm)
+            .collect();
+        assert_eq!(served, vec![24000.0], "{:?}", imported.feeds);
+
+        // And a NON-FINITE number, which is the same rule (#326) reached by another door: `num()`
+        // reads TEXT, and Rust's `f64` parse accepts "inf" — a number no cut can use, and one
+        // serde_json would write as `null`, failing the client's parse of the whole document.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE t_MakeraCutterProperties SET stepDown = ?1 WHERE propertiesId = 'prop-3'",
+            rusqlite::params![f64::INFINITY],
+        )
+        .unwrap();
+        drop(conn);
+
+        let imported = read_all(&path).unwrap();
+        assert!(
+            imported.feeds.is_empty(),
+            "a non-finite number is not servable: {:?}",
+            imported.feeds
+        );
+        assert!(
+            imported.notes[0].contains("not positive and finite"),
+            "{}",
+            imported.notes[0]
+        );
+    }
+
+    #[test]
+    fn a_database_without_the_feeds_table_is_a_catalogue_with_no_starting_numbers() {
+        // The case the swallow was there for, kept benign (#326): a Studio build that never held
+        // feeds has no `t_MakeraCutterProperties`, and that is an empty matrix with NO note. A note
+        // would be a problem report about a catalogue that is exactly what it says it is.
+        let dir = TempDir::new().unwrap();
+        let path = temp_db(dir.path());
+        let conn = db(&path);
+        put(&conn, &Cutter::new("3.175*12mm Flat End(Metal)", 1));
+        conn.execute("DROP TABLE t_MakeraCutterProperties", []).unwrap();
+        drop(conn);
+
+        let imported = read_all(&path).unwrap();
+        assert!(imported.feeds.is_empty());
+        assert!(imported.notes.is_empty(), "{:?}", imported.notes);
+        assert_eq!(imported.entries.len(), 1, "the tool tier is unaffected");
+    }
+
+    #[test]
+    fn a_feeds_query_that_fails_any_other_way_is_refused_rather_than_emptied() {
+        // #326. `let Ok(stmt) = conn.prepare(…) else { empty }` swallowed EVERY prepare error, so a
+        // Studio update that renamed one column made the next sync SUCCEED, write `feeds: []` over
+        // every starting number and report nothing at all — the user's matrix gone, silently, with
+        // the note list empty. Only the absence of the table is benign.
+        let (_dir, path, _g_id) = a_library_with_feeds();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+
+        // A renamed column: the query names `p.plungeFeedRate`, and the column is gone.
+        conn.execute(
+            "ALTER TABLE t_MakeraCutterProperties RENAME COLUMN plungeFeedRate TO plungeFeed_new",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let err = read_all(&path).unwrap_err();
+        assert!(err.contains("feed matrix"), "{err}");
+        assert!(err.contains("plungeFeedRate"), "the column must be named: {err}");
+
+        // And the other silent one: a join table that is not there either. Nothing about that is a
+        // catalogue without feeds — the rows exist and cannot be named. The table is named in the
+        // check, so this is refused rather than passed off as an empty matrix.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "ALTER TABLE t_MakeraCutterProperties RENAME COLUMN plungeFeed_new TO plungeFeedRate",
+            [],
+        )
+        .unwrap();
+        conn.execute("DROP TABLE t_MaterialList", []).unwrap();
+        drop(conn);
+        let err = read_all(&path).unwrap_err();
+        assert!(err.contains("feed matrix"), "{err}");
+        assert!(err.contains("t_MaterialList"), "{err}");
     }
 
     #[test]
