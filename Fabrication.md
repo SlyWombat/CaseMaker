@@ -1225,7 +1225,15 @@ because a printed code retyped in lowercase names the same box, and the service 
 duplicate anyway (`InventorySchema`). Registration is a POST of an `owned` row whose `Tool` is
 **copied** — the user owns the cutter whether or not Makera still lists it — with Makera's `id`
 **kept** (it is the definition's identity) and the catalogue row named in `origin: {id, syncedAt}`.
-The clone rule is untouched here; `cloneOf` keeps `tool.id` too, which is flagged on #311/#316.
+An **owned** row keeps Makera's `id` deliberately — it is that definition's identity, and `origin`
+names the row it was registered from. A **clone** does not, and that asymmetry is the point
+(`selection.ts::cloneOf`, #212's "Do not let a clone inherit the vendor id"): an owned row is the
+vendor's cutter held in a hand, so the id is still true of it, while a clone is a definition the user
+is about to change. `Tool.id` is what `post/z1.ts` writes into the `.nc` header and what
+`simSetupStore.matchRegistryTool` matches a header back on **first**, so a clone carrying it would
+write the id of the row it came from and reopen as that unedited row. `id` and `number` are the two
+fields a clone does not copy; pinned in `manageMode.spec.tsx` and in `qa-311-manage.mjs`.
+(#316 is the separate, still-open question of a header matched on shape + diameter alone.)
 
 **Two defects found while verifying, both fixed and both pinned.**
 *Every write unmounted the pane it was written from*: `toolRegistryStore.refresh()` set

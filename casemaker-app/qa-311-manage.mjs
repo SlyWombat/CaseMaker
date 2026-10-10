@@ -334,6 +334,11 @@ const svc = makeService();
     Boolean(clone) && clone.body.key.startsWith('user:') && clone.body.key !== USER_KEY, clone?.body.key);
   check('[1] the clone keeps the numbers it was cloned from',
     clone?.body.tool.tipDiameter === 2 && clone?.body.tool.shoulderLength === null);
+  // The one field NOT copied: the `.nc` header writes `Tool.id` and a header is matched back id-first,
+  // so a clone carrying Makera's id would reopen as the row it came from (#212's "Do not").
+  check('[1] and does NOT inherit Makera’s id or cutter number',
+    clone?.body.tool.id === null && clone?.body.tool.number === null,
+    JSON.stringify({ id: clone?.body.tool.id, number: clone?.body.tool.number }));
   check('[1] the clone says where it came from, in prose the row can show',
     /cloned from Makera catalogue/.test(clone?.body.provenance ?? ''), clone?.body.provenance);
   const notice = (await page.getByTestId('manage-notice').innerText()).replace(/\s+/g, ' ');

@@ -47,6 +47,15 @@ export function useSelectedItem(): InventoryItem | null {
  * rows (`house.rs`). The tool is copied field for field — a clone that improved a number the source
  * never stated would be inventing a measurement, and the whole point of the Yours tier is that the
  * user changes it ON PURPOSE.
+ *
+ * **Makera's `id` and `number` are dropped, and that is the one field that is not copied** (#212's
+ * "Do not let a clone inherit the vendor id"). `Tool.id` IS the vendor's `g_ID`, and two things read
+ * it: `post/z1.ts` writes it into the `.nc` header, and `simSetupStore.matchRegistryTool` matches a
+ * header back to a registry row **id first**. A clone that kept it would therefore write the id of
+ * the catalogue row it was cloned from — so an edited cutter would reopen as the unedited original,
+ * which is exactly the silent substitution the clone exists to prevent. A `user:` definition is not
+ * a Makera row, so it has no vendor id and no vendor cutter number: both are `null`, which is the
+ * honest value rather than a borrowed one.
  */
 export function cloneOf(entry: ToolLibraryEntry, today: string): ToolLibraryEntry {
   const tier = tierOf(entry.key);
@@ -61,7 +70,7 @@ export function cloneOf(entry: ToolLibraryEntry, today: string): ToolLibraryEntr
   const day = formatDay(today) ?? today;
   return {
     key: `user:${newId()}`,
-    tool: { ...entry.tool },
+    tool: { ...entry.tool, id: null, number: null },
     provenance: `cloned from ${from} “${entry.tool.name}” on ${day}`,
   };
 }

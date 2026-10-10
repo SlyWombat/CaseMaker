@@ -250,6 +250,52 @@ describe('#311 — the detail rail', () => {
   });
 });
 
+describe('#311 — cloning a catalogue row', () => {
+  /** The service's writes, as the fake saw them: `[method, path, body]`. */
+  let calls: Array<{ method: string; path: string; body: unknown }>;
+
+  beforeEach(async () => {
+    calls = [];
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        call: async (method, path, body) => {
+          calls.push({ method, path, body });
+          return { kind: 'ok', text: '' };
+        },
+      }),
+    );
+    await useToolRegistryStore.getState().refresh();
+    useManageModeStore.getState().openManage();
+  });
+
+  it('is a new `user:` row that does not inherit Makera’s id or cutter number', async () => {
+    render(<ManageMode />);
+    fireEvent.click(screen.getByTestId(`manage-tools-row-${CAT.key}`));
+    fireEvent.click(screen.getByTestId('manage-clone-here'));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.method).toBe('POST');
+    expect(calls[0]!.path).toBe('/tools');
+    const clone = calls[0]!.body as ToolLibraryEntry;
+
+    // A separate definition the catalogue does not own, keyed by the client.
+    expect(clone.key.startsWith('user:')).toBe(true);
+    expect(clone.key).not.toBe(CAT.key);
+    // The `.nc` header writes `Tool.id` and `simSetupStore.matchRegistryTool` matches a header back
+    // id-FIRST, so a clone that kept the vendor id would reopen as the row it was cloned from —
+    // an edited cutter reading as the unedited original (#212's "Do not let a clone inherit the
+    // vendor id"). A user definition has no vendor id and no vendor cutter number: null is the
+    // honest value rather than a borrowed one.
+    expect(clone.tool.id).toBeNull();
+    expect(clone.tool.number).toBeNull();
+    // Everything the source DID state is copied, so the clone is not an invention.
+    expect(clone.tool.name).toBe(CAT.tool.name);
+    expect(clone.tool.tipDiameter).toBe(CAT.tool.tipDiameter);
+    expect(clone.provenance).toContain('Makera catalogue');
+  });
+});
+
 describe('#309 — the register frame and its three doors', () => {
   /** The service's writes, as the fake saw them: `[method, path, body]`. */
   let calls: Array<{ method: string; path: string; body: unknown }>;
