@@ -18,6 +18,7 @@ import { DocsModal } from '@/components/docs/DocsModal';
 import { SettingsMenu } from '@/components/layout/SettingsMenu';
 import { PartsMenu } from '@/components/layout/PartsMenu';
 import { ExportModal } from '@/components/panels/ExportModal';
+import { useManageModeStore } from '@/store/manageModeStore';
 
 const FORMAT_LABEL: Record<string, string> = {
   'stl-binary': 'STL (binary)',
@@ -84,6 +85,11 @@ export function Toolbar() {
   // in place. Reset whenever the user picks "Save as…" or loads a new file.
   const fileHandleRef = useRef<ProjectFileHandle>(null);
   const fsaAvailable = fileSystemAccessAvailable();
+  // #311 — the house surface. Entered from here because the toolbar is the one chrome the app draws
+  // in every mode, including with no project open — which is exactly when someone sets up cutters.
+  const manageOpen = useManageModeStore((s) => s.open);
+  const openManage = useManageModeStore((s) => s.openManage);
+  const closeManage = useManageModeStore((s) => s.closeManage);
 
   // L-key shortcut for lid show/hide is now part of the view-mode picker
   // (#91 — Shift+1..4 cycles Complete / Exploded / Base / Lid). The
@@ -142,11 +148,15 @@ export function Toolbar() {
       clearHistory();
       fileHandleRef.current = handle;
       setError(null);
+      // #311 — a project was opened: the Manage surface is left, so what was just loaded is what is
+      // drawn. Both entry points into a project do this (`onFileChange` is the other), because the
+      // mode is about the house and the load is about the project.
+      closeManage();
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [fsaAvailable, setProject]);
+  }, [fsaAvailable, setProject, closeManage]);
 
   const onFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -159,20 +169,26 @@ export function Toolbar() {
         // Fallback path: no handle, so subsequent Save behaves like Save As.
         fileHandleRef.current = null;
         setError(null);
+        // #311 — same as the picker path: opening a project leaves the Manage surface.
+        closeManage();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (fileInput.current) fileInput.current.value = '';
       }
     },
-    [setProject],
+    [setProject, closeManage],
   );
 
   const onNew = useCallback(() => {
     if (!window.confirm('Start a new project? Unsaved changes will be lost.')) return;
+    // #311 — New returns to the board picker, so the Manage surface has to come down first: left
+    // open on top of the overlay it would hide the very thing New just asked for, and the button
+    // would look like it did nothing.
+    closeManage();
     showWelcome();
     clearHistory();
-  }, [showWelcome]);
+  }, [showWelcome, closeManage]);
 
   // Open the multi-part export modal — per-part Save buttons + thumbnails
   // + a Save All footer that lays everything flat for printing. The old
@@ -195,6 +211,26 @@ export function Toolbar() {
       ✨ New
     </button>
   );
+  // #311 — the Manage toggle, and the reason it sits beside New: both leave the project behind and
+  // go somewhere that is not the viewport. Gated on `__FEATURE_SIM__` with the rest of the CNC UI
+  // (the web deployment switches the house off wholesale), and `aria-pressed` is how the toolbar
+  // shows it is up — the app's toolbar buttons carry no class of their own, so the state has to hang
+  // off an attribute that means exactly this (`.toolbar-buttons button[aria-pressed="true"]`).
+  const manageBtn = __FEATURE_SIM__ ? (
+    <button
+      type="button"
+      aria-pressed={manageOpen}
+      data-testid="manage-open"
+      title={
+        manageOpen
+          ? 'Leave the house — back to what you had open'
+          : 'The house and its machines — your cutters, the Makera catalogue, and what the bench answered (#311)'
+      }
+      onClick={() => (manageOpen ? closeManage() : openManage())}
+    >
+      🧰 Manage
+    </button>
+  ) : null;
   const undoBtn = (
     <button onClick={undoProject} data-testid="undo-btn" title="Undo (Ctrl+Z)">
       ↶ Undo
@@ -288,13 +324,14 @@ export function Toolbar() {
               aria-label="More actions"
               aria-haspopup="menu"
               aria-expanded={overflowOpen}
-              title="More actions — New, Save as, Load, Export, Docs, settings"
+              title="More actions — New, Manage, Save as, Load, Export, Docs, settings"
             >
               ⋯
             </button>
             {overflowOpen && (
               <div className="toolbar-overflow__panel" role="menu" data-testid="toolbar-overflow-panel">
                 {newBtn}
+                {manageBtn}
                 {saveAsBtn}
                 {loadBtn}
                 {exportBtn}
@@ -320,6 +357,7 @@ export function Toolbar() {
       ) : (
         <>
           {newBtn}
+          {manageBtn}
           {undoBtn}
           {redoBtn}
           {saveBtn}

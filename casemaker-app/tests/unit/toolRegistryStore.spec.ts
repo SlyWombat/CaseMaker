@@ -9,11 +9,14 @@ import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import {
   setHouseClientLoader,
   HOUSE_SCHEMA_VERSION,
+  type HouseCall,
   type HouseClient,
   type HouseFeeds,
   type HouseHealth,
+  type HouseInventory,
   type HouseProbe,
   type HouseTools,
+  type InventoryItem,
 } from '@/platform/houseClient';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 
@@ -58,11 +61,25 @@ const FEED_ROW: FeedCatalogueRow = {
   stepDown: 1.2,
 };
 
+/** One physical cutter, for the inventory document (#309). */
+const ITEM: InventoryItem = {
+  id: '1a2b3c4d5e',
+  tool: USER.tool,
+  origin: null,
+  quantity: 2,
+  codes: [{ symbology: 'qr', value: 'C1-BIT-FLAT-2-0' }],
+  addedAt: '2026-01-02T03:04:05.000Z',
+  notes: null,
+};
+
 /** A fake client that records what it was asked, so the store's calls can be asserted. */
 function fakeClient(opts: {
   probe: HouseProbe;
   tools?: (etag: string | null) => HouseTools;
   feeds?: (etag: string | null) => HouseFeeds;
+  inventory?: (etag: string | null) => HouseInventory;
+  /** Never called by a read; a write test brings its own. Present so the fake is a real `HouseClient`. */
+  call?: (method: string, path: string, body?: unknown) => HouseCall;
   log?: string[];
 }): HouseClient {
   return {
@@ -78,6 +95,15 @@ function fakeClient(opts: {
       opts.log?.push(`feeds:${etag ?? '-'}`);
       // The default is a service that answers, with no catalogue rows: the fresh-machine case.
       return opts.feeds ? opts.feeds(etag) : { kind: 'ok', etag: '"f1"', rows: [] };
+    },
+    inventory: async (etag) => {
+      opts.log?.push(`inventory:${etag ?? '-'}`);
+      // The default is a service that answers, with nothing registered yet.
+      return opts.inventory ? opts.inventory(etag) : { kind: 'ok', etag: '"i1"', items: [] };
+    },
+    call: async (method, path, body) => {
+      opts.log?.push(`call:${method} ${path}`);
+      return opts.call ? opts.call(method, path, body) : { kind: 'ok', text: '' };
     },
   };
 }
@@ -129,7 +155,18 @@ describe('refresh against a house service', () => {
     expect(state().entries).toEqual([USER]);
 
     await state().refresh();
-    expect(log).toEqual(['probe', 'tools:-', 'feeds:-', 'probe', 'tools:"e1"', 'feeds:"f1"']);
+    // One probe, then the three documents, each with the validator the last read returned: the
+    // order is the dependency order (tools → feeds → inventory), and the second pass is all 304s.
+    expect(log).toEqual([
+      'probe',
+      'tools:-',
+      'feeds:-',
+      'inventory:-',
+      'probe',
+      'tools:"e1"',
+      'feeds:"f1"',
+      'inventory:"i1"',
+    ]);
     expect(state().status).toBe('present');
     expect(state().entries).toEqual([USER]);
     expect(getTools().map((e) => e.key)).toContain('user:1a2b3c4d5e');
@@ -202,6 +239,83 @@ describe('the feed catalogue (#310)', () => {
     await state().refresh();
     expect(feedCatalogueRows()).toEqual([FEED_ROW]);
     expect(state().feedCount).toBe(1);
+  });
+});
+
+describe('the inventory (#309)', () => {
+  it('keeps the items and puts their inv: entries in the registry', async () => {
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        inventory: () => ({ kind: 'ok', etag: '"i1"', items: [ITEM] }),
+      }),
+    );
+    await state().refresh();
+
+    // The documents are here, because the panel's Qty/Codes columns are about the possession.
+    expect(state().items).toEqual([ITEM]);
+    expect(state().inventoryEtag).toBe('"i1"');
+    expect(state().inventoryError).toBeNull();
+    // And the resolver sees the cutter, under the key a job names it by.
+    expect(getTools().map((e) => e.key)).toContain('inv:1a2b3c4d5e');
+    expect(getTools().find((e) => e.key === 'inv:1a2b3c4d5e')?.tool.name).toBe(USER.tool.name);
+  });
+
+  it('an inventory the service could not read is dropped, with the reason, and the registry stands', async () => {
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        inventory: () => ({ kind: 'absent', reason: 'GET /api/v1/inventory answered 500' }),
+      }),
+    );
+    await state().refresh();
+
+    expect(state().status).toBe('present');
+    expect(state().error).toBeNull();
+    expect(state().inventoryError).toContain('500');
+    expect(state().items).toEqual([]);
+    // The tool tier is untouched: one document failing does not take the other with it.
+    expect(getTools().map((e) => e.key)).toContain('user:1a2b3c4d5e');
+    expect(getTools().some((e) => e.key.startsWith('inv:'))).toBe(false);
+  });
+
+  it('losing the service drops the inventory with it', async () => {
+    let present = true;
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: present
+          ? { kind: 'present', health: HEALTH, base: '' }
+          : { kind: 'absent', reason: 'the page answered with text/html, not the house service' },
+        inventory: () => ({ kind: 'ok', etag: '"i1"', items: [ITEM] }),
+      }),
+    );
+    await state().refresh();
+    expect(state().items).toEqual([ITEM]);
+
+    present = false;
+    await state().refresh();
+    expect(state().items).toEqual([]);
+    expect(state().inventoryEtag).toBeNull();
+    expect(getTools().some((e) => e.key.startsWith('inv:'))).toBe(false);
+  });
+
+  it('a 304 keeps the items and the entries already loaded', async () => {
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        tools: (etag) => (etag ? { kind: 'unchanged' } : { kind: 'ok', etag: '"e1"', entries: [USER] }),
+        inventory: (etag) =>
+          etag ? { kind: 'unchanged' } : { kind: 'ok', etag: '"i1"', items: [ITEM] },
+      }),
+    );
+    await state().refresh();
+    const first = getTools();
+    await state().refresh();
+
+    expect(state().items).toEqual([ITEM]);
+    expect(state().inventoryEtag).toBe('"i1"');
+    // The snapshot itself is untouched by the 304 — every picker re-renders from this identity.
+    expect(getTools()).toBe(first);
   });
 });
 

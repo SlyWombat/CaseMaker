@@ -32,6 +32,7 @@ import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
 import { getTools, resolveTool } from '@/engine/cnc/toolRegistry';
 import { useToolRegistryStore, type HouseStatus } from '@/store/toolRegistryStore';
+import { useManageModeStore } from '@/store/manageModeStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { stubSetup, Z1 } from '@/engine/cnc';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -171,6 +172,13 @@ export interface CaseMakerTestApi {
     houseKeys: string[];
     registryKeys: string[];
   };
+  /**
+   * #311 — enter and leave the Manage surface from a script. The toolbar button is the way in for a
+   * person, and a spec drives that button too; this is for the cases where the button is not the
+   * point (the compact layout hides it behind ⋯) and for getting to one scope in a single call.
+   */
+  openManage(scope?: 'tools' | 'machines'): void;
+  closeManage(): void;
 }
 
 /**
@@ -470,6 +478,12 @@ export function installCaseMakerTestApi(): void {
         houseKeys: s.entries.map((e) => e.key),
         registryKeys: getTools().map((e) => e.key),
       };
+    },
+    openManage(scope) {
+      useManageModeStore.getState().openManage(scope);
+    },
+    closeManage() {
+      useManageModeStore.getState().closeManage();
     },
   };
 

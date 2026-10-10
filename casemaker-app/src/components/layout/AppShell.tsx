@@ -8,9 +8,11 @@ import { WelcomeOverlay } from '../welcome/WelcomeOverlay';
 import { StartWizard } from '../welcome/StartWizard';
 import { ContextPanel } from './ContextPanel';
 import { Viewport } from '@/components/viewport/Viewport';
+import { ManageMode } from '@/components/manage/ManageMode';
 import { useRebuildOnProjectChange } from '@/hooks/useRebuildOnProjectChange';
 import { undoProject, redoProject, useProjectStore } from '@/store/projectStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
+import { useManageModeStore } from '@/store/manageModeStore';
 
 function useUndoRedoShortcuts(): void {
   useEffect(() => {
@@ -37,6 +39,15 @@ export function AppShell() {
   // #280 — the wizard mounts HERE, not inside the welcome overlay: its step 2 creates the project,
   // which flips `welcomeMode` off and unmounts the overlay the wizard was launched from.
   const wizardOpen = useStartWizardStore((s) => s.open);
+  // #311 — the Manage surface is a THIRD mode beside the project shell and the welcome overlay. It
+  // comes first because it is the one surface that has to be reachable with nothing else open, and
+  // it does not disturb either of the other two: `welcomeMode` and the project are left alone, so
+  // closing it puts the user back exactly where they were.
+  //
+  // Gated on `__FEATURE_SIM__` with the rest of the CNC UI: the house is a CNC notion and the web
+  // deployment switches that off wholesale (`Sidebar`, `docs/index.ts`).
+  const manageRequested = useManageModeStore((s) => s.open);
+  const manageOpen = __FEATURE_SIM__ && manageRequested;
   // Issue #59 — board visualization cycle removed; no fallback banner needed.
   return (
     <div className="app-shell">
@@ -49,7 +60,9 @@ export function AppShell() {
       <main className="app-main">
         {/* Welcome mode owns the full main area — the board-picker catalog
             needs the width; sidebar/context panels are project UI anyway. */}
-        {welcomeMode ? (
+        {manageOpen ? (
+          <ManageMode />
+        ) : welcomeMode ? (
           <WelcomeOverlay />
         ) : (
           <>

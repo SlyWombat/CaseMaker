@@ -432,27 +432,9 @@ body, html, #root {
   margin-top: 10px;
   font-size: 11px;
 }
-/* Issue #247 — "my machine" export/import block. */
-.settings-menu .settings-section {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid #2a3340;
-}
-.settings-menu .settings-section h4 {
-  margin: 0 0 4px 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: #e5e7eb;
-}
-.settings-menu .settings-row-buttons {
-  grid-template-columns: 1fr 1fr;
-}
-.settings-menu .settings-transfer-ok {
-  color: #7fd6a0;
-}
-.settings-menu .settings-transfer-error {
-  color: #ff8888;
-}
+/* The #247 "my machine" export/import block lived here. #311 moved it, with its markup, to the
+   Machines pane of the Manage surface — where the machine it describes is. Nothing else used these
+   selectors, so they went with it rather than lingering as rules for a component that is gone. */
 
 .pcb-grid {
   display: grid;
@@ -1925,4 +1907,825 @@ button:disabled {
   color: var(--cm-color-on-surface-muted);
   text-transform: uppercase;
   text-align: center;
+}
+
+/* --- Manage mode (#311, tracking #212) -------------------------------------
+   A third mode beside the project shell and the welcome overlay: the house's
+   tools and the machines, reached from the toolbar with no project open.
+
+   The design source is the approved mockup (docs/assets/cnc-mockup.html, G1-G4),
+   and these are its class names. Where the mockup used one of its own palette
+   variables the app already has a token, the token is used; the handful it had
+   no token for (rail buttons, control wells, the card well, the hairline
+   between rows) are declared here as `--m-*` locals on `.manage` rather than
+   added to tokens.css, because they belong to this one surface.
+
+   Everything generic is scoped under `.manage`. The app's stylesheet has no
+   `.btn`, `.tag`, `.chip`, `.hint` or `.panel-head` of its own, so these are new
+   names rather than overrides — scoping them keeps them from ever becoming
+   overrides if one is added later. */
+
+.manage {
+  --m-rail-btn: #1a1f25;
+  --m-rail-border: #2a2f36;
+  --m-rail-active: #243042;
+  --m-rail-active-border: #3a5a7a;
+  --m-rail-text: #d1d5db;
+  --m-control-bg: #14181c;
+  --m-control-text: #e6e8eb;
+  --m-card-bg: #161a20;
+  --m-hairline: #20262e;
+
+  /* The mode replaces all three columns of `.app-main` (rail / canvas / context
+     rail), so it spans the grid rather than landing in the 320px first column. */
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 220px 1fr 360px;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--cm-color-surface);
+}
+
+/* --- the scopes rail ------------------------------------------------------ */
+.manage .mrail {
+  background: var(--cm-color-surface-container-low);
+  border-right: var(--cm-border-1);
+  padding: var(--cm-space-2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.manage .mrail .nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  background: var(--m-rail-btn);
+  border: 1px solid var(--m-rail-border);
+  border-radius: var(--cm-radius-sm);
+  color: var(--m-rail-text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.manage .mrail .nav--active {
+  background: var(--m-rail-active);
+  border-color: var(--m-rail-active-border);
+  color: #cfe;
+  font-weight: 600;
+}
+.manage .mrail .nav--later {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.manage .nav__icon {
+  font-size: 16px;
+  width: 18px;
+  text-align: center;
+  flex: none;
+}
+.manage .nav__count {
+  margin-left: auto;
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  color: var(--cm-color-on-surface-muted);
+}
+.manage .nav em {
+  margin-left: auto;
+  font-style: normal;
+  font-family: var(--cm-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cm-color-on-surface-muted);
+}
+.manage .nav__divider {
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--cm-color-on-surface-muted);
+  margin: 12px 0 8px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.manage .nav__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--cm-color-outline-variant);
+  opacity: 0.7;
+}
+.manage .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: auto;
+  flex: none;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+}
+.manage .dot--ok {
+  background: var(--cm-color-secondary);
+}
+.manage .dot--off {
+  background: #5b6472;
+}
+.manage .dot--warn {
+  background: var(--cm-color-tertiary);
+}
+.manage .mrail__foot {
+  margin-top: auto;
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  color: var(--cm-color-on-surface-muted);
+  line-height: 1.5;
+  padding: 6px 4px 0;
+  border-top: 1px solid var(--m-rail-border);
+}
+.manage .mrail__foot b {
+  color: var(--cm-color-secondary);
+  font-weight: 400;
+}
+
+/* --- the main pane -------------------------------------------------------- */
+.manage .mmain {
+  padding: 14px 18px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--cm-color-surface);
+}
+.manage .mhead {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+.manage .mhead h3 {
+  margin: 0 0 3px;
+  font-size: 17px;
+  color: var(--cm-color-on-surface);
+}
+.manage .mhead p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--cm-color-on-surface-muted);
+  max-width: 620px;
+  line-height: 1.45;
+}
+.manage .mhead .btn-row {
+  margin: 0 0 0 auto;
+  flex: none;
+}
+.manage .mscroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* --- buttons and fields, this surface's own ------------------------------- */
+.manage .btn {
+  background: var(--m-control-bg);
+  color: var(--m-control-text);
+  border: 1px solid var(--m-rail-border);
+  padding: 4px 10px;
+  border-radius: var(--cm-radius-sm);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.manage .btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--cm-color-on-surface-variant);
+}
+.manage .btn--ghost:hover {
+  border-color: var(--m-rail-border);
+}
+.manage .btn--primary {
+  background: var(--cm-color-primary-container);
+  border-color: transparent;
+  color: var(--cm-color-on-primary-container);
+  font-weight: 600;
+}
+.manage .btn--danger {
+  color: #f0b4ad;
+  border-color: #7a2828;
+  background: #2a1416;
+}
+.manage .btn--sm {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.manage .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.manage .btn-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.manage .row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.manage .row--wrap {
+  flex-wrap: wrap;
+}
+.manage .spacer {
+  margin-left: auto;
+}
+.manage .fld {
+  background: var(--m-control-bg);
+  color: var(--m-control-text);
+  border: 1px solid var(--m-rail-border);
+  border-radius: var(--cm-radius-sm);
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 11px;
+  min-width: 0;
+  width: 100%;
+}
+.manage .fld--num {
+  font-family: var(--cm-font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.manage .fld--text {
+  font-family: var(--cm-font-body);
+}
+.manage .fld:focus {
+  outline: none;
+  border-color: var(--m-rail-active-border);
+}
+.manage .mono {
+  font-family: var(--cm-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.manage .lf {
+  display: grid;
+  gap: 2px;
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+.manage .lf > span {
+  color: var(--cm-color-on-surface-variant);
+}
+.manage .lf em {
+  font-style: normal;
+  color: var(--cm-color-on-surface-muted);
+  font-size: 10px;
+}
+.manage .grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
+}
+
+/* --- tags, badges, codes -------------------------------------------------- */
+.manage .tag {
+  display: inline-block;
+  font-family: var(--cm-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  color: var(--cm-color-secondary);
+  border: 1px solid color-mix(in srgb, var(--cm-color-secondary) 45%, transparent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.manage .tag--owned {
+  color: var(--cm-color-primary);
+  border-color: color-mix(in srgb, var(--cm-color-primary) 45%, transparent);
+}
+.manage .tag--yours {
+  color: var(--cm-color-secondary);
+  border-color: color-mix(in srgb, var(--cm-color-secondary) 45%, transparent);
+}
+.manage .tag--catalogue {
+  color: var(--cm-color-on-surface-variant);
+  border-color: var(--cm-color-outline-variant);
+}
+.manage .tag--builtin {
+  color: var(--cm-color-on-surface-muted);
+  border-color: var(--cm-color-outline-variant);
+  border-style: dashed;
+}
+.manage .tag--muted {
+  color: var(--cm-color-on-surface-muted);
+  border-color: var(--cm-color-outline-variant);
+}
+.manage .badge {
+  display: inline-block;
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--cm-color-outline-variant);
+  color: var(--cm-color-on-surface-variant);
+  white-space: nowrap;
+}
+.manage .badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+.manage .code {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  color: var(--cm-color-on-surface-variant);
+  background: #0f1420;
+  border: 1px solid var(--m-rail-border);
+  border-radius: 3px;
+  padding: 1px 6px;
+}
+.manage .code i {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--cm-color-on-surface-muted);
+  letter-spacing: 0.08em;
+}
+
+/* --- the filter row and the tier chips ------------------------------------ */
+.manage .mfilter {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.manage .mfilter .fld {
+  width: 260px;
+}
+.manage .chip {
+  white-space: nowrap;
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--cm-color-outline-variant);
+  color: var(--cm-color-on-surface-variant);
+  background: transparent;
+  cursor: pointer;
+}
+.manage .chip--on {
+  background: var(--m-rail-active);
+  border-color: var(--m-rail-active-border);
+  color: #cfe;
+}
+.manage .mcount {
+  margin-left: auto;
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  color: var(--cm-color-on-surface-muted);
+}
+
+/* --- the tool list -------------------------------------------------------- */
+.manage .tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  background: var(--m-card-bg);
+  border: 1px solid var(--m-rail-border);
+  border-radius: var(--cm-radius-sm);
+}
+.manage .tbl th {
+  white-space: nowrap;
+  text-align: left;
+  font-family: var(--cm-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cm-color-on-surface-muted);
+  font-weight: 400;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--cm-color-outline-variant);
+  background: #121722;
+}
+.manage .tbl td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--m-hairline);
+  color: var(--cm-color-on-surface);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.manage .tbl td.num {
+  font-family: var(--cm-font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.manage .tbl th.num {
+  text-align: right;
+}
+.manage .tbl td.dim {
+  color: var(--cm-color-on-surface-muted);
+}
+.manage .tbl tr.sel td {
+  background: var(--m-rail-active);
+}
+.manage .tbl tr.sel td:first-child {
+  box-shadow: inset 2px 0 0 var(--cm-color-primary-container);
+}
+.manage .tbl tbody tr:not(.grp) {
+  cursor: pointer;
+}
+.manage .tbl tr.grp td {
+  background: #0f1420;
+  color: var(--cm-color-on-surface-variant);
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 8px;
+}
+.manage .tbl tr.grp td small {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--cm-color-on-surface-muted);
+  margin-left: 8px;
+}
+.manage .tbl tr.more td {
+  color: var(--cm-color-on-surface-muted);
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  text-align: center;
+}
+.manage .tbl .nm {
+  font-weight: 500;
+}
+/* The provenance line WRAPS, and that is load-bearing. It is long — "cloned from Makera catalogue
+   “3.175*12mm Flat End(Metal)” on 2026-10-08" — so left on one line it set the Name column's minimum
+   width to ~390 px, which pushed the From column (the tier tag, which is the point of the grouping)
+   off the right edge of a 1400 px window and turned the list into one that scrolls sideways. The
+   words are what must not move when the window narrows; the sentence survives on two lines.
+
+   The `max-width` is a MEASURED figure, not a taste. Every `td` is `nowrap`, so no column shrinks
+   below its content and the table's minimum is the sum of nine: eight narrow columns are 444 px
+   together and the Name column is this cap plus 17 px of cell padding. At 340 the table came to
+   801 px, and the list pane of a maximised 1400 px window is 784 — a 17 px overflow, i.e. a
+   horizontal scrollbar drawn at the design width. 300 puts the sum at 761, leaving slack so the
+   scrollbar only appears at widths narrower than the design. */
+.manage .tbl .nm small {
+  display: block;
+  font-weight: 400;
+  color: var(--cm-color-on-surface-muted);
+  font-size: 10px;
+  max-width: 300px;
+}
+/* The built-ins rail's own short list: no row is selectable there. */
+.manage .context-panel .tbl tbody tr {
+  cursor: default;
+}
+
+/* --- notices, the empty card, the reserved slot --------------------------- */
+.manage .mnotice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  border: 1px solid;
+  border-radius: var(--cm-radius-sm);
+  padding: 6px 10px;
+  margin-bottom: 8px;
+}
+.manage .mnotice span {
+  flex: 1;
+}
+.manage .mnotice button {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.manage .mnotice--ok {
+  background: #16302a;
+  border-color: #2c5f4c;
+  color: #b8f0d6;
+}
+.manage .mnotice--refused {
+  background: #4a3e1d;
+  border-color: #7a6828;
+  color: #f7eed4;
+}
+.manage .mnotice--error {
+  background: #4a1d1d;
+  border-color: #7a2828;
+  color: #f7d4d4;
+}
+.manage .mempty {
+  border: 1px dashed var(--cm-color-outline-variant);
+  border-radius: var(--cm-radius-md);
+  padding: 28px 32px;
+  max-width: 720px;
+  margin: 24px auto;
+  color: var(--cm-color-on-surface-variant);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.manage .mempty h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--cm-color-on-surface);
+}
+.manage .mempty p {
+  margin: 0 0 8px;
+}
+.manage .mempty .why {
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  color: var(--cm-color-on-surface-muted);
+  background: #0f1420;
+  border: 1px solid var(--m-rail-border);
+  border-radius: var(--cm-radius-sm);
+  padding: 6px 8px;
+  margin: 8px 0;
+}
+.manage .mempty .btn-row {
+  margin-top: 10px;
+}
+.manage .slot {
+  border: 1px dashed var(--cm-color-outline-variant);
+  border-radius: var(--cm-radius-sm);
+  padding: 10px;
+  margin-top: 12px;
+  text-align: center;
+  color: #6c7585;
+  font-size: 11px;
+  font-family: var(--cm-font-mono);
+  line-height: 1.5;
+}
+
+/* --- the machines card ---------------------------------------------------- */
+.manage .mcard {
+  border: 1px solid var(--m-rail-border);
+  border-radius: var(--cm-radius-sm);
+  background: var(--m-card-bg);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.manage .mcard--muted {
+  opacity: 0.75;
+}
+.manage .mcard h4 {
+  margin: 0 0 2px;
+  font-size: 14px;
+  color: var(--cm-color-on-surface);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.manage .mcard .sub {
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  color: var(--cm-color-on-surface-muted);
+  margin-bottom: 8px;
+}
+.manage .kv {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 4px 10px;
+  font-size: 11px;
+  align-items: start;
+}
+.manage .kv span {
+  color: var(--cm-color-on-surface-muted);
+}
+.manage .kv b {
+  font-weight: 400;
+  font-family: var(--cm-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--cm-color-on-surface);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+.manage .kv .dim {
+  color: var(--cm-color-on-surface-muted);
+}
+.manage .two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.manage .notes {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  font-size: 11px;
+  color: var(--cm-color-tertiary);
+}
+.manage .notes li {
+  padding: 2px 0;
+}
+
+/* --- the detail rail ------------------------------------------------------ */
+.manage .context-panel {
+  padding: 12px;
+}
+.manage .panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.manage .panel-head h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--cm-color-on-surface);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.manage .panel-head .x {
+  background: transparent;
+  border: 0;
+  color: var(--cm-color-on-surface-muted);
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 2px;
+}
+.manage .panel-subhead {
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cm-color-on-surface-muted);
+  margin: 12px 0 5px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--m-rail-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.manage .hint {
+  font-size: 11px;
+  color: var(--cm-color-on-surface-muted);
+  line-height: 1.45;
+  margin: 4px 0 0;
+}
+.manage .hint .dim {
+  color: var(--cm-color-on-surface-muted);
+}
+.manage .ro {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.manage .ro th {
+  text-align: left;
+  color: var(--cm-color-on-surface-muted);
+  font-weight: 400;
+  padding: 3px 4px;
+  width: 90px;
+  vertical-align: top;
+}
+.manage .ro td {
+  padding: 3px 4px;
+  font-family: var(--cm-font-mono);
+  color: var(--cm-color-on-surface);
+  font-variant-numeric: tabular-nums;
+}
+.manage .ro td .dim {
+  font-family: var(--cm-font-body);
+  color: var(--cm-color-on-surface-muted);
+}
+.manage .ro tr {
+  border-bottom: 1px solid var(--m-hairline);
+}
+.manage .ro tr:last-child {
+  border-bottom: 0;
+}
+.manage .card {
+  border: 1px solid var(--m-rail-border);
+  border-radius: var(--cm-radius-sm);
+  padding: 8px;
+  margin-bottom: 6px;
+  background: var(--m-card-bg);
+}
+.manage .context-panel .btn-row {
+  margin-top: 8px;
+}
+
+/* --- the register frame's doors ------------------------------------------- */
+.manage .door {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--m-rail-border);
+  border-radius: var(--cm-radius-sm);
+  overflow: hidden;
+  margin: 6px 0 8px;
+}
+.manage .door button {
+  flex: 1;
+  background: var(--m-control-bg);
+  border: 0;
+  border-right: 1px solid var(--m-rail-border);
+  color: var(--cm-color-on-surface-variant);
+  padding: 5px 0;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.manage .door button:last-child {
+  border-right: 0;
+}
+.manage .door .on {
+  background: var(--m-rail-active);
+  color: #cfe;
+  font-weight: 600;
+}
+
+/* --- the doors' own pieces (#309) ---------------------------------------- */
+/* A candidate row inside a door's match card: radio, name, and the two numbers that tell two
+   otherwise identical Makera rows apart. */
+.manage .cand--radio {
+  display: grid;
+  /* `minmax(0, 1fr)` and an ellipsised name, because a Makera row's name is long and the NUMBER it
+     is told apart by ("flute 4.0 · shoulder 4.0") must never be the thing that gets clipped: the
+     name is repeated on the row it selects, the numbers are how two rows are chosen between. */
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--m-hairline);
+  font-size: 11px;
+  cursor: pointer;
+}
+.manage .cand--radio:last-child {
+  border-bottom: 0;
+}
+.manage .cand--radio input {
+  margin: 0;
+  accent-color: var(--cm-color-primary);
+}
+.manage .cand--radio > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.manage .cand--radio small {
+  white-space: nowrap;
+  color: var(--cm-color-on-surface-muted);
+  font-family: var(--cm-font-mono);
+  font-size: 10px;
+}
+/* A sentence that offers a route ("or type it"): a button, because it changes the panel, but
+   dressed as the prose it sits in. */
+.manage .linkish {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--cm-color-primary);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.manage .scan-video {
+  width: 100%;
+  margin-top: 4px;
+  border-radius: var(--cm-radius-sm);
+  background: #000;
+}
+
+/* --- the empty rail (the app's own context-panel empty block) ------------- */
+.manage .empty h3 {
+  margin: 0 0 10px;
+  font-family: var(--cm-font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cm-color-on-surface);
+}
+.manage .empty p {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--cm-color-on-surface-muted);
+}
+
+/* The toolbar's Manage toggle, lit while the mode is up. The app's toolbar buttons carry no class
+   of their own, so the on-state has to hang off an attribute that means exactly this. */
+.toolbar-buttons button[aria-pressed='true'] {
+  background: var(--cm-color-primary-container);
+  color: var(--cm-color-on-primary-container);
+  font-weight: 600;
 }

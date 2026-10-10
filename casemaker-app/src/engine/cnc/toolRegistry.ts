@@ -6,12 +6,13 @@
  * sim workers resolved inside their own realm, where no store is visible. Every consumer asks
  * here now, and gets the same answer.
  *
- * **Two tiers, and the built-ins are permanent.** `TOOL_LIBRARY` is the `builtin` tier and is
+ * **Three tiers, and the built-ins are permanent.** `TOOL_LIBRARY` is the `builtin` tier and is
  * never replaced: the shipped default job names `flat-1.0` (`engrave/defaults.ts:120`), so a job
- * has to resolve with no service, no file and no network at all. `setRegistry` adds the tiers
- * ABOVE it — a Studio catalogue clone (`cat:`), the user's own cutters (`user:`), the physical
- * inventory (`inv:`) — and `getTools()` returns the built-ins first, then those. An empty
- * registry is therefore not "no tools": it is "no service yet", which is the V1 default.
+ * has to resolve with no service, no file and no network at all. Above it come the house service's
+ * two documents, each with its own setter: its tool list — Studio catalogue clones (`cat:`) and the
+ * user's own definitions (`user:`) — through `setRegistry`, and the physical inventory (`inv:`)
+ * through `setInventoryEntries` (#309). `getTools()` returns the built-ins first, then those. An
+ * empty registry is therefore not "no tools": it is "no service yet", which is the V1 default.
  *
  * **Plain data, web-safe, no React.** One module-level snapshot, deliberately: the sim workers
  * are long-lived and reached over Comlink, so a `localStorage` or Zustand registry is invisible
@@ -47,28 +48,58 @@ export interface ToolNamingJob {
  */
 let snapshot: readonly ToolLibraryEntry[] = TOOL_LIBRARY;
 
+/** The house service's tool list (`cat:` + `user:`), and its inventory (`inv:`). Two documents. */
+let houseEntries: readonly ToolLibraryEntry[] = [];
+let inventoryEntries: readonly ToolLibraryEntry[] = [];
+
 const listeners = new Set<() => void>();
 
 /**
  * The resolved list every picker lists and every measurement ranks: the built-ins, then whatever
- * `setRegistry` last supplied.
+ * `setRegistry` last supplied, then `setInventoryEntries`'.
  */
 export function getTools(): readonly ToolLibraryEntry[] {
   return snapshot;
 }
 
-/**
- * Replace the tiers ABOVE the built-ins (`[]` = no service). Empties back to `TOOL_LIBRARY`
- * itself, so the default is one object and not a copy of it.
- */
-export function setRegistry(entries: readonly ToolLibraryEntry[]): void {
-  snapshot = entries.length === 0 ? TOOL_LIBRARY : [...TOOL_LIBRARY, ...entries];
+function publish(): void {
+  snapshot =
+    houseEntries.length === 0 && inventoryEntries.length === 0
+      ? TOOL_LIBRARY
+      : [...TOOL_LIBRARY, ...houseEntries, ...inventoryEntries];
   for (const listener of listeners) listener();
 }
 
-/** Back to the built-ins only. */
+/**
+ * Replace the service's tool list (`[]` = no service, or none read yet). The built-ins stay
+ * underneath, and so does the inventory — the two are separate documents and one going away must
+ * not take the other with it.
+ */
+export function setRegistry(entries: readonly ToolLibraryEntry[]): void {
+  houseEntries = entries;
+  publish();
+}
+
+/**
+ * Replace the physical cutters the user has registered (#309). Their `inv:` keys are the job's
+ * way of naming a possession rather than a definition: the same cutter can be re-registered with
+ * a new count, or removed, without the key a saved job holds changing meaning.
+ */
+export function setInventoryEntries(entries: readonly ToolLibraryEntry[]): void {
+  inventoryEntries = entries;
+  publish();
+}
+
+/** Back to the built-ins only: both documents released. */
 export function resetRegistry(): void {
-  setRegistry([]);
+  houseEntries = [];
+  inventoryEntries = [];
+  publish();
+}
+
+/** The key a physical cutter is named by, minted in one place so no caller spells `inv:` itself. */
+export function inventoryKey(id: string): string {
+  return `inv:${id}`;
 }
 
 /** Notified whenever the snapshot is replaced. Returns the unsubscribe. */

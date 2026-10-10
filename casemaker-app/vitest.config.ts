@@ -4,7 +4,18 @@ import path from 'node:path';
 export default defineConfig({
   // #181 — the unit tests run the web target, matching the default build. Without this the
   // `__BUILD_TARGET__` reference in src/platform/capabilities.ts would be an undeclared global.
-  define: { __FEATURE_SIM__: 'true', __BUILD_TARGET__: JSON.stringify('web') },
+  //
+  // The other two are the same story, found the same way: `__APP_VERSION__` is read by `StatusBar`,
+  // and `__DONATE_URL__`/`__DEPLOY_TARGET__` are read by the panels beside it — so any spec that
+  // renders the app shell rather than one panel would meet an undefined global rather than a bug.
+  // The values are deliberately inert: nothing here asserts on a version or a donate link.
+  define: {
+    __FEATURE_SIM__: 'true',
+    __BUILD_TARGET__: JSON.stringify('web'),
+    __APP_VERSION__: JSON.stringify('0.0.0-test'),
+    __DEPLOY_TARGET__: JSON.stringify(''),
+    __DONATE_URL__: JSON.stringify(''),
+  },
   resolve: {
     alias: { '@': path.resolve(__dirname, 'src') },
   },

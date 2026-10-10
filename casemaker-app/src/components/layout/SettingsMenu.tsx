@@ -2,27 +2,14 @@
 // Replaces the sidebar SettingsPanel. Hides port + LAN-bind on web (those
 // only affect the Tauri desktop build's embedded HTTP server).
 
+// #311 — the "My machine" block that used to live here MOVED. The `casemaker-my-machine.json`
+// round trip (vise and sacrificial measurements, #247) is a fact about a machine, so it now sits on
+// the Machines pane of the Manage surface, beside the machine it describes. Settings keeps the
+// settings.
+
 import { useEffect, useRef, useState } from 'react';
 import { useSettingsStore, type ExportFormat, type ExportLayoutMode } from '@/store/settingsStore';
 import { canRunLocalServer } from '@/platform/capabilities';
-import {
-  MY_MACHINE_FILENAME,
-  parseMyMachineFile,
-  serializeMyMachineFile,
-} from '@/store/myMachineFile';
-
-/** Anchor-tag download for the "my machine" JSON — the same fallback the project save uses. */
-function downloadText(text: string, filename: string): void {
-  const blob = new Blob([text], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 interface Props {
   onClose: () => void;
@@ -38,39 +25,11 @@ export function SettingsMenu({ onClose }: Props) {
   const setExportLayout = useSettingsStore((s) => s.setExportLayout);
   const setExportFormat = useSettingsStore((s) => s.setExportFormat);
   const reset = useSettingsStore((s) => s.resetSettings);
-  const replaceFixtures = useSettingsStore((s) => s.replaceFixtures);
   const [draftPort, setDraftPort] = useState<string>(String(port));
-  const [transfer, setTransfer] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
-  const importInput = useRef<HTMLInputElement | null>(null);
   // #181 — the embedded-server controls are a desktop capability, not a runtime property of the
   // window. `canRunLocalServer` is a build-time constant, so the web build never even carries them.
   const showServerControls = canRunLocalServer;
-
-  const onExportMachine = () => {
-    const text = serializeMyMachineFile(useSettingsStore.getState().fixtures);
-    downloadText(text, MY_MACHINE_FILENAME);
-    setTransfer({ kind: 'ok', message: `Exported ${MY_MACHINE_FILENAME}` });
-  };
-
-  const onImportMachineFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const result = parseMyMachineFile(await file.text());
-      if (!result.ok) {
-        // Whole-or-nothing: a refused file changes nothing.
-        setTransfer({ kind: 'error', message: result.reason });
-        return;
-      }
-      replaceFixtures(result.fixtures);
-      setTransfer({ kind: 'ok', message: 'Imported — measured values restored.' });
-    } catch (err) {
-      setTransfer({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
-    } finally {
-      if (importInput.current) importInput.current.value = '';
-    }
-  };
 
   useEffect(() => {
     function onDocClick(e: MouseEvent): void {
@@ -158,47 +117,6 @@ export function SettingsMenu({ onClose }: Props) {
           <option value="print-ready">Print-ready (lid flipped)</option>
           <option value="assembled">Assembled (visualization)</option>
         </select>
-      </div>
-
-      <div className="settings-section">
-        <h4>My machine</h4>
-        <p className="settings-hint">
-          Export the saved vise and sacrificial setup as one JSON, or restore it on another
-          machine. A file that does not validate is refused whole.
-        </p>
-        <div className="settings-row settings-row-buttons">
-          <button
-            onClick={onExportMachine}
-            data-testid="settings-machine-export"
-            title="Download the measured machine setup as JSON"
-          >
-            Export…
-          </button>
-          <button
-            onClick={() => importInput.current?.click()}
-            data-testid="settings-machine-import"
-            title="Restore the machine setup from a 'my machine' JSON file"
-          >
-            Import…
-          </button>
-          <input
-            ref={importInput}
-            type="file"
-            accept=".json,application/json"
-            onChange={onImportMachineFile}
-            data-testid="settings-machine-import-input"
-            style={{ display: 'none' }}
-          />
-        </div>
-        {transfer && (
-          <p
-            className={`settings-hint settings-transfer settings-transfer-${transfer.kind}`}
-            data-testid="settings-machine-status"
-            data-status={transfer.kind}
-          >
-            {transfer.message}
-          </p>
-        )}
       </div>
 
       <button

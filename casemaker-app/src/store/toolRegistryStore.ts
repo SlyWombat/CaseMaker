@@ -18,6 +18,20 @@
  * cutters they name not one of them is reachable. Its failure is reported separately from `error`,
  * because a cutter list with no starting numbers is a perfectly usable house.
  *
+ * THE INVENTORY IS A THIRD REQUEST AND A THIRD SNAPSHOT (#309). `GET /api/v1/inventory` is the
+ * cutters the user physically owns, and it is a different document from the tool list for a reason
+ * that shows in the UI: a definition has a shape and a tip, a possession has a count and codes. So
+ * the items are kept HERE (`items`) while the `inv:` entries derived from them are pushed into the
+ * registry the pickers read — the same split the feeds use, where the matrix itself lives in the
+ * engine and the store keeps its count. A failed inventory read is reported as `inventoryError`,
+ * for the same reason `feedError` exists: a house whose cutters read fine but whose inventory did
+ * not is a usable house with a gap.
+ *
+ * READS HERE, WRITES NEXT DOOR. Registering, cloning, syncing, importing and exporting live in
+ * `store/houseStore.ts` (#311): they are events with a result to report, not state to hold, and
+ * every one of them ends by asking this store to refresh. This store's job stays what it was —
+ * ask the service what it has, and put the answer where the rest of the app can see it.
+ *
  * THE THREE STATES, AND WHAT THEY MEAN. `present` is "the registry came from a house service";
  * `absent` is every outcome that is not a service — a web deployment, whose own origin has none; a
  * static host answering 404; a page answering instead of JSON — and `error` is a service this build
@@ -40,15 +54,17 @@
  */
 
 import { create } from 'zustand';
-import { setRegistry } from '@/engine/cnc/toolRegistry';
+import { inventoryKey, setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
 import { clearFeedCatalogue, setFeedCatalogue } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import {
   houseFeeds,
+  houseInventory,
   houseTools,
   probeHouse,
   type HouseHealth,
   type HouseRequestOptions,
+  type InventoryItem,
 } from '@/platform/houseClient';
 
 /** Whether the tool list came from a house service. See the module doc for why this is not `error`. */
@@ -82,6 +98,16 @@ export interface ToolRegistryState {
    */
   feedError: string | null;
   /**
+   * The cutters the user physically owns, exactly what `GET /api/v1/inventory` returned (#309).
+   * Their `inv:` entries are in the registry; these are the documents, because the panel's Qty,
+   * Codes and Added columns are about the possession and not about the cutter.
+   */
+  items: readonly InventoryItem[];
+  /** The inventory document's validator, for the next read's `If-None-Match`. */
+  inventoryEtag: string | null;
+  /** Why the inventory is not loaded, when the service had one to offer and the read failed. */
+  inventoryError: string | null;
+  /**
    * Probe the house service and push what it has into the registry. Safe to call any number of
    * times; concurrent calls share one run rather than racing (`main.tsx` mounts under StrictMode,
    * whose effects run twice in development).
@@ -96,6 +122,32 @@ function reasonFor(outcome: { kind: 'absent'; reason: string } | { kind: 'error'
   return outcome.kind === 'absent' ? outcome.reason : outcome.detail;
 }
 
+/**
+ * The registry entry for a possession (#309). The key is `inv:<id>` (`inventoryKey`), the tool is
+ * the item's own materialised snapshot — which is the point of materialising it: a job that names
+ * this cutter still resolves when the catalogue row it came from is gone.
+ *
+ * Exported because #309's panels mint the same entries and the Engrave panel's picker lists them
+ * straight off the registry.
+ */
+export function inventoryEntryFor(item: InventoryItem): ToolLibraryEntry {
+  return {
+    key: inventoryKey(item.id),
+    tool: item.tool,
+    provenance: item.origin ? 'your cutter, cloned from the catalogue' : 'your cutter, registered here',
+  };
+}
+
+/**
+ * Drop both of the service's tiers. They arrive from one machine and leave together: a tool list
+ * from a service we can no longer reach and an inventory from the same unreachable service are the
+ * same claim about the world, and neither is safe to keep.
+ */
+function clearHouseTiers(): void {
+  setRegistry([]);
+  setInventoryEntries([]);
+}
+
 /** The in-flight refresh, so a double-mount is one request. */
 let inFlight: Promise<void> | null = null;
 
@@ -108,14 +160,22 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
   feedCount: 0,
   feedEtag: null,
   feedError: null,
+  items: [],
+  inventoryEtag: null,
+  inventoryError: null,
 
   refresh: (opts) => {
     if (inFlight) return inFlight;
     inFlight = (async () => {
-      set({ status: 'checking', error: null });
+      // `checking` ONLY WHILE THERE IS NO ANSWER YET. The status is about the SOURCE, and a re-read
+      // — which is what every write ends in — does not make a source we already have an answer for
+      // unknown again. Flipping it back matters beyond the status bar: `ToolsScope` draws a
+      // different branch for `checking`, so a save used to unmount the whole tools pane and
+      // everything under it, which took the register frame's half-typed scan with it (#309).
+      set(get().status === 'present' ? { error: null } : { status: 'checking', error: null });
       const probe = await probeHouse(opts);
       if (probe.kind !== 'present') {
-        setRegistry([]);
+        clearHouseTiers();
         clearFeedCatalogue();
         set({
           status: 'absent',
@@ -126,12 +186,15 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
           feedCount: 0,
           feedEtag: null,
           feedError: null,
+          items: [],
+          inventoryEtag: null,
+          inventoryError: null,
         });
         return;
       }
       const read = await houseTools(get().etag, opts);
       if (read.kind !== 'ok' && read.kind !== 'unchanged') {
-        setRegistry([]);
+        clearHouseTiers();
         clearFeedCatalogue();
         set({
           status: 'absent',
@@ -144,6 +207,9 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
           feedCount: 0,
           feedEtag: null,
           feedError: null,
+          items: [],
+          inventoryEtag: null,
+          inventoryError: null,
         });
         return;
       }
@@ -172,6 +238,32 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
         feed = { count: 0, etag: null, error: reasonFor(feeds) };
       }
 
+      // The inventory is the third document (#309), and the only one that has no order dependency
+      // on the others: it is the user's own list of what they physically own, and each item carries
+      // its own tool rather than naming a row in the catalogue. Same treatment as the feeds, though
+      // — a failing read drops what it would have supplied rather than keeping a stale list.
+      const inventory = await houseInventory(get().inventoryEtag, opts);
+      let items: readonly InventoryItem[];
+      let inventoryEtag: string | null;
+      let inventoryError: string | null;
+      if (inventory.kind === 'ok') {
+        // Only a real read re-pushes the tier: a 304's entries are already in the registry, and
+        // replacing them with equal ones would churn the snapshot every picker re-renders from.
+        setInventoryEntries(inventory.items.map(inventoryEntryFor));
+        items = inventory.items;
+        inventoryEtag = inventory.etag;
+        inventoryError = null;
+      } else if (inventory.kind === 'unchanged') {
+        items = get().items;
+        inventoryEtag = get().inventoryEtag;
+        inventoryError = null;
+      } else {
+        setInventoryEntries([]);
+        items = [];
+        inventoryEtag = null;
+        inventoryError = reasonFor(inventory);
+      }
+
       set({
         status: 'present',
         entries: tools.entries,
@@ -181,6 +273,9 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
         feedCount: feed.count,
         feedEtag: feed.etag,
         feedError: feed.error,
+        items,
+        inventoryEtag,
+        inventoryError,
       });
     })().finally(() => {
       inFlight = null;
@@ -189,7 +284,7 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
   },
 
   reset: () => {
-    setRegistry([]);
+    clearHouseTiers();
     clearFeedCatalogue();
     set({
       status: 'checking',
@@ -200,6 +295,9 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
       feedCount: 0,
       feedEtag: null,
       feedError: null,
+      items: [],
+      inventoryEtag: null,
+      inventoryError: null,
     });
   },
 }));

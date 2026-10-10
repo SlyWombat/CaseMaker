@@ -15,6 +15,7 @@ import { labelProfile, toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { flatEndMill, cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { measureLabels, type LabelEngravability } from '@/workers/sim/engraveGeometry';
+import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { EngraveJob } from '@/types/engraveJob';
 
 /** A library entry built around `flatEndMill`, with lengths/ratios supplied per case. */
@@ -74,7 +75,7 @@ describe('recommendTool (#211)', () => {
       tool('t3.175', 3.175, { shoulderLength: 12 }),
     ];
     const measure = (key: string) => (key === 't3.175' ? [row('l1', 0.5)] : [row('l1', 1)]);
-    const rec = recommendTool(job, tools, measure);
+    const rec = recommendTool(job, tools, [], measure);
     expect(rec.key).toBe('t2.0');
     expect(rec.compromise).toBe(false);
     expect(rec.reason).toBe('Largest cutter that keeps every item intact.');
@@ -82,11 +83,25 @@ describe('recommendTool (#211)', () => {
     expect(candidate(rec, 't3.175').qualifies).toBe(false);
   });
 
+  // #309 — the cutters the user OWNS reach the recommender through the same list as every other
+  // tier (#319), keyed `inv:`. Two boxes of one bit are two rows of ONE definition, so the
+  // inventory key is the only thing telling them apart — a ranking that keyed on the definition
+  // would see one candidate where the user owns two, and could not offer the third at all.
+  it('ranks the user’s own cutters by their inventory keys (#309)', () => {
+    const job = jobWithLabel('l1', 'CASE', 1);
+    const tools = [tool('inv:aaa', 2.0), tool('inv:bbb', 2.0), tool('inv:wide', 3.175)];
+    const rec = recommendTool(job, tools, [], allRows(1));
+    expect(rec.key).toBe('inv:wide');
+    expect(rec.compromise).toBe(false);
+    expect(candidate(rec, 'inv:aaa').qualifies).toBe(true);
+    expect(candidate(rec, 'inv:bbb').qualifies).toBe(true);
+  });
+
   it('picks the only qualifying cutter when the others lose detail', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
     const tools = [tool('t1.0', 1.0), tool('t2.0', 2.0)];
     const measure = (key: string) => [row('l1', key === 't1.0' ? 1 : 0.4)];
-    const rec = recommendTool(job, tools, measure);
+    const rec = recommendTool(job, tools, [], measure);
     expect(rec.key).toBe('t1.0');
     expect(rec.compromise).toBe(false);
   });
@@ -96,7 +111,7 @@ describe('recommendTool (#211)', () => {
     const tools = [tool('t1.0', 1.0), tool('t2.0', 2.0), tool('t3.175', 3.175)];
     // Every cutter loses detail; the smaller the cutter the less it loses.
     const measure = (key: string) => [row('l1', key === 't1.0' ? 0.4 : key === 't2.0' ? 0.2 : 0.05)];
-    const rec = recommendTool(job, tools, measure);
+    const rec = recommendTool(job, tools, [], measure);
     expect(rec.key).toBe('t1.0');
     expect(rec.compromise).toBe(true);
     expect(rec.reason).toContain('CASE');
@@ -108,7 +123,7 @@ describe('recommendTool (#211)', () => {
   it('does not recommend a cutter whose reach is shorter than the deepest label, even at ratio 1', () => {
     const job = jobWithLabel('l1', 'CASE', 2.0);
     const tools = [tool('short', 2.0, { shoulderLength: 1 }), tool('ok', 1.0, { fluteLength: 12 })];
-    const rec = recommendTool(job, tools, allRows(1));
+    const rec = recommendTool(job, tools, [], allRows(1));
     expect(rec.key).toBe('ok');
     const short = candidate(rec, 'short');
     expect(short.reachKnown).toBe(true);
@@ -121,7 +136,7 @@ describe('recommendTool (#211)', () => {
     const ball = tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' });
     const flat = tool('flat', 1.0);
     const measure = vi.fn((_key: string) => [row('l1', 1)]);
-    const rec = recommendTool(job, [ball, flat], measure);
+    const rec = recommendTool(job, [ball, flat], [], measure);
     expect(measure).toHaveBeenCalledTimes(1);
     expect(measure).toHaveBeenCalledWith('flat');
     expect(candidate(rec, 'ball').excluded).toBe('not-flat');
@@ -131,15 +146,45 @@ describe('recommendTool (#211)', () => {
   it('excludes a cutter with no feeds row and never measures it', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
     const measure = vi.fn((_key: string) => [row('l1', 1)]);
-    const rec = recommendTool(job, [tool('big', 5.0), tool('flat', 1.0)], measure);
+    const rec = recommendTool(job, [tool('big', 5.0), tool('flat', 1.0)], [], measure);
     expect(measure).toHaveBeenCalledTimes(1);
     expect(measure).toHaveBeenCalledWith('flat');
     expect(candidate(rec, 'big').excluded).toBe('no-feeds');
   });
 
+  // #325 — and a handed row the machine cannot run does NOT take the cutter out of the list. This
+  // is #324's example, inverted: the absurd spindle speed used to make `feedsFor` refuse, and
+  // refusing a job the starting table would have cut is exactly what a tier ABOVE the starting
+  // table may not do. The row falls through, the cutter stays, and the two calls AGREE — which is
+  // the guarantee #324 was written for.
+  it('keeps a cutter whose handed row states a number the machine refuses (#325)', () => {
+    const job = jobWithLabel('l1', 'CASE', 1);
+    // The built-in metal cutter's id, with a spindle speed far past the Z1's ceiling: the number is
+    // passed over field by field (`feedsFor`), so this candidate is NOT excluded.
+    const cutter = tool('t', 1.0, { id: '112111313812' });
+    const absurd: FeedCatalogueRow = {
+      cutterId: '112111313812',
+      material: 'Softwood',
+      rpm: 24000,
+      feed: 500,
+      plungeFeed: 200,
+      stepDown: 0.5,
+    };
+    const measure = vi.fn((_key: string) => [row('l1', 1)]);
+    const withRows = recommendTool(job, [cutter], [absurd], measure);
+    expect(candidate(withRows, 't').excluded).toBeUndefined();
+    expect(withRows.key).toBe('t');
+
+    // The same cutter with no rows to read is the same recommendation. After #325 no catalogue row
+    // can decide this pre-filter, so what a row still decides for a picker is nothing — the
+    // hand-over is observable where it matters, in the NUMBERS `engraveGenerate.spec.ts` reads out
+    // of the `.nc` (the feed catalogue reaches the worker, #324).
+    expect(recommendTool(job, [cutter], [], allRows(1)).key).toBe('t');
+  });
+
   it('still qualifies a cutter with unknown reach, and says so in the note', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
-    const rec = recommendTool(job, [tool('unknown-reach', 1.0)], allRows(1));
+    const rec = recommendTool(job, [tool('unknown-reach', 1.0)], [], allRows(1));
     expect(rec.key).toBe('unknown-reach');
     expect(rec.compromise).toBe(false);
     expect(candidate(rec, 'unknown-reach').reachKnown).toBe(false);
@@ -149,19 +194,19 @@ describe('recommendTool (#211)', () => {
   it('is deterministic on ties: known reach wins, then the lower key', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
     const tied = [tool('z-unknown', 2.0), tool('a-unknown', 2.0)];
-    expect(recommendTool(job, tied, allRows(1)).key).toBe('a-unknown');
+    expect(recommendTool(job, tied, [], allRows(1)).key).toBe('a-unknown');
 
     const reachTie = [tool('z-unknown', 2.0), tool('y-known', 2.0, { shoulderLength: 12 })];
-    expect(recommendTool(job, reachTie, allRows(1)).key).toBe('y-known');
+    expect(recommendTool(job, reachTie, [], allRows(1)).key).toBe('y-known');
   });
 
   it('returns key null only when no eligible cutter exists', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
-    const rec = recommendTool(job, [tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' })], allRows(1));
+    const rec = recommendTool(job, [tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' })], [], allRows(1));
     expect(rec.key).toBeNull();
     expect(rec.reason).toContain('flat end mill');
 
-    const empty = recommendTool(job, [], allRows(1));
+    const empty = recommendTool(job, [], [], allRows(1));
     expect(empty.key).toBeNull();
     expect(empty.candidates).toEqual([]);
   });
@@ -189,7 +234,7 @@ describe('recommendTool integration (#211)', () => {
       return measureLabels(tl, plan, radius.radius, job.edgeMargin, perChar);
     };
 
-    const rec = recommendTool(job, TOOL_LIBRARY, measure);
+    const rec = recommendTool(job, TOOL_LIBRARY, [], measure);
     expect(rec.key).toBe('flat-1.0');
     // The wide cutter is the one that loses the thin strokes of the smaller labels.
     expect(candidate(rec, 'flat-3.175x12-metal').qualifies).toBe(false);

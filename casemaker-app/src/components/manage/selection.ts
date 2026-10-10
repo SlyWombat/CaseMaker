@@ -1,0 +1,67 @@
+/**
+ * The row the Manage surface has selected, and what a clone of it is (#311).
+ *
+ * Kept out of the list component because two panes act on the selection — the list's `Clone` button
+ * and the detail rail — and the rule for reading it belongs in one place: the selection is a KEY,
+ * the registry is the source of truth for what that key resolves to today, and an inventory item is
+ * a separate document that only exists for an `inv:` row.
+ *
+ * `cloneOf` is the whole of Decision 2 (#311): a clone is a SEPARATE definition that remembers what
+ * it was cloned from, and it never edits the row it came from. The prose it mints is what the Yours
+ * group's second line shows, so it is the only record of the origin — the wire shape a `POST /tools`
+ * sends carries no `origin` field (`house.rs`), which is why the sentence has to be complete on its
+ * own rather than a bare reference to a key the clone does not hold.
+ */
+
+import { newId } from '@/utils/id';
+import { tierOf } from '@/engine/cnc/toolTiers';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { useToolRegistry } from '@/hooks/useToolRegistry';
+import { inventoryKey } from '@/engine/cnc/toolRegistry';
+import type { InventoryItem } from '@/platform/houseClient';
+import { useManageModeStore } from '@/store/manageModeStore';
+import { useToolRegistryStore } from '@/store/toolRegistryStore';
+import { formatDay } from './display';
+
+/** The entry behind the selected key, or null when nothing is selected or the row has gone. */
+export function useSelectedEntry(): ToolLibraryEntry | null {
+  const key = useManageModeStore((s) => s.selectedKey);
+  const tools = useToolRegistry();
+  if (key === null) return null;
+  return tools.find((e) => e.key === key) ?? null;
+}
+
+/** The possession behind the selected key. Only an `inv:` row has one. */
+export function useSelectedItem(): InventoryItem | null {
+  const key = useManageModeStore((s) => s.selectedKey);
+  const items = useToolRegistryStore((s) => s.items);
+  if (key === null || !key.startsWith('inv:')) return null;
+  return items.find((i) => inventoryKey(i.id) === key) ?? null;
+}
+
+/**
+ * A new `user:` definition cloned from an existing row.
+ *
+ * The key is minted here and not derived from the source, exactly as `InventoryItem.id` is: the
+ * service keys its own file by what the client sends, so two clones of the same row must be two
+ * rows (`house.rs`). The tool is copied field for field — a clone that improved a number the source
+ * never stated would be inventing a measurement, and the whole point of the Yours tier is that the
+ * user changes it ON PURPOSE.
+ */
+export function cloneOf(entry: ToolLibraryEntry, today: string): ToolLibraryEntry {
+  const tier = tierOf(entry.key);
+  const from =
+    tier === 'catalogue'
+      ? 'Makera catalogue'
+      : tier === 'owned'
+        ? 'your inventory'
+        : tier === 'yours'
+          ? 'your own'
+          : 'the built-in';
+  const day = formatDay(today) ?? today;
+  return {
+    key: `user:${newId()}`,
+    tool: { ...entry.tool },
+    provenance: `cloned from ${from} “${entry.tool.name}” on ${day}`,
+  };
+}

@@ -13,10 +13,21 @@
  * In the worker (#205) `measure` is `measureLabels(tl, plan, radius, …)` bound to the
  * candidate's own radius, computed once per job edit beside the preview. The candidate list is
  * HANDED IN (#305), not read from a module: the worker is sent the registry snapshot the picker
- * is showing, so the two cannot disagree about which cutters exist.
+ * is showing, so the two cannot disagree about which cutters exist. The feed catalogue is handed in
+ * the same way and for the same reason (#324): the worker's own copy of it is always empty, and a
+ * pre-filter over feeds that resolves against a different table than the panel's is a filter over
+ * the wrong numbers.
+ *
+ * WHAT THE FEEDS PRE-FILTER ASKS, after #325. A catalogue row can no longer decide it on its own:
+ * a vendor number this job cannot use — a `0`, or one past the machine's refusal threshold — is
+ * passed over field by field instead of refusing the job, so `feedsFor` answers exactly as it would
+ * with no row at all. What is left is the question the starting table and the machine answer:
+ * does ANY table have cutting parameters for this cutter and material, and can the machine run
+ * them. The rows are still handed in — they are what the same call returns for the program, and the
+ * one seam is worth keeping one seam.
  */
 
-import { feedsFor } from '@/engine/cnc/feeds';
+import { feedsFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -155,10 +166,16 @@ function noCandidateReason(toolCount: number): string {
  * `measure(toolKey)` returns #201's `LabelEngravability[]` for that cutter, one row per enabled
  * engrave. It is called only for candidates that survive the two pre-filters (flat, feeds), so
  * a ball-nose in the list is never measured — it can never be recommended.
+ *
+ * `catalogue` is the caller's Makera rows, for the feeds pre-filter below — on the worker's side of
+ * the boundary they have to be handed in (#324), exactly as `tools` are (#305). Since #325 a row
+ * cannot make that filter exclude anything by itself (the module doc says why); it is handed in
+ * because it is the same set of rows the program is generated from, and one seam is worth keeping.
  */
 export function recommendTool(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
+  catalogue: readonly FeedCatalogueRow[],
   measure: (toolKey: string) => LabelEngravability[],
 ): ToolRecommendation {
   // The deepest cut is over every enabled item — a shape or combined shape can be the deepest
@@ -178,7 +195,7 @@ export function recommendTool(
 
     const radius = cuttingRadiusForSweep(tool);
     if (!radius.ok) return { ...base, qualifies: false, excluded: 'not-flat' as const };
-    if (!feedsFor(job.stock.material, tool, Z1).ok) {
+    if (!feedsFor(catalogue, job.stock.material, tool, Z1).ok) {
       return { ...base, qualifies: false, excluded: 'no-feeds' as const };
     }
 

@@ -7,13 +7,21 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   houseBaseUrl,
   houseFeeds,
+  houseRegisterItem,
+  houseRegisterTool,
+  houseRemoveItem,
+  houseRemoveTool,
+  houseReplaceItem,
+  houseReplaceTool,
   houseTools,
   probeHouse,
   setHouseClientLoader,
   HOUSE_API_PATH,
   HOUSE_SCHEMA_VERSION,
   type HouseClient,
+  type InventoryItem,
 } from '@/platform/houseClient';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 
 const BASE = 'http://127.0.0.1:8000';
 
@@ -59,7 +67,7 @@ const HEALTH = {
 };
 
 /** One entry in the shape the service serves — every field explicit, nulls included. */
-const ENTRY = {
+const ENTRY: ToolLibraryEntry = {
   key: 'user:1a2b3c4d5e',
   provenance: 'typed in by hand',
   tool: {
@@ -264,6 +272,107 @@ describe('houseFeeds (#310)', () => {
     if (read.kind !== 'error') throw new Error('unreachable');
     expect(read.detail).toContain('feed catalogue');
   });
+
+  it('is an error when a row states a number no cut can use (#325)', async () => {
+    // Studio writes `0` into a numeric column it never filled, and `0.0` is well-formed JSON — the
+    // schema is what says this app cannot cut with it. The service drops such a row at sync
+    // (`catalogue.rs::read_feeds`), so a row like this reaching the client is a service this build
+    // does not understand, and saying so beats resolving 0 RPM into a program.
+    for (const bad of [{ rpm: 0 }, { feed: -1 }, { plungeFeed: 0 }, { stepDown: Number.POSITIVE_INFINITY }]) {
+      stubFetch(() => ({
+        contentType: 'application/json',
+        body: JSON.stringify([{ ...ROW, ...bad }]),
+      }));
+      const read = await houseFeeds(null, { base: BASE });
+      expect(read.kind, JSON.stringify(bad)).toBe('error');
+      if (read.kind !== 'error') throw new Error('unreachable');
+      expect(read.detail).toContain('feed catalogue');
+    }
+  });
+});
+
+/**
+ * The guarded writes (#321). What is under test is the HEADER: a save that changes a document has to
+ * say which version of it the change was made against, and this module is the only place that
+ * decides what a write puts on the wire.
+ */
+describe('a guarded write (#321)', () => {
+  const ITEM: InventoryItem = {
+    id: '9f8e7d6c5b',
+    tool: ENTRY.tool,
+    origin: null,
+    quantity: 2,
+    codes: [{ symbology: 'qr', value: 'C1-BIT-FLAT-2-0' }],
+    addedAt: '2026-01-02T03:04:05.000Z',
+    notes: null,
+  };
+
+  it('sends the validator it was given, on each document’s own write', async () => {
+    // `{}` rather than an empty body: a bare string body makes `Response` set `text/plain`, and a
+    // non-JSON success is deliberately `absent` here (see `call`). The service's own successes are
+    // empty, which is covered by the store's fakes.
+    const calls = stubFetch(() => ({ status: 200, contentType: 'application/json', body: '{}' }));
+
+    expect(await houseReplaceTool(ENTRY, '"fnv1a-tools"', { base: BASE })).toEqual({ kind: 'ok' });
+    expect(await houseRemoveTool(ENTRY.key, '"fnv1a-tools"', { base: BASE })).toEqual({ kind: 'ok' });
+    expect(await houseReplaceItem(ITEM, '"fnv1a-inv"', { base: BASE })).toEqual({ kind: 'ok' });
+    expect(await houseRemoveItem(ITEM.id, '"fnv1a-inv"', { base: BASE })).toEqual({ kind: 'ok' });
+
+    // The key's `:` is percent-encoded on the wire (`keyPath`), which axum's wildcard route decodes
+    // back — the key itself is what the service sees and what it checks the body against.
+    expect(calls.map((c) => c.url)).toEqual([
+      `${BASE}${HOUSE_API_PATH}/tools/user%3A1a2b3c4d5e`,
+      `${BASE}${HOUSE_API_PATH}/tools/user%3A1a2b3c4d5e`,
+      `${BASE}${HOUSE_API_PATH}/inventory/9f8e7d6c5b`,
+      `${BASE}${HOUSE_API_PATH}/inventory/9f8e7d6c5b`,
+    ]);
+    expect(calls.map((c) => c.headers['If-Match'])).toEqual([
+      '"fnv1a-tools"',
+      '"fnv1a-tools"',
+      '"fnv1a-inv"',
+      '"fnv1a-inv"',
+    ]);
+    // The READ side's header must not ride along: `If-None-Match` asks the service to spare the body,
+    // which on a save is the one request where that is not what is wanted.
+    expect(calls[0]!.headers['If-None-Match']).toBeUndefined();
+  });
+
+  it('sends no header — and so earns a 428 — when the client holds no version', async () => {
+    const calls = stubFetch(() => ({ status: 200, contentType: 'application/json', body: '{}' }));
+    await houseReplaceTool(ENTRY, null, { base: BASE });
+    expect(calls[0]!.headers['If-Match']).toBeUndefined();
+    // The 428's own sentence is what tells the user, so inventing a validator here would be a lie
+    // dressed as helpfulness.
+    calls.length = 0;
+    stubFetch(() => ({
+      status: 428,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'this save did not say which version of the tool list it was based on' }),
+    }));
+    expect((await houseRemoveTool(ENTRY.key, null, { base: BASE })).kind).toBe('refused');
+  });
+
+  it('does not guard a register, which is judged by its key rather than by a version', async () => {
+    const calls = stubFetch(() => ({ status: 201, contentType: 'application/json', body: '{}' }));
+    await houseRegisterTool(ENTRY, { base: BASE });
+    await houseRegisterItem(ITEM, { base: BASE });
+    expect(calls.map((c) => c.headers['If-Match'])).toEqual([undefined, undefined]);
+  });
+
+  it('carries the service’s 412 refusal through with its status, which is how a stale guard is spotted', async () => {
+    stubFetch(() => ({
+      status: 412,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'the tool list changed since you read it' }),
+    }));
+    // The status is kept rather than flattened into the sentence: `houseStore` is what decides that a
+    // 412 means "re-read before you try again", and it cannot decide that from English.
+    expect(await houseReplaceTool(ENTRY, '"old"', { base: BASE })).toEqual({
+      kind: 'refused',
+      status: 412,
+      message: 'the tool list changed since you read it',
+    });
+  });
 });
 
 describe('the loader seam', () => {
@@ -276,6 +385,8 @@ describe('the loader seam', () => {
         return { kind: 'unchanged' };
       },
       feeds: async () => ({ kind: 'absent', reason: 'fake' }),
+      inventory: async () => ({ kind: 'absent', reason: 'fake' }),
+      call: async () => ({ kind: 'ok', text: '' }),
     };
     setHouseClientLoader(async () => fake);
     expect(await probeHouse({ base: BASE })).toEqual({ kind: 'absent', reason: 'fake' });
