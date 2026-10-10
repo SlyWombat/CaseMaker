@@ -2,7 +2,8 @@
 
 This is the user guide for Case Maker's CNC work, written for someone who owns a
 **Makera Z1** and has never driven a CNC before. It covers the whole workflow: simulating
-a G-code file, and (still to come) engraving text into a block of wood.
+a G-code file, and engraving text into a printed PLA blank held in the vise — the two-colour
+badge is the first job. Chapter 5 says which parts of the engraving side are in the app today.
 
 Two things to hold on to before you read on:
 
@@ -29,8 +30,9 @@ if a sentence says "will", it is not shipping yet. Everything is in millimetres.
 > **Status: Available** — a statement of scope.
 
 **What it is.** Case Maker can do two CNC things for a Makera Z1: **simulate** a G-code file
-you already have (so you can see what it cuts before risking a blank), and — later — **write**
-an engraving program for a block of wood. Both end at a `.nc` file on disk.
+you already have (so you can see what it cuts before risking a blank), and **write** an
+engraving program for a printed PLA blank — the two-colour badge — held in the vise. Both end
+at a `.nc` file on disk.
 
 **What it is not.** It is not machine control. It does not talk to the Z1. You take the
 `.nc` file to **Makera Studio**, upload it, set the work origin on the machine, and press
@@ -41,7 +43,9 @@ oversight):
 
 - Machine control over WiFi.
 - Automatic probing.
-- Autolevelling (`G32`).
+- Autolevelling (`G32`) *in the file*. The printed blank is domed (about 0.33 mm across its
+  width), so the job runs `G32 R1` at the machine before cutting and `M370` after — a run-sheet
+  step (#176), in the firmware; the `.nc` the app writes is unchanged.
 - 3D surfacing.
 - V-carving.
 - Laser work.
@@ -71,18 +75,22 @@ not a wiki page):
 | Automatic tool changer | **none** — you change cutters by hand |
 
 **The three probes.** Three things ship or are sold under nearly identical names, they all
-install the same way and plug into the same connector. Only **one** can touch off
-non-conductive material like wood or PLA. Getting this wrong means the whole workflow does
-not work at all.
+install the same way and plug into the same connector. Makera's pages rate only one of them
+for non-conductive material like PLA — and the bench says otherwise, so read the table with
+the paragraph under it.
 
 | Probe | Axes | Materials |
 |---|---|---|
-| **Wired probe** (in the box) | Z only, plus surface levelling and area scanning | not stated |
+| **Wired probe** (in the box) | Z only, plus surface levelling and area scanning | not stated by Makera — **measured 2026-10-08: a mechanical tip that triggers on PLA** |
 | **3D Probe Rod** (in the box) | X, Y and Z | **conductive only** — the workpiece must be electrically connected to the aluminium table |
 | **Makera 3D Probe** (separate accessory) | X, Y and Z | both conductive **and non-conductive** |
 
-For a wood blank you need the **separate Makera 3D Probe**. The rod that came in the box
-cannot do it.
+**The wired probe is the one in use.** It is a mechanical touch tip — it registers on
+contact, conductive or not — and on 2026-10-08 it touched the printed PLA blank five times
+with a 0.001 mm spread between slow touches (`/Fabrication.md` decision 8, revised that day).
+So the Z touch-off and the surface levelling both use the probe that came in the box, with
+nothing to unplug. The **Makera 3D Probe** is held in reserve; the 3D Probe Rod cannot touch
+PLA at all.
 
 **The low-profile vise.** The **fixed jaw is on the left**. It locates the part in X and in
 rotation, and leaves it free to slide in Y. It mounts with the wasteboard removed. Its
@@ -271,34 +279,39 @@ Every refusal and warning has a short code. Chapter 8 lists all of them.
 simulation assumes a rigid, ideal machine: no deflection, no runout, no Z-chain error, no
 chatter."* Spelled out: it does not model how the cutter bends under load, how much the
 spindle and collet wobble, how far the Z stack creeps between a probe and a cut, or how the
-wood chatters when the cutter bites. It does not know about the fixture unless the fixture
+blank chatters when the cutter bites. It does not know about the fixture unless the fixture
 has been given to it, and it does not know whether your blank is the size you typed. It
 answers *"does this file's geometry overlap the stock where I think it does"*. It does not
 answer *"will this come out clean"*.
 
 ---
 
-## 5 · Engrave text into wood — CNC-2
+## 5 · Engrave text into the blank — CNC-2
 
-> **Status: Planned** — CNC-2 (#200, #201, #202, #203, #204, #205, #206, #207). Not in the
-> app yet; this section describes the design.
+> **Status: Partly available** — CNC-2's bench half is open: #208 (at the machine), #209 and #165 (measured feeds).
+> The **Engrave text** panel itself is in the app — steps 1–8 below (#200, #201, #202, #203,
+> #204, #205, #206, #207, all shipped, with #213, #244 and #271 beside them); steps 9 and 10
+> are the unconfirmed bench half. Each step is marked.
 
-This is a walkthrough of the default job, start to finish. Today the engine pieces exist
-(the job document, the tool-radius check, the vise envelope, the feeds model), but there is
-no **Engrave text** panel yet — the screen is designed, not shipped. **Read every step as
-future tense.**
+This is a walkthrough of the default job, start to finish: a printed two-colour PLA blank in
+the vise, with words engraved to different depths. Steps marked **in the app** describe the
+shipped screen; the two marked **bench** are written in the future tense on purpose, because
+nothing has confirmed them on a machine yet.
 
-The **Engrave text** entry will sit in the sidebar next to **Simulate .nc**, and — like
-every other part of this — **it ends at a `.nc` file you upload with Makera Studio.** Case
-Maker will not start the machine.
+The **Engrave text** entry sits in the sidebar next to **Simulate .nc**, and — like every
+other part of this — **it ends at a `.nc` file you upload with Makera Studio.** Case Maker
+does not start the machine.
 
-**1. Describe the blank (#205).** You will type the stock's length (X), width (Y) and
-thickness (Z), and pick a material (softwood, hardwood, MDF, PLA). X runs between the vise
-jaws; the fixed jaw is on the left. The stock's front-left corner is the work origin.
+**1. Describe the blank (#205, #271) — in the app.** Type the stock's length (X), width (Y)
+and thickness (Z), and pick a material. The job's material is **PLA**, the printed blank; the
+starting table also carries softwood, hardwood and MDF rows for a blank that is not the badge.
+Or press **Use the badge blank**: it takes the stock and the magnet pocket from the project's
+own badge, so nobody retypes 76.2 × 38.1 × 3.81 (chapter 6). X runs between the vise jaws;
+the fixed jaw is on the left. The stock's front-left corner is the work origin.
 
-**2. Add labels (#200, #205).** Each label will carry its own text, font, weight, cap height,
-position on the blank, rotation and **depth**. The editor will show a depth box with a
-slider beside it — never a slider alone, because depth is a number you will want to type.
+**2. Add labels (#200, #205) — in the app.** Each label carries its own text, font, weight,
+cap height, position on the blank, rotation and **depth**. The editor shows a depth box with
+a slider beside it — never a slider alone, because depth is a number you will want to type.
 Labels at different depths are normal: the default job is three words at 2.0, 1.0 and
 0.5 mm.
 
@@ -306,12 +319,12 @@ Labels at different depths are normal: the default job is three words at 2.0, 1.
 
 *Design mockup — not the shipped screen.*
 
-**3. Choose the cutter; read the lost-detail warnings (#201).** With the labels set, the app
-will work out which cutter keeps the most of each glyph and put the best one first —
+**3. Choose the cutter; read the lost-detail warnings (#201) — in the app.** With the labels
+set, the app works out which cutter keeps the most of each glyph and puts the best one first —
 *"Largest cutter that keeps every label intact."* You can pick another; the app keeps your
-choice and offers the recommendation back. A **Why?** disclosure will list every cutter
+choice and offers the recommendation back. A **Why?** disclosure lists every cutter
 considered with its worst label and the percentage kept. When a label loses detail, a warning
-under that row will say what to do — *"‘Maker' at 4 mm loses 96 % of its area with a 1.0 mm
+under that row says what to do — *"‘Maker' at 4 mm loses 96 % of its area with a 1.0 mm
 cutter — increase to 6 mm or more."* When a label breaks through the floor, an error, not a
 warning, and Generate stays disabled until it is fixed.
 
@@ -328,9 +341,9 @@ them, including the ones you added yourself.
 *Design mockup — not the shipped screen.*
 
 **4. Describe the vise; what "unmeasured defaults" means; save your own measurements
-(#203).** The jaws are what hold the blank and what the tool must not hit. Their dimensions
-are published nowhere, so the app will ship **unmeasured defaults** and say so. Two buttons
-will record your own: **Save as my vise** and **I just measured these**. Until you measure,
+(#203) — in the app.** The jaws are what hold the blank and what the tool must not hit. Their
+dimensions are published nowhere, so the app ships **unmeasured defaults** and says so. Two
+buttons record your own: **Save as my vise** and **I just measured these**. Until you measure,
 `vise-default` is a standing warning and collisions cannot be trusted.
 
 **Sacrificial material (#213).** Alongside the vise you can say what else is in the setup: a
@@ -354,8 +367,8 @@ that it modelled it; the run sheet gains a **side view** of the assembly (see st
 enter your own sizes the dimensions are unmeasured defaults and `sacrificial-default` warns,
 exactly as for the vise.
 
-**5. Cutting parameters (#202).** Spindle speed, feed, plunge, step-down and step-over will
-be shown with **where the number came from**, and none of it is a recommendation. Where
+**5. Cutting parameters (#202) — in the app.** Spindle speed, feed, plunge, step-down and
+step-over are shown with **where the number came from**, and none of it is a recommendation. Where
 Makera's own library has a row for your cutter and your material, the panel starts from
 **their** numbers: the fields it actually answers are tagged `Makera` and the section is labelled
 **"Makera's catalogue — not measured"** (#310), clamped to the Z1 — a 15 000 RPM row arrives
@@ -371,16 +384,16 @@ starting table instead, and `catalogue-ignored` names the row and the number it 
 panel keeps **"starting values — unmeasured"**. Step-over is always the app's own 45 %, never
 the catalogue's 63 % of the tip (#191). You can override each one.
 
-**6. Generate — the three checks (#206).** Pressing **Generate** will produce the toolpath
-and then run three gates, each a row with a tick or a cross:
+**6. Generate — the three checks (#206) — in the app.** Pressing **Generate** produces the
+toolpath and then runs three gates, each a row with a tick or a cross:
 
 - **Toolpath generated** — operations, move count and an estimated time.
 - **Verified** — the toolpath re-read and checked against the stock: it does not exit the
   stock, does not cut deeper than the floor allows, and stays clear of the fixture.
 - **Simulated** — the toolpath swept and compared against the predicted region.
 
-**Nothing is written to disk until all three rows are ticks.** The **Save .nc…** button will
-stay disabled while any gate fails, with the reason beside it. This is the answer to *"why is
+**Nothing is written to disk until all three rows are ticks.** The **Save .nc…** button
+stays disabled while any gate fails, with the reason beside it. This is the answer to *"why is
 Save disabled?"* in the troubleshooting table: one of the three checks has not passed, and
 the failing row says which.
 
@@ -397,9 +410,9 @@ together. Nothing is re-derived at save time: the frame is the one the verifier 
 
 *Design mockup — not the shipped screen.*
 
-**7. Watch it in the simulator before the machine.** The engrave preview will draw the blank
-with each label's floor cut in and coloured by depth on a fixed ramp, so the same depth is the
-same colour in every job. What it draws is the **opened region** — the glyph grown and shrunk
+**7. Watch it in the simulator before the machine — in the app.** The engrave preview draws
+the blank with each label's floor cut in and coloured by depth on a fixed ramp, so the same
+depth is the same colour in every job. What it draws is the **opened region** — the glyph grown and shrunk
 back by the cutter's radius — so inside corners are rounded and strokes thinner than the
 cutter have vanished. That is what the cutter will actually make, not an idealised glyph.
 
@@ -407,9 +420,9 @@ cutter have vanished. That is what the cutter will actually make, not an idealis
 
 *Design mockup — not the shipped screen.*
 
-**8. Print the run sheet (#207).** A **Run sheet** lists, on one page, the cutter, the work
-origin, the stock, the feeds and the steps to follow at the machine, so you are not reading a
-phone next to a spinning cutter. Its work-origin section is **derived from how the part is
+**8. Print the run sheet (#207) — in the app.** A **Run sheet** lists, on one page, the
+cutter, the work origin, the stock, the feeds and the steps to follow at the machine, so you
+are not reading a phone next to a spinning cutter. Its work-origin section is **derived from how the part is
 held** (#272, decision 26), not written out by hand: it says what the jaws already reference and
 to what accuracy, names each edge to touch on the blank in physical words ("the back edge — the
 one furthest from you, about 19 mm along from the left end"), and reports the residual the
@@ -420,10 +433,10 @@ section also carries a **side view** of the assembly — the jaws at the faces t
 the board, the strips and the part, each at its own thickness, with Z = 0 drawn on the *part's*
 top face so the datum cannot be probed on the board by mistake.
 
-> **Placeholder — no capture yet.** The run-sheet screen has no mockup; it is designed in
-> #207. A screenshot will go here when it ships.
+> **Placeholder — no capture yet.** The run sheet shipped with #207 but has not been
+> captured for this guide. A screenshot will go here.
 
-**9. At the machine.**
+**9. At the machine — bench.**
 
 > **⚠ These steps have not yet been confirmed on a machine.**
 
@@ -432,12 +445,15 @@ top face so the datum cannot be probed on the board by mistake.
 > their photographs will go.
 
 The steps, in prose, will be: mount the correct cutter and probe its length; fit the blank in
-the vise and confirm it is proud of the jaws; set the work origin with the Makera 3D Probe;
-upload the `.nc` with Makera Studio; run the job with your hand on the stop. When #208 and
-#209 record the real screens and numbers, the assumed numbers here become measured ones.
+the vise and confirm it is proud of the jaws; set the work origin with the **wired probe**
+(chapter 2 — it touches PLA, and the single Z touch is what sets the depth window); run
+`G32 R1` over the engraved area, because the printed blank is domed, and `M370` when the job
+is done (#176); upload the `.nc` with Makera Studio; run the job with your hand on the stop.
+When #208 and #209 record the real screens and numbers, the assumed numbers here become
+measured ones.
 
-**10. After the cut.** Measure the actual depth of each floor and compare it with what you
-asked for. The difference is the Z-chain error the simulation cannot see (`/Fabrication.md`
+**10. After the cut — bench.** Measure the actual depth of each floor and compare it with
+what you asked for. The difference is the Z-chain error the simulation cannot see (`/Fabrication.md`
 §7.6) — the sum of probe repeatability, `M491` tool-length repeatability and how the collet
 seats. Writing it down is how the assumed numbers become measured ones.
 
@@ -445,8 +461,10 @@ seats. Writing it down is how the assumed numbers become measured ones.
 
 ## 6 · Two-colour badges — CNC-3
 
-> **Status: Planned** — CNC-3 (#165, #205). Not in the app yet; this section describes the
-> design.
+> **Status: Partly available** — CNC-3 (#165, #205). The badge blank is in the app: **Use
+> the badge blank** on the Engrave panel takes the stock and the magnet pocket from the
+> project's badge (#271). The surface/reveal depth choice (decision 20) is not in the panel,
+> and #165's measurement pass has not run.
 
 A **two-colour badge** is a blank printed in two colours stacked in Z — the lower colour
 underneath, the top colour above. Where the engraving cuts deeper than the boundary between
@@ -464,8 +482,14 @@ bottom one (**"reveal"**). A continuous slider would imply a continuous set of o
 the two-colour stack does not have. So the badge will offer two states, and the honest default
 between them carries the meaning.
 
-This chapter describes **no screen**, because there is no mockup for one yet (#165). It
-describes what the feature is and what has to be true first. See also CNC-3 #165.
+**What is on screen today, and what is not.** One button: **Use the badge blank**, at the top
+of the Engrave panel's *Stock* section (chapter 5, step 1). It reads the project's badge —
+76.2 × 38.1 × 3.81 mm PLA by default — and sets the stock to that blank and declares its
+magnet pocket as a void the depth limit respects, then states back in a sentence what it set.
+Nothing else in the job changes. The two-state depth choice is **not** there: a label's depth
+is still a number in a box, and the colour boundary it is measured against is still #165's to
+measure. Until then the badge is a blank the app knows the shape of, not yet a job it knows
+the depths for.
 
 ---
 
@@ -537,7 +561,9 @@ Makera's. **Clone** copies the selected row.
 **Sync catalogue** re-reads Makera Studio's library on this PC (#308). A sync can succeed and still
 have something to say — a library file it could not read and replaced, feed rows whose cells Studio
 left empty — and those sentences are listed under the result, below the counts, where they stay
-until the next sync (#328). **Export** and **Import** move the house as a `house.json` file.
+until the next sync (#328). Each carries its weight: a sync that **lost** something (a replaced
+file, an emptied feed matrix) is marked in amber, information is not. The service remembers the
+last sync's notes, so they are still there after a restart, dated. **Export** and **Import** move the house as a `house.json` file.
 
 **No service: the Tools scope is absent, not broken.** The cutters live in a small service the
 desktop app runs. With nothing running, the app does not show you an empty list or a broken one — it
@@ -816,7 +842,7 @@ splits it, and a field with no `=` is kept rather than dropped.
 | **The simulation says the cutter hits the vise** | A `holder-collision` or fixture finding (#203). The jaws and the blank's height above them disagree; re-check the vise numbers and how proud the blank sits. |
 | **The simulator refuses my file** | See the refusal banner's code: `laser-job`, `rotary-job`, `dense-3d-refused`, or `tool-refused`. Chapter 8.1 explains each. |
 | **The part came out mirrored / rotated / offset** | The work origin or the placement is wrong. The app's `placement: stub` badge means it assumed the position; on the machine, re-probe the origin. Also check `stock-axes-unverified` — which stock dimension runs along X is unverified. |
-| **Why does it say "starting values, unmeasured"?** | No feed or speed has been measured on this machine in this wood yet (#209). They are a place to start, not a recommendation. |
+| **Why does it say "starting values, unmeasured"?** | No feed or speed has been measured on this machine in this material yet — #165 for the PLA blank, #209 for the first chips. They are a place to start, not a recommendation. |
 | **Why does it say "Makera's catalogue — not measured"?** | Makera's own library has a row for your cutter and material, so the panel starts from their numbers instead of ours (#310). Still not a measurement *of this machine* — and still clamped to its 13 000 RPM ceiling. Cut a coupon and the bench's reading replaces it. |
 
 ### 8.5 Glossary

@@ -18,8 +18,8 @@
  * are long-lived and reached over Comlink, so a `localStorage` or Zustand registry is invisible
  * inside them. `Tool` is plain data and crosses by structured clone — the pattern `simLoad` uses
  * — so the workers are handed the list as an argument and read `toolForJob` themselves
- * (`engravePreview(job, tools, gen)`), and nothing under `src/workers/` touches this module's
- * state at all.
+ * (`engravePreview(job, tools, catalogue, gen)` since #324), and nothing under `src/workers/`
+ * touches this module's state at all.
  *
  * **A job names its cutter twice.** `job.toolKey` is the key (unchanged, so no saved document
  * needs migrating), and `job.tool` is the materialised `Tool` the job was written with (#305

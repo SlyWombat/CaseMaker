@@ -17,6 +17,19 @@
  * for (`--cm-font-display` 500/600/700, body 400/500/600, mono 400/500), so there is nothing to
  * keep in step as weights are added. Licences sit beside the files: all three are SIL OFL 1.1, the
  * licence #180 already settled for the engraving fonts (#84).
+ *
+ * WHERE EACH FILE CAME FROM. Fetched from each project's own repository, never the Google Fonts
+ * CSS endpoint, and checked for the `wOF2` signature after download (#330, 2026-10-10):
+ *
+ *   SpaceGrotesk-Variable.woff2   github.com/floriankarsten/space-grotesk
+ *                                 fonts/woff2/SpaceGrotesk[wght].woff2 (49 256 bytes, wght 300–700)
+ *   Inter-Variable.woff2          github.com/rsms/inter
+ *                                 docs/font-files/InterVariable.woff2 (352 240 bytes, wght 100–900)
+ *   JetBrainsMono-Variable.woff2  github.com/JetBrains/JetBrainsMono
+ *                                 fonts/webfonts/JetBrainsMono[wght].woff2 (113 672 bytes, wght 100–800)
+ *
+ * No release tag was recorded at fetch time — the repositories' default branches as of
+ * 2026-10-10. The byte counts are the way to tell a refetched file from the committed one.
  */
 
 @font-face {

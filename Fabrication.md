@@ -343,7 +343,7 @@ accepted.
 | 9 | **First real job is a 3D-printed blank (PLA/PETG)** | The badge. **Reworded 2026-10-05:** the first *badge* job; CNC-2's first chips are wood in the vise (#209) and the badge is CNC-3. `/Makera-Parity.md` §14.5. |
 | 10 | **Transport is WiFi** | Still the chosen transport. **Not in V1** — see §10.1. |
 | 11 | **4th axis: designed for, not built** | See decision 18. **Design in `/Rotary.md` (decisions R1–R12).** |
-| 12 | **The depth window is bed-referenced; `G32` is not an input.** | See §7. **The clause "measured stock thickness is the required input" is superseded by decision 24** — after the flip, total thickness is not a job input at all. "Bed-referenced" survives and is strengthened: the printer's bed face *is* the engraved face. **2026-10-07 (#191 item 10):** the objection to `G32` is that a *point* Z touch already sets the depth window, and that stands for the vise. It does not cover a **taped** blank, whose residual is a *tilt* one touch cannot see (§7.3) — and a tilt is a height field, which is what `G32` samples. So `G32` stays out of the depth window and is **re-openable for taped setups only**, on the four-corner spread `docs/bench/191-tape-tilt-run-sheet.md` measures. §9.1. |
+| 12 | **The depth window is bed-referenced; `G32` is not an input.** | See §7. **The clause "measured stock thickness is the required input" is superseded by decision 24** — after the flip, total thickness is not a job input at all. "Bed-referenced" survives and is strengthened: the printer's bed face *is* the engraved face. **2026-10-07 (#191 item 10):** the objection to `G32` is that a *point* Z touch already sets the depth window, and that stands for the vise. It does not cover a **taped** blank, whose residual is a *tilt* one touch cannot see (§7.3) — and a tilt is a height field, which is what `G32` samples. So `G32` stays out of the depth window and is **re-openable for taped setups only**, on the four-corner spread `docs/bench/191-tape-tilt-run-sheet.md` measures. §9.1. **Revised 2026-10-09 (#166).** The vise clause did not survive the bench: the printed blank is **domed** — ~0.33 mm centre-to-edge across its 38 mm width, ~0.1 mm along its length (`/Z1-Firmware-Dialect.md` §11.8), larger than the colour boundary's tolerance — so a point datum is *not* all a flat-part-on-flat-jaw needs, because the part is not flat. `G32 R1` grid autolevel over the engraved area **returns for the vise job too**, cleared with `M370` at the end of the job. What stands: the single-point Z touch still sets the depth window, and `G32` is still not an *input* to it — the compensation is in firmware, the `.nc` is unchanged, and the verifier keeps working in the part frame with its limit relative to the local surface by construction. The grid, its extent and the run-sheet step are #176's. |
 | 13 | **The blank must be printed 100 % infill, and its spec is part of the depth model** | See §7. |
 | 14 | **V1 cuts with a flat end mill, not a V-bit** | A V-bit couples depth to stroke width, so per-label depth stops meaning what the UI says. V-carve is V2. |
 | 15 | **Engravability is computed and rendered, not assumed** | Tool radius removes glyph detail; the viewport shows the *opened* region and the predicted colour. |
@@ -1881,7 +1881,10 @@ The model settles geometry. These need the machine:
   touch. Nothing has measured whether that drift is a tenth of the badge's 0.810 mm colour
   boundary or half of it (§7.1), and it is the one live reason `G32` might come back (§9.1).
   Four corner touches size it:
-  `docs/bench/191-tape-tilt-run-sheet.md`. #191 item 10.
+  `docs/bench/191-tape-tilt-run-sheet.md`. #191 item 10. **Revised 2026-10-09 (#166):** no
+  longer the *one* reason — the blank's own dome (~0.33 mm across its width, measured
+  2026-10-08) brought `G32 R1` back for the vise job as well (decision 12). The tape tilt is
+  still unmeasured and still its own row.
 - **PLA finish at 13 000 RPM.** A parameter table, not a design risk. #165 records it.
 
 ## 8. Safety constraints
@@ -1912,7 +1915,7 @@ each is recorded above and keeps its decision number.
 | Deferred | Why it is not in V1 |
 |---|---|
 | **WiFi machine bridge** (decision 10) | Studio already uploads over WiFi. A protocol reverse-engineer plus a Windows-only dev loop on the critical path buys nothing a working `.nc` doesn't. |
-| **`G32` autolevel** (decision 7) | §7.1 — in the **vise** it addresses the wrong error: the probe sets the depth window from the face, and a point datum is all a flat-part-on-flat-jaw needs. **For tape it is the right *shape* of tool and is not closed** (added 2026-10-07, #191 item 10): a taped blank's residual is a *tilt* (§7.3), a tilt is a height field, and `G32` samples exactly that — so it comes back **for taped setups only**, on the four-corner spread `docs/bench/191-tape-tilt-run-sheet.md` measures, and never as an input to the bed-referenced depth window (decision 12). Also re-add if **#176** shows warp matters after clamping in the nest. |
+| **`G32` autolevel** (decision 7) | §7.1 — in the **vise** it addresses the wrong error: the probe sets the depth window from the face, and a point datum is all a flat-part-on-flat-jaw needs. **For tape it is the right *shape* of tool and is not closed** (added 2026-10-07, #191 item 10): a taped blank's residual is a *tilt* (§7.3), a tilt is a height field, and `G32` samples exactly that — so it comes back **for taped setups only**, on the four-corner spread `docs/bench/191-tape-tilt-run-sheet.md` measures, and never as an input to the bed-referenced depth window (decision 12). Also re-add if **#176** shows warp matters after clamping in the nest. **Revised 2026-10-09 (#166): it is back, for the vise job too.** The 2026-10-08 probe pass found the printed blank domed ~0.33 mm across its 38 mm width (`/Z1-Firmware-Dialect.md` §11.8) — the warp the previous sentence was waiting for, measured before #176 ran — so the job runs `G32 R1` over the engraved area and `M370` at its end. The single-point Z touch still sets the depth window; `G32` is still not an input to it (the `.nc` is unchanged, the compensation is the firmware's). The grid's extent and the run-sheet step are #176's, which also answers §9.4's long-straight-move question on the bench. |
 | **Heightmap/dexel engine** (decision 2) | Nothing in V1 is 3D. **#182** does exact 2.5D stock simulation with CSG, and **#174** re-parses the output — between them that is the stock check V1 actually needs, with no sampled grid. |
 | **4th-axis fields in the IR** (decisions 3, 11) | Adding an `A` to a move record later is one line. Adding it now is a field nobody tests. **Confirmed by `/Rotary.md` R5** — A stays out of `Pos`/`commanded`/`values`; the three R-0 reservations (`ToolpathIR.frame`, the second `zDatum`, the cylinder WCS on the axis) are the recorded exception. |
 | **Image methods** (decision 5) | V1 is text. |
@@ -2003,9 +2006,9 @@ physical engraved badge, `[F]` = follows.
 
 **[F] Deferred**, each with its reasoning in §9.1: **#181** web/desktop build split
 (prerequisite for the bridge, not for V1) ·
-feeds/speeds from `makera_library.db` · WiFi bridge · `G32` option if #176 or the
-taped-blank tilt (#191 item 10) justifies
-it · V-carve · `Project.kind` · multi-tool jobs · importer registry · image methods ·
+feeds/speeds from `makera_library.db` · WiFi bridge · `G32` — **no longer deferred since
+2026-10-09 (#166)**: the dome brought it back for the vise job, the run-sheet step is #176's
+· V-carve · `Project.kind` · multi-tool jobs · importer registry · image methods ·
 heightmap engine · 4th axis.
 
 **#182 needs #174's parser, not #172** — it simulates the emitted `.nc` (`/Simulation.md`
@@ -2030,4 +2033,7 @@ way (#174, rescoped 2026-10-03). #175 needs only #167. #176 needs all of them.
   are short segments, but the stem of an `I` is one long `G1`. Only matters if `G32`
   comes back into scope — and the taped-blank tilt (#191 item 10, §7.3) is now the one
   live reason it might, so this question stops being hypothetical the moment that row is
-  run on a taped blank.
+  run on a taped blank. **Revised 2026-10-09 (#166):** `G32` is back in scope for the vise
+  job (decision 12), so the question is live now. **#176 answers it on the bench** — one long
+  stroke, measured at its ends and its centre. If it fails, the post splits long `G1`s, a
+  `post/z1.ts` change and not a verifier one.
