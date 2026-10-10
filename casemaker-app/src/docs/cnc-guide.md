@@ -312,9 +312,9 @@ under that row will say what to do — *"‘Maker' at 4 mm loses 96 % of its are
 cutter — increase to 6 mm or more."* When a label breaks through the floor, an error, not a
 warning, and Generate stays disabled until it is fixed.
 
-Today that list holds the app's two built-in cutters, and the recommendation chooses between
-them. Once the cutter registry lands (#212, §7), it holds **the cutters you own** and the same
-recommendation ranks those — including the ones you added yourself.
+The list holds every cutter a job can name: the app's two built-ins always, and — once the
+**house** (§7) is reachable — **the cutters you own** beside them. The recommendation ranks all of
+them, including the ones you added yourself.
 
 ![The cutter recommendation with its reason](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-engrave-tool-recommendation.png)
 
@@ -354,12 +354,15 @@ exactly as for the vise.
 **5. Cutting parameters (#202).** Spindle speed, feed, plunge, step-down and step-over will
 be shown with **where the number came from**, and none of it is a recommendation. Where
 Makera's own library has a row for your cutter and your material, the panel starts from
-**their** numbers: the four fields are tagged `Makera` and the section is labelled
+**their** numbers: the fields it actually answers are tagged `Makera` and the section is labelled
 **"Makera's catalogue — not measured"** (#310), clamped to the Z1 — a 15 000 RPM row arrives
-as 13 000, and a row far above the ceiling is refused outright. Where the library has no row
-— PLA, the badge job's material, has none at all — the panel keeps **"starting values —
-unmeasured"**. Step-over is always the app's own 45 %, never the catalogue's 63 % of the tip
-(#191). You can override each one.
+as 13 000, and that field stops being tagged `Makera`, because the ceiling is the machine's and
+not theirs. A row stating a number this job cannot use — a `0` in a cell Studio never filled, or
+a speed far past the ceiling — does **not** fail the job: that one field comes from the app's
+starting table instead, and `catalogue-ignored` names the row and the number it passed over
+(#325). Where the library has no row — PLA, the badge job's material, has none at all — the
+panel keeps **"starting values — unmeasured"**. Step-over is always the app's own 45 %, never
+the catalogue's 63 % of the tip (#191). You can override each one.
 
 **6. Generate — the three checks (#206).** Pressing **Generate** will produce the toolpath
 and then run three gates, each a row with a tick or a cross:
@@ -459,11 +462,98 @@ describes what the feature is and what has to be true first. See also CNC-3 #165
 
 ---
 
-## 7 · Later — CNC-4 and CNC-6
+## 7 · Your cutters — the house (CNC-6)
 
-> **Status: Planned** — CNC-4 (#181, #185, #189) and CNC-6 (#212). None of these is started.
+> **Status: Partly available** — the **Manage** screen (#311, tracking #212), the house service
+> behind it (#306, #308) and the three **Register** doors (#309) are in the app, so you can see and
+> register the cutters you own today. Nothing in CNC-4 (§7.1) has started.
 
-Four things are on the far side of this work, and none of them is in the app.
+**What this is, first.** Your cutters are not a property of the case you are building, and not a
+property of the Z1: they belong to the **house**. They outlive the machine they were bought for and
+get shared between machines, so they live in their own place — and that place opens with **no
+project open**.
+
+**Where it is.** **🧰 Manage** sits in the toolbar beside **✨ New**. It is a **mode**, not a
+sidebar section: a sidebar section belongs to a project, and there is no project here. Opening it
+replaces the working area; closing it puts you back where you were.
+
+**The rail.** Two scopes today — **House → Tools** (the cutters) and **Machines** (the Z1's
+connection and profiles). **Materials** is drawn in the rail greyed and tagged *later*: the slot is
+shown so you can tell a reserved place from a broken one, but nothing is built behind it. The foot
+of the rail states the service in one line.
+
+**House → Tools: the list.** Every cutter a job could name, **grouped by where it came from** —
+**Owned**, **Yours**, **Makera catalogue**, **Built-in** — so a shipped assumption is never sitting
+beside a cutter you own without a label between them. Each row carries shape, tip ⌀, shank, flute,
+shoulder, stick-out, quantity and its tier. A length nobody stated prints as **—**, never `0`. A
+search box and one chip per tier narrow the list, and the counts line says how many definitions
+there are and how many fall in each tier.
+
+![Manage, House → Tools, with a service present](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc-mockup-manage-tools.png)
+
+*Design mockup — not the shipped screen.*
+
+**The four tiers, and why they are labelled.** **Built-in** is the two cutters the app has always
+had, and they are permanent — they are in the list with no service running, because a simulation has
+to have something to run with. One of them is literally named *"1 mm flat end (assumed)"*: its
+geometry is an assumption, and the name says so rather than dressing it up as a measurement.
+**Makera catalogue** is Makera Studio's own cutter library, imported read-only; you **pick** from
+it, you never edit it. **Yours** is a cutter you own whose definition you changed — a slower speed,
+a different reach out of the collet. **Owned** is a physical cutter in your drawer, with a quantity
+and the code printed on its box.
+
+**Changing a vendor's cutter: clone, never edit.** A catalogue row states what Makera says about
+that cutter, and that is not yours to rewrite. Changing anything makes a **clone** — a *Yours* row
+that keeps the numbers it was copied from and records, in a sentence, what it was cloned from. The
+cutter in the drawer stays a separate **Owned** row pointing at a definition, so one physical
+cutter can show up twice, once owned and once yours, by design: one is the thing you hold, the other
+is the numbers you chose for it.
+
+**The detail rail.** Selecting a row shows the definition read-only, with the catalogue id it came
+from when it came from the catalogue; **Clone to change**; the inventory (quantity, when it was
+added, your notes); and the codes printed on the box. **Codes are never looked up online** — a code
+is matched against what has already been recorded on this machine.
+
+**The actions.** **Register ▾** opens the three ways to add a physical cutter. **Scan** takes a
+barcode scanner's keystrokes or a typed code — the field has the focus, and Enter is the read. What
+a code names is shown rather than guessed: a cutter you already have becomes a **count** (a code
+names a possession, so scanning one you own adds one rather than making a second row); catalogue rows
+that fit the reading are offered for you to pick the one on the label; a code nothing fits is read
+back and offered to the other two doors. The reading is **provisional** — the format is fitted to one
+label, and the panel says so. The camera is an addition where the browser can drive one, and never
+the only way in. **Catalogue** is a search over the synced rows. **Type** is the form, where a blank
+length means *unknown*, never `0`. Registering makes an **Owned** row and leaves the definition
+Makera's. **Clone** copies the selected row.
+**Sync catalogue** re-reads Makera Studio's library on this PC (#308). **Export** and **Import**
+move the house as a `house.json` file.
+
+**No service: the Tools scope is absent, not broken.** The cutters live in a small service the
+desktop app runs. With nothing running, the app does not show you an empty list or a broken one — it
+says why, in the service's own words, and reminds you that the two built-ins need no service at all.
+**Check again** asks the origin a second time. This is the same treatment the Start wizard gives a
+machine it cannot find.
+
+![No house service — Tools is absent, not broken](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc-mockup-manage-absent.png)
+
+*Design mockup — not the shipped screen.*
+
+**Machines.** The Z1's card is the record of a moment: the connection state in the machine's own
+words, when it was checked, and the profile it resolved. **Check for a machine** and an address
+field sit in the header — the same probe the Start wizard uses, two doors onto it — and **Check
+again** re-runs it. The **"my machine" file** (Export / Import) moves here. A card for printers is
+drawn muted, claiming no connection, because Machines reads as everything that makes a part.
+**Forget** is the only thing here that writes. Bench power is deliberately *not* here: switching
+the machine on is a physical act, not a setting.
+
+![Machines — the Z1's card](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc-mockup-manage-machines.png)
+
+*Design mockup — not the shipped screen.*
+
+### 7.1 · Still later — CNC-4
+
+> **Status: Planned** — CNC-4 (#181, #185, #189). None of these is started.
+
+Three things are on the far side of this work, and none of them is in the app.
 
 **Sending the job to the machine (#181).** A bridge that uploads the `.nc` to the Z1 over
 WiFi and starts it, so you do not open Studio at all. This is the "one flag for the user"
@@ -479,20 +569,6 @@ confident position instead of a blind one. Not started.
 **V-carving small text (#185).** A V-bit couples depth to stroke width, so it can reach
 strokes a flat end mill cannot — but it needs a medial-axis engine, and it is V2 by decision
 (`/Fabrication.md` §7.4). Not started.
-
-**Keeping track of your own cutters (#212).** Today the app knows **two** cutters, and both
-are shipped assumptions — the 1 mm flat end is literally named *"1 mm flat end (assumed)"*.
-The plan is a registry of the cutters **you actually own**: Makera Studio's own cutter list
-imported as a read-only catalogue to pick from, your cutters added by scanning the label on
-the box or typing the code printed on it, and any change you want — a slower speed, a
-different reach out of the collet — made by **copying** a catalogue entry rather than editing
-it, because a vendor's numbers are not yours to rewrite. Cutters belong to the **house**, not
-to a machine: they outlive the machine they were bought for and get shared between machines.
-So the list lives in the small local service the desktop app already runs, which means a
-browser on your own network sees the same cutters; with nothing running, the app quietly
-falls back to the two built-ins rather than showing you a list it cannot vouch for. None of
-it is started, and no screen gets written until a mockup is agreed — the same rule the
-Simulate chapter followed. See #212 for the whole picture, #311 for the screen.
 
 ---
 
@@ -618,6 +694,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `rpm-clamped` | warning | The requested spindle speed is above the Z1's 13 000 RPM and was clamped. | Expect a slower spindle. |
 | `feed-refused` | error | The requested feed is so far above the ceiling it was refused rather than clamped. | Use a sane feed. |
 | `rpm-refused` | error | The requested spindle speed is so far above the ceiling it was refused. | Use a sane spindle speed. |
+| `catalogue-ignored` | warning | Makera's own table states a number this job cannot use — a `0` (Studio writes one into a column it never filled) or a speed past the ceiling — so that one field comes from the app's starting table instead of from Makera (#325). The job cuts; it does not fail. | Nothing. If every cut of this material reads this way, the vendor's row is not the one you want — set your own value for that field. |
 
 **Planning the probe** (probe plan — #188). The run sheet's work-origin section is this plan,
 printed (#272); the codes below are raised by no screen yet — a refusal reaches the sheet as the
@@ -709,7 +786,7 @@ A record is a tag followed by `key=value` fields separated by `|`:
 |---|---|---|
 | `STOCK` | `id`, `length`, `width`, `height` | Prefills the stock dimensions (cuboid only). |
 | `ORIGIN` | `type_name`, `x`, `y`, `z` | A corner preset hint, cross-checked against the stock. |
-| `TOOL` | `number`, `id`, `name`, `type`, `diameter`, … | Matches a file to a tool in the library — the built-ins today, the cutters you registered once #212 lands (§7). |
+| `TOOL` | `number`, `id`, `name`, `type`, `diameter`, … | Matches a file to a tool in the library — the built-ins, and the cutters you registered (§7). |
 
 The full sequence Studio writes is `BEGIN`, `SCHEMA`, `MACHINE`, `MATERIAL`, `STOCK`,
 `ORIGIN`, `CAM`, `UNIT`, `TOOL`, `TIME`, `TOOLPATH`, `END` (`/Fabrication.md` §2). The

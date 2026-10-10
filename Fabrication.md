@@ -364,6 +364,7 @@ accepted.
 | 30 | **Catalogue rows are immutable; divergence is a clone** | Maintainer's rule, 2026-10-08: *"the core database tools cannot be changed, you can only clone to make speed changes."* So the imported catalogue is a read-only tier replaced wholesale on a re-sync, and everything the user owns is a **clone** — a `user_tool` holding the **fully materialised `Tool`** plus `base: {cutterId, g_ID, syncedAt}` and a **display-only** `overrides` diff of the fields that differ. Materialising rather than storing only the diff is the load-bearing half (the diff is never the source of a value): the clone keeps working when Makera discontinues the cutter or a re-sync drops its base row, and the diff is still there to render *"speed 9000 → 6000 (cloned)"*. Same discipline as decision 28 and `myMachineFile.ts` — values **and** their provenance, so a round trip cannot turn a measurement into a default. Physical possession is a *third*, separate record (`quantity`, scanned codes, `addedAt`) that points at a definition; a scan of a code that already exists offers `quantity + 1` and never a second row. #212, #305, #308, #309. |
 | 31 | **The house service — the bridge — is the source of truth for house state** | Maintainer's call, 2026-10-08: *"a bridge is required for any printing, so the bridge should keep the database; it should sync to any web instance."* The desktop UI and a browser on the LAN read and write the same stores over `/api/v1`, so per-browser `localStorage` owns nothing house-scoped. The hosted HTTPS app at electricrv.ca **cannot** reach a plain-HTTP service (mixed content is hard-blocked), so "sync to any web instance" means the clients the service itself serves, and the hosted app stays on the built-ins (#212). **With no bridge reachable the Tools scope is absent and the pickers fall back to `TOOL_LIBRARY`** — no offline cache and no reconcile, so the degradation is visible instead of silently divergent. Reaching a bridge is a **runtime fact, not a build target**: a browser on the LAN is the *web* build and still talks to a bridge, so `canRunLocalServer`/`canReadLocalFiles` gate *hosting and syncing*, never *reaching*; `machineProbe.ts` is the model (one configured URL, one probe, four honest answers, unreachable is a normal outcome). Tiered versioned JSON on disk, not SQLite — the schemas stay in Zod, nothing needs a query, and the API is the contract if that ever changes. §5.7, #306, #312. **Naming (#306):** in code, comments and the rest of this document this is the **house service**; "the bridge" in the quote above is the maintainer's word, and it already means the machine bridge (§5.7, #255), so `houseClient`/`house.rs`/`ToolRegistryStore` and `loadMachineBridge`/`machineProbe`/`machine.rs` never collide in a grep. |
 | 32 | **Feeds from `makera_library.db` are a catalogue tier *below* measurement** | Maintainer's call, 2026-10-08, correcting §9.1's 2026-10-05 line. The three objections in `/Makera-Parity.md` §5.1 — no PLA or PETG, no machine column, 32 rows above the Z1's ceiling — are reasons the table cannot be a **source**, not reasons it is useless. Adopted as a tier under the precedence `measured → job override → user feed → catalogue → unmeasured`, clamped through `clampToMachine`, each row carrying a `FieldSource` so a vendor number never reads as a measurement (decision 28's discipline, applied to feeds). It is genuinely useful for **wood** — CNC-2's material, #209 — and **can never serve the badge job at all**, because PLA has no row. A speed change is a `user_feed` row, not a clone. §9.1, #310. |
+| 33 | **The house service is not authenticated on a LAN, and that is a decision rather than an omission** | Maintainer's call, 2026-10-09 (#321): a house is served on the home LAN with **no token, no login and no account** — the app's own origin is the only address that answers (decision 31), the window it serves is the same one it was launched for, and a shared house on a home network has the LAN as its trust boundary. Saying so out loud is the point: an implicit "nobody thought about it" and a deliberate "the LAN *is* the boundary" look identical in the code and completely different when a second person or a second machine appears. What sharing therefore gates on is **not** identity but **concurrency**: one process serves the house (a directory lock), and every write that changes a document carries the version it was based on (`If-Match`), so two people or two windows cannot silently overwrite each other. Both are refusals the user can see; neither is a permission. Exposing the house beyond a trusted LAN — a port-forward, a shared office network — is out of scope and would need real authentication first. §5.7, #306, #321. |
 
 ---
 
@@ -807,6 +808,448 @@ the hardwood feed 400 mm/min, nothing claiming Makera.
 diagnostics and the panel renders none of them, so a catalogue row clamped from 15 000 to 13 000 is
 silent in the UI — the number is right and the user is not told it moved. It is a pre-existing gap
 (the panel never rendered `diagnostics`), not a regression, and #310's acceptance holds without it.
+
+**Implemented 2026-10-09 (#324): the rows are handed across, not remembered on the far side.** #310's
+tier resolved from **module state** — `let feedCatalogue` in `feeds.ts`, filled by
+`toolRegistryStore` — and that is where the defect lived: **a worker is a separate module realm**, so
+from the sim worker the same import read `[]`. Panel and program therefore disagreed about the same
+job: the panel showed Makera's hardwood numbers, and `engraveGenerate` posted the STARTING table's
+`S`/`F` into the `.nc`, which the run sheet then printed, because the sheet is built from that same
+worker result. Nothing caught it because the browser check read the panel and never the file
+(`qa-310-feeds.mjs`). The fix is #305's shape applied to feeds: `feedsFor` takes its rows as a
+**required first argument** — `feedsFor(catalogue, material, tool, machine, override?, table?)` — so
+worker code that forgot to say where its rows came from is a **compile error rather than a silent
+wrong number**, for the same reason `toolForIn` takes its entries. Module state survives only as the
+main thread's storage (`setFeedCatalogue` / `clearFeedCatalogue` / `feedCatalogueRows`); no resolver
+falls back to it. The rows are read once on the main thread and structured-cloned through the four
+layers that already carried the cutter — `EngravePanel` / `engravePreviewStore` / `engraveRunStore` →
+`simClient` → `sim.worker` → `engraveGenerate(job, tool, catalogue, calibration)` and
+`engravePreview(job, tools, catalogue, gen)` → `recommendTool(job, tools, catalogue, measure)`. **The
+preview needed it for a behavioural reason, not symmetry**: `feedsFor` refuses a row past the
+machine's ceiling, so a cutter the starting table alone would qualify is *excluded from the
+recommendation* once the real rows say 24 000 rpm — the picker and the generator were choosing from
+different lists. The three Node scripts (bench, job upload, upload check) pass `[]` and say why in a
+comment: a headless run has no house service. The two tests that would have caught it:
+`engraveGenerate.spec.ts` generates with a hardwood row loaded and asserts the `.nc` carries the
+row's `S`/`F` and **not** the starting table's, plus the same numbers on the run sheet;
+`engraveRunStore.spec.ts` fails if the store stops handing the rows over. Nothing vendor-derived is
+in the repository — the test row is hand-built (§3, #186).
+
+**Implemented 2026-10-09 (#319, #320): the service refuses at the door, because the far side's refusal
+is silent.** Both issues are one defect seen from two sides: a document the service accepts and the
+client refuses does not fail loudly, it makes the whole house read `absent` — catalogue tier and all —
+while `/health` still says ok, and nothing names the import that caused it. So the refusals moved to
+where the data is written.
+
+**#319 — a key this house stores is exactly `user:<something>`.** `validate_key` (which the client
+mirrors as `isToolKey`) refuses, with the reason it refuses: a key with no `user:` namespace, a
+namespace with nothing after it, a key with a **control character** (CR, LF, TAB, NUL) — a stored key
+is what the `.nc` header's tool field prints and, in the comment line carrying it, `user:a\nG0 Z-50`
+is a stored key that injects a line into every program generated with it — a `|`, which the header's
+tool line cannot carry, and whitespace at either end, **refused rather than trimmed** (`user:x` and
+`user:x ` are one cutter to a human and two keys to a `Map`; a silent rename is exactly what this
+contract exists to prevent). `cat:` is refused by case, since the catalogue belongs to a sync and not
+to this file. The client's half is the same rule applied to the **four** namespaces the app carries
+(`inv:`/`user:`/`cat:`/bare) — the client does not only write keys, it reads the catalogue's and the
+built-ins' — and it lives in `ToolLibrarySchema`, which parses `GET /tools`, so a key the service
+should not have stored is a refusal of the whole list rather than a row filed under the built-ins.
+
+**#320 — one document, validated whole, on the way in and on the way out.** `import` shape-checked
+and adopted; `HouseDoc::validate` now runs the full `ToolLibraryEntry` rule (provenance non-empty),
+unique tool keys, unique inventory ids and a code on exactly one cutter — in **`import`** (400,
+whole-or-nothing, store untouched) **and in `load`**, so a hand-edited `house.json` is a `problem` in
+`/health` with nothing served and writes refused, instead of being served into a panel that cannot
+read it. The rule #320 asked to be decided once: **a code value appears at most once in the whole
+inventory**, because `code → the item` is the door #309 is built on and must be a function; enforced
+in `create_inventory`/`update_inventory` too (change the other cutter's quantity, don't register the
+code twice). Two more of the same class — served in `/inventory` where the client refuses — fell out
+of the same reading: an empty `addedAt` and an empty `origin.id`.
+
+**The pairing is the test (#319/#320).** `tests/unit/fixtures/house-doc.json` is a committed,
+**synthetic** document (§3, #186) read by both sides: `house.rs::tests::the_shared_house_fixture_is_accepted_and_served_whole`
+imports it, serves it and round-trips it, and `tests/unit/houseContract.spec.ts` asserts it parses
+through the client's two schemas — then asserts that each mutation the service refuses is one **both**
+sides refuse. One list, two implementations: if either contract loosens, a test on the other side
+fails next to it. Evidence: `cargo test --lib` 60 passed (the seven break-mutations each refuse, leave
+`tools()` as `[]`, `problems` empty and no file written), the full vitest suite 3312 passed, typecheck
+clean. No browser QA, and none is possible — the service is the desktop shell, and the web build has
+no house (the same reason #324's panel-only check missed its defect).
+
+**Implemented 2026-10-09 (#327): a torn copy is refused, on both sides of the copy.** The sync takes a
+bare `fs::copy` of a database Studio writes in place (the header's bytes 18/19 are `1` — rollback
+mode), so a copy taken mid-commit can be torn. A torn copy does not have to fail to open or to query:
+the outcome worth refusing is the one that **parses and answers with fewer rows**, where every missing
+cutter is reported `removed` and its feed rows go with it until somebody happens to re-sync.
+
+Two checks, one either side of the copy.
+
+- **Before it: the source's sidecars.** A `-journal` or `-wal` with **anything** in it beside
+  `makera_library.db` means the main file is behind its own writes — rollback mode keeps the original
+  pages in the journal while the main file already carries the new ones, WAL keeps commits in `-wal`
+  until a checkpoint — so a copy of the main file alone is missing a transaction. The sync refuses and
+  names the sidecar and the consequence, with the one action that fixes it ("Open Makera Studio and
+  close it again, then sync"). An **empty** sidecar is not a pending write (`journal_mode=PERSIST`
+  leaves an empty journal after every commit, and a checkpointed `-wal` can be empty), so the at-rest
+  states still sync. This is a third mechanism, beyond the two the issue named, and it is the only way
+  the copy-first design can honour the "handles journal and WAL correctly" the backup API would have
+  given — the backup API reads Studio's live file, which the module's first promise forbids.
+- **After it: `PRAGMA integrity_check`** on the copy, before a row is read from it. `integrity_check`
+  and not the `quick_check` the issue named: the difference between them is the index-versus-table
+  cross-check and the UNIQUE checks, and an index that disagrees with its table is exactly what a main
+  file written without its journal looks like — with this module's SELECTs joining through
+  `t_MakeraCutterList.cutterId`'s primary-key index, a `quick_check`-clean copy can still answer the
+  wrong rows. Both a pragma that fails and a pragma that reports are the same refusal.
+
+Also: the cleanup removes the `-journal`/`-wal`/`-shm` beside the copy as well as the copy itself (a
+read-only open of a WAL-mode copy creates the first two in the temp directory, and the old cleanup
+left them there for good); `immutable=1` is deliberately **not** used, because a `file:` URI has to be
+hand-escaped for a Windows temp path with a space in it and a mis-escaped one fails the whole sync, so
+the sidecars are deleted by name instead; and a file whose pages cannot be read at all is refused as
+**damage** ("the copy did not verify … `database disk image is malformed`") rather than as "not a
+Makera Studio library", which sent the user looking for the wrong file — a valid database that has
+never heard of Makera still gets the wrong-file answer.
+
+**One test-infrastructure fix, because the change exposed it.** `the_read_leaves_the_vendors_database_
+exactly_as_it_was` sampled the process-wide temp directory for leftover copies. That was already racy —
+every test in the binary reads in parallel, and another thread's in-flight copy is not a leak — and
+`integrity_check` widened a copy's live window from microseconds to milliseconds, which made it fail.
+The scratch directory is now a parameter of the read (`read_all_in`, with `read_all` passing
+`env::temp_dir()`), so the test makes its copy in a directory it owns and the existing "only
+`makera_library.db` is in there" assertion covers the copy **and** any sidecar beside it, with no race.
+The claim got stronger rather than weaker.
+
+Evidence: `cargo test` 68 passed / 0 failed / 1 ignored, and three consecutive runs of it — the flake is
+gone rather than hidden. New: a library with a non-empty `-journal` (and separately `-wal`) is refused
+by name, an empty one still syncs, a halved library file is refused as a copy that did not verify, and a
+sentence where a database should be is refused as damage rather than as the wrong file.
+
+**Implemented 2026-10-09 (#326): a failed feeds query is not an empty matrix, and the problem outlives
+the write.** Three defects from the same review of e77b230, all in the sync path.
+
+1. **Every prepare error was read as "no feeds table".** `let Ok(mut stmt) = conn.prepare(SELECT_FEEDS)
+   else { return Ok((vec![], None)) }` — so a Studio update that renamed one column made the next sync
+   **succeed**: `feeds: []` written over 1 328 rows, `feedRows: 0`, notes empty, and the panel quietly
+   back on the app's starting table with nothing telling the user why. The two cases cannot be told
+   apart by code — SQLite reports "no such table" and "no such column" with the same `SQLITE_ERROR`,
+   which rusqlite maps to `ErrorCode::Unknown` — so `absent_feed_table` reads the **message** and
+   matches the one table whose absence is legitimate. Everything else comes back as a sentence naming
+   the vendor's own error, which is what makes a renamed column refuse the sync by name. The table name
+   in the match is not decoration: the join that carries the material is `t_MaterialList`, and a missing
+   one would otherwise have emptied the matrix with no note at all.
+2. **`inf`/`NaN` were servable.** `num()` reads text, and Rust's `f64` parse accepts `"inf"`; `> 0.0`
+   passes `+inf`, serde_json writes it as `null`, and that fails the client's parse of the **whole**
+   document — the exact "one bad row costs the tier" outcome the dropping exists to prevent. The line is
+   now `is_finite() && > 0.0`, the same line the client's schema draws (`.finite().positive()`, #325),
+   and the note says which rule did it ("not positive and finite"). NaN was already caught by `> 0.0`;
+   `inf` was reachable, through a TEXT cell.
+3. **The problem was cleared before the write could fail.** `catalogue_problem.take()` ran before
+   `write_atomic`, so a sync whose write failed reported no problem while `catalogue.json` was still
+   unreadable — and the next successful sync lost the note about the file it replaced. The read is now
+   `as_deref()` and the clear happens where it already did, after the write: a store is only touched
+   once the bytes have landed.
+
+**And the empty guard, one tier down.** The tools guard refuses an all-or-nothing empty import because a
+catalogue with no cutters leaves nothing to cut with. The same import with no **feed** rows costs only
+the starting numbers, so it is a NOTE and the sync still lands — stopping there would block the one
+operation that can heal a bad catalogue file, which is the same reasoning that lets a sync replace an
+unreadable one. It fires only when rows would be lost; a first sync over a database that never held
+feeds says nothing, which is the state the reader is allowed to call empty.
+
+Evidence: `cargo test --lib` 66 passed / 0 failed / 1 ignored. New: a database without the feeds table
+is an empty matrix with no note and its cutters import; a renamed column refuses the sync **naming the
+column**, and a dropped `t_MaterialList` refuses too rather than passing for empty; an `inf` step-down
+drops its row under the same rule as a `0`; at the store's edge a renamed column is a `Refused` that
+leaves the served matrix intact; a write that cannot land leaves `catalogue_problem` set; and a sync
+that empties the matrix notes it while a first sync over a feedless database is silent.
+
+**One gap, filed rather than fixed here (#328).** These are sentences nobody reads yet: `houseStore`
+keeps the report as `lastSync` and builds its notice from the counts alone, so a replaced catalogue
+file, forty dropped feed rows and an emptied matrix all look like a clean sync. That is the same
+silent-failure shape this issue is about, one layer up, and it is a rendering job on #311's surface.
+
+**Implemented 2026-10-09 (#325): the catalogue yields, and the label follows the clamp.** Two defects
+from the review of e77b230, one class each: the tier above the starting table was treating its
+numbers as the truth about this job.
+
+1. **A row could refuse a job the default would cut.** `catalogue.rs` dropped only empty or
+   unparseable cells — `num()` reads Studio's `0` in a numeric column as a perfectly good `0.0` —
+   and the client's `FeedCatalogueSchema` was `finite()`, not positive. `feedsFor` then adopted the
+   row and hit its own `<= 0` and >50 % clamp refusals with no fall-through, so a vendor row with
+   `feedRate = 0` for a wood cutter refused a job that generated fine before the sync, with a
+   message ("cutting feed must be > 0, got 0 mm/min") naming the vendor's cell and not the vendor.
+   Fixed at three points, because the failure is silent wherever it is not refused: the **reader**
+   drops a row whose four numbers are not all positive and says which rule dropped them, the
+   **client schema** requires positive-and-finite (a `0` reaching a client is a service this build
+   does not understand — said out loud, and the tier is lost loudly rather than resolved into a
+   program), and **`feedsFor` screens the row field by field before adopting it**: a number this job
+   cannot use — non-positive, or past the machine's refusal band — is passed over, the starting table
+   answers that field, and a `catalogue-ignored` diagnostic names the row, the number and why. A row
+   that answers none of its four fields is not this job's catalogue answer at all (`catalogue: null`,
+   and the panel's label with it). The refusal stays for a value someone **asserted** — an override,
+   a typed feeds row — which is the whole asymmetry: a vendor table does not get to assert for the
+   user. The band question is put to `clampToMachine` rather than restated, so the rule has one home.
+
+2. **A clamped value was labelled Makera.** `sources` was stamped from the row *before* the clamp, so
+   a 15 000 RPM row showed 13 000 tagged `Makera` — when Makera said 15 000 and the 13 000 is this
+   machine's ceiling. `sources` is now stamped after the clamp, with the moved fields read off the
+   choke point's own answer rather than a remembered copy (decision 28). The same one-line condition
+   covers the measured tier, which had the same unearned tag.
+
+**One consequence, named rather than hidden.** #324's `recommendTool` test used an absurd row
+(24 000 RPM) to show the handed catalogue excluding a cutter the starting table would qualify. After
+this, **no catalogue row can decide that pre-filter at all**: every number a row states is either
+usable or passed over, so `feedsFor(...).ok` answers exactly as it would with no row. The test is now
+the opposite assertion — the cutter stays, and the two calls agree — which is the guarantee #324
+exists for. The hand-over is still observable where it matters, in the numbers
+`engraveGenerate.spec.ts` reads out of the `.nc`; `recommendTool` keeps the argument and says in its
+doc why. The guide gained the `catalogue-ignored` row (chapter 8 lists every code the tree can emit)
+and its feeds step now says a row stating a number this job cannot use does not fail the job; the
+mirror is re-synced. Evidence: `cargo test --lib` 61 passed — the new one drops a `0` feed and a
+negative step-down with a note naming the rule, and **serves** a 24 000 RPM row, since absurd is not
+the same as unusable; full vitest 3316 passed; typecheck and eslint clean. No browser QA, and none is
+possible — the reader lives in the desktop shell, and the web build has no house.
+
+**Implemented 2026-10-09 (#321): sharing the house safely — one process, and a version on every
+change.** The service was built for one window and had no answer for a second. Two of them on one
+machine is the case that matters: `server.rs` falls back to an ephemeral port when the configured one
+is taken, so a second launch would have bound a different port, opened its own `HouseStore` over the
+same `house.json`, served its own in-memory copy, and let the two windows overwrite each other's saves
+by arrival order with nothing on screen saying so. Five changes, in the order they matter.
+
+**One house, one process.** `HouseLock::acquire` takes an OS lock on `house.lock` in the house
+directory (`File::try_lock`, which is why `rust-version` is now `1.89` — the file's own comment says
+so, because a `rust-version` the code does not honour is a promise to nobody). A second launch
+**refuses to start** — the issue allowed refusing or focusing the first, and refusing costs nothing: a
+window is not built, a store is not opened and no second port is bound. The refusal is shown in a
+message box via the already-present dialog plugin, not written to a log, because `eprintln!` and
+`env_logger` go nowhere for a Windows GUI app: a lock that silently made the app not open would be
+worse than the bug. `server::start` now takes the lock as a parameter, so "the process serving the
+house is the process holding its lock" is compiler-checked rather than a comment.
+
+A held lock and not a pid file or a `create_new` marker, because the OS releases a lock when its
+holder dies: a pid file cannot tell a live process from a crashed one, and a marker file would leave
+a stale lock that permanently blocks the app. Nothing ever DELETES `house.lock` either — unlinking it
+while another process held a lock on it would let a third create a fresh file and lock *that*, and two
+processes would be serving one house again. The file is empty and permanent; the lock is the truth.
+`tauri-plugin-single-instance` was considered and rejected: the directory lock is the stronger
+guarantee (it covers a second *process*, whoever started it) and needs no new dependency.
+
+**A version on every write that changes something.** `PATCH` and `DELETE` on `/tools` and
+`/inventory` now require `If-Match`: missing is **428**, naming a version no longer served is
+**412**, and last-writer-wins becomes a refusal the client has to act on. `POST` is deliberately not
+guarded — a create is judged against its key, and a second create of the same key is a 409 whatever
+version it was based on, which is a stronger answer than a validator — and neither is `POST /import`,
+which replaces the house wholesale and has no prior version here to be based on. The validator is the
+**list's** `ETag` (`/tools` or `/inventory`), not a per-entry one: the list is the representation the
+client actually read and the one whose etag `toolRegistryStore` already keeps, so the guard needed no
+wire-shape widening. The over-breadth is deliberate and conservative — a catalogue re-sync invalidates
+a pending tool edit, which costs a reload and can never lose a write.
+
+The two helpers that derive a list's bytes are **free functions over `&Inner`** rather than methods
+(`tools_bytes`, `inventory_bytes`), because a guarded write has to compute the validator while already
+holding the write guard, and a method would have deadlocked on the same `RwLock`.
+
+**Unique temp names, and a flushed directory.** `write_atomic` wrote `<file>.tmp`, which two writers
+would both aim at: the loser's rename would publish the winner's half-written bytes — the exact torn
+copy the atomic write exists to prevent. The scratch name is now `<file>.<pid>-<counter>.tmp`
+(`WRITE_SEQ`, process-wide), and `sync_dir` fsyncs the directory on unix so the rename itself is on
+disk before the write is called done — unix only, because on Windows a directory handle cannot be
+opened for that purpose and `rename` is already the file's own barrier.
+
+**The client sends what it read, and re-reads when it is told it is stale.** `houseClient.ts` carries
+the validator as `ifMatch` on the request options — a field of its own, not the reads' `etag`, which
+is an `If-None-Match` saying the opposite thing — and the four guarded helpers take it as a required
+parameter whose type allows `null` (a client with no validator has none to offer, and the 428's
+sentence says so rather than an invented etag). `houseStore` passes `etag` / `inventoryEtag`, read at
+the moment of the write rather than captured when the edit began. And a 412 or 428 now **re-reads**:
+the rule was "a refusal leaves the house exactly as it was, so re-reading is a request whose answer is
+already known", and a stale guard is precisely the refusal where that is false — without it the user
+retries against the same dead validator for ever. The notice is still the service's own sentence,
+because a 412 is something the user can fix, not an error to report.
+
+**LAN authentication: decided, not omitted — decision 33.** A house on a home LAN stays
+unauthenticated, and what sharing gets instead is the lock and the guard: concurrency is the problem a
+home network actually has.
+
+Evidence: `cargo test --lib` 74 passed / 0 failed / 1 ignored (the ignored one reads this machine's
+Studio library), typecheck, eslint and `check:platform-gate` clean both directions, and the targeted
+vitest specs 54 passed. New Rust tests: no-`If-Match` and a stale one each refuse **and leave the
+document byte-identical**, the current one succeeds and moves the etag, the two lists guard
+separately, a scratch name is never reused and never the destination, the lock admits one holder and
+frees on drop, and the atomic-write test now scans the **directory** for leftovers instead of checking
+a guessed name. New client tests: the header on all four helpers and its absence on register, the 428
+path, the 412 carried through with its status, and the store re-reading on 412/428 and **not** on a
+409. No browser QA: the feature is a second process and a header, and the web build has no house to
+run either against.
+
+Two stale comments died with this change, both claiming the client's write path did not exist — true
+until #311 landed, and a lie in `house_api.rs`'s and `houseClient.ts`'s front doors ever since.
+
+**Implemented 2026-10-09 (#311): the Manage surface — the house, in the app.** #306/#308/#310 built
+the service and the tiers; this is the screen over them, and it gives #306's write path its first
+users. Manage is a **third mode beside the welcome overlay**, entered from the toolbar beside
+`✨ New` and gated on `__FEATURE_SIM__` like every other CNC surface: a house-scoped surface has to be
+visible with no project open, and no sidebar section can be (`activeSidebarSection` is
+project-scoped, and `Sidebar.tsx` filters by archetype). Its rail holds **House → Tools** and
+**Machines**, with **Materials** drawn greyed and *later* rather than absent. A row's tier is read
+from its **key namespace** (`inv:`/`user:`/`cat:`/builtin) — the one thing the client can trust,
+since `GET /tools` serves the catalogue tier first and `ToolLibrarySchema` does not carry `origin` —
+and a clone's `provenance` sentence is what names what it was cloned from. The five decisions the
+mockup took stand as drawn: grouped by tier, a clone a **separate** row that records its origin while
+the owned row keeps Makera's definition read-only (decision 30), Materials reserved, the printers
+card kept muted, and the Machines header keeping its own check beside the card's **Check again**.
+
+**Three things it cost, kept because each is a trap.** (1) **Two definitions no service supplies,
+and two counts that disagreed.** The built-ins are in the list with the service absent — a simulation
+needs something to run with — and the first status bar summed `entries.length + 2`, which counted
+neither them nor the `inv:` rows, so it read "4 definitions" beside a rail that read "5": two counts
+of one thing, on screen at once. Both now read `useToolRegistry()`. (2) **The provenance line is the
+widest thing in the table.** Every `td` is `nowrap`, so the Name column's minimum is the widest thing
+in it; left unwrapped, *"cloned from Makera catalogue “3.175*12mm Flat End(Metal)” on 2026-10-08"* set
+that column to ~390 px and pushed the From column — the tier tag, the whole point of the grouping —
+past the right edge of a 1400 px window. It wraps now, under a **measured** cap: nine `nowrap`
+columns come to 761 px against the 784 the list pane has at 1400, so no scrollbar appears at the
+design width (it still does at 1200, where the pane is 584, and `overflow: auto` keeps every column
+reachable there). (3) **Every write re-reads, and the re-read blanks the pane.**
+`toolRegistryStore.refresh()` opens with `status: 'checking'`, so ToolsScope swaps to its "Asking
+this origin…" pane and the list unmounts for one local round trip after each save. Left standing and
+reported rather than papered over: the fix is a store change (hold the last list through
+`checking`), the flash is one round trip against a local service, and the QA waits on the sentence
+the write concludes in instead of a node that may be gone by then.
+
+**Verified in a browser, 2026-10-09 (#311)** — `qa-311-manage.mjs`, four scenarios, all green and
+photographed into `qa-311-out/`. The toolbar toggle opens the mode with no project open and the rail
+names both scopes; the list groups owned → yours → catalogue → built-in and the counts line accounts
+for every definition; a stated dimension prints as stated and an unstated one as `—`, never `0`; the
+status bar and the rail agree on the count, and the list fits its pane, tag and all; search and the
+tier chips each narrow the list; selecting a row shows the definition with its catalogue id; **Clone
+registers a new `user:` key and not an edit of the catalogue row**, keeping the numbers it was cloned
+from and stating where it came from; saving a quantity PATCHes `/api/v1/inventory/{id}` and leaves
+the definition untouched; Export is a `GET` that wrote nothing and Import sends the file whole; the
+three Register doors each say what they will hold, and the Type door says blank means unknown; the
+Machines card concludes out loud that the web build cannot reach a machine and leaves no machine
+behind, with the house undisturbed; and with the origin answering as a non-service the card carries
+the probe's own reason sentence verbatim, the two built-ins are drawn beside it, and **Check again**
+asks the origin again. The unit specs pin the tier rules and the store against a faked `HouseClient`;
+the browser pins reachability, real rendering at real size, and the wire shape.
+
+**Implemented 2026-10-09 (#313): the shell is revalidated, not cached for an hour.** Every asset went
+out with `public, max-age=3600`, `index.html` included — which made the one file whose *name* does not
+change with its content the only one pinned for an hour, so a user who updated the app kept a shell
+naming the **previous** build's chunks. `serve_asset` now decides on the **served** name — the name that
+answered, which is not always the name requested: an unknown path is the shell, so a deep link is
+revalidated exactly as `/` is, and an `assets/` path never is. `index.html` → `no-cache` with a content
+validator, `assets/…` → `public, max-age=31536000, immutable`, everything else keeps the hour (the
+favicons and the social card have no hash to pin them by). `no-cache` and deliberately not `no-store`:
+the entry is *kept* and one conditional request decides it, which is what also keeps the back/forward
+entry — the thing `no-store` throws away — and one 304 against a local server is not a saving worth
+losing it for.
+
+**The validator is over the shell's bytes, and a 304 carries the headers that are not about bytes.** The
+ETag is `"fnv1a-<16 hex>"` over the bytes served, so a rebuild changes it and the first load after an
+update is a 200 with the new shell. The 304 repeats the ETag, `no-cache` **and the CSP**, because RFC
+9111 says a 304 updates the stored response's headers with its own and leaves absent ones as they were —
+and the CSP comes from the server rather than the file, so a build that changed only the policy would
+otherwise leave the old policy governing a cached page that the validator says is unchanged.
+
+**`fnv1a_hex` moved to `etag.rs`.** Four modules hashed bytes and `server.rs` reaching into `house.rs`
+for it would have stated a false structure — the shell has nothing to do with the house — so the one
+content-validator idiom lives in its own module, and the `If-None-Match` matching rule (exact, comma
+list, `*`) moved with it, so the API and the shell answer "the same bytes" by one implementation of one
+sentence instead of two.
+
+**Evidence.** `cargo test` in `src-tauri`: 79 passed / 0 failed / 1 ignored, five of them new — the
+shell's validator is the same across `/` and a deep link, a matching validator answers a bodyless 304
+with the CSP aboard while a foreign one answers 200, `cache_policy`'s four cases, an `/api/v1` request
+carrying the *shell's* validator still gets JSON rather than a 304, and the headers the real server
+writes **over a real socket** — a router test and "what a browser does" are different claims, and only
+the second one was the bug.
+
+**The gate, run for real (`qa-313-rebuild.mjs`).** Two phases sharing one persistent browser profile:
+load the built app (shell A), add a marker `<meta>` to `dist/index.html`, rebuild and restart, load
+again. The browser sent the validator it had stored for A, the server answered 200 because the bytes
+differed, and the new marker was in the DOM **on the first load** — the whole point of the issue, and
+the one claim a header test cannot make. `qa-313-shell-cache.mjs` is the standing policy check beside
+it.
+
+**The trap that cost the most time, recorded because it will read as a bug again.** Two CDP readings
+said "the shell is never revalidated": `Network.requestWillBeSent.request.headers` fires *before* the
+cache layer adds the validator, so it reports `If-None-Match: null` on a request that carries one, and
+`Network.responseReceived` reports the **merged** response, so a 304 surfaces as `200,
+fromDiskCache: false`. The honest signal is `requestWillBeSentExtraInfo` — the headers that actually
+went on the wire — and even that was only trusted after an in-process server that logs what it receives
+was pointed at the same probe and agreed. Every one of those readings is a level removed from the
+claim; the server's own log is not.
+
+**Two defects found while verifying, filed rather than folded in.** #330 — the shell's CSP refuses the
+Google Fonts stylesheet, so the desktop app renders in fallback type (`style-src 'self'
+'unsafe-inline'`); #313's brief says do not change the CSP, so it is its own issue with its own
+evidence. #329 — the desktop app could not start at all: `tauri.conf.json` declared window `main` while
+`setup()` built a programmatic `main`, and Tauri creates config windows before the setup hook, so every
+launch panicked. Fixed with `create: false` (the documented escape hatch) and verified by the app
+running and answering on its port; it is its own change and its own commit. The reason it survived to
+now is worth keeping: every desktop verification so far went through vite.
+
+**Implemented 2026-10-09 (#309): registering a cutter — the scan field, and the two doors behind it.**
+The Register frame was a placeholder in #311; it is now three doors, and the frame itself does
+nothing but choose between them. *Scan* is the way in a scanner drives: one field, focused on mount,
+Enter moves it on, and a decoded camera frame goes to the **same** handler as a typed line, so the
+camera is an addition and never the way in (`'BarcodeDetector' in window` decides whether the button
+exists at all, and jsdom proves the absent branch). *Catalogue* searches the synced rows. *Type* is
+the honest last resort: name, shape, tip ⌀, shank ⌀, flute, shoulder, every blank left **null** —
+never 0, because a blank field is "not stated" and a 0 mm shank would collide with every holder in
+the planner.
+
+**The box-code reading is provisional, and says so.** `parseBoxCode` reads
+`C1-BIT-<TYPE>-<tip>-<flute>` into a shape and two lengths, but the only label anyone here has held
+is the bench's 1 mm ball nose (`3.175*1*4mm Ball Nose`, g_ID `131012103804`), so #208 A7 stands: one
+example is not a format. The type word is read through the **same** vocabulary Studio's `type=` field
+uses (`shapeFromType`), so a label and a `.nc` header describing one cutter agree once the dashes are
+spelled as spaces; a word that does not parse is `'unknown'` **and the two numbers are still read**,
+because the numbers are the part a wrong guess would not corrupt. The panel draws the result as a
+reading ("Read as a Makera box code: …"), and the #311 mockup's G2 already drew what happens when the
+reading fits more than one row.
+
+**The candidate rule — the "ask first" answer, taken as recommended: match on the tip, ignore the
+flute.** The slug's flute is what the *box* says the bit reaches, and it is read off a provisional
+format; matching on it would let one wrong guess hide the right row behind an empty list, where a
+user has no way to argue with it, while matching on the tip over-suggests and G2 already draws that
+outcome — two rows fit, pick the one on the label. Since the reading is provisional, the failure that
+is recoverable (a longer list) beats the one that is not (no list). Shape is matched only when the
+label named one.
+
+**A code identifies a possession, not a definition** (decision 30's third record). So a scan of a
+code the inventory already holds is **not** a second row: it answers "this is one of the ones you
+have", names it and its count, and offers one button that PATCHes `quantity + 1`. Case-insensitive,
+because a printed code retyped in lowercase names the same box, and the service would refuse the
+duplicate anyway (`InventorySchema`). Registration is a POST of an `owned` row whose `Tool` is
+**copied** — the user owns the cutter whether or not Makera still lists it — with Makera's `id`
+**kept** (it is the definition's identity) and the catalogue row named in `origin: {id, syncedAt}`.
+The clone rule is untouched here; `cloneOf` keeps `tool.id` too, which is flagged on #311/#316.
+
+**Two defects found while verifying, both fixed and both pinned.**
+*Every write unmounted the pane it was written from*: `toolRegistryStore.refresh()` set
+`status: 'checking'` on every re-read, and the tools pane answers `checking` by rendering no detail
+view — so a save tore down the rail and took the half-typed scan with it. `checking` now means "no
+answer yet", which is what it was always about: a source we already have an answer for is not
+unknown again because we asked it twice. *The candidate row's numbers were clipped at the card edge*
+because a `1fr` grid column has a min-content floor; `14px minmax(0, 1fr) auto` plus an ellipsis on
+the name keeps them, and the QA now **measures** the card rather than trusting the screenshot. One
+thing found on the way was **filed rather than folded in**: #331 — the quantity rule is written
+twice, and `ToolDetail`'s editor and the doors disagree about a blank field (`Number('')` is 0 there,
+one here). Both readings are defensible in their own context, and the divergence is on #311's
+surface, so it is its own issue.
+
+**Evidence.** `registerCutter.spec.ts` — 31 tests, the parse and its three resolve outcomes, the
+tip-match/flute-ignore rule, the excluded row whose tip the catalogue does not state, `itemFromEntry`'s
+origin/id rules and `itemFromForm`'s nulls including the `type=` round trip; `manageMode.spec.tsx`
+drives all three doors in jsdom against a faked `HouseClient`, and pins that the frame **survives its
+own write**; `recommendTool.spec.ts` pins that two `inv:` rows of the same definition rank as the
+cutter they are. Full suite 3364 passed / 4 skipped. `qa-311-manage.mjs` ALL PASS, photographed into
+`qa-311-out/`: the focused field, the camera button exactly where the browser could drive one, the
+owned code reading as PATCH-then-a-new-count, the candidates card measured, the unknown read back
+rather than swallowed, the Type door refusing a nameless cutter, and the Catalogue door's way out of
+a search that matches nothing.
 
 ---
 
