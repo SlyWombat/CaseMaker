@@ -19,7 +19,7 @@ import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
 import { openTextFile } from '@/utils/openTextFile';
-import { feedsFor, type CutParams } from '@/engine/cnc/feeds';
+import { feedCatalogueRows, feedsFor, type CutParams } from '@/engine/cnc/feeds';
 import { MATERIAL_OPTIONS } from '@/engine/cnc/engrave/setupFlow';
 import {
   TRACE_DEFAULTS,
@@ -334,7 +334,10 @@ export function EngravePanel(): JSX.Element {
   const tool = jobTool(job);
   const toolEntry = tools.find((e) => e.key === job.toolKey) ?? null;
   const diameter = toolEntry ? entryDiameter(toolEntry) : null;
-  const feeds = tool ? feedsFor(job.stock.material, tool, Z1, job.cutOverride) : null;
+  // The rows are the main thread's own catalogue snapshot (#324) — read here so the numbers on
+  // screen are the same resolution the worker is handed at Generate, not a module state only this
+  // side of the boundary can see.
+  const feeds = tool ? feedsFor(feedCatalogueRows(), job.stock.material, tool, Z1, job.cutOverride) : null;
   const params: CutParams | null = feeds && feeds.ok ? feeds.params : null;
 
   const maxDepth = job.stock.thickness - job.minFloor;

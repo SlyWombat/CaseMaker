@@ -60,7 +60,8 @@ if (!parsed.ok) {
   process.exit(2);
 }
 const job = parsed.job;
-const generated = engraveGenerate(tl, job, jobTool(job));
+// No Makera feed rows in a headless run (#324): the catalogue tier needs a house service.
+const generated = engraveGenerate(tl, job, jobTool(job), []);
 
 console.log(`job      : ${job.name}`);
 console.log(`stage    : ${generated.stage}   ok: ${generated.ok}`);

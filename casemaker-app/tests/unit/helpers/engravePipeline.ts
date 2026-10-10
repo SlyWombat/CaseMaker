@@ -8,6 +8,7 @@
 // a tool the job does NOT name (a probe, a deliberate mismatch) still calls the real function.
 
 import type { MachineCalibration } from '@/engine/cnc/calibration';
+import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -21,13 +22,19 @@ import {
 import { engravabilityFindings, type LabelEngravability, type LabelRatioAt } from '@/workers/sim/engraveGeometry';
 import type { EngravePreview, EngravePreviewer } from '@/workers/sim/engravePreview';
 
-/** `engraveGenerate` for a job, with the cutter that job names. */
+/**
+ * `engraveGenerate` for a job, with the cutter that job names.
+ *
+ * `catalogue` defaults to no Makera rows — the state a build with no house service is in. A spec
+ * exercising the catalogue tier (#310/#324) passes rows, exactly as the app hands them to the worker.
+ */
 export function generate(
   tl: ManifoldToplevel,
   job: EngraveJob,
   calibration: MachineCalibration | null = null,
+  catalogue: readonly FeedCatalogueRow[] = [],
 ): EngraveGenerated {
-  return engraveGenerate(tl, job, jobTool(job), calibration);
+  return engraveGenerate(tl, job, jobTool(job), catalogue, calibration);
 }
 
 /** `engraveRegions` for a job, with the cutter that job names. */
@@ -42,8 +49,14 @@ export function engravability(job: EngraveJob, m: LabelEngravability[], ratioAt:
 
 /**
  * A preview of `job` over the builtin registry — the list the app ships with when no later tier
- * is loaded, which is what every preview spec runs against.
+ * is loaded, which is what every preview spec runs against — and no Makera feed rows, for the same
+ * reason.
  */
-export function preview(previewer: EngravePreviewer, job: EngraveJob, gen: number): EngravePreview | null {
-  return previewer.engravePreview(job, TOOL_LIBRARY, gen);
+export function preview(
+  previewer: EngravePreviewer,
+  job: EngraveJob,
+  gen: number,
+  catalogue: readonly FeedCatalogueRow[] = [],
+): EngravePreview | null {
+  return previewer.engravePreview(job, TOOL_LIBRARY, catalogue, gen);
 }

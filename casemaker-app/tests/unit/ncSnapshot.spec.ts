@@ -41,7 +41,7 @@ function defaultJobNc(job: EngraveJob): string {
   if (!tool) throw new Error('the default job has no tool');
   const radius = cuttingRadiusForSweep(tool);
   if (!radius.ok) throw new Error(radius.reason);
-  const feeds = feedsFor(job.stock.material, tool, Z1);
+  const feeds = feedsFor([], job.stock.material, tool, Z1);
   if (!feeds.ok) throw new Error(feeds.reason);
 
   const opened = (label: EngraveLabel): Polygons => {

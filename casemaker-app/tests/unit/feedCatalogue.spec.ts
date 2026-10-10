@@ -82,7 +82,7 @@ describe('the vendor material map is exactly two rows', () => {
 describe('a catalogue row supplies the four numbers Makera states', () => {
   it('answers a wood job in the vendor’s own cutter, with the source stamped per field', () => {
     setFeedCatalogue([HARDWOOD_ROW]);
-    const res = feedsFor('hardwood', makeraCutter(), Z1);
+    const res = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1);
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error(res.reason);
 
@@ -112,7 +112,7 @@ describe('a catalogue row supplies the four numbers Makera states', () => {
     // contour-parallel sweep would refuse outright (#191). So it is not in the catalogue's row at
     // all, and the app's own 45 % stands even when the catalogue answered.
     setFeedCatalogue([HARDWOOD_ROW]);
-    const res = feedsFor('hardwood', makeraCutter(), Z1);
+    const res = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.stepOver).toBeCloseTo(0.45 * 3.175, 10);
     expect(res.params.peck).toBeCloseTo(3.175, 10);
@@ -122,7 +122,7 @@ describe('a catalogue row supplies the four numbers Makera states', () => {
   it('is keyed on the cutter, not on the diameter: the same geometry with no vendor id gets nothing', () => {
     setFeedCatalogue([HARDWOOD_ROW]);
     const anonymous = flatEndMill(3.175); // identical geometry, `id: null`
-    const res = feedsFor('hardwood', anonymous, Z1);
+    const res = feedsFor(feedCatalogueRows(), 'hardwood', anonymous, Z1);
     if (!res.ok) throw new Error(res.reason);
     const row = FEEDS_TABLE.find(
       (e) => e.material === 'hardwood' && 3.175 >= e.minDiameter && 3.175 <= e.maxDiameter,
@@ -137,7 +137,7 @@ describe('a catalogue row supplies the four numbers Makera states', () => {
     // A row that exists in the snapshot and can never be read: the map refuses MDF, so a job in
     // `mdf` with this cutter keeps the starting values. This is the PLA/MDF half of the issue.
     setFeedCatalogue([{ ...HARDWOOD_ROW, material: 'MDF' }]);
-    const res = feedsFor('mdf', makeraCutter(), Z1);
+    const res = feedsFor(feedCatalogueRows(), 'mdf', makeraCutter(), Z1);
     if (!res.ok) throw new Error(res.reason);
     expect(res.catalogue).toBeNull();
     expect(res.params.feed).toBe(500);
@@ -147,7 +147,7 @@ describe('a catalogue row supplies the four numbers Makera states', () => {
     // A 6 mm Makera cutter: the catalogue may well have rows for it, and the app still refuses,
     // because every wood row of the starting table stops at 3.2 mm.
     setFeedCatalogue([{ ...HARDWOOD_ROW, cutterId: '999999999999', rpm: 10000, feed: 1000 }]);
-    const res = feedsFor('hardwood', flatEndMill(6, { id: '999999999999' }), Z1);
+    const res = feedsFor(feedCatalogueRows(), 'hardwood', flatEndMill(6, { id: '999999999999' }), Z1);
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('expected a refusal');
     expect(res.reason).toContain('6 mm');
@@ -173,7 +173,7 @@ describe('a measured row wins over a catalogue row (#310’s precedence)', () =>
 
   it('answers alone, and the panel says so per field', () => {
     setFeedCatalogue([HARDWOOD_ROW]);
-    const res = feedsFor('hardwood', makeraCutter(), Z1, undefined, tableWithMeasuredFeed());
+    const res = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1, undefined, tableWithMeasuredFeed());
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error(res.reason);
 
@@ -193,7 +193,7 @@ describe('a measured row wins over a catalogue row (#310’s precedence)', () =>
     setFeedCatalogue([
       { ...HARDWOOD_ROW, material: 'Softwood', feed: 950, rpm: 11000 },
     ]);
-    const res = feedsFor('softwood', makeraCutter(), Z1, undefined, tableWithMeasuredFeed());
+    const res = feedsFor(feedCatalogueRows(), 'softwood', makeraCutter(), Z1, undefined, tableWithMeasuredFeed());
     if (!res.ok) throw new Error(res.reason);
     expect(res.catalogue).not.toBeNull();
     expect(res.params.feed).toBe(950);
@@ -205,7 +205,7 @@ describe('a measured row wins over a catalogue row (#310’s precedence)', () =>
 describe('the machine still has the last word', () => {
   it('clamps a 15 000 RPM row to the Z1’s 13 000, and says so', () => {
     setFeedCatalogue([{ ...HARDWOOD_ROW, rpm: 15000 }]);
-    const res = feedsFor('hardwood', makeraCutter(), Z1);
+    const res = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1);
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.rpm).toBe(Z1.maxRpm);
@@ -213,29 +213,109 @@ describe('the machine still has the last word', () => {
     expect(res.diagnostics[0]).toMatchObject({ severity: 'warning', code: 'rpm-clamped' });
     // +15 %, inside the 50 % refusal band, which is why this one is a clamp and not a refusal.
     expect(15000 / Z1.maxRpm - 1).toBeLessThan(CLAMP_REFUSE_FRACTION);
+
+    // #325 — and the label follows the CLAMP, not the row: Makera said 15 000, the 13 000 is the
+    // machine's limit, so this field is not Makera's (decision 28). The fields the clamp did not
+    // touch are still the vendor's.
+    expect(res.sources.rpm).toBe('computed');
+    expect(res.sources.feed).toBe('catalogue');
+    expect(res.params.feed).toBe(900);
   });
 
-  it('refuses a catalogue row far past the ceiling rather than cutting at a made-up speed', () => {
+  it('passes over a row far past the ceiling and cuts the starting table’s number instead (#325)', () => {
+    // It used to REFUSE the job ("rpm 24000 RPM is more than 50 % above the Z1's 13000 RPM ceiling")
+    // — a tier above the starting table vetoing a job the starting table would have cut. The row
+    // does not get to do that: the field is passed over and the diagnostic names it.
     setFeedCatalogue([{ ...HARDWOOD_ROW, rpm: 24000 }]);
-    const res = feedsFor('hardwood', makeraCutter(), Z1);
-    expect(res.ok).toBe(false);
-    if (res.ok) throw new Error('expected a refusal');
-    expect(res.reason).toContain('24000');
+    const res = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1);
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.params.rpm).toBe(12000); // the hardwood 1.6-3.2 starting row
+    expect(res.sources.rpm).toBe('computed');
+    // Per FIELD, not per row: the other three numbers are still Makera's.
+    expect(res.params.feed).toBe(900);
+    expect(res.sources.feed).toBe('catalogue');
+    expect(res.catalogue).toEqual({ ...HARDWOOD_ROW, rpm: 24000 });
+    expect(res.diagnostics).toHaveLength(1);
+    expect(res.diagnostics[0]).toMatchObject({ severity: 'warning', code: 'catalogue-ignored' });
+    expect(res.diagnostics[0]!.message).toContain('24000 RPM');
+    expect(res.diagnostics[0]!.message).toContain('refuses');
+    // And the one sentence the panel shows says so out loud, since no screen renders the
+    // diagnostic yet (#317).
+    expect(res.provenance).toContain('Not used for this job');
+    expect(res.provenance).toContain('spindle speed');
   });
 
   it('clamps a feed above 1 200 mm/min', () => {
     setFeedCatalogue([{ ...HARDWOOD_ROW, feed: 1500 }]);
-    const res = feedsFor('hardwood', makeraCutter(), Z1);
+    const res = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.feed).toBe(Z1.maxCutFeed);
+    expect(res.sources.feed).toBe('computed'); // the ceiling is the machine's, not Makera's
   });
 
   it('still refuses a job override that leaves an uncut spine (#191), catalogue or not', () => {
     setFeedCatalogue([HARDWOOD_ROW]);
-    const res = feedsFor('hardwood', makeraCutter(), Z1, { stepOver: 2.0 });
+    const res = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1, { stepOver: 2.0 });
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('expected a refusal');
     expect(res.reason).toContain('#191');
+  });
+});
+
+// #325 — the tier above the default YIELDS where it cannot answer, field by field. The failure this
+// describe prevents is one a user meets as a REFUSAL of a job that cut fine yesterday: before the
+// sync, `feedsFor` never saw the row at all.
+describe('a row this job cannot use falls through to the starting table (#325)', () => {
+  it('falls through a zero feed, and names the number it passed over', () => {
+    const zeroFeed = { ...HARDWOOD_ROW, feed: 0 };
+    setFeedCatalogue([zeroFeed]);
+    const res = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1);
+    // Before #325 this was `ok: false` — "cutting feed must be > 0, got 0 mm/min" — for a job the
+    // same app generated happily before the sync. Studio writes `0` in a column it never filled.
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error(res.reason);
+
+    expect(res.params.feed).toBe(400); // the hardwood 1.6-3.2 starting row
+    expect(res.sources.feed).toBe('computed');
+    // The rest of the row is untouched: this is per FIELD, not "the row is bad".
+    expect(res.params.rpm).toBe(12000);
+    expect(res.sources.rpm).toBe('catalogue');
+    expect(res.params.plungeFeed).toBe(300);
+    expect(res.params.stepDown).toBe(1.2);
+
+    expect(res.diagnostics).toHaveLength(1);
+    expect(res.diagnostics[0]).toMatchObject({ severity: 'warning', code: 'catalogue-ignored' });
+    expect(res.diagnostics[0]!.message).toContain('0 mm/min');
+    expect(res.diagnostics[0]!.message).toContain('not a positive number');
+    expect(res.diagnostics[0]!.message).toContain('400 mm/min');
+  });
+
+  it('still answers nothing at all when every number in the row is unusable', () => {
+    setFeedCatalogue([{ ...HARDWOOD_ROW, rpm: 0, feed: -1, plungeFeed: 0, stepDown: 0 }]);
+    const res = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1);
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error(res.reason);
+    // The panel reads `catalogue` to decide between "Makera's numbers" and "computed", and a row
+    // that supplied none of them is not this job's catalogue answer.
+    expect(res.catalogue).toBeNull();
+    expect(new Set(Object.values(res.sources))).toEqual(new Set(['computed']));
+    expect(res.provenance).toContain('Starting value');
+    expect(res.diagnostics).toHaveLength(4);
+    for (const d of res.diagnostics) {
+      expect(d).toMatchObject({ severity: 'warning', code: 'catalogue-ignored' });
+    }
+  });
+
+  it('leaves the refusals for values someone ASSERTED alone: an override still refuses', () => {
+    // The asymmetry is the point: a vendor table does not get to assert for the user, and the user
+    // still may not assert an uncuttable number. Same for the starting table, whose own values are
+    // non-positive never. `cncFeeds.spec.ts` pins the override half in full.
+    setFeedCatalogue([HARDWOOD_ROW]);
+    const res = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1, { feed: 0 });
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('expected a refusal');
+    expect(res.reason).toContain('cutting feed must be > 0');
   });
 });
 
@@ -243,7 +323,7 @@ describe('no catalogue loaded is exactly the old behaviour', () => {
   it('every row of the table resolves as it did, unstamped', () => {
     for (const row of FEEDS_TABLE) {
       const diameter = (row.minDiameter + row.maxDiameter) / 2;
-      const res = feedsFor(row.material, flatEndMill(diameter), Z1);
+      const res = feedsFor(feedCatalogueRows(), row.material, flatEndMill(diameter), Z1);
       expect(res.ok, `${row.material} ${diameter}`).toBe(true);
       if (!res.ok) continue;
       expect(res.catalogue).toBeNull();
@@ -255,12 +335,12 @@ describe('no catalogue loaded is exactly the old behaviour', () => {
 
   it('a cleared catalogue forgets a row that was loaded a moment ago', () => {
     setFeedCatalogue([HARDWOOD_ROW]);
-    const loaded = feedsFor('hardwood', makeraCutter(), Z1);
+    const loaded = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1);
     if (!loaded.ok) throw new Error(loaded.reason);
     expect(loaded.catalogue).not.toBeNull();
 
     clearFeedCatalogue();
-    const cleared = feedsFor('hardwood', makeraCutter(), Z1);
+    const cleared = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1);
     if (!cleared.ok) throw new Error(cleared.reason);
     expect(cleared.catalogue).toBeNull();
     expect(cleared.params.feed).toBe(400); // the hardwood 1.6-3.2 row, not the fixture's 900

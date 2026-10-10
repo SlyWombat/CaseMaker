@@ -38,6 +38,7 @@ import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { toolForJob } from '@/engine/cnc/toolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { recommendTool, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
+import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { boxSolid, OVERSHOOT_MM } from '@/workers/geometry/sweep';
 import { meshOutputOf, type NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -148,8 +149,16 @@ export interface EngravePreviewer {
    * questions at once: which cutter the job names (`toolForJob`, the job's own snapshot first)
    * and what the recommendation (#211) may rank — one list, so the panel's picker and the
    * recommendation it reads beside can never be listing two different sets of cutters.
+   *
+   * `catalogue` is Makera's feed rows, handed in for the same reason (#324): the recommendation's
+   * feeds pre-filter resolves with them, and this worker's own copy of that snapshot is empty.
    */
-  engravePreview(job: EngraveJob, tools: readonly ToolLibraryEntry[], gen: number): EngravePreview | null;
+  engravePreview(
+    job: EngraveJob,
+    tools: readonly ToolLibraryEntry[],
+    catalogue: readonly FeedCatalogueRow[],
+    gen: number,
+  ): EngravePreview | null;
 }
 
 /** `perChar` for a job: one single-character glyph profile per character, in text order. */
@@ -218,7 +227,12 @@ function completeCompromiseReason(
 export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
   let latestGen = Number.NEGATIVE_INFINITY;
 
-  const engravePreview = (job: EngraveJob, tools: readonly ToolLibraryEntry[], gen: number): EngravePreview | null => {
+  const engravePreview = (
+    job: EngraveJob,
+    tools: readonly ToolLibraryEntry[],
+    catalogue: readonly FeedCatalogueRow[],
+    gen: number,
+  ): EngravePreview | null => {
     if (gen < latestGen) return null;
     latestGen = gen;
 
@@ -340,7 +354,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // the user cannot choose. With the built-ins alone that is two cutters, so the "early stop
     // for long lists" rule (measure in ascending diameter, stop after the first failure that
     // follows a pass) does not apply yet: until the list is long, measure them all.
-    const recommendation = recommendTool(job, tools, (key) => {
+    const recommendation = recommendTool(job, tools, catalogue, (key) => {
       const entry = tools.find((e) => e.key === key);
       if (!entry) return [];
       const r = cuttingRadiusForSweep(entry.tool);

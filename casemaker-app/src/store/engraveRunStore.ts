@@ -22,6 +22,8 @@ import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle'
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { SimStatus } from './simStore';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { feedCatalogueRows } from '@/engine/cnc/feeds';
+import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import { resolveMachine } from '@/engine/cnc/calibration';
 import type { MachineCalibration } from '@/engine/cnc';
@@ -36,6 +38,7 @@ export type EngraveRunClient = {
   engraveGenerate: (
     job: EngraveJob,
     tool: Tool | null,
+    catalogue: readonly FeedCatalogueRow[],
     calibration?: MachineCalibration | null,
   ) => Promise<EngraveGenerated>;
   simOracle: (predicted: OraclePredicted[]) => Promise<OracleReport>;
@@ -184,11 +187,18 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // and the sweep cannot judge the job with two different cutters.
     const tool = jobTool(job);
 
+    // Makera's feed rows, read here for the same reason (#324): `feeds.ts` keeps them as module
+    // state this realm owns, the worker's copy of that state is always empty, and the `.nc` and the
+    // run sheet are both posted from the worker's resolution. Without this the panel showed the
+    // catalogue's S/F while the program carried the starting table's — the operator reading one set
+    // of numbers and the machine running another.
+    const catalogue = feedCatalogueRows();
+
     let client: EngraveRunClient;
     let generated: EngraveGenerated;
     try {
       client = await clientLoader();
-      generated = await client.engraveGenerate(job, tool, calibration);
+      generated = await client.engraveGenerate(job, tool, catalogue, calibration);
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
       return;

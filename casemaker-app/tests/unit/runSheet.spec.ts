@@ -43,7 +43,7 @@ function stubGenerated(job: EngraveJob, nc: string = NC, frame = true): RunSheet
   const tool = jobTool(job);
   return {
     findings: validateJob(job),
-    feeds: tool ? feedsFor(job.stock.material, tool, Z1, job.cutOverride) : null,
+    feeds: tool ? feedsFor([], job.stock.material, tool, Z1, job.cutOverride) : null,
     cam: { operations: 3, cuttingMoves: 1234, estimatedSeconds: 95, passes: 2 },
     nc,
     verify: {
@@ -100,7 +100,7 @@ describe('runSheet (#207)', () => {
     // stockProud (the default vise's 4 mm) is stated in section 3.
     expect(section(sheet, 'load').steps.some((s) => s.text.includes('4 mm above the jaw tops'))).toBe(true);
     // The feeds come from `feedsFor`.
-    const feeds = feedsFor(job.stock.material, jobTool(job)!, Z1, job.cutOverride);
+    const feeds = feedsFor([], job.stock.material, jobTool(job)!, Z1, job.cutOverride);
     expect(feeds.ok).toBe(true);
     if (feeds.ok) {
       expect(all).toContain(`${feeds.params.rpm} RPM`);

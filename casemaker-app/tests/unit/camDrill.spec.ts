@@ -52,7 +52,7 @@ function singleHole(): EngraveJob {
 function drillIr(job: EngraveJob) {
   const { regions, tool } = cutRegions(tl, job);
   if (tool === null) throw new Error(`${TOOL_KEY} is not in the tool library`);
-  const feeds = feedsFor(job.stock.material, tool, Z1, job.cutOverride);
+  const feeds = feedsFor([], job.stock.material, tool, Z1, job.cutOverride);
   if (!feeds.ok) throw new Error(feeds.reason);
   return generateEngrave(tl, regions, tool, feeds.params);
 }
@@ -158,7 +158,7 @@ describe('drill CAM (#220)', () => {
   it('refuses to drill with a tool that is not a flat end mill, naming the shape', () => {
     const { regions } = cutRegions(tl, singleHole());
     const ball = flatEndMill(3.175, { shape: 'ball', typeText: 'Ball End' });
-    const feeds = feedsFor('softwood', ball, Z1);
+    const feeds = feedsFor([], 'softwood', ball, Z1);
     // The feeds table refuses a ball cutter before CAM even runs; the CAM refusal is the belt
     // to that braces and is what the issue's test names.
     expect(feeds.ok).toBe(false);

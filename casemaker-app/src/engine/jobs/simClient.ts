@@ -11,6 +11,7 @@ import * as Comlink from 'comlink';
 import type { MachineCalibration, Setup } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
@@ -174,15 +175,17 @@ export const simPath = (): Promise<SimPath> => getSimApi().simPath();
  * vise jaws. `null` when `gen` is older than one the worker has already answered; mesh buffers
  * are transferred. Independent of any loaded simulation program.
  *
- * `tools` is the resolved registry snapshot (#305): the worker cannot read the app's module
- * state, so the list it resolves and recommends from is sent with the job. Plain data, like the
+ * `tools` is the resolved registry snapshot (#305) and `catalogue` the Makera feed rows (#324):
+ * the worker cannot read the app's module state, so the list it resolves and recommends from —
+ * and the rows that recommendation filters on — are sent with the job. Plain data, like the
  * `Tool` `simLoad` takes.
  */
 export const engravePreview = (
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
+  catalogue: readonly FeedCatalogueRow[],
   gen: number,
-): Promise<EngravePreview | null> => getSimApi().engravePreview(job, tools, gen);
+): Promise<EngravePreview | null> => getSimApi().engravePreview(job, tools, catalogue, gen);
 
 /**
  * Generate → verify, headless, in the sim worker (#206). Returns the exact `.nc` text and the
@@ -192,12 +195,18 @@ export const engravePreview = (
  * `tool` is the caller's resolved cutter (#305) — `jobTool(job)` on this side, because the
  * worker cannot resolve it. The same object is what the caller then loads the simulation with,
  * so the gate and the sweep judge one cutter and not two.
+ *
+ * `catalogue` is the caller's Makera feed rows (#324), for the same reason: the `.nc` and the run
+ * sheet are posted from the worker's `feedsFor`, and that realm's own copy of the snapshot is
+ * always empty.
  */
 export const engraveGenerate = (
   job: EngraveJob,
   tool: Tool | null,
+  catalogue: readonly FeedCatalogueRow[],
   calibration?: MachineCalibration | null,
-): Promise<EngraveGenerated> => getSimApi().engraveGenerate(job, tool, calibration ?? null);
+): Promise<EngraveGenerated> =>
+  getSimApi().engraveGenerate(job, tool, catalogue, calibration ?? null);
 
 /**
  * The volumetric oracle (#206 §3) over the program CURRENTLY loaded in the worker's session.

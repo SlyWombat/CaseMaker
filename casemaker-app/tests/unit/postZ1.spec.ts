@@ -306,7 +306,7 @@ describe('postZ1 round trip (#173)', () => {
     if (!tool) return;
     const radius = cuttingRadiusForSweep(tool);
     if (!radius.ok) throw new Error(radius.reason);
-    const feeds = feedsFor(job.stock.material, tool, Z1);
+    const feeds = feedsFor([], job.stock.material, tool, Z1);
     if (!feeds.ok) throw new Error(feeds.reason);
 
     const opened = (label: EngraveLabel): Polygons => {

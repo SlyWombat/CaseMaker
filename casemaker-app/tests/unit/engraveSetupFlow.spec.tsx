@@ -24,6 +24,8 @@ import {
 } from '@/engine/cnc/engrave/setupFlow';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
+import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { resolveTool } from '@/engine/cnc/toolRegistry';
 
 vi.mock('@/engine/exportTrigger', () => ({ saveText: vi.fn() }));
 
@@ -109,6 +111,28 @@ describe('guided job setup — the pure answers (#254)', () => {
     // A job that already has strips: the seeded answers keep them.
     answers.sacrificial = presetJawStrips();
     expect(applyAnswers(job, answers).sacrificial).toEqual(presetJawStrips());
+  });
+
+  it('moves the cutter SNAPSHOT with the key, so the job cuts with the cutter the panel shows (#318)', () => {
+    const start = defaultEngraveJob(); // names flat-1.0
+    const from = resolveTool(start.toolKey);
+    const to = resolveTool('flat-3.175x12-metal');
+    expect(from?.name, 'flat-1.0 should resolve').toBeTruthy();
+    expect(to?.name, 'flat-3.175x12-metal should resolve').toBeTruthy();
+    expect(to!.name).not.toBe(from!.name);
+
+    const job = { ...start, tool: from };
+    // The flow's cutter question answered with a different key than the job's snapshot.
+    const applied = applyAnswers(job, { ...defaultSetupAnswers(job), toolKey: 'flat-3.175x12-metal' });
+
+    expect(applied.toolKey).toBe('flat-3.175x12-metal');
+    // `toolForJob` prefers the snapshot, so a stale one is the cutter every consumer would cut
+    // with — preview, feeds, CAM, post, verifier, and the flow's own `stepFindings`.
+    expect(jobTool(applied)!.name).toBe(to!.name);
+
+    // An UNCHANGED key keeps the job's own snapshot: re-entering the flow and finishing without
+    // touching the cutter must not silently re-pin it (`toolRegistry`'s design point 1).
+    expect(applyAnswers(job, defaultSetupAnswers(job)).tool).toBe(from);
   });
 });
 

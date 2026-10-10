@@ -22,7 +22,7 @@ function sheetFor(job: EngraveJob): RunSheet {
   const tool = jobTool(job);
   const generated: RunSheetGenerated = {
     findings: validateJob(job),
-    feeds: tool ? feedsFor(job.stock.material, tool, Z1, job.cutOverride) : null,
+    feeds: tool ? feedsFor([], job.stock.material, tool, Z1, job.cutOverride) : null,
     cam: { operations: 3, cuttingMoves: 1234, estimatedSeconds: 95, passes: 2 },
     nc: NC,
     verify: {

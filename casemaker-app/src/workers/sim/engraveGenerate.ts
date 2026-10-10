@@ -37,7 +37,7 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { version as CAM_VERSION } from '../../../package.json';
 import { Z1, type MillProfile } from '@/engine/cnc/machine';
 import { resolveMachine, type MachineCalibration } from '@/engine/cnc/calibration';
-import { feedsFor, type FeedsResult } from '@/engine/cnc/feeds';
+import { feedsFor, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { toPartPlan, labelProfile, jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import { toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -380,6 +380,12 @@ function frameProgram(
  * verifier. `null` is not an error to swallow — it stops at the feeds stage with "the job has no
  * usable cutter", which is exactly what `tool-missing` says above it.
  *
+ * `catalogue` is Makera's feed rows, HANDED IN for the same reason (#324): `feeds.ts`'s own copy
+ * lives in this worker's module realm and is always empty, so resolving feeds here without the
+ * caller's rows would post the STARTING TABLE's numbers under a panel showing the catalogue's. The
+ * `.nc` and the run sheet are cut from this call's result, so it is the numbers the operator reads
+ * against the numbers the machine runs that is at stake.
+ *
  * `calibration` is the machine's own frame, if the user has one saved (#279). The machine is resolved
  * from it ONCE here (#297) and that one object feeds the feeds, the post, the setup, the verifier and
  * the frame file — the same object the caller loads the simulation with. Before this, the verifier
@@ -390,6 +396,7 @@ export function engraveGenerate(
   tl: ManifoldToplevel,
   job: EngraveJob,
   tool: Tool | null,
+  catalogue: readonly FeedCatalogueRow[],
   calibration: MachineCalibration | null = null,
 ): EngraveGenerated {
   const mill = resolveMachine(Z1, calibration);
@@ -421,7 +428,7 @@ export function engraveGenerate(
   if (tool === null || radius === null) {
     return stop('feeds', { message: radius === null && tool !== null ? 'the job tool is not a flat end mill V1 can sweep' : 'the job has no usable cutter' });
   }
-  const feeds = feedsFor(job.stock.material, tool, mill, job.cutOverride);
+  const feeds = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride);
   if (!feeds.ok) return stop('feeds', { feeds, message: feeds.reason });
 
   // 3. the CAM core (#172), on the SAME opened polygons stage 1 measured.

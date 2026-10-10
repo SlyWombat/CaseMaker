@@ -18,6 +18,7 @@ import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import { useSimStore } from '@/store/simStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { calibrationFromReplies, type MachineCalibration } from '@/engine/cnc';
+import { clearFeedCatalogue, setFeedCatalogue, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
 
 const NOTHING: EngraveGenerated = {
@@ -69,6 +70,9 @@ describe('engraveRunStore (#206)', () => {
     useEngraveRunStore.getState().reset();
     setEngraveRunClientLoader(null);
     useEngraveJobStore.getState().replace(defaultEngraveJob());
+    // No Makera catalogue unless a test loads one: it is module state (`feeds.ts`), so it outlives a
+    // test that set it (#324).
+    clearFeedCatalogue();
   });
 
   it('refuses Save before anything is generated', () => {
@@ -184,7 +188,7 @@ describe('engraveRunStore (#206)', () => {
       },
     });
     setEngraveRunClientLoader(async () => ({
-      engraveGenerate: async (_job, _tool, calibration) => {
+      engraveGenerate: async (_job, _tool, _catalogue, calibration) => {
         generatedWith = calibration;
         // The user saves a new frame while the worker is generating.
         useSettingsStore.setState({ machineCalibration: second });
@@ -221,7 +225,7 @@ describe('engraveRunStore (#206)', () => {
       },
     });
     setEngraveRunClientLoader(async () => ({
-      engraveGenerate: async (_job, _tool, calibration) => {
+      engraveGenerate: async (_job, _tool, _catalogue, calibration) => {
         generatedWith = calibration;
         return clean();
       },
@@ -262,6 +266,36 @@ describe('engraveRunStore (#206)', () => {
     }
   });
 
+  // #324 — the catalogue reaches the worker only if the CALLER sends it: `feeds.ts`'s module state
+  // is invisible across the boundary, so whatever this store does not hand over is simply absent
+  // when the `.nc` is posted. The other half of this pair is `engraveGenerate.spec.ts`'s S/F case,
+  // which proves the handed rows are what the program and the run sheet are made of.
+  it('hands the worker the catalogue rows the house loaded (#324)', async () => {
+    const ROW: FeedCatalogueRow = {
+      cutterId: '112111313812',
+      material: 'Hardwood',
+      rpm: 9800,
+      feed: 700,
+      plungeFeed: 250,
+      stepDown: 0.7,
+    };
+    let seen: readonly FeedCatalogueRow[] | null = null;
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async (_job, _tool, catalogue) => {
+        seen = catalogue;
+        return NOTHING;
+      },
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    setFeedCatalogue([ROW]);
+    try {
+      await useEngraveRunStore.getState().generate();
+    } finally {
+      clearFeedCatalogue();
+    }
+    expect(seen).toEqual([ROW]);
+  });
+
   it('passes "no saved frame" as null to both, not as a fresh read (#297)', async () => {
     useSettingsStore.setState({ machineCalibration: undefined });
     let generatedWith: MachineCalibration | null | undefined = undefined;
@@ -273,7 +307,7 @@ describe('engraveRunStore (#206)', () => {
       },
     });
     setEngraveRunClientLoader(async () => ({
-      engraveGenerate: async (_job, _tool, calibration) => {
+      engraveGenerate: async (_job, _tool, _catalogue, calibration) => {
         generatedWith = calibration;
         return clean();
       },

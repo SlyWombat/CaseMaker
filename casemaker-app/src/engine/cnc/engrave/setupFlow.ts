@@ -26,6 +26,7 @@ import {
   presetPartOnBoard,
 } from '@/engine/cnc/sacrificial';
 import { validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { resolveTool } from '@/engine/cnc/toolRegistry';
 import type {
   EngraveJob,
   FieldSource,
@@ -140,12 +141,25 @@ export function sacrificialForChoice(choice: SacrificialChoice, current: Sacrifi
  * The one write path (#254). Applies every answer to the job and stamps the stock and cutter
  * provenance. The vise and sacrificial carry their own `source`, so nothing this function writes
  * is untagged — the acceptance the guided setup promises.
+ *
+ * **The snapshot moves WITH the key (#318).** A job names its cutter twice — `toolKey` and the
+ * materialised `tool` — and `toolForJob` prefers the snapshot, so this function writing `toolKey`
+ * alone left the job cutting with the OLD cutter while the panel showed the new one: picking
+ * `flat-1.0`, then answering the flow's cutter question with `flat-3.175x12-metal`, kept the 1 mm
+ * flat under every consumer (preview, feeds, CAM, post, verifier, and `stepFindings`). Re-resolved
+ * here rather than only in the store, because `stepFindings` builds its probe through this same
+ * function and has to judge the cutter the flow is about to write.
+ *
+ * Re-pinned **only when the key changes**: an unchanged key keeps the job's own snapshot, so
+ * opening this flow and finishing without touching the cutter cannot silently re-prove the job at
+ * a cutter that has since been re-collared or re-measured (`toolRegistry`'s design point 1).
  */
 export function applyAnswers(job: EngraveJob, a: SetupAnswers): EngraveJob {
   return {
     ...job,
     stock: { ...a.stock },
     toolKey: a.toolKey,
+    tool: a.toolKey === job.toolKey ? job.tool : resolveTool(a.toolKey),
     workholding: { kind: 'vise', vise: { ...a.vise } },
     sacrificial: a.sacrificial,
     sources: {

@@ -106,7 +106,8 @@ function ladderJob(): EngraveJob {
 }
 
 const job = ladderJob();
-const generated = engraveGenerate(tl, job, jobTool(job));
+// No Makera feed rows in a headless run (#324): the catalogue tier needs a house service.
+const generated = engraveGenerate(tl, job, jobTool(job), []);
 if (!generated.ok || generated.nc === null) {
   console.error(JSON.stringify({ stage: generated.stage, errors: generated.errors, findings: generated.findings }, null, 2));
   throw new Error(`#165 ladder did not generate (stopped at ${generated.stage})`);

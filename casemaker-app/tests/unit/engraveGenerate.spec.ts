@@ -7,6 +7,8 @@ import { describe, it, expect } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { generate, regions } from './helpers/engravePipeline';
 import { frameCorners } from '@/workers/sim/engraveGenerate';
+import { UNMEASURED_FEEDS_TABLE, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { CAM_ID, CAM_NAME } from '@/engine/cnc/post/z1';
 import { version as APP_VERSION } from '../../package.json';
@@ -419,6 +421,94 @@ describe('a trace item reaches the program (#287)', () => {
     // as a move and which reaches far past the work.
     expect(g.verify!.stats.deepestZ).toBeCloseTo(-0.8, 6);
     expect(g.verify!.stats.cuttingMoves).toBeGreaterThan(0);
+  });
+});
+
+// #324 — the catalogue has to reach the WORKER, not just the panel. `feeds.ts` holds Makera's rows
+// as module state the main thread owns; the sim worker is a separate module realm whose copy of
+// that state is always empty, so a generate that resolved feeds in there posted the STARTING
+// TABLE's numbers — and the run sheet, built from the same result, printed them too — while the
+// panel showed the catalogue's. These two cases are that pair: the same job, hand-built ×2.
+describe('the feed catalogue reaches the worker (#324)', () => {
+  /** The vendor's id for the 3.175 × 12 mm flat end, which the built-in tier also carries. */
+  const VENDOR_ID = '112111313812';
+  /** Makera's numbers for that cutter in hardwood. Hand-built, never vendor data (§3, #186). */
+  const HARDWOOD_ROW: FeedCatalogueRow = {
+    cutterId: VENDOR_ID,
+    material: 'Hardwood',
+    rpm: 9800,
+    feed: 700,
+    plungeFeed: 250,
+    stepDown: 0.7,
+  };
+  /** What the STARTING table says for the same cutter and material — the numbers this must not use. */
+  const starting = UNMEASURED_FEEDS_TABLE.find(
+    (e) => e.material === 'hardwood' && e.minDiameter <= 3.175 && 3.175 <= e.maxDiameter,
+  );
+  if (!starting || starting.params.rpm === HARDWOOD_ROW.rpm) throw new Error('the fixture must differ');
+
+  /** A hardwood job in the Makera metal flat end, cutting one 10 × 10 pocket 1.0 mm deep. */
+  function job(): EngraveJob {
+    return {
+      ...defaultEngraveJob(),
+      toolKey: 'flat-3.175x12-metal',
+      stock: { ...defaultEngraveJob().stock, material: 'hardwood' },
+      labels: [],
+      shapes: [
+        {
+          id: 'a',
+          name: 'A',
+          kind: 'rect',
+          position: { x: 50, y: 30 },
+          rotation: 0,
+          depth: 1.0,
+          enabled: true,
+          width: 10,
+          height: 10,
+          cornerRadius: 0,
+        },
+      ],
+    };
+  }
+
+  it('posts the catalogue’s S and F into the .nc, not the starting table’s', () => {
+    const g = generate(tl, job(), null, [HARDWOOD_ROW]);
+    expect(g.ok).toBe(true);
+    expect(g.feeds?.ok).toBe(true);
+    if (!g.feeds?.ok) throw new Error('feeds should resolve');
+    expect(g.feeds.catalogue).toEqual(HARDWOOD_ROW);
+    expect(g.feeds.params.rpm).toBe(HARDWOOD_ROW.rpm);
+    expect(g.feeds.params.stepDown).toBe(HARDWOOD_ROW.stepDown);
+
+    // What the machine runs: the spindle word and the two feed words, as the post writes them.
+    const nc = g.nc!;
+    expect(nc).toContain(`S${HARDWOOD_ROW.rpm} M3`);
+    expect(nc).toContain(`F${HARDWOOD_ROW.feed}`);
+    expect(nc).toContain(`F${HARDWOOD_ROW.plungeFeed}`);
+    // …and NOT the row this job would have resolved with no catalogue at all.
+    expect(nc).not.toContain(`S${starting.params.rpm}`);
+    expect(nc).not.toContain(`F${starting.params.feed}`);
+    expect(nc).not.toContain(`F${starting.params.plungeFeed}`);
+  });
+
+  it('prints those same numbers on the run sheet the operator reads', () => {
+    const g = generate(tl, job(), null, [HARDWOOD_ROW]);
+    const cut = buildRunSheet(job(), g, null).sections.find((s) => s.id === 'cut');
+    expect(cut).toBeTruthy();
+    const value = cut!.steps.map((s) => s.value ?? '').join(' ');
+    expect(value).toContain(`${HARDWOOD_ROW.rpm} RPM`);
+    expect(value).toContain(`${HARDWOOD_ROW.feed} mm/min feed`);
+    expect(value).toContain(`${HARDWOOD_ROW.plungeFeed} mm/min plunge`);
+    expect(value).toContain(`${HARDWOOD_ROW.stepDown} mm passes`);
+  });
+
+  it('with no rows handed over, is exactly what the worker used to produce', () => {
+    // The control, and the defect itself: `[]` is the worker's own module state, which is why the
+    // panel and the program disagreed before #324.
+    const g = generate(tl, job(), null, []);
+    expect(g.ok).toBe(true);
+    expect(g.nc).toContain(`S${starting.params.rpm} M3`);
+    expect(g.nc).toContain(`F${starting.params.feed}`);
   });
 });
 

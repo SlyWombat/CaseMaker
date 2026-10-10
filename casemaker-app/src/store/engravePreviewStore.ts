@@ -15,7 +15,9 @@ import { create } from 'zustand';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import { getTools } from '@/engine/cnc/toolRegistry';
+import { feedCatalogueRows } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { useEngraveJobStore } from './engraveJobStore';
 
 export type EngravePreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -24,6 +26,7 @@ export type EngravePreviewClient = {
   engravePreview: (
     job: EngraveJob,
     tools: readonly ToolLibraryEntry[],
+    catalogue: readonly FeedCatalogueRow[],
     gen: number,
   ) => Promise<EngravePreview | null>;
 };
@@ -65,8 +68,10 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
     try {
       const client = await clientLoader();
       // The registry snapshot read HERE, at request time, not at module load (#305): the list the
-      // worker measures and recommends from is the one the panel's picker is showing.
-      const preview = await client.engravePreview(job, getTools(), mine);
+      // worker measures and recommends from is the one the panel's picker is showing. The Makera
+      // feed rows go the same way and for the same reason (#324): this side's module state is not
+      // visible in the worker, so the recommendation's feeds filter has to be handed the rows.
+      const preview = await client.engravePreview(job, getTools(), feedCatalogueRows(), mine);
       if (mine !== seq) return; // superseded by a newer request
       // `preview === null` means the worker saw a newer generation already; keep the last one.
       if (preview) set({ preview, status: 'ready' });
