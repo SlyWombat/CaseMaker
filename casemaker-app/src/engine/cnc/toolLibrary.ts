@@ -45,9 +45,46 @@ export const ToolSchema = z.object({
   centreCutting: z.boolean().nullable().default(null),
 });
 
+/**
+ * The namespaces a key in this app can be in (#319). `cat:` is the catalogue tier a sync owns,
+ * `user:` the house's own tools, `inv:` the physical cutters; a key with none of them and no colon
+ * is a built-in (`TOOL_LIBRARY`). `toolTiers.ts` reads the same four, in this order.
+ */
+export const KEY_NAMESPACES = ['inv:', 'user:', 'cat:'] as const;
+
+/**
+ * The key rule, as the CLIENT states it (#319, `house.rs::validate_key`).
+ *
+ * The service stores exactly `user:<something>` and refuses everything else — but the client does
+ * not only WRITE keys, it READS all four namespaces, so "the same rule" here is the service's rule
+ * applied to the vocabulary the app actually carries: a known namespace with at least one character
+ * after it, or a bare built-in with no colon at all. A colon in any other position is a namespace
+ * nobody claims — precisely what the service refuses to store — so the client refuses to read it
+ * rather than filing it under the built-ins and hoping.
+ *
+ * The same two characters are refused as at the service's door, for the same reason: `|` ends the
+ * `.nc` header's tool field and a control character (CR, LF, TAB) ends the comment line it sits in,
+ * so a key carrying one could inject a line into a job's program (#305 design point 3). Whitespace
+ * at either end is refused, never trimmed: `user:abc ` and `user:abc` are one cutter to a human and
+ * two keys to a `Map`, and a silent rename is what this contract exists to prevent.
+ */
+export function isToolKey(key: string): boolean {
+  if (key.length === 0 || key !== key.trim()) return false;
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
+  if (key.includes('|') || /[\u0000-\u001f\u007f-\u009f]/.test(key)) return false;
+  const namespace = KEY_NAMESPACES.find((prefix) => key.startsWith(prefix));
+  return namespace ? key.length > namespace.length : !key.includes(':');
+}
+
 export const ToolLibraryEntrySchema = z.object({
-  /** Stable key a form stores. */
-  key: z.string().min(1),
+  /**
+   * Stable key a form stores. Held to {@link isToolKey}: the service validates the same rule before
+   * it stores one and refuses the rest, so a body carrying a key this refuses is a service (or a
+   * file) that is not the one this build talks to.
+   */
+  key: z.string().refine(isToolKey, {
+    message: 'a tool key must be `inv:…`, `user:…`, `cat:…` or a bare built-in, with no control character',
+  }),
   tool: ToolSchema,
   /** Where the numbers came from, for the panel. */
   provenance: z.string().min(1),

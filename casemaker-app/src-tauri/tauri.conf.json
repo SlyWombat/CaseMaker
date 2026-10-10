@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "create": false,
         "title": "Case Maker",
         "width": 1400,
         "height": 900,

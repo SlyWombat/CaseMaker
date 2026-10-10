@@ -1,0 +1,77 @@
+{
+  "kind": "casemaker-house",
+  "schemaVersion": 1,
+  "tools": [
+    {
+      "key": "user:1a2b3c4d5e",
+      "provenance": "typed in by hand",
+      "origin": null,
+      "tool": {
+        "number": null,
+        "id": null,
+        "name": "2 mm flat end",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": null,
+        "tipDiameter": 2,
+        "diameter": 2,
+        "cornerRadius": 0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": null,
+        "shoulderLength": 12,
+        "stickout": null,
+        "centreCutting": null
+      }
+    },
+    {
+      "key": "user:6f7a8b9c0d",
+      "provenance": "cloned from Makera catalogue “3.175*12mm Flat End(Metal)” on 2026-10-09",
+      "origin": { "id": "00000000-0000-4000-8000-000000000000", "syncedAt": "2026-10-09T09:00:00.000Z" },
+      "tool": {
+        "number": null,
+        "id": null,
+        "name": "3.175*12mm Flat End(Metal) (clone)",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": null,
+        "tipDiameter": 3.175,
+        "diameter": 3.175,
+        "cornerRadius": 0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": null,
+        "shoulderLength": 12,
+        "stickout": 12,
+        "centreCutting": null
+      }
+    }
+  ],
+  "inventory": [
+    {
+      "id": "inv-1a2b3c",
+      "tool": {
+        "number": null,
+        "id": null,
+        "name": "1/4 in ball nose",
+        "typeText": "Ball End",
+        "shape": "ball",
+        "handleDiameter": 6.35,
+        "tipDiameter": 0,
+        "diameter": 6.35,
+        "cornerRadius": null,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": null,
+        "shoulderLength": 20,
+        "stickout": null,
+        "centreCutting": false
+      },
+      "origin": { "id": "00000000-0000-4000-8000-000000000001", "syncedAt": "2026-10-09T09:00:00.000Z" },
+      "quantity": 2,
+      "codes": [{ "symbology": "qr_code", "value": "C1-BIT-BALL-NOSE-1-4" }],
+      "addedAt": "2026-10-09T09:05:00.000Z",
+      "notes": null
+    }
+  ]
+}

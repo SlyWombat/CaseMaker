@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Parametric 3D-printable enclosure designer for microcontrollers and SBCs"
 authors = ["SlyWombat"]
 edition = "2021"
-rust-version = "1.75"
+# 1.89 is where `File::try_lock` / `std::fs::TryLockError` stabilized, and `house.rs` uses them for
+# the single-instance lock (#321). A `rust-version` that the code does not honour is a promise to
+# nobody.
+rust-version = "1.89"
 
 [lib]
 name = "casemaker_lib"

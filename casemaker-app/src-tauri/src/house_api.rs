@@ -10,10 +10,19 @@
 // is answered by `api_not_found` with a JSON 404. `server.rs`'s tests assert all three of those
 // against the real router.
 //
-// WRITES ARE HERE, THE CLIENT'S WRITE PATH IS NOT. Every endpoint #212 describes exists and is
-// tested, but the TypeScript client (#306's `platform/houseClient.ts`) implements the READ path
-// only: registering, cloning and importing are #309/#311's, and they need the tray/settings UI
-// #308/#310 carry. A service with an unused write path is honest; a client guessing at one is not.
+// WRITES ARE HERE, AND SO IS THE CLIENT'S WRITE PATH. Every endpoint #212 describes has been served
+// here since #306, and since #311 `platform/houseClient.ts` implements the writes as well as the
+// reads — register, clone, edit, remove, sync, export, import are all reachable from the panel.
+//
+// TWO OF THE FOUR METHODS TAKE A GUARD, AND THE OTHER TWO TAKE A REASON INSTEAD (#321). `PATCH` and
+// `DELETE` change a document somebody has already read, so each requires `If-Match` with that
+// document's `ETag`: a missing header is 428 and one that names a version no longer served is 412
+// (`status_for`). `POST` is NOT guarded, because a create is judged against its key — a second create
+// of the same key is a 409 whatever version it was based on, which is a stronger answer than a
+// validator. `POST /import` is not guarded either: a "my machine" file replaces the house wholesale
+// and there is no prior version here to be based on. The guard is per LIST (`/tools` vs
+// `/inventory`), never per entry: the list is the representation the client actually read and whose
+// `ETag` it holds.
 //
 // THE KEY IS A WILDCARD PATH SEGMENT (`/tools/*key`), NOT A SINGLE SEGMENT, so a key containing `/`
 // routes without any escaping — and the client must therefore NOT `encodeURIComponent` a whole key,
@@ -68,8 +77,24 @@ fn status_for(e: &HouseError) -> StatusCode {
         // A key that already exists, and a write refused because the file on disk is unreadable.
         // Both are "the request was fine, the house's state says no" — 409, not 400.
         HouseError::Conflict(_) | HouseError::Refused(_) => StatusCode::CONFLICT,
+        // #321. A guarded write with no validator to check, and one whose validator is no longer
+        // current. 428 is the status that says the header was MISSING rather than wrong, which is
+        // the difference between "your client is out of date" and "somebody else got there first".
+        HouseError::PreconditionRequired(_) => StatusCode::PRECONDITION_REQUIRED,
+        HouseError::StalePrecondition(_) => StatusCode::PRECONDITION_FAILED,
         HouseError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
+}
+
+/// The `If-Match` header, if the request carried one (#321).
+///
+/// Trimmed: the header's grammar allows optional whitespace around the field value, and a validator
+/// with a stray space around it would compare unequal to the very `ETag` the client meant.
+fn if_match(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(header::IF_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
 }
 
 fn json_body(status: StatusCode, bytes: Vec<u8>) -> Response<Body> {
@@ -105,12 +130,9 @@ fn json_with_etag(bytes: Vec<u8>, etag: String, headers: &HeaderMap, status: Sta
         return json_body(status, bytes);
     };
     if let Some(requested) = headers.get(header::IF_NONE_MATCH) {
-        let matches = requested == &value
-            || requested
-                .to_str()
-                .map(|s| s.split(',').any(|part| part.trim() == etag || part.trim() == "*"))
-                .unwrap_or(false);
-        if matches {
+        // The matching rule is `etag.rs`'s, so the API and the SPA shell answer "the same bytes"
+        // identically (#313).
+        if crate::etag::if_none_match_covers(requested, &etag) {
             // 304 carries the validator and no body, so the client keeps what it has.
             let mut res = empty(StatusCode::NOT_MODIFIED);
             res.headers_mut().insert(header::ETAG, value);
@@ -161,9 +183,16 @@ async fn create_tool(
     }
 }
 
+/// Replace a definition in place. GUARDED (#321): the request must carry `If-Match` with the `ETag`
+/// of the tool list it read, or the service has no way to tell this save from one based on a list
+/// somebody else has already changed. A missing header is 428, a stale one 412 — see
+/// `status_for`. `POST` is not guarded: a create is checked against the key, which is a stronger
+/// answer than a validator (a second create of the same key is a 409 whatever version it was based
+/// on).
 async fn update_tool(
     State(store): State<Arc<HouseStore>>,
     Path(key): Path<String>,
+    headers: HeaderMap,
     axum::Json(entry): axum::Json<ToolLibraryEntry>,
 ) -> Response<Body> {
     // The path is the key, not the body's copy of it: a PATCH that disagrees with its own URL is a
@@ -174,14 +203,21 @@ async fn update_tool(
             entry.key
         )));
     }
-    match store.update_tool(entry).await {
+    let guard = if_match(&headers);
+    match store.update_tool(entry, guard.as_deref()).await {
         Ok(()) => empty(StatusCode::OK),
         Err(e) => error_response(e),
     }
 }
 
-async fn delete_tool(State(store): State<Arc<HouseStore>>, Path(key): Path<String>) -> Response<Body> {
-    match store.delete_tool(&key).await {
+/// Remove a definition. Guarded exactly as `update_tool` is (#321).
+async fn delete_tool(
+    State(store): State<Arc<HouseStore>>,
+    Path(key): Path<String>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let guard = if_match(&headers);
+    match store.delete_tool(&key, guard.as_deref()).await {
         Ok(()) => empty(StatusCode::NO_CONTENT),
         Err(e) => error_response(e),
     }
@@ -204,9 +240,12 @@ async fn create_inventory(
     }
 }
 
+/// Change a possession. GUARDED on the INVENTORY list's `ETag` (#321) — the document this client
+/// read to find the row, so a re-measured tool definition does not invalidate a count edit.
 async fn update_inventory(
     State(store): State<Arc<HouseStore>>,
     Path(id): Path<String>,
+    headers: HeaderMap,
     axum::Json(item): axum::Json<InventoryItem>,
 ) -> Response<Body> {
     if item.id != id {
@@ -215,17 +254,21 @@ async fn update_inventory(
             item.id
         )));
     }
-    match store.update_inventory(item).await {
+    let guard = if_match(&headers);
+    match store.update_inventory(item, guard.as_deref()).await {
         Ok(()) => empty(StatusCode::OK),
         Err(e) => error_response(e),
     }
 }
 
+/// Take a cutter out of the inventory. Guarded as `update_inventory` is (#321).
 async fn delete_inventory(
     State(store): State<Arc<HouseStore>>,
     Path(id): Path<String>,
+    headers: HeaderMap,
 ) -> Response<Body> {
-    match store.delete_inventory(&id).await {
+    let guard = if_match(&headers);
+    match store.delete_inventory(&id, guard.as_deref()).await {
         Ok(()) => empty(StatusCode::NO_CONTENT),
         Err(e) => error_response(e),
     }
@@ -301,6 +344,40 @@ mod tests {
         Request::builder().uri(uri).body(Body::empty()).unwrap()
     }
 
+    /// The current `ETag` of a list endpoint, read the way the client reads it (#321). Every guarded
+    /// request below is built from one of these, because that is the only honest way to write the
+    /// header: the validator means "the version I am editing", so a test that invented one would be
+    /// testing a request the client cannot produce.
+    async fn etag_of(app: &Router, uri: &str) -> String {
+        let res = app.clone().oneshot(get(uri)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "{uri}");
+        res.headers()
+            .get(header::ETAG)
+            .expect("a list endpoint always carries a validator")
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
+    fn patch_json(uri: &str, if_match: Option<&str>, body: &impl serde::Serialize) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("PATCH")
+            .uri(uri)
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(tag) = if_match {
+            builder = builder.header(header::IF_MATCH, tag);
+        }
+        builder.body(Body::from(serde_json::to_vec(body).unwrap())).unwrap()
+    }
+
+    fn delete(uri: &str, if_match: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder().method("DELETE").uri(uri);
+        if let Some(tag) = if_match {
+            builder = builder.header(header::IF_MATCH, tag);
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
     fn post_json(uri: &str, body: &impl serde::Serialize) -> Request<Body> {
         Request::builder()
             .method("POST")
@@ -354,9 +431,10 @@ mod tests {
             tool: a_tool("1/4 in ball nose"),
             origin: None,
             quantity: 1,
+            // Derived from the id: a code names one cutter (#320), so two items may not share one.
             codes: vec![Coded {
                 symbology: "qr_code".to_string(),
-                value: "C1-BIT-BALL-NOSE-1-4".to_string(),
+                value: format!("C1-BIT-{}", id.to_uppercase()),
             }],
             added_at: "2026-10-08T00:00:00.000Z".to_string(),
             notes: None,
@@ -533,16 +611,10 @@ mod tests {
             tool: a_tool("2 mm flat end, re-measured"),
             provenance: "calipers, 2026-10-08".to_string(),
         };
+        let etag = etag_of(&app, "/api/v1/tools").await;
         let res = app
             .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri("/api/v1/tools/user:abc")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(serde_json::to_vec(&edited).unwrap()))
-                    .unwrap(),
-            )
+            .oneshot(patch_json("/api/v1/tools/user:abc", Some(&etag), &edited))
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
@@ -557,32 +629,156 @@ mod tests {
         };
         let res = app
             .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PATCH")
-                    .uri("/api/v1/tools/user:abc")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(serde_json::to_vec(&mismatched).unwrap()))
-                    .unwrap(),
-            )
+            .oneshot(patch_json("/api/v1/tools/user:abc", Some(&etag_of(&app, "/api/v1/tools").await), &mismatched))
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
+        let etag = etag_of(&app, "/api/v1/tools").await;
         let res = app
             .clone()
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri("/api/v1/tools/user:abc")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(delete("/api/v1/tools/user:abc", Some(&etag)))
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::NO_CONTENT);
         let body = json_of(app.clone().oneshot(get("/api/v1/tools")).await.unwrap()).await;
         assert_eq!(body, serde_json::json!([]));
+    }
+
+    /// The guard as the wire sees it (#321): no `If-Match` is a 428, a validator from a version that
+    /// is gone is a 412, and the current one goes through. The point of the whole mechanism is the
+    /// middle case — a second window's save meeting the first's must be a visible refusal and not a
+    /// silent overwrite, so the status, the body and the UNCHANGED document are all asserted.
+    #[tokio::test]
+    async fn a_guarded_write_needs_the_version_the_client_read() {
+        let (_dir, app) = app_under_test();
+        app.clone()
+            .oneshot(post_json("/api/v1/tools", &an_entry("user:abc")))
+            .await
+            .unwrap();
+        let edited = ToolLibraryEntry {
+            key: "user:abc".to_string(),
+            tool: a_tool("re-measured"),
+            provenance: "calipers".to_string(),
+        };
+
+        // 428: the request said nothing about which version it was based on.
+        let res = app
+            .clone()
+            .oneshot(patch_json("/api/v1/tools/user:abc", None, &edited))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::PRECONDITION_REQUIRED);
+        let body = json_of(res).await;
+        assert!(
+            body["error"].as_str().unwrap().contains("version"),
+            "the refusal has to say what was missing: {body}"
+        );
+        let res = app
+            .clone()
+            .oneshot(delete("/api/v1/tools/user:abc", None))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::PRECONDITION_REQUIRED);
+
+        // Somebody else's write moves the document. The validator in hand is now history.
+        let stale = etag_of(&app, "/api/v1/tools").await;
+        let other = ToolLibraryEntry {
+            key: "user:abc".to_string(),
+            tool: a_tool("the other window's edit"),
+            provenance: "calipers, other window".to_string(),
+        };
+        assert_eq!(
+            app.clone()
+                .oneshot(patch_json("/api/v1/tools/user:abc", Some(&stale), &other))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+
+        // 412, and nothing moved: the stale save must not undo the write it never saw.
+        let res = app
+            .clone()
+            .oneshot(patch_json("/api/v1/tools/user:abc", Some(&stale), &edited))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::PRECONDITION_FAILED);
+        let body = json_of(res).await;
+        assert!(
+            body["error"].as_str().unwrap().contains("reload"),
+            "the refusal has to say what to do: {body}"
+        );
+        assert_eq!(
+            app.clone()
+                .oneshot(delete("/api/v1/tools/user:abc", Some(&stale)))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::PRECONDITION_FAILED
+        );
+        let body = json_of(app.clone().oneshot(get("/api/v1/tools")).await.unwrap()).await;
+        assert_eq!(body[0]["provenance"], serde_json::json!("calipers, other window"));
+
+        // The current validator — the one the client would have read by reloading — goes through.
+        let fresh = etag_of(&app, "/api/v1/tools").await;
+        assert_ne!(fresh, stale);
+        assert_eq!(
+            app.clone()
+                .oneshot(patch_json("/api/v1/tools/user:abc", Some(&fresh), &edited))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+    }
+
+    /// The inventory has its OWN validator (#321): a definition edit must not invalidate a count
+    /// edit, and the tool list's `ETag` is not accepted for an inventory write. This is the case that
+    /// a single house-wide validator would have got wrong.
+    #[tokio::test]
+    async fn the_inventory_guards_on_its_own_validator() {
+        let (_dir, app) = app_under_test();
+        app.clone()
+            .oneshot(post_json("/api/v1/inventory", &an_item("inv-1")))
+            .await
+            .unwrap();
+        app.clone()
+            .oneshot(post_json("/api/v1/tools", &an_entry("user:abc")))
+            .await
+            .unwrap();
+
+        let inventory = etag_of(&app, "/api/v1/inventory").await;
+        let tools = etag_of(&app, "/api/v1/tools").await;
+        assert_ne!(inventory, tools);
+
+        // The tool list's validator is simply the wrong version for the inventory — a stale one.
+        let mut more = an_item("inv-1");
+        more.quantity = 4;
+        assert_eq!(
+            app.clone()
+                .oneshot(patch_json("/api/v1/inventory/inv-1", Some(&tools), &more))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::PRECONDITION_FAILED
+        );
+        // And an unrelated tool write leaves the inventory's validator alone, so the count edit still
+        // goes through with what it read.
+        app.clone()
+            .oneshot(post_json("/api/v1/tools", &an_entry("user:def")))
+            .await
+            .unwrap();
+        assert_eq!(
+            app.clone()
+                .oneshot(patch_json("/api/v1/inventory/inv-1", Some(&inventory), &more))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        let body = json_of(app.clone().oneshot(get("/api/v1/inventory")).await.unwrap()).await;
+        assert_eq!(body[0]["quantity"], serde_json::json!(4));
     }
 
     #[tokio::test]
@@ -597,20 +793,14 @@ mod tests {
             StatusCode::CREATED
         );
         let body = json_of(app.clone().oneshot(get("/api/v1/inventory")).await.unwrap()).await;
-        assert_eq!(body[0]["codes"][0]["value"], serde_json::json!("C1-BIT-BALL-NOSE-1-4"));
+        assert_eq!(body[0]["codes"][0]["value"], serde_json::json!("C1-BIT-INV-1"));
 
         let mut more = an_item("inv-1");
         more.quantity = 2;
+        let etag = etag_of(&app, "/api/v1/inventory").await;
         assert_eq!(
             app.clone()
-                .oneshot(
-                    Request::builder()
-                        .method("PATCH")
-                        .uri("/api/v1/inventory/inv-1")
-                        .header(header::CONTENT_TYPE, "application/json")
-                        .body(Body::from(serde_json::to_vec(&more).unwrap()))
-                        .unwrap(),
-                )
+                .oneshot(patch_json("/api/v1/inventory/inv-1", Some(&etag), &more))
                 .await
                 .unwrap()
                 .status(),
@@ -619,15 +809,10 @@ mod tests {
         let body = json_of(app.clone().oneshot(get("/api/v1/inventory")).await.unwrap()).await;
         assert_eq!(body[0]["quantity"], serde_json::json!(2));
 
+        let etag = etag_of(&app, "/api/v1/inventory").await;
         assert_eq!(
             app.clone()
-                .oneshot(
-                    Request::builder()
-                        .method("DELETE")
-                        .uri("/api/v1/inventory/inv-1")
-                        .body(Body::empty())
-                        .unwrap(),
-                )
+                .oneshot(delete("/api/v1/inventory/inv-1", Some(&etag)))
                 .await
                 .unwrap()
                 .status(),
@@ -848,7 +1033,7 @@ mod tests {
     async fn the_real_install_imports_is_idempotent_and_agrees_with_the_nc_header() {
         let db = crate::catalogue::studio_db_path().expect("a data directory");
         assert!(db.exists(), "no Makera Studio library at {}", db.display());
-        let before_digest = crate::house::fnv1a_hex(&std::fs::read(&db).unwrap());
+        let before_digest = crate::etag::fnv1a_hex(&std::fs::read(&db).unwrap());
         let dir = TempDir::new().unwrap();
         let app = app_syncing_from(&dir, &db);
 
@@ -1020,7 +1205,7 @@ mod tests {
         // never opened it for writing. A 14 MB digest, because "we only read" is a claim about
         // bytes.
         assert_eq!(
-            crate::house::fnv1a_hex(&std::fs::read(&db).unwrap()),
+            crate::etag::fnv1a_hex(&std::fs::read(&db).unwrap()),
             before_digest,
             "the vendor database was modified by a sync"
         );
