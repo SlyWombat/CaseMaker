@@ -36,13 +36,15 @@ import type { EngraveJob } from '@/types/engraveJob';
 import type { Mm, Vec2 } from '@/types/units';
 
 /**
- * The probe in use. §1: of the three that fit the Z1, only the **Makera 3D Probe** is rated for
- * non-conductive material, so it is the only one that can touch off a PLA blank — the wired probe
- * is Z-only and the 3D Probe Rod that ships in the box requires a conductive workpiece.
+ * The probe in use. REVISED 2026-10-08 (decision 8, `/Fabrication.md` §7.3, #293): the **wired
+ * probe that ships with the machine** is the touch-off probe. Makera's pages rate only the
+ * separate 3D Probe for non-conductive material, but the bench showed the wired probe is a
+ * *mechanical* touch tip — it triggered on the PLA blank five times with a 0.001 mm slow spread
+ * (`/Z1-Firmware-Dialect.md` §11.7). It is Z-only; the X/Y touches this planner lists are what
+ * the 3D Probe (held in reserve) would do, and for the vise the jaws already fix X and rotation.
  *
- * ITS TIP DIAMETER IS PROVISIONAL (#208). Makera publishes no figure and nobody has put calipers
- * on it; 3 mm is the common ball for a probe of this class and is what `cncProbePlan.spec.ts`
- * used. The tip sets how far a touch stands off a corner and how short an edge may be, so where
+ * THE TIP DIAMETER IS PROVISIONAL (#208, #188): unmeasured for either probe. 3 mm is the common
+ * ball for a probe of this class and is what `cncProbePlan.spec.ts` used. The tip sets how far a touch stands off a corner and how short an edge may be, so where
  * that matters the plan is nominal — the *edges and axes* it chooses are the finding, the
  * millimetre along them is not.
  *

@@ -1204,6 +1204,50 @@ if T1 is already active, and a full, blocking change if it is not.
 
 **Goes to:** #207 section 4.
 
+### C8 — The probe with nothing plugged in (#293 item a)
+
+**Do.** Collet **empty**, probe cable **unplugged**, head at clearance after `G28`. From Windows,
+one line at a time, maintainer at the machine with a hand on the stop:
+`node tools/z1/z1.mjs send 192.168.10.43 "<line>" --i-am-at-the-machine --first-reply 60000`.
+1. `?` — record `T:` and the state. 2. `G38.2 Z-5 F100` — travels Z −3 → −8 at most; the nearest
+surface below clearance XY is the tool-length sensor at −85.8 (§11.9), so a never-triggering probe
+reaches nothing. 3. `$X`, `G53 G0 Z-3`, `?`.
+
+**Expected.** Either an immediate refusal text, or a miss — `[PRB:…:0]` then `ALARM: Probe fail`.
+Which one is the answer: it decides whether a job may assume the controller refuses to probe with
+nothing plugged in, or drives until Alarm.
+
+**Recorded:** _not yet run — the exact reply, verbatim._
+
+| Field | Value |
+|---|---|
+| Reply to `G38.2 Z-5 F100` with the cable unplugged (verbatim) | |
+| State after (`?`) | |
+
+**Goes to:** `/Z1-Firmware-Dialect.md` §11.6; `/Fabrication.md` §7.6.
+
+### C9 — Do `G38.2` and the tool-length sensor share an input? (#293 item b)
+
+**Do.** A cutter in the collet (not the probe; spindle off), probe **plugged in and seated in its
+holder**, `T1` active. Over the sensor, the `M491` macro's own XY: `G53 G0 X-9.89 Y-12.83`.
+1. `G38.2 Z-82 F300` — ends at −85.0, 0.8 mm above the sensor's trigger height, as a miss/Alarm;
+`$X`. 2. `G38.2 Z-2 F100` — crosses −85.78 by ≤ 1.2 mm, the same overshoot the `M491` slow pass
+allows. 3. `$X` if needed, `G53 G0 Z-20`, `G28`.
+
+**Expected.** Unknown — that is the question. A **trigger** `[PRB:…,-85.78…:1]` means the
+workpiece-probe cycle listens to the sensor (shared input: a `G38.2` over the sensor is a contact,
+not a measurement). A **miss** at −87 means separate inputs.
+
+**Recorded:** _not yet run._
+
+| Field | Value |
+|---|---|
+| Step 1 reply (expected miss at −85.0) | |
+| Step 2 reply — trigger at ≈ −85.78, or miss at −87? | |
+| Shared input? (yes/no) | |
+
+**Goes to:** `/Z1-Firmware-Dialect.md` §11 (new 11.10); C4's notes.
+
 ---
 
 ## D · Run files — in the air first

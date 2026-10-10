@@ -460,11 +460,16 @@ export const Z1: MillProfile = {
     probeSlowFeed: 100,
     probeRetract: 1,
   },
-  // PROVISIONAL (#208): the collet nut has never been measured. `null` is the honest value —
-  // it makes the fixture check warn "cannot be proven" instead of testing a made-up cylinder.
+  // Unmeasured, and no longer needed by the sweep (#314, 2026-10-08): the collet grips the shank,
+  // never the flutes, so the nut face is at least `shoulderLength` above the tip at any seating
+  // and the depth gate at `shoulderLength` keeps it out of the stock. `null` stays the honest
+  // value; it matters only for an obstacle that rises above the stock top.
   holder: null,
-  // The shipped 4th-axis figures (#237, /Rotary.md §3.5). A reading of configZ1.default, not
-  // the device; the ⌀80 x 150 envelope is from t_MachineType. R-1 replaces all of it.
+  // The 4th-axis figures (#237, /Rotary.md §3.5). `maxRate` and `acceleration` were READ from the
+  // machine's own config on 2026-10-07 (`delta_max_rate` = 3600, `delta_acceleration` = 360,
+  // docs/bench/2026-10-07-config-sweep.json; runbook B2) and match configZ1.default digit for
+  // digit. `stepsPerDegree` and homing are still the shipped file; the ⌀80 x 150 envelope is from
+  // t_MachineType. R-1 measures the module itself.
   rotary: {
     axis: 'A',
     parent: 'y',
@@ -474,7 +479,7 @@ export const Z1: MillProfile = {
     acceleration: 360,
     homing: 'home_to_min',
     unwind: 'G92.4 A S',
-    source: 'configZ1.default (shipped default, unverified)',
+    source: 'maxRate/acceleration: config read on the machine (B2, 2026-10-07); steps and homing: configZ1.default (unverified)',
   },
 };
 

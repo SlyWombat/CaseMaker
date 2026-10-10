@@ -105,7 +105,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
           "text": "Record the cutter's flute length and its stick-out from the collet.",
         },
         {
-          "text": "The Z1 low-profile vise, and the Makera 3D Probe — the one rated for non-conductive material, NOT the 3D Probe Rod that came in the box.",
+          "text": "The Z1 low-profile vise, and the wired probe that ships with the machine — a mechanical touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.",
         },
       ],
       "title": "1 · What you need",

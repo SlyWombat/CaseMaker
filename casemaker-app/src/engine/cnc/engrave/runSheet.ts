@@ -783,8 +783,8 @@ export function buildRunSheet(
     },
     {
       text:
-        'The Z1 low-profile vise, and the Makera 3D Probe — the one rated for non-conductive ' +
-        'material, NOT the 3D Probe Rod that came in the box.',
+        'The Z1 low-profile vise, and the wired probe that ships with the machine — a mechanical ' +
+        'touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.',
     },
   ];
   const sac = sacrificialSummary(job);
