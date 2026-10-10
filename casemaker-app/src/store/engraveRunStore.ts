@@ -9,11 +9,12 @@
  *
  * It holds no wasm handle and no mesh: `engraveGenerate` returns plain data and the oracle a
  * plain report. The sim program itself lives in `simStore` (this store only drives its load and
- * reads its diagnostics); the client is reached by a dynamic `import()` behind `__FEATURE_SIM__`,
+ * reads its diagnostics); the client is reached by a dynamic `import()` behind `featureSim` (#343),
  * exactly as `engravePreviewStore.ts` does, so a build with the flag off contains neither the sim
  * client nor its worker.
  */
 
+import { featureSim } from '@/platform/features';
 import { create } from 'zustand';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Tool } from '@/engine/cnc/tool';
@@ -45,7 +46,7 @@ export type EngraveRunClient = {
 };
 
 const loadClient = async (): Promise<EngraveRunClient> => {
-  if (!__FEATURE_SIM__) throw new Error('the engrave run is not enabled in this build');
+  if (!featureSim) throw new Error('the engrave run is not enabled in this build');
   return import('@/engine/jobs/simClient');
 };
 let clientLoader: () => Promise<EngraveRunClient> = loadClient;

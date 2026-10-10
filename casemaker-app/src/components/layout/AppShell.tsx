@@ -1,3 +1,4 @@
+import { featureSim } from '@/platform/features';
 import { useEffect } from 'react';
 import { Sidebar } from './Sidebar';
 import { StatusBar } from './StatusBar';
@@ -44,10 +45,10 @@ export function AppShell() {
   // it does not disturb either of the other two: `welcomeMode` and the project are left alone, so
   // closing it puts the user back exactly where they were.
   //
-  // Gated on `__FEATURE_SIM__` with the rest of the CNC UI: the house is a CNC notion and the web
+  // Gated on `featureSim` (#343) with the rest of the CNC UI: the house is a CNC notion and the web
   // deployment switches that off wholesale (`Sidebar`, `docs/index.ts`).
   const manageRequested = useManageModeStore((s) => s.open);
-  const manageOpen = __FEATURE_SIM__ && manageRequested;
+  const manageOpen = featureSim && manageRequested;
   // Issue #59 — board visualization cycle removed; no fallback banner needed.
   return (
     <div className="app-shell">

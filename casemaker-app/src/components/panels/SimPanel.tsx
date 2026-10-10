@@ -1,3 +1,4 @@
+import { featureSim } from '@/platform/features';
 import { useState, type CSSProperties, type DragEvent, type JSX } from 'react';
 import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
 import { isSimSceneActive, useSimStore } from '@/store/simStore';
@@ -209,7 +210,7 @@ export function SimPanel() {
   }
 
   async function cancel(): Promise<void> {
-    if (__FEATURE_SIM__) {
+    if (featureSim) {
       const client = await import('@/engine/jobs/simClient');
       client.terminateSim();
     }

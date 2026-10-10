@@ -1,7 +1,7 @@
 /**
  * Main-thread side of the simulation worker (#182 step 8b). Lazy-init like `workerClient.ts`.
  *
- * Import this ONLY through a dynamic `import()` behind `__FEATURE_SIM__` (see `simStore.ts`), so
+ * Import this ONLY through a dynamic `import()` behind `featureSim` (#343) (see `simStore.ts`), so
  * the worker never enters the production graph. Nothing here holds a wasm handle: only plain
  * data and ArrayBuffers cross the boundary. `terminateSim()` is the cancel — `sweepTimeline` is
  * synchronous and cannot be interrupted any other way.

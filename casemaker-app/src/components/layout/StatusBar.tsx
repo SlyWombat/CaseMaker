@@ -1,3 +1,4 @@
+import { featureSim } from '@/platform/features';
 import { useJobStore } from '@/store/jobStore';
 import { useManageModeStore } from '@/store/manageModeStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
@@ -32,7 +33,7 @@ export function StatusBar() {
   const duration = useJobStore((s) => s.durationMs);
   const error = useJobStore((s) => s.error);
   const manageRequested = useManageModeStore((s) => s.open);
-  const manageOpen = __FEATURE_SIM__ && manageRequested;
+  const manageOpen = featureSim && manageRequested;
   return (
     <footer className="status-bar" data-testid="status-bar" data-status={status}>
       <DonateButton variant="status" />

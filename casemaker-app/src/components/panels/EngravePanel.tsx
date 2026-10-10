@@ -1,3 +1,4 @@
+import { featureSim } from '@/platform/features';
 import { useEffect, useState, type CSSProperties, type JSX } from 'react';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useProjectStore } from '@/store/projectStore';
@@ -401,7 +402,7 @@ export function EngravePanel(): JSX.Element {
   // ---- the run (#206) ----------------------------------------------------------------------
 
   const run = useEngraveRunStore();
-  const simEnabled = __FEATURE_SIM__;
+  const simEnabled = featureSim;
   const running = run.phase === 'generating' || run.phase === 'simulating' || run.phase === 'checking';
 
   // The run sheet is built on demand from the current job and the last generated result, and

@@ -1,3 +1,4 @@
+import { featureSim } from '@/platform/features';
 import gettingStartedRaw from './getting-started.md?raw';
 import userManualRaw from './user-manual.md?raw';
 import technicalReferenceRaw from './technical-reference.md?raw';
@@ -11,9 +12,9 @@ export interface DocEntry {
   source: string;
 }
 
-// The CNC guide is listed only when the CNC simulation is built in: the public site
-// switches the CNC UI off, and it must not offer a guide to screens that are not there.
-const cncDocs: DocEntry[] = __FEATURE_SIM__
+// The CNC guide is listed only when the CNC UI is on (`featureSim`, #343): the public site
+// switches it off unless the address says `?BETA=yes`, and it must not offer a guide to screens that are not there.
+const cncDocs: DocEntry[] = featureSim
   ? [{ id: 'cnc-guide', title: 'CNC Guide', source: cncGuideRaw }]
   : [];
 

@@ -1,3 +1,4 @@
+import { featureSim } from '@/platform/features';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   useProjectStore,
@@ -212,11 +213,11 @@ export function Toolbar() {
     </button>
   );
   // #311 — the Manage toggle, and the reason it sits beside New: both leave the project behind and
-  // go somewhere that is not the viewport. Gated on `__FEATURE_SIM__` with the rest of the CNC UI
+  // go somewhere that is not the viewport. Gated on `featureSim` (#343) with the rest of the CNC UI
   // (the web deployment switches the house off wholesale), and `aria-pressed` is how the toolbar
   // shows it is up — the app's toolbar buttons carry no class of their own, so the state has to hang
   // off an attribute that means exactly this (`.toolbar-buttons button[aria-pressed="true"]`).
-  const manageBtn = __FEATURE_SIM__ ? (
+  const manageBtn = featureSim ? (
     <button
       type="button"
       aria-pressed={manageOpen}

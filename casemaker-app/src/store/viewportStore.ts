@@ -53,9 +53,9 @@ export type SidebarSectionId =
   | 'features'
   | 'assets'
   | 'export'
-  // #196 — the CNC Simulate .nc panel (only present when `__FEATURE_SIM__`).
+  // #196 — the CNC Simulate .nc panel (only present when `featureSim`, #343).
   | 'cnc-sim'
-  // #205 — the CNC Engrave text panel (only present when `__FEATURE_SIM__`).
+  // #205 — the CNC Engrave text panel (only present when `featureSim`, #343).
   | 'cnc-engrave';
 
 // Issue #91 — 4-way view-mode picker that drives lid lift + per-mesh

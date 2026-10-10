@@ -7,10 +7,11 @@
  * by export, `FloatersBanner` and `PartsMenu` — a preview mesh there would leak into exported
  * STLs. It holds no wasm handle either: meshes arrive as transferred ArrayBuffers.
  *
- * The client is reached by a dynamic `import()` behind `__FEATURE_SIM__` (as `simStore.ts`
+ * The client is reached by a dynamic `import()` behind `featureSim` (#343) (as `simStore.ts`
  * does), so a build with the flag off contains neither the sim client nor its worker.
  */
 
+import { featureSim } from '@/platform/features';
 import { create } from 'zustand';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
@@ -32,7 +33,7 @@ export type EngravePreviewClient = {
 };
 
 const loadClient = async (): Promise<EngravePreviewClient> => {
-  if (!__FEATURE_SIM__) throw new Error('the engrave preview is not enabled in this build');
+  if (!featureSim) throw new Error('the engrave preview is not enabled in this build');
   return import('@/engine/jobs/simClient');
 };
 let clientLoader: () => Promise<EngravePreviewClient> = loadClient;

@@ -7,9 +7,10 @@
  * holds no wasm handle either: meshes arrive as transferred ArrayBuffers.
  *
  * There is no UI yet (it waits on a mockup). The client is reached by a dynamic `import()`
- * behind `__FEATURE_SIM__`, so a build with the flag off contains neither it nor the worker.
+ * behind `featureSim` (#343), so a build with the flag off contains neither it nor the worker.
  */
 
+import { featureSim } from '@/platform/features';
 import { create } from 'zustand';
 import type { MachineCalibration, PausePoint, Setup } from '@/engine/cnc';
 import { resolveMachine } from '@/engine/cnc/calibration';
@@ -172,7 +173,7 @@ export interface SimState {
 export type SimClient = typeof import('@/engine/jobs/simClient');
 
 const loadClient = async (): Promise<SimClient> => {
-  if (!__FEATURE_SIM__) throw new Error('the simulation is not enabled in this build');
+  if (!featureSim) throw new Error('the simulation is not enabled in this build');
   return import('@/engine/jobs/simClient');
 };
 let clientLoader: () => Promise<SimClient> = loadClient;

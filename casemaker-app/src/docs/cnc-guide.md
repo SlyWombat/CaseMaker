@@ -12,6 +12,11 @@ Two things to hold on to before you read on:
   set the work origin there. Every chapter that could be read otherwise says so again.
 - **Case Maker supports the Z1 only.** Carvera and Carvera Air are different machines; the
   app does not model them.
+- **On the public site the CNC side is a beta switch.** [electricrv.ca/casemaker](https://electricrv.ca/casemaker)
+  hides the Engrave and Simulate sections, the cutting-job door, Manage and this guide
+  unless the address carries `?BETA=yes`:
+  `https://electricrv.ca/casemaker/?BETA=yes`. Dev builds and the desktop build have it on
+  without the switch. The switch does not let a browser reach a machine — nothing can.
 
 For the rest of the app — building cases around boards — see the
 [User Manual](https://github.com/SlyWombat/CaseMaker/blob/main/docs/user-manual.md). This

@@ -1,3 +1,4 @@
+import { featureSim } from '@/platform/features';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProjectStore, clearHistory } from '@/store/projectStore';
 import { useLibraryStore, refreshStaleSources, type ImportResult } from '@/store/libraryStore';
@@ -225,15 +226,19 @@ export function WelcomeOverlay() {
           <div className="wb-header__actions">
             {/* #274 / #280 — the way IN. Every card on this screen creates a project first, so a
                 cutting job with no enclosure had no door: the engrave and simulate panels are
-                sidebar sections, and a sidebar only exists once a project does. */}
-            <button
-              className="wb-btn wb-btn--primary"
-              onClick={openWizard}
-              data-testid="welcome-start-cnc"
-              title="Check for a machine, pick what you are making, then set up the cut"
-            >
-              🪚 Set up a cutting job…
-            </button>
+                sidebar sections, and a sidebar only exists once a project does. Behind the same
+                switch as those sections (#343): a door onto a project with no CNC section is worse
+                than no door. */}
+            {featureSim && (
+              <button
+                className="wb-btn wb-btn--primary"
+                onClick={openWizard}
+                data-testid="welcome-start-cnc"
+                title="Check for a machine, pick what you are making, then set up the cut"
+              >
+                🪚 Set up a cutting job…
+              </button>
+            )}
             <button
               className={`wb-btn wb-btn--ghost ${sourcesOpen ? 'wb-btn--toggled' : ''}`}
               onClick={() => setSourcesOpen((v) => !v)}

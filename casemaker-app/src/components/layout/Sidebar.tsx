@@ -1,3 +1,4 @@
+import { featureSim } from '@/platform/features';
 import { useEffect, useState } from 'react';
 import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore, type SidebarSectionId } from '@/store/viewportStore';
@@ -26,10 +27,10 @@ const SECTIONS: { id: SidebarSectionId; label: string; icon: string; hint: strin
   { id: 'export',   label: 'Export',          icon: '⬇️',  hint: 'Per-part Save + Save All' },
 ];
 
-// #196 / #205 — the CNC panels. Behind the compile-time flag, the same gate as the stores and
-// workers they drive, so the electricrv.ca bundle carries no CNC UI. The engrave editor sits
+// #196 / #205 — the CNC panels. Behind `featureSim` (#343: the build flag, or `?BETA=yes` on the
+// public site), the same gate as the stores and workers they drive. The engrave editor sits
 // above Simulate .nc (the issue's order).
-if (__FEATURE_SIM__) {
+if (featureSim) {
   SECTIONS.push(
     {
       id: 'cnc-engrave',
