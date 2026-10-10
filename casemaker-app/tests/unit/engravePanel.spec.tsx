@@ -24,6 +24,7 @@ import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
 import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
+import { clearFeedCatalogue, setFeedCatalogue, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 
 // The save path is the thing under test (#207): mock it so a test can read the files the panel
@@ -102,6 +103,67 @@ describe('EngravePanel (#205)', () => {
     fireEvent.change(screen.getByTestId('engrave-override-stepOver'), { target: { value: '' } });
     expect(screen.queryByTestId('engrave-feeds-refused')).toBeNull();
     expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+// #317 — a value the machine moved was invisible: the row kept its provenance tag and the panel
+// showed 13 000 rpm where the source said 15 000. These are the rendering half; the diagnostics
+// themselves are pinned in `feedCatalogue.spec.ts` / `cncFeeds.spec.ts`. No vendor number below is
+// derived from Studio's database — the row is a hand-built fixture in the service's shape.
+describe('EngravePanel — the clamp notice (#317)', () => {
+  /** The built-in metal flat end's vendor id, which the row must name to be selected at all. */
+  const VENDOR_ID = '112111313812';
+  const ROW: FeedCatalogueRow = {
+    cutterId: VENDOR_ID,
+    material: 'Softwood', // the default job's stock, through the vendor's own word
+    rpm: 15000,
+    feed: 900,
+    plungeFeed: 300,
+    stepDown: 1.2,
+  };
+
+  /** The default job, with the cutter whose id the rows above name. */
+  const renderWithCatalogueCutter = (): void => {
+    render(<EngravePanel />);
+    fireEvent.change(screen.getByTestId('engrave-tool'), { target: { value: 'flat-3.175x12-metal' } });
+  };
+
+  afterEach(() => clearFeedCatalogue());
+
+  it('says the machine moved a number, and names the code it moved it for', () => {
+    setFeedCatalogue([ROW]);
+    renderWithCatalogueCutter();
+    const tag = screen.getByTestId('engrave-feeds-clamped');
+    expect(tag.textContent).toContain('(1)');
+    expect(tag.getAttribute('data-codes')).toBe('rpm-clamped');
+    // The provenance tag stays: "whose number is this" and "the machine moved it" are two facts.
+    expect(screen.getByTestId('engrave-feeds-status')).toBeTruthy();
+  });
+
+  it('is silent when the row is inside the ceiling', () => {
+    setFeedCatalogue([{ ...ROW, rpm: 12000 }]);
+    renderWithCatalogueCutter();
+    expect(screen.queryByTestId('engrave-feeds-clamped')).toBeNull();
+  });
+
+  it('counts the clamps and NOT a catalogue row that yielded a field (#325)', () => {
+    // A row with no usable feed and a clamped rpm is BOTH a `catalogue-ignored` and an
+    // `rpm-clamped`. Only one of them is the machine's doing, so the tag must say (1) — counting
+    // the pair would make the sentence a lie about the row that simply had nothing to say.
+    setFeedCatalogue([{ ...ROW, feed: 0 }]);
+    renderWithCatalogueCutter();
+    const tag = screen.getByTestId('engrave-feeds-clamped');
+    expect(tag.textContent).toContain('(1)');
+    expect(tag.getAttribute('data-codes')).toBe('rpm-clamped');
+  });
+
+  it('is absent when the feeds are refused — the refusal box already says so', () => {
+    setFeedCatalogue([ROW]);
+    renderWithCatalogueCutter();
+    // The 3.175 mm cutter's radius is 1.5875 mm; a 2 mm step-over leaves an uncut spine.
+    fireEvent.change(screen.getByTestId('engrave-override-stepOver'), { target: { value: '2' } });
+    expect(screen.getByTestId('engrave-feeds-refused')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-feeds-clamped')).toBeNull();
   });
 });
 

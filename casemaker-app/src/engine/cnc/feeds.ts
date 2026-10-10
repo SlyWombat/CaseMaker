@@ -500,8 +500,9 @@ function catalogueRefusal(field: CatalogueField, value: number, machine: MillPro
  * app's, and nothing here has been cut on the machine.
  *
  * `ignored` are the fields the row could not answer for THIS job (#325). They belong in this
- * sentence, not only in `diagnostics`: no screen renders a feeds diagnostic yet (#317), so the one
- * place a user learns that Makera's number was passed over is here.
+ * sentence, not only in `diagnostics`: the panel renders the CLAMP diagnostics (the tag #317 added)
+ * and not a `catalogue-ignored`, so the one place a user learns that Makera's number was passed
+ * over is here.
  */
 function catalogueProvenance(
   row: FeedCatalogueRow,

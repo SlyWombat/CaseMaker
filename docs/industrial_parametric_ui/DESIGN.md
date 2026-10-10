@@ -122,6 +122,14 @@ Typography in this design system is split between two roles: **Expression** and 
 - **Body & Controls (Inter):** Used for maximum legibility in dense control panels. It is highly readable at small sizes, which is critical for parameter labels and numeric inputs.
 - **Utility Labels:** Small, semi-bold, uppercase labels are used for headers within sidebars to distinguish metadata from editable values.
 
+**Where the files come from (Case Maker #330).** The app ships the three families itself rather than
+linking a font CDN: `casemaker-app/public/fonts/` holds one **variable** woff2 per family — Space
+Grotesk (300–700), Inter (100–900) and JetBrains Mono (100–800) — with each family's `OFL.txt`
+beside it, and `fonts.css` next to them declares the three `@font-face` rules. All three are
+**SIL Open Font License 1.1**, the same licence #180 settled for the engraving fonts, so the files
+travel with the build and the desktop shell — whose CSP is `default-src 'self'` — needs no network
+to render the real type stack.
+
 ## Layout & Spacing
 The design system follows a **Fixed-Fluid Hybrid** model. The main viewport for the 3D tool is fluid, expanding to fill available space, while control sidebars are fixed-width (typically 280px or 320px) to ensure consistent interaction targets.
 

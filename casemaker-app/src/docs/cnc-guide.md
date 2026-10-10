@@ -185,11 +185,14 @@ the app** — nothing is uploaded, and nothing is sent to a machine.
 *Design mockup — not the shipped screen.*
 
 **Confirming stock and tool.** If the file carries a `;@MKR|` header, the stock length,
-width and thickness are prefilled from it, each tagged **“from file header”**. The header
-does not state the cutter's geometry reliably, so the tool dropdown starts empty and is
-**required** — you choose the tool the program was written for. **Simulate** stays disabled
-until both a file and a tool are present. A file with no header is fine; you just type the
-three stock numbers yourself.
+width and thickness are prefilled from it, each tagged **“from file header”**. A `TOOL`
+record is matched against your cutters and pre-selects the one it names, tagged as matched
+from the header — but the geometry it states is not always reliable, so the dropdown is yours
+to change and a cutter you already chose is **kept** when a file is opened. **Simulate** stays
+disabled until both a file and a tool are present. A file with no header is fine; you just
+type the three stock numbers yourself. Whatever you have already chosen — a stock number you
+typed, the cutter in your spindle — survives opening a file; **Reset** is the way back to the
+file's own numbers (#315).
 
 ![The Simulate panel asking for a tool](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-sim-tool-required.png)
 
@@ -357,7 +360,11 @@ Makera's own library has a row for your cutter and your material, the panel star
 **their** numbers: the fields it actually answers are tagged `Makera` and the section is labelled
 **"Makera's catalogue — not measured"** (#310), clamped to the Z1 — a 15 000 RPM row arrives
 as 13 000, and that field stops being tagged `Makera`, because the ceiling is the machine's and
-not theirs. A row stating a number this job cannot use — a `0` in a cell Studio never filled, or
+not theirs. When that happens the heading also carries a plain **`clamped to this machine (n)`**
+tag beside the label, so a number the machine moved is never silent: hover it for each moved
+value and what it was moved from (#317). It is a notice, not a finding — a clamp is the
+machine's limit applied correctly, and the job can still be generated. A row stating a number
+this job cannot use — a `0` in a cell Studio never filled, or
 a speed far past the ceiling — does **not** fail the job: that one field comes from the app's
 starting table instead, and `catalogue-ignored` names the row and the number it passed over
 (#325). Where the library has no row — PLA, the badge job's material, has none at all — the
@@ -522,10 +529,15 @@ that fit the reading are offered for you to pick the one on the label; a code no
 back and offered to the other two doors. The reading is **provisional** — the format is fitted to one
 label, and the panel says so. The camera is an addition where the browser can drive one, and never
 the only way in. **Catalogue** is a search over the synced rows. **Type** is the form, where a blank
-length means *unknown*, never `0`. Registering makes an **Owned** row and leaves the definition
+length means *unknown*, never `0`. A blank **quantity**, by contrast, means **one** — in all three
+doors and in the inventory editor alike: a person holding the box owns at least one cutter, and the
+screen that shows the rule is the screen that would otherwise refuse the blank it produced itself
+(#331). Registering makes an **Owned** row and leaves the definition
 Makera's. **Clone** copies the selected row.
-**Sync catalogue** re-reads Makera Studio's library on this PC (#308). **Export** and **Import**
-move the house as a `house.json` file.
+**Sync catalogue** re-reads Makera Studio's library on this PC (#308). A sync can succeed and still
+have something to say — a library file it could not read and replaced, feed rows whose cells Studio
+left empty — and those sentences are listed under the result, below the counts, where they stay
+until the next sync (#328). **Export** and **Import** move the house as a `house.json` file.
 
 **No service: the Tools scope is absent, not broken.** The cutters live in a small service the
 desktop app runs. With nothing running, the app does not show you an empty list or a broken one — it

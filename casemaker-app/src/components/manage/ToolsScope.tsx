@@ -89,6 +89,8 @@ export function ToolsScope() {
 
   const busy = useHouseStore((s) => s.busy);
   const notice = useHouseStore((s) => s.notice);
+  /** The last sync's report — read here for its `notes` alone (#328); its counts are in the notice. */
+  const lastSync = useHouseStore((s) => s.lastSync);
   const dismissNotice = useHouseStore((s) => s.dismissNotice);
   const registerTool = useHouseStore((s) => s.registerTool);
   const syncCatalogue = useHouseStore((s) => s.syncCatalogue);
@@ -300,6 +302,27 @@ export function ToolsScope() {
             <button type="button" data-testid="manage-notice-dismiss" onClick={dismissNotice}>
               ×
             </button>
+          </div>
+        )}
+
+        {/* #328 — the sync's own NOTES, which the notice's counts sentence never carried. A sync that
+            succeeded can still have replaced a catalogue file it could not read, dropped feed rows
+            whose cells Studio left empty, or emptied the feed matrix; all three used to look exactly
+            like a clean sync. Deliberately NOT part of the notice: dismissing that must not take the
+            record of what the sync did with it, and these stay until the next sync replaces them.
+            Still in-memory only — a reload forgets them (#328's open question). */}
+        {lastSync !== null && lastSync.notes.length > 0 && (
+          <div className="mnotes" data-testid="manage-sync-notes" data-count={lastSync.notes.length}>
+            <p className="mnotes__head">
+              Besides the counts, that sync reported:
+            </p>
+            <ul>
+              {lastSync.notes.map((note, i) => (
+                <li key={`${i}-${note}`} data-testid={`manage-sync-note-${i}`}>
+                  {note}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

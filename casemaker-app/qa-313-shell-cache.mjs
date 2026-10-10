@@ -13,10 +13,11 @@
 //      goes back to revalidating, the fix has cost a request per chunk per load.
 //
 // Zero console errors is part of the pass bar, and the app has to come up (the status bar renders),
-// so "the shell is live" is checked against the DOM and not only against a header. The one exception
-// is the Google-Fonts refusal, which is a separate, pre-existing desktop defect (#330) that this
-// issue's brief forbids touching; it is asserted to be EXACTLY that, so any other console error still
-// fails.
+// so "the shell is live" is checked against the DOM and not only against a header. This script used to
+// carry one exception — the CSP refusing the Google-Fonts stylesheet, filed as #330 and out of this
+// issue's scope — and #330 is now fixed the other way round: the fonts are served from this origin, so
+// that refusal no longer exists and the bar is the strict one. (`qa-330-fonts.mjs` is the script that
+// asserts the families actually load; this one only requires that nothing was refused.)
 //
 // **The measurement trap, and why this file reads CDP's `…ExtraInfo` events.** The obvious way to see
 // a revalidation is `Network.requestWillBeSent.request.headers` — and it is wrong: that event fires
@@ -138,11 +139,11 @@ const shellAgainLive = (await page.locator('[data-testid="status-bar"]').count()
 note(shellAgainLive, 'the app is live after the second navigation');
 
 // --- 4. and nothing logged a complaint --------------------------------------
-// The shell's CSP refusing the Google-Fonts stylesheet is a real defect, filed as #330 and out of this
-// issue's scope; anything else on the console is a failure.
-const FONTS_CSP = /fonts\.googleapis\.com[\s\S]*violates the following Content Security Policy/;
-const realErrors = consoleErrors.filter((text) => !/favicon/.test(text) && !FONTS_CSP.test(text));
-note(realErrors.length === 0, `no console errors beyond the filed #330 font refusal (${JSON.stringify(realErrors)})`);
+// #330 is fixed, so the exception this line used to make is gone: the shell's CSP permits the three
+// families now because they are served from this origin (`public/fonts/`, asserted by
+// `qa-330-fonts.mjs`), and a refusal here would mean that regressed.
+const realErrors = consoleErrors.filter((text) => !/favicon/.test(text) && !/\/api\/v1\//.test(text));
+note(realErrors.length === 0, `no console errors (${JSON.stringify(realErrors)})`);
 
 await page.screenshot({ path: `${OUT}/shell-cache.png`, fullPage: false });
 writeFileSync(

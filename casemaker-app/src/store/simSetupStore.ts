@@ -4,7 +4,12 @@
  *
  * `openFile` prefills from the `.nc` header — via `setupFromHeader`, which reads the UNTRUSTED
  * `;@MKR` records and only ever suggests. A user edit always wins: `setStock`/`setTool` flip that
- * field's `source` to `'user'`, and a reopened header never overwrites it.
+ * field's `source` to `'user'`, and a reopened header never overwrites it (#315). `reset()` is the
+ * only way back to the defaults, because it is the only explicit statement that the user wants them.
+ *
+ * "Never overwrites it" is per FIELD, not per file: opening while the tool is `'user'` keeps the
+ * tool and takes the header's stock, and the other way round — a fresh file supplies whatever the
+ * user has not claimed, and nothing they have.
  *
  * Not persisted, and plain zustand — no immer needed.
  */
@@ -41,7 +46,10 @@ export interface SimSetupState {
   toolKey: string | null;
   toolSource: FieldSource | null;
   headerDiagnostics: SimHeaderDiagnostic[];
-  /** Parse the header, prefill, and reset everything the header does not supply. */
+  /**
+   * Parse the header and prefill every field the user has not already claimed; fields whose source
+   * is `'user'` are kept (#315). `reset()` is the way back to the defaults.
+   */
   openFile(name: string, text: string): void;
   /** Merge a stock edit and mark the edited fields `'user'`. */
   setStock(patch: Partial<SimStock>): void;
@@ -104,29 +112,43 @@ export const useSimSetupStore = create<SimSetupState>()((set) => ({
     const parsed = parseGcode(text);
     const fromHeader = setupFromHeader(parsed.header);
 
-    const stock: SimStock = { ...DEFAULT_STOCK };
-    const stockSource = allDefault();
+    // What THIS file says, before the user's own edits are laid over it.
+    const headerStock: SimStock = { ...DEFAULT_STOCK };
+    const headerSource = allDefault();
     const part = fromHeader.patch.part;
     if (part && part.kind === 'prism' && part.outline.kind === 'p-rect') {
-      stock.length = part.outline.size[0];
-      stock.width = part.outline.size[1];
-      stock.thickness = part.thickness;
-      stockSource.length = 'header';
-      stockSource.width = 'header';
-      stockSource.thickness = 'header';
+      headerStock.length = part.outline.size[0];
+      headerStock.width = part.outline.size[1];
+      headerStock.thickness = part.thickness;
+      headerSource.length = 'header';
+      headerSource.width = 'header';
+      headerSource.thickness = 'header';
     }
 
     const toolRecord = parsed.header?.records.find((r) => r.tag === 'TOOL');
-    const toolKey = toolRecord ? matchRegistryTool(toolFromMkrRecord(toolRecord)) : null;
+    const headerToolKey = toolRecord ? matchRegistryTool(toolFromMkrRecord(toolRecord)) : null;
 
-    set({
-      fileName: name,
-      gcodeText: text,
-      stock,
-      stockSource,
-      toolKey,
-      toolSource: toolKey ? 'header' : null,
-      headerDiagnostics: fromHeader.diagnostics.map((d) => ({ severity: d.severity, message: d.message })),
+    set((s) => {
+      // A field the user has claimed survives the open; every other field takes this file's value.
+      // The rule is per FIELD, so opening a file after choosing a cutter keeps the cutter and still
+      // brings the stock in — and the reverse. `reset()` is the only way back (#315).
+      const stock = { ...s.stock };
+      const stockSource = { ...s.stockSource };
+      for (const field of ['length', 'width', 'thickness'] as const) {
+        if (s.stockSource[field] === 'user') continue;
+        stock[field] = headerStock[field];
+        stockSource[field] = headerSource[field];
+      }
+      const keepTool = s.toolSource === 'user';
+      return {
+        fileName: name,
+        gcodeText: text,
+        stock,
+        stockSource,
+        toolKey: keepTool ? s.toolKey : headerToolKey,
+        toolSource: keepTool ? 'user' : headerToolKey ? 'header' : null,
+        headerDiagnostics: fromHeader.diagnostics.map((d) => ({ severity: d.severity, message: d.message })),
+      };
     });
   },
   setStock(patch) {

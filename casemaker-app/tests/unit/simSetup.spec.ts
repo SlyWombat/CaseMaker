@@ -83,13 +83,50 @@ describe('simSetupStore.openFile', () => {
     expect(useSimSetupStore.getState().toolKey).toBe('flat-3.175x12-metal');
   });
 
-  it('reopening a file resets a user-edited stock back to the new header', () => {
+  it('keeps a user-edited stock when a file is reopened, and reset() is the way back (#315)', () => {
     useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
     useSimSetupStore.getState().setStock({ length: 80 });
     useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
-    const s = useSimSetupStore.getState();
+    let s = useSimSetupStore.getState();
+    expect(s.stock).toEqual({ length: 80, width: 100, thickness: 5 });
+    expect(s.stockSource).toEqual({ length: 'user', width: 'header', thickness: 'header' });
+
+    // The explicit way back, and the only one: reset() then the same file, and the header wins
+    // again because nothing is the user's any more.
+    useSimSetupStore.getState().reset();
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    s = useSimSetupStore.getState();
     expect(s.stock).toEqual({ length: 100, width: 100, thickness: 5 });
     expect(s.stockSource.length).toBe('header');
+  });
+
+  it('keeps the cutter the user chose, and still takes the file’s stock (#315)', () => {
+    // The normal second order: pick the cutter in the spindle, THEN open the program. The header
+    // is the untrusted half, so its match must not replace a stated choice.
+    useSimSetupStore.getState().setTool('flat-1.0');
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    const s = useSimSetupStore.getState();
+    expect(s.toolKey).toBe('flat-1.0');
+    expect(s.toolSource).toBe('user');
+    // Per field, not per file: the half the user did not claim arrives with the file.
+    expect(s.stock).toEqual({ length: 100, width: 100, thickness: 5 });
+    expect(s.stockSource).toEqual({ length: 'header', width: 'header', thickness: 'header' });
+  });
+
+  it('keeps a chosen cutter even when the file it opens states no tool at all (#315)', () => {
+    useSimSetupStore.getState().setTool('flat-1.0');
+    useSimSetupStore.getState().openFile('plain.nc', 'G0 X0 Y0\n');
+    const s = useSimSetupStore.getState();
+    expect(s.toolKey).toBe('flat-1.0');
+    expect(s.toolSource).toBe('user');
+  });
+
+  it('keeps an edited stock field and takes the header’s for the others (#315)', () => {
+    useSimSetupStore.getState().setStock({ thickness: 7 });
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    const s = useSimSetupStore.getState();
+    expect(s.stock).toEqual({ length: 100, width: 100, thickness: 7 });
+    expect(s.stockSource).toEqual({ length: 'header', width: 'header', thickness: 'user' });
   });
 });
 

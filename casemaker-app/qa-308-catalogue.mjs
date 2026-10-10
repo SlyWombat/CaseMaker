@@ -120,12 +120,18 @@ async function scenario(name, { route, sim } = {}) {
 
   const runs = [];
   for (const key of sim ?? []) {
-    // Open FIRST, then choose: `openFile` replaces the tool with the one it matched in the file's
-    // own TOOL record (`src/store/simSetupStore.ts`), so a selection made before it is discarded —
-    // which is the panel's own flow anyway (open a program, then say which cutter wrote it).
-    await page.evaluate((t) => window.__caseMaker.simOpenText('qa-308.nc', t), GCODE);
-    await page.waitForTimeout(300);
+    // The order the user actually works in, and the one the code got wrong until #315: choose the
+    // cutter you have in the spindle, THEN open the program. `openFile` keeps a field the user has
+    // claimed (`simSetupStore.ts`), so the selection below must survive the open.
+    //
+    // BOTH `[2]` checks discriminate, measured against the pre-#315 store on 2026-10-09 rather than
+    // assumed: without the fix the picker came back `flat-3.175x12-metal` (the header's own tool,
+    // matched through shape + diameter to the built-in that leads the registry) and the ball nose
+    // run reported `status ready, diagnostics []` — a ball end silently swept as a flat end. With
+    // the fix the selection is kept and the refusal comes back by name.
     await page.locator('[data-testid="sim-tool"]').selectOption(key);
+    await page.waitForTimeout(300);
+    await page.evaluate((t) => window.__caseMaker.simOpenText('qa-308.nc', t), GCODE);
     await page.waitForTimeout(300);
     const selected = await page.inputValue('[data-testid="sim-tool"]');
     const t0 = Date.now();

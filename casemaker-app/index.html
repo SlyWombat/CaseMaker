@@ -24,14 +24,15 @@
     <meta name="twitter:description" content="Parametric 3D-printable enclosures — exports STL / 3MF in seconds." />
     <meta name="twitter:image" content="https://electricrv.ca/casemaker/social-card.png" />
 
-    <!-- Issue #84 — Industrial Parametric type stack. preconnect saves the
-         second-RTT TLS handshake on font CSS + woff2 fetch. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Issue #84 — Industrial Parametric type stack.
+         #330 — SPACE GROTESK, INTER AND JETBRAINS MONO ARE SERVED FROM HERE, not from Google Fonts.
+         The desktop shell's CSP is `default-src 'self'` with no `font-src` and no remote style
+         origin, so the Google Fonts stylesheet was refused there and the app silently fell back to
+         the system stack. The three variable woff2 files and their OFL licences live in
+         `public/fonts/`, and Vite rewrites this root-absolute href with `base` at build time
+         (`/fonts/fonts.css` here, `/casemaker/fonts/fonts.css` on the cPanel deploy); the woff2
+         URLs inside that stylesheet are relative to it, so they follow it anywhere. -->
+    <link rel="stylesheet" href="/fonts/fonts.css" />
   </head>
   <body>
     <div id="root"></div>

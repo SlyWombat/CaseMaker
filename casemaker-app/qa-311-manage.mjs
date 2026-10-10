@@ -98,6 +98,12 @@ const INVENTORY = [
   },
 ];
 
+/** What a sync that SUCCEEDED still had to say (#328) — two of the three shapes the issue names. */
+const SYNC_NOTES = [
+  'makera_library.db could not be read: the catalogue file was replaced with an empty one',
+  '40 feed rows were dropped: their numbers were empty',
+];
+
 const results = [];
 let failures = 0;
 
@@ -185,6 +191,19 @@ function makeService() {
     }
     if (pathname.endsWith('/export') && method === 'GET') {
       return json(200, { kind: 'casemaker-house', version: 1, tools, inventory });
+    }
+    if (pathname.endsWith('/catalogue/sync') && method === 'POST') {
+      return json(200, {
+        source: 'C:\\Users\\Someone\\AppData\\Roaming\\MakeraStudio\\makera_library.db',
+        syncedAt: '2026-10-09T14:02:57.269Z',
+        total: tools.length,
+        added: [],
+        removed: [],
+        changed: [],
+        unchanged: tools.length,
+        feedRows: 1328,
+        notes: SYNC_NOTES,
+      });
     }
     if (pathname.endsWith('/import') && method === 'POST') {
       if (!String(req.postData() ?? '').includes('casemaker-house')) {
@@ -369,6 +388,38 @@ const svc = makeService();
   check('[1] the save did not touch the cutter’s shape', patch?.body.tool.tipDiameter === 2);
   check('[1] the panel re-read and shows the saved count',
     (await page.getByTestId('manage-item-quantity').inputValue()) === '3');
+
+  // #331 — the count rule is `registerCutter.ts`'s, and this end now answers it the same way: a
+  // cleared box is ONE. The field says so rather than doing it silently.
+  //
+  // Every step waits for the PREVIOUS write's re-read to land. A save re-reads the whole house, which
+  // remounts the editor (it is keyed on the record), so a `fill` typed into the old node is thrown
+  // away when the new one arrives — waiting on the notice sentence alone is not enough.
+  const settledCount = async (value) => {
+    await page.waitForFunction(
+      (v) => document.querySelector('[data-testid="manage-item-quantity"]')?.value === v,
+      value, { timeout: 15000 });
+  };
+  const saveCount = async (typed, concludesIn) => {
+    await page.getByTestId('manage-item-quantity').fill(typed);
+    await page.getByTestId('manage-item-save').click();
+    await page.waitForFunction(
+      (s) => (document.querySelector('[data-testid="manage-notice"]')?.textContent ?? '').includes(s),
+      concludesIn, { timeout: 15000 });
+  };
+
+  await settledCount('3');
+  await page.getByTestId('manage-item-quantity').fill('');
+  check('[1] the cleared quantity field shows the count it will send',
+    (await page.getByTestId('manage-item-quantity').getAttribute('placeholder')) === '1');
+  await saveCount('', '— 1 cutter in the inventory');
+  const cleared = svc.calls.filter((c) => c.method === 'PATCH' && c.pathname.includes('/inventory/')).at(-1) ?? null;
+  check('[1] clearing the box saves one, not zero (#331)',
+    cleared?.body.quantity === 1, String(cleared?.body.quantity));
+  // Put the count back, so the scenarios after this one still read the house §4 set up.
+  await settledCount('1');
+  await saveCount('3', '— 3 cutters in the inventory');
+  await settledCount('3');
 
   // — Export: the service's own document, handed to the browser as a file. —
   const download = page.waitForEvent('download', { timeout: 10000 }).catch(() => null);
@@ -602,6 +653,37 @@ console.log('\n== 4. no house service: the card, and the two definitions that ne
     (await page.getByTestId('manage-absent-reason').innerText()) === reason);
   const unexpected = errors.filter((e) => !ORIGIN_404.test(e));
   check('[4] no console or page errors beyond the origin’s own 404 line', unexpected.length === 0, unexpected.join(' | ') || '(none)');
+  await browser.close();
+}
+
+// — 5 — a sync's own notes (#328). ----------------------------------------------------------------
+console.log('\n== 5. a sync that succeeded still has things to say (#328) ==');
+const notesSvc = makeService();
+{
+  const { browser, page, errors } = await open({ route: notesSvc.handler });
+  await page.getByTestId('manage-open').click();
+  await page.waitForSelector('[data-testid="manage-mode"]');
+  check('[5] nothing is claimed before the first sync', (await page.getByTestId('manage-sync-notes').count()) === 0);
+
+  await page.getByTestId('manage-sync').click();
+  await page.waitForSelector('[data-testid="manage-sync-notes"]', { timeout: 15000 });
+  const block = (await page.getByTestId('manage-sync-notes').innerText()).replace(/\s+/g, ' ');
+  check('[5] both notes are ON SCREEN, not merely kept',
+    block.includes('could not be read') && block.includes('40 feed rows were dropped'), block.slice(0, 160));
+  check('[5] one row per note', (await page.$$('[data-testid^="manage-sync-note-"]')).length === SYNC_NOTES.length);
+
+  // The counts sentence is still the whole notice: the notes are news ABOUT a sync that worked, and
+  // folding them into the same line would make a clean-looking sync the only thing a user can read.
+  const notice = (await page.getByTestId('manage-notice').innerText()).replace(/\s+/g, ' ');
+  check('[5] the notice still reports the counts alone', /\d+ cutters/.test(notice) && notice.includes('nothing changed'), notice);
+  check('[5] and does not carry the notes', !notice.includes('feed rows were dropped'), notice);
+  await page.screenshot({ path: `${OUT}/5-sync-notes.png` });
+
+  await page.getByTestId('manage-notice-dismiss').click();
+  check('[5] dismissing the notice keeps the record — it is news about a sync, not a popup',
+    (await page.getByTestId('manage-sync-notes').count()) === 1);
+  const unexpected = errors.filter((e) => !ORIGIN_404.test(e));
+  check('[5] no console or page errors', unexpected.length === 0, unexpected.join(' | ') || '(none)');
   await browser.close();
 }
 

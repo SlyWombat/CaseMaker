@@ -1,0 +1,44 @@
+/* Issue #330 — the type stack, served from this app's own origin.
+ *
+ * The three families used to come from `fonts.googleapis.com`. The desktop shell's CSP is
+ * `default-src 'self' …` with no `font-src` and no `style-src` exception for a remote host, so the
+ * stylesheet was refused there and the app fell back to the system stack — a desktop app that looks
+ * right only while it has a network. The files are now here, one variable file per family, and the
+ * CSP did not have to change: `'self'` already covers them (decision 33's LAN-needs-no-token mind:
+ * local by default, and the header stays the one that was audited).
+ *
+ * WHY THE URLS ARE BARE FILENAMES. This file is served as-is from `public/`, so a browser resolves
+ * `SpaceGrotesk-Variable.woff2` against the STYLESHEET's own URL — which is what makes the same file
+ * work at `/`, at `/casemaker/` and over `tauri://localhost` with no rewriting anywhere. A file
+ * under `src/` could not do that: the bundler resolves a relative `url()` against the importing
+ * stylesheet, not the served one.
+ *
+ * ONE FILE PER FAMILY, ALL WEIGHTS. Each is a variable font covering every weight the tokens ask
+ * for (`--cm-font-display` 500/600/700, body 400/500/600, mono 400/500), so there is nothing to
+ * keep in step as weights are added. Licences sit beside the files: all three are SIL OFL 1.1, the
+ * licence #180 already settled for the engraving fonts (#84).
+ */
+
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('SpaceGrotesk-Variable.woff2') format('woff2');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('Inter-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('JetBrainsMono-Variable.woff2') format('woff2');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}

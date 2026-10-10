@@ -99,6 +99,17 @@ const TAG: CSSProperties = {
 const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a' };
 
 /**
+ * The feeds diagnostics that mean THE MACHINE MOVED A NUMBER (#317): the clamp half of
+ * `FeedsDiagnostic`, which is the union of these with the catalogue's own `catalogue-ignored`.
+ *
+ * The distinction is the whole point of the tag. A clamp is a value the resolver changed on the way
+ * past the machine's ceiling and must be shown; a `catalogue-ignored` is a row that YIELDED a field
+ * to the tier below (#325), and that one is already told in the provenance sentence with the field
+ * named. Counting both together would make "clamped to this machine (2)" a lie about one of them.
+ */
+const CLAMP_CODES: ReadonlySet<string> = new Set(['feed-clamped', 'rpm-clamped']);
+
+/**
  * The visible word for a value's source (#246/#254): a typed number reads "typed", never looking
  * like a bench reading, and a computed feed says so. `measured` is the one that gets a colour.
  */
@@ -339,6 +350,9 @@ export function EngravePanel(): JSX.Element {
   // side of the boundary can see.
   const feeds = tool ? feedsFor(feedCatalogueRows(), job.stock.material, tool, Z1, job.cutOverride) : null;
   const params: CutParams | null = feeds && feeds.ok ? feeds.params : null;
+  // Only the clamps (#317): an `ok: false` result carries `-refused` diagnostics, which the refusal
+  // box below already states, and a `catalogue-ignored` is not the machine's doing at all.
+  const clamps = feeds?.ok ? feeds.diagnostics.filter((d) => CLAMP_CODES.has(d.code)) : [];
 
   const maxDepth = job.stock.thickness - job.minFloor;
   // The declared under-surface voids (#271). One row each, under the stock they are a fact about.
@@ -1416,6 +1430,20 @@ export function EngravePanel(): JSX.Element {
               : feeds.entry.status === 'unmeasured'
                 ? 'starting values — unmeasured'
                 : 'measured'}
+          </span>
+        )}
+        {/* A number the machine moved said nothing before this (#317): the row kept its own
+            provenance tag and the panel showed 13 000 rpm where the source said 15 000. The tag
+            carries no count of its own beyond the clamps, and no finding — a clamp is the machine's
+            limit applied correctly, not a reason to refuse a job (decision on #317). */}
+        {clamps.length > 0 && (
+          <span
+            style={{ ...TAG, marginLeft: 4, color: SEVERITY_COLOR.warning }}
+            title={clamps.map((d) => d.message).join('\n')}
+            data-testid="engrave-feeds-clamped"
+            data-codes={clamps.map((d) => d.code).join(' ')}
+          >
+            clamped to this machine ({clamps.length})
           </span>
         )}
       </h3>

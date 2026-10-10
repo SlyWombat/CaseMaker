@@ -159,6 +159,11 @@ async fn serve_path(AxumPath(path): AxumPath<String>, headers: HeaderMap) -> imp
 /// actually bound to (loopback, LAN, or any future case), so the SPA can
 /// always fetch its own chunks. We additionally allow the Tauri webview's
 /// IPC origins and `wasm-unsafe-eval` for the manifold-3d worker.
+///
+/// The font stack is LOCAL BY DESIGN (#330), which is why there is still no `font-src` here and no
+/// exception for a font CDN: Space Grotesk, Inter and JetBrains Mono are served from this app's own
+/// `public/fonts/` (`/fonts/fonts.css` + three woff2), so `default-src 'self'` already covers them.
+/// The same string is `app.security.csp` in `tauri.conf.json` and the two must stay in step.
 const CSP_HEADER: &str = "default-src 'self' tauri: ipc: http://ipc.localhost; \
 img-src 'self' data: blob: tauri: ipc: http://ipc.localhost; \
 style-src 'self' 'unsafe-inline'; \
@@ -541,5 +546,85 @@ mod tests {
             ),
         );
         assert!(deep.starts_with("HTTP/1.1 304 Not Modified"), "{deep}");
+    }
+
+    #[test]
+    fn the_type_stack_comes_from_this_origin_with_the_headers_the_shell_enforces() {
+        // (#330) The desktop shell renders this origin under a policy with no `font-src` and no remote
+        // style origin, which is exactly why the three families had to be self-hosted: a font CDN is
+        // refused there, and the app then falls back to the system stack without saying so. This is
+        // the shell's own serving path, over a real socket, because the policy is enforced on the
+        // bytes a browser receives — not on the router's intent.
+        //
+        // A MISSING ASSET IS NOT A 404 HERE. `serve_asset` answers an unknown path with index.html
+        // and status 200, so a 200 proves nothing by itself: the CONTENT TYPE is the discriminator,
+        // because `text/css` and `font/woff2` are what nothing else in `dist/` is. (That fallback is
+        // also why a font file deleted from `public/fonts/` would look like a working page.)
+        let dir = TempDir::new().unwrap();
+        let lock = HouseLock::acquire(dir.path()).unwrap();
+        let (handle, _rx) = start(
+            ServerConfig {
+                requested_port: 0,
+                bind_to_all: false,
+                host: None,
+            },
+            &lock,
+        )
+        .unwrap();
+        let port = handle.bound_port;
+
+        for (path, kind) in [
+            ("/fonts/fonts.css", "content-type: text/css"),
+            ("/fonts/SpaceGrotesk-Variable.woff2", "content-type: font/woff2"),
+            ("/fonts/Inter-Variable.woff2", "content-type: font/woff2"),
+            ("/fonts/JetBrainsMono-Variable.woff2", "content-type: font/woff2"),
+        ] {
+            let res = over_the_wire(
+                port,
+                &format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"),
+            );
+            let head = res.to_ascii_lowercase();
+            assert!(res.starts_with("HTTP/1.1 200 OK"), "{path} was answered: {res}");
+            assert!(head.contains(kind), "{path} came back as: {res}");
+            assert!(
+                head.contains("content-security-policy: default-src 'self'"),
+                "{path} carried no policy the shell would enforce: {res}"
+            );
+        }
+
+        // And the stylesheet declares the three families, pointing at the files this origin just
+        // served — a link to a CDN would leave the families declared and the fetches refused.
+        let css = over_the_wire(
+            port,
+            "GET /fonts/fonts.css HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        );
+        for family in ["Space Grotesk", "Inter", "JetBrains Mono"] {
+            assert!(
+                css.contains(&format!("font-family: '{family}'")),
+                "{family} is not declared in the served stylesheet: {css}"
+            );
+        }
+        // And every `url()` in the served stylesheet is one of the three files beside it — no host is
+        // named to fetch from, which is the actual defect. The check is over the `url()` values and
+        // not the whole text because the comment above the rules does name the CDN: it explains why
+        // the fonts were taken off it.
+        let mut targets: Vec<&str> = css
+            .split("url(")
+            .skip(1)
+            .filter_map(|rest| rest.split(')').next())
+            // The comment above the rules writes `url()` as prose, which yields an empty target.
+            .filter(|t| !t.is_empty())
+            .collect();
+        targets.sort_unstable();
+        let mut expected = [
+            "'Inter-Variable.woff2'",
+            "'JetBrainsMono-Variable.woff2'",
+            "'SpaceGrotesk-Variable.woff2'",
+        ];
+        expected.sort_unstable();
+        assert_eq!(
+            targets, expected.to_vec(),
+            "the stylesheet should fetch its three families from beside itself: {css}"
+        );
     }
 }

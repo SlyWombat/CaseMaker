@@ -250,6 +250,67 @@ describe('#311 — the detail rail', () => {
   });
 });
 
+// #331 — the quantity rule is written once. The editor used to re-derive it (`Number('')` is 0, so
+// blank was refused) and spell the sentence again in its own capitalisation. Both ends now answer
+// to `registerCutter.ts`: blank means one, and the refusal is that module's wording.
+describe('#331 — the inventory editor answers to the shared count rule', () => {
+  /** The service's writes, as the fake saw them: `[method, path, body]`. */
+  let calls: Array<{ method: string; path: string; body: unknown }>;
+
+  beforeEach(async () => {
+    calls = [];
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        call: async (method, path, body) => {
+          calls.push({ method, path, body });
+          return { kind: 'ok', text: '' };
+        },
+      }),
+    );
+    await useToolRegistryStore.getState().refresh();
+    useManageModeStore.getState().openManage();
+  });
+
+  /** The editor for the one owned cutter, with `text` in its quantity box. */
+  function openEditor(text: string): HTMLInputElement {
+    render(<ManageMode />);
+    fireEvent.click(screen.getByTestId('manage-tools-row-inv:9f8e7d6c5b'));
+    const field = screen.getByTestId('manage-item-quantity') as HTMLInputElement;
+    fireEvent.change(field, { target: { value: text } });
+    return field;
+  }
+
+  it('saves one for a cleared box, the same answer the register doors give', async () => {
+    const field = openEditor('');
+    // Visible, not silent: the field says which count a blank will send.
+    expect(field.placeholder).toBe('1');
+    fireEvent.click(screen.getByTestId('manage-item-save'));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.method).toBe('PATCH');
+    expect(calls[0]!.path).toBe('/inventory/9f8e7d6c5b');
+    expect((calls[0]!.body as InventoryItem).quantity).toBe(1);
+  });
+
+  it('refuses zero and a fraction, in the one sentence', () => {
+    openEditor('0');
+    const save = screen.getByTestId('manage-item-save') as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    // The wording is `quantityProblem`'s, not a second copy of it: one string in the source, and the
+    // issue's own grep for it (`grep -rn "whole number of cutters" src`) finds exactly one file.
+    expect(save.title).toContain('a quantity is a whole number of cutters, one or more');
+
+    fireEvent.change(screen.getByTestId('manage-item-quantity'), { target: { value: '1.5' } });
+    expect((screen.getByTestId('manage-item-save') as HTMLButtonElement).disabled).toBe(true);
+    // And with a count the schema would accept, the tooltip stops being a complaint.
+    fireEvent.change(screen.getByTestId('manage-item-quantity'), { target: { value: '3' } });
+    const ok = screen.getByTestId('manage-item-save') as HTMLButtonElement;
+    expect(ok.disabled).toBe(false);
+    expect(ok.title).toBe('Save the count and the notes');
+  });
+});
+
 describe('#311 — cloning a catalogue row', () => {
   /** The service's writes, as the fake saw them: `[method, path, body]`. */
   let calls: Array<{ method: string; path: string; body: unknown }>;
@@ -293,6 +354,76 @@ describe('#311 — cloning a catalogue row', () => {
     expect(clone.tool.name).toBe(CAT.tool.name);
     expect(clone.tool.tipDiameter).toBe(CAT.tool.tipDiameter);
     expect(clone.provenance).toContain('Makera catalogue');
+  });
+});
+
+// #328 — the sync's own notes were stored and never shown, so a sync that replaced an unreadable
+// catalogue file, dropped feed rows whose cells Studio left empty, or emptied the feed matrix looked
+// exactly like a clean one. The fixture below is a hand-built report in the SERVICE's shape; the
+// strings are the kind of sentence `SyncReportSchema.notes` carries, not vendor data.
+describe('#328 — a sync’s notes reach the screen', () => {
+  const REPORT = (notes: string[]): string =>
+    JSON.stringify({
+      source: 'C:\\Users\\Someone\\AppData\\Roaming\\MakeraStudio\\makera_library.db',
+      syncedAt: '2026-10-09T14:02:57.269Z',
+      total: 129,
+      added: [],
+      removed: [],
+      changed: [],
+      unchanged: 129,
+      feedRows: 1328,
+      notes,
+    });
+
+  /** A service whose sync answers with these notes, wired BEFORE the refresh that reads it. */
+  async function goOnlineWithSync(notes: string[]): Promise<void> {
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        call: async (method, path): Promise<HouseCall> =>
+          method === 'POST' && path === '/catalogue/sync' ? { kind: 'ok', text: REPORT(notes) } : { kind: 'ok', text: '' },
+      }),
+    );
+    await useToolRegistryStore.getState().refresh();
+  }
+
+  it('lists every note under the counts, and keeps them when the notice is dismissed', async () => {
+    const notes = [
+      'makera_library.db could not be read: the catalogue file was replaced with an empty one',
+      '40 feed rows were dropped: their numbers were empty',
+    ];
+    await goOnlineWithSync(notes);
+    useManageModeStore.getState().openManage();
+    render(<ManageMode />);
+
+    // Before any sync there is nothing to show: these are the LAST sync's notes, not a standing box.
+    expect(q('manage-sync-notes')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('manage-sync'));
+    await waitFor(() => expect(q('manage-sync-notes')).not.toBeNull());
+
+    expect(screen.getByTestId('manage-sync-notes').getAttribute('data-count')).toBe('2');
+    expect(screen.getByTestId('manage-sync-note-0').textContent).toContain('could not be read');
+    expect(screen.getByTestId('manage-sync-note-1').textContent).toContain('40 feed rows were dropped');
+    // The counts sentence is the notice, and it never carried these.
+    expect(screen.getByTestId('manage-notice').textContent).toContain('129 cutters');
+
+    // Dismissing the notice must not take the record of what the sync did with it.
+    fireEvent.click(screen.getByTestId('manage-notice-dismiss'));
+    expect(q('manage-notice')).toBeNull();
+    expect(q('manage-sync-notes')).not.toBeNull();
+    expect(screen.getByTestId('manage-sync-note-1').textContent).toContain('40 feed rows were dropped');
+  });
+
+  it('shows nothing at all when the sync had nothing to add', async () => {
+    await goOnlineWithSync([]);
+    useManageModeStore.getState().openManage();
+    render(<ManageMode />);
+
+    fireEvent.click(screen.getByTestId('manage-sync'));
+    await waitFor(() => expect(q('manage-notice')).not.toBeNull());
+    expect(screen.getByTestId('manage-notice').textContent).toContain('nothing changed');
+    expect(q('manage-sync-notes')).toBeNull();
   });
 });
 

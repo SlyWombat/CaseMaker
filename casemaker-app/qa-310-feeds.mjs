@@ -105,6 +105,15 @@ async function scenario(name, { route } = {}) {
       refused: (await page.getByTestId('engrave-feeds-refused').count())
         ? await page.getByTestId('engrave-feeds-refused').innerText()
         : null,
+      // #317's notice. Read as a whole (text + codes + title) because the claim is not that a tag
+      // exists but that it names the right code and carries the machine's own sentence.
+      clamped: (await page.getByTestId('engrave-feeds-clamped').count())
+        ? {
+            text: await page.getByTestId('engrave-feeds-clamped').innerText(),
+            codes: await page.getByTestId('engrave-feeds-clamped').getAttribute('data-codes'),
+            title: await page.getByTestId('engrave-feeds-clamped').getAttribute('title'),
+          }
+        : null,
       params: {},
       sources: {},
     };
@@ -157,6 +166,12 @@ const present = await scenario('1-catalogue', { route: open(FEEDS) });
   }
   // And the two this app keeps to itself: the vendor's 63 % step-over is not ours (#191).
   check('[1] step-over stays ours', present.makera.sources.stepOver === 'computed', String(present.makera.sources.stepOver));
+  // #317 — the notice must be absent exactly when nothing was moved. `Math.min` above already says
+  // the panel would clamp this row if the vendor stated more than the ceiling; the vendor's own
+  // Hardwood row states 10 000, so with the real matrix nothing is clamped and the tag must not be
+  // there. Scenario 3 is the other half of this pair.
+  check('[1] no clamp notice on a row the machine did not touch',
+    present.makera.clamped === null && WOOD.rpm < 13000, JSON.stringify(present.makera.clamped));
   check('[1] the panel explains where the numbers came from',
     /Makera's catalogue for .* in hardwood/.test(present.makera.badgeTitle ?? '')
       && /nothing here has been cut on this machine/.test(present.makera.badgeTitle ?? ''),
@@ -189,6 +204,17 @@ console.log('\n== 3. a row above the ceiling ==');
   check('[3] the row is still Makera\'s', clamped.makera.badgeSource === 'catalogue', String(clamped.makera.badgeSource));
   check('[3] the spindle speed the panel shows is the Z1\'s ceiling, not 15 000',
     clamped.makera.params.rpm === 13000, String(clamped.makera.params.rpm));
+  // #317 — until now that 13 000 was silent: the row kept its "Makera's catalogue" tag and nothing
+  // said the number had been moved. The tag is the missing half of the same observation.
+  check('[3] and the panel SAYS the machine moved it',
+    clamped.makera.clamped?.text.includes('(1)') === true
+      && clamped.makera.clamped?.codes === 'rpm-clamped',
+    JSON.stringify(clamped.makera.clamped));
+  check('[3] with the machine\'s own sentence for the code, not a restatement',
+    /spindle|rpm/i.test(clamped.makera.clamped?.title ?? '') && (clamped.makera.clamped?.title ?? '').includes('13'),
+    JSON.stringify(clamped.makera.clamped?.title));
+  check('[3] the provenance tag is untouched — the two say different things (#325)',
+    clamped.makera.badgeSource === 'catalogue', String(clamped.makera.badgeSource));
 }
 
 // — 4 — nothing answering. ------------------------------------------------------------------------

@@ -23,6 +23,7 @@
 
 import { useState } from 'react';
 import { catalogueIdOf, tierOf, TIER_TAG, type ToolTier } from '@/engine/cnc/toolTiers';
+import { quantityOrOne, quantityProblem } from '@/engine/cnc/registerCutter';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { InventoryItem } from '@/platform/houseClient';
 import { useHouseStore } from '@/store/houseStore';
@@ -249,12 +250,12 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
   const [quantity, setQuantity] = useState(String(item.quantity));
   const [notes, setNotes] = useState(item.notes ?? '');
 
-  const qty = Number(quantity);
-  // `quantity` is a positive integer on the wire (`houseClient.InventoryItemSchema`): 0 is not a
-  // cutter, so a save that would send one is refused here rather than by the service.
-  const qtyOk = Number.isInteger(qty) && qty > 0;
+  // The count rule is the register doors' rule, imported rather than re-derived (#331): blank means
+  // one at both ends, and the sentence a refusal shows is the one sentence, in `registerCutter.ts`.
+  const qty = quantityOrOne(quantity);
+  const qtyProblem = quantityProblem(quantity);
   const nextNotes = notes.trim().length === 0 ? null : notes;
-  const dirty = qtyOk && (qty !== item.quantity || nextNotes !== item.notes);
+  const dirty = qtyProblem === null && (qty !== item.quantity || nextNotes !== item.notes);
   const disabled = busy !== null;
 
   return (
@@ -269,6 +270,7 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
             min={1}
             step={1}
             value={quantity}
+            placeholder="1"
             data-testid="manage-item-quantity"
             aria-label="How many of this cutter are owned"
             onChange={(e) => setQuantity(e.target.value)}
@@ -305,7 +307,7 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
           className="btn btn--sm btn--primary"
           data-testid="manage-item-save"
           disabled={!dirty || disabled}
-          title={qtyOk ? 'Save the count and the notes' : 'A quantity is a whole number of cutters, one or more'}
+          title={qtyProblem ?? 'Save the count and the notes'}
           onClick={() => void updateItem({ ...item, quantity: qty, notes: nextNotes })}
         >
           Save

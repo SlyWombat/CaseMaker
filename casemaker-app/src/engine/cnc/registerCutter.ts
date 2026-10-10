@@ -170,8 +170,14 @@ function textOrNull(value: string | null | undefined): string | null {
   return t.length === 0 ? null : t;
 }
 
-/** A count from a text field: blank is ONE (a user with the box in hand has at least one), and a
- *  count the service would refuse is left for the form to catch — never silently rewritten to 1. */
+/**
+ * A count from a text field: blank is ONE, and a count the service would refuse is left for the
+ * form to catch — never silently rewritten to 1.
+ *
+ * BLANK IS ONE AT EVERY SURFACE THAT ASKS (#331): a registration and an edit are the same question
+ * to the same `InventoryItemSchema`, and a blank the form itself produced must not be refused. The
+ * rule lives here, not beside any one of those surfaces, so all of them answer alike.
+ */
 export function quantityOrOne(value: string): number {
   const t = value.trim();
   if (t.length === 0) return 1;
@@ -180,10 +186,10 @@ export function quantityOrOne(value: string): number {
 }
 
 /**
- * Why a door cannot be sent yet, or null. The rule and the words for it live together here rather
- * than beside one of the three forms that ask it: all three collect a quantity, all three are
- * refused by the same `InventoryItemSchema`, and three copies of the same sentence would be three
- * chances to drift.
+ * Why a form cannot be sent yet, or null. The rule and the words for it live together here rather
+ * than beside one of the surfaces that ask it: the three register doors and the inventory editor
+ * (`ToolDetail.tsx`) all collect a quantity, all are refused by the same `InventoryItemSchema`, and
+ * four copies of the same sentence would be four chances to drift.
  */
 export function quantityProblem(value: string): string | null {
   return quantityOrOne(value) > 0 ? null : 'a quantity is a whole number of cutters, one or more';

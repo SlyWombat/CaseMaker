@@ -1259,6 +1259,134 @@ owned code reading as PATCH-then-a-new-count, the candidates card measured, the 
 rather than swallowed, the Type door refusing a nameless cutter, and the Catalogue door's way out of
 a search that matches nothing.
 
+**The Simulate form and the clamp notice — two silences (#315, #317).** Different files, one shape:
+the app knew a thing and did not say it.
+
+*#315 — a user edit the file threw away.* `simSetupStore`'s module doc had stated the rule since
+#196: "A user edit always wins: `setStock`/`setTool` flip that field's `source` to `'user'`, and a
+reopened header never overwrites it." `openFile` rebuilt `stock`, `stockSource` and `toolKey` from
+scratch on every call, so the doc and the code said opposite things. The panel's happy path is
+open-then-choose, which hides it; the other order is ordinary — pick the cutter you have in the
+spindle, then open the program — and the header silently replaced the choice. It was found while
+writing #308's browser gate, where select-then-open made a ball nose run as a flat end. `openFile` now
+MERGES: a field whose source is `'user'` keeps its value and its source, every other field takes this
+file's, and `reset()` is the only way back. The rule is per FIELD, not per file, so opening a file
+after choosing a cutter keeps the cutter and still brings the stock in — and the reverse.
+
+*Measuring that the gate discriminates, rather than asserting it.* `qa-308-catalogue.mjs` had been
+reordered around the bug (the selection moved after the open, with a comment naming why). The reorder
+was reverted and the gate run against **both** stores: with the pre-#315 `openFile` the picker came
+back `flat-3.175x12-metal` — the header's own cutter, matched through shape + diameter to the built-in
+that leads the registry — and the ball-nose run reported `status ready, diagnostics []`, a ball end
+swept as a flat end. With the fix the selection survives (`cat:019c049a-…` for the flat) and the
+refusal returns by name. Both `[2]` checks are regression tests for #315; neither was assumed to be.
+
+*#317 — a number the machine moved, said nothing.* `feedsFor` has returned clamp diagnostics since
+#310 and no screen rendered them, which #310's catalogue tier made reachable on the vendor's own data:
+32 of Makera's 1 328 rows state 15 000 RPM against the Z1's 13 000 ceiling, and that band CLAMPS rather
+than refuses. The `Cutting` heading now carries `clamped to this machine (n)` in the warning colour,
+the moved values and their messages in the `title`, the codes in `data-codes`. It counts **only the
+clamps**: `FeedsDiagnostic` is the union of `ClampDiagnostic` and the catalogue's `catalogue-ignored`
+(#325), and that second one is a row that YIELDED a field to the tier below — already told in the
+provenance sentence, with the field named. Counting the pair would make "clamped to this machine (2)" a
+lie about the row that simply had nothing to say, so a test seeds exactly that pair. The maintainer's
+decision, taken on the issue the day it was filed: **show only** — no `JobFinding`, no change to the
+start gate, because a clamp is the machine's limit applied correctly rather than a reason to refuse.
+
+*#328 — a sync's own notes, stored and never shown.* Both of #326's fixes and one from #308 were
+sentences nobody could read: `HouseStore::sync_catalogue` returns a `SyncReport` whose `notes` carry
+what a sync that SUCCEEDED still has to say — a `catalogue.json` it could not read and replaced,
+cutters in a category this build does not know, feed rows dropped because Studio left their cells
+empty, and a sync that emptied the feed matrix. Nothing rendered them; the store kept the report as
+`lastSync` and built its sentence from the counts alone, so all four looked exactly like a clean sync.
+That is #319/#320 and #325/#326's failure mode one layer up: the service says the right thing and the
+user is not told it. The Tools scope now lists them under the result (`manage-sync-notes`, one
+`manage-sync-note-<i>` per note), **deliberately outside the notice** — dismissing that must not take
+the record of what the sync did with it, and the notes stay until the next sync replaces them. Whether
+a note and a dropped-row count deserve different WEIGHT, and whether `lastSync` should outlive a
+reload (it is in-memory only, so a restart forgets them) are left as the issue's open questions rather
+than guessed.
+
+*One doc correction made on the way, in the paragraph being edited:* `cnc-guide.md` §4 still said the
+Simulate tool dropdown "starts empty and is required", which stopped being true when #305 gave the
+header a match to suggest. It now says what the code does — a `TOOL` record pre-selects its cutter,
+and a cutter you already chose is kept.
+
+**Evidence.** `simSetup.spec.ts` 15 tests (the per-field merge, the per-field reverse, a choice kept
+against a file that states no tool, and `reset()` as the only way back); `engravePanel.spec.tsx` 51,
+four of them #317's — the tag present and naming `rpm-clamped`, absent inside the ceiling, absent when
+the feeds are refused (the box already says it), and the clamp-vs-yield count. Full suite **3374 passed
+/ 4 skipped**; `typecheck`, `check:sim-gate` and `check:platform-gate` clean; `docs:sync` re-mirrored
+and both doc gates green. Browsers, all three ALL PASS: `qa-308-catalogue.mjs` with the user's own
+order restored; `qa-310-feeds.mjs`, whose scenario 3 now reads
+`{"text":"clamped to this machine (1)","codes":"rpm-clamped","title":"rpm 15000 RPM exceeds the Makera
+Z1's 13000 RPM ceiling; clamped"}` beside the unchanged `Makera's catalogue` badge; and
+`qa-311-manage.mjs`'s new §5, which clicks Sync against a service whose report carries two notes and
+reads them off the screen rather than trusting the store.
+
+**Blank means one, at both ends (#331).** Filed from that session's own verification. The count rule
+was written twice and the two copies disagreed about an empty box: `ToolDetail`'s inventory editor
+derived `qty = Number(quantity)` and `qtyOk = Number.isInteger(qty) && qty > 0` — and `Number('')` is
+`0`, so a cleared field was refused — while `registerCutter.ts`'s `quantityOrOne` reads blank as
+**one**. The refusal sentence was hard-coded a second time in the Save button's `title` too,
+capitalised, against the lower-case wording `quantityProblem` returns. The maintainer's decision, taken
+on the issue the day it was filed: **blank means one at both ends** — a person holding the box owns at
+least one cutter, and the worse surprise is an editor refusing a blank it produced itself. The editor
+now imports both functions; `dirty` is `qtyProblem === null && (qty !== item.quantity || nextNotes !==
+item.notes)`, the Save `title` is `qtyProblem ?? 'Save the count and the notes'`, and the field carries
+the same `placeholder="1"` the three doors do, so the rule is visible rather than silent. Nothing moved
+to the service: `InventoryItemSchema.quantity` is `z.number().int().positive()`, and that stays the
+floor at both ends rather than a rule the UI keeps its own copy of. One implementation, one sentence —
+`grep -rn "whole number of cutters" src` is a single hit, in `registerCutter.ts`.
+
+**The app's own type (#330).** The desktop shell rendered in the fallback stack and said nothing about
+it: `index.html` linked `fonts.googleapis.com` for #84's three families, and every response the server
+sends carries `default-src 'self'` with no `font-src`, so the stylesheet was refused — visible only in
+the console of a browser pointed at the shell, which is nobody's normal day. Option 2 of the issue,
+chosen: **self-host the three families**. `public/fonts/` now holds one **variable** woff2 per family
+from each project's own repository — Space Grotesk 49 256 B (300–700), Inter 352 240 B (100–900),
+JetBrains Mono 113 672 B (100–800) — each with its `OFL.txt` beside it (all three SIL OFL 1.1, the
+licence #180 settled for the engraving fonts) and a `fonts.css` declaring the three `@font-face` rules.
+The two `preconnect`s and the CDN `<link>` are gone from `index.html`; the CSP is **unchanged**, since
+`default-src 'self'` already covers this origin — that is the whole point of the option, and the reason
+`server.rs`'s `CSP_HEADER` doc now says the stack is local by design and the two copies of the policy
+must stay in step.
+
+Two deviations from the brief, both deliberate. The brief put the rules in `src/styles/fonts.css`
+imported by `index.css`, addressing the files as `url('fonts/<file>.woff2')`. A stylesheet inside the
+bundle cannot relatively address `public/` — Vite resolves a relative `url()` against the importing CSS
+file, not the page — so the rules live in `public/fonts/fonts.css`, linked from `index.html`
+root-absolute. That the href survives the build was checked rather than assumed: Vite rewrites it with
+`base` (`/casemaker/fonts/fonts.css` on the cPanel deploy) and leaves the *relative* woff2 URLs inside
+it alone, so one file serves `/`, `/casemaker/` and `tauri://localhost`. And no comment was added beside
+`tauri.conf.json`'s `csp` key, because JSON has none: the note went into `server.rs`'s `CSP_HEADER` doc,
+where the second copy of the policy lives, and into `DESIGN.md`'s typography section, beside the #84
+note the stack came from.
+
+**Evidence.** `manageMode.spec.tsx` 26 tests, two of them #331's — the field's `placeholder` is `1`,
+clearing it and saving PATCHes `quantity: 1`, `0` and `1.5` disable Save with the shared sentence in
+`title`, and `3` restores `'Save the count and the notes'`. `qa-311-manage.mjs` ALL PASS with a new
+block that clears the box against the running service and reads back the PATCH it sent: a browser gate,
+because jsdom cannot show that a save re-reads and remounts the keyed `InventoryEditor`, so a `fill`
+typed into the old node is discarded — the first run of that block timed out on exactly that, and the
+script now waits for the field to settle before each save. `cnc-guide.md` and its mirror say the pair of
+rules in one breath: a blank length means *unknown*, a blank **quantity** means one.
+
+`cargo test`: **80 passed / 0 failed / 1 ignored**, one of them new — the shell serves `/fonts/fonts.css`
+as `text/css` and the three woff2 as `font/woff2`, each with the policy header attached, and the
+stylesheet it serves declares all three families with `url()` targets that are exactly those three
+filenames. That last shape is what makes it evidence rather than decoration: `serve_asset` answers a
+MISSING asset with `index.html` and **status 200**, so a misnamed font still "requests fine" and only
+the content type separates a font from the SPA fallback. In a browser, the new `qa-330-fonts.mjs` ALL
+PASS on both origins — the dev server on 5199 and the desktop shell on 5399 — where all three families
+are `loaded`, each measures unlike a serif or monospace generic, nothing is requested from either Google
+host, and a DOM walk names the app's own elements as the ones that draw them (`app-header__logo` Space
+Grotesk, `html` Inter, `wb-card__print` JetBrains Mono). `qa-313-shell-cache.mjs` passes with **zero**
+console errors, the exception it carried for the CSP refusal deleted rather than kept. `dist/fonts/`
+carries the three woff2, the stylesheet and the three licences with the href rewritten, and nothing is
+inlined: the only `wOF2` bytes in `dist/assets/*.js` are three.js's font-loader magic check. Full suite
+**3376 passed / 4 skipped**; `typecheck`, `check:sim-gate` and `check:platform-gate` clean.
+
 ---
 
 ## 6. The geometry, ported

@@ -1,6 +1,8 @@
 :root {
-  /* Issue #84 — body / heading stacks fall back to system fonts cleanly if
-     Google Fonts fails (offline / blocked CDN). */
+  /* Issue #84 — body / heading stacks fall back to system fonts cleanly if the
+     webfonts fail to load. As of #330 the three families are served from
+     `public/fonts/` by this app, so "fails" now means a missing or unreadable
+     local file rather than a blocked CDN — the fallback stays either way. */
   font-family: var(--cm-font-body);
   color-scheme: dark;
   background: var(--cm-color-surface);
@@ -2428,6 +2430,26 @@ button:disabled {
   background: #4a1d1d;
   border-color: #7a2828;
   color: #f7d4d4;
+}
+/* #328 — the sync's notes. Quieter than a notice on purpose: these are things a sync that
+   SUCCEEDED still had to say, so they are news, not a failure. They stay until the next sync. */
+.manage .mnotes {
+  border: 1px solid var(--cm-color-outline-variant);
+  border-radius: var(--cm-radius-sm);
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--cm-color-on-surface-variant);
+}
+.manage .mnotes__head {
+  margin: 0 0 4px;
+}
+.manage .mnotes ul {
+  margin: 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 2px;
 }
 .manage .mempty {
   border: 1px dashed var(--cm-color-outline-variant);
