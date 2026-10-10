@@ -64,7 +64,7 @@
 // machine" file carried between two computers (#247) can never smuggle Makera's table with it
 // (`/Fabrication.md` §3, #186).
 
-use crate::catalogue::{CatalogueDoc, SyncReport, CATALOGUE_KIND};
+use crate::catalogue::{CatalogueDoc, SyncNote, SyncReport, SyncSummary, CATALOGUE_KIND};
 use crate::etag::etag_for;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -251,7 +251,7 @@ impl Tool {
 /// catalogue row this was materialised from, with the date it was taken — so a later re-sync (#308)
 /// can name what a clone was made from without ever reaching into the clone itself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Origin {
     /// The catalogue row's `cutterId` (`/Makera-Parity.md` §3.2), NOT the `g_ID` the `.nc` header
     /// carries: the UUID is what a re-sync diffs on, and the `g_ID` is not inherited by a clone.
@@ -278,8 +278,14 @@ impl Origin {
 /// A cutter the user's house owns, as stored. The wire shape is {@link ToolLibraryEntry}: `origin`
 /// stays on disk because the client's Zod schema does not carry it yet, and `provenance` — the
 /// human sentence the panel shows — already says what it was cloned from.
+///
+/// UNKNOWN KEYS ARE REFUSED, here and on every struct `house.json` is made of (#339). The file is
+/// the user's and is hand-editable, and a misspelled optional key (`orgin`) would otherwise parse
+/// clean and be dropped by the next `commit`'s rewrite — a hand edit lost with no `problem` to say
+/// so, which is the failure shape #320 is about. `CatalogueDoc` stays lenient on purpose: it is
+/// machine-written and a sync replaces it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UserTool {
     pub key: String,
     pub tool: Tool,
@@ -352,7 +358,7 @@ impl From<&crate::catalogue::CatalogueEntry> for ToolLibraryEntry {
 /// text it decoded to. `symbology` is kept because the same value can arrive as a QR slug
 /// (`C1-BIT-BALL-NOSE-1-4`) or as typed text, and only the first is evidence of a label.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Coded {
     pub symbology: String,
     pub value: String,
@@ -365,7 +371,7 @@ pub struct Coded {
 /// not depend on the catalogue surviving a re-sync. A user who cloned a row and then synced a
 /// catalogue that dropped it still physically owns the cutter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InventoryItem {
     /// Ours, minted by the client (`utils/id.ts`). Unique, and checked here: a document with the
     /// same id twice is two rows for one possession. The **codes** are checked for uniqueness too
@@ -439,9 +445,10 @@ fn clashing_code<'a>(inventory: &'a [InventoryItem], item: &'a InventoryItem) ->
     })
 }
 
-/// `house.json` — the user's own tiers. A sync (#308) never touches this file.
+/// `house.json` — the user's own tiers. A sync (#308) never touches this file. Unknown keys are
+/// refused (see `UserTool`), and this is also the document `/api/v1/import` accepts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HouseDoc {
     pub kind: String,
     pub schema_version: u32,
@@ -522,6 +529,10 @@ pub struct Health {
     /// fixes — so the two numbers answer different questions and a client shows both.
     pub feed_rows: usize,
     pub catalogue_synced_at: Option<String>,
+    /// What the last sync came to (#328): its counts and its notes, kept in `catalogue.json` so the
+    /// desktop and a LAN browser read the same answer after a restart. `None` until the first sync,
+    /// and for a catalogue file written before the field existed.
+    pub last_sync: Option<SyncSummary>,
     /// One sentence per document that could not be read. A non-empty list is also why writes are
     /// refused: the store will not overwrite a file it could not understand.
     pub problems: Vec<String>,
@@ -820,9 +831,22 @@ impl HouseStore {
                 (HouseDoc::default(), Some(e))
             }
         };
+        let catalogue_path = dir.join(CATALOGUE_FILE);
         let (catalogue, catalogue_problem) =
-            match read_doc::<CatalogueDoc>(&dir.join(CATALOGUE_FILE), CATALOGUE_KIND) {
-                Ok(Some(doc)) => (doc, None),
+            match read_doc::<CatalogueDoc>(&catalogue_path, CATALOGUE_KIND) {
+                // The same rule as the house, one tier down (#339): a parsed entry is not a servable
+                // one. A corrupted row with a non-`cat:` key would go out on `/tools`, the client's
+                // `isToolKey` would refuse the WHOLE list, and the house would read absent while
+                // `/health` said ok. So the tier is empty and the reason is in `/health` — which a
+                // sync heals, since the catalogue's only copy is the vendor's database.
+                Ok(Some(doc)) => match doc.tools.iter().try_for_each(|e| e.validate()) {
+                    Ok(()) => (doc, None),
+                    Err(e) => {
+                        let why = format!("{} cannot be served: {e}", catalogue_path.display());
+                        log::warn!("house service: {why}");
+                        (CatalogueDoc::default(), Some(why))
+                    }
+                },
                 Ok(None) => (CatalogueDoc::default(), None),
                 Err(e) => {
                     log::warn!("house service: {e}");
@@ -849,6 +873,7 @@ impl HouseStore {
             has_catalogue: !inner.catalogue.tools.is_empty(),
             feed_rows: inner.catalogue.feeds.len(),
             catalogue_synced_at: inner.catalogue.synced_at.clone(),
+            last_sync: inner.catalogue.last_sync.clone(),
             problems: [&inner.house_problem, &inner.catalogue_problem]
                 .iter()
                 .filter_map(|p| (*p).clone())
@@ -1097,9 +1122,10 @@ impl HouseStore {
         // whose write FAILS reports no problem while `catalogue.json` is still unreadable, and the
         // next successful sync loses the note about the file it replaced.
         if let Some(problem) = inner.catalogue_problem.as_deref() {
-            notes.push(format!(
+            // A LOSS (#328): whatever that file held is gone, and this sync's rows are what replaced it.
+            notes.push(SyncNote::loss(format!(
                 "the previous catalogue file could not be read ({problem}) — this sync replaced it"
-            ));
+            )));
         }
         // The same loss one tier down, and a NOTE rather than a refusal (#326). An import that
         // arrives with no feed rows while the stored catalogue has some is either a vendor database
@@ -1108,34 +1134,39 @@ impl HouseStore {
         // fall-back to the app's starting table. So it is said and no more: the sync still lands,
         // because stopping here would block the one operation that can heal a bad catalogue file.
         if imported.feeds.is_empty() && !inner.catalogue.feeds.is_empty() {
-            notes.push(format!(
+            // The one feed note that is a LOSS (#328): a matrix that had rows and now has none. A
+            // large drop that leaves some is `catalogue.rs`'s information note, however large.
+            notes.push(SyncNote::loss(format!(
                 "it holds no feed rows, and the catalogue already has {} — this sync emptied the \
                  feed matrix, so every starting number is now the app's own",
                 inner.catalogue.feeds.len()
-            ));
+            )));
         }
 
-        let doc = CatalogueDoc {
+        let report = SyncReport {
+            source: path.display().to_string(),
             synced_at: Some(synced_at.clone()),
+            total: imported.entries.len(),
+            unchanged: change.unchanged,
+            added: change.added,
+            removed: change.removed,
+            changed: change.changed,
+            feed_rows: imported.feeds.len(),
+            notes,
+        };
+        let doc = CatalogueDoc {
+            synced_at: Some(synced_at),
             tools: imported.entries,
             feeds: imported.feeds,
+            // The report's counts and notes outlive this response (#328): written beside the rows
+            // so a restart, or a second client, still has what the sync said.
+            last_sync: Some(SyncSummary::from(&report)),
             ..CatalogueDoc::default()
         };
         let bytes = serde_json::to_vec_pretty(&doc)
             .map_err(|e| HouseError::Io(format!("could not serialize the catalogue: {e}")))?;
         write_atomic(&self.dir.join(CATALOGUE_FILE), &bytes)?;
 
-        let report = SyncReport {
-            source: path.display().to_string(),
-            synced_at: Some(synced_at),
-            total: doc.tools.len(),
-            unchanged: change.unchanged,
-            added: change.added,
-            removed: change.removed,
-            changed: change.changed,
-            feed_rows: doc.feeds.len(),
-            notes,
-        };
         inner.catalogue = doc;
         inner.catalogue_problem = None;
         Ok(report)
@@ -1851,6 +1882,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_house_file_with_a_key_this_build_does_not_know_is_refused_and_the_key_named() {
+        // #339. A hand-edited `house.json` with a misspelled optional key (`orgin`) used to load
+        // clean, and the next commit rewrote the file without it: a hand edit lost with no
+        // `problem` to say so. Now it is refused like any other unreadable file — and the refusal
+        // names the key, because "does not match its own schema" alone sends the user reading the
+        // whole file. Every struct the document is made of is strict, so the key is caught at
+        // whichever depth it was mistyped.
+        let cases: Vec<(&str, Box<dyn FnOnce(&mut serde_json::Value)>)> = vec![
+            ("orgin", Box::new(|d| d["tools"][0]["orgin"] = serde_json::json!({ "id": "x" }))),
+            ("inventry", Box::new(|d| d["inventry"] = serde_json::json!([]))),
+            ("qty", Box::new(|d| d["inventory"][0]["qty"] = serde_json::json!(2))),
+            ("symbolgy", Box::new(|d| d["inventory"][0]["codes"][0]["symbolgy"] = serde_json::json!("qr"))),
+            (
+                "syncedOn",
+                Box::new(|d| {
+                    d["tools"][0]["origin"] = serde_json::json!({ "id": "x", "syncedOn": "2026" })
+                }),
+            ),
+        ];
+        for (key, break_it) in cases {
+            let dir = TempDir::new().unwrap();
+            let doc = broken_fixture(break_it);
+            fs::write(dir.path().join(HOUSE_FILE), &doc).unwrap();
+            let loaded = HouseStore::open(dir.path().to_path_buf());
+            let h = loaded.health().await;
+            assert_eq!(h.problems.len(), 1, "{key}: {:?}", h.problems);
+            assert!(h.problems[0].contains(HOUSE_FILE), "{key}: {:?}", h.problems);
+            assert!(h.problems[0].contains(key), "the key must be named: {:?}", h.problems);
+            assert_eq!(loaded.tools().await.unwrap().0, b"[]", "{key}");
+            assert!(matches!(
+                loaded.create_tool(an_entry("user:abc")).await,
+                Err(HouseError::Refused(_))
+            ));
+            // The user's bytes are exactly where they were: nothing rewrote the file.
+            assert_eq!(fs::read(dir.path().join(HOUSE_FILE)).unwrap(), doc, "{key}");
+
+            // The same document through the other door (#339): `/import` takes a house file too.
+            let (_dir, fresh) = store();
+            let err = fresh.import(&doc).await.unwrap_err();
+            assert!(matches!(err, HouseError::BadEntry(_)), "{key}: {err:?}");
+            assert!(err.to_string().contains(key), "{key}: {err}");
+        }
+    }
+
+    #[tokio::test]
     async fn a_house_file_that_fails_its_own_rules_is_a_problem_and_not_a_served_house() {
         // The hand-edited case: it parses, and it is still a document the client would refuse. It
         // must be reported like any other unreadable file — reason in `/health`, nothing served,
@@ -2053,13 +2129,108 @@ mod tests {
 
         let report = store.sync_catalogue().await.unwrap();
         assert_eq!(report.total, 2);
-        assert!(
-            report.notes.iter().any(|n| n.contains("could not be read")),
-            "{:?}",
-            report.notes
-        );
+        let note = report
+            .notes
+            .iter()
+            .find(|n| n.text.contains("could not be read"))
+            .unwrap_or_else(|| panic!("{:?}", report.notes));
+        // A replaced file is a LOSS (#328): whatever it held is not coming back from this sync.
+        assert_eq!(note.kind, crate::catalogue::SyncNoteKind::Loss);
         assert!(store.health().await.problems.is_empty());
         assert!(store.health().await.has_catalogue);
+    }
+
+    #[tokio::test]
+    async fn the_last_sync_outlives_the_response_and_a_restart() {
+        // #328. The report is one response; its counts and notes are kept in `catalogue.json` so a
+        // restart — or a second client on the LAN — reads the same last sync from `/health`.
+        let dir = TempDir::new().unwrap();
+        let db = a_library(&dir);
+        fs::write(dir.path().join(CATALOGUE_FILE), b"{ this is not json").unwrap();
+        let store = store_syncing(&dir, &db);
+        let report = store.sync_catalogue().await.unwrap();
+        assert_eq!(report.notes.len(), 1, "{:?}", report.notes);
+
+        let expected = SyncSummary {
+            synced_at: report.synced_at.clone(),
+            source: report.source.clone(),
+            total: report.total,
+            feed_rows: report.feed_rows,
+            notes: report.notes.clone(),
+        };
+        assert_eq!(store.health().await.last_sync, Some(expected.clone()));
+
+        // Round-tripped through the file, not just held in memory.
+        let raw: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join(CATALOGUE_FILE)).unwrap()).unwrap();
+        assert_eq!(raw["lastSync"]["notes"][0]["kind"], serde_json::json!("loss"), "{raw:#}");
+        assert!(raw["lastSync"].get("added").is_none(), "the diff lists are not stored: {raw:#}");
+        let reopened = store_syncing(&dir, &db);
+        assert_eq!(reopened.health().await.last_sync, Some(expected));
+
+        // A second sync REPLACES it, notes included: the record is of the last sync, not of all.
+        let again = store.sync_catalogue().await.unwrap();
+        assert!(again.notes.is_empty(), "{:?}", again.notes);
+        let h = store.health().await;
+        assert_eq!(h.last_sync.as_ref().map(|s| s.notes.len()), Some(0));
+        assert_eq!(h.last_sync.as_ref().and_then(|s| s.synced_at.clone()), again.synced_at);
+    }
+
+    #[tokio::test]
+    async fn a_catalogue_file_from_before_last_sync_still_parses() {
+        // #328, the other direction: `catalogue.json` written by a build that had no `lastSync` is
+        // a catalogue whose last sync went unrecorded, not a problem (#320 is about shape, not
+        // absence). Written by hand, because a `CatalogueDoc` of this build would write the key.
+        let dir = TempDir::new().unwrap();
+        let entry = a_catalogue_entry("019c049a-8169-7a1e-ace2-28e03809ce44");
+        let doc = serde_json::json!({
+            "kind": CATALOGUE_KIND,
+            "schemaVersion": HOUSE_SCHEMA_VERSION,
+            "syncedAt": "2026-10-08T12:00:00.000Z",
+            "tools": [entry],
+            "feeds": [],
+        });
+        fs::write(dir.path().join(CATALOGUE_FILE), serde_json::to_vec(&doc).unwrap()).unwrap();
+
+        let store = HouseStore::open(dir.path().to_path_buf());
+        let h = store.health().await;
+        assert!(h.problems.is_empty(), "{:?}", h.problems);
+        assert!(h.has_catalogue);
+        assert_eq!(h.last_sync, None);
+    }
+
+    #[tokio::test]
+    async fn a_catalogue_file_whose_entries_cannot_be_served_is_a_problem_and_an_empty_tier() {
+        // #339. A parsed catalogue is not a servable one: an entry with a non-`cat:` key would go
+        // out on `/tools`, the client would refuse the whole list, and the house would read absent
+        // while `/health` said ok. The tier is empty instead, the reason is in `/health`, and the
+        // user's own tools are still served — the house file was never the problem.
+        let dir = TempDir::new().unwrap();
+        let mut bad = a_catalogue_entry("019c049a-8169-7a1e-ace2-28e03809ce44");
+        bad.key = "user:019c049a-8169-7a1e-ace2-28e03809ce44".to_string();
+        let catalogue = CatalogueDoc {
+            synced_at: Some("2026-10-08T12:00:00.000Z".to_string()),
+            tools: vec![a_catalogue_entry("019c049a-8169-7a1e-ace2-28e03809ce45"), bad],
+            ..CatalogueDoc::default()
+        };
+        fs::write(
+            dir.path().join(CATALOGUE_FILE),
+            serde_json::to_vec_pretty(&catalogue).unwrap(),
+        )
+        .unwrap();
+
+        let store = HouseStore::open(dir.path().to_path_buf());
+        let h = store.health().await;
+        assert_eq!(h.problems.len(), 1, "{:?}", h.problems);
+        assert!(h.problems[0].contains(CATALOGUE_FILE), "{:?}", h.problems);
+        assert!(!h.has_catalogue, "a refused tier is an empty one, not a half-served one");
+        store.create_tool(an_entry("user:abc")).await.unwrap();
+        let (bytes, _) = store.tools().await.unwrap();
+        let entries: Vec<ToolLibraryEntry> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+            vec!["user:abc"]
+        );
     }
 
     #[tokio::test]
@@ -2252,14 +2423,18 @@ mod tests {
         let store = store_syncing(&dir, &bare);
         let report = store.sync_catalogue().await.unwrap();
         assert_eq!(report.feed_rows, 0);
+        assert_eq!(report.notes.len(), 1, "{:?}", report.notes);
         assert!(
-            report
-                .notes
-                .iter()
-                .any(|n| n.contains("emptied the feed matrix")),
+            report.notes[0].text.contains("emptied the feed matrix"),
             "{:?}",
             report.notes
         );
+        // An emptied matrix is the one feed note that is a LOSS (#328), and it is kept with the
+        // catalogue so `/health` still says so after a restart.
+        assert_eq!(report.notes[0].kind, crate::catalogue::SyncNoteKind::Loss);
+        let kept = store_syncing(&dir, &bare).health().await.last_sync.unwrap();
+        assert_eq!(kept.notes, report.notes);
+        assert_eq!(kept.feed_rows, 0);
         // A FIRST sync over a DB with no feed table says nothing, because nothing was lost.
         let fresh = TempDir::new().unwrap();
         let store = store_syncing(&fresh, &bare);

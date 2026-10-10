@@ -19,11 +19,25 @@
  * library on this PC; a change made here would be overwritten by the next sync. So the only write
  * a catalogue row offers is `Clone to change`, exactly as the mockup has it — and the clone is a
  * `user:` definition that never edits the row it came from (`selection.cloneOf`).
+ *
+ * AND A YOURS ROW IS WHERE THE CHANGE HAPPENS (#335, #311 decision 2). "Clone to change" used to
+ * end at the clone: `updateTool` had no caller. A `user:` row now gets the definition editor — the
+ * Type door's six fields and its rules (`registerCutter.specProblem` / `toolFromSpec`), a Save that
+ * `PATCH`es the key with the tool list's validator — and nothing else does: catalogue, built-in and
+ * owned rows keep the read-only table, because a possession's definition is the catalogue's or
+ * the one it was typed with, and changing it is a clone.
  */
 
 import { useState } from 'react';
 import { catalogueIdOf, tierOf, TIER_TAG, type ToolTier } from '@/engine/cnc/toolTiers';
-import { quantityOrOne, quantityProblem } from '@/engine/cnc/registerCutter';
+import {
+  quantityOrOne,
+  quantityProblem,
+  specOfTool,
+  specProblem,
+  toolFromSpec,
+  type CutterSpec,
+} from '@/engine/cnc/registerCutter';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { InventoryItem } from '@/platform/houseClient';
 import { useHouseStore } from '@/store/houseStore';
@@ -31,6 +45,7 @@ import { useManageModeStore } from '@/store/manageModeStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { formatDay, mm } from './display';
 import { cloneOf, useSelectedEntry, useSelectedItem } from './selection';
+import { CutterFields } from './doors/CutterFields';
 import { RegisterDoor } from './RegisterDoor';
 
 /** The `tag` modifier for a tier. One class per tier id, so no mapping table has to stay in step. */
@@ -86,8 +101,12 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
   // Where this cutter came from, in the catalogue's own vocabulary. A `cat:` row IS its cutterId; an
   // owned row carries it on the possession's `origin` (`house.rs` keeps the catalogue id there and
   // deliberately not the key), which is the only way a physical cutter can name the row it was
-  // registered from after that row is gone.
-  const catalogueId = catalogueIdOf(entry.key) ?? item?.origin?.id ?? t.id;
+  // registered from after that row is gone. Failing both, a definition may still carry Makera's own
+  // `g_ID` on `tool.id` — the built-in `flat-3.175x12-metal` does — and that is a DIFFERENT id
+  // (`OriginSchema` calls the catalogue's `cutterId`), so it is labelled as Makera's, not as the
+  // catalogue's (#311 review).
+  const catalogueId = catalogueIdOf(entry.key) ?? item?.origin?.id ?? null;
+  const vendorId = catalogueId === null ? t.id : null;
   const synced = formatDay(catalogueSyncedAt);
 
   return (
@@ -135,31 +154,40 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
       <div className="panel-subhead">
         Definition <span className={`tag ${definition.cls}`}>{definition.label}</span>
       </div>
+      {/* Keyed on the fields it seeds from, like the inventory editor below: a save re-reads the
+          list and the editor remounts on the saved values rather than keeping the draft. */}
+      {tier === 'yours' && (
+        <DefinitionEditor key={`${entry.key}\u0000${JSON.stringify(specOfTool(t))}`} entry={entry} />
+      )}
       <table className="ro">
         <tbody>
-          <tr>
-            <th>shape</th>
-            <td>{t.shape}</td>
-          </tr>
-          <tr>
-            <th>tip ⌀</th>
-            <td>{mm(t.tipDiameter ?? t.diameter)} mm</td>
-          </tr>
-          <tr>
-            <th>shank ⌀</th>
-            <td>{mm(t.handleDiameter)} mm</td>
-          </tr>
-          <tr>
-            <th>flute length</th>
-            <td>{mm(t.fluteLength)} mm</td>
-          </tr>
-          <tr>
-            <th>shoulder length</th>
-            <td>
-              {mm(t.shoulderLength)} mm{' '}
-              {t.shoulderLength === null && <span className="dim">— the depth it supports (#314)</span>}
-            </td>
-          </tr>
+          {tier !== 'yours' && (
+            <>
+              <tr>
+                <th>shape</th>
+                <td>{t.shape}</td>
+              </tr>
+              <tr>
+                <th>tip ⌀</th>
+                <td>{mm(t.tipDiameter ?? t.diameter)} mm</td>
+              </tr>
+              <tr>
+                <th>shank ⌀</th>
+                <td>{mm(t.handleDiameter)} mm</td>
+              </tr>
+              <tr>
+                <th>flute length</th>
+                <td>{mm(t.fluteLength)} mm</td>
+              </tr>
+              <tr>
+                <th>shoulder length</th>
+                <td>
+                  {mm(t.shoulderLength)} mm{' '}
+                  {t.shoulderLength === null && <span className="dim">— the depth it supports (#314)</span>}
+                </td>
+              </tr>
+            </>
+          )}
           <tr>
             <th>stick-out</th>
             <td>
@@ -184,6 +212,12 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
             <tr>
               <th>catalogue id</th>
               <td>{catalogueId}</td>
+            </tr>
+          )}
+          {vendorId !== null && (
+            <tr>
+              <th>Makera id</th>
+              <td data-testid="manage-detail-makera-id">{vendorId}</td>
             </tr>
           )}
         </tbody>
@@ -228,6 +262,60 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
         </div>
       )}
     </aside>
+  );
+}
+
+/**
+ * The definition editor for a Yours row (#335): the Type door's six fields over the user's own
+ * `Tool`, and a Save that replaces it in place.
+ *
+ * THE RULES ARE THE TYPE DOOR'S, IMPORTED. Blank is null and never 0, a typed 0 or negative is
+ * refused with its sentence, a non-flat shape's `diameter` is the shank alone — all of it is
+ * `registerCutter.ts`, read through `specProblem` and `toolFromSpec`, so an edit and a registration
+ * cannot disagree about what a blank box means. What the form has no box for (stick-out,
+ * centre-cutting) is carried over from the row untouched, and shown below as the read-only rows
+ * they still are.
+ *
+ * THE SAVE IS GUARDED BY THE TOOL LIST'S VALIDATOR (#321). `houseStore.updateTool` reads the
+ * registry's `etag` at the moment of the write and sends it as `If-Match`; a 412 comes back as the
+ * service's own sentence in the notice above the list, and the store re-reads behind it, exactly as
+ * the inventory editor's save does. Nothing here has its own words for that.
+ *
+ * A draft until Save, for the same reason the inventory editor is: each keystroke writing a
+ * definition to disk would make a typo a measurement.
+ */
+function DefinitionEditor({ entry }: { entry: ToolLibraryEntry }) {
+  const updateTool = useHouseStore((s) => s.updateTool);
+  const busy = useHouseStore((s) => s.busy);
+  const [spec, setSpec] = useState<CutterSpec>(() => specOfTool(entry.tool));
+
+  const problem = specProblem(spec);
+  const next = problem === null ? toolFromSpec(spec, entry.tool) : null;
+  // Dirty means the TOOL would change, read back through the same text the boxes show: `2.0`
+  // typed over a stored 2 is not an edit.
+  const dirty =
+    next !== null && JSON.stringify(specOfTool(next)) !== JSON.stringify(specOfTool(entry.tool));
+  const disabled = busy !== null;
+
+  return (
+    <div data-testid="manage-definition-editor">
+      <CutterFields prefix="manage-def" spec={spec} onChange={setSpec} disabled={disabled} />
+      <p className="hint">
+        blank stays unknown — never 0. A blank shoulder is the depth it supports (#314).
+      </p>
+      <div className="btn-row">
+        <button
+          type="button"
+          className="btn btn--sm btn--primary"
+          data-testid="manage-def-save"
+          disabled={!dirty || disabled}
+          title={problem ?? 'Save this definition'}
+          onClick={() => next !== null && void updateTool({ ...entry, tool: next })}
+        >
+          Save
+        </button>
+      </div>
+    </div>
   );
 }
 

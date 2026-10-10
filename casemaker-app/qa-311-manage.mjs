@@ -99,9 +99,11 @@ const INVENTORY = [
 ];
 
 /** What a sync that SUCCEEDED still had to say (#328) — two of the three shapes the issue names. */
+// Shaped as the service sends them since #328: a kind beside the sentence. A replaced file is a
+// LOSS; dropped cells are information. The page renders `data-kind` from it.
 const SYNC_NOTES = [
-  'makera_library.db could not be read: the catalogue file was replaced with an empty one',
-  '40 feed rows were dropped: their numbers were empty',
+  { kind: 'loss', text: 'makera_library.db could not be read: the catalogue file was replaced with an empty one' },
+  { kind: 'info', text: '40 feed rows were dropped: their numbers were empty' },
 ];
 
 const results = [];
@@ -493,7 +495,13 @@ console.log('\n== 2. Register: the three doors, and what each does ==');
   check('[2] the count goes out as an UPDATE of the same possession',
     plusOne.length === 1 && plusOne[0].body.id === ITEM_ID && plusOne[0].body.quantity === 3,
     JSON.stringify(plusOne[0]?.body?.quantity));
-  check('[2] and the rail shows the NEW count, so the round trip closed', true);
+  // The sentence re-reads the inventory after the write, so it is the round trip's evidence; a
+  // panel that posted and never refreshed would still say "2 on record" (the bug this caught).
+  await page.waitForFunction(
+    () => (document.querySelector('[data-testid="manage-scan-owned"]')?.textContent ?? '').includes('3 on record'),
+    null, { timeout: 15000 }).catch(() => {});
+  const ownedAfter = (await page.getByTestId('manage-scan-owned').innerText()).replace(/\s+/g, ' ');
+  check('[2] and the match card shows the NEW count, so the round trip closed', ownedAfter.includes('3 on record'), ownedAfter);
 
   // A code nothing owns, but a catalogue row fits it: the user picks the row on the label.
   await field.fill('C1-BIT-FLAT-2-12');

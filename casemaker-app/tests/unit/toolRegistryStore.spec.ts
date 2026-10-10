@@ -26,6 +26,7 @@ const HEALTH: HouseHealth = {
   hasCatalogue: false,
   feedRows: 0,
   catalogueSyncedAt: null,
+  lastSync: null,
   problems: [],
 };
 

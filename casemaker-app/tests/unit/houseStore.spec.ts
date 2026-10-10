@@ -19,7 +19,7 @@ import {
   type InventoryItem,
   type SyncReport,
 } from '@/platform/houseClient';
-import { HOUSE_FILENAME, resetHouseStore, useHouseStore } from '@/store/houseStore';
+import { HOUSE_FILENAME, lastSyncView, resetHouseStore, useHouseStore } from '@/store/houseStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 
 const HEALTH: HouseHealth = {
@@ -28,6 +28,7 @@ const HEALTH: HouseHealth = {
   hasCatalogue: true,
   feedRows: 1328,
   catalogueSyncedAt: '2026-01-01T00:00:00.000Z',
+  lastSync: null,
   problems: [],
 };
 
@@ -95,6 +96,9 @@ function fakeHouse(
     write?: (setItems: (items: InventoryItem[]) => void) => HouseCall;
     /** Holds a write open, so a test can catch the store mid-flight. */
     gate?: Promise<void>;
+    /** Holds every probe but the first open, so a test can catch the store between a write and
+     *  the re-read that follows it (#336). The first read has to land for there to be a version. */
+    probeGate?: Promise<void>;
     /** What the inventory read serves to begin with. */
     items?: InventoryItem[];
   } = {},
@@ -105,6 +109,7 @@ function fakeHouse(
   const client: HouseClient = {
     probe: async () => {
       log.push('probe');
+      if (opts.probeGate && log.filter((l) => l === 'probe').length > 1) await opts.probeGate;
       return { kind: 'present', health: HEALTH, base: '' };
     },
     tools: async () => {
@@ -367,6 +372,60 @@ describe('one writer at a time', () => {
     expect(await first).toBe(true);
     expect(state().busy).toBeNull();
     expect(sent).toHaveLength(1);
+  });
+});
+
+// #336 — `busy` used to clear before the re-read, and the validators live in the registry store
+// and are only replaced BY the re-read. A click in that window sent the pre-write `If-Match`, got a
+// 412, and told the user the house had "moved on" — about their own write.
+describe('busy outlives the write, until the re-read lands (#336)', () => {
+  it('holds the slot while the house is re-read, so a second click is dropped rather than stale', async () => {
+    let release: (() => void) | null = null;
+    const probeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { sent } = fakeHouse({ write: () => ({ kind: 'ok', text: '' }), probeGate });
+    await useToolRegistryStore.getState().refresh();
+
+    const first = state().updateItem(ITEM);
+    // The write has concluded — its sentence is up — but the re-read is held at the probe.
+    await vi.waitFor(() => expect(state().notice?.kind).toBe('ok'));
+    expect(state().busy).toBe('update-item');
+    // This is the trap: the version held here is still the one from before the write.
+    expect(useToolRegistryStore.getState().inventoryEtag).toBe('"i1"');
+
+    // A second write in this window is dropped by the one-writer rule — not sent with that version.
+    expect(await state().updateItem(ITEM)).toBe(false);
+    expect(sent).toHaveLength(1);
+    expect(state().busy).toBe('update-item');
+
+    release!();
+    expect(await first).toBe(true);
+    expect(state().busy).toBeNull();
+    expect(sent).toHaveLength(1);
+  });
+});
+
+// #328 decision 2 — the service keeps the last sync's report on `/health`, and the panel shows that
+// record until a sync is clicked here. Which one to show is one rule, pinned without two stores.
+describe('which last sync the panel talks about (#328)', () => {
+  const served = { syncedAt: '2026-01-02T00:00:00.000Z', source: 'db', total: 120, feedRows: 0, notes: [] };
+
+  it('is the service’s record when nothing has been synced here, and says so', () => {
+    expect(lastSyncView(null, null)).toBeNull();
+    expect(lastSyncView(null, served)).toEqual({ summary: served, fromHealth: true });
+  });
+
+  it('is this session’s report once a sync is clicked here', () => {
+    // The common case: the sync's re-read brings the same record back on `/health`.
+    expect(lastSyncView(REPORT, { ...served, syncedAt: REPORT.syncedAt })).toEqual({ summary: REPORT, fromHealth: false });
+    expect(lastSyncView(REPORT, null)).toEqual({ summary: REPORT, fromHealth: false });
+  });
+
+  it('is the service’s again when it reports a sync newer than this session’s', () => {
+    // Another client synced since: the house is the authority (decision 31).
+    const newer = { ...served, syncedAt: '2026-01-04T00:00:00.000Z' };
+    expect(lastSyncView(REPORT, newer)).toEqual({ summary: newer, fromHealth: true });
   });
 });
 

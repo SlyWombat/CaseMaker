@@ -2387,6 +2387,26 @@ button:disabled {
   font-size: 10px;
   max-width: 300px;
 }
+/* #340 — the name cell is a button so the row is in the tab order. Text-only: it inherits the
+   cell's font and colour, fills the cell so the hit area is the cell's, and only a keyboard focus
+   draws anything the mouse row did not. */
+.manage .tbl .tbl__rowbtn {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.manage .tbl .tbl__rowbtn:focus-visible {
+  outline: 2px solid var(--cm-color-primary);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
 /* The built-ins rail's own short list: no row is selectable there. */
 .manage .context-panel .tbl tbody tr {
   cursor: default;
@@ -2450,6 +2470,16 @@ button:disabled {
   padding-left: 16px;
   display: grid;
   gap: 2px;
+}
+/* #328 decision 1 — a LOSS (an emptied feed matrix, a catalogue file replaced because it could not
+   be read) is not the same kind of news as an unknown category, so it is drawn in the same amber
+   the warning banners use; an `info` note stays plain. */
+.manage .mnotes li[data-kind='loss'] {
+  background: #4a3e1d;
+  color: #f7eed4;
+  border: 1px solid #7a6828;
+  border-radius: var(--cm-radius-sm);
+  padding: 2px 6px;
 }
 .manage .mempty {
   border: 1px dashed var(--cm-color-outline-variant);

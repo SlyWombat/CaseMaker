@@ -13,6 +13,7 @@ import {
   houseRemoveTool,
   houseReplaceItem,
   houseReplaceTool,
+  houseSyncCatalogue,
   houseTools,
   probeHouse,
   setHouseClientLoader,
@@ -63,6 +64,7 @@ const HEALTH = {
   hasCatalogue: false,
   feedRows: 0,
   catalogueSyncedAt: null,
+  lastSync: null,
   problems: [],
 };
 
@@ -141,6 +143,33 @@ describe('probeHouse', () => {
 
   it('is an error when the JSON is not a health report', async () => {
     stubFetch(() => ({ contentType: 'application/json', body: '{"hello":"world"}' }));
+    expect((await probeHouse({ base: BASE })).kind).toBe('error');
+  });
+
+  it('carries the last sync the service kept, and reads a service that has none (#328)', async () => {
+    // A fresh service, and one from before the field: both answer "present" with no last sync.
+    const { lastSync: _omitted, ...before } = HEALTH;
+    stubFetch(() => ({ contentType: 'application/json', body: JSON.stringify(before) }));
+    expect(await probeHouse({ base: BASE })).toEqual({ kind: 'present', health: HEALTH, base: BASE });
+
+    // After a sync, the counts and the notes — each note with its weight — come with the probe.
+    const lastSync = {
+      syncedAt: '2026-01-03T00:00:00.000Z',
+      source: 'C:\\Makera\\makera_library.db',
+      total: 129,
+      feedRows: 0,
+      notes: [
+        { kind: 'loss', text: 'it holds no feed rows, and the catalogue already has 1328' },
+        { kind: 'info', text: '2 cutters are in a category this build does not know' },
+      ],
+    };
+    stubFetch(() => ({ contentType: 'application/json', body: JSON.stringify({ ...HEALTH, lastSync }) }));
+    const probe = await probeHouse({ base: BASE });
+    expect(probe).toEqual({ kind: 'present', health: { ...HEALTH, lastSync }, base: BASE });
+
+    // A note without its kind is not one this build reads: the weight is the service's to say.
+    const bare = { ...lastSync, notes: ['a bare sentence'] };
+    stubFetch(() => ({ contentType: 'application/json', body: JSON.stringify({ ...HEALTH, lastSync: bare }) }));
     expect((await probeHouse({ base: BASE })).kind).toBe('error');
   });
 
@@ -288,6 +317,39 @@ describe('houseFeeds (#310)', () => {
       if (read.kind !== 'error') throw new Error('unreachable');
       expect(read.detail).toContain('feed catalogue');
     }
+  });
+});
+
+describe('houseSyncCatalogue (#328)', () => {
+  const REPORT = {
+    source: 'C:\\Makera\\makera_library.db',
+    syncedAt: '2026-01-03T00:00:00.000Z',
+    total: 129,
+    added: [],
+    removed: [],
+    changed: [],
+    unchanged: 129,
+    feedRows: 1328,
+    notes: [{ kind: 'info', text: '40 feed rows name no cutter: they are not served' }],
+  };
+
+  it('reads the report with each note carrying its weight', async () => {
+    const calls = stubFetch(() => ({ contentType: 'application/json', body: JSON.stringify(REPORT) }));
+    expect(await houseSyncCatalogue({ base: BASE })).toEqual({ kind: 'ok', report: REPORT });
+    expect(calls[0]!.url).toBe(`${BASE}${HOUSE_API_PATH}/catalogue/sync`);
+  });
+
+  it('refuses a note that is a bare string', async () => {
+    // The kind is the service's to state, not the client's to infer from the wording: a report
+    // whose notes are plain sentences is from a service this build does not read.
+    stubFetch(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify({ ...REPORT, notes: ['40 feed rows were dropped'] }),
+    }));
+    const sync = await houseSyncCatalogue({ base: BASE });
+    expect(sync.kind).toBe('error');
+    if (sync.kind !== 'error') throw new Error('unreachable');
+    expect(sync.detail).toContain('notes');
   });
 });
 

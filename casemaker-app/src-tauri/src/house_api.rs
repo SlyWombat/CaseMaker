@@ -89,12 +89,16 @@ fn status_for(e: &HouseError) -> StatusCode {
 /// The `If-Match` header, if the request carried one (#321).
 ///
 /// Trimmed: the header's grammar allows optional whitespace around the field value, and a validator
-/// with a stray space around it would compare unequal to the very `ETag` the client meant.
+/// with a stray space around it would compare unequal to the very `ETag` the client meant. An EMPTY
+/// value is no validator at all (#339): it names no version, so it is the 428 "you did not say"
+/// rather than the 412 "you said a version that is gone".
 fn if_match(headers: &HeaderMap) -> Option<String> {
     headers
         .get(header::IF_MATCH)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.trim().to_string())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 fn json_body(status: StatusCode, bytes: Vec<u8>) -> Response<Body> {
@@ -455,6 +459,10 @@ mod tests {
         // synced before the feed tier existed is `hasCatalogue: true, feedRows: 0` (#310).
         assert_eq!(body["feedRows"], serde_json::json!(0));
         assert_eq!(body["problems"], serde_json::json!([]));
+        // No sync yet, so nothing to say about one (#328): the key is there and it is null, which
+        // is what the client's `lastSync: nullable().default(null)` reads.
+        assert!(body["lastSync"].is_null(), "{body}");
+        assert!(body.get("lastSync").is_some(), "{body}");
     }
 
     #[tokio::test]
@@ -674,6 +682,16 @@ mod tests {
             body["error"].as_str().unwrap().contains("version"),
             "the refusal has to say what was missing: {body}"
         );
+        // An EMPTY header says nothing either (#339): it is the same 428, not a 412 about a version
+        // that was never named. Whitespace alone is empty too, since the value is trimmed.
+        for blank in ["", "   "] {
+            let res = app
+                .clone()
+                .oneshot(patch_json("/api/v1/tools/user:abc", Some(blank), &edited))
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::PRECONDITION_REQUIRED, "If-Match: {blank:?}");
+        }
         let res = app
             .clone()
             .oneshot(delete("/api/v1/tools/user:abc", None))
@@ -960,6 +978,14 @@ mod tests {
         assert_eq!(body["hasCatalogue"], serde_json::json!(true));
         assert_eq!(body["feedRows"], serde_json::json!(1));
         assert_eq!(body["problems"], serde_json::json!([]));
+        // And what that sync came to, served as-is (#328): the counts and the notes, not the diff
+        // lists — a client that connects later reads the same last sync this response carried.
+        assert_eq!(body["lastSync"]["total"], serde_json::json!(2), "{body}");
+        assert_eq!(body["lastSync"]["feedRows"], serde_json::json!(1), "{body}");
+        assert_eq!(body["lastSync"]["notes"], serde_json::json!([]), "{body}");
+        assert_eq!(body["lastSync"]["syncedAt"], report["syncedAt"], "{body}");
+        assert_eq!(body["lastSync"]["source"], report["source"], "{body}");
+        assert!(body["lastSync"].get("added").is_none(), "{body}");
 
         // The matrix is served as its own document, keyed on the vendor's own ids and material
         // words — the client's map translates; the service does not.

@@ -134,7 +134,9 @@ export function inventoryEntryFor(item: InventoryItem): ToolLibraryEntry {
   return {
     key: inventoryKey(item.id),
     tool: item.tool,
-    provenance: item.origin ? 'your cutter, cloned from the catalogue' : 'your cutter, registered here',
+    // Registering and cloning are different acts (#311 decision 2): an owned row is a cutter in the
+    // drawer, and its definition is either the catalogue's or the one typed in — never a clone.
+    provenance: item.origin ? 'a cutter you own, registered from the catalogue' : 'a cutter you own, typed in here',
   };
 }
 

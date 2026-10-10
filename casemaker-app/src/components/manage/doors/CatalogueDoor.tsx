@@ -10,6 +10,11 @@
  * REGISTERING DOES NOT COPY THE ROW INTO `user:`. It creates an owned row whose definition is
  * Makera's, read-only, with `origin` naming the row it came from — #311 decision 2. A user who
  * wants to CHANGE the definition clones it, which is a different act and lives in the detail rail.
+ *
+ * THE PICK IS DROPPED WHEN THE CUTTER LANDS (#337). A row registered from here carries no code, so
+ * the service's one-code-one-item rule cannot catch a second click on the same pick; the only
+ * guard is that there is no pick left to click. The search stays — the next cutter is often the
+ * row beside the last one — and the new `inv:` row is highlighted in the list behind the frame.
  */
 
 import { useState } from 'react';
@@ -25,6 +30,7 @@ import {
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { mm } from '../display';
 import { useManageModeStore } from '@/store/manageModeStore';
+import { selectRegistered } from '../selection';
 import { InventoryFields } from './InventoryFields';
 
 export function CatalogueDoor() {
@@ -45,16 +51,20 @@ export function CatalogueDoor() {
   const qtyProblem = quantityProblem(quantity);
   const disabled = busy !== null;
 
-  function register(entry: ToolLibraryEntry) {
-    void registerItem(
-      itemFromEntry(entry, {
-        quantity: quantityOrOne(quantity),
-        code: null,
-        notes,
-        now: new Date().toISOString(),
-        health,
-      }),
-    );
+  async function register(entry: ToolLibraryEntry) {
+    const item = itemFromEntry(entry, {
+      quantity: quantityOrOne(quantity),
+      code: null,
+      notes,
+      now: new Date().toISOString(),
+      health,
+    });
+    if (await registerItem(item)) {
+      setPicked(null);
+      setQuantity('1');
+      setNotes('');
+      selectRegistered(item.id);
+    }
   }
 
   if (catalogue.length === 0) {
@@ -138,7 +148,7 @@ export function CatalogueDoor() {
               data-testid="manage-catalogue-register"
               disabled={qtyProblem !== null || disabled}
               title={qtyProblem ?? 'Register this cutter'}
-              onClick={() => register(pickedEntry)}
+              onClick={() => void register(pickedEntry)}
             >
               Add to inventory
             </button>

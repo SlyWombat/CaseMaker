@@ -96,17 +96,20 @@ export function parseBoxCode(value: string): BoxCode | null {
 /**
  * Whether a code the user typed names a code the inventory already holds.
  *
- * Case-insensitive, because a case difference is not something a printed code can mean — the user
- * retyping `c1-bit-flat-2-0` in lowercase is naming the same box, and letting that mint a second
- * item would break the one-code-one-cutter rule on the service. The stored value is never rewritten
- * by this: {@link itemFromEntry} keeps whatever was first scanned, symbology and all.
+ * EXACT, trimmed, and that is a choice (#311 review): the service's one-code-one-item rule compares
+ * the stored value byte for byte, so this has to answer the same question or the two disagree about
+ * whether a code is taken — a lowercase retype that matched here but not there would be offered as
+ * "one you have" and then refused as a second item, or the reverse. The label is the source of the
+ * code, and a scanner types it as printed; a case difference is a different code. The stored value
+ * is never rewritten by this: {@link itemFromEntry} keeps whatever was first scanned, symbology and
+ * all.
  */
 function ownerOfCode(value: string, items: readonly InventoryItem[]): InventoryItem | null {
-  const wanted = value.trim().toUpperCase();
+  const wanted = value.trim();
   if (wanted.length === 0) return null;
   for (const item of items) {
     for (const coded of item.codes) {
-      if (coded.value.trim().toUpperCase() === wanted) return item;
+      if (coded.value.trim() === wanted) return item;
     }
   }
   return null;
@@ -219,8 +222,12 @@ export function itemFromEntry(entry: ToolLibraryEntry, choice: EntryChoice): Inv
   };
 }
 
-/** The Type door's fields, as typed — every number a string, because a blank one is not a zero. */
-export interface CutterForm {
+/**
+ * The DEFINITION half of a typed-in cutter, as typed — every number a string, because a blank one
+ * is not a zero. Shared by the Type door and the Yours-row editor (#335): the two ask the same six
+ * questions of the same `Tool`, and a second form would be a second set of rules to drift.
+ */
+export interface CutterSpec {
   name: string;
   shape: ToolShape;
   /** Cutting diameter at the tip, mm. */
@@ -229,6 +236,10 @@ export interface CutterForm {
   handleDiameter: string;
   fluteLength: string;
   shoulderLength: string;
+}
+
+/** The Type door's fields: the definition, plus the two the inventory row needs. */
+export interface CutterForm extends CutterSpec {
   /** Blank means one; see {@link quantityOrOne}. */
   quantity: string;
   notes: string;
@@ -236,12 +247,63 @@ export interface CutterForm {
 
 /** A form field, in mm, or null — NEVER 0. A blank field is "not stated", and 0 mm is a cutter
  *  nobody makes; writing 0 would put a real number in a `Tool` where the truth is "unknown", and
- *  the cut planner treats the two differently (a 0 shank would collide with everything). */
+ *  the cut planner treats the two differently (a 0 shank would collide with everything). A typed
+ *  0 or a negative is REFUSED before this is reached ({@link lengthProblem}); the null here is the
+ *  last line, not the rule. */
 function lengthOrNull(value: string): number | null {
   const t = value.trim();
   if (t.length === 0) return null;
   const n = Number(t);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Why a length field cannot be sent, or null. Blank is fine — it is the honest answer for a
+ * measurement nobody took — but a typed `0` or `-3` is a typo, not an unknown, and turning it into
+ * null silently would read a slip of the finger as "not stated" (#334). The same shape of rule as
+ * {@link quantityProblem}, for the same reason: the form disables the submit with the sentence.
+ */
+export function lengthProblem(value: string): string | null {
+  const t = value.trim();
+  if (t.length === 0) return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n > 0
+    ? null
+    : 'a length is millimetres above 0 — leave the box blank when it is not known';
+}
+
+/** The length fields of a spec, with the label each one is refused under. */
+const LENGTH_FIELDS: ReadonlyArray<{ key: keyof CutterSpec; label: string }> = [
+  { key: 'tipDiameter', label: 'tip ⌀' },
+  { key: 'handleDiameter', label: 'shank ⌀' },
+  { key: 'fluteLength', label: 'flute' },
+  { key: 'shoulderLength', label: 'shoulder' },
+];
+
+/**
+ * Why a definition cannot be sent yet, or null: it needs a name, and every length it states has to
+ * be one. First problem wins, named by its field, so the tooltip says which box to fix.
+ */
+export function specProblem(spec: CutterSpec): string | null {
+  if (spec.name.trim().length === 0) return 'a cutter needs a name';
+  for (const f of LENGTH_FIELDS) {
+    const why = lengthProblem(spec[f.key]);
+    if (why !== null) return `${f.label}: ${why}`;
+  }
+  return null;
+}
+
+/** A `Tool` as the form shows it: numbers as text, a null as the blank it came from. */
+export function specOfTool(tool: Tool): CutterSpec {
+  const text = (n: number | null) => (n === null ? '' : String(n));
+  return {
+    name: tool.name,
+    shape: tool.shape,
+    tipDiameter: text(tool.tipDiameter),
+    handleDiameter: text(tool.handleDiameter),
+    fluteLength: text(tool.fluteLength),
+    shoulderLength: text(tool.shoulderLength),
+  };
 }
 
 /**
@@ -261,39 +323,67 @@ const SHAPE_TYPE_TEXT: Record<ToolShape, string> = {
   unknown: '',
 };
 
+/** A `Tool` with nothing stated: what a typed-in cutter starts from. */
+const BLANK_TOOL: Tool = {
+  number: null,
+  id: null,
+  name: '',
+  typeText: '',
+  shape: 'unknown',
+  handleDiameter: null,
+  tipDiameter: null,
+  diameter: null,
+  cornerRadius: null,
+  angle: null,
+  halfAngle: null,
+  fluteLength: null,
+  shoulderLength: null,
+  stickout: null,
+  centreCutting: null,
+};
+
+/**
+ * The spec's six fields written over `base`, with the two derived fields that follow from them.
+ *
+ * Everything the spec does not ask about — stick-out, centre-cutting, the angles — is `base`'s,
+ * untouched: the Yours-row editor (#335) must not blank a measured stick-out because its form has no
+ * box for one. The derived fields are the ones the physical cutter answers for itself: a flat end
+ * mill's `diameter` IS its cutting diameter and its corner radius is 0, where for every other shape
+ * `diameter` is the SHANK (Makera's own convention, `Tool.diameter`) — and the shank alone (#334):
+ * a ball nose typed with a tip and no shank has a `diameter` of null, not the tip, because the tip
+ * is a different measurement and a shank the user never typed is a guess the sweep would then read
+ * as a fact. `typeText` is rewritten in the vocabulary {@link shapeFromType} reads back, so the
+ * shape survives a round trip through a header.
+ */
+export function toolFromSpec(spec: CutterSpec, base: Tool): Tool {
+  const tip = lengthOrNull(spec.tipDiameter);
+  const shank = lengthOrNull(spec.handleDiameter);
+  const shape = spec.shape;
+  return {
+    ...base,
+    name: spec.name.trim(),
+    typeText: SHAPE_TYPE_TEXT[shape],
+    shape,
+    handleDiameter: shank,
+    tipDiameter: tip,
+    diameter: shape === 'flat' ? (tip ?? shank) : shank,
+    cornerRadius: shape === 'flat' ? 0 : null,
+    fluteLength: lengthOrNull(spec.fluteLength),
+    shoulderLength: lengthOrNull(spec.shoulderLength),
+  };
+}
+
 /**
  * A cutter the user typed in (#309 Type door).
  *
  * Nothing is invented: every field the form did not state is `null`, `id` and `number` are null
  * because this cutter came from no Makera table, and `origin` is null because it came from no
- * catalogue row. The two derived fields are the ones the physical cutter answers for itself: a flat
- * end mill's `diameter` IS its cutting diameter and its corner radius is 0, where for every other
- * shape `diameter` is the shank (Makera's own convention, `Tool.diameter`).
+ * catalogue row. The derived fields are {@link toolFromSpec}'s.
  */
 export function itemFromForm(form: CutterForm, now: string): InventoryItem {
-  const tip = lengthOrNull(form.tipDiameter);
-  const shank = lengthOrNull(form.handleDiameter);
-  const shape = form.shape;
-  const tool: Tool = {
-    number: null,
-    id: null,
-    name: form.name.trim(),
-    typeText: SHAPE_TYPE_TEXT[shape],
-    shape,
-    handleDiameter: shank,
-    tipDiameter: tip,
-    diameter: shape === 'flat' ? (tip ?? shank) : (shank ?? tip),
-    cornerRadius: shape === 'flat' ? 0 : null,
-    angle: null,
-    halfAngle: null,
-    fluteLength: lengthOrNull(form.fluteLength),
-    shoulderLength: lengthOrNull(form.shoulderLength),
-    stickout: null,
-    centreCutting: null,
-  };
   return {
     id: newId(),
-    tool,
+    tool: toolFromSpec(form, BLANK_TOOL),
     origin: null,
     quantity: quantityOrOne(form.quantity),
     codes: [],

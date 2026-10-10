@@ -33,7 +33,9 @@ import {
   type HouseProbe,
   type HouseTools,
   type InventoryItem,
+  type SyncNote,
 } from '@/platform/houseClient';
+import { formatStamp } from '@/components/manage/display';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -44,6 +46,7 @@ const HEALTH: HouseHealth = {
   feedRows: 0,
   catalogueSyncedAt: '2026-10-08T09:30:00.000Z',
   problems: [],
+  lastSync: null,
 };
 
 /** One of the user's own definitions — the Yours tier, by key namespace. */
@@ -95,8 +98,9 @@ function fakeClient(opts: { probe: HouseProbe; call?: HouseClient['call'] }): Ho
     tools: async (): Promise<HouseTools> => ({ kind: 'ok', etag: '"e1"', entries: [USER, CAT] }),
     feeds: async () => ({ kind: 'ok', etag: '"f1"', rows: [] }),
     inventory: async () => ({ kind: 'ok', etag: '"i1"', items: [ITEM] }),
-    call: async (method, path, body): Promise<HouseCall> =>
-      opts.call ? opts.call(method, path, body) : { kind: 'ok', text: '' },
+    // All four arguments through: the fourth carries the guarded writes' `ifMatch` (#321, #335).
+    call: async (method, path, body, reqOpts): Promise<HouseCall> =>
+      opts.call ? opts.call(method, path, body, reqOpts) : { kind: 'ok', text: '' },
   };
 }
 
@@ -246,7 +250,130 @@ describe('#311 — the detail rail', () => {
     expect(rail.textContent).toContain('C1-BIT-FLAT-2-0');
     expect((screen.getByTestId('manage-item-quantity') as HTMLInputElement).value).toBe('2');
     // The catalogue row it was registered from is named by its own id, not by the key.
+    expect(rail.textContent).toContain('catalogue id');
     expect(rail.textContent).toContain('112111313812');
+  });
+
+  it('a built-in that carries Makera’s g_ID labels it as Makera’s, not as a catalogue id', () => {
+    // `OriginSchema` calls the catalogue's id `cutterId`; `tool.id` is the vendor's own g_ID, and
+    // the two are different things even when the digits agree (#311 review).
+    const vendor = TOOL_LIBRARY.find((e) => e.tool.id !== null)!;
+    render(<ManageMode />);
+    fireEvent.click(screen.getByTestId(`manage-tools-row-${vendor.key}`));
+    const rail = screen.getByTestId('manage-detail');
+    expect(rail.textContent).toContain('Makera id');
+    expect(rail.textContent).not.toContain('catalogue id');
+    expect(screen.getByTestId('manage-detail-makera-id').textContent).toBe(vendor.tool.id);
+  });
+
+  // #340 — a `<tr onClick>` is reachable by nothing but a mouse. The name cell is a button, so the
+  // row is in the tab order and Enter means what the click means.
+  it('a row is reachable by keyboard: its name is a button in the tab order, and Enter selects it', () => {
+    render(<ManageMode />);
+    const picks = screen.getAllByTestId(/^manage-tools-pick-/) as HTMLButtonElement[];
+    const second = picks[1]!;
+    expect(second.tagName).toBe('BUTTON');
+    expect(second.getAttribute('data-testid')).toBe(`manage-tools-pick-${USER.key}`);
+
+    // Tab order is document order over the focusable elements; the second row's button is after
+    // the first's and before the third's, and the focus lands.
+    const tabbable = Array.from(
+      document.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select, [tabindex]:not([tabindex="-1"])'),
+    );
+    expect(tabbable.indexOf(second)).toBeGreaterThan(tabbable.indexOf(picks[0]!));
+    expect(tabbable.indexOf(second)).toBeLessThan(tabbable.indexOf(picks[2]!));
+    second.focus();
+    expect(document.activeElement).toBe(second);
+
+    // Enter on a focused button IS a click in every browser; jsdom does not synthesise the
+    // activation, so it is fired as the event it becomes.
+    fireEvent.keyDown(second, { key: 'Enter' });
+    fireEvent.click(second);
+    expect(useManageModeStore.getState().selectedKey).toBe(USER.key);
+    expect(screen.getByTestId('manage-detail').textContent).toContain(USER.tool.name);
+    expect(second.getAttribute('aria-current')).toBe('true');
+  });
+});
+
+// #335 — "Clone to change" used to end at the clone: `updateTool` had no caller and a `user:` row was
+// read-only but for Remove. The Yours rail now carries the Type door's six fields over the user's own
+// tool, and Save replaces it in place under the tool list's validator (#321).
+describe('#335 — a Yours row is the one that can be changed', () => {
+  let calls: Array<{ method: string; path: string; body: unknown; ifMatch: string | null | undefined }>;
+
+  beforeEach(async () => {
+    calls = [];
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        call: async (method, path, body, opts) => {
+          calls.push({ method, path, body, ifMatch: opts?.ifMatch });
+          return { kind: 'ok', text: '' };
+        },
+      }),
+    );
+    await useToolRegistryStore.getState().refresh();
+    useManageModeStore.getState().openManage();
+  });
+
+  it('selecting a user: row shows the editor seeded from the row, with nothing to save yet', () => {
+    render(<ManageMode />);
+    fireEvent.click(screen.getByTestId(`manage-tools-row-${USER.key}`));
+    expect(q('manage-definition-editor')).not.toBeNull();
+    expect((screen.getByTestId('manage-def-name') as HTMLInputElement).value).toBe('2 mm flat end');
+    expect((screen.getByTestId('manage-def-tip') as HTMLInputElement).value).toBe('2');
+    // A null is a blank box, never a 0.
+    expect((screen.getByTestId('manage-def-shoulder') as HTMLInputElement).value).toBe('');
+    expect((screen.getByTestId('manage-def-save') as HTMLButtonElement).disabled).toBe(true);
+    // What the form has no box for is still drawn, read-only, as the unknown it is.
+    expect(screen.getByTestId('manage-detail').textContent).toContain('unset; the machine probes the tip');
+  });
+
+  it('Save PATCHes the key with the tool list’s validator and the edited fields, the rest untouched', async () => {
+    render(<ManageMode />);
+    fireEvent.click(screen.getByTestId(`manage-tools-row-${USER.key}`));
+    fireEvent.change(screen.getByTestId('manage-def-name'), { target: { value: '2 mm flat end — measured' } });
+    fireEvent.change(screen.getByTestId('manage-def-shoulder'), { target: { value: '14' } });
+    const save = screen.getByTestId('manage-def-save') as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.method).toBe('PATCH');
+    expect(calls[0]!.path).toBe('/tools/user%3A1a2b3c4d5e');
+    // The guard (#321): the version this window last read of the TOOL list, not the inventory's.
+    expect(calls[0]!.ifMatch).toBe('"e1"');
+    const sent = calls[0]!.body as ToolLibraryEntry;
+    expect(sent.key).toBe(USER.key);
+    expect(sent.tool.name).toBe('2 mm flat end — measured');
+    expect(sent.tool.shoulderLength).toBe(14);
+    // Carried over, not blanked: the editor has no box for these.
+    expect(sent.tool.fluteLength).toBe(12);
+    expect(sent.tool.stickout).toBeNull();
+    expect(sent.tool.id).toBeNull();
+  });
+
+  it('refuses a typed 0 with the Type door’s own sentence, naming the box', () => {
+    render(<ManageMode />);
+    fireEvent.click(screen.getByTestId(`manage-tools-row-${USER.key}`));
+    fireEvent.change(screen.getByTestId('manage-def-tip'), { target: { value: '0' } });
+    const save = screen.getByTestId('manage-def-save') as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(save.title).toContain('tip ⌀');
+    expect(save.title).toContain('above 0');
+  });
+
+  it('a catalogue row, an owned row and a built-in have no editor', () => {
+    render(<ManageMode />);
+    for (const key of [CAT.key, 'inv:9f8e7d6c5b', TOOL_LIBRARY[0]!.key]) {
+      fireEvent.click(screen.getByTestId(`manage-tools-row-${key}`));
+      expect(q('manage-definition-editor'), key).toBeNull();
+      expect(q('manage-def-save'), key).toBeNull();
+    }
+    // The read-only table is what a catalogue row gets, with the clone as its only write.
+    fireEvent.click(screen.getByTestId(`manage-tools-row-${CAT.key}`));
+    expect(screen.getByTestId('manage-detail').textContent).toContain('shape');
+    expect(q('manage-clone-here')).not.toBeNull();
   });
 });
 
@@ -360,12 +487,15 @@ describe('#311 — cloning a catalogue row', () => {
 // #328 — the sync's own notes were stored and never shown, so a sync that replaced an unreadable
 // catalogue file, dropped feed rows whose cells Studio left empty, or emptied the feed matrix looked
 // exactly like a clean one. The fixture below is a hand-built report in the SERVICE's shape; the
-// strings are the kind of sentence `SyncReportSchema.notes` carries, not vendor data.
+// strings are the kind of sentence `SyncReportSchema.notes` carries, not vendor data. Each note
+// carries its weight (decision 1), and the service keeps the last report on `/health` (decision 2).
 describe('#328 — a sync’s notes reach the screen', () => {
-  const REPORT = (notes: string[]): string =>
+  const SYNCED_AT = '2026-10-09T14:02:57.269Z';
+  const SOURCE = 'C:\\Users\\Someone\\AppData\\Roaming\\MakeraStudio\\makera_library.db';
+  const REPORT = (notes: SyncNote[]): string =>
     JSON.stringify({
-      source: 'C:\\Users\\Someone\\AppData\\Roaming\\MakeraStudio\\makera_library.db',
-      syncedAt: '2026-10-09T14:02:57.269Z',
+      source: SOURCE,
+      syncedAt: SYNCED_AT,
       total: 129,
       added: [],
       removed: [],
@@ -375,11 +505,16 @@ describe('#328 — a sync’s notes reach the screen', () => {
       notes,
     });
 
+  const NOTES: SyncNote[] = [
+    { kind: 'loss', text: 'makera_library.db could not be read: the catalogue file was replaced with an empty one' },
+    { kind: 'info', text: '40 feed rows were dropped: their numbers were empty' },
+  ];
+
   /** A service whose sync answers with these notes, wired BEFORE the refresh that reads it. */
-  async function goOnlineWithSync(notes: string[]): Promise<void> {
+  async function goOnlineWithSync(notes: SyncNote[], health: HouseHealth = HEALTH): Promise<void> {
     setHouseClientLoader(async () =>
       fakeClient({
-        probe: { kind: 'present', health: HEALTH, base: '' },
+        probe: { kind: 'present', health, base: '' },
         call: async (method, path): Promise<HouseCall> =>
           method === 'POST' && path === '/catalogue/sync' ? { kind: 'ok', text: REPORT(notes) } : { kind: 'ok', text: '' },
       }),
@@ -387,12 +522,8 @@ describe('#328 — a sync’s notes reach the screen', () => {
     await useToolRegistryStore.getState().refresh();
   }
 
-  it('lists every note under the counts, and keeps them when the notice is dismissed', async () => {
-    const notes = [
-      'makera_library.db could not be read: the catalogue file was replaced with an empty one',
-      '40 feed rows were dropped: their numbers were empty',
-    ];
-    await goOnlineWithSync(notes);
+  it('lists every note under the counts, each with its weight, and keeps them when the notice is dismissed', async () => {
+    await goOnlineWithSync(NOTES);
     useManageModeStore.getState().openManage();
     render(<ManageMode />);
 
@@ -405,6 +536,12 @@ describe('#328 — a sync’s notes reach the screen', () => {
     expect(screen.getByTestId('manage-sync-notes').getAttribute('data-count')).toBe('2');
     expect(screen.getByTestId('manage-sync-note-0').textContent).toContain('could not be read');
     expect(screen.getByTestId('manage-sync-note-1').textContent).toContain('40 feed rows were dropped');
+    // A loss is marked as one, so the stylesheet can draw it in the warning colour; information is not.
+    expect(screen.getByTestId('manage-sync-note-0').getAttribute('data-kind')).toBe('loss');
+    expect(screen.getByTestId('manage-sync-note-1').getAttribute('data-kind')).toBe('info');
+    // This session's own sync: not dated as something read back from the service.
+    expect(screen.getByTestId('manage-sync-notes').getAttribute('data-from')).toBe('session');
+    expect(screen.getByTestId('manage-sync-notes').textContent).not.toContain('(from ');
     // The counts sentence is the notice, and it never carried these.
     expect(screen.getByTestId('manage-notice').textContent).toContain('129 cutters');
 
@@ -423,6 +560,30 @@ describe('#328 — a sync’s notes reach the screen', () => {
     fireEvent.click(screen.getByTestId('manage-sync'));
     await waitFor(() => expect(q('manage-notice')).not.toBeNull());
     expect(screen.getByTestId('manage-notice').textContent).toContain('nothing changed');
+    expect(q('manage-sync-notes')).toBeNull();
+  });
+
+  it('draws the service’s own record of the last sync on first render, dated, before any click', async () => {
+    // Decision 2: the house keeps the last report, so a restart does not forget what the last sync
+    // did. The notes are on screen before anything is clicked, and the head line says when.
+    const earlier = '2026-10-08T09:30:00.000Z';
+    await goOnlineWithSync([], {
+      ...HEALTH,
+      lastSync: { syncedAt: earlier, source: SOURCE, total: 129, feedRows: 0, notes: [NOTES[0]!] },
+    });
+    useManageModeStore.getState().openManage();
+    render(<ManageMode />);
+
+    const notes = screen.getByTestId('manage-sync-notes');
+    expect(notes.getAttribute('data-from')).toBe('health');
+    expect(notes.getAttribute('data-count')).toBe('1');
+    expect(notes.textContent).toContain(`The last sync (${formatStamp(earlier)}) reported:`);
+    expect(screen.getByTestId('manage-sync-note-0').getAttribute('data-kind')).toBe('loss');
+    expect(q('manage-notice')).toBeNull();
+
+    // A sync clicked here replaces it, and the record is this session's again.
+    fireEvent.click(screen.getByTestId('manage-sync'));
+    await waitFor(() => expect(q('manage-notice')).not.toBeNull());
     expect(q('manage-sync-notes')).toBeNull();
   });
 });
@@ -565,6 +726,118 @@ describe('#309 — the register frame and its three doors', () => {
     expect(sent.origin?.id).toBe('112111313812');
   });
 
+  // #333 — symbology is the only evidence a label was actually scanned (`houseClient.ts`), and it
+  // used to be door state: one camera hit, and every code typed after it was recorded as a QR scan.
+  it('a code typed after a camera decode is recorded as typed, not as a scan (#333)', async () => {
+    // The camera seam, stood in for: jsdom has no `BarcodeDetector`, no camera and no `play()`.
+    // The detector answers the bench cutter's own box on the first frame.
+    class FakeDetector {
+      async detect() {
+        return [{ rawValue: 'C1-BIT-BALL-NOSE-1-4' }];
+      }
+    }
+    const w = window as unknown as { BarcodeDetector?: unknown };
+    const hadMedia = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+    const play = HTMLMediaElement.prototype.play;
+    w.BarcodeDetector = FakeDetector;
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: async () => ({ getTracks: () => [] }) },
+    });
+    HTMLMediaElement.prototype.play = () => Promise.resolve();
+    try {
+      openRegister();
+      fireEvent.click(screen.getByTestId('manage-scan-camera'));
+      // The decode lands in the field, and the camera is released by it.
+      await waitFor(() =>
+        expect((screen.getByTestId('manage-scan-code') as HTMLInputElement).value).toBe('C1-BIT-BALL-NOSE-1-4'),
+      );
+      expect(q('manage-scan-video')).toBeNull();
+
+      // Now a code TYPED, after that hit.
+      scan('C1-BIT-FLAT-2-12');
+      fireEvent.click(screen.getByTestId(`manage-scan-candidate-${CAT.key}`));
+      fireEvent.click(screen.getByTestId('manage-scan-register'));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      const sent = calls[0]!.body as InventoryItem;
+      expect(sent.codes).toEqual([{ symbology: 'text', value: 'C1-BIT-FLAT-2-12' }]);
+    } finally {
+      delete w.BarcodeDetector;
+      if (hadMedia) Object.defineProperty(navigator, 'mediaDevices', hadMedia);
+      else delete (navigator as unknown as { mediaDevices?: unknown }).mediaDevices;
+      HTMLMediaElement.prototype.play = play;
+    }
+  });
+
+  // #337 — a door that stayed armed after a registration registered the same cutter again on a
+  // second click, and a Catalogue or Type registration carries no code for the service to catch
+  // it by. The doors reset when the cutter lands, and the list points at the new row.
+  it('the Catalogue door drops its pick when the cutter lands, and points the list at the new row (#337)', async () => {
+    openRegister('catalogue');
+    fireEvent.click(screen.getByTestId(`manage-catalogue-row-${CAT.key}`));
+    fireEvent.change(screen.getByTestId('manage-catalogue-quantity'), { target: { value: '3' } });
+    fireEvent.click(screen.getByTestId('manage-catalogue-register'));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    const sent = calls[0]!.body as InventoryItem;
+
+    // The frame stays up — the next box is in the other hand — but nothing is picked, so there is
+    // no button to click twice.
+    await waitFor(() => expect(q('manage-catalogue-register')).toBeNull());
+    expect(q('manage-register')).not.toBeNull();
+    expect((screen.getByTestId(`manage-catalogue-row-${CAT.key}`) as HTMLInputElement).checked).toBe(false);
+    // The new row is the selection behind the frame; closing the frame lands on it.
+    expect(useManageModeStore.getState().selectedKey).toBe(`inv:${sent.id}`);
+    expect(calls.filter((c) => c.method === 'POST' && c.path === '/inventory')).toHaveLength(1);
+  });
+
+  it('the Scan door empties its field when the cutter lands, and Enter on nothing sends nothing', async () => {
+    openRegister();
+    scan('C1-BIT-FLAT-2-12');
+    fireEvent.click(screen.getByTestId(`manage-scan-candidate-${CAT.key}`));
+    fireEvent.click(screen.getByTestId('manage-scan-register'));
+    await waitFor(() => expect(calls).toHaveLength(1));
+
+    const field = screen.getByTestId('manage-scan-code') as HTMLInputElement;
+    await waitFor(() => expect(field.value).toBe(''));
+    expect(q('manage-scan-reading')).toBeNull();
+    expect(q('manage-scan-register')).toBeNull();
+    // The caret is back where the scanner types, once the field is enabled again.
+    await waitFor(() => expect(document.activeElement).toBe(field));
+
+    // A second Enter, on an empty field: not a code, so nothing is read and nothing is sent.
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(q('manage-scan-unknown')).toBeNull();
+    expect(q('manage-scan-reading')).toBeNull();
+    expect(calls.filter((c) => c.method === 'POST' && c.path === '/inventory')).toHaveLength(1);
+  });
+
+  it('the Type door empties when the cutter lands, so the button is back to refusing a nameless cutter', async () => {
+    openRegister('type');
+    fireEvent.change(screen.getByTestId('manage-type-name'), { target: { value: 'drawer 3 ball' } });
+    fireEvent.change(screen.getByTestId('manage-type-tip'), { target: { value: '1' } });
+    fireEvent.click(screen.getByTestId('manage-type-register'));
+    await waitFor(() => expect(calls).toHaveLength(1));
+
+    await waitFor(() => expect((screen.getByTestId('manage-type-name') as HTMLInputElement).value).toBe(''));
+    expect((screen.getByTestId('manage-type-tip') as HTMLInputElement).value).toBe('');
+    expect((screen.getByTestId('manage-type-register') as HTMLButtonElement).disabled).toBe(true);
+    expect(useManageModeStore.getState().selectedKey).toBe(`inv:${(calls[0]!.body as InventoryItem).id}`);
+  });
+
+  // #334 — a typed 0 or negative is a typo, not an unknown, and it used to become null silently.
+  it('the Type door refuses a typed 0 or a negative length with its sentence, rather than nulling it', () => {
+    openRegister('type');
+    fireEvent.change(screen.getByTestId('manage-type-name'), { target: { value: 'drawer 3 ball' } });
+    const submit = screen.getByTestId('manage-type-register') as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    fireEvent.change(screen.getByTestId('manage-type-flute'), { target: { value: '-3' } });
+    expect(submit.disabled).toBe(true);
+    expect(submit.title).toContain('flute');
+    expect(submit.title).toContain('above 0');
+    fireEvent.change(screen.getByTestId('manage-type-flute'), { target: { value: '' } });
+    expect(submit.disabled).toBe(false);
+  });
+
   it('the Type door refuses a nameless cutter and writes nulls for the blanks', async () => {
     openRegister('type');
     const submit = screen.getByTestId('manage-type-register') as HTMLButtonElement;
@@ -585,6 +858,8 @@ describe('#309 — the register frame and its three doors', () => {
     expect(sent.tool.handleDiameter).toBeNull();
     expect(sent.tool.fluteLength).toBeNull();
     expect(sent.tool.shoulderLength).toBeNull();
+    // And a ball nose's `diameter` is its shank, which was not typed — not its tip (#334).
+    expect(sent.tool.diameter).toBeNull();
     // No Makera row and no catalogue behind it.
     expect(sent.tool.id).toBeNull();
     expect(sent.tool.number).toBeNull();

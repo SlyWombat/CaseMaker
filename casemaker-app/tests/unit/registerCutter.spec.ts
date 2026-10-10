@@ -10,10 +10,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   itemFromEntry,
   itemFromForm,
+  lengthProblem,
   parseBoxCode,
   quantityOrOne,
   quantityProblem,
   resolveCode,
+  specOfTool,
+  specProblem,
+  toolFromSpec,
 } from '@/engine/cnc/registerCutter';
 import type { InventoryItem } from '@/platform/houseClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -117,9 +121,13 @@ describe('resolveCode — the scan door’s three outcomes', () => {
     expect(got).toEqual({ kind: 'owned', item });
   });
 
-  it('matches a stored code case-insensitively — the same box, so the same item', () => {
+  it('matches a stored code exactly, which is the service’s own duplicate rule (#311 review)', () => {
+    // The service compares codes byte for byte, so a lowercase retype that matched here would be
+    // offered as "one you have" and then registered as a second item there. The label is the
+    // source: a scanner types it as printed, and whitespace is the one thing a scanner adds.
     const item = ownedItem();
-    expect(resolveCode('c1-bit-ball-nose-1-4', [item], catalogue)).toEqual({ kind: 'owned', item });
+    expect(resolveCode(' C1-BIT-BALL-NOSE-1-4 ', [item], catalogue)).toEqual({ kind: 'owned', item });
+    expect(resolveCode('c1-bit-ball-nose-1-4', [item], catalogue).kind).not.toBe('owned');
   });
 
   it('offers the rows that fit the reading when nothing owns the code', () => {
@@ -274,6 +282,21 @@ describe('itemFromForm — the Type door', () => {
     expect(item.tool.cornerRadius).toBeNull();
   });
 
+  // #334 — `diameter` is the SHANK for every non-flat shape (`Tool.diameter`), so a ball nose typed
+  // with a tip and no shank must not be given the tip as a shank: that is a claim the user never
+  // made, and the sweep's holder reasoning (#314) reads it as one.
+  it('a ball nose with a tip and no shank has no diameter — the tip is not a shank (#334)', () => {
+    const item = itemFromForm({ ...blank, shape: 'ball', tipDiameter: '1' }, NOW);
+    expect(item.tool.diameter).toBeNull();
+    expect(item.tool.tipDiameter).toBe(1);
+    expect(item.tool.handleDiameter).toBeNull();
+  });
+
+  it('a flat end mill with a tip alone has that tip as its diameter', () => {
+    const item = itemFromForm({ ...blank, shape: 'flat', tipDiameter: '1' }, NOW);
+    expect(item.tool.diameter).toBe(1);
+  });
+
   it('records the shape in the vocabulary the parser reads back', () => {
     for (const shape of ['flat', 'ball', 'tapered-ball', 'engraving', 'chamfer', 'drill', 'thread', 'bull'] as const) {
       const item = itemFromForm({ ...blank, shape }, NOW);
@@ -283,6 +306,64 @@ describe('itemFromForm — the Type door', () => {
 
   it('a blank quantity is one; it never writes a zero', () => {
     expect(itemFromForm(blank, NOW).quantity).toBe(1);
+  });
+});
+
+// #334 — a typed 0 or negative is a typo, not an unknown. It used to become null silently, which
+// read a slip of the finger as "not stated"; now the form is refused with a sentence, the way a bad
+// quantity is, and only a blank box is the honest null.
+describe('lengthProblem / specProblem — a typed length that cannot be one', () => {
+  const spec = {
+    name: 'My 2 mm flat',
+    shape: 'flat' as const,
+    tipDiameter: '',
+    handleDiameter: '',
+    fluteLength: '',
+    shoulderLength: '',
+  };
+
+  it('is silent about a blank and about a length above 0', () => {
+    expect(lengthProblem('')).toBeNull();
+    expect(lengthProblem('  ')).toBeNull();
+    expect(lengthProblem('0.5')).toBeNull();
+    expect(specProblem({ ...spec, fluteLength: '12' })).toBeNull();
+  });
+
+  it('refuses a -3 flute with a sentence naming the box, rather than nulling it', () => {
+    expect(lengthProblem('-3')).toContain('above 0');
+    expect(lengthProblem('0')).toContain('above 0');
+    expect(lengthProblem('abc')).not.toBeNull();
+    const why = specProblem({ ...spec, fluteLength: '-3' });
+    expect(why).not.toBeNull();
+    expect(why).toContain('flute');
+    expect(why).toContain('above 0');
+  });
+
+  it('a nameless cutter is refused first', () => {
+    expect(specProblem({ ...spec, name: '  ', tipDiameter: '-1' })).toBe('a cutter needs a name');
+  });
+});
+
+// #335 — the Yours-row editor writes the same six fields over an EXISTING tool, and what it has no
+// box for stays what it was.
+describe('toolFromSpec / specOfTool — the editor’s round trip', () => {
+  it('keeps the measurements the form has no box for', () => {
+    const base = { ...catalogueRow({}).tool, stickout: 22, centreCutting: true, angle: 30 };
+    const next = toolFromSpec({ ...specOfTool(base), shoulderLength: '14' }, base);
+    expect(next.shoulderLength).toBe(14);
+    expect(next.stickout).toBe(22);
+    expect(next.centreCutting).toBe(true);
+    expect(next.angle).toBe(30);
+    // And `diameter` follows the rule, not the base: a ball nose's is the shank.
+    expect(next.diameter).toBe(3.175);
+  });
+
+  it('shows a null as a blank box and reads a blank box back as null', () => {
+    const base = { ...catalogueRow({}).tool, shoulderLength: null };
+    const spec = specOfTool(base);
+    expect(spec.shoulderLength).toBe('');
+    expect(spec.tipDiameter).toBe('1');
+    expect(toolFromSpec(spec, base)).toEqual(base);
   });
 });
 

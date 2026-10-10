@@ -86,6 +86,34 @@ export const HOUSE_SCHEMA_VERSION = 1;
  */
 export const DEFAULT_TIMEOUT_MS = 2000;
 
+/**
+ * One sentence about a sync that still succeeded, and its weight (#328). `loss` is something the
+ * user had that is gone — an emptied feed matrix, a replaced catalogue file; `info` is what the sync
+ * did about a row it could not use. The kind travels with the note so the panel never has to read
+ * the English to decide what to colour. A bare string is refused: the service always sends the kind.
+ */
+export const SyncNoteSchema = z.object({
+  kind: z.enum(['info', 'loss']),
+  text: z.string(),
+});
+
+export type SyncNote = z.infer<typeof SyncNoteSchema>;
+
+/**
+ * What the last sync came to, as `/health` carries it (#328): the counts and the notes, kept on the
+ * service so the desktop and a LAN browser read the same last sync after a restart. Not the
+ * added/removed/changed lists — those are a diff against a catalogue that no longer exists.
+ */
+export const SyncSummarySchema = z.object({
+  syncedAt: z.string().nullable().default(null),
+  source: z.string(),
+  total: z.number().int().nonnegative(),
+  feedRows: z.number().int().nonnegative().default(0),
+  notes: z.array(SyncNoteSchema).default([]),
+});
+
+export type SyncSummary = z.infer<typeof SyncSummarySchema>;
+
 /** What the service says about itself (`GET /api/v1/health`). */
 const HouseHealthSchema = z.object({
   ok: z.boolean(),
@@ -100,6 +128,11 @@ const HouseHealthSchema = z.object({
    */
   feedRows: z.number().int().nonnegative().default(0),
   catalogueSyncedAt: z.string().nullable(),
+  /**
+   * What the last sync came to (#328). Defaulted for the same reason `feedRows` is: a service from
+   * before the field answers "present" with no last sync, which is also what a fresh one says.
+   */
+  lastSync: SyncSummarySchema.nullable().default(null),
   /**
    * One sentence per document the service could not read. Non-empty means it will refuse writes —
    * worth showing to the user rather than swallowing, and worth not treating as "no tools".
@@ -259,7 +292,8 @@ export type HouseMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 /**
  * What one catalogue sync found (#308). `changed`/`added`/`removed` are KEYS, so the panel can name
  * what moved; `feedRows` is a count rather than a diff, because a feed row has no identity beyond its
- * (cutter, material) pair; `notes` carries what is worth saying about a sync that still succeeded.
+ * (cutter, material) pair; `notes` carries what is worth saying about a sync that still succeeded,
+ * each with its weight ({@link SyncNoteSchema}).
  */
 export const SyncReportSchema = z.object({
   /** The vendor database this read, so a user with two installs can see which one it was. */
@@ -271,7 +305,7 @@ export const SyncReportSchema = z.object({
   changed: z.array(z.string()).default([]),
   unchanged: z.number().int().nonnegative(),
   feedRows: z.number().int().nonnegative().default(0),
-  notes: z.array(z.string()).default([]),
+  notes: z.array(SyncNoteSchema).default([]),
 });
 
 export type SyncReport = z.infer<typeof SyncReportSchema>;

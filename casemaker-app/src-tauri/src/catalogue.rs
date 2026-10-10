@@ -266,6 +266,12 @@ pub struct CatalogueDoc {
     /// a re-sync fixes rather than an error (`GET /api/v1/health` reports it as `feedRows: 0`).
     #[serde(default)]
     pub feeds: Vec<FeedRow>,
+    /// What the last sync came to (#328): the counts and the notes, so a restart — or a second
+    /// client on the LAN — can still see what the sync said. Defaulted, like every field added after
+    /// the first release: #320's strictness is about SHAPE, not absence, and a `catalogue.json`
+    /// written before this field is a catalogue whose last sync simply went unrecorded.
+    #[serde(default)]
+    pub last_sync: Option<SyncSummary>,
 }
 
 impl Default for CatalogueDoc {
@@ -276,6 +282,69 @@ impl Default for CatalogueDoc {
             synced_at: None,
             tools: Vec::new(),
             feeds: Vec::new(),
+            last_sync: None,
+        }
+    }
+}
+
+/// How much a note weighs (#328). An emptied feed matrix or a replaced catalogue file is a LOSS —
+/// something the user had is gone, and only a re-sync against a better database brings it back. An
+/// unknown category or a handful of unusable cells is INFORMATION: the sync did what it could and
+/// says so. The distinction travels with the note rather than being read back out of its wording,
+/// because the panel that renders them must not have to parse English to decide what to colour.
+///
+/// A LARGE drop of feed cells is still `Info` unless the matrix emptied: there is no threshold here,
+/// and inventing one would be a judgement about the vendor's data this module has no basis for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncNoteKind {
+    Info,
+    Loss,
+}
+
+/// One sentence about a sync that still succeeded, and its weight.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SyncNote {
+    pub kind: SyncNoteKind,
+    pub text: String,
+}
+
+impl SyncNote {
+    pub fn info(text: impl Into<String>) -> SyncNote {
+        SyncNote { kind: SyncNoteKind::Info, text: text.into() }
+    }
+
+    pub fn loss(text: impl Into<String>) -> SyncNote {
+        SyncNote { kind: SyncNoteKind::Loss, text: text.into() }
+    }
+}
+
+/// What the last sync came to, as `catalogue.json` keeps it across a restart (#328). The counts and
+/// the notes, and NOT the added/removed/changed lists: those are a diff against a catalogue that no
+/// longer exists, so a restart has nothing to show them against. The house is the authority
+/// (decision 31) and the same service answers a LAN browser and the desktop, so this lives on the
+/// service — a browser remembering its own last sync would make each client remember a different one.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncSummary {
+    #[serde(default)]
+    pub synced_at: Option<String>,
+    pub source: String,
+    pub total: usize,
+    #[serde(default)]
+    pub feed_rows: usize,
+    #[serde(default)]
+    pub notes: Vec<SyncNote>,
+}
+
+impl From<&SyncReport> for SyncSummary {
+    fn from(r: &SyncReport) -> Self {
+        SyncSummary {
+            synced_at: r.synced_at.clone(),
+            source: r.source.clone(),
+            total: r.total,
+            feed_rows: r.feed_rows,
+            notes: r.notes.clone(),
         }
     }
 }
@@ -304,9 +373,9 @@ pub struct SyncReport {
     #[serde(default)]
     pub feed_rows: usize,
     /// Sentences about this sync that are not failures: a replaced unreadable file, a category
-    /// this build does not know.
+    /// this build does not know. Each carries its weight (#328).
     #[serde(default)]
-    pub notes: Vec<String>,
+    pub notes: Vec<SyncNote>,
 }
 
 /// Added, removed, changed — by key. The one place a re-sync decides what happened.
@@ -349,7 +418,7 @@ pub struct Imported {
     pub entries: Vec<CatalogueEntry>,
     /// The feed matrix (#310), in catalogue order.
     pub feeds: Vec<FeedRow>,
-    pub notes: Vec<String>,
+    pub notes: Vec<SyncNote>,
 }
 
 /// Read every cutter Studio knows about, from a scratch copy of its database.
@@ -372,6 +441,19 @@ pub fn read_all(db: &Path) -> Result<Imported, String> {
 /// thread at the instant the process-wide temp directory is listed is not a leak — while a copy made
 /// in the test's own directory and not removed is exactly one.
 fn read_all_in(db: &Path, scratch_dir: &Path) -> Result<Imported, String> {
+    read_all_around(db, scratch_dir, || {})
+}
+
+/// The same read, with a hook that runs BETWEEN the copy and the check that follows it.
+///
+/// A test seam and nothing else (#339): the sidecar check below runs on both sides of the copy, and
+/// the only way to exercise the second side is to put a sidecar there after the first has looked.
+/// The hook is a no-op for every caller that is not a test.
+fn read_all_around(
+    db: &Path,
+    scratch_dir: &Path,
+    after_copy: impl FnOnce(),
+) -> Result<Imported, String> {
     if !db.exists() {
         return Err(format!(
             "{}: Makera Studio's library is not there",
@@ -379,21 +461,23 @@ fn read_all_in(db: &Path, scratch_dir: &Path) -> Result<Imported, String> {
         ));
     }
     if let Some(sidecar) = pending_write_beside(db) {
-        return Err(format!(
-            "{}: {} is beside it, so the database holds a transaction that has not reached the main \
-             file — a copy taken now would be missing it, and the cutters it touches would be \
-             reported removed. Open Makera Studio and close it again, then sync",
-            db.display(),
-            sidecar
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| sidecar.display().to_string())
-        ));
+        return Err(pending_write(db, &sidecar));
     }
     let copy = scratch_path(scratch_dir);
     std::fs::copy(db, &copy)
         .map_err(|e| format!("{}: could not be read: {e}", db.display()))?;
-    let read = read_copy(&copy, db);
+    after_copy();
+    // The same check AGAIN, now that the copy is done (#339). The one before the copy is a
+    // point-in-time answer: a Studio commit that begins between it and the copy produces a copy
+    // whose sidecar was never seen, and `integrity_check` catches a copy that is physically torn —
+    // not one that is logically torn, where one table's pages landed and a sibling's did not. A
+    // sidecar that is there now may have appeared after the copy finished, in which case the copy
+    // is whole; but from here the two cannot be told apart, and the refusal costs one re-sync where
+    // the alternative costs cutters reported removed.
+    let read = match pending_write_beside(db) {
+        Some(sidecar) => Err(pending_write(db, &sidecar)),
+        None => read_copy(&copy, db),
+    };
     // The copy is ours and is not a document: leave nothing behind, and never let a failure to
     // remove it change the answer. The sidecars go too (#327): a read-only open of a database in WAL
     // mode creates `-wal` and `-shm` beside it, and the cleanup that removed only the copy left those
@@ -404,6 +488,21 @@ fn read_all_in(db: &Path, scratch_dir: &Path) -> Result<Imported, String> {
         let _ = std::fs::remove_file(PathBuf::from(os));
     }
     read
+}
+
+/// The refusal for a sidecar with something in it (#327), in ONE wording whichever side of the copy
+/// found it: the fact is the same, and the advice that fixes it is the same.
+fn pending_write(db: &Path, sidecar: &Path) -> String {
+    format!(
+        "{}: {} is beside it, so the database holds a transaction that has not reached the main \
+         file — a copy taken now would be missing it, and the cutters it touches would be \
+         reported removed. Open Makera Studio and close it again, then sync",
+        db.display(),
+        sidecar
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| sidecar.display().to_string())
+    )
 }
 
 /// The `-journal` or `-wal` beside Studio's library, when it says the main file is behind (#327).
@@ -542,15 +641,19 @@ fn read_copy(copy: &Path, source: &Path) -> Result<Imported, String> {
     if !unknown.is_empty() {
         let ids: Vec<String> = unknown.keys().map(|id| id.to_string()).collect();
         let count: usize = unknown.values().sum();
-        notes.push(format!(
+        notes.push(SyncNote::info(format!(
             "{count} cutters are in a category this build does not know (id {}): they are served \
              with no `type=` text and shape `unknown`",
             ids.join(", ")
-        ));
+        )));
     }
     let (feeds, feed_note) = read_feeds(&conn, source)?;
     if let Some(note) = feed_note {
-        notes.push(note);
+        // Information, whatever the count (#328): rows that no cutter could have been given were
+        // dropped, and the matrix is still there. The loss case — the matrix emptied — is decided
+        // one level up, in `house.rs::sync_catalogue`, which is the only place that can see what
+        // was stored before.
+        notes.push(SyncNote::info(note));
     }
     Ok(Imported {
         entries,
@@ -1309,8 +1412,15 @@ mod tests {
         assert_eq!(imported.entries[0].tool.shape, ToolShape::Unknown);
         assert_eq!(imported.entries[0].tool.type_text, "Category 9");
         assert_eq!(imported.notes.len(), 1);
-        assert!(imported.notes[0].contains("2 cutters"), "{}", imported.notes[0]);
-        assert!(imported.notes[0].contains("9"), "{}", imported.notes[0]);
+        assert!(imported.notes[0].text.contains("2 cutters"), "{:?}", imported.notes[0]);
+        assert!(imported.notes[0].text.contains("9"), "{:?}", imported.notes[0]);
+        // Information, not loss (#328): the cutters are served, just without a name for their kind.
+        assert_eq!(imported.notes[0].kind, SyncNoteKind::Info);
+        assert_eq!(
+            serde_json::to_value(&imported.notes[0]).unwrap()["kind"],
+            serde_json::json!("info"),
+            "the kind goes on the wire lowercase, which is what the client's enum reads"
+        );
     }
 
     #[test]
@@ -1462,6 +1572,39 @@ mod tests {
     }
 
     #[test]
+    fn a_pending_write_that_appears_after_the_copy_is_refused_too() {
+        // #339. The check before the copy is a point-in-time answer: a commit that begins between it
+        // and the copy leaves a sidecar the first look never saw, and a copy that may be missing
+        // the transaction's pages. The second look is what catches it, so the hook puts the journal
+        // there AFTER the copy has been taken — the window the first check cannot see into.
+        let (dir, path) = a_library();
+        let journal = sidecar_of(&path, "-journal");
+        let err = read_all_around(&path, dir.path(), || {
+            std::fs::write(&journal, b"the pages this transaction replaced").unwrap();
+        })
+        .unwrap_err();
+        assert!(err.contains("makera_library.db-journal"), "{err}");
+        assert!(err.contains("reported removed"), "the same sentence as the first check: {err}");
+
+        // And the refused copy is still cleaned up: nothing of ours is left in the scratch directory.
+        let ours: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.starts_with("casemaker-studio-"))
+            .collect();
+        assert!(ours.is_empty(), "{ours:?}");
+
+        // An EMPTY sidecar appearing after the copy is the at-rest state, as it is before the copy.
+        std::fs::remove_file(&journal).unwrap();
+        let imported = read_all_around(&path, dir.path(), || {
+            std::fs::write(&journal, b"").unwrap();
+        })
+        .unwrap();
+        assert_eq!(imported.entries.len(), 8);
+    }
+
+    #[test]
     fn a_torn_copy_is_refused_rather_than_read_short() {
         // The half the sidecar check cannot see: the copy is short or malformed for a reason that is
         // not a sidecar — a write landed mid-copy, or the disk truncated it. The outcome to refuse is
@@ -1590,7 +1733,7 @@ mod tests {
         assert_eq!(imported.feeds.len(), 1, "the rows that DO state everything are served");
         assert_eq!(imported.feeds[0].material, "6061 Aluminum");
         assert_eq!(imported.notes.len(), 1, "{:?}", imported.notes);
-        assert!(imported.notes[0].contains("2 feed rows"), "{}", imported.notes[0]);
+        assert!(imported.notes[0].text.contains("2 feed rows"), "{:?}", imported.notes[0]);
 
         // And a cutter whose `g_ID` is empty: its rows have no tool to be served against, so they go
         // the same way — while the CUTTER still imports. A gap in the feed matrix must not cost the
@@ -1601,7 +1744,7 @@ mod tests {
 
         let imported = read_all(&path).unwrap();
         assert!(imported.feeds.is_empty(), "{:?}", imported.feeds);
-        assert!(imported.notes[0].contains("3 feed rows"), "{}", imported.notes[0]);
+        assert!(imported.notes[0].text.contains("3 feed rows"), "{:?}", imported.notes[0]);
         assert_eq!(imported.entries.len(), 1);
     }
 
@@ -1629,10 +1772,10 @@ mod tests {
         assert_eq!(imported.feeds.len(), 1, "the rows with usable numbers are served");
         assert_eq!(imported.feeds[0].material, "6061 Aluminum");
         assert_eq!(imported.notes.len(), 1, "{:?}", imported.notes);
-        assert!(imported.notes[0].contains("2 feed rows"), "{}", imported.notes[0]);
+        assert!(imported.notes[0].text.contains("2 feed rows"), "{:?}", imported.notes[0]);
         assert!(
-            imported.notes[0].contains("not positive"),
-            "the note must say WHICH rule dropped them: {}",
+            imported.notes[0].text.contains("not positive"),
+            "the note must say WHICH rule dropped them: {:?}",
             imported.notes[0]
         );
 
@@ -1674,8 +1817,8 @@ mod tests {
             imported.feeds
         );
         assert!(
-            imported.notes[0].contains("not positive and finite"),
-            "{}",
+            imported.notes[0].text.contains("not positive and finite"),
+            "{:?}",
             imported.notes[0]
         );
     }

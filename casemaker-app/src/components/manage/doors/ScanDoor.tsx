@@ -11,6 +11,15 @@
  * answer is a count, not a second row), catalogue rows that fit the reading (the user picks the one
  * on the label), or nothing (an invitation to the other two doors). The reading itself is labelled
  * provisional, because it is (`registerCutter`, #208 A7).
+ *
+ * SYMBOLOGY IS A FACT ABOUT THE EVENT, NOT THE DOOR (#333). `houseClient.ts` keeps `symbology` as
+ * the only evidence that a label was actually scanned, so it is decided where the code arrives —
+ * `'qr'` from the camera's decode, `'text'` from the field's Enter — and never remembered across
+ * codes: a code typed after a camera hit is a typed code. Editing the field resets it for the same
+ * reason; a decoded value the user has changed is no longer what the camera read.
+ *
+ * THE FIELD EMPTIES WHEN THE CUTTER LANDS (#337), and the caret goes back into it, because the
+ * next scan is seconds away. A door left armed would register the same box twice on a second click.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -28,6 +37,7 @@ import {
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { InventoryItem } from '@/platform/houseClient';
 import { mm } from '../display';
+import { selectRegistered } from '../selection';
 import { InventoryFields } from './InventoryFields';
 import { describeReading } from './reading';
 
@@ -52,6 +62,7 @@ export function ScanDoor() {
   const setDoor = useManageModeStore((s) => s.setDoor);
 
   const [code, setCode] = useState('');
+  /** How the code in `resolved` arrived — see the module doc. Not a mode: it changes with the code. */
   const [symbology, setSymbology] = useState('text');
   const [resolved, setResolved] = useState<ResolvedCode | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
@@ -62,6 +73,8 @@ export function ScanDoor() {
   const fieldRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  /** Set when a registration lands: the caret goes back into the field once it is enabled again. */
+  const refocus = useRef(false);
 
   // Focused on mount: a scanner types wherever the caret is, and a door that opens with the caret
   // nowhere means the first scan goes into the void.
@@ -69,8 +82,24 @@ export function ScanDoor() {
     fieldRef.current?.focus();
   }, []);
 
-  /** Everything the three outcomes share: read what was handed over, and close the camera. */
-  function handleCode(value: string, from: string) {
+  // And focused again after a registration (#337) — but only once the write's re-read has landed
+  // and the field is enabled again, which is a later render than the one the promise resolves in:
+  // `focus()` on a still-disabled input does nothing. A ref rather than state, so no setState runs
+  // inside an effect.
+  useEffect(() => {
+    if (busy === null && refocus.current) {
+      refocus.current = false;
+      fieldRef.current?.focus();
+    }
+  }, [busy]);
+
+  /**
+   * Everything the three outcomes share: read what was handed over, with where it came from. An
+   * empty field is not a code — Enter on nothing (the state the door is in right after a
+   * registration) reads nothing and sends nothing.
+   */
+  function handleCode(value: string, from: 'qr' | 'text') {
+    if (value.trim().length === 0) return;
     setCode(value);
     setSymbology(from);
     setPicked(null);
@@ -141,16 +170,24 @@ export function ScanDoor() {
   const qtyProblem = quantityProblem(quantity);
   const disabled = busy !== null;
 
-  function registerPicked(entry: ToolLibraryEntry) {
-    void registerItem(
-      itemFromEntry(entry, {
-        quantity: quantityOrOne(quantity),
-        code: code.trim().length > 0 ? { symbology, value: code.trim() } : null,
-        notes,
-        now: new Date().toISOString(),
-        health,
-      }),
-    );
+  async function registerPicked(entry: ToolLibraryEntry) {
+    const item = itemFromEntry(entry, {
+      quantity: quantityOrOne(quantity),
+      code: code.trim().length > 0 ? { symbology, value: code.trim() } : null,
+      notes,
+      now: new Date().toISOString(),
+      health,
+    });
+    if (await registerItem(item)) {
+      setCode('');
+      setSymbology('text');
+      setResolved(null);
+      setPicked(null);
+      setQuantity('1');
+      setNotes('');
+      selectRegistered(item.id);
+      refocus.current = true;
+    }
   }
 
   return (
@@ -167,11 +204,14 @@ export function ScanDoor() {
           placeholder="C1-BIT-…"
           data-testid="manage-scan-code"
           disabled={disabled}
-          onChange={(e) => setCode(e.target.value)}
+          onChange={(e) => {
+            setCode(e.target.value);
+            setSymbology('text');
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
-              handleCode(code, symbology);
+              handleCode(code, 'text');
             }
           }}
         />
@@ -248,7 +288,7 @@ export function ScanDoor() {
               data-testid="manage-scan-register"
               disabled={pickedEntry === null || qtyProblem !== null || disabled}
               title={qtyProblem ?? 'Register this cutter'}
-              onClick={() => pickedEntry && registerPicked(pickedEntry)}
+              onClick={() => pickedEntry && void registerPicked(pickedEntry)}
             >
               Add to inventory
             </button>

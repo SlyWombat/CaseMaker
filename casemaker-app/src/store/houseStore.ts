@@ -29,6 +29,13 @@
  * two files (`house.json`'s tools and inventory), so two in flight is two writers racing for one
  * document. The panel disables the others while one runs.
  *
+ * AND IT STAYS SET UNTIL THE RE-READ LANDS (#336). The write's validators (`etag`, `inventoryEtag`)
+ * live in the registry store and are only replaced by the re-read; between the service's 200 and
+ * that read landing, this window still holds the pre-write ones. A click in that window would send
+ * a stale `If-Match`, be refused with a 412, and tell the user the house "moved on" — about their
+ * own write. So the notice is set the moment the write concludes, and `busy` is cleared only once
+ * the versions the next write will carry are the ones the service now serves.
+ *
  * NOT PERSISTED, for the same reason the registry is not: the house lives on the service, in its own
  * file, and a copy here would be a second source of truth for the thing #212 exists to have one of.
  * The notice is a message about a moment, and a message about last Tuesday is worse than none.
@@ -49,6 +56,7 @@ import {
   type HouseFailure,
   type InventoryItem,
   type SyncReport,
+  type SyncSummary,
 } from '@/platform/houseClient';
 import { useToolRegistryStore } from './toolRegistryStore';
 
@@ -85,7 +93,12 @@ export interface HouseState {
   busy: HouseAction | null;
   /** What the last action said. Null before anything has been done in this session. */
   notice: HouseNotice | null;
-  /** What the last catalogue sync found (#308): the counts are what the panel reports. */
+  /**
+   * What the last catalogue sync IN THIS SESSION found (#308): the counts are what the panel
+   * reports, the notes are what it lists (#328). Null before a sync here; the service's own record
+   * of the last sync — which outlives a reload — comes in through `/health` and is read beside this
+   * by {@link useLastSync}, not copied into it.
+   */
   lastSync: SyncReport | null;
 
   /** Add a definition the house did not have — a clone, or one typed in by hand (#309). */
@@ -180,18 +193,21 @@ export const useHouseStore = create<HouseState>((set, get) => {
     set({ busy: action, notice: null });
     try {
       const done = await work();
+      // The sentence first, the slot last: the panel can show what happened while the re-read is
+      // still in flight, and nothing can write against the old validators meanwhile (#336).
       if (done.ok) {
         opts.onOk?.();
-        set({ busy: null, notice: { kind: 'ok', text: done.text } });
+        set({ notice: { kind: 'ok', text: done.text } });
         if (opts.reRead !== false) await useToolRegistryStore.getState().refresh();
       } else {
         // The house did not change, so there is nothing to re-read — except when the refusal was a
         // STALE GUARD, which is the service saying it has moved on without us (#321). That case is
         // the one where the version held here is now worthless, so the re-read is what makes the
         // user's next attempt able to succeed.
-        set({ busy: null, notice: { kind: done.kind, text: done.text } });
+        set({ notice: { kind: done.kind, text: done.text } });
         if (done.stale) await useToolRegistryStore.getState().refresh();
       }
+      set({ busy: null });
       return done.ok;
     } catch (e) {
       set({ busy: null, notice: { kind: 'error', text: e instanceof Error ? e.message : String(e) } });
@@ -311,6 +327,47 @@ export const useHouseStore = create<HouseState>((set, get) => {
     dismissNotice: () => set({ notice: null }),
   };
 });
+
+/** The last sync the panel should talk about, and whether it is this session's or the service's. */
+export interface LastSyncView {
+  summary: SyncSummary;
+  /** True when the record came from `/health` rather than from a sync clicked here (#328). */
+  fromHealth: boolean;
+}
+
+/** Whether stamp `a` names a later moment than stamp `b`. Unparseable or absent stamps are never later. */
+function later(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return false;
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  return Number.isFinite(ta) && Number.isFinite(tb) && ta > tb;
+}
+
+/**
+ * Which record of the last sync to show (#328 decision 2): the service's, from `/health`, until a
+ * sync is clicked here — and the service's again if it reports one NEWER than this session's,
+ * because the house is the authority and another client may have synced since. The two agree in
+ * the common case (a sync here re-reads `/health`, which then carries the same report), and then
+ * this session's wins, so the panel does not say "from <stamp>" about the sync it just did.
+ *
+ * A pure function rather than a selector, so the rule is testable without two stores.
+ */
+export function lastSyncView(mine: SyncReport | null, served: SyncSummary | null): LastSyncView | null {
+  if (mine === null) return served === null ? null : { summary: served, fromHealth: true };
+  if (served !== null && later(served.syncedAt, mine.syncedAt)) return { summary: served, fromHealth: true };
+  return { summary: mine, fromHealth: false };
+}
+
+/**
+ * The last sync as the Tools scope shows it: this session's report, seeded from the probe's
+ * `health.lastSync` when there has been none here (#328). Reading the registry's health rather than
+ * copying it across on connect means a re-read that brings a newer record in is seen at once.
+ */
+export function useLastSync(): LastSyncView | null {
+  const mine = useHouseStore((s) => s.lastSync);
+  const served = useToolRegistryStore((s) => s.health?.lastSync ?? null);
+  return lastSyncView(mine, served);
+}
 
 /** Test seam: forget the last action's result without touching the registry. */
 export function resetHouseStore(): void {

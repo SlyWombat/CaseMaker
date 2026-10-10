@@ -31,6 +31,20 @@ export function useSelectedEntry(): ToolLibraryEntry | null {
   return tools.find((e) => e.key === key) ?? null;
 }
 
+/**
+ * Point the list at a cutter that was just registered (#337), WITHOUT closing the register frame.
+ *
+ * `manageModeStore.select` closes the frame, which is right for a click in the list and wrong here:
+ * a registration is one of several — the user at the bench has the next box in hand — so the door
+ * resets, the new `inv:` row is highlighted behind it (the write's re-read has already brought it
+ * in), and closing the frame then lands on the row that was just made. The store has no action for
+ * "select but stay", so this sets the one field directly; it belongs beside `select` if a second
+ * caller ever appears.
+ */
+export function selectRegistered(itemId: string): void {
+  useManageModeStore.setState({ selectedKey: inventoryKey(itemId) });
+}
+
 /** The possession behind the selected key. Only an `inv:` row has one. */
 export function useSelectedItem(): InventoryItem | null {
   const key = useManageModeStore((s) => s.selectedKey);

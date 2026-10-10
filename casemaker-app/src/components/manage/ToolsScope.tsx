@@ -33,11 +33,11 @@ import { inventoryKey } from '@/engine/cnc/toolRegistry';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { InventoryItem } from '@/platform/houseClient';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
-import { useHouseStore } from '@/store/houseStore';
+import { useHouseStore, useLastSync } from '@/store/houseStore';
 import { useManageModeStore, type TierFilter } from '@/store/manageModeStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { DocsModal } from '@/components/docs/DocsModal';
-import { mm, NOT_APPLICABLE } from './display';
+import { formatStamp, mm, NOT_APPLICABLE } from './display';
 import { cloneOf, useSelectedEntry } from './selection';
 import { ToolDetail } from './ToolDetail';
 
@@ -89,8 +89,8 @@ export function ToolsScope() {
 
   const busy = useHouseStore((s) => s.busy);
   const notice = useHouseStore((s) => s.notice);
-  /** The last sync's report — read here for its `notes` alone (#328); its counts are in the notice. */
-  const lastSync = useHouseStore((s) => s.lastSync);
+  /** The last sync — read here for its `notes` alone (#328); its counts are in the notice. */
+  const lastSync = useLastSync();
   const dismissNotice = useHouseStore((s) => s.dismissNotice);
   const registerTool = useHouseStore((s) => s.registerTool);
   const syncCatalogue = useHouseStore((s) => s.syncCatalogue);
@@ -310,16 +310,25 @@ export function ToolsScope() {
             whose cells Studio left empty, or emptied the feed matrix; all three used to look exactly
             like a clean sync. Deliberately NOT part of the notice: dismissing that must not take the
             record of what the sync did with it, and these stay until the next sync replaces them.
-            Still in-memory only — a reload forgets them (#328's open question). */}
-        {lastSync !== null && lastSync.notes.length > 0 && (
-          <div className="mnotes" data-testid="manage-sync-notes" data-count={lastSync.notes.length}>
+            Each note carries its weight (decision 1): a LOSS is drawn in the warning colour, an
+            `info` plain. And they outlive a reload (decision 2): the service keeps the last report
+            on `/health`, so a record read from there is drawn too, dated, before any sync here. */}
+        {lastSync !== null && lastSync.summary.notes.length > 0 && (
+          <div
+            className="mnotes"
+            data-testid="manage-sync-notes"
+            data-count={lastSync.summary.notes.length}
+            data-from={lastSync.fromHealth ? 'health' : 'session'}
+          >
             <p className="mnotes__head">
-              Besides the counts, that sync reported:
+              {lastSync.fromHealth
+                ? `The last sync (${formatStamp(lastSync.summary.syncedAt) ?? 'date unknown'}) reported:`
+                : 'Besides the counts, that sync reported:'}
             </p>
             <ul>
-              {lastSync.notes.map((note, i) => (
-                <li key={`${i}-${note}`} data-testid={`manage-sync-note-${i}`}>
-                  {note}
+              {lastSync.summary.notes.map((note, i) => (
+                <li key={`${i}-${note.text}`} data-kind={note.kind} data-testid={`manage-sync-note-${i}`}>
+                  {note.text}
                 </li>
               ))}
             </ul>
@@ -443,9 +452,21 @@ function Rows({
             data-testid={`manage-tools-row-${entry.key}`}
             onClick={() => onSelect(entry.key)}
           >
+            {/* The name is a BUTTON (#340): the row's click is a convenience for the mouse, and a
+                `<tr onClick>` is reachable by nothing else. The button puts every row in the tab
+                order and gives Enter and Space the same meaning as the click, which is what makes
+                the detail rail, Clone and the editors reachable from the keyboard at all. */}
             <td className="nm">
-              {t.name}
-              <small>{provenanceLine(entry, possession)}</small>
+              <button
+                type="button"
+                className="tbl__rowbtn"
+                data-testid={`manage-tools-pick-${entry.key}`}
+                aria-current={selectedKey === entry.key ? 'true' : undefined}
+                onClick={() => onSelect(entry.key)}
+              >
+                {t.name}
+                <small>{provenanceLine(entry, possession)}</small>
+              </button>
             </td>
             <td>{t.shape}</td>
             <td className={dim(tip)}>{mm(tip)}</td>

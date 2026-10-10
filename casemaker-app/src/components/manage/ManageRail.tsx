@@ -14,6 +14,7 @@
 
 import type { JSX } from 'react';
 import { MACHINES } from '@/engine/cnc/machine';
+import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
 import { houseBaseUrl, HOUSE_SCHEMA_VERSION } from '@/platform/houseClient';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useMachineStore } from '@/store/machineStore';
@@ -119,7 +120,7 @@ export function ManageRail() {
               : `${health.problems.length} problem${health.problems.length === 1 ? '' : 's'}`}
           </>
         ) : (
-          <>built-ins only: 2</>
+          <>built-ins only: {TOOL_LIBRARY.length}</>
         )}
       </div>
     </aside>
