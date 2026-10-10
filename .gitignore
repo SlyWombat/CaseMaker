@@ -29,8 +29,13 @@ Thumbs.db
 .claude/
 
 # Competitor/market research staging — local copies of vendor docs (2026-10-04).
-# Remove this ignore (or whitelist just the summaries) once the research is written up.
-docs/market-research/
+# The four summaries are committed (#228, 2026-10-09); raw/, extracted/, notes/ and transfer/
+# hold third-party material and stay local.
+docs/market-research/**
+!docs/market-research/README.md
+!docs/market-research/FEATURE-MATRIX.md
+!docs/market-research/UI-PATTERNS.md
+!docs/market-research/SOURCES.md
 
 # Vendor PDFs downloaded for reading, not for redistribution (2026-10-07).
 # Makera-Parity.md cites docs/makera/CARVERA_EXAMPLES_2026.02.pdf; the citation is
