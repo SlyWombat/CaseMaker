@@ -160,6 +160,30 @@ describe('SimPanel', () => {
     expect((screen.getByTestId('sim-simulate') as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('says a shape-only match is a suggestion, and an exact one is not (#316)', async () => {
+    // The panel is the half of #316 the user reads. Makera sells six 3.175 mm flats that differ
+    // only in length, so "matched from the file's TOOL record" over a 12 mm entry when the file
+    // states 42 mm would be a claim the evidence does not support.
+    const TOOL_LINE = (flute: number) =>
+      `;@MKR|TOOL|number=1|id=112111313812|name=3.175*${flute}mm Flat End(Metal)|type=Flat End|handlediameter=3.175|sticklength=0|shoulderlength=${flute}|flutelength=${flute}|diameter=3.175|tipdiameter=3.175|cornerradius=0|angle=0|halfAngle=0`;
+
+    act(() => useSimSetupStore.getState().openFile('long.nc', `${TOOL_LINE(42)}\n`));
+    render(<SimPanel />);
+    const weak = screen.getByTestId('sim-tool-match');
+    expect(weak.getAttribute('data-strength')).toBe('suggested');
+    expect(weak.getAttribute('data-provenance')).toBe('shape');
+    expect(weak.textContent).toContain('check it');
+
+    cleanup();
+    act(() => useSimSetupStore.getState().reset());
+    act(() => useSimSetupStore.getState().openFile('exact.nc', `${TOOL_LINE(12)}\n`));
+    render(<SimPanel />);
+    const firm = screen.getByTestId('sim-tool-match');
+    expect(firm.getAttribute('data-strength')).toBe('exact');
+    expect(firm.getAttribute('data-provenance')).toBe('id');
+    expect(firm.textContent).toContain('matched from the file’s TOOL record');
+  });
+
   it('shows the runner summary count, not the capped list length', async () => {
     setSimClientLoader(async () => fakeClient(READY));
     openPlainFile();

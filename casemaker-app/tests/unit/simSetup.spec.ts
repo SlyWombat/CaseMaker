@@ -25,6 +25,9 @@ describe('simSetupStore.openFile', () => {
     expect(s.stockSource).toEqual({ length: 'header', width: 'header', thickness: 'header' });
     expect(s.toolKey).toBe('flat-3.175x12-metal');
     expect(s.toolSource).toBe('header');
+    // The header states 12 / 12 and the built-in states the same, so the id match is exact (#316).
+    expect(s.toolMatch).toBe('exact');
+    expect(s.toolMatchProvenance).toBe('id');
     expect(s.headerDiagnostics).toEqual([]);
   });
 
@@ -64,6 +67,9 @@ describe('simSetupStore.openFile', () => {
     useSimSetupStore.getState().openFile('ball.nc', headerText(STOCK, odd));
     expect(useSimSetupStore.getState().toolKey).toBeNull();
     expect(useSimSetupStore.getState().toolSource).toBeNull();
+    // Nothing matched, so there is no match to describe (#316).
+    expect(useSimSetupStore.getState().toolMatch).toBeNull();
+    expect(useSimSetupStore.getState().toolMatchProvenance).toBeNull();
   });
 
   it('matches on the header id first, so two same-size flats cannot tie (#305)', () => {
@@ -73,14 +79,31 @@ describe('simSetupStore.openFile', () => {
     useSimSetupStore.getState().openFile('odd.nc', headerText(STOCK, odd));
     expect(useSimSetupStore.getState().toolKey).toBe('flat-3.175x12-metal');
     expect(useSimSetupStore.getState().toolSource).toBe('header');
+    expect(useSimSetupStore.getState().toolMatchProvenance).toBe('id');
   });
 
-  it('falls back to shape + diameter when the id is one nothing knows', () => {
-    // The same cutter, named by a clone's id (or one from a catalogue we do not hold): the
-    // geometry still identifies the builtin row.
+  it('falls back to shape + diameter when the id is one nothing knows, and says the id did not answer', () => {
+    // The same cutter, named by a clone's id (or one from a catalogue we do not hold): the geometry
+    // and the file's own 12 / 12 lengths identify the builtin row. The match is still exact — the
+    // lengths the file states DO agree — but the panel can see the id is not what decided it.
     const odd = TOOL.replace('id=112111313812', 'id=999999999999');
     useSimSetupStore.getState().openFile('clone.nc', headerText(STOCK, odd));
-    expect(useSimSetupStore.getState().toolKey).toBe('flat-3.175x12-metal');
+    const s = useSimSetupStore.getState();
+    expect(s.toolKey).toBe('flat-3.175x12-metal');
+    expect(s.toolMatch).toBe('exact');
+    expect(s.toolMatchProvenance).toBe('shape');
+  });
+
+  it('suggests, and does not claim a match, when the file names a length the entry does not have (#316)', () => {
+    // Makera sells six 3.175 mm flats that differ only in length. This file was cut with the 42 mm
+    // one; the registry holds the 12 mm built-in. Naming the built-in anyway is the useful answer —
+    // but it is a SUGGESTION, and the panel has to be able to say so.
+    const long = TOOL.replace(/shoulderlength=12/, 'shoulderlength=42').replace(/flutelength=12/, 'flutelength=42');
+    useSimSetupStore.getState().openFile('long.nc', headerText(STOCK, long));
+    const s = useSimSetupStore.getState();
+    expect(s.toolKey).toBe('flat-3.175x12-metal');
+    expect(s.toolMatch).toBe('suggested');
+    expect(s.toolMatchProvenance).toBe('shape');
   });
 
   it('keeps a user-edited stock when a file is reopened, and reset() is the way back (#315)', () => {
@@ -108,6 +131,9 @@ describe('simSetupStore.openFile', () => {
     const s = useSimSetupStore.getState();
     expect(s.toolKey).toBe('flat-1.0');
     expect(s.toolSource).toBe('user');
+    // The match describes the cutter the form will USE (#316): a cutter the user chose carries none.
+    expect(s.toolMatch).toBeNull();
+    expect(s.toolMatchProvenance).toBeNull();
     // Per field, not per file: the half the user did not claim arrives with the file.
     expect(s.stock).toEqual({ length: 100, width: 100, thickness: 5 });
     expect(s.stockSource).toEqual({ length: 'header', width: 'header', thickness: 'header' });

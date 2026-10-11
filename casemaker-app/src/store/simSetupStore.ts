@@ -15,12 +15,16 @@
  * different registry entries, `headerDiagnostics` gains a warning naming both, so a sweep valid
  * for the 1 mm cutter is never silently shown against a file written for a 3.175 mm one.
  *
+ * How well the file's TOOL record fits what it matched (#316) is `toolMatch` — the rule itself
+ * lives in `engine/cnc/headerMatch.ts`, where a test can hand it a list and the store cannot.
+ *
  * Not persisted, and plain zustand — no immer needed.
  */
 
 import { create } from 'zustand';
 import { getTools, parseGcode, setupFromHeader, stubSetup, Z1 } from '@/engine/cnc';
-import { toolFromMkrRecord, type Tool } from '@/engine/cnc/tool';
+import { matchHeaderTool, type MatchProvenance, type MatchStrength } from '@/engine/cnc/headerMatch';
+import { toolFromMkrRecord } from '@/engine/cnc/tool';
 import { rectProfile } from '@/engine/compiler/profile';
 import type { Setup, StartingTool } from '@/engine/cnc';
 
@@ -49,6 +53,14 @@ export interface SimSetupState {
   /** A tool registry key (#305); null = "tool required". */
   toolKey: string | null;
   toolSource: FieldSource | null;
+  /**
+   * How well the file's TOOL record fits the entry `toolKey` names (#316), when the header is what
+   * supplied it: `exact` = every length the header states agrees with the entry, `suggested` =
+   * shape and diameter only. Null when the user chose the cutter, or when nothing matched.
+   */
+  toolMatch: MatchStrength | null;
+  /** Which rule answered — our key line (#332), the vendor `id=`, or shape and diameter (#316). */
+  toolMatchProvenance: MatchProvenance | null;
   headerDiagnostics: SimHeaderDiagnostic[];
   /**
    * Parse the header and prefill every field the user has not already claimed; fields whose source
@@ -73,42 +85,10 @@ const EMPTY = {
   stockSource: allDefault(),
   toolKey: null,
   toolSource: null,
+  toolMatch: null,
+  toolMatchProvenance: null,
   headerDiagnostics: [] as SimHeaderDiagnostic[],
 };
-
-/** The file header's cutting diameter, using the same rule as `cuttingRadiusForSweep`. */
-function cuttingDiameter(tool: Tool): number | null {
-  return tool.tipDiameter ?? tool.diameter;
-}
-
-/**
- * The registry entry matching a header tool (#305). The header's `id=` is the catalogue's `g_ID`
- * (`/Makera-Parity.md` §3.2), so it is tried FIRST: shape + diameter alone ties for two 3.175 mm
- * flats and would pick whichever came first in the list. The id is what the file itself asserts
- * the cutter was — and a clone may not inherit it (#212), which is exactly why #309 has to add a
- * step above this one rather than below it.
- *
- * Falls back to shape + cutting diameter within 0.01 mm — the rule `cuttingRadiusForSweep` uses,
- * and the only one that can match a file written for a cutter no tier knows.
- *
- * #309 prepends one step: a Case Maker comment line naming our key, for a clone the post cannot
- * give a vendor `g_ID` to (design point 3).
- */
-function matchRegistryTool(tool: Tool): string | null {
-  const entries = getTools();
-  if (tool.id !== null) {
-    const byId = entries.find((e) => e.tool.id !== null && e.tool.id === tool.id);
-    if (byId) return byId.key;
-  }
-  const d = cuttingDiameter(tool);
-  if (d === null) return null;
-  const entry = entries.find((e) => {
-    if (e.tool.shape !== tool.shape) return false;
-    const ed = cuttingDiameter(e.tool);
-    return ed !== null && Math.abs(ed - d) <= 0.01;
-  });
-  return entry ? entry.key : null;
-}
 
 /** `3.175*12mm Flat End(Metal) (flat-3.175x12-metal)` — the entry's name with its key, or the bare key. */
 function describeTool(key: string): string {
@@ -135,8 +115,12 @@ export const useSimSetupStore = create<SimSetupState>()((set) => ({
       headerSource.thickness = 'header';
     }
 
+    // The file's TOOL record, matched against the registry list (#316) — see `headerMatch.ts` for
+    // the order. A fit that leans on shape and diameter alone comes back `suggested`, and that
+    // travels with the key so the panel can say which answer it is holding.
     const toolRecord = parsed.header?.records.find((r) => r.tag === 'TOOL');
-    const headerToolKey = toolRecord ? matchRegistryTool(toolFromMkrRecord(toolRecord)) : null;
+    const headerMatch = toolRecord ? matchHeaderTool(toolFromMkrRecord(toolRecord), getTools()) : null;
+    const headerToolKey = headerMatch?.key ?? null;
 
     set((s) => {
       // A field the user has claimed survives the open; every other field takes this file's value.
@@ -172,6 +156,9 @@ export const useSimSetupStore = create<SimSetupState>()((set) => ({
         stockSource,
         toolKey: keepTool ? s.toolKey : headerToolKey,
         toolSource: keepTool ? 'user' : headerToolKey ? 'header' : null,
+        // The match describes the tool the form will USE, so a cutter the user chose carries none.
+        toolMatch: keepTool ? null : (headerMatch?.strength ?? null),
+        toolMatchProvenance: keepTool ? null : (headerMatch?.provenance ?? null),
         headerDiagnostics,
       };
     });

@@ -126,6 +126,8 @@ export function SimPanel() {
   const stockSource = useSimSetupStore((s) => s.stockSource);
   const toolKey = useSimSetupStore((s) => s.toolKey);
   const toolSource = useSimSetupStore((s) => s.toolSource);
+  const toolMatch = useSimSetupStore((s) => s.toolMatch);
+  const toolMatchProvenance = useSimSetupStore((s) => s.toolMatchProvenance);
   const headerDiagnostics = useSimSetupStore((s) => s.headerDiagnostics);
   const openFile = useSimSetupStore((s) => s.openFile);
   const setStock = useSimSetupStore((s) => s.setStock);
@@ -352,7 +354,22 @@ export function SimPanel() {
       {!toolKey && (
         <p style={{ ...MUTED, color: '#e0a19b' }}>required — choose the tool this program was written for.</p>
       )}
-      {toolKey && toolSource === 'header' && <p style={MUTED}>matched from the file’s TOOL record.</p>}
+      {/* #316 — how well the file's TOOL record fits the entry it matched. An entry found on shape
+          and diameter alone is a SUGGESTION: the file either states lengths this entry does not
+          match, or states none at all, and either way "matched" would be a stronger word than the
+          evidence carries. `data-provenance` says which rule answered (id, shape, or #332's key). */}
+      {toolKey && toolSource === 'header' && (
+        <p
+          style={MUTED}
+          data-testid="sim-tool-match"
+          data-strength={toolMatch ?? ''}
+          data-provenance={toolMatchProvenance ?? ''}
+        >
+          {toolMatch === 'suggested'
+            ? 'closest cutter by shape and diameter — the file does not confirm it; check it.'
+            : 'matched from the file’s TOOL record.'}
+        </p>
+      )}
 
       {/* 4 — advanced: the starting tool */}
       <details style={{ marginTop: 8 }}>

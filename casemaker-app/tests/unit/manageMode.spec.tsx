@@ -470,7 +470,7 @@ describe('#311 — cloning a catalogue row', () => {
     // A separate definition the catalogue does not own, keyed by the client.
     expect(clone.key.startsWith('user:')).toBe(true);
     expect(clone.key).not.toBe(CAT.key);
-    // The `.nc` header writes `Tool.id` and `simSetupStore.matchRegistryTool` matches a header back
+    // The `.nc` header writes `Tool.id` and `engine/cnc/headerMatch.ts` matches a header back
     // id-FIRST, so a clone that kept the vendor id would reopen as the row it was cloned from —
     // an edited cutter reading as the unedited original (#212's "Do not let a clone inherit the
     // vendor id"). A user definition has no vendor id and no vendor cutter number: null is the

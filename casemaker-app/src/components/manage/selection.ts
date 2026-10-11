@@ -64,7 +64,7 @@ export function useSelectedItem(): InventoryItem | null {
  *
  * **Makera's `id` and `number` are dropped, and that is the one field that is not copied** (#212's
  * "Do not let a clone inherit the vendor id"). `Tool.id` IS the vendor's `g_ID`, and two things read
- * it: `post/z1.ts` writes it into the `.nc` header, and `simSetupStore.matchRegistryTool` matches a
+ * it: `post/z1.ts` writes it into the `.nc` header, and `engine/cnc/headerMatch.ts` matches a
  * header back to a registry row **id first**. A clone that kept it would therefore write the id of
  * the catalogue row it was cloned from — so an edited cutter would reopen as the unedited original,
  * which is exactly the silent substitution the clone exists to prevent. A `user:` definition is not
