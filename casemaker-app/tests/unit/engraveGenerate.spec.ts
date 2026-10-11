@@ -15,6 +15,9 @@ import { version as APP_VERSION } from '../../package.json';
 import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { calibrationFromReplies } from '@/engine/cnc/calibration';
 import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
+import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
+import { viseForNewJob } from '@/engine/cnc/fixture';
+import { defaultBadgeParams } from '@/types/badge';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLineItem, EngraveTraceItem } from '@/types/engraveJob';
@@ -329,6 +332,94 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
       keepOuts: [pocket],
     });
     expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
+  });
+});
+
+// #285 — a job that states its print takes its DEPTH LIMIT from the blank sliced on the printer's
+// own layer grid, rather than from the nominal membrane arithmetic. The switch is
+// `EngraveJob.stock.print` (`fromBadge.ts` writes it only when the badge declares one, #166), and
+// the whole point is the pair below: the SAME 1.2 mm cut over the pocket is refused by the analytic
+// limit and permitted by the stack's, because 0.2 mm layers leave 1.4 mm of solid there and the
+// membrane-plus-floor arithmetic says 0.51.
+describe('a job that states its print limits on the printer’s layer grid (#285)', () => {
+  /**
+   * The badge's blank as a job with one 10 × 10 pocket over the magnet cavity — the acceptance
+   * case's shape, so the numbers below are the badge's own and not a fixture invented here.
+   */
+  function badgeJob(print: boolean, depth: number): EngraveJob {
+    const badge = defaultBadgeParams(print ? { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } } : {});
+    const blank = badgeBlankFor(badge);
+    return {
+      // The blank is 3.81 mm, so the vise is the stock-derived default (#231 item 2): the shipped
+      // flat 4 mm is taller than the whole badge and refuses it outright.
+      ...defaultEngraveJob(viseForNewJob(undefined, blank.stock)),
+      stock: blank.stock,
+      keepOuts: blank.pocket ? [blank.pocket] : [],
+      labels: [],
+      shapes: [
+        {
+          id: 'a',
+          name: 'A',
+          kind: 'rect',
+          position: { x: 38.1, y: 19.05 },
+          rotation: 0,
+          depth,
+          enabled: true,
+          width: 10,
+          height: 10,
+          cornerRadius: 0,
+        },
+      ],
+    };
+  }
+
+  it('refuses 1.6 mm over the pocket, naming the void the stack found', () => {
+    const g = generate(tl, badgeJob(true, 1.6));
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('verify');
+    // The text existed — it is the verifier, re-reading the posted bytes, that refused it.
+    expect(g.nc).not.toBeNull();
+    const deep = g.verify!.findings.find((f) => f.code === 'cut-too-deep');
+    expect(deep).toBeDefined();
+    expect(deep!.severity).toBe('error');
+    // 0.2 mm layers carry the 1.51 mm membrane down to a 1.4 mm solid span below the face, so that
+    // is the number the cutter is refused against — and the sentence says which membrane broke.
+    expect(deep!.message).toContain('1.400 mm permitted there');
+    expect(deep!.message).toContain('Magnet pocket');
+  });
+
+  it('passes 1.2 mm over the same pocket — deeper than the nominal membrane allows', () => {
+    const g = generate(tl, badgeJob(true, 1.2));
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+  });
+
+  it('refuses that same 1.2 mm cut when the job states no print — the switch is the print', () => {
+    const g = generate(tl, badgeJob(false, 1.2));
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('verify');
+    // 1.51 mm of membrane less the 1 mm minimum floor: the analytic limit over the pocket is 0.51.
+    const deep = g.verify!.findings.find((f) => f.code === 'cut-too-deep');
+    expect(deep).toBeDefined();
+    expect(deep!.message).toContain('0.510 mm permitted there');
+  });
+
+  it('generates the same program with and without a print — the print moves the gate, not the toolpath', () => {
+    // The print changes what the verifier permits; it never changes a coordinate. So a cut within
+    // BOTH limits produces the same bytes either way, which is the byte-identity every pre-#285
+    // program keeps.
+    const withPrint = generate(tl, badgeJob(true, 0.5));
+    const without = generate(tl, badgeJob(false, 0.5));
+    expect(withPrint.ok).toBe(true);
+    expect(without.ok).toBe(true);
+    expect(withPrint.nc).toBe(without.nc);
+  });
+
+  it('reports the colour boundary on the layer grid, and none without a print', () => {
+    // 3.81 − 3.0 = 0.81 below the face; the nearest 0.2 mm layer line is 0.8.
+    expect(regions(tl, badgeJob(true, 0.5)).colourBoundaryDepth).toBeCloseTo(0.8, 6);
+    expect(regions(tl, badgeJob(false, 0.5)).colourBoundaryDepth).toBeNull();
   });
 });
 

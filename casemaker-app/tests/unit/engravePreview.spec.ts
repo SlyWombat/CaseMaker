@@ -18,6 +18,9 @@ import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { presetJawStrips, presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
+import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
+import { viseForNewJob } from '@/engine/cnc/fixture';
+import { defaultBadgeParams } from '@/types/badge';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { EngraveJob, EngraveShape } from '@/types/engraveJob';
 import { depthColor, SHALLOW_COLOR, DEEP_COLOR } from '@/components/viewport/engraveRamp';
@@ -581,5 +584,74 @@ describe('engravePreview — declared under-surface voids (#271)', () => {
     expect(bbox.minY).toBeCloseTo(37, 6);
     expect(bbox.maxY).toBeCloseTo(43, 6);
     expect(p.voids[0]!.limit).toBeCloseTo(12 - 3 - 1, 6);
+  });
+});
+
+// #285 — the boundary has two halves and this is the panel's: the number the viewport draws the
+// line at, and the per-item `item-wrong-colour` a label gets when its floor lands in the colour it
+// did not ask for. Both come off the SAME `engraveRegions` call the cuts do, so the line and the
+// finding cannot disagree.
+describe('engravePreview — the colour boundary (#285)', () => {
+  // Its own previewer: the tests above pin the shared one’s latest generation.
+  const pv = createEngravePreviewer(tl);
+  let g = 0;
+  function buildPreview(job: EngraveJob) {
+    const p = preview(pv, job, ++g);
+    if (!p) throw new Error('the previewer refused a fresh generation');
+    return p;
+  }
+
+  /** The badge's blank, with a `depthIntent` and a depth on one label over the pocket. */
+  function badgeJob(print: boolean, depth: number, depthIntent?: 'reveal' | 'surface'): EngraveJob {
+    const badge = defaultBadgeParams(print ? { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } } : {});
+    const blank = badgeBlankFor(badge);
+    const base = defaultEngraveJob(viseForNewJob(undefined, blank.stock));
+    return {
+      ...base,
+      stock: blank.stock,
+      keepOuts: blank.pocket ? [blank.pocket] : [],
+      labels: [
+        {
+          id: 'lbl',
+          text: 'CASE',
+          font: base.labels[0]!.font,
+          weight: 'bold',
+          size: 6,
+          position: { x: 38.1, y: 19.05 },
+          rotation: 0,
+          depth,
+          enabled: true,
+          ...(depthIntent ? { depthIntent } : {}),
+        },
+      ],
+    };
+  }
+
+  it('reports the boundary the printer’s layers put the colour change on', () => {
+    // 3.81 − 3.0 = 0.81 below the engraved face; the nearest 0.2 mm layer line is 0.8.
+    expect(buildPreview(badgeJob(true, 0.5)).colourBoundaryDepth).toBeCloseTo(0.8, 6);
+  });
+
+  it('reports no boundary at all for a job that states no print', () => {
+    expect(buildPreview(badgeJob(false, 0.5)).colourBoundaryDepth).toBeNull();
+  });
+
+  it('flags a "surface" label whose floor lands in the bottom colour, at the boundary', () => {
+    const wrong = buildPreview(badgeJob(true, 0.9, 'surface')).findings.filter((f) => f.code === 'item-wrong-colour');
+    expect(wrong).toHaveLength(1);
+    expect(wrong[0]!.severity).toBe('error');
+    expect(wrong[0]!.labelId).toBe('lbl');
+    // The sentence names the boundary it crossed, so the fix ("cut shallower than 0.8") is legible.
+    expect(wrong[0]!.message).toContain('0.8 mm colour boundary');
+  });
+
+  it('says nothing for a "surface" label that stays in the top colour', () => {
+    const p = buildPreview(badgeJob(true, 0.5, 'surface'));
+    expect(p.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
+  });
+
+  it('says nothing without a print — no boundary, so no colour to be wrong about', () => {
+    const p = buildPreview(badgeJob(false, 0.9, 'surface'));
+    expect(p.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
   });
 });

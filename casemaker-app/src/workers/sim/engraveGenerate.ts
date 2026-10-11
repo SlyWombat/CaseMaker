@@ -28,6 +28,7 @@
  */
 
 import type { EngraveItem, EngraveJob } from '@/types/engraveJob';
+import type { Mm } from '@/types/units';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 // package.json version for the post's `;@MKR|CAM|v=` header. Read from package.json directly
 // rather than Vite's `__APP_VERSION__` define: Vite replaces the define at build time, but a
@@ -39,7 +40,7 @@ import { Z1, type MillProfile } from '@/engine/cnc/machine';
 import { resolveMachine, type MachineCalibration } from '@/engine/cnc/calibration';
 import { feedsFor, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
-import { toPartPlan, labelProfile, jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
+import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt } from '@/engine/cnc/engrave/partPlan';
 import { toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
@@ -52,6 +53,7 @@ import type { Setup } from '@/engine/cnc/setup';
 import { verifyProgram, type DepthLimit, type VerifyReport } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import {
+  colourIntentFindings,
   engraveCutRegions,
   engravabilityFindings,
   keepOutFindings,
@@ -62,6 +64,7 @@ import {
   type LabelRatioAt,
   type PerCharGlyph,
 } from './engraveGeometry';
+import { stackDepthLimit } from './stackDepthLimit';
 import type { OraclePredicted } from '@/engine/cnc/engrave/oracle';
 
 /** The stage that stopped the pipeline, or `done` when everything passed. */
@@ -183,6 +186,15 @@ export interface EngraveRegions {
   tool: Tool | null;
   radius: number | null;
   findings: JobFinding[];
+  /**
+   * The blank's colour boundary, mm below the engraved face, ON a real layer line (#285), or
+   * null when the job states no print and there are no colour layers to speak of.
+   *
+   * Read here rather than in the preview so both halves of the pipe — the picture and the
+   * generated program — are told the same boundary by the same call: the preview draws it and
+   * `item-wrong-colour` is raised against it, and the verifier's limit comes from the same stack.
+   */
+  colourBoundaryDepth: Mm | null;
 }
 
 /**
@@ -223,6 +235,18 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob, tool: Tool
   // membrane stays the verifier's `cut-too-deep`, which owns the layer-aligned depth limit.
   const voidFindings = keepOutFindings(tl, job, plan, engraveCutRegions(plan, measured), radius);
 
+  // #285 — the colour boundary, when the job states its print. The stack is built, read for one
+  // number and freed again: the limit this run's verifier uses is built separately, live, below.
+  // Two builds rather than one handle carried across an API boundary, because a stack that
+  // outlives its function is exactly the leak `dispose()` exists to prevent.
+  const boundary = stackDepthLimit(tl, plan, job);
+  let colourBoundaryDepth: Mm | null = null;
+  try {
+    colourBoundaryDepth = boundary === null ? null : boundary.boundary;
+  } finally {
+    boundary?.dispose();
+  }
+
   // `job.sacrificial` is threaded so the generate path's `vise-grip-shallow` judges what the
   // jaws actually grip (#213 §2), not the raw stock: the argument `validateVise` has accepted
   // since `454110a` but this call never passed.
@@ -231,6 +255,9 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob, tool: Tool
     ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
     ...engFindings,
     ...voidFindings,
+    // #285 — an item whose floor lands in the colour it was not asked for. A no-op for a job
+    // with no boundary and for any item that states no `depthIntent`.
+    ...colourIntentFindings(job, colourBoundaryDepth),
   ]);
 
   const byId = new Map(measured.map((m) => [m.labelId, m] as const));
@@ -275,7 +302,7 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob, tool: Tool
   const cuts: CutRegion[] = [...regions, ...traceCutRegions(tl, plan, radius)];
   const predicted: OraclePredicted[] = cuts.map((c) => ({ depth: c.depth, polygons: c.polygons }));
 
-  return { plan, measured, regions, cuts, predicted, tool, radius, findings };
+  return { plan, measured, regions, cuts, predicted, tool, radius, findings, colourBoundaryDepth };
 }
 
 /** Count what the panel reports: operations, cutting moves, estimated seconds, depth passes. */
@@ -477,40 +504,56 @@ export function engraveGenerate(
   }
 
   // 5. the verifier (#174) on the TEXT, with the depth limit the JOB implies: the CNC-2 stock
-  // limit, tightened where an under-surface void leaves a thinner membrane (#231 item 3).
-  const limit = jobDepthLimit(job);
+  // limit, tightened where an under-surface void leaves a thinner membrane (#231 item 3). On a
+  // job that states its print (#285) the whole limit comes from the layer stack instead, so the
+  // void membrane is layer-aligned and the verifier's number is the one the printer will honour.
+  // The stack owns wasm cross-sections, so it lives no longer than the two verifier calls below.
+  const stack = stackDepthLimit(tl, plan, job);
+  const limit: DepthLimit = stack?.limit ?? jobDepthLimit(job);
+  const limitReasonAt = stack
+    ? (x: number, y: number): string => {
+        if (stack.reasonAt(x, y) === 'stock') return '— the floor the job keeps under the stock';
+        const name = keepOutNameAt(job, x, y);
+        return name ? `— the membrane over "${name}"` : '— the membrane over a declared void';
+      }
+    : undefined;
   const setup = toSetup(job, mill);
-  const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ: ir.hopZ });
-  if (verify.findings.some((f) => f.severity === 'error')) {
-    errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
-    return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
-  }
 
-  // 6. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
-  // THIS gated action from the same toolpath, and checked by the SAME verifier — a frame the
-  // operator cannot run at the wrong Z, because the Z is in the file.
-  const frame = frameProgram(ir, ctx, mill, setup, tool, limit);
-  if ('error' in frame) {
-    errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
-    return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
-  }
-  const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
-  if (frameErrors.length > 0) {
-    errors.push({ stage: 'verify', message: `the frame file has ${frameErrors.length} verifier error(s)` });
-    return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, predicted, errors };
-  }
+  try {
+    const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ: ir.hopZ, ...(limitReasonAt ? { limitReasonAt } : {}) });
+    if (verify.findings.some((f) => f.severity === 'error')) {
+      errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
+      return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
+    }
 
-  return {
-    ok: true,
-    stage: 'done',
-    findings,
-    feeds,
-    cam,
-    nc,
-    verify,
-    frameNc: frame.nc,
-    frameVerify: frame.verify,
-    predicted,
-    errors,
-  };
+    // 6. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
+    // THIS gated action from the same toolpath, and checked by the SAME verifier — a frame the
+    // operator cannot run at the wrong Z, because the Z is in the file.
+    const frame = frameProgram(ir, ctx, mill, setup, tool, limit);
+    if ('error' in frame) {
+      errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
+      return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
+    }
+    const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
+    if (frameErrors.length > 0) {
+      errors.push({ stage: 'verify', message: `the frame file has ${frameErrors.length} verifier error(s)` });
+      return { ok: false, stage: 'verify', findings, feeds, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, predicted, errors };
+    }
+
+    return {
+      ok: true,
+      stage: 'done',
+      findings,
+      feeds,
+      cam,
+      nc,
+      verify,
+      frameNc: frame.nc,
+      frameVerify: frame.verify,
+      predicted,
+      errors,
+    };
+  } finally {
+    stack?.dispose();
+  }
 }

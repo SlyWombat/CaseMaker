@@ -38,6 +38,23 @@ export interface BadgeMagnetPocket {
   depth: Mm;
 }
 
+/**
+ * How the blank is SLICED (#166): the two inputs the app cannot compute and does not control,
+ * because the slicer is the user's own. They are stated, never measured — a different layer
+ * height moves every depth number on the blank (decision 27, `/Fabrication.md` §7.1).
+ *
+ * Only their PRESENCE matters to the engrave side (#285): `fromBadge.ts` copies them — with the
+ * split — into `EngraveJob.stock.print`, and that is what lets the job slice the compiled solid
+ * on the printer's real layer grid. A badge that declares no print leaves the job's depth limit
+ * analytic, unchanged.
+ */
+export interface BadgePrint {
+  /** The slicer's layer height, mm. */
+  layerHeight: Mm;
+  /** The first layer's own height, mm; the slicer's value when it differs. */
+  firstLayerHeight: Mm;
+}
+
 export interface BadgeParams {
   enabled: boolean;
   /** Overall length along X, mm. Oracle: 3.0 in. */
@@ -59,6 +76,13 @@ export interface BadgeParams {
   bottomExtruder: number;
   /** Extruder (tool) the top colour prints on. Oracle: T3. */
   topExtruder: number;
+  /**
+   * The slicing this blank depends on (#166). OPTIONAL, and its absence is the switch #285 reads:
+   * with no print stated the blank's colour boundary is not a fact the app holds, so an engrave
+   * job built from this badge keeps the analytic depth limit. #166 owns populating it (defaults,
+   * the panel's two fields, and `projectSchema`'s mirror).
+   */
+  print?: BadgePrint;
 }
 
 /**

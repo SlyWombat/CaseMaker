@@ -39,7 +39,10 @@ import { sacrificialDepthLimit } from '@/engine/cnc/verify';
  * CAM to re-infer them.
  *
  * Two differences from the §5.2 sketch (#200):
- *  - `split` is omitted: wood has no colour layers. The badge adds it back in CNC-3.
+ *  - `split` is OPTIONAL (#285): wood has no colour layers, so it is absent for every job but a
+ *    two-colour blank. A badge job that states its print carries `split`/`layerHeight` here, and
+ *    that is what lets the layer stack (#178) put the colour boundary on a real layer line; a job
+ *    without them plans exactly as it did before and its depth limit stays analytic.
  *
  * `keepOuts` is NOT empty any more (#231 item 3): a job that declares an under-surface void
  * (#165's magnet pocket) carries it here, as the same `{ footprint, zCeiling }` #178's layer
@@ -59,6 +62,17 @@ export interface PartPlan {
     thickness: Mm;
     /** Under-surface voids, in the stock XY frame; `zCeiling` is PART-frame z from the bottom. */
     keepOuts: { id: string; name: string; footprint: Profile; zCeiling: Mm }[];
+    /**
+     * The blank's colour split, PART-frame z from the bottom face — copied from
+     * `EngraveJob.stock.print` (#285). ABSENT for a job that states no print, which is every
+     * job that is not a two-colour badge: wood has no colour layers, so nothing downstream has
+     * a boundary to work from and the depth limit stays analytic.
+     */
+    split?: Mm;
+    /** The slicer's layer height, mm (#285). Present exactly when `split` is. */
+    layerHeight?: Mm;
+    /** The first layer's own height, mm (#285); absent = the same as `layerHeight`. */
+    firstLayerHeight?: Mm;
   };
   engraves: { id: string; name: string; profile: Profile; depth: Mm }[];
   /**
@@ -875,17 +889,36 @@ export function keepOutLimit(job: EngraveJob, membraneThickness: Mm): Mm {
 }
 
 /**
+ * The enabled void that binds at (x, y) — the one with the shallowest limit when two overlap —
+ * or null when none covers the point. One walk, so `keepOutLimitAt` and `keepOutNameAt` can
+ * never disagree about WHICH void is the answer there.
+ */
+function bindingKeepOutAt(job: EngraveJob, x: Mm, y: Mm): { ko: EngraveKeepOut; limit: Mm } | null {
+  let found: { ko: EngraveKeepOut; limit: Mm } | null = null;
+  for (const ko of job.keepOuts ?? []) {
+    if (!ko.enabled || !pointInKeepOut(ko, x, y)) continue;
+    const limit = keepOutLimit(job, keepOutMembrane(job, ko.zCeiling));
+    if (found === null || limit < found.limit) found = { ko, limit };
+  }
+  return found;
+}
+
+/**
  * The deepest cut an enabled under-surface void permits at (x, y), or null when none covers it.
  * When two voids overlap, the shallowest limit wins.
  */
 export function keepOutLimitAt(job: EngraveJob, x: Mm, y: Mm): Mm | null {
-  let found: Mm | null = null;
-  for (const ko of job.keepOuts ?? []) {
-    if (!ko.enabled || !pointInKeepOut(ko, x, y)) continue;
-    const limit = keepOutLimit(job, keepOutMembrane(job, ko.zCeiling));
-    found = found === null ? limit : Math.min(found, limit);
-  }
-  return found;
+  return bindingKeepOutAt(job, x, y)?.limit ?? null;
+}
+
+/**
+ * The NAME of the void that binds at (x, y), or null. The verifier's `cut-too-deep` says which
+ * membrane the cutter broke (#285); an unnamed void answers `''`, and the caller words the
+ * sentence its own way rather than being handed an invented name.
+ */
+export function keepOutNameAt(job: EngraveJob, x: Mm, y: Mm): string | null {
+  const binding = bindingKeepOutAt(job, x, y);
+  return binding === null ? null : (binding.ko.name ?? '');
 }
 
 /**
@@ -998,12 +1031,20 @@ export function toPartPlan(job: EngraveJob): PartPlan {
     keepOuts.push({ id: ko.id, name: ko.name ?? '', footprint: keepOutProfile(ko), zCeiling: ko.zCeiling });
   }
 
+  // #285 — the blank's print, when the job holds one. This is the ONLY place the plan learns
+  // there are colour layers at all; everything downstream (the stack, the boundary, the limit)
+  // is inert without it.
+  const print = job.stock.print;
+
   return {
     stock: {
       outline: stockOutline,
       supported: supportedFootprint(job.stock, job.sacrificial),
       thickness: job.stock.thickness,
       keepOuts,
+      // #285 — the badge's print facts, copied straight through when the job states them. Both
+      // keys are absent otherwise, so a job without a print plans exactly as it always did.
+      ...(print ? { split: print.split, layerHeight: print.layerHeight, firstLayerHeight: print.firstLayerHeight } : {}),
     },
     engraves,
     traces,

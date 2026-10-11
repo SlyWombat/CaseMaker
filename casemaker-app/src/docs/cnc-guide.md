@@ -496,6 +496,14 @@ is still a number in a box, and the colour boundary it is measured against is st
 measure. Until then the badge is a blank the app knows the shape of, not yet a job it knows
 the depths for.
 
+**The colour boundary is measured on the printer's layer grid (#285).** A badge that states how
+it is sliced — its layer height and first-layer height (#166) — hands those to the job along with
+its colour split, and from then on the boundary is read off the compiled blank sliced on the
+printer's real layers rather than assumed at the nominal height. That is what makes *surface* and
+*reveal* checkable: a label that states which colour it wants, and whose floor lands in the other
+one, is refused as `item-wrong-colour` (chapter 8.1). A badge that states no print leaves the
+depth limit arithmetic as it was.
+
 ---
 
 ## 7 · Your cutters — the house (CNC-6)
@@ -706,6 +714,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `item-detail-lost` | warning | An item loses detail (thin strokes, inside corners) to the cutter's radius. Formerly `label-detail-lost`. | Increase the size, enlarge the shape, or use a smaller cutter. |
 | `item-outside-stock` | error | An item hangs off the blank, or off the sacrificial material beside it (#213). Formerly `label-outside-stock`. | Move it back inside the edge margin, or declare a strip or board under the overhang. |
 | `item-over-void` | warning | An item cuts over a declared under-surface void (#231), whose membrane has nothing under it (#171). True at any depth — even a shallow cut there will chatter and finish rough. A single-line trace is warned about the same way (#270); a plunge drill is not, because a drill into a void is a breach `cut-too-deep` refuses, and a drilled hole has no pocketed floor to finish. | Move the cut clear of the void. A cut deep enough to break through is refused separately, as `cut-too-deep`. |
+| `item-wrong-colour` | error | On a two-colour blank (#285), a label's floor lands in the colour it was not asked to. Its `depthIntent` is *surface* (stay in the top colour) and the floor is past the colour boundary, or *reveal* (reach the bottom colour) and the floor is not past it. Only a label that STATES an intent can be judged: one with none, or set to *custom*, is left alone. The boundary is where the slicer's layers put it, not the nominal design height, so changing the layer height moves it. | Set the label's depth to the other side of the boundary, or switch its intent. The message names the boundary in mm. |
 | `trace-outside-stock` | error | A single-line trace runs off the blank (#219). | Move it back inside the stock. |
 
 **Checking the engraving job** (job):

@@ -52,8 +52,12 @@ export type FieldSource = 'computed' | 'catalogue' | 'user' | 'measured';
  * shipped default.
  */
 export interface EngraveJobSources {
-  /** Which stock fields were asserted, and how (#254). Absent = the shipped default blank. */
-  stock?: Partial<Record<'length' | 'width' | 'thickness' | 'material', FieldSource>>;
+  /**
+   * Which stock fields were asserted, and how (#254). Absent = the shipped default blank. `print`
+   * is stamped by whoever copies a badge's print facts in (#285), the same way `material` is
+   * stamped when a badge becomes the blank.
+   */
+  stock?: Partial<Record<'length' | 'width' | 'thickness' | 'material' | 'print', FieldSource>>;
   /** Provenance of `toolKey` (#254). Absent = the shipped default cutter. */
   tool?: FieldSource;
   /** Per-field provenance for `cutOverride` (#246). Absent = computed from the feeds table. */
@@ -73,6 +77,18 @@ export interface EngraveLabel {
   rotation: number;
   /** Depth of this label's floor below the top face, mm. Positive. */
   depth: Mm;
+  /**
+   * Which colour the floor is MEANT to land in (decision 20, `/Fabrication.md` §7.2): `reveal`
+   * reaches the bottom colour, `surface` stays in the top one, `custom` is the advanced override
+   * that says nothing about intent.
+   *
+   * OPTIONAL, and absent until #170's two-state control writes it — which is the honest state for
+   * every job authored before that: with no stated intent there is nothing to be wrong about, so
+   * `item-wrong-colour` (#285) cannot fire. The FIELD is declared here rather than in #170 because
+   * that check has to read it off the item it is judging; #170 owns the control that produces it,
+   * on `TextLabel` as well.
+   */
+  depthIntent?: 'reveal' | 'surface' | 'custom';
   enabled: boolean;
   /**
    * Reference-only (#215): the item produces no cut of its own and exists only to be named by a
@@ -461,11 +477,43 @@ export interface Sacrificial {
   source: 'default' | 'saved' | 'measured';
 }
 
+/**
+ * The print facts the depth model needs from whoever sliced the blank (#285, on #166's field).
+ *
+ * A two-colour blank's go/no-go is the colour split, and that only exists as a fact about the
+ * PRINT: the boundary lands where the slicer's layer grid puts it. This carries the three inputs
+ * `buildLayerStack` (decision 27) needs, so the app can slice the compiled solid on the printer's
+ * own grid rather than on the nominal design height.
+ *
+ * PART-frame z, like `zCeiling`: `split` is the colour change height above the blank's BOTTOM
+ * face — the same number `BadgeParams.splitHeight` carries, and the reason the two agree about
+ * where the boundary is.
+ *
+ * OPTIONAL, and its ABSENCE IS THE SWITCH (#285). A job without it has no colour layers as far as
+ * the app is concerned: its depth limit stays the analytic `jobDepthLimit` and its `.nc` is
+ * byte-identical to before. `fromBadge.ts` sets it the moment a badge declares its own print
+ * (`BadgeParams.print`, #166) — until then nothing in the app writes it.
+ *
+ * A `Mm` is the MODEL's layer height, a slicer setting the user states, never a measurement of
+ * the printed blank.
+ */
+export interface StockPrint {
+  /** Colour change height above the blank's BOTTOM face, mm (PART-frame z). */
+  split: Mm;
+  /** The slicer's layer height, mm. */
+  layerHeight: Mm;
+  /** The first layer's own height, mm; absent = the same as `layerHeight`. */
+  firstLayerHeight?: Mm;
+}
+
 export interface EngraveJob {
   schemaVersion: 2;
   name: string;
-  /** length = X, width = Y, thickness = Z. */
-  stock: { length: Mm; width: Mm; thickness: Mm; material: StockMaterial };
+  /**
+   * length = X, width = Y, thickness = Z. `print` is the badge path's colour-layer input (#285);
+   * absent for every job that is not a two-colour blank.
+   */
+  stock: { length: Mm; width: Mm; thickness: Mm; material: StockMaterial; print?: StockPrint };
   labels: EngraveLabel[];
   /** Shape pockets (#214), each at its own depth. Empty for a text-only job. */
   shapes: EngraveShape[];

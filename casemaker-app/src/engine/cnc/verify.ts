@@ -50,6 +50,15 @@ export interface VerifyContext {
   depthLimit: DepthLimit;
   /** Z at or above which XY rapids are allowed, work frame. The IR's hopZ. */
   minRapidZ: number;
+  /**
+   * WHY the limit is what it is at (x, y), as the tail of the `cut-too-deep` sentence — `— the
+   * membrane over "Magnet pocket"`, say (#285). A membrane and the stock's own floor are
+   * different failures with different fixes, and the number alone does not tell them apart.
+   *
+   * OPTIONAL: the CNC-2 and restart paths compute their limit from the stock alone and pass
+   * nothing, and the message then ends exactly where it always did.
+   */
+  limitReasonAt?: (x: number, y: number) => string;
 }
 
 export interface VerifyFinding {
@@ -328,10 +337,14 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         }
         if (worst !== null) {
           const [x, y, z] = worst.p;
+          // #285 — name WHICH limit was broken when the caller can say. The trailing fragment is
+          // passed through verbatim (it carries its own em dash) so this file needs no vocabulary
+          // for voids, membranes or colour boundaries.
+          const why = ctx.limitReasonAt?.(x, y);
           push(
             'cut-too-deep',
             m.line,
-            `a cutting move reaches Z=${fmt(z)} at (${fmt(x)}, ${fmt(y)}), deeper than the ${fmt(ctx.depthLimit(x, y))} mm permitted there`,
+            `a cutting move reaches Z=${fmt(z)} at (${fmt(x)}, ${fmt(y)}), deeper than the ${fmt(ctx.depthLimit(x, y))} mm permitted there${why === undefined ? '' : ` ${why}`}`,
           );
         }
 

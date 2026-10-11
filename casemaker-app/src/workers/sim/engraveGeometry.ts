@@ -494,3 +494,61 @@ function emptyMessage(item: EngraveAnyItem, cutter: string): string {
   }
   return `${itemLabel(item)} has nothing this cutter can reach: it is smaller than ${cutter}.`;
 }
+
+/** `0.8`, not `0.80000000000000004` — the boundary comes off a layer grid, not a decimal string. */
+function mm(v: number): string {
+  return `${Number(v.toFixed(3))}`;
+}
+
+/**
+ * Items whose floor lands in the colour they did not ask for (#285, decision 20).
+ *
+ * This is the OTHER half of the colour boundary, and the reason the boundary is not a
+ * `cut-too-deep` limit: a `reveal` label crossing it is the entire point of a two-colour blank, so
+ * a per-move depth limit would refuse the job it exists to cut. What can be wrong is the
+ * AGREEMENT between where the floor is and which colour it was asked to land in — and only the
+ * item itself knows which that was.
+ *
+ * The rule, in the depth-below-the-face frame everything here is measured in: a floor shallower
+ * than `boundaryDepth` stays in the TOP colour, one deeper reaches the BOTTOM colour. So a
+ * `surface` item deeper than the boundary, and a `reveal` item not past it, are both floors in the
+ * wrong colour.
+ *
+ * A job with no boundary (no `stock.print`) has no colour to be wrong about, and an item with no
+ * `depthIntent` — every item authored before #170's control — states no expectation, so neither
+ * produces a finding. `custom` is the advanced override and says "I know; the number is the
+ * point", so it is left alone by design.
+ */
+export function colourIntentFindings(job: EngraveJob, boundaryDepth: number | null): JobFinding[] {
+  if (boundaryDepth === null) return [];
+  const findings: JobFinding[] = [];
+  for (const label of job.labels) {
+    // A construction label cuts nothing, so it has no floor to place.
+    if (!label.enabled || label.construction === true) continue;
+    const intent = label.depthIntent;
+    if (intent !== 'reveal' && intent !== 'surface') continue;
+    const belowBoundary = label.depth > boundaryDepth;
+    if (intent === 'surface' && belowBoundary) {
+      findings.push({
+        severity: 'error',
+        code: 'item-wrong-colour',
+        labelId: label.id,
+        message:
+          `${itemLabel(label)} cuts ${mm(label.depth)} mm deep, past the ${mm(boundaryDepth)} mm colour ` +
+          'boundary — its floor lands in the BOTTOM colour, and "surface" asks for the top one. ' +
+          `Cut shallower than ${mm(boundaryDepth)} mm, or set the label to "reveal".`,
+      });
+    } else if (intent === 'reveal' && !belowBoundary) {
+      findings.push({
+        severity: 'error',
+        code: 'item-wrong-colour',
+        labelId: label.id,
+        message:
+          `${itemLabel(label)} cuts ${mm(label.depth)} mm deep, inside the top colour — the ` +
+          `${mm(boundaryDepth)} mm colour boundary is where the bottom colour starts. Cut deeper than ` +
+          `${mm(boundaryDepth)} mm, or set the label to "surface".`,
+      });
+    }
+  }
+  return findings;
+}

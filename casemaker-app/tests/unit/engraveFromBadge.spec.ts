@@ -80,3 +80,50 @@ describe('badgeBlankFor (#271)', () => {
     expect(plan.stock.keepOuts.map((k) => k.id)).toEqual([BADGE_POCKET_KEEP_OUT_ID]);
   });
 });
+
+describe('the badge’s print becomes the job’s (#285)', () => {
+  it('carries nothing when the badge states no print — the switches stay off', () => {
+    // `BadgeParams.print` is #166's, and nothing in the app writes it yet, so this is the state
+    // every badge is in today. The job must be exactly what it was before #285 existed.
+    const blank = badgeBlankFor(defaultBadgeParams());
+    expect(blank.stock.print).toBeUndefined();
+    // …and the plan therefore has no colour layers at all, which is what keeps the depth limit
+    // analytic and the `.nc` byte-identical.
+    expect(toPartPlan(jobForBadge()).stock.split).toBeUndefined();
+  });
+
+  it('copies the split and the layer grid when the badge states its print', () => {
+    const badge = defaultBadgeParams({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } });
+    const blank = badgeBlankFor(badge);
+    // The split travels WITH the blank: a job document is standalone and must not have to look
+    // back at the project's badge to know where its colour boundary is.
+    expect(blank.stock.print).toEqual({ split: 3.0, layerHeight: 0.2, firstLayerHeight: 0.2 });
+    // The blank itself is unchanged — the print adds a fact, it does not move a dimension.
+    expect(blank.stock.thickness).toBe(3.81);
+    expect(blank.notes.join(' ')).toContain('3 mm colour split');
+    expect(blank.notes.join(' ')).toContain('0.2 mm layers');
+  });
+
+  it('reaches the plan, where the layer stack reads it', () => {
+    const badge = defaultBadgeParams({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } });
+    const plan = toPartPlan(jobForBadge(badge));
+    expect(plan.stock.split).toBe(3.0);
+    expect(plan.stock.layerHeight).toBe(0.2);
+    expect(plan.stock.firstLayerHeight).toBe(0.2);
+  });
+
+  it('keeps the print through the schema round-trip, and drops it for a job without one', () => {
+    const badge = defaultBadgeParams({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } });
+    const withPrint = parseEngraveJob(JSON.parse(JSON.stringify(jobForBadge(badge))) as unknown);
+    expect(withPrint.ok).toBe(true);
+    if (!withPrint.ok) return;
+    expect(withPrint.job.stock.print).toEqual({ split: 3.0, layerHeight: 0.2, firstLayerHeight: 0.2 });
+
+    // The other direction: a plain job keeps no key, so it round-trips byte-for-byte.
+    const without = parseEngraveJob(JSON.parse(JSON.stringify(jobForBadge())) as unknown);
+    expect(without.ok).toBe(true);
+    if (!without.ok) return;
+    expect(without.job.stock.print).toBeUndefined();
+    expect('print' in without.job.stock).toBe(false);
+  });
+});

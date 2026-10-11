@@ -406,6 +406,19 @@ export function sha256Hex(input: string): string {
 // ---------------------------------------------------------------------------------------------
 
 /**
+ * #285 — whether the membrane numbers on this sheet are the ones the verifier enforced.
+ *
+ * A job that states its print is verified against the layer-aligned limit the WORKER computes by
+ * slicing the compiled solid (`stackDepthLimit`); building that needs Manifold, and the run sheet
+ * is built on the main thread with no wasm by design. So the sheet prints the membrane arithmetic
+ * it can do and labels it *nominal* rather than presenting a number it is not standing behind.
+ * A job with no print keeps the exact wording it always had.
+ */
+function nominalSuffix(job: EngraveJob): string {
+  return job.stock.print === undefined ? '' : ' (nominal)';
+}
+
+/**
  * The void a cut item's extent sits over, or null. Both the item and the void are reduced to
  * their stock-frame bounding boxes (`buildDiagram` has them), because the sheet is pure — no
  * wasm, so no exact region intersection — and a box overlap is the CONSERVATIVE test: it may
@@ -796,7 +809,7 @@ export function buildRunSheet(
       text:
         `Under-surface void — ${ko.name}. The blank is only ${fmtNum(ko.solidThickness)} mm thick ` +
         'over it: do not cut through.',
-      value: `deepest cut ${fmtNum(keepOutLimit(job, ko.solidThickness))} mm`,
+      value: `deepest cut ${fmtNum(keepOutLimit(job, ko.solidThickness))} mm${nominalSuffix(job)}`,
     });
   }
 
@@ -926,8 +939,8 @@ export function buildRunSheet(
     const note = over
       ? ` — over "${over.name}", only ${fmtNum(over.solidThickness)} mm of material` +
         (item.depth > keepOutLimit(job, over.solidThickness)
-          ? ` (DEEPER than the ${fmtNum(keepOutLimit(job, over.solidThickness))} mm the void allows)`
-          : ` (deepest cut there ${fmtNum(keepOutLimit(job, over.solidThickness))} mm)`)
+          ? ` (DEEPER than the ${fmtNum(keepOutLimit(job, over.solidThickness))} mm the void allows${nominalSuffix(job)})`
+          : ` (deepest cut there ${fmtNum(keepOutLimit(job, over.solidThickness))} mm${nominalSuffix(job)})`)
       : '';
     cutSteps.push({ text: `${item.name}${note}`, value: `${fmtNum(item.depth)} mm deep` });
   }

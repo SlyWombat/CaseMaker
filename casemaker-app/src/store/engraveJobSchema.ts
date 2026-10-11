@@ -49,6 +49,10 @@ const labelSchema = z.object({
   position: positionSchema,
   rotation: z.number().finite(),
   depth: z.number().finite().positive(),
+  // Which colour the floor is meant to land in (#285 reading decision 20). OPTIONAL, not
+  // defaulted: a job authored before the control existed states no intent, carries no key, and
+  // round-trips byte-for-byte — the same reason `construction` below is optional.
+  depthIntent: z.enum(['reveal', 'surface', 'custom']).optional(),
   enabled: z.boolean(),
   // Reference-only item (#215). Optional, so a pre-#215 job is unchanged.
   construction: z.boolean().optional(),
@@ -337,11 +341,24 @@ const sacrificialSchema = z.object({
   source: z.enum(['default', 'saved', 'measured']),
 });
 
+/**
+ * The print facts a two-colour blank's depth model needs (#285). OPTIONAL, not defaulted: a job
+ * that is not a badge keeps no key, so it round-trips byte-for-byte and its depth limit stays the
+ * analytic one. `split`/`layerHeight` are bounded by the same limits as the stock's own Z, so a
+ * hand-edited file cannot smuggle in a boundary that is not on the blank.
+ */
+const stockPrintSchema = z.object({
+  split: z.number().finite().nonnegative().max(STOCK_LIMITS.thickness),
+  layerHeight: z.number().finite().positive().max(STOCK_LIMITS.thickness),
+  firstLayerHeight: z.number().finite().positive().max(STOCK_LIMITS.thickness).optional(),
+});
+
 const stockSchema = z.object({
   length: z.number().finite().positive().max(STOCK_LIMITS.length),
   width: z.number().finite().positive().max(STOCK_LIMITS.width),
   thickness: z.number().finite().positive().max(STOCK_LIMITS.thickness),
   material: z.enum(['softwood', 'hardwood', 'mdf', 'pla']),
+  print: stockPrintSchema.optional(),
 });
 
 const customFontSchema = z.object({
@@ -383,6 +400,8 @@ const jobSourcesSchema = z.object({
       width: fieldSourceSchema.optional(),
       thickness: fieldSourceSchema.optional(),
       material: fieldSourceSchema.optional(),
+      // #285 — the badge's own print facts, stamped when they became the job's.
+      print: fieldSourceSchema.optional(),
     })
     .optional(),
   tool: fieldSourceSchema.optional(),

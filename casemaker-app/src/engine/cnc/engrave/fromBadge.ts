@@ -22,6 +22,9 @@
  *   - The pocket is CENTRED on the outline and `BadgeMagnetPocket` has no offset, so the flip that
  *     machining requires cannot move it: a mirror about either in-plane axis maps the centre to
  *     itself. Nothing here depends on which way the operator turns the blank over.
+ *   - `splitHeight` and the badge's own `print` (#166) travel into `EngraveJob.stock.print` when
+ *     the badge states one (#285). That is the switch that puts the colour boundary into the
+ *     depth model; a badge without a print leaves the job's limit analytic and its `.nc` unchanged.
  *
  * This module is PURE and returns a patch, not a job: the caller decides what to do with it, and
  * `engraveJobStore` owns the write (and the `sources` stamping, #254).
@@ -54,6 +57,28 @@ function mm(v: number): string {
 }
 
 /**
+ * The blank's print facts, in `EngraveJob.stock`'s shape, or `undefined` when the badge states
+ * none (#285).
+ *
+ * This is the switch the whole colour-boundary path hangs off. `EngraveJob.stock.print` is what
+ * makes the app slice the compiled solid on the printer's layer grid instead of trusting a
+ * nominal design height — so it is written ONLY when the badge actually declares its print
+ * (`BadgeParams.print`, #166). A badge that does not leaves the job's depth limit analytic and
+ * its `.nc` byte-identical to before.
+ *
+ * The split travels with it: the job is a standalone document and must not have to look back at
+ * the project's badge to know where its colour boundary is.
+ */
+function stockPrintFor(badge: BadgeParams): EngraveJob['stock']['print'] {
+  if (!badge.print) return undefined;
+  return {
+    split: badge.splitHeight,
+    layerHeight: badge.print.layerHeight,
+    firstLayerHeight: badge.print.firstLayerHeight,
+  };
+}
+
+/**
  * Read `badge` as the job's blank: its stock, and the void its model already has.
  *
  * Deliberately narrow — it does not touch labels, tool, vise, feeds or `minFloor`. The badge
@@ -62,15 +87,30 @@ function mm(v: number): string {
  */
 export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
   const pocket = badge.magnetPocket;
+  const print = stockPrintFor(badge);
   const notes = [
     `The badge's blank, ${mm(badge.width)} × ${mm(badge.height)} × ${mm(badge.thickness)} mm PLA, ` +
       `is now the stock (its bounding rectangle — the corner radii are not modelled here).`,
   ];
 
+  if (print) {
+    notes.push(
+      `The blank's print came with it: a ${mm(badge.splitHeight)} mm colour split at ` +
+        `${mm(print.layerHeight)} mm layers, so the colour boundary is measured on the printer's own ` +
+        'layer grid rather than at the nominal height.',
+    );
+  }
+
   if (!pocket) {
     notes.push('This badge has no magnet pocket, so no void was declared.');
     return {
-      stock: { length: badge.width, width: badge.height, thickness: badge.thickness, material: 'pla' },
+      stock: {
+        length: badge.width,
+        width: badge.height,
+        thickness: badge.thickness,
+        material: 'pla',
+        ...(print ? { print } : {}),
+      },
       pocket: null,
       notes,
     };
@@ -83,7 +123,13 @@ export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
   );
 
   return {
-    stock: { length: badge.width, width: badge.height, thickness: badge.thickness, material: 'pla' },
+    stock: {
+      length: badge.width,
+      width: badge.height,
+      thickness: badge.thickness,
+      material: 'pla',
+      ...(print ? { print } : {}),
+    },
     pocket: {
       id: BADGE_POCKET_KEEP_OUT_ID,
       name: 'Magnet pocket',

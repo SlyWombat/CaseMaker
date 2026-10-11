@@ -134,6 +134,12 @@ export interface EngravePreview {
   engravability: Omit<LabelEngravability, 'polygons'>[];
   /** `engraveRegions`' findings — `validateJob` + `validateVise` + engravability + the #171 void warning (#288). */
   findings: JobFinding[];
+  /**
+   * The blank's colour boundary, mm below the engraved face and ON a real layer line (#285), or
+   * null when the job states no print. Read off the same `engraveRegions` call the cuts come from,
+   * so the line the panel draws and the `item-wrong-colour` finding agree by construction.
+   */
+  colourBoundaryDepth: Mm | null;
   /** #211's cutter recommendation, with the compromise message completed here (see below). */
   recommendation: ToolRecommendation;
 }
@@ -246,7 +252,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // The job's own snapshot wins over its key's entry (design point 2, #305), resolved against
     // the list the main thread sent — the worker has no registry of its own to read.
     const tool = toolForJob(job, tools);
-    const { plan, measured, cuts, findings } = engraveRegions(tl, job, tool);
+    const { plan, measured, cuts, findings, colourBoundaryDepth } = engraveRegions(tl, job, tool);
 
     // A label whose findings include an error is left out of the cut — the stock is drawn
     // uncut there — but its row and findings are still reported (the issue's rule).
@@ -369,6 +375,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       voids,
       engravability: measured.map(({ polygons: _polygons, ...rest }) => rest),
       findings,
+      colourBoundaryDepth,
       recommendation: {
         ...recommendation,
         reason: completeCompromiseReason(tl, job, recommendation, tools),
