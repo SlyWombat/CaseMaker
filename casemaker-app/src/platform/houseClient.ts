@@ -11,11 +11,12 @@
  * ASKED BY EVERY BUILD, BECAUSE REACHING IS A RUNTIME FACT AND NOT A BUILD TARGET (decision 31). A
  * browser that loaded this page from the service — a phone on the LAN, a bench browser — must reach
  * it, and that browser is not the Tauri shell. So there is no `canRunLocalServer` guard here: the
- * probe runs and the ORIGIN's answer decides. `canRunLocalServer` gates hosting and syncing, never
- * reaching. The price of that honesty is one request and one 404 in the console for the web
- * deployment, whose origin has no service to answer — observed in #306's browser QA, reported on the
- * issue, and deliberately kept as the smaller cost next to a reachability rule that would be wrong
- * for the LAN case.
+ * probe runs and the answer decides. `canRunLocalServer` gates hosting and syncing, never reaching.
+ * The price of that honesty is one request per visit from the web deployment, whose host has no
+ * service to answer — observed in #306's browser QA, reported on the issue, and deliberately kept as
+ * the smaller cost next to a reachability rule that would be wrong for the LAN case. It is asked
+ * UNDER THE APP'S OWN BASE (#342), so a static host answers it with its SPA fallback rather than the
+ * 404 a request to the host root drew; the JSON-shape check below reads both as `absent`.
  *
  * THE TRAP IT EXISTS TO AVOID. The embedded server answers every path it does not know with
  * `index.html` and status **200** so the SPA's deep links work. A client that read "200" as
@@ -62,8 +63,9 @@ import { ToolLibrarySchema, ToolSchema, type ToolLibraryEntry } from '@/engine/c
 import { FeedCatalogueSchema, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 
 /**
- * The API root under the page's origin. Matches `house_api.rs`'s route prefix, and is the one
- * string a change has to keep in step — the Rust route tests and this module are the two ends.
+ * The service's route prefix, appended to {@link houseBaseUrl} — the page's origin plus the app's
+ * base path (#342). Matches `house_api.rs`'s route prefix, and is the one string a change has to
+ * keep in step — the Rust route tests and this module are the two ends.
  */
 export const HOUSE_API_PATH = '/api/v1';
 
@@ -351,6 +353,15 @@ export interface HouseClient {
  * something that answers `{@link HOUSE_API_PATH}` — a second address would need its own discovery
  * and its own Windows firewall story for nothing (#306). Returns `''` when there is no `location`
  * at all (a unit test, a worker), which makes every URL relative and every probe honestly `absent`.
+ *
+ * THE ORIGIN PLUS THE BUILD'S OWN BASE PATH (#342). The web deployment serves the app from a
+ * subdirectory (`https://electricrv.ca/casemaker/`, `DEPLOY_BASE=/casemaker/`), so asking the origin
+ * alone reached `https://electricrv.ca/api/v1/health` — the right verdict (`absent`), the wrong
+ * request, and a 404 in the console on every visit. The API root hangs under the app's own base, and
+ * that base is read from the BUILD rather than guessed: `import.meta.env.BASE_URL` is where Vite
+ * actually mounted the app. `document.baseURI` would not do — there is no `<base>` element, so it is
+ * the current page's URL, and a deep link like `/casemaker/jobs/7` would resolve to the wrong root.
+ * A static host answers this with its SPA fallback: the same `absent`, without the 404.
  */
 export function houseBaseUrl(): string {
   if (typeof location === 'undefined') return '';
@@ -358,7 +369,10 @@ export function houseBaseUrl(): string {
   // `file://` and other opaque origins report the literal string "null"; a relative URL is the
   // honest version of "this page has no origin", and it fails the probe rather than fetching
   // `null/api/v1/health`.
-  return origin === 'null' ? '' : origin;
+  if (origin === 'null' || origin === '') return '';
+  // `BASE_URL` is a path prefix in every build this repo makes (`vite.config.ts`'s `DEPLOY_BASE`,
+  // default `/`), resolved against the origin so that it works with or without a trailing slash.
+  return new URL(import.meta.env.BASE_URL, `${origin}/`).href.replace(/\/+$/, '');
 }
 
 function reasonOf(e: unknown): string {

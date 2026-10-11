@@ -32,6 +32,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 /** One canned response, recorded so a test can assert the request as well as the answer. */
@@ -101,6 +102,39 @@ describe('houseBaseUrl', () => {
     // a URL worth building.
     vi.stubGlobal('location', { origin: 'null' });
     expect(houseBaseUrl()).toBe('');
+  });
+
+  it('carries the build’s own base path, so a subdirectory deploy asks its own root (#342)', () => {
+    vi.stubGlobal('location', { origin: 'https://electricrv.ca' });
+    // The cPanel deploy: `DEPLOY_BASE=/casemaker/` reaches the build as Vite's `BASE_URL`.
+    vi.stubEnv('BASE_URL', '/casemaker/');
+    expect(houseBaseUrl()).toBe('https://electricrv.ca/casemaker');
+    // A base without its trailing slash lands in the same place — the strip is the same one the
+    // request path already goes through.
+    vi.stubEnv('BASE_URL', '/casemaker');
+    expect(houseBaseUrl()).toBe('https://electricrv.ca/casemaker');
+    // The desktop shell and the plain dev server are mounted at `/`, and are unchanged.
+    vi.stubEnv('BASE_URL', '/');
+    expect(houseBaseUrl()).toBe('https://electricrv.ca');
+  });
+
+  it('asks its own root, not the host root, so the console stays clean (#342)', async () => {
+    vi.stubGlobal('location', { origin: 'https://electricrv.ca' });
+    vi.stubEnv('BASE_URL', '/casemaker/');
+    // What the bug did: this URL was `https://electricrv.ca/api/v1/health`, and a static host with
+    // nothing mounted there answers 404 — on every page load.
+    const staticHost = stubFetch(() => ({ contentType: 'text/html', body: '<!doctype html>' }));
+    const probe = await probeHouse();
+    expect(staticHost[0]!.url).toBe(`https://electricrv.ca/casemaker${HOUSE_API_PATH}/health`);
+    // The fallback is a page, and a page is not the service — `absent`, exactly as before.
+    expect(probe.kind).toBe('absent');
+
+    // With no base the URL is the one it always was: the desktop shell and the dev server.
+    vi.stubEnv('BASE_URL', '/');
+    const desktop = stubFetch(() => ({ contentType: 'application/json', body: JSON.stringify(HEALTH) }));
+    const present = await probeHouse();
+    expect(desktop[0]!.url).toBe(`https://electricrv.ca${HOUSE_API_PATH}/health`);
+    expect(present.kind).toBe('present');
   });
 });
 
