@@ -12,7 +12,6 @@
 
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
-import { Html } from '@react-three/drei';
 import { useSimStore } from '@/store/simStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import {
@@ -200,45 +199,6 @@ export function SimMeshes() {
 
       {layers.fixture &&
         meshes?.fixture.map((f) => <FixtureBox key={f.id} mesh={f.mesh} label={f.label} />)}
-
-      {showSacrificial && (
-        // #213 §4 — the legend entry for the pale grey, shown only while the material is drawn.
-        // #229 — `style` reaches the fullscreen Html's wrapper (a non-transform Html gets its
-        // pointer-events from there, not from the `pointerEvents` prop); without it the
-        // viewport-sized wrapper swallows clicks meant for the toolbar below it.
-        <Html fullscreen zIndexRange={[8, 0]} style={{ pointerEvents: 'none' }}>
-          <div
-            data-testid="sim-legend-sacrificial"
-            style={{
-              position: 'absolute',
-              top: 8,
-              right: 8,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              background: 'rgba(20,25,30,0.82)',
-              border: '1px solid #2a2f36',
-              borderRadius: 4,
-              padding: '3px 6px',
-              color: '#d1d5db',
-              fontSize: 11,
-              lineHeight: 1.6,
-              pointerEvents: 'none',
-            }}
-          >
-            <span
-              style={{
-                width: 10,
-                height: 10,
-                background: SACRIFICIAL_COLOR,
-                border: '1px solid #00000055',
-                display: 'inline-block',
-              }}
-            />
-            sacrificial
-          </div>
-        </Html>
-      )}
     </group>
   );
 }

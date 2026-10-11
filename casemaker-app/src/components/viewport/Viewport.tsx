@@ -4,6 +4,8 @@ import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 import { GridFloor } from './GridFloor';
 import { SceneMeshes } from './SceneMeshes';
+import { EngraveLegend } from './EngraveLegend';
+import { SimLegend } from './SimLegend';
 import { SimTransport } from './SimTransport';
 import { ViewportToolbar } from './ViewportToolbar';
 import {
@@ -310,6 +312,11 @@ export function Viewport() {
         {!simActive && !engraveActive && <GridFloor />}
         <SceneMeshes />
       </Canvas>
+      {/* #349 — the engrave depth legend rides over the canvas as DOM, like the transport, rather
+          than being projected from the scene origin. It renders itself null with no preview. */}
+      {engraveActive && <EngraveLegend />}
+      {/* #349 — the simulation's sacrificial swatch, the same move. */}
+      {simActive && <SimLegend />}
       {/* #198 — the transport rides over the bottom of the canvas while a simulation owns the
           scene. It renders itself null otherwise, so no guard is needed here. */}
       <SimTransport />

@@ -41,6 +41,20 @@ async function axisRects(page: Page): Promise<{ x: Rect; y: Rect }> {
 
 const moved = (a: Rect, b: Rect): number => Math.hypot(a.x - b.x, a.y - b.y);
 
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** The other half of #229, reported as #349: the legend must stay where it is put. */
+const within = (inner: Box, outer: Box): boolean =>
+  inner.x >= outer.x &&
+  inner.y >= outer.y &&
+  inner.x + inner.width <= outer.x + outer.width &&
+  inner.y + inner.height <= outer.y + outer.height;
+
 test('engrave section: Top, Fit and the zoom buttons take ordinary clicks and move the camera', async ({
   cm,
   page,
@@ -91,4 +105,58 @@ test('engrave section: Top, Fit and the zoom buttons take ordinary clicks and mo
   await page.waitForTimeout(700);
   const afterFit = await axisRects(page);
   expect(moved(zoomedOut.x, afterFit.x)).toBeGreaterThan(5);
+});
+
+// #349 — the legend used to be a drei `<Html fullscreen>`: its wrapper is translated to the scene
+// ORIGIN's projected screen position and the inner div offset back, so it only sits where it looks
+// like it sits while the origin projects inside the canvas. Orbit the camera past that and the
+// label drifts off with it — the report that filed this had it over the header. As DOM beside the
+// canvas it has no position in the scene to inherit, so an orbit that visibly moves the camera
+// must leave its box exactly where it was, inside the pane.
+test('the depth legend stays put and inside the pane while the camera orbits (#349)', async ({
+  cm,
+  page,
+}) => {
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+  });
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
+  // Let the preview build and the section-open AutoFrame settle.
+  await page.waitForTimeout(700);
+
+  const legend = page.getByTestId('engrave-preview-legend');
+  const pane = page.locator('.viewport-wrapper');
+  const before = (await legend.boundingBox()) as Box;
+  const paneBox = (await pane.boundingBox()) as Box;
+  expect(before).not.toBeNull();
+  expect(within(before, paneBox), 'the legend starts inside the viewport pane').toBe(true);
+
+  const start = await axisRects(page);
+
+  // An ordinary orbit drag across the canvas — no forced click; the legend is pointer-transparent
+  // (that is the #229 half, asserted above).
+  const canvas = (await page.getByTestId('viewport-canvas').boundingBox()) as Box;
+  const cx = canvas.x + canvas.width / 2;
+  const cy = canvas.y + canvas.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 220, cy + 90, { steps: 25 });
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+
+  // The drag must have moved the camera, or "the legend did not move" proves nothing. The axis
+  // labels are placed by drei from the camera's matrix, so their projected positions are the
+  // witness — the same evidence the toolbar test uses.
+  const orbited = await axisRects(page);
+  expect(
+    Math.max(moved(start.x, orbited.x), moved(start.y, orbited.y)),
+    'the orbit drag moved the camera',
+  ).toBeGreaterThan(20);
+
+  const after = (await legend.boundingBox()) as Box;
+  expect(after.x).toBeCloseTo(before.x, 0);
+  expect(after.y).toBeCloseTo(before.y, 0);
+  expect(within(after, paneBox), 'the legend is still inside the viewport pane').toBe(true);
 });

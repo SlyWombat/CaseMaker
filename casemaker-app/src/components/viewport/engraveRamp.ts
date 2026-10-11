@@ -1,11 +1,14 @@
 /**
- * The engrave preview's depth ramp (#205) — a plain module so the ramp can be pinned by a test
+ * The engrave preview's colours (#205) — a plain module so the ramp can be pinned by a test
  * without a canvas, and so `EngravePreview.tsx` exports components only
  * (`react-refresh/only-export-components`, the same rule that moved the camera helpers into
  * `viewportCamera.ts` under #197).
  *
  * The ramp is FIXED, not per-job: the same depth reads as the same colour in every job, so a
  * 1 mm pocket never looks like a 2 mm one because the job's deepest cut changed.
+ *
+ * The void outline lives here rather than beside the meshes that draw it because the legend is a
+ * plain DOM component (#349) and must not import the three/drei module just to name one colour.
  */
 
 import * as THREE from 'three';
@@ -13,6 +16,9 @@ import * as THREE from 'three';
 /** The ramp's ends: shallowest and deepest, per the issue (#205). */
 export const SHALLOW_COLOR = '#ffe08a';
 export const DEEP_COLOR = '#7a2e0e';
+
+/** #271 — the amber a declared under-surface void is outlined in, on the face and in the legend. */
+export const VOID_COLOR = '#e0c07a';
 
 /**
  * Depth → colour on the fixed ramp over `[0, maxDepth]`, where `maxDepth` is

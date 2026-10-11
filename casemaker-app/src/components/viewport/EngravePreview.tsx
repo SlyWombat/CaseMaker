@@ -24,7 +24,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { ViseParams } from '@/types/engraveJob';
 import { geometryFromMesh, SACRIFICIAL_COLOR } from './simGeometry';
-import { depthColor } from './engraveRamp';
+import { depthColor, VOID_COLOR } from './engraveRamp';
 
 /** The same neutral wood tone the simulation's stock uses (#197). */
 const STOCK_COLOR = '#c9a26b';
@@ -105,7 +105,6 @@ function Sacrificial({ mesh, name, label }: { mesh: NodeMeshOutput; name: string
  * The amber is the same warning tone the panel's findings use, because that is what the outline
  * means: cut over it and the job is warned, cut too deep over it and the verifier refuses.
  */
-const VOID_COLOR = '#e0c07a';
 /** How far above the top face the outline floats, mm — clear of the surface's own geometry. */
 const VOID_LIFT = 0.05;
 
@@ -215,11 +214,8 @@ export function EngravePreview() {
 
   // Hooks run before the early return; the geometry is null until the first preview lands.
   const stockGeom = useMeshGeometry(preview?.stock ?? null);
-  // Distinct depths, shallowest first, for the legend and the ramp.
-  const depths = useMemo(() => {
-    if (!preview) return [];
-    return [...new Set(preview.floors.map((f) => f.depth))].sort((a, b) => a - b);
-  }, [preview]);
+  // The ramp's upper bound: what this stock will allow at all (#205). The distinct-depth list the
+  // legend used to build lives with the legend now (#349).
   const maxDepth = stock.thickness - minFloor;
 
   if (!preview || !stockGeom) return null;
@@ -289,81 +285,6 @@ export function EngravePreview() {
         </Html>
       )}
 
-      {/* Screen-fixed legend: each distinct depth and the colour the floors use for it. */}
-      <Html fullscreen zIndexRange={[8, 0]} style={NON_INTERACTIVE}>
-        <div
-          data-testid="engrave-preview-legend"
-          style={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            background: 'rgba(20,25,30,0.82)',
-            border: '1px solid #2a2f36',
-            borderRadius: 4,
-            padding: '6px 8px',
-            color: '#d1d5db',
-            fontSize: 11,
-            lineHeight: 1.6,
-            pointerEvents: 'none',
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 2 }}>Depth</div>
-          {depths.length === 0 ? (
-            <div style={{ color: '#9aa4b0' }}>nothing cut</div>
-          ) : (
-            depths.map((d) => (
-              <div key={d} data-testid={`engrave-legend-${d}`} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <span
-                  style={{
-                    width: 10,
-                    height: 10,
-                    background: depthColor(d, maxDepth),
-                    border: '1px solid #00000055',
-                    display: 'inline-block',
-                  }}
-                />
-                {d.toFixed(1)} mm
-              </div>
-            ))
-          )}
-          {/* #213 — the sacrificial material is not a depth; it gets its own swatch. */}
-          {preview.sacrificial.length > 0 && (
-            <div
-              data-testid="engrave-legend-sacrificial"
-              style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}
-            >
-              <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  background: SACRIFICIAL_COLOR,
-                  border: '1px solid #00000055',
-                  display: 'inline-block',
-                }}
-              />
-              sacrificial
-            </div>
-          )}
-          {/* #271 — a void is not a depth either: it is a region of the face the cut must respect. */}
-          {preview.voids.length > 0 && (
-            <div
-              data-testid="engrave-legend-void"
-              style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}
-            >
-              <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  border: `2px solid ${VOID_COLOR}`,
-                  display: 'inline-block',
-                  boxSizing: 'border-box',
-                }}
-              />
-              void under the face
-            </div>
-          )}
-        </div>
-      </Html>
     </group>
   );
 }
