@@ -256,8 +256,9 @@ export async function exportSinglePart(
   // print orientation to a hint the user had to read and act on. That cost a
   // 1.1 kg print: the fused frame stands on four stacking feet, so only 2.3%
   // of its footprint touched and a slicer supported the entire bottom plate.
-  // Routing through the same layout the Save All path uses applies the flip
-  // AND corrects the triangle winding a flip inverts.
+  // Routing through the same layout the Save All path uses applies the flip.
+  // (#357 — the flip is a half turn, so it needs no winding correction; the
+  // layout used to make one anyway and wrote this part inside-out.)
   const [laid] = applyLayoutToMeshes([node]);
   const mesh: StlMeshInput = laid
     ? { positions: laid.positions, indices: laid.indices, material: laid.material, name: nodeId }

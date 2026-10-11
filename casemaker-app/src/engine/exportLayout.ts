@@ -160,10 +160,12 @@ export function applyPartTransform(
       out[i + 2] = positions[i + 2]! + tz;
     }
   }
-  // Flipping negates an axis and inverts triangle winding — but indices live
-  // separately, so applyLayoutToMeshes calls reverseTriangleWinding on the
-  // index buffer when t.flipAxis !== null. This function only handles
-  // positions; winding correction happens at the caller.
+  // #357 — every branch above negates exactly TWO axes, which is a half turn about the third: a
+  // rotation, determinant +1. Only a transform with a NEGATIVE determinant (a mirror — an odd
+  // number of negated axes) inverts triangle winding; this one does not. So the indices are
+  // correct as they are, and it is `applyLayoutToMeshes`' old unconditional reversal that wrote
+  // every pre-flipped part inside-out. `exportLayout.spec.ts` measures the signed volume, so the
+  // day someone adds a mirror flip axis the sign goes negative and the suite says so.
   return out;
 }
 
@@ -192,21 +194,9 @@ export function applyLayoutToMeshes(
       };
     }
     const positions = applyPartTransform(n.buffer.positions, t);
-    // If we flipped on X (negates Y and Z), winding is inverted — fix indices.
-    const indices =
-      t.flipAxis === null
-        ? n.buffer.indices
-        : reverseTriangleWinding(n.buffer.indices);
-    return { id: n.id, positions, indices, material: n.material };
+    // #357 — the indices are carried through untouched. The flip negates Y and Z, a half turn
+    // about X, so the triangle order still faces outward (see `applyPartTransform`). Reversing it
+    // here wrote the part inside-out: a Manifold difference() then unions a negative volume.
+    return { id: n.id, positions, indices: n.buffer.indices, material: n.material };
   });
-}
-
-function reverseTriangleWinding(indices: Uint32Array): Uint32Array {
-  const out = new Uint32Array(indices.length);
-  for (let t = 0; t < indices.length; t += 3) {
-    out[t] = indices[t]!;
-    out[t + 1] = indices[t + 2]!;
-    out[t + 2] = indices[t + 1]!;
-  }
-  return out;
 }
