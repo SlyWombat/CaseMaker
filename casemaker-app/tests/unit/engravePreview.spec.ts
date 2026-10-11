@@ -592,6 +592,25 @@ describe('engravePreview — declared under-surface voids (#271)', () => {
     // states no print (#345 decision A).
     expect(p.voids[0]!.limit).toBeCloseTo(12 - 3 - 1.0, 6);
   });
+
+  it('states what the LAYER GRID gives, not the declared membrane’s own answer (#351)', () => {
+    // The blank the wizard seeds (#352) states the badge's print, so this void's roof is quantised
+    // onto the 0.2 mm layer grid: the 1.51 mm of declared membrane becomes a 1.40 mm roof, and the
+    // 0.2 mm boundary margin makes the limit 1.20. The viewport label used to read the analytic
+    // 1.31 while the verifier refused every cut below 1.20 — #351, and the reason this number now
+    // comes from `keepOutLimit` rather than being composed where the label is drawn.
+    const blank = badgeBlankFor(defaultBadgeParams({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } }));
+    const job: EngraveJob = {
+      ...defaultEngraveJob(),
+      stock: blank.stock,
+      keepOuts: blank.pocket ? [blank.pocket] : [],
+    };
+    const p = buildPreview(job);
+
+    expect(p.voids).toHaveLength(1);
+    expect(p.voids[0]!.membrane).toBeCloseTo(1.51, 6); // still what the document declares
+    expect(p.voids[0]!.limit).toBeCloseTo(1.2, 6); // what the run enforces, and what the label reads
+  });
 });
 
 // #285/#345 — the boundary has two halves and this is the panel's: the number the viewport draws

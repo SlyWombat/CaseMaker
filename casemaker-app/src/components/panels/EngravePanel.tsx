@@ -24,7 +24,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { dedupeFindings, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
-import { keepOutLimit, keepOutMembrane } from '@/engine/cnc/engrave/partPlan';
+import { keepOutLimitParts, keepOutMembrane } from '@/engine/cnc/engrave/partPlan';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
@@ -1011,12 +1011,14 @@ export function EngravePanel(): JSX.Element {
           keepOut={ko}
           index={i}
           thickness={job.stock.thickness}
-          membrane={keepOutMembrane(job, ko.zCeiling)}
-          // #345 — the same margin the run sheet and the verifier use, so the row's "mm of cut"
-          // is the number the program is actually gated to rather than one blank's own arithmetic.
-          limit={keepOutLimit(job, keepOutMembrane(job, ko.zCeiling), margins.boundaryMargin)}
-          // #345 — which rule set that margin, from the same `voidMargin` arithmetic `keepOutLimit`
-          // ran, so the sentence under the number cannot name a rule the number is not on.
+          // #351 — the WHOLE answer, from the one function the run sheet and the preview also read:
+          // the declared membrane, the layer-aligned roof, the void's own number, the blank's floor
+          // and the `min` of the last two. Passing the parts rather than a bare number is what lets
+          // the row say which of them set the limit instead of attributing every number to the void.
+          depth={keepOutLimitParts(job, keepOutMembrane(job, ko.zCeiling), margins.boundaryMargin)}
+          // #345 — which rule set that margin, from the same `voidMargin` arithmetic
+          // `keepOutLimitParts` ran, so the sentence under the number cannot name a rule the number
+          // is not on.
           limitBasis={voidMarginWords(job, margins.boundaryMargin)}
           findings={findingsFor(ko.id)}
           onChange={(patch) => updateKeepOut(ko.id, patch)}

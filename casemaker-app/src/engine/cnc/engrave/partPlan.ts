@@ -31,6 +31,7 @@ import type { CustomFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
 import { supportedFootprint } from '@/engine/cnc/sacrificial';
 import { defaultBoundaryMargin, voidFloor, voidMargin } from '@/engine/cnc/engrave/depthBounds';
+import { voidCeilingFor } from '@/engine/cnc/layerStack';
 import type { DepthLimit } from '@/engine/cnc/verify';
 import { sacrificialDepthLimit } from '@/engine/cnc/verify';
 
@@ -882,25 +883,79 @@ export function keepOutMembrane(job: EngraveJob, zCeiling: Mm): Mm {
 }
 
 /**
- * The deepest cut a void permits, mm — its membrane less the margin the ceiling keeps, never
- * below 0. This is the design-arithmetic twin of the stack's `maxDepthAt − margin` for a blank
- * that states no print.
- *
- * #345 changed WHICH number that margin is. `#231` subtracted `minFloor`, so the rule over a void
- * was the structural one ("leave a millimetre of material") while the layer-aligned rule a printed
- * blank gets (#285's `maxDepthAt`) enforced the Z-error one. A void's ceiling is now an `above`
- * bound like every other plane — but the margin it keeps is `voidMargin`, not a bare
- * `boundaryMargin`: a blank that STATES a print keeps the Z-error margin (the layer grid quantises
- * the ceiling), and a blank that states none keeps `max(boundaryMargin, minFloor)` (#345 decision
- * A — with no grid to align to, the structural floor is the number with a basis). One owner for
- * that choice, shared with the run sheet and the per-item bound.
+ * The halves of a void's depth limit, kept apart (#351) so a surface can say WHICH number set the
+ * limit as well as what it is — the run sheet names the blank's own floor when that is what binds,
+ * and the panel's void row needs the same distinction to explain the number honestly.
  */
+export interface VoidLimitParts {
+  /** Solid material above the void as the DOCUMENT declares it, mm (`keepOutMembrane`). */
+  membrane: Mm;
+  /**
+   * The plane the limit is measured from, mm below the engraved face: the roof quantised onto the
+   * printer's layer grid where the blank states a print, the declared membrane where it states
+   * none (`voidCeilingFor` is the one owner of that choice).
+   */
+  ceiling: Mm;
+  /** `ceiling` less the margin its rule keeps (`voidMargin`) — the void's own answer. */
+  overVoid: Mm;
+  /** `thickness − minFloor` — the blank's own floor, the other candidate at this point. */
+  stockFloor: Mm;
+  /**
+   * `max(0, min(overVoid, stockFloor))`: the deepest cut over this void that still keeps the floor.
+   * Clamped like every other bound (`boundFloor`), so a `minFloor` larger than the blank — a job the
+   * `depth-exceeds-stock` finding already refuses — reads "no cut here" rather than a negative depth.
+   */
+  limit: Mm;
+}
+
+/**
+ * The deepest cut a void permits, mm — and the numbers it was chosen from (#351).
+ *
+ * `limit` is the number #174's verifier refuses against, and every surface that states it reads it
+ * from here rather than working out its own: the panel's void row, the preview's viewport label,
+ * the run sheet's §1 step and its per-cut note. It is the smaller of two numbers:
+ *
+ *   - `overVoid` — the void's ceiling less the margin its rule keeps (`voidMargin`). The ceiling is
+ *     NOT the declared membrane on a blank that states its print: the roof was built on the
+ *     printer's layer grid, so `voidCeilingFor` quantises it there, and the stack's own
+ *     `maxDepthAt` reports the same plane (#285). #351 is the bug that came of skipping this: the
+ *     panel read 1.31 mm over the default badge's pocket where the verifier refused above the
+ *     layer-aligned 1.20.
+ *   - `stockFloor` — `thickness − minFloor`, the blank's own floor. A void sits inside the part
+ *     outline, so this is the base the verifier takes there; without the `min`, a SHALLOW void
+ *     prints a number the verifier refuses (#285 review — a 3.81 mm badge with a 3.31 mm membrane
+ *     reads 3.2 mm against the enforced `3.81 − 1.0`).
+ *
+ * The margin is `voidMargin`'s and not a bare `boundaryMargin` (#345 decision A): a blank that
+ * STATES a print keeps the Z-error margin (its ceiling is on a real layer line, a distance the
+ * printer can hold), while one that states none keeps `max(boundaryMargin, minFloor)` — with no
+ * grid to align to, the structural floor is the only number with a basis. One owner for that
+ * choice, shared with the per-item bound and the stack's own limit.
+ *
+ * `membrane` is the declared one and stays in the answer so a caller can print what the DOCUMENT
+ * says beside what the printer's layers make of it: the two differ exactly when
+ * `ceiling < membrane`, which is the layer grid at work rather than a mistake. A blank that states
+ * no print has no grid — `voidCeilingFor` returns the membrane, so `ceiling` IS the membrane and
+ * the whole answer is the arithmetic #213 always used.
+ */
+export function keepOutLimitParts(
+  job: EngraveJob,
+  membrane: Mm,
+  margin: Mm = defaultBoundaryMargin(job),
+): VoidLimitParts {
+  const ceiling = voidCeilingFor(membrane, job.stock.thickness, job.stock.print);
+  const overVoid = voidFloor(ceiling, voidMargin(job, margin));
+  const stockFloor = job.stock.thickness - job.minFloor;
+  return { membrane, ceiling, overVoid, stockFloor, limit: Math.max(0, Math.min(overVoid, stockFloor)) };
+}
+
+/** `keepOutLimitParts(...).limit` — the number itself, for a caller that needs only that. */
 export function keepOutLimit(
   job: EngraveJob,
   membraneThickness: Mm,
   margin: Mm = defaultBoundaryMargin(job),
 ): Mm {
-  return voidFloor(membraneThickness, voidMargin(job, margin));
+  return keepOutLimitParts(job, membraneThickness, margin).limit;
 }
 
 /**

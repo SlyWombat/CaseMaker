@@ -5,15 +5,19 @@
 import { describe, it, expect } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import {
   jobDepthLimit,
   keepOutLimitAt,
+  keepOutLimitParts,
+  keepOutMembrane,
   pointInKeepOut,
   toPartPlan,
 } from '@/engine/cnc/engrave/partPlan';
 import { buildRunSheet, runSheetDiagramSvg, type RunSheetGenerated } from '@/engine/cnc/engrave/runSheet';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { aabbOfProfile } from '@/engine/compiler/profile';
+import { defaultBadgeParams } from '@/types/badge';
 import type { EngraveJob, EngraveKeepOut } from '@/types/engraveJob';
 
 const rectKeepOut = (over: Partial<EngraveKeepOut & { kind: 'rect' }> = {}): EngraveKeepOut => ({
@@ -163,7 +167,7 @@ describe('pointInKeepOut (#231)', () => {
   });
 });
 
-describe('the analytic depth limit (#231)', () => {
+describe('the void depth limit (#231, #351)', () => {
   it('a void permits only its membrane less the margin its ceiling keeps', () => {
     // 12 thick, zCeiling 10 -> membrane 2. #345 takes a margin off it, and on a blank that states
     // no print that margin is `max(boundaryMargin, minFloor)` — 1.0 here, not the 0.2 the boundary
@@ -218,6 +222,38 @@ describe('the analytic depth limit (#231)', () => {
     const limit = jobDepthLimit(jobWithKeepOut());
     expect(limit(50, 30)).toBeCloseTo(1.0, 9); // over the pocket: 2 − max(0.2, 1.0)
     expect(limit(5, 5)).toBe(11); // solid stock
+  });
+
+  it('snaps a roof that is off the printer’s layer grid, so the limit is the enforced one (#351)', () => {
+    // The badge's magnet pocket: a 3.81 mm blank, ceiling 2.3 from the BOTTOM face, so 1.51 mm of
+    // membrane as the document declares it. The 0.2 mm layer grid puts the roof at 1.40 mm, and a
+    // blank that STATES its print keeps the 0.2 mm boundary margin there — 1.20 mm, not the
+    // analytic 1.51 − 0.2 = 1.31. That 1.31 is what the panel's row and the viewport label printed
+    // while the verifier refused every cut below 1.20, which is #351.
+    const blank = badgeBlankFor(defaultBadgeParams({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } }));
+    const pocket = blank.pocket!;
+    const job: EngraveJob = { ...defaultEngraveJob(), stock: blank.stock, keepOuts: [pocket] };
+    const depth = keepOutLimitParts(job, keepOutMembrane(job, pocket.zCeiling), 0.2);
+    expect(depth.membrane).toBeCloseTo(1.51, 9);
+    expect(depth.ceiling).toBeCloseTo(1.4, 9);
+    expect(depth.overVoid).toBeCloseTo(1.2, 9);
+    expect(depth.limit).toBeCloseTo(1.2, 9);
+    // The blank's own floor is 3.81 − 1.0 = 2.81, so the VOID is what binds here, not the stock.
+    expect(depth.stockFloor).toBeCloseTo(2.81, 9);
+
+    // The run sheet states the same number, from the same owner: the sheet and the panel cannot
+    // drift the way the panel and the verifier did.
+    const need = buildRunSheet(job, NO_GENERATED, null, new Date('2026-10-05T00:00:00Z')).sections.find(
+      (s) => s.id === 'need',
+    )!;
+    expect(need.steps.find((s) => s.text.includes('Under-surface void'))!.value).toBe('deepest cut 1.2 mm');
+
+    // Without a stated print there is no grid to snap the roof to: the declared membrane IS the
+    // ceiling, and the whole answer is #213's arithmetic again.
+    const blind = { ...job, stock: badgeBlankFor(defaultBadgeParams()).stock };
+    const blindDepth = keepOutLimitParts(blind, keepOutMembrane(blind, pocket.zCeiling), 1.0);
+    expect(blindDepth.ceiling).toBeCloseTo(blindDepth.membrane, 9);
+    expect(blindDepth.limit).toBeCloseTo(0.51, 9); // 1.51 − max(0.2, 1.0)
   });
 });
 

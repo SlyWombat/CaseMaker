@@ -1,20 +1,22 @@
 import { ASSUMED_RAPID_MM_MIN } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { keepOutMembrane, toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import {
-  defaultBoundaryMargin,
+  keepOutLimit,
+  keepOutLimitParts,
+  keepOutMembrane,
+  toPartPlan,
+  type PartPlan,
+} from '@/engine/cnc/engrave/partPlan';
+import {
   effectiveMargins,
   MARGIN_DEFAULTS,
   marginSourceWords,
   recommendMargins,
   splitBound,
-  voidFloor,
-  voidMargin,
   zBudgetInputsFor,
   type MarginSettings,
 } from '@/engine/cnc/engrave/depthBounds';
-import { voidCeilingFor } from '@/engine/cnc/layerStack';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { axesWord, describeTouch, kindWord, readsWord, registrationFor } from '@/engine/cnc/engrave/registration';
 import type { FeedsResult } from '@/engine/cnc/feeds';
@@ -415,59 +417,17 @@ export function sha256Hex(input: string): string {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * #285/#345 — the membrane numbers on this sheet, as the verifier enforces them.
+ * #285/#345/#351 — the void numbers on this sheet are `keepOutLimit`'s, not this file's.
  *
- * A job that states its print is verified against the layer-aligned limit: the blank's own layers
- * sit over the void and the last whole layer above its roof is the floor (`layerStack`'s
- * `maxDepthAt`). That is grid arithmetic, and the grid is a rule about the printer rather than a
- * measurement of the solid, so the sheet works the same number out itself — building the stack
- * would need Manifold, which the sheet's no-wasm, main-thread contract forbids, and the answer is
- * already in the arithmetic (#285 review). A job with no print has no grid: the declared membrane
- * IS the ceiling (`voidCeilingFor`).
- *
- * #345 then takes a margin off it, because a void's ceiling is a bound like any other. WHICH margin
- * is `voidMargin`'s rule, and it is not the same on both paths (decision A): a printed blank keeps
- * the Z-error `boundaryMargin` — its ceiling is on a real layer line, so one printed layer is a
- * distance the printer can hold — while a blank that states no print keeps
- * `max(boundaryMargin, minFloor)`, because with no grid to align to the structural floor is the only
- * number with a basis and the least-known blank must not get the thinnest membrane. This is the same
- * pair `keepOutLimit` uses, so the sheet and the panel and the verifier keep one distance per plane.
- *
- * Whichever path worked it out, the answer is the void's own limit AND the stock's — a void is a
- * fact about the blank, `thickness − minFloor` a fact about the material, and `jobDepthLimit`
- * composes them with a `min` the way it composes every other pair (#285 review). Without that, a
- * SHALLOW void prints a number the verifier refuses: on the 3.81 mm badge, a void whose ceiling
- * leaves a 3.31 mm membrane gives a sheet 3.2 mm against the verifier's `2.81 = 3.81 − 1.0`, and
- * the operator reads a depth the machine will not cut.
+ * They used to be worked out here, because the sheet's no-wasm, main-thread contract forbids
+ * building the layer stack and the grid arithmetic was reproduced by hand. #351 is what that cost:
+ * the panel and the preview each had their own copy of the same composition and one of the three
+ * drifted. `keepOutLimitParts` in `partPlan.ts` is now the single owner — the ceiling plane
+ * (`voidCeilingFor`, layer-aligned where the blank states a print), the margin its rule keeps
+ * (`voidMargin`, #345 decision A), and the `min` against the blank's own `thickness − minFloor` —
+ * and the sheet, the panel and the preview all read it. The sheet still needs the two halves APART,
+ * not just the answer, so it can say WHICH number bound: see the §1 step below.
  */
-function voidLimit(job: EngraveJob, membrane: Mm, margin: Mm = defaultBoundaryMargin(job)): Mm {
-  return voidLimitParts(job, membrane, margin).limit;
-}
-
-/**
- * The two halves `voidLimit` takes the smaller of, kept apart so the sheet can say WHICH one bound
- * (#285 review) — `taken` is `Math.min` of them, and a row that prints the number while attributing
- * it to the void is wrong whenever the blank's own floor is the smaller one.
- *
- *   - `overVoid` — the ceiling plane (`voidCeilingFor`) less the margin it keeps (`voidMargin`).
- *   - `stockFloor` — `thickness − minFloor`, CNC-2's `stockDepthLimit` number over the part. A void
- *     sits inside the part outline, so this is the base the verifier takes there.
- *
- * The `min` is the point: a SHALLOW void prints a number the verifier refuses unless the blank's
- * own floor is allowed to win (#285 review).
- */
-function voidLimitParts(
-  job: EngraveJob,
-  membrane: Mm,
-  margin: Mm,
-): { overVoid: Mm; stockFloor: Mm; limit: Mm } {
-  // The ceiling plane — analytic where the blank states no print, layer-aligned where it does — and
-  // the margin that plane keeps. Two owners, one plane, so no two callers can pair them differently.
-  const ceiling = voidCeilingFor(membrane, job.stock.thickness, job.stock.print);
-  const overVoid = voidFloor(ceiling, voidMargin(job, margin));
-  const stockFloor = job.stock.thickness - job.minFloor;
-  return { overVoid, stockFloor, limit: Math.min(overVoid, stockFloor) };
-}
 
 /**
  * Whether ANY plane in this job carries the `boundaryMargin` rule (#345) — a void's ceiling, or the
@@ -548,7 +508,7 @@ function keepOutOver(
   let worstLimit = Infinity;
   for (const ko of keepOuts) {
     if (!boxesOverlap(box, ko)) continue;
-    const limit = voidLimit(job, ko.solidThickness, margin);
+    const limit = keepOutLimit(job, ko.solidThickness, margin);
     if (limit < worstLimit) {
       worstLimit = limit;
       worst = ko;
@@ -930,7 +890,7 @@ export function buildRunSheet(
     // `thickness − minFloor`, so naming the void as its author is wrong whenever the blank's floor
     // binds. The sheet says which of the two is doing the limiting rather than leaving the operator
     // to guess, because the two have different fixes (pour a thicker blank vs. move the pocket).
-    const parts = voidLimitParts(job, ko.solidThickness, margins.boundaryMargin);
+    const parts = keepOutLimitParts(job, ko.solidThickness, margins.boundaryMargin);
     const byStockFloor = parts.stockFloor < parts.overVoid;
     needSteps.push({
       text:
@@ -1067,9 +1027,9 @@ export function buildRunSheet(
     const over = keepOutOver(job, itemBox.get(item.id), diagram.keepOuts, margins.boundaryMargin);
     const note = over
       ? ` — over "${over.name}", only ${fmtNum(over.solidThickness)} mm of material` +
-        (item.depth > voidLimit(job, over.solidThickness, margins.boundaryMargin)
-          ? ` (DEEPER than the ${fmtNum(voidLimit(job, over.solidThickness, margins.boundaryMargin))} mm the void allows)`
-          : ` (deepest cut there ${fmtNum(voidLimit(job, over.solidThickness, margins.boundaryMargin))} mm)`)
+        (item.depth > keepOutLimit(job, over.solidThickness, margins.boundaryMargin)
+          ? ` (DEEPER than the ${fmtNum(keepOutLimit(job, over.solidThickness, margins.boundaryMargin))} mm the void allows)`
+          : ` (deepest cut there ${fmtNum(keepOutLimit(job, over.solidThickness, margins.boundaryMargin))} mm)`)
       : '';
     cutSteps.push({ text: `${item.name}${note}`, value: `${fmtNum(item.depth)} mm deep` });
   }

@@ -112,7 +112,14 @@ export interface EngravePreviewVoid {
   zCeiling: Mm;
   /** `keepOutMembrane(job, zCeiling)`: solid left above it, mm. */
   membrane: Mm;
-  /** `keepOutLimit(job, membrane, boundaryMargin)`: the deepest cut over it, mm (#345). */
+  /**
+   * `keepOutLimit(job, membrane, boundaryMargin)`: the deepest cut over it, mm — the number the
+   * verifier ENFORCES there, not the design's arithmetic (#345, #351). Its ceiling is snapped to
+   * the printer's layer grid when the blank states a print, and it is never deeper than the
+   * blank's own `thickness − minFloor`; both of those are `keepOutLimitParts`' work in
+   * `partPlan.ts`, so this label and the panel's void row and the run sheet's §1 step state one
+   * number rather than three.
+   */
   limit: Mm;
   /** Footprint contours in the work frame, one entry per ring (a hole is its own ring). */
   rings: [number, number][][];
@@ -342,7 +349,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     );
 
     // The declared under-surface voids (#271). `plan.stock.keepOuts` already drops the disabled
-    // ones, so what is drawn is exactly what `jobDepthLimit` reserves — a void the user switched
+    // ones, so what is drawn is exactly what the verifier reserves — a void the user switched
     // off is not in this list and not in the limit either. Each footprint is evaluated once here;
     // `keepOutFindings` evaluates its own copy for the warning, and both come from the same
     // `keepOutProfile`, so the outline and the warning name the same region.

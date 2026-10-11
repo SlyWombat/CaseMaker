@@ -231,9 +231,9 @@ export function splitBound(intent: EngraveLabel['depthIntent'], splitDepth: Mm |
  * is larger, `boundaryMargin` or the structural `minFloor`. The LEAST-known blank must not get the
  * THINNEST membrane.
  *
- * ONE owner for that rule: `keepOutLimit` (the analytic ceiling the panel and the no-print verifier
- * use), `voidLimit` (the sheet) and the per-item void bound all call it, so the three cannot keep
- * different distances from the same plane.
+ * ONE owner for that rule: `keepOutLimitParts` (which the panel, the preview and the run sheet all
+ * read), the per-item void bound in `bindingVoidsByRegion` and the stack's own limit in
+ * `stackDepthLimit` all call it, so none of them can keep a different distance from the same plane.
  */
 export function voidMargin(job: Pick<EngraveJob, 'stock' | 'minFloor'>, boundaryMargin: Mm): Mm {
   return job.stock.print === undefined ? Math.max(boundaryMargin, job.minFloor) : boundaryMargin;

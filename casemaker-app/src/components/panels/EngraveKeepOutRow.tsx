@@ -1,4 +1,5 @@
 import { useState, type CSSProperties, type JSX } from 'react';
+import type { VoidLimitParts } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { KeepOutPatch } from '@/store/engraveJobStore';
 import type { EngraveKeepOut } from '@/types/engraveJob';
@@ -15,14 +16,18 @@ import type { Mm } from '@/types/units';
  * engraved face). That is a DIFFERENT datum from every `depth` in this panel, so the field is
  * labelled with both the datum and its consequence, and the row reads the consequence back:
  *
- *   membrane = thickness − zCeiling   (the solid left above the void)
- *   limit    = membrane − margin      (the deepest cut that keeps clear of the ceiling)
+ *   membrane = thickness − zCeiling   (the solid the DOCUMENT declares above the void)
+ *   limit    = min(ceiling − margin, thickness − minFloor)   (the deepest cut the verifier allows)
  *
- * Both come from `keepOutMembrane` / `keepOutLimit` in `engrave/partPlan.ts` — the SAME two
- * functions `jobDepthLimit` composes and #174's verifier refuses against — so the number the row
- * shows and the number the run enforces cannot drift apart. The margin is the job's minimum floor
- * on a blank that states no print and its boundary margin everywhere else (#345 decision A);
- * `limitBasis` carries WHICH one, in words, so this row names the rule it is actually on.
+ * `depth` is `keepOutLimitParts`' whole answer, from `engrave/partPlan.ts` — the SAME function the
+ * run sheet's §1 step and the preview's viewport label read, and the one #174's verifier refuses
+ * against — so the number the row shows and the number the run enforces cannot drift apart. #351
+ * is the bug that came of the row composing its own: on a blank that states its print the ceiling
+ * is quantised onto the printer's layer grid, so `limit` is NOT `membrane − margin`, and the row
+ * printed 1.31 mm where the verifier refused above 1.20. The margin is the job's minimum floor on
+ * a blank that states no print and its boundary margin everywhere else (#345 decision A);
+ * `limitBasis` carries WHICH one, in words, and the sentence names the layer grid or the blank's
+ * own floor where either is what set the number.
  *
  * The polygon editor keeps its text LOCAL and commits only a ring of 3–500 valid points, exactly
  * as the shape row does: a half-typed ring must never reach the job, or the schema would reject
@@ -88,10 +93,13 @@ export interface EngraveKeepOutRowProps {
   index: number;
   /** The blank's thickness, mm — the far end of the `zCeiling` datum's scale. */
   thickness: Mm;
-  /** `keepOutMembrane(job, zCeiling)`: solid left above this void, mm. */
-  membrane: Mm;
-  /** `keepOutLimit(job, membrane)`: the deepest cut over this void, mm. */
-  limit: Mm;
+  /**
+   * `keepOutLimitParts(job, membrane, boundaryMargin)` — the deepest cut over this void and the
+   * numbers it was chosen from (#351). The whole struct rather than a bare number: the row says
+   * which of them set the limit, so a void whose roof the layer grid moved, or one where the
+   * blank's own floor is what binds, is described honestly instead of blamed on the void.
+   */
+  depth: VoidLimitParts;
   /**
    * Which rule set that limit's margin, in words (`voidMarginWords`): "the 1 mm minimum floor" or
    * "the 0.2 mm boundary margin" (#345 decision A). The row prints it rather than hard-coding one
@@ -108,8 +116,7 @@ export function EngraveKeepOutRow({
   keepOut,
   index,
   thickness,
-  membrane,
-  limit,
+  depth,
   limitBasis,
   onChange,
   onRemove,
@@ -119,6 +126,19 @@ export function EngraveKeepOutRow({
   // contain, and no cut over it can keep the floor. A non-positive one is below the bottom face.
   const ceilingInvalid = keepOut.zCeiling >= thickness || keepOut.zCeiling <= 0;
   const [pointsText, setPointsText] = useState(() => (keepOut.kind === 'polygon' ? pointsToText(keepOut.points) : ''));
+
+  // #351 — WHAT SET THE NUMBER, in words, so the sentence never blames the void for a limit the
+  // blank's own floor or the printer's layer grid decided. The blank's floor comes first because it
+  // is a different fix from a moved pocket (a thicker blank), exactly as the run sheet's §1 step
+  // says; then the layer grid, when it moved the roof off the declared membrane; and otherwise the
+  // design's own arithmetic, unchanged since #213.
+  const byStockFloor = depth.stockFloor < depth.overVoid;
+  const byLayerGrid = !byStockFloor && depth.ceiling < depth.membrane - 1e-9;
+  const limitWords = byStockFloor
+    ? `the blank’s own ${(thickness - depth.stockFloor).toFixed(2)} mm floor, not the void, sets that`
+    : byLayerGrid
+      ? `the printer’s layers put the roof at ${depth.ceiling.toFixed(2)} mm, less ${limitBasis}`
+      : `the membrane less ${limitBasis}`;
 
   const numField = (key: NumField, label: string, title: string, invalid = false): JSX.Element => (
     <label style={FIELD_LABEL}>
@@ -272,12 +292,12 @@ export function EngraveKeepOutRow({
       </div>
 
       <p
-        style={{ ...MUTED, ...(limit <= 0 ? { color: SEVERITY_COLOR.error } : null) }}
+        style={{ ...MUTED, ...(depth.limit <= 0 ? { color: SEVERITY_COLOR.error } : null) }}
         data-testid={`engrave-keepout-membrane-${index}`}
       >
         {ceilingInvalid
           ? `A ceiling of ${keepOut.zCeiling} mm is not inside a ${thickness} mm blank — the void reaches the engraving face, so no cut over it can keep the minimum floor.`
-          : `Leaves ${membrane.toFixed(2)} mm of material above it: a cut over this void may go ${limit.toFixed(2)} mm deep — the membrane less ${limitBasis}.`}
+          : `Leaves ${depth.membrane.toFixed(2)} mm of material above it${byLayerGrid ? ' as designed' : ''}: a cut over this void may go ${depth.limit.toFixed(2)} mm deep — ${limitWords}.`}
       </p>
 
       {findings.map((f, i) => (

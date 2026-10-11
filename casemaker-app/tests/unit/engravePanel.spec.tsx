@@ -17,7 +17,7 @@ import {
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
-import { BADGE_POCKET_KEEP_OUT_ID } from '@/engine/cnc/engrave/fromBadge';
+import { BADGE_POCKET_KEEP_OUT_ID, badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultBadgeParams, type BadgeParams } from '@/types/badge';
 import { useProjectStore } from '@/store/projectStore';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -827,6 +827,39 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     expect(limit(38.1, 19.05)).toBeCloseTo(0.51, 6);
     expect(limit(5, 5)).toBeCloseTo(2.81, 6);
     expect(screen.getByTestId('engrave-badge-notes')).toBeTruthy();
+  });
+
+  it('reads the layer-aligned limit, not the analytic one, once the blank states its print (#351)', () => {
+    // The blank the wizard hands the job (#352) carries the badge's print, so the pocket's roof is
+    // quantised onto the 0.2 mm layer grid: the 1.51 mm of declared membrane becomes a 1.40 mm
+    // roof, and the 0.2 mm boundary margin makes the limit 1.20. The row used to print the
+    // analytic 1.51 − 0.2 = 1.31 while the verifier refused every cut below 1.20 (#351).
+    //
+    // Seeded through the same `badgeBlankFor` → `takeBadgeBlank` seam `engraveFromBadge.spec` and
+    // the wizard use, rather than by pressing the button on a project badge: the badge schema has
+    // no `print` key yet (#166 owns that mirror), so a badge written through `patchCase` arrives at
+    // the panel with the field already stripped and there would be no print to read.
+    act(() => {
+      useEngraveJobStore
+        .getState()
+        .takeBadgeBlank(
+          badgeBlankFor(defaultBadgeParams({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } })),
+        );
+    });
+    render(<EngravePanel />);
+
+    const readout = screen.getByTestId('engrave-keepout-membrane-0').textContent ?? '';
+    expect(readout).toContain('1.20'); // the number the run enforces — the one a person types against
+    expect(readout).not.toContain('1.31'); // the analytic one it printed before
+    // The declared membrane is still stated, and the sentence says the LAYER GRID moved the roof
+    // rather than crediting the number to a membrane arithmetic it is not on.
+    expect(readout).toContain('1.51');
+    expect(readout).toContain('as designed');
+    expect(readout).toContain('layers put the roof at 1.40');
+
+    // And the limit the row shows is the limit the verifier takes at that point, not a parallel one.
+    const job = useEngraveJobStore.getState().job;
+    expect(jobDepthLimit(job)(38.1, 19.05)).toBeCloseTo(1.2, 6);
   });
 
   it('lands on the same void when it is pressed twice', () => {
