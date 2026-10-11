@@ -641,8 +641,21 @@ describe('EngravePanel — the Simulated row’s coverage sentence (#243)', () =
     });
     const cov = screen.getByTestId('engrave-sim-coverage').textContent ?? '';
     expect(cov).toContain('Checked: the tool against the stock');
-    // The Z1 states no holder, so the collet nut is named as a blind spot.
-    expect(cov).toContain('the collet nut');
+    // #314 — the collet nut is named from the run's own codes, and this run raised none: the
+    // Z1 stating no holder is no longer a blind spot in itself.
+    expect(cov).not.toContain('the collet nut');
+  });
+
+  it('names the collet nut when the run raised the unproven-holder code (#314)', () => {
+    render(<EngravePanel />);
+    act(() => {
+      useEngraveRunStore.setState({
+        simStatus: 'ready',
+        pathOnly: false,
+        simDiagnostics: [{ source: 'sweep', severity: 'warning', code: 'holder-vs-fixture-unproven', message: 'an obstacle rises above the stock top and the collet nut is unmeasured' }],
+      });
+    });
+    expect(screen.getByTestId('engrave-sim-coverage').textContent ?? '').toContain('the collet nut');
   });
 
   it('says so in the same place when the run was path-only', () => {

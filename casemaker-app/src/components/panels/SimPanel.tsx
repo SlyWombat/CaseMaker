@@ -160,16 +160,16 @@ export function SimPanel() {
   const canSimulate = gcodeText !== null && tool !== null && !loading;
 
   // #243 — the blind-spot sentence, assembled from what this run actually carried: the fixture
-  // obstacles it was given (#204), whether sacrificial material was modelled, the machine's own
-  // holder (null on the Z1, so the collet nut is unmodelled), and the "cannot be proven" codes
-  // the sweep raised. The physics caveat stays a constant; this half changes per run.
+  // obstacles it was given (#204), whether sacrificial material was modelled, and the "cannot be
+  // proven" codes the sweep raised — the collet nut's among them, but only where the sweep
+  // needed it, i.e. only for an obstacle above the stock top (#314). The physics caveat stays a
+  // constant; this half changes per run.
   const outcome: SimRunOutcome = status === 'ready' ? 'swept' : pathOnly ? 'path-only' : 'refused';
   const coverage = coverageDisclaimer({
     outcome,
     fixtureLabels: (meshes?.fixture ?? []).map((f) => f.label),
     fixtureSource: info?.fixtureSource,
     sacrificialModelled: meshes?.sacrificial != null,
-    holderKnown: Z1.holder !== null,
     toolName: tool?.name ?? null,
     codes: diagnostics.map((d) => d.code),
   });

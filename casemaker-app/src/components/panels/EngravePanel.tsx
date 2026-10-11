@@ -492,9 +492,9 @@ export function EngravePanel(): JSX.Element {
 
   // #243 (§14.2 A2) — the blind-spot half of the Simulated row. The SAME pure builder the
   // Simulate panel uses, fed from THIS run rather than re-written: the fixture the setup
-  // modelled, whether sacrificial material was included, the machine's own holder (null on the
-  // Z1, so the collet nut is unmodelled), and the codes the sweep raised. Importing it is what
-  // keeps the two panels from disagreeing about what the sweep saw.
+  // modelled, whether sacrificial material was included, and the codes the sweep raised — the
+  // unmeasured collet nut among them, but only where the sweep actually needed it (#314).
+  // Importing it is what keeps the two panels from disagreeing about what the sweep saw.
   const simCoverage: string[] =
     run.simStatus === null
       ? []
@@ -503,7 +503,6 @@ export function EngravePanel(): JSX.Element {
           fixtureLabels: viseEnvelope(job.stock, job.workholding.vise, job.sacrificial).boxes.map((b) => b.label),
           fixtureSource: job.workholding.vise.source,
           sacrificialModelled: hasSacrificial(job.sacrificial),
-          holderKnown: Z1.holder !== null,
           toolName: toolEntry?.tool.name ?? null,
           codes: run.simDiagnostics.map((d) => d.code),
         });

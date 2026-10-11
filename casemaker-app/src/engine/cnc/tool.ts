@@ -37,6 +37,7 @@ export interface Tool {
   fluteLength: number | null;
   /** Length to the shoulder: the shank-collision limit. EMPTY for every engraver and chamfer in Makera's catalogue. */
   shoulderLength: number | null;
+  /** Tip → the collet nut's face at the seating this file records. Recorded, never a sweep input (#314). */
   stickout: number | null;
   /**
    * Can this cutter plunge straight down without a pilot hole? Only a CENTRE-CUTTING end mill
@@ -68,9 +69,13 @@ export function shapeFromType(typeText: string): ToolShape {
  * on the bit (#305 design point 1) — not a catalogue field, which is why Makera's own database
  * leaves `cutterStickoutLength` empty. The file format writes `sticklength=0` for "unset" (Studio
  * does it for every bit whose collar nobody measured), and a 0 mm stick-out is impossible for a
- * cutter whose shoulder alone is 12 mm, so a non-positive value is UNKNOWN. It matters: the
- * holder gate treats a null as "cannot be proven", while a 0 would put the modelled collet nut at
- * the tool tip and manufacture `holder-into-fixture` errors out of nothing.
+ * cutter whose shoulder alone is 12 mm, so a non-positive value is UNKNOWN.
+ *
+ * #314 made it recorded-but-not-used: it round-trips through the file (`restart.ts`) and stays in
+ * `Tool`, because it says what the job was generated with and the collar makes a seating
+ * repeatable — but it is no longer a SWEEP INPUT. The nut's worst-case placement is derived from
+ * the cutter's own shoulder length, so a 0 can no longer put a modelled nut at the tool tip and
+ * manufacture `holder-into-fixture` errors out of nothing.
  */
 function stickoutFromRecord(rec: MkrRecord): number | null {
   const v = mkrNumber(rec, 'sticklength') ?? mkrNumber(rec, 'stickout');

@@ -186,10 +186,25 @@ describe('runSheet (#207)', () => {
     // The vise envelope `toSetup` hands the sweep is named as the fixture it checked.
     expect(warnings.some((t) => t.startsWith('Checked: the tool against the stock and the modelled fixture'))).toBe(true);
     expect(warnings.some((t) => t.includes('Vise fixed jaw (left)'))).toBe(true);
-    // Z1 states no holder, so the collet nut is named as unmodelled — the exact blind spot A2
-    // calls out — and the fixture being the shipped default is said, not implied.
-    expect(warnings.some((t) => t.includes('the collet nut'))).toBe(true);
+    // The fixture being the shipped default is said, not implied.
     expect(warnings.some((t) => t.includes('shipped default, not a measurement'))).toBe(true);
+    // #314 — the collet nut is NOT named here. Z1 still states no holder, but the nut's
+    // placement is derived from the cutter and every obstacle the vise models sits BELOW the
+    // stock top, so the nut cannot reach one and the run never raised
+    // `holder-vs-fixture-unproven`. A sheet that named it anyway would print a blind spot for a
+    // check that was provably moot.
+    expect(warnings.some((t) => t.includes('the collet nut'))).toBe(false);
+  });
+
+  // #314 — and it IS named where the run says the check was needed and could not be made: the
+  // sheet reads the run's own codes, so the sentence follows the geometry, not the machine.
+  it('names the collet nut when the run could not prove it (#314)', () => {
+    const job = defaultEngraveJob();
+    const sim: RunSheetSim = {
+      diagnostics: [{ severity: 'warning', code: 'holder-vs-fixture-unproven', message: 'An obstacle rises above the stock top and the collet nut is unmeasured.' }],
+    };
+    const warnings = section(buildRunSheet(job, stubGenerated(job), sim, NOW), 'warnings').steps.map((s) => s.text);
+    expect(warnings.some((t) => t.includes('the collet nut'))).toBe(true);
   });
 
   it('says a path-only run swept no geometry (#243)', () => {

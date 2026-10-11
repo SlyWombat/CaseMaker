@@ -79,6 +79,21 @@ const READY_COVERED = {
   fixtureUncertainty: 0.5,
 } as unknown as SimLoadResult;
 
+/** #314 — the same loaded fixture, for a run whose sweep could not prove the nut: an obstacle
+ *  rose above the stock top while the machine still states no collet-nut dimensions. */
+const READY_NUT_UNPROVEN = {
+  ...READY_COVERED,
+  diagnostics: [
+    ...READY_COVERED.diagnostics,
+    {
+      source: 'sweep',
+      severity: 'warning',
+      code: 'holder-vs-fixture-unproven',
+      message: 'an obstacle rises 3.000 mm above the stock top and the collet nut’s size is not known',
+    },
+  ],
+} as unknown as SimLoadResult;
+
 // --- #249 restart ---------------------------------------------------------------------------
 /** A two-stroke job in our own dialect, for the restart generator. */
 const RESTART_PROGRAM = [
@@ -349,8 +364,26 @@ describe('SimPanel', () => {
     const text = screen.getByTestId('sim-disclaimer').textContent ?? '';
     expect(text).toContain('the modelled fixture (vise-jaw-front)');
     expect(text).toContain('a shipped default, not a measurement');
-    expect(text).toContain('the collet nut');
     expect(text).toContain('the spindle body, head and gantry');
+    // #314 — this run's codes carry no holder question, so the unmeasured collet nut is NOT
+    // named: the sweep raises `holder-vs-fixture-unproven` only where an obstacle rises above
+    // the stock top, and a blind spot the run never had would be a false one.
+    expect(text).not.toContain('the collet nut');
+  });
+
+  // #314 — the other direction, through the panel: when the run DOES raise the code, the
+  // sentence names the nut, because the check was needed and could not be made.
+  it('names the collet nut when the run raised the unproven-holder code (#314)', async () => {
+    setSimClientLoader(async () => fakeClient(READY_NUT_UNPROVEN));
+    openPlainFile();
+    act(() => useSimSetupStore.getState().setTool(CHOSEN_TOOL));
+    render(<SimPanel />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sim-simulate'));
+    });
+    await screen.findByTestId('sim-result');
+    expect(screen.getByTestId('sim-disclaimer').textContent ?? '').toContain('the collet nut');
   });
 
   it('says a path-only run checked nothing but the path', async () => {

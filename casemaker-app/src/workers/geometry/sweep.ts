@@ -216,9 +216,14 @@ export interface SweepOpts {
   /** Once per checkpoint, after its solid is built. `done` runs 1…total. */
   onProgress?: (done: number, total: number) => void;
   /**
-   * The machine in use (#204). Its `holder` is the collet nut above the cutter, needed for the
-   * holder-into-fixture check. Absent, or `holder: null`, means the nut is unmeasured — the
-   * sweep says clearance "cannot be proven" rather than guessing a cylinder.
+   * The machine in use (#204). Its `holder` is the collet nut above the cutter — the widest thing
+   * above the tool, and the only part of the spindle that can reach an obstacle the CUTTER has
+   * not already reached. Only the nut's DIAMETER and LENGTH are read; where it sits is derived
+   * from the cutter (#314), so `holder: null` costs nothing on a vise job.
+   *
+   * `null` means the nut is unmeasured, and the sweep then says "cannot be proven" rather than
+   * guessing a cylinder — but only where that is actually the question: an obstacle rising ABOVE
+   * the stock top. Below it the shoulder gate has already proven the shank clear (#314).
    */
   machine?: MillProfile;
 }
@@ -793,19 +798,30 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // The fixture diagnostics fold together (one bad label must not print 400 lines).
   const fixtureDiag = new DiagnosticFolder();
   const holder = opts?.machine?.holder ?? null;
-  const stickout = tool.stickout;
-  // (c-precondition) An unknown nut or stick-out is "cannot be proven", a warning — never a
-  // refusal (#182), or every tool with unstated lengths would be refused.
-  if (fixture) {
-    if (holder === null || stickout === null) {
-      fixtureDiag.push({
-        severity: 'warning',
-        code: 'holder-vs-fixture-unproven',
-        message: `the collet nut's size or the tool's stick-out is not known: clearance to the vise cannot be proven`,
-      });
-    }
+  // Where the nut sits is a property of the CUTTER, not of the fitting (#314). The collet grips
+  // the shank and never the flutes, so the shank cannot enter past the point where it stops being
+  // shank: the nut face is at least `shoulderLength` above the tip at ANY seating, and the depth
+  // gate (`holderGate`) already refuses a cut deeper than that. So `tip + (shoulderLength ??
+  // fluteLength)` is the LOWEST the nut face can be, and a measured stick-out — which depends on
+  // how deep the shank was pushed in at THIS fitting, and survives no tool change — could only
+  // move it up. The bound is therefore safe, and it needs no caliper. `null` (neither length
+  // stated) means the nut cannot be placed at all: `holder-unproven` already says so.
+  const nutOffset = tool.shoulderLength ?? tool.fluteLength;
+  // (c-precondition) #314 — the nut is only ever in the way ABOVE the stock top. The collet puts
+  // its face at or above the deepest cut's tip + `nutOffset`, which the depth gate keeps at or
+  // above the top face; every obstacle in a vise job (`viseEnvelope`: jaw tops at −stockProud)
+  // is below that. So on a vise job the nut check is provably moot and "cannot be proven" is
+  // false — moot is not unknown. An obstacle that DOES rise above the top (a toe clamp on the
+  // part, a tall fixture beside it, the rotary chuck) is the case the check exists for, and only
+  // there is the unknown real. An unmeasured nut is a warning, never a refusal (#182).
+  const fixtureAboveStockTop = fixture !== null && fixtureTop > topZ;
+  if (fixtureAboveStockTop && holder === null) {
+    fixtureDiag.push({
+      severity: 'warning',
+      code: 'holder-vs-fixture-unproven',
+      message: `an obstacle rises ${(fixtureTop - topZ).toFixed(3)} mm above the stock top and the collet nut's size is not known: clearance to it cannot be proven`,
+    });
   }
-  const nutKnown = holder !== null && stickout !== null;
 
   const t0 = performance.now();
   const total = timeline.checkpoints.length;
@@ -859,15 +875,17 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       } else {
         const b = performance.now();
         // (c) Holder into fixture (#204): the collet nut is a cylinder whose bottom face sits
-        // `stickout` above the tool tip, and its footprint is this checkpoint's own 2D region
-        // offset outward to the nut radius. Checked only when both the nut and the stick-out
-        // are known; otherwise the warning above stands and there is nothing to test.
-        if (fixture && nutKnown && holder && stickout !== null) {
+        // `nutOffset` above the tool tip (#314 — the worst case, not a measured stick-out), and
+        // its footprint is this checkpoint's own 2D region offset outward to the nut radius.
+        // Checked only when the nut's dimensions and the cutter's reach are both stated;
+        // otherwise `holder-vs-fixture-unproven` or `holder-unproven` stands and there is nothing
+        // to test.
+        if (fixture && holder !== null && nutOffset !== null) {
           const offsetBy = holder.nutDiameter / 2 - radius;
           const nutRegion = region.offset(offsetBy, 'Round', 2, segmentsForRadius(Math.abs(offsetBy)));
           const nutColumn = tl.Manifold.extrude(nutRegion, holder.nutLength);
           nutRegion.delete();
-          const nutSolid = nutColumn.translate([0, 0, cp.z + stickout]);
+          const nutSolid = nutColumn.translate([0, 0, cp.z + nutOffset]);
           nutColumn.delete();
           const nutHit = nutSolid.intersect(fixture);
           nutSolid.delete();
@@ -878,7 +896,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
               severity: 'error',
               code: 'holder-into-fixture',
               checkpoint: idx,
-              message: `checkpoint ${idx}: the collet nut (⌀${holder.nutDiameter} mm) at ${stickout} mm stick-out overlaps the fixture by ${formatVolume(nutVol)} mm³`,
+              message: `checkpoint ${idx}: the collet nut (⌀${holder.nutDiameter} mm), placed at the lowest it can sit at any seating — its face ${nutOffset} mm above the tip — overlaps the fixture by ${formatVolume(nutVol)} mm³`,
             });
           }
         }

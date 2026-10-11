@@ -8,7 +8,6 @@ const base: SimCoverageInput = {
   outcome: 'swept',
   fixtureLabels: [],
   sacrificialModelled: false,
-  holderKnown: false,
   toolName: null,
   codes: [],
 };
@@ -16,13 +15,15 @@ const base: SimCoverageInput = {
 const text = (input: Partial<SimCoverageInput>): string => coverageDisclaimer({ ...base, ...input }).join(' ');
 
 describe('coverageDisclaimer', () => {
-  it('names the default setup’s blind spots: no fixture, an unmeasured collet nut', () => {
+  it('names the default setup’s blind spots: no fixture, and no nut until the run asks for one', () => {
     const s = text({});
     expect(s).toContain('Checked: the tool against the stock.');
     expect(s).toContain('any fixture — none is modelled');
-    expect(s).toContain('the collet nut, which this machine states no dimensions for');
     expect(s).toContain('the spindle body, head and gantry');
     expect(s).not.toContain('the sacrificial material');
+    // #314 — the Z1's nut is unmeasured, and that alone is no longer a blind spot: the sweep
+    // raises the code only where the nut could matter, and this run raised nothing.
+    expect(s).not.toContain('the collet nut');
   });
 
   it('names the obstacles it was given: fixture labels and sacrificial material', () => {
@@ -30,7 +31,6 @@ describe('coverageDisclaimer', () => {
       fixtureLabels: ['vise-jaw-front', 'vise-jaw-back'],
       sacrificialModelled: true,
       fixtureSource: 'default',
-      holderKnown: true,
     });
     expect(s).toContain('the sacrificial material');
     expect(s).toContain('the modelled fixture (vise-jaw-front, vise-jaw-back)');
@@ -38,9 +38,15 @@ describe('coverageDisclaimer', () => {
     expect(s).toContain('The modelled fixture is a shipped default, not a measurement.');
   });
 
-  it('drops the collet-nut caveat when the machine states a holder', () => {
-    const s = text({ holderKnown: true });
-    expect(s).not.toContain('the collet nut');
+  // #314 — the sentence is named from the run, like the shank caveat below it: the sweep raises
+  // `holder-vs-fixture-unproven` only when an obstacle rises above the stock top with the nut's
+  // size unstated. A vise job — the ordinary job — cannot reach that, so it says nothing.
+  it('reports the collet nut only when the run needed the check and could not make it', () => {
+    const needed = text({ codes: ['holder-vs-fixture-unproven'] });
+    expect(needed).toContain('the collet nut, which this machine states no dimensions for');
+
+    const viseJob = text({});
+    expect(viseJob).not.toContain('the collet nut');
   });
 
   it('names the tool whose shank length is unproven, from the run’s own code', () => {

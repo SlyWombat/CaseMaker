@@ -21,7 +21,6 @@ import { cuttingDiameter } from '@/engine/cnc/tool';
 import { axesWord, describeTouch, kindWord, readsWord, registrationFor } from '@/engine/cnc/engrave/registration';
 import type { FeedsResult } from '@/engine/cnc/feeds';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
-import { Z1 } from '@/engine/cnc/machine';
 import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
 import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
@@ -720,8 +719,10 @@ function isViseDefault(vise: ViseParams): boolean {
  * was printed for a run cannot claim coverage that run did not have.
  *
  * The fixture is the vise envelope `toSetup` hands the sweep (`viseEnvelope`), so the obstacles
- * the sheet names ARE the ones the sweep was given. `holderKnown` is the machine's own answer
- * (`Z1.holder` is null), and the tool name comes from the job's cutter.
+ * the sheet names ARE the ones the sweep was given, and the tool name comes from the job's
+ * cutter. The collet nut is NOT a field here (#314): the sheet reports the nut as a blind spot
+ * only when the run's own codes say the check was needed and could not be made, which on a vise
+ * job — every obstacle below the stock top — is never.
  */
 function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunSheetSim | null): SimCoverageInput {
   const codes = new Set<string>();
@@ -734,7 +735,6 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
     fixtureLabels: envelope.boxes.map((b) => b.label),
     fixtureSource: envelope.source,
     sacrificialModelled: hasSacrificial(job.sacrificial),
-    holderKnown: Z1.holder !== null,
     toolName: jobTool(job)?.name ?? null,
     codes: [...codes],
   };

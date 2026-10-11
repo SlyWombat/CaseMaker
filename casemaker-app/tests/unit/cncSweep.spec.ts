@@ -736,6 +736,11 @@ describe('#194: the time budget and progress are part of the contract', () => {
 // boxes, each grown by `uncertainty` and unioned — and the collet nut is `machine.holder`
 // (#208; unmeasured, so `null` on the Z1). Three checks, all against the tool's own geometry:
 // the cutter on a cutting move, the cutter on an air move, and the nut above it.
+//
+// #314 tightened the third: the nut's PLACEMENT is derived from the cutter (its face is at least
+// `shoulderLength` above the tip, whatever the seating), never from a measured stick-out, and the
+// nut is only ever asked about where an obstacle rises ABOVE the stock top. The tests below pin
+// both halves — silent where the question is moot, exact where it is not.
 // ---------------------------------------------------------------------------------------
 describe('#204: the fixture is an obstacle the sweep refuses to cut into', () => {
   // 100 x 60 x 12: the default job's blank. Work origin on its top-front-left, so the stock
@@ -793,25 +798,69 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
     expect(codesOf(fine.out)).not.toContain('rapid-through-stock');
   });
 
-  it('an UNMEASURED nut (machine.holder null) is exactly one warning, never a refusal', () => {
+  // #314 — the nut needs no caliper, and a vise job has nothing for it to hit. The collet grips
+  // the shank and never the flutes, so the nut face is at least `shoulderLength` above the tip at
+  // ANY seating, and `holderGate` already refuses a cut deeper than that. Every obstacle in the
+  // vise tops out at Z = -4, below the stock top, so the nut cannot reach one before the shank
+  // does — and the warning that used to fire on every single job was about a check that is
+  // provably moot, which is not the same as unknown.
+  it('#314: a 4 mm-shoulder cutter at 0.5 mm deep on a vise job raises no holder warning', () => {
+    // The cutter the collet actually holds (A1: the 3.175×1×4 mm ball nose, shoulder = flute =
+    // 4.0 mm) on an ordinary vise job. Nothing stands above the stock top and the cut is an
+    // eighth of the shoulder, so all three holder questions have a decided answer, and every one
+    // of them is "fine" — including the nut, which `machine.holder` is still null for.
+    const t = flatEndMill(3.175, { shoulderLength: 4, fluteLength: 4 });
+    const { out } = sweep(stroke(50, -0.5), t, fixtureSetup(), { machine: Z1 });
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.diagnostics.filter((d) => d.code.startsWith('holder-'))).toEqual([]);
+  });
+
+  it('#314: an unmeasured nut is SILENT on a vise job, however many checkpoints', () => {
     const program = 'S1000 M3\nG0 X20 Y10 Z1\nG1 Z-5 F100\nG1 Y50\nG0 Z1\nG0 X50\nG1 Z-6 F100\nG1 Y50\nG0 Z1\nG0 X80\nG1 Z-7 F100\nG1 Y50\n';
     const { out, timeline } = sweep(program, T3, fixtureSetup());
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
     expect(timeline.checkpoints).toHaveLength(3); // three depths: three checkpoints
+    expect(out.value.diagnostics.map((d) => d.code)).not.toContain('holder-vs-fixture-unproven');
+  });
+
+  /** An obstacle ABOVE the stock top at work X [minX, maxX], off the cut at X = 50 so the
+   *  r-1.59 cutter never reaches it while the r-10 nut does. */
+  const toeClamp = (minX = 56, maxX = 70): Setup =>
+    stubSetup(FSLAB, HOLD, {
+      fixture: { boxes: [{ id: 'toe-clamp', label: 'Toe clamp', min: [minX, 0, 1], max: [maxX, 60, 3] }], source: 'default', uncertainty: 0 },
+    });
+
+  it('#314: an obstacle ABOVE the stock top is where the unknown becomes real again', () => {
+    const { out } = sweep(stroke(50, -5), T3, toeClamp(), { machine: Z1 });
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
     const warns = out.value.diagnostics.filter((d) => d.code === 'holder-vs-fixture-unproven');
     expect(warns).toHaveLength(1);
     expect(warns[0]?.severity).toBe('warning');
+    // It says WHICH question is unanswerable, not merely that something is.
+    expect(warns[0]?.message).toContain('rises 3.000 mm above the stock top');
+    expect(warns[0]?.message).toContain("collet nut's size is not known");
   });
 
-  it('a MEASURED nut: clear at depth 5, in the jaw at depth 8', () => {
+  it('#314: with the nut stated, the nut face is at tip + shoulderLength — not at a stick-out', () => {
     const machine: MillProfile = { ...Z1, holder: { nutDiameter: 20, nutLength: 15, source: 'test' } };
-    const t = flatEndMill(3.175, { stickout: 3 }); // nut bottom sits 3 mm above the tip
-    // Depth 5: nut bottom Z = -2, above the jaw top at -4 → clear.
-    expect(codesOf(sweep(stroke(8, -5), t, fixtureSetup(), { machine }).out)).not.toContain('holder-into-fixture');
-    // Depth 8: nut bottom Z = -5, below -4, and its r-10 footprint reaches X = -2 over the jaw.
-    const { out } = sweep(stroke(8, -8), t, fixtureSetup(), { machine });
+    // A stick-out of 8 mm would put the nut face 3 mm ABOVE the stock top — clear of the clamp
+    // (which spans Z 1..3) by exactly the measurement, and the old rule trusted it. The cutter's
+    // own 4 mm shoulder is the honest bound: at the deepest point of the job (Z = -5) the nut
+    // face sits at -1, so the nut — and only the nut — is inside the clamp.
+    const t = flatEndMill(3.175, { shoulderLength: 4, fluteLength: 4, stickout: 8 });
+    const { out } = sweep(stroke(50, -5), t, toeClamp(), { machine });
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
-    expect(out.value.diagnostics.find((d) => d.code === 'holder-into-fixture')?.severity).toBe('error');
+    const hit = out.value.diagnostics.find((d) => d.code === 'holder-into-fixture');
+    expect(hit?.severity).toBe('error');
+    expect(hit?.message).toContain('its face 4 mm above the tip');
+    expect(hit?.message).toContain('⌀20 mm');
+    // The cutter itself never touched the clamp: this is the nut alone, which is the point.
+    expect(out.value.diagnostics.map((d) => d.code)).not.toContain('tool-into-fixture');
+
+    // The same job with the clamp out of the nut's reach (it reaches X = 60) is clean, so the
+    // error above is the overlap and not a check that fires on any fixture at all.
+    const clear = sweep(stroke(50, -5), t, toeClamp(70, 84), { machine });
+    expect(codesOf(clear.out)).not.toContain('holder-into-fixture');
   });
 
   it('no fixture → fixture-unchecked; a modelled fixture → no such info', () => {
@@ -904,7 +953,7 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
     expect(vise.out.value.diagnostics.map((d) => d.code)).not.toContain('rapid-into-fixture');
   });
 
-  it('ACCEPTANCE: the default engrave job sweeps with zero fixture errors and one unproven-nut warning', () => {
+  it('ACCEPTANCE: the default engrave job sweeps with zero fixture errors and no nut warning at all', () => {
     const job = defaultEngraveJob();
     const s = toSetup(job, Z1);
     const t = jobTool(job) ?? flatEndMill(1);
@@ -914,8 +963,16 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
     const fixtureErrors = out.value.diagnostics.filter((d) => ['tool-into-fixture', 'rapid-into-fixture', 'feed-into-fixture', 'holder-into-fixture'].includes(d.code));
     expect(fixtureErrors).toEqual([]);
-    // Z1.holder is null (#208): one warning, exactly, however many checkpoints.
-    expect(out.value.diagnostics.filter((d) => d.code === 'holder-vs-fixture-unproven')).toHaveLength(1);
+    // #314 — every obstacle the vise models is below the stock top, so the unmeasured nut is not
+    // a question here and the run must not ask for an acknowledgement for it. This is the whole
+    // issue: `holder-vs-fixture-unproven` used to fire on EVERY job, and the Generate panel
+    // demanded a tick for it.
+    expect(out.value.diagnostics.map((d) => d.code)).not.toContain('holder-vs-fixture-unproven');
+    // `holder-unproven` DOES stand here, and correctly: `flat-1.0` — the shipped default job's
+    // cutter — states no shoulder or flute length at all, so the shank above the cutter cannot be
+    // bounded against the cut's own wall. That is a question about the TOOL, not about the nut,
+    // and it is answered by picking a cutter; the nut no longer piggybacks on it.
+    expect(out.value.diagnostics.map((d) => d.code)).toContain('holder-unproven');
   });
 });
 

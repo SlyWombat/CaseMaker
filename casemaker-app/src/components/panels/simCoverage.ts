@@ -4,9 +4,11 @@
  * The old disclaimer was physics only — "rigid, ideal machine" — and said nothing about the
  * geometry the sweep never saw. Bantam names its blind spots and we did not, so a green result
  * could be read as "nothing can be hit". This builds the blind-spot sentences from the run
- * itself: which obstacles the sweep was given (#204's fixture boxes), whether a collet nut was
- * modelled, which "cannot be proven" findings the run raised, and whether it was a full sweep or
- * a path-only refusal. Assembled from data, it cannot drift out of date the way prose does.
+ * itself: which obstacles the sweep was given (#204's fixture boxes), which "cannot be proven"
+ * findings the run raised — the unmeasured collet nut and the unstated shank among them — and
+ * whether it was a full sweep or a path-only refusal. Assembled from data, it cannot drift out of
+ * date the way prose does, and a check the run did not actually need is not reported as a gap
+ * (#314).
  *
  * Pure — no store and no React — so every branch is exercised in `simCoverage.spec.ts` without a
  * worker. The physics sentence stays a constant in the panel; this is the part that changes per run.
@@ -27,8 +29,6 @@ export interface SimCoverageInput {
   fixtureSource?: 'default' | 'saved' | 'measured';
   /** True when the run modelled sacrificial material (#213) as a second body. */
   sacrificialModelled: boolean;
-  /** The machine states a collet-nut holder (#182). False = the nut above the cutter is unmodelled. */
-  holderKnown: boolean;
   /** The tool the program was written for, when known, so the shank caveat can name it. */
   toolName?: string | null;
   /** The codes this run reported, so "cannot be proven" is named from the run, not from prose. */
@@ -61,7 +61,12 @@ export function coverageDisclaimer(input: SimCoverageInput): string[] {
     if (input.fixtureLabels.length === 0) {
       blind.push('any fixture — none is modelled as an obstacle, so the workholding is not checked');
     }
-    if (!input.holderKnown || input.codes.includes('holder-vs-fixture-unproven')) {
+    // #314 — from the run's own codes, like the shank caveat below. The sweep raises
+    // `holder-vs-fixture-unproven` only when an obstacle rises ABOVE the stock top and the nut's
+    // size is unstated; below the top the nut is held off by the shoulder gate, so a vise job —
+    // the ordinary job — says nothing here. Moot is not unknown, and a sentence that named it
+    // anyway would put a blind spot in every report this panel writes.
+    if (input.codes.includes('holder-vs-fixture-unproven')) {
       blind.push('the collet nut, which this machine states no dimensions for');
     }
     if (input.codes.includes('holder-unproven')) {
