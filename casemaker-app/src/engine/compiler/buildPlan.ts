@@ -84,6 +84,10 @@ export interface PrintMeta {
    *  print-ready layout — the sentence "the file already comes this way up".
    *  Only true there; the assembled layout skips the flip. */
   exportedFlipNote?: string;
+  /** The `rotation` analogue of `exportedFlipNote` (#358): appended when the
+   *  part's non-zero `rotation` has been applied in the print-ready layout, so
+   *  an instruction like "Lay FLAT" does not read as a step still owed. */
+  exportedOrientationNote?: string;
 }
 
 export interface BuildNode {

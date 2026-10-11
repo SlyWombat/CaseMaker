@@ -145,11 +145,24 @@ const PRINT_TABLE: Record<string, PrintMeta> = {
   // needed. Layer lines then run across the pockets, the direction a socket is
   // pushed in.
   'insert-plate': flat('Print flat, pocket mouths UP, as modelled — no supports'),
+  // Issue #358 — the two panels are chiral, so the quarter turn that lays each one flat has the
+  // OPPOSITE sign: the left panel's inner face looks along +x and the right panel's along −x, and
+  // ±90° about Y is what puts each of those faces down. The sign is not a guess — the table entry
+  // and the exported bbox are checked against each other in `printOrientation.spec.ts`, and the
+  // reason the pair needs a rotation at all is that the panel stands on edge as modelled.
   'rack-side-left': flat(
     'Lay FLAT, inner face down (the face with the plate tab ledges). Wall-mount ears/gussets then rise as self-supporting walls. Strongest layer direction for the screw columns',
+    {
+      rotation: [0, 90, 0],
+      exportedOrientationNote: 'the tab ledges and the gussets all face up.',
+    },
   ),
   'rack-side-right': flat(
     'Lay FLAT, inner face down (the face with the plate tab ledges). Wall-mount ears/gussets then rise as self-supporting walls. Strongest layer direction for the screw columns',
+    {
+      rotation: [0, -90, 0],
+      exportedOrientationNote: 'the tab ledges and the gussets all face up.',
+    },
   ),
   'rack-top': flat(
     'Lay flat, COUNTERBORES UP — flat slab, so it sits flat either way, but the head seats must face up or their floors bridge and give the head nothing smooth to bear on. No supports',
@@ -263,7 +276,10 @@ const PRINT_PATTERNS: PrintPattern[] = [
     test: (id) => id.startsWith('divider-peg-'),
     meta: flat(
       'Lay it on its SIDE — wall face on the bed, tenons pointing sideways. The wall prints as flat layers and nothing overhangs',
-      { rotation: [90, 0, 0] },
+      {
+        rotation: [90, 0, 0],
+        exportedOrientationNote: 'the tenons point sideways, not down.',
+      },
     ),
   },
   {
@@ -481,7 +497,10 @@ export function partForId(id: string, index = 0): ProjectPart {
  *  `printNotesText` for the layout-aware sidecar. */
 export function printOrientationHint(part: ProjectPart): string {
   const meta = printMetaForId(part.id);
-  return meta.exportedFlipNote ? `${meta.hint} ${meta.exportedFlipNote}` : meta.hint;
+  // Either note is the same claim — "the exported print-ready file already comes this way" — from
+  // the flip and from the declared rotation respectively (#154, #358).
+  const note = meta.exportedFlipNote ?? meta.exportedOrientationNote;
+  return note ? `${meta.hint} ${note}` : meta.hint;
 }
 
 /** Walk a BuildPlan and return the typed parts list. Order preserved from

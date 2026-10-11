@@ -204,7 +204,8 @@ export function meshNodesForExport(): ExportMeshGroups {
       gasketId: gasketNode ? gasketNode.id : null,
     };
   }
-  // Print-ready: lay main parts out flat, lid flipped, side-by-side along +X.
+  // Print-ready: apply each part's declared print orientation (the table's rotation, then the
+  // lid-style flip), then lay them out side-by-side along +X.
   const laid = applyLayoutToMeshes(main, { flipNodeIds: PRINT_FLIP_NODE_IDS });
   return {
     main: laid.map((m) => ({

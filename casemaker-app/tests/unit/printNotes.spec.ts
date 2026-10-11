@@ -37,7 +37,25 @@ describe('print notes (#154)', () => {
     for (const mode of ['print-ready', 'assembled'] as const) {
       const text = printNotesText(parts('shell'), mode);
       expect(text).not.toContain('FLIP FOR PRINT');
+      expect(text).not.toContain('TURNED FOR PRINT');
     }
+  });
+
+  // Issue #358 — the rack side panel's own note says "Lay FLAT". Now that the exporter applies the
+  // table's declared rotation, the note must not read as a step the user still owes on the
+  // print-ready file — and in the assembled layout it must, because there nothing is applied.
+  it('print-ready says a turned part already comes laid flat (#358)', () => {
+    const ready = printNotesText(parts('rack-side-left'), 'print-ready');
+    expect(ready).toContain('Lay FLAT');
+    expect(ready).toContain('TURNED FOR PRINT');
+    expect(ready).toContain('already turned into that orientation');
+    expect(ready).not.toContain('NOT turned');
+
+    const asm = printNotesText(parts('rack-side-left'), 'assembled');
+    expect(asm).toContain('NOT turned (assembled layout)');
+    // Crucially, it must NOT claim the file is already laid flat.
+    expect(asm).not.toContain('already turned into that orientation');
+    expect(asm).not.toContain('already comes laid flat');
   });
 
   it('states the structured support level and why', () => {

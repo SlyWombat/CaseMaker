@@ -15,11 +15,11 @@ import {
  * is structural.
  *
  * `layoutMode` is REQUIRED, and it is not a detail. In `print-ready` layout the
- * exporter flips the parts that need it, so the file really does "already come
- * this way up". In `assembled` layout it skips the flip entirely
- * (`meshNodesForExport`, exportTrigger) — so for a flipped part the notes must
- * say the opposite: turn it over yourself. A function that hard-codes the
- * print-ready sentence is wrong half the time.
+ * exporter applies each part's declared print orientation — the quarter turn as
+ * well as the flip (#358) — so the file really does "already come this way up".
+ * In `assembled` layout it skips both (`meshNodesForExport`, exportTrigger), so
+ * for such a part the notes must say the opposite: orient it yourself. A
+ * function that hard-codes the print-ready sentence is wrong half the time.
  *
  * Takes the parts actually being exported (after any filtering), not the whole
  * plan: Save All excludes the fused assembled racks, and the notes must match
@@ -36,8 +36,8 @@ export function printNotesText(
   lines.push('');
   lines.push(
     layoutMode === 'print-ready'
-      ? 'Layout: PRINT-READY. Parts are laid flat and flipped where they need it, so each STL drops straight onto the bed as exported.'
-      : 'Layout: ASSEMBLED. The print-ready flip is NOT applied — parts export in their assembly orientation. Turn over any part marked FLIP below.',
+      ? 'Layout: PRINT-READY. Parts are laid flat, turned and flipped where their print orientation needs it, so each STL drops straight onto the bed as exported.'
+      : 'Layout: ASSEMBLED. The print-ready orientation is NOT applied — parts export as they assemble. Turn over any part marked FLIP below, and lay flat any marked TURNED.',
   );
   lines.push('');
   // Issue #153 — a relieved fit is a property of the file's geometry (the
@@ -71,6 +71,15 @@ export function printNotesText(
         layoutMode === 'print-ready'
           ? `Orientation: ${meta.hint} FLIP FOR PRINT — the exported file is already turned over: ${meta.exportedFlipNote ?? 'drop it straight in.'}`
           : `Orientation: ${meta.hint} FLIP FOR PRINT — this file is NOT flipped (assembled layout): turn it over in the slicer.`,
+      );
+    } else if (meta.rotation.some((d) => d !== 0)) {
+      // #358 — the same claim the flip branch makes, for a part the layout turns by a quarter
+      // turn instead of turning over. Without this the note read "Lay FLAT" beside a file that
+      // already was, which is an instruction to undo the export.
+      lines.push(
+        layoutMode === 'print-ready'
+          ? `Orientation: ${meta.hint} TURNED FOR PRINT — the exported file is already turned into that orientation: ${meta.exportedOrientationNote ?? 'drop it straight in.'}`
+          : `Orientation: ${meta.hint} TURNED FOR PRINT — this file is NOT turned (assembled layout): orient it in the slicer.`,
       );
     } else {
       lines.push(`Orientation: ${meta.hint}`);
