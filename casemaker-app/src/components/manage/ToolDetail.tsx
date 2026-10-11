@@ -39,6 +39,7 @@ import {
   type CutterSpec,
 } from '@/engine/cnc/registerCutter';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { InventoryItem } from '@/platform/houseClient';
 import { useHouseStore } from '@/store/houseStore';
 import { useManageModeStore } from '@/store/manageModeStore';
@@ -169,7 +170,7 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
               </tr>
               <tr>
                 <th>tip ⌀</th>
-                <td>{mm(t.tipDiameter ?? t.diameter)} mm</td>
+                <td>{mm(cuttingDiameter(t))} mm</td>
               </tr>
               <tr>
                 <th>shank ⌀</th>

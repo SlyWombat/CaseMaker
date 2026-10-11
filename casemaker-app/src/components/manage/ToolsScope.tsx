@@ -31,6 +31,7 @@ import {
 } from '@/engine/cnc/toolTiers';
 import { inventoryKey } from '@/engine/cnc/toolRegistry';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { InventoryItem } from '@/platform/houseClient';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useHouseStore, useLastSync } from '@/store/houseStore';
@@ -443,7 +444,7 @@ function Rows({
       {entries.map((entry) => {
         const possession = item.get(entry.key) ?? null;
         const t = entry.tool;
-        const tip = t.tipDiameter ?? t.diameter;
+        const tip = cuttingDiameter(t);
         const dim = (v: number | null) => (v === null ? 'num dim' : 'num');
         return (
           <tr

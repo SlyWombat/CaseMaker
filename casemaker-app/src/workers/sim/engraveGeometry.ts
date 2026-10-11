@@ -18,7 +18,7 @@ import { engravableProfile } from '@/engine/cnc/engrave/engravable';
 import { checkBounds, defaultBoundaryMargin, splitBound } from '@/engine/cnc/engrave/depthBounds';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { itemLabel } from '@/engine/cnc/engrave/jobSetup';
-import type { Tool } from '@/engine/cnc/tool';
+import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { aabbOfProfile, pOffset, type Profile } from '@/engine/compiler/profile';
 import type {
   EngraveAnyItem,
@@ -215,7 +215,7 @@ export function engravabilityFindings(
   tool: Tool | null,
 ): JobFinding[] {
   const findings: JobFinding[] = [];
-  const diameter = tool?.tipDiameter ?? tool?.diameter ?? null;
+  const diameter = tool === null ? null : cuttingDiameter(tool);
   const cutter = diameter === null ? 'the cutter' : `a ${diameter} mm cutter`;
 
   for (const row of m) {

@@ -12,6 +12,7 @@ import {
   voidFloor,
 } from '@/engine/cnc/engrave/depthBounds';
 import { layerAlignedDepthFor } from '@/engine/cnc/layerStack';
+import { cuttingDiameter } from '@/engine/cnc/tool';
 import { axesWord, describeTouch, kindWord, readsWord, registrationFor } from '@/engine/cnc/engrave/registration';
 import type { FeedsResult } from '@/engine/cnc/feeds';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
@@ -263,11 +264,6 @@ const MATERIAL_LABEL: Record<EngraveJob['stock']['material'], string> = {
   mdf: 'MDF',
   pla: 'PLA',
 };
-
-/** Cutting diameter of a tool, best effort (`tipDiameter ?? diameter`, as `EngravePanel` does). */
-function cuttingDiameter(tool: NonNullable<ReturnType<typeof jobTool>>): number | null {
-  return tool.tipDiameter ?? tool.diameter;
-}
 
 /** '2 min 35 s'. Formats the seconds it is given; `estimatedTimeNote` says what they are. */
 export function formatDuration(seconds: number): string {

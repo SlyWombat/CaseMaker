@@ -24,6 +24,7 @@
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { recordDepths, runSheetFileName, sha256Hex, type RunSheetGenerated } from '@/engine/cnc/engrave/runSheet';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
@@ -138,7 +139,7 @@ export function buildRunRecord(
     ncFile: runSheetFileName(job.name),
     ncHash: nc === null ? '' : sha256Hex(nc).slice(0, 8),
     tool: tool?.name ?? null,
-    cuttingDiameter: tool ? (tool.tipDiameter ?? tool.diameter) : null,
+    cuttingDiameter: tool ? cuttingDiameter(tool) : null,
     estimatedSeconds: generated.cam?.estimatedSeconds ?? null,
     generatedOn: now.toISOString().slice(0, 10),
     cutOn: null,

@@ -6,10 +6,10 @@ import { resolveTool, Z1 } from '@/engine/cnc';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { StartingTool } from '@/engine/cnc';
 import type { DiagnosticSource, SimDiagnostic } from '@/workers/sim/session';
-import type { MatchProvenance, MatchStrength } from '@/engine/cnc/headerMatch';
 import { MAX_TEXT_FILE_BYTES, openTextFile } from '@/utils/openTextFile';
 import { GcodePane } from '@/components/panels/GcodePane';
 import { coverageDisclaimer, type SimRunOutcome } from '@/components/panels/simCoverage';
+import { matchSentence, requiredToolSentence } from '@/components/panels/simMatchSentence';
 
 /**
  * The Simulate panel (#196): open a `.nc`, confirm the stock and the tool, run the sweep, and
@@ -107,34 +107,6 @@ const LINELINK: CSSProperties = {
   cursor: 'pointer',
   textDecoration: 'underline dotted',
 };
-/**
- * What the sentence under the Tool select says the match rests on (#316/#332 review).
- *
- * The rule that answered decides the phrase, not the fact that a key was stated: an unheld key
- * falls through to the id step or the shape step, and the sentence has to name the evidence it
- * actually has. A held key whose entry no longer measures what the file cut is the one case where
- * the key is right and `exact` is not.
- */
-export function matchSentence(
-  match: MatchStrength | null,
-  provenance: MatchProvenance | null,
-  statedKey: string | null,
-): string {
-  if (provenance === 'key') {
-    return match === 'exact'
-      ? 'matched from the cutter the file names.'
-      : `the file names the cutter "${statedKey}", but states a cutting diameter this house’s entry does not match — check it.`;
-  }
-  if (statedKey !== null) {
-    return provenance === 'id'
-      ? `the file names the cutter "${statedKey}", which this house does not have — closest by the vendor id it also states; check it.`
-      : `the file names the cutter "${statedKey}", which this house does not have — closest by shape and diameter; check it.`;
-  }
-  return match === 'suggested'
-    ? 'closest cutter by shape and diameter — the file does not confirm it; check it.'
-    : 'matched from the file’s TOOL record.';
-}
-
 /** Save a generated restart `.nc`. Plain text, unlike SettingsMenu's JSON export. */
 function downloadNc(text: string, filename: string): void {
   const blob = new Blob([text], { type: 'text/plain' });
@@ -382,7 +354,9 @@ export function SimPanel() {
         ))}
       </select>
       {!toolKey && (
-        <p style={{ ...MUTED, color: '#e0a19b' }}>required — choose the tool this program was written for.</p>
+        <p style={{ ...MUTED, color: '#e0a19b' }} data-testid="sim-tool-required">
+          {requiredToolSentence(statedToolKey)}
+        </p>
       )}
       {/* #316/#332 — how well the file's own records fit the entry they matched. The file's
           `;@CM|TOOL|key=` line settles it outright when the registry holds the key; a key it does

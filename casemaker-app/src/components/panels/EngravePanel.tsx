@@ -19,6 +19,7 @@ import {
 import { Z1 } from '@/engine/cnc';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { cuttingDiameter } from '@/engine/cnc/tool';
 import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { keepOutLimit, keepOutMembrane } from '@/engine/cnc/engrave/partPlan';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
@@ -238,13 +239,8 @@ function fmtDiameter(d: number): string {
   return Number.isInteger(d) ? d.toFixed(1) : String(d);
 }
 
-/** Cutting diameter of a library entry, best effort (`tipDiameter ?? diameter`). */
-function entryDiameter(e: ToolLibraryEntry): number | null {
-  return e.tool.tipDiameter ?? e.tool.diameter;
-}
-
 function toolOptionLabel(e: ToolLibraryEntry): string {
-  const d = entryDiameter(e);
+  const d = cuttingDiameter(e.tool);
   return d === null ? `${e.tool.name} — cutting diameter unknown` : `${e.tool.name} — Ø ${d} mm cutting`;
 }
 
@@ -353,7 +349,7 @@ export function EngravePanel(): JSX.Element {
   const tools = useToolRegistry();
   const tool = jobTool(job);
   const toolEntry = tools.find((e) => e.key === job.toolKey) ?? null;
-  const diameter = toolEntry ? entryDiameter(toolEntry) : null;
+  const diameter = toolEntry ? cuttingDiameter(toolEntry.tool) : null;
   // The rows are the main thread's own catalogue snapshot (#324) — read here so the numbers on
   // screen are the same resolution the worker is handed at Generate, not a module state only this
   // side of the boundary can see.

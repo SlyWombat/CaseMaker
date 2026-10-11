@@ -244,6 +244,27 @@ describe('SimPanel', () => {
     expect(edited.textContent).toContain('cutting diameter');
   });
 
+  it('names the cutter the file asks for even when nothing matched (#332 review)', async () => {
+    // A file that states a key this house does not hold AND no TOOL record to match on leaves the
+    // select empty. A bare "required" would hide which cutter is missing, which is the one fact the
+    // file did give us — so the sentence carries it.
+    act(() => useSimSetupStore.getState().openFile('norecord.nc', ';@CM|TOOL|key=user:missing-tool\n'));
+    render(<SimPanel />);
+    const required = screen.getByTestId('sim-tool-required');
+    expect(required.textContent).toContain('user:missing-tool');
+    expect(required.textContent).toContain('does not have');
+    expect(required.textContent).toContain('choose the tool');
+
+    // And with no key line at all there is nothing to name: the plain sentence stands.
+    cleanup();
+    act(() => useSimSetupStore.getState().reset());
+    act(() => useSimSetupStore.getState().openFile('plain.nc', 'G0 X0 Y0\n'));
+    render(<SimPanel />);
+    expect(screen.getByTestId('sim-tool-required').textContent).toBe(
+      'required — choose the tool this program was written for.',
+    );
+  });
+
   it('shows the runner summary count, not the capped list length', async () => {
     setSimClientLoader(async () => fakeClient(READY));
     openPlainFile();

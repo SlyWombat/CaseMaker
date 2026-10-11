@@ -129,9 +129,13 @@ export type RadiusResult = { ok: true; radius: number } | { ok: false; reason: s
 
 /**
  * The tool's cutting diameter, best effort: `tipDiameter` when it states one (the tip is what
- * cuts), `diameter` otherwise, `null` when it states neither. The ONE copy of this rule, shared by
- * the header matcher, the sweep and the verifier (#316 review) — three `??` chains that could
- * drift apart are three chances to disagree about which cutter a file names.
+ * cuts), `diameter` otherwise, `null` when it states neither.
+ *
+ * The ONE copy of this rule (#316 review). The header matcher, the sweep, the verifier, the run
+ * sheet, the run record, the tool recommendation, the engravability findings and every place a
+ * tool is listed or described all ask this function — `??` chains that could drift apart are
+ * chances to disagree about which cutter a file names, and about whether two entries are the same
+ * cutter at all.
  */
 export function cuttingDiameter(tool: Tool): number | null {
   return tool.tipDiameter ?? tool.diameter;

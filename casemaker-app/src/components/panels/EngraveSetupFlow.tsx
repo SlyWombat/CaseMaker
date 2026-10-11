@@ -1,7 +1,7 @@
 import { useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
-import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { cuttingDiameter } from '@/engine/cnc/tool';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import {
   MATERIAL_OPTIONS,
@@ -59,11 +59,6 @@ const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, 
 const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, margin: '4px 0' };
 const FIELD: CSSProperties = { width: 80 };
 const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a' };
-
-/** Cutting diameter of a library entry, best effort (`tipDiameter ?? diameter`). */
-function entryDiameter(e: ToolLibraryEntry): number | null {
-  return e.tool.tipDiameter ?? e.tool.diameter;
-}
 
 function FindingRow({ finding, testid }: { finding: JobFinding; testid: string }): JSX.Element {
   return (
@@ -223,7 +218,7 @@ export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Elem
               onChange={(e) => setAnswers((a) => withToolAnswer(a, e.target.value))}
             >
               {tools.map((e) => {
-                const d = entryDiameter(e);
+                const d = cuttingDiameter(e.tool);
                 return (
                   <option key={e.key} value={e.key} title={e.provenance}>
                     {d === null ? e.tool.name : `${e.tool.name} — Ø ${d} mm cutting`}

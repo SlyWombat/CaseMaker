@@ -29,7 +29,7 @@
 
 import { feedsFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
-import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
+import { cuttingDiameter, cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveAnyItem, EngraveJob } from '@/types/engraveJob';
 import { LOST_DETAIL_RATIO, type LabelEngravability } from '@/workers/sim/engraveGeometry';
@@ -39,7 +39,7 @@ export type ToolExclusion = 'not-flat' | 'no-feeds';
 
 export interface ToolCandidate {
   key: string;
-  /** Cutting diameter, mm. Best-effort (`tipDiameter ?? diameter`) even when excluded. */
+  /** Cutting diameter, mm (`cuttingDiameter`) — and 0 when the tool states neither, even if excluded. */
   diameter: number;
   qualifies: boolean;
   /** Worst label for this cutter: the lowest ratio, and any characters lost. Null if unmeasured. */
@@ -186,7 +186,7 @@ export function recommendTool(
 
   const candidates: ToolCandidate[] = tools.map((entry) => {
     const tool = entry.tool;
-    const diameter = tool.tipDiameter ?? tool.diameter ?? 0;
+    const diameter = cuttingDiameter(tool) ?? 0;
     const reach = reachOf(entry);
     const reachKnown = reach !== null;
     // An unknown reach cannot be shown to foul, so it stays OK (the note above carries it).
