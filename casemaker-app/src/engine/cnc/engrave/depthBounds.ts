@@ -23,6 +23,11 @@
  * pass INTO the board — neither is a depth plane, and `depth-exceeds-stock` / the sacrificial limit
  * keep their own owners.
  *
+ * The ONE place `minFloor` also sets a ceiling is a void on a blank that states no print (#345
+ * decision A, `voidMargin`): with no layer grid there is nothing to align a Z-error margin to, so
+ * the structural floor is the only number with a basis and the ceiling keeps `max(boundaryMargin,
+ * minFloor)`.
+ *
  * PURE. No wasm, no store, no React: the numbers are arithmetic on facts the job already holds
  * (`stock.print`, the keep-outs, the vises), which is what lets the panel, the run sheet and the
  * verifier all read the same rule. The one wasm-backed input — how deep the cutter may go before it
@@ -114,9 +119,31 @@ export function defaultBoundaryMargin(job: Pick<EngraveJob, 'stock'>): Mm {
  */
 export function effectiveMargins(job: EngraveJob, settings: MarginSettings): EngraveMargins {
   if (job.margins) return job.margins;
-  const boundaryMargin =
-    settings.source === 'default' ? defaultBoundaryMargin(job) : settings.boundaryMargin;
-  return { boundaryMargin, zTolerance: settings.zTolerance, source: settings.source };
+  return {
+    boundaryMargin: houseBoundaryMargin(job, settings),
+    zTolerance: settings.zTolerance,
+    source: settings.source,
+  };
+}
+
+/**
+ * The boundary margin the HOUSE setting puts in force for THIS job (#345 review), mm.
+ *
+ * The house number is both the margin a job with none of its own runs on AND the floor under the
+ * recommendation, and in either role it must be the number really in force: while the setting is
+ * still the shipped default, "one printed layer" is read off the blank's own print
+ * (`defaultBoundaryMargin`), so a 0.3 mm-layer blank runs 0.3 — not the 0.2 the settings box shows.
+ * Reading the raw `settings.boundaryMargin` instead let the panel and the run sheet print an advice
+ * BELOW the margin that blank was already running on.
+ *
+ * ONE owner, so the margin in force (`effectiveMargins`) and the floor under the advice
+ * (`recommendMargins`) cannot be two different numbers.
+ */
+export function houseBoundaryMargin(
+  job: Pick<EngraveJob, 'stock'>,
+  settings: Pick<MarginSettings, 'boundaryMargin' | 'source'>,
+): Mm {
+  return settings.source === 'default' ? defaultBoundaryMargin(job) : settings.boundaryMargin;
 }
 
 /**
@@ -195,14 +222,59 @@ export function splitBound(intent: EngraveLabel['depthIntent'], splitDepth: Mm |
 }
 
 /**
+ * The margin a VOID'S CEILING keeps (#345 decision A), mm.
+ *
+ * A blank that states its print gets the Z-error margin like every other plane: the layer grid
+ * quantises the ceiling, so keeping one printed layer clear of it is a distance the printer can
+ * hold. A blank that states NO print has no grid to align to — the 0.2 can straddle the roof layer
+ * — and it is also the blank the app knows least about, so it keeps whichever of the two numbers
+ * is larger, `boundaryMargin` or the structural `minFloor`. The LEAST-known blank must not get the
+ * THINNEST membrane.
+ *
+ * ONE owner for that rule: `keepOutLimit` (the analytic ceiling the panel and the no-print verifier
+ * use), `voidLimit` (the sheet) and the per-item void bound all call it, so the three cannot keep
+ * different distances from the same plane.
+ */
+export function voidMargin(job: Pick<EngraveJob, 'stock' | 'minFloor'>, boundaryMargin: Mm): Mm {
+  return job.stock.print === undefined ? Math.max(boundaryMargin, job.minFloor) : boundaryMargin;
+}
+
+/**
+ * WHICH of those two numbers `voidMargin` returned, in words (#345) — so a row that prints the
+ * number can also name the rule that set it instead of hard-coding one of the two and being wrong
+ * on the other. Mirrors `voidMargin`'s own arithmetic; `marginSourceWords` is the same discipline
+ * for the house/job/recommendation provenance.
+ */
+export function voidMarginWords(
+  job: Pick<EngraveJob, 'stock' | 'minFloor'>,
+  boundaryMargin: Mm,
+): string {
+  const keepsFloor = job.stock.print === undefined && job.minFloor >= boundaryMargin;
+  return keepsFloor
+    ? `the ${mm(job.minFloor)} mm minimum floor`
+    : `the ${mm(boundaryMargin)} mm boundary margin`;
+}
+
+/**
  * The bound a void's ceiling makes (#345), from how deep a cutter may go there before it reaches
  * the void (`maxDepthAt`, or the analytic membrane where there is no layer grid).
  *
- * `breach` is a DEPTH, not a height: the caller has already flipped the void's part-frame
- * `zCeiling` into the work frame every bound lives in.
+ * `breach` is the CEILING — a DEPTH below the engraved face, not a height: the caller has already
+ * flipped the void's part-frame `zCeiling` into the work frame every bound lives in, and aligned it
+ * to the printer's layers when the blank states a print. It is the PLANE, not the limit; subtracting
+ * the margin is `checkBounds`/`boundFloor`'s job.
+ *
+ * `margin` is this bound's own margin where its rule differs from the job's `boundaryMargin` — a
+ * void on a no-print blank, whose margin `voidMargin` works out (#345 decision A).
  */
-export function voidBound(name: string, breach: Mm): DepthBound {
-  return { at: breach, side: 'above', name: ceilingName(name), source: 'void' };
+export function voidBound(name: string, breach: Mm, margin?: Mm): DepthBound {
+  return {
+    at: breach,
+    side: 'above',
+    name: ceilingName(name),
+    source: 'void',
+    ...(margin === undefined ? {} : { margin }),
+  };
 }
 
 /**
@@ -243,15 +315,26 @@ export interface ItemBoundPlanes {
  *
  * The split comes first because it is the item's OWN stated intent — when a floor breaks both its
  * intent and a plane under it, the intent is the one the person can act on. The underside comes
- * last, and its violation is `depth-exceeds-stock`'s to report: the per-item check skips that
+ * last, and its violation is `depth-exceeds-stock`'s to report: the per-item check drops that
  * source so one over-deep item does not produce two errors saying the same thing (see
  * `itemDepthBoundFindings`).
+ *
+ * A void's bound carries its OWN margin (`voidMargin`), which is not `boundaryMargin` on a blank
+ * that states no print (#345 decision A) — so the caller's number is the boundary margin, and the
+ * rule for this plane is applied here rather than trusting each caller to remember it.
  */
-export function boundsFor(job: EngraveJob, item: EngraveAnyItem, planes: ItemBoundPlanes): DepthBound[] {
+export function boundsFor(
+  job: EngraveJob,
+  item: EngraveAnyItem,
+  planes: ItemBoundPlanes,
+  boundaryMargin: Mm = defaultBoundaryMargin(job),
+): DepthBound[] {
   const bounds: DepthBound[] = [];
   const split = splitBound('depthIntent' in item ? item.depthIntent : undefined, planes.split);
   if (split) bounds.push(split);
-  if (planes.overVoid) bounds.push(voidBound(planes.overVoid.name, planes.overVoid.breach));
+  if (planes.overVoid) {
+    bounds.push(voidBound(planes.overVoid.name, planes.overVoid.breach, voidMargin(job, boundaryMargin)));
+  }
   bounds.push(undersideBound(job));
   return bounds;
 }
@@ -285,21 +368,6 @@ export function checkBounds(
  */
 export function boundFloor(bound: DepthBound, margin: Mm): Mm {
   return Math.max(0, bound.at - (bound.margin ?? margin));
-}
-
-/**
- * The shallowest `above` bound, as the verifier's per-point limit: `min(at − margin)`, or null when
- * there is no `above` bound at all. This is the one number `verifyProgram`'s `depthLimit` field is
- * built from, so a limit and a finding can never disagree about where a plane is.
- */
-export function boundLimit(bounds: readonly DepthBound[], margin: Mm): Mm | null {
-  let limit: Mm | null = null;
-  for (const bound of bounds) {
-    if (bound.side !== 'above') continue;
-    const v = boundFloor(bound, margin);
-    limit = limit === null ? v : Math.min(limit, v);
-  }
-  return limit;
 }
 
 /**
@@ -361,10 +429,14 @@ export interface MarginRecommendation {
  * review). A job that has already taken a recommendation carries it in `job.margins`; feeding that
  * back in would let the job's own number raise its own advice, so the recommendation could only
  * ever ratchet and the panel would have nothing to offer the second time round.
+ *
+ * The floor under the advice is `houseBoundaryMargin(job, setting)` — the house number AS THIS JOB
+ * runs it, one printed layer of this blank while the setting is still the shipped default — so a
+ * recommendation can never come out below the margin already in force (#345 review).
  */
 export function recommendMargins(
   job: EngraveJob,
-  setting: Pick<MarginSettings, 'boundaryMargin'>,
+  setting: Pick<MarginSettings, 'boundaryMargin' | 'source'>,
   inputs: ZBudgetInputs = {},
 ): MarginRecommendation {
   const basis: string[] = [];
@@ -396,7 +468,7 @@ export function recommendMargins(
 
   return {
     zTolerance,
-    boundaryMargin: Math.max(setting.boundaryMargin, zTolerance),
+    boundaryMargin: Math.max(houseBoundaryMargin(job, setting), zTolerance),
     basis,
   };
 }

@@ -16,11 +16,13 @@ import type { Mm } from '@/types/units';
  * labelled with both the datum and its consequence, and the row reads the consequence back:
  *
  *   membrane = thickness − zCeiling   (the solid left above the void)
- *   limit    = membrane − minFloor    (the deepest cut that keeps the job's floor)
+ *   limit    = membrane − margin      (the deepest cut that keeps clear of the ceiling)
  *
  * Both come from `keepOutMembrane` / `keepOutLimit` in `engrave/partPlan.ts` — the SAME two
  * functions `jobDepthLimit` composes and #174's verifier refuses against — so the number the row
- * shows and the number the run enforces cannot drift apart.
+ * shows and the number the run enforces cannot drift apart. The margin is the job's minimum floor
+ * on a blank that states no print and its boundary margin everywhere else (#345 decision A);
+ * `limitBasis` carries WHICH one, in words, so this row names the rule it is actually on.
  *
  * The polygon editor keeps its text LOCAL and commits only a ring of 3–500 valid points, exactly
  * as the shape row does: a half-typed ring must never reach the job, or the schema would reject
@@ -90,6 +92,12 @@ export interface EngraveKeepOutRowProps {
   membrane: Mm;
   /** `keepOutLimit(job, membrane)`: the deepest cut over this void, mm. */
   limit: Mm;
+  /**
+   * Which rule set that limit's margin, in words (`voidMarginWords`): "the 1 mm minimum floor" or
+   * "the 0.2 mm boundary margin" (#345 decision A). The row prints it rather than hard-coding one
+   * of the two, so a blank that states its print does not read a minimum-floor rule it is not on.
+   */
+  limitBasis: string;
   onChange: (patch: KeepOutPatch) => void;
   onRemove: () => void;
   /** Findings about THIS void (the panel filters the job's list by `labelId`). */
@@ -102,6 +110,7 @@ export function EngraveKeepOutRow({
   thickness,
   membrane,
   limit,
+  limitBasis,
   onChange,
   onRemove,
   findings,
@@ -268,7 +277,7 @@ export function EngraveKeepOutRow({
       >
         {ceilingInvalid
           ? `A ceiling of ${keepOut.zCeiling} mm is not inside a ${thickness} mm blank — the void reaches the engraving face, so no cut over it can keep the minimum floor.`
-          : `Leaves ${membrane.toFixed(2)} mm of material above it: a cut over this void may go ${limit.toFixed(2)} mm deep — the membrane less the minimum floor.`}
+          : `Leaves ${membrane.toFixed(2)} mm of material above it: a cut over this void may go ${limit.toFixed(2)} mm deep — the membrane less ${limitBasis}.`}
       </p>
 
       {findings.map((f, i) => (

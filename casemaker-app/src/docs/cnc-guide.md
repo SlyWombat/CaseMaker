@@ -502,21 +502,27 @@ the depths for.
 **Every floor keeps clear of a plane it must not cross (#345).** A depth in this app is never "as
 deep as you like": each floor has to stay clear of the planes the job knows about — a void's
 ceiling, the stock's underside, and on a two-colour blank the colour split. ONE number, the
-**boundary margin** (0.2 mm by default, which is one printed layer; the house setting is one number
-for every job, and for the blank in hand the app works out a recommendation it will put on the job
-for you in one click), is how far every floor stays from every one of them, and the stock's
-underside keeps its own minimum-floor rule because that is a different quantity — material that
-must remain, not a Z-error allowance. WHICH check reports a broken bound depends on the plane: the
-colour split is judged per item as `item-depth-bound` (chapter 8.1), naming the plane and which
-side the floor belongs on; a void's ceiling is a moving target — the cutter reaches it part-way
-through a move — and is caught per move as `cut-too-deep`; and the stock's underside is
+**boundary margin** (0.2 mm by default; while the house setting is still the shipped default it is
+re-read as one printed layer of the blank in hand, so a badge with 0.3 mm layers gets 0.3 without
+anyone typing it — and for the blank in hand the app works out a recommendation it will put on the
+job for you in one click), is how far every floor stays from every one of them — except a void's
+ceiling on a blank that states no print, where the layers are unknown and the job's own
+minimum-floor rule stands in instead. The stock's
+underside keeps that minimum-floor rule because it is a different quantity — material that must
+remain, not a Z-error allowance. WHICH check reports a broken bound depends on the plane: the
+colour split and a void's ceiling are both judged per item as `item-depth-bound` (chapter 8.1),
+naming the plane and which side the floor belongs on; a void's ceiling is ALSO a moving target —
+the cutter reaches it part-way through a move — so `cut-too-deep` catches it per move as well, the
+backstop for a cut the item's own check never saw; and the stock's underside is
 `depth-exceeds-stock`, the minimum-floor rule that was always the per-item answer there. The colour
 split is one example of that rule, not a special case: a label's depth intent only chooses WHICH
 SIDE of the split its floor must be on — *surface* above it, *reveal* through it — so a blank that
 states no split, and a label that states no intent, have no bound between them and are left alone.
 Where the split IS known, it is read off the printer's real layers rather than the nominal design
 height when the blank states how it is sliced (#285, #166), so changing the layer height moves the
-boundary — and the refusal says where it actually is.
+boundary — and the refusal says where it actually is. A void's ceiling follows the same rule: it is
+taken off the layer stack when the blank states its print, and off the design's own membrane (the
+material left over the pocket) when it does not.
 
 ---
 
@@ -728,7 +734,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `item-detail-lost` | warning | An item loses detail (thin strokes, inside corners) to the cutter's radius. Formerly `label-detail-lost`. | Increase the size, enlarge the shape, or use a smaller cutter. |
 | `item-outside-stock` | error | An item hangs off the blank, or off the sacrificial material beside it (#213). Formerly `label-outside-stock`. | Move it back inside the edge margin, or declare a strip or board under the overhang. |
 | `item-over-void` | warning | An item cuts over a declared under-surface void (#231), whose membrane has nothing under it (#171). True at any depth — even a shallow cut there will chatter and finish rough. A single-line trace is warned about the same way (#270); a plunge drill is not, because a drill into a void is a breach `cut-too-deep` refuses, and a drilled hole has no pocketed floor to finish. | Move the cut clear of the void. A cut deep enough to break through is refused separately, as `cut-too-deep`. |
-| `item-depth-bound` | error | An item's floor lands on the wrong side of a plane it must stay clear of (#345). Raised for the colour split on a two-colour blank (#285): a label's `depthIntent` chooses which SIDE of the split its floor belongs on — *surface* above it, *reveal* through it. Only a plane the job knows about can be broken, so a blank that states no split and a label that states no intent (or *custom*) are left alone. Where the split is known it is read off the printer's real layers, not the nominal design height, so changing the layer height moves it. The other two planes of the same rule are reported elsewhere: a move into a void's ceiling as `cut-too-deep`, an item past the stock's minimum floor as `depth-exceeds-stock`. Formerly `item-wrong-colour`. | Set the depth to the other side of the plane, or switch the label's intent. The message names the plane, where it is in mm, and which side the floor must be on. |
+| `item-depth-bound` | error | An item's floor lands on the wrong side of a plane it must stay clear of (#345). Raised for the colour split on a two-colour blank — a label's `depthIntent` chooses which SIDE of the split its floor belongs on, *surface* above it, *reveal* through it (#285) — and for a void's ceiling under the item's own footprint: the label cut over a magnet pocket is told where that ceiling is and how far above it the floor must stay (#345). Only a plane the job knows about can be broken, so a blank that states no split and a label that states no intent (or *custom*) are left alone. Where the split is known it is read off the printer's real layers, not the nominal design height, so changing the layer height moves it; a void's ceiling is read off the layer stack when the blank states its print and off the design's own membrane when it does not. `cut-too-deep` is the per-move backstop for both these planes — the cutter reaches a void's ceiling part-way through a move — and is the only check for an item that is not a label (a drawn shape, a traced path). An item past the stock's minimum floor is `depth-exceeds-stock`. Formerly `item-wrong-colour`. | Set the depth to the other side of the plane, or switch the label's intent. The message names the plane, where it is in mm, and which side the floor must be on. |
 | `trace-outside-stock` | error | A single-line trace runs off the blank (#219). | Move it back inside the stock. |
 
 **Checking the engraving job** (job):

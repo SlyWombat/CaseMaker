@@ -53,6 +53,7 @@ import type { Setup } from '@/engine/cnc/setup';
 import { verifyProgram, type DepthLimit, type VerifyReport } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import {
+  bindingVoidsByRegion,
   itemDepthBoundFindings,
   engraveCutRegions,
   engravabilityFindings,
@@ -242,17 +243,19 @@ export function engraveRegions(
   const measured = radius === null ? [] : measureLabels(tl, plan, radius, job.edgeMargin, perChar);
   const engFindings = radius === null ? [] : engravabilityFindings(job, measured, ratioAtFor(tl, job, radius), tool);
 
-  // #171 — a WARNING only, and only for a job that declares a void (`keepOutFindings` returns
-  // early otherwise, so a void-free job pays nothing here). A cut deep enough to breach the
-  // membrane stays the verifier's `cut-too-deep`, which owns the layer-aligned depth limit.
-  const voidFindings = keepOutFindings(
-    tl,
-    job,
-    plan,
-    engraveCutRegions(plan, measured),
-    radius,
-    margins.boundaryMargin,
-  );
+  // #171/#345 — the cut regions a void check reads, built ONCE: the engrave openings plus the
+  // swept traces (#270). A void-free job is the common case and pays for nothing here — sweeping
+  // the traces means wasm, and #205 calls this on a debounce.
+  const voidCuts: CutRegion[] =
+    plan.stock.keepOuts.length === 0
+      ? []
+      : [...engraveCutRegions(plan, measured), ...traceCutRegions(tl, plan, radius)];
+
+  // #345 decision B — ONE scan decides which void binds each region, and BOTH stages read it: the
+  // per-move warning (#171) and the per-item bound, so the banner and the item cannot name
+  // different voids for the same overlap.
+  const bindingVoids = bindingVoidsByRegion(tl, job, plan, voidCuts, margins.boundaryMargin);
+  const voidFindings = keepOutFindings(job, voidCuts, bindingVoids);
 
   // #285 — the colour boundary, when the job states its print. PURE grid arithmetic (#285 review):
   // the boundary is a rule about the layer grid, not a measurement of the solid, so it is read
@@ -268,9 +271,10 @@ export function engraveRegions(
     ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
     ...engFindings,
     ...voidFindings,
-    // #345 — an item whose floor breaks the split's bound, on the side its own `depthIntent` put
-    // it. A no-op for a blank that states no split and for any item with no intent.
-    ...itemDepthBoundFindings(job, colourBoundaryDepth, margins.boundaryMargin),
+    // #345 — every item judged against every bound under its footprint: the split on the side its
+    // own `depthIntent` put it, and the ceiling of any void it sits over. A no-op for a job with
+    // neither.
+    ...itemDepthBoundFindings(job, colourBoundaryDepth, margins.boundaryMargin, bindingVoids),
   ]);
 
   const byId = new Map(measured.map((m) => [m.labelId, m] as const));

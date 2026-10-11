@@ -60,11 +60,12 @@ describe('badgeBlankFor (#271)', () => {
 
   it('produces a void the depth limit reads, and only over its footprint', () => {
     const job = jobForBadge();
-    // The pocket's ceiling is an `above` bound (#345), so what is reserved over it is the
-    // boundary margin — one printed layer's worth, and this badge states no print, so the shipped
-    // 0.2 — and NOT the stock's 1 mm minimum floor, which is the UNDERSIDE's own rule.
-    // 1.51 mm of membrane, less 0.2: 1.31 mm over the pocket…
-    expect(keepOutLimitAt(job, 38.1, 19.05)).toBeCloseTo(1.31, 6);
+    // The pocket's ceiling is an `above` bound like any other (#345), so what it reserves is the
+    // margin its OWN rule keeps — and this badge states no print, so that is
+    // `max(boundaryMargin, minFloor)` = 1.0, not the shipped 0.2 (#345 decision A: with no layer
+    // grid the structural floor is the only number with a basis).
+    // 1.51 mm of membrane, less 1.0: 0.51 mm over the pocket…
+    expect(keepOutLimitAt(job, 38.1, 19.05)).toBeCloseTo(0.51, 6);
     // …and nothing reserved out at the blank's corner, where the limit is the stock's own.
     expect(keepOutLimitAt(job, 5, 5)).toBeNull();
     expect(jobDepthLimit(job)(5, 5)).toBeCloseTo(3.81 - 1, 6);

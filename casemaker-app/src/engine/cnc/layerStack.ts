@@ -193,6 +193,33 @@ export function layerAlignedDepthFor(
 }
 
 /**
+ * The plane a void's ceiling sits at, as a depth below the engraved face (#345) — the CEILING the
+ * floor is judged against, not the floor. Its twin is `voidMargin`, which is the other half.
+ *
+ * A blank that states its print quantises the ceiling onto the printer's layer grid
+ * (`layerAlignedDepthFor`): the void's roof was built on that grid, so the first layer line at or
+ * above the declared membrane is where the material really ends, and the stack's own `maxDepthAt`
+ * reports the same plane. A blank that states none has no grid to snap to, so the declared
+ * `membrane` IS the ceiling and the caller's margin has to carry the whole Z-error budget.
+ *
+ * PURE, primitives only: the run sheet needs this number without building the wasm stack, and it
+ * must stay importable from the main chunk, so nothing here may reach `executeProfile`.
+ */
+export function voidCeilingFor(
+  membrane: Mm,
+  thickness: Mm,
+  print: { layerHeight: Mm; firstLayerHeight?: Mm } | undefined,
+): Mm {
+  if (print === undefined) return membrane;
+  return layerAlignedDepthFor(
+    membrane,
+    thickness,
+    print.layerHeight,
+    print.firstLayerHeight ?? print.layerHeight,
+  );
+}
+
+/**
  * Build the layer stack. Layers are `[0, firstLayerHeight]` then uniform `layerHeight` steps up
  * to `thickness` (decision 27: the first layer is its own size, `h₁ + k·h`). A layer counts as
  * solid where the compiled solid spans it — a void that reaches into a layer removes its

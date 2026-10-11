@@ -545,12 +545,13 @@ describe('engravePreview — declared under-surface voids (#271)', () => {
     const v = p.voids[0]!;
     expect(v.id).toBe('pocket');
     expect(v.name).toBe('Magnet pocket');
-    // 12 mm blank, ceiling 10: 2 mm of material left, and #345's `boundaryMargin` (one printed
-    // layer, 0.2 mm here — the default job states no print) taken off it. This fixture MOVED from
-    // 1 mm when the ceiling became a depth bound: the analytic `membrane − minFloor` it used to
-    // report was the one place the void's limit was arithmetic rather than a Z-error margin.
+    // 12 mm blank, ceiling 10: 2 mm of material left, and #345's margin taken off it. This fixture
+    // MOVED back to 1 mm on decision A: the default job states NO print, so there is no layer grid
+    // to make the 0.2 mm boundary margin a distance the printer can hold, and the void keeps the
+    // job's 1 mm structural floor instead — 2 − 1.0 = 1.0, the same number the pre-#345 analytic
+    // limit printed.
     expect(v.membrane).toBeCloseTo(2, 6);
-    expect(v.limit).toBeCloseTo(1.8, 6);
+    expect(v.limit).toBeCloseTo(1.0, 6);
     // The rings ARE the footprint: 30 × 20 centred on (50, 30) in the work frame.
     expect(ringBBox(v.rings)).toMatchObject({ minX: 35, maxX: 65, minY: 20, maxY: 40 });
   });
@@ -587,8 +588,9 @@ describe('engravePreview — declared under-surface voids (#271)', () => {
     expect(bbox.maxX).toBeCloseTo(80, 6);
     expect(bbox.minY).toBeCloseTo(37, 6);
     expect(bbox.maxY).toBeCloseTo(43, 6);
-    // The same bound as above: membrane (12 − 3) less #345's `boundaryMargin`, not `minFloor`.
-    expect(p.voids[0]!.limit).toBeCloseTo(12 - 3 - 0.2, 6);
+    // The same bound as above: membrane (12 − 3) less the job's 1 mm floor, since this blank
+    // states no print (#345 decision A).
+    expect(p.voids[0]!.limit).toBeCloseTo(12 - 3 - 1.0, 6);
   });
 });
 
@@ -685,8 +687,20 @@ describe('engravePreview — the colour boundary (#285, #345)', () => {
     expect(boundFindings(badgeJob(true, 1, { depthIntent: 'reveal' }))).toHaveLength(0);
   });
 
-  it('says nothing without a print — no split, so no bound to break', () => {
-    expect(boundFindings(badgeJob(false, 0.9, { depthIntent: 'surface' }))).toHaveLength(0);
+  it('raises no SPLIT bound without a print — the label’s finding is the pocket’s void (#345 B)', () => {
+    // #285's "no print, no split" still holds: `colourBoundaryFor` returns null, so no split bound
+    // is built for either intent. But #345 decision B judges every label against every bound under
+    // its footprint, and this label sits on the badge's magnet pocket — so the finding that arrives
+    // names the POCKET's ceiling, not a colour split the job does not have.
+    const blind = boundFindings(badgeJob(false, 0.9, { depthIntent: 'surface' }));
+    expect(blind).toHaveLength(1);
+    expect(blind[0]!.severity).toBe('error');
+    expect(blind[0]!.labelId).toBe('lbl');
+    expect(blind[0]!.message).toContain("the magnet pocket's ceiling");
+    // 1.51 mm of membrane less the job's 1 mm floor, with no layer grid to make a smaller margin
+    // mean anything (#345 decision A).
+    expect(blind[0]!.message).toContain('no deeper than 0.51 mm');
+    expect(blind[0]!.message).not.toContain('colour split');
   });
 
   it('leaves "custom" alone — the advanced override says the number is the point', () => {

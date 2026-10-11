@@ -37,6 +37,25 @@ describe('the house depth margins (#345)', () => {
     });
   });
 
+  it('a box tabbed through UNCHANGED commits nothing (#345 review)', () => {
+    render(<SettingsMenu onClose={() => {}} />);
+    // The shipped 0.2 is already in the box. Focusing and blurring it — a tab-through — used to call
+    // `commitMargin({ boundaryMargin: 0.2 })` because the draft was a valid number, changed or not,
+    // which flipped `source` to `'user'` and stopped `effectiveMargins` reading each blank's own
+    // layer height: the SAME failure as item 4's, reachable without typing a character.
+    const box = screen.getByTestId('settings-margin-boundary') as HTMLInputElement;
+    expect(box.value).toBe('0.2');
+    fireEvent.focus(box);
+    fireEvent.blur(box);
+    expect(useSettingsStore.getState().margins.source).toBe('default');
+
+    // A re-typed spelling of the same number is not a change either: the field is a number, so
+    // 0.20 IS 0.2 and the source must not be claimed for it.
+    fireEvent.change(box, { target: { value: '0.20' } });
+    fireEvent.blur(box);
+    expect(useSettingsStore.getState().margins.source).toBe('default');
+  });
+
   it('a seed edited on its own does not claim the boundary margin as the user’s (#345 review)', () => {
     render(<SettingsMenu onClose={() => {}} />);
     commit('settings-margin-floor', '2');

@@ -40,7 +40,8 @@ describe('jobDepthLimit composes the sacrificial table (#213 §3)', () => {
   it('takes the shallower of the strip and an under-surface void when both cover a point', () => {
     // A void whose footprint reaches 3 mm past the right edge; over the strip the base limit is
     // the strip height (12) and the void's ceiling is an `above` bound (#345) leaving a 2 mm
-    // membrane less the 0.2 boundary margin, so 1.8 wins.
+    // membrane. This job states no print, so #345 decision A keeps the job's 1 mm structural floor
+    // over that membrane — 2 − 1.0 = 1.0, which wins.
     const pocket: EngraveKeepOut = {
       id: 'pocket',
       kind: 'rect',
@@ -53,7 +54,7 @@ describe('jobDepthLimit composes the sacrificial table (#213 §3)', () => {
       cornerRadius: 0,
     };
     const limit = jobDepthLimit(job({ sacrificial: presetJawStrips(), keepOuts: [pocket] }));
-    expect(limit(105, 30)).toBeCloseTo(1.8, 9); // 12 − 10 − 0.2
+    expect(limit(105, 30)).toBeCloseTo(1.0, 9); // 12 − 10 − 1.0 (no print: the floor, not the margin)
     expect(limit(101, 30)).toBe(12); // on the strip, clear of the void (void spans 102…108 in X)
   });
 });

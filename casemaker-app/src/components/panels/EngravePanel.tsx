@@ -11,9 +11,11 @@ import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
   effectiveMargins,
+  houseBoundaryMargin,
   marginSourceWords,
   mm as mmText,
   recommendMargins,
+  voidMarginWords,
   zBudgetInputsFor,
 } from '@/engine/cnc/engrave/depthBounds';
 import { Z1 } from '@/engine/cnc';
@@ -372,9 +374,22 @@ export function EngravePanel(): JSX.Element {
   const houseMargins = useSettingsStore((s) => s.margins);
   const margins = effectiveMargins(job, houseMargins);
   const recommendation = recommendMargins(job, houseMargins, zBudgetInputsFor(job));
+  // The house number AS THIS JOB runs it (#345 review): one printed layer of this blank while the
+  // setting is still the shipped default, not the 0.2 the settings box shows. The same resolver
+  // `effectiveMargins` and `recommendMargins` use, so the title below and both of their numbers
+  // agree.
+  const houseBoundary = houseBoundaryMargin(job, houseMargins);
   // "Recommends more" is the only case worth a button: a recommendation that ties or loses to what
   // is already in force has nothing to offer, and two numbers that agree do not need a control.
-  const recommendMore = recommendation.boundaryMargin > margins.boundaryMargin + 1e-9;
+  //
+  // #345 review — and neither does a recommendation that only RE-STATES the house number on a job
+  // that already carries its own. When the house margin sits at or above the blank's own arithmetic
+  // (`max(setting, zTolerance)`), "Use it" would stamp that number onto the job as `'recommended'`
+  // while "Follow the house setting" beside it hands back the same number by dropping the override:
+  // one outcome, two buttons, so the redundant one goes.
+  const recommendMore =
+    recommendation.boundaryMargin > margins.boundaryMargin + 1e-9 &&
+    !(job.margins && recommendation.boundaryMargin <= houseBoundary + 1e-9);
 
   // #271 route 1 — the blank this job is for is usually already in the project as `case.badge`,
   // and the one void V1 needs (the magnet pocket) is the badge's own. Reading it here cannot get
@@ -998,6 +1013,9 @@ export function EngravePanel(): JSX.Element {
           // #345 — the same margin the run sheet and the verifier use, so the row's "mm of cut"
           // is the number the program is actually gated to rather than one blank's own arithmetic.
           limit={keepOutLimit(job, keepOutMembrane(job, ko.zCeiling), margins.boundaryMargin)}
+          // #345 — which rule set that margin, from the same `voidMargin` arithmetic `keepOutLimit`
+          // ran, so the sentence under the number cannot name a rule the number is not on.
+          limitBasis={voidMarginWords(job, margins.boundaryMargin)}
           findings={findingsFor(ko.id)}
           onChange={(patch) => updateKeepOut(ko.id, patch)}
           onRemove={() => removeKeepOut(ko.id)}
@@ -1201,9 +1219,10 @@ export function EngravePanel(): JSX.Element {
       </details>
       <p style={MUTED}>Depth keeps the {job.minFloor} mm minimum floor — at most {maxDepth} mm on this stock.</p>
 
-      {/* #345 — what every floor keeps clear of, and where that number came from. "Yours" is the
-          job's own; when the job states none it follows the house setting, which is what lets a
-          later change to the setting reach a job nobody has overridden. The recommendation is this
+      {/* #345 — what every floor keeps clear of, and where that number came from. The tag names the
+          source ("the house default", "this job's recommendation", "set for this job"); when the
+          job states no margins of its own it follows the house setting, which is what lets a later
+          change to the setting reach a job nobody has overridden. The recommendation is this
           blank's own arithmetic, taken in one click. No slider: a margin nobody can reason about is
           worse than the honest default, so the only controls are "take the recommendation" and
           "go back to the house's". */}
@@ -1246,7 +1265,7 @@ export function EngravePanel(): JSX.Element {
             <button
               type="button"
               data-testid="engrave-margins-house"
-              title={`Drop this job's own margins and follow the house setting (${mmText(houseMargins.boundaryMargin)} mm)`}
+              title={`Drop this job's own margins and follow the house setting (${mmText(houseBoundary)} mm on this blank)`}
               onClick={() => setJobMargins(null)}
             >
               Follow the house setting

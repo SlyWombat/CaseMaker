@@ -13,7 +13,7 @@ import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import {
-  boundLimit,
+  boundFloor,
   boundsFor,
   checkBounds,
   DEFAULT_BOUNDARY_MARGIN_MM,
@@ -27,6 +27,7 @@ import {
   undersideBound,
   voidBound,
   voidFloor,
+  voidMargin,
   type MarginSettings,
 } from '@/engine/cnc/engrave/depthBounds';
 import { buildRunSheet, type RunSheetGenerated } from '@/engine/cnc/engrave/runSheet';
@@ -84,16 +85,31 @@ describe('the depth-bound model (#345)', () => {
     expect(splitBound('reveal', null)).toBeNull();
   });
 
-  it('names a void’s ceiling as a clause, and one bound’s floor is the verifier’s limit', () => {
+  it('names a void’s ceiling as a clause, and a bound’s floor is its plane less its margin', () => {
     expect(voidBound('Magnet pocket', 1.51).name).toBe("the magnet pocket's ceiling");
     expect(voidBound('', 1.51).name).toBe("the void's ceiling");
-    // `min over 'above' bounds of (at − margin)`, clamped at 0 — the number a `DepthLimit` field is.
-    expect(boundLimit([voidBound('p', 1.51), undersideBound(defaultEngraveJob())], 0.2)).toBeCloseTo(1.31, 9);
-    expect(boundLimit([undersideBound(defaultEngraveJob())], 0.2)).toBeCloseTo(11, 9);
-    // A `below` bound is never a limit: a reveal is supposed to cross it.
-    expect(boundLimit([splitBound('reveal', 0.8)!], 0.2)).toBeNull();
+    // `at − margin`: what a `DepthLimit` field is made of, and the bound's OWN margin wins where it
+    // has one — which is the stock's underside (`minFloor`) and every void.
+    expect(boundFloor(voidBound('p', 1.51), 0.2)).toBeCloseTo(1.31, 9);
+    expect(boundFloor(undersideBound(defaultEngraveJob()), 0.2)).toBeCloseTo(11, 9);
+    // The job's own margin does not move the underside: 11 is what `minFloor` leaves either way.
+    expect(boundFloor(undersideBound(defaultEngraveJob()), 0.05)).toBeCloseTo(11, 9);
     // A plane nearer the face than the margin leaves nothing to cut, not a negative depth.
     expect(voidFloor(0.1, 0.2)).toBe(0);
+  });
+
+  it('a void on a blank that states NO print keeps the larger of the two numbers (#345 A)', () => {
+    // The layer grid is what makes one printed layer a distance a printer can hold, so a blank that
+    // states no print has nothing to align a Z-error margin to — and it is also the blank the app
+    // knows least about. The LEAST-known blank must not get the THINNEST membrane.
+    const blind = defaultEngraveJob(); // no print, minFloor 1.0
+    expect(voidMargin(blind, 0.2)).toBe(1.0);
+    // A user who typed a boundary margin bigger than their own floor still gets that margin: the
+    // rule is `max`, not "always the floor".
+    expect(voidMargin(blind, 1.4)).toBe(1.4);
+    // With a print the layer grid carries the Z-error, so the boundary margin stands as it does on
+    // every other plane — the badge's 0.2.
+    expect(voidMargin(printedJob(PRINT_0_2), 0.2)).toBe(0.2);
   });
 
   it('gives every item the split, the void under it and the underside, in that order', () => {
@@ -103,6 +119,10 @@ describe('the depth-bound model (#345)', () => {
     expect(boundsFor(job, label, planes).map((b) => b.source)).toEqual(['split', 'void', 'underside']);
     // The underside is carried for the model's sake, and `depth-exceeds-stock` is its owner.
     expect(boundsFor(job, label, { split: null }).map((b) => b.source)).toEqual(['underside']);
+    // Decision A lives in the BOUND, not in each caller: `boundsFor` applies the void's own margin,
+    // so the whole 1 mm floor travels with the plane however the caller resolved its boundary margin.
+    expect(boundsFor(job, label, planes, 0.2)[1]!.margin).toBe(1.0);
+    expect(boundsFor(printedJob(PRINT_0_2), label, planes, 0.2)[1]!.margin).toBe(0.2);
   });
 });
 
@@ -191,7 +211,24 @@ describe('the recommendation (#345)', () => {
     expect(rec.zTolerance).toBeCloseTo(WIRED_PROBE_Z_RESIDUAL_MM + MEASURED_THICKNESS_TOLERANCE_MM, 9);
     expect(rec.basis.join(' ')).toContain('measured thickness');
     // max(setting, zTolerance): a big setting wins, a small recommendation does not lower it.
-    expect(recommendMargins(printedJob(PRINT_0_2), { boundaryMargin: 0.5 }).boundaryMargin).toBe(0.5);
+    expect(
+      recommendMargins(printedJob(PRINT_0_2), { boundaryMargin: 0.5, source: 'user' }).boundaryMargin,
+    ).toBe(0.5);
+  });
+
+  it('reads the setting as THIS blank runs it — one printed layer while it is still the default', () => {
+    // #345 review: the floor under the advice must be the margin really in force. A house setting
+    // left on `'default'` resolves to `defaultBoundaryMargin(job)` — the blank's own layer height —
+    // so a 0.3 mm-layer blank is already running 0.3, and an advice of 0.2 would sit BELOW it. The
+    // same resolver `effectiveMargins` uses, so the two cannot disagree.
+    const thickLayers = printedJob({ split: 3, layerHeight: 0.3, firstLayerHeight: 0.3 });
+    expect(
+      recommendMargins(thickLayers, { boundaryMargin: 0.2, source: 'default' }).boundaryMargin,
+    ).toBeCloseTo(0.3, 9);
+    // A setting the user typed is never second-guessed: 0.2 stays 0.2 even on the 0.3 mm blank.
+    expect(
+      recommendMargins(thickLayers, { boundaryMargin: 0.2, source: 'user' }).boundaryMargin,
+    ).toBeCloseTo(0.2, 9);
   });
 });
 
@@ -224,7 +261,13 @@ describe('the run sheet prints the margins (#345)', () => {
   it('states the value, its source and the arithmetic behind it', () => {
     const step = marginsStepOf(voidJob())!;
     expect(step).toBeTruthy();
-    expect(step.value).toBe('0.2 mm boundary margin · the house default');
+    // #345 A — a blank that states no print keeps the larger of the two numbers over a void, and
+    // this is the only place the operator can read that the margin beside it is not the one the
+    // ceiling kept.
+    expect(step.value).toBe(
+      '0.2 mm boundary margin · the house default · no print stated: a void’s ceiling keeps the ' +
+        'job’s minimum floor, 1 mm',
+    );
     expect(step.text).toContain('Recommended for this blank: 0.2 mm');
     expect(step.text).toContain('flatness unknown');
   });
@@ -278,9 +321,8 @@ describe('the margins reach the program only where a bound does (#345)', () => {
     expect(stated.nc).toBe(absent.nc);
   });
 
-  it('moves the verdict on a job that HAS one — which is the only place this issue changes a file', () => {
-    // The raw limit is the void's breach; the margin comes off it. So a 1.9 mm cut is refused at
-    // the shipped 0.2 mm and permitted at 0.05, and the user has to regenerate to see it.
+  /** The 12 mm blank with a void under a 1.9 mm cut — the job the two verdict tests below share. */
+  function deepCutOverVoid(print?: EngraveJob['stock']['print']): EngraveJob {
     const pocket: EngraveKeepOut = {
       id: 'pocket',
       name: 'Magnet pocket',
@@ -295,16 +337,47 @@ describe('the margins reach the program only where a bound does (#345)', () => {
     };
     const base = defaultEngraveJob();
     const label = { ...(base.labels[0] as EngraveLabel) };
-    const job: EngraveJob = {
+    return {
       ...base,
+      stock: print === undefined ? base.stock : { ...base.stock, print },
       labels: [{ ...label, text: 'CASE', size: 10, depth: 1.9, position: { x: 50, y: 30 } }],
       keepOuts: [pocket],
     };
-    // 12 mm blank, ceiling at 10: 2 mm of membrane. 2 − 0.2 = 1.8, so 1.9 is out.
-    expect(generate(tl, job).verify!.findings.some((f) => f.code === 'cut-too-deep')).toBe(true);
-    // 2 − 0.05 = 1.95, so the same cut is in.
-    const loose = generate(tl, job, null, [], { boundaryMargin: 0.05, zTolerance: 0.05, source: 'user' });
-    expect(loose.verify!.findings.some((f) => f.code === 'cut-too-deep')).toBe(false);
+  }
+
+  const LOOSE = { boundaryMargin: 0.05, zTolerance: 0.05, source: 'user' } as const;
+
+  it('moves the verdict on a PRINTED blank — the margin comes off the layer-aligned ceiling', () => {
+    // #345 A: with a print, the layer grid carries the Z-error, so the margin in force is the
+    // boundary margin and the raw limit is the layer-aligned ceiling. The ceiling is 12 − 10 = 2 mm
+    // of membrane and 2 mm is a layer line (0.2 × 10), so it is 2.0 exactly.
+    const job = deepCutOverVoid({ split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 });
+    // 2.0 − 0.2 = 1.8, so 1.9 is out — and #345 B says the ITEM is what gets named, against the
+    // plane it crossed, rather than a move the operator never typed.
+    const f = generate(tl, job).findings.find((x) => x.code === 'item-depth-bound');
+    expect(f?.message).toContain("the magnet pocket's ceiling");
+    expect(f?.message).toContain('0.2 mm above it');
+    // …and 2.0 − 0.05 = 1.95, so the same cut is in and the job runs through. The user has to
+    // regenerate to see it, which is the whole reason this number is on the run sheet.
+    const loose = generate(tl, job, null, [], LOOSE);
+    expect(loose.ok).toBe(true);
+    expect(loose.findings.some((x) => x.code === 'item-depth-bound')).toBe(false);
+  });
+
+  it('does NOT move it on a blank that states no print — the floor is the number there (#345 A)', () => {
+    // Same job, no print. The ceiling keeps `max(boundaryMargin, minFloor)` = 1.0, so the limit is
+    // 2 − 1.0 = 1.0 and 1.9 stays refused however small the boundary margin gets. This is the
+    // decision: with no layer grid there is nothing to align a 0.2 to, the structural floor is the
+    // only number with a basis, and a setting must not talk the least-known blank into a thinner
+    // membrane.
+    const job = deepCutOverVoid();
+    const tight = generate(tl, job).findings.find((x) => x.code === 'item-depth-bound');
+    expect(tight?.message).toContain("the magnet pocket's ceiling");
+    // `1` mm, not `0.2`: the sentence quotes the margin the ceiling actually kept.
+    expect(tight?.message).toContain('1 mm above it');
+    expect(generate(tl, job, null, [], LOOSE).findings.some((x) => x.code === 'item-depth-bound')).toBe(
+      true,
+    );
   });
 
   it('refuses a `reveal` floor over a void, though its intent is the deeper one (#345 review)', () => {
@@ -340,8 +413,13 @@ describe('the margins reach the program only where a bound does (#345)', () => {
     // The intent's own bound is satisfied at 1.9: it is on the deep side of the split.
     expect(checkBounds(1.9, [splitBound('reveal', 1.4)!], 0.2)).toBeNull();
 
-    const findings = generate(tl, job).verify!.findings;
-    expect(findings.some((f) => f.code === 'cut-too-deep')).toBe(true);
-    expect(findings.some((f) => f.code === 'item-depth-bound')).toBe(false);
+    // #345 B — the item is refused against the void's ceiling, at the findings stage, and the
+    // finding names the item, the plane and the side. The intent's own bound is NOT what fired:
+    // the same job with the pocket removed cuts, which is what makes this the void's doing.
+    const item = generate(tl, job).findings.find((f) => f.code === 'item-depth-bound');
+    expect(item?.message).toContain("the magnet pocket's ceiling");
+    expect(item?.message).toContain('cuts to 1.9 mm');
+    const without: EngraveJob = { ...job, keepOuts: [] };
+    expect(generate(tl, without).findings.some((f) => f.code === 'item-depth-bound')).toBe(false);
   });
 });

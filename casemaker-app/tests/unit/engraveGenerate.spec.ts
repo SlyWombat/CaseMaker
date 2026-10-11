@@ -196,9 +196,11 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
   });
 
   it('passes the same cut when it stays within the membrane', () => {
-    // 1.8 mm is exactly the limit (2 mm of membrane less the 0.2 mm margin) and passes: the bound
-    // is a plane to stay clear of, not a thickness to reach.
-    const g = generate(tl, job(1.8, [pocket]));
+    // 1.0 mm is exactly the limit and passes: the bound is a plane to stay clear of, not a
+    // thickness to reach. The limit MOVED from 1.8 when #345 decision A gave a no-print blank's
+    // void the job's 1 mm minimum floor instead of the 0.2 mm boundary margin — with no layer grid
+    // the structural floor is the only number with a basis — so 2 − 1.0 = 1.0.
+    const g = generate(tl, job(1.0, [pocket]));
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.verify!.findings.some((f) => f.code === 'cut-too-deep')).toBe(false);
@@ -403,20 +405,23 @@ describe('a job that states its print limits on the printer’s layer grid (#285
     expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
   });
 
-  it('lets a 1.25 mm cut through without a print and refuses it with one — the print is the stricter gate', () => {
-    // The two limits, both on #345's margin: the grid's 1.4 mm span less 0.2 is 1.2, the design's
-    // 1.51 mm membrane less 0.2 is 1.31. 1.25 sits between them, so the same cut is permitted on a
-    // plain blank and refused on a printed one.
-    const withPrint = generate(tl, badgeJob(true, 1.25));
-    expect(withPrint.ok).toBe(false);
-    expect(withPrint.stage).toBe('verify');
-    const deep = withPrint.verify!.findings.find((f) => f.code === 'cut-too-deep');
+  it('refuses 1 mm on a blank that states no print and permits it on one that does (#345 A)', () => {
+    // The two limits. With a print the grid's 1.4 mm solid span less #345's 0.2 mm boundary margin
+    // is 1.2. With NO print there is no grid, so #345 decision A keeps the job's 1 mm STRUCTURAL
+    // floor over the design's 1.51 mm membrane — 1.51 − 1.0 = 0.51, which is byte-identical to what
+    // the analytic limit returned before #345 existed. 1 mm sits between the two, so the same cut is
+    // refused on the plain blank and permitted on the printed one: with the layers unknown, the
+    // floor is the only number with a basis, and it is the stricter of the two.
+    const without = generate(tl, badgeJob(false, 1.0));
+    expect(without.ok).toBe(false);
+    expect(without.stage).toBe('verify');
+    const deep = without.verify!.findings.find((f) => f.code === 'cut-too-deep');
     expect(deep).toBeDefined();
-    expect(deep!.message).toContain('1.200 mm permitted there');
+    expect(deep!.message).toContain('0.510 mm permitted there');
 
-    const without = generate(tl, badgeJob(false, 1.25));
-    expect(without.ok).toBe(true);
-    expect(without.stage).toBe('done');
+    const withPrint = generate(tl, badgeJob(true, 1.0));
+    expect(withPrint.ok).toBe(true);
+    expect(withPrint.stage).toBe('done');
   });
 
   it('generates the same program with and without a print — the print moves the gate, not the toolpath', () => {

@@ -164,14 +164,32 @@ describe('pointInKeepOut (#231)', () => {
 });
 
 describe('the analytic depth limit (#231)', () => {
-  it('a void permits only its membrane less the boundary margin, and null away from it', () => {
-    // 12 thick, zCeiling 10 -> membrane 2. #345 takes the job's `boundaryMargin` off it, which for a
-    // job stating no print is the common 0.2 mm — the same rule the layer-aligned path follows.
+  it('a void permits only its membrane less the margin its ceiling keeps', () => {
+    // 12 thick, zCeiling 10 -> membrane 2. #345 takes a margin off it, and on a blank that states
+    // no print that margin is `max(boundaryMargin, minFloor)` — 1.0 here, not the 0.2 the boundary
+    // margin would be (#345 decision A: with no layer grid the structural floor is the number with
+    // a basis). So 2 − 1.0 = 1.0.
     const job = jobWithKeepOut();
-    expect(keepOutLimitAt(job, 50, 30)).toBeCloseTo(1.8, 9);
+    expect(keepOutLimitAt(job, 50, 30)).toBeCloseTo(1.0, 9);
     expect(keepOutLimitAt(job, 5, 5)).toBeNull();
+    // A user who typed a boundary margin LARGER than their own floor gets that margin instead:
+    // the rule is `max`, not "always the floor".
+    expect(keepOutLimitAt(job, 50, 30, 1.4)).toBeCloseTo(0.6, 9);
     // The limit is never below 0: a void reaching the face permits nothing.
     expect(keepOutLimitAt(jobWithKeepOut(rectKeepOut({ zCeiling: 12 })), 50, 30)).toBe(0);
+  });
+
+  it('a void on a blank that STATES its print keeps the boundary margin, not the floor (#345 A)', () => {
+    // The layer grid is what makes one printed layer a distance the printer can hold, so a printed
+    // blank's ceiling keeps the Z-error margin like every other plane.
+    const job: EngraveJob = {
+      ...jobWithKeepOut(),
+      stock: {
+        ...defaultEngraveJob().stock,
+        print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 },
+      },
+    };
+    expect(keepOutLimitAt(job, 50, 30)).toBeCloseTo(1.8, 9); // 2 − 0.2
   });
 
   it('a disabled void does not limit the cut', () => {
@@ -183,7 +201,9 @@ describe('the analytic depth limit (#231)', () => {
       ...defaultEngraveJob(),
       keepOuts: [rectKeepOut({ id: 'a', zCeiling: 10 }), rectKeepOut({ id: 'b', zCeiling: 11 })],
     };
-    expect(keepOutLimitAt(job, 50, 30)).toBeCloseTo(0.8, 9); // 12 - 11 - 0.2
+    // Membranes 2 and 1, less the same 1.0: 1.0 and 0 — the shallower void wins, and a void whose
+    // membrane is exactly the floor it must keep permits no cut at all.
+    expect(keepOutLimitAt(job, 50, 30)).toBeCloseTo(0, 9); // 12 - 11 - 1.0
   });
 
   it('jobDepthLimit is the stock limit with no void, and 0 outside the stock', () => {
@@ -196,7 +216,7 @@ describe('the analytic depth limit (#231)', () => {
 
   it('jobDepthLimit tightens over a void and leaves the rest of the blank alone', () => {
     const limit = jobDepthLimit(jobWithKeepOut());
-    expect(limit(50, 30)).toBeCloseTo(1.8, 9); // over the pocket
+    expect(limit(50, 30)).toBeCloseTo(1.0, 9); // over the pocket: 2 − max(0.2, 1.0)
     expect(limit(5, 5)).toBe(11); // solid stock
   });
 });
@@ -208,7 +228,10 @@ describe('the run sheet reports the void (#231)', () => {
     const step = need.steps.find((s) => s.text.includes('Under-surface void'))!;
     expect(step.text).toContain('Magnet pocket');
     expect(step.text).toContain('2 mm thick'); // 12 - 10
-    expect(step.value).toContain('deepest cut 1.8 mm'); // 2 less the 0.2 mm boundary margin
+    // 2 less the 1.0 the ceiling keeps on a blank with no stated print (#345 A). The blank's own
+    // `thickness − minFloor` floor is 11 here, so nothing else is capping it and the row does not
+    // credit the floor — see the thin-blank case below for when it does.
+    expect(step.value).toBe('deepest cut 1 mm');
   });
 
   it('says which cut sits over the void and the depth it allows', () => {
@@ -251,7 +274,7 @@ describe('the run sheet reports the void (#231)', () => {
     expect(overPocket).toBeTruthy();
     expect(overPocket!.text).toContain('Magnet pocket');
     expect(overPocket!.text).toContain('only 2 mm of material');
-    expect(overPocket!.text).toContain('DEEPER than the 1.8 mm');
+    expect(overPocket!.text).toContain('DEEPER than the 1 mm');
     // The clear item is not tagged with the void.
     const clear = cut.steps.find((s) => s.text.includes('"B"'))!;
     expect(clear.text).not.toContain('Magnet pocket');
@@ -281,27 +304,35 @@ describe('the run sheet reports the void (#231)', () => {
     expect(step.text).not.toContain('-8');
   });
 
-  it('prints the number the verifier enforces when the stock’s own floor is the shallower limit (#285 review)', () => {
-    // A void high in a THIN blank leaves a membrane deeper than `thickness − minFloor`. The verifier
-    // composes the two with a `min` (`jobDepthLimit`), so the sheet must print the same capped
-    // number; it used to print the membrane's own answer, and here that is 3.0 mm against the 2.81
-    // the verifier refuses past — an operator reading a depth the machine will not cut.
+  it('prints the sheet’s own number, and names WHICH half of it is binding (#285 review)', () => {
+    // A void high in a THIN blank leaves a membrane deeper than `thickness − minFloor`. The sheet
+    // composes the two with a `min` the way `jobDepthLimit` does — it used to print the membrane's
+    // own answer, and here that is 3.0 mm against the 2.81 the verifier refuses past, an operator
+    // reading a depth the machine will not cut.
     const thin = (print?: { split: number; layerHeight: number }): EngraveJob => ({
       ...defaultEngraveJob(),
       stock: { length: 76.2, width: 38.1, thickness: 3.81, material: 'pla', ...(print ? { print } : {}) },
       keepOuts: [rectKeepOut({ zCeiling: 0.5 })], // 3.31 mm of membrane, over a 2.81 mm floor
     });
-
-    // Both paths — the layer-aligned one a stated print gets (3.2 mm of solid, less 0.2) and the
-    // analytic one a blank with no print gets (3.31 less 0.2) — land on the stock's 2.81.
-    for (const job of [thin({ split: 3.0, layerHeight: 0.2 }), thin()]) {
-      const limit = jobDepthLimit(job)(50, 30);
-      expect(limit).toBeCloseTo(2.81, 9); // 3.81 − minFloor 1.0
-      const step = buildRunSheet(job, NO_GENERATED, null, new Date('2026-10-05T00:00:00Z'))
+    const sheetVoid = (job: EngraveJob): string =>
+      buildRunSheet(job, NO_GENERATED, null, new Date('2026-10-05T00:00:00Z'))
         .sections.find((s) => s.id === 'need')!
-        .steps.find((s) => s.text.includes('Under-surface void'))!;
-      expect(step.value).toContain(`deepest cut ${String(Number(limit.toFixed(3)))} mm`);
-    }
+        .steps.find((s) => s.text.includes('Under-surface void'))!.value ?? '';
+
+    // With a print the ceiling is on the layer grid (3.2 mm of solid, less 0.2) while the blank's
+    // own floor is 2.81 — so the FLOOR is the shallower half, and the row says so rather than
+    // crediting a void that is not what limits the cut.
+    expect(sheetVoid(thin({ split: 3.0, layerHeight: 0.2 }))).toBe(
+      'deepest cut 2.81 mm (the blank’s own 1 mm floor, not the void, sets this)',
+    );
+
+    // With no print the ceiling keeps the job's own 1 mm minimum instead of a 0.2 layer (#345
+    // decision A), so 3.31 − 1.0 = 2.31 is now the shallower half — and that IS the number
+    // `jobDepthLimit` enforces, because this is the path the verifier keeps for a blank with no
+    // stated print. The sheet and the limit agree.
+    const blind = thin();
+    expect(jobDepthLimit(blind)(50, 30)).toBeCloseTo(2.31, 9);
+    expect(sheetVoid(blind)).toBe('deepest cut 2.31 mm');
   });
 
   it('leaves a job with no void unchanged — no extra steps, no diagram voids', () => {

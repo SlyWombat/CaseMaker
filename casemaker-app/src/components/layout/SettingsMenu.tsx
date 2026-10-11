@@ -61,8 +61,15 @@ function MarginRow({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => {
           const v = Number(draft);
-          if (draft.trim() !== '' && Number.isFinite(v) && v >= 0) onCommit(v);
-          else setDraft(String(value));
+          if (draft.trim() === '' || !Number.isFinite(v) || v < 0) {
+            setDraft(String(value));
+            return;
+          }
+          // #345 review — commit only a REAL change. Tab-through used to call `onCommit` with the
+          // value already in the box, and for a margin that stamped `source: 'user'`, stopping it
+          // from following each blank's own layer height — the failure the comment above warns
+          // about, reachable without typing a character.
+          if (v !== value) onCommit(v);
         }}
       />
     </div>

@@ -123,11 +123,11 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
         },
         {
           "text": "Depth margins — how far every floor stays clear of a plane: a void’s ceiling, the colour split. Recommended for this blank: 0.2 mm — the wired probe adds 0.001 mm; flatness unknown: no number for the dome.",
-          "value": "0.2 mm boundary margin · the house default",
+          "value": "0.2 mm boundary margin · the house default · no print stated: a void’s ceiling keeps the job’s minimum floor, 1 mm",
         },
         {
           "text": "Under-surface void — Magnet pocket. The blank is only 2 mm thick over it: do not cut through.",
-          "value": "deepest cut 1.8 mm",
+          "value": "deepest cut 1 mm",
         },
       ],
       "title": "1 · What you need",
@@ -243,7 +243,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
           "value": "2 mm deep",
         },
         {
-          "text": "Engrave "MAKER" — over "Magnet pocket", only 2 mm of material (deepest cut there 1.8 mm)",
+          "text": "Engrave "MAKER" — over "Magnet pocket", only 2 mm of material (deepest cut there 1 mm)",
           "value": "1 mm deep",
         },
         {

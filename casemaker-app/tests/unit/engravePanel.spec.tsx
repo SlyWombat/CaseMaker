@@ -697,18 +697,20 @@ describe('EngravePanel — under-surface voids (#271)', () => {
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-add-keepout-rect'));
 
-    // 12 mm blank, ceiling 6: 6.00 mm of material left. #345 — the margin a void's ceiling keeps
-    // is the boundary margin (0.2 on a blank that states no print), not the 1 mm minimum floor,
-    // which is the stock's underside rule and a different quantity: 6 − 0.2 = 5.80 mm of cut.
+    // 12 mm blank, ceiling 6: 6.00 mm of material left. #345 decision A — this blank states no
+    // print, so there is no layer grid to make the 0.2 mm boundary margin a distance the printer can
+    // hold, and the ceiling keeps the job's 1 mm minimum floor instead: 6 − 1.0 = 5.00 mm of cut,
+    // and the row NAMES that rule rather than a boundary margin it is not on.
     const readout = screen.getByTestId('engrave-keepout-membrane-0').textContent ?? '';
     expect(readout).toContain('6.00');
-    expect(readout).toContain('5.80');
+    expect(readout).toContain('5.00');
+    expect(readout).toContain('the 1 mm minimum floor');
 
     // The ceiling is measured UP from the bottom face, so a HIGHER ceiling leaves LESS material.
     fireEvent.change(screen.getByTestId('engrave-keepout-zceiling-0'), { target: { value: '10' } });
     const higher = screen.getByTestId('engrave-keepout-membrane-0').textContent ?? '';
     expect(higher).toContain('2.00');
-    expect(higher).toContain('1.80');
+    expect(higher).toContain('1.00');
     expect(useEngraveJobStore.getState().job.keepOuts![0]!.zCeiling).toBe(10);
 
     // A ceiling at the top face is not inside the blank: it says so instead of promising a cut.
@@ -725,9 +727,9 @@ describe('EngravePanel — under-surface voids (#271)', () => {
     const job = useEngraveJobStore.getState().job;
     const ko = job.keepOuts![0]!;
     const limit = jobDepthLimit(job);
-    // Inside the 20 × 10 footprint centred on the blank: the 2 mm membrane less the boundary
-    // margin (0.2), which is the number #345 gates a void's ceiling to.
-    expect(limit(ko.position.x, ko.position.y)).toBeCloseTo(1.8, 6);
+    // Inside the 20 × 10 footprint centred on the blank: the 2 mm membrane less the job's 1 mm
+    // minimum floor, which #345 decision A gates a no-print blank's void ceiling to (2 − 1.0 = 1.0).
+    expect(limit(ko.position.x, ko.position.y)).toBeCloseTo(1.0, 6);
     // Well clear of it: the stock's own limit, untouched by the void.
     expect(limit(2, 2)).toBeCloseTo(job.stock.thickness - job.minFloor, 6);
     // The name reaches the job too — the run sheet and the warning both print it.
@@ -818,10 +820,11 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     expect(screen.getByTestId('engrave-keepout-count').textContent?.trim()).toBe('1');
     expect(screen.getByTestId('engrave-keepout-membrane-0').textContent).toContain('1.51');
 
-    // 1.51 mm of membrane over the pocket, less the 0.2 mm boundary margin a void's ceiling keeps
-    // (#345; the 1 mm minimum floor is the stock's underside rule, not this plane's).
+    // 1.51 mm of membrane over the pocket, less the job's 1 mm minimum floor: the badge states no
+    // print, so #345 decision A keeps the structural floor over the ceiling (1.51 − 1.0 = 0.51) —
+    // the number the pre-#345 limit already printed.
     const limit = jobDepthLimit(job);
-    expect(limit(38.1, 19.05)).toBeCloseTo(1.31, 6);
+    expect(limit(38.1, 19.05)).toBeCloseTo(0.51, 6);
     expect(limit(5, 5)).toBeCloseTo(2.81, 6);
     expect(screen.getByTestId('engrave-badge-notes')).toBeTruthy();
   });

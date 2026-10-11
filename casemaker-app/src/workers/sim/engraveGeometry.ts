@@ -13,9 +13,17 @@
  */
 
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
-import { keepOutLimit, keepOutMembrane, traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
+import { keepOutMembrane, traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
-import { checkBounds, defaultBoundaryMargin, splitBound } from '@/engine/cnc/engrave/depthBounds';
+import {
+  boundsFor,
+  checkBounds,
+  defaultBoundaryMargin,
+  voidFloor,
+  voidMargin,
+  type BoundViolation,
+} from '@/engine/cnc/engrave/depthBounds';
+import { voidCeilingFor } from '@/engine/cnc/layerStack';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { itemLabel } from '@/engine/cnc/engrave/jobSetup';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
@@ -24,6 +32,7 @@ import type {
   EngraveAnyItem,
   EngraveCombinedShape,
   EngraveJob,
+  EngraveLabel,
   EngraveShape,
   EngraveVectorShape,
 } from '@/types/engraveJob';
@@ -370,6 +379,99 @@ export function traceCutRegions(
 }
 
 /**
+ * The void that binds one cut region (#345), with the numbers a bound needs off it.
+ *
+ * It is a REDUCTION of a void, not a copy of one: the footprint `CrossSection` is gone, so this
+ * survives the `delete()` the scan does and can be handed to the findings stage.
+ */
+export interface BindingVoid {
+  /** The void's name as authored; `''` when it has none. */
+  name: string;
+  /** Solid material between the engraved face and the void's roof, mm (`keepOutMembrane`). */
+  membrane: number;
+  /**
+   * The roof as a DEPTH below the face — the PLANE a bound sits at, which is what a finding quotes.
+   * Layer-aligned where the blank states its print (`voidCeilingFor`), the declared membrane where
+   * it states none.
+   */
+  ceiling: number;
+  /** The deepest cut the void permits: `ceiling` less the margin its rule keeps, mm. */
+  limit: number;
+}
+
+/**
+ * The void that binds each cut region, by region id (#345, decision B) — the ONE scan.
+ *
+ * BOTH the per-move warning (`keepOutFindings`) and the per-item bound (`itemDepthBoundFindings`)
+ * read this map, so the two cannot name different voids for the same overlap; that is the whole
+ * point of extracting it. "Worst void wins" is the same rule `keepOutLimitAt` and the run sheet's
+ * `keepOutOver` follow: when two voids overlap a cut, the shallower limit is the one to respect.
+ *
+ * The margin is `voidMargin`'s, i.e. the ceiling keeps the Z-error margin on a printed blank and
+ * `max(boundaryMargin, minFloor)` on one that states no print (#345 decision A) — the same pair
+ * `keepOutLimit` and the run sheet work out, so the three never keep different distances.
+ *
+ * `regions` must ALREADY include the trace regions (`traceCutRegions`): the caller builds that list
+ * once, and a job that declares no void gets an empty map without paying for the sweep.
+ */
+export function bindingVoidsByRegion(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  plan: PartPlan,
+  regions: readonly CutRegion[],
+  margin: number = defaultBoundaryMargin(job),
+): Map<string, BindingVoid> {
+  const out = new Map<string, BindingVoid>();
+  if (plan.stock.keepOuts.length === 0) return out;
+  const CS = tl.CrossSection;
+  // Each void footprint is evaluated ONCE, not once per cut: a blank carries a handful of voids
+  // and a job dozens of cuts, and every evaluation is a Clipper2 op (#205 runs this on a debounce).
+  const voids = plan.stock.keepOuts.map((ko) => {
+    const membrane = keepOutMembrane(job, ko.zCeiling);
+    const ceiling = voidCeilingFor(membrane, plan.stock.thickness, job.stock.print);
+    return {
+      name: ko.name,
+      membrane,
+      ceiling,
+      limit: voidFloor(ceiling, voidMargin(job, margin)),
+      cs: executeProfile(tl, ko.footprint),
+    };
+  });
+
+  try {
+    for (const region of regions) {
+      if (region.polygons.length === 0) continue;
+      const cut = CS.ofPolygons(region.polygons, 'Positive');
+      try {
+        let worst: (typeof voids)[number] | null = null;
+        for (const void_ of voids) {
+          const overlap = CS.intersection([cut, void_.cs]);
+          const area = overlap.area();
+          overlap.delete();
+          if (area <= VOID_OVERLAP_AREA_MM2) continue;
+          // `<`: at equal limits the first void named stays, which for a job whose voids are
+          // declared in document order is the earlier one — stable, and never a silent re-pick.
+          if (worst === null || void_.limit < worst.limit) worst = void_;
+        }
+        if (worst !== null) {
+          out.set(region.id, {
+            name: worst.name,
+            membrane: worst.membrane,
+            ceiling: worst.ceiling,
+            limit: worst.limit,
+          });
+        }
+      } finally {
+        cut.delete();
+      }
+    }
+  } finally {
+    for (const v of voids) v.cs.delete();
+  }
+  return out;
+}
+
+/**
  * Warn about every cut that sits over an under-surface void (#171).
  *
  * One finding, not two: a cut deep enough to breach the membrane is refused as `cut-too-deep` by
@@ -384,78 +486,31 @@ export function traceCutRegions(
  * `/Fabrication.md` §7.2's chatter, and it is true at 0.1 mm. `region.depth` here is only used to
  * hand the case to the verifier; the membrane thickness is what the sentence reports.
  *
- * Each cut yields at most one finding, about the void with the SHALLOWEST limit among those it
- * covers: the same "worst void wins" rule `keepOutLimitAt` and the run sheet's `keepOutOver` use,
- * so the banner and the sheet name the same void.
- *
- * `regions` are the engrave regions (`engraveCutRegions`); single-line traces are swept from the
- * plan here instead (#270), so a caller does not have to remember they exist. Drills are still
- * absent (#220) — see `engraveCutRegions`.
+ * `bound` is `bindingVoidsByRegion`'s map — the same one the item stage reads. A region with no
+ * entry sits over nothing (or cuts nothing), so it has no warning to raise.
  */
 export function keepOutFindings(
-  tl: ManifoldToplevel,
   job: EngraveJob,
-  plan: PartPlan,
   regions: readonly CutRegion[],
-  toolRadius: number | null,
-  margin: number = defaultBoundaryMargin(job),
+  bound: ReadonlyMap<string, BindingVoid>,
 ): JobFinding[] {
-  // A void-free job is the common case and pays for nothing more than this line (#171): the trace
-  // regions below need the toplevel to sweep, and sweeping them for a job with no voids to check
-  // against would be pure waste on #205's debounce.
-  if (plan.stock.keepOuts.length === 0) return [];
-  const CS = tl.CrossSection;
   const findings: JobFinding[] = [];
-  // #270 — traces reach the void check here rather than through `engraveCutRegions`, because their
-  // region is a swept path rather than a measured opening. Built only once the job is known to
-  // declare a void, so the early return above still holds.
-  const all: readonly CutRegion[] = [...regions, ...traceCutRegions(tl, plan, toolRadius)];
+  for (const region of regions) {
+    const worst = bound.get(region.id);
+    if (worst === undefined) continue;
+    if (region.depth > worst.limit + DEPTH_EPS_MM) continue;
 
-  // Each void footprint is evaluated ONCE, not once per cut: a blank carries a handful of voids
-  // and a job dozens of cuts, and every evaluation is a Clipper2 op (#205 runs this on a debounce).
-  const voids = plan.stock.keepOuts.map((ko) => {
-    const membrane = keepOutMembrane(job, ko.zCeiling);
-    return { name: ko.name, cs: executeProfile(tl, ko.footprint), membrane, limit: keepOutLimit(job, membrane, margin) };
-  });
-
-  try {
-    for (const region of all) {
-      if (region.polygons.length === 0) continue;
-      const cut = CS.ofPolygons(region.polygons, 'Positive');
-      try {
-        let worst: { name: string; membrane: number; limit: number } | null = null;
-        for (const void_ of voids) {
-          const overlap = CS.intersection([cut, void_.cs]);
-          const area = overlap.area();
-          overlap.delete();
-          if (area <= VOID_OVERLAP_AREA_MM2) continue;
-          // `<=`: at equal limits the first void named stays, which for a job whose voids are
-          // declared in document order is the earlier one — stable, and never a silent re-pick.
-          if (worst === null || void_.limit < worst.limit) worst = void_;
-        }
-        if (worst === null) continue;
-
-        // A breach is the verifier's refusal, on the real text and the layer-aligned limit; the
-        // user reads the advice to move the cut clear there. Saying it twice is noise.
-        if (region.depth > worst.limit + DEPTH_EPS_MM) continue;
-
-        const src = findItem(job, region.id);
-        const who = src ? itemLabel(src) : region.name || `Item ${region.id}`;
-        findings.push({
-          severity: 'warning',
-          code: 'item-over-void',
-          labelId: region.id,
-          message:
-            `${who} cuts ${fmtMm(region.depth)} mm deep over "${worst.name}" — a ` +
-            `${fmtMm(worst.membrane)} mm membrane with nothing under it — so expect chatter and a ` +
-            `rough finish there. Moving the cut clear of the void will finish better.`,
-        });
-      } finally {
-        cut.delete();
-      }
-    }
-  } finally {
-    for (const v of voids) v.cs.delete();
+    const src = findItem(job, region.id);
+    const who = src ? itemLabel(src) : region.name || `Item ${region.id}`;
+    findings.push({
+      severity: 'warning',
+      code: 'item-over-void',
+      labelId: region.id,
+      message:
+        `${who} cuts ${fmtMm(region.depth)} mm deep over "${worst.name}" — a ` +
+        `${fmtMm(worst.membrane)} mm membrane with nothing under it — so expect chatter and a ` +
+        `rough finish there. Moving the cut clear of the void will finish better.`,
+    });
   }
   return findings;
 }
@@ -498,56 +553,94 @@ function emptyMessage(item: EngraveAnyItem, cutter: string): string {
 }
 
 /**
- * Items whose floor breaks a bound it stated for itself (#285, decision 20; #345).
+ * The sentence a broken bound makes (#345) — the ITEM, the PLANE and the SIDE, in that order.
  *
- * The one bound an item can break on its OWN is the colour split, because `depthIntent` is what
- * puts the split's plane there and what chooses its side: `surface` puts the floor above the split,
- * `reveal` below it. Every other bound — a void's ceiling, the stock's underside — is a fact about
- * the BLANK, which is not something an item is judged against here: the verifier's per-point limit
- * owns the void (#171's `keepOutFindings` says why there is no second test) and
- * `depth-exceeds-stock` owns the underside. So the rule stays per item and per intent, and no item
- * is refused twice for one floor.
+ * ONE builder for both bound kinds, so the split's two orders and a void's ceiling read alike and
+ * neither can drift into wording the other never uses. The advice at the end is the one that
+ * applies to that plane: a split has a control to flip ("set the label to reveal"), a void does
+ * not — the cut has to move, or the blank has to change.
+ */
+function boundMessage(label: EngraveLabel, hit: BoundViolation): string {
+  const { bound, margin } = hit;
+  const cuts = `${itemLabel(label)} cuts to ${fmtMm(label.depth)} mm`;
+  const at = fmtMm(bound.at);
+  const m = fmtMm(margin);
+  if (bound.side === 'above') {
+    const deepest = fmtMm(bound.at - margin);
+    const advice =
+      bound.source === 'split'
+        ? 'Cut shallower, or set the label to "reveal".'
+        : 'Cut shallower, or move the cut clear of the void.';
+    const subject = bound.source === 'split' ? 'a "surface" label must stay' : 'a floor must stay';
+    return `${cuts} — ${bound.name} is at ${at} mm and ${subject} ${m} mm above it, so no deeper than ${deepest} mm. ${advice}`;
+  }
+  return (
+    `${cuts} — ${bound.name} is at ${at} mm and a "reveal" label must go ${m} mm below it, ` +
+    `so at least ${fmtMm(bound.at + margin)} mm. Cut deeper, or set the label to "surface".`
+  );
+}
+
+/**
+ * Items whose floor breaks a bound (#285, decision 20; #345).
+ *
+ * An item is judged against EVERY bound under its footprint (#345 decision B): the colour split,
+ * chosen by its own `depthIntent` (`surface` puts the floor above the plane, `reveal` below it), and
+ * the ceiling of any void it sits over. The stock's underside is deliberately NOT judged here — it
+ * is filtered out below, because `depth-exceeds-stock` is its owner and one over-deep item must not
+ * produce two errors saying the same thing.
+ *
+ * Why a void bound here at all, when the per-move verifier already refuses a breach: the verifier
+ * names a MOVE ("a cutting move reaches Z=… at (x, y)"), which is the right sentence for CAM and the
+ * wrong one for the person who typed a depth into a label. This stage names the ITEM, the plane and
+ * the side, and it is the stage that knows the item's own intent — `cut-too-deep` stays the
+ * per-move backstop with the same plane name.
  *
  * Why not a `cut-too-deep` limit: a `reveal` floor crossing the split is the entire point of a
  * two-colour blank, so a per-move limit that refused every move past the plane would refuse the job
  * it exists to cut. A `below` bound is not a ceiling, and only `checkBounds` knows the difference.
  *
- * A job whose blank states no split has no plane to be wrong about, and an item with no
- * `depthIntent` — every item authored before #170's control — states no expectation, so neither
- * produces a finding. `custom` is the advanced override and says "I know; the number is the point",
- * so it carries no bound from the split by design.
+ * A job whose blank states no split and holds no void has nothing to be wrong about, and an item
+ * with no `depthIntent` — every item authored before #170's control — carries no split bound.
+ * `custom` is the advanced override and says "I know; the number is the point", so it carries no
+ * bound from the split by design.
  *
  * `splitDepth` is the split ON the printer's layer grid (`colourBoundaryFor`), which is where a
- * floor can actually be, not the nominal height the design asked for.
+ * floor can actually be, not the nominal height the design asked for. `bound` is
+ * `bindingVoidsByRegion`'s map, the same one `keepOutFindings` reads.
  */
 export function itemDepthBoundFindings(
   job: EngraveJob,
   splitDepth: number | null,
   margin: number,
+  bound: ReadonlyMap<string, BindingVoid> = new Map(),
 ): JobFinding[] {
-  if (splitDepth === null) return [];
+  if (splitDepth === null && bound.size === 0) return [];
   const findings: JobFinding[] = [];
   for (const label of job.labels) {
     // A construction label cuts nothing, so it has no floor to place.
     if (!label.enabled || label.construction === true) continue;
-    const bound = splitBound(label.depthIntent, splitDepth);
-    if (bound === null) continue;
-    const hit = checkBounds(label.depth, [bound], margin);
+    const over = bound.get(label.id);
+    const bounds = boundsFor(
+      job,
+      label,
+      {
+        split: splitDepth,
+        overVoid: over === undefined ? null : { name: over.name, breach: over.ceiling },
+      },
+      margin,
+    );
+    // The underside is out of this stage's hands before the check, not after it: `checkBounds`
+    // returns the FIRST broken bound, and leaving the underside in would let a job that breaks both
+    // it and nothing else read as a violation this stage then has to un-report.
+    const owned = bounds.filter((b) => b.source !== 'underside');
+    if (owned.length === 0) continue;
+    const hit = checkBounds(label.depth, owned, margin);
     if (hit === null) continue;
-    const m = fmtMm(hit.margin);
-    const at = fmtMm(bound.at);
     findings.push({
       severity: 'error',
       code: 'item-depth-bound',
       labelId: label.id,
-      message:
-        bound.side === 'above'
-          ? `${itemLabel(label)} cuts to ${fmtMm(label.depth)} mm — the colour split is at ${at} mm and ` +
-            `a "surface" label must stay ${m} mm above it, so no deeper than ${fmtMm(bound.at - hit.margin)} mm. ` +
-            'Cut shallower, or set the label to "reveal".'
-          : `${itemLabel(label)} cuts to ${fmtMm(label.depth)} mm — the colour split is at ${at} mm and ` +
-            `a "reveal" label must go ${m} mm below it, so at least ${fmtMm(bound.at + hit.margin)} mm. ` +
-            'Cut deeper, or set the label to "surface".',
+      message: boundMessage(label, hit),
     });
   }
   return findings;

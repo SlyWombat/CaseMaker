@@ -35,6 +35,7 @@ import {
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
+import { cuttingDiameter } from '@/engine/cnc/tool';
 import { feedsFor } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -89,7 +90,7 @@ describe('runRecord (#277)', () => {
     expect(run.ncFile).toBe(runSheetFileName(job.name));
     expect(run.ncHash).toBe(sha256Hex(NC).slice(0, 8));
     expect(run.tool).toBe(tool.name);
-    expect(run.cuttingDiameter).toBe(tool.tipDiameter ?? tool.diameter);
+    expect(run.cuttingDiameter).toBe(cuttingDiameter(tool));
     expect(run.estimatedSeconds).toBe(95);
     expect(run.generatedOn).toBe('2026-10-04');
     expect(run.instructions).toBe(RUN_RECORD_INSTRUCTIONS);

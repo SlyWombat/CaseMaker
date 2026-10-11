@@ -30,7 +30,7 @@ import type {
 import type { CustomFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
 import { supportedFootprint } from '@/engine/cnc/sacrificial';
-import { defaultBoundaryMargin, voidFloor } from '@/engine/cnc/engrave/depthBounds';
+import { defaultBoundaryMargin, voidFloor, voidMargin } from '@/engine/cnc/engrave/depthBounds';
 import type { DepthLimit } from '@/engine/cnc/verify';
 import { sacrificialDepthLimit } from '@/engine/cnc/verify';
 
@@ -882,21 +882,25 @@ export function keepOutMembrane(job: EngraveJob, zCeiling: Mm): Mm {
 }
 
 /**
- * The deepest cut a void permits, mm — its membrane less the boundary margin, never below 0.
+ * The deepest cut a void permits, mm — its membrane less the margin the ceiling keeps, never
+ * below 0. This is the design-arithmetic twin of the stack's `maxDepthAt − margin` for a blank
+ * that states no print.
  *
- * #345 changed WHICH number this is. `#231` subtracted `minFloor`, so the rule over a void was the
- * structural one ("leave a millimetre of material") while the layer-aligned rule a printed blank
- * gets (#285's `maxDepthAt`) enforced the Z-error one. Two rules for one plane, and the tighter of
- * them arbitrarily. A void's ceiling is now the same kind of bound as every other: an `above` plane
- * the floor keeps `boundaryMargin` clear of, and this is the design-arithmetic twin of the stack's
- * `maxDepthAt − margin` for a blank that states no print.
+ * #345 changed WHICH number that margin is. `#231` subtracted `minFloor`, so the rule over a void
+ * was the structural one ("leave a millimetre of material") while the layer-aligned rule a printed
+ * blank gets (#285's `maxDepthAt`) enforced the Z-error one. A void's ceiling is now an `above`
+ * bound like every other plane — but the margin it keeps is `voidMargin`, not a bare
+ * `boundaryMargin`: a blank that STATES a print keeps the Z-error margin (the layer grid quantises
+ * the ceiling), and a blank that states none keeps `max(boundaryMargin, minFloor)` (#345 decision
+ * A — with no grid to align to, the structural floor is the number with a basis). One owner for
+ * that choice, shared with the run sheet and the per-item bound.
  */
 export function keepOutLimit(
   job: EngraveJob,
   membraneThickness: Mm,
   margin: Mm = defaultBoundaryMargin(job),
 ): Mm {
-  return voidFloor(membraneThickness, margin);
+  return voidFloor(membraneThickness, voidMargin(job, margin));
 }
 
 /**
