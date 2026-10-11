@@ -11,12 +11,14 @@
  * sacrificial material (#213) is drawn from the same boxes the sweep tests against, in a paler
  * grey than the jaws so a strip between them reads as material and not as a third jaw. A legend
  * lists each distinct depth and the sacrificial swatch, and an axis marker sits at the work
- * origin with X and Y labelled. Each declared under-surface void (#271) is outlined in amber ON
+ * origin with X and Y labelled — and every label projected from a world point is kept inside the
+ * canvas whatever its anchor's projection does (#359, `projectedLabel.ts`). Each declared under-surface void (#271) is outlined in amber ON
  * the top face — the void itself is interior to solid material — and labelled with the deepest
  * cut it permits.
  */
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
@@ -25,6 +27,7 @@ import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { ViseParams } from '@/types/engraveJob';
 import { geometryFromMesh, SACRIFICIAL_COLOR } from './simGeometry';
 import { depthColor, VOID_COLOR } from './engraveRamp';
+import { clampLabelBox, projectToCanvas } from './projectedLabel';
 
 /** The same neutral wood tone the simulation's stock uses (#197). */
 const STOCK_COLOR = '#c9a26b';
@@ -160,22 +163,21 @@ function Void({
         <lineBasicMaterial color={VOID_COLOR} />
       </lineSegments>
       {centre && (
-        <Html position={[centre[0], centre[1], VOID_LIFT]} center style={NON_INTERACTIVE} zIndexRange={LABEL_Z}>
-          <span
-            data-testid={`engrave-void-label-${id}`}
-            style={{
-              fontSize: 10,
-              color: VOID_COLOR,
-              background: 'rgba(20,25,30,0.7)',
-              borderRadius: 3,
-              padding: '1px 4px',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            void: {name || 'unnamed'} · {words}
-            {limit > 0 ? '' : ` (${membrane.toFixed(2)} mm left)`}
-          </span>
-        </Html>
+        <ProjectedLabel
+          position={[centre[0], centre[1], VOID_LIFT]}
+          testId={`engrave-void-label-${id}`}
+          style={{
+            fontSize: 10,
+            color: VOID_COLOR,
+            background: 'rgba(20,25,30,0.7)',
+            borderRadius: 3,
+            padding: '1px 4px',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          void: {name || 'unnamed'} · {words}
+          {limit > 0 ? '' : ` (${membrane.toFixed(2)} mm left)`}
+        </ProjectedLabel>
       )}
     </>
   );
@@ -216,6 +218,62 @@ const NON_INTERACTIVE = { pointerEvents: 'none' } as const;
  * lands under the toolbar, a panel or the transport bar, the chrome is what you see.
  */
 const LABEL_Z: [number, number] = [0, 0];
+
+/**
+ * #359 — a label anchored to a world point whose BOX stays inside the canvas.
+ *
+ * `center` puts the box's middle on the anchor's projected position, so a label whose anchor lands
+ * near the canvas edge is half off it — and the wrapper is canvas-sized, so it is clipped
+ * mid-word. `clampLabelBox` moves the projection inward by exactly what the box needs; drei calls
+ * `calculatePosition` on every frame, and the clamp is applied there rather than in a React state
+ * update, so following the camera stays as cheap as it was.
+ *
+ * The box's own size is read inside `calculatePosition` rather than cached from an effect, and not
+ * by preference: drei renders an `Html`'s children through a `ReactDOM.createRoot` of its own on a
+ * div beside the canvas, and that root commits AFTER the effects of the component that rendered
+ * the `Html`. A ref held here is therefore still null when a layout effect runs, and — with
+ * nothing re-rendering afterwards — it stays null: measured at 1024 × 700, caching it that way
+ * clamped every label against a zero-size box, which moved the axis labels by the pad and left the
+ * 133 px jaw label exactly where it was. `calculatePosition` runs every frame, from a point where
+ * the DOM has settled, so it is the first place the span's real size exists at all. The read is a
+ * layout lookup, not a re-layout — nothing invalidates layout between frames — and it keeps the
+ * clamp honest through a font load or a change of words, which a cached size would not.
+ */
+function ProjectedLabel({
+  position,
+  testId,
+  style,
+  children,
+}: {
+  position: [number, number, number];
+  testId: string;
+  style: CSSProperties;
+  children: ReactNode;
+}) {
+  const boxRef = useRef<HTMLSpanElement>(null);
+  return (
+    <Html
+      position={position}
+      center
+      style={NON_INTERACTIVE}
+      zIndexRange={LABEL_Z}
+      calculatePosition={(el, camera, size) => {
+        const [x, y] = projectToCanvas(el, camera, size);
+        const box = boxRef.current;
+        return clampLabelBox(
+          x,
+          y,
+          box ? { width: box.offsetWidth, height: box.offsetHeight } : { width: 0, height: 0 },
+          size,
+        );
+      }}
+    >
+      <span ref={boxRef} data-testid={testId} style={style}>
+        {children}
+      </span>
+    </Html>
+  );
+}
 
 export function EngravePreview() {
   const preview = useEngravePreviewStore((s) => s.preview);
@@ -266,34 +324,29 @@ export function EngravePreview() {
           <boxGeometry args={[0.4, axisLen, 0.4]} />
           <meshBasicMaterial color="#30a46c" />
         </mesh>
-        <Html position={[axisLen, 0, 0]} center style={NON_INTERACTIVE} zIndexRange={LABEL_Z}>
-          <span data-testid="engrave-axis-x" style={AXIS_LABEL}>
-            X
-          </span>
-        </Html>
-        <Html position={[0, axisLen, 0]} center style={NON_INTERACTIVE} zIndexRange={LABEL_Z}>
-          <span data-testid="engrave-axis-y" style={AXIS_LABEL}>
-            Y
-          </span>
-        </Html>
+        <ProjectedLabel position={[axisLen, 0, 0]} testId="engrave-axis-x" style={AXIS_LABEL}>
+          X
+        </ProjectedLabel>
+        <ProjectedLabel position={[0, axisLen, 0]} testId="engrave-axis-y" style={AXIS_LABEL}>
+          Y
+        </ProjectedLabel>
       </group>
 
       {fixedJaw && (
-        <Html position={centreOf(fixedJaw.mesh.bbox)} center style={NON_INTERACTIVE} zIndexRange={LABEL_Z}>
-          <span
-            data-testid="engrave-jaw-source"
-            style={{
-              fontSize: 10,
-              color: '#c8d3de',
-              background: 'rgba(20,25,30,0.7)',
-              borderRadius: 3,
-              padding: '1px 4px',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            vise: {sourceWords(vise.source)}
-          </span>
-        </Html>
+        <ProjectedLabel
+          position={centreOf(fixedJaw.mesh.bbox)}
+          testId="engrave-jaw-source"
+          style={{
+            fontSize: 10,
+            color: '#c8d3de',
+            background: 'rgba(20,25,30,0.7)',
+            borderRadius: 3,
+            padding: '1px 4px',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          vise: {sourceWords(vise.source)}
+        </ProjectedLabel>
       )}
 
     </group>
