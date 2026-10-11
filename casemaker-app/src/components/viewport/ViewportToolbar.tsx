@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, type Ref } from 'react';
 import {
   useViewportStore,
   type ViewportTool,
@@ -86,7 +86,20 @@ function isInputFocused(): boolean {
   return false;
 }
 
-export function ViewportToolbar() {
+/**
+ * #361 — the toolbar hands its own box back to `Viewport`, which measures it and publishes the
+ * height as a CSS variable for the legends to clear (`EngraveLegend`, `SimLegend`). It is `Viewport`
+ * that OWNS the arrangement of the panes (toolbar, canvas, legends, transport), so it is the one
+ * that gets to know where the toolbar ends; the toolbar only knows its own height.
+ *
+ * A `ref` PROP rather than `forwardRef`: React 19 passes `ref` through to a function component as
+ * an ordinary prop, and this is a plain DOM node, not a component that needs to expose anything.
+ */
+export interface ViewportToolbarProps {
+  ref?: Ref<HTMLDivElement>;
+}
+
+export function ViewportToolbar({ ref }: ViewportToolbarProps) {
   const activeTool = useViewportStore((s) => s.activeTool);
   const cameraMode = useViewportStore((s) => s.cameraMode);
   const viewMode = useViewportStore((s) => s.viewMode);
@@ -157,6 +170,7 @@ export function ViewportToolbar() {
 
   return (
     <div
+      ref={ref}
       className="viewport-toolbar"
       data-testid="viewport-toolbar"
       // The CNC groups make the toolbar wider than the case view's; wrapping beats overflowing

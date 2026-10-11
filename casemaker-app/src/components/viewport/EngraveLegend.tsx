@@ -22,10 +22,19 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { SACRIFICIAL_COLOR } from './simGeometry';
 import { depthColor, VOID_COLOR } from './engraveRamp';
 
-/** Top-right, clear of the top-left `ViewportToolbar` and the bottom `SimTransport` (#198). */
+/**
+ * Top-right, below the top-left `ViewportToolbar` and above the bottom `SimTransport` (#198).
+ *
+ * #361 — the toolbar WRAPS, so its height is one row at 1440 and three at 1024 in the rail layout,
+ * and a fixed `top: 8` sat the legend on top of it there: "Fit" was covered and "Side" was cut to
+ * "Si". `Viewport` measures the toolbar's bottom edge and publishes it as
+ * `--cm-viewport-toolbar-bottom` on `.viewport-wrapper`; the fallback is 0, so an unmeasured pane
+ * (jsdom — no layout, no `ResizeObserver` — and the first paint before the measurement) renders
+ * exactly today's `top: 8px`.
+ */
 const BOX: CSSProperties = {
   position: 'absolute',
-  top: 8,
+  top: 'calc(var(--cm-viewport-toolbar-bottom, 0px) + 8px)',
   right: 8,
   zIndex: 'var(--cm-z-viewport-chrome)', // the one stacking scale (#348), src/styles/tokens.css
   background: 'rgba(20,25,30,0.82)',

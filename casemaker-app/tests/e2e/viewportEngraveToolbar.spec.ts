@@ -185,6 +185,135 @@ test('the depth legend stays put and inside the pane while the camera orbits (#3
 // context as the portaled dialog. That is what is asserted here, plus the one structural condition
 // that makes the comparison meaningful (nothing between the label and the body traps it in a
 // stacking context of its own).
+// #361 — the DOM legends must CLEAR the toolbar, not sit on it.
+//
+// #349 put the depth legend in the pane's top-right corner at `top: 8`; the toolbar is a DOM row in
+// the same corner and it WRAPS — one row at 1440, three at 1024 in the #355 rail layout — so at
+// 1024 the legend covered the right end of the first two rows: "Fit" was hidden and "Side" was cut
+// to "Si". Nothing was clickable-but-dead (the legend is `pointer-events: none`, so a click still
+// reached the button, which is why #229's click test passes either way) — the buttons were simply
+// unreadable, and only a geometry assertion can see that. Both legends share the anchor, so the
+// swatch had the same fault with a sim scene up.
+//
+// `Viewport` measures the toolbar's bottom edge into `--cm-viewport-toolbar-bottom`; the assertions
+// below are on the rendered rects, and the control step re-measures with that variable cleared —
+// the pre-#361 layout — so a green run also proves the variable is what moved the legend.
+
+interface Hits {
+  legend: Box;
+  toolbar: Box;
+  bottom: string;
+  hits: { el: string; box: Box }[];
+}
+
+/**
+ * Every toolbar box the legend at `legendTestId` must not touch: the toolbar's own box (its border
+ * and padding are chrome the legend should not sit on either) and each control inside it.
+ *
+ * `clearFix` removes the measured variable for the measurement and puts it back — the legend
+ * computes back to `top: 8`, which is the layout the issue reports — so the caller can assert the
+ * overlap was real before the fix and not merely absent from a toolbar that never wrapped.
+ */
+async function toolbarHits(page: Page, legendTestId: string, clearFix = false): Promise<Hits> {
+  return page.evaluate(
+    ({ id, clear }) => {
+      const box = (el: Element): Box => {
+        const r = el.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      };
+      const overlaps = (a: Box, b: Box): boolean =>
+        a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+      const legend = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+      if (!legend) throw new Error(`no [data-testid="${id}"] on screen`);
+      const toolbar = document.querySelector('[data-testid="viewport-toolbar"]') as HTMLElement;
+      const wrapper = document.querySelector('.viewport-wrapper') as HTMLElement;
+
+      const saved = wrapper.style.getPropertyValue('--cm-viewport-toolbar-bottom');
+      if (clear) wrapper.style.removeProperty('--cm-viewport-toolbar-bottom');
+
+      const legendBox = box(legend);
+      const toolbarBox = box(toolbar);
+      const hits: { el: string; box: Box }[] = [];
+      if (overlaps(legendBox, toolbarBox)) hits.push({ el: 'viewport-toolbar', box: toolbarBox });
+      for (const el of Array.from(toolbar.querySelectorAll('[data-testid^="viewport-"]'))) {
+        const b = box(el);
+        // A collapsed box (the 0x0 markers a few controls render) is not a thing to be covering.
+        if (b.width === 0 && b.height === 0) continue;
+        if (overlaps(legendBox, b)) hits.push({ el: el.getAttribute('data-testid') ?? el.tagName, box: b });
+      }
+
+      const bottom = saved;
+      if (clear) wrapper.style.setProperty('--cm-viewport-toolbar-bottom', saved);
+      return { legend: legendBox, toolbar: toolbarBox, bottom, hits };
+    },
+    { id: legendTestId, clear: clearFix },
+  );
+}
+
+/** Both widths the issue reports: the wrapped three-row toolbar, and the roomy single row. */
+const WIDTHS: { width: number; height: number }[] = [
+  { width: 1440, height: 900 },
+  { width: 1024, height: 700 },
+];
+
+/** Clear of the toolbar AND still inside the pane — the fix must not push the legend off an edge. */
+async function expectCleared(page: Page, legendTestId: string, label: string): Promise<void> {
+  for (const size of WIDTHS) {
+    await page.setViewportSize(size);
+    // The toolbar re-wraps and the observer publishes the new edge; give the layout one frame.
+    await page.waitForTimeout(600);
+    const m = await toolbarHits(page, legendTestId);
+    console.log(
+      '#361 %s %dx%d legend=%j toolbar=%j --cm-viewport-toolbar-bottom=%s hits=%j',
+      label, size.width, size.height, m.legend, m.toolbar, m.bottom || '(unset)', m.hits,
+    );
+    expect(m.hits, `${label} at ${size.width}x${size.height} must clear the toolbar`).toEqual([]);
+    const pane = (await page.locator('.viewport-wrapper').boundingBox()) as Box;
+    expect(within(m.legend, pane), `${label} at ${size.width}x${size.height} stays in the pane`).toBe(true);
+  }
+}
+
+test('#361 — the depth legend clears the toolbar at both widths', async ({ cm, page }) => {
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+  });
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
+
+  await expectCleared(page, 'engrave-preview-legend', 'engrave');
+
+  // The control: at the wrapped width, the PRE-#361 layout really does overlap what the assertion
+  // above just proved clear. Without this, the check would pass on a toolbar that never wraps.
+  await page.setViewportSize({ width: 1024, height: 700 });
+  await page.waitForTimeout(600);
+  const before = await toolbarHits(page, 'engrave-preview-legend', true);
+  console.log('#361 engrave 1024x700 WITHOUT the measured variable: hits=%j', before.hits);
+  expect(
+    before.hits.length,
+    'the pre-#361 layout overlapped the toolbar here — the fix is what cleared it',
+  ).toBeGreaterThan(0);
+});
+
+test('#361 — the sacrificial swatch clears the toolbar at both widths', async ({ cm, page }) => {
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+  });
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-panel')).toBeVisible({ timeout: 60_000 });
+
+  // The swatch reads the SIM store, so a sim scene has to be up for it to render at all — and the
+  // only route in the app that puts a sacrificial body into that store is the engrave job's own:
+  // the strips, then Generate, which loads the program it generated into `simStore`.
+  await page.getByTestId('engrave-sac-preset-strips').click();
+  await page.getByTestId('engrave-generate').click();
+  await expect(page.getByTestId('sim-legend-sacrificial')).toBeVisible({ timeout: 180_000 });
+
+  await expectCleared(page, 'sim-legend-sacrificial', 'sim swatch');
+});
+
 test('a dialog is above every element of the viewport pane (#348)', async ({ cm, page }) => {
   await cm.ready();
   await page.evaluate(async () => {

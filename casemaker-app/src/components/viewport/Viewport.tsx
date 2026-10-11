@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
@@ -216,6 +216,49 @@ function AutoFrame() {
   return null;
 }
 
+/**
+ * #361 — publish the toolbar's BOTTOM EDGE, so the corner legends can clear it instead of sitting
+ * on top of it.
+ *
+ * The toolbar WRAPS (`flexWrap: 'wrap'` in `ViewportToolbar`), so its height is one row at 1440 and
+ * three at 1024 in the rail layout: no static `top` clears it at every width, and at 1024 the
+ * engrave depth legend covered "Fit" and cut "Side" to "Si" — the legend is `pointer-events: none`,
+ * so the buttons still took clicks, but they could not be READ.
+ *
+ * The BOTTOM EDGE, not the height: the toolbar also sits at `top: var(--cm-space-3)`, so a height
+ * alone leaves the legends a `--cm-space-3` short of clearing it — `top: calc(h + 8px)` at one row
+ * puts the legend 4 px INTO the toolbar's box. Measured from the wrapper (position: relative, no
+ * padding or border, so the rect difference is the offset within it) it needs no knowledge of the
+ * toolbar's own `top`, and would still be right if that changed.
+ *
+ * Written as a CSS variable on the wrapper, never React state: this runs on every resize and a
+ * state update would re-render the subtree containing `<Canvas>`. The legends read it as
+ * `calc(var(--cm-viewport-toolbar-bottom, 0px) + 8px)`, so with no measurement at all — jsdom,
+ * which has neither layout nor `ResizeObserver` — they fall back to exactly today's `top: 8px`.
+ */
+const TOOLBAR_BOTTOM_VAR = '--cm-viewport-toolbar-bottom';
+
+function useToolbarBottom(wrapper: React.RefObject<HTMLDivElement | null>, toolbar: React.RefObject<HTMLDivElement | null>): void {
+  useLayoutEffect(() => {
+    const host = wrapper.current;
+    const el = toolbar.current;
+    if (!host || !el || typeof ResizeObserver === 'undefined') return;
+    const publish = (): void => {
+      const bottom = el.getBoundingClientRect().bottom - host.getBoundingClientRect().top;
+      host.style.setProperty(TOOLBAR_BOTTOM_VAR, `${Math.round(bottom)}px`);
+    };
+    publish();
+    // What changes the edge: the pane's WIDTH (the toolbar wraps), and the LAYER group appearing
+    // when a CNC section opens. The observer sees both without a resize listener.
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      host.style.removeProperty(TOOLBAR_BOTTOM_VAR);
+    };
+  }, [wrapper, toolbar]);
+}
+
 /** How much one Zoom click changes the camera's distance to the orbit target (#197 §7). */
 const ZOOM_FACTOR = 1.25;
 
@@ -314,9 +357,13 @@ export function Viewport() {
   const simActive = useSimStore(isSimSceneActive);
   const engraveActive = useViewportStore((s) => s.activeSidebarSection === 'cnc-engrave');
   const onPointerDown = useNoSelectWhileOrbiting();
+  // #361 — the wrapper the legends are anchored to, and the toolbar whose height they have to clear.
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  useToolbarBottom(wrapperRef, toolbarRef);
   return (
-    <div className="viewport-wrapper" onPointerDown={onPointerDown}>
-      <ViewportToolbar />
+    <div ref={wrapperRef} className="viewport-wrapper" onPointerDown={onPointerDown}>
+      <ViewportToolbar ref={toolbarRef} />
       <Canvas
         gl={{ antialias: !isE2E, preserveDrawingBuffer: true }}
         dpr={isE2E ? 1 : window.devicePixelRatio}

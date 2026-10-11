@@ -13,10 +13,16 @@ import type { CSSProperties, JSX } from 'react';
 import { drawsSacrificial, SACRIFICIAL_COLOR, sacrificialMesh } from './simGeometry';
 import { useSimStore } from '@/store/simStore';
 
-/** Top-right, under the engrave legend's own corner — the two never show at once (#197, #205). */
+/**
+ * Top-right, under the engrave legend's own corner — the two never show at once (#197, #205).
+ *
+ * #361 — the SAME anchor expression as `EngraveLegend`: both clear the measured toolbar by the same
+ * rule, so whichever of the two is up sits at the same height and neither can drift back over the
+ * buttons when the toolbar wraps. See the comment there for the fallback.
+ */
 const BOX: CSSProperties = {
   position: 'absolute',
-  top: 8,
+  top: 'calc(var(--cm-viewport-toolbar-bottom, 0px) + 8px)',
   right: 8,
   zIndex: 'var(--cm-z-viewport-chrome)', // the one stacking scale (#348), src/styles/tokens.css
   display: 'flex',
