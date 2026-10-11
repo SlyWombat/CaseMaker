@@ -32,6 +32,9 @@ function previewFor(job: EngraveJob = defaultEngraveJob()): NonNullable<ReturnTy
 
 beforeEach(() => {
   useEngravePreviewStore.setState({ preview: null });
+  // The sacrificial/void test leaves its own job in the store; reset it so these three do not
+  // depend on running in this order (review of ebf38c5).
+  useEngraveJobStore.setState({ job: defaultEngraveJob() });
 });
 
 afterEach(cleanup);

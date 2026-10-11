@@ -7,8 +7,11 @@
  * The ramp is FIXED, not per-job: the same depth reads as the same colour in every job, so a
  * 1 mm pocket never looks like a 2 mm one because the job's deepest cut changed.
  *
- * The void outline lives here rather than beside the meshes that draw it because the legend is a
- * plain DOM component (#349) and must not import the three/drei module just to name one colour.
+ * The void outline's colour lives here rather than beside the meshes that draw it because BOTH
+ * the meshes and the DOM legend (#349) need the same constant, and the meshes' own module
+ * (`EngravePreview.tsx`) may export components only — the rule named in the first paragraph above.
+ * The constraint is that export rule, not an objection to importing three: this file imports it
+ * for the ramp.
  */
 
 import * as THREE from 'three';

@@ -160,10 +160,12 @@ test('the depth legend stays put and inside the pane while the camera orbits (#3
     'the orbit drag moved the camera',
   ).toBeGreaterThan(20);
 
+  // The unmoved box is the load-bearing check (the review of `ebf38c5` noted the `within` this
+  // replaces was a tautology: the legend is an absolutely-positioned child of the pane, so its
+  // box is inside the pane's by construction).
   const after = (await legend.boundingBox()) as Box;
   expect(after.x).toBeCloseTo(before.x, 0);
   expect(after.y).toBeCloseTo(before.y, 0);
-  expect(within(after, paneBox), 'the legend is still inside the viewport pane').toBe(true);
 });
 
 // #348 — the projected labels printed THROUGH the setup flow and the wizard, because drei's `Html`

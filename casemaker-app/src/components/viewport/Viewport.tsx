@@ -349,8 +349,12 @@ export function Viewport() {
         <SceneMeshes />
       </Canvas>
       {/* #349 — the engrave depth legend rides over the canvas as DOM, like the transport, rather
-          than being projected from the scene origin. It renders itself null with no preview. */}
-      {engraveActive && <EngraveLegend />}
+          than being projected from the scene origin. It renders itself null with no preview.
+          Gated on the SCENE, not just the section: opening the Engrave section does not take the
+          viewport from a loaded simulation (`SceneMeshes`, and `activeSceneBounds` above), so the
+          depth legend must not paint over a scene it does not describe — as DOM it did not follow
+          the scene the way it did while it lived inside `EngravePreview` (review of ebf38c5). */}
+      {engraveActive && !simActive && <EngraveLegend />}
       {/* #349 — the simulation's sacrificial swatch, the same move. */}
       {simActive && <SimLegend />}
       {/* #198 — the transport rides over the bottom of the canvas while a simulation owns the
