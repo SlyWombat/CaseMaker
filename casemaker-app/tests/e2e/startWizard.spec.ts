@@ -18,16 +18,13 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
 
-  // Step 1 — the check. A browser cannot open a raw socket, and it says so rather than pretending.
-  await page.getByTestId('start-wizard-check').click();
-  await expect(page.getByTestId('start-wizard-machine-state')).toHaveAttribute(
-    'data-state',
-    'unavailable',
+  // Step 1 — a browser cannot open a raw socket, and the wizard says so instead of offering a
+  // check it cannot run (#346): the note, Cancel, and Continue without a machine.
+  await expect(page.getByTestId('start-wizard-machine-note-build')).toContainText(
+    'cannot control a machine',
   );
-  await expect(page.getByTestId('start-wizard-machine-state')).toContainText('desktop build');
-
-  // Never blocks: Next works with no machine at all.
-  await expect(page.getByTestId('start-wizard-next')).toBeEnabled();
+  await expect(page.getByTestId('start-wizard-check')).toHaveCount(0);
+  await expect(page.getByTestId('start-wizard-next')).toHaveText('Continue without a machine');
   await page.getByTestId('start-wizard-next').click();
 
   // Step 2 — the project.

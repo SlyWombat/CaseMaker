@@ -27,6 +27,20 @@ import { useViewportStore } from '@/store/viewportStore';
 
 vi.mock('@/engine/jobs/JobScheduler', () => ({ scheduleImmediate: vi.fn(async () => {}) }));
 
+// #346 — vitest runs the WEB target, where the wizard shows no check at all. The step-1 tests below
+// exercise the desktop build's check through the probe seam, so they run with the capability on;
+// the "no socket" tests turn it off. A getter, so each test reads the value at render.
+const caps = vi.hoisted(() => ({ drive: true }));
+vi.mock('@/platform/capabilities', async (orig) => {
+  const real = await orig<typeof import('@/platform/capabilities')>();
+  return {
+    ...real,
+    get canDriveMachine() {
+      return caps.drive;
+    },
+  };
+});
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** The Engrave panel is rendered beside the wizard by `AppShell`; a jsdom test has no worker. */
@@ -195,18 +209,36 @@ describe('#280 — step 1, the machine check', () => {
     expect(screen.getByTestId('start-wizard-step-job')).toBeDefined();
   });
 
-  it('a build with no socket says so, in the guard’s own words', async () => {
-    setMachineProbeLoader(async () => {
-      throw new Error('Driving the machine requires the desktop build (BUILD_TARGET=desktop).');
-    });
-    render(<StartWizard />);
-    // vitest runs the web target, so the reason is on screen before anything is pressed.
-    expect(screen.getByTestId('start-wizard-machine-note-build')).toBeDefined();
-    fireEvent.click(screen.getByTestId('start-wizard-check'));
+  it('a build with no socket does not ask to connect one: the note, Cancel, Continue (#346)', () => {
+    caps.drive = false;
+    try {
+      render(<StartWizard />);
+      const note = screen.getByTestId('start-wizard-machine-note-build');
+      expect(note.textContent).toContain('This instance cannot control a machine');
+      expect(note.textContent).toContain('local (desktop) instance');
+      // No check, no address box, no Connect, no Back: nothing that pretends a socket exists.
+      expect(screen.queryByTestId('start-wizard-check')).toBeNull();
+      expect(screen.queryByTestId('start-wizard-address')).toBeNull();
+      expect(screen.queryByTestId('start-wizard-connect-address')).toBeNull();
+      expect(screen.queryByTestId('start-wizard-back')).toBeNull();
+      // Continue is the advancing button, and it says what it does.
+      expect(screen.getByTestId('start-wizard-next').textContent).toBe('Continue without a machine');
+      fireEvent.click(screen.getByTestId('start-wizard-next'));
+      expect(screen.getByTestId('start-wizard-step-job')).toBeDefined();
+    } finally {
+      caps.drive = true;
+    }
+  });
 
-    const state = await screen.findByTestId('start-wizard-machine-state');
-    expect(state.getAttribute('data-state')).toBe('unavailable');
-    expect(state.textContent).toContain('desktop build');
+  it('Cancel on the no-socket step puts the wizard away (#346)', () => {
+    caps.drive = false;
+    try {
+      render(<StartWizard />);
+      fireEvent.click(screen.getByTestId('start-wizard-cancel'));
+      expect(useStartWizardStore.getState().open).toBe(false);
+    } finally {
+      caps.drive = true;
+    }
   });
 
   it('a search that fails is an error, not a silent “nothing there”', async () => {
@@ -238,12 +270,17 @@ describe('#280 — step 1, the machine check', () => {
 });
 
 describe('#280 — step 2, what are you making', () => {
-  it('offers the five project types, each an existing template', () => {
+  it('offers only what the CNC cuts: the badge blank and the bare blank (#346)', () => {
     render(<StartWizard />);
     skipToJobStep();
-    for (const id of ['protective-case', 'mini-rack-10in', 'tool-insert', 'badge-blank', 'blank']) {
+    for (const id of ['badge-blank', 'blank']) {
       expect(screen.getByTestId(`start-wizard-job-${id}`), `${id} should be offered`).toBeDefined();
     }
+    // The printed archetypes have the welcome screen; "no way a rack mount is being carved".
+    for (const id of ['protective-case', 'mini-rack-10in', 'tool-insert', 'toolbox']) {
+      expect(screen.queryByTestId(`start-wizard-job-${id}`), `${id} is printed, not cut`).toBeNull();
+    }
+    expect(screen.getAllByTestId(/^start-wizard-job-/)).toHaveLength(2);
   });
 
   it('choosing the blank creates the project, opens the Engrave panel and hands off to the setup', () => {

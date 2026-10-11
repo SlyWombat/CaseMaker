@@ -60,19 +60,13 @@ const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, 
 const NOTE: CSSProperties = { ...MUTED, borderLeft: '2px solid #3a5a7a', paddingLeft: 6 };
 
 /**
- * Step 2's six project types, in the order the question makes sense: the things you print, then
- * the two that are cut. Each is an existing template id — nothing here invents a second way to make
- * a project, and a spec that is renamed or missing simply drops out of the list rather than
- * breaking the wizard.
+ * Step 2's project types: ONLY what the CNC cuts (#346 — "no way a rack mount is being carved").
+ * The printed archetypes (protective case, mini rack, tool insert, toolbox) have the welcome
+ * screen; a cutting job is a blank. Each id is an existing template — nothing here invents a
+ * second way to make a project, and a spec that is renamed or missing simply drops out of the
+ * list rather than breaking the wizard.
  */
-const JOB_TYPE_IDS = [
-  'protective-case',
-  'mini-rack-10in',
-  'tool-insert',
-  'toolbox',
-  'badge-blank',
-  'blank',
-] as const;
+const JOB_TYPE_IDS = ['badge-blank', 'blank'] as const;
 
 type Step = 'machine' | 'job' | 'setup';
 
@@ -262,19 +256,24 @@ export function StartWizard(): JSX.Element {
           </button>
         </div>
 
-        {step === 'machine' && (
+        {/* #346 — a build that cannot reach a machine does not ask to connect one. The web build
+            says so once and offers the two honest choices (Cancel, or Continue without a machine);
+            the check, the address box and the probe's answer exist only where a socket does. */}
+        {step === 'machine' && !canDriveMachine && (
+          <div data-testid="start-wizard-step-machine" style={{ marginTop: 8 }}>
+            <p style={NOTE} data-testid="start-wizard-machine-note-build">
+              This instance cannot control a machine. To connect one, launch Case Maker from your
+              local (desktop) instance. You can still set the job up here, without a machine.
+            </p>
+          </div>
+        )}
+
+        {step === 'machine' && canDriveMachine && (
           <div data-testid="start-wizard-step-machine" style={{ marginTop: 8 }}>
             <p style={MUTED}>
               First, whether a machine is on the network. This is a check rather than a question —
               the machine is asked, and it answers or it does not.
             </p>
-            {!canDriveMachine && (
-              <p style={NOTE} data-testid="start-wizard-machine-note-build">
-                This build cannot open a raw socket, so it cannot reach a machine on the network:
-                a browser cannot, and the desktop build can. Everything else works — a job can be
-                written, verified and simulated here, and cut later on the desktop build.
-              </p>
-            )}
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"
@@ -333,7 +332,7 @@ export function StartWizard(): JSX.Element {
         {step === 'job' && (
           <div data-testid="start-wizard-step-job" style={{ marginTop: 8 }}>
             <p style={MUTED}>
-              What are you making? Each of these sets the project up; a machine can be connected
+              What are you cutting? Each of these sets the project up; a machine can be connected
               later, or not at all.
             </p>
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 6 }}>
@@ -357,14 +356,21 @@ export function StartWizard(): JSX.Element {
         )}
 
         <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-          <button
-            type="button"
-            data-testid="start-wizard-back"
-            disabled={step === 'machine'}
-            onClick={() => setStep('machine')}
-          >
-            Back
-          </button>
+          {step === 'machine' && !canDriveMachine ? (
+            <button type="button" data-testid="start-wizard-cancel" onClick={closeWizard}>
+              Cancel
+            </button>
+          ) : (
+            <button
+              type="button"
+              data-testid="start-wizard-back"
+              disabled={step === 'machine'}
+              onClick={() => setStep('machine')}
+            >
+              Back
+            </button>
+          )}
+          {/* The SAME test id either way: it is the button that advances, whatever it says. */}
           {step === 'machine' && (
             <button
               type="button"
@@ -373,7 +379,7 @@ export function StartWizard(): JSX.Element {
               title="A job does not need a machine."
               onClick={() => setStep('job')}
             >
-              Next
+              {canDriveMachine ? 'Next' : 'Continue without a machine'}
             </button>
           )}
         </div>

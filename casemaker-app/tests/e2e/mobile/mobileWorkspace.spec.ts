@@ -150,7 +150,7 @@ test('every section panel fits the phone without clipping a field (#134)', async
 test('the Part panel fits the phone, and its numbers reach the part (#282)', async ({ cm, page }) => {
   await cm.ready();
   await page.getByTestId('welcome-start-cnc').click();
-  await page.getByTestId('start-wizard-check').click();
+  // #346: the web build offers no check; Continue without a machine is the advancing button.
   await page.getByTestId('start-wizard-next').click();
   await page.waitForSelector('[data-testid="start-wizard-step-job"]');
   await page.getByTestId('start-wizard-job-badge-blank').click();
