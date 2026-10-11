@@ -195,3 +195,45 @@ describe('the tool library', () => {
     expect(resolveTool('nope')).toBeNull();
   });
 });
+
+// ---- #332: our own `;@CM|` records -----------------------------------------------------------------
+// A second prefix, written only by OUR post (#332), so a file can name the cutter by registry key —
+// which is the one identity a clone or a hand-typed definition has (#212 keeps the vendor `g_ID`
+// off them). Studio ignores a comment it does not know, so the line cannot break its reader, and
+// the `;@MKR|` records are left exactly as Studio writes them.
+
+describe('#332: `;@CM|` records', () => {
+  it('a `;@CM|TOOL|key=` line arrives as cm.tool.key, outside Studio’s records', () => {
+    const parsed = parseGcode([STOCK, TOOL, ';@CM|TOOL|key=user:abc'].join('\n'));
+    expect(parsed.header?.cm).toEqual({ tool: { key: 'user:abc' } });
+    // It is NOT one of Studio's records, and the key is not smuggled onto the MKR line.
+    expect(parsed.header?.records.map((r) => r.tag)).toEqual(['STOCK', 'TOOL']);
+    expect(parsed.header?.records.find((r) => r.tag === 'TOOL')?.fields['key']).toBeUndefined();
+    expect(parsed.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  });
+
+  it('a file that carries only our record still has a header, with cm and no records', () => {
+    const parsed = parseGcode(';@CM|TOOL|key=flat-1.0\n');
+    expect(parsed.header?.records).toEqual([]);
+    expect(parsed.header?.cm).toEqual({ tool: { key: 'flat-1.0' } });
+  });
+
+  it('ignores a CM record it does not know, and a TOOL record with no key, without erroring', () => {
+    // Untrusted input either way. A foreign file carrying one is not something the operator can act
+    // on, and the key is only ever read, never trusted to be well formed.
+    const parsed = parseGcode([';@MKR|STOCK|id=cuboid|length=10|width=10|height=5|diameter=1', ';@CM|OTHER|x=1', ';@CM|TOOL', ';@CM|TOOL|key='].join('\n'));
+    expect(parsed.header?.cm).toBeUndefined();
+    expect(parsed.diagnostics.filter((d) => d.severity !== 'info')).toEqual([]);
+  });
+
+  it('takes the FIRST `;@CM|TOOL|key=`, as the MKR reader takes the first TOOL record', () => {
+    const parsed = parseGcode(';@CM|TOOL|key=flat-1.0\n;@CM|TOOL|key=user:later\n');
+    expect(parsed.header?.cm).toEqual({ tool: { key: 'flat-1.0' } });
+  });
+
+  it('adds nothing to the setup a header prefills — the key is not a `Tool`', () => {
+    const withKey = parseGcode([STOCK, TOOL, ';@CM|TOOL|key=user:abc'].join('\n'));
+    const without = parseGcode([STOCK, TOOL].join('\n'));
+    expect(setupFromHeader(withKey.header)).toEqual(setupFromHeader(without.header));
+  });
+});

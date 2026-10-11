@@ -35,6 +35,8 @@ function postCtx(job: EngraveJob): PostContext {
     zDatum: 'probed-top-face',
     origin: 'topFrontLeft',
     camVersion: 'test',
+    // #332: the job's own key, exactly as `engraveGenerate` passes it.
+    toolKey: job.toolKey,
   };
 }
 

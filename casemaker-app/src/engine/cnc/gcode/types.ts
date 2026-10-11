@@ -252,8 +252,20 @@ export interface MkrRecord {
   line: number;
 }
 
+/**
+ * The header's OUR-OWN records (#332), parsed from `;@CM|` lines. Every field is optional: a file
+ * from another house has none of them, and a `;@CM|` record whose tag we do not know is ignored
+ * rather than reported. `tool.key` is a registry key (`cat:`, `user:`, `inv:` or a built-in), which
+ * is the one way a file can name a cutter that has no vendor `g_ID` at all (#212).
+ */
+export interface CmHeader {
+  tool?: { key: string };
+}
+
 export interface MkrHeader {
   records: MkrRecord[];
+  /** Our own records, when the file carries any (#332). */
+  cm?: CmHeader;
 }
 
 export interface ParseSummary {

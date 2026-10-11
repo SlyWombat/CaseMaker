@@ -463,6 +463,9 @@ export function engraveGenerate(
     zDatum: 'probed-top-face',
     origin: 'topFrontLeft',
     camVersion: CAM_VERSION,
+    // #332: the key the JOB names, not anything off the `Tool` — a clone's rendered cutter carries
+    // no identity of its own, and this is the line that lets the file say which cutter it was for.
+    toolKey: job.toolKey,
   };
   let nc: string;
   try {

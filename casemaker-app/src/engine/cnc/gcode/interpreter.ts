@@ -23,7 +23,7 @@
 
 import { tessellateArc, type Plane } from './arcs';
 import { classifyLine, codeParts, parseWords, splitCommands, splitLines, stripComment, type Word } from './lexer';
-import { parseMkrRecord } from './mkrHeader';
+import { parseCmRecord, parseMkrRecord } from './mkrHeader';
 import type { Diagnostic, Frame, GcodeEvent, MkrHeader, MkrRecord, MoveEvent, ParseResult, Pos } from './types';
 
 const INCH = 25.4;
@@ -61,6 +61,13 @@ class Interp {
   readonly events: GcodeEvent[] = [];
   readonly diagnostics: Diagnostic[] = [];
   readonly headerRecords: MkrRecord[] = [];
+  /**
+   * The registry key a `;@CM|TOOL|key=` line names (#332), or null. The FIRST such line wins, as
+   * the `MKR` reader takes the first `TOOL` record. A `;@CM|` record of any other tag — or a `TOOL`
+   * one with no usable key — is ignored rather than reported: the line is ours to write and a
+   * foreign file carrying one is not an error the operator can act on.
+   */
+  cmToolKey: string | null = null;
 
   // ---- modal state -------------------------------------------------------
   private scale = 1;
@@ -132,6 +139,16 @@ class Interp {
   }
 
   private handleHeader(raw: string, lineNo: number): void {
+    // `;@CM|` first: `parseMkrRecord` would refuse it anyway (different prefix), and our records
+    // never go into `headerRecords`, which is Studio's line and stays exactly what Studio writes.
+    const cm = parseCmRecord(raw, lineNo);
+    if (cm) {
+      if (cm.tag === 'TOOL' && this.cmToolKey === null) {
+        const key = cm.fields['key'];
+        if (key !== undefined && key !== '') this.cmToolKey = key;
+      }
+      return;
+    }
     const rec = parseMkrRecord(raw, lineNo);
     if (!rec) return;
     this.headerRecords.push(rec);
@@ -789,7 +806,11 @@ export function parseGcode(source: string): ParseResult {
   const it = new Interp();
   const lines = splitLines(source);
   for (let i = 0; i < lines.length; i++) it.handleLine(lines[i] as string, i + 1);
-  const header: MkrHeader | null = it.headerRecords.length > 0 ? { records: it.headerRecords } : null;
+  // A `;@CM|` line is header data too (#332), so a file carrying only ours still has a header.
+  const header: MkrHeader | null =
+    it.headerRecords.length > 0 || it.cmToolKey !== null
+      ? { records: it.headerRecords, ...(it.cmToolKey !== null ? { cm: { tool: { key: it.cmToolKey } } } : {}) }
+      : null;
   return {
     events: it.events,
     diagnostics: it.diagnostics,

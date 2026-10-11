@@ -184,6 +184,33 @@ describe('SimPanel', () => {
     expect(firm.textContent).toContain('matched from the file’s TOOL record');
   });
 
+  it('names the cutter the file asks for when this house does not have it (#332)', async () => {
+    // A `;@CM|TOOL|key=` line is the file saying which cutter it was written for. When the registry
+    // does not hold that key, the closest entry is offered — but the sentence has to say which
+    // cutter is missing, or the substitution is silent.
+    const HEADER = [
+      ';@MKR|TOOL|number=1|id=0|name=six-flat copy|type=Flat End|handlediameter=3.175|sticklength=0|shoulderlength=12|flutelength=12|diameter=3.175|tipdiameter=3.175|cornerradius=0|angle=0|halfAngle=0',
+      ';@CM|TOOL|key=user:six-flat-copy',
+    ].join('\n');
+
+    act(() => useSimSetupStore.getState().openFile('foreign.nc', `${HEADER}\n`));
+    render(<SimPanel />);
+    const weak = screen.getByTestId('sim-tool-match');
+    expect(weak.getAttribute('data-strength')).toBe('suggested');
+    expect(weak.textContent).toContain('user:six-flat-copy');
+    expect(weak.textContent).toContain('does not have');
+
+    // And when the key DOES resolve, the key is what answered — the strongest reason there is.
+    cleanup();
+    act(() => useSimSetupStore.getState().reset());
+    act(() => useSimSetupStore.getState().openFile('ours.nc', `${HEADER.replace('user:six-flat-copy', 'flat-1.0')}\n`));
+    render(<SimPanel />);
+    const firm = screen.getByTestId('sim-tool-match');
+    expect(firm.getAttribute('data-strength')).toBe('exact');
+    expect(firm.getAttribute('data-provenance')).toBe('key');
+    expect(firm.textContent).toContain('matched from the cutter the file names');
+  });
+
   it('shows the runner summary count, not the capped list length', async () => {
     setSimClientLoader(async () => fakeClient(READY));
     openPlainFile();

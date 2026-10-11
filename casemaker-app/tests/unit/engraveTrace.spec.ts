@@ -41,6 +41,7 @@ const CTX: PostContext = {
   zDatum: 'probed-top-face',
   origin: 'topFrontLeft',
   camVersion: 'test',
+  toolKey: 'flat-1.0',
 };
 
 function line(over: Partial<EngraveLineItem> & Pick<EngraveLineItem, 'points'>): EngraveLineItem {

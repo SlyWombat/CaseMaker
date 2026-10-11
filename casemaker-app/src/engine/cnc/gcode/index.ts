@@ -2,6 +2,7 @@
 export { parseGcode } from './interpreter';
 export { hasErrors } from './types';
 export type {
+  CmHeader,
   Diagnostic,
   Frame,
   GcodeEvent,
@@ -14,6 +15,6 @@ export type {
   Severity,
   ToolChangeEvent,
 } from './types';
-export { parseMkrRecord, mkrNumber } from './mkrHeader';
+export { CM_PREFIX, MKR_PREFIX, mkrNumber, parseCmRecord, parseMkrRecord } from './mkrHeader';
 export { splitCommands, stripComment } from './lexer';
 export { tessellateArc } from './arcs';

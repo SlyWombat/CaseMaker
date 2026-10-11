@@ -128,6 +128,7 @@ export function SimPanel() {
   const toolSource = useSimSetupStore((s) => s.toolSource);
   const toolMatch = useSimSetupStore((s) => s.toolMatch);
   const toolMatchProvenance = useSimSetupStore((s) => s.toolMatchProvenance);
+  const statedToolKey = useSimSetupStore((s) => s.statedToolKey);
   const headerDiagnostics = useSimSetupStore((s) => s.headerDiagnostics);
   const openFile = useSimSetupStore((s) => s.openFile);
   const setStock = useSimSetupStore((s) => s.setStock);
@@ -354,10 +355,13 @@ export function SimPanel() {
       {!toolKey && (
         <p style={{ ...MUTED, color: '#e0a19b' }}>required — choose the tool this program was written for.</p>
       )}
-      {/* #316 — how well the file's TOOL record fits the entry it matched. An entry found on shape
-          and diameter alone is a SUGGESTION: the file either states lengths this entry does not
-          match, or states none at all, and either way "matched" would be a stronger word than the
-          evidence carries. `data-provenance` says which rule answered (id, shape, or #332's key). */}
+      {/* #316/#332 — how well the file's own records fit the entry they matched. The file's
+          `;@CM|TOOL|key=` line settles it outright when the registry holds the key; a key it does
+          NOT hold is the file saying it was cut with a cutter this house does not have, which caps
+          everything else at a suggestion; and a match leaning on shape and diameter alone is one
+          too — the file either states lengths this entry does not match, or states none at all.
+          Either way "matched" would be a stronger word than the evidence carries.
+          `data-provenance` says which rule answered (key, id, or shape). */}
       {toolKey && toolSource === 'header' && (
         <p
           style={MUTED}
@@ -365,9 +369,13 @@ export function SimPanel() {
           data-strength={toolMatch ?? ''}
           data-provenance={toolMatchProvenance ?? ''}
         >
-          {toolMatch === 'suggested'
-            ? 'closest cutter by shape and diameter — the file does not confirm it; check it.'
-            : 'matched from the file’s TOOL record.'}
+          {toolMatchProvenance === 'key'
+            ? 'matched from the cutter the file names.'
+            : statedToolKey !== null
+              ? `the file names the cutter "${statedToolKey}", which this house does not have — closest by shape and diameter; check it.`
+              : toolMatch === 'suggested'
+                ? 'closest cutter by shape and diameter — the file does not confirm it; check it.'
+                : 'matched from the file’s TOOL record.'}
         </p>
       )}
 

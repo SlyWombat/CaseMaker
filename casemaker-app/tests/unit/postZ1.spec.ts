@@ -54,6 +54,7 @@ const CTX: PostContext = {
   zDatum: 'probed-top-face',
   origin: 'topFrontLeft',
   camVersion: '1.0.0',
+  toolKey: 'flat-1.0',
 };
 
 /** Small two-operation engrave IR: a rectangle at -1.0, then a smaller one at -0.5. */
@@ -108,6 +109,7 @@ describe('postZ1 (#173)', () => {
       ;@MKR|CAM|id=CaseMaker|name=Case Maker|v=1.0.0
       ;@MKR|UNIT|value=MM
       ;@MKR|TOOL|number=1|id=0|name=1 mm flat end|type=Flat End|handlediameter=3.175|sticklength=0|shoulderlength=0|flutelength=0|diameter=1|tipdiameter=1|cornerradius=0|angle=0|halfAngle=0
+      ;@CM|TOOL|key=flat-1.0
       ;@MKR|TIME|seconds=3
       ; cycle estimate: cutting + rapids at an assumed 3000 mm/min (PROVISIONAL, #208 D3 calibrates)
       ;@MKR|TOOLPATH|number=1|tool_number=1|name=[T1]Engrave "A" 1.0mm
@@ -327,6 +329,7 @@ describe('postZ1 round trip (#173)', () => {
       zDatum: 'probed-top-face',
       origin: 'topFrontLeft',
       camVersion: '1.0.0',
+      toolKey: job.toolKey,
     };
     const res = postZ1(ir, ctx, Z1);
     expect(res.ok).toBe(true);

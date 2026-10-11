@@ -4,9 +4,11 @@
  * The question is "which of my cutters is the one this file names?", and the file states it three
  * ways, in descending order of how much they actually say:
  *
- *  1. our own registry key, on the `;@CM|TOOL|key=` line (#332) — an identity the post could write
- *     for ANY cutter, including the clones and hand-typed definitions that may not carry Makera's
- *     `g_ID` at all (#212). It is step (0) because nothing else is as specific.
+ *  1. our own registry key, on the `;@CM|TOOL|key=` line (#332) — an identity the post writes for
+ *     ANY cutter, including the clones and hand-typed definitions that may not carry Makera's
+ *     `g_ID` at all (#212). It is step (0) because nothing else is as specific: a key THIS list
+ *     holds settles the question outright, and a key it does not hold is the file saying it was cut
+ *     with something this house does not have — which caps what the rules below may claim.
  *  2. the vendor `id=`, which is the catalogue's `g_ID` (`/Makera-Parity.md` §3.2) — what the file
  *     asserts the cutter WAS, when it was cut with a catalogue tool.
  *  3. shape + cutting diameter, which is the only rule that can match a file written for a cutter
@@ -96,14 +98,33 @@ function preferNamespaced(hits: readonly ToolLibraryEntry[]): ToolLibraryEntry |
  * The entry a header's `;@MKR|TOOL` record names, or null when nothing in the list is close.
  *
  * The order is the whole of it, and each step refuses to fall through silently:
- * (a) the vendor id, with every length the header states agreeing; (b) shape, cutting diameter AND
- * the stated lengths; (c) shape and cutting diameter alone — which is a suggestion, because that is
- * all the evidence it has.
+ * (0) our own registry key, when the file carries a `;@CM|TOOL|key=` line (#332) and the list holds
+ * it; (a) the vendor id, with every length the header states agreeing; (b) shape, cutting diameter
+ * AND the stated lengths; (c) shape and cutting diameter alone — which is a suggestion, because that
+ * is all the evidence it has.
+ *
+ * `statedKey` is what the file's `;@CM|` line names, or null when it has none. A key the list does
+ * NOT hold caps everything under it at `suggested`: the file has stated which cutter it was written
+ * for and we are about to hand over a different one, so no rule here may call that exact.
  */
 export function matchHeaderTool(
   tool: Tool,
   entries: readonly ToolLibraryEntry[],
+  statedKey: string | null = null,
 ): HeaderToolMatch | null {
+  // (0) the file's own statement, and the strongest one there is (#332). Resolving it is the whole
+  // test: the entry carries the tool, so nothing about the vendor id or the shape can add to it.
+  if (statedKey !== null) {
+    const named = entries.find((e) => e.key === statedKey);
+    if (named) return { key: named.key, strength: 'exact', provenance: 'key' };
+    const fallback = matchByIdOrShape(tool, entries);
+    return fallback ? { ...fallback, strength: 'suggested' } : null;
+  }
+  return matchByIdOrShape(tool, entries);
+}
+
+/** Steps (a)–(c) on their own: what a file that names no registry key can be matched by. */
+function matchByIdOrShape(tool: Tool, entries: readonly ToolLibraryEntry[]): HeaderToolMatch | null {
   // (a) the file's own statement of the cutter, when the lengths back it up. An id whose lengths
   // disagree is not this entry: the six same-diameter flats share a shape, not a length.
   if (tool.id !== null) {

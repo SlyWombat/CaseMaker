@@ -5,7 +5,9 @@
  * a work coordinate (0 = stock top, cuts negative), and the feeds are already on the moves.
  * This module is the ONLY place any of that becomes the Z1's dialect:
  *
- *  - the `;@MKR|` header the machine's UI reads (field for field, as Studio writes it),
+ *  - the `;@MKR|` header the machine's UI reads (field for field, as Studio writes it), plus ONE
+ *    `;@CM|` record of our own — `;@CM|TOOL|key=` (#332), which names the cutter by our registry
+ *    key and which Studio ignores,
  *  - the machine-frame Z conversion is NOT here: the file's Z is work Z, and the controller
  *    supplies the offset exactly as it does for Studio's own files. The file assumes the
  *    operator set the origin (#207) — it emits NO probing or origin-setting command
@@ -51,6 +53,13 @@ export interface PostContext {
   origin: 'topFrontLeft';
   /** package.json version. */
   camVersion: string;
+  /**
+   * The registry key of the job's cutter (#332) — the key `toolForJob` resolved, not the `Tool`'s
+   * own fields. Required, like `zDatum`, because it is a statement the file has to make and the
+   * post cannot derive it: the IR carries a MATERIALISED cutter, and a clone or a hand-typed
+   * definition has no vendor `g_ID` for the `MKR` line to name (#212).
+   */
+  toolKey: string;
 }
 
 export type PostResult = { ok: true; text: string } | { ok: false; errors: string[] };
@@ -179,6 +188,12 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): 
       `angle=${numberOrZero(ir.tool.angle)}`,
       `halfAngle=${numberOrZero(ir.tool.halfAngle)}`,
     ),
+    // #332: our own record, right after the one it qualifies, naming the cutter by OUR key — the
+    // only way a file can say WHICH cutter it was written for when the cutter has no vendor `g_ID`
+    // (a clone, a hand-typed definition: #212 keeps the id off them, so the MKR line says id=0).
+    // Studio ignores a comment it does not know, so this cannot break the machine's own reader;
+    // the `MKR` line above is left exactly as Studio writes it and the key never goes into it.
+    `;@CM|TOOL|key=${sanitizeMkrValue(ctx.toolKey)}`,
     mkr('TIME', `seconds=${Math.round(estimateIRCycleSeconds(ir))}`),
     // #242: the machine's screen shows the figure above as the job time, so say what it assumes.
     // A `;` comment (not a `;@MKR` record), so the header reader ignores it but the operator does not.

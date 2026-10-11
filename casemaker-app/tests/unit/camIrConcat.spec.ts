@@ -23,6 +23,7 @@ const CTX: PostContext = {
   zDatum: 'probed-top-face',
   origin: 'topFrontLeft',
   camVersion: 'test',
+  toolKey: 'flat-1.0',
 };
 
 /** One short cut at `x`, whose moves name the operation they came from. */

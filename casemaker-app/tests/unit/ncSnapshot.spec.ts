@@ -62,11 +62,38 @@ function defaultJobNc(job: EngraveJob): string {
     zDatum: 'probed-top-face',
     origin: 'topFrontLeft',
     camVersion: '1.0.0',
+    // #332: the job's own key, exactly as `engraveGenerate` passes it.
+    toolKey: job.toolKey,
   };
   const res = postZ1(ir, ctx, Z1);
   if (!res.ok) throw new Error(res.errors.join('; '));
   return res.text;
 }
+
+describe('#332: the file names its cutter by OUR registry key', () => {
+  it('writes exactly one `;@CM|TOOL|key=` line, and it carries the job’s key', () => {
+    // Every file gets the line, catalogue tools included: a built-in has no vendor `g_ID` either
+    // (the golden's `id=0`), so without this the file cannot say which cutter it was written for.
+    const nc = defaultJobNc(defaultJob());
+    const lines = nc.split('\n').filter((l) => l.startsWith(';@CM|TOOL|'));
+    expect(lines).toEqual([`;@CM|TOOL|key=${defaultEngraveJob().toolKey}`]);
+  });
+
+  it('a clone still writes `id=0` on the MKR line, with the key as the only name it has', () => {
+    // #212: a clone must not inherit the vendor `g_ID`, so the `MKR` line — Studio's line, left
+    // exactly as it writes it — carries id=0. Before #332 that left such a file matchable on shape
+    // and diameter alone, which ties between the six 3.175 mm flats (#316).
+    const source = defaultJob();
+    const cloneTool = { ...jobTool(source)!, id: null, number: null, name: 'six-flat copy', fluteLength: 12, shoulderLength: 12 };
+    const nc = defaultJobNc(defaultJob({ toolKey: 'user:six-flat-copy', tool: cloneTool }));
+
+    expect(nc.split('\n').filter((l) => l.startsWith(';@CM|TOOL|'))).toEqual([';@CM|TOOL|key=user:six-flat-copy']);
+    const mkrTool = nc.split('\n').find((l) => l.startsWith(';@MKR|TOOL|'))!;
+    expect(mkrTool).toContain('|id=0|');
+    // The key is not smuggled onto Studio's line: that line is the vendor's record, field for field.
+    expect(mkrTool).not.toContain('user:');
+  });
+});
 
 describe('#213: the default job posts byte-identical output with and without sacrificial material', () => {
   it('the default job (no sacrificial material) is the golden .nc', async () => {

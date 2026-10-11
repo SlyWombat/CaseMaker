@@ -16,7 +16,10 @@
  * for the 1 mm cutter is never silently shown against a file written for a 3.175 mm one.
  *
  * How well the file's TOOL record fits what it matched (#316) is `toolMatch` — the rule itself
- * lives in `engine/cnc/headerMatch.ts`, where a test can hand it a list and the store cannot.
+ * lives in `engine/cnc/headerMatch.ts`, where a test can hand it a list and the store cannot. The
+ * file's own `;@CM|TOOL|key=` line leads that rule (#332), and `statedToolKey` keeps what it says
+ * even when the registry cannot resolve it, so the form can say WHICH cutter this house is missing
+ * instead of quietly offering the closest one it has.
  *
  * Not persisted, and plain zustand — no immer needed.
  */
@@ -61,6 +64,13 @@ export interface SimSetupState {
   toolMatch: MatchStrength | null;
   /** Which rule answered — our key line (#332), the vendor `id=`, or shape and diameter (#316). */
   toolMatchProvenance: MatchProvenance | null;
+  /**
+   * The registry key the file itself named (`;@CM|TOOL|key=`, #332), or null when it names none —
+   * a file from another house, or one posted before the line existed. Kept even when the registry
+   * cannot resolve it: "this house does not have the cutter the file names" is a fact about the
+   * file, and the panel says it rather than passing the shape match off as the answer.
+   */
+  statedToolKey: string | null;
   headerDiagnostics: SimHeaderDiagnostic[];
   /**
    * Parse the header and prefill every field the user has not already claimed; fields whose source
@@ -87,6 +97,7 @@ const EMPTY = {
   toolSource: null,
   toolMatch: null,
   toolMatchProvenance: null,
+  statedToolKey: null,
   headerDiagnostics: [] as SimHeaderDiagnostic[],
 };
 
@@ -117,9 +128,13 @@ export const useSimSetupStore = create<SimSetupState>()((set) => ({
 
     // The file's TOOL record, matched against the registry list (#316) — see `headerMatch.ts` for
     // the order. A fit that leans on shape and diameter alone comes back `suggested`, and that
-    // travels with the key so the panel can say which answer it is holding.
+    // travels with the key so the panel can say which answer it is holding. The file's OWN key
+    // (#332) leads the order, and is worth keeping whether or not the registry holds it.
+    const statedKey = parsed.header?.cm?.tool?.key ?? null;
     const toolRecord = parsed.header?.records.find((r) => r.tag === 'TOOL');
-    const headerMatch = toolRecord ? matchHeaderTool(toolFromMkrRecord(toolRecord), getTools()) : null;
+    const headerMatch = toolRecord
+      ? matchHeaderTool(toolFromMkrRecord(toolRecord), getTools(), statedKey)
+      : null;
     const headerToolKey = headerMatch?.key ?? null;
 
     set((s) => {
@@ -159,6 +174,9 @@ export const useSimSetupStore = create<SimSetupState>()((set) => ({
         // The match describes the tool the form will USE, so a cutter the user chose carries none.
         toolMatch: keepTool ? null : (headerMatch?.strength ?? null),
         toolMatchProvenance: keepTool ? null : (headerMatch?.provenance ?? null),
+        // The file's own statement stands whatever the user does: it is what the file says, and
+        // #338's warning about a disagreement is the other half of the same fact.
+        statedToolKey: statedKey,
         headerDiagnostics,
       };
     });

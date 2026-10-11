@@ -1,10 +1,18 @@
 /**
- * `;@MKR|…` header records, as written by Makera Studio (`/Fabrication.md` §2).
+ * `;@MKR|…` header records, as written by Makera Studio (`/Fabrication.md` §2), and the
+ * `;@CM|…` records OUR post writes beside them (#332).
  *
  *   ;@MKR|TOOL|number=1|id=112111313812|name=3.175*12mm Flat End(Metal)|type=Flat End|…
+ *   ;@CM|TOOL|key=user:abc
  *
- * A record is a tag followed by `key=value` fields separated by `|`. This function ONLY
- * splits — it interprets nothing. The header is untrusted input, and some of it is still
+ * The two have the same shape — a tag, then `key=value` fields separated by `|` — and deliberately
+ * different prefixes, so a reader that knows one prefix never mistakes the other's fields for its
+ * own. Studio ignores `;@CM|` (it ignores any comment it does not know), which is why our line
+ * cannot break the machine's reader; and `;@MKR|` must keep meaning exactly what Studio writes
+ * (#212: the vendor's `id=` stays on that line and is never ours to extend).
+ *
+ * A record is a tag followed by `key=value` fields separated by `|`. These functions ONLY
+ * split — they interpret nothing. The header is untrusted input, and some of it is still
  * a hypothesis: the `ORIGIN` semantics (which stock axis `length` maps to, which corner
  * `topFrontLeft` is) rest on one square-stock sample (`/Makera-Parity.md` §6.1), and the
  * strings Studio writes for `TOOL|type=` are known only for flat and ball end mills.
@@ -20,13 +28,17 @@
 
 import type { MkrRecord } from './types';
 
-const PREFIX = ';@MKR|';
+/** Studio's prefix. Nothing of ours may be added to a record behind it (#212). */
+export const MKR_PREFIX = ';@MKR|';
 
-/** Parse one header line. Returns `null` if it is not a `;@MKR|` record or has no tag. */
-export function parseMkrRecord(rawLine: string, line: number): MkrRecord | null {
+/** Case Maker's prefix, for records Studio does not read (#332). */
+export const CM_PREFIX = ';@CM|';
+
+/** The record-splitting both prefixes share. `null` if the prefix is absent or there is no tag. */
+function split(rawLine: string, prefix: string, line: number): MkrRecord | null {
   const trimmed = rawLine.trimStart();
-  if (!trimmed.startsWith(PREFIX)) return null;
-  const parts = trimmed.slice(PREFIX.length).trimEnd().split('|');
+  if (!trimmed.startsWith(prefix)) return null;
+  const parts = trimmed.slice(prefix.length).trimEnd().split('|');
   const tag = parts[0];
   if (tag === undefined || tag === '') return null;
   const fields: Record<string, string> = {};
@@ -40,6 +52,16 @@ export function parseMkrRecord(rawLine: string, line: number): MkrRecord | null 
     }
   }
   return { tag, fields, line };
+}
+
+/** Parse one `;@MKR|` line. Returns `null` if it is not one, or has no tag. */
+export function parseMkrRecord(rawLine: string, line: number): MkrRecord | null {
+  return split(rawLine, MKR_PREFIX, line);
+}
+
+/** Parse one `;@CM|` line (#332). Returns `null` if it is not one, or has no tag. */
+export function parseCmRecord(rawLine: string, line: number): MkrRecord | null {
+  return split(rawLine, CM_PREFIX, line);
 }
 
 /** Convenience: a numeric field, or `null` if absent or not a finite number. */

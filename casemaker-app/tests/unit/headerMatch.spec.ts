@@ -94,3 +94,34 @@ describe('matchHeaderTool (#316)', () => {
     expect(matchHeaderTool(flatEndMill(3.175, { id: null, tipDiameter: null, diameter: null }), [FLAT_12])).toBeNull();
   });
 });
+
+// ---- #332: the file's own `;@CM|TOOL|key=` line, which leads the whole order -----------------------
+// The one identity a clone or a hand-typed definition has (#212 keeps the vendor `g_ID` off them),
+// and the reason the order starts here rather than at the id.
+
+describe('matchHeaderTool: the stated key (#332)', () => {
+  it('answers with the key, exact, before the vendor id is even looked at', () => {
+    // The file names a cutter of ours by key. Nothing the MKR line says can improve on that, so
+    // even a g_ID pointing elsewhere does not get a look in.
+    const m = matchHeaderTool(header({ id: '112111313812', fluteLength: 12, shoulderLength: 12 }), [FLAT_12, CAT_42], 'cat:111011313842');
+    expect(m).toEqual({ key: 'cat:111011313842', strength: 'exact', provenance: 'key' });
+  });
+
+  it('a key the registry does not hold caps everything under it at `suggested`', () => {
+    // "I was cut with user:six-flat-copy" — a cutter this house does not have. The geometry rules
+    // can still name the closest entry, but calling that EXACT would contradict the file.
+    const m = matchHeaderTool(header({ id: '112111313812', fluteLength: 12, shoulderLength: 12 }), [FLAT_12], 'user:six-flat-copy');
+    expect(m).toEqual({ key: 'flat-3.175x12-metal', strength: 'suggested', provenance: 'id' });
+  });
+
+  it('an unresolvable key with nothing close is still null', () => {
+    const ball = header({ id: null, shape: 'ball', tipDiameter: 6.35, diameter: 6.35 });
+    expect(matchHeaderTool(ball, [FLAT_12], 'user:six-flat-copy')).toBeNull();
+  });
+
+  it('is unaffected when the file states no key at all', () => {
+    // The default argument: every file posted before #332, and every file from another CAM package.
+    const h = header({ id: '112111313812', fluteLength: 12, shoulderLength: 12 });
+    expect(matchHeaderTool(h, [FLAT_12])).toEqual(matchHeaderTool(h, [FLAT_12], null));
+  });
+});

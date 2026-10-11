@@ -36,6 +36,7 @@ const CTX: PostContext = {
   zDatum: 'probed-top-face',
   origin: 'topFrontLeft',
   camVersion: '1.0.0',
+  toolKey: 'flat-1.0',
 };
 
 function rectRegion(w: number, h: number, x = 0, y = 0): Polygons {

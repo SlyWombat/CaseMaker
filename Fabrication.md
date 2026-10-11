@@ -253,7 +253,7 @@ seeing whether anything objects — not by reading a screen.
 
 Studio's `TOOL` record names a catalogue cutter by `id=` — the catalogue's `g_ID`
 (`/Makera-Parity.md` §3.2). A **clone** (a cutter the user owns, materialised rather than
-pointed at a base row, #212) must not inherit that id, so the post writes `id=` empty there.
+pointed at a base row, #212) must not inherit that id, so the post writes `id=0` there.
 A file posted with a clone therefore names no cutter any tier can identify, and matching falls
 to shape + diameter — which **already ties for two 3.175 mm flats**.
 
@@ -264,25 +264,32 @@ So the post writes one extra line, immediately after the `;@MKR|TOOL` line it be
 ```
 
 - **`;@CM|` is our prefix, not Makera's.** To everything else it is a `;` comment: Studio
-  ignores it, and our own lexer reads any `;`-start that is not `;@MKR|` as a comment
-  (`gcode/lexer.ts:44`), so it becomes no header record and raises no diagnostic. It is
+  ignores it, our lexer reads any `;`-start that is neither `;@MKR|` nor `;@CM|` as a comment,
+  and the interpreter keeps a `;@CM|` line out of `header.records` — it lands in `header.cm` and
+  raises no diagnostic (`gcode/lexer.ts`, `gcode/interpreter.ts`, #332). It is
   deliberately *not* a `;@MKR|` tag: that namespace is the vendor's, a tag we invented in it
   could collide with one they add, and a vendor reading our file would be reading a record
   that is not theirs.
 - **`key=` is the registry key**, namespaced as everywhere else (`flat-1.0`, `cat:…`,
   `user:…`, `inv:…`) — the same string `EngraveJob.toolKey` holds and
   `ToolLibraryEntrySchema.key` validates.
-- **One key per line, `|`-terminated like the rest.** The reader takes everything after
-  `key=` to the end of the line, so `=` inside a key is unambiguous and `|` is not: the
-  writer **refuses a key containing `|`** rather than escaping it. Keys are ours to generate
-  (`ToolLibraryEntrySchema.key` is only `min(1)`), so this is a guard, not a feature.
-- **Read back in this order: this key → `id=` (`g_ID`) → shape + diameter.** `matchRegistryTool`
-  gained the `id=` step in #305; the key step is #309's, and this line is why that step has to
-  come FIRST — an `id=` that a clone could not carry cannot outrank a key we wrote ourselves.
+- **One key per line, split like every other record.** The reader is the same
+  `|`-separated, first-`=`-splits parse as `;@MKR|`, so a `|` inside a key would end the
+  field. Nothing can put one there — the house service refuses a key containing `|` at the
+  door (§5, #305) and every other key is ours to generate — and the writer still passes the
+  key through `sanitizeMkrValue`, which would turn one into a space rather than write a record
+  that splits wrong.
+- **Read back in this order: this key → `id=` (`g_ID`) → shape + diameter.** The matcher is
+  `engine/cnc/headerMatch.ts` (#316 moved it there); the `id=` step came in #305, and the key
+  step is #332. This line is why that step has to come FIRST — an `id=` that a clone could not
+  carry cannot outrank a key we wrote ourselves. A key the registry does **not** hold is kept
+  and shown ("this house does not have that cutter") but caps everything below it at
+  `suggested`: the file has said which cutter it was written for, and the closest match is not
+  it.
 - **The key only, on purpose.** The `;@MKR|TOOL` record beside it already carries the whole
   geometry, and `sticklength=` already carries the installed stick-out, so a second copy here
-  would be a second thing to keep true. (The format is settled here because #309 depends on it;
-  nothing writes the line yet.)
+  would be a second thing to keep true. (Written by `post/z1.ts` since #332 — every file gets
+  it, catalogue tools included: a built-in has no vendor `g_ID` either.)
 
 ---
 

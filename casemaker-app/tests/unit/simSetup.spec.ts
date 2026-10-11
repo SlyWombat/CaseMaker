@@ -106,6 +106,45 @@ describe('simSetupStore.openFile', () => {
     expect(s.toolMatchProvenance).toBe('shape');
   });
 
+  it('takes the key the file itself names, and says the key is what answered (#332)', () => {
+    // Our own record, which a clone or a hand-typed cutter needs: it has no vendor `g_ID`, so the
+    // MKR line cannot tell the six 3.175 mm flats apart (#316). The key can.
+    useSimSetupStore.getState().openFile('keyed.nc', headerText(STOCK, TOOL, ';@CM|TOOL|key=flat-3.175x12-metal'));
+    const s = useSimSetupStore.getState();
+    expect(s.statedToolKey).toBe('flat-3.175x12-metal');
+    expect(s.toolKey).toBe('flat-3.175x12-metal');
+    expect(s.toolMatch).toBe('exact');
+    expect(s.toolMatchProvenance).toBe('key');
+  });
+
+  it('lets the file’s key outrank the geometry, so a re-rendered cutter is not the answer (#332)', () => {
+    // The TOOL record describes a 3.175 mm flat, and the key says which cutter of ours that was.
+    // Matching the diameter instead would answer 'flat-3.175x12-metal' — the substitution the key
+    // line exists to prevent.
+    useSimSetupStore.getState().openFile('keyed.nc', headerText(STOCK, TOOL, ';@CM|TOOL|key=flat-1.0'));
+    const s = useSimSetupStore.getState();
+    expect(s.toolKey).toBe('flat-1.0');
+    expect(s.toolMatchProvenance).toBe('key');
+  });
+
+  it('keeps a key this house does not hold, and downgrades the match rather than claiming it (#332)', () => {
+    // Another house's file, or one whose cutter was deleted. The key is still what the file says,
+    // so it is kept and shown; the closest entry can only be a suggestion.
+    useSimSetupStore.getState().openFile('foreign.nc', headerText(STOCK, TOOL, ';@CM|TOOL|key=user:six-flat-copy'));
+    const s = useSimSetupStore.getState();
+    expect(s.statedToolKey).toBe('user:six-flat-copy');
+    expect(s.toolKey).toBe('flat-3.175x12-metal');
+    expect(s.toolMatch).toBe('suggested');
+    expect(s.toolMatchProvenance).toBe('id');
+  });
+
+  it('states no key for a file that carries none, and for the plain text case', () => {
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    expect(useSimSetupStore.getState().statedToolKey).toBeNull();
+    useSimSetupStore.getState().openFile('plain.nc', 'G0 X0 Y0\nG1 Z-1 F100\n');
+    expect(useSimSetupStore.getState().statedToolKey).toBeNull();
+  });
+
   it('keeps a user-edited stock when a file is reopened, and reset() is the way back (#315)', () => {
     useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
     useSimSetupStore.getState().setStock({ length: 80 });

@@ -17,6 +17,7 @@
  */
 
 import type { Diagnostic } from './types';
+import { CM_PREFIX, MKR_PREFIX } from './mkrHeader';
 
 /** One parsed word: a letter and its value, with the number as it was written. */
 export interface Word {
@@ -41,9 +42,10 @@ export function splitLines(source: string): string[] {
 /**
  * Classify a line by its first character, as the dispatcher does.
  *
- * `;@MKR|` is a header record. Any other `;` or `(` start is a comment. A lowercase
- * first letter (or `$`) is a SHELL command, ignored by the G-code dispatcher — which is
- * what makes `echo …` lines harmless, and also what makes `g1 x5` silently do nothing.
+ * `;@MKR|` is a header record, and so is `;@CM|` — OUR record, which Studio ignores (#332). Any
+ * other `;` or `(` start is a comment. A lowercase first letter (or `$`) is a SHELL command,
+ * ignored by the G-code dispatcher — which is what makes `echo …` lines harmless, and also what
+ * makes `g1 x5` silently do nothing.
  */
 export function classifyLine(raw: string): LineKind {
   let i = 0;
@@ -51,7 +53,7 @@ export function classifyLine(raw: string): LineKind {
   if (i >= raw.length) return { kind: 'blank' };
   const c = raw.charCodeAt(i);
   if (c === 59 /* ; */) {
-    return { kind: 'comment', header: raw.startsWith(';@MKR|', i) };
+    return { kind: 'comment', header: raw.startsWith(MKR_PREFIX, i) || raw.startsWith(CM_PREFIX, i) };
   }
   if (c === 40 /* ( */) return { kind: 'comment', header: false };
   if (c === 37 /* % */) return { kind: 'percent' };

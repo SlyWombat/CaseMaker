@@ -836,6 +836,17 @@ The full sequence Studio writes is `BEGIN`, `SCHEMA`, `MACHINE`, `MATERIAL`, `ST
 origin defaults to the stock's **top-front-left** corner. Only the **first** `=` in a field
 splits it, and a field with no `=` is kept rather than dropped.
 
+**A file Case Maker posts carries one line of ours.** Immediately after the `TOOL` record
+sits `;@CM|TOOL|key=<your tool key>` — the key the cutter has in your tool list (`flat-1.0`,
+`cat:…`, `user:…`, `inv:…`). Makera's `id=` names a cutter from Makera's catalogue, and a
+clone or a hand-typed cutter has none, so this is the only way such a file can say which
+cutter it was written for. Studio ignores the line, and everything that reads `.nc` files
+treats it as a comment.
+
+The Simulate form reads it first: when the key is in your tool list it settles the question
+outright, and when it is not, the form says so — *this file names a cutter this house does
+not have* — instead of passing the closest match off as the answer.
+
 ### 8.4 Troubleshooting
 
 > **Status: Partly available** — answers exist for what is built; entries that name a planned feature name it, such as #206 or #207.
