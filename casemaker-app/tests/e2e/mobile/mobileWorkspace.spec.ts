@@ -142,6 +142,56 @@ test('every section panel fits the phone without clipping a field (#134)', async
 });
 
 /**
+ * #350 — a label's text field, at phone width. The Items row once held the text input on ONE flex
+ * line with the font picker and the weight toggle: `flex: 1` gives the input a zero flex-basis, so
+ * it was the first thing to give up its width and it collapsed to a sliver beside siblings that do
+ * not shrink — the label's text was neither readable nor editable. #134's fit spec passed the whole
+ * time because it samples the board sections (`sidebar-button-<id>` for board/case/ports/…), and the
+ * engrave panel is not one of them.
+ */
+test('a label’s text field keeps a usable width at phone width (#350)', async ({ cm, page }) => {
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+    window.__caseMaker!.engraveReset();
+  });
+
+  // The rail is off-canvas at phone width; bring it in the same way #134's test does.
+  const sideX = await page.getByTestId('sidebar').evaluate((el) => el.getBoundingClientRect().x);
+  if (sideX < 0) await page.getByTestId('sidebar-handle').click();
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+
+  const m = await page.getByTestId('engrave-label-text-0').evaluate((el) => {
+    const input = el as HTMLInputElement;
+    const row = input.closest('[data-testid^="engrave-label-row-"]') as HTMLElement;
+    // What shares the input's own flex line. This is the assertion that can only pass with the
+    // fix: the width below could in principle come out large on some other layout, but a SELECT or
+    // a BUTTON on this line is the bug itself — `flex: 1` gives the input a zero basis, so any
+    // non-shrinking sibling takes its width and the input pays.
+    const line = Array.from(input.parentElement!.children).map(
+      (c) => `${c.tagName}:${(c as HTMLElement).dataset.testid ?? ''}`,
+    );
+    return {
+      line,
+      width: input.getBoundingClientRect().width,
+      rowWidth: row.getBoundingClientRect().width,
+      text: input.value,
+      // The field must show its whole value, not just be wide enough to be clickable.
+      clipped: input.scrollWidth > input.clientWidth,
+    };
+  });
+  expect(m.line, 'the text field still shares its line').toEqual([
+    'INPUT:engrave-label-enabled-0',
+    'INPUT:engrave-label-text-0',
+  ]);
+  expect(m.text.length, 'the deterministic job’s first label').toBeGreaterThan(0);
+  expect(m.width, 'the text field is a sliver').toBeGreaterThanOrEqual(120);
+  expect(m.width / m.rowWidth, 'the text field is a minority of its own row').toBeGreaterThanOrEqual(0.5);
+  expect(m.clipped, 'the text field clips its value').toBe(false);
+});
+
+/**
  * #282 — the Part panel, in the same drawer as every other section, on the archetype that carries
  * the most controls. It is the newest panel and the only one whose rail section a shell project
  * cannot reach, so it is opened through the wizard rather than the board cards above; the same two

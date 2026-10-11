@@ -96,6 +96,12 @@ export function EngraveLabelRow({
       data-testid={`engrave-label-row-${index}`}
       style={{ border: '1px solid #2a2f36', borderRadius: 4, padding: 6, marginBottom: 6 }}
     >
+      {/* #350 — the text gets the line to itself. Sharing one with the font picker and the weight
+          toggle collapsed it to a sliver: `flex: 1` gives the input a flex-basis of 0, so it is the
+          first thing to give up its width when the siblings do not shrink, and in the 320 px rail
+          the select alone takes most of the line. `min-width: 0` does not save it — it ALLOWS the
+          collapse rather than preventing it. Its own line is the only arrangement where the
+          label's most important field cannot lose that fight. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <input
           type="checkbox"
@@ -114,6 +120,9 @@ export function EngraveLabelRow({
           style={{ flex: 1, minWidth: 0 }}
           onChange={(e) => onChange({ text: e.target.value })}
         />
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
         <FontPicker
           value={label.font}
           onChange={(font) => onChange({ font })}
@@ -132,6 +141,7 @@ export function EngraveLabelRow({
           data-testid={`engrave-label-remove-${index}`}
           aria-label={`Remove label ${index + 1}`}
           title="Remove this label."
+          style={{ marginLeft: 'auto' }}
           onClick={onRemove}
         >
           🗑
