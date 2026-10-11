@@ -407,8 +407,13 @@ describe('a job that states its print limits on the printer’s layer grid (#285
 
   it('generates the same program with and without a print — the print moves the gate, not the toolpath', () => {
     // The print changes what the verifier permits; it never changes a coordinate. So a cut within
-    // BOTH limits produces the same bytes either way, which is the byte-identity every pre-#285
-    // program keeps.
+    // BOTH limits produces the same bytes either way.
+    //
+    // NOT the pre-#285 guarantee, though: both programs here run under the current code, so this
+    // shows the print is INERT, not that a no-print job is byte-for-byte unchanged. The assertion
+    // for that one is `ncSnapshot.spec.ts`, which compares the default job's posted program against
+    // the committed golden `tests/unit/fixtures/default-job.nc` — a real file that fails until a
+    // human deliberately regenerates it.
     const withPrint = generate(tl, badgeJob(true, 0.5));
     const without = generate(tl, badgeJob(false, 0.5));
     expect(withPrint.ok).toBe(true);

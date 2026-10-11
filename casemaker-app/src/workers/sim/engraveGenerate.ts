@@ -64,7 +64,7 @@ import {
   type LabelRatioAt,
   type PerCharGlyph,
 } from './engraveGeometry';
-import { stackDepthLimit } from './stackDepthLimit';
+import { colourBoundaryFor, stackDepthLimit, type StackDepthLimit } from './stackDepthLimit';
 import type { OraclePredicted } from '@/engine/cnc/engrave/oracle';
 
 /** The stage that stopped the pipeline, or `done` when everything passed. */
@@ -235,17 +235,11 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob, tool: Tool
   // membrane stays the verifier's `cut-too-deep`, which owns the layer-aligned depth limit.
   const voidFindings = keepOutFindings(tl, job, plan, engraveCutRegions(plan, measured), radius);
 
-  // #285 — the colour boundary, when the job states its print. The stack is built, read for one
-  // number and freed again: the limit this run's verifier uses is built separately, live, below.
-  // Two builds rather than one handle carried across an API boundary, because a stack that
-  // outlives its function is exactly the leak `dispose()` exists to prevent.
-  const boundary = stackDepthLimit(tl, plan, job);
-  let colourBoundaryDepth: Mm | null = null;
-  try {
-    colourBoundaryDepth = boundary === null ? null : boundary.boundary;
-  } finally {
-    boundary?.dispose();
-  }
+  // #285 — the colour boundary, when the job states its print. PURE grid arithmetic (#285 review):
+  // the boundary is a rule about the layer grid, not a measurement of the solid, so it is read
+  // straight off `colourBoundaryFor` rather than by building the stack here and freeing it again.
+  // The verifier builds its own stack below; this used to be a second one, live on every keystroke.
+  const colourBoundaryDepth = colourBoundaryFor(plan, job);
 
   // `job.sacrificial` is threaded so the generate path's `vise-grip-shallow` judges what the
   // jaws actually grip (#213 §2), not the raw stock: the argument `validateVise` has accepted
@@ -399,6 +393,24 @@ function frameProgram(
 }
 
 /**
+ * The tail of the `cut-too-deep` sentence: WHY the limit at (x, y) is what it is (#285).
+ *
+ * Two answers, and the difference is what the operator acts on. Over a void the solid itself
+ * stopped the cutter, so the sentence names the membrane — the void's own name when it has one.
+ * Everywhere else the limit is the job's own floor under the stock (or the sacrificial height),
+ * and naming a membrane there would send the operator looking for a pocket that is not there.
+ *
+ * Exported so the branch is directly testable: over solid stock nothing can reach the verifier
+ * today — `validateJob` refuses the same depth first — so only the void half is reachable through
+ * the pipeline, and the floor half would otherwise be an unverified string.
+ */
+export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm, y: Mm): string {
+  if (stack.reasonAt(x, y) === 'stock') return '— the floor the job keeps under the stock';
+  const name = keepOutNameAt(job, x, y);
+  return name ? `— the membrane over "${name}"` : '— the membrane over a declared void';
+}
+
+/**
  * Generate, post and verify one engrave job.
  *
  * `tool` is the resolved cutter, HANDED IN (#305): this runs in the sim worker, where neither the
@@ -511,11 +523,7 @@ export function engraveGenerate(
   const stack = stackDepthLimit(tl, plan, job);
   const limit: DepthLimit = stack?.limit ?? jobDepthLimit(job);
   const limitReasonAt = stack
-    ? (x: number, y: number): string => {
-        if (stack.reasonAt(x, y) === 'stock') return '— the floor the job keeps under the stock';
-        const name = keepOutNameAt(job, x, y);
-        return name ? `— the membrane over "${name}"` : '— the membrane over a declared void';
-      }
+    ? (x: number, y: number): string => depthLimitReason(stack, job, x, y)
     : undefined;
   const setup = toSetup(job, mill);
 

@@ -26,6 +26,8 @@ import { labelProfile, toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { jobTool, toSetup, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { engravedFaceWorkZ, partToWork } from '@/engine/cnc/frames';
+import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
+import { defaultBadgeParams } from '@/types/badge';
 import { Z1 } from '@/engine/cnc/machine';
 
 const KEY = 'casemaker.engraveJob.v1';
@@ -253,6 +255,55 @@ describe('engraveJobStore (#200)', () => {
 
     useEngraveJobStore.getState().setVise({ uncertainty: 1, source: 'measured' });
     expect(useEngraveJobStore.getState().job.workholding.vise.source).toBe('measured');
+  });
+
+  // #285 review — `print` is the one stock field a patch can CLEAR. An explicit `undefined` means
+  // "this blank states no print", an OMITTED key means "this patch says nothing about it", and the
+  // two must not be confused or a stale layer grid outlives the blank it described.
+  it('setStock clears stock.print on an explicit undefined, and leaves it alone when omitted', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const { setStock } = useEngraveJobStore.getState();
+
+    setStock({ print: { split: 3.0, layerHeight: 0.2 } }, 'computed');
+    expect(useEngraveJobStore.getState().job.stock.print).toEqual({ split: 3.0, layerHeight: 0.2 });
+    expect(useEngraveJobStore.getState().job.sources?.stock?.print).toBe('computed');
+
+    // An omitted key still means "leave it alone" — every other caller relies on that.
+    setStock({ thickness: 4 });
+    expect(useEngraveJobStore.getState().job.stock.print).toEqual({ split: 3.0, layerHeight: 0.2 });
+
+    // And the provenance goes with the value: a source for a value that is gone is a lie.
+    setStock({ print: undefined }, 'computed');
+    const { job } = useEngraveJobStore.getState();
+    expect('print' in job.stock).toBe(false);
+    expect(job.sources?.stock?.print).toBeUndefined();
+  });
+
+  it('"Use the badge blank" takes a stale print away when the badge loses it (#285 review)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const { setStock } = useEngraveJobStore.getState();
+
+    // The badge states a print: the blank arrives with the layer grid.
+    setStock(
+      badgeBlankFor(defaultBadgeParams({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } })).stock,
+      'computed',
+    );
+    expect(useEngraveJobStore.getState().job.stock.print).toEqual({
+      split: 3.0,
+      layerHeight: 0.2,
+      firstLayerHeight: 0.2,
+    });
+
+    // The SAME badge, now without one: the grid must go with it, or the stack limit keeps applying
+    // to a blank whose print is no longer known.
+    setStock(badgeBlankFor(defaultBadgeParams()).stock, 'computed');
+    const { job } = useEngraveJobStore.getState();
+    expect(job.stock.print).toBeUndefined();
+    // The rest of the blank still came through, so this is a CLEAR of the print, not a wipe.
+    expect(job.stock.thickness).toBe(3.81);
+    expect(job.stock.material).toBe('pla');
   });
 
   it('a corrupt payload falls back to the default and is preserved under .rejected', async () => {

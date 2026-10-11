@@ -39,13 +39,15 @@
  * fact about the blank, the sacrificial material a fact about the setup, and whichever is
  * shallower at a point wins.
  *
- * WORKER-ONLY. `buildLayerStack` needs the Manifold toplevel, so this runs where the geometry
- * does — the sim worker, beside `engraveGenerate`. The main thread never builds a stack.
+ * WORKER-ONLY, mostly. `buildLayerStack` needs the Manifold toplevel, so `stackDepthLimit` runs
+ * where the geometry does — the sim worker, beside `engraveGenerate`. The one exception is the
+ * colour boundary itself, which is grid arithmetic and so needs no wasm at all: `colourBoundaryFor`
+ * is pure and is what the non-stack callers use (#285 review).
  */
 
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
-import { buildLayerStack } from '@/engine/cnc/layerStack';
+import { buildLayerStack, colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { sacrificialDepthLimit, type DepthLimit } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
@@ -71,6 +73,36 @@ export interface StackDepthLimit {
 const EPS = 1e-9;
 
 /**
+ * The layer grid the plan carries for a job that states a print, or `null` for a job that does not.
+ * The ONE gate: `stack.stock.print` absent, or a plan that has not copied the grid, means there are
+ * no colour layers and every caller keeps its pre-#285 answer.
+ */
+function gridOf(
+  plan: PartPlan,
+  job: EngraveJob,
+): { thickness: Mm; split: Mm; layerHeight: Mm; firstLayerHeight: Mm } | null {
+  const { thickness, split, layerHeight, firstLayerHeight } = plan.stock;
+  if (job.stock.print === undefined || split === undefined || layerHeight === undefined) return null;
+  return { thickness, split, layerHeight, firstLayerHeight: firstLayerHeight ?? layerHeight };
+}
+
+/**
+ * Where the job's colour boundary lands, mm below the engraved face ON a real layer line, or `null`
+ * when the job states no print (#285 review).
+ *
+ * PURE — the boundary is a rule about the layer grid, not a measurement of the solid, so this
+ * answers off `colourBoundaryDepthFor` without a Manifold toplevel. `engraveRegions` used to build
+ * the whole stack just to read this one number and free it again, keeping the wasm live twice per
+ * generate and once per preview keystroke for a value the grid already holds.
+ */
+export function colourBoundaryFor(plan: PartPlan, job: EngraveJob): Mm | null {
+  const grid = gridOf(plan, job);
+  return grid === null
+    ? null
+    : colourBoundaryDepthFor(grid.thickness, grid.split, grid.layerHeight, grid.firstLayerHeight);
+}
+
+/**
  * The job's depth limit from the layer stack, or `null` when the job states no print — in which
  * case the caller keeps `jobDepthLimit`, byte-identically to before #285.
  *
@@ -79,22 +111,21 @@ const EPS = 1e-9;
  * different blank.
  */
 export function stackDepthLimit(tl: ManifoldToplevel, plan: PartPlan, job: EngraveJob): StackDepthLimit | null {
-  const print = job.stock.print;
-  const { split, layerHeight, firstLayerHeight } = plan.stock;
-  if (print === undefined || split === undefined || layerHeight === undefined) return null;
+  const grid = gridOf(plan, job);
+  if (grid === null) return null;
 
   const stack = buildLayerStack(
     tl,
     {
       stock: {
         outline: plan.stock.outline,
-        thickness: plan.stock.thickness,
-        split,
+        thickness: grid.thickness,
+        split: grid.split,
         keepOuts: plan.stock.keepOuts,
       },
     },
-    layerHeight,
-    firstLayerHeight ?? layerHeight,
+    grid.layerHeight,
+    grid.firstLayerHeight,
   );
 
   const sacrificial = sacrificialDepthLimit(job.stock, job.sacrificial, {

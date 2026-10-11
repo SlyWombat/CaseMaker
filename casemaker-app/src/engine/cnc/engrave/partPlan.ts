@@ -39,8 +39,9 @@ import { sacrificialDepthLimit } from '@/engine/cnc/verify';
  * CAM to re-infer them.
  *
  * Two differences from the §5.2 sketch (#200):
- *  - `split` is OPTIONAL (#285): wood has no colour layers, so it is absent for every job but a
- *    two-colour blank. A badge job that states its print carries `split`/`layerHeight` here, and
+ *  - `split` is OPTIONAL (#285): it is absent for every job but a two-colour blank — the part is
+ *    printed PLA, and a blank that was not printed in two colours has no layer at which the colour
+ *    changes. A badge job that states its print carries `split`/`layerHeight` here, and
  *    that is what lets the layer stack (#178) put the colour boundary on a real layer line; a job
  *    without them plans exactly as it did before and its depth limit stays analytic.
  *
@@ -64,9 +65,9 @@ export interface PartPlan {
     keepOuts: { id: string; name: string; footprint: Profile; zCeiling: Mm }[];
     /**
      * The blank's colour split, PART-frame z from the bottom face — copied from
-     * `EngraveJob.stock.print` (#285). ABSENT for a job that states no print, which is every
-     * job that is not a two-colour badge: wood has no colour layers, so nothing downstream has
-     * a boundary to work from and the depth limit stays analytic.
+     * `EngraveJob.stock.print` (#285). ABSENT for a job that states no print, which is every job
+     * that is not a two-colour blank: a part the printer made in one colour has no boundary for
+     * anything downstream to work from, and the depth limit stays analytic.
      */
     split?: Mm;
     /** The slicer's layer height, mm (#285). Present exactly when `split` is. */
@@ -814,8 +815,8 @@ export function traceSelfOverlapFindings(
  * A keep-out is a declarative void (#165's magnet pocket), so its geometry is a fact the job
  * holds, not an inference from a mesh: the depth limit it implies can be computed analytically,
  * with no layer stack and no wasm. These helpers are the analytic twin of #178's `maxDepthAt`
- * (which does the same from the compiled solid, on the printer's layer grid) for the CNC-2 wood
- * path, where there is no layer grid to slice.
+ * (which does the same from the compiled solid, on the printer's layer grid) for the jobs that
+ * state no print, where there is no layer grid to slice.
  * -------------------------------------------------------------------------------------------*/
 
 /** The point at (x, y) expressed in a keep-out's own frame (origin at `position`, axes un-rotated). */

@@ -125,6 +125,74 @@ function nearestBoundary(depth: number, boundaries: readonly Mm[]): Mm {
 }
 
 /**
+ * The layer grid as depths below the engraved face: `[0, h₁, h₁ + h, …, thickness]` (decision 27 —
+ * the first layer is its own size). PURE, and that is the point of it (#285 review): the grid is a
+ * rule about the printer, not a measurement of the solid, so a caller that needs a number off it
+ * must not have to build the wasm stack to get one.
+ */
+export function layerBoundariesFor(
+  thickness: Mm,
+  layerHeight: Mm,
+  firstLayerHeight: Mm = layerHeight,
+): Mm[] {
+  if (!(layerHeight > 0)) throw new Error(`layerHeight must be > 0 (got ${layerHeight})`);
+  if (!(firstLayerHeight > 0)) throw new Error(`firstLayerHeight must be > 0 (got ${firstLayerHeight})`);
+  if (!(thickness > 0)) throw new Error(`stock.thickness must be > 0 (got ${thickness})`);
+  const boundaries: Mm[] = [0];
+  for (
+    let k = 1, b = firstLayerHeight;
+    b < thickness - EPS;
+    k++, b = firstLayerHeight + (k - 1) * layerHeight
+  ) {
+    boundaries.push(b);
+  }
+  boundaries.push(thickness);
+  return boundaries;
+}
+
+/**
+ * Where the colour change actually lands, in depth below the engraved face: the layer line NEAREST
+ * the nominal `thickness − split` (#178/decision 27). Pure arithmetic on the grid, so a caller that
+ * needs only this number — `engraveRegions`, the run sheet — gets the stack's own answer without
+ * building the stack (#285 review).
+ */
+export function colourBoundaryDepthFor(
+  thickness: Mm,
+  split: Mm,
+  layerHeight: Mm,
+  firstLayerHeight: Mm = layerHeight,
+): Mm {
+  return nearestBoundary(thickness - split, layerBoundariesFor(thickness, layerHeight, firstLayerHeight));
+}
+
+/**
+ * The deepest cut that leaves a whole printed layer over a void whose roof is `membrane` mm below
+ * the engraved face — the layer grid's answer where `keepOutLimit`'s is the design's arithmetic.
+ *
+ * This is EXACTLY what `maxDepthAt` reports over a void (#178): the stack descends from the face
+ * until a layer is not solid, and that first layer meeting the void is left uncut, so the limit is
+ * the boundary BELOW it. Computed from the grid instead of the solid, because the void's ceiling is
+ * a declared fact and not something the slicer discovers — which is what lets the run sheet print
+ * the number the verifier enforces (#285 review).
+ */
+export function layerAlignedDepthFor(
+  membrane: Mm,
+  thickness: Mm,
+  layerHeight: Mm,
+  firstLayerHeight: Mm = layerHeight,
+): Mm {
+  // The void reaches a layer whose far edge is past its roof (`z1 > membrane`), and that layer is
+  // the first the stack finds not solid, so the deepest cut is the boundary BELOW it — the largest
+  // boundary at or above the roof. A roof beyond every layer line leaves the full thickness.
+  let limit: Mm = 0;
+  for (const b of layerBoundariesFor(thickness, layerHeight, firstLayerHeight)) {
+    if (b > membrane + EPS) break;
+    limit = b;
+  }
+  return limit;
+}
+
+/**
  * Build the layer stack. Layers are `[0, firstLayerHeight]` then uniform `layerHeight` steps up
  * to `thickness` (decision 27: the first layer is its own size, `h₁ + k·h`). A layer counts as
  * solid where the compiled solid spans it — a void that reaches into a layer removes its
@@ -136,10 +204,7 @@ export function buildLayerStack(
   layerHeight: Mm,
   firstLayerHeight: Mm = layerHeight,
 ): LayerStack {
-  if (!(layerHeight > 0)) throw new Error(`layerHeight must be > 0 (got ${layerHeight})`);
-  if (!(firstLayerHeight > 0)) throw new Error(`firstLayerHeight must be > 0 (got ${firstLayerHeight})`);
   const { outline, thickness, split, keepOuts } = part.stock;
-  if (!(thickness > 0)) throw new Error(`stock.thickness must be > 0 (got ${thickness})`);
 
   // Every CrossSection the stack creates goes in here and is freed once, in dispose(). Deletes
   // are identity-based, so a section aliased into more than one place is still deleted once.
@@ -151,11 +216,9 @@ export function buildLayerStack(
   let disposed = false;
 
   // ---- the layer grid, in depth below the engraved face --------------------------------
-  const boundaries: Mm[] = [0];
-  for (let k = 1, b = firstLayerHeight; b < thickness - EPS; k++, b = firstLayerHeight + (k - 1) * layerHeight) {
-    boundaries.push(b);
-  }
-  boundaries.push(thickness);
+  // The same grid the pure callers compute, so a number read off the stack and a number computed
+  // without one can never disagree (#285 review).
+  const boundaries = layerBoundariesFor(thickness, layerHeight, firstLayerHeight);
 
   const outlineCS = own(executeProfile(tl, outline));
 
@@ -194,7 +257,7 @@ export function buildLayerStack(
   const empty = own(tl.CrossSection.union([]));
 
   const last = layers[layers.length - 1]!;
-  const colourBoundaryDepth = nearestBoundary(thickness - split, boundaries);
+  const colourBoundaryDepth = colourBoundaryDepthFor(thickness, split, layerHeight, firstLayerHeight);
 
   // Lazily converted to polygons for point queries; JS arrays, no wasm handles.
   const polys: (Vec2[][] | null)[] = new Array(layers.length).fill(null);

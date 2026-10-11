@@ -418,7 +418,18 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         const keys = (Object.keys(patch) as (keyof EngraveJob['stock'])[]).filter(
           (k) => patch[k] !== undefined,
         );
-        return { ...job, stock: { ...job.stock, ...patch }, sources: withStockSource(job, keys, source) };
+        const stock = { ...job.stock, ...patch };
+        // `print` is the one stock field a patch can CLEAR (#285 review). "Use the badge blank" on a
+        // badge that has lost its print must take the layer grid away with it, or the stack limit
+        // goes on applying to a blank whose print is no longer known. An explicit `undefined` says
+        // that; an OMITTED key still means "leave it alone", which is what every other caller relies
+        // on. The provenance goes with it — a source for a value that is gone is a lie.
+        const sources = withStockSource(job, keys, source);
+        if ('print' in patch && patch.print === undefined) {
+          delete stock.print;
+          if (sources.stock) delete sources.stock.print;
+        }
+        return { ...job, stock, sources };
       }),
 
     addLabel: () => {

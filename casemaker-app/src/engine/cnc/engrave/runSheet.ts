@@ -2,6 +2,7 @@ import { ASSUMED_RAPID_MM_MIN } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { keepOutLimit, keepOutMembrane, toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
+import { layerAlignedDepthFor } from '@/engine/cnc/layerStack';
 import { axesWord, describeTouch, kindWord, readsWord, registrationFor } from '@/engine/cnc/engrave/registration';
 import type { FeedsResult } from '@/engine/cnc/feeds';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
@@ -406,16 +407,28 @@ export function sha256Hex(input: string): string {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * #285 — whether the membrane numbers on this sheet are the ones the verifier enforced.
+ * #285 — the membrane numbers on this sheet, as the verifier enforces them.
  *
- * A job that states its print is verified against the layer-aligned limit the WORKER computes by
- * slicing the compiled solid (`stackDepthLimit`); building that needs Manifold, and the run sheet
- * is built on the main thread with no wasm by design. So the sheet prints the membrane arithmetic
- * it can do and labels it *nominal* rather than presenting a number it is not standing behind.
- * A job with no print keeps the exact wording it always had.
+ * A job that states its print is verified against the layer-aligned limit: the blank's own layers
+ * sit over the void and the last whole layer above its roof is the floor (`layerStack`'s
+ * `maxDepthAt`). That is grid arithmetic, and the grid is a rule about the printer rather than a
+ * measurement of the solid, so the sheet works the same number out itself — building the stack
+ * would need Manifold, which the sheet's no-wasm, main-thread contract forbids, and the answer is
+ * already in the arithmetic (#285 review). A job with no print has no grid: the analytic membrane
+ * less the floor was the enforced limit there and still is.
+ *
+ * So the sheet prints the number the verifier stands behind in both cases, and the `(nominal)`
+ * hedge that used to mark the difference is gone.
  */
-function nominalSuffix(job: EngraveJob): string {
-  return job.stock.print === undefined ? '' : ' (nominal)';
+function voidLimit(job: EngraveJob, membrane: Mm): Mm {
+  const print = job.stock.print;
+  if (print === undefined) return keepOutLimit(job, membrane);
+  return layerAlignedDepthFor(
+    membrane,
+    job.stock.thickness,
+    print.layerHeight,
+    print.firstLayerHeight ?? print.layerHeight,
+  );
 }
 
 /**
@@ -435,7 +448,7 @@ function keepOutOver(
   let worstLimit = Infinity;
   for (const ko of keepOuts) {
     if (!boxesOverlap(box, ko)) continue;
-    const limit = keepOutLimit(job, ko.solidThickness);
+    const limit = voidLimit(job, ko.solidThickness);
     if (limit < worstLimit) {
       worstLimit = limit;
       worst = ko;
@@ -809,7 +822,7 @@ export function buildRunSheet(
       text:
         `Under-surface void — ${ko.name}. The blank is only ${fmtNum(ko.solidThickness)} mm thick ` +
         'over it: do not cut through.',
-      value: `deepest cut ${fmtNum(keepOutLimit(job, ko.solidThickness))} mm${nominalSuffix(job)}`,
+      value: `deepest cut ${fmtNum(voidLimit(job, ko.solidThickness))} mm`,
     });
   }
 
@@ -938,9 +951,9 @@ export function buildRunSheet(
     const over = keepOutOver(job, itemBox.get(item.id), diagram.keepOuts);
     const note = over
       ? ` — over "${over.name}", only ${fmtNum(over.solidThickness)} mm of material` +
-        (item.depth > keepOutLimit(job, over.solidThickness)
-          ? ` (DEEPER than the ${fmtNum(keepOutLimit(job, over.solidThickness))} mm the void allows${nominalSuffix(job)})`
-          : ` (deepest cut there ${fmtNum(keepOutLimit(job, over.solidThickness))} mm${nominalSuffix(job)})`)
+        (item.depth > voidLimit(job, over.solidThickness)
+          ? ` (DEEPER than the ${fmtNum(voidLimit(job, over.solidThickness))} mm the void allows)`
+          : ` (deepest cut there ${fmtNum(voidLimit(job, over.solidThickness))} mm)`)
       : '';
     cutSteps.push({ text: `${item.name}${note}`, value: `${fmtNum(item.depth)} mm deep` });
   }

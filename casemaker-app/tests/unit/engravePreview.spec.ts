@@ -22,7 +22,7 @@ import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { viseForNewJob } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
-import type { EngraveJob, EngraveShape } from '@/types/engraveJob';
+import type { EngraveJob, EngraveLabel, EngraveShape } from '@/types/engraveJob';
 import { depthColor, SHALLOW_COLOR, DEEP_COLOR } from '@/components/viewport/engraveRamp';
 
 /** Signed volume of a triangle soup (divergence theorem), absolute value in mm³. */
@@ -601,8 +601,8 @@ describe('engravePreview — the colour boundary (#285)', () => {
     return p;
   }
 
-  /** The badge's blank, with a `depthIntent` and a depth on one label over the pocket. */
-  function badgeJob(print: boolean, depth: number, depthIntent?: 'reveal' | 'surface'): EngraveJob {
+  /** The badge's blank, with `over` merged into the one label over the pocket. */
+  function badgeJob(print: boolean, depth: number, over: Partial<EngraveLabel> = {}): EngraveJob {
     const badge = defaultBadgeParams(print ? { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } } : {});
     const blank = badgeBlankFor(badge);
     const base = defaultEngraveJob(viseForNewJob(undefined, blank.stock));
@@ -621,7 +621,7 @@ describe('engravePreview — the colour boundary (#285)', () => {
           rotation: 0,
           depth,
           enabled: true,
-          ...(depthIntent ? { depthIntent } : {}),
+          ...over,
         },
       ],
     };
@@ -637,7 +637,7 @@ describe('engravePreview — the colour boundary (#285)', () => {
   });
 
   it('flags a "surface" label whose floor lands in the bottom colour, at the boundary', () => {
-    const wrong = buildPreview(badgeJob(true, 0.9, 'surface')).findings.filter((f) => f.code === 'item-wrong-colour');
+    const wrong = buildPreview(badgeJob(true, 0.9, { depthIntent: 'surface' })).findings.filter((f) => f.code === 'item-wrong-colour');
     expect(wrong).toHaveLength(1);
     expect(wrong[0]!.severity).toBe('error');
     expect(wrong[0]!.labelId).toBe('lbl');
@@ -646,12 +646,46 @@ describe('engravePreview — the colour boundary (#285)', () => {
   });
 
   it('says nothing for a "surface" label that stays in the top colour', () => {
-    const p = buildPreview(badgeJob(true, 0.5, 'surface'));
+    const p = buildPreview(badgeJob(true, 0.5, { depthIntent: 'surface' }));
     expect(p.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
   });
 
   it('says nothing without a print — no boundary, so no colour to be wrong about', () => {
-    const p = buildPreview(badgeJob(false, 0.9, 'surface'));
+    const p = buildPreview(badgeJob(false, 0.9, { depthIntent: 'surface' }));
     expect(p.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
+  });
+
+  it('says nothing for a "reveal" label that reaches the bottom colour', () => {
+    // The other side of the same bound: a reveal PAST the boundary is exactly what a two-colour
+    // blank is for, so it is not an error — and #285 is careful that the boundary is not a
+    // `cut-too-deep` limit for precisely this reason.
+    const p = buildPreview(badgeJob(true, 1.2, { depthIntent: 'reveal' }));
+    expect(p.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
+  });
+
+  it('flags a "reveal" label that stops short of the boundary, at the boundary', () => {
+    const wrong = buildPreview(badgeJob(true, 0.5, { depthIntent: 'reveal' })).findings.filter((f) => f.code === 'item-wrong-colour');
+    expect(wrong).toHaveLength(1);
+    expect(wrong[0]!.severity).toBe('error');
+    expect(wrong[0]!.labelId).toBe('lbl');
+    expect(wrong[0]!.message).toContain('0.8 mm colour boundary');
+    expect(wrong[0]!.message).toContain('Cut deeper than 0.8 mm');
+  });
+
+  it('leaves "custom" alone — the advanced override says the number is the point', () => {
+    const p = buildPreview(badgeJob(true, 0.9, { depthIntent: 'custom' }));
+    expect(p.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
+  });
+
+  it('leaves a label with no intent alone — it states no expectation', () => {
+    const p = buildPreview(badgeJob(true, 0.9));
+    expect(p.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
+  });
+
+  it('skips a disabled label and a construction label — neither has a floor to place', () => {
+    const off = buildPreview(badgeJob(true, 0.9, { depthIntent: 'surface', enabled: false }));
+    expect(off.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
+    const construction = buildPreview(badgeJob(true, 0.9, { depthIntent: 'surface', construction: true }));
+    expect(construction.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
   });
 });

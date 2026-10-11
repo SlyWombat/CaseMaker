@@ -68,6 +68,11 @@ function mm(v: number): string {
  *
  * The split travels with it: the job is a standalone document and must not have to look back at
  * the project's badge to know where its colour boundary is.
+ *
+ * The key is always present, `undefined` when the badge states no print (#285 review). It is the
+ * difference between "this blank states no print" and "this patch says nothing about the print":
+ * `setStock` clears on the first and leaves alone on the second, so "Use the badge blank" on a badge
+ * that has lost its print can take a stale layer grid away.
  */
 function stockPrintFor(badge: BadgeParams): EngraveJob['stock']['print'] {
   if (!badge.print) return undefined;
@@ -109,7 +114,7 @@ export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
         width: badge.height,
         thickness: badge.thickness,
         material: 'pla',
-        ...(print ? { print } : {}),
+        print,
       },
       pocket: null,
       notes,
@@ -128,7 +133,7 @@ export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
       width: badge.height,
       thickness: badge.thickness,
       material: 'pla',
-      ...(print ? { print } : {}),
+      print,
     },
     pocket: {
       id: BADGE_POCKET_KEEP_OUT_ID,
