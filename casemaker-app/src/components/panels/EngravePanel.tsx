@@ -43,7 +43,7 @@ import {
   type TraceOptions,
 } from '@/engine/import/outlineImport';
 import { newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
-import { BADGE_POCKET_KEEP_OUT_ID, badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
+import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import {
   defaultSacrificialSide,
@@ -318,8 +318,8 @@ export function EngravePanel(): JSX.Element {
   const removeDrill = useEngraveJobStore((s) => s.removeDrill);
   const addKeepOut = useEngraveJobStore((s) => s.addKeepOut);
   const updateKeepOut = useEngraveJobStore((s) => s.updateKeepOut);
-  const upsertKeepOut = useEngraveJobStore((s) => s.upsertKeepOut);
   const removeKeepOut = useEngraveJobStore((s) => s.removeKeepOut);
+  const takeBadgeBlank = useEngraveJobStore((s) => s.takeBadgeBlank);
   const addVector = useEngraveJobStore((s) => s.addVector);
   const updateVector = useEngraveJobStore((s) => s.updateVector);
   const removeVector = useEngraveJobStore((s) => s.removeVector);
@@ -402,11 +402,9 @@ export function EngravePanel(): JSX.Element {
   function useBadgeBlank(): void {
     if (!badge) return;
     const blank = badgeBlankFor(badge);
-    setStock(blank.stock, 'computed');
-    // A badge with no pocket must also CLEAR a pocket stamped by a previous press — but only the
-    // one the badge owns. A void the user typed has a `ko-…` id and is never touched.
-    if (blank.pocket) upsertKeepOut(blank.pocket);
-    else if (keepOuts.some((k) => k.id === BADGE_POCKET_KEEP_OUT_ID)) removeKeepOut(BADGE_POCKET_KEEP_OUT_ID);
+    // #352 — the write itself lives in the store, because the wizard's hand-off seed makes the same
+    // one. The panel owns only what it shows.
+    takeBadgeBlank(blank);
     setBlankNotes(blank.notes);
   }
 

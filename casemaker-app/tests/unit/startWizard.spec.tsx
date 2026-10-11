@@ -13,6 +13,7 @@ import { EngravePanel } from '@/components/panels/EngravePanel';
 import { setMachineProbeLoader, type ConfigReadSummary, type MachineProbeClient } from '@/platform/machineProbe';
 import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { BADGE_POCKET_KEEP_OUT_ID } from '@/engine/cnc/engrave/fromBadge';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import {
   setEngravePreviewClientLoader,
@@ -311,12 +312,13 @@ describe('#280 — step 2, what are you making', () => {
     expect(job.sources?.stock?.material).toBeUndefined();
   });
 
-  // #344 — the V1 job is the two-colour badge, and it arrives at the setup flow from this route.
-  // The panel is mounted beside the wizard here the way `AppShell` mounts it, so the spec drives
-  // the real path: hand off, take the badge blank, come back into the flow, and look at the step
-  // that holds the vise. Before the fix the shipped 4 mm `stockProud` met the 3.81 mm blank and
-  // the blank step refused the job before the person could answer anything else.
-  it('the badge job reaches the setup flow with no vise error (#344)', () => {
+  // #344/#352 — the V1 job is the two-colour badge, and it arrives at the setup flow from this
+  // route. The panel is mounted beside the wizard here the way `AppShell` mounts it, so the spec
+  // drives the real path. Before #344's fix the shipped 4 mm `stockProud` met the 3.81 mm blank and
+  // the blank step refused the job before the person could answer anything else; before #352 the
+  // hand-off seeded `case.blank` only, so this spec passed trivially on the 12 mm default and only
+  // the panel's button brought the badge across. The numbers are now the hand-off's own.
+  it('the badge job reaches the setup flow with no vise error (#344, #352)', () => {
     useStartWizardStore.getState().openWizard();
     render(
       <>
@@ -328,22 +330,21 @@ describe('#280 — step 2, what are you making', () => {
     fireEvent.click(screen.getByTestId('start-wizard-job-badge-blank'));
     expect(screen.getByTestId('engrave-setup-flow')).toBeTruthy();
 
-    // Take the badge's own blank (the button the stale-stock nag points at), then re-enter the
-    // flow: the answers are seeded when it opens, so it has to be reopened to see the new blank.
-    fireEvent.click(screen.getByTestId('engrave-setup-close'));
-    fireEvent.click(screen.getByTestId('engrave-stock-from-badge'));
+    // The hand-off itself is the seed (#352): the badge's blank is the stock, no button pressed.
     const job = useEngraveJobStore.getState().job;
-    expect(job.stock.thickness).toBe(3.81);
+    expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([76.2, 38.1, 3.81]);
     expect(job.workholding.vise.stockProud).toBeCloseTo(1.905, 9);
+    // …and the void the badge's model already has came with it (#271 route 1), so nothing floats.
+    expect((job.keepOuts ?? []).map((k) => k.id)).toContain(BADGE_POCKET_KEEP_OUT_ID);
 
-    fireEvent.click(screen.getByTestId('engrave-setup-open'));
     fireEvent.click(screen.getByTestId('engrave-setup-next')); // holding -> material
     fireEvent.click(screen.getByTestId('engrave-setup-next')); // material -> blank
     const blankStep = screen.getByTestId('engrave-setup-step-blank');
     expect(blankStep.textContent).not.toContain('vise-stock-proud-exceeds-thickness');
-    // …and it is the badge's blank the flow is asking about, not the 12 mm default it would have
-    // seeded before the panel's button ran.
+    // …and it is the badge's blank the flow is asking about, not the 12 mm default it seeded before.
     expect((screen.getByTestId('engrave-setup-stock-thickness') as HTMLInputElement).value).toBe('3.81');
+    // #352 — the step says where those numbers came from, rather than letting 3.81 look typed.
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('the template');
   });
 
   it('never overwrites a stock the user typed or measured', () => {

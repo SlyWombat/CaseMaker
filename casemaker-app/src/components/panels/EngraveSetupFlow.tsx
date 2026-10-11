@@ -90,6 +90,15 @@ export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Elem
   const findings = useMemo(() => stepFindings(stepId, job, answers), [stepId, job, answers]);
   const fix = useMemo(() => (stepId === 'blank' ? stockProudFix(answers) : null), [stepId, answers]);
 
+  // #352 — where the blank's numbers came from. All three dims at `'computed'` is the hand-off
+  // seed's own stamp (`seedStockFromProject`), so 76.2 need not look hand-typed. The line goes the
+  // moment an answer moves off the number that was seeded, because then it IS a typed answer and
+  // the sentence would be a lie about a value nobody supplied.
+  const stockSources = job.sources?.stock;
+  const seeded = (['length', 'width', 'thickness'] as const).every(
+    (key) => stockSources?.[key] === 'computed' && answers.stock[key] === job.stock[key],
+  );
+
   function finish(): void {
     applySetup(answers);
     onClose();
@@ -185,6 +194,12 @@ export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Elem
                 />
               </label>
             ))}
+            {seeded && (
+              <p style={MUTED} data-testid="engrave-setup-stock-provenance">
+                These numbers came from the template you picked, not from a bench measurement — change
+                any you measured.
+              </p>
+            )}
             {fix && (
               <div
                 data-testid="engrave-setup-fix-slot"

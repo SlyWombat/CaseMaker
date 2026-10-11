@@ -13,6 +13,7 @@ import { defaultStockProud, todayISODate, viseForNewJob } from '@/engine/cnc/fix
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
+import { BADGE_POCKET_KEEP_OUT_ID, type BadgeBlank } from '@/engine/cnc/engrave/fromBadge';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type {
   EngraveBorderShape,
@@ -414,6 +415,12 @@ export interface EngraveJobState {
   upsertKeepOut: (keepOut: EngraveKeepOut) => void;
   removeKeepOut: (id: string) => void;
   /**
+   * Take a `BadgeBlank` as this job's blank (#271 route 1, #352) — the ONE owner of that write,
+   * shared by the panel's "Use the badge blank" and the wizard's hand-off seed so the two cannot
+   * drift into two versions of "the badge is the blank".
+   */
+  takeBadgeBlank: (blank: BadgeBlank) => void;
+  /**
    * Add an imported vector outline (#217) and return its id. The shape is built by the panel
    * from an accepted `OutlineImport` (via `toVectorShape`), because only the panel holds the
    * placement fields the import dialog settled on.
@@ -653,6 +660,19 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
 
     removeKeepOut: (id) =>
       apply((job) => ({ ...job, keepOuts: (job.keepOuts ?? []).filter((k) => k.id !== id) })),
+
+    // #352 — the badge's blank, applied in one place. The stock goes through `setStock` rather than
+    // being written here, so the `print`/`flatness` clearing and the vise follow (#344) stay
+    // `setStock`'s rules and not a second copy of them. A badge with no pocket must also CLEAR a
+    // pocket an earlier badge stamped — but only the one the badge owns (`BADGE_POCKET_KEEP_OUT_ID`);
+    // a void the user typed carries a `ko-…` id and is never touched.
+    takeBadgeBlank: (blank) => {
+      get().setStock(blank.stock, 'computed');
+      if (blank.pocket) get().upsertKeepOut(blank.pocket);
+      else if ((get().job.keepOuts ?? []).some((k) => k.id === BADGE_POCKET_KEEP_OUT_ID)) {
+        get().removeKeepOut(BADGE_POCKET_KEEP_OUT_ID);
+      }
+    },
 
     addVector: (shape) => {
       apply((job) => ({ ...job, vectors: [...(job.vectors ?? []), shape] }));

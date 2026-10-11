@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { MACHINES } from '@/engine/cnc/machine';
 import { machineCalibrationNotice } from '@/engine/cnc/calibration';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
+import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { canDriveMachine } from '@/platform/capabilities';
 import { probeMachine, type MachineObservation } from '@/platform/machineProbe';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
@@ -170,16 +171,22 @@ function MachineAnswer({
 }
 
 /**
- * Seed the engrave job's stock from a blank project, once, at hand-off (#280 §3).
+ * Seed the engrave job's stock from the project the wizard just built, once, at hand-off (#280 §3).
  *
- * A blank IS the stock, so retyping its size into the job would be an invitation to a typo. But the
- * job is stored independently of the project and outlives it, so a size the user typed or measured
- * is NOT overwritten: `'computed'` is the app's own derivation and may be replaced, `'user'` and
- * `'measured'` may not (#254's source tags are what make that distinction readable).
+ * A blank — or a badge blank — IS the stock, so retyping its size into the job would be an invitation
+ * to a typo. Which archetype the project carries is the project's answer, not this function's: the
+ * badge route seeds `case.badge`, which also brings the magnet pocket, the colour split and the
+ * print's flatness with it (#352 — before this it read `case.blank` only, so a badge job kept
+ * `defaultEngraveJob`'s 100 × 60 × 12 softwood and step 3 asked about a blank nobody picked). The
+ * write goes through the store's `takeBadgeBlank`, the same one the panel's button makes.
+ *
+ * But the job is stored independently of the project and outlives it, so a size the user typed or
+ * measured is NOT overwritten: `'computed'` is the app's own derivation and may be replaced,
+ * `'user'` and `'measured'` may not (#254's source tags are what make that distinction readable).
+ * The guard is on the DIMENSIONS and covers the whole seed — a badge's pocket belongs to the badge's
+ * blank, so seeding the one without the other would be a void floating in a stock that is not its own.
  */
-function seedStockFromBlank(project: Project): void {
-  const blank = project.case.blank;
-  if (blank === undefined || !blank.enabled) return;
+function seedStockFromProject(project: Project): void {
   const job = useEngraveJobStore.getState();
   const sources = job.job.sources?.stock;
   const asserted = (['length', 'width', 'thickness'] as const).some((key) => {
@@ -187,6 +194,14 @@ function seedStockFromBlank(project: Project): void {
     return source === 'user' || source === 'measured';
   });
   if (asserted) return;
+
+  const badge = project.case.badge;
+  if (badge !== undefined && badge.enabled) {
+    job.takeBadgeBlank(badgeBlankFor(badge));
+    return;
+  }
+  const blank = project.case.blank;
+  if (blank === undefined || !blank.enabled) return;
   job.setStock(blankStockFor(blank).stock, 'computed');
 }
 
@@ -230,7 +245,7 @@ export function StartWizard(): JSX.Element {
     setProject(project); // also flips welcomeMode off
     clearHistory();
     setSection('cnc-engrave');
-    seedStockFromBlank(project);
+    seedStockFromProject(project);
     // Hand off to step 3, which is the flow's own overlay: the wizard gets out of the way rather
     // than stacking a second dialog on top of it.
     setStep('setup');
