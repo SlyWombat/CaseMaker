@@ -12,7 +12,7 @@
 // as a cutter the user owns), the `—` for a dimension no source stated, and the close relationship
 // between a possession and the definition it was registered from.
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AppShell } from '@/components/layout/AppShell';
 import { Toolbar } from '@/components/layout/Toolbar';
@@ -38,6 +38,20 @@ import {
 import { formatStamp } from '@/components/manage/display';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+// #354 — vitest runs the WEB target, so `canDriveMachine` is already false here; the desktop half of
+// the machines tests turns it on through the same seam `startWizard.spec.tsx` uses (#346). A getter,
+// so each test reads the value at render rather than at import.
+const caps = vi.hoisted(() => ({ drive: false }));
+vi.mock('@/platform/capabilities', async (orig) => {
+  const real = await orig<typeof import('@/platform/capabilities')>();
+  return {
+    ...real,
+    get canDriveMachine() {
+      return caps.drive;
+    },
+  };
+});
 
 const HEALTH: HouseHealth = {
   ok: true,
@@ -91,6 +105,20 @@ const ITEM: InventoryItem = {
   notes: 'drawer 3',
 };
 
+/** A controller that answered once — the record the machines tests are about (#311, #354). */
+const Z1_RECORD = {
+  name: 'Z1',
+  host: '192.168.10.43',
+  port: 2222,
+  busy: false,
+  ip: '192.168.10.43',
+  mac: 'AA:BB:CC:DD:EE:FF',
+  status: '<Idle|MPos:0.000,0.000,0.000|Bf:14,128>',
+  profileId: 'Z1',
+  observedAt: '2026-10-09T06:00:00.000Z',
+  notes: [],
+};
+
 /** A fake that answers like a service holding one of each tier. */
 function fakeClient(opts: { probe: HouseProbe; call?: HouseClient['call'] }): HouseClient {
   return {
@@ -118,6 +146,7 @@ async function goAbsent(reason = 'the page at http://localhost answered with tex
 
 beforeEach(() => {
   cleanup();
+  caps.drive = false; // the web target, unless a test says otherwise (#354)
   resetRegistry();
   useToolRegistryStore.getState().reset();
   resetHouseStore();
@@ -898,18 +927,7 @@ describe('#311 — the machines scope', () => {
   it('a machine that answered is shown as the moment it answered, with the profile behind it', async () => {
     await goOnline();
     useMachineStore.setState({
-      machine: {
-        name: 'Z1',
-        host: '192.168.10.43',
-        port: 2222,
-        busy: false,
-        ip: '192.168.10.43',
-        mac: 'AA:BB:CC:DD:EE:FF',
-        status: '<Idle|MPos:0.000,0.000,0.000|Bf:14,128>',
-        profileId: 'Z1',
-        observedAt: '2026-10-09T06:00:00.000Z',
-        notes: [],
-      },
+      machine: Z1_RECORD,
       outcome: 'found',
       reason: null,
       checkedAt: '2026-10-09T06:00:00.000Z',
@@ -926,5 +944,66 @@ describe('#311 — the machines scope', () => {
     // The profile's standing numbers are every machine-dependent figure a `.nc` is verified against.
     expect(card.textContent).toContain('work envelope');
     expect(screen.getByTestId('manage-machine-detail').textContent).toContain('Tool-length probe');
+  });
+});
+
+// #354 — #346's rule, on this surface: do not offer what you know cannot work. The pane used to show
+// "Check for a machine", an address box and Connect directly under a sentence saying a check could
+// only ever answer "unavailable".
+describe('#354 — a build with no socket offers no check', () => {
+  it('the web pane carries #346’s one sentence and none of the three controls', async () => {
+    caps.drive = false;
+    await goAbsent();
+    useManageModeStore.getState().openManage('machines');
+    render(<ManageMode />);
+
+    expect(q('manage-machine-check')).toBeNull();
+    expect(q('manage-machine-address')).toBeNull();
+    expect(q('manage-machine-connect')).toBeNull();
+
+    // The wizard's own words, less the clause about setting a job up (there is no job here).
+    expect(screen.getByTestId('manage-machine-web-hint').textContent).toBe(
+      'This instance cannot control a machine. To connect one, launch Case Maker from your local ' +
+        '(desktop) instance.',
+    );
+
+    // What is NOT a check stays: the my-machine file is a fact about the setup, not a probe (#247).
+    expect(q('manage-machine-export')).not.toBeNull();
+    expect(q('manage-machine-import')).not.toBeNull();
+  });
+
+  it('a record left by a desktop session is still the record — with no way to re-run the check', async () => {
+    caps.drive = false;
+    await goOnline();
+    useMachineStore.setState({
+      machine: Z1_RECORD,
+      outcome: 'found',
+      reason: null,
+      checkedAt: '2026-10-09T06:00:00.000Z',
+    });
+    useManageModeStore.getState().openManage('machines');
+    render(<ManageMode />);
+
+    // The card is the record of that moment, so it survives the capability (its status line, its
+    // profile, its Forget), but "Check again" is a check and goes with the address box.
+    const card = screen.getByTestId('manage-machine-card');
+    expect(card.textContent).toContain('<Idle|MPos:0.000,0.000,0.000|Bf:14,128>');
+    expect(card.textContent).toContain('work envelope');
+    expect(q('manage-machine-forget')).not.toBeNull();
+    expect(q('manage-machine-recheck')).toBeNull();
+    expect(q('manage-machine-web-hint')).not.toBeNull();
+  });
+
+  it('the desktop build keeps the check, the address box and Connect', async () => {
+    caps.drive = true;
+    await goAbsent();
+    useManageModeStore.getState().openManage('machines');
+    render(<ManageMode />);
+
+    expect(q('manage-machine-check')).not.toBeNull();
+    expect(q('manage-machine-address')).not.toBeNull();
+    expect(q('manage-machine-connect')).not.toBeNull();
+    // …and says nothing about a limitation it does not have.
+    expect(q('manage-machine-web-hint')).toBeNull();
   });
 });

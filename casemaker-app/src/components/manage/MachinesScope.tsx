@@ -168,47 +168,52 @@ export function MachinesScope() {
               network; the machine answers or it does not.
             </p>
           </div>
-          <div className="btn-row">
-            <button
-              type="button"
-              className="btn btn--primary"
-              data-testid="manage-machine-check"
-              disabled={busy}
-              title="Search the network for a controller and ask it what it is"
-              onClick={() => void runCheck()}
-            >
-              {busy ? 'Checking…' : 'Check for a machine'}
-            </button>
-            <input
-              className="fld fld--text mono"
-              type="text"
-              placeholder="192.168.1.50"
-              value={address}
-              aria-label="A controller's address"
-              data-testid="manage-machine-address"
-              onChange={(e) => setAddress(e.target.value)}
-            />
-            <button
-              type="button"
-              className="btn"
-              data-testid="manage-machine-connect"
-              disabled={busy || !typed}
-              title={
-                typed
-                  ? 'Connect straight to this address, skipping the search'
-                  : 'Type an address first — the search already covers this network'
-              }
-              onClick={() => void runCheck(address.trim())}
-            >
-              Connect
-            </button>
-          </div>
+          {/* #354 — a build that cannot open a socket to a controller does not offer to check one.
+              The check, the address box and Connect used to sit here under a sentence saying a check
+              could only ever answer "unavailable": #346's rule, which the wizard already follows. */}
+          {canDriveMachine && (
+            <div className="btn-row">
+              <button
+                type="button"
+                className="btn btn--primary"
+                data-testid="manage-machine-check"
+                disabled={busy}
+                title="Search the network for a controller and ask it what it is"
+                onClick={() => void runCheck()}
+              >
+                {busy ? 'Checking…' : 'Check for a machine'}
+              </button>
+              <input
+                className="fld fld--text mono"
+                type="text"
+                placeholder="192.168.1.50"
+                value={address}
+                aria-label="A controller's address"
+                data-testid="manage-machine-address"
+                onChange={(e) => setAddress(e.target.value)}
+              />
+              <button
+                type="button"
+                className="btn"
+                data-testid="manage-machine-connect"
+                disabled={busy || !typed}
+                title={
+                  typed
+                    ? 'Connect straight to this address, skipping the search'
+                    : 'Type an address first — the search already covers this network'
+                }
+                onClick={() => void runCheck(address.trim())}
+              >
+                Connect
+              </button>
+            </div>
+          )}
         </div>
 
         {!canDriveMachine && (
           <p className="hint" data-testid="manage-machine-web-hint">
-            This build cannot open a raw socket to a controller, so a check can only ever answer
-            “unavailable”. The desktop build is the one that can reach a machine on your LAN.
+            This instance cannot control a machine. To connect one, launch Case Maker from your local
+            (desktop) instance.
           </p>
         )}
 
@@ -256,15 +261,19 @@ export function MachinesScope() {
               </ul>
             )}
             <div className="btn-row">
-              <button
-                type="button"
-                className="btn btn--sm"
-                data-testid="manage-machine-recheck"
-                disabled={busy}
-                onClick={() => void runCheck(machine.host)}
-              >
-                {busy ? 'Checking…' : 'Check again'}
-              </button>
+              {/* The card is the RECORD of the last check either way; where there is no socket,
+                  re-running one is offered by nothing (#354). */}
+              {canDriveMachine && (
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  data-testid="manage-machine-recheck"
+                  disabled={busy}
+                  onClick={() => void runCheck(machine.host)}
+                >
+                  {busy ? 'Checking…' : 'Check again'}
+                </button>
+              )}
               {machineFileRow}
               <span className="spacer" />
               <button
