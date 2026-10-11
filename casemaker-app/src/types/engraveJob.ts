@@ -54,10 +54,12 @@ export type FieldSource = 'computed' | 'catalogue' | 'user' | 'measured';
 export interface EngraveJobSources {
   /**
    * Which stock fields were asserted, and how (#254). Absent = the shipped default blank. `print`
-   * is stamped by whoever copies a badge's print facts in (#285), the same way `material` is
-   * stamped when a badge becomes the blank.
+   * and `flatness` are stamped by whoever copies a badge's print facts in (#285, #345), the same
+   * way `material` is stamped when a badge becomes the blank.
    */
-  stock?: Partial<Record<'length' | 'width' | 'thickness' | 'material' | 'print', FieldSource>>;
+  stock?: Partial<
+    Record<'length' | 'width' | 'thickness' | 'material' | 'print' | 'flatness', FieldSource>
+  >;
   /** Provenance of `toolKey` (#254). Absent = the shipped default cutter. */
   tool?: FieldSource;
   /** Per-field provenance for `cutOverride` (#246). Absent = computed from the feeds table. */
@@ -82,11 +84,15 @@ export interface EngraveLabel {
    * reaches the bottom colour, `surface` stays in the top one, `custom` is the advanced override
    * that says nothing about intent.
    *
+   * Since #345 this field does exactly ONE thing: it picks the SIDE of the colour split's depth
+   * bound (`surface` → the floor must stay above the split, `reveal` → below it, `custom`/absent →
+   * no bound from the split at all). It produces no rule of its own.
+   *
    * OPTIONAL, and absent until #170's two-state control writes it — which is the honest state for
    * every job authored before that: with no stated intent there is nothing to be wrong about, so
-   * `item-wrong-colour` (#285) cannot fire. The FIELD is declared here rather than in #170 because
-   * that check has to read it off the item it is judging; #170 owns the control that produces it,
-   * on `TextLabel` as well.
+   * `item-depth-bound` (#345, formerly #285's `item-wrong-colour`) cannot fire. The FIELD is
+   * declared here rather than in #170 because that check has to read it off the item it is
+   * judging; #170 owns the control that produces it, on `TextLabel` as well.
    */
   depthIntent?: 'reveal' | 'surface' | 'custom';
   enabled: boolean;
@@ -506,14 +512,76 @@ export interface StockPrint {
   firstLayerHeight?: Mm;
 }
 
+/**
+ * Where a margin value came from (#345) — decision 28's provenance rule, applied to a THRESHOLD
+ * rather than a measurement. A shipped default is not a recommendation, and a recommendation is
+ * not a number the user chose, so all three read differently on screen.
+ *
+ * - `default` — shipped, or the house setting a new job was seeded with.
+ * - `recommended` — this job's own arithmetic from what it knows about THIS blank and THIS setup
+ *   (`recommendMargins`), taken in one click.
+ * - `user` — typed in the panel.
+ */
+export type MarginSource = 'default' | 'recommended' | 'user';
+
+/**
+ * The Z-error margins a job runs with (#345), mm.
+ *
+ * These are the distances a floor must keep from a PLANE — the colour split, a void's ceiling,
+ * the stock's underside. `zTolerance` is the budget itself: how far the job expects the blank
+ * and the registration to put it out in Z. `boundaryMargin` is what a floor must stay clear by,
+ * and it is recommended as `max(setting, zTolerance)` — the house setting is the floor, the
+ * tolerance is the honest answer when it is larger.
+ *
+ * OPTIONAL on the job, and its ABSENCE IS THE SWITCH: a job with no `margins` runs on the house
+ * setting at generate time, so every saved job keeps the behaviour it had and no stored document
+ * needs migrating. See `engine/cnc/engrave/depthBounds.ts` for the resolution.
+ */
+export interface EngraveMargins {
+  /** How far a floor must stay from any bound plane, mm. */
+  boundaryMargin: Mm;
+  /** The ± this job expects in Z after registration, mm — the budget `boundaryMargin` covers. */
+  zTolerance: Mm;
+  source: MarginSource;
+}
+
+/**
+ * How flat the blank's printed face is (#345), stated by whoever knows it: a badge's print spec
+ * states the dome, a bare blank states none.
+ *
+ * `dome` is the height difference between the blank's centre and its edges on the face to be
+ * engraved. It is the term a job running with NO autolevel grid must carry in its Z budget —
+ * #176's grid is what removes it — so the recommendation names it rather than assuming a flat
+ * blank (`flatness unknown` is its own answer, never an invented 0).
+ *
+ * PROVISIONAL on the default badge: 0.33 mm across the width, measured on the printed blank for
+ * #166 and awaiting the measured blank of #165.
+ */
+export interface StockFlatness {
+  /** Centre-to-edge height difference on the engraved face, mm. */
+  dome: Mm;
+  /** The direction `dome` was measured across. */
+  across: 'width' | 'length';
+  /** Where the number came from — a default is not a measurement (decision 28). */
+  source: 'badge' | 'user' | 'measured';
+}
+
 export interface EngraveJob {
   schemaVersion: 2;
   name: string;
   /**
    * length = X, width = Y, thickness = Z. `print` is the badge path's colour-layer input (#285);
-   * absent for every job that is not a two-colour blank.
+   * absent for every job that is not a two-colour blank. `flatness` is the dome the printed face
+   * carries (#345), where anyone has stated one.
    */
-  stock: { length: Mm; width: Mm; thickness: Mm; material: StockMaterial; print?: StockPrint };
+  stock: {
+    length: Mm;
+    width: Mm;
+    thickness: Mm;
+    material: StockMaterial;
+    print?: StockPrint;
+    flatness?: StockFlatness;
+  };
   labels: EngraveLabel[];
   /** Shape pockets (#214), each at its own depth. Empty for a text-only job. */
   shapes: EngraveShape[];
@@ -594,6 +662,16 @@ export interface EngraveJob {
    * (#213/#218). PROVISIONAL 0.3: enough to part cleanly; measured on the first through-cut.
    */
   breakthrough: Mm;
+  /**
+   * The Z-error margins this job runs with (#345), or absent — in which case it runs on the house
+   * setting (`AppSettings.margins`) at generate time. Absent is what every stored job is, so none
+   * of them changes behaviour by this field existing.
+   *
+   * `minFloor`, `edgeMargin` and `breakthrough` above are NOT repeated here: they are a different
+   * quantity (material that must remain, clearance to an edge, travel into the board), each with
+   * its own owner, and the house setting only SEEDS them for a new job.
+   */
+  margins?: EngraveMargins;
   /**
    * Feeds/speeds the user overrode by hand (#205). Absent = use `feedsFor`'s values untouched;
    * a present key wins over the computed table for that field only. The computed values are

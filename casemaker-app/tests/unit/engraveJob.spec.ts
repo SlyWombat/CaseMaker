@@ -70,6 +70,23 @@ describe('EngraveJob schema (#200)', () => {
     expect('bogus' in parsed.job).toBe(false);
   });
 
+  it('keeps the #345 flatness, its provenance and the job’s margins through a round trip', () => {
+    const job = defaultEngraveJob();
+    job.stock.flatness = { dome: 0.33, across: 'width', source: 'badge' };
+    job.sources = { stock: { flatness: 'computed' } };
+    job.margins = { boundaryMargin: 0.331, zTolerance: 0.331, source: 'recommended' };
+
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // The VALUE is not enough on its own: every enumerated key zod does not name is stripped, and
+    // a blank that kept its dome while losing where the number came from would read as measured.
+    expect(parsed.job.stock.flatness).toEqual({ dome: 0.33, across: 'width', source: 'badge' });
+    expect(parsed.job.sources?.stock?.flatness).toBe('computed');
+    expect(parsed.job.margins).toEqual({ boundaryMargin: 0.331, zTolerance: 0.331, source: 'recommended' });
+    expect(parsed.job).toEqual(job);
+  });
+
   it('rejects depth: -1 with a message naming labels[0].depth', () => {
     const job = defaultEngraveJob();
     job.labels[0]!.depth = -1;
@@ -256,6 +273,26 @@ describe('engraveJobStore (#200)', () => {
 
     useEngraveJobStore.getState().setVise({ uncertainty: 1, source: 'measured' });
     expect(useEngraveJobStore.getState().job.workholding.vise.source).toBe('measured');
+  });
+
+  // #345 — the job's own depth margins, and the two states the panel's row moves between.
+  it('setJobMargins writes the job’s own margins, and null puts it back on the house setting', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    // A fresh job has none: absent is the switch, so it follows the house setting.
+    expect(s().job.margins).toBeUndefined();
+
+    s().setJobMargins({ boundaryMargin: 0.331, zTolerance: 0.331, source: 'recommended' });
+    expect(s().job.margins).toEqual({ boundaryMargin: 0.331, zTolerance: 0.331, source: 'recommended' });
+    expect(JSON.parse(localStorage.getItem(KEY)!).margins.boundaryMargin).toBe(0.331);
+
+    // Clearing DELETES the key rather than writing the house numbers into the document, so the
+    // job goes back to following the setting.
+    s().setJobMargins(null);
+    expect(s().job.margins).toBeUndefined();
+    expect('margins' in JSON.parse(localStorage.getItem(KEY)!)).toBe(false);
   });
 
   // #285 review — `print` is the one stock field a patch can CLEAR. An explicit `undefined` means

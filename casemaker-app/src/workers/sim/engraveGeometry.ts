@@ -15,6 +15,7 @@
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { keepOutLimit, keepOutMembrane, traceSweptProfile } from '@/engine/cnc/engrave/partPlan';
 import { engravableProfile } from '@/engine/cnc/engrave/engravable';
+import { checkBounds, defaultBoundaryMargin, splitBound } from '@/engine/cnc/engrave/depthBounds';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { itemLabel } from '@/engine/cnc/engrave/jobSetup';
 import type { Tool } from '@/engine/cnc/tool';
@@ -397,6 +398,7 @@ export function keepOutFindings(
   plan: PartPlan,
   regions: readonly CutRegion[],
   toolRadius: number | null,
+  margin: number = defaultBoundaryMargin(job),
 ): JobFinding[] {
   // A void-free job is the common case and pays for nothing more than this line (#171): the trace
   // regions below need the toplevel to sweep, and sweeping them for a job with no voids to check
@@ -413,7 +415,7 @@ export function keepOutFindings(
   // and a job dozens of cuts, and every evaluation is a Clipper2 op (#205 runs this on a debounce).
   const voids = plan.stock.keepOuts.map((ko) => {
     const membrane = keepOutMembrane(job, ko.zCeiling);
-    return { name: ko.name, cs: executeProfile(tl, ko.footprint), membrane, limit: keepOutLimit(job, membrane) };
+    return { name: ko.name, cs: executeProfile(tl, ko.footprint), membrane, limit: keepOutLimit(job, membrane, margin) };
   });
 
   try {
@@ -495,60 +497,58 @@ function emptyMessage(item: EngraveAnyItem, cutter: string): string {
   return `${itemLabel(item)} has nothing this cutter can reach: it is smaller than ${cutter}.`;
 }
 
-/** `0.8`, not `0.80000000000000004` — the boundary comes off a layer grid, not a decimal string. */
-function mm(v: number): string {
-  return `${Number(v.toFixed(3))}`;
-}
-
 /**
- * Items whose floor lands in the colour they did not ask for (#285, decision 20).
+ * Items whose floor breaks a bound it stated for itself (#285, decision 20; #345).
  *
- * This is the OTHER half of the colour boundary, and the reason the boundary is not a
- * `cut-too-deep` limit: a `reveal` label crossing it is the entire point of a two-colour blank, so
- * a per-move depth limit would refuse the job it exists to cut. What can be wrong is the
- * AGREEMENT between where the floor is and which colour it was asked to land in — and only the
- * item itself knows which that was.
+ * The one bound an item can break on its OWN is the colour split, because `depthIntent` is what
+ * puts the split's plane there and what chooses its side: `surface` puts the floor above the split,
+ * `reveal` below it. Every other bound — a void's ceiling, the stock's underside — is a fact about
+ * the BLANK, which is not something an item is judged against here: the verifier's per-point limit
+ * owns the void (#171's `keepOutFindings` says why there is no second test) and
+ * `depth-exceeds-stock` owns the underside. So the rule stays per item and per intent, and no item
+ * is refused twice for one floor.
  *
- * The rule, in the depth-below-the-face frame everything here is measured in: a floor shallower
- * than `boundaryDepth` stays in the TOP colour, one deeper reaches the BOTTOM colour. So a
- * `surface` item deeper than the boundary, and a `reveal` item not past it, are both floors in the
- * wrong colour.
+ * Why not a `cut-too-deep` limit: a `reveal` floor crossing the split is the entire point of a
+ * two-colour blank, so a per-move limit that refused every move past the plane would refuse the job
+ * it exists to cut. A `below` bound is not a ceiling, and only `checkBounds` knows the difference.
  *
- * A job with no boundary (no `stock.print`) has no colour to be wrong about, and an item with no
+ * A job whose blank states no split has no plane to be wrong about, and an item with no
  * `depthIntent` — every item authored before #170's control — states no expectation, so neither
- * produces a finding. `custom` is the advanced override and says "I know; the number is the
- * point", so it is left alone by design.
+ * produces a finding. `custom` is the advanced override and says "I know; the number is the point",
+ * so it carries no bound from the split by design.
+ *
+ * `splitDepth` is the split ON the printer's layer grid (`colourBoundaryFor`), which is where a
+ * floor can actually be, not the nominal height the design asked for.
  */
-export function colourIntentFindings(job: EngraveJob, boundaryDepth: number | null): JobFinding[] {
-  if (boundaryDepth === null) return [];
+export function itemDepthBoundFindings(
+  job: EngraveJob,
+  splitDepth: number | null,
+  margin: number,
+): JobFinding[] {
+  if (splitDepth === null) return [];
   const findings: JobFinding[] = [];
   for (const label of job.labels) {
     // A construction label cuts nothing, so it has no floor to place.
     if (!label.enabled || label.construction === true) continue;
-    const intent = label.depthIntent;
-    if (intent !== 'reveal' && intent !== 'surface') continue;
-    const belowBoundary = label.depth > boundaryDepth;
-    if (intent === 'surface' && belowBoundary) {
-      findings.push({
-        severity: 'error',
-        code: 'item-wrong-colour',
-        labelId: label.id,
-        message:
-          `${itemLabel(label)} cuts ${mm(label.depth)} mm deep, past the ${mm(boundaryDepth)} mm colour ` +
-          'boundary — its floor lands in the BOTTOM colour, and "surface" asks for the top one. ' +
-          `Cut shallower than ${mm(boundaryDepth)} mm, or set the label to "reveal".`,
-      });
-    } else if (intent === 'reveal' && !belowBoundary) {
-      findings.push({
-        severity: 'error',
-        code: 'item-wrong-colour',
-        labelId: label.id,
-        message:
-          `${itemLabel(label)} cuts ${mm(label.depth)} mm deep, inside the top colour — the ` +
-          `${mm(boundaryDepth)} mm colour boundary is where the bottom colour starts. Cut deeper than ` +
-          `${mm(boundaryDepth)} mm, or set the label to "surface".`,
-      });
-    }
+    const bound = splitBound(label.depthIntent, splitDepth);
+    if (bound === null) continue;
+    const hit = checkBounds(label.depth, [bound], margin);
+    if (hit === null) continue;
+    const m = fmtMm(hit.margin);
+    const at = fmtMm(bound.at);
+    findings.push({
+      severity: 'error',
+      code: 'item-depth-bound',
+      labelId: label.id,
+      message:
+        bound.side === 'above'
+          ? `${itemLabel(label)} cuts to ${fmtMm(label.depth)} mm — the colour split is at ${at} mm and ` +
+            `a "surface" label must stay ${m} mm above it, so no deeper than ${fmtMm(bound.at - hit.margin)} mm. ` +
+            'Cut shallower, or set the label to "reveal".'
+          : `${itemLabel(label)} cuts to ${fmtMm(label.depth)} mm — the colour split is at ${at} mm and ` +
+            `a "reveal" label must go ${m} mm below it, so at least ${fmtMm(bound.at + hit.margin)} mm. ` +
+            'Cut deeper, or set the label to "surface".',
+    });
   }
   return findings;
 }

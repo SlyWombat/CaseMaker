@@ -499,13 +499,21 @@ is still a number in a box, and the colour boundary it is measured against is st
 measure. Until then the badge is a blank the app knows the shape of, not yet a job it knows
 the depths for.
 
-**The colour boundary is measured on the printer's layer grid (#285).** A badge that states how
-it is sliced — its layer height and first-layer height (#166) — hands those to the job along with
-its colour split, and from then on the boundary is read off the compiled blank sliced on the
-printer's real layers rather than assumed at the nominal height. That is what makes *surface* and
-*reveal* checkable: a label that states which colour it wants, and whose floor lands in the other
-one, is refused as `item-wrong-colour` (chapter 8.1). A badge that states no print leaves the
-depth limit arithmetic as it was.
+**Every floor keeps clear of a plane it must not cross (#345).** A depth in this app is never "as
+deep as you like": each floor has to stay clear of the planes the job knows about — a void's
+ceiling, the stock's underside, and on a two-colour blank the colour split. ONE number, the
+**boundary margin** (0.2 mm by default, which is one printed layer; you can set it per job, and
+the app recommends a value for the blank in hand), is how far every floor stays from every one of
+them, and the stock's underside keeps its own minimum-floor rule because that is a different
+quantity — material that must remain, not a Z-error allowance. A floor on the wrong side of a
+plane is refused per item as `item-depth-bound` (chapter 8.1), naming the plane and which side it
+belongs on, and the moves that would cut too deep anyway are caught as `cut-too-deep`. The colour
+split is one example of that rule, not a special case: a label's depth intent only chooses WHICH
+SIDE of the split its floor must be on — *surface* above it, *reveal* through it — so a blank that
+states no split, and a label that states no intent, have no bound between them and are left alone.
+Where the split IS known, it is read off the printer's real layers rather than the nominal design
+height when the blank states how it is sliced (#285, #166), so changing the layer height moves the
+boundary — and the refusal says where it actually is.
 
 ---
 
@@ -717,7 +725,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `item-detail-lost` | warning | An item loses detail (thin strokes, inside corners) to the cutter's radius. Formerly `label-detail-lost`. | Increase the size, enlarge the shape, or use a smaller cutter. |
 | `item-outside-stock` | error | An item hangs off the blank, or off the sacrificial material beside it (#213). Formerly `label-outside-stock`. | Move it back inside the edge margin, or declare a strip or board under the overhang. |
 | `item-over-void` | warning | An item cuts over a declared under-surface void (#231), whose membrane has nothing under it (#171). True at any depth — even a shallow cut there will chatter and finish rough. A single-line trace is warned about the same way (#270); a plunge drill is not, because a drill into a void is a breach `cut-too-deep` refuses, and a drilled hole has no pocketed floor to finish. | Move the cut clear of the void. A cut deep enough to break through is refused separately, as `cut-too-deep`. |
-| `item-wrong-colour` | error | On a two-colour blank (#285), a label's floor lands in the colour it was not asked to. Its `depthIntent` is *surface* (stay in the top colour) and the floor is past the colour boundary, or *reveal* (reach the bottom colour) and the floor is not past it. Only a label that STATES an intent can be judged: one with none, or set to *custom*, is left alone. The boundary is where the slicer's layers put it, not the nominal design height, so changing the layer height moves it. | Set the label's depth to the other side of the boundary, or switch its intent. The message names the boundary in mm. |
+| `item-depth-bound` | error | An item's floor lands on the wrong side of a plane it must stay clear of (#345): a void's ceiling it would breach, the stock's underside, or — on a two-colour blank (#285) — the colour split. A label's `depthIntent` chooses which SIDE of the split its floor belongs on: *surface* above it, *reveal* through it. Only a plane the job knows about can be broken, so a blank that states no split and a label that states no intent (or *custom*) are left alone. Where the split is known it is read off the printer's real layers, not the nominal design height, so changing the layer height moves it. Formerly `item-wrong-colour`. | Set the depth to the other side of the plane, or switch the label's intent. The message names the plane, where it is in mm, and which side the floor must be on. |
 | `trace-outside-stock` | error | A single-line trace runs off the blank (#219). | Move it back inside the stock. |
 
 **Checking the engraving job** (job):

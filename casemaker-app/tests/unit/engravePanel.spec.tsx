@@ -697,16 +697,18 @@ describe('EngravePanel — under-surface voids (#271)', () => {
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-add-keepout-rect'));
 
-    // 12 mm blank, minFloor 1 mm, ceiling 6: 6.00 mm of material left, 5.00 mm of cut allowed.
+    // 12 mm blank, ceiling 6: 6.00 mm of material left. #345 — the margin a void's ceiling keeps
+    // is the boundary margin (0.2 on a blank that states no print), not the 1 mm minimum floor,
+    // which is the stock's underside rule and a different quantity: 6 − 0.2 = 5.80 mm of cut.
     const readout = screen.getByTestId('engrave-keepout-membrane-0').textContent ?? '';
     expect(readout).toContain('6.00');
-    expect(readout).toContain('5.00');
+    expect(readout).toContain('5.80');
 
     // The ceiling is measured UP from the bottom face, so a HIGHER ceiling leaves LESS material.
     fireEvent.change(screen.getByTestId('engrave-keepout-zceiling-0'), { target: { value: '10' } });
     const higher = screen.getByTestId('engrave-keepout-membrane-0').textContent ?? '';
     expect(higher).toContain('2.00');
-    expect(higher).toContain('1.00');
+    expect(higher).toContain('1.80');
     expect(useEngraveJobStore.getState().job.keepOuts![0]!.zCeiling).toBe(10);
 
     // A ceiling at the top face is not inside the blank: it says so instead of promising a cut.
@@ -723,8 +725,9 @@ describe('EngravePanel — under-surface voids (#271)', () => {
     const job = useEngraveJobStore.getState().job;
     const ko = job.keepOuts![0]!;
     const limit = jobDepthLimit(job);
-    // Inside the 20 × 10 footprint centred on the blank: the membrane less the floor (2 − 1).
-    expect(limit(ko.position.x, ko.position.y)).toBeCloseTo(1, 6);
+    // Inside the 20 × 10 footprint centred on the blank: the 2 mm membrane less the boundary
+    // margin (0.2), which is the number #345 gates a void's ceiling to.
+    expect(limit(ko.position.x, ko.position.y)).toBeCloseTo(1.8, 6);
     // Well clear of it: the stock's own limit, untouched by the void.
     expect(limit(2, 2)).toBeCloseTo(job.stock.thickness - job.minFloor, 6);
     // The name reaches the job too — the run sheet and the warning both print it.
@@ -815,9 +818,10 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     expect(screen.getByTestId('engrave-keepout-count').textContent?.trim()).toBe('1');
     expect(screen.getByTestId('engrave-keepout-membrane-0').textContent).toContain('1.51');
 
-    // 1.51 mm of membrane over the pocket, less the 1 mm minimum floor.
+    // 1.51 mm of membrane over the pocket, less the 0.2 mm boundary margin a void's ceiling keeps
+    // (#345; the 1 mm minimum floor is the stock's underside rule, not this plane's).
     const limit = jobDepthLimit(job);
-    expect(limit(38.1, 19.05)).toBeCloseTo(0.51, 6);
+    expect(limit(38.1, 19.05)).toBeCloseTo(1.31, 6);
     expect(limit(5, 5)).toBeCloseTo(2.81, 6);
     expect(screen.getByTestId('engrave-badge-notes')).toBeTruthy();
   });
@@ -845,5 +849,65 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     expect(ids).toHaveLength(1);
     expect(ids[0]).not.toBe(BADGE_POCKET_KEEP_OUT_ID);
     expect(ids[0]!.startsWith('ko-')).toBe(true);
+  });
+});
+
+// #345 — the margins row. It is the only control that moves a job between "the house setting" and
+// "my own number", so both directions are driven through the DOM here rather than through the store
+// (whose own spec covers `setJobMargins`): what the row SHOWS is as much of the feature as the
+// number it writes.
+describe('EngravePanel margins row (#345)', () => {
+  /** A blank that states the dome a printed badge carries — what lifts the recommendation. */
+  const domed = (): void => {
+    const job = defaultEngraveJob();
+    job.stock.flatness = { dome: 0.33, across: 'width', source: 'badge' };
+    act(() => useEngraveJobStore.setState({ job }));
+  };
+
+  it('states the margin a job with none of its own is running on, and where it came from', () => {
+    render(<EngravePanel />);
+    // No `margins` on the job: it follows the house setting, and the row says so rather than
+    // claiming the number as the user's.
+    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('0.2 mm');
+    expect(screen.getByTestId('engrave-margins-source').textContent).toBe('the house default');
+    // There is nothing of the job's own to go back to yet.
+    expect(screen.queryByTestId('engrave-margins-house')).toBeNull();
+  });
+
+  it('offers this blank’s own recommendation, and one click puts the job on it', () => {
+    domed();
+    render(<EngravePanel />);
+
+    // 0.001 mm of probe plus the stated 0.33 mm dome — above the 0.2 mm house layer, so there is
+    // something to take, and the basis says which term moved it.
+    const recommended = screen.getByTestId('engrave-margins-recommended').textContent!;
+    expect(recommended).toContain('0.331');
+    expect(recommended).toContain('domed 0.33');
+
+    fireEvent.click(screen.getByTestId('engrave-margins-use'));
+
+    // The job now OWNS the number (so a later settings change cannot move it), and the row reads
+    // it back as the user's rather than as the house's.
+    const job = useEngraveJobStore.getState().job;
+    expect(job.margins).toEqual({ boundaryMargin: 0.331, zTolerance: 0.331, source: 'recommended' });
+    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('0.331 mm');
+    expect(screen.getByTestId('engrave-margins-source').textContent).toBe('yours');
+
+    // …and the way back is offered only now that there is something to go back from.
+    fireEvent.click(screen.getByTestId('engrave-margins-house'));
+    expect(useEngraveJobStore.getState().job.margins).toBeUndefined();
+    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('0.2 mm');
+    expect(screen.getByTestId('engrave-margins-source').textContent).toBe('the house default');
+  });
+
+  it('writes the recommendation into the job’s own margins, not into the house setting', () => {
+    domed();
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-margins-use'));
+
+    // The house setting is untouched: taking the advice for ONE blank is not a decision about every
+    // job, which is the whole reason the job carries its own copy.
+    expect(useSettingsStore.getState().margins.boundaryMargin).toBe(0.2);
+    expect(useSettingsStore.getState().margins.source).toBe('default');
   });
 });

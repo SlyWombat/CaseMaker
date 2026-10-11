@@ -10,8 +10,9 @@
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import {
   engraveGenerate,
@@ -33,13 +34,18 @@ export function generate(
   job: EngraveJob,
   calibration: MachineCalibration | null = null,
   catalogue: readonly FeedCatalogueRow[] = [],
+  margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
 ): EngraveGenerated {
-  return engraveGenerate(tl, job, jobTool(job), catalogue, calibration);
+  return engraveGenerate(tl, job, jobTool(job), catalogue, calibration, margins);
 }
 
 /** `engraveRegions` for a job, with the cutter that job names. */
-export function regions(tl: ManifoldToplevel, job: EngraveJob): EngraveRegions {
-  return engraveRegions(tl, job, jobTool(job));
+export function regions(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
+): EngraveRegions {
+  return engraveRegions(tl, job, jobTool(job), margins);
 }
 
 /** `engravabilityFindings` for a job, with the cutter that job names (its messages name it). */
@@ -57,6 +63,7 @@ export function preview(
   job: EngraveJob,
   gen: number,
   catalogue: readonly FeedCatalogueRow[] = [],
+  margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
 ): EngravePreview | null {
-  return previewer.engravePreview(job, TOOL_LIBRARY, catalogue, gen);
+  return previewer.engravePreview(job, TOOL_LIBRARY, catalogue, gen, margins);
 }

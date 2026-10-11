@@ -16,7 +16,7 @@ import type { Setup, MachineCalibration } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { getToplevel } from './geometry/ManifoldRuntime';
 import type { NodeMeshOutput } from './geometry/meshOutput';
@@ -108,12 +108,13 @@ const api = {
     tools: readonly ToolLibraryEntry[],
     catalogue: readonly FeedCatalogueRow[],
     gen: number,
+    margins: EngraveMargins,
   ): Promise<EngravePreview | null> {
     // Issue #180 — the preview typesets labels through the synchronous `resolveFont`, and the
     // bundled faces are static assets now, so load the keys this job's enabled labels need
     // first. A shapes-only job (or one with every label disabled/empty) passes `[]`.
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    const p = (await getPreviewer()).engravePreview(job, tools, catalogue, gen);
+    const p = (await getPreviewer()).engravePreview(job, tools, catalogue, gen, margins);
     if (!p) return null;
     return Comlink.transfer(p, buffersOf([p.stock, ...p.floors.map((f) => f.mesh), ...p.fixture.map((f) => f.mesh), ...p.sacrificial.map((s) => s.mesh)]));
   },
@@ -135,10 +136,11 @@ const api = {
     job: EngraveJob,
     tool: Tool | null,
     catalogue: readonly FeedCatalogueRow[],
-    calibration?: MachineCalibration | null,
+    calibration: MachineCalibration | null,
+    margins: EngraveMargins,
   ): Promise<EngraveGenerated> {
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    return runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration ?? null);
+    return runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins);
   },
   /**
    * The volumetric oracle (#206 §3) against the program CURRENTLY loaded in the session. The

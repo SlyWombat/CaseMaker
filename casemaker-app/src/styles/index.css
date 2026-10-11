@@ -434,6 +434,19 @@ body, html, #root {
   margin-top: 10px;
   font-size: 11px;
 }
+/* #345 — the depth-margins section's dividers. A subhead separates "what every job copies" from
+   "what a new job starts from" without a second heading level in a popover this size. */
+.settings-menu .settings-subhead {
+  margin: 10px 0 2px 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a94a4;
+}
+.settings-menu .settings-hint button {
+  font-size: 11px;
+}
 /* The #247 "my machine" export/import block lived here. #311 moved it, with its markup, to the
    Machines pane of the Manage surface — where the machine it describes is. Nothing else used these
    selectors, so they went with it rather than lingering as rules for a component that is gone. */

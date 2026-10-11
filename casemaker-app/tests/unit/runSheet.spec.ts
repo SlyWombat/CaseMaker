@@ -529,4 +529,30 @@ describe('runSheet (#207)', () => {
     });
     expect(sheetFor(job)).toMatchSnapshot();
   });
+
+  // #345 — the depth-margins block is GATED: a job with no bound at all (the default above) has
+  // nothing for it to say, and its sheet must stay exactly what it was. This is the other half of
+  // that pair — the sheet of a job that DOES have a bound, so the block's wording and position are
+  // pinned rather than only asserted with a `.toContain`.
+  it('snapshots the whole RunSheet for a job with a depth bound (#345)', () => {
+    const job = defaultEngraveJob();
+    job.labels.forEach((label, i) => {
+      label.id = `label-${i}`;
+    });
+    job.keepOuts = [
+      {
+        id: 'pocket',
+        name: 'Magnet pocket',
+        kind: 'rect',
+        position: { x: 50, y: 30 },
+        rotation: 0,
+        enabled: true,
+        zCeiling: 10,
+        width: 20,
+        height: 10,
+        cornerRadius: 0,
+      },
+    ];
+    expect(sheetFor(job)).toMatchSnapshot();
+  });
 });

@@ -9,6 +9,13 @@ import { canDriveMachine } from '@/platform/capabilities';
 import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { useSettingsStore } from '@/store/settingsStore';
+import {
+  effectiveMargins,
+  marginSourceWords,
+  MEASURED_THICKNESS_TOLERANCE_MM,
+  mm as mmText,
+  recommendMargins,
+} from '@/engine/cnc/engrave/depthBounds';
 import { Z1 } from '@/engine/cnc';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -294,6 +301,7 @@ const OVERRIDE_FIELDS: readonly { key: keyof Omit<CutParams, 'air'>; label: stri
 
 export function EngravePanel(): JSX.Element {
   const job = useEngraveJobStore((s) => s.job);
+  const setJobMargins = useEngraveJobStore((s) => s.setJobMargins);
   const setStock = useEngraveJobStore((s) => s.setStock);
   const addLabel = useEngraveJobStore((s) => s.addLabel);
   const updateLabel = useEngraveJobStore((s) => s.updateLabel);
@@ -358,6 +366,21 @@ export function EngravePanel(): JSX.Element {
   const maxDepth = job.stock.thickness - job.minFloor;
   // The declared under-surface voids (#271). One row each, under the stock they are a fact about.
   const keepOuts = job.keepOuts ?? [];
+
+  // #345 — the depth margins. `effectiveMargins` is the SAME call the run store and the sheet make,
+  // so the row, the printout and the verifier cannot state three different numbers. The
+  // recommendation is per-job arithmetic on this blank; `max(margin in force, zTolerance)` is why
+  // it is never tighter than what the job already runs. A measured thickness is the one input the
+  // panel has that the model does not (the grid's residual arrives with #176).
+  const houseMargins = useSettingsStore((s) => s.margins);
+  const margins = effectiveMargins(job, houseMargins);
+  const recommendation = recommendMargins(job, margins, {
+    thicknessUncertainty:
+      job.sources?.stock?.thickness === 'measured' ? MEASURED_THICKNESS_TOLERANCE_MM : undefined,
+  });
+  // "Recommends more" is the only case worth a button: a recommendation that ties or loses to what
+  // is already in force has nothing to offer, and two numbers that agree do not need a control.
+  const recommendMore = recommendation.boundaryMargin > margins.boundaryMargin + 1e-9;
 
   // #271 route 1 — the blank this job is for is usually already in the project as `case.badge`,
   // and the one void V1 needs (the magnet pocket) is the badge's own. Reading it here cannot get
@@ -427,7 +450,12 @@ export function EngravePanel(): JSX.Element {
     // that cache is per-realm — the main thread must load the job's faces itself first, exactly
     // as `JobScheduler` does before its compile.
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    setSheet(buildRunSheet(job, generated, { diagnostics: run.simDiagnostics }));
+    // #345 — the margins the run was gated to, resolved here the same way `engraveRunStore` did at
+    // Generate: the sheet's depth notes have to be the numbers the verifier enforced, and a sheet
+    // drawn to the shipped default would tell the operator to cut deeper than the program allows.
+    setSheet(
+      buildRunSheet(job, generated, { diagnostics: run.simDiagnostics }, new Date(), effectiveMargins(job, houseMargins)),
+    );
   }
 
   const verifyFindings = run.generated?.verify?.findings ?? [];
@@ -973,7 +1001,9 @@ export function EngravePanel(): JSX.Element {
           index={i}
           thickness={job.stock.thickness}
           membrane={keepOutMembrane(job, ko.zCeiling)}
-          limit={keepOutLimit(job, keepOutMembrane(job, ko.zCeiling))}
+          // #345 — the same margin the run sheet and the verifier use, so the row's "mm of cut"
+          // is the number the program is actually gated to rather than one blank's own arithmetic.
+          limit={keepOutLimit(job, keepOutMembrane(job, ko.zCeiling), margins.boundaryMargin)}
           findings={findingsFor(ko.id)}
           onChange={(patch) => updateKeepOut(ko.id, patch)}
           onRemove={() => removeKeepOut(ko.id)}
@@ -1176,6 +1206,60 @@ export function EngravePanel(): JSX.Element {
         )}
       </details>
       <p style={MUTED}>Depth keeps the {job.minFloor} mm minimum floor — at most {maxDepth} mm on this stock.</p>
+
+      {/* #345 — what every floor keeps clear of, and where that number came from. "Yours" is the
+          job's own; when the job states none it follows the house setting, which is what lets a
+          later change to the setting reach a job nobody has overridden. The recommendation is this
+          blank's own arithmetic, taken in one click. No slider: a margin nobody can reason about is
+          worse than the honest default, so the only controls are "take the recommendation" and
+          "go back to the house's". */}
+      <div data-testid="engrave-margins" style={{ marginTop: 6, borderTop: '1px solid #2a2f36', paddingTop: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, fontSize: 11 }}>
+          <span style={{ color: '#c8d3de', fontWeight: 600 }}>Depth margins</span>
+          <span>
+            <b data-testid="engrave-margins-value">{mmText(margins.boundaryMargin)} mm</b>{' '}
+            <span style={TAG} data-testid="engrave-margins-source">
+              {job.margins ? 'yours' : marginSourceWords(margins.source)}
+            </span>
+          </span>
+        </div>
+        <p style={MUTED} data-testid="engrave-margins-note">
+          How far every floor stays clear of a plane it must not cross — a void’s ceiling, the colour
+          split. Z tolerance {mmText(margins.zTolerance)} mm; a job with no stated margins follows
+          the house setting.
+        </p>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 2 }}>
+          <span style={{ ...MUTED, margin: 0 }} data-testid="engrave-margins-recommended">
+            For this blank: <b>{mmText(recommendation.boundaryMargin)} mm</b> — {recommendation.basis.join('; ')}.
+          </span>
+          {recommendMore && (
+            <button
+              type="button"
+              data-testid="engrave-margins-use"
+              title={`Run this job on ${mmText(recommendation.boundaryMargin)} mm — the margin this blank's own arithmetic argues for`}
+              onClick={() =>
+                setJobMargins({
+                  boundaryMargin: recommendation.boundaryMargin,
+                  zTolerance: recommendation.zTolerance,
+                  source: 'recommended',
+                })
+              }
+            >
+              Use it
+            </button>
+          )}
+          {job.margins && (
+            <button
+              type="button"
+              data-testid="engrave-margins-house"
+              title={`Drop this job's own margins and follow the house setting (${mmText(houseMargins.boundaryMargin)} mm)`}
+              onClick={() => setJobMargins(null)}
+            >
+              Follow the house setting
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* 3 — tool */}
       <h3 style={SUBHEAD}>

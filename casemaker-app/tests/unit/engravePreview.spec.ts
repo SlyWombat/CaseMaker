@@ -12,7 +12,8 @@ import { tl } from './helpers/manifoldExec';
 import { preview, regions } from './helpers/engravePipeline';
 import { createEngravePreviewer, FLOOR_THICKNESS_MM } from '@/workers/sim/engravePreview';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
+import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
@@ -544,9 +545,12 @@ describe('engravePreview — declared under-surface voids (#271)', () => {
     const v = p.voids[0]!;
     expect(v.id).toBe('pocket');
     expect(v.name).toBe('Magnet pocket');
-    // 12 mm blank, ceiling 10: 2 mm of material left, 1 mm of cut under the 1 mm minimum floor.
+    // 12 mm blank, ceiling 10: 2 mm of material left, and #345's `boundaryMargin` (one printed
+    // layer, 0.2 mm here — the default job states no print) taken off it. This fixture MOVED from
+    // 1 mm when the ceiling became a depth bound: the analytic `membrane − minFloor` it used to
+    // report was the one place the void's limit was arithmetic rather than a Z-error margin.
     expect(v.membrane).toBeCloseTo(2, 6);
-    expect(v.limit).toBeCloseTo(1, 6);
+    expect(v.limit).toBeCloseTo(1.8, 6);
     // The rings ARE the footprint: 30 × 20 centred on (50, 30) in the work frame.
     expect(ringBBox(v.rings)).toMatchObject({ minX: 35, maxX: 65, minY: 20, maxY: 40 });
   });
@@ -583,20 +587,21 @@ describe('engravePreview — declared under-surface voids (#271)', () => {
     expect(bbox.maxX).toBeCloseTo(80, 6);
     expect(bbox.minY).toBeCloseTo(37, 6);
     expect(bbox.maxY).toBeCloseTo(43, 6);
-    expect(p.voids[0]!.limit).toBeCloseTo(12 - 3 - 1, 6);
+    // The same bound as above: membrane (12 − 3) less #345's `boundaryMargin`, not `minFloor`.
+    expect(p.voids[0]!.limit).toBeCloseTo(12 - 3 - 0.2, 6);
   });
 });
 
-// #285 — the boundary has two halves and this is the panel's: the number the viewport draws the
-// line at, and the per-item `item-wrong-colour` a label gets when its floor lands in the colour it
-// did not ask for. Both come off the SAME `engraveRegions` call the cuts do, so the line and the
-// finding cannot disagree.
-describe('engravePreview — the colour boundary (#285)', () => {
+// #285/#345 — the boundary has two halves and this is the panel's: the number the viewport draws
+// the line at, and the per-item `item-depth-bound` a label gets when its floor breaks the split's
+// bound. Both come off the SAME `engraveRegions` call the cuts do, so the line and the finding
+// cannot disagree.
+describe('engravePreview — the colour boundary (#285, #345)', () => {
   // Its own previewer: the tests above pin the shared one’s latest generation.
   const pv = createEngravePreviewer(tl);
   let g = 0;
-  function buildPreview(job: EngraveJob) {
-    const p = preview(pv, job, ++g);
+  function buildPreview(job: EngraveJob, margins = effectiveMargins(job, MARGIN_DEFAULTS)) {
+    const p = preview(pv, job, ++g, [], margins);
     if (!p) throw new Error('the previewer refused a fresh generation');
     return p;
   }
@@ -636,56 +641,72 @@ describe('engravePreview — the colour boundary (#285)', () => {
     expect(buildPreview(badgeJob(false, 0.5)).colourBoundaryDepth).toBeNull();
   });
 
-  it('flags a "surface" label whose floor lands in the bottom colour, at the boundary', () => {
-    const wrong = buildPreview(badgeJob(true, 0.9, { depthIntent: 'surface' })).findings.filter((f) => f.code === 'item-wrong-colour');
+  /**
+   * The `item-depth-bound` findings for a job — the split's bound, and only it (#345).
+   *
+   * The default badge's split lands on 0.8 mm (above) and its default `boundaryMargin` is one
+   * printed layer, 0.2 mm — so a `surface` floor must be at most 0.6 and a `reveal` floor at least
+   * 1.0. Those are the numbers the cases below are written against.
+   */
+  function boundFindings(job: EngraveJob): JobFinding[] {
+    return buildPreview(job).findings.filter((f) => f.code === 'item-depth-bound');
+  }
+
+  it('refuses a "surface" floor that lands ON the split', () => {
+    // #285's review found the equality here was decided by whichever side of `≥`/`≤` the old test
+    // happened to use. The bound always subtracts its margin, so a floor in the plane is refused
+    // and there is no equality left to argue about.
+    const wrong = boundFindings(badgeJob(true, 0.8, { depthIntent: 'surface' }));
     expect(wrong).toHaveLength(1);
     expect(wrong[0]!.severity).toBe('error');
     expect(wrong[0]!.labelId).toBe('lbl');
-    // The sentence names the boundary it crossed, so the fix ("cut shallower than 0.8") is legible.
-    expect(wrong[0]!.message).toContain('0.8 mm colour boundary');
+    // The sentence names the plane and the side, so the fix ("no deeper than 0.6") is legible.
+    expect(wrong[0]!.message).toContain('the colour split is at 0.8 mm');
+    expect(wrong[0]!.message).toContain('must stay 0.2 mm above it');
+    expect(wrong[0]!.message).toContain('no deeper than 0.6 mm');
   });
 
-  it('says nothing for a "surface" label that stays in the top colour', () => {
-    const p = buildPreview(badgeJob(true, 0.5, { depthIntent: 'surface' }));
-    expect(p.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
+  it('passes a "surface" floor exactly one margin above the split', () => {
+    expect(boundFindings(badgeJob(true, 0.6, { depthIntent: 'surface' }))).toHaveLength(0);
   });
 
-  it('says nothing without a print — no boundary, so no colour to be wrong about', () => {
-    const p = buildPreview(badgeJob(false, 0.9, { depthIntent: 'surface' }));
-    expect(p.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
-  });
-
-  it('says nothing for a "reveal" label that reaches the bottom colour', () => {
-    // The other side of the same bound: a reveal PAST the boundary is exactly what a two-colour
-    // blank is for, so it is not an error — and #285 is careful that the boundary is not a
-    // `cut-too-deep` limit for precisely this reason.
-    const p = buildPreview(badgeJob(true, 1.2, { depthIntent: 'reveal' }));
-    expect(p.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
-  });
-
-  it('flags a "reveal" label that stops short of the boundary, at the boundary', () => {
-    const wrong = buildPreview(badgeJob(true, 0.5, { depthIntent: 'reveal' })).findings.filter((f) => f.code === 'item-wrong-colour');
+  it('refuses a "reveal" floor that lands ON the split', () => {
+    const wrong = boundFindings(badgeJob(true, 0.8, { depthIntent: 'reveal' }));
     expect(wrong).toHaveLength(1);
     expect(wrong[0]!.severity).toBe('error');
-    expect(wrong[0]!.labelId).toBe('lbl');
-    expect(wrong[0]!.message).toContain('0.8 mm colour boundary');
-    expect(wrong[0]!.message).toContain('Cut deeper than 0.8 mm');
+    expect(wrong[0]!.message).toContain('the colour split is at 0.8 mm');
+    expect(wrong[0]!.message).toContain('must go 0.2 mm below it');
+    expect(wrong[0]!.message).toContain('at least 1 mm');
+  });
+
+  it('passes a "reveal" floor exactly one margin below the split', () => {
+    // The other side of the same bound, and the reason it is not a `cut-too-deep` limit: a reveal
+    // PAST the split is exactly what a two-colour blank is for.
+    expect(boundFindings(badgeJob(true, 1, { depthIntent: 'reveal' }))).toHaveLength(0);
+  });
+
+  it('says nothing without a print — no split, so no bound to break', () => {
+    expect(boundFindings(badgeJob(false, 0.9, { depthIntent: 'surface' }))).toHaveLength(0);
   });
 
   it('leaves "custom" alone — the advanced override says the number is the point', () => {
-    const p = buildPreview(badgeJob(true, 0.9, { depthIntent: 'custom' }));
-    expect(p.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
+    expect(boundFindings(badgeJob(true, 0.9, { depthIntent: 'custom' }))).toHaveLength(0);
   });
 
   it('leaves a label with no intent alone — it states no expectation', () => {
-    const p = buildPreview(badgeJob(true, 0.9));
-    expect(p.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
+    expect(boundFindings(badgeJob(true, 0.9))).toHaveLength(0);
   });
 
   it('skips a disabled label and a construction label — neither has a floor to place', () => {
-    const off = buildPreview(badgeJob(true, 0.9, { depthIntent: 'surface', enabled: false }));
-    expect(off.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
-    const construction = buildPreview(badgeJob(true, 0.9, { depthIntent: 'surface', construction: true }));
-    expect(construction.findings.some((f) => f.code === 'item-wrong-colour')).toBe(false);
+    expect(boundFindings(badgeJob(true, 0.9, { depthIntent: 'surface', enabled: false }))).toHaveLength(0);
+    expect(boundFindings(badgeJob(true, 0.9, { depthIntent: 'surface', construction: true }))).toHaveLength(0);
+  });
+
+  it('takes the margin from the caller, not from the job (#345)', () => {
+    // A house margin of 0.5 mm refuses a floor that the shipped 0.2 allows: the same job, the same
+    // split, one number different — which is the whole point of the margin being a setting.
+    const job = badgeJob(true, 0.6, { depthIntent: 'surface' });
+    const p = buildPreview(job, { ...effectiveMargins(job, MARGIN_DEFAULTS), boundaryMargin: 0.5, source: 'user' });
+    expect(p.findings.filter((f) => f.code === 'item-depth-bound')).toHaveLength(1);
   });
 });

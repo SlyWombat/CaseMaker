@@ -135,7 +135,8 @@ describe('engraveGenerate (#206)', () => {
 
 describe('an under-surface void limits the cut (#231 item 3)', () => {
   // A 12 mm blank with a 2 mm membrane over a pocket: the void's ceiling is at z 10 from the
-  // bottom face, so minFloor 1 leaves a deepest cut of 1.0 mm over it. `toPartPlan` turns the
+  // bottom face, so the job's boundary margin (0.2 mm — no print is stated, so there is no layer
+  // height to read it from) leaves a deepest cut of 1.8 mm over it. `toPartPlan` turns the
   // void into `stock.keepOuts`, and `jobDepthLimit` is what the verifier is handed.
   const pocket: EngraveKeepOut = {
     id: 'pocket',
@@ -183,7 +184,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
   });
 
   it('refuses a cut past the membrane, flagged at verify on the TEXT', () => {
-    const g = generate(tl, job(1.5, [pocket]));
+    const g = generate(tl, job(2.0, [pocket]));
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('verify');
     // The text existed — it is the verifier, re-reading the posted bytes, that refused it.
@@ -195,7 +196,9 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
   });
 
   it('passes the same cut when it stays within the membrane', () => {
-    const g = generate(tl, job(0.8, [pocket]));
+    // 1.8 mm is exactly the limit (2 mm of membrane less the 0.2 mm margin) and passes: the bound
+    // is a plane to stay clear of, not a thickness to reach.
+    const g = generate(tl, job(1.8, [pocket]));
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.verify!.findings.some((f) => f.code === 'cut-too-deep')).toBe(false);
@@ -222,12 +225,12 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
   });
 
   it('does not object to the same depth clear of the void (#171)', () => {
-    // The acceptance pair: 1.5 mm over the membrane is refused, and the same 1.5 mm cut on solid
+    // The acceptance pair: 2 mm over the membrane is refused, and the same 2 mm cut on solid
     // stock is not — the depth alone is never the problem.
     const clear: EngraveJob = {
       ...defaultEngraveJob(),
       labels: [],
-      shapes: [shapeB(1.5)],
+      shapes: [shapeB(2.0)],
       keepOuts: [pocket],
     };
     const g = generate(tl, clear);
@@ -338,9 +341,13 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
 // #285 — a job that states its print takes its DEPTH LIMIT from the blank sliced on the printer's
 // own layer grid, rather than from the nominal membrane arithmetic. The switch is
 // `EngraveJob.stock.print` (`fromBadge.ts` writes it only when the badge declares one, #166), and
-// the whole point is the pair below: the SAME 1.2 mm cut over the pocket is refused by the analytic
-// limit and permitted by the stack's, because 0.2 mm layers leave 1.4 mm of solid there and the
-// membrane-plus-floor arithmetic says 0.51.
+// the pair below is what it buys: over the pocket the nominal membrane is 1.51 mm and the layer grid
+// leaves 1.4 mm of solid, so the print is the STRICTER of the two — 1.25 mm sits between them.
+//
+// #345 made the two comparable by putting both on the same `boundaryMargin`. Before it they were
+// not: the analytic path subtracted `minFloor` (1 mm, a different quantity) while the grid subtracted
+// nothing, so a printed blank appeared to permit DEEPER cuts than a plain one, which is backwards.
+// The grid's answer is a refinement of the membrane's and can only be shallower.
 describe('a job that states its print limits on the printer’s layer grid (#285)', () => {
   /**
    * The badge's blank as a job with one 10 × 10 pocket over the magnet cavity — the acceptance
@@ -382,27 +389,34 @@ describe('a job that states its print limits on the printer’s layer grid (#285
     const deep = g.verify!.findings.find((f) => f.code === 'cut-too-deep');
     expect(deep).toBeDefined();
     expect(deep!.severity).toBe('error');
-    // 0.2 mm layers carry the 1.51 mm membrane down to a 1.4 mm solid span below the face, so that
-    // is the number the cutter is refused against — and the sentence says which membrane broke.
-    expect(deep!.message).toContain('1.400 mm permitted there');
-    expect(deep!.message).toContain('Magnet pocket');
+    // 0.2 mm layers carry the 1.51 mm membrane down to a 1.4 mm solid span below the face, and
+    // #345's 0.2 mm margin comes off that: 1.2 mm is the number the cutter is refused against, and
+    // the sentence names the plane — the void's ceiling — in the bound's own words.
+    expect(deep!.message).toContain('1.200 mm permitted there');
+    expect(deep!.message).toContain("the magnet pocket's ceiling");
   });
 
-  it('passes 1.2 mm over the same pocket — deeper than the nominal membrane allows', () => {
+  it('passes 1.2 mm over the same pocket — the layer grid’s own floor, to the margin', () => {
     const g = generate(tl, badgeJob(true, 1.2));
     expect(g.ok).toBe(true);
     expect(g.stage).toBe('done');
     expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
   });
 
-  it('refuses that same 1.2 mm cut when the job states no print — the switch is the print', () => {
-    const g = generate(tl, badgeJob(false, 1.2));
-    expect(g.ok).toBe(false);
-    expect(g.stage).toBe('verify');
-    // 1.51 mm of membrane less the 1 mm minimum floor: the analytic limit over the pocket is 0.51.
-    const deep = g.verify!.findings.find((f) => f.code === 'cut-too-deep');
+  it('lets a 1.25 mm cut through without a print and refuses it with one — the print is the stricter gate', () => {
+    // The two limits, both on #345's margin: the grid's 1.4 mm span less 0.2 is 1.2, the design's
+    // 1.51 mm membrane less 0.2 is 1.31. 1.25 sits between them, so the same cut is permitted on a
+    // plain blank and refused on a printed one.
+    const withPrint = generate(tl, badgeJob(true, 1.25));
+    expect(withPrint.ok).toBe(false);
+    expect(withPrint.stage).toBe('verify');
+    const deep = withPrint.verify!.findings.find((f) => f.code === 'cut-too-deep');
     expect(deep).toBeDefined();
-    expect(deep!.message).toContain('0.510 mm permitted there');
+    expect(deep!.message).toContain('1.200 mm permitted there');
+
+    const without = generate(tl, badgeJob(false, 1.25));
+    expect(without.ok).toBe(true);
+    expect(without.stage).toBe('done');
   });
 
   it('generates the same program with and without a print — the print moves the gate, not the toolpath', () => {

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { todayISODate } from '@/engine/cnc/fixture';
 import { parseMachineCalibration, type MachineCalibration } from '@/engine/cnc/calibration';
+import { MARGIN_DEFAULTS, type MarginSettings } from '@/engine/cnc/engrave/depthBounds';
 import type { Sacrificial, SacrificialSide, SacrificialUnder, ViseParams } from '@/types/engraveJob';
 
 export type ExportLayoutMode = 'print-ready' | 'assembled';
@@ -24,6 +25,14 @@ export interface AppSettings {
   exportFormat: ExportFormat;
   fixtures: FixturesSettings;
   /**
+   * The house's depth thresholds (#345): the two Z-error margins every job copies, and the three
+   * numbers that SEED a new job's own `minFloor`/`edgeMargin`/`breakthrough`.
+   *
+   * A house default is not a recommendation (decision 28): `source` says whether this is the
+   * shipped set or the user's own, and a job's own `margins` always wins over it.
+   */
+  margins: MarginSettings;
+  /**
    * The machine's own coordinate frame, read from it (#279). Decision 28's saved tier, for a
    * MACHINE rather than a fixture: absent means the shipped profile's vendor defaults are in
    * force, present means these numbers win. `MACHINES` is never mutated — the resolution happens
@@ -46,6 +55,7 @@ const DEFAULTS: AppSettings = {
   exportLayout: DEFAULT_EXPORT_LAYOUT,
   exportFormat: DEFAULT_EXPORT_FORMAT,
   fixtures: {},
+  margins: { ...MARGIN_DEFAULTS },
 };
 
 const VALID_FORMATS: ReadonlySet<ExportFormat> = new Set(['stl-binary', 'stl-ascii', '3mf']);
@@ -194,13 +204,80 @@ export function parseFixturesStrict(raw: unknown): FixturesParseResult {
   return { ok: true, fixtures: out };
 }
 
+const VALID_MARGIN_SOURCES: ReadonlySet<MarginSettings['source']> = new Set(['default', 'user']);
+
+/**
+ * The house's depth thresholds (#345), validated on load. Whole-or-nothing, like the vise: a
+ * partially-read margin set would apply the user's `boundaryMargin` with the shipped `minFloor`,
+ * which is a threshold nobody chose. Absent — every install that predates this — is the shipped
+ * set, so behaviour is exactly what it was.
+ *
+ * Exported for its spec, the way `clampPort` is: the fallback is the whole reason it exists, and
+ * nothing else in the app may call it — the store reads it once, at load.
+ */
+export function parseMargins(raw: unknown): MarginSettings {
+  if (typeof raw !== 'object' || raw === null) return { ...MARGIN_DEFAULTS };
+  const o = raw as Record<string, unknown>;
+  const source = o.source;
+  if (typeof source !== 'string' || !VALID_MARGIN_SOURCES.has(source as MarginSettings['source'])) {
+    return { ...MARGIN_DEFAULTS };
+  }
+  const keys = ['boundaryMargin', 'zTolerance', 'minFloor', 'edgeMargin', 'breakthrough'] as const;
+  for (const key of keys) {
+    if (typeof o[key] !== 'number' || !Number.isFinite(o[key]) || (o[key] as number) < 0) {
+      return { ...MARGIN_DEFAULTS };
+    }
+  }
+  return {
+    boundaryMargin: o.boundaryMargin as number,
+    zTolerance: o.zTolerance as number,
+    minFloor: o.minFloor as number,
+    edgeMargin: o.edgeMargin as number,
+    breakthrough: o.breakthrough as number,
+    source: source as MarginSettings['source'],
+  };
+}
+
+/**
+ * Validate a margins record for the "my machine" import (#247). Stricter than `parseMargins`: a
+ * section that is PRESENT but malformed refuses the whole record with a reason rather than quietly
+ * falling back to the shipped numbers — a half-applied threshold set is worse than none.
+ */
+export function parseMarginsStrict(raw: unknown): { ok: true; margins: MarginSettings } | { ok: false; reason: string } {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { ok: false, reason: 'the margins record is not an object' };
+  }
+  const o = raw as Record<string, unknown>;
+  const source = o.source;
+  if (typeof source !== 'string' || !VALID_MARGIN_SOURCES.has(source as MarginSettings['source'])) {
+    return { ok: false, reason: 'the margins record does not say where its numbers came from' };
+  }
+  const keys = ['boundaryMargin', 'zTolerance', 'minFloor', 'edgeMargin', 'breakthrough'] as const;
+  for (const key of keys) {
+    if (typeof o[key] !== 'number' || !Number.isFinite(o[key]) || (o[key] as number) < 0) {
+      return { ok: false, reason: `the margins record's ${key} is missing or not a number` };
+    }
+  }
+  return {
+    ok: true,
+    margins: {
+      boundaryMargin: o.boundaryMargin as number,
+      zTolerance: o.zTolerance as number,
+      minFloor: o.minFloor as number,
+      edgeMargin: o.edgeMargin as number,
+      breakthrough: o.breakthrough as number,
+      source: source as MarginSettings['source'],
+    },
+  };
+}
+
 function loadSettings(): AppSettings {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
-    return { ...DEFAULTS };
+    return { ...DEFAULTS, margins: { ...MARGIN_DEFAULTS } };
   }
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return { ...DEFAULTS };
+    if (!raw) return { ...DEFAULTS, margins: { ...MARGIN_DEFAULTS } };
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
     return {
       port: clampPort(parsed.port),
@@ -214,10 +291,11 @@ function loadSettings(): AppSettings {
           ? (parsed.exportFormat as ExportFormat)
           : DEFAULT_EXPORT_FORMAT,
       fixtures: parseFixtures(parsed.fixtures),
+      margins: parseMargins(parsed.margins),
       ...pickCalibration(parsed.machineCalibration),
     };
   } catch {
-    return { ...DEFAULTS };
+    return { ...DEFAULTS, margins: { ...MARGIN_DEFAULTS } };
   }
 }
 
@@ -263,6 +341,14 @@ export interface SettingsState extends AppSettings {
   setSacrificial: (sacrificial: Sacrificial) => void;
   /** Forget the saved sacrificial setup; a new job then starts with none. */
   clearSacrificial: () => void;
+  /**
+   * Save the house's depth thresholds (#345). The caller has already built the record; this
+   * persists it verbatim, `source` and all, so the app can still tell a threshold the user chose
+   * from the shipped set.
+   */
+  setMargins: (margins: MarginSettings) => void;
+  /** Put the shipped thresholds back. */
+  clearMargins: () => void;
   /**
    * Replace the whole saved-fixture slice in one step (#247) — what a validated "my machine"
    * import does. The caller has already validated the record; this persists it verbatim.
@@ -330,6 +416,17 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       set({ fixtures });
       persist({ ...get(), fixtures });
     },
+    // The house thresholds (#345) are remembered verbatim, `source` and all: a set the user chose
+    // has to keep saying so, or the app would seed new jobs from a number nobody picked.
+    setMargins: (margins) => {
+      set({ margins });
+      persist({ ...get(), margins });
+    },
+    clearMargins: () => {
+      const margins = { ...MARGIN_DEFAULTS };
+      set({ margins });
+      persist({ ...get(), margins });
+    },
     // Saved verbatim, provenance and all (#279): the record has to keep saying WHICH machine and
     // WHEN, or a year-old read becomes an assertion about a machine that has since been trammed.
     setMachineCalibration: (machineCalibration) => {
@@ -343,7 +440,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       persist(next);
     },
     resetSettings: () => {
-      const fresh = { ...DEFAULTS };
+      // `margins` is cloned, not shared: `DEFAULTS` is module state, and a reset that handed out
+      // the same object the next edit would then mutate is how a "reset" stops resetting.
+      const fresh = { ...DEFAULTS, margins: { ...MARGIN_DEFAULTS } };
       // Zustand's `set` MERGES, so a key `DEFAULTS` does not carry would survive a reset. The
       // machine's saved frame (#279) is one: it has to go back to "nothing read" like every other
       // setting, or "reset" would leave a calibration in force that nothing on screen claims.

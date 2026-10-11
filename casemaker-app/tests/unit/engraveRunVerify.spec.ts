@@ -37,10 +37,12 @@ function refusingSimClient(): SimClient {
 }
 
 /**
- * A 12 mm blank with a 2 mm membrane over a magnet pocket (ceiling at z 10 from the bottom), so
- * `minFloor` 1 leaves a deepest cut of 1.0 mm over the void. A 1.5 mm cut there clears
- * `validateJob` (which only knows the stock's own floor) and is refused by the verifier alone —
- * which is precisely the stage this spec exists to reach.
+ * A 12 mm blank with a 2 mm membrane over a magnet pocket (ceiling at z 10 from the bottom).
+ * #345 made that ceiling an `above` bound carrying the boundary margin, not the stock's 1 mm
+ * minimum floor — which is the underside's own rule — so the deepest cut over the void is now
+ * 2 − 0.2 = 1.8 mm. A 1.9 mm cut there clears `validateJob` (which only knows the stock's own
+ * floor) and is refused by the verifier alone — which is precisely the stage this spec exists to
+ * reach.
  */
 const pocket: EngraveKeepOut = {
   id: 'pocket',
@@ -97,7 +99,7 @@ describe('engraveRunStore — a verifier refusal stops the run (#174)', () => {
   });
 
   it('blocks Save on a real cut-too-deep, with the text produced and no simulation run', async () => {
-    useEngraveJobStore.setState({ job: overMembraneJob(1.5) });
+    useEngraveJobStore.setState({ job: overMembraneJob(1.9) });
     await useEngraveRunStore.getState().generate();
     const run = useEngraveRunStore.getState();
 

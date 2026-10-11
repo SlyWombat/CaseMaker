@@ -27,7 +27,7 @@
  *     but not for a CAM or POST refusal, and a refusal with no reason is useless in the panel.
  */
 
-import type { EngraveItem, EngraveJob } from '@/types/engraveJob';
+import type { EngraveItem, EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 // package.json version for the post's `;@MKR|CAM|v=` header. Read from package.json directly
@@ -53,7 +53,7 @@ import type { Setup } from '@/engine/cnc/setup';
 import { verifyProgram, type DepthLimit, type VerifyReport } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import {
-  colourIntentFindings,
+  itemDepthBoundFindings,
   engraveCutRegions,
   engravabilityFindings,
   keepOutFindings,
@@ -65,6 +65,7 @@ import {
   type PerCharGlyph,
 } from './engraveGeometry';
 import { colourBoundaryFor, stackDepthLimit, type StackDepthLimit } from './stackDepthLimit';
+import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import type { OraclePredicted } from '@/engine/cnc/engrave/oracle';
 
 /** The stage that stopped the pipeline, or `done` when everything passed. */
@@ -187,14 +188,20 @@ export interface EngraveRegions {
   radius: number | null;
   findings: JobFinding[];
   /**
-   * The blank's colour boundary, mm below the engraved face, ON a real layer line (#285), or
-   * null when the job states no print and there are no colour layers to speak of.
+   * The blank's colour split, mm below the engraved face, ON a real layer line (#285), or null
+   * when the job states no print and there are no colour layers to speak of.
    *
    * Read here rather than in the preview so both halves of the pipe — the picture and the
-   * generated program — are told the same boundary by the same call: the preview draws it and
-   * `item-wrong-colour` is raised against it, and the verifier's limit comes from the same stack.
+   * generated program — are told the same plane by the same call: the preview draws it and
+   * `item-depth-bound` is raised against it, and the verifier's limit comes from the same stack.
    */
   colourBoundaryDepth: Mm | null;
+  /**
+   * The depth margins this job ran with (#345), resolved from the job's own record or from the
+   * house setting the caller handed in. Returned so the preview draws and reports the SAME numbers
+   * the findings and the verifier used instead of resolving a second set of its own.
+   */
+  margins: EngraveMargins;
 }
 
 /**
@@ -221,7 +228,12 @@ function drillPolygons(tl: ManifoldToplevel, holes: readonly [number, number][],
  * measurement, the findings, the CAM and the verifier, so the run can never disagree with itself
  * about which cutter it used.
  */
-export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob, tool: Tool | null): EngraveRegions {
+export function engraveRegions(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  tool: Tool | null,
+  margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
+): EngraveRegions {
   const plan = toPartPlan(job);
   const perChar = perCharFor(job);
   const r = tool ? cuttingRadiusForSweep(tool) : null;
@@ -233,7 +245,14 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob, tool: Tool
   // #171 — a WARNING only, and only for a job that declares a void (`keepOutFindings` returns
   // early otherwise, so a void-free job pays nothing here). A cut deep enough to breach the
   // membrane stays the verifier's `cut-too-deep`, which owns the layer-aligned depth limit.
-  const voidFindings = keepOutFindings(tl, job, plan, engraveCutRegions(plan, measured), radius);
+  const voidFindings = keepOutFindings(
+    tl,
+    job,
+    plan,
+    engraveCutRegions(plan, measured),
+    radius,
+    margins.boundaryMargin,
+  );
 
   // #285 — the colour boundary, when the job states its print. PURE grid arithmetic (#285 review):
   // the boundary is a rule about the layer grid, not a measurement of the solid, so it is read
@@ -249,9 +268,9 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob, tool: Tool
     ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
     ...engFindings,
     ...voidFindings,
-    // #285 — an item whose floor lands in the colour it was not asked for. A no-op for a job
-    // with no boundary and for any item that states no `depthIntent`.
-    ...colourIntentFindings(job, colourBoundaryDepth),
+    // #345 — an item whose floor breaks the split's bound, on the side its own `depthIntent` put
+    // it. A no-op for a blank that states no split and for any item with no intent.
+    ...itemDepthBoundFindings(job, colourBoundaryDepth, margins.boundaryMargin),
   ]);
 
   const byId = new Map(measured.map((m) => [m.labelId, m] as const));
@@ -296,7 +315,7 @@ export function engraveRegions(tl: ManifoldToplevel, job: EngraveJob, tool: Tool
   const cuts: CutRegion[] = [...regions, ...traceCutRegions(tl, plan, radius)];
   const predicted: OraclePredicted[] = cuts.map((c) => ({ depth: c.depth, polygons: c.polygons }));
 
-  return { plan, measured, regions, cuts, predicted, tool, radius, findings, colourBoundaryDepth };
+  return { plan, measured, regions, cuts, predicted, tool, radius, findings, colourBoundaryDepth, margins };
 }
 
 /** Count what the panel reports: operations, cutting moves, estimated seconds, depth passes. */
@@ -393,12 +412,14 @@ function frameProgram(
 }
 
 /**
- * The tail of the `cut-too-deep` sentence: WHY the limit at (x, y) is what it is (#285).
+ * The tail of the `cut-too-deep` sentence: WHICH plane the limit at (x, y) is (#285, #345).
  *
  * Two answers, and the difference is what the operator acts on. Over a void the solid itself
- * stopped the cutter, so the sentence names the membrane — the void's own name when it has one.
- * Everywhere else the limit is the job's own floor under the stock (or the sacrificial height),
- * and naming a membrane there would send the operator looking for a pocket that is not there.
+ * stopped the cutter, so the sentence names the plane the floor would have crossed — the void's
+ * ceiling, named by the same `ceilingName` the bound model uses, so the sentence and the per-item
+ * finding cannot describe one plane two ways. Everywhere else the limit is the job's own floor
+ * under the stock (or the sacrificial height), and naming a ceiling there would send the operator
+ * looking for a pocket that is not there.
  *
  * Exported so the branch is directly testable: over solid stock nothing can reach the verifier
  * today — `validateJob` refuses the same depth first — so only the void half is reachable through
@@ -406,8 +427,7 @@ function frameProgram(
  */
 export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm, y: Mm): string {
   if (stack.reasonAt(x, y) === 'stock') return '— the floor the job keeps under the stock';
-  const name = keepOutNameAt(job, x, y);
-  return name ? `— the membrane over "${name}"` : '— the membrane over a declared void';
+  return `— ${ceilingName(keepOutNameAt(job, x, y) ?? '')}`;
 }
 
 /**
@@ -425,6 +445,12 @@ export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm,
  * `.nc` and the run sheet are cut from this call's result, so it is the numbers the operator reads
  * against the numbers the machine runs that is at stake.
  *
+ * `margins` is the job's depth thresholds as the MAIN THREAD resolved them (#345), for the same
+ * reason `catalogue` is handed in: the house setting lives in `useSettingsStore`, which this realm
+ * cannot read. Omitted — a test, or a caller with no settings — the job's own record answers, and a
+ * job that carries none falls back to the shipped default, so nothing here needs a store to be
+ * correct.
+ *
  * `calibration` is the machine's own frame, if the user has one saved (#279). The machine is resolved
  * from it ONCE here (#297) and that one object feeds the feeds, the post, the setup, the verifier and
  * the frame file — the same object the caller loads the simulation with. Before this, the verifier
@@ -437,9 +463,10 @@ export function engraveGenerate(
   tool: Tool | null,
   catalogue: readonly FeedCatalogueRow[],
   calibration: MachineCalibration | null = null,
+  margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
 ): EngraveGenerated {
   const mill = resolveMachine(Z1, calibration);
-  const { plan, regions, predicted, radius, findings } = engraveRegions(tl, job, tool);
+  const { plan, regions, predicted, radius, findings } = engraveRegions(tl, job, tool, margins);
   const errors: EngraveFailure[] = [];
 
   const stop = (stage: EngraveStage, extra?: { feeds?: FeedsResult | null; message?: string }): EngraveGenerated => {
@@ -520,8 +547,8 @@ export function engraveGenerate(
   // job that states its print (#285) the whole limit comes from the layer stack instead, so the
   // void membrane is layer-aligned and the verifier's number is the one the printer will honour.
   // The stack owns wasm cross-sections, so it lives no longer than the two verifier calls below.
-  const stack = stackDepthLimit(tl, plan, job);
-  const limit: DepthLimit = stack?.limit ?? jobDepthLimit(job);
+  const stack = stackDepthLimit(tl, plan, job, margins.boundaryMargin);
+  const limit: DepthLimit = stack?.limit ?? jobDepthLimit(job, margins.boundaryMargin);
   const limitReasonAt = stack
     ? (x: number, y: number): string => depthLimitReason(stack, job, x, y)
     : undefined;

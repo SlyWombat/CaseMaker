@@ -13,13 +13,15 @@
 
 import { featureSim } from '@/platform/features';
 import { create } from 'zustand';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import { getTools } from '@/engine/cnc/toolRegistry';
 import { feedCatalogueRows } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useEngraveJobStore } from './engraveJobStore';
+import { useSettingsStore } from './settingsStore';
 
 export type EngravePreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -29,6 +31,7 @@ export type EngravePreviewClient = {
     tools: readonly ToolLibraryEntry[],
     catalogue: readonly FeedCatalogueRow[],
     gen: number,
+    margins: EngraveMargins,
   ) => Promise<EngravePreview | null>;
 };
 
@@ -72,7 +75,16 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
       // worker measures and recommends from is the one the panel's picker is showing. The Makera
       // feed rows go the same way and for the same reason (#324): this side's module state is not
       // visible in the worker, so the recommendation's feeds filter has to be handed the rows.
-      const preview = await client.engravePreview(job, getTools(), feedCatalogueRows(), mine);
+      // The job's depth thresholds, resolved HERE (#345) for the same reason the registry snapshot
+      // is read here: the worker cannot see `useSettingsStore`, and a preview drawn to a different
+      // margin than the run will use would show a void floor the verifier does not enforce.
+      const preview = await client.engravePreview(
+        job,
+        getTools(),
+        feedCatalogueRows(),
+        mine,
+        effectiveMargins(job, useSettingsStore.getState().margins),
+      );
       if (mine !== seq) return; // superseded by a newer request
       // `preview === null` means the worker saw a newer generation already; keep the last one.
       if (preview) set({ preview, status: 'ready' });

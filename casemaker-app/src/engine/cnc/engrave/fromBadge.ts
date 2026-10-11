@@ -84,6 +84,29 @@ function stockPrintFor(badge: BadgeParams): EngraveJob['stock']['print'] {
 }
 
 /**
+ * The dome a printed badge blank is assumed to carry, mm (#345). PROVISIONAL, awaiting #165: it is
+ * the order of warp a PLA badge picks up across its 76.2 mm width on an unheated bed, and nothing
+ * has measured THIS badge. It is stated as a flatness fact rather than folded into a margin so the
+ * recommendation can say WHERE the number came from and a later measurement replaces it.
+ */
+export const DEFAULT_BADGE_DOME_MM = 0.33;
+
+/**
+ * The blank's flatness, in `EngraveJob.stock`'s shape, or `undefined` when the badge states nothing
+ * about how it was printed (#345).
+ *
+ * The dome is a consequence of PRINTING, so it travels with the print for the same reason the split
+ * does: a badge that states no print has told us nothing about how flat it is, and inventing a dome
+ * for it would put a number nobody supplied into `recommendMargins`' budget. Across the WIDTH
+ * because that is the shorter span the badge is printed over and the one the provisional figure is
+ * quoted for.
+ */
+function stockFlatnessFor(badge: BadgeParams): EngraveJob['stock']['flatness'] {
+  if (!badge.print) return undefined;
+  return { dome: DEFAULT_BADGE_DOME_MM, across: 'width', source: 'badge' };
+}
+
+/**
  * Read `badge` as the job's blank: its stock, and the void its model already has.
  *
  * Deliberately narrow — it does not touch labels, tool, vise, feeds or `minFloor`. The badge
@@ -93,6 +116,7 @@ function stockPrintFor(badge: BadgeParams): EngraveJob['stock']['print'] {
 export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
   const pocket = badge.magnetPocket;
   const print = stockPrintFor(badge);
+  const flatness = stockFlatnessFor(badge);
   const notes = [
     `The badge's blank, ${mm(badge.width)} × ${mm(badge.height)} × ${mm(badge.thickness)} mm PLA, ` +
       `is now the stock (its bounding rectangle — the corner radii are not modelled here).`,
@@ -106,6 +130,13 @@ export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
     );
   }
 
+  if (flatness) {
+    notes.push(
+      `Its dome came with it too: a printed blank is out of flat by about ${mm(flatness.dome)} mm ` +
+        `across its ${flatness.across}, which the job's Z budget has to cover.`,
+    );
+  }
+
   if (!pocket) {
     notes.push('This badge has no magnet pocket, so no void was declared.');
     return {
@@ -115,6 +146,7 @@ export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
         thickness: badge.thickness,
         material: 'pla',
         print,
+        flatness,
       },
       pocket: null,
       notes,
@@ -134,6 +166,7 @@ export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
       thickness: badge.thickness,
       material: 'pla',
       print,
+      flatness,
     },
     pocket: {
       id: BADGE_POCKET_KEEP_OUT_ID,

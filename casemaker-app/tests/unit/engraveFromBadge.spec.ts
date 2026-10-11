@@ -60,13 +60,16 @@ describe('badgeBlankFor (#271)', () => {
 
   it('produces a void the depth limit reads, and only over its footprint', () => {
     const job = jobForBadge();
-    // 1.51 mm of membrane, less the default 1 mm minimum floor: 0.51 mm over the pocket…
-    expect(keepOutLimitAt(job, 38.1, 19.05)).toBeCloseTo(0.51, 6);
+    // The pocket's ceiling is an `above` bound (#345), so what is reserved over it is the
+    // boundary margin — one printed layer's worth, and this badge states no print, so the shipped
+    // 0.2 — and NOT the stock's 1 mm minimum floor, which is the UNDERSIDE's own rule.
+    // 1.51 mm of membrane, less 0.2: 1.31 mm over the pocket…
+    expect(keepOutLimitAt(job, 38.1, 19.05)).toBeCloseTo(1.31, 6);
     // …and nothing reserved out at the blank's corner, where the limit is the stock's own.
     expect(keepOutLimitAt(job, 5, 5)).toBeNull();
     expect(jobDepthLimit(job)(5, 5)).toBeCloseTo(3.81 - 1, 6);
-    // The membrane is thin: a 1 mm cut on the badge's engraved face breaks through it.
-    expect(jobDepthLimit(job)(38.1, 19.05)).toBeLessThan(1);
+    // The membrane is thin: a 1.5 mm cut on the badge's engraved face breaks through it.
+    expect(jobDepthLimit(job)(38.1, 19.05)).toBeLessThan(1.5);
   });
 
   it('survives the schema round-trip, at the same fixed id', () => {

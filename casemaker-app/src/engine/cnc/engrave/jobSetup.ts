@@ -58,11 +58,13 @@ export type JobFindingCode =
   // deep enough to breach is `cut-too-deep`, raised by the verifier against the layer-aligned
   // limit, and a second limit computed at this stage would be a second owner of that number.
   | 'item-over-void'
-  // A two-colour blank's own error twin (#285, decision 20): a label whose floor lands in the
-  // colour it did not ask for. It is NOT a depth limit — a `reveal` floor below the boundary is
-  // correct by design, which is why the boundary is checked against each item's stated
-  // `depthIntent` here and never as a `cut-too-deep` limit in `verify.ts`.
-  | 'item-wrong-colour'
+  // A depth bound an item stated for itself (#345, superseding #285's `item-wrong-colour`): the
+  // colour split, whose plane and side come from the item's own `depthIntent`. It is NOT a depth
+  // limit — a `reveal` floor below the split is correct by design, which is why a `below` bound can
+  // only be checked per item against the intent that put it there, never as a `cut-too-deep` limit
+  // in `verify.ts`. The bounds a BLANK states (a void's ceiling, the stock's underside) keep the
+  // owners named above: `cut-too-deep` and `depth-exceeds-stock`.
+  | 'item-depth-bound'
   // Single-line traces (#219). `trace-self-overlap` is raised here; `trace-outside-stock` needs
   // the swept region intersected with the stock, which only the worker evaluates (#201). Both
   // are part of `TraceFindingCode` in `partPlan.ts`, where the geometry that detects them lives.

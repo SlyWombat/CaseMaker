@@ -12,7 +12,7 @@ import type { MachineCalibration, Setup } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import { createFrameCoalescer } from './frameCoalescer';
@@ -175,17 +175,19 @@ export const simPath = (): Promise<SimPath> => getSimApi().simPath();
  * vise jaws. `null` when `gen` is older than one the worker has already answered; mesh buffers
  * are transferred. Independent of any loaded simulation program.
  *
- * `tools` is the resolved registry snapshot (#305) and `catalogue` the Makera feed rows (#324):
- * the worker cannot read the app's module state, so the list it resolves and recommends from —
- * and the rows that recommendation filters on — are sent with the job. Plain data, like the
- * `Tool` `simLoad` takes.
+ * `tools` is the resolved registry snapshot (#305), `catalogue` the Makera feed rows (#324) and
+ * `margins` the job's depth thresholds (#345): the worker cannot read the app's module state, so
+ * the list it resolves and recommends from — and the rows that recommendation filters on, and the
+ * margins its void limits are drawn to — are all sent with the job. Plain data, like the `Tool`
+ * `simLoad` takes.
  */
 export const engravePreview = (
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
   gen: number,
-): Promise<EngravePreview | null> => getSimApi().engravePreview(job, tools, catalogue, gen);
+  margins: EngraveMargins,
+): Promise<EngravePreview | null> => getSimApi().engravePreview(job, tools, catalogue, gen, margins);
 
 /**
  * Generate → verify, headless, in the sim worker (#206). Returns the exact `.nc` text and the
@@ -199,14 +201,21 @@ export const engravePreview = (
  * `catalogue` is the caller's Makera feed rows (#324), for the same reason: the `.nc` and the run
  * sheet are posted from the worker's `feedsFor`, and that realm's own copy of the snapshot is
  * always empty.
+ *
+ * `margins` is the caller's resolved depth thresholds (#345) — `effectiveMargins(job, settings)`
+ * on this side, because the house setting lives in `useSettingsStore` and the worker cannot see
+ * it. It gates the program, so sending it is not optional: the fallback the worker would otherwise
+ * use is the shipped default, and a run gated to a different margin than the sheet prints is
+ * exactly the disagreement #345 exists to remove.
  */
 export const engraveGenerate = (
   job: EngraveJob,
   tool: Tool | null,
   catalogue: readonly FeedCatalogueRow[],
-  calibration?: MachineCalibration | null,
+  calibration: MachineCalibration | null,
+  margins: EngraveMargins,
 ): Promise<EngraveGenerated> =>
-  getSimApi().engraveGenerate(job, tool, catalogue, calibration ?? null);
+  getSimApi().engraveGenerate(job, tool, catalogue, calibration, margins);
 
 /**
  * The volumetric oracle (#206 §3) over the program CURRENTLY loaded in the worker's session.

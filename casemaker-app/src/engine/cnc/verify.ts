@@ -52,8 +52,9 @@ export interface VerifyContext {
   minRapidZ: number;
   /**
    * WHY the limit is what it is at (x, y), as the tail of the `cut-too-deep` sentence — `— the
-   * membrane over "Magnet pocket"`, say (#285). A membrane and the stock's own floor are
-   * different failures with different fixes, and the number alone does not tell them apart.
+   * magnet pocket's ceiling`, say (#285, #345). A plane the cutter must stay clear of and the
+   * stock's own floor are different failures with different fixes, and the number alone does not
+   * tell them apart.
    *
    * OPTIONAL: the CNC-2 and restart paths compute their limit from the stock alone and pass
    * nothing, and the message then ends exactly where it always did.

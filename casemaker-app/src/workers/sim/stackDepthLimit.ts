@@ -16,12 +16,12 @@
  * has a print, this limit IS the void limit, and the analytic one is what a job without a print
  * keeps using. There is never a second owner of the number the verifier enforces.
  *
- * It is a BREACH limit, where the analytic one is a FLOOR limit. `maxDepthAt` answers "how deep
- * before the cutter reaches a void", so the whole first affected layer is left uncut and the
- * job's `minFloor` is not subtracted again — the margin and the floor would be two answers to one
- * question. Over solid stock the sacrificial limit, which does keep `minFloor`, is the shallower
- * of the two, so the two rules never contradict each other; over a void the stack's answer is
- * what the sliced blank actually gives.
+ * `maxDepthAt` is a BREACH depth — "how deep before the cutter reaches a void" — and the whole
+ * first affected layer is left uncut, so the answer is already on a layer line. #345 subtracts the
+ * job's `boundaryMargin` from it, which is the one rule every bound now follows: the floor stays
+ * `boundaryMargin` clear of the plane it must not cross. Over solid stock the sacrificial limit,
+ * which keeps `minFloor`, is the shallower of the two, so the two rules never contradict each
+ * other; over a void the stack's answer is what the sliced blank actually gives.
  *
  * The sacrificial material is NOT in the stack, and must not be: `buildLayerStack` is told the
  * part's outline and the voids in it, and nothing else. A side strip or an under-board sits
@@ -29,11 +29,11 @@
  * sacrificial answer unchanged there rather than reading the stack's "nothing here" as "no
  * cutting".
  *
- * The colour boundary is NOT part of this limit, and deliberately so. A `reveal` label crosses
- * the boundary by design, so a boundary the verifier refused every move below would refuse the
- * whole point of a two-colour blank. It is enforced per item against the item's own
- * `depthIntent`, as `item-wrong-colour` (`engraveGeometry.ts`), and this module exposes it as a
- * plain number for that check and for the panel.
+ * The colour split is NOT part of this limit, and deliberately so. A `reveal` label crosses the
+ * split by design, so a limit the verifier refused every move below would refuse the whole point of
+ * a two-colour blank. It is a `below` bound for such a label (and an `above` one for a `surface`
+ * label), checked per item in `engraveGeometry.ts` as `item-depth-bound`; this module exposes the
+ * split's depth as a plain number for that check and for the panel.
  *
  * The sacrificial limit is still composed in, exactly as `jobDepthLimit` composes it: a void is a
  * fact about the blank, the sacrificial material a fact about the setup, and whichever is
@@ -48,6 +48,7 @@
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 import { buildLayerStack, colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
+import { defaultBoundaryMargin, voidFloor } from '@/engine/cnc/engrave/depthBounds';
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { sacrificialDepthLimit, type DepthLimit } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
@@ -110,7 +111,12 @@ export function colourBoundaryFor(plan: PartPlan, job: EngraveJob): Mm | null {
  * reads its outline, thickness and voids, and a plan built from a different job would slice a
  * different blank.
  */
-export function stackDepthLimit(tl: ManifoldToplevel, plan: PartPlan, job: EngraveJob): StackDepthLimit | null {
+export function stackDepthLimit(
+  tl: ManifoldToplevel,
+  plan: PartPlan,
+  job: EngraveJob,
+  margin: Mm = defaultBoundaryMargin(job),
+): StackDepthLimit | null {
   const grid = gridOf(plan, job);
   if (grid === null) return null;
 
@@ -144,7 +150,9 @@ export function stackDepthLimit(tl: ManifoldToplevel, plan: PartPlan, job: Engra
       // part and lets the cutter onto it, so a point the stack is empty at must not tighten
       // anything. Where the sacrificial limit is genuinely 0 (over air) it is returned as it was.
       if (solid <= EPS) return base;
-      return Math.min(base, solid);
+      // #345 — the ceiling is a bound like any other: the floor keeps the margin clear of it, and
+      // the clamp at 0 (a ceiling nearer the face than the margin) says "do not cut here".
+      return Math.min(base, voidFloor(solid, margin));
     },
     boundary: stack.colourBoundaryDepth,
     reasonAt(x, y) {

@@ -3,11 +3,11 @@
  * measures lives in one browser's `localStorage`, and they work on two machines — one JSON
  * carries the saved machine setup between them.
  *
- * What it carries TODAY is `settingsStore.fixtures`: the saved vise and the sacrificial stack
- * (#203, #213). Tool-library and feed overrides do not exist as persisted state yet — the
- * `TOOL_LIBRARY` and `FEEDS_TABLE` are hardcoded tables — so there is nothing of theirs to
- * export; the format is versioned and sectioned so those land here when they exist, rather
- * than being invented now.
+ * What it carries TODAY is `settingsStore.fixtures` — the saved vise and the sacrificial stack
+ * (#203, #213) — and the house depth margins (#345). Tool-library and feed overrides do not exist
+ * as persisted state yet — the `TOOL_LIBRARY` and `FEEDS_TABLE` are hardcoded tables — so there is
+ * nothing of theirs to export; the format is versioned and sectioned so those land here when they
+ * exist, rather than being invented now.
  *
  * Import is WHOLE-OR-NOTHING (decision 28): a record that is malformed, truncated or of an
  * unknown version is refused with a reason and nothing is applied. `source` and `measuredAt`
@@ -16,7 +16,8 @@
  * Pure: parse and serialize touch no DOM and no store. The caller applies the result.
  */
 
-import { parseFixturesStrict, type FixturesSettings } from './settingsStore';
+import { parseFixturesStrict, parseMarginsStrict, type FixturesSettings } from './settingsStore';
+import type { MarginSettings } from '@/engine/cnc/engrave/depthBounds';
 
 /** Magic string that says "this is a Case Maker machine file", not some other JSON. */
 export const MY_MACHINE_KIND = 'casemaker-my-machine';
@@ -31,10 +32,25 @@ export interface MyMachineFile {
   /** ISO timestamp, informational only — never read back as truth. */
   exportedAt: string;
   fixtures: FixturesSettings;
+  /**
+   * The house's depth margins (#345). ADDITIVE, so the version does not move: an older build
+   * reading this record ignores the key, and an older record simply has none (see
+   * `MyMachineParseResult.margins`).
+   */
+  margins: MarginSettings;
 }
 
 export type MyMachineParseResult =
-  | { ok: true; fixtures: FixturesSettings }
+  | {
+      ok: true;
+      fixtures: FixturesSettings;
+      /**
+       * The file's margins, or `null` when it carries none — an export from before #345. `null` is
+       * NOT the shipped defaults: a file with no opinion on the margins must leave the importing
+       * machine's own setting alone, or a round trip through an old file would silently reset it.
+       */
+      margins: MarginSettings | null;
+    }
   | { ok: false; reason: string };
 
 /** A fresh copy that serializes to plain JSON, so the caller's store object is never aliased. */
@@ -44,6 +60,7 @@ function cloneFixtures(fixtures: FixturesSettings): FixturesSettings {
 
 export function buildMyMachineFile(
   fixtures: FixturesSettings,
+  margins: MarginSettings,
   now: Date = new Date(),
 ): MyMachineFile {
   return {
@@ -51,14 +68,16 @@ export function buildMyMachineFile(
     schemaVersion: MY_MACHINE_SCHEMA_VERSION,
     exportedAt: now.toISOString(),
     fixtures: cloneFixtures(fixtures),
+    margins: { ...margins },
   };
 }
 
 export function serializeMyMachineFile(
   fixtures: FixturesSettings,
+  margins: MarginSettings,
   now: Date = new Date(),
 ): string {
-  return JSON.stringify(buildMyMachineFile(fixtures, now), null, 2) + '\n';
+  return JSON.stringify(buildMyMachineFile(fixtures, margins, now), null, 2) + '\n';
 }
 
 /**
@@ -84,7 +103,17 @@ export function parseMyMachineRecord(raw: unknown): MyMachineParseResult {
   if (!('fixtures' in r)) {
     return { ok: false, reason: 'the file carries no machine setup' };
   }
-  return parseFixturesStrict(r.fixtures);
+  const fixtures = parseFixturesStrict(r.fixtures);
+  if (!fixtures.ok) return { ok: false, reason: fixtures.reason };
+  // #345 — the margins section, as an ADDITIVE one. Absent is legal (a file written before it
+  // existed) and means the file has no opinion; a present-but-malformed one refuses the lot, the
+  // same whole-or-nothing rule every other section follows.
+  if (!('margins' in r) || r.margins === undefined) {
+    return { ok: true, fixtures: fixtures.fixtures, margins: null };
+  }
+  const margins = parseMarginsStrict(r.margins);
+  if (!margins.ok) return { ok: false, reason: margins.reason };
+  return { ok: true, fixtures: fixtures.fixtures, margins: margins.margins };
 }
 
 /** Parse the file's text. Non-JSON is refused with a reason rather than thrown. */

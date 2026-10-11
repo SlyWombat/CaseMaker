@@ -30,6 +30,7 @@ import type {
 import type { CustomFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
 import { supportedFootprint } from '@/engine/cnc/sacrificial';
+import { defaultBoundaryMargin, voidFloor } from '@/engine/cnc/engrave/depthBounds';
 import type { DepthLimit } from '@/engine/cnc/verify';
 import { sacrificialDepthLimit } from '@/engine/cnc/verify';
 
@@ -881,12 +882,21 @@ export function keepOutMembrane(job: EngraveJob, zCeiling: Mm): Mm {
 }
 
 /**
- * The deepest cut a void permits, mm — its membrane less `minFloor`, never below 0 (#231). At a
- * cut of exactly this depth `minFloor` of material is left, which is the floor the job asked for;
- * one micron deeper and there is less.
+ * The deepest cut a void permits, mm — its membrane less the boundary margin, never below 0.
+ *
+ * #345 changed WHICH number this is. `#231` subtracted `minFloor`, so the rule over a void was the
+ * structural one ("leave a millimetre of material") while the layer-aligned rule a printed blank
+ * gets (#285's `maxDepthAt`) enforced the Z-error one. Two rules for one plane, and the tighter of
+ * them arbitrarily. A void's ceiling is now the same kind of bound as every other: an `above` plane
+ * the floor keeps `boundaryMargin` clear of, and this is the design-arithmetic twin of the stack's
+ * `maxDepthAt − margin` for a blank that states no print.
  */
-export function keepOutLimit(job: EngraveJob, membraneThickness: Mm): Mm {
-  return Math.max(0, membraneThickness - job.minFloor);
+export function keepOutLimit(
+  job: EngraveJob,
+  membraneThickness: Mm,
+  margin: Mm = defaultBoundaryMargin(job),
+): Mm {
+  return voidFloor(membraneThickness, margin);
 }
 
 /**
@@ -894,11 +904,12 @@ export function keepOutLimit(job: EngraveJob, membraneThickness: Mm): Mm {
  * or null when none covers the point. One walk, so `keepOutLimitAt` and `keepOutNameAt` can
  * never disagree about WHICH void is the answer there.
  */
-function bindingKeepOutAt(job: EngraveJob, x: Mm, y: Mm): { ko: EngraveKeepOut; limit: Mm } | null {
+function bindingKeepOutAt(job: EngraveJob, x: Mm, y: Mm, margin?: Mm): { ko: EngraveKeepOut; limit: Mm } | null {
   let found: { ko: EngraveKeepOut; limit: Mm } | null = null;
+  const m = margin ?? defaultBoundaryMargin(job);
   for (const ko of job.keepOuts ?? []) {
     if (!ko.enabled || !pointInKeepOut(ko, x, y)) continue;
-    const limit = keepOutLimit(job, keepOutMembrane(job, ko.zCeiling));
+    const limit = keepOutLimit(job, keepOutMembrane(job, ko.zCeiling), m);
     if (found === null || limit < found.limit) found = { ko, limit };
   }
   return found;
@@ -908,8 +919,8 @@ function bindingKeepOutAt(job: EngraveJob, x: Mm, y: Mm): { ko: EngraveKeepOut; 
  * The deepest cut an enabled under-surface void permits at (x, y), or null when none covers it.
  * When two voids overlap, the shallowest limit wins.
  */
-export function keepOutLimitAt(job: EngraveJob, x: Mm, y: Mm): Mm | null {
-  return bindingKeepOutAt(job, x, y)?.limit ?? null;
+export function keepOutLimitAt(job: EngraveJob, x: Mm, y: Mm, margin?: Mm): Mm | null {
+  return bindingKeepOutAt(job, x, y, margin)?.limit ?? null;
 }
 
 /**
@@ -937,15 +948,20 @@ export function keepOutNameAt(job: EngraveJob, x: Mm, y: Mm): string | null {
  *
  * A through-cut (#218) is not wired yet, so `through` is left false here; when #218 lands, the
  * flag comes from the job and this is the one place it is threaded from.
+ *
+ * `margin` (#345) is the job's `boundaryMargin` as the caller resolved it, and only the void half
+ * uses it: the job's own `minFloor`/`breakthrough` are the document's numbers and are not the
+ * house's to override. It is passed in rather than looked up because this module must stay free of
+ * the settings store — the panel and the worker each resolve it once and hand the same number here.
  */
-export function jobDepthLimit(job: EngraveJob): DepthLimit {
+export function jobDepthLimit(job: EngraveJob, margin?: Mm): DepthLimit {
   const sacrificial = sacrificialDepthLimit(job.stock, job.sacrificial, {
     minFloor: job.minFloor,
     breakthrough: job.breakthrough,
   });
   return (x, y) => {
     const base = sacrificial(x, y);
-    const local = keepOutLimitAt(job, x, y);
+    const local = keepOutLimitAt(job, x, y, margin);
     return local === null ? base : Math.min(base, local);
   };
 }

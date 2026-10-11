@@ -164,12 +164,14 @@ describe('pointInKeepOut (#231)', () => {
 });
 
 describe('the analytic depth limit (#231)', () => {
-  it('a void permits only its membrane less minFloor, and null away from it', () => {
-    const job = jobWithKeepOut(); // 12 thick, minFloor 1, zCeiling 10 -> membrane 2
-    expect(keepOutLimitAt(job, 50, 30)).toBeCloseTo(1.0, 9);
+  it('a void permits only its membrane less the boundary margin, and null away from it', () => {
+    // 12 thick, zCeiling 10 -> membrane 2. #345 takes the job's `boundaryMargin` off it, which for a
+    // job stating no print is the common 0.2 mm — the same rule the layer-aligned path follows.
+    const job = jobWithKeepOut();
+    expect(keepOutLimitAt(job, 50, 30)).toBeCloseTo(1.8, 9);
     expect(keepOutLimitAt(job, 5, 5)).toBeNull();
-    // The limit is never below 0: a void reaching to within minFloor of the face permits nothing.
-    expect(keepOutLimitAt(jobWithKeepOut(rectKeepOut({ zCeiling: 11.5 })), 50, 30)).toBe(0);
+    // The limit is never below 0: a void reaching the face permits nothing.
+    expect(keepOutLimitAt(jobWithKeepOut(rectKeepOut({ zCeiling: 12 })), 50, 30)).toBe(0);
   });
 
   it('a disabled void does not limit the cut', () => {
@@ -181,7 +183,7 @@ describe('the analytic depth limit (#231)', () => {
       ...defaultEngraveJob(),
       keepOuts: [rectKeepOut({ id: 'a', zCeiling: 10 }), rectKeepOut({ id: 'b', zCeiling: 11 })],
     };
-    expect(keepOutLimitAt(job, 50, 30)).toBeCloseTo(0.0, 9); // 12 - 11 - 1 = 0
+    expect(keepOutLimitAt(job, 50, 30)).toBeCloseTo(0.8, 9); // 12 - 11 - 0.2
   });
 
   it('jobDepthLimit is the stock limit with no void, and 0 outside the stock', () => {
@@ -194,7 +196,7 @@ describe('the analytic depth limit (#231)', () => {
 
   it('jobDepthLimit tightens over a void and leaves the rest of the blank alone', () => {
     const limit = jobDepthLimit(jobWithKeepOut());
-    expect(limit(50, 30)).toBeCloseTo(1.0, 9); // over the pocket
+    expect(limit(50, 30)).toBeCloseTo(1.8, 9); // over the pocket
     expect(limit(5, 5)).toBe(11); // solid stock
   });
 });
@@ -206,7 +208,7 @@ describe('the run sheet reports the void (#231)', () => {
     const step = need.steps.find((s) => s.text.includes('Under-surface void'))!;
     expect(step.text).toContain('Magnet pocket');
     expect(step.text).toContain('2 mm thick'); // 12 - 10
-    expect(step.value).toContain('deepest cut 1 mm');
+    expect(step.value).toContain('deepest cut 1.8 mm'); // 2 less the 0.2 mm boundary margin
   });
 
   it('says which cut sits over the void and the depth it allows', () => {
@@ -221,7 +223,7 @@ describe('the run sheet reports the void (#231)', () => {
           kind: 'rect',
           position: { x: 50, y: 30 },
           rotation: 0,
-          depth: 1.5,
+          depth: 2.2,
           enabled: true,
           width: 10,
           height: 10,
@@ -249,7 +251,7 @@ describe('the run sheet reports the void (#231)', () => {
     expect(overPocket).toBeTruthy();
     expect(overPocket!.text).toContain('Magnet pocket');
     expect(overPocket!.text).toContain('only 2 mm of material');
-    expect(overPocket!.text).toContain('DEEPER than the 1 mm');
+    expect(overPocket!.text).toContain('DEEPER than the 1.8 mm');
     // The clear item is not tagged with the void.
     const clear = cut.steps.find((s) => s.text.includes('"B"'))!;
     expect(clear.text).not.toContain('Magnet pocket');

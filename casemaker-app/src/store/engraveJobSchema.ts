@@ -353,12 +353,36 @@ const stockPrintSchema = z.object({
   firstLayerHeight: z.number().finite().positive().max(STOCK_LIMITS.thickness).optional(),
 });
 
+/**
+ * The printed face's dome (#345). OPTIONAL, not defaulted, for the same byte-for-byte reason as
+ * `print`: a blank nobody has stated a flatness for keeps no key, and the recommendation then says
+ * "flatness unknown" rather than carrying an invented 0. Bounded by the stock's own thickness — a
+ * dome taller than the blank is not a flatness.
+ */
+const stockFlatnessSchema = z.object({
+  dome: z.number().finite().nonnegative().max(STOCK_LIMITS.thickness),
+  across: z.enum(['width', 'length']),
+  source: z.enum(['badge', 'user', 'measured']),
+});
+
 const stockSchema = z.object({
   length: z.number().finite().positive().max(STOCK_LIMITS.length),
   width: z.number().finite().positive().max(STOCK_LIMITS.width),
   thickness: z.number().finite().positive().max(STOCK_LIMITS.thickness),
   material: z.enum(['softwood', 'hardwood', 'mdf', 'pla']),
   print: stockPrintSchema.optional(),
+  flatness: stockFlatnessSchema.optional(),
+});
+
+/**
+ * The job's own Z-error margins (#345). OPTIONAL, not defaulted: a job with none runs on the house
+ * setting at generate time, and a stored document that keeps no key round-trips byte-for-byte.
+ * Both numbers may be 0 (a job that has decided it needs no margin), so neither is `.positive()`.
+ */
+const engraveMarginsSchema = z.object({
+  boundaryMargin: z.number().finite().nonnegative().max(STOCK_LIMITS.thickness),
+  zTolerance: z.number().finite().nonnegative().max(STOCK_LIMITS.thickness),
+  source: z.enum(['default', 'recommended', 'user']),
 });
 
 const customFontSchema = z.object({
@@ -402,6 +426,10 @@ const jobSourcesSchema = z.object({
       material: fieldSourceSchema.optional(),
       // #285 — the badge's own print facts, stamped when they became the job's.
       print: fieldSourceSchema.optional(),
+      // #345 — the printed face's dome, stamped with the print it belongs to. Listed explicitly
+      // because zod STRIPS what an object does not name: the far side of a round trip would lose
+      // the provenance while keeping the value, which is worse than either.
+      flatness: fieldSourceSchema.optional(),
     })
     .optional(),
   tool: fieldSourceSchema.optional(),
@@ -442,6 +470,9 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   schemaVersion: z.literal(2),
   sacrificial: sacrificialSchema,
   breakthrough: z.number().finite().nonnegative(),
+  // #345's Z-error margins. OPTIONAL, not defaulted: an absent `margins` means "run on the house
+  // setting", which is what every job written before this field existed does.
+  margins: engraveMarginsSchema.optional(),
   // #205's hand-override of the feeds/speeds. Optional, so a v2 job without it is unchanged.
   cutOverride: cutOverrideSchema.optional(),
   // #214's shape pockets. Defaulted to empty so a v2 job written before shapes existed (and

@@ -2,6 +2,15 @@ import { ASSUMED_RAPID_MM_MIN } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { keepOutLimit, keepOutMembrane, toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
+import {
+  defaultBoundaryMargin,
+  effectiveMargins,
+  MARGIN_DEFAULTS,
+  marginSourceWords,
+  recommendMargins,
+  splitBound,
+  voidFloor,
+} from '@/engine/cnc/engrave/depthBounds';
 import { layerAlignedDepthFor } from '@/engine/cnc/layerStack';
 import { axesWord, describeTouch, kindWord, readsWord, registrationFor } from '@/engine/cnc/engrave/registration';
 import type { FeedsResult } from '@/engine/cnc/feeds';
@@ -12,7 +21,7 @@ import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
 // re-worded, so the sheet and the panel cannot disagree about what the sweep did not see.
 import { coverageDisclaimer, type SimCoverageInput, type SimRunOutcome } from '@/components/panels/simCoverage';
-import type { EngraveJob, ViseParams } from '@/types/engraveJob';
+import type { EngraveJob, EngraveMargins, ViseParams } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
 /**
@@ -407,7 +416,7 @@ export function sha256Hex(input: string): string {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * #285 — the membrane numbers on this sheet, as the verifier enforces them.
+ * #285/#345 — the membrane numbers on this sheet, as the verifier enforces them.
  *
  * A job that states its print is verified against the layer-aligned limit: the blank's own layers
  * sit over the void and the last whole layer above its roof is the floor (`layerStack`'s
@@ -415,20 +424,65 @@ export function sha256Hex(input: string): string {
  * measurement of the solid, so the sheet works the same number out itself — building the stack
  * would need Manifold, which the sheet's no-wasm, main-thread contract forbids, and the answer is
  * already in the arithmetic (#285 review). A job with no print has no grid: the analytic membrane
- * less the floor was the enforced limit there and still is.
+ * was the enforced limit there and still is.
  *
- * So the sheet prints the number the verifier stands behind in both cases, and the `(nominal)`
- * hedge that used to mark the difference is gone.
+ * #345 then takes the job's `boundaryMargin` off BOTH, because a void's ceiling is a bound like any
+ * other and the two paths must not keep different distances from it. The `(nominal)` hedge that
+ * used to mark the difference is gone: this is the number the verifier stands behind, in both cases.
  */
-function voidLimit(job: EngraveJob, membrane: Mm): Mm {
+function voidLimit(job: EngraveJob, membrane: Mm, margin: Mm = defaultBoundaryMargin(job)): Mm {
   const print = job.stock.print;
-  if (print === undefined) return keepOutLimit(job, membrane);
-  return layerAlignedDepthFor(
-    membrane,
-    job.stock.thickness,
-    print.layerHeight,
-    print.firstLayerHeight ?? print.layerHeight,
+  if (print === undefined) return keepOutLimit(job, membrane, margin);
+  return voidFloor(
+    layerAlignedDepthFor(
+      membrane,
+      job.stock.thickness,
+      print.layerHeight,
+      print.firstLayerHeight ?? print.layerHeight,
+    ),
+    margin,
   );
+}
+
+/**
+ * Whether ANY plane in this job carries the `boundaryMargin` rule (#345) — a void's ceiling, or the
+ * colour split under an item that states an intent.
+ *
+ * The sheet's margins block is gated on this, the way every other absent fact is: a one-colour job
+ * over solid stock has no such plane, so the margin binds nothing and a block about it would be
+ * noise. The split needs the print as well as the stock's `split`, because the depth the bound sits
+ * at is the layer-aligned one — a blank with no stated print has no boundary to keep clear of, which
+ * is `engraveRegions`' own rule for reporting `item-depth-bound`.
+ */
+function usesBoundaryMargin(job: EngraveJob, plan: PartPlan): boolean {
+  if (plan.stock.keepOuts.length > 0) return true;
+  const split = job.stock.print?.split;
+  if (split === undefined) return false;
+  // Read off the LABELS, not the plan: `plan.engraves` is the four fields a cut needs and does not
+  // carry `depthIntent`, and only a label can state one. The two skips mirror
+  // `itemDepthBoundFindings` exactly — a disabled or construction label is not judged, so it is not
+  // a bound in play here either.
+  return job.labels.some(
+    (l) => l.enabled && l.construction !== true && splitBound(l.depthIntent, split) !== null,
+  );
+}
+
+/**
+ * The margins block for §1 (#345): the number every bound in this job uses, where it came from, and
+ * the arithmetic the app recommends for THIS blank.
+ *
+ * Both numbers, because the operator holding a printout has no panel to check them against: the
+ * house default is 0.2 mm, and a blank that states a 0.33 mm dome needs more than that. Printing
+ * only the one in force would hide the disagreement the panel shows.
+ */
+function marginsStep(job: EngraveJob, margins: EngraveMargins): RunSheetStep {
+  const rec = recommendMargins(job, margins);
+  return {
+    text:
+      'Depth margins — how far every floor stays clear of a plane: a void’s ceiling, the colour ' +
+      `split. Recommended for this blank: ${fmtNum(rec.boundaryMargin)} mm — ${rec.basis.join('; ')}.`,
+    value: `${fmtNum(margins.boundaryMargin)} mm boundary margin · ${marginSourceWords(margins.source)}`,
+  };
 }
 
 /**
@@ -442,13 +496,14 @@ function keepOutOver(
   job: EngraveJob,
   box: { min: [Mm, Mm]; max: [Mm, Mm] } | undefined,
   keepOuts: readonly RunSheetDiagramKeepOut[],
+  margin: Mm,
 ): RunSheetDiagramKeepOut | null {
   if (!box) return null;
   let worst: RunSheetDiagramKeepOut | null = null;
   let worstLimit = Infinity;
   for (const ko of keepOuts) {
     if (!boxesOverlap(box, ko)) continue;
-    const limit = voidLimit(job, ko.solidThickness);
+    const limit = voidLimit(job, ko.solidThickness, margin);
     if (limit < worstLimit) {
       worstLimit = limit;
       worst = ko;
@@ -764,6 +819,7 @@ export function buildRunSheet(
   generated: RunSheetGenerated,
   sim: RunSheetSim | null,
   now: Date = new Date(),
+  margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
 ): RunSheet {
   const { length, width, thickness, material } = job.stock;
   const vise = job.workholding.vise;
@@ -815,6 +871,9 @@ export function buildRunSheet(
   ];
   const sac = sacrificialSummary(job);
   if (sac !== null) needSteps.push({ text: 'Sacrificial material:', value: sac });
+  // #345 — the margin every bound in this job is drawn to, with its source and the arithmetic the
+  // app recommends for this blank. Only when a bound exists: see `usesBoundaryMargin`.
+  if (usesBoundaryMargin(job, plan)) needSteps.push(marginsStep(job, margins));
   // #231 item 3 — an under-surface void is a property of the blank the operator must know about
   // before probing Z, so each one is stated up front with the material left over it.
   for (const ko of diagram.keepOuts) {
@@ -822,7 +881,7 @@ export function buildRunSheet(
       text:
         `Under-surface void — ${ko.name}. The blank is only ${fmtNum(ko.solidThickness)} mm thick ` +
         'over it: do not cut through.',
-      value: `deepest cut ${fmtNum(voidLimit(job, ko.solidThickness))} mm`,
+      value: `deepest cut ${fmtNum(voidLimit(job, ko.solidThickness, margins.boundaryMargin))} mm`,
     });
   }
 
@@ -948,12 +1007,12 @@ export function buildRunSheet(
   for (const item of items) {
     // #231 item 3 — say which cut sits over a void, and the depth the material there allows,
     // so the item name no longer has to smuggle the distinction onto the sheet.
-    const over = keepOutOver(job, itemBox.get(item.id), diagram.keepOuts);
+    const over = keepOutOver(job, itemBox.get(item.id), diagram.keepOuts, margins.boundaryMargin);
     const note = over
       ? ` — over "${over.name}", only ${fmtNum(over.solidThickness)} mm of material` +
-        (item.depth > voidLimit(job, over.solidThickness)
-          ? ` (DEEPER than the ${fmtNum(voidLimit(job, over.solidThickness))} mm the void allows)`
-          : ` (deepest cut there ${fmtNum(voidLimit(job, over.solidThickness))} mm)`)
+        (item.depth > voidLimit(job, over.solidThickness, margins.boundaryMargin)
+          ? ` (DEEPER than the ${fmtNum(voidLimit(job, over.solidThickness, margins.boundaryMargin))} mm the void allows)`
+          : ` (deepest cut there ${fmtNum(voidLimit(job, over.solidThickness, margins.boundaryMargin))} mm)`)
       : '';
     cutSteps.push({ text: `${item.name}${note}`, value: `${fmtNum(item.depth)} mm deep` });
   }

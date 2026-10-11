@@ -32,6 +32,7 @@ import type {
   EngraveKeepOutSlot,
   EngraveLabel,
   EngraveLineItem,
+  EngraveMargins,
   EngravePolygonShape,
   EngraveRectShape,
   EngraveShape,
@@ -128,12 +129,16 @@ function persist(job: EngraveJob): void {
 
 /**
  * A brand-new job, with its vise and its sacrificial setup taken from the saved setup in
- * settings when one exists (#203/#213, decision 28). The reading of `settings.fixtures`
- * happens HERE, in the store, so `defaultEngraveJob` stays a pure function of its argument.
+ * settings when one exists (#203/#213, decision 28), and its floor / edge margin / breakthrough
+ * SEEDED from the house thresholds (#345). The reading of settings happens HERE, in the store, so
+ * `defaultEngraveJob` stays a pure function of its arguments.
+ *
+ * The new job carries no `margins` key of its own: absent means "run on the house setting", which
+ * is what makes a later change to the setting reach a job nobody has overridden.
  */
 function newDefaultJob(): EngraveJob {
-  const { fixtures } = useSettingsStore.getState();
-  const job = defaultEngraveJob(viseForNewJob(fixtures.vise));
+  const { fixtures, margins } = useSettingsStore.getState();
+  const job = defaultEngraveJob(viseForNewJob(fixtures.vise), margins);
   return { ...job, sacrificial: sacrificialForNewJob(fixtures.sacrificial) };
 }
 
@@ -429,6 +434,13 @@ export interface EngraveJobState {
   setCutOverrideSource: (key: keyof CutParams, source: FieldSource) => void;
   /** Apply a whole guided job setup in one write, stamping every value's source (#254). */
   applySetup: (answers: SetupAnswers) => void;
+  /**
+   * Set this job's own depth margins, or clear them back to the house setting (#345). The
+   * panel's "use the recommendation" passes `{ ...rec, source: 'recommended' }`; `null` deletes
+   * the key, which is the same state every stored job is in and the one a settings change then
+   * reaches.
+   */
+  setJobMargins: (margins: EngraveMargins | null) => void;
   replace: (job: EngraveJob) => void;
   reset: () => void;
 }
@@ -448,15 +460,19 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           (k) => patch[k] !== undefined,
         );
         const stock = { ...job.stock, ...patch };
-        // `print` is the one stock field a patch can CLEAR (#285 review). "Use the badge blank" on a
-        // badge that has lost its print must take the layer grid away with it, or the stack limit
-        // goes on applying to a blank whose print is no longer known. An explicit `undefined` says
-        // that; an OMITTED key still means "leave it alone", which is what every other caller relies
-        // on. The provenance goes with it — a source for a value that is gone is a lie.
+        // `print` and `flatness` are the two stock fields a patch can CLEAR (#285 review, #345).
+        // "Use the badge blank" on a badge that has lost its print must take the layer grid away
+        // with it, or the stack limit goes on applying to a blank whose print is no longer known —
+        // and the stated dome (`flatness`) is a fact about the SAME printed blank, so it goes with
+        // it too. An explicit `undefined` says that; an OMITTED key still means "leave it alone",
+        // which is what every other caller relies on. The provenance goes with it — a source for a
+        // value that is gone is a lie.
         const sources = withStockSource(job, keys, source);
-        if ('print' in patch && patch.print === undefined) {
-          delete stock.print;
-          if (sources.stock) delete sources.stock.print;
+        for (const key of ['print', 'flatness'] as const) {
+          if (key in patch && patch[key] === undefined) {
+            delete stock[key];
+            if (sources.stock) delete sources.stock[key];
+          }
         }
         // The vise follows a blank that changes size (#344) — see `viseAfterStockEdit`.
         const vise = viseAfterStockEdit(job, patch);
@@ -698,6 +714,17 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       }),
 
     applySetup: (answers) => apply((job) => applyAnswers(job, answers)),
+
+    setJobMargins: (margins) =>
+      apply((job) => {
+        if (margins === null) {
+          // ABSENCE IS THE SWITCH: delete the key rather than writing the house numbers into the
+          // document, so the job keeps following the setting the way a fresh job does.
+          const { margins: _dropped, ...rest } = job;
+          return rest;
+        }
+        return { ...job, margins: { ...margins } };
+      }),
 
     replace: (job) => apply(() => job),
 

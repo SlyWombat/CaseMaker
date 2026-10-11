@@ -56,6 +56,7 @@ export function MachinesScope() {
   const setMachineCalibration = useSettingsStore((s) => s.setMachineCalibration);
   const calibration = useSettingsStore((s) => s.machineCalibration);
   const replaceFixtures = useSettingsStore((s) => s.replaceFixtures);
+  const setMargins = useSettingsStore((s) => s.setMargins);
 
   const [busy, setBusy] = useState(false);
   const [address, setAddress] = useState('');
@@ -80,7 +81,10 @@ export function MachinesScope() {
   }
 
   const onExportMachine = () => {
-    const text = serializeMyMachineFile(useSettingsStore.getState().fixtures);
+    // #345 — the house depth margins ride along with the fixtures: they are the same kind of fact
+    // (numbers this machine was set up with, measured or chosen here), and the maintainer's two
+    // machines should not drift on them.
+    const text = serializeMyMachineFile(useSettingsStore.getState().fixtures, useSettingsStore.getState().margins);
     const why = saveText(text, MY_MACHINE_FILENAME);
     setTransfer(
       why === null
@@ -100,6 +104,9 @@ export function MachinesScope() {
         return;
       }
       replaceFixtures(result.fixtures);
+      // #345 — only a file that HAS margins applies them; an older export leaves this machine's
+      // own setting alone rather than resetting it to whatever the file's absent section implies.
+      if (result.margins) setMargins(result.margins);
       setTransfer({ kind: 'ok', message: 'Imported — measured values restored.' });
     } catch (err) {
       setTransfer({ kind: 'error', message: err instanceof Error ? err.message : String(err) });

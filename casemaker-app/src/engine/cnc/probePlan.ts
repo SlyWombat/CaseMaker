@@ -49,6 +49,15 @@ const EPS = 1e-9;
 export const PROBE_RESIDUAL_MM = 0.02;
 
 /**
+ * The WIRED probe's repeatability in Z, mm — the figure the run sheet tells the operator to use for
+ * Z0 ("the wired probe that ships with the machine ... measured 2026-10-08, 0.001 mm"). It is a
+ * separate constant from `PROBE_RESIDUAL_MM` because it is a different instrument's measured
+ * number, and #345's Z budget is built on it rather than on the 3D probe's conservative assumption
+ * (`/Z1-Firmware-Dialect.md` §11.7, runbook C4).
+ */
+export const WIRED_PROBE_Z_RESIDUAL_MM = 0.001;
+
+/**
  * The chuck locates the axis. Its runout is the residual, mm. PROVISIONAL — an unverified
  * figure, the same standing as every stub until the bench measures it (#208).
  */

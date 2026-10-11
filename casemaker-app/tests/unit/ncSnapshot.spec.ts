@@ -8,6 +8,12 @@
 // The golden is generated on first run (`toMatchFileSnapshot` writes it when absent); later runs
 // compare against it, and a change to the default job's toolpath fails here rather than silently
 // shipping.
+//
+// #345's depth bounds sit on the VERIFIER's side of this line and never reach it: nothing here
+// calls `engraveGenerate`'s limit, so the margin a job is running on cannot move a byte of this
+// golden. That is one half of "no `.nc` moves when a job carries no margins"; the other half is
+// the pair in `engraveMargins.spec.ts`, which drives the same job through Generate under a
+// changed margin and compares the posted text.
 
 import { describe, it, expect } from 'vitest';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';

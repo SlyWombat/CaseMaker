@@ -20,6 +20,7 @@ const backing = new Map<string, string>();
 } as Storage;
 
 import { DEFAULT_VISE } from '@/engine/cnc/fixture';
+import { MARGIN_DEFAULTS, type MarginSettings } from '@/engine/cnc/engrave/depthBounds';
 import type { Sacrificial, ViseParams } from '@/types/engraveJob';
 import {
   MY_MACHINE_FILENAME,
@@ -61,12 +62,13 @@ async function generation() {
 }
 
 /** A record as the exporter writes it, before serialization. */
-function fileWith(fixtures: MyMachineFile['fixtures']): MyMachineFile {
+function fileWith(fixtures: MyMachineFile['fixtures'], margins: MarginSettings = MARGIN_DEFAULTS): MyMachineFile {
   return {
     kind: MY_MACHINE_KIND,
     schemaVersion: MY_MACHINE_SCHEMA_VERSION,
     exportedAt: '2026-10-05T00:00:00.000Z',
     fixtures,
+    margins,
   };
 }
 
@@ -83,17 +85,21 @@ describe('the "my machine" file (#247)', () => {
 
   it('serializes a versioned record and does not alias the caller object', () => {
     const fixtures = { vise: MEASURED_VISE, sacrificial: MEASURED_SACRIFICIAL };
-    const file = buildMyMachineFile(fixtures, new Date('2026-10-05T12:00:00Z'));
+    const file = buildMyMachineFile(fixtures, MARGIN_DEFAULTS, new Date('2026-10-05T12:00:00Z'));
     expect(file.kind).toBe(MY_MACHINE_KIND);
     expect(file.schemaVersion).toBe(1);
     expect(file.exportedAt).toBe('2026-10-05T12:00:00.000Z');
     expect(file.fixtures).toEqual(fixtures);
     expect(file.fixtures.vise).not.toBe(MEASURED_VISE);
+    // #345 — the margins ride along, copied rather than aliased for the same reason.
+    expect(file.margins).toEqual(MARGIN_DEFAULTS);
+    expect(file.margins).not.toBe(MARGIN_DEFAULTS);
   });
 
   it('round-trips a measured vise and sacrificial stack with provenance intact', () => {
     const text = serializeMyMachineFile(
       { vise: MEASURED_VISE, sacrificial: MEASURED_SACRIFICIAL },
+      MARGIN_DEFAULTS,
       new Date('2026-10-05T00:00:00Z'),
     );
     const result = parseMyMachineFile(text);
@@ -103,11 +109,46 @@ describe('the "my machine" file (#247)', () => {
     expect(result.fixtures.vise!.source).toBe('measured');
     expect(result.fixtures.vise!.measuredAt).toBe('2026-09-20');
     expect(result.fixtures.sacrificial).toEqual(MEASURED_SACRIFICIAL);
+    expect(result.margins).toEqual(MARGIN_DEFAULTS);
+  });
+
+  it('round-trips a house margin the user chose (#345)', () => {
+    const mine: MarginSettings = { ...MARGIN_DEFAULTS, boundaryMargin: 0.35, zTolerance: 0.06, source: 'user' };
+    const result = parseMyMachineFile(serializeMyMachineFile({}, mine));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.margins).toEqual(mine);
+  });
+
+  it('parses an older file with NO margins section, and says so with null (#345)', () => {
+    // Exactly what an export from before this issue looks like: no `margins` key at all.
+    const older = JSON.stringify({ ...fileWith({}), margins: undefined });
+    const result = parseMyMachineFile(older);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // NOT the shipped defaults: `null` is the file having no opinion, so the importer leaves this
+    // machine's own setting alone rather than resetting it to 0.2.
+    expect(result.margins).toBeNull();
+  });
+
+  it('refuses a whole record when the margins section is malformed (#345)', () => {
+    // Whole-or-nothing, like every other section: a good fixture set must not sneak in beside it.
+    const result = parseMyMachineRecord(
+      { ...fileWith({ vise: MEASURED_VISE }), margins: { ...MARGIN_DEFAULTS, boundaryMargin: -1 } },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/boundaryMargin/);
+    // A present-but-sourceless one is refused too — the provenance is part of the record.
+    const sourceless = parseMyMachineRecord({ ...fileWith({}), margins: { boundaryMargin: 0.2 } });
+    expect(sourceless.ok).toBe(false);
+    if (sourceless.ok) return;
+    expect(sourceless.reason).toMatch(/margins record/i);
   });
 
   it('accepts an empty machine (nothing measured yet)', () => {
-    const result = parseMyMachineFile(serializeMyMachineFile({}));
-    expect(result).toEqual({ ok: true, fixtures: {} });
+    const result = parseMyMachineFile(serializeMyMachineFile({}, MARGIN_DEFAULTS));
+    expect(result).toEqual({ ok: true, fixtures: {}, margins: MARGIN_DEFAULTS });
   });
 
   it('refuses a file that is not valid JSON', () => {
@@ -118,7 +159,7 @@ describe('the "my machine" file (#247)', () => {
   });
 
   it('refuses a truncated file', () => {
-    const full = serializeMyMachineFile({ vise: MEASURED_VISE });
+    const full = serializeMyMachineFile({ vise: MEASURED_VISE }, MARGIN_DEFAULTS);
     const result = parseMyMachineFile(full.slice(0, Math.floor(full.length / 2)));
     expect(result.ok).toBe(false);
   });
@@ -187,29 +228,63 @@ describe('the "my machine" round trip through the store (#247)', () => {
     const first = await generation();
     first.useSettingsStore.getState().setVise(MEASURED_VISE);
     first.useSettingsStore.getState().setSacrificial(MEASURED_SACRIFICIAL);
-    const text = first.serializeMyMachineFile(first.useSettingsStore.getState().fixtures);
+    first.useSettingsStore.getState().setMargins({ ...MARGIN_DEFAULTS, boundaryMargin: 0.35, zTolerance: 0.07, source: 'user' });
+    const text = first.serializeMyMachineFile(
+      first.useSettingsStore.getState().fixtures,
+      first.useSettingsStore.getState().margins,
+    );
 
     // "Clear site data": nothing left in the browser.
     backing.clear();
     const second = await generation();
     expect(second.useSettingsStore.getState().fixtures).toEqual({});
+    expect(second.useSettingsStore.getState().margins).toEqual(MARGIN_DEFAULTS);
 
     const result = second.parseMyMachineFile(text);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     second.useSettingsStore.getState().replaceFixtures(result.fixtures);
+    // The importer applies the margins only when the file HAS them (#345); this one does.
+    if (result.margins) second.useSettingsStore.getState().setMargins(result.margins);
 
     const restored = second.useSettingsStore.getState().fixtures;
     expect(restored.vise).toEqual(MEASURED_VISE);
     expect(restored.sacrificial).toEqual(MEASURED_SACRIFICIAL);
     expect(restored.vise!.source).toBe('measured');
     expect(restored.vise!.measuredAt).toBe('2026-09-20');
+    // #345 — the house margin travelled too, provenance included, and is persisted alongside.
+    expect(second.useSettingsStore.getState().margins).toMatchObject({
+      boundaryMargin: 0.35,
+      zTolerance: 0.07,
+      source: 'user',
+    });
 
     // ...and it is written through, so a later reload keeps it.
     const persisted = JSON.parse(backing.get('casemaker.settings.v1') ?? '{}') as {
       fixtures?: { vise?: ViseParams };
+      margins?: MarginSettings;
     };
     expect(persisted.fixtures?.vise).toEqual(MEASURED_VISE);
+    expect(persisted.margins).toMatchObject({ boundaryMargin: 0.35, source: 'user' });
+  });
+
+  it('an import from an older file leaves this machine’s margins alone (#345)', async () => {
+    const gen = await generation();
+    gen.useSettingsStore.getState().setMargins({ ...MARGIN_DEFAULTS, boundaryMargin: 0.4, source: 'user' });
+    // Exactly the shape a pre-#345 export has: fixtures, and no `margins` key.
+    const older = JSON.stringify({
+      kind: MY_MACHINE_KIND,
+      schemaVersion: MY_MACHINE_SCHEMA_VERSION,
+      exportedAt: '2026-10-01T00:00:00.000Z',
+      fixtures: {},
+    });
+    const result = gen.parseMyMachineFile(older);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.margins).toBeNull();
+    // The caller's `if (result.margins)` is the guard: nothing was applied.
+    if (result.margins) gen.useSettingsStore.getState().setMargins(result.margins);
+    expect(gen.useSettingsStore.getState().margins.boundaryMargin).toBe(0.4);
   });
 
   it('a refused import leaves the current machine untouched', async () => {

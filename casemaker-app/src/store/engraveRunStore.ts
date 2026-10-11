@@ -16,7 +16,7 @@
 
 import { featureSim } from '@/platform/features';
 import { create } from 'zustand';
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
@@ -28,6 +28,7 @@ import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import { resolveMachine } from '@/engine/cnc/calibration';
 import type { MachineCalibration } from '@/engine/cnc';
+import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useSettingsStore } from './settingsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSimStore } from './simStore';
@@ -40,7 +41,8 @@ export type EngraveRunClient = {
     job: EngraveJob,
     tool: Tool | null,
     catalogue: readonly FeedCatalogueRow[],
-    calibration?: MachineCalibration | null,
+    calibration: MachineCalibration | null,
+    margins: EngraveMargins,
   ) => Promise<EngraveGenerated>;
   simOracle: (predicted: OraclePredicted[]) => Promise<OracleReport>;
 };
@@ -183,6 +185,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // to the saved frame and leave the gate and the sim judging different machines for one .nc.
     const calibration = useSettingsStore.getState().machineCalibration ?? null;
 
+    // The job's depth thresholds, resolved ONCE here too (#345). The worker cannot see
+    // `useSettingsStore`, and this is the run: the margin that gates the program has to be the one
+    // the house setting and the job's own record say, not the shipped default the worker falls back
+    // to. Read from the same settings snapshot as the calibration above, for the same reason —
+    // a re-read after the await could straddle an edit and gate a different job than it reports.
+    const margins = effectiveMargins(job, useSettingsStore.getState().margins);
+
     // The cutter, resolved ONCE on this side (#305): the sim worker cannot see the registry, so
     // it is sent the `Tool` — and the same object then loads the simulation below, so the gate
     // and the sweep cannot judge the job with two different cutters.
@@ -199,7 +208,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     let generated: EngraveGenerated;
     try {
       client = await clientLoader();
-      generated = await client.engraveGenerate(job, tool, catalogue, calibration);
+      generated = await client.engraveGenerate(job, tool, catalogue, calibration, margins);
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
       return;
@@ -207,10 +216,15 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     if (mine !== seq) return;
 
     // The job may have been edited while generating: the result already describes an older job. So
-    // may the machine's saved frame (#301): the result was generated against the one read above.
+    // may the machine's saved frame (#301), and so may the depth margins (#345): the program above
+    // was gated against the one read at the top. The margins are compared by VALUE rather than by
+    // the settings object, because a job carrying its own record keeps them whatever the house
+    // setting does — comparing the setting would block a run the user did not change.
+    const nowMargins = effectiveMargins(useEngraveJobStore.getState().job, useSettingsStore.getState().margins);
     const stale =
       useEngraveJobStore.getState().job !== job ||
-      (useSettingsStore.getState().machineCalibration ?? null) !== calibration;
+      (useSettingsStore.getState().machineCalibration ?? null) !== calibration ||
+      nowMargins.boundaryMargin !== margins.boundaryMargin;
     if (stale) {
       set({ generated, phase: 'blocked', staleSince: Date.now() });
       return;

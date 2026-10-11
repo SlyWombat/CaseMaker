@@ -28,7 +28,7 @@
  * following `sweep.ts`. The only things that leave are `NodeMeshOutput` buffers and plain data.
  */
 
-import type { EngraveJob } from '@/types/engraveJob';
+import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 import { toPartPlan, keepOutLimit, keepOutMembrane, labelProfile } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -112,7 +112,7 @@ export interface EngravePreviewVoid {
   zCeiling: Mm;
   /** `keepOutMembrane(job, zCeiling)`: solid left above it, mm. */
   membrane: Mm;
-  /** `keepOutLimit(job, membrane)`: the deepest cut over it that keeps `minFloor`, mm. */
+  /** `keepOutLimit(job, membrane, boundaryMargin)`: the deepest cut over it, mm (#345). */
   limit: Mm;
   /** Footprint contours in the work frame, one entry per ring (a hole is its own ring). */
   rings: [number, number][][];
@@ -135,9 +135,9 @@ export interface EngravePreview {
   /** `engraveRegions`' findings — `validateJob` + `validateVise` + engravability + the #171 void warning (#288). */
   findings: JobFinding[];
   /**
-   * The blank's colour boundary, mm below the engraved face and ON a real layer line (#285), or
-   * null when the job states no print. Read off the same `engraveRegions` call the cuts come from,
-   * so the line the panel draws and the `item-wrong-colour` finding agree by construction.
+   * The blank's colour split, mm below the engraved face and ON a real layer line (#285), or null
+   * when the job states no print. Read off the same `engraveRegions` call the cuts come from, so
+   * the line the panel draws and the `item-depth-bound` finding agree by construction.
    */
   colourBoundaryDepth: Mm | null;
   /** #211's cutter recommendation, with the compromise message completed here (see below). */
@@ -158,12 +158,17 @@ export interface EngravePreviewer {
    *
    * `catalogue` is Makera's feed rows, handed in for the same reason (#324): the recommendation's
    * feeds pre-filter resolves with them, and this worker's own copy of that snapshot is empty.
+   *
+   * `margins` is the job's depth thresholds as the main thread resolved them (#345), handed in for
+   * the same reason again: reading them here would need `useSettingsStore`, and a preview drawn to
+   * a different margin than the run uses would show a void floor the verifier does not enforce.
    */
   engravePreview(
     job: EngraveJob,
     tools: readonly ToolLibraryEntry[],
     catalogue: readonly FeedCatalogueRow[],
     gen: number,
+    margins: EngraveMargins,
   ): EngravePreview | null;
 }
 
@@ -238,6 +243,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     tools: readonly ToolLibraryEntry[],
     catalogue: readonly FeedCatalogueRow[],
     gen: number,
+    margins: EngraveMargins,
   ): EngravePreview | null => {
     if (gen < latestGen) return null;
     latestGen = gen;
@@ -252,7 +258,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // The job's own snapshot wins over its key's entry (design point 2, #305), resolved against
     // the list the main thread sent — the worker has no registry of its own to read.
     const tool = toolForJob(job, tools);
-    const { plan, measured, cuts, findings, colourBoundaryDepth } = engraveRegions(tl, job, tool);
+    const { plan, measured, cuts, findings, colourBoundaryDepth } = engraveRegions(tl, job, tool, margins);
 
     // A label whose findings include an error is left out of the cut — the stock is drawn
     // uncut there — but its row and findings are still reported (the issue's rule).
@@ -350,7 +356,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
         name: ko.name,
         zCeiling: ko.zCeiling,
         membrane,
-        limit: keepOutLimit(job, membrane),
+        limit: keepOutLimit(job, membrane, margins.boundaryMargin),
         rings,
       };
     });

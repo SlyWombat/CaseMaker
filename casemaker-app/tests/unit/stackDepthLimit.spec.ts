@@ -64,22 +64,25 @@ describe('stackDepthLimit (#285): what binds where', () => {
       // blank is in the way, so the reason is the stock.
       expect(stack!.reasonAt(10, 19.05)).toBe('stock');
       // The limit agrees with the reason: 1.4 mm of solid over the pocket (0.2 mm layers under the
-      // 1.51 mm membrane), the full stock floor elsewhere.
-      expect(stack!.limit(38.1, 19.05)).toBeCloseTo(1.4, 6);
+      // 1.51 mm membrane) less the 0.2 mm boundary margin the ceiling's `above` bound carries
+      // (#345), the full stock floor elsewhere.
+      expect(stack!.limit(38.1, 19.05)).toBeCloseTo(1.2, 6);
       expect(stack!.limit(10, 19.05)).toBeCloseTo(job.stock.thickness - job.minFloor, 6);
     } finally {
       stack!.dispose();
     }
   });
 
-  it('words the limiter: the membrane over the void it names, or the job’s own floor', () => {
+  it('words the limiter: the void ceiling it names, or the job’s own floor', () => {
     // The tail of the `cut-too-deep` sentence is built here rather than inside the pipeline,
     // because over SOLID stock nothing reaches the verifier — `validateJob` refuses the same
     // depth first — so the floor half has no end-to-end route to test it through.
     const stack = stackDepthLimit(tl, plan, job);
     expect(stack).not.toBeNull();
     try {
-      expect(depthLimitReason(stack!, job, 38.1, 19.05)).toBe('— the membrane over "Magnet pocket"');
+      // #345: the bound the void's ceiling makes speaks of the PLANE, and `ceilingName` words it —
+      // the same namer the per-item finding uses, so the two cannot describe one plane two ways.
+      expect(depthLimitReason(stack!, job, 38.1, 19.05)).toBe("— the magnet pocket's ceiling");
       expect(depthLimitReason(stack!, job, 10, 19.05)).toBe('— the floor the job keeps under the stock');
     } finally {
       stack!.dispose();
