@@ -211,13 +211,19 @@ function withoutCutOverride(job: EngraveJob): EngraveJob {
  *
  * Only the shipped default is re-derived. A SAVED or MEASURED vise is the user's own number, kept
  * exactly even when it refuses the new blank, so the panel can still show why (#231/#203). An edit
- * that does not move the thickness — a width, a material — says nothing about how tall the blank
- * stands, so the vise is untouched and the object's identity is kept.
+ * that states no thickness — a width, a material — says nothing about how tall the blank stands,
+ * so the vise is untouched and the object's identity is kept.
+ *
+ * A patch that restates the thickness the stock already has is NOT skipped (#344 review). It looks
+ * like a no-op and the derived number makes it one — `stockProud === vise.stockProud` returns the
+ * same object — but only when the state is already right. A job saved by an older build before this
+ * derivation existed (a 3.81 mm blank still carrying the shipped 4 mm) heals on the next press of
+ * "Use the badge blank" precisely because the restated thickness is re-derived rather than trusted.
  */
 function viseAfterStockEdit(job: EngraveJob, patch: Partial<EngraveJob['stock']>): ViseParams {
   const thickness = patch.thickness;
   const { vise } = job.workholding;
-  if (thickness === undefined || thickness === job.stock.thickness) return vise;
+  if (thickness === undefined) return vise;
   if (vise.source !== 'default') return vise;
   const stockProud = defaultStockProud(thickness);
   return stockProud === vise.stockProud ? vise : { ...vise, stockProud };

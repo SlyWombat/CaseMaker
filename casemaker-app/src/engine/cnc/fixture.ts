@@ -68,8 +68,10 @@ export const DEFAULT_STOCK_PROUD: Mm = 4;
  * How far a stock of `thickness` stands proud of the jaw tops by default, mm — the HONEST
  * default (#231 item 2).
  *
- * `stockProud` is a job input (`ViseParams.stockProud`) and stays one; this is only the value a
- * NEW job starts from when there is no saved vise. It used to be a bare 4 mm, which is not a
+ * `stockProud` is a job input (`ViseParams.stockProud`) and stays one; this is the value the
+ * SHIPPED default vise carries — what a new job starts from, and what `viseAfterStockEdit`
+ * re-derives whenever an edit restates the blank's thickness (#344), so a job saved while the two
+ * disagreed does not stay stuck. It used to be a bare 4 mm, which is not a
  * truth: on a stock at or under 4 mm thick — the 3.81 mm badge blank #165 cuts — a flat 4 mm is
  * taller than the whole blank and `validateVise` refuses it outright
  * (`vise-stock-proud-exceeds-thickness`), so the job had to override the vise by hand.

@@ -385,6 +385,26 @@ describe('engraveJobStore (#200)', () => {
     ).toBe(true);
   });
 
+  it('heals a job saved in the stuck state when the same blank is taken again (#344 review)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    // A job persisted by a build before the re-derivation existed: the blank is already the badge's
+    // 3.81 mm, but the vise is still the shipped 4 mm — `vise-stock-proud-exceeds-thickness`, with
+    // no way out, because re-taking the blank sends the thickness the stock already has. Written
+    // straight onto the store, since every `setStock` call now heals it.
+    const job = useEngraveJobStore.getState().job;
+    useEngraveJobStore.setState({
+      job: { ...job, stock: { ...job.stock, thickness: 3.81 } },
+    });
+
+    // "Use the badge blank" again — the same thickness the stock already has.
+    useEngraveJobStore.getState().setStock(badgeBlankFor(defaultBadgeParams()).stock, 'computed');
+
+    const { stock, workholding } = useEngraveJobStore.getState().job;
+    expect(workholding.vise.stockProud).toBeCloseTo(1.905, 9);
+    expect(validateVise(stock, workholding.vise).some((f) => f.severity === 'error')).toBe(false);
+  });
+
   it('leaves the vise alone when the patch does not move the thickness (#344)', async () => {
     backing.clear();
     const { useEngraveJobStore } = await freshStore();
