@@ -4,6 +4,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { buildSimSetup, DEFAULT_STOCK, useSimSetupStore } from '@/store/simSetupStore';
 import { buildTimeline, parseGcode, Z1 } from '@/engine/cnc';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { setRegistry } from '@/engine/cnc/toolRegistry';
 
 // Verbatim from reference-gcode/Z1/TopClamp.nc (also in tests/unit/cncSetupFromHeader.spec.ts).
 const STOCK = ';@MKR|STOCK|id=cuboid|length=100|width=100|height=5|diameter=1';
@@ -136,6 +138,22 @@ describe('simSetupStore.openFile', () => {
     expect(s.toolKey).toBe('flat-3.175x12-metal');
     expect(s.toolMatch).toBe('suggested');
     expect(s.toolMatchProvenance).toBe('id');
+  });
+
+  it('resolves the key on a file that carries our line and no TOOL record (#332 review)', () => {
+    // Hand-edited, or posted by something that writes identity only. The key needs no geometry to
+    // resolve — before the fix this file parsed (its header is real) and matched nothing.
+    setRegistry([{ key: 'user:six-flat-copy', provenance: 'cloned', tool: flatEndMill(1, { id: null, name: 'six-flat copy' }) }]);
+    try {
+      useSimSetupStore.getState().openFile('keyonly.nc', headerText(STOCK, ';@CM|TOOL|key=user:six-flat-copy'));
+      const s = useSimSetupStore.getState();
+      expect(s.statedToolKey).toBe('user:six-flat-copy');
+      expect(s.toolKey).toBe('user:six-flat-copy');
+      expect(s.toolMatch).toBe('exact');
+      expect(s.toolMatchProvenance).toBe('key');
+    } finally {
+      setRegistry([]);
+    }
   });
 
   it('states no key for a file that carries none, and for the plain text case', () => {

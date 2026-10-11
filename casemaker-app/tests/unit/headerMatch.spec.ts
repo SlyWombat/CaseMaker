@@ -124,4 +124,35 @@ describe('matchHeaderTool: the stated key (#332)', () => {
     const h = header({ id: '112111313812', fluteLength: 12, shoulderLength: 12 });
     expect(matchHeaderTool(h, [FLAT_12])).toEqual(matchHeaderTool(h, [FLAT_12], null));
   });
+
+  it('does not call a held key exact when the file states a diameter the entry lost (#316 review)', () => {
+    // A `user:` cutter edited after the file was posted: the key still resolves, but the entry is
+    // no longer the cutter the sweep was written for. The key is what the file SAYS, so it stays
+    // the answer and the provenance stays `key` — the strength is what drops.
+    const h = header({ id: null, fluteLength: 12, shoulderLength: 12, tipDiameter: 2, diameter: 2 });
+    expect(matchHeaderTool(h, [FLAT_12], 'flat-3.175x12-metal')).toEqual({
+      key: 'flat-3.175x12-metal',
+      strength: 'suggested',
+      provenance: 'key',
+    });
+    // A missing diameter on either side is not a disagreement — nothing can be shown to differ.
+    expect(matchHeaderTool(flatEndMill(3.175, { id: null, tipDiameter: null, diameter: null }), [FLAT_12], 'flat-3.175x12-metal')).toEqual({
+      key: 'flat-3.175x12-metal',
+      strength: 'exact',
+      provenance: 'key',
+    });
+  });
+
+  it('resolves the key on a file with no TOOL record at all (#332 review)', () => {
+    // Hand-edited, or posted by something that puts identity only in the CM line. Step (0) needs
+    // no geometry, so the key still answers; every step below it does, and finds nothing.
+    expect(matchHeaderTool(null, [FLAT_12, CAT_42], 'cat:111011313842')).toEqual({
+      key: 'cat:111011313842',
+      strength: 'exact',
+      provenance: 'key',
+    });
+    // A key the list does not hold, and no geometry to suggest with: no answer rather than a guess.
+    expect(matchHeaderTool(null, [FLAT_12], 'user:six-flat-copy')).toBeNull();
+    expect(matchHeaderTool(null, [FLAT_12])).toBeNull();
+  });
 });

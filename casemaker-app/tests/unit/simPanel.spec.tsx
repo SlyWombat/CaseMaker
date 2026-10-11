@@ -200,15 +200,48 @@ describe('SimPanel', () => {
     expect(weak.textContent).toContain('user:six-flat-copy');
     expect(weak.textContent).toContain('does not have');
 
-    // And when the key DOES resolve, the key is what answered — the strongest reason there is.
+    // The phrase names the evidence the rule actually used (#332 review). This file states only
+    // geometry, so the fallback was the shape step — and the sentence must not offer a vendor id
+    // the file never wrote.
+    expect(weak.getAttribute('data-provenance')).toBe('shape');
+    expect(weak.textContent).toContain('shape and diameter');
+    expect(weak.textContent).not.toContain('vendor id');
+
+    // The same file WITH the vendor id the fallback matched on: now the id is the evidence, and
+    // "closest by shape and diameter" would be describing a rule that did not answer.
     cleanup();
     act(() => useSimSetupStore.getState().reset());
-    act(() => useSimSetupStore.getState().openFile('ours.nc', `${HEADER.replace('user:six-flat-copy', 'flat-1.0')}\n`));
+    act(() => useSimSetupStore.getState().openFile('foreign-id.nc', `${HEADER.replace('|id=0', '|id=112111313812')}\n`));
+    render(<SimPanel />);
+    const byId = screen.getByTestId('sim-tool-match');
+    expect(byId.getAttribute('data-provenance')).toBe('id');
+    expect(byId.textContent).toContain('user:six-flat-copy');
+    expect(byId.textContent).toContain('vendor id');
+    expect(byId.textContent).not.toContain('shape and diameter');
+
+    // And when the key DOES resolve, and the file's own geometry agrees with the entry, the key is
+    // what answered — the strongest reason there is.
+    cleanup();
+    act(() => useSimSetupStore.getState().reset());
+    act(() => useSimSetupStore.getState().openFile('ours.nc', `${HEADER.replace('user:six-flat-copy', 'flat-3.175x12-metal')}\n`));
     render(<SimPanel />);
     const firm = screen.getByTestId('sim-tool-match');
     expect(firm.getAttribute('data-strength')).toBe('exact');
     expect(firm.getAttribute('data-provenance')).toBe('key');
     expect(firm.textContent).toContain('matched from the cutter the file names');
+
+    // A held key whose entry no longer measures what the file cut (#316 review): the cutter was
+    // edited since the file was posted. The key is still what the file says, so it is still the
+    // answer — but "matched from the cutter the file names" would hide that the sweep is wrong.
+    cleanup();
+    act(() => useSimSetupStore.getState().reset());
+    act(() => useSimSetupStore.getState().openFile('edited.nc', `${HEADER.replace('user:six-flat-copy', 'flat-1.0')}\n`));
+    render(<SimPanel />);
+    const edited = screen.getByTestId('sim-tool-match');
+    expect(edited.getAttribute('data-provenance')).toBe('key');
+    expect(edited.getAttribute('data-strength')).toBe('suggested');
+    expect(edited.textContent).toContain('flat-1.0');
+    expect(edited.textContent).toContain('cutting diameter');
   });
 
   it('shows the runner summary count, not the capped list length', async () => {

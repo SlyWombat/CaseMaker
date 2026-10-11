@@ -289,7 +289,10 @@ So the post writes one extra line, immediately after the `;@MKR|TOOL` line it be
 - **The key only, on purpose.** The `;@MKR|TOOL` record beside it already carries the whole
   geometry, and `sticklength=` already carries the installed stick-out, so a second copy here
   would be a second thing to keep true. (Written by `post/z1.ts` since #332 — every file gets
-  it, catalogue tools included: a built-in has no vendor `g_ID` either.)
+  it, catalogue tools included. Not because a built-in has no `g_ID` — `flat-3.175x12-metal`
+  carries `112111313812` — but because a key is the only identity EVERY entry has: most built-ins
+  and every clone state none, and a file written for one of those would otherwise be matchable on
+  shape and diameter alone, which ties between the six 3.175 mm flats (#316).)
 
 ---
 

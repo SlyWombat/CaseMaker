@@ -72,8 +72,10 @@ function defaultJobNc(job: EngraveJob): string {
 
 describe('#332: the file names its cutter by OUR registry key', () => {
   it('writes exactly one `;@CM|TOOL|key=` line, and it carries the job’s key', () => {
-    // Every file gets the line, catalogue tools included: a built-in has no vendor `g_ID` either
-    // (the golden's `id=0`), so without this the file cannot say which cutter it was written for.
+    // Every file gets the line, catalogue tools included. Most built-ins and every clone state no
+    // vendor `g_ID` at all (the golden's `id=0`) — `flat-3.175x12-metal` does (`112111313812`), so
+    // this is not "a built-in has no id": it is that keys are the only identity EVERY entry has,
+    // and without the line a file written for a clone cannot say which cutter it was written for.
     const nc = defaultJobNc(defaultJob());
     const lines = nc.split('\n').filter((l) => l.startsWith(';@CM|TOOL|'));
     expect(lines).toEqual([`;@CM|TOOL|key=${defaultEngraveJob().toolKey}`]);

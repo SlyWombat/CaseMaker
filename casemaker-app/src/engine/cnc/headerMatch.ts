@@ -21,7 +21,10 @@
  * they state is a SUGGESTION, not an answer.** `exact` means every length the file states agrees
  * with the entry (within 0.01 mm, the tolerance `cuttingRadiusForSweep` uses); `suggested` means
  * shape and diameter agreed and the file states lengths this entry does not match — the panel says
- * so rather than printing "matched" over a different cutter.
+ * so rather than printing "matched" over a different cutter. The stated CUTTING DIAMETER is checked
+ * on the key step too (#316 review): a key the list holds settles the identity, but a key whose
+ * entry no longer measures what the file cut is a cutter edited since, and it drops to `suggested`
+ * like any other disagreement.
  *
  * A file that states NO lengths cannot be checked, and `suggested` is the honest strength for it:
  * "shape and diameter only" is exactly the evidence there is. That is the common case for a file
@@ -39,7 +42,7 @@
  * entries, and the sim worker realm has no store to read.
  */
 
-import type { Tool } from './tool';
+import { cuttingDiameter, type Tool } from './tool';
 import type { ToolLibraryEntry } from './toolLibrary';
 
 /** How well the entry fits the file. `exact` = every length the header states agrees. */
@@ -57,11 +60,6 @@ export interface HeaderToolMatch {
 
 /** 0.01 mm — the same tolerance `cuttingRadiusForSweep` matches the swept cutter with. */
 const TOLERANCE_MM = 0.01;
-
-/** The file header's cutting diameter, using the same rule as `cuttingRadiusForSweep`. */
-function cuttingDiameter(tool: Tool): number | null {
-  return tool.tipDiameter ?? tool.diameter;
-}
 
 /**
  * Two lengths agree. A length only one side states does NOT agree: an entry that does not state a
@@ -106,21 +104,34 @@ function preferNamespaced(hits: readonly ToolLibraryEntry[]): ToolLibraryEntry |
  * `statedKey` is what the file's `;@CM|` line names, or null when it has none. A key the list does
  * NOT hold caps everything under it at `suggested`: the file has stated which cutter it was written
  * for and we are about to hand over a different one, so no rule here may call that exact.
+ *
+ * `tool` is null for a file that carries the key line and NO `;@MKR|TOOL` record (#332 review) —
+ * hand-edited, or written by a post that puts identity in the CM line only. Step (0) still answers
+ * it on its own; every step below needs the header's geometry and so finds nothing.
  */
 export function matchHeaderTool(
-  tool: Tool,
+  tool: Tool | null,
   entries: readonly ToolLibraryEntry[],
   statedKey: string | null = null,
 ): HeaderToolMatch | null {
-  // (0) the file's own statement, and the strongest one there is (#332). Resolving it is the whole
-  // test: the entry carries the tool, so nothing about the vendor id or the shape can add to it.
+  // (0) the file's own statement, and the strongest one there is (#332). Resolving it is almost the
+  // whole test: the entry carries the tool, so nothing about the vendor id or the shape can add to
+  // it — EXCEPT the geometry the file itself states (#316 review). A `user:` cutter edited after
+  // the file was posted (same key, different diameter) reopens as the cutter the file names, over a
+  // sweep it was not cut with; a stated diameter this entry does not match makes it a suggestion.
+  // The key is still the answer — it is what the file says — so the provenance stays `'key'`.
   if (statedKey !== null) {
     const named = entries.find((e) => e.key === statedKey);
-    if (named) return { key: named.key, strength: 'exact', provenance: 'key' };
-    const fallback = matchByIdOrShape(tool, entries);
+    if (named) {
+      const stated = tool === null ? null : cuttingDiameter(tool);
+      const entry = cuttingDiameter(named.tool);
+      const agreesOnDiameter = stated === null || entry === null || Math.abs(stated - entry) <= TOLERANCE_MM;
+      return { key: named.key, strength: agreesOnDiameter ? 'exact' : 'suggested', provenance: 'key' };
+    }
+    const fallback = tool === null ? null : matchByIdOrShape(tool, entries);
     return fallback ? { ...fallback, strength: 'suggested' } : null;
   }
-  return matchByIdOrShape(tool, entries);
+  return tool === null ? null : matchByIdOrShape(tool, entries);
 }
 
 /** Steps (a)–(c) on their own: what a file that names no registry key can be matched by. */

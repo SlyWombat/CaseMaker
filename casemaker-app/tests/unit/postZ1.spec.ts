@@ -24,6 +24,8 @@ import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import type { EngraveLabel } from '@/types/engraveJob';
 import { executeProfile } from '@/workers/geometry/evaluateOp';
+import { setRegistry } from '@/engine/cnc/toolRegistry';
+import { useSimSetupStore } from '@/store/simSetupStore';
 import { tl } from './helpers/manifoldExec';
 
 const rapid = (x: number, y: number, z: number): CamMove => ({ kind: 'rapid', x, y, z });
@@ -370,5 +372,37 @@ describe('postZ1 round trip (#173)', () => {
       emitted++;
     }
     expect(emitted).toBe(cutMoves.length);
+  });
+});
+
+// ---- #332 review: what the post writes, our own reader reads back ----------------------------------
+// The line is only worth writing if the file it lands in comes back as the cutter it names. This is
+// the round trip the two halves of #332 are supposed to make: `postZ1` emits the key, and
+// `simSetupStore.openFile` resolves it — with the registry holding the cutter, which is the case the
+// built-in/`cat:` rows cannot answer (#212: a clone carries no vendor `g_ID`).
+
+describe('the file names its cutter, and the Simulate form reads it back (#332)', () => {
+  it('a user-keyed post reopens as that cutter, not as the closest 3.175 mm flat', () => {
+    const tool = flatEndMill(3.175, { id: null, name: 'six-flat copy', fluteLength: 12, shoulderLength: 12 });
+    const res = postZ1(makeIr(TWO_OP.operations, { tool }), { ...CTX, toolKey: 'user:six-flat-copy' }, Z1);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    // What the file offers on its own: the vendor line says `id=0` (the clone cannot inherit a
+    // `g_ID`), so shape and diameter is all the geometry has, and all six 3.175 mm flats tie on it.
+    expect(res.text).toContain(';@MKR|TOOL|number=1|id=0|');
+
+    setRegistry([{ key: 'user:six-flat-copy', provenance: 'cloned from the catalogue', tool }]);
+    try {
+      useSimSetupStore.getState().openFile('six-flat-copy.nc', res.text);
+      const s = useSimSetupStore.getState();
+      expect(s.statedToolKey).toBe('user:six-flat-copy');
+      expect(s.toolKey).toBe('user:six-flat-copy');
+      expect(s.toolMatch).toBe('exact');
+      expect(s.toolMatchProvenance).toBe('key');
+    } finally {
+      setRegistry([]);
+      useSimSetupStore.getState().reset();
+    }
   });
 });

@@ -37,7 +37,7 @@ import { applyEvent, buildTimeline, initialState, type MachineState } from './em
 import type { MillProfile } from './machine';
 import { sacrificialBoxes, type SacrificialBox } from './sacrificial';
 import type { Setup } from './setup';
-import { cuttingRadiusForSweep, type Tool } from './tool';
+import { cuttingDiameter, cuttingRadiusForSweep, type Tool } from './tool';
 
 /** Deepest permitted cut (positive mm below the top face) at a work-frame XY. 0 = no cutting allowed here. */
 export type DepthLimit = (x: number, y: number) => number;
@@ -468,7 +468,7 @@ function collect(min: Vec3, max: Vec3, p: [number, number, number]): void {
 function toolRadiusOf(tool: Tool): number {
   const r = cuttingRadiusForSweep(tool);
   if (r.ok) return r.radius;
-  const d = tool.tipDiameter ?? tool.diameter;
+  const d = cuttingDiameter(tool);
   return d === null || !(d > 0) ? 0 : d / 2;
 }
 

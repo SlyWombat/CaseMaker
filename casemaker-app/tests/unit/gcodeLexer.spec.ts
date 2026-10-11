@@ -68,6 +68,8 @@ describe('classifyLine (§6)', () => {
   });
   it('recognises header, comment, percent and blank lines', () => {
     expect(classifyLine(';@MKR|BEGIN')).toEqual({ kind: 'comment', header: true });
+    // Our own line, one record type over (#332): it is a comment to Studio, and a record to us.
+    expect(classifyLine(';@CM|TOOL|key=flat-1.0')).toEqual({ kind: 'comment', header: true });
     expect(classifyLine('; plain')).toEqual({ kind: 'comment', header: false });
     expect(classifyLine('(plain)')).toEqual({ kind: 'comment', header: false });
     expect(classifyLine('%')).toEqual({ kind: 'percent' });

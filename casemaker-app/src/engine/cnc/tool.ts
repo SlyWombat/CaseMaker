@@ -128,6 +128,16 @@ export function flatEndMill(cuttingDiameter: number, opts: Partial<Tool> = {}): 
 export type RadiusResult = { ok: true; radius: number } | { ok: false; reason: string };
 
 /**
+ * The tool's cutting diameter, best effort: `tipDiameter` when it states one (the tip is what
+ * cuts), `diameter` otherwise, `null` when it states neither. The ONE copy of this rule, shared by
+ * the header matcher, the sweep and the verifier (#316 review) — three `??` chains that could
+ * drift apart are three chances to disagree about which cutter a file names.
+ */
+export function cuttingDiameter(tool: Tool): number | null {
+  return tool.tipDiameter ?? tool.diameter;
+}
+
+/**
  * The radius the V1 sweep uses, or a refusal naming why. Only a flat end mill qualifies; a
  * flat end mill with a corner radius is a bull nose and is refused too, because its sweep at
  * constant Z is not a capsule.
@@ -139,7 +149,7 @@ export function cuttingRadiusForSweep(tool: Tool): RadiusResult {
   if (tool.cornerRadius !== null && tool.cornerRadius > 0) {
     return { ok: false, reason: `tool "${tool.name}" has a corner radius of ${tool.cornerRadius} mm: a bull nose, whose constant-Z sweep is not a capsule` };
   }
-  const d = tool.tipDiameter ?? tool.diameter;
+  const d = cuttingDiameter(tool);
   if (d === null || !(d > 0)) {
     return { ok: false, reason: `tool "${tool.name}" has no usable cutting diameter (tipdiameter=${tool.tipDiameter}, diameter=${tool.diameter})` };
   }

@@ -129,12 +129,16 @@ export const useSimSetupStore = create<SimSetupState>()((set) => ({
     // The file's TOOL record, matched against the registry list (#316) — see `headerMatch.ts` for
     // the order. A fit that leans on shape and diameter alone comes back `suggested`, and that
     // travels with the key so the panel can say which answer it is holding. The file's OWN key
-    // (#332) leads the order, and is worth keeping whether or not the registry holds it.
+    // (#332) leads the order, and is worth keeping whether or not the registry holds it. A file with
+    // the key line and NO TOOL record (hand-edited, or a post that writes identity only) still
+    // matches: step (0) needs no geometry, and `null` here is that file, not a missing answer.
     const statedKey = parsed.header?.cm?.tool?.key ?? null;
     const toolRecord = parsed.header?.records.find((r) => r.tag === 'TOOL');
-    const headerMatch = toolRecord
-      ? matchHeaderTool(toolFromMkrRecord(toolRecord), getTools(), statedKey)
-      : null;
+    const headerMatch = matchHeaderTool(
+      toolRecord ? toolFromMkrRecord(toolRecord) : null,
+      getTools(),
+      statedKey,
+    );
     const headerToolKey = headerMatch?.key ?? null;
 
     set((s) => {
