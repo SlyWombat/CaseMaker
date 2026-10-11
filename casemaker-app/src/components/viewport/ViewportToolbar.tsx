@@ -252,7 +252,18 @@ export function ViewportToolbar() {
         // Real checkboxes, as the approved mockup drew them (#195). Styled inline because
         // `src/styles/index.css` is not one of this issue's files; the values are the mockup's
         // `.vp-layer` rule.
-        <div className="viewport-toolbar__group" role="group" aria-label="Layers" style={{ gap: 7 }}>
+        //
+        // #355 — `flexWrap` on the GROUP, not just on the toolbar. Six uppercase labels are ~383 px
+        // wide, wider than the 320 a 1024-px window leaves the canvas once the context panel takes
+        // its column; the toolbar wraps its GROUPS, but a single group wider than the line it is on
+        // still overruns, which is what cut "Sacrificial" in half. `.viewport-toolbar__group` is
+        // `display: flex` with no wrap, so the row has to be allowed to break here.
+        <div
+          className="viewport-toolbar__group"
+          role="group"
+          aria-label="Layers"
+          style={{ gap: 7, flexWrap: 'wrap' }}
+        >
           {LAYERS.map((l) => (
             <label
               key={l.key}

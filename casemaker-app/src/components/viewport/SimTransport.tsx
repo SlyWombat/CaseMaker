@@ -68,7 +68,14 @@ const BAR: CSSProperties = {
   flexDirection: 'column',
   gap: 4,
 };
-const ROW: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6 };
+/**
+ * #355 — `flexWrap` on the transport's row, for the same reason the layer chips wrap: at 1024 the
+ * context panel takes its column and the canvas is 344 px wide, so five 30 px buttons, the speed
+ * select, the scrubber and three `nowrap` read-outs cannot share one line — the read-outs ran off
+ * the right edge and were clipped, taking "step N / N" and the line number with them. The scrubber
+ * has a zero flex-basis, so it stays on the first line and grows; only the read-outs move down.
+ */
+const ROW: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' };
 const BTN: CSSProperties = {
   width: 30,
   height: 26,

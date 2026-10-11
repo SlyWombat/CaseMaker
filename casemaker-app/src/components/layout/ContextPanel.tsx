@@ -60,12 +60,23 @@ function renderSection(id: SidebarSectionId): JSX.Element {
  * Selection and active section are MUTUALLY EXCLUSIVE in viewportStore;
  * setting one clears the other so the right rail only ever shows ONE thing.
  */
+/**
+ * Issue #355 — the narrowest window that still SHARES its width with the panel.
+ *
+ * The two rails take 680 px of it, so at 1024 the canvas keeps 344 and the panel stops covering
+ * what it is describing; below that (measured at 900: a 220 px canvas) the overlay costs less than
+ * the column would. It used to be 1366, which meant a laptop-width window got a 360 px drawer over
+ * the viewport: the viewport toolbar sat clipped under it and the panel covered half the canvas.
+ * The stylesheet's `.app-main` query (max-width: 1023px) is the same number from the other side.
+ */
+const RAIL_MIN_W = 1024;
+
 export function ContextPanel() {
   const selection = useViewportStore((s) => s.selection);
   const activeSection = useViewportStore((s) => s.activeSidebarSection);
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
   const [isCompact, setIsCompact] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth < 1366 : false,
+    typeof window !== 'undefined' ? window.innerWidth < RAIL_MIN_W : false,
   );
   // Issue #280 — the auto-open rule below fires on a *change* of input, so a panel that MOUNTS
   // with a section already active (the startup wizard sets the section and then the shell swaps
@@ -75,13 +86,13 @@ export function ContextPanel() {
   const [drawerOpen, setDrawerOpen] = useState(
     () =>
       typeof window !== 'undefined' &&
-      window.innerWidth < 1366 &&
+      window.innerWidth < RAIL_MIN_W &&
       (selection !== null || activeSection !== null),
   );
 
   useEffect(() => {
     function onResize() {
-      setIsCompact(window.innerWidth < 1366);
+      setIsCompact(window.innerWidth < RAIL_MIN_W);
     }
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
@@ -134,17 +145,10 @@ export function ContextPanel() {
         data-testid="context-panel"
         aria-label="Context panel"
       >
-        {isCompact && (
-          <button
-            type="button"
-            className="context-panel__close"
-            onClick={() => setDrawerOpen(false)}
-            aria-label="Close context panel"
-            title="Close"
-          >
-            ×
-          </button>
-        )}
+        {/* Issue #355 — there is no drawer × of its own here any more. It sat directly under the
+            content's × (the section editor's, or the selection's) and the two read as one control
+            duplicated; the handle tab on the right edge is the drawer's affordance, and it says so
+            in its own label. Rail mode never had one, so this is also the two modes agreeing. */}
         {selection ? (
           <SelectionPanel />
         ) : activeSection ? (

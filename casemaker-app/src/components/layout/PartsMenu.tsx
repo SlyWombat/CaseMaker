@@ -67,7 +67,10 @@ export function PartsMenu({ compact = false }: Props) {
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        👁 Parts {hiddenCount > 0 ? `(${total - hiddenCount}/${total})` : ''}
+        👁 <span className="btn-label">Parts</span>{' '}
+        {/* #355 — the word hides on a laptop-width window (see the .btn-label rule); the count
+            stays, because a part switched off is worth seeing even when the label is not. */}
+        {hiddenCount > 0 ? `(${total - hiddenCount}/${total})` : ''}
       </button>
       {open && (
         <div

@@ -61,25 +61,25 @@ body, html, #root {
 
 .app-main {
   display: grid;
-  /* Issue #93 Phase 4a — three-panel layout above 1366 px viewport: left
-     domain rail, center canvas, right context rail. Below 1366 px the right
-     rail collapses to a drawer (handled in JS via media query) so the grid
-     drops back to two columns. */
+  /* Issue #93 Phase 4a — three-panel layout: left domain rail, center canvas, right
+     context rail. Below 1024 px (#355) the right rail collapses to a drawer (handled in JS
+     via a media query) so the grid drops back to two columns. 1024 is where sharing stops
+     paying: the two rails take 680 px of it and leave the canvas 344, while below that the
+     overlay costs less than a canvas of 220 px or less would. */
   grid-template-columns: 320px 1fr 360px;
   min-height: 0;
 }
-@media (max-width: 1366px) {
+@media (max-width: 1023px) {
   .app-main {
     grid-template-columns: 320px 1fr;
   }
 }
 
-/* Phones (#134) — viewport-first. The rail is a drawer (see .sidebar--drawer),
-   so the workspace grid is one column and the pane may shrink below its
-   min-content (its toolbar + banners otherwise forced the shell to ~620px). */
+/* Phones (#134) — viewport-first. The rail is a drawer (see .sidebar--drawer), so the
+   workspace grid is one column. The pane's `min-width: 0` (see .viewport-pane) is what keeps
+   its toolbar and banners from forcing the shell out to their min-content width here. */
 @media (max-width: 640px) {
   .app-main { grid-template-columns: 1fr; }
-  .viewport-pane { min-width: 0; }
   /* The wordmark is the widest thing in the bar. From 641px up it fits beside
      the collapsed ⋯ toolbar; below 640px the two together would push the ⋯
      menu off-screen, so the wordmark goes. */
@@ -172,7 +172,10 @@ body, html, #root {
   top: 50%;
   right: 0;
   transform: translateY(-50%);
-  z-index: var(--cm-z-sidebar-handle);
+  /* #355 — above the drawer it opens, not below it: see the token. With the drawer's own
+     × gone this tab is the only control that closes an open drawer, and there is no other way
+     out — the section editor's × clears the section but leaves the drawer itself up. */
+  z-index: var(--cm-z-context-handle);
   background: var(--cm-color-surface-container-high);
   color: var(--cm-color-on-surface);
   border: var(--cm-border-1);
@@ -185,23 +188,6 @@ body, html, #root {
   line-height: 1;
 }
 .context-panel__handle:hover {
-  background: var(--cm-color-surface-bright);
-}
-.context-panel__close {
-  position: absolute;
-  top: var(--cm-space-3);
-  right: var(--cm-space-3);
-  background: transparent;
-  border: none;
-  color: var(--cm-color-on-surface-variant);
-  font-size: 20px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 2px 6px;
-  border-radius: var(--cm-radius-sm);
-}
-.context-panel__close:hover {
-  color: var(--cm-color-on-surface);
   background: var(--cm-color-surface-bright);
 }
 .context-panel__empty {
@@ -352,6 +338,20 @@ body, html, #root {
 }
 .toolbar-buttons input[type=file] {
   display: none;
+}
+
+/* Issue #355 — laptop widths (901–1199px). The row is 1001 px of buttons and the wordmark
+   another 162, so between about 1195 and the phone breakpoint the flex row squeezes its items
+   and every label wraps to a second line inside the 48px bar (measured: 10 of 11 buttons at
+   1024). The controls whose icon already says what they do drop the word and keep their title;
+   New, Manage, Save and Save as… keep theirs, because ✨ and 🧰 carry less and 💾 is
+   shared by the two save buttons. Scoped to the band: at 900 and below the compact bar renders
+   those same buttons with their words, and the ⋯ panel's own buttons are never matched
+   (they are not direct children of .toolbar-buttons). */
+@media (min-width: 901px) and (max-width: 1199px) {
+  .toolbar-buttons > * .btn-label {
+    display: none;
+  }
 }
 
 /* Issue #134 — phone-width overflow menu. Below 640px the secondary controls
@@ -1793,9 +1793,17 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Issue #355 — `min-width: 0` at EVERY width, not just on phones. The pane is a `1fr`
+   grid item holding a <canvas>, and a grid item's default `min-width: auto` floors it at the
+   canvas's INTRINSIC width — which is the width the canvas was last resized to. Resize a
+   maximised window down and the column refuses to shrink: measured 1440 -> 1024, `.app-main`
+   stayed 1440 wide, the middle column stayed 760, and the 360 px context rail was pushed past
+   the clipped shell edge, i.e. the panel simply disappeared. Below 640 px the same rule keeps
+   the pane from forcing the shell to the toolbar's min-content width. */
 .viewport-pane {
   position: relative;
   background: #0d1014;
+  min-width: 0;
 }
 
 .status-bar {

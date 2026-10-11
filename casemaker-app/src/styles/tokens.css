@@ -89,6 +89,12 @@
   --cm-z-viewport-banner: 11;   /* the placement-issue banner, over the canvas */
   --cm-z-sidebar-handle: 24;    /* the mobile drawer's edge handle */
   --cm-z-sidebar-drawer: 25;    /* the mobile drawer itself */
+  /* #355 — the RIGHT drawer's edge tab. It sits above the drawer it opens, because
+     since the drawer's own × was removed it is the only control that can close it: at 24,
+     below the drawer, an open context panel (25) swallowed the tab and the drawer could not be
+     shut at all. The left rail keeps 24 — picking a section there shuts it, so its tab is
+     not the only way out and need not cover the rail's own buttons. */
+  --cm-z-context-handle: 26;
   --cm-z-header-menu: 100;      /* header popovers: settings, overflow, parts */
   --cm-z-modal: 120;            /* a dialog portaled to the body */
   --cm-z-modal-raised: 200;     /* a dialog opened from inside another surface (Export) */

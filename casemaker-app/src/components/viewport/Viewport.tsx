@@ -272,14 +272,50 @@ function ViewportCameraController() {
   return null;
 }
 
+/**
+ * Issue #355 — an orbit drag that leaves the canvas must not select the panels beside it.
+ *
+ * `OrbitControls` takes the pointer on the canvas and captures it, but it never calls
+ * `preventDefault`, so the browser's own drag-to-select runs alongside the orbit: pull the scene
+ * left across the Context panel and the paragraph under the pointer, and every button in its way,
+ * comes back highlighted and filled in blue. `user-select: none` on the document for the DURATION
+ * of the drag stops the selection starting; the first `pointerup`, `pointercancel` or `blur` after
+ * it clears the rule again, so a release the window never sees (a pointer captured and let go
+ * outside) cannot leave the app unselectable.
+ *
+ * The rule is applied only for a press that BEGAN on the canvas — the toolbar, the legends and the
+ * transport live inside the same wrapper and have their own hit-testing to worry about.
+ */
+function useNoSelectWhileOrbiting(): (e: React.PointerEvent) => void {
+  useEffect(() => {
+    const root = document.documentElement;
+    const clear = (): void => {
+      root.style.userSelect = '';
+    };
+    window.addEventListener('pointerup', clear);
+    window.addEventListener('pointercancel', clear);
+    window.addEventListener('blur', clear);
+    return () => {
+      window.removeEventListener('pointerup', clear);
+      window.removeEventListener('pointercancel', clear);
+      window.removeEventListener('blur', clear);
+      clear();
+    };
+  }, []);
+  return (e: React.PointerEvent) => {
+    if (e.target instanceof HTMLCanvasElement) document.documentElement.style.userSelect = 'none';
+  };
+}
+
 export function Viewport() {
   // The grid's plane is z = 0 — the stock's TOP face in the work frame — so it would slice
   // through the middle of the simulation's stock, and z-fight the engrave preview's top face,
   // which sits at exactly z = 0 too. Hidden while either CNC view owns the viewport (#197, #205).
   const simActive = useSimStore(isSimSceneActive);
   const engraveActive = useViewportStore((s) => s.activeSidebarSection === 'cnc-engrave');
+  const onPointerDown = useNoSelectWhileOrbiting();
   return (
-    <div className="viewport-wrapper">
+    <div className="viewport-wrapper" onPointerDown={onPointerDown}>
       <ViewportToolbar />
       <Canvas
         gl={{ antialias: !isE2E, preserveDrawingBuffer: true }}

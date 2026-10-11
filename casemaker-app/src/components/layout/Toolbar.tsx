@@ -232,14 +232,19 @@ export function Toolbar() {
       🧰 Manage
     </button>
   ) : null;
+  // #355 — five of these carry their word in a `btn-label` span, which the stylesheet hides on a
+  // laptop-width window (901–1199px): at that size the full row is wider than the bar and every
+  // label wrapped to a second line inside the 48px header. The icons that survive alone (↶ ↷ 📂 ⬇
+  // 👁 📖) are the ones that already say what the button does; New, Manage, Save and Save as… keep
+  // their words, because ✨ and 🧰 carry less and 💾 is shared by the two save buttons.
   const undoBtn = (
     <button onClick={undoProject} data-testid="undo-btn" title="Undo (Ctrl+Z)">
-      ↶ Undo
+      ↶ <span className="btn-label">Undo</span>
     </button>
   );
   const redoBtn = (
     <button onClick={redoProject} data-testid="redo-btn" title="Redo (Ctrl+Shift+Z)">
-      ↷ Redo
+      ↷ <span className="btn-label">Redo</span>
     </button>
   );
   const saveBtn = (
@@ -278,7 +283,7 @@ export function Toolbar() {
       data-testid="load-project"
       title="Load a project from a .caseproj.json file"
     >
-      📂 Load
+      📂 <span className="btn-label">Load</span>
     </button>
   );
   const exportBtn = (
@@ -292,7 +297,7 @@ export function Toolbar() {
           : `Open the export modal — per-part thumbnails + Save All (current format: ${FORMAT_LABEL[exportFormat] ?? exportFormat}, change in ⚙)`
       }
     >
-      ⬇ Export…
+      ⬇ <span className="btn-label">Export…</span>
     </button>
   );
   const docsBtn = (
@@ -301,7 +306,7 @@ export function Toolbar() {
       data-testid="docs-open"
       title="Open the User Manual"
     >
-      📖 Docs
+      📖 <span className="btn-label">Docs</span>
     </button>
   );
   const settingsMenu = settingsOpen ? <SettingsMenu onClose={closeSettings} /> : null;

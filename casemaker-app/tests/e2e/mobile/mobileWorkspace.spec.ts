@@ -88,6 +88,13 @@ test('the phone header exposes every control without a hidden swipe (#134)', asy
  * "22.86" painted as "22.8" against the Ø glyph beside it.
  */
 test('every section panel fits the phone without clipping a field (#134)', async ({ cm, page }) => {
+  // #355 — a budget this walk can actually meet. It opens and shuts two drawers and visits seven
+  // sections on a phone viewport under swiftshader, and every click on a `position: fixed` element
+  // there costs ~0.9 s in actionability waits; the run was measured at 32 s against the default
+  // 30 s, so it timed out a line or two short on a loaded machine — on `main` as well, with the
+  // #355 work stashed, so this is not a regression the layout brought with it. 60 s leaves the
+  // same margin the other walkers in this directory have.
+  test.setTimeout(60_000);
   await cm.ready();
   await page.getByTestId('welcome-search').fill('sht31');
   await page.getByTestId('welcome-board-adafruit-sht31d').click();
@@ -99,10 +106,11 @@ test('every section panel fits the phone without clipping a field (#134)', async
   for (const id of sections) {
     // The open context drawer covers the rail handle, so put it away first.
     // Read the class, not isVisible(): the closed drawer is translated off to
-    // the right rather than hidden, so its close button still reports visible.
+    // the right rather than hidden, so the handle still reports visible.
+    // #355 — the drawer's own × is gone; the handle tab is the drawer's control.
     const panel = page.getByTestId('context-panel');
     if ((await panel.getAttribute('class'))?.includes('context-panel--open')) {
-      await page.locator('.context-panel__close').click();
+      await page.getByTestId('context-panel-handle').click();
       await expect(panel).toHaveClass(/context-panel--closed/);
     }
     const sideX = await page.getByTestId('sidebar').evaluate((el) => el.getBoundingClientRect().x);
@@ -212,9 +220,10 @@ test('the Part panel fits the phone, and its numbers reach the part (#282)', asy
   await page.evaluate(async () => { await window.__caseMaker!.waitForIdle(); });
 
   // The wizard can leave the right-hand drawer open, and an open drawer covers the rail handle.
+  // #355 — closed with the drawer's own handle tab, the only close control the drawer has now.
   const panel = page.getByTestId('context-panel');
   if ((await panel.getAttribute('class'))?.includes('context-panel--open')) {
-    await page.locator('.context-panel__close').click();
+    await page.getByTestId('context-panel-handle').click();
     await expect(panel).toHaveClass(/context-panel--closed/);
   }
   await page.getByTestId('sidebar-handle').click();

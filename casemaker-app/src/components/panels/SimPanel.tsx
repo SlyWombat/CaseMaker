@@ -344,8 +344,11 @@ export function SimPanel() {
           ...(toolKey ? null : { borderColor: '#b4524c', boxShadow: '0 0 0 1px rgba(180,82,76,.4)' }),
         }}
       >
+        {/* #355 — a placeholder, not a sentence. The full one ("choose the tool this program was
+            written for") is longer than the 360px panel draws, so it arrived cut at "...writ"; the
+            hint directly below says it in full, and the control's own title above says it too. */}
         <option value="" disabled>
-          Choose the tool this program was written for…
+          Choose the tool…
         </option>
         {tools.map((e) => (
           <option key={e.key} value={e.key} title={e.provenance}>
