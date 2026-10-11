@@ -5,6 +5,7 @@ import {
   keepOutLimit,
   keepOutLimitParts,
   keepOutMembrane,
+  shallowestVoidLimit,
   toPartPlan,
   type PartPlan,
 } from '@/engine/cnc/engrave/partPlan';
@@ -12,6 +13,7 @@ import {
   effectiveMargins,
   MARGIN_DEFAULTS,
   marginSourceWords,
+  recommendLabelDepth,
   recommendMargins,
   splitBound,
   zBudgetInputsFor,
@@ -490,6 +492,45 @@ function marginsStep(
 }
 
 /**
+ * Where a label's depth came from, in words, for §7 (#362 review; #345's rule that the number says
+ * where it came from).
+ *
+ * Only the app's OWN numbers get a sentence. A depth a person typed is theirs and needs no note; a
+ * depth the recommendation wrote is the one an operator may reasonably read as a mistake — 0.51 mm
+ * is shallow for a label — unless the printout says which constraint left only that much. The
+ * sentence is the same `basis[0]` the label's own row shows in the panel, and it is produced by the
+ * same call, so the paper and the screen cannot explain one number two ways.
+ *
+ * The clause is printed only when the recommendation STILL reproduces the depth the job carries.
+ * `setStock` can be edited after a blank was taken without re-depthing anything, and quoting a
+ * reason for a number this blank's arithmetic no longer produces would be the invented provenance
+ * #345 is against — so a stale `computed` depth says only that the app chose it, and what the
+ * blank now allows instead.
+ */
+function depthSourceWords(
+  job: EngraveJob,
+  item: { id: string; depth: Mm },
+  voidLimit: { name: string; limit: Mm } | null,
+  boundaryMargin: Mm,
+): string {
+  const label = job.labels.find((l) => l.id === item.id);
+  if (!label) return '';
+  const claim = job.sources?.labels?.[label.id];
+  // Anything but `computed` is the user's or the bench's number, and neither asked to be explained.
+  if (claim?.depth !== 'computed') return '';
+  const rec = recommendLabelDepth(job, label, {
+    voidLimit,
+    boundaryMargin,
+    ...(claim.depthIntent === undefined ? {} : { intent: claim.depthIntent }),
+  });
+  if (rec !== null && Math.abs(rec.depth - item.depth) < 1e-9) return ` — ${rec.basis[0]}`;
+  return (
+    ' — the app recommended this depth for the blank it was taken on' +
+    (rec === null ? '' : `; this blank's arithmetic allows ${fmtNum(rec.depth)} mm`)
+  );
+}
+
+/**
  * The void a cut item's extent sits over, or null. Both the item and the void are reduced to
  * their stock-frame bounding boxes (`buildDiagram` has them), because the sheet is pure — no
  * wasm, so no exact region intersection — and a box overlap is the CONSERVATIVE test: it may
@@ -842,7 +883,15 @@ export function buildRunSheet(
   const stackUp = buildStackUp(job);
   const itemBox = new Map(diagram.items.map((i) => [i.id, i] as const));
   const deepest = items.reduce((max, item) => Math.max(max, item.depth), 0);
-  const stopBelow = deepest + 1; // #207 section 3: below the deepest cut + 1 mm the cutter is under the jaw tops
+  // #362 review — the blank's void ceiling, resolved once, the same way the store's seeding and the
+  // panel's row resolve it: the reason a recommended depth is as shallow as it is has to be the same
+  // reason in all three places.
+  const voidLimit = shallowestVoidLimit(job, margins.boundaryMargin);
+  // #207 section 3: below the deepest cut by the clearance the JOB keeps, the cutter is under the
+  // jaw tops. The number is the job's own `jawClearance` (#362 review) — the same one
+  // `stock-proud-too-small` and `recommendLabelDepth` hold a floor to, so the printout cannot tell
+  // the operator to stop somewhere the app does not.
+  const stopBelow = deepest + job.jawClearance;
   const tool = jobTool(job);
   const diameter = tool ? cuttingDiameter(tool) : null;
   const params = generated.feeds && generated.feeds.ok ? generated.feeds.params : null;
@@ -1031,7 +1080,10 @@ export function buildRunSheet(
           ? ` (DEEPER than the ${fmtNum(keepOutLimit(job, over.solidThickness, margins.boundaryMargin))} mm the void allows)`
           : ` (deepest cut there ${fmtNum(keepOutLimit(job, over.solidThickness, margins.boundaryMargin))} mm)`)
       : '';
-    cutSteps.push({ text: `${item.name}${note}`, value: `${fmtNum(item.depth)} mm deep` });
+    cutSteps.push({
+      text: `${item.name}${note}${depthSourceWords(job, item, voidLimit, margins.boundaryMargin)}`,
+      value: `${fmtNum(item.depth)} mm deep`,
+    });
   }
   cutSteps.push({
     text: 'Stay at the machine. Stop it if the sound changes, the blank moves, or the cutter loads up.',

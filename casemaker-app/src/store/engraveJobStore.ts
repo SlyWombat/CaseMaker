@@ -525,13 +525,27 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // `takeBadgeBlank` re-depths the labels a blank has not claimed, and a stated depth is
         // precisely the one it must leave alone. Stamped here rather than at each call site, so
         // there is one place that decides what "the user typed this depth" means.
-        const sources: EngraveJobSources =
-          patch.depth === undefined
-            ? (job.sources ?? {})
-            : {
-                ...(job.sources ?? {}),
-                labels: { ...(job.sources?.labels ?? {}), [id]: { depth: 'user' } },
-              };
+        //
+        // The INTENT's provenance is stamped the same way and for the same reason (review): the
+        // recommendation writes a `'reveal'` of its own, and the guard it has to get past declines
+        // any item that states an intent. Without a source on the USER's intent, a person's reveal
+        // and a previous call's would be indistinguishable — so either the person's statement would
+        // be silently revised, or the app's own would be frozen in place forever.
+        const claim = { ...(job.sources?.labels?.[id] ?? {}) };
+        if (patch.depth !== undefined) claim.depth = 'user';
+        if ('depthIntent' in patch) {
+          if (patch.depthIntent === undefined) delete claim.depthIntent;
+          else claim.depthIntent = 'user';
+        }
+        const claimed = Object.keys(claim).length > 0;
+        const sources: EngraveJobSources = {
+          ...(job.sources ?? {}),
+          labels: { ...(job.sources?.labels ?? {}), [id]: claim },
+        };
+        // A label whose claims have all been cleared goes back to claiming nothing, so the map does
+        // not accumulate `{}` entries the schema has to carry.
+        if (!claimed) delete sources.labels![id];
+        if (Object.keys(sources.labels!).length === 0) delete sources.labels;
         return {
           ...job,
           labels: job.labels.map((l) =>
@@ -720,13 +734,20 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         const boundaryMargin = effectiveMargins(job, useSettingsStore.getState().margins).boundaryMargin;
         const voidLimit = shallowestVoidLimit(job, boundaryMargin);
         const stated = job.sources?.labels ?? {};
-        const stamps: Record<string, { depth: FieldSource }> = {};
+        const stamps: Record<string, { depth: FieldSource; depthIntent?: FieldSource }> = {};
         let changed = false;
 
         const labels = job.labels.map((label) => {
-          const source = stated[label.id]?.depth;
-          if (source === 'user' || source === 'measured') return label;
-          const rec = recommendLabelDepth(job, label, { voidLimit, boundaryMargin });
+          const claim = stated[label.id];
+          if (claim?.depth === 'user' || claim?.depth === 'measured') return label;
+          const rec = recommendLabelDepth(job, label, {
+            voidLimit,
+            boundaryMargin,
+            // Its OWN past intent does not lock the label out (#362 review): `'computed'` says the
+            // `'reveal'` on this label is a previous call's, so a thicker badge or a different split
+            // gets a fresh answer instead of a stale depth the checker would refuse.
+            ...(claim?.depthIntent === undefined ? {} : { intent: claim.depthIntent }),
+          });
           if (rec === null) return label;
           changed = true;
           // The depth is written as `computed`, the honest member of `FieldSource` for a number the
@@ -735,11 +756,21 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           // stock, tool and cut fields too. What the source is FOR is the guard above — a value the
           // user or the bench claimed is never overwritten, and `computed` is precisely a value they
           // have not.
-          stamps[label.id] = { depth: 'computed' };
+          stamps[label.id] = {
+            depth: 'computed',
+            // The intent travels with its provenance for the same reason, and is CLEARED when the
+            // recommendation no longer states one — a `'reveal'` left behind on a floor that has
+            // moved back above the split is a claim about a blank this job is no longer on.
+            ...(rec.depthIntent === undefined ? {} : { depthIntent: 'computed' as FieldSource }),
+          };
           return {
             ...label,
             depth: rec.depth,
-            ...(rec.depthIntent === undefined ? {} : { depthIntent: rec.depthIntent }),
+            // Written unconditionally, `undefined` included: a label reaching here with an intent
+            // can only be carrying one this same code wrote (`'computed'` is the only provenance the
+            // guard above lets through), and a `'reveal'` on a floor the new blank no longer puts
+            // past the split would be a claim about the blank this job has left.
+            depthIntent: rec.depthIntent,
           };
         });
 

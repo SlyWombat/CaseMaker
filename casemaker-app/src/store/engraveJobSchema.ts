@@ -451,7 +451,12 @@ const jobSourcesSchema = z.object({
   // #362 — per-label provenance, keyed by label id. Named explicitly for the same reason
   // `flatness` above is: zod strips what an object does not name, and a user's typed depth coming
   // back as an unclaimed one would let the next `takeBadgeBlank` overwrite it.
-  labels: z.record(z.string(), z.object({ depth: fieldSourceSchema.optional() })).optional(),
+  labels: z
+    .record(
+      z.string(),
+      z.object({ depth: fieldSourceSchema.optional(), depthIntent: fieldSourceSchema.optional() }),
+    )
+    .optional(),
 });
 
 /** Version 1 (#200): the document before sacrificial material existed. */

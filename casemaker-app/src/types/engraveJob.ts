@@ -74,7 +74,7 @@ export interface EngraveJobSources {
    * depth. A key absent WITHIN the map is a label nobody has claimed, which is exactly what the
    * re-depth is allowed to move.
    */
-  labels?: Record<string, { depth?: FieldSource }>;
+  labels?: Record<string, { depth?: FieldSource; depthIntent?: FieldSource }>;
 }
 
 export interface EngraveLabel {

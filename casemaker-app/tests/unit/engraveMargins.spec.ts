@@ -481,18 +481,56 @@ describe('the label depth a blank allows (#362)', () => {
     expect(rec.basis[1]).toContain('not binding');
   });
 
-  it('leaves the intent OFF where the split is out of reach — the jaws win and say so', () => {
-    // The badge's own seating: 1.905 mm proud leaves 0.905 mm over the jaws, and reaching the
-    // bottom colour on a 3.81 mm blank would take 1.0. The two-colour reveal is simply not
-    // available on a blank seated this low, and the answer says that rather than stamping a
-    // `reveal` the item would then be refused for.
+  it('stops in the TOP colour when the shallowest floor lands inside the split band (#362 review)', () => {
+    // The badge's own seating: 1.905 mm proud leaves 0.905 mm over the jaws. The blank's split sits
+    // at 0.8 mm with a ±0.2 mm band around it, and 0.905 is inside that band — neither colour is
+    // decided there, so a floor at 0.905 is a floor whose colour the app cannot name. The review's
+    // ruling: the recommendation comes back UP to the top colour, 0.8 − 0.2 = 0.6, and says so.
+    //
+    // The intent it stamps is `'surface'`, which is a real statement and not a formality: this floor
+    // DOES stay in the top colour, and saying so is what lets `checkBounds` hold it to the plane
+    // from the right side — and it is stamped as the app's own, so a thicker blank or a moved split
+    // gets a fresh answer rather than a floor frozen against this one.
     const badge = badgeJob();
     const job: EngraveJob = { ...badge, stock: { ...badge.stock, print: PRINT_0_2 }, keepOuts: [] };
+    const rec = recommendLabelDepth(job, label(), { voidLimit: null, boundaryMargin: 0.2 })!;
+    expect(rec.depth).toBe(0.6);
+    expect(rec.depthIntent).toBe('surface');
+    expect(rec.basis[0]).toContain('which lands inside the colour split');
+    expect(rec.basis[0]).toContain('stops in the top colour at 0.6 mm');
+    // The demotion quotes the clause that was binding (the jaws, 0.905 mm) and then every other
+    // constraint considered, in the candidates' own order — the split, the blank's underside.
+    expect(rec.basis[0]).toContain('above the jaw tops');
+    expect(rec.basis[1]).toContain('the colour split is 0.8 mm under the face');
+    expect(rec.basis[1]).toContain('not binding');
+    expect(rec.basis[2]).toContain('minimum floor allows');
+    expect(rec.basis[2]).toContain('not binding');
+    expect(rec.basis).toHaveLength(3);
+    // A floor the checker accepts from the side the demotion claims: exactly one margin above the
+    // plane, which is what `surface` means.
+    expect(checkBounds(rec.depth, [splitBound('surface', splitDepthOf(job))!], 0.2)).toBeNull();
+    // …and one 0.1 mm deeper, still inside the band, would keep a distance no colour claim survives.
+    expect(checkBounds(0.7, [splitBound('surface', splitDepthOf(job))!], 0.2)).not.toBeNull();
+  });
+
+  it('leaves the intent OFF where the split is out of reach — the jaws win and say so', () => {
+    // The same seating, on a blank whose split sits 1.4 mm down (`split: 2.41` on a 3.81 mm blank).
+    // Reaching the bottom colour would need 1.4 + 0.2 = 1.6 mm and the jaws leave 0.905, so the
+    // reveal is simply not available on a blank seated this low: the answer says so rather than
+    // stamping a `reveal` the item would then be refused for. 0.905 is also well below the split's
+    // band (1.2–1.6), so the top-colour demotion above does not apply either — the jaws win plainly.
+    const badge = badgeJob();
+    const job: EngraveJob = {
+      ...badge,
+      stock: { ...badge.stock, print: { split: 2.41, layerHeight: 0.2, firstLayerHeight: 0.2 } },
+      keepOuts: [],
+    };
+    expect(splitDepthOf(job)).toBeCloseTo(1.4, 9);
     const rec = recommendLabelDepth(job, label(), { voidLimit: null, boundaryMargin: 0.2 })!;
     expect(rec.depth).toBe(0.905);
     expect(rec.depthIntent).toBeUndefined();
     expect(rec.basis[0]).toContain('above the jaw tops');
-    expect(rec.basis[1]).toContain('the colour split is 0.8 mm under the face');
+    expect(rec.basis[1]).toContain('the colour split is 1.4 mm under the face');
     expect(rec.basis[1]).toContain('not binding');
   });
 
@@ -546,5 +584,31 @@ describe('the label depth a blank allows (#362)', () => {
     const rec = recommendLabelDepth(job, label(), { voidLimit: null, boundaryMargin: 0.2 })!;
     expect(rec.depth).toBe(2);
     expect(rec.basis[0]).toContain("the blank's 10 mm minimum floor allows 2 mm");
+  });
+
+  it('revises its OWN past intent, and declines every other stated one (#362 review)', () => {
+    // The recommendation stamps `'reveal'` on a two-colour blank, and the guard that declines a
+    // stated intent would then lock the label out of every later re-depth — a label frozen to the
+    // blank it was first measured against. `inputs.intent` is the way out: `'computed'` says the
+    // intent is OURS, so it may be rewritten. Everything else — `'user'`, `'catalogue'`,
+    // `'measured'` — is a person's statement, and so is a stated intent with NO provenance at all,
+    // which is every document written by hand (#362: an absent key means "still the shipped
+    // default", and a default intent is not the app's to overwrite).
+    const job = badgeJob();
+    const inputs = { voidLimit: shallowestVoidLimit(job), boundaryMargin: 0.2 };
+    const stated = label({ depthIntent: 'surface' });
+    expect(recommendLabelDepth(job, stated, inputs)).toBeNull();
+    expect(recommendLabelDepth(job, stated, { ...inputs, intent: 'computed' })).not.toBeNull();
+    expect(recommendLabelDepth(job, stated, { ...inputs, intent: 'computed' })!.depth).toBe(0.51);
+    for (const intent of ['user', 'catalogue', 'measured'] as const) {
+      expect(recommendLabelDepth(job, stated, { ...inputs, intent })).toBeNull();
+    }
+    // A construction label cuts nothing, so no intent and no provenance can conjure a depth for it.
+    expect(
+      recommendLabelDepth(job, label({ construction: true, depthIntent: 'surface' }), {
+        ...inputs,
+        intent: 'computed',
+      }),
+    ).toBeNull();
   });
 });

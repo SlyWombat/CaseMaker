@@ -337,6 +337,59 @@ describe('engraveJobStore (#200)', () => {
     expect(second.useEngraveJobStore.getState().job.labels[0]!.depth).toBe(1.2);
   });
 
+  // #362 review — the recommendation writes a `depthIntent` of its OWN (`'reveal'`, or the
+  // `'surface'` a band demotion stamps), and the guard in `recommendLabelDepth` declines any item
+  // that states one. Without a provenance on that intent, the app's own statement would lock the
+  // label out of every later re-depth: frozen onto the blank it was first measured against.
+  it('clears the intent it wrote when the next blank no longer produces one (#362 review)', async () => {
+    backing.clear();
+    const seeded = defaultEngraveJob();
+    const id = seeded.labels[0]!.id;
+    seeded.labels[0] = { ...seeded.labels[0]!, depth: 0.6, depthIntent: 'surface' };
+    seeded.sources = { labels: { [id]: { depth: 'computed', depthIntent: 'computed' } } };
+    backing.set(KEY, JSON.stringify(seeded));
+
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    // The document came back with the app's own claim on the intent — zod keeps the key (#310's trap).
+    expect(s().job.labels[0]!.depthIntent).toBe('surface');
+    expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'computed', depthIntent: 'computed' });
+
+    // The badge blank states no print, so there is no colour split for any intent to be about: the
+    // label re-depths to the magnet pocket's 0.51 mm and the `surface` claim goes with it. A stale
+    // `surface` here would be a claim about a blank this job has left.
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    expect(s().job.labels[0]!.depth).toBe(0.51);
+    expect(s().job.labels[0]!.depthIntent).toBeUndefined();
+    expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'computed' });
+  });
+
+  it('stamps a stated intent as the user’s own, and drops the claim when it is cleared (#362 review)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    const id = s().job.labels[0]!.id;
+
+    s().updateLabel(id, { depthIntent: 'surface' });
+    expect(s().job.sources?.labels?.[id]).toEqual({ depthIntent: 'user' });
+    // Clearing the intent clears its provenance with it — a source for a value that is gone is a
+    // lie — and the label goes back to claiming nothing at all, so the map carries no empty entry.
+    s().updateLabel(id, { depthIntent: undefined });
+    expect(s().job.sources?.labels?.[id]).toBeUndefined();
+
+    // Both claims stamp together, and a patch that claims NEITHER leaves them standing: changing
+    // the text is not a statement about the depth or the colour.
+    s().updateLabel(id, { depthIntent: 'reveal', depth: 1.4 });
+    expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'user', depthIntent: 'user' });
+    s().updateLabel(id, { text: 'HELLO' });
+    expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'user', depthIntent: 'user' });
+
+    // And the user's intent survives the blank being applied, the way the user's depth does.
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    expect(s().job.labels[0]!.depth).toBe(1.4);
+    expect(s().job.labels[0]!.depthIntent).toBe('reveal');
+  });
+
   it('gives a document written before #362 the clearance its check used, and keeps a stated one', () => {
     const raw = JSON.parse(JSON.stringify(defaultEngraveJob())) as Record<string, unknown>;
     delete raw.jawClearance;

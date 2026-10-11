@@ -575,4 +575,72 @@ describe('runSheet (#207)', () => {
     ];
     expect(sheetFor(job)).toMatchSnapshot();
   });
+
+  // #362 review, #345's rule — the number says where it came from. On the sheet that means the §7
+  // cut step: a depth the app CHOSE (0.51 mm on a badge blank is the case that raised this) is the
+  // one an operator may read as a mistake, and the clause is the same one the label's own row shows
+  // in the panel. A depth a person typed is theirs and gets no sentence.
+  describe('where a label’s depth came from (#362 review)', () => {
+    /**
+     * The default job with its first label's underside binding: a 12 mm blank that keeps 10 mm → a
+     * 2 mm floor. Built ONCE per call so the caller can address `labels[0].id` — the ids are minted
+     * per job, so a second `defaultEngraveJob()` would name a different label.
+     */
+    function undersideJob(claim?: 'computed' | 'user'): EngraveJob {
+      const base = { ...defaultEngraveJob(), minFloor: 10 };
+      const first = base.labels[0]!;
+      return {
+        ...base,
+        labels: base.labels.map((l) => (l.id === first.id ? { ...l, depth: 2 } : l)),
+        ...(claim === undefined ? {} : { sources: { labels: { [first.id]: { depth: claim } } } }),
+      };
+    }
+    const cutStep = (job: EngraveJob, value: string) => {
+      const step = section(sheetFor(job), 'cut').steps.find((s) => s.value === value);
+      expect(step, `a cut step reading ${value}`).toBeTruthy();
+      return step!;
+    };
+
+    it('states the binding constraint for a depth the recommendation wrote', () => {
+      const step = cutStep(undersideJob('computed'), '2 mm deep');
+      expect(step.text).toContain("the blank's 10 mm minimum floor allows 2 mm");
+    });
+
+    it('says nothing for a depth the person typed, or one with no provenance at all', () => {
+      // The same 2 mm, but nobody claimed it: the depth is the user's own doing, and a sentence
+      // explaining their number back to them is noise on a sheet read under a spindle.
+      expect(cutStep(undersideJob(), '2 mm deep').text).not.toContain('minimum floor allows');
+      expect(cutStep(undersideJob('user'), '2 mm deep').text).not.toContain('minimum floor allows');
+    });
+
+    it('does not invent a reason for an app-chosen depth this blank no longer produces', () => {
+      // `computed` on a job whose arithmetic has since moved — `setStock` can be edited without
+      // re-depthing anything. The sheet says the app chose it and what the blank allows NOW, and
+      // never quotes a clause for a number the arithmetic does not produce (which is the failure
+      // #345 is about: provenance printed for a value it does not describe).
+      const job = undersideJob('computed');
+      const stale: EngraveJob = {
+        ...job,
+        labels: job.labels.map((l) => ({ ...l, depth: 1.5 })),
+      };
+      const step = cutStep(stale, '1.5 mm deep');
+      expect(step.text).toContain('the app recommended this depth for the blank it was taken on');
+      expect(step.text).toContain("this blank's arithmetic allows 2 mm");
+      expect(step.text).not.toContain('minimum floor allows 2 mm');
+    });
+
+    it('clears the cutter by the job’s OWN jaw clearance, not a constant', () => {
+      const job = defaultEngraveJob(); // deepest cut 2.0 mm, jawClearance 1.0
+      const stop = section(sheetFor(job), 'load').steps.find((s) =>
+        s.text.includes('would work below the jaw tops'),
+      )!;
+      expect(stop.text).toContain('less than 3 mm, stop');
+      // A blank whose clearance the user raised stops higher — the printout cannot tell the
+      // operator to go somewhere the app's own jaw check does not.
+      const wider = section(sheetFor({ ...job, jawClearance: 1.5 }), 'load').steps.find((s) =>
+        s.text.includes('would work below the jaw tops'),
+      )!;
+      expect(wider.text).toContain('less than 3.5 mm, stop');
+    });
+  });
 });

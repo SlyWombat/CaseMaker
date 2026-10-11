@@ -901,6 +901,95 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
   });
 });
 
+// #362 review, #345's rule — the number says where it came from. The label row used to show a
+// recommended depth (0.51 on a badge blank) with no reason under it and, worse, a CEILING line
+// reading like the reason. These are the rendering half; the arithmetic is pinned in
+// `engraveMargins.spec.ts` and the seam that writes it in `engraveJob.spec.ts`.
+describe('EngravePanel — where a label’s depth came from (#362 review)', () => {
+  /** The badge route, the one place the app CHOOSES a label's depth (#352). */
+  function takeBadgeBlank(print = false): void {
+    act(() => {
+      useEngraveJobStore.getState().takeBadgeBlank(
+        badgeBlankFor(defaultBadgeParams(print ? { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } } : {})),
+      );
+    });
+  }
+  const recommended = (i: number) => screen.queryByTestId(`engrave-label-recommended-${i}`)?.textContent ?? null;
+
+  it('names the constraint under the depth it filled in, and calls the ceiling a ceiling', () => {
+    takeBadgeBlank();
+    render(<EngravePanel />);
+
+    // The magnet pocket is what leaves 0.51 mm, and the row says so — the same first clause the run
+    // sheet prints in §7 and `recommendLabelDepth` returns.
+    const line = recommended(0)!;
+    expect(line).toContain('Recommended 0.51 mm');
+    expect(line).toContain('"Magnet pocket" leaves 0.51 mm of material');
+    // The label is AT the recommendation, so nothing is added to reconcile: one number, no second.
+    expect(line).not.toContain('This label is at');
+
+    // The ceiling stays, and now says what it is. It was the only line under the field, and it read
+    // as the reason for a 0.51 mm depth (2.81 mm being "the stock thickness less the minimum floor").
+    const ceiling = screen.getByTestId('engrave-label-maxdepth-0').textContent!;
+    expect(ceiling).toContain('2.81');
+    expect(ceiling).toContain('ceiling this blank allows, not the depth the app recommends');
+  });
+
+  it('keeps the sentence after the person types their own number, and reconciles the two', () => {
+    takeBadgeBlank();
+    render(<EngravePanel />);
+    fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '1.2' } });
+
+    const line = recommended(0)!;
+    expect(line).toContain('Recommended 0.51 mm');
+    expect(line).toContain('"Magnet pocket" leaves 0.51 mm of material');
+    // The advice is not withdrawn, and the row is honest that the field is no longer on it.
+    expect(line).toContain('This label is at 1.2 mm');
+  });
+
+  it('offers no recommendation for a reference-only label, or one that states its own colour intent', () => {
+    takeBadgeBlank();
+    render(<EngravePanel />);
+    // A construction label cuts nothing, so there is no depth to recommend (#215).
+    fireEvent.click(screen.getByTestId('engrave-label-construction-0'));
+    expect(recommended(0)).toBeNull();
+    // …and a label that states an intent is the user's to place, not the app's to re-depth.
+    fireEvent.click(screen.getByTestId('engrave-label-construction-0'));
+    act(() => {
+      const id = useEngraveJobStore.getState().job.labels[0]!.id;
+      useEngraveJobStore.getState().updateLabel(id, { depthIntent: 'surface' });
+    });
+    expect(recommended(0)).toBeNull();
+    // The other two rows are untouched by either.
+    expect(recommended(1)).not.toBeNull();
+    expect(recommended(2)).not.toBeNull();
+  });
+
+  it('shows the band demotion a printed blank causes, and stamps the intent it implies', () => {
+    // A blank that states its print keeps the 0.2 mm boundary margin over its pocket's ceiling
+    // instead of the 1 mm structural floor (`voidMargin`, #345 A), so the void is no longer the
+    // shallowest floor: the JAWS are, at 0.905 mm. That lands inside the colour split's ±0.2 mm band
+    // at 0.8 mm — neither colour is decided there — so the recommendation comes back up to the top
+    // colour at 0.6 mm, and says why.
+    takeBadgeBlank(true);
+    render(<EngravePanel />);
+    const line = recommended(0)!;
+    expect(line).toContain('Recommended 0.6 mm');
+    expect(line).toContain('inside the colour split');
+    expect(line).toContain('stops in the top colour at 0.6 mm');
+
+    // The store's own write matches it: the depth and the `surface` intent it implies are on the
+    // job, both claimed as the app's own — which is what lets a later, different blank revise them.
+    const job = useEngraveJobStore.getState().job;
+    expect(job.labels[0]!.depth).toBe(0.6);
+    expect(job.labels[0]!.depthIntent).toBe('surface');
+    expect(job.sources?.labels?.[job.labels[0]!.id]).toEqual({
+      depth: 'computed',
+      depthIntent: 'computed',
+    });
+  });
+});
+
 // #345 — the margins row. It is the only control that moves a job between "the house setting" and
 // "my own number", so both directions are driven through the DOM here rather than through the store
 // (whose own spec covers `setJobMargins`): what the row SHOWS is as much of the feature as the

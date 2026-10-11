@@ -14,17 +14,19 @@ import {
   houseBoundaryMargin,
   marginSourceWords,
   mm as mmText,
+  recommendLabelDepth,
   recommendMargins,
   voidMarginWords,
   zBudgetInputsFor,
 } from '@/engine/cnc/engrave/depthBounds';
+import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
 import { Z1 } from '@/engine/cnc';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { dedupeFindings, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
-import { keepOutLimitParts, keepOutMembrane } from '@/engine/cnc/engrave/partPlan';
+import { keepOutLimitParts, keepOutMembrane, shallowestVoidLimit } from '@/engine/cnc/engrave/partPlan';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
@@ -71,6 +73,7 @@ import type {
   EngraveCombinedShape,
   EngraveJob,
   EngraveKeepOut,
+  EngraveLabel,
   EngraveShape,
   FieldSource,
   Sacrificial,
@@ -394,6 +397,26 @@ export function EngravePanel(): JSX.Element {
   const recommendMore =
     recommendation.boundaryMargin > margins.boundaryMargin + 1e-9 &&
     !(job.margins && recommendation.boundaryMargin <= houseBoundary + 1e-9);
+
+  // #362 — why each label is as deep as it is, in the row that holds the number (#345's rule: the
+  // number says where it came from). Before this the row showed `0.51` with the only explanation
+  // under it being the CEILING — "max depth 2.81 mm here" — which reads as the reason for it.
+  //
+  // The same call the store's seeding makes (`redepthLabelsForBlank`), on the same two inputs, so
+  // the number in the row and the number the badge route writes cannot disagree. The store still
+  // owns the WRITE; this is only the sentence beside the field.
+  const voidLimit = shallowestVoidLimit(job, margins.boundaryMargin);
+  const depthRecommendation = (label: EngraveLabel): LabelDepthRecommendation | null => {
+    // A label's OWN past intent does not lock it out of its own recommendation — `'computed'` means
+    // "ours to rewrite" (#362 review). Anything else, or a hand-written intent with no provenance,
+    // is a person's statement and the recommendation has nothing to say about it.
+    const intent = job.sources?.labels?.[label.id]?.depthIntent;
+    return recommendLabelDepth(job, label, {
+      voidLimit,
+      boundaryMargin: margins.boundaryMargin,
+      ...(intent === undefined ? {} : { intent }),
+    });
+  };
 
   // #271 route 1 — the blank this job is for is usually already in the project as `case.badge`,
   // and the one void V1 needs (the magnet pocket) is the badge's own. Reading it here cannot get
@@ -1054,6 +1077,7 @@ export function EngravePanel(): JSX.Element {
           maxDepth={maxDepth}
           findings={findingsFor(label.id)}
           customFonts={job.customFonts}
+          recommended={depthRecommendation(label)}
           onChange={(patch) => updateLabel(label.id, patch)}
           onRemove={() => removeLabel(label.id)}
         />

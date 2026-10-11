@@ -41,7 +41,7 @@
 import { DEFAULT_BREAKTHROUGH } from '@/engine/cnc/sacrificial';
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import { WIRED_PROBE_Z_RESIDUAL_MM } from '@/engine/cnc/probePlan';
-import type { EngraveAnyItem, EngraveJob, EngraveLabel, EngraveMargins, MarginSource } from '@/types/engraveJob';
+import type { EngraveAnyItem, EngraveJob, EngraveLabel, EngraveMargins, FieldSource, MarginSource } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
 /**
@@ -593,6 +593,18 @@ export interface LabelDepthInputs {
    * a number the check then holds the floor to.
    */
   boundaryMargin: Mm;
+  /**
+   * WHO stated the item's `depthIntent`, from `sources.labels[id].depthIntent` (#362 review). Omit
+   * when the item states none.
+   *
+   * It exists because this module writes an intent of its OWN. `'reveal'` on a two-colour blank is
+   * the recommendation's statement, not the user's, and the guard below declines any item that
+   * states an intent — so without this a label the recommendation itself stamped would be locked
+   * out of every later re-depth and keep a depth for a blank it is no longer on. `'computed'` says
+   * "ours, and ours to rewrite"; anything else — or a stated intent with no provenance at all, which
+   * is every document written by hand — is a person's and is left alone.
+   */
+  intent?: FieldSource;
 }
 
 /** What `recommendLabelDepth` worked out, and the arithmetic in words for the panel and the sheet. */
@@ -638,7 +650,10 @@ export interface LabelDepthRecommendation {
  *
  * EMPTY for an item that states its own `depthIntent`, and for a construction label that cuts
  * nothing: an item that has told us what it means is the user's to place, and re-depthing it under a
- * different intent would be this module overruling a statement nobody asked it to review.
+ * different intent would be this module overruling a statement nobody asked it to review. The one
+ * intent this does NOT decline is its own — `inputs.intent === 'computed'` is a `'reveal'` a
+ * previous call wrote, and a recommendation that could not revise itself would freeze a label onto
+ * the blank it was first measured against (#362 review).
  */
 export function recommendLabelDepth(
   job: EngraveJob,
@@ -647,7 +662,7 @@ export function recommendLabelDepth(
 ): LabelDepthRecommendation | null {
   if ('construction' in item && item.construction === true) return null;
   const stated = 'depthIntent' in item ? item.depthIntent : undefined;
-  if (stated !== undefined) return null;
+  if (stated !== undefined && inputs.intent !== 'computed') return null;
 
   const margin = inputs.boundaryMargin;
   const candidates: { depth: Mm; clause: string }[] = [];
@@ -692,13 +707,38 @@ export function recommendLabelDepth(
   const winner = candidates.reduce((a, b) => (b.depth < a.depth ? b : a));
   if (winner.depth <= 0) return null;
 
+  const notBinding = candidates.filter((c) => c !== winner).map((c) => `${c.clause} — not binding`);
+
+  // The BAND between the two colour bounds, `(split − m, split + m)`: past the plane, but not far
+  // enough past it for a `reveal`, and not short enough for a `surface`. A floor landing here is
+  // neither bound's business, so nothing checks it — and on a domed blank the two-tone floor it
+  // would leave is exactly what the margin exists to prevent. It is demoted to a `surface` floor,
+  // which is the deepest depth in the band a bound can actually hold the floor to (#362 review).
+  if (split !== null && winner.depth > split - margin + 1e-9 && winner.depth < split + margin - 1e-9) {
+    const surface = shallower(split - margin);
+    // `surface ≤ 0` is a two-colour blank whose split is too near the face for any floor to stay in
+    // the top colour: there is nothing to demote TO, so the winner stands and the basis says so.
+    if (surface > 0) {
+      return {
+        depth: surface,
+        depthIntent: 'surface',
+        basis: [
+          `the shallowest this blank allows is ${mm(winner.depth)} mm (${winner.clause}), which lands ` +
+            `inside the colour split's ±${mm(margin)} mm band at ${mm(split)} mm — neither colour is ` +
+            `decided there, so the floor stops in the top colour at ${mm(surface)} mm`,
+          ...notBinding,
+        ],
+      };
+    }
+  }
+
   // The intent, only where the floor really is on the far side of the split by the margin a
-  // `reveal` bound demands — which is exactly the split's own candidate having won.
+  // `reveal` bound demands.
   const reveal = split !== null && winner.depth >= split + margin - 1e-9;
 
   return {
     depth: winner.depth,
     ...(reveal ? { depthIntent: 'reveal' as const } : {}),
-    basis: [winner.clause, ...candidates.filter((c) => c !== winner).map((c) => `${c.clause} — not binding`)],
+    basis: [winner.clause, ...notBinding],
   };
 }

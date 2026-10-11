@@ -1,6 +1,8 @@
 import type { CSSProperties, JSX } from 'react';
 import { FontPicker, WeightPicker } from '@/components/panels/FontPicker';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { mm } from '@/engine/cnc/engrave/depthBounds';
+import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
 import type { CustomFont } from '@/types/textLabel';
 import type { EngraveLabel } from '@/types/engraveJob';
 
@@ -33,6 +35,15 @@ export interface EngraveLabelRowProps {
   findings: readonly JobFinding[];
   /** The project's embedded fonts, for the font picker. */
   customFonts?: readonly CustomFont[];
+  /**
+   * What `recommendLabelDepth` works out for this label on this blank, with its arithmetic (#362).
+   *
+   * `null` when there is nothing to recommend (a construction label, a label stating its own intent,
+   * a blank with no depth left): the row then says only what it always said. Omitted entirely by a
+   * caller that has no recommendation to offer — the row does not go looking for one, because the
+   * void limit it needs is `partPlan`'s arithmetic and this component must not guess at it.
+   */
+  recommended?: LabelDepthRecommendation | null;
 }
 
 export function EngraveLabelRow({
@@ -43,6 +54,7 @@ export function EngraveLabelRow({
   onRemove,
   findings,
   customFonts = [],
+  recommended,
 }: EngraveLabelRowProps): JSX.Element {
   const depthInvalid = label.depth > maxDepth;
 
@@ -195,8 +207,19 @@ export function EngraveLabelRow({
       </div>
 
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-label-maxdepth-${index}`}>
-        Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
+        Max depth {maxDepth} mm here — the stock thickness less the minimum floor. That is the
+        ceiling this blank allows, not the depth the app recommends.
       </p>
+
+      {/* #362 — where the number came from (#345's rule). The recommendation is arithmetic on THIS
+          blank, so it goes under the field it filled in rather than in a panel elsewhere; without
+          it the row shows a depth with no reason and the ceiling above reads like the reason. */}
+      {recommended !== null && recommended !== undefined && (
+        <p style={MUTED} data-testid={`engrave-label-recommended-${index}`}>
+          Recommended {mm(recommended.depth)} mm — {recommended.basis[0]}.
+          {label.depth === recommended.depth ? '' : ` This label is at ${mm(label.depth)} mm.`}
+        </p>
+      )}
 
       {findings.map((f, i) => (
         <p
