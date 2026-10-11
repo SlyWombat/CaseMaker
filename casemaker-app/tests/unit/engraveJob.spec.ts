@@ -23,7 +23,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveLabel } from '@/types/engraveJob';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { labelProfile, toPartPlan } from '@/engine/cnc/engrave/partPlan';
-import { jobTool, toSetup, validateJob } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, jobTool, toSetup, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { engravedFaceWorkZ, partToWork } from '@/engine/cnc/frames';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
@@ -170,8 +170,15 @@ describe('validateJob (#200)', () => {
     expect(validateJob(job).some((f) => f.code === 'depth-exceeds-stock')).toBe(false);
   });
 
-  it('warns that the vise is an unmeasured default', () => {
-    expect(validateJob(defaultEngraveJob()).some((f) => f.code === 'vise-default')).toBe(true);
+  it('leaves the unmeasured-vise warning to `validateVise`, and the merged list carries it once (#353)', () => {
+    const job = defaultEngraveJob();
+    // One owner: the vise validator says it, `validateJob` does not repeat it.
+    expect(validateJob(job).some((f) => f.code === 'vise-default')).toBe(false);
+    const vise = validateVise(job.stock, job.workholding.vise, job.sacrificial);
+    expect(vise.filter((f) => f.code === 'vise-default')).toHaveLength(1);
+    // The safety net: the two passes merged as every consumer merges them, still one.
+    const merged = dedupeFindings([...validateJob(job), ...vise]);
+    expect(merged.filter((f) => f.code === 'vise-default')).toHaveLength(1);
   });
 
   it('errors when the named tool is not in the library', () => {

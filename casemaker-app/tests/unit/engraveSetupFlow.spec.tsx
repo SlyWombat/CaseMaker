@@ -24,7 +24,8 @@ import {
 } from '@/engine/cnc/engrave/setupFlow';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
-import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
+import { validateVise } from '@/engine/cnc/fixture';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 
 vi.mock('@/engine/exportTrigger', () => ({ saveText: vi.fn() }));
@@ -105,6 +106,19 @@ describe('guided job setup — the pure answers (#254)', () => {
     expect(stockProudFix(fixed)).toBeNull();
   });
 
+  it('shows `vise-default` once on the blank step, not once per validator (#353)', () => {
+    const job = defaultEngraveJob();
+    const answers = defaultSetupAnswers(job);
+
+    // Both passes used to answer it, and the step printed both copies. Now the vise validator
+    // owns the finding…
+    expect(validateVise(answers.stock, answers.vise, answers.sacrificial).some((f) => f.code === 'vise-default')).toBe(true);
+    // …and the job validator does not repeat it…
+    expect(validateJob(applyAnswers(job, answers)).some((f) => f.code === 'vise-default')).toBe(false);
+    // …so the blank step — which merges both and de-duplicates as a net — says it exactly once.
+    expect(stepFindings('blank', job, answers).filter((f) => f.code === 'vise-default')).toHaveLength(1);
+  });
+
   it('carries a custom sacrificial setup through untouched until the choice changes', () => {
     const job = defaultEngraveJob();
     const answers = defaultSetupAnswers(job);
@@ -168,6 +182,16 @@ describe('guided job setup — the flow in the panel (#254)', () => {
     expect(screen.getByTestId('engrave-stock-thickness-source').getAttribute('data-source')).toBe('user');
     expect(screen.getByTestId('engrave-tool-source').getAttribute('data-source')).toBe('user');
     expect(screen.getByTestId('engrave-vise-badge').textContent).toMatch(/^saved/);
+  });
+
+  it('renders the blank step’s unmeasured-vise warning once, not once per validator (#353)', () => {
+    render(<EngravePanel />);
+    toBlankStep();
+    // The row is keyed by code, so two copies would be two elements with the same testid — which
+    // is exactly what the review saw. One row, and its words, is the fix.
+    const rows = screen.getAllByTestId('engrave-setup-step-finding-vise-default');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain('unmeasured defaults');
   });
 
   it('“Same as last job” finishes in one click without changing the numbers', () => {

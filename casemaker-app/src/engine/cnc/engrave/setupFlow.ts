@@ -25,7 +25,7 @@ import {
   presetJawStrips,
   presetPartOnBoard,
 } from '@/engine/cnc/sacrificial';
-import { validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import type {
   EngraveJob,
@@ -197,12 +197,19 @@ const STEP_CODES: Record<SetupStepId, ReadonlySet<JobFinding['code']>> = {
  * the exact document it would write. `validateJob` alone does not raise the vise's own checks
  * (`validateVise` is a separate pass the worker merges in), so both run here — the #231
  * `vise-stock-proud-exceeds-thickness` comes from `validateVise`.
+ *
+ * The merge goes through `dedupeFindings` (#353): two passes over the same document can answer the
+ * same code, and the step rendered that twice — `vise-default`, one copy per validator — until
+ * this was added. It is a safety net, not the fix: `validateVise` is the code's one owner.
  */
 export function stepFindings(step: SetupStepId, job: EngraveJob, a: SetupAnswers): JobFinding[] {
   const codes = STEP_CODES[step];
   if (codes.size === 0) return [];
   const probe = applyAnswers(job, a);
-  const all = [...validateJob(probe), ...validateVise(probe.stock, probe.workholding.vise, probe.sacrificial)];
+  const all = dedupeFindings([
+    ...validateJob(probe),
+    ...validateVise(probe.stock, probe.workholding.vise, probe.sacrificial),
+  ]);
   return all.filter((f) => codes.has(f.code));
 }
 

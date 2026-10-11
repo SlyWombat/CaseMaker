@@ -41,7 +41,7 @@ import { resolveMachine, type MachineCalibration } from '@/engine/cnc/calibratio
 import { feedsFor, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt } from '@/engine/cnc/engrave/partPlan';
-import { toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
 import { generateTrace } from '@/engine/cnc/cam/trace';
@@ -142,19 +142,6 @@ function ratioAtFor(tl: ManifoldToplevel, job: EngraveJob, radius: number): Labe
     const probe: EngraveJob = { ...job, shapes: [], labels: [{ ...label, size }] };
     return measureLabels(tl, toPartPlan(probe), radius, job.edgeMargin, perCharFor(probe))[0]?.ratio ?? 0;
   };
-}
-
-/** `validateJob` + `validateVise` + `engravabilityFindings`, with byte-identical duplicates dropped. */
-function dedupeFindings(findings: readonly JobFinding[]): JobFinding[] {
-  const seen = new Set<string>();
-  const out: JobFinding[] = [];
-  for (const f of findings) {
-    const key = `${f.severity}|${f.code}|${f.labelId ?? ''}|${f.message}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(f);
-  }
-  return out;
 }
 
 /** The text an engrave region pockets: a label's text, empty for a shape. */

@@ -403,13 +403,10 @@ export function validateJob(job: EngraveJob): JobFinding[] {
     });
   }
 
-  if (job.workholding.vise.source === 'default') {
-    findings.push({
-      severity: 'warning',
-      code: 'vise-default',
-      message: 'Vise dimensions are unmeasured defaults (#208); collisions cannot be trusted yet.',
-    });
-  }
+  // The unmeasured-vise warning is NOT raised here (#353): `validateVise` owns `vise-default`, so
+  // the vise has exactly one validator saying so, and a consumer that shows only vise findings
+  // (`blankViseFindings`) is not the one place that goes silent about it. Every consumer that
+  // needs the whole picture merges the two lists through `dedupeFindings` below.
 
   // A trace whose cutter-swept strokes come closer than the cutter width fills in (#219): the
   // letters merge. A warning, not an error — the cut still exists, it is just not what was drawn.
@@ -423,4 +420,26 @@ export function validateJob(job: EngraveJob): JobFinding[] {
   findings.push(...validateSacrificial(job));
 
   return findings;
+}
+
+/**
+ * The one de-duplicator for a merged finding list (#353). `validateJob` and `validateVise` are
+ * separate passes with separate subjects, and a code can be answered by both — `vise-default` was
+ * the shipped case, listed twice on the setup flow's blank step until this ran between them.
+ *
+ * The key is the whole finding, message included, rather than `code` + `labelId` alone: two
+ * findings that share a code and an item but say different things are two findings (a trace can
+ * cross itself in two places), and collapsing them would hide one. Byte-identical duplication is
+ * the only thing this is meant to catch.
+ */
+export function dedupeFindings(findings: readonly JobFinding[]): JobFinding[] {
+  const seen = new Set<string>();
+  const out: JobFinding[] = [];
+  for (const f of findings) {
+    const key = `${f.severity}|${f.code}|${f.labelId ?? ''}|${f.message}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(f);
+  }
+  return out;
 }

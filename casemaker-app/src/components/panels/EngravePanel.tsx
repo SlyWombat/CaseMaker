@@ -22,7 +22,8 @@ import { Z1 } from '@/engine/cnc';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter } from '@/engine/cnc/tool';
-import { jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { validateVise } from '@/engine/cnc/fixture';
 import { keepOutLimit, keepOutMembrane } from '@/engine/cnc/engrave/partPlan';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
@@ -340,9 +341,12 @@ export function EngravePanel(): JSX.Element {
   }, []);
 
   // Findings: the worker's list (validateJob + validateVise + the geometry findings, deduped)
-  // once it has one, otherwise the pure `validateJob` — which already carries `validateVise`'s
-  // most important codes and the sacrificial ones, so the form is never blank.
-  const findings: JobFinding[] = preview?.findings ?? validateJob(job);
+  // once it has one, otherwise the same two pure validators without the geometry half, merged the
+  // same way (#353) — so the list does not change under the user when the first preview lands, and
+  // the form is never blank.
+  const findings: JobFinding[] =
+    preview?.findings ??
+    dedupeFindings([...validateJob(job), ...validateVise(job.stock, job.workholding.vise, job.sacrificial)]);
   const jobFindings = findings.filter((f) => f.labelId === undefined);
   const findingsFor = (labelId: string): JobFinding[] => findings.filter((f) => f.labelId === labelId);
 
