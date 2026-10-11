@@ -144,7 +144,10 @@ export function PortMarkers() {
                   onDragEnd={onDragEnd}
                 />
                 {delta && (
-                  <Html position={[0, 0, 8]} center distanceFactor={120} zIndexRange={[100, 0]}>
+                  // The drag readout is an annotation on a scene position, not a layer (#348): it
+                  // is pinned below the `--cm-z-*` scale (tokens.css) so it cannot print through a
+                  // dialog — it used to interpolate 100 → 0 by camera distance, above everything.
+                  <Html position={[0, 0, 8]} center distanceFactor={120} zIndexRange={[0, 0]}>
                     <div className="port-delta-readout" data-testid="port-delta-readout">
                       Δx {fmt(delta.x)}  Δy {fmt(delta.y)}  Δz {fmt(delta.z)}
                     </div>

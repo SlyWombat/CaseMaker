@@ -33,7 +33,7 @@ const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, 
 const OVERLAY: CSSProperties = {
   position: 'fixed',
   inset: 0,
-  zIndex: 60,
+  zIndex: 'var(--cm-z-modal)', // the one stacking scale (#348), src/styles/tokens.css
   background: 'rgba(8, 11, 15, 0.72)',
   display: 'flex',
   alignItems: 'center',

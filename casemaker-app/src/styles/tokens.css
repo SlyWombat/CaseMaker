@@ -71,6 +71,28 @@
   /* Borders */
   --cm-border-1: 1px solid var(--cm-color-outline-variant);
   --cm-border-strong: 1px solid var(--cm-color-outline);
+
+  /*
+   * Stacking scale (#348) — THE one place a z-index is decided, so "a dialog is above every
+   * viewport element" holds by construction rather than per component. Nothing should name a
+   * z-index that is not one of these.
+   *
+   * It exists because a scene label printed through the setup flow and the wizard: drei's `<Html>`
+   * defaults `zIndexRange` to `[16777271, 0]`, four orders of magnitude above any dialog, and
+   * writes it onto a wrapper div it appends beside the canvas. A label projected from a scene
+   * position is an ANNOTATION, not a layer: the labels in `EngravePreview.tsx` and the port delta
+   * readout in `PortMarkers.tsx` pass `zIndexRange={[0, 0]}` — below this whole scale,
+   * deliberately unnamed here — so a label can never cover the chrome over it, let alone a dialog.
+   */
+  --cm-z-viewport-chrome: 5;    /* the toolbar and the legends, over the canvas */
+  --cm-z-viewport-panel: 6;     /* the transport bar and the selection panel */
+  --cm-z-viewport-banner: 11;   /* the placement-issue banner, over the canvas */
+  --cm-z-sidebar-handle: 24;    /* the mobile drawer's edge handle */
+  --cm-z-sidebar-drawer: 25;    /* the mobile drawer itself */
+  --cm-z-header-menu: 100;      /* header popovers: settings, overflow, parts */
+  --cm-z-modal: 120;            /* a dialog portaled to the body */
+  --cm-z-modal-raised: 200;     /* a dialog opened from inside another surface (Export) */
+  --cm-z-document: 1000;        /* the run sheet and the docs reader: a document over the app */
 }
 
 /*

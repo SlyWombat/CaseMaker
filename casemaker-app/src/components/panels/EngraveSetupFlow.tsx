@@ -38,7 +38,7 @@ import type { StockMaterial } from '@/types/engraveJob';
 const OVERLAY: CSSProperties = {
   position: 'fixed',
   inset: 0,
-  zIndex: 60,
+  zIndex: 'var(--cm-z-modal)', // the one stacking scale (#348), src/styles/tokens.css
   background: 'rgba(8, 11, 15, 0.72)',
   display: 'flex',
   alignItems: 'center',
@@ -274,7 +274,20 @@ export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Elem
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+        {/* #348 — the actions are their own region, not a row tucked under the last field. A native
+            `<select>`'s popup is the browser's own and always paints over what is under it, so no
+            gap can keep the buttons uncovered while a list is open; what this buys is clearance, so
+            the buttons are not what the list appears to be hiding. */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 6,
+            marginTop: 14,
+            paddingTop: 10,
+            borderTop: '1px solid #2a2f36',
+            flexWrap: 'wrap',
+          }}
+        >
           <button type="button" data-testid="engrave-setup-same" onClick={sameAsLast}>
             Same as last job
           </button>

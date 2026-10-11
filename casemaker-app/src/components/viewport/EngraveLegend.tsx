@@ -27,7 +27,7 @@ const BOX: CSSProperties = {
   position: 'absolute',
   top: 8,
   right: 8,
-  zIndex: 5,
+  zIndex: 'var(--cm-z-viewport-chrome)', // the one stacking scale (#348), src/styles/tokens.css
   background: 'rgba(20,25,30,0.82)',
   border: '1px solid #2a2f36',
   borderRadius: 4,

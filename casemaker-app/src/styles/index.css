@@ -110,7 +110,7 @@ body, html, #root {
   left: 0;
   width: min(78vw, 300px);
   box-sizing: border-box;
-  z-index: 25;
+  z-index: var(--cm-z-sidebar-drawer);
   transform: translateX(-100%);
   transition: transform 180ms ease;
   box-shadow: 4px 0 14px rgba(0, 0, 0, 0.4);
@@ -122,7 +122,7 @@ body, html, #root {
   top: 50%;
   left: 0;
   transform: translateY(-50%);
-  z-index: 24;
+  z-index: var(--cm-z-sidebar-handle);
   background: var(--cm-color-surface-container-high);
   color: var(--cm-color-on-surface);
   border: var(--cm-border-1);
@@ -156,7 +156,7 @@ body, html, #root {
   bottom: 28px; /* above status bar */
   right: 0;
   width: 360px;
-  z-index: 25;
+  z-index: var(--cm-z-sidebar-drawer);
   transform: translateX(100%);
   transition: transform 180ms ease;
   box-shadow: -4px 0 14px rgba(0, 0, 0, 0.4);
@@ -172,7 +172,7 @@ body, html, #root {
   top: 50%;
   right: 0;
   transform: translateY(-50%);
-  z-index: 24;
+  z-index: var(--cm-z-sidebar-handle);
   background: var(--cm-color-surface-container-high);
   color: var(--cm-color-on-surface);
   border: var(--cm-border-1);
@@ -370,7 +370,7 @@ body, html, #root {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 100;
+  z-index: var(--cm-z-header-menu);
   min-width: 190px;
   display: flex;
   flex-direction: column;
@@ -396,7 +396,7 @@ body, html, #root {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 100;
+  z-index: var(--cm-z-header-menu);
   min-width: 280px;
   padding: 12px;
   background: #1a2028;
@@ -495,7 +495,7 @@ body, html, #root {
   border-radius: 4px;
   font-size: 11px;
   line-height: 1.35;
-  z-index: 11;
+  z-index: var(--cm-z-viewport-banner);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 .placement-banner--error {
@@ -823,7 +823,7 @@ body, html, #root {
   position: absolute;
   top: var(--cm-space-3);
   left: var(--cm-space-3);
-  z-index: 5;
+  z-index: var(--cm-z-viewport-chrome);
   display: flex;
   gap: var(--cm-space-2);
   background: var(--cm-color-surface-container);
@@ -886,7 +886,7 @@ body, html, #root {
   position: absolute;
   top: var(--cm-space-3);
   right: var(--cm-space-3);
-  z-index: 6;
+  z-index: var(--cm-z-viewport-panel);
   width: 300px;
   background: var(--cm-color-surface-container);
   border: var(--cm-border-1);
@@ -1640,7 +1640,7 @@ body, html, #root {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--cm-z-document);
 }
 .docs-modal {
   background: #1f242a;

@@ -78,7 +78,7 @@ export function PartsMenu({ compact = false }: Props) {
             top: '100%',
             left: compact ? 'auto' : 0,
             right: compact ? 0 : 'auto',
-            zIndex: 100,
+            zIndex: 'var(--cm-z-header-menu)', // the one stacking scale (#348), src/styles/tokens.css
             background: '#14181c',
             border: '1px solid #2a2f36',
             borderRadius: 4,

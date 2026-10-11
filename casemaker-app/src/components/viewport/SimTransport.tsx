@@ -60,7 +60,7 @@ const BAR: CSSProperties = {
   left: 0,
   right: 0,
   bottom: 0,
-  zIndex: 6,
+  zIndex: 'var(--cm-z-viewport-panel)', // the one stacking scale (#348), src/styles/tokens.css
   background: 'rgba(17,23,36,.97)',
   borderTop: '1px solid #2a2f36',
   padding: '6px 12px 8px',

@@ -160,7 +160,7 @@ function Void({
         <lineBasicMaterial color={VOID_COLOR} />
       </lineSegments>
       {centre && (
-        <Html position={[centre[0], centre[1], VOID_LIFT]} center style={NON_INTERACTIVE}>
+        <Html position={[centre[0], centre[1], VOID_LIFT]} center style={NON_INTERACTIVE} zIndexRange={LABEL_Z}>
           <span
             data-testid={`engrave-void-label-${id}`}
             style={{
@@ -205,6 +205,17 @@ const AXIS_LABEL = {
  * legend was swallowing the Top/Fit/zoom clicks. `style` reaches that wrapper, the prop does not.
  */
 const NON_INTERACTIVE = { pointerEvents: 'none' } as const;
+
+/**
+ * #348 — the stacking. drei's `Html` defaults `zIndexRange` to `[16777271, 0]` and writes the
+ * interpolated number onto the wrapper div it appends beside the canvas, which is why these
+ * labels printed through the setup flow and the wizard: no dialog can out-stack four orders of
+ * magnitude. A label projected from a scene position is an ANNOTATION, not a layer, so it takes
+ * the bottom — `[0, 0]` is below the whole `--cm-z-*` scale in `src/styles/tokens.css`, and
+ * deliberately not a member of it. The consequence, and it is the intended one: where a label
+ * lands under the toolbar, a panel or the transport bar, the chrome is what you see.
+ */
+const LABEL_Z: [number, number] = [0, 0];
 
 export function EngravePreview() {
   const preview = useEngravePreviewStore((s) => s.preview);
@@ -255,12 +266,12 @@ export function EngravePreview() {
           <boxGeometry args={[0.4, axisLen, 0.4]} />
           <meshBasicMaterial color="#30a46c" />
         </mesh>
-        <Html position={[axisLen, 0, 0]} center style={NON_INTERACTIVE}>
+        <Html position={[axisLen, 0, 0]} center style={NON_INTERACTIVE} zIndexRange={LABEL_Z}>
           <span data-testid="engrave-axis-x" style={AXIS_LABEL}>
             X
           </span>
         </Html>
-        <Html position={[0, axisLen, 0]} center style={NON_INTERACTIVE}>
+        <Html position={[0, axisLen, 0]} center style={NON_INTERACTIVE} zIndexRange={LABEL_Z}>
           <span data-testid="engrave-axis-y" style={AXIS_LABEL}>
             Y
           </span>
@@ -268,7 +279,7 @@ export function EngravePreview() {
       </group>
 
       {fixedJaw && (
-        <Html position={centreOf(fixedJaw.mesh.bbox)} center style={NON_INTERACTIVE}>
+        <Html position={centreOf(fixedJaw.mesh.bbox)} center style={NON_INTERACTIVE} zIndexRange={LABEL_Z}>
           <span
             data-testid="engrave-jaw-source"
             style={{

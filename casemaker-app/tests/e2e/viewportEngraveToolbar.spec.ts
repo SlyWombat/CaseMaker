@@ -10,6 +10,11 @@
 // the camera moved. That is the evidence the acceptance asks for ("click without force and assert
 // the camera changed").
 //
+// #348 closed the same seam from the other side: those projected labels sat four orders of
+// magnitude above every dialog, so they printed through the setup flow and the wizard. The test at
+// the bottom of this file asserts the stacking, which is the only honest assertion available —
+// see its comment for the two checks the issue suggested and the measurement that rules them out.
+//
 // Run (Windows side, Vite started by hand on 127.0.0.1 per #226):
 //   npx playwright test tests/e2e/viewportEngraveToolbar.spec.ts
 
@@ -159,4 +164,102 @@ test('the depth legend stays put and inside the pane while the camera orbits (#3
   expect(after.x).toBeCloseTo(before.x, 0);
   expect(after.y).toBeCloseTo(before.y, 0);
   expect(within(after, paneBox), 'the legend is still inside the viewport pane').toBe(true);
+});
+
+// #348 — the projected labels printed THROUGH the setup flow and the wizard, because drei's `Html`
+// defaults `zIndexRange` to `[16777271, 0]` and writes that onto a wrapper div beside the canvas:
+// no dialog can out-stack four orders of magnitude. One stacking scale now owns every number
+// (`src/styles/tokens.css`), and a projected label is pinned BELOW it.
+//
+// The issue asks for a bounding-box or `visibility` assertion; both are ruled out by measurement.
+// The overlay is `inset: 0`, so it contains every label's box — a box-intersection assertion would
+// fail on a correct fix and, worse, pass on a label hidden behind an opaque dialog. And a label is
+// not hit-testable at all: `pointer-events: none` on the wrapper's inner div, and its own box is
+// 0x0 (its content is absolutely positioned), so `elementFromPoint` at a label's centre returns the
+// canvas with no dialog open and the dialog with one — identically before and after this fix.
+//
+// What the browser does expose is the arithmetic that decides the paint: the z-index on the drei
+// wrapper, and the z-index of everything else in the pane, all resolved in the same stacking
+// context as the portaled dialog. That is what is asserted here, plus the one structural condition
+// that makes the comparison meaningful (nothing between the label and the body traps it in a
+// stacking context of its own).
+test('a dialog is above every element of the viewport pane (#348)', async ({ cm, page }) => {
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+  });
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
+  await page.waitForTimeout(700);
+
+  // With no dialog up: the projected label carries a numeric wrapper z-index BELOW the toolbar's,
+  // so it is a member of the scale's bottom band rather than of drei's default range.
+  const bare = await page.evaluate(() => {
+    const span = document.querySelector('[data-testid="engrave-axis-x"]');
+    if (!span) return null;
+    let el: HTMLElement | null = span as HTMLElement;
+    while (el && getComputedStyle(el).zIndex === 'auto') el = el.parentElement;
+    const toolbar = document.querySelector('[data-testid="viewport-toolbar"]') as HTMLElement | null;
+    return {
+      label: el ? Number(getComputedStyle(el).zIndex) : null,
+      toolbar: toolbar ? Number(getComputedStyle(toolbar).zIndex) : null,
+    };
+  });
+  expect(bare, 'the projected axis label is mounted with its drei wrapper').not.toBeNull();
+  expect(Number.isFinite(bare!.label), 'the wrapper carries a numeric z-index').toBe(true);
+  expect(bare!.label!, 'a projected label sits under the viewport chrome').toBeLessThan(bare!.toolbar!);
+
+  // The reported screen: the setup flow at step 2 (material), with the preview still mounted behind
+  // it — the report was '…asured defaults' printed over "What is it made of?".
+  await page.getByTestId('engrave-setup-open').click();
+  await expect(page.getByTestId('engrave-setup-flow')).toBeVisible();
+  await page.getByTestId('engrave-setup-next').click();
+  await expect(page.getByTestId('engrave-setup-step-material')).toBeVisible();
+
+  const stack = await page.evaluate(() => {
+    const overlay = document.querySelector('[data-testid="engrave-setup-flow"]') as HTMLElement;
+    const pane = document.querySelector('.viewport-wrapper') as HTMLElement;
+    const named = (el: Element): string => {
+      const id = el.getAttribute('data-testid');
+      const cls = typeof el.className === 'string' && el.className ? `.${el.className.split(' ').join('.')}` : '';
+      return `${el.tagName.toLowerCase()}${id ? `#${id}` : ''}${cls}`;
+    };
+
+    const inPane: Array<{ el: string; z: number }> = [];
+    for (const el of Array.from(pane.querySelectorAll('*'))) {
+      const z = getComputedStyle(el).zIndex;
+      if (z !== 'auto') inPane.push({ el: named(el), z: Number(z) });
+    }
+
+    // Would anything between a label and the body trap it in a stacking context of its own? The
+    // wrapper's two own divs are the label itself (drei renders an inner div inside the wrapper),
+    // so the walk starts at the wrapper's parent.
+    const span = document.querySelector('[data-testid="engrave-axis-x"]') as HTMLElement;
+    let wrapper: HTMLElement | null = span;
+    while (wrapper && getComputedStyle(wrapper).zIndex === 'auto') wrapper = wrapper.parentElement;
+    const trappedBy: string[] = [];
+    for (let n = wrapper?.parentElement ?? null; n && n !== document.body; n = n.parentElement) {
+      const z = getComputedStyle(n).zIndex;
+      if (z !== 'auto') trappedBy.push(`${named(n)} z=${z}`);
+    }
+
+    return {
+      overlayZ: Number(getComputedStyle(overlay).zIndex),
+      overlayParent: overlay.parentElement?.tagName ?? null,
+      labelZ: wrapper ? Number(getComputedStyle(wrapper).zIndex) : null,
+      inPane,
+      trappedBy,
+    };
+  });
+
+  // The check below is only worth something if the pane has elements in it to be below the dialog —
+  // in particular the projected label, which is the whole point of the issue.
+  expect(stack.inPane.length, 'the pane really has z-index-carrying chrome').toBeGreaterThan(2);
+  expect(stack.inPane.some((e) => e.z === stack.labelZ), 'the projected label is one of them').toBe(true);
+
+  expect(Number.isFinite(stack.overlayZ), 'the dialog carries a numeric z-index').toBe(true);
+  expect(stack.trappedBy, 'no ancestor traps the label in its own stacking context').toEqual([]);
+  expect(stack.overlayParent, 'the overlay is portaled to the body, as the scale assumes').toBe('BODY');
+  const above = stack.inPane.filter((e) => e.z >= stack.overlayZ);
+  expect(above, 'nothing in the viewport pane stacks at or above the open dialog').toEqual([]);
 });

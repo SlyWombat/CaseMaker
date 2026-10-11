@@ -32,15 +32,16 @@ import type { Project } from '@/types/project';
  *    workholding, material, blank and cutter, already seeds from the job, and already writes
  *    through the one tagged answer path. A second copy would be a second place to change.
  *
- * Portal'd to `document.body` at `zIndex: 60`, the house pattern the run sheet and the setup flow
- * both use, and mounted from `AppShell` rather than from the welcome overlay — step 2 creates the
- * project, which flips `welcomeMode` off and unmounts that overlay, and this has to survive it.
+ * Portal'd to `document.body` at the modal layer of the one stacking scale (`--cm-z-modal`,
+ * #348), the house pattern the setup flow and the import dialog both use, and mounted from
+ * `AppShell` rather than from the welcome overlay — step 2 creates the project, which flips
+ * `welcomeMode` off and unmounts that overlay, and this has to survive it.
  */
 
 const OVERLAY: CSSProperties = {
   position: 'fixed',
   inset: 0,
-  zIndex: 60,
+  zIndex: 'var(--cm-z-modal)', // the one stacking scale (#348), src/styles/tokens.css
   background: 'rgba(8, 11, 15, 0.72)',
   display: 'flex',
   alignItems: 'center',

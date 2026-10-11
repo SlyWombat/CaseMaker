@@ -123,7 +123,7 @@ export function ExportModal({ onClose }: ExportModalProps) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 200,
+        zIndex: 'var(--cm-z-modal-raised)', // the one stacking scale (#348), src/styles/tokens.css
       }}
     >
       <div

@@ -18,7 +18,7 @@ const BOX: CSSProperties = {
   position: 'absolute',
   top: 8,
   right: 8,
-  zIndex: 5,
+  zIndex: 'var(--cm-z-viewport-chrome)', // the one stacking scale (#348), src/styles/tokens.css
   display: 'flex',
   alignItems: 'center',
   gap: 5,
