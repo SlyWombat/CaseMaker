@@ -16,6 +16,7 @@ import {
   type EngravePreviewClient,
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { MARGIN_DEFAULTS, checkBounds, splitBound } from '@/engine/cnc/engrave/depthBounds';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import { BADGE_POCKET_KEEP_OUT_ID, badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultBadgeParams, type BadgeParams } from '@/types/badge';
@@ -907,13 +908,13 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
 // `engraveMargins.spec.ts` and the seam that writes it in `engraveJob.spec.ts`.
 describe('EngravePanel — where a label’s depth came from (#362 review)', () => {
   /** The badge route, the one place the app CHOOSES a label's depth (#352). */
-  function takeBadgeBlank(print = false): void {
+  function takeBadgeBlank(over: Partial<BadgeParams> = {}): void {
     act(() => {
-      useEngraveJobStore.getState().takeBadgeBlank(
-        badgeBlankFor(defaultBadgeParams(print ? { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } } : {})),
-      );
+      useEngraveJobStore.getState().takeBadgeBlank(badgeBlankFor(defaultBadgeParams(over)));
     });
   }
+  /** A badge that states how it was printed — what puts the colour split into the depth model. */
+  const PRINTED: Partial<BadgeParams> = { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } };
   const recommended = (i: number) => screen.queryByTestId(`engrave-label-recommended-${i}`)?.textContent ?? null;
 
   it('names the constraint under the depth it filled in, and calls the ceiling a ceiling', () => {
@@ -965,23 +966,49 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
     expect(recommended(2)).not.toBeNull();
   });
 
-  it('shows the band demotion a printed blank causes, and stamps the intent it implies', () => {
-    // A blank that states its print keeps the 0.2 mm boundary margin over its pocket's ceiling
-    // instead of the 1 mm structural floor (`voidMargin`, #345 A), so the void is no longer the
-    // shallowest floor: the JAWS are, at 0.905 mm. That lands inside the colour split's ±0.2 mm band
-    // at 0.8 mm — neither colour is decided there — so the recommendation comes back up to the top
-    // colour at 0.6 mm, and says why.
-    takeBadgeBlank(true);
+  it('demotes on the job’s OWN margin, to a floor the checker can hold (#362 review)', () => {
+    // Neither the margin nor the vise is the shipped one here, and neither is what the badge brings.
+    // The job states its own 0.28 mm boundary margin, and its vise — SET, so a stock edit leaves it
+    // alone (#344) — stands the badge 2.2 mm proud, which puts the jaws at 1.2 mm. So the void binds:
+    // the pocket's ceiling 1.4 mm down on the 0.2 mm layer grid, less that margin, is 1.12 mm. That
+    // lands inside the colour split's ±0.28 mm band at 1.2 mm (neither colour is decided there), so
+    // the floor comes back up into the top colour at 0.92 mm.
+    //
+    // The two numbers are deliberately not 0.8 / 0.2: `1.2 − 0.28` is `0.9199999999999999` to a
+    // float, so the demoted 0.92 mm is the recommendation the checker used to refuse against the very
+    // bound it was computed from — passing at the shipped margin was float luck (the arithmetic is
+    // pinned in `engraveMargins.spec.ts`; one `DEPTH_EPS` now satisfies both sides).
+    const base = defaultEngraveJob();
+    act(() => {
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          margins: { boundaryMargin: 0.28, zTolerance: MARGIN_DEFAULTS.zTolerance, source: 'user' },
+        },
+      });
+      useEngraveJobStore.getState().setVise({ stockProud: 2.2 });
+    });
+    takeBadgeBlank({ ...PRINTED, splitHeight: 2.61 });
     render(<EngravePanel />);
+
+    // The row the panel offers is the JOB's number, not the house default — which is the margin the
+    // recommendation below was worked out with.
+    expect(screen.getByTestId('engrave-margins-value').textContent).toBe('0.28 mm');
+    expect(screen.getByTestId('engrave-margins-source').textContent).toBe('set for this job');
+
     const line = recommended(0)!;
-    expect(line).toContain('Recommended 0.6 mm');
+    expect(line).toContain('Recommended 0.92 mm');
+    expect(line).toContain('"Magnet pocket" leaves 1.12 mm of material');
     expect(line).toContain('inside the colour split');
-    expect(line).toContain('stops in the top colour at 0.6 mm');
+    expect(line).toContain('stops in the top colour at 0.92 mm');
+    // And the bound that number is demoted against HOLDS it: 0.92 mm is a float tail above the
+    // `1.2 − 0.28` plane, which is the pair the shared tolerance exists to reconcile.
+    expect(checkBounds(0.92, [splitBound('surface', 1.2)!], 0.28)).toBeNull();
 
     // The store's own write matches it: the depth and the `surface` intent it implies are on the
     // job, both claimed as the app's own — which is what lets a later, different blank revise them.
     const job = useEngraveJobStore.getState().job;
-    expect(job.labels[0]!.depth).toBe(0.6);
+    expect(job.labels[0]!.depth).toBe(0.92);
     expect(job.labels[0]!.depthIntent).toBe('surface');
     expect(job.sources?.labels?.[job.labels[0]!.id]).toEqual({
       depth: 'computed',

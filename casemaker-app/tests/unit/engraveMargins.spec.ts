@@ -18,6 +18,7 @@ import {
   checkBounds,
   DEFAULT_BOUNDARY_MARGIN_MM,
   defaultBoundaryMargin,
+  type DepthBound,
   effectiveMargins,
   MARGIN_DEFAULTS,
   marginSourceWords,
@@ -39,6 +40,7 @@ import { viseForNewJob } from '@/engine/cnc/fixture';
 import { WIRED_PROBE_Z_RESIDUAL_MM } from '@/engine/cnc/probePlan';
 import { defaultBadgeParams } from '@/types/badge';
 import type { EngraveJob, EngraveKeepOut, EngraveLabel } from '@/types/engraveJob';
+import { itemDepthBoundFindings } from '@/workers/sim/engraveGeometry';
 
 /** A printed blank's facts, as a job carries them (#285/#345): no wasm, so the numbers are exact. */
 function printedJob(print: EngraveJob['stock']['print'], flatness?: EngraveJob['stock']['flatness']): EngraveJob {
@@ -63,6 +65,26 @@ describe('the depth-bound model (#345)', () => {
     // #285's review found each side of this pair was decided by whichever of `≥`/`≤` the code
     // happened to use. Always subtracting is what leaves no equality to argue about.
     expect(checkBounds(1.8, [above], 0.2)).toBeNull();
+  });
+
+  it('judges the bound to the float tail, and no further (#362 review)', () => {
+    // The checker re-derives `at ± m` from the two numbers the document holds, while the
+    // recommendation quantises its floor to the thousandth — so the two land a few bits apart. On a
+    // split 1.2 mm down with a 0.28 mm margin, `at − m` is `0.9199999999999999` to a float and `0.92`
+    // to the rounding, and the app's own recommended floor was refused by the bound it was computed
+    // against. Both sides carry the same `DEPTH_EPS`, so they cannot disagree; the shipped 0.8/0.2
+    // pair only ever passed because its tail happens to round the other way.
+    const above: DepthBound = { at: 1.2, side: 'above', name: 'the colour split', source: 'split' };
+    expect(checkBounds(0.92, [above], 0.28)).toBeNull();
+    // …and the tolerance is the representation, not the cut: a thousandth past the floor is still
+    // refused, which is what makes this a rounding fix rather than a loosened check.
+    expect(checkBounds(0.921, [above], 0.28)).not.toBeNull();
+
+    // The same, on the other side: a floor the user typed as exactly the grid line a `reveal` bound
+    // asks for (0.92 + 0.28 = 1.2000000000000002 in binary) is ON that bound, not short of it.
+    const below: DepthBound = { ...above, at: 0.92, side: 'below' };
+    expect(checkBounds(1.2, [below], 0.28)).toBeNull();
+    expect(checkBounds(1.199, [below], 0.28)).not.toBeNull();
   });
 
   it('a bound carries its own margin where its rule is a different quantity', () => {
@@ -511,6 +533,50 @@ describe('the label depth a blank allows (#362)', () => {
     expect(checkBounds(rec.depth, [splitBound('surface', splitDepthOf(job))!], 0.2)).toBeNull();
     // …and one 0.1 mm deeper, still inside the band, would keep a distance no colour claim survives.
     expect(checkBounds(0.7, [splitBound('surface', splitDepthOf(job))!], 0.2)).not.toBeNull();
+  });
+
+  it('recommends a demotion the checker accepts, on a margin that floats the other way (#362 review)', () => {
+    // The same demotion on a margin whose float tail rounds DOWN. The peer review's case: the colour
+    // boundary lands 1.2 mm down on the grid, and the job runs a 0.28 mm boundary margin — a number
+    // a job states for itself (#345), not necessarily one printed layer. `1.2 − 0.28` is
+    // `0.9199999999999999` in binary, so the demoted floor `0.92` is a few bits PAST the `at − m` the
+    // checker derives, and the app reported `item-depth-bound` against its own recommendation. The
+    // shipped 0.8/0.2 pair passes only because 0.8 − 0.2 floats UP.
+    //
+    // The winner is the jaws at 1.2 mm — the split's own depth — which is inside the band by
+    // construction: 2.2 mm proud less the 1 mm clearance.
+    const base = badgeJob();
+    const job: EngraveJob = {
+      ...base,
+      stock: { ...base.stock, print: { split: 2.61, layerHeight: 0.2, firstLayerHeight: 0.2 } },
+      workholding: { kind: 'vise', vise: { ...base.workholding.vise, stockProud: 2.2 } },
+      keepOuts: [],
+      // Stated BY THE JOB so the whole path runs at 0.28: `effectiveMargins` gives a job its own
+      // margin, and `engraveGenerate` judges at `margins.boundaryMargin`. Nothing here is derived
+      // from the layer height — that is the point of a job's own margin.
+      margins: { boundaryMargin: 0.28, zTolerance: MARGIN_DEFAULTS.zTolerance, source: 'user' },
+    };
+    const margin = effectiveMargins(job, MARGIN_DEFAULTS).boundaryMargin;
+    expect(margin).toBe(0.28);
+    expect(splitDepthOf(job)).toBe(1.2);
+
+    const rec = recommendLabelDepth(job, label(), { voidLimit: null, boundaryMargin: margin })!;
+    expect(rec.depthIntent).toBe('surface');
+    expect(rec.depth).toBe(0.92);
+    expect(rec.basis[0]).toContain('stops in the top colour at 0.92 mm');
+
+    // The two checks the app actually makes, on the recommendation as the store writes it onto the
+    // label: the bound in isolation, and the finding `engraveGenerate` raises from it
+    // (`itemDepthBoundFindings(job, colourBoundaryDepth, margins.boundaryMargin, bindingVoids)`).
+    const applied: EngraveJob = {
+      ...job,
+      labels: [{ ...label(), depth: rec.depth, depthIntent: rec.depthIntent }],
+    };
+    const bound = splitBound(rec.depthIntent, splitDepthOf(job))!;
+    expect(checkBounds(rec.depth, [bound], margin)).toBeNull();
+    expect(itemDepthBoundFindings(applied, splitDepthOf(job), margin)).toEqual([]);
+    // …and through the real generate path, which is where the operator would have met the finding.
+    expect(generate(tl, applied).findings.some((f) => f.code === 'item-depth-bound')).toBe(false);
   });
 
   it('leaves the intent OFF where the split is out of reach — the jaws win and say so', () => {

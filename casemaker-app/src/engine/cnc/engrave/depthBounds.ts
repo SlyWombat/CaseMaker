@@ -128,6 +128,22 @@ export function mm(v: number): string {
 const DEPTH_STEPS = 1000;
 
 /**
+ * How far a floor may miss a plane and still count as ON it, mm — the binary-float tail of `at ± margin`.
+ *
+ * A recommendation is quantised to the thousandth (`deeper`/`shallower`) and the checker re-derives
+ * `at − margin` from the two numbers the document actually holds, so the two sides can land on values
+ * that differ only in the last bits — `1.2 − 0.28` is `0.9199999999999999` to a float and `0.92` to
+ * the rounding, and the app's own recommendation was refused by the bound it was computed against
+ * (#362 review). `1e-9` is nothing on a machine whose smallest move is 0.001 mm: it absorbs the
+ * representation error (tails run to ~1e-14 at these magnitudes) and nothing else — a floor half a
+ * step past the plane is still a violation.
+ *
+ * ONE constant for both sides — the band test in `recommendLabelDepth` and `checkBounds` — because
+ * they are the same judgement about the same plane and must not carry different tolerances.
+ */
+const DEPTH_EPS = 1e-9;
+
+/**
  * A candidate floor that must land at or PAST a plane (the colour split, which a `reveal` bound
  * requires to be `≥ at + m`): rounded UP, by at most one step. Rounding it down is the one way to
  * write a recommendation that the checker then refuses against its own bound.
@@ -394,6 +410,11 @@ export function boundsFor(
  * Strict both ways: an `above` bound needs `d ≤ at − m`, a `below` bound needs `d ≥ at + m`. A
  * floor sitting exactly ON a plane is refused — it is in the plane, not clear of it — which is the
  * equality #285's review flagged and this margin always subtracts away.
+ *
+ * The comparison carries `DEPTH_EPS` so it judges the same number the recommendation computes
+ * (#362 review): `at − m` in floats is `0.9199999999999999` where the rounded floor it is judging is
+ * `0.92`, and without the tolerance the app's own number broke its own bound. The tolerance is the
+ * float tail and nothing more — a floor a thousandth past the plane still fails.
  */
 export function checkBounds(
   depth: Mm,
@@ -402,7 +423,8 @@ export function checkBounds(
 ): BoundViolation | null {
   for (const bound of bounds) {
     const m = bound.margin ?? margin;
-    const broke = bound.side === 'above' ? depth > bound.at - m : depth < bound.at + m;
+    const broke =
+      bound.side === 'above' ? depth > bound.at - m + DEPTH_EPS : depth < bound.at + m - DEPTH_EPS;
     if (broke) return { bound, margin: m };
   }
   return null;
@@ -714,7 +736,7 @@ export function recommendLabelDepth(
   // neither bound's business, so nothing checks it — and on a domed blank the two-tone floor it
   // would leave is exactly what the margin exists to prevent. It is demoted to a `surface` floor,
   // which is the deepest depth in the band a bound can actually hold the floor to (#362 review).
-  if (split !== null && winner.depth > split - margin + 1e-9 && winner.depth < split + margin - 1e-9) {
+  if (split !== null && winner.depth > split - margin + DEPTH_EPS && winner.depth < split + margin - DEPTH_EPS) {
     const surface = shallower(split - margin);
     // `surface ≤ 0` is a two-colour blank whose split is too near the face for any floor to stay in
     // the top colour: there is nothing to demote TO, so the winner stands and the basis says so.
@@ -734,7 +756,7 @@ export function recommendLabelDepth(
 
   // The intent, only where the floor really is on the far side of the split by the margin a
   // `reveal` bound demands.
-  const reveal = split !== null && winner.depth >= split + margin - 1e-9;
+  const reveal = split !== null && winner.depth >= split + margin - DEPTH_EPS;
 
   return {
     depth: winner.depth,
