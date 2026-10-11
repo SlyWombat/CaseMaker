@@ -10,6 +10,8 @@ import {
   recommendMargins,
   splitBound,
   voidFloor,
+  zBudgetInputsFor,
+  type MarginSettings,
 } from '@/engine/cnc/engrave/depthBounds';
 import { layerAlignedDepthFor } from '@/engine/cnc/layerStack';
 import { cuttingDiameter } from '@/engine/cnc/tool';
@@ -485,8 +487,11 @@ function usesBoundaryMargin(job: EngraveJob, plan: PartPlan): boolean {
  * house default is 0.2 mm, and a blank that states a 0.33 mm dome needs more than that. Printing
  * only the one in force would hide the disagreement the panel shows.
  */
-function marginsStep(job: EngraveJob, margins: EngraveMargins): RunSheetStep {
-  const rec = recommendMargins(job, margins);
+function marginsStep(job: EngraveJob, margins: EngraveMargins, settings: MarginSettings): RunSheetStep {
+  // The recommendation is `max(setting, zTolerance)` — the house number, never the margin the job
+  // happens to be running on, and the SAME inputs the panel resolves (`zBudgetInputsFor`), so the
+  // printout and the panel cannot offer two different numbers for one blank (#345 review).
+  const rec = recommendMargins(job, settings, zBudgetInputsFor(job));
   return {
     text:
       'Depth margins — how far every floor stays clear of a plane: a void’s ceiling, the colour ' +
@@ -829,8 +834,12 @@ export function buildRunSheet(
   generated: RunSheetGenerated,
   sim: RunSheetSim | null,
   now: Date = new Date(),
-  margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
+  settings: MarginSettings = MARGIN_DEFAULTS,
 ): RunSheet {
+  // One resolution, here: the sheet's own numbers and the panel's come off the same call with the
+  // same house setting, and the BLOCK's recommendation is made from the setting rather than from
+  // `margins`, which may be the job's own past recommendation (#345 review).
+  const margins = effectiveMargins(job, settings);
   const { length, width, thickness, material } = job.stock;
   const vise = job.workholding.vise;
   // The one funnel all three item lists go through (#214/#215), so a `border`/`frame`/`cutaway`
@@ -883,7 +892,7 @@ export function buildRunSheet(
   if (sac !== null) needSteps.push({ text: 'Sacrificial material:', value: sac });
   // #345 — the margin every bound in this job is drawn to, with its source and the arithmetic the
   // app recommends for this blank. Only when a bound exists: see `usesBoundaryMargin`.
-  if (usesBoundaryMargin(job, plan)) needSteps.push(marginsStep(job, margins));
+  if (usesBoundaryMargin(job, plan)) needSteps.push(marginsStep(job, margins, settings));
   // #231 item 3 — an under-surface void is a property of the blank the operator must know about
   // before probing Z, so each one is stated up front with the material left over it.
   for (const ko of diagram.keepOuts) {

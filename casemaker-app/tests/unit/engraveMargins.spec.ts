@@ -258,12 +258,14 @@ describe('the run sheet prints the margins (#345)', () => {
     expect(marginsStepOf(surface)).toBeTruthy();
   });
 
-  it('leaving the margins out resolves to the same sheet as posting them', () => {
+  it('leaving the house setting out resolves to the same sheet as posting it', () => {
     const job = voidJob();
-    const resolved = effectiveMargins(job, MARGIN_DEFAULTS);
-    // The panel passes the resolved value (#345); this is the proof that its absence is the same
-    // thing, so a caller that does not pass one is not printing a different number.
-    expect(buildRunSheet(job, NO_GENERATED, null, NOW, resolved)).toEqual(buildRunSheet(job, NO_GENERATED, null, NOW));
+    // The sheet resolves the margins itself (#345 review), from the HOUSE setting — so the panel
+    // handing it the setting and a caller handing it nothing are the same sheet. Passing a job's
+    // resolved margins back in would skip `effectiveMargins`, and with it the blank's own layers.
+    expect(buildRunSheet(job, NO_GENERATED, null, NOW, MARGIN_DEFAULTS)).toEqual(
+      buildRunSheet(job, NO_GENERATED, null, NOW),
+    );
   });
 });
 
@@ -303,5 +305,43 @@ describe('the margins reach the program only where a bound does (#345)', () => {
     // 2 − 0.05 = 1.95, so the same cut is in.
     const loose = generate(tl, job, null, [], { boundaryMargin: 0.05, zTolerance: 0.05, source: 'user' });
     expect(loose.verify!.findings.some((f) => f.code === 'cut-too-deep')).toBe(false);
+  });
+
+  it('refuses a `reveal` floor over a void, though its intent is the deeper one (#345 review)', () => {
+    // A `reveal` is the one item that WANTS a deep floor — below the colour split. A void under it
+    // is a plane it still may not cross, and the per-move limit knows nothing about intent: it is
+    // the material's own number (`jobDepthLimit`), so an item whose intent is satisfied can still
+    // be refused, and the two findings are answers to two different questions.
+    const pocket: EngraveKeepOut = {
+      id: 'pocket',
+      name: 'Magnet pocket',
+      kind: 'rect',
+      position: { x: 50, y: 30 },
+      rotation: 0,
+      enabled: true,
+      zCeiling: 10, // depth 12 − 10 = 2 mm of membrane, so the floor is 2 − 0.2 = 1.8
+      width: 30,
+      height: 20,
+      cornerRadius: 0,
+    };
+    const base = defaultEngraveJob();
+    const label = { ...(base.labels[0] as EngraveLabel) };
+    const job: EngraveJob = {
+      // Split depth 12 − 10.6 = 1.4, so a reveal needs 1.4 + 0.2 = 1.6 — shallower than the
+      // 1.8 the void allows. 1.9 is a legal reveal AND past the void's floor.
+      ...base,
+      stock: { ...base.stock, print: { split: 10.6, layerHeight: 0.2, firstLayerHeight: 0.2 } },
+      labels: [
+        { ...label, text: 'CASE', size: 10, depth: 1.9, position: { x: 50, y: 30 }, depthIntent: 'reveal' },
+      ],
+      keepOuts: [pocket],
+    };
+
+    // The intent's own bound is satisfied at 1.9: it is on the deep side of the split.
+    expect(checkBounds(1.9, [splitBound('reveal', 1.4)!], 0.2)).toBeNull();
+
+    const findings = generate(tl, job).verify!.findings;
+    expect(findings.some((f) => f.code === 'cut-too-deep')).toBe(true);
+    expect(findings.some((f) => f.code === 'item-depth-bound')).toBe(false);
   });
 });

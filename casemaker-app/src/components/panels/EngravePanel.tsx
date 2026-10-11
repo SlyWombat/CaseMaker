@@ -12,9 +12,9 @@ import { useSettingsStore } from '@/store/settingsStore';
 import {
   effectiveMargins,
   marginSourceWords,
-  MEASURED_THICKNESS_TOLERANCE_MM,
   mm as mmText,
   recommendMargins,
+  zBudgetInputsFor,
 } from '@/engine/cnc/engrave/depthBounds';
 import { Z1 } from '@/engine/cnc';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
@@ -365,15 +365,13 @@ export function EngravePanel(): JSX.Element {
 
   // #345 — the depth margins. `effectiveMargins` is the SAME call the run store and the sheet make,
   // so the row, the printout and the verifier cannot state three different numbers. The
-  // recommendation is per-job arithmetic on this blank; `max(margin in force, zTolerance)` is why
-  // it is never tighter than what the job already runs. A measured thickness is the one input the
-  // panel has that the model does not (the grid's residual arrives with #176).
+  // recommendation is per-job arithmetic on THIS blank over the inputs the job itself supplies
+  // (`zBudgetInputsFor`), raised to `max(setting, zTolerance)`: the house setting is a floor under
+  // the advice, and the margin the job happens to be running on is not part of the sum — feeding a
+  // job's own past recommendation back in would let it raise its own advice.
   const houseMargins = useSettingsStore((s) => s.margins);
   const margins = effectiveMargins(job, houseMargins);
-  const recommendation = recommendMargins(job, margins, {
-    thicknessUncertainty:
-      job.sources?.stock?.thickness === 'measured' ? MEASURED_THICKNESS_TOLERANCE_MM : undefined,
-  });
+  const recommendation = recommendMargins(job, houseMargins, zBudgetInputsFor(job));
   // "Recommends more" is the only case worth a button: a recommendation that ties or loses to what
   // is already in force has nothing to offer, and two numbers that agree do not need a control.
   const recommendMore = recommendation.boundaryMargin > margins.boundaryMargin + 1e-9;
@@ -446,11 +444,11 @@ export function EngravePanel(): JSX.Element {
     // that cache is per-realm — the main thread must load the job's faces itself first, exactly
     // as `JobScheduler` does before its compile.
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    // #345 — the margins the run was gated to, resolved here the same way `engraveRunStore` did at
-    // Generate: the sheet's depth notes have to be the numbers the verifier enforced, and a sheet
-    // drawn to the shipped default would tell the operator to cut deeper than the program allows.
+    // #345 — the house setting the run was gated to, handed over rather than a pre-resolved margin:
+    // the sheet resolves it the same way `engraveRunStore` did at Generate, so its depth notes are
+    // the numbers the verifier enforced and its recommendation is made from the SETTING.
     setSheet(
-      buildRunSheet(job, generated, { diagnostics: run.simDiagnostics }, new Date(), effectiveMargins(job, houseMargins)),
+      buildRunSheet(job, generated, { diagnostics: run.simDiagnostics }, new Date(), houseMargins),
     );
   }
 
@@ -1215,7 +1213,7 @@ export function EngravePanel(): JSX.Element {
           <span>
             <b data-testid="engrave-margins-value">{mmText(margins.boundaryMargin)} mm</b>{' '}
             <span style={TAG} data-testid="engrave-margins-source">
-              {job.margins ? 'yours' : marginSourceWords(margins.source)}
+              {marginSourceWords(margins.source)}
             </span>
           </span>
         </div>

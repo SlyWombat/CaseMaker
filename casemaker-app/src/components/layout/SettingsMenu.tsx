@@ -90,8 +90,16 @@ export function SettingsMenu({ onClose }: Props) {
   // #345 — a house margin the user has typed. Stamping the source here is what keeps the run sheet
   // honest: `'default'` means "one printed layer, read off the blank", `'user'` means "this number,
   // deliberately". A margin left on `'default'` keeps following each blank's own layer height.
-  const commitMargin = (patch: Partial<MarginSettings>): void =>
-    setMargins({ ...margins, ...patch, source: 'user' });
+  //
+  // Only the two margins a job COPIES from this screen flip the source (#345 review). The three
+  // "a new job starts from" fields seed a job's own per-job values and never enter
+  // `effectiveMargins`, so retyping the minimum floor has said nothing about the boundary margin —
+  // flipping the source for it would silently pin every future blank to the house 0.2 and stop a
+  // 0.3-layer blank from moving its own boundary.
+  const commitMargin = (patch: Partial<MarginSettings>): void => {
+    const copied = 'boundaryMargin' in patch || 'zTolerance' in patch;
+    setMargins({ ...margins, ...patch, source: copied ? 'user' : margins.source });
+  };
 
   useEffect(() => {
     function onDocClick(e: MouseEvent): void {

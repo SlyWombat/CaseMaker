@@ -42,7 +42,14 @@ import type { Mm } from '@/types/units';
  * owner of their quantities. A seed is a starting number the user then has per job, not a second
  * copy of the same rule.
  */
-export interface MarginSettings extends EngraveMargins {
+export interface MarginSettings extends Omit<EngraveMargins, 'source'> {
+  /**
+   * Where the house SETTING came from — a typing user, or the shipped default. `'recommended'` is
+   * deliberately not a source a setting can have (`parseMargins` refuses it too): a recommendation
+   * is per-job arithmetic on this blank (`recommendMargins`), and a house number that claimed to be
+   * one would be describing a blank the next job does not have.
+   */
+  source: 'default' | 'user';
   /** Material that must remain under the deepest cut, mm — the underside bound's own margin. */
   minFloor: Mm;
   /** No item may come closer than this to a stock edge, mm. */
@@ -349,6 +356,11 @@ export interface MarginRecommendation {
  *
  * The margin is then `max(setting, zTolerance)`: the house setting is a floor under the advice, so
  * a job with nothing special about it is not talked into a tighter margin than the house runs.
+ *
+ * `setting` is the HOUSE setting, and deliberately not the margins a job is running on (#345
+ * review). A job that has already taken a recommendation carries it in `job.margins`; feeding that
+ * back in would let the job's own number raise its own advice, so the recommendation could only
+ * ever ratchet and the panel would have nothing to offer the second time round.
  */
 export function recommendMargins(
   job: EngraveJob,
@@ -358,12 +370,12 @@ export function recommendMargins(
   const basis: string[] = [];
   const probe = inputs.probeUncertainty ?? WIRED_PROBE_Z_RESIDUAL_MM;
   let zTolerance = probe;
-  basis.push(`the wired probe adds ${mm(probe)}`);
+  basis.push(`the wired probe adds ${mm(probe)} mm`);
 
   if (inputs.gridResidual !== undefined) {
     zTolerance += inputs.gridResidual;
     basis.push(
-      `the autolevel grid's residual adds ${mm(inputs.gridResidual)}`,
+      `the autolevel grid's residual adds ${mm(inputs.gridResidual)} mm`,
     );
   } else {
     const flatness = job.stock.flatness;
@@ -379,7 +391,7 @@ export function recommendMargins(
 
   if (inputs.thicknessUncertainty !== undefined) {
     zTolerance += inputs.thicknessUncertainty;
-    basis.push(`the measured thickness adds ${mm(inputs.thicknessUncertainty)}`);
+    basis.push(`the measured thickness adds ${mm(inputs.thicknessUncertainty)} mm`);
   }
 
   return {
@@ -395,3 +407,20 @@ export function recommendMargins(
  * only when `sources.stock.thickness` says the number was measured rather than computed.
  */
 export const MEASURED_THICKNESS_TOLERANCE_MM: Mm = 0.05;
+
+/**
+ * The `ZBudgetInputs` THIS job supplies by itself (#345 review) — the facts that live on the
+ * document and nowhere else. The panel and the run sheet both call this and then hand the result to
+ * `recommendMargins`, so the number the operator reads on the printout and the number the panel
+ * offers are the same arithmetic over the same inputs. Two callers each deciding for themselves
+ * which inputs apply is two answers waiting to disagree.
+ *
+ * The grid's residual (#176) is NOT here: nothing produces one yet, and a job that runs a grid will
+ * have to say so on the document before either caller can read it.
+ */
+export function zBudgetInputsFor(job: EngraveJob): ZBudgetInputs {
+  return {
+    thicknessUncertainty:
+      job.sources?.stock?.thickness === 'measured' ? MEASURED_THICKNESS_TOLERANCE_MM : undefined,
+  };
+}

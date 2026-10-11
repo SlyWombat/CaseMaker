@@ -886,12 +886,14 @@ describe('EngravePanel margins row (#345)', () => {
 
     fireEvent.click(screen.getByTestId('engrave-margins-use'));
 
-    // The job now OWNS the number (so a later settings change cannot move it), and the row reads
-    // it back as the user's rather than as the house's.
+    // The job now OWNS the number (so a later settings change cannot move it), and the row names it
+    // the way the run sheet does — one namer (#345 review): a recommended margin is not "yours", it
+    // is this blank's own arithmetic, and saying "yours" here and "this job's recommendation" on the
+    // printout would describe the same number two ways.
     const job = useEngraveJobStore.getState().job;
     expect(job.margins).toEqual({ boundaryMargin: 0.331, zTolerance: 0.331, source: 'recommended' });
     expect(screen.getByTestId('engrave-margins-value').textContent).toBe('0.331 mm');
-    expect(screen.getByTestId('engrave-margins-source').textContent).toBe('yours');
+    expect(screen.getByTestId('engrave-margins-source').textContent).toBe("this job's recommendation");
 
     // …and the way back is offered only now that there is something to go back from.
     fireEvent.click(screen.getByTestId('engrave-margins-house'));
