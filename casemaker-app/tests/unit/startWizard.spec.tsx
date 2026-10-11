@@ -9,10 +9,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { StartWizard } from '@/components/welcome/StartWizard';
+import { EngravePanel } from '@/components/panels/EngravePanel';
 import { setMachineProbeLoader, type ConfigReadSummary, type MachineProbeClient } from '@/platform/machineProbe';
 import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import {
+  setEngravePreviewClientLoader,
+  useEngravePreviewStore,
+  type EngravePreviewClient,
+} from '@/store/engravePreviewStore';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { createDefaultProject, useProjectStore } from '@/store/projectStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -22,6 +28,9 @@ import { useViewportStore } from '@/store/viewportStore';
 vi.mock('@/engine/jobs/JobScheduler', () => ({ scheduleImmediate: vi.fn(async () => {}) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+/** The Engrave panel is rendered beside the wizard by `AppShell`; a jsdom test has no worker. */
+const NO_PREVIEW: EngravePreviewClient = { engravePreview: async () => null };
 
 function fakeClient(over: Partial<MachineProbeClient> = {}): MachineProbeClient {
   return {
@@ -52,6 +61,7 @@ function useClient(client: MachineProbeClient): void {
 
 beforeEach(() => {
   cleanup();
+  setEngravePreviewClientLoader(async () => NO_PREVIEW);
   resetMachineStore();
   // The check writes the machine's own frame into settings (#279), so each test starts with no
   // saved frame rather than inheriting the previous one's.
@@ -65,11 +75,23 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   setMachineProbeLoader(null);
+  setEngravePreviewClientLoader(null);
+  useEngravePreviewStore.getState().dispose();
 });
 
 /** Click through step 1 without checking for a machine. */
 function skipToJobStep(): void {
   fireEvent.click(screen.getByTestId('start-wizard-next'));
+}
+
+/**
+ * The wizard mounted the way `AppShell` mounts it (`{wizardOpen && <StartWizard />}`), beside the
+ * panel. Closing the wizard must UNMOUNT it, or its setup overlay stays on screen at `step`;
+ * `step === 'setup'` and the panel would then both render a flow.
+ */
+function WizardHost() {
+  const open = useStartWizardStore((s) => s.open);
+  return open ? <StartWizard /> : <></>;
 }
 
 describe('#280 — step 1, the machine check', () => {
@@ -250,6 +272,41 @@ describe('#280 — step 2, what are you making', () => {
     expect(job.sources?.stock?.length).toBe('computed');
     // The material is left alone: a blank does not know what it is made of.
     expect(job.sources?.stock?.material).toBeUndefined();
+  });
+
+  // #344 — the V1 job is the two-colour badge, and it arrives at the setup flow from this route.
+  // The panel is mounted beside the wizard here the way `AppShell` mounts it, so the spec drives
+  // the real path: hand off, take the badge blank, come back into the flow, and look at the step
+  // that holds the vise. Before the fix the shipped 4 mm `stockProud` met the 3.81 mm blank and
+  // the blank step refused the job before the person could answer anything else.
+  it('the badge job reaches the setup flow with no vise error (#344)', () => {
+    useStartWizardStore.getState().openWizard();
+    render(
+      <>
+        <EngravePanel />
+        <WizardHost />
+      </>,
+    );
+    skipToJobStep();
+    fireEvent.click(screen.getByTestId('start-wizard-job-badge-blank'));
+    expect(screen.getByTestId('engrave-setup-flow')).toBeTruthy();
+
+    // Take the badge's own blank (the button the stale-stock nag points at), then re-enter the
+    // flow: the answers are seeded when it opens, so it has to be reopened to see the new blank.
+    fireEvent.click(screen.getByTestId('engrave-setup-close'));
+    fireEvent.click(screen.getByTestId('engrave-stock-from-badge'));
+    const job = useEngraveJobStore.getState().job;
+    expect(job.stock.thickness).toBe(3.81);
+    expect(job.workholding.vise.stockProud).toBeCloseTo(1.905, 9);
+
+    fireEvent.click(screen.getByTestId('engrave-setup-open'));
+    fireEvent.click(screen.getByTestId('engrave-setup-next')); // holding -> material
+    fireEvent.click(screen.getByTestId('engrave-setup-next')); // material -> blank
+    const blankStep = screen.getByTestId('engrave-setup-step-blank');
+    expect(blankStep.textContent).not.toContain('vise-stock-proud-exceeds-thickness');
+    // …and it is the badge's blank the flow is asking about, not the 12 mm default it would have
+    // seeded before the panel's button ran.
+    expect((screen.getByTestId('engrave-setup-stock-thickness') as HTMLInputElement).value).toBe('3.81');
   });
 
   it('never overwrites a stock the user typed or measured', () => {

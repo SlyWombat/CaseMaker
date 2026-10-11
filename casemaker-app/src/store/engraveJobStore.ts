@@ -9,7 +9,7 @@ import {
   newEngraveShapeId,
   newEngraveTraceId,
 } from '@/engine/cnc/engrave/defaults';
-import { todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
+import { defaultStockProud, todayISODate, viseForNewJob } from '@/engine/cnc/fixture';
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
@@ -194,6 +194,30 @@ function withoutCutOverride(job: EngraveJob): EngraveJob {
   return next;
 }
 
+/**
+ * The vise after a stock edit that moves the blank's thickness (#344).
+ *
+ * `viseForNewJob` derives `stockProud` from the stock, but it only runs when a job is CREATED. Every
+ * path that puts a blank into an EXISTING job — the wizard's blank route, the panel's "Use the
+ * blank" / "Use the badge blank", the stale-stock nag that points at them — goes through `setStock`,
+ * which patched the stock and left the vise alone. So the shipped 4 mm default met a 3.81 mm badge
+ * blank and `validateVise` refused the job outright (`vise-stock-proud-exceeds-thickness`) before
+ * anything else was possible, and the person had to find the number and type a smaller one.
+ *
+ * Only the shipped default is re-derived. A SAVED or MEASURED vise is the user's own number, kept
+ * exactly even when it refuses the new blank, so the panel can still show why (#231/#203). An edit
+ * that does not move the thickness — a width, a material — says nothing about how tall the blank
+ * stands, so the vise is untouched and the object's identity is kept.
+ */
+function viseAfterStockEdit(job: EngraveJob, patch: Partial<EngraveJob['stock']>): ViseParams {
+  const thickness = patch.thickness;
+  const { vise } = job.workholding;
+  if (thickness === undefined || thickness === job.stock.thickness) return vise;
+  if (vise.source !== 'default') return vise;
+  const stockProud = defaultStockProud(thickness);
+  return stockProud === vise.stockProud ? vise : { ...vise, stockProud };
+}
+
 /** The job with a source stamped on each of `keys` in `sources.stock` (#254). */
 function withStockSource(
   job: EngraveJob,
@@ -330,7 +354,12 @@ function newKeepOut(kind: EngraveKeepOut['kind'], job: EngraveJob): EngraveKeepO
 
 export interface EngraveJobState {
   job: EngraveJob;
-  /** Merge a stock edit and stamp each edited field's source (#254). Defaults to `'user'`. */
+  /**
+   * Merge a stock edit and stamp each edited field's source (#254). Defaults to `'user'`.
+   *
+   * A patch that changes the thickness carries the SHIPPED-DEFAULT vise with it, re-deriving its
+   * `stockProud` from the new blank (#344). A saved or measured vise is never touched.
+   */
   setStock: (patch: Partial<EngraveJob['stock']>, source?: FieldSource) => void;
   /** Add a default label and return its id. */
   addLabel: () => string;
@@ -429,7 +458,12 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           delete stock.print;
           if (sources.stock) delete sources.stock.print;
         }
-        return { ...job, stock, sources };
+        // The vise follows a blank that changes size (#344) — see `viseAfterStockEdit`.
+        const vise = viseAfterStockEdit(job, patch);
+        const next = { ...job, stock, sources };
+        return vise === job.workholding.vise
+          ? next
+          : { ...next, workholding: { ...job.workholding, vise } };
       }),
 
     addLabel: () => {

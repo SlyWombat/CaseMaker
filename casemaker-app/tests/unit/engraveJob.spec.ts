@@ -27,6 +27,7 @@ import { jobTool, toSetup, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { engravedFaceWorkZ, partToWork } from '@/engine/cnc/frames';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
+import { validateVise } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import { Z1 } from '@/engine/cnc/machine';
 
@@ -304,6 +305,59 @@ describe('engraveJobStore (#200)', () => {
     // The rest of the blank still came through, so this is a CLEAR of the print, not a wipe.
     expect(job.stock.thickness).toBe(3.81);
     expect(job.stock.material).toBe('pla');
+  });
+
+  // #344 — the shipped 4 mm `stockProud` is taller than a 3.81 mm badge blank, so `validateVise`
+  // refused it outright. `viseForNewJob` derives the default from the stock, but it runs when a
+  // job is CREATED; every path that puts a blank into an EXISTING job goes through `setStock`.
+  it('a thickness change carries the shipped-default vise with it, so the badge blank is not refused (#344)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const { setStock } = useEngraveJobStore.getState();
+    expect(useEngraveJobStore.getState().job.workholding.vise).toMatchObject({
+      source: 'default',
+      stockProud: 4,
+    });
+
+    // "Use the badge blank": the same patch the panel's button sends.
+    setStock(badgeBlankFor(defaultBadgeParams()).stock, 'computed');
+    const { stock, workholding } = useEngraveJobStore.getState().job;
+    expect(stock.thickness).toBe(3.81);
+    // Half the blank, capped at the shipped 4 mm — the number `viseForNewJob(…, stock)` gives.
+    expect(workholding.vise.stockProud).toBeCloseTo(1.905, 9);
+    // A derived number is still NOT a measurement (decision 28), so the source stays `default`
+    // and the vise still warns that the jaws are unmeasured.
+    expect(workholding.vise.source).toBe('default');
+    expect(validateVise(stock, workholding.vise).some((f) => f.severity === 'error')).toBe(false);
+  });
+
+  it('never touches a saved vise, even when the user’s own number refuses the new blank (#344)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    useEngraveJobStore.getState().setVise({ stockProud: 6 });
+    useEngraveJobStore.getState().setStock({ thickness: 3.81 }, 'computed');
+
+    const { stock, workholding } = useEngraveJobStore.getState().job;
+    // The #231/#203 rule: the user's number is kept exactly, and the panel shows why it refuses.
+    expect(workholding.vise.stockProud).toBe(6);
+    expect(workholding.vise.source).toBe('saved');
+    expect(
+      validateVise(stock, workholding.vise).some(
+        (f) => f.code === 'vise-stock-proud-exceeds-thickness',
+      ),
+    ).toBe(true);
+  });
+
+  it('leaves the vise alone when the patch does not move the thickness (#344)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const before = useEngraveJobStore.getState().job.workholding.vise;
+
+    useEngraveJobStore.getState().setStock({ width: 50, material: 'pla' });
+
+    // Identity, not merely equality: a width or a material says nothing about how tall the blank
+    // stands, so nothing that reads the vise is disturbed by an unrelated stock edit.
+    expect(useEngraveJobStore.getState().job.workholding.vise).toBe(before);
   });
 
   it('a corrupt payload falls back to the default and is preserved under .rejected', async () => {

@@ -311,8 +311,11 @@ does not start the machine.
 and thickness (Z), and pick a material. The job's material is **PLA**, the printed blank; the
 starting table also carries softwood, hardwood and MDF rows for a blank that is not the badge.
 Or press **Use the badge blank**: it takes the stock and the magnet pocket from the project's
-own badge, so nobody retypes 76.2 × 38.1 × 3.81 (chapter 6). X runs between the vise jaws;
-the fixed jaw is on the left. The stock's front-left corner is the work origin.
+own badge, so nobody retypes 76.2 × 38.1 × 3.81 (chapter 6). Taking a blank also brings the
+vise's **stock proud** with it when the vise is still the shipped default — half the blank, at
+most 4 mm (#344) — because a flat 4 mm stands taller than a 3.81 mm badge. A vise you saved or
+measured is never touched. X runs between the vise jaws; the fixed jaw is on the left. The
+stock's front-left corner is the work origin.
 
 **2. Add labels (#200, #205) — in the app.** Each label carries its own text, font, weight,
 cap height, position on the blank, rotation and **depth**. The editor shows a depth box with
