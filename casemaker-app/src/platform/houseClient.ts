@@ -15,8 +15,10 @@
  * The price of that honesty is one request per visit from the web deployment, whose host has no
  * service to answer — observed in #306's browser QA, reported on the issue, and deliberately kept as
  * the smaller cost next to a reachability rule that would be wrong for the LAN case. It is asked
- * UNDER THE APP'S OWN BASE (#342), so a static host answers it with its SPA fallback rather than the
- * 404 a request to the host root drew; the JSON-shape check below reads both as `absent`.
+ * UNDER THE APP'S OWN BASE (#342): a host with nothing mounted there still answers 404 (the cPanel
+ * deploy ships its SPA rewrite commented out), but the request is now the right one — a host that
+ * DID mount the service under the app's base is found. The JSON-shape check below reads a 404, a
+ * fallback page and a missing host all as `absent`.
  *
  * THE TRAP IT EXISTS TO AVOID. The embedded server answers every path it does not know with
  * `index.html` and status **200** so the SPA's deep links work. A client that read "200" as
@@ -361,7 +363,8 @@ export interface HouseClient {
  * that base is read from the BUILD rather than guessed: `import.meta.env.BASE_URL` is where Vite
  * actually mounted the app. `document.baseURI` would not do — there is no `<base>` element, so it is
  * the current page's URL, and a deep link like `/casemaker/jobs/7` would resolve to the wrong root.
- * A static host answers this with its SPA fallback: the same `absent`, without the 404.
+ * On electricrv.ca this is still a 404 (nothing is mounted there): the verdict is the same `absent`,
+ * and the console line stays until the host answers the path. The point is the path, not the line.
  */
 export function houseBaseUrl(): string {
   if (typeof location === 'undefined') return '';
@@ -372,7 +375,10 @@ export function houseBaseUrl(): string {
   if (origin === 'null' || origin === '') return '';
   // `BASE_URL` is a path prefix in every build this repo makes (`vite.config.ts`'s `DEPLOY_BASE`,
   // default `/`), resolved against the origin so that it works with or without a trailing slash.
-  return new URL(import.meta.env.BASE_URL, `${origin}/`).href.replace(/\/+$/, '');
+  // Only its PATH is taken: a full-URL base (Vite allows `base: 'https://cdn/x/'`) must not move
+  // the probe off the page's own origin, which is the only candidate (above).
+  const base = new URL(import.meta.env.BASE_URL, `${origin}/`);
+  return `${origin}${base.pathname}`.replace(/\/+$/, '');
 }
 
 function reasonOf(e: unknown): string {

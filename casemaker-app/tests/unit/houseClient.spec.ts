@@ -116,9 +116,15 @@ describe('houseBaseUrl', () => {
     // The desktop shell and the plain dev server are mounted at `/`, and are unchanged.
     vi.stubEnv('BASE_URL', '/');
     expect(houseBaseUrl()).toBe('https://electricrv.ca');
+    // Vite's relative base resolves to the origin too.
+    vi.stubEnv('BASE_URL', './');
+    expect(houseBaseUrl()).toBe('https://electricrv.ca');
+    // A full-URL base keeps the probe on the page's own origin: only the path is taken.
+    vi.stubEnv('BASE_URL', 'https://cdn.example/x/');
+    expect(houseBaseUrl()).toBe('https://electricrv.ca/x');
   });
 
-  it('asks its own root, not the host root, so the console stays clean (#342)', async () => {
+  it('asks its own root, not the host root — the right request, whatever the host answers (#342)', async () => {
     vi.stubGlobal('location', { origin: 'https://electricrv.ca' });
     vi.stubEnv('BASE_URL', '/casemaker/');
     // What the bug did: this URL was `https://electricrv.ca/api/v1/health`, and a static host with
