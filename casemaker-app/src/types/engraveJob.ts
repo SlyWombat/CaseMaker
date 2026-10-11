@@ -64,6 +64,17 @@ export interface EngraveJobSources {
   tool?: FieldSource;
   /** Per-field provenance for `cutOverride` (#246). Absent = computed from the feeds table. */
   cut?: Partial<Record<keyof CutParams, FieldSource>>;
+  /**
+   * Per-label provenance, keyed by label id (#362). Absent = the label's own fields are the ones
+   * it shipped with, or the ones the recommendation wrote.
+   *
+   * It exists for ONE decision: `takeBadgeBlank` re-depths every label to the blank it is about to
+   * cut, and it must NOT overwrite a number the user typed (`'user'`) or one taken at the bench
+   * (`'measured'`) — the recommendation is a starting point, not an authority over a stated
+   * depth. A key absent WITHIN the map is a label nobody has claimed, which is exactly what the
+   * re-depth is allowed to move.
+   */
+  labels?: Record<string, { depth?: FieldSource }>;
 }
 
 export interface EngraveLabel {
@@ -663,13 +674,25 @@ export interface EngraveJob {
    */
   breakthrough: Mm;
   /**
+   * How far a cut's floor must stay above the vise jaws' TOPS, mm (#362). PROVISIONAL 1.0, the
+   * same clearance the `stock-proud-too-small` check carried as a bare `1` before #345's rule
+   * moved the number onto the document; the house setting (`MarginSettings.jawClearance`) only
+   * SEEDS it, exactly as it seeds `minFloor`.
+   *
+   * A property of the SETUP and not of the blank, which is why the job states its own: a blank
+   * that will be re-fixtured, or an operator who wants more room over hardened jaws, should not
+   * have to change the house number to say so.
+   */
+  jawClearance: Mm;
+  /**
    * The Z-error margins this job runs with (#345), or absent — in which case it runs on the house
    * setting (`AppSettings.margins`) at generate time. Absent is what every stored job is, so none
    * of them changes behaviour by this field existing.
    *
-   * `minFloor`, `edgeMargin` and `breakthrough` above are NOT repeated here: they are a different
-   * quantity (material that must remain, clearance to an edge, travel into the board), each with
-   * its own owner, and the house setting only SEEDS them for a new job.
+   * `minFloor`, `edgeMargin`, `breakthrough` and `jawClearance` above are NOT repeated here: they
+   * are a different quantity (material that must remain, clearance to an edge, travel into the
+   * board, room over the jaws), each with its own owner, and the house setting only SEEDS them for
+   * a new job.
    */
   margins?: EngraveMargins;
   /**

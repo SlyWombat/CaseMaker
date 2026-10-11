@@ -71,11 +71,12 @@ export function newEngraveKeepOutId(): string {
  * caller with no saved measurement gets the shipped default. A copy is stored so patching the
  * job cannot mutate `DEFAULT_VISE` (or the caller's object).
  *
- * `margins` (#345) is the house's threshold set, and it SEEDS the three per-job fields below —
- * `minFloor`, `edgeMargin`, `breakthrough` — which stay the document's own numbers once written.
- * They are a different quantity from the Z-error margins (material that must remain, clearance to
- * an edge, travel into the board), so they are seeded rather than copied into `job.margins`, which
- * is left ABSENT so the job follows the house setting until someone overrides it.
+ * `margins` (#345) is the house's threshold set, and it SEEDS the four per-job fields below —
+ * `minFloor`, `edgeMargin`, `breakthrough`, `jawClearance` — which stay the document's own numbers
+ * once written. They are a different quantity from the Z-error margins (material that must remain,
+ * clearance to an edge, travel into the board, room over the jaws), so they are seeded rather than
+ * copied into `job.margins`, which is left ABSENT so the job follows the house setting until
+ * someone overrides it.
  */
 export function defaultEngraveJob(
   vise: ViseParams = DEFAULT_VISE,
@@ -141,6 +142,8 @@ export function defaultEngraveJob(
     // No sacrificial material: a job that does not use it behaves exactly as before (#213).
     sacrificial: noneSacrificial(),
     breakthrough: margins.breakthrough,
+    // #362 — the same 1.0 the check used to hard-code, now a number the job can state.
+    jawClearance: margins.jawClearance,
     customFonts: [],
   };
 }

@@ -825,9 +825,9 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
 
   /** An obstacle ABOVE the stock top at work X [minX, maxX], off the cut at X = 50 so the
    *  r-1.59 cutter never reaches it while the r-10 nut does. */
-  const toeClamp = (minX = 56, maxX = 70): Setup =>
+  const toeClamp = (minX = 56, maxX = 70, minZ = 1): Setup =>
     stubSetup(FSLAB, HOLD, {
-      fixture: { boxes: [{ id: 'toe-clamp', label: 'Toe clamp', min: [minX, 0, 1], max: [maxX, 60, 3] }], source: 'default', uncertainty: 0 },
+      fixture: { boxes: [{ id: 'toe-clamp', label: 'Toe clamp', min: [minX, 0, minZ], max: [maxX, 60, 3] }], source: 'default', uncertainty: 0 },
     });
 
   it('#314: an obstacle ABOVE the stock top is where the unknown becomes real again', () => {
@@ -839,17 +839,47 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
     // It says WHICH question is unanswerable, not merely that something is.
     expect(warns[0]?.message).toContain('rises 3.000 mm above the stock top');
     expect(warns[0]?.message).toContain("collet nut's size is not known");
+    // …and WHICH obstacle it is asking about (#314 review): "an obstacle" was the message at its
+    // least useful, and the clamp's own label was in hand two lines away.
+    expect(warns[0]?.message).toContain('Toe clamp');
+  });
+
+  it('#314: an unmeasured band that lifts a jaw above the stock top says so, and names the jaw', () => {
+    // The vise case, and the one a test with `uncertainty: 0` never sees: jaws declared BELOW the
+    // stock top (there they must be), and the 2 mm unmeasured band around them reaching above it.
+    // Reporting that as an obstacle "rising" would send the user looking for something on the part
+    // that is not there — what rose was the uncertainty.
+    const banded = stubSetup(FSLAB, HOLD, {
+      fixture: {
+        boxes: [{ id: 'vise-fixed-jaw', label: 'Vise fixed jaw (left)', min: [-15, -10, -23.81], max: [0, 70, -1.905] }],
+        source: 'default',
+        uncertainty: 2,
+      },
+    });
+    const { out } = sweep(stroke(50, -0.5), T3, banded, { machine: Z1 });
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    const warn = out.value.diagnostics.find((d) => d.code === 'holder-vs-fixture-unproven');
+    expect(warn?.message).toContain('Vise fixed jaw (left)');
+    expect(warn?.message).toContain('declared 1.905 mm below the stock top');
+    expect(warn?.message).toContain('unmeasured 2 mm band');
+    expect(warn?.message).toContain('lifts its top 0.095 mm ABOVE');
+    expect(warn?.message).toContain("collet nut's size is not known");
   });
 
   it('#314: with the nut stated, the nut face is at tip + shoulderLength — not at a stick-out', () => {
     const machine: MillProfile = { ...Z1, holder: { nutDiameter: 20, nutLength: 15, source: 'test' } };
-    // A stick-out of 8 mm would put the nut face 3 mm ABOVE the stock top — clear of the clamp
-    // (which spans Z 1..3) by exactly the measurement, and the old rule trusted it. The cutter's
-    // own 4 mm shoulder is the honest bound: at the deepest point of the job (Z = -5) the nut
-    // face sits at -1, so the nut — and only the nut — is inside the clamp.
+    // A stick-out of 8 mm would put the nut face 3 mm ABOVE the stock top — clear of the clamp by
+    // exactly the measurement, and the old rule trusted it. The cutter's own 4 mm shoulder is the
+    // honest bound: at the deepest point of the job (Z = -3) the nut face sits at +1, so the nut —
+    // and only the nut — is inside the clamp, which spans Z 0.5..3. The depth is deliberately
+    // WITHIN the shoulder: `holderGate` refuses a deeper cut (`holder-collision`), so a test that
+    // cut to -5 would be asserting a nut position inside a job the app will not run.
     const t = flatEndMill(3.175, { shoulderLength: 4, fluteLength: 4, stickout: 8 });
-    const { out } = sweep(stroke(50, -5), t, toeClamp(), { machine });
+    const { out } = sweep(stroke(50, -3), t, toeClamp(56, 70, 0.5), { machine });
     if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    // The invariant this test claims to pin, asserted rather than assumed: the run is not one the
+    // shoulder gate refused, so the nut really is the thing in the clamp.
+    expect(codesOf(out)).not.toContain('holder-collision');
     const hit = out.value.diagnostics.find((d) => d.code === 'holder-into-fixture');
     expect(hit?.severity).toBe('error');
     expect(hit?.message).toContain('its face 4 mm above the tip');
@@ -859,7 +889,7 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
 
     // The same job with the clamp out of the nut's reach (it reaches X = 60) is clean, so the
     // error above is the overlap and not a check that fires on any fixture at all.
-    const clear = sweep(stroke(50, -5), t, toeClamp(70, 84), { machine });
+    const clear = sweep(stroke(50, -3), t, toeClamp(70, 84, 0.5), { machine });
     expect(codesOf(clear.out)).not.toContain('holder-into-fixture');
   });
 

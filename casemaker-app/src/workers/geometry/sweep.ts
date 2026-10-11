@@ -778,11 +778,16 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   let fixture: ManifoldInstance | null = null;
   let fixtureBB: Box | null = null;
   let fixtureTop = Number.NEGATIVE_INFINITY;
+  /** The inflated box whose top IS `fixtureTop` — so the finding can name the obstacle, not "an obstacle". */
+  let tallestBox: ObstacleBox | null = null;
   if (setup.fixture && setup.fixture.boxes.length > 0) {
     for (const raw of setup.fixture.boxes) {
       const box = inflate(raw, setup.fixture.uncertainty);
       fixtureBoxes.push({ box, solid: boxSolid(tl, box) });
-      fixtureTop = Math.max(fixtureTop, box.max[2]);
+      if (box.max[2] > fixtureTop) {
+        fixtureTop = box.max[2];
+        tallestBox = box;
+      }
     }
     // A single box aliases `fixture`; the union is a separate handle only when there is more
     // than one, so the delete below never touches a handle twice.
@@ -816,10 +821,27 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // there is the unknown real. An unmeasured nut is a warning, never a refusal (#182).
   const fixtureAboveStockTop = fixture !== null && fixtureTop > topZ;
   if (fixtureAboveStockTop && holder === null) {
+    // WHICH obstacle, not "an obstacle" (#314 review, folded into #362). `fixtureBoxes` right here
+    // carries the id and the label, and the message was throwing them away — so the one case that
+    // most needs naming was also the one that said least. The jaws are why it matters: a vise's
+    // `defaultStockProud` is `thickness / 2`, so on a blank thinner than 4 mm the UNMEASURED 2 mm
+    // band (`DEFAULT_UNCERTAINTY`) lifts a jaw top that sits BELOW the stock top to just above it,
+    // and the finding reads as a physical obstruction when what actually rose was the uncertainty.
+    // Say both numbers, and say which one did the rising.
+    const name = tallestBox?.label ?? 'an obstacle';
+    const rise = (fixtureTop - topZ).toFixed(3);
+    const band = setup.fixture?.uncertainty ?? 0;
+    const declaredTop = tallestBox === null ? topZ : tallestBox.max[2] - band;
+    const liftedByBand = band > 0 && declaredTop <= topZ;
     fixtureDiag.push({
       severity: 'warning',
       code: 'holder-vs-fixture-unproven',
-      message: `an obstacle rises ${(fixtureTop - topZ).toFixed(3)} mm above the stock top and the collet nut's size is not known: clearance to it cannot be proven`,
+      message: liftedByBand
+        ? `the ${name} is declared ${(-declaredTop).toFixed(3)} mm below the stock top, but the ` +
+          `unmeasured ${band} mm band around it lifts its top ${rise} mm ABOVE — and the collet ` +
+          `nut's size is not known: clearance to it cannot be proven`
+        : `the ${name} rises ${rise} mm above the stock top and the collet nut's size is not ` +
+          `known: clearance to it cannot be proven`,
     });
   }
 

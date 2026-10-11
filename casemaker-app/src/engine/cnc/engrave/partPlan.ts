@@ -993,6 +993,35 @@ export function keepOutNameAt(job: EngraveJob, x: Mm, y: Mm): string | null {
 }
 
 /**
+ * The shallowest limit ANY enabled void on the blank imposes, mm, with the void it belongs to —
+ * or null when the blank declares none (#362).
+ *
+ * NOT the same question as `keepOutLimitAt(job, x, y)`, which answers for one point. A label's
+ * glyphs have an extent, and whether they actually reach a void is a question about their
+ * profiles (`bindingVoidsByRegion`, in the worker that can evaluate them). A caller with no plan
+ * in hand — the store, re-depthing a badge blank the moment it is taken — must not guess, and
+ * guessing OPTIMISTICALLY is the wrong way to be wrong: a recommendation that turns out not to be
+ * cuttable is worse than one that keeps a fraction of a millimetre more than it strictly had to.
+ * So this answers for the WHOLE blank, which is a superset of every point's answer, and the name
+ * travels with it so the recommendation's basis can say which void it was.
+ *
+ * Empty when every void is disabled, or there are none: a blank with no void under it is limited
+ * by its own floor and the jaws, not by anything here.
+ */
+export function shallowestVoidLimit(
+  job: EngraveJob,
+  margin?: Mm,
+): { name: string; limit: Mm } | null {
+  let found: { name: string; limit: Mm } | null = null;
+  for (const ko of job.keepOuts ?? []) {
+    if (!ko.enabled) continue;
+    const limit = keepOutLimit(job, keepOutMembrane(job, ko.zCeiling), margin);
+    if (found === null || limit < found.limit) found = { name: ko.name ?? '', limit };
+  }
+  return found;
+}
+
+/**
  * The job's depth limit as #174's verifier takes it. It is the MINIMUM of two limits, and the
  * whole point is that there is exactly one function that composes them:
  *

@@ -25,8 +25,8 @@ export interface AppSettings {
   exportFormat: ExportFormat;
   fixtures: FixturesSettings;
   /**
-   * The house's depth thresholds (#345): the two Z-error margins every job copies, and the three
-   * numbers that SEED a new job's own `minFloor`/`edgeMargin`/`breakthrough`.
+   * The house's depth thresholds (#345): the two Z-error margins every job copies, and the four
+   * numbers that SEED a new job's own `minFloor`/`edgeMargin`/`breakthrough`/`jawClearance`.
    *
    * A house default is not a recommendation (decision 28): `source` says whether this is the
    * shipped set or the user's own, and a job's own `margins` always wins over it.
@@ -228,12 +228,26 @@ export function parseMargins(raw: unknown): MarginSettings {
       return { ...MARGIN_DEFAULTS };
     }
   }
+  // #362's jaw clearance, and the ONE place in here that reads a missing key as a version
+  // difference rather than a fault. A record written before this field existed has five honest
+  // thresholds in it and no `jawClearance`; failing the whole set closed over the key it could not
+  // have carried would throw away the user's numbers to defend a default. So: absent → the shipped
+  // default, which is the same 1 mm the check used before the setting existed; present and
+  // malformed → the set is refused, the way every other key is.
+  const rawClearance = o.jawClearance;
+  if (
+    rawClearance !== undefined &&
+    (typeof rawClearance !== 'number' || !Number.isFinite(rawClearance) || rawClearance < 0)
+  ) {
+    return { ...MARGIN_DEFAULTS };
+  }
   return {
     boundaryMargin: o.boundaryMargin as number,
     zTolerance: o.zTolerance as number,
     minFloor: o.minFloor as number,
     edgeMargin: o.edgeMargin as number,
     breakthrough: o.breakthrough as number,
+    jawClearance: (rawClearance as number | undefined) ?? MARGIN_DEFAULTS.jawClearance,
     source: source as MarginSettings['source'],
   };
 }
@@ -258,6 +272,17 @@ export function parseMarginsStrict(raw: unknown): { ok: true; margins: MarginSet
       return { ok: false, reason: `the margins record's ${key} is missing or not a number` };
     }
   }
+  // #362's jaw clearance. An ABSENT key is the same version difference `parseMargins` reads it as —
+  // a "my machine" file written before this field existed is not malformed, and refusing it would
+  // lock a user out of importing their own machine over a default — so it takes the shipped value.
+  // A key that IS there and is not a number is exactly what this path exists to refuse.
+  const rawClearance = o.jawClearance;
+  if (
+    rawClearance !== undefined &&
+    (typeof rawClearance !== 'number' || !Number.isFinite(rawClearance) || rawClearance < 0)
+  ) {
+    return { ok: false, reason: "the margins record's jawClearance is not a number" };
+  }
   return {
     ok: true,
     margins: {
@@ -266,6 +291,7 @@ export function parseMarginsStrict(raw: unknown): { ok: true; margins: MarginSet
       minFloor: o.minFloor as number,
       edgeMargin: o.edgeMargin as number,
       breakthrough: o.breakthrough as number,
+      jawClearance: (rawClearance as number | undefined) ?? MARGIN_DEFAULTS.jawClearance,
       source: source as MarginSettings['source'],
     },
   };

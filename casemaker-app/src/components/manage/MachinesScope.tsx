@@ -408,7 +408,9 @@ export function MachinesScope() {
                   <th>collet nut</th>
                   <td>
                     {profile.holder === null ? 'not modelled' : 'measured'}{' '}
-                    {profile.holder === null && <span className="dim">the holder gate says so</span>}
+                    {profile.holder === null && (
+                      <span className="dim">asked about only for an obstacle above the stock top</span>
+                    )}
                   </td>
                 </tr>
               </tbody>
@@ -467,7 +469,9 @@ function ProfileKv({ profile }: { profile: MillProfile | undefined }) {
         {profile.toolChange.clearanceZ}
       </Kv>
       <Kv label="collet nut">
-        {profile.holder === null ? 'not modelled — the holder gate says the clearance is unproven' : 'measured'}
+        {profile.holder === null
+          ? 'not modelled — asked about only for an obstacle above the stock top'
+          : 'measured'}
       </Kv>
     </div>
   );

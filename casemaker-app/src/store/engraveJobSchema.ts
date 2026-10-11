@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Z1 } from '@/engine/cnc/machine';
 import { ToolSchema } from '@/engine/cnc/toolLibrary';
 import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
+import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
 import { MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS } from '@/engine/import/outlineTypes';
 import type { EngraveJob } from '@/types/engraveJob';
 
@@ -447,6 +448,10 @@ const jobSourcesSchema = z.object({
       air: fieldSourceSchema.optional(),
     })
     .optional(),
+  // #362 — per-label provenance, keyed by label id. Named explicitly for the same reason
+  // `flatness` above is: zod strips what an object does not name, and a user's typed depth coming
+  // back as an unclaimed one would let the next `takeBadgeBlank` overwrite it.
+  labels: z.record(z.string(), z.object({ depth: fieldSourceSchema.optional() })).optional(),
 });
 
 /** Version 1 (#200): the document before sacrificial material existed. */
@@ -470,6 +475,11 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   schemaVersion: z.literal(2),
   sacrificial: sacrificialSchema,
   breakthrough: z.number().finite().nonnegative(),
+  // #362's jaw clearance. DEFAULTED, unlike the optional keys below: the shipped value is the 1 mm
+  // the `stock-proud-too-small` check hard-coded before it became a setting, so a job written
+  // without this field loads with exactly the clearance it was judged by, and no document changes
+  // behaviour by the field existing.
+  jawClearance: z.number().finite().nonnegative().default(DEFAULT_JAW_CLEARANCE_MM),
   // #345's Z-error margins. OPTIONAL, not defaulted: an absent `margins` means "run on the house
   // setting", which is what every job written before this field existed does.
   margins: engraveMarginsSchema.optional(),
@@ -513,6 +523,9 @@ export const engraveJobSchema = z
           // An old job loads with no sacrificial material (#213): the default is none.
           sacrificial: noneSacrificial(),
           breakthrough: DEFAULT_BREAKTHROUGH,
+          // …and the jaw clearance that was the only number the check knew (#362): a v1 job is a
+          // v1 job, and 1.0 mm is what it was judged by.
+          jawClearance: DEFAULT_JAW_CLEARANCE_MM,
           // …and no shapes (#214): every old label stays a label, so a version-1 job loads and
           // cuts byte-identically.
           shapes: [],

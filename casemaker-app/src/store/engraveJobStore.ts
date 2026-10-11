@@ -13,6 +13,8 @@ import { defaultStockProud, todayISODate, viseForNewJob } from '@/engine/cnc/fix
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
+import { effectiveMargins, recommendLabelDepth } from '@/engine/cnc/engrave/depthBounds';
+import { shallowestVoidLimit } from '@/engine/cnc/engrave/partPlan';
 import { BADGE_POCKET_KEEP_OUT_ID, type BadgeBlank } from '@/engine/cnc/engrave/fromBadge';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type {
@@ -421,6 +423,22 @@ export interface EngraveJobState {
    */
   takeBadgeBlank: (blank: BadgeBlank) => void;
   /**
+   * Give every label a depth THIS blank allows, and say who decided (#362) — the arithmetic is
+   * `recommendLabelDepth`, this is only the walk over the labels and the provenance.
+   *
+   * Called by `takeBadgeBlank` on the job as it now stands, and exposed on its own so the
+   * re-depthing has a name a test can call without a badge template in hand.
+   *
+   * Two labels are SKIPPED, and both for the same reason — the recommendation is a starting point,
+   * not an authority over a number someone else stated:
+   *
+   *   - one whose depth source is `'user'` or `'measured'` (`sources.labels[id]`, #362), i.e. one
+   *     the user typed or read at the bench;
+   *   - one that states its own `depthIntent` — `recommendLabelDepth` declines those itself, since
+   *     an item that has said which colour its floor means is the user's to place.
+   */
+  redepthLabelsForBlank: () => void;
+  /**
    * Add an imported vector outline (#217) and return its id. The shape is built by the panel
    * from an accepted `OutlineImport` (via `toVectorShape`), because only the panel holds the
    * placement fields the import dialog settled on.
@@ -502,19 +520,33 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     },
 
     updateLabel: (id, patch) =>
-      apply((job) => ({
-        ...job,
-        labels: job.labels.map((l) =>
-          l.id === id
-            ? {
-                ...l,
-                ...patch,
-                // Merge a partial position rather than replacing the whole object.
-                position: patch.position ? { ...l.position, ...patch.position } : l.position,
-              }
-            : l,
-        ),
-      })),
+      apply((job) => {
+        // #362 — a depth typed into the label editor is the user's number, and it has to say so:
+        // `takeBadgeBlank` re-depths the labels a blank has not claimed, and a stated depth is
+        // precisely the one it must leave alone. Stamped here rather than at each call site, so
+        // there is one place that decides what "the user typed this depth" means.
+        const sources: EngraveJobSources =
+          patch.depth === undefined
+            ? (job.sources ?? {})
+            : {
+                ...(job.sources ?? {}),
+                labels: { ...(job.sources?.labels ?? {}), [id]: { depth: 'user' } },
+              };
+        return {
+          ...job,
+          labels: job.labels.map((l) =>
+            l.id === id
+              ? {
+                  ...l,
+                  ...patch,
+                  // Merge a partial position rather than replacing the whole object.
+                  position: patch.position ? { ...l.position, ...patch.position } : l.position,
+                }
+              : l,
+          ),
+          sources,
+        };
+      }),
 
     removeLabel: (id) => apply((job) => ({ ...job, labels: job.labels.filter((l) => l.id !== id) })),
 
@@ -672,7 +704,50 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       else if ((get().job.keepOuts ?? []).some((k) => k.id === BADGE_POCKET_KEEP_OUT_ID)) {
         get().removeKeepOut(BADGE_POCKET_KEEP_OUT_ID);
       }
+      // #362 — and a DEPTH for each label the blank has not been told about. Before this, taking a
+      // 3.81 mm badge blank left the 12 mm softwood job's 2.0/1.0/0.5 mm depths on it, and the
+      // wizard immediately complained about a job it had just built. Every clause of "why this is
+      // deep" is arithmetic on the blank that was just applied, so it has to run AFTER the stock
+      // and the pocket, on the job as it now stands.
+      get().redepthLabelsForBlank();
     },
+
+    redepthLabelsForBlank: () =>
+      apply((job) => {
+        // Resolved ONCE, the way every other reader of the margins does it: the recommendation and
+        // the checker must be holding the same margin, or a depth can be recommended and then
+        // refused by the bound it was recommended against.
+        const boundaryMargin = effectiveMargins(job, useSettingsStore.getState().margins).boundaryMargin;
+        const voidLimit = shallowestVoidLimit(job, boundaryMargin);
+        const stated = job.sources?.labels ?? {};
+        const stamps: Record<string, { depth: FieldSource }> = {};
+        let changed = false;
+
+        const labels = job.labels.map((label) => {
+          const source = stated[label.id]?.depth;
+          if (source === 'user' || source === 'measured') return label;
+          const rec = recommendLabelDepth(job, label, { voidLimit, boundaryMargin });
+          if (rec === null) return label;
+          changed = true;
+          // The depth is written as `computed`, the honest member of `FieldSource` for a number the
+          // app worked out: the issue's "stamped recommended" has no member here, and inventing one
+          // in a shared enum to say what `computed` already says would widen the vocabulary of the
+          // stock, tool and cut fields too. What the source is FOR is the guard above — a value the
+          // user or the bench claimed is never overwritten, and `computed` is precisely a value they
+          // have not.
+          stamps[label.id] = { depth: 'computed' };
+          return {
+            ...label,
+            depth: rec.depth,
+            ...(rec.depthIntent === undefined ? {} : { depthIntent: rec.depthIntent }),
+          };
+        });
+
+        // Nothing was written, so nothing is claimed: `apply` still persists, but a job that came
+        // through untouched keeps the byte-identical document it had.
+        if (!changed) return job;
+        return { ...job, labels, sources: { ...(job.sources ?? {}), labels: { ...stated, ...stamps } } };
+      }),
 
     addVector: (shape) => {
       apply((job) => ({ ...job, vectors: [...(job.vectors ?? []), shape] }));

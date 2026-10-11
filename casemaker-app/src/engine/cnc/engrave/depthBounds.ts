@@ -32,9 +32,14 @@
  * (`stock.print`, the keep-outs, the vises), which is what lets the panel, the run sheet and the
  * verifier all read the same rule. The one wasm-backed input — how deep the cutter may go before it
  * reaches a void — arrives as a plain number from the layer stack that computed it.
+ *
+ * The layer GRID's own arithmetic is the one thing it borrows rather than receives
+ * (`colourBoundaryDepthFor`, #362): where the colour split lands is a rule about the printer's
+ * layers, so the recommendation must land it on the same line the checker does.
  */
 
 import { DEFAULT_BREAKTHROUGH } from '@/engine/cnc/sacrificial';
+import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import { WIRED_PROBE_Z_RESIDUAL_MM } from '@/engine/cnc/probePlan';
 import type { EngraveAnyItem, EngraveJob, EngraveLabel, EngraveMargins, MarginSource } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
@@ -42,10 +47,10 @@ import type { Mm } from '@/types/units';
 /**
  * The house's thresholds (#345), persisted with the rest of the app settings.
  *
- * `boundaryMargin` and `zTolerance` are what a job COPIES; the other three SEED a new job's own
- * per-job fields (`minFloor`, `edgeMargin`, `breakthrough` on the document), which stay the single
- * owner of their quantities. A seed is a starting number the user then has per job, not a second
- * copy of the same rule.
+ * `boundaryMargin` and `zTolerance` are what a job COPIES; the other four SEED a new job's own
+ * per-job fields (`minFloor`, `edgeMargin`, `breakthrough`, `jawClearance` on the document), which
+ * stay the single owner of their quantities. A seed is a starting number the user then has per job,
+ * not a second copy of the same rule.
  */
 export interface MarginSettings extends Omit<EngraveMargins, 'source'> {
   /**
@@ -61,6 +66,15 @@ export interface MarginSettings extends Omit<EngraveMargins, 'source'> {
   edgeMargin: Mm;
   /** How far a through-cut may pass below the part's underside, mm. */
   breakthrough: Mm;
+  /**
+   * How far a cut's floor must stay above the vise jaws' TOPS, mm (#362) — the clearance the
+   * `stock-proud-too-small` check used to carry as a bare `1` in its own arithmetic.
+   *
+   * A seed, like the three above: a new job takes it as its own `jawClearance`, and the check and
+   * `recommendLabelDepth` both read that. The number is a property of the SETUP (how much room over
+   * the jaws this operator wants), which is why a job may state its own.
+   */
+  jawClearance: Mm;
 }
 
 /** `0.2` — one printed layer at the layer height most printers use when nothing says otherwise. */
@@ -74,8 +88,15 @@ export const DEFAULT_MIN_FLOOR_MM: Mm = 1.0;
 export const DEFAULT_EDGE_MARGIN_MM: Mm = 1.0;
 
 /**
+ * `1.0` — the clearance `validateJob`'s jaw check demanded before #362 made it a setting (#314
+ * wrote the sentence, #345's rule moved the number). PROVISIONAL in the same sense the other house
+ * thresholds are: it is a clearance an operator wants, not one anyone measured.
+ */
+export const DEFAULT_JAW_CLEARANCE_MM: Mm = 1.0;
+
+/**
  * The shipped thresholds, and the fallback whenever a stored setting is missing or malformed. The
- * three seeds are exactly the constants `defaultEngraveJob` used before they moved here, so a fresh
+ * seeds are exactly the constants `defaultEngraveJob` used before they moved here, so a fresh
  * install produces the job it always did.
  */
 export const MARGIN_DEFAULTS: MarginSettings = {
@@ -84,6 +105,7 @@ export const MARGIN_DEFAULTS: MarginSettings = {
   minFloor: DEFAULT_MIN_FLOOR_MM,
   edgeMargin: DEFAULT_EDGE_MARGIN_MM,
   breakthrough: DEFAULT_BREAKTHROUGH,
+  jawClearance: DEFAULT_JAW_CLEARANCE_MM,
   source: 'default',
 };
 
@@ -95,6 +117,33 @@ export const MARGIN_DEFAULTS: MarginSettings = {
  */
 export function mm(v: number): string {
   return `${Number(v.toFixed(3))}`;
+}
+
+/**
+ * The machine's Z resolution, and the number of steps a recommended depth is rounded to in the
+ * THOUSANDS domain below: 0.001 mm, the smallest move the controller makes and the precision the
+ * panel's field shows. A recommendation is written onto the document and read back by a person, so
+ * it cannot be the binary-float tail of `3.81 − 2.3 − 1.0` (`0.5100000000000002`).
+ */
+const DEPTH_STEPS = 1000;
+
+/**
+ * A candidate floor that must land at or PAST a plane (the colour split, which a `reveal` bound
+ * requires to be `≥ at + m`): rounded UP, by at most one step. Rounding it down is the one way to
+ * write a recommendation that the checker then refuses against its own bound.
+ */
+function deeper(v: number): Mm {
+  return Math.ceil(v * DEPTH_STEPS) / DEPTH_STEPS;
+}
+
+/**
+ * A candidate floor that must STOP SHORT of a plane (a void's ceiling, the blank's underside, the
+ * jaws): rounded DOWN, by at most one step. The epsilon is for the binary tail the other way —
+ * `0.905 × 1000` is `904.9999999999999` in a float, and flooring that unguarded would write
+ * `0.904` for a budget of exactly `0.905`.
+ */
+function shallower(v: number): Mm {
+  return Math.floor(v * DEPTH_STEPS + 1e-6) / DEPTH_STEPS;
 }
 
 /**
@@ -494,5 +543,162 @@ export function zBudgetInputsFor(job: EngraveJob): ZBudgetInputs {
   return {
     thicknessUncertainty:
       job.sources?.stock?.thickness === 'measured' ? MEASURED_THICKNESS_TOLERANCE_MM : undefined,
+  };
+}
+
+/**
+ * Where the colour split lands below the engraved face, mm — or null when the blank states no print
+ * (#166/#285).
+ *
+ * The GRID's answer, not the nominal `thickness − split`: the boundary is a fact about the
+ * printer's layers, and `colourBoundaryDepthFor` is the one function that says where it is
+ * (`colourBoundaryFor` asks it for the per-move verifier and `item-depth-bound`). A recommendation
+ * that used the nominal height would sit up to half a layer away from the plane the checker then
+ * judges it against — which is how a recommendation ends up failing its own check.
+ */
+export function splitDepthOf(job: Pick<EngraveJob, 'stock'>): Mm | null {
+  const print = job.stock.print;
+  if (print === undefined) return null;
+  return colourBoundaryDepthFor(
+    job.stock.thickness,
+    print.split,
+    print.layerHeight,
+    print.firstLayerHeight ?? print.layerHeight,
+  );
+}
+
+/** What `recommendLabelDepth` needs that the item itself does not hold. */
+export interface LabelDepthInputs {
+  /**
+   * The SHALLOWEST void limit anywhere on the blank, mm, with the void it belongs to — or null when
+   * the blank declares no enabled void (`shallowestVoidLimit`, #362).
+   *
+   * The whole blank's answer and not the item's own footprint's, deliberately. Intersecting a
+   * label's glyphs with a void's outline is the geometry worker's (`bindingVoidsByRegion`), and a
+   * caller that has no plan — the store, seeding a badge's blank — must not guess at it. A limit no
+   * deeper than ANY void's is the conservative one: a recommendation that cannot be carried out is
+   * worse than one that is a fraction of a millimetre timid, and the basis names the void so the
+   * user can see which one it was.
+   *
+   * REQUIRED, `null` included, and not optional-with-a-default: this module cannot compute it (the
+   * void's arithmetic lives in `partPlan`, which is built on this one), so the alternative to an
+   * argument is silently recommending a depth that cuts straight through a pocket. A caller with
+   * voids must say what they leave; a caller with none must say so.
+   */
+  voidLimit: { name: string; limit: Mm } | null;
+  /**
+   * The Z-error margin in force for this job, mm — `effectiveMargins`' `boundaryMargin`, as the
+   * checker will resolve it. REQUIRED for the same reason: this module does not read the settings
+   * store, and a margin guessed here rather than passed would be a second, invisible opinion about
+   * a number the check then holds the floor to.
+   */
+  boundaryMargin: Mm;
+}
+
+/** What `recommendLabelDepth` worked out, and the arithmetic in words for the panel and the sheet. */
+export interface LabelDepthRecommendation {
+  /** The depth to cut at, mm — the shallowest any constraint under this item allows. */
+  depth: Mm;
+  /**
+   * `'reveal'` when this recommendation places the floor PAST the blank's colour split, which is
+   * what a two-colour blank is for — the intent the route is asserting for an item that states none
+   * of its own.
+   *
+   * ABSENT when the blank states no print (there is no split to reveal) and when the split's own
+   * depth did not win (a jaw clearance tighter than the reveal is not a reveal, and stamping one
+   * would make the item fail `checkBounds` against its own stated intent).
+   */
+  depthIntent?: EngraveLabel['depthIntent'];
+  /** One clause per constraint considered, the BINDING one first — `MarginRecommendation.basis`' rule. */
+  basis: string[];
+}
+
+/**
+ * The depth THIS blank lets THIS item be cut at, and the arithmetic that decided it (#362).
+ *
+ * The issue this answers is a clash of three defaults that never knew about each other: a 3.81 mm
+ * badge blank (`badgeBlankFor`, #352), the vise standing it 1.905 mm proud (`defaultStockProud`,
+ * #344) and the 2 mm label depth the 12 mm softwood job shipped with — so the wizard handed over a
+ * job its own findings already complained about. The route that knows the blank now also says how
+ * deep it may be cut.
+ *
+ * The answer is the SHALLOWEST of four floors, each of which is a real plane or a real budget:
+ *
+ *   1. the colour split, by ONE margin — `split + boundaryMargin`, which is the *below* bound
+ *      `checkBounds` holds a `reveal` floor to;
+ *   2. the void's ceiling, taken as the blank's own shallowest `keepOutLimit` (`inputs.voidLimit`);
+ *   3. the blank's underside: `thickness − minFloor`;
+ *   4. the jaws: `stockProud − max(job.jawClearance, boundaryMargin)` — the max is #345's rule that
+ *      a per-job recommendation may be stricter than the setting, so a domed blank (whose boundary
+ *      margin covers the dome) keeps more room over the jaws than the house number alone.
+ *
+ * A blank that leaves no depth at all (`≤ 0` on a stock thinner than the clearance it must keep) is
+ * NOT given a made-up 0.1 mm: this returns null, nothing is written, and the jaw check goes on
+ * saying what is wrong with the setup — which is a thing to fix, not a depth to cut.
+ *
+ * EMPTY for an item that states its own `depthIntent`, and for a construction label that cuts
+ * nothing: an item that has told us what it means is the user's to place, and re-depthing it under a
+ * different intent would be this module overruling a statement nobody asked it to review.
+ */
+export function recommendLabelDepth(
+  job: EngraveJob,
+  item: EngraveAnyItem,
+  inputs: LabelDepthInputs,
+): LabelDepthRecommendation | null {
+  if ('construction' in item && item.construction === true) return null;
+  const stated = 'depthIntent' in item ? item.depthIntent : undefined;
+  if (stated !== undefined) return null;
+
+  const margin = inputs.boundaryMargin;
+  const candidates: { depth: Mm; clause: string }[] = [];
+
+  const split = splitDepthOf(job);
+  if (split !== null) {
+    candidates.push({
+      depth: deeper(split + margin),
+      clause:
+        `the colour split is ${mm(split)} mm under the face, so reaching the bottom colour needs ` +
+        `${mm(deeper(split + margin))} mm`,
+    });
+  }
+
+  if (inputs.voidLimit) {
+    const { name, limit } = inputs.voidLimit;
+    const depth = shallower(limit);
+    candidates.push({
+      depth,
+      clause:
+        name.length === 0
+          ? `the void under the blank leaves ${mm(depth)} mm`
+          : `"${name}" leaves ${mm(depth)} mm of material`,
+    });
+  }
+
+  const blank = shallower(job.stock.thickness - job.minFloor);
+  candidates.push({
+    depth: blank,
+    clause: `the blank's ${mm(job.minFloor)} mm minimum floor allows ${mm(blank)} mm`,
+  });
+
+  const clearance = Math.max(job.jawClearance, margin);
+  const { stockProud } = job.workholding.vise;
+  candidates.push({
+    depth: shallower(stockProud - clearance),
+    clause:
+      `the stock stands ${mm(stockProud)} mm above the jaw tops and a floor has to stay ` +
+      `${mm(clearance)} mm clear of them`,
+  });
+
+  const winner = candidates.reduce((a, b) => (b.depth < a.depth ? b : a));
+  if (winner.depth <= 0) return null;
+
+  // The intent, only where the floor really is on the far side of the split by the margin a
+  // `reveal` bound demands — which is exactly the split's own candidate having won.
+  const reveal = split !== null && winner.depth >= split + margin - 1e-9;
+
+  return {
+    depth: winner.depth,
+    ...(reveal ? { depthIntent: 'reveal' as const } : {}),
+    basis: [winner.clause, ...candidates.filter((c) => c !== winner).map((c) => `${c.clause} — not binding`)],
   };
 }

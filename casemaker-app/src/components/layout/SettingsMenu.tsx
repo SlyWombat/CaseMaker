@@ -98,11 +98,12 @@ export function SettingsMenu({ onClose }: Props) {
   // honest: `'default'` means "one printed layer, read off the blank", `'user'` means "this number,
   // deliberately". A margin left on `'default'` keeps following each blank's own layer height.
   //
-  // Only the two margins a job COPIES from this screen flip the source (#345 review). The three
+  // Only the two margins a job COPIES from this screen flip the source (#345 review). The four
   // "a new job starts from" fields seed a job's own per-job values and never enter
   // `effectiveMargins`, so retyping the minimum floor has said nothing about the boundary margin —
   // flipping the source for it would silently pin every future blank to the house 0.2 and stop a
-  // 0.3-layer blank from moving its own boundary.
+  // 0.3-layer blank from moving its own boundary. The same goes for #362's jaw clearance: it seeds
+  // a job's own number and is read off the document by the check.
   const commitMargin = (patch: Partial<MarginSettings>): void => {
     const copied = 'boundaryMargin' in patch || 'zTolerance' in patch;
     setMargins({ ...margins, ...patch, source: copied ? 'user' : margins.source });
@@ -236,6 +237,13 @@ export function SettingsMenu({ onClose }: Props) {
             title="How far a through-cut may pass below the part's underside. Seeds each new job."
             value={margins.breakthrough}
             onCommit={(v) => commitMargin({ breakthrough: v })}
+          />
+          <MarginRow
+            id="settings-margin-jaw"
+            label="Jaw clearance (mm)"
+            title="How far a cut's floor must stay above the vise jaws' tops. Seeds each new job — and a job handed a thin blank gets a label depth recommended from it, so the wizard does not open on a finding."
+            value={margins.jawClearance}
+            onCommit={(v) => commitMargin({ jawClearance: v })}
           />
           <p className="settings-hint" data-testid="settings-margins-source">
             {margins.source === 'default' ? (

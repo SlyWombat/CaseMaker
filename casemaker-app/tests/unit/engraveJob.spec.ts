@@ -20,10 +20,11 @@ const backing = new Map<string, string>();
 } as Storage;
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import type { EngraveLabel } from '@/types/engraveJob';
+import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { labelProfile, toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { dedupeFindings, jobTool, toSetup, validateJob } from '@/engine/cnc/engrave/jobSetup';
+import { defaultSetupAnswers, stepFindings } from '@/engine/cnc/engrave/setupFlow';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { engravedFaceWorkZ, partToWork } from '@/engine/cnc/frames';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
@@ -199,6 +200,15 @@ describe('validateJob (#200)', () => {
     job.workholding.vise.stockProud = 2.5;
     job.workholding.vise.source = 'saved';
     expect(validateJob(job).some((f) => f.code === 'stock-proud-too-small')).toBe(true);
+    // #362 — the clearance is the JOB's number, not a constant in the check: at 0.4 mm asked for,
+    // a 2.5 mm stand clears a 2 mm cut.
+    const tight: EngraveJob = { ...job, jawClearance: 0.4 };
+    expect(validateJob(tight).some((f) => f.code === 'stock-proud-too-small')).toBe(false);
+    // …and the message quotes the number it was given, so a job that asks for more says so.
+    job.jawClearance = 1.5;
+    const msg = validateJob(job).find((f) => f.code === 'stock-proud-too-small')!.message;
+    expect(msg).toContain('at least 1.5 mm of clearance is wanted');
+    expect(msg).toContain('stockProud ≥ 3.5 mm');
   });
 
   // #219: a trace is work too, so a job of traces alone is not "no items"; its own findings
@@ -271,10 +281,91 @@ describe('engraveJobStore (#200)', () => {
     expect(second.useEngraveJobStore.getState().job.labels.find((l) => l.id === id)!.depth).toBe(3.3);
   });
 
+  // #362 — the hand-off the issue was opened for. Before this, taking a 3.81 mm badge blank left
+  // the 12 mm softwood job's 2.0 / 1.0 / 0.5 mm depths on it, and the wizard's own blank step
+  // complained about the job it had just built: 1.905 mm proud cannot carry a 2 mm cut with 1 mm
+  // of clearance wanted under it.
+  it('re-depths the labels to what the badge blank allows, and opens with no jaw finding', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    const job = s().job;
+    expect(job.stock.thickness).toBe(3.81);
+    // The magnet pocket leaves 3.81 − 2.3 − 1 = 0.51 mm of material above it, which is shallower
+    // than the jaws' own 1.905 − 1 = 0.905 — so 0.51 is the answer for every label, and it is
+    // written as a depth a person can read rather than as the float tail of that subtraction.
+    expect(job.labels.map((l) => l.depth)).toEqual([0.51, 0.51, 0.51]);
+    expect(job.sources?.labels).toEqual(
+      Object.fromEntries(job.labels.map((l) => [l.id, { depth: 'computed' }])),
+    );
+
+    // The bar the issue set: the wizard does not hand over a job its own findings complain about.
+    const findings = stepFindings('blank', job, defaultSetupAnswers(job));
+    expect(findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(findings.map((f) => f.code)).not.toContain('stock-proud-too-small');
+    // …while the warnings that are telling the truth about an unmeasured vise stay.
+    expect(findings.map((f) => f.code)).toContain('vise-default');
+  });
+
+  it('leaves a depth the user typed alone — and reports the finding it causes rather than hiding it', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    const id = s().job.labels[0]!.id;
+
+    s().updateLabel(id, { depth: 1.2 });
+    expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'user' });
+
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    const job = s().job;
+    // The user's 1.2 mm survives the blank being applied, and the other two are re-depth-ed.
+    expect(job.labels[0]!.depth).toBe(1.2);
+    expect(job.labels[1]!.depth).toBe(0.51);
+    expect(job.labels[2]!.depth).toBe(0.51);
+    // 1.2 + 1 mm of clearance is past the 1.905 mm stand, and the check says so: the guard protects
+    // the user's number, it does not silence the warning about it.
+    expect(stepFindings('blank', job, defaultSetupAnswers(job)).map((f) => f.code)).toContain(
+      'stock-proud-too-small',
+    );
+
+    // The provenance survives the round trip: zod strips every key its object does not name, and a
+    // `user` depth coming back unclaimed would let the NEXT blank overwrite it (#310's trap).
+    const second = await freshStore();
+    expect(second.useEngraveJobStore.getState().job.sources?.labels?.[id]).toEqual({ depth: 'user' });
+    expect(second.useEngraveJobStore.getState().job.labels[0]!.depth).toBe(1.2);
+  });
+
+  it('gives a document written before #362 the clearance its check used, and keeps a stated one', () => {
+    const raw = JSON.parse(JSON.stringify(defaultEngraveJob())) as Record<string, unknown>;
+    delete raw.jawClearance;
+    const parsed = parseEngraveJob(raw);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // The 1 mm the `stock-proud-too-small` check hard-coded, so no stored job changes behaviour.
+    expect(parsed.job.jawClearance).toBe(1.0);
+
+    const stated = parseEngraveJob({ ...JSON.parse(JSON.stringify(defaultEngraveJob())), jawClearance: 2.5, schemaVersion: 2 });
+    expect(stated.ok).toBe(true);
+    if (!stated.ok) return;
+    expect(stated.job.jawClearance).toBe(2.5);
+
+    // A v1 document — which never carried the field — loads with the same default.
+    const v1 = { ...raw, schemaVersion: 1 } as Record<string, unknown>;
+    delete v1.sacrificial;
+    delete v1.breakthrough;
+    const old = parseEngraveJob(v1);
+    expect(old.ok).toBe(true);
+    if (!old.ok) return;
+    expect(old.job.jawClearance).toBe(1.0);
+  });
+
   it('setVise marks the vise as saved unless the patch states its own source', async () => {
     backing.clear();
     const { useEngraveJobStore } = await freshStore();
     useEngraveJobStore.getState().setVise({ stockProud: 6 });
+
     expect(useEngraveJobStore.getState().job.workholding.vise.source).toBe('saved');
     expect(useEngraveJobStore.getState().job.workholding.vise.stockProud).toBe(6);
 

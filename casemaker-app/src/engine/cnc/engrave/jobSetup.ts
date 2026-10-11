@@ -390,16 +390,20 @@ export function validateJob(job: EngraveJob): JobFinding[] {
     null,
   );
   const deepest = deepestItem?.depth ?? 0;
-  if (job.workholding.vise.stockProud < deepest + 1) {
+  // The clearance is the JOB's (#362), not a constant in this check: #345's rule is that a
+  // verifier holds a threshold it was given. `minFloor`/`edgeMargin`/`breakthrough` are read the
+  // same way, off the document, and this one joins them.
+  const jawClearance = job.jawClearance;
+  if (job.workholding.vise.stockProud < deepest + jawClearance) {
     findings.push({
       severity: 'warning',
       code: 'stock-proud-too-small',
       labelId: deepestItem?.id,
       message:
         `The stock stands ${job.workholding.vise.stockProud} mm above the jaw tops, but the ` +
-        `deepest cut reaches ${deepest} mm; at least 1 mm of clearance is wanted, so the ` +
-        `cutter would work below the jaw tops (` +
-        `stockProud ≥ ${deepest + 1} mm).`,
+        `deepest cut reaches ${deepest} mm; at least ${jawClearance} mm of clearance is wanted, ` +
+        `so the cutter would work below the jaw tops (` +
+        `stockProud ≥ ${deepest + jawClearance} mm).`,
     });
   }
 
