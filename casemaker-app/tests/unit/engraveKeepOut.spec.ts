@@ -281,6 +281,29 @@ describe('the run sheet reports the void (#231)', () => {
     expect(step.text).not.toContain('-8');
   });
 
+  it('prints the number the verifier enforces when the stock’s own floor is the shallower limit (#285 review)', () => {
+    // A void high in a THIN blank leaves a membrane deeper than `thickness − minFloor`. The verifier
+    // composes the two with a `min` (`jobDepthLimit`), so the sheet must print the same capped
+    // number; it used to print the membrane's own answer, and here that is 3.0 mm against the 2.81
+    // the verifier refuses past — an operator reading a depth the machine will not cut.
+    const thin = (print?: { split: number; layerHeight: number }): EngraveJob => ({
+      ...defaultEngraveJob(),
+      stock: { length: 76.2, width: 38.1, thickness: 3.81, material: 'pla', ...(print ? { print } : {}) },
+      keepOuts: [rectKeepOut({ zCeiling: 0.5 })], // 3.31 mm of membrane, over a 2.81 mm floor
+    });
+
+    // Both paths — the layer-aligned one a stated print gets (3.2 mm of solid, less 0.2) and the
+    // analytic one a blank with no print gets (3.31 less 0.2) — land on the stock's 2.81.
+    for (const job of [thin({ split: 3.0, layerHeight: 0.2 }), thin()]) {
+      const limit = jobDepthLimit(job)(50, 30);
+      expect(limit).toBeCloseTo(2.81, 9); // 3.81 − minFloor 1.0
+      const step = buildRunSheet(job, NO_GENERATED, null, new Date('2026-10-05T00:00:00Z'))
+        .sections.find((s) => s.id === 'need')!
+        .steps.find((s) => s.text.includes('Under-surface void'))!;
+      expect(step.value).toContain(`deepest cut ${String(Number(limit.toFixed(3)))} mm`);
+    }
+  });
+
   it('leaves a job with no void unchanged — no extra steps, no diagram voids', () => {
     const sheet = buildRunSheet(defaultEngraveJob(), NO_GENERATED, null, new Date('2026-10-05T00:00:00Z'));
     expect(sheet.diagram.keepOuts).toEqual([]);

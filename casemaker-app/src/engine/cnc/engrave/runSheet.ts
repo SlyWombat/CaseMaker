@@ -425,19 +425,33 @@ export function sha256Hex(input: string): string {
  * #345 then takes the job's `boundaryMargin` off BOTH, because a void's ceiling is a bound like any
  * other and the two paths must not keep different distances from it. The `(nominal)` hedge that
  * used to mark the difference is gone: this is the number the verifier stands behind, in both cases.
+ *
+ * Whichever path worked it out, the answer is the void's own limit AND the stock's — a void is a
+ * fact about the blank, `thickness − minFloor` a fact about the material, and `jobDepthLimit`
+ * composes them with a `min` the way it composes every other pair (#285 review). Without that, a
+ * SHALLOW void prints a number the verifier refuses: on the 3.81 mm badge, a void whose ceiling
+ * leaves a 3.31 mm membrane gives a sheet 3.2 mm against the verifier's `2.81 = 3.81 − 1.0`, and
+ * the operator reads a depth the machine will not cut. The `(nominal)` hedge that used to sit over
+ * the analytic path hid the same disagreement rather than fixing it.
  */
 function voidLimit(job: EngraveJob, membrane: Mm, margin: Mm = defaultBoundaryMargin(job)): Mm {
   const print = job.stock.print;
-  if (print === undefined) return keepOutLimit(job, membrane, margin);
-  return voidFloor(
-    layerAlignedDepthFor(
-      membrane,
-      job.stock.thickness,
-      print.layerHeight,
-      print.firstLayerHeight ?? print.layerHeight,
-    ),
-    margin,
-  );
+  const overVoid =
+    print === undefined
+      ? keepOutLimit(job, membrane, margin)
+      : voidFloor(
+          layerAlignedDepthFor(
+            membrane,
+            job.stock.thickness,
+            print.layerHeight,
+            print.firstLayerHeight ?? print.layerHeight,
+          ),
+          margin,
+        );
+  // The stock's floor over the part (CNC-2's `thickness − minFloor`, `stockDepthLimit`'s own
+  // number). A void sits inside the part outline, so this is the base the verifier takes there.
+  const stockFloor = job.stock.thickness - job.minFloor;
+  return Math.min(overVoid, stockFloor);
 }
 
 /**

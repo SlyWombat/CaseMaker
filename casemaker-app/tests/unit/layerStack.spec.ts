@@ -6,7 +6,14 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { buildLayerStack, type LayerStack, type LayerStackPart } from '@/engine/cnc/layerStack';
+import {
+  buildLayerStack,
+  colourBoundaryDepthFor,
+  layerAlignedDepthFor,
+  layerBoundariesFor,
+  type LayerStack,
+  type LayerStackPart,
+} from '@/engine/cnc/layerStack';
 import { pTranslate, rectProfile, roundedRect } from '@/engine/compiler/profile';
 import { verifyProgram, type VerifyContext } from '@/engine/cnc/verify';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -87,6 +94,40 @@ describe('layerStack (#178): the grid is real, not decorative', () => {
     expect(Math.abs(a.min - b.min)).toBeGreaterThan(1e-6);
     fine.dispose();
     coarse.dispose();
+  });
+});
+
+// #285 review — the pure grid functions are what everything that cannot build the stack reads
+// (`engraveGenerate`, the run sheet, the depth limit's `reasonAt`). Their whole value is agreeing
+// with the stack they were extracted from, and the case that can drift is a first layer that is
+// NOT the same size as the rest, so this pins all three against a stack built with (0.2, 0.25).
+describe('layerStack (#178): the pure arithmetic and the built stack agree (#285 review)', () => {
+  const H = 0.2;
+  const H1 = 0.25;
+  // Part-frame z 2.3 is 3.81 − 2.3 = 1.51 mm of membrane below the engraved face.
+  const MEMBRANE = THICK - POCKET_D;
+
+  it('layerBoundariesFor reproduces the stack’s own boundaries, first layer included', () => {
+    const stack = buildLayerStack(tl, badgePlan(), H, H1);
+    expect(stack.boundaries).toEqual(layerBoundariesFor(THICK, H, H1));
+    // The first layer is its own size, so it is NOT a uniform grid: [0, 0.25, 0.45, …].
+    expect(stack.boundaries[1]).toBeCloseTo(H1, 9);
+    expect(stack.boundaries[2]).toBeCloseTo(H1 + H, 9);
+    stack.dispose();
+  });
+
+  it('colourBoundaryDepthFor reproduces the stack’s colour boundary', () => {
+    const stack = buildLayerStack(tl, badgePlan(), H, H1);
+    expect(stack.colourBoundaryDepth).toBe(colourBoundaryDepthFor(THICK, SPLIT, H, H1));
+    stack.dispose();
+  });
+
+  it('layerAlignedDepthFor reproduces maxDepthAt over the pocket', () => {
+    const stack = buildLayerStack(tl, badgePlan(), H, H1);
+    // The pocket's centre: the stack's own answer over the void, and the arithmetic's, are the
+    // same number — which is what lets the run sheet print the enforced limit without wasm.
+    expect(stack.maxDepthAt(WIDTH / 2, HEIGHT / 2)).toBe(layerAlignedDepthFor(MEMBRANE, THICK, H, H1));
+    stack.dispose();
   });
 });
 
