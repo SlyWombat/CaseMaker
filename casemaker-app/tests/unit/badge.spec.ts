@@ -16,6 +16,7 @@ import { compileProject } from '@/engine/compiler/ProjectCompiler';
 import { defaultBadgeParams, badgeParamsProblem, type BadgeParams } from '@/types/badge';
 import { findTemplate } from '@/library/templates';
 import { createDefaultProject } from '@/store/projectStore';
+import { parseProject, serializeProject } from '@/store/persistence';
 import { exec } from './helpers/manifoldExec';
 
 /**
@@ -311,5 +312,49 @@ describe('#168 — the badge carries its tools to the slicer', () => {
     const config = new TextDecoder().decode(zip['Metadata/Slic3r_PE_model.config']!);
     expect(config).toContain('<volume firstid="0"');
     expect(config).toContain('<metadata type="volume" key="extruder" value="2"/>');
+  });
+});
+
+/**
+ * Issue #368 — the badge states the print it was sliced with (#166's `BadgePrint`).
+ *
+ * The field is what turns #285's stack limit and #170's colour split ON for a badge nobody hand-tuned:
+ * with it, the engrave job's blank carries a layer grid and a colour boundary; without it, the depth
+ * limit stays analytic and the `.nc` is what it always was. So the two things worth pinning are that
+ * the shipped route really states one (a schema field nothing writes is dormant), and that the
+ * projects written before it still load — the whole reason it is optional and needs no bump.
+ */
+describe('#368 — the badge states its print', () => {
+  it('is on the template’s badge, and on a badge built by hand', () => {
+    const fromTemplate = findTemplate('badge-blank')!.build().case.badge!;
+    expect(fromTemplate.print).toEqual({ layerHeight: 0.2, firstLayerHeight: 0.2 });
+    // The other way a project gets a badge: `defaultBadgeParams`, which is also what the wizard's
+    // own badge step starts from.
+    expect(defaultBadgeParams().print).toEqual({ layerHeight: 0.2, firstLayerHeight: 0.2 });
+  });
+
+  it('round-trips through the project file, at the same schema version', () => {
+    // `caseParamsSchema` strips what it does not name, so this is really a test that the field IS
+    // named there: a `BadgeParams` field with no schema entry vanishes on save (#310's trap).
+    const project = findTemplate('badge-blank')!.build();
+    const back = parseProject(serializeProject(project));
+    expect(back.case.badge!.print).toEqual({ layerHeight: 0.2, firstLayerHeight: 0.2 });
+    // Adding an optional field to a schema every version embeds needs no bump, and got none.
+    expect(back.schemaVersion).toBe(project.schemaVersion);
+  });
+
+  it('loads a project saved before the field existed, with no print', () => {
+    const project = findTemplate('badge-blank')!.build();
+    const stripped = JSON.parse(JSON.stringify(project)) as {
+      case: { badge?: Record<string, unknown> };
+    };
+    // Exactly a v16-on-disk badge: every key but this one.
+    delete stripped.case.badge!.print;
+
+    const back = parseProject(JSON.stringify(stripped));
+    expect(back.case.badge!.print).toBeUndefined();
+    // …and the absent print is the ONLY difference: the badge itself came through whole.
+    expect(back.case.badge!.width).toBe(76.2);
+    expect(back.case.badge!.magnetPocket).toEqual({ length: 45, width: 13, depth: 2.3 });
   });
 });

@@ -25,7 +25,8 @@
         "depth": 2.3
       },
       "bottomExtruder": 2,
-      "topExtruder": 3
+      "topExtruder": 3,
+      "print": { "layerHeight": 0.2, "firstLayerHeight": 0.2 }
     }
   },
   "ports": "none"

@@ -325,16 +325,24 @@ describe('engraveJobStore (#200)', () => {
     const job = s().job;
     expect(job.stock.thickness).toBe(3.81);
     expect(job.labels).toHaveLength(1);
-    // The seeded line is the free band beside the magnet pocket, and since #365 the walk's void
-    // bound asks about the voids the LINE reaches: none, so the jaws' own 1.905 − 1 = 0.905 mm is
-    // the answer for the seeded line, and it is written as a depth a person can read rather than as
-    // the float tail of that subtraction. (Before #365 the bound was blank-wide and this line was
-    // handed the pocket's 0.51 — half the depth the blank allows.)
-    expect(job.labels.map((l) => l.depth)).toEqual([0.905]);
+    // The badge the template makes states its print (#368), so the blank carries a colour boundary
+    // and that boundary is what binds the seeded line: the split lands on the 0.8 mm layer line and
+    // #345 gives the `above` bound its own 0.2 mm margin, so the walk writes 0.6 mm — a depth a
+    // person can read rather than the float tail of a subtraction. (Before #368 the badge stated no
+    // print, so the void bound decided and the line took the jaws' 1.905 − 1 = 0.905; before #365
+    // made that bound per-line it was handed the pocket's 0.51, half the depth the blank allows.)
+    expect(job.labels.map((l) => l.depth)).toEqual([0.6]);
     // `layout` is the seed's own stamp (#363 review): it is what tells a later take that this line
-    // is still the route's to replace, and `depth` is the walk's answer on top of it.
+    // is still the route's to replace, and `depth`/`depthIntent` are the walk's answer on top of it —
+    // the intent only exists because the badge states a print for it to be about.
+    expect(job.labels.map((l) => l.depthIntent)).toEqual(['surface']);
     expect(job.sources?.labels).toEqual(
-      Object.fromEntries(job.labels.map((l) => [l.id, { layout: 'computed', depth: 'computed' }])),
+      Object.fromEntries(
+        job.labels.map((l) => [
+          l.id,
+          { layout: 'computed', depth: 'computed', depthIntent: 'computed' },
+        ]),
+      ),
     );
 
     // The bar the issue set: the wizard does not hand over a job its own findings complain about.
@@ -354,7 +362,10 @@ describe('engraveJobStore (#200)', () => {
     s().updateLabel(id, { depth: 1.2 });
     expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'user' });
 
-    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    // A badge stating NO print (#368): the evidence this test wants is the PER-LINE void answer, and
+    // on a printed blank the colour band is tighter than either line's void, so all three would come
+    // back as the one band depth and the pocket distinction would be untested here.
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ print: undefined })));
     const job = s().job;
     // The user's 1.2 mm survives the blank being applied, and the other two are re-depth-ed — each
     // against its own line's extent since #365: 'MAKER' at (50, 26) and 'first chips' at (50, 10)
@@ -408,7 +419,7 @@ describe('engraveJobStore (#200)', () => {
     // label re-depths to the jaws' 0.905 mm — the 'CASE' line sits at (50, 43), clear of the magnet
     // pocket whose band is y 12.55–25.55 (#365) — and the `surface` claim goes with it. A stale
     // `surface` here would be a claim about a blank this job has left.
-    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ print: undefined })));
     expect(s().job.labels[0]!.depth).toBe(0.905);
     expect(s().job.labels[0]!.depthIntent).toBeUndefined();
     // The walk wrote the whole depth entry and carried the `layout` claim across it (#363 review), so
@@ -558,9 +569,10 @@ describe('engraveJobStore (#200)', () => {
       firstLayerHeight: 0.2,
     });
 
-    // The SAME badge, now without one: the grid must go with it, or the stack limit keeps applying
-    // to a blank whose print is no longer known.
-    setStock(badgeBlankFor(defaultBadgeParams()).stock, 'computed');
+    // The SAME badge, now without a print — stated explicitly, because `defaultBadgeParams` now
+    // carries one (#368): the grid must go with it, or the stack limit keeps applying to a blank
+    // whose print is no longer known.
+    setStock(badgeBlankFor(defaultBadgeParams({ print: undefined })).stock, 'computed');
     const { job } = useEngraveJobStore.getState();
     expect(job.stock.print).toBeUndefined();
     // The rest of the blank still came through, so this is a CLEAR of the print, not a wipe.

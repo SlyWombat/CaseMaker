@@ -326,6 +326,16 @@ export const caseParamsSchema = z.object({
         .nullable(),
       bottomExtruder: z.number().int().positive(),
       topExtruder: z.number().int().positive(),
+      // Issue #368 — the slicing the blank was printed with (#166, `BadgePrint`). OPTIONAL and
+      // additive: a legacy project has no key and loads unchanged, and a badge that states no
+      // print leaves the engrave job's depth limit analytic (#285) — so every version's embedded
+      // `caseParamsSchema` accepts it without a bump (the v11 badge precedent).
+      print: z
+        .object({
+          layerHeight: z.number().positive(),
+          firstLayerHeight: z.number().positive(),
+        })
+        .optional(),
     })
     .optional(),
   // Issue #158 — tool-insert holder archetype (types/insert.ts). Optional so

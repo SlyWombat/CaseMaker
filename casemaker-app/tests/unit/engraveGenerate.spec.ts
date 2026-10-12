@@ -359,7 +359,11 @@ describe('a job that states its print limits on the printer’s layer grid (#285
    * case's shape, so the numbers below are the badge's own and not a fixture invented here.
    */
   function badgeJob(print: boolean, depth: number): EngraveJob {
-    const badge = defaultBadgeParams(print ? { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } } : {});
+    // `print=false` states NO print explicitly: the default badge carries one now (#368), and the
+    // gate's off side has to stay reachable for the comparison this describe makes.
+    const badge = defaultBadgeParams(
+      print ? { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } } : { print: undefined },
+    );
     const blank = badgeBlankFor(badge);
     return {
       // The blank is 3.81 mm, so the vise is the stock-derived default (#231 item 2): the shipped

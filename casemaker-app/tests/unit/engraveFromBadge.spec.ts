@@ -5,11 +5,18 @@
 import { describe, it, expect } from 'vitest';
 
 import { BADGE_POCKET_KEEP_OUT_ID, badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
-import { defaultBadgeParams } from '@/types/badge';
+import { defaultBadgeParams, type BadgeParams } from '@/types/badge';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobDepthLimit, keepOutLimitAt, toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { EngraveJob } from '@/types/engraveJob';
+
+/**
+ * A badge that states NO print — the state a legacy project loads in, and the one #285's switch
+ * reads. Written explicitly, because `defaultBadgeParams` now carries a print (#368) and the
+ * switch's "off" side must stay reachable to be tested at all.
+ */
+const noPrint = (): BadgeParams => defaultBadgeParams({ print: undefined });
 
 /** The job a caller gets by writing `badgeBlankFor(badge)` into a fresh default job. */
 function jobForBadge(badge = defaultBadgeParams()): EngraveJob {
@@ -24,8 +31,17 @@ function jobForBadge(badge = defaultBadgeParams()): EngraveJob {
 describe('badgeBlankFor (#271)', () => {
   it('reads the blank out of the badge, in the job’s own stock shape', () => {
     const blank = badgeBlankFor(defaultBadgeParams());
-    // The badge's `width` is X and its `height` is Y — 3.0 in × 1.5 in, 0.15 in thick.
-    expect(blank.stock).toEqual({ length: 76.2, width: 38.1, thickness: 3.81, material: 'pla' });
+    // The badge's `width` is X and its `height` is Y — 3.0 in × 1.5 in, 0.15 in thick. What rides
+    // ALONG in the same object — the print and the dome (#285, #352, #368) — is those issues'
+    // business and is asserted in its own describe below, so here it is only that the dimensions are
+    // the badge's own, matched rather than deep-equalled so a fact added beside them cannot fail this.
+    expect(blank.stock).toMatchObject({
+      length: 76.2,
+      width: 38.1,
+      thickness: 3.81,
+      material: 'pla',
+      print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 },
+    });
     expect(blank.notes[0]).toContain('76.2 × 38.1 × 3.81');
   });
 
@@ -59,7 +75,7 @@ describe('badgeBlankFor (#271)', () => {
   });
 
   it('produces a void the depth limit reads, and only over its footprint', () => {
-    const job = jobForBadge();
+    const job = jobForBadge(noPrint());
     // The pocket's ceiling is an `above` bound like any other (#345), so what it reserves is the
     // margin its OWN rule keeps — and this badge states no print, so that is
     // `max(boundaryMargin, minFloor)` = 1.0, not the shipped 0.2 (#345 decision A: with no layer
@@ -87,13 +103,23 @@ describe('badgeBlankFor (#271)', () => {
 
 describe('the badge’s print becomes the job’s (#285)', () => {
   it('carries nothing when the badge states no print — the switches stay off', () => {
-    // `BadgeParams.print` is #166's, and nothing in the app writes it yet, so this is the state
-    // every badge is in today. The job must be exactly what it was before #285 existed.
-    const blank = badgeBlankFor(defaultBadgeParams());
+    // A badge with no print is a legacy project's badge, or one a test builds by hand. The job
+    // must be exactly what it was before #285 existed.
+    const blank = badgeBlankFor(noPrint());
     expect(blank.stock.print).toBeUndefined();
     // …and the plan therefore has no colour layers at all, which is what keeps the depth limit
     // analytic and the `.nc` byte-identical.
-    expect(toPartPlan(jobForBadge()).stock.split).toBeUndefined();
+    expect(toPartPlan(jobForBadge(noPrint())).stock.split).toBeUndefined();
+  });
+
+  it('states the print the DEFAULT badge carries, so the template is not dormant (#368)', () => {
+    // The default badge now declares its print, which is the whole point of #368: a badge made
+    // from the template (or from `defaultBadgeParams`) reaches the engrave job with a colour
+    // boundary, so #170's surface/reveal control and #351's layer-aligned limit are live.
+    const blank = badgeBlankFor(defaultBadgeParams());
+    expect(defaultBadgeParams().print).toEqual({ layerHeight: 0.2, firstLayerHeight: 0.2 });
+    expect(blank.stock.print).toEqual({ split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 });
+    expect(toPartPlan(jobForBadge()).stock.split).toBe(3);
   });
 
   it('copies the split and the layer grid when the badge states its print', () => {
@@ -123,8 +149,11 @@ describe('the badge’s print becomes the job’s (#285)', () => {
     if (!withPrint.ok) return;
     expect(withPrint.job.stock.print).toEqual({ split: 3.0, layerHeight: 0.2, firstLayerHeight: 0.2 });
 
-    // The other direction: a plain job keeps no key, so it round-trips byte-for-byte.
-    const without = parseEngraveJob(JSON.parse(JSON.stringify(jobForBadge())) as unknown);
+    // The other direction: a job built from a print-less badge keeps no key, so it round-trips
+    // byte-for-byte.
+    const without = parseEngraveJob(
+      JSON.parse(JSON.stringify(jobForBadge(noPrint()))) as unknown,
+    );
     expect(without.ok).toBe(true);
     if (!without.ok) return;
     expect(without.job.stock.print).toBeUndefined();

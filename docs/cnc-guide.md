@@ -553,9 +553,15 @@ and the legend names the two, calls them stand-ins (the app cannot know which fi
 loaded), and says where the boundary sits.
 
 A badge says how it was printed through its **print** specification — layer height and first
-layer height. Nothing in the app writes that yet (#166), so today the control appears only for a
-job that already states a print; a badge without one leaves the badge a blank the app knows the
-shape of, not yet a job it knows the depths for.
+layer height — and since #368 the badge template and a badge built from the stone default both
+state one (0.2 mm layers, marked **provisional**: the print spec's default, not a reading of your
+slicer, until #165's measurement lands). It is edited on the badge's **Part** panel, where the
+layer height is the control that matters: the colour boundary lands on that grid, so moving it
+moves the split, every recommended depth, and every colour reading — and a depth measured at the
+bench was measured against the print it was cut on. A badge that states no print still loads, and
+this whole half is then off for its job: the blank is a shape the app knows rather than a job it
+knows the depths for, the depth limit stays analytic, and the label rows show the depth field
+alone.
 
 **Every floor keeps clear of a plane it must not cross (#345).** A depth in this app is never "as
 deep as you like": each floor has to stay clear of the planes the job knows about — a void's

@@ -835,7 +835,17 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     await press(screen.getByTestId('engrave-stock-from-badge'));
 
     const job = useEngraveJobStore.getState().job;
-    expect(job.stock).toEqual({ length: 76.2, width: 38.1, thickness: 3.81, material: 'pla' });
+    // The blank AND the two facts that ride with it (#352, #368): the badge the template makes
+    // states how it was printed, so the blank arrives with a layer grid and the dome a printed blank
+    // is assumed to carry. Both are the badge's own — this is the route that decides them.
+    expect(job.stock).toEqual({
+      length: 76.2,
+      width: 38.1,
+      thickness: 3.81,
+      material: 'pla',
+      print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 },
+      flatness: { dome: 0.33, across: 'width', source: 'badge' },
+    });
     expect((screen.getByTestId('engrave-stock-length') as HTMLInputElement).value).toBe('76.2');
     // The numbers are the model's, not something someone typed here (decision 28's question).
     expect(screen.getByTestId('engrave-stock-length-source').dataset.source).toBe('computed');
@@ -845,11 +855,12 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     expect(screen.getByTestId('engrave-keepout-count').textContent?.trim()).toBe('1');
     expect(screen.getByTestId('engrave-keepout-membrane-0').textContent).toContain('1.51');
 
-    // 1.51 mm of membrane over the pocket, less the job's 1 mm minimum floor: the badge states no
-    // print, so #345 decision A keeps the structural floor over the ceiling (1.51 − 1.0 = 0.51) —
-    // the number the pre-#345 limit already printed.
+    // 1.51 mm of declared membrane over the pocket, and because the blank states its print the roof
+    // is snapped onto the 0.2 mm layer grid (1.40) and the boundary margin taken off it: 1.20 mm.
+    // The badge's own 1 mm minimum floor is NOT what stands in here — it does that only for a badge
+    // that states no print (#345 decision A), and this one does state one.
     const limit = jobDepthLimit(job);
-    expect(limit(38.1, 19.05)).toBeCloseTo(0.51, 6);
+    expect(limit(38.1, 19.05)).toBeCloseTo(1.2, 6);
     expect(limit(5, 5)).toBeCloseTo(2.81, 6);
     expect(screen.getByTestId('engrave-badge-notes')).toBeTruthy();
   });
@@ -860,10 +871,10 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     // roof, and the 0.2 mm boundary margin makes the limit 1.20. The row used to print the
     // analytic 1.51 − 0.2 = 1.31 while the verifier refused every cut below 1.20 (#351).
     //
-    // Seeded through the same `badgeBlankFor` → `takeBadgeBlank` seam `engraveFromBadge.spec` and
-    // the wizard use, rather than by pressing the button on a project badge: the badge schema has
-    // no `print` key yet (#166 owns that mirror), so a badge written through `patchCase` arrives at
-    // the panel with the field already stripped and there would be no print to read.
+    // Seeded through the same `badgeBlankFor` → `takeBadgeBlank` seam `engraveFromBadge.spec` uses,
+    // to hold this spec on the panel's own readout rather than re-covering the wizard's badge→blank
+    // plumbing (the project-badge route is the test above, which now presses the button on a badge
+    // that states its print — #368 gave the schema the mirror that used to strip it).
     act(() => {
       useEngraveJobStore
         .getState()
@@ -918,10 +929,14 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
 // reading like the reason. These are the rendering half; the arithmetic is pinned in
 // `engraveMargins.spec.ts` and the seam that writes it in `engraveJob.spec.ts`.
 describe('EngravePanel — where a label’s depth came from (#362 review)', () => {
-  /** The badge route, the one place the app CHOOSES a label's depth (#352). */
+  /** The badge route, the one place the app CHOOSES a label's depth (#352), on a badge that states
+   * no print — the state these rows' analytic numbers (the jaws' 0.905, the pocket's 0.51) are on.
+   * `over` can put a print back, which is what the split-band test below does. */
   function takeBadgeBlank(over: Partial<BadgeParams> = {}): void {
     act(() => {
-      useEngraveJobStore.getState().takeBadgeBlank(badgeBlankFor(defaultBadgeParams(over)));
+      useEngraveJobStore
+        .getState()
+        .takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ print: undefined, ...over })));
     });
   }
   /** A badge that states how it was printed — what puts the colour split into the depth model. */
@@ -1136,7 +1151,7 @@ describe('EngravePanel — the two-state depth control (#170)', () => {
    */
   function printedBlank(): void {
     act(() => {
-      useEngraveJobStore.getState().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+      useEngraveJobStore.getState().takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ print: undefined })));
       const job = useEngraveJobStore.getState().job;
       expect(job.labels[0]!.depthIntent).toBeUndefined(); // nothing has stated a colour intent yet
       useEngraveJobStore.setState({

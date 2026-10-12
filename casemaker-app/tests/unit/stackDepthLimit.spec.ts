@@ -20,9 +20,13 @@ import { colourBoundaryFor, stackDepthLimit } from '@/workers/sim/stackDepthLimi
 import { depthLimitReason } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob } from '@/types/engraveJob';
 
-/** The brand-default badge blank (76.2 × 38.1 × 3.81, a 45 × 13 × 2.3 pocket centred) as a job. */
+/** The brand-default badge blank (76.2 × 38.1 × 3.81, a 45 × 13 × 2.3 pocket centred) as a job.
+ *  `print=false` states NO print explicitly — the default badge now carries one (#368), and the
+ *  gate's off side has to stay reachable. */
 function badgeJob(print: boolean): EngraveJob {
-  const badge = defaultBadgeParams(print ? { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } } : {});
+  const badge = defaultBadgeParams(
+    print ? { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } } : { print: undefined },
+  );
   const blank = badgeBlankFor(badge);
   return {
     // The blank is thinner than the shipped 4 mm standoff, so the vise is the stock-derived

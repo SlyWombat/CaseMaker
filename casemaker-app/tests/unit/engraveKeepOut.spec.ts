@@ -249,8 +249,9 @@ describe('the void depth limit (#231, #351)', () => {
     expect(need.steps.find((s) => s.text.includes('Under-surface void'))!.value).toBe('deepest cut 1.2 mm');
 
     // Without a stated print there is no grid to snap the roof to: the declared membrane IS the
-    // ceiling, and the whole answer is #213's arithmetic again.
-    const blind = { ...job, stock: badgeBlankFor(defaultBadgeParams()).stock };
+    // ceiling, and the whole answer is #213's arithmetic again. The badge says so EXPLICITLY, since
+    // `defaultBadgeParams` now carries a print (#368) and the no-print branch has to stay reachable.
+    const blind = { ...job, stock: badgeBlankFor(defaultBadgeParams({ print: undefined })).stock };
     const blindDepth = keepOutLimitParts(blind, keepOutMembrane(blind, pocket.zCeiling), 1.0);
     expect(blindDepth.ceiling).toBeCloseTo(blindDepth.membrane, 9);
     expect(blindDepth.limit).toBeCloseTo(0.51, 9); // 1.51 − max(0.2, 1.0)

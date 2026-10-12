@@ -274,3 +274,47 @@ test('a filled run record shows its measured run beside the estimate', async ({ 
   expect(undated.reason).toContain('no cutOn date');
   await expect(measured).toContainText('12:30');
 });
+
+test('#368 — a badge that states its print reaches Engrave with a live colour split', async ({
+  cm,
+  page,
+}) => {
+  // The template is the route the issue is about: before #368 its badge stated no print, so the
+  // blank arrived with no layer grid, the depth limit stayed analytic, and the two-state control
+  // had nothing to offer — the whole two-colour half of the app was dormant on the one part it
+  // was built for. This walks the user path end to end and reads what they would see.
+  await cm.ready();
+  await page.getByTestId('welcome-template-badge-blank').click();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.waitForIdle();
+  });
+
+  const engrave = page.getByTestId('sidebar-button-cnc-engrave');
+  if ((await engrave.getAttribute('aria-pressed')) !== 'true') await engrave.click();
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+
+  // "Use the badge blank": the job takes the badge's stock, magnet pocket and print together.
+  await page.getByTestId('engrave-stock-from-badge').click();
+
+  // The legend turns from a plain depth key into the two colours plus the plane they part at.
+  const legend = page.getByTestId('engrave-preview-legend');
+  await expect(legend).toContainText('Colour');
+  await expect(page.getByTestId('engrave-legend-top')).toContainText('top colour');
+  await expect(page.getByTestId('engrave-legend-bottom')).toContainText('bottom colour');
+  // 3.0 mm of split under 0.2 mm layers: the boundary lands on the 0.8 mm line.
+  await expect(page.getByTestId('engrave-legend-split')).toHaveText('split 0.8 mm down');
+
+  // The seeded line arrived on the top colour (0.6 = the boundary less the margin). Pressing
+  // `reveal` writes the state's own depth in the same patch: one printed layer PAST the boundary,
+  // 0.8 + 0.2 = 1.0 — which is the arithmetic the control promises, read off the field the user is
+  // looking at.
+  const depth = page.getByTestId('engrave-label-depth-0');
+  await expect(depth).toHaveValue('0.6');
+  await page.getByTestId('engrave-label-reveal-0').click();
+  await expect(depth).toHaveValue('1');
+  const reveal = page.getByTestId('engrave-label-reveal-0');
+  await expect(reveal).toHaveAttribute('aria-pressed', 'true');
+  // …and the other state is one press back, in the other direction.
+  await expect(page.getByTestId('engrave-label-surface-0')).toHaveAttribute('aria-pressed', 'false');
+  await page.screenshot({ path: 'test-results/368-badge-print-split.png' });
+});

@@ -351,7 +351,9 @@ describe('#363 — the store hand-off', () => {
     const { useEngraveJobStore } = await freshStore();
     const s = () => useEngraveJobStore.getState();
 
-    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    // `defaultBadgeParams` now carries a print (#368), and this test is about the HAND-OFF and the
+    // per-line void query, whose numbers are the blank-geometry ones: a badge that states no print.
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ print: undefined })));
     const job = s().job;
     expect(job.stock.thickness).toBe(3.81);
     // The three demo lines are gone; one name line took their place.
@@ -456,7 +458,10 @@ describe('#363 — the store hand-off', () => {
 
     const id = s().job.labels[0]!.id;
     s().updateLabel(id, { text: 'DAVE' });
-    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    // A badge stating NO print (#368): the point of this test is the PER-LINE answer, and the three
+    // per-line constraints it names are the blank's own. A printed badge adds a fourth, tighter one
+    // (the colour band) that binds all three alike — see the next test.
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ print: undefined })));
 
     const job = s().job;
     expect(job.labels).toHaveLength(3);
@@ -467,6 +472,30 @@ describe('#363 — the store hand-off', () => {
     // pocket (whose band is y 12.55–25.55) and takes the jaws' 0.905, while 'MAKER' at (50, 26) and
     // 'first chips' at (50, 10) both reach the pocket's band and take its 0.51.
     expect(job.labels.map((l) => l.depth)).toEqual([0.905, 0.51, 0.51]);
+  });
+
+  it('re-depths the seeded lines onto the colour band when the badge states a print (#368)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+
+    // The badge the template makes now states its print (#368), so the blank carries a colour
+    // boundary and the walk has a band to place the seeded line in — where the test above, on a
+    // print-less badge, gets the void bound's 0.905 instead.
+    const labels = s().job.labels;
+    expect(labels).toHaveLength(1);
+    // …and the walk writes an INTENT with the number, because a print is what makes one mean
+    // anything: 0.905 (the jaw bound) would land inside the split's ±0.2 mm band, where neither
+    // colour is decided, so it is demoted to the deepest depth the top colour can hold — 0.6.
+    expect(labels.map((l) => [l.depth, l.depthIntent])).toEqual([[0.6, 'surface']]);
+    // The stamps are the route's, not the person's: the seed's `layout` and the walk's own two.
+    expect(s().job.sources?.labels?.[labels[0]!.id]).toEqual({
+      layout: 'computed',
+      depth: 'computed',
+      depthIntent: 'computed',
+    });
   });
 
   it('a removed label takes its claim with it (#363 review nit)', async () => {

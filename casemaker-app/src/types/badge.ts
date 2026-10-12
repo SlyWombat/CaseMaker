@@ -47,6 +47,12 @@ export interface BadgeMagnetPocket {
  * split — into `EngraveJob.stock.print`, and that is what lets the job slice the compiled solid
  * on the printer's real layer grid. A badge that declares no print leaves the job's depth limit
  * analytic, unchanged.
+ *
+ * `defaultBadgeParams` carries one, PROVISIONAL (#368). The numbers are the print spec's stated
+ * defaults, not readings: `samples/badge-blank/make_badge.py` slices nothing (it writes a mesh),
+ * so a 0.2 mm layer is what #166 assumes until #165 records the value the user's slicer actually
+ * ran. The default is stated so the colour-boundary paths are live for a badge made from the
+ * template — before #368 nothing wrote this field, so every badge was the "no print" case.
  */
 export interface BadgePrint {
   /** The slicer's layer height, mm. */
@@ -79,8 +85,10 @@ export interface BadgeParams {
   /**
    * The slicing this blank depends on (#166). OPTIONAL, and its absence is the switch #285 reads:
    * with no print stated the blank's colour boundary is not a fact the app holds, so an engrave
-   * job built from this badge keeps the analytic depth limit. #166 owns populating it (defaults,
-   * the panel's two fields, and `projectSchema`'s mirror).
+   * job built from this badge keeps the analytic depth limit. `defaultBadgeParams` carries one
+   * (PROVISIONAL, #368); `projectSchema` mirrors it and the Part panel's print block edits the
+   * layer height. A badge can still state none — a legacy project loads without it, and the
+   * engrave job then keeps the analytic limit.
    */
   print?: BadgePrint;
 }
@@ -88,6 +96,11 @@ export interface BadgeParams {
 /**
  * The oracle's default part: 76.2 × 38.1 × 3.81 mm, R3.175, split at 3.0 mm,
  * a 45 × 13 × 2.3 mm pocket, extruders 2 and 3.
+ *
+ * The `print` is the ONE field that is not an oracle number (#368): the script slices nothing, so
+ * 0.2 mm layers is the print spec's PROVISIONAL default (#166), stated so the colour-boundary
+ * paths are live for a badge made from the template. Nothing asserts geometry against it — the
+ * STL oracle is unaffected — and #165's measurement replaces it when it lands.
  */
 export function defaultBadgeParams(overrides: Partial<BadgeParams> = {}): BadgeParams {
   return {
@@ -100,6 +113,7 @@ export function defaultBadgeParams(overrides: Partial<BadgeParams> = {}): BadgeP
     magnetPocket: { length: 45, width: 13, depth: 2.3 },
     bottomExtruder: 2,
     topExtruder: 3,
+    print: { layerHeight: 0.2, firstLayerHeight: 0.2 },
     ...overrides,
   };
 }

@@ -659,9 +659,13 @@ describe('engravePreview — the colour boundary (#285, #345)', () => {
     return p;
   }
 
-  /** The badge's blank, with `over` merged into the one label over the pocket. */
+  /** The badge's blank, with `over` merged into the one label over the pocket. `print=false` states
+   *  NO print explicitly, because `defaultBadgeParams` now carries one (#368) and the "no boundary
+   *  at all" side of #285's switch has to stay reachable. */
   function badgeJob(print: boolean, depth: number, over: Partial<EngraveLabel> = {}): EngraveJob {
-    const badge = defaultBadgeParams(print ? { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } } : {});
+    const badge = defaultBadgeParams(
+      print ? { print: { layerHeight: 0.2, firstLayerHeight: 0.2 } } : { print: undefined },
+    );
     const blank = badgeBlankFor(badge);
     const base = defaultEngraveJob(viseForNewJob(undefined, blank.stock));
     return {

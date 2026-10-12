@@ -106,6 +106,40 @@ describe('PartPanel (#282) — the name badge', () => {
     expect(screen.queryByTestId('part-summary')).toBeNull();
     expect(screen.getByTestId('part-problem').textContent).toContain('colour split');
   });
+
+  it('shows the print the badge states, and where the number came from (#368)', () => {
+    render(<PartPanel />);
+    expect((screen.getByTestId('badge-layer-height') as HTMLInputElement).value).toBe('0.2');
+    expect(screen.getByTestId('badge-first-layer-height').textContent).toContain('0.2');
+    // The provenance is not decoration: 0.2 mm is the print spec's stated default, NOT a reading of
+    // the user's slicer, and the note is where that is said.
+    expect(screen.getByTestId('badge-print-source').textContent).toContain('Provisional');
+    expect(screen.queryByTestId('badge-print-none')).toBeNull();
+  });
+
+  it('edits the layer height without disturbing the rest of the badge (#368)', () => {
+    render(<PartPanel />);
+    fireEvent.change(screen.getByTestId('badge-layer-height'), { target: { value: '0.28' } });
+    // Through `patchCase` to the store, and the first layer — a read-only statement about the print,
+    // not a control — stays where it was.
+    expect(badge().print).toEqual({ layerHeight: 0.28, firstLayerHeight: 0.2 });
+    expect(badge().width).toBe(76.2);
+    expect(badge().magnetPocket).toEqual({ length: 45, width: 13, depth: 2.3 });
+  });
+
+  it('says what a badge with no print means, instead of showing rows with no value (#368)', () => {
+    const project = findTemplate('badge-blank')!.build();
+    const { print: _dropped, ...badgeWithoutPrint } = project.case.badge!;
+    useProjectStore.setState({
+      project: { ...project, case: { ...project.case, badge: badgeWithoutPrint } },
+    });
+
+    render(<PartPanel />);
+    expect(screen.queryByTestId('badge-layer-height')).toBeNull();
+    // The consequence, not just the absence: without a print there is no colour boundary to hit, so
+    // the depth limit stays analytic and Engrave offers no colour-split control.
+    expect(screen.getByTestId('badge-print-none').textContent).toContain('analytic');
+  });
 });
 
 describe('PartPanel (#282) — the bare blank', () => {

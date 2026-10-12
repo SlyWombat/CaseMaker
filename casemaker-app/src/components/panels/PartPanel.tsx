@@ -337,6 +337,52 @@ function BadgeEditor({ badge }: { badge: BadgeParams }) {
         />
       </LabelledField>
 
+      <h3 style={SUBHEAD}>Print</h3>
+      {/* #368 — how the blank was SLICED. It is a stated fact, not something the app measures, so
+          the block is read-only except the layer height: changing that moves every depth number on
+          the badge (the colour boundary and anything measured against it), which is what the row
+          says. No slider — one honest number, typed. */}
+      {badge.print ? (
+        <>
+          <LabelledField
+            label="Layer height"
+            unit="mm"
+            hint="How the blank was sliced: the colour boundary lands on this grid, so this number moves where the split sits — and with it every recommended depth and every colour reading. A depth you measured at the bench was measured against a different print; one you typed stays your number, but it is re-read against the new boundary. Set it to the print you actually made."
+          >
+            <input
+              type="number"
+              min={0.01}
+              step={0.05}
+              value={badge.print.layerHeight}
+              data-testid="badge-layer-height"
+              style={NUM}
+              onChange={(e) =>
+                update({
+                  print: { ...badge.print!, layerHeight: Number(e.target.value) },
+                })
+              }
+            />
+          </LabelledField>
+          <LabelledField
+            label="First layer"
+            unit="mm"
+            hint="The first layer’s own height as the blank was sliced. Read-only: the app does not measure it, it states what the print spec recorded."
+          >
+            <span data-testid="badge-first-layer-height" style={{ fontSize: 13, color: '#cfe0ff' }}>
+              {mm(badge.print.firstLayerHeight)}
+            </span>
+          </LabelledField>
+          <p style={HINT} data-testid="badge-print-source">
+            Provisional — the print spec’s stated default (#166), not a reading of your slicer.
+          </p>
+        </>
+      ) : (
+        <p style={HINT} data-testid="badge-print-none">
+          This badge states no print, so its colour boundary is not known: the depth limit stays
+          analytic and Engrave text offers no colour-split control.
+        </p>
+      )}
+
       <h3 style={SUBHEAD}>Magnet</h3>
       <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
         <input

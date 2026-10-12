@@ -460,9 +460,11 @@ describe('the margins reach the program only where a bound does (#345)', () => {
 // the blank now also says how deep it may be cut (`recommendLabelDepth`), and these are the four
 // floors that answer is the shallowest of.
 describe('the label depth a blank allows (#362)', () => {
-  /** The badge's own blank — 3.81 mm — as the job's stock, with the vise the store seeds for it. */
+  /** The badge's own blank — 3.81 mm — as the job's stock, with the vise the store seeds for it.
+   *  A badge stating NO print (#368): these are the four floors of the analytic limit, and each test
+   *  that wants a colour boundary states the print it is about (`PRINT_0_2`). */
   function badgeJob(over: Partial<EngraveJob> = {}): EngraveJob {
-    const blank = badgeBlankFor(defaultBadgeParams());
+    const blank = badgeBlankFor(defaultBadgeParams({ print: undefined }));
     const base = defaultEngraveJob();
     return {
       ...base,
