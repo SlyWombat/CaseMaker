@@ -2,7 +2,6 @@ import { useState, type CSSProperties, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { MACHINES } from '@/engine/cnc/machine';
 import { machineCalibrationNotice } from '@/engine/cnc/calibration';
-import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { canDriveMachine } from '@/platform/capabilities';
 import { probeMachine, type MachineObservation } from '@/platform/machineProbe';
@@ -203,7 +202,11 @@ function seedStockFromProject(project: Project): void {
   }
   const blank = project.case.blank;
   if (blank === undefined || !blank.enabled) return;
-  job.setStock(blankStockFor(blank).stock, 'computed');
+  // #364 — the blank route's own store method, the twin of `takeBadgeBlank`: it takes the stock AND
+  // the lines (a blank that is not the demo plank gets one seeded `Text` line, and every unclaimed
+  // label is re-depthed either way), so the hand-off no longer leaves three demo words laid out for
+  // a plank on a blank that is not one.
+  job.takeBlankStock(blank);
 }
 
 export function StartWizard(): JSX.Element {

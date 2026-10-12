@@ -17,11 +17,15 @@ import { effectiveMargins, recommendLabelDepth } from '@/engine/cnc/engrave/dept
 import { labelProfile, shallowestVoidLimit } from '@/engine/cnc/engrave/partPlan';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import {
-  badgeLabelSeed,
+  BLANK_SEED_TEXT,
+  blankLabelSeed,
+  isShippedDemoLabelSet,
   mayRelayoutLabels,
   type SeedMeasure,
-} from '@/engine/cnc/engrave/badgeLabelSeed';
+} from '@/engine/cnc/engrave/blankLabelSeed';
 import { BADGE_POCKET_KEEP_OUT_ID, type BadgeBlank } from '@/engine/cnc/engrave/fromBadge';
+import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
+import type { BlankParams } from '@/types/blank';
 import type { CustomFont } from '@/types/textLabel';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type {
@@ -215,6 +219,22 @@ const LAYOUT_FIELDS = [
   'enabled',
   'construction',
 ] as const;
+
+/**
+ * Is this stock the DEMO PLANK the shipped labels were written for? (#364)
+ *
+ * `defaultEngraveJob` ships three lines laid out for a 100 × 60 mm plank, and those words are that
+ * blank's own content — so a bare blank of the same footprint keeps them, re-depthed. Any other
+ * blank replaces them, because they were never written for it.
+ *
+ * A FOOTPRINT test: length and width, and deliberately not thickness. The three lines are laid out
+ * in X and Y, so a thinner or thicker slab of the same face is still the plank they were written
+ * for — which is why 100 × 60 × 4 keeps them (and why only their DEPTHS move with the thickness).
+ */
+function isDemoPlank(stock: Pick<EngraveJob['stock'], 'length' | 'width'>): boolean {
+  const demo = defaultEngraveJob().stock;
+  return stock.length === demo.length && stock.width === demo.width;
+}
 
 /**
  * The badge seed's measurement (#363): the app's own typesetter, or `null` when the bundled face
@@ -486,6 +506,17 @@ export interface EngraveJobState {
    */
   takeBadgeBlank: (blank: BadgeBlank) => void;
   /**
+   * Take a bare blank as this job's stock (#280, #364) — the twin of `takeBadgeBlank`, and the ONE
+   * owner of that write, shared by the panel's "Use the blank" and the wizard's hand-off seed so the
+   * two cannot drift into two versions of "the blank is the stock".
+   *
+   * It carries the dimensions only (`blankStockFor`): the material is the operator's and a blank
+   * cannot know it. On top of `setStock` it does the two things the badge route does — seed a line,
+   * and re-depth every unclaimed label — because a blank that changes the stock and nothing else
+   * hands over a job laid out for a different blank, which will not generate.
+   */
+  takeBlankStock: (blank: BlankParams) => void;
+  /**
    * Give every label a depth THIS blank allows, and say who decided (#362) — the arithmetic is
    * `recommendLabelDepth`, this is only the walk over the labels and the provenance.
    *
@@ -604,7 +635,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         //
         // The label's own fields — what it says, its face, and where and how big it sits — are ONE
         // claim, stamped the same way and for the same reason (#363 review). They are the fields a
-        // route lays out in a single pass (`badgeLabelSeed`) and only a person otherwise decides, so
+        // route lays out in a single pass (`blankLabelSeed`) and only a person otherwise decides, so
         // a single `layout` stamp is what tells the route "this line is not yours to re-lay" — a
         // stamp per field would only record the same decision four times. `depth` keeps its own slot
         // above, because the re-depth and the replacement are different decisions.
@@ -830,7 +861,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       const face = job.labels[0];
       if (face && mayRelayoutLabels(job)) {
         const pocket = (job.keepOuts ?? []).find((k) => k.id === BADGE_POCKET_KEEP_OUT_ID);
-        const seed = badgeLabelSeed({
+        const seed = blankLabelSeed({
           blank: {
             length: job.stock.length,
             width: job.stock.width,
@@ -867,6 +898,60 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       // deep" is arithmetic on the blank that was just applied, so it has to run AFTER the stock
       // and the pocket, on the job as it now stands — and after the seed, which is a label with a
       // starting depth and no claim, so this walk is what writes the number it really takes (#363).
+      get().redepthLabelsForBlank();
+    },
+
+    // #364 — the bare blank's twin. `blankStockFor` is the blank's own reading of itself
+    // (dimensions only; the material is the operator's and a blank cannot know it), and `setStock`
+    // keeps owning the `stockProud` re-derivation and the vise follow (#344) rather than this
+    // method growing a second copy of those rules.
+    takeBlankStock: (blank) => {
+      get().setStock(blankStockFor(blank).stock, 'computed');
+
+      // …and the LINES, the same gap the badge route had (#363) one archetype over. The three demo
+      // words are laid out for the 100 × 60 mm plank — `CASE` centred at x = 50, which is 10 mm from
+      // the right edge of a 60 mm blank and more than its own half-width — so on a 60 × 40 blank
+      // `generate` refused the job with three `item-outside-stock` errors, and on any other blank
+      // they ran off in the same way.
+      //
+      // Two conditions, and each answers a different question (#364):
+      //   - NOT the demo plank — the three lines ARE that blank's content, so a blank of the same
+      //     footprint (thickness aside) keeps them. `isDemoPlank` is the footprint test.
+      //   - `isShippedDemoLabelSet` — the demo set is the only thing this route may replace. It is
+      //     NOT the badge's wider `mayRelayoutLabels`: a bare blank has no content of its own to
+      //     justify taking over a set a route seeded (a line the badge route wrote survives, and
+      //     only its depth is re-walked), and it never re-lays a set the person has touched.
+      const job = get().job;
+      const face = job.labels[0];
+      if (face && !isDemoPlank(job.stock) && isShippedDemoLabelSet(job)) {
+        const seed = blankLabelSeed({
+          // No pocket: a bare blank declares none, so `freeBands` answers its whole usable face as
+          // one band and the line is sized to the blank (`blankStockFor` carries dimensions only).
+          blank: { length: job.stock.length, width: job.stock.width, pocket: null },
+          edgeMargin: job.edgeMargin,
+          font: face.font,
+          weight: face.weight,
+          text: BLANK_SEED_TEXT,
+          measure: measureSeedGlyphs(job.customFonts ?? []),
+        });
+        if (seed) {
+          apply((current) => ({
+            ...current,
+            labels: [seed],
+            // Written together with the line, and the claim map replaced rather than merged: the
+            // dropped demo labels' stamps are about labels that are gone, and `layout: 'computed'`
+            // is what lets the BADGE route recognise this line as a route's if one is taken next.
+            sources: {
+              ...(current.sources ?? {}),
+              labels: { [seed.id]: { layout: 'computed' } },
+            },
+          }));
+        }
+      }
+
+      // Unconditional, and after either branch (#364): the walk is right at every thickness — the
+      // demo plank's own three lines are re-depthed to 3/3/3 on a 100 × 60 × 12 and to 1/1/1 on a
+      // 100 × 60 × 4 — and it is the only thing that writes the seeded line's real depth (#362).
       get().redepthLabelsForBlank();
     },
 

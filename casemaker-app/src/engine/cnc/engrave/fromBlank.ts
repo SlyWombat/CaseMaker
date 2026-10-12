@@ -50,8 +50,12 @@ function mm(v: number): string {
  *
  * Deliberately narrow, like `badgeBlankFor`: it does not touch labels, tool, vise, feeds,
  * `minFloor` or the material. The blank settles what the BLANK is; where the cut goes is the
- * user's business, and a label that no longer fits the new stock is reported by `validateJob`
- * as it always is, not silently moved.
+ * user's business.
+ *
+ * The LABELS are still not this module's, but they are no longer nobody's (#364): the store's
+ * `takeBlankStock` — the one place either call site writes this patch — seeds one `Text` line on a
+ * blank that is not the demo plank and re-depths every unclaimed line either way, so a label laid
+ * out for a different blank is no longer left for `validateJob` to report after the fact.
  */
 export function blankStockFor(blank: BlankParams): BlankStock {
   return {

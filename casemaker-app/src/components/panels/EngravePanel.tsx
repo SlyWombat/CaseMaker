@@ -324,6 +324,7 @@ export function EngravePanel(): JSX.Element {
   const updateKeepOut = useEngraveJobStore((s) => s.updateKeepOut);
   const removeKeepOut = useEngraveJobStore((s) => s.removeKeepOut);
   const takeBadgeBlank = useEngraveJobStore((s) => s.takeBadgeBlank);
+  const takeBlankStock = useEngraveJobStore((s) => s.takeBlankStock);
   const addVector = useEngraveJobStore((s) => s.addVector);
   const updateVector = useEngraveJobStore((s) => s.updateVector);
   const removeVector = useEngraveJobStore((s) => s.removeVector);
@@ -445,9 +446,11 @@ export function EngravePanel(): JSX.Element {
 
   function useBlankStock(): void {
     if (!blankPart) return;
-    const b = blankStockFor(blankPart);
-    setStock(b.stock, 'computed');
-    setBlankPartNotes(b.notes);
+    // #364 — one store method owns the whole write, the panel only shows what it did. It takes the
+    // stock AND the lines (the seed and the re-depth walk), so "Use the blank" no longer leaves the
+    // demo words laid out for a plank on a blank that is not one.
+    takeBlankStock(blankPart);
+    setBlankPartNotes(blankStockFor(blankPart).notes);
   }
   const errors = findings.filter((f) => f.severity === 'error');
   const blockedByFeeds = feeds !== null && !feeds.ok;

@@ -287,7 +287,7 @@ describe('engraveJobStore (#200)', () => {
   // of clearance wanted under it.
   //
   // #363 then replaced the LINES too: the three demo labels were laid out for the 100 × 60 mm plank
-  // and ran off the 76.2 mm badge, so the route seeds one `Name` line (see `badgeLabelSeed.spec.ts`
+  // and ran off the 76.2 mm badge, so the route seeds one `Name` line (see `blankLabelSeed.spec.ts`
   // for the layout) and this walk re-depths it.
   it('re-depths the seeded badge line to what the blank allows, and opens with no jaw finding', async () => {
     backing.clear();
@@ -353,14 +353,25 @@ describe('engraveJobStore (#200)', () => {
     const seeded = defaultEngraveJob();
     const id = seeded.labels[0]!.id;
     seeded.labels[0] = { ...seeded.labels[0]!, depth: 0.6, depthIntent: 'surface' };
-    seeded.sources = { labels: { [id]: { depth: 'computed', depthIntent: 'computed' } } };
+    // The `layout` claim is what stands the badge route aside here, and it is the only thing that
+    // can: an app-computed `depth`/`depthIntent` is a past answer of the app's own and no longer
+    // keeps a job out of the seed (#363 review follow-up — `demoShape` stopped comparing the intent
+    // by value, or a pre-#363 split-badge job would never re-seed). A person's own claim does, which
+    // is what this job has.
+    seeded.sources = {
+      labels: { [id]: { layout: 'user', depth: 'computed', depthIntent: 'computed' } },
+    };
     backing.set(KEY, JSON.stringify(seeded));
 
     const { useEngraveJobStore } = await freshStore();
     const s = () => useEngraveJobStore.getState();
     // The document came back with the app's own claim on the intent — zod keeps the key (#310's trap).
     expect(s().job.labels[0]!.depthIntent).toBe('surface');
-    expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'computed', depthIntent: 'computed' });
+    expect(s().job.sources?.labels?.[id]).toEqual({
+      layout: 'user',
+      depth: 'computed',
+      depthIntent: 'computed',
+    });
 
     // The badge blank states no print, so there is no colour split for any intent to be about: the
     // label re-depths to the magnet pocket's 0.51 mm and the `surface` claim goes with it. A stale
@@ -368,7 +379,9 @@ describe('engraveJobStore (#200)', () => {
     s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
     expect(s().job.labels[0]!.depth).toBe(0.51);
     expect(s().job.labels[0]!.depthIntent).toBeUndefined();
-    expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'computed' });
+    // The walk wrote the whole depth entry and carried the `layout` claim across it (#363 review), so
+    // the person's own claim — and the line it protects — is still theirs afterwards.
+    expect(s().job.sources?.labels?.[id]).toEqual({ layout: 'user', depth: 'computed' });
   });
 
   it('stamps a stated intent as the user’s own, and drops the claim when it is cleared (#362 review)', async () => {
@@ -401,6 +414,21 @@ describe('engraveJobStore (#200)', () => {
     s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
     expect(s().job.labels[0]!.depth).toBe(1.4);
     expect(s().job.labels[0]!.depthIntent).toBe('reveal');
+  });
+
+  it('keeps a label’s `layout` claim through a save and load (#363 review)', () => {
+    // The schema mirror names every key a source record may carry (zod STRIPS an unnamed one, #254's
+    // trap), and `layout` is the claim a route reads back to tell its own line from a person's. If it
+    // did not survive the round-trip, every reloaded job would look untouched and the route would
+    // re-lay a line the person had placed.
+    const job = defaultEngraveJob();
+    const id = job.labels[0]!.id;
+    job.sources = { labels: { [id]: { layout: 'computed', depth: 'computed' } } };
+
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.sources?.labels?.[id]).toEqual({ layout: 'computed', depth: 'computed' });
   });
 
   it('gives a document written before #362 the clearance its check used, and keeps a stated one', () => {

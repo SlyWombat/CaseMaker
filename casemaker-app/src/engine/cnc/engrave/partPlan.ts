@@ -1007,6 +1007,10 @@ export function keepOutNameAt(job: EngraveJob, x: Mm, y: Mm): string | null {
  *
  * Empty when every void is disabled, or there are none: a blank with no void under it is limited
  * by its own floor and the jaws, not by anything here.
+ *
+ * The blank-wide answer is deliberately conservative for now, and #365 is the issue that would make
+ * it per item: a line that sits clear of the pocket is still advised the pocket's ceiling, because
+ * this asks about the WHOLE blank rather than what the glyphs actually cover.
  */
 export function shallowestVoidLimit(
   job: EngraveJob,

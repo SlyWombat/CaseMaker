@@ -1,12 +1,13 @@
-// #363 — the badge route seeds ONE name line.
+// #363/#364 — the ONE line a blank route seeds.
 //
-// Taking a badge blank replaced the job's stock, void and depths (#271 route 1, #352, #362) but
-// nothing had ever moved the LABELS: the shipped demo job's three lines, laid out for the 100 ×
-// 60 mm softwood plank, were left standing on a 76.2 × 38.1 mm badge, so `CASE` at (50, 43) ran off
-// the back edge and the wizard's blank step opened on three `item-outside-stock` errors for a job it
-// had just built. This spec covers the pure seed, the gate that decides when it may run, and the
-// hand-off through the real store — including a real Manifold `generate`, because the bar the issue
-// set is that the wizard does not hand over a job its own findings complain about.
+// Taking a blank replaced the job's stock, void and depths (#271 route 1, #352, #362) but nothing
+// had ever moved the LABELS: the shipped demo job's three lines, laid out for the 100 × 60 mm
+// softwood plank, were left standing on whatever blank was taken — a 76.2 × 38.1 mm badge (where
+// `CASE` at (50, 43) ran off the back edge and the wizard's blank step opened on three
+// `item-outside-stock` errors), or a 60 × 40 mm bare blank (#364), in the same way. This spec covers
+// the pure seed, the gate that decides when it may run, and the hand-off through the real store —
+// including a real Manifold `generate`, because the bar the issues set is that the wizard does not
+// hand over a job its own findings complain about.
 //
 // #363 REVIEW — the gate is on PROVENANCE, not on values: `computed` is the app's own past answer,
 // and a job the OLD badge route had already re-depth-ed (three lines, 0.51 mm, stamped `computed`,
@@ -24,16 +25,18 @@ import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
 import {
   BADGE_SEED_TEXT,
-  badgeLabelSeed,
+  BLANK_SEED_TEXT,
+  blankLabelSeed,
   isShippedDemoLabelSet,
   mayRelayoutLabels,
-  type BadgeSeedBlank,
-  type BadgeLabelSeedInputs,
+  type SeedBlank,
+  type LabelSeedInputs,
   type SeedMeasure,
-} from '@/engine/cnc/engrave/badgeLabelSeed';
+} from '@/engine/cnc/engrave/blankLabelSeed';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultBadgeParams } from '@/types/badge';
+import { defaultBlankParams, type BlankParams } from '@/types/blank';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { labelProfile } from '@/engine/cnc/engrave/partPlan';
 import { aabbOfProfile } from '@/engine/compiler/profile';
@@ -63,7 +66,7 @@ async function freshStore() {
 /** The badge route's own blank, in the seed's shape — the same extraction `takeBadgeBlank` does. */
 const badge = badgeBlankFor(defaultBadgeParams());
 const pocket = badge.pocket?.kind === 'rect' ? badge.pocket : null;
-const BLANK: BadgeSeedBlank = {
+const BLANK: SeedBlank = {
   length: badge.stock.length,
   width: badge.stock.width,
   pocket,
@@ -89,8 +92,8 @@ const measure: SeedMeasure = (text, font, weight, size) => {
   }
 };
 
-function seed(over: Partial<BadgeLabelSeedInputs> = {}) {
-  return badgeLabelSeed({
+function seed(over: Partial<LabelSeedInputs> = {}) {
+  return blankLabelSeed({
     blank: BLANK,
     edgeMargin: defaultEngraveJob().edgeMargin,
     font: DEFAULT_FONT_ID,
@@ -100,7 +103,7 @@ function seed(over: Partial<BadgeLabelSeedInputs> = {}) {
   });
 }
 
-describe('#363 — the badge label seed', () => {
+describe('#363/#364 — the blank label seed', () => {
   it('lays one name line on the default badge, centred, in the front band', () => {
     const line = seed();
     expect(line).not.toBeNull();
@@ -170,9 +173,10 @@ describe('#363 — the badge label seed', () => {
   });
 
   it('estimates the ink box when the face is not parsed, and shrinks the size to fit', () => {
-    // A 10-character line on a narrow blank: the ≈0.6 em/char estimate puts the widest that fits at
-    // 0.6 × size × 10 ≤ 18, i.e. size 3.
-    const line = badgeLabelSeed({
+    // A 10-character line on a narrow blank: the fallback's 1.25 em/char (an upper bound over the
+    // bundled face, #364) puts the widest that fits at 1.25 × size × 10 ≤ 18, i.e. size 1 — and 1 mm
+    // is still laid out, so the blank gets a line rather than nothing.
+    const line = blankLabelSeed({
       blank: { length: 20, width: 30, pocket: null },
       edgeMargin: 1,
       font: DEFAULT_FONT_ID,
@@ -180,12 +184,12 @@ describe('#363 — the badge label seed', () => {
       text: 'AAAAAAAAAA',
       measure: () => null,
     });
-    expect(line!.size).toBe(3);
+    expect(line!.size).toBe(1);
     expect(line!.position.y).toBeCloseTo(15, 6);
   });
 
   it('shrinks a real measurement down until it fits, and gives up when none does', () => {
-    const wide = badgeLabelSeed({
+    const wide = blankLabelSeed({
       blank: { length: 20, width: 30, pocket: null },
       edgeMargin: 1,
       font: DEFAULT_FONT_ID,
@@ -196,7 +200,7 @@ describe('#363 — the badge label seed', () => {
 
     // A measurement that caps the height is honoured the same way — nothing fits under 1 mm, so
     // there is no line to seed.
-    const tall = badgeLabelSeed({
+    const tall = blankLabelSeed({
       blank: { length: 76.2, width: 38.1, pocket: null },
       edgeMargin: 1,
       font: DEFAULT_FONT_ID,
@@ -215,6 +219,40 @@ describe('#363 — the badge label seed', () => {
     expect(seed({ blank: { length: 2, width: 10, pocket: null }, edgeMargin: 0.5 })).toBeNull();
     // A whitespace placeholder is not a line.
     expect(seed({ text: '   ' })).toBeNull();
+  });
+});
+
+describe('#364 — the bare-blank seed', () => {
+  it('sets one Text line on the whole usable face of a blank with no pocket', () => {
+    const line = seed({ blank: { length: 100, width: 60, pocket: null }, text: BLANK_SEED_TEXT });
+    expect(line).not.toBeNull();
+    if (!line) return;
+    expect(line.text).toBe(BLANK_SEED_TEXT);
+    expect(line.text).toBe('Text');
+    // No pocket, so `freeBands` answers the whole usable face as ONE band and the line is centred on
+    // the blank itself (not in a front band, which is what the badge's split face gives).
+    expect(line.position.x).toBeCloseTo(50, 6);
+    expect(line.position.y).toBeCloseTo(30, 6);
+    // The cap starts at floor(0.7 × 58) = 40 mm and the search walks down a millimetre at a time
+    // until the real ink box fits both the band's 58 mm of height and the 98 mm of usable width.
+    const ink = measure(line.text, DEFAULT_FONT_ID, 'bold', line.size)!;
+    expect(ink.height).toBeLessThanOrEqual(58);
+    expect(ink.width).toBeLessThanOrEqual(98);
+    expect(line.rotation).toBe(0);
+    expect(line.enabled).toBe(true);
+    // The placeholder depth the caller's walk replaces; asserted on the store hand-off below.
+    expect(line.depth).toBe(0.5);
+  });
+
+  it('carries the placeholder the caller asks for, and Name only by default', () => {
+    // The module's default is still the badge's placeholder, so the bare route has to be explicit —
+    // which is the point of having two exported constants rather than one string.
+    expect(BADGE_SEED_TEXT).toBe('Name');
+    expect(BLANK_SEED_TEXT).toBe('Text');
+    expect(seed({ blank: { length: 100, width: 60, pocket: null } })!.text).toBe('Name');
+    expect(
+      seed({ blank: { length: 100, width: 60, pocket: null }, text: BLANK_SEED_TEXT })!.text,
+    ).toBe('Text');
   });
 });
 
@@ -253,7 +291,6 @@ describe('#363 — the gate that decides whether the labels may be replaced', ()
 
     expect(touched((j) => (j.labels[0]!.text = 'DAVE'))).toBe(false);
     expect(touched((j) => (j.labels[0]!.position.y = 20))).toBe(false);
-    expect(touched((j) => (j.labels[0]!.depthIntent = 'surface'))).toBe(false);
     expect(touched((j) => j.labels.pop())).toBe(false);
     expect(touched((j) => j.labels.reverse())).toBe(false);
     expect(touched((j) => (j.labels = []))).toBe(false);
@@ -261,6 +298,10 @@ describe('#363 — the gate that decides whether the labels may be replaced', ()
     // `updateLabel` (asserted on the store hand-off below), so an unstamped one is the app's own —
     // or one typed before #362, which the re-depth walk already documents as indistinguishable.
     expect(touched((j) => (j.labels[0]!.depth = 1.1))).toBe(true);
+    // …and NEITHER does the INTENT, for the same reason (folding the #363-review follow-up): the
+    // walk writes `'reveal'` on a printed badge's floor and stamps it `computed`, so the value alone
+    // says nothing about who decided — a pre-#363 split-badge job would otherwise never re-seed.
+    expect(touched((j) => (j.labels[0]!.depthIntent = 'surface'))).toBe(true);
     // An explicit `construction: false` is NOT a change: the label cuts either way, and the gate
     // compares what a label means, not which keys happen to be present.
     expect(touched((j) => (j.labels[0]!.construction = false))).toBe(true);
@@ -268,8 +309,37 @@ describe('#363 — the gate that decides whether the labels may be replaced', ()
     // A claim someone STATED is a person's, whatever the values say…
     expect(touched((j) => (j.sources = { labels: { l: { depth: 'user' } } }))).toBe(false);
     expect(touched((j) => (j.sources = { labels: { l: { layout: 'user' } } }))).toBe(false);
+    expect(touched((j) => (j.sources = { labels: { l: { depthIntent: 'user' } } }))).toBe(false);
     // …and a `computed` one is not: it is a past answer of the app's own, not a decision.
     expect(touched((j) => (j.sources = { labels: { l: { layout: 'computed' } } }))).toBe(true);
+    expect(
+      touched((j) => (j.sources = { labels: { l: { depth: 'computed', depthIntent: 'computed' } } })),
+    ).toBe(true);
+  });
+
+  it('re-seeds a pre-#363 split-badge job, whose walk wrote the intent it now carries (review)', () => {
+    // What `redepthLabelsForBlank` leaves on a SPLIT badge: every label re-depth-ed and stamped
+    // `computed`, and a `'reveal'` on each floor because the badge's second colour makes one
+    // meaningful. Before the follow-up `demoShape` compared `depthIntent` by VALUE, so this job
+    // looked touched for ever — the same trap the depth comparison was.
+    const split = defaultEngraveJob();
+    split.labels = split.labels.map((l) => ({ ...l, depth: 0.51, depthIntent: 'reveal' as const }));
+    split.sources = {
+      labels: Object.fromEntries(
+        split.labels.map((l) => [l.id, { depth: 'computed' as const, depthIntent: 'computed' as const }]),
+      ),
+    };
+    expect(isShippedDemoLabelSet(split)).toBe(true);
+    expect(mayRelayoutLabels(split)).toBe(true);
+
+    // A person's own intent IS a claim, and stops it — the guard the value comparison was standing in
+    // for, said the way the rest of the gate says it.
+    split.sources = {
+      labels: Object.fromEntries(
+        split.labels.map((l) => [l.id, { depth: 'computed' as const, depthIntent: 'user' as const }]),
+      ),
+    };
+    expect(mayRelayoutLabels(split)).toBe(false);
   });
 });
 
@@ -416,4 +486,153 @@ describe('#363 — the store hand-off', () => {
     expect(s().job.labels).toHaveLength(3);
     expect(s().job.labels[0]!.depth).toBe(1.2);
   });
+});
+
+describe('#364 — the bare-blank hand-off', () => {
+  /** A bare blank in the shapes the issue's table measures, all through the same route. */
+  const blank = (over: Partial<BlankParams> = {}) => defaultBlankParams(over);
+
+  /** The codes of every error-severity finding, which is the bar the issue set: generate clean. */
+  function errorCodes(g: ReturnType<typeof generate>): string[] {
+    return [
+      ...g.findings.filter((f) => f.severity === 'error'),
+      ...(g.verify?.findings.filter((f) => f.severity === 'error') ?? []),
+    ].map((f) => f.code);
+  }
+
+  it('keeps the demo plank’s three lines and re-depths them (100 × 60 × 12)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().takeBlankStock(blank());
+
+    const job = s().job;
+    // The demo plank is the one blank those three words were written for, so they stay — by text,
+    // position and id — and only their DEPTHS move (2 / 1 / 0.5 were never a recommendation).
+    expect(job.labels.map((l) => l.text)).toEqual(['CASE', 'MAKER', 'first chips']);
+    expect(job.labels.map((l) => l.position.x)).toEqual([50, 50, 50]);
+    expect(job.labels.map((l) => l.depth)).toEqual([3, 3, 3]);
+    // No seed ran, so nothing carries a route's `layout` stamp — only the walk's `computed` depths.
+    expect(Object.values(job.sources?.labels ?? {}).every((c) => c.layout === undefined)).toBe(true);
+    expect(Object.values(job.sources?.labels ?? {}).every((c) => c.depth === 'computed')).toBe(true);
+  });
+
+  it('replaces the demo set with ONE Text line on a smaller blank (60 × 40 × 12)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().takeBlankStock(blank({ width: 60, height: 40 }));
+
+    const job = s().job;
+    expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([60, 40, 12]);
+    expect(job.labels).toHaveLength(1);
+    const line = job.labels[0]!;
+    expect(line.text).toBe(BLANK_SEED_TEXT);
+    // Centred on the blank, in the whole face (a blank declares no pocket).
+    expect(line.position.x).toBeCloseTo(30, 6);
+    expect(line.position.y).toBeCloseTo(20, 6);
+    // The seed's placeholder is gone: `redepthLabelsForBlank` wrote the real number and stamped it.
+    expect(line.depth).not.toBe(0.5);
+    expect(job.sources?.labels).toEqual({ [line.id]: { layout: 'computed', depth: 'computed' } });
+
+    // The bar #363 set, on the real pipeline: the job the wizard hands over generates clean.
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    expect(errorCodes(g)).toEqual([]);
+    expect(g.findings.some((f) => f.code === 'item-over-void')).toBe(false);
+  }, 60_000);
+
+  it('replaces the demo set on the swapped-axes blank too (60 × 100 × 12)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().takeBlankStock(blank({ width: 60, height: 100 }));
+
+    const job = s().job;
+    expect(job.labels).toHaveLength(1);
+    const line = job.labels[0]!;
+    expect(line.text).toBe(BLANK_SEED_TEXT);
+    expect(line.position.x).toBeCloseTo(30, 6);
+    expect(line.position.y).toBeCloseTo(50, 6);
+    // 60 × 100 is NOT the 100 × 60 footprint, so it is not the demo plank: the three words go even
+    // though the two blanks hold the same 6000 mm².
+    const g = generate(tl, job);
+    expect(errorCodes(g)).toEqual([]);
+  }, 60_000);
+
+  it('keeps the three lines on a thinner slab of the same footprint (100 × 60 × 4)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().takeBlankStock(blank({ thickness: 4 }));
+
+    const job = s().job;
+    // Thickness is deliberately NOT part of the footprint test: 100 × 60 × 4 is still the plank
+    // those three words were written for, so they stay — at the depths the 4 mm slab allows.
+    expect(job.labels.map((l) => l.text)).toEqual(['CASE', 'MAKER', 'first chips']);
+    expect(job.labels.map((l) => l.depth)).toEqual([1, 1, 1]);
+
+    const g = generate(tl, job);
+    expect(errorCodes(g)).toEqual([]);
+    // The `stock-proud-too-small` warning goes with the depth: the deepest cut is now 1 mm, inside
+    // the 2 mm the slab stands proud. The vise-grip warning is #344's business and stays — it is
+    // honest about a 4 mm blank in jaws whose default wants more.
+    expect(g.findings.some((f) => f.code === 'stock-proud-too-small')).toBe(false);
+    expect(g.findings.some((f) => f.code === 'vise-grip-shallow')).toBe(true);
+  }, 60_000);
+
+  it('never replaces a label set the person has touched', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    const id = s().job.labels[0]!.id;
+    s().updateLabel(id, { text: 'DAVE' });
+
+    s().takeBlankStock(blank({ width: 60, height: 40 }));
+
+    const job = s().job;
+    expect(job.labels.map((l) => l.text)).toEqual(['DAVE', 'MAKER', 'first chips']);
+    // …re-depthed for the new blank, because the person moved the words, not the numbers.
+    expect(job.labels[0]!.depth).toBeGreaterThan(0);
+  });
+
+  it('leaves a line the BADGE route seeded alone, re-depthed (#364 gate)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    const name = s().job.labels[0]!;
+    expect(name.text).toBe('Name');
+
+    // The bare route's gate is `isShippedDemoLabelSet`, NOT the badge's wider
+    // `mayRelayoutLabels`: a blank seeds only a placeholder, so it replaces the demo words it was
+    // never written for and leaves a line another route placed — it does not hand back `Text`.
+    s().takeBlankStock(blank());
+    const job = s().job;
+    expect(job.labels).toHaveLength(1);
+    expect(job.labels[0]!.text).toBe('Name');
+    expect(job.labels[0]!.id).toBe(name.id);
+    // …and its depth is re-walked for the new blank, like every unclaimed line.
+    expect(job.sources?.labels?.[name.id]?.depth).toBe('computed');
+  });
+
+  it('generates the seeded 60 × 40 blank clean and carries no leftover demo claim', async () => {
+    // The wizard's own path, end to end: the same call `seedStockFromProject` makes, then the real
+    // pipeline. A separate spec because this is the one the issue's table is about.
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().takeBlankStock(blank({ width: 60, height: 40 }));
+    const g = generate(tl, s().job);
+    expect(g.stage).toBe('done');
+    expect(errorCodes(g)).toEqual([]);
+    // The three `item-outside-stock` errors the issue measured are exactly what this rules out.
+    expect(g.findings.some((f) => f.code === 'item-outside-stock')).toBe(false);
+  }, 60_000);
 });

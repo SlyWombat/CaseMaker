@@ -1,11 +1,12 @@
 /**
- * The ONE label the badge route seeds (#363).
+ * The ONE label a blank route seeds (#363, #364).
  *
- * Taking a badge blank replaces the job's stock, void and depths (#271 route 1, #352, #362) — but
- * nothing moved the labels, so the shipped demo job's three lines, laid out for a 100 × 60 mm
- * softwood plank, were left standing on a 76.2 × 38.1 mm badge. `CASE` at (50, 43) ran 12 mm off
- * the back edge of the smaller blank and every line was centred 10 mm right of the badge's centre,
- * so `generate` refused the job the wizard had just built with three `item-outside-stock` errors.
+ * Taking a blank replaces the job's stock, void and depths (#271 route 1, #352, #362) — but nothing
+ * moved the labels, so the shipped demo job's three lines, laid out for a 100 × 60 mm softwood
+ * plank, were left standing on whatever blank was taken. On a badge (76.2 × 38.1 mm) `CASE` ran
+ * 12 mm off the back edge and every line was centred 10 mm right of the centre, so `generate`
+ * refused the job the wizard had just built with three `item-outside-stock` errors; on any other
+ * blank the same three lines ran off the edges in the same way (#364).
  *
  * Option (a) of the issue, and the house rule behind it (a default, not a knob): those three lines
  * were demo text for a plank, not badge text. A badge is a name badge, so the badge route seeds
@@ -20,11 +21,23 @@
  * line at (38.1, 6.775) has no void under it at all, and the jaws would allow 0.905 mm there.
  * Making the bound per item is #365.
  *
- * This module is PURE and returns plain data: no store, no font registry, no wasm. The store
- * decides WHEN to seed (only a job still carrying the shipped demo labels, or one an earlier take
- * seeded — see `mayRelayoutLabels`) and writes the result; the measurement is injected, because a
- * bundled face that has not been parsed yet throws rather than answering (#180) and the wizard's
- * hand-off must not depend on the fonts being up.
+ * The BARE blank (#364) takes the same rule with `BLANK_SEED_TEXT` and no pocket, so `freeBands`
+ * answers its whole usable face as one band: a `Text` line sized to the blank, rather than three
+ * demo words laid out for a blank they were not written for. The demo PLANK (100 × 60) is the one
+ * blank that keeps the three lines — they are the content that blank shipped with — and the store's
+ * footprint test is what tells the two apart.
+ *
+ * #364 also made the FALLBACK measurement an upper bound (`ESTIMATED_ADVANCE_EM`). The hand-off runs
+ * before any face is parsed, so the estimate is what sizes the seeded line in the app — and the old
+ * rule of thumb erred small, which seeded a line the real face then ran off the blank. That is the
+ * same `item-outside-stock` failure this seed exists to remove, produced by the seed itself.
+ *
+ * This module is PURE and returns plain data: no store, no font registry, no wasm. The store decides
+ * WHEN to seed — a set the route may replace (`mayRelayoutLabels` for the badge, whose seed may also
+ * take over an earlier take's line; `isShippedDemoLabelSet` alone for a bare blank, whose seed is
+ * only a placeholder) — and writes the result. The measurement is injected, because a bundled face
+ * that has not been parsed yet throws rather than answering (#180) and the wizard's hand-off must
+ * not depend on the fonts being up.
  */
 
 import type { TextWeight } from '@/types/textLabel';
@@ -40,12 +53,22 @@ import { defaultEngraveJob, newEngraveLabelId } from './defaults';
 export const BADGE_SEED_TEXT = 'Name';
 
 /**
+ * The placeholder the bare-blank route writes (#364).
+ *
+ * `Text` and not a name or a word with meaning: a blank is "just cut something", so the shipped
+ * line has to be something the person will type over, and `Text` is the string the label editor's
+ * own empty state uses. A word like `CASE` would read as content that fits a differently-shaped
+ * blank.
+ */
+export const BLANK_SEED_TEXT = 'Text';
+
+/**
  * How much of the room a free band offers the seeded line takes, as a fraction.
  *
  * There is more to keep clear of than the pocket: the cutter's own clearance to the blank's edge
- * is `edgeMargin` (already taken off below), and a badge is engraved after being printed, so the
- * dome and the print's own overshoot want something too. 0.7 of an 11.55 mm band is 8 mm of cap
- * height with 1.8 mm either side of it — the number the issue's decision quotes.
+ * is `edgeMargin` (already taken off below), and a printed blank — a badge above all — is engraved
+ * after printing, so the dome and the print's own overshoot want something too. 0.7 of an 11.55 mm
+ * band is 8 mm of cap height with 1.8 mm either side of it — the number the issue's decision quotes.
  */
 const BAND_FILL = 0.7;
 
@@ -60,18 +83,24 @@ const BAND_FILL = 0.7;
 const STARTING_DEPTH = 0.5;
 
 /**
- * Average glyph advance, in em, for the FALLBACK ink box: the same ≈0.6 em/char rule of thumb the
- * board preview's silkscreen legend uses (`BoardPreviewSvg`'s `size.x * 1.6 / text.length`, which is
- * 1/1.6 em per character).
+ * Average glyph advance, in em, for the FALLBACK ink box — an UPPER bound over the bundled face,
+ * not a rule of thumb.
  *
- * A rule of thumb, NOT an upper bound, and it errs SMALL — measured, the bundled default face sets
- * 'Name' bold at 3.54 mm of ink per millimetre of cap height, 0.88 em/char, a third more than this.
- * So a line it says fits can still overrun the blank; the outcome is the `item-outside-stock`
- * finding, on a line the person can retype or shrink, rather than a silent one. It is only ever
- * read when the real face is not parsed (#180) — the wizard's hand-off, which happens before any
- * panel or worker has loaded the fonts — and a measured face never reaches it.
+ * It has to be an upper bound, and that is a fix rather than a preference (#364). The fallback is
+ * the number the WIZARD's hand-off lays a line out with, before any panel or worker has parsed a
+ * face (#180), so a fallback that errs small seeds a line the real face then runs off the blank: at
+ * the old 0.6, 'Text' on a 60 × 40 blank came out at 24 mm and `generate` refused the job the wizard
+ * had just built with `item-outside-stock` — one more version of the very bug this seed exists to
+ * fix, this time created by the fix.
+ *
+ * Measured, em of ink per character of the bundled default face at a 10 mm cap, bold (regular is
+ * narrower): `iiiiiiiiii` 0.35, `first chips` 0.58, `Text` 0.67, `Name` 0.88, `MAKER` 0.89,
+ * `AAAAAAAAAA` 0.95, `WWWWWWWWWW` **1.25**. A run of the widest capital is the worst the face can
+ * do, so a line this size says fits does fit. It costs a smaller placeholder than a real measurement
+ * would pick — the honest direction to be wrong in, since the line is a starting point the person
+ * types over, and being one size small is not a reason to refuse the job.
  */
-const ESTIMATED_ADVANCE_EM = 0.6;
+const ESTIMATED_ADVANCE_EM = 1.25;
 
 /** The ink box of `text` at cap height `size`, mm — what the seed lays out and fits. */
 export interface SeedGlyphBox {
@@ -92,34 +121,37 @@ export type SeedMeasure = (
 ) => SeedGlyphBox | null;
 
 /** The blank the seed lays a label out on, in the job's frame: front-left corner at the origin. */
-export interface BadgeSeedBlank {
+export interface SeedBlank {
   length: Mm;
   width: Mm;
   /**
-   * The void the badge declares, or null, in the RECT shape (`badgeBlankFor` builds the magnet
-   * pocket as one, and a y-band is only a band for a rect) — `position` its CENTRE. Read as a band
-   * across the whole blank (see `freeBands`): the badge centres its pocket and this seed centres the
-   * line, so a y-band clear of the pocket is clear of it whatever the line's width.
+   * The void the blank declares, or null, in the RECT shape (`badgeBlankFor` builds the badge's
+   * magnet pocket as one, and a y-band is only a band for a rect) — `position` its CENTRE. Read as
+   * a band across the whole blank (see `freeBands`): the badge centres its pocket and this seed
+   * centres the line, so a y-band clear of the pocket is clear of it whatever the line's width.
+   *
+   * A bare blank has none (`blankStockFor` carries dimensions only), so its free band is the whole
+   * usable face.
    */
   pocket: EngraveKeepOutRect | null;
 }
 
-/** Everything `badgeLabelSeed` reads. Plain data: the store extracts it from the job. */
-export interface BadgeLabelSeedInputs {
-  blank: BadgeSeedBlank;
+/** Everything `blankLabelSeed` reads. Plain data: the store extracts it from the job. */
+export interface LabelSeedInputs {
+  blank: SeedBlank;
   /** The blank's edge inset, mm — `job.edgeMargin`, the number the outside-stock finding uses. */
   edgeMargin: Mm;
-  /** The face to set the line in, borrowed from the job's own demo labels. */
+  /** The face to set the line in, borrowed from the job's own labels. */
   font: string;
   weight: TextWeight;
-  /** The placeholder. Defaults to `BADGE_SEED_TEXT`. */
+  /** The placeholder: `BADGE_SEED_TEXT` for a badge, `BLANK_SEED_TEXT` for a bare blank. */
   text?: string;
   measure?: SeedMeasure;
 }
 
 /**
- * The fields a demo label is compared on — everything that decides what it CUTS **except the
- * depth**, plus the intent that decides which colour its floor means, and nothing else.
+ * The fields a demo label is compared on — everything that decides what it CUTS **except the DEPTH
+ * and the intent**, plus nothing else that the app's own walk can write.
  *
  * Deliberately by VALUE and not by id (`defaultEngraveJob` mints a fresh id every call, so the
  * shipped labels have no stable identity to check against).
@@ -131,10 +163,14 @@ export interface BadgeLabelSeedInputs {
  * badge route had already re-depth-ed to 0.51 look like a job somebody had touched, so it was never
  * re-seeded.
  *
- * The two optionals are compared by what they MEAN rather than by presence: `construction ?? false`
- * (a label with no flag and one flagged `false` both cut, so they are the same label), and
- * `depthIntent ?? null` (a stated intent is a claim about which colour the floor is, which the
- * shipped set never makes).
+ * `depthIntent` is out for the same reason, one step further (#363 review, folding the follow-up):
+ * the walk WRITES `'reveal'` on a printed badge's floor and stamps it `computed`, so a pre-#363 job
+ * that went through a split badge carries a `depthIntent` value the shipped set never had and would
+ * never re-seed. A person's intent is caught by provenance like every other claim (they can only
+ * reach it through `updateLabel`, which stamps `user`), not by its value.
+ *
+ * `construction` stays, compared by what it MEANS rather than by presence: `construction ?? false`
+ * (a label with no flag and one flagged `false` both cut, so they are the same label).
  */
 function demoShape(l: EngraveLabel): string {
   return JSON.stringify([
@@ -147,7 +183,6 @@ function demoShape(l: EngraveLabel): string {
     l.rotation,
     l.enabled,
     l.construction ?? false,
-    l.depthIntent ?? null,
   ]);
 }
 
@@ -200,11 +235,16 @@ function isRouteLaidOut(job: Pick<EngraveJob, 'labels' | 'sources'>): boolean {
 }
 
 /**
- * May the badge route replace this job's labels? The ONE gate `takeBadgeBlank` asks (#363).
+ * May the BADGE route replace this job's labels? The gate `takeBadgeBlank` asks (#363).
  *
- * True for the shipped demo set, and for a set this same route seeded on an earlier take. False the
- * moment a person has stated anything about any line, and false for a job left with no lines — a
- * set someone emptied is a decision, and re-seeding it would hand back a line they deleted.
+ * True for the shipped demo set, and for a set the badge route seeded on an earlier take. False the
+ * moment a person has stated anything about any line, and false for a job left with no lines — a set
+ * someone emptied is a decision, and re-seeding it would hand back a line they deleted.
+ *
+ * The BARE-blank route (#364) asks only `isShippedDemoLabelSet`, not this: a badge seeds content of
+ * its own (a badge is a name badge) and so may also take over a line an earlier take left, but a
+ * blank's seed is only a placeholder, so it replaces the demo words it was never written for and
+ * leaves any other set alone — including a line the badge route seeded.
  */
 export function mayRelayoutLabels(job: Pick<EngraveJob, 'labels' | 'sources'>): boolean {
   if (job.labels.length === 0) return false;
@@ -219,7 +259,7 @@ export function mayRelayoutLabels(job: Pick<EngraveJob, 'labels' | 'sources'>): 
  * The free space either side of the pocket, INSIDE the edge inset. Empty when the pocket leaves no
  * strip tall enough to be worth naming — a blank whose pocket spans the usable height — which the
  * caller reads as "no free band": the seed then centres the line on the blank and accepts the
- * `item-over-void` warning, which is the honest thing for a badge whose pocket is its whole face.
+ * `item-over-void` warning, which is the honest thing for a blank whose pocket is its whole face.
  *
  * Two voids are not bands at all, and both fall back to the whole usable area (the same reading as
  * "no pocket", so the line still goes on the blank): one that is **disabled** — it does not cut, and
@@ -227,7 +267,7 @@ export function mayRelayoutLabels(job: Pick<EngraveJob, 'labels' | 'sources'>): 
  * height a horizontal band can be cut out of. A rect at 0° or 180° has the same footprint either
  * way and is answered normally.
  */
-function freeBands(blank: BadgeSeedBlank, edgeMargin: Mm): { y0: Mm; y1: Mm }[] {
+function freeBands(blank: SeedBlank, edgeMargin: Mm): { y0: Mm; y1: Mm }[] {
   const y0 = edgeMargin;
   const y1 = blank.width - edgeMargin;
   if (y1 <= y0) return [];
@@ -250,13 +290,12 @@ function inkBoxOf(text: string, font: string, weight: TextWeight, size: Mm, meas
 }
 
 /**
- * The one label the badge route seeds, or null when this blank cannot hold one at all.
+ * The one label a blank route seeds, or null when this blank cannot hold one at all.
  *
  * The shape of the answer, and why each number is what it is:
  *
  *   - **The band** — the free strip with the most ROOM, ties going to the front (nearest the
- *     operator, and the edge a badge is read from). With no pocket the whole usable area is one
- *     band.
+ *     operator, and the edge a line is read from). With no pocket the whole usable area is one band.
  *   - **The cap height** — `BAND_FILL` of the band, rounded DOWN to a whole millimetre, then
  *     measured down a millimetre at a time until the line's real ink box fits both the band's
  *     height and the blank's usable width. Whole millimetres and not a measured size: this is a
@@ -270,7 +309,7 @@ function inkBoxOf(text: string, font: string, weight: TextWeight, size: Mm, meas
  * Null when no size at or above 1 mm fits — a blank too small to hold a single line at all. Nothing
  * is seeded then; the person gets the demo labels' own findings, which is the honest report.
  */
-export function badgeLabelSeed(inputs: BadgeLabelSeedInputs): EngraveLabel | null {
+export function blankLabelSeed(inputs: LabelSeedInputs): EngraveLabel | null {
   const { blank, edgeMargin, font, weight } = inputs;
   const text = inputs.text ?? BADGE_SEED_TEXT;
   const usableWidth = blank.length - 2 * edgeMargin;
