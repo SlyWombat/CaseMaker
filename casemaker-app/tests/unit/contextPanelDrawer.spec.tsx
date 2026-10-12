@@ -92,3 +92,20 @@ describe('#355 — the rail shares the viewport from 1024 up', () => {
     }
   });
 });
+
+describe('#360 — the export modal leaves the drawer it is opened from', () => {
+  it('mounts on the body, not inside the drawer that holds its button', () => {
+    setWidth(1023);
+    useViewportStore.setState({ activeSidebarSection: 'export' });
+    render(<ContextPanel />);
+    fireEvent.click(screen.getByTestId('export-open'));
+
+    // The drawer is `position: fixed` WITH a `transform` and a z-index token, so as an ancestor it
+    // is both the modal's containing block and its stacking context — a backdrop asking for
+    // `--cm-z-modal-raised` would never leave it. Portaled, the modal answers to the window.
+    const backdrop = document.querySelector('.export-modal-backdrop');
+    expect(backdrop, 'the modal rendered').not.toBeNull();
+    expect(backdrop!.parentElement, 'portaled to the document body').toBe(document.body);
+    expect(screen.getByTestId('context-panel').contains(backdrop!), 'not inside the drawer').toBe(false);
+  });
+});

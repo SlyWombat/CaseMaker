@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
+import { createPortal } from 'react-dom';
 import { useJobStore } from '@/store/jobStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useSettingsStore, type ExportFormat } from '@/store/settingsStore';
@@ -107,7 +108,14 @@ export function ExportModal({ onClose }: ExportModalProps) {
     }
   };
 
-  return (
+  // Portaled to the body (#360), as the other three dialogs are. This one is mounted from
+  // `ExportPanel`, which lives INSIDE the sidebar: below 1024 px the sidebar is a drawer, and
+  // `.sidebar--drawer`'s `transform` both creates a stacking context at `--cm-z-sidebar-drawer`
+  // (25) and becomes the containing block for a fixed descendant — so a backdrop asking for
+  // `--cm-z-modal-raised` (200) would stack at 25 and be positioned against the drawer rather than
+  // the window, i.e. under the context panel and under any dialog at 120. The modal belongs to the
+  // page, not to the drawer it happens to be opened from.
+  return createPortal(
     <div
       className="export-modal-backdrop"
       role="dialog"
@@ -279,7 +287,8 @@ export function ExportModal({ onClose }: ExportModalProps) {
           </p>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -252,3 +252,116 @@ test('the Part panel fits the phone, and its numbers reach the part (#282)', asy
   expect(bbox.min[0]).toBeCloseTo(-30, 3);
   expect(bbox.max[0]).toBeCloseTo(30, 3);
 });
+
+/**
+ * #360 — the export modal, on the phone, from the drawer it is opened inside.
+ *
+ * `ExportModal` was `position: fixed` with `--cm-z-modal-raised` (200) but NOT portaled, and it is
+ * mounted from `ExportPanel`, which `ContextPanel` renders. Below 1366 px that panel is
+ * `.context-panel--drawer`: `position: fixed` with `transform: translateX(-100% …)` and
+ * `--cm-z-sidebar-drawer` (25). A transform makes it the CONTAINING BLOCK for a fixed descendant,
+ * and its z-index makes it the stacking context — so the modal's "200" never left the drawer, and
+ * its backdrop was positioned against a 360 px drawer rather than the window. (The issue names
+ * `.sidebar--drawer`, which has the same shape; the export panel is in the context drawer, so the
+ * exposure starts at 1366 px, not at the phone breakpoint. Measured here rather than assumed.)
+ *
+ * The #348 review's rule applies to a modal as much as to a viewport label, so this asserts the
+ * arithmetic that decides the paint — parent, z-index, and the box the fixed element resolved to —
+ * rather than a screenshot in which a correct fix and a modal that merely happens to be on top
+ * look the same.
+ */
+test('the export modal belongs to the page, not the drawer it opens from (#360)', async ({ cm, page }) => {
+  await cm.ready();
+  await page.getByTestId('welcome-search').fill('sht31');
+  await page.getByTestId('welcome-board-adafruit-sht31d').click();
+  await page.getByTestId('welcome-generate').click();
+  await page.waitForSelector('[data-testid="sidebar"]', { timeout: 30_000 });
+  await page.evaluate(async () => { await window.__caseMaker!.waitForIdle(); });
+
+  // The route in is the real one: the rail's drawer, then the Export section, then its button.
+  const panel = page.getByTestId('context-panel');
+  if ((await panel.getAttribute('class'))?.includes('context-panel--open')) {
+    await page.getByTestId('context-panel-handle').click();
+    await expect(panel).toHaveClass(/context-panel--closed/);
+  }
+  const sideX = await page.getByTestId('sidebar').evaluate((el) => el.getBoundingClientRect().x);
+  if (sideX < 0) await page.getByTestId('sidebar-handle').click();
+  await page.getByTestId('sidebar-button-export').click();
+  await expect(page.getByTestId('context-section-export')).toBeVisible();
+  await page.getByTestId('export-open').click();
+  await expect(page.getByTestId('export-modal-close')).toBeVisible();
+  await page.waitForTimeout(200);
+
+  const stack = await page.evaluate(() => {
+    const backdrop = document.querySelector('.export-modal-backdrop') as HTMLElement;
+    const named = (el: Element): string => {
+      const id = el.getAttribute('data-testid');
+      const cls = typeof el.className === 'string' && el.className ? `.${el.className.split(' ').join('.')}` : '';
+      return `${el.tagName.toLowerCase()}${id ? `#${id}` : ''}${cls}`;
+    };
+    const r = backdrop.getBoundingClientRect();
+
+    // Every ancestor between the backdrop and the body, with EVERY property that makes a stacking
+    // context or a containing block — not just `z-index`: `transform` is what traps this one, and a
+    // check that named only z-index would report "nothing traps it" while the drawer did exactly
+    // that. (#348's review flagged the narrow form of this walk in the toolbar spec.)
+    const traps: string[] = [];
+    for (let n = backdrop.parentElement; n && n !== document.body; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      const why: string[] = [];
+      if (cs.zIndex !== 'auto') why.push(`z=${cs.zIndex}`);
+      if (cs.transform !== 'none') why.push(`transform=${cs.transform}`);
+      if (cs.filter !== 'none') why.push('filter');
+      if (cs.perspective !== 'none') why.push('perspective');
+      if (cs.opacity !== '1') why.push(`opacity=${cs.opacity}`);
+      if (cs.isolation === 'isolate') why.push('isolation');
+      if (why.length > 0) traps.push(`${named(n)} ${why.join(' ')}`);
+    }
+
+    // Is the drawer really a drawer here? Without this the whole test could pass on a layout that
+    // has no containing block to escape from.
+    const drawer = document.querySelector('.context-panel--drawer') as HTMLElement | null;
+    const inDrawer: Array<{ el: string; z: number }> = [];
+    for (const el of Array.from(drawer?.querySelectorAll('*') ?? [])) {
+      const z = getComputedStyle(el).zIndex;
+      if (z !== 'auto') inDrawer.push({ el: named(el), z: Number(z) });
+    }
+
+    return {
+      parent: backdrop.parentElement?.tagName ?? null,
+      z: Number(getComputedStyle(backdrop).zIndex),
+      token: getComputedStyle(document.documentElement).getPropertyValue('--cm-z-modal-raised').trim(),
+      box: { x: r.x, y: r.y, w: r.width, h: r.height },
+      win: { w: window.innerWidth, h: window.innerHeight },
+      drawerZ: drawer ? getComputedStyle(drawer).zIndex : null,
+      drawerTransform: drawer ? getComputedStyle(drawer).transform : null,
+      traps,
+      inDrawer,
+    };
+  });
+
+  // The premise: the modal was opened from inside a transformed, z-indexed drawer.
+  expect(stack.drawerZ, 'the context panel is a drawer here, at its own token').toBe('25');
+  expect(stack.drawerTransform, 'and it carries the transform that would trap a fixed child').not.toBe('none');
+
+  // The fix: it is portaled to the body, so the drawer is neither its stacking context nor its
+  // containing block, and nothing in between can become one.
+  expect(stack.parent, 'the modal is portaled to the body').toBe('BODY');
+  expect(stack.traps, 'nothing between the modal and the body traps it').toEqual([]);
+
+  // The number is the scale's, compared against the token rather than a literal.
+  expect(Number.isFinite(stack.z), 'the modal carries a numeric z-index').toBe(true);
+  expect(stack.z, 'the raised-modal rung of the one scale').toBe(Number(stack.token));
+  expect(stack.z, 'and it is above the drawer it was opened from').toBeGreaterThan(Number(stack.drawerZ));
+
+  // The containing-block proof: `inset: 0` on a fixed element covers the WINDOW. Against the
+  // drawer's box it would be ~360 px wide, starting at the drawer's right edge.
+  expect(Math.abs(stack.box.x), 'the backdrop starts at the window’s left edge').toBeLessThanOrEqual(1);
+  expect(Math.abs(stack.box.y), 'and at its top').toBeLessThanOrEqual(1);
+  expect(Math.abs(stack.box.w - stack.win.w), 'and it is as wide as the window').toBeLessThanOrEqual(1);
+  expect(Math.abs(stack.box.h - stack.win.h), 'and as tall').toBeLessThanOrEqual(1);
+
+  // #348's rule, for the drawer this time: nothing in it stacks at or above the open modal.
+  const above = stack.inDrawer.filter((e) => e.z >= stack.z);
+  expect(above, 'nothing in the drawer stacks at or above the open modal').toEqual([]);
+});
