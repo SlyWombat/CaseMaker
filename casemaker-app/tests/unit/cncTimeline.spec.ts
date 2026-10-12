@@ -427,6 +427,17 @@ describe('checkpoints are CAUSAL runs (review #4: a return to an earlier Z was f
     }
   });
 
+  it('carries the tool its own cuts ran under, so a probe cut is readable without the timeline (#191 review)', () => {
+    const tl = run('T1 M6\nS1000 M3\nG0 X0 Y0 Z1\nG1 Z-1 F100\nG1 X5\nT0 M6\nS1000 M3\nG0 X10 Y0 Z1\nG1 Z-1 F100\nG1 X15\n', { startingTool: 1 });
+    // Two buckets at the same Z, either side of the change: T1 cut the first, T0 the second. The
+    // air gate reads `cp.tool` to decide which buckets removed material, and `checkAirMoves` is
+    // handed the checkpoints alone.
+    expect(tl.checkpoints.map((c) => [c.z, c.tool])).toEqual([
+      [-1, 1],
+      [-1, 0],
+    ]);
+  });
+
   it('carries each move\'s own Z pair, with an unknown start stored as the end (a plunge)', () => {
     const tl = run('S1000 M3\nG0 X10 Y10 Z1\nG1 Z-0.5 F100\nG1 X30 Z-1\n');
     // The plunge ends at -0.5; the ramp ends at -1, so it is its own (lower) checkpoint.

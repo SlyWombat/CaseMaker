@@ -203,6 +203,15 @@ describe('cam/trace (#219)', () => {
     expect(ir.operations.map((o) => o.labelId)).toEqual(['near', 'far']);
     expect(ir.operations.map((o) => o.number)).toEqual([1, 2]);
   });
+
+  it('refuses a cutter numbered 0 at generate, like the region CAM does (#191 review)', () => {
+    // The rule is one function (`toolNumberFor`), so this module's call site is tested here rather
+    // than trusted to match `generateEngrave`'s by hand.
+    const t = trace({ paths: [[[0, 0], [20, 0]]], closed: [false] });
+    expect(() => generateTrace([t], { ...TOOL, number: 0 }, PARAMS, Z1.rapidEstimate)).toThrow(
+      /T0 is the Z1's probe slot/,
+    );
+  });
 });
 
 describe('trace model (#219)', () => {

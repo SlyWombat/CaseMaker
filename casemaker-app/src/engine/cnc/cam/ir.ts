@@ -61,7 +61,7 @@ export interface ToolpathIR {
   frame: 'flat' | 'rotary';
   /** The cutter, as the `.nc` header describes it (#182, `/Simulation.md` §6). */
   tool: Tool;
-  /** Tool number, 1 for V1's single-tool jobs. */
+  /** Tool number, 1 for V1's single-tool jobs. Chosen by {@link toolNumberFor}. */
   toolNumber: number;
   spindleRpm: number;
   /** Airflow (the machine's air output; the post decides the word). */
@@ -71,6 +71,34 @@ export interface ToolpathIR {
   /** Z for hops between loops inside one operation, mm above the stock top. */
   hopZ: number;
   operations: CamOperation[];
+}
+
+/**
+ * The tool number a job's file carries, from the cutter's own — or a refusal (#191 review).
+ *
+ * `Tool.number` is a CUTTER number and a catalogue row can state `0`: the importer copies
+ * `cutterNumber` as it stands, and `ToolSchema.number` is `int().nullable()`, so nothing on the
+ * way in says no. `??` passed that 0 straight through, and the post would have written `T0 M6` —
+ * and T0 is the Z1's PROBE slot. Our own file would then be one our own sweep reads as a
+ * `probe-fitted-cut`, i.e. "foreign or broken", which is the right reading of that file and the
+ * wrong file to have written.
+ *
+ * So the refusal is HERE, where the number is chosen, and not in the sweep: the sweep's job is to
+ * report what a file says, and a file that cuts with a probe really is broken. A number that is
+ * not a positive whole one cannot be posted either — `T1.5 M6` is not a station — so both are
+ * refused together, by name, at generate.
+ *
+ * `null` is "the cutter states no number", which V1's single-tool jobs post as `T1`.
+ */
+export function toolNumberFor(tool: Tool): number {
+  const n = tool.number;
+  if (n === null) return 1;
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(
+      `a tool number of ${n} is not usable: T0 is the Z1's probe slot, so the cutter's station has to be T1 or higher, and a station is a whole number`,
+    );
+  }
+  return n;
 }
 
 /**

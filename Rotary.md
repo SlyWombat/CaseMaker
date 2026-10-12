@@ -181,7 +181,7 @@ the page is JS-rendered and the first fetch returned only its title):
 | checkpoints are keyed on (segment, Z) | a change in A does not open a new run; `zs` carries a Z pair per move | `emulator/timeline.ts` `Checkpoint`, the run-splitter |
 | the IR has no `A` | documented as deliberate; `ToolpathIR.frame` (`'flat'`/`'rotary'`) is the R-0 discriminant | `cam/ir.ts` header |
 | the post refuses the rotary frame | `frame === 'rotary'` and `zDatum === 'rotary-axis'` are errors until R-3 | `post/z1.ts` `postZ1` |
-| the profile carries the module | `MachineProfile.rotary` (axis/parent/envelope/steps/rates/homing/unwind), `configZ1.default` figures, `source` flagged unverified | `machine.ts` `RotaryProfile`, `Z1.rotary` |
+| the profile carries the module | `MachineProfile.rotary` (axis/parent/envelope/steps/rates/homing/unwind) with `sources` — the provenance of EACH figure, not one for the block (`RotarySourcedField`); the shipped defaults and the database figure are recorded unverified, the two rates as config reads | `machine.ts` `RotaryProfile`, `Z1.rotary` |
 | `G92.4 A S/R` is a rotary unwind | lowers to a `rotary-unwind` event (mode + a + value), X/Y/Z left intact; bare `G92.4` stays a manual home | `gcode/interpreter.ts`, `gcode/types.ts`, `emulator/timeline.ts` |
 | the post emits X/Y/Z/F only | sticky formatted words | `post/z1.ts` `emit` |
 | the verifier **refuses any `A`** | `PARAM_LETTERS = {T,S,F,X,Y,Z}` → `not-our-dialect` | `verify.ts` |
@@ -772,7 +772,7 @@ written for B; under A, R-2 becomes "#222's engine, then the rotary footprint".
 | | Milestone | Entry | Exit | Bench work |
 |---|---|---|---|---|
 | **R-0** | **Keep it additive.** The three reservations of §3.8 (`ToolpathIR.frame`, the second `zDatum` literal, `stubSetup`'s cylinder WCS on the axis), `MachineProfile.rotary` as sourced data with provenance (§3.5), the `rotary-unwind` event for `G92.4 A S/R`, the doc edits of §11 | this document accepted; the maintainer's answers to §12 | all tests green; rotary still refused everywhere; `grep` finds no `A` word in the post | none |
-| **R-1** | **Bench: fit and characterise the module.** Every row of §9 | the module, a dowel, a dial indicator, an afternoon | the profile's `rotary` block carries device values with `source: 'measured'`; the +A sign is recorded; a Studio rotary header is on disk (uncommitted, like the corpus) | all of it |
+| **R-1** | **Bench: fit and characterise the module.** Every row of §9 | the module, a dowel, a dial indicator, an afternoon | the profile's `rotary` block carries device values, with each measured figure's own `sources.<field>` entry replaced by the measurement (`RotarySourcedField` — the block has one source per figure, never one for the whole block); the +A sign is recorded; a Studio rotary header is on disk (uncommitted, like the corpus) | all of it |
 | **R-2** | **The column engine, rotary parameterisation.** Grid, footprint (§4.2), `axis-crossing` refusal, gouges, mesh at display resolution, snapshot anchors; a probe script first (§4.4's estimates measured) | R-0 | `NefertitiRough.nc` simulates inside `SIM_BUDGET_MS` with memory recorded; `NefertitiFinish.nc` is **refused** `axis-crossing` at its first Z ≤ 0 step, with the path still returned; the engine's interface is the one #222 extends | none |
 | **R-3** | **Wrap engraving — the dowel.** `EngraveJob` stock `cylinder` + `workholding: rotary-chuck`; unrolled authoring with the seam and end bands; anisotropic opening (R10); wrap CAM; `a` in IR and post; verifier rotary rules (§6.4); the rotary frame's golden-number test; the column-space oracle (§4.5); the viewport hybrid (§5.3); run sheet sections (§6.5) | R-1 and R-2 | a verified, simulated, oracle-passing `.nc` cuts legible text round a wooden dowel; the probed radius and run-out are on the run sheet; the viewport shows the dowel turning with the path on it and unrolls on demand | the cut itself; a rotary depth ladder |
 | **R-4** | **Indexed faces** on the exact sweeper: R4's run-splitting on A, rotated stock per index, flats and cross-features | R-3 | a two-flat job on a round stock simulates exactly and plays back per face | one indexed cut |
@@ -819,5 +819,6 @@ option chosen.
 5. **R-0's three type reservations now** (R5's exception) versus no code until R-3.
 6. **Class R (axis-crossing continuous relief):** a placeholder milestone, or declared out of scope
    until someone asks (`feedback_demand_driven_features`).
-7. **Shipped firmware numbers on the profile now** as `source: 'configZ1.default (shipped default, unverified)'`,
-   or an empty `rotary` block until R-1.
+7. **Shipped firmware numbers on the profile now**, each with its own
+   `sources.<field>` entry (e.g. `'configZ1.default, shipped default (key absent from /sd/config.txt)
+   — unverified'`), or an empty `rotary` block until R-1.

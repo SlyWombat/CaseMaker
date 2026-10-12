@@ -145,6 +145,7 @@ describe('display mesh (§4.4)', () => {
 function fakeTimeline(moves: CutMove[], rotary = true, y = 0): Timeline {
   const cp = {
     segment: 0,
+    tool: 1,
     zKey: Math.round((moves[0]?.z ?? 0) * 1000),
     z: moves[0]?.z ?? 0,
     run: 0,

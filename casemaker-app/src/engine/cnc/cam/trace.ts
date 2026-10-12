@@ -35,6 +35,7 @@ import {
   type CamOperation,
   type RapidEstimate,
   type ToolpathIR,
+  toolNumberFor,
 } from './ir';
 
 /**
@@ -155,7 +156,7 @@ export function generateTrace(
 ): ToolpathIR {
   const radiusResult = cuttingRadiusForSweep(tool);
   if (!radiusResult.ok) throw new Error(`generateTrace: ${radiusResult.reason}`);
-  const toolNumber = tool.number ?? 1;
+  const toolNumber = toolNumberFor(tool);
 
   const strategies: Record<'nearest', (items: readonly TracePaths[]) => TracePaths[]> = {
     nearest: orderNearest,

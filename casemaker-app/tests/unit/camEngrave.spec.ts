@@ -347,3 +347,24 @@ describe('operation names (#214 work item 4)', () => {
     expect(toolpathNames).toContain('[T1]Engrave "CASE" 2.0mm');
   });
 });
+
+// #191 review. The rule is `toolNumberFor`'s (tested directly in `camIrConcat.spec.ts`); this is
+// the call site, so that a generator that stops asking it fails here rather than posting `T0 M6`.
+describe('the tool number a job posts (#191 review)', () => {
+  const region = rectRegion(10, 5, 2, 2);
+
+  it('refuses a cutter numbered 0 at generate, naming the probe slot', () => {
+    const probeNumbered = { ...TOOL, number: 0 };
+    expect(() =>
+      generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], probeNumbered, PARAMS, Z1.rapidEstimate),
+    ).toThrow(/T0 is the Z1's probe slot/);
+  });
+
+  it('posts T1 for a cutter that states no number, and the stated station when there is one', () => {
+    const unnamed = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], { ...TOOL, number: null }, PARAMS, Z1.rapidEstimate);
+    expect(unnamed.toolNumber).toBe(1);
+    const third = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], { ...TOOL, number: 3 }, PARAMS, Z1.rapidEstimate);
+    expect(third.toolNumber).toBe(3);
+    expect(third.operations[0]?.name.startsWith('[T3]')).toBe(true);
+  });
+});

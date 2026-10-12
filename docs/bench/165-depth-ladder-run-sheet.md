@@ -1,6 +1,6 @@
 # Run sheet — 165 depth ladder
 
-Generated 2026-10-04 · file `165-depth-ladder.nc` · sha256 `6f782fa0` · estimated cutting time 6 min 22 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² — a planning estimate, not a measured cycle time)
+Generated 2026-10-04 · file `165-depth-ladder.nc` · sha256 `6f782fa0` · estimated cutting time 6 min 22 s — **UNDERSTATED**, as the note below says: that figure is from a generation whose estimate did not count rapids. Regenerating for the chosen cutter recomputes it as cutting + rapids through the trapezoid, on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² — a planning estimate either way, not a measured cycle time
 
 > *The 6 min 22 s above is from the 2026-10-04 generation, when the estimate excluded rapids and is therefore **understated**; the regeneration for the chosen cutter recomputes it, and D3 of the bench runbook is how the real figure is measured. (The old "simulated — rapids not included" wording is what made `DISPLAY_RAPID_MM_MIN` look relevant; that constant is gone.)*
 

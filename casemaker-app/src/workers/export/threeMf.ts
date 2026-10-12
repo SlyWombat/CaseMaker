@@ -140,9 +140,17 @@ function volumeRanges(meshes: StlMeshInput[]): VolumeRange[] {
 
 /**
  * `Metadata/Slic3r_PE_model.config` — the sidecar that turns one object back
- * into named parts and assigns each one a tool. Format is
+ * into named parts and assigns each one a tool. The shape is
  * `make_badge.py:120-130`'s, which is the reference: it is known to open in
- * PrusaSlicer as one object with two parts.
+ * PrusaSlicer as one object with two parts, and its keys — the object's `name`
+ * and `extruder`, and each volume's `name`, `volume_type`, `matrix` and
+ * `extruder` — are the ones with that evidence behind them.
+ *
+ * We write one key the reference does NOT: an object-level `fill_density`
+ * (also #166 item 2). It is the app's own spec rather than the format's — the
+ * blank's depth model assumes solid material — and `engine/compiler/badge.ts`
+ * says where the divergence is recorded. Read the reference as the floor, not
+ * as the whole of what this writes.
  */
 function buildConfigXml(meshes: StlMeshInput[], objectName?: string): string {
   const cfg: string[] = ['<?xml version="1.0" encoding="UTF-8"?>', '<config>', ' <object id="1" instances_count="1">'];

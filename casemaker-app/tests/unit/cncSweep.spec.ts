@@ -508,6 +508,34 @@ describe('#191 item 9: a cut made with T0 (the probe) active is refused, not swe
     expect(out.value.stats.removedVolume).toBeGreaterThan(0);
   });
 
+  // #191 review: a probe cut is refused by name above, but the AIR GATE is a second reader of the
+  // same fact. Both shortcuts it uses credit a checkpoint with having REMOVED material — the
+  // step-7 retract and the recheck's subtraction of the earlier cuts — so a T0 bucket left in
+  // either one CLEARS a rapid that ploughs through material the blank still has. That is the
+  // permissive direction, and these two pin both halves.
+  const rapidLines = (out: { value: { diagnostics: { code: string; message: string }[] } }) =>
+    out.value.diagnostics
+      .filter((d) => d.code === 'rapid-through-stock')
+      .map((d) => Number(/line (\d+)/.exec(d.message)?.[1]));
+
+  it('...and a T0 bucket proves nothing to the retract shortcut: the retract out of a probe cut is tested', () => {
+    const { out } = sweep('T1 M6\nS1000 M3\nG0 X10 Y10 Z1\nT0 M6\nS1000 M3\nG1 Z-0.5 F100\nG1 X30\nG0 Z1\n');
+    if (!out.ok) throw new Error('refused');
+    // Line 8 retracts straight up from the end of the T0 cut, which removed nothing: the tool is
+    // still inside material all the way to the top face.
+    expect(rapidLines(out)).toContain(8);
+    expect(out.value.diagnostics.map((d) => d.code)).toContain('probe-fitted-cut');
+  });
+
+  it('...and it proves nothing to the recheck either: a probe cut is not subtracted from a later rapid', () => {
+    // This rapid is not a straight retract (X changes), so the shortcut above cannot answer for
+    // it: it is tested geometrically, and the phantom removal of the T0 cut must not be subtracted
+    // from what the tool body meets.
+    const { out } = sweep('T1 M6\nS1000 M3\nG0 X10 Y10 Z1\nT0 M6\nS1000 M3\nG1 Z-0.5 F100\nG1 X40\nG0 X20 Z-0.1\n');
+    if (!out.ok) throw new Error('refused');
+    expect(rapidLines(out)).toContain(8);
+  });
+
   it('...and a real tool (T1) cuts as it always did', () => {
     const { out } = sweep('T1 M6\nS1000 M3\nG0 X10 Y10 Z1\nG1 Z-0.5 F100\nG1 X30\n');
     if (!out.ok) throw new Error('refused');

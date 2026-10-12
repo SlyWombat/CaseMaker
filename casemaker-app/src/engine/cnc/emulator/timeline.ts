@@ -84,6 +84,15 @@ export interface Segment {
 
 export interface Checkpoint {
   segment: number;
+  /**
+   * The tool that was ACTIVE for the moves in this bucket (#191 review): `0` is the probe,
+   * `'unknown'` a program that never said. It is the value `Segment.tool` settles on — a segment's
+   * tool is fixed at its first move, and this literal is built on a move of the same segment — but
+   * it is carried HERE, on the bucket, because what a bucket's cuts were made with is a fact about
+   * the cuts, and the checks that need it (the probe refusal, and the air gate's reading of which
+   * buckets removed material) are handed the checkpoints, not the timeline.
+   */
+  tool: ToolState;
   /** Quantised Z in micrometres (work frame). */
   zKey: number;
   /** The Z in mm that bucket stands for: the LOWEST Z of any move in it. */
@@ -642,7 +651,7 @@ export function buildTimeline(parse: ParseResult, setup: Setup, machine?: MillPr
           // to it later is a new, later checkpoint (see `Checkpoint.run`).
           let cp = current && current.segment === seg.index && current.zKey === zKey ? current : null;
           if (!cp) {
-            cp = { segment: seg.index, zKey, z, run: order.length, steps: [], xy: [], zs: [], nonConstantZ: false };
+            cp = { segment: seg.index, tool: state.tool, zKey, z, run: order.length, steps: [], xy: [], zs: [], nonConstantZ: false };
             order.push(cp);
           }
           current = cp;

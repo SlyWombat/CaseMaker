@@ -39,6 +39,7 @@ import {
   type CamOperation,
   type RapidEstimate,
   type ToolpathIR,
+  toolNumberFor,
 } from './ir';
 import { pocketLoops, type OffsetFn, type Polygons } from './pocket';
 
@@ -255,7 +256,7 @@ export function generateEngrave(
   const radiusResult = cuttingRadiusForSweep(tool);
   if (!radiusResult.ok) throw new Error(`generateEngrave: ${radiusResult.reason}`);
   const toolRadius = radiusResult.radius;
-  const toolNumber = tool.number ?? 1;
+  const toolNumber = toolNumberFor(tool);
   const offset = makeClipperOffset(tl);
 
   const prepared: Prepared[] = labels.map((label) => {

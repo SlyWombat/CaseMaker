@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { concatToolpathIR, type CamMove, type CamOperation, type ToolpathIR } from '@/engine/cnc/cam/ir';
+import { concatToolpathIR, toolNumberFor, type CamMove, type CamOperation, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { Z1 } from '@/engine/cnc/machine';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -116,5 +116,27 @@ describe('concatToolpathIR (#219/#287)', () => {
     // The control: with nothing changed it joins cleanly, so the throws above are the assert and
     // not this helper refusing everything.
     expect(() => concatToolpathIR(base, ir([op(1, 't')]))).not.toThrow();
+  });
+});
+
+// #191 review: the tool number a job POSTS, refused where it is chosen rather than where the file
+// is read back. `cam/engraveJob.ts` and `cam/trace.ts` both pick it here, so the rule lives in one
+// place and the two cannot drift.
+describe('toolNumberFor (#191 review)', () => {
+  it("takes the cutter's own number, and T1 when the cutter states none", () => {
+    expect(toolNumberFor(flatEndMill(1))).toBe(1);
+    expect(toolNumberFor({ ...flatEndMill(1), number: null })).toBe(1);
+    expect(toolNumberFor({ ...flatEndMill(1), number: 4 })).toBe(4);
+  });
+
+  it('refuses T0 — the probe slot — and any number that is not a station', () => {
+    // A catalogue row can carry `cutterNumber = 0`: the importer copies it as it stands and
+    // `ToolSchema.number` is `int().nullable()`, so `number ?? 1` passed the 0 straight through and
+    // our own post wrote `T0 M6` — a file our own sweep then reads back as `probe-fitted-cut`, i.e.
+    // foreign or broken. T0 is the PROBE.
+    expect(() => toolNumberFor({ ...flatEndMill(1), number: 0 })).toThrow(/T0 is the Z1's probe slot/);
+    // A station is a whole number, so a fractional or negative one cannot be posted either.
+    expect(() => toolNumberFor({ ...flatEndMill(1), number: -1 })).toThrow(/not usable/);
+    expect(() => toolNumberFor({ ...flatEndMill(1), number: 1.5 })).toThrow(/whole number/);
   });
 });

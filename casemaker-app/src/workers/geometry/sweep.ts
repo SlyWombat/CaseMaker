@@ -493,9 +493,17 @@ export function checkAirMoves(
   // tolerate, stated once instead of measured through tessellation slivers. It holds only while
   // `retractCoveredByColumn` — see that flag: a fixture above the stock top escapes the column
   // and must be tested like any other obstacle, so the shortcut is then disabled (#204 follow-up).
+  // The checkpoints that REMOVE material, and so the only ones either gate below may credit with
+  // clearing a later rapid. Two kinds are not: one at or above the stock top, whose cuts removed
+  // nothing (the vendor's rotary files feed at Z = +30 over a cylinder), and one made with `T0`,
+  // the PROBE, which removes nothing at all because a probe is contact (#191 review). Both gates
+  // below would otherwise treat a probe bucket as cut material — the retract shortcut clears a
+  // rapid landing on one, and the recheck subtracts one's solids from a rapids's gouge — so leaving
+  // them in makes the gate MORE permissive, which is the wrong direction to be wrong in. The main
+  // checkpoint loop refuses a probe cut by name for the same reason (sweep.ts, `probe-fitted-cut`).
+  const removesMaterial = checkpoints.filter((cp) => cp.z < topZ && cp.tool !== 0);
   const cutEndByStep = new Map<number, readonly [number, number, number]>();
-  for (const cp of checkpoints) {
-    if (cp.z >= topZ) continue; // not swept: its cuts removed nothing, so they prove nothing
+  for (const cp of removesMaterial) {
     for (let k = 0; k < cp.steps.length; k++) {
       cutEndByStep.set(cp.steps[k] as number, [cp.xy[k * 4 + 2] as number, cp.xy[k * 4 + 3] as number, cp.zs[k * 2 + 1] as number]);
     }
@@ -506,7 +514,7 @@ export function checkAirMoves(
   interface Group { z: number; region: CrossSectionInstance | null; solid: ManifoldInstance | null; box: Box | null; pending: Polygon[] }
   interface Ramp { solid: ManifoldInstance; box: Box }
   interface Prefix { cp: Checkpoint; next: number; groups: Map<number, Group>; ramps: Ramp[] }
-  const prefixes: Prefix[] = checkpoints.filter((cp) => cp.z < topZ).map((cp) => ({ cp, next: 0, groups: new Map(), ramps: [] }));
+  const prefixes: Prefix[] = removesMaterial.map((cp) => ({ cp, next: 0, groups: new Map(), ramps: [] }));
   // Columns replaced by a larger one, and ramp solids: deleted at the end, never now (a lazy
   // subtract may still refer to them until it is forced).
   const retired: ManifoldInstance[] = [];
@@ -892,7 +900,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
     if (cp.z >= topZ) {
       perCheckpoint.push(null);
       skipped++;
-    } else if (timeline.segments[cp.segment]?.tool === 0) {
+    } else if (cp.tool === 0) {
       // `T0` is the PROBE, and a probe is contact, not removal (#191 item 9; the maintainer's
       // decision of 2026-10-12). A cutting move made with `T0` active would "remove" material with
       // a probe — our post never writes one (`T0` is not a cutter), so such a file is foreign or
@@ -900,10 +908,11 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       // there. No removal is modelled for the checkpoint, because the probe removes nothing. This
       // is the same posture as the interpreter refusing an unknown `G28` subcode.
       //
-      // The active tool comes from the checkpoint's SEGMENT: a real tool change calls `boundary`,
-      // so it always opens a new segment, and `Segment.tool` is the tool in force at that
-      // segment's first move. Only a checkpoint at or below the stock top is flagged, because only
-      // one of those would remove material at all (the arm above skips the rest as no-ops).
+      // The tool is the checkpoint's own (#191 review) — the value the segment settles on, carried
+      // on the bucket rather than looked up through the timeline. Only a checkpoint at or
+      // below the stock top is flagged, because only one of those would remove material at all (the
+      // arm above skips the rest as no-ops), and `checkAirMoves` leaves probe buckets out of the
+      // material it credits for the same reason.
       const line = cp.steps.length > 0 ? (timeline.events[cp.steps[0] as number]?.line ?? 0) : 0;
       probeDiag.push({
         severity: 'error',
