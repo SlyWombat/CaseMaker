@@ -9,8 +9,9 @@
  * WHAT A CODE TURNS OUT TO NAME IS DRAWN, NOT HIDDEN. Three outcomes, and the panel never guesses
  * between them: a cutter the inventory already holds (the code names a POSSESSION, so the honest
  * answer is a count, not a second row), catalogue rows that fit the reading (the user picks the one
- * on the label), or nothing (an invitation to the other two doors). The reading itself is labelled
- * provisional, because it is (`registerCutter`, #208 A7).
+ * on the label), or nothing (an invitation to the other two doors). The reading is shown as what the
+ * LABEL printed — a settled format since 2026-10-12, but still the box's word and not a fact about
+ * the cutter, so it is written out for the user to check (`registerCutter`, #378).
  *
  * SYMBOLOGY IS A FACT ABOUT THE EVENT, NOT THE DOOR (#333). `houseClient.ts` keeps `symbology` as
  * the only evidence that a label was actually scanned, so it is decided where the code arrives —

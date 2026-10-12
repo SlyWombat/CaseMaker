@@ -1,10 +1,11 @@
 /**
  * Saying what a printed box code was read as (#309, tracking #212), and naming a shape.
  *
- * The reading is PROVISIONAL (`registerCutter.parseBoxCode`, #208 A7 — one label known), so the
- * panel has to show it as a reading rather than a fact: the user is the only one who can see the
- * box, and a sentence like "ball nose, 1 mm, 4 mm" is what they check it against. Everything the
- * code did not state is left out rather than filled with a `—`, because this is prose, not a table.
+ * The reading says what the LABEL printed, which since 2026-10-12 is a settled format rather than a
+ * guess at one (`registerCutter.parseBoxCode`, #378) — but a settled format is still a reading and
+ * not a fact about the cutter in the box: the user is the only one who can see it, and a sentence
+ * like "ball nose, 1 mm, 4 mm" is what they check it against. Everything the code did not state is
+ * left out rather than filled with a `—`, because this is prose, not a table.
  */
 
 import type { ToolShape } from '@/engine/cnc/tool';
@@ -36,10 +37,18 @@ export const TYPABLE_SHAPES: readonly ToolShape[] = [
   'bull',
 ];
 
-/** `ball nose, 1 mm, 4 mm` — only the parts the label actually stated. */
+/**
+ * `engraving cutter, 30°, 0.3 mm tip` — only the parts the label actually stated. The angle comes
+ * before the tip because that is the order the code prints it in (`C1-BIT-ENGRAVE-30-0.3`).
+ *
+ * The angle is NOT written through `mm` below: it is degrees, and a dimension formatter would put a
+ * trailing `.0` on a whole 30° and read as a length beside the tip. It keeps the degree sign for the
+ * same reason.
+ */
 export function describeReading(box: BoxCode): string {
   const parts: string[] = [];
   if (box.shape !== 'unknown') parts.push(SHAPE_LABELS[box.shape]);
+  if (box.includedAngle !== null) parts.push(`${box.includedAngle}°`);
   if (box.tipDiameter !== null) parts.push(`${mm(box.tipDiameter)} mm tip`);
   if (box.fluteLength !== null) parts.push(`${mm(box.fluteLength)} mm flute`);
   return parts.length > 0 ? parts.join(', ') : 'nothing that names a cutter';

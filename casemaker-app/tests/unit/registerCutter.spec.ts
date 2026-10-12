@@ -3,8 +3,8 @@
 // The three ways a cutter gets into the inventory (scan a box, pick a catalogue row, type it in) all
 // end in one `InventoryItem`, and the rules that are easy to get quietly wrong live here rather than
 // in the panels: a code names ONE possession, a blank field is `null` and never 0, a clone keeps
-// Makera's `id` while its `origin` names the catalogue ROW, and the provisional box-code reading
-// must not let one guessed field hide the right candidate row.
+// Makera's `id` while its `origin` names the catalogue ROW, and the box-code reading must not let
+// one field of a label hide the right candidate row.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
@@ -71,12 +71,13 @@ function ownedItem(over: Partial<InventoryItem> = {}): InventoryItem {
 beforeEach(() => setSeededIds(true));
 afterEach(() => resetSeed());
 
-describe('parseBoxCode — PROVISIONAL (#208 A7: one label known)', () => {
+describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
   it('reads the bench cutter’s own box: a 1 mm ball nose with a 4 mm flute', () => {
     expect(parseBoxCode('C1-BIT-BALL-NOSE-1-4')).toEqual({
       shape: 'ball',
       tipDiameter: 1,
       fluteLength: 4,
+      includedAngle: null,
     });
   });
 
@@ -85,6 +86,7 @@ describe('parseBoxCode — PROVISIONAL (#208 A7: one label known)', () => {
       shape: 'flat',
       tipDiameter: 3.175,
       fluteLength: 12,
+      includedAngle: null,
     });
   });
 
@@ -94,6 +96,7 @@ describe('parseBoxCode — PROVISIONAL (#208 A7: one label known)', () => {
       shape: 'flat',
       tipDiameter: 2,
       fluteLength: null,
+      includedAngle: null,
     });
   });
 
@@ -102,6 +105,7 @@ describe('parseBoxCode — PROVISIONAL (#208 A7: one label known)', () => {
       shape: 'ball',
       tipDiameter: 1,
       fluteLength: 4,
+      includedAngle: null,
     });
   });
 
@@ -118,7 +122,12 @@ describe('parseBoxCode — PROVISIONAL (#208 A7: one label known)', () => {
     ['C1-BIT-CORN-2.0-10.5', 2.0, 10.5],
     ['C1-BIT-CORN-3.0-12', 3.0, 12],
   ])('reads the real corn bit %s as a flat end (#377)', (code, tip, flute) => {
-    expect(parseBoxCode(code)).toEqual({ shape: 'flat', tipDiameter: tip, fluteLength: flute });
+    expect(parseBoxCode(code)).toEqual({
+      shape: 'flat',
+      tipDiameter: tip,
+      fluteLength: flute,
+      includedAngle: null,
+    });
   });
 
   // #379 — the five real Spiral 'O' single-flute codes. A single-flute "O" end mill is a flat end
@@ -131,7 +140,36 @@ describe('parseBoxCode — PROVISIONAL (#208 A7: one label known)', () => {
     ['C1-BIT-O-FLUTE-M-2-8', 2, 8],
     ['C1-BIT-O-FLUTE-M-3.175-12', 3.175, 12],
   ])('reads the real single-flute code %s as a flat end (#379)', (code, tip, flute) => {
-    expect(parseBoxCode(code)).toEqual({ shape: 'flat', tipDiameter: tip, fluteLength: flute });
+    expect(parseBoxCode(code)).toEqual({
+      shape: 'flat',
+      tipDiameter: tip,
+      fluteLength: flute,
+      includedAngle: null,
+    });
+  });
+
+  // #378 — the five real engraving codes (two plain, three on the metal line). An ENGRAVE code is
+  // `<angle>-<tip>` and states NO flute: `30-0.3` is a 30° cutter with a 0.3 mm tip. Read as
+  // `<tip>-<flute>` — which is what this did when every type shared one reading — it said "a 30 mm
+  // tip", a cutter nobody makes, and then matched no catalogue row.
+  it.each([
+    ['C1-BIT-ENGRAVE-30-0.3', 30, 0.3],
+    ['C1-BIT-ENGRAVE-30-0.5', 30, 0.5],
+    ['C1-BIT-ENGRAVE-M-30-0.2', 30, 0.2],
+    ['C1-BIT-ENGRAVE-M-30-0.3', 30, 0.3],
+    ['C1-BIT-ENGRAVE-M-60-0.1', 60, 0.1],
+  ])('reads the real engraving code %s as angle-then-tip, and no flute (#378)', (code, angle, tip) => {
+    expect(parseBoxCode(code)).toEqual({
+      shape: 'engraving',
+      tipDiameter: tip,
+      fluteLength: null,
+      includedAngle: angle,
+    });
+  });
+
+  it('states an angle only where the type does: a flat code has none (#378)', () => {
+    expect(parseBoxCode('C1-BIT-FLAT-3.175-12')?.includedAngle).toBeNull();
+    expect(parseBoxCode('C1-BIT-ENGRAVE-30-0.3')?.includedAngle).toBe(30);
   });
 
   it('drops the metal marker wherever it sits, and reads the same numbers either way (#379)', () => {
@@ -169,7 +207,12 @@ describe('resolveCode — the scan door’s three outcomes', () => {
     expect(got.kind).toBe('candidates');
     if (got.kind !== 'candidates') return;
     expect(got.rows.map((r) => r.key)).toEqual(['cat:111111111111']);
-    expect(got.prefill).toEqual({ shape: 'ball', tipDiameter: 1, fluteLength: 4 });
+    expect(got.prefill).toEqual({
+      shape: 'ball',
+      tipDiameter: 1,
+      fluteLength: 4,
+      includedAngle: null,
+    });
   });
 
   it('ignores the flute: the same tip with a different stated flute is still offered', () => {
@@ -214,7 +257,17 @@ describe('resolveCode — the scan door’s three outcomes', () => {
     const got = resolveCode('C1-BIT-FLAT-3.175-12', [], []);
     expect(got).toEqual({
       kind: 'unknown',
-      prefill: { shape: 'flat', tipDiameter: 3.175, fluteLength: 12 },
+      prefill: { shape: 'flat', tipDiameter: 3.175, fluteLength: 12, includedAngle: null },
+    });
+  });
+
+  it('hands an engraving code’s angle along, and no imagined 30 mm tip (#378)', () => {
+    // The reading is the only thing the user has to check the box against, so `describeReading`
+    // builds its sentence from THIS value — "engraving cutter, 30 mm tip" was the sentence before.
+    const got = resolveCode('C1-BIT-ENGRAVE-30-0.3', [], []);
+    expect(got).toEqual({
+      kind: 'unknown',
+      prefill: { shape: 'engraving', tipDiameter: 0.3, fluteLength: null, includedAngle: 30 },
     });
   });
 

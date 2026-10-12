@@ -27,17 +27,33 @@ import { catalogueIdOf, tierOf } from './toolTiers';
 /**
  * What a printed box code says about the cutter inside.
  *
- * **PROVISIONAL (#208 A7: one label known).** The only label anyone here has held is the 1 mm ball
- * nose (`3.175*1*4mm Ball Nose`, g_ID `131012103804`) the bench is cutting with, so the reading below
- * is a guess fitted to ONE example and marked as such rather than presented as Makera's format. The
- * parts that would go wrong first if the guess is wrong are the type words — hence {@link shapeOf}
- * maps a word it does not know to `'unknown'` and still returns the two numbers, and the caller is
- * told the reading is provisional so it can show it as a reading rather than a fact.
+ * **The format is CONFIRMED, 2026-10-12: 28 real codes, every one decoded.** #208 A7 had a single
+ * label — the 1 mm ball nose the bench cuts with — and the reading below was a guess fitted to it.
+ * The house's whole Makera inventory has since been photographed from the boxes, and it settled the
+ * three things one label could not: a code's numbers mean different things for different types
+ * (#378, #380), a type word may carry Makera's `-M-` metal marker (#379), and a type word this app
+ * has no shape for still leaves its numbers readable (#377).
+ *
+ * What has NOT changed is the SHAPE of the answer, which is why the callers are written the way they
+ * are: a word nobody knows is `'unknown'` rather than an error, and a length that is not a number
+ * only costs that length. The parts still worth doubting are the ones a box does not state at all —
+ * the shank, and a corn bit's chip-breaker teeth.
  */
 export interface BoxCode {
   shape: ToolShape;
   tipDiameter: number | null;
   fluteLength: number | null;
+  /**
+   * The INCLUDED angle in degrees, when the code states one — an engraving code's first number
+   * (`C1-BIT-ENGRAVE-30-0.3`) and a chamfer code's only one (#378, #380).
+   *
+   * It is the angle the LABEL prints, and both of Makera's own rows record a printed angle as the
+   * included one: `catalogue.rs` stores a chamfer's straight into `angle` and an engraver's HALVED
+   * into `halfAngle` ("30º in the name is the INCLUDED angle"). So a consumer writing this into a
+   * `Tool` must halve it for an engraver and must not for a chamfer — which is why it is named for
+   * what the label says rather than after either field.
+   */
+  includedAngle: number | null;
 }
 
 /**
@@ -54,8 +70,9 @@ export type ResolvedCode =
    * `prefill` is the provisional reading, so the panel can say WHY these rows and not others.
    */
   | { kind: 'candidates'; rows: readonly ToolLibraryEntry[]; prefill: BoxCode }
-  /** Nothing matched. `prefill` is non-null when the code was read but nothing fit — the seed for
-   *  the Type door, where the numbers are the user's to correct. `null` when nothing was read. */
+  /** Nothing matched. `prefill` is non-null when the code was read but nothing fit: the panel shows
+   *  the reading back so it can be checked against the box, and the numbers are the user's to correct
+   *  in the Type door, which opens blank. `null` when nothing was read. */
   | { kind: 'unknown'; prefill: BoxCode | null };
 
 /** A printed length, or null. A label cannot state a length of 0 mm, so 0 is "not stated". */
@@ -77,20 +94,68 @@ function boxLength(raw: string): number | null {
  */
 const METAL_MARKER = 'M';
 
+/** What a code's tail can say. Whatever a type's tail does not state is `null`, never 0. */
+interface TailReading {
+  tipDiameter: number | null;
+  fluteLength: number | null;
+  includedAngle: number | null;
+}
+
 /**
- * Read a Makera box code — `C1-BIT-<TYPE>-<tip>-<flute>` — into the shape and the two lengths it
- * names. **PROVISIONAL** (see {@link BoxCode}).
+ * The tail most types use: the last two tokens are the tip diameter and then the flute length —
+ * `C1-BIT-FLAT-3.175-12`, `C1-BIT-BALL-NOSE-1-4`, `C1-BIT-O-FLUTE-M-2-8`, `C1-BIT-CORN-2.0-10.5`.
+ */
+function tipThenFlute(tail: readonly string[]): TailReading | null {
+  if (tail.length < 2) return null;
+  return {
+    tipDiameter: boxLength(tail[tail.length - 2]!),
+    fluteLength: boxLength(tail[tail.length - 1]!),
+    includedAngle: null,
+  };
+}
+
+/**
+ * A type whose tail does NOT mean `<tip>-<flute>`.
  *
- * The type word may itself contain dashes (`BALL-NOSE`), so the last two dash-separated tokens are
- * the lengths and everything between the prefix and them is the type. The word is read through the
- * SAME vocabulary Studio's `type=` field uses ({@link shapeFromType}), so a label and a `.nc` header
- * describing one cutter agree once the dashes are spelled as spaces — a second, competing vocabulary
- * would be one more thing to get wrong, and an unrecognised word is `'unknown'` rather than an error,
- * because the two numbers below it are still read.
+ * The number of numbers, and what they mean, depends on the type word (#378, #380) — the whole
+ * inventory was photographed from the boxes on 2026-10-12 and every one of the 28 codes was decoded,
+ * which is what turned this from a guess into a table. Only the exceptions live here; everything
+ * else is {@link tipThenFlute}, so a type added later reads sensibly by default rather than needing
+ * a row of its own.
  *
- * Anything that is not that shape — no prefix, fewer than three tokens, an empty type word — is
+ * An ENGRAVING code is `<angle>-<tip>` and states no flute: `C1-BIT-ENGRAVE-30-0.3` is a 30° cutter
+ * with a 0.3 mm tip, and `C1-BIT-ENGRAVE-M-60-0.1` a 60° with a 0.1 mm one. The angle is the one the
+ * LABEL prints — see {@link BoxCode.includedAngle} for what that means to a `Tool`.
+ */
+const TAIL_READINGS: Partial<Record<ToolShape, (tail: readonly string[]) => TailReading | null>> = {
+  engraving: (tail) =>
+    tail.length === 2
+      ? { tipDiameter: boxLength(tail[1]!), fluteLength: null, includedAngle: boxLength(tail[0]!) }
+      : null,
+};
+
+/**
+ * Read a Makera box code — `C1-BIT-<TYPE>-<numbers>` — into the shape and the numbers it names.
+ *
+ * The type word may itself contain dashes (`BALL-NOSE`) and may carry the `-M-` metal marker, which
+ * {@link METAL_MARKER} has already dropped; what is left is read through the SAME vocabulary
+ * Studio's `type=` field uses ({@link shapeFromType}), so a label and a `.nc` header describing one
+ * cutter agree once the dashes are spelled as spaces — a second, competing vocabulary would be one
+ * more thing to get wrong.
+ *
+ * Where the type word ENDS is not fixed by the dashes alone, since the type can be one token or two,
+ * so each split of the tokens is offered to the vocabulary and the first one it recognises wins —
+ * shortest word first, because `BALL NOSE 1` is still a ball and would otherwise swallow a number.
+ * What the rest of the tail then means is the type's business ({@link TAIL_READINGS}), not a fixed
+ * `-<tip>-<flute>` position.
+ *
+ * Nothing recognised as a type word is not nothing read: the numbers are still taken by the default
+ * reading and the shape is `'unknown'`, which is what makes a code from a type this app has never
+ * seen useful (#377) instead of a dead label.
+ *
+ * Anything that is not that shape at all — no prefix, fewer than three tokens, no type word — is
  * `null`: the code is then still matchable against the inventory as text, but it says nothing about
- * the cutter. A length that is not a number only costs that length.
+ * the cutter. A number that is not a number only costs that number.
  */
 export function parseBoxCode(value: string): BoxCode | null {
   const text = value.trim().toUpperCase();
@@ -101,11 +166,18 @@ export function parseBoxCode(value: string): BoxCode | null {
     .split('-')
     .filter((t) => t.length > 0 && t !== METAL_MARKER);
   if (tokens.length < 3) return null;
-  const flute = boxLength(tokens[tokens.length - 1]!);
-  const tip = boxLength(tokens[tokens.length - 2]!);
+  for (let cut = 1; cut < tokens.length; cut++) {
+    const shape = shapeFromType(tokens.slice(0, cut).join(' '));
+    if (shape === 'unknown') continue;
+    const tail = tokens.slice(cut);
+    const reading = (TAIL_READINGS[shape] ?? tipThenFlute)(tail);
+    if (reading !== null) return { shape, ...reading };
+  }
+  // No split is a type word this app knows. Keep the numbers, call the shape what it is.
   const typeWords = tokens.slice(0, -2).join(' ');
-  if (typeWords.length === 0) return null;
-  return { shape: shapeFromType(typeWords), tipDiameter: tip, fluteLength: flute };
+  const reading = tipThenFlute(tokens);
+  if (typeWords.length === 0 || reading === null) return null;
+  return { shape: shapeFromType(typeWords), ...reading };
 }
 
 /**
@@ -139,11 +211,11 @@ function sameLength(a: number | null, b: number | null): boolean {
  * What the user's code names: a cutter they already have, catalogue rows that fit it, or nothing.
  *
  * **The candidate rule, decided (#309 "ask first"): match on the tip and let the user pick; ignore
- * the flute.** The slug reading is PROVISIONAL (#208 A7 — one label known), and the one label that
- * is known proves why: the bench cutter's own box says `…-1-4`, which fits a 1 mm BALL row whose
- * catalogue `fluteLength` is 4.0 — but the flute on the label is what the BOX says the bit reaches,
- * not a field Makera fills differently in general. Matching on a provisional field would let one
- * wrong guess hide the right row behind an empty list, where the user has no way back. Matching on
+ * the flute.** The label's two numbers are not the same kind of statement as a catalogue row's: the
+ * tip is the cutter's identity, where the flute is what the BOX says the bit reaches — the bench
+ * cutter's own box reads `…-1-4` and the row it names states a `fluteLength` of 4, but one agreeing
+ * pair does not make the box's number the catalogue's field. Matching on it would let a single
+ * disagreement hide the right row behind an empty list, where the user has no way back. Matching on
  * the tip over-suggests instead, and the mockup (G2) already draws that outcome: two rows fit, pick
  * the one on the label. `shape` is matched when the label named one — a word we could not read
  * leaves the shape free rather than excluding every row.
