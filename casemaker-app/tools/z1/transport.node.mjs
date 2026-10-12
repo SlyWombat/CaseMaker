@@ -49,10 +49,16 @@ export function createNodeTransport() {
   }
 
   return {
-    /** Bind UDP `port`, collect datagram payloads as UTF-8 strings for `windowMs`, then close. */
+    /**
+     * Bind UDP `port`, collect `{ at, text }` per datagram for `windowMs`, then close.
+     *
+     * `at` is stamped in the `message` handler — when Node delivered the datagram — which is the
+     * closest thing to receipt this side has, and the same fact the Rust side records (#275).
+     */
     async udpListen(port, windowMs) {
       return await new Promise((resolve, reject) => {
         const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+        /** @type {{at: number, text: string}[]} */
         const lines = [];
         let done = false;
         const finish = (err) => {
@@ -68,7 +74,7 @@ export function createNodeTransport() {
           else resolve(lines);
         };
         const timer = setTimeout(() => finish(null), windowMs);
-        sock.on('message', (buf) => lines.push(buf.toString('utf8')));
+        sock.on('message', (buf) => lines.push({ at: Date.now(), text: buf.toString('utf8') }));
         sock.on('error', (err) => finish(err));
         sock.bind(port, '0.0.0.0');
       });

@@ -41,6 +41,7 @@ import {
   type Md5SumOutcome,
   type ReadConfigKeyOutcome,
   type ReadFileOutcome,
+  type UdpDatagram,
 } from '@/platform/desktop/protocol';
 
 const EMPTY = new Uint8Array(0);
@@ -56,6 +57,9 @@ class FakeTransport implements MachineTransport {
   writes: Uint8Array[] = [];
   reads: Uint8Array[] = [];
   udpLines: string[] = [];
+  /** Arrival times handed back beside `udpLines`, one per line in the same order (#275); a missing
+   *  entry reads as 0, so a spec that cares about the text alone does not have to set any. */
+  udpAt: number[] = [];
   connects = 0;
   closed: number[] = [];
   listenPort: number | null = null;
@@ -67,10 +71,10 @@ class FakeTransport implements MachineTransport {
     this.reads.push(...chunks);
   }
 
-  async udpListen(port: number, windowMs: number): Promise<string[]> {
+  async udpListen(port: number, windowMs: number): Promise<UdpDatagram[]> {
     this.listenPort = port;
     this.listenWindow = windowMs;
-    return this.udpLines;
+    return this.udpLines.map((text, i) => ({ at: this.udpAt[i] ?? 0, text }));
   }
   async tcpConnect(_host: string, _port: number, _timeoutMs: number): Promise<number> {
     this.connects++;
@@ -177,17 +181,27 @@ describe('#255 protocol — discovery', () => {
     expect(parseDiscoveryDatagram('Z1,10.0.0.5,2222,1,')).not.toHaveProperty('state');
   });
 
-  it('returns every datagram un-deduplicated, in arrival order (#275 discover --all)', async () => {
+  it('returns every datagram un-deduplicated, in arrival order with its own time (#275 discover --all)', async () => {
     const transport = new FakeTransport();
     transport.udpLines = [
       'A,10.0.0.1,2222,0,Idle',
       'A,10.0.0.1,2222,1,Run', // same machine, a state change — kept, where runDiscovery collapses it
       'badline', // not a datagram — kept too
     ];
-    const lines = await discoveryDatagrams(transport, { port: 3333, windowMs: 20 });
-    expect(lines).toEqual(['A,10.0.0.1,2222,0,Idle', 'A,10.0.0.1,2222,1,Run', 'badline']);
+    // Two seconds apart, so the times order the state change rather than merely accompanying it.
+    transport.udpAt = [1_700_000_000_000, 1_700_000_002_000, 1_700_000_003_500];
+    const datagrams = await discoveryDatagrams(transport, { port: 3333, windowMs: 20 });
+    expect(datagrams).toEqual([
+      { at: 1_700_000_000_000, text: 'A,10.0.0.1,2222,0,Idle' },
+      { at: 1_700_000_002_000, text: 'A,10.0.0.1,2222,1,Run' },
+      { at: 1_700_000_003_500, text: 'badline' },
+    ]);
+    // A malformed line is stamped like any other: what it is, is the parser's business, not the
+    // listener's — the time is when the bytes arrived either way.
+    expect(datagrams[2]?.at).toBe(1_700_000_003_500);
     expect(transport.listenPort).toBe(3333);
-    // The contrast that makes `--all` worth having: runDiscovery returns the first `A` only.
+    // The contrast that makes `--all` worth having: runDiscovery returns the first `A` only, and
+    // reads the text rather than the timing.
     const machines = await runDiscovery(transport, { port: 3333, windowMs: 20 });
     expect(machines.map((m) => m.name)).toEqual(['A']);
   });

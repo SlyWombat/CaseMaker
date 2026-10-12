@@ -12,7 +12,9 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::Serialize;
 use tauri::State;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -100,20 +102,41 @@ impl MachineTransport {
     }
 }
 
-/// Listen on `0.0.0.0:port` for `window_ms` and return each datagram as a UTF-8 string.
+/// One discovery datagram as received (#275): its text, and when this listener took it off the
+/// socket, in Unix epoch milliseconds.
+///
+/// The datagram carries no time of its own, so receipt is the only time there is to report. It orders
+/// the datagrams of one window — and so dates a field-4 state change — and says nothing about the
+/// controller's clock.
+#[derive(Debug, Clone, Serialize)]
+pub struct UdpDatagram {
+    pub at: i64,
+    pub text: String,
+}
+
+/// Now, as Unix epoch milliseconds. A clock set before 1970 reads as 0 rather than panicking: this is
+/// a timestamp on an observation line, not a reason to fail a discovery.
+fn epoch_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Listen on `0.0.0.0:port` for `window_ms` and return each datagram with the time it arrived.
 ///
 /// Discovery is passive: the machine broadcasts, we listen (`Z1-Bridge-Protocol.md` §2). Nothing
 /// is sent. The window resets only in the sense that we keep listening until the deadline; each
 /// datagram is collected. A port already bound (for example by Makera Studio) is reported clearly
 /// rather than mistaken for "no machines found".
 #[tauri::command(rename_all = "snake_case")]
-pub async fn machine_udp_listen(port: u16, window_ms: u64) -> Result<Vec<String>, String> {
+pub async fn machine_udp_listen(port: u16, window_ms: u64) -> Result<Vec<UdpDatagram>, String> {
     let socket = UdpSocket::bind(("0.0.0.0", port)).await.map_err(|e| {
         format!("could not bind UDP {port} for discovery: {e} (another program, such as Makera Studio, may be using it)")
     })?;
 
     let deadline = Instant::now() + Duration::from_millis(window_ms);
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<UdpDatagram> = Vec::new();
     let mut buf = [0u8; 256];
     loop {
         let now = Instant::now();
@@ -122,10 +145,13 @@ pub async fn machine_udp_listen(port: u16, window_ms: u64) -> Result<Vec<String>
         }
         match timeout(deadline - now, socket.recv_from(&mut buf)).await {
             Ok(Ok((n, _addr))) => {
+                // Stamped here, the moment the socket handed the bytes over and before any decoding:
+                // the time belongs to arrival, not to how long it took to read the text (#275).
+                let at = epoch_millis();
                 if let Ok(text) = std::str::from_utf8(&buf[..n]) {
                     let trimmed = text.trim();
                     if !trimmed.is_empty() {
-                        out.push(trimmed.to_string());
+                        out.push(UdpDatagram { at, text: trimmed.to_string() });
                     }
                 }
             }
@@ -279,5 +305,29 @@ mod tests {
         assert!(t.read(id, 64, 50).await.unwrap_err().contains("unknown connection"));
         assert!(t.write(id, b"x").await.unwrap_err().contains("unknown connection"));
         t.close(id).await; // closing twice is not an error
+    }
+
+    // #275: the reply's field names ARE the contract with the TypeScript side, which reads `{ at,
+    // text }` (`UdpDatagram` in `protocol.ts`). A discovery needs a machine on the LAN, so this is
+    // the one part of that seam a test can hold.
+    #[test]
+    fn a_datagram_serialises_to_the_names_the_typescript_reads() {
+        let json = serde_json::to_string(&UdpDatagram {
+            at: 1_700_000_000_000,
+            text: "Makera_Z1_010290,192.168.10.43,2222,0,Idle".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"at":1700000000000,"text":"Makera_Z1_010290,192.168.10.43,2222,0,Idle"}"#
+        );
+    }
+
+    // #275: epoch MILLISECONDS, because the TypeScript side compares this against `Date.now()`. A
+    // seconds figure would arrive as a plausible-looking 1970 date rather than as an error.
+    #[test]
+    fn the_arrival_time_is_epoch_milliseconds() {
+        // 2023-11-14 in millis (1.70e12). The same instant in seconds (1.70e9) fails, by three orders.
+        assert!(epoch_millis() > 1_700_000_000_000);
     }
 }

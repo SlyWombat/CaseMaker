@@ -96,9 +96,11 @@ the frames go into --out as a directory, --every <ms> apart. It moves nothing an
 the machine. A frame before and after a move is the cheapest answer to A6 (head- or frame-mounted).
 
 \`discover --all\` prints **every** datagram received in the window, un-de-duplicated and with nothing
-dropped, showing field 4 — the undocumented textual state — beside the \`busy\` flag (#275; only
-\`Idle\` has ever been seen). Plain \`discover\` still returns one line per distinct machine. Nothing is
-decided from field 4: it is an observation, not an input.
+dropped, each line led by the time it ARRIVED at this listener (ISO, UTC — receipt, never the
+controller's clock) and followed by the raw datagram, then field 4 — the undocumented textual state —
+beside the \`busy\` flag (#275; only \`Idle\` has ever been seen). The times are what date a state
+change: the raw lines alone say which state came first, not when. Plain \`discover\` still returns one
+line per distinct machine. Nothing is decided from field 4: it is an observation, not an input.
 
 MOTION AND THE CONSOLE (#302). Two commands send a line you typed, which can move the machine:
 
@@ -158,27 +160,35 @@ async function main() {
     // field 3 (`busy`) as the machine changes. Nothing here is decided from field 4: it stays an
     // observation, because whether the two can disagree, and which is authoritative, is unknown.
     if (flags.all === true) {
-      const lines = await P.discoveryDatagrams(transport, { windowMs });
+      const datagrams = await P.discoveryDatagrams(transport, { windowMs });
       if (asJson) {
         console.log(
           JSON.stringify(
-            lines.map((raw) => ({ raw, parsed: P.parseDiscoveryDatagram(raw) })),
+            datagrams.map((d) => ({
+              at: new Date(d.at).toISOString(),
+              raw: d.text,
+              parsed: P.parseDiscoveryDatagram(d.text),
+            })),
             null,
             2,
           ),
         );
         return;
       }
-      if (lines.length === 0) {
+      if (datagrams.length === 0) {
         console.log('no datagrams received.');
         return;
       }
-      for (const raw of lines) {
-        const m = P.parseDiscoveryDatagram(raw);
+      // The time leads and the raw datagram follows it: the time is what dates a state change, and
+      // the raw text is the evidence — the parsed reading is an aside on the same line, for field 4
+      // beside field 3, and nothing is decided from it (#275).
+      for (const d of datagrams) {
+        const at = new Date(d.at).toISOString();
+        const m = P.parseDiscoveryDatagram(d.text);
         console.log(
           m === null
-            ? `${raw}   [not a machine datagram]`
-            : `${m.name}  ${m.host}:${m.port}  ${m.busy ? 'BUSY' : 'not busy'}  state=${m.state ?? '(none)'}`,
+            ? `${at}  ${d.text}   [not a machine datagram]`
+            : `${at}  ${d.text}   [${m.busy ? 'BUSY' : 'not busy'}, state=${m.state ?? '(none)'}]`,
         );
       }
       return;

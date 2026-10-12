@@ -42,6 +42,22 @@ export const STATUS_POLL_BYTE = 0x3f;
 // ---------------------------------------------------------------------------
 
 /**
+ * One datagram, as it arrived (#275): the bytes, and when the listener took them off the socket.
+ *
+ * `at` is **receipt at this listener**, in epoch milliseconds — not a send time, and not the
+ * machine's clock. Nothing in the datagram says when it was sent (`Z1-Bridge-Protocol.md` §2), so the
+ * only time a listener can honestly report is its own, at the moment the bytes reached it. That is
+ * all it is for: ordering one window's datagrams, and putting a field-4 state change at a moment.
+ * Two listeners' times are not comparable, and neither is a listener's time against the controller's.
+ */
+export interface UdpDatagram {
+  /** Epoch milliseconds, at the receiving listener (see above). */
+  at: number;
+  /** The datagram's bytes as UTF-8, trimmed. Empty datagrams are never returned. */
+  text: string;
+}
+
+/**
  * Five calls, no framing. Implemented today by Tauri commands over raw sockets; USB can be a second
  * implementation without anything above changing.
  *
@@ -49,7 +65,9 @@ export const STATUS_POLL_BYTE = 0x3f;
  * if the peer closed the connection, so a caller can tell "nothing yet" from "gone".
  */
 export interface MachineTransport {
-  udpListen(port: number, windowMs: number): Promise<string[]>;
+  /** Every datagram that arrived in the window, in arrival order, each stamped when it was taken
+   *  off the socket ({@link UdpDatagram}). */
+  udpListen(port: number, windowMs: number): Promise<UdpDatagram[]>;
   tcpConnect(host: string, port: number, timeoutMs: number): Promise<number>;
   tcpWrite(conn: number, data: Uint8Array): Promise<void>;
   tcpRead(conn: number, max: number, timeoutMs: number): Promise<Uint8Array>;
@@ -249,15 +267,17 @@ export function parseDiscoveryDatagram(text: string): DiscoveredMachine | null {
 }
 
 /**
- * Every datagram received in the listen window, in arrival order and **unparsed** — the raw lines,
- * with no de-duplication and nothing discarded (#275). This is what wants field 4 watched against
- * field 3 as the machine changes state: a machine list would collapse the repeats that carry the
- * change, and would drop the malformed line that says something else is broadcasting.
+ * Every datagram received in the listen window, in arrival order, each with the time it arrived and
+ * its text **unparsed** — no de-duplication and nothing discarded (#275). This is what wants field 4
+ * watched against field 3 as the machine changes state: a machine list would collapse the repeats
+ * that carry the change, and would drop the malformed line that says something else is broadcasting.
+ * The arrival time is what turns that list into a sequence — `0,Idle` before `0,Run` only says which
+ * came first, not how long it stayed that way.
  */
 export async function discoveryDatagrams(
   transport: MachineTransport,
   opts: { port?: number; windowMs?: number } = {},
-): Promise<string[]> {
+): Promise<UdpDatagram[]> {
   return transport.udpListen(opts.port ?? DISCOVERY_UDP_PORT, opts.windowMs ?? 3000);
 }
 
@@ -266,11 +286,11 @@ export async function runDiscovery(
   transport: MachineTransport,
   opts: { port?: number; windowMs?: number } = {},
 ): Promise<DiscoveredMachine[]> {
-  const lines = await discoveryDatagrams(transport, opts);
+  const datagrams = await discoveryDatagrams(transport, opts);
   const seen = new Set<string>();
   const out: DiscoveredMachine[] = [];
-  for (const line of lines) {
-    const machine = parseDiscoveryDatagram(line);
+  for (const datagram of datagrams) {
+    const machine = parseDiscoveryDatagram(datagram.text);
     if (machine !== null && !seen.has(machine.name)) {
       seen.add(machine.name);
       out.push(machine);

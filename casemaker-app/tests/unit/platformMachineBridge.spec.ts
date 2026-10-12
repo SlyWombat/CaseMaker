@@ -29,6 +29,7 @@ import {
   utf8,
   type Frame,
   type MachineTransport,
+  type UdpDatagram,
 } from '@/platform/desktop/protocol';
 import type { VerifyReport } from '@/engine/cnc/verify';
 
@@ -65,9 +66,10 @@ class FakeTransport implements MachineTransport {
   queueRead(...chunks: Uint8Array[]): void {
     this.reads.push(...chunks);
   }
-  async udpListen(port: number, _windowMs: number): Promise<string[]> {
+  async udpListen(port: number, _windowMs: number): Promise<UdpDatagram[]> {
     this.listenPort = port;
-    return this.udpLines;
+    // The bridge reads the text and nothing else, so a fixed arrival time is enough here (#275).
+    return this.udpLines.map((text) => ({ at: 0, text }));
   }
   async tcpConnect(_host: string, _port: number, _timeoutMs: number): Promise<number> {
     this.connects++;

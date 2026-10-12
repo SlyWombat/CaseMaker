@@ -9,12 +9,14 @@
 // (`src-tauri/src/machine.rs`) is the same kind of dumb: it owns sockets, not the protocol.
 
 import { invoke } from '@tauri-apps/api/core';
-import type { MachineTransport } from './protocol';
+import type { MachineTransport, UdpDatagram } from './protocol';
 
 /** The concrete transport: raw sockets via the desktop shell's Tauri commands. */
 export const tauriTransport: MachineTransport = {
-  async udpListen(port, windowMs): Promise<string[]> {
-    return invoke<string[]>('machine_udp_listen', { port, window_ms: windowMs });
+  // The Rust side stamps each datagram as it takes it off the socket, so the arrival time is a
+  // fact about receipt and not about how long the reply took to cross the IPC boundary (#275).
+  async udpListen(port, windowMs): Promise<UdpDatagram[]> {
+    return invoke<UdpDatagram[]>('machine_udp_listen', { port, window_ms: windowMs });
   },
   async tcpConnect(host, port, timeoutMs): Promise<number> {
     return invoke<number>('machine_tcp_connect', { host, port, timeout_ms: timeoutMs });

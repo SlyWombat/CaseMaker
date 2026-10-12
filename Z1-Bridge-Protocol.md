@@ -86,7 +86,10 @@ vocabulary is, and whether the two ever disagree, is open (#275). It is recorded
 not explained. The parser read this datagram correctly as shipped even while it ignored field 4;
 it now surfaces it as `DiscoveredMachine.state` — for observation only, never as an input (#275,
 desk half). `z1.mjs discover --all` prints every datagram un-deduplicated so two moments of one
-machine can be compared.
+machine can be compared, each line led by **the time that datagram arrived at the listener** (epoch
+milliseconds in `MachineTransport.udpListen`, printed as ISO). A datagram carries no time of its own,
+so receipt is the only time there is to report: it orders one window and dates a state change, and
+says nothing about the controller's clock — the two are not comparable.
 
 **OBSERVED:** the machine broadcasts continuously at roughly **3 per second**. The listening window
 is therefore bounded by the listener, not by the machine — the published client's 3 s wait was
