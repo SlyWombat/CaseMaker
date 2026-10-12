@@ -1,10 +1,23 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability set for Case Maker desktop window",
-  "windows": ["main"],
+  "description": "Capability set for Case Maker desktop window. The window loads the app from its own embedded server (http://127.0.0.1:<port>, #312), which Tauri treats as a REMOTE origin, so the IPC commands (the machine transport among them) are only allowed if that origin is listed here.",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*/*",
+      "http://localhost:*/*"
+    ]
+  },
   "permissions": [
     "core:default",
-    "dialog:default"
+    "dialog:default",
+    "allow-machine-udp-listen",
+    "allow-machine-tcp-connect",
+    "allow-machine-tcp-write",
+    "allow-machine-tcp-read",
+    "allow-machine-tcp-close"
   ]
 }

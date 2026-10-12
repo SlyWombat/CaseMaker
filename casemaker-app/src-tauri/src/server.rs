@@ -209,7 +209,10 @@ async fn serve_path(AxumPath(path): AxumPath<String>, headers: HeaderMap) -> imp
 /// `'self'` covers same-origin requests on whatever IP / port the server
 /// actually bound to (loopback, LAN, or any future case), so the SPA can
 /// always fetch its own chunks. We additionally allow the Tauri webview's
-/// IPC origins and `wasm-unsafe-eval` for the manifold-3d worker.
+/// IPC origins and `wasm-unsafe-eval` for the manifold-3d worker. `unsafe-eval` as well: Manifold's
+/// emscripten embind glue builds its method callers with `Function(...)` at startup, so without it
+/// the geometry and sim workers fail to start and nothing renders or generates (found at the bench,
+/// 2026-10-12). Every script here is still `'self'`; no remote origin can supply one.
 ///
 /// The font stack is LOCAL BY DESIGN (#330), which is why there is still no `font-src` here and no
 /// exception for a font CDN: Space Grotesk, Inter and JetBrains Mono are served from this app's own
@@ -218,7 +221,7 @@ async fn serve_path(AxumPath(path): AxumPath<String>, headers: HeaderMap) -> imp
 const CSP_HEADER: &str = "default-src 'self' tauri: ipc: http://ipc.localhost; \
 img-src 'self' data: blob: tauri: ipc: http://ipc.localhost; \
 style-src 'self' 'unsafe-inline'; \
-script-src 'self' 'wasm-unsafe-eval' tauri: ipc: http://ipc.localhost; \
+script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' tauri: ipc: http://ipc.localhost; \
 worker-src 'self' blob:; \
 connect-src 'self' ws: wss: tauri: ipc: http://ipc.localhost";
 
