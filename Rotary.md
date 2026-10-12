@@ -333,6 +333,12 @@ not to `Checkpoint`.** *Reason:* above. **Additive and local** (one field, one c
 - `capabilities.rotary: boolean` stays as "a module exists"; the block says what it is.
 - **Additive.** Later-is-fine; the schema must gain it at the same time (`projectSchema` strips
   unknown keys — the standing rule).
+- **Amended 2026-10-12 (#238).** Provenance is **per field**, not one string for the block: the
+  fields do not share a source (the rates were read off this machine's config by `#208 B9`, while
+  `stepsPerDegree` and `homing` are still `configZ1.default`, and the envelope is `t_MachineType`).
+  So `rotary.sources` is a map keyed by sourced field — the `SoftEndstop` pattern with one string
+  per sourced field, as `feeds.ts` already does — and R-1 replaces each string with a
+  `measured (#238, <date>)` one as its §9 row is answered, instead of the block flipping at once.
 
 ### 3.6 Frames
 

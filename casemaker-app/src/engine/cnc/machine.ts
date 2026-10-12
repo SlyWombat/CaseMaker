@@ -96,13 +96,30 @@ export interface SoftEndstop {
 }
 
 /**
- * The optional 4th-axis module's profile (#237, `/Rotary.md` §3.5), sourced in the
- * {@link SoftEndstop} pattern: `undefined` means no module fitted.
+ * Every field of {@link RotaryProfile} whose provenance R-1 can replace on its own (#238).
  *
- * Every figure here is a READING of Makera's shipped config (`src/configZ1.default`) and
- * database (`t_MachineType` — the ⌀80 × 150 envelope), never of the device, so `source` says
- * so. R-1 measures the module at the bench and replaces them with `source: 'measured'` values
- * (`/Rotary.md` §9).
+ * `axis` and `parent` are deliberately absent: they are the module's frame in Makera's own model
+ * (`Makera_Z1.fcm`) — structure, not a figure any bench step re-measures.
+ */
+export type RotarySourcedField =
+  | 'envelope'
+  | 'stepsPerDegree'
+  | 'maxRate'
+  | 'acceleration'
+  | 'homing'
+  | 'unwind';
+
+/**
+ * The optional 4th-axis module's profile (#237, `/Rotary.md` §3.5): `undefined` means no module
+ * fitted.
+ *
+ * PROVENANCE, PER FIELD (#238). A single `source` string for the whole block could not hold the
+ * truth: `maxRate` and `acceleration` were READ off this machine's own config on 2026-10-07, while
+ * `stepsPerDegree` and `homing` are still the shipped file and the envelope is from Makera's
+ * database. So each figure carries its own string, and R-1 replaces them ONE AT A TIME at the bench
+ * with `measured (#238, <date>)` as each row of `/Rotary.md` §9 is answered — the same shape as
+ * `feeds.ts`'s per-field `sources`. This is the {@link SoftEndstop} pattern with one string per
+ * sourced field instead of one per block, because here the fields do not share a source.
  *
  * DELIBERATELY NO ANGULAR TRAVEL LIMITS. A is unwound — the vendor's own files run to
  * −153 720° and reset with `G92.4 A0 S0` — so none exist; a limit here would be an invented
@@ -126,8 +143,11 @@ export interface RotaryProfile {
   homing: 'home_to_min';
   /** The firmware's rotary unwind, the code the vendor's own files end with. */
   unwind: 'G92.4 A S';
-  /** Where every figure above came from. A shipped default is not a measurement. */
-  source: string;
+  /**
+   * Where each figure above came from, keyed by the field it describes. A shipped default is not a
+   * measurement, and the fields do not share a source — see the block's note.
+   */
+  sources: Record<RotarySourcedField, string>;
 }
 
 export interface MillProfile extends MachineIdentity {
@@ -516,11 +536,13 @@ export const Z1: MillProfile = {
   // and the depth gate at `shoulderLength` keeps it out of the stock. `null` stays the honest
   // value; it matters only for an obstacle that rises above the stock top.
   holder: null,
-  // The 4th-axis figures (#237, /Rotary.md §3.5). `maxRate` and `acceleration` were READ from the
-  // machine's own config on 2026-10-07 (`delta_max_rate` = 3600, `delta_acceleration` = 360,
-  // docs/bench/2026-10-07-config-sweep.json; runbook B2) and match configZ1.default digit for
-  // digit. `stepsPerDegree` and homing are still the shipped file; the ⌀80 x 150 envelope is from
-  // t_MachineType. R-1 measures the module itself.
+  // The 4th-axis figures (#237, /Rotary.md §3.5), each with its own provenance (#238). `maxRate`
+  // and `acceleration` were READ from the machine's own config on 2026-10-07 (`delta_max_rate` =
+  // 3600, `delta_acceleration` = 360, docs/bench/2026-10-07-config-sweep.json; runbook B9) and match
+  // configZ1.default digit for digit — a config read, still not a measurement. `stepsPerDegree`,
+  // `homing` and the unwind are the shipped file (`delta_steps_per_mm` and `delta_homing_direction`
+  // never answered on the machine: absent from /sd/config.txt). The ⌀80 x 150 envelope is Makera's
+  // own database row. R-1 replaces each string with `measured (#238, <date>)` as its §9 row lands.
   rotary: {
     axis: 'A',
     parent: 'y',
@@ -530,7 +552,14 @@ export const Z1: MillProfile = {
     acceleration: 360,
     homing: 'home_to_min',
     unwind: 'G92.4 A S',
-    source: 'maxRate/acceleration: config read on the machine (B2, 2026-10-07); steps and homing: configZ1.default (unverified)',
+    sources: {
+      envelope: 't_MachineType, Makera library database (the Z1 row) — a vendor figure, not measured',
+      stepsPerDegree: 'configZ1.default, shipped default (key absent from /sd/config.txt) — unverified',
+      maxRate: 'config-get sd on the machine (#208 B9, 2026-10-07) — a config read, not a measurement',
+      acceleration: 'config-get sd on the machine (#208 B9, 2026-10-07) — a config read, not a measurement',
+      homing: 'configZ1.default, shipped default (key absent from /sd/config.txt) — unverified',
+      unwind: 'configZ1.default / Robot.cpp, corroborated by the vendor rotary files (they end on G92.4A0S0) — unverified on the device',
+    },
   },
 };
 
@@ -660,7 +689,10 @@ const holderSchema = z.object({
   source: z.string().min(1),
 });
 
-/** The optional 4th-axis module (#237). A shipped default is carried as sourced data. */
+/**
+ * The optional 4th-axis module (#237). A shipped default is carried as sourced data, one string per
+ * sourced field (#238) — so a profile that states a rate but not where it came from does not parse.
+ */
 const rotarySchema = z.object({
   axis: z.literal('A'),
   parent: z.literal('y'),
@@ -670,7 +702,14 @@ const rotarySchema = z.object({
   acceleration: finite.positive(),
   homing: z.literal('home_to_min'),
   unwind: z.literal('G92.4 A S'),
-  source: z.string().min(1),
+  sources: z.object({
+    envelope: z.string().min(1),
+    stepsPerDegree: z.string().min(1),
+    maxRate: z.string().min(1),
+    acceleration: z.string().min(1),
+    homing: z.string().min(1),
+    unwind: z.string().min(1),
+  }),
 });
 
 export const millProfileSchema = z.object({

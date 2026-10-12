@@ -132,15 +132,36 @@ describe('the Z1 profile', () => {
     expect(Z1.holder).toBeNull();
   });
 
-  it('states the 4th axis as SOURCED data, flagged shipped-default (#237 R-0, /Rotary.md §3.5)', () => {
+  it('states the 4th axis as SOURCED data, one string per field (#237 R-0, #238, /Rotary.md §3.5)', () => {
     // The rotary profile exists so the A-axis numbers are data with provenance, not constants
-    // typed at a call site. It is not a measurement: `source` says where each number came from.
+    // typed at a call site. It is not a measurement: `sources` says where each number came from —
+    // and the fields do NOT share a source, which is the whole point of the map (#238): the rates
+    // were read off this machine's config and steps/homing are still the shipped file, so R-1
+    // replaces them one at a time.
     expect(Z1.rotary).toBeDefined();
     expect(Z1.rotary).toMatchObject({ axis: 'A', parent: 'y', homing: 'home_to_min', unwind: 'G92.4 A S' });
     expect(Z1.rotary?.stepsPerDegree).toBeCloseTo(88.888889, 6);
     expect(Z1.rotary?.envelope).toEqual({ diameter: 80, length: 150 });
-    expect(Z1.rotary?.source).toContain('configZ1.default');
-    expect(Z1.rotary?.source).toMatch(/unverified/i);
+    // Every sourced field has a non-empty string: no silent gap for R-1 to fill in later.
+    for (const s of Object.values(Z1.rotary?.sources ?? {})) expect(s.length).toBeGreaterThan(0);
+    expect(Object.keys(Z1.rotary?.sources ?? {}).sort()).toEqual([
+      'acceleration',
+      'envelope',
+      'homing',
+      'maxRate',
+      'stepsPerDegree',
+      'unwind',
+    ]);
+    // The rates are a config READ off the machine (B9), which is still not a measurement.
+    expect(Z1.rotary?.sources.maxRate).toMatch(/config-get|config read/);
+    expect(Z1.rotary?.sources.maxRate).toContain('B9');
+    expect(Z1.rotary?.sources.acceleration).toContain('B9');
+    // Steps and homing are still the shipped default, and must SAY so until R-1 measures them.
+    expect(Z1.rotary?.sources.stepsPerDegree).toContain('configZ1.default');
+    expect(Z1.rotary?.sources.stepsPerDegree).toMatch(/unverified/i);
+    expect(Z1.rotary?.sources.homing).toMatch(/unverified/i);
+    // The envelope is Makera's database row, not the device.
+    expect(Z1.rotary?.sources.envelope).toContain('t_MachineType');
   });
 
   it('the heights the head actually goes to are within travel; the probe TARGET is not, and that is recorded', () => {
@@ -270,11 +291,18 @@ describe('profile schemas (#184 work item 1)', () => {
     expect(millProfileSchema.safeParse({ ...Z1, rapidEstimate: { ...Z1.rapidEstimate, source: '' } }).success).toBe(false);
   });
 
-  it('carries the rotary profile as optional sourced data (#237)', () => {
+  it('carries the rotary profile as optional sourced data (#237, #238)', () => {
     // Optional: a flat mill states no 4th axis. Present: every field is a sourced literal.
     const { rotary: _rotary, ...flat } = Z1;
     expect(millProfileSchema.safeParse(flat).success).toBe(true);
     expect(millProfileSchema.safeParse(Z1).success).toBe(true);
     expect(millProfileSchema.safeParse({ ...Z1, rotary: { ...Z1.rotary, axis: 'B' } }).success).toBe(false);
+    // #238 — provenance is per field, so a rate without a source does not parse: it would be a
+    // number typed at a call site wearing the block's name.
+    const noSources = { ...Z1.rotary };
+    delete (noSources as { sources?: unknown }).sources;
+    expect(millProfileSchema.safeParse({ ...Z1, rotary: noSources }).success).toBe(false);
+    const blank = { ...Z1.rotary, sources: { ...Z1.rotary?.sources, maxRate: '' } };
+    expect(millProfileSchema.safeParse({ ...Z1, rotary: blank }).success).toBe(false);
   });
 });
