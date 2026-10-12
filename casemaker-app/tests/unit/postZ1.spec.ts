@@ -125,6 +125,7 @@ describe('postZ1 (#173)', () => {
 
       T1 M6
       M7
+      G53 G0 Z-3
       G0 X2 Y2
       S12000 M3
       G0 Z5
@@ -221,8 +222,37 @@ describe('postZ1 (#173)', () => {
     // leak into the program as a commanded feed.
     expect(lines.filter((l) => l.startsWith('G0 ')).some((l) => l.includes('F'))).toBe(false);
     expect(lines.filter((l) => l.includes('F')).every((l) => l.startsWith('G1'))).toBe(true);
-    const forbidden = /\b(G2|G3|G38|G10|G92|G53|G54|G55|G56|G57|G58|G59|G91|G81|G82|G83|G84|G85|G86|G87|G88|G89|M490|M491|M801|M802|M861|M862|M3\d\d)\b|\bA[-+]?\d/;
+    // #384 — `G53` is no longer in this list: the post now WRITES it, deliberately, as the one
+    // machine-frame word it needs. Everything else here is still a code our files must not contain.
+    const forbidden = /\b(G2|G3|G38|G10|G92|G54|G55|G56|G57|G58|G59|G91|G81|G82|G83|G84|G85|G86|G87|G88|G89|M490|M491|M801|M802|M861|M862|M3\d\d)\b|\bA[-+]?\d/;
     expect(lines.join('\n')).not.toMatch(forbidden);
+  });
+
+  it('lifts the head in the MACHINE frame before its first XY rapid (#384)', () => {
+    const res = postZ1(TWO_OP, CTX, Z1);
+    if (!res.ok) throw new Error('post failed');
+    const lines = codeLines(res.text);
+
+    const lift = lines.findIndex((l) => l.startsWith('G53 '));
+    const firstXY = lines.findIndex((l) => /^G0 X[-\d.]+ Y[-\d.]+$/.test(l));
+    expect(lift).toBeGreaterThanOrEqual(0);
+    expect(firstXY).toBeGreaterThan(lift);
+    // The height is the PROFILE's clearance, not a number typed here (`coordinate.clearance_z`,
+    // measured on the machine, #208 B6).
+    expect(lines[lift]).toBe(`G53 G0 Z${formatFixed(Z1.toolChange.clearanceZ, Z1.dialect.axisPrecision)}`);
+  });
+
+  it('writes a G53 the controller can obey from an unknown position: the machine frame only', () => {
+    // `G53` must be followed ON THE SAME LINE by G0/G1 (`handleG53`): a bare `G53` on its own line
+    // reuses the modal motion, and the firmware ignores anything else. And it carries no work-frame
+    // word at all — the whole point is that it does not depend on where the work origin is.
+    const res = postZ1(TWO_OP, CTX, Z1);
+    if (!res.ok) throw new Error('post failed');
+    for (const line of codeLines(res.text).filter((l) => l.includes('G53'))) {
+      expect(line).toMatch(/^G53 G0 Z-?\d/);
+      expect(line).not.toContain('X');
+      expect(line).not.toContain('Y');
+    }
   });
 
   it('a name containing | does not add a field to its header record', () => {

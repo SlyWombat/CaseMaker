@@ -243,9 +243,10 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): 
   ops.forEach((op, index) => {
     body.push(`;@MKR|TOOLPATH_START|toolpath_number=${index + 1}`);
     if (index === 0) {
-      // The head's Z is unknown after a manual `M6`. Studio positions XY first, starts the
-      // spindle, THEN states Z at the safe height — so the first move never rapids in Z from
-      // an unknown height. Seed the sticky state with what these lines established.
+      // The head's Z is unknown after a manual `M6`. The first line therefore lifts it in the
+      // MACHINE frame (below), then Studio's own order follows: XY, the spindle, THEN Z stated
+      // at the safe height — so no work-frame move ever runs from an unknown height. Seed the
+      // sticky state with what these lines established.
       const first = op.moves[0]!;
       const x0 = axis(first.x);
       const y0 = axis(first.y);
@@ -257,6 +258,15 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): 
         `T${ir.toolNumber} M6`,
       );
       if (ir.air) body.push('M7');
+      // #384 — THE FILE LIFTS THE HEAD ITSELF, IN THE MACHINE FRAME. After a manual `M6` the
+      // head's Z is wherever the last job left it, so an XY rapid at "whatever Z the head is
+      // at" is the move that drives a tool through the work. `G53` is absolute in MACHINE
+      // coordinates, which is the frame the clearance is known in: the controller can execute
+      // this from an unknown work position, where a work-frame Z could not be trusted.
+      // Studio covers this OUTSIDE the file (its "Goto path origin first" buffer runs
+      // `G53 G0 Z-3` then `G90 G0 X Y`, #302 item 5); our app starts a job with `play` alone,
+      // so the program has to be safe on its own. The verifier refuses a file that is not.
+      body.push(`G53 G0 Z${axis(machine.toolChange.clearanceZ)}`);
       body.push(`G0 X${x0} Y${y0}`, `S${axis(ir.spindleRpm)} M3`, `G0 Z${safe}`);
       lastX = x0;
       lastY = y0;

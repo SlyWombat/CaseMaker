@@ -156,7 +156,7 @@ export function sacrificialDepthLimit(stock: StockDims, s: Sacrificial, opts: Sa
 }
 
 /** The words our post-processor (#173) may write. Anything else is `not-our-dialect`. */
-const G_ALLOWED = new Set([0, 1, 21, 28, 90]);
+const G_ALLOWED = new Set([0, 1, 21, 28, 53, 90]);
 const M_ALLOWED = new Set([2, 3, 5, 6, 7, 9]);
 const PARAM_LETTERS = new Set(['T', 'S', 'F', 'X', 'Y', 'Z']);
 
@@ -239,7 +239,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
     if (w.letter === 'G') {
       const c = numParts(w.text);
       if (c === null || c.sub !== 0 || !G_ALLOWED.has(c.code)) {
-        push('not-our-dialect', w.line, `the word '${shown}' is not in the post's dialect (G0 G1 G21 G28 G90)`);
+        push('not-our-dialect', w.line, `the word '${shown}' is not in the post's dialect (G0 G1 G21 G28 G53 G90)`);
       }
     } else if (w.letter === 'M') {
       const c = numParts(w.text);
@@ -277,8 +277,6 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
     const minRapidZ = ctx.minRapidZ;
 
     let state: MachineState = initialState(ctx.setup);
-    let sawZ = false;
-    let usedOpeningRapid = false;
     let seenCut = false;
     const toolNumbers = new Set<number>();
 
@@ -396,9 +394,13 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         }
       }
 
-      // ---- 9. rapid-too-low. An XY rapid below minRapidZ. A pure-Z rapid is a retract and
-      // is allowed at any height. The program's opening XY positioning move (before any Z
-      // word) is the one exception — Studio's own files and our post open that way.
+      // ---- 9. rapid-too-low. An XY rapid below minRapidZ, or at a Z the program never
+      // established (#384). A pure-Z rapid is a retract and is allowed at any height. There is
+      // NO exemption for the opening positioning move: after a manual `M6` the head is wherever
+      // the last job left it, so an XY rapid the file cannot place in Z is exactly the move that
+      // sends the tool through the work. The file must establish Z first, and the only way it can
+      // do that from an unknown work position is a MACHINE-frame lift — `G53 G0 Z<clearance>`,
+      // which the post writes and which resolves to a known work Z through the setup's offset.
       if (m.mode === 'rapid') {
         const movedX = axisMoved(fromW[0], toW[0]);
         const movedY = axisMoved(fromW[1], toW[1]);
@@ -408,18 +410,13 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
           if (toW[2] !== null) zs.push(toW[2]);
           const zLow = zs.length > 0 ? Math.min(...zs) : null;
           if (zLow === null) {
-            if (!sawZ && !usedOpeningRapid) {
-              usedOpeningRapid = true;
-            } else {
-              push('rapid-too-low', m.line, 'an X/Y rapid runs at an unknown Z: the program never established where the tool is');
-            }
+            push('rapid-too-low', m.line, 'an X/Y rapid runs at a Z the program never established: nothing lifts the tool to a known height first');
           } else if (zLow < minRapidZ) {
             push('rapid-too-low', m.line, `an X/Y rapid runs at Z=${fmt(zLow)}, below the permitted rapid height Z=${fmt(minRapidZ)}`);
           }
         }
       }
 
-      if (m.commanded[2] || m.values[2] !== null) sawZ = true;
       if (isCut) seenCut = true;
       state = after;
     }

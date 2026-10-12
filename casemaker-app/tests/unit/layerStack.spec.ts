@@ -220,6 +220,10 @@ describe('layerStack (#178): ownership and the verifier seam', () => {
         'T1 M6',
         'M7',
         'S12000 M3',
+        // #384 — the machine-frame retract the post writes: the file has to establish a Z before
+        // its first XY rapid, or the verifier refuses it (and rightly: the head's Z is unknown
+        // after a manual `M6`).
+        'G53 G0 Z-3',
         `G0 X${p.x} Y${p.y}`,
         `G1 Z${z} F200`,
         `G1 X${p.x + 0.5}`,
