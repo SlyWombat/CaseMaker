@@ -1120,3 +1120,104 @@ describe('EngravePanel margins row (#345)', () => {
     expect(useSettingsStore.getState().margins.source).toBe('default');
   });
 });
+
+// #170 — decision 20's control, in the row it lives in: two states and the numeric override, offered
+// only where the blank has two outcomes to choose between. The arithmetic is pinned in
+// `depthIntent.spec.ts`; what is pinned here is the SHAPE of the control — when it is there at all,
+// which state it lights, and what it writes onto the document.
+describe('EngravePanel — the two-state depth control (#170)', () => {
+  /**
+   * A blank that states its print, with the labels exactly as the badge route seeded them.
+   *
+   * Taken WITHOUT the print first and then given it, deliberately: handing the print to the badge
+   * route makes `takeBadgeBlank` re-depth the seeded line onto the colour boundary (the two-colour
+   * write #362 review pins), and this describe is about what the CONTROL writes, not what the seed
+   * did. The precondition below is asserted rather than assumed.
+   */
+  function printedBlank(): void {
+    act(() => {
+      useEngraveJobStore.getState().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+      const job = useEngraveJobStore.getState().job;
+      expect(job.labels[0]!.depthIntent).toBeUndefined(); // nothing has stated a colour intent yet
+      useEngraveJobStore.setState({
+        job: {
+          ...job,
+          stock: {
+            ...job.stock,
+            print: {
+              split: defaultBadgeParams().splitHeight,
+              layerHeight: 0.2,
+              firstLayerHeight: 0.2,
+            },
+          },
+        },
+      });
+    });
+  }
+
+  it('offers no colour state on a blank that states no print, and writes no intent from the field', () => {
+    // The default job: PLA, one colour, no print. Depth is a free number and the field stands alone.
+    render(<EngravePanel />);
+    expect(screen.queryByTestId('engrave-label-surface-0')).toBeNull();
+    expect(screen.queryByTestId('engrave-label-reveal-0')).toBeNull();
+
+    fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '1.5' } });
+    const job = useEngraveJobStore.getState().job;
+    expect(job.labels[0]!.depth).toBe(1.5);
+    // Not `'custom'`: with no split there was no colour to override, and stamping an intent would
+    // claim one the blank does not have (#362's stamp is what takes a label out of the app's reach).
+    expect(job.labels[0]!.depthIntent).toBeUndefined();
+    expect(job.sources?.labels?.[job.labels[0]!.id]).toEqual({ depth: 'user' });
+  });
+
+  it('writes the layer past the split for each state, and lights only the one that is on', () => {
+    printedBlank();
+    render(<EngravePanel />);
+
+    const surface = screen.getByTestId('engrave-label-surface-0');
+    const reveal = screen.getByTestId('engrave-label-reveal-0');
+    // Two states, and neither is on: the seed placed this line without saying which colour it wants.
+    expect(surface.getAttribute('aria-pressed')).toBe('false');
+    expect(reveal.getAttribute('aria-pressed')).toBe('false');
+
+    // 3.81 mm badge, split 3.0 mm up from the back → 0.81 nominal, on the 0.2 mm grid → 0.8. A
+    // `reveal` floor is one printed layer below that plane…
+    fireEvent.click(reveal);
+    let job = useEngraveJobStore.getState().job;
+    expect(job.labels[0]!.depthIntent).toBe('reveal');
+    expect(job.labels[0]!.depth).toBe(1);
+    // The state is the USER's statement, so the store stamps both halves — which is what stops the
+    // badge route re-depthing a label a person has placed (#362).
+    expect(job.sources?.labels?.[job.labels[0]!.id]).toMatchObject({ depth: 'user', depthIntent: 'user' });
+    expect(screen.getByTestId('engrave-label-reveal-0').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('engrave-label-surface-0').getAttribute('aria-pressed')).toBe('false');
+
+    // …and a `surface` floor one layer above it. The two states are exclusive: pressing one moves
+    // the floor and unlights the other.
+    fireEvent.click(surface);
+    job = useEngraveJobStore.getState().job;
+    expect(job.labels[0]!.depthIntent).toBe('surface');
+    // 0.6, not 0.6000000000000001 — the field would show that tail and the checker would judge it
+    // against a plane it misses by a trillionth (`roundDepth`).
+    expect(job.labels[0]!.depth).toBe(0.6);
+    expect(screen.getByTestId('engrave-label-surface-0').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('engrave-label-reveal-0').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('takes a typed depth as the override, and says the number is the user’s', () => {
+    printedBlank();
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-label-reveal-0'));
+
+    fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '1.55' } });
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.labels[0]!.depth).toBe(1.55);
+    // `'custom'`, not a cleared key: the label did mean something and the person has taken the
+    // number over. Neither state stays lit — a pressed "reveal" over 1.55 mm would be the row
+    // drawing a colour the depth does not have.
+    expect(job.labels[0]!.depthIntent).toBe('custom');
+    expect(screen.getByTestId('engrave-label-surface-0').getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByTestId('engrave-label-reveal-0').getAttribute('aria-pressed')).toBe('false');
+  });
+});

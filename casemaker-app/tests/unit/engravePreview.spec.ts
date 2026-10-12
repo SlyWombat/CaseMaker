@@ -24,7 +24,14 @@ import { viseForNewJob } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { EngraveJob, EngraveLabel, EngraveShape } from '@/types/engraveJob';
-import { depthColor, SHALLOW_COLOR, DEEP_COLOR } from '@/components/viewport/engraveRamp';
+import {
+  depthColor,
+  floorColor,
+  SHALLOW_COLOR,
+  DEEP_COLOR,
+  SPLIT_TOP_COLOR,
+  SPLIT_BOTTOM_COLOR,
+} from '@/components/viewport/engraveRamp';
 
 /** Signed volume of a triangle soup (divergence theorem), absolute value in mm³. */
 function meshVolume(m: NodeMeshOutput): number {
@@ -499,6 +506,31 @@ describe('the depth ramp (#205)', () => {
     const mid = depthColor(2, 4);
     expect(mid).not.toBe(SHALLOW_COLOR);
     expect(mid).not.toBe(DEEP_COLOR);
+  });
+});
+
+// #170 — the choice of WHICH colouring is in force. Two floors either side of a split are drawn in
+// the two stand-ins rather than on the ramp, and a blank with no split keeps the ramp it always
+// had. Pinned here because it is a rule about what the picture MEANS, and it needs no canvas.
+describe('floorColor — the two-colour reading (#170)', () => {
+  it('sends a floor either side of the split to the two stand-in colours', () => {
+    expect(floorColor(1.0, 4, 1.2)).toBe(SPLIT_TOP_COLOR);
+    expect(floorColor(1.4, 4, 1.2)).toBe(SPLIT_BOTTOM_COLOR);
+    // The split itself is the bottom colour's plane (`floorColour`).
+    expect(floorColor(1.2, 4, 1.2)).toBe(SPLIT_BOTTOM_COLOR);
+  });
+
+  it('keeps the ramp — and only the ramp — on a blank that states no split', () => {
+    expect(floorColor(2, 4, null)).toBe(depthColor(2, 4));
+    expect(floorColor(0, 4, null)).toBe(depthColor(0, 4));
+  });
+
+  it('does not use the ramp at all once a split is known: depth is no longer the question', () => {
+    // The whole point of the change: 1.0 and 1.4 are nearly the same colour on a 4 mm ramp, which
+    // is exactly the confusion the two-state control exists to prevent.
+    for (const d of [0, 1, 2, 3, 4]) {
+      expect(floorColor(d, 4, 1.2)).not.toBe(depthColor(d, 4));
+    }
   });
 });
 

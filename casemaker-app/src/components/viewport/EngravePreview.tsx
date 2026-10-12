@@ -5,8 +5,9 @@
  * Everything arrives from the sim worker in the WORK frame — origin at the stock's top-front-left
  * corner, +X right, +Y away from the operator, Z = 0 at the stock's top face, material at
  * negative Z — and the scene is Z-up, so the meshes are drawn as-is with NO transform (exactly
- * what `SimMeshes` does). Each pocket floor is coloured by its depth on a FIXED ramp so the same
- * depth reads the same everywhere; the vise jaws are translucent and never write depth (a
+ * what `SimMeshes` does). Each pocket floor is coloured by `floorColor` (#170): by its depth on a
+ * FIXED ramp so the same depth reads the same everywhere, or — on a blank that states its colour
+ * split — by which side of the split the floor lands on; the vise jaws are translucent and never write depth (a
  * transparent mesh that wrote depth would hide the pocket behind it — issue #162). The
  * sacrificial material (#213) is drawn from the same boxes the sweep tests against, in a paler
  * grey than the jaws so a strip between them reads as material and not as a third jaw. A legend
@@ -26,7 +27,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { ViseParams } from '@/types/engraveJob';
 import { geometryFromMesh, SACRIFICIAL_COLOR } from './simGeometry';
-import { depthColor, VOID_COLOR } from './engraveRamp';
+import { floorColor, VOID_COLOR } from './engraveRamp';
 import { clampLabelBox, projectToCanvas } from './projectedLabel';
 
 /** The same neutral wood tone the simulation's stock uses (#197). */
@@ -54,7 +55,7 @@ function useMeshGeometry(mesh: NodeMeshOutput | null): THREE.BufferGeometry | nu
   return geom;
 }
 
-/** One label's pocket floor, coloured by its depth. */
+/** One cut's floor, coloured by `floorColor` — the depth ramp, or the two-colour reading (#170). */
 function Floor({ mesh, color, labelId }: { mesh: NodeMeshOutput; color: string; labelId: string }) {
   const geom = useMeshGeometry(mesh);
   if (!geom) return null;
@@ -303,7 +304,12 @@ export function EngravePreview() {
       ))}
 
       {preview.floors.map((f) => (
-        <Floor key={f.labelId} mesh={f.mesh} labelId={f.labelId} color={depthColor(f.depth, maxDepth)} />
+        <Floor
+          key={f.labelId}
+          mesh={f.mesh}
+          labelId={f.labelId}
+          color={floorColor(f.depth, maxDepth, preview.colourBoundaryDepth)}
+        />
       ))}
 
       {preview.voids.map((v) => (

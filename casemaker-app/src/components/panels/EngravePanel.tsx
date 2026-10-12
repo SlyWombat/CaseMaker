@@ -20,6 +20,7 @@ import {
   zBudgetInputsFor,
 } from '@/engine/cnc/engrave/depthBounds';
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
+import { jobSplit } from '@/engine/cnc/engrave/depthIntent';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -401,6 +402,11 @@ export function EngravePanel(): JSX.Element {
   const clamps = feeds?.ok ? feeds.diagnostics.filter((d) => CLAMP_CODES.has(d.code)) : [];
 
   const maxDepth = job.stock.thickness - job.minFloor;
+  // #170 — everything the two-state depth control needs, worked out ONCE for the job: where the
+  // colour split lands and how tall the blank's layers are. `null` on a blank that states no print,
+  // which is when a label row has no two outcomes to offer. The same call the preview draws its
+  // colours from, so a row's `reveal` and the colour the floor is painted cannot disagree.
+  const split = jobSplit(job);
   // The declared under-surface voids (#271). One row each, under the stock they are a fact about.
   const keepOuts = job.keepOuts ?? [];
 
@@ -1128,6 +1134,7 @@ export function EngravePanel(): JSX.Element {
           findings={findingsFor(label.id)}
           customFonts={job.customFonts}
           recommended={depthRecommendation(label)}
+          split={split}
           onChange={(patch) => updateLabel(label.id, patch)}
           onRemove={() => removeLabel(label.id)}
         />

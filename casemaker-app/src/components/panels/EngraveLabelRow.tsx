@@ -3,6 +3,7 @@ import { FontPicker, WeightPicker } from '@/components/panels/FontPicker';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
+import { depthForIntent, type LabelSplit } from '@/engine/cnc/engrave/depthIntent';
 import type { CustomFont } from '@/types/textLabel';
 import type { EngraveLabel } from '@/types/engraveJob';
 
@@ -10,9 +11,16 @@ import type { EngraveLabel } from '@/types/engraveJob';
  * One label of an engrave job (#205): enabled, text, font, weight, cap height, position,
  * rotation, depth, and its own findings.
  *
- * Depth is a NUMERIC field with a slider BESIDE it, never a slider alone (the mockup's rule) —
- * a slider cannot express "11.5 mm" reliably, and depth is the one number a user has a reason
- * to type exactly. The field is marked when the depth leaves less than `minFloor` under the cut.
+ * Depth is a NUMERIC field, and the number is the control that is never taken away — a slider
+ * cannot express "11.5 mm" reliably, and depth is the one number a user has a reason to type
+ * exactly. The field is marked when the depth leaves less than `minFloor` under the cut.
+ *
+ * #170 adds a two-state control BESIDE that field — but only on a blank that states its colour
+ * split (`split`), because only there are there two outcomes to choose between (decision 20):
+ * *surface* stays in the top colour, *reveal* comes through to the bottom one, and each writes the
+ * depth one printed layer on its side of the split (`depthForIntent`). On a one-colour blank depth
+ * is a free number and the field stands alone, which is also what retires the slider this row used
+ * to carry: a continuous control is exactly the wrong shape for a choice that has two answers.
  */
 
 const NUM: CSSProperties = { width: 60 };
@@ -44,6 +52,15 @@ export interface EngraveLabelRowProps {
    * void limit it needs is `partPlan`'s arithmetic and this component must not guess at it.
    */
   recommended?: LabelDepthRecommendation | null;
+  /**
+   * This job's colour split, as the two-state control needs it (#170) — or `null`/absent when the
+   * blank states no print, which is when the row shows the depth field alone.
+   *
+   * Passed in rather than looked up: the split is `splitDepthOf(job)` and the layer height is the
+   * same blank's, so a row that went and found them itself would be a second opinion about which
+   * blank is in the vise. Omitted entirely by a caller with no job in hand (the row does not guess).
+   */
+  split?: LabelSplit | null;
 }
 
 export function EngraveLabelRow({
@@ -55,8 +72,34 @@ export function EngraveLabelRow({
   findings,
   customFonts = [],
   recommended,
+  split = null,
 }: EngraveLabelRowProps): JSX.Element {
   const depthInvalid = label.depth > maxDepth;
+
+  /**
+   * One state of the two-colour control. Pressing either writes the intent AND the depth it means
+   * in one patch — `updateLabel` stamps both as the user's own, which is what stops the badge route
+   * re-depthing a label a person has placed (#362).
+   *
+   * The button is `aria-pressed`, so the state says itself to a screen reader; the COLOUR side of
+   * the claim is the preview's, and its legend names the two stand-ins.
+   */
+  const intentButton = (
+    at: LabelSplit,
+    intent: 'surface' | 'reveal',
+    words: string,
+    title: string,
+  ): JSX.Element => (
+    <button
+      type="button"
+      aria-pressed={label.depthIntent === intent}
+      data-testid={`engrave-label-${intent}-${index}`}
+      title={title}
+      onClick={() => onChange({ depthIntent: intent, depth: depthForIntent(intent, at.depth, at.layerHeight) })}
+    >
+      {words}
+    </button>
+  );
 
   const num = (
     key: 'size' | 'rotation',
@@ -179,18 +222,26 @@ export function EngraveLabelRow({
         {positionNum('x')}
         {positionNum('y')}
         {num('rotation', 'rot', 'Degrees counter-clockwise about the text centre.')}
+        {/* #170 — the two states, on a blank that has two. On a one-colour blank there is nothing
+            to choose and the depth field below stands alone. */}
+        {split !== null && (
+          <span role="group" aria-label={`Label ${index + 1} colour`} style={FIELD_LABEL}>
+            {intentButton(
+              split,
+              'surface',
+              'surface',
+              `Keep this label's floor in the top colour: one ${mm(split.layerHeight)} mm layer above the colour split, ${mm(split.depth)} mm below the face.`,
+            )}
+            {intentButton(
+              split,
+              'reveal',
+              'reveal',
+              `Cut through to the bottom colour: one ${mm(split.layerHeight)} mm layer below the colour split, ${mm(split.depth)} mm below the face.`,
+            )}
+          </span>
+        )}
         <label style={FIELD_LABEL}>
           <span>depth</span>
-          <input
-            type="range"
-            min={0}
-            max={maxDepth}
-            step="0.1"
-            value={Math.min(label.depth, maxDepth)}
-            aria-label={`Label ${index + 1} depth slider`}
-            title={`Depth below the top face, mm. At most ${maxDepth} mm on this stock: the thickness less the minimum floor.`}
-            onChange={(e) => onChange({ depth: Number(e.target.value) })}
-          />
           <input
             type="number"
             min={0}
@@ -202,7 +253,19 @@ export function EngraveLabelRow({
             style={{ ...NUM, ...(depthInvalid ? INVALID : null) }}
             onChange={(e) => {
               const v = Number(e.target.value);
-              if (Number.isFinite(v)) onChange({ depth: v });
+              if (!Number.isFinite(v)) return;
+              // #170 — typing a depth IS the advanced override (decision 20), and this row is the
+              // one place that knows whether there were two states to override. `'custom'` rather
+              // than a cleared key: the label did mean something, and the document should say the
+              // person has taken the number over instead of letting the split's intent linger
+              // (there is no third state to press — a lit state with a number that betrays it is a
+              // contradiction the row would be drawing).
+              //
+              // Only where the control exists. On a blank with no split the field writes its number
+              // and nothing else, exactly as before: an intent there would claim a colour the blank
+              // does not have, and stamping it would take the label out of `recommendLabelDepth`'s
+              // reach (#362) for no reason a user could see.
+              onChange(split === null ? { depth: v } : { depth: v, depthIntent: 'custom' });
             }}
           />
           <span>mm</span>

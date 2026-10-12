@@ -89,3 +89,54 @@ describe('the engrave depth legend (#349)', () => {
     expect(screen.getByTestId('engrave-legend-void').textContent).toContain('void under the face');
   });
 });
+
+// #170 — a blank that states its colour split is not drawn on the depth ramp (`floorColor`), so a
+// ramp of depth swatches would name colours the meshes are NOT in. The legend says which two colours
+// the floors are drawn in instead, where they part, and that the colours are stand-ins.
+describe('the engrave legend on a blank that states its split (#170)', () => {
+  /** The shipped job, printed: a 3.0 mm split on a 12 mm blank puts the boundary 9 mm down. */
+  function printed(split = 11): EngraveJob {
+    const job = defaultEngraveJob();
+    job.stock.print = { split, layerHeight: 0.2, firstLayerHeight: 0.2 };
+    useEngraveJobStore.setState({ job });
+    return job;
+  }
+
+  it('names the two colours and the plane they part at, instead of a ramp of depths', () => {
+    // Split 11 mm up from the back face → 1.0 mm down from the engraved face, which is a layer line
+    // exactly, so the 0.5 mm floor is top colour and the 1.0 and 2.0 mm floors are through it.
+    const job = printed();
+    useEngravePreviewStore.setState({ preview: previewFor(job) });
+    render(<EngraveLegend />);
+
+    const top = screen.getByTestId('engrave-legend-top');
+    const bottom = screen.getByTestId('engrave-legend-bottom');
+    // The two things the eye has to tell apart, and the word "stand-in" out loud: nothing in the app
+    // maps an extruder to a colour (the swatches themselves are `splitColor`'s, and `floorColor`'s
+    // tests in engravePreview.spec.ts pin that the floors came from the same pair).
+    expect(top.textContent).toContain('top colour (stand-in)');
+    expect(bottom.textContent).toContain('bottom colour (stand-in)');
+    // …and the plane they are read against, as the depth it sits at — it is not a colour a floor
+    // lands IN.
+    expect(screen.getByTestId('engrave-legend-split').textContent).toContain('split 1.00 mm down');
+
+    // The ramp's rows are gone — 0.5/1/2 mm are depths the floors have, and naming them here would
+    // be naming colours the picture is not drawn in.
+    expect(screen.queryByTestId('engrave-legend-0.5')).toBeNull();
+    expect(screen.queryByTestId('engrave-legend-1')).toBeNull();
+    expect(screen.queryByTestId('engrave-legend-2')).toBeNull();
+    // The header says which of the two readings is in force.
+    const box = screen.getByTestId('engrave-preview-legend');
+    expect(box.textContent).toContain('Colour');
+    expect(box.textContent).not.toContain('Depth');
+  });
+
+  it('keeps the ramp for a blank that states none — the two readings do not leak into each other', () => {
+    useEngravePreviewStore.setState({ preview: previewFor(defaultEngraveJob()) });
+    render(<EngraveLegend />);
+
+    expect(screen.queryByTestId('engrave-legend-top')).toBeNull();
+    expect(screen.queryByTestId('engrave-legend-split')).toBeNull();
+    expect(screen.getByTestId('engrave-legend-2').textContent).toContain('2.0 mm');
+  });
+});

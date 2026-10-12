@@ -128,6 +128,22 @@ export function mm(v: number): string {
 const DEPTH_STEPS = 1000;
 
 /**
+ * A computed depth, quantised to that same thousandth — the number written onto the document.
+ *
+ * The two-state control writes `boundaryDepth ± layerHeight` (#170), and both operands are layer
+ * lines the grid computes as sums: the default badge's boundary is `0.2 + 3 × 0.2` and its `surface`
+ * floor comes back as `0.8 − 0.2` = `0.6000000000000001`. The depth field shows THAT, and the
+ * verifier then judges a floor against a plane it differs from by a trillionth. Rounding to the
+ * unit the machine moves in is not a tidy-up: it is the value the document is allowed to hold.
+ *
+ * Nearest, not directionally like `deeper`/`shallower`: those two exist to respect a bound, and a
+ * state's depth is exactly ON the grid and has no bound to respect.
+ */
+export function roundDepth(v: Mm): Mm {
+  return Math.round(v * DEPTH_STEPS) / DEPTH_STEPS;
+}
+
+/**
  * How far a floor may miss a plane and still count as ON it, mm — the binary-float tail of `at ± margin`.
  *
  * A recommendation is quantised to the thousandth (`deeper`/`shallower`) and the checker re-derives

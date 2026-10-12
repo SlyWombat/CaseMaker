@@ -14,13 +14,14 @@
 // swallowed the Top/Fit/zoom clicks. Here `pointer-events: none` is simply a CSS property.
 //
 // It reads the same two stores `EngravePreview.tsx` does, so the swatches and the mesh colours
-// cannot drift apart.
+// cannot drift apart — including the #170 choice of WHICH colouring is in force: the depth ramp, or
+// the two-colour reading a blank that states its split gets.
 
 import { useMemo, type CSSProperties, type JSX } from 'react';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { SACRIFICIAL_COLOR } from './simGeometry';
-import { depthColor, VOID_COLOR } from './engraveRamp';
+import { depthColor, splitColor, VOID_COLOR } from './engraveRamp';
 
 /**
  * Top-right, below the top-left `ViewportToolbar` and above the bottom `SimTransport` (#198).
@@ -62,7 +63,8 @@ export function EngraveLegend(): JSX.Element | null {
   const stock = useEngraveJobStore((s) => s.job.stock);
   const minFloor = useEngraveJobStore((s) => s.job.minFloor);
 
-  // Distinct depths, shallowest first — the same order and the same ramp the floors are drawn on.
+  // Distinct depths, shallowest first — the same order and the same ramp the floors are drawn on
+  // when the blank states no split. Computed unconditionally (a hook), and unused in the split case.
   const depths = useMemo(() => {
     if (!preview) return [];
     return [...new Set(preview.floors.map((f) => f.depth))].sort((a, b) => a - b);
@@ -72,11 +74,33 @@ export function EngraveLegend(): JSX.Element | null {
   // either, so an empty box would be the only thing on screen.
   if (!preview) return null;
   const maxDepth = stock.thickness - minFloor;
+  // #170 — on a blank that states its colour split the floors are NOT drawn on the depth ramp
+  // (`floorColor`), so a ramp of depth swatches here would name colours the meshes are not in. The
+  // two rows below are the two things the eye has to tell apart, and they say "stand-in" out loud:
+  // nothing in the app maps an extruder to a colour, so `SPLIT_TOP_COLOR` is not a claim about the
+  // blank. Both come from the same module the meshes were coloured from, so they cannot drift.
+  const split = preview.colourBoundaryDepth;
 
   return (
     <div data-testid="engrave-preview-legend" style={BOX}>
-      <div style={{ fontWeight: 600, marginBottom: 2 }}>Depth</div>
-      {depths.length === 0 ? (
+      <div style={{ fontWeight: 600, marginBottom: 2 }}>{split === null ? 'Depth' : 'Colour'}</div>
+      {split !== null ? (
+        <>
+          <div data-testid="engrave-legend-top" style={ROW}>
+            <span style={{ ...SWATCH, background: splitColor('top') }} />
+            top colour (stand-in)
+          </div>
+          <div data-testid="engrave-legend-bottom" style={ROW}>
+            <span style={{ ...SWATCH, background: splitColor('bottom') }} />
+            bottom colour (stand-in)
+          </div>
+          {/* The plane the two rows are read against, stated as the depth it sits at rather than
+              drawn as a third colour: it is not a colour a floor lands IN, it is where they part. */}
+          <div data-testid="engrave-legend-split" style={{ color: '#9aa4b0' }}>
+            split {split.toFixed(2)} mm down
+          </div>
+        </>
+      ) : depths.length === 0 ? (
         <div style={{ color: '#9aa4b0' }}>nothing cut</div>
       ) : (
         depths.map((d) => (

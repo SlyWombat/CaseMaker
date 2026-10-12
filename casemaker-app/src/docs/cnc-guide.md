@@ -360,10 +360,10 @@ or not a machine is switched on. The check never repoints the job: a machine tha
 different profile is named as such, and the picker is where you change it.
 
 **2. Add labels (#200, #205) — in the app.** Each label carries its own text, font, weight,
-cap height, position on the blank, rotation and **depth**. The editor shows a depth box with
-a slider beside it — never a slider alone, because depth is a number you will want to type.
-Labels at different depths are normal: the default job is three words at 2.0, 1.0 and
-0.5 mm.
+cap height, position on the blank, rotation and **depth**. Depth is a box you type a number
+into — never a slider: a slider cannot express 11.5 mm reliably, and on a two-colour blank the
+choice is not continuous anyway (chapter 6). Labels at different depths are normal: the default
+job is three words at 2.0, 1.0 and 0.5 mm.
 
 ![The Engrave panel being edited](https://raw.githubusercontent.com/SlyWombat/CaseMaker/main/docs/assets/cnc/cnc-mockup-engrave-editing.png)
 
@@ -462,7 +462,9 @@ together. Nothing is re-derived at save time: the frame is the one the verifier 
 
 **7. Watch it in the simulator before the machine — in the app.** The engrave preview draws
 the blank with each label's floor cut in and coloured by depth on a fixed ramp, so the same
-depth is the same colour in every job. What it draws is the **opened region** — the glyph grown and shrunk
+depth is the same colour in every job. On a two-colour blank, whose whole point is which colour
+shows through, the floors are drawn in the **colour** they land in instead (chapter 6) — a fixed
+ramp would colour two floors differently that come out the same colour. What it draws is the **opened region** — the glyph grown and shrunk
 back by the cutter's radius — so inside corners are rounded and strokes thinner than the
 cutter have vanished. That is what the cutter will actually make, not an idealised glyph.
 
@@ -513,8 +515,9 @@ seats. Writing it down is how the assumed numbers become measured ones.
 
 > **Status: Partly available** — CNC-3 (#165, #205). The badge blank is in the app: **Use
 > the badge blank** on the Engrave panel takes the stock and the magnet pocket from the
-> project's badge (#271). The surface/reveal depth choice (decision 20) is not in the panel,
-> and #165's measurement pass has not run.
+> project's badge (#271). The surface/reveal depth choice (decision 20) is in the label rows
+> (#170) — on a blank that states how it was printed. Nothing writes that statement yet
+> (#166), and #165's measurement pass has not run.
 
 A **two-colour badge** is a blank printed in two colours stacked in Z — the lower colour
 underneath, the top colour above. Where the engraving cuts deeper than the boundary between
@@ -529,17 +532,28 @@ anything. #165 is the measurement pass.
 **Why depth is two choices, not a slider (decision 20).** On a two-colour badge, a label's
 depth is not free: it either stays in the top colour (**"surface"**) or goes through to the
 bottom one (**"reveal"**). A continuous slider would imply a continuous set of outcomes that
-the two-colour stack does not have. So the badge will offer two states, and the honest default
-between them carries the meaning.
+the two-colour stack does not have. So the label row offers those two states beside the
+number, and typing a depth is the override for anyone who wants one.
 
 **What is on screen today, and what is not.** One button: **Use the badge blank**, at the top
 of the Engrave panel's *Stock* section (chapter 5, step 1). It reads the project's badge —
 76.2 × 38.1 × 3.81 mm PLA by default — and sets the stock to that blank and declares its
 magnet pocket as a void the depth limit respects, then states back in a sentence what it set.
-Nothing else in the job changes. The two-state depth choice is **not** there: a label's depth
-is still a number in a box, and the colour boundary it is measured against is still #165's to
-measure. Until then the badge is a blank the app knows the shape of, not yet a job it knows
-the depths for.
+Nothing else in the job changes.
+
+**The two-state depth choice (#170).** On a blank that says how it was printed, every label row
+carries **surface** and **reveal** beside its depth field. Each one writes the depth it means —
+one printed layer above the colour boundary for *surface*, one layer below it for *reveal* —
+so the choice is a colour, not a number to work out. The depth field stays: type in it and the
+number is yours (the app marks it as your own, and neither state stays lit over it). The preview
+follows the COLOUR wherever a boundary is known — every floor is drawn in the colour it lands in,
+and the legend names the two, calls them stand-ins (the app cannot know which filament you
+loaded), and says where the boundary sits.
+
+A badge says how it was printed through its **print** specification — layer height and first
+layer height. Nothing in the app writes that yet (#166), so today the control appears only for a
+job that already states a print; a badge without one leaves the badge a blank the app knows the
+shape of, not yet a job it knows the depths for.
 
 **Every floor keeps clear of a plane it must not cross (#345).** A depth in this app is never "as
 deep as you like": each floor has to stay clear of the planes the job knows about — a void's
