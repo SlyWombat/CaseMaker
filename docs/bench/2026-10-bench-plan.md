@@ -16,9 +16,8 @@ The fitted 1 × 4 mm ball nose cannot be simulated (the sweep refuses any non-fl
 green-box 1 mm flat is a metal cutter, ruled out for PLA (maintainer, 2026-10-09, on #209).
 Sessions S1 and S2 do not need a cutter and can run first.
 
-**Cutter recommended (2026-10-12), awaiting the maintainer's confirmation.** The maintainer asked
-"which colour and label to put in the machine" and was given the one below; they have not yet said
-it is fitted. Every Makera box in the house was photographed and decoded that
+**Cutter fitted (2026-10-12).** The maintainer asked which bit to put in the machine, was given the
+one below, and has swapped it in. Every Makera box in the house was photographed and decoded that
 day: 37 boxes, 28 codes. They are loaded into the desktop app's house inventory, and every code
 scans as owned. (The records and photos are local, in `tool-labels/`, gitignored as vendor label
 text.) The flat to fit for S3/S4:
@@ -31,8 +30,8 @@ text.) The flat to fit for S3/S4:
   flat (the job's own recommendation, #211). If the job wants smaller, the only plastic-safe
   option owned is a 1 mm corn bit (`C1-BIT-CORN-1-7`), and that needs a test cut first. Corn bits
   are sold for PCB and composites.
-- The ball nose comes out and goes back in its yellow box ("Two Flute Ball Nose Bit … 1mm * 4mm",
-  `C1-BIT-BALL-NOSE-1-4`). The inventory marks that ball nose as in the spindle until told otherwise.
+- The ball nose is out and back in its yellow box ("Two Flute Ball Nose Bit … 1mm * 4mm",
+  `C1-BIT-BALL-NOSE-1-4`). The house inventory's notes record the swap on both items.
 - **#185's V-bit:** yellow case, "Single Flute Engraving Bit - 1/8" Shank 30° * 0.3mm",
   `C1-BIT-ENGRAVE-30-0.3`. The orange `ENGRAVE-M` bits are the metal line.
 - The app reads all of these from their box codes since #377–#380. Before #379 an O-flute read as
@@ -44,7 +43,7 @@ text.) The flat to fit for S3/S4:
 
 | # | What | Where | Feeds |
 |---|---|---|---|
-| 1 | ~~Yellow-box photos, pick the cutter~~ done 2026-10-12: `C1-BIT-O-FLUTE-2-12` (see the gate above); still to do: caliper it (runbook A1) | desk | every cut |
+| 1 | ~~Yellow-box photos, pick the cutter~~ done 2026-10-12: `C1-BIT-O-FLUTE-2-12` (see the gate above); fitted 2026-10-12; still to do: caliper it (runbook A1) | desk | every cut |
 | 2 | Vise dimensions, proud height and rock (A3, A4, A5); wired-probe tip ⌀ (A8) | machine off, calipers | `DEFAULT_VISE`, regenerated files |
 | 3 | 30° V-bit (`C1-BIT-ENGRAVE-30-0.3`, label 30° × 0.3 mm flat tip) tip and angle under a loupe | desk | #185 |
 | 4 | PrusaSlicer reads: `z_offset`, elephant-foot, layer heights, the colour-change layer (#269 item 2, #165 step 1); per-object infill (#166 item 2) | desk | #165, #166 |
