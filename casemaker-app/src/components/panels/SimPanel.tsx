@@ -9,7 +9,14 @@ import type { DiagnosticSource, SimDiagnostic } from '@/workers/sim/session';
 import { MAX_TEXT_FILE_BYTES, openTextFile } from '@/utils/openTextFile';
 import { GcodePane } from '@/components/panels/GcodePane';
 import { coverageDisclaimer, type SimRunOutcome } from '@/components/panels/simCoverage';
-import { matchSentence, requiredToolSentence } from '@/components/panels/simMatchSentence';
+import {
+  ambiguousSentence,
+  matchSentence,
+  pickedSentence,
+  requiredToolSentence,
+  type DescribedCandidate,
+} from '@/components/panels/simMatchSentence';
+import { TIER_TAG, tierOf } from '@/engine/cnc/toolTiers';
 
 /**
  * The Simulate panel (#196): open a `.nc`, confirm the stock and the tool, run the sweep, and
@@ -129,11 +136,13 @@ export function SimPanel() {
   const toolSource = useSimSetupStore((s) => s.toolSource);
   const toolMatch = useSimSetupStore((s) => s.toolMatch);
   const toolMatchProvenance = useSimSetupStore((s) => s.toolMatchProvenance);
+  const toolCandidates = useSimSetupStore((s) => s.toolCandidates);
   const statedToolKey = useSimSetupStore((s) => s.statedToolKey);
   const headerDiagnostics = useSimSetupStore((s) => s.headerDiagnostics);
   const openFile = useSimSetupStore((s) => s.openFile);
   const setStock = useSimSetupStore((s) => s.setStock);
   const setTool = useSimSetupStore((s) => s.setTool);
+  const pickTool = useSimSetupStore((s) => s.pickTool);
   const resetSetup = useSimSetupStore((s) => s.reset);
 
   const status = useSimStore((s) => s.status);
@@ -158,6 +167,15 @@ export function SimPanel() {
   const tool = toolKey ? resolveTool(toolKey) : null;
   const loading = status === 'loading';
   const canSimulate = gcodeText !== null && tool !== null && !loading;
+
+  // #316 — how a row is named in the question and in the answer: the entry's own name, and the tier
+  // word every other screen gives it. A key the registry no longer holds falls back to the key
+  // itself, which is the honest thing to show and cannot happen for a candidate (`toolCandidates`
+  // come from this same list).
+  const describeCandidate = (key: string): DescribedCandidate => ({
+    name: tools.find((e) => e.key === key)?.tool.name ?? key,
+    tier: tierOf(key),
+  });
 
   // #243 — the blind-spot sentence, assembled from what this run actually carried: the fixture
   // obstacles it was given (#204), whether sacrificial material was modelled, and the "cannot be
@@ -356,7 +374,31 @@ export function SimPanel() {
           </option>
         ))}
       </select>
-      {!toolKey && (
+      {/* #316 — the file's TOOL record answers as well for rows in two tiers, so the form asks
+          rather than choosing. There is NO preselected candidate: a seeded row would be a silent
+          choice with an extra click, and the whole point is that neither row wins on its own. */}
+      {!toolKey && toolCandidates !== null && (
+        <div data-testid="sim-tool-ambiguous">
+          <p style={{ ...MUTED, color: '#e0a19b' }}>
+            {ambiguousSentence(toolCandidates.map((c) => describeCandidate(c.key)))}
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {toolCandidates.map((c, i) => (
+              <button
+                key={c.key}
+                type="button"
+                data-testid={`sim-tool-candidate-${i}`}
+                data-key={c.key}
+                data-tier={c.tier}
+                onClick={() => pickTool(c.key)}
+              >
+                {describeCandidate(c.key).name} — {TIER_TAG[c.tier]}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {!toolKey && toolCandidates === null && (
         <p style={{ ...MUTED, color: '#e0a19b' }} data-testid="sim-tool-required">
           {requiredToolSentence(statedToolKey)}
         </p>
@@ -367,15 +409,22 @@ export function SimPanel() {
           everything else at a suggestion; and a match leaning on shape and diameter alone is one
           too — the file either states lengths this entry does not match, or states none at all.
           Either way "matched" would be a stronger word than the evidence carries.
-          `data-provenance` says which rule answered (key, id, or shape). */}
-      {toolKey && toolSource === 'header' && (
+          `data-provenance` says which rule answered (key, id, or shape).
+          A PICKED row (#316) gets the line too: the answer is the person's, not the file's, and
+          saying that on every load is the whole reason the sentence exists. */}
+      {toolKey && (toolSource === 'header' || toolSource === 'picked') && (
         <p
           style={MUTED}
           data-testid="sim-tool-match"
           data-strength={toolMatch ?? ''}
           data-provenance={toolMatchProvenance ?? ''}
+          // #316 — the row is the person's answer, not the file's, so the key goes on the element:
+          // an e2e asserts WHICH candidate was taken, rather than grepping the sentence for it.
+          data-picked={toolSource === 'picked' ? toolKey : undefined}
         >
-          {matchSentence(toolMatch, toolMatchProvenance, statedToolKey)}
+          {toolSource === 'picked'
+            ? pickedSentence(describeCandidate(toolKey))
+            : matchSentence(toolMatch, toolMatchProvenance, statedToolKey)}
         </p>
       )}
 

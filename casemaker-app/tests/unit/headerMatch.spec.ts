@@ -2,7 +2,7 @@
 // matcher is handed the list, which is the whole reason it left `simSetupStore`.
 
 import { describe, it, expect } from 'vitest';
-import { matchHeaderTool } from '@/engine/cnc/headerMatch';
+import { headerSignature, matchHeaderTool } from '@/engine/cnc/headerMatch';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 
@@ -23,6 +23,21 @@ const CAT_12 = entry(
 const CAT_42 = entry(
   'cat:111011313842',
   flatEndMill(3.175, { id: '111011313842', name: '3.175*42mm Flat End', fluteLength: 42, shoulderLength: 42 }),
+);
+
+// #316's ambiguous case, as the house really holds it: an item registered FROM the catalogue keeps
+// the catalogue tool as its materialised snapshot (`inventoryEntryFor`), so the owned row carries
+// the same `g_ID` as the `cat:` row it came from. Nothing about the file's TOOL record can then
+// separate them.
+const INV_12 = entry(
+  'inv:box-1',
+  flatEndMill(3.175, { id: '112111313812', name: '3.175*12mm Flat End(Metal)', fluteLength: 12, shoulderLength: 12 }),
+);
+// A second catalogue row answering the same evidence as CAT_12 — same tier, so not the tie #316
+// asks about.
+const CAT_12_B = entry(
+  'cat:duplicate-row',
+  flatEndMill(3.175, { id: '112111313812', name: '3.175*12mm Flat End(Metal)', fluteLength: 12, shoulderLength: 12 }),
 );
 
 /** The header's TOOL record, as `toolFromMkrRecord` hands it over: a `Tool` and nothing else. */
@@ -55,6 +70,9 @@ describe('matchHeaderTool (#316)', () => {
     // only thing that separates them is which tier answered.
     const h = header({ id: '112111313812', fluteLength: 12, shoulderLength: 12 });
     expect(matchHeaderTool(h, [FLAT_12, CAT_12])).toEqual({ key: 'cat:112111313812', strength: 'exact', provenance: 'id' });
+    // …and it stays a decision, not a question: one namespaced row against a built-in is not the
+    // two-tier tie #316 asks about, so no candidates come back.
+    expect(matchHeaderTool(h, [FLAT_12, CAT_12])!.candidates).toBeUndefined();
     // With no service there is no `cat:` row, and the built-in is the answer — never null.
     expect(matchHeaderTool(h, [FLAT_12])).toEqual({ key: 'flat-3.175x12-metal', strength: 'exact', provenance: 'id' });
   });
@@ -154,5 +172,92 @@ describe('matchHeaderTool: the stated key (#332)', () => {
     // A key the list does not hold, and no geometry to suggest with: no answer rather than a guess.
     expect(matchHeaderTool(null, [FLAT_12], 'user:six-flat-copy')).toBeNull();
     expect(matchHeaderTool(null, [FLAT_12])).toBeNull();
+  });
+});
+
+// ---- #316: two tiers answering the same evidence, which is a question and not a tie ------------
+// The 2026-10-09 decision resolved a built-in against a namespaced row. It does not reach two
+// NAMESPACED rows in different tiers: an owned cutter and the catalogue row it was registered from
+// are two different things to say about the same program, and the file says neither.
+
+describe('matchHeaderTool: the two-tier tie (#316)', () => {
+  const AMBIGUOUS_BY_ID = {
+    key: 'inv:box-1',
+    strength: 'suggested',
+    provenance: 'id',
+    candidates: [
+      { key: 'inv:box-1', tier: 'owned' },
+      { key: 'cat:112111313812', tier: 'catalogue' },
+    ],
+  } as const;
+
+  it('names both rows by the id, when the file states one and the lengths agree with each', () => {
+    // Passed catalogue-first, so the ORDER in the answer is the tier order and not the list order —
+    // the same order the Manage picker draws, which is what the person is choosing down.
+    const h = header({ id: '112111313812', fluteLength: 12, shoulderLength: 12 });
+    expect(matchHeaderTool(h, [CAT_12, INV_12])).toEqual(AMBIGUOUS_BY_ID);
+  });
+
+  it('names both by shape and diameter too, on the lengths and without them', () => {
+    // The common real case: a file from another CAM package states no key and no vendor id, so the
+    // only evidence is shape and diameter — and both rows offer exactly that.
+    const lengths = header({ id: null, fluteLength: 12, shoulderLength: 12 });
+    expect(matchHeaderTool(lengths, [CAT_12, INV_12])).toEqual({ ...AMBIGUOUS_BY_ID, provenance: 'shape' });
+
+    // No lengths stated at all: step (c), which is a suggestion anyway — and still a question.
+    const bare = header({ id: null });
+    expect(matchHeaderTool(bare, [CAT_12, INV_12])).toEqual({ ...AMBIGUOUS_BY_ID, provenance: 'shape' });
+  });
+
+  it('is never exact while the question is open, however good the evidence for the pair is', () => {
+    // The id and every stated length agree with BOTH rows. That is exact evidence that the cutter
+    // is one of two, which is not an answer about which — so `suggested` is the strongest word the
+    // match may use, and the caller that can ask does not apply `key`.
+    const h = header({ id: '112111313812', fluteLength: 12, shoulderLength: 12 });
+    expect(matchHeaderTool(h, [CAT_12, INV_12])!.strength).toBe('suggested');
+  });
+
+  it('keeps the first hit when both rows come from ONE tier', () => {
+    // Two catalogue rows answering identically is a registry oddity, not this decision's case: no
+    // tier is being chosen between, so there is nothing to ask and the first hit stands.
+    const h = header({ id: '112111313812', fluteLength: 12, shoulderLength: 12 });
+    const m = matchHeaderTool(h, [CAT_12, CAT_12_B]);
+    expect(m).toEqual({ key: 'cat:112111313812', strength: 'exact', provenance: 'id' });
+    expect(m!.candidates).toBeUndefined();
+  });
+
+  it('leaves the ordinary single-answer match with no candidates at all', () => {
+    // The additive field: every match this issue did not change keeps exactly its old shape.
+    expect(matchHeaderTool(header({ id: null, fluteLength: 42, shoulderLength: 42 }), [FLAT_12, CAT_42])!.candidates).toBeUndefined();
+    expect(matchHeaderTool(header({ id: '0' }), [FLAT_12])!.candidates).toBeUndefined();
+  });
+});
+
+// ---- #316: the signature a remembered pick is filed under --------------------------------------
+// The header's own identity in the match order, so a choice follows the PROGRAM rather than the
+// file name — the same file reopened, or the same post run again, asks no second time.
+
+describe('headerSignature (#316)', () => {
+  it('reads the three rungs of the match order, most specific first', () => {
+    // The file's own key line outranks the vendor id it also states…
+    expect(headerSignature(header({ id: '112111313812' }), 'cat:111011313842')).toBe('key=cat:111011313842');
+    // …the vendor id outranks the shape…
+    expect(headerSignature(header({ id: '112111313812' }), null)).toBe('id=112111313812');
+    // …and shape with the diameter is what is left when the record states neither.
+    expect(headerSignature(header({ id: null }), null)).toBe('shape=flat@3.175');
+  });
+
+  it('quantises the diameter the way the panel writes it, so one cutter is one signature', () => {
+    // Two files stating the same cutter must land on the same string, or the memory silently
+    // misses and the question is asked again — which is the failure this whole path exists to avoid.
+    expect(headerSignature(flatEndMill(3.1750000000000003, { id: null }), null)).toBe('shape=flat@3.175');
+    expect(headerSignature(flatEndMill(3.175, { id: null }), null)).toBe(headerSignature(flatEndMill(3.175, { id: null }), null));
+  });
+
+  it('is null when the record states none of the three, and for a file with no record', () => {
+    // Nothing about such a file can tie, so there is nothing to remember — and the caller may not
+    // file an answer under a signature it invented.
+    expect(headerSignature(flatEndMill(3.175, { id: null, tipDiameter: null, diameter: null }), null)).toBeNull();
+    expect(headerSignature(null, null)).toBeNull();
   });
 });

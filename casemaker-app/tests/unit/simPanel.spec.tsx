@@ -7,6 +7,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { SimPanel } from '@/components/panels/SimPanel';
 import { setSimClientLoader, useSimStore, type SimClient } from '@/store/simStore';
 import { DEFAULT_STOCK, buildSimSetup, useSimSetupStore } from '@/store/simSetupStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { resetRegistry, setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { RESTART_TOOL_LENGTH_NOTE } from '@/engine/cnc/restart';
 import { parseGcode } from '@/engine/cnc/gcode';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
@@ -153,6 +157,10 @@ function openPlainFile(): void {
 
 beforeEach(() => {
   useSimSetupStore.getState().reset();
+  // The registry and the pick memory are module state: a pick made in one test would otherwise leak
+  // into the next, which is the same leak the sim-setup spec guards against (#316).
+  resetRegistry();
+  useSettingsStore.setState({ toolPicks: {} });
   setSimClientLoader(async () => fakeClient(REFUSED));
 });
 
@@ -197,6 +205,57 @@ describe('SimPanel', () => {
     expect(firm.getAttribute('data-strength')).toBe('exact');
     expect(firm.getAttribute('data-provenance')).toBe('id');
     expect(firm.textContent).toContain('matched from the file’s TOOL record');
+  });
+
+  it('asks which of two equally-matching rows the file was cut with, and applies the pick (#316)', async () => {
+    // The owned cutter and the catalogue row it was registered from carry the same `g_ID` and the
+    // same lengths, so the file names neither. The panel asks — with no row preselected, because a
+    // seeded choice would be a silent one — and applies the answer the person gives.
+    const CAT: ToolLibraryEntry = {
+      key: 'cat:112111313812',
+      provenance: 'the house catalogue',
+      tool: flatEndMill(3.175, { id: '112111313812', name: '3.175*12mm Flat End(Metal)', fluteLength: 12, shoulderLength: 12 }),
+    };
+    const INV: ToolLibraryEntry = {
+      key: 'inv:box-1',
+      provenance: 'registered from the catalogue',
+      tool: flatEndMill(3.175, { id: '112111313812', name: '3.175*12mm Flat End(Metal)', fluteLength: 12, shoulderLength: 12 }),
+    };
+    setRegistry([CAT]);
+    setInventoryEntries([INV]);
+    const TOOL_LINE =
+      ';@MKR|TOOL|number=1|id=112111313812|name=3.175*12mm Flat End(Metal)|type=Flat End|handlediameter=3.175|sticklength=0|shoulderlength=12|flutelength=12|diameter=3.175|tipdiameter=3.175|cornerradius=0|angle=0|halfAngle=0';
+
+    act(() => useSimSetupStore.getState().openFile('ambiguous.nc', `${TOOL_LINE}\n`));
+    render(<SimPanel />);
+
+    // Nothing is applied, so the select is empty and Simulate is refused until the question is
+    // answered — but this is a QUESTION, not a missing tool, so the "required" line stays away.
+    expect((screen.getByTestId('sim-tool') as HTMLSelectElement).value).toBe('');
+    expect((screen.getByTestId('sim-simulate') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByTestId('sim-tool-required')).toBeNull();
+
+    const chooser = screen.getByTestId('sim-tool-ambiguous');
+    expect(chooser.textContent).toContain('more than one of your cutters');
+    expect(chooser.textContent).toContain('pick the one it was cut with');
+    const owned = screen.getByTestId('sim-tool-candidate-0');
+    const catalogue = screen.getByTestId('sim-tool-candidate-1');
+    // Drawn in tier order (owned first), which is the order the Manage picker groups them in.
+    expect(owned.getAttribute('data-key')).toBe('inv:box-1');
+    expect(owned.getAttribute('data-tier')).toBe('owned');
+    expect(catalogue.getAttribute('data-key')).toBe('cat:112111313812');
+    expect(catalogue.getAttribute('data-tier')).toBe('catalogue');
+
+    fireEvent.click(catalogue);
+    expect(useSimSetupStore.getState().toolKey).toBe('cat:112111313812');
+    expect((screen.getByTestId('sim-tool') as HTMLSelectElement).value).toBe('cat:112111313812');
+    // The answer is the person's, not the file's, and the line keeps saying so (#316).
+    const line = screen.getByTestId('sim-tool-match');
+    expect(line.getAttribute('data-picked')).toBe('cat:112111313812');
+    expect(line.getAttribute('data-strength')).toBe('suggested');
+    expect(line.textContent).toContain('the one you picked');
+    expect(line.textContent).toContain('the file does not confirm');
+    expect(screen.queryByTestId('sim-tool-ambiguous')).toBeNull();
   });
 
   it('names the cutter the file asks for when this house does not have it (#332)', async () => {

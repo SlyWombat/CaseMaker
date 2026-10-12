@@ -3,9 +3,11 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { buildSimSetup, DEFAULT_STOCK, useSimSetupStore } from '@/store/simSetupStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import { buildTimeline, parseGcode, Z1 } from '@/engine/cnc';
 import { flatEndMill } from '@/engine/cnc/tool';
-import { setRegistry } from '@/engine/cnc/toolRegistry';
+import { resetRegistry, setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 
 // Verbatim from reference-gcode/Z1/TopClamp.nc (also in tests/unit/cncSetupFromHeader.spec.ts).
 const STOCK = ';@MKR|STOCK|id=cuboid|length=100|width=100|height=5|diameter=1';
@@ -16,6 +18,10 @@ const headerText = (...lines: string[]): string => lines.join('\n') + '\n';
 
 beforeEach(() => {
   useSimSetupStore.getState().reset();
+  // The registry and the pick memory are module state, and `environment: 'node'` means the settings
+  // store never touched `localStorage` — so a pick made in one test would leak into the next (#316).
+  resetRegistry();
+  useSettingsStore.setState({ toolPicks: {} });
 });
 
 describe('simSetupStore.openFile', () => {
@@ -234,6 +240,153 @@ describe('simSetupStore.openFile', () => {
     const s = useSimSetupStore.getState();
     expect(s.stock).toEqual({ length: 100, width: 100, thickness: 7 });
     expect(s.stockSource).toEqual({ length: 'header', width: 'header', thickness: 'user' });
+  });
+});
+
+// ---- #316: the open question, and the pick that answers it once ---------------------------------
+// An owned cutter and the catalogue row it was registered from carry the same `g_ID` and the same
+// lengths (`inventoryEntryFor` materialises the catalogue tool as the item's snapshot), so nothing
+// in the file separates them. The store asks rather than choosing, and remembers the answer.
+
+const CAT_12: ToolLibraryEntry = {
+  key: 'cat:112111313812',
+  provenance: 'the house catalogue',
+  tool: flatEndMill(3.175, { id: '112111313812', name: '3.175*12mm Flat End(Metal)', fluteLength: 12, shoulderLength: 12 }),
+};
+const INV_12: ToolLibraryEntry = {
+  key: 'inv:box-1',
+  provenance: 'registered from the catalogue',
+  tool: flatEndMill(3.175, { id: '112111313812', name: '3.175*12mm Flat End(Metal)', fluteLength: 12, shoulderLength: 12 }),
+};
+// A second catalogue row answering the same evidence: same tier as CAT_12, so the pick memory that
+// named CAT_12 no longer answers and the question reopens.
+const CAT_12_B: ToolLibraryEntry = {
+  key: 'cat:duplicate-row',
+  provenance: 'the house catalogue',
+  tool: flatEndMill(3.175, { id: '112111313812', name: '3.175*12mm Flat End(Metal)', fluteLength: 12, shoulderLength: 12 }),
+};
+
+const bothTiers = (): void => {
+  setRegistry([CAT_12]);
+  setInventoryEntries([INV_12]);
+};
+
+describe('simSetupStore: the two-tier question and the remembered pick (#316)', () => {
+  it('asks instead of choosing, and applies nothing, when two tiers match equally', () => {
+    bothTiers();
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    const s = useSimSetupStore.getState();
+    // No row is entitled to win, so no row is applied — a preselected candidate would be a silent
+    // choice. The panel reads `toolCandidates` and puts the question to the person.
+    expect(s.toolKey).toBeNull();
+    expect(s.toolSource).toBeNull();
+    expect(s.toolCandidates).toEqual([
+      { key: 'inv:box-1', tier: 'owned' },
+      { key: 'cat:112111313812', tier: 'catalogue' },
+    ]);
+    // The match still TRAVELS — the panel needs the strength and the rule to build the sentence.
+    expect(s.toolMatch).toBe('suggested');
+    expect(s.toolMatchProvenance).toBe('id');
+    expect(s.toolSignature).toBe('id=112111313812');
+  });
+
+  it('applies the pick, marks it a pick, and files it under the header’s signature', () => {
+    bothTiers();
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    useSimSetupStore.getState().pickTool('cat:112111313812');
+    const s = useSimSetupStore.getState();
+    expect(s.toolKey).toBe('cat:112111313812');
+    expect(s.toolSource).toBe('picked');
+    expect(s.toolCandidates).toBeNull();
+    // Filed so the same program does not ask again — and NOT as `'user'`, which would ride #315 onto
+    // a different file whose rows may differ.
+    expect(useSettingsStore.getState().toolPicks['id=112111313812']).toBe('cat:112111313812');
+    expect(s.toolSource).not.toBe('user');
+  });
+
+  it('reopens the same program without asking, and keeps saying the file did not confirm it', () => {
+    bothTiers();
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    useSimSetupStore.getState().pickTool('inv:box-1');
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    const s = useSimSetupStore.getState();
+    expect(s.toolCandidates).toBeNull();
+    expect(s.toolKey).toBe('inv:box-1');
+    expect(s.toolSource).toBe('picked');
+  });
+
+  it('asks again for a different signature, even with a pick already remembered', () => {
+    bothTiers();
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    useSimSetupStore.getState().pickTool('cat:112111313812');
+    // The same two rows, a vendor id neither carries: step (b) matches both by shape and diameter (the
+    // lengths agree), and the pick filed under the other id does not answer this file's signature.
+    const oddId = TOOL.replace('id=112111313812', 'id=999999999999');
+    useSimSetupStore.getState().openFile('clone.nc', headerText(STOCK, oddId));
+    const s = useSimSetupStore.getState();
+    expect(s.toolSignature).toBe('id=999999999999');
+    expect(s.toolKey).toBeNull();
+    expect(s.toolCandidates).toEqual([
+      { key: 'inv:box-1', tier: 'owned' },
+      { key: 'cat:112111313812', tier: 'catalogue' },
+    ]);
+  });
+
+  it('asks again when the remembered row is no longer one of the rows that match', () => {
+    // The one check that clears a pick: it is applied only while it is still among the fresh
+    // candidates. A catalogue sync dropping the `cat:` row it named is exactly this.
+    bothTiers();
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    useSimSetupStore.getState().pickTool('cat:112111313812');
+    setRegistry([CAT_12_B]);
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    const s = useSimSetupStore.getState();
+    expect(s.toolKey).toBeNull();
+    expect(s.toolCandidates).toEqual([
+      { key: 'inv:box-1', tier: 'owned' },
+      { key: 'cat:duplicate-row', tier: 'catalogue' },
+    ]);
+    // Lapsed, not deleted: a service that was merely unreachable would refresh the registry to
+    // built-ins only, and a self-cleaning map would then destroy the pick over a network hiccup.
+    expect(useSettingsStore.getState().toolPicks['id=112111313812']).toBe('cat:112111313812');
+  });
+
+  it('warns about the ambiguity itself when the user’s own cutter is kept (#338 + #316)', () => {
+    // There is no "the file's cutter" to name when two rows matched equally, so the warning names
+    // the rows instead — silence would leave a cutter chosen for another program with nothing on
+    // screen saying the file disagrees.
+    bothTiers();
+    useSimSetupStore.getState().setTool('flat-1.0');
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    const s = useSimSetupStore.getState();
+    expect(s.toolKey).toBe('flat-1.0');
+    expect(s.toolSource).toBe('user');
+    expect(s.toolCandidates).toBeNull();
+    expect(s.headerDiagnostics).toHaveLength(1);
+    expect(s.headerDiagnostics[0]!.message).toContain('inv:box-1');
+    expect(s.headerDiagnostics[0]!.message).toContain('cat:112111313812');
+    expect(s.headerDiagnostics[0]!.message).toContain('flat-1.0');
+  });
+
+  it('says nothing when the user’s own cutter is one of the rows that matched', () => {
+    bothTiers();
+    useSimSetupStore.getState().setTool('cat:112111313812');
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    const s = useSimSetupStore.getState();
+    expect(s.toolKey).toBe('cat:112111313812');
+    expect(s.toolSource).toBe('user');
+    expect(s.headerDiagnostics).toEqual([]);
+  });
+
+  it('does not treat a single answer as a question, however many rows the registry holds', () => {
+    // Only the owned row matches: one tier, so step (b) resolves it and no question is asked.
+    setInventoryEntries([INV_12]);
+    useSimSetupStore.getState().openFile('TopClamp.nc', headerText(STOCK, TOOL));
+    const s = useSimSetupStore.getState();
+    expect(s.toolCandidates).toBeNull();
+    expect(s.toolKey).toBe('inv:box-1');
+    expect(s.toolSource).toBe('header');
+    expect(s.toolMatch).toBe('exact');
   });
 });
 

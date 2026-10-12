@@ -21,18 +21,39 @@
  * even when the registry cannot resolve it, so the form can say WHICH cutter this house is missing
  * instead of quietly offering the closest one it has.
  *
- * Not persisted, and plain zustand — no immer needed.
+ * WHEN TWO TIERS MATCH EQUALLY, THIS STORE ASKS (#316). A file whose TOOL record answers as well
+ * for an owned `inv:` row as for a `cat:` row does not name one of them, so `toolKey` stays null,
+ * `toolCandidates` carries both and the panel puts the question to the person — a preselected
+ * candidate would be a silent choice with an extra click. Their answer is applied as `'picked'`, a
+ * source of its own, and remembered in `settingsStore.toolPicks` under the header's signature so
+ * the same program does not ask twice and a reload does not re-ask. A remembered key is used only
+ * while it is still among the rows that match that signature: that one check is what makes Forget
+ * on the row and a catalogue sync clear it, with no subscription between the two stores.
+ *
+ * Not persisted, and plain zustand — no immer needed. (The PICKS are persisted; the form is not.)
  */
 
 import { create } from 'zustand';
 import { getTools, parseGcode, setupFromHeader, stubSetup, Z1 } from '@/engine/cnc';
-import { matchHeaderTool, type MatchProvenance, type MatchStrength } from '@/engine/cnc/headerMatch';
+import {
+  headerSignature,
+  matchHeaderTool,
+  type MatchProvenance,
+  type MatchStrength,
+  type ToolMatchCandidate,
+} from '@/engine/cnc/headerMatch';
 import { toolFromMkrRecord } from '@/engine/cnc/tool';
 import { rectProfile } from '@/engine/compiler/profile';
+import { useSettingsStore } from './settingsStore';
 import type { Setup, StartingTool } from '@/engine/cnc';
 
-/** Where a field's current value came from. */
-export type FieldSource = 'header' | 'user' | 'default';
+/**
+ * Where a field's current value came from. `'picked'` is the sim setup's own (#316): the file's TOOL
+ * record matched rows in two tiers, so the person was asked, and this is the row they chose. It is
+ * deliberately NOT `'user'` — a `'user'` claim wins over every file that follows (#315), which would
+ * carry one program's answer onto another whose rows may differ. A pick is scoped to its signature.
+ */
+export type FieldSource = 'header' | 'user' | 'picked' | 'default';
 
 export interface SimStock {
   /** X, mm. */
@@ -65,6 +86,18 @@ export interface SimSetupState {
   /** Which rule answered — our key line (#332), the vendor `id=`, or shape and diameter (#316). */
   toolMatchProvenance: MatchProvenance | null;
   /**
+   * The rows that answer the file's TOOL record EQUALLY, when they come from two or more tiers
+   * (#316). Non-null means the question is open: `toolKey` is null because no row is entitled to
+   * win, and the panel asks rather than choosing. Null is the ordinary case — either one row
+   * answered, or a remembered pick already did.
+   */
+  toolCandidates: ToolMatchCandidate[] | null;
+  /**
+   * The header's own identity in the match order (#316), as `headerSignature` reads it — what a
+   * remembered pick is filed under, so it follows the program rather than the file name.
+   */
+  toolSignature: string | null;
+  /**
    * The registry key the file itself named (`;@CM|TOOL|key=`, #332), or null when it names none —
    * a file from another house, or one posted before the line existed. Kept even when the registry
    * cannot resolve it: "this house does not have the cutter the file names" is a fact about the
@@ -80,6 +113,12 @@ export interface SimSetupState {
   /** Merge a stock edit and mark the edited fields `'user'`. */
   setStock(patch: Partial<SimStock>): void;
   setTool(key: string): void;
+  /**
+   * Answer the open question (#316): the person chose between rows that matched equally. Applies
+   * the row as `'picked'` and remembers it under this header's signature, so the same program does
+   * not ask again.
+   */
+  pickTool(key: string): void;
   reset(): void;
 }
 
@@ -97,6 +136,8 @@ const EMPTY = {
   toolSource: null,
   toolMatch: null,
   toolMatchProvenance: null,
+  toolCandidates: null,
+  toolSignature: null,
   statedToolKey: null,
   headerDiagnostics: [] as SimHeaderDiagnostic[],
 };
@@ -107,7 +148,14 @@ function describeTool(key: string): string {
   return entry ? `${entry.tool.name} (${key})` : key;
 }
 
-export const useSimSetupStore = create<SimSetupState>()((set) => ({
+/** The rows named in a sentence: `A or B`, `A, B or C`. */
+function nameRows(keys: readonly string[]): string {
+  const named = keys.map(describeTool);
+  if (named.length <= 1) return named[0] ?? '';
+  return `${named.slice(0, -1).join(', ')} or ${named[named.length - 1]}`;
+}
+
+export const useSimSetupStore = create<SimSetupState>()((set, get) => ({
   ...EMPTY,
   openFile(name, text) {
     const parsed = parseGcode(text);
@@ -134,17 +182,32 @@ export const useSimSetupStore = create<SimSetupState>()((set) => ({
     // matches: step (0) needs no geometry, and `null` here is that file, not a missing answer.
     const statedKey = parsed.header?.cm?.tool?.key ?? null;
     const toolRecord = parsed.header?.records.find((r) => r.tag === 'TOOL');
-    const headerMatch = matchHeaderTool(
-      toolRecord ? toolFromMkrRecord(toolRecord) : null,
-      getTools(),
-      statedKey,
-    );
+    const headerTool = toolRecord ? toolFromMkrRecord(toolRecord) : null;
+    const headerMatch = matchHeaderTool(headerTool, getTools(), statedKey);
     const headerToolKey = headerMatch?.key ?? null;
+    const signature = headerSignature(headerTool, statedKey);
+
+    // #316 — two tiers answered equally, so the match names both and nobody has picked yet. Nothing
+    // is applied: `toolKey` stays null and the panel asks. A remembered pick answers it instead,
+    // but ONLY if it is still one of the rows that match THIS signature today. That single test is
+    // the whole of the clearing rule: Forget on the row and a catalogue sync both change what
+    // `getTools()` holds, so the pick lapses with nothing to subscribe to — and it lapses rather
+    // than being deleted, because a service that is merely unreachable refreshes the registry to
+    // built-ins only (`toolRegistryStore`), and a self-cleaning map would then delete the user's
+    // picks to punish a network hiccup.
+    const candidates = headerMatch?.candidates ?? null;
+    const remembered = signature === null ? undefined : useSettingsStore.getState().toolPicks[signature];
+    const picked =
+      candidates !== null && remembered !== undefined && candidates.some((c) => c.key === remembered)
+        ? remembered
+        : null;
 
     set((s) => {
       // A field the user has claimed survives the open; every other field takes this file's value.
       // The rule is per FIELD, so opening a file after choosing a cutter keeps the cutter and still
-      // brings the stock in — and the reverse. `reset()` is the only way back (#315).
+      // brings the stock in — and the reverse. `reset()` is the only way back (#315). A `'picked'`
+      // claim is NOT one of these: it belongs to the signature it was made for, and this open has
+      // just worked out whether it still answers (#316).
       const stock = { ...s.stock };
       const stockSource = { ...s.stockSource };
       for (const field of ['length', 'width', 'thickness'] as const) {
@@ -160,24 +223,55 @@ export const useSimSetupStore = create<SimSetupState>()((set) => ({
       // The user's cutter wins, but a file that names a DIFFERENT one must say so (#338): the
       // sweep is about to be drawn for a cutter the file was not written for. A file naming the
       // same entry, or none the registry knows, adds nothing.
-      if (keepTool && s.toolKey !== null && headerToolKey !== null && headerToolKey !== s.toolKey) {
-        headerDiagnostics.push({
-          severity: 'warning',
-          message:
-            `the file's TOOL record names ${describeTool(headerToolKey)}; your choice of ` +
-            `${describeTool(s.toolKey)} was kept — Reset to take the file's`,
-        });
+      //
+      // An AMBIGUOUS file is the one case that cannot be put this way (#316): there is no "the
+      // file's cutter" to name, so the warning names the rows it matches instead. Silence here
+      // would be worse than the extra sentence — the user would be holding a cutter chosen for a
+      // previous program while the sweep is drawn with nothing saying the file disagrees.
+      if (keepTool && s.toolKey !== null) {
+        if (candidates !== null) {
+          if (!candidates.some((c) => c.key === s.toolKey)) {
+            headerDiagnostics.push({
+              severity: 'warning',
+              message:
+                `the file's TOOL record matches ${nameRows(candidates.map((c) => c.key))}; your ` +
+                `choice of ${describeTool(s.toolKey)} was kept — Reset to take one of the file's`,
+            });
+          }
+        } else if (headerToolKey !== null && headerToolKey !== s.toolKey) {
+          headerDiagnostics.push({
+            severity: 'warning',
+            message:
+              `the file's TOOL record names ${describeTool(headerToolKey)}; your choice of ` +
+              `${describeTool(s.toolKey)} was kept — Reset to take the file's`,
+          });
+        }
       }
+      // What the form will USE, in the order it is known: a cutter the user claimed, then one they
+      // PICKED for this signature, then the file's own best row — and nothing at all while the
+      // question is still open, because a preselected candidate would be a silent choice (#316).
+      const key = keepTool ? s.toolKey : (picked ?? (candidates === null ? headerToolKey : null));
+      const source: FieldSource | null = keepTool
+        ? 'user'
+        : picked !== null
+          ? 'picked'
+          : candidates === null && headerToolKey !== null
+            ? 'header'
+            : null;
       return {
         fileName: name,
         gcodeText: text,
         stock,
         stockSource,
-        toolKey: keepTool ? s.toolKey : headerToolKey,
-        toolSource: keepTool ? 'user' : headerToolKey ? 'header' : null,
+        toolKey: key,
+        toolSource: source,
         // The match describes the tool the form will USE, so a cutter the user chose carries none.
         toolMatch: keepTool ? null : (headerMatch?.strength ?? null),
         toolMatchProvenance: keepTool ? null : (headerMatch?.provenance ?? null),
+        // The open question, and the signature it is filed under — kept even while the user's own
+        // cutter wins, because both are facts about the FILE.
+        toolCandidates: keepTool ? null : picked !== null ? null : candidates,
+        toolSignature: signature,
         // The file's own statement stands whatever the user does: it is what the file says, and
         // #338's warning about a disagreement is the other half of the same fact.
         statedToolKey: statedKey,
@@ -195,7 +289,18 @@ export const useSimSetupStore = create<SimSetupState>()((set) => ({
     });
   },
   setTool(key) {
-    set({ toolKey: key, toolSource: 'user' });
+    // The user's own claim on the cutter (#315), which outranks every file that follows. Answering
+    // an open question is `pickTool`'s job and NOT this one's: a pick is scoped to its signature,
+    // and stamping `'user'` here would carry it onto a different program (#316).
+    set({ toolKey: key, toolSource: 'user', toolCandidates: null });
+  },
+  pickTool(key) {
+    const { toolSignature: signature } = get();
+    // Remembered first, so a failed write cannot leave the form answered but the memory empty. The
+    // signature is only null for a file with no TOOL record and no key line — which cannot have
+    // produced candidates, so this is unreachable in practice and cheap to state.
+    if (signature !== null) useSettingsStore.getState().setToolPick(signature, key);
+    set({ toolKey: key, toolSource: 'picked', toolCandidates: null });
   },
   reset() {
     set({ ...EMPTY, stock: { ...DEFAULT_STOCK }, stockSource: allDefault() });

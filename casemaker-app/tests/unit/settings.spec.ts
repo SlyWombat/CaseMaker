@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useSettingsStore, clampPort, parseMargins } from '@/store/settingsStore';
+import { useSettingsStore, clampPort, parseMargins, parseToolPicks } from '@/store/settingsStore';
 import { MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 
 describe('app settings', () => {
@@ -63,5 +63,38 @@ describe('app settings', () => {
       boundaryMargin: 0.4,
       source: 'user',
     });
+  });
+});
+
+// #316 — the cutter each header signature was settled on by hand. Persisted so a reload does not
+// re-ask, and validated per ENTRY rather than whole-or-nothing.
+describe('the remembered tool picks (#316)', () => {
+  beforeEach(() => {
+    useSettingsStore.getState().resetSettings();
+  });
+
+  it('remembers a pick under its signature, and resetSettings forgets every one', () => {
+    useSettingsStore.getState().setToolPick('id=112111313812', 'cat:112111313812');
+    useSettingsStore.getState().setToolPick('shape=flat@3.175', 'inv:box-1');
+    expect(useSettingsStore.getState().toolPicks).toEqual({
+      'id=112111313812': 'cat:112111313812',
+      'shape=flat@3.175': 'inv:box-1',
+    });
+    useSettingsStore.getState().resetSettings();
+    expect(useSettingsStore.getState().toolPicks).toEqual({});
+  });
+
+  it('drops a junk entry and keeps the rest, rather than refusing the whole map', () => {
+    // Per-entry, deliberately unlike the vise and the margins: a bad entry can only ever be a pick
+    // that does not come back (the reader re-checks it against the fresh candidates), so there is
+    // nothing dangerous to guard whole. The allow-list of signature prefixes is what stops a foreign
+    // payload from landing `__proto__` as a candidate key in a plain object.
+    const raw = JSON.parse(
+      '{"id=112111313812":"cat:112111313812","__proto__":"inv:box-1","shape=flat@3.175":"","nonsense":"cat:x","id=":"cat:y","shape=ball@6.35":42}',
+    );
+    expect(parseToolPicks(raw)).toEqual({ 'id=112111313812': 'cat:112111313812' });
+    // Absent, or the wrong shape entirely, is not a map.
+    expect(parseToolPicks(undefined)).toEqual({});
+    expect(parseToolPicks(['id=x'])).toEqual({});
   });
 });

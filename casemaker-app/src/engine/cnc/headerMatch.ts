@@ -30,19 +30,22 @@
  * "shape and diameter only" is exactly the evidence there is. That is the common case for a file
  * from another CAM package, which is why the weaker sentence has to exist.
  *
- * **On the id step a tie between tiers is resolved toward the service's row (#316's decision of
- * 2026-10-09).** A built-in and a `cat:` row can carry the same `g_ID` — the built-in IS the
- * catalogue's cutter, copied verbatim from the TopClamp reference (`toolLibrary.ts`) — and there
- * the namespaced key wins, because it is the row the service owns and re-syncs. The decision names
- * that tie and only that one; the shape steps keep taking the FIRST hit, which is the built-in,
- * because a key the registry may not currently hold is not a better answer than one it always
- * holds. Which rule answered is what `provenance` reports.
+ * **A tie between two TIERS is not resolved here, and is not resolved silently (#316's decision of
+ * 2026-10-12).** The 2026-10-09 decision named one tie and only one: a built-in and a `cat:` row
+ * carrying the same `g_ID` — the built-in IS the catalogue's cutter, copied verbatim from the
+ * TopClamp reference (`toolLibrary.ts`) — where the namespaced key wins because it is the row the
+ * service owns and re-syncs. `preferNamespaced` still does exactly that, and only that: it breaks a
+ * tie whose namespaced side all comes from ONE tier. Two NAMESPACED rows in different tiers — an
+ * owned `inv:` row and a `cat:` row matching the same shape and diameter — are two different claims
+ * about the same program, and neither is entitled to win: the entry is `suggested` with BOTH named
+ * as `candidates`, and the person picks. Which rule answered is what `provenance` reports.
  *
  * Pure, and given the list rather than reading the registry: the matcher's tests hand it two
  * entries, and the sim worker realm has no store to read.
  */
 
 import { cuttingDiameter, type Tool } from './tool';
+import { tierOf, TIER_ORDER, type ToolTier } from './toolTiers';
 import type { ToolLibraryEntry } from './toolLibrary';
 
 /** How well the entry fits the file. `exact` = every length the header states agrees. */
@@ -51,11 +54,29 @@ export type MatchStrength = 'exact' | 'suggested';
 /** Which rule decided it: our key line, the vendor `id=`, or shape and diameter alone. */
 export type MatchProvenance = 'key' | 'id' | 'shape';
 
+/**
+ * One row that answers the header's evidence as well as another (#316). Carries its tier because the
+ * tier is what the person is choosing between: the same cutter the house OWNS and the catalogue row
+ * it was cloned from are different things to say about the same program.
+ */
+export interface ToolMatchCandidate {
+  key: string;
+  tier: ToolTier;
+}
+
 export interface HeaderToolMatch {
   /** The registry key the file names, or the closest entry by shape and diameter. */
   key: string;
   strength: MatchStrength;
   provenance: MatchProvenance;
+  /**
+   * Every row that answers the same evidence, in tier order — present ONLY when two or more tiers
+   * do, and then `strength` is always `suggested`, because which of them the file names is exactly
+   * what is unresolved. `key` is then the first of these, which is the ENGINE's best default and
+   * not an answer: a caller that can ask (the sim setup) does not apply it, and one that cannot
+   * (a worker with no person to ask) still has the best row rather than none.
+   */
+  candidates?: ToolMatchCandidate[];
 }
 
 /** 0.01 mm — the same tolerance `cuttingRadiusForSweep` matches the swept cutter with. */
@@ -84,12 +105,61 @@ function statesALength(tool: Tool): boolean {
 }
 
 /**
- * The namespaced entry if the hits include one, the first hit otherwise (#316's decision). A key
- * with a namespace is `cat:`, `user:` or `inv:` (`toolLibrary.isToolKey`); a bare key is a
- * built-in, which is the row that answers when no service does.
+ * The namespaced entry if the hits include one, the first hit otherwise (#316's decision of
+ * 2026-10-09). A key with a namespace is `cat:`, `user:` or `inv:` (`toolLibrary.isToolKey`); a bare
+ * key is a built-in, which is the row that answers when no service does.
+ *
+ * This is a tie-break among rows of ONE tier — built-in versus namespaced, where the namespaced row
+ * is the one the service owns. It is deliberately NOT a tie-break between two namespaced rows: that
+ * is the ambiguity `resolveHits` reports instead of deciding (#316's decision of 2026-10-12).
  */
 function preferNamespaced(hits: readonly ToolLibraryEntry[]): ToolLibraryEntry | null {
   return hits.find((e) => e.key.includes(':')) ?? hits[0] ?? null;
+}
+
+/**
+ * One step's hits, resolved to a single answer — or, when two tiers answer it, to both (#316).
+ *
+ * `strength` is what the step's own evidence earns (the caller passes `exact` or `suggested` for
+ * it); an ambiguous answer overrides it to `suggested`, because "which of these two rows is it" is
+ * unresolved however good the evidence for the PAIR is.
+ */
+function resolveHits(
+  hits: readonly ToolLibraryEntry[],
+  strength: MatchStrength,
+  provenance: MatchProvenance,
+): HeaderToolMatch | null {
+  const namespaced = hits.filter((e) => e.key.includes(':'));
+  const tiers = new Set(namespaced.map((e) => tierOf(e.key)));
+  if (tiers.size >= 2) {
+    // Tier order, and stable within a tier, so the list the person sees is the order the Manage
+    // picker draws and the first candidate is the one the tiers themselves put first.
+    const candidates = [...namespaced]
+      .sort((a, b) => TIER_ORDER.indexOf(tierOf(a.key)) - TIER_ORDER.indexOf(tierOf(b.key)))
+      .map((e): ToolMatchCandidate => ({ key: e.key, tier: tierOf(e.key) }));
+    return { key: candidates[0]!.key, strength: 'suggested', provenance, candidates };
+  }
+  const hit = preferNamespaced(hits);
+  return hit ? { key: hit.key, strength, provenance } : null;
+}
+
+/**
+ * The evidence a header's TOOL record offers, as the string the pick memory is keyed by (#316) —
+ * the header's OWN identity in the match order, so a remembered choice follows the program and not
+ * the file name. One of, in descending specificity:
+ *
+ *   `key=<the ;@CM|TOOL|key= line>` › `id=<the vendor g_ID>` › `shape=<shape>@<diameter, 3 dp>`
+ *
+ * Null when the record states none of the three — nothing about such a file can tie, so there is
+ * nothing to remember. The diameter is quantised the way the panel writes it, since two files that
+ * state the same cutter must produce the same string.
+ */
+export function headerSignature(tool: Tool | null, statedKey: string | null): string | null {
+  if (statedKey !== null) return `key=${statedKey}`;
+  if (tool === null) return null;
+  if (tool.id !== null) return `id=${tool.id}`;
+  const d = cuttingDiameter(tool);
+  return d === null ? null : `shape=${tool.shape}@${d.toFixed(3)}`;
 }
 
 /**
@@ -142,21 +212,27 @@ function matchByIdOrShape(tool: Tool, entries: readonly ToolLibraryEntry[]): Hea
     const byId = entries.filter(
       (e) => e.tool.id !== null && e.tool.id === tool.id && lengthsAgree(tool, e.tool),
     );
-    const hit = preferNamespaced(byId);
-    if (hit) return { key: hit.key, strength: 'exact', provenance: 'id' };
+    const hit = resolveHits(byId, 'exact', 'id');
+    if (hit) return hit;
   }
 
   const d = cuttingDiameter(tool);
   if (d === null) return null;
   const sameShape = entries.filter((e) => e.tool.shape === tool.shape && agrees(cuttingDiameter(e.tool), d));
 
-  // (b) shape and diameter, and the header's own lengths agree with the entry's.
+  // (b) shape and diameter, and the header's own lengths agree with the entry's. Every agreeing
+  // entry is resolved TOGETHER rather than the first being taken: two tiers answering this step are
+  // as ambiguous as two answering (a), and picking the one that happens to be first in the registry
+  // is the silent choice #316 exists to remove.
   if (statesALength(tool)) {
-    const withLengths = sameShape.find((e) => lengthsAgree(tool, e.tool));
-    if (withLengths) return { key: withLengths.key, strength: 'exact', provenance: 'shape' };
+    const hit = resolveHits(
+      sameShape.filter((e) => lengthsAgree(tool, e.tool)),
+      'exact',
+      'shape',
+    );
+    if (hit) return hit;
   }
 
-  // (c) shape and diameter only — suggest the first, and let the panel say the match is weak.
-  const byShape = sameShape[0];
-  return byShape ? { key: byShape.key, strength: 'suggested', provenance: 'shape' } : null;
+  // (c) shape and diameter only — suggest the best of them, and let the panel say the match is weak.
+  return resolveHits(sameShape, 'suggested', 'shape');
 }

@@ -18,6 +18,12 @@ export interface FixturesSettings {
   sacrificial?: Sacrificial;
 }
 
+/**
+ * One remembered tool pick (#316): a header signature — `headerSignature`'s own string — mapped to
+ * the registry key the person chose for it. See `AppSettings.toolPicks`.
+ */
+export type ToolPicks = Record<string, string>;
+
 export interface AppSettings {
   port: number;
   bindToAll: boolean;
@@ -32,6 +38,17 @@ export interface AppSettings {
    * shipped set or the user's own, and a job's own `margins` always wins over it.
    */
   margins: MarginSettings;
+  /**
+   * The cutter each header signature was settled on BY HAND, when a `.nc`'s TOOL record matched rows
+   * in two tiers and neither was entitled to win (#316). Keyed by `headerSignature` — the file's own
+   * identity in the match order — so the choice follows the PROGRAM and not the file name, and
+   * remembered so the question is asked once per program rather than on every open.
+   *
+   * This is a convenience and not a fact about the house, which is why it lives here rather than in
+   * the registry: it is persisted (a reload must not re-ask) but it never travels in
+   * `casemaker-my-machine.json` (that file describes a MACHINE, and a pick names a cutter id).
+   */
+  toolPicks: ToolPicks;
   /**
    * The machine's own coordinate frame, read from it (#279). Decision 28's saved tier, for a
    * MACHINE rather than a fixture: absent means the shipped profile's vendor defaults are in
@@ -56,6 +73,7 @@ const DEFAULTS: AppSettings = {
   exportFormat: DEFAULT_EXPORT_FORMAT,
   fixtures: {},
   margins: { ...MARGIN_DEFAULTS },
+  toolPicks: {},
 };
 
 const VALID_FORMATS: ReadonlySet<ExportFormat> = new Set(['stl-binary', 'stl-ascii', '3mf']);
@@ -297,6 +315,36 @@ export function parseMarginsStrict(raw: unknown): { ok: true; margins: MarginSet
   };
 }
 
+/** The three shapes `headerSignature` can return, in its own order (`key=` › `id=` › `shape=`). */
+const SIGNATURE_PREFIXES = ['key=', 'id=', 'shape='] as const;
+
+/**
+ * The remembered tool picks (#316), validated per ENTRY rather than whole-or-nothing.
+ *
+ * The difference is deliberate, and it is the one place this file's usual rule does not apply.
+ * Whole-or-nothing guards a record where a half-applied value is DANGEROUS — an obstacle envelope,
+ * a threshold set — and a pick is not one: the read side applies a remembered key only after
+ * showing it is still among the rows that actually match that signature, so a bad entry can only
+ * ever be a pick that does not come back. Refusing the whole map over one junk entry would throw
+ * away every other pick the user had made to defend a convenience.
+ *
+ * A signature must carry one of the three prefixes `headerSignature` writes. That is not
+ * decoration: it is what stops a hand-edited or foreign payload from landing a key like
+ * `__proto__` in here, since the alternative to an allow-list would be writing a candidate object
+ * key straight into a plain object.
+ */
+export function parseToolPicks(raw: unknown): ToolPicks {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
+  const out: ToolPicks = {};
+  for (const [signature, key] of Object.entries(raw as Record<string, unknown>)) {
+    const prefix = SIGNATURE_PREFIXES.find((p) => signature.startsWith(p));
+    if (prefix === undefined || signature.length === prefix.length) continue;
+    if (typeof key !== 'string' || key.length === 0) continue;
+    out[signature] = key;
+  }
+  return out;
+}
+
 function loadSettings(): AppSettings {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
     return { ...DEFAULTS, margins: { ...MARGIN_DEFAULTS } };
@@ -318,6 +366,7 @@ function loadSettings(): AppSettings {
           : DEFAULT_EXPORT_FORMAT,
       fixtures: parseFixtures(parsed.fixtures),
       margins: parseMargins(parsed.margins),
+      toolPicks: parseToolPicks(parsed.toolPicks),
       ...pickCalibration(parsed.machineCalibration),
     };
   } catch {
@@ -375,6 +424,12 @@ export interface SettingsState extends AppSettings {
   setMargins: (margins: MarginSettings) => void;
   /** Put the shipped thresholds back. */
   clearMargins: () => void;
+  /**
+   * Remember which cutter a header signature was settled on (#316) — written when the person picks
+   * between two rows that both matched, so the same program does not ask again. Persisted: a reload
+   * is not an answer, and re-asking after one would be the prompt the decision exists to avoid.
+   */
+  setToolPick: (signature: string, key: string) => void;
   /**
    * Replace the whole saved-fixture slice in one step (#247) — what a validated "my machine"
    * import does. The caller has already validated the record; this persists it verbatim.
@@ -452,6 +507,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       const margins = { ...MARGIN_DEFAULTS };
       set({ margins });
       persist({ ...get(), margins });
+    },
+    // The remembered pick (#316). Written through from the sim setup when the person chooses, and
+    // read back there: this store owns the map, and knows nothing about which keys still exist —
+    // that check belongs to the reader, which is the only place the fresh candidate list is in hand.
+    setToolPick: (signature, key) => {
+      const toolPicks = { ...get().toolPicks, [signature]: key };
+      set({ toolPicks });
+      persist({ ...get(), toolPicks });
     },
     // Saved verbatim, provenance and all (#279): the record has to keep saying WHICH machine and
     // WHEN, or a year-old read becomes an assertion about a machine that has since been trammed.
