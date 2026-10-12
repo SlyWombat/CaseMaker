@@ -17,9 +17,10 @@
 // the house service and the settings endpoint own, and any write added to them later, judged by the
 // same three questions, each of which a page on another site cannot answer:
 //
-//   * `Host` names this server — `localhost`, an IP literal, or the name Case Maker is configured to
-//     serve under. This is the one a REBOUND name fails: the browser sends the name it believed it
-//     was talking to, and that name is the attacker's.
+//   * `Host` names this server AND its port is the port this process serves on — `localhost`, an IP
+//     literal, or the name Case Maker is configured to serve under, with the port stated or, when it
+//     is not, the one the scheme defaults to. This is the one a REBOUND name fails: the browser sends
+//     the name it believed it was talking to, and that name is the attacker's.
 //   * `Origin` is absent, or is exactly `http://` + that same `Host`. A page on another site always
 //     sends its own origin, and it cannot equal the address it is posting to — so this is what
 //     separates a LAN browser reaching the app at `http://192.168.10.43:8000` (allowed: that IS the
@@ -40,7 +41,11 @@
 // not a refusal: it is a local process that could edit the files directly, so refusing it would buy
 // nothing and break the tooling. Not a read guard either: GETs skip this entirely, because decision
 // 33's LAN browser renders the same lists and reads the numbers it needs to explain what it is
-// looking at. And not a replacement for the settings endpoint's PEER check: "are you the app?" and
+// looking at — and that is a stated limitation rather than a gap in the reasoning, since a rebound
+// name is same-origin to the browser on a `GET` as much as on anything else, so it can READ every
+// read this API answers, `/api/v1/export` and the whole house document included. Decision 33 carries
+// the note; what a hostile page gains there is a copy to send elsewhere, not a change to the house.
+// And not a replacement for the settings endpoint's PEER check: "are you the app?" and
 // "are you on this machine?" are different questions with different answers, and `/api/v1/config`
 // asks both (decision 35).
 //
@@ -113,14 +118,18 @@ async fn app_writes_only(State(guard): State<Guard>, req: Request, next: Next) -
         );
     }
 
-    let origin = header_str(req.headers(), header::ORIGIN);
-    if !from_the_page_it_served(origin.as_deref(), &host) {
+    let origin = origin_of(req.headers());
+    if !from_the_page_it_served(origin, &host) {
         return json_error(
             StatusCode::FORBIDDEN,
             format!(
                 "Case Maker only accepts writes from the page it itself served at that address \
                  (http://{host}), and this request came from {}.",
-                said(origin.as_deref().unwrap_or(""))
+                match origin {
+                    Origin::At(stated) => format!("`{stated}`"),
+                    Origin::Unreadable => "an `Origin` this server cannot read".to_string(),
+                    Origin::Absent => "no origin at all".to_string(),
+                }
             ),
         );
     }
@@ -178,14 +187,17 @@ fn said(value: &str) -> String {
 /// arrives, the attacker's name resolves to this machine too, which is the whole trick. So a name
 /// that is not the configured one is refused, and the sentence says which forms are accepted.
 ///
-/// The port, when the header states one, has to be the port this process serves on: a `Host` naming
-/// a different port is a different origin, and after a rebind the port is the only part of the
-/// authority the attacker does not get to choose.
+/// The port has to be the port this process serves on. A `Host` naming a different port is a
+/// different origin, and after a rebind the port is the only part of the authority the attacker does
+/// not get to choose. A header that states NO port names the scheme's default — 80 for `http`, and
+/// this server speaks only `http` — so `Host: 127.0.0.1` is this process only when this process is ON
+/// port 80. Writing the default out, rather than reading "no port stated" as "our port", is what
+/// keeps a portless authority from being the one way past this check.
 fn addressed_to_this_server(host: &str, serving_port: u16, configured: Option<&str>) -> bool {
     let Some((name, port)) = split_authority(host) else {
         return false;
     };
-    if port.is_some_and(|p| p != serving_port) {
+    if port.unwrap_or(80) != serving_port {
         return false;
     }
     if name.eq_ignore_ascii_case("localhost") {
@@ -222,6 +234,30 @@ fn split_authority(authority: &str) -> Option<(&str, Option<u16>)> {
     }
 }
 
+/// What a request's `Origin` header says, in THREE states rather than the two an `Option` gives.
+///
+/// The third is the reason this is a type and not a lookup: a header that is PRESENT but not text is
+/// not an absent one, and folding the two together leaves the rule with exactly one bypass — state an
+/// `Origin` the parser cannot read and be judged as the client that stated none. A header value
+/// carries bytes above ASCII (`obs-text`) and `to_str` rejects them, so that state is one a request
+/// can really reach. A browser writes visible ASCII, so the distinction costs a real client nothing.
+#[derive(Clone, Copy)]
+enum Origin<'a> {
+    Absent,
+    At(&'a str),
+    Unreadable,
+}
+
+fn origin_of(headers: &HeaderMap) -> Origin<'_> {
+    match headers.get(header::ORIGIN) {
+        None => Origin::Absent,
+        Some(value) => match value.to_str() {
+            Ok(stated) => Origin::At(stated),
+            Err(_) => Origin::Unreadable,
+        },
+    }
+}
+
 /// Whether a request's `Origin`, if it has one, is the page this server served at the address the
 /// request was sent to.
 ///
@@ -233,17 +269,21 @@ fn split_authority(authority: &str) -> Option<(&str, Option<u16>)> {
 ///
 /// An ABSENT origin is not a refusal, and this is the one judgement here that is deliberately not
 /// about attackers: `Origin` is sent by browsers, so a client without one is a process on this
-/// machine that could edit the files directly.
+/// machine that could edit the files directly. An UNREADABLE one is a refusal, which is the whole
+/// reason the state exists — it is not a client that stated nothing, it is a client stating something
+/// this server declines to guess at, and only an attacker has a reason to send it. (`Origin: null`,
+/// which a sandboxed frame and a `file://` page do send, is text and simply does not match.)
 ///
 /// That a same-origin POST carries one at all is observed and not assumed: the app's own page, served
 /// from a listener on one origin, posted to that same origin with `Origin: http://127.0.0.1:8411` and
 /// `Host: 127.0.0.1:8411` — equal to `http://` plus its own `Host`, which is what this comparison
 /// wants. Had browsers omitted `Origin` on same-origin writes there would be nothing to compare and
 /// the rule would have to be weaker; they do not, so it does not.
-fn from_the_page_it_served(origin: Option<&str>, host: &str) -> bool {
+fn from_the_page_it_served(origin: Origin<'_>, host: &str) -> bool {
     match origin {
-        None => true,
-        Some(origin) => origin == format!("http://{host}"),
+        Origin::Absent => true,
+        Origin::At(stated) => stated == format!("http://{host}"),
+        Origin::Unreadable => false,
     }
 }
 
@@ -318,6 +358,7 @@ fn configured_host(guard: &Guard) -> Option<String> {
 mod tests {
     use super::*;
     use axum::body::Body as AxumBody;
+    use axum::http::HeaderValue;
     use axum::http::Request as HttpRequest;
     use axum::routing::any;
     use std::path::PathBuf;
@@ -529,6 +570,10 @@ mod tests {
                 "a malformed authority, which is not a shape to guess about",
                 write_with("POST", Some("[::1]junk"), None, Some(APPLICATION_JSON), "{}"),
             ),
+            (
+                "a portless Host, which names port 80 and not this server's port",
+                write_with("POST", Some("127.0.0.1"), None, Some(APPLICATION_JSON), "{}"),
+            ),
         ] {
             let (_dir, app) = with_settings();
             let (status, text, json) = answer(&app, req).await;
@@ -602,6 +647,33 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{text}");
     }
 
+    /// (#375) A present `Origin` this server cannot READ is a refusal, not an absent one. The
+    /// `Option` a plain header lookup hands back conflates the two, and that conflation is the bypass
+    /// this state exists to close: state an origin the parser cannot read and be judged as the client
+    /// that stated none. A browser writes visible ASCII, so nothing real is refused by it.
+    #[tokio::test]
+    async fn an_origin_that_is_not_text_is_refused_rather_than_read_as_no_origin() {
+        let (_dir, app) = with_settings();
+        let json_write = || write_with("POST", Some(APP_HOST), None, Some(APPLICATION_JSON), "{}");
+
+        // The control: the same write with no origin at all is the local client, and it goes through.
+        let (status, text, _) = answer(&app, json_write()).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+
+        // The same request with an origin the server cannot read. `HeaderValue` carries `obs-text`,
+        // and `to_str` rejects it — which is exactly the shape a client would send to be read as
+        // having sent nothing.
+        let mut req = json_write();
+        req.headers_mut().insert(
+            header::ORIGIN,
+            HeaderValue::from_bytes(b"http://127.0.0.1:5173\xff").expect("obs-text is a header byte"),
+        );
+        let (status, text, json) = answer(&app, req).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{text}");
+        assert!(json["error"].is_string(), "{text}");
+        assert!(!text.contains("reached the handler"), "{text}");
+    }
+
     #[tokio::test]
     async fn reads_are_not_guarded() {
         // Decision 33/35: a browser on the LAN renders the same lists and needs them, so the guard
@@ -632,22 +704,34 @@ mod tests {
         assert_eq!(split_authority("evil.example:port"), None);
 
         assert!(addressed_to_this_server("localhost:5173", 5173, None));
-        assert!(addressed_to_this_server("127.0.0.1", 5173, None)); // no port stated: this socket
         assert!(addressed_to_this_server("[::1]:5173", 5173, None));
         assert!(addressed_to_this_server("192.168.10.43:5173", 5173, None));
         assert!(addressed_to_this_server("bench-pc:5173", 5173, Some("bench-pc")));
         assert!(!addressed_to_this_server("bench-pc:5173", 5173, Some("other-pc")));
         assert!(!addressed_to_this_server("evil.example:5173", 5173, None));
+        // A portless authority names the SCHEME's default — 80 for http — so it is this server only
+        // when this server is on 80. Reading "no port stated" as "our port" would leave a portless
+        // `Host` as the one way past the port check.
+        assert!(!addressed_to_this_server("127.0.0.1", 5173, None));
+        assert!(!addressed_to_this_server("localhost", 5173, None));
+        assert!(!addressed_to_this_server("[::1]", 5173, None));
+        assert!(addressed_to_this_server("127.0.0.1", 80, None));
+        assert!(addressed_to_this_server("localhost", 80, None));
+        assert!(addressed_to_this_server("[::1]", 80, None));
         // An IP literal at another port is another origin, and `2130706433` is `127.0.0.1` to a
         // resolver but not to `IpAddr` — which is the safe half to be on.
         assert!(!addressed_to_this_server("127.0.0.1:9999", 5173, None));
         assert!(!addressed_to_this_server("2130706433:5173", 5173, None));
 
         // The origin rule is exact, and its absence is a local process rather than an attacker.
-        assert!(from_the_page_it_served(None, "127.0.0.1:5173"));
-        assert!(from_the_page_it_served(Some("http://127.0.0.1:5173"), "127.0.0.1:5173"));
-        assert!(!from_the_page_it_served(Some("https://evil.example"), "127.0.0.1:5173"));
-        assert!(!from_the_page_it_served(Some("http://127.0.0.1:5173"), "192.168.10.43:5173"));
+        assert!(from_the_page_it_served(Origin::Absent, "127.0.0.1:5173"));
+        assert!(from_the_page_it_served(Origin::At("http://127.0.0.1:5173"), "127.0.0.1:5173"));
+        assert!(!from_the_page_it_served(Origin::At("https://evil.example"), "127.0.0.1:5173"));
+        assert!(!from_the_page_it_served(Origin::At("http://127.0.0.1:5173"), "192.168.10.43:5173"));
+        // Present but not text is its own answer rather than "no origin", and `null` — what a
+        // sandboxed frame and a `file://` page send — is text that simply does not match.
+        assert!(!from_the_page_it_served(Origin::Unreadable, "127.0.0.1:5173"));
+        assert!(!from_the_page_it_served(Origin::At("null"), "127.0.0.1:5173"));
     }
 
     #[test]

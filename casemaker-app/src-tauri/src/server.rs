@@ -1050,4 +1050,36 @@ mod tests {
         assert_eq!(body.as_array().unwrap().len(), 1, "a refused write changed the house: {body}");
         assert_eq!(body[0]["key"], serde_json::json!("user:guarded"));
     }
+
+    /// (#375) The case decision 33 exists for, through the REAL router: the app served on the LAN,
+    /// opened at its own address by a browser on another machine, writing the house. `guard.rs` tests
+    /// the rule; what has to be pinned HERE is that the guard the router applies is that same rule and
+    /// is not quietly loopback-only — a guard that refused this would break the thing decision 33
+    /// exists to protect, and the refusal-compiles-a-list tests would never say so.
+    #[tokio::test]
+    async fn a_browser_on_the_lan_writes_the_house_at_its_own_address() {
+        let (_dir, app) = app();
+        let res = app
+            .clone()
+            .oneshot(write(
+                "POST",
+                "/api/v1/tools",
+                Some("192.168.10.43:5173"),
+                Some("http://192.168.10.43:5173"),
+                Some("application/json"),
+                &a_tool_entry(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::CREATED,
+            "a LAN browser, which decision 33 is about, could not write its house"
+        );
+
+        // And the house it wrote is the house that is there: not a 201 from some other path.
+        let body = body_json(app.clone().oneshot(get("/api/v1/tools")).await.unwrap()).await;
+        assert_eq!(body.as_array().unwrap().len(), 1, "{body}");
+        assert_eq!(body[0]["key"], serde_json::json!("user:guarded"));
+    }
 }

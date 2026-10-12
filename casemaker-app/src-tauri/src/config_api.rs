@@ -28,7 +28,9 @@
 // — the webview's machine and the page's machine are the same one — and a rebound hostname is worse,
 // being same-origin to the browser with no provenance header left to disagree with. Those are the same
 // two attacks `/api/v1/import` and `/api/v1/catalogue/sync` face, and the SAME rule answers all three,
-// so it lives once in `guard.rs` and is applied once in `server.rs` over the whole `/api/v1` surface.
+// so it lives once in `guard.rs` and is applied over the whole `/api/v1` surface: over the merged API
+// in `server.rs`, and again over these routes in `routes()` below, so that a settings write is guarded
+// wherever this router is mounted rather than only where `server.rs` happens to put it.
 // What stays here is the one question the guard does not ask and the house API does not want asked:
 // "are you on the machine this process runs on?" A LAN browser may write the house and may not write
 // these settings, and only this endpoint can draw that line.
@@ -78,15 +80,22 @@ pub struct ConfigApiState {
 /// The settings routes. `server.rs` merges this into the top-level router beside `house_api`, before
 /// the SPA wildcard — the ordering note in that module applies unchanged (`/api/v1/*rest` in
 /// `house_api` would otherwise be free to answer `/api/v1/config` with a JSON 404, and matchit gives
-/// the static path priority). The guard is applied there too, over both modules at once: these routes
-/// are handed their provenance already checked, which is why the handler asks only about the peer.
+/// the static path priority).
+///
+/// The guard is applied HERE as well as over the merged API in `server.rs` (#375), so these routes
+/// carry their own provenance check wherever they are mounted: a test, a second server, a future
+/// caller that merges this router alone. That the check then runs twice on the real server is
+/// deliberate and costs nothing — it is the same idempotent rule, so a request that passed the inner
+/// one passes the outer, and the failure a duplicated check can produce is a refusal that would have
+/// happened anyway.
 pub fn routes(serving_port: u16, config_path: PathBuf) -> Router {
-    Router::new()
+    let guarded = Router::new()
         .route("/api/v1/config", get(read_config).post(write_config))
         .with_state(ConfigApiState {
             serving_port,
-            path: Arc::new(config_path),
-        })
+            path: Arc::new(config_path.clone()),
+        });
+    crate::guard::enforce(guarded, crate::guard::Guard::new(serving_port, config_path))
 }
 
 /// What a client reads, from both endpoints: the settings as the file holds them, and the port this
