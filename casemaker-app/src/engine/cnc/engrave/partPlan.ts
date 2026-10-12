@@ -29,7 +29,9 @@ import type {
 } from '@/types/engraveJob';
 import type { CustomFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
+import { viseEnvelope } from '@/engine/cnc/fixture';
 import { supportedFootprint } from '@/engine/cnc/sacrificial';
+import { sweepRadiusForJob } from '@/engine/cnc/toolRegistry';
 import { defaultBoundaryMargin, voidFloor, voidMargin } from '@/engine/cnc/engrave/depthBounds';
 import { inkBoxOf, type InkBox, type InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import { voidCeilingFor } from '@/engine/cnc/layerStack';
@@ -1225,6 +1227,123 @@ export function voidLimitForItem(
     }
   }
   return found;
+}
+
+/**
+ * How near an item's own extent comes to the vise's jaws, in XY (#369).
+ *
+ * The jaw floor is a Z rule — a floor must stay `clearance` mm above the jaw TOPS — but whether it
+ * applies at all is an XY fact: a line engraved in the middle of the blank has tens of millimetres
+ * of material between it and either jaw face, so nothing about the jaws can reach it. Charging it
+ * the jaw clearance anyway is the same blank-wide shortcut #365 removed for voids.
+ */
+export interface JawReach {
+  /** The jaw the item's extent comes nearest — the one whose clearance the floor must keep. */
+  jaw: 'fixed' | 'moving';
+  /**
+   * The clear XY distance from the item's extent to that jaw's footprint, mm — 0 where they touch
+   * or overlap. It is the CHEBYSHEV distance (the larger of the two axis gaps), which is never more
+   * than the true corner-to-corner distance, so the number reported and the test below are both the
+   * conservative reading.
+   */
+  gap: Mm;
+  /** True when `gap` is inside the reach: the jaw floor applies to this item. */
+  reaches: boolean;
+}
+
+/**
+ * How near an ITEM comes to the jaws, as a yes/no (#369) — the reading `validateJob`'s
+ * `stock-proud-too-small` and the run sheet's jaw step ask for.
+ *
+ * A LABEL is answered by `labelJawReach` above. Every other kind — a shape, a trace, a drilled
+ * hole — declares no ink box this module measures, and for them the STRICT reading stands: they
+ * are charged the jaw floor wherever they sit. That over-warns rather than under-warns, it is what
+ * every one of them did before #369, and the geometric sweep (`tool-into-fixture`) is the real
+ * collision check for all of them (issue item 2). Measuring a shape's own outline here would be
+ * this function's answer for a shape, and no caller has one to ask with.
+ */
+export function itemReachesJaws(
+  job: EngraveJob,
+  item: EngraveAnyItem | EngraveTraceItem | EngraveDrill,
+  clearance: Mm,
+): boolean {
+  return idReachesJaws(job, item.id, clearance);
+}
+
+/**
+ * `itemReachesJaws` by ID, for a caller holding only the plan's plain item (`plan.engraves` — id,
+ * name, profile, depth) rather than the document's: the run sheet, which reads the same funnel
+ * every other reader does and must not answer this question a second way.
+ *
+ * The whole rule lives here, once. A LABEL is the one kind with an extent this module can measure
+ * (`labelJawReach`); every other id belongs to a shape, a trace or a drill, and for those the
+ * strict reading stands. A label id is never a shape's: ids are minted per list and unique.
+ */
+export function idReachesJaws(job: EngraveJob, id: string, clearance: Mm): boolean {
+  const label = job.labels.find((l) => l.id === id);
+  return label === undefined || labelJawReach(job, label, clearance).reaches;
+}
+
+/**
+ * The reach for a LINE's own ink box (`labelFootprint`), in the part frame — the per-item
+ * replacement for the blank-wide jaw bound the recommendation and the warning used to hold.
+ *
+ * The box is `inkBoxOf`'s documented ESTIMATE, in both readers, and that is a decision rather than
+ * an omission. The jaw floor is an ITEM-level rule with a reader (`validateJob`) that may not parse
+ * a face — it is pure, and it is called from the panel, the setup flow, the sim worker and the
+ * tests — so the estimate is the only box both readers can share. Sharing one box is what stops the
+ * app recommending a depth that its own warning then refuses (#362). The estimate is an upper bound,
+ * so the box is wider, the gap smaller and the reach a superset: the basis sentence says "at least"
+ * for exactly that reason.
+ *
+ * `clearance` is the Z clearance the jaw floor itself holds — `max(job.jawClearance,
+ * boundaryMargin)` for a caller that resolves a margin, the job's own `jawClearance` for one that
+ * has none (`validateJob` reads no settings, #345). The reach the floor applies over is
+ * `uncertainty + clearance + radius`, because each term can move the cut to a floor the jaws would
+ * be under:
+ *
+ *   - the vise's OWN `uncertainty`: a default vise's jaws may be anywhere in that band (decision
+ *     28), so the jaw that matters may be that much nearer than the box says;
+ *   - the clearance: a floor exactly `clearance` deep is the deepest one a jaw under it tolerates;
+ *   - the cutter's radius: the cutter is a DISC, and the material it removes reaches that far
+ *     outside the toolpath, which reaches no further than the line's own box.
+ */
+export function labelJawReach(job: EngraveJob, label: EngraveLabel, clearance: Mm): JawReach {
+  const box = labelFootprint(label, inkBoxOf(label.text, label.font, label.weight, label.size));
+  const envelope = viseEnvelope(job.stock, job.workholding.vise, job.sacrificial);
+  // The box's own bounds, as an axis-aligned box that CONTAINS it: a label's rotation turns the
+  // box, and the projection of a turned box onto the stock's axes contains it, so the gap below is
+  // never larger than the real one. Conservative in the direction that matters — a smaller gap
+  // costs depth advice, and never buys it.
+  const [ux, uy] = rotateVec(1, 0, box.rotation);
+  const [vx, vy] = rotateVec(0, 1, box.rotation);
+  const halfX = box.halfWidth * Math.abs(ux) + box.halfHeight * Math.abs(vx);
+  const halfY = box.halfWidth * Math.abs(uy) + box.halfHeight * Math.abs(vy);
+  const minX = box.x - halfX;
+  const maxX = box.x + halfX;
+  const minY = box.y - halfY;
+  const maxY = box.y + halfY;
+
+  let nearest: { jaw: 'fixed' | 'moving'; gap: Mm } | null = null;
+  for (const jaw of envelope.boxes) {
+    const gap = Math.max(
+      jaw.min[0] - maxX,
+      minX - jaw.max[0],
+      jaw.min[1] - maxY,
+      minY - jaw.max[1],
+      0,
+    );
+    // `<` and not `<=`: an exact tie keeps the FIRST jaw `viseEnvelope` declares — the fixed one —
+    // so the jaw a recommendation names never depends on float noise.
+    if (nearest === null || gap < nearest.gap) {
+      nearest = { jaw: jaw.id === 'vise-moving-jaw' ? 'moving' : 'fixed', gap };
+    }
+  }
+  // `viseEnvelope` always declares both jaws; the guard keeps the types honest rather than the code.
+  if (nearest === null) return { jaw: 'fixed', gap: 0, reaches: true };
+
+  const reach = envelope.uncertainty + clearance + sweepRadiusForJob(job);
+  return { jaw: nearest.jaw, gap: nearest.gap, reaches: nearest.gap <= reach };
 }
 
 /**

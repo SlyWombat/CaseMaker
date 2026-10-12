@@ -12,13 +12,22 @@
  * were demo text for a plank, not badge text. A badge is a name badge, so the badge route seeds
  * one line of it, laid out FROM the blank — and `takeBadgeBlank` runs the same
  * `redepthLabelsForBlank` walk over it that #362 added, so the depth is the one #362 already
- * recommends for the new blank: 0.905 mm on the default badge, the jaws' own floor (see below).
+ * recommends for the new blank: 1.0 mm on the default badge, its colour split's own reveal (see
+ * below).
  *
  * The seeded line sits in the free band BESIDE the pocket, and since #365 the walk's void bound
  * knows it: `voidLimitForItem` asks about the voids the LINE's own ink box reaches, so the pocket
  * a line is clear of no longer sets its depth. Measured: the line at (38.1, 6.775) has no void
- * under it, and the walk writes the jaws' own 0.905 mm there. Before #365 the bound was blank-wide
- * (`shallowestVoidLimit`) and this line was advised the pocket's 0.51 mm.
+ * under it. Before #365 the bound was blank-wide (`shallowestVoidLimit`) and this line was advised
+ * the pocket's 0.51 mm.
+ *
+ * The JAW bound knows where the line is too, since #369: a line's own ink box decides whether the
+ * jaws can reach it, and this one comes no nearer than 6.9 mm to a jaw face even at the estimate's
+ * width — past the 3.5 mm reach the vise's own uncertainty opens up — so the jaws set no limit
+ * here and the split's reveal is what the walk writes. While every line was charged the blank-wide
+ * jaw floor, this line took 1.905 − 1 = 0.905 mm instead, which lands inside the split's ±0.2 mm
+ * band and came back up as a 0.6 mm `surface` floor: a two-colour blank handed over with a floor
+ * that stops just short of its colour boundary.
  *
  * The BARE blank (#364) takes the same rule with `BLANK_SEED_TEXT` and no pocket, so `freeBands`
  * answers its whole usable face as one band: a `Text` line sized to the blank, rather than three

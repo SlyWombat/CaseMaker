@@ -238,6 +238,28 @@ describe('validateJob (#200)', () => {
     expect(msg).toContain('stockProud ≥ 3.5 mm');
   });
 
+  // #369 — the check is XY-aware too: it asks only about the items whose own extent comes within a
+  // jaw's reach, the same rule #365 gave the voids. A line clear of both jaws cannot make it fire,
+  // because the jaws are not what it is short for.
+  it('asks the jaws about an item only where the item can reach them (#369)', () => {
+    const job = defaultEngraveJob(); // deepest 2.0 -> needs stockProud >= 3
+    job.workholding.vise.stockProud = 2.5;
+    job.workholding.vise.source = 'saved';
+    // The demo 'CASE' line is 109.2 mm wide at the estimate across a 100 mm plank: EDGE TO EDGE, its
+    // box spans past both jaw faces, so the jaws are exactly what this stand is short for.
+    job.labels = [job.labels[0]!];
+    expect(validateJob(job).some((f) => f.code === 'stock-proud-too-small')).toBe(true);
+
+    // The same stand, with the line moved and shrunk clear of both jaws: the 2.5 mm is still short of
+    // the 2.0 mm cut, but not for the jaws' sake, and nothing else on this blank limits a depth — so
+    // the finding that guards the jaws has nothing to say. (A blank-wide check would still fire.)
+    const clear: EngraveJob = {
+      ...job,
+      labels: [{ ...job.labels[0]!, text: 'Name', size: 8, position: { x: 50, y: 30 } }],
+    };
+    expect(validateJob(clear).some((f) => f.code === 'stock-proud-too-small')).toBe(false);
+  });
+
   // #219: a trace is work too, so a job of traces alone is not "no items"; its own findings
   // (a stroke that merges under the cutter, a depth past the floor) are raised here.
   it('treats an enabled trace as work, so a trace-only job is not “no items” (#219)', () => {
@@ -327,15 +349,22 @@ describe('engraveJobStore (#200)', () => {
     expect(job.labels).toHaveLength(1);
     // The badge the template makes states its print (#368), so the blank carries a colour boundary
     // and that boundary is what binds the seeded line: the split lands on the 0.8 mm layer line and
-    // #345 gives the `above` bound its own 0.2 mm margin, so the walk writes 0.6 mm — a depth a
-    // person can read rather than the float tail of a subtraction. (Before #368 the badge stated no
-    // print, so the void bound decided and the line took the jaws' 1.905 − 1 = 0.905; before #365
-    // made that bound per-line it was handed the pocket's 0.51, half the depth the blank allows.)
-    expect(job.labels.map((l) => l.depth)).toEqual([0.6]);
+    // #345 gives the `below` bound its own 0.2 mm margin, so the walk writes 1.0 mm — the reveal
+    // this two-colour blank is FOR, and a depth a person can read rather than the float tail of a
+    // subtraction.
+    //
+    // #369 is what lets it be the reveal. The seeded line sits 6.775 mm from the front edge, centred
+    // under the blank's width, and even at `inkBoxOf`'s widest estimate it comes no nearer than
+    // 6.9 mm to a jaw face — past the 3.5 mm the vise's own uncertainty opens up — so the jaws set no
+    // limit here. While every line was charged the blank-wide jaw floor it took 1.905 − 1 = 0.905,
+    // which landed inside the split's ±0.2 mm band and came back up as a 0.6 mm `surface` floor.
+    // (Before #368 the badge stated no print, so the line took that 0.905 with no band to demote it;
+    // before #365 it was handed the pocket's 0.51, half the depth the blank allows.)
+    expect(job.labels.map((l) => l.depth)).toEqual([1.0]);
     // `layout` is the seed's own stamp (#363 review): it is what tells a later take that this line
     // is still the route's to replace, and `depth`/`depthIntent` are the walk's answer on top of it —
     // the intent only exists because the badge states a print for it to be about.
-    expect(job.labels.map((l) => l.depthIntent)).toEqual(['surface']);
+    expect(job.labels.map((l) => l.depthIntent)).toEqual(['reveal']);
     expect(job.sources?.labels).toEqual(
       Object.fromEntries(
         job.labels.map((l) => [

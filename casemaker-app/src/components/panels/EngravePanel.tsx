@@ -27,7 +27,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { dedupeFindings, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
-import { keepOutLimitParts, keepOutMembrane, labelGlyphMeasure, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
+import { keepOutLimitParts, keepOutMembrane, labelGlyphMeasure, labelJawReach, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, labelFontsLoaded } from '@/engine/fonts/registry';
 import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
@@ -462,6 +462,11 @@ export function EngravePanel(): JSX.Element {
     const intent = job.sources?.labels?.[label.id]?.depthIntent;
     return recommendLabelDepth(job, label, {
       voidLimit: voidLimitForItem(job, label, margins.boundaryMargin, measure),
+      // #369 — the jaw bound is charged to this line only where a jaw can reach it, on the same
+      // estimate box the void bound above reads. `max(jawClearance, boundaryMargin)` is the
+      // clearance the floor itself holds (the module's own `Math.max`), so the reach is the same
+      // number the clause will quote.
+      jawReach: labelJawReach(job, label, Math.max(job.jawClearance, margins.boundaryMargin)),
       boundaryMargin: margins.boundaryMargin,
       ...(intent === undefined ? {} : { intent }),
     });

@@ -2,10 +2,12 @@ import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
+  idReachesJaws,
   keepOutLimit,
   keepOutLimitParts,
   keepOutMembrane,
   labelGlyphMeasure,
+  labelJawReach,
   toPartPlan,
   voidLimitForItem,
   type PartPlan,
@@ -540,6 +542,10 @@ function depthSourceWords(
     // #365 — this line's own extent decides which voids bound it, exactly as the store's walk and
     // the panel's row do it. The sheet used to quote the blank's shallowest void for every line.
     voidLimit: voidLimitForItem(job, label, boundaryMargin, measure),
+    // #369 — the jaw bound behind the sentence is the one THIS line is charged, on the same
+    // estimate box the void bound above reads, or the paper would explain the depth with a limit
+    // the app no longer holds the line to.
+    jawReach: labelJawReach(job, label, Math.max(job.jawClearance, boundaryMargin)),
     boundaryMargin,
     ...(claim.depthIntent === undefined ? {} : { intent: claim.depthIntent }),
   });
@@ -902,18 +908,27 @@ export function buildRunSheet(
   const diagram = buildDiagram(job, plan);
   const stackUp = buildStackUp(job);
   const itemBox = new Map(diagram.items.map((i) => [i.id, i] as const));
-  const deepest = items.reduce((max, item) => Math.max(max, item.depth), 0);
+  // Only the cuts the JAWS can REACH decide how far proud the blank must stand (#369). A floor works
+  // below the jaw tops only where a jaw is under it in XY, so a blank-wide `deepest + clearance`
+  // told the operator to stop on a job the app itself had just recommended: the badge hand-off
+  // stands 1.905 mm proud and cuts 1.0 mm, inside the 2.0 mm a blank-wide reading demands. Same
+  // `itemReachesJaws` the finding uses, so the paper and the panel cannot disagree about whether the
+  // jaws bind at all.
+  const atJaws = items.filter((item) => idReachesJaws(job, item.id, job.jawClearance));
+  const deepestAtJaws = atJaws.reduce((max, item) => Math.max(max, item.depth), 0);
   // #362 review, #365 — the reason a recommended depth is as shallow as it is has to be the same
   // reason in all three places that state it, so the per-line void bound is worked out by the same
   // `voidLimitForItem` the store's walk and the panel's row call, on the same measurement
   // (`labelGlyphMeasure`). `depthSourceWords` asks it for the item it is wording, so a line the
   // sheet prints a reason for is judged against the voids THAT line reaches.
   const measure = labelGlyphMeasure(job.customFonts ?? []);
-  // #207 section 3: below the deepest cut by the clearance the JOB keeps, the cutter is under the
-  // jaw tops. The number is the job's own `jawClearance` (#362 review) — the same one
-  // `stock-proud-too-small` and `recommendLabelDepth` hold a floor to, so the printout cannot tell
-  // the operator to stop somewhere the app does not.
-  const stopBelow = deepest + job.jawClearance;
+  // #207 section 3: below the deepest cut the JAWS CAN REACH, by the clearance the JOB keeps, the
+  // cutter is under the jaw tops. The number is the job's own `jawClearance` (#362 review) — the
+  // same one `stock-proud-too-small` and `recommendLabelDepth` hold a floor to, so the printout
+  // cannot tell the operator to stop somewhere the app does not. `null` when no cut reaches a jaw
+  // (#369): there is then no depth that would put a floor under one, and the step says so instead of
+  // printing a stop the job cannot trip.
+  const stopBelow = atJaws.length === 0 ? null : deepestAtJaws + job.jawClearance;
   const tool = jobTool(job);
   const diameter = tool ? cuttingDiameter(tool) : null;
   const params = generated.feeds && generated.feeds.ok ? generated.feeds.params : null;
@@ -1024,7 +1039,9 @@ export function buildRunSheet(
     {
       text:
         `The ${onBoard ? "part's " : ''}top face must stand ${fmtNum(vise.stockProud)} mm above the jaw tops. Record the measured ` +
-        `value. If it is less than ${fmtNum(stopBelow)} mm, stop: the cutter would work below the jaw tops.`,
+        (stopBelow === null
+          ? 'value: no cut on this job comes within reach of a jaw, so it sets no limit here.'
+          : `value. If it is less than ${fmtNum(stopBelow)} mm, stop: the cutter would work below the jaw tops.`),
       record: 'measured stock proud (mm)',
     },
     {

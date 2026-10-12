@@ -363,11 +363,14 @@ describe('#363 — the store hand-off', () => {
     expect(line.position).toMatchObject({ x: 38.1 });
     expect(line.position.y).toBeCloseTo(6.775, 6);
     // The seeded line sits in the free band BESIDE the magnet pocket, so since #365 the void bound
-    // asks about the voids the LINE reaches and finds none: the jaws' 1.905 − 1 = 0.905 mm is what
-    // the walk writes, and the STARTING_DEPTH placeholder is gone. Before #365 the blank-wide bound
-    // handed this line the pocket's 0.51 mm — half of what the blank allows, on a line the seed had
-    // deliberately placed clear of the pocket.
-    expect(line.depth).toBe(0.905);
+    // asks about the voids the LINE reaches and finds none. Since #369 the JAWS are asked the same
+    // way — by the line's own ink box — and this line is clear of them too: even at `inkBoxOf`'s
+    // widest estimate it comes no nearer than 6.9 mm to a jaw face, past the 3.5 mm reach the vise's
+    // own uncertainty opens up. So the blank's underside answers: 3.81 − 1 = 2.81 mm. While every line
+    // was charged the blank-wide jaw floor it took 1.905 − 1 = 0.905 whether or not it went near a
+    // jaw; before #365 it was handed the pocket's 0.51 — half of what the blank allows, on a line the
+    // seed had deliberately placed clear of the pocket.
+    expect(line.depth).toBe(2.81);
     // Both claims on the one line: `layout` says the ROUTE laid it out (which is what lets a later
     // take replace it), `depth` says the walk worked the number out (#363 review).
     expect(job.sources?.labels).toEqual({ [line.id]: { layout: 'computed', depth: 'computed' } });
@@ -416,8 +419,13 @@ describe('#363 — the store hand-off', () => {
     const second = job.labels[0]!;
     expect(second.id).not.toBe(first.id);
     expect(second.position.x).toBeCloseTo(50, 6); // the new blank's own centre
-    // The claims are the NEW line's alone: the dropped line's stamps went with it, not orphaned.
-    expect(job.sources?.labels).toEqual({ [second.id]: { layout: 'computed', depth: 'computed' } });
+    // The claims are the NEW line's alone: the dropped line's stamps went with it, not orphaned. The
+    // second blank STATES a print (#368), so the walk's answer carries an intent alongside its depth
+    // (`engraveJob.spec.ts` pins that number and its kind); the first badge in this file states none,
+    // and the walk then writes the two-key pair the test above reads back.
+    expect(job.sources?.labels).toEqual({
+      [second.id]: { layout: 'computed', depth: 'computed', depthIntent: 'computed' },
+    });
   });
 
   it('leaves a line the person moved alone, even on a second take (#363 review)', async () => {
@@ -482,14 +490,15 @@ describe('#363 — the store hand-off', () => {
     s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
 
     // The badge the template makes now states its print (#368), so the blank carries a colour
-    // boundary and the walk has a band to place the seeded line in — where the test above, on a
-    // print-less badge, gets the void bound's 0.905 instead.
+    // boundary and the walk has a band to place the seeded line in. The line is 8 mm tall on a
+    // 76.2 × 38.1 blank, so its box comes no nearer than 6.9 mm to a jaw face at the estimate — past
+    // the 3.5 mm reach — and since #369 the jaws leave it alone. So the split is the shallowest floor
+    // and it wins outright: the blank's own reveal, 0.8 + 0.2 = 1.0, with the intent that means it.
+    // Before #369 the jaw floor 0.905 was charged to every line alike, which lands INSIDE the split's
+    // ±0.2 mm band where neither colour is decided, so the walk demoted it to the 0.6 `surface`.
     const labels = s().job.labels;
     expect(labels).toHaveLength(1);
-    // …and the walk writes an INTENT with the number, because a print is what makes one mean
-    // anything: 0.905 (the jaw bound) would land inside the split's ±0.2 mm band, where neither
-    // colour is decided, so it is demoted to the deepest depth the top colour can hold — 0.6.
-    expect(labels.map((l) => [l.depth, l.depthIntent])).toEqual([[0.6, 'surface']]);
+    expect(labels.map((l) => [l.depth, l.depthIntent])).toEqual([[1.0, 'reveal']]);
     // The stamps are the route's, not the person's: the seed's `layout` and the walk's own two.
     expect(s().job.sources?.labels?.[labels[0]!.id]).toEqual({
       layout: 'computed',

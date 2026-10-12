@@ -22,6 +22,7 @@ import {
   splitDepthOf,
 } from '@/engine/cnc/engrave/depthBounds';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { labelJawReach } from '@/engine/cnc/engrave/partPlan';
 
 /** The pair the control is handed, written as the two numbers a test is moving. */
 const at = (depth: number, step: number): LabelSplit => ({ depth, step });
@@ -189,7 +190,14 @@ describe('the two-state control against the checker (#170 review)', () => {
     const row = recommendLabelDepth(
       job,
       { ...label, depthIntent: undefined },
-      { voidLimit: null, boundaryMargin: MARGIN },
+      {
+        voidLimit: null,
+        // #369 — the jaw bound, on the reach this line's own extent has: the 'CASE' line spans the
+        // whole 100 mm blank at the estimate's 109.2 mm, so it reaches both jaws and the 3 mm floor
+        // is a candidate here exactly as it was before.
+        jawReach: labelJawReach(job, label, Math.max(job.jawClearance, MARGIN)),
+        boundaryMargin: MARGIN,
+      },
     )!;
     expect(row.depthIntent).toBe('reveal');
     expect(reveal).toBe(row.depth);

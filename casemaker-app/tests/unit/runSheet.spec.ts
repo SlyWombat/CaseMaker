@@ -647,5 +647,24 @@ describe('runSheet (#207)', () => {
       )!;
       expect(wider.text).toContain('less than 3.5 mm, stop');
     });
+
+    it('says the jaws set no limit where no cut comes within their reach (#369)', () => {
+      // The demo plank's lines span the whole 100 mm blank, so they reach both jaws and the stop
+      // above is live. Shrunk and moved clear of them — the XY test #369 added — a number below the
+      // face would be a stop the app's own jaw check does not make, so it is dropped and the sentence
+      // says why instead of printing a limit nobody has to keep.
+      const job = defaultEngraveJob();
+      const clear: EngraveJob = {
+        ...job,
+        labels: [{ ...job.labels[0]!, text: 'Name', size: 8, position: { x: 50, y: 30 } }],
+      };
+      const step = section(sheetFor(clear), 'load').steps.find((s) =>
+        s.text.includes('comes within reach of a jaw'),
+      )!;
+      expect(step.text).toContain('no cut on this job comes within reach of a jaw');
+      expect(step.text).not.toContain('would work below the jaw tops');
+      // The face height the operator records is unchanged: only the "stop below" number goes.
+      expect(step.text).toContain('4 mm above the jaw tops');
+    });
   });
 });

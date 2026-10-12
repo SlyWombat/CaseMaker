@@ -326,15 +326,20 @@ centred on the blank and clear of the magnet pocket (#363). A **bare** blank tha
 placeholder is set in their place, sized to the blank (#364). The one blank that keeps them is the
 plank they were written for — 100 × 60, at *any* thickness, because a thinner slab of the same face
 does not move a line, only its depth. Either way, the depth of every line nobody has claimed is then
-recommended for the blank it is really on (#362), and the void limit in that answer belongs to the
-line and not to the blank (#365): it is taken from the voids the **line's own extent** reaches, so
-the seeded line — which sits in the free band beside the magnet pocket — is advised the jaws' own
-0.905 mm rather than the pocket's 0.51 mm, and a line placed over the pocket carries the pocket's
-number and names it ("Magnet pocket" leaves 0.51 mm of material). The extent is the line's whole ink
-box — the honest superset of the cut, since the check it answers to is a positional one — measured
-from the same face the layout was, and where that face is not parsed yet the box falls back to a
-documented upper-bound estimate, which the sentence says where it is used ("measured against the
-line's estimated extent — its face is not parsed yet"). A line **you** typed or placed is left
+recommended for the blank it is really on (#362), and the two limits in that answer belong to the
+line and not to the blank: the void limit is taken from the voids the **line's own extent** reaches
+(#365), and the jaw limit only from a jaw that extent comes within reach of (#369). So the seeded
+line — in the free band beside the magnet pocket, no nearer than 6.9 mm to either jaw — is advised
+the blank's own colour-split reveal, 1.0 mm on the default badge, and told "clear of both jaws by at
+least 6.9 mm; the jaws set no limit here". A line placed over the pocket carries the pocket's number
+and names it ("Magnet pocket" leaves 0.51 mm of material), and one run out to a jaw face takes that
+jaw's floor and names it too. The extent is the line's whole ink box — the honest superset of the
+cut, since the check it answers to is a positional one — measured from the same face the layout was,
+and where that face is not parsed yet the box falls back to a documented upper-bound estimate, which
+the sentence says where it is used ("measured against the line's estimated extent — its face is not
+parsed yet"). The jaw reach alone is judged on that estimate always, never the parsed face: the
+check that refuses a cut at the jaws reads the job as data and cannot parse a face, so the two work
+from the same box — which is why the clause says "at least". A line **you** typed or placed is left
 exactly where it is, text and position both — and so is one an earlier take seeded, once you have
 touched it: taking a second badge blank re-lays only what the app still owns.
 
@@ -842,7 +847,7 @@ running passes above; the rest are the checks the runner does not do on its own:
 | `drill-too-deep` | error | A hole is deeper than the cutter's flute, so chips cannot clear (#220). | Drill shallower, or use a cutter with a longer flute. |
 | `drill-through-unavailable` | error | The hole is asked to cut all the way through, which needs a sacrificial board (#213) and the through-cut rules (#218) that are not in yet (#220). | Drill to a floor instead, or wait for the through-cut work. |
 | `tool-missing` | error | The job names a tool that is not in the library. | Pick a real tool. |
-| `stock-proud-too-small` | warning | The blank stands too far below the jaw tops for the deepest cut, so the cutter would work below the jaws. | Seat the blank higher. |
+| `stock-proud-too-small` | warning | A cut comes within reach of a jaw and the blank stands too far below the jaw tops for its depth, so the cutter would work below the jaws. | Seat the blank higher. |
 | `vise-default` | warning | The vise dimensions are unmeasured defaults, so collisions cannot be trusted. | Measure your vise. |
 | `vise-stock-not-proud` | error | The blank is not proud of the jaws at all — the cutter would hit the vise. | Seat the blank proud. |
 | `vise-stock-proud-exceeds-thickness` | error | The blank stands proud by more than its own thickness; the numbers do not add up. | Re-check the vise and stock numbers. |

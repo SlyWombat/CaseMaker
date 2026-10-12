@@ -304,17 +304,18 @@ test('#368 — a badge that states its print reaches Engrave with a live colour 
   // 3.0 mm of split under 0.2 mm layers: the boundary lands on the 0.8 mm line.
   await expect(page.getByTestId('engrave-legend-split')).toHaveText('split 0.8 mm down');
 
-  // The seeded line arrived on the top colour (0.6 = the boundary less the margin). Pressing
-  // `reveal` writes the state's own depth in the same patch: one printed layer PAST the boundary,
-  // 0.8 + 0.2 = 1.0 — which is the arithmetic the control promises, read off the field the user is
-  // looking at.
+  // The seeded line is clear of both jaws (#369), so the blank's own colour split is what binds it
+  // and the walk writes the reveal itself: 0.8 + 0.2 = 1.0, one printed layer PAST the boundary — so
+  // the control opens with that state already pressed.
   const depth = page.getByTestId('engrave-label-depth-0');
-  await expect(depth).toHaveValue('0.6');
-  await page.getByTestId('engrave-label-reveal-0').click();
   await expect(depth).toHaveValue('1');
-  const reveal = page.getByTestId('engrave-label-reveal-0');
-  await expect(reveal).toHaveAttribute('aria-pressed', 'true');
-  // …and the other state is one press back, in the other direction.
-  await expect(page.getByTestId('engrave-label-surface-0')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('engrave-label-reveal-0')).toHaveAttribute('aria-pressed', 'true');
+  // The other state is one press away, on the other side of the same plane: the boundary less the
+  // margin, 0.8 − 0.2 = 0.6, written in the same patch — which is the arithmetic the control
+  // promises, read off the field the user is looking at.
+  await page.getByTestId('engrave-label-surface-0').click();
+  await expect(depth).toHaveValue('0.6');
+  await expect(page.getByTestId('engrave-label-surface-0')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('engrave-label-reveal-0')).toHaveAttribute('aria-pressed', 'false');
   await page.screenshot({ path: 'test-results/368-badge-print-split.png' });
 });

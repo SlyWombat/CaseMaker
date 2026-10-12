@@ -14,7 +14,7 @@ import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { effectiveMargins, recommendLabelDepth } from '@/engine/cnc/engrave/depthBounds';
-import { labelGlyphMeasure, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
+import { labelGlyphMeasure, labelJawReach, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import {
   BLANK_SEED_TEXT,
   blankLabelSeed,
@@ -950,6 +950,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           if (claim?.depth === 'user' || claim?.depth === 'measured') return label;
           const rec = recommendLabelDepth(job, label, {
             voidLimit: voidLimitForItem(job, label, boundaryMargin, measure),
+            // #369 — and the jaw bound only where a jaw can reach this line, so the walk stops
+            // re-depthing a centred line to a jaw floor that has nothing to do with it.
+            jawReach: labelJawReach(job, label, Math.max(job.jawClearance, boundaryMargin)),
             boundaryMargin,
             // Its OWN past intent does not lock the label out (#362 review): `'computed'` says the
             // `'reveal'` on this label is a previous call's, so a thicker badge or a different split

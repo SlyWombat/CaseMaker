@@ -8,6 +8,7 @@ import { stubSetup, type Setup, type Workholding } from '@/engine/cnc/setup';
 import {
   drillHoles,
   drillOperationName,
+  itemReachesJaws,
   polygonSelfIntersects,
   resolveItems,
   traceOperationName,
@@ -378,23 +379,33 @@ export function validateJob(job: EngraveJob): JobFinding[] {
     });
   }
 
-  // The deepest cut across region items, traces AND drills, so any of them is reported with the
-  // same jaw-clearance warning.
+  // The clearance is the JOB's (#362), not a constant in this check: #345's rule is that a verifier
+  // holds a threshold it was given. `minFloor`/`edgeMargin`/`breakthrough` are read the same way,
+  // off the document, and this one joins them.
+  const jawClearance = job.jawClearance;
+  // The deepest cut across region items, traces AND drills — but only the ones the JAWS can reach
+  // in XY (#369). The jaw check is about a floor working below the jaw TOPS, and a line with blank
+  // material between it and both jaw faces cannot put a floor there whatever its depth; charging it
+  // is what made the shipped badge hand-off warn about its own recommendation. `itemReachesJaws`
+  // reads a label's own ink box and answers the strict yes for the kinds it cannot measure, so this
+  // can only warn where it warned before, plus nothing.
+  const reachingDepths = (items: readonly (EngraveAnyItem | EngraveTraceItem | EngraveDrill)[]) =>
+    items
+      .filter((item) => itemReachesJaws(job, item, jawClearance))
+      .map((item) => ({ id: item.id, depth: item.depth }));
   const candidateDepths: { id: string; depth: number }[] = [
-    ...enabled.map((item) => ({ id: item.id, depth: item.depth })),
-    ...enabledTraces.map((trace) => ({ id: trace.id, depth: trace.depth })),
-    ...enabledDrills.map((drill) => ({ id: drill.id, depth: drill.depth })),
+    ...reachingDepths(enabled),
+    ...reachingDepths(enabledTraces),
+    ...reachingDepths(enabledDrills),
   ];
   const deepestItem = candidateDepths.reduce<{ id: string; depth: number } | null>(
     (deepestSoFar, item) => (!deepestSoFar || item.depth > deepestSoFar.depth ? item : deepestSoFar),
     null,
   );
   const deepest = deepestItem?.depth ?? 0;
-  // The clearance is the JOB's (#362), not a constant in this check: #345's rule is that a
-  // verifier holds a threshold it was given. `minFloor`/`edgeMargin`/`breakthrough` are read the
-  // same way, off the document, and this one joins them.
-  const jawClearance = job.jawClearance;
-  if (job.workholding.vise.stockProud < deepest + jawClearance) {
+  // `deepestItem === null` is a job whose every cut sits clear of the jaws: nothing works below the
+  // jaw tops, so there is no clearance to ask for — not a clearance of zero.
+  if (deepestItem !== null && job.workholding.vise.stockProud < deepest + jawClearance) {
     findings.push({
       severity: 'warning',
       code: 'stock-proud-too-small',

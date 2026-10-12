@@ -28,8 +28,9 @@
  * obstacles use (`/Fabrication.md` decision 28).
  */
 
-import type { Tool } from './tool';
+import { cuttingRadiusForSweep, type Tool } from './tool';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from './toolLibrary';
+import type { Mm } from '@/types/units';
 
 /** The two fields a job names its cutter with — `EngraveJob`, structurally. */
 export interface ToolNamingJob {
@@ -135,6 +136,26 @@ export function resolveTool(key: string): Tool | null {
 export function toolForJob(job: ToolNamingJob, entries: readonly ToolLibraryEntry[]): Tool | null {
   if (job.tool) return { ...job.tool };
   return toolForIn(entries, job.toolKey);
+}
+
+/**
+ * The radius the JOB's cutter sweeps in XY, mm — the disc of material the toolpath removes, read
+ * from the same `toolForJob` every other reader asks (#369).
+ *
+ * `0` when the job names no tool, or names one the V1 sweep refuses: a ball nose, a V-bit or a
+ * bull nose has no single flat radius (`cuttingRadiusForSweep`), and neither does a missing entry.
+ * 0 is the honest number for a FOOTPRINT — a cutter the app cannot sweep is not a cutter with a
+ * smaller radius — and it is not a silent hole: the job is refused for `tool-missing`, or for the
+ * sweep's own reason, long before anything is cut.
+ *
+ * More than one field wants this, exactly as they want `cuttingDiameter`: the reach the jaw floor
+ * applies over (`partPlan.labelJawReach`), and #219's stroke-merge check in `validateJob`.
+ */
+export function sweepRadiusForJob(job: ToolNamingJob): Mm {
+  const tool = toolForJob(job, getTools());
+  if (!tool) return 0;
+  const r = cuttingRadiusForSweep(tool);
+  return r.ok ? r.radius : 0;
 }
 
 /** `resolveTool` against a list handed in, for a caller that has one (the workers). */

@@ -648,6 +648,21 @@ export interface LabelDepthInputs {
    */
   voidLimit: { name: string; limit: Mm; estimated?: boolean } | null;
   /**
+   * How near THIS ITEM's own extent comes to the vise's jaws, in XY — `labelJawReach`, or the
+   * `itemReachesJaws` reading reduced to a `reaches` flag (#369).
+   *
+   * The jaw floor is `stockProud − clearance`, a Z rule, and it used to be charged to every line on
+   * the blank whatever its position. It applies only where a jaw can actually reach the cut, which
+   * is an XY question `partPlan` answers; this module cannot compute it, because `partPlan` is built
+   * ON this one and the import would be a cycle. So it arrives as an argument, in the same shape
+   * `voidLimit` does.
+   *
+   * REQUIRED, and with the same reasoning as `voidLimit`: a caller that passed nothing would get a
+   * jaw bound charged to a line the jaws cannot reach — the exact bug — and there is no honest
+   * default, because "the jaws bind everything" is the reading #369 removed.
+   */
+  jawReach: { jaw: 'fixed' | 'moving'; gap: Mm; reaches: boolean };
+  /**
    * The Z-error margin in force for this job, mm — `effectiveMargins`' `boundaryMargin`, as the
    * checker will resolve it. REQUIRED for the same reason: this module does not read the settings
    * store, and a margin guessed here rather than passed would be a second, invisible opinion about
@@ -703,7 +718,9 @@ export interface LabelDepthRecommendation {
  *   3. the blank's underside: `thickness − minFloor`;
  *   4. the jaws: `stockProud − max(job.jawClearance, boundaryMargin)` — the max is #345's rule that
  *      a per-job recommendation may be stricter than the setting, so a domed blank (whose boundary
- *      margin covers the dome) keeps more room over the jaws than the house number alone.
+ *      margin covers the dome) keeps more room over the jaws than the house number alone. Only
+ *      where this item's own extent comes within the jaws' reach (`inputs.jawReach`, #369): a line
+ *      with material between it and both jaw faces gets no jaw bound at all, and the basis says so.
  *
  * A blank that leaves no depth at all (`≤ 0` on a stock thinner than the clearance it must keep) is
  * NOT given a made-up 0.1 mm: this returns null, nothing is written, and the jaw check goes on
@@ -762,17 +779,32 @@ export function recommendLabelDepth(
 
   const clearance = Math.max(job.jawClearance, margin);
   const { stockProud } = job.workholding.vise;
-  candidates.push({
-    depth: shallower(stockProud - clearance),
-    clause:
-      `the stock stands ${mm(stockProud)} mm above the jaw tops and a floor has to stay ` +
-      `${mm(clearance)} mm clear of them`,
-  });
+  // #369 — the jaw floor is a Z rule with an XY precondition, and the basis states which one held
+  // rather than which number won. The gap is measured against the line's ESTIMATED extent (the box
+  // `voidLimitForItem` also reads), which is an upper bound on the real ink, so the real clearance is
+  // at least the number quoted — hence "at least", and hence "within" on the other side.
+  const { jaw, gap, reaches } = inputs.jawReach;
+  if (reaches) {
+    candidates.push({
+      depth: shallower(stockProud - clearance),
+      clause:
+        `the line comes within ${mm(gap)} mm of the ${jaw} jaw; the stock stands ` +
+        `${mm(stockProud)} mm above the jaw tops and a floor has to stay ${mm(clearance)} mm clear ` +
+        'of them',
+    });
+  }
 
   const winner = candidates.reduce((a, b) => (b.depth < a.depth ? b : a));
   if (winner.depth <= 0) return null;
 
   const notBinding = candidates.filter((c) => c !== winner).map((c) => `${c.clause} — not binding`);
+  // A clear item still states that the jaws were CONSIDERED and set no limit. Silence here would be
+  // indistinguishable from a check that never ran, and the reader of a basis sentence is deciding
+  // how deep it is safe to cut. `— not binding` is not the right suffix for it: it is not a limit
+  // that lost, it is no limit at all.
+  if (!reaches) {
+    notBinding.push(`clear of both jaws by at least ${mm(gap)} mm; the jaws set no limit here`);
+  }
 
   // The BAND between the two colour bounds, `(split − m, split + m)`: past the plane, but not far
   // enough past it for a `reveal`, and not short enough for a `surface`. A floor landing here is

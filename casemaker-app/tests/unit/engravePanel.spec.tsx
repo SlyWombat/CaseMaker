@@ -946,9 +946,11 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
   it('names the constraint under the depth it filled in, and calls the ceiling a ceiling', () => {
     takeBadgeBlank();
     // #365: the seeded 'Name' line sits BESIDE the pocket — that is the whole point of the band it
-    // is laid in — so what binds it is the jaws. A second line, placed over the pocket, is what
-    // shows the void clause; before #365 the void floor was blank-wide and the seeded line carried
-    // the pocket's 0.51 mm it was nowhere near.
+    // is laid in — and since #369 it is clear of the JAWS too, so what answers it is the blank's own
+    // underside: 3.81 mm less the 1 mm floor. It carried the pocket's 0.51 mm before #365 made the
+    // void bound per-line, and the jaws' 0.905 mm before #369 made the jaw bound per-item — two
+    // floors neither the pocket nor the jaws could reach the line to impose. A second line, placed
+    // over the pocket, is what shows the void clause.
     act(() => {
       useEngraveJobStore.getState().addLabel();
       const id = useEngraveJobStore.getState().job.labels[1]!.id;
@@ -957,8 +959,8 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
     render(<EngravePanel />);
 
     const seeded = recommended(0)!;
-    expect(seeded).toContain('Recommended 0.905 mm');
-    expect(seeded).toContain('stands 1.905 mm above the jaw tops');
+    expect(seeded).toContain('Recommended 2.81 mm');
+    expect(seeded).toContain("the blank's 1 mm minimum floor allows 2.81 mm");
     // The label is AT the recommendation, so nothing is added to reconcile: one number, no second.
     expect(seeded).not.toContain('This label is at');
 
@@ -982,8 +984,8 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
     fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '1.2' } });
 
     const line = recommended(0)!;
-    expect(line).toContain('Recommended 0.905 mm');
-    expect(line).toContain('stands 1.905 mm above the jaw tops');
+    expect(line).toContain('Recommended 2.81 mm');
+    expect(line).toContain("the blank's 1 mm minimum floor allows 2.81 mm");
     // The advice is not withdrawn, and the row is honest that the field is no longer on it.
     expect(line).toContain('This label is at 1.2 mm');
   });
@@ -1043,6 +1045,10 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
       useEngraveJobStore.setState({
         job: { ...job, labels: [{ ...first!, position: { x: 38.1, y: 19.05 } }, ...rest] },
       });
+      // The walk has to be re-run at the new position: `setState` writes a document, it does not
+      // re-depth one, and the line has not been over the void since the blank was taken. It is the
+      // same walk `takeBadgeBlank` ends on, so the store's number below is the store's own answer.
+      useEngraveJobStore.getState().redepthLabelsForBlank();
     });
     render(<EngravePanel />);
 
