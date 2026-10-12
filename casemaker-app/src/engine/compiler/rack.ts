@@ -264,10 +264,14 @@ export const TAB_REACH = 12;
 const TAB_LEN = 22;
 /**
  * Tab thickness EQUALS the deck, so the plate is a flat slab with ears rather
- * than a slab with lumps: both faces are dead flat, which is what lets it be
- * printed counterbore-UP. Printed the other way the counterbore opens onto the
- * bed and its floor becomes an unsupported ceiling — a bridge — which is no
- * seat for a screw head to bear on.
+ * than a slab with lumps, which is what lets it be printed counterbore-UP.
+ * Printed the other way the counterbore opens onto the bed and its floor
+ * becomes an unsupported ceiling — a bridge — which is no seat for a screw
+ * head to bear on.
+ *
+ * The TAB gives up `TAB_Z_SHAVE` (#356) of that on its INNER face, so it is the
+ * deck that is `PLATE_T` thick and the tab one layer thinner. The OUTER face is
+ * the datum and stays flush with the plate's own face.
  */
 export const TAB_T = PLATE_T;
 /**
@@ -279,7 +283,11 @@ export const TAB_T = PLATE_T;
 export const TAB_SLACK = 0.3;
 /**
  * As-designed THICKNESS clearance of the same joint, mm (#356) — the z twin of
- * TAB_SLACK, and the number #153's fit relief is added to on this axis too.
+ * TAB_SLACK, and the number #153's fit relief is added to on this axis too. It
+ * is the WHOLE as-designed z clearance, not one half of it: `TAB_Z_SHAVE +
+ * TAB_Z_OPEN` is this number, and the laddered total is
+ * `TAB_Z_SLACK + fitRelief(rack.fit)` — 0.3 / 0.4 / 0.55, the same ladder the
+ * width already has per side (TAB_SLACK + relief).
  *
  * The ledge's z opening used to be exactly `TAB_T`: a nominal tab in a nominal
  * opening, with nothing but the printer's own error between them. The printed
@@ -288,26 +296,66 @@ export const TAB_SLACK = 0.3;
  * other.
  *
  * It is SHARED between the two printed halves, but deliberately not evenly with
- * the ladder. Half is a FIXED shave off the tab's INNER face (`TAB_Z_SHAVE`,
- * applied in `buildPlate`) — the outer face stays flush with the plate and
- * keeps the screw-head seat whole — and the other half opens the LEDGE, where
+ * the ladder. The tab gives up a FIXED shave off its INNER face (`TAB_Z_SHAVE`,
+ * applied in `buildPlate` — the outer face stays flush with the plate and keeps
+ * the screw-head seat whole) and the rest opens the LEDGE (`TAB_Z_OPEN`), where
  * #153's relief piles on. That keeps `snap.ts`'s rule: the ladder relief is
  * applied to the CUT, never to both halves, which is also what leaves the
  * coupon's single printed tab able to grade every rung on the z axis.
  *
+ * That asymmetry has a consequence worth stating: **the ladder lives in the
+ * sides' ledge cut, so a rack whose SIDES are already printed and which reprints
+ * only the plates gets the tab's fixed shave and nothing else** — the two loose
+ * rungs buy nothing without new sides. Re-cutting both panels is what the fit
+ * ladder costs.
+ *
  * So the joint's whole z clearance is `TAB_Z_SLACK + fitRelief(rack.fit)`, and
  * that sum is exactly what the rack-tab coupon's rungs now let you feel.
  */
-export const TAB_Z_SLACK = 0.2;
+export const TAB_Z_SLACK = 0.3;
 /** How far a tab overlaps the deck it grows out of, to avoid a coplanar seam. */
 const TAB_MERGE = 0.5;
 /**
- * What a tab gives up of its thickness for `TAB_Z_SLACK`, mm — half the base
- * clearance, off the INNER face, and FIXED: the tab never moves with `fit`.
- * The laddered half is the ledge's (`buildSide`), so the fit coupon can grade
- * both the slot's width and its opening height against one printed tab.
+ * What a tab gives up of its thickness for `TAB_Z_SLACK`, mm — off the INNER
+ * face, and FIXED: the tab never moves with `fit`. The laddered share is the
+ * ledge's (`buildSide`), so the fit coupon can grade both the slot's width and
+ * its opening height against one printed tab.
+ *
+ * **One WHOLE LAYER (#356 review).** It was half of TAB_Z_SLACK — 0.1 — and
+ * that is half of a 0.2 mm first layer. The plates print counterbores UP, so
+ * the tab's inner face is the BED face, and the slicer samples layer 1 at
+ * z = 0.1: exactly on that face. A shave that shallow is not a face a slicer can
+ * keep — it rounds the tab's inner face away (leaving no thickness clearance at
+ * all) or starts the tab on layer 2 as a 12 mm cantilever floating over the bed.
+ * 0.2 is the maintainer's own hand fix on the bound rack, and it is a whole
+ * layer at the profile's layer height. Keep it one: a fraction of a layer is not
+ * a feature.
  */
-const TAB_Z_SHAVE = TAB_Z_SLACK / 2;
+export const TAB_Z_SHAVE = 0.2;
+/**
+ * The ledge's base z OPENING, mm: what is left of `TAB_Z_SLACK` after the tab's
+ * shave. `buildSide` opens each ledge by this plus #153's relief, so the joint's
+ * whole z clearance stays `TAB_Z_SLACK + fitRelief(rack.fit)` whatever the rung.
+ */
+export const TAB_Z_OPEN = TAB_Z_SLACK - TAB_Z_SHAVE;
+/**
+ * The z clearance the plate-tab joint is COMPILED with, as `buildSide` and
+ * `buildPlate` take it: the tab's shave and the ledge's opening.
+ *
+ * `fused` compiles the joint NOMINAL — no shave, no opening — and that is what
+ * the one-piece export needs (#356 review). A part printed as a unit has no
+ * fitting to do: every other joint clearance in it is welded shut, and this one
+ * cannot be, because the welds bridge the SIDES and this gap is a 12 mm sheet of
+ * air over the tab's inner face with solid rail above it and the deck below —
+ * out of a weld's reach, and an internal crack in a part that is meant to be one
+ * solid. Compiling it nominal closes the joint outright, which is what removes
+ * the crack rather than hiding it.
+ */
+export function tabZJoint(rack: RackParams, fused = false): { shave: number; open: number } {
+  return fused
+    ? { shave: 0, open: 0 }
+    : { shave: TAB_Z_SHAVE, open: TAB_Z_OPEN + fitRelief(rack.fit) };
+}
 /**
  * The tab screw is the SAME M5 as everything else in the rack, so it takes the
  * same numbers. It used to carry its own: TAB_SCREW_CLEAR_D was a byte-identical
@@ -471,7 +519,7 @@ function xWindow(x0: number, y0: number, z0: number, yLen: number, zLen: number,
  * `mirror=true` maps every x range through (width - x) for the RIGHT panel.
  * The two are true chiral parts (tab pockets open inward, ears point outward).
  */
-function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
+function buildSide(rack: RackParams, dims: RackDims, mirror: boolean, fused = false): BuildOp {
   const { width, depth, bodyH, rearBand } = dims;
   const H_TOP = FOOT_H + bodyH;
   // Map an [a, b] x-interval into this panel's frame.
@@ -487,9 +535,11 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   // compile unchanged. Relief only ever widens the ledge (looser).
   const tabSlack = TAB_SLACK + fitRelief(rack.fit);
   // Issue #356 — the ledge's OPENING HEIGHT, the z twin of `tabSlack`: the
-  // fixed half of TAB_Z_SLACK plus the rack's relief, matching the fixed shave
-  // buildPlate takes off the tab. See TAB_Z_SLACK.
-  const tabZOpen = TAB_Z_SLACK / 2 + fitRelief(rack.fit);
+  // base opening plus the rack's relief, matching the fixed shave `buildPlate`
+  // takes off the tab. NOMINAL and zero when the frame is compiled for the
+  // one-piece export, where the joint is welded solid instead of fitted — see
+  // `tabZJoint`.
+  const tabZOpen = tabZJoint(rack, fused).open;
 
   const solid: BuildOp[] = [
     // Panel body spans z FOOT_H..H_TOP; stacking feet hang below at both ends.
@@ -1034,12 +1084,27 @@ export function plateScrewYs(depth: number): number[] {
  * turned over (see buildRackNodes), which is why every y feature is symmetric
  * about depth/2 and the tabs sit on the face that points OUT of the rack.
  *
- * Print it OUTER FACE DOWN: the tabs are flush with that face, so the whole
- * underside is one flat plane on the bed and nothing needs support. The head
- * counterbores open downward and their floors bridge — a short annular bridge
- * slicers handle cleanly.
+ * Print it COUNTERBORES UP (see the print table in `engine/exporters/parts.ts`):
+ * the tabs are flush with the OUTER face, so that face is one flat plane and
+ * lies on the bed either way up — the head seats are what choose, and printed
+ * the other way each seat is a downward-facing ceiling spanning its own bore
+ * that bridges and gives the head nothing flat to bear on. In assembly the
+ * bottom plate's counterbored face points down, so `rack-bottom` is the one
+ * that gets flipped (`buildRackNodes`) and `rack-top` is already correct as
+ * modelled. **The INNER face is therefore the BED face** — which is why
+ * TAB_Z_SHAVE is a whole layer: a shave of half a layer there is a face the
+ * slicer samples exactly on.
+ *
+ * `zShave` is that shave; the one-piece export compiles the plate with it zero
+ * (`tabZJoint`), because a joint inside one printed piece has no fit to hold
+ * open.
  */
-function buildPlate(dims: RackDims, notchSolid: Profile[] = [], floorRibs = false): BuildOp {
+function buildPlate(
+  dims: RackDims,
+  notchSolid: Profile[] = [],
+  floorRibs = false,
+  zShave = TAB_Z_SHAVE,
+): BuildOp {
   const { plateW, depth } = dims;
   const x0 = SIDE_T + SIDE_CLEAR;
   const plateOutline = pTranslate([x0, 0], rectProfile(plateW, depth));
@@ -1118,13 +1183,14 @@ function buildPlate(dims: RackDims, notchSolid: Profile[] = [], floorRibs = fals
       // vertices along the seam, and a slicer reading the de-indexed STL sees
       // those as a mesh needing repair. Overlapping removes the seam.
       const xa = dir < 0 ? edge - TAB_REACH : edge - TAB_MERGE;
-      // The tab gives up TAB_Z_SHAVE (#356), and it gives it up on its INNER
-      // face: the solids start at plate z = 0, which is the OUTER face — the one
-      // the counterbore opens into and the one that must stay flush with the
-      // plate. So the tab is shortened to TAB_T - TAB_Z_SHAVE and the screw's
-      // through-hole follows it. See TAB_Z_SLACK.
+      // The tab gives up `zShave` (#356), and it gives it up on its INNER face:
+      // the solids start at plate z = 0, which is the OUTER face — the one the
+      // counterbore opens into and the one that must stay flush with the plate.
+      // So the tab is shortened to TAB_T - zShave and the screw's through-hole
+      // follows it. Zero when the frame is compiled for the one-piece export.
+      // See TAB_Z_SLACK.
       solid.push(
-        translate([xa, yC - TAB_LEN / 2, 0], cube([TAB_REACH + TAB_MERGE, TAB_LEN, TAB_T - TAB_Z_SHAVE])),
+        translate([xa, yC - TAB_LEN / 2, 0], cube([TAB_REACH + TAB_MERGE, TAB_LEN, TAB_T - zShave])),
       );
       if (!screwYs.has(yC)) continue; // mid tab is a rest, not a fixing
       const axis = dir < 0 ? edge - TAB_SCREW_INSET : edge + TAB_SCREW_INSET;
@@ -1137,7 +1203,7 @@ function buildPlate(dims: RackDims, notchSolid: Profile[] = [], floorRibs = fals
           size: 'M5',
           at: [axis, yC, 0],
           axis: '+z',
-          through: TAB_T - TAB_Z_SHAVE,
+          through: TAB_T - zShave,
           head: 'button',
           recess: 'flush',
           segments: 24,
@@ -1705,16 +1771,15 @@ function withNotches(
 }
 
 /**
- * Optional one-piece exports./**
  * Optional one-piece exports. Printing the rack fused is far stronger than
  * bolting it together, at the cost of a very long print and heavy internal
  * support — so these are OFFERED, never substituted for the separate parts,
  * and only when the whole thing fits the selected printer.
  *
  * Two variants, because they are not the same gamble:
- *  - FRAME: sides + plates. They already touch — the plate tabs seat in their
- *    ledges with no z clearance — so this is a plain union of existing
- *    geometry, and support stays in the open interior where a hand can reach.
+ *  - FRAME: sides + plates, compiled with the plate-tab joint NOMINAL (#356) so
+ *    the two halves close on every face. Support stays in the open interior
+ *    where a hand can reach.
  *  - ALL: accessories too. Those sit on SIDE_CLEAR and do NOT touch, so they
  *    are welded to the sides deliberately. Shelf positions become permanent
  *    and the support under each deck is sealed in, reachable only through the
@@ -1731,8 +1796,14 @@ function assembledNodes(
   if (!rack.assembledExport || !rackFitsWhole(rack, printer)) return [];
 
   const FRAME_IDS = ['rack-side-left', 'rack-side-right', 'rack-bottom', 'rack-top'];
-  const frameOps = built.filter((n) => FRAME_IDS.includes(n.id)).map((n) => n.op);
-  if (frameOps.length === 0) return [];
+  // Compiled NOMINAL (`fused`), NOT the fitted parts in `built`. The tab's
+  // shave and the ledge's opening are a FITTING, and a part printed as a unit
+  // has none to do: left in, the designed z clearance is a 12 mm sheet of air
+  // over every tab's inner face with solid rail above it and the deck below,
+  // which no weld can reach — an internal crack in what is meant to be one
+  // solid. Compiling the joint nominal closes it (#356 review). `built` is
+  // still what names the parts this variant replaces.
+  const frameOps = frameParts(rack, dims, true).map((n) => n.op);
 
   // Weld the plates to the sides along their FULL length.
   //
@@ -1743,6 +1814,11 @@ function assembledNodes(
   // tabs, 66 mm of 250 — leaving a 1.1 kg frame hanging off six small tabs and
   // a 0.3 mm crack down both sides. Fit clearance is for parts that come apart;
   // this one is printed as a unit, so the clearance is filled.
+  //
+  // The welds are PLATE_T tall because that is all this crack needs: it spans
+  // the plate's own band. The tab joint's clearance is NOT this weld's to fill
+  // and never was — it is closed at the source, by compiling the joint nominal
+  // (#356 review), which is also why no taller weld is needed for it.
   const plateWelds: BuildOp[] = [];
   const wt = SIDE_CLEAR + 0.8; // bites 0.4 mm into the panel and 0.4 into the deck
   for (const zPlate of [FOOT_H, FOOT_H + dims.bodyH - PLATE_T]) {
@@ -1864,20 +1940,31 @@ export function accessorySpaces(rack: RackParams): AccessorySpace[] {
   });
 }
 
-/** Compile the whole rack to one BuildNode per printable part, positioned in
- *  assembly space so the viewport previews the assembled rack. */
-export function buildRackNodes(rack: RackParams, printer?: PrinterVolume): BuildNode[] {
-  const dims = computeRackDims(rack);
+/**
+ * The four structural parts — the two sides and the two plates — positioned in
+ * assembly space. The ONE copy of their construction: `buildRackNodes` emits
+ * these as the printed parts, and `assembledNodes` calls this again with
+ * `fused` for the one-piece export, so the two can never drift apart.
+ *
+ * `fused` compiles the plate-tab joint NOMINAL (`tabZJoint`): the sides keep
+ * the fitting on the width but lose it in z, and the plates lose the tab shave.
+ * See `tabZJoint` for why the one-piece export needs that.
+ */
+function frameParts(rack: RackParams, dims: RackDims, fused = false): BuildNode[] {
   // One local for both the build and the notch depth: the notches have to cut
   // as deep as the ribs actually reach, so these two must never drift apart.
   const floorRibs = floorRibsEnabled(rack);
-  const nodes: BuildNode[] = [
-    { id: 'rack-side-left', op: buildSide(rack, dims, false) },
-    { id: 'rack-side-right', op: buildSide(rack, dims, true) },
+  const { shave } = tabZJoint(rack, fused);
+  return [
+    { id: 'rack-side-left', op: buildSide(rack, dims, false, fused) },
+    { id: 'rack-side-right', op: buildSide(rack, dims, true, fused) },
     {
       id: 'rack-bottom',
       op: withNotches(
-        translate([0, 0, FOOT_H], buildPlate(dims, notchKeepOut(rack, dims, 'bottom'), floorRibs)),
+        translate(
+          [0, 0, FOOT_H],
+          buildPlate(dims, notchKeepOut(rack, dims, 'bottom'), floorRibs, shave),
+        ),
         rack,
         dims,
         'bottom',
@@ -1893,7 +1980,7 @@ export function buildRackNodes(rack: RackParams, printer?: PrinterVolume): Build
       op: withNotches(
         translate(
           [0, dims.depth, FOOT_H + dims.bodyH],
-          rotate([180, 0, 0], buildPlate(dims, notchKeepOut(rack, dims, 'top'))),
+          rotate([180, 0, 0], buildPlate(dims, notchKeepOut(rack, dims, 'top'), false, shave)),
         ),
         rack,
         dims,
@@ -1902,6 +1989,13 @@ export function buildRackNodes(rack: RackParams, printer?: PrinterVolume): Build
       ),
     },
   ];
+}
+
+/** Compile the whole rack to one BuildNode per printable part, positioned in
+ *  assembly space so the viewport previews the assembled rack. */
+export function buildRackNodes(rack: RackParams, printer?: PrinterVolume): BuildNode[] {
+  const dims = computeRackDims(rack);
+  const nodes: BuildNode[] = frameParts(rack, dims);
 
   // Accessories stack bottom-up in their mounted positions for the preview.
   const accessoryOps: BuildOp[] = [];

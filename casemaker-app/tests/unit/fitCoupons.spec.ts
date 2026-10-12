@@ -47,7 +47,7 @@ import {
 } from '@/engine/compiler/fitCoupons';
 import { MAGNETS } from '@/engine/compiler/fasteners';
 import { CLIP_FIT } from '@/engine/compiler/boardSnap';
-import { SIDE_T, TAB_SLACK, TAB_T, TAB_Z_SLACK } from '@/engine/compiler/rack';
+import { SIDE_T, TAB_SLACK, TAB_T, TAB_Z_OPEN, TAB_Z_SHAVE } from '@/engine/compiler/rack';
 import { FIT_VARIANTS, fitRelief } from '@/types/snap';
 import type { MagnetSize, Vec3 } from '@/types';
 import { Manifold, exec, type ManifoldInstance } from './helpers/manifoldExec';
@@ -465,21 +465,21 @@ describe('rack plate-tab coupon (laddered by #153)', () => {
           ).toBeLessThan(0.04);
         }
       });
-      // The shipped rung's opening is TAB_T plus the fixed half of TAB_Z_SLACK —
-      // the base clearance is design, not ladder.
+      // The shipped rung's opening is TAB_T plus TAB_Z_OPEN — the base
+      // clearance is design, not ladder.
       expect(
-        Math.abs(tightCeil - plan.plateZ - (TAB_T + TAB_Z_SLACK / 2)),
+        Math.abs(tightCeil - plan.plateZ - (TAB_T + TAB_Z_OPEN)),
         `shipped rung opens ${(tightCeil - plan.plateZ).toFixed(2)} mm tall`,
       ).toBeLessThan(0.04);
 
-      // ...and the one tab is TAB_Z_SLACK/2 thinner than nominal, on its INNER
+      // ...and the one tab is TAB_Z_SHAVE thinner than nominal, on its INNER
       // face, so tab plus opening make TAB_Z_SLACK + fitRelief of real clearance.
       const inside = tabAt(5, plan.tabY, midZ);
       const dSeat = scanTo(m, inside, [0, 0, 1], 'void'); // to the flush seat face
       const dInner = scanTo(m, inside, [0, 0, -1], 'void'); // to the shaved inner face
       expect(Number.isFinite(dSeat) && Number.isFinite(dInner), 'the tab is printed at x=5').toBe(true);
       expect(
-        Math.abs(dSeat + dInner - (TAB_T - TAB_Z_SLACK / 2)),
+        Math.abs(dSeat + dInner - (TAB_T - TAB_Z_SHAVE)),
         `the tab is ${(dSeat + dInner).toFixed(2)} mm thick`,
       ).toBeLessThan(0.04);
     } finally {

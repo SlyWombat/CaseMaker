@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { fitRelief, FIT_RELIEF_MM, FIT_VARIANTS } from '@/types/snap';
 import { buildSnapCatch, defaultSnapCatchesForCase } from '@/engine/compiler/snapCatches';
 import { buildBoardSnapOps } from '@/engine/compiler/boardSnap';
-import { buildRackNodes, FOOT_H, plateTabYs, SIDE_T, TAB_T, TAB_Z_SLACK } from '@/engine/compiler/rack';
+import { buildRackNodes, FOOT_H, plateTabYs, SIDE_T, TAB_T, TAB_Z_OPEN, TAB_Z_SHAVE } from '@/engine/compiler/rack';
 import { aabbOfOp, union, type BuildOp } from '@/engine/compiler/buildPlan';
 import { cavityOriginXY } from '@/engine/coords';
 import { createDefaultProject } from '@/store/projectStore';
@@ -173,9 +173,9 @@ describe('Issue #153 — rack plate-tab ledges loosen with rack.fit', () => {
 
   // #356 — the same ladder, on the THICKNESS axis. The ledge used to be exactly
   // TAB_T tall for every rung, so it could never relieve a thickness bind; now
-  // half the base clearance plus the rung's relief opens the ceiling, and the
-  // tab gives up the fixed half on its inner face.
-  it('loosens the ledge’s z opening by the same ladder, over a tab thinned by a FIXED half', () => {
+  // the base opening plus the rung's relief lifts the ceiling, and the tab gives
+  // up the fixed shave — one whole layer — on its inner face.
+  it('loosens the ledge’s z opening by the same ladder, over a tab thinned by a FIXED shave', () => {
     const tabY = plateTabYs(rack.depth)[0]!;
     const ceilingOf = (fit: RackParams['fit']): number => {
       const m = exec(
@@ -198,12 +198,12 @@ describe('Issue #153 — rack plate-tab ledges loosen with rack.fit', () => {
       const ceil = ceilingOf(fit);
       expect(Number.isFinite(ceil), `${fit}: found the ledge ceiling`).toBe(true);
       expect(
-        Math.abs(ceil - (FOOT_H + TAB_T + TAB_Z_SLACK / 2 + fitRelief(fit))),
+        Math.abs(ceil - (FOOT_H + TAB_T + TAB_Z_OPEN + fitRelief(fit))),
         `${fit}: the ledge ceiling sits at ${ceil.toFixed(2)}, not the laddered opening`,
       ).toBeLessThan(0.04);
     }
 
-    // The tab carries the FIXED half only, so the plate's own volume does not
+    // The tab carries the FIXED shave only, so the plate's own volume does not
     // move with the rung — which is what lets the coupon grade every rung with
     // one printed tab.
     const plateVolume = (fit: RackParams['fit']): number => {
@@ -218,7 +218,7 @@ describe('Issue #153 — rack plate-tab ledges loosen with rack.fit', () => {
     };
     expect(Math.abs(plateVolume('loose') - plateVolume('tight'))).toBeLessThan(1e-6);
 
-    // ...and the shave is real: the tab is TAB_Z_SLACK/2 thinner, and its OUTER
+    // ...and the shave is real: the tab is TAB_Z_SHAVE thinner, and its OUTER
     // face — the counterbore face that must stay flush with the plate — is at z=0.
     const m = exec(
       buildRackNodes({ ...rack, fit: 'tight' }).find((n) => n.id === 'rack-bottom')!.op as BuildOp,
@@ -234,7 +234,7 @@ describe('Issue #153 — rack plate-tab ledges loosen with rack.fit', () => {
       }
       expect(Math.abs(lo - FOOT_H), 'the tab’s outer face is flush at the plate’s underside').toBeLessThan(0.04);
       expect(
-        Math.abs(hi - (FOOT_H + TAB_T - TAB_Z_SLACK / 2)),
+        Math.abs(hi - (FOOT_H + TAB_T - TAB_Z_SHAVE)),
         `the tab is ${(hi - lo).toFixed(2)} mm thick, not TAB_T less the shave`,
       ).toBeLessThan(0.04);
     } finally {

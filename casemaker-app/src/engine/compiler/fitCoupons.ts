@@ -898,9 +898,9 @@ export function rackTabCouponPlan(rack: RackParams = RACK_COUPON_RACK): RackTabC
   // The tab's band is `FOOT_H .. FOOT_H + TAB_T`: `buildPlate` grows the tabs
   // from its own z = 0 and `buildRackNodes` seats that at FOOT_H. Both slabs
   // keep that full nominal band even though #356 shaves the tab and opens the
-  // ledge by TAB_Z_SLACK: the slabs are query windows, so a window a hair wider
-  // than the part it clips is honest, and the rung-measured difference is what
-  // the coupon is for.
+  // ledge (TAB_Z_SLACK between them): the slabs are query windows, so a window a
+  // hair wider than the part it clips is honest, and the rung-measured
+  // difference is what the coupon is for.
   const ledgeSlab: [Vec3, Vec3] = [
     [0, yMin, 0],
     [SIDE_T, yMax, FOOT_H + TAB_T + RACK_COUPON_PAD],
@@ -995,7 +995,13 @@ export function buildRackTabCoupon(
       'with a slab, so the coupon cannot certify a slot the panel does not have; ' +
       'the slice windows are coupon scaffolding, not mating surfaces. The one tab ' +
       'carries only the fixed #356 shave, so its thickness is a datum the rungs ' +
-      'are measured against, never a rung itself. What it does ' +
+      'are measured against, never a rung itself. Its z grade is COARSE: the ' +
+      'ledge slice prints rack-z as PRINT-z, where the real panel lies flat so ' +
+      'its ledges are cut in-plane, and a 0.2 mm layer therefore quantises the ' +
+      'ceiling — the 0.1 mm between the tight and standard rungs can print as ' +
+      'one face. Read the slot WIDTH (in-plane, full resolution) as this ' +
+      'coupon’s answer, then, and the z difference as an indication of what a ' +
+      'rung opens rather than a measurement of it. What it does ' +
       'NOT cover: the same ledge is cut at the rack TOP, where #356 opens the ' +
       'FLOOR down instead of the ceiling up (the coupon slices the bottom one), ' +
       'the plate is also carried by a ' +

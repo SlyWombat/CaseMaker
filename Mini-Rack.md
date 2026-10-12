@@ -73,6 +73,22 @@ standing rack.
   over the side panel. That face points out of the rack in *both* installs, so
   the tab fills its ledge at whichever end it lands: the top stays flat enough
   to stack on and the underside stays flat enough to sit on.
+- **The joint carries a designed THICKNESS clearance too, and it is split.**
+  The ledge's z opening used to be exactly `TAB_T` — a nominal tab in a nominal
+  opening — and the first printed rack bound on it; the 0.2 mm the maintainer
+  took off the tab's inner face by hand is now the design. `TAB_Z_SLACK` = 0.3
+  is the z twin of `TAB_SLACK`, and #153's ladder rides it, so the joint's whole
+  z clearance is `TAB_Z_SLACK + fitRelief(rack.fit)` — 0.3 / 0.4 / 0.55, the
+  same ladder the width has per side. It splits the way `src/types/snap.ts` says
+  relief must: a FIXED `TAB_Z_SHAVE` = 0.2 off the tab's INNER face, where the
+  outer face stays the datum and the screw-head seat it carries stays whole
+  (the bearing floor under the counterbore is 1.8 mm). The shave is **one whole
+  layer**, not half of one: the plates print counterbores UP, so the tab's inner
+  face is the BED face and half a first layer is a face the slicer samples
+  exactly on. The remaining `TAB_Z_OPEN` = 0.1 mm, plus the whole ladder, opens
+  the LEDGE's cut. **The ladder is in the sides**, so a rack that reprints only
+  its plates against sides it already has gets the tab's fixed 0.2 mm and
+  nothing else.
 - **One printed plate, installed twice** survives. `rack-top` is `rack-bottom`'s
   op rotated 180° about x; every y feature is symmetric about depth/2.
 - **The two ends are not alike, and cannot be.** At the top the ledge is only
@@ -98,7 +114,8 @@ standing rack.
   tab that leaves 0.6 mm of wall each side, which is not a wall. Offset 4.3 mm
   inboard from the plate edge, the outboard wall gets 1.8 mm and the inboard
   side of the bore runs into the deck, which is solid there. Tab thickness is
-  head height + a 3 mm bearing floor.
+  head height + a bearing floor: 3.0 + 2.0 = the deck's 5.0 mm, less the
+  inner-face z shave, which leaves 3.0 + 1.8 (see the bullet above).
 - **The bottom screw needs a way IN.** Its head lands in the tab's outer-face
   counterbore, which on the bottom plate faces the rack's underside — and the
   end tabs sit over a stacking foot. The first cut of this joint left that head
@@ -117,12 +134,14 @@ standing rack.
   windows were pulled back off the rear tabs — without both, two of the four
   screws had only ~67% of their thread annulus. They now measure 98–99%.
 
-Print the plate **counterbores UP**. The tab is the same thickness as the deck
-— the plate is a flat slab with ears, not a slab with lumps — so it lies flat
-either way and the only thing choosing the orientation is the head seats.
+Print the plate **counterbores UP**. The tab is the deck's thickness less the z
+shave — the plate is a flat slab with ears, not a slab with lumps — so it lies
+flat either way and the only thing choosing the orientation is the head seats.
 Printed the other way up, each seat is a downward-facing ceiling spanning its
 own bore: it bridges, droops, and gives the screw head nothing flat to bear on.
-Turned over, the same face is an ordinary supported top surface.
+Turned over, the same face is an ordinary supported top surface — and the tab's
+shaved inner face becomes the BED face, which is why that shave has to be a
+whole layer and never a fraction of one.
 
 In assembly the bottom plate's counterbored face points down, so **`rack-bottom`
 is the one that gets turned over**; `rack-top` is already correct as modelled.
@@ -164,12 +183,18 @@ entries to Export:
 
 **Both variants weld the plate edges to the sides along their full length.**
 Unioning the frame as-is gives a single Manifold component, which sounds like
-more than it is: the tabs only TOUCH their ledges on coincident faces, and
-everywhere else the `SIDE_CLEAR` slot runs the whole depth. Measured, just 26%
-of each plate edge was bridged — the three tabs, 66 mm of 250 — leaving a
-1.1 kg frame hanging off six small tabs with a 0.3 mm crack down both sides.
-Fit clearance is for parts that come apart; a part printed as a unit gets it
-filled. Now 100% bridged.
+more than it is: with the tab joint compiled nominal, the tabs only TOUCH their
+ledges on coincident faces, and everywhere else the `SIDE_CLEAR` slot runs the
+whole depth. Measured, just 26% of each plate edge was bridged — the three tabs,
+66 mm of 250 — leaving a 1.1 kg frame hanging off six small tabs with a 0.3 mm
+crack down both sides. Fit clearance is for parts that come apart; a part
+printed as a unit gets it filled. Now 100% bridged.
+
+The plate-**tab** joint is the one clearance the welds cannot fill, because it
+is nowhere near them: it is a 12 mm sheet of air over each tab's inner face,
+with solid rail above it and the deck below, ten millimetres inboard of the weld
+line. That is why the fused frame compiles that joint **nominal** — no tab
+shave, no ledge opening — so the two halves close on every face instead.
 
 The whole-rack variant additionally welds the accessories, which sit on `SIDE_CLEAR` and do **not** touch at all. Shelf positions become
 permanent, and the support under each deck can only be worked out through the

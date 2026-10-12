@@ -28,11 +28,14 @@ import {
   TRAY_DECK_T,
   TAB_T,
   TAB_Z_SLACK,
+  TAB_Z_SHAVE,
+  TAB_Z_OPEN,
   TAB_SCREW_INSET,
   TAB_SCREW_HEAD_H,
   TAB_SCREW_BITE,
   REAR_ANCHOR_INSET,
   SIDE_T,
+  FOOT_H,
 } from '@/engine/compiler/rack';
 import { collectMeshTransferables, transferListForPlan, union } from '@/engine/compiler/buildPlan';
 import { PRINT_FLIP_NODE_IDS } from '@/engine/exportLayout';
@@ -162,6 +165,79 @@ describe('rack archetype — mini-rack template', () => {
       } finally {
         m.delete();
       }
+    }
+  }, 120000);
+
+  // #356 review — the one-piece frame is compiled with the plate-tab joint
+  // NOMINAL, and this is the reason. The designed z clearance is a 12 mm sheet
+  // of air over each tab's INNER face, with solid rail above it and the deck
+  // below and the screw bore through it: no weld can reach it (the welds bridge
+  // the plate's outer edge, 10 mm away), so leaving the fitting in would leave
+  // an internal crack in a part whose whole point is to be one solid — 0.55 mm
+  // of it at a loose rung. The welds still stay PLATE_T tall; they have nothing
+  // to do up here.
+  it('fuses the frame with a NOMINAL tab joint, so the one-piece export has no z crack', () => {
+    const rack: RackParams = {
+      enabled: true,
+      width: 180,
+      depth: 160,
+      slots: 8,
+      accessories: [],
+      // A loose rung on purpose: the crack the fused compile has to close is
+      // widest here, and the fused part must not depend on the rung at all.
+      fit: 'loose',
+      printer: { x: 220, y: 220, z: 250 },
+      assembledExport: true,
+    };
+    const nodes = buildRackNodes(rack);
+    const byId = new Map(nodes.map((n) => [n.id, n.op]));
+    const dims = computeRackDims(rack);
+    const hTop = FOOT_H + dims.bodyH;
+    const tabY = plateTabYs(dims.depth)[0]!;
+    const frame = nodes.find((n) => n.id === 'rack-assembled-frame');
+    expect(frame, 'the rack fits the printer, so the frame export is offered').toBeTruthy();
+    const m = exec(frame!.op);
+    try {
+      // A probe in x 4..5 — inside the tab's 12 mm reach, clear of the Ø9.8
+      // counterbore the screw axis at x = 11 opens — and 0.1 mm thin in z.
+      const Z = 0.1;
+      const probeV = 1 * 8 * Z;
+      const materialIn = (op: ManifoldInstance, z: number): number => {
+        const c = Manifold.cube([1, 8, Z]).translate([4, tabY - 4, z]);
+        const i = Manifold.intersection([op, c]);
+        const v = i.volume();
+        i.delete();
+        c.delete();
+        return v;
+      };
+      // Just INSIDE the clearance each plate would have if it were fitted: the
+      // bottom tab's inner face is TAB_T - TAB_Z_SHAVE up from its outer face,
+      // the top plate's the same down from the ceiling. Nominal, both reach the
+      // face itself.
+      const cases: Array<[string, string, number]> = [
+        ['bottom', 'rack-bottom', FOOT_H + TAB_T - TAB_Z_SHAVE + 0.02],
+        ['top', 'rack-top', hTop - TAB_T + TAB_Z_SHAVE - Z - 0.02],
+      ];
+      for (const [label, plateId, z] of cases) {
+        const fitted = [plateId, 'rack-side-left', 'rack-side-right'].map((id) =>
+          exec(byId.get(id)!),
+        );
+        try {
+          const open = fitted.reduce((v, p) => v + materialIn(p, z), 0);
+          expect(
+            open,
+            `${label}: the FITTED parts really do leave the joint's z clearance open here`,
+          ).toBeLessThan(0.02 * probeV);
+        } finally {
+          fitted.forEach((p) => p.delete());
+        }
+        expect(
+          materialIn(m, z) / probeV,
+          `${label}: the fused frame fills it`,
+        ).toBeGreaterThan(0.97);
+      }
+    } finally {
+      m.delete();
     }
   }, 120000);
 
@@ -707,10 +783,10 @@ describe('rack archetype — mini-rack template', () => {
         return f;
       };
       const H = 5 + (16 * SLOT_PITCH + 11);
-      // #356 — the ledge's mouth moved by the fixed half of TAB_Z_SLACK, so the
-      // column's own span moved with it (SAMPLE sets no `fit`, so the relief is
-      // the tight rung's 0).
-      const zOpen = TAB_Z_SLACK / 2;
+      // #356 — the ledge's mouth moved by TAB_Z_OPEN (the base opening left
+      // after the tab's fixed shave), so the column's own span moved with it
+      // (SAMPLE sets no `fit`, so the relief is the tight rung's 0).
+      const zOpen = TAB_Z_OPEN;
       for (const y of tabYs) {
         expect(ring(sides[0]!, y, 5 + TAB_T + zOpen, 5 + TAB_T + zOpen + TAB_SCREW_BITE), `bottom tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
         expect(ring(sides[0]!, y, H - TAB_T - zOpen - TAB_SCREW_BITE, H - TAB_T - zOpen), `top tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
@@ -1466,8 +1542,8 @@ describe('rack archetype — mini-rack template', () => {
       // shelf's rear anchor and the two holes ran into each other.
       const axisX = 15 + 0.3 - TAB_SCREW_INSET;
       const accCols = [22, 100, SAMPLE.depth - REAR_ANCHOR_INSET];
-      // #356: the pilot's own mouth moved by the fixed half of TAB_Z_SLACK.
-      const zOpen = TAB_Z_SLACK / 2;
+      // #356: the pilot's own mouth moved by TAB_Z_OPEN.
+      const zOpen = TAB_Z_OPEN;
       for (const ty of plateScrewYs(dims.depth)) {
         for (const zBase of [5 + TAB_T + zOpen, dims.totalH - TAB_T - zOpen - TAB_SCREW_BITE]) {
           const pilot = Manifold.cylinder(TAB_SCREW_BITE, 2.4, 2.4, 32).translate([axisX, ty, zBase]);
