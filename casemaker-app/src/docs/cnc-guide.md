@@ -754,6 +754,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `arc-r-unsupported` | error | The firmware has no radius-form (`R`) arcs; only `I`/`J`/`K`. | Convert to `I`/`J`/`K`. |
 | `arc-radius-mismatch` | warning | The arc's start and end do not sit at the same radius from its centre. | Check the offsets. |
 | `no-arc-centre-mode` | error | `G90.1`/`G91.1` are the arc-centre-mode pair, and this firmware has no arc-centre mode: `I`/`J`/`K` are always incremental. The distance mode is left unchanged, not reinterpreted. | Use plain `G90`/`G91`; this is not our post's output. |
+| `unknown-g28-subcode` | error | `G28.<n>` carries a subcode, and the dialect records only plain `G28` (the clearance position, not home). Whether the firmware matches the plain code's prefix on it is unverified, so the position is left unchanged and the file is treated as foreign — the same shape as `G90.1`/`G91.1`. | Use plain `G28`; this is not our post's output. |
 | `atc-self-check` | warning | A bare `M490` is the ATC motor self-check, which this machine (no ATC) does not have. | Remove it. |
 | `rotary-axis` | info | An `A` word: the rotary axis is tracked but not interpreted. | V1 does not simulate rotary work. |
 
@@ -813,6 +814,7 @@ running passes above; the rest are the checks the runner does not do on its own:
 | `axis-crossing` | error | A rotary cut reaches the axis deeper than the tool radius (the cutter tip at radius Z ≤ −r); a single-valued radius column cannot represent a cut that crosses the axis. | Keep the cutter off the axis, or use a shorter tool. |
 | `axis-clamped` | warning | A rotary cut dipped just past the axis (within one tool radius) and was clamped to it; the far-side hollow is not modelled, and the cut did not come out the depth the program asked for. | Keep the cutter off the axis, or accept the clamped picture. |
 | `tool-refused` | error | The selected tool shape is not a flat end mill, which is all V1 sweeps. | Pick a flat end mill. |
+| `probe-fitted-cut` | error | A cutting move was made with `T0` active — `T0` is the **probe**, and a probe is contact, not removal. No cutter is modelled for it, and nothing is drawn as removed. The post never writes a probe cut, so the file is foreign or broken. | Check the tool numbers; re-post the job. |
 | `dense-3d-refused` | error | Too many separate cut runs at one (segment, Z): a 3D or dense job the 2.5D sweep will not take on. | — |
 | `sweep-budget-exceeded` | error | The sweep would take longer than the allowed budget, so it was stopped. | Retry with a longer limit, or simplify the job. |
 | `ramp-over-removed` | info | A checkpoint changes Z; it was swept at its lowest Z, removing more than the machine would. | Expect a slightly pessimistic picture. |

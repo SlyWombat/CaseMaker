@@ -802,6 +802,8 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   };
   // The fixture diagnostics fold together (one bad label must not print 400 lines).
   const fixtureDiag = new DiagnosticFolder();
+  // Cuts made with the probe active fold the same way (#191 item 9).
+  const probeDiag = new DiagnosticFolder();
   const holder = opts?.machine?.holder ?? null;
   // Where the nut sits is a property of the CUTTER, not of the fitting (#314). The collet grips
   // the shank and never the flutes, so the shank cannot enter past the point where it stops being
@@ -888,6 +890,27 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
     // A checkpoint at or above the top of the stock removes nothing: the vendor's rotary files
     // feed at Z = +30 over a cylinder, and a stub prism has nothing there.
     if (cp.z >= topZ) {
+      perCheckpoint.push(null);
+      skipped++;
+    } else if (timeline.segments[cp.segment]?.tool === 0) {
+      // `T0` is the PROBE, and a probe is contact, not removal (#191 item 9; the maintainer's
+      // decision of 2026-10-12). A cutting move made with `T0` active would "remove" material with
+      // a probe — our post never writes one (`T0` is not a cutter), so such a file is foreign or
+      // broken, and it is REFUSED with a named error rather than swept with a cutter that is not
+      // there. No removal is modelled for the checkpoint, because the probe removes nothing. This
+      // is the same posture as the interpreter refusing an unknown `G28` subcode.
+      //
+      // The active tool comes from the checkpoint's SEGMENT: a real tool change calls `boundary`,
+      // so it always opens a new segment, and `Segment.tool` is the tool in force at that
+      // segment's first move. Only a checkpoint at or below the stock top is flagged, because only
+      // one of those would remove material at all (the arm above skips the rest as no-ops).
+      const line = cp.steps.length > 0 ? (timeline.events[cp.steps[0] as number]?.line ?? 0) : 0;
+      probeDiag.push({
+        severity: 'error',
+        code: 'probe-fitted-cut',
+        checkpoint: idx,
+        message: `checkpoint ${idx}${line ? ` (line ${line})` : ''}: a cutting move was made with T0 active — T0 is the PROBE, and a probe is contact, not removal. Our post never writes a probe cut, so this file is foreign or broken`,
+      });
       perCheckpoint.push(null);
       skipped++;
     } else {
@@ -1011,6 +1034,8 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // The fixture checks fold together and go in after the stock gates, so the picture reads in
   // the order the tool meets things.
   diagnostics.push(...fixtureDiag.finish());
+  // A probe cut is refused whether or not a fixture was modelled, so it goes in with the others.
+  diagnostics.push(...probeDiag.finish());
   if (air.gouges.length < air.diagnostics.filter((d) => d.code === 'rapid-through-stock').length) {
     diagnostics.push({ severity: 'info', code: 'gouges-truncated', message: `only the first ${MAX_GOUGES} rapids through the stock are returned as solids; the rest are reported but not drawn` });
   }

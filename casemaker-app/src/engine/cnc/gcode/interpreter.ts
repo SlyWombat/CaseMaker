@@ -362,6 +362,23 @@ class Interp {
         return false;
       case 21: this.scale = 1; return false;
       case 28:
+        // `G28.<n>` is not a code this firmware has a record of: the dialect records plain `G28`
+        // — the CLEARANCE position, not home — and the 25-file corpus holds only that. It is the
+        // same shape as the `G90.1`/`G91.1` pair above, and gets the same treatment: refuse it
+        // rather than read it as the plain code and move the machine on a guess.
+        //
+        // The position is left UNCHANGED, not set unknown: a refused file must not also "run as
+        // if it homed". Our post never writes one, so a file that does is foreign — the verifier's
+        // `not-our-dialect` whitelist would reject it anyway.
+        if (sub !== 0) {
+          this.diag(
+            'error',
+            'unknown-g28-subcode',
+            line,
+            `G${gw.text} carries a subcode, and this firmware's dialect records only plain G28 (the CLEARANCE position, not home): whether the firmware matches the plain code's prefix on this string is unverified. The position is left UNCHANGED. Treat the file as foreign.`,
+          );
+          return false;
+        }
         this.events.push({ kind: 'home', line });
         this.unknownPosition();
         return false;

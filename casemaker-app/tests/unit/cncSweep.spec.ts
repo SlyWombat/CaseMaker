@@ -473,6 +473,50 @@ describe('the must-FAIL list (§7.1): refusals and the gates that need the stock
   });
 });
 
+describe('#191 item 9: a cut made with T0 (the probe) active is refused, not swept', () => {
+  const err = (src: string) => {
+    const { out } = sweep(src);
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    return out.value.diagnostics.find((d) => d.code === 'probe-fitted-cut');
+  };
+
+  it('a cutting move made with T0 active is a named error, and NO cutter is modelled for it', () => {
+    // `T0 M6` stops the spindle, so the program restarts it to make the cut — exactly the shape a
+    // foreign or broken file has. The probe removes nothing, so nothing is drawn as removed.
+    const { out } = sweep('S1000 M3\nG0 X10 Y10 Z1\nT0 M6\nS1000 M3\nG1 Z-0.5 F100\nG1 X30\n');
+    if (!out.ok) throw new Error('refused');
+    const d = out.value.diagnostics.find((x) => x.code === 'probe-fitted-cut');
+    expect(d?.severity).toBe('error');
+    expect(d?.checkpoint).toBe(0);
+    expect(out.value.stats.removedVolume).toBe(0);
+    expect(out.value.stats.checkpointsSkipped).toBe(1);
+  });
+
+  it('a T0 move that only RAPIDS (or feeds with the spindle off) is not a probe cut', () => {
+    // The cut here happens BEFORE `T0 M6`, so the whole T0 stretch is an air move. Nothing is
+    // removed by a probe in air, so there is nothing to refuse.
+    const { out } = sweep('T1 M6\nS1000 M3\nG0 X10 Y10 Z1\nG1 Z-0.5 F100\nG1 X30\nT0 M6\nG0 X20 Y20 Z1\n');
+    if (!out.ok) throw new Error('refused');
+    expect(out.value.diagnostics.map((x) => x.code)).not.toContain('probe-fitted-cut');
+  });
+
+  it('...and an UNKNOWN starting tool is not T0: a cut with no tool stated is untouched', () => {
+    // `'unknown'` is not `0`. A program that never names a tool must not be read as a probe job.
+    const { out } = sweep('S1000 M3\nG0 X10 Y10 Z1\nG1 Z-0.5 F100\nG1 X30\n');
+    if (!out.ok) throw new Error('refused');
+    expect(out.value.diagnostics.map((x) => x.code)).not.toContain('probe-fitted-cut');
+    expect(out.value.stats.removedVolume).toBeGreaterThan(0);
+  });
+
+  it('...and a real tool (T1) cuts as it always did', () => {
+    const { out } = sweep('T1 M6\nS1000 M3\nG0 X10 Y10 Z1\nG1 Z-0.5 F100\nG1 X30\n');
+    if (!out.ok) throw new Error('refused');
+    expect(out.value.diagnostics.map((x) => x.code)).not.toContain('probe-fitted-cut');
+    expect(out.value.stats.removedVolume).toBeGreaterThan(0);
+    expect(err('T1 M6\nS1000 M3\nG0 X10 Y10 Z1\nG1 Z-0.5 F100\nG1 X30\n')).toBeUndefined();
+  });
+});
+
 describe('the air-move gate after code review #4: the tool body is swept EXACTLY, and the floor is honest', () => {
   const errs = (src: string) => {
     const { out } = sweep(src);

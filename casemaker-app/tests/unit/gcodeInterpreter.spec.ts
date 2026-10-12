@@ -448,6 +448,25 @@ describe('dialect spellings the vendor tooling actually writes (#186 checklist)'
     expect(moves(r).at(-1)?.to[0]).toBe(15);
   });
 
+  it('REGRESSION (review #3 §9): G28.1 is refused — the position is NOT set unknown', () => {
+    // The same family as the `G91.1` above: a subcode on a code the dialect records only plain.
+    // `G28` is the CLEARANCE position and the 25-file corpus holds only that, so a `G28.<n>` is a
+    // foreign file. It must not run as if it homed — the position is left as it was.
+    const r = parseGcode('G0 X1 Y2 Z3\nG28.1\nG0 X5\n');
+    expect(errors(r)).toContain('unknown-g28-subcode');
+    // Left UNCHANGED: the move after it still knows where it starts from.
+    expect(moves(r).at(-1)?.from).toEqual([1, 2, 3]);
+    // And no `home` was registered for the refused line.
+    expect(kinds(r)).not.toContain('home');
+  });
+
+  it('...while plain G28 is still the clearance move that forgets the position', () => {
+    const r = parseGcode('G0 X1 Y2 Z3\nG28\nG0 X5\n');
+    expect(kinds(r)).toContain('home');
+    expect(errors(r)).not.toContain('unknown-g28-subcode');
+    expect(moves(r).at(-1)?.from).toEqual([null, null, null]);
+  });
+
   it('G18 and G19 select the plane an arc is drawn in', () => {
     const xy = parseGcode('G17\nG0 X0 Y0 Z0\nG3 X0 Y10 I0 J5 F100\n');
     const xz = parseGcode('G18\nG0 X0 Y0 Z0\nG3 X10 Z0 I5 K0 F100\n');

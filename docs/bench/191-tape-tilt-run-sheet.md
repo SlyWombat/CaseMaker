@@ -19,7 +19,9 @@ needs **C4** in the same sitting: see the trap below.
 1. The blank — the **76.2 × 38.1 × 3.81 mm PLA** badge blank, the same one `/Fabrication.md` §7
    works from. Its length (76.2 mm) runs left–right, its width (38.1 mm) front–back.
 2. Double-sided tape. Record the brand and nominal thickness: \_\_\_\_\_\_\_\_  *(type / nominal mm)*
-3. The **Makera 3D Probe** — rated for non-conductive material, not the 3D Probe Rod.
+3. The **wired probe** that ships with the machine — a mechanical touch tip, measured on the
+   blank to 0.001 mm (decision 8, revised 2026-10-08). *Not* the 3D Probe Rod (conductive only),
+   and *not* the Makera 3D Probe, which is held in reserve.
 4. A straightedge, to check the tape lies flat under the blank before you rely on it.
 5. **C4's answer for this session.** ⚠ *C4 has not been run — its only figure is one point
    probed twice, 0.017 mm apart (`docs/bench/2026-10-bench-day-1.md`, C4).* Run C4 in this
