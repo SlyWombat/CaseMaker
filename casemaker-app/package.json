@@ -35,7 +35,7 @@
   "dependencies": {
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.0",
-    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/api": "^2.12.3",
     "comlink": "^4.4.2",
     "fflate": "^0.8.2",
     "immer": "^11.1.4",
@@ -53,7 +53,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "1.61.0",
-    "@tauri-apps/cli": "^2.10.1",
+    "@tauri-apps/cli": "^2.12.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^24.12.2",
