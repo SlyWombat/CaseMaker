@@ -317,13 +317,17 @@ most 4 mm (#344) — because a flat 4 mm stands taller than a 3.81 mm badge. A v
 measured is never touched. X runs between the vise jaws; the fixed jaw is on the left. The
 stock's front-left corner is the work origin.
 
-A new blank also re-works the **lines** on it — where the job is still carrying the shipped demo
-words. Those three were laid out for the 100 × 60 mm default plank, so on a badge they ran off its
-edges; pressing **Use the badge blank** replaces them with **one** placeholder name, centred on the
-blank and clear of the magnet pocket (#363). Either way, the depth of every line nobody has claimed
-is then recommended for the blank it is really on (#362) — on the default badge the magnet pocket's
-ceiling is what binds, so the lines come out at 0.51 mm. A line **you** typed or placed is left
-exactly where it is, text and position both.
+A new blank also re-works the **lines** on it — where the job's set is still one the app laid out
+itself. Those three demo words were laid out for the 100 × 60 mm default plank, so on a badge they
+ran off its edges; pressing **Use the badge blank** replaces them with **one** placeholder name,
+centred on the blank and clear of the magnet pocket (#363). Either way, the depth of every line
+nobody has claimed is then recommended for the blank it is really on (#362). On the default badge
+that number is 0.51 mm, and it is the magnet pocket's ceiling: the recommendation takes the
+shallowest limit ANYWHERE on the blank rather than the one the line actually sits over, so a line
+that is clear of the pocket is still given the pocket's number — the seeded line sits in the free
+band beside it, where the jaws would allow 0.905 mm (#365). A line **you** typed or placed is left
+exactly where it is, text and position both — and so is a line an earlier badge seeded, once you
+have touched it: taking a second badge blank re-lays only what the app still owns.
 
 **2. Add labels (#200, #205) — in the app.** Each label carries its own text, font, weight,
 cap height, position on the blank, rotation and **depth**. The editor shows a depth box with

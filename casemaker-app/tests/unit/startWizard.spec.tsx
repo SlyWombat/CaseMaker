@@ -336,6 +336,12 @@ describe('#280 — step 2, what are you making', () => {
     expect(job.workholding.vise.stockProud).toBeCloseTo(1.905, 9);
     // …and the void the badge's model already has came with it (#271 route 1), so nothing floats.
     expect((job.keepOuts ?? []).map((k) => k.id)).toContain(BADGE_POCKET_KEEP_OUT_ID);
+    // …and so did the LINES (#363 review): the three demo words were laid out for the 100 × 60 mm
+    // plank, so the hand-off replaces them with the one placeholder the badge route seeds. The
+    // stock assertions above would all still pass if the labels had been left running off the
+    // badge, which is exactly what the issue was about.
+    expect(job.labels).toHaveLength(1);
+    expect(job.labels[0]!.text).toBe('Name');
 
     fireEvent.click(screen.getByTestId('engrave-setup-next')); // holding -> material
     fireEvent.click(screen.getByTestId('engrave-setup-next')); // material -> blank

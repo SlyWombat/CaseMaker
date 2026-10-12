@@ -8,6 +8,12 @@
 // hand-off through the real store — including a real Manifold `generate`, because the bar the issue
 // set is that the wizard does not hand over a job its own findings complain about.
 //
+// #363 REVIEW — the gate is on PROVENANCE, not on values: `computed` is the app's own past answer,
+// and a job the OLD badge route had already re-depth-ed (three lines, 0.51 mm, stamped `computed`,
+// never moved) is still the app's set and must be re-laid. The tests below pin both directions:
+// that job re-seeds, and a line the person has touched does not — including the line a previous
+// take seeded, which is recognised by its `layout: 'computed'` stamp alone.
+//
 // Real Manifold + the store's localStorage read, plain Node: the shim below is installed BEFORE the
 // store is dynamically imported (the pattern `engraveJob.spec.ts` uses), because the store reads
 // localStorage at module load.
@@ -20,6 +26,7 @@ import {
   BADGE_SEED_TEXT,
   badgeLabelSeed,
   isShippedDemoLabelSet,
+  mayRelayoutLabels,
   type BadgeSeedBlank,
   type BadgeLabelSeedInputs,
   type SeedMeasure,
@@ -211,29 +218,58 @@ describe('#363 — the badge label seed', () => {
   });
 });
 
-describe('#363 — the shipped-demo gate', () => {
+describe('#363 — the gate that decides whether the labels may be replaced', () => {
   it('recognises the untouched default job', () => {
     expect(isShippedDemoLabelSet(defaultEngraveJob())).toBe(true);
+    expect(mayRelayoutLabels(defaultEngraveJob())).toBe(true);
+  });
+
+  it('opens for a job the OLD badge route had already re-depth-ed (review)', () => {
+    // Exactly what a pre-#363 badge hand-off left behind: the three demo lines, still where the
+    // plank put them, re-depth-ed to the badge's 0.51 mm and stamped `computed` by the walk. That
+    // stamp is the app's own past answer — not a person's — so treating it as a claim, or comparing
+    // the depth, left these jobs unseeded for good and a second take never re-laid them.
+    const old = defaultEngraveJob();
+    old.labels = old.labels.map((l) => ({ ...l, depth: 0.51 }));
+    old.sources = {
+      labels: Object.fromEntries(old.labels.map((l) => [l.id, { depth: 'computed' as const }])),
+    };
+    expect(isShippedDemoLabelSet(old)).toBe(true);
+    expect(mayRelayoutLabels(old)).toBe(true);
+
+    // The same job with a depth the person stated is theirs, and is left alone.
+    old.sources = {
+      labels: Object.fromEntries(old.labels.map((l) => [l.id, { depth: 'user' as const }])),
+    };
+    expect(mayRelayoutLabels(old)).toBe(false);
   });
 
   it('stands aside the moment a label says something the shipped set does not', () => {
     const touched = (mutate: (job: EngraveJob) => void): boolean => {
       const job = defaultEngraveJob();
       mutate(job);
-      return isShippedDemoLabelSet(job);
+      return mayRelayoutLabels(job);
     };
 
     expect(touched((j) => (j.labels[0]!.text = 'DAVE'))).toBe(false);
     expect(touched((j) => (j.labels[0]!.position.y = 20))).toBe(false);
-    expect(touched((j) => (j.labels[0]!.depth = 1.1))).toBe(false);
     expect(touched((j) => (j.labels[0]!.depthIntent = 'surface'))).toBe(false);
+    expect(touched((j) => j.labels.pop())).toBe(false);
+    expect(touched((j) => j.labels.reverse())).toBe(false);
+    expect(touched((j) => (j.labels = []))).toBe(false);
+    // The DEPTH alone no longer decides anything (#363 review): a typed depth is stamped `user` by
+    // `updateLabel` (asserted on the store hand-off below), so an unstamped one is the app's own —
+    // or one typed before #362, which the re-depth walk already documents as indistinguishable.
+    expect(touched((j) => (j.labels[0]!.depth = 1.1))).toBe(true);
     // An explicit `construction: false` is NOT a change: the label cuts either way, and the gate
     // compares what a label means, not which keys happen to be present.
     expect(touched((j) => (j.labels[0]!.construction = false))).toBe(true);
     expect(touched((j) => (j.labels[0]!.construction = true))).toBe(false);
-    expect(touched((j) => j.labels.pop())).toBe(false);
-    expect(touched((j) => j.labels.reverse())).toBe(false);
+    // A claim someone STATED is a person's, whatever the values say…
     expect(touched((j) => (j.sources = { labels: { l: { depth: 'user' } } }))).toBe(false);
+    expect(touched((j) => (j.sources = { labels: { l: { layout: 'user' } } }))).toBe(false);
+    // …and a `computed` one is not: it is a past answer of the app's own, not a decision.
+    expect(touched((j) => (j.sources = { labels: { l: { layout: 'computed' } } }))).toBe(true);
   });
 });
 
@@ -256,7 +292,63 @@ describe('#363 — the store hand-off', () => {
     // than the jaws' own 1.905 − 1 = 0.905 — so 0.51 is the answer #362's walk writes, and the
     // STARTING_DEPTH placeholder is gone.
     expect(line.depth).toBe(0.51);
-    expect(job.sources?.labels).toEqual({ [line.id]: { depth: 'computed' } });
+    // Both claims on the one line: `layout` says the ROUTE laid it out (which is what lets a later
+    // take replace it), `depth` says the walk worked the number out (#363 review).
+    expect(job.sources?.labels).toEqual({ [line.id]: { layout: 'computed', depth: 'computed' } });
+  });
+
+  it('re-lays the line when a SECOND badge blank is taken (#363 review)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    const first = s().job.labels[0]!;
+    expect(first.position.x).toBeCloseTo(38.1, 6);
+
+    // A larger badge. The line the first take seeded was laid out for the FIRST blank's size and
+    // centre, and nobody has touched it since — so it is still a route's, and gets re-laid. Before
+    // the review it could not be: its values no longer matched the demo set, so the gate closed for
+    // good and the 38.1 mm badge's line stayed on the 100 mm blank.
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ width: 100, height: 50, thickness: 6 })));
+    const job = s().job;
+    expect(job.labels).toHaveLength(1);
+    const second = job.labels[0]!;
+    expect(second.id).not.toBe(first.id);
+    expect(second.position.x).toBeCloseTo(50, 6); // the new blank's own centre
+    // The claims are the NEW line's alone: the dropped line's stamps went with it, not orphaned.
+    expect(job.sources?.labels).toEqual({ [second.id]: { layout: 'computed', depth: 'computed' } });
+  });
+
+  it('leaves a line the person moved alone, even on a second take (#363 review)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    const id = s().job.labels[0]!.id;
+    const x = s().job.labels[0]!.position.x;
+    s().updateLabel(id, { position: { x, y: 12 } });
+
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ width: 100, height: 50, thickness: 6 })));
+    const job = s().job;
+    expect(job.labels).toHaveLength(1);
+    expect(job.labels[0]!.id).toBe(id); // the seed was not run again
+    expect(job.labels[0]!.position.y).toBe(12); // …and the line is still where they put it
+  });
+
+  it('stamps an edit as the person’s, and only for the fields the claim covers (#363 review)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    const id = s().job.labels[0]!.id;
+
+    // A depth is its own claim: it says nothing about where the line is or what it says.
+    s().updateLabel(id, { depth: 1.2 });
+    expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'user' });
+    // A field the route lays out is the person's the moment they touch it.
+    s().updateLabel(id, { text: 'DAVE' });
+    expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'user', layout: 'user' });
   });
 
   it('leaves a label set the person has touched exactly where it is', async () => {

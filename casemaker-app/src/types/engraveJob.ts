@@ -65,16 +65,29 @@ export interface EngraveJobSources {
   /** Per-field provenance for `cutOverride` (#246). Absent = computed from the feeds table. */
   cut?: Partial<Record<keyof CutParams, FieldSource>>;
   /**
-   * Per-label provenance, keyed by label id (#362). Absent = the label's own fields are the ones
-   * it shipped with, or the ones the recommendation wrote.
+   * Per-label provenance, keyed by label id (#362, #363). Absent = the label's own fields are the
+   * ones it shipped with, or the ones the recommendation wrote.
    *
-   * It exists for ONE decision: `takeBadgeBlank` re-depths every label to the blank it is about to
-   * cut, and it must NOT overwrite a number the user typed (`'user'`) or one taken at the bench
-   * (`'measured'`) — the recommendation is a starting point, not an authority over a stated
-   * depth. A key absent WITHIN the map is a label nobody has claimed, which is exactly what the
-   * re-depth is allowed to move.
+   * It exists for TWO decisions, and a label answers them separately:
+   *
+   *   - `depth` / `depthIntent` — who decided the number, and the colour its floor means.
+   *     `takeBadgeBlank` re-depths every label to the blank it is about to cut, and it must NOT
+   *     overwrite a number the user typed (`'user'`) or one taken at the bench (`'measured'`) — the
+   *     recommendation is a starting point, not an authority over a stated depth.
+   *   - `layout` — who decided everything else about the label: its text, face, size, position,
+   *     rotation, whether it is enabled and whether it is a construction. Those are the fields a
+   *     route lays out in ONE go and only a person otherwise decides, so one stamp covers them; a
+   *     route writes `computed` and an edit writes `user`. The badge route replaces the labels when
+   *     this stamp says they are still a route's, so it will not re-lay a line someone has moved or
+   *     retyped (#363 review).
+   *
+   * A key absent WITHIN the map is a label nobody has claimed, which is exactly what the re-depth —
+   * and the badge route's replacement — is allowed to move.
    */
-  labels?: Record<string, { depth?: FieldSource; depthIntent?: FieldSource }>;
+  labels?: Record<
+    string,
+    { layout?: FieldSource; depth?: FieldSource; depthIntent?: FieldSource }
+  >;
 }
 
 export interface EngraveLabel {

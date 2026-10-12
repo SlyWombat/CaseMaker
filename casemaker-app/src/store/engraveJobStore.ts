@@ -18,7 +18,7 @@ import { labelProfile, shallowestVoidLimit } from '@/engine/cnc/engrave/partPlan
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import {
   badgeLabelSeed,
-  isShippedDemoLabelSet,
+  mayRelayoutLabels,
   type SeedMeasure,
 } from '@/engine/cnc/engrave/badgeLabelSeed';
 import { BADGE_POCKET_KEEP_OUT_ID, type BadgeBlank } from '@/engine/cnc/engrave/fromBadge';
@@ -196,6 +196,25 @@ function newLabel(job: EngraveJob): EngraveLabel {
     enabled: true,
   };
 }
+
+/**
+ * The fields a label's `layout` claim covers (#363 review): everything about the line EXCEPT how
+ * deep it cuts. A patch that touches any of them is a person deciding what the label is or where it
+ * goes, and the badge route may not lay it out again.
+ *
+ * `construction` is in the list because it is one of the fields the person can set that the route's
+ * own seed never writes — losing it to a re-lay would be silent.
+ */
+const LAYOUT_FIELDS = [
+  'text',
+  'font',
+  'weight',
+  'size',
+  'position',
+  'rotation',
+  'enabled',
+  'construction',
+] as const;
 
 /**
  * The badge seed's measurement (#363): the app's own typesetter, or `null` when the bundled face
@@ -582,8 +601,16 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // any item that states an intent. Without a source on the USER's intent, a person's reveal
         // and a previous call's would be indistinguishable — so either the person's statement would
         // be silently revised, or the app's own would be frozen in place forever.
+        //
+        // The label's own fields — what it says, its face, and where and how big it sits — are ONE
+        // claim, stamped the same way and for the same reason (#363 review). They are the fields a
+        // route lays out in a single pass (`badgeLabelSeed`) and only a person otherwise decides, so
+        // a single `layout` stamp is what tells the route "this line is not yours to re-lay" — a
+        // stamp per field would only record the same decision four times. `depth` keeps its own slot
+        // above, because the re-depth and the replacement are different decisions.
         const claim = { ...(job.sources?.labels?.[id] ?? {}) };
         if (patch.depth !== undefined) claim.depth = 'user';
+        if (LAYOUT_FIELDS.some((key) => key in patch)) claim.layout = 'user';
         if ('depthIntent' in patch) {
           if (patch.depthIntent === undefined) delete claim.depthIntent;
           else claim.depthIntent = 'user';
@@ -617,10 +644,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       apply((job) => {
         // #363 (review nit) — a removed label must not leave its claim behind. `sources.labels` is
         // keyed by label id, so the entry survives the label and is then an orphan: nothing reads
-        // it (every lookup is by a live label's id), but it is carried by the document, counted by
-        // nothing, and — worst — makes `isShippedDemoLabelSet` answer false for a job whose labels
-        // are otherwise untouched. Deleted the same way `updateLabel` drops a claim that has gone
-        // empty, map and all, so the field never holds an empty object.
+        // it (every lookup is by a live label's id), but it is carried by the document and counted
+        // by nothing. Deleted the same way `updateLabel` drops a claim that has gone empty, map and
+        // all, so the field never holds an empty object.
         const sources: EngraveJobSources = { ...(job.sources ?? {}) };
         if (sources.labels) {
           const labels = { ...sources.labels };
@@ -785,15 +811,24 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       else if ((get().job.keepOuts ?? []).some((k) => k.id === BADGE_POCKET_KEEP_OUT_ID)) {
         get().removeKeepOut(BADGE_POCKET_KEEP_OUT_ID);
       }
-      // #363 — and the LINES, where the job is still carrying the shipped demo ones. Those three
-      // were laid out for the 100 × 60 mm default plank and nothing had ever moved them, so a
+      // #363 — and the LINES, where the job's set is still one a ROUTE laid out. Those three demo
+      // lines were laid out for the 100 × 60 mm default plank and nothing had ever moved them, so a
       // 76.2 mm badge got a `CASE` running 12 mm off its back edge and three `item-outside-stock`
       // errors on the job the wizard had just built. A badge is a name badge, so this route seeds
       // ONE line, laid out from the blank as it now stands — the document's own stock and pocket,
-      // not the patch that was just applied to it. A label set the person has made is left alone
-      // (`isShippedDemoLabelSet`), and either way every label gets its depth from the walk below.
+      // not the patch that was just applied to it.
+      //
+      // `mayRelayoutLabels` is the gate, and it asks about provenance as well as values (#363
+      // review): the shipped demo set, or the line an earlier take seeded — so taking a second,
+      // different badge blank re-lays the line rather than leaving the first badge's size and
+      // position standing on a blank they were not measured for. A set the person has touched in
+      // any way is left alone, and either way every label gets its depth from the walk below.
       const job = get().job;
-      if (isShippedDemoLabelSet(job)) {
+      // Every branch of the gate requires at least one label, so whenever it passes there is a face
+      // to borrow — which is the point: the seeded line is set in the face the person is already
+      // looking at, rather than in a second default that would disagree with the job's own labels.
+      const face = job.labels[0];
+      if (face && mayRelayoutLabels(job)) {
         const pocket = (job.keepOuts ?? []).find((k) => k.id === BADGE_POCKET_KEEP_OUT_ID);
         const seed = badgeLabelSeed({
           blank: {
@@ -805,13 +840,26 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             pocket: pocket?.kind === 'rect' ? pocket : null,
           },
           edgeMargin: job.edgeMargin,
-          font: job.labels[0]?.font ?? DEFAULT_FONT_ID,
-          weight: job.labels[0]?.weight ?? 'bold',
+          font: face.font,
+          weight: face.weight,
           measure: measureSeedGlyphs(job.customFonts ?? []),
         });
         // Nothing at all on a blank too small for one line at 1 mm: the seed declines and the demo
         // labels' own findings stand, which is the honest report for a blank nothing fits on.
-        if (seed) apply((current) => ({ ...current, labels: [seed] }));
+        if (seed) {
+          apply((current) => ({
+            ...current,
+            labels: [seed],
+            // The line and its provenance go in TOGETHER, and the claim map is replaced rather than
+            // merged: the stamps on the labels this call just dropped are about labels that are
+            // gone, and `layout: 'computed'` is what tells a later take that this new line is still
+            // a route's to re-lay (#363 review). The walk below adds the depth to this same entry.
+            sources: {
+              ...(current.sources ?? {}),
+              labels: { [seed.id]: { layout: 'computed' } },
+            },
+          }));
+        }
       }
       // #362 — and a DEPTH for each label the blank has not been told about. Before this, taking a
       // 3.81 mm badge blank left the 12 mm softwood job's 2.0/1.0/0.5 mm depths on it, and the
@@ -873,7 +921,20 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // Nothing was written, so nothing is claimed: `apply` still persists, but a job that came
         // through untouched keeps the byte-identical document it had.
         if (!changed) return job;
-        return { ...job, labels, sources: { ...(job.sources ?? {}), labels: { ...stated, ...stamps } } };
+        // The walk writes its own entry WHOLE. `depth` and the intent are the fields it decides, and
+        // a stamp that no longer states an intent has to take the stale one with it (#362 review) —
+        // a claim about a value that is gone is a lie.
+        //
+        // But the same entry may also carry the label's `layout` claim, which is about where the line
+        // is and what it says, not how deep it cuts (#363 review). That one is carried ACROSS the
+        // write: replacing the whole entry would drop it, and a line the badge route had laid out
+        // would come out of the walk looking as if nobody had ever placed it.
+        const merged: NonNullable<EngraveJobSources['labels']> = { ...stated };
+        for (const [id, stamp] of Object.entries(stamps)) {
+          const { layout } = stated[id] ?? {};
+          merged[id] = { ...(layout === undefined ? {} : { layout }), ...stamp };
+        }
+        return { ...job, labels, sources: { ...(job.sources ?? {}), labels: merged } };
       }),
 
     addVector: (shape) => {

@@ -451,10 +451,18 @@ const jobSourcesSchema = z.object({
   // #362 — per-label provenance, keyed by label id. Named explicitly for the same reason
   // `flatness` above is: zod strips what an object does not name, and a user's typed depth coming
   // back as an unclaimed one would let the next `takeBadgeBlank` overwrite it.
+  //
+  // `layout` is the same trap in the other direction (#363 review): it is what tells the badge
+  // route whether a line is still one a route laid out, so a stamp lost on load would have the
+  // route re-lay a line the person had moved or retyped.
   labels: z
     .record(
       z.string(),
-      z.object({ depth: fieldSourceSchema.optional(), depthIntent: fieldSourceSchema.optional() }),
+      z.object({
+        layout: fieldSourceSchema.optional(),
+        depth: fieldSourceSchema.optional(),
+        depthIntent: fieldSourceSchema.optional(),
+      }),
     )
     .optional(),
 });

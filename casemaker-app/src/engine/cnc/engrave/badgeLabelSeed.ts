@@ -11,19 +11,24 @@
  * were demo text for a plank, not badge text. A badge is a name badge, so the badge route seeds
  * one line of it, laid out FROM the blank — and `takeBadgeBlank` runs the same
  * `redepthLabelsForBlank` walk over it that #362 added, so the depth is the one #362 already
- * recommends for the new blank: on the default badge the magnet pocket's ceiling binds, and the
- * line comes out at 0.51 mm wherever in the band it sits (the void limit is a property of the
- * blank, not of what happens to be over it).
+ * recommends for the new blank: on the default badge the walk writes 0.51 mm.
+ *
+ * That 0.51 is the magnet pocket's ceiling, and the seeded line sits in the free band BESIDE the
+ * pocket. The walk's void bound is **blank-wide for now** — `shallowestVoidLimit` answers for the
+ * whole blank because the store has no plan in hand, which is the conservative way to be wrong, not
+ * a statement about the line — so a void the line is clear of still sets its depth. Measured: the
+ * line at (38.1, 6.775) has no void under it at all, and the jaws would allow 0.905 mm there.
+ * Making the bound per item is #365.
  *
  * This module is PURE and returns plain data: no store, no font registry, no wasm. The store
- * decides WHEN to seed (only a job still carrying the shipped demo labels, untouched) and writes
- * the result; the measurement is injected, because a bundled face that has not been parsed yet
- * throws rather than answering (#180) and the wizard's hand-off must not depend on the fonts
- * being up.
+ * decides WHEN to seed (only a job still carrying the shipped demo labels, or one an earlier take
+ * seeded — see `mayRelayoutLabels`) and writes the result; the measurement is injected, because a
+ * bundled face that has not been parsed yet throws rather than answering (#180) and the wizard's
+ * hand-off must not depend on the fonts being up.
  */
 
 import type { TextWeight } from '@/types/textLabel';
-import type { EngraveJob, EngraveLabel, EngraveKeepOutRect } from '@/types/engraveJob';
+import type { EngraveJob, EngraveLabel, EngraveKeepOutRect, FieldSource } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 import { defaultEngraveJob, newEngraveLabelId } from './defaults';
 
@@ -55,10 +60,16 @@ const BAND_FILL = 0.7;
 const STARTING_DEPTH = 0.5;
 
 /**
- * Average glyph advance, in em, for the FALLBACK ink box: the same ≈0.6 em/char estimate the
- * board preview's silkscreen label uses. It is only ever read when the real face is not parsed —
- * a wide line is then a shade likelier to be measured down a millimetre further, which is the
- * harmless direction to be wrong in.
+ * Average glyph advance, in em, for the FALLBACK ink box: the same ≈0.6 em/char rule of thumb the
+ * board preview's silkscreen legend uses (`BoardPreviewSvg`'s `size.x * 1.6 / text.length`, which is
+ * 1/1.6 em per character).
+ *
+ * A rule of thumb, NOT an upper bound, and it errs SMALL — measured, the bundled default face sets
+ * 'Name' bold at 3.54 mm of ink per millimetre of cap height, 0.88 em/char, a third more than this.
+ * So a line it says fits can still overrun the blank; the outcome is the `item-outside-stock`
+ * finding, on a line the person can retype or shrink, rather than a silent one. It is only ever
+ * read when the real face is not parsed (#180) — the wizard's hand-off, which happens before any
+ * panel or worker has loaded the fonts — and a measured face never reaches it.
  */
 const ESTIMATED_ADVANCE_EM = 0.6;
 
@@ -107,11 +118,18 @@ export interface BadgeLabelSeedInputs {
 }
 
 /**
- * The fields a demo label is compared on — everything that decides what it CUTS, plus the intent
- * that decides which colour its floor means, and nothing else.
+ * The fields a demo label is compared on — everything that decides what it CUTS **except the
+ * depth**, plus the intent that decides which colour its floor means, and nothing else.
  *
  * Deliberately by VALUE and not by id (`defaultEngraveJob` mints a fresh id every call, so the
  * shipped labels have no stable identity to check against).
+ *
+ * `depth` is NOT one of them (#363 review): since #362 a depth a person typed carries
+ * `depth: 'user'` in `sources`, so a depth that differs WITHOUT a stated claim is one the app wrote
+ * — or one typed before #362, which `redepthLabelsForBlank` already documents as indistinguishable
+ * from an app-written one, and re-depths. Comparing the number here is what made a job the OLD
+ * badge route had already re-depth-ed to 0.51 look like a job somebody had touched, so it was never
+ * re-seeded.
  *
  * The two optionals are compared by what they MEAN rather than by presence: `construction ?? false`
  * (a label with no flag and one flagged `false` both cut, so they are the same label), and
@@ -127,31 +145,71 @@ function demoShape(l: EngraveLabel): string {
     l.position.x,
     l.position.y,
     l.rotation,
-    l.depth,
     l.enabled,
     l.construction ?? false,
     l.depthIntent ?? null,
   ]);
 }
 
+/** The two `FieldSource`s that say a PERSON stated the value — the ones that make a label theirs. */
+const STATED_SOURCES: readonly FieldSource[] = ['user', 'measured'];
+
+function isStated(source: FieldSource | undefined): boolean {
+  return source !== undefined && STATED_SOURCES.includes(source);
+}
+
 /**
- * Is this job still carrying the shipped demo labels, untouched?
+ * Has anyone stated anything about these labels that the app did not work out? (#363 review)
  *
- * The gate on the whole seed (#363): a label set the person has made is theirs, so the badge route
- * replaces ONLY the three lines it shipped with — one typed character, a moved line, a stated
- * intent or a claimed depth takes the job out of this function's answer, and then the labels are
- * left exactly where they are (and, as #362 already does, only the unclaimed ones are re-depth-ed).
- *
- * The claim check is belt-and-braces beside the values: `sources.labels` is how a number says who
- * decided it (#362), and a claim on ANY label means this job has been touched by someone who
- * stated something. It also keeps the replacement from leaving an orphan claim behind for an id it
- * is about to drop.
+ * Only `user` and `measured` count. `computed` is the app's own past answer — the walk in
+ * `redepthLabelsForBlank` writes one and the seed below stamps one — so it says nothing about
+ * whether the person wants the line where it is. Reading every claim as a touch is what kept a
+ * pre-#363 job, whose three lines the old badge route had re-depth-ed and stamped `computed`, out
+ * of the seed for good.
  */
-export function isShippedDemoLabelSet(job: Pick<EngraveJob, 'labels' | 'sources'>): boolean {
-  if (Object.keys(job.sources?.labels ?? {}).length > 0) return false;
+function hasStatedClaim(job: Pick<EngraveJob, 'sources'>): boolean {
+  return Object.values(job.sources?.labels ?? {}).some(
+    (claim) => isStated(claim.depth) || isStated(claim.depthIntent) || isStated(claim.layout),
+  );
+}
+
+/** Are these still the shipped demo labels, by value? (`demoShape` says what is compared.) */
+export function isShippedDemoLabelSet(job: Pick<EngraveJob, 'labels'>): boolean {
   const demo = defaultEngraveJob().labels;
   if (job.labels.length !== demo.length) return false;
   return job.labels.every((l, i) => demoShape(l) === demoShape(demo[i]!));
+}
+
+/**
+ * Did a ROUTE lay every one of these labels out? (#363 review)
+ *
+ * The badge route can run more than once — take one badge blank, then a different one — and the
+ * second take has to re-lay the line the first one seeded, which is neither the demo set nor
+ * anything a person has touched. What identifies it is provenance and not values: the seed stamps
+ * `layout: 'computed'` on the line it writes, and a person's own edit stamps `layout: 'user'`
+ * (which `hasStatedClaim` has already caught by the time this is asked).
+ *
+ * EVERY label has to carry the stamp, so one line the person added — which has no claim at all —
+ * takes the whole set out of consideration.
+ */
+function isRouteLaidOut(job: Pick<EngraveJob, 'labels' | 'sources'>): boolean {
+  return (
+    job.labels.length > 0 &&
+    job.labels.every((l) => job.sources?.labels?.[l.id]?.layout === 'computed')
+  );
+}
+
+/**
+ * May the badge route replace this job's labels? The ONE gate `takeBadgeBlank` asks (#363).
+ *
+ * True for the shipped demo set, and for a set this same route seeded on an earlier take. False the
+ * moment a person has stated anything about any line, and false for a job left with no lines — a
+ * set someone emptied is a decision, and re-seeding it would hand back a line they deleted.
+ */
+export function mayRelayoutLabels(job: Pick<EngraveJob, 'labels' | 'sources'>): boolean {
+  if (job.labels.length === 0) return false;
+  if (hasStatedClaim(job)) return false;
+  return isShippedDemoLabelSet(job) || isRouteLaidOut(job);
 }
 
 /**
@@ -162,13 +220,19 @@ export function isShippedDemoLabelSet(job: Pick<EngraveJob, 'labels' | 'sources'
  * strip tall enough to be worth naming — a blank whose pocket spans the usable height — which the
  * caller reads as "no free band": the seed then centres the line on the blank and accepts the
  * `item-over-void` warning, which is the honest thing for a badge whose pocket is its whole face.
+ *
+ * Two voids are not bands at all, and both fall back to the whole usable area (the same reading as
+ * "no pocket", so the line still goes on the blank): one that is **disabled** — it does not cut, and
+ * the recommendation ignores it too — and one **rotated** off the axes, whose y-extent is not a
+ * height a horizontal band can be cut out of. A rect at 0° or 180° has the same footprint either
+ * way and is answered normally.
  */
 function freeBands(blank: BadgeSeedBlank, edgeMargin: Mm): { y0: Mm; y1: Mm }[] {
   const y0 = edgeMargin;
   const y1 = blank.width - edgeMargin;
   if (y1 <= y0) return [];
   const { pocket } = blank;
-  if (!pocket) return [{ y0, y1 }];
+  if (!pocket || !pocket.enabled || pocket.rotation % 180 !== 0) return [{ y0, y1 }];
   const roof = pocket.position.y - pocket.height / 2;
   const floor = pocket.position.y + pocket.height / 2;
   const bands = [

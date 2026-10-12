@@ -302,8 +302,10 @@ describe('engraveJobStore (#200)', () => {
     // than the jaws' own 1.905 − 1 = 0.905 — so 0.51 is the answer for the seeded line, and it is
     // written as a depth a person can read rather than as the float tail of that subtraction.
     expect(job.labels.map((l) => l.depth)).toEqual([0.51]);
+    // `layout` is the seed's own stamp (#363 review): it is what tells a later take that this line
+    // is still the route's to replace, and `depth` is the walk's answer on top of it.
     expect(job.sources?.labels).toEqual(
-      Object.fromEntries(job.labels.map((l) => [l.id, { depth: 'computed' }])),
+      Object.fromEntries(job.labels.map((l) => [l.id, { layout: 'computed', depth: 'computed' }])),
     );
 
     // The bar the issue set: the wizard does not hand over a job its own findings complain about.
@@ -383,11 +385,17 @@ describe('engraveJobStore (#200)', () => {
     expect(s().job.sources?.labels?.[id]).toBeUndefined();
 
     // Both claims stamp together, and a patch that claims NEITHER leaves them standing: changing
-    // the text is not a statement about the depth or the colour.
+    // the text is not a statement about the depth or the colour — it is a statement about the LINE
+    // itself, which is the `layout` claim, so the two depth claims are untouched by it (#363
+    // review).
     s().updateLabel(id, { depthIntent: 'reveal', depth: 1.4 });
     expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'user', depthIntent: 'user' });
     s().updateLabel(id, { text: 'HELLO' });
-    expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'user', depthIntent: 'user' });
+    expect(s().job.sources?.labels?.[id]).toEqual({
+      layout: 'user',
+      depth: 'user',
+      depthIntent: 'user',
+    });
 
     // And the user's intent survives the blank being applied, the way the user's depth does.
     s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
