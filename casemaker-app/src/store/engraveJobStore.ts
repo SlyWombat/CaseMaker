@@ -14,8 +14,15 @@ import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { effectiveMargins, recommendLabelDepth } from '@/engine/cnc/engrave/depthBounds';
-import { shallowestVoidLimit } from '@/engine/cnc/engrave/partPlan';
+import { labelProfile, shallowestVoidLimit } from '@/engine/cnc/engrave/partPlan';
+import { aabbOfProfile } from '@/engine/compiler/profile';
+import {
+  badgeLabelSeed,
+  isShippedDemoLabelSet,
+  type SeedMeasure,
+} from '@/engine/cnc/engrave/badgeLabelSeed';
 import { BADGE_POCKET_KEEP_OUT_ID, type BadgeBlank } from '@/engine/cnc/engrave/fromBadge';
+import type { CustomFont } from '@/types/textLabel';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type {
   EngraveBorderShape,
@@ -187,6 +194,43 @@ function newLabel(job: EngraveJob): EngraveLabel {
     rotation: 0,
     depth: 0.5,
     enabled: true,
+  };
+}
+
+/**
+ * The badge seed's measurement (#363): the app's own typesetter, or `null` when the bundled face
+ * has not been parsed yet.
+ *
+ * `labelProfile` typesets at the origin, centred on the line's own ink box, so a probe at (0, 0)
+ * hands that box straight back — nothing reads the probe's other fields, they are the label
+ * shape's required filler. The call THROWS on an unparsed face (`resolveFont`, #180), and the
+ * wizard's hand-off happens before any panel or worker has called `ensureFontsLoaded`, so a miss
+ * is expected there: it answers `null`, which is the seed's cue to fall back to its documented
+ * average advance rather than refusing to lay the label out at all.
+ */
+function measureSeedGlyphs(customFonts: readonly CustomFont[]): SeedMeasure {
+  return (text, font, weight, size) => {
+    try {
+      const box = aabbOfProfile(
+        labelProfile(
+          {
+            id: 'seed-probe',
+            text,
+            font,
+            weight,
+            size,
+            position: { x: 0, y: 0 },
+            rotation: 0,
+            depth: 1,
+            enabled: true,
+          },
+          customFonts,
+        ),
+      );
+      return box ? { width: box.max[0] - box.min[0], height: box.max[1] - box.min[1] } : null;
+    } catch {
+      return null;
+    }
   };
 }
 
@@ -436,6 +480,13 @@ export interface EngraveJobState {
    *     the user typed or read at the bench;
    *   - one that states its own `depthIntent` — `recommendLabelDepth` declines those itself, since
    *     an item that has said which colour its floor means is the user's to place.
+   *
+   * The provenance has a floor in time that cannot be seen from here: a depth typed before #362
+   * shipped is indistinguishable from one the app wrote, since the document recorded only the
+   * number. Such a label is treated as unclaimed and re-depth-ed. That is the right way round for a
+   * route whose whole job is to make the blank and the depths agree (a stale pre-#362 depth is
+   * exactly the one that disagrees), and there is nothing left to recover the intent from — but it
+   * does mean "the label editor remembers what I typed" only holds for a depth typed since #362.
    */
   redepthLabelsForBlank: () => void;
   /**
@@ -562,7 +613,23 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         };
       }),
 
-    removeLabel: (id) => apply((job) => ({ ...job, labels: job.labels.filter((l) => l.id !== id) })),
+    removeLabel: (id) =>
+      apply((job) => {
+        // #363 (review nit) — a removed label must not leave its claim behind. `sources.labels` is
+        // keyed by label id, so the entry survives the label and is then an orphan: nothing reads
+        // it (every lookup is by a live label's id), but it is carried by the document, counted by
+        // nothing, and — worst — makes `isShippedDemoLabelSet` answer false for a job whose labels
+        // are otherwise untouched. Deleted the same way `updateLabel` drops a claim that has gone
+        // empty, map and all, so the field never holds an empty object.
+        const sources: EngraveJobSources = { ...(job.sources ?? {}) };
+        if (sources.labels) {
+          const labels = { ...sources.labels };
+          delete labels[id];
+          if (Object.keys(labels).length > 0) sources.labels = labels;
+          else delete sources.labels;
+        }
+        return { ...job, labels: job.labels.filter((l) => l.id !== id), sources };
+      }),
 
     setTool: (key, source = 'user') =>
       apply((job) => ({
@@ -718,11 +785,40 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       else if ((get().job.keepOuts ?? []).some((k) => k.id === BADGE_POCKET_KEEP_OUT_ID)) {
         get().removeKeepOut(BADGE_POCKET_KEEP_OUT_ID);
       }
+      // #363 — and the LINES, where the job is still carrying the shipped demo ones. Those three
+      // were laid out for the 100 × 60 mm default plank and nothing had ever moved them, so a
+      // 76.2 mm badge got a `CASE` running 12 mm off its back edge and three `item-outside-stock`
+      // errors on the job the wizard had just built. A badge is a name badge, so this route seeds
+      // ONE line, laid out from the blank as it now stands — the document's own stock and pocket,
+      // not the patch that was just applied to it. A label set the person has made is left alone
+      // (`isShippedDemoLabelSet`), and either way every label gets its depth from the walk below.
+      const job = get().job;
+      if (isShippedDemoLabelSet(job)) {
+        const pocket = (job.keepOuts ?? []).find((k) => k.id === BADGE_POCKET_KEEP_OUT_ID);
+        const seed = badgeLabelSeed({
+          blank: {
+            length: job.stock.length,
+            width: job.stock.width,
+            // The badge builds its pocket as a rect (`badgeBlankFor`); a void under that id of any
+            // other shape is not one, and a seed laid out as if the void were absent is the honest
+            // reading of a shape this layout has no y-band for.
+            pocket: pocket?.kind === 'rect' ? pocket : null,
+          },
+          edgeMargin: job.edgeMargin,
+          font: job.labels[0]?.font ?? DEFAULT_FONT_ID,
+          weight: job.labels[0]?.weight ?? 'bold',
+          measure: measureSeedGlyphs(job.customFonts ?? []),
+        });
+        // Nothing at all on a blank too small for one line at 1 mm: the seed declines and the demo
+        // labels' own findings stand, which is the honest report for a blank nothing fits on.
+        if (seed) apply((current) => ({ ...current, labels: [seed] }));
+      }
       // #362 — and a DEPTH for each label the blank has not been told about. Before this, taking a
       // 3.81 mm badge blank left the 12 mm softwood job's 2.0/1.0/0.5 mm depths on it, and the
       // wizard immediately complained about a job it had just built. Every clause of "why this is
       // deep" is arithmetic on the blank that was just applied, so it has to run AFTER the stock
-      // and the pocket, on the job as it now stands.
+      // and the pocket, on the job as it now stands — and after the seed, which is a label with a
+      // starting depth and no claim, so this walk is what writes the number it really takes (#363).
       get().redepthLabelsForBlank();
     },
 

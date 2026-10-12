@@ -837,7 +837,11 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
       severity: 'warning',
       code: 'holder-vs-fixture-unproven',
       message: liftedByBand
-        ? `the ${name} is declared ${(-declaredTop).toFixed(3)} mm below the stock top, but the ` +
+        // #363 (review nit) — "below the stock top" is measured FROM that top, `topZ`, not from the
+        // work origin. They coincide today (`stockFromSetup` anchors the part's top face at z = 0),
+        // but the text must state the distance it means rather than inherit it from an invariant
+        // three hundred lines away.
+        ? `the ${name} is declared ${(topZ - declaredTop).toFixed(3)} mm below the stock top, but the ` +
           `unmeasured ${band} mm band around it lifts its top ${rise} mm ABOVE — and the collet ` +
           `nut's size is not known: clearance to it cannot be proven`
         : `the ${name} rises ${rise} mm above the stock top and the collet nut's size is not ` +

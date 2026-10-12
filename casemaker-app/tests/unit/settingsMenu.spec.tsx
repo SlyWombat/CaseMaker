@@ -67,12 +67,17 @@ describe('the house depth margins (#345)', () => {
     expect(useSettingsStore.getState().margins.source).toBe('default');
   });
 
-  it('the other two seeds are the same: edge margin and breakthrough leave the source alone', () => {
+  it('the other three seeds are the same: edge margin, breakthrough and jaw clearance leave the source alone', () => {
     render(<SettingsMenu onClose={() => {}} />);
     commit('settings-margin-edge', '3');
     commit('settings-margin-breakthrough', '0.5');
+    // #362/#363 — the jaw clearance is the case most tempting to get wrong: it is a depth-related
+    // number sitting between the two margins that DO flip the source, but a job copies it as its OWN
+    // `jawClearance` and the check reads that off the document (#362), so it never enters
+    // `effectiveMargins`. Setting it has said nothing about the boundary margin.
+    commit('settings-margin-jaw', '1.5');
     const margins = useSettingsStore.getState().margins;
-    expect(margins).toMatchObject({ edgeMargin: 3, breakthrough: 0.5, source: 'default' });
+    expect(margins).toMatchObject({ edgeMargin: 3, breakthrough: 0.5, jawClearance: 1.5, source: 'default' });
   });
 
   it('a Z tolerance is one of the two copied margins, so it DOES flip the source', () => {

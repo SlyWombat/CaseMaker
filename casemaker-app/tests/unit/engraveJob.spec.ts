@@ -285,7 +285,11 @@ describe('engraveJobStore (#200)', () => {
   // the 12 mm softwood job's 2.0 / 1.0 / 0.5 mm depths on it, and the wizard's own blank step
   // complained about the job it had just built: 1.905 mm proud cannot carry a 2 mm cut with 1 mm
   // of clearance wanted under it.
-  it('re-depths the labels to what the badge blank allows, and opens with no jaw finding', async () => {
+  //
+  // #363 then replaced the LINES too: the three demo labels were laid out for the 100 × 60 mm plank
+  // and ran off the 76.2 mm badge, so the route seeds one `Name` line (see `badgeLabelSeed.spec.ts`
+  // for the layout) and this walk re-depths it.
+  it('re-depths the seeded badge line to what the blank allows, and opens with no jaw finding', async () => {
     backing.clear();
     const { useEngraveJobStore } = await freshStore();
     const s = () => useEngraveJobStore.getState();
@@ -293,10 +297,11 @@ describe('engraveJobStore (#200)', () => {
     s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
     const job = s().job;
     expect(job.stock.thickness).toBe(3.81);
+    expect(job.labels).toHaveLength(1);
     // The magnet pocket leaves 3.81 − 2.3 − 1 = 0.51 mm of material above it, which is shallower
-    // than the jaws' own 1.905 − 1 = 0.905 — so 0.51 is the answer for every label, and it is
+    // than the jaws' own 1.905 − 1 = 0.905 — so 0.51 is the answer for the seeded line, and it is
     // written as a depth a person can read rather than as the float tail of that subtraction.
-    expect(job.labels.map((l) => l.depth)).toEqual([0.51, 0.51, 0.51]);
+    expect(job.labels.map((l) => l.depth)).toEqual([0.51]);
     expect(job.sources?.labels).toEqual(
       Object.fromEntries(job.labels.map((l) => [l.id, { depth: 'computed' }])),
     );

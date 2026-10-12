@@ -950,6 +950,11 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
 
   it('offers no recommendation for a reference-only label, or one that states its own colour intent', () => {
     takeBadgeBlank();
+    // #363 seeds ONE line on a badge, so add a second: this test needs a row that is NEITHER of the
+    // two refusals below, or "every row is null" would pass for the wrong reason.
+    act(() => {
+      useEngraveJobStore.getState().addLabel();
+    });
     render(<EngravePanel />);
     // A construction label cuts nothing, so there is no depth to recommend (#215).
     fireEvent.click(screen.getByTestId('engrave-label-construction-0'));
@@ -961,9 +966,8 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
       useEngraveJobStore.getState().updateLabel(id, { depthIntent: 'surface' });
     });
     expect(recommended(0)).toBeNull();
-    // The other two rows are untouched by either.
+    // The row that is neither is untouched by either.
     expect(recommended(1)).not.toBeNull();
-    expect(recommended(2)).not.toBeNull();
   });
 
   it('demotes on the job’s OWN margin, to a floor the checker can hold (#362 review)', () => {
