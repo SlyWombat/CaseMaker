@@ -1,13 +1,15 @@
 # Run sheet — 165 depth ladder
 
-Generated 2026-10-04 · file `165-depth-ladder.nc` · sha256 `6f782fa0` · estimated cutting time 6 min 22 s (simulated — rapids not included)
+Generated 2026-10-04 · file `165-depth-ladder.nc` · sha256 `6f782fa0` · estimated cutting time 6 min 22 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² — a planning estimate, not a measured cycle time)
+
+> *The 6 min 22 s above is from the 2026-10-04 generation, when the estimate excluded rapids and is therefore **understated**; the regeneration for the chosen cutter recomputes it, and D3 of the bench runbook is how the real figure is measured. (The old "simulated — rapids not included" wording is what made `DISPLAY_RAPID_MM_MIN` look relevant; that constant is gone.)*
 
 ## 1 · What you need
 
 1. The blank. Measure it. If it differs by more than 0.5 mm in any dimension, change the job and regenerate — do not run this file. — **76.2 × 38.1 × 3.81 mm PLA**
 2. The cutter — 1 mm flat end (assumed). — **⌀ 1 mm cutting**
 3. Record the cutter's flute length and its stick-out from the collet. — \_\_\_\_\_\_\_\_  *(flute length (mm) / stick-out (mm))*
-4. The Z1 low-profile vise, and the Makera 3D Probe — the one rated for non-conductive material, NOT the 3D Probe Rod that came in the box.
+4. The Z1 low-profile vise, and the wired probe that ships with the machine — a mechanical touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.
 
 ## 2 · Mount the vise
 
@@ -62,7 +64,7 @@ Generated 2026-10-04 · file `165-depth-ladder.nc` · sha256 `6f782fa0` · estim
 1. **Vise dimensions are unmeasured defaults (#208); collisions cannot be trusted yet.**
 2. Only 0.81 mm of the stock is gripped below the jaw tops; under 3 mm the part can lift (PROVISIONAL threshold, #208).
 3. the deepest cut is 1.600 mm below the stock top and tool "1 mm flat end (assumed)" states no shoulder or flute length: holder clearance cannot be proven
-4. the collet nut's size or the tool's stick-out is not known: clearance to the vise cannot be proven
+4. ~~the collet nut's size or the tool's stick-out is not known: clearance to the vise cannot be proven~~ — **stale, #314:** the collet nut's size and the tool's stick-out are **not** sweep inputs any more. The sweep warns only when a fixture stands *above the stock top* (`holder-vs-fixture-unproven`), and in the vise nothing does — a regeneration drops this line.
 
 ## 9 · Record afterwards
 

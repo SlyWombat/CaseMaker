@@ -6,16 +6,25 @@ Sections A–C move nothing (A–C run with the spindle off and **nothing in the
 air-only; the real cut is E and belongs to #209. Nothing here cuts material except the last,
 optional step.
 
-**Status: partly run — 2026-10-06 and 2026-10-07.** Every **Expected** value below is a *reading*
-of the code or a document — never a measurement of this machine. Every **Recorded** form is
-**blank** until the session fills it in at the machine. When the machine disagrees with a
-document, the machine is right and the document changes.
+**Status: partly run — 2026-10-06, 2026-10-07 and 2026-10-08.** Every **Expected** value below is a
+*reading* of the code or a document — never a measurement of this machine. Every **Recorded** form is
+**blank** until the session fills it in at the machine. When the machine disagrees with a document,
+the machine is right and the document changes.
 
-*What has run so far:* **B0, B2, B4 (partial), B5, B6, B7, B8, B9, C1** on 2026-10-06/07, **A7
-(one cutter)** and **D1 (partial)** on 2026-10-07. Everything else is still blank. B0 was recorded
-before the first session, over the network, with nothing sent but two identify queries and a status
-poll. Two items have been **parked** rather than left looking merely un-run — **C2** (blocked, see
-its own note) and **D1**'s header question — and both say so in place.
+*What has run so far.* **2026-10-06/07:** **B0, B2, B4 (partial), B5, B6, B7, B8, B9, C1**; **A7**
+(one cutter); **D1** (partial — stopped at the wizard's tool prompt); **D0** walked end to end. B0 was
+recorded before the first session, over the network, with nothing sent but two identify queries and a
+status poll. **2026-10-08** (the #293 trip, every line through our own console): **C2** (**X and Y** —
+Z is not run, on purpose), **C4** (the wired probe on the printed blank), **C6**, **C7**; **A1** (the
+set photographed, nothing measured); **A6** (the mount — **frame**, on the left wall); **A7** (its slug
+closed from the library DB, #307); **B4** re-read.
+
+*Superseded rather than run.* **A2** (the collet-nut caliper — #314); **A8** — the wired probe is the
+touch-off probe, not the 3D Probe; **C3** — the mount is known from A6, and camera capture is #286
+(unscheduled); **C4**'s 3D-probe-on-wood row — there is no wood job.
+
+*Deliberately not run, and said so in place:* **C2**'s Z half (the vise is on the bed, so the Z limit
+is its own trip) and **C5** (Studio-only — the wired probe is Z-only).
 
 *Added 2026-10-07 after the fact:* **D0**, which is Studio's Machining Wizard. It was not in this
 runbook when the session started, and it is the reason D1 could not run as written.
@@ -1070,7 +1079,14 @@ shift, or only the spindle within a still image?
 **Expected.** Unknown. Head-mounted moves the whole image; frame-mounted leaves the bed still
 (this is the A6 answer confirmed by behaviour).
 
-**Recorded:** _not yet run — one sentence._
+> **Superseded 2026-10-12 — answered by A6, not by a move.** A6 settled the mount directly on
+> 2026-10-08: the camera is **frame-mounted, on the left wall of the enclosure**, so the head moves
+> through a still image and the bed stays put. This item existed to *infer* the mount from behaviour;
+> with the mount known, the behavioural test has nothing left to decide, and camera capture is
+> **#286**, which is **not scheduled**. (No frame was taken of the move: the module replays its last
+> frame to a new client — see C2.)
+
+**Recorded:** _superseded — the mount is known (A6, frame); see above._
 
 | Field | Value (one sentence) |
 |---|---|
@@ -1078,7 +1094,7 @@ shift, or only the spindle within a still image?
 
 **Goes to:** #189 (`/Fabrication.md` §7.3 / #191 item 5: "run it first and record the answer").
 
-### C4 — Probe repeatability on wood (Z)
+### C4 — Probe repeatability (Z)
 
 **Do.** Fit the **Makera 3D Probe**. Probe the top of a **wood** blank in Z. Repeat five times
 without moving XY.
@@ -1097,14 +1113,16 @@ its repeatability has never been measured (`/Fabrication.md` §1, §7.6).
 > (`docs/bench/img/D1-probe-cycle-mdi-log.png`). That is **one point, twice, on an unidentified
 > surface** — the bed or the vise, not wood, and not five repeats. It is the first probe figure this
 > machine has produced and it is the right order of magnitude for C4 to be worth running properly;
-> it is **not** C4's answer. The five-repeats-on-wood procedure below still stands.
+> it is **not** C4's answer. The five-repeats-on-wood procedure was never run and is **not needed**
+> — see the supersede note above; C4's figure is the wired probe's, on the printed blank, below.
 
 **Recorded 2026-10-08 — on the printed blank, with the WIRED probe (not the 3D Probe, not wood).**
 The wired probe is a mechanical touch tip (it triggers on contact, so PLA is fine). Five fast/slow
 pairs at machine −168.4, −140.0, in the vise (`/Z1-Firmware-Dialect.md` §11.7):
 slow (F100) triggers **−55.708, −55.707, −55.708, −55.708, −55.708** → **spread 0.001 mm**; fast
-(F300) **−55.710 … −55.714**, spread 0.004 mm, reading 2–6 µm deep. The 3D Probe on wood — C4's own
-question — is still open; this is the wired probe's figure on the blank we actually engrave.
+(F300) **−55.710 … −55.714**, spread 0.004 mm, reading 2–6 µm deep. The 3D Probe on wood — C4's
+original question — is **superseded** (no wood part); this wired probe's figure on the blank we
+actually engrave is C4's answer.
 
 **Blank flatness, same sitting (#191 item 10, the vise case).** 3 × 3 grid, an X line and a Y line
 on the blank, and a Y line on the **fixed jaw's top** as the reference (`/Z1-Firmware-Dialect.md`
@@ -1436,16 +1454,23 @@ comes from a rendered map rather than the machine.
 
 **Do.** Run D1 in the air. Time it with a stopwatch.
 
-**Expected.** Compare with the simulation's "simulated time" — this calibrates
-`DISPLAY_RAPID_MM_MIN` (3000 mm/min, `src/workers/sim/session.ts:127`; #197).
+**Expected.** Compare against the sheet's **"simulated time"** (#281). The old flat
+`DISPLAY_RAPID_MM_MIN` assumption (one 3000 mm/min rate for *every* rapid) is **gone** from
+`src/workers/sim/session.ts`: a **feed** is now timed at that move's own `feed` and a **rapid** at
+`rapidRate(…)`, so the two run through **separate models** and only their sum is the single
+"simulated time" figure the sheet prints. **Time the feed and rapid portions separately where you
+can** — a mismatch in one hides in the sum otherwise. The sheet's own note now names the model: a
+rapid at `rapidEstimate.xyMmPerMin` 1200 XY / `zMmPerMin` 600 Z, `accelMmPerS2` 150, `source`
+*"config read 2026-10-07 + stopwatch 2026-10-08 (#281)"* (`machine.ts:476`).
 
-**Run it expecting the estimate to come in LOW (#281).** B9 read the controller's own rates, and the
-3000 assumption does not survive them: `default_seek_rate` is **2000**, `alpha_max_rate` and
+**Run it expecting the estimate to come in LOW (#281).** B9 read the controller's own rates, and no
+single flat rapid rate survives them: `default_seek_rate` is **2000**, `alpha_max_rate` and
 `beta_max_rate` cap X and Y at **1200**, `gamma_max_rate` caps Z at **600**, and `acceleration = 150`
-is not modelled at all. So a rapid is planned at roughly **1200 mm/min on X/Y**, not 3000, and every
-move is timed as if it reached that rate instantly. Both errors point the same way. **A stopwatch
-reading longer than the sheet's estimate is the expected result, not a fault** — record the ratio
-either way, since the whole point is that this is the measurement and the config is only a reading.
+is modelled as a trapezoid but the estimate is only as good as that model. So a rapid is planned at
+roughly **1200 mm/min on X/Y**, and if the trapezoid is optimistic every move is timed a little fast.
+**A stopwatch reading longer than the sheet's estimate is the expected result, not a fault** — record
+the ratio either way, since the whole point is that this is the measurement and the config is only a
+reading.
 
 **Recorded:** _not yet run — wall-clock seconds._
 
@@ -1455,17 +1480,26 @@ either way, since the whole point is that this is the measurement and the config
 | Simulation's "simulated time" (s) | |
 | Ratio / difference | |
 
-**Goes to:** #197; the rapid assumption itself is **#281**.
+**Goes to:** #281 — this timed air run is what closes the rapid model `machine.ts:476` carries as a
+config reading plus one stopwatch sample; the `#197` sim-time calibration rides with it.
 
-### D4 — Air-run the default engrave job
+### D4 — Air-run the regenerated depth ladder
 
-**Do.** If #206 is done: generate the default engrave job, raise work Z by 20 mm, and air-run it
-over a clamped blank. Watch the clearance to the jaws at the lowest point.
+**Do.** Air-run the **regenerated** depth ladder — `docs/bench/165-depth-ladder.nc`, regenerated for
+the chosen cutter with its run sheet (`docs/bench/165-depth-ladder-run-sheet.md`) updated beside it
+(plan desk item 8; the regeneration **waits for the cutter**, so the file on the card today is the
+2026-10-04 one and **must be re-uploaded** once it is rebuilt). Raise work Z by 20 mm and run it over
+the **clamped printed PLA blank** in the vise. Watch the clearance to the jaws at the lowest point.
+**This is the go/no-go for S3**, the first chips.
 
-**Expected.** The default job is 100 × 60 × 12 softwood, three labels — CASE 14 mm / 2.0 deep,
-MAKER 12 / 1.0, "first chips" 8 / 0.5 — with tool `flat-1.0` (1 mm flat) **unless A1 changes it**
-(`engrave/defaults.ts:55-115`). The vise dimensions are still §A3 defaults (`source: 'default'`,
-uncertainty 2 mm), so the app's collision check will warn.
+**Expected.** Two rows of six 5 × 5 mm squares, Row A over the magnet pocket (the
+unsupported-membrane test) and Row B in the clear band — the depths and the tool are in the run
+sheet. There is **no wood job**: the part is the printed PLA badge blank, 100 % infill, and A1's
+cutter supersedes the sheet's assumed 1 mm flat once it is chosen. The vise dimensions are still §A3
+defaults (`source: 'default'`, uncertainty 2 mm), so the app's collision check will warn.
+
+*This replaces the old "air-run the default engrave job" step, which named a 100 × 60 × 12 softwood
+blank — stale, there is no wood in this plan.*
 
 **Recorded:** _not yet run — notes; video if possible._
 
@@ -1476,7 +1510,8 @@ uncertainty 2 mm), so the app's collision check will warn.
 | Notes | |
 | Video (`docs/bench/img/…`) | |
 
-**Goes to:** go / no-go for #209.
+**Goes to:** the S3 go/no-go — the first chips (#165 and #209 are the same cut; the ladder is #209's
+program).
 
 ---
 
@@ -1491,10 +1526,11 @@ uncertainty 2 mm), so the app's collision check will warn.
 
 - **#165's depth ladder** on the printed blank already waiting (CNC-3). Its procedure is in that
   issue; it shares this setup time but **not this fixture** (`/Fabrication.md` §7.3 / #191 item 6).
-  Prepared for the trip: `docs/bench/165-depth-ladder.nc` with its run sheet at
+  The file and its run sheet are `docs/bench/165-depth-ladder.nc` and
   `docs/bench/165-depth-ladder-run-sheet.md` (the job document is beside them as
-  `165-depth-ladder.job.json`). Two rows of six 5 × 5 mm squares, Row A over the pocket and Row B
-  in the clear band; no result is recorded in any of them.
+  `165-depth-ladder.job.json`) — **regenerated for the chosen cutter before the trip** (plan desk
+  item 8; the file on the card today is the 2026-10-04 one). Two rows of six 5 × 5 mm squares, Row A
+  over the pocket and Row B in the clear band; no result is recorded in any of them.
 
   | Field | Value |
   |---|---|
@@ -1585,9 +1621,10 @@ only on a matching digest. Filed as **#291**.
 `/sd/gcodes/165-depth-ladder.nc` is on the card and will stay there. **It is inert**: a file on the
 card does nothing until Studio's Machining Wizard is driven by hand at the machine (D0).
 
-**Still owed from the 2026-10-07 trip, and cheap to get next time:** the five probe repeats on wood
-(C4), what the `Set Stock` step does with `Custom` selected (D0), and whether the assist modes
-survive a power cycle (`/Z1-Firmware-Dialect.md` §11.4).
+**Still owed from the 2026-10-07 trip, and cheap to get next time:** what the `Set Stock` step does
+with `Custom` selected (D0), and whether the assist modes survive a power cycle
+(`/Z1-Firmware-Dialect.md` §11.4). *(The five probe repeats on **wood** — C4 — are superseded: there
+is no wood job, and the wired-probe figure on the printed blank is in C4.)*
 
 **Struck from that list, 2026-10-07:** "the machine screen's `CAM` header readout". **The Z1 has no
 panel of its own** — confirmed at the bench. The expectation came from `Fabrication.md` §2, which
