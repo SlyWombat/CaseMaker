@@ -34,7 +34,7 @@ import {
   type MarginSettings,
 } from '@/engine/cnc/engrave/depthBounds';
 import { buildRunSheet, type RunSheetGenerated } from '@/engine/cnc/engrave/runSheet';
-import { shallowestVoidLimit } from '@/engine/cnc/engrave/partPlan';
+import { labelGlyphMeasure, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { viseForNewJob } from '@/engine/cnc/fixture';
 import { WIRED_PROBE_Z_RESIDUAL_MM } from '@/engine/cnc/probePlan';
@@ -600,18 +600,90 @@ describe('the label depth a blank allows (#362)', () => {
     expect(rec.basis[1]).toContain('not binding');
   });
 
-  it('takes the shallowest void on the blank, and names it', () => {
-    // The shipped badge's magnet pocket: 3.81 − 2.3 = 1.51 mm of membrane, and with no print there
-    // is no layer grid, so the ceiling keeps the 1 mm structural floor → 0.51 mm of cut — written
-    // as 0.51 and not as the `0.5100000000000002` the arithmetic actually lands on.
+  it('binds a line to the voids ITS OWN extent reaches, and names the one that binds (#365)', () => {
+    // The pocket's own arithmetic is what it always was: 3.81 − 2.3 = 1.51 mm of membrane, less the
+    // 1 mm structural floor a blank with no stated print keeps over it → 0.51. What #365 changed is
+    // WHO is charged for it: a line is bound by the voids its own ink box reaches, and by nothing
+    // else on the blank.
     const job = badgeJob();
-    expect(shallowestVoidLimit(job)).toEqual({ name: 'Magnet pocket', limit: 0.5100000000000002 });
-    const rec = recommendLabelDepth(job, label(), { voidLimit: shallowestVoidLimit(job), boundaryMargin: 0.2 })!;
+    const measure = labelGlyphMeasure([]);
+    const over = label({ position: { x: 38.1, y: 19.05 } }); // the pocket's own centre
+    const bound = voidLimitForItem(job, over, undefined, measure)!;
+    expect(bound.name).toBe('Magnet pocket');
+    expect(bound.limit).toBe(0.5100000000000002);
+    const rec = recommendLabelDepth(job, over, { voidLimit: bound, boundaryMargin: 0.2 })!;
     expect(rec.depth).toBe(0.51);
     expect(rec.basis[0]).toBe('"Magnet pocket" leaves 0.51 mm of material');
-    // A blank with nothing declared under it has no void floor to keep.
-    expect(shallowestVoidLimit({ ...job, keepOuts: [] })).toBeNull();
-    expect(shallowestVoidLimit({ ...job, keepOuts: job.keepOuts!.map((k) => ({ ...k, enabled: false })) })).toBeNull();
+
+    // The line the badge route seeds: 'Name' at 8 mm on (38.1, 6.775), whose ink box stops short of
+    // the pocket's roof at y = 12.55. It reaches NO void, so the jaws answer — 0.905 rather than the
+    // 0.51 this line was advised while the bound was blank-wide, which is the issue's own case.
+    const beside = label({ text: 'Name', size: 8, position: { x: 38.1, y: 6.775 } });
+    expect(voidLimitForItem(job, beside, undefined, measure)).toBeNull();
+    expect(recommendLabelDepth(job, beside, { voidLimit: null, boundaryMargin: 0.2 })!.depth).toBe(0.905);
+
+    // A blank with nothing declared under it has no void floor to keep, and a void that does not cut
+    // cannot bind anything either.
+    expect(voidLimitForItem({ ...job, keepOuts: [] }, over)).toBeNull();
+    expect(
+      voidLimitForItem({ ...job, keepOuts: job.keepOuts!.map((k) => ({ ...k, enabled: false })) }, over),
+    ).toBeNull();
+  });
+
+  it('measures the line with the face where it can, and says so in the basis where it cannot (#365)', () => {
+    const job = badgeJob();
+    const over = label({ position: { x: 38.1, y: 19.05 } });
+    // No measure injected is the hand-off's own case: `inkBoxOf`'s documented upper-bound estimate,
+    // and the answer carries that fact so the clause does not read as a measurement nobody made.
+    // The estimate is the TIMID box, so a number worked out with it can only move deeper later.
+    const estimated = voidLimitForItem(job, over)!;
+    expect(estimated.estimated).toBe(true);
+    expect(recommendLabelDepth(job, over, { voidLimit: estimated, boundaryMargin: 0.2 })!.basis[0]).toContain(
+      'its face is not parsed yet',
+    );
+
+    // The app's own measure — the one the seed, the walk and the panel all use — answers with the
+    // real glyphs, and the sentence about the estimate is gone.
+    const measured = voidLimitForItem(job, over, undefined, labelGlyphMeasure([]))!;
+    expect(measured.estimated).toBe(false);
+    expect(measured.name).toBe('Magnet pocket');
+    expect(recommendLabelDepth(job, over, { voidLimit: measured, boundaryMargin: 0.2 })!.basis[0]).toBe(
+      '"Magnet pocket" leaves 0.51 mm of material',
+    );
+  });
+
+  it('reads every void kind in the void’s OWN frame, rotation included (#365 decision 1)', () => {
+    const job = badgeJob();
+    const measure = labelGlyphMeasure([]); // the app's own adapter, so the box is the real ink
+    // The seeded 'Name' line at 8 mm, centred on the pocket, widened into a box by that face.
+    const line = label({ text: 'Name', size: 8, position: { x: 38.1, y: 19.05 } });
+    // Four voids, four kinds, each one reaching that line: a rect's face, a circle's disc, a slot
+    // lying ACROSS the line (its rotated frame, not the blank's) and a ring whose bounding box the
+    // line crosses.
+    const reaching: EngraveKeepOut[] = [
+      { id: 'r', name: 'R', kind: 'rect', position: { x: 38.1, y: 19.05 }, rotation: 0, enabled: true, zCeiling: 2.3, width: 20, height: 6, cornerRadius: 0 },
+      { id: 'c', name: 'C', kind: 'circle', position: { x: 38.1, y: 19.05 }, rotation: 0, enabled: true, zCeiling: 2.3, diameter: 6 },
+      { id: 's', name: 'S', kind: 'slot', position: { x: 38.1, y: 19.05 }, rotation: 90, enabled: true, zCeiling: 2.3, length: 12, width: 4 },
+      { id: 'p', name: 'P', kind: 'polygon', position: { x: 38.1, y: 19.05 }, rotation: 30, enabled: true, zCeiling: 2.3, points: [[-6, -2], [6, -2], [6, 2], [-6, 2]] },
+    ];
+    for (const ko of reaching) {
+      expect(voidLimitForItem({ ...job, keepOuts: [ko] }, line, undefined, measure)?.name, ko.kind).toBe(ko.name);
+    }
+    // The same four, moved clear of the line's box: none of them binds it. (Their CENTRES are still
+    // in the line's x range, so a check that reached for the wrong axis would fail here.)
+    for (const ko of reaching) {
+      expect(
+        voidLimitForItem({ ...job, keepOuts: [{ ...ko, position: { x: 10, y: 8 } }] }, line, undefined, measure),
+        ko.kind,
+      ).toBeNull();
+    }
+
+    // Rotation is the LINE's extent turning, read in the void's frame: this line clears the pocket's
+    // band (y 12.55–25.55) upright at (38.1, 30) — its ink half-height is 4.05 — and reaches it
+    // turned 90° about the same centre, where the half-WIDTH faces the pocket instead.
+    const upright = label({ text: 'Name', size: 8, position: { x: 38.1, y: 30 }, rotation: 0 });
+    expect(voidLimitForItem(job, upright, undefined, measure)).toBeNull();
+    expect(voidLimitForItem(job, { ...upright, rotation: 90 }, undefined, measure)?.name).toBe('Magnet pocket');
   });
 
   it('takes the JAWs when they are the tightest floor, and asks for no intent there', () => {
@@ -634,7 +706,9 @@ describe('the label depth a blank allows (#362)', () => {
 
   it('says nothing about an item that has stated its own intent, or cut nothing at all', () => {
     const job = badgeJob();
-    const inputs = { voidLimit: shallowestVoidLimit(job), boundaryMargin: 0.2 };
+    // Since #365 the void bound is the LINE's own, so this one is placed over the pocket for the
+    // limit to be in play at all — the 'CASE' line itself sits at (50, 43), clear of it.
+    const inputs = { voidLimit: voidLimitForItem(job, label({ position: { x: 38.1, y: 19.05 } })), boundaryMargin: 0.2 };
     expect(recommendLabelDepth(job, label({ depthIntent: 'surface' }), inputs)).toBeNull();
     expect(recommendLabelDepth(job, label({ depthIntent: 'custom' }), inputs)).toBeNull();
     expect(recommendLabelDepth(job, label({ construction: true }), inputs)).toBeNull();
@@ -661,7 +735,9 @@ describe('the label depth a blank allows (#362)', () => {
     // which is every document written by hand (#362: an absent key means "still the shipped
     // default", and a default intent is not the app's to overwrite).
     const job = badgeJob();
-    const inputs = { voidLimit: shallowestVoidLimit(job), boundaryMargin: 0.2 };
+    // Since #365 the void bound is the LINE's own, so this one is placed over the pocket for the
+    // limit to be in play at all — the 'CASE' line itself sits at (50, 43), clear of it.
+    const inputs = { voidLimit: voidLimitForItem(job, label({ position: { x: 38.1, y: 19.05 } })), boundaryMargin: 0.2 };
     const stated = label({ depthIntent: 'surface' });
     expect(recommendLabelDepth(job, stated, inputs)).toBeNull();
     expect(recommendLabelDepth(job, stated, { ...inputs, intent: 'computed' })).not.toBeNull();

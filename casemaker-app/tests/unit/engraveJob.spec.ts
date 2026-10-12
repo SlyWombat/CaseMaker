@@ -325,10 +325,12 @@ describe('engraveJobStore (#200)', () => {
     const job = s().job;
     expect(job.stock.thickness).toBe(3.81);
     expect(job.labels).toHaveLength(1);
-    // The magnet pocket leaves 3.81 − 2.3 − 1 = 0.51 mm of material above it, which is shallower
-    // than the jaws' own 1.905 − 1 = 0.905 — so 0.51 is the answer for the seeded line, and it is
-    // written as a depth a person can read rather than as the float tail of that subtraction.
-    expect(job.labels.map((l) => l.depth)).toEqual([0.51]);
+    // The seeded line is the free band beside the magnet pocket, and since #365 the walk's void
+    // bound asks about the voids the LINE reaches: none, so the jaws' own 1.905 − 1 = 0.905 mm is
+    // the answer for the seeded line, and it is written as a depth a person can read rather than as
+    // the float tail of that subtraction. (Before #365 the bound was blank-wide and this line was
+    // handed the pocket's 0.51 — half the depth the blank allows.)
+    expect(job.labels.map((l) => l.depth)).toEqual([0.905]);
     // `layout` is the seed's own stamp (#363 review): it is what tells a later take that this line
     // is still the route's to replace, and `depth` is the walk's answer on top of it.
     expect(job.sources?.labels).toEqual(
@@ -354,7 +356,9 @@ describe('engraveJobStore (#200)', () => {
 
     s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
     const job = s().job;
-    // The user's 1.2 mm survives the blank being applied, and the other two are re-depth-ed.
+    // The user's 1.2 mm survives the blank being applied, and the other two are re-depth-ed — each
+    // against its own line's extent since #365: 'MAKER' at (50, 26) and 'first chips' at (50, 10)
+    // both reach the magnet pocket's band (y 12.55–25.55), so both take its 0.51 mm.
     expect(job.labels[0]!.depth).toBe(1.2);
     expect(job.labels[1]!.depth).toBe(0.51);
     expect(job.labels[2]!.depth).toBe(0.51);
@@ -401,10 +405,11 @@ describe('engraveJobStore (#200)', () => {
     });
 
     // The badge blank states no print, so there is no colour split for any intent to be about: the
-    // label re-depths to the magnet pocket's 0.51 mm and the `surface` claim goes with it. A stale
+    // label re-depths to the jaws' 0.905 mm — the 'CASE' line sits at (50, 43), clear of the magnet
+    // pocket whose band is y 12.55–25.55 (#365) — and the `surface` claim goes with it. A stale
     // `surface` here would be a claim about a blank this job has left.
     s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
-    expect(s().job.labels[0]!.depth).toBe(0.51);
+    expect(s().job.labels[0]!.depth).toBe(0.905);
     expect(s().job.labels[0]!.depthIntent).toBeUndefined();
     // The walk wrote the whole depth entry and carried the `layout` claim across it (#363 review), so
     // the person's own claim — and the line it protects — is still theirs afterwards.

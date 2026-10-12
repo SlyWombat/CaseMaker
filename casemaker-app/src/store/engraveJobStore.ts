@@ -14,19 +14,16 @@ import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { effectiveMargins, recommendLabelDepth } from '@/engine/cnc/engrave/depthBounds';
-import { labelProfile, shallowestVoidLimit } from '@/engine/cnc/engrave/partPlan';
-import { aabbOfProfile } from '@/engine/compiler/profile';
+import { labelGlyphMeasure, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import {
   BLANK_SEED_TEXT,
   blankLabelSeed,
   isShippedDemoLabelSet,
   mayRelayoutLabels,
-  type SeedMeasure,
 } from '@/engine/cnc/engrave/blankLabelSeed';
 import { BADGE_POCKET_KEEP_OUT_ID, type BadgeBlank } from '@/engine/cnc/engrave/fromBadge';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import type { BlankParams } from '@/types/blank';
-import type { CustomFont } from '@/types/textLabel';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type {
   EngraveBorderShape,
@@ -234,43 +231,6 @@ const LAYOUT_FIELDS = [
 function isDemoPlank(stock: Pick<EngraveJob['stock'], 'length' | 'width'>): boolean {
   const demo = defaultEngraveJob().stock;
   return stock.length === demo.length && stock.width === demo.width;
-}
-
-/**
- * The badge seed's measurement (#363): the app's own typesetter, or `null` when the bundled face
- * has not been parsed yet.
- *
- * `labelProfile` typesets at the origin, centred on the line's own ink box, so a probe at (0, 0)
- * hands that box straight back — nothing reads the probe's other fields, they are the label
- * shape's required filler. The call THROWS on an unparsed face (`resolveFont`, #180), and the
- * wizard's hand-off happens before any panel or worker has called `ensureFontsLoaded`, so a miss
- * is expected there: it answers `null`, which is the seed's cue to fall back to its documented
- * average advance rather than refusing to lay the label out at all.
- */
-function measureSeedGlyphs(customFonts: readonly CustomFont[]): SeedMeasure {
-  return (text, font, weight, size) => {
-    try {
-      const box = aabbOfProfile(
-        labelProfile(
-          {
-            id: 'seed-probe',
-            text,
-            font,
-            weight,
-            size,
-            position: { x: 0, y: 0 },
-            rotation: 0,
-            depth: 1,
-            enabled: true,
-          },
-          customFonts,
-        ),
-      );
-      return box ? { width: box.max[0] - box.min[0], height: box.max[1] - box.min[1] } : null;
-    } catch {
-      return null;
-    }
-  };
 }
 
 /** The job with its feeds/speeds override removed entirely (#205), provenance included (#246). */
@@ -888,7 +848,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           edgeMargin: job.edgeMargin,
           font: face.font,
           weight: face.weight,
-          measure: measureSeedGlyphs(job.customFonts ?? []),
+          measure: labelGlyphMeasure(job.customFonts ?? []),
         });
         // Nothing at all on a blank too small for one line at 1 mm: the seed declines and the demo
         // labels' own findings stand, which is the honest report for a blank nothing fits on.
@@ -947,7 +907,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           font: face.font,
           weight: face.weight,
           text: BLANK_SEED_TEXT,
-          measure: measureSeedGlyphs(job.customFonts ?? []),
+          measure: labelGlyphMeasure(job.customFonts ?? []),
         });
         if (seed) {
           apply((current) => ({
@@ -976,7 +936,11 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // the checker must be holding the same margin, or a depth can be recommended and then
         // refused by the bound it was recommended against.
         const boundaryMargin = effectiveMargins(job, useSettingsStore.getState().margins).boundaryMargin;
-        const voidLimit = shallowestVoidLimit(job, boundaryMargin);
+        // The void bound is worked out PER LINE, from the same measurement the seed laid it out with
+        // (#365): a line clear of the pocket is not charged for it. The measure is the one
+        // `labelGlyphMeasure` builds for every reader, so the box this walk tests a void against is
+        // the box the line was placed by.
+        const measure = labelGlyphMeasure(job.customFonts ?? []);
         const stated = job.sources?.labels ?? {};
         const stamps: Record<string, { depth: FieldSource; depthIntent?: FieldSource }> = {};
         let changed = false;
@@ -985,7 +949,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           const claim = stated[label.id];
           if (claim?.depth === 'user' || claim?.depth === 'measured') return label;
           const rec = recommendLabelDepth(job, label, {
-            voidLimit,
+            voidLimit: voidLimitForItem(job, label, boundaryMargin, measure),
             boundaryMargin,
             // Its OWN past intent does not lock the label out (#362 review): `'computed'` says the
             // `'reveal'` on this label is a previous call's, so a thicker badge or a different split

@@ -12,14 +12,13 @@
  * were demo text for a plank, not badge text. A badge is a name badge, so the badge route seeds
  * one line of it, laid out FROM the blank — and `takeBadgeBlank` runs the same
  * `redepthLabelsForBlank` walk over it that #362 added, so the depth is the one #362 already
- * recommends for the new blank: on the default badge the walk writes 0.51 mm.
+ * recommends for the new blank: 0.905 mm on the default badge, the jaws' own floor (see below).
  *
- * That 0.51 is the magnet pocket's ceiling, and the seeded line sits in the free band BESIDE the
- * pocket. The walk's void bound is **blank-wide for now** — `shallowestVoidLimit` answers for the
- * whole blank because the store has no plan in hand, which is the conservative way to be wrong, not
- * a statement about the line — so a void the line is clear of still sets its depth. Measured: the
- * line at (38.1, 6.775) has no void under it at all, and the jaws would allow 0.905 mm there.
- * Making the bound per item is #365.
+ * The seeded line sits in the free band BESIDE the pocket, and since #365 the walk's void bound
+ * knows it: `voidLimitForItem` asks about the voids the LINE's own ink box reaches, so the pocket
+ * a line is clear of no longer sets its depth. Measured: the line at (38.1, 6.775) has no void
+ * under it, and the walk writes the jaws' own 0.905 mm there. Before #365 the bound was blank-wide
+ * (`shallowestVoidLimit`) and this line was advised the pocket's 0.51 mm.
  *
  * The BARE blank (#364) takes the same rule with `BLANK_SEED_TEXT` and no pocket, so `freeBands`
  * answers its whole usable face as one band: a `Text` line sized to the blank, rather than three
@@ -27,7 +26,8 @@
  * blank that keeps the three lines — they are the content that blank shipped with — and the store's
  * footprint test is what tells the two apart.
  *
- * #364 also made the FALLBACK measurement an upper bound (`ESTIMATED_ADVANCE_EM`). The hand-off runs
+ * #364 also made the FALLBACK measurement an upper bound (`inkBox.ts`'s `ESTIMATED_ADVANCE_EM`,
+ * which since #365 is also what the depth bound measures a line with). The hand-off runs
  * before any face is parsed, so the estimate is what sizes the seeded line in the app — and the old
  * rule of thumb erred small, which seeded a line the real face then ran off the blank. That is the
  * same `item-outside-stock` failure this seed exists to remove, produced by the seed itself.
@@ -43,6 +43,7 @@
 import type { TextWeight } from '@/types/textLabel';
 import type { EngraveJob, EngraveLabel, EngraveKeepOutRect, FieldSource } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
+import { inkBoxOf, type InkMeasure } from './inkBox';
 import { defaultEngraveJob, newEngraveLabelId } from './defaults';
 
 /**
@@ -82,44 +83,6 @@ const BAND_FILL = 0.7;
  */
 const STARTING_DEPTH = 0.5;
 
-/**
- * Average glyph advance, in em, for the FALLBACK ink box — an UPPER bound over the bundled face,
- * not a rule of thumb.
- *
- * It has to be an upper bound, and that is a fix rather than a preference (#364). The fallback is
- * the number the WIZARD's hand-off lays a line out with, before any panel or worker has parsed a
- * face (#180), so a fallback that errs small seeds a line the real face then runs off the blank: at
- * the old 0.6, 'Text' on a 60 × 40 blank came out at 24 mm and `generate` refused the job the wizard
- * had just built with `item-outside-stock` — one more version of the very bug this seed exists to
- * fix, this time created by the fix.
- *
- * Measured, em of ink per character of the bundled default face at a 10 mm cap, bold (regular is
- * narrower): `iiiiiiiiii` 0.35, `first chips` 0.58, `Text` 0.67, `Name` 0.88, `MAKER` 0.89,
- * `AAAAAAAAAA` 0.95, `WWWWWWWWWW` **1.25**. A run of the widest capital is the worst the face can
- * do, so a line this size says fits does fit. It costs a smaller placeholder than a real measurement
- * would pick — the honest direction to be wrong in, since the line is a starting point the person
- * types over, and being one size small is not a reason to refuse the job.
- */
-const ESTIMATED_ADVANCE_EM = 1.25;
-
-/** The ink box of `text` at cap height `size`, mm — what the seed lays out and fits. */
-export interface SeedGlyphBox {
-  width: Mm;
-  height: Mm;
-}
-
-/**
- * Measure one candidate line, or answer `null` when the face is not available — in which case the
- * caller falls back to `ESTIMATED_ADVANCE_EM`. Injected so this module stays free of the font
- * registry (and of its throw).
- */
-export type SeedMeasure = (
-  text: string,
-  font: string,
-  weight: TextWeight,
-  size: Mm,
-) => SeedGlyphBox | null;
-
 /** The blank the seed lays a label out on, in the job's frame: front-left corner at the origin. */
 export interface SeedBlank {
   length: Mm;
@@ -146,7 +109,7 @@ export interface LabelSeedInputs {
   weight: TextWeight;
   /** The placeholder: `BADGE_SEED_TEXT` for a badge, `BLANK_SEED_TEXT` for a bare blank. */
   text?: string;
-  measure?: SeedMeasure;
+  measure?: InkMeasure;
 }
 
 /**
@@ -280,13 +243,6 @@ function freeBands(blank: SeedBlank, edgeMargin: Mm): { y0: Mm; y1: Mm }[] {
     { y0: Math.max(y0, floor), y1 },
   ];
   return bands.filter((b) => b.y1 > b.y0);
-}
-
-/** The ink box of one candidate size: the injected measurement, or the documented estimate. */
-function inkBoxOf(text: string, font: string, weight: TextWeight, size: Mm, measure?: SeedMeasure): SeedGlyphBox {
-  const measured = measure?.(text, font, weight, size);
-  if (measured) return measured;
-  return { width: ESTIMATED_ADVANCE_EM * size * text.length, height: size };
 }
 
 /**

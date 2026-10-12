@@ -592,22 +592,28 @@ export function splitDepthOf(job: Pick<EngraveJob, 'stock'>): Mm | null {
 /** What `recommendLabelDepth` needs that the item itself does not hold. */
 export interface LabelDepthInputs {
   /**
-   * The SHALLOWEST void limit anywhere on the blank, mm, with the void it belongs to — or null when
-   * the blank declares no enabled void (`shallowestVoidLimit`, #362).
+   * The shallowest limit among the voids THIS ITEM's own extent reaches, mm, with the void it
+   * belongs to — or null when the item sits clear of every one (`voidLimitForItem`, #365).
    *
-   * The whole blank's answer and not the item's own footprint's, deliberately. Intersecting a
-   * label's glyphs with a void's outline is the geometry worker's (`bindingVoidsByRegion`), and a
-   * caller that has no plan — the store, seeding a badge's blank — must not guess at it. A limit no
-   * deeper than ANY void's is the conservative one: a recommendation that cannot be carried out is
-   * worse than one that is a fraction of a millimetre timid, and the basis names the void so the
-   * user can see which one it was.
+   * Per ITEM, and not one number for the blank. It used to be the blank-wide `shallowestVoidLimit`,
+   * on the reasoning that a caller with no plan in hand must not guess at the glyphs' true extent —
+   * which is still true, and is why the item is reduced to its ink BOX: the verifier is positional,
+   * cutting at the toolpath's own points, and those points lie inside that box, so the box reaches a
+   * superset of the voids the checker can refuse against. The recommendation therefore still never
+   * permits more than the checker allows; it only stops charging a line for a void its own extent
+   * misses, which was half the depth the blank allowed on the badge's own seeded line.
+   *
+   * `estimated` says the box behind this answer was the fallback estimate rather than a measurement
+   * — a face that is not parsed yet (#180). That estimate is an UPPER bound, so such an answer is
+   * the timid one, and the clause built from it says so rather than reading as if the glyphs had
+   * been measured.
    *
    * REQUIRED, `null` included, and not optional-with-a-default: this module cannot compute it (the
    * void's arithmetic lives in `partPlan`, which is built on this one), so the alternative to an
    * argument is silently recommending a depth that cuts straight through a pocket. A caller with
    * voids must say what they leave; a caller with none must say so.
    */
-  voidLimit: { name: string; limit: Mm } | null;
+  voidLimit: { name: string; limit: Mm; estimated?: boolean } | null;
   /**
    * The Z-error margin in force for this job, mm — `effectiveMargins`' `boundaryMargin`, as the
    * checker will resolve it. REQUIRED for the same reason: this module does not read the settings
@@ -700,14 +706,18 @@ export function recommendLabelDepth(
   }
 
   if (inputs.voidLimit) {
-    const { name, limit } = inputs.voidLimit;
+    const { name, limit, estimated } = inputs.voidLimit;
     const depth = shallower(limit);
+    const who =
+      name.length === 0 ? 'the void under this line' : `"${name}"`;
     candidates.push({
       depth,
       clause:
-        name.length === 0
-          ? `the void under the blank leaves ${mm(depth)} mm`
-          : `"${name}" leaves ${mm(depth)} mm of material`,
+        `${who} leaves ${mm(depth)} mm of material` +
+        // #365 — say which box the overlap was measured against. The fallback box is an upper
+        // bound, so an answer that used it is the TIMID one: named, rather than left to read as a
+        // measurement the app did not make.
+        (estimated === true ? ", measured against the line's estimated extent — its face is not parsed yet" : ''),
     });
   }
 

@@ -31,15 +31,13 @@ import {
   mayRelayoutLabels,
   type SeedBlank,
   type LabelSeedInputs,
-  type SeedMeasure,
 } from '@/engine/cnc/engrave/blankLabelSeed';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { defaultBadgeParams } from '@/types/badge';
 import { defaultBlankParams, type BlankParams } from '@/types/blank';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
-import { labelProfile } from '@/engine/cnc/engrave/partPlan';
-import { aabbOfProfile } from '@/engine/compiler/profile';
+import { labelGlyphMeasure } from '@/engine/cnc/engrave/partPlan';
 import type { EngraveJob } from '@/types/engraveJob';
 
 // A minimal in-memory Storage, installed before any store import — the unit suite runs on node,
@@ -73,24 +71,13 @@ const BLANK: SeedBlank = {
 };
 
 /**
- * The face the app measures with, mirrored from the store's adapter (#363): the module takes the
- * measurement injected so it stays free of the font registry, so a spec that wants the numbers the
- * WIZARD gets has to inject the real one. Correct for 'Name' bold in the bundled default face:
- * 3.536 mm of ink per millimetre of cap height, and 1.011 of height.
+ * The face the app measures with — the app's OWN adapter (#363, #365), not a copy of it: the module
+ * takes the measurement injected so it stays free of the font registry, and a spec that wants the
+ * numbers the WIZARD gets should measure with the same function the store does. Correct for 'Name'
+ * bold in the bundled default face: 3.536 mm of ink per millimetre of cap height, and 1.011 of
+ * height.
  */
-const measure: SeedMeasure = (text, font, weight, size) => {
-  try {
-    const box = aabbOfProfile(
-      labelProfile(
-        { id: 'probe', text, font, weight, size, position: { x: 0, y: 0 }, rotation: 0, depth: 1, enabled: true },
-        [],
-      ),
-    );
-    return box ? { width: box.max[0] - box.min[0], height: box.max[1] - box.min[1] } : null;
-  } catch {
-    return null;
-  }
-};
+const measure = labelGlyphMeasure([]);
 
 function seed(over: Partial<LabelSeedInputs> = {}) {
   return blankLabelSeed({
@@ -358,10 +345,12 @@ describe('#363 — the store hand-off', () => {
     expect(line.text).toBe('Name');
     expect(line.position).toMatchObject({ x: 38.1 });
     expect(line.position.y).toBeCloseTo(6.775, 6);
-    // The magnet pocket leaves 3.81 − 2.3 − 1 = 0.51 mm of material above it, which is shallower
-    // than the jaws' own 1.905 − 1 = 0.905 — so 0.51 is the answer #362's walk writes, and the
-    // STARTING_DEPTH placeholder is gone.
-    expect(line.depth).toBe(0.51);
+    // The seeded line sits in the free band BESIDE the magnet pocket, so since #365 the void bound
+    // asks about the voids the LINE reaches and finds none: the jaws' 1.905 − 1 = 0.905 mm is what
+    // the walk writes, and the STARTING_DEPTH placeholder is gone. Before #365 the blank-wide bound
+    // handed this line the pocket's 0.51 mm — half of what the blank allows, on a line the seed had
+    // deliberately placed clear of the pocket.
+    expect(line.depth).toBe(0.905);
     // Both claims on the one line: `layout` says the ROUTE laid it out (which is what lets a later
     // take replace it), `depth` says the walk worked the number out (#363 review).
     expect(job.sources?.labels).toEqual({ [line.id]: { layout: 'computed', depth: 'computed' } });
@@ -434,8 +423,11 @@ describe('#363 — the store hand-off', () => {
     expect(job.labels).toHaveLength(3);
     expect(job.labels.map((l) => l.text)).toEqual(['DAVE', 'MAKER', 'first chips']);
     // Nothing claimed a depth, so #362's walk still re-depths them for the new blank — the person
-    // moved the words, not the numbers.
-    expect(job.labels.map((l) => l.depth)).toEqual([0.51, 0.51, 0.51]);
+    // moved the words, not the numbers. Since #365 that is a PER-LINE answer, and on this badge the
+    // three demo lines are three different constraints: 'DAVE' at (50, 43) sits clear of the magnet
+    // pocket (whose band is y 12.55–25.55) and takes the jaws' 0.905, while 'MAKER' at (50, 26) and
+    // 'first chips' at (50, 10) both reach the pocket's band and take its 0.51.
+    expect(job.labels.map((l) => l.depth)).toEqual([0.905, 0.51, 0.51]);
   });
 
   it('a removed label takes its claim with it (#363 review nit)', async () => {

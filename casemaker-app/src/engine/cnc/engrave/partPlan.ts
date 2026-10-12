@@ -31,6 +31,7 @@ import type { CustomFont } from '@/types/textLabel';
 import type { Mm } from '@/types/units';
 import { supportedFootprint } from '@/engine/cnc/sacrificial';
 import { defaultBoundaryMargin, voidFloor, voidMargin } from '@/engine/cnc/engrave/depthBounds';
+import { inkBoxOf, type InkBox, type InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import { voidCeilingFor } from '@/engine/cnc/layerStack';
 import type { DepthLimit } from '@/engine/cnc/verify';
 import { sacrificialDepthLimit } from '@/engine/cnc/verify';
@@ -120,6 +121,47 @@ export function labelProfile(label: EngraveLabel, customFonts: readonly CustomFo
   const centred = pTranslate([-cx, -cy], glyphs);
   const rotated = pRotate(label.rotation, centred);
   return pTranslate([label.position.x, label.position.y], rotated);
+}
+
+/**
+ * The app's own typesetter as a measuring stick: the ink box of `text` at cap height `size`, or
+ * `null` when that face has not been parsed yet (#180).
+ *
+ * The ONE implementation of `InkMeasure`, and it lives here rather than beside any caller because it
+ * is built out of this module's `labelProfile`: that function typesets at the origin, centred on the
+ * line's own ink box, so a probe at (0, 0) hands the box straight back. Its readers — the seed that
+ * lays a line out (`blankLabelSeed`), the store's re-depth walk and the panel's row — must measure
+ * the same box, or a line can be laid out clear of a void and then advised the void's depth anyway
+ * (#365).
+ *
+ * The call THROWS on an unparsed face (`resolveFont`), and the wizard's hand-off happens before any
+ * panel or worker has called `ensureFontsLoaded`, so a miss is expected there: it answers `null`,
+ * which is the caller's cue to fall back to `inkBoxOf`'s documented upper bound.
+ */
+export function labelGlyphMeasure(customFonts: readonly CustomFont[]): InkMeasure {
+  return (text, font, weight, size) => {
+    try {
+      const box = aabbOfProfile(
+        labelProfile(
+          {
+            id: 'measure-probe',
+            text,
+            font,
+            weight,
+            size,
+            position: { x: 0, y: 0 },
+            rotation: 0,
+            depth: 1,
+            enabled: true,
+          },
+          customFonts,
+        ),
+      );
+      return box ? { width: box.max[0] - box.min[0], height: box.max[1] - box.min[1] } : null;
+    } catch {
+      return null;
+    }
+  };
 }
 
 /** The region item kinds: the simple shapes (#214), the combined kinds (#215) and vectors (#217). */
@@ -992,35 +1034,195 @@ export function keepOutNameAt(job: EngraveJob, x: Mm, y: Mm): string | null {
   return binding === null ? null : (binding.ko.name ?? '');
 }
 
+/** A line's own extent in the stock frame, as a box that CONTAINS the cut (#365). */
+export interface ItemFootprint {
+  /** The box's centre — a label's `position`, which is where `labelProfile` centres the ink on. */
+  x: Mm;
+  y: Mm;
+  halfWidth: Mm;
+  halfHeight: Mm;
+  /** The box's own angle, degrees — a label's `rotation`. */
+  rotation: number;
+}
+
 /**
- * The shallowest limit ANY enabled void on the blank imposes, mm, with the void it belongs to —
- * or null when the blank declares none (#362).
+ * A line's extent as a box: its ink box (`inkBoxOf`, measured where a face is up) centred on
+ * `position` and turned by `rotation` — `labelProfile`'s own three moves, so the box contains every
+ * point of the cut and the void test below is answered about something the job really holds.
  *
- * NOT the same question as `keepOutLimitAt(job, x, y)`, which answers for one point. A label's
- * glyphs have an extent, and whether they actually reach a void is a question about their
- * profiles (`bindingVoidsByRegion`, in the worker that can evaluate them). A caller with no plan
- * in hand — the store, re-depthing a badge blank the moment it is taken — must not guess, and
- * guessing OPTIMISTICALLY is the wrong way to be wrong: a recommendation that turns out not to be
- * cuttable is worse than one that keeps a fraction of a millimetre more than it strictly had to.
- * So this answers for the WHOLE blank, which is a superset of every point's answer, and the name
- * travels with it so the recommendation's basis can say which void it was.
- *
- * Empty when every void is disabled, or there are none: a blank with no void under it is limited
- * by its own floor and the jaws, not by anything here.
- *
- * The blank-wide answer is deliberately conservative for now, and #365 is the issue that would make
- * it per item: a line that sits clear of the pocket is still advised the pocket's ceiling, because
- * this asks about the WHOLE blank rather than what the glyphs actually cover.
+ * Takes the ink box rather than a measure so the caller can say WHICH box it used: the one reader
+ * that needs to (`voidLimitForItem`) asks its measure once and reads the fallback off the same
+ * answer, instead of measuring twice and hoping the two agree.
  */
-export function shallowestVoidLimit(
+export function labelFootprint(label: EngraveLabel, ink: InkBox): ItemFootprint {
+  return {
+    x: label.position.x,
+    y: label.position.y,
+    halfWidth: ink.width / 2,
+    halfHeight: ink.height / 2,
+    rotation: label.rotation,
+  };
+}
+
+/** The vector (x, y) turned by `deg` degrees, in `keepOutLocalPoint`'s handedness. */
+function rotateVec(x: number, y: number, deg: number): [number, number] {
+  const a = (deg * Math.PI) / 180;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return [x * c - y * s, x * s + y * c];
+}
+
+/**
+ * Does the box (centre `cx`/`cy`, half extents, turned by `rot`) reach the axis-aligned rect centred
+ * on the origin? The separating-axis test over the four axes of the two boxes — exact for two
+ * rectangles, however either is turned.
+ */
+function boxReachesRect(
+  cx: number,
+  cy: number,
+  rot: number,
+  hw: number,
+  hh: number,
+  rw: number,
+  rh: number,
+): boolean {
+  const [ux, uy] = rotateVec(1, 0, rot);
+  const [vx, vy] = rotateVec(0, 1, rot);
+  // The rect's own two axes: the box's extent along each is its half extents projected.
+  if (Math.abs(cx) > rw + hw * Math.abs(ux) + hh * Math.abs(vx)) return false;
+  if (Math.abs(cy) > rh + hw * Math.abs(uy) + hh * Math.abs(vy)) return false;
+  // …and the box's two: the rect's extent along each, the same way round.
+  if (Math.abs(cx * ux + cy * uy) > hw + rw * Math.abs(ux) + rh * Math.abs(uy)) return false;
+  if (Math.abs(cx * vx + cy * vy) > hh + rw * Math.abs(vx) + rh * Math.abs(vy)) return false;
+  return true;
+}
+
+/** Does the box reach the circle of radius `r` at `(px, py)`? Exact: the clamped point-to-box distance. */
+function boxReachesCircle(
+  cx: number,
+  cy: number,
+  rot: number,
+  hw: number,
+  hh: number,
+  px: number,
+  py: number,
+  r: number,
+): boolean {
+  // The circle's centre in the box's OWN frame, where the box is axis-aligned again.
+  const [lx, ly] = rotateVec(px - cx, py - cy, -rot);
+  const qx = Math.max(-hw, Math.min(hw, lx));
+  const qy = Math.max(-hh, Math.min(hh, ly));
+  return (lx - qx) ** 2 + (ly - qy) ** 2 <= r * r;
+}
+
+/**
+ * Does the line's box reach this void's footprint at all? (#365)
+ *
+ * Answered in the VOID's own frame — `keepOutLocalPoint`'s transform, the one `pointInKeepOut`
+ * already uses — where the line is a box at its centre turned by `label.rotation − ko.rotation`:
+ *
+ *   - `rect` — the full bounding rect with the corner radius ignored, exactly as `pointInKeepOut`
+ *     reads it, and for the same reason: calling a corner "over the void" can only cost depth.
+ *   - `circle` — the exact point-to-box distance against the radius, so a line beside the disc is
+ *     not charged for it.
+ *   - `slot` — exact, as the rect plus its two end discs; the parts are tested one at a time, so a
+ *     line in a corner the round end does not reach is clear of the void it looks near.
+ *   - `polygon` — the ring's BOUNDING BOX, conservatively. An exact box-vs-ring test is a corner
+ *     and edge-crossing walk this issue does not need: a bounding box can only over-report overlap,
+ *     and over-reporting advises a shallower cut, which is the safe direction. The same reading
+ *     `pointInKeepOut` takes of a rounded corner.
+ */
+function lineReachesKeepOut(box: ItemFootprint, ko: EngraveKeepOut): boolean {
+  const [cx, cy] = keepOutLocalPoint(ko, box.x, box.y);
+  const rot = box.rotation - ko.rotation;
+  const { halfWidth: hw, halfHeight: hh } = box;
+  switch (ko.kind) {
+    case 'rect':
+      return boxReachesRect(cx, cy, rot, hw, hh, ko.width / 2, ko.height / 2);
+    case 'circle':
+      return boxReachesCircle(cx, cy, rot, hw, hh, 0, 0, ko.diameter / 2);
+    case 'slot': {
+      const r = ko.width / 2;
+      const half = Math.max(0, ko.length / 2 - r);
+      return (
+        boxReachesRect(cx, cy, rot, hw, hh, half, r) ||
+        boxReachesCircle(cx, cy, rot, hw, hh, -half, 0, r) ||
+        boxReachesCircle(cx, cy, rot, hw, hh, half, 0, r)
+      );
+    }
+    case 'polygon': {
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const [px, py] of ko.points) {
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
+      }
+      if (minX > maxX) return false; // no ring at all
+      return boxReachesRect(
+        cx - (minX + maxX) / 2,
+        cy - (minY + maxY) / 2,
+        rot,
+        hw,
+        hh,
+        (maxX - minX) / 2,
+        (maxY - minY) / 2,
+      );
+    }
+  }
+}
+
+/**
+ * The shallowest limit among the voids THIS LINE's own extent reaches, and the void it belongs to —
+ * or null when the line reaches none of them (#365).
+ *
+ * The per-item replacement for the blank-wide answer this function used to give. That older reading
+ * collapsed every enabled void on the blank to one number because the store re-depths a blank with
+ * no plan in hand, and it was right about being conservative and wrong about what it was
+ * conservative WITH: a line that sits clear of the pocket was still advised the pocket's ceiling, so
+ * the seeded badge line read 0.51 mm where the jaws allow 0.905 — half the depth the blank permits,
+ * on a line the seed had deliberately placed in the free band BESIDE the pocket.
+ *
+ * The box test is the honest superset, not a shortcut. The verifier's `jobDepthLimit` is positional,
+ * evaluated at the toolpath's own points, and those points lie inside the line's ink box: ink-box
+ * overlap is therefore a superset of everything the checker can refuse, so the recommendation still
+ * never permits a cut the checker would refuse. It only stops charging a line for a void its own
+ * extent misses.
+ *
+ * A LABEL, and not any item, because a depth is recommended for a label alone: the store's walk, the
+ * panel's row and the run sheet all ask about lines. A shape's own outline bbox would be this
+ * function's answer for a shape, and no caller has one to ask with.
+ *
+ * `estimated` is true when the ink box was `inkBoxOf`'s documented ESTIMATE rather than a
+ * measurement — a face that is not parsed yet. The estimate is an upper bound, so it reaches at
+ * least as many voids as the real glyphs, and a number worked out that way can only move DEEPER
+ * once the face is up: never into a refusal. It travels with the answer so the recommendation's
+ * basis can say which box it was measured against.
+ */
+export function voidLimitForItem(
   job: EngraveJob,
+  label: EngraveLabel,
   margin?: Mm,
-): { name: string; limit: Mm } | null {
-  let found: { name: string; limit: Mm } | null = null;
+  measure?: InkMeasure,
+): { name: string; limit: Mm; estimated: boolean } | null {
+  const measured = measure?.(label.text, label.font, label.weight, label.size) ?? null;
+  const box = labelFootprint(
+    label,
+    measured ?? inkBoxOf(label.text, label.font, label.weight, label.size),
+  );
+  const m = margin ?? defaultBoundaryMargin(job);
+  let found: { name: string; limit: Mm; estimated: boolean } | null = null;
   for (const ko of job.keepOuts ?? []) {
-    if (!ko.enabled) continue;
-    const limit = keepOutLimit(job, keepOutMembrane(job, ko.zCeiling), margin);
-    if (found === null || limit < found.limit) found = { name: ko.name ?? '', limit };
+    if (!ko.enabled || !lineReachesKeepOut(box, ko)) continue;
+    const limit = keepOutLimit(job, keepOutMembrane(job, ko.zCeiling), m);
+    // `<` and not `<=`: at equal limits the first void keeps the answer, so the name a job shows is
+    // the one its document declares first — stable, and never a silent re-pick.
+    if (found === null || limit < found.limit) {
+      found = { name: ko.name ?? '', limit, estimated: measured === null };
+    }
   }
   return found;
 }

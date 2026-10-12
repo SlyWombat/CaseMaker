@@ -919,18 +919,32 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
 
   it('names the constraint under the depth it filled in, and calls the ceiling a ceiling', () => {
     takeBadgeBlank();
+    // #365: the seeded 'Name' line sits BESIDE the pocket — that is the whole point of the band it
+    // is laid in — so what binds it is the jaws. A second line, placed over the pocket, is what
+    // shows the void clause; before #365 the void floor was blank-wide and the seeded line carried
+    // the pocket's 0.51 mm it was nowhere near.
+    act(() => {
+      useEngraveJobStore.getState().addLabel();
+      const id = useEngraveJobStore.getState().job.labels[1]!.id;
+      useEngraveJobStore.getState().updateLabel(id, { position: { x: 38.1, y: 19.05 } });
+    });
     render(<EngravePanel />);
 
-    // The magnet pocket is what leaves 0.51 mm, and the row says so — the same first clause the run
-    // sheet prints in §7 and `recommendLabelDepth` returns.
-    const line = recommended(0)!;
-    expect(line).toContain('Recommended 0.51 mm');
-    expect(line).toContain('"Magnet pocket" leaves 0.51 mm of material');
+    const seeded = recommended(0)!;
+    expect(seeded).toContain('Recommended 0.905 mm');
+    expect(seeded).toContain('stands 1.905 mm above the jaw tops');
     // The label is AT the recommendation, so nothing is added to reconcile: one number, no second.
-    expect(line).not.toContain('This label is at');
+    expect(seeded).not.toContain('This label is at');
+
+    // …and the magnet pocket is what leaves 0.51 mm for a line that DOES reach it — the same first
+    // clause the run sheet prints in §7 and `recommendLabelDepth` returns.
+    const over = recommended(1)!;
+    expect(over).toContain('Recommended 0.51 mm');
+    expect(over).toContain('"Magnet pocket" leaves 0.51 mm of material');
 
     // The ceiling stays, and now says what it is. It was the only line under the field, and it read
-    // as the reason for a 0.51 mm depth (2.81 mm being "the stock thickness less the minimum floor").
+    // as the reason for a recommended depth (2.81 mm being "the stock thickness less the minimum
+    // floor").
     const ceiling = screen.getByTestId('engrave-label-maxdepth-0').textContent!;
     expect(ceiling).toContain('2.81');
     expect(ceiling).toContain('ceiling this blank allows, not the depth the app recommends');
@@ -942,8 +956,8 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
     fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '1.2' } });
 
     const line = recommended(0)!;
-    expect(line).toContain('Recommended 0.51 mm');
-    expect(line).toContain('"Magnet pocket" leaves 0.51 mm of material');
+    expect(line).toContain('Recommended 0.905 mm');
+    expect(line).toContain('stands 1.905 mm above the jaw tops');
     // The advice is not withdrawn, and the row is honest that the field is no longer on it.
     expect(line).toContain('This label is at 1.2 mm');
   });
@@ -993,6 +1007,17 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
       useEngraveJobStore.getState().setVise({ stockProud: 2.2 });
     });
     takeBadgeBlank({ ...PRINTED, splitHeight: 2.61 });
+    // #365: this test is about the VOID binding, and the seeded line is laid BESIDE the pocket — move
+    // it over the pocket, where the ceiling is the floor that binds. Written straight into the job so
+    // the seed's own provenance stays what the last assertions read, which `updateLabel` would claim
+    // as the person's.
+    act(() => {
+      const job = useEngraveJobStore.getState().job;
+      const [first, ...rest] = job.labels;
+      useEngraveJobStore.setState({
+        job: { ...job, labels: [{ ...first!, position: { x: 38.1, y: 19.05 } }, ...rest] },
+      });
+    });
     render(<EngravePanel />);
 
     // The row the panel offers is the JOB's number, not the house default — which is the margin the

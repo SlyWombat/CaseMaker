@@ -9,6 +9,9 @@ import { generate, regions } from './helpers/engravePipeline';
 import { frameCorners } from '@/workers/sim/engraveGenerate';
 import { UNMEASURED_FEEDS_TABLE, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
+import { defaultBoundaryMargin, recommendLabelDepth } from '@/engine/cnc/engrave/depthBounds';
+import { labelGlyphMeasure, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
+import { bindingVoidsByRegion } from '@/workers/sim/engraveGeometry';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { CAM_ID, CAM_NAME } from '@/engine/cnc/post/z1';
 import { version as APP_VERSION } from '../../package.json';
@@ -20,7 +23,7 @@ import { viseForNewJob } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
-import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLineItem, EngraveTraceItem } from '@/types/engraveJob';
+import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveTraceItem } from '@/types/engraveJob';
 
 describe('engraveGenerate with a saved machine frame (#297)', () => {
   const read = calibrationFromReplies(new Map(Object.entries(Z1_FRAME_REPLIES)), {
@@ -444,6 +447,71 @@ describe('a job that states its print limits on the printer’s layer grid (#285
     // 3.81 − 3.0 = 0.81 below the face; the nearest 0.2 mm layer line is 0.8.
     expect(regions(tl, badgeJob(true, 0.5)).colourBoundaryDepth).toBeCloseTo(0.8, 6);
     expect(regions(tl, badgeJob(false, 0.5)).colourBoundaryDepth).toBeNull();
+  });
+});
+
+// #365 decision 4 — the void bound the PANEL advises from and the void the WORKER finds are two
+// different measurements of the same overlap: the app's engine tests the line's ink box against the
+// void's shape (cheap, analytic, and the honest superset), while `bindingVoidsByRegion` intersects
+// the measured ink with the void's own footprint in Clipper2. They must agree where both can see the
+// item, or the panel would advise a depth the generator then refuses.
+describe('the per-item void bound agrees with the region scan (#365)', () => {
+  /** The badge blank with its magnet pocket, and ONE measured line over it. */
+  function badgeLine(text: string, x: number, y: number): EngraveJob {
+    const blank = badgeBlankFor(defaultBadgeParams());
+    const base = defaultEngraveJob(viseForNewJob(undefined, blank.stock));
+    return {
+      ...base,
+      stock: blank.stock,
+      keepOuts: blank.pocket ? [blank.pocket] : [],
+      labels: [
+        { ...(base.labels[0] as EngraveLabel), id: 'name', text, size: 8, position: { x, y } },
+      ],
+      shapes: [],
+    };
+  }
+  const margin = (job: EngraveJob) => defaultBoundaryMargin(job);
+
+  it('names the same void, and the same number, where the line lies inside it', () => {
+    // The line is centred on the pocket (38.1, 19.05), so its whole measured ink is inside the
+    // 45 × 13 pocket: the Clipper2 scan sees a full overlap and the box test sees containment.
+    const job = badgeLine('Name', 38.1, 19.05);
+    const r = regions(tl, job);
+    const scan = bindingVoidsByRegion(tl, job, r.plan, r.cuts, margin(job)).get('name')!;
+    const bound = voidLimitForItem(job, job.labels[0]!, margin(job), labelGlyphMeasure([]))!;
+    expect(bound.name).toBe(scan.name);
+    expect(bound.name).toBe('Magnet pocket');
+    // The same arithmetic, so the two are the same number rather than merely close: this is the
+    // pairing that lets the panel's advice be the depth the verifier then holds the cut to.
+    expect(bound.limit).toBe(scan.limit);
+    expect(bound.estimated).toBe(false);
+  });
+
+  it('is the honest SUPERSET: where only the box reaches the void, it still bounds, never deeper', () => {
+    // A line parked 0.2 mm below the pocket's roof as the INK measures it: the measured ink stops
+    // short of the void, so the worker's own overlap threshold finds nothing and the region carries
+    // no bound at all — while the fallback box (the estimated advance, sized by the nominal em) still
+    // reaches it, which is the case the seed runs in before any face is parsed. The app may only ever
+    // be STRICTER than the scan: the advice for a line the box bounds can never come out deeper than
+    // the advice with no void in play.
+    const line = { ...(defaultEngraveJob().labels[0] as EngraveLabel), id: 'name', text: 'Name', size: 8 };
+    const ink = labelGlyphMeasure([])(line.text, line.font, line.weight, line.size)!;
+    const pocket = badgeBlankFor(defaultBadgeParams()).pocket!;
+    if (pocket.kind !== 'rect') throw new Error('the badge pocket is a rect');
+    const roof = pocket.position.y - pocket.height / 2; // the void's near edge, 12.55
+    const job = badgeLine('Name', 38.1, roof - ink.height / 2 - 0.2);
+
+    const r = regions(tl, job);
+    const scan = bindingVoidsByRegion(tl, job, r.plan, r.cuts, margin(job)).get('name');
+    expect(scan).toBeUndefined();
+
+    const bound = voidLimitForItem(job, job.labels[0]!, margin(job)); // estimated box, no measure
+    expect(bound?.name).toBe('Magnet pocket');
+    expect(bound!.estimated).toBe(true);
+    const bounds = { boundaryMargin: margin(job) };
+    const withVoid = recommendLabelDepth(job, job.labels[0]!, { ...bounds, voidLimit: bound })!;
+    const without = recommendLabelDepth(job, job.labels[0]!, { ...bounds, voidLimit: null })!;
+    expect(withVoid.depth).toBeLessThanOrEqual(without.depth);
   });
 });
 

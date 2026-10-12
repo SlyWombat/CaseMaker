@@ -26,7 +26,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { dedupeFindings, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
-import { keepOutLimitParts, keepOutMembrane, shallowestVoidLimit } from '@/engine/cnc/engrave/partPlan';
+import { keepOutLimitParts, keepOutMembrane, labelGlyphMeasure, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
@@ -406,14 +406,20 @@ export function EngravePanel(): JSX.Element {
   // The same call the store's seeding makes (`redepthLabelsForBlank`), on the same two inputs, so
   // the number in the row and the number the badge route writes cannot disagree. The store still
   // owns the WRITE; this is only the sentence beside the field.
-  const voidLimit = shallowestVoidLimit(job, margins.boundaryMargin);
+  //
+  // #365 — the void bound is asked about THIS LINE's own extent, not the whole blank: the rows used
+  // to read as if every line sat over the blank's shallowest void, so the badge's seeded line was
+  // advised the magnet pocket's 0.51 mm from the free band beside it. Both the box and the answer
+  // come from `voidLimitForItem`, and the measure is the one implementation the seed and the walk
+  // use, so a row can never test a line against a void the line was placed clear of.
+  const measure = labelGlyphMeasure(job.customFonts ?? []);
   const depthRecommendation = (label: EngraveLabel): LabelDepthRecommendation | null => {
     // A label's OWN past intent does not lock it out of its own recommendation — `'computed'` means
     // "ours to rewrite" (#362 review). Anything else, or a hand-written intent with no provenance,
     // is a person's statement and the recommendation has nothing to say about it.
     const intent = job.sources?.labels?.[label.id]?.depthIntent;
     return recommendLabelDepth(job, label, {
-      voidLimit,
+      voidLimit: voidLimitForItem(job, label, margins.boundaryMargin, measure),
       boundaryMargin: margins.boundaryMargin,
       ...(intent === undefined ? {} : { intent }),
     });

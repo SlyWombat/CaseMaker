@@ -325,13 +325,17 @@ centred on the blank and clear of the magnet pocket (#363). A **bare** blank tha
 placeholder is set in their place, sized to the blank (#364). The one blank that keeps them is the
 plank they were written for — 100 × 60, at *any* thickness, because a thinner slab of the same face
 does not move a line, only its depth. Either way, the depth of every line nobody has claimed is then
-recommended for the blank it is really on (#362). On the default badge that number is 0.51 mm, and
-it is the magnet pocket's ceiling: the recommendation takes the shallowest limit ANYWHERE on the
-blank rather than the one the line actually sits over, so a line that is clear of the pocket is
-still given the pocket's number — the seeded line sits in the free band beside it, where the jaws
-would allow 0.905 mm (#365). A line **you** typed or placed is left exactly where it is, text and
-position both — and so is one an earlier take seeded, once you have touched it: taking a second
-badge blank re-lays only what the app still owns.
+recommended for the blank it is really on (#362), and the void limit in that answer belongs to the
+line and not to the blank (#365): it is taken from the voids the **line's own extent** reaches, so
+the seeded line — which sits in the free band beside the magnet pocket — is advised the jaws' own
+0.905 mm rather than the pocket's 0.51 mm, and a line placed over the pocket carries the pocket's
+number and names it ("Magnet pocket" leaves 0.51 mm of material). The extent is the line's whole ink
+box — the honest superset of the cut, since the check it answers to is a positional one — measured
+from the same face the layout was, and where that face is not parsed yet the box falls back to a
+documented upper-bound estimate, which the sentence says where it is used ("measured against the
+line's estimated extent — its face is not parsed yet"). A line **you** typed or placed is left
+exactly where it is, text and position both — and so is one an earlier take seeded, once you have
+touched it: taking a second badge blank re-lays only what the app still owns.
 
 **The material list is the machine's list as well as this app's (#347).** It offers the four
 materials the starting table has rows for — softwood, hardwood, MDF, PLA — and then every material

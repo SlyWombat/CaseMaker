@@ -5,8 +5,9 @@ import {
   keepOutLimit,
   keepOutLimitParts,
   keepOutMembrane,
-  shallowestVoidLimit,
+  labelGlyphMeasure,
   toPartPlan,
+  voidLimitForItem,
   type PartPlan,
 } from '@/engine/cnc/engrave/partPlan';
 import {
@@ -26,6 +27,7 @@ import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
 import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
 import { jobMachine } from '@/engine/cnc/calibration';
+import type { InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
 // re-worded, so the sheet and the panel cannot disagree about what the sweep did not see.
@@ -516,8 +518,8 @@ function marginsStep(
 function depthSourceWords(
   job: EngraveJob,
   item: { id: string; depth: Mm },
-  voidLimit: { name: string; limit: Mm } | null,
   boundaryMargin: Mm,
+  measure: InkMeasure,
 ): string {
   const label = job.labels.find((l) => l.id === item.id);
   if (!label) return '';
@@ -525,7 +527,9 @@ function depthSourceWords(
   // Anything but `computed` is the user's or the bench's number, and neither asked to be explained.
   if (claim?.depth !== 'computed') return '';
   const rec = recommendLabelDepth(job, label, {
-    voidLimit,
+    // #365 — this line's own extent decides which voids bound it, exactly as the store's walk and
+    // the panel's row do it. The sheet used to quote the blank's shallowest void for every line.
+    voidLimit: voidLimitForItem(job, label, boundaryMargin, measure),
     boundaryMargin,
     ...(claim.depthIntent === undefined ? {} : { intent: claim.depthIntent }),
   });
@@ -889,10 +893,12 @@ export function buildRunSheet(
   const stackUp = buildStackUp(job);
   const itemBox = new Map(diagram.items.map((i) => [i.id, i] as const));
   const deepest = items.reduce((max, item) => Math.max(max, item.depth), 0);
-  // #362 review — the blank's void ceiling, resolved once, the same way the store's seeding and the
-  // panel's row resolve it: the reason a recommended depth is as shallow as it is has to be the same
-  // reason in all three places.
-  const voidLimit = shallowestVoidLimit(job, margins.boundaryMargin);
+  // #362 review, #365 — the reason a recommended depth is as shallow as it is has to be the same
+  // reason in all three places that state it, so the per-line void bound is worked out by the same
+  // `voidLimitForItem` the store's walk and the panel's row call, on the same measurement
+  // (`labelGlyphMeasure`). `depthSourceWords` asks it for the item it is wording, so a line the
+  // sheet prints a reason for is judged against the voids THAT line reaches.
+  const measure = labelGlyphMeasure(job.customFonts ?? []);
   // #207 section 3: below the deepest cut by the clearance the JOB keeps, the cutter is under the
   // jaw tops. The number is the job's own `jawClearance` (#362 review) — the same one
   // `stock-proud-too-small` and `recommendLabelDepth` hold a floor to, so the printout cannot tell
@@ -1091,7 +1097,7 @@ export function buildRunSheet(
           : ` (deepest cut there ${fmtNum(keepOutLimit(job, over.solidThickness, margins.boundaryMargin))} mm)`)
       : '';
     cutSteps.push({
-      text: `${item.name}${note}${depthSourceWords(job, item, voidLimit, margins.boundaryMargin)}`,
+      text: `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)}`,
       value: `${fmtNum(item.depth)} mm deep`,
     });
   }
