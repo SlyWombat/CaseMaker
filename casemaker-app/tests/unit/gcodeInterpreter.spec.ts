@@ -21,7 +21,9 @@ describe('UNKNOWN IS A STATE: the parser never invents a coordinate', () => {
     expect(m[0]?.to).toEqual([70.11, 6.42, null]);
     expect(m[1]?.from).toEqual([70.11, 6.42, null]);
     expect(m[1]?.to).toEqual([70.11, 6.42, 5]);
-    expect(kinds(r)).toEqual(['tool-change', 'air', 'move', 'spindle', 'move']);
+    // #283 — `M7` is still in the line above because Studio's file carries it, but it emits
+    // nothing: this controller answers `M7` `ok` and blows no air, so there is no state to set.
+    expect(kinds(r)).toEqual(['tool-change', 'move', 'spindle', 'move']);
   });
 
   it('an axis that was never set stays null through relative moves', () => {
@@ -87,12 +89,39 @@ describe('M6, as the firmware executes it (§2)', () => {
   });
 });
 
+describe('the vacuum: M331 / M332, and the air words that are not (#283)', () => {
+  it('bare M331 turns the vacuum on and bare M332 turns it off', () => {
+    const r = parseGcode('M331\nM332\n');
+    expect(kinds(r)).toEqual(['vacuum', 'vacuum']);
+    expect(r.events[0]).toMatchObject({ kind: 'vacuum', on: true });
+    expect(r.events[1]).toMatchObject({ kind: 'vacuum', on: false });
+    expect(hasErrors(r)).toBe(false);
+  });
+
+  it('the family\'s decimal forms are accepted and change nothing — they are machine settings', () => {
+    // Bed cleaning (.2), blowing (.1), static removal (.4): real modes on this machine, none of
+    // which this app drives or models. Only the BARE form is the vacuum.
+    const r = parseGcode('M331.1\nM331.2\nM331.4\nM332.1\n');
+    expect(r.events).toEqual([]);
+    expect(hasErrors(r)).toBe(false);
+  });
+
+  it('M7 and M9 are accepted and set nothing: this controller answers them and blows nothing', () => {
+    // Observed at the bench 2026-10-12: `ok`, and the chips are not moved. A file may carry them
+    // (Studio's own do), so they are not errors — they are simply not air.
+    const r = parseGcode('M7\nM9\nM331\n');
+    expect(kinds(r)).toEqual(['vacuum']);
+    expect(hasErrors(r)).toBe(false);
+  });
+});
+
 describe('M2 / M30 end of program (grbl mode: M30 is M2)', () => {
-  it('stops the spindle and air, resets the modal motion to G1 and distance to absolute', () => {
+  it('stops the spindle, resets the modal motion to G1 and distance to absolute', () => {
     const r = parseGcode('G91\nS1000 M3\nM7\nM30\nG1 X5 F100\n');
-    expect(kinds(r)).toEqual(['spindle', 'air', 'spindle', 'air', 'program-end', 'move']);
-    expect(r.events[2]).toMatchObject({ kind: 'spindle', state: 'off' });
-    expect(r.events[3]).toMatchObject({ kind: 'air', on: false });
+    // #283 — no accessory event at all here. `M7` does nothing on this machine, and the firmware's
+    // program end is not observed to clear a mode family that persists as a machine setting.
+    expect(kinds(r)).toEqual(['spindle', 'spindle', 'program-end', 'move']);
+    expect(r.events[1]).toMatchObject({ kind: 'spindle', state: 'off' });
     // Distance mode is absolute again: X5 is the position X5, not "5 from unknown".
     expect(moves(r)[0]?.to[0]).toBe(5);
   });
@@ -167,8 +196,8 @@ describe('firmware hazards (§6) are reported, not silently obeyed', () => {
   });
 
   it('trailing remark text after a command is one WARNING and the command still runs', () => {
-    const r = parseGcode('M7 # air on\n');
-    expect(r.events[0]).toMatchObject({ kind: 'air', on: true });
+    const r = parseGcode('M331 # vacuum on\n');
+    expect(r.events[0]).toMatchObject({ kind: 'vacuum', on: true });
     expect(hasErrors(r)).toBe(false);
     expect(codes(r)).toEqual(['ignored-text']);
   });
@@ -585,7 +614,7 @@ describe('header, markers and robustness', () => {
   });
 
   it('every event carries its 1-based source line', () => {
-    const r = parseGcode('\n\nG0 X1\n\nM7\n');
+    const r = parseGcode('\n\nG0 X1\n\nM331\n');
     expect(r.events.map((e) => e.line)).toEqual([3, 5]);
   });
 });

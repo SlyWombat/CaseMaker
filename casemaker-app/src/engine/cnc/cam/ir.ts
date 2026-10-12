@@ -64,7 +64,12 @@ export interface ToolpathIR {
   /** Tool number, 1 for V1's single-tool jobs. Chosen by {@link toolNumberFor}. */
   toolNumber: number;
   spindleRpm: number;
-  /** Airflow (the machine's air output; the post decides the word). */
+  /**
+   * The job wants its accessory output on: clear the chips while cutting. The post decides the
+   * word, and on a Z1 that word is the VACUUM — bare `M331`/`M332` — because `M7`/`M9` are
+   * answered `ok` and blow nothing on this controller (#283). The field keeps its name because it
+   * is what the feeds table, the job schema and a saved job all call it.
+   */
   air: boolean;
   /** Z the tool retracts to between operations and at the end, mm above the stock top (positive). */
   safeZ: number;

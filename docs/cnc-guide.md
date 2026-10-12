@@ -792,7 +792,7 @@ running passes above; the rest are the checks the runner does not do on its own:
 |---|---|---|---|
 | `parse-error` | error | The file could not be read as G-code and was not simulated: either the parser refused a line, or the program could not be lowered to moves at all. The message carries the inner reason. | Fix the line the message names, then generate again. |
 | `runner-error` | error | The runner refused the program — a move that leaves the machine's envelope, an arc with no feed rate or in a form it cannot read, or an arc from a position the program never established. (A *warning* the runner raises — an unknown Z, an unknown X,Y — is not carried here.) The message names the runner's own code and what it found. | Fix the move the message names. |
-| `not-our-dialect` | error | A word in the file is not one this post writes (`G0 G1 G21 G28 G53 G90`, `M2 M3 M5 M6 M7 M9`, and only G/M/T/S/F/X/Y/Z words). The file did not come from the app, or was hand-edited. | Re-post it, or fix the word. |
+| `not-our-dialect` | error | A word in the file is not one this post writes (`G0 G1 G21 G28 G53 G90`, `M2 M3 M5 M6 M7 M9 M331 M332`, and only G/M/T/S/F/X/Y/Z words). The file did not come from the app, or was hand-edited. | Re-post it, or fix the word. |
 | `cut-too-deep` | error | A cutting move reaches Z deeper than the material permits at that (X, Y): past the stock floor, through a colour or void ceiling, or into material the job says must remain. The message names the limit and, when the job can say, why. | Reduce the depth, move the cut clear, or switch the label's intent. |
 | `cut-outside-stock` | error | The cutter's *edge*, not just its centre, reaches a point where no material may be cut — off the blank onto air. | Move the cut back inside the stock. |
 | `feed-missing` | error | A cutting move has no feed rate set. | Add an `F` before the cut. |
@@ -931,7 +931,8 @@ semantics are LinuxCNC-flavoured.
 | Spindle | `M3` / `M4` / `M5` |
 | Tools | `M6 T<n>` (with the `T` on the same command), `M491` (re-measure tool length) |
 | Manual tool change | `M490.1` / `M490.2` (the operator handshake) |
-| Air | `M7` / `M9` |
+| Vacuum | `M331` / `M332` (bare; what this app's programs use) |
+| Air (no-op) | `M7` / `M9` — answered `ok`, blow nothing on a Z1 |
 | Laser (refused) | `M321`–`M325` |
 | Pause | `M600` |
 

@@ -103,7 +103,7 @@ const READY_NUT_UNPROVEN = {
 const RESTART_PROGRAM = [
   'G90 G21',
   'T1 M6',
-  'M7',
+  'M331',
   'S12000 M3',
   'G0 X2 Y2 Z5',
   'G0 Z1',
@@ -112,7 +112,7 @@ const RESTART_PROGRAM = [
   'G1 X10 Y6',
   'G1 X2 Y6',
   'G0 Z15',
-  'M9',
+  'M332',
   'M5',
   'G28',
   'M02',

@@ -609,7 +609,7 @@ export function SimPanel() {
           <h3 style={SUBHEAD}>Restart from a step</h3>
           <p style={MUTED}>
             Generate a <code>.nc</code> that resumes at step {step} of {Math.max(0, stepCount - 1)}. It
-            restores the spindle, air and position, approaches safely, then runs the file’s own remaining
+            restores the spindle, vacuum and position, approaches safely, then runs the file’s own remaining
             moves. It is checked by the same verifier as any other program — no exemption.
           </p>
           <button

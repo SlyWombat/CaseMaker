@@ -35,7 +35,12 @@ export interface MachineState {
   tool: ToolState;
   spindle: 'cw' | 'ccw' | 'off';
   rpm: number | null;
-  air: boolean;
+  /**
+   * The vacuum (`M331` on, `M332` off, bare forms) — the Z1's accessory, and the only one our
+   * post drives (#283). Not "air": `M7`/`M9` are answered `ok` and blow nothing on this machine,
+   * so they set nothing here.
+   */
+  vacuum: boolean;
   /** `M321` laser mode: a laser job, which a mill emulation should refuse (verifier's call). */
   laser: boolean;
   /** Selected work coordinate system, 0 = G54. Only G54 is modelled. */
@@ -196,7 +201,7 @@ export function initialState(setup: Setup): MachineState {
     tool: setup.startingTool,
     spindle: 'off',
     rpm: null,
-    air: false,
+    vacuum: false,
     laser: false,
     wcs: 0,
     wcsOrigin: [setup.wcs.origin[0], setup.wcs.origin[1], setup.wcs.origin[2]],
@@ -317,8 +322,8 @@ export function applyEvent(s: MachineState, ev: GcodeEvent, _setup: Setup): Mach
     }
     case 'spindle':
       return { ...s, spindle: ev.state, rpm: ev.rpm };
-    case 'air':
-      return { ...s, air: ev.on };
+    case 'vacuum':
+      return { ...s, vacuum: ev.on };
     case 'laser-mode':
       return { ...s, laser: ev.on };
     case 'wcs-select':

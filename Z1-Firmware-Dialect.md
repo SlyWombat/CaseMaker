@@ -319,26 +319,31 @@ Toggling the wizard's five "assist" switches sent these, each with Studio's own 
 | *(no description, and no `ok`)* | `M951` |
 
 **`M331` is a mode family with a decimal sub-index** — a shape nothing in §1–§10 has, and none of
-these codes appears in the source reading. Which switch maps to bare `M331` is **inferred by
+these codes appears in the source reading. Which switch maps to bare `M331` was **inferred by
 elimination, not observed**: four of the variants describe themselves, which leaves `M951` for the
-camera time-lapse and bare `M331` ("extend out") for the vacuum. **Toggling one at a time settles
-it**, and has not been done.
+camera time-lapse and bare `M331` ("extend out") for the vacuum. **It has since been settled from our
+own traffic — §11.10.**
 
 `M951` also **answered nothing**, where every other command answered `ok`, with a seven-second gap
 to the next command. Unexplained.
 
-**This matters beyond curiosity.** `machine.ts` models the Z1's only accessory as **air
-(`M7`/`M9`)** and records the internal vacuum as Carvera-only. Studio's own wording says this
+**This matters beyond curiosity.** From this reading, `machine.ts` modelled the Z1's only accessory
+as **air (`M7`/`M9`)** and recorded the internal vacuum as Carvera-only. Studio's own wording says this
 machine has bed cleaning, blowing, static removal and "extend out" as four separable modes. **No
-`M7` or `M9` appears anywhere in the traffic read.**
+`M7` or `M9` appears anywhere in the traffic read.** The modelling call has since been reversed on
+evidence: bare `M331`/`M332` are the vacuum and are what our post writes, and `M7` is a no-op on
+this controller — §11.10, #283.
 
 ### 11.4 What §11 does not settle
 
 - **§2's `T1 M6` on an already-active tool** was not reached — the wizard's changes were to and
   from the probe, never a no-op change. The source reading stands unverified on hardware.
 - **The roles of the `M49x` codes** beyond `M490.1` remain unread.
-- **Whether the assist modes persist across a power cycle** is unasked. All five were off before
-  the session and all five on after it.
+- **Whether the assist modes persist across a power cycle** is unasked, and whether they persist
+  across *programs* is no longer claimed either: all five were off before the session and all five
+  on after it, which says the toggles stayed put through the session's own traffic, not that a
+  program boundary leaves them alone. §11.10 has the correction — each 2026-10-12 run carried its
+  own `M331` … `M332` pair, so nothing isolates the boundary.
 - **Nothing was captured off the wire.** A capture would make all of the above first-hand; the
   client's own log is what made any of it visible at all.
 
@@ -512,3 +517,36 @@ check (tool 0 only); `M493.1` save offset; `M493.2 T<n>` set the active tool num
 every macro. The third value of the status `T:` field is the tool number a pending change is waiting
 for (1 while waiting for T1; −1 otherwise).
 
+
+### 11.10 Observed 2026-10-12 — the vacuum, and that `M7` does nothing (#283, #165)
+
+Two things, both from our own console, and they close the two rows §11.3 and §11.4 left open.
+
+**The bare form is the vacuum, and it is what a cut runs with.** Sent before and after each of the
+day's two first-chips runs, the controller answers with Studio's own wording and an `ok`:
+
+```
+M331                                 turning extend out mode on      ok
+play /sd/gcodes/165-depth-ladder-row-A.nc
+… 3 minutes of cutting …
+M332                                 turning extend out mode off     ok
+```
+
+Verbatim in `docs/bench/traces/2026-10-12-cut-rowA.log` (lines 3 and 281) and `…-rowB.log`. So
+Studio's **Vacuum** switch is the bare `M331`/`M332` pair, not one of the sub-coded modes — the
+mapping §11.3 could only infer by elimination is now a reading of our own traffic. The maintainer
+adopted it as the default for every real cut (#283), which is why the app's post writes those two
+words for the job's `air` flag and no longer writes `M7`/`M9`.
+
+**`M7` is a no-op on this machine.** Answered `ok` — and the chips are not moved by it, where
+`M331` visibly pulls them. `M9` likewise. Air via `M7` is therefore a word with no effect here (the
+blowing mode is the family's `M331.1`, §11.3), which is what §11.3's "no `M7` or `M9` appears
+anywhere in the traffic read" was pointing at.
+
+**Persistence is still not settled, and the day does not pretend otherwise.** Each run was bracketed
+by its own `M331` … `M332` pair (row A 21:07:05 → 21:10:12, row B 21:15:21 → 21:18:27), so nothing
+here says whether the mode would have survived between them, and nothing says whether it survives a
+power cycle — §11.4's row is corrected to drop its persistence claim for this reason. What the file
+has to act on is the other half of the same bench rule: **the switches are off at power-up**, so a
+program cannot assume the vacuum is where the last job left it. It states `M331` itself, and `M332`
+at the end.

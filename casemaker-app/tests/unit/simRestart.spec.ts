@@ -24,7 +24,7 @@ const SETUP: Setup = stubSetup(
 const PROGRAM = [
   'G90 G21',
   'T1 M6',
-  'M7',
+  'M331',
   'S12000 M3',
   'G0 X2 Y2 Z5',
   'G0 Z1',
@@ -33,15 +33,24 @@ const PROGRAM = [
   'G1 X10 Y6',
   'G1 X2 Y6',
   'G0 Z15',
-  'M9',
+  'M332',
   'M5',
   'G28',
   'M02',
 ].join('\n');
 
-const EVENTS = buildTimeline(parseGcode(PROGRAM), SETUP, Z1).events.length;
+const TIMELINE = buildTimeline(parseGcode(PROGRAM), SETUP, Z1);
+const EVENTS = TIMELINE.events.length;
 /** The event index of the first cut move: resuming there restores the tool at [2, 2, −1]. */
-const CUT_STEP = 6;
+const CUT_STEP = (() => {
+  for (let i = 0; i < TIMELINE.events.length; i++) {
+    const e = TIMELINE.events[i];
+    if (e === undefined || e.kind !== 'move' || e.synthetic !== undefined) continue;
+    const w = TIMELINE.stateAt(i).work;
+    if (w[0] === 10 && w[1] === 2 && w[2] === -1) return i;
+  }
+  throw new Error('the resume move was not found in the fixture program');
+})();
 
 const READY = {
   ok: true,

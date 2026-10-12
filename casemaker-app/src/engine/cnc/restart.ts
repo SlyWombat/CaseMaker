@@ -10,8 +10,8 @@
  *
  * WHY THIS IS THE RIGHT SHAPE. The `Timeline` already holds the machine state after every event,
  * including the accessory state the issue calls the field's hard part: which way the spindle is
- * turning and at what speed, and whether air is on. So the restart is a pure function of the
- * original program plus the step — no controller command, no probing, no re-planning.
+ * turning and at what speed, and whether the vacuum is on. So the restart is a pure function of
+ * the original program plus the step — no controller command, no probing, no re-planning.
  *
  * WHAT THIS FILE IS NOT. It is not a controller command (`M-` restart keyed on a controller the
  * Z1 does not have); it is a generated `.nc` that runs through the SAME verifier as any other
@@ -21,11 +21,13 @@
  * LENGTH — that is machine state the file cannot see — so the operator run sheet it returns says
  * so in plain words ({@link RESTART_TOOL_LENGTH_NOTE}).
  *
- * COOLANT. The Z1 dialect our post writes has no coolant word (the verifier's whitelist is
- * `M2 M3 M5 M6 M7 M9`); the single accessory it models is AIR (`M7`/`M9`), which is what
- * `MachineState.air` tracks. There is no `M8` to lose, and this generator refuses rather than
- * invent one. The MACHINE has more — a `M331.x` mode family and `M951` (#283) — but the post
- * drives none of them, so none of them appears in a generated file.
+ * COOLANT. The Z1 dialect our post writes has no coolant word (the whitelist is
+ * `M2 M3 M5 M6 M7 M9 M331 M332`); the single accessory it drives is the VACUUM — bare
+ * `M331`/`M332`, the machine's "extend out" mode, which is what `MachineState.vacuum` tracks.
+ * There is no `M8` to lose, and this generator refuses rather than invent one. `M7`/`M9` remain
+ * legal words that do nothing on this machine (#283), so the tail may carry one through untouched;
+ * the post stopped writing them. The rest of the machine's accessory surface — the `M331.x`
+ * sub-codes and `M951` — is driven by neither the post nor this file.
  *
  * Pure: no React, no wasm, no worker. `parseGcode` + `buildTimeline` are the same pure halves
  * the verifier uses, so the restart and the file it came from can never disagree about a move.
@@ -67,7 +69,8 @@ export interface RestartResume {
   work: [number, number, number];
   spindle: MachineState['spindle'];
   rpm: number | null;
-  air: boolean;
+  /** The vacuum: `M331` on / `M332` off, as the original left it at the resume step. */
+  vacuum: boolean;
   /** The active tool. `-1` is an empty spindle; `'unknown'` is the setup's own value. */
   tool: MachineState['tool'];
 }
@@ -189,8 +192,8 @@ function buildTail(timeline: Timeline, step: number): { lines: string[]; errors:
         else lines.push(ev.rpm === null ? 'M3' : `S${fmt(ev.rpm, 0)} M3`);
         break;
       }
-      case 'air':
-        lines.push(ev.on ? 'M7' : 'M9');
+      case 'vacuum':
+        lines.push(ev.on ? 'M331' : 'M332');
         break;
       case 'tool-change': {
         const real = isRealToolChange(timeline.stateAt(i - 1), ev.tool);
@@ -300,7 +303,7 @@ export function generateRestart(input: RestartInput): RestartResult {
     } else if (before.spindle === 'ccw') {
       errors.push(`the spindle runs counter-clockwise at step ${step}; the post's dialect has no M4`);
     } else {
-      resume = { step, work: [w[0], w[1], w[2]], spindle: before.spindle, rpm: before.rpm, air: before.air, tool: before.tool };
+      resume = { step, work: [w[0], w[1], w[2]], spindle: before.spindle, rpm: before.rpm, vacuum: before.vacuum, tool: before.tool };
     }
   }
 
@@ -315,8 +318,9 @@ export function generateRestart(input: RestartInput): RestartResult {
     const [rx, ry, rz] = resume.work;
     lines.push('G90 G21');
     // Restore the accessory state BEFORE the descent, so the descent happens with the spindle in
-    // the state it will cut in. Air first (it is the coolant substitute); the spindle follows.
-    if (resume.air) lines.push('M7');
+    // the state it will cut in. The vacuum first (chips are cleared from the moment the cutter
+    // touches); the spindle follows.
+    if (resume.vacuum) lines.push('M331');
     if (resume.spindle === 'off') lines.push('M5');
     else lines.push(resume.rpm === null ? 'M3' : `S${fmt(resume.rpm, 0)} M3`);
     // 1. Retract straight up from wherever the machine is. A pure-Z rapid is exempt from the
@@ -414,7 +418,10 @@ function compose(
     ...preamble,
     ...tail,
     `G0 Z${axis(FINAL_RETRACT_Z)}`,
-    'M9',
+    // The post's own ending, with the vacuum's off code (#283). Unconditional, where the post
+    // writes its `M332` only when it wrote an `M331`: a restart's tail may turn the vacuum on at
+    // any later step, and the file must leave the machine as the original would have — off.
+    'M332',
     'M05',
     'G28',
     'M02',
@@ -436,12 +443,12 @@ function buildRunSheet(
   if (resume !== null) {
     const spindle = resume.spindle === 'off' ? 'off' : `${resume.spindle.toUpperCase()}${resume.rpm === null ? '' : ` at ${resume.rpm} RPM`}`;
     const tool = resume.tool === 'unknown' ? 'unknown' : resume.tool === -1 ? 'empty' : `T${resume.tool}`;
-    lines.push(`Re-establishes: spindle ${spindle}, air ${resume.air ? 'on' : 'off'}, tool ${tool}.`);
+    lines.push(`Re-establishes: spindle ${spindle}, vacuum ${resume.vacuum ? 'on' : 'off'}, tool ${tool}.`);
   }
   lines.push(RESTART_TOOL_LENGTH_NOTE);
   lines.push('The moves after the resume step are the original file’s own, re-emitted unchanged; nothing was re-planned.');
   lines.push(
-    'The only accessory this program uses is air (M7/M9); coolant is not modelled and is not in this file.',
+    'The only accessory this program uses is the vacuum (M331/M332); coolant is not modelled and is not in this file.',
   );
   if (verify !== null) {
     if (ok) lines.push('The verifier passed this file under the same rules as any other program.');

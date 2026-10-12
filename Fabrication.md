@@ -186,7 +186,8 @@ implements deliberately, not as a degraded fallback.
 | `M497.<n>` | Sets a UI state flag only (`set_atc_state`); no motion. Subcodes name the setup workflow: 4 = margin, 5 = Zprobe, 6 = Autolevel, 7 = Done. Useful for telling the UI where we are; it does not *do* any of it. |
 | `M600` | Suspend and wait for resume (`Player.cpp`). Separate mechanism from the `M490.x` handshake. |
 | `M3 S<rpm>` / `M5` | Spindle. |
-| `M7` / `M9` | Airflow. `M331`/`M332` auto-vacuum mode. |
+| `M7` / `M9` | **Answered `ok` and blow nothing** on a Z1 (bench, 2026-10-12). Legal words, no effect — so our post stopped writing them. |
+| `M331` / `M332` | The vacuum: bare `M331` = *turning extend out mode on*, `M332` = *…off* (our console, 2026-10-12). **This is the accessory our post writes.** The decimal forms are other modes — `M331.1` blowing, `M331.2` bed cleaning, `M331.4` static removal — which this app does not drive (`/Z1-Firmware-Dialect.md` §11.3). |
 | `M811`/`M812`, `M821`/`M822`, `M851`/`M852` | Spindle fan, light, extended port PWM. |
 | `M220 S<pct>` / `M223 S<pct>` | Feed and spindle overrides. |
 | `M482.4` / `M482.5` | Retrieve MAC / IP. |

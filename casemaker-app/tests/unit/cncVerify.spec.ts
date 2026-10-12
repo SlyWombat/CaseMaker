@@ -45,8 +45,12 @@ const lineOf = (ctx: VerifyContext, text: string, code: string): (number | null)
   verifyProgram(text, ctx).findings.find((f) => f.code === code)?.line;
 
 /**
- * A minimal valid program: preamble, one tool, spindle on, the machine-frame retract, an opening
- * XY rapid, a plunge.
+ * A minimal valid program: preamble, one tool, the vacuum on, spindle on, the machine-frame
+ * retract, an opening XY rapid, a plunge.
+ *
+ * THE ACCESSORY WORD IS `M331` (#283): it is what our post writes — bare `M331` where it used to
+ * write `M7` — so it is what a program of ours carries. (`M7`/`M9` are still accepted by the
+ * verifier; see the dialect test below.)
  *
  * THE RETRACT IS PART OF MINIMAL-VALID NOW (#384). After a manual `M6` the head's Z is wherever the
  * last job left it, so a file that rapids in XY without first establishing Z is refused — the check
@@ -56,7 +60,7 @@ const lineOf = (ctx: VerifyContext, text: string, code: string): (number | null)
  * top on every stock this file uses).
  */
 function program(body: string[], over: Partial<VerifyContext> = {}): { text: string; ctx: VerifyContext } {
-  const text = ['G90 G21', 'T1 M6', 'M7', 'S12000 M3', 'G53 G0 Z-3', ...body].join('\n');
+  const text = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 Z-3', ...body].join('\n');
   return { text, ctx: ctxFor(over) };
 }
 
@@ -79,6 +83,10 @@ describe('cncVerify (#174): the default job and the authored fixture', () => {
   });
 
   it.skipIf(!existsSync(THREE_STROKES))('three-strokes.nc (#199) passes on a 60 × 30 × 6 stock', () => {
+    // #283 — THIS FILE CARRIES `M7`/`M9`, and it still passes. It is our own authored bench file,
+    // written before the post learned that `M7` blows nothing on a Z1 and switched to `M331`; the
+    // controller answers the air words `ok`, so a file holding them is not unsafe. That is the whole
+    // reason they stay whitelisted rather than being struck out with the post's change.
     const stock = { length: 60, width: 30, thickness: 6 };
     const setup = stubSetup(
       { kind: 'prism', outline: rectProfile(60, 30), thickness: 6 },
@@ -140,7 +148,7 @@ describe('cncVerify (#174): the checks', () => {
   // files and our post opened that way; what the exemption actually permitted was an XY rapid at a
   // Z NOBODY KNOWS, which is the move that drives a tool through the work after a manual `M6`.
   it('rapid-too-low: an XY rapid with no Z established is refused, wherever it appears', () => {
-    const noRetract = ['G90 G21', 'T1 M6', 'M7', 'S12000 M3', 'G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02'].join('\n');
+    const noRetract = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02'].join('\n');
     const report = verifyProgram(noRetract, ctxFor());
     const f = report.findings.find((x) => x.code === 'rapid-too-low');
     expect(f).toBeDefined();
@@ -150,19 +158,19 @@ describe('cncVerify (#174): the checks', () => {
   });
 
   it('rapid-too-low: the machine-frame retract cures it, and one retract covers the whole opening', () => {
-    const withRetract = ['G90 G21', 'T1 M6', 'M7', 'S12000 M3', 'G53 G0 Z-3', 'G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02'].join('\n');
+    const withRetract = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 Z-3', 'G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor(), withRetract)).not.toContain('rapid-too-low');
   });
 
   it('rapid-too-low: a G53 X/Y word on its own retract does not establish a work Z', () => {
     // The retract has to be a Z move in the machine frame. `G53 G0 X5` moves in MACHINE X — the
     // work Z is still unknown, and an XY rapid after it is exactly as dangerous as before.
-    const sideways = ['G90 G21', 'T1 M6', 'M7', 'S12000 M3', 'G53 G0 X-5', 'G0 X5 Y5', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
+    const sideways = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 X-5', 'G0 X5 Y5', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor(), sideways)).toContain('rapid-too-low');
   });
 
   it('spindle-off-cut: a G1 Z-1 before M3 is refused', () => {
-    const text = ['G90 G21', 'T1 M6', 'M7', 'G0 X5 Y5 Z5', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
+    const text = ['G90 G21', 'T1 M6', 'M331', 'G0 X5 Y5 Z5', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
     const ctx = ctxFor();
     expect(codes(ctx, text)).toContain('spindle-off-cut');
   });
@@ -193,6 +201,32 @@ describe('cncVerify (#174): the checks', () => {
     expect(about54.find((f) => f.code === 'not-our-dialect')?.message).toContain('G53');
   });
 
+  // #283 — THE M WHITELIST. The post writes the vacuum's bare `M331`/`M332` where it used to write
+  // `M7`/`M9`, and the verifier has to know all four. The two pairs are not the same kind of entry:
+  // `M331`/`M332` are what our own output carries, while `M7`/`M9` are kept because the machine
+  // ANSWERS them — a file that carries one is not unsafe, only written for a machine whose air
+  // output does nothing. The sub-coded family members are refused either way: we drive the bare
+  // modes and nothing else, and a sub-code is a different command.
+  it('not-our-dialect: the vacuum words are in the dialect, and the air words stay legal', () => {
+    const vacuum = program(['G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M332', 'M5', 'M02']);
+    expect(codes(vacuum.ctx, vacuum.text)).not.toContain('not-our-dialect');
+
+    // Legacy words: accepted, because the controller accepts them (`ok`, and it blows nothing).
+    const air = ['G90 G21', 'T1 M6', 'M7', 'S12000 M3', 'G53 G0 Z-3', 'G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M9', 'M5', 'M02'].join('\n');
+    expect(codes(ctxFor(), air)).not.toContain('not-our-dialect');
+
+    // A sub-code is a DIFFERENT command from the bare mode: `M331.1` blows, `M331.2` cleans the
+    // bed, `M331.4` removes static — none of which this post drives.
+    const blowing = program(['M331.1', 'G0 X5 Y5', 'G1 Z-1 F200', 'M5', 'M02']);
+    const findings = verifyProgram(blowing.text, blowing.ctx).findings;
+    expect(findings.some((f) => f.code === 'not-our-dialect')).toBe(true);
+    expect(findings.find((f) => f.code === 'not-our-dialect')?.message).toContain('M331 M332');
+
+    // And an accessory word outside the family is still refused: `M8` is not this machine's.
+    const flood = program(['M8', 'G0 X5 Y5', 'G1 Z-1 F200', 'M5', 'M02']);
+    expect(codes(flood.ctx, flood.text)).toContain('not-our-dialect');
+  });
+
   it('not-our-dialect: a ; comment containing G2 raises nothing', () => {
     const { text, ctx } = program(['; G2 is an arc word, but this is a comment', 'G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02']);
     const report = verifyProgram(text, ctx);
@@ -209,12 +243,12 @@ describe('cncVerify (#174): the checks', () => {
   });
 
   it('rpm-too-high: an S above the machine ceiling', () => {
-    const text = ['G90 G21', 'T1 M6', 'M7', 'S20000 M3', 'G0 X5 Y5 Z5', 'G1 Z-1 F200', 'G1 X10', 'G0 Z5', 'M5', 'M02'].join('\n');
+    const text = ['G90 G21', 'T1 M6', 'M331', 'S20000 M3', 'G0 X5 Y5 Z5', 'G1 Z-1 F200', 'G1 X10', 'G0 Z5', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor(), text)).toContain('rpm-too-high');
   });
 
   it('bad-preamble: a first motion without G90 and G21', () => {
-    const text = ['T1 M6', 'M7', 'S12000 M3', 'G0 X5 Y5 Z5', 'G1 Z-1 F200', 'G1 X10', 'G0 Z5', 'M5', 'M02'].join('\n');
+    const text = ['T1 M6', 'M331', 'S12000 M3', 'G0 X5 Y5 Z5', 'G1 Z-1 F200', 'G1 X10', 'G0 Z5', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor(), text)).toContain('bad-preamble');
   });
 
@@ -330,7 +364,7 @@ describe('sacrificialDepthLimit (#213 §3): the depth table', () => {
 describe('cut-outside-stock against supportedFootprint (#213 §3)', () => {
   const STOCK = { length: 20, width: 10, thickness: 5 };
   // A stroke from X = 17 to X = 23: it runs 3 mm past the part's right edge at X = 20.
-  const PAST_EDGE = ['G90 G21', 'T1 M6', 'M7', 'S12000 M3', 'G53 G0 Z-3', 'G0 X17 Y5', 'G1 Z-1 F200', 'G1 X23', 'M5', 'M02'].join('\n');
+  const PAST_EDGE = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 Z-3', 'G0 X17 Y5', 'G1 Z-1 F200', 'G1 X23', 'M5', 'M02'].join('\n');
 
   it('with no sacrificial material, 3 mm past the edge is refused at the tool edge', () => {
     expect(codes(ctxFor(), PAST_EDGE)).toContain('cut-outside-stock');
@@ -345,7 +379,7 @@ describe('cut-outside-stock against supportedFootprint (#213 §3)', () => {
 
   it('a stroke that leaves the strip too is still cut-outside-stock', () => {
     const depthLimit = sacrificialDepthLimit(STOCK, presetJawStrips(), { minFloor: 1, breakthrough: 0.3 });
-    const pastStrip = ['G90 G21', 'T1 M6', 'M7', 'S12000 M3', 'G53 G0 Z-3', 'G0 X23 Y5', 'G1 Z-1 F200', 'G1 X30', 'M5', 'M02'].join('\n');
+    const pastStrip = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 Z-3', 'G0 X23 Y5', 'G1 Z-1 F200', 'G1 X30', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor({ depthLimit }), pastStrip)).toContain('cut-outside-stock');
   });
 });

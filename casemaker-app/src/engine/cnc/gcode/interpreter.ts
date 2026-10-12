@@ -31,16 +31,16 @@ const INCH = 25.4;
 /** A radius mismatch above this is reported: the firmware accepts it and runs a circle on the start radius, then one jump to the target. */
 const ARC_RADIUS_MISMATCH_WARN_MM = 0.01;
 
-/** Codes with no geometric effect that appear in the reference corpus. */
+/** Codes with no geometric effect, in the reference corpus or observed on the machine. */
 const NO_EFFECT_M = new Set([
+  // `M7`/`M9` are here rather than in the switch below because this controller does nothing with
+  // them: both are answered `ok` and neither blows air (bench, 2026-10-12; the 2026-10-07 traffic
+  // read saw no `M7`/`M9` at all). A file that asks for air on a Z1 gets nothing, and this
+  // interpreter models the machine, not the wish — so no event, no state, no diagnostic. Our post
+  // stopped writing them for exactly this reason (#283); `case 331` is the accessory it writes.
+  7, 9,
   106, 107, // fan
   220, 223, // feed / spindle override (change time, not geometry)
-  // #331.x is a MODE FAMILY, not a vacuum: Studio toggles bed cleaning (`.2`), blowing (`.1`),
-  // static removal (`.4`) and extend-out (bare `331`), with 332 the off side. Earlier comments
-  // here called it "auto vacuum", which named only the bare form — the family is observed in
-  // Studio's own MDI log, 2026-10-07 (#283, `/Z1-Firmware-Dialect.md` §11.3). None has a
-  // geometric effect, so the whole family is accepted silently.
-  331, 332,
   497, // UI state flag, no motion
   801, 802, // vacuum (Carvera)
   811, 812, // spindle fan
@@ -725,11 +725,18 @@ class Interp {
       case 6:
         this.toolChange(words, line);
         return;
-      case 7:
-        this.events.push({ kind: 'air', line, on: true });
+      // The accessory, as a program command: bare `M331` on, bare `M332` off. That is the vacuum
+      // — the mode Studio's own Vacuum switch drives, which the maintainer turns on for every real
+      // cut, and which our post writes for `ir.air` (#283; `M331` → *turning extend out mode on* /
+      // `ok`, sent from our console on 2026-10-12, `docs/bench/traces/2026-10-12-cut-rowA.log`).
+      // The DECIMAL forms are the rest of the family — bed cleaning (`.2`), blowing (`.1`), static
+      // removal (`.4`) — machine settings this app neither drives nor models, so they are accepted
+      // and change nothing, exactly as before.
+      case 331:
+        if (sub === 0) this.events.push({ kind: 'vacuum', line, on: true });
         return;
-      case 9:
-        this.events.push({ kind: 'air', line, on: false });
+      case 332:
+        if (sub === 0) this.events.push({ kind: 'vacuum', line, on: false });
         return;
       case 321:
         this.laser = true;
@@ -764,16 +771,23 @@ class Interp {
   /**
    * `M2` / `M30`, as the firmware executes them. The Z1 runs in grbl mode (the CNC build
    * defaults it on), so `M30` is end-of-program, exactly like `M2`. The dispatcher issues
-   * `M5` and `M9`, sets the modal motion to `G1`, and the robot resets the work offset to
-   * G54 and the distance mode to absolute. Makera's concatenated samples depend on this:
-   * `M30` ends one program and `T1M6` starts the next with no `M5` between.
+   * `M5` (and `M9`, which this machine does nothing with — see `NO_EFFECT_M`), sets the modal
+   * motion to `G1`, and the robot resets the work offset to G54 and the distance mode to
+   * absolute. Makera's concatenated samples depend on this: `M30` ends one program and `T1M6`
+   * starts the next with no `M5` between.
+   *
+   * NO ACCESSORY EVENT. The vacuum is a machine SETTING, not coolant: the wizard's five switches
+   * were still on at the end of the 2026-10-07 session after being toggled on at its start, and
+   * **nothing observed says `M30` clears one** (`/Z1-Firmware-Dialect.md` §11.10, which also
+   * leaves persistence across a power cycle open). So the model does not claim the firmware turns
+   * it off — a file that turns the vacuum on is responsible for turning it off, which is exactly
+   * why the post writes its `M332` itself (#283).
    */
   private programEnd(line: number): void {
     if (this.spindle !== 'off') {
       this.spindle = 'off';
       this.events.push({ kind: 'spindle', line, state: 'off', rpm: this.rpm });
     }
-    this.events.push({ kind: 'air', line, on: false });
     this.events.push({ kind: 'program-end', line });
     this.motion = 1;
     this.absolute = true;

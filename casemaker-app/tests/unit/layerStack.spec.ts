@@ -218,7 +218,7 @@ describe('layerStack (#178): ownership and the verifier seam', () => {
       [
         'G90 G21',
         'T1 M6',
-        'M7',
+        'M331',
         'S12000 M3',
         // #384 — the machine-frame retract the post writes: the file has to establish a Z before
         // its first XY rapid, or the verifier refuses it (and rightly: the head's Z is unknown

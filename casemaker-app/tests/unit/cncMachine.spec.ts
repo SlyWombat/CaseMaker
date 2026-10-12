@@ -66,9 +66,14 @@ describe('the Z1 profile', () => {
 
   it('states what it does not have as FLAGS, not silence', () => {
     expect(Z1.capabilities.laser).toBe(false);
-    expect(Z1.capabilities.vacuum).toBe(false);
     expect(Z1.capabilities.rotary).toBe(true);
-    expect(Z1.capabilities.air).toBe(true);
+    // #283 — the two accessory flags say which surface our post drives, and on a Z1 that surface
+    // is the vacuum: `M331`/`M332` were observed working from our own console on 2026-10-12. `air`
+    // is false because the machine ANSWERS `M7`/`M9` and blows nothing — it is not an absence of
+    // the capability, it is the observation that the word does nothing (the blowing mode is the
+    // family's `M331.1`, which this app does not drive).
+    expect(Z1.capabilities.vacuum).toBe(true);
+    expect(Z1.capabilities.air).toBe(false);
   });
 
   it('dialect flags match the firmware and the vendor FreeCAD definition', () => {

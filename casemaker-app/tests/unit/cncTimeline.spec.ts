@@ -23,17 +23,17 @@ const expectPos = (actual: readonly (number | null)[], expected: readonly (numbe
 describe('machine state: what the controller holds after each step', () => {
   it('starts from the setup: starting tool, spindle off, nothing known', () => {
     const s = initialState(setupWith({ startingTool: 3 }));
-    expect(s).toMatchObject({ tool: 3, spindle: 'off', air: false, laser: false, wcs: 0, a: null });
+    expect(s).toMatchObject({ tool: 3, spindle: 'off', vacuum: false, laser: false, wcs: 0, a: null });
     expect(s.work).toEqual([null, null, null]);
     expect(s.machine).toEqual([null, null, null]);
   });
 
-  it('spindle, air and laser follow their events', () => {
-    const tl = run('S12000 M3\nM7\nM5\nM9\nM321\n');
+  it('spindle, vacuum and laser follow their events', () => {
+    const tl = run('S12000 M3\nM331\nM5\nM332\nM321\n');
     expect(tl.stateAt(0)).toMatchObject({ spindle: 'cw', rpm: 12000 });
-    expect(tl.stateAt(1)).toMatchObject({ air: true });
+    expect(tl.stateAt(1)).toMatchObject({ vacuum: true });
     expect(tl.stateAt(2)).toMatchObject({ spindle: 'off' });
-    expect(tl.stateAt(3)).toMatchObject({ air: false });
+    expect(tl.stateAt(3)).toMatchObject({ vacuum: false });
     expect(tl.stateAt(4)).toMatchObject({ laser: true });
   });
 
@@ -163,7 +163,8 @@ describe('machine state: what the controller holds after each step', () => {
   });
 
   it('M2 / M30 reset the work offset to G54', () => {
-    // M30 emits an air-off event BEFORE program-end, so the reset lands on the LAST step.
+    // The reset lands on the LAST step — the program-end event (nothing else follows an M30
+    // that would move the offset back; #283 removed the accessory event that used to sit here).
     const tl = run('G55\nM30\n');
     expect(tl.stateAt(0).wcs).toBe(1);
     expect(tl.stateAt(tl.events.length - 1).wcs).toBe(0);

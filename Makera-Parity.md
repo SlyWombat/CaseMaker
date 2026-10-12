@@ -229,7 +229,7 @@ strategy names, because they are what makes an operation usable.
 | **Pocket shape** | `pocket_strategy`, `path_direction`, `direction`, `parallel_angle`, `position_offset`, `toolcontainment` | **V1** needs contour-parallel; the rest planned |
 | **Contour side** | `contourPosition`, `offset`, `workDirection` | planned |
 | **Peck drilling** | `retract_distance`, `retract_position`, `retract_z` | planned with drilling |
-| **Coolant / air** | `coolant` on the tool; `M7`/`M9` in output | **V1** (#173) |
+| **Coolant / air** | `coolant` on the tool — our post writes the machine's VACUUM for it, bare `M331`/`M332` (#283); `M7`/`M9` are answered `ok` and blow nothing on a Z1 | **V1** (#173, #283) |
 | **Operation list** | `pathName`, `pathOrder`, `groupid`, `showstate`, `selectedmeshes` | needed for multi-op jobs |
 | **Thread milling** | `pitch`, `threadDiameter`, `holeScrew`, included angle, inside/outside, hand, layered passes | not planned |
 
@@ -883,8 +883,8 @@ Each is cheap, changes something already built or already scheduled, and needs n
   recovery; TM has *Set a New Start Line* with four lead-in behaviours and logs the last
   executed line "in case a program must be restarted from the middle" (`UI-PATTERNS.md` §8;
   `notes/tormach.md`). The hard part SC describes is what our `Timeline` already holds at every
-  step — spindle, air, tool, WCS (`/Simulation.md` §1.1). We do not drive the machine, so
-  resume is a second `.nc`: a literal prefix (`G90 G21`, `T<n> M6`, `S M3`, `M7`, `G0` to
+  step — spindle, vacuum, tool, WCS (`/Simulation.md` §1.1). We do not drive the machine, so
+  resume is a second `.nc`: a literal prefix (`G90 G21`, `T<n> M6`, `S M3`, `M331`, `G0` to
   `hopZ` then XY) and the tail from step *k*. Two Z1 facts make it safe: Smoothieware has no
   variables, so the prefix must be literal anyway, and `M6` re-measures tool length, which is
   exactly what a broken-bit restart needs (`/Z1-Firmware-Dialect.md` §2). *Entry:* #209 — the

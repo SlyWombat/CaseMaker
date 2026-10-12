@@ -257,7 +257,15 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): 
         '',
         `T${ir.toolNumber} M6`,
       );
-      if (ir.air) body.push('M7');
+      // #283 — THE PROGRAM'S ACCESSORY IS THE VACUUM, AND THE FILE TURNS IT ON ITSELF. `M7` is
+      // answered `ok` by this controller and blows nothing (never mind that no `M7`/`M9` appeared
+      // in the 2026-10-07 traffic read at all): air via `M7` is a no-op on a Z1. What clears chips
+      // is bare `M331`, "turning extend out mode on" — the code Studio's own Vacuum switch sends,
+      // which the bench drove from our console around both 2026-10-12 first-chips runs
+      // (`docs/bench/traces/2026-10-12-cut-rowA.log`) and which the maintainer runs for every real
+      // cut. The switches are off at power-up and a file cannot assume where the last job left
+      // them, so the program states this itself — which is why it belongs in the file.
+      if (ir.air) body.push('M331');
       // #384 — THE FILE LIFTS THE HEAD ITSELF, IN THE MACHINE FRAME. After a manual `M6` the
       // head's Z is wherever the last job left it, so an XY rapid at "whatever Z the head is
       // at" is the move that drives a tool through the work. `G53` is absolute in MACHINE
@@ -283,7 +291,9 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): 
 
   // ---- Studio's own ending, verbatim.
   body.push(`G0 Z${axis(FINAL_RETRACT_Z)}`);
-  if (ir.air) body.push('M9');
+  // The other end of #283's `M331`: an explicit off. A mode left on would keep running after the
+  // job — the bench rule is vacuum on for the cut, off when it is finished.
+  if (ir.air) body.push('M332');
   body.push('M05', 'G28', 'M02');
 
   return { ok: true, text: [...header, '', ...body].join('\n') + '\n' };

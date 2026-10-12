@@ -236,7 +236,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
       "id": "cut",
       "steps": [
         {
-          "text": "Spindle, feed, plunge, passes and step-down. Air on.",
+          "text": "Spindle, feed, plunge, passes and step-down. Vacuum on.",
           "value": "12000 RPM · 500 mm/min feed · 200 mm/min plunge · 2 × 0.5 mm passes · 0.45 mm step-over",
         },
         {
@@ -524,7 +524,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "id": "cut",
       "steps": [
         {
-          "text": "Spindle, feed, plunge, passes and step-down. Air on.",
+          "text": "Spindle, feed, plunge, passes and step-down. Vacuum on.",
           "value": "12000 RPM · 500 mm/min feed · 200 mm/min plunge · 2 × 0.5 mm passes · 0.45 mm step-over",
         },
         {

@@ -1106,7 +1106,7 @@ export function buildRunSheet(
   const cutSteps: RunSheetStep[] = [];
   if (params !== null) {
     cutSteps.push({
-      text: 'Spindle, feed, plunge, passes and step-down. Air on.',
+      text: `Spindle, feed, plunge, passes and step-down. Vacuum ${params.air ? 'on' : 'off'}.`,
       value:
         `${params.rpm} RPM · ${fmtNum(params.feed)} mm/min feed · ${fmtNum(params.plungeFeed)} mm/min ` +
         `plunge · ${generated.cam?.passes ?? 1} × ${fmtNum(params.stepDown)} mm passes · ` +

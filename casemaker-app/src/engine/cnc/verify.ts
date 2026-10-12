@@ -157,7 +157,19 @@ export function sacrificialDepthLimit(stock: StockDims, s: Sacrificial, opts: Sa
 
 /** The words our post-processor (#173) may write. Anything else is `not-our-dialect`. */
 const G_ALLOWED = new Set([0, 1, 21, 28, 53, 90]);
-const M_ALLOWED = new Set([2, 3, 5, 6, 7, 9]);
+/**
+ * `M331`/`M332` (bare) are the vacuum the post now writes (#283), and they are the ONLY accessory
+ * our post drives. `M7`/`M9` stay accepted although the post no longer writes them: the machine
+ * answers both `ok` (it blows nothing — #283), our own authored bench file
+ * (`tests/e2e/fixtures/three-strokes.nc`) and Studio's own files carry them, and refusing a word
+ * this controller runs without complaint is not this verifier's job. They are legacy in the
+ * dialect, not wrong in it.
+ *
+ * The sub-coded forms of the family (`M331.1` blowing, `M331.2` bed cleaning, `M331.4` static
+ * removal) are refused by the `sub !== 0` rule below, as they always were: we drive the bare mode
+ * and nothing else.
+ */
+const M_ALLOWED = new Set([2, 3, 5, 6, 7, 9, 331, 332]);
 const PARAM_LETTERS = new Set(['T', 'S', 'F', 'X', 'Y', 'Z']);
 
 interface SourceWord {
@@ -244,7 +256,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
     } else if (w.letter === 'M') {
       const c = numParts(w.text);
       if (c === null || c.sub !== 0 || !M_ALLOWED.has(c.code)) {
-        push('not-our-dialect', w.line, `the word '${shown}' is not in the post's dialect (M2 M3 M5 M6 M7 M9)`);
+        push('not-our-dialect', w.line, `the word '${shown}' is not in the post's dialect (M2 M3 M5 M6 M7 M9 M331 M332)`);
       }
     } else if (!PARAM_LETTERS.has(w.letter)) {
       push('not-our-dialect', w.line, `the word '${shown}' is not in the post's dialect (only G, M, T, S, F, X, Y, Z words)`);

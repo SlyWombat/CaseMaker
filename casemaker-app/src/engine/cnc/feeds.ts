@@ -93,7 +93,11 @@ export interface CutParams {
    * peck cycle measures it (#208/#209).
    */
   peck: number;
-  /** M7. */
+  /**
+   * The job's accessory output. Named `air` since the first table, but on a Z1 the post realises
+   * it as the VACUUM (bare `M331`/`M332`): `M7`/`M9` are answered `ok` and blow nothing (#283).
+   * Always `true` — every row in this table runs with it, and a coupon cannot measure it.
+   */
   air: boolean;
 }
 

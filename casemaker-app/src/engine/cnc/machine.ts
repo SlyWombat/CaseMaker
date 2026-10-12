@@ -209,19 +209,25 @@ export interface MillProfile extends MachineIdentity {
     /** No laser module on this machine. A FLAG, so the absence is a fact rather than silence. */
     laser: boolean;
     /**
-     * `M7`/`M9` air. These two flags are the accessory surface OUR POST drives, not the
-     * machine's whole one — the Z1 also answers a mode family (`M331.2` bed cleaning, `M331.1`
-     * blowing, `M331.4` static removal, `M331` extend-out) plus `M951` time-lapse, none of which
-     * this app emits or reads (#283; observed in Studio's own MDI log 2026-10-07, recorded at
-     * `/Z1-Firmware-Dialect.md` §11.3). Whether `M7` selects air on this machine is exactly what
-     * the traffic read could not settle: no `M7`/`M9` appeared in it at all.
+     * `M7`/`M9` air: **`false` on a Z1, and that is an observation, not a silence.** The
+     * controller answers both `ok` and blows nothing (bench, 2026-10-12; no `M7`/`M9` appeared in
+     * the 2026-10-07 traffic read either), so air via `M7` is a no-op here. It is not "the machine
+     * has no air": the blowing mode is `M331.1`, part of the family below, which this app does not
+     * drive.
      */
     air: boolean;
     /**
-     * The Carvera's internal vacuum is `M801`/`M802`, which this controller does not take. The
-     * Z1's own suction story is the `M331` "extend out" mode, which the log renders as *Auto
-     * Vacuum* — but that mapping is inferred by elimination, not observed, so it is not a `true`
-     * here. See #283.
+     * The bare `M331`/`M332` "extend out" mode — the vacuum, and what every real cut runs with
+     * (maintainer's call at the bench, 2026-10-12, #283). `true`: our post writes those two words
+     * and the machine obeys them — `M331` answered *turning extend out mode on* / `ok`, `M332`
+     * *…off* / `ok`, sent from our own console around both first-chips runs
+     * (`docs/bench/traces/2026-10-12-cut-rowA.log`). What was inference by elimination on
+     * 2026-10-07 is a reading of our own traffic now.
+     *
+     * The rest of the machine's accessory surface is the same family's sub-codes — `M331.2` bed
+     * cleaning, `M331.1` blowing, `M331.4` static removal — plus `M951` time-lapse, none of which
+     * this app emits or reads (#283, #289; `/Z1-Firmware-Dialect.md` §11.3). The Carvera's
+     * internal vacuum, `M801`/`M802`, is a different machine's and is not this.
      */
     vacuum: boolean;
   };
@@ -511,7 +517,9 @@ export const Z1: MillProfile = {
     zMin: -102.0,
     source: 'config-get sd, read on the machine (#208 B2, 2026-10-06)',
   },
-  capabilities: { rotary: true, laser: false, air: true, vacuum: false },
+  // `air: false` — `M7`/`M9` are answered `ok` and blow nothing on this machine; `vacuum: true` —
+  // the post writes bare `M331`/`M332` and the machine obeys them (#283, bench 2026-10-12).
+  capabilities: { rotary: true, laser: false, air: false, vacuum: true },
   dialect: { acceptsArcs: true, cannedCycles: false, grblMode: true, axisPrecision: 3, feedPrecision: 2 },
   // The frame and its derivations, not the numbers themselves: `Z1_DATUMS` is
   // `deriveCoordinateFrame(Z1_FRAME)` and is the only thing that computes a position (#279).

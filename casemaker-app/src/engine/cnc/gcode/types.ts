@@ -124,8 +124,14 @@ export interface SpindleEvent extends BaseEvent {
   rpm: number | null;
 }
 
-export interface AirEvent extends BaseEvent {
-  kind: 'air';
+/**
+ * The program's accessory output, on or off. On a Z1 that accessory is the VACUUM: bare `M331`
+ * (Studio's own "extend out" mode, the one its Vacuum switch drives) and bare `M332` for off
+ * (#283, observed from our console 2026-10-12). `M7`/`M9` are answered `ok` and blow nothing, so
+ * they emit no event at all — there is no air to track.
+ */
+export interface VacuumEvent extends BaseEvent {
+  kind: 'vacuum';
   on: boolean;
 }
 
@@ -228,7 +234,7 @@ export type GcodeEvent =
   | ToolChangeEvent
   | PauseEvent
   | SpindleEvent
-  | AirEvent
+  | VacuumEvent
   | DwellEvent
   | HomeEvent
   | ProbeEvent

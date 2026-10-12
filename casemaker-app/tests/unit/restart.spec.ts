@@ -26,11 +26,15 @@ function setupFor(stock = STOCK, startingTool: number | 'unknown' = 1): Setup {
   );
 }
 
-/** Two open strokes on a 20 × 10 × 5 block, our own dialect: real T1 M6 is a no-op (startingTool 1). */
+/**
+ * Two open strokes on a 20 × 10 × 5 block, our own dialect: real T1 M6 is a no-op (startingTool 1),
+ * and the accessory word is the vacuum's `M331`/`M332` — what this app's post writes since #283
+ * (`M7`/`M9` are answered `ok` by the controller and blow nothing, so they set no state at all).
+ */
 const PROGRAM = [
   'G90 G21',
   'T1 M6',
-  'M7',
+  'M331',
   'S12000 M3',
   'G0 X2 Y2 Z5',
   'G0 Z1',
@@ -39,7 +43,7 @@ const PROGRAM = [
   'G1 X10 Y6',
   'G1 X2 Y6',
   'G0 Z15',
-  'M9',
+  'M332',
   'M5',
   'G28',
   'M02',
@@ -108,7 +112,7 @@ describe('restart (#249): generateRestart', () => {
     // The state restored is the one AFTER step − 1: resuming AT a step means event `step` has
     // not run yet. Here that is the tool at [2, 2, −1] about to move to [10, 2, −1].
     const before = original.stateAt(step - 1);
-    expect(r.resume).toEqual({ step, work: before.work, spindle: before.spindle, rpm: before.rpm, air: before.air, tool: before.tool });
+    expect(r.resume).toEqual({ step, work: before.work, spindle: before.spindle, rpm: before.rpm, vacuum: before.vacuum, tool: before.tool });
     expect(before.work).toEqual([2, 2, -1]);
 
     // The restart's moves CONTINUE the original's: after the 3-move approach (retract, XY rapid,
@@ -126,7 +130,7 @@ describe('restart (#249): generateRestart', () => {
     const lastOriginal = original.stateAt(original.events.length - 1);
     const lastRestart = restart.stateAt(restart.events.length - 1);
     expect(lastRestart.spindle).toBe(lastOriginal.spindle);
-    expect(lastRestart.air).toBe(lastOriginal.air);
+    expect(lastRestart.vacuum).toBe(lastOriginal.vacuum);
   });
 
   it('re-establishes the accessory state before it moves (the field’s hard part)', () => {
@@ -135,14 +139,14 @@ describe('restart (#249): generateRestart', () => {
     const r = generateRestart({ gcodeText: PROGRAM, setup: setupFor(), tool: TOOL, machine: Z1, step, stock: STOCK, baseName: 'job' });
     const text = r.nc as string;
     const lines = text.split('\n');
-    const airIdx = lines.indexOf('M7');
+    const vacuumIdx = lines.indexOf('M331');
     const spindleIdx = lines.findIndex((l) => l === 'S12000 M3');
     const retractIdx = lines.findIndex((l) => l === 'G0 Z15');
     // The resume point is the state before the cut at `step`: here [2, 2, −1].
     const rapidIdx = lines.findIndex((l) => l === 'G0 X2 Y2');
     const descendIdx = lines.findIndex((l) => l === 'G1 Z-1 F200');
-    expect(airIdx).toBeGreaterThan(-1);
-    expect(spindleIdx).toBeGreaterThan(airIdx); // air before spindle
+    expect(vacuumIdx).toBeGreaterThan(-1);
+    expect(spindleIdx).toBeGreaterThan(vacuumIdx); // vacuum before spindle
     expect(retractIdx).toBeGreaterThan(spindleIdx); // state restored before the retract
     expect(rapidIdx).toBeGreaterThan(retractIdx); // retract before the XY rapid
     expect(descendIdx).toBeGreaterThan(rapidIdx); // controlled descent last

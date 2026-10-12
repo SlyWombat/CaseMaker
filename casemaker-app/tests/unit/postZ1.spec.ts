@@ -124,7 +124,7 @@ describe('postZ1 (#173)', () => {
       ; T1-1 mm flat end
 
       T1 M6
-      M7
+      M331
       G53 G0 Z-3
       G0 X2 Y2
       S12000 M3
@@ -143,7 +143,7 @@ describe('postZ1 (#173)', () => {
       G1 Y7
       G0 Z5
       G0 Z15
-      M9
+      M332
       M05
       G28
       M02
@@ -223,9 +223,35 @@ describe('postZ1 (#173)', () => {
     expect(lines.filter((l) => l.startsWith('G0 ')).some((l) => l.includes('F'))).toBe(false);
     expect(lines.filter((l) => l.includes('F')).every((l) => l.startsWith('G1'))).toBe(true);
     // #384 — `G53` is no longer in this list: the post now WRITES it, deliberately, as the one
-    // machine-frame word it needs. Everything else here is still a code our files must not contain.
-    const forbidden = /\b(G2|G3|G38|G10|G92|G54|G55|G56|G57|G58|G59|G91|G81|G82|G83|G84|G85|G86|G87|G88|G89|M490|M491|M801|M802|M861|M862|M3\d\d)\b|\bA[-+]?\d/;
+    // machine-frame word it needs. #283 — the laser family `M321`–`M325` is still forbidden
+    // (`M32\d`), while `M331`/`M332` are now the post's own accessory words; and `M7`/`M9` are
+    // forbidden because the post STOPPED writing the air words that blow nothing on a Z1.
+    // Everything else here is still a code our files must not contain.
+    const forbidden =
+      /\b(G2|G3|G38|G10|G92|G54|G55|G56|G57|G58|G59|G91|G81|G82|G83|G84|G85|G86|G87|G88|G89|M490|M491|M801|M802|M861|M862|M32\d|M7|M9)\b|\bA[-+]?\d/;
     expect(lines.join('\n')).not.toMatch(forbidden);
+  });
+
+  it('turns the VACUUM on where the air word used to go, and off at the end (#283)', () => {
+    const res = postZ1(TWO_OP, CTX, Z1);
+    if (!res.ok) throw new Error('post failed');
+    const lines = codeLines(res.text);
+
+    // On: after the tool change, before anything moves. The machine switches are off at power-up
+    // and the program cannot assume where the last job left them, so the file states it itself.
+    const on = lines.indexOf('M331');
+    expect(on).toBeGreaterThan(lines.indexOf('T1 M6'));
+    expect(on).toBeLessThan(lines.findIndex((l) => /^G[01] /.test(l)));
+    // Off: exactly once, and in the ending — a mode left running outlives the job.
+    expect(lines.filter((l) => l === 'M332')).toHaveLength(1);
+    expect(lines.indexOf('M332')).toBeLessThan(lines.indexOf('M02'));
+
+    // A job that asks for no accessory writes neither word, exactly as it wrote no `M7`/`M9`.
+    const dry = postZ1(makeIr(TWO_OP.operations, { air: false }), CTX, Z1);
+    if (!dry.ok) throw new Error('post failed');
+    const dryLines = codeLines(dry.text);
+    expect(dryLines).not.toContain('M331');
+    expect(dryLines).not.toContain('M332');
   });
 
   it('lifts the head in the MACHINE frame before its first XY rapid (#384)', () => {
@@ -332,7 +358,9 @@ describe('postZ1 (#173)', () => {
     const res = postZ1(TWO_OP, CTX, Z1);
     if (!res.ok) throw new Error('post failed');
     const tail = res.text.trimEnd().split('\n').slice(-5);
-    expect(tail).toEqual([`G0 Z${FINAL_RETRACT_Z}`, 'M9', 'M05', 'G28', 'M02']);
+    // #283 — Studio's closing lines with OUR accessory word: the vacuum off, not the `M9` that
+    // blows nothing on this machine.
+    expect(tail).toEqual([`G0 Z${FINAL_RETRACT_Z}`, 'M332', 'M05', 'G28', 'M02']);
   });
 });
 
