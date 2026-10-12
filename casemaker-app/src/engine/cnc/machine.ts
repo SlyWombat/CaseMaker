@@ -477,7 +477,7 @@ export const Z1: MillProfile = {
     xyMmPerMin: 1200,
     zMmPerMin: 600,
     accelMmPerS2: 150,
-    source: 'config-get sd, read on the machine (#281, 2026-10-07)',
+    source: 'config read 2026-10-07 + stopwatch 2026-10-08 (#281)',
   },
   maxRpm: 13000,
   hasATC: false,

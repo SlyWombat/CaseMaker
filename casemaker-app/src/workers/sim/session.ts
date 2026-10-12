@@ -517,11 +517,18 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    *
    * Times (#197, #281): every move over a fully-known span is timed through the trapezoid on the
    * machine's rapid model — a feed at its own `feed` (mm/min), a rapid at `rapidRate` — using
-   * `moveSeconds`, the SAME function the cycle estimate is timed with, so the drawn clock, the run
-   * sheet and the post's `TIME` cannot time one move two ways. A move whose start or end is unknown,
-   * or a feed with no known feed value, takes 0 s — the first rapid of a program starts from an
-   * unknown position and so contributes nothing to the clock. With NO machine loaded there is no
-   * rapid model, so rapids take 0 s and `rapidsTimed` is false: the clock is feeds only, and the
+   * `moveSeconds`, the same trapezoid the cycle estimate is built from. PER MOVE here, where the
+   * estimate charges one trapezoid per contiguous feed run: the drawn clock is what the axes do
+   * arriving at each vertex, the estimate is what a run costs once the planner carries speed
+   * through the junctions between those vertices, and on a pocket cut in short chords that makes
+   * this clock the longer of the two — playback, not a prediction (the run sheet's estimate is).
+   *
+   * Only moves are timed: a loaded program's `dwell` moves no axis and carries no time this clock
+   * can read, so it adds nothing to `t` and the drawn clock is short by its holds. A move whose
+   * start or end is unknown, or a feed with no known feed value, takes 0 s — the first rapid of a
+   * program starts from an unknown
+   * position and so contributes nothing to the clock. With NO machine loaded there is no rapid
+   * model, so rapids take 0 s and `rapidsTimed` is false: the clock is feeds only, and the
    * transport says so rather than reading as a total (#367).
    */
   const simPath = (): SimPath => {

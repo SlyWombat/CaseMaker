@@ -91,7 +91,7 @@ export const HOP_Z = 1;
  * FEED moves only, `Σ distance / f × 60`, with no acceleration term. This is the cutting
  * COMPONENT of the cycle estimate (`estimateCycleSeconds`); #242's single number is the cycle
  * estimate, not this one, and since #281 the two are no longer in fixed ratio — the cycle
- * estimate times the same feeds through the trapezoid, so it exceeds this sum by the moves'
+ * estimate times the same feeds through the trapezoid, so it exceeds this sum by the feed RUNS'
  * accelerate/decelerate terms and by the rapids this one excludes.
  *
  * Distance is the full 3D length to the move's endpoint, so a plunge counts its Z travel.
@@ -126,8 +126,10 @@ export function estimateSeconds(moves: readonly CamMove[]): number {
  * 2026-10-07 (X/Y `alpha_max_rate` 1200, Z `gamma_max_rate` 600, `acceleration` 150 mm/s²),
  * bracketed by one stopwatch sample of an 88.4 mm X-only rapid on 2026-10-08 that came in at
  * 1060–1360 mm/min — consistent with the config and NOT a measurement of the machine. `#208 D3`, a
- * timed air run, is the end-to-end check that closes it; the estimate is expected to come in LOW
- * against a real run until that runs (#281).
+ * timed air run, is the end-to-end check that closes it. It does not compare one total against one
+ * number: feeds are timed per run and rapids per move ({@link estimateCycleSeconds}), so D3 times
+ * the two PORTIONS separately — an air run for the rapids, a cutting run for the feeds — and each
+ * one's error is visible on its own (#281).
  */
 export interface RapidEstimate {
   /** A rapid moving in X and/or Y, mm/min: the controller's own X/Y ceiling. */
@@ -144,6 +146,14 @@ export interface RapidEstimate {
  * The rate a rapid moving `(dx, dy, dz)` is timed at: Z's own ceiling when it moves in Z alone,
  * otherwise the X/Y one. The ONE place that choice is made, so the estimate and the drawn clock
  * cannot disagree about which ceiling a given rapid is under.
+ *
+ * A rapid that moves in Z AS WELL AS in X/Y is timed at the X/Y rate over its whole 3D length, so
+ * its Z leg is charged at twice the rate the controller would give it: the estimate is OPTIMISTIC
+ * by that leg's share, and this app's own programs contain such rapids — a trace hops straight from
+ * the end of one stroke at depth to the next stroke's start at `HOP_Z`, moving all three axes at
+ * once. It is stated rather than priced: the Z leg is bounded by the hop height beside an XY leg
+ * that is usually longer, and splitting one move per axis would model a planner that blends it with
+ * the moves around it, which this file has no measurement of (#281).
  */
 export function rapidRate(rapid: RapidEstimate, dx: number, dy: number, dz: number): number {
   return dx === 0 && dy === 0 && dz !== 0 ? rapid.zMmPerMin : rapid.xyMmPerMin;
@@ -167,10 +177,22 @@ export function moveSeconds(distance: number, rate: number, accel: number): numb
 }
 
 /**
- * Estimated CYCLE time in seconds for one operation's moves — cutting PLUS rapids, every move
- * timed through the trapezoid (#242, #281). This is THE one estimate: the Engrave panel's row and
- * the run sheet read the `estimatedSeconds` this populates, and `postZ1` writes its program-wide
- * sum into `;@MKR|TIME`, so all three come from this function and cannot disagree.
+ * Estimated CYCLE time in seconds for one operation's moves — cutting PLUS rapids, timed through
+ * the trapezoid (#242, #281). This is THE one estimate: the Engrave panel's row and the run sheet
+ * read the `estimatedSeconds` this populates, and `postZ1` writes its program-wide sum into
+ * `;@MKR|TIME`, so all three come from this function and cannot disagree.
+ *
+ * CUTTING IS TIMED PER RUN, rapids per move (#281, the review of 62fa025). A run is a maximal
+ * stretch of consecutive feed moves at the same `f` with no rapid between them, and its trapezoid
+ * is charged once, on the sum of its segments. The controller does not stop at every junction —
+ * Smoothieware's planner carries speed across one, which is what `junction_deviation` in its config
+ * is for — and this app cuts a pocket in 0.05 mm chords, so a triangle on each chord times the
+ * machine as if it had no look-ahead at all: it read the default job's 14 318 chords as 973 s of
+ * cutting, against the 539 s this run model gives and the 527 s the same feeds sum to with no
+ * acceleration at all. Those three numbers are the argument — the run model's 12 s over the closed
+ * form is the 304 runs' ramps, which is what a machine with look-ahead actually pays, where the
+ * extra 446 s was an artefact of charging every chord for a stop it never makes. A rapid is a stop
+ * at each end by construction, so each gets its own trapezoid.
  *
  * A feed is timed at its own `f`; a rapid at `rapidRate` of the machine the job is for. `rapid` is
  * REQUIRED and there is no default: the machine is the caller's to name (#347), a second mill
@@ -181,16 +203,37 @@ export function moveSeconds(distance: number, rate: number, accel: number): numb
 export function estimateCycleSeconds(moves: readonly CamMove[], rapid: RapidEstimate): number {
   let seconds = 0;
   let previous: CamMove | null = null;
+  /** The feed run being accumulated — its `f` and the running length of its segments. */
+  let run: { f: number; length: number } | null = null;
+  const endRun = (): void => {
+    if (run !== null) {
+      seconds += moveSeconds(run.length, run.f, rapid.accelMmPerS2);
+      run = null;
+    }
+  };
   for (const move of moves) {
-    if (previous !== null) {
-      const dx = move.x - previous.x;
-      const dy = move.y - previous.y;
-      const dz = move.z - previous.z;
-      const rate = move.kind === 'feed' ? move.f : rapidRate(rapid, dx, dy, dz);
-      seconds += moveSeconds(Math.hypot(dx, dy, dz), rate, rapid.accelMmPerS2);
+    if (previous === null) {
+      previous = move;
+      continue;
+    }
+    const dx = move.x - previous.x;
+    const dy = move.y - previous.y;
+    const dz = move.z - previous.z;
+    const distance = Math.hypot(dx, dy, dz);
+    if (move.kind === 'feed') {
+      if (run !== null && run.f === move.f) {
+        run.length += distance;
+      } else {
+        endRun();
+        run = { f: move.f, length: distance };
+      }
+    } else {
+      endRun();
+      seconds += moveSeconds(distance, rapidRate(rapid, dx, dy, dz), rapid.accelMmPerS2);
     }
     previous = move;
   }
+  endRun();
   return seconds;
 }
 

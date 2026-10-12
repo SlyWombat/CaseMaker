@@ -52,9 +52,10 @@ describe('the Z1 profile', () => {
       xyMmPerMin: 1200,
       zMmPerMin: 600,
       accelMmPerS2: 150,
-      source: expect.stringContaining('#281'),
+      // The decided sentence (#281, review of 62fa025): both halves of the evidence, and neither of
+      // them claiming to be a measurement of the machine.
+      source: 'config read 2026-10-07 + stopwatch 2026-10-08 (#281)',
     });
-    expect(Z1.rapidEstimate.source).toContain('config-get sd');
     // Z alone is slower than X/Y: the config's `gamma_max_rate` is half `alpha_max_rate`.
     expect(Z1.rapidEstimate.zMmPerMin).toBeLessThan(Z1.rapidEstimate.xyMmPerMin);
     // Values, not ceilings: `maxCutFeed` is the only number that bounds a move.

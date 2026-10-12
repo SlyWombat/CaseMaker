@@ -65,8 +65,9 @@ import type { Mm } from '@/types/units';
 
 /**
  * The CAM summary #206 returns on `EngraveGenerated.cam`. Structural, so the real object is
- * assignable. `estimatedSeconds` is the CYCLE estimate — cutting PLUS rapids, every move through
- * the trapezoid on the job machine's rapid model (#242, #281).
+ * assignable. `estimatedSeconds` is the CYCLE estimate — cutting PLUS rapids, a feed run timed as
+ * one move and a rapid as its own, through the trapezoid on the job machine's rapid model
+ * (#242, #281).
  */
 export interface RunSheetCamSummary {
   operations: number;
@@ -227,14 +228,18 @@ export interface RunSheetStackUp {
 
 /**
  * The note beside the header's time estimate (#242, #281). The number is a CYCLE estimate —
- * cutting plus rapids, every move through the trapezoid — so it is a planning figure, not a
+ * cutting plus rapids, each timed through the trapezoid — so it is a planning figure, not a
  * measured cycle time. Built from the profile's own rapid model so the printed rates cannot drift
- * from the ones the estimate is timed with, and so a second mill prints its own.
+ * from the ones the estimate is timed with, and so a second mill prints its own. The model's
+ * `source` rides along exactly as it does in the post's header line, so a sheet read on its own
+ * still says where the numbers came from — a config read and a stopwatch sample, not a measurement
+ * of the machine.
  */
 export function rapidAssumptionNote(rapid: RapidEstimate): string {
   return (
     `cutting + rapids through the trapezoid, timed on a rapid model of ${rapid.xyMmPerMin} mm/min XY / ` +
-    `${rapid.zMmPerMin} mm/min Z at ${rapid.accelMmPerS2} mm/s² — a planning estimate, not a measured cycle time.`
+    `${rapid.zMmPerMin} mm/min Z at ${rapid.accelMmPerS2} mm/s² (${rapid.source}) — a planning estimate, ` +
+    `not a measured cycle time.`
   );
 }
 

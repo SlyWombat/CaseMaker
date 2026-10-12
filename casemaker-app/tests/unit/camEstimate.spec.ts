@@ -1,6 +1,6 @@
-// The cycle-time estimate (#242, #281). One number with one meaning: CUTTING + RAPIDS, every move
-// timed through the trapezoid on a named rapid model, produced by ONE function so nothing
-// downstream can invent a second one.
+// The cycle-time estimate (#242, #281). One number with one meaning: CUTTING + RAPIDS, timed
+// through the trapezoid on a named rapid model — a feed RUN as one move, a rapid as its own —
+// produced by ONE function so nothing downstream can invent a second one.
 //
 // No wasm here: `estimateCycleSeconds`, `moveSeconds` and `generateTrace` are pure, so these run in
 // milliseconds.
@@ -99,10 +99,56 @@ describe('estimateCycleSeconds (#242, #281)', () => {
     // The cycle estimate is strictly larger: it adds the two rapids AND the feeds' own accel/decel
     // terms that the closed-form `estimateSeconds` drops.
     expect(cycle).toBeGreaterThan(cutting);
-    // The plunge is 2 mm (from HOP_Z 1 down to −1); the cut is 10 mm; the Z-only retract is 6 mm.
-    expect(cycle).toBeCloseTo(trap(2, 200, 150) + trap(10, 200, 150) + trap(6, 600, 150), 9);
+    // The plunge (2 mm, from HOP_Z 1 down to −1) and the cut (10 mm) are at the SAME feed, so they
+    // are one run of 12 mm and take one trapezoid; the Z-only retract is 6 mm at the Z rate.
+    expect(cycle).toBeCloseTo(trap(12, 200, 150) + trap(6, 600, 150), 9);
     // The opening rapid (no prior point) contributes nothing; the closing Z-only retract does.
     expect(cutting).toBeCloseTo((2 / 200) * 60 + (10 / 200) * 60, 9);
+  });
+
+  it('times a feed RUN as one move — the planner does not stop at every chord (#281, review of 62fa025)', () => {
+    // A pocket is cut in short chords and the controller carries speed across the junctions between
+    // them (`junction_deviation` is what that config key is for), so charging a stop-start triangle
+    // per chord times a machine with no look-ahead. Twenty 1 mm chords at F400: one 20 mm move, not
+    // twenty 1 mm ones.
+    const chords = [rapid(0, 0, 1)];
+    for (let i = 1; i <= 20; i++) chords.push(cut(i, 0, 1, 400));
+    const perRun = estimateCycleSeconds(chords, RAPID);
+    expect(perRun).toBeCloseTo(trap(20, 400, 150), 9);
+    const perChord = 20 * trap(1, 400, 150);
+    // And the difference is exactly nineteen ramps: both readings pay ONE ramp pair (v/a = 400/60/150
+    // s), and the per-chord reading pays it twenty times.
+    expect(perChord).toBeGreaterThan(perRun);
+    expect(perChord - perRun).toBeCloseTo(19 * (400 / 60 / 150), 9);
+  });
+
+  it('ends the run at a rapid, at a feed change, and at the start of the program', () => {
+    // Two cuts at different feeds are two runs (each trapezoid is applicable to one `f`).
+    expect(estimateCycleSeconds([rapid(0, 0, 0), cut(5, 0, 0, 100), cut(10, 0, 0, 200)], RAPID)).toBeCloseTo(
+      trap(5, 100, 150) + trap(5, 200, 150),
+      9,
+    );
+    // A rapid between two same-feed cuts ends the first run: a rapid IS a stop, so the second cut
+    // pays its own accel/decel.
+    expect(estimateCycleSeconds([rapid(0, 0, 0), cut(5, 0, 0, 200), rapid(5, 0, 1), cut(5, 5, 1, 200)], RAPID)).toBeCloseTo(
+      // …and that rapid is a Z-only rise of 1 mm, so it is timed at the Z ceiling, not the X/Y one.
+      trap(5, 200, 150) + trap(1, 600, 150) + trap(5, 200, 150),
+      9,
+    );
+    // The first move is never timed (no prior point), so a program that opened with a feed would
+    // start its run at the second move.
+    expect(estimateCycleSeconds([cut(5, 0, 0, 200), cut(10, 0, 0, 200)], RAPID)).toBeCloseTo(trap(5, 200, 150), 9);
+  });
+
+  it('times the model the machine actually has: 60.13 s for a 1200 mm X rapid, 60.07 s for 600 in Z', () => {
+    // The anchors #281's decision comment names, evaluated rather than quoted: a 1200 mm X-only
+    // rapid is a full minute of cruise at 1200 mm/min plus the 20 mm/s the trapezoid's ramps add
+    // (v/a = 20/150 = 0.1333 s), and the Z ceiling is half that rate, so the same distance in Z
+    // alone costs 60 + 10/150 = 60.0667 s.
+    expect(estimateCycleSeconds([rapid(0, 0, 0), rapid(1200, 0, 0)], RAPID)).toBeCloseTo(60.133333333, 6);
+    expect(estimateCycleSeconds([rapid(0, 0, 0), rapid(0, 0, 600)], RAPID)).toBeCloseTo(60.066666667, 6);
+    // 100 mm at F100: a minute of cutting plus 1.6667/150 s of ramps.
+    expect(estimateCycleSeconds([rapid(0, 0, 0), cut(100, 0, 0, 100)], RAPID)).toBeCloseTo(60.011111111, 6);
   });
 
   it('the IR total is the sum of the per-operation estimates (one function, no drift)', () => {

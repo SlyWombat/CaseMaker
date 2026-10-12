@@ -113,7 +113,7 @@ describe('postZ1 (#173)', () => {
       ;@MKR|TOOL|number=1|id=0|name=1 mm flat end|type=Flat End|handlediameter=3.175|sticklength=0|shoulderlength=0|flutelength=0|diameter=1|tipdiameter=1|cornerradius=0|angle=0|halfAngle=0
       ;@CM|TOOL|key=flat-1.0
       ;@MKR|TIME|seconds=4
-      ; cycle estimate: cutting + rapids through the trapezoid, timed on Makera Z1's rapid model (1200 mm/min XY, 600 mm/min Z, 150 mm/s² accel, config-get sd, read on the machine (#281, 2026-10-07)) — a planning estimate, not a measured cycle time
+      ; cycle estimate: cutting + rapids through the trapezoid, timed on Makera Z1's rapid model (1200 mm/min XY, 600 mm/min Z, 150 mm/s² accel, config read 2026-10-07 + stopwatch 2026-10-08 (#281)) — a planning estimate, not a measured cycle time
       ;@MKR|TOOLPATH|number=1|tool_number=1|name=[T1]Engrave "A" 1.0mm
       ;@MKR|TOOLPATH|number=2|tool_number=1|name=[T1]Engrave "B" 0.5mm
       ;@MKR|END
@@ -340,6 +340,15 @@ describe('postZ1 round trip (#173)', () => {
     const res = postZ1(ir, ctx, Z1);
     expect(res.ok).toBe(true);
     if (!res.ok) return;
+
+    // #281 — the same scan the hand-built program gets above, on the program the app actually
+    // writes: a real IR out of `generateEngrave`, format-shaped feeds and all. The hand-built IR is
+    // two operations of five moves; a pocket's hundreds of chords are where a modelled rapid rate
+    // could plausibly reach a feed word, so the evidence has to be this file.
+    const real = codeLines(res.text);
+    expect(real.filter((l) => l.startsWith('G0 ')).length).toBeGreaterThan(0);
+    expect(real.filter((l) => l.startsWith('G0 ')).some((l) => l.includes('F'))).toBe(false);
+    expect(real.filter((l) => l.includes('F')).every((l) => l.startsWith('G1'))).toBe(true);
 
     const parse = parseGcode(res.text);
     expect(parse.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);

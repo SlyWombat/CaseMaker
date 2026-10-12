@@ -299,7 +299,7 @@ function TransportBar() {
           title={
             path && path.rapidsTimed === false
               ? 'Simulated time — feeds only, rapids untimed (no machine): this program was loaded with no machine profile, so there is no rapid model to time its rapids with. The total is what the feeds account for, not a cycle time.'
-              : "Simulated time — feeds and rapids both timed through the trapezoid on the machine's rapid model (the same model the run sheet's estimate is timed on), so this is playback, not a measured cycle time."
+              : "Simulated time — feeds and rapids both timed through the trapezoid on the machine's rapid model, so this is playback, not a measured cycle time."
           }
         >
           {formatTime(seconds)} / {formatTime(total)} simulated
