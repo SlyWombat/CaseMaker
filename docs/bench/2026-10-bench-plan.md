@@ -21,6 +21,12 @@ possible. **Nothing here is scheduled; the maintainer calls each session.**
   blank as clamped (#383) and one file per row, was cut with the vacuum on. Depths and photos are on
   #165; solid plastic tracks the program to −0.1…−0.2 mm. The maintainer accepted that accuracy for
   V1 ("we can refine this in v2").
+- **Before any cut (maintainer, 2026-10-12, #391):** offer to validate the material's position.
+  On yes: wired probe in, `M491`, then find the blank's four edges with downward touches stepped
+  across each one: blank top ≈ −56, jaw top ≈ −56.9, otherwise a capped miss. Compare with the
+  job's origin and correct X/Y before the cutter goes back in. First, measure both jaw-top widths
+  (calipers, or the same scan along X). They are still the unmeasured 15 mm defaults, and the scan
+  needs them to know where a touch can land.
 - **Next in S3:** #176's G32 stroke test, the #284 coupons and restart proof, #185 V-grooves. Before
   any of them: lift the head before `play` (#384) and set Z0 as the cutter tip's own height (#387).
 - The 2026-10-04 single-file ladder is **superseded** by the `-row-A` / `-row-B` files and moved to
