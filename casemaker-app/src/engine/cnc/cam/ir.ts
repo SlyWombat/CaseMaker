@@ -148,12 +148,16 @@ export interface RapidEstimate {
  * cannot disagree about which ceiling a given rapid is under.
  *
  * A rapid that moves in Z AS WELL AS in X/Y is timed at the X/Y rate over its whole 3D length, so
- * its Z leg is charged at twice the rate the controller would give it: the estimate is OPTIMISTIC
- * by that leg's share, and this app's own programs contain such rapids — a trace hops straight from
- * the end of one stroke at depth to the next stroke's start at `HOP_Z`, moving all three axes at
- * once. It is stated rather than priced: the Z leg is bounded by the hop height beside an XY leg
- * that is usually longer, and splitting one move per axis would model a planner that blends it with
- * the moves around it, which this file has no measurement of (#281).
+ * its Z leg is charged at twice the rate the controller gives a Z-only move. The estimate never
+ * presents one: a stroke hops in TWO moves — a Z-only retract to `HOP_Z` at the end of one stroke,
+ * then an XY-only traverse to the next stroke's start — and `engraveJob` and `drill` hop the same
+ * way, so the only rapid that leaves any generator with all three axes moving is an operation's
+ * ENTRY move, the previous operation's `safeZ` down to this operation's first start at `HOP_Z`.
+ * That is the FIRST move of its operation, which `estimateCycleSeconds` skips (the IR carries no
+ * start point), so the estimate times no combined rapid at all and the inter-operation travel is
+ * left UNPRICED — the error is a move missing, not a leg over-charged. The drawn clock walks every
+ * move whose endpoints it knows and does time that rapid; the rule below is what the two share
+ * (#281).
  */
 export function rapidRate(rapid: RapidEstimate, dx: number, dy: number, dz: number): number {
   return dx === 0 && dy === 0 && dz !== 0 ? rapid.zMmPerMin : rapid.xyMmPerMin;
@@ -191,8 +195,12 @@ export function moveSeconds(distance: number, rate: number, accel: number): numb
  * cutting, against the 539 s this run model gives and the 527 s the same feeds sum to with no
  * acceleration at all. Those three numbers are the argument — the run model's 12 s over the closed
  * form is the 304 runs' ramps, which is what a machine with look-ahead actually pays, where the
- * extra 446 s was an artefact of charging every chord for a stop it never makes. A rapid is a stop
- * at each end by construction, so each gets its own trapezoid.
+ * extra 446 s was an artefact of charging every chord for a stop it never makes. The model holds
+ * only for GENTLE junctions: the speed the planner carries across one is `junction_deviation`'s,
+ * set by the ANGLE between the two cuts — near the run's rate on near-straight chords, less at a
+ * corner, zero at a full reversal — so a run that turns sharply is charged optimistically, since
+ * one trapezoid per run has no corner in it. A rapid is a stop at each end by construction, so each
+ * gets its own trapezoid.
  *
  * A feed is timed at its own `f`; a rapid at `rapidRate` of the machine the job is for. `rapid` is
  * REQUIRED and there is no default: the machine is the caller's to name (#347), a second mill
