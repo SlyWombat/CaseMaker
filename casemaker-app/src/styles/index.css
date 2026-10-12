@@ -2609,6 +2609,76 @@ button:disabled {
   padding: 2px 0;
 }
 
+/* --- the console, collapsed at the foot of the machine card (#302 item 4) --- */
+.manage .mconsole {
+  margin-top: 10px;
+  border-top: 1px solid var(--m-hairline);
+  padding-top: 8px;
+}
+.manage .mconsole summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--cm-color-on-surface-muted);
+  list-style-position: inside;
+}
+.manage .mconsole summary .dim {
+  color: var(--cm-color-tertiary);
+}
+.manage .mconsole .hint {
+  margin: 6px 0;
+}
+.manage .console-armed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--cm-color-on-surface);
+  margin: 6px 0;
+}
+.manage .console-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.manage .console-row .fld {
+  flex: 1;
+  min-width: 0;
+}
+.manage .console-refusal {
+  color: var(--cm-color-tertiary);
+}
+.manage .console-transcript {
+  margin: 8px 0;
+  border: 1px solid var(--m-hairline);
+  border-radius: var(--cm-radius-sm);
+  background: var(--m-control-bg);
+  padding: 6px 8px;
+  max-height: 220px;
+  overflow: auto;
+  font-family: var(--cm-font-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.manage .console-entry + .console-entry {
+  margin-top: 8px;
+  border-top: 1px dashed var(--m-hairline);
+  padding-top: 8px;
+}
+.manage .console-line {
+  color: var(--cm-color-on-surface);
+  overflow-wrap: anywhere;
+}
+.manage .console-reply {
+  margin: 2px 0 2px 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--cm-color-on-surface);
+}
+.manage .console-note {
+  margin-left: 10px;
+  color: var(--cm-color-on-surface-muted);
+}
+
 /* --- the detail rail ------------------------------------------------------ */
 .manage .context-panel {
   padding: 12px;

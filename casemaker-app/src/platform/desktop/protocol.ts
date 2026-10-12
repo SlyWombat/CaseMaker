@@ -1028,37 +1028,14 @@ function wordHex(word: number): string {
  * call, from a caller that was asked to send it, through the guards below.
  *
  * The guards are at the sink, the same place `READABLE_PATH` guards `cat` and `md5sum`: every caller —
- * the bench harness today, an app panel later — gets the same answer to "may this line be sent".
+ * the bench harness, the app panel, the bridge — gets the same answer to "may this line be sent".
+ * The clauses themselves live in `engine/cnc/consoleGate.ts`, because the panel asks them before it
+ * loads this module and must not import sockets to do it (#302 item 4). This is a relative import,
+ * not the `@/` alias, because `tools/z1/z1.mjs` runs THIS file under Node, which resolves no alias.
  */
+import { consoleProblem } from '../../engine/cnc/consoleGate';
 
-/** One printable-ASCII line. No control characters, so a newline can never end the command early. */
-const CONSOLE_LINE = /^[\x20-\x7e]{1,200}$/;
-
-/**
- * Lines refused outright. They are the ways a console line writes to the machine's configuration or
- * its card, or reaches the firmware rather than the job — "nothing in this repo may change a value on
- * the machine" (the harness's own rule) still stands. Motion, spindle, probe and status lines are NOT
- * here: those are what a console is for, and the person at the machine is the safeguard.
- */
-const CONSOLE_DENY: ReadonlyArray<{ pattern: RegExp; why: string }> = [
-  { pattern: /^\s*config-set\b/i, why: 'it changes a configuration value on the machine' },
-  { pattern: /^\s*(rm|mv|format|mkdir|truncate)\b/i, why: 'it changes the machine’s card' },
-  { pattern: /^\s*(reset|dfu|flash|upgrade|reboot|restart)\b/i, why: 'it resets or reflashes the controller' },
-  { pattern: /^\s*(upload|download)\b/i, why: 'transfers go through the verified-program upload, not the console' },
-  // The realtime bytes travel on their own and are deliberately unwired (§8): the physical stop is the stop.
-  { pattern: /^\s*[!~]\s*$/, why: 'realtime hold/resume bytes are not wired (Z1-Bridge-Protocol.md §8)' },
-];
-
-/** Why a line may not be sent, or null when it may. Pure, so a UI can ask before it connects. */
-export function consoleProblem(line: string): string | null {
-  if (!CONSOLE_LINE.test(line)) {
-    return 'a console line is one line of printable ASCII, 1 to 200 characters';
-  }
-  for (const rule of CONSOLE_DENY) {
-    if (rule.pattern.test(line)) return `refusing ${JSON.stringify(line)}: ${rule.why}`;
-  }
-  return null;
-}
+export { consoleProblem };
 
 export interface ConsoleOptions {
   /** How long to wait for the FIRST reply frame. Default 3000. */

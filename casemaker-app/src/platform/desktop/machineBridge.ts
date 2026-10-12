@@ -253,7 +253,8 @@ export async function uploadVerifiedProgram(
  * The caller is asking for exactly this line, now — there is no queue and no repeat — and the guards
  * (`consoleProblem`) run before a socket is opened, so a refused line costs no connection. A caller
  * with several lines to send in order, such as an interactive console, keeps a connection with
- * `openConsole` itself so replies that straddle two lines are not lost; this is the one-shot form.
+ * {@link openConsoleSession} so replies that straddle two lines are not lost; this is the one-shot
+ * form, and it is what one press of an app's Send button gets.
  *
  * Motion needs a person at the machine (`/Fabrication.md` §8). That is the caller's to establish and
  * is not something this function can check.
@@ -272,6 +273,36 @@ export async function sendConsoleLine(
   } finally {
     await closeQuietly(transport, conn);
   }
+}
+
+/**
+ * A console on ONE connection, open until {@link LiveConsole.close} (#302 item 4).
+ *
+ * The app's panel uses this rather than `sendConsoleLine` per line: a connection per line is a
+ * connect/close per line, and — the reason `openConsole` exists at all — a reply that straddles two
+ * lines is attributed to the later one. One session, one connection, one frame channel.
+ */
+export interface LiveConsole {
+  send(line: string, opts?: ConsoleOptions): Promise<ConsoleOutcome>;
+  /** Close the socket. Idempotent, and safe after a failed send: closing a dead socket is not a failure. */
+  close(): Promise<void>;
+}
+
+/**
+ * Open a console session against `target`. The socket is connected HERE, once; nothing is sent by
+ * opening it, so a caller can hold a session open while the person decides what to type.
+ */
+export async function openConsoleSession(
+  target: MachineTarget,
+  opts: BridgeOptions = {},
+): Promise<LiveConsole> {
+  const transport = transportOf(opts);
+  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? 3000);
+  const session = openConsole(transport, conn);
+  return {
+    send: (line, sendOpts) => session.send(line, sendOpts),
+    close: () => closeQuietly(transport, conn),
+  };
 }
 
 async function closeQuietly(transport: MachineTransport, conn: number): Promise<void> {

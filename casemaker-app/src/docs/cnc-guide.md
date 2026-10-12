@@ -108,6 +108,16 @@ screen says (`/Fabrication.md` §7.4). A flat end mill pockets the glyph region,
 is genuinely independent. That is the honest reason the app sweeps flat end mills only; it is
 not that a V-bit is worse at small text.
 
+**The console.** Manage → Machines carries a one-line console, collapsed under the machine's card,
+in the desktop build only. Type a line, press Send, and the controller's answer appears beside it
+with how long it took and how many frames it arrived in; the record is a "Copy transcript" button,
+and nothing is written to disk. The panel refuses anything that would change the machine rather
+than move it — `config-set`, card writes (`rm`, `mv`, `format`), a reset or reflash (`dfu`, `flash`,
+`upgrade`, `reboot`), and transfers, which belong to the verified upload — and it deliberately does
+not wire the `!` and `~` realtime bytes. **The physical stop is the stop**: the console has no hold
+and no jog, so anything that moves needs a person standing at the machine (chapter 8.4, and
+`/Fabrication.md` §8).
+
 ---
 
 ## 3 · Ideas you need first

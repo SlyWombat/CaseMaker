@@ -13,6 +13,7 @@ import {
   DESKTOP_ONLY_MARKER,
   discover,
   identify,
+  openConsoleSession,
   status,
   uploadVerifiedProgram,
   type VerifiedProgram,
@@ -21,10 +22,13 @@ import {
   decodeText,
   encodeFrame,
   FrameDecoder,
+  PTYPE_CTRL_MULTI,
+  PTYPE_CTRL_SINGLE,
   PTYPE_FILE_DATA,
   PTYPE_FILE_END,
   PTYPE_FILE_START,
   PTYPE_FILE_VIEW,
+  STATUS_POLL_BYTE,
   u32be,
   utf8,
   type Frame,
@@ -212,5 +216,100 @@ describe('#255 machine bridge — actions', () => {
     expect(machineStatus.ok).toBe(true);
     expect(machineStatus.text).toContain('Idle');
     expect(transport.closed).toEqual([1]);
+  });
+});
+
+// #302 item 4 — the app's console panel keeps ONE session, rather than a connect per line, so a
+// reply that straddles the next line is still attributed to the line that caused it.
+describe('#302 openConsoleSession — one connection, replies kept with their line', () => {
+  /**
+   * A transport whose replies are scripted PER LINE: `script[i]` answers the i-th write. A flat queue
+   * of reads would let the second line's reply be read as part of the first line's answer — the very
+   * confusion the session's single frame channel exists to prevent — so the fake must not create it.
+   */
+  class ScriptedConsoleTransport extends FakeTransport {
+    script: Uint8Array[][] = [];
+    private pending: Uint8Array[] = [];
+
+    override async tcpWrite(conn: number, data: Uint8Array): Promise<void> {
+      await super.tcpWrite(conn, data);
+      this.pending = [...(this.script[this.writes.length - 1] ?? [])];
+    }
+
+    override async tcpRead(): Promise<Uint8Array> {
+      return this.pending.shift() ?? EMPTY;
+    }
+  }
+
+  it('sends two lines on one connection, and closes that connection once', async () => {
+    const transport = new ScriptedConsoleTransport();
+    transport.script = [
+      [encodeFrame(0x81, utf8('<Idle|MPos:0,0,0>'))],
+      [encodeFrame(0x81, utf8('ok'))],
+    ];
+
+    const live = await openConsoleSession({ host: '192.168.10.43', port: 2222 }, { transport });
+    expect(transport.connects).toBe(1);
+
+    const first = await live.send('?');
+    const second = await live.send('M491');
+    expect(first.ok).toBe(true);
+    if (first.ok) expect(first.text).toBe('<Idle|MPos:0,0,0>');
+    expect(second.ok).toBe(true);
+    if (second.ok) expect(second.text).toBe('ok');
+
+    // Still the one connection, and still nothing closed until the panel says so.
+    expect(transport.connects).toBe(1);
+    expect(transport.closed).toEqual([]);
+    await live.close();
+    expect(transport.closed).toEqual([1]);
+
+    // The first line went out as the single status byte and the second as a console frame, exactly
+    // as `runStatus` and `openConsole` send them.
+    const frames = decodeAll(transport.writes);
+    expect(frames).toHaveLength(2);
+    expect(frames[0]!.type).toBe(PTYPE_CTRL_SINGLE);
+    expect(frames[0]!.data).toEqual(new Uint8Array([STATUS_POLL_BYTE]));
+    expect(frames[1]!.type).toBe(PTYPE_CTRL_MULTI);
+    expect(decodeText(frames[1]!.data)).toBe('M491');
+  });
+
+  it('joins a reply split across two frames to the line that caused it, not to the next one', async () => {
+    // The reason the session owns one channel: the second frame of a reply can arrive after the next
+    // line has gone out. A decoder built per line would read it as that line's answer.
+    const transport = new ScriptedConsoleTransport();
+    transport.script = [
+      [encodeFrame(0x81, utf8('<Idle')), encodeFrame(0x81, utf8('|MPos:0,0,0>'))],
+      [encodeFrame(0x81, utf8('ok'))],
+    ];
+
+    const live = await openConsoleSession({ host: '192.168.10.43' }, { transport });
+    const first = await live.send('?');
+    const second = await live.send('M491');
+
+    expect(first.ok).toBe(true);
+    if (first.ok) {
+      expect(first.frames).toBe(2);
+      expect(first.text).toBe('<Idle|MPos:0,0,0>');
+    }
+    expect(second.ok).toBe(true);
+    if (second.ok) {
+      expect(second.frames).toBe(1);
+      expect(second.text).toBe('ok');
+    }
+  });
+
+  it('refuses a guarded line without writing it, on a session that is already open', async () => {
+    const transport = new ScriptedConsoleTransport();
+    transport.script = [[encodeFrame(0x81, utf8('ok'))]];
+    const live = await openConsoleSession({ host: '192.168.10.43' }, { transport });
+
+    const refused = await live.send('config-set sd x 1');
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.detail).toContain('configuration value');
+    // Nothing went out, and the session is still usable: a refusal is not a broken connection.
+    expect(transport.writes).toEqual([]);
+    const after = await live.send('?');
+    expect(after.ok).toBe(true);
   });
 });
