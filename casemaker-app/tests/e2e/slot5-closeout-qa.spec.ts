@@ -5,6 +5,12 @@
 //
 // Run (Playwright starts its own dev server, #226):
 //   npx playwright test tests/e2e/slot5-closeout-qa.spec.ts
+//
+// The captures go to `test-results/` (Playwright's own output dir, gitignored). The ten
+// `docs/assets/slot5-*.png` are DOCUMENTATION, not test output: a fresh capture is byte-different
+// from the committed one, so writing them on every run left the tree dirty with unreviewed image
+// changes for a commit sweep or a deploy to carry along (#370). To refresh the docs on purpose:
+//   UPDATE_DOC_SHOTS=1 npx playwright test tests/e2e/slot5-closeout-qa.spec.ts
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -22,7 +28,14 @@ const readVendor = (testInfo: TestInfo, rel: string): string | null => {
     return null;
   }
 };
-const shot = (name: string): string => join(process.cwd(), '..', 'docs', 'assets', name);
+/**
+ * Where a capture goes. A routine run writes to Playwright's per-test output dir under the
+ * gitignored `test-results/`; `UPDATE_DOC_SHOTS=1` — the deliberate docs refresh — is the only
+ * thing that rewrites the ten TRACKED files under `docs/assets/` (#370).
+ */
+const DOC_SHOTS = process.env.UPDATE_DOC_SHOTS === '1';
+const shot = (testInfo: TestInfo, name: string): string =>
+  DOC_SHOTS ? join(process.cwd(), '..', 'docs', 'assets', name) : testInfo.outputPath(name);
 
 test.use({ viewport: { width: 1440, height: 900 } });
 // The vendor sim and the engrave preview both run the wasm worker under swiftshader; a full
@@ -44,7 +57,7 @@ test('visual QA: Simulate panel — idle, then ready with stock, path and diagno
   // Idle — "Open .nc…" and the drop hint, nothing else (mockup state B1).
   await expect(page.getByTestId('sim-open')).toBeVisible();
   await expect(page.getByTestId('sim-drop-hint')).toBeVisible();
-  await page.screenshot({ path: shot('slot5-sim-idle.png') });
+  await page.screenshot({ path: shot(testInfo, 'slot5-sim-idle.png') });
 
   // Ready — load our authored fixture and run it (mockup states B4 + C + D).
   await page.evaluate(
@@ -56,20 +69,20 @@ test('visual QA: Simulate panel — idle, then ready with stock, path and diagno
   await expect(page.getByTestId('sim-result')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('sim-disclaimer')).toContainText('rigid, ideal machine');
   await expect(page.getByTestId('sim-transport')).toBeVisible();
-  await page.screenshot({ path: shot('slot5-sim-ready.png') });
+  await page.screenshot({ path: shot(testInfo, 'slot5-sim-ready.png') });
 
   // #197 addition: the camera presets and Fit frame the SIM scene, not the case.
   await page.getByTestId('viewport-camera-top').click();
   await page.waitForTimeout(700);
-  await page.screenshot({ path: shot('slot5-sim-top.png') });
+  await page.screenshot({ path: shot(testInfo, 'slot5-sim-top.png') });
   await page.getByTestId('viewport-zoom-out').click();
   await page.getByTestId('viewport-zoom-out').click();
   await page.getByTestId('viewport-fit').click();
   await page.waitForTimeout(700);
-  await page.screenshot({ path: shot('slot5-sim-fit.png') });
+  await page.screenshot({ path: shot(testInfo, 'slot5-sim-fit.png') });
 });
 
-test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-coloured preview', async ({ cm, page }) => {
+test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-coloured preview', async ({ cm, page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
@@ -78,7 +91,7 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   await cm.ready();
   await loadBoardAndSection(page, 'cnc-engrave');
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
-  await page.screenshot({ path: shot('slot5-engrave-just-opened.png') });
+  await page.screenshot({ path: shot(testInfo, 'slot5-engrave-just-opened.png') });
 
   await expect(page.getByTestId('engrave-tool')).toBeVisible();
   // #211 acceptance 1: a fresh job opens with a selected tool AND a recommendation sentence.
@@ -87,14 +100,14 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   const recFresh = await page.getByTestId('engrave-recommendation').innerText().catch(() => '');
   console.log('DIAG #211 fresh selection=%j rec=%j', await page.getByTestId('engrave-tool').inputValue(), recFresh);
   expect(recFresh).toContain('Recommended');
-  await page.screenshot({ path: shot('slot5-engrave-after-4s.png') });
+  await page.screenshot({ path: shot(testInfo, 'slot5-engrave-after-4s.png') });
   const legendCount = await page.getByTestId('engrave-preview-legend').count();
   const loadingCount = await page.getByTestId('engrave-preview-loading').count();
   const errCount = await page.getByTestId('engrave-preview-error').count();
   console.log('DIAG legend=%d loading=%d err=%d errors=%j', legendCount, loadingCount, errCount, errors);
   await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('engrave-preview-error')).toHaveCount(0);
-  await page.screenshot({ path: shot('slot5-engrave-editing.png') });
+  await page.screenshot({ path: shot(testInfo, 'slot5-engrave-editing.png') });
 
   // #211 acceptance 2: the user's own pick is kept when the recommendation changes.
   // `engrave-label-size-N` is the row's cap-height input (aria "cap"); shrinking it until
@@ -113,7 +126,7 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   // preview canvas sits over the toolbar and intercepts pointer events (see #197 comment).
   await page.getByTestId('viewport-camera-top').click({ force: true });
   await page.waitForTimeout(700);
-  await page.screenshot({ path: shot('slot5-engrave-top.png') });
+  await page.screenshot({ path: shot(testInfo, 'slot5-engrave-top.png') });
 
   // The Tool reason (#211) and the Vise / Cutting sections live below the fold.
   const reason = await page.getByTestId('engrave-recommendation').innerText().catch(() => '(none)');
@@ -122,7 +135,7 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
     el.scrollTop = el.scrollHeight;
   });
   await page.waitForTimeout(500);
-  await page.screenshot({ path: shot('slot5-engrave-scrolled.png') });
+  await page.screenshot({ path: shot(testInfo, 'slot5-engrave-scrolled.png') });
 });
 
 // #196's two still-unverified acceptance items, on the vendor corpus (#186: read-only, skipped
@@ -172,5 +185,5 @@ test('acceptance #196: ACRYLIC-Balloon.nc simulates to a result; TopClamp.nc pre
   expect(sim.status).toBe('ready');
   expect(sim.removedVolume).toBeGreaterThan(0);
   expect(sim.errorCodes).toEqual([]);
-  await page.screenshot({ path: shot('slot5-sim-balloon.png') });
+  await page.screenshot({ path: shot(testInfo, 'slot5-sim-balloon.png') });
 });

@@ -107,6 +107,7 @@ enforces this too.
 - **Unit tests** (`tests/unit/*.spec.ts`) run under Vitest in node env. They should be hermetic — no I/O, no sleep, no flaky timing.
 - **E2E tests** (`tests/e2e/*.spec.ts`) run under Playwright with a real Chromium + the Vite dev server. Drive behavior through `window.__caseMaker` (the test API) wherever possible — the API surface in `src/testing/windowApi.ts` is the contract. Don't simulate clicks for state changes that the API can mutate directly.
 - **Mesh-stat assertions over pixel snapshots.** The viewport renders WebGL — pixel diffs are noisy. Compare `getMeshStats('shell').triangleCount` and `bbox` instead.
+- **Screenshots are documentation, not test output.** A spec writes its captures to Playwright's own output dir (`testInfo.outputPath()`, under the gitignored `test-results/`), so a routine run leaves the tree clean. The tracked images under `docs/assets/` are refreshed only by a deliberate run that says so on the command line — `slot5-closeout-qa.spec.ts` gates its ten behind `UPDATE_DOC_SHOTS=1` ([#370](https://github.com/SlyWombat/CaseMaker/issues/370)).
 - **For mesh-pipeline bugs** the canonical fingerprint is `getLastDiag().meshOpsSeen === 0` while `project.externalAssets.length > 0` (or analogous). Use `getJobError()` to read the worker's last error.
 
 ## Commit messages
