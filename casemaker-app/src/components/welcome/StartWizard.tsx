@@ -20,10 +20,15 @@ import type { Project } from '@/types/project';
 /**
  * The startup wizard (#280, filed from #274) — three questions and a panel.
  *
- * 1. **Is a machine there?** A CHECK, not a picker. `probeMachine` asks the network; the answer is
- *    one of four, and all four are rendered. It never blocks: a job can be authored, verified and
- *    simulated with no machine at all, which is the same conclusion MillMage's skippable setup and
- *    Bantam's "will not prevent you from milling" reach (UI-PATTERNS §1).
+ * 1. **Which machine is this job for?** A PICKER on every build, plus a CHECK where a socket exists
+ *    (#347). The picker writes `machineId` and nothing else, so the work area, the spindle ceiling
+ *    and the limits are the profile's before any hardware is involved — and on the web build, which
+ *    has no socket at all (#346), it is the only way the question can be answered. `probeMachine`
+ *    then asks the network; the answer is one of four and all four are rendered, and a found machine
+ *    whose profile is not the selected one is said out loud rather than silently repointed. Neither
+ *    half blocks: a job can be authored, verified and simulated with no machine at all, which is the
+ *    same conclusion MillMage's skippable setup and Bantam's "will not prevent you from milling"
+ *    reach (UI-PATTERNS §1).
  * 2. **What are you making?** Five project types, each one an existing template spec. Ours is the
  *    question the field does not ask, because every other product is single-purpose CAM; the
  *    nearest equivalent is new-from-template, which is exactly the route this reuses.
@@ -69,6 +74,13 @@ const NOTE: CSSProperties = { ...MUTED, borderLeft: '2px solid #3a5a7a', padding
  */
 const JOB_TYPE_IDS = ['badge-blank', 'blank'] as const;
 
+/**
+ * The machines step 1 offers: every profile this app can actually write for (#347). It is the
+ * catalogue of MODELS, not of connected hardware — one entry today (the Z1), and the select exists
+ * before the second one lands so the job's machine is a question rather than a constant.
+ */
+const MACHINE_PROFILES = Object.values(MACHINES);
+
 type Step = 'machine' | 'job' | 'setup';
 
 /** `100 × 60 × 12 mm` — the work area is the envelope's span, machine coordinates run negative. */
@@ -86,12 +98,15 @@ function MachineAnswer({
   machine,
   reason,
   calibration,
+  selectedId,
 }: {
   outcome: MachineCheckOutcome;
   machine: MachineObservation | null;
   reason: string | null;
   /** The saved frame for this machine, if there is one (#279). */
   calibration?: MachineCalibration | null;
+  /** The profile the job is set up for (#347), so a found machine can disagree with it out loud. */
+  selectedId: string;
 }): JSX.Element {
   if (outcome === 'not-found') {
     return (
@@ -119,8 +134,22 @@ function MachineAnswer({
 
   const profile = machine.profileId !== null ? MACHINES[machine.profileId] : undefined;
   const frameNotice = profile === undefined ? null : machineCalibrationNotice(profile, calibration);
+  // #347 — the machine that answered is EVIDENCE about the job's machine, not a substitute for it.
+  // When the two disagree, both are named and the fix is the select just above: repointing the job
+  // to a controller it was not set up for would move every number in the document without a word.
+  const mismatch =
+    profile !== undefined && machine.profileId !== null && machine.profileId !== selectedId
+      ? { found: profile, chosen: MACHINES[selectedId] }
+      : null;
   return (
     <div data-testid="start-wizard-machine-state" data-state="found">
+      {mismatch && (
+        <p style={NOTE} data-testid="start-wizard-machine-mismatch">
+          This controller answers as <b>{mismatch.found.name}</b>, but the job is set up for{' '}
+          <b>{mismatch.chosen?.name ?? selectedId}</b>. Nothing has been repointed for you — change
+          the machine above if this is the machine the job will run on.
+        </p>
+      )}
       <p style={{ ...MUTED, color: '#cfe', margin: '6px 0 2px' }} data-testid="start-wizard-machine-name">
         {machine.name ?? `a controller at ${machine.host}`}
       </p>
@@ -219,6 +248,15 @@ export function StartWizard(): JSX.Element {
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
   const savedCalibration = useSettingsStore((s) => s.machineCalibration);
   const setMachineCalibration = useSettingsStore((s) => s.setMachineCalibration);
+  const jobMachineId = useEngraveJobStore((s) => s.job.machineId);
+  const setMachine = useEngraveJobStore((s) => s.setMachine);
+
+  // The job's own answer, as a value the `<select>` can hold. The schema coerces an unknown id to
+  // the Z1 (#347), so a miss here is a store-side impossibility rather than a state to render — but
+  // a blank control is a worse answer than the first profile, which is what the schema would pick.
+  const machineChoice = MACHINE_PROFILES.some((p) => p.id === jobMachineId)
+    ? jobMachineId
+    : (MACHINE_PROFILES[0]?.id ?? '');
 
   const [step, setStep] = useState<Step>('machine');
   const [busy, setBusy] = useState(false);
@@ -275,75 +313,102 @@ export function StartWizard(): JSX.Element {
           </button>
         </div>
 
-        {/* #346 — a build that cannot reach a machine does not ask to connect one. The web build
-            says so once and offers the two honest choices (Cancel, or Continue without a machine);
-            the check, the address box and the probe's answer exist only where a socket does. */}
-        {step === 'machine' && !canDriveMachine && (
+        {/* #347 — the machine is a QUESTION first, and it is asked on every build. Before this, step
+            1 was the check alone: the job carried `defaultEngraveJob`'s Z1 whoever was on the bench,
+            and the web build (#346) could not answer at all. The list is `MACHINES` — the profiles
+            this app can write for — and picking one writes the id and nothing else (`setMachine`),
+            so nothing else in a half-built document moves. The check below is then evidence about
+            that answer; where there is no socket it is the whole of step 1. */}
+        {step === 'machine' && (
           <div data-testid="start-wizard-step-machine" style={{ marginTop: 8 }}>
-            <p style={NOTE} data-testid="start-wizard-machine-note-build">
-              This instance cannot control a machine. To connect one, launch Case Maker from your
-              local (desktop) instance. You can still set the job up here, without a machine.
+            <label style={{ ...MUTED, display: 'block', margin: '4px 0 0' }}>
+              <span>Machine</span>
+              <select
+                data-testid="start-wizard-machine-select"
+                aria-label="Machine profile"
+                value={machineChoice}
+                onChange={(e) => setMachine(e.target.value)}
+                style={{ display: 'block', width: '100%', marginTop: 2 }}
+              >
+                {MACHINE_PROFILES.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p style={MUTED} data-testid="start-wizard-machine-pick-note">
+              Every job is written for one machine: its work area, its spindle ceiling and its own
+              limits. That is true whether or not one is connected now.
             </p>
-          </div>
-        )}
 
-        {step === 'machine' && canDriveMachine && (
-          <div data-testid="start-wizard-step-machine" style={{ marginTop: 8 }}>
-            <p style={MUTED}>
-              First, whether a machine is on the network. This is a check rather than a question —
-              the machine is asked, and it answers or it does not.
-            </p>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                data-testid="start-wizard-check"
-                disabled={busy}
-                style={{ padding: '3px 12px' }}
-                onClick={() => {
-                  void runCheck();
-                }}
-              >
-                {busy ? 'Looking…' : 'Check for a machine'}
-              </button>
-              <label style={{ ...MUTED, display: 'flex', gap: 4, alignItems: 'center' }}>
-                or connect to an address
-                {/* A GENERIC example, deliberately not the address of the machine on this bench:
-                    a real one in the placeholder reads as a value the app already filled in. */}
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="192.168.1.50"
-                  data-testid="start-wizard-address"
-                  aria-label="Machine address"
-                  title="For a machine whose broadcast does not reach this computer."
-                  style={{ width: 120 }}
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                />
-              </label>
-              <button
-                type="button"
-                data-testid="start-wizard-connect-address"
-                disabled={busy || address.trim().length === 0}
-                onClick={() => {
-                  void runCheck(address.trim());
-                }}
-              >
-                Connect
-              </button>
-            </div>
-            {busy && (
-              <p style={MUTED} data-testid="start-wizard-machine-busy">
-                Listening for a machine, then reading its own configuration…
+            {!canDriveMachine && (
+              <p style={NOTE} data-testid="start-wizard-machine-note-build">
+                This instance cannot control a machine. To connect one, launch Case Maker from your
+                local (desktop) instance. You can still set the job up here, without a machine.
               </p>
             )}
-            {!busy && outcome !== null && (
-              <MachineAnswer
-                outcome={outcome}
-                machine={machine}
-                reason={reason}
-                calibration={savedCalibration}
-              />
+
+            {canDriveMachine && (
+              <>
+                <p style={MUTED}>
+                  Whether a machine is on the network. This is a check rather than a question — the
+                  machine is asked, and it answers or it does not.
+                </p>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    data-testid="start-wizard-check"
+                    disabled={busy}
+                    style={{ padding: '3px 12px' }}
+                    onClick={() => {
+                      void runCheck();
+                    }}
+                  >
+                    {busy ? 'Looking…' : 'Check for a machine'}
+                  </button>
+                  <label style={{ ...MUTED, display: 'flex', gap: 4, alignItems: 'center' }}>
+                    or connect to an address
+                    {/* A GENERIC example, deliberately not the address of the machine on this bench:
+                        a real one in the placeholder reads as a value the app already filled in. */}
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="192.168.1.50"
+                      data-testid="start-wizard-address"
+                      aria-label="Machine address"
+                      title="For a machine whose broadcast does not reach this computer."
+                      style={{ width: 120 }}
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    data-testid="start-wizard-connect-address"
+                    disabled={busy || address.trim().length === 0}
+                    onClick={() => {
+                      void runCheck(address.trim());
+                    }}
+                  >
+                    Connect
+                  </button>
+                </div>
+                {busy && (
+                  <p style={MUTED} data-testid="start-wizard-machine-busy">
+                    Listening for a machine, then reading its own configuration…
+                  </p>
+                )}
+                {!busy && outcome !== null && (
+                  <MachineAnswer
+                    outcome={outcome}
+                    machine={machine}
+                    reason={reason}
+                    calibration={savedCalibration}
+                    selectedId={machineChoice}
+                  />
+                )}
+              </>
             )}
           </div>
         )}

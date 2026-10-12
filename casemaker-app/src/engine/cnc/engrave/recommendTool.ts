@@ -28,7 +28,7 @@
  */
 
 import { feedsFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
-import { Z1 } from '@/engine/cnc/machine';
+import { jobMachine } from '@/engine/cnc/calibration';
 import { cuttingDiameter, cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveAnyItem, EngraveJob } from '@/types/engraveJob';
@@ -195,7 +195,9 @@ export function recommendTool(
 
     const radius = cuttingRadiusForSweep(tool);
     if (!radius.ok) return { ...base, qualifies: false, excluded: 'not-flat' as const };
-    if (!feedsFor(catalogue, job.stock.material, tool, Z1).ok) {
+    // #347 — the JOB's machine. The profile only supplies the clamp ceilings here, which no
+    // calibration touches, so this needs no saved frame to be right.
+    if (!feedsFor(catalogue, job.stock.material, tool, jobMachine(job)).ok) {
       return { ...base, qualifies: false, excluded: 'no-feeds' as const };
     }
 

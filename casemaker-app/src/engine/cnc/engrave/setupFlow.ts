@@ -19,6 +19,9 @@
  */
 
 import { defaultStockProud, validateVise } from '@/engine/cnc/fixture';
+import { FEEDS_TABLE } from '@/engine/cnc/feeds';
+import { MATERIAL_LABELS } from '@/engine/cnc/materials';
+import type { MillProfile } from '@/engine/cnc/machine';
 import {
   hasSacrificial,
   noneSacrificial,
@@ -35,13 +38,50 @@ import type {
   ViseParams,
 } from '@/types/engraveJob';
 
-/** The four stocks the feeds table covers, in the order the flow offers them. */
-export const MATERIAL_OPTIONS: readonly { value: StockMaterial; label: string }[] = [
-  { value: 'softwood', label: 'softwood' },
-  { value: 'hardwood', label: 'hardwood' },
-  { value: 'mdf', label: 'MDF' },
-  { value: 'pla', label: 'PLA' },
-];
+/** One material the flow offers: the value it writes into the job and the word it shows. */
+export interface MaterialOption {
+  value: StockMaterial;
+  label: string;
+}
+
+/**
+ * The materials a job may be cut in: the ones the STARTING TABLE has a row for, and the ones the
+ * machine's own profile declares (#347).
+ *
+ * The UNION is the point, and its two halves are two different claims:
+ *
+ *   - A material the starting table covers (softwood, hardwood, MDF, PLA) is cut on this app's own
+ *     numbers, whatever a profile says about it.
+ *   - A material only a PROFILE names — the Z1's metals, ABS and Acrylic — is one the machine is
+ *     set up for, and the only numbers for it are Makera's own, for that exact cutter and material
+ *     (`feedsFor`, Route A). Offering it is not a promise: a job in one is REFUSED until the user's
+ *     own synced catalogue carries such a row, and the refusal says which row is missing. The
+ *     important half is that the metal can be ASKED for at all — before #347 the list offered four
+ *     materials and the machine's own table could not be answered from.
+ *
+ * It deliberately does NOT consult the catalogue, and that is a rule rather than a simplification:
+ * the catalogue is a runtime snapshot, empty on the web build (#324) and empty on the desktop until
+ * the service answers, so an option list built from it would offer a different set of materials on
+ * two machines running the same build.
+ *
+ * A word this build cannot label is dropped rather than shown blank. That is belt-and-braces rather
+ * than the load path — a profile's own schema refuses a material this build does not know — but the
+ * options are built from whatever machine object a caller hands in, and a blank `<option>` is a
+ * worse answer than a material that is simply not offered.
+ */
+export function materialOptionsFor(machine?: MillProfile): MaterialOption[] {
+  const options: MaterialOption[] = [];
+  const seen = new Set<string>();
+  const add = (material: StockMaterial): void => {
+    if (seen.has(material) || !Object.prototype.hasOwnProperty.call(MATERIAL_LABELS, material)) return;
+    seen.add(material);
+    options.push({ value: material, label: MATERIAL_LABELS[material] });
+  };
+  // The table's own order, because that list is the one this app can cut with no help.
+  for (const entry of FEEDS_TABLE) add(entry.material);
+  for (const material of machine?.materials ?? []) add(material);
+  return options;
+}
 
 /**
  * What the part is held in. Only a vise exists today; a rotary chuck is CNC-5's work and is

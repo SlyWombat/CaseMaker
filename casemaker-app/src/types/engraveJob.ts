@@ -23,7 +23,31 @@ import type { Tool } from '@/engine/cnc/tool';
  * registry or the id generator.
  */
 
-export type StockMaterial = 'softwood' | 'hardwood' | 'mdf' | 'pla';
+/**
+ * What the blank is made of (#200, widened by #347).
+ *
+ * The first four are the materials this app's own STARTING TABLE has rows for — the ones it can
+ * cut without anyone else's numbers. The rest are the materials a MACHINE PROFILE declares and
+ * that only Makera's own catalogue can answer for: the profile offers them (`Z1.materials`), and
+ * `feedsFor` refuses a job in one until the user's own synced catalogue has a row for the cutter
+ * and the material (#347, Route A). Offering them is not the same as knowing them.
+ *
+ * The two aluminium alloys are SEPARATE materials on purpose. `t_MaterialList` names `6061
+ * Aluminum` and `7075 Aluminum` as distinct rows with distinct feeds, so folding them into one
+ * `aluminium` would let whichever row the catalogue listed first answer for both — a wrong number
+ * in metal, silently. Every name here maps to exactly one vendor row ({@link CATALOGUE_MATERIALS}).
+ */
+export type StockMaterial =
+  | 'softwood'
+  | 'hardwood'
+  | 'mdf'
+  | 'pla'
+  | 'abs'
+  | 'acrylic'
+  | 'aluminium-6061'
+  | 'aluminium-7075'
+  | 'brass'
+  | 'copper';
 
 /**
  * Where an asserted value came from (#246, and the same provenance rule as the vise and the
@@ -593,6 +617,20 @@ export interface StockFlatness {
 export interface EngraveJob {
   schemaVersion: 2;
   name: string;
+  /**
+   * The MILL this job is written for (#347) — a `MACHINES` key, and `'Z1'` today, because that is
+   * the only mill this app models.
+   *
+   * A PLAIN STRING, for the same reason `toolKey` is one: a second machine is an entry in
+   * `MACHINES`, not a migration, and a saved job keeps resolving. `jobMachine(job, calibration)`
+   * in `engine/cnc/calibration.ts` is the reader; the job schema coerces an id this build does not
+   * know to the one it does, so a document written by a later build still loads here.
+   *
+   * It is not decoration. The work envelope the stock is bounded by, the spindle ceiling the feeds
+   * are clamped to, the frame the probe positions come from — and, since #347, WHICH MATERIALS the
+   * setup flow offers — are all the machine's, not the app's.
+   */
+  machineId: string;
   /**
    * length = X, width = Y, thickness = Z. `print` is the badge path's colour-layer input (#285);
    * absent for every job that is not a two-colour blank. `flatness` is the dome the printed face

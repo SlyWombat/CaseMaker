@@ -25,8 +25,7 @@ import type { SimStatus } from './simStore';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { feedCatalogueRows } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
-import { Z1 } from '@/engine/cnc/machine';
-import { resolveMachine } from '@/engine/cnc/calibration';
+import { jobMachine } from '@/engine/cnc/calibration';
 import type { MachineCalibration } from '@/engine/cnc';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useSettingsStore } from './settingsStore';
@@ -250,7 +249,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
 
     set({ phase: 'simulating' });
     try {
-      await useSimStore.getState().loadProgram(generated.nc, toSetup(job, resolveMachine(Z1, calibration)), tool, Z1.id, calibration);
+      await useSimStore.getState().loadProgram(generated.nc, toSetup(job, jobMachine(job, calibration)), tool, job.machineId, calibration);
     } catch (e) {
       if (mine === seq) set({ phase: 'blocked', error: e instanceof Error ? e.message : String(e) });
       return;

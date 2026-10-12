@@ -35,12 +35,16 @@
  *     at 13 000. They are not dropped or edited: they go through `clampToMachine` like every other
  *     number, which clamps them and says so (#184, #310).
  *
- * AND IT DOES NOT WIDEN COVERAGE. A cutter the starting table has no row for — 6 mm and up, since
- * every wood row stops at 3.2 mm — is still refused before the catalogue is consulted, so a
- * catalogue row for a 6 mm cutter changes nothing today. The tier sits above
- * `UNMEASURED_FEEDS_TABLE` as a source of better NUMBERS; the ranges are still the table's, because
- * the row also supplies our step-over and peck, which no vendor states. Widening the ranges is its
- * own decision with its own evidence, and is not this change.
+ * AND IT DOES NOT WIDEN COVERAGE — except where the starting table has NO ROW FOR THE MATERIAL AT
+ * ALL (#347). A cutter the starting table has no row for at a diameter it covers — 6 mm and up,
+ * since every wood row stops at 3.2 mm — is still refused before the catalogue is consulted, so a
+ * catalogue row for a 6 mm cutter changes nothing today. What #347 adds is the other kind of gap: a
+ * MATERIAL the table does not cover at all, which a machine profile can declare (the Z1's metals,
+ * and ABS and Acrylic). There a catalogue row is not a better number standing above a starting
+ * value — it is the WHOLE answer, with this app's step-over, peck and air, and a vendor number this
+ * job cannot use refuses the job rather than yielding, because underneath there is nothing to yield
+ * to. So coverage widens for a MATERIAL, never for a cutter: the cutter's own vendor id is what
+ * selects a row, and what makes the answer attributable to one cutter Makera sells.
  *
  * AND IT YIELDS WHERE IT CANNOT ANSWER (#325). A tier that sits ABOVE the default must not VETO it:
  * a vendor row stating a number this app cannot cut with — Studio's `0` in a column it never filled,
@@ -73,6 +77,7 @@ import { cuttingRadiusForSweep } from './tool';
 import type { Tool } from './tool';
 import { clampToMachine } from './machine';
 import type { ClampDiagnostic, MillProfile } from './machine';
+import { MATERIAL_LABELS } from './materials';
 import type { FieldSource, StockMaterial } from '@/types/engraveJob';
 
 export interface CutParams {
@@ -361,17 +366,29 @@ export const FeedCatalogueSchema = z.array(
 );
 
 /**
- * The vendor's material names, mapped to this app's `StockMaterial`. EXACTLY TWO ROWS (#310).
+ * The vendor's material names, mapped to this app's `StockMaterial` (#310, widened by #347).
  *
- * `t_MaterialList` names fifteen materials and this app cuts four things, and the overlap is wood:
- * `Hardwood` and `Softwood`. There is no row for `mdf`, none for `pla`, and none for the twelve
- * metals and plastics Makera lists. A name that is not a key here is REFUSED — the row is not used
- * — rather than guessed at by substring, so a future `Hardwood (Oak)` cannot silently become
- * `hardwood` and a `6061 Aluminum` can never be read as anything at all.
+ * `t_MaterialList` names fifteen materials; this app has a word for eight of them. The mapping is
+ * by EXACT name and nothing else — a name that is not a key here is REFUSED, the row is not used,
+ * rather than guessed at by substring. So a future `Hardwood (Oak)` cannot silently become
+ * `hardwood`, an `Aluminum 6061` in the vendor's own other order is not read as our `6061 Aluminum`,
+ * and `Bakelite`, `Carbon Fiber`, `Epoxy Tooling`, `Synthetic Stone`, `Delrin`, `Polycarbonate` and
+ * `PCB` — which this app has no material for, and therefore no starting row and no gate for — can
+ * never be answered as something else.
+ *
+ * The metals are where the exactness earns its keep (#347): `6061 Aluminum` and `7075 Aluminum` map
+ * to TWO different materials, so a 7075 row can never answer a 6061 job. One `aluminium` key would
+ * have made whichever row the catalogue listed first the answer for both.
  */
 export const CATALOGUE_MATERIALS: Readonly<Record<string, StockMaterial>> = {
   Hardwood: 'hardwood',
   Softwood: 'softwood',
+  ABS: 'abs',
+  Acrylic: 'acrylic',
+  '6061 Aluminum': 'aluminium-6061',
+  '7075 Aluminum': 'aluminium-7075',
+  Brass: 'brass',
+  Copper: 'copper',
 };
 
 /**
@@ -528,6 +545,130 @@ function catalogueProvenance(
   );
 }
 
+/**
+ * The step-over and peck a catalogue-only answer gets, as fractions of the cutter diameter
+ * (#347). The SAME numbers the starting table's rows carry, and ours rather than the vendor's:
+ * no feeds table states a step-over or a peck at all.
+ */
+const CATALOGUE_ONLY_STEP_OVER_FRACTION = 0.45;
+const CATALOGUE_ONLY_PECK_FRACTION = 1.0;
+
+/** The four numbers a catalogue row states, as its own row, for the Route A answer below. */
+function catalogueOnlyRow(
+  material: StockMaterial,
+  diameter: number,
+  row: FeedCatalogueRow,
+  tool: Tool,
+): FeedsEntry {
+  return {
+    material,
+    minDiameter: diameter,
+    maxDiameter: diameter,
+    params: {
+      rpm: row.rpm,
+      feed: row.feed,
+      plungeFeed: row.plungeFeed,
+      stepDown: row.stepDown,
+      stepOverFraction: CATALOGUE_ONLY_STEP_OVER_FRACTION,
+      peckFraction: CATALOGUE_ONLY_PECK_FRACTION,
+      air: true,
+    },
+    // NOT `measured`: no coupon cut this. It is a vendor's starting point standing alone.
+    status: 'unmeasured',
+    provenance:
+      `${CATALOGUE_LABEL}'s row for ${tool.name} in ${MATERIAL_LABELS[material]} — the whole answer ` +
+      `for this material, because this app's starting table has no row for it.`,
+  };
+}
+
+/** The row a job resolves against, and whether that row came from the catalogue alone (#347). */
+type EntryChoice =
+  | { ok: true; entry: FeedsEntry; catalogueOnly: boolean }
+  | { ok: false; reason: string };
+
+/**
+ * Which row `feedsFor` resolves this job against, or why there is none (#310, Route A of #347).
+ *
+ * The plain case is a row of `table`: a material the starting table covers, at a diameter inside
+ * one of its ranges. A material with rows but not at THIS diameter is the old refusal, unchanged.
+ *
+ * The other case is a material the starting table has NO row for at all — a metal or a plastic the
+ * machine's profile declares and this app has never measured. There the row has to come from the
+ * user's OWN synced catalogue, and it is the WHOLE answer: nothing sits underneath it, so a vendor
+ * number this job cannot use is a REFUSAL rather than a field that yields to a starting value. That
+ * is the one difference from the catalogue tier inside `feedsFor`, which stands ABOVE a starting row
+ * and passes a number over when it cannot use it (#325). No row, and no material this app can cut
+ * at all: the job is refused and the reason names what is missing.
+ */
+function entryFor(
+  catalogue: readonly FeedCatalogueRow[],
+  material: StockMaterial,
+  tool: Tool,
+  diameter: number,
+  machine: MillProfile,
+  table: readonly FeedsEntry[],
+): EntryChoice {
+  const entry = table.find(
+    (e) => e.material === material && diameter >= e.minDiameter && diameter <= e.maxDiameter,
+  );
+  if (entry) return { ok: true, entry, catalogueOnly: false };
+  if (table.some((e) => e.material === material)) {
+    return { ok: false, reason: `no cutting parameters for a ${diameter} mm cutter in ${material}` };
+  }
+
+  const label = MATERIAL_LABELS[material];
+  const named = `a ${diameter} mm cutter in ${label}`;
+  // The cutter has to carry Makera's own id for any of their rows to name it (#332: a clone's
+  // rendered cutter carries no identity of its own).
+  if (tool.id === null || tool.id === '') {
+    return {
+      ok: false,
+      reason:
+        `no cutting parameters for ${named}: the starting table has no row for ${label}, and ` +
+        `${CATALOGUE_LABEL}'s rows are matched by Makera's own cutter id — which this cutter does ` +
+        `not carry, so no row of theirs can name it. Pick a material the starting table covers, or ` +
+        `a cutter Makera sells.`,
+    };
+  }
+  const row = catalogueRowFor(catalogue, tool, material);
+  if (row === null) {
+    return {
+      ok: false,
+      reason:
+        `no cutting parameters for ${named}: the starting table has no row for ${label}, and ` +
+        `${CATALOGUE_LABEL} has no row for ${tool.name} in it. A material the starting table does ` +
+        `not cover is cut on the vendor's own numbers for that exact cutter and material, never on ` +
+        `a guess — sync the catalogue, or pick a material the table covers.`,
+    };
+  }
+  // Nothing below this row to fall back on, so a number this job cannot use is the end of it. The
+  // screening is `catalogueRefusal`, the same one the tier above uses, so the two cannot disagree
+  // about what "this job cannot use it" means.
+  for (const field of CATALOGUE_FIELDS) {
+    const why = catalogueRefusal(field, row[field], machine);
+    if (!why) continue;
+    const { label: fieldLabel, unit } = CATALOGUE_FIELD[field];
+    return {
+      ok: false,
+      reason:
+        `${CATALOGUE_LABEL} states a ${fieldLabel} of ${row[field]} ${unit} for ${tool.name} in ` +
+        `${label}, which this job cannot use — ${why} — and the starting table has no row for ` +
+        `${label} to answer it instead.`,
+    };
+  }
+  return { ok: true, entry: catalogueOnlyRow(material, diameter, row, tool), catalogueOnly: true };
+}
+
+/**
+ * The sentence a catalogue-only answer appends to its provenance (#347). It says which numbers are
+ * the vendor's and which are the app's, because on a material the starting table does not cover
+ * there is nothing else to say where the app's own values came from.
+ */
+const CATALOGUE_ONLY_NOTE =
+  ` This material has no row in the starting table, so this row is the whole answer: its four ` +
+  `numbers as the vendor states them, with this app's ${CATALOGUE_ONLY_STEP_OVER_FRACTION} × cutter ` +
+  `step-over, one-diameter peck and air.`;
+
 export type FeedsResult =
   | {
       ok: true;
@@ -559,7 +700,10 @@ export type FeedsResult =
  * Resolve the cutting parameters for a material and a tool, or refuse with a reason.
  *
  * The tool must be one `cuttingRadiusForSweep` accepts — a plain flat end mill — because V1
- * sweeps nothing else (`tool.ts`). The cutter's diameter selects a row; no row means no cut.
+ * sweeps nothing else (`tool.ts`). The cutter's diameter selects a row; no row means no cut — with
+ * one exception, and it is a MATERIAL's (#347): a material the starting table has no row for at all
+ * is answered by the user's own catalogue row (`entryFor`, Route A), which then stands ALONE, so a
+ * vendor number this job cannot use refuses the job instead of being passed over.
  *
  * THE TIERS, in the order this function consults them (#310's precedence, minus the rung that has
  * no writer yet): the row a coupon measured answers alone; otherwise Makera's catalogue answers —
@@ -593,12 +737,9 @@ export function feedsFor(
   if (!radius.ok) return { ok: false, reason: radius.reason };
   const diameter = radius.radius * 2;
 
-  const entry = table.find(
-    (e) => e.material === material && diameter >= e.minDiameter && diameter <= e.maxDiameter,
-  );
-  if (!entry) {
-    return { ok: false, reason: `no cutting parameters for a ${diameter} mm cutter in ${material}` };
-  }
+  const choice = entryFor(catalogue, material, tool, diameter, machine, table);
+  if (!choice.ok) return { ok: false, reason: choice.reason };
+  const { entry, catalogueOnly } = choice;
 
   // #310 — the catalogue rung. A row a coupon has measured is NOT eligible: "a catalogue row never
   // overrides a measured row" is the rule this tier exists under, and it is the difference between
@@ -726,7 +867,9 @@ export function feedsFor(
   // The row answers this job only if at least one of its numbers survived (#325): a row we passed
   // over entirely supplied nothing, and `catalogue: null` is how the panel is told so.
   const answered = row !== null && used.size > 0;
-  const provenance = answered && row ? catalogueProvenance(row, tool, entry, ignored) : entry.provenance;
+  const provenance =
+    (answered && row ? catalogueProvenance(row, tool, entry, ignored) : entry.provenance) +
+    (catalogueOnly ? CATALOGUE_ONLY_NOTE : '');
 
   // The row DID answer (`answered`) rather than merely existing: a vendor row whose numbers were
   // all passed over supplied nothing, and the panel's "Makera's numbers" label would be false.

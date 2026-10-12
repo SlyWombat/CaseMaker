@@ -34,6 +34,7 @@
 import type { Vec2 } from '@/types/units';
 import {
   MACHINES,
+  Z1,
   deriveCoordinateFrame,
   type CoordinateFrame,
   type MillProfile,
@@ -319,6 +320,29 @@ export function resolvedMachineById(
 ): MillProfile | undefined {
   const base = MACHINES[id];
   return base === undefined ? undefined : resolveMachine(base, calibration);
+}
+
+/**
+ * The MILL a JOB runs on (#347): the profile its own `machineId` names, resolved against the saved
+ * calibration. This is the reader every mill-shaped consumer of a job uses — the feeds clamp, the
+ * post, the verifier, the simulation, the run sheet — so "which machine is this job for" has one
+ * answer in one place.
+ *
+ * **It always answers.** An id this build does not know comes back as the Z1, which is a fallback
+ * and is named as one: there is exactly ONE mill in `MACHINES` today, so it is the only machine a
+ * job can be cut on, and the job schema coerces an unknown id to it on load (`.catch`, so a
+ * document written by a later build still opens). What must change when a SECOND mill lands is this
+ * line, not the callers: an unknown id then has to refuse generation the way an unknown tool key
+ * does, because the Z1's envelope and spindle ceiling would be exactly the numbers that are wrong
+ * for it. `resolvedMachineById` above is the reader for a caller that can say "no machine" —
+ * `undefined` stays `undefined` there, and this function is the one place that decides a job cannot
+ * do without a profile.
+ */
+export function jobMachine(
+  job: { machineId: string },
+  calibration?: MachineCalibration | null,
+): MillProfile {
+  return resolvedMachineById(job.machineId, calibration) ?? Z1;
 }
 
 /** Which frame is in force, for a panel or a wizard to print. */

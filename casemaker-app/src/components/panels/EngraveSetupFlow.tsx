@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { jobMachine } from '@/engine/cnc/calibration';
 import {
-  MATERIAL_OPTIONS,
+  materialOptionsFor,
   SETUP_STEPS,
   defaultSetupAnswers,
   sacrificialChoice,
@@ -165,7 +166,7 @@ export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Elem
               title="Selects the row of the feeds table."
               onChange={(e) => setAnswers((a) => withStockAnswer(a, 'material', e.target.value as StockMaterial))}
             >
-              {MATERIAL_OPTIONS.map((m) => (
+              {materialOptionsFor(jobMachine(job)).map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.label}
                 </option>

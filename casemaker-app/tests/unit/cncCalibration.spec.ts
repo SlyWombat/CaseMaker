@@ -18,6 +18,7 @@ import {
   CALIBRATION_KEYS,
   CALIBRATION_KEY_LIST,
   calibrationFromReplies,
+  jobMachine,
   machineCalibrationNotice,
   parseMachineCalibration,
   readSource,
@@ -222,6 +223,27 @@ describe('resolving a profile against a calibration', () => {
     expectAt(resolvedMachineById('Z1', readMachine())!.toolChange.sensor, [-9.89, -12.83]);
     expect(resolvedMachineById('Z1')).toEqual(MACHINES.Z1);
     expect(resolvedMachineById('carvera')).toBeUndefined();
+  });
+});
+
+// #347 — "which machine is this job for" is asked by the feeds clamp, the post, the verifier, the
+// simulation and the run sheet alike, so it is one function with one answer rather than four
+// readings of `job.machineId`.
+describe('the mill a JOB runs on (#347)', () => {
+  it('reads the job’s own id, resolved against the saved calibration', () => {
+    const job = { machineId: 'Z1' };
+    // The job's frame, not the shipped one: the resolved profile is what the consumers clamp to.
+    expectAt(jobMachine(job, readMachine()).toolChange.sensor, [-9.89, -12.83]);
+    expect(jobMachine(job)).toEqual(MACHINES.Z1);
+  });
+
+  it('always answers, falling back to the one mill this app models', () => {
+    // Named as a fallback rather than a lookup: a job written by a later build that offered a second
+    // machine still has to be cuttable here, and the shipping machine is the only profile there is.
+    // The line's doc says what has to change when a second mill lands — this test is what will fail.
+    expect(MACHINES.Z1).toBeDefined();
+    expect(jobMachine({ machineId: 'Carvera-Air' })).toEqual(MACHINES.Z1);
+    expect(jobMachine({ machineId: 'Carvera-Air' }, readMachine())).toEqual(MACHINES.Z1);
   });
 });
 

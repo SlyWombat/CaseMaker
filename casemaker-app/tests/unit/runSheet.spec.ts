@@ -92,6 +92,9 @@ describe('runSheet (#207)', () => {
     expect(sheet.header.estimatedTimeNote).toBe(RAPID_ASSUMPTION_NOTE);
     expect(sheet.header.estimatedTimeNote).toContain('cutting + rapids');
     expect(sheet.header.estimatedTimeNote).toContain('3000 mm/min');
+    // #347 — which machine the job is written for, read from the JOB rather than from a constant:
+    // an operator holding a sheet printed for another machine is the failure this line prevents.
+    expect(sheet.header.machine).toBe(Z1.name);
   });
 
   it('carries the stock, the three depths, stockProud, the feeds and the hash', () => {

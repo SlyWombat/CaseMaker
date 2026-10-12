@@ -22,8 +22,10 @@ import {
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { axesWord, describeTouch, kindWord, readsWord, registrationFor } from '@/engine/cnc/engrave/registration';
 import type { FeedsResult } from '@/engine/cnc/feeds';
+import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
 import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
+import { jobMachine } from '@/engine/cnc/calibration';
 import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
 // re-worded, so the sheet and the panel cannot disagree about what the sweep did not see.
@@ -231,6 +233,14 @@ export const RAPID_ASSUMPTION_NOTE =
 
 export interface RunSheetHeader {
   jobName: string;
+  /**
+   * The machine the job names (#347), by its profile name — `Makera Z1` today. On paper because it
+   * is what the rest of the sheet is true ABOUT: the envelope the blank was checked against, the
+   * spindle ceiling the feeds were clamped to, and the materials the job could be asked for are all
+   * the machine's, and an operator holding a printout should not have to open the app to know which
+   * one it was written for.
+   */
+  machine: string;
   /** ISO date (`YYYY-MM-DD`) the sheet was generated. */
   generatedOn: string;
   /** The sanitised job name plus `.nc` — the file the operator loads. */
@@ -264,12 +274,8 @@ function fmtNum(n: number): string {
   return String(Number(n.toFixed(3)));
 }
 
-const MATERIAL_LABEL: Record<EngraveJob['stock']['material'], string> = {
-  softwood: 'softwood',
-  hardwood: 'hardwood',
-  mdf: 'MDF',
-  pla: 'PLA',
-};
+// #347 — the app's word for a material comes from the ONE map (`feeds.ts`), so this sheet and the
+// flow's `<select>` cannot spell a material two ways.
 
 /** '2 min 35 s'. Formats the seconds it is given; `estimatedTimeNote` says what they are. */
 export function formatDuration(seconds: number): string {
@@ -898,6 +904,10 @@ export function buildRunSheet(
   const nc = generated.nc;
   const header: RunSheetHeader = {
     jobName: job.name,
+    // #347 — the JOB's machine. Read here rather than handed in: the name is the profile's and no
+    // saved calibration touches it, so the sheet and the panel cannot disagree about which machine
+    // this is even when the panel is showing a calibrated frame.
+    machine: jobMachine(job).name,
     generatedOn: now.toISOString().slice(0, 10),
     fileName: runSheetFileName(job.name),
     fileHash: nc === null ? '' : sha256Hex(nc).slice(0, 8),
@@ -911,7 +921,7 @@ export function buildRunSheet(
       text:
         'The blank. Measure it. If it differs by more than 0.5 mm in any dimension, change the job ' +
         'and regenerate — do not run this file.',
-      value: `${fmtNum(length)} × ${fmtNum(width)} × ${fmtNum(thickness)} mm ${MATERIAL_LABEL[material]}`,
+      value: `${fmtNum(length)} × ${fmtNum(width)} × ${fmtNum(thickness)} mm ${MATERIAL_LABELS[material]}`,
     },
     {
       text: tool ? `The cutter — ${tool.name}.` : 'The cutter named by the job.',

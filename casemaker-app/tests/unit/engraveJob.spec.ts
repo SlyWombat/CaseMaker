@@ -105,6 +105,33 @@ describe('EngraveJob schema (#200)', () => {
     if (parsed.ok) return;
     expect(parsed.errors.some((e) => e.includes('stock.length'))).toBe(true);
   });
+
+  it('carries the job’s machine and a profile-declared material through a round trip (#347)', () => {
+    const job = defaultEngraveJob();
+    expect(job.machineId).toBe(Z1.id);
+    job.stock.material = 'aluminium-6061';
+
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // BOTH fields have to survive in both directions: this schema STRIPS every key it does not name
+    // (#310's trap), so a material the enum does not carry would come back as the default and the
+    // job would be cut as if it were wood, with the machine's numbers silently replaced.
+    expect(parsed.job.stock.material).toBe('aluminium-6061');
+    expect(parsed.job.machineId).toBe('Z1');
+    expect(parsed.job).toEqual(job);
+  });
+
+  it('coerces an unknown machine id to the one mill this app models, rather than dropping the job', () => {
+    // A job written by a build that offered a second machine, opened by this one: the id is not a
+    // `MACHINES` key here, and the alternative to coercing is refusing a document that is otherwise
+    // perfectly readable. `jobMachine` falls back to the same profile, so the two agree.
+    const job = defaultEngraveJob();
+    const parsed = parseEngraveJob({ ...job, machineId: 'Carvera-Air' });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.machineId).toBe(Z1.id);
+  });
 });
 
 describe('labelProfile (#200)', () => {

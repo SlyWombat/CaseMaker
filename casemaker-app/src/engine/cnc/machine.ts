@@ -24,6 +24,8 @@
 
 import { z } from 'zod';
 import type { Mm, Vec2 } from '@/types/units';
+import type { StockMaterial } from '@/types/engraveJob';
+import { STOCK_MATERIALS } from './materials';
 
 export interface AxisRange {
   min: Mm;
@@ -130,6 +132,20 @@ export interface RotaryProfile {
 export interface MillProfile extends MachineIdentity {
   /** A mill. The only process with a spindle and a tool change (#183: Z1-only). */
   process: 'mill';
+  /**
+   * The materials this profile says the machine is set up to cut (#347), in the order the setup
+   * flow lists the ones only this list can offer.
+   *
+   * It is the MACHINE's own claim, and the app treats it as one: the flow offers the union of this
+   * list and the starting table's own materials (`materialOptionsFor`), because a material with a
+   * starting row is cut by this app's numbers whether or not a profile names it. What a profile
+   * cannot supply is the numbers — a material here with no starting row is answerable only from the
+   * user's own synced catalogue, and `feedsFor` refuses it until that row exists (#347, Route A).
+   *
+   * For the Z1 the list is Makera's OWN `t_MaterialList`, in this app's words, one entry per vendor
+   * row this app can name EXACTLY. See the literal for what is left out and why.
+   */
+  materials: StockMaterial[];
   /**
    * The work envelope in MACHINE coordinates. The Z1 homes to MAX on every axis and loads
    * 0 there, so machine coordinates run negative: X and Y in [-200, 0], Z in [-100, 0]. The
@@ -426,6 +442,14 @@ export const Z1: MillProfile = {
   id: 'Z1',
   name: 'Makera Z1',
   process: 'mill',
+  // Makera's own `t_MaterialList`, in this app's words (#347): the wood the Z1 ships cutting, the
+  // two plastics and the four metals this app can NAME EXACTLY. The other vendor rows — `Bakelite`,
+  // `Carbon Fiber`, `Epoxy Tooling`, `Synthetic Stone`, `Delrin`, `Polycarbonate`, `PCB` — are left
+  // out because `CATALOGUE_MATERIALS` has no exact mapping for them: offering a word this app
+  // cannot match to a row would offer a job nothing can answer. (The four plastics and woods the
+  // STARTING TABLE covers — softwood, hardwood, MDF, PLA — are in this list where the vendor names
+  // them and are unioned in by the flow where it does not.)
+  materials: ['softwood', 'hardwood', 'abs', 'acrylic', 'aluminium-6061', 'aluminium-7075', 'brass', 'copper'],
   envelope: { x: { min: -200, max: 0 }, y: { min: -200, max: 0 }, z: { min: -100, max: 0 } },
   maxCutFeed: 1200,
   maxRpm: 13000,
@@ -626,6 +650,12 @@ export const millProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   process: z.literal('mill'),
+  // #347 — the profile's own material claim, parsed against the ONE vocabulary
+  // (`engine/cnc/materials.ts`), so a profile's parse output is a `MillProfile` rather than a shape
+  // with a `string[]` where the materials go. A word this build does not know fails the parse and is
+  // reported at the profile, which is the honest place for a machine that claims a material the app
+  // cannot cut — `materialOptionsFor`'s guard is for the opposite case, a field the JOB carries.
+  materials: z.array(z.enum(STOCK_MATERIALS)),
   envelope: z.object({
     x: z.object({ min: finite, max: finite }),
     y: z.object({ min: finite, max: finite }),

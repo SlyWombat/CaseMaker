@@ -132,6 +132,8 @@ describe('#280 — step 1, the machine check', () => {
     expect(screen.getByTestId('start-wizard-machine-profile').textContent).toContain('Makera Z1');
     expect(screen.getByTestId('start-wizard-machine-profile').textContent).toContain('13000 rpm');
     expect(screen.queryByTestId('start-wizard-machine-unknown')).toBeNull();
+    // #347 — the machine that answered IS the job's machine, so there is nothing to warn about.
+    expect(screen.queryByTestId('start-wizard-machine-mismatch')).toBeNull();
   });
 
   it("saves the machine's own frame and says which frame is in force (#279)", async () => {

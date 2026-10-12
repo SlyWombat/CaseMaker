@@ -19,9 +19,12 @@ import {
   applyAnswers,
   blankViseFindings,
   defaultSetupAnswers,
+  materialOptionsFor,
   stepFindings,
   stockProudFix,
 } from '@/engine/cnc/engrave/setupFlow';
+import { Z1 } from '@/engine/cnc/machine';
+import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { presetJawStrips } from '@/engine/cnc/sacrificial';
 import { jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
@@ -147,6 +150,41 @@ describe('guided job setup — the pure answers (#254)', () => {
     // An UNCHANGED key keeps the job's own snapshot: re-entering the flow and finishing without
     // touching the cutter must not silently re-pin it (`toolRegistry`'s design point 1).
     expect(applyAnswers(job, defaultSetupAnswers(job)).tool).toBe(from);
+  });
+});
+
+describe('the material list the job may be cut in (#347)', () => {
+  it('is the starting table’s materials plus the machine’s own, in that order, with no duplicates', () => {
+    const values = materialOptionsFor(Z1).map((o) => o.value);
+    expect(values).toEqual([
+      // What this app can cut with no help, in the table's own order…
+      'softwood', 'hardwood', 'mdf', 'pla',
+      // …then the Z1's own list, which the starting table has no row for: the vendor's
+      // `t_MaterialList` in this app's words, metals included.
+      'abs', 'acrylic', 'aluminium-6061', 'aluminium-7075', 'brass', 'copper',
+    ]);
+    // Every one of them has a word to show; offering a value the app cannot label would render a
+    // blank `<option>`.
+    for (const option of materialOptionsFor(Z1)) expect(option.label).toBe(MATERIAL_LABELS[option.value]);
+  });
+
+  it('answers with the table’s materials when there is no machine to ask', () => {
+    // The panel builds this list from `jobMachine(job)`, which always answers — but the no-argument
+    // case must still be a usable list rather than an empty control.
+    expect(materialOptionsFor().map((o) => o.value)).toEqual(['softwood', 'hardwood', 'mdf', 'pla']);
+  });
+
+  it('offers the metals on the one machine this app models, and only what it declares', () => {
+    // The acceptance that matters for #347: a metal can be ASKED FOR at all. Before this, the list
+    // was four wood-or-plastic materials and no machine's table could be answered from.
+    const body = materialOptionsFor(Z1).map((o) => o.value);
+    for (const metal of ['aluminium-6061', 'aluminium-7075', 'brass', 'copper'] as const) {
+      expect(body).toContain(metal);
+    }
+    // A machine that declares nothing extra gets the table and nothing more — the profile is the
+    // second half of the union, not a promise about every material the app knows.
+    const bare = { ...Z1, materials: [] };
+    expect(materialOptionsFor(bare).map((o) => o.value)).toEqual(['softwood', 'hardwood', 'mdf', 'pla']);
   });
 });
 

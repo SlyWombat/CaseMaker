@@ -333,6 +333,27 @@ would allow 0.905 mm (#365). A line **you** typed or placed is left exactly wher
 position both — and so is one an earlier take seeded, once you have touched it: taking a second
 badge blank re-lays only what the app still owns.
 
+**The material list is the machine's list as well as this app's (#347).** It offers the four
+materials the starting table has rows for — softwood, hardwood, MDF, PLA — and then every material
+the **machine profile** declares, which on the Z1 is **ABS**, **Acrylic** and the four metals:
+**6061 aluminium**, **7075 aluminium**, **brass** and **copper**. Those are the vendor's own
+`t_MaterialList` in this app's words, and the two halves are two different claims. A *table*
+material is cut on this app's numbers, as before. A *profile* material is cut on **Makera's own
+numbers for that exact cutter and material**, from the catalogue you synced (#310) — their four
+numbers, with this app's step-over, peck and air — because nothing here has measured a metal. There
+is no guessing underneath: with no catalogue row for that cutter and material the job is
+**refused**, and the refusal names the row that is missing. A material the app has no word for
+(Delrin, polycarbonate, PCB and the rest of the vendor's list) is not offered at all, rather than
+offered and then refused. The two aluminium alloys are two materials, deliberately: a 7075 row can
+never answer a 6061 job.
+
+**Which machine the job is for is a question, not a constant (#347).** Step 1 of the **Start**
+wizard shows a **Machine** picker on every build — the desktop instance puts the network **check**
+under it, and the web build asks the picker alone, since it cannot reach a machine at all. The job
+carries that answer, and the work area, the spindle ceiling and every clamp come from it, whether
+or not a machine is switched on. The check never repoints the job: a machine that answers with a
+different profile is named as such, and the picker is where you change it.
+
 **2. Add labels (#200, #205) — in the app.** Each label carries its own text, font, weight,
 cap height, position on the blank, rotation and **depth**. The editor shows a depth box with
 a slider beside it — never a slider alone, because depth is a number you will want to type.
@@ -661,12 +682,11 @@ strokes a flat end mill cannot — but it needs a medial-axis engine, and it is 
 
 ## 8 · Reference
 
-> **Status: Available** — reference. The rows marked *planned* inside §8.1 and §8.4 are the
-> one exception, and each names its issue.
+> **Status: Available** — reference. The rows marked *planned* inside §8.4 are the one exception, and each names its issue.
 
 ### 8.1 Every diagnostic the app can raise
 
-> **Status: Partly available** — every code the engine raises today is listed; rows marked *planned* arrive with #174, #194, #204 and #219.
+> **Status: Available** — every code the engine raises today is listed. A new code gets its row here in the same change that adds it to the engine.
 
 You will see these short kebab-case codes in the diagnostics list and in the refusal banner.
 The severity is **error** (the app refuses or the cut is unsafe), **warning** (it proceeded,
@@ -743,6 +763,11 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `ramp-over-removed` | info | A checkpoint changes Z; it was swept at its lowest Z, removing more than the machine would. | Expect a slightly pessimistic picture. |
 | `gouges-truncated` | info | Only the first few gouges are drawn; the rest are reported, not drawn. | Read the other diagnostics. |
 | `fixture-unchecked` | info | The fixture is not modelled as an obstacle, so the cutter's proximity to it is **not** checked. The message names what is in the way — the vise's jaws, a clamp. Nothing is reported for a fixture that puts nothing over the part (tape-down, a nest wall outside the outline). | Model the vise (chapter 5). |
+| `tool-into-fixture` | error | The cutter's own swept column at a checkpoint drives into a modelled obstacle. The message names WHICH box — a jaw, a clamp — and the volume removed. | Move the cut clear of it, or correct the fixture's declared size. |
+| `rapid-into-fixture` | error | A rapid move drives the tool body into a modelled obstacle. | Fix the clearance height, or reorder the moves. |
+| `feed-into-fixture` | error | A feed move with the spindle **off** drives the tool body into a modelled obstacle — the same test as the rapid, with nothing being cut away as it goes. | Turn the spindle on, or move the move away. |
+| `holder-into-fixture` | error | The collet nut (its declared diameter), placed at the lowest it can sit at any seating, overlaps a modelled obstacle. | Use a shorter seating or a shorter holder, or move the work clear. |
+| `holder-vs-fixture-unproven` | warning | A modelled obstacle rises above the stock top while the collet nut's size is unknown, so the clearance to it cannot be proven. The message names the obstacle and how far it rises — and, when the rise is really the unmeasured band around a box that is declared below the stock top, says that instead. | Declare the holder's nut size, or keep the fixture below the stock top. |
 | `nothing-to-sweep` | warning | The program has no cutting moves at a known position. | Check the program. |
 | `gaps` | warning | Some cutting moves could not be placed and are missing from the picture. | Read the `cut-unknown-*` rows. |
 | `item-empty` | error | An item has nothing the cutter can reach: a label has no text, or a shape (a hole, a slot) is smaller than the cutter. Formerly `label-empty`. | Type text, enlarge the shape, or disable it. |
@@ -818,13 +843,6 @@ what a machine on a bench has been trammed to:
 | `machine-calibrated-frame` | info | Positions come from this machine's own configuration, read from it, with the date it was read. | Nothing — this is the good state. |
 | `machine-vendor-frame` | warning | Positions are the vendor's shipped defaults for a STOCK Z1: this machine's own configuration has not been read, and a machine that has been trammed keeps its anchors — and so its tool-length sensor and change position — elsewhere. | Run the machine check in the start wizard with the machine on the network. |
 | `machine-calibration-ignored` | warning | A saved calibration was read from a DIFFERENT machine (its own id is in the message), so it is deliberately not used here. | Check which machine this job is set for. |
-
-*Planned rows (not in the app yet):* the CAM verifier (#174) will add its own codes
-(`parse-error`, `not-our-dialect`, `cut-too-deep`, `cut-outside-stock`, `spindle-off-cut`,
-`feed-too-high`, `rapid-too-low`, and others); the runner (#194) will add
-`too-many-checkpoints`; the fixture checks (#204) will add `tool-into-fixture`,
-`rapid-into-fixture`, `feed-into-fixture`, `holder-into-fixture` and
-`holder-vs-fixture-unproven`.
 
 ### 8.2 G-code the simulator understands
 

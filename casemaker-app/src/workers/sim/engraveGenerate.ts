@@ -36,8 +36,8 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 // fall back to `dev`, so a generated-then-committed `.nc` was not byte-identical to the app's
 // own save (#231 item 4). package.json is the single source in every environment.
 import { version as CAM_VERSION } from '../../../package.json';
-import { Z1, type MillProfile } from '@/engine/cnc/machine';
-import { resolveMachine, type MachineCalibration } from '@/engine/cnc/calibration';
+import type { MillProfile } from '@/engine/cnc/machine';
+import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
 import { feedsFor, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt } from '@/engine/cnc/engrave/partPlan';
@@ -456,7 +456,11 @@ export function engraveGenerate(
   calibration: MachineCalibration | null = null,
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
 ): EngraveGenerated {
-  const mill = resolveMachine(Z1, calibration);
+  // #347 — the JOB's machine, not the app's only one: the envelope, the spindle ceiling and the
+  // frame below are read off the profile the document names. The POST is still `postZ1`'s dialect,
+  // which is the only post this app has; a second mill is a second post, and this line is where a
+  // job naming it would have to be refused until there is one.
+  const mill = jobMachine(job, calibration);
   const { plan, regions, predicted, radius, findings } = engraveRegions(tl, job, tool, margins);
   const errors: EngraveFailure[] = [];
 

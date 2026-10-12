@@ -20,7 +20,7 @@ import {
   zBudgetInputsFor,
 } from '@/engine/cnc/engrave/depthBounds';
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
-import { Z1 } from '@/engine/cnc';
+import { jobMachine } from '@/engine/cnc/calibration';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter } from '@/engine/cnc/tool';
@@ -34,7 +34,7 @@ import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
 import { openTextFile } from '@/utils/openTextFile';
 import { feedCatalogueRows, feedsFor, type CutParams } from '@/engine/cnc/feeds';
-import { MATERIAL_OPTIONS } from '@/engine/cnc/engrave/setupFlow';
+import { materialOptionsFor } from '@/engine/cnc/engrave/setupFlow';
 import {
   TRACE_DEFAULTS,
   importOutlineFromDisk,
@@ -363,7 +363,7 @@ export function EngravePanel(): JSX.Element {
   // The rows are the main thread's own catalogue snapshot (#324) — read here so the numbers on
   // screen are the same resolution the worker is handed at Generate, not a module state only this
   // side of the boundary can see.
-  const feeds = tool ? feedsFor(feedCatalogueRows(), job.stock.material, tool, Z1, job.cutOverride) : null;
+  const feeds = tool ? feedsFor(feedCatalogueRows(), job.stock.material, tool, jobMachine(job), job.cutOverride) : null;
   const params: CutParams | null = feeds && feeds.ok ? feeds.params : null;
   // Only the clamps (#317): an `ok: false` result carries `-refused` diagnostics, which the refusal
   // box below already states, and a `catalogue-ignored` is not the machine's doing at all.
@@ -1003,7 +1003,7 @@ export function EngravePanel(): JSX.Element {
             style={FIELD}
             onChange={(e) => setStock({ material: e.target.value as StockMaterial })}
           >
-            {MATERIAL_OPTIONS.map((m) => (
+            {materialOptionsFor(jobMachine(job)).map((m) => (
               <option key={m.value} value={m.value}>
                 {m.label}
               </option>

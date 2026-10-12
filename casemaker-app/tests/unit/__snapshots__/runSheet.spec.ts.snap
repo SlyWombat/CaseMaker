@@ -101,6 +101,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
     "fileName": "Untitled-engrave-job.nc",
     "generatedOn": "2026-10-04",
     "jobName": "Untitled engrave job",
+    "machine": "Makera Z1",
   },
   "sections": [
     {
@@ -396,6 +397,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
     "fileName": "Untitled-engrave-job.nc",
     "generatedOn": "2026-10-04",
     "jobName": "Untitled engrave job",
+    "machine": "Makera Z1",
   },
   "sections": [
     {

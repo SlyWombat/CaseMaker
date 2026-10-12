@@ -56,4 +56,11 @@ describe('RunSheetView — the stack-up elevation (#213 §6)', () => {
     expect(screen.queryByTestId('run-sheet-stackup')).toBeNull();
     expect(screen.getByTestId('run-sheet-diagram')).toBeTruthy();
   });
+
+  it('prints the machine the job is written for (#347)', () => {
+    // The operator's copy is what tells them which machine to set up, so the row is on the page and
+    // not only in the data (`runSheet.spec.ts` asserts where the value comes from).
+    render(<RunSheetView sheet={sheetFor(defaultEngraveJob())} />);
+    expect(screen.getByTestId('run-sheet-machine').textContent).toBe(Z1.name);
+  });
 });

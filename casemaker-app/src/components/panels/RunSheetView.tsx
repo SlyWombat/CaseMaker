@@ -65,6 +65,10 @@ export function RunSheetView({ sheet, onClose }: { sheet: RunSheet; onClose?: ()
           <h1>{sheet.header.jobName}</h1>
           <dl className="run-sheet-meta">
             <div>
+              <dt>Machine</dt>
+              <dd data-testid="run-sheet-machine">{sheet.header.machine}</dd>
+            </div>
+            <div>
               <dt>Generated</dt>
               <dd>{sheet.header.generatedOn}</dd>
             </div>

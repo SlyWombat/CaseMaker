@@ -1,5 +1,6 @@
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { DEFAULT_VISE } from '@/engine/cnc/fixture';
+import { Z1 } from '@/engine/cnc/machine';
 import { noneSacrificial } from '@/engine/cnc/sacrificial';
 import { MARGIN_DEFAULTS, type MarginSettings } from '@/engine/cnc/engrave/depthBounds';
 import { newId } from '@/utils/id';
@@ -85,6 +86,10 @@ export function defaultEngraveJob(
   return {
     schemaVersion: 2,
     name: 'Untitled engrave job',
+    // #347 — the one mill this app models, READ from the profile rather than typed. A job's
+    // machine decides which materials the setup offers and which envelope the stock is bounded by,
+    // so it has to be stated in the document like every other fact the job runs on.
+    machineId: Z1.id,
     stock: {
       length: 100, // X — a common hobby blank, fits the Z1's 200 mm X with vise room.
       width: 60, // Y

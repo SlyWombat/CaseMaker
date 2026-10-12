@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { Z1 } from '@/engine/cnc/machine';
+import { MACHINES, Z1 } from '@/engine/cnc/machine';
+import { STOCK_MATERIALS } from '@/engine/cnc/materials';
 import { ToolSchema } from '@/engine/cnc/toolLibrary';
 import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
 import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
@@ -24,12 +25,28 @@ import type { EngraveJob } from '@/types/engraveJob';
 /**
  * The stock bounds ARE the Z1 work envelope, read rather than retyped (200 × 200 × 100). The
  * envelope runs negative in machine coordinates, so the usable size is max − min per axis.
+ *
+ * The Z1 is the only MILL this app models (#347), so these are every job's bounds today. When a
+ * second machine lands they become ITS bounds and the job's own `machineId` picks which — the
+ * schema cannot express a per-machine bound while there is one machine, and pretending otherwise
+ * would be a limit no document has.
  */
 const STOCK_LIMITS = {
   length: Z1.envelope.x.max - Z1.envelope.x.min,
   width: Z1.envelope.y.max - Z1.envelope.y.min,
   thickness: Z1.envelope.z.max - Z1.envelope.z.min,
 } as const;
+
+/**
+ * The ids the job may name (#347). Read off `MACHINES` rather than retyped, so a second mill is an
+ * entry there and nothing here — and `.catch(Z1.id)` rather than a plain enum, because a document
+ * is the user's own file and must still LOAD: a job naming a machine a later build added comes back
+ * as the one this build has, which the panel and the run sheet then state plainly. (The alternative
+ * — failing the parse — would throw away a whole job over a field that has a correct answer.)
+ */
+const machineIdSchema = z
+  .enum(Object.keys(MACHINES) as [string, ...string[]])
+  .catch(Z1.id);
 
 /** The largest a label's cap height may be, mm. A blank this size is 12 mm thick; 100 mm is a guard, not a physical limit. */
 const MAX_LABEL_SIZE = 100;
@@ -370,7 +387,7 @@ const stockSchema = z.object({
   length: z.number().finite().positive().max(STOCK_LIMITS.length),
   width: z.number().finite().positive().max(STOCK_LIMITS.width),
   thickness: z.number().finite().positive().max(STOCK_LIMITS.thickness),
-  material: z.enum(['softwood', 'hardwood', 'mdf', 'pla']),
+  material: z.enum(STOCK_MATERIALS),
   print: stockPrintSchema.optional(),
   flatness: stockFlatnessSchema.optional(),
 });
@@ -471,6 +488,11 @@ const jobSourcesSchema = z.object({
 const engraveJobV1Schema = z.object({
   schemaVersion: z.literal(1),
   name: z.string(),
+  // #347 — on the BASE version, not v2, because that is where every job gets it: the field is
+  // DEFAULTED to the one mill this build models (`machineIdSchema`'s `.catch`), so a v1 job and a v2
+  // job written before the field existed both load carrying `'Z1'`. Unlike the optional keys below
+  // it is never absent, because a job has a machine whether or not anyone wrote one down.
+  machineId: machineIdSchema,
   stock: stockSchema,
   labels: z.array(labelSchema),
   toolKey: z.string().min(1),

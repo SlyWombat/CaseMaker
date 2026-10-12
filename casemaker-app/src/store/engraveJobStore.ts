@@ -452,6 +452,18 @@ function newKeepOut(kind: EngraveKeepOut['kind'], job: EngraveJob): EngraveKeepO
 export interface EngraveJobState {
   job: EngraveJob;
   /**
+   * Point the job at a machine (#347) — its `machineId`, which decides the materials the flow
+   * offers and the envelope and spindle ceiling every resolver reads.
+   *
+   * It writes the id and NOTHING else, deliberately. The blank, the cutter and the labels are the
+   * same objects whoever cuts them, and the app's own findings are what say when they do not fit
+   * the machine — so re-deriving them here would be a second, quieter opinion than the one the
+   * panel prints. (There is one mill in `MACHINES` today, so a change is a statement about the
+   * job's machine rather than a different machine's numbers; when a second lands, this is where the
+   * stock bounds and the material's availability get their say.)
+   */
+  setMachine: (id: string) => void;
+  /**
    * Merge a stock edit and stamp each edited field's source (#254). Defaults to `'user'`.
    *
    * A patch that changes the thickness carries the SHIPPED-DEFAULT vise with it, re-deriving its
@@ -585,6 +597,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
 
   return {
     job: loadJob(),
+
+    // #347 — the id alone, and no other field. See the interface's own doc for why.
+    setMachine: (id) => apply((job) => (job.machineId === id ? job : { ...job, machineId: id })),
 
     setStock: (patch, source = 'user') =>
       apply((job) => {
