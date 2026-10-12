@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { fitRelief, FIT_RELIEF_MM, FIT_VARIANTS } from '@/types/snap';
 import { buildSnapCatch, defaultSnapCatchesForCase } from '@/engine/compiler/snapCatches';
 import { buildBoardSnapOps } from '@/engine/compiler/boardSnap';
-import { buildRackNodes } from '@/engine/compiler/rack';
+import { buildRackNodes, FOOT_H, plateTabYs, SIDE_T, TAB_T, TAB_Z_SLACK } from '@/engine/compiler/rack';
 import { aabbOfOp, union, type BuildOp } from '@/engine/compiler/buildPlan';
 import { cavityOriginXY } from '@/engine/coords';
 import { createDefaultProject } from '@/store/projectStore';
@@ -47,6 +47,10 @@ const baseCase: CaseParameters = {
   ventilation: { enabled: false, pattern: 'none', coverage: 0 },
   bosses: { enabled: true, insertType: 'none', outerDiameter: 5, holeDiameter: 2.5 },
 };
+
+/** Probe side, mm for a face walk. Small enough that the smeared solid/void
+ *  boundary of a cube straddling a face lands within a few hundredths. */
+const PROBE = 0.04;
 
 /** Is the op's material present at this point? */
 function solidAt(m: ManifoldInstance, p: [number, number, number], s = 0.12): boolean {
@@ -165,6 +169,77 @@ describe('Issue #153 — rack plate-tab ledges loosen with rack.fit', () => {
     // A 0.25 mm relief widens each ledge's reach and its along-plate opening.
     // Deterministic, so an exact inequality is enough.
     expect(loose).toBeLessThan(tight);
+  });
+
+  // #356 — the same ladder, on the THICKNESS axis. The ledge used to be exactly
+  // TAB_T tall for every rung, so it could never relieve a thickness bind; now
+  // half the base clearance plus the rung's relief opens the ceiling, and the
+  // tab gives up the fixed half on its inner face.
+  it('loosens the ledge’s z opening by the same ladder, over a tab thinned by a FIXED half', () => {
+    const tabY = plateTabYs(rack.depth)[0]!;
+    const ceilingOf = (fit: RackParams['fit']): number => {
+      const m = exec(
+        buildRackNodes({ ...rack, fit }).find((n) => n.id === 'rack-side-left')!.op as BuildOp,
+      );
+      try {
+        // Walk up the ledge's centre line from inside the notch; the first solid
+        // overhead is the ceiling the plate tab's inner face has to clear.
+        const zMid = FOOT_H + TAB_T / 2;
+        for (let d = 0; d <= 4; d += 0.01) {
+          if (solidAt(m, [SIDE_T / 2, tabY, zMid + d], PROBE)) return zMid + d;
+        }
+        return NaN;
+      } finally {
+        m.delete();
+      }
+    };
+
+    for (const fit of FIT_VARIANTS) {
+      const ceil = ceilingOf(fit);
+      expect(Number.isFinite(ceil), `${fit}: found the ledge ceiling`).toBe(true);
+      expect(
+        Math.abs(ceil - (FOOT_H + TAB_T + TAB_Z_SLACK / 2 + fitRelief(fit))),
+        `${fit}: the ledge ceiling sits at ${ceil.toFixed(2)}, not the laddered opening`,
+      ).toBeLessThan(0.04);
+    }
+
+    // The tab carries the FIXED half only, so the plate's own volume does not
+    // move with the rung — which is what lets the coupon grade every rung with
+    // one printed tab.
+    const plateVolume = (fit: RackParams['fit']): number => {
+      const m = exec(
+        buildRackNodes({ ...rack, fit }).find((n) => n.id === 'rack-bottom')!.op as BuildOp,
+      );
+      try {
+        return m.volume();
+      } finally {
+        m.delete();
+      }
+    };
+    expect(Math.abs(plateVolume('loose') - plateVolume('tight'))).toBeLessThan(1e-6);
+
+    // ...and the shave is real: the tab is TAB_Z_SLACK/2 thinner, and its OUTER
+    // face — the counterbore face that must stay flush with the plate — is at z=0.
+    const m = exec(
+      buildRackNodes({ ...rack, fit: 'tight' }).find((n) => n.id === 'rack-bottom')!.op as BuildOp,
+    );
+    try {
+      const xProbe = SIDE_T - 10; // inside the tab, outboard of the screw bore
+      const zMid = FOOT_H + TAB_T / 2; // buildRackNodes seats the plate at FOOT_H
+      let lo = NaN;
+      let hi = NaN;
+      for (let d = 0; d <= 4 && (Number.isNaN(lo) || Number.isNaN(hi)); d += 0.01) {
+        if (Number.isNaN(hi) && !solidAt(m, [xProbe, tabY, zMid + d], PROBE)) hi = zMid + d;
+        if (Number.isNaN(lo) && !solidAt(m, [xProbe, tabY, zMid - d], PROBE)) lo = zMid - d;
+      }
+      expect(Math.abs(lo - FOOT_H), 'the tab’s outer face is flush at the plate’s underside').toBeLessThan(0.04);
+      expect(
+        Math.abs(hi - (FOOT_H + TAB_T - TAB_Z_SLACK / 2)),
+        `the tab is ${(hi - lo).toFixed(2)} mm thick, not TAB_T less the shave`,
+      ).toBeLessThan(0.04);
+    } finally {
+      m.delete();
+    }
   });
 });
 

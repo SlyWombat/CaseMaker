@@ -27,6 +27,7 @@ import {
   SHELF_RIB_H,
   TRAY_DECK_T,
   TAB_T,
+  TAB_Z_SLACK,
   TAB_SCREW_INSET,
   TAB_SCREW_HEAD_H,
   TAB_SCREW_BITE,
@@ -636,6 +637,22 @@ describe('rack archetype — mini-rack template', () => {
           // The ledge floor carries the plate, and its walls locate it fore/aft.
           expect(clash([0, 0, -1]), `${plateId} cannot drop through its ledges`).toBeGreaterThan(20);
           expect(clash([0, 3, 0]), `${plateId} cannot slide out fore/aft`).toBeGreaterThan(20);
+          // #356 — and it now has its designed THICKNESS clearance, where it used
+          // to be a nominal tab in a nominal opening. The bottom plate is seated
+          // on its feet and can only rise into the ledge CEILING; the top plate
+          // hangs from an open-upward ledge and can only drop onto its FLOOR.
+          // Either way the free travel is TAB_Z_SLACK, and the face it meets is
+          // what stops it — so a regression here reads as a joint that binds
+          // again on its thickness. SAMPLE sets no `fit`, so there is no relief.
+          const toward = plateId === 'rack-bottom' ? 1 : -1;
+          expect(
+            clash([0, 0, toward * (TAB_Z_SLACK - 0.05)]),
+            `${plateId} keeps its designed z clearance`,
+          ).toBeLessThan(1);
+          expect(
+            clash([0, 0, toward * (TAB_Z_SLACK + 0.05)]),
+            `${plateId} is stopped at the ledge ceiling/floor`,
+          ).toBeGreaterThan(1);
         } finally {
           plate.delete();
         }
@@ -690,9 +707,13 @@ describe('rack archetype — mini-rack template', () => {
         return f;
       };
       const H = 5 + (16 * SLOT_PITCH + 11);
+      // #356 — the ledge's mouth moved by the fixed half of TAB_Z_SLACK, so the
+      // column's own span moved with it (SAMPLE sets no `fit`, so the relief is
+      // the tight rung's 0).
+      const zOpen = TAB_Z_SLACK / 2;
       for (const y of tabYs) {
-        expect(ring(sides[0]!, y, 5 + TAB_T, 5 + TAB_T + TAB_SCREW_BITE), `bottom tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
-        expect(ring(sides[0]!, y, H - TAB_T - TAB_SCREW_BITE, H - TAB_T), `top tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
+        expect(ring(sides[0]!, y, 5 + TAB_T + zOpen, 5 + TAB_T + zOpen + TAB_SCREW_BITE), `bottom tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
+        expect(ring(sides[0]!, y, H - TAB_T - zOpen - TAB_SCREW_BITE, H - TAB_T - zOpen), `top tab screw at y=${y} has a solid column`).toBeGreaterThan(0.9);
 
         // ...and it has to be possible to actually INSERT it. The bottom
         // screw threads upward, so it can only be entered from under the
@@ -1445,8 +1466,10 @@ describe('rack archetype — mini-rack template', () => {
       // shelf's rear anchor and the two holes ran into each other.
       const axisX = 15 + 0.3 - TAB_SCREW_INSET;
       const accCols = [22, 100, SAMPLE.depth - REAR_ANCHOR_INSET];
+      // #356: the pilot's own mouth moved by the fixed half of TAB_Z_SLACK.
+      const zOpen = TAB_Z_SLACK / 2;
       for (const ty of plateScrewYs(dims.depth)) {
-        for (const zBase of [5 + TAB_T, dims.totalH - TAB_T - TAB_SCREW_BITE]) {
+        for (const zBase of [5 + TAB_T + zOpen, dims.totalH - TAB_T - zOpen - TAB_SCREW_BITE]) {
           const pilot = Manifold.cylinder(TAB_SCREW_BITE, 2.4, 2.4, 32).translate([axisX, ty, zBase]);
           for (const cy of accCols) {
             for (let k = 0; k < dims.slots; k++) {

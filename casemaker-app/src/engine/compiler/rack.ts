@@ -277,8 +277,37 @@ export const TAB_T = PLATE_T;
  * same width and depth on both axes, so this one number is the whole gap.
  */
 export const TAB_SLACK = 0.3;
+/**
+ * As-designed THICKNESS clearance of the same joint, mm (#356) — the z twin of
+ * TAB_SLACK, and the number #153's fit relief is added to on this axis too.
+ *
+ * The ledge's z opening used to be exactly `TAB_T`: a nominal tab in a nominal
+ * opening, with nothing but the printer's own error between them. The printed
+ * network-closet rack bound on it (2026-10-11 — 0.2 mm off the tab's inner face
+ * freed it by hand), so the joint now carries a designed clearance like every
+ * other.
+ *
+ * It is SHARED between the two printed halves, but deliberately not evenly with
+ * the ladder. Half is a FIXED shave off the tab's INNER face (`TAB_Z_SHAVE`,
+ * applied in `buildPlate`) — the outer face stays flush with the plate and
+ * keeps the screw-head seat whole — and the other half opens the LEDGE, where
+ * #153's relief piles on. That keeps `snap.ts`'s rule: the ladder relief is
+ * applied to the CUT, never to both halves, which is also what leaves the
+ * coupon's single printed tab able to grade every rung on the z axis.
+ *
+ * So the joint's whole z clearance is `TAB_Z_SLACK + fitRelief(rack.fit)`, and
+ * that sum is exactly what the rack-tab coupon's rungs now let you feel.
+ */
+export const TAB_Z_SLACK = 0.2;
 /** How far a tab overlaps the deck it grows out of, to avoid a coplanar seam. */
 const TAB_MERGE = 0.5;
+/**
+ * What a tab gives up of its thickness for `TAB_Z_SLACK`, mm — half the base
+ * clearance, off the INNER face, and FIXED: the tab never moves with `fit`.
+ * The laddered half is the ledge's (`buildSide`), so the fit coupon can grade
+ * both the slot's width and its opening height against one printed tab.
+ */
+const TAB_Z_SHAVE = TAB_Z_SLACK / 2;
 /**
  * The tab screw is the SAME M5 as everything else in the rack, so it takes the
  * same numbers. It used to carry its own: TAB_SCREW_CLEAR_D was a byte-identical
@@ -457,6 +486,10 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   // Absent fit = 'tight' = the as-designed TAB_SLACK (0.3), so legacy racks
   // compile unchanged. Relief only ever widens the ledge (looser).
   const tabSlack = TAB_SLACK + fitRelief(rack.fit);
+  // Issue #356 — the ledge's OPENING HEIGHT, the z twin of `tabSlack`: the
+  // fixed half of TAB_Z_SLACK plus the rack's relief, matching the fixed shave
+  // buildPlate takes off the tab. See TAB_Z_SLACK.
+  const tabZOpen = TAB_Z_SLACK / 2 + fitRelief(rack.fit);
 
   const solid: BuildOp[] = [
     // Panel body spans z FOOT_H..H_TOP; stacking feet hang below at both ends.
@@ -560,28 +593,45 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
   const xAt = (v: number): number => xr(v, v)[0];
   const tabAxis = xAt(tabEdge - TAB_SCREW_INSET);
   const screwYs = new Set(plateScrewYs(depth));
-  for (const ty of plateTabYs(depth)) {
+  // The two ledges at one tab's y, in this panel's own x frame. One source for
+  // the panel body and the fan path below: a vertical fan strip spans
+  // rail-to-rail, so one landing on a ledge fills it right back in, and a strip
+  // cut a hair off the ledge it re-opens leaves a sliver of shelf in the notch.
+  const ledgesAt = (ty: number): BuildOp[] => {
     const y0 = ty - TAB_LEN / 2 - tabSlack;
     const dy = TAB_LEN + 2 * tabSlack;
-    // Bottom: the ledge is only as deep as the tab, so the rail ABOVE it stays
-    // solid — that is what the bottom screw threads into, driven UP from
-    // underneath. Downward is not an option here: there are only 19 mm of rack
-    // below plate level (5 mm foot + 14 mm rail) and a 24 mm screw would come
-    // straight out through the foot. Going up instead reaches the rail and the
-    // web above it, and lands the head in the same outer-face counterbore the
-    // top plate uses.
-    cuts.push(box(tabEdge - TAB_REACH - tabSlack, SIDE_T + OVER, y0, FOOT_H, dy, TAB_T));
-    // Top: only as deep as the tab, so the rail below stays solid to bite.
-    cuts.push(
-      box(tabEdge - TAB_REACH - tabSlack, SIDE_T + OVER, y0, H_TOP - TAB_T, dy, TAB_T + OVER),
-    );
+    return [
+      // Bottom: the ledge is only as deep as the tab, so the rail ABOVE it stays
+      // solid — that is what the bottom screw threads into, driven UP from
+      // underneath. Downward is not an option here: there are only 19 mm of rack
+      // below plate level (5 mm foot + 14 mm rail) and a 24 mm screw would come
+      // straight out through the foot. Going up instead reaches the rail and the
+      // web above it, and lands the head in the same outer-face counterbore the
+      // top plate uses. The opening is TAB_T plus the z relief and reaches UP,
+      // away from the foot the tab seats on.
+      box(tabEdge - TAB_REACH - tabSlack, SIDE_T + OVER, y0, FOOT_H, dy, TAB_T + tabZOpen),
+      // Top: only as deep as the tab, so the rail below stays solid to bite. Its
+      // floor drops by the same relief, away from the flush outer face.
+      box(
+        tabEdge - TAB_REACH - tabSlack,
+        SIDE_T + OVER,
+        y0,
+        H_TOP - TAB_T - tabZOpen,
+        dy,
+        TAB_T + tabZOpen + OVER,
+      ),
+    ];
+  };
+  for (const ty of plateTabYs(depth)) {
+    cuts.push(...ledgesAt(ty));
     if (!screwYs.has(ty)) continue; // mid tab bears the deck, takes no screw
     // A millimetre deeper than the screw reaches: a screw that bottoms out
-    // jacks the plate back up off its seat.
+    // jacks the plate back up off its seat. The mouth sits on the ledge's own
+    // ceiling, so it rises with the #356 relief the same as the ceiling does.
     cuts.push(
       screwStarter({
         size: 'M5',
-        at: [tabAxis, ty, FOOT_H + TAB_T],
+        at: [tabAxis, ty, FOOT_H + TAB_T + tabZOpen],
         axis: '+z',
         depth: TAB_SCREW_BITE + OVER,
         segments: 24,
@@ -598,11 +648,12 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     );
     // Driven DOWN from the top ledge, so the hole runs -z from its mouth. The
     // bottom one is the mirror case and goes UP, which is the whole reason the
-    // two ends of this joint are not the same part of the rail.
+    // two ends of this joint are not the same part of the rail. Its mouth sits
+    // on the ledge's floor, so it drops with the #356 relief.
     cuts.push(
       screwStarter({
         size: 'M5',
-        at: [tabAxis, ty, H_TOP - TAB_T],
+        at: [tabAxis, ty, H_TOP - TAB_T - tabZOpen],
         axis: '-z',
         depth: TAB_SCREW_BITE,
         segments: 24,
@@ -691,8 +742,8 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     // the way out to the face — see the shallow pocket below.
     if (!screwYs.has(yC)) continue;
     for (const [za, zb] of [
-      [FOOT_H + TAB_T, FOOT_H + TAB_T + TAB_SCREW_BITE + 2],
-      [H_TOP - TAB_T - TAB_SCREW_BITE - 2, H_TOP - TAB_T],
+      [FOOT_H + TAB_T + tabZOpen, FOOT_H + TAB_T + tabZOpen + TAB_SCREW_BITE + 2],
+      [H_TOP - TAB_T - tabZOpen - TAB_SCREW_BITE - 2, H_TOP - TAB_T - tabZOpen],
     ] as [number, number][]) {
       screwColumns.push(yzRect(yC - TAB_COLUMN_D / 2, yC + TAB_COLUMN_D / 2, za, zb));
     }
@@ -857,14 +908,10 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean): BuildOp {
     fanCuts.push(translate([holeX, ty, FOOT_H + bodyH - RAIL / 2], axisCylinder('+x', holeLen, TIE_D / 2, 16)));
   }
   // ...and the tab ledges: a vertical fan strip spans rail-to-rail, so one landing on a
-  // ledge would fill it right back in.
+  // ledge would fill it right back in. Cut from the same `ledgesAt` the panel body uses,
+  // so the strip and the body carve the notch to exactly the same size.
   for (const ty of plateTabYs(depth)) {
-    const y0 = ty - TAB_LEN / 2 - tabSlack;
-    const dy = TAB_LEN + 2 * tabSlack;
-    fanCuts.push(box(tabEdge - TAB_REACH - tabSlack, SIDE_T + OVER, y0, FOOT_H, dy, TAB_T));
-    fanCuts.push(
-      box(tabEdge - TAB_REACH - tabSlack, SIDE_T + OVER, y0, H_TOP - TAB_T, dy, TAB_T + OVER),
-    );
+    fanCuts.push(...ledgesAt(ty));
   }
   const [sx0, sx1] = xr(0, SIDE_T);
   // Fan cuts reuse holeX/holeLen — the SAME lateral start the screw columns
@@ -1071,8 +1118,13 @@ function buildPlate(dims: RackDims, notchSolid: Profile[] = [], floorRibs = fals
       // vertices along the seam, and a slicer reading the de-indexed STL sees
       // those as a mesh needing repair. Overlapping removes the seam.
       const xa = dir < 0 ? edge - TAB_REACH : edge - TAB_MERGE;
+      // The tab gives up TAB_Z_SHAVE (#356), and it gives it up on its INNER
+      // face: the solids start at plate z = 0, which is the OUTER face — the one
+      // the counterbore opens into and the one that must stay flush with the
+      // plate. So the tab is shortened to TAB_T - TAB_Z_SHAVE and the screw's
+      // through-hole follows it. See TAB_Z_SLACK.
       solid.push(
-        translate([xa, yC - TAB_LEN / 2, 0], cube([TAB_REACH + TAB_MERGE, TAB_LEN, TAB_T])),
+        translate([xa, yC - TAB_LEN / 2, 0], cube([TAB_REACH + TAB_MERGE, TAB_LEN, TAB_T - TAB_Z_SHAVE])),
       );
       if (!screwYs.has(yC)) continue; // mid tab is a rest, not a fixing
       const axis = dir < 0 ? edge - TAB_SCREW_INSET : edge + TAB_SCREW_INSET;
@@ -1085,7 +1137,7 @@ function buildPlate(dims: RackDims, notchSolid: Profile[] = [], floorRibs = fals
           size: 'M5',
           at: [axis, yC, 0],
           axis: '+z',
-          through: TAB_T,
+          through: TAB_T - TAB_Z_SHAVE,
           head: 'button',
           recess: 'flush',
           segments: 24,

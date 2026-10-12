@@ -47,7 +47,7 @@ import {
 } from '@/engine/compiler/fitCoupons';
 import { MAGNETS } from '@/engine/compiler/fasteners';
 import { CLIP_FIT } from '@/engine/compiler/boardSnap';
-import { SIDE_T, TAB_SLACK, TAB_T } from '@/engine/compiler/rack';
+import { SIDE_T, TAB_SLACK, TAB_T, TAB_Z_SLACK } from '@/engine/compiler/rack';
 import { FIT_VARIANTS, fitRelief } from '@/types/snap';
 import type { MagnetSize, Vec3 } from '@/types';
 import { Manifold, exec, type ManifoldInstance } from './helpers/manifoldExec';
@@ -429,6 +429,59 @@ describe('rack plate-tab coupon (laddered by #153)', () => {
         Math.abs(tabFace - shippedFloor - TAB_SLACK),
         `shipped rung gap reads ${(tabFace - shippedFloor).toFixed(2)}`,
       ).toBeLessThan(0.05);
+    } finally {
+      m.delete();
+    }
+  });
+
+  it('grades the joint’s THICKNESS too: each ledge opens taller by its rung, over the one tab (#356)', () => {
+    // Before #356 the ledge's z opening was TAB_T for EVERY rung — the rung moved
+    // only the slot's width and reach — so the coupon could not feel a thickness
+    // bind at all. It can now, and this walks the opening it prints.
+    const built = buildRackTabCoupon();
+    const plan = rackTabCouponPlan();
+    const m = exec(built.op);
+    try {
+      const ledgeAt = (shift: Vec3, x: number, y: number, z: number): [number, number, number] =>
+        [x + shift[0], y + shift[1], z + shift[2]];
+      const tabAt = (x: number, y: number, z: number): [number, number, number] =>
+        [x + plan.tabShift[0], -y + plan.tabShift[1], -z + plan.tabShift[2]];
+
+      // Inside each ledge notch on its centre line; the first material overhead is
+      // the ceiling the tab's inner face has to clear.
+      const midZ = plan.plateZ + TAB_T / 2;
+      const ceilingAt = (shift: Vec3): number =>
+        midZ + scanTo(m, ledgeAt(shift, 6, plan.tabY, midZ), [0, 0, 1], 'solid');
+
+      let tightCeil = NaN;
+      FIT_VARIANTS.forEach((fit, i) => {
+        const ceil = ceilingAt(plan.ledgeShift(i));
+        expect(Number.isFinite(ceil), `${fit}: found the ledge ceiling`).toBe(true);
+        if (fit === 'tight') tightCeil = ceil;
+        else {
+          expect(
+            Math.abs(ceil - tightCeil - fitRelief(fit)),
+            `${fit}: the ledge opens ${(ceil - tightCeil).toFixed(2)} mm taller in z`,
+          ).toBeLessThan(0.04);
+        }
+      });
+      // The shipped rung's opening is TAB_T plus the fixed half of TAB_Z_SLACK —
+      // the base clearance is design, not ladder.
+      expect(
+        Math.abs(tightCeil - plan.plateZ - (TAB_T + TAB_Z_SLACK / 2)),
+        `shipped rung opens ${(tightCeil - plan.plateZ).toFixed(2)} mm tall`,
+      ).toBeLessThan(0.04);
+
+      // ...and the one tab is TAB_Z_SLACK/2 thinner than nominal, on its INNER
+      // face, so tab plus opening make TAB_Z_SLACK + fitRelief of real clearance.
+      const inside = tabAt(5, plan.tabY, midZ);
+      const dSeat = scanTo(m, inside, [0, 0, 1], 'void'); // to the flush seat face
+      const dInner = scanTo(m, inside, [0, 0, -1], 'void'); // to the shaved inner face
+      expect(Number.isFinite(dSeat) && Number.isFinite(dInner), 'the tab is printed at x=5').toBe(true);
+      expect(
+        Math.abs(dSeat + dInner - (TAB_T - TAB_Z_SLACK / 2)),
+        `the tab is ${(dSeat + dInner).toFixed(2)} mm thick`,
+      ).toBeLessThan(0.04);
     } finally {
       m.delete();
     }

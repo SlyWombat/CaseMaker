@@ -896,7 +896,11 @@ export function rackTabCouponPlan(rack: RackParams = RACK_COUPON_RACK): RackTabC
   const yMin = tabY - RACK_COUPON_HALF_WINDOW;
   const yMax = tabY + RACK_COUPON_HALF_WINDOW;
   // The tab's band is `FOOT_H .. FOOT_H + TAB_T`: `buildPlate` grows the tabs
-  // from its own z = 0 and `buildRackNodes` seats that at FOOT_H.
+  // from its own z = 0 and `buildRackNodes` seats that at FOOT_H. Both slabs
+  // keep that full nominal band even though #356 shaves the tab and opens the
+  // ledge by TAB_Z_SLACK: the slabs are query windows, so a window a hair wider
+  // than the part it clips is honest, and the rung-measured difference is what
+  // the coupon is for.
   const ledgeSlab: [Vec3, Vec3] = [
     [0, yMin, 0],
     [SIDE_T, yMax, FOOT_H + TAB_T + RACK_COUPON_PAD],
@@ -939,10 +943,12 @@ export function rackTabCouponPlan(rack: RackParams = RACK_COUPON_RACK): RackTabC
  *
  * Both halves are the compiler's own parts, cut with a slab: the ledges are
  * `rack-side-left` compiled at the rung under test, the tab is `rack-bottom` —
- * the same plate for every rung, because `buildSide` applies the relief to the
- * LEDGE only and the plate's tabs never move. One printed tab therefore tests
- * all three ledges honestly: whichever the tab slides into and still holds the
- * deck down is the grade that ships.
+ * the same plate for every rung, because `buildSide` applies the ladder relief
+ * to the LEDGE only and the plate's tabs move with nothing but the FIXED #356
+ * shave, which is the same on every rung. One printed tab therefore tests all
+ * three ledges honestly — whichever the tab slides into and still holds the
+ * deck down is the grade that ships — and it tests them on both axes, since
+ * #356 also made each rung's ledge opening taller by its relief.
  *
  * The tab is printed with its deck stub down, counterbore UP — the orientation
  * the real plate prints in (`buildPlate`: printed the other way the tab's
@@ -979,16 +985,20 @@ export function buildRackTabCoupon(
     columns,
     bodies: FIT_VARIANTS.length + 1,
     settles:
-      'rack.ts TAB_SLACK + fitRelief(rack.fit) (#153): which grade — 0 / 0.10 / ' +
-      '0.25 mm — lets the plate tab slide into its bottom ledge and still stop ' +
-      'the deck shifting',
+      'rack.ts TAB_SLACK + fitRelief(rack.fit) (#153) across the slot, and ' +
+      'TAB_Z_SLACK + fitRelief(rack.fit) (#356) up its opening: which grade — ' +
+      '0 / 0.10 / 0.25 mm — lets the plate tab slide into its bottom ledge, ' +
+      'clear the ceiling, and still stop the deck shifting',
     provenance:
       'PROVISIONAL — the ladder is #153’s, and no rack has been assembled with a ' +
       'loosened ledge to prove it. Both halves are the compiler’s own parts cut ' +
       'with a slab, so the coupon cannot certify a slot the panel does not have; ' +
-      'the slice windows are coupon scaffolding, not mating surfaces. What it does ' +
-      'NOT cover: the same ledge is cut at the rack TOP with `TAB_T + OVER` of ' +
-      'depth (the coupon slices the bottom one), the plate is also carried by a ' +
+      'the slice windows are coupon scaffolding, not mating surfaces. The one tab ' +
+      'carries only the fixed #356 shave, so its thickness is a datum the rungs ' +
+      'are measured against, never a rung itself. What it does ' +
+      'NOT cover: the same ledge is cut at the rack TOP, where #356 opens the ' +
+      'FLOOR down instead of the ceiling up (the coupon slices the bottom one), ' +
+      'the plate is also carried by a ' +
       'mid tab on racks deeper than MID_BAR_MIN_DEPTH, and nothing here tests the ' +
       'M5 that pins the tab (its starter hole and head access are both in the ' +
       'slice, but a print is not a torque test).',
