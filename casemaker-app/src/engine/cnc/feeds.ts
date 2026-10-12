@@ -153,10 +153,12 @@ const PROVENANCE =
   'Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209.';
 
 /**
- * The V1 table's STARTING VALUES. Every row `unmeasured`. The PLA row is a placeholder for
- * #165, which measures the real one; the softwood/hardwood/MDF step-downs are conservative
- * guesses for a 150 W spindle, not measurements. A coupon never edits this literal — it
- * appends to `MEASURED_ROWS` below, and `FEEDS_TABLE` folds the two together (#248 item 3).
+ * The V1 table's STARTING VALUES. Every row `unmeasured`. The two PLA rows are placed for #284's
+ * coupons, which measure them — NOT for #165, which is a depth ladder: depth is deliberately not a
+ * feeds column (`FeedsMeasurement`, above), so the ladder cannot settle either row. The
+ * softwood/hardwood/MDF step-downs are conservative guesses for a 150 W spindle, not measurements.
+ * A coupon never edits this literal — it appends to `MEASURED_ROWS` below, and `FEEDS_TABLE` folds
+ * the two together (#248 item 3).
  *
  * Range tests are INCLUSIVE at both ends, and the FIRST matching row wins. So a diameter
  * exactly on a shared boundary — 1.6 mm between the 0.8-1.6 and 1.6-3.2 rows — takes the

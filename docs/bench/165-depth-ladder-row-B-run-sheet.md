@@ -1,6 +1,6 @@
 # Run sheet — 165 depth ladder row B
 
-Generated 2026-10-12 · file `165-depth-ladder-row-B.nc` · sha256 `1481fe06` · estimated cutting time 1 min 8 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08 (#281)) — a planning estimate, not a measured cycle time.)
+Generated 2026-10-12 · file `165-depth-ladder-row-B.nc` · sha256 `2c335055` · estimated cutting time 1 min 8 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08 (#281)) — a planning estimate, not a measured cycle time.)
 
 ## 1 · What you need
 
@@ -17,7 +17,7 @@ Generated 2026-10-12 · file `165-depth-ladder-row-B.nc` · sha256 `1481fe06` ·
 ## 3 · Load the blank
 
 1. The blank's length runs left–right between the jaws. The face to be engraved is up. — **38.1 mm**
-2. The top face must stand 1.2 mm above the jaw tops. Record the measured value. If it is less than NaN mm, stop: the cutter would work below the jaw tops. — \_\_\_\_\_\_\_\_  *(measured stock proud (mm))*
+2. The top face must stand 1.2 mm above the jaw tops. Record the measured value. If it is less than 2.6 mm, stop: the cutter would work below the jaw tops. — \_\_\_\_\_\_\_\_  *(measured stock proud (mm))*
 3. Push the blank's front edge to where the file expects it: the front edge is 10 mm behind the front of the jaws.
 4. Tighten. Check the blank does not rock.
 
@@ -46,7 +46,7 @@ Generated 2026-10-12 · file `165-depth-ladder-row-B.nc` · sha256 `1481fe06` ·
 
 ## 7 · Cut
 
-1. Spindle, feed, plunge, passes and step-down. Air on. — **12000 RPM · 500 mm/min feed · 200 mm/min plunge · 16 × 0.5 mm passes · 0.9 mm step-over**
+1. Spindle, feed, plunge, passes and step-down. Vacuum on. — **12000 RPM · 500 mm/min feed · 200 mm/min plunge · 16 × 0.5 mm passes · 0.9 mm step-over**
 2. Pocket rect "B clear 0.6" 5×5 — **0.6 mm deep**
 3. Pocket rect "B clear 0.8" 5×5 — **0.8 mm deep**
 4. Pocket rect "B clear 1.0" 5×5 — **1 mm deep**
@@ -58,11 +58,12 @@ Generated 2026-10-12 · file `165-depth-ladder-row-B.nc` · sha256 `1481fe06` ·
 ## 8 · Warnings carried from the app
 
 1. **Vise dimensions are unmeasured defaults (#208); collisions cannot be trusted yet.**
-2. Only 2.6100000000000003 mm of the stock is gripped below the jaw tops; under 3 mm the part can lift (PROVISIONAL threshold, #208).
-3. the Vise fixed jaw (left) is declared 1.200 mm below the stock top, but the unmeasured 2 mm band around it lifts its top 0.800 mm ABOVE — and the collet nut's size is not known: clearance to it cannot be proven
-4. Checked: the tool against the stock and the modelled fixture (Vise fixed jaw (left), Vise moving jaw (right)).
-5. Not checked: the spindle body, head and gantry; anything on the bed other than the declared stock, workholding and sacrificial material; the collet nut, which this machine states no dimensions for.
-6. The modelled fixture is a shipped default, not a measurement.
+2. The stock stands 1.2 mm above the jaw tops, but the deepest cut reaches 1.6 mm; at least 1 mm of clearance is wanted, so the cutter would work below the jaw tops (stockProud ≥ 2.6 mm).
+3. Only 2.6100000000000003 mm of the stock is gripped below the jaw tops; under 3 mm the part can lift (PROVISIONAL threshold, #208).
+4. the Vise fixed jaw (left) is declared 1.200 mm below the stock top, but the unmeasured 2 mm band around it lifts its top 0.800 mm ABOVE — and the collet nut's size is not known: clearance to it cannot be proven
+5. Checked: the tool against the stock and the modelled fixture (Vise fixed jaw (left), Vise moving jaw (right)).
+6. Not checked: the spindle body, head and gantry; anything on the bed other than the declared stock, workholding and sacrificial material; the collet nut, which this machine states no dimensions for.
+7. The modelled fixture is a shipped default, not a measurement.
 
 ## 9 · Record afterwards
 

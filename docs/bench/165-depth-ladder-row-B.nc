@@ -7,7 +7,7 @@
 ;@MKR|CAM|id=CaseMaker|name=Case Maker|v=1.0.0
 ;@MKR|UNIT|value=MM
 ;@MKR|TOOL|number=1|id=C1-BIT-O-FLUTE-2-12|name=Spiral O single flute 2 × 12|type=Flat End|handlediameter=3.175|sticklength=0|shoulderlength=12|flutelength=12|diameter=2|tipdiameter=2|cornerradius=0|angle=0|halfAngle=0
-;@CM|TOOL|key=flat-1.0
+;@CM|TOOL|key=inv:kz-o-flute-2-12
 ;@MKR|TIME|seconds=68
 ; cycle estimate: cutting + rapids through the trapezoid, timed on Makera Z1's rapid model (1200 mm/min XY, 600 mm/min Z, 150 mm/s² accel, config read 2026-10-07 + stopwatch 2026-10-08 (#281)) — a planning estimate, not a measured cycle time
 ;@MKR|TOOLPATH|number=1|tool_number=1|name=[T1]Pocket rect "B clear 0.6" 5×5 0.6mm
@@ -24,7 +24,8 @@ G90 G21
 ; T1-Spiral O single flute 2 × 12
 
 T1 M6
-M7
+M331
+G53 G0 Z-3
 G0 X30.45 Y20
 S12000 M3
 G0 Z5
@@ -392,7 +393,7 @@ G1 X29.55 Y54.149
 G0 Z1
 G0 Z5
 G0 Z15
-M9
+M332
 M05
 G28
 M02

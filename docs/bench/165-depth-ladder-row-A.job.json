@@ -1,6 +1,8 @@
 {
   "schemaVersion": 2,
   "name": "165 depth ladder row A",
+  "machineId": "Z1",
+  "jawClearance": 1,
   "stock": {
     "length": 38.1,
     "width": 76.2,
@@ -112,7 +114,7 @@
       "uncertainty": 2
     }
   },
-  "toolKey": "flat-1.0",
+  "toolKey": "inv:kz-o-flute-2-12",
   "tool": {
     "number": 1,
     "id": "C1-BIT-O-FLUTE-2-12",

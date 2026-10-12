@@ -68,6 +68,26 @@ describe('feedsFor selects a row by cutting diameter', () => {
     expect(res.params.stepDown).toBe(0.5);
   });
 
+  // The second PLA row exists because the fitted bench cutter is a 2 mm O-flute and every PLA job on
+  // it was refused at the feeds stage (#165/#383, bench 2026-10-12). It is a placeholder like the
+  // rest of the table — #284's coupons measure it — so what is pinned here is only that it EXISTS and
+  // is selected, at the CUTTING diameter (2), not the 3.175 shank.
+  it('PLA + the fitted 2 mm O-flute -> the 1.6-3.2 mm PLA row', () => {
+    const res = feedsFor([], 'pla', flatEndMill(2, { name: 'Spiral O single flute 2 x 12' }), Z1);
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.entry.material).toBe('pla');
+    expect(res.entry.minDiameter).toBe(1.6);
+    expect(res.entry.maxDiameter).toBe(3.2);
+    expect(res.params.stepDown).toBe(0.5);
+    expect(res.params.feed).toBe(500);
+    // Still the FIRST matching row for a smaller PLA cutter: #284's sweeps do not move the boundary.
+    const small = feedsFor([], 'pla', flatEndMill(1.0), Z1);
+    expect(small.ok).toBe(true);
+    if (!small.ok) throw new Error(small.reason);
+    expect(small.entry.maxDiameter).toBe(1.6);
+  });
+
   it('a 6 mm cutter has no row: refused, never extrapolated', () => {
     const res = feedsFor([], 'softwood', flatEndMill(6), Z1);
     expect(res.ok).toBe(false);

@@ -33,6 +33,7 @@ import {
 } from '@/engine/cnc/engrave/runSheet';
 import { DEFAULT_VISE } from '@/engine/cnc/fixture';
 import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
+import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
 import type { EngraveJob, EngraveRectShape } from '@/types/engraveJob';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -111,6 +112,13 @@ function ladderJob(row: 'A' | 'B'): EngraveJob {
   return {
     schemaVersion: 2,
     name: `165 depth ladder row ${row}`,
+    // Both of these are required on `EngraveJob` and were missing from this literal: `tsx` strips
+    // types, so nothing complained, but the committed `.job.json` was a document the app's own
+    // parser had to fill in. Stating them is what makes the file on disk the job the pipeline ran.
+    machineId: Z1.id,
+    // The shipped default (1.0), same as `engraveJobSchema`'s `.default`, so the value in the file is
+    // the value the sheet was built with rather than a number that appeared at parse time.
+    jawClearance: DEFAULT_JAW_CLEARANCE_MM,
     // Printed PLA blank (100 % infill), not wood — #165 is the two-colour badge experiment.
     stock: { length: BADGE.length, width: BADGE.width, thickness: BADGE.thickness, material: 'pla' },
     labels: [],
@@ -118,11 +126,24 @@ function ladderJob(row: 'A' | 'B'): EngraveJob {
     shapes: DEPTHS.map((_, i) => ladderShape(row, i)),
     // Vise: the blank is only 3.81 mm thick, so the shipped DEFAULT_VISE (stockProud 4) reads as
     // "nothing left in the jaws" (`vise-stock-proud-exceeds-thickness`, an ERROR) and stops the
-    // pipeline. stockProud 3.0 clears the deepest cut (1.6 + 1 mm) while staying under the
-    // thickness; it is UNMEASURED still (`source: 'default'`) — #208 A3/A5 replace it. The thin
-    // blank necessarily also raises `vise-grip-shallow`, which the run sheet carries as a warning.
+    // pipeline. stockProud is the MEASURED proud height here, not a chosen margin: the printed
+    // blank's top face stands 1.07-1.21 mm above the jaw tops (`Z1-Firmware-Dialect.md` §11.8), so
+    // 1.2 is what the bench actually clamps. The two consequences ride on the sheet as warnings
+    // rather than hiding: only `thickness - stockProud` = 2.61 mm of the part is gripped below the
+    // jaw tops (`vise-grip-shallow`, under 3 mm), and the deepest floor (1.6 mm below the top face)
+    // is 0.4 mm BELOW the declared jaw tops — harmless for these squares, which run down the blank's
+    // centre at X 19.05/31.05 and never reach a jaw face at X 0 / 38.1, which is exactly what
+    // `itemReachesJaws` (#369) decides before it charges a depth. A3/A5 measure the vise itself; the
+    // rest of this record stays `source: 'default'` with its 2 mm uncertainty band.
     workholding: { kind: 'vise', vise: { ...DEFAULT_VISE, stockProud: STOCK_PROUD } },
-    toolKey: 'flat-1.0',
+    // The job's own snapshot (`tool`) is what it generates with (#305 design point 2); `toolKey` is
+    // the name it is filed under, and the two must not disagree. `flat-1.0` was the builtin default
+    // and said the OPPOSITE of `tool`: this job is cut with the fitted 2 mm O-flute, a physical
+    // cutter in the house inventory, so it is named by that entry's key (`inventoryKey` mints
+    // `inv:<id>`; the key does not have to resolve here — the snapshot wins in `jobTool` — but the
+    // .nc header's `;@CM|TOOL|key=` line carries it, and a file that says `flat-1.0` while cutting
+    // with a 2 mm bit is the wrong fact to hand the next operator).
+    toolKey: 'inv:kz-o-flute-2-12',
     tool: { ...O_FLUTE_2_12 },
     minFloor: 1.0,
     edgeMargin: 1.0,
