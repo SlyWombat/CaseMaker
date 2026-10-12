@@ -34,10 +34,11 @@ import {
 } from '@/engine/cnc/engrave/runSheet';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
+import { dedupeFindings, jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { feedsFor } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc';
+import { validateVise } from '@/engine/cnc/fixture';
 import type { EngraveJob } from '@/types/engraveJob';
 
 const NOW = new Date('2026-10-04T00:00:00Z');
@@ -48,7 +49,12 @@ const NO_SIM: RunSheetSim = { diagnostics: [] };
 function stubGenerated(job: EngraveJob, nc: string = NC): RunSheetGenerated {
   const tool = jobTool(job);
   return {
-    findings: validateJob(job),
+    // Both pure passes, merged the way the worker merges them (#353) — the vise validator owns
+    // `vise-default`, so `validateJob` alone is not the whole list.
+    findings: dedupeFindings([
+      ...validateJob(job),
+      ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
+    ]),
     feeds: tool ? feedsFor([], job.stock.material, tool, Z1, job.cutOverride) : null,
     cam: { operations: 3, cuttingMoves: 1234, estimatedSeconds: 95, passes: 2 },
     nc,

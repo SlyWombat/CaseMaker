@@ -14,7 +14,8 @@ import './runSheet.css';
  * in; the caller decides which generated job it belongs to.
  *
  * The overlay is PORTALED to `document.body`. The panel that mounts it lives in the context
- * rail, which is a `position: fixed` drawer with a `transform` below 1366 px (#93 Phase 4a); a
+ * rail, which is a `position: fixed` drawer with a `transform` below 1024 px (#93 Phase 4a;
+ * the breakpoint moved from 1366 in #355); a
  * transformed ancestor would otherwise become the containing block for this overlay's fixed
  * position and trap the sheet inside a 360 px column. A portal keeps the sheet full-page on
  * screen and, more importantly, keeps the print preview a page rather than a drawer.

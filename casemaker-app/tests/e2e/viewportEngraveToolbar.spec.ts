@@ -362,16 +362,40 @@ test('a dialog is above every element of the viewport pane (#348)', async ({ cm,
       if (z !== 'auto') inPane.push({ el: named(el), z: Number(z) });
     }
 
+    // A stacking context is created by MORE than a z-index: a non-`none` `transform`, `filter`
+    // (and `backdrop-filter`) or `perspective`, an `opacity` below 1, and `isolation: isolate` all
+    // create one on their own. A z-index-only walk would miss a trap any of those set, which is
+    // exactly the class of bug the walk exists to catch, so the predicate names what did it or
+    // returns null.
+    const stacking = (el: Element): string | null => {
+      const cs = getComputedStyle(el);
+      if (cs.zIndex !== 'auto') return `z=${cs.zIndex}`;
+      if (cs.transform !== 'none') return 'transform';
+      if (cs.filter !== 'none') return 'filter';
+      if (cs.backdropFilter !== 'none') return 'backdrop-filter';
+      if (cs.perspective !== 'none') return 'perspective';
+      if (cs.opacity !== '1') return `opacity=${cs.opacity}`;
+      if (cs.isolation === 'isolate') return 'isolation';
+      return null;
+    };
+
     // Would anything between a label and the body trap it in a stacking context of its own? The
     // wrapper's two own divs are the label itself (drei renders an inner div inside the wrapper),
     // so the walk starts at the wrapper's parent.
+    //
+    // The wrapper is found by its Z-INDEX, not by the broad predicate below: `labelZ` is the number
+    // the pane's arithmetic compares against, so the wrapper must be the element that carries one.
+    // (drei's own transform div sits below it and carries no z-index; finding THAT would leave
+    // `labelZ` undefined and the check below nothing to compare.) The walk that hunts for a TRAP is
+    // the one that must see every way a stacking context is created, and it starts above the
+    // wrapper, so the wrapper itself is never reported.
     const span = document.querySelector('[data-testid="engrave-axis-x"]') as HTMLElement;
     let wrapper: HTMLElement | null = span;
     while (wrapper && getComputedStyle(wrapper).zIndex === 'auto') wrapper = wrapper.parentElement;
     const trappedBy: string[] = [];
     for (let n = wrapper?.parentElement ?? null; n && n !== document.body; n = n.parentElement) {
-      const z = getComputedStyle(n).zIndex;
-      if (z !== 'auto') trappedBy.push(`${named(n)} z=${z}`);
+      const why = stacking(n);
+      if (why !== null) trappedBy.push(`${named(n)} ${why}`);
     }
 
     return {

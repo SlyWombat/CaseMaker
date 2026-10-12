@@ -289,4 +289,4 @@ These are the implicit contracts the engine relies on; future issues should be s
 18. **NSIS firewall cleanup** — extend `installer-hooks.nsh:90` to discover and drop any rule prefixed `"Case Maker (TCP "`.
 19. **Templates docstring vs assertion** — `tests/unit/templates.spec.ts:7` says "5 starter templates" but asserts six.
 20. **`piPoeStack` template still has `ports: []`** — `templates/index.ts:30–37` reproduces the same #35 bug for the PoE+ HAT.
-21. **`exportLayout.ts:148–153` comment contradicts implementation** — comment claims winding is left wrong, but `applyLayoutToMeshes:170–176` does fix it.
+21. ~~**`exportLayout.ts:148–153` comment contradicts implementation** — comment claims winding is left wrong, but `applyLayoutToMeshes:170–176` does fix it.~~ *Resolved by [#357](https://github.com/SlyWombat/CaseMaker/issues/357) (7a5010d): the flip's winding was re-derived and the file rewound, so the comment, the layout and the emitted mesh all agree now. The old comment has since been removed outright.*

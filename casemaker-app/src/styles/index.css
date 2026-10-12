@@ -100,7 +100,7 @@ body, html, #root {
 }
 
 /* Phones (#134) — the left section rail becomes an off-canvas drawer, the
-   same pattern the right context panel already uses below 1366px. A fixed
+   same pattern the right context panel already uses below 1024px (#355). A fixed
    320px column plus the pane's min-content used to lay the whole shell out
    at ~620px inside a 390px window, leaving the viewport a ~70px sliver. */
 .sidebar--drawer {
@@ -138,7 +138,8 @@ body, html, #root {
   background: var(--cm-color-surface-bright);
 }
 
-/* Issue #93 Phase 4a — right context rail (≥ 1366 px) / drawer (< 1366 px) */
+/* Issue #93 Phase 4a — right context rail (≥ 1024 px) / drawer (< 1024 px); the threshold is
+   #355's, moved down from 1366. */
 .context-panel {
   background: var(--cm-color-surface-container-low);
   color: var(--cm-color-on-surface);

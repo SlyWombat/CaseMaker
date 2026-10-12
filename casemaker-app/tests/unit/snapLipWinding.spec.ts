@@ -28,29 +28,9 @@ import { describe, it, expect } from 'vitest';
 import { buildSnapCatch } from '@/engine/compiler/snapCatches';
 import { computeShellDims } from '@/engine/compiler/caseShell';
 import { findTemplate } from '@/library/templates';
+import { signedVolume } from './helpers/meshVolume';
 import type { BuildOp } from '@/engine/compiler/buildPlan';
 import type { SnapWall } from '@/types';
-
-/** Sum of (1/6) (a · (b × c)) over every triangle — divergence-theorem
- *  volume. Positive for a closed, outward-wound mesh; negative for
- *  inverted; ~0 for a partially-inverted mesh that cancels with itself. */
-function signedVolume(positions: Float32Array, indices: Uint32Array): number {
-  let v = 0;
-  for (let i = 0; i < indices.length; i += 3) {
-    const a = indices[i]! * 3;
-    const b = indices[i + 1]! * 3;
-    const c = indices[i + 2]! * 3;
-    const ax = positions[a]!, ay = positions[a + 1]!, az = positions[a + 2]!;
-    const bx = positions[b]!, by = positions[b + 1]!, bz = positions[b + 2]!;
-    const cx = positions[c]!, cy = positions[c + 1]!, cz = positions[c + 2]!;
-    v += (
-      ax * (by * cz - bz * cy) +
-      bx * (cy * az - cz * ay) +
-      cx * (ay * bz - az * by)
-    ) / 6;
-  }
-  return v;
-}
 
 /** Find the first 'mesh' primitive inside an op tree (the lip is a single
  *  trapezoidal-prism mesh; no nesting to worry about). */

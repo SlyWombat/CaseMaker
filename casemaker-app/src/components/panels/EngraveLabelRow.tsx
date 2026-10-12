@@ -134,7 +134,10 @@ export function EngraveLabelRow({
         />
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+      {/* The font picker, the weight toggle and the remove button are three fixed-width controls
+          with no shrink between them, so at the 320 px rail they overrun the row rather than wrap.
+          `flexWrap` (as on the field line below) lets them take a second line instead. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 4 }}>
         <FontPicker
           value={label.font}
           onChange={(font) => onChange({ font })}

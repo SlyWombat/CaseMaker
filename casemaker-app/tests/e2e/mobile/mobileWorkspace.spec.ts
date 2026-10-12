@@ -257,13 +257,13 @@ test('the Part panel fits the phone, and its numbers reach the part (#282)', asy
  * #360 — the export modal, on the phone, from the drawer it is opened inside.
  *
  * `ExportModal` was `position: fixed` with `--cm-z-modal-raised` (200) but NOT portaled, and it is
- * mounted from `ExportPanel`, which `ContextPanel` renders. Below 1366 px that panel is
+ * mounted from `ExportPanel`, which `ContextPanel` renders. Below 1024 px that panel is
  * `.context-panel--drawer`: `position: fixed` with `transform: translateX(-100% …)` and
  * `--cm-z-sidebar-drawer` (25). A transform makes it the CONTAINING BLOCK for a fixed descendant,
  * and its z-index makes it the stacking context — so the modal's "200" never left the drawer, and
  * its backdrop was positioned against a 360 px drawer rather than the window. (The issue names
  * `.sidebar--drawer`, which has the same shape; the export panel is in the context drawer, so the
- * exposure starts at 1366 px, not at the phone breakpoint. Measured here rather than assumed.)
+ * exposure starts at 1024 px, not at the phone breakpoint. Measured here rather than assumed.)
  *
  * The #348 review's rule applies to a modal as much as to a viewport label, so this asserts the
  * arithmetic that decides the paint — parent, z-index, and the box the fixed element resolved to —

@@ -276,8 +276,8 @@ function fmtNum(n: number): string {
   return String(Number(n.toFixed(3)));
 }
 
-// #347 — the app's word for a material comes from the ONE map (`feeds.ts`), so this sheet and the
-// flow's `<select>` cannot spell a material two ways.
+// #347 — the app's word for a material comes from the ONE map (`materials.ts`), so this sheet and
+// the flow's `<select>` cannot spell a material two ways.
 
 /** '2 min 35 s'. Formats the seconds it is given; `estimatedTimeNote` says what they are. */
 export function formatDuration(seconds: number): string {

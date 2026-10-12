@@ -604,8 +604,14 @@ describe('#364 — the bare-blank hand-off', () => {
     // The bare route's gate is `isShippedDemoLabelSet`, NOT the badge's wider
     // `mayRelayoutLabels`: a blank seeds only a placeholder, so it replaces the demo words it was
     // never written for and leaves a line another route placed — it does not hand back `Text`.
-    s().takeBlankStock(blank());
+    //
+    // The blank is 60 × 40, NOT the `blank()` default of 100 × 60: the default IS the demo plank,
+    // so `isDemoPlank` short-circuits the gate before `isShippedDemoLabelSet` is ever consulted and
+    // the test would pass for a reason it does not name. A blank that is not the plank reaches the
+    // condition this test is about.
+    s().takeBlankStock(blank({ width: 60, height: 40 }));
     const job = s().job;
+    expect([job.stock.length, job.stock.width]).toEqual([60, 40]);
     expect(job.labels).toHaveLength(1);
     expect(job.labels[0]!.text).toBe('Name');
     expect(job.labels[0]!.id).toBe(name.id);
