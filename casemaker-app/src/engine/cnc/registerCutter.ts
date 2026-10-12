@@ -54,6 +54,16 @@ export interface BoxCode {
    * what the label says rather than after either field.
    */
   includedAngle: number | null;
+  /**
+   * The thread the code names — `M5` in `C1-BIT-THREAD-M5-15` (#380), `M3` in `C1-BIT-THREAD-M3-9`.
+   *
+   * A SPECIFICATION, not a measurement, and not the cutter: what diameter a thread mill cuts is not
+   * in the code at all — the store prints it beside the spec instead (`M5(d4) * 15mm`) — so the
+   * diameter has to come from Makera's thread row in the synced catalogue, whose spec and angle live
+   * in that row's `extras`. Nothing narrows a candidate by this yet; it is kept so that a step which
+   * can is not asking for a value the reading threw away.
+   */
+  threadSpec: string | null;
 }
 
 /**
@@ -99,6 +109,7 @@ interface TailReading {
   tipDiameter: number | null;
   fluteLength: number | null;
   includedAngle: number | null;
+  threadSpec: string | null;
 }
 
 /**
@@ -111,8 +122,12 @@ function tipThenFlute(tail: readonly string[]): TailReading | null {
     tipDiameter: boxLength(tail[tail.length - 2]!),
     fluteLength: boxLength(tail[tail.length - 1]!),
     includedAngle: null,
+    threadSpec: null,
   };
 }
+
+/** `M5`, `M2.5`, `M12` — a metric thread size, the whole of what a THREAD code says about the thread. */
+const THREAD_SPEC = /^M\d+(\.\d+)?$/;
 
 /**
  * A type whose tail does NOT mean `<tip>-<flute>`.
@@ -123,14 +138,45 @@ function tipThenFlute(tail: readonly string[]): TailReading | null {
  * else is {@link tipThenFlute}, so a type added later reads sensibly by default rather than needing
  * a row of its own.
  *
- * An ENGRAVING code is `<angle>-<tip>` and states no flute: `C1-BIT-ENGRAVE-30-0.3` is a 30° cutter
- * with a 0.3 mm tip, and `C1-BIT-ENGRAVE-M-60-0.1` a 60° with a 0.1 mm one. The angle is the one the
- * LABEL prints — see {@link BoxCode.includedAngle} for what that means to a `Tool`.
+ * Each reader also returns `null` for a tail it does not recognise, which sends the code on to the
+ * next split of its tokens rather than freezing it: a shape's format is a claim about the tails that
+ * TYPE carries, and a tail matching none of them says this reading is wrong.
+ *
+ *   - **ENGRAVE** is `<angle>-<tip>` and states no flute: `C1-BIT-ENGRAVE-30-0.3` is a 30° cutter
+ *     with a 0.3 mm tip, and `C1-BIT-ENGRAVE-M-60-0.1` a 60° with a 0.1 mm one. The angle is the one
+ *     the LABEL prints — see {@link BoxCode.includedAngle} for what that means to a `Tool`.
+ *   - **CHAMFER** is `<angle>` alone, one number and nothing else: `C1-BIT-CHAMFER-90` (#380). That
+ *     is the whole code, which is why a two-token code is readable at all.
+ *   - **THREAD** is `<spec>-<flute>` — `C1-BIT-THREAD-M5-15`, `C1-BIT-THREAD-M3-9` (#380). The spec
+ *     is a thread size, so it is not a number and `boxLength` would have made it a null tip.
  */
 const TAIL_READINGS: Partial<Record<ToolShape, (tail: readonly string[]) => TailReading | null>> = {
   engraving: (tail) =>
     tail.length === 2
-      ? { tipDiameter: boxLength(tail[1]!), fluteLength: null, includedAngle: boxLength(tail[0]!) }
+      ? {
+          tipDiameter: boxLength(tail[1]!),
+          fluteLength: null,
+          includedAngle: boxLength(tail[0]!),
+          threadSpec: null,
+        }
+      : null,
+  chamfer: (tail) =>
+    tail.length === 1
+      ? {
+          tipDiameter: null,
+          fluteLength: null,
+          includedAngle: boxLength(tail[0]!),
+          threadSpec: null,
+        }
+      : null,
+  thread: (tail) =>
+    tail.length === 2
+      ? {
+          tipDiameter: null,
+          fluteLength: boxLength(tail[1]!),
+          includedAngle: null,
+          threadSpec: THREAD_SPEC.test(tail[0]!) ? tail[0]! : null,
+        }
       : null,
 };
 
@@ -153,9 +199,10 @@ const TAIL_READINGS: Partial<Record<ToolShape, (tail: readonly string[]) => Tail
  * reading and the shape is `'unknown'`, which is what makes a code from a type this app has never
  * seen useful (#377) instead of a dead label.
  *
- * Anything that is not that shape at all — no prefix, fewer than three tokens, no type word — is
+ * Anything that is not that shape at all — no prefix, fewer than two tokens, no type word — is
  * `null`: the code is then still matchable against the inventory as text, but it says nothing about
- * the cutter. A number that is not a number only costs that number.
+ * the cutter. A number that is not a number only costs that number. TWO tokens are enough, because a
+ * chamfer code is its type word and one number and nothing else (#380).
  */
 export function parseBoxCode(value: string): BoxCode | null {
   const text = value.trim().toUpperCase();
@@ -165,7 +212,7 @@ export function parseBoxCode(value: string): BoxCode | null {
     .slice(PREFIX.length)
     .split('-')
     .filter((t) => t.length > 0 && t !== METAL_MARKER);
-  if (tokens.length < 3) return null;
+  if (tokens.length < 2) return null;
   for (let cut = 1; cut < tokens.length; cut++) {
     const shape = shapeFromType(tokens.slice(0, cut).join(' '));
     if (shape === 'unknown') continue;

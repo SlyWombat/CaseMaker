@@ -38,17 +38,20 @@ export const TYPABLE_SHAPES: readonly ToolShape[] = [
 ];
 
 /**
- * `engraving cutter, 30°, 0.3 mm tip` — only the parts the label actually stated. The angle comes
- * before the tip because that is the order the code prints it in (`C1-BIT-ENGRAVE-30-0.3`).
+ * `engraving cutter, 30°, 0.3 mm tip` — only the parts the label actually stated. The order is the
+ * order the code prints its numbers in: an angle, then a thread spec, then the tip and the flute
+ * (`C1-BIT-ENGRAVE-30-0.3`, `C1-BIT-THREAD-M5-15`, `C1-BIT-BALL-NOSE-1-4`).
  *
  * The angle is NOT written through `mm` below: it is degrees, and a dimension formatter would put a
  * trailing `.0` on a whole 30° and read as a length beside the tip. It keeps the degree sign for the
- * same reason.
+ * same reason. A thread SPEC is a designation and not a measurement either — `M5` is a size, and
+ * `M5 thread` is what the user compares against the box.
  */
 export function describeReading(box: BoxCode): string {
   const parts: string[] = [];
   if (box.shape !== 'unknown') parts.push(SHAPE_LABELS[box.shape]);
   if (box.includedAngle !== null) parts.push(`${box.includedAngle}°`);
+  if (box.threadSpec !== null) parts.push(`${box.threadSpec} thread`);
   if (box.tipDiameter !== null) parts.push(`${mm(box.tipDiameter)} mm tip`);
   if (box.fluteLength !== null) parts.push(`${mm(box.fluteLength)} mm flute`);
   return parts.length > 0 ? parts.join(', ') : 'nothing that names a cutter';

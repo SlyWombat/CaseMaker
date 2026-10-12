@@ -78,6 +78,7 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       tipDiameter: 1,
       fluteLength: 4,
       includedAngle: null,
+      threadSpec: null,
     });
   });
 
@@ -87,6 +88,7 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       tipDiameter: 3.175,
       fluteLength: 12,
       includedAngle: null,
+      threadSpec: null,
     });
   });
 
@@ -97,6 +99,7 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       tipDiameter: 2,
       fluteLength: null,
       includedAngle: null,
+      threadSpec: null,
     });
   });
 
@@ -106,6 +109,7 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       tipDiameter: 1,
       fluteLength: 4,
       includedAngle: null,
+      threadSpec: null,
     });
   });
 
@@ -127,6 +131,7 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       tipDiameter: tip,
       fluteLength: flute,
       includedAngle: null,
+      threadSpec: null,
     });
   });
 
@@ -145,6 +150,7 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       tipDiameter: tip,
       fluteLength: flute,
       includedAngle: null,
+      threadSpec: null,
     });
   });
 
@@ -164,12 +170,55 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       tipDiameter: tip,
       fluteLength: null,
       includedAngle: angle,
+      threadSpec: null,
     });
   });
 
   it('states an angle only where the type does: a flat code has none (#378)', () => {
     expect(parseBoxCode('C1-BIT-FLAT-3.175-12')?.includedAngle).toBeNull();
     expect(parseBoxCode('C1-BIT-ENGRAVE-30-0.3')?.includedAngle).toBe(30);
+  });
+
+  // #380 — a chamfer code is its type word and ONE number, the included angle: `C1-BIT-CHAMFER-90`,
+  // the four 90° chamfer mills in the inventory. It states no tip and no flute at all, which is why a
+  // code of two tokens has to be readable.
+  it('reads the real chamfer code as an angle alone (#380)', () => {
+    expect(parseBoxCode('C1-BIT-CHAMFER-90')).toEqual({
+      shape: 'chamfer',
+      tipDiameter: null,
+      fluteLength: null,
+      includedAngle: 90,
+      threadSpec: null,
+    });
+  });
+
+  it('still refuses a two-token code that names no type it knows (#380)', () => {
+    // The gate opened to two tokens so a chamfer's single number is reachable — not so that any two
+    // tokens are a reading. The shape is what says whether a lone number is a tip or an angle.
+    expect(parseBoxCode('C1-BIT-90')).toBeNull();
+    expect(parseBoxCode('C1-BIT-WIDGET-90')).toBeNull();
+  });
+
+  // #380 — both real thread codes. THREAD is `<spec>-<flute>`: the token before the last is a thread
+  // size, so `boxLength` read `M5` as a null tip and the code came out with one number missing. The
+  // cutter's diameter is in neither the code nor its readings; it comes from Makera's thread row.
+  it.each([
+    ['C1-BIT-THREAD-M5-15', 'M5', 15],
+    ['C1-BIT-THREAD-M3-9', 'M3', 9],
+  ])('reads the real thread code %s as a spec and a flute (#380)', (code, spec, flute) => {
+    expect(parseBoxCode(code)).toEqual({
+      shape: 'thread',
+      tipDiameter: null,
+      fluteLength: flute,
+      includedAngle: null,
+      threadSpec: spec,
+    });
+  });
+
+  it('keeps a thread spec only when the token is one (#380)', () => {
+    // The store's thread line runs M1 to M5, so a size with a decimal is a real code too.
+    expect(parseBoxCode('C1-BIT-THREAD-M2.5-12')?.threadSpec).toBe('M2.5');
+    expect(parseBoxCode('C1-BIT-THREAD-3-12')?.threadSpec).toBeNull();
   });
 
   it('drops the metal marker wherever it sits, and reads the same numbers either way (#379)', () => {
@@ -212,6 +261,7 @@ describe('resolveCode — the scan door’s three outcomes', () => {
       tipDiameter: 1,
       fluteLength: 4,
       includedAngle: null,
+      threadSpec: null,
     });
   });
 
@@ -257,7 +307,7 @@ describe('resolveCode — the scan door’s three outcomes', () => {
     const got = resolveCode('C1-BIT-FLAT-3.175-12', [], []);
     expect(got).toEqual({
       kind: 'unknown',
-      prefill: { shape: 'flat', tipDiameter: 3.175, fluteLength: 12, includedAngle: null },
+      prefill: { shape: 'flat', tipDiameter: 3.175, fluteLength: 12, includedAngle: null, threadSpec: null },
     });
   });
 
@@ -267,7 +317,17 @@ describe('resolveCode — the scan door’s three outcomes', () => {
     const got = resolveCode('C1-BIT-ENGRAVE-30-0.3', [], []);
     expect(got).toEqual({
       kind: 'unknown',
-      prefill: { shape: 'engraving', tipDiameter: 0.3, fluteLength: null, includedAngle: 30 },
+      prefill: { shape: 'engraving', tipDiameter: 0.3, fluteLength: null, includedAngle: 30, threadSpec: null },
+    });
+  });
+
+  it('hands a chamfer code’s angle along, and no tip it never stated (#380)', () => {
+    // Two tokens, five fields: the whole of a chamfer code is one number, and the door has to say
+    // "chamfer mill, 90°" rather than treat the pair as a tip and a flute.
+    const got = resolveCode('C1-BIT-CHAMFER-90', [], []);
+    expect(got).toEqual({
+      kind: 'unknown',
+      prefill: { shape: 'chamfer', tipDiameter: null, fluteLength: null, includedAngle: 90, threadSpec: null },
     });
   });
 

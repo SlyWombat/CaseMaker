@@ -27,6 +27,14 @@ describe('describeReading', () => {
     expect(readingOf('C1-BIT-ENGRAVE-30-0.5')).not.toContain('30.0');
   });
 
+  it('says a chamfer code’s one number as the angle, and claims nothing else (#380)', () => {
+    expect(readingOf('C1-BIT-CHAMFER-90')).toBe('chamfer mill, 90°');
+  });
+
+  it('says a thread code’s spec, which is a size and not a measurement (#380)', () => {
+    expect(readingOf('C1-BIT-THREAD-M5-15')).toBe('thread mill, M5 thread, 15.0 mm flute');
+  });
+
   it('says the ball nose the bench cuts with as the box states it', () => {
     expect(readingOf('C1-BIT-BALL-NOSE-1-4')).toBe('ball nose, 1.0 mm tip, 4.0 mm flute');
   });
