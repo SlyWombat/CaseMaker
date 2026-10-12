@@ -169,7 +169,9 @@ class Interp {
     // first character ('N'), which matches none of its G/M/T/S branches. So a line like
     // `N10 G1 X5` falls through to "ignore" and does NOTHING. Only a remainder that starts
     // with X, Y, Z, A or F survives, via the bare-axis path. Read from GcodeDispatch.cpp;
-    // no corpus file has an N word, so this is unverified on hardware.
+    // CONFIRMED on hardware 2026-10-12 — `N10 M5` answered `ok - ignore: [M5]` and the
+    // spindle stayed on (`docs/bench/traces/2026-10-12-console.log`, runbook D1b, #385). The
+    // bare-axis survivor (`N10 X5`) is still a reading: the bench sent commands, not moves.
     if (s.charCodeAt(0) === 78 /* N */) {
       let i = 0;
       while (i < s.length && 'N0123456789.,- '.indexOf(s[i] as string) !== -1) i++;
@@ -180,7 +182,7 @@ class Interp {
           'error',
           'n-line-ignored',
           lineNo,
-          `an N-numbered line whose command starts with '${s[0]}' is IGNORED by the firmware (it strips the number but keeps testing 'N'); the machine does nothing for this line`,
+          `an N-numbered line whose command starts with '${s[0]}' is IGNORED by the firmware (it strips the number but keeps testing 'N'): the machine answers 'ok - ignore: [${s.trim().slice(0, 24)}]' and does nothing — bench 2026-10-12`,
         );
         return;
       }

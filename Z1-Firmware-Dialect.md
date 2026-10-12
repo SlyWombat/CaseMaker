@@ -230,7 +230,9 @@ Accessory codes with no geometric effect, all Carvera-era: `M106`/`M107` (fan), 
 - **An `N`-numbered line is dropped.** The dispatcher captures `first_char` *before* it
   strips the line number and never refreshes it, so `N10 G1 X5` matches none of its G/M/T/S
   branches and falls through to "ignore". Only a remainder starting with `X`, `Y`, `Z`, `A`
-  or `F` survives, via the bare-axis path. No corpus file has an `N` word.
+  or `F` survives, via the bare-axis path. No corpus file has an `N` word. **The drop is now
+  confirmed on hardware** — `N10 M5` answered `ok - ignore: [M5]`, §11.11 — while the bare-axis
+  survivor is still a reading: the bench sent commands, not moves.
 - **`F` on a `G0` sets the SEEK rate.** `Makera-Parity.md` §11.2 said a rapid "never carries a
   feed rate" and that the rapid ceiling is therefore never ours to state. True of the
   samples read, but a *file can* set it. The parser ignores `F` on `G0` for feed purposes,
@@ -550,3 +552,29 @@ power cycle — §11.4's row is corrected to drop its persistence claim for this
 has to act on is the other half of the same bench rule: **the switches are off at power-up**, so a
 program cannot assume the vacuum is where the last job left it. It states `M331` itself, and `M332`
 at the end.
+
+### 11.11 Observed 2026-10-12 — a numbered line executes nothing (#385)
+
+§10's `N`-word row, checked on the machine (runbook D1b, S2). Typed at our console:
+
+```
+N10 M5        ok - ignore: [M5]
+N11 G4 P0.1   ok - ignore: [G4 P0.1]
+```
+
+Verbatim in `docs/bench/traces/2026-10-12-console.log` (20:28:32 and 20:28:36). **The number is
+stripped and the line is not run**, and the controller says `ok` rather than complaining — the
+`ignore: […]` bracket names what it threw away. A program with line numbers would therefore run as
+a stream of silently skipped lines.
+
+What this settles and what it does not:
+
+- **Settled:** the drop, for a line whose command follows the number. The runbook's own two move
+  lines (`N10 G0 X5`, `N10 X5`) were not the ones sent, so the **bare-axis survivor path**
+  (`N10 X5` executing) remains a reading of `GcodeDispatch.cpp`, not an observation.
+- The reply's shape is worth keeping: `ok` for a line that did nothing is exactly why the app
+  refuses a numbered file at the verifier (`numbered-line`, error) instead of trusting the
+  controller to object.
+
+No `N` word appears in any corpus file or in anything our post writes, so nothing we generate was
+affected either way.

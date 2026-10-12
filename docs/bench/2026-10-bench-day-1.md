@@ -1408,17 +1408,27 @@ and raises `n-line-ignored` — but that reading has never been checked on hardw
 vendor's FreeCAD machine definition ships a `line_numbers` option that implies the opposite. Both
 cannot be true, and no file we hold settles it: `reference-gcode/` (26 files) has no `N` word.
 
-**Recorded:** _not yet run — did the head move? yes/no ×2._
+**Recorded (S2, 2026-10-12):** the two lines actually typed were **commands**, not the move lines
+above — the runbook's own `N10 G0 X5` / `N10 X5` pair was not sent, so the bare-axis survivor is
+still a source reading:
+
+```
+N10 M5        -> ok - ignore: [M5]       (20:28:32)
+N11 G4 P0.1   -> ok - ignore: [G4 P0.1]  (20:28:36)
+```
+
+`docs/bench/traces/2026-10-12-console.log`. The number is stripped and the line is **not run**, and
+the controller answers `ok` rather than objecting.
 
 | Question | Answer |
 |---|---|
-| `N10 G0 X5` — did X move 5 mm? (yes/no) | |
-| `N10 X5` — did X move 5 mm? (yes/no) | |
-| Notes (anything shown on the screen) | |
+| A numbered line's command — does it run? | **No.** `ok - ignore: […]`; the bracket names what was dropped |
+| Is the bare-axis path (`N10 X5`) confirmed? | **No** — that line was not sent |
+| Notes | The `ok` is the hazard: a numbered program skips lines silently, announced as success |
 
-**Goes to:** #174's `n-line-ignored` reading. Low priority — whichever way it lands, the user-facing
-fix is the export wiring (#206: the verifier run on export, refusing to write), not the parser, so
-nothing waits on this.
+**Goes to:** #174's `n-line-ignored` reading — **confirmed for a command after the number**
+(`/Z1-Firmware-Dialect.md` §11.11), bare-axis path still unread. User-facing fix was the verifier
+refusing a numbered file (`numbered-line`), landed for **#385**.
 
 ### D2 — Preview origin and axes
 

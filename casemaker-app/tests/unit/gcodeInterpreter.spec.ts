@@ -143,17 +143,32 @@ describe('M2 / M30 end of program (grbl mode: M30 is M2)', () => {
   });
 });
 
-describe('N-numbered lines (§10): the firmware strips the number but keeps testing "N"', () => {
+describe('N-numbered lines (§10, bench 2026-10-12): the firmware strips the number but keeps testing "N"', () => {
   it('`N10 G1 X5` is IGNORED by the firmware, so the parser must not execute it', () => {
     const r = parseGcode('N10 G1 X5 F100\n');
     expect(moves(r)).toHaveLength(0);
     expect(errors(r)).toEqual(['n-line-ignored']);
   });
+
+  it('#385 — the bench line verbatim: `N10 M5` sets nothing, and the spindle stays as it was', () => {
+    // Typed at our console on 2026-10-12 (runbook D1b): the controller answered
+    // `ok - ignore: [M5]`, so the commanded `M5` never ran. The diagnostic quotes that reply.
+    const r = parseGcode('S10000 M3\nN10 M5\nN11 G4 P0.1\n');
+    expect(kinds(r)).toEqual(['spindle']);
+    expect(errors(r)).toEqual(['n-line-ignored', 'n-line-ignored']);
+    const d = r.diagnostics.find((x) => x.code === 'n-line-ignored');
+    expect(d?.message).toContain("'ok - ignore: [M5]'");
+  });
+
   it('...but `N10 X5` survives, via the bare-axis path', () => {
+    // Still a READING of GcodeDispatch.cpp, not a bench result: D1b sent commands, not moves
+    // (the runbook's two move lines were not the ones typed). Pinned so the day someone checks
+    // it, the change is deliberate.
     const r = parseGcode('N10 X5\n');
     expect(moves(r)).toHaveLength(1);
     expect(hasErrors(r)).toBe(false);
   });
+
   it('a lone line number is a blank line', () => {
     expect(codes(parseGcode('N20\n'))).toEqual([]);
   });

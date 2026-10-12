@@ -227,6 +227,30 @@ describe('cncVerify (#174): the checks', () => {
     expect(codes(flood.ctx, flood.text)).toContain('not-our-dialect');
   });
 
+  it('numbered-line: a line carrying an N word is refused, and the reason is the bench reply (#385)', () => {
+    // `N10 M5` typed at our console answered `ok - ignore: [M5]`: the firmware strips the number
+    // but keeps testing 'N', which matches none of its branches, so the command never runs. A file
+    // that numbers its lines would run as a stream of silently skipped lines — and the machine
+    // says `ok` to every one of them, which is why this is a refusal and not a warning.
+    const numbered = program(['N20 G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02']);
+    const findings = verifyProgram(numbered.text, numbered.ctx).findings;
+    const f = findings.find((x) => x.code === 'numbered-line');
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe('error');
+    expect(f?.line).toBe(6); // the numbered line itself, the `N20 G0 X5 Y5`
+    expect(f?.message).toContain("'ok - ignore: [M5]'");
+    expect(verifyProgram(numbered.text, numbered.ctx).ok).toBe(false);
+
+    // The word after the number is irrelevant — a legal one is dropped just the same, and the
+    // bench's own second line (`N11 G4 P0.1`, a dwell) is refused too.
+    const dwell = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 Z-3', 'N11 G4 P0.1', 'G0 X5 Y5', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
+    expect(codes(ctxFor(), dwell)).toContain('numbered-line');
+
+    // ...and a program with no N word raises nothing here, which is every file our post writes.
+    const plain = program(['G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02']);
+    expect(codes(plain.ctx, plain.text)).not.toContain('numbered-line');
+  });
+
   it('not-our-dialect: a ; comment containing G2 raises nothing', () => {
     const { text, ctx } = program(['; G2 is an arc word, but this is a comment', 'G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02']);
     const report = verifyProgram(text, ctx);

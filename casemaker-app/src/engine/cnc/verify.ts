@@ -223,7 +223,8 @@ const known3 = (p: Pos): p is [number, number, number] => p[0] !== null && p[1] 
  * Parse, run and check a program. Returns every finding; `ok` is
  * `findings.every(f => f.severity !== 'error')`.
  *
- * The order is the spec's: (1) parse errors, (2) the strict dialect whitelist, (3) every
+ * The order is the spec's: (1) parse errors, (2) the strict dialect whitelist — with a numbered
+ * line refused under its own code, because the machine will not run one (#385) — (3) every
  * error the runner raised, then the checks the runner does not do — (4) cut depth from the
  * injected limit, (5) the stock outline under the tool edge, (6) cutting with the spindle
  * off, (7) feed ceiling and missing feed, (8) spindle ceiling, (9) low XY rapids, (10) the
@@ -258,6 +259,20 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
       if (c === null || c.sub !== 0 || !M_ALLOWED.has(c.code)) {
         push('not-our-dialect', w.line, `the word '${shown}' is not in the post's dialect (M2 M3 M5 M6 M7 M9 M331 M332)`);
       }
+    } else if (w.letter === 'N') {
+      // #385 — A NUMBERED LINE IS NOT A DIALECT QUESTION, IT IS A LINE THE MACHINE WILL NOT RUN.
+      // `N10 M5` typed at our console answered `ok - ignore: [M5]` (bench 2026-10-12, runbook D1b,
+      // `docs/bench/traces/2026-10-12-console.log`): the firmware strips the number but keeps
+      // testing the ORIGINAL first character, `N`, which matches none of its G/M/T/S branches, so
+      // the command after the number is dropped. A numbered program would therefore run as a
+      // stream of silently skipped lines — the machine says `ok` to every one of them. Our post
+      // writes no `N` word, so a file that carries one is not ours and is refused outright rather
+      // than checked line by line.
+      push(
+        'numbered-line',
+        w.line,
+        `the word '${shown}' numbers this line, and the firmware executes NOTHING on a numbered line: it strips the number but keeps testing 'N', which matches none of its branches, and answers 'ok - ignore: [M5]' (bench 2026-10-12, #385). A numbered program runs as a stream of silently skipped lines`,
+      );
     } else if (!PARAM_LETTERS.has(w.letter)) {
       push('not-our-dialect', w.line, `the word '${shown}' is not in the post's dialect (only G, M, T, S, F, X, Y, Z words)`);
     }

@@ -742,7 +742,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | `bad-number` | error | A word's number is not a number the machine would accept. | Fix the line the message names. |
 | `stray-text` | error | A line holds text the dispatcher cannot read as G-code. | Fix or delete the line. |
 | `console-line` | error | A line starting with a lowercase letter or `$` went to the controller's console, not the G-code dispatcher. | Nothing happened; if you meant G-code, fix it. |
-| `n-line-ignored` | error | An `N`-numbered line whose command follows the number is **ignored** by the firmware. | Put the command on its own line, or drop the `N`. |
+| `n-line-ignored` | error | An `N`-numbered line whose command follows the number is **ignored** by the firmware — confirmed on the machine 2026-10-12 (`N10 M5` → `ok - ignore: [M5]`). | Put the command on its own line, or drop the `N`. |
 | `lone-f-switches-g1` | warning | A line starting with `F` becomes `G1`, and that makes `G1` the modal motion — following bare moves now cut. | Check the program's intent. |
 | `comment-contains-g90-g91` | error | A comment mentioning `G90`/`G91` is hoisted out of the comment and applied by the firmware. | Remove `G90`/`G91` from comments. |
 | `paren-comment-truncates` | error | Text **after** a `(` comment is discarded by the firmware, not run. | Move it out of the line. |
@@ -793,6 +793,7 @@ running passes above; the rest are the checks the runner does not do on its own:
 | `parse-error` | error | The file could not be read as G-code and was not simulated: either the parser refused a line, or the program could not be lowered to moves at all. The message carries the inner reason. | Fix the line the message names, then generate again. |
 | `runner-error` | error | The runner refused the program — a move that leaves the machine's envelope, an arc with no feed rate or in a form it cannot read, or an arc from a position the program never established. (A *warning* the runner raises — an unknown Z, an unknown X,Y — is not carried here.) The message names the runner's own code and what it found. | Fix the move the message names. |
 | `not-our-dialect` | error | A word in the file is not one this post writes (`G0 G1 G21 G28 G53 G90`, `M2 M3 M5 M6 M7 M9 M331 M332`, and only G/M/T/S/F/X/Y/Z words). The file did not come from the app, or was hand-edited. | Re-post it, or fix the word. |
+| `numbered-line` | error | A line carries an `N` word. The firmware strips the number but keeps testing `N`, so it answers `ok` and **runs nothing on the line** — a numbered program runs as a stream of silently skipped lines (confirmed at the bench 2026-10-12, #385). The post writes no line numbers. | Remove the `N` words (or the numbers' line), then re-post. |
 | `cut-too-deep` | error | A cutting move reaches Z deeper than the material permits at that (X, Y): past the stock floor, through a colour or void ceiling, or into material the job says must remain. The message names the limit and, when the job can say, why. | Reduce the depth, move the cut clear, or switch the label's intent. |
 | `cut-outside-stock` | error | The cutter's *edge*, not just its centre, reaches a point where no material may be cut — off the blank onto air. | Move the cut back inside the stock. |
 | `feed-missing` | error | A cutting move has no feed rate set. | Add an `F` before the cut. |
@@ -940,7 +941,9 @@ semantics are LinuxCNC-flavoured.
 on an `A` axis (rotary). A laser job or a rotary job is refused outright rather than drawn as
 a cut. `G90.1`/`G91.1` are refused too — the firmware has no arc-centre mode, so the code
 cannot mean what RS274 says; the distance mode is deliberately left unchanged and the file is
-reported (`no-arc-centre-mode`).
+reported (`no-arc-centre-mode`). **Line numbers are refused as well**: an `N` word makes the
+firmware ignore the line it numbers, so a numbered program would run as a stream of silently
+skipped lines (`numbered-line`, #385).
 
 ### 8.3 The `;@MKR|` file header
 
