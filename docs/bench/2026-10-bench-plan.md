@@ -27,6 +27,18 @@ possible. **Nothing here is scheduled; the maintainer calls each session.**
   job's origin and correct X/Y before the cutter goes back in. First, measure both jaw-top widths
   (calipers, or the same scan along X). They are still the unmeasured 15 mm defaults, and the scan
   needs them to know where a touch can land.
+- **Which blank each S3 file goes on** (safety review of 3bc11ee, 2026-10-12). Every file cuts at
+  a fixed place, so the blank decides what can share it:
+
+  | Blank | Cuts | Why |
+  |---|---|---|
+  | Today's ladder blank | `185-v-groove.nc` (front band, Y 3.5–14.5), then one coupon (back band, Y 62.5–73.5) | Both bands are free; the squares span Y 18.1–58.1. |
+  | Fresh blank 1 | `176-g32-stroke.nc` only | The stroke runs X 30–32 over Y 7–69. On the ladder blank it would run through every row B square, and it crosses any coupon cell. |
+  | Fresh blank 2 | a coupon, then turn the blank end for end and cut a second | The coupon cell and the magnet pocket are symmetric about the blank's centre, so turned 180° the same file cuts the other end. Re-check the position (#391) after turning. |
+  | Fresh blank 3 | the fourth coupon | spare end for a re-cut |
+
+  Three fresh blanks, plus today's. The V-bit's Z0 is probed in the front band (Y ≈ 9): the 0.33 mm
+  dome is larger than the 0.2 mm steps between groove depths.
 - **Next in S3:** #176's G32 stroke test, the #284 coupons and restart proof, #185 V-grooves. Before
   any of them: lift the head before `play` (#384) and set Z0 as the cutter tip's own height (#387).
 - **S3's files are written; none of them has been run** (2026-10-12). `scripts/bench-files.ts` builds
