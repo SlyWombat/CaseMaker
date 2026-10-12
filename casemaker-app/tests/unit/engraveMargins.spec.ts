@@ -11,6 +11,9 @@ import { describe, it, expect } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
+import { buildTimeline, parseGcode, Z1 } from '@/engine/cnc';
+import { sweepTimeline } from '@/workers/geometry/sweep';
+import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import {
   boundFloor,
@@ -857,9 +860,38 @@ describe('the label depth a blank allows (#362)', () => {
         },
       ],
     };
-    const found = generate(tl, job).findings;
+    const gen = generate(tl, job);
+    const found = gen.findings;
     expect(found.filter((f) => f.severity === 'error')).toEqual([]);
     expect(found.map((f) => f.code)).not.toContain('item-depth-bound');
     expect(found.map((f) => f.code)).not.toContain('stock-proud-too-small');
+
+    // The fixture check lives in the SWEEP, not in `generate` (#369 follow-up): `engraveGenerate`
+    // returns the program but never builds a timeline, so `tool-into-fixture` has no way to fire
+    // above — the run above is clean whatever the cutter would have hit. So the assembled job is
+    // swept too, over the app's OWN assembly: `toSetup` carries the very `viseEnvelope` the run
+    // sheet and the preview describe, where a hand-built fixture could pass against an envelope the
+    // app never uses.
+    //
+    // WHAT THIS PROVES, AND WHAT IT DOES NOT. It proves the seeded line, cut where the walk put it,
+    // gouges nothing — the hand-off is clean end to end, which is the operator's question. It does
+    // NOT show the jaw bound was consulted, and it cannot: this line is bound by the blank's colour
+    // split exactly BECAUSE it stands clear of both jaws, so a sweep that never read the jaw bound
+    // passes this assertion exactly as it passes below. The bound itself is pinned by the reach and
+    // sentence assertions above; this is the other half — the part only a sweep can state.
+    expect(gen.nc).not.toBeNull();
+    const cutter = jobTool(job);
+    // A null here would mean the sweep never ran, which is the vacuous pass this whole block
+    // exists to prevent — the job names a built-in cutter, so it cannot be null in this fixture.
+    if (cutter === null) throw new Error('the seeded job names a cutter the registry does not hold');
+    const setup = toSetup(job, Z1);
+    const out = sweepTimeline(tl, buildTimeline(parseGcode(gen.nc as string), setup, Z1), cutter, setup, {
+      machine: Z1,
+    });
+    if (!out.ok) throw new Error(JSON.stringify(out.diagnostics));
+    expect(out.value.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    // Named separately from the severity check so a reader can see the collision codes were looked
+    // for on purpose: the cutter, the collet nut, a feed and a rapid all have their own.
+    expect(out.value.diagnostics.map((d) => d.code).filter((c) => c.endsWith('into-fixture'))).toEqual([]);
   });
 });
