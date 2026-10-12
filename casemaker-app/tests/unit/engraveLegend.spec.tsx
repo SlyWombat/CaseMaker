@@ -117,8 +117,9 @@ describe('the engrave legend on a blank that states its split (#170)', () => {
     expect(top.textContent).toContain('top colour (stand-in)');
     expect(bottom.textContent).toContain('bottom colour (stand-in)');
     // …and the plane they are read against, as the depth it sits at — it is not a colour a floor
-    // lands IN.
-    expect(screen.getByTestId('engrave-legend-split').textContent).toContain('split 1.00 mm down');
+    // lands IN. Written through the app's own depth formatter (`mm`), so the split reads like every
+    // other depth: `1`, not `1.00` (#170 review).
+    expect(screen.getByTestId('engrave-legend-split').textContent).toContain('split 1 mm down');
 
     // The ramp's rows are gone — 0.5/1/2 mm are depths the floors have, and naming them here would
     // be naming colours the picture is not drawn in.
@@ -138,5 +139,24 @@ describe('the engrave legend on a blank that states its split (#170)', () => {
     expect(screen.queryByTestId('engrave-legend-top')).toBeNull();
     expect(screen.queryByTestId('engrave-legend-split')).toBeNull();
     expect(screen.getByTestId('engrave-legend-2').textContent).toContain('2.0 mm');
+  });
+
+  it('still says nothing is cut when the blank has a split and no label is on (#170 review)', () => {
+    // The split branch is taken on the BLANK's own print, not on anything being cut — so it is
+    // reached with nothing on the face at all, where the two colour rows describe a blank and could
+    // otherwise read as a picture that failed to draw. The note comes from the same emptiness the
+    // ramp branch reports, so the two readings answer this question identically.
+    const job = printed();
+    job.labels.forEach((l) => {
+      l.enabled = false;
+    });
+    useEngraveJobStore.setState({ job });
+    useEngravePreviewStore.setState({ preview: previewFor(job) });
+    render(<EngraveLegend />);
+
+    // The colours and the plane are still stated — they are facts about the blank.
+    expect(screen.getByTestId('engrave-legend-top')).not.toBeNull();
+    expect(screen.getByTestId('engrave-legend-split').textContent).toContain('split 1 mm down');
+    expect(screen.getByTestId('engrave-legend-nothing-cut').textContent).toContain('nothing cut');
   });
 });

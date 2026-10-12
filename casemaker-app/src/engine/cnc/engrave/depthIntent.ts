@@ -12,9 +12,11 @@
  *
  * So this module holds two small, opposite readings, and nothing else:
  *
- *   - `depthForIntent` — the state the user pressed, turned into a depth: one printed layer on
- *     their side of the split. That is as close as a state can get to the plane it means while
- *     staying clear of it, and a printed layer is the only unit the printer can hold.
+ *   - `depthForIntent` — the state the user pressed, turned into a depth: clear of the split by one
+ *     printed layer, or by the margin in force when that is further. One layer is as close as a
+ *     state can get to the plane it means while staying on the printer's grid; the margin is what the
+ *     app's own checker will hold the floor to, so a state that ignored it would write a depth
+ *     `item-depth-bound` then refuses (#170 review).
  *   - `floorColour` — a depth, turned back into the colour it lands in. The PREVIEW needs this one
  *     for every floor, including the many whose label states no intent at all.
  *
@@ -25,7 +27,7 @@
 
 import type { Mm } from '@/types/units';
 import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
-import { roundDepth, splitDepthOf } from './depthBounds';
+import { deeper, shallower, splitDepthOf } from './depthBounds';
 
 /** The three states the schema carries: the two a control can press, and "no statement". */
 export type DepthIntent = NonNullable<EngraveLabel['depthIntent']>;
@@ -34,18 +36,34 @@ export type DepthIntent = NonNullable<EngraveLabel['depthIntent']>;
 export type FloorColour = 'top' | 'bottom';
 
 /**
- * The blank's colour split as the CONTROL needs it: where the boundary is, and how tall one of the
- * printed layers either side of it is.
+ * The blank's colour split as the CONTROL needs it: where the boundary is, and how far off it each
+ * state writes its floor.
  *
  * Both numbers, together, because neither is any use to a two-state control alone — and because
  * asking for them separately at two call sites is how a depth comes to be written from a boundary
- * measured against a different layer height.
+ * measured against a different step.
  */
 export interface LabelSplit {
   /** Where the colour boundary lands below the engraved face, mm, ON a real layer line (#285). */
   depth: Mm;
-  /** The blank's printed layer height, mm — the step each state moves off the boundary. */
-  layerHeight: Mm;
+  /**
+   * How far clear of the boundary each state writes its floor, mm: ONE PRINTED LAYER
+   * (`print.layerHeight`), or the margin in force when that is further — `max(layerHeight,
+   * boundaryMargin)`, never less than either (#170 review).
+   *
+   * The layer is the unit the printer can hold, and at the shipped margin the two are the same
+   * number, which is why one layer was the whole rule to begin with. They part on a job carrying a
+   * margin of its own: a printed blank's dome makes `recommendMargins` offer more than one layer, and
+   * `checkBounds` then holds every floor to that larger number whatever the grid says. Stepping by
+   * the layer alone writes a floor INSIDE the margin — a depth `item-depth-bound` refuses and the
+   * worker drops, while the #362 row beside it states the larger one.
+   *
+   * DEGENERATE where the margin wins: the floor is then no longer on a layer line, because the
+   * boundary is a grid line and the step is not a multiple of the grid. That is deliberate — the
+   * margin is a Z-error budget rather than a slicing fact, and a floor the printer would place
+   * correctly is worth more than one it can name a layer for.
+   */
+  step: Mm;
 }
 
 /**
@@ -53,47 +71,57 @@ export interface LabelSplit {
  *
  * `null` is not an error and not a missing measurement: a blank that declares no print has, as far
  * as the app holds any, no colour boundary — so it has no two outcomes to offer and the control is
- * not shown. That is why this returns the pair rather than the depth alone: the layer height is the
- * same fact's other half, and a caller that had the depth without it would have to go and find a
- * layer height somewhere, which is a second opinion about the blank in hand.
+ * not shown. That is why this returns the pair rather than the depth alone: the step is the same
+ * fact's other half, and a caller that had the depth without it would have to go and find a layer
+ * height somewhere, which is a second opinion about the blank in hand.
+ *
+ * `boundaryMargin` is the margin IN FORCE for this job (`effectiveMargins`), and it is REQUIRED for
+ * the reason `LabelDepthInputs.boundaryMargin` is: `checkBounds` will hold every floor this control
+ * writes to that number, and a default guessed here would be a second, invisible opinion about it —
+ * one that agrees with the checker only while the job runs on the shipped default.
+ *
+ * The layer in that `max` is the blank's REGULAR one (`print.layerHeight`), which is not always the
+ * grid's: a boundary can land on the FIRST layer's line, and that layer is its own size (decision
+ * 27). A split sitting there puts each state's floor at that line ± a regular layer, so NEITHER one
+ * is on the grid. Degenerate, and stated rather than corrected: the first line is a slicing fact, the
+ * step is the layer the plate is overwhelmingly built from, and a control that stepped by 0.3 near
+ * the face and 0.2 elsewhere would be keeping a second grid — the thing this module exists not to do.
  */
-export function jobSplit(job: Pick<EngraveJob, 'stock'>): LabelSplit | null {
+export function jobSplit(job: Pick<EngraveJob, 'stock'>, boundaryMargin: Mm): LabelSplit | null {
   const depth = splitDepthOf(job);
   const print = job.stock.print;
   if (depth === null || print === undefined) return null;
-  return { depth, layerHeight: print.layerHeight };
+  return { depth, step: Math.max(print.layerHeight, boundaryMargin) };
 }
 
 /**
- * The depth a stated intent means: one printed layer on that side of the colour split (decision 20).
+ * The depth a stated intent means: a floor clear of the colour split on that state's side of it
+ * (decision 20), by one printed layer or the margin in force, whichever is further.
  *
- * `surface` stays in the top colour, so the floor sits one layer ABOVE the boundary; `reveal` comes
- * through to the bottom one, so it sits one layer BELOW. One layer, and not "as near as can be
- * expressed": the boundary is itself a layer line, so a floor a hair off it is a floor the printer
- * may place on the wrong side, and the whole point of the state is which side the colour shows.
+ * `surface` stays in the top colour, so the floor sits ABOVE the boundary by `at.step`; `reveal` comes
+ * through to the bottom one, so it sits BELOW. A whole step, and not "as near as can be expressed":
+ * the boundary is itself a layer line, so a floor a hair off it is a floor the printer may place on
+ * the wrong side, and the whole point of the state is which side the colour shows. Where the margin
+ * is the larger of the two it is the margin that sets the step — see `LabelSplit.step`.
  *
- * A boundary within one layer of the engraved face leaves no room for a top-colour floor, and this
+ * The step is applied in the DIRECTION OF THE BOUND and quantised that way (`deeper` going down,
+ * `shallower` coming up), not to the nearest thousandth. `depth + step` is `rel`-free only in exact
+ * arithmetic: `1.2 + 0.331` is `1.5310000000000001` to a float and the checker's own plane is the
+ * rounded one, so a nearest-rounding that also stepped by the layer alone was the write that made
+ * `item-depth-bound` refuse the app's own button (#362's epsilon review, and this one).
+ *
+ * A boundary within one step of the engraved face leaves no room for a top-colour floor, and this
  * returns 0 rather than a negative depth — a negative depth is not a depth, and the app's own
  * findings say what is wrong with a blank that thin. The OTHER end is deliberately unclamped: the
  * ceiling is `thickness − minFloor`, a job field this function is not given, and the row already
  * marks a depth past it (`maxDepth`).
  *
- * The answer is quantised to the thousandth (`roundDepth`): both operands are layer lines the grid
- * builds as sums (`0.2 + 3 × 0.2`), so `0.8 − 0.2` comes back as `0.6000000000000001`, and the row
- * shows an unrounded depth in a number field while the checker judges it against the plane it
- * misses by a trillionth.
- *
  * `custom` is not accepted. An intent that says nothing about the colour has no depth to mean, so
  * the caller narrows to the two states that do before it gets here.
  */
-export function depthForIntent(
-  intent: 'reveal' | 'surface',
-  boundaryDepth: Mm,
-  layerHeight: Mm,
-): Mm {
-  const depth = roundDepth(
-    intent === 'reveal' ? boundaryDepth + layerHeight : boundaryDepth - layerHeight,
-  );
+export function depthForIntent(intent: 'reveal' | 'surface', at: LabelSplit): Mm {
+  const depth =
+    intent === 'reveal' ? deeper(at.depth + at.step) : shallower(at.depth - at.step);
   return depth > 0 ? depth : 0;
 }
 

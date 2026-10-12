@@ -543,8 +543,10 @@ Nothing else in the job changes.
 
 **The two-state depth choice (#170).** On a blank that says how it was printed, every label row
 carries **surface** and **reveal** beside its depth field. Each one writes the depth it means —
-one printed layer above the colour boundary for *surface*, one layer below it for *reveal* —
-so the choice is a colour, not a number to work out. The depth field stays: type in it and the
+clear of the colour boundary by one printed layer, or by the **boundary margin** where that is
+further, so a blank running on a margin of its own (a domed badge, say) still gets a floor the
+checker accepts and the recommendation beside it quotes the same number — so the choice is a
+colour, not a number to work out. The depth field stays: type in it and the
 number is yours (the app marks it as your own, and neither state stays lit over it). The preview
 follows the COLOUR wherever a boundary is known — every floor is drawn in the colour it lands in,
 and the legend names the two, calls them stand-ins (the app cannot know which filament you

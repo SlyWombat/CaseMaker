@@ -20,6 +20,7 @@
 import { useMemo, type CSSProperties, type JSX } from 'react';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { mm } from '@/engine/cnc/engrave/depthBounds';
 import { SACRIFICIAL_COLOR } from './simGeometry';
 import { depthColor, splitColor, VOID_COLOR } from './engraveRamp';
 
@@ -64,7 +65,8 @@ export function EngraveLegend(): JSX.Element | null {
   const minFloor = useEngraveJobStore((s) => s.job.minFloor);
 
   // Distinct depths, shallowest first — the same order and the same ramp the floors are drawn on
-  // when the blank states no split. Computed unconditionally (a hook), and unused in the split case.
+  // when the blank states no split. Computed unconditionally (a hook); in the split case the ramp
+  // rows are not drawn, but the COUNT still answers whether anything is cut at all.
   const depths = useMemo(() => {
     if (!preview) return [];
     return [...new Set(preview.floors.map((f) => f.depth))].sort((a, b) => a - b);
@@ -95,10 +97,22 @@ export function EngraveLegend(): JSX.Element | null {
             bottom colour (stand-in)
           </div>
           {/* The plane the two rows are read against, stated as the depth it sits at rather than
-              drawn as a third colour: it is not a colour a floor lands IN, it is where they part. */}
+              drawn as a third colour: it is not a colour a floor lands IN, it is where they part.
+
+              `mm` and not `toFixed(2)` (#170 review): the split is a depth, and every other depth
+              the app prints goes through the one formatter — `split 1 mm down`, not `1.00`. */}
           <div data-testid="engrave-legend-split" style={{ color: '#9aa4b0' }}>
-            split {split.toFixed(2)} mm down
+            split {mm(split)} mm down
           </div>
+          {/* This branch is taken on the BLANK's own print, not on anything being cut, so it is
+              reached by a two-colour job with no enabled label — where the two rows above describe a
+              blank and nothing is on the face at all. Said out loud rather than left to read as a
+              picture that failed to draw (#170 review). */}
+          {depths.length === 0 && (
+            <div data-testid="engrave-legend-nothing-cut" style={{ color: '#9aa4b0' }}>
+              nothing cut
+            </div>
+          )}
         </>
       ) : depths.length === 0 ? (
         <div style={{ color: '#9aa4b0' }}>nothing cut</div>

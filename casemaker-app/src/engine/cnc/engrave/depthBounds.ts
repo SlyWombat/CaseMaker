@@ -130,14 +130,16 @@ const DEPTH_STEPS = 1000;
 /**
  * A computed depth, quantised to that same thousandth — the number written onto the document.
  *
- * The two-state control writes `boundaryDepth ± layerHeight` (#170), and both operands are layer
+ * The two-state control writes a floor clear of the colour split (#170), and both operands are layer
  * lines the grid computes as sums: the default badge's boundary is `0.2 + 3 × 0.2` and its `surface`
  * floor comes back as `0.8 − 0.2` = `0.6000000000000001`. The depth field shows THAT, and the
  * verifier then judges a floor against a plane it differs from by a trillionth. Rounding to the
  * unit the machine moves in is not a tidy-up: it is the value the document is allowed to hold.
  *
- * Nearest, not directionally like `deeper`/`shallower`: those two exist to respect a bound, and a
- * state's depth is exactly ON the grid and has no bound to respect.
+ * Nearest, and NOT directional like `deeper`/`shallower`: this is the rule for a number with no plane
+ * to land clear of — a typed override, or the arithmetic #362 reports. A floor that DOES have a bound
+ * (`depthForIntent`, `recommendLabelDepth`) quantises toward it instead, or the app writes a depth its
+ * own checker refuses (#170 review, #362 review).
  */
 export function roundDepth(v: Mm): Mm {
   return Math.round(v * DEPTH_STEPS) / DEPTH_STEPS;
@@ -162,19 +164,34 @@ const DEPTH_EPS = 1e-9;
 /**
  * A candidate floor that must land at or PAST a plane (the colour split, which a `reveal` bound
  * requires to be `≥ at + m`): rounded UP, by at most one step. Rounding it down is the one way to
- * write a recommendation that the checker then refuses against its own bound.
+ * write a depth that the checker then refuses against its own bound.
+ *
+ * Exported for `depthForIntent`, which writes the two-state control's own depth onto the document
+ * (#170 review): a state's floor has a bound to respect exactly as a recommendation's does — `reveal`
+ * at or past `split + margin`, `surface` short of `split − margin` — so the control and the #362 row
+ * beside it must quantise the same way. `roundDepth` is the other rule and not this one: it is for a
+ * depth with NO bound to respect, where the nearest thousandth is the honest answer.
+ *
+ * The epsilon mirrors `shallower`'s, and it is what keeps "one layer past the plane" reading as one
+ * layer: these operands are grid sums, so `3.6 + 0.2` is `3.8000000000000003` and `0.1 + 0.2` is
+ * `0.30000000000000004`. Bare, those ceil to `3.801` and `0.301` — a thousandth deeper than the
+ * number the person pressed for, on a floor that was never meant to be off the grid. `1e-6` on the
+ * scaled value swallows that tail (it is ~1e-12 at these magnitudes) and nothing else: a genuine
+ * thousandth still rounds up, because a whole thousandth is three orders above the tolerance.
  */
-function deeper(v: number): Mm {
-  return Math.ceil(v * DEPTH_STEPS) / DEPTH_STEPS;
+export function deeper(v: number): Mm {
+  return Math.ceil(v * DEPTH_STEPS - 1e-6) / DEPTH_STEPS;
 }
 
 /**
  * A candidate floor that must STOP SHORT of a plane (a void's ceiling, the blank's underside, the
- * jaws): rounded DOWN, by at most one step. The epsilon is for the binary tail the other way —
- * `0.905 × 1000` is `904.9999999999999` in a float, and flooring that unguarded would write
- * `0.904` for a budget of exactly `0.905`.
+ * jaws, and the colour split under a `surface`): rounded DOWN, by at most one step. The epsilon is
+ * for the binary tail the other way — `0.905 × 1000` is `904.9999999999999` in a float, and flooring
+ * that unguarded would write `0.904` for a budget of exactly `0.905`.
+ *
+ * Exported for `depthForIntent` — see `deeper`.
  */
-function shallower(v: number): Mm {
+export function shallower(v: number): Mm {
   return Math.floor(v * DEPTH_STEPS + 1e-6) / DEPTH_STEPS;
 }
 

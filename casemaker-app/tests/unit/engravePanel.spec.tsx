@@ -1217,7 +1217,41 @@ describe('EngravePanel — the two-state depth control (#170)', () => {
     // number over. Neither state stays lit — a pressed "reveal" over 1.55 mm would be the row
     // drawing a colour the depth does not have.
     expect(job.labels[0]!.depthIntent).toBe('custom');
+    // …and BOTH halves of the claim are stamped (#170 review): `depth` is the number the route must
+    // not re-depth (#362), and `depthIntent` is what says the `'custom'` above is a PERSON's
+    // statement rather than one the app wrote for itself. Without the second stamp the two are
+    // indistinguishable, and the recommendation would be free to revise a person's override.
+    // (`toMatchObject`: the badge seed left its own `layout` claim beside these, which this test is
+    // not about.)
+    expect(job.sources?.labels?.[job.labels[0]!.id]).toMatchObject({
+      depth: 'user',
+      depthIntent: 'user',
+    });
     expect(screen.getByTestId('engrave-label-surface-0').getAttribute('aria-pressed')).toBe('false');
     expect(screen.getByTestId('engrave-label-reveal-0').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('clears a leftover intent from a blank that has none, so the field cannot lock it out (#170 review)', () => {
+    // A job that came from a PRINTED blank and lost its print — or a document authored by hand —
+    // can carry an intent no control is drawn for. The field is the only depth control such a row
+    // has, and a stated intent is exactly what takes a label out of `recommendLabelDepth`'s reach
+    // (#362): left standing it would go on claiming a colour the blank does not have, with nothing
+    // on screen to say why no recommendation appears.
+    render(<EngravePanel />);
+    const id = useEngraveJobStore.getState().job.labels[0]!.id;
+    act(() => {
+      useEngraveJobStore.getState().updateLabel(id, { depthIntent: 'reveal' });
+    });
+    expect(useEngraveJobStore.getState().job.labels[0]!.depthIntent).toBe('reveal');
+
+    fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '1.5' } });
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.labels[0]!.depth).toBe(1.5);
+    expect(job.labels[0]!.depthIntent).toBeUndefined();
+    // The CLAIM is dropped too, not just the field: the store deletes it when the patch says
+    // `undefined`, and a claim that outlived its intent would keep the label out of the app's reach
+    // for good.
+    expect(job.sources?.labels?.[id]).toEqual({ depth: 'user' });
   });
 });

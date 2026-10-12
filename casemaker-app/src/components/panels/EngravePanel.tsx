@@ -402,11 +402,6 @@ export function EngravePanel(): JSX.Element {
   const clamps = feeds?.ok ? feeds.diagnostics.filter((d) => CLAMP_CODES.has(d.code)) : [];
 
   const maxDepth = job.stock.thickness - job.minFloor;
-  // #170 — everything the two-state depth control needs, worked out ONCE for the job: where the
-  // colour split lands and how tall the blank's layers are. `null` on a blank that states no print,
-  // which is when a label row has no two outcomes to offer. The same call the preview draws its
-  // colours from, so a row's `reveal` and the colour the floor is painted cannot disagree.
-  const split = jobSplit(job);
   // The declared under-surface voids (#271). One row each, under the stock they are a fact about.
   const keepOuts = job.keepOuts ?? [];
 
@@ -418,6 +413,16 @@ export function EngravePanel(): JSX.Element {
   // job's own past recommendation back in would let it raise its own advice.
   const houseMargins = useSettingsStore((s) => s.margins);
   const margins = effectiveMargins(job, houseMargins);
+  // #170 — everything the two-state depth control needs, worked out ONCE for the job: where the
+  // colour split lands and how far off it a state's floor has to stop. `null` on a blank that states
+  // no print, which is when a label row has no two outcomes to offer. The same call the preview draws
+  // its colours from, so a row's `reveal` and the colour the floor is painted cannot disagree.
+  //
+  // The MARGIN in force is handed in rather than a bare layer height (its own review): the row writes
+  // a depth onto the document and `checkBounds` holds it to `margins.boundaryMargin`, so a control
+  // stepping by the layer alone writes a depth the app's own checker refuses the moment a job carries
+  // a margin of its own — and `margins` is computed ABOVE this line for exactly that reason.
+  const split = jobSplit(job, margins.boundaryMargin);
   const recommendation = recommendMargins(job, houseMargins, zBudgetInputsFor(job));
   // The house number AS THIS JOB runs it (#345 review): one printed layer of this blank while the
   // setting is still the shipped default, not the 0.2 the settings box shows. The same resolver

@@ -18,7 +18,9 @@ import type { EngraveLabel } from '@/types/engraveJob';
  * #170 adds a two-state control BESIDE that field — but only on a blank that states its colour
  * split (`split`), because only there are there two outcomes to choose between (decision 20):
  * *surface* stays in the top colour, *reveal* comes through to the bottom one, and each writes the
- * depth one printed layer on its side of the split (`depthForIntent`). On a one-colour blank depth
+ * depth its state means (`depthForIntent`) — one printed layer clear of the split, or the margin in
+ * force where that is further, so a job carrying a margin of its own still gets a depth its own
+ * checker accepts. On a one-colour blank depth
  * is a free number and the field stands alone, which is also what retires the slider this row used
  * to carry: a continuous control is exactly the wrong shape for a choice that has two answers.
  */
@@ -56,9 +58,9 @@ export interface EngraveLabelRowProps {
    * This job's colour split, as the two-state control needs it (#170) — or `null`/absent when the
    * blank states no print, which is when the row shows the depth field alone.
    *
-   * Passed in rather than looked up: the split is `splitDepthOf(job)` and the layer height is the
-   * same blank's, so a row that went and found them itself would be a second opinion about which
-   * blank is in the vise. Omitted entirely by a caller with no job in hand (the row does not guess).
+   * Passed in rather than looked up: the split is `splitDepthOf(job)` and the step is that blank's
+   * own layer height against the margin in force, so a row that went and found them itself would be a
+   * second opinion about which blank is in the vise and how far off its plane a floor has to stay. Omitted entirely by a caller with no job in hand (the row does not guess).
    */
   split?: LabelSplit | null;
 }
@@ -95,7 +97,7 @@ export function EngraveLabelRow({
       aria-pressed={label.depthIntent === intent}
       data-testid={`engrave-label-${intent}-${index}`}
       title={title}
-      onClick={() => onChange({ depthIntent: intent, depth: depthForIntent(intent, at.depth, at.layerHeight) })}
+      onClick={() => onChange({ depthIntent: intent, depth: depthForIntent(intent, at) })}
     >
       {words}
     </button>
@@ -230,13 +232,13 @@ export function EngraveLabelRow({
               split,
               'surface',
               'surface',
-              `Keep this label's floor in the top colour: one ${mm(split.layerHeight)} mm layer above the colour split, ${mm(split.depth)} mm below the face.`,
+              `Keep this label's floor in the top colour: ${mm(split.step)} mm above the colour split, ${mm(split.depth)} mm below the face.`,
             )}
             {intentButton(
               split,
               'reveal',
               'reveal',
-              `Cut through to the bottom colour: one ${mm(split.layerHeight)} mm layer below the colour split, ${mm(split.depth)} mm below the face.`,
+              `Cut through to the bottom colour: ${mm(split.step)} mm below the colour split, ${mm(split.depth)} mm below the face.`,
             )}
           </span>
         )}
@@ -262,10 +264,13 @@ export function EngraveLabelRow({
               // contradiction the row would be drawing).
               //
               // Only where the control exists. On a blank with no split the field writes its number
-              // and nothing else, exactly as before: an intent there would claim a colour the blank
-              // does not have, and stamping it would take the label out of `recommendLabelDepth`'s
-              // reach (#362) for no reason a user could see.
-              onChange(split === null ? { depth: v } : { depth: v, depthIntent: 'custom' });
+              // and nothing else — plus the CLEARING of an intent, which is the one thing it must
+              // still do there: a blank that lost its print (or a job that never had one) can carry
+              // an intent from the printed job it came from, and an intent no control is drawn for
+              // is invisible. Left standing it would go on claiming a colour the blank does not have
+              // and, being a stated intent, take the label out of `recommendLabelDepth`'s reach
+              // (#362) with nothing on screen to say why (#170 review).
+              onChange(split === null ? { depth: v, depthIntent: undefined } : { depth: v, depthIntent: 'custom' });
             }}
           />
           <span>mm</span>
