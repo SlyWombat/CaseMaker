@@ -16,7 +16,9 @@ The fitted 1 × 4 mm ball nose cannot be simulated (the sweep refuses any non-fl
 green-box 1 mm flat is a metal cutter, ruled out for PLA (maintainer, 2026-10-09, on #209).
 Sessions S1 and S2 do not need a cutter and can run first.
 
-**Cutter chosen (2026-10-12).** Every Makera box in the house was photographed and decoded that
+**Cutter recommended (2026-10-12), awaiting the maintainer's confirmation.** The maintainer asked
+"which colour and label to put in the machine" and was given the one below; they have not yet said
+it is fitted. Every Makera box in the house was photographed and decoded that
 day: 37 boxes, 28 codes. They are loaded into the desktop app's house inventory, and every code
 scans as owned. (The records and photos are local, in `tool-labels/`, gitignored as vendor label
 text.) The flat to fit for S3/S4:
