@@ -382,10 +382,22 @@ export const TAB_SCREW_HEAD_H = headHeight('M5', 'button');
  * still 3 mm of rail left outboard of the ledge.
  */
 export const TAB_SCREW_INSET = 4.3;
-/** Pilot depth below the TOP ledge, sized for the 24 mm-thread M5s in hand:
- *  a screw longer than its hole bottoms out and jacks the plate back up. The
- *  bottom tab lands on a stacking foot instead and takes what the foot gives. */
-export const TAB_SCREW_BITE = 21;
+/** Under-head length of the tab screw the hardware list names (M5 × 25, button head). The
+ *  maintainer's own screws measure 24 mm of thread, so a pilot sized for 25 seats either. */
+export const TAB_SCREW_LENGTH = 25;
+/** Spare depth below the screw's tip once it is seated, mm. */
+const TAB_SCREW_SPARE = 1;
+/**
+ * Pilot depth from the ledge mouth, DERIVED from the screw (#371). A screw longer than its hole
+ * bottoms out and jacks the plate back up off its seat. When the screw is tight the plate is
+ * clamped onto the ledge face, so the head seat sits a bearing floor (tab thickness after the
+ * #356 shave, less the head's counterbore) above the mouth, and the pilot has to run the rest of
+ * the screw's length plus a spare. It used to be a literal 21, sized when the floor was 3 mm and
+ * the screw assumed shorter, and by #356 the top screw bottomed ~1.2 mm before it seated; the
+ * seated-screw probe in `rack.spec.ts` is what holds this now.
+ */
+export const TAB_SCREW_BITE =
+  TAB_SCREW_LENGTH + TAB_SCREW_SPARE - (TAB_T - TAB_Z_SHAVE - TAB_SCREW_HEAD_H);
 /** Solid column reserved around a tab screw in the side's lightening pocket. */
 const TAB_COLUMN_D = 10;
 /**
@@ -675,15 +687,15 @@ function buildSide(rack: RackParams, dims: RackDims, mirror: boolean, fused = fa
   for (const ty of plateTabYs(depth)) {
     cuts.push(...ledgesAt(ty));
     if (!screwYs.has(ty)) continue; // mid tab bears the deck, takes no screw
-    // A millimetre deeper than the screw reaches: a screw that bottoms out
-    // jacks the plate back up off its seat. The mouth sits on the ledge's own
+    // Deeper than the screw reaches by TAB_SCREW_SPARE (#371): a screw that
+    // bottoms out jacks the plate back up off its seat. The mouth sits on the ledge's own
     // ceiling, so it rises with the #356 relief the same as the ceiling does.
     cuts.push(
       screwStarter({
         size: 'M5',
         at: [tabAxis, ty, FOOT_H + TAB_T + tabZOpen],
         axis: '+z',
-        depth: TAB_SCREW_BITE + OVER,
+        depth: TAB_SCREW_BITE,
         segments: 24,
       }),
     );

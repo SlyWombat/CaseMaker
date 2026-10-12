@@ -33,6 +33,7 @@ import {
   TAB_SCREW_INSET,
   TAB_SCREW_HEAD_H,
   TAB_SCREW_BITE,
+  TAB_SCREW_LENGTH,
   REAR_ANCHOR_INSET,
   SIDE_T,
   FOOT_H,
@@ -50,6 +51,7 @@ import {
 import { findTemplate } from '@/library/templates';
 import { hardwareForProject } from '@/engine/exporters/hardwareList';
 import type { RackAccessory, RackParams } from '@/types';
+import { fitRelief } from '@/types/snap';
 import { Manifold, exec, type ManifoldInstance } from './helpers/manifoldExec';
 
 
@@ -808,6 +810,69 @@ describe('rack archetype — mini-rack template', () => {
       sides.forEach((s) => s.delete());
     }
   }, 60000);
+
+  // #371 — the tab screw must SEAT. A screw longer than its pilot bottoms out on the hole's floor
+  // and jacks the plate back up off its seat, which no amount of torque fixes. Checked the way this
+  // repo validates every hole (#356's walk, the insertion-path probe below): the real screw as a
+  // solid, in its real seated position, intersected with the real parts. Seated means CLAMPED —
+  // the screw pulls each plate onto the face it bears on (the bottom plate up onto its ledge
+  // ceiling, the top plate down onto its floor), which is the worst case for reach, since the
+  // #356 clearance would otherwise hide up to 0.55 mm of bottoming. The head seat is read off the
+  // plate's own counterbore floor, not re-derived from constants.
+  it('lets every tab screw seat fully, on every rung and depth (#371)', () => {
+    const CORE_R = 2.0; // under the Ø4.8 pilot, so ordinary thread engagement is not counted
+    for (const depth of [160, 250]) {
+      for (const fit of ['tight', 'standard', 'loose'] as const) {
+        const rack: RackParams = { ...SAMPLE, depth, fit, accessories: [] };
+        const byId = new Map(buildRackNodes(rack).map((n) => [n.id, n.op]));
+        const sides = ['rack-side-left', 'rack-side-right'].map((id) => exec(byId.get(id)!));
+        const xMax = sides[1]!.boundingBox().max[0];
+        const axes = [15 + 0.3 - TAB_SCREW_INSET, xMax - (15 + 0.3 - TAB_SCREW_INSET)];
+        const slack = TAB_Z_SLACK + fitRelief(fit);
+        try {
+          for (const plateId of ['rack-bottom', 'rack-top'] as const) {
+            const up = plateId === 'rack-bottom';
+            const plate = exec(byId.get(plateId)!).translate([0, 0, up ? slack : -slack]);
+            try {
+              for (const x of axes) {
+                for (const y of plateScrewYs(depth)) {
+                  // The seat: where plate material starts along the axis inside the counterbore.
+                  const ring = Manifold.difference([
+                    Manifold.cylinder(400, 4.4, 4.4, 32).translate([x, y, -50]),
+                    Manifold.cylinder(402, 3.2, 3.2, 32).translate([x, y, -51]),
+                  ]);
+                  const mat = Manifold.intersection([plate, ring]);
+                  const bb = mat.boundingBox();
+                  mat.delete();
+                  ring.delete();
+                  const seat = up ? bb.min[2] : bb.max[2];
+                  const reach = (len: number): number => {
+                    const core = Manifold.cylinder(len, CORE_R, CORE_R, 32).translate([x, y, up ? seat : seat - len]);
+                    let v = 0;
+                    for (const part of [...sides, plate]) {
+                      const i = Manifold.intersection([part, core]);
+                      v += i.volume();
+                      i.delete();
+                    }
+                    core.delete();
+                    return v;
+                  };
+                  const where = `${plateId} screw at x=${x.toFixed(1)} y=${y} (depth ${depth}, ${fit})`;
+                  expect(reach(TAB_SCREW_LENGTH + 0.5), `${where} seats with room to spare`).toBeLessThan(0.05);
+                  // The probe can fail: a screw far too long must hit the hole's floor.
+                  expect(reach(TAB_SCREW_LENGTH + 6), `${where}: the probe sees a hole floor`).toBeGreaterThan(1);
+                }
+              }
+            } finally {
+              plate.delete();
+            }
+          }
+        } finally {
+          for (const s of sides) s.delete();
+        }
+      }
+    }
+  });
 
   it('gives each tab screw head a flat seat, printed facing up', () => {
     const rack: RackParams = { ...SAMPLE, accessories: [] };

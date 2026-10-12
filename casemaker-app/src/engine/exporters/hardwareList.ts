@@ -1,6 +1,6 @@
 import type { Project } from '@/types';
 import { computeBossPlacements } from '@/engine/compiler/bosses';
-import { accessorySlots, computeRackDims, earScrewsPerSide, plateScrewYs, resolveShelfDepth, FAN_SCREW_D, LONG_SHELF } from '@/engine/compiler/rack';
+import { accessorySlots, computeRackDims, earScrewsPerSide, plateScrewYs, resolveShelfDepth, FAN_SCREW_D, LONG_SHELF, TAB_SCREW_LENGTH } from '@/engine/compiler/rack';
 import { clearanceDiameter, pilotDiameter } from '@/engine/compiler/fasteners';
 import { HARDWARE_SCREW } from '@/engine/compiler/hinges';
 import { derivedKind } from '@/engine/compiler/archetype';
@@ -75,7 +75,10 @@ export function hardwareForProject(project: Project): HardwareItem[] {
     const tabScrews = plateScrewYs(rack.depth).length * 2 * 2;
     items.push({
       id: 'rack-plate-screws',
-      label: 'M5 × 25 mm socket cap screws (top + bottom plates)',
+      // Button head, not socket cap (#371): the tab's counterbore is cut for a button head
+      // (TAB_SCREW_HEAD_H), and a socket cap stands ~2 mm proud of it. The pilot is sized for
+      // TAB_SCREW_LENGTH under the head.
+      label: `M5 × ${TAB_SCREW_LENGTH} mm button head screws (top + bottom plates)`,
       count: tabScrews,
       note: `Vertical, into the side rails through each plate's corner tabs — ${tabScrews / 2} per plate. TOP plate: driven DOWN from above, head flush in the tab's counterbore. BOTTOM plate: driven UP from underneath, through the access holes in the stacking feet — there is no room to go downward at that end. Fit the bottom plate before the sides; the top one drops into the finished frame and lifts back out.`,
     });
