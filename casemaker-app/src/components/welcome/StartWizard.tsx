@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { MACHINES } from '@/engine/cnc/machine';
 import { machineCalibrationNotice } from '@/engine/cnc/calibration';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
+import { ensureSeedFontsLoaded } from '@/engine/fonts/registry';
 import { canDriveMachine } from '@/platform/capabilities';
 import { probeMachine, type MachineObservation } from '@/platform/machineProbe';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
@@ -214,8 +215,15 @@ function MachineAnswer({
  * `'user'` and `'measured'` may not (#254's source tags are what make that distinction readable).
  * The guard is on the DIMENSIONS and covers the whole seed — a badge's pocket belongs to the badge's
  * blank, so seeding the one without the other would be a void floating in a stock that is not its own.
+ *
+ * ASYNC, because the store's seed MEASURES the line it lays out and the hand-off is the very call
+ * that runs before any face is parsed (#365 review): a badge taken here seeded the estimate's 5 mm
+ * cap where the panel's own row — with the faces up — says 8. Awaiting the labels' faces costs a
+ * fetch (once, on a cold cache) and makes the number the wizard hands over the number the panel
+ * shows; a fetch that fails leaves the estimate in its place rather than a hand-off that stops
+ * (`ensureSeedFontsLoaded` and not `ensureLabelFontsLoaded`).
  */
-function seedStockFromProject(project: Project): void {
+async function seedStockFromProject(project: Project): Promise<void> {
   const job = useEngraveJobStore.getState();
   const sources = job.job.sources?.stock;
   const asserted = (['length', 'width', 'thickness'] as const).some((key) => {
@@ -223,6 +231,8 @@ function seedStockFromProject(project: Project): void {
     return source === 'user' || source === 'measured';
   });
   if (asserted) return;
+
+  await ensureSeedFontsLoaded(job.job.labels, job.job.customFonts ?? []);
 
   const badge = project.case.badge;
   if (badge !== undefined && badge.enabled) {
@@ -287,7 +297,7 @@ export function StartWizard(): JSX.Element {
     setProject(project); // also flips welcomeMode off
     clearHistory();
     setSection('cnc-engrave');
-    seedStockFromProject(project);
+    await seedStockFromProject(project);
     // Hand off to step 3, which is the flow's own overlay: the wizard gets out of the way rather
     // than stacking a second dialog on top of it.
     setStep('setup');

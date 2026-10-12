@@ -160,10 +160,26 @@ describe('#363/#364 — the blank label seed', () => {
   });
 
   it('estimates the ink box when the face is not parsed, and shrinks the size to fit', () => {
-    // A 10-character line on a narrow blank: the fallback's 1.25 em/char (an upper bound over the
-    // bundled face, #364) puts the widest that fits at 1.25 × size × 10 ≤ 18, i.e. size 1 — and 1 mm
-    // is still laid out, so the blank gets a line rather than nothing.
+    // A 4-character line on a narrow blank, with no face up: the fallback's 1.95 em/char (an upper
+    // bound over every bundled face, #364/#365 — see `inkBoxEstimate.spec.ts`) puts the widest that
+    // fits at 1.95 × size × 4 ≤ 18, i.e. size 2, and 2 mm is laid out rather than nothing.
     const line = blankLabelSeed({
+      blank: { length: 20, width: 30, pocket: null },
+      edgeMargin: 1,
+      font: DEFAULT_FONT_ID,
+      weight: 'bold',
+      text: 'AAAA',
+      measure: () => null,
+    });
+    expect(line!.size).toBe(2);
+    expect(line!.position.y).toBeCloseTo(15, 6);
+
+    // The same blank and a 10-character line: the estimate needs 19.5 mm of width for even 1 mm of
+    // cap, so there is no size at or above 1 that fits and nothing is seeded. That is the honest
+    // answer for a line that long on an 18 mm face — and the SEED does not rely on it any more: the
+    // callers load the faces first (`ensureFontsLoaded`), so this path is the residual one (#365
+    // review).
+    const tooLong = blankLabelSeed({
       blank: { length: 20, width: 30, pocket: null },
       edgeMargin: 1,
       font: DEFAULT_FONT_ID,
@@ -171,8 +187,7 @@ describe('#363/#364 — the blank label seed', () => {
       text: 'AAAAAAAAAA',
       measure: () => null,
     });
-    expect(line!.size).toBe(1);
-    expect(line!.position.y).toBeCloseTo(15, 6);
+    expect(tooLong).toBeNull();
   });
 
   it('shrinks a real measurement down until it fits, and gives up when none does', () => {
@@ -354,6 +369,30 @@ describe('#363 — the store hand-off', () => {
     // Both claims on the one line: `layout` says the ROUTE laid it out (which is what lets a later
     // take replace it), `depth` says the walk worked the number out (#363 review).
     expect(job.sources?.labels).toEqual({ [line.id]: { layout: 'computed', depth: 'computed' } });
+  });
+
+  it('seeds the MEASURED line once the faces are up, and the estimate until then (#365 review)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+
+    // No `measure` is injected anywhere on this path: `takeBadgeBlank` supplies the app's own
+    // `labelGlyphMeasure`, and every other test in this file hands the pure seed the same adapter —
+    // so all of them pass whether or not the STORE does. `vi.resetModules()` above also gave the
+    // store a registry of its OWN, which is the cold start a browser has before anything has
+    // fetched a face: cold, the measure answers null and the seed falls back to the estimate's
+    // 5 mm cap, where the real face sets 8.
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    expect(s().job.labels[0]!.size).toBe(5);
+
+    // Which is why the CALLERS await the labels' faces before they call in (#365 review): the
+    // wizard's hand-off and the panel's two buttons run `ensureLabelFontsLoaded` first. Up, the same
+    // call re-lays the same line at the 8 mm the module's own rows show.
+    await import('../setup/fonts'); // the seam the suite installs for every spec, for this generation
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams()));
+    const line = s().job.labels[0]!;
+    expect(line.text).toBe(BADGE_SEED_TEXT);
+    expect(line.size).toBe(8);
   });
 
   it('re-lays the line when a SECOND badge blank is taken (#363 review)', async () => {

@@ -6,7 +6,7 @@
 // hand-off does not depend on the rebuild finishing.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { StartWizard } from '@/components/welcome/StartWizard';
 import { EngravePanel } from '@/components/panels/EngravePanel';
@@ -31,6 +31,25 @@ vi.mock('@/engine/jobs/JobScheduler', () => ({ scheduleImmediate: vi.fn(async ()
 // #346 — vitest runs the WEB target, where the wizard shows no check at all. The step-1 tests below
 // exercise the desktop build's check through the probe seam, so they run with the capability on;
 // the "no socket" tests turn it off. A getter, so each test reads the value at render.
+/**
+ * #365 review — the hand-off awaits the labels' FACES before it seeds the job, so this seam can hold
+ * them in flight (`fonts.gate`) and watch the store stay untouched until they land. Pass-through for
+ * every other test, so the mock is invisible to them.
+ */
+const fonts = vi.hoisted(() => ({ gate: false, release: null as null | (() => void) }));
+vi.mock('@/engine/fonts/registry', async (orig) => {
+  const real = await orig<typeof import('@/engine/fonts/registry')>();
+  // Both names: the seed paths call the best-effort one, and the mock has to intercept THOSE calls
+  // (a mock of its sibling would not — the real `ensureSeedFontsLoaded` calls the real loader).
+  const waiting = async (
+    ...args: Parameters<typeof real.ensureLabelFontsLoaded>
+  ): Promise<void> => {
+    if (fonts.gate) await new Promise<void>((resolve) => (fonts.release = resolve));
+    await real.ensureLabelFontsLoaded(...args);
+  };
+  return { ...real, ensureLabelFontsLoaded: waiting, ensureSeedFontsLoaded: waiting };
+});
+
 const caps = vi.hoisted(() => ({ drive: true }));
 vi.mock('@/platform/capabilities', async (orig) => {
   const real = await orig<typeof import('@/platform/capabilities')>();
@@ -89,6 +108,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  fonts.gate = false;
+  fonts.release = null;
   setMachineProbeLoader(null);
   setEngravePreviewClientLoader(null);
   useEngravePreviewStore.getState().dispose();
@@ -97,6 +118,19 @@ afterEach(() => {
 /** Click through step 1 without checking for a machine. */
 function skipToJobStep(): void {
   fireEvent.click(screen.getByTestId('start-wizard-next'));
+}
+
+/**
+ * Pick a JOB TYPE — the click whose hand-off is async. `chooseJob` awaits the labels' faces before
+ * it seeds the job (#365 review), so a bare `fireEvent.click` returns while the store write and the
+ * step change are still a microtask away, and a spec that read either one straight after would be
+ * asserting on the state from BEFORE the hand-off. `vitest`'s fake fonts are already parsed, but the
+ * await is unconditional, so this is the shape the component really runs in.
+ */
+async function chooseJob(id: string): Promise<void> {
+  await act(async () => {
+    fireEvent.click(screen.getByTestId(`start-wizard-job-${id}`));
+  });
 }
 
 /**
@@ -286,10 +320,10 @@ describe('#280 — step 2, what are you making', () => {
     expect(screen.getAllByTestId(/^start-wizard-job-/)).toHaveLength(2);
   });
 
-  it('choosing the blank creates the project, opens the Engrave panel and hands off to the setup', () => {
+  it('choosing the blank creates the project, opens the Engrave panel and hands off to the setup', async () => {
     render(<StartWizard />);
     skipToJobStep();
-    fireEvent.click(screen.getByTestId('start-wizard-job-blank'));
+    await chooseJob('blank');
 
     const s = useProjectStore.getState();
     expect(s.project.case.blank?.enabled).toBe(true);
@@ -300,10 +334,10 @@ describe('#280 — step 2, what are you making', () => {
     expect(screen.queryByTestId('start-wizard')).toBeNull();
   });
 
-  it('seeds the engrave job’s stock from the blank — dimensions only, tagged computed', () => {
+  it('seeds the engrave job’s stock from the blank — dimensions only, tagged computed', async () => {
     render(<StartWizard />);
     skipToJobStep();
-    fireEvent.click(screen.getByTestId('start-wizard-job-blank'));
+    await chooseJob('blank');
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stock.length).toBe(100);
@@ -320,7 +354,7 @@ describe('#280 — step 2, what are you making', () => {
   // the blank step refused the job before the person could answer anything else; before #352 the
   // hand-off seeded `case.blank` only, so this spec passed trivially on the 12 mm default and only
   // the panel's button brought the badge across. The numbers are now the hand-off's own.
-  it('the badge job reaches the setup flow with no vise error (#344, #352)', () => {
+  it('the badge job reaches the setup flow with no vise error (#344, #352)', async () => {
     useStartWizardStore.getState().openWizard();
     render(
       <>
@@ -329,7 +363,7 @@ describe('#280 — step 2, what are you making', () => {
       </>,
     );
     skipToJobStep();
-    fireEvent.click(screen.getByTestId('start-wizard-job-badge-blank'));
+    await chooseJob('badge-blank');
     expect(screen.getByTestId('engrave-setup-flow')).toBeTruthy();
 
     // The hand-off itself is the seed (#352): the badge's blank is the stock, no button pressed.
@@ -355,14 +389,41 @@ describe('#280 — step 2, what are you making', () => {
     expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('the template');
   });
 
-  it('never overwrites a stock the user typed or measured', () => {
+  it('does not seed the job until the labels’ faces are up (#365 review)', async () => {
+    // The hand-off MEASURES the line it lays out, and a measure with no face parsed is the fallback
+    // estimate — a badge seeded that way lands on 5 mm of cap where the panel's own rows (faces up)
+    // say 8. So the seed waits, and this holds the faces in flight to show it: the project half is
+    // up at once (it never waited), while the job is byte-for-byte the one that was there before.
+    fonts.gate = true;
+    render(<StartWizard />);
+    skipToJobStep();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-job-badge-blank'));
+    });
+
+    expect(useProjectStore.getState().welcomeMode).toBe(false);
+    expect(useEngraveJobStore.getState().job.stock.length).toBe(defaultEngraveJob().stock.length);
+    expect(useEngraveJobStore.getState().job.labels).toHaveLength(3); // the demo set, untouched
+    expect(screen.queryByTestId('engrave-setup-flow')).toBeNull();
+
+    fonts.release?.();
+    // …and once they land, the whole of the hand-off runs: the badge's stock, its ONE seeded line,
+    // and step 3.
+    expect(await screen.findByTestId('engrave-setup-flow')).toBeTruthy();
+    const job = useEngraveJobStore.getState().job;
+    expect(job.stock.length).toBeCloseTo(76.2, 6);
+    expect(job.labels).toHaveLength(1);
+    expect(job.labels[0]!.size).toBe(8); // measured, not the estimate's 5 (see the seed spec)
+  });
+
+  it('never overwrites a stock the user typed or measured', async () => {
     const job = defaultEngraveJob();
     useEngraveJobStore.setState({
       job: { ...job, stock: { ...job.stock, length: 999 }, sources: { stock: { length: 'measured' } } },
     });
     render(<StartWizard />);
     skipToJobStep();
-    fireEvent.click(screen.getByTestId('start-wizard-job-blank'));
+    await chooseJob('blank');
 
     const after = useEngraveJobStore.getState().job;
     expect(after.stock.length).toBe(999);

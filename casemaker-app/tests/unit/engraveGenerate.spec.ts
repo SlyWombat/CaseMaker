@@ -9,7 +9,7 @@ import { generate, regions } from './helpers/engravePipeline';
 import { frameCorners } from '@/workers/sim/engraveGenerate';
 import { UNMEASURED_FEEDS_TABLE, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
-import { defaultBoundaryMargin, recommendLabelDepth } from '@/engine/cnc/engrave/depthBounds';
+import { defaultBoundaryMargin } from '@/engine/cnc/engrave/depthBounds';
 import { labelGlyphMeasure, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import { bindingVoidsByRegion } from '@/workers/sim/engraveGeometry';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -454,16 +454,19 @@ describe('a job that states its print limits on the printer’s layer grid (#285
 // different measurements of the same overlap: the app's engine tests the line's ink box against the
 // void's shape (cheap, analytic, and the honest superset), while `bindingVoidsByRegion` intersects
 // the measured ink with the void's own footprint in Clipper2. They must agree where both can see the
-// item, or the panel would advise a depth the generator then refuses.
+// item, or the panel would advise a depth the generator then refuses — and where only the BOX
+// reaches a void (the box is a superset, so it can), its answer may only ever be the stricter one.
+// Both halves are asserted below on the LIMIT, which is where the claim lives: the advice is a
+// monotone function of it, so comparing advised depths would say nothing the limits do not.
 describe('the per-item void bound agrees with the region scan (#365)', () => {
   /** The badge blank with its magnet pocket, and ONE measured line over it. */
-  function badgeLine(text: string, x: number, y: number): EngraveJob {
+  function badgeLine(text: string, x: number, y: number, extra: EngraveKeepOut[] = []): EngraveJob {
     const blank = badgeBlankFor(defaultBadgeParams());
     const base = defaultEngraveJob(viseForNewJob(undefined, blank.stock));
     return {
       ...base,
       stock: blank.stock,
-      keepOuts: blank.pocket ? [blank.pocket] : [],
+      keepOuts: [...(blank.pocket ? [blank.pocket] : []), ...extra],
       labels: [
         { ...(base.labels[0] as EngraveLabel), id: 'name', text, size: 8, position: { x, y } },
       ],
@@ -487,31 +490,42 @@ describe('the per-item void bound agrees with the region scan (#365)', () => {
     expect(bound.estimated).toBe(false);
   });
 
-  it('is the honest SUPERSET: where only the box reaches the void, it still bounds, never deeper', () => {
-    // A line parked 0.2 mm below the pocket's roof as the INK measures it: the measured ink stops
-    // short of the void, so the worker's own overlap threshold finds nothing and the region carries
-    // no bound at all — while the fallback box (the estimated advance, sized by the nominal em) still
-    // reaches it, which is the case the seed runs in before any face is parsed. The app may only ever
-    // be STRICTER than the scan: the advice for a line the box bounds can never come out deeper than
-    // the advice with no void in play.
-    const line = { ...(defaultEngraveJob().labels[0] as EngraveLabel), id: 'name', text: 'Name', size: 8 };
-    const ink = labelGlyphMeasure([])(line.text, line.font, line.weight, line.size)!;
+  it('never advises deeper than the scan where the line only PARTLY overlaps the void', () => {
+    // The first test's line sits INSIDE the pocket: a containment. This one straddles its near edge
+    // (the roof at y = 12.55), so the two measurements are compared where the overlap is partial —
+    // the same question, and both have to answer it the same way.
     const pocket = badgeBlankFor(defaultBadgeParams()).pocket!;
     if (pocket.kind !== 'rect') throw new Error('the badge pocket is a rect');
-    const roof = pocket.position.y - pocket.height / 2; // the void's near edge, 12.55
-    const job = badgeLine('Name', 38.1, roof - ink.height / 2 - 0.2);
+    const roof = pocket.position.y - pocket.height / 2;
 
+    // A second void with LESS material over it than the pocket, well clear of the text: the pocket
+    // leaves 1.51 mm and permits 0.51, this one leaves 1.21 mm and permits 0.21.
+    const shallower: EngraveKeepOut = {
+      kind: 'rect', id: 'ko-bore', name: 'Test bore', enabled: true, rotation: 0,
+      position: { x: 63, y: 6 }, width: 6, height: 4, cornerRadius: 0, zCeiling: 2.6,
+    };
+
+    const job = badgeLine('Name', 38.1, roof + 2.5, [shallower]);
+    const m = margin(job);
     const r = regions(tl, job);
-    const scan = bindingVoidsByRegion(tl, job, r.plan, r.cuts, margin(job)).get('name');
-    expect(scan).toBeUndefined();
+    const scan = bindingVoidsByRegion(tl, job, r.plan, r.cuts, m).get('name')!;
+    // The ink never comes near the bore, so the scan's answer is the pocket — and the MEASURED box
+    // test is bound the same way, name for name and number for number.
+    expect(scan.name).toBe('Magnet pocket');
+    const measured = voidLimitForItem(job, job.labels[0]!, m, labelGlyphMeasure([]))!;
+    expect(measured.name).toBe(scan.name);
+    expect(measured.limit).toBe(scan.limit);
+    expect(measured.estimated).toBe(false);
 
-    const bound = voidLimitForItem(job, job.labels[0]!, margin(job)); // estimated box, no measure
-    expect(bound?.name).toBe('Magnet pocket');
-    expect(bound!.estimated).toBe(true);
-    const bounds = { boundaryMargin: margin(job) };
-    const withVoid = recommendLabelDepth(job, job.labels[0]!, { ...bounds, voidLimit: bound })!;
-    const without = recommendLabelDepth(job, job.labels[0]!, { ...bounds, voidLimit: null })!;
-    expect(withVoid.depth).toBeLessThanOrEqual(without.depth);
+    // The FALLBACK box is the honest SUPERSET, and this is the direction that matters: 1.95 of cap
+    // per character makes it as wide as the blank, so it reaches the bore the ink stops 8 mm short
+    // of, and its answer is the bore's smaller limit. Never larger — the panel's advice may only
+    // ever be STRICTER than the generator's own bound, never deeper than a depth the scan refuses.
+    const estimated = voidLimitForItem(job, job.labels[0]!, m)!;
+    expect(estimated.estimated).toBe(true);
+    expect(estimated.name).toBe('Test bore');
+    expect(estimated.limit).toBeLessThan(scan.limit);
+    expect(estimated.limit).toBeLessThanOrEqual(scan.limit);
   });
 });
 

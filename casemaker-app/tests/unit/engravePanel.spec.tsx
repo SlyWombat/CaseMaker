@@ -39,6 +39,17 @@ const NO_PREVIEW: EngravePreviewClient = { engravePreview: async () => null };
 
 const rows = (): HTMLElement[] => screen.queryAllByTestId(/^engrave-label-row-/);
 
+/**
+ * Press a button whose handler AWAITS the labels' faces before it writes (#365 review): the click's
+ * effect lands on a microtask, so a `fireEvent.click` alone would assert against a store nobody has
+ * written to yet.
+ */
+const press = async (el: HTMLElement): Promise<void> => {
+  await act(async () => {
+    fireEvent.click(el);
+  });
+};
+
 beforeEach(() => {
   setEngravePreviewClientLoader(async () => NO_PREVIEW);
   useSettingsStore.getState().resetSettings();
@@ -818,10 +829,10 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     expect(button().disabled).toBe(false);
   });
 
-  it('takes the stock and the magnet pocket from the badge in one press', () => {
+  it('takes the stock and the magnet pocket from the badge in one press', async () => {
     setBadge(defaultBadgeParams());
     render(<EngravePanel />);
-    fireEvent.click(screen.getByTestId('engrave-stock-from-badge'));
+    await press(screen.getByTestId('engrave-stock-from-badge'));
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stock).toEqual({ length: 76.2, width: 38.1, thickness: 3.81, material: 'pla' });
@@ -876,24 +887,24 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     expect(jobDepthLimit(job)(38.1, 19.05)).toBeCloseTo(1.2, 6);
   });
 
-  it('lands on the same void when it is pressed twice', () => {
+  it('lands on the same void when it is pressed twice', async () => {
     setBadge(defaultBadgeParams());
     render(<EngravePanel />);
-    fireEvent.click(screen.getByTestId('engrave-stock-from-badge'));
-    fireEvent.click(screen.getByTestId('engrave-stock-from-badge'));
+    await press(screen.getByTestId('engrave-stock-from-badge'));
+    await press(screen.getByTestId('engrave-stock-from-badge'));
     expect(useEngraveJobStore.getState().job.keepOuts).toHaveLength(1);
   });
 
-  it('removes the void IT stamped when the badge has no pocket — and never one the user typed', () => {
+  it('removes the void IT stamped when the badge has no pocket — and never one the user typed', async () => {
     setBadge(defaultBadgeParams());
     render(<EngravePanel />);
-    fireEvent.click(screen.getByTestId('engrave-stock-from-badge'));
+    await press(screen.getByTestId('engrave-stock-from-badge'));
     // A void of the user's own, beside the stamped one.
     fireEvent.click(screen.getByTestId('engrave-add-keepout-circle'));
     expect(useEngraveJobStore.getState().job.keepOuts).toHaveLength(2);
 
     setBadge(defaultBadgeParams({ magnetPocket: null }));
-    fireEvent.click(screen.getByTestId('engrave-stock-from-badge'));
+    await press(screen.getByTestId('engrave-stock-from-badge'));
 
     const ids = useEngraveJobStore.getState().job.keepOuts!.map((k) => k.id);
     expect(ids).toHaveLength(1);

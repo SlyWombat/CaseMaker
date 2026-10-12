@@ -751,18 +751,18 @@ running passes above; the rest are the checks the runner does not do on its own:
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|
 | `parse-error` | error | The file could not be read as G-code and was not simulated: either the parser refused a line, or the program could not be lowered to moves at all. The message carries the inner reason. | Fix the line the message names, then generate again. |
-| `runner-error` | error | The runner raised an error over the program — an out-of-envelope move, a cut at an unknown Z, an arc it cannot walk. The message names the runner's own code and what it found. | Fix the move the message names. |
+| `runner-error` | error | The runner refused the program — a move that leaves the machine's envelope, an arc with no feed rate or in a form it cannot read, or an arc from a position the program never established. (A *warning* the runner raises — an unknown Z, an unknown X,Y — is not carried here.) The message names the runner's own code and what it found. | Fix the move the message names. |
 | `not-our-dialect` | error | A word in the file is not one this post writes (`G0 G1 G21 G28 G90`, `M2 M3 M5 M6 M7 M9`, and only G/M/T/S/F/X/Y/Z words). The file did not come from the app, or was hand-edited. | Re-post it, or fix the word. |
 | `cut-too-deep` | error | A cutting move reaches Z deeper than the material permits at that (X, Y): past the stock floor, through a colour or void ceiling, or into material the job says must remain. The message names the limit and, when the job can say, why. | Reduce the depth, move the cut clear, or switch the label's intent. |
 | `cut-outside-stock` | error | The cutter's *edge*, not just its centre, reaches a point where no material may be cut — off the blank onto air. | Move the cut back inside the stock. |
 | `feed-missing` | error | A cutting move has no feed rate set. | Add an `F` before the cut. |
 | `feed-too-high` | error | A cutting feed is above the machine's ceiling. (The planner's softer `feed-clamped` is a different code, raised earlier.) | Lower the feed. |
-| `spindle-off-cut` | error | A feed move reaches below the top face with the spindle off. | Turn the spindle on (`M3`/`M4`) before cutting. |
+| `spindle-off-cut` | error | A feed move reaches below the top face with the spindle off. | Turn the spindle on with `M3` — it is the dialect's only spindle-on word (`M4` is not one of them). |
 | `rapid-too-low` | error | An X/Y rapid runs below the permitted rapid height, or at a Z the program never established. | Raise the rapid height, or state the Z first. |
-| `rpm-too-high` | error | A spindle speed is above the Z1's ceiling. (The planner's `rpm-clamped`/`rpm-refused` are separate.) | Lower the speed. |
+| `rpm-too-high` | error | A spindle speed is above the machine's ceiling. (The planner's `rpm-clamped`/`rpm-refused` are separate.) | Lower the speed. |
 | `multi-tool` | error | The program uses more than one tool; V1 is single-tool. Raised for an `M6` to a new tool after the first cut, or for more than one distinct tool anywhere. | Post the job with one tool. |
 | `bad-preamble` | error | The first motion is not preceded by `G90` and `G21`. | Open the program the way the app's post does. |
-| `bad-ending` | error | The program does not end with `M02`, or the spindle is still on at it, or no `M5`/`M05` turns it off first. | End with `M5`, `G28`, `M02`. |
+| `bad-ending` | error | The program does not end with `M02`/`M30`, or the spindle is still on at it, or no `M5`/`M05` turns it off first. | End with `M5`, `G28`, `M02`. |
 
 **Sweeping the cuts** (sweep):
 

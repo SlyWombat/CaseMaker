@@ -27,7 +27,7 @@ import { cuttingDiameter } from '@/engine/cnc/tool';
 import { dedupeFindings, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
 import { keepOutLimitParts, keepOutMembrane, labelGlyphMeasure, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
-import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
+import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, labelFontsLoaded } from '@/engine/fonts/registry';
 import { buildRunSheet, runSheetFileName, type RunSheet } from '@/engine/cnc/engrave/runSheet';
 import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/engrave/runRecord';
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
@@ -344,6 +344,28 @@ export function EngravePanel(): JSX.Element {
     useEngravePreviewStore.getState().request(useEngraveJobStore.getState().job);
   }, []);
 
+  // #365 review — the rows MEASURE, so the faces they measure with have to be up before the render
+  // that shows a number. The sim worker loads its own (per-realm) cache and this thread only did so
+  // inside `openRunSheet`/save, so every row read the fallback's sentence — "its face is not parsed
+  // yet" — until the run sheet had been opened once. Load the job's faces here, on mount and whenever
+  // the line set changes, and bump a counter so `measure` below is rebuilt once they land:
+  // `labelGlyphMeasure` is synchronous and reads the registry, so a re-render is the whole of it. The
+  // seed paths (`useBadgeBlank`/`useBlankStock`) await the same call, so neither relies on this race.
+  const [, bumpFacesLoaded] = useState(0);
+  useEffect(() => {
+    // The ordinary case is that they are already up (every render after the first, and every test),
+    // and then this render's numbers are final: no fetch, no bump, no second render. Only a cold
+    // cache pays, and only once.
+    if (labelFontsLoaded(job.labels, job.customFonts ?? [])) return;
+    let live = true;
+    void ensureLabelFontsLoaded(job.labels, job.customFonts ?? []).then(() => {
+      if (live) bumpFacesLoaded((n) => n + 1);
+    });
+    return () => {
+      live = false;
+    };
+  }, [job.labels, job.customFonts]);
+
   // Findings: the worker's list (validateJob + validateVise + the geometry findings, deduped)
   // once it has one, otherwise the same two pure validators without the geometry half, merged the
   // same way (#353) — so the list does not change under the user when the first preview lands, and
@@ -433,9 +455,15 @@ export function EngravePanel(): JSX.Element {
   const badgeUsable = badge !== undefined && badge.enabled;
   const [blankNotes, setBlankNotes] = useState<string[] | null>(null);
 
-  function useBadgeBlank(): void {
+  async function useBadgeBlank(): Promise<void> {
     if (!badge) return;
     const blank = badgeBlankFor(badge);
+    // #365 review — the store's seed MEASURES the line it lays out, so the face it borrows has to be
+    // parsed before the write. Pressed before the faces were up (the header effect above usually wins
+    // that race, but a button may not depend on it) the seeded line came out at the estimate's 5 mm
+    // cap while the row right beside it said 8. Best-effort: a face that will not load leaves the
+    // seed the estimate, which is what it had before this wait.
+    await ensureSeedFontsLoaded(job.labels, job.customFonts ?? []);
     // #352 — the write itself lives in the store, because the wizard's hand-off seed makes the same
     // one. The panel owns only what it shows.
     takeBadgeBlank(blank);
@@ -450,8 +478,12 @@ export function EngravePanel(): JSX.Element {
   const blankPartUsable = blankPart !== undefined && blankPart.enabled;
   const [blankPartNotes, setBlankPartNotes] = useState<string[] | null>(null);
 
-  function useBlankStock(): void {
+  async function useBlankStock(): Promise<void> {
     if (!blankPart) return;
+    // The same wait as the badge button's, for the same reason and with the same best-effort
+    // reading: `takeBlankStock` seeds its line from a MEASUREMENT of the face it borrows (#364,
+    // #365 review).
+    await ensureSeedFontsLoaded(job.labels, job.customFonts ?? []);
     // #364 — one store method owns the whole write, the panel only shows what it did. It takes the
     // stock AND the lines (the seed and the re-depth walk), so "Use the blank" no longer leaves the
     // demo words laid out for a plank on a blank that is not one.
@@ -492,7 +524,7 @@ export function EngravePanel(): JSX.Element {
     // throws unless the bundled faces are already parsed (#180). The sim worker loads them, but
     // that cache is per-realm — the main thread must load the job's faces itself first, exactly
     // as `JobScheduler` does before its compile.
-    await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
+    await ensureLabelFontsLoaded(job.labels, job.customFonts ?? []);
     // #345 — the house setting the run was gated to, handed over rather than a pre-resolved margin:
     // the sheet resolves it the same way `engraveRunStore` did at Generate, so its depth notes are
     // the numbers the verifier enforced and its recommendation is made from the SETTING.
@@ -599,7 +631,7 @@ export function EngravePanel(): JSX.Element {
     // The record reads §9 off `toPartPlan`, which typesets every label — so the main thread's font
     // cache has to be seeded first, exactly as `openRunSheet` does above (#180). The two `.nc`s do
     // not need it, but they are written in the same breath.
-    await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
+    await ensureLabelFontsLoaded(job.labels, job.customFonts ?? []);
     await saveEngraveProgram(
       generated.nc,
       generated.frameNc,

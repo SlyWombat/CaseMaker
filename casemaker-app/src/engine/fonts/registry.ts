@@ -147,6 +147,64 @@ export async function ensureFontsLoaded(keys?: readonly string[]): Promise<void>
 }
 
 /**
+ * Load the faces a set of LABELS is set in — the two calls above, as one name, for the callers that
+ * are about to MEASURE a label rather than merely draw it.
+ *
+ * `labelGlyphMeasure` answers `null` for a face that is not parsed yet (that is how #180's throw is
+ * caught), and its readers fall back to `inkBoxOf`'s documented estimate — which is honest, but the
+ * seed paths (#363/#364) were quietly measuring with it: the wizard's hand-off and the panel's two
+ * buttons ran before anything on the main thread had fetched a face, so the badge seed came out at
+ * the estimate's 5 mm cap instead of the 8 this module's own rows show once the faces are up (#365
+ * review). A caller that is about to size or bound a line says so by awaiting this first.
+ *
+ * Superset of what the caller needs, deliberately: the seed borrows ONE label's face, and asking for
+ * the whole set costs nothing when the keys are already cached (`ensureFontsLoaded` returns without a
+ * fetch) and one extra fetch when they are not.
+ */
+export async function ensureLabelFontsLoaded(
+  labels: readonly FontBearingLabel[] | undefined,
+  customFonts: readonly Pick<CustomFont, 'id'>[] = [],
+): Promise<void> {
+  await ensureFontsLoaded(fontKeysForLabels(labels, customFonts));
+}
+
+/**
+ * `ensureLabelFontsLoaded` for the SEED paths, where the wait is a nicety rather than a precondition.
+ *
+ * The store's seed MEASURES the line it lays out, and the measurement has a documented fallback — the
+ * estimate — for a face that is not parsed; a fetch that plainly fails leaves the seed with exactly
+ * the answer it had before this wait existed. So the failure is swallowed here: the alternative is a
+ * hand-off (or a click on the panel's button) that does nothing at all, which is a worse outcome than
+ * a placeholder one size small. `ensureLabelFontsLoaded` stays loud for the run sheet and the saves,
+ * which must not write a document full of numbers nobody measured.
+ */
+export async function ensureSeedFontsLoaded(
+  labels: readonly FontBearingLabel[] | undefined,
+  customFonts: readonly Pick<CustomFont, 'id'>[] = [],
+): Promise<void> {
+  try {
+    await ensureLabelFontsLoaded(labels, customFonts);
+  } catch {
+    // Deliberately silent: the estimate is the documented answer when no face is available.
+  }
+}
+
+/**
+ * The synchronous half of the call above: are those faces ALREADY up? A caller that renders rows by
+ * measuring them asks this first, so that the ordinary case — every face already parsed — costs no
+ * fetch, no re-render and no state bump, and only the cold first render pays for the await.
+ *
+ * Same question, same keys: `fontKeysForLabels` is the single list both read, so "already up" cannot
+ * drift from what `ensureLabelFontsLoaded` would go and get.
+ */
+export function labelFontsLoaded(
+  labels: readonly FontBearingLabel[] | undefined,
+  customFonts: readonly Pick<CustomFont, 'id'>[] = [],
+): boolean {
+  return fontKeysForLabels(labels, customFonts).every((key) => parsedCache.has(key));
+}
+
+/**
  * Resolve a label's font id to a parsed font. Unknown ids (a custom font that was deleted, a
  * hand-edited file) fall back to the default sans rather than dropping the label; a custom font
  * that fails to parse also falls back.

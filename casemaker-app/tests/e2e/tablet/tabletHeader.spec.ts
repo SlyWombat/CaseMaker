@@ -87,7 +87,9 @@ test('the tablet ⋯ menu and the settings popover are fully on-screen (#134)', 
   expect(m.y + m.height).toBeLessThanOrEqual(1024);
 });
 
-test('above the band the full labelled toolbar comes back (#134)', async ({ cm, page }) => {
+// At 1024 the label band (#355, 901–1199) still applies, so most buttons are icon-only — what this
+// pins is that the row FITS: nothing overflows the header and the ⋯ toggle is gone.
+test('at 1024px every toolbar control still fits the header (#134, #355)', async ({ cm, page }) => {
   await cm.ready();
   await page.setViewportSize({ width: 1024, height: 768 });
   await expect(page.getByTestId('toolbar-overflow-toggle')).toHaveCount(0);
