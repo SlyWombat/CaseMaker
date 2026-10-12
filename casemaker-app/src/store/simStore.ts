@@ -14,7 +14,7 @@ import { featureSim } from '@/platform/features';
 import { create } from 'zustand';
 import type { MachineCalibration, PausePoint, Setup } from '@/engine/cnc';
 import { resolveMachine } from '@/engine/cnc/calibration';
-import { MACHINES, Z1 } from '@/engine/cnc/machine';
+import { MACHINES } from '@/engine/cnc/machine';
 import { useSettingsStore } from '@/store/settingsStore';
 import { stepAtTime, timeAtStep, totalTime } from '@/engine/cnc/playbackClock';
 import { generateRestart as buildRestart, stockFromSetup, type RestartResult } from '@/engine/cnc/restart';
@@ -325,7 +325,29 @@ export const useSimStore = create<SimState>()((set, get) => {
       }
       // A restart re-lowers the ORIGINAL text through the same pure halves the verifier uses, so
       // it never needs the wasm sweep the client holds — only the text, the setup and the tool.
-      const machine = resolveMachine(MACHINES[lastLoad.machineId ?? ''] ?? Z1, lastLoad.calibration);
+      //
+      // The machine is NOT a default (#367): `session.load` resolves NO machine for a null id, so
+      // this load ran with no macro steps and no envelope check, and a restart lowered through the
+      // Z1 would carry tool changes, clearance moves, envelope errors and a `;@MKR|MACHINE` header
+      // the run it restarts never had. Refused in the shape of the stock refusal above, for the same
+      // reason: what the load did not have, the restart must not invent. An unknown id cannot reach
+      // here — `session.load` refuses it before any frame, which leaves `stepCount` at 0.
+      const base = lastLoad.machineId === null ? undefined : MACHINES[lastLoad.machineId];
+      if (!base) {
+        set({
+          restart: {
+            ok: false,
+            nc: null,
+            fileName: null,
+            resume: null,
+            verify: null,
+            errors: ['the simulated load had no machine, so the restart cannot be lowered through one'],
+            runSheet: [],
+          },
+        });
+        return;
+      }
+      const machine = resolveMachine(base, lastLoad.calibration);
       set({
         restart: buildRestart({
           gcodeText: lastLoad.gcodeText,

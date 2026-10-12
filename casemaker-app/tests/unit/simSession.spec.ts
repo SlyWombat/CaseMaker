@@ -665,6 +665,30 @@ describe('simStore: plain data and meshes, never jobStore.nodes', () => {
     setSimClientLoader(null);
   });
 
+  it('#367: a restart of a load that had no machine is REFUSED, not lowered through the Z1', async () => {
+    setSimClientLoader(async () => fakeClient());
+    const store = useSimStore;
+    // A null id is a load with no machine: `session.load` resolves none, so the sweep synthesises no
+    // macro steps and checks no envelope. The load itself is fine, which is what makes the restart
+    // the place the disagreement would have shown up.
+    await store.getState().loadProgram(THREE, setup(), tool, null);
+    expect(store.getState().status).toBe('ready');
+    expect(store.getState().stepCount).toBeGreaterThan(0);
+    store.getState().generateRestart({ baseName: 'job' });
+    const r = store.getState().restart;
+    expect(r?.ok).toBe(false);
+    expect(r?.nc).toBeNull();
+    expect(r?.fileName).toBeNull();
+    expect(r?.resume).toBeNull();
+    // Not `buildRestart`'s own errors: the refusal happened before a machine was chosen. This is
+    // the one place a `;@MKR|MACHINE|id=z1` header would have come from (#367).
+    expect(r?.verify).toBeNull();
+    expect(r?.errors).toHaveLength(1);
+    expect(r?.errors[0]).toMatch(/no machine/);
+    expect(r?.runSheet).toEqual([]);
+    setSimClientLoader(null);
+  });
+
   it('a refused load is a status with its diagnostics, and seek does nothing', async () => {
     setSimClientLoader(async () => fakeClient());
     await useSimStore.getState().loadProgram('M321\nG0 X1 Y1 Z0\n', setup(), tool, null);
