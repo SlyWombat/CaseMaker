@@ -83,8 +83,10 @@ Makera_Z1_010290,192.168.10.43,2222,0,Idle
 Field 4 carried `Idle` while the machine sat untouched and `busy` was `0`. The two agree, but field
 4 is a *string* where field 3 is a flag, and no other state value has been seen — so what the
 vocabulary is, and whether the two ever disagree, is open (#275). It is recorded here as observed,
-not explained. Our parser ignores trailing fields rather than rejecting the machine, so it read
-this datagram correctly as shipped; only this description was wrong.
+not explained. The parser read this datagram correctly as shipped even while it ignored field 4;
+it now surfaces it as `DiscoveredMachine.state` — for observation only, never as an input (#275,
+desk half). `z1.mjs discover --all` prints every datagram un-deduplicated so two moments of one
+machine can be compared.
 
 **OBSERVED:** the machine broadcasts continuously at roughly **3 per second**. The listening window
 is therefore bounded by the listener, not by the machine — the published client's 3 s wait was
@@ -92,7 +94,8 @@ never sizing a one-shot announcement, and is ample.
 
 Our parser is deliberately tolerant: it requires a non-empty name and IP, defaults the port to
 2222 when the field is missing or not a number, and treats any value other than `1` as not busy.
-It ignores extra trailing fields rather than rejecting the machine.
+It reads field 4 into `state` when it is non-empty (an observation, not an input — see above) and
+ignores anything past the fifth field rather than rejecting the machine.
 
 ## 3. The command envelope
 

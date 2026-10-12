@@ -39,7 +39,7 @@ import * as P from '../../src/platform/desktop/protocol.ts';
 import { CAMERA_PORT, captureFrames, saveFrame } from './camera.mjs';
 
 /** Flags that never take a value. Without this, `--effective <key>` swallows the key as its value. */
-const BOOLEAN_FLAGS = new Set(['json', 'help', 'effective', 'i-am-at-the-machine']);
+const BOOLEAN_FLAGS = new Set(['json', 'help', 'effective', 'i-am-at-the-machine', 'all']);
 
 function parseArgs(argv) {
   const positional = [];
@@ -67,7 +67,7 @@ const num = (v, fallback) => (v === undefined ? fallback : Number(v));
 function usage() {
   console.log(`z1 — bench harness for the Makera Z1 (reads, the camera, plus a guarded console — see the end)
 
-  node tools/z1/z1.mjs discover [--window <ms>] [--json]
+  node tools/z1/z1.mjs discover [--window <ms>] [--json] [--all]
   node tools/z1/z1.mjs identify <host> [--port <n>] [--json]
   node tools/z1/z1.mjs status   <host> [--port <n>] [--json]
   node tools/z1/z1.mjs read     <host> <path> [--limit <lines>] [--window <ms>] [--out <file>]
@@ -94,6 +94,11 @@ configuration keys and nothing else.
 see camera.mjs). One frame to --out (default docs/bench/img/camera-<timestamp>.jpg); with --count N
 the frames go into --out as a directory, --every <ms> apart. It moves nothing and writes nothing on
 the machine. A frame before and after a move is the cheapest answer to A6 (head- or frame-mounted).
+
+\`discover --all\` prints **every** datagram received in the window, un-de-duplicated and with nothing
+dropped, showing field 4 — the undocumented textual state — beside the \`busy\` flag (#275; only
+\`Idle\` has ever been seen). Plain \`discover\` still returns one line per distinct machine. Nothing is
+decided from field 4: it is an observation, not an input.
 
 MOTION AND THE CONSOLE (#302). Two commands send a line you typed, which can move the machine:
 
@@ -148,6 +153,36 @@ async function main() {
   if (cmd === 'discover') {
     const windowMs = num(flags.window, 5000);
     process.stderr.write(`listening on UDP ${P.DISCOVERY_UDP_PORT} for ${windowMs} ms (sends nothing)...\n`);
+    // --all (#275): every datagram, un-de-duplicated and nothing discarded, so field 4 (the textual
+    // state — `Idle`, and whatever else it says when the machine is not idle) can be watched against
+    // field 3 (`busy`) as the machine changes. Nothing here is decided from field 4: it stays an
+    // observation, because whether the two can disagree, and which is authoritative, is unknown.
+    if (flags.all === true) {
+      const lines = await P.discoveryDatagrams(transport, { windowMs });
+      if (asJson) {
+        console.log(
+          JSON.stringify(
+            lines.map((raw) => ({ raw, parsed: P.parseDiscoveryDatagram(raw) })),
+            null,
+            2,
+          ),
+        );
+        return;
+      }
+      if (lines.length === 0) {
+        console.log('no datagrams received.');
+        return;
+      }
+      for (const raw of lines) {
+        const m = P.parseDiscoveryDatagram(raw);
+        console.log(
+          m === null
+            ? `${raw}   [not a machine datagram]`
+            : `${m.name}  ${m.host}:${m.port}  ${m.busy ? 'BUSY' : 'not busy'}  state=${m.state ?? '(none)'}`,
+        );
+      }
+      return;
+    }
     const machines = await P.runDiscovery(transport, { windowMs });
     if (asJson) {
       console.log(JSON.stringify(machines, null, 2));

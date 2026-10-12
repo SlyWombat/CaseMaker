@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   crc16Ccitt,
   decodeText,
+  discoveryDatagrams,
   encodeFrame,
   extractIpv4,
   extractMac,
@@ -155,8 +156,40 @@ describe('#255 protocol — discovery', () => {
     });
   });
 
-  it('marks a busy machine and ignores trailing fields', () => {
+  it('marks a busy machine', () => {
     expect(parseDiscoveryDatagram('Z1,10.0.0.5,2222,1,extra')?.busy).toBe(true);
+  });
+
+  it("reads the fifth field as the machine's textual state (#275)", () => {
+    // The real datagram, observed 2026-10-06 (Z1-Bridge-Protocol.md §2).
+    expect(parseDiscoveryDatagram('Makera_Z1_010290,192.168.10.43,2222,0,Idle')).toEqual({
+      name: 'Makera_Z1_010290',
+      host: '192.168.10.43',
+      port: 2222,
+      busy: false,
+      state: 'Idle',
+    });
+    // A four-field datagram still parses, with no `state` at all — the key is absent, not undefined.
+    expect(parseDiscoveryDatagram('Z1,10.0.0.5,2222,1')).not.toHaveProperty('state');
+    // Fields beyond the fifth are ignored, not rejected, and do not disturb `state`.
+    expect(parseDiscoveryDatagram('Z1,10.0.0.5,2222,1,Idle,extra')?.state).toBe('Idle');
+    // An empty fifth field is the same as no fifth field.
+    expect(parseDiscoveryDatagram('Z1,10.0.0.5,2222,1,')).not.toHaveProperty('state');
+  });
+
+  it('returns every datagram un-deduplicated, in arrival order (#275 discover --all)', async () => {
+    const transport = new FakeTransport();
+    transport.udpLines = [
+      'A,10.0.0.1,2222,0,Idle',
+      'A,10.0.0.1,2222,1,Run', // same machine, a state change — kept, where runDiscovery collapses it
+      'badline', // not a datagram — kept too
+    ];
+    const lines = await discoveryDatagrams(transport, { port: 3333, windowMs: 20 });
+    expect(lines).toEqual(['A,10.0.0.1,2222,0,Idle', 'A,10.0.0.1,2222,1,Run', 'badline']);
+    expect(transport.listenPort).toBe(3333);
+    // The contrast that makes `--all` worth having: runDiscovery returns the first `A` only.
+    const machines = await runDiscovery(transport, { port: 3333, windowMs: 20 });
+    expect(machines.map((m) => m.name)).toEqual(['A']);
   });
 
   it('defaults a missing or non-numeric port to 2222', () => {

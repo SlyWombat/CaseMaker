@@ -217,12 +217,21 @@ export interface DiscoveredMachine {
   host: string;
   port: number;
   busy: boolean;
+  /**
+   * Field 4 of the datagram — a textual state the real machine sends (`Idle` is the only value ever
+   * seen). Undocumented, and **deliberately not used to decide anything** (#275): if field 4 and
+   * `busy` ever diverge, which one is authoritative is unknown, so the field is surfaced for an
+   * observation (`discover --all`) to compare them — never for a caller to key off.
+   */
+  state?: string;
 }
 
 /**
- * Parse one `name,ip,port,busy` UDP datagram. Returns null for anything the client would discard:
- * four fields or fewer, or an empty name or address. Unknown values are defaulted, not guessed:
- * a missing/!numeric port becomes 2222 and anything but `1` is "not busy".
+ * Parse one `name,ip,port,busy,state` UDP datagram. Returns null for anything the client would
+ * discard: four fields or fewer, or an empty name or address. Unknown values are defaulted, not
+ * guessed: a missing/!numeric port becomes 2222 and anything but `1` is "not busy". Field 4, when
+ * present and non-empty, is kept as `state` (#275); fields beyond it are ignored, since the
+ * datagram's shape past the fifth has never been seen.
  */
 export function parseDiscoveryDatagram(text: string): DiscoveredMachine | null {
   const fields = text.trim().split(',');
@@ -233,7 +242,23 @@ export function parseDiscoveryDatagram(text: string): DiscoveredMachine | null {
   const rawPort = (fields[2] ?? '').trim();
   const parsed = /^\d+$/.test(rawPort) ? Number(rawPort) : NaN;
   const port = Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535 ? parsed : COMMAND_TCP_PORT;
-  return { name, host, port, busy: (fields[3] ?? '').trim() === '1' };
+  const machine: DiscoveredMachine = { name, host, port, busy: (fields[3] ?? '').trim() === '1' };
+  const state = (fields[4] ?? '').trim();
+  if (state.length > 0) machine.state = state;
+  return machine;
+}
+
+/**
+ * Every datagram received in the listen window, in arrival order and **unparsed** — the raw lines,
+ * with no de-duplication and nothing discarded (#275). This is what wants field 4 watched against
+ * field 3 as the machine changes state: a machine list would collapse the repeats that carry the
+ * change, and would drop the malformed line that says something else is broadcasting.
+ */
+export async function discoveryDatagrams(
+  transport: MachineTransport,
+  opts: { port?: number; windowMs?: number } = {},
+): Promise<string[]> {
+  return transport.udpListen(opts.port ?? DISCOVERY_UDP_PORT, opts.windowMs ?? 3000);
 }
 
 /** Listen for the machine's broadcast and return unique machines in arrival order. */
@@ -241,9 +266,7 @@ export async function runDiscovery(
   transport: MachineTransport,
   opts: { port?: number; windowMs?: number } = {},
 ): Promise<DiscoveredMachine[]> {
-  const port = opts.port ?? DISCOVERY_UDP_PORT;
-  const windowMs = opts.windowMs ?? 3000;
-  const lines = await transport.udpListen(port, windowMs);
+  const lines = await discoveryDatagrams(transport, opts);
   const seen = new Set<string>();
   const out: DiscoveredMachine[] = [];
   for (const line of lines) {
