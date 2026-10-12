@@ -7,6 +7,7 @@ mod catalogue;
 mod config;
 mod config_api;
 mod etag;
+mod guard;
 mod house;
 mod house_api;
 mod machine;

@@ -176,10 +176,22 @@ pub fn start(
 /// `/api/v1` surface and take the same ordering rule. `house_api`'s `/api/v1/*rest` 404 and the
 /// static `/api/v1/config` can coexist: matchit gives a static path priority, so the catch-all only
 /// ever answers what neither module owns.
+///
+/// THE GUARD GOES ON THE API, AND THE ORDER HERE IS THE WHOLE OF IT (#375). `Router::layer` covers
+/// the routes registered before it and only those, so wrapping the two merged API modules is what
+/// makes "every write under `/api/v1` proves it is Case Maker" true by construction: an endpoint
+/// added to either module later is inside the layer without anyone remembering to add it, and the
+/// SPA's own routes — registered below, outside it — are pages, which have no provenance to judge.
+/// `guard.rs` holds the rules; `every_write_under_the_api_is_guarded` below is the test that fails if
+/// this line is ever moved after the last `route`.
 fn router(store: Arc<HouseStore>, serving_port: u16, config_path: PathBuf) -> Router {
-    Router::new()
-        .merge(crate::config_api::routes(serving_port, config_path))
-        .merge(crate::house_api::routes(store))
+    let api = Router::new()
+        .merge(crate::config_api::routes(
+            serving_port,
+            config_path.clone(),
+        ))
+        .merge(crate::house_api::routes(store));
+    crate::guard::enforce(api, crate::guard::Guard::new(serving_port, config_path))
         .route("/", get(serve_root))
         .route("/*path", get(serve_path))
 }
@@ -786,5 +798,256 @@ mod tests {
         );
         assert!(read.starts_with("HTTP/1.1 200 OK"), "{read}");
         assert!(read.contains("\"port\":8123"), "{read}");
+    }
+
+    /// The name and port a request from the app's own window arrives under: `routes` serves 5173 in
+    /// these tests, and the webview is loaded from exactly this URL (`lib.rs`), which is the app's
+    /// origin and the reason the guard's Origin rule can be exact.
+    const APP_HOST: &str = "127.0.0.1:5173";
+    const APP_ORIGIN: &str = "http://127.0.0.1:5173";
+
+    /// The two statuses the guard refuses with, and nothing else is a guard refusal.
+    fn refused_by_the_guard(status: StatusCode) -> bool {
+        status == StatusCode::FORBIDDEN || status == StatusCode::UNSUPPORTED_MEDIA_TYPE
+    }
+
+    /// A write with the provenance headers a test wants to vary and `None` for the ones it wants
+    /// ABSENT — a different case from empty, for all three.
+    ///
+    /// `Content-Length` is written out because the framing is what the guard judges a body by, and an
+    /// in-process `Request` has no wire to have it added by (`guard.rs`'s tests carry the same note).
+    fn write(
+        method: &str,
+        uri: &str,
+        host: Option<&str>,
+        origin: Option<&str>,
+        content_type: Option<&str>,
+        body: &[u8],
+    ) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(header::CONTENT_LENGTH, body.len().to_string());
+        if let Some(h) = host {
+            builder = builder.header(header::HOST, h);
+        }
+        if let Some(o) = origin {
+            builder = builder.header(header::ORIGIN, o);
+        }
+        if let Some(c) = content_type {
+            builder = builder.header(header::CONTENT_TYPE, c);
+        }
+        builder.body(Body::from(body.to_vec())).unwrap()
+    }
+
+    /// Every write the service has, as `(method, uri, body)`, in one table so a route added later is
+    /// one line rather than a new test that forgets an attack. `/api/v1/import` is here because it is
+    /// the one that takes raw bytes — the handler parses them itself, so no extractor stood in front
+    /// of it — and `/api/v1/catalogue/sync` because it is the one a bodyless request reaches.
+    const WRITES: &[(&str, &str, &str)] = &[
+        ("POST", "/api/v1/config", r#"{"port":8123,"bindToAll":true}"#),
+        ("POST", "/api/v1/tools", r#"{"key":"user:abc"}"#),
+        ("PATCH", "/api/v1/tools/user:abc", r#"{"key":"user:abc"}"#),
+        ("DELETE", "/api/v1/tools/user:abc", "{}"),
+        ("POST", "/api/v1/inventory", r#"{"id":"inv-1"}"#),
+        ("PATCH", "/api/v1/inventory/inv-1", r#"{"id":"inv-1"}"#),
+        ("DELETE", "/api/v1/inventory/inv-1", "{}"),
+        ("POST", "/api/v1/import", r#"{"kind":"casemaker-house"}"#),
+        ("POST", "/api/v1/catalogue/sync", "{}"),
+    ];
+
+    /// #375 — the guard's PLACEMENT, over the real router.
+    ///
+    /// `config_api` and `house_api`'s own tests call their `routes()` directly and therefore see none
+    /// of this: they are tests of handlers. What can only be tested here is that every write under
+    /// `/api/v1` is inside the layer — and that the SPA's routes are not, which the last case checks
+    /// by asserting the page still answers a path that is not the API's.
+    #[tokio::test]
+    async fn every_write_under_the_api_is_guarded() {
+        let (_dir, app) = app();
+
+        for (method, uri, body) in WRITES {
+            for (label, req) in [
+                (
+                    "a cross-site page, typed text/plain — the simple request, no preflight",
+                    write(method, uri, Some(APP_HOST), Some("https://evil.example"), Some("text/plain"), body.as_bytes()),
+                ),
+                (
+                    "the same page as JSON, which a cross-origin request cannot send without a preflight this server does not answer",
+                    write(method, uri, Some(APP_HOST), Some("https://evil.example"), Some("application/json"), body.as_bytes()),
+                ),
+                (
+                    "a rebound hostname: same-origin to the browser, so the name is the only tell",
+                    write(method, uri, Some("evil.example:5173"), None, Some("application/json"), body.as_bytes()),
+                ),
+                (
+                    "a byte-array body, which a browser sends with no Content-Type at all",
+                    write(method, uri, Some(APP_HOST), None, None, body.as_bytes()),
+                ),
+                (
+                    "a form post, whose encoding is another simple type",
+                    write(method, uri, Some(APP_HOST), None, Some("application/x-www-form-urlencoded"), body.as_bytes()),
+                ),
+                (
+                    "another port on this machine, which is a different origin",
+                    write(method, uri, Some("127.0.0.1:9999"), Some("http://127.0.0.1:9999"), Some("application/json"), body.as_bytes()),
+                ),
+            ] {
+                let res = app.clone().oneshot(req).await.unwrap();
+                let status = res.status();
+                assert!(
+                    refused_by_the_guard(status),
+                    "{method} {uri} — {label} answered {status}"
+                );
+                // The refusal has to be the service's own shape: `houseClient.ts` reads anything else
+                // as "somebody other than the service answered", which is a transport failure to the
+                // user instead of a reason — and axum's own 415 for two of these endpoints used to be
+                // exactly that.
+                assert!(
+                    content_type(&res).starts_with("application/json"),
+                    "{method} {uri} — {label} refused with {:?}",
+                    content_type(&res)
+                );
+                let json = body_json(res).await;
+                assert!(
+                    json["error"].is_string(),
+                    "{method} {uri} — {label} has to carry a reason: {json}"
+                );
+            }
+
+            // And the client that must keep working: the app's own page, under the name and origin it
+            // is actually served from. Asserted as "not a guard refusal" and not as a status, because
+            // what each handler then says about the body is that handler's business — a 428 from an
+            // unguarded PATCH and a 422 from a body that is not an entry are both correct here.
+            let res = app
+                .clone()
+                .oneshot(write(
+                    method,
+                    uri,
+                    Some(APP_HOST),
+                    Some(APP_ORIGIN),
+                    Some("application/json"),
+                    body.as_bytes(),
+                ))
+                .await
+                .unwrap();
+            assert!(
+                !refused_by_the_guard(res.status()),
+                "{method} {uri} refused the app's own page: {}",
+                res.status()
+            );
+        }
+
+        // The SPA is outside the layer. A write method to a page path is not the API's to judge, and
+        // the fallback still answers it with the shell — which is the case that would break if the
+        // guard were applied over the finished router instead of over the API half of it.
+        let res = app
+            .clone()
+            .oneshot(write("POST", "/tools/3", Some(APP_HOST), None, None, &[]))
+            .await
+            .unwrap();
+        assert!(!refused_by_the_guard(res.status()), "{}", res.status());
+    }
+
+    /// The other half of the same rule: a write that declares NO body is judged on its origin alone
+    /// (#375), because demanding a type would refuse the app's own client — `houseClient.send` leaves
+    /// the `Content-Type` off when there is nothing to send (`POST /api/v1/catalogue/sync`, both
+    /// DELETEs). So a bodyless cross-site write still has to be refused, by its origin, and a bodyless
+    /// write from the app's own page still has to be let through.
+    #[tokio::test]
+    async fn a_write_with_no_body_is_judged_on_its_origin_alone() {
+        let (_dir, app) = app();
+
+        for (method, uri) in [
+            ("POST", "/api/v1/catalogue/sync"),
+            ("DELETE", "/api/v1/tools/user:abc"),
+            ("DELETE", "/api/v1/inventory/inv-1"),
+        ] {
+            let res = app
+                .clone()
+                .oneshot(write(method, uri, Some(APP_HOST), Some("https://evil.example"), None, &[]))
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::FORBIDDEN, "{method} {uri}");
+            assert!(body_json(res).await["error"].is_string(), "{method} {uri}");
+
+            // A rebound name is refused too, and this is the shape with no origin to disagree with.
+            let res = app
+                .clone()
+                .oneshot(write(method, uri, Some("evil.example:5173"), None, None, &[]))
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::FORBIDDEN, "{method} {uri}");
+
+            // And the app's own client — no body to type, and no type on it.
+            let res = app
+                .clone()
+                .oneshot(write(method, uri, Some(APP_HOST), Some(APP_ORIGIN), None, &[]))
+                .await
+                .unwrap();
+            assert!(
+                !refused_by_the_guard(res.status()),
+                "{method} {uri} refused the app's own bodyless write: {}",
+                res.status()
+            );
+        }
+    }
+
+    /// A tool as `house_api`'s own tests build one: a body the handler will actually accept, so that
+    /// "the app's own page is not refused" is a write that LANDED rather than a 422 that was not a
+    /// guard refusal.
+    fn a_tool_entry() -> Vec<u8> {
+        use crate::house::{Tool, ToolLibraryEntry, ToolShape};
+        serde_json::to_vec(&ToolLibraryEntry {
+            key: "user:guarded".to_string(),
+            tool: Tool {
+                name: "2 mm flat end".to_string(),
+                type_text: "Flat End".to_string(),
+                shape: ToolShape::Flat,
+                diameter: Some(2.0),
+                ..Tool::default()
+            },
+            provenance: "typed in by hand".to_string(),
+        })
+        .unwrap()
+    }
+
+    /// #375's acceptance, through the guarded router: a cross-site write is refused AND the house is
+    /// exactly as it was, while the same write from the app's own page lands. `a_refused_write_changes
+    /// _nothing` is the half worth having a test for — a refusal that has already done the damage is
+    /// not a refusal, and `/api/v1/import` replaces the whole document.
+    #[tokio::test]
+    async fn a_refused_house_write_leaves_the_house_alone() {
+        let (_dir, app) = app();
+        let entry = a_tool_entry();
+
+        let res = app
+            .clone()
+            .oneshot(write("POST", "/api/v1/tools", Some(APP_HOST), Some(APP_ORIGIN), Some("application/json"), &entry))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED, "the app's own page could not write its house");
+
+        // The page on another site, in all three shapes it can send to THIS endpoint without a
+        // preflight: the simple `text/plain`, the byte-array body with no type, and — because
+        // `import_house` takes raw bytes rather than an `axum::Json` — a body the handler itself would
+        // have parsed.
+        for (label, content_type, body) in [
+            ("the simple request", Some("text/plain"), entry.as_slice()),
+            ("a byte-array body with no type", None, entry.as_slice()),
+            ("a form post", Some("application/x-www-form-urlencoded"), entry.as_slice()),
+        ] {
+            let res = app
+                .clone()
+                .oneshot(write("POST", "/api/v1/tools", Some(APP_HOST), Some("https://evil.example"), content_type, body))
+                .await
+                .unwrap();
+            assert!(refused_by_the_guard(res.status()), "{label} answered {}", res.status());
+        }
+
+        // And nothing moved: one tool, the one the app's own page created.
+        let body = body_json(app.clone().oneshot(get("/api/v1/tools")).await.unwrap()).await;
+        assert_eq!(body.as_array().unwrap().len(), 1, "a refused write changed the house: {body}");
+        assert_eq!(body[0]["key"], serde_json::json!("user:guarded"));
     }
 }

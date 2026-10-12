@@ -23,22 +23,19 @@
 // decide whether the host starts at all: point it at a busy port and the next launch is the refusal
 // dialog; clear `bind_to_all` and the machine that just wrote it can no longer reach the app.
 //
-// A PEER CHECK ALONE WOULD NOT HAVE CLOSED THAT. A page open in the user's OWN browser reaches this
-// endpoint FROM loopback — the webview's machine and the page's machine are the same one — so any
-// website could have written these settings with
-// `fetch("http://127.0.0.1:<port>/api/v1/config", {method: "POST", mode: "no-cors",
-// headers: {"Content-Type": "text/plain"}, body: '{"port":8000,"bindToAll":true}'})`: a simple
-// request, no preflight, and the body parsed here by hand rather than by `axum::Json`, which is what
-// would have required the JSON type in the first place. A rebound hostname is worse — it is
-// same-origin to the browser, so there is no provenance header to disagree with. So a write must also
-// come from the app's own page, and three headers say so:
+// SO THE PEER CHECK IS HERE AND THE PROVENANCE CHECKS ARE NOT (#375). A peer check alone would not
+// have closed the settings: a page open in the user's OWN browser reaches this endpoint FROM loopback
+// — the webview's machine and the page's machine are the same one — and a rebound hostname is worse,
+// being same-origin to the browser with no provenance header left to disagree with. Those are the same
+// two attacks `/api/v1/import` and `/api/v1/catalogue/sync` face, and the SAME rule answers all three,
+// so it lives once in `guard.rs` and is applied once in `server.rs` over the whole `/api/v1` surface.
+// What stays here is the one question the guard does not ask and the house API does not want asked:
+// "are you on the machine this process runs on?" A LAN browser may write the house and may not write
+// these settings, and only this endpoint can draw that line.
 //
-//   * `Content-Type: application/json` — the one type a cross-origin page CANNOT send without a
-//     preflight, and this server answers no preflight;
-//   * an absent `Origin`, or the app's own page — the app's window is `http://127.0.0.1:<port>`, and
-//     `localhost` and `[::1]` are the same machine under the names a user types;
-//   * a `Host` that is the app itself — which is what a rebound name cannot be, because the browser
-//     sends the name it believed it was talking to.
+// The order is guard first, then the peer: a client that may not write is refused before it is asked
+// where it is. Both refusals name what would be accepted, and both use the service's `{"error": …}`
+// shape — see `house_api::json_error`.
 //
 // The READ is not guarded (decision 33/35): a browser on the LAN renders the same dialog, and the
 // numbers are how it explains why its write was declined.
@@ -57,7 +54,7 @@ use crate::house_api::json_error;
 use axum::body::{Body, Bytes};
 use axum::extract::connect_info::ConnectInfo;
 use axum::extract::State;
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
@@ -81,7 +78,8 @@ pub struct ConfigApiState {
 /// The settings routes. `server.rs` merges this into the top-level router beside `house_api`, before
 /// the SPA wildcard — the ordering note in that module applies unchanged (`/api/v1/*rest` in
 /// `house_api` would otherwise be free to answer `/api/v1/config` with a JSON 404, and matchit gives
-/// the static path priority).
+/// the static path priority). The guard is applied there too, over both modules at once: these routes
+/// are handed their provenance already checked, which is why the handler asks only about the peer.
 pub fn routes(serving_port: u16, config_path: PathBuf) -> Router {
     Router::new()
         .route("/api/v1/config", get(read_config).post(write_config))
@@ -129,42 +127,6 @@ fn view_of(cfg: &AppConfig, serving_port: u16) -> Response<Body> {
     }
 }
 
-/// The three names this app answers to on the machine it runs on, in the form the headers carry
-/// them: with the port this process is serving on. `127.0.0.1` is what the window is loaded from and
-/// what `listen_addr` binds; `localhost` and `[::1]` are the same machine under the names a user
-/// types by hand, and refusing those would refuse a user who opened the app the long way round.
-fn own_authorities(serving_port: u16) -> [String; 3] {
-    [
-        format!("127.0.0.1:{serving_port}"),
-        format!("localhost:{serving_port}"),
-        format!("[::1]:{serving_port}"),
-    ]
-}
-
-/// Whether a `Host` says this request was addressed to the app itself.
-///
-/// This is the guard a REBOUND hostname cannot pass. After a rebind the request is same-origin to the
-/// browser — no `Origin` to disagree with, no preflight — but the browser still sends the name it
-/// believed it was talking to, and that name is the attacker's.
-fn addressed_to_the_app(host: Option<&HeaderValue>, serving_port: u16) -> bool {
-    host.and_then(|h| h.to_str().ok())
-        .is_some_and(|h| own_authorities(serving_port).iter().any(|own| own == h))
-}
-
-/// Whether a request's `Origin`, if it has one, is the app's own page.
-///
-/// An ABSENT origin is not a refusal: `Origin` is a browser's provenance header, and its absence says
-/// the client is not a page at all (curl, a script, a native request). Those are local processes on
-/// this machine, which could write the file directly.
-fn from_the_apps_own_page(origin: Option<&HeaderValue>, serving_port: u16) -> bool {
-    match origin.and_then(|o| o.to_str().ok()) {
-        None => true,
-        Some(origin) => own_authorities(serving_port)
-            .iter()
-            .any(|own| origin == format!("http://{own}")),
-    }
-}
-
 /// Parse a request body into the write, or the sentence to refuse it with.
 ///
 /// The body is parsed by hand rather than through `axum::Json` so the refusal keeps the service's
@@ -189,16 +151,21 @@ async fn read_config(State(state): State<ConfigApiState>) -> Response<Body> {
 }
 
 /// Write the settings, from this machine's own copy of the app and nowhere else.
+///
+/// ONE CHECK IS MADE HERE AND THREE WERE (#375). The host/origin/Content-Type rules are the guard's
+/// now — they are the same rules `/api/v1/tools` and `/api/v1/import` live under, and `server.rs`
+/// applies them over the whole API surface — so by the time this handler runs, the request has
+/// already proved it came from the page this server served at the address it was addressed to. What
+/// the guard cannot ask on the house's behalf is whether the caller is on this MACHINE, so that is
+/// what is left, and why the peer is still judged here and before any body is read.
 async fn write_config(
     State(state): State<ConfigApiState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response<Body> {
-    // The peer is judged BEFORE the body is looked at: a machine that may not write these settings
-    // does not get told what a valid request would have looked like. `to_canonical` because a
-    // dual-stack listener (`--host ::`) reports the webview as the IPv4-mapped `::ffff:127.0.0.1`,
-    // which `is_loopback` does not recognise on an IPv6 address — the app would refuse its own page.
+    // `to_canonical` because a dual-stack listener (`--host ::`) reports the webview as the
+    // IPv4-mapped `::ffff:127.0.0.1`, which `is_loopback` does not recognise on an IPv6 address — the
+    // app would refuse its own page.
     let ip = peer.ip().to_canonical();
     if !ip.is_loopback() {
         return json_error(
@@ -207,60 +174,6 @@ async fn write_config(
                 "Case Maker's own settings can only be changed from the machine it runs on, and this \
                  request came from {ip}. Open the app on that machine, or start it with --port or \
                  --bind-all to change which port and address it serves on."
-            ),
-        );
-    }
-
-    // From here the peer IS this machine, which is not the same as being the app: a page in the
-    // user's own browser is loopback too. The three checks below are what tell one from the other —
-    // see the module doc for why each is needed.
-    if !addressed_to_the_app(headers.get(header::HOST), state.serving_port) {
-        let said = headers
-            .get(header::HOST)
-            .and_then(|h| h.to_str().ok())
-            .unwrap_or("no name at all");
-        return json_error(
-            StatusCode::FORBIDDEN,
-            format!(
-                "Case Maker's own settings are only written when the request is addressed to the app \
-                 itself ({}), and this one was addressed to {said}.",
-                own_authorities(state.serving_port).join(", ")
-            ),
-        );
-    }
-
-    if !from_the_apps_own_page(headers.get(header::ORIGIN), state.serving_port) {
-        let said = headers
-            .get(header::ORIGIN)
-            .and_then(|o| o.to_str().ok())
-            .unwrap_or("an unreadable origin");
-        return json_error(
-            StatusCode::FORBIDDEN,
-            format!(
-                "Case Maker's own settings can only be changed from Case Maker's own page \
-                 (http://127.0.0.1:{}), and this request came from {said}.",
-                state.serving_port
-            ),
-        );
-    }
-
-    // A cross-origin page cannot send this type without a preflight, which this server does not
-    // answer — so this is the check that stops the simple `text/plain` write outright. The app's own
-    // client already sends it (`houseClient.ts`).
-    let content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|c| c.to_str().ok())
-        .map(|c| c.split(';').next().unwrap_or(c).trim().to_string());
-    if content_type.as_deref() != Some("application/json") {
-        return json_error(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            format!(
-                "these are not Case Maker's settings: a write has to be `application/json`, and this \
-                 one said {}.",
-                match content_type.as_deref() {
-                    Some(t) => format!("`{t}`"),
-                    None => "no Content-Type at all".to_string(),
-                }
             ),
         );
     }
@@ -303,7 +216,7 @@ async fn write_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::Request;
+    use axum::http::{header, Request};
     use tempfile::TempDir;
     use tower::ServiceExt;
 
@@ -468,11 +381,13 @@ mod tests {
         assert_eq!(on_disk.host.as_deref(), Some("192.168.10.16"));
     }
 
+    /// A write from another machine is refused, and this is now the ONLY check this handler makes
+    /// about who is asking (#375 moved the host/origin/Content-Type rules into `guard.rs`, where the
+    /// whole API shares them — `server.rs`'s tests exercise them over this route too). What is left
+    /// here is a question the house API does not want asked at all: a LAN browser may write the
+    /// house and may not write these settings.
     #[tokio::test]
     async fn a_write_from_another_machine_is_refused_and_changes_nothing() {
-        // Decision 35: this is the host process's own settings, so a peer on the LAN may read them
-        // and may not write them. 403 rather than 404 or a silent no-op — the sentence has to say
-        // that this is a rule and not a malfunction, and the file has to be untouched.
         let (dir, app) = app_under_test();
         let path = dir.path().join("config.json");
         config::save_to(&path, &AppConfig::default()).unwrap();
@@ -502,144 +417,10 @@ mod tests {
         assert_eq!(written(&dir).port, 8123);
     }
 
-    #[tokio::test]
-    async fn a_write_from_a_page_on_another_site_is_refused_and_changes_nothing() {
-        // The hole a peer check alone does not close: a page open in the user's OWN browser is on
-        // loopback too, because it is the same machine. This is the request such a page can send —
-        // `text/plain` is a SIMPLE type, so it needs no preflight, and the body is parsed by hand
-        // here, so it would have been read. A rebound hostname is the same attack with the provenance
-        // header removed: the browser believes the request is same-origin, and only the name it
-        // addressed is wrong.
-        let (dir, app) = app_under_test();
-        let path = dir.path().join("config.json");
-        config::save_to(&path, &AppConfig::default()).unwrap();
-        let attack = r#"{"port":8123,"bindToAll":true}"#;
-
-        for (label, req) in [
-            (
-                "the browser's simple request",
-                write_with(
-                    "127.0.0.1:5555",
-                    Some(APP_HOST),
-                    Some("https://evil.example"),
-                    Some("text/plain"),
-                    attack,
-                ),
-            ),
-            (
-                "the same write as JSON, which no cross-origin page can send without a preflight",
-                write_with(
-                    "127.0.0.1:5555",
-                    Some(APP_HOST),
-                    Some("https://evil.example"),
-                    Some("application/json"),
-                    attack,
-                ),
-            ),
-            (
-                "a rebound hostname, which has no origin to disagree with",
-                write_with(
-                    "127.0.0.1:5555",
-                    Some("evil.example:5173"),
-                    None,
-                    Some("application/json"),
-                    attack,
-                ),
-            ),
-        ] {
-            let (status, body) = json_of(&app, req).await;
-            assert_eq!(status, StatusCode::FORBIDDEN, "{label}");
-            assert!(
-                body["error"].is_string(),
-                "{label} has to refuse in the service's own shape: {body}"
-            );
-            let on_disk = written(&dir);
-            assert_eq!(on_disk.port, config::DEFAULT_PORT, "{label} wrote the file");
-            assert!(!on_disk.bind_to_all, "{label} wrote the file");
-        }
-    }
-
-    #[tokio::test]
-    async fn a_body_is_refused_by_its_type_before_any_of_it_is_read() {
-        // Judged by the TYPE, not by what the bytes would have parsed as: a `text/plain` body holding
-        // a perfectly good settings object is still not a settings document. A non-browser client —
-        // a script, curl — carries no origin, so nothing above stops it, and it does not need
-        // stopping: it is a local process, which can edit the file directly.
-        let (dir, app) = app_under_test();
-        let path = dir.path().join("config.json");
-        config::save_to(&path, &AppConfig::default()).unwrap();
-
-        for said in [
-            Some("text/plain"),
-            Some("application/x-www-form-urlencoded"),
-            Some("text/json"),
-            None,
-        ] {
-            let (status, body) = json_of(
-                &app,
-                write_with(
-                    "127.0.0.1:5555",
-                    Some(APP_HOST),
-                    None,
-                    said,
-                    r#"{"port":8123,"bindToAll":true}"#,
-                ),
-            )
-            .await;
-            assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE, "Content-Type {said:?}");
-            assert!(
-                body["error"].as_str().unwrap().contains("application/json"),
-                "name the type it takes: {body}"
-            );
-            assert_eq!(written(&dir).port, config::DEFAULT_PORT, "Content-Type {said:?} wrote");
-        }
-    }
-
-    #[tokio::test]
-    async fn the_apps_own_page_may_write_under_every_name_the_app_has() {
-        // The window is loaded from `http://127.0.0.1:<port>`, and the other two spellings of the
-        // same machine are a user typing the address by hand: all three are the app itself, and a
-        // guard that refused them would refuse the app.
-        for (host, origin) in [
-            ("127.0.0.1:5173", "http://127.0.0.1:5173"),
-            ("localhost:5173", "http://localhost:5173"),
-            ("[::1]:5173", "http://[::1]:5173"),
-        ] {
-            let (dir, app) = app_under_test();
-            let (status, body) = json_of(
-                &app,
-                write_with(
-                    "127.0.0.1:5555",
-                    Some(host),
-                    Some(origin),
-                    Some("application/json"),
-                    r#"{"port":8123,"bindToAll":false}"#,
-                ),
-            )
-            .await;
-            assert_eq!(status, StatusCode::OK, "{host} answered {body}");
-            assert_eq!(written(&dir).port, 8123, "{host}");
-        }
-
-        // A client that is not a browser at all — a script, curl, the installer — sends no Origin, and
-        // its absence says only that there is no page to be a provenance for. A charset parameter is
-        // the same type, not another one.
-        let (dir, app) = app_under_test();
-        let (status, body) = json_of(
-            &app,
-            write_with(
-                "127.0.0.1:5555",
-                Some(APP_HOST),
-                None,
-                Some("application/json; charset=utf-8"),
-                r#"{"port":8123,"bindToAll":true}"#,
-            ),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(written(&dir).port, 8123);
-    }
-
+    /// The three provenance checks this endpoint used to make for itself are the guard's now (#375),
+    /// and they are tested where the whole API is put under them: `guard.rs` for the rules and
+    /// `server.rs` for their placement over this route and every other write. What is left below is
+    /// what only this handler knows — the peer, the body's shape, and the port.
     #[tokio::test]
     async fn a_port_outside_the_range_is_refused_with_the_range() {
         let (dir, app) = app_under_test();
