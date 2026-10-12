@@ -253,6 +253,71 @@ describe('PartPanel (#282) — the engrave job’s side of it', () => {
     expect(note).toContain('30 × 13 mm pocket');
     expect(note).toContain('45 × 13 mm');
   });
+
+  /** The job as “Use the badge blank” leaves it (#368): the blank's numbers, its print and its
+   *  pocket, all stamped `computed`. Only the job's own copy can be called stale, so the print has to
+   *  be the computed one — and the matching keep-out is here so the POCKET cannot also go stale and
+   *  muddy the note. */
+  function jobBlankTakenFromBadge(): void {
+    const job = defaultEngraveJob();
+    useEngraveJobStore.setState({
+      job: {
+        ...job,
+        stock: {
+          ...job.stock,
+          length: 76.2,
+          width: 38.1,
+          thickness: 3.81,
+          print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 },
+        },
+        sources: {
+          stock: { length: 'computed', width: 'computed', thickness: 'computed', print: 'computed' },
+        },
+        keepOuts: [
+          {
+            id: BADGE_POCKET_KEEP_OUT_ID,
+            name: 'Magnet pocket',
+            kind: 'rect',
+            position: { x: 38.1, y: 19.05 },
+            rotation: 0,
+            enabled: true,
+            zCeiling: 2.3,
+            width: 45,
+            height: 13,
+            cornerRadius: 0,
+          },
+        ],
+      },
+    });
+  }
+
+  it('notices a badge whose print the job took and that has since changed (#368)', () => {
+    useProjectStore.getState().setProject(findTemplate('badge-blank')!.build());
+    jobBlankTakenFromBadge();
+    render(<PartPanel />);
+    // Silence first: the stock, the print and the pocket all still match, so there is nothing to say.
+    expect(screen.queryByTestId('part-job-note')).toBeNull();
+
+    fireEvent.change(screen.getByTestId('badge-layer-height'), { target: { value: '0.28' } });
+    const note = screen.getByTestId('part-job-note').textContent ?? '';
+    expect(note).toContain('layer height 0.2 → 0.28 mm');
+    expect(note).toContain('Use the badge blank');
+  });
+
+  it('notices a badge that lost its print after the job took one (#368)', () => {
+    const project = findTemplate('badge-blank')!.build();
+    const { print: _dropped, ...badgeWithoutPrint } = project.case.badge!;
+    useProjectStore.setState({
+      project: { ...project, case: { ...project.case, badge: badgeWithoutPrint } },
+    });
+    jobBlankTakenFromBadge();
+    render(<PartPanel />);
+    // The job is still slicing on a layer grid the badge no longer states, so the note names what the
+    // grid would become — nothing, the value “Use the badge blank” would write.
+    const note = screen.getByTestId('part-job-note').textContent ?? '';
+    expect(note).toContain('layer height 0.2 → none mm');
+    expect(note).toContain('colour split 3 → none mm');
+  });
 });
 
 describe('PartPanel (#282) — everywhere else', () => {

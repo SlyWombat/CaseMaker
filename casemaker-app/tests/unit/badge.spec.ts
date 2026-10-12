@@ -325,11 +325,11 @@ describe('#168 — the badge carries its tools to the slicer', () => {
  * projects written before it still load — the whole reason it is optional and needs no bump.
  */
 describe('#368 — the badge states its print', () => {
-  it('is on the template’s badge, and on a badge built by hand', () => {
+  it('is on the template’s badge, and on a badge from the app’s own defaults', () => {
     const fromTemplate = findTemplate('badge-blank')!.build().case.badge!;
     expect(fromTemplate.print).toEqual({ layerHeight: 0.2, firstLayerHeight: 0.2 });
-    // The other way a project gets a badge: `defaultBadgeParams`, which is also what the wizard's
-    // own badge step starts from.
+    // The other way a project gets a badge: `defaultBadgeParams`, the app's own defaults — also
+    // what the wizard's badge step starts from, so the field is live on both routes into a badge.
     expect(defaultBadgeParams().print).toEqual({ layerHeight: 0.2, firstLayerHeight: 0.2 });
   });
 

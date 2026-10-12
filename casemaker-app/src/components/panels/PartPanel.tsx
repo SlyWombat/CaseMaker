@@ -105,19 +105,45 @@ function mm(v: number): string {
   return `${Number(v.toFixed(3))}`;
 }
 
+/** A print fact for the stale note: `0.2` or `none`, since the badge can state one and no longer. */
+function printMm(v: number | undefined): string {
+  return v === undefined ? 'none' : mm(v);
+}
+
 function staleStockLines(
   job: EngraveJob,
-  wanted: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness'>,
+  wanted: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'print'>,
   bridge: string,
 ): string[] {
   const sources = job.sources?.stock ?? {};
   const moved = STOCK_FIELDS.filter(
     (f) => sources[f] === 'computed' && Math.abs(job.stock[f] - wanted[f]) > 1e-6,
   );
-  if (moved.length === 0) return [];
-  const detail = moved.map((f) => `${f} ${mm(job.stock[f])} → ${mm(wanted[f])} mm`).join(', ');
+  const detail = moved.map((f) => `${f} ${mm(job.stock[f])} → ${mm(wanted[f])} mm`);
+
+  // The PRINT rides the same hand-off (#368): a job whose blank carries a COMPUTED print is slicing
+  // this part on a layer grid and a colour split, so a badge edited since — a new layer height, a
+  // moved split, or a print lost altogether — leaves the job describing a blank that is not this
+  // one. Only when the job's own print is computed, because that is the copy that came from here.
+  if (sources.print === 'computed') {
+    const now = job.stock.print;
+    const next = wanted.print;
+    if (now?.layerHeight !== next?.layerHeight) {
+      detail.push(`layer height ${printMm(now?.layerHeight)} → ${printMm(next?.layerHeight)} mm`);
+    }
+    if (now?.firstLayerHeight !== next?.firstLayerHeight) {
+      detail.push(
+        `first layer ${printMm(now?.firstLayerHeight)} → ${printMm(next?.firstLayerHeight)} mm`,
+      );
+    }
+    if (now?.split !== next?.split) {
+      detail.push(`colour split ${printMm(now?.split)} → ${printMm(next?.split)} mm`);
+    }
+  }
+
+  if (detail.length === 0) return [];
   return [
-    `The engrave job’s stock was taken from this part and no longer matches it (${detail}). ` +
+    `The engrave job’s stock was taken from this part and no longer matches it (${detail.join(', ')}). ` +
       `Press “${bridge}” in Engrave text to take the new numbers across.`,
   ];
 }
@@ -339,15 +365,16 @@ function BadgeEditor({ badge }: { badge: BadgeParams }) {
 
       <h3 style={SUBHEAD}>Print</h3>
       {/* #368 — how the blank was SLICED. It is a stated fact, not something the app measures, so
-          the block is read-only except the layer height: changing that moves every depth number on
-          the badge (the colour boundary and anything measured against it), which is what the row
-          says. No slider — one honest number, typed. */}
+          the block is read-only except the layer height: changing that moves where the colour
+          boundary sits, and with it every depth measured against it — but it reaches an existing
+          job only when “Use the badge blank” takes the new grid across, which is what the row says.
+          No slider — one honest number, typed. */}
       {badge.print ? (
         <>
           <LabelledField
             label="Layer height"
             unit="mm"
-            hint="How the blank was sliced: the colour boundary lands on this grid, so this number moves where the split sits — and with it every recommended depth and every colour reading. A depth you measured at the bench was measured against a different print; one you typed stays your number, but it is re-read against the new boundary. Set it to the print you actually made."
+            hint="How the blank was sliced: the colour boundary lands on this grid, so this number moves where the split sits — and with it every recommended depth and every colour reading. Editing it here does not reach into an existing job: the engrave job keeps the print it was handed until you press “Use the badge blank”, which takes the new grid — and re-reads the label depths against it. Set it to the print you actually made."
           >
             <input
               type="number"
