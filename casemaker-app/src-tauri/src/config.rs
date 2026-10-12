@@ -15,6 +15,12 @@ pub struct AppConfig {
     /// Optional explicit listen IP (e.g. "192.168.10.16"). When set, takes
     /// precedence over `bind_to_all`. Empty string / None = use the existing
     /// 127.0.0.1 / 0.0.0.0 behaviour.
+    ///
+    /// There is deliberately no `listen_addr` on this struct. `server.rs::start` is the one place
+    /// that turns these three fields into a socket address, because it also VALIDATES `host` as an
+    /// IP literal and falls back to `bind_to_all`/loopback with a warning when it is not one. A
+    /// second, string-returning copy here would take a bad value at face value and hand it to the
+    /// resolver instead — the failure mode the live one exists to avoid.
     #[serde(default)]
     pub host: Option<String>,
 }
@@ -30,24 +36,6 @@ impl Default for AppConfig {
             bind_to_all: false,
             host: None,
         }
-    }
-}
-
-impl AppConfig {
-    /// Resolve the effective listen address as a string suitable for
-    /// `TcpListener::bind` etc.
-    pub fn listen_addr(&self) -> String {
-        let host = match &self.host {
-            Some(h) if !h.is_empty() => h.clone(),
-            _ => {
-                if self.bind_to_all {
-                    "0.0.0.0".to_string()
-                } else {
-                    "127.0.0.1".to_string()
-                }
-            }
-        };
-        format!("{}:{}", host, self.port)
     }
 }
 
