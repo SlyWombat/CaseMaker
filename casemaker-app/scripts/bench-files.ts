@@ -53,15 +53,40 @@ const fmt = (n: number): string => String(Number(n.toFixed(3)));
 // ---------------------------------------------------------------------------------------------
 
 // `samples/badge-blank/make_badge.py` defaults (#165): 76.20 × 38.10 × 3.810 mm badge.
-const BADGE = { length: 76.2, width: 38.1, thickness: 3.81 } as const;
-// Two rows of six 5 mm squares, 2 mm gaps, 40 mm span, centred in X. X centres: the 40 mm row
-// spans 18.1..58.1 on the 76.2 mm length (pocket is 45 mm wide, ~2.5 mm margin each end).
-const X_CENTRES = [20.6, 27.6, 34.6, 41.6, 48.6, 55.6] as const;
+//
+// AS CLAMPED (#383, bench 2026-10-12): the blank's 38.1 mm side spans the jaws (X) and its 76.2 mm
+// side runs along them (Y). The job is written in that frame, so the app's vise model (jaws at the
+// stock's X ends) matches the bench. The magnet pocket is centred, so the 90° turn is symmetric.
+const BADGE = { length: 38.1, width: 76.2, thickness: 3.81 } as const;
+// Each row is a column of six 5 mm squares, 2 mm gaps, 40 mm span, centred along Y (76.2 mm):
+// Y centres 20.6..55.6, inside the 45 mm pocket's 15.6..60.6.
+const Y_CENTRES = [20.6, 27.6, 34.6, 41.6, 48.6, 55.6] as const;
 const DEPTHS = [0.6, 0.8, 1.0, 1.2, 1.4, 1.6] as const;
-// Row A over the 45 × 13 magnet pocket, on its centre line; Row B 12 mm further back (+Y), in the
-// 12.55 mm clear band above the pocket (clears the pocket edge by ~3 mm).
-const ROW_A_Y = 19.05;
-const ROW_B_Y = 31.05;
+// Row A over the 45 × 13 magnet pocket, on its centre line (X 12.55..25.55); Row B 12 mm towards
+// the moving jaw, in the clear band (squares X 28.55..33.55, 4.55 mm from the blank's edge).
+const ROW_A_X = 19.05;
+const ROW_B_X = 31.05;
+// The fitted cutter (bench plan, 2026-10-12): yellow-box single-flute O, `C1-BIT-O-FLUTE-2-12`,
+// 2 mm cutting, 12 mm flute, 1/8" shank. Label values; caliper still to do (runbook A1).
+const O_FLUTE_2_12 = {
+  number: 1,
+  id: 'C1-BIT-O-FLUTE-2-12',
+  name: 'Spiral O single flute 2 × 12',
+  typeText: 'Flat End',
+  shape: 'flat',
+  handleDiameter: 3.175,
+  tipDiameter: 2,
+  diameter: 2,
+  cornerRadius: 0,
+  angle: null,
+  halfAngle: null,
+  fluteLength: 12,
+  shoulderLength: 12,
+  stickout: null,
+  centreCutting: null,
+} as const;
+// Measured 2026-10-08 (`Z1-Firmware-Dialect.md` §11.8): the top face stands 1.07–1.21 mm proud.
+const STOCK_PROUD = 1.2;
 
 function ladderShape(row: 'A' | 'B', i: number): EngraveRectShape {
   const depth = DEPTHS[i] as number;
@@ -72,7 +97,7 @@ function ladderShape(row: 'A' | 'B', i: number): EngraveRectShape {
     // The item NAME flows into every operation name on the run sheet, so it carries the one fact
     // the job document cannot model: Row A (over the magnet pocket) vs Row B (the clear band).
     name: row === 'A' ? `A over pocket ${depth.toFixed(1)}` : `B clear ${depth.toFixed(1)}`,
-    position: { x: X_CENTRES[i] as number, y: row === 'A' ? ROW_A_Y : ROW_B_Y },
+    position: { x: row === 'A' ? ROW_A_X : ROW_B_X, y: Y_CENTRES[i] as number },
     rotation: 0,
     depth,
     enabled: true,
@@ -82,52 +107,29 @@ function ladderShape(row: 'A' | 'B', i: number): EngraveRectShape {
   };
 }
 
-function ladderJob(): EngraveJob {
+function ladderJob(row: 'A' | 'B'): EngraveJob {
   return {
     schemaVersion: 2,
-    name: '165 depth ladder',
+    name: `165 depth ladder row ${row}`,
     // Printed PLA blank (100 % infill), not wood — #165 is the two-colour badge experiment.
     stock: { length: BADGE.length, width: BADGE.width, thickness: BADGE.thickness, material: 'pla' },
     labels: [],
-    shapes: [...DEPTHS.map((_, i) => ladderShape('A', i)), ...DEPTHS.map((_, i) => ladderShape('B', i))],
+    // One file per row: the bench plan probes Z0 at each row's centre (decided 2026-10-12).
+    shapes: DEPTHS.map((_, i) => ladderShape(row, i)),
     // Vise: the blank is only 3.81 mm thick, so the shipped DEFAULT_VISE (stockProud 4) reads as
     // "nothing left in the jaws" (`vise-stock-proud-exceeds-thickness`, an ERROR) and stops the
     // pipeline. stockProud 3.0 clears the deepest cut (1.6 + 1 mm) while staying under the
     // thickness; it is UNMEASURED still (`source: 'default'`) — #208 A3/A5 replace it. The thin
     // blank necessarily also raises `vise-grip-shallow`, which the run sheet carries as a warning.
-    workholding: { kind: 'vise', vise: { ...DEFAULT_VISE, stockProud: 3.0 } },
+    workholding: { kind: 'vise', vise: { ...DEFAULT_VISE, stockProud: STOCK_PROUD } },
     toolKey: 'flat-1.0',
+    tool: { ...O_FLUTE_2_12 },
     minFloor: 1.0,
     edgeMargin: 1.0,
     sacrificial: noneSacrificial(),
     breakthrough: DEFAULT_BREAKTHROUGH,
     customFonts: [],
   };
-}
-
-const job = ladderJob();
-// No Makera feed rows in a headless run (#324): the catalogue tier needs a house service.
-const generated = engraveGenerate(tl, job, jobTool(job), []);
-if (!generated.ok || generated.nc === null) {
-  console.error(JSON.stringify({ stage: generated.stage, errors: generated.errors, findings: generated.findings }, null, 2));
-  throw new Error(`#165 ladder did not generate (stopped at ${generated.stage})`);
-}
-
-// #206's "simulated" gate: run the saved text through the session and require zero errors.
-const tool = jobTool(job);
-if (tool === null) throw new Error('flat-1.0 is not in the tool library');
-const session = createSimSession(tl);
-const simLoad = session.load(generated.nc, toSetup(job, Z1), tool, 'Z1');
-if (!simLoad.ok) {
-  console.error(JSON.stringify(simLoad.diagnostics, null, 2));
-  throw new Error('#165 ladder simulation refused');
-}
-const simErrors = simLoad.diagnostics.filter((d) => d.severity === 'error');
-session.dispose();
-
-const sheet = buildRunSheet(job, generated, { diagnostics: simLoad.diagnostics });
-if (sheet.header.fileName !== '165-depth-ladder.nc') {
-  throw new Error(`run sheet file name drifted: ${sheet.header.fileName}`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -180,9 +182,50 @@ function renderRunSheetMarkdown(s: RunSheet): string {
   return out.join('\n') + '\n';
 }
 
-writeFileSync(join(outDir, '165-depth-ladder.nc'), generated.nc);
-writeFileSync(join(outDir, '165-depth-ladder.job.json'), JSON.stringify(job, null, 2) + '\n');
-writeFileSync(join(outDir, '165-depth-ladder-run-sheet.md'), renderRunSheetMarkdown(sheet));
+for (const row of ['A', 'B'] as const) {
+const job = ladderJob(row);
+// No Makera feed rows in a headless run (#324): the catalogue tier needs a house service.
+const generated = engraveGenerate(tl, job, jobTool(job), []);
+if (!generated.ok || generated.nc === null) {
+  console.error(JSON.stringify({ stage: generated.stage, errors: generated.errors, findings: generated.findings }, null, 2));
+  throw new Error(`#165 ladder did not generate (stopped at ${generated.stage})`);
+}
+
+// #206's "simulated" gate: run the saved text through the session and require zero errors.
+const tool = jobTool(job);
+if (tool === null) throw new Error('the ladder job names no tool');
+const session = createSimSession(tl);
+const simLoad = session.load(generated.nc, toSetup(job, Z1), tool, 'Z1');
+if (!simLoad.ok) {
+  console.error(JSON.stringify(simLoad.diagnostics, null, 2));
+  throw new Error('#165 ladder simulation refused');
+}
+const simErrors = simLoad.diagnostics.filter((d) => d.severity === 'error');
+session.dispose();
+
+const sheet = buildRunSheet(job, generated, { diagnostics: simLoad.diagnostics });
+const base = `165-depth-ladder-row-${row}`;
+if (sheet.header.fileName !== `${base}.nc`) {
+  throw new Error(`run sheet file name drifted: ${sheet.header.fileName}`);
+}
+if (simErrors.length > 0) throw new Error(`row ${row}: ${simErrors.length} simulation error(s)`);
+console.log(`#165 depth ladder, row ${row}`);
+console.log(`  file       ${base}.nc  (${generated.nc.length} bytes, ${generated.nc.split('\n').length} lines)`);
+console.log(`  stage      ${generated.stage}, ok=${generated.ok}`);
+console.log(`  cam        ${generated.cam?.operations} ops, ${generated.cam?.cuttingMoves} cutting moves, ${generated.cam?.passes} passes, ~${generated.cam?.estimatedSeconds}s`);
+console.log(`  findings   ${generated.findings.filter((f) => f.severity === 'error').length} error, ${generated.findings.filter((f) => f.severity === 'warning').length} warning`);
+for (const f of generated.findings.filter((f) => f.severity === 'warning')) console.log(`     warn  ${f.code}: ${f.message}`);
+console.log(`  verify     ${generated.verify?.findings.filter((f) => f.severity === 'error').length ?? '?'} error, ${generated.verify?.findings.filter((f) => f.severity === 'warning').length ?? '?'} warning`);
+for (const f of generated.verify?.findings.filter((f) => f.severity === 'warning') ?? []) console.log(`     warn  ${f.code}: ${f.message}`);
+console.log(`  sim        ok=${simLoad.ok}, count=${simLoad.count}, removed=${fmt(simLoad.stats.removedVolume)} mm³, ${simErrors.length} errors, ${simLoad.diagnostics.length - simErrors.length} warnings`);
+for (const d of simLoad.diagnostics.filter((x) => x.severity !== 'error')) console.log(`     warn  ${d.code}: ${d.message}`);
+console.log(`  sheet      ${sheet.header.fileName}  hash=${sheet.header.fileHash}  time=${sheet.header.estimatedTime}`);
+
+writeFileSync(join(outDir, `${base}.nc`), generated.nc);
+writeFileSync(join(outDir, `${base}.job.json`), JSON.stringify(job, null, 2) + '\n');
+writeFileSync(join(outDir, `${base}-run-sheet.md`), renderRunSheetMarkdown(sheet));
+}
+
 
 // ---------------------------------------------------------------------------------------------
 // #208 D1 — the air program: three-strokes.nc with every motion Z raised 25 mm
@@ -210,18 +253,6 @@ writeFileSync(join(outDir, '208-D1-three-strokes-air.nc'), air);
 // ---------------------------------------------------------------------------------------------
 // Console receipt
 // ---------------------------------------------------------------------------------------------
-
-console.log('#165 depth ladder');
-console.log(`  file       165-depth-ladder.nc  (${generated.nc.length} bytes, ${generated.nc.split('\n').length} lines)`);
-console.log(`  stage      ${generated.stage}, ok=${generated.ok}`);
-console.log(`  cam        ${generated.cam?.operations} ops, ${generated.cam?.cuttingMoves} cutting moves, ${generated.cam?.passes} passes, ~${generated.cam?.estimatedSeconds}s`);
-console.log(`  findings   ${generated.findings.filter((f) => f.severity === 'error').length} error, ${generated.findings.filter((f) => f.severity === 'warning').length} warning`);
-for (const f of generated.findings.filter((f) => f.severity === 'warning')) console.log(`     warn  ${f.code}: ${f.message}`);
-console.log(`  verify     ${generated.verify?.findings.filter((f) => f.severity === 'error').length ?? '?'} error, ${generated.verify?.findings.filter((f) => f.severity === 'warning').length ?? '?'} warning`);
-for (const f of generated.verify?.findings.filter((f) => f.severity === 'warning') ?? []) console.log(`     warn  ${f.code}: ${f.message}`);
-console.log(`  sim        ok=${simLoad.ok}, count=${simLoad.count}, removed=${fmt(simLoad.stats.removedVolume)} mm³, ${simErrors.length} errors, ${simLoad.diagnostics.length - simErrors.length} warnings`);
-for (const d of simLoad.diagnostics.filter((x) => x.severity !== 'error')) console.log(`     warn  ${d.code}: ${d.message}`);
-console.log(`  sheet      ${sheet.header.fileName}  hash=${sheet.header.fileHash}  time=${sheet.header.estimatedTime}`);
 
 console.log('#208 D1 air program');
 console.log(`  file       208-D1-three-strokes-air.nc  (${air.length} bytes, ${air.split('\n').length} lines)`);

@@ -1256,13 +1256,19 @@ allows. 3. `$X` if needed, `G53 G0 Z-20`, `G28`.
 workpiece-probe cycle listens to the sensor (shared input: a `G38.2` over the sensor is a contact,
 not a measurement). A **miss** at −87 means separate inputs.
 
-**Recorded:** _not yet run._
+**Recorded 2026-10-12** (2 × 12 O-flute as T1, TLO 0.507; its `M491` trigger is at about −75.55, so
+the heights were shifted 10.2 mm up from the runbook's 1 mm-cutter figures; moves made with `G91`
+from `G53 G0 Z-3` over `X-9.89 Y-12.83`; run twice; trace `traces/2026-10-12-console.log`):
 
 | Field | Value |
 |---|---|
-| Step 1 reply (expected miss at −85.0) | |
-| Step 2 reply — trigger at ≈ −85.78, or miss at −87? | |
-| Shared input? (yes/no) | |
+| Step 1 reply (`G91 G38.2 Z-71 F300`, expected miss at −74.0) | miss at −74.000, `ALARM` H:3; `$X` |
+| Step 2 reply (`G91 G38.2 Z-2.7 F100`, crosses −75.55 by 1.15 mm) | `[PRB:-9.890,-12.830,-76.700:0]`, `ALARM: Probe fail` — a **miss** |
+| Contact made? | **yes** — the maintainer watched the cutter push the sensor's button down on the second run |
+| Shared input? (yes/no) | **no** — `G38.2` does not listen to the tool-length sensor |
+
+Side note: each probe-fail alarm turns the head light red and beeps; plugging the probe in during
+an earlier alarm state looked the same.
 
 **Goes to:** `/Z1-Firmware-Dialect.md` §11 (new 11.10); C4's notes.
 

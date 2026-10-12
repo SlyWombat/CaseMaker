@@ -216,6 +216,17 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     status: 'unmeasured',
     provenance: PROVENANCE,
   },
+  {
+    // The fitted cutter for the first chips is a 2 mm O-flute (bench plan, 2026-10-12); without
+    // this row every PLA job on it was refused at the feeds stage. Placeholder like the row above,
+    // step-down 0.5 by the softwood rows' small/large pattern. #284's coupons measure it.
+    material: 'pla',
+    minDiameter: 1.6,
+    maxDiameter: 3.2,
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.5, stepOverFraction: 0.45, peckFraction: 1.0, air: true },
+    status: 'unmeasured',
+    provenance: PROVENANCE,
+  },
 ];
 
 // ---------------------------------------------------------------------------------------------

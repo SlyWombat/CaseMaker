@@ -10,6 +10,22 @@ The sessions are ordered so each one produces what the next needs and so setup c
 (power cycles, tool changes, workholding swaps, Studio vs our console) happen as rarely as
 possible. **Nothing here is scheduled; the maintainer calls each session.**
 
+## Status, 2026-10-12 (end of day)
+
+- **S1 done.** #255 upload, B3, B1, #283 modes (vacuum `M331`/`M332`; `M7` blows nothing).
+- **S2 done.** D3 timed, #303 stop controls, B4, D1b (`N` lines are ignored, #385), C8, and
+  #302 item 5: jobs start from our console with `play` from the card (#386).
+- **Gate block done.** C9: `G38.2` does **not** share the tool-length sensor's input. D4: the
+  regenerated ladder air-ran clean.
+- **S3 step 1–2 done: first chips.** The #165 ladder, regenerated for the 2 × 12 O-flute with the
+  blank as clamped (#383) and one file per row, was cut with the vacuum on. Depths and photos are on
+  #165; solid plastic tracks the program to −0.1…−0.2 mm. The maintainer accepted that accuracy for
+  V1 ("we can refine this in v2").
+- **Next in S3:** #176's G32 stroke test, the #284 coupons and restart proof, #185 V-grooves. Before
+  any of them: lift the head before `play` (#384) and set Z0 as the cutter tip's own height (#387).
+- The 2026-10-04 single-file ladder (`165-depth-ladder.nc` and its sheet) is **superseded** by the
+  `-row-A` / `-row-B` files. Do not upload it.
+
 ## The one gate on every chip-making session: the cutter
 
 The fitted 1 × 4 mm ball nose cannot be simulated (the sweep refuses any non-flat tool), and the
