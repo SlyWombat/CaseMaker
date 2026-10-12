@@ -28,7 +28,7 @@ or buy one. Sessions S1 and S2 do not need it and can run first.
 | 4 | PrusaSlicer reads: `z_offset`, elephant-foot, layer heights, the colour-change layer (#269 item 2, #165 step 1); per-object infill (#166 item 2) | desk | #165, #166 |
 | 5 | Makera Studio, **not connected to the machine**: the three reads in #268 (~30 min, cited); a Studio-made equivalent `.nc` for #176's diff | desk | #221, #176 |
 | 6 | Check the D0/D1 MDI logs for what Studio's "Auto Workpiece Leveling" sends | desk | the dome-compensation decision |
-| 7 | Print blanks on one recorded profile, 100 % infill, printed flipped (est. 4–7: ladder, +1 stroke test, 1–3 coupons, 2 for #176, +1 if scrap-first) | printer | S3, S4 |
+| 7 | Print blanks on one recorded profile, 100 % infill, printed flipped (est. 4–6: ladder, +1 stroke test, 1–3 coupons, 2 for #176) | printer | S3, S4 |
 | 8 | Code and file prep once 1 and 2 exist: regenerate the ladder and its run sheet for the chosen cutter; hand-write `185-v-groove.nc`; the #284 coupon spec; the #176 60 mm stroke file **along the 76.2 mm length** (the 38.1 mm width cannot hold it); a Windows desktop build for #255 | desk | S1–S4 |
 | 9 | Get a USB cable for the Z1 (no serial port on hand, 2026-10-08) | — | #304 |
 
@@ -87,8 +87,8 @@ Setup: vise on, the chosen flat as T1, wired probe. Record the wizard settings f
 the wizard's Auto Z and leveling can overwrite a console Z0 (D1's `G10 L20` moved Z by 6.5 mm).
 
 1. Wired-probe Z at each row centre.
-2. **#165 (and #209):** the depth ladder, scrap blank first if decided. Stopwatch it for D3's
-   cutting half.
+2. **#165 (and #209):** the depth ladder, cut once (no scrap blank), no `G32`, Z0 per row.
+   Stopwatch it for D3's cutting half.
 3. **#176's bounded G32 test:** one 60 mm stroke **along the length** with `G32` active, depth
    measured at both ends and the centre, on its own blank. If it fails, split long `G1` moves in
    `post/z1.ts` before S4.
@@ -134,11 +134,11 @@ config-read values in `Z1.rotary`.
 
 ## Decisions for the maintainer
 
-Before desk prep (they change the files and the blank count):
-1. Scrap blank first for the ladder, or waive it.
-2. Dome compensation (`G32`) on the ladder, or not (the issue body says without; decision 12 brought
-   `G32` back for vise jobs on 2026-10-09).
-3. One Z0, or one per row (the brief recommends per row).
+Decided by the maintainer, 2026-10-12:
+1. **No scrap blank** for the ladder: it is itself a test piece, and the D4 air run proves the
+   path first. Blank count est. 4–6.
+2. **No `G32`** on the ladder; G32 is proven separately by the 60 mm stroke test.
+3. **One Z0 per row**, probed at each row centre (cancels most of the 0.33 mm dome).
 
 At the bench or later: `toleranceMm` for #176 (3 touches or 1); rotary before or after the cuts
 (the brief says after); whether to run the Z travel-limit test.
