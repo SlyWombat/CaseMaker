@@ -584,7 +584,11 @@ describe('tools: V1 sweeps a flat end mill and refuses everything else BY NAME',
     ['Drill', 'drill'], ['Thread', 'thread'], ['Bull Nose', 'bull'], ['', 'unknown'], ['Laser', 'unknown'],
     // #377 — Makera's own database files a corn bit under "Flat End" (category 1, "Corn Bits" group),
     // and the word has to be whole: another header's "Corner Radius" is not a corn bit.
+    // #379 — a single-flute "O" end mill is a flat end too, and the `O` has to be there: a bare
+    // `flute` would swallow "Two Flute Ball Nose".
     ['Corn Bit', 'flat'], ['Corn Bits', 'flat'], ['Corner Radius End Mill', 'unknown'],
+    ['O Flute', 'flat'], ['O Flute M', 'flat'], ['Two Flute Ball Nose', 'ball'],
+    ['Single Flute Engraving', 'engraving'],
   ])('%s -> %s', (text, shape) => {
     expect(shapeFromType(text)).toBe(shape);
   });

@@ -66,6 +66,11 @@ export function shapeFromType(typeText: string): ToolShape {
   // swallowed by a longer one, and "Corner Radius End Mill" is a real thing another header could
   // send — so `\b` keeps it from reading as a corn bit and keeps that word `unknown`.
   if (/\bcorn\b/.test(s)) return 'flat';
+  // A single-flute "O" end mill is a flat end (#379): Makera files it in the "Single Flute Non
+  // Metal" group under family "Flat End". Anchored to the START of the word, because a bare `flute`
+  // would swallow "Two Flute Ball Nose" (a ball) — and, at the start, `O FLUTE` is what the box
+  // code joins for these and what a store title leads with.
+  if (/^o\s+flute\b/.test(s)) return 'flat';
   if (s.includes('engrav')) return 'engraving';
   if (s.includes('chamfer')) return 'chamfer';
   if (s.includes('drill')) return 'drill';

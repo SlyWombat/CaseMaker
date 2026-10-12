@@ -120,6 +120,30 @@ describe('parseBoxCode — PROVISIONAL (#208 A7: one label known)', () => {
   ])('reads the real corn bit %s as a flat end (#377)', (code, tip, flute) => {
     expect(parseBoxCode(code)).toEqual({ shape: 'flat', tipDiameter: tip, fluteLength: flute });
   });
+
+  // #379 — the five real Spiral 'O' single-flute codes. A single-flute "O" end mill is a flat end
+  // (Makera files it in the "Single Flute Non Metal" group, family "Flat End"), and the `-M-` token
+  // is Makera's "for Metal" line, not a word of the type. The numbers are `<tip>-<flute>` either way.
+  it.each([
+    ['C1-BIT-O-FLUTE-2-12', 2, 12],
+    ['C1-BIT-O-FLUTE-3.175-25', 3.175, 25],
+    ['C1-BIT-O-FLUTE-3.175-42', 3.175, 42],
+    ['C1-BIT-O-FLUTE-M-2-8', 2, 8],
+    ['C1-BIT-O-FLUTE-M-3.175-12', 3.175, 12],
+  ])('reads the real single-flute code %s as a flat end (#379)', (code, tip, flute) => {
+    expect(parseBoxCode(code)).toEqual({ shape: 'flat', tipDiameter: tip, fluteLength: flute });
+  });
+
+  it('drops the metal marker wherever it sits, and reads the same numbers either way (#379)', () => {
+    // The marker rides between the word and the numbers, so the reading is the metal line's too.
+    expect(parseBoxCode('C1-BIT-O-FLUTE-M-1-3')).toEqual(parseBoxCode('C1-BIT-O-FLUTE-1-3'));
+    expect(parseBoxCode('C1-BIT-BALL-NOSE-M-2-6')).toEqual(parseBoxCode('C1-BIT-BALL-NOSE-2-6'));
+  });
+
+  it('does not read a plain `flute` as an O-flute: engraving stays engraving (#379)', () => {
+    expect(shapeFromType('Single Flute Engraving')).toBe('engraving');
+    expect(shapeFromType('Two Flute Ball Nose')).toBe('ball');
+  });
 });
 
 describe('resolveCode — the scan door’s three outcomes', () => {

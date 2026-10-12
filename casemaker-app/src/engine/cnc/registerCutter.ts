@@ -66,6 +66,18 @@ function boxLength(raw: string): number | null {
 }
 
 /**
+ * Makera's "for Metal" line marker: a bare `M` token sitting between the type word and the numbers
+ * — `O-FLUTE-M-2-8`, `ENGRAVE-M-30-0.3`, `BALL-NOSE-M-2-6` (#379). It names the product line, not
+ * the shape, and it is not a number, so it is dropped before either is read rather than being left
+ * to be read as one.
+ *
+ * Nothing keeps it. Whether a metal bit should be a note or a material hint on the row is open on
+ * #379; today it only has to stop being in the way. A thread's size — `M5` in `THREAD-M5-15` — is a
+ * different token and is NOT this: the match is exact.
+ */
+const METAL_MARKER = 'M';
+
+/**
  * Read a Makera box code — `C1-BIT-<TYPE>-<tip>-<flute>` — into the shape and the two lengths it
  * names. **PROVISIONAL** (see {@link BoxCode}).
  *
@@ -84,7 +96,10 @@ export function parseBoxCode(value: string): BoxCode | null {
   const text = value.trim().toUpperCase();
   const PREFIX = 'C1-BIT-';
   if (!text.startsWith(PREFIX)) return null;
-  const tokens = text.slice(PREFIX.length).split('-').filter((t) => t.length > 0);
+  const tokens = text
+    .slice(PREFIX.length)
+    .split('-')
+    .filter((t) => t.length > 0 && t !== METAL_MARKER);
   if (tokens.length < 3) return null;
   const flute = boxLength(tokens[tokens.length - 1]!);
   const tip = boxLength(tokens[tokens.length - 2]!);
