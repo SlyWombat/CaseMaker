@@ -1,0 +1,24 @@
+{
+  "id": "284-pla-feed",
+  "title": "284 PLA feed coupon",
+  "parameter": "feed",
+  "values": [
+    350,
+    500,
+    700,
+    900
+  ],
+  "basePath": "165-depth-ladder-row-A.job.json",
+  "text": {
+    "size": 11,
+    "pitch": 16
+  },
+  "origin": {
+    "x": 19.05,
+    "y": 68
+  },
+  "depth": 0.8,
+  "font": "sans-default",
+  "weight": "bold",
+  "note": "One program per feed value, one labelled cell each, on the as-clamped badge blank with the 2 mm O-flute (the PLA 1.6-3.2 row, #284). The row measures FEED, so every other parameter comes from the base job unchanged and the record must be read back with feeds-readback.ts. Mark the value to adopt \"chosen\": true. The cell text is 11 mm because the UNMEASURED vise sets that ceiling (its 2 mm band leaves 34.1 mm of the blank across the jaws) and Barlow bold is the only bundled face that survives this cutter; the 18 % area loss is the warning in §8."
+}

@@ -6,11 +6,25 @@
 //     0.6 / 0.8 / 1.0 / 1.2 / 1.4 / 1.6 mm on the 76.2 × 38.1 × 3.81 mm badge blank) run through
 //     #206's `engraveGenerate` (findings → feeds → cam → post → verify), simulated through #182's
 //     `createSimSession`, and rendered from #207's `buildRunSheet`.
+//   * #176's bounded G32 test — ONE 60 mm `line` trace along the 76.2 mm length (#219's trace
+//     CAM), same blank, same frame, same cutter. The two console lines the test needs (`G32`
+//     before `play`, `M370` after) cannot be IN the file — the upload gate refuses anything the
+//     verifier does not know (#386) and `G32` is not in the post's dialect — so the sheet carries
+//     them as an operator step, marked unverified, with the grid parameters blank until desk item
+//     6 reads them off Studio's Auto-Level MDI log.
+//   * #284's PLA feed coupon — the SPEC, written here so its geometry comes from the same
+//     as-clamped constants as the ladder; the programs come from `scripts/engrave-job.ts --coupon`
+//     (#248's own entry point, which owns the coupon record). One more command, printed at the end.
+//   * #185's V-groove file — hand-written, because our pipeline cannot make it: a V-bit has no
+//     sweep (`cuttingRadiusForSweep` refuses a non-flat tool), so no job can generate it. It is
+//     handed to the app's OWN verifier here before it is written, so the file that reaches the
+//     bench is one the upload gate would accept.
 //   * #208 D1's air program — `tests/e2e/fixtures/three-strokes.nc` (#199) with every motion Z
 //     raised 25 mm, so nothing touches.
 //
-// Outputs land in `docs/bench/`. Run:
+// Outputs land in `docs/bench/`. Run from `casemaker-app/`:
 //   npx tsx --tsconfig tsconfig.scripts.json scripts/bench-files.ts
+//   npx tsx --tsconfig tsconfig.scripts.json scripts/engrave-job.ts --coupon ../docs/bench/284-pla-feed.json
 //
 // No default in `src/` is changed and nothing here measures anything.
 
@@ -34,7 +48,11 @@ import {
 import { DEFAULT_VISE } from '@/engine/cnc/fixture';
 import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
 import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
+import { HOP_Z } from '@/engine/cnc/cam/ir';
+import { stockDepthLimit, verifyProgram } from '@/engine/cnc/verify';
+import type { CouponSpec } from '@/engine/cnc/engrave/couponJob';
 import type { EngraveJob, EngraveRectShape } from '@/types/engraveJob';
+import { version as CAM_VERSION } from '../package.json';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..');
@@ -82,7 +100,12 @@ const O_FLUTE_2_12 = {
   angle: null,
   halfAngle: null,
   fluteLength: 12,
-  shoulderLength: 12,
+  // null, not 12 (a3, 2026-10-12): the file must not state a shoulder the house inventory does
+  // not have. The inventory row for `kz-o-flute-2-12` leaves shoulderLength null and the LABEL's
+  // flute length is not a shoulder measurement; runbook A1 calipers the cutter at tomorrow's
+  // opening and that number replaces this one. Until then the honest value is "unknown", and the
+  // holder check's warning (if it raises one) is the honest consequence.
+  shoulderLength: null,
   stickout: null,
   centreCutting: null,
 } as const;
@@ -165,7 +188,10 @@ function renderStep(step: RunSheetStep, i: number): string {
   return `${i + 1}. ${text}`;
 }
 
-function renderRunSheetMarkdown(s: RunSheet): string {
+function renderRunSheetMarkdown(
+  s: RunSheet,
+  opts: { before?: string; footer?: string[] } = {},
+): string {
   const out: string[] = [];
   out.push(`# Run sheet — ${s.header.jobName}`);
   out.push('');
@@ -174,6 +200,10 @@ function renderRunSheetMarkdown(s: RunSheet): string {
       `sha256 \`${s.header.fileHash}\` · estimated cutting time ${s.header.estimatedTime} ` +
       `(${s.header.estimatedTimeNote})`,
   );
+  if (opts.before !== undefined && opts.before !== '') {
+    out.push('');
+    out.push(opts.before.trimEnd());
+  }
   for (const section of s.sections) {
     out.push('');
     out.push(`## ${section.title}`);
@@ -189,19 +219,25 @@ function renderRunSheetMarkdown(s: RunSheet): string {
   out.push('');
   out.push(
     '*Rendered from `buildRunSheet` (#207) by `casemaker-app/scripts/bench-files.ts`; the app’s ' +
-      '`RunSheetView` renders the same structure. This is the sheet for #165’s depth ladder on the ' +
-      'printed badge blank — its blanks are filled at the machine and the results go to #165 / ' +
-      '`docs/bench/2026-10-bench-day-1.md` (E). No result is recorded here.*',
+      '`RunSheetView` renders the same structure. No result is recorded here.*',
   );
-  out.push('');
-  out.push(
-    '*Row A (“A over pocket”) is centred on the 45 × 13 mm magnet pocket — the unsupported-' +
-      'membrane test. Row B (“B clear”) is 12 mm behind it in the clear band. The job document has ' +
-      'no field for the pocket, so the row names and the operator, not the diagram, carry that ' +
-      'distinction (logged on #206’s dogfood issue).*',
-  );
+  for (const paragraph of opts.footer ?? []) {
+    out.push('');
+    out.push(paragraph);
+  }
   return out.join('\n') + '\n';
 }
+
+/** #165's ladder: what the row names carry, and where its numbers go. */
+const LADDER_FOOTER = [
+  '*This is the sheet for #165’s depth ladder on the printed badge blank — its blanks are filled ' +
+    'at the machine and the results go to #165 / `docs/bench/2026-10-bench-day-1.md` (E).*',
+  '*Row A (“A over pocket”) is centred on the 45 × 13 mm magnet pocket — the unsupported-' +
+    'membrane test. Row B (“B clear”) is 12 mm behind it in the clear band. The job document has ' +
+    'no field for the pocket, so the row names and the operator, not the diagram, carry that ' +
+    'distinction (logged on #206’s dogfood issue).*',
+];
+
 
 for (const row of ['A', 'B'] as const) {
 const job = ladderJob(row);
@@ -244,7 +280,392 @@ console.log(`  sheet      ${sheet.header.fileName}  hash=${sheet.header.fileHash
 
 writeFileSync(join(outDir, `${base}.nc`), generated.nc);
 writeFileSync(join(outDir, `${base}.job.json`), JSON.stringify(job, null, 2) + '\n');
-writeFileSync(join(outDir, `${base}-run-sheet.md`), renderRunSheetMarkdown(sheet));
+writeFileSync(join(outDir, `${base}-run-sheet.md`), renderRunSheetMarkdown(sheet, { footer: LADDER_FOOTER }));
+}
+
+// ---------------------------------------------------------------------------------------------
+// #176 — the bounded G32 test: ONE 60 mm stroke along the 76.2 mm length
+// ---------------------------------------------------------------------------------------------
+
+// Bench plan S3 step 3: one 60 mm stroke with `G32` active, depth measured at both ends and the
+// centre, on its own blank (the ladder blank's rows sit exactly where the stroke runs). The
+// 38.1 mm side cannot hold 60 mm, so the stroke runs along the blank's LENGTH — the plan's own
+// constraint, and the reason the blank is clamped the way #383 has it.
+const STROKE_LENGTH = 60;
+// 0.8 mm: the badge's own reveal depth (#166), so the number the caliper reads is the depth the
+// acceptance run cuts at, not a coupon-only depth.
+const STROKE_DEPTH = 0.8;
+// The clear band Row B already uses: solid material the whole length, no magnet pocket under it
+// (the pocket spans X 12.55..25.55), 7.05 mm off the moving jaw's face at X 38.1.
+const STROKE_X = ROW_B_X;
+// Centred on the blank: 8.1 mm of clearance at each end, symmetric, so a Z error at either end of
+// the travel is not confounded with starting or ending off the part.
+const STROKE_Y0 = (BADGE.width - STROKE_LENGTH) / 2;
+
+function strokeJob(): EngraveJob {
+  // Same stock, workholding, cutter and frame as the ladder — one frame for the whole trip.
+  const base = ladderJob('A');
+  return {
+    ...base,
+    // Names the file (`176-g32-stroke.nc`) and the `;@MKR|TOOLPATH` line.
+    name: '176 g32 stroke',
+    labels: [],
+    shapes: [],
+    traces: [
+      {
+        id: 'trc-g32-stroke',
+        kind: 'line',
+        // A trace's centre follows the path, so the stroke IS the cutter's width (2 mm, #219).
+        name: 'g32 stroke 60mm',
+        position: { x: STROKE_X, y: STROKE_Y0 },
+        rotation: 0,
+        depth: STROKE_DEPTH,
+        enabled: true,
+        points: [
+          [0, 0],
+          [0, STROKE_LENGTH],
+        ],
+        closed: false,
+      },
+    ],
+  };
+}
+
+/**
+ * The console steps the stroke file cannot carry (#176, bench plan S3 step 3).
+ *
+ * This block is written by the GENERATOR, not by the app's `buildRunSheet`: the run sheet has no
+ * section for a step the operator types, and `G32`/`M370` cannot go in the program — the upload
+ * gate refuses anything the verifier does not pass (#386) and neither word is in the post's
+ * dialect (`G_ALLOWED` is G0 G1 G21 G28 G53 G90). #176's own item is to give the sheet such a
+ * section; until then this is where the step lives, marked unverified, because it has never been
+ * typed on the machine either.
+ */
+const STROKE_CONSOLE_STEPS = `## Console steps this file cannot carry — #176
+
+*Typed here by \`bench-files.ts\`, not rendered by the app's run sheet (no job field holds a
+console step, and \`G32\`/\`M370\` must not be in the program: the upload gate refuses a file the
+verifier does not pass, #386). If the app's own sheet is used at the bench instead of this one,
+steps 1–3 are the part it is missing; step 4 is its §9 record.*
+
+1. **BEFORE \`play\`** — with the blank clamped and Z0 probed: send Studio's Auto-Level line,
+   \`G32 R1\` with its grid parameters filled from the Auto-Level MDI log (desk item 6, unread):
+   \`G32 R1 X\\_\\_\\_\\_ Y\\_\\_\\_\\_ \\_\\_\\_\\_\`.  ⚠ *Not yet confirmed on the machine (the grid
+   parameters have never been read off Studio; that desk step is still open).*
+2. **Run this file** (\`play\`).
+3. **AFTER the program ends** — send \`M370\` from the console to clear the auto-level state.
+   ⚠ *Not yet confirmed on the machine (whether \`M02\` already clears it is not known).*
+4. **Measure** — caliper the stroke's depth at both ends and at its centre (three readings each
+   way, six in total) and write them into \`docs/bench/2026-10-bench-day-1.md\`. The test's
+   question is whether the depth holds along a 60 mm move, not whether the stroke exists.`;
+
+{
+  const job = strokeJob();
+  const generated = engraveGenerate(tl, job, jobTool(job), []);
+  if (!generated.ok || generated.nc === null) {
+    console.error(JSON.stringify({ stage: generated.stage, errors: generated.errors, findings: generated.findings }, null, 2));
+    throw new Error(`#176 stroke did not generate (stopped at ${generated.stage})`);
+  }
+  const tool = jobTool(job);
+  if (tool === null) throw new Error('the stroke job names no tool');
+  const session = createSimSession(tl);
+  const simLoad = session.load(generated.nc, toSetup(job, Z1), tool, 'Z1');
+  if (!simLoad.ok) {
+    console.error(JSON.stringify(simLoad.diagnostics, null, 2));
+    throw new Error('#176 stroke simulation refused');
+  }
+  const simErrors = simLoad.diagnostics.filter((d) => d.severity === 'error');
+  session.dispose();
+  if (simErrors.length > 0) throw new Error(`#176 stroke: ${simErrors.length} simulation error(s)`);
+
+  const sheet = buildRunSheet(job, generated, { diagnostics: simLoad.diagnostics });
+  const base = '176-g32-stroke';
+  if (sheet.header.fileName !== `${base}.nc`) {
+    throw new Error(`run sheet file name drifted: ${sheet.header.fileName}`);
+  }
+  console.log('\n#176 bounded G32 stroke');
+  console.log(`  file       ${base}.nc  (${generated.nc.length} bytes, ${generated.nc.split('\n').length} lines)`);
+  console.log(`  cam        ${generated.cam?.operations} ops, ${generated.cam?.cuttingMoves} cutting moves, ~${generated.cam?.estimatedSeconds}s`);
+  console.log(`  findings   ${generated.findings.filter((f) => f.severity === 'error').length} error, ${generated.findings.filter((f) => f.severity === 'warning').length} warning`);
+  for (const f of generated.findings.filter((f) => f.severity === 'warning')) console.log(`     warn  ${f.code}: ${f.message}`);
+  console.log(`  sim        ok=${simLoad.ok}, count=${simLoad.count}, removed=${fmt(simLoad.stats.removedVolume)} mm³, ${simErrors.length} errors`);
+  console.log(`  sheet      ${sheet.header.fileName}  hash=${sheet.header.fileHash}  time=${sheet.header.estimatedTime}`);
+
+  writeFileSync(join(outDir, `${base}.nc`), generated.nc);
+  writeFileSync(join(outDir, `${base}.job.json`), JSON.stringify(job, null, 2) + '\n');
+  writeFileSync(
+    join(outDir, `${base}-run-sheet.md`),
+    renderRunSheetMarkdown(sheet, {
+      before: STROKE_CONSOLE_STEPS,
+      footer: [
+        '*This is #176’s bounded G32 test (bench plan S3 step 3): ONE 60 mm stroke along the ' +
+          'blank’s 76.2 mm length at X 31.05 (the clear band, solid material, no magnet pocket ' +
+          'under it), 0.8 mm deep, on its OWN blank. Its numbers go to `docs/bench/2026-10-bench-day-1.md`.*',
+        '*A null result here is a null result about a LONG MOVE ALONG Y, not about the dome: the ' +
+          'blank’s warp is strongest ACROSS its 38.1 mm width (the axis no straight 60 mm line can ' +
+          'follow, #165’s row A vs row B is the test that spans it).*',
+      ],
+    }),
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// #284 — the PLA feed coupon SPEC (the programs come from `engrave-job.ts --coupon`)
+// ---------------------------------------------------------------------------------------------
+
+/** The spec JSON `engrave-job.ts --coupon` consumes: a `CouponSpec` with `basePath` instead of inline `base`. */
+type CouponSpecFile = Omit<CouponSpec, 'base'> & { basePath: string; note: string };
+
+/**
+ * #284's first coupon: the PLA 1.6–3.2 mm feed row, measured on the fitted 2 mm O-flute. Written
+ * from the SAME constants as the ladder, because every number here was measured against the
+ * as-clamped badge blank and the fitted cutter rather than chosen:
+ *
+ *  - `origin` is the REAR clear band (Y 60.6..76.2), which is empty on this part: the cell sits on
+ *    solid material, so a membrane (row A) cannot confound a feed reading, and the front band stays
+ *    free for #185's V-grooves.
+ *  - `text.size` 11.0 mm in Barlow BOLD is the largest cap height whose cell the APP accepts on this
+ *    blank. The binding limit is NOT `edgeMargin`: it is the vise. The fixed jaw's face is at work
+ *    X 0 and the moving jaw's at X 38.1, and the collision check grows each by the 2 mm PROVISIONAL
+ *    band (#208 — the vise is unmeasured), so the cutter's body must stay inside X 2.0..36.1. The
+ *    label CAM sweeps the cutter INSIDE the glyph outline, so the ink box's own edge is as far as
+ *    the cutter's body reaches: the ink must lie in X 2.0..36.1, a **34.1 mm** ceiling. At 11.5 mm
+ *    the ink was 35.0 mm wide and the sim reported it as it should — `tool-into-fixture`, the cutter
+ *    driving 2.2 and 3.4 mm³ into the fixed jaw. At 11.0 mm the ink is 33.49 × 11.30 mm, X
+ *    2.31..35.79 — 0.31 mm inside each band — and the sim is clean.
+ *  - …and it is the one face that survives this cutter at all: Barlow bold at 11.0 loses 18 % of its
+ *    area to the 2 mm opening (`item-detail-lost`, a warning the run sheet carries), while every
+ *    other bundled face at any size that FITS loses the label entirely (`item-empty`) or a whole
+ *    character. The cell is a label, not a pocket (#248), so the cutter's reach decides how large
+ *    the value text can be — and on a 38.1 mm blank the jaw band, not the text, sets the ceiling.
+ *  - `values` bracket the row's own 500 (the number a readback adopts), and the row's own value must
+ *    be cut or there is nothing to adopt (`measurementFromRecord`).
+ *  - `depth` 0.8 mm is the badge's reveal depth (#166), so the feed is judged at the depth the
+ *    acceptance run cuts at.
+ *
+ * All of that re-opens after runbook A1 measures the vise: a measured vise has no 2 mm band, the
+ * ceiling goes back to ~36 mm and this cell could be enlarged. Until then this is the cell the app
+ * itself will let through the upload gate, and the one an operator may run.
+ */
+const COUPON_SPEC: CouponSpecFile = {
+  id: '284-pla-feed',
+  title: '284 PLA feed coupon',
+  parameter: 'feed',
+  values: [350, 500, 700, 900],
+  basePath: '165-depth-ladder-row-A.job.json',
+  text: { size: 11, pitch: 16 },
+  origin: { x: 19.05, y: 68 },
+  depth: 0.8,
+  font: 'sans-default',
+  weight: 'bold',
+  note:
+    'One program per feed value, one labelled cell each, on the as-clamped badge blank with the ' +
+    '2 mm O-flute (the PLA 1.6-3.2 row, #284). The row measures FEED, so every other parameter ' +
+    'comes from the base job unchanged and the record must be read back with feeds-readback.ts. ' +
+    'Mark the value to adopt "chosen": true. The cell text is 11 mm because the UNMEASURED vise ' +
+    'sets that ceiling (its 2 mm band leaves 34.1 mm of the blank across the jaws) and Barlow bold ' +
+    'is the only bundled face that survives this cutter; the 18 % area loss is the warning in §8.',
+};
+
+writeFileSync(join(outDir, '284-pla-feed.json'), JSON.stringify(COUPON_SPEC, null, 2) + '\n');
+console.log('\n#284 PLA feed coupon spec written: 284-pla-feed.json');
+console.log('  generate its programs with (this script runs from casemaker-app/, the spec is in the repo):');
+console.log('    npx tsx --tsconfig tsconfig.scripts.json scripts/engrave-job.ts --coupon ../docs/bench/284-pla-feed.json');
+
+// ---------------------------------------------------------------------------------------------
+// #185 — the V-groove reach test: HAND-WRITTEN, because the pipeline cannot generate it
+// ---------------------------------------------------------------------------------------------
+
+// A V-bit has no sweep: `cuttingRadiusForSweep` refuses a non-flat tool, so `feedsFor` refuses it
+// and no job can generate a program for one. The bench still needs the file (#185 asks for four
+// grooves at #165's first four depths, calipered against `w(d) = tip + 2·d·tan(halfAngle)`), so it
+// is written here and handed to the app's OWN verifier before it is written — the same gate the
+// upload path uses (#386), so what reaches the bench is what the app would have accepted.
+const V_BIT_30_0_3 = {
+  number: 1,
+  id: 'C1-BIT-ENGRAVE-30-0.3',
+  // ASCII only, like the post's own names: the machine's header reader is given no glyphs to trip on.
+  name: 'Single Flute Engraving Bit 30 x 0.3',
+  typeText: 'Engraving',
+  shape: 'engraving',
+  handleDiameter: 3.175,
+  // The house inventory's own fields for this cutter (`kz-engrave-30-0-3` in the local
+  // `tool-labels/kazoo-house.json`): `diameter` is the SHANK there and the cutting diameter is
+  // `tipDiameter` — which is the number #185's formula starts from.
+  tipDiameter: 0.3,
+  diameter: 3.175,
+  cornerRadius: 0,
+  angle: null,
+  halfAngle: 15,
+  fluteLength: null,
+  shoulderLength: null,
+  stickout: null,
+  centreCutting: null,
+} as const;
+
+const V_TIP = 0.3;
+const V_HALF_ANGLE_DEG = 15;
+/** The cutter's house-inventory key, as the ladder's job carries its own (`#332`'s `;@CM|` record). */
+const V_BIT_KEY = 'inv:kz-engrave-30-0-3';
+/** #185's own formula, the thing the caliper is checked against: `w(d) = tip + 2·d·tan(halfAngle)`. */
+const vFloorWidth = (depth: number): number => V_TIP + 2 * depth * Math.tan((V_HALF_ANGLE_DEG * Math.PI) / 180);
+
+// The FRONT clear band (Y < 15.6, the magnet pocket's front edge), 10 mm long, 1.6 mm clear of the
+// pocket: the plan's own placement decision (S3 step 6 — 185's brief says "the same X/Y band as Row
+// B", which Row B occupies). Four X positions, 8 mm apart, each ≥ 6 mm off a jaw face; they run
+// SHALLOWEST FIRST so the file's own order says which groove is which.
+const V_Y0 = 4;
+const V_Y1 = 14;
+const V_FEED = 500;
+const V_PLUNGE = 200;
+const V_RPM = 12000;
+const V_GROOVES = [
+  { x: 6, depth: 0.6 },
+  { x: 14, depth: 0.8 },
+  { x: 22, depth: 1.0 },
+  { x: 30, depth: 1.2 },
+] as const;
+
+/** The job that supplies the verifier's context — stock, vise, frame. It generates nothing. */
+function vGrooveCtxJob(): EngraveJob {
+  return {
+    ...ladderJob('A'),
+    name: '185 v-groove',
+    labels: [],
+    shapes: [],
+    toolKey: V_BIT_KEY,
+    tool: { ...V_BIT_30_0_3 },
+  };
+}
+
+/** A hand estimate: cutting moves at the stated F, rapids at the profile's own rates, no accel term. */
+function vGrooveSeconds(): number {
+  const xy = Z1.rapidEstimate.xyMmPerMin;
+  const z = Z1.rapidEstimate.zMmPerMin;
+  let seconds = 0;
+  let prevX = V_GROOVES[0].x; // the opening rapid lands on the first groove's start
+  for (const g of V_GROOVES) {
+    const xyTravel = Math.hypot(g.x - prevX, V_Y1 - V_Y0); // from the last groove's END point
+    if (g !== V_GROOVES[0]) seconds += (xyTravel / xy) * 60;
+    seconds += (4 / z) * 60; // safe height down to hop height
+    seconds += ((1 + g.depth) / V_PLUNGE) * 60; // hop height down to depth, at the plunge feed
+    seconds += ((V_Y1 - V_Y0) / V_FEED) * 60; // the groove itself
+    seconds += ((1 + g.depth) / z) * 60; // back up to hop height
+    seconds += (4 / z) * 60; // hop height up to safe
+    prevX = g.x;
+  }
+  return Math.round(seconds);
+}
+
+function vGrooveNc(): string {
+  const vTool = `number=${V_BIT_30_0_3.number}|id=${V_BIT_30_0_3.id}|name=${V_BIT_30_0_3.name}` +
+    `|type=${V_BIT_30_0_3.typeText}|handlediameter=${V_BIT_30_0_3.handleDiameter}` +
+    `|sticklength=0|shoulderlength=0|flutelength=0|diameter=${V_BIT_30_0_3.diameter}` +
+    `|tipdiameter=${V_BIT_30_0_3.tipDiameter}|cornerradius=0|angle=0|halfAngle=${V_BIT_30_0_3.halfAngle}`;
+
+  const header = [
+    ';@MKR|BEGIN',
+    ';@MKR|SCHEMA|v=1.0.0',
+    `;@MKR|MACHINE|id=${Z1.id}|name=${Z1.name}`,
+    `;@MKR|MATERIAL|id=0|name=${jobMaterialName()}`,
+    `;@MKR|STOCK|id=cuboid|length=${BADGE.length}|width=${BADGE.width}|height=${BADGE.thickness}|diameter=1`,
+    `;@MKR|ORIGIN|id=0|type_name=topFrontLeft|x=${fmt(-BADGE.length / 2)}|y=${fmt(-BADGE.width / 2)}|z=${fmt(BADGE.thickness / 2)}`,
+    `;@MKR|CAM|id=CaseMaker|name=Case Maker|v=${CAM_VERSION}`,
+    ';@MKR|UNIT|value=MM',
+    `;@MKR|TOOL|${vTool}`,
+    `;@CM|TOOL|key=${V_BIT_KEY}`,
+    `;@MKR|TIME|seconds=${vGrooveSeconds()}`,
+    '; hand-written: the app cannot generate a V-bit program (no sweep; see the comment in the body)',
+    '; TIME is a hand estimate with no accel term, so it reads a little low',
+    ...V_GROOVES.map(
+      (g, i) =>
+        `;@MKR|TOOLPATH|number=${i + 1}|tool_number=${V_BIT_30_0_3.number}` +
+        `|name=[T1]V-groove ${g.depth.toFixed(1)} deep at X ${g.x}, predicted floor width ${fmt(vFloorWidth(g.depth))}mm`,
+    ),
+    ';@MKR|END',
+  ];
+
+  const body: string[] = [
+    'G90 G21',
+    '',
+    `; T1-${V_BIT_30_0_3.name}`,
+    ';',
+    '; #185 V-groove reach test, HAND-WRITTEN by casemaker-app/scripts/bench-files.ts.',
+    '; Our pipeline cannot emit this file: a V-bit has no sweep (cuttingRadiusForSweep refuses a',
+    '; non-flat tool), so no engrave job can generate a program for one. It was checked by the',
+    '; app\'s own verifier (verifyProgram) before being written, the same gate the upload path uses.',
+    ';',
+    '; Cut it on the LADDER blank, FRONT clear band (Y 4..14, in front of the magnet pocket at',
+    '; Y 15.6), after #165\'s ladder and #176\'s stroke, with the 30 V-bit in T1 (M491, plan S3',
+    '; step 6). Four grooves, 10 mm long along +Y, at #165\'s first four depths, shallowest first.',
+    ';',
+    '; CALIPER the floor width of each groove and compare it with',
+    ';   w(d) = tip + 2 d tan(halfAngle)   (tip 0.3 mm, half angle 15 deg):',
+    ...V_GROOVES.map(
+      (g) =>
+        `;   X ${String(g.x).padStart(2)}  d ${g.depth.toFixed(1)} mm  ->  predicted ${fmt(vFloorWidth(g.depth))} mm` +
+        `${g.depth === 0.8 ? '   <-- the 0.81 mm reveal depth: #185\'s own reading' : ''}`,
+    ),
+    ';',
+    '; The tip and the included angle are MEASURED under a loupe first (#185 step 1, plan desk',
+    '; item 3): w(d) above is only as good as the tip they report. Stage 1 of #185 — the',
+    '; morphological opening over the bundled fonts - needs no machine; it is',
+    '; docs/bench/185-font-opening.md.',
+    ';',
+    `T1 M6`,
+    'M331',
+    // #384's machine-frame lift: `Z-3` is `Z1.toolChange.clearanceZ`, the same constant the post
+    // writes, so a hand-written file cannot drift from the generated ones.
+    `G53 G0 Z${fmt(Z1.toolChange.clearanceZ)}`,
+    '',
+  ];
+  // #384's own order: the head is lifted in the MACHINE frame first, then XY, then the spindle,
+  // then Z stated at the safe height - the same sequence the post writes, so the file is safe to
+  // run from an unknown head position.
+  body.push(`G0 X${fmt(V_GROOVES[0].x)} Y${V_Y0}`, `S${V_RPM} M3`, 'G0 Z5');
+  V_GROOVES.forEach((g, i) => {
+    body.push(`;@MKR|TOOLPATH_START|toolpath_number=${i + 1}`);
+    body.push(`; groove ${i + 1} of ${V_GROOVES.length}: ${g.depth.toFixed(1)} mm deep at X ${g.x}, width ${fmt(vFloorWidth(g.depth))} mm`);
+    // The post's own shape: the FIRST op is seeded by the head lines above (XY already set), every
+    // later one restates it. Matching it keeps a hand-written file indistinguishable from a
+    // generated one at the machine.
+    body.push(i === 0 ? `G0 Z${HOP_Z}` : `G0 X${fmt(g.x)} Y${V_Y0} Z${HOP_Z}`);
+    body.push(`G1 Z${fmt(-g.depth)} F${V_PLUNGE}`);
+    body.push(`G1 Y${V_Y1} F${V_FEED}`);
+    body.push(`G0 Z${HOP_Z}`);
+    body.push('G0 Z5');
+  });
+  body.push('G0 Z15', 'M332', 'M05', 'G28', 'M02');
+  return [...header, '', ...body].join('\n') + '\n';
+}
+
+/** The material name the V-groove file's header carries — the same `pla` the ladder's does. */
+function jobMaterialName(): string {
+  return ladderJob('A').stock.material;
+}
+
+{
+  const ctxJob = vGrooveCtxJob();
+  const vTool = jobTool(ctxJob);
+  if (vTool === null) throw new Error('the V-groove context job names no tool');
+  const nc = vGrooveNc();
+  const report = verifyProgram(nc, {
+    setup: toSetup(ctxJob, Z1),
+    machine: Z1,
+    tool: vTool,
+    // The stock alone: the grooves are in the front clear band, so no void's membrane is in play,
+    // and this is the same limit the job's own `minFloor` implies (3.81 − 1.0 = 2.81 mm).
+    depthLimit: stockDepthLimit(ctxJob.stock, ctxJob.minFloor),
+    minRapidZ: HOP_Z,
+  });
+  console.log('\n#185 V-groove file (hand-written, checked by the app\'s verifier)');
+  console.log(`  file      185-v-groove.nc  (${nc.length} bytes, ${nc.split('\n').length} lines)`);
+  console.log(`  verify     ok=${report.ok}, ${report.findings.filter((f) => f.severity === 'error').length} error, ${report.findings.filter((f) => f.severity === 'warning').length} warning`);
+  for (const f of report.findings) console.log(`     ${f.severity === 'error' ? 'ERR ' : 'warn'} ${f.code}${f.line === null ? '' : ` (line ${f.line})`}: ${f.message}`);
+  console.log(`  moves      ${report.stats.cuttingMoves} cutting moves, deepest Z ${fmt(report.stats.deepestZ)}`);
+  console.log(`  predicted  ${V_GROOVES.map((g) => `d${g.depth.toFixed(1)}->w${fmt(vFloorWidth(g.depth))}`).join(', ')} mm`);
+  if (!report.ok) throw new Error('#185 V-groove file FAILED the app\'s verifier — do not hand it to the machine');
+  writeFileSync(join(outDir, '185-v-groove.nc'), nc);
 }
 
 

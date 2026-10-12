@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "name": "284 PLA feed coupon F700",
+  "machineId": "Z1",
+  "stock": {
+    "length": 38.1,
+    "width": 76.2,
+    "thickness": 3.81,
+    "material": "pla"
+  },
+  "labels": [
+    {
+      "id": "284-pla-feed-lbl-0",
+      "text": "F700",
+      "font": "sans-default",
+      "weight": "bold",
+      "size": 11,
+      "position": {
+        "x": 19.05,
+        "y": 68
+      },
+      "rotation": 0,
+      "depth": 0.8,
+      "enabled": true
+    }
+  ],
+  "toolKey": "inv:kz-o-flute-2-12",
+  "workholding": {
+    "kind": "vise",
+    "vise": {
+      "stockProud": 1.2,
+      "fixedJawThickness": 15,
+      "movingJawThickness": 15,
+      "jawLength": 80,
+      "jawStartY": -10,
+      "source": "default",
+      "uncertainty": 2
+    }
+  },
+  "minFloor": 1,
+  "edgeMargin": 1,
+  "customFonts": [],
+  "sacrificial": {
+    "under": null,
+    "sides": {
+      "left": null,
+      "right": null,
+      "front": null,
+      "back": null
+    },
+    "source": "default"
+  },
+  "breakthrough": 0.3,
+  "jawClearance": 1,
+  "shapes": [],
+  "tool": {
+    "number": 1,
+    "id": "C1-BIT-O-FLUTE-2-12",
+    "name": "Spiral O single flute 2 × 12",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2,
+    "diameter": 2,
+    "cornerRadius": 0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+  },
+  "combined": [],
+  "traces": [],
+  "cutOverride": {
+    "feed": 700
+  }
+}

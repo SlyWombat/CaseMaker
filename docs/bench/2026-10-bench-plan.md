@@ -29,6 +29,17 @@ possible. **Nothing here is scheduled; the maintainer calls each session.**
   needs them to know where a touch can land.
 - **Next in S3:** #176's G32 stroke test, the #284 coupons and restart proof, #185 V-grooves. Before
   any of them: lift the head before `play` (#384) and set Z0 as the cutter tip's own height (#387).
+- **S3's files are written; none of them has been run** (2026-10-12). `scripts/bench-files.ts` builds
+  them through the app's own pipeline. The ladder comes back with the same motions it was cut with —
+  the only change is the tool header's `shoulderlength`, 12 → 0, to match the house inventory (a3,
+  2026-10-12; the cutter's shoulder is not a label's flute length), which is why the hashes moved to
+  `94d39f74` / `bf0cb09b` and why the sheets' §8 warnings are unchanged. New: `176-g32-stroke.nc` and its run sheet (the `G32`/`M370`
+  console steps, grid parameters blank until desk item 6, marked unverified), `284-pla-feed.json`
+  and the four `284-PLA-feed-coupon-F{350,500,700,900}.nc` with their coupon record, and
+  `185-v-groove.nc` — hand-written (a V-bit has no sweep), then put through the same verifier the
+  upload gate uses before it was written. **While the vise is unmeasured, no cell on this blank may
+  be wider than 34.1 mm across the jaws**: the 2 mm default band around the jaws, not `edgeMargin`,
+  is the limit, and 11 mm is the largest cap height the app accepts for a coupon label.
 - The 2026-10-04 single-file ladder is **superseded** by the `-row-A` / `-row-B` files and moved to
   `docs/bench/superseded/`. Its card copy (`/sd/gcodes/165-depth-ladder.nc`), which would cut into the moving jaw on today's
   clamping, was **deleted from the card on 2026-10-12** at the maintainer's request (`md5` now answers
@@ -74,7 +85,7 @@ text.) The flat to fit for S3/S4:
 | 5 | Makera Studio, **not connected to the machine**: the three reads in #268 (~30 min, cited); a Studio-made equivalent `.nc` for #176's diff | desk | #221, #176 |
 | 6 | Check the D0/D1 MDI logs for what Studio's "Auto Workpiece Leveling" sends | desk | the dome-compensation decision |
 | 7 | Print blanks on one recorded profile, 100 % infill, printed flipped (est. 4–6: ladder, +1 stroke test, 1–3 coupons, 2 for #176) | printer | S3, S4 |
-| 8 | Code and file prep once 1 and 2 exist: regenerate the ladder and its run sheet for the chosen cutter; hand-write `185-v-groove.nc`; the #284 coupon spec; the #176 60 mm stroke file **along the 76.2 mm length** (the 38.1 mm width cannot hold it); a Windows desktop build for #255 | desk | S1–S4 |
+| 8 | ~~Code and file prep~~ **done 2026-10-12**, one command (`casemaker-app/scripts/bench-files.ts`, plus `engrave-job.ts --coupon` for #284): the ladder and its run sheet for the chosen cutter (same motions as the one that was cut); `185-v-groove.nc`; `284-pla-feed.json` + its four programs; `176-g32-stroke.nc` **along the 76.2 mm length** (the 38.1 mm width cannot hold it); ~~a Windows desktop build for #255~~ closed in S1 | desk | S1–S4 |
 | 9 | Get a USB cable for the Z1 (no serial port on hand, 2026-10-08) | — | #304 |
 
 ## Every session opens the same way
@@ -134,16 +145,25 @@ the wizard's Auto Z and leveling can overwrite a console Z0 (D1's `G10 L20` move
 1. Wired-probe Z at each row centre.
 2. **#165 (and #209):** the depth ladder, cut once (no scrap blank), no `G32`, Z0 per row.
    Stopwatch it for D3's cutting half.
-3. **#176's bounded G32 test:** one 60 mm stroke **along the length** with `G32` active, depth
-   measured at both ends and the centre, on its own blank. If it fails, split long `G1` moves in
-   `post/z1.ts` before S4.
-4. **#284:** the feeds coupons, one program per feed value; fill in the coupon record; run
-   `feeds-readback.ts` (never hand-edit `<feeds-measured>`).
+3. **#176's bounded G32 test:** `176-g32-stroke.nc` — one 60 mm stroke **along the length** at
+   X 31.05 (the clear band), depth measured at both ends and the centre, on its own blank. Its run
+   sheet carries the two lines the file may not: `G32 R1 …` from the console **before** `play`, with
+   the grid numbers to be filled from Studio's Auto-Level log (desk item 6), and `M370` after. Both
+   marked unverified. If it fails, split long `G1` moves in `post/z1.ts` before S4.
+4. **#284:** `284-PLA-feed-coupon-F{350,500,700,900}.nc` (spec `284-pla-feed.json`), one program per
+   feed value, the row's own 500 among them; fill in `284-pla-feed-coupon-record.json`; run
+   `feeds-readback.ts` (never hand-edit `<feeds-measured>`). The cell loses 15–22 % of its area to
+   the 2 mm cutter (`item-detail-lost` in §8) and its size is capped by the unmeasured vise, not by
+   the blank — record whether the value was still readable, since that is what the readback needs.
 5. **#284 restart proof:** stop one coupon mid-cut, `generateRestart`, compare the floor across
    the seam.
-6. Last: swap to the 30° V-bit, `M491`, cut the **#185** grooves on the ladder blank. **Confirm
-   the groove placement first:** the brief says "the same X/Y band as Row B", which Row B
-   occupies; the front clear band is free.
+6. Last: swap to the 30° V-bit, `M491`, cut the **#185** grooves on the ladder blank:
+   `185-v-groove.nc`, four 10 mm grooves along +Y in the FRONT clear band (Y 4..14, in front of the
+   magnet pocket), X 6 / 14 / 22 / 30 at 0.6 / 0.8 / 1.0 / 1.2 mm deep, shallowest first. Caliper
+   each floor and compare with `w(d) = 0.3 + 2·d·tan 15°` = 0.622 / 0.729 / 0.836 / 0.943 mm;
+   the 0.8 mm groove is the 0.81 mm reveal depth, #185's own reading. **Confirm the groove placement
+   first:** the brief says "the same X/Y band as Row B", which Row B occupies; the front clear band
+   is free — and at X ≥ 6 the grooves clear the unmeasured jaws' 2 mm band.
 
 Consumables: the ladder blank, +1 for the stroke test, 1–3 coupon blanks; the flat and the V-bit.
 Unblocks: the #165 verdict, the #166 §7.2 table, #209, the Z-chain error, the G32 answer, the PLA

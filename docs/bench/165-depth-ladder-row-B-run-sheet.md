@@ -1,6 +1,6 @@
 # Run sheet — 165 depth ladder row B
 
-Generated 2026-10-12 · file `165-depth-ladder-row-B.nc` · sha256 `2c335055` · estimated cutting time 1 min 8 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08 (#281)) — a planning estimate, not a measured cycle time.)
+Generated 2026-10-12 · file `165-depth-ladder-row-B.nc` · sha256 `bf0cb09b` · estimated cutting time 1 min 8 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08 (#281)) — a planning estimate, not a measured cycle time.)
 
 ## 1 · What you need
 
@@ -79,6 +79,8 @@ Generated 2026-10-12 · file `165-depth-ladder-row-B.nc` · sha256 `2c335055` ·
 
 ---
 
-*Rendered from `buildRunSheet` (#207) by `casemaker-app/scripts/bench-files.ts`; the app’s `RunSheetView` renders the same structure. This is the sheet for #165’s depth ladder on the printed badge blank — its blanks are filled at the machine and the results go to #165 / `docs/bench/2026-10-bench-day-1.md` (E). No result is recorded here.*
+*Rendered from `buildRunSheet` (#207) by `casemaker-app/scripts/bench-files.ts`; the app’s `RunSheetView` renders the same structure. No result is recorded here.*
+
+*This is the sheet for #165’s depth ladder on the printed badge blank — its blanks are filled at the machine and the results go to #165 / `docs/bench/2026-10-bench-day-1.md` (E).*
 
 *Row A (“A over pocket”) is centred on the 45 × 13 mm magnet pocket — the unsupported-membrane test. Row B (“B clear”) is 12 mm behind it in the clear band. The job document has no field for the pocket, so the row names and the operator, not the diagram, carry that distinction (logged on #206’s dogfood issue).*

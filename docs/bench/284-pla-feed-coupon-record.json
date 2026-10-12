@@ -1,0 +1,62 @@
+{
+  "coupon": "284-pla-feed",
+  "title": "284 PLA feed coupon",
+  "parameter": "feed",
+  "material": "pla",
+  "toolKey": "inv:kz-o-flute-2-12",
+  "cuttingDiameter": 2,
+  "generatedOn": "2026-10-12",
+  "cutOn": null,
+  "baseOverride": {},
+  "note": "Fill \"verdict\" (ok / poor / broke), \"cutOn\" (YYYY-MM-DD) and any note per program. If more than one program cut ok, mark exactly one \"chosen\": true. Then run scripts/feeds-readback.ts on this file.",
+  "programs": [
+    {
+      "program": "284-pla-feed-f350",
+      "values": [
+        350
+      ],
+      "ncFile": "284-PLA-feed-coupon-F350.nc",
+      "sheetFile": "284-PLA-feed-coupon-F350-run-sheet.md",
+      "hash": "333c1d60",
+      "verdict": null,
+      "chosen": false,
+      "note": ""
+    },
+    {
+      "program": "284-pla-feed-f500",
+      "values": [
+        500
+      ],
+      "ncFile": "284-PLA-feed-coupon-F500.nc",
+      "sheetFile": "284-PLA-feed-coupon-F500-run-sheet.md",
+      "hash": "5b28e15c",
+      "verdict": null,
+      "chosen": false,
+      "note": ""
+    },
+    {
+      "program": "284-pla-feed-f700",
+      "values": [
+        700
+      ],
+      "ncFile": "284-PLA-feed-coupon-F700.nc",
+      "sheetFile": "284-PLA-feed-coupon-F700-run-sheet.md",
+      "hash": "b0d954be",
+      "verdict": null,
+      "chosen": false,
+      "note": ""
+    },
+    {
+      "program": "284-pla-feed-f900",
+      "values": [
+        900
+      ],
+      "ncFile": "284-PLA-feed-coupon-F900.nc",
+      "sheetFile": "284-PLA-feed-coupon-F900-run-sheet.md",
+      "hash": "fc93c782",
+      "verdict": null,
+      "chosen": false,
+      "note": ""
+    }
+  ]
+}

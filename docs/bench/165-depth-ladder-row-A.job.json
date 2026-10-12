@@ -128,7 +128,7 @@
     "angle": null,
     "halfAngle": null,
     "fluteLength": 12,
-    "shoulderLength": 12,
+    "shoulderLength": null,
     "stickout": null,
     "centreCutting": null
   },

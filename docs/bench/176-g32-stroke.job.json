@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "name": "176 g32 stroke",
+  "machineId": "Z1",
+  "jawClearance": 1,
+  "stock": {
+    "length": 38.1,
+    "width": 76.2,
+    "thickness": 3.81,
+    "material": "pla"
+  },
+  "labels": [],
+  "shapes": [],
+  "workholding": {
+    "kind": "vise",
+    "vise": {
+      "stockProud": 1.2,
+      "fixedJawThickness": 15,
+      "movingJawThickness": 15,
+      "jawLength": 80,
+      "jawStartY": -10,
+      "source": "default",
+      "uncertainty": 2
+    }
+  },
+  "toolKey": "inv:kz-o-flute-2-12",
+  "tool": {
+    "number": 1,
+    "id": "C1-BIT-O-FLUTE-2-12",
+    "name": "Spiral O single flute 2 × 12",
+    "typeText": "Flat End",
+    "shape": "flat",
+    "handleDiameter": 3.175,
+    "tipDiameter": 2,
+    "diameter": 2,
+    "cornerRadius": 0,
+    "angle": null,
+    "halfAngle": null,
+    "fluteLength": 12,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+  },
+  "minFloor": 1,
+  "edgeMargin": 1,
+  "sacrificial": {
+    "under": null,
+    "sides": {
+      "left": null,
+      "right": null,
+      "front": null,
+      "back": null
+    },
+    "source": "default"
+  },
+  "breakthrough": 0.3,
+  "customFonts": [],
+  "traces": [
+    {
+      "id": "trc-g32-stroke",
+      "kind": "line",
+      "name": "g32 stroke 60mm",
+      "position": {
+        "x": 31.05,
+        "y": 8.100000000000001
+      },
+      "rotation": 0,
+      "depth": 0.8,
+      "enabled": true,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          60
+        ]
+      ],
+      "closed": false
+    }
+  ]
+}
