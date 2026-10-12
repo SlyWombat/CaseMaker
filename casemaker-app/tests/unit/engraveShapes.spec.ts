@@ -252,6 +252,7 @@ describe('shapes reach the engravability check (#214)', () => {
       [{ id: 'c6', text: 'Circle "port" ⌀6', depth: 2, polygons: m[0]!.polygons }],
       tool,
       feeds.params,
+      Z1.rapidEstimate,
     );
     expect(ir.operations).toHaveLength(1);
     expect(ir.operations[0]!.moves.some((mv) => mv.kind === 'feed' && mv.z < 0)).toBe(true);

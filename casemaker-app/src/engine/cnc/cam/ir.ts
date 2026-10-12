@@ -40,9 +40,9 @@ export interface CamOperation {
   depth: number;
   moves: CamMove[];
   /**
-   * The operation's CYCLE estimate in seconds — cutting PLUS rapids at `ASSUMED_RAPID_MM_MIN`
-   * (#242), from `estimateCycleSeconds`. This is the one estimate the panel, the run sheet and
-   * the post's `TIME` record all read, so they cannot disagree.
+   * The operation's CYCLE estimate in seconds — cutting PLUS rapids, every move through the
+   * trapezoid (#242, #281), from `estimateCycleSeconds`. This is the one estimate the panel, the
+   * run sheet and the post's `TIME` record all read, so they cannot disagree.
    */
   estimatedSeconds: number;
 }
@@ -87,11 +87,12 @@ export const SAFE_Z = 5;
 export const HOP_Z = 1;
 
 /**
- * Estimated CUTTING time in seconds for one operation's moves: FEED moves only,
- * `Σ distance / f × 60`. Rapids are excluded — a rapid's rate is the controller's own seek
- * rate, which we do not know and the header does not carry (/Makera-Parity.md §11.2). This is
- * the cutting COMPONENT of the cycle estimate (`estimateCycleSeconds`); #242's single number is
- * the cycle estimate, not this one.
+ * Estimated CUTTING time in seconds for one operation's moves, as the closed-form sum:
+ * FEED moves only, `Σ distance / f × 60`, with no acceleration term. This is the cutting
+ * COMPONENT of the cycle estimate (`estimateCycleSeconds`); #242's single number is the cycle
+ * estimate, not this one, and since #281 the two are no longer in fixed ratio — the cycle
+ * estimate times the same feeds through the trapezoid, so it exceeds this sum by the moves'
+ * accelerate/decelerate terms and by the rapids this one excludes.
  *
  * Distance is the full 3D length to the move's endpoint, so a plunge counts its Z travel.
  * The first move contributes nothing if it is a feed (no prior point); runs of moves always
@@ -113,30 +114,71 @@ export function estimateSeconds(moves: readonly CamMove[]): number {
 }
 
 /**
- * The assumed RAPID rate for the cycle estimate, mm/min (#242).
+ * The rapid model a cycle estimate times rapids with, and the acceleration it times every move
+ * through (#281).
  *
- * A rapid carries no `f` in the file (#184) and the controller's real seek rate is not ours to
- * state, so this is a labelled ESTIMATE assumption — NOT a `maxRapid` the post would ever
- * command (/Makera-Parity.md §11.2 refuses an `F` on a `G0`). It is the same number the
- * transport draws rapids at (`DISPLAY_RAPID_MM_MIN` in `workers/sim/session.ts`, which now
- * imports this constant), so the drawn clock and the printed estimate assume one rate.
+ * ESTIMATE ONLY. Nothing here is ever commanded: a rapid carries no `F` in the file (#184) and the
+ * post must never put one on a `G0` (`/Makera-Parity.md` §11.2), so this is NOT a `maxRapid` and no
+ * reader may take it as a ceiling to clamp to — {@link MillProfile.maxCutFeed} is the one field
+ * that limits the program, and it limits CUTTING moves alone.
  *
- * PROVISIONAL — this is the display constant, not a measurement of the machine. `#208 D3`
- * times an air run and replaces it; source: /Makera-Parity.md §14.2 A1.
+ * The three numbers are the controller's own configuration, read over `config-get sd` on
+ * 2026-10-07 (X/Y `alpha_max_rate` 1200, Z `gamma_max_rate` 600, `acceleration` 150 mm/s²),
+ * bracketed by one stopwatch sample of an 88.4 mm X-only rapid on 2026-10-08 that came in at
+ * 1060–1360 mm/min — consistent with the config and NOT a measurement of the machine. `#208 D3`, a
+ * timed air run, is the end-to-end check that closes it; the estimate is expected to come in LOW
+ * against a real run until that runs (#281).
  */
-export const ASSUMED_RAPID_MM_MIN = 3000;
+export interface RapidEstimate {
+  /** A rapid moving in X and/or Y, mm/min: the controller's own X/Y ceiling. */
+  xyMmPerMin: number;
+  /** A rapid moving in Z ALONE, mm/min: the controller's Z ceiling, half the X/Y one. */
+  zMmPerMin: number;
+  /** Acceleration, mm/s², applied to every timed move — rapid and feed alike. */
+  accelMmPerS2: number;
+  /** Where those numbers came from, in words, for the panel and the run sheet to quote. */
+  source: string;
+}
 
 /**
- * Estimated CYCLE time in seconds for one operation's moves — cutting PLUS rapids at one named
- * rate (#242). This is THE one estimate: the Engrave panel's row and the run sheet read the
- * `estimatedSeconds` this populates, and `postZ1` writes its program-wide sum into
- * `;@MKR|TIME`, so all three come from this function and cannot disagree.
- *
- * A feed is timed at its own `f`; a rapid at `rapidMmPerMin` (the assumption, stated where the
- * number is shown). As in `estimateSeconds`, the first move contributes nothing — the IR does
- * not carry the start point, and a run begins with a rapid in practice.
+ * The rate a rapid moving `(dx, dy, dz)` is timed at: Z's own ceiling when it moves in Z alone,
+ * otherwise the X/Y one. The ONE place that choice is made, so the estimate and the drawn clock
+ * cannot disagree about which ceiling a given rapid is under.
  */
-export function estimateCycleSeconds(moves: readonly CamMove[], rapidMmPerMin: number = ASSUMED_RAPID_MM_MIN): number {
+export function rapidRate(rapid: RapidEstimate, dx: number, dy: number, dz: number): number {
+  return dx === 0 && dy === 0 && dz !== 0 ? rapid.zMmPerMin : rapid.xyMmPerMin;
+}
+
+/**
+ * Seconds `distance` mm takes at `rate` mm/min through the trapezoid: the move accelerates to the
+ * rate and decelerates back to a stop, so it is `d/v + v/a` when it is long enough to reach `v`
+ * and `2·√(d/a)` when it is not (#281). `accel` is mm/s².
+ *
+ * ONE function for every timed move — the estimate here and the simulation's drawn clock
+ * (`workers/sim/session.ts`) both call it, so the printed figure and the transport cannot time the
+ * same move two ways. A non-positive rate, acceleration or distance times nothing (0 s): that is
+ * the same rule a move with an unknown start or end already gets, and it is what the transport's
+ * no-machine session falls back to rather than inventing a rate (#367).
+ */
+export function moveSeconds(distance: number, rate: number, accel: number): number {
+  if (!(rate > 0) || !(accel > 0) || !(distance > 0)) return 0;
+  const v = rate / 60; // mm/s
+  return distance >= (v * v) / accel ? distance / v + v / accel : 2 * Math.sqrt(distance / accel);
+}
+
+/**
+ * Estimated CYCLE time in seconds for one operation's moves — cutting PLUS rapids, every move
+ * timed through the trapezoid (#242, #281). This is THE one estimate: the Engrave panel's row and
+ * the run sheet read the `estimatedSeconds` this populates, and `postZ1` writes its program-wide
+ * sum into `;@MKR|TIME`, so all three come from this function and cannot disagree.
+ *
+ * A feed is timed at its own `f`; a rapid at `rapidRate` of the machine the job is for. `rapid` is
+ * REQUIRED and there is no default: the machine is the caller's to name (#347), a second mill
+ * brings its own numbers, and a default would be a second source for a number this file exists to
+ * keep single. As in `estimateSeconds`, the first move contributes nothing — the IR does not carry
+ * the start point, and a run begins with a rapid in practice.
+ */
+export function estimateCycleSeconds(moves: readonly CamMove[], rapid: RapidEstimate): number {
   let seconds = 0;
   let previous: CamMove | null = null;
   for (const move of moves) {
@@ -144,8 +186,8 @@ export function estimateCycleSeconds(moves: readonly CamMove[], rapidMmPerMin: n
       const dx = move.x - previous.x;
       const dy = move.y - previous.y;
       const dz = move.z - previous.z;
-      const rate = move.kind === 'feed' ? move.f : rapidMmPerMin;
-      if (rate > 0) seconds += (Math.hypot(dx, dy, dz) / rate) * 60;
+      const rate = move.kind === 'feed' ? move.f : rapidRate(rapid, dx, dy, dz);
+      seconds += moveSeconds(Math.hypot(dx, dy, dz), rate, rapid.accelMmPerS2);
     }
     previous = move;
   }
@@ -157,8 +199,8 @@ export function estimateCycleSeconds(moves: readonly CamMove[], rapidMmPerMin: n
  * The post writes `Math.round` of this into `TIME`, and `CamOperation.estimatedSeconds` for
  * each operation is the same function, so the panel, the sheet and the header agree.
  */
-export function estimateIRCycleSeconds(ir: ToolpathIR, rapidMmPerMin: number = ASSUMED_RAPID_MM_MIN): number {
-  return ir.operations.reduce((s, op) => s + estimateCycleSeconds(op.moves, rapidMmPerMin), 0);
+export function estimateIRCycleSeconds(ir: ToolpathIR, rapid: RapidEstimate): number {
+  return ir.operations.reduce((s, op) => s + estimateCycleSeconds(op.moves, rapid), 0);
 }
 
 /** The machine state two IRs must share for their moves to belong to one program. */

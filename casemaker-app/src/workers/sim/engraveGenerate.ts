@@ -393,7 +393,14 @@ function frameProgram(
     safeZ: FRAME_Z,
     hopZ: HOP_Z,
     operations: [
-      { number: 1, name: 'Frame trace', labelId: '', depth: 0, moves, estimatedSeconds: estimateCycleSeconds(moves) },
+      {
+        number: 1,
+        name: 'Frame trace',
+        labelId: '',
+        depth: 0,
+        moves,
+        estimatedSeconds: estimateCycleSeconds(moves, machine.rapidEstimate),
+      },
     ],
   };
   const posted = postZ1(frameIr, ctx, machine);
@@ -495,7 +502,7 @@ export function engraveGenerate(
   // 3. the CAM core (#172), on the SAME opened polygons stage 1 measured.
   let ir: ReturnType<typeof generateEngrave>;
   try {
-    ir = generateEngrave(tl, regions, tool, feeds.params);
+    ir = generateEngrave(tl, regions, tool, feeds.params, mill.rapidEstimate);
     // #287 — single-line traces (#219) are their own CAM: the cutter's centre follows the path,
     // so there is no region to open, no offset and no pocketing. They are appended AFTER the
     // region operations, so a trace can shift no pocket's ordering, and a job with none joins an
@@ -509,7 +516,7 @@ export function engraveGenerate(
     // unweakened). A trace wants to be cut BEFORE a cut-out releases the part, so #218 should
     // place traces ahead of its cut-out class rather than leaving this append at the end — a
     // released part can shift under the tape, which is exactly what the drills-first rule avoids.
-    const traceIr = generateTrace(plan.traces, tool, feeds.params);
+    const traceIr = generateTrace(plan.traces, tool, feeds.params, mill.rapidEstimate);
     if (traceIr.operations.length > 0) ir = concatToolpathIR(ir, traceIr);
   } catch (e) {
     return stop('cam', { feeds, message: e instanceof Error ? e.message : String(e) });

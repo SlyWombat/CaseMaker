@@ -619,7 +619,8 @@ Both can be true at once, and in stock Smoothieware the seek rate is 3× the fee
 > figure**: both lines are commented out, so the firmware is using its compiled-in default
 > until something sets it. Treat 2000 and 3000 alike — as readings of a file, not of hardware —
 > and get the real traverse rate from #208 D3's timed air run, which is also what calibrates
-> `ASSUMED_RAPID_MM_MIN` (#242).
+> the machine profile's `rapidEstimate` (#242; it was a single `ASSUMED_RAPID_MM_MIN` constant
+> until #281 split it into X/Y, Z and acceleration, all three from `config-get sd`).
 
 **Neither 6000 nor those firmware numbers are Z1 figures.** Every rate line in
 `configZ1.default` is commented out, so the firmware uses its compiled-in defaults, and
@@ -793,7 +794,11 @@ Each is cheap, changes something already built or already scheduled, and needs n
   plus rapids at one named PROVISIONAL rapid rate (the display constant is already that
   number; #208 D3 times an air run and calibrates it) — show it in the Simulate panel on load,
   in the Engrave panel's Generate row and on the run sheet, and write *that* into `TIME` with
-  the assumption in a header comment. This does not collide with §11.2's "no `maxRapid`
+  the assumption in a header comment.
+  *Landed:* #242 did exactly this, and #281 replaced the provisional 3000 mm/min constant with
+  the machine profile's own `rapidEstimate` — X/Y 1 200, Z 600, 150 mm/s² from `config-get sd`
+  — timed through a trapezoid for rapids and feeds alike, in one `moveSeconds` shared by the
+  estimate and the transport's drawn clock. `#208 D3`'s timed air run is still what closes it. This does not collide with §11.2's "no `maxRapid`
   field": §11.2 refuses to *command* a rapid rate (`F` on `G0`); an estimate's assumed rate is
   a labelled assumption, which the transport already makes. **So we should not** add VC's
   user-editable scale factor (a knob; the project rule is fix the default) — the honest

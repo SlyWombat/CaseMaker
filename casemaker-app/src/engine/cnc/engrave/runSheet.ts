@@ -1,4 +1,4 @@
-import { ASSUMED_RAPID_MM_MIN } from '@/engine/cnc/cam/ir';
+import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
@@ -65,8 +65,8 @@ import type { Mm } from '@/types/units';
 
 /**
  * The CAM summary #206 returns on `EngraveGenerated.cam`. Structural, so the real object is
- * assignable. `estimatedSeconds` is the CYCLE estimate — cutting PLUS rapids at
- * `ASSUMED_RAPID_MM_MIN` (#242).
+ * assignable. `estimatedSeconds` is the CYCLE estimate — cutting PLUS rapids, every move through
+ * the trapezoid on the job machine's rapid model (#242, #281).
  */
 export interface RunSheetCamSummary {
   operations: number;
@@ -226,12 +226,17 @@ export interface RunSheetStackUp {
 }
 
 /**
- * The note beside the header's time estimate (#242). The number is a CYCLE estimate — cutting
- * plus rapids at `ASSUMED_RAPID_MM_MIN` — so it is a planning figure, not a measured cycle time.
- * Built from the constant so the printed rate cannot drift from the one the estimate uses.
+ * The note beside the header's time estimate (#242, #281). The number is a CYCLE estimate —
+ * cutting plus rapids, every move through the trapezoid — so it is a planning figure, not a
+ * measured cycle time. Built from the profile's own rapid model so the printed rates cannot drift
+ * from the ones the estimate is timed with, and so a second mill prints its own.
  */
-export const RAPID_ASSUMPTION_NOTE =
-  `cutting + rapids at an assumed ${ASSUMED_RAPID_MM_MIN} mm/min — a planning estimate, not a measured cycle time.`;
+export function rapidAssumptionNote(rapid: RapidEstimate): string {
+  return (
+    `cutting + rapids through the trapezoid, timed on a rapid model of ${rapid.xyMmPerMin} mm/min XY / ` +
+    `${rapid.zMmPerMin} mm/min Z at ${rapid.accelMmPerS2} mm/s² — a planning estimate, not a measured cycle time.`
+  );
+}
 
 export interface RunSheetHeader {
   jobName: string;
@@ -251,7 +256,7 @@ export interface RunSheetHeader {
   fileHash: string;
   /** Formatted cycle estimate, from `generated.cam.estimatedSeconds`. */
   estimatedTime: string;
-  /** Always `RAPID_ASSUMPTION_NOTE` — says the number is a planning estimate (#242). */
+  /** Always `rapidAssumptionNote` for the job's machine — says the number is a planning estimate (#242, #281). */
   estimatedTimeNote: string;
 }
 
@@ -908,17 +913,19 @@ export function buildRunSheet(
   const diameter = tool ? cuttingDiameter(tool) : null;
   const params = generated.feeds && generated.feeds.ok ? generated.feeds.params : null;
   const nc = generated.nc;
+  // #347 — the JOB's machine. Read once, here, rather than handed in: the name is the profile's and
+  // no saved calibration touches it, so the sheet and the panel cannot disagree about which machine
+  // this is even when the panel is showing a calibrated frame. Its rapid model is read from the same
+  // profile (#281), so the note beside the estimate quotes the numbers the estimate was timed with.
+  const machine = jobMachine(job);
   const header: RunSheetHeader = {
     jobName: job.name,
-    // #347 — the JOB's machine. Read here rather than handed in: the name is the profile's and no
-    // saved calibration touches it, so the sheet and the panel cannot disagree about which machine
-    // this is even when the panel is showing a calibrated frame.
-    machine: jobMachine(job).name,
+    machine: machine.name,
     generatedOn: now.toISOString().slice(0, 10),
     fileName: runSheetFileName(job.name),
     fileHash: nc === null ? '' : sha256Hex(nc).slice(0, 8),
     estimatedTime: generated.cam ? formatDuration(generated.cam.estimatedSeconds) : 'unknown',
-    estimatedTimeNote: RAPID_ASSUMPTION_NOTE,
+    estimatedTimeNote: rapidAssumptionNote(machine.rapidEstimate),
   };
 
   // ---- 1 · What you need ---------------------------------------------------------------------

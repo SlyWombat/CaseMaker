@@ -25,6 +25,7 @@
 import { z } from 'zod';
 import type { Mm, Vec2 } from '@/types/units';
 import type { StockMaterial } from '@/types/engraveJob';
+import type { RapidEstimate } from './cam/ir';
 import { STOCK_MATERIALS } from './materials';
 
 export interface AxisRange {
@@ -160,11 +161,27 @@ export interface MillProfile extends MachineIdentity {
    * guessed field would be worse than none (`/Makera-Parity.md` §11.2).
    */
   maxCutFeed: number;
+  /**
+   * The machine's rapid model, for the CYCLE ESTIMATE only (#281): the rate a rapid is timed at and
+   * the acceleration every timed move is run through.
+   *
+   * The pairing with {@link maxCutFeed} above is the point. That field is the one limit on the
+   * program and it bounds CUTTING moves; this one bounds nothing — it is a labelled assumption a
+   * figure is computed from, and the post never writes it as an `F` (/Makera-Parity.md §11.2). A
+   * reader looking for "how fast may this machine go" wants `maxCutFeed`; this is "what do we
+   * assume it goes, to print a number".
+   */
+  rapidEstimate: RapidEstimate;
   maxRpm: number;
   /** `isATC=0`: a manual tool change, which is what makes `M490.1`/`M490.2` the tool-change path. */
   hasATC: false;
   toolSlots: 0;
-  /** Sourced. Disabled, and past the vendor figure — see {@link SoftEndstop}. Not read by `insideEnvelope`. */
+  /**
+   * The controller's software endstops, as read off the machine (`config-get sd`, #208 B2): the
+   * Z1's literal is `enabled: true` since #279, bounding cuts short of the declared travel.
+   * Carried for the profile's own account of the machine; `insideEnvelope` does NOT consult it,
+   * and {@link envelope} is the field that describes where the head may go.
+   */
   softEndstop: SoftEndstop;
   capabilities: {
     /** Optional 4th-axis module. Owned; not simulated in V1. */
@@ -452,6 +469,16 @@ export const Z1: MillProfile = {
   materials: ['softwood', 'hardwood', 'abs', 'acrylic', 'aluminium-6061', 'aluminium-7075', 'brass', 'copper'],
   envelope: { x: { min: -200, max: 0 }, y: { min: -200, max: 0 }, z: { min: -100, max: 0 } },
   maxCutFeed: 1200,
+  // The cycle estimate's rapid model (#281), from the controller's own config (`config-get sd`,
+  // 2026-10-07): X/Y `alpha_max_rate` 1200, Z `gamma_max_rate` 600, `acceleration` 150 mm/s². One
+  // stopwatch sample (2026-10-08) agreed to within its own spread; `#208 D3`'s timed air run closes
+  // it. NOT a limit — nothing here clamps, and no `F` is ever written from it (§11.2).
+  rapidEstimate: {
+    xyMmPerMin: 1200,
+    zMmPerMin: 600,
+    accelMmPerS2: 150,
+    source: 'config-get sd, read on the machine (#281, 2026-10-07)',
+  },
   maxRpm: 13000,
   hasATC: false,
   toolSlots: 0,
@@ -662,6 +689,15 @@ export const millProfileSchema = z.object({
     z: z.object({ min: finite, max: finite }),
   }),
   maxCutFeed: finite.positive(),
+  // #281 — the estimate's rapid model. Positive like the other motion numbers: a zero rate would
+  // make a rapid instantaneous rather than estimated, which is a claim about the machine this field
+  // is not allowed to make. `source` is required for the same reason every other `source` is.
+  rapidEstimate: z.object({
+    xyMmPerMin: finite.positive(),
+    zMmPerMin: finite.positive(),
+    accelMmPerS2: finite.positive(),
+    source: z.string().min(1),
+  }),
   maxRpm: finite.positive(),
   hasATC: z.literal(false),
   toolSlots: z.literal(0),

@@ -144,7 +144,7 @@ function openedRegion(text: string, size: number): Polygons {
 describe('generateEngrave (#172)', () => {
   it('10 x 5 x 1 deep at step-down 0.4 makes three passes at -0.4, -0.8, -1.0', () => {
     const region = rectRegion(10, 5);
-    const ir = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], TOOL, PARAMS);
+    const ir = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], TOOL, PARAMS, Z1.rapidEstimate);
     expect(ir.operations.length).toBe(1);
     const op = ir.operations[0]!;
     expect(distinctFeedZs(op.moves)).toEqual([-0.4, -0.8, -1]);
@@ -156,7 +156,7 @@ describe('generateEngrave (#172)', () => {
 
   it('every cutting move lies inside the region shrunk by r - 0.001', () => {
     const region = rectRegion(10, 5);
-    const ir = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], TOOL, PARAMS);
+    const ir = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], TOOL, PARAMS, Z1.rapidEstimate);
     const shrunk = makeClipperOffset(tl)(region, -(R - 0.001));
     const moves = ir.operations[0]!.moves;
     for (let i = 0; i < moves.length; i++) {
@@ -173,7 +173,7 @@ describe('generateEngrave (#172)', () => {
     const holes = region.filter((c) => signedArea(c as Pt[]) < 0);
     expect(holes.length).toBeGreaterThan(0);
 
-    const ir = generateEngrave(tl, [{ id: 'o', text: 'O', depth: 1, polygons: region }], TOOL, PARAMS);
+    const ir = generateEngrave(tl, [{ id: 'o', text: 'O', depth: 1, polygons: region }], TOOL, PARAMS, Z1.rapidEstimate);
     const moves = ir.operations[0]!.moves;
 
     // Grow each hole by r - 0.001 and require no feed endpoint inside it.
@@ -190,13 +190,13 @@ describe('generateEngrave (#172)', () => {
 
     // A plain rectangle has only outer contours, so every traversed loop is negative.
     const rect = rectRegion(10, 5);
-    const rectIr = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: rect }], TOOL, PARAMS);
+    const rectIr = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: rect }], TOOL, PARAMS, Z1.rapidEstimate);
     const rectLoops = reconstructLoops(rectIr.operations[0]!.moves);
     expect(rectLoops.length).toBeGreaterThan(0);
     for (const loop of rectLoops) expect(signedArea(loop)).toBeLessThan(0);
 
     // The 'O' has islands: the outer loops stay negative and the island loops are positive.
-    const oIr = generateEngrave(tl, [{ id: 'o', text: 'O', depth: 1, polygons: openedRegion('O', 14) }], TOOL, PARAMS);
+    const oIr = generateEngrave(tl, [{ id: 'o', text: 'O', depth: 1, polygons: openedRegion('O', 14) }], TOOL, PARAMS, Z1.rapidEstimate);
     const oAreas = reconstructLoops(oIr.operations[0]!.moves).map(signedArea);
     expect(oAreas.some((a) => a < 0)).toBe(true);
     expect(oAreas.some((a) => a > 0)).toBe(true);
@@ -205,7 +205,7 @@ describe('generateEngrave (#172)', () => {
   it('rings are cut innermost first: the first contour has the smallest box, the last the largest (9 x 4)', () => {
     // One depth pass so the loops are exactly the rings, in cut order (#173 comment 3).
     const params: CutParams = { ...PARAMS, stepDown: 1 };
-    const ir = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: rectRegion(10, 5) }], TOOL, params);
+    const ir = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: rectRegion(10, 5) }], TOOL, params, Z1.rapidEstimate);
     const loops = reconstructLoops(ir.operations[0]!.moves);
     expect(loops.length).toBeGreaterThan(1);
 
@@ -226,7 +226,7 @@ describe('generateEngrave (#172)', () => {
 
   it('every feed uses the cutting or plunge feed, none above the Z1 cap; every XY rapid clears hopZ', () => {
     const region = rectRegion(10, 5);
-    const ir = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], TOOL, PARAMS);
+    const ir = generateEngrave(tl, [{ id: 'a', text: 'A', depth: 1, polygons: region }], TOOL, PARAMS, Z1.rapidEstimate);
     const moves = ir.operations[0]!.moves;
     for (const m of moves) {
       if (m.kind === 'feed') {
@@ -249,7 +249,7 @@ describe('generateEngrave (#172)', () => {
       { id: 'a', text: 'A', depth: 1, polygons: rectRegion(6, 4, 10, 10) },
       { id: 'b', text: 'B', depth: 0.5, polygons: rectRegion(6, 4, 50, 10) },
     ];
-    const ir = generateEngrave(tl, labels, TOOL, PARAMS, 'nearest');
+    const ir = generateEngrave(tl, labels, TOOL, PARAMS, Z1.rapidEstimate, 'nearest');
     expect(ir.operations.map((o) => o.number)).toEqual([1, 2, 3]);
     const passes = new Map(ir.operations.map((o) => [o.depth, distinctFeedZs(o.moves).length]));
     expect(passes.get(2)).toBe(5);
@@ -260,8 +260,8 @@ describe('generateEngrave (#172)', () => {
 
   it('is deterministic for identical input', () => {
     const labels: EngraveRegion[] = [{ id: 'a', text: 'A', depth: 1, polygons: rectRegion(10, 5) }];
-    const first = generateEngrave(tl, labels, TOOL, PARAMS);
-    const second = generateEngrave(tl, labels, TOOL, PARAMS);
+    const first = generateEngrave(tl, labels, TOOL, PARAMS, Z1.rapidEstimate);
+    const second = generateEngrave(tl, labels, TOOL, PARAMS, Z1.rapidEstimate);
     expect(second.operations).toEqual(first.operations);
     const a = first.operations[0]!;
     const b = second.operations[0]!;
@@ -275,7 +275,7 @@ describe('generateEngrave (#172)', () => {
       .filter((l) => l.enabled && l.text.trim().length > 0)
       .map((l) => ({ id: l.id, text: l.text, depth: l.depth, polygons: openedRegionForLabel(l) }));
     const start = performance.now();
-    const ir = generateEngrave(tl, labels, TOOL, PARAMS);
+    const ir = generateEngrave(tl, labels, TOOL, PARAMS, Z1.rapidEstimate);
     const elapsed = performance.now() - start;
     expect(ir.operations.length).toBe(3);
     for (const op of ir.operations) expect(op.moves.length).toBeGreaterThan(0);
@@ -286,9 +286,9 @@ describe('generateEngrave (#172)', () => {
 
   it('does not leak wasm handles across 100 runs', () => {
     const labels: EngraveRegion[] = [{ id: 'a', text: 'A', depth: 1, polygons: rectRegion(10, 5) }];
-    const first = generateEngrave(tl, labels, TOOL, PARAMS).operations[0]!.moves.length;
-    for (let i = 0; i < 100; i++) generateEngrave(tl, labels, TOOL, PARAMS);
-    expect(generateEngrave(tl, labels, TOOL, PARAMS).operations[0]!.moves.length).toBe(first);
+    const first = generateEngrave(tl, labels, TOOL, PARAMS, Z1.rapidEstimate).operations[0]!.moves.length;
+    for (let i = 0; i < 100; i++) generateEngrave(tl, labels, TOOL, PARAMS, Z1.rapidEstimate);
+    expect(generateEngrave(tl, labels, TOOL, PARAMS, Z1.rapidEstimate).operations[0]!.moves.length).toBe(first);
   });
 });
 
@@ -332,7 +332,7 @@ describe('operation names (#214 work item 4)', () => {
       // No `name`: a label keeps the untouched `Engrave "<text>"` fallback.
       { id: 'l', text: 'CASE', depth: 2, polygons: rectRegion(6, 4, 40, 10) },
     ];
-    const ir = generateEngrave(tl, regions, TOOL, PARAMS);
+    const ir = generateEngrave(tl, regions, TOOL, PARAMS, Z1.rapidEstimate);
     expect(ir.operations.map((o) => o.name)).toContain('[T1]Pocket rect 20×10 1.0mm');
     expect(ir.operations.map((o) => o.name)).toContain('[T1]Engrave "CASE" 2.0mm');
 

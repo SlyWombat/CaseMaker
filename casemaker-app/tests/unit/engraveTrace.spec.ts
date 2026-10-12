@@ -132,7 +132,7 @@ function sweptPolygons(paths: Pt[][], closed: boolean[], radius: number): Polygo
 describe('cam/trace (#219)', () => {
   it('a 20 mm line at depth 1, one pass: one plunge, one 20 mm feed, one retract', () => {
     const t = trace({ paths: [[[0, 0], [20, 0]]], closed: [false] });
-    const ir = generateTrace([t], TOOL, { ...PARAMS, stepDown: 1 });
+    const ir = generateTrace([t], TOOL, { ...PARAMS, stepDown: 1 }, Z1.rapidEstimate);
 
     expect(ir.operations).toHaveLength(1);
     const op = ir.operations[0]!;
@@ -159,7 +159,7 @@ describe('cam/trace (#219)', () => {
 
   it('depth 1 at step-down 0.4 makes three passes, each with its own plunge', () => {
     const t = trace({ paths: [[[0, 0], [20, 0]]], closed: [false] });
-    const op = generateTrace([t], TOOL, PARAMS).operations[0]!;
+    const op = generateTrace([t], TOOL, PARAMS, Z1.rapidEstimate).operations[0]!;
     expect(feedZs(op.moves)).toEqual([-0.4, -0.8, -1]);
     expect(plunges(op.moves)).toHaveLength(3);
     // Every travel is still the full 20 mm, once per pass.
@@ -173,7 +173,7 @@ describe('cam/trace (#219)', () => {
       closed: [true],
       depth: 0.5,
     });
-    const op = generateTrace([t], TOOL, { ...PARAMS, stepDown: 0.5 }).operations[0]!;
+    const op = generateTrace([t], TOOL, { ...PARAMS, stepDown: 0.5 }, Z1.rapidEstimate).operations[0]!;
 
     const trav = travels(op.moves);
     // Four edges, the last closing back on the start point.
@@ -199,7 +199,7 @@ describe('cam/trace (#219)', () => {
   it('nearest ordering starts with the trace closest to the origin', () => {
     const far = trace({ id: 'far', name: 'Far', paths: [[[50, 50], [60, 50]]], closed: [false] });
     const near = trace({ id: 'near', name: 'Near', paths: [[[2, 2], [8, 2]]], closed: [false] });
-    const ir = generateTrace([far, near], TOOL, { ...PARAMS, stepDown: 1 });
+    const ir = generateTrace([far, near], TOOL, { ...PARAMS, stepDown: 1 }, Z1.rapidEstimate);
     expect(ir.operations.map((o) => o.labelId)).toEqual(['near', 'far']);
     expect(ir.operations.map((o) => o.number)).toEqual([1, 2]);
   });
@@ -359,7 +359,7 @@ describe('trace oracle (#219)', () => {
     ok: boolean;
     worst: { underCut: number; overCut: number };
   } {
-    const ir = generateTrace([program], TOOL, { ...PARAMS, stepDown: 1 });
+    const ir = generateTrace([program], TOOL, { ...PARAMS, stepDown: 1 }, Z1.rapidEstimate);
     const posted = postZ1(ir, CTX, Z1);
     if (!posted.ok) throw new Error(`post refused: ${JSON.stringify(posted.errors)}`);
 

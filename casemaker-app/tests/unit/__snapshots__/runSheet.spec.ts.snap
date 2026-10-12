@@ -96,7 +96,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
   },
   "header": {
     "estimatedTime": "1 min 35 s",
-    "estimatedTimeNote": "cutting + rapids at an assumed 3000 mm/min — a planning estimate, not a measured cycle time.",
+    "estimatedTimeNote": "cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² — a planning estimate, not a measured cycle time.",
     "fileHash": "a377421c",
     "fileName": "Untitled-engrave-job.nc",
     "generatedOn": "2026-10-04",
@@ -392,7 +392,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
   },
   "header": {
     "estimatedTime": "1 min 35 s",
-    "estimatedTimeNote": "cutting + rapids at an assumed 3000 mm/min — a planning estimate, not a measured cycle time.",
+    "estimatedTimeNote": "cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² — a planning estimate, not a measured cycle time.",
     "fileHash": "a377421c",
     "fileName": "Untitled-engrave-job.nc",
     "generatedOn": "2026-10-04",

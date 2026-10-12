@@ -59,7 +59,7 @@ function defaultJobNc(job: EngraveJob): string {
   const labels: EngraveRegion[] = job.labels
     .filter((l) => l.enabled && l.text.trim().length > 0)
     .map((l) => ({ id: l.id, text: l.text, depth: l.depth, polygons: opened(l) }));
-  const ir = generateEngrave(tl, labels, tool, feeds.params);
+  const ir = generateEngrave(tl, labels, tool, feeds.params, Z1.rapidEstimate);
 
   const ctx: PostContext = {
     jobName: job.name,

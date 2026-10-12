@@ -241,7 +241,8 @@ source.
 **Playback** — *planned (#198)*. A transport bar at the bottom of the viewport will carry
 start, step-back, play/pause, step-forward and run-to-completion, speeds of 1×, 5×, 20× and
 100×, and a scrubber whose only tick marks are the program's **pause points**. The
-read-out is **simulated time**, not a cycle-time estimate — rapids use a display-only rate.
+read-out is **simulated time**, not a measured cycle time — rapids are timed on the machine
+profile's rapid model (#281), the same model the printed estimate uses.
 Material updates at checkpoints, not every frame, so the tool moves smoothly over a still
 stock between them. When the program reaches a tool change, playback **stops at the pause**,
 names the change and waits: a virtual tool swap is a pause, not an error, unless you said the

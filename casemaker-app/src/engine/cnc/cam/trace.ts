@@ -33,6 +33,7 @@ import {
   SAFE_Z,
   type CamMove,
   type CamOperation,
+  type RapidEstimate,
   type ToolpathIR,
 } from './ir';
 
@@ -140,13 +141,16 @@ function buildTraceMoves(trace: TracePaths, params: CutParams): CamMove[] {
  *
  * `traces` are `PartPlan.traces` in document order; `tool` must be a plain flat end mill
  * (`cuttingRadiusForSweep`), and `params` arrive from `feedsFor` (#202) — this module owns no
- * feeds, RPM or step values. `order` is the ordering strategy; only `'nearest'` exists in V1,
- * matching `generateEngrave`.
+ * feeds, RPM or step values. `rapid` is the machine's rapid model for the operation's
+ * `estimatedSeconds` (#281), required and placed before `order` for the reason `generateEngrave`
+ * states. `order` is the ordering strategy; only `'nearest'` exists in V1, matching
+ * `generateEngrave`.
  */
 export function generateTrace(
   traces: readonly TracePaths[],
   tool: Tool,
   params: CutParams,
+  rapid: RapidEstimate,
   order: 'nearest' = 'nearest',
 ): ToolpathIR {
   const radiusResult = cuttingRadiusForSweep(tool);
@@ -166,7 +170,7 @@ export function generateTrace(
       labelId: trace.id,
       depth: trace.depth,
       moves,
-      estimatedSeconds: estimateCycleSeconds(moves),
+      estimatedSeconds: estimateCycleSeconds(moves, rapid),
     };
   });
 

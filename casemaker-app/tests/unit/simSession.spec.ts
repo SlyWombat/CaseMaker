@@ -349,7 +349,7 @@ describe('simPath: the whole path, with kinds and times (#197)', () => {
   // are the spindle start and the four moves.
   const LINES_193 = ['G90 G21', 'T1 M6', 'S12000 M3', 'G0 X10 Y10 Z5', 'G1 Z-1 F200', 'G1 X30 F500', 'G0 Z5', 'M5', 'M02'].join('\n');
 
-  it('the #193 program: four vertices, kinds [0, 1, 1, 0], a 4.32 s clock', () => {
+  it('no machine: four vertices, kinds [0, 1, 1, 0], and a FEEDS-ONLY clock (#281)', () => {
     const { session } = loaded(LINES_193, setup({ startingTool: 1 }));
     const p = session.simPath();
     expect(Array.from(p.kind)).toEqual([0, 1, 1, 0]);
@@ -358,11 +358,32 @@ describe('simPath: the whole path, with kinds and times (#197)', () => {
     for (let i = 1; i < steps.length; i++) expect(steps[i]!).toBeGreaterThan(steps[i - 1]!);
     // The first rapid starts from an unknown position: a vertex, but no time on the clock.
     expect(p.t[0]).toBe(0);
-    // 6 mm plunge at 200 mm/min = 1.8 s; 20 mm cut at 500 mm/min = 2.4 s;
-    // the retract is 6 mm at the 3000 mm/min DISPLAY rate = 0.12 s.
+    // With NO machine there is no rapid model, so rapids draw at 0 s and the clock is feeds only:
+    // 6 mm plunge at 200 mm/min = 1.8 s, then 20 mm at 500 mm/min = 2.4 s (closed form — there is
+    // no acceleration to apply), and the 6 mm retract adds nothing.
+    expect(p.rapidsTimed).toBe(false);
     expect(p.t[1]).toBeCloseTo(1.8, 3);
     expect(p.t[2]).toBeCloseTo(4.2, 3);
-    expect(p.t[3]).toBeCloseTo(4.32, 3);
+    expect(p.t[3]).toBeCloseTo(4.2, 3);
+    session.dispose();
+  });
+
+  it('with the Z1: rapids are timed too, every move through the trapezoid (#281)', () => {
+    const { session } = loaded(LINES_193, setup({ startingTool: 1 }), tool, 'Z1');
+    const p = session.simPath();
+    expect(p.rapidsTimed).toBe(true);
+    // Z1's model: 1200 mm/min XY, 600 mm/min Z, 150 mm/s². Same three moves, now through
+    // `moveSeconds` — plunge 6 mm at F200 (v = 3.333 mm/s) = 6/v + v/a; cut 20 mm at F500
+    // (v = 8.333) = 20/v + v/a; the Z-only retract 6 mm at 600 mm/min (v = 10) = 6/v + v/a.
+    const trap = (d: number, rateMmMin: number, a = 150) => {
+      const v = rateMmMin / 60;
+      return d >= (v * v) / a ? d / v + v / a : 2 * Math.sqrt(d / a);
+    };
+    expect(p.t[1]).toBeCloseTo(trap(6, 200), 3);
+    expect(p.t[2]).toBeCloseTo(trap(6, 200) + trap(20, 500), 3);
+    expect(p.t[3]).toBeCloseTo(trap(6, 200) + trap(20, 500) + trap(6, 600), 3);
+    // And the Z-only retract is slower than an XY rapid of the same length would have been.
+    expect(trap(6, 600)).toBeGreaterThan(trap(6, 1200));
     session.dispose();
   });
 

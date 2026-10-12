@@ -12,7 +12,7 @@ import {
   buildRunSheet,
   formatDuration,
   FRAME_Z,
-  RAPID_ASSUMPTION_NOTE,
+  rapidAssumptionNote,
   runSheetDiagramSvg,
   runSheetFileName,
   runSheetFrameFileName,
@@ -87,11 +87,13 @@ describe('runSheet (#207)', () => {
     expect(sheet.header.fileHash).toBe(sha256Hex(NC).slice(0, 8));
     expect(sheet.header.fileHash).toHaveLength(8);
     expect(sheet.header.estimatedTime).toBe('1 min 35 s');
-    // #242: the note names the cycle estimate and the assumed rapid rate, so the printed number
-    // cannot be mistaken for a measured cycle time.
-    expect(sheet.header.estimatedTimeNote).toBe(RAPID_ASSUMPTION_NOTE);
+    // #242/#281: the note names the cycle estimate and the machine's OWN rapid model, so the
+    // printed number cannot be mistaken for a measured cycle time and the rates cannot drift from
+    // the ones the estimate was timed with.
+    expect(sheet.header.estimatedTimeNote).toBe(rapidAssumptionNote(Z1.rapidEstimate));
     expect(sheet.header.estimatedTimeNote).toContain('cutting + rapids');
-    expect(sheet.header.estimatedTimeNote).toContain('3000 mm/min');
+    expect(sheet.header.estimatedTimeNote).toContain(`${Z1.rapidEstimate.xyMmPerMin} mm/min XY`);
+    expect(sheet.header.estimatedTimeNote).toContain(`${Z1.rapidEstimate.zMmPerMin} mm/min Z`);
     // #347 — which machine the job is written for, read from the JOB rather than from a constant:
     // an operator holding a sheet printed for another machine is the failure this line prevents.
     expect(sheet.header.machine).toBe(Z1.name);

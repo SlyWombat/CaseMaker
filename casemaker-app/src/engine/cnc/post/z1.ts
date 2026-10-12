@@ -27,7 +27,7 @@
  */
 
 import type { CamMove, ToolpathIR } from '../cam/ir';
-import { estimateIRCycleSeconds, ASSUMED_RAPID_MM_MIN } from '../cam/ir';
+import { estimateIRCycleSeconds } from '../cam/ir';
 import type { MillProfile } from '../machine';
 import { formatFixed, sanitizeMkrValue } from './format';
 
@@ -158,6 +158,8 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): 
   const numberOrZero = (v: number | null): string => axis(v ?? 0);
 
   const { length: L, width: W, thickness: T } = ctx.stock;
+  /** The profile's own rapid model, the one number set the cycle estimate is timed with (#281). */
+  const rapid = machine.rapidEstimate;
 
   // ---- The `;@MKR|` header. Field for field, as Studio writes it (issue implementation spec).
   const header: string[] = [
@@ -194,10 +196,13 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): 
     // Studio ignores a comment it does not know, so this cannot break the machine's own reader;
     // the `MKR` line above is left exactly as Studio writes it and the key never goes into it.
     `;@CM|TOOL|key=${sanitizeMkrValue(ctx.toolKey)}`,
-    mkr('TIME', `seconds=${Math.round(estimateIRCycleSeconds(ir))}`),
-    // #242: the machine's screen shows the figure above as the job time, so say what it assumes.
-    // A `;` comment (not a `;@MKR` record), so the header reader ignores it but the operator does not.
-    `; cycle estimate: cutting + rapids at an assumed ${ASSUMED_RAPID_MM_MIN} mm/min (PROVISIONAL, #208 D3 calibrates)`,
+    mkr('TIME', `seconds=${Math.round(estimateIRCycleSeconds(ir, rapid))}`),
+    // #242/#281: the machine's screen shows the figure above as the job time, so say what it assumes
+    // AND on what numbers. A `;` comment (not a `;@MKR` record), so the header reader ignores it but
+    // the operator does not. The rates are the profile's own, so this sentence cannot outlive them.
+    `; cycle estimate: cutting + rapids through the trapezoid, timed on ${machine.name}'s rapid model ` +
+      `(${rapid.xyMmPerMin} mm/min XY, ${rapid.zMmPerMin} mm/min Z, ${rapid.accelMmPerS2} mm/s² accel, ` +
+      `${rapid.source}) — a planning estimate, not a measured cycle time`,
     ...ops.map((op, i) => mkr('TOOLPATH', `number=${i + 1}`, `tool_number=${ir.toolNumber}`, `name=${sanitizeMkrValue(op.name)}`)),
     ';@MKR|END',
   ];

@@ -12,7 +12,6 @@
 
 import { useEffect, type CSSProperties } from 'react';
 import { advance, lineAtStep, totalTime } from '@/engine/cnc/playbackClock';
-import { ASSUMED_RAPID_MM_MIN } from '@/engine/cnc/cam/ir';
 import { isSimSceneActive, SIM_SPEEDS, useSimStore, type SimSpeed } from '@/store/simStore';
 import type { PausePoint, ToolState } from '@/engine/cnc';
 
@@ -297,9 +296,14 @@ function TransportBar() {
         <span
           data-testid="sim-time"
           style={READOUT}
-          title={`Simulated time — rapids are timed at an assumed ${ASSUMED_RAPID_MM_MIN} mm/min (the same rate the run sheet's estimate assumes), so this is playback, not a measured cycle time.`}
+          title={
+            path && path.rapidsTimed === false
+              ? 'Simulated time — feeds only, rapids untimed (no machine): this program was loaded with no machine profile, so there is no rapid model to time its rapids with. The total is what the feeds account for, not a cycle time.'
+              : "Simulated time — feeds and rapids both timed through the trapezoid on the machine's rapid model (the same model the run sheet's estimate is timed on), so this is playback, not a measured cycle time."
+          }
         >
           {formatTime(seconds)} / {formatTime(total)} simulated
+          {path && path.rapidsTimed === false ? ' (feeds only)' : ''}
         </span>
         <span data-testid="sim-step" style={READOUT_MUTED}>
           step {Math.max(0, step) + 1} / {stepCount}

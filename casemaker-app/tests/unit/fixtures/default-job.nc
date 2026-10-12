@@ -8,8 +8,8 @@
 ;@MKR|UNIT|value=MM
 ;@MKR|TOOL|number=1|id=0|name=1 mm flat end (assumed)|type=Flat End|handlediameter=3.175|sticklength=0|shoulderlength=0|flutelength=0|diameter=1|tipdiameter=1|cornerradius=0|angle=0|halfAngle=0
 ;@CM|TOOL|key=flat-1.0
-;@MKR|TIME|seconds=581
-; cycle estimate: cutting + rapids at an assumed 3000 mm/min (PROVISIONAL, #208 D3 calibrates)
+;@MKR|TIME|seconds=1153
+; cycle estimate: cutting + rapids through the trapezoid, timed on Makera Z1's rapid model (1200 mm/min XY, 600 mm/min Z, 150 mm/s² accel, config-get sd, read on the machine (#281, 2026-10-07)) — a planning estimate, not a measured cycle time
 ;@MKR|TOOLPATH|number=1|tool_number=1|name=[T1]Engrave "first chips" 0.5mm
 ;@MKR|TOOLPATH|number=2|tool_number=1|name=[T1]Engrave "MAKER" 1.0mm
 ;@MKR|TOOLPATH|number=3|tool_number=1|name=[T1]Engrave "CASE" 2.0mm

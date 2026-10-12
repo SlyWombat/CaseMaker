@@ -54,7 +54,7 @@ function drillIr(job: EngraveJob) {
   if (tool === null) throw new Error(`${TOOL_KEY} is not in the tool library`);
   const feeds = feedsFor([], job.stock.material, tool, Z1, job.cutOverride);
   if (!feeds.ok) throw new Error(feeds.reason);
-  return generateEngrave(tl, regions, tool, feeds.params);
+  return generateEngrave(tl, regions, tool, feeds.params, Z1.rapidEstimate);
 }
 
 /** Rebuild a solid from a meshed sweep result so its volume can be read. */
@@ -164,7 +164,7 @@ describe('drill CAM (#220)', () => {
     expect(feeds.ok).toBe(false);
     expect(() => generateEngrave(tl, regions, ball, {
       rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1, stepOver: 1, peck: 1, air: false,
-    })).toThrow(/flat end mill only/);
+    }, Z1.rapidEstimate)).toThrow(/flat end mill only/);
   });
 
   it('round-trips through the schema, and a pre-#220 document keeps no drills key', () => {

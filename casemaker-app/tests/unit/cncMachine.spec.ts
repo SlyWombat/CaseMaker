@@ -44,6 +44,25 @@ describe('the Z1 profile', () => {
     expect('maxSeek' in Z1).toBe(false);
   });
 
+  it('carries the cycle estimate’s rapid model as SOURCED data, not as a ceiling (#281)', () => {
+    // The estimate needs a rate to time rapids at; the machine must not gain a `maxRapid` to give it
+    // one. So the numbers live in `rapidEstimate` — same shape as every other sourced group, and
+    // deliberately NOT named after a limit, because nothing here clamps a move.
+    expect(Z1.rapidEstimate).toMatchObject({
+      xyMmPerMin: 1200,
+      zMmPerMin: 600,
+      accelMmPerS2: 150,
+      source: expect.stringContaining('#281'),
+    });
+    expect(Z1.rapidEstimate.source).toContain('config-get sd');
+    // Z alone is slower than X/Y: the config's `gamma_max_rate` is half `alpha_max_rate`.
+    expect(Z1.rapidEstimate.zMmPerMin).toBeLessThan(Z1.rapidEstimate.xyMmPerMin);
+    // Values, not ceilings: `maxCutFeed` is the only number that bounds a move.
+    for (const n of [Z1.rapidEstimate.xyMmPerMin, Z1.rapidEstimate.zMmPerMin, Z1.rapidEstimate.accelMmPerS2]) {
+      expect(n).toBeGreaterThan(0);
+    }
+  });
+
   it('states what it does not have as FLAGS, not silence', () => {
     expect(Z1.capabilities.laser).toBe(false);
     expect(Z1.capabilities.vacuum).toBe(false);
@@ -239,6 +258,15 @@ describe('profile schemas (#184 work item 1)', () => {
     expect(millProfileSchema.safeParse(noEndstop).success).toBe(false);
     // hasATC is a literal false on the type (#183, Z1-only): a profile with an ATC is not one.
     expect(millProfileSchema.safeParse({ ...Z1, hasATC: true }).success).toBe(false);
+  });
+
+  it('refuses a mill whose rapid model is missing, non-positive, or unsourced (#281)', () => {
+    const { rapidEstimate: _rapid, ...noRapid } = Z1;
+    expect(millProfileSchema.safeParse(noRapid).success).toBe(false);
+    // A zero rate would make a rapid instantaneous — a claim about the machine, not an estimate.
+    expect(millProfileSchema.safeParse({ ...Z1, rapidEstimate: { ...Z1.rapidEstimate, xyMmPerMin: 0 } }).success).toBe(false);
+    expect(millProfileSchema.safeParse({ ...Z1, rapidEstimate: { ...Z1.rapidEstimate, accelMmPerS2: -1 } }).success).toBe(false);
+    expect(millProfileSchema.safeParse({ ...Z1, rapidEstimate: { ...Z1.rapidEstimate, source: '' } }).success).toBe(false);
   });
 
   it('carries the rotary profile as optional sourced data (#237)', () => {

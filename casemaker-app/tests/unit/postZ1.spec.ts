@@ -112,8 +112,8 @@ describe('postZ1 (#173)', () => {
       ;@MKR|UNIT|value=MM
       ;@MKR|TOOL|number=1|id=0|name=1 mm flat end|type=Flat End|handlediameter=3.175|sticklength=0|shoulderlength=0|flutelength=0|diameter=1|tipdiameter=1|cornerradius=0|angle=0|halfAngle=0
       ;@CM|TOOL|key=flat-1.0
-      ;@MKR|TIME|seconds=3
-      ; cycle estimate: cutting + rapids at an assumed 3000 mm/min (PROVISIONAL, #208 D3 calibrates)
+      ;@MKR|TIME|seconds=4
+      ; cycle estimate: cutting + rapids through the trapezoid, timed on Makera Z1's rapid model (1200 mm/min XY, 600 mm/min Z, 150 mm/s² accel, config-get sd, read on the machine (#281, 2026-10-07)) — a planning estimate, not a measured cycle time
       ;@MKR|TOOLPATH|number=1|tool_number=1|name=[T1]Engrave "A" 1.0mm
       ;@MKR|TOOLPATH|number=2|tool_number=1|name=[T1]Engrave "B" 0.5mm
       ;@MKR|END
@@ -216,7 +216,11 @@ describe('postZ1 (#173)', () => {
     const res = postZ1(TWO_OP, CTX, Z1);
     if (!res.ok) throw new Error('post failed');
     const lines = codeLines(res.text);
+    // #281 — the rapid model is an ESTIMATE and must never reach the machine as a feed word: no `G0`
+    // carries an `F`, and no line but a `G1` carries one either, so a rapid's modelled rate can never
+    // leak into the program as a commanded feed.
     expect(lines.filter((l) => l.startsWith('G0 ')).some((l) => l.includes('F'))).toBe(false);
+    expect(lines.filter((l) => l.includes('F')).every((l) => l.startsWith('G1'))).toBe(true);
     const forbidden = /\b(G2|G3|G38|G10|G92|G53|G54|G55|G56|G57|G58|G59|G91|G81|G82|G83|G84|G85|G86|G87|G88|G89|M490|M491|M801|M802|M861|M862|M3\d\d)\b|\bA[-+]?\d/;
     expect(lines.join('\n')).not.toMatch(forbidden);
   });
@@ -322,7 +326,7 @@ describe('postZ1 round trip (#173)', () => {
     const labels: EngraveRegion[] = job.labels
       .filter((l) => l.enabled && l.text.trim().length > 0)
       .map((l) => ({ id: l.id, text: l.text, depth: l.depth, polygons: opened(l) }));
-    const ir = generateEngrave(tl, labels, tool, feeds.params);
+    const ir = generateEngrave(tl, labels, tool, feeds.params, Z1.rapidEstimate);
 
     const ctx: PostContext = {
       jobName: job.name,

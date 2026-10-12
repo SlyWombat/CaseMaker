@@ -107,6 +107,23 @@ describe('SimTransport (#198)', () => {
     expect(screen.getAllByTestId('sim-pause-tick')).toHaveLength(3);
   });
 
+  it('a no-machine path reads as feeds only, not as a total (#281, #367)', () => {
+    // The session sets `rapidsTimed: false` when it was loaded with no machine: rapids draw in 0 s,
+    // so the figure is feeds only and must say so rather than read as a cycle time.
+    setStore({ path: { ...fakePath(), rapidsTimed: false } });
+    render(<SimTransport />);
+    const readout = screen.getByTestId('sim-time');
+    expect(readout.textContent).toContain('(feeds only)');
+    expect(readout.getAttribute('title')).toContain('rapids untimed (no machine)');
+
+    // A machine-loaded path (absent or true) names the model instead, and says no such thing.
+    setStore({ path: { ...fakePath(), rapidsTimed: true } });
+    const timed = screen.getByTestId('sim-time');
+    expect(timed.textContent).not.toContain('(feeds only)');
+    expect(timed.getAttribute('title')).toContain('rapids');
+    expect(timed.getAttribute('title')).not.toContain('untimed');
+  });
+
   it('dragging the scrubber moves the step on every input event', () => {
     render(<SimTransport />);
     fireEvent.change(screen.getByTestId('sim-scrubber'), { target: { value: '37' } });

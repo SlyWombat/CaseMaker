@@ -29,7 +29,7 @@
  */
 
 import { applyEvent, buildTimeline, parseGcode, resolveMachine, MACHINES, type FixtureEnvelope, type MachineCalibration, type MachineState, type PausePoint, type Segment, type Setup, type Timeline } from '@/engine/cnc';
-import { ASSUMED_RAPID_MM_MIN } from '@/engine/cnc/cam/ir';
+import { moveSeconds, rapidRate, type RapidEstimate } from '@/engine/cnc/cam/ir';
 
 import type { Mm } from '@/types/units';
 import type { Tool } from '@/engine/cnc/tool';
@@ -130,14 +130,6 @@ export interface SimLoadRefused {
 export type SimLoadResult = SimLoadOk | SimLoadRefused;
 
 /**
- * The seek rate a RAPID is DRAWN at, mm/min (#197), AND the rate the cycle estimate assumes
- * (#242). Both are now the ONE named constant `ASSUMED_RAPID_MM_MIN`, so the drawn timeline and
- * the run sheet's estimate cannot drift apart. It stays an ASSUMPTION, never a claim about the
- * controller's real seek rate (#208 D3 calibrates it).
- */
-export const DISPLAY_RAPID_MM_MIN = ASSUMED_RAPID_MM_MIN;
-
-/**
  * The whole tool path, with the kind and time of every move (#197, `/Simulation.md` §8). The
  * viewport needs to know which segments cut and #198 needs time; `toolPath` returns bare
  * positions and neither. One entry per MoveEvent whose position is FULLY known — a non-move
@@ -161,6 +153,14 @@ export interface SimPath {
    * carry it, and `simPath` always produces it.
    */
   line?: Uint32Array;
+  /**
+   * Whether `t` is a FULL clock — feeds AND rapids, timed through the trapezoid on the machine's
+   * rapid model (#281) — or feeds only. A session loaded with an explicit machine times rapids;
+   * one loaded with NO machine (`machineId === null`) has no rapid model to time them with, so it
+   * draws them in 0 s rather than inventing a rate, and says so. Absent means timed: a hand-built
+   * path in a spec carries only what it cares about, and the real ones always set it (#367).
+   */
+  rapidsTimed?: boolean;
 }
 
 export interface SimFrame {
@@ -274,10 +274,17 @@ const tagSweep = (d: SweepDiagnostic): SimDiagnostic => ({ source: 'sweep', seve
 export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks): SimSession {
   let live: Live | null = null;
   let latestGen = Number.NEGATIVE_INFINITY;
+  /**
+   * The rapid model the LOADED program was swept for (#281), or `null` when it was loaded with no
+   * machine. Set by `load`, cleared by `dispose`, and read by `simPath` — it is the session's own
+   * account of the run it holds, so the drawn clock does not have to re-derive which machine this is.
+   */
+  let rapid: RapidEstimate | null = null;
 
   const dispose = (): void => {
     const l = live;
     live = null;
+    rapid = null;
     if (!l) return;
     if (l.kind === 'path' || l.kind === 'column') return; // owns no wasm handle at all
     // Playback first: its anchors and cached unions are built over the sweep's solids.
@@ -297,6 +304,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       // the CALLER's id, so an unknown id still refuses by name rather than falling back to a
       // profile with the machine's calibration quietly laid over it.
       machine = resolveMachine(base, opts?.calibration);
+      rapid = machine.rapidEstimate;
     }
     const parse = parseGcode(gcodeText);
     const timeline = buildTimeline(parse, setup, machine);
@@ -507,10 +515,14 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * emitted for each MoveEvent whose position is FULLY known after it; its kind is the move that
    * ended there, and its `t` is the running time.
    *
-   * Times (the issue's rule): a move over a fully-known span takes `distance / feed × 60` s using
-   * the move's own `feed` (mm/min) for a feed, and `DISPLAY_RAPID_MM_MIN` for a rapid. A move
-   * whose start or end is unknown, or a feed with no known feed value, takes 0 s — the first
-   * rapid of a program starts from an unknown position and so contributes nothing to the clock.
+   * Times (#197, #281): every move over a fully-known span is timed through the trapezoid on the
+   * machine's rapid model — a feed at its own `feed` (mm/min), a rapid at `rapidRate` — using
+   * `moveSeconds`, the SAME function the cycle estimate is timed with, so the drawn clock, the run
+   * sheet and the post's `TIME` cannot time one move two ways. A move whose start or end is unknown,
+   * or a feed with no known feed value, takes 0 s — the first rapid of a program starts from an
+   * unknown position and so contributes nothing to the clock. With NO machine loaded there is no
+   * rapid model, so rapids take 0 s and `rapidsTimed` is false: the clock is feeds only, and the
+   * transport says so rather than reading as a total (#367).
    */
   const simPath = (): SimPath => {
     const empty = (): SimPath => ({
@@ -519,6 +531,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       kind: new Uint8Array(0),
       t: new Float32Array(0),
       line: new Uint32Array(0),
+      rapidsTimed: rapid !== null,
     });
     const l = live;
     if (!l || l.timeline.events.length === 0) return empty();
@@ -541,8 +554,16 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       const [fx, fy, fz] = from;
       if (fx !== null && fy !== null && fz !== null) {
         const dist = Math.hypot(x - fx, y - fy, z - fz);
-        if (ev.mode === 'rapid') dt = (dist / DISPLAY_RAPID_MM_MIN) * 60;
-        else if (ev.feed !== null) dt = (dist / ev.feed) * 60;
+        if (rapid === null) {
+          // No machine: rapids are untimed (0 s) and feeds fall back to the closed-form `d/f` — with
+          // no acceleration to apply, dressing a feeds-only figure as a total would be worse than
+          // saying so. Telling the truth about what this clock contains is the point (#367).
+          if (ev.mode !== 'rapid' && ev.feed !== null) dt = (dist / ev.feed) * 60;
+        } else if (ev.mode === 'rapid') {
+          dt = moveSeconds(dist, rapidRate(rapid, x - fx, y - fy, z - fz), rapid.accelMmPerS2);
+        } else if (ev.feed !== null) {
+          dt = moveSeconds(dist, ev.feed, rapid.accelMmPerS2);
+        }
         // else: a feed with no known feed value takes 0 s.
       }
       cum += dt;
@@ -558,6 +579,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       kind: Uint8Array.from(kind),
       t: Float32Array.from(t),
       line: Uint32Array.from(line),
+      rapidsTimed: rapid !== null,
     };
   };
 

@@ -31,7 +31,15 @@ import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { CutParams } from '../feeds';
 import { cuttingRadiusForSweep, type Tool } from '../tool';
 import { drillMoves, orderHolesNearest } from './drill';
-import { estimateCycleSeconds, HOP_Z, SAFE_Z, type CamMove, type CamOperation, type ToolpathIR } from './ir';
+import {
+  estimateCycleSeconds,
+  HOP_Z,
+  SAFE_Z,
+  type CamMove,
+  type CamOperation,
+  type RapidEstimate,
+  type ToolpathIR,
+} from './ir';
 import { pocketLoops, type OffsetFn, type Polygons } from './pocket';
 
 /**
@@ -228,14 +236,20 @@ function buildMoves(prepared: Prepared, params: CutParams): CamMove[] {
  *
  * `labels` are #201's opened regions in document order; `tool` must be a plain flat end mill
  * (`cuttingRadiusForSweep`), and `params` arrive from `feedsFor` (#202) — this module owns no
- * feeds, RPM or step values. `order` is the label ordering strategy; only `'nearest'` exists
- * in V1.
+ * feeds, RPM or step values. `rapid` is the machine's rapid model, which the operation's
+ * `estimatedSeconds` is timed with (#281); it is required, like every other number a caller
+ * owns, so this module never invents a rate. `order` is the label ordering strategy; only
+ * `'nearest'` exists in V1.
+ *
+ * `rapid` sits BEFORE `order` because a required parameter cannot follow a defaulted one — the
+ * caller that passed `order` positionally gets a type error rather than a silent shift.
  */
 export function generateEngrave(
   tl: ManifoldToplevel,
   labels: readonly EngraveRegion[],
   tool: Tool,
   params: CutParams,
+  rapid: RapidEstimate,
   order: 'nearest' = 'nearest',
 ): ToolpathIR {
   const radiusResult = cuttingRadiusForSweep(tool);
@@ -289,7 +303,7 @@ export function generateEngrave(
       labelId: item.label.id,
       depth: item.label.depth,
       moves,
-      estimatedSeconds: estimateCycleSeconds(moves),
+      estimatedSeconds: estimateCycleSeconds(moves, rapid),
     };
   });
 
