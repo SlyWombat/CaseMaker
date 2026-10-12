@@ -41,6 +41,17 @@ import { catalogueIdOf, tierOf } from './toolTiers';
  */
 export interface BoxCode {
   shape: ToolShape;
+  /**
+   * Whether the code carries Makera's `-M-` "for Metal" marker (#379 review) — the one thing a
+   * printed code says that is NOT a type word, a number or a measurement.
+   *
+   * It is kept because the two lines are different cutters and a job's answer depends on which one
+   * is in the spindle: Makera files a single-flute end mill under "Single Flute Non Metal" and its
+   * `-M-` twin under the metal group, and the material a bit was ground for is not recoverable from
+   * its dimensions. It rides on the reading so {@link resolveCode} can prefer the row on the same
+   * line as the box, and the panel can say which line the box named.
+   */
+  metal: boolean;
   tipDiameter: number | null;
   fluteLength: number | null;
   /**
@@ -98,11 +109,28 @@ function boxLength(raw: string): number | null {
  * the shape, and it is not a number, so it is dropped before either is read rather than being left
  * to be read as one.
  *
- * Nothing keeps it. Whether a metal bit should be a note or a material hint on the row is open on
- * #379; today it only has to stop being in the way. A thread's size — `M5` in `THREAD-M5-15` — is a
- * different token and is NOT this: the match is exact.
+ * It is not thrown away, though: it is taken out of the tokens and kept where a reader can see it,
+ * as {@link BoxCode.metal}. A thread's size — `M5` in `THREAD-M5-15` — is a different token and is
+ * NOT this: the match is exact.
  */
 const METAL_MARKER = 'M';
+
+/**
+ * A store SKU's pack size. The printed code on the box does not carry one — a store variant code is
+ * the box code plus this suffix (#377) — so a scanned QR value never has it, but a typed SKU does,
+ * and left in the tail it was read as one of the cutter's numbers: `C1-BIT-DRILL-2.5-12-10PCS` came
+ * out a 12 mm drill and `C1-BIT-ENGRAVE-30-0.3-10PCS` a 0.3° engraver, both naming the pack count
+ * and neither the cutter (#379 review).
+ */
+const PACK_SUFFIX = /^\d+PCS$/;
+
+/**
+ * A type word is a WORD: it starts with a letter, never a number. Once a split of the tokens would
+ * put a number inside the type word, every later split would leave it there, so the search stops
+ * rather than offering the vocabulary `DRILL 2.5` and `DRILL 2.5 12` — two strings no type is
+ * called, and a tail read from the wrong side of a number (#379 review).
+ */
+const STARTS_NUMERIC = /^\d/;
 
 /** What a code's tail can say. Whatever a type's tail does not state is `null`, never 0. */
 interface TailReading {
@@ -184,16 +212,18 @@ const TAIL_READINGS: Partial<Record<ToolShape, (tail: readonly string[]) => Tail
  * Read a Makera box code — `C1-BIT-<TYPE>-<numbers>` — into the shape and the numbers it names.
  *
  * The type word may itself contain dashes (`BALL-NOSE`) and may carry the `-M-` metal marker, which
- * {@link METAL_MARKER} has already dropped; what is left is read through the SAME vocabulary
- * Studio's `type=` field uses ({@link shapeFromType}), so a label and a `.nc` header describing one
- * cutter agree once the dashes are spelled as spaces — a second, competing vocabulary would be one
- * more thing to get wrong.
+ * {@link METAL_MARKER} has already taken out and recorded as {@link BoxCode.metal}; what is left is
+ * read through the SAME vocabulary Studio's `type=` field uses ({@link shapeFromType}), so a label
+ * and a `.nc` header describing one cutter agree once the dashes are spelled as spaces — a second,
+ * competing vocabulary would be one more thing to get wrong. A trailing pack size
+ * ({@link PACK_SUFFIX}) is dropped for the same reason: it is the store's token, not the cutter's.
  *
  * Where the type word ENDS is not fixed by the dashes alone, since the type can be one token or two,
  * so each split of the tokens is offered to the vocabulary and the first one it recognises wins —
- * shortest word first, because `BALL NOSE 1` is still a ball and would otherwise swallow a number.
- * What the rest of the tail then means is the type's business ({@link TAIL_READINGS}), not a fixed
- * `-<tip>-<flute>` position.
+ * shortest word first, because `BALL NOSE 1` is still a ball and would otherwise swallow a number,
+ * and no further than the first numeric token, because past that a split is not a word
+ * ({@link STARTS_NUMERIC}). What the rest of the tail then means is the type's business
+ * ({@link TAIL_READINGS}), not a fixed `-<tip>-<flute>` position.
  *
  * Nothing recognised as a type word is not nothing read: the numbers are still taken by the default
  * reading and the shape is `'unknown'`, which is what makes a code from a type this app has never
@@ -208,23 +238,27 @@ export function parseBoxCode(value: string): BoxCode | null {
   const text = value.trim().toUpperCase();
   const PREFIX = 'C1-BIT-';
   if (!text.startsWith(PREFIX)) return null;
-  const tokens = text
+  const parts = text
     .slice(PREFIX.length)
     .split('-')
-    .filter((t) => t.length > 0 && t !== METAL_MARKER);
+    .filter((t) => t.length > 0);
+  const metal = parts.includes(METAL_MARKER);
+  const tokens = parts.filter((t) => t !== METAL_MARKER);
+  if (PACK_SUFFIX.test(tokens[tokens.length - 1] ?? '')) tokens.pop();
   if (tokens.length < 2) return null;
   for (let cut = 1; cut < tokens.length; cut++) {
+    if (STARTS_NUMERIC.test(tokens[cut - 1]!)) break;
     const shape = shapeFromType(tokens.slice(0, cut).join(' '));
     if (shape === 'unknown') continue;
     const tail = tokens.slice(cut);
     const reading = (TAIL_READINGS[shape] ?? tipThenFlute)(tail);
-    if (reading !== null) return { shape, ...reading };
+    if (reading !== null) return { shape, metal, ...reading };
   }
   // No split is a type word this app knows. Keep the numbers, call the shape what it is.
   const typeWords = tokens.slice(0, -2).join(' ');
   const reading = tipThenFlute(tokens);
   if (typeWords.length === 0 || reading === null) return null;
-  return { shape: shapeFromType(typeWords), ...reading };
+  return { shape: shapeFromType(typeWords), metal, ...reading };
 }
 
 /**
@@ -255,6 +289,21 @@ function sameLength(a: number | null, b: number | null): boolean {
 }
 
 /**
+ * Whether a catalogue row is on Makera's "for Metal" line.
+ *
+ * The line is not a field on a row — `ToolSchema` carries dimensions and nothing about what a bit
+ * was ground for — so the row's own NAME is what states it: `3.175*12mm Flat End(Metal)` is the row
+ * the built-in was copied from, and `catalogue.rs` records the same `(Metal)` convention (#379
+ * review). Anchored to the END of the name, so this is a claim about the line and not about a row
+ * that happens to mention metal somewhere in the middle of it.
+ */
+const METAL_ROW = /\(metal\)$/i;
+
+function isMetalRow(entry: ToolLibraryEntry): boolean {
+  return METAL_ROW.test(entry.tool.name.trim());
+}
+
+/**
  * What the user's code names: a cutter they already have, catalogue rows that fit it, or nothing.
  *
  * **The candidate rule, decided (#309 "ask first"): match on the tip and let the user pick; ignore
@@ -278,12 +327,21 @@ export function resolveCode(
   const prefill = parseBoxCode(value);
   if (!prefill) return { kind: 'unknown', prefill: null };
 
-  const rows = entries.filter((entry) => {
+  const fits = entries.filter((entry) => {
     if (tierOf(entry.key) !== 'catalogue') return false;
     if (prefill.shape !== 'unknown' && entry.tool.shape !== prefill.shape) return false;
     // A label that stated no tip cannot be narrowed by it; the user picks.
     return prefill.tipDiameter === null || sameLength(entry.tool.tipDiameter, prefill.tipDiameter);
   });
+
+  // The box says which LINE it is, and the two lines are different cutters — a bit ground for
+  // aluminium is not the one a PLA job wants, and its dimensions do not tell them apart — so the
+  // same line is offered ahead of the other when both fit (#379 review). Ahead of, not instead of:
+  // this narrows a list the user picks from, and the rule that does not bend is that there is always
+  // one to pick (the flute is ignored above for exactly this reason). A box with no marker prefers
+  // the plain line the same way, so the metal bit is not offered for it either.
+  const sameLine = fits.filter((entry) => isMetalRow(entry) === prefill.metal);
+  const rows = sameLine.length > 0 ? sameLine : fits;
 
   return rows.length > 0 ? { kind: 'candidates', rows, prefill } : { kind: 'unknown', prefill };
 }

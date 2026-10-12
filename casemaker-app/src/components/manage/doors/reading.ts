@@ -39,8 +39,13 @@ export const TYPABLE_SHAPES: readonly ToolShape[] = [
 
 /**
  * `engraving cutter, 30°, 0.3 mm tip` — only the parts the label actually stated. The order is the
- * order the code prints its numbers in: an angle, then a thread spec, then the tip and the flute
- * (`C1-BIT-ENGRAVE-30-0.3`, `C1-BIT-THREAD-M5-15`, `C1-BIT-BALL-NOSE-1-4`).
+ * order the code prints its numbers in: the type word, then the metal marker, then an angle, then a
+ * thread spec, then the tip and the flute (`C1-BIT-ENGRAVE-30-0.3`, `C1-BIT-THREAD-M5-15`,
+ * `C1-BIT-BALL-NOSE-1-4`).
+ *
+ * The metal LINE is said because it is the one thing about a cutter that its numbers do not carry:
+ * a box printed `-M-` is a bit ground for aluminium, and a user checking a box against a row they
+ * are about to register needs to see which line they are holding (#379 review).
  *
  * The angle is NOT written through `mm` below: it is degrees, and a dimension formatter would put a
  * trailing `.0` on a whole 30° and read as a length beside the tip. It keeps the degree sign for the
@@ -50,6 +55,7 @@ export const TYPABLE_SHAPES: readonly ToolShape[] = [
 export function describeReading(box: BoxCode): string {
   const parts: string[] = [];
   if (box.shape !== 'unknown') parts.push(SHAPE_LABELS[box.shape]);
+  if (box.metal) parts.push('metal line');
   if (box.includedAngle !== null) parts.push(`${box.includedAngle}°`);
   if (box.threadSpec !== null) parts.push(`${box.threadSpec} thread`);
   if (box.tipDiameter !== null) parts.push(`${mm(box.tipDiameter)} mm tip`);

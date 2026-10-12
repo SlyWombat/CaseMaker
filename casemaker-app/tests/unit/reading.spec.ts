@@ -19,7 +19,18 @@ describe('describeReading', () => {
   it('says an engraving code’s angle before its tip, in the order the label prints them (#378)', () => {
     // Read as `<tip>-<flute>` this sentence was "engraving cutter, 30 mm tip, 0.3 mm flute".
     expect(readingOf('C1-BIT-ENGRAVE-30-0.3')).toBe('engraving cutter, 30°, 0.3 mm tip');
-    expect(readingOf('C1-BIT-ENGRAVE-M-60-0.1')).toBe('engraving cutter, 60°, 0.1 mm tip');
+    // The second one is on the metal line, and the marker is said where the code prints it — between
+    // the type word and the numbers (#379 review).
+    expect(readingOf('C1-BIT-ENGRAVE-M-60-0.1')).toBe('engraving cutter, metal line, 60°, 0.1 mm tip');
+  });
+
+  it('says which product line the box named, where the code prints the marker (#379 review)', () => {
+    // `O-FLUTE-M-2-8` and `O-FLUTE-2-12` sit one `-M-` apart on the shelf and their numbers do not
+    // tell them apart — a bit ground for aluminium against one for the plastics the bench cuts.
+    expect(readingOf('C1-BIT-O-FLUTE-M-2-8')).toBe('flat end mill, metal line, 2.0 mm tip, 8.0 mm flute');
+    // The plain line says nothing: only the marker is a claim, and inventing "non-metal" for a code
+    // that states nothing would be the panel adding a fact to the label.
+    expect(readingOf('C1-BIT-O-FLUTE-2-12')).toBe('flat end mill, 2.0 mm tip, 12.0 mm flute');
   });
 
   it('keeps the degree sign, so the angle cannot read as another length', () => {

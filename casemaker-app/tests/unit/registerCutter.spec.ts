@@ -79,6 +79,7 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       fluteLength: 4,
       includedAngle: null,
       threadSpec: null,
+      metal: false,
     });
   });
 
@@ -89,6 +90,7 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       fluteLength: 12,
       includedAngle: null,
       threadSpec: null,
+      metal: false,
     });
   });
 
@@ -100,6 +102,7 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       fluteLength: null,
       includedAngle: null,
       threadSpec: null,
+      metal: false,
     });
   });
 
@@ -110,6 +113,7 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       fluteLength: 4,
       includedAngle: null,
       threadSpec: null,
+      metal: false,
     });
   });
 
@@ -125,6 +129,8 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
   it.each([
     ['C1-BIT-CORN-2.0-10.5', 2.0, 10.5],
     ['C1-BIT-CORN-3.0-12', 3.0, 12],
+    ['C1-BIT-CORN-0.6-3', 0.6, 3],
+    ['C1-BIT-CORN-1-7', 1, 7],
   ])('reads the real corn bit %s as a flat end (#377)', (code, tip, flute) => {
     expect(parseBoxCode(code)).toEqual({
       shape: 'flat',
@@ -132,25 +138,67 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       fluteLength: flute,
       includedAngle: null,
       threadSpec: null,
+      metal: false,
     });
   });
 
-  // #379 — the five real Spiral 'O' single-flute codes. A single-flute "O" end mill is a flat end
+  // #379 — the six real Spiral 'O' single-flute codes. A single-flute "O" end mill is a flat end
   // (Makera files it in the "Single Flute Non Metal" group, family "Flat End"), and the `-M-` token
-  // is Makera's "for Metal" line, not a word of the type. The numbers are `<tip>-<flute>` either way.
+  // is Makera's "for Metal" line, not a word of the type. The numbers are `<tip>-<flute>` either
+  // way, and the last column is the one thing the marker DOES change (#379 review).
   it.each([
-    ['C1-BIT-O-FLUTE-2-12', 2, 12],
-    ['C1-BIT-O-FLUTE-3.175-25', 3.175, 25],
-    ['C1-BIT-O-FLUTE-3.175-42', 3.175, 42],
-    ['C1-BIT-O-FLUTE-M-2-8', 2, 8],
-    ['C1-BIT-O-FLUTE-M-3.175-12', 3.175, 12],
-  ])('reads the real single-flute code %s as a flat end (#379)', (code, tip, flute) => {
+    ['C1-BIT-O-FLUTE-2-12', 2, 12, false],
+    ['C1-BIT-O-FLUTE-3.175-25', 3.175, 25, false],
+    ['C1-BIT-O-FLUTE-3.175-42', 3.175, 42, false],
+    ['C1-BIT-O-FLUTE-M-1-3', 1, 3, true],
+    ['C1-BIT-O-FLUTE-M-2-8', 2, 8, true],
+    ['C1-BIT-O-FLUTE-M-3.175-12', 3.175, 12, true],
+  ])('reads the real single-flute code %s as a flat end (#379)', (code, tip, flute, metal) => {
     expect(parseBoxCode(code)).toEqual({
       shape: 'flat',
       tipDiameter: tip,
       fluteLength: flute,
       includedAngle: null,
       threadSpec: null,
+      metal,
+    });
+  });
+
+  // #379 review — the four real drill codes. They read as `<tip>-<flute>` like the flat family, and
+  // the sizes are the ones a bench actually drills with: a 1 mm, a 2 mm, a 2.5 mm and a 3 mm bit.
+  it.each([
+    ['C1-BIT-DRILL-1-10', 1, 10],
+    ['C1-BIT-DRILL-2-12', 2, 12],
+    ['C1-BIT-DRILL-2.5-12', 2.5, 12],
+    ['C1-BIT-DRILL-3-12', 3, 12],
+  ])('reads the real drill code %s on the numbers alone (#379 review)', (code, tip, flute) => {
+    expect(parseBoxCode(code)).toEqual({
+      shape: 'drill',
+      tipDiameter: tip,
+      fluteLength: flute,
+      includedAngle: null,
+      threadSpec: null,
+      metal: false,
+    });
+  });
+
+  // #379 review — the six real ball nose codes. The bench cutter's own box is `-1-4` (read at the top
+  // of this file); these are the other five, and the three metal-line ones are pinned absolutely
+  // because a reading that drops the marker still has to come out 2/6, 1/3 and 3.175/10.
+  it.each([
+    ['C1-BIT-BALL-NOSE-2-12', 2, 12, false],
+    ['C1-BIT-BALL-NOSE-3.175-22', 3.175, 22, false],
+    ['C1-BIT-BALL-NOSE-M-1-3', 1, 3, true],
+    ['C1-BIT-BALL-NOSE-M-2-6', 2, 6, true],
+    ['C1-BIT-BALL-NOSE-M-3.175-10', 3.175, 10, true],
+  ])('reads the real ball nose code %s on the numbers alone (#379 review)', (code, tip, flute, metal) => {
+    expect(parseBoxCode(code)).toEqual({
+      shape: 'ball',
+      tipDiameter: tip,
+      fluteLength: flute,
+      includedAngle: null,
+      threadSpec: null,
+      metal,
     });
   });
 
@@ -159,18 +207,19 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
   // `<tip>-<flute>` — which is what this did when every type shared one reading — it said "a 30 mm
   // tip", a cutter nobody makes, and then matched no catalogue row.
   it.each([
-    ['C1-BIT-ENGRAVE-30-0.3', 30, 0.3],
-    ['C1-BIT-ENGRAVE-30-0.5', 30, 0.5],
-    ['C1-BIT-ENGRAVE-M-30-0.2', 30, 0.2],
-    ['C1-BIT-ENGRAVE-M-30-0.3', 30, 0.3],
-    ['C1-BIT-ENGRAVE-M-60-0.1', 60, 0.1],
-  ])('reads the real engraving code %s as angle-then-tip, and no flute (#378)', (code, angle, tip) => {
+    ['C1-BIT-ENGRAVE-30-0.3', 30, 0.3, false],
+    ['C1-BIT-ENGRAVE-30-0.5', 30, 0.5, false],
+    ['C1-BIT-ENGRAVE-M-30-0.2', 30, 0.2, true],
+    ['C1-BIT-ENGRAVE-M-30-0.3', 30, 0.3, true],
+    ['C1-BIT-ENGRAVE-M-60-0.1', 60, 0.1, true],
+  ])('reads the real engraving code %s as angle-then-tip, and no flute (#378)', (code, angle, tip, metal) => {
     expect(parseBoxCode(code)).toEqual({
       shape: 'engraving',
       tipDiameter: tip,
       fluteLength: null,
       includedAngle: angle,
       threadSpec: null,
+      metal,
     });
   });
 
@@ -189,6 +238,7 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       fluteLength: null,
       includedAngle: 90,
       threadSpec: null,
+      metal: false,
     });
   });
 
@@ -212,6 +262,7 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
       fluteLength: flute,
       includedAngle: null,
       threadSpec: spec,
+      metal: false,
     });
   });
 
@@ -221,10 +272,66 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
     expect(parseBoxCode('C1-BIT-THREAD-3-12')?.threadSpec).toBeNull();
   });
 
-  it('drops the metal marker wherever it sits, and reads the same numbers either way (#379)', () => {
-    // The marker rides between the word and the numbers, so the reading is the metal line's too.
-    expect(parseBoxCode('C1-BIT-O-FLUTE-M-1-3')).toEqual(parseBoxCode('C1-BIT-O-FLUTE-1-3'));
-    expect(parseBoxCode('C1-BIT-BALL-NOSE-M-2-6')).toEqual(parseBoxCode('C1-BIT-BALL-NOSE-2-6'));
+  it('keeps the metal marker as the only difference from the plain line (#379 review)', () => {
+    // The marker rides between the word and the numbers, so the numbers are the same on both lines —
+    // and this used to be the whole test: the two readings were equal and the line was lost. It is
+    // now the one field that separates them, which is the point: `METAL_ROW` on the row side and this
+    // flag on the label side are what keep a metal bit out of a PLA job.
+    expect(parseBoxCode('C1-BIT-O-FLUTE-M-1-3')).toEqual({
+      shape: 'flat',
+      tipDiameter: 1,
+      fluteLength: 3,
+      includedAngle: null,
+      threadSpec: null,
+      metal: true,
+    });
+    expect(parseBoxCode('C1-BIT-O-FLUTE-1-3')).toEqual({
+      shape: 'flat',
+      tipDiameter: 1,
+      fluteLength: 3,
+      includedAngle: null,
+      threadSpec: null,
+      metal: false,
+    });
+  });
+
+  it('does not read a thread size as the metal marker: the match is exact (#379 review)', () => {
+    // `THREAD-M5-15` is one token saying what the thread mill cuts. Taking it for the marker would
+    // drop the spec AND claim the metal line for a row that is not on it.
+    expect(parseBoxCode('C1-BIT-THREAD-M5-15')?.metal).toBe(false);
+    expect(parseBoxCode('C1-BIT-THREAD-M5-15')?.threadSpec).toBe('M5');
+  });
+
+  // #379 review — the store's SKU is the box code plus its pack suffix, and the suffix arrived as
+  // one of the cutter's numbers: `DRILL-2.5-12-10PCS` came out a 12 mm drill (the pack count read as
+  // the flute, the 2.5 as the tip) and `ENGRAVE-30-0.3-10PCS` a 0.3° engraver. A scanned QR value
+  // never carries it; a typed SKU does.
+  it('drops the store’s pack suffix, so the tail is the cutter’s numbers again (#379 review)', () => {
+    expect(parseBoxCode('C1-BIT-DRILL-2.5-12-10PCS')).toEqual({
+      shape: 'drill',
+      tipDiameter: 2.5,
+      fluteLength: 12,
+      includedAngle: null,
+      threadSpec: null,
+      metal: false,
+    });
+    expect(parseBoxCode('C1-BIT-ENGRAVE-30-0.3-10PCS')).toEqual({
+      shape: 'engraving',
+      tipDiameter: 0.3,
+      fluteLength: null,
+      includedAngle: 30,
+      threadSpec: null,
+      metal: false,
+    });
+  });
+
+  it('drops the pack suffix before the type word is searched, not after (#379 review)', () => {
+    // The suffix is the STORE's token and the tail is read from the end, so a code whose only other
+    // number is a tip has nothing left to be a flute: `DRILL-2.5-10PCS` is not a reading at all,
+    // where a trailing `10` would have made it "a 2.5 mm drill with a 10 mm flute" — a cutter made
+    // out of a pack size.
+    expect(parseBoxCode('C1-BIT-DRILL-2.5-10PCS')).toBeNull();
+    expect(parseBoxCode('C1-BIT-DRILL-2.5-10')?.fluteLength).toBe(10);
   });
 
   it('does not read a plain `flute` as an O-flute: engraving stays engraving (#379)', () => {
@@ -262,6 +369,7 @@ describe('resolveCode — the scan door’s three outcomes', () => {
       fluteLength: 4,
       includedAngle: null,
       threadSpec: null,
+      metal: false,
     });
   });
 
@@ -307,7 +415,14 @@ describe('resolveCode — the scan door’s three outcomes', () => {
     const got = resolveCode('C1-BIT-FLAT-3.175-12', [], []);
     expect(got).toEqual({
       kind: 'unknown',
-      prefill: { shape: 'flat', tipDiameter: 3.175, fluteLength: 12, includedAngle: null, threadSpec: null },
+      prefill: {
+        shape: 'flat',
+        tipDiameter: 3.175,
+        fluteLength: 12,
+        includedAngle: null,
+        threadSpec: null,
+        metal: false,
+      },
     });
   });
 
@@ -317,18 +432,80 @@ describe('resolveCode — the scan door’s three outcomes', () => {
     const got = resolveCode('C1-BIT-ENGRAVE-30-0.3', [], []);
     expect(got).toEqual({
       kind: 'unknown',
-      prefill: { shape: 'engraving', tipDiameter: 0.3, fluteLength: null, includedAngle: 30, threadSpec: null },
+      prefill: {
+        shape: 'engraving',
+        tipDiameter: 0.3,
+        fluteLength: null,
+        includedAngle: 30,
+        threadSpec: null,
+        metal: false,
+      },
     });
   });
 
   it('hands a chamfer code’s angle along, and no tip it never stated (#380)', () => {
-    // Two tokens, five fields: the whole of a chamfer code is one number, and the door has to say
+    // Two tokens, six fields: the whole of a chamfer code is one number, and the door has to say
     // "chamfer mill, 90°" rather than treat the pair as a tip and a flute.
     const got = resolveCode('C1-BIT-CHAMFER-90', [], []);
     expect(got).toEqual({
       kind: 'unknown',
-      prefill: { shape: 'chamfer', tipDiameter: null, fluteLength: null, includedAngle: 90, threadSpec: null },
+      prefill: {
+        shape: 'chamfer',
+        tipDiameter: null,
+        fluteLength: null,
+        includedAngle: 90,
+        threadSpec: null,
+        metal: false,
+      },
     });
+  });
+
+  // #379 review — nothing about a cutter's dimensions says which product line it is, and `ToolSchema`
+  // has no field for one, so Makera's `(Metal)` row name is the only place a row states it. The
+  // reading carries the flag and the candidates put the SAME line first, which is what keeps a bit
+  // ground for aluminium from being offered as the one to fit for PLA.
+  const lines = [
+    catalogueRow({
+      key: 'cat:222222222222',
+      name: '3.175*25mm Flat End',
+      shape: 'flat',
+      tipDiameter: 3.175,
+      fluteLength: 25,
+    }),
+    catalogueRow({
+      key: 'cat:333333333333',
+      name: '3.175*12mm Flat End(Metal)',
+      shape: 'flat',
+      tipDiameter: 3.175,
+      fluteLength: 12,
+    }),
+  ];
+
+  it('offers the metal-line row ahead of the plain one when the box carries the marker (#379 review)', () => {
+    // The two real 3.175 single-flute codes sit one `-M-` apart on the shelf, and both rows fit the
+    // reading. The marker is the only thing that says which one is in the user's hand.
+    const got = resolveCode('C1-BIT-O-FLUTE-M-3.175-12', [], lines);
+    expect(got.kind).toBe('candidates');
+    if (got.kind !== 'candidates') return;
+    expect(got.rows.map((r) => r.key)).toEqual(['cat:333333333333']);
+  });
+
+  it('offers the plain row ahead of the metal one when the box says nothing (#379 review)', () => {
+    const got = resolveCode('C1-BIT-O-FLUTE-3.175-25', [], lines);
+    expect(got.kind).toBe('candidates');
+    if (got.kind !== 'candidates') return;
+    expect(got.rows.map((r) => r.key)).toEqual(['cat:222222222222']);
+  });
+
+  it('still offers the other line rather than nothing, when that is all there is (#379 review)', () => {
+    // Ahead of, never instead of. A catalogue that does not carry the line, or a row whose name does
+    // not state one, must not leave the user with an empty panel: this is the same rule that keeps
+    // the flute from narrowing anything (an empty list has no way back).
+    const plainOnly = [lines[0]!];
+    const got = resolveCode('C1-BIT-O-FLUTE-M-3.175-12', [], plainOnly);
+    expect(got.kind).toBe('candidates');
+    if (got.kind !== 'candidates') return;
+    expect(got.rows.map((r) => r.key)).toEqual(['cat:222222222222']);
   });
 
   it('has no prefill when there was nothing to read', () => {
