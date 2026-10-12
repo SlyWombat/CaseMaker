@@ -42,3 +42,6 @@ docs/market-research/**
 # ours, the 8 MB Carvera-branded document is theirs. Keep it local, like the
 # market-research staging above and the un-committed reference-gcode corpus.
 docs/makera/
+
+# Kazoo tool-label records + barcode photos — Makera label text is vendor data, stays local (2026-10-12).
+tool-labels/

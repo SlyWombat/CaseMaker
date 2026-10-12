@@ -14,17 +14,37 @@ possible. **Nothing here is scheduled; the maintainer calls each session.**
 
 The fitted 1 × 4 mm ball nose cannot be simulated (the sweep refuses any non-flat tool), and the
 green-box 1 mm flat is a metal cutter, ruled out for PLA (maintainer, 2026-10-09, on #209).
-**Before S3, S4 or any cut:** photograph each yellow box close up so the labels and QR slugs can
-be read, then pick a non-metal flat if one is owned (`3.175*1*3mm Flat End`, `1.5*8` or `2*12`),
-or buy one. Sessions S1 and S2 do not need it and can run first.
+Sessions S1 and S2 do not need a cutter and can run first.
+
+**Cutter chosen (2026-10-12).** Every Makera box in the house was photographed and decoded that
+day: 37 boxes, 28 codes. They are loaded into the desktop app's house inventory, and every code
+scans as owned. (The records and photos are local, in `tool-labels/`, gitignored as vendor label
+text.) The flat to fit for S3/S4:
+
+- **Yellow case, label "Spiral 'O' Single Flute Bit - 1/8" Shank 2mm * 12mm", 单刃螺旋铣刀**,
+  QR `C1-BIT-O-FLUTE-2-12` (one owned). It is the smallest plastic-rated flat in the house and the
+  plan's own `2*12`. Check the Chinese: a label starting 金属 is the metal line (`O-FLUTE-M`),
+  which also comes in yellow cases.
+- Before cutting: caliper it (runbook A1), and confirm the badge's text is large enough for a 2 mm
+  flat (the job's own recommendation, #211). If the job wants smaller, the only plastic-safe
+  option owned is a 1 mm corn bit (`C1-BIT-CORN-1-7`), and that needs a test cut first. Corn bits
+  are sold for PCB and composites.
+- The ball nose comes out and goes back in its yellow box ("Two Flute Ball Nose Bit … 1mm * 4mm",
+  `C1-BIT-BALL-NOSE-1-4`). The inventory marks that ball nose as in the spindle until told otherwise.
+- **#185's V-bit:** yellow case, "Single Flute Engraving Bit - 1/8" Shank 30° * 0.3mm",
+  `C1-BIT-ENGRAVE-30-0.3`. The orange `ENGRAVE-M` bits are the metal line.
+- The app reads all of these from their box codes since #377–#380. Before #379 an O-flute read as
+  an unknown shape, so the build used at the bench must include `b74e148` or later.
+- Only flat end mills simulate today. What it takes to simulate the rest of the owned set is
+  #382.
 
 ## Before the bench (machine off, or no machine at all)
 
 | # | What | Where | Feeds |
 |---|---|---|---|
-| 1 | Yellow-box photos, pick or buy the cutter; caliper it (runbook A1) | desk | every cut |
+| 1 | ~~Yellow-box photos, pick the cutter~~ done 2026-10-12: `C1-BIT-O-FLUTE-2-12` (see the gate above); still to do: caliper it (runbook A1) | desk | every cut |
 | 2 | Vise dimensions, proud height and rock (A3, A4, A5); wired-probe tip ⌀ (A8) | machine off, calipers | `DEFAULT_VISE`, regenerated files |
-| 3 | 30° V-bit tip and angle under a loupe | desk | #185 |
+| 3 | 30° V-bit (`C1-BIT-ENGRAVE-30-0.3`, label 30° × 0.3 mm flat tip) tip and angle under a loupe | desk | #185 |
 | 4 | PrusaSlicer reads: `z_offset`, elephant-foot, layer heights, the colour-change layer (#269 item 2, #165 step 1); per-object infill (#166 item 2) | desk | #165, #166 |
 | 5 | Makera Studio, **not connected to the machine**: the three reads in #268 (~30 min, cited); a Studio-made equivalent `.nc` for #176's diff | desk | #221, #176 |
 | 6 | Check the D0/D1 MDI logs for what Studio's "Auto Workpiece Leveling" sends | desk | the dome-compensation decision |
