@@ -24,9 +24,17 @@ export interface FixturesSettings {
  */
 export type ToolPicks = Record<string, string>;
 
+/**
+ * The app's own webview-local settings.
+ *
+ * `port` and `bindToAll` used to live here and never did anything (#372): the port the app binds is
+ * read from `config.json` by `lib.rs`, so a value in this store was a control that looked like it
+ * changed the app and could not — and after #312 that invited the user to answer a port-busy refusal
+ * with it. The server settings now live where the app actually reads them, `config.rs`'s file,
+ * reached through `platform/houseClient`'s two config calls, and nothing about the host process is
+ * persisted in an origin-keyed store any more. What is left here is the user's preferences.
+ */
 export interface AppSettings {
-  port: number;
-  bindToAll: boolean;
   exportLayout: ExportLayoutMode;
   exportFormat: ExportFormat;
   fixtures: FixturesSettings;
@@ -59,7 +67,6 @@ export interface AppSettings {
 }
 
 const SETTINGS_KEY = 'casemaker.settings.v1';
-const DEFAULT_PORT = 8000;
 const DEFAULT_EXPORT_LAYOUT: ExportLayoutMode = 'print-ready';
 // Issue #75 — fresh users get a human-readable text STL out of the gate.
 // Existing localStorage prefs override this default; they're respected
@@ -67,8 +74,6 @@ const DEFAULT_EXPORT_LAYOUT: ExportLayoutMode = 'print-ready';
 const DEFAULT_EXPORT_FORMAT: ExportFormat = 'stl-ascii';
 
 const DEFAULTS: AppSettings = {
-  port: DEFAULT_PORT,
-  bindToAll: false,
   exportLayout: DEFAULT_EXPORT_LAYOUT,
   exportFormat: DEFAULT_EXPORT_FORMAT,
   fixtures: {},
@@ -230,8 +235,8 @@ const VALID_MARGIN_SOURCES: ReadonlySet<MarginSettings['source']> = new Set(['de
  * which is a threshold nobody chose. Absent — every install that predates this — is the shipped
  * set, so behaviour is exactly what it was.
  *
- * Exported for its spec, the way `clampPort` is: the fallback is the whole reason it exists, and
- * nothing else in the app may call it — the store reads it once, at load.
+ * Exported for its spec: the fallback is the whole reason it exists, and nothing else in the app may
+ * call it — the store reads it once, at load.
  */
 export function parseMargins(raw: unknown): MarginSettings {
   if (typeof raw !== 'object' || raw === null) return { ...MARGIN_DEFAULTS };
@@ -353,9 +358,10 @@ function loadSettings(): AppSettings {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return { ...DEFAULTS, margins: { ...MARGIN_DEFAULTS } };
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
+    // A record written before #372 still carries `port` and `bindToAll`; they are simply not read,
+    // which is the whole of that change from this side — `config.json` has been the only thing the
+    // app binds from all along.
     return {
-      port: clampPort(parsed.port),
-      bindToAll: Boolean(parsed.bindToAll),
       exportLayout:
         parsed.exportLayout === 'assembled' || parsed.exportLayout === 'print-ready'
           ? parsed.exportLayout
@@ -387,13 +393,6 @@ function pickCalibration(raw: unknown): { machineCalibration?: MachineCalibratio
   return parsed.ok ? { machineCalibration: parsed.calibration } : {};
 }
 
-function clampPort(n: unknown): number {
-  if (typeof n !== 'number' || !Number.isFinite(n)) return DEFAULT_PORT;
-  const v = Math.floor(n);
-  if (v < 1024 || v > 65535) return DEFAULT_PORT;
-  return v;
-}
-
 function persist(s: AppSettings): void {
   if (typeof localStorage === 'undefined') return;
   try {
@@ -404,8 +403,6 @@ function persist(s: AppSettings): void {
 }
 
 export interface SettingsState extends AppSettings {
-  setPort: (port: number) => void;
-  setBindToAll: (v: boolean) => void;
   setExportLayout: (mode: ExportLayoutMode) => void;
   setExportFormat: (fmt: ExportFormat) => void;
   /** Save a vise measurement ("Save as my vise", #205), persisted with the rest of settings. */
@@ -446,15 +443,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
   const initial = loadSettings();
   return {
     ...initial,
-    setPort: (port) => {
-      const clamped = clampPort(port);
-      set({ port: clamped });
-      persist({ ...get(), port: clamped });
-    },
-    setBindToAll: (bindToAll) => {
-      set({ bindToAll });
-      persist({ ...get(), bindToAll });
-    },
     setExportLayout: (mode) => {
       set({ exportLayout: mode });
       persist({ ...get(), exportLayout: mode });
@@ -542,4 +530,3 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
 });
 
 export const SETTINGS_DEFAULTS = DEFAULTS;
-export { clampPort };

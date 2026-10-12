@@ -10,6 +10,7 @@ use axum::{
 };
 use rust_embed::RustEmbed;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -44,12 +45,17 @@ pub struct ServerHandle {
 /// second instance cannot reach the store without the lock, because `lib.rs` cannot acquire it while
 /// the first instance holds it.
 ///
+/// `config_path` is where the settings endpoints (#372) read and write, and it is a parameter for
+/// the same reason: `config::config_path()` is the developer's own settings file, and a test that
+/// reached it would rewrite the settings of whichever machine ran the suite.
+///
 /// Returns the bound port — which, with no fallback left to move to (#312), is `requested_port`
 /// unless the caller asked for 0 and let the OS choose (the tests do, so they never race a real
 /// port). The returned receiver fires when the server stops.
 pub fn start(
     cfg: ServerConfig,
     house: &HouseLock,
+    config_path: PathBuf,
 ) -> Result<(ServerHandle, oneshot::Receiver<()>), std::io::Error> {
     let bind_addr = match cfg.host.as_deref() {
         Some(h) if !h.is_empty() => match h.parse::<IpAddr>() {
@@ -112,7 +118,7 @@ pub fn start(
     // yet is a house with no tools, and a file that cannot be read is reported by `/api/v1/health`
     // rather than by refusing to serve the UI.
     let store = Arc::new(HouseStore::open(house.dir().to_path_buf()));
-    let app = router(store);
+    let app = router(store, handle.bound_port, config_path);
 
     std::thread::Builder::new()
         .name("casemaker-http".into())
@@ -137,7 +143,18 @@ pub fn start(
                         return;
                     }
                 };
-                if let Err(e) = axum::serve(listener, app).await {
+                if let Err(e) = axum::serve(
+                    listener,
+                    // #372 — WITH CONNECT INFO, because `config_api` refuses a settings write from
+                    // any peer that is not loopback, and `ConnectInfo<SocketAddr>` is the only thing
+                    // that tells a handler where the request came from. Without this the extractor
+                    // fails and every settings write answers 500 — a plain `axum::serve(listener,
+                    // app)` cannot be tested into correctness, so `a_settings_write_over_the_wire`
+                    // below goes through this exact call and a real socket.
+                    app.into_make_service_with_connect_info::<SocketAddr>(),
+                )
+                .await
+                {
                     log::error!("axum server stopped: {e}");
                 }
                 let _ = tx.send(());
@@ -154,8 +171,14 @@ pub fn start(
 /// merged in would get a perfectly successful-looking HTML response. `house_api::routes` owns every
 /// `/api/v1/…` path including a JSON 404 for the ones it does not have, and it is merged BEFORE the
 /// `/*path` fallback is registered. The test below pins that against this exact router.
-fn router(store: Arc<HouseStore>) -> Router {
+///
+/// `config_api::routes` (#372) is merged alongside it — the app's own settings are part of the same
+/// `/api/v1` surface and take the same ordering rule. `house_api`'s `/api/v1/*rest` 404 and the
+/// static `/api/v1/config` can coexist: matchit gives a static path priority, so the catch-all only
+/// ever answers what neither module owns.
+fn router(store: Arc<HouseStore>, serving_port: u16, config_path: PathBuf) -> Router {
     Router::new()
+        .merge(crate::config_api::routes(serving_port, config_path))
         .merge(crate::house_api::routes(store))
         .route("/", get(serve_root))
         .route("/*path", get(serve_path))
@@ -303,7 +326,8 @@ mod tests {
     fn app() -> (TempDir, Router) {
         let dir = TempDir::new().unwrap();
         let store = Arc::new(HouseStore::open(dir.path().to_path_buf()));
-        (dir, router(store))
+        let settings = dir.path().join("config.json");
+        (dir, router(store, 5173, settings))
     }
 
     fn get(uri: &str) -> Request<Body> {
@@ -362,6 +386,29 @@ mod tests {
         assert_eq!(res.status(), StatusCode::NOT_FOUND);
         assert!(content_type(&res).starts_with("application/json"));
         assert!(body_json(res).await["error"].is_string());
+    }
+
+    #[tokio::test]
+    async fn the_settings_route_is_the_apis_and_not_the_spa_catch_all() {
+        // #372, the ordering half. `house_api` ends in `/api/v1/*rest` → a JSON 404, and the SPA
+        // wildcard behind it answers everything with `index.html` and status 200. A route merged in
+        // the wrong place would be answered by one of those two and look fine at a glance: a 404 is
+        // a plausible "not here" and an HTML 200 is exactly the trap #306's tests exist for. The
+        // static path has to win over the catch-all, and this reads the answer rather than the code.
+        let (_dir, app) = app();
+        let res = app.clone().oneshot(get("/api/v1/config")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(
+            content_type(&res).starts_with("application/json"),
+            "/api/v1/config was answered with {:?}",
+            content_type(&res)
+        );
+        let body = body_json(res).await;
+        assert!(body["port"].is_number(), "{body}");
+        assert!(
+            body["servingPort"].is_number(),
+            "the port it is actually served on is half the answer: {body}"
+        );
     }
 
     #[tokio::test]
@@ -516,6 +563,7 @@ mod tests {
                 host: None,
             },
             &lock,
+            dir.path().join("config.json"),
         )
         .expect_err("a taken port must refuse, never move to another one");
         assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
@@ -553,6 +601,7 @@ mod tests {
                 host: None,
             },
             &lock,
+            dir.path().join("config.json"),
         )
         .unwrap();
         let port = handle.bound_port;
@@ -616,6 +665,7 @@ mod tests {
                 host: None,
             },
             &lock,
+            dir.path().join("config.json"),
         )
         .unwrap();
         let port = handle.bound_port;
@@ -673,5 +723,68 @@ mod tests {
             targets, expected.to_vec(),
             "the stylesheet should fetch its three families from beside itself: {css}"
         );
+    }
+
+    /// #372 — the settings write, over a real socket, through the real `start`.
+    ///
+    /// The claim that needs a socket is NOT the guard's decision: `config_api.rs` tests that with a
+    /// mocked peer address, which is the only way to be a LAN client from a test host. What cannot
+    /// be tested there is that the address EXISTS — `ConnectInfo` is populated only by
+    /// `axum::serve(… into_make_service_with_connect_info …)`, and a handler that asks for it without
+    /// that answers 500 to everything. Injecting the extension by hand is exactly what the server is
+    /// being asked to do, so a mock would go on passing while the app refused every write. Hence a
+    /// real request to a bound port, and an assertion on the file it was supposed to change.
+    #[test]
+    fn a_settings_write_over_the_wire_knows_which_machine_asked() {
+        let dir = TempDir::new().unwrap();
+        let lock = HouseLock::acquire(dir.path()).unwrap();
+        let settings = dir.path().join("config.json");
+        let (handle, _rx) = start(
+            ServerConfig {
+                requested_port: 0,
+                bind_to_all: false,
+                host: None,
+            },
+            &lock,
+            settings.clone(),
+        )
+        .unwrap();
+        let port = handle.bound_port;
+
+        let body = r#"{"port":8123,"bindToAll":true}"#;
+        // The request carries the provenance headers a browser sends to the app's own page: the name
+        // and port it is loaded from, and no `Origin` rewriting of the address. `config_api.rs` owns
+        // what the guard does with them; what this test adds is that a real socket populates the peer
+        // at all, and that the app's own page still writes through it.
+        let response = over_the_wire(
+            port,
+            &format!(
+                "POST /api/v1/config HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+                 Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        );
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        // The answer is about the NEXT launch, and says which port this one is on — which is the
+        // port the OS chose for `requested_port: 0`, and therefore a number only the listener knows.
+        assert!(
+            response.contains(&format!("{{\"port\":8123,\"bindToAll\":true,\"servingPort\":{port}}}")),
+            "{response}"
+        );
+
+        // And the file `lib.rs` reads was actually written, which is the whole point of the endpoint.
+        let written = crate::config::load_from(&settings).expect("the settings file");
+        assert_eq!(written.port, 8123);
+        assert!(written.bind_to_all);
+
+        // The READ takes no peer, so it is answered for anyone: the LAN browser that sees the dialog.
+        let read = over_the_wire(
+            port,
+            &format!(
+                "GET /api/v1/config HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+            ),
+        );
+        assert!(read.starts_with("HTTP/1.1 200 OK"), "{read}");
+        assert!(read.contains("\"port\":8123"), "{read}");
     }
 }

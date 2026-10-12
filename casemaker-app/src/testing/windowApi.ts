@@ -78,8 +78,6 @@ export interface CaseMakerTestApi {
   getLastDiag(): { meshOpsSeen: number; note?: string; componentSummary?: string } | null;
   getJobError(): string | null;
   getSmartCutoutDecisions(): SmartCutoutDecision[];
-  getSettings(): { port: number; bindToAll: boolean };
-  setPortSetting(port: number): void;
   setExportLayout(mode: 'print-ready' | 'assembled'): void;
   /** Issue #163 — shell/lid shading: 'xray' (default) or 'solid'. */
   setShellRender(mode: 'xray' | 'solid'): void;
@@ -309,13 +307,6 @@ export function installCaseMakerTestApi(): void {
       useProjectStore.getState().addExternalAsset(asset);
       await waitForIdle();
       return asset.id;
-    },
-    getSettings: () => {
-      const s = useSettingsStore.getState();
-      return { port: s.port, bindToAll: s.bindToAll };
-    },
-    setPortSetting: (port) => {
-      useSettingsStore.getState().setPort(port);
     },
     setShellRender: (mode) => {
       useViewportStore.getState().setShellRender(mode);

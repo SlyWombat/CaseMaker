@@ -40,6 +40,13 @@
  * a different method, path and body, and nine named methods would be nine places to get the status
  * handling wrong. {@link houseWrite} wraps it back up for the callers that want a name.
  *
+ * THE APP'S OWN SETTINGS ARE A SECOND API ON THE SAME SERVER (#372). `/api/v1/config` is not house
+ * data — it is the HOST PROCESS's configuration, the file `lib.rs` starts from — so it is two calls
+ * of its own rather than a member of {@link HouseClient}, and its one caller is the settings dialog.
+ * It rides here because this module is the app's one answer to "what is this server, and what does
+ * it say?", and the refusals have to be read the same way. The asymmetry between its two calls is
+ * decision 35's, stated in full beside them.
+ *
  * A WRITE'S REFUSAL IS THE SERVICE'S OWN SENTENCE. `house_api.rs` writes every error body as
  * `{"error": "..."}` with a status chosen for the reason (400 for a body it cannot use, 404 for a
  * key that is not there, 409 for one that already is), and that sentence is written for the user —
@@ -319,6 +326,28 @@ export type HouseSync = { kind: 'ok'; report: SyncReport } | HouseFailure;
 
 /** `GET /api/v1/export`'s outcome (#247): the house document's own text, as the file the user saves. */
 export type HouseExport = { kind: 'ok'; text: string } | HouseFailure;
+
+/**
+ * The HOST PROCESS's own settings (#372), as `GET /api/v1/config` serves them — the same file
+ * `config.rs` writes and `lib.rs` reads at start-up, which is the point: until this existed the
+ * settings dialog wrote a copy in the webview's storage that nothing on the Rust side ever read.
+ *
+ * `servingPort` is the port THIS process is bound to, and it is deliberately not the same number as
+ * `port`: a change here takes effect at the next launch, because moving the port under a running
+ * page would move the page's ORIGIN out from under it (decision 34) and leave every origin-keyed
+ * store — settings, library, run records — behind. The pair is what lets the dialog say which of
+ * the two numbers is in force (decision 35, and the banner in `SettingsMenu`).
+ */
+export const ServerConfigSchema = z.object({
+  port: z.number().int(),
+  bindToAll: z.boolean(),
+  servingPort: z.number().int(),
+});
+
+export type ServerConfig = z.infer<typeof ServerConfigSchema>;
+
+/** What a settings read or write concluded, in the same three shapes the writes already use. */
+export type HouseServerConfig = { kind: 'ok'; config: ServerConfig } | HouseFailure;
 
 /**
  * The house service, as the stores see it.
@@ -849,6 +878,49 @@ export async function houseImportHouse(
   opts?: HouseRequestOptions,
 ): Promise<HouseWrite> {
   return ask(async (client) => okOnly(await client.call('POST', '/import', text, opts)));
+}
+
+// — the app's own settings (#372). The one pair here that is not house data: it is the host
+// process's configuration, and it is the reason this client is not called "the tool service client".
+//
+// READ AND WRITE ARE ASYMMETRIC, AND THAT IS THE DESIGN (decision 35). The read is answered for
+// anyone — a browser on the LAN renders the same dialog and needs the numbers to explain itself. The
+// write is refused by the service for any peer that is not loopback: a client that can rewrite these
+// decides whether the host starts at all, and decision 33's "the LAN is the boundary" is about the
+// HOUSE's data, not about the machine that serves it. The refusal arrives as `refused` with the
+// service's own sentence, and the dialog shows it verbatim — there is no second copy of that wording
+// on this side, which is what keeps the two ends from drifting.
+
+/** Read the app's own settings (#372). Unguarded on the service's side: the LAN gets the numbers. */
+export async function houseServerConfig(opts?: HouseRequestOptions): Promise<HouseServerConfig> {
+  return ask(async (client) => {
+    const res = await client.call('GET', '/config', undefined, opts);
+    if (res.kind !== 'ok') return res;
+    const parsed = parseJson(res.text, ServerConfigSchema);
+    return parsed.kind === 'ok'
+      ? { kind: 'ok', config: parsed.value }
+      : { kind: 'error', detail: `the app's own settings ${parsed.why}` };
+  });
+}
+
+/**
+ * Save the app's own settings (#372). Both fields are required by the service — this is a statement
+ * about the settings, not a partial edit, so a body missing one is refused rather than defaulted —
+ * and the answer is the new state, `servingPort` included, so the caller never has to guess which
+ * numbers are now in force.
+ */
+export async function houseSaveServerConfig(
+  config: { port: number; bindToAll: boolean },
+  opts?: HouseRequestOptions,
+): Promise<HouseServerConfig> {
+  return ask(async (client) => {
+    const res = await client.call('POST', '/config', config, opts);
+    if (res.kind !== 'ok') return res;
+    const parsed = parseJson(res.text, ServerConfigSchema);
+    return parsed.kind === 'ok'
+      ? { kind: 'ok', config: parsed.value }
+      : { kind: 'error', detail: `the app's own settings ${parsed.why}` };
+  });
 }
 
 /** A write's success body is empty; only its `text` is dropped, never its failure. */

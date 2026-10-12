@@ -5,6 +5,7 @@ use tauri_plugin_dialog::DialogExt;
 
 mod catalogue;
 mod config;
+mod config_api;
 mod etag;
 mod house;
 mod house_api;
@@ -117,7 +118,10 @@ pub fn run() {
                 }
             };
 
-            let server_handle = match server::start(server_cfg, &lock) {
+            // `config::config_path()` is the same file this function has just read and written, so
+            // the settings dialog (#372) edits the settings the app actually binds from — one file,
+            // one reader, and no second copy in the webview's storage where nothing could see it.
+            let server_handle = match server::start(server_cfg, &lock, config::config_path()) {
                 Ok((handle, _stop_rx)) => {
                     log::info!(
                         "casemaker http server bound to {}:{}",

@@ -101,12 +101,24 @@ fn if_match(headers: &HeaderMap) -> Option<String> {
         .map(str::to_string)
 }
 
-fn json_body(status: StatusCode, bytes: Vec<u8>) -> Response<Body> {
+pub(crate) fn json_body(status: StatusCode, bytes: Vec<u8>) -> Response<Body> {
     let mut res = Response::new(Body::from(bytes));
     *res.status_mut() = status;
     res.headers_mut()
         .insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
     res
+}
+
+/// A refusal, in the one shape this server uses for them (#372).
+///
+/// `{"error": "..."}` and nothing else, because that is exactly what `platform/houseClient.ts`
+/// reads as "the service itself said no, in these words" — anything else that answers (a page, a
+/// proxy, a static host) is reported as "somebody else answered", and the user then sees a
+/// transport failure instead of a reason. `config_api.rs` writes its refusals with this too, so
+/// the shape is stated once rather than agreed on twice.
+pub(crate) fn json_error(status: StatusCode, message: String) -> Response<Body> {
+    let body = serde_json::json!({ "error": message }).to_string();
+    json_body(status, body.into_bytes())
 }
 
 fn empty(status: StatusCode) -> Response<Body> {
@@ -116,11 +128,9 @@ fn empty(status: StatusCode) -> Response<Body> {
 }
 
 fn error_response(e: HouseError) -> Response<Body> {
-    let status = status_for(&e);
     // The message is written for the user, not the developer: the client shows it as-is
     // (`houseClient.ts` surfaces `error`), so a refusal has to say what to do about it.
-    let body = serde_json::json!({ "error": e.to_string() }).to_string();
-    json_body(status, body.into_bytes())
+    json_error(status_for(&e), e.to_string())
 }
 
 /// A JSON body with its `ETag`, honouring `If-None-Match`.

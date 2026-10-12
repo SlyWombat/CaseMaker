@@ -144,7 +144,7 @@ The compiler is 43 modules. Grouped by what they build:
 | `projectStore.ts` | The parametric `Project`. Wrapped in zundo `temporal` for undo/redo. |
 | `jobStore.ts` | Latest build status, mesh nodes, mesh stats, last error, last diag, and the compiler's `splitOffer` (#148). |
 | `viewportStore.ts` | UI-only viewport state (showLid/Grid, selectedPortId). |
-| `settingsStore.ts` | App settings (port, bindToAll). localStorage-persisted. |
+| `settingsStore.ts` | App settings (export format/layout, fixtures, house margins, tool picks, machine calibration). localStorage-persisted. **Not** the server port or LAN bind (#372): those are read by `lib.rs` from `config.rs`'s `config.json`, so the settings dialog reaches them over `/api/v1/config` (`platform/houseClient.ts`) instead of keeping a copy here nothing on the Rust side could see. |
 
 ### Test API — `window.__caseMaker`
 
@@ -155,7 +155,7 @@ Activated by `VITE_E2E=1` or `MODE=test`. The full surface is documented in `src
 - `triggerExport(format)` — triggers a download; intercept with `page.waitForEvent('download')`
 - `serializeProject()` / `loadSerializedProject(json)` for save/load round-trips
 - `undo()` / `redo()`, `cloneBoardForEditing()`, `addMountingHole()`, `patchPort(...)`
-- `getSettings()` / `setPortSetting(port)` / `selectPort(id)`
+- `setExportLayout(mode)` / `selectPort(id)`
 
 > **Note:** Worker `console.log` does not reliably reach Playwright's page console. For worker-side observability use `getLastDiag()` and `getJobError()` instead.
 

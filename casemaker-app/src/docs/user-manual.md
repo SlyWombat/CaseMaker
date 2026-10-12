@@ -86,8 +86,19 @@ All dimensions in **millimeters**. Coordinate frame is **Z-up**; the PCB sits at
 
 | Setting | Default | Description |
 | :--- | :--- | :--- |
-| `port` | 8000 | TCP port for the embedded HTTP server (1024–65535). Desktop builds restart-required. |
-| `bindToAll` | `false` | If true, the embedded server binds to `0.0.0.0` instead of `127.0.0.1`. Allows LAN access. |
+| `port` | 8000 | TCP port the embedded HTTP server serves the app on (1024–65535). **App server** section, desktop builds only. Written to `config.json`; it applies the **next** time the app starts, and the panel says so while a change is pending. |
+| `bindToAll` | `false` | If true, the embedded server binds to `0.0.0.0` instead of `127.0.0.1`, so other devices on the LAN can reach it. Also applies at the next start. |
+| `exportFormat` | `stl-ascii` | Default export file format (STL binary/ASCII, 3MF). |
+| `exportLayout` | `print-ready` | `print-ready` flips the lid for the slicer; `assembled` stacks both halves for viewing. |
+
+> **Changing the port changes the app's origin** — its saved settings, library and run records live
+> under the address the app is served from, so they do not follow it to a new port. The panel warns
+> while a change is pending, and the change takes effect the next time the app starts. A browser on
+> the LAN can **read** these two settings and cannot **write** them: they belong to the machine Case
+> Maker runs on, and only Case Maker's own window can change them.
+
+> **The depth margins** (CNC builds) — the boundary margin, Z tolerance, minimum floor, edge margin,
+> breakthrough and jaw clearance — are the same dialog's second half; see the CNC guide.
 
 ## Joint types
 

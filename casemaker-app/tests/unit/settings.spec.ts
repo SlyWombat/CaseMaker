@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useSettingsStore, clampPort, parseMargins, parseToolPicks } from '@/store/settingsStore';
+import { useSettingsStore, parseMargins, parseToolPicks } from '@/store/settingsStore';
 import { MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 
 describe('app settings', () => {
@@ -7,32 +7,19 @@ describe('app settings', () => {
     useSettingsStore.getState().resetSettings();
   });
 
-  it('default port is 8000', () => {
-    expect(useSettingsStore.getState().port).toBe(8000);
-  });
-
-  it('setPort persists a valid value', () => {
-    useSettingsStore.getState().setPort(9000);
-    expect(useSettingsStore.getState().port).toBe(9000);
-  });
-
-  it('setPort rejects out-of-range and falls back to default', () => {
-    useSettingsStore.getState().setPort(70000);
-    expect(useSettingsStore.getState().port).toBe(8000);
-    useSettingsStore.getState().setPort(0);
-    expect(useSettingsStore.getState().port).toBe(8000);
-  });
-
-  it('clampPort floors decimals and rejects non-numbers', () => {
-    expect(clampPort(8080.7)).toBe(8080);
-    expect(clampPort(NaN)).toBe(8000);
-    expect(clampPort('1234' as unknown)).toBe(8000);
-  });
-
-  it('bindToAll defaults to false', () => {
-    expect(useSettingsStore.getState().bindToAll).toBe(false);
-    useSettingsStore.getState().setBindToAll(true);
-    expect(useSettingsStore.getState().bindToAll).toBe(true);
+  // #372 — the port and the LAN bind are NOT here any more, and this is the assertion that keeps
+  // them out. They belong to the host process, which reads them from `config.json` (`config.rs`),
+  // and a second copy in an origin-keyed store is exactly what made the old field unable to do
+  // anything: nothing on the Rust side could see it. The settings dialog reads and writes that file
+  // through `platform/houseClient` instead.
+  it('keeps nothing about the server in the webview’s own storage', () => {
+    // The store's own shape, not a sample of it: `persist` writes `{...get()}`, so a key that is not
+    // here cannot reach `localStorage` either.
+    const keys = Object.keys(useSettingsStore.getState());
+    expect(keys).not.toContain('port');
+    expect(keys).not.toContain('bindToAll');
+    expect(keys).not.toContain('setPort');
+    expect(keys).not.toContain('setBindToAll');
   });
 
   // #345 — the house depth margins. They are like every other setting: persisted, shipped with a
