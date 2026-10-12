@@ -28,7 +28,6 @@ A = ap.parse_args()
 W, H, T, R = A.width*IN, A.height*IN, A.thick*IN, A.radius*IN
 PW, PH, PD = A.magnet
 SPLIT = A.split
-FILL = '100%'           # object-level fill_density: the blank prints solid (#166)
 SEG = 16                # segments per corner
 BED = (180.0, 180.0)    # Prusa XL bed centre
 assert PD < SPLIT < T, f'need pocket depth {PD} < split {SPLIT} < thickness {T:.3f} mm'
@@ -120,12 +119,7 @@ model += ['    </triangles>', '   </mesh>', '  </object>', ' </resources>',
 
 cfg = ['<?xml version="1.0" encoding="UTF-8"?>', '<config>', ' <object id="1" instances_count="1">',
  f'  <metadata type="object" key="name" value="{A.name}"/>',
- f'  <metadata type="object" key="extruder" value="{E2}"/>',
- # Decision 13 / #166 item 2. The blank is printed 100% infill, and the file has
- # to SAY so: the depth model assumes solid material under every pocket roof, and
- # a slicer left on its own infill setting turns that assumption into air. Written
- # at OBJECT level (the slicer wants one density per object, not per volume).
- f'  <metadata type="object" key="fill_density" value="{FILL}"/>']
+ f'  <metadata type="object" key="extruder" value="{E2}"/>']
 for name, ext, a, b in vols:
     cfg += [f'  <volume firstid="{a}" lastid="{b}">',
             f'   <metadata type="volume" key="name" value="{name}"/>',

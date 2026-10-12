@@ -33,8 +33,11 @@ const POCKET_OVER = 1;
  * assumes solid material under every pocket roof and under the engraved floor —
  * a slicer left on its own infill percentage turns that assumption into air, and
  * the failure is invisible until someone engraves deeper than the top skins.
- * Same value `samples/badge-blank/make_badge.py` writes, which is the reference
- * for the sidecar's format.
+ *
+ * `samples/badge-blank/make_badge.py` is the reference for this sidecar's format
+ * and does NOT write this key: the sample generator is a one-off print, this is
+ * the app's own spec, and the divergence is recorded on #166. A change to the
+ * ONE format means changing both, and only if the maintainer says so.
  */
 export const BADGE_FILL_DENSITY = '100%';
 
