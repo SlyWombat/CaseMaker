@@ -56,6 +56,16 @@ export function shapeFromType(typeText: string): ToolShape {
   if (s.includes('tapered')) return 'tapered-ball';
   if (s.includes('ball')) return 'ball';
   if (s.includes('flat')) return 'flat';
+  // A corn bit IS a flat end mill, and Makera classifies it as one: its own database files the
+  // twenty of them under the "Corn Bits" group INSIDE category 1, "Flat End" (#377). The geometry
+  // the CAM cares about — a flat tip of the stated diameter — is the same for both, so the shape is
+  // the same and only the chip-breaker teeth differ.
+  //
+  // Whole-word, unlike every check around it. Those are substrings because their words are long
+  // enough to carry ("chamfer" cannot hide inside another word); `corn` is short enough to be
+  // swallowed by a longer one, and "Corner Radius End Mill" is a real thing another header could
+  // send — so `\b` keeps it from reading as a corn bit and keeps that word `unknown`.
+  if (/\bcorn\b/.test(s)) return 'flat';
   if (s.includes('engrav')) return 'engraving';
   if (s.includes('chamfer')) return 'chamfer';
   if (s.includes('drill')) return 'drill';

@@ -110,6 +110,16 @@ describe('parseBoxCode — PROVISIONAL (#208 A7: one label known)', () => {
     expect(parseBoxCode('C1-BIT-FLAT')).toBeNull(); // nothing below the type
     expect(parseBoxCode('SOMETHING-ELSE-1-4')).toBeNull(); // not a box code at all
   });
+
+  // #377 — the first real corn bits. Makera's database files its twenty under the "Corn Bits" group
+  // inside category 1, "Flat End", and the box code's two numbers are the same `<tip>-<flute>` every
+  // other flat-family code carries, so only the type word was missing.
+  it.each([
+    ['C1-BIT-CORN-2.0-10.5', 2.0, 10.5],
+    ['C1-BIT-CORN-3.0-12', 3.0, 12],
+  ])('reads the real corn bit %s as a flat end (#377)', (code, tip, flute) => {
+    expect(parseBoxCode(code)).toEqual({ shape: 'flat', tipDiameter: tip, fluteLength: flute });
+  });
 });
 
 describe('resolveCode — the scan door’s three outcomes', () => {
