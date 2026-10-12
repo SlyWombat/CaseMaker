@@ -35,16 +35,20 @@
  * carrying the same `g_ID` — the built-in IS the catalogue's cutter, copied verbatim from the
  * TopClamp reference (`toolLibrary.ts`) — where the namespaced key wins because it is the row the
  * service owns and re-syncs. `preferNamespaced` still does exactly that, and only that: it breaks a
- * tie whose namespaced side all comes from ONE tier. Two NAMESPACED rows in different tiers — an
- * owned `inv:` row and a `cat:` row matching the same shape and diameter — are two different claims
- * about the same program, and neither is entitled to win: the entry is `suggested` with BOTH named
- * as `candidates`, and the person picks. Which rule answered is what `provenance` reports.
+ * tie whose namespaced side all comes from ONE tier. **It now does so on every rung**, the two
+ * shape rungs included, which used to take the first hit in `getTools()` order — and the built-ins
+ * come first there, so a file stating only shape and diameter took a built-in even when the
+ * service's own row for that cutter was in the list (#316 review). Two NAMESPACED rows in
+ * different tiers — an owned `inv:` row and a `cat:` row matching the same shape and diameter — are
+ * two different claims about the same program, and neither is entitled to win: the entry is
+ * `suggested` with BOTH named as `candidates`, and the person picks. Which rule answered is what
+ * `provenance` reports.
  *
  * Pure, and given the list rather than reading the registry: the matcher's tests hand it two
  * entries, and the sim worker realm has no store to read.
  */
 
-import { cuttingDiameter, type Tool } from './tool';
+import { cuttingDiameter, vendorId, type Tool } from './tool';
 import { tierOf, TIER_ORDER, type ToolTier } from './toolTiers';
 import type { ToolLibraryEntry } from './toolLibrary';
 
@@ -110,8 +114,10 @@ function statesALength(tool: Tool): boolean {
  * key is a built-in, which is the row that answers when no service does.
  *
  * This is a tie-break among rows of ONE tier — built-in versus namespaced, where the namespaced row
- * is the one the service owns. It is deliberately NOT a tie-break between two namespaced rows: that
- * is the ambiguity `resolveHits` reports instead of deciding (#316's decision of 2026-10-12).
+ * is the one the service owns. Every rung resolves through it, the two shape rungs included; those
+ * used to take the first hit in `getTools()` order, which is registry order and put the built-in
+ * first. It is deliberately NOT a tie-break between two namespaced rows: that is the ambiguity
+ * `resolveHits` reports instead of deciding (#316's decision of 2026-10-12).
  */
 function preferNamespaced(hits: readonly ToolLibraryEntry[]): ToolLibraryEntry | null {
   return hits.find((e) => e.key.includes(':')) ?? hits[0] ?? null;
@@ -152,12 +158,18 @@ function resolveHits(
  *
  * Null when the record states none of the three — nothing about such a file can tie, so there is
  * nothing to remember. The diameter is quantised the way the panel writes it, since two files that
- * state the same cutter must produce the same string.
+ * state the same cutter must produce the same string. A rung the record does not really answer is
+ * skipped: a zero vendor id is not an id (`vendorId`), so a clone's file, whose MKR line says
+ * `id=0`, keys on its shape rather than colliding with every other no-id file (#316 review).
  */
 export function headerSignature(tool: Tool | null, statedKey: string | null): string | null {
   if (statedKey !== null) return `key=${statedKey}`;
   if (tool === null) return null;
-  if (tool.id !== null) return `id=${tool.id}`;
+  // `vendorId` skips a zero (a clone's file says `id=0`, which is the ABSENCE of an id): the
+  // signature has to name the rung the file really answered, or two no-id files of different
+  // shapes would share one remembered pick. See `vendorId` in `tool.ts` (#316 review).
+  const id = vendorId(tool);
+  if (id !== null) return `id=${id}`;
   const d = cuttingDiameter(tool);
   return d === null ? null : `shape=${tool.shape}@${d.toFixed(3)}`;
 }
@@ -207,10 +219,13 @@ export function matchHeaderTool(
 /** Steps (a)–(c) on their own: what a file that names no registry key can be matched by. */
 function matchByIdOrShape(tool: Tool, entries: readonly ToolLibraryEntry[]): HeaderToolMatch | null {
   // (a) the file's own statement of the cutter, when the lengths back it up. An id whose lengths
-  // disagree is not this entry: the six same-diameter flats share a shape, not a length.
-  if (tool.id !== null) {
+  // disagree is not this entry: the six same-diameter flats share a shape, not a length — and a
+  // ZERO id is not a statement at all (`vendorId`: it is how a file with no `g_ID` writes the
+  // field), so this rung may never pair two absences and call that an identity (#316 review).
+  const fileId = vendorId(tool);
+  if (fileId !== null) {
     const byId = entries.filter(
-      (e) => e.tool.id !== null && e.tool.id === tool.id && lengthsAgree(tool, e.tool),
+      (e) => vendorId(e.tool) === fileId && lengthsAgree(tool, e.tool),
     );
     const hit = resolveHits(byId, 'exact', 'id');
     if (hit) return hit;

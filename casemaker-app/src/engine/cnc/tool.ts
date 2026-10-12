@@ -147,6 +147,28 @@ export function cuttingDiameter(tool: Tool): number | null {
 }
 
 /**
+ * The vendor `g_ID` a tool actually STATES, or null when it has none (#316 review).
+ *
+ * `Tool.id` is the `id=` field verbatim, and a cutter with no vendor id does not leave the field
+ * out: the post writes `id=${ir.tool.id ?? 0}` (`post/z1.ts`), so **`0` is the file's way of saying
+ * "no `g_ID`"** — the clone and the hand-typed definition that #212 keeps the id off — and an empty
+ * field says the same. A zero is therefore not an identity: `t_MakeraCutterList.g_ID` values are
+ * long numbers, and no row anywhere carries `0`.
+ *
+ * It matters on both sides. In the matcher, a zero id must not let the id rung pair two ABSENCES and
+ * call the result exact; in `headerSignature`, a file filed under `id=0` would share one remembered
+ * pick with every other no-id file whatever shape it is — a 3.175 flat and a 6.35 ball — so each
+ * reopen would overwrite the other's answer and neither would come back.
+ *
+ * The ONE copy of this rule, shared by the header matcher and `feeds.ts`, so two places cannot
+ * disagree about whether a file named a cutter.
+ */
+export function vendorId(tool: Tool): string | null {
+  const id = tool.id;
+  return id === null || id === '' || id === '0' ? null : id;
+}
+
+/**
  * The radius the V1 sweep uses, or a refusal naming why. Only a flat end mill qualifies; a
  * flat end mill with a corner radius is a bull nose and is refused too, because its sweep at
  * constant Z is not a capsule.

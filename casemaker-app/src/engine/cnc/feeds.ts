@@ -73,7 +73,7 @@
  */
 
 import { z } from 'zod';
-import { cuttingRadiusForSweep } from './tool';
+import { cuttingRadiusForSweep, vendorId } from './tool';
 import type { Tool } from './tool';
 import { clampToMachine } from './machine';
 import type { ClampDiagnostic, MillProfile } from './machine';
@@ -502,9 +502,10 @@ function catalogueRowFor(
   tool: Tool,
   material: StockMaterial,
 ): FeedCatalogueRow | null {
-  if (tool.id === null || tool.id === '') return null;
+  const cutterId = vendorId(tool);
+  if (cutterId === null) return null;
   for (const row of catalogue) {
-    if (row.cutterId !== tool.id) continue;
+    if (row.cutterId !== cutterId) continue;
     if (catalogueMaterialFor(row.material) === material) return row;
   }
   return null;
@@ -681,8 +682,9 @@ function entryFor(
   const label = MATERIAL_LABELS[material];
   const named = `a ${diameter} mm cutter in ${label}`;
   // The cutter has to carry Makera's own id for any of their rows to name it (#332: a clone's
-  // rendered cutter carries no identity of its own).
-  if (tool.id === null || tool.id === '') {
+  // rendered cutter carries no identity of its own — and neither does a `0`, which is what a file
+  // with no `g_ID` writes there: `vendorId`).
+  if (vendorId(tool) === null) {
     return {
       ok: false,
       reason:

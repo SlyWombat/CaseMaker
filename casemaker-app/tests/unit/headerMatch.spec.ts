@@ -77,6 +77,52 @@ describe('matchHeaderTool (#316)', () => {
     expect(matchHeaderTool(h, [FLAT_12])).toEqual({ key: 'flat-3.175x12-metal', strength: 'exact', provenance: 'id' });
   });
 
+  it('resolves that same tie on the SHAPE rungs too, where the first hit in registry order used to win (#316 review)', () => {
+    // The shape rungs took `sameShape[0]` / `sameShape.find(...)`, i.e. whichever row came first in
+    // `getTools()` — and the built-ins come first there. So a file stating only shape and diameter
+    // was handed the built-in even with the service's own row for that same cutter in the list.
+    // Both shape rungs now resolve like the id rung: namespaced wins, still as a decision and not
+    // as the two-tier question, because only ONE tier of namespaced row is in play.
+    // Passed built-in first on purpose: the list order is what the old rule followed.
+    const bare = header({ id: null }); // step (c): no lengths stated at all
+    expect(matchHeaderTool(bare, [FLAT_12, CAT_12])).toEqual({
+      key: 'cat:112111313812',
+      strength: 'suggested',
+      provenance: 'shape',
+    });
+    expect(matchHeaderTool(bare, [FLAT_12, CAT_12])!.candidates).toBeUndefined();
+
+    const lengths = header({ id: null, fluteLength: 12, shoulderLength: 12 }); // step (b)
+    expect(matchHeaderTool(lengths, [FLAT_12, CAT_12])).toEqual({
+      key: 'cat:112111313812',
+      strength: 'exact',
+      provenance: 'shape',
+    });
+    // …and with no service, the built-in still answers: the rule is a preference among rows, not a
+    // requirement that one be namespaced.
+    expect(matchHeaderTool(lengths, [FLAT_12])).toEqual({
+      key: 'flat-3.175x12-metal',
+      strength: 'exact',
+      provenance: 'shape',
+    });
+  });
+
+  it('never joins a file to a row through a ZERO id (#316 review)', () => {
+    // `id=0` is what the post writes for a cutter that has no `g_ID` at all (#212 keeps it off
+    // clones and hand-typed definitions), so it is the ABSENCE of an id and not one. Without the
+    // rule the id rung pairs two absences and calls the result `exact` — a file that confirmed
+    // nothing would be reported as naming this row.
+    const zero = entry('user:hand-typed', flatEndMill(3.175, { id: '0' }));
+    const m = matchHeaderTool(header({ id: '0' }), [zero]);
+    expect(m).toEqual({ key: 'user:hand-typed', strength: 'suggested', provenance: 'shape' });
+    // The same file against a row with a real id behaves as it always did.
+    expect(matchHeaderTool(header({ id: '0' }), [FLAT_12])).toEqual({
+      key: 'flat-3.175x12-metal',
+      strength: 'suggested',
+      provenance: 'shape',
+    });
+  });
+
   it('never claims an exact match on a file that states no lengths (#305’s id=0 fixture)', () => {
     // Shape and diameter IS the evidence then, and the strength has to say so.
     const m = matchHeaderTool(header({ id: '0' }), [FLAT_12]);
@@ -259,5 +305,25 @@ describe('headerSignature (#316)', () => {
     // file an answer under a signature it invented.
     expect(headerSignature(flatEndMill(3.175, { id: null, tipDiameter: null, diameter: null }), null)).toBeNull();
     expect(headerSignature(null, null)).toBeNull();
+  });
+
+  it('skips a ZERO id, so no-id files of different cutters do not share one remembered pick (#316 review)', () => {
+    // `id=0` is the post's way of writing "no `g_ID`" (#212), so it names a rung the file did not
+    // really answer. Filed under it, EVERY no-id file would share one pick whatever it was cut
+    // with — and the answer for a 3.175 flat would be asked for again over a 6.35 ball.
+    expect(headerSignature(header({ id: '0' }), null)).toBe('shape=flat@3.175');
+    expect(headerSignature(header({ id: '' }), null)).toBe('shape=flat@3.175');
+    expect(
+      headerSignature(header({ id: '0', shape: 'ball', tipDiameter: 6.35, diameter: 6.35 }), null),
+    ).toBe('shape=ball@6.350');
+    // A real `g_ID` still leads, and still has to: it is the file's own statement.
+    expect(headerSignature(header({ id: '111011313842' }), null)).toBe('id=111011313842');
+    // The signature still states no MORE than the match order does: two files naming the same
+    // shape and diameter share it even when their stated lengths differ, and that is deliberate —
+    // the read side applies a remembered key only while it is among the rows that match TODAY, so
+    // a pick that no longer answers lapses instead of being handed over (`simSetupStore`).
+    expect(headerSignature(header({ id: '0', fluteLength: 42 }), null)).toBe(
+      headerSignature(header({ id: '0', fluteLength: 12 }), null),
+    );
   });
 });
