@@ -104,7 +104,7 @@ const LOCK_FILE: &str = "house.lock";
 /// (#321).
 ///
 /// WHY IT EXISTS. Two instances of the desktop app used to be able to run at once: the second could
-/// not have the configured port (`server.rs` falls back to an ephemeral one) and opened the same
+/// not have the configured port (`server.rs` fell back to an ephemeral one) and opened the same
 /// `house.json` with no lock and no reload, so each served its own memory and each save overwrote
 /// the other's — a change saved in one quietly gone after the next save in the other. `lib.rs` asks
 /// for this lock before starting the server and refuses to launch without it, and `server::start`

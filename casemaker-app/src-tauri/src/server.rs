@@ -90,8 +90,9 @@ pub fn start(
                      a different port is a different origin, and the app would come up with your \
                      saved settings, library and run records missing.\n\n\
                      Close whatever holds port {}, then start Case Maker again. (Starting with \
-                     --port is possible, but it is a different origin: the app would open empty, \
-                     with today's data left behind on this one.)",
+                     --port also works, but the port you pass is saved as the configured port, so \
+                     later runs use it too — and it is a different origin: the app would open \
+                     empty, with today's data left behind on this one.)",
                     cfg.requested_port, cfg.requested_port
                 ),
             )

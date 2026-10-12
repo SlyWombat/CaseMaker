@@ -19,7 +19,8 @@ struct CliArgs {
     #[arg(long, default_value_t = false)]
     bind_all: bool,
 
-    /// Override the configured port for this run only.
+    /// Serve on this port instead, and save it as the configured port — the override is persisted
+    /// (`save_config` runs below), so it applies to later runs too, not just this one.
     #[arg(long)]
     port: Option<u16>,
 
