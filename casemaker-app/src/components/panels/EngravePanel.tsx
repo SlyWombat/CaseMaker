@@ -33,7 +33,7 @@ import { buildRunRecord, isMeasuredRun, serializeRunRecord } from '@/engine/cnc/
 import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
 import { openTextFile } from '@/utils/openTextFile';
-import { feedCatalogueRows, feedsFor, type CutParams } from '@/engine/cnc/feeds';
+import { feedCatalogueSnapshot, feedsFor, type CutParams } from '@/engine/cnc/feeds';
 import { materialOptionsFor } from '@/engine/cnc/engrave/setupFlow';
 import {
   TRACE_DEFAULTS,
@@ -391,7 +391,10 @@ export function EngravePanel(): JSX.Element {
   // The rows are the main thread's own catalogue snapshot (#324) — read here so the numbers on
   // screen are the same resolution the worker is handed at Generate, not a module state only this
   // side of the boundary can see.
-  const feeds = tool ? feedsFor(feedCatalogueRows(), job.stock.material, tool, jobMachine(job), job.cutOverride) : null;
+  // The rows AND their sync date (#366): the panel shows the catalogue's provenance sentence, so it
+  // is the caller that has to hand `feedsFor` the age. The worker passes rows alone and gets the
+  // sentence without it — it never renders one.
+  const feeds = tool ? feedsFor(feedCatalogueSnapshot(), job.stock.material, tool, jobMachine(job), job.cutOverride) : null;
   const params: CutParams | null = feeds && feeds.ok ? feeds.params : null;
   // Only the clamps (#317): an `ok: false` result carries `-refused` diagnostics, which the refusal
   // box below already states, and a `catalogue-ignored` is not the machine's doing at all.

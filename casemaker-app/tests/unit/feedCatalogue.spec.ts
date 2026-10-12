@@ -15,6 +15,7 @@ import {
   catalogueMaterialFor,
   clearFeedCatalogue,
   feedCatalogueRows,
+  feedCatalogueSnapshot,
   feedsFor,
   setFeedCatalogue,
   type FeedCatalogueRow,
@@ -58,6 +59,70 @@ describe('the catalogue snapshot', () => {
 
     clearFeedCatalogue();
     expect(feedCatalogueRows()).toEqual([]);
+  });
+});
+
+// #366 — the snapshot carries WHEN it was synced, so a vendor row can be named as old. The date is
+// stamped where the sync writes it (`setFeedCatalogue`), travels with the rows, and shows up in the
+// sentences that name the catalogue — the answer's provenance, and Route A's refusal.
+describe('the catalogue knows how old it is (#366)', () => {
+  it('stamps the sync, carries it, and drops it with the rows', () => {
+    expect(feedCatalogueSnapshot().syncedOn).toBeNull();
+
+    setFeedCatalogue([HARDWOOD_ROW], '2026-10-11T09:00:00.000Z');
+    expect(feedCatalogueSnapshot().syncedOn).toBe('2026-10-11T09:00:00.000Z');
+    expect(feedCatalogueSnapshot().rows).toEqual([HARDWOOD_ROW]);
+
+    // Clearing the catalogue clears its age too: "no catalogue" and "a catalogue from some date"
+    // must not be able to disagree.
+    clearFeedCatalogue();
+    expect(feedCatalogueSnapshot().syncedOn).toBeNull();
+  });
+
+  it('names the age in the answer’s provenance, and only when it has one', () => {
+    setFeedCatalogue([HARDWOOD_ROW], '2026-10-11T09:00:00.000Z');
+    const dated = feedsFor(feedCatalogueSnapshot(), 'hardwood', makeraCutter(), Z1);
+    expect(dated.ok).toBe(true);
+    if (!dated.ok) throw new Error(dated.reason);
+    expect(dated.provenance).toContain('The catalogue was synced 2026-10-11.');
+
+    // The same rows as a BARE array — a worker's structured clone, and every existing caller — is
+    // the snapshot with no date: the sentence is exactly what it was before this existed.
+    const bare = feedsFor(feedCatalogueRows(), 'hardwood', makeraCutter(), Z1);
+    if (!bare.ok) throw new Error(bare.reason);
+    expect(bare.provenance).not.toContain('was synced');
+  });
+
+  it('says the DATE alone — an hour is not what tells you a row has gone stale', () => {
+    setFeedCatalogue([HARDWOOD_ROW], '2026-10-11T23:59:59.000Z');
+    const res = feedsFor(feedCatalogueSnapshot(), 'hardwood', makeraCutter(), Z1);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.provenance).toContain('synced 2026-10-11');
+    expect(res.provenance).not.toContain('23:59');
+  });
+
+  it('dates the Route A answer, and the Route A refusal that tells you to sync', () => {
+    const ALUMINIUM_ROW: FeedCatalogueRow = {
+      cutterId: VENDOR_ID,
+      material: '6061 Aluminum',
+      rpm: 10000,
+      feed: 400,
+      plungeFeed: 120,
+      stepDown: 0.3,
+    };
+    setFeedCatalogue([ALUMINIUM_ROW], '2026-10-11T09:00:00.000Z');
+    const answered = feedsFor(feedCatalogueSnapshot(), 'aluminium-6061', makeraCutter(), Z1);
+    if (!answered.ok) throw new Error(answered.reason);
+    expect(answered.provenance).toContain('The catalogue was synced 2026-10-11.');
+
+    // No row for THIS cutter: the refusal is the sentence that says "sync the catalogue", so it is
+    // the one that most needs to say how long ago anyone did. (A cutter with a vendor id and no row
+    // of its own — the no-id cutter below is a different refusal, with no sync to name.)
+    const refused = feedsFor(feedCatalogueSnapshot(), 'aluminium-6061', flatEndMill(6, { id: '999999999999' }), Z1);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) throw new Error('expected a refusal');
+    expect(refused.reason).toContain('sync the catalogue');
+    expect(refused.reason).toContain('The catalogue was synced 2026-10-11.');
   });
 });
 

@@ -402,6 +402,27 @@ export function catalogueMaterialFor(vendorName: string): StockMaterial | null {
 }
 
 /**
+ * The catalogue as a whole: Makera's rows, and WHEN they were synced (#366).
+ *
+ * The date is the one thing the provenance could not say. It can name the row that answered, but a
+ * raw vendor table with no age is exactly the kind that goes stale — a spindle ceiling or a cutter
+ * reissue from a year ago reads like today's number — and Route A's refusal ("sync the catalogue")
+ * could not say how long ago anyone had.
+ */
+export interface FeedCatalogue {
+  rows: readonly FeedCatalogueRow[];
+  /**
+   * ISO-8601 instant of the sync that produced `rows`, or null when nothing has loaded one. Stamped
+   * by {@link setFeedCatalogue}, so it is the moment THIS build read them, not the vendor's revised
+   * date — which the service does not serve.
+   */
+  syncedOn: string | null;
+}
+
+/** The catalogue before anything loads one — the `{ rows: [], syncedOn: null }` every path starts at. */
+export const EMPTY_CATALOGUE: FeedCatalogue = { rows: [], syncedOn: null };
+
+/**
  * The catalogue snapshot, empty until something loads one. Module state rather than a store field,
  * so the panel can read it without a React dependency (the same shape `engine/cnc/toolRegistry.ts`
  * has) — but it is NOT how `feedsFor` gets its rows any more (#324). The resolver takes them as an
@@ -409,25 +430,62 @@ export function catalogueMaterialFor(vendorName: string): StockMaterial | null {
  * the worker's copy here is always `[]` however carefully the main thread filled it. The rows reach
  * a worker by structured clone, like the tool registry (#305).
  */
-let feedCatalogue: readonly FeedCatalogueRow[] = [];
+let feedCatalogue: FeedCatalogue = EMPTY_CATALOGUE;
 
 /**
- * Load Makera's rows, replacing any previous set. Called by the house client after a read, and by
- * tests. An empty array (or {@link clearFeedCatalogue}) is the no-catalogue case. Main thread only:
- * a caller on the other side of a worker boundary hands the rows over instead (#324).
+ * Load Makera's rows, replacing any previous set, and stamp when they were read. Called by the house
+ * client after a read, and by tests. An empty array (or {@link clearFeedCatalogue}) is the
+ * no-catalogue case. Main thread only: a caller on the other side of a worker boundary hands the
+ * rows over instead (#324).
+ *
+ * `syncedOn` defaults to NOW — this is the one place the sync writes, so the stamp belongs here
+ * rather than at each call site — and is a parameter only so a test can pin a date.
  */
-export function setFeedCatalogue(rows: readonly FeedCatalogueRow[]): void {
-  feedCatalogue = rows.slice();
+export function setFeedCatalogue(
+  rows: readonly FeedCatalogueRow[],
+  syncedOn: string = new Date().toISOString(),
+): void {
+  feedCatalogue = { rows: rows.slice(), syncedOn };
 }
 
 /** Back to no catalogue. What `toolRegistryStore.reset()` and a lost service both need. */
 export function clearFeedCatalogue(): void {
-  feedCatalogue = [];
+  feedCatalogue = EMPTY_CATALOGUE;
 }
 
 /** The rows loaded right now. Read-only: the snapshot is replaced, never mutated in place. */
 export function feedCatalogueRows(): readonly FeedCatalogueRow[] {
+  return feedCatalogue.rows;
+}
+
+/** The snapshot itself — the rows AND their sync date (#366), for a caller that renders the age. */
+export function feedCatalogueSnapshot(): FeedCatalogue {
   return feedCatalogue;
+}
+
+/**
+ * The whole snapshot from what a caller hands over: the snapshot, or a bare rows array.
+ *
+ * `feedsFor` accepts both because the date is OPT-IN and the rows are not: every existing caller and
+ * every test passes rows, and a worker receives them as a bare array by structured clone (#324), so a
+ * bare array is simply "the snapshot with no date" — the behaviour that existed before there was a
+ * date, with no clause to add. A caller that HAS the snapshot passes it and gets the age.
+ */
+function catalogueOf(catalogue: readonly FeedCatalogueRow[] | FeedCatalogue): FeedCatalogue {
+  // `in`, not `Array.isArray`: the negative narrowing has to take `readonly T[]` out of the union,
+  // which a `T[]` guard does not do.
+  return 'rows' in catalogue ? catalogue : { rows: catalogue, syncedOn: null };
+}
+
+/**
+ * How old the catalogue is, as a sentence of its own — " The catalogue was synced 2026-10-11." — or
+ * "" when nothing has loaded one (#366). The DATE alone: the snapshot is the whole catalogue, and an
+ * hour is not what tells a person whether a vendor row has gone stale. Self-contained (subject and
+ * all) because it is appended to two different sentences: the answer's provenance, and Route A's
+ * refusal.
+ */
+function syncedSentence(snapshot: FeedCatalogue): string {
+  return snapshot.syncedOn === null ? '' : ` The catalogue was synced ${snapshot.syncedOn.slice(0, 10)}.`;
 }
 
 /**
@@ -526,6 +584,7 @@ function catalogueProvenance(
   tool: Tool,
   entry: FeedsEntry,
   ignored: readonly CatalogueField[],
+  snapshot: FeedCatalogue,
 ): string {
   const material = catalogueMaterialFor(row.material) ?? row.material;
   const fromCoupon = entry.status === 'measured';
@@ -541,6 +600,7 @@ function catalogueProvenance(
     `Makera sells — nothing here has been cut on this machine. Step-over, peck and air are this ` +
     `app's, not the table's.` +
     (fromCoupon ? ' A coupon has measured this row; those fields win.' : '') +
+    syncedSentence(snapshot) +
     passedOver
   );
 }
@@ -559,6 +619,7 @@ function catalogueOnlyRow(
   diameter: number,
   row: FeedCatalogueRow,
   tool: Tool,
+  snapshot: FeedCatalogue,
 ): FeedsEntry {
   return {
     material,
@@ -577,7 +638,8 @@ function catalogueOnlyRow(
     status: 'unmeasured',
     provenance:
       `${CATALOGUE_LABEL}'s row for ${tool.name} in ${MATERIAL_LABELS[material]} — the whole answer ` +
-      `for this material, because this app's starting table has no row for it.`,
+      `for this material, because this app's starting table has no row for it.` +
+      syncedSentence(snapshot),
   };
 }
 
@@ -601,7 +663,7 @@ type EntryChoice =
  * at all: the job is refused and the reason names what is missing.
  */
 function entryFor(
-  catalogue: readonly FeedCatalogueRow[],
+  snapshot: FeedCatalogue,
   material: StockMaterial,
   tool: Tool,
   diameter: number,
@@ -630,7 +692,7 @@ function entryFor(
         `a cutter Makera sells.`,
     };
   }
-  const row = catalogueRowFor(catalogue, tool, material);
+  const row = catalogueRowFor(snapshot.rows, tool, material);
   if (row === null) {
     return {
       ok: false,
@@ -638,7 +700,8 @@ function entryFor(
         `no cutting parameters for ${named}: the starting table has no row for ${label}, and ` +
         `${CATALOGUE_LABEL} has no row for ${tool.name} in it. A material the starting table does ` +
         `not cover is cut on the vendor's own numbers for that exact cutter and material, never on ` +
-        `a guess — sync the catalogue, or pick a material the table covers.`,
+        `a guess — sync the catalogue, or pick a material the table covers.` +
+        syncedSentence(snapshot),
     };
   }
   // Nothing below this row to fall back on, so a number this job cannot use is the end of it. The
@@ -656,7 +719,7 @@ function entryFor(
         `${label} to answer it instead.`,
     };
   }
-  return { ok: true, entry: catalogueOnlyRow(material, diameter, row, tool), catalogueOnly: true };
+  return { ok: true, entry: catalogueOnlyRow(material, diameter, row, tool, snapshot), catalogueOnly: true };
 }
 
 /**
@@ -712,13 +775,15 @@ export type FeedsResult =
  * answers. `override` is applied field by field on top, and then the machine's ceilings are the last
  * word: a modest overage is clamped with a diagnostic, a gross one is refused.
  *
- * `catalogue` is REQUIRED and is the caller's own rows — {@link feedCatalogueRows} on the main
- * thread, the array handed across the boundary in a worker (#324). It is a parameter rather than a
- * read of this module's state because a worker is a separate realm: `setFeedCatalogue` on the main
- * thread cannot reach it, so the worker's copy read empty, the panel showed Makera's numbers and
- * the `.nc` — and the run sheet printed beside it — carried the starting table's. Making the
- * argument required is what makes that mistake a compile error instead of a silent one, the same
- * shape `toolForIn` has for the same reason (#305).
+ * `catalogue` is REQUIRED and is the caller's own snapshot — {@link feedCatalogueSnapshot} on the
+ * main thread, the rows handed across the boundary in a worker (#324). Bare rows are accepted and
+ * mean "no sync date to name" ({@link catalogueOf}), which is what a worker's structured clone is and
+ * what every test passes, so a caller that has the age passes the snapshot and one that does not is
+ * unchanged. It is a parameter rather than a read of this module's state because a worker is a
+ * separate realm: `setFeedCatalogue` on the main thread cannot reach it, so the worker's copy read
+ * empty, the panel showed Makera's numbers and the `.nc` — and the run sheet printed beside it —
+ * carried the starting table's. Making the argument required is what makes that mistake a compile
+ * error instead of a silent one, the same shape `toolForIn` has for the same reason (#305).
  *
  * `table` is the table to resolve against, `FEEDS_TABLE` unless a caller has its own: a test
  * exercising the measured tier passes the output of {@link applyMeasurements}, which is the only
@@ -726,25 +791,26 @@ export type FeedsResult =
  * region of this file.
  */
 export function feedsFor(
-  catalogue: readonly FeedCatalogueRow[],
+  catalogue: readonly FeedCatalogueRow[] | FeedCatalogue,
   material: StockMaterial,
   tool: Tool,
   machine: MillProfile,
   override?: Partial<CutParams>,
   table: readonly FeedsEntry[] = FEEDS_TABLE,
 ): FeedsResult {
+  const snapshot = catalogueOf(catalogue);
   const radius = cuttingRadiusForSweep(tool);
   if (!radius.ok) return { ok: false, reason: radius.reason };
   const diameter = radius.radius * 2;
 
-  const choice = entryFor(catalogue, material, tool, diameter, machine, table);
+  const choice = entryFor(snapshot, material, tool, diameter, machine, table);
   if (!choice.ok) return { ok: false, reason: choice.reason };
   const { entry, catalogueOnly } = choice;
 
   // #310 — the catalogue rung. A row a coupon has measured is NOT eligible: "a catalogue row never
   // overrides a measured row" is the rule this tier exists under, and it is the difference between
   // a vendor's starting point and this machine's own answer.
-  const row = entry.status === 'measured' ? null : catalogueRowFor(catalogue, tool, material);
+  const row = entry.status === 'measured' ? null : catalogueRowFor(snapshot.rows, tool, material);
 
   const params: CutParams = {
     rpm: entry.params.rpm,
@@ -868,7 +934,7 @@ export function feedsFor(
   // over entirely supplied nothing, and `catalogue: null` is how the panel is told so.
   const answered = row !== null && used.size > 0;
   const provenance =
-    (answered && row ? catalogueProvenance(row, tool, entry, ignored) : entry.provenance) +
+    (answered && row ? catalogueProvenance(row, tool, entry, ignored, snapshot) : entry.provenance) +
     (catalogueOnly ? CATALOGUE_ONLY_NOTE : '');
 
   // The row DID answer (`answered`) rather than merely existing: a vendor row whose numbers were
