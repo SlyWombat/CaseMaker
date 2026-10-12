@@ -60,6 +60,9 @@ test('#168 — the badge exports as one object with a part per extruder', async 
   expect(config).toContain('key="name" value="badge-top"');
   expect(config).toContain('<metadata type="volume" key="extruder" value="2"/>');
   expect(config).toContain('<metadata type="volume" key="extruder" value="3"/>');
+  // #166 item 2 — the blank prints solid, and the file it downloads says so.
+  // Object level: `fill_density` read off a volume is ignored by the slicer.
+  expect(config).toContain('<metadata type="object" key="fill_density" value="100%"/>');
   // The ranges must tile the mesh with no gap and no overlap — this is the
   // number that would silently mis-slice the boundary between the colours.
   const ranges = [...config.matchAll(/<volume firstid="(\d+)" lastid="(\d+)">/g)].map(

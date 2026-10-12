@@ -6,6 +6,7 @@ import { unzipSync } from 'fflate';
 
 import {
   BADGE_BOTTOM_NODE_ID,
+  BADGE_FILL_DENSITY,
   BADGE_TOP_NODE_ID,
   badgeOutline,
   buildBadgeNodes,
@@ -283,6 +284,17 @@ describe('#168 — the badge carries its tools to the slicer', () => {
     expect(buildBadgeNodes(b)!.map((n) => n.material?.extruder)).toEqual([2, 3]);
   });
 
+  it('asks the slicer for 100 % infill on both halves (#166 item 2, decision 13)', () => {
+    // The depth model assumes SOLID material under the pocket roof and under the
+    // engraved floor, so the blank may only be printed at 100 %. The app does not
+    // own the slicer, so it says so in the file rather than in a README.
+    expect(BADGE_FILL_DENSITY).toBe('100%');
+    expect(buildBadgeNodes(b)!.map((n) => n.material?.fillDensity)).toEqual([
+      BADGE_FILL_DENSITY,
+      BADGE_FILL_DENSITY,
+    ]);
+  });
+
   it('compiles to a 3MF the slicer reads as one two-part object', () => {
     const plan = compileProject(findTemplate('badge-blank')!.build());
     const meshes = meshInputs(plan);
@@ -303,6 +315,12 @@ describe('#168 — the badge carries its tools to the slicer', () => {
     // 2 for the bottom colour, 3 for the top — the oracle's `--ext 2 3`.
     expect(config).toContain('<metadata type="volume" key="extruder" value="2"/>');
     expect(config).toContain('<metadata type="volume" key="extruder" value="3"/>');
+    // #166 item 2 — the blank's one infill, and it has to be OBJECT level: the
+    // slicer reads `fill_density` off the object, and a volume-level copy would
+    // do nothing. Exactly one, so the two halves cannot each ask for their own.
+    expect(config.split('\n').filter((l) => l.includes('key="fill_density"'))).toEqual([
+      '  <metadata type="object" key="fill_density" value="100%"/>',
+    ]);
   });
 
   it('a single badge half exported alone still says which tool it is', () => {

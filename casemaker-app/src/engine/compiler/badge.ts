@@ -28,6 +28,17 @@ export const BADGE_TOP_NODE_ID = 'badge-top';
 const POCKET_OVER = 1;
 
 /**
+ * The blank is printed SOLID (decision 13, #166 item 2). It travels in the 3MF
+ * sidecar as an object-level `fill_density`, because the app's depth model
+ * assumes solid material under every pocket roof and under the engraved floor —
+ * a slicer left on its own infill percentage turns that assumption into air, and
+ * the failure is invisible until someone engraves deeper than the top skins.
+ * Same value `samples/badge-blank/make_badge.py` writes, which is the reference
+ * for the sidecar's format.
+ */
+export const BADGE_FILL_DENSITY = '100%';
+
+/**
  * The outline, centred on the origin (the oracle's convention, and the reason
  * the `pTranslate` below exists — `roundedRect` is bbox-min-at-origin, so
  * without it the part lands in the first quadrant and the oracle bbox check in
@@ -69,12 +80,14 @@ export function buildBadgeNodes(b: BadgeParams): BuildNode[] | null {
       // Issue #168 — which tool prints each colour. The values have been on
       // `BadgeParams` since #167 because the oracle takes them as `--ext 2 3`;
       // this is where they stop being documentation and reach the slicer.
-      material: { extruder: b.bottomExtruder },
+      // `fillDensity` is the same story for the one infill this blank may be
+      // printed at (#166); the export writes it once, at OBJECT level.
+      material: { extruder: b.bottomExtruder, fillDensity: BADGE_FILL_DENSITY },
     },
     {
       id: BADGE_TOP_NODE_ID,
       op: translate([0, 0, b.splitHeight], extrude(outline, b.thickness - b.splitHeight)),
-      material: { extruder: b.topExtruder },
+      material: { extruder: b.topExtruder, fillDensity: BADGE_FILL_DENSITY },
     },
   ];
 }
