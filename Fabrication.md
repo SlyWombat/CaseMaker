@@ -375,6 +375,7 @@ accepted.
 | 31 | **The house service — the bridge — is the source of truth for house state** | Maintainer's call, 2026-10-08: *"a bridge is required for any printing, so the bridge should keep the database; it should sync to any web instance."* The desktop UI and a browser on the LAN read and write the same stores over `/api/v1`, so per-browser `localStorage` owns nothing house-scoped. The hosted HTTPS app at electricrv.ca **cannot** reach a plain-HTTP service (mixed content is hard-blocked), so "sync to any web instance" means the clients the service itself serves, and the hosted app stays on the built-ins (#212). **With no bridge reachable the Tools scope is absent and the pickers fall back to `TOOL_LIBRARY`** — no offline cache and no reconcile, so the degradation is visible instead of silently divergent. Reaching a bridge is a **runtime fact, not a build target**: a browser on the LAN is the *web* build and still talks to a bridge, so `canRunLocalServer`/`canReadLocalFiles` gate *hosting and syncing*, never *reaching*; `machineProbe.ts` is the model (one configured URL, one probe, four honest answers, unreachable is a normal outcome). Tiered versioned JSON on disk, not SQLite — the schemas stay in Zod, nothing needs a query, and the API is the contract if that ever changes. §5.7, #306, #312. **Naming (#306):** in code, comments and the rest of this document this is the **house service**; "the bridge" in the quote above is the maintainer's word, and it already means the machine bridge (§5.7, #255), so `houseClient`/`house.rs`/`ToolRegistryStore` and `loadMachineBridge`/`machineProbe`/`machine.rs` never collide in a grep. |
 | 32 | **Feeds from `makera_library.db` are a catalogue tier *below* measurement** | Maintainer's call, 2026-10-08, correcting §9.1's 2026-10-05 line. The three objections in `/Makera-Parity.md` §5.1 — no PLA or PETG, no machine column, 32 rows above the Z1's ceiling — are reasons the table cannot be a **source**, not reasons it is useless. Adopted as a tier under the precedence `measured → job override → user feed → catalogue → unmeasured`, clamped through `clampToMachine`, each row carrying a `FieldSource` so a vendor number never reads as a measurement (decision 28's discipline, applied to feeds). It is genuinely useful for **wood** — CNC-2's material, #209 — and **can never serve the badge job at all**, because PLA has no row. A speed change is a `user_feed` row, not a clone. §9.1, #310. |
 | 33 | **The house service is not authenticated on a LAN, and that is a decision rather than an omission** | Maintainer's call, 2026-10-09 (#321): a house is served on the home LAN with **no token, no login and no account** — the app's own origin is the only address that answers (decision 31), the window it serves is the same one it was launched for, and a shared house on a home network has the LAN as its trust boundary. Saying so out loud is the point: an implicit "nobody thought about it" and a deliberate "the LAN *is* the boundary" look identical in the code and completely different when a second person or a second machine appears. What sharing therefore gates on is **not** identity but **concurrency**: one process serves the house (a directory lock), and every write that changes a document carries the version it was based on (`If-Match`), so two people or two windows cannot silently overwrite each other. Both are refusals the user can see; neither is a permission. Exposing the house beyond a trusted LAN — a port-forward, a shared office network — is out of scope and would need real authentication first. §5.7, #306, #321. |
+| 34 | **A second launch focuses the running window, and a port that cannot be had is a refusal — the app's origin never changes silently** | Maintainer's call, 2026-10-11 (#312): a desktop build's `localStorage` is keyed by ORIGIN, and the origin includes the port, so the ephemeral-port fallback in `server.rs` was a live data-loss path — a second instance, or any foreign process on the port, moved the app to a new storage partition while the user's settings, library and run records stayed on disk under a port they no longer knew, and the app looked exactly like a first run. Both halves of the fix are the same rule. `tauri-plugin-single-instance` is **adopted** (registered first, as it requires) so a second launch hands the running instance its argv, raises that window and exits before any window, store or listener exists; and the fallback is **deleted**, so `AddrInUse` comes back as an error naming the port and `lib.rs` shows it in a native dialog and exits rather than falling through to `tauri://localhost`, which is another origin and the same silence from the other side. This **supersedes the #321 implementation note below**, which considered the plugin and rejected it: the directory lock is still the stronger guarantee for a second *process* and remains as the backstop, but refusing was never what the user wanted, and the plugin is what makes the lock's dialog unreachable for a second Case Maker. `--port` still works, and the refusal message says what it costs — a different origin and an empty app. The `SettingsMenu` "App port" field, which never reached `config.rs` at all, is its own issue (#372). §5.7, #306, #312, #321. |
 
 ---
 
@@ -1022,19 +1023,21 @@ possible — the reader lives in the desktop shell, and the web build has no hou
 **Implemented 2026-10-09 (#321): sharing the house safely — one process, and a version on every
 change.** The service was built for one window and had no answer for a second. Two of them on one
 machine is the case that matters: `server.rs` falls back to an ephemeral port when the configured one
-is taken, so a second launch would have bound a different port, opened its own `HouseStore` over the
-same `house.json`, served its own in-memory copy, and let the two windows overwrite each other's saves
-by arrival order with nothing on screen saying so. Five changes, in the order they matter.
+is taken (a fallback #312 has since deleted — decision 34), so a second launch would have bound a
+different port, opened its own `HouseStore` over the same `house.json`, served its own in-memory copy,
+and let the two windows overwrite each other's saves by arrival order with nothing on screen saying so.
+Five changes, in the order they matter.
 
 **One house, one process.** `HouseLock::acquire` takes an OS lock on `house.lock` in the house
 directory (`File::try_lock`, which is why `rust-version` is now `1.89` — the file's own comment says
 so, because a `rust-version` the code does not honour is a promise to nobody). A second launch
 **refuses to start** — the issue allowed refusing or focusing the first, and refusing costs nothing: a
-window is not built, a store is not opened and no second port is bound. The refusal is shown in a
-message box via the already-present dialog plugin, not written to a log, because `eprintln!` and
-`env_logger` go nowhere for a Windows GUI app: a lock that silently made the app not open would be
-worse than the bug. `server::start` now takes the lock as a parameter, so "the process serving the
-house is the process holding its lock" is compiler-checked rather than a comment.
+window is not built, a store is not opened and no second port is bound. (A second launch no longer
+gets this far: the single-instance plugin focuses the running window first — decision 34.) The refusal
+is shown in a message box via the already-present dialog plugin, not written to a log, because
+`eprintln!` and `env_logger` go nowhere for a Windows GUI app: a lock that silently made the app not
+open would be worse than the bug. `server::start` now takes the lock as a parameter, so "the process
+serving the house is the process holding its lock" is compiler-checked rather than a comment.
 
 A held lock and not a pid file or a `create_new` marker, because the OS releases a lock when its
 holder dies: a pid file cannot tell a live process from a crashed one, and a marker file would leave
@@ -1043,6 +1046,10 @@ while another process held a lock on it would let a third create a fresh file an
 processes would be serving one house again. The file is empty and permanent; the lock is the truth.
 `tauri-plugin-single-instance` was considered and rejected: the directory lock is the stronger
 guarantee (it covers a second *process*, whoever started it) and needs no new dependency.
+**Superseded 2026-10-11 (#312, decision 34):** the plugin is now adopted *in front of* the lock
+rather than instead of it — a second launch focuses the running window and never reaches the lock's
+dialog, while the lock stays the guarantee for a process the plugin cannot see. What the earlier
+rejection missed is that the lock's refusal was never the outcome the user wanted.
 
 **A version on every write that changes something.** `PATCH` and `DELETE` on `/tools` and
 `/inventory` now require `If-Match`: missing is **428**, naming a version no longer served is

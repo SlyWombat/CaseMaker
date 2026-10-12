@@ -44,8 +44,9 @@ pub struct ServerHandle {
 /// second instance cannot reach the store without the lock, because `lib.rs` cannot acquire it while
 /// the first instance holds it.
 ///
-/// Returns the actually-bound port (which may differ from `requested_port`
-/// if it was taken). The returned receiver fires when the server stops.
+/// Returns the bound port — which, with no fallback left to move to (#312), is `requested_port`
+/// unless the caller asked for 0 and let the OS choose (the tests do, so they never race a real
+/// port). The returned receiver fires when the server stops.
 pub fn start(
     cfg: ServerConfig,
     house: &HouseLock,
@@ -72,18 +73,32 @@ pub fn start(
         }
     };
 
-    // Try the requested port first; if taken, let the OS pick.
-    let listener = match TcpListener::bind(SocketAddr::new(bind_addr, cfg.requested_port)) {
-        Ok(l) => l,
-        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-            log::warn!(
-                "port {} in use; falling back to ephemeral port",
-                cfg.requested_port
-            );
-            TcpListener::bind(SocketAddr::new(bind_addr, 0))?
+    // The requested port, or a refusal. There is deliberately NO ephemeral fallback (#312): the
+    // webview is loaded from `http://127.0.0.1:<bound_port>`, so a different port is a different
+    // ORIGIN, and every origin-keyed store goes with it — `casemaker.settings.v1` (the saved vise
+    // and stack, the machine calibration), `casemaker.library.v1`, `casemaker.machine.v1`, the
+    // engrave job and the run records. The app would then open looking exactly like a first run,
+    // with the user's data still on disk under a port they no longer know. Refusing to start is the
+    // only failure that loses nothing, so `AddrInUse` is reported rather than stepped around.
+    let listener = TcpListener::bind(SocketAddr::new(bind_addr, cfg.requested_port)).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AddrInUse {
+            std::io::Error::new(
+                std::io::ErrorKind::AddrInUse,
+                format!(
+                    "port {} is already in use.\n\n\
+                     Case Maker serves its own interface from this port, and it has to be this one: \
+                     a different port is a different origin, and the app would come up with your \
+                     saved settings, library and run records missing.\n\n\
+                     Close whatever holds port {}, then start Case Maker again. (Starting with \
+                     --port is possible, but it is a different origin: the app would open empty, \
+                     with today's data left behind on this one.)",
+                    cfg.requested_port, cfg.requested_port
+                ),
+            )
+        } else {
+            e
         }
-        Err(e) => return Err(e),
-    };
+    })?;
     listener.set_nonblocking(true)?;
     let local_addr = listener.local_addr()?;
     let handle = ServerHandle {
@@ -476,6 +491,37 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         assert!(content_type(&res).starts_with("application/json"));
         assert_eq!(body_json(res).await, serde_json::json!([]));
+    }
+
+    #[test]
+    fn a_taken_port_is_a_refusal_and_not_a_different_origin() {
+        // (#312) The defect this pins: `start` used to fall back to an ephemeral port when the
+        // requested one was taken, and `lib.rs` loaded the webview from whatever it got — so a
+        // foreign process on the port turned a working app into one that had forgotten everything,
+        // silently, with the old data stranded under the port that could not be had. Holding a real
+        // listener on a free port and asking `start` for that port IS the reproduction; the
+        // assertion is that it refuses and returns no handle, so there is no second origin for a
+        // window to be built from.
+        let dir = TempDir::new().unwrap();
+        let lock = HouseLock::acquire(dir.path()).unwrap();
+
+        let held = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).unwrap();
+        let taken = held.local_addr().unwrap().port();
+
+        let err = start(
+            ServerConfig {
+                requested_port: taken,
+                bind_to_all: false,
+                host: None,
+            },
+            &lock,
+        )
+        .expect_err("a taken port must refuse, never move to another one");
+        assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
+        assert!(
+            err.to_string().contains(&taken.to_string()),
+            "the message has to name the port the user must free: {err}"
+        );
     }
 
     /// One request over a real socket, answered by a real hyper, returned as bytes.

@@ -19,6 +19,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+# #312 — a second launch must FOCUS the running window, not become a second origin. Pinned to the
+# 2.4 line on purpose: 2.5 raised its own MSRV to Rust 1.90, above this crate's committed 1.89, and
+# a `rust-version` the code does not honour is the promise `[package]` above refuses to make.
+tauri-plugin-single-instance = "~2.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "io-util", "time"] }
