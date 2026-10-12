@@ -6,7 +6,18 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'playwright-report', 'test-results']),
+  globalIgnores([
+    'dist',
+    'playwright-report',
+    'test-results',
+    // #374 — `src-tauri/target` is full of generated JavaScript: the Tauri codegen assets, hashed
+    // `.js` files under `release/build/casemaker-*/out/tauri-codegen-assets/`, which this config
+    // has no parser for. Lint reported 14 parsing errors on files nobody wrote and nobody can fix.
+    // Nothing under `src-tauri` is JavaScript of ours — the crate is Rust, and there is no
+    // `.js`/`.mjs`/`.ts` in it outside `target/` — so the whole tree is ignored, for the same
+    // reason `vite.config.ts` stops watching it.
+    'src-tauri',
+  ]),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

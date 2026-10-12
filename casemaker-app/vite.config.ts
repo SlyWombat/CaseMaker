@@ -106,7 +106,24 @@ export default defineConfig(({ mode }) => {
     // moves to 5174 because 5173 was busy; failing loudly is the only useful answer there. Web
     // mode keeps the lenient default that the Playwright runs and hand-started servers rely on.
     // CASEMAKER_PORT therefore only applies to web mode: change `devUrl` with it for desktop.
-    server: { host: '127.0.0.1', fs: { allow: ['..'] }, port: DEFAULT_PORT, strictPort: mode === 'desktop' },
+    //
+    // #374 — never watch `src-tauri/**`. A desktop build writes and re-writes the whole tree under
+    // `target/` (every dependency, and the `.exe` of each build script), holding those files open
+    // while it does. Windows refuses a watch on a file another process has locked, and Vite's
+    // watcher treats that as fatal: the `FSWatcher` 'error' event has no handler, so the dev server
+    // process dies — Playwright's own `webServer` included, which then reports the failure as every
+    // test timing out on `page.goto`. Observed 2026-10-12 with a `cargo build` running. Nothing
+    // under `src-tauri` is ever served to the page: the desktop build embeds `dist/`, and every
+    // mention of that tree in `src/` is a doc comment. Vite APPENDS this to its own ignore list
+    // (`**/.git/**`, `**/node_modules/**`, `**/test-results/**`, the cache dir), so it stands in
+    // for none of them.
+    server: {
+      host: '127.0.0.1',
+      fs: { allow: ['..'] },
+      port: DEFAULT_PORT,
+      strictPort: mode === 'desktop',
+      watch: { ignored: ['**/src-tauri/**'] },
+    },
     preview: { port: DEFAULT_PORT, strictPort: false },
   };
 });
