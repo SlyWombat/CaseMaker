@@ -23,8 +23,10 @@ possible. **Nothing here is scheduled; the maintainer calls each session.**
   V1 ("we can refine this in v2").
 - **Next in S3:** #176's G32 stroke test, the #284 coupons and restart proof, #185 V-grooves. Before
   any of them: lift the head before `play` (#384) and set Z0 as the cutter tip's own height (#387).
-- The 2026-10-04 single-file ladder (`165-depth-ladder.nc` and its sheet) is **superseded** by the
-  `-row-A` / `-row-B` files. Do not upload it.
+- The 2026-10-04 single-file ladder is **superseded** by the `-row-A` / `-row-B` files and moved to
+  `docs/bench/superseded/`. **Its copy is still on the card as `/sd/gcodes/165-depth-ladder.nc`, and
+  on today's clamping it would cut into the moving jaw: delete it from the card (Studio's file list)
+  first thing next session.** Our console's `play` can run any card file (#386).
 
 ## The one gate on every chip-making session: the cutter
 
