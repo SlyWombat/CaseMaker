@@ -19,9 +19,11 @@
  *
  * "Upper bound" is a claim about the FACES, and both sides were once only claims about the text
  * somebody happened to measure (#365 review): a run of the widest CAPITAL for the width, `Åg` for the
- * height. Neither held — a face's widest glyph is not a capital and its tallest is not a letter — so
- * `tests/unit/inkBoxEstimate.spec.ts` now scans every glyph of every bundled face and checks both
- * numbers against what the app's own typesetter really returns.
+ * height. Neither held — a face's widest glyph is not a capital and its tallest line is not a letter
+ * pair — so `tests/unit/inkBoxEstimate.spec.ts` now scans every glyph of every bundled face and
+ * checks both numbers against what the app's own typesetter really returns. The height took two
+ * passes to get right: 2.0 was still a claim about SINGLE glyphs, and a line's box is the SPAN across
+ * the glyphs it holds.
  *
  * Both sides are load-bearing, and the HEIGHT is the one that looks like it cannot be (#365): an
  * ink box is taller than its cap height whenever the text has a descender or a carried accent, so a
@@ -63,21 +65,29 @@ export const ESTIMATED_ADVANCE_EM = 1.95;
  * face, not a rule of thumb.
  *
  * Added by #365, and it is a fix rather than a second guess: the fallback used to be a bare `size`,
- * which is the CAP height, not the box. An ink box is its glyphs' full extent, so real text measured
- * over the bundled faces runs from 1.00 (a bare ascender, `l`) to **1.926** — the worst is the
- * shading block `▓` in IBM Plex Mono, drawn over the whole em, with the box-drawing set just behind
- * it at 1.862 and the tallest accented letter (`Ậ` in Barlow bold) at 1.574. A bare `size` therefore
- * under-reached every void a face with a descender would really hit, and the depth bound is only
- * allowed to err the other way: measured small says a line is clear of a pocket the cutter then
- * walks into.
+ * which is the CAP height, not the box. An ink box is the union of its glyphs' ink, so real text
+ * measured over the bundled faces runs from 1.00 (a bare ascender, `l`) to a SPAN of **2.057** —
+ * `Ắ` over `ķ` in IBM Plex Serif bold, which is 2.020 even without the Latin Extended-B pair. A bare
+ * `size` therefore under-reached every void a face with a descender would really hit, and the depth
+ * bound is only allowed to err the other way: measured small says a line is clear of a pocket the
+ * cutter then walks into.
  *
  * 1.75 was #365's first answer, worked out from LETTERS (a carried accent over a descender, `Åg` in
- * Barlow bold, 1.706 — its ring rides above the cap and its tail drops below the baseline), and the
- * #365 review was right that it is not an upper bound over the faces: it misses the symbols by 0.18.
- * 2.0 covers the measured worst with a little room, and costs the fallback only a smaller
- * placeholder — the same honest direction `ESTIMATED_ADVANCE_EM` is wrong in.
+ * Barlow bold, 1.706), and the review was right that it is not an upper bound. 2.0 was the second,
+ * and the review was right again: it was pinned by SINGLE glyphs (the tallest, the shading block `▓`
+ * in IBM Plex Mono, 1.926) and by lines of one repeated glyph, but a line's box is not one glyph's —
+ * it is max top − min bottom across EVERY glyph on the line, and a line can hold a face's highest
+ * ink over its lowest. 2.1 is that span with a little room.
+ *
+ * The box-drawing and block-element symbols (U+2500–259F) are the one thing this does NOT bound, and
+ * are left out of the measurement deliberately: they are drawing glyphs drawn to the em to meet their
+ * neighbours (only IBM Plex Mono has them), a line of them is not text a label holds, and they are
+ * what the single-glyph reading was picking up (`▓` 1.926). A face's span with them is 2.149.
+ *
+ * The cost is only a smaller placeholder if a face ever does set one — the same honest direction
+ * `ESTIMATED_ADVANCE_EM` is wrong in.
  */
-export const ESTIMATED_HEIGHT_EM = 2.0;
+export const ESTIMATED_HEIGHT_EM = 2.1;
 
 /** The ink box of `text` at cap height `size`, mm — what the seed lays out and fits. */
 export interface InkBox {

@@ -1,14 +1,25 @@
 // `inkBox.ts`'s fallback is documented as an UPPER bound over the bundled faces, and "upper bound"
-// is a claim about the FACES rather than about whichever text somebody measured (#365 review). It
-// was wrong twice over for exactly that reason: 1.25 em/char was measured over a run of the widest
-// CAPITAL, and 1.75 em of height over `Åg` — but a face's widest glyph is not a capital and its
-// tallest is not a letter.
+// is a claim about the FACES rather than about whichever text somebody measured (#365 review). Both
+// constants were wrong twice over for exactly that reason — 1.25 em/char was measured over a run of
+// the widest CAPITAL, and 1.75 em of height over `Åg` — and the second review found the correction
+// short too: 2.0 was pinned by SINGLE-glyph and homogeneous-line measurements, but a line's ink box
+// is not one glyph's, it is the SPAN across the glyphs set on it, max top − min bottom. Nothing
+// typesets `Ắ` above `ķ`; a label can hold both, and in IBM Plex Serif bold that pair is 2.057 of
+// cap — taller than the 2.0 that was supposed to bound it.
 //
 // So this spec does not measure a hand-picked corpus. It walks every glyph of every bundled face,
 // typesets it through the app's OWN path (`glyphProfile` → `aabbOfProfile`, the two calls
-// `labelGlyphMeasure` makes) and reads its advance, then checks both constants against the worst the
-// faces really set — for one glyph, and for a line of nothing but that glyph, which is the shape the
-// fallback multiplies out by `text.length`.
+// `labelGlyphMeasure` makes) and reads its advance, its ink, and where its top and bottom sit, then
+// checks both constants against the worst the faces really set: the widest glyph, a line of nothing
+// but that glyph, and — for the height, which is where a single glyph is not the question — the
+// tallest pair of DIFFERENT glyphs a face can put on one line.
+//
+// The box-drawing and block-element symbols (U+2500–259F) are excluded, and deliberately: they are
+// drawing glyphs drawn to the em so they meet their neighbours, they exist only in IBM Plex Mono,
+// and a line of them is not text a label holds. Their presence is exactly what the single-glyph
+// measurement was picking up (`▓`, 1.926) and what hid the real bound — with them a face's span
+// reaches 2.149 (`Ǻ` over `│`), without them 2.057, and then every extreme is a letter of the Latin
+// ranges a label is set in. Both constants are claims about the text the app sets.
 //
 // The tightness half of each check is deliberate: a constant bumped to 5 to silence a failure would
 // be as wrong as one that errs small, only the other way round. "A little room" is what the
@@ -26,6 +37,10 @@ import type { TextWeight } from '@/types/textLabel';
 const SIZE = 8;
 const WEIGHTS: readonly TextWeight[] = ['regular', 'bold'];
 
+/** The box-drawing and block-element block, excluded: drawing glyphs, not text. See the header. */
+const BOX_DRAWING_FIRST = 0x2500;
+const BOX_DRAWING_LAST = 0x259f;
+
 /** One glyph as the fallback sees it, every length a ratio of the cap height it was set at. */
 interface Glyph {
   char: string;
@@ -33,6 +48,9 @@ interface Glyph {
   /** Its ink box, mm of ink per mm of cap. */
   inkWidth: number;
   inkHeight: number;
+  /** Where its ink sits vertically, mm per mm of cap — a line's height is `hi.top − lo.bottom`. */
+  top: number;
+  bottom: number;
   /** What it costs a LINE, mm per mm of cap — the number `text.length` multiplies. */
   advance: number;
 }
@@ -58,6 +76,7 @@ function glyphsOf(font: ParsedFont): Glyph[] {
     const cp = glyph.unicode;
     // Unmapped glyphs carry the 0xFFFF sentinel; control characters and the space have no ink.
     if (cp === undefined || cp === 0xffff || cp <= 0x20) continue;
+    if (cp >= BOX_DRAWING_FIRST && cp <= BOX_DRAWING_LAST) continue;
     const char = String.fromCodePoint(cp);
     const box = aabbOfProfile(glyphProfile(char, font, SIZE));
     const inkWidth = box ? (box.max[0] - box.min[0]) / SIZE : 0;
@@ -68,6 +87,8 @@ function glyphsOf(font: ParsedFont): Glyph[] {
       cp,
       inkWidth,
       inkHeight,
+      top: box ? box.max[1] / SIZE : 0,
+      bottom: box ? box.min[1] / SIZE : 0,
       advance: glyph.advanceWidth / font.unitsPerEm / cap,
     });
   }
@@ -83,6 +104,17 @@ const FACES: { def: BundledFontDef; weight: TextWeight; glyphs: Glyph[] }[] = BU
 const ALL: { glyph: Glyph; face: string }[] = FACES.flatMap((f) =>
   f.glyphs.map((glyph) => ({ glyph, face: `${f.def.id} ${f.weight}` })),
 );
+
+/** The tallest and the deepest glyph of a face, and the span a line holding both would ink. */
+function spanOf(f: { glyphs: Glyph[] }): { hi: Glyph; lo: Glyph; span: number } {
+  const hi = f.glyphs.reduce((a, b) => (b.top > a.top ? b : a));
+  const lo = f.glyphs.reduce((a, b) => (b.bottom < a.bottom ? b : a));
+  return { hi, lo, span: hi.top - lo.bottom };
+}
+
+/** Each face's own worst line height, and the worst of the worst — the number the constant bounds. */
+const SPANS = FACES.map((f) => ({ face: `${f.def.id} ${f.weight}`, ...spanOf(f) }));
+const WORST_SPAN = SPANS.reduce((a, b) => (b.span > a.span ? b : a));
 
 function worst(score: (g: Glyph) => number): { glyph: Glyph; face: string; value: number } {
   const at = (g: { glyph: Glyph; face: string }) => ({ ...g, value: score(g.glyph) });
@@ -110,7 +142,6 @@ describe('the fallback ink box is an upper bound over the bundled faces (#364, #
     // constant, because the fallback sizes a line by BOTH (`width = ADVANCE × size × text.length`).
     const widestInk = worst((g) => g.inkWidth);
     const widestAdvance = worst((g) => g.advance);
-    const tallest = worst((g) => g.inkHeight);
     expect(
       widestInk.value,
       `${describeGlyph(widestInk.glyph)} in ${widestInk.face} is ${widestInk.value.toFixed(3)} of cap of ink`,
@@ -118,17 +149,41 @@ describe('the fallback ink box is an upper bound over the bundled faces (#364, #
     expect(widestAdvance.value, `${describeGlyph(widestAdvance.glyph)} in ${widestAdvance.face} advances`).toBeLessThanOrEqual(
       ESTIMATED_ADVANCE_EM,
     );
+    // …and not by much: the constant is the measured worst plus a little room, not a shrug.
+    expect(ESTIMATED_ADVANCE_EM).toBeLessThanOrEqual(Math.max(widestInk.value, widestAdvance.value) * 1.15);
+    // The width answer #365 replaced cannot pass the assertions above — a widest CAPITAL is not the
+    // widest a face can set — so this test is the review's point and not a restatement of it.
+    expect(Math.max(widestInk.value, widestAdvance.value)).toBeGreaterThan(1.25);
+
+    // The single-glyph height is the WEAKER half of the height claim (any one glyph's ink is inside
+    // the span below), kept because it is the form the old constant was checked in.
+    const tallest = worst((g) => g.inkHeight);
     expect(tallest.value, `${describeGlyph(tallest.glyph)} in ${tallest.face} is that tall`).toBeLessThanOrEqual(
       ESTIMATED_HEIGHT_EM,
     );
-    // …and not by much: the constants are the measured worst plus a little room, not a shrug.
-    expect(ESTIMATED_ADVANCE_EM).toBeLessThanOrEqual(Math.max(widestInk.value, widestAdvance.value) * 1.15);
-    expect(ESTIMATED_HEIGHT_EM).toBeLessThanOrEqual(tallest.value * 1.15);
-    // The two answers #365 replaced cannot pass the assertions above — a widest CAPITAL is not the
-    // widest a face can set, and `Åg` is not the tallest — so this test is the review's point and
-    // not a restatement of it.
-    expect(Math.max(widestInk.value, widestAdvance.value)).toBeGreaterThan(1.25);
-    expect(tallest.value).toBeGreaterThan(1.75);
+  });
+
+  it('bounds the TALLEST line a face can set — a span across glyphs, not one glyph (#365 review, again)', () => {
+    // A line's ink box is the union of its glyphs, so the tallest any line can be is the face's
+    // highest ink over its lowest — and here the app's OWN typesetter typesets exactly that pair,
+    // which is the shape the review turned up (nothing draws `Ắ` over `ķ`, but a label can hold both).
+    for (const f of FACES) {
+      const { hi, lo, span } = spanOf(f);
+      const where = `${f.def.id} ${f.weight}: ${describeGlyph(hi)} over ${describeGlyph(lo)} = ${span.toFixed(3)} of cap`;
+      expect(span, where).toBeLessThanOrEqual(ESTIMATED_HEIGHT_EM);
+      const real = labelGlyphMeasure([])(hi.char + lo.char, f.def.id, f.weight, SIZE)!;
+      expect(real.height / SIZE, where).toBeCloseTo(span, 6);
+      expect(real.height, where).toBeLessThanOrEqual(inkBoxOf(hi.char + lo.char, f.def.id, f.weight, SIZE, () => null).height);
+    }
+    // The worst span is what the constant is for — measured worst plus a little room, no more.
+    expect(ESTIMATED_HEIGHT_EM).toBeGreaterThanOrEqual(WORST_SPAN.span);
+    expect(
+      ESTIMATED_HEIGHT_EM,
+      `worst span is ${WORST_SPAN.span.toFixed(3)} in ${WORST_SPAN.face}`,
+    ).toBeLessThanOrEqual(WORST_SPAN.span * 1.15);
+    // Both answers #365 gave cannot pass: 1.75 was `Åg` (a letter pair, but not the extreme) and 2.0
+    // was pinned by single glyphs — the span the letters really set is taller than either.
+    expect(WORST_SPAN.span).toBeGreaterThan(2.0);
   });
 
   it('bounds a LINE of the widest glyph, which is the shape the fallback multiplies out', () => {

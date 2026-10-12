@@ -358,9 +358,15 @@ export function EngravePanel(): JSX.Element {
     // cache pays, and only once.
     if (labelFontsLoaded(job.labels, job.customFonts ?? [])) return;
     let live = true;
-    void ensureLabelFontsLoaded(job.labels, job.customFonts ?? []).then(() => {
-      if (live) bumpFacesLoaded((n) => n + 1);
-    });
+    void ensureLabelFontsLoaded(job.labels, job.customFonts ?? [])
+      .then(() => {
+        if (live) bumpFacesLoaded((n) => n + 1);
+      })
+      // Swallowed, not rethrown: a face that plainly fails to fetch leaves the rows reading the
+      // fallback's sentence, which is exactly what they showed before this effect existed. Letting
+      // it reject would be an unhandled rejection — re-raised on every keystroke that redraws the
+      // label list. `openRunSheet`/`save` stay loud; they must not write numbers nobody measured.
+      .catch(() => {});
     return () => {
       live = false;
     };
