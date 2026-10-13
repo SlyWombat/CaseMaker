@@ -13,13 +13,16 @@
 
 G90 G21
 ;@MKR|TOOLPATH_START|toolpath_number=1
+; The deliberate-gouge twin of `three-strokes.nc`, in the same post order (#395): vacuum, the
+; machine-frame Z lift, an X/Y word, then the spindle. The one difference is the second stroke's
+; rapid — `G0 X10 Y15 Z-1` carries the tool at cutting depth across the stock, which is the
+; `rapid-through-stock` diagnostic the e2e run asserts on.
 T1 M6
-M7
-S12000 M3
-; #392 — the head lift, as in `three-strokes.nc`: the gouge below is carried at its own line, and
-; the opening X/Y rapid still needs a Z the program established at its start.
+M331
 G53 G0 Z-3
-G0 X10 Y8 Z5
+G0 X10 Y8
+S12000 M3
+G0 Z5
 G1 Z-0.5 F200
 G1 X50 F500
 G0 X10 Y15 Z-1
@@ -30,7 +33,7 @@ G0 X10 Y22
 G1 Z-2 F200
 G1 X50 F500
 G0 Z15
-M9
+M332
 M05
 G28
 M02

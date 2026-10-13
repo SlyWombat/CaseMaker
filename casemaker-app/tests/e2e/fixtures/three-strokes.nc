@@ -13,15 +13,18 @@
 
 G90 G21
 ;@MKR|TOOLPATH_START|toolpath_number=1
+; #395 — the POST's order, word for word (#384): the vacuum comes on, then the machine-frame Z
+; lift, and only then a word that moves in X/Y. The spindle start sits after the lift, so it
+; comes on with the head at the controller's own clearance, and before `G0 Z5` — the first word
+; that establishes a work Z, and the height the approach runs at. The accessory words are `M331`
+; / `M332`, which is what our post writes and what a Z1 obeys; `M7`/`M9` are answered `ok` and
+; blow nothing (#283), and this file used to carry them.
 T1 M6
-M7
-S12000 M3
-; #392 — the head lift the post writes (#384): after a manual `M6` the head's Z is wherever the
-; last job left it, so a file establishes a machine-frame Z before its first X/Y rapid. The
-; verifier refuses one that does not, and this line was added to this file when that check
-; tightened to require a Z at the START of an X/Y rapid, not merely somewhere on the line.
+M331
 G53 G0 Z-3
-G0 X10 Y8 Z5
+G0 X10 Y8
+S12000 M3
+G0 Z5
 G1 Z-0.5 F200
 G1 X50 F500
 G0 Z5
@@ -33,7 +36,7 @@ G0 X10 Y22
 G1 Z-2 F200
 G1 X50 F500
 G0 Z15
-M9
+M332
 M05
 G28
 M02

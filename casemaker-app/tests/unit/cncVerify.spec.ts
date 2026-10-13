@@ -83,10 +83,12 @@ describe('cncVerify (#174): the default job and the authored fixture', () => {
   });
 
   it.skipIf(!existsSync(THREE_STROKES))('three-strokes.nc (#199) passes on a 60 × 30 × 6 stock', () => {
-    // #283 — THIS FILE CARRIES `M7`/`M9`, and it still passes. It is our own authored bench file,
-    // written before the post learned that `M7` blows nothing on a Z1 and switched to `M331`; the
-    // controller answers the air words `ok`, so a file holding them is not unsafe. That is the whole
-    // reason they stay whitelisted rather than being struck out with the post's change.
+    // #283 — this file used to carry `M7`/`M9`, the air words the post wrote before it learned
+    // they blow nothing on a Z1 (#283), and it passed then too: the controller answers both `ok`,
+    // which is the whole reason they stay whitelisted rather than being struck out with the post's
+    // change. #395 gave the file the post's own accessory words (`M331`/`M332`) and word order, so
+    // the dialect they are whitelisted FOR is now covered by the dialect test below and not only by
+    // this fixture.
     const stock = { length: 60, width: 30, thickness: 6 };
     const setup = stubSetup(
       { kind: 'prism', outline: rectProfile(60, 30), thickness: 6 },

@@ -15,6 +15,9 @@ import { create } from 'zustand';
 import type { MachineCalibration, PausePoint, Setup } from '@/engine/cnc';
 import { resolveMachine } from '@/engine/cnc/calibration';
 import { MACHINES } from '@/engine/cnc/machine';
+// The one statement of the simulation's safety rule (#393). Safe in the web bundle: it imports a
+// TYPE from the worker session, nothing else.
+import { simulationProblem } from '@/engine/cnc/simGate';
 import { useSettingsStore } from '@/store/settingsStore';
 import { stepAtTime, timeAtStep, totalTime } from '@/engine/cnc/playbackClock';
 import { generateRestart as buildRestart, stockFromSetup, type RestartResult } from '@/engine/cnc/restart';
@@ -132,8 +135,9 @@ export interface SimState {
   retryWithLongerBudget(): Promise<void>;
   /**
    * Generate a restart `.nc` for the loaded program, resuming at `step` (default: the current
-   * step). Differs from the run only in refusing when the resume state cannot be re-established;
-   * the result is stored in `restart` (#249). No-op when nothing has been loaded.
+   * step). Refuses when the resume state cannot be re-established, and — like every other
+   * producer of a file — when the loaded program failed the simulation (#395); the result is
+   * stored in `restart` (#249). No-op when nothing has been loaded.
    */
   generateRestart(opts?: { step?: number; baseName?: string }): void;
   /** Discard the generated restart (#249). */
@@ -307,6 +311,36 @@ export const useSimStore = create<SimState>()((set, get) => {
     generateRestart(opts) {
       const s = get();
       if (!lastLoad || s.stepCount <= 0) return;
+      // The sweep's own verdict outranks every check below (#395). `status: 'ready'` means the
+      // sweep produced material, NOT that the program is safe (#393): a load whose cutter drove
+      // into the fixed jaw comes back `ready` with its `tool-into-fixture` error sitting in
+      // `diagnostics`. And a `pathOnly` refusal is the sweep refusing outright — the runner drew
+      // the path, no material was cut. Either way the program is one the app would not run, so a
+      // restart of it is a file the app would not write.
+      //
+      // This is the gate the restart's OWN verifier cannot stand in for: `buildRestart` verifies
+      // against the STOCK's depth limit (`stockFromSetup`), and the gouge that matters is in the
+      // FIXTURE — so a restart of a program that cut into the jaw verifies clean and, step for
+      // step, repeats the moves that did it.
+      const problem = simulationProblem(s.diagnostics);
+      if (problem !== null || s.pathOnly) {
+        // BOTH facts when both hold: a path-only refusal carries its errors too, and the codes are
+        // the part that says what went wrong.
+        const cause = `the loaded program is refused by the simulation${problem !== null ? ` (${problem})` : ''}`;
+        const why = s.pathOnly ? `${cause}; only its path was drawn and no material was cut` : cause;
+        set({
+          restart: {
+            ok: false,
+            nc: null,
+            fileName: null,
+            resume: null,
+            verify: null,
+            errors: [`${why}, so a restart of it is refused too`],
+            runSheet: [],
+          },
+        });
+        return;
+      }
       const at = Math.trunc(opts?.step ?? s.step);
       const stock = stockFromSetup(lastLoad.setup);
       if (stock === null) {

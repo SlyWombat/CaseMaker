@@ -143,6 +143,9 @@ sends nothing, so it can run beside everything else.
 
 Studio block:
 1. **D3 (#281):** timed air run of the D1 file, **feed and rapid portions recorded separately**.
+   The file's words were re-ordered to the post's own order afterwards (#395, 2026-10-13), so the
+   recorded split belongs to the pre-#395 bytes — the difference is the opening rapid, which is now
+   an X/Y word and a separate `G0 Z30` rather than one `G0 X10 Y8 Z30`.
 2. **#303:** red STOP, Pause/Resume, grey Stop, Reset, one fresh air run each. Our console
    disconnected while Studio drives.
 

@@ -4,7 +4,10 @@
 //
 // Flags: --dry (generate and print, send nothing), --verbose (every byte, both directions),
 //        --name <file.nc> (a bare filename; default the run sheet's own name),
-//        --dir <path> (the card directory; default GCODE_DIR = /sd/gcodes).
+//        --dir <path> (the card directory; default GCODE_DIR = /sd/gcodes),
+//        --calibration <file.json> (the app's saved machine calibration, #279/#395; without it the
+//                                   shipped profile is used, which is what the app runs before
+//                                   any probe).
 //
 // Why this exists rather than "just drive the desktop app": the GUI needs a Rust build and a person
 // clicking, and the thing that is actually unproven is the PROTOCOL, not the button (the button has
@@ -34,7 +37,7 @@ import { createSimSession } from '../src/workers/sim/session';
 import { simErrors, simulationProblem } from '../src/engine/cnc/simGate';
 import { runSheetFileName } from '../src/engine/cnc/engrave/runSheet';
 import { jobTool, toSetup } from '../src/engine/cnc/engrave/jobSetup';
-import { Z1 } from '../src/engine/cnc/machine';
+import { jobMachine, parseMachineCalibration, type MachineCalibration } from '../src/engine/cnc/calibration';
 import { parseEngraveJob } from '../src/store/engraveJobSchema';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '../src/engine/fonts/registry';
 
@@ -63,19 +66,57 @@ if (!parsed.ok) {
   process.exit(2);
 }
 const job = parsed.job;
+
+/**
+ * The app's saved machine calibration, if the caller passed one (#279). Read from a FILE because
+ * this script runs in node: the app keeps it in `localStorage`, which a headless run has none of,
+ * so the record has to be handed over rather than fetched.
+ */
+function savedCalibration(): MachineCalibration | null {
+  const flag = process.argv.indexOf('--calibration');
+  if (flag === -1) return null;
+  const path = process.argv[flag + 1];
+  if (path === undefined) {
+    console.error('--calibration needs the path of a saved calibration record');
+    process.exit(2);
+  }
+  const parsedCal = parseMachineCalibration(JSON.parse(readFileSync(path, 'utf8')));
+  if (!parsedCal.ok) {
+    console.error(`${path} is not a calibration record: ${parsedCal.reason}`);
+    process.exit(2);
+  }
+  return parsedCal.calibration;
+}
+
 // No Makera feed rows in a headless run (#324): the catalogue tier needs a house service.
 const tool = jobTool(job);
-const generated = engraveGenerate(tl, job, tool, []);
+// The machine the file is posted AND swept against, resolved ONCE (#395). `engraveGenerate`
+// resolves the same profile internally and feeds the post, the setup and its own verifier from
+// it; this script used to hand the sweep a bare `Z1`, which is the shipped profile with none of
+// the calibration applied. Same reader, same arguments, so the two cannot judge different
+// machines — and `session.load` resolves the id it is given the same way.
+const calibration = savedCalibration();
+const mill = jobMachine(job, calibration);
+const generated = engraveGenerate(tl, job, tool, [], calibration);
 
 console.log(`job      : ${job.name}`);
+console.log(
+  `machine  : ${mill.id}   ${calibration === null ? 'shipped profile (no calibration passed)' : `calibrated ${calibration.measuredAt} — ${calibration.source}`}`,
+);
 console.log(`stage    : ${generated.stage}   ok: ${generated.ok}`);
 console.log(`verify   : ok=${generated.verify?.ok}   findings=${generated.verify?.findings.length ?? 0}`);
 for (const f of generated.verify?.findings ?? []) {
   console.log(`   ${f.severity.padEnd(7)} ${f.code}: ${f.message}`);
 }
+for (const e of generated.errors) console.log(`   ${e.stage.padEnd(7)} ${e.message}`);
 
-if (tool === null || generated.nc === null || generated.verify == null) {
-  console.error('\nno tool, no program or no report — the gates have nothing to judge, nothing is sent.');
+// #395 — `generated.ok`, not "there is a file and a report". `engraveGenerate` returns
+// `ok: false` WITH an `nc` and a PASSING `verify` when only the FRAME file fails (#244): the
+// program is fine and the file beside it was refused, which is exactly what the app's own Save
+// gate refuses on (`saveBlocker` reads `ok`). Gating on the three nulls alone let this script
+// write and upload a program the app would not.
+if (tool === null || !generated.ok || generated.nc === null || generated.verify == null) {
+  console.error('\nno tool, or the pipeline did not reach a clean finish — the gates have nothing to judge, nothing is sent.');
   process.exit(1);
 }
 
@@ -85,13 +126,15 @@ if (tool === null || generated.nc === null || generated.verify == null) {
 // carried straight to the card by the one tool in this repo that hands a file to the real machine.
 // Same predicate as the app and the other two producers; the sim is a few seconds here.
 const session = createSimSession(tl);
-const sim = session.load(generated.nc, toSetup(job, Z1), tool, Z1.id);
+const sim = session.load(generated.nc, toSetup(job, mill), tool, mill.id, { calibration });
 session.dispose();
 console.log(`sim      : ok=${sim.ok}   errors=${simErrors(sim.diagnostics).length}`);
 const simProblem = simulationProblem(sim.diagnostics);
-if (simProblem !== null) {
+// #395 — `!sim.ok` too, not only the diagnostics: `ok: false` is the sweep's own refusal, and a
+// refusal that carried no error diagnosis would otherwise pass this gate by silence.
+if (!sim.ok || simProblem !== null) {
   for (const d of simErrors(sim.diagnostics)) console.error(`   ERROR ${d.code}: ${d.message}`);
-  console.error(`\nthe simulation refuses this program (${simProblem}) — nothing is prepared or sent.`);
+  console.error(`\nthe simulation refuses this program (${simProblem ?? 'no error diagnostic, but the load did not succeed'}) — nothing is prepared or sent.`);
   process.exit(1);
 }
 
