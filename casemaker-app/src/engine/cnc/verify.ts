@@ -364,10 +364,6 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
       // the offsets are the runner's, not a second implementation's (the runner sets both
       // `work` and `machine` on every move while the WCS is G54, which our dialect requires).
       const m: MoveEvent = ev;
-      // #396 follow-up — a move the PROGRAM wrote that commands Z places the tool itself. The
-      // moves of an expanded macro are synthetic (the runner's own steps), so they cannot clear
-      // it however much Z they appear to assert.
-      if (m.synthetic === undefined && m.commanded[2] === true) zUnproven = false;
       const after = applyEvent(state, m, ctx.setup);
       const fromW = state.work;
       const toW = after.work;
@@ -491,6 +487,15 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
           }
         }
       }
+
+      // #396 follow-up — a move the PROGRAM wrote that commands Z places the tool itself, for the
+      // events that FOLLOW it. The moves of an expanded macro are synthetic (the runner's own
+      // steps), so they cannot clear it however much Z they appear to assert. Cleared HERE, after
+      // the rapid check rather than before it: that check judges the move's own X/Y travel against
+      // the Z it STARTS at, and a `G0 X5 Y5 Z5` runs those legs from wherever the head was left just
+      // as a `G0 X5 Y5` does. Clearing first refused the Z-less form and passed the Z-on-the-line
+      // form, which is the same hazard with a word that places nothing (review, 2026-10-13).
+      if (m.synthetic === undefined && m.commanded[2] === true) zUnproven = false;
 
       if (isCut) seenCut = true;
       state = after;

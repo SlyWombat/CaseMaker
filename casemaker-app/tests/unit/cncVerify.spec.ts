@@ -311,6 +311,23 @@ describe('cncVerify (#174): the checks', () => {
     expect(codes(unknownTool(), studio)).toContain('rapid-too-low');
   });
 
+  it('rapid-too-low: a Z word on the same line does not excuse the X/Y travel (#392, #396 follow-up)', () => {
+    // Review case, 2026-10-13. The same X/Y travel as the test above with the Z on the same line:
+    // `G0 X5 Y5 Z5` runs its X/Y legs from wherever the head was left, which is undetermined while
+    // the file's own `M6` may have been a no-op. Commanding Z places the tool for the events AFTER
+    // this move, not for this move's own travel — so the flag may only be cleared once that travel
+    // has been judged. Clearing it first refused `G0 X5 Y5` and passed `G0 X5 Y5 Z5`, the same
+    // hazard with a Z word on the line.
+    const combo = ['G90 G21', 'T1 M6', 'G0 X5 Y5 Z5', 'S12000 M3', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
+    expect(codes(unknownTool(), combo)).toContain('rapid-too-low');
+    // With the tool stated the change is real, the macro really does end at clearance, and the move
+    // is placed: no finding. (Stated as T2: with `startingTool: 1` the `M6` is a no-op, which forgets
+    // the Z outright, so the same program is refused there for the #392 reason.)
+    const c = ctxFor();
+    const stated: VerifyContext = { ...c, setup: { ...c.setup, startingTool: 2 } };
+    expect(codes(stated, combo)).not.toContain('rapid-too-low');
+  });
+
   it('not-our-dialect: an arc, a G91/G92 and an I/J word are all refused', () => {
     const arc = program(['G0 X5 Y5 Z5', 'G1 Z-1 F200', 'G2 X10 Y5 I2.5 J0', 'M5', 'M02']);
     expect(codes(arc.ctx, arc.text)).toContain('not-our-dialect');
