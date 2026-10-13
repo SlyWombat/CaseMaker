@@ -2679,6 +2679,46 @@ button:disabled {
   color: var(--cm-color-on-surface-muted);
 }
 
+/* --- the vacuum switch, above the console (#390) -------------------------- */
+.manage .mvacuum {
+  margin-top: 10px;
+  border-top: 1px solid var(--m-hairline);
+  padding-top: 8px;
+}
+.manage .mvacuum .hint {
+  margin: 6px 0 0;
+}
+.manage .mvacuum-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.manage .mvacuum-label {
+  color: var(--cm-color-on-surface);
+  font-weight: 600;
+}
+.manage .mvacuum-state {
+  font-size: 11px;
+  color: var(--cm-color-on-surface-muted);
+}
+.manage .mvacuum-state[data-mode='on'],
+.manage .mvacuum-state[data-mode='off'] {
+  color: var(--cm-color-on-surface);
+}
+.manage .mvacuum-btns {
+  display: flex;
+  gap: 6px;
+}
+/* The lit state of the two-state switch, the toolbar's own pattern (there is no accent token here):
+   the pressed half carries the same primary container as a `btn--primary`. */
+.manage .mvacuum-btns .btn[aria-pressed='true'] {
+  background: var(--cm-color-primary-container);
+  color: var(--cm-color-on-primary-container);
+  border-color: transparent;
+  font-weight: 600;
+}
+
 /* --- the detail rail ------------------------------------------------------ */
 .manage .context-panel {
   padding: 12px;
