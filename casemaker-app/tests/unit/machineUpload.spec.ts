@@ -4,11 +4,12 @@ import {
   programBytes,
   setMachineUploadLoader,
   controllerState,
+  jobProgressPercent,
   uploadProgram,
   type MachineUploadClient,
   type UploadAttempt,
 } from '@/platform/machineUpload';
-import type { UploadOutcome } from '@/platform/desktop/protocol';
+import { readJobProgress, type UploadOutcome } from '@/platform/desktop/protocol';
 import type { VerifyReport } from '@/engine/cnc/verify';
 
 /**
@@ -272,5 +273,43 @@ describe('#296 uploadProgram — the machine is asked NOW, not remembered', () =
     expect(controllerState('<Run>')).toBe('Run');
     expect(controllerState('Idle')).toBeNull();
     expect(controllerState(null)).toBeNull();
+  });
+});
+
+describe('#390 jobProgressPercent — the web-safe restatement of readJobProgress’s percent', () => {
+  // Verbatim replies from `docs/bench/traces/2026-10-12-poll.log` — the same three the desktop spec
+  // reads the finish rule off, plus the Alarm line and the garbage a bench socket can return.
+  const RUN = '<Run|MPos:-11.6000,-14.6000,-3.0000|WPos:136.8000,110.2000,61.6109|S:7128.4,12000.0|T:1,0.507,1|P:0,56,4|OTA:0,0>';
+  const MID_JOB_IDLE = '<Idle|MPos:-98.4000,-102.8000,-9.6109|WPos:50.0000,22.0000,55.0000|S:11988.6,12000.0|T:1,0.507,1|P:29,74,42|OTA:0,0>';
+  const END = '<Idle|MPos:-11.6000,-14.6000,-3.0000|WPos:136.8000,110.2000,61.6109|S:0.0,12000.0|P:34,100,51|OTA:0,0>';
+  const AFTER = '<Idle|MPos:-11.6000,-14.6000,-3.0000|WPos:136.8000,110.2000,61.6109|S:0.0,12000.0|OTA:0,0>';
+  const ALARM = '<Alarm|MPos:-9.890,-12.830,-85.788|H:10|S:0.0|T:1,-9.752,1>';
+
+  it('reads the percent while a program runs, 100 at its end, and null once the field is gone', () => {
+    expect(jobProgressPercent(RUN)).toBe(56);
+    expect(jobProgressPercent(MID_JOB_IDLE)).toBe(74);
+    expect(jobProgressPercent(END)).toBe(100);
+    expect(jobProgressPercent(AFTER)).toBeNull();
+    expect(jobProgressPercent(ALARM)).toBeNull();
+    expect(jobProgressPercent('garbage from the controller')).toBeNull();
+    expect(jobProgressPercent(null)).toBeNull();
+  });
+
+  it('is read off the Idle line the state word cannot tell from the end of a job', () => {
+    // The whole reason it exists: `controllerState` says `Idle` for both of these.
+    expect(controllerState(MID_JOB_IDLE)).toBe('Idle');
+    expect(controllerState(END)).toBe('Idle');
+    expect(jobProgressPercent(MID_JOB_IDLE)).toBeLessThan(100);
+    expect(jobProgressPercent(END)).toBe(100);
+  });
+
+  it('agrees with the desktop `readJobProgress` it is restated from, line for line', () => {
+    // The restatement's honest check: not a type shape but the same ANSWER, over real replies. A
+    // regex fixed on one side and not the other fails here rather than silently gating on a wrong
+    // number (`platform/desktop/protocol.ts` cannot be imported by `machineUpload.ts` itself — see
+    // the module doc — so the two copies are kept in step by this test instead).
+    for (const line of [RUN, MID_JOB_IDLE, END, AFTER, ALARM, '', 'garbage', '<Idle|P:9,0,0>']) {
+      expect(jobProgressPercent(line)).toBe(readJobProgress(line).percent);
+    }
   });
 });

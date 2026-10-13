@@ -16,7 +16,15 @@
  * HANDS-OFF WHILE A JOB RUNS. A running program owns the vacuum — it wrote its own `M331` and will
  * write its own `M332` — so a press must not fight it. The machine is asked what it is doing before
  * the code is sent, and anything that is not an explicit `Idle` refuses (`platform/machineVacuum.ts`,
- * `uploadProgram`'s #296 rule). The refusal is shown, not swallowed.
+ * `uploadProgram`'s #296 rule). The refusal is shown, not swallowed. Nor is `Idle` alone enough: the
+ * state word reads `Idle` for the last few seconds of a job too, so a line that still carries a `P:`
+ * percent below 100 is a job in progress and refuses as well (#390).
+ *
+ * A MEMORY OF ONE CONNECTION, SO IT IS KEYED BY ONE. What this panel remembers is what it last sent
+ * *on the connection it sent it on*. A re-check, a fresh wizard run and a machine found at a new
+ * address are all new connections, and a power cycle clears `M331`/`M332` outright — so the parent
+ * keys this component on the observation, and every one of those remounts it at `unknown` rather than
+ * carrying a claim across (`MachinesScope.tsx`). That is the reset; there is no other.
  *
  * WHAT IS NOT HERE. No arming checkbox: a mode change is not motion, and `/Fabrication.md` §8's
  * "a person at the machine" rule is about moves. No `M331.x` family (`M331.1` blowing, `M331.2` bed
@@ -85,7 +93,7 @@ function VacuumSwitch({ host, port }: { host: string; port: number }) {
             data-testid="manage-vacuum-on"
             aria-pressed={mode === true}
             disabled={busy}
-            title="Switch the machine's vacuum on (M331) — it is refused unless the machine is Idle"
+            title="Switch the machine's vacuum on (M331) — asked live, and refused unless the machine is idle with no program running"
             onClick={() => void press(true)}
           >
             On
@@ -96,7 +104,7 @@ function VacuumSwitch({ host, port }: { host: string; port: number }) {
             data-testid="manage-vacuum-off"
             aria-pressed={mode === false}
             disabled={busy}
-            title="Switch the machine's vacuum off (M332) — it is refused unless the machine is Idle"
+            title="Switch the machine's vacuum off (M332) — asked live, and refused unless the machine is idle with no program running"
             onClick={() => void press(false)}
           >
             Off

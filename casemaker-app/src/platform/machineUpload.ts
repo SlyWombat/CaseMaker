@@ -69,6 +69,34 @@ export function controllerState(text: string | null): string | null {
   return m === null ? null : (m[1] ?? null);
 }
 
+/**
+ * The controller's `P:` progress percent from a status line — 100 at the end of a program, a smaller
+ * number while one runs — or null when the line carries no `P:` field at all (which is what an idle
+ * machine outside a job answers). `P:` is `line,percent,seconds`; only the percent is read here.
+ *
+ * WHY THIS EXISTS BESIDE {@link controllerState} AND NOT AS A SECOND PARSER ELSEWHERE. The state word
+ * alone cannot say whether a program is running: the machine reads `Idle` MID-JOB, for the ~4 s
+ * spin-down at `M05` before the head goes home (`docs/bench/traces/2026-10-12-poll*.log`,
+ * `Z1-Bridge-Protocol.md` §6), so a caller that gates on `Idle` alone lets a command in during the one
+ * window where a program still owns the machine (#390). The field that answers it is `P:`, and this is
+ * that field read off the same line, in the same module, as the state word — one parser for a status
+ * line, not two.
+ *
+ * **`readJobProgress`'s percent, restated web-safe** (`platform/desktop/protocol.ts`), for the reason
+ * {@link MachineStatusReading} restates `MachineStatus`: importing it would pull the desktop bridge
+ * into the web bundle. `machineUpload.spec.ts` keeps the two in step by running both over one table of
+ * real status lines, so a divergence is a failing test rather than a silently wrong gate.
+ */
+export function jobProgressPercent(text: string | null): number | null {
+  if (text === null) return null;
+  const m = /(?:^|\|)P:([^|>]*)/.exec(text);
+  if (m === null) return null;
+  const raw = (m[1] as string).split(',')[1]?.trim();
+  if (raw === undefined || raw === '') return null;
+  const v = Number(raw);
+  return Number.isFinite(v) ? v : null;
+}
+
 /** The socket-facing half of the upload: one status read, one transfer. */
 export interface MachineUploadClient {
   /**

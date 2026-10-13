@@ -11,7 +11,7 @@
 // for one test without rebuilding for the other target.
 
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MachinesScope } from '@/components/manage/MachinesScope';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -197,6 +197,29 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
     expect(state().textContent).toBe('unknown');
   });
 
+  it('a mid-job Idle is refused too — a `P:` below 100 is a program still running', async () => {
+    // The state word says Idle at 90 %, which is the ~4 s spin-down before the head goes home (#390
+    // item 1). A press here would send M331 after the program's own M332 and leave the vacuum on.
+    const wire = fakeConsole((line) =>
+      line === '?'
+        ? {
+            ok: true,
+            line,
+            text: '<Idle|MPos:-98.4,-102.8,-9.6|WPos:50.0,22.0,55.0|S:11988.6,12000.0|T:1,0.507,1|P:29,90,88|OTA:0,0>',
+            frames: 1,
+            elapsedMs: 30,
+          }
+        : { ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 },
+    );
+    render(<MachinesScope />);
+    fireEvent.click(on());
+
+    await waitFor(() => expect(q('manage-vacuum-note')).not.toBeNull());
+    expect(screen.getByTestId('manage-vacuum-note').textContent).toContain('90% through');
+    expect(wire.sent).toEqual(['?']);
+    expect(state().textContent).toBe('unknown');
+  });
+
   it('a press that lost the link goes back to unknown, because the code may or may not have arrived', async () => {
     const wire = fakeConsole((line) =>
       line === '?'
@@ -224,5 +247,60 @@ describe('#390 the vacuum switch — it claims only what it sent', () => {
     expect(state().textContent).toBe('unknown');
     // Only the ask was attempted; the code was never reached.
     expect(wire.sent).toEqual(['?']);
+  });
+});
+
+describe('#390 the vacuum switch — the memory belongs to one connection (#390 item 2)', () => {
+  beforeEach(() => {
+    caps.drive = true;
+    withMachine();
+  });
+
+  /** A press that reported `on`, and the handle to re-render the pane it left behind. */
+  async function pressOn(): Promise<ReturnType<typeof render>> {
+    fakeConsole(idleMachine);
+    const view = render(<MachinesScope />);
+    fireEvent.click(on());
+    await waitFor(() => expect(state().textContent).toBe('on'));
+    return view;
+  }
+
+  it('forgets the mode when the machine is reached again — a re-check is a new connection', async () => {
+    const view = await pressOn();
+
+    // A plain re-render is NOT a new connection: the same record keeps what was sent. This is the
+    // non-vacuity half — without it the two resets below would pass for any render at all.
+    view.rerender(<MachinesScope />);
+    expect(state().textContent).toBe('on');
+
+    // A fresh observation (a re-check, a wizard run, an upload's live status — anything that reaches
+    // the machine again) is. `observedAt` is what moves, and the switch is keyed on it.
+    act(() => {
+      useMachineStore.setState({
+        machine: { ...Z1_RECORD, observedAt: '2026-10-13T09:00:00.000Z' },
+        checkedAt: '2026-10-13T09:00:00.000Z',
+      });
+    });
+
+    expect(state().textContent).toBe('unknown');
+    expect(state().getAttribute('data-mode')).toBe('unknown');
+    expect(on().getAttribute('aria-pressed')).toBe('false');
+    // The note went with the connection it was about.
+    expect(q('manage-vacuum-note')).toBeNull();
+  });
+
+  it('forgets the mode when the machine turns up at a different address', async () => {
+    await pressOn();
+
+    act(() => {
+      useMachineStore.setState({
+        machine: { ...Z1_RECORD, host: '192.168.10.99', ip: '192.168.10.99' },
+      });
+    });
+
+    expect(state().textContent).toBe('unknown');
+    // Changing the address a machine answers on is a new connection even with the same stamp, which
+    // is why the key carries host and port and not only `observedAt`.
+    expect(on().getAttribute('aria-pressed')).toBe('false');
   });
 });

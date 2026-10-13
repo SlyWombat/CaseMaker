@@ -16,6 +16,13 @@
  * permission. The state word is read with `controllerState`, the one parser for a status line, and
  * not with a second one written here.
  *
+ * AND IDLE ALONE IS NOT ENOUGH (#390). The state word reads `Idle` MID-JOB — for the ~4 s spin-down at
+ * `M05`, before the head goes home (`Z1-Bridge-Protocol.md` §6) — so an `Idle` with a `P:` percent
+ * below 100 is a job that is still running, and a press there would send `M331` after the program's
+ * own `M332` had already gone out: the vacuum would stay on with nothing left to switch it off. The
+ * percent is read off the same line, by `jobProgressPercent`, beside the state word and in the same
+ * module, so there is still exactly one parser for a status line.
+ *
  * WHAT A REFUSAL COSTS. The ask is one line (`?`) on the session's own connection; a refusal sends
  * nothing further and the connection is closed (the `finally`). So a press on a running machine
  * costs one poll and no command, and a press on an idle one is `?` then `M331`/`M332` on the SAME
@@ -30,7 +37,7 @@
  * removal) stays unmodelled (`Z1-Firmware-Dialect.md` §11.3, #283).
  */
 
-import { controllerState } from './machineUpload';
+import { controllerState, jobProgressPercent } from './machineUpload';
 import { attachConsole, type MachineConsoleTarget } from './machineConsole';
 
 /** The machine's bare `M331`/`M332` — "turning extend out mode on/off", the vacuum (#283). */
@@ -47,7 +54,9 @@ export function vacuumLine(on: boolean): string {
  *
  *   - `toggled` — the machine took the code. `on` is the state now, and `status` is the idle line
  *     that let it start (verbatim, as `uploadProgram` carries it).
- *   - `busy` — the machine answered, and it was not Idle. Nothing was sent; `status` is its line.
+ *   - `busy` — the machine answered and a program still owns the vacuum: a state word that is not
+ *     `Idle`, or an `Idle` line whose `P:` percent says the job has not finished (see below). Nothing
+ *     was sent; `status` is its line.
  *   - `refused` — the guards refused the line (never the case for `M331`/`M332` today, mapped rather
  *     than asserted away so a divergence is an answer and not a crash).
  *   - `timeout` / `error` — the socket failed, or the exchange went where the protocol does not
@@ -98,6 +107,21 @@ export async function toggleVacuum(target: MachineConsoleTarget, on: boolean): P
       return {
         kind: 'busy',
         detail: `it reports ${state} rather than Idle — a program owns the vacuum while it runs, so nothing was sent`,
+        status: ask.text,
+      };
+    }
+    // 1b. IDLE IS NOT ENOUGH, and this is the window the state word hides (#390). The line reads
+    //     `<Idle|…|S:12031…|P:389,90,88>` for the ~4 s spin-down at `M05`, before the head goes home —
+    //     Idle at 90 %, the spindle still turning, the program not finished (`Z1-Bridge-Protocol.md` §6,
+    //     traces `docs/bench/traces/2026-10-12-poll*.log`). A `P:` field is present only while a program
+    //     is running, so a percent below 100 means one is, whatever the state word says. Sending
+    //     `M331` here would leave the vacuum ON after the job: the program's own `M332` is written
+    //     before the `M05` that produced this very line, so nothing later will turn it off.
+    const percent = jobProgressPercent(ask.text);
+    if (percent !== null && percent < 100) {
+      return {
+        kind: 'busy',
+        detail: `it reports Idle, but its status line says a program is ${percent}% through — the job has not finished with the vacuum yet, so nothing was sent`,
         status: ask.text,
       };
     }

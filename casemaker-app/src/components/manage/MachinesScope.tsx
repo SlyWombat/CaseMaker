@@ -290,8 +290,24 @@ export function MachinesScope() {
             </div>
             {machineStatus}
             {/* #390 — the vacuum switch, above the console. Like it, it owns its own
-                `canDriveMachine` rule and draws nothing without it (#354's rule). */}
-            <MachineVacuum host={machine.host} port={machine.port} />
+                `canDriveMachine` rule and draws nothing without it (#354's rule).
+
+                THE `key` IS THE RESET, and it names one CONNECTION rather than one machine. The
+                switch shows the mode it last sent, which is a claim about the connection that sent
+                it: a machine found at a new address, or the same machine reached again — a re-check,
+                a fresh wizard run, an upload's own live status — is a different connection, and what
+                we sent on the old one is no longer something this panel can stand behind. A power
+                cycle is the sharpest case: `M331`/`M332` do not survive it, so a remembered "on"
+                would be wrong outright. `observedAt` is what moves on every one of those, so keying
+                on it remounts the switch and it starts at `unknown` again. What this CANNOT see is a
+                plug switched off with nothing else happening — there is no power feed in this app
+                (`tools/z1/power.sh` is a person's act) and nothing polls — so the switch stops
+                claiming the moment anything reaches the machine again, and not before. */}
+            <MachineVacuum
+              key={`${machine.host}:${machine.port}@${machine.observedAt}`}
+              host={machine.host}
+              port={machine.port}
+            />
             {/* #302 item 4 — the console, collapsed, at the foot of the card. It owns its own
                 `canDriveMachine` rule and draws nothing without it, so a web build sees the card it
                 has always seen (#354's rule: do not offer what cannot work). */}
