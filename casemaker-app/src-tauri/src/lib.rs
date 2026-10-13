@@ -77,10 +77,12 @@ fn window_capability(origin: &str) -> Result<String, serde_json::Error> {
 /// bound and then thrown away, so the window, and with it every `machine_*` grant, pointed at
 /// 127.0.0.1, where this run had nothing listening (#402).
 ///
-/// V6 keeps the mapping it had: a V6 loopback or unspecified bind becomes 127.0.0.1, and any other
-/// V6 address is passed through unbracketed, which is not a usable URL host. Both are #401's, where
-/// the bracketing and the address a V6 bind implies belong; mapping `::1` here rather than passing
-/// it on is what keeps this change from trading a dead window for that issue's startup panic.
+/// #401 settled V6 by REFUSING it rather than by spelling it: `server.rs`'s `bind_addr_for` never
+/// binds an IPv6 address, whether it arrived as `--host` (refused before it is saved, `host_to_save`
+/// below) or out of a `config.json` that already holds one (refused at the bind). So no V6 address
+/// reaches this function from `run()` any more. The two V6 arms stay as this function's total answer
+/// to an `IpAddr` — a match has to answer for every arm, and answering "loopback" cannot hand Tauri
+/// the unbracketed address it panics on. `server.rs`'s `host_refusal` carries the whole reasoning.
 fn webview_host(bind_addr: IpAddr) -> String {
     match bind_addr {
         IpAddr::V4(v4) if v4.is_unspecified() || v4 == Ipv4Addr::LOCALHOST => {
@@ -88,6 +90,20 @@ fn webview_host(bind_addr: IpAddr) -> String {
         }
         IpAddr::V6(v6) if v6.is_unspecified() || v6.is_loopback() => "127.0.0.1".to_string(),
         ip => ip.to_string(),
+    }
+}
+
+/// The `--host` value that may be SAVED — `Ok` for a host the shell can serve, `Err` with the reason
+/// for one it refuses (#401).
+///
+/// Extracted so the saving decision can be asserted on its own rather than only by reading a
+/// `config.json` after `run()` (the same reason `webview_host` above exists). What #401 needs is not
+/// that an IPv6 host is refused — `server.rs` falls back whether or not this exists — but that the
+/// refusal is never WRITTEN DOWN, because a saved host is the address of every launch after it.
+fn host_to_save(host: &str) -> Result<&str, &'static str> {
+    match server::host_refusal(host) {
+        Some(why) => Err(why),
+        None => Ok(host),
     }
 }
 
@@ -106,7 +122,20 @@ pub fn run() {
         }
     }
     if let Some(h) = args.host.clone() {
-        cfg.host = Some(h);
+        // #401 — a host the shell refuses is not SAVED. `--host` is persisted (#399), and a saved
+        // host is the address every later launch binds, so writing a refused one turns one bad
+        // launch into a bad install: an IPv6 literal in `config.json` was a startup panic with no
+        // argument at all, and only hand-editing the file could undo it.
+        //
+        // The refusal is `server.rs`'s (`host_refusal`), not a second opinion here: the address the
+        // server binds and the origin the window is loaded from are built from this one value, and
+        // that file owns the rule. This only asks it before the value is written down.
+        match host_to_save(&h) {
+            Ok(host) => cfg.host = Some(host.to_string()),
+            Err(why) => log::warn!(
+                "{why}: not saving --host {h}; the saved host (or loopback) is used instead"
+            ),
+        }
     }
     if args.print_config {
         println!(
@@ -281,13 +310,31 @@ mod tests {
         );
     }
 
-    /// Pinned deliberately, because it is the boundary this change stops at: V6 is still mapped or
-    /// passed through unbracketed, so `--host 2001:db8::5` still reaches `window_capability` as an
-    /// invalid pattern. #401 replaces all three of these.
+    /// #401 refused V6 before it can become `bind_addr`, so `run()` no longer asks this function
+    /// about an IPv6 address. The arms are still asserted because they are what the function answers
+    /// with if one ever arrives: loopback, never an unbracketed address, which is the pattern Tauri
+    /// panics on. The refusal itself is `server::host_refusal` — and `host_to_save` is what stops a
+    /// refused `--host` from being written down in the first place.
     #[test]
-    fn webview_host_leaves_v6_to_401() {
+    fn webview_host_still_answers_for_a_v6_address_it_is_no_longer_given() {
         assert_eq!(webview_host("::1".parse().unwrap()), "127.0.0.1");
         assert_eq!(webview_host("::".parse().unwrap()), "127.0.0.1");
         assert_eq!(webview_host("2001:db8::5".parse().unwrap()), "2001:db8::5");
+    }
+
+    /// #399 is what made the old panic permanent: `--host` is written to `config.json`, so a
+    /// refused value has to be refused *before* it is saved — otherwise the next bare launch reads
+    /// it back and the user's recovery is hand-editing the file. What may still be saved is every
+    /// other host, including one that is not an address at all: that one is warned about at bind
+    /// time, which is where it was already handled.
+    #[test]
+    fn a_refused_host_is_never_saved() {
+        assert_eq!(host_to_save("192.168.10.16"), Ok("192.168.10.16"));
+        assert_eq!(host_to_save("127.0.0.2"), Ok("127.0.0.2"));
+        assert_eq!(host_to_save("bogus"), Ok("bogus"));
+
+        assert!(host_to_save("::1").is_err());
+        assert!(host_to_save("fe80::1").is_err());
+        assert!(host_to_save("2001:db8::5").is_err());
     }
 }

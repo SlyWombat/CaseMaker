@@ -24,8 +24,8 @@ pub struct ServerConfig {
     pub requested_port: u16,
     pub bind_to_all: bool,
     /// Optional explicit listen IP. Wins over `bind_to_all` when set and
-    /// parses as a valid IP. Empty string / invalid IP → fall back to the
-    /// bind_to_all / 127.0.0.1 behaviour.
+    /// parses as a valid IP. Empty string / invalid IP / an IPv6 literal → fall back to the
+    /// bind_to_all / 127.0.0.1 behaviour (`bind_addr_for`, and #401 for why IPv6 is refused).
     pub host: Option<String>,
 }
 
@@ -33,6 +33,62 @@ pub struct ServerConfig {
 pub struct ServerHandle {
     pub bound_port: u16,
     pub bind_addr: IpAddr,
+}
+
+/// Why a `host` setting cannot be used, if it cannot (#401). `None` means it can.
+///
+/// One rule with two readers, because it decides two different things: `bind_addr_for` warns with
+/// this and binds the default, and `lib.rs` refuses to SAVE a `--host` that answers `Some` here —
+/// `--host` is persisted (#399), and a saved host is the address of every later launch, so a
+/// refused value written once is a refusal on every launch after it.
+///
+/// An IPv6 literal is a real address this shell cannot serve. It BINDS — the OS does that happily —
+/// but the window's origin is built from the same address, and there it is a URLPattern, where
+/// `[::1]` is not the address: a bare `:` opens a named group, so the pattern does not parse at all,
+/// and Tauri PANICS on a pattern it cannot parse rather than refusing it.
+///
+/// Refused rather than supported: nobody has asked to serve the app over IPv6, the bench LAN is
+/// IPv4, and supporting it means two spellings of the one address — the pattern needs the colons
+/// escaped (`[\:\:1]`) and the URL must not have them (`[::1]`) — so `window_capability` would have
+/// to take a pattern as well as the origin.
+///
+/// A host that is not an address at all is NOT refused here. That is the older route: it is saved,
+/// and `bind_addr_for` warns about it at bind time.
+pub fn host_refusal(host: &str) -> Option<&'static str> {
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V6(_)) => Some("IPv6 is not supported"),
+        _ => None,
+    }
+}
+
+/// The address to bind: the three settings and nothing else — the one place they become a socket
+/// address (`config.rs`'s `host` field says why there is only one).
+///
+/// An absent or empty host, a host that is not an address at all, and an IPv6 literal all end at the
+/// same default: loopback, or every interface if `--bind-all` asked for it. The default is where a
+/// *port* is deliberately different — a different port is a different origin, and there is no
+/// fallback to it (#312) — but nothing about an unusable ADDRESS reaches the window, because
+/// `lib.rs` builds the window's origin from this same value.
+fn bind_addr_for(host: Option<&str>, bind_to_all: bool) -> IpAddr {
+    let fallback = if bind_to_all {
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+    } else {
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    };
+    let Some(h) = host.filter(|h| !h.is_empty()) else {
+        return fallback;
+    };
+    if let Some(why) = host_refusal(h) {
+        log::warn!("{why} (host '{h}'); falling back to {fallback}");
+        return fallback;
+    }
+    match h.parse::<IpAddr>() {
+        Ok(ip) => ip,
+        Err(_) => {
+            log::warn!("invalid host '{h}'; falling back to {fallback}");
+            fallback
+        }
+    }
 }
 
 /// Start the HTTP server on a background tokio task: the SPA's static assets, and the house service
@@ -57,27 +113,7 @@ pub fn start(
     house: &HouseLock,
     config_path: PathBuf,
 ) -> Result<(ServerHandle, oneshot::Receiver<()>), std::io::Error> {
-    let bind_addr = match cfg.host.as_deref() {
-        Some(h) if !h.is_empty() => match h.parse::<IpAddr>() {
-            Ok(ip) => ip,
-            Err(_) => {
-                log::warn!("invalid host '{h}'; falling back to {}",
-                    if cfg.bind_to_all { "0.0.0.0" } else { "127.0.0.1" });
-                if cfg.bind_to_all {
-                    IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-                } else {
-                    IpAddr::V4(Ipv4Addr::LOCALHOST)
-                }
-            }
-        },
-        _ => {
-            if cfg.bind_to_all {
-                IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-            } else {
-                IpAddr::V4(Ipv4Addr::LOCALHOST)
-            }
-        }
-    };
+    let bind_addr = bind_addr_for(cfg.host.as_deref(), cfg.bind_to_all);
 
     // The requested port, or a refusal. There is deliberately NO ephemeral fallback (#312): the
     // webview is loaded from `http://127.0.0.1:<bound_port>`, so a different port is a different
@@ -554,6 +590,58 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         assert!(content_type(&res).starts_with("application/json"));
         assert_eq!(body_json(res).await, serde_json::json!([]));
+    }
+
+    /// #401 — the address is refused in this function, not only where `--host` is read, because the
+    /// same value can arrive from a `config.json` written before the refusal existed, and a saved
+    /// one must not survive into a bind either.
+    ///
+    /// The two addresses as given are here on purpose: refusing an unusable host must not become a
+    /// reason to stop using a usable one — `127.0.0.2` is the sibling loopback a second instance
+    /// runs on (#402) and `192.168.10.16` is the LAN case the window's grant is built for (#389).
+    #[test]
+    fn bind_addr_refuses_ipv6_and_uses_every_other_address_as_given() {
+        let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let every_interface = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+
+        assert_eq!(bind_addr_for(Some("::1"), false), loopback);
+        assert_eq!(bind_addr_for(Some("fe80::1"), true), every_interface);
+        assert_eq!(bind_addr_for(Some("2001:db8::5"), false), loopback);
+
+        assert_eq!(
+            bind_addr_for(Some("127.0.0.2"), false),
+            "127.0.0.2".parse::<IpAddr>().unwrap()
+        );
+        assert_eq!(
+            bind_addr_for(Some("192.168.10.16"), false),
+            "192.168.10.16".parse::<IpAddr>().unwrap()
+        );
+
+        // The older route, unchanged: not an address, empty, or absent.
+        assert_eq!(bind_addr_for(Some("bogus"), false), loopback);
+        assert_eq!(bind_addr_for(Some(""), true), every_interface);
+        assert_eq!(bind_addr_for(None, true), every_interface);
+        assert_eq!(bind_addr_for(None, false), loopback);
+    }
+
+    /// The predicate `lib.rs` asks before it SAVES a `--host` (#399): it refuses the address the
+    /// shell cannot serve and nothing else. A value that is not an address is still saved — that is
+    /// the older behaviour, and moving it is not this change.
+    #[test]
+    fn host_refusal_names_only_the_address_the_shell_cannot_serve() {
+        for refused in ["::1", "::", "fe80::1", "2001:db8::5"] {
+            assert!(host_refusal(refused).is_some(), "{refused} must be refused");
+        }
+        for kept in [
+            "127.0.0.1",
+            "0.0.0.0",
+            "127.0.0.2",
+            "192.168.10.16",
+            "bogus",
+            "",
+        ] {
+            assert!(host_refusal(kept).is_none(), "{kept} must not be refused");
+        }
     }
 
     #[test]
