@@ -421,25 +421,31 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         }
       }
 
-      // ---- 9. rapid-too-low. An XY rapid below minRapidZ, or at a Z the program never
-      // established (#384). A pure-Z rapid is a retract and is allowed at any height. There is
-      // NO exemption for the opening positioning move: after a manual `M6` the head is wherever
-      // the last job left it, so an XY rapid the file cannot place in Z is exactly the move that
-      // sends the tool through the work. The file must establish Z first, and the only way it can
-      // do that from an unknown work position is a MACHINE-frame lift — `G53 G0 Z<clearance>`,
-      // which the post writes and which resolves to a known work Z through the setup's offset.
+      // ---- 9. rapid-too-low. An X/Y rapid whose PATH the program cannot place in Z. A pure-Z
+      // rapid is a retract and is allowed at any height. There is NO exemption for the opening
+      // positioning move: after a manual `M6` the head is wherever the last job left it, so an
+      // XY rapid the file cannot place in Z is exactly the move that sends the tool through the
+      // work. The file must establish Z first, and the only way it can do that from an unknown
+      // work position is a MACHINE-frame lift — `G53 G0 Z<clearance>`, which the post writes and
+      // which resolves to a known work Z through the setup's offset.
+      //
+      // #392 — WHERE IT ENDS IS NOT WHERE IT STARTS. This check used to take the LOWEST of the
+      // Zs the move names, which let `G0 X10 Y8 Z5` through as a file's first motion: it names
+      // Z=5, so the move looked placed, when in fact the tool travels to (10, 8) DIAGONALLY from
+      // a height nobody knows, and the check could only fire when BOTH ends were unstated. So an
+      // X/Y rapid now needs a Z ESTABLISHED AT ITS START; the end Z remains an extra bound.
       if (m.mode === 'rapid') {
         const movedX = axisMoved(fromW[0], toW[0]);
         const movedY = axisMoved(fromW[1], toW[1]);
         if (movedX || movedY) {
-          const zs: number[] = [];
-          if (fromW[2] !== null) zs.push(fromW[2]);
-          if (toW[2] !== null) zs.push(toW[2]);
-          const zLow = zs.length > 0 ? Math.min(...zs) : null;
-          if (zLow === null) {
-            push('rapid-too-low', m.line, 'an X/Y rapid runs at a Z the program never established: nothing lifts the tool to a known height first');
-          } else if (zLow < minRapidZ) {
-            push('rapid-too-low', m.line, `an X/Y rapid runs at Z=${fmt(zLow)}, below the permitted rapid height Z=${fmt(minRapidZ)}`);
+          if (fromW[2] === null) {
+            const ends = toW[2] === null ? '' : ` (stating only where it ends, Z=${fmt(toW[2])}, places nothing: the tool travels to that end from wherever it was)`;
+            push('rapid-too-low', m.line, `an X/Y rapid starts at a Z the program never established: nothing lifts the tool to a known height first, so the move runs diagonally from an unknown height${ends}`);
+          } else {
+            const zLow = toW[2] === null ? fromW[2] : Math.min(fromW[2], toW[2]);
+            if (zLow < minRapidZ) {
+              push('rapid-too-low', m.line, `an X/Y rapid runs at Z=${fmt(zLow)}, below the permitted rapid height Z=${fmt(minRapidZ)}`);
+            }
           }
         }
       }

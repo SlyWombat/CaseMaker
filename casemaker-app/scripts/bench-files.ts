@@ -716,11 +716,19 @@ const AIR_RISE = 25;
  * are skipped: the ORIGIN is the reference the motion is measured from, so raising it too would
  * cancel the move and put the cutter back in the stock.
  *
+ * A `G53` line is skipped for the same reason it exists (#384): its Z is absolute in the MACHINE
+ * frame, not a work height to be lifted clear of the stock, and `clearanceZ` is already the
+ * controller's own known-clear position. Raising it would command the machine 25 mm above its
+ * tool-change height, past the top of the Z travel.
  */
 function raiseMotionZ(text: string, dz: number): string {
   return text
     .split('\n')
-    .map((line) => (line.trimStart().startsWith(';') ? line : line.replace(/Z(-?\d+(?:\.\d+)?)/g, (_m, n: string) => `Z${fmt(Number(n) + dz)}`)))
+    .map((line) =>
+      line.trimStart().startsWith(';') || line.includes('G53')
+        ? line
+        : line.replace(/Z(-?\d+(?:\.\d+)?)/g, (_m, n: string) => `Z${fmt(Number(n) + dz)}`),
+    )
     .join('\n');
 }
 

@@ -16,6 +16,11 @@ G90 G21
 T1 M6
 M7
 S12000 M3
+; #392 — the head lift the post writes (#384): after a manual `M6` the head's Z is wherever the
+; last job left it, so a file establishes a machine-frame Z before its first X/Y rapid. The
+; verifier refuses one that does not, and this line was added to this file when that check
+; tightened to require a Z at the START of an X/Y rapid, not merely somewhere on the line.
+G53 G0 Z-3
 G0 X10 Y8 Z5
 G1 Z-0.5 F200
 G1 X50 F500

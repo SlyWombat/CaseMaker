@@ -316,19 +316,35 @@ export function generateRestart(input: RestartInput): RestartResult {
   // ---- The safe approach. ----
   if (errors.length === 0 && resume !== null) {
     const [rx, ry, rz] = resume.work;
+    const axis = (v: number): string => fmt(v, input.machine.dialect.axisPrecision);
     lines.push('G90 G21');
-    // Restore the accessory state BEFORE the descent, so the descent happens with the spindle in
-    // the state it will cut in. The vacuum first (chips are cleared from the moment the cutter
-    // touches); the spindle follows.
+    // 1. LIFT THE HEAD FIRST — BEFORE THE SPINDLE, AND BEFORE ANY X/Y MOVE. A restart is written
+    //    AT A STOP, so the tool may still be sitting at the depth it was cutting, inside the part.
+    //    `G53` is absolute in MACHINE coordinates, the frame this clearance is known in, so the
+    //    controller can execute it from a work position nobody knows — and it is the post's own
+    //    opening move (#384), so the head height gets established the same way on both sides of
+    //    the app. #392: the accessory block used to come first, which spun the spindle up with the
+    //    cutter still at the resume DEPTH; the lift is what makes starting it safe, and it is now
+    //    the file's very first motion. The order below is the post's (lift, X/Y, spindle, then the
+    //    work-frame height) rather than the issue's sketch (lift, spindle, X/Y): both put the lift
+    //    before the spindle, and this one keeps the two files' shapes identical.
+    lines.push(`G53 G0 Z${axis(input.machine.toolChange.clearanceZ)}`);
+    // 2. Rapid over the resume point. Safe at the machine's own clear height: the head is where the
+    //    controller itself puts it for a tool change, and NO work-frame Z has been stated yet, so
+    //    this move is measured from nothing that could be stale.
+    lines.push(`G0 X${fmt(rx, 3)} Y${fmt(ry, 3)}`);
+    // 3. NOW restore the accessory state, with the head up and parked over the resume point. The
+    //    vacuum first (chips are cleared from the moment the cutter touches); the spindle follows —
+    //    so the spindle can never start with the cutter buried in the part, and the descent below
+    //    happens with the spindle in the state it will cut in. The vacuum word rides with the
+    //    spindle here rather than ahead of the lift, where the post writes it: the accessory state
+    //    is restored in one block, once the head is already up.
     if (resume.vacuum) lines.push('M331');
     if (resume.spindle === 'off') lines.push('M5');
     else lines.push(resume.rpm === null ? 'M3' : `S${fmt(resume.rpm, 0)} M3`);
-    // 1. Retract straight up from wherever the machine is. A pure-Z rapid is exempt from the
-    //    verifier's rapid-too-low check and cannot hit material it was not already at.
+    // 4. The work-frame safe height, then the resume Z.
     lines.push(`G0 Z${fmt(RESTART_SAFE_Z, 3)}`);
-    // 2. Rapid over the resume point at the safe height.
-    lines.push(`G0 X${fmt(rx, 3)} Y${fmt(ry, 3)}`);
-    // 3. Descend to the resume Z. With the spindle OFF this is a pure-Z rapid (the tool was
+    // 5. Descend to the resume Z. With the spindle OFF this is a pure-Z rapid (the tool was
     //    already at this point, so nothing is being cut); with the spindle ON it is a controlled
     //    FEED, never a rapid into material — the whole reason a restart file is dangerous.
     if (resume.spindle === 'off') {

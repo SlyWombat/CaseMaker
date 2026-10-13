@@ -162,6 +162,24 @@ describe('cncVerify (#174): the checks', () => {
     expect(codes(ctxFor(), withRetract)).not.toContain('rapid-too-low');
   });
 
+  // #392 — WHERE AN X/Y RAPID ENDS IS NOT WHERE IT STARTS. The check used to take the lowest of the
+  // Zs the move names, so `G0 X10 Y8 Z5` sailed through as a file's opening move: it names Z=5,
+  // which is high enough, while the tool actually travels to (10, 8) DIAGONALLY from a height
+  // nobody knows. The end Z places nothing; only a Z established at the START does.
+  it('rapid-too-low: an XY rapid that states only its END Z is refused as an opening move (#392)', () => {
+    const endsOnly = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G0 X10 Y8 Z5', 'G1 Z-1 F200', 'G1 X10 Y6', 'M5', 'M02'].join('\n');
+    const report = verifyProgram(endsOnly, ctxFor());
+    const f = report.findings.find((x) => x.code === 'rapid-too-low');
+    expect(f).toBeDefined();
+    expect(f?.line).toBe(5); // the opening rapid itself
+    expect(f?.message).toContain('never established');
+    expect(report.ok).toBe(false);
+
+    // The machine-frame lift before it is what cures it — and then the same line is fine.
+    const lifted = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 Z-3', 'G0 X10 Y8 Z5', 'G1 Z-1 F200', 'G1 X10 Y6', 'M5', 'M02'].join('\n');
+    expect(codes(ctxFor(), lifted)).not.toContain('rapid-too-low');
+  });
+
   it('rapid-too-low: a G53 X/Y word on its own retract does not establish a work Z', () => {
     // The retract has to be a Z move in the machine frame. `G53 G0 X5` moves in MACHINE X — the
     // work Z is still unknown, and an XY rapid after it is exactly as dangerous as before.

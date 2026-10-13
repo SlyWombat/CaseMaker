@@ -115,12 +115,13 @@ describe('restart (#249): generateRestart', () => {
     expect(r.resume).toEqual({ step, work: before.work, spindle: before.spindle, rpm: before.rpm, vacuum: before.vacuum, tool: before.tool });
     expect(before.work).toEqual([2, 2, -1]);
 
-    // The restart's moves CONTINUE the original's: after the 3-move approach (retract, XY rapid,
-    // descent), every move is the original's own, same mode and same work endpoint. This is
-    // acceptance 1 in its strongest form — the simulated motion from the step on is identical.
+    // The restart's moves CONTINUE the original's: after the 4-move approach (the machine-frame
+    // head lift, the XY rapid, the work-frame safe height, the descent), every move is the
+    // original's own, same mode and same work endpoint. This is acceptance 1 in its strongest
+    // form — the simulated motion from the step on is identical.
     const restart = timelineOf(r.nc as string);
     const originalTail = movesFrom(original, step);
-    const restartTail = movesFrom(restart, 0).slice(3);
+    const restartTail = movesFrom(restart, 0).slice(4);
     expect(originalTail.length).toBeGreaterThanOrEqual(3);
     expect(restartTail.slice(0, originalTail.length)).toEqual(originalTail);
 
@@ -133,23 +134,31 @@ describe('restart (#249): generateRestart', () => {
     expect(lastRestart.vacuum).toBe(lastOriginal.vacuum);
   });
 
-  it('re-establishes the accessory state before it moves (the field’s hard part)', () => {
+  it('lifts the head before it starts the spindle, and restores the state before it descends', () => {
     const original = timelineOf(PROGRAM);
     const step = moveIndexTo(original, [10, 2, -1]);
     const r = generateRestart({ gcodeText: PROGRAM, setup: setupFor(), tool: TOOL, machine: Z1, step, stock: STOCK, baseName: 'job' });
     const text = r.nc as string;
     const lines = text.split('\n');
     const vacuumIdx = lines.indexOf('M331');
+    const liftIdx = lines.findIndex((l) => l === `G53 G0 Z${Z1.toolChange.clearanceZ}`);
     const spindleIdx = lines.findIndex((l) => l === 'S12000 M3');
-    const retractIdx = lines.findIndex((l) => l === 'G0 Z15');
-    // The resume point is the state before the cut at `step`: here [2, 2, −1].
     const rapidIdx = lines.findIndex((l) => l === 'G0 X2 Y2');
+    const safeZIdx = lines.findIndex((l) => l === 'G0 Z15');
+    // The resume point is the state before the cut at `step`: here [2, 2, −1].
     const descendIdx = lines.findIndex((l) => l === 'G1 Z-1 F200');
-    expect(vacuumIdx).toBeGreaterThan(-1);
+    expect(liftIdx).toBeGreaterThan(-1);
+    // #392 — THE LIFT COMES FIRST, AND IT IS THE FILE'S FIRST MOTION. The generator used to start
+    // the spindle before lifting, so a restart after a stop spun up with the cutter still at the
+    // resume DEPTH, inside the part. No G0/G1 may precede the lift: any earlier motion would run
+    // from the unknown height the lift exists to resolve.
+    expect(lines.slice(0, liftIdx).filter((l) => /^G(0|1)(\s|$)/.test(l.trim()))).toEqual([]);
+    expect(spindleIdx).toBeGreaterThan(liftIdx); // the lift before the spindle
+    expect(rapidIdx).toBeGreaterThan(liftIdx); // and before the XY rapid
+    expect(vacuumIdx).toBeGreaterThan(rapidIdx); // both accessories restored over the resume point
     expect(spindleIdx).toBeGreaterThan(vacuumIdx); // vacuum before spindle
-    expect(retractIdx).toBeGreaterThan(spindleIdx); // state restored before the retract
-    expect(rapidIdx).toBeGreaterThan(retractIdx); // retract before the XY rapid
-    expect(descendIdx).toBeGreaterThan(rapidIdx); // controlled descent last
+    expect(safeZIdx).toBeGreaterThan(spindleIdx); // state restored before the work-frame height
+    expect(descendIdx).toBeGreaterThan(safeZIdx); // controlled descent last
   });
 
   it('descends at a FEED with the spindle on, never a rapid into material', () => {

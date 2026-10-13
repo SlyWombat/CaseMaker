@@ -16,6 +16,9 @@ G90 G21
 T1 M6
 M7
 S12000 M3
+; #392 — the head lift, as in `three-strokes.nc`: the gouge below is carried at its own line, and
+; the opening X/Y rapid still needs a Z the program established at its start.
+G53 G0 Z-3
 G0 X10 Y8 Z5
 G1 Z-0.5 F200
 G1 X50 F500
