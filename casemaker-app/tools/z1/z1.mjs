@@ -438,13 +438,21 @@ async function main() {
       trace(file, `\n=== run session ${new Date().toISOString()} ${host}:${port} ===\n`);
       const session = P.openConsole(transport, conn);
       let stopAsked = 0;
+      // Set the moment `abort` has gone out, so a SECOND Ctrl-C can say what is true at that moment
+      // rather than the reassuring thing: the spindle is stopping, and `M332` — the vacuum-off the
+      // aborted program never ran — has NOT been sent yet, so the vacuum is still on (#386 review).
+      let abortSent = false;
       // Ctrl-C does not kill the process: it asks for the play to be aborted, which is a single line
       // this session is allowed to send because a person pressed the key. The send happens at the next
       // poll boundary, never during one: a reply belongs to one open request (protocol.ts's channel),
       // and two lines in flight would attach the next reply to the wrong one.
       const onSigint = () => {
         if (stopAsked === 1) {
-          console.error('\nleaving now. The machine was NOT stopped — the physical stop is the stop.');
+          console.error(
+            abortSent
+              ? '\nleaving now. `abort` was already sent and the controller is draining its queue, but `M332` has NOT been sent — the vacuum is still on. Turn it off at the machine.'
+              : '\nleaving now. The machine was NOT stopped — the physical stop is the stop.',
+          );
           process.exit(130);
         }
         stopAsked = 1;
@@ -462,7 +470,12 @@ async function main() {
         // refused too, because "probably idle" is not a state this tool may start a program on.
         const before = await sendTraced(session, file, '?', flags, { echo: false });
         const beforeState = before.ok ? P.readJobProgress(before.text).state : null;
-        if (!before.ok) {
+        if (stopAsked === 1) {
+          // Ctrl-C while the pre-play poll was in flight (#386 review): the program was never sent, so
+          // there is nothing to abort and nothing is left running. Same exit code a Ctrl-C gives.
+          console.error('Ctrl-C before the program started. Nothing was played.');
+          process.exitCode = 130;
+        } else if (!before.ok) {
           console.error(`the machine did not answer a status poll (${before.detail}), so whether it is idle is unknown. Nothing was played.`);
           process.exitCode = 1;
         } else if (/ALARM/i.test(before.text) || beforeState === 'Alarm') {
@@ -573,6 +586,7 @@ async function main() {
                   echo: false,
                   window: { firstReplyMs: ABORT_REPLY_MS, maxMs: ABORT_REPLY_MS },
                 });
+                abortSent = true;
                 if (aborted.ok) {
                   const said = aborted.text.replace(/\r/g, '').trim();
                   process.stderr.write(`  ${said.length > 0 ? said.split('\n').join('\n  ') : '(the abort was answered with no text)'}\n`);
@@ -584,7 +598,12 @@ async function main() {
                 // something says the controller has finished draining: the abort's own reply, or a status
                 // poll that reads `Idle`. A vacuum line into a controller that is still moving is one more
                 // line to answer at the worst possible moment (#386 review).
-                let drained = aborted.ok;
+                //
+                // And only the reply that SAYS SO counts (#386 review): the controller sends unsolicited
+                // lines mid-job — `G28 means goto clearance position on CARVERA` arrived inside a `?`
+                // reply in the 2026-10-12 log — so any text at all is not the abort's answer. Without the
+                // word, the Idle polls below decide, which is the same rule one step later.
+                let drained = aborted.ok && /aborted playing/i.test(aborted.text);
                 for (let i = 0; !drained && i < ABORT_IDLE_POLLS; i++) {
                   const q = await pollOnce({ firstReplyMs: ABORT_IDLE_POLL_MS, maxMs: ABORT_IDLE_POLL_MS });
                   if (q.ok && P.readJobProgress(q.text).state === 'Idle') drained = true;
@@ -633,8 +652,9 @@ async function main() {
             }
             if (outcome === 'never-started') {
               console.error(
-                `no \`P\` progress field in ${Math.round(noProgressMs / 1000)} s of status polls — the controller is answering, but nothing ` +
-                  'it reports is a running job. Polling stopped; nothing was stopped from here, and the machine is not idle because this tool says so.',
+                `no \`P\` progress field in ${Math.round(noProgressMs / 1000)} s of status polls — the controller answers ` +
+                  `\`${last.state ?? 'no state this tool reads'}\` and no reply carried a progress line, so nothing here was a job this tool could watch. ` +
+                  'Polling stopped; nothing was stopped from here, and the machine is not idle because this tool says so.',
               );
             }
           }

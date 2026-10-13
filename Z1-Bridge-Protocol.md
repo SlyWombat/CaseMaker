@@ -505,12 +505,19 @@ touching callers.
   and is still open) — so a run is not left cutting unwatched: the **spindle stops at
   once**, but the controller drains the queue it already had and only then answers `Aborted playing or
   paused file` (**~18 s** in the 2026-10-12 observation), leaving the head where the queue ended, `Idle`
-  and no alarm. `run` waits 30 s for that reply — not the 3 s a console line gets — and only then sends
+  and no alarm. `run` waits 30 s for that reply — not the 3 s a console line gets — and takes it as the
+  signal only when its text carries `Aborted playing`: the controller emits unsolicited lines mid-job
+  too (a `?` reply in the 2026-10-12 log arrived with `G28 means goto clearance position on CARVERA`
+  inside it), so any text at all is not the abort's answer. Once the queue is drained it sends
   `M332`, the one line it sends that the program did not ask for: an aborted program never reached its
   own vacuum-off (§11.10 of `/Z1-Firmware-Dialect.md`), and the bench's rule is that the switch rests
-  off. That reply is the signal that the queue is drained; if the abort goes unanswered, `M332` waits
+  off. If the abort goes unanswered, `M332` waits
   for a status poll to read `Idle` instead, and is **not sent** when none does — a vacuum line into a
-  controller that is still moving is one more line to answer at the worst moment. It then exits 130. The
+  controller that is still moving is one more line to answer at the worst moment. It then exits 130. A
+  Ctrl-C **before** `play` — pressed while the pre-play status poll is in flight — sends nothing and
+  exits 130 as well, because no program was ever played; and a **second** Ctrl-C leaves immediately,
+  saying what is true at that moment: `abort` has gone out and `M332` has not, so the vacuum is still
+  on. The
   physical stop is still the stop — this is a console word, not the e-stop byte, which stays unwired.
 - The single-byte e-stop byte is **not** wired: an e-stop that travels over the same socket the
   bridge is mid-transfer on is worse than useless. The physical stop is the stop.

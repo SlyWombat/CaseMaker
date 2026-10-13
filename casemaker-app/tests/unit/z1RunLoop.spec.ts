@@ -186,6 +186,35 @@ describe('#386 run — the harness poll loop (against a fake controller)', () =>
   );
 
   it(
+    'rides out a mid-job Idle at a partial percent and keeps watching when Run comes back',
+    async () => {
+      // The mid-job `Idle` is not always bare: at `M05` the controller reports it with the job's own
+      // `P` field still in place — `P:29,74` is line 29, percent 74, so it is emphatically not the end
+      // (`END` is percent 100). The loop must carry on through it and end when the trip home finishes
+      // (#386 review: the code handles this, nothing pinned it).
+      const controller = await fakeController([RUNNING, MID_JOB_IDLE, RUNNING, END]);
+      try {
+        const { code, stdout, stderr } = await runHarness(controller.port, ['--json']);
+        expect(code).toBe(0);
+        expect(controller.seen).toEqual(['?', 'play /sd/gcodes/fake.nc', '?', '?', '?', '?']);
+        expect(JSON.parse(stdout)).toMatchObject({
+          outcome: 'finished',
+          polls: 4,
+          state: 'Idle',
+          percent: 100,
+          line: 34,
+        });
+        // The pause was displayed as what it was, and the run went on from it.
+        expect(stderr).toContain('74%');
+        expect(stderr).toContain('100%');
+      } finally {
+        await controller.close();
+      }
+    },
+    45_000,
+  );
+
+  it(
     'gives up, non-zero, when the controller stops answering — it does not poll a dead socket forever',
     async () => {
       const controller = await fakeController([]);
