@@ -12,6 +12,16 @@
 ;@MKR|END
 
 G90 G21
+; #208 D1 air tip. Every motion Z below is the #199 fixture's, raised 25 mm, so nothing
+; touches. The raise is what this file needs room for:
+;
+;   REQUIRED: the blank's top face (work Z0) at machine Z -40 or lower — at least 20 mm below
+;   the -20 tool-change SAFE height. Above that, the topmost move (`G0 Z40`) leaves the Z travel
+;   (the enclosure is -100..0).
+;
+;   MEASURED 2026-10-12: the bench set work Z0 to machine Z -56.544 (`G10 L2 P1 ... Z-56.544`,
+;   `traces/2026-10-12-console.log`; the probe touched at -56.107). `G0 Z40` therefore lands at
+;   ~-16.5 machine, ~16.5 mm inside the travel.
 ;@MKR|TOOLPATH_START|toolpath_number=1
 ; #395 — the POST's order, word for word (#384): the vacuum comes on, then the machine-frame Z
 ; lift, and only then a word that moves in X/Y. The spindle start sits after the lift, so it

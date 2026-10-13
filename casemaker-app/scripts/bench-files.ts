@@ -771,7 +771,33 @@ function raiseMotionZ(text: string, dz: number): string {
     .join('\n');
 }
 
-const air = raiseMotionZ(fixture, AIR_RISE);
+/**
+ * The air file's own note, placed just after `G90 G21` so it sits above every motion and travels
+ * WITH the file to the bench. It is a comment: nothing reads it but a person, and the numbers in it
+ * are the ones the check below measures — the file the bench plays should say for itself what it
+ * needs the blank to give it (#395, decision recorded 2026-10-13).
+ */
+const AIR_HEADROOM_NOTE = [
+  '; #208 D1 air tip. Every motion Z below is the #199 fixture\'s, raised 25 mm, so nothing',
+  '; touches. The raise is what this file needs room for:',
+  ';',
+  ';   REQUIRED: the blank\'s top face (work Z0) at machine Z -40 or lower — at least 20 mm below',
+  ';   the -20 tool-change SAFE height. Above that, the topmost move (`G0 Z40`) leaves the Z travel',
+  ';   (the enclosure is -100..0).',
+  ';',
+  ';   MEASURED 2026-10-12: the bench set work Z0 to machine Z -56.544 (`G10 L2 P1 ... Z-56.544`,',
+  ';   `traces/2026-10-12-console.log`; the probe touched at -56.107). `G0 Z40` therefore lands at',
+  ';   ~-16.5 machine, ~16.5 mm inside the travel.',
+];
+
+function withAirNote(text: string): string {
+  return text
+    .split('\n')
+    .flatMap((line) => (line.trim() === 'G90 G21' ? [line, ...AIR_HEADROOM_NOTE] : [line]))
+    .join('\n');
+}
+
+const air = withAirNote(raiseMotionZ(fixture, AIR_RISE));
 
 // #395: CHECKED BEFORE IT IS WRITTEN, like the V-groove file above — this one used to be the only
 // file here that went to `docs/bench/` unread, and it is the file the bench actually plays.
@@ -825,7 +851,7 @@ const air = raiseMotionZ(fixture, AIR_RISE);
     if (!verifyAir(headroom).findings.some((f) => f.severity === 'error' && /^outside-envelope:/.test(f.message))) break;
   }
   if (headroom > 0) {
-    console.log(`  headroom  REQUIRED: the blank's top face must sit >= ${headroom} mm below the tool-change safe height, or the raised moves run past the top of Z travel`);
+    console.log(`  headroom  REQUIRED: the blank's top face (work Z0) at machine Z ${Z1.toolChange.safeZ - headroom} or lower — >= ${headroom} mm below the safe height ${Z1.toolChange.safeZ}, or the raised moves run past the top of Z travel`);
   } else {
     console.log('  headroom  none needed: every move is inside the travel with the stock at the safe height');
   }

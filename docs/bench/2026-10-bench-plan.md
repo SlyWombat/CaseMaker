@@ -146,6 +146,13 @@ Studio block:
    The file's words were re-ordered to the post's own order afterwards (#395, 2026-10-13), so the
    recorded split belongs to the pre-#395 bytes — the difference is the opening rapid, which is now
    an X/Y word and a separate `G0 Z30` rather than one `G0 X10 Y8 Z30`.
+   **Check the blank's Z before playing it (#395).** The 25 mm raise needs the blank's top face
+   (work Z0) at machine Z **−40 or lower** — at least 20 mm below the −20 tool-change **safe**
+   height — or the topmost move, `G0 Z40`, leaves the Z travel (−100..0). The 2026-10-12 WCS put
+   work Z0 at −56.544 (`G10 L2 P1 … Z-56.544`, `traces/2026-10-12-console.log`; the probe touched at
+   −56.107), which lands `G0 Z40` at ≈−16.5 — **≈16.5 mm of margin**. Measuring the blank's *depth*
+   below the −3 clearance height instead gives ~53 mm and overstates it by the 17 mm between the two
+   reference heights; the file's own header now carries the requirement.
 2. **#303:** red STOP, Pause/Resume, grey Stop, Reset, one fresh air run each. Our console
    disconnected while Studio drives.
 
