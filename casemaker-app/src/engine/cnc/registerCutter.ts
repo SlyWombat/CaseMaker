@@ -336,12 +336,19 @@ export function resolveCode(
 
   // The box says which LINE it is, and the two lines are different cutters — a bit ground for
   // aluminium is not the one a PLA job wants, and its dimensions do not tell them apart — so the
-  // same line is offered ahead of the other when both fit (#379 review). Ahead of, not instead of:
-  // this narrows a list the user picks from, and the rule that does not bend is that there is always
-  // one to pick (the flute is ignored above for exactly this reason). A box with no marker prefers
-  // the plain line the same way, so the metal bit is not offered for it either.
-  const sameLine = fits.filter((entry) => isMetalRow(entry) === prefill.metal);
-  const rows = sameLine.length > 0 ? sameLine : fits;
+  // same line is offered AHEAD of the other when both fit (#379 review).
+  //
+  // AHEAD OF, not instead of, and this is now the code rather than the comment: the list was once
+  // `sameLine.length > 0 ? sameLine : fits`, which dropped every row on the other line as soon as
+  // one row matched — so a metal box hid a plain row, and a metal row whose NAME states no line (a
+  // clone under a house name, or a catalogue row that does not use Makera's `(Metal)` convention,
+  // #398) was hidden from a metal box. Ranked second is not hidden: `rows.length === fits.length`,
+  // so the rule that does not bend still holds — there is always one to pick, which is also why the
+  // flute is ignored above.
+  const rows = [
+    ...fits.filter((entry) => isMetalRow(entry) === prefill.metal),
+    ...fits.filter((entry) => isMetalRow(entry) !== prefill.metal),
+  ];
 
   return rows.length > 0 ? { kind: 'candidates', rows, prefill } : { kind: 'unknown', prefill };
 }

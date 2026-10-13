@@ -334,6 +334,59 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
     expect(parseBoxCode('C1-BIT-DRILL-2.5-10')?.fluteLength).toBe(10);
   });
 
+  // #379 review — WHERE THE TYPE WORD ENDS. The words before the first number are the type; every
+  // number after it is the tail. A number absorbed into the type word is not a wrong SHAPE (the type
+  // word is matched by substring, so `ENGRAVE 30` is still an engraving bit) — it is a tail read one
+  // token late, and that only moves the readers whose tail has a FIXED length: engraving wants
+  // exactly 2, chamfer exactly 1, thread exactly 2. The rest take the last two whatever comes, which
+  // is why `DRILL-2.5-12-10` reads the same either way (that one is a mis-read of its own, #379).
+  //
+  // MEASURED 2026-10-13, and why the tests below are written against stray codes rather than shelf
+  // ones: over 113 readings — the 28 codes in the label inventory, their `-10PCS` store SKUs, and
+  // stray variants of those (the SKU typed short, a number fumbled) — removing the bound changes
+  // exactly EIGHT. Six engraving, and in all six it is the tip that moves: five read the pack `10`
+  // as the tip (0.3, 0.5, 0.2, 0.3, 0.1) and the sixth takes a fumbled trailing number for it (a
+  // 0.3 mm tip read as 0.1). Two chamfer. Not one code on the shelf changes — the bound limits what
+  // a stray number can do, it does not re-read the inventory.
+  it('stops the type word at its first number, so a stray number cannot become the tip (#379 review)', () => {
+    // The real code, whose tail is its own pair — angle then tip. The bound is not reached here and
+    // must not change this reading.
+    expect(parseBoxCode('C1-BIT-ENGRAVE-30-0.3')).toEqual({
+      shape: 'engraving',
+      tipDiameter: 0.3,
+      fluteLength: null,
+      includedAngle: 30,
+      threadSpec: null,
+      metal: false,
+    });
+    // The same store SKU typed without its `PCS` letters, one step past the pack-suffix tests above.
+    // With the bound the 0.3 stays the tip and the 10 lands on the flute — the field this file's
+    // other tests already treat as the one the reading is LEAST sure of. Without it, the 10 becomes
+    // the TIP: a 10 mm engraving tip where the box says 0.3, which is not a cutter anybody sells.
+    expect(parseBoxCode('C1-BIT-ENGRAVE-30-0.3-10')).toEqual({
+      shape: 'engraving',
+      tipDiameter: 0.3,
+      fluteLength: 10,
+      includedAngle: null,
+      threadSpec: null,
+      metal: false,
+    });
+  });
+
+  // The second family the bound holds, and the one where it is least comfortable: a chamfer's tail
+  // is ONE token, so a tail of two is nothing the reader recognises and the fallback's tip/flute pair
+  // is what comes out. Neither reading makes a chamfer mill — the code is the store's `-10PCS` SKU
+  // typed short, and the app cannot know the `10` is a pack count — so what is pinned here is the
+  // BOUNDARY, not the reading: with it the pack count is not taken for the angle. The reading falls
+  // back to the tip/flute pair instead, where the 90 lands in the tip field — not a chamfer mill's
+  // diameter either, but not a measurement made from a pack count.
+  it('stops it on a chamfer too, whose tail is one token: the stray number is not an angle (#379 review)', () => {
+    expect(parseBoxCode('C1-BIT-CHAMFER-90-10PCS')?.includedAngle).toBe(90);
+    const typedShort = parseBoxCode('C1-BIT-CHAMFER-90-10');
+    expect(typedShort?.shape).toBe('chamfer');
+    expect(typedShort?.includedAngle).toBeNull();
+  });
+
   it('does not read a plain `flute` as an O-flute: engraving stays engraving (#379)', () => {
     expect(shapeFromType('Single Flute Engraving')).toBe('engraving');
     expect(shapeFromType('Two Flute Ball Nose')).toBe('ball');
@@ -483,29 +536,43 @@ describe('resolveCode — the scan door’s three outcomes', () => {
 
   it('offers the metal-line row ahead of the plain one when the box carries the marker (#379 review)', () => {
     // The two real 3.175 single-flute codes sit one `-M-` apart on the shelf, and both rows fit the
-    // reading. The marker is the only thing that says which one is in the user's hand.
+    // reading. The marker is the only thing that says which one is in the user's hand, so it ranks
+    // that row first — and the other line is still offered, second (#379: it used to be dropped).
     const got = resolveCode('C1-BIT-O-FLUTE-M-3.175-12', [], lines);
     expect(got.kind).toBe('candidates');
     if (got.kind !== 'candidates') return;
-    expect(got.rows.map((r) => r.key)).toEqual(['cat:333333333333']);
+    expect(got.rows.map((r) => r.key)).toEqual(['cat:333333333333', 'cat:222222222222']);
   });
 
   it('offers the plain row ahead of the metal one when the box says nothing (#379 review)', () => {
+    // The same ordering for a box with no marker, which is the common case: the plain line leads and
+    // the metal row is one click below, not absent.
     const got = resolveCode('C1-BIT-O-FLUTE-3.175-25', [], lines);
     expect(got.kind).toBe('candidates');
     if (got.kind !== 'candidates') return;
-    expect(got.rows.map((r) => r.key)).toEqual(['cat:222222222222']);
+    expect(got.rows.map((r) => r.key)).toEqual(['cat:222222222222', 'cat:333333333333']);
   });
 
-  it('still offers the other line rather than nothing, when that is all there is (#379 review)', () => {
-    // Ahead of, never instead of. A catalogue that does not carry the line, or a row whose name does
-    // not state one, must not leave the user with an empty panel: this is the same rule that keeps
-    // the flute from narrowing anything (an empty list has no way back).
+  it('ranks in order and narrows nothing: every fitting row is offered, same line first (#379 review)', () => {
+    // Ahead of, never instead of — asserted as the invariant rather than as an example, because that
+    // is the bug this test file was missing: the two cases above each had ONE row in the list, so
+    // `toEqual([one])` passed just as happily against a rule that filtered as against one that
+    // ordered. A catalogue that carries only the other line (or a row whose name states no line at
+    // all, #398) must not leave the user with an empty panel — the same reason the flute is ignored
+    // above: an empty list has no way back.
     const plainOnly = [lines[0]!];
     const got = resolveCode('C1-BIT-O-FLUTE-M-3.175-12', [], plainOnly);
     expect(got.kind).toBe('candidates');
     if (got.kind !== 'candidates') return;
     expect(got.rows.map((r) => r.key)).toEqual(['cat:222222222222']);
+
+    for (const code of ['C1-BIT-O-FLUTE-M-3.175-12', 'C1-BIT-O-FLUTE-3.175-25']) {
+      const all = resolveCode(code, [], lines);
+      expect(all.kind).toBe('candidates');
+      if (all.kind !== 'candidates') return;
+      expect(new Set(all.rows.map((r) => r.key))).toEqual(new Set(lines.map((l) => l.key)));
+      expect(all.rows).toHaveLength(lines.length);
+    }
   });
 
   it('has no prefill when there was nothing to read', () => {
