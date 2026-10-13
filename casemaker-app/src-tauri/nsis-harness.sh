@@ -10,8 +10,11 @@
 #     casemaker-app/src-tauri/nsis-harness.sh
 #
 # It writes only inside this directory (`harness-config/`, `harness-install/`, `nsis-harness.exe`)
-# and removes what it made. Nothing here touches %APPDATA% or the machine's firewall — see the
-# harness script's own header for why /HOST is not exercised here.
+# and removes what it made; the settings directory is redirected by a compile-time define, so it
+# never touches %APPDATA%. The hook calls `netsh advfirewall` on every install (the discovery rule,
+# #403 gap 3), and so does the harness — unelevated, which makes those calls inert. Rather than
+# trust that, the run asserts the machine's firewall rule list is byte-identical afterwards, and it
+# refuses to run at all from an elevated shell, where the calls would land.
 
 set -euo pipefail
 
@@ -38,6 +41,19 @@ to_windows() {
   if command -v wslpath >/dev/null 2>&1; then wslpath -w "$1"; else printf '%s' "$1"; fi
 }
 
+is_elevated() {
+  powershell.exe -NoProfile -Command \
+    "([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)" \
+    2>/dev/null | tr -d '\r'
+}
+
+# One hash of the whole firewall rule list, so the run can show it changed nothing rather than
+# assert it.
+firewall_rules() { netsh.exe advfirewall firewall show rule name=all 2>/dev/null | md5sum | cut -d' ' -f1; }
+
+command -v powershell.exe >/dev/null 2>&1 || fail "this harness needs Windows (powershell.exe, netsh.exe and makensis); run it from WSL on a Windows host"
+[[ "$(is_elevated)" == "False" ]] || fail "this shell is elevated: the harness's netsh calls would add a real firewall rule. Run it unelevated."
+
 # The exe is built and run on the Windows side; both calls go through PowerShell so the working
 # directory is a real Windows one (NSIS resolves OutFile against it).
 MAKENSIS_BIN="$(find_makensis)" || fail "no makensis found; set MAKENSIS=/path/to/makensis.exe (Tauri keeps one under %LOCALAPPDATA%\\tauri\\NSIS)"
@@ -55,6 +71,8 @@ install_silently() { "$EXE" /S "$@"; }
 # (the file is CRLF — NSIS writes $\r$\n — so every read must drop the carriage return)
 port_of() { sed -n 's/.*"port": *\([0-9][0-9]*\).*/\1/p' "$1" | tr -d '\r'; }
 host_of() { sed -n 's/.*"host": *\(.*[^ ,]\).*/\1/p' "$1" | tr -d '\r'; }
+
+firewall_before="$(firewall_rules)"
 
 echo "case 1 — a first install writes the defaults"
 rm -rf "$CONFIG_DIR" "$HERE/harness-install"
@@ -86,6 +104,13 @@ install_silently /PORT=9300
 [[ -f "$CONFIG" ]] || fail "case 4: no config.json after a silent install with /PORT"
 [[ "$(port_of "$CONFIG")" == "9300" ]] || fail "case 4: port is $(port_of "$CONFIG"), expected 9300"
 ok "port 9300"
+
+# The hook calls netsh on every install now; prove those calls were inert here (they are unelevated,
+# asserted above) instead of assuming it.
+firewall_after="$(firewall_rules)"
+[[ "$firewall_after" == "$firewall_before" ]] \
+  || fail "the run changed the machine's firewall rules ($firewall_before -> $firewall_after)"
+ok "the machine's firewall rule list is unchanged"
 
 rm -rf "$CONFIG_DIR" "$HERE/harness-install"
 printf 'all 4 cases passed\n'

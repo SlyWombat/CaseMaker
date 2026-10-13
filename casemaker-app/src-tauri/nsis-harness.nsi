@@ -11,10 +11,17 @@
 ; (#403 gap 6); it is what makes the fix checkable without cutting a release.
 ;
 ; CM_CONFIG_DIR is defined BEFORE the include so the hook writes to a scratch directory beside this
-; file rather than to the builder's own %APPDATA%\casemaker. The `/HOST` flag is deliberately NOT
-; exercised: the hook answers it by adding a firewall rule and recording the port under
-; HKCU\Software\Case Maker, and a harness has no business touching the machine's firewall or a
-; registry key a real install also uses. The /PORT flag shares the same guard.
+; file rather than to the builder's own %APPDATA%\casemaker.
+;
+; The `/HOST` flag is deliberately NOT exercised: the hook answers it by recording a port under
+; HKCU\Software\Case Maker, a key a real install also uses, and a harness has no business writing
+; it. The /PORT flag shares the same guard, so the branch that matters is still covered.
+;
+; The hook DOES call `netsh advfirewall` on every install — the discovery rule (#403 gap 3) — and
+; the harness runs it too. That is safe here because the harness is not elevated, so netsh refuses
+; and the hook continues as designed; `nsis-harness.sh` asserts the machine's rule list is
+; byte-identical after the run rather than taking that on trust. If this harness is ever run from an
+; elevated shell, stop: it would add a real firewall rule.
 
 !define CM_CONFIG_DIR "$EXEDIR\harness-config"
 !define SHCTX HKCU

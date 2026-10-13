@@ -124,6 +124,35 @@
       DetailPrint "Case Maker: firewall rule add returned exit code $4 (continuing)"
     ${EndIf}
   ${EndIf}
+
+  ; DISCOVERY (#403 gap 3). The app BINDS UDP 3333 and waits for the machine's broadcast
+  ; (`DISCOVERY_UDP_PORT`, src/platform/desktop/protocol.ts:19, bound by `machine_udp_listen` in
+  ; src-tauri/src/machine.rs). That is inbound and is NOT a reply to anything the app sent, so
+  ; Windows' stateful allowance does not cover it: without a rule the datagram is dropped before the
+  ; app sees it — discovery looks like "no machine found" rather than like a blocked packet.
+  ;
+  ; Added on EVERY install, unlike the HTTP rule above: discovery is the machine panel's first act,
+  ; and an operator cannot be made to answer a firewall prompt in the middle of setting a job up.
+  ; The name carries no port, so a future port change replaces the rule rather than leaving the old
+  ; one open beside it, and the delete-before-add makes a reinstall idempotent.
+  ;
+  ; Deleted by NAME only. The Lighting Arduino installer also clears `name=all program="<app>"` to
+  ; sweep up rules Windows' own first-run prompt creates against the exe path; that would equally
+  ; remove a rule the user added on purpose, and these named rules are all this app listens for, so
+  ; it is not done here.
+  ;
+  ; An add needs elevation, and the default Tauri install mode is `currentUser` (see
+  ; `bundle.windows.nsis.installMode`), so on a stock install netsh reports a failure and this
+  ; continues — the same caveat the HTTP rule carries. The rule really lands only when the installer
+  ; runs elevated (a per-machine install).
+  DetailPrint "Case Maker: adding inbound firewall rule UDP 3333 (Case Maker Discovery)"
+  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Case Maker Discovery"'
+  Pop $4
+  nsExec::ExecToLog 'netsh advfirewall firewall add rule name="Case Maker Discovery" dir=in action=allow protocol=UDP localport=3333 description="Case Maker machine discovery (Z1 broadcast)"'
+  Pop $4
+  ${If} $4 != "0"
+    DetailPrint "Case Maker: discovery firewall rule add returned exit code $4 (continuing; firewall rules need an elevated install)"
+  ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
@@ -157,6 +186,17 @@
     Pop $1
     ${If} $1 != "0"
       DetailPrint "Case Maker: firewall rule delete returned exit code $1 (continuing)"
+    ${EndIf}
+
+    ; Discovery's rule carries no port, so it needs no record to find it again — delete it by name.
+    ; Inside the same $UpdateMode guard: an update's uninstaller run is skipped, and the install
+    ; that follows re-adds the rule, so deleting it here would only open a window with discovery
+    ; blocked.
+    DetailPrint "Case Maker: removing inbound firewall rule UDP 3333 (Case Maker Discovery)"
+    nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Case Maker Discovery"'
+    Pop $1
+    ${If} $1 != "0"
+      DetailPrint "Case Maker: discovery firewall rule delete returned exit code $1 (continuing)"
     ${EndIf}
 
     ; Forget the recorded port now that it has been used.
