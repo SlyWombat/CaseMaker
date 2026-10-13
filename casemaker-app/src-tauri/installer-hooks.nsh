@@ -17,7 +17,10 @@
 ;
 ; The chosen port + host are written to %APPDATA%\casemaker\config.json
 ; before the first launch. The Rust HTTP server reads this file at startup.
-; When /HOST is specified the installer also adds an inbound TCP firewall
+; ON AN UPGRADE THE FILE IS LEFT ALONE unless /PORT or /HOST is passed (#403):
+; every install runs this hook, and the file is the only copy of `host`, which
+; no screen can restore. When /HOST is specified the installer also adds an
+; inbound TCP firewall
 ; rule for the chosen port and records that port under the registry key
 ; "Software\Case Maker" (DWORD value "FirewallPort") so that uninstall can
 ; remove exactly that rule without parsing locale-sensitive netsh output.
@@ -27,10 +30,22 @@
 
 !include "FileFunc.nsh"
 
+; Where the settings live, as a compile-time define so a harness can point the hook at a scratch
+; directory (`nsis-harness.nsi` defines it before including this file; the real installer never
+; defines it, so it gets the real location). The reason is the one `config::save_to` gives for
+; taking its path as a parameter: this hook writes `host`, which nothing can restore, so a harness
+; that ran against the user's own config.json would rewrite the settings of whichever machine built
+; the installer.
+!ifndef CM_CONFIG_DIR
+  !define CM_CONFIG_DIR "$APPDATA\casemaker"
+!endif
+
 !macro NSIS_HOOK_POSTINSTALL
   ; Defaults
   StrCpy $0 "8000"     ; port
   StrCpy $2 ""         ; host (empty = loopback)
+  StrCpy $5 "0"        ; was /PORT= given?
+  StrCpy $6 "0"        ; was /HOST= given?
 
   ${GetParameters} $R0
 
@@ -45,6 +60,7 @@
       DetailPrint "Case Maker: invalid /PORT=$R1 (above 65535); falling back to 8000"
     ${Else}
       StrCpy $0 $R1
+      StrCpy $5 "1"
     ${EndIf}
   ${EndIf}
 
@@ -54,26 +70,45 @@
     ClearErrors
   ${Else}
     StrCpy $2 $R3
+    StrCpy $6 "1"
   ${EndIf}
 
-  ; Ensure %APPDATA%\casemaker exists
-  CreateDirectory "$APPDATA\casemaker"
+  ; Ensure the settings directory exists
+  CreateDirectory "${CM_CONFIG_DIR}"
 
-  ; Write config.json. host is null when empty (loopback default).
-  FileOpen $1 "$APPDATA\casemaker\config.json" w
-  FileWrite $1 "{$\r$\n"
-  FileWrite $1 '  "port": $0,$\r$\n'
-  ${If} $2 == ""
-    FileWrite $1 '  "bind_to_all": false,$\r$\n'
-    FileWrite $1 '  "host": null$\r$\n'
+  ; WRITE THE SETTINGS ONLY WHEN THERE IS NOTHING TO KEEP (#403 gap 1).
+  ;
+  ; This hook runs on EVERY install, upgrades included, and config.json is the only copy the app
+  ; has of `port` and `host` — `host` in particular is on no screen, so a rewrite is
+  ; unrecoverable. Until #403 the open was unconditional, so an upgrade put the defaults back and a
+  ; machine set to a custom port silently returned to 8000 on the next release, while the uninstall
+  ; hook's own comment claimed the settings were preserved across reinstalls.
+  ;
+  ; So: write when the file is ABSENT (a first install), and write when the operator PASSED /PORT
+  ; or /HOST (an explicit instruction — that is what the switches are for). Otherwise leave the
+  ; file exactly as it is. A switch rewrites the whole document rather than merging one field into
+  ; it, so pass BOTH to pin both values.
+  ${If} ${FileExists} "${CM_CONFIG_DIR}\config.json"
+  ${AndIf} $5 == "0"
+  ${AndIf} $6 == "0"
+    DetailPrint "Case Maker: keeping the existing settings in ${CM_CONFIG_DIR}\config.json (no /PORT or /HOST given)"
   ${Else}
-    FileWrite $1 '  "bind_to_all": false,$\r$\n'
-    FileWrite $1 '  "host": "$2"$\r$\n'
-  ${EndIf}
-  FileWrite $1 "}$\r$\n"
-  FileClose $1
+    ; host is null when empty (loopback default).
+    FileOpen $1 "${CM_CONFIG_DIR}\config.json" w
+    FileWrite $1 "{$\r$\n"
+    FileWrite $1 '  "port": $0,$\r$\n'
+    ${If} $2 == ""
+      FileWrite $1 '  "bind_to_all": false,$\r$\n'
+      FileWrite $1 '  "host": null$\r$\n'
+    ${Else}
+      FileWrite $1 '  "bind_to_all": false,$\r$\n'
+      FileWrite $1 '  "host": "$2"$\r$\n'
+    ${EndIf}
+    FileWrite $1 "}$\r$\n"
+    FileClose $1
 
-  DetailPrint "Case Maker: configured port $0 host=$2 in $APPDATA\casemaker\config.json"
+    DetailPrint "Case Maker: configured port $0 host=$2 in ${CM_CONFIG_DIR}\config.json"
+  ${EndIf}
 
   ; Open the firewall port iff the user asked for non-loopback access.
   ${If} $2 != ""
@@ -92,7 +127,9 @@
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
-  ; Leave config.json in place — preserves user settings across reinstalls.
+  ; Leave config.json in place — and since #403 the install that follows leaves it alone too, so
+  ; the settings really do survive a reinstall: an upgrade passes no /PORT or /HOST, and
+  ; POSTINSTALL writes only when the file is absent or a switch says otherwise.
   ;
   ; Best-effort firewall cleanup. The rule name encodes the port and netsh
   ; output is locale-sensitive, so rather than enumerating rules we read back
