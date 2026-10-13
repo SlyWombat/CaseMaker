@@ -1,16 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability set for Case Maker desktop window. The window loads the app from its own embedded server (http://127.0.0.1:<port>, #312), which Tauri treats as a REMOTE origin, so the IPC commands (the machine transport among them) are only allowed if that origin is listed here.",
+  "description": "The desktop window's permission list, and no origin. Tauri decides an IPC call against the CALLER'S ORIGIN, and this window's origin is its own embedded server (#312) — which Tauri treats as REMOTE, so the machine transport and the rest are granted to it only if a capability names that URL. That URL is not knowable at build time: the port comes from --port or the settings file, and the host is loopback unless --host/--bind-all asked for a LAN address. lib.rs therefore adds a second capability carrying THIS list for the address the server bound (#389). This entry is deliberately instanced for no origin — no `remote`, and `local: false` — and is kept because tauri-build is what resolves and checks every identifier below; deleting it would take the list's only build-time check with it, and leave a build that trims unused commands (build.removeUnusedCommands) with no reason to keep the machine commands at all.",
+  "local": false,
   "windows": [
     "main"
   ],
-  "remote": {
-    "urls": [
-      "http://127.0.0.1:*/*",
-      "http://localhost:*/*"
-    ]
-  },
   "permissions": [
     "core:default",
     "dialog:default",

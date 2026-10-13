@@ -35,6 +35,34 @@ struct CliArgs {
     print_config: bool,
 }
 
+/// The desktop window's permission list, as a document — `capabilities/default.json`, read here
+/// rather than restated, because a second copy of a permission list drifts from the first one
+/// silently. tauri-build resolves every identifier in that file; see `window_capability` for the
+/// one field it cannot fill in (#389).
+const CAPABILITY_FILE: &str = include_str!("../capabilities/default.json");
+
+/// The window's grant, for the origin it will actually load (#389).
+///
+/// `resolve_access` judges every IPC call against the CALLER'S ORIGIN, and this window's origin is
+/// its own embedded server: `http://<host>:<port>`, where the port comes from `--port` or the
+/// settings file and the host is loopback unless `--host`/`--bind-all` asked for a LAN address. A
+/// capability file is read at build time, so all it can do is guess — and that guess was wrong in
+/// both directions: with an explicit `--host 192.168.10.16` the window came up on an origin no
+/// capability named, so every `machine_*` command answered "not allowed by ACL", while the loopback
+/// pattern that replaced it (`http://127.0.0.1:*/*`) also handed the raw UDP/TCP transport to any
+/// page on ANY local port. So `capabilities/default.json` holds the permission list and no origin,
+/// and this function instantiates it for the one URL the server bound.
+///
+/// The URL is a URLPattern (Tauri's remote matching), so the path is left open the way the old
+/// entry left it; the host and port are exact. The window is built after this runs, so it never
+/// exists without its grant.
+fn window_capability(origin: &str) -> Result<String, serde_json::Error> {
+    let mut document: serde_json::Value = serde_json::from_str(CAPABILITY_FILE)?;
+    document["identifier"] = serde_json::Value::from("embedded-server");
+    document["remote"] = serde_json::json!({ "urls": [format!("{origin}/*")] });
+    Ok(document.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _ = env_logger::try_init();
@@ -146,11 +174,14 @@ pub fn run() {
                 }
             };
 
-            // The webview always reaches the server via loopback, even when the server itself is
-            // bound to a LAN IP for external access. 127.0.0.1 works because the OS routes all
-            // *.0.0.0 binds to the loopback path too; explicit-IP binds need the actual address.
-            // This URL is the app's ORIGIN, and so the identity of every `localStorage` store it has
-            // (#312) — which is exactly why it is not allowed to change under a running app.
+            // The webview reaches the server over loopback whenever the server is listening there:
+            // 127.0.0.1 works for `--bind-all` because the OS routes an unspecified-address bind to
+            // the loopback path too. An explicit `--host` is the exception, and it needs to be: the
+            // window loads its own server at the address the server was told to bind, because that
+            // address is the only one this machine is known to answer on. This URL is the app's
+            // ORIGIN, and so the identity of every `localStorage` store it has (#312) — which is
+            // exactly why it is not allowed to change under a running app, and why the capability
+            // that grants it is built from this string rather than guessed (#389).
             let host_for_webview = match server_handle.bind_addr {
                 std::net::IpAddr::V4(v4) if v4.is_unspecified() || v4.is_loopback() => {
                     "127.0.0.1".to_string()
@@ -158,6 +189,27 @@ pub fn run() {
                 ip => ip.to_string(),
             };
             let window_url = format!("http://{}:{}", host_for_webview, server_handle.bound_port);
+
+            // #389 — the grant, added BEFORE the window exists, because the URL above is what it
+            // grants: this window's origin is the embedded server, and Tauri allows a remote origin
+            // to call an app command (the machine transport among them) only when a capability
+            // names that URL. `window_capability` owns the reasoning; the refusal below is here for
+            // the same reason as the two above it: with no console attached on Windows a panic
+            // would be a window that never appears, and the list is instantiated at runtime, so a
+            // permission identifier the ACL does not know has nowhere else to show up.
+            let grant = window_capability(&window_url)
+                .map_err(|why| format!("capabilities/default.json: {why}"))
+                .and_then(|grant| app.add_capability(grant).map_err(|why| why.to_string()));
+            if let Err(why) = grant {
+                log::error!("cannot grant the window its own origin ({window_url}): {why}");
+                app.dialog()
+                    .message(&format!(
+                        "Case Maker cannot let its own window reach the machine bridge at {window_url}: {why}"
+                    ))
+                    .title("Case Maker cannot start")
+                    .show(|_| std::process::exit(1));
+                return Ok(());
+            }
 
             let url = WebviewUrl::External(window_url.parse()?);
             let _window = WebviewWindowBuilder::new(app, "main", url)
