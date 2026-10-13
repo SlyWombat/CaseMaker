@@ -34,6 +34,7 @@ function StepBody({ step }: { step: RunSheetStep }): JSX.Element {
     <>
       <span className="run-sheet-step-text">{step.text}</span>
       {step.value !== undefined && <b className="run-sheet-step-value">{step.value}</b>}
+      {step.code !== undefined && <code className="run-sheet-step-code">{step.code}</code>}
       {step.record !== undefined && (
         <span className="run-sheet-record">
           <span className="run-sheet-record-label">{step.record}</span>

@@ -53,7 +53,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
           70,
         ],
         "min": [
-          -15,
+          -10.5,
           -10,
         ],
       },
@@ -61,7 +61,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
         "id": "vise-moving-jaw",
         "label": "Moving jaw (right)",
         "max": [
-          115,
+          109,
           70,
         ],
         "min": [
@@ -363,7 +363,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
           70,
         ],
         "min": [
-          -15,
+          -10.5,
           -10,
         ],
       },
@@ -371,7 +371,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
         "id": "vise-moving-jaw",
         "label": "Moving jaw (right)",
         "max": [
-          115,
+          109,
           70,
         ],
         "min": [

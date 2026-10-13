@@ -14,6 +14,9 @@ import {
 function renderStep(step: RunSheetStep, i: number): string {
   let text = step.bold ? `**${step.text}**` : step.text;
   if (step.value !== undefined) text += ` — **${step.value}**`;
+  // Inline code, not a fenced block: the step is a numbered list item, and a block would break the
+  // list this renderer joins by hand. Backticks are exactly the "type this" run Markdown has.
+  if (step.code !== undefined) text += ` — \`${step.code}\``;
   if (step.record !== undefined) text += ` — \\_\\_\\_\\_\\_\\_\\_\\_  *(${step.record})*`;
   if (step.unverified !== undefined) text += `  ⚠ *Not yet confirmed on the machine (${step.unverified}).*`;
   return `${i + 1}. ${text}`;

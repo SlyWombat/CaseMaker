@@ -474,11 +474,15 @@ describe('runSheet (#207)', () => {
       expect(offer).toContain('one tool change');
       expect(offer).toContain('Skip this if this is the blank you have just set the origin against');
 
-      // The reference touch, then the cap that keeps a never-triggering touch off the bed. The cap
-      // is the plan's `missTravelMm` (the height the blank stands proud, plus 1 mm).
+      // #391 review item 2 — what the numbers REST ON comes before the numbers, and the tip leads:
+      // it is the one figure every position is derived from and no tip has been measured.
+      const assume = texts.find((t) => t.startsWith('Before you touch anything'))!;
+      expect(assume).toContain('what the numbers below assume');
+      expect(texts.some((t) => t.includes('3 mm across AS ASSUMED'))).toBe(true);
+      expect(texts.some((t) => t.includes('starts no dome'))).toBe(false);
+
+      // The reference touch everything else is measured from.
       expect(texts.some((t) => t.includes('touch off ONCE on the blank’s top face'))).toBe(true);
-      const cap = steps.find((s) => s.value?.startsWith('cap '))!;
-      expect(cap.value).toBe('cap 5 mm below the reference');
 
       // One step per edge, each naming the side the way a person finds it, and each carrying the
       // four positions and what the reading should be at each — including the miss past a side.
@@ -487,6 +491,7 @@ describe('runSheet (#207)', () => {
       expect(checks[0]).toContain('the left edge — the one against the fixed jaw');
       expect(checks[0]).toContain('at the middle of the blank’s width');
       expect(checks[0]).toContain('3.5 and 1.5 mm inside');
+      expect(checks[0]).toContain('at 0.9 mm outside');
       expect(checks[0]).toContain('the blank’s edge itself');
       // The END edges have a jaw top past them; the SIDE edges have the gap between the jaws, so
       // their outward touch runs to the cap instead — and the sheet says that is expected.
@@ -494,15 +499,16 @@ describe('runSheet (#207)', () => {
       expect(checks.find((t) => t.startsWith('Check the front edge'))).toContain('the expected reading, not a fault');
       for (const id of checks) expect(id).toMatch(/at the middle of the blank’s (width|length)/);
 
-      // The bands, the resolution and the margin are the JOB's figures (#345/#362), not constants in
-      // the sheet: a flat blank's own dome would move all three.
-      const reading = texts.find((t) => t.startsWith('Reading the depths:'))!;
-      expect(reading).toContain('within 0.38 mm of the reference');
-      expect(reading).toContain('3.95 mm or more below it is off the blank');
-      expect(reading).toContain('leaves the blank about 0.998 mm BEFORE the edge');
+      // The bands are the JOB's figures (#345/#362), not constants in the sheet — and they are PER
+      // EDGE, because the dome is a shape (#391 item 4): the sides are judged against 0.38 mm and
+      // the ends against 0.15, where the old block quoted one figure for all four.
+      const reading = texts.find((t) => t.startsWith('Reading the depths.'))!;
+      expect(reading).toContain('within 0.38 mm of the reference is the blank at the left and right edges');
+      expect(reading).toContain('0.15 mm at the front and back');
+      expect(reading).toContain('3.95 mm or more below is off the blank');
       const compare = steps.find((s) => s.value?.startsWith('allowed '))!;
       expect(compare.value).toBe('allowed 1 mm');
-      expect(compare.text).toContain('after the 0.998 mm above is taken off');
+      expect(compare.text).toContain('after the 0.384 mm above is taken back toward the blank');
 
       // The tool change back, because every Z in the program is the CUTTER's.
       expect(texts[texts.length - 1]).toContain('Put the CUTTER back and measure its length again');
@@ -515,6 +521,68 @@ describe('runSheet (#207)', () => {
         'Y where the reading stops being the blank (mm)',
         'edge that is out, and by how much (mm)',
       ]);
+    });
+
+    // #391 review item 1 — the block named a cap the machine has no field for. A `G38.2` takes a
+    // TRAVEL distance, so a step an operator can actually send needs both the line and the height it
+    // is sent from, and a touch that finds nothing needs a way back out of the Alarm it leaves.
+    it('gives every touch a sendable line, its cap, and the way back from a miss (#391 item 1)', () => {
+      const steps = section(sheetFor(defaultEngraveJob(), NO_SIM, NC, SCAN), 'origin').steps;
+      const codes = steps.filter((s) => s.code !== undefined);
+
+      // 3 mm of start gap over the blank's top, plus the plan's own cap: 5 mm on this job. The Z word
+      // is a travel distance from wherever the tip is, which is why the height is stated at all.
+      const send = codes.find((s) => s.code!.startsWith('G38.2'))!;
+      expect(send.code).toBe('G38.2 Z-8 F100');
+      expect(send.text).toContain('held 3 mm above the top of the blank');
+      expect(send.text).toContain('distance the tip may TRAVEL');
+      expect(send.text).toContain('runs the 3 mm plus the 5 mm cap');
+      expect(send.text).toContain('never sideways at depth');
+
+      // A miss is one of the readings the check looks for, so it says so, and gives the two lines
+      // that recover the machine: the Alarm clear, then the lift.
+      const miss = codes.find((s) => s.code === '$X')!;
+      expect(miss.text).toContain('not a fault');
+      expect(miss.text).toContain('ALARM: Probe fail');
+      expect(miss.text).toContain('error:Alarm lock');
+      const lift = codes.find((s) => s.code === 'G53 G0 Z-3')!;
+      expect(lift.text).toContain('after EVERY touch, hit or miss');
+      expect(lift.text).toContain('with a jaw beside it');
+
+      // The old cap step is gone: `cap 5 mm below the reference` named a field the console has not
+      // got, and the line above carries the same 5 mm as the travel it really is.
+      expect(steps.some((s) => s.value?.startsWith('cap '))).toBe(false);
+    });
+
+    // #391 review items 3, 5 and 6 — the three ways a step could send an operator the wrong way: a
+    // correction that read backwards, a bisection that only went one way, and no answer at all for a
+    // first pass that never bracketed the edge.
+    it('reads the correction PAST the edge, and says what to do when the pass misses it (#391)', () => {
+      const texts = section(sheetFor(defaultEngraveJob(), NO_SIM, NC, SCAN), 'origin').steps.map((s) => s.text);
+
+      // The tip's corner contact sinks the reading a little PAST the real edge, so the edge is
+      // measured back toward the blank. The old wording said BEFORE, which is the opposite — and a
+      // sheet that is one word out sends the operator to the wrong side of the line they just found.
+      const correction = texts.find((t) => t.startsWith('The reading leaves the blank'))!;
+      expect(correction).toContain('0.384 mm PAST the real edge');
+      expect(correction).toContain('is 0.384 mm INSIDE where the reading changed');
+      expect(correction).toContain('back toward the blank');
+      expect(correction).not.toContain('BEFORE');
+
+      // Bisection works from either side of the change, and it terminates where the scan's own bias
+      // says it can no longer tell — not at an unrelated half-step.
+      const bisect = texts.find((t) => t.startsWith('To place an edge more finely'))!;
+      expect(bisect).toContain('in either direction');
+      expect(bisect).toContain('inward or outward');
+      expect(bisect).toContain('no more than 0.384 mm apart');
+
+      // A pass whose four readings are all the blank, or whose innermost is already off it, has
+      // nothing to bisect between: the step says which way to step and that a miss counts as off.
+      const unbracketed = texts.find((t) => t.startsWith('If the readings do not bracket'))!;
+      expect(unbracketed).toContain('ALL FOUR reading the blank');
+      expect(unbracketed).toContain('step 2 mm further OUT');
+      expect(unbracketed).toContain('step 2 mm back IN');
+      expect(unbracketed).toContain('which counts as off the blank');
     });
 
     it('leaves the block out entirely when the setup cannot support it', () => {
@@ -640,9 +708,10 @@ describe('runSheet (#207)', () => {
       expect(svg).toContain('fixed jaw (left)');
       expect(svg).toContain("Z0 — the part's top face");
       // The viewBox is in millimetres and flipped: Z runs up the page, so its TOP edge is -zmax.
-      // X spans the board (−10) and the fixed jaw (−25) with the 6 mm margin → −31; the drawing is
-      // 6 mm above the part's top face → the viewBox starts at −6.
-      expect(svg).toContain('viewBox="-31 -6 162 44"');
+      // X spans the board (−10) and the fixed jaw — 10.5 mm thick, its face on the part's own edge
+      // (§11.8's band, #391 item 7) → −20.5 — with the 6 mm margin → −26.5; the drawing is 6 mm
+      // above the part's top face → the viewBox starts at −6.
+      expect(svg).toContain('viewBox="-26.5 -6 151.5 44"');
     });
 
     it('tells the operator to fix the part to the board, and that Z0 is the PART, not the board', () => {

@@ -26,13 +26,21 @@
  * the depth, so the scan reads the depth and asks it one question: has it left the blank's top?
  *
  * AND THAT QUESTION HAS THE BLANK'S DOME IN IT. The face being scanned is domed — 0.33 mm across
- * the 38 mm badge blank (#345), a slow rise that a touch near the edge cannot tell from the edge
- * itself. So the tolerance for "still the blank" is the job's OWN dome, and the resolution that
- * follows — the outward distance at which the corner contact has sunk past the dome,
- * `sqrt(2·r·dome − dome²)` — is 1.0 mm on that blank with the assumed 3 mm tip and 0.4 mm on flat
- * stock. That is what this scan can honestly claim; it is one more reason the tip's own
- * measurement (#208 A8) is worth taking, and the plan states the figure rather than leaving it
- * implied.
+ * the 38 mm badge blank and 0.1 mm along its length (#345, §11.8), a slow rise that a touch near
+ * the edge cannot tell from the edge itself. So the tolerance for "still the blank" is the blank's
+ * OWN dome, and the dome is a SHAPE rather than one number (review of 36f3837, #391): it is lower
+ * at the sides than at the ends, so "the blank's own top" is a different depth at each edge, and
+ * `domeDropMm` below is the model that says how much lower. Each edge is judged against the top
+ * where THAT edge is — which is what stops the single stated figure from swallowing a real change
+ * near an edge that sits twice as far below the middle as the figure allows.
+ *
+ * WHAT THAT LEAVES AS THE RESOLUTION. A reading leaves the blank's own top once the corner
+ * contact has sunk it past that local top by more than the dial can tell — a fixed 0.05 mm — so
+ * the outward distance at which the change appears is `sqrt(2·r·0.05 − 0.05²)`: **0.4 mm** with
+ * the assumed 3 mm tip, at every edge, and *not* the ~1 mm the dome-sized band gave before. That
+ * is the figure the sheet asks the operator to measure back by, and it is one more reason the
+ * tip's own measurement (#208 A8) is worth taking: the plan states both the assumption and the
+ * figure, rather than leaving either implied.
  *
  * NOTHING HERE DRIVES THE MACHINE, and nothing here needs to: the plan is a list of positions and
  * what to expect at each, the run sheet prints it in the operator's words, and the touches are
@@ -41,7 +49,9 @@
  * and stops there.
  */
 
-import { viseEnvelope } from '@/engine/cnc/fixture';
+import { inflate, viseEnvelope } from '@/engine/cnc/fixture';
+import { DEFAULT_BADGE_DOME_MM } from './fromBadge';
+import type { ObstacleBox } from '@/engine/cnc/setup';
 import { PROBE_SPEC, SIDE_WORDS, type JobSide } from './registration';
 import type { ProbeSpec } from '@/engine/cnc/probePlan';
 import type { EngraveJob, StockFlatness } from '@/types/engraveJob';
@@ -60,6 +70,17 @@ export const SCAN_COARSE_STEP_MM: Mm = 2;
  */
 export const SCAN_MISS_MARGIN_MM: Mm = 1;
 
+/**
+ * How far above the reference the tip is brought before each touch, mm — the height the touch is
+ * SENT from (#391 review item 1).
+ *
+ * It has to be stated, because the `G38.2` Z word is a distance to TRAVEL and not a place to go
+ * (§11.6), so the operator cannot send a touch at all without a start height to count down from.
+ * The reference touch leaves the tip on the blank's top; this is the gap lifted above it, and it
+ * is the blank's own dome plus room, since the face falls away toward the edges.
+ */
+export const SCAN_START_GAP_MM: Mm = 3;
+
 /** The depth two readings can be told apart by, mm. The machine's dial, not the probe's spec. */
 const DEPTH_TOLERANCE_MM: Mm = 0.05;
 
@@ -68,7 +89,18 @@ const DEPTH_TOLERANCE_MM: Mm = 0.05;
  * would tell the plan the blank is flat (#345's own rule, and the badge figure is the measured
  * one the job would have carried). The plan says which figure it used.
  */
-const PROVISIONAL_DOME_MM: Mm = 0.33;
+const PROVISIONAL_DOME_MM: Mm = DEFAULT_BADGE_DOME_MM;
+
+/**
+ * The blank's dome ALONG its longer span, mm — the second figure §11.8 measured (0.33 mm across
+ * the badge's 38 mm span, ~0.1 mm along its 76 mm one), and the one the job has no field for: a
+ * job states `flatness.dome` for ONE direction, and the model needs both.
+ *
+ * It is the measured badge blank's figure standing in for whatever blank is in the jaws, so the
+ * plan names it as an assumption in its notes. A job that states its dome across the LONG span
+ * gets its own figure there, and this one stands in across the short span instead.
+ */
+const DOME_ALONG_LONG_MM: Mm = 0.1;
 
 /** A side of the blank. The same four `registration.ts` names, and the same words for them. */
 export type ScanEdge = JobSide;
@@ -83,6 +115,18 @@ export type ScanEdge = JobSide;
  * nothing under it at all.
  */
 export type TouchSurface = 'blank' | 'corner' | 'below' | 'miss';
+
+/**
+ * What the fixture leaves under a point: a jaw's top certainly, nothing certainly, or — between
+ * the two — a jaw whose own width the measurement does not pin down (decision 28).
+ *
+ * `maybe` is the whole reason this is not a boolean. The jaw boxes are the shipped or saved
+ * dimensions grown by the vise's own `uncertainty`, and every consumer is supposed to work over
+ * that band rather than trusting the point value (#203). A touch inside the raw box is on a jaw
+ * whatever the true width is; one inside the grown box but not the raw one is on the jaw only if
+ * the jaw runs wider than its nominal figure — which the plan does not get to assume.
+ */
+export type JawReach = 'on' | 'maybe' | 'off';
 
 /** The two depths that turn a reading into a `TouchSurface`, mm below the reference touch. */
 export interface ScanBands {
@@ -110,6 +154,14 @@ export interface ScanTouch {
    * finding rather than a mystery.
    */
   expect: TouchSurface;
+  /**
+   * The OTHER surface this touch may read, when the fixture's own uncertainty covers the point
+   * (`JawReach` = `'maybe'`). Present only when the two readings really differ, so a correct reading
+   * is not a fault: `expect` is what the NOMINAL jaw gives (usually nothing, `miss`), and this is
+   * what a jaw whose face reaches further in — or whose top runs wider — would give instead (the
+   * jaw's top, `below`). One direction only, because growing the box can only ADD jaw.
+   */
+  alsoMaybe?: TouchSurface;
 }
 
 /** The first touch of the scan: the blank's top face, at its middle. */
@@ -136,15 +188,29 @@ export interface EdgeScan {
   /** The coordinate all its touches share on the other axis, mm — the middle of that edge. */
   alongMm: Mm;
   /**
-   * True when a jaw's top lies under the outward touches, so they stop `stockProud` down.
+   * How far the blank's own top sits below the reference AT THIS TOUCH LINE, mm — the dome as a
+   * shape rather than one tolerance (#391 review item 4). The blank's face is not flat and not
+   * even: it is highest near the middle and falls away toward the sides, by a different figure
+   * along each span, so this is what a reading here is judged against. `domeDropMm` owns the model.
+   */
+  dropMm: Mm;
+  /**
+   * The two depths that turn a reading HERE into a surface: this edge's own top plus the dial, and
+   * the jaw's top. Per edge, because the first is (the second is the same everywhere — the jaw
+   * top does not dome).
+   */
+  bands: ScanBands;
+  /**
+   * What lies under the outward touches: a jaw's top certain (`'on'`), nothing certain (`'off'`),
+   * or a jaw whose width the fixture's own uncertainty leaves open (`'maybe'`).
    *
-   * It is true for the left and right edges, whose touches sit on the jaw tops the blank is
-   * clamped between — and FALSE for the front and back edges, because a jaw reaches only along the
+   * `'on'` for the left and right edges, whose touches sit on the jaw tops the blank is clamped
+   * between — and `'off'` for the front and back edges, because a jaw reaches only along the
    * blank's ENDS: at the middle of a side there is the gap between the jaws, and the tip finds
    * nothing at jaw height there at all. That is the one fact about the fixture the operator cannot
    * see from where they stand and the plan can, and it is why those touches are capped.
    */
-  jawOutboard: boolean;
+  jawUnder: JawReach;
   /** In the order they are taken: inboard first, outward after. */
   touches: ScanTouch[];
 }
@@ -154,12 +220,30 @@ export interface MaterialScanPlan {
   /** The touch every reading is measured from: the blank's top face, at its middle. */
   reference: ScanReference;
   edges: EdgeScan[];
+  /**
+   * The band the JOB's own statement gives — its stated dome plus the dial — which is the OUTER
+   * bound: the blank's face is domed by at most that much anywhere, and each edge is judged
+   * against the tighter band it carries (`EdgeScan.bands`), because the top where that edge is sits
+   * above the figure's own extreme. Only `belowMm`, the jaw's top, is the same for every edge and
+   * is therefore exact wherever it is read.
+   */
   bands: ScanBands;
   /** How far below the reference a touch may travel before it is certainly on nothing, mm. */
   missTravelMm: Mm;
-  /** How far OUTSIDE the real edge a reading first leaves the blank, mm — the scan's own bias. */
+  /**
+   * How far OUTSIDE the real edge a reading first leaves the blank, mm — the scan's own bias.
+   *
+   * ONE figure for every edge, and not by approximation: each edge's band is its own top plus the
+   * dial, so the corner contact has to climb past the DIAL, the same 0.05 mm everywhere. It is
+   * what the tip's radius buys and the tip alone (`sqrt(2·r·0.05 − 0.05²)`), which is why an
+   * unmeasured tip (#208 A8) is stated as an assumption rather than folded into a margin.
+   */
   resolutionMm: Mm;
-  /** Full sentences: the run sheet prints them after the steps. */
+  /**
+   * Full sentences: what this plan ASSUMES and what the fixture already guarantees. The run sheet
+   * prints them, in this order, ahead of the steps that quote the numbers they qualify — an operator
+   * about to act on a prediction reads what it rests on first (#391 review item 2).
+   */
   notes: string[];
 }
 
@@ -217,14 +301,22 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
   // already carries the sacrificial shift, so a strip between jaw and blank moves the jaw's top
   // with it and this needs no second copy of that rule).
   const envelope = viseEnvelope(job.stock, vise, job.sacrificial);
-  const jawUnder = (x: Mm, y: Mm): boolean =>
-    envelope.boxes.some((b) => x >= b.min[0] && x <= b.max[0] && y >= b.min[1] && y <= b.max[1]);
+  const inAny = (boxes: readonly ObstacleBox[], x: Mm, y: Mm): boolean =>
+    boxes.some((b) => x >= b.min[0] && x <= b.max[0] && y >= b.min[1] && y <= b.max[1]);
+  // The same boxes grown by the vise's own uncertainty — the band every consumer is meant to work
+  // over (#203). Inside the raw box the jaw is there whatever its true width is; inside the grown
+  // one it is there only if the jaw runs wider than the number says, and the plan says so rather
+  // than picking the reading it prefers (#391 review item 7).
+  const grown = envelope.boxes.map((b) => inflate(b, envelope.uncertainty));
+  const jawReach = (x: Mm, y: Mm): JawReach =>
+    inAny(envelope.boxes, x, y) ? 'on' : inAny(grown, x, y) ? 'maybe' : 'off';
 
-  // Where the corner contact has sunk past the blank's own dome: the outward distance at which a
+  // Where the corner contact has sunk past the blank's own top: the outward distance at which a
   // reading first stops reading as the blank. It answers two questions with one number — how far
   // past the real edge the change appears (the scan's bias) and how finely the scan can place an
-  // edge — because they are the same distance.
-  const resolutionMm = cornerBandMm(blankMm, tipR);
+  // edge — because they are the same distance. Past the DIAL rather than the dome, since each edge
+  // is judged against the top where that edge is: see `resolutionMm` on the plan.
+  const resolutionMm = cornerBandMm(DEPTH_TOLERANCE_MM, tipR);
 
   /** What each of those four is for, in the same order — see `ScanTouch.role`. */
   const roles: readonly ScanTouch['role'][] = ['inside', 'inside', 'edge', 'outside'];
@@ -248,16 +340,33 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
   const edges: EdgeScan[] = sidesFor(job).map(({ edge, axis, dir, nominalMm, alongMm }): EdgeScan => {
     const at = (o: Mm): Vec2 =>
       axis === 'x' ? [nominalMm + dir * o, alongMm] : [alongMm, nominalMm + dir * o];
+    // The blank's own top AT THIS LINE, and the band that follows from it. The face is a shape, so
+    // each edge is judged against the height it actually has, not against the one figure the job
+    // states for one direction (#391 review item 4) — and that is what keeps a reading on a blank
+    // whose edges sit twice as far below the middle as the figure allows from being read as a cut.
+    const [ex, ey] = at(0);
+    const dropMm = domeDropMm(job, ex, ey);
+    const edgeBands: ScanBands = { blankMm: dropMm + DEPTH_TOLERANCE_MM, belowMm };
     const touches = offsets.map((offsetMm, i): ScanTouch => {
       const point = at(offsetMm);
-      const depth = predictedDepthMm(offsetMm, tipR, proud, jawUnder(point[0], point[1]));
-      return {
+      const reach = jawReach(point[0], point[1]);
+      // The reading the plan stands behind is the one the fixture's NOMINAL dimensions give. When
+      // the uncertainty reaches this point the other one is named beside it, rather than folded
+      // away: a jaw's width is unmeasured (#208), so "the jaw's top, or nothing at all if the jaw
+      // ends short of here" is the honest sentence and one reading is not a fault (item 7).
+      const sure = predictedDepthMm(offsetMm, tipR, proud, dropMm, reach === 'on');
+      const touch: ScanTouch = {
         edge,
         offsetMm,
         role: roles[i] ?? 'inside',
         at: point,
-        expect: surfaceOf(depth, bands),
+        expect: surfaceOf(sure, edgeBands),
       };
+      if (reach === 'maybe') {
+        const other = surfaceOf(predictedDepthMm(offsetMm, tipR, proud, dropMm, true), edgeBands);
+        if (other !== touch.expect) touch.alsoMaybe = other;
+      }
+      return touch;
     });
     const outward = at(tipR);
     return {
@@ -266,14 +375,23 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
       dir,
       nominalMm,
       alongMm,
-      jawOutboard: jawUnder(outward[0], outward[1]),
+      dropMm,
+      bands: edgeBands,
+      jawUnder: jawReach(outward[0], outward[1]),
       touches,
     };
   });
 
   const missTravelMm = proud + SCAN_MISS_MARGIN_MM;
   const flatness: StockFlatness | undefined = job.stock.flatness;
-  const free = edges.filter((e) => !e.jawOutboard);
+  const acrossX = flatness === undefined || flatness.across === 'width';
+  const free = edges.filter((e) => e.jawUnder === 'off');
+  const unsure = edges.filter((e) => e.jawUnder === 'maybe');
+  /** The blank's own height below the reference at one edge's touch line, mm. */
+  const dropAt = (edge: ScanEdge): Mm => edges.find((e) => e.edge === edge)!.dropMm;
+  /** The two figures the shape is built from: the span the job's own dome names, and the other. */
+  const acrossDrop = acrossX ? dropAt('left') : dropAt('front');
+  const otherDrop = acrossX ? dropAt('front') : dropAt('left');
 
   return {
     tipRadiusMm: tipR,
@@ -283,20 +401,38 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
     missTravelMm,
     resolutionMm,
     notes: [
-      `A touch stays on the blank’s own edge until the tip is about ${fmtNum(resolutionMm)} mm ` +
-        `outside it, so a reading first leaves the blank that far PAST the real edge — read back ` +
-        `${fmtNum(resolutionMm)} mm from where the reading changes and that is where the edge is.`,
-      `The tip is ${fmtNum(probe.tipDiameter)} mm across as assumed, not as measured (#208 A8): a ` +
-        'smaller tip is a sharper scan, and this figure is what the numbers above are made of.',
+      // THE ASSUMPTION FIRST (#391 review item 2): it is the figure every other one is derived
+      // from, no tip has ever been measured, and an operator reading a prediction is entitled to
+      // know which of these numbers is a guess.
+      `The tip is ${fmtNum(probe.tipDiameter)} mm across AS ASSUMED, not as measured (#208 A8): no ` +
+        `tip has been measured, and every position and depth below is derived from this one figure — ` +
+        `the ${fmtNum(resolutionMm)} mm the reading stands past the edge is its radius and the dial, ` +
+        'and a smaller tip is a sharper scan.',
       flatness
-        ? `The ${fmtNum(dome)} mm dome the reads are judged against is the one the job states (${flatness.source}, across the ${flatness.across}).`
-        : `The job states no dome, so the reads are judged against the ${fmtNum(dome)} mm the badge blank measured — a domed blank is the case that matters, and this is the figure to correct.`,
+        ? `The ${fmtNum(dome)} mm the reads are allowed to vary by is the dome the job states ` +
+          `(${flatness.source}, across its ${flatness.across}).`
+        : `The job states no dome, so the reads are allowed the ${fmtNum(dome)} mm the badge blank ` +
+          'measured — a domed blank is the case that matters, and this is the figure to correct.',
+      `The face is a SHAPE and not one number, so the blank’s own top sits at a different depth at ` +
+        `each edge: about ${fmtNum(dropAt('left'))} mm below the reference at the left and right ` +
+        `edges, ${fmtNum(dropAt('front'))} mm at the front and back. The ${fmtNum(acrossDrop)} mm the ` +
+        `job states is taken across the span it names; the other span carries the ` +
+        `${fmtNum(otherDrop)} mm §11.8 measured on the badge blank. Each edge’s step prints the ` +
+        'height it is judged against.',
       free.length > 0
         ? `Nothing lies at jaw height under the tip past ${names(free.map((e) => e.edge))} — a jaw ` +
           'reaches only along the blank’s ends — so those outside touches have nothing to stop ' +
           `them: a miss there is the expected reading, not a fault, and the cap ${fmtNum(missTravelMm)} mm ` +
           'below the reference is what keeps them off the bed.'
         : 'Every edge has a jaw top outside it, so an outside touch stops on the jaw rather than on the cap.',
+      ...(unsure.length > 0
+        ? [
+            `Past ${names(unsure.map((e) => e.edge))} the answer is not certain either way: the ` +
+              `outward touch sits within the ${fmtNum(vise.uncertainty)} mm the fixture’s own ` +
+              'measurement is uncertain by, so the jaw’s top may end short of it. Those steps print ' +
+              'both readings.',
+          ]
+        : []),
       `The ${job.workholding.kind} already fixes X and rotation to within ±${fmtNum(vise.uncertainty)} mm, so the left and right edges mostly re-check that the blank is seated against them; the front and back edges are the free ones.`,
       'A Z-only tip cannot find rotation: this scan says where the edges are, not whether the blank sits square in the jaws.',
     ],
@@ -335,9 +471,15 @@ interface EdgeSide {
  * or `null` when nothing stops it within the cap. THE ONE STATEMENT OF THE PHYSICS at the top of
  * this file: the plan's own expectations are made from it.
  */
-function predictedDepthMm(o: Mm, tipR: Mm, proud: Mm, jawUnder: boolean): Mm | null {
-  if (o <= 0) return 0;
-  const corner = o < tipR ? tipR - Math.sqrt(tipR * tipR - o * o) : null;
+function predictedDepthMm(o: Mm, tipR: Mm, proud: Mm, dropMm: Mm, jawUnder: boolean): Mm | null {
+  // Inside the edge the ball lands on the blank's own face, which is `dropMm` down here.
+  if (o <= 0) return dropMm;
+  // The corner contact is a CLIMB up from that face (`r − sqrt(r² − o²)`), and a reading is a depth
+  // below the reference: the blank's local top plus the climb.
+  const climb = o < tipR ? tipR - Math.sqrt(tipR * tipR - o * o) : null;
+  const corner = climb === null ? null : dropMm + climb;
+  // Whichever the ball meets first — the jaw's top only stops it if the jaw stands above the
+  // corner, and past a full radius the corner is out of reach entirely.
   if (jawUnder && (corner === null || proud <= corner)) return proud;
   return corner;
 }
@@ -351,13 +493,47 @@ function surfaceOf(depthMm: Mm | null, bands: ScanBands): TouchSurface {
 }
 
 /**
- * How far outside the real edge the corner contact has sunk past the blank's own dome, mm: the
- * outward distance at which a reading first stops reading as the blank. Capped at the tip's
- * radius, which is the deepest the corner contact goes — past that a dome cannot be told from an
- * edge at all, and the scan is no better than its tip.
+ * How far outside the real edge the corner contact has sunk the reading past `sinkMm`, mm: the
+ * outward distance at which a reading first stops reading as the blank.
+ *
+ * `sinkMm` is the HEADROOM a reading has before it stops being the surface it is compared against
+ * — the dial, for an edge (`bands.blankMm` less the blank's own height there), because each edge is
+ * judged against its own top. The result is capped at the tip's radius, which is the deepest the
+ * corner contact goes: past that the tip is off the blank entirely and the scan is no better than
+ * its tip.
  */
-function cornerBandMm(blankMm: Mm, tipR: Mm): Mm {
-  return blankMm >= tipR ? tipR : Math.sqrt(2 * tipR * blankMm - blankMm * blankMm);
+function cornerBandMm(sinkMm: Mm, tipR: Mm): Mm {
+  return sinkMm >= tipR ? tipR : Math.sqrt(2 * tipR * sinkMm - sinkMm * sinkMm);
+}
+
+/**
+ * The blank's own face as a SHAPE, mm below its highest point, at a point on the blank — the model
+ * that replaced the dome-as-a-tolerance the review of 36f3837 called out (#391 item 4).
+ *
+ * Two parabolas, one per span, which is the shape §11.8 measured: the badge blank's face is convex,
+ * highest near the middle, and **0.33 mm lower at its left and right edges** than at the middle,
+ * **0.1 mm lower at its front and back**. Those are not the same number and they are not a
+ * tolerance around the middle's: a touch near a side meets a face 0.33 mm further down than a touch
+ * near an end, and a plan that judged both by the middle's figure would swallow the first 0.28 mm
+ * of a real change at the ends.
+ *
+ * THE SPANS ARE THE JOB'S, AND THE WORD `across` IS THE BADGE'S — THE OTHER WAY ROUND. `flatness`
+ * travels with a badge, where `across: 'width'` means the BADGE's width, which `badgeBlankFor`
+ * makes the job's `stock.length`: the X span the left and right edges bound. So `'width'` is the
+ * job's X, `'length'` its Y, and the stated figure is applied to the span it names — with the
+ * badge's measured figure for the span the job states nothing about.
+ */
+function domeDropMm(job: EngraveJob, x: Mm, y: Mm): Mm {
+  const { length, width } = job.stock;
+  const acrossX = job.stock.flatness === undefined || job.stock.flatness.across === 'width';
+  const stated = job.stock.flatness?.dome ?? PROVISIONAL_DOME_MM;
+  const dropX = acrossX ? stated : DEFAULT_BADGE_DOME_MM;
+  const dropY = acrossX ? DOME_ALONG_LONG_MM : stated;
+  // Normalised so ±1 is the blank's own edge on that axis and 0 is its middle, where the reference
+  // touch is: the model's zero and the scan's zero are the same point by construction.
+  const u = length > 0 ? (2 * x) / length - 1 : 0;
+  const v = width > 0 ? (2 * y) / width - 1 : 0;
+  return dropX * u * u + dropY * v * v;
 }
 
 /** `1.5` → `1.5 mm inside`; `-1.5` → `1.5 mm outside`. The words a touch's offset reads as. */

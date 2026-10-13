@@ -58,14 +58,22 @@ function touchesOf(plan: MaterialScanPlan, edge: string): ScanTouch[] {
   return plan.edges.find((e) => e.edge === edge)!.touches;
 }
 
+/** One edge's own band and local drop — the per-edge half of the shape (#391 item 4). */
+function edgeOf(plan: MaterialScanPlan, edge: string): MaterialScanPlan['edges'][number] {
+  const scan = plan.edges.find((e) => e.edge === edge);
+  if (!scan) throw new Error(`no ${edge} edge in the plan`);
+  return scan;
+}
+
 describe('planMaterialScan — the shipped default blank (#391)', () => {
-  // The default job is 100 × 60 × 12 with the shipped vise: 4 mm proud, jaws 15 mm thick,
-  // 80 mm long, starting 10 mm ahead of the blank's front edge.
+  // The default job is 100 × 60 × 12 with the shipped vise: 4 mm proud, jaws 10.5 and 9 mm thick
+  // (§11.8's bands, #391 review item 7), 80 mm long, starting 10 mm ahead of the blank's front edge.
   const plan = () => planned(defaultEngraveJob());
 
   it('reads its bands from the job: the blank’s dome, and the height it stands proud', () => {
     const p = plan();
-    // 0.33 mm of dome (the badge figure, used because the job states none) plus the dial's 0.05.
+    // The job's own figure for the span it names — 0.33 mm of dome (the badge figure, used because
+    // the job states none) plus the dial's 0.05 — and the height it stands proud, less the dial.
     expect(p.bands.blankMm).toBeCloseTo(0.38, 6);
     expect(p.bands.belowMm).toBeCloseTo(3.95, 6);
     // The reference is the blank's top face, at the middle: the touch everything is read against.
@@ -74,11 +82,33 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
     expect(p.tipRadiusMm).toBe(1.5);
   });
 
-  it('places the scan’s resolution where the corner contact sinks past the dome', () => {
+  // #391 review item 4 — the dome is a SHAPE. One figure for the middle is not the top at the edges,
+  // and a plan that judged all four by it would swallow most of a real change at the ends.
+  it('judges each edge against the top where THAT edge is, not one figure for the blank', () => {
     const p = plan();
-    // sqrt(2·1.5·0.38 − 0.38²) — the outward distance at which the corner reading reaches the
-    // dome's own depth, which is the finest this tip can place an edge on this blank.
-    expect(p.resolutionMm).toBeCloseTo(0.998, 3);
+    // The stated dome is taken across the span it names (the job's X, where the left and right edges
+    // are); the other span carries the badge's measured 0.1 mm. Each edge's band is its own top plus
+    // the same dial, so the SIDES are allowed 0.38 mm and the ENDS 0.15 mm — not 0.38 everywhere.
+    expect(p.edges.map((e) => e.edge)).toEqual(['left', 'right', 'front', 'back']);
+    for (const side of ['left', 'right'] as const) {
+      expect(edgeOf(p, side).dropMm).toBeCloseTo(0.33, 6);
+      expect(edgeOf(p, side).bands.blankMm).toBeCloseTo(0.38, 6);
+    }
+    for (const end of ['front', 'back'] as const) {
+      expect(edgeOf(p, end).dropMm).toBeCloseTo(0.1, 6);
+      expect(edgeOf(p, end).bands.blankMm).toBeCloseTo(0.15, 6);
+    }
+    // The plan-level band is the OUTER bound, the job's own statement plus the dial — the most the
+    // face varies by anywhere. It is what the job's own number is worth, and no edge uses it alone.
+    expect(p.bands.blankMm).toBeCloseTo(Math.max(...p.edges.map((e) => e.bands.blankMm)), 6);
+  });
+
+  it('places the scan’s resolution where the corner contact sinks past the dial', () => {
+    const p = plan();
+    // sqrt(2·1.5·0.05 − 0.05²) — the outward distance at which the corner reading clears the DIAL
+    // below the blank's own top at that edge, which is the finest this tip can place an edge. The
+    // dial and the tip set it, nothing else: the dome is in the band, not in the bias (#391 item 4).
+    expect(p.resolutionMm).toBeCloseTo(0.384, 3);
     expect(p.missTravelMm).toBeCloseTo(4 + SCAN_MISS_MARGIN_MM, 6);
     expect(p.missTravelMm).toBeLessThan(0.5 * defaultEngraveJob().stock.thickness);
   });
@@ -87,12 +117,13 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
     const p = plan();
     const step = SCAN_COARSE_STEP_MM;
     // Two touches that should still be on the blank (clear of the edge, and close to it), one
-    // aimed at the edge itself, one past it. The offsets are the same on all four edges.
+    // aimed at the edge itself — the MIDDLE of the corner band, which is where the bias comes from —
+    // and one past it. The offsets are the same on all four edges.
     for (const scan of p.edges) {
       expect(scan.touches.map((t) => t.offsetMm)).toEqual([
         -(1.5 + step),
         -1.5,
-        1.2,
+        0.9,
         1.5 + step,
       ]);
     }
@@ -108,13 +139,13 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
     expect(touchesOf(p, 'left').map((t) => t.at)).toEqual([
       [3.5, 30],
       [1.5, 30],
-      [-1.2, 30],
+      [-0.9, 30],
       [-3.5, 30],
     ]);
     expect(touchesOf(p, 'back').map((t) => t.at)).toEqual([
       [50, 56.5],
       [50, 58.5],
-      [50, 61.2],
+      [50, 60.9],
       [50, 63.5],
     ]);
   });
@@ -124,15 +155,48 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
     // A jaw reaches only along the blank's ENDS, so only the left and right edges have a jaw top
     // under their outward touches. Past the front and back edges at the middle of a side there is
     // the gap between the jaws: nothing at jaw height, and the cap is what stops the tip.
-    expect(p.edges.map((e) => [e.edge, e.jawOutboard])).toEqual([
-      ['left', true],
-      ['right', true],
-      ['front', false],
-      ['back', false],
+    expect(p.edges.map((e) => [e.edge, e.jawUnder])).toEqual([
+      ['left', 'on'],
+      ['right', 'on'],
+      ['front', 'off'],
+      ['back', 'off'],
     ]);
-    expect(expectations(p, 'left')).toEqual(['-3.5:blank', '-1.5:blank', '1.2:corner', '3.5:below']);
-    expect(expectations(p, 'front')).toEqual(['-3.5:blank', '-1.5:blank', '1.2:corner', '3.5:miss']);
-    expect(expectations(p, 'back')).toEqual(['-3.5:blank', '-1.5:blank', '1.2:corner', '3.5:miss']);
+    expect(expectations(p, 'left')).toEqual(['-3.5:blank', '-1.5:blank', '0.9:corner', '3.5:below']);
+    expect(expectations(p, 'front')).toEqual(['-3.5:blank', '-1.5:blank', '0.9:corner', '3.5:miss']);
+    expect(expectations(p, 'back')).toEqual(['-3.5:blank', '-1.5:blank', '0.9:corner', '3.5:miss']);
+  });
+
+  // #391 review item 7 — the jaw's own width is a default nobody has measured, so a point the
+  // uncertainty reaches is not a point the plan gets to decide: it carries BOTH readings, and a
+  // reading that matches the other one is not a fault.
+  it('carries the other reading where the fixture’s uncertainty reaches the touch', () => {
+    const job = defaultEngraveJob();
+    // A 4 mm strip between the jaw and the blank moves the fixed jaw's FACE 4 mm out (#213), so the
+    // nominal jaw stops short of the outward touch by more than the touch is proud — while a jaw at
+    // the wide end of its ±2 mm band reaches under it. That is the ambiguity, stated as two readings.
+    const strip = {
+      ...job,
+      sacrificial: {
+        ...job.sacrificial,
+        sides: {
+          ...job.sacrificial.sides,
+          left: { thickness: 4, height: 'flush' as const },
+          right: { thickness: 4, height: 'flush' as const },
+        },
+      },
+    };
+    const p = planned(strip);
+    const outward = touchesOf(p, 'left')[3]!;
+    expect(outward.expect).toBe('miss');
+    expect(outward.alsoMaybe).toBe('below');
+    // The inside touches are untouched by it: the jaw is outboard of the blank's edge either way,
+    // so there is nothing to be ambiguous about.
+    for (const t of touchesOf(p, 'left').slice(0, 2)) {
+      expect(t.expect).toBe('blank');
+      expect(t.alsoMaybe).toBeUndefined();
+    }
+    // With no strip the same touch has one reading and no second one.
+    expect(touchesOf(plan(), 'left')[3]!.alsoMaybe).toBeUndefined();
   });
 
   it('says which edges the jaws already reference, and that rotation is not in reach', () => {
@@ -144,6 +208,19 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
     expect(p.notes.join(' ')).toContain('a miss there is the expected reading, not a fault');
   });
 
+  // #391 review item 2 — the tip is the one figure every other one is derived from, and no tip has
+  // ever been measured. The plan says so FIRST, in its own words, and the sheet prints it; a plan
+  // that stated a derived position without its assumption would be presenting a guess as a reading.
+  it('leads its notes with the assumed tip, and names what the figure costs', () => {
+    const p = plan();
+    expect(p.notes[0]).toContain('3 mm across AS ASSUMED');
+    expect(p.notes[0]).toContain('#208 A8');
+    expect(p.notes[0]).toContain('0.384 mm the reading stands past the edge');
+    expect(p.notes[0]).toContain('a smaller tip is a sharper scan');
+    // The dome's provenance is the second thing it says, because it is the second input.
+    expect(p.notes[1]).toContain('The job states no dome');
+  });
+
   it('judges the reads against the dome the job states, when it states one', () => {
     const job = defaultEngraveJob();
     const p = planned({
@@ -151,10 +228,30 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
       stock: { ...job.stock, flatness: { dome: 0.05, across: 'width', source: 'measured' } },
     });
     expect(p.bands.blankMm).toBeCloseTo(0.1, 6);
-    expect(p.resolutionMm).toBeCloseTo(0.539, 3);
-    expect(p.notes.join(' ')).toContain('is the one the job states (measured, across the width)');
-    // A flatter blank is a sharper scan: the same tip places the edge twice as finely.
-    expect(p.resolutionMm).toBeLessThan(planned(job).resolutionMm / 1.5);
+    expect(p.notes.join(' ')).toContain('is the dome the job states (measured, across its width)');
+    // A flatter blank moves what each edge is judged against — the left and right edges carry the
+    // stated 0.05, the front and back the badge's 0.1 — and NOT the scan's bias, which is the tip
+    // and the dial alone. The old plan's 0.998 → 0.539 was the dome-as-a-tolerance bug: a dome that
+    // is a shape cannot also be the resolution.
+    expect(edgeOf(p, 'left').bands.blankMm).toBeCloseTo(0.1, 6);
+    expect(edgeOf(p, 'front').bands.blankMm).toBeCloseTo(0.15, 6);
+    expect(p.resolutionMm).toBeCloseTo(planned(job).resolutionMm, 6);
+  });
+
+  // The word `across` belongs to the BADGE the flatness came from, and the badge's axis is the other
+  // way round (`badgeBlankFor` sets `length: badge.width`): `'width'` is the job's X, `'length'` its
+  // Y. Getting it backwards would judge every edge against the wrong span's figure.
+  it('takes the stated dome across the span it names, in the JOB’s frame', () => {
+    const job = defaultEngraveJob();
+    const alongY = planned({
+      ...job,
+      stock: { ...job.stock, flatness: { dome: 0.2, across: 'length', source: 'measured' } },
+    });
+    expect(edgeOf(alongY, 'front').bands.blankMm).toBeCloseTo(0.25, 6);
+    expect(edgeOf(alongY, 'back').bands.blankMm).toBeCloseTo(0.25, 6);
+    // The X span now carries the badge's measured across-the-width figure instead.
+    expect(edgeOf(alongY, 'left').bands.blankMm).toBeCloseTo(0.38, 6);
+    expect(edgeOf(alongY, 'right').bands.blankMm).toBeCloseTo(0.38, 6);
   });
 });
 
@@ -170,15 +267,30 @@ describe('planMaterialScan — the bench’s badge blank (#391)', () => {
 
   it('expects a MISS past the back edge — the jaw stops 6.2 mm short of it', () => {
     const p = plan();
-    const back = p.edges.find((e) => e.edge === 'back')!;
+    const back = edgeOf(p, 'back');
     // The jaws span Y ∈ [−10, 70] and this blank is 76.2 wide, so there is no jaw top past its
     // back edge (and none past the front either, which is between the jaws): those touches run to
     // the cap instead. The ends are the other way round — the blank's left and right edges are the
     // faces the jaws bear on, so they have a jaw top 1.2 mm below the blank.
-    expect(back.jawOutboard).toBe(false);
-    expect(expectations(p, 'back')).toEqual(['-3.5:blank', '-1.5:blank', '1.2:corner', '3.5:miss']);
-    expect(p.edges.filter((e) => e.jawOutboard).map((e) => e.edge)).toEqual(['left', 'right']);
-    expect(expectations(p, 'left')).toEqual(['-3.5:blank', '-1.5:blank', '1.2:corner', '3.5:below']);
+    expect(back.jawUnder).toBe('off');
+    expect(expectations(p, 'back')).toEqual(['-3.5:blank', '-1.5:blank', '0.9:corner', '3.5:miss']);
+    expect(p.edges.filter((e) => e.jawUnder === 'on').map((e) => e.edge)).toEqual(['left', 'right']);
+    expect(expectations(p, 'left')).toEqual(['-3.5:blank', '-1.5:blank', '0.9:corner', '3.5:below']);
+  });
+
+  it('measures the badge blank’s own shape: 0.33 across it, 0.1 along it', () => {
+    const p = plan();
+    // The badge blank's 38 mm side is its length in this job (§11.8 probed it along X), so the
+    // 0.33 mm the maintainer measured across that side is the LEFT and RIGHT edges' drop, and the
+    // 0.1 mm along the 76 mm side is the front and back's — the two figures §11.8 found, in the
+    // axes the job puts them in.
+    expect(edgeOf(p, 'left').dropMm).toBeCloseTo(0.33, 6);
+    expect(edgeOf(p, 'front').dropMm).toBeCloseTo(0.1, 6);
+    // And the bands follow the shape, not one number: 0.38 mm at the ends of the blank's width
+    // against 0.15 down its length. Both are still far inside the 1.15 mm that means "off the blank".
+    expect(edgeOf(p, 'left').bands.blankMm).toBeCloseTo(0.38, 6);
+    expect(edgeOf(p, 'front').bands.blankMm).toBeCloseTo(0.15, 6);
+    expect(edgeOf(p, 'front').bands.belowMm).toBeCloseTo(1.15, 6);
   });
 
   it('names the edges that run to the cap in its notes', () => {

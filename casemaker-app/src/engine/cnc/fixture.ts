@@ -91,6 +91,15 @@ export function defaultStockProud(thickness: Mm): Mm {
  * the slot and lip, and the fixed jaw's offset from the anchor pins are all unmeasured, so
  * every number here is a PROVISIONAL (#208) placeholder.
  *
+ * The two jaw WIDTHS are the exception, and they are why they are not 15 any more (#391 review
+ * item 7). §11.8 probed the jaw tops on the badge blank and puts the fixed jaw's top at roughly
+ * 8–13 mm of material and the moving jaw's at roughly 6–12 (its top is narrow: "6 mm right of it is
+ * already a miss"); a 15 mm jaw is outside both, and the material-scan plan reads a jaw's top as a
+ * SURFACE — 15 would have it stand where the clamp has nothing, so a correct reading would look like
+ * a fault. These are the middle of those two bands, and the shipped `uncertainty` (±2) sits inside
+ * both: 8.5–12.5 inside the fixed jaw's 8–13, 7–11 inside the moving jaw's 6–12. Still `source:
+ * 'default'`, still provisional — the C-series jaws measurement (#208) replaces all of it.
+ *
  * `stockProud` here is the shipped working height, correct for the 12 mm default blank. A job on
  * a DIFFERENT stock must resolve its default through `viseForNewJob` (below), never from this
  * constant: `DEFAULT_VISE` knows no stock, so its 4 mm would refuse a thin blank.
@@ -101,8 +110,8 @@ export function defaultStockProud(thickness: Mm): Mm {
  */
 export const DEFAULT_VISE: ViseParams = {
   stockProud: DEFAULT_STOCK_PROUD, // PROVISIONAL (#208): how far the top face stands above the jaw tops.
-  fixedJawThickness: 15, // PROVISIONAL (#208): fixed jaw (LEFT, /Fabrication.md §7.3) width in X.
-  movingJawThickness: 15, // PROVISIONAL (#208): moving jaw width in X.
+  fixedJawThickness: 10.5, // §11.8's band is ~8–13; the middle of it (#391 review item 7).
+  movingJawThickness: 9, // §11.8's band is ~6–12 — this jaw's top is narrow (#391 review item 7).
   jawLength: 80, // PROVISIONAL (#208): jaw length in Y.
   jawStartY: -10, // PROVISIONAL (#208): jaw start relative to the stock's front edge (Y).
   source: 'default',

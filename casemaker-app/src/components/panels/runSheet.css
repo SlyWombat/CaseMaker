@@ -88,6 +88,18 @@
   margin-left: 6px;
 }
 
+.run-sheet-step-code {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #f4f4f4;
+  font-family: var(--cm-font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .run-sheet-record {
   margin-left: 6px;
   white-space: nowrap;

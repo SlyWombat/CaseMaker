@@ -31,6 +31,8 @@ import {
   planMaterialScan,
   surfaceWord,
   SCAN_COARSE_STEP_MM,
+  SCAN_START_GAP_MM,
+  type ScanTouch,
 } from '@/engine/cnc/engrave/materialScan';
 import type { FeedsResult } from '@/engine/cnc/feeds';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
@@ -140,6 +142,13 @@ export interface RunSheetStep {
   text: string;
   /** A number with units, shown bold. */
   value?: string;
+  /**
+   * A line to SEND, verbatim, in the console's own language — e.g. `G38.2 Z-8 F100`. Set in a
+   * monospace run rather than left inside the sentence, because it is meant to be typed and not
+   * read (#391 review item 1: a step that names a travel cap but never gives a sendable line is not
+   * a step an operator can follow, and the command itself must not have to be reassembled from prose).
+   */
+  code?: string;
   /** Label of a blank the operator fills in. */
   record?: string;
   /**
@@ -910,9 +919,13 @@ function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string
  * against, the check confirms what the operator has already seen with their own hands.
  *
  * HELD, not printed (#391): `buildRunSheet` calls this only when `RunSheetOptions.materialScan` is
- * set, and nothing in the app sets it. The steps below are the review's list of what to fix before
- * they reach an operator — they are kept, compiled and tested so that fixing them is the only work
- * left. See `RunSheetOptions.materialScan` for the list.
+ * set, and nothing in the app sets it. The block was written, reviewed and held (review of 36f3837,
+ * 2026-10-13); the review's seven items are now IN, one step each — the sendable `G38.2` line from a
+ * stated start height with its travel cap and the miss's `$X`/lift, the tip stated as the assumption
+ * every figure derives from, the correction reading PAST the edge as the module always meant, the
+ * dome as a shape judged edge by edge, bisection either way and a step for a pass that never
+ * bracketed the edge, and per-jaw numbers inside §11.8's bounds carrying their own uncertainty —
+ * but the hold is not lifted until a person has read them again. See `RunSheetOptions.materialScan`.
  */
 function materialPositionSteps(job: EngraveJob, onBoard: boolean, unverified: string): RunSheetStep[] {
   const part = onBoard ? 'part' : 'blank';
@@ -933,6 +946,20 @@ function materialPositionSteps(job: EngraveJob, onBoard: boolean, unverified: st
     ];
   }
 
+  // The plan's own figures, quoted rather than re-derived: the sheet prints what the module decided,
+  // and every number below appears exactly once as a source.
+  const gapMm = fmtNum(SCAN_START_GAP_MM);
+  const capMm = fmtNum(plan.missTravelMm);
+  const travelMm = fmtNum(SCAN_START_GAP_MM + plan.missTravelMm);
+  const stepMm = fmtNum(SCAN_COARSE_STEP_MM);
+  const biasMm = fmtNum(plan.resolutionMm);
+  const belowMm = fmtNum(plan.bands.belowMm);
+  /** The blank's own top band at an edge — the left/right and front/back figures differ (the dome). */
+  const bandMm = (edge: 'left' | 'front'): string =>
+    fmtNum(plan.edges.find((e) => e.edge === edge)!.bands.blankMm);
+  const sidesMm = bandMm('left');
+  const endsMm = bandMm('front');
+
   const steps: RunSheetStep[] = [
     {
       text:
@@ -943,6 +970,15 @@ function materialPositionSteps(job: EngraveJob, onBoard: boolean, unverified: st
       unverified,
     },
     {
+      // #391 review item 2 — the assumptions come FIRST, before a single position is read off this
+      // sheet: an operator deciding whether to trust a predicted depth is entitled to know which of
+      // the figures behind it is measured and which is standing in. The plan words them, so the
+      // sheet cannot soften one.
+      text: 'Before you touch anything: what the numbers below assume, and what this fixture already gives you.',
+      unverified,
+    },
+    ...plan.notes.map((text): RunSheetStep => ({ text, unverified })),
+    {
       text:
         `Fit the probe and touch off ONCE on the ${part}’s top face, near the middle (M491 for the ` +
         'probe’s own length). Every reading below is a change from this one, so its Z is the zero ' +
@@ -950,9 +986,32 @@ function materialPositionSteps(job: EngraveJob, onBoard: boolean, unverified: st
       unverified,
     },
     {
+      // #391 review item 1 — a sendable line, and the height it is sent from. The cap the old step
+      // named (`5 mm below the reference`) was a field the machine does not show: a `G38.2` takes a
+      // TRAVEL distance, so without a stated start height there was nothing to send.
       text:
-        'Set the touch-off’s travel limit — the cap — before the first edge touch:',
-      value: `cap ${fmtNum(plan.missTravelMm)} mm below the reference`,
+        `Every touch below is ONE line, sent with the tip held ${gapMm} mm above the top of the blank — ` +
+        'lift to that height and jog X and Y THERE, never sideways at depth. The Z word is the distance ' +
+        `the tip may TRAVEL, not a place to go (§11.6): from the ${gapMm} mm gap it descends onto the ` +
+        `blank and stops there, or runs the ${gapMm} mm plus the ${capMm} mm cap if there is nothing ` +
+        'under it — as far as it may ever go, which is what keeps a touch that finds nothing off the bed:',
+      code: `G38.2 Z-${travelMm} F100`,
+      unverified,
+    },
+    {
+      text:
+        'A touch that finds NOTHING is not a fault — it is one of the readings this check looks for. ' +
+        'The console reports where the tip stopped with a 0 flag, then ALARM: Probe fail, and the ' +
+        'machine locks: a lift is refused (error:Alarm lock) until the Alarm is cleared, which is what ' +
+        'this sends:',
+      code: '$X',
+      unverified,
+    },
+    {
+      text:
+        'Then lift the tip clear of the clamp. Do this after EVERY touch, hit or miss, before any X or ' +
+        'Y move — after a miss the tip is at the cap with a jaw beside it:',
+      code: 'G53 G0 Z-3',
       unverified,
     },
   ];
@@ -962,14 +1021,22 @@ function materialPositionSteps(job: EngraveJob, onBoard: boolean, unverified: st
   for (const scan of plan.edges) {
     const aimed = scan.touches.find((t) => t.role === 'edge')!;
     const inside = scan.touches.filter((t) => t.role === 'inside');
-    const outside = scan.touches.filter((t) => t.role === 'outside');
-    const outward = outside[outside.length - 1]!;
+    const outward = scan.touches[scan.touches.length - 1]!;
+    // #391 review item 7 — when the fixture's own uncertainty reaches this point, the plan carries a
+    // second reading: the nominal jaw stops short of it, and a jaw at the wide end of its band does
+    // not. A step that printed only the first would turn a CORRECT reading into a fault the operator
+    // has to explain. The second reading is always the jaw's TOP, because growing the box can only
+    // add jaw — `ScanTouch.alsoMaybe` owns that direction.
+    const reads = (t: ScanTouch): string =>
+      t.alsoMaybe === undefined
+        ? surfaceWord(t.expect)
+        : `${surfaceWord(t.expect)} — or, if the jaw reaches this far after all, ${surfaceWord(t.alsoMaybe)}`;
     steps.push({
       text:
         `Check ${sideWords(scan.edge)} — at ${alongWord(scan.edge)}. Touch down at ` +
-        `${inside.map((t) => fmtNum(Math.abs(t.offsetMm))).join(' and ')} mm inside ` +
-        `(${surfaceWord('blank')}), at ${inOutWord(aimed.offsetMm)} (${surfaceWord(aimed.expect)}), ` +
-        `and at ${inOutWord(outward.offsetMm)} (${surfaceWord(outward.expect)})` +
+        `${inside.map((t) => fmtNum(Math.abs(t.offsetMm))).join(' and ')} mm inside (${reads(inside[0]!)}), ` +
+        `at ${inOutWord(aimed.offsetMm)} (${reads(aimed)}), ` +
+        `and at ${inOutWord(outward.offsetMm)} (${reads(outward)})` +
         (outward.expect === 'miss'
           ? ' — no jaw reaches under the tip past that edge, so a miss there is the expected reading, not a fault.'
           : '.'),
@@ -978,24 +1045,57 @@ function materialPositionSteps(job: EngraveJob, onBoard: boolean, unverified: st
     });
   }
 
-  // What the readings mean, and what to do when one lands between the two clear cases. The bands
-  // are the job's own (its blank's dome, and the height it stands proud), not a rule of thumb.
+  // What the readings mean. The bands are the JOB's own (its blank's dome, and the height it stands
+  // proud) and they are PER EDGE, because the face is a shape: the whole point of #391's fourth
+  // review item is that one figure quoted for the middle is not the top at the edges.
   steps.push({
     text:
-      `Reading the depths: within ${fmtNum(plan.bands.blankMm)} mm of the reference is the ${part}’s own top, ` +
-      `${fmtNum(plan.bands.belowMm)} mm or more below it is off the blank, and between the two the tip is on the edge ` +
-      `itself. The reading leaves the blank about ${fmtNum(plan.resolutionMm)} mm BEFORE the edge, so measure back ` +
-      `${fmtNum(plan.resolutionMm)} mm from where it changed: that is where the edge is. If the change comes at the inside ` +
-      `touch nearest the edge, bisect — halve the gap, touch the middle, keep the two readings that straddle it — until the ` +
-      `two are ${fmtNum(SCAN_COARSE_STEP_MM / 2)} mm apart.`,
+      'Reading the depths. Each edge is judged against the blank’s own top WHERE THAT EDGE IS, not ' +
+      `against one number, because the face is domed: within ${sidesMm} mm of the reference is the ` +
+      `blank at the left and right edges, ${endsMm} mm at the front and back, and ${belowMm} mm or more ` +
+      'below is off the blank at any of them. Between the two the tip is on the edge itself.',
+    unverified,
+  });
+  steps.push({
+    text:
+      // #391 review item 3 — PAST, which is what the module has always computed and what the physics
+      // says: the corner contact has to sink the reading before the dial can see it, so the change
+      // appears on the far side of the edge and the edge is measured back TOWARD the blank.
+      `The reading leaves the blank about ${biasMm} mm PAST the real edge — the tip’s corner contact ` +
+      `has to climb ${biasMm} mm before the dial moves — so the edge is ${biasMm} mm INSIDE where the ` +
+      `reading changed: measure the change, then take ${biasMm} mm back toward the blank. It is the ` +
+      'same figure and the same direction at all four edges.',
+    unverified,
+  });
+  steps.push({
+    text:
+      // #391 review item 5 — BOTH directions. The old step halved the gap one way only.
+      `To place an edge more finely, BISECT where the reading changed, in either direction: halve the ` +
+      'gap between the last reading that was the blank and the first that was not — inward or outward, ' +
+      'whichever side the change fell on — touch the middle of that gap, keep the two readings that ' +
+      `straddle it, and go again until they are no more than ${biasMm} mm apart, which is as fine as ` +
+      'this scan can honestly place an edge. Every touch that finds nothing needs the Alarm cleared and ' +
+      'the lift first (above).',
+    unverified,
+  });
+  steps.push({
+    text:
+      // #391 review item 6 — the pass that never brackets the edge, which the old steps had no answer
+      // for: an operator whose four readings were all "the blank" had nothing to bisect between.
+      `If the readings do not bracket the change at all, the edge is not where the first pass looked. ` +
+      `ALL FOUR reading the blank means every touch was still on it: step ${stepMm} mm further OUT and ` +
+      `try again. An OFF reading at the innermost touch means the pass started past the edge: step ` +
+      `${stepMm} mm back IN. Keep stepping until two neighbouring readings straddle the change, then ` +
+      'bisect as above — and past an edge with no jaw under the tip the change arrives as a miss, ' +
+      'which counts as off the blank.',
     unverified,
   });
   steps.push({
     text:
       `Compare with the file: the edges should lie where it says they do — X = 0 and X = ${fmtNum(job.stock.length)} for the ` +
-      `left and right, Y = 0 and Y = ${fmtNum(job.stock.width)} for the front and back — after the ${fmtNum(plan.resolutionMm)} mm ` +
-      'above is taken off. More than the job’s own margin out, and the blank has moved: re-clamp it, or set the origin from ' +
-      'the measured position. Do not cut until the two agree.',
+      `left and right, Y = 0 and Y = ${fmtNum(job.stock.width)} for the front and back — after the ${biasMm} mm ` +
+      'above is taken back toward the blank. More than the job’s own margin out, and the blank has moved: re-clamp it, or set the ' +
+      'origin from the measured position. Do not cut until the two agree.',
     value: `allowed ${fmtNum(job.edgeMargin)} mm`,
     record: 'edge that is out, and by how much (mm)',
     unverified,
@@ -1018,12 +1118,15 @@ export interface RunSheetOptions {
   /**
    * Print §5's material-position check (`materialScan.ts`, #391). **OFF, deliberately and for now.**
    *
-   * It is the operator-facing half of a feature whose printed steps a review has held (#391, review
-   * of 36f3837 on 2026-10-13): the travel cap names a field the machine does not show, the tip's
-   * diameter is stated as a fact when no tip has been measured, the correction's direction reads
-   * backwards, and the bisection covers one direction only. The scan itself is fine and stays where
-   * it is; what is held is what it TELLS a person to do at the machine, so no sheet — the app's, the
-   * bench generator's, or a committed `docs/bench` one — carries those steps until they land.
+   * It is the operator-facing half of a feature whose printed steps a review held (review of 36f3837
+   * on 2026-10-13). That review's seven items are now all IN — see `materialPositionSteps` for the
+   * list and which step carries each — and the module and the block are both tested; what remains is
+   * that no person has read the rebuilt steps at a machine, so no sheet — the app's, the bench
+   * generator's, or a committed `docs/bench` one — prints them yet. Two figures in them are still
+   * assumptions rather than measurements, and the steps SAY so rather than implying otherwise: the
+   * probe's tip diameter (#208 A8, never measured, and every position derives from it), and the
+   * blank's dome, which stands in from the badge blank where the job states none (#345). Lifting the
+   * hold is the maintainer's call, not this flag's.
    *
    * Nothing in the app sets it. `runSheet.spec.ts` does, so the block cannot rot while it is held.
    */
