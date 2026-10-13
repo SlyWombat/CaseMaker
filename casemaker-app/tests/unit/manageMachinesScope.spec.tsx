@@ -420,8 +420,11 @@ describe('#386 item 3 — a frame that arrived with no line in flight', () => {
 
       fireEvent.click(screen.getByTestId('manage-console-copy'));
       await waitFor(() => expect(writes).toHaveLength(1));
-      expect(writes[0]).toContain('(no line in flight) ALARM: Probe fail');
-      expect(writes[0].indexOf('> ?')).toBeLessThan(writes[0].indexOf('(no line in flight)'));
+      // Bound once: `writes` is `string[]`, and `noUncheckedIndexedAccess` gives an element the type
+      // `string | undefined`, so every `writes[0]` in a call is a tsc error in the tests project.
+      const copied = writes[0] ?? '';
+      expect(copied).toContain('(no line in flight) ALARM: Probe fail');
+      expect(copied.indexOf('> ?')).toBeLessThan(copied.indexOf('(no line in flight)'));
     } finally {
       if (had) Object.defineProperty(navigator, 'clipboard', had);
       else delete (navigator as unknown as { clipboard?: unknown }).clipboard;
