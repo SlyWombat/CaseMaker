@@ -70,6 +70,24 @@ possible. **Nothing here is scheduled; the maintainer calls each session.**
   clamping, was **deleted from the card on 2026-10-12** at the maintainer's request (`md5` now answers
   not found). Our console's `play` can run any card file (#386).
 
+## Z1 low-profile vise: product constants (calipers, 2026-10-13, in progress)
+
+The vise is identical on every Z1 (maintainer, 2026-10-13), so these become the shipped
+`DEFAULT_VISE`, measured once on the reference unit, not per-user values. Photos:
+`img/2026-10-13-vise-front-profile.jpg`, `img/2026-10-13-vise-top.jpg`. Each jaw carries an
+L-shaped slotted soft jaw: a tall bar, with a lower ledge facing inward that the blank sits on.
+
+| Dimension | Fixed jaw | Moving jaw | Note |
+|---|---|---|---|
+| Soft-jaw top width (flat top of the tall bar) | 10 mm | 10 mm | agrees with the 2026-10-08 probe (top at 3–8 mm out from the blank, a miss at 13 mm; moving side a miss 6 mm out) |
+| Step, jaw top down to the blank ledge | 3.1 mm | 3.1 mm | first read as 3 mm, corrected |
+| Ledge depth (how far it sticks out from the tall bar) | — | — | **next to measure** |
+| Soft-jaw length (along the jaw, Y) | — | — | to measure |
+| Blank thickness at its middle | — | — | to measure: a 3.1 mm step and the probed 1.07–1.21 mm proud imply ~4.2 mm, against 3.81 designed and the ~3.5 mm nut reading. Either the blank isn't seated on the ledges, or a number is off |
+
+Not changed in the code yet: `DEFAULT_VISE` still holds 10.5 / 9 (0116f36). It moves to the
+measured set in one commit once the table is complete.
+
 ## The one gate on every chip-making session: the cutter
 
 The fitted 1 × 4 mm ball nose cannot be simulated (the sweep refuses any non-flat tool), and the
