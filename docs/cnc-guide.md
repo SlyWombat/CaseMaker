@@ -817,7 +817,12 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 program back — what the **Verified** row in the engrave flow is: the parser, the dialect whitelist,
 the runner and the depth checks run over the file itself, and every error any of them finds is
 carried under one of these names. Two of them (`parse-error`, `runner-error`) wrap the reading and
-running passes above; the rest are the checks the runner does not do on its own:
+running passes above; the rest are the checks the runner does not do on its own.
+
+**It runs on what the app produces, and is not a gate on imports.** The three callers are the engrave
+run, a restart, and the bench file generator — so a file you open or import is read and simulated,
+never verified, and nothing below checks a foreign program's depths, feeds or spindle starts. What a
+simulation does report about one is the sweep's own list, next:
 
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|
@@ -830,6 +835,7 @@ running passes above; the rest are the checks the runner does not do on its own:
 | `feed-missing` | error | A cutting move has no feed rate set. | Add an `F` before the cut. |
 | `feed-too-high` | error | A cutting feed is above the machine's ceiling. (The planner's softer `feed-clamped` is a different code, raised earlier.) | Lower the feed. |
 | `spindle-off-cut` | error | A feed move reaches below the top face with the spindle off. | Turn the spindle on with `M3` — it is the dialect's only spindle-on word (`M4` is not one of them). |
+| `spindle-at-unknown-z` | error | The spindle starts with no Z established: nothing placed the tool in Z first, so the cutter comes on **wherever the head was left** — after a manual `M6` that can be inside the part. Read on every start, so a later `M3` is judged where the head is then, not on the file's opening lift. | State the Z first: a `G53` lift in the machine frame (what the app's own post and restarts write), or an absolute Z move. |
 | `rapid-too-low` | error | An X/Y rapid runs below the permitted rapid height, or at a Z the program never established. | Raise the rapid height, or state the Z first. |
 | `rpm-too-high` | error | A spindle speed is above the machine's ceiling. (The planner's `rpm-clamped`/`rpm-refused` are separate.) | Lower the speed. |
 | `multi-tool` | error | The program uses more than one tool; V1 is single-tool. Raised for an `M6` to a new tool after the first cut, or for more than one distinct tool anywhere. | Post the job with one tool. |
