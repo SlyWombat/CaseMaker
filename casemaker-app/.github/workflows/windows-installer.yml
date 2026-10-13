@@ -35,19 +35,15 @@ jobs:
       - name: Install npm deps
         run: npm ci
 
-      - name: Generate platform icons from source PNG
-        run: npx tauri icon ./src-tauri/icons/icon.png
+      # NOT `npx tauri icon`: re-running that in this repo is not a no-op (it resamples every
+      # checked-in PNG differently and drops android/ios trees in), and it would write a 6-size
+      # icon.ico over the 8-size one — silently bringing back the 20/40 gap. The icons are
+      # committed; this only guarantees the .ico still carries all eight sizes before we build.
+      - name: Check the Windows icon carries every size
+        run: npm run icons
 
       - name: Build SPA + Tauri Windows bundle
         run: npm run tauri:build
-
-      - name: Upload MSI installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: case-maker-windows-msi
-          path: casemaker-app/src-tauri/target/release/bundle/msi/*.msi
-          if-no-files-found: error
-          retention-days: 30
 
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v4

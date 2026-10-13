@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "nsis"],
+    "targets": ["nsis"],
     "publisher": "Electric RV Corporation",
     "homepage": "https://electricrv.ca/casemaker/",
     "copyright": "© 2026 Electric RV Corporation",
