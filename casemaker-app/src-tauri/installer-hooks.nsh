@@ -73,9 +73,6 @@
     StrCpy $6 "1"
   ${EndIf}
 
-  ; Ensure the settings directory exists
-  CreateDirectory "${CM_CONFIG_DIR}"
-
   ; WRITE THE SETTINGS ONLY WHEN THERE IS NOTHING TO KEEP (#403 gap 1).
   ;
   ; This hook runs on EVERY install, upgrades included, and config.json is the only copy the app
@@ -88,11 +85,27 @@
   ; or /HOST (an explicit instruction — that is what the switches are for). Otherwise leave the
   ; file exactly as it is. A switch rewrites the whole document rather than merging one field into
   ; it, so pass BOTH to pin both values.
+  ;
+  ; THE WRITE HAPPENS IN THE CURRENT-USER SHELL CONTEXT, whatever the install mode, because
+  ; `${CM_CONFIG_DIR}` is `$APPDATA\casemaker` and `$APPDATA` follows `SetShellVarContext`
+  ; (#403 gap 5). Tauri's own `SetContext` (utils.nsh) calls `SetShellVarContext all` for a
+  ; perMachine install, and under `all` NSIS resolves `$APPDATA` to `C:\ProgramData` — a path this
+  ; app never reads, because the Rust side asks `dirs::config_dir()` for the user's
+  ; `%APPDATA%\casemaker\config.json`. Measured, not assumed: under `all`, `$APPDATA` and
+  ; `$LOCALAPPDATA` both become `C:\ProgramData`, while `$PROFILE` is unchanged. Without the
+  ; switch below, a perMachine install would configure a port that nothing reads and log it as if
+  ; it had worked. `nsis-harness-ctx.nsi` is the case that fails when this line is removed.
+  ;
+  ; The context goes back to what the installer chose afterwards: code that follows in the section
+  ; (start-menu and desktop shortcuts, and the uninstaller's shortcut removal) is context-dependent.
   ${If} ${FileExists} "${CM_CONFIG_DIR}\config.json"
   ${AndIf} $5 == "0"
   ${AndIf} $6 == "0"
     DetailPrint "Case Maker: keeping the existing settings in ${CM_CONFIG_DIR}\config.json (no /PORT or /HOST given)"
   ${Else}
+    SetShellVarContext current
+    CreateDirectory "${CM_CONFIG_DIR}"
+
     ; host is null when empty (loopback default).
     FileOpen $1 "${CM_CONFIG_DIR}\config.json" w
     FileWrite $1 "{$\r$\n"
@@ -108,6 +121,15 @@
     FileClose $1
 
     DetailPrint "Case Maker: configured port $0 host=$2 in ${CM_CONFIG_DIR}\config.json"
+
+    ; Put the context back. `INSTALLMODE` is defined by the generated installer script above this
+    ; file's include, and read here at macro-insertion time — the same way Tauri's own `SetContext`
+    ; macro reads it. The harness, which never defines it, takes the `current` branch.
+    !if "${INSTALLMODE}" == "perMachine"
+      SetShellVarContext all
+    !else
+      SetShellVarContext current
+    !endif
   ${EndIf}
 
   ; Open the firewall port iff the user asked for non-loopback access.

@@ -11,10 +11,16 @@
 #
 # It writes only inside this directory (`harness-config/`, `harness-install/`, `nsis-harness.exe`)
 # and removes what it made; the settings directory is redirected by a compile-time define, so it
-# never touches %APPDATA%. The hook calls `netsh advfirewall` on every install (the discovery rule,
-# #403 gap 3), and so does the harness — unelevated, which makes those calls inert. Rather than
-# trust that, the run asserts the machine's firewall rule list is byte-identical afterwards, and it
-# refuses to run at all from an elevated shell, where the calls would land.
+# never touches %APPDATA%\casemaker. The hook calls `netsh advfirewall` on every install (the
+# discovery rule, #403 gap 3), and so does the harness — unelevated, which makes those calls inert.
+# Rather than trust that, the run asserts the machine's firewall rule list is byte-identical
+# afterwards, and it refuses to run at all from an elevated shell, where the calls would land.
+#
+# One case (case 5) deliberately does the opposite of the redirect: `installMode: perMachine` makes
+# Tauri's SetContext call `SetShellVarContext all`, so that case leaves the settings path at its
+# real shape and checks WHERE it lands. It writes under the real %APPDATA% and C:\ProgramData, but
+# only ever into a `casemaker-harness-ctx` scratch directory, which it removes — never
+# `casemaker\config.json`, and never anything a real install reads.
 
 set -euo pipefail
 
@@ -23,6 +29,10 @@ SCRIPT="$HERE/nsis-harness.nsi"
 EXE="$HERE/nsis-harness.exe"
 CONFIG_DIR="$HERE/harness-config"
 CONFIG="$CONFIG_DIR/config.json"
+# The perMachine settings-path case (case 5) has its own script: it must NOT redirect the settings
+# path, because the path is the thing under test.
+CTX_SCRIPT="$HERE/nsis-harness-ctx.nsi"
+CTX_EXE="$HERE/nsis-harness-ctx.exe"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 ok()   { printf '  ok: %s\n' "$*"; }
@@ -46,6 +56,11 @@ is_elevated() {
     "([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)" \
     2>/dev/null | tr -d '\r'
 }
+
+# The two Windows paths case 5 cares about, asked of Windows itself. `$env:...` is passed through
+# single quotes on purpose so the shell does not touch it.
+win_env() { powershell.exe -NoProfile -Command "\$env:$1" 2>/dev/null | tr -d '\r'; }
+to_unix() { if command -v wslpath >/dev/null 2>&1; then wslpath -u "$1"; else printf '%s' "$1"; fi; }
 
 # One hash of the whole firewall rule list, so the run can show it changed nothing rather than
 # assert it.
@@ -105,6 +120,45 @@ install_silently /PORT=9300
 [[ "$(port_of "$CONFIG")" == "9300" ]] || fail "case 4: port is $(port_of "$CONFIG"), expected 9300"
 ok "port 9300"
 
+echo "case 5 — a perMachine install writes the settings to the USER's profile (#403 gap 5)"
+# `installMode: perMachine` makes Tauri's own SetContext call `SetShellVarContext all`, and under
+# `all` NSIS resolves $APPDATA to C:\ProgramData — a path this app never reads, because the Rust
+# side asks dirs::config_dir() for the user's %APPDATA%\casemaker. So this case compiles the SAME
+# hook with ${CM_CONFIG_DIR} left in its real shape (only the last segment renamed, to a scratch
+# directory) and forces `all` before the hook, which is what a perMachine install does.
+#
+# Both target paths are proved absent first: a directory left over from an earlier run must not be
+# able to make the case pass.
+WIN_APPDATA="$(win_env APPDATA)"
+WIN_PROGRAMDATA="$(win_env ProgramData)"
+[[ -n "$WIN_APPDATA" && -n "$WIN_PROGRAMDATA" ]] \
+  || fail "case 5: could not read %APPDATA% and %ProgramData% from Windows"
+CTX_DIR="$(to_unix "$WIN_APPDATA")/casemaker-harness-ctx"
+PD_DIR="$(to_unix "$WIN_PROGRAMDATA")/casemaker-harness-ctx"
+
+rm -rf "$CTX_DIR" "$PD_DIR" "$HERE/ctx-after.txt" "$CTX_EXE"
+[[ -e "$CTX_DIR" ]] && fail "case 5: $CTX_DIR was not removed before the case"
+[[ -e "$PD_DIR" ]] && fail "case 5: $PD_DIR was not removed before the case"
+
+powershell.exe -NoProfile -Command \
+  "Set-Location -LiteralPath '$(to_windows "$HERE")'; & '$(to_windows "$MAKENSIS_BIN")' /V2 'nsis-harness-ctx.nsi'" \
+  || fail "makensis failed to compile nsis-harness-ctx.nsi"
+[[ -f "$CTX_EXE" ]] || fail "case 5: makensis reported success but produced no $CTX_EXE"
+"$CTX_EXE" /S
+
+[[ -f "$CTX_DIR/config.json" ]] \
+  || fail "case 5: no config.json under the user's %APPDATA% — a perMachine install would have configured a path the app never reads"
+ok "the settings landed in $WIN_APPDATA\\casemaker-harness-ctx"
+[[ ! -e "$PD_DIR" ]] || fail "case 5: the settings were also written under $WIN_PROGRAMDATA"
+ok "nothing was written under $WIN_PROGRAMDATA"
+
+# The hook must put the shell context back: in a real perMachine install the code that follows it
+# creates the shortcuts, and those are context-dependent.
+CTX_AFTER="$(tr -d '\r' < "$HERE/ctx-after.txt" 2>/dev/null || true)"
+[[ "$CTX_AFTER" == "$WIN_PROGRAMDATA" ]] \
+  || fail "case 5: the hook left the shell context at '$CTX_AFTER', expected $WIN_PROGRAMDATA"
+ok "the shell context was put back afterwards"
+
 # The hook calls netsh on every install now; prove those calls were inert here (they are unelevated,
 # asserted above) instead of assuming it.
 firewall_after="$(firewall_rules)"
@@ -112,5 +166,5 @@ firewall_after="$(firewall_rules)"
   || fail "the run changed the machine's firewall rules ($firewall_before -> $firewall_after)"
 ok "the machine's firewall rule list is unchanged"
 
-rm -rf "$CONFIG_DIR" "$HERE/harness-install"
-printf 'all 4 cases passed\n'
+rm -rf "$CONFIG_DIR" "$HERE/harness-install" "$CTX_DIR" "$PD_DIR" "$HERE/ctx-after.txt"
+printf 'all 5 cases passed\n'

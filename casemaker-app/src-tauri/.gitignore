@@ -14,3 +14,6 @@ gen/schemas/
 /nsis-harness.exe
 /harness-config/
 /harness-install/
+# The perMachine settings-path case (case 5) and the context it reads back.
+/nsis-harness-ctx.exe
+/ctx-after.txt
