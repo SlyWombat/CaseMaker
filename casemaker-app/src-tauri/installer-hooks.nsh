@@ -30,6 +30,31 @@
 
 !include "FileFunc.nsh"
 
+; ---------------------------------------------------------------------------------------------
+; THE WELCOME PAGE'S WORDING (#403 gap 5).
+;
+; This file is included at installer.nsi:32 and Tauri's page list is not expanded until :165, so a
+; define written here is already in place when `!insertmacro MUI_PAGE_WELCOME` runs. MUI takes it
+; because every one of its own welcome strings arrives via `MUI_DEFAULT`, which only defines a
+; symbol that is not defined yet — so these two override the stock "Welcome to the ... Setup
+; Wizard" text without vendoring Tauri's template.
+;
+; THE PRODUCT AND VERSION CANNOT BE USED HERE. `${PRODUCTNAME}` and `${VERSION}` are defined at
+; installer.nsi:36-41, four lines *after* this include, so interpolating them would put an empty
+; string on the page. The name is spelled out instead; the version is left off, which also means
+; this wording does not need editing at every release.
+;
+; The text says what the app actually does in a user's hands — it designs enclosures and it drives
+; the Makera Z1 — rather than only the first half, which is what an "enclosure designer" line alone
+; would have said (#403). Paragraph breaks are `$\r$\n`; the control wraps the rest itself, so
+; there are no hand-placed line breaks to go ragged at another font size.
+!ifndef MUI_WELCOMEPAGE_TITLE
+  !define MUI_WELCOMEPAGE_TITLE "Welcome to the Case Maker Setup Wizard"
+!endif
+!ifndef MUI_WELCOMEPAGE_TEXT
+  !define MUI_WELCOMEPAGE_TEXT "Case Maker designs 3D-printable enclosures for microcontrollers and single-board computers: pick a board, place its mounting points, and export STL or 3MF for your slicer. It also drives the Makera Z1 desktop CNC for engraving, so a project can be cut as well as printed.$\r$\n$\r$\nThis wizard will install Case Maker on your computer.$\r$\n$\r$\nClick Next to continue, or Cancel to exit Setup."
+!endif
+
 ; Where the settings live, as a compile-time define so a harness can point the hook at a scratch
 ; directory (`nsis-harness.nsi` defines it before including this file; the real installer never
 ; defines it, so it gets the real location). The reason is the one `config::save_to` gives for
