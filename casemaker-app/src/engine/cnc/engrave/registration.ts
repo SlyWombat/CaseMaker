@@ -86,21 +86,46 @@ export interface TouchWords {
 }
 
 /**
+ * The four sides of the blank, in the words an operator uses, split into the side and how it is
+ * TOLD from the other three. Both parts are what a person at the machine has: the jaws are what
+ * makes a name useful — the left side is the one the fixed jaw bears on — and their own position
+ * is what makes the front and back names work.
+ *
+ * Two parts rather than one phrase because sentences use them differently: a step names one side
+ * and how to find it, while a note that has to mention several at once uses their names alone
+ * ("past the front and back edges"). Exported because this is the ONE place a side of the blank is
+ * put into words — `edgeName` reads it here, and `materialScan.ts`'s steps (§5, #391) print it too.
+ */
+export const SIDE_WORDS = {
+  left: { name: 'the left edge', hint: 'the one against the fixed jaw' },
+  right: { name: 'the right edge', hint: 'the one against the moving jaw' },
+  front: { name: 'the front edge', hint: 'the one nearest you' },
+  back: { name: 'the back edge', hint: 'the one furthest from you' },
+} as const;
+
+/** A side of the blank, as the work frame names it. */
+export type JobSide = keyof typeof SIDE_WORDS;
+
+/** `the left edge — the one against the fixed jaw`: one side, and how to tell it from the others. */
+export function sideWords(edge: JobSide): string {
+  return `${SIDE_WORDS[edge].name} — ${SIDE_WORDS[edge].hint}`;
+}
+
+/**
  * Name one side of the blank.
  *
  * A side is told from the other three by its midpoint, which is safe because the sides do not
  * overlap: an X-parallel edge has its midpoint at y = 0 or y = width, a Y-parallel one at x = 0 or
- * x = length. The jaws are what makes the name useful — the left side is the one the fixed jaw
- * bears on, and the operator has that in front of them.
+ * x = length.
  */
 function edgeName(edge: readonly [Vec2, Vec2], length: Mm, width: Mm): string {
   const [a, b] = edge;
   const mx = (a[0] + b[0]) / 2;
   const my = (a[1] + b[1]) / 2;
   if (Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1])) {
-    return my > width / 2 ? 'the back edge — the one furthest from you' : 'the front edge — the one nearest you';
+    return sideWords(my > width / 2 ? 'back' : 'front');
   }
-  return mx > length / 2 ? 'the right edge — the one against the moving jaw' : 'the left edge — the one against the fixed jaw';
+  return sideWords(mx > length / 2 ? 'right' : 'left');
 }
 
 /**

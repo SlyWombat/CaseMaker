@@ -23,7 +23,14 @@ import {
   type MarginSettings,
 } from '@/engine/cnc/engrave/depthBounds';
 import { cuttingDiameter } from '@/engine/cnc/tool';
-import { axesWord, describeTouch, kindWord, readsWord, registrationFor } from '@/engine/cnc/engrave/registration';
+import { axesWord, describeTouch, kindWord, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
+import {
+  alongWord,
+  inOutWord,
+  planMaterialScan,
+  surfaceWord,
+  SCAN_COARSE_STEP_MM,
+} from '@/engine/cnc/engrave/materialScan';
 import type { FeedsResult } from '@/engine/cnc/feeds';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
@@ -886,6 +893,115 @@ function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string
   return steps;
 }
 
+/**
+ * §5's second half — the material-position check (#391, decision 26).
+ *
+ * The steps above set the origin; these OFFER to check it against the blank that is actually in the
+ * jaws, which is a different question. `registrationSteps` answers it with X, Y and rotation
+ * touches that the wired probe cannot make (it is Z-only, §11.7), so the sheet says which way the
+ * blank has moved with the one gesture the probe does have: a downward touch across each edge, read
+ * as "the blank's own top" or "not". `materialScan.ts` owns the geometry and the physics; this
+ * function is only how an operator reads them, so every number here comes from the plan.
+ *
+ * IT IS AN OFFER, and the sheet says so, because the check costs a tool change: the probe goes in
+ * for it and the cutter comes back after. When the blank is the one the origin was just set
+ * against, the check confirms what the operator has already seen with their own hands.
+ */
+function materialPositionSteps(job: EngraveJob, onBoard: boolean, unverified: string): RunSheetStep[] {
+  const part = onBoard ? 'part' : 'blank';
+  // Nothing to check the blank against when the origin itself could not be resolved: §5 is then one
+  // refusal step, and a scan printed under it would be a sequence the sheet has just declined to
+  // stand behind. (`registrationFor` is pure point maths on the stock rectangle, so asking it twice
+  // costs nothing and keeps this function's own contract — never a scan for an unresolvable origin.)
+  if ('refuse' in registrationFor(job)) return [];
+  const plan = planMaterialScan(job);
+  if ('refuse' in plan) {
+    return [
+      {
+        text:
+          `The ${part}’s position cannot be checked with the probe on this setup: ${plan.message}. ` +
+          'Set the origin as above and check the blank against it with a rule instead.',
+        unverified,
+      },
+    ];
+  }
+
+  const steps: RunSheetStep[] = [
+    {
+      text:
+        'OPTIONAL, BEFORE THE FIRST CUT — check where the blank really is, with the wired probe. It ' +
+        'is Z-only, so it cannot touch a side: it finds an edge by touching DOWN at points across ' +
+        `it and watching where the reading changes. ${plan.edges.length} edges, ${plan.edges[0]!.touches.length} touches each, a few minutes, one tool change. ` +
+        'Skip this if this is the blank you have just set the origin against.',
+      unverified,
+    },
+    {
+      text:
+        `Fit the probe and touch off ONCE on the ${part}’s top face, near the middle (M491 for the ` +
+        'probe’s own length). Every reading below is a change from this one, so its Z is the zero ' +
+        'depth to compare against.',
+      unverified,
+    },
+    {
+      text:
+        'Set the touch-off’s travel limit — the cap — before the first edge touch:',
+      value: `cap ${fmtNum(plan.missTravelMm)} mm below the reference`,
+      unverified,
+    },
+  ];
+
+  // One step per edge. The four touches of an edge differ only in how far they sit from it, so the
+  // step is one sentence with the expected reading beside each position.
+  for (const scan of plan.edges) {
+    const aimed = scan.touches.find((t) => t.role === 'edge')!;
+    const inside = scan.touches.filter((t) => t.role === 'inside');
+    const outside = scan.touches.filter((t) => t.role === 'outside');
+    const outward = outside[outside.length - 1]!;
+    steps.push({
+      text:
+        `Check ${sideWords(scan.edge)} — at ${alongWord(scan.edge)}. Touch down at ` +
+        `${inside.map((t) => fmtNum(Math.abs(t.offsetMm))).join(' and ')} mm inside ` +
+        `(${surfaceWord('blank')}), at ${inOutWord(aimed.offsetMm)} (${surfaceWord(aimed.expect)}), ` +
+        `and at ${inOutWord(outward.offsetMm)} (${surfaceWord(outward.expect)})` +
+        (outward.expect === 'miss'
+          ? ' — no jaw reaches under the tip past that edge, so a miss there is the expected reading, not a fault.'
+          : '.'),
+      record: `${scan.axis === 'x' ? 'X' : 'Y'} where the reading stops being the blank (mm)`,
+      unverified,
+    });
+  }
+
+  // What the readings mean, and what to do when one lands between the two clear cases. The bands
+  // are the job's own (its blank's dome, and the height it stands proud), not a rule of thumb.
+  steps.push({
+    text:
+      `Reading the depths: within ${fmtNum(plan.bands.blankMm)} mm of the reference is the ${part}’s own top, ` +
+      `${fmtNum(plan.bands.belowMm)} mm or more below it is off the blank, and between the two the tip is on the edge ` +
+      `itself. The reading leaves the blank about ${fmtNum(plan.resolutionMm)} mm BEFORE the edge, so measure back ` +
+      `${fmtNum(plan.resolutionMm)} mm from where it changed: that is where the edge is. If the change comes at the inside ` +
+      `touch nearest the edge, bisect — halve the gap, touch the middle, keep the two readings that straddle it — until the ` +
+      `two are ${fmtNum(SCAN_COARSE_STEP_MM / 2)} mm apart.`,
+    unverified,
+  });
+  steps.push({
+    text:
+      `Compare with the file: the edges should lie where it says they do — X = 0 and X = ${fmtNum(job.stock.length)} for the ` +
+      `left and right, Y = 0 and Y = ${fmtNum(job.stock.width)} for the front and back — after the ${fmtNum(plan.resolutionMm)} mm ` +
+      'above is taken off. More than the job’s own margin out, and the blank has moved: re-clamp it, or set the origin from ' +
+      'the measured position. Do not cut until the two agree.',
+    value: `allowed ${fmtNum(job.edgeMargin)} mm`,
+    record: 'edge that is out, and by how much (mm)',
+    unverified,
+  });
+  steps.push({
+    text:
+      'Put the CUTTER back and measure its length again (M491): the probe and the cutter are ' +
+      'different tools, and every Z in the program is the cutter’s.',
+    unverified,
+  });
+  return steps;
+}
+
 export function buildRunSheet(
   job: EngraveJob,
   generated: RunSheetGenerated,
@@ -1065,7 +1181,12 @@ export function buildRunSheet(
   ];
 
   // ---- 5 · Set the work origin (⚠ #208) ------------------------------------------------------
-  const originSteps = registrationSteps(job, onBoard, UNVERIFIED);
+  // #391 — where the origin IS, then how the operator checks it against the blank actually in the
+  // jaws. One section, because they are one task: a corrected origin is corrected on the spot.
+  const originSteps: RunSheetStep[] = [
+    ...registrationSteps(job, onBoard, UNVERIFIED),
+    ...materialPositionSteps(job, onBoard, UNVERIFIED),
+  ];
 
   // ---- 6 · Dry run ---------------------------------------------------------------------------
   // #244 — the frame file replaces the manual "raise Z by 20 mm" offset. Its Z is baked in, so

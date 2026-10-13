@@ -494,7 +494,14 @@ held** (#272, decision 26), not written out by hand: it says what the jaws alrea
 to what accuracy, names each edge to touch on the blank in physical words ("the back edge — the
 one furthest from you, about 19 mm along from the left end"), and reports the residual the
 registration leaves. If no reachable edge can resolve an axis, it prints the refusal and names
-what is in the way instead of a sequence it cannot stand behind. When the job declares
+what is in the way instead of a sequence it cannot stand behind. The same section carries the
+**optional** check of where the blank really is (#391): the wired probe is Z-only, so it cannot
+touch a side — it finds an edge by touching *down* at points across it and watching where the
+reading changes. The sheet gives the positions, what the reading should be at each, the job's own
+thresholds for reading them (the blank's dome, the height it stands proud, the margin) and what to
+write in the record column. It is an offer rather than a step, because it costs a tool change and
+it is worth taking when the blank in the jaws is not the one the origin was just set against; a
+setup the scan cannot work on prints that sentence instead of the sequence. When the job declares
 sacrificial material (#213) the loading
 section also carries a **side view** of the assembly — the jaws at the faces they really clamp,
 the board, the strips and the part, each at its own thickness, with Z = 0 drawn on the *part's*
@@ -885,6 +892,16 @@ step's text:
 |---|---|---|---|
 | `no-outline` | error | The part's outline needs a geometry kernel to evaluate (a boolean or offset shape), and the planner is kernel-free, so it has nothing to measure against. | Nothing you can do from the app — this is a wiring gap the caller closes by evaluating the outline in the worker first. |
 | `no-reachable-edge` | error | On an axis the fixture leaves open, that axis still has a straight edge long enough and clear of the fixture. The message names the obstruction. | Move or remove whatever the message names — that is what is sitting on the edge. |
+
+**Checking where the blank really is** (material-position scan — #391). The probe-planning rule
+holds here too: no screen raises these, and the run sheet's work-origin section prints the refusal
+as the step's own text. They refuse the *check*, never the job — the check is optional, so a refusal
+costs the operator the sentence and nothing else.
+
+| Code | Severity | What it means in plain words | What to do |
+|---|---|---|---|
+| `not-proud-enough` | error | The blank stands so little proud of the jaw tops that the probe cannot tell the blank's own top from the jaw's — every reading would sit within the dial's own tolerance of both. | Seat the blank higher, or set the origin as usual and check the blank against it with a rule. |
+| `dome-covers-the-jaw` | error | The blank's stated dome is as deep as the height it stands proud, so the top of the dome and the level of the jaw tops read the same. | Say what the dome really is, seat the blank higher, or check with a rule instead. |
 
 **Reading the file header** (form prefill only; these never change the sweep):
 

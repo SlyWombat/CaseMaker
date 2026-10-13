@@ -419,6 +419,78 @@ describe('runSheet (#207)', () => {
       expect(texts[0]).toContain('no reachable straight edge');
       expect(texts.some((t) => t.startsWith('Touch '))).toBe(false);
     });
+
+    // #391 — the second half of §5: the check the operator can make against the blank ACTUALLY in
+    // the jaws, with the wired probe. Every number is the plan's, so these assertions are about the
+    // sheet saying them in words a person at the machine can act on (and about it not saying them
+    // when they would not be true).
+    it('offers the material-position scan, in physical landmarks and the plan’s own numbers', () => {
+      const steps = section(sheetFor(defaultEngraveJob()), 'origin').steps;
+      const texts = steps.map((s) => s.text);
+
+      // It is an OFFER, and it says why it costs something: a tool change.
+      const offer = texts.find((t) => t.startsWith('OPTIONAL, BEFORE THE FIRST CUT'))!;
+      expect(offer).toContain('It is Z-only, so it cannot touch a side');
+      expect(offer).toContain('one tool change');
+      expect(offer).toContain('Skip this if this is the blank you have just set the origin against');
+
+      // The reference touch, then the cap that keeps a never-triggering touch off the bed. The cap
+      // is the plan's `missTravelMm` (the height the blank stands proud, plus 1 mm).
+      expect(texts.some((t) => t.includes('touch off ONCE on the blank’s top face'))).toBe(true);
+      const cap = steps.find((s) => s.value?.startsWith('cap '))!;
+      expect(cap.value).toBe('cap 5 mm below the reference');
+
+      // One step per edge, each naming the side the way a person finds it, and each carrying the
+      // four positions and what the reading should be at each — including the miss past a side.
+      const checks = texts.filter((t) => t.startsWith('Check '));
+      expect(checks).toHaveLength(4);
+      expect(checks[0]).toContain('the left edge — the one against the fixed jaw');
+      expect(checks[0]).toContain('at the middle of the blank’s width');
+      expect(checks[0]).toContain('3.5 and 1.5 mm inside');
+      expect(checks[0]).toContain('the blank’s edge itself');
+      // The END edges have a jaw top past them; the SIDE edges have the gap between the jaws, so
+      // their outward touch runs to the cap instead — and the sheet says that is expected.
+      expect(checks[0]).toContain('the jaw’s top');
+      expect(checks.find((t) => t.startsWith('Check the front edge'))).toContain('the expected reading, not a fault');
+      for (const id of checks) expect(id).toMatch(/at the middle of the blank’s (width|length)/);
+
+      // The bands, the resolution and the margin are the JOB's figures (#345/#362), not constants in
+      // the sheet: a flat blank's own dome would move all three.
+      const reading = texts.find((t) => t.startsWith('Reading the depths:'))!;
+      expect(reading).toContain('within 0.38 mm of the reference');
+      expect(reading).toContain('3.95 mm or more below it is off the blank');
+      expect(reading).toContain('leaves the blank about 0.998 mm BEFORE the edge');
+      const compare = steps.find((s) => s.value?.startsWith('allowed '))!;
+      expect(compare.value).toBe('allowed 1 mm');
+      expect(compare.text).toContain('after the 0.998 mm above is taken off');
+
+      // The tool change back, because every Z in the program is the CUTTER's.
+      expect(texts[texts.length - 1]).toContain('Put the CUTTER back and measure its length again');
+
+      // What the operator writes down, so the sheet's record column is not empty for this block.
+      expect(steps.filter((s) => s.record !== undefined).map((s) => s.record)).toEqual([
+        'X where the reading stops being the blank (mm)',
+        'X where the reading stops being the blank (mm)',
+        'Y where the reading stops being the blank (mm)',
+        'Y where the reading stops being the blank (mm)',
+        'edge that is out, and by how much (mm)',
+      ]);
+    });
+
+    it('leaves the block out entirely when the setup cannot support it', () => {
+      // The scan needs the blank to stand clear of the jaw tops by more than the dial's own
+      // tolerance. A blank 0.05 mm proud cannot be told from the jaw at all, so the plan refuses —
+      // and §5 then says so in one step rather than printing an offer it cannot honour. The origin
+      // itself still resolves (the jaws reference X and rotation here), which is the point: the two
+      // refusals are separate questions.
+      const job = defaultEngraveJob({ ...DEFAULT_VISE, stockProud: 0.05 });
+      const texts = origin(job);
+      expect(texts.filter((t) => t.startsWith('Touch '))).toHaveLength(3);
+      const refused = texts.filter((t) => t.includes('cannot be checked with the probe'));
+      expect(refused).toHaveLength(1);
+      expect(refused[0]).toContain('check the blank against it with a rule instead');
+      expect(texts.some((t) => t.startsWith('Check '))).toBe(false);
+    });
   });
 
   // #213 §6 — the side view of the setup. It is present ONLY when there is sacrificial material,
