@@ -22,7 +22,9 @@
 //   * #208 D1's air program — `tests/e2e/fixtures/three-strokes.nc` (#199) with every motion Z
 //     raised 25 mm, so nothing touches. Checked like the V-groove file, and against the placement
 //     the file's own header implies (#395): the raise is what decides whether it stays inside the
-//     machine's Z travel, so the check reports the headroom the blank has to give it.
+//     machine's Z travel, so the check measures the headroom the blank has to give it, writes that
+//     number into the file's own note, and then runs the verifier and the sweep AGAIN at that
+//     placement — a finding that survives it is a defect, and nothing is written.
 //
 // Outputs land in `docs/bench/`. Run from `casemaker-app/`:
 //   npx tsx --tsconfig tsconfig.scripts.json scripts/bench-files.ts
@@ -771,33 +773,85 @@ function raiseMotionZ(text: string, dz: number): string {
     .join('\n');
 }
 
-/**
- * The air file's own note, placed just after `G90 G21` so it sits above every motion and travels
- * WITH the file to the bench. It is a comment: nothing reads it but a person, and the numbers in it
- * are the ones the check below measures — the file the bench plays should say for itself what it
- * needs the blank to give it (#395, decision recorded 2026-10-13).
- */
-const AIR_HEADROOM_NOTE = [
-  '; #208 D1 air tip. Every motion Z below is the #199 fixture\'s, raised 25 mm, so nothing',
-  '; touches. The raise is what this file needs room for:',
-  ';',
-  ';   REQUIRED: the blank\'s top face (work Z0) at machine Z -40 or lower — at least 20 mm below',
-  ';   the -20 tool-change SAFE height. Above that, the topmost move (`G0 Z40`) leaves the Z travel',
-  ';   (the enclosure is -100..0).',
-  ';',
-  ';   MEASURED 2026-10-12: the bench set work Z0 to machine Z -56.544 (`G10 L2 P1 ... Z-56.544`,',
-  ';   `traces/2026-10-12-console.log`; the probe touched at -56.107). `G0 Z40` therefore lands at',
-  ';   ~-16.5 machine, ~16.5 mm inside the travel.',
-];
+/** The ceiling on the headroom search. Past this the raise does not fit any placement (see below). */
+const MAX_HEADROOM = 60;
 
-function withAirNote(text: string): string {
+/**
+ * The air file's own note, GENERATED from the measurement that gates the write (#395 follow-up 4).
+ *
+ * WHY GENERATED. The note states a requirement — how far below the tool-change safe height the
+ * blank's top face has to sit — and it used to state it as literals (`-40`, `20 mm`) sitting a few
+ * lines above a `headroom` the check computed. Two statements of one number, which drift the moment
+ * the raise changes. The requirement is now filled in from the number the verifier measures, so the
+ * file cannot ask the bench for something the app did not verify, and cannot stay quiet about
+ * something it did.
+ *
+ * The MEASURED paragraph is the one part that is NOT generated: it is a citation of a dated bench
+ * trace (`docs/bench/traces/2026-10-12-console.log`), and those numbers are the trace's.
+ */
+function airNote(headroom: number, topMoveZ: number | null): string[] {
+  const safeZ = Z1.toolChange.safeZ;
+  const travel = `(the enclosure is ${fmt(Z1.envelope.z.min)}..${fmt(Z1.envelope.z.max)})`;
+  const required =
+    headroom > 0 && topMoveZ !== null
+      ? [
+          `;   REQUIRED: the blank's top face (work Z0) at machine Z ${fmt(safeZ - headroom)} or lower — at least ${fmt(headroom)} mm below`,
+          `;   the ${fmt(safeZ)} tool-change SAFE height. Above that, the topmost move (\`G0 Z${fmt(topMoveZ)}\`) leaves the Z travel`,
+          `;   ${travel}.`,
+        ]
+      : [
+          `;   REQUIRED: nothing. With the blank's top face at the ${fmt(safeZ)} tool-change SAFE height every move is`,
+          `;   already inside the Z travel ${travel}, so the fixture's own height will do.`,
+        ];
+  return [
+    `; #208 D1 air tip. Every motion Z below is the #199 fixture's, raised ${fmt(AIR_RISE)} mm, so nothing`,
+    '; touches. The raise is what this file needs room for:',
+    ';',
+    ...required,
+    ';',
+    ';   MEASURED 2026-10-12: the bench set work Z0 to machine Z -56.544 (`G10 L2 P1 ... Z-56.544`,',
+    ';   `traces/2026-10-12-console.log`; the probe touched at -56.107). `G0 Z40` therefore lands at',
+    ';   ~-16.5 machine, ~16.5 mm inside the travel.',
+  ];
+}
+
+/** Place `note` just after `G90 G21`, so it sits above every motion and travels WITH the file. */
+function withAirNote(text: string, note: readonly string[]): string {
   return text
     .split('\n')
-    .flatMap((line) => (line.trim() === 'G90 G21' ? [line, ...AIR_HEADROOM_NOTE] : [line]))
+    .flatMap((line) => (line.trim() === 'G90 G21' ? [line, ...note] : [line]))
     .join('\n');
 }
 
-const air = withAirNote(raiseMotionZ(fixture, AIR_RISE));
+const airBase = raiseMotionZ(fixture, AIR_RISE);
+
+/**
+ * The machine point a breach names — `a move to machine (x, y, z) leaves the …'s envelope` — or
+ * null when the line did not resolve one (the runner writes `?` per unknown axis, which parses to
+ * NaN and is reported as unknown here rather than guessed).
+ */
+function breachedPoint(message: string): Vec3 | null {
+  const m = /a move to machine \(([^)]+)\)/.exec(message);
+  if (m === null) return null;
+  const n = (m[1] as string).split(',').map((t) => Number(t.trim()));
+  if (n.length !== 3 || n.some((v) => !Number.isFinite(v))) return null;
+  return [n[0]!, n[1]!, n[2]!];
+}
+
+/**
+ * Whether a breach is one the BLANK can cure by sitting lower: a move above the TOP of Z travel.
+ *
+ * This is the carve-out, and it is now by axis rather than by message prefix (#395 follow-up 2).
+ * `outside-envelope` says nothing about which axis was breached, and the drop the blank gives shifts
+ * machine Z and nothing else — so an X or Y breach, and one below the travel's floor, are never
+ * cured by lowering the blank, and a breach the runner could not resolve is not assumed to be the
+ * curable kind. Under the old prefix rule all four were excused, and a file that breached X was
+ * written after the loop ran out at 65 and printed "REQUIRED >= 65".
+ */
+function isRaiseBreach(message: string): boolean {
+  const p = breachedPoint(message);
+  return p !== null && p[2] > Z1.envelope.z.max;
+}
 
 // #395: CHECKED BEFORE IT IS WRITTEN, like the V-groove file above — this one used to be the only
 // file here that went to `docs/bench/` unread, and it is the file the bench actually plays.
@@ -809,7 +863,7 @@ const air = withAirNote(raiseMotionZ(fixture, AIR_RISE));
 // its own docstring is honest about what that is — a stub, whose top face lands at the profile's
 // tool-change safe height. A real placement comes from probing (decisions 26 and 28).
 {
-  const parsedAir = parseGcode(air);
+  const parsedAir = parseGcode(airBase);
   const airPart = setupFromHeader(parsedAir.header).patch.part;
   const airToolRec = parsedAir.header?.records.find((r) => r.tag === 'TOOL');
   if (!airPart || airPart.kind !== 'prism' || airPart.outline.kind !== 'p-rect' || !airToolRec) {
@@ -824,65 +878,110 @@ const air = withAirNote(raiseMotionZ(fixture, AIR_RISE));
     MARGIN_DEFAULTS.minFloor,
   );
 
-  /** The same file, verified with the blank's top face `drop` mm lower than the stub puts it. */
-  const verifyAir = (drop: number) => {
+  /**
+   * The stub's placement with the blank's top face `drop` mm lower. This is what a bench operator
+   * sets with a probe; the drop moves the WORK origin and the stock's seat together, so the program
+   * reads the same in work coordinates and only its machine Z changes.
+   */
+  const setupAt = (drop: number): Setup => {
     const shift = (v: Vec3): Vec3 => [v[0], v[1], v[2] - drop];
-    const setup: Setup = { ...airSetup, placement: { ...airSetup.placement, origin: shift(airSetup.placement.origin) }, wcs: { ...airSetup.wcs, origin: shift(airSetup.wcs.origin) } };
-    return verifyProgram(air, { setup, machine: Z1, tool: airTool, depthLimit: airLimit, minRapidZ: HOP_Z });
+    return {
+      ...airSetup,
+      placement: { ...airSetup.placement, origin: shift(airSetup.placement.origin) },
+      wcs: { ...airSetup.wcs, origin: shift(airSetup.wcs.origin) },
+    };
   };
+  /** One program text, verified as the bench would have it: the blank `drop` mm lower. */
+  const verifyAt = (text: string, drop: number) =>
+    verifyProgram(text, { setup: setupAt(drop), machine: Z1, tool: airTool, depthLimit: airLimit, minRapidZ: HOP_Z });
 
-  const report = verifyAir(0);
+  // THE HEADROOM, MEASURED (#395 follow-up 2). How far below the tool-change height the blank's top
+  // face has to sit before every move is inside the machine's Z travel — and only that clause: the
+  // raise is what puts it there (the fixture's own `G0 Z15` becomes `G0 Z40`, 20 mm above the top of
+  // travel at the stub placement), so a breach the drop cannot cure must not be excused by it.
+  let headroom = 0;
+  const atRaise = verifyAt(airBase, 0);
+  // The move that decides it, as the PROGRAM names it. The breach is measured in machine
+  // coordinates at the stub placement, whose top face IS the tool-change safe height (`stubSetup`),
+  // so the work Z a reader sees in the file is the machine Z less that height: the topmost move is
+  // `G0 Z40` in the file, and at the stub it lands 20 mm above the top of travel — which is why
+  // exactly 20 mm of drop is required.
+  const topMoveWorkZ = Math.max(
+    Number.NEGATIVE_INFINITY,
+    ...atRaise.findings
+      .filter((f) => f.severity === 'error' && isRaiseBreach(f.message))
+      .map((f) => (breachedPoint(f.message)?.[2] ?? Number.NEGATIVE_INFINITY) - Z1.toolChange.safeZ),
+  );
+  for (; headroom <= MAX_HEADROOM; headroom += 5) {
+    if (!verifyAt(airBase, headroom).findings.some((f) => f.severity === 'error' && isRaiseBreach(f.message))) break;
+  }
+  // RUNNING OUT IS A REFUSAL, not a larger number to print (#395 follow-up 2). Past the ceiling
+  // there is no placement this file fits, so the raise itself is wrong and the file must not be
+  // written — where the old loop left `headroom` at 65, printed "REQUIRED >= 65 mm" and wrote it.
+  if (headroom > MAX_HEADROOM) {
+    throw new Error(
+      `#208 D1 air file: even with the blank's top face ${MAX_HEADROOM} mm below the safe height ${Z1.toolChange.safeZ}, a move is still above the top of Z travel (${Z1.envelope.z.max}) — the raise does not fit the machine, so this is not a placement the bench can set`,
+    );
+  }
+  // The note carries the requirement the loop just measured, and is part of the file from here on —
+  // so everything below verifies the bytes that get written, notes and line numbers included.
+  const air = withAirNote(airBase, airNote(headroom, Number.isFinite(topMoveWorkZ) ? topMoveWorkZ : null));
+
+  const report = verifyAt(air, headroom);
   const errors = report.findings.filter((f) => f.severity === 'error');
   console.log('\n#208 D1 air program (checked before it is written — #395)');
   console.log(`  file      208-D1-three-strokes-air.nc  (${air.length} bytes, ${air.split('\n').length} lines)`);
-  console.log(`  place     wcs ${JSON.stringify(airSetup.wcs.origin)} — the stub fits the header's stock with its top face at the safe Z ${Z1.toolChange.safeZ}`);
+  console.log(`  place     wcs ${JSON.stringify(airSetup.wcs.origin)} — the stub fits the header's stock with its top face at the safe Z ${Z1.toolChange.safeZ}, checked ${headroom} mm below it`);
   console.log(`  verify    ok=${report.ok}, ${errors.length} error, ${report.findings.length - errors.length} warning`);
   for (const f of report.findings) console.log(`     ${f.severity === 'error' ? 'ERR ' : 'warn'} ${f.code}${f.line === null ? '' : ` (line ${f.line})`}: ${f.message}`);
   console.log(`  moves     ${report.stats.cuttingMoves} cutting moves, deepest Z ${fmt(report.stats.deepestZ)} (work)`);
-
-  // THE ONE CLAUSE WHOSE VERDICT IS NOT A PROPERTY OF THE PROGRAM. Every other finding is about the
-  // file itself; `outside-envelope` is about the file AND the placement, and the placement here is
-  // the stub's worst case. So it is measured rather than pronounced: how far below the tool-change
-  // height the blank's top face has to sit before every move is inside the machine's Z travel. The
-  // raise is what puts it there — the fixture's own `G0 Z15` becomes `G0 Z40`, which is 20 mm above
-  // the top of travel at the stub placement.
-  let headroom = 0;
-  for (; headroom <= 60; headroom += 5) {
-    if (!verifyAir(headroom).findings.some((f) => f.severity === 'error' && /^outside-envelope:/.test(f.message))) break;
-  }
   if (headroom > 0) {
     console.log(`  headroom  REQUIRED: the blank's top face (work Z0) at machine Z ${Z1.toolChange.safeZ - headroom} or lower — >= ${headroom} mm below the safe height ${Z1.toolChange.safeZ}, or the raised moves run past the top of Z travel`);
   } else {
     console.log('  headroom  none needed: every move is inside the travel with the stock at the safe height');
   }
 
-  // A defective program is not a placement question, and is never written.
-  const defects = errors.filter((f) => !/^outside-envelope:/.test(f.message));
-  if (defects.length > 0) {
-    throw new Error(`#208 D1 air file FAILED the app's verifier (${defects.length}) — do not hand it to the machine`);
+  // EVERY CLAUSE, AT THE PLACEMENT THE FILE IS WRITTEN FOR (#395 follow-ups 2 and 3). This report
+  // used to be taken at the stub placement with `outside-envelope` carved out by its message prefix,
+  // which excused X, Y and below-travel breaches the drop can never cure, and left the other checks
+  // — depth, holder, fixture, rapid height — judging a placement the bench will not use. There is
+  // nothing to exclude now: at the drop measured above, a finding that survives is a defect in the
+  // file, whatever its code says.
+  if (errors.length > 0) {
+    throw new Error(`#208 D1 air file FAILED the app's verifier at its own placement, ${headroom} mm below the safe height (${errors.length} error) — do not hand it to the machine`);
   }
 
   // The air premise itself, which is what the file is FOR: it must remove nothing, and draw no
-  // gouge. This is independent of where the blank sits.
+  // gouge.
   const session = createSimSession(tl);
-  const sim = session.load(air, airSetup, airTool, Z1.id);
-  const simProblem = sim.ok ? null : simulationProblem(sim.diagnostics);
+  const sim = session.load(air, setupAt(headroom), airTool, Z1.id);
+  const simProblems = simErrors(sim.diagnostics);
   const removed = sim.ok ? sim.stats.removedVolume : Number.NaN;
   const gouges = sim.ok ? sim.meshes.gouges.length : Number.NaN;
-  console.log(`  sim       ok=${sim.ok}, ${simErrors(sim.diagnostics).length} errors, removed ${fmt(removed)} mm³, ${gouges} gouges`);
-  for (const d of simErrors(sim.diagnostics).filter((d) => d.code !== 'outside-envelope')) console.error(`     ERROR ${d.code}: ${d.message}`);
+  console.log(`  sim       ok=${sim.ok}, ${simProblems.length} errors, removed ${fmt(removed)} mm³, ${gouges} gouges`);
+  for (const d of simProblems) console.error(`     ERROR ${d.code}: ${d.message}`);
   session.dispose();
-  if (simProblem !== null) throw new Error(`#208 D1 air file: the sweep refused it — ${simProblem}`);
+  // `sim.ok` IS NOT THE WHOLE VERDICT (#393's pattern, which this file repeated — #395 follow-up
+  // 1). A sweep that reports `ok: true` can still carry an error diagnostic — the sweep driving the
+  // cutter into the fixed jaw is the recorded case — and the old line took `ok` as the answer, so an
+  // air file with a `tool-into-fixture` was printed and written. Nothing is carved out here either:
+  // at the placement above, an error diagnostic is a reason not to write the file.
+  if (!sim.ok || simProblems.length > 0) {
+    const why = sim.ok
+      ? simProblems.map((d) => `${d.code}: ${d.message}`).join('; ')
+      : (simulationProblem(sim.diagnostics) ?? 'the sweep refused it');
+    throw new Error(`#208 D1 air file: the sweep refused it — ${why}`);
+  }
   if (removed !== 0 || gouges !== 0) {
     throw new Error(`#208 D1 air file is not air: it removes ${fmt(removed)} mm³ and draws ${gouges} gouge(s)`);
   }
 
   writeFileSync(join(outDir, '208-D1-three-strokes-air.nc'), air);
+
+  // -------------------------------------------------------------------------------------------
+  // Console receipt
+  // -------------------------------------------------------------------------------------------
+
+  console.log('\n#208 D1 air program — every Z word, as written');
+  for (const line of air.split('\n').filter((l) => /Z/.test(l) && !l.trimStart().startsWith(';'))) console.log(`     ${line}`);
 }
-
-// ---------------------------------------------------------------------------------------------
-// Console receipt
-// ---------------------------------------------------------------------------------------------
-
-console.log('\n#208 D1 air program — every Z word, as written');
-for (const line of air.split('\n').filter((l) => /Z/.test(l) && !l.trimStart().startsWith(';'))) console.log(`     ${line}`);
