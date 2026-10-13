@@ -490,16 +490,27 @@ touching callers.
   every other line, because a piped session has nobody at the machine to watch it. What is LEFT is the
   path the bench proved: upload the verified `.nc` (§5), then `play` it, polling the status (§6) every
   2 s or slower on one connection. Job end is `P` percent 100 and `Idle`, never `Idle` alone. That path
-  is one command — `z1.mjs run <host> <path> --i-am-at-the-machine` — which sends `play` built from a
-  checked card path, polls on that same connection (refusing `--interval` under 2 s), prints a line per
-  poll, and stops on §6's two end conditions. Ctrl-C there sends `abort` — the exact word Studio's own
+  is one command — `z1.mjs run <host> <path> --i-am-at-the-machine` — which polls the status ONCE
+  before it plays and plays only on a reply that reads `Idle` with no alarm (a `play` on a machine
+  already running, or in an alarm, is the one way that command could turn a person's intent into
+  something else; a poll nobody answered is not evidence of either state, so it refuses too). It then
+  sends `play` built from a checked card path, polls on that same connection (refusing `--interval`
+  under 2 s, measuring the interval from one send to the next, the first `?` one interval after
+  `play`), prints a line per poll, and stops on §6's two end conditions. A `play` the controller does
+  not answer is NOT a refused program and does not stop the watching; only a reply containing `Error`
+  does. A job that reports no `P` field for `--no-progress` ms (30 s by default) ends it non-zero,
+  because a controller answering with no job in its status is not something this tool can watch.
+  Ctrl-C there sends `abort` — the exact word Studio's own
   grey Stop sends, recorded at the bench on 2026-10-12 (#303, which is where the wire record belongs
   and is still open) — so a run is not left cutting unwatched: the **spindle stops at
   once**, but the controller drains the queue it already had and only then answers `Aborted playing or
   paused file` (**~18 s** in the 2026-10-12 observation), leaving the head where the queue ended, `Idle`
-  and no alarm. `run` waits 30 s for that reply and then sends `M332`, the one line it sends that the
-  program did not ask for: an aborted program never reached its own vacuum-off (§11.10 of
-  `/Z1-Firmware-Dialect.md`), and the bench's rule is that the switch rests off. It then exits 130. The
+  and no alarm. `run` waits 30 s for that reply — not the 3 s a console line gets — and only then sends
+  `M332`, the one line it sends that the program did not ask for: an aborted program never reached its
+  own vacuum-off (§11.10 of `/Z1-Firmware-Dialect.md`), and the bench's rule is that the switch rests
+  off. That reply is the signal that the queue is drained; if the abort goes unanswered, `M332` waits
+  for a status poll to read `Idle` instead, and is **not sent** when none does — a vacuum line into a
+  controller that is still moving is one more line to answer at the worst moment. It then exits 130. The
   physical stop is still the stop — this is a console word, not the e-stop byte, which stays unwired.
 - The single-byte e-stop byte is **not** wired: an e-stop that travels over the same socket the
   bridge is mid-transfer on is worse than useless. The physical stop is the stop.

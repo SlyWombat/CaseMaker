@@ -18,10 +18,10 @@
  * answer is the same whether it was pasted, typed, or piped (#386 also limits a PIPED session to the
  * status poll — see `consolePipedProblem`).
  *
- * That count is the dispatcher's OWN reading, which the review of 2026-10-12 sharpened twice: a
+ * That count is the dispatcher's OWN reading, which the review of 2026-10-12 sharpened three times: a
  * prefix word (`G53`, and the modal-only `G90`/`G91`/`G20`/`G21`) is part of the command it prefixes
- * rather than a second one, and an `N` line number is stripped first — a numbered line whose command
- * is G/M/T/S does nothing on this machine at all (#385). See `dispatchedCommands`.
+ * rather than a second one, an `N` line number is stripped before the remainder is counted, and a
+ * prefix slice with a word beside it (`G90 X10 …`) is no prefix at all. See `dispatchedCommands`.
  *
  * WHY THE RULES LIVE IN `engine/`. Two callers ask them and must never disagree:
  *
@@ -66,25 +66,24 @@ const BARE_MOTION = 'XYZAF';
 const PREFIX_G = new Set([53, 90, 91, 20, 21]);
 
 /**
- * The line's body after an `N` line number, or `null` when a number means the whole line does
- * NOTHING (#386 review item 3, `interpreter.ts` `n-line-ignored`, #385).
+ * The line's body without an `N` line number, or `''` when nothing follows the number.
  *
  * The firmware strips the number and keeps testing the ORIGINAL first character, `N`, which matches
- * none of its G/M/T/S branches — `N10 M5` answered `ok - ignore: [M5]` on the bench on 2026-10-12
- * and the spindle stayed on. Only a remainder that begins with a BARE AXIS survives, and it survives
- * by being re-dispatched with the modal motion prefixed, so that is what is counted here:
- * `N10 X0 G1 X10` is TWO commands and `N10 M5` is none.
+ * none of its G/M/T/S branches — `N10 M5` answered `ok - ignore: [M5]` on the bench on 2026-10-12 and
+ * the spindle stayed on. Only a remainder that begins with a BARE AXIS survives, and it survives by
+ * being re-dispatched with the modal motion prefixed.
  *
- * `splitCommands` falls through on a leading `N` and reports the whole line as one slice, which is
- * how a numbered two-command line passed the gate before this.
+ * That is a ONE-WORD observation, and it is not a licence to pass a longer remainder: this strips the
+ * number so the REMAINDER is counted like any other line's text, and `dispatchedCommands` refuses what
+ * it reads as more than one command (#386 review: `N10 G0 X10 G1 Y20` used to count zero and pass).
+ * `splitCommands` falls through on a leading `N` and reports the whole line as one slice, which is how
+ * a numbered two-command line passed the gate before any of this.
  */
-function afterLineNumber(text: string): string | null {
+function afterLineNumber(text: string): string {
   if (text[0] !== 'N') return text;
   let i = 0;
   while (i < text.length && 'N0123456789.,- '.includes(text[i] as string)) i++;
-  const rest = text.slice(i);
-  if (rest === '') return '';
-  return BARE_MOTION.includes(rest[0] as string) ? rest : null;
+  return text.slice(i);
 }
 
 /**
@@ -98,27 +97,32 @@ function afterLineNumber(text: string): string | null {
  * Three things are then added, all from the interpreter's own dispatch loop, because a slice is not
  * always a dispatch:
  *
- *   - an `N`-numbered line is read first (`afterLineNumber`): a number whose command is G/M/T/S
- *     makes the line do nothing at all, and a bare-axis remainder is counted without its number;
+ *   - an `N` line number is stripped first (`afterLineNumber`), and the remainder is counted like any
+ *     other text;
  *   - a bare `X…`/`F…` line is dispatched with the modal motion prefixed, so it is split that way;
- *   - a slice carrying ONLY prefix G words (`PREFIX_G`) is that next command's prefix, not a
- *     command: `G53 G0 X-50 Y-50`, `G91 G38.2 Z-8 F300` and `G21 G90` are each ONE command. A
- *     prefix slice with nothing after it is the whole line (`G91` alone is legitimate) and counts.
+ *   - a slice carrying NOTHING BUT prefix G words (`PREFIX_G`) is that next command's prefix, not a
+ *     command: `G53 G0 X-50 Y-50`, `G91 G38.2 Z-8 F300` and `G21 G90` are each ONE command. A prefix
+ *     slice with nothing after it is the whole line (`G91` alone is legitimate) and counts.
+ *
+ * That last test reads EVERY word of the slice, not its G/M codes (#386 review): `G90 X10 G0 Y20` is a
+ * modal set carrying an axis word and then a move, and reading only `G90` called the first slice a
+ * prefix — one command for what the interpreter would dispatch twice. A prefix carries no value of its
+ * own, so a word beside it means the slice is more than a prefix.
  *
  * `text` is the line as `classifyLine` returns it for a code line: leading blanks already removed.
  */
 function dispatchedCommands(text: string): number {
   const body = afterLineNumber(text);
-  if (body === null || body === '') return 0;
+  if (body === '') return 0;
   const prefixed = BARE_MOTION.includes(body[0] as string) ? `G0 ${body}` : body;
   const commands = splitCommands(prefixed);
   let dispatches = 0;
   for (let i = 0; i < commands.length; i++) {
     const slice = commands[i] as string;
-    const codes = parseWords(slice, 0, []).filter((w) => w.letter === 'G' || w.letter === 'M');
+    const words = parseWords(slice, 0, []);
     const isPrefix =
-      codes.length > 0 &&
-      codes.every((w) => w.letter === 'G' && PREFIX_G.has(codeParts(w.text).code));
+      words.length > 0 &&
+      words.every((w) => w.letter === 'G' && PREFIX_G.has(codeParts(w.text).code));
     if (isPrefix && i + 1 < commands.length) continue;
     dispatches++;
   }

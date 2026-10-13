@@ -807,11 +807,14 @@ describe('#302 console — the guards', () => {
     // sends: no-space words, a second word that is not a command letter, `G53`'s move, and the
     // modal-only G words, which are that move's PREFIX and not a command of their own (#386 review:
     // `G91 G38.2 Z-8 F300` is the probe line the bench sends, and three lines like it were refused
-    // as two commands before this).
+    // as two commands before this). The list is the bench's own vocabulary — every line the sheets
+    // and the runbook print, plus the two the harness sends — so a rule that stopped passing one of
+    // them would fail here rather than at the machine.
     for (const line of [
       'G1X10Y20',
       'G1 X10 Y20 F500',
       'M3 S12000',
+      'M5',
       'T1 M6',
       'G28',
       'G53 G0 X-50 Y-50',
@@ -819,10 +822,17 @@ describe('#302 console — the guards', () => {
       'G21 G90',
       'G90 G0 X0 Y0',
       'G91 G38.2 Z-8 F300',
+      'G91 G38.2 Z-2 F100',
       'G91 G0 Z1',
       'G91 G0 X10',
       'G91',
+      'G10 L2 P1 X0 Y0 Z0',
+      'M331',
+      'M332',
       'M491',
+      'M499',
+      '$X',
+      'abort',
       '?',
     ]) {
       expect(consoleProblem(line), line).toBeNull();
@@ -831,6 +841,11 @@ describe('#302 console — the guards', () => {
     // AND a second move.
     expect(consoleProblem('G90 G0 X10 G1 Y20')).not.toBeNull();
     expect(consoleProblem('G91 G0 X10 M3')).toContain('2 commands');
+    // And a "prefix" carrying a word of its own is no prefix — `G90 X10` is the modal set beside a
+    // move whatever the firmware makes of the pair, so a line that continues after it is counted as
+    // two (#386 review). The lone case stays what `G53 X-50 Y-50` is: ONE slice, and one command.
+    expect(consoleProblem('G90 X10 G0 Y20')).toContain('2 commands');
+    expect(consoleProblem('G90 X10')).toBeNull();
     // A bare `X…` line is dispatched with the modal motion prefixed, so it counts the words after it.
     expect(consoleProblem('X10 Y10')).toBeNull();
     expect(consoleProblem('X10 Y10 M3')).not.toBeNull();
@@ -840,13 +855,16 @@ describe('#302 console — the guards', () => {
   });
 
   it('strips an N line number before counting (#386 review)', () => {
-    // The reading is `interpreter.ts`'s own, and it is hardware-confirmed (#385, 2026-10-12): the
-    // firmware strips the number but keeps testing the ORIGINAL first character, so a numbered line
-    // whose command is G/M/T/S runs NOTHING — `N10 M5` answered `ok - ignore: [M5]` and the spindle
-    // stayed on. Nothing to stream, so nothing to refuse.
+    // The number goes, and the REMAINDER is counted like any other text. The firmware itself runs a
+    // numbered line whose command letter is G/M/T/S as nothing — it keeps testing the original `N`, and
+    // `N10 M5` answered `ok - ignore: [M5]` on the bench on 2026-10-12 with the spindle still on — but
+    // that is a ONE-WORD observation, and this count is a guard rather than a description.
     expect(consoleProblem('N10 M5')).toBeNull();
     expect(consoleProblem('N10 G1 X5')).toBeNull();
-    expect(consoleProblem('N10 G0 X10 G1 Y20')).toBeNull();
+    // So a numbered line whose remainder reads as two commands is refused like any other: passing it
+    // would rest on our reading of the firmware's ignore branch, tried with a single word (#386 review
+    // — this line used to count zero and pass).
+    expect(consoleProblem('N10 G0 X10 G1 Y20')).toContain('2 commands');
     // A bare-axis remainder DOES survive, by being re-dispatched with the modal motion prefixed — so
     // `N10 X0 G1 X10` is two commands, and it passed the gate before this because `splitCommands`
     // falls through on a leading `N` and called the whole line one slice.

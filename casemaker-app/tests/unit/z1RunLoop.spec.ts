@@ -13,7 +13,12 @@
 //
 // Not covered here: Ctrl-C. On Windows `child.kill('SIGINT')` terminates the process outright instead
 // of delivering the signal (Node maps it to `TerminateProcess`), so the abort path cannot be driven
-// from a test — at the bench it is a real keypress and a real trace line.
+// from a test — at the bench it is a real keypress and a real trace line, and the two things the
+// #386 review changed there (a 30 s reply window, and `M332` only after the queue is drained) are
+// reasoned from the 2026-10-12 observation rather than exercised here.
+//
+// The rest of that review IS exercised: the pre-play `Idle` gate, a `play` the controller never
+// answers, a `play` it answers with an error, and the bound on a job that reports no `P` at all.
 
 import { describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
@@ -43,26 +48,44 @@ const MID_JOB_IDLE = '<Idle|MPos:-98.4000,-102.8000,-9.6109|L:0, 0, 0, 0.0,100.0
 const END = '<Idle|MPos:-11.6000,-14.6000,-3.0000|L:0, 0, 0, 0.0,100.0|P:34,100,51|C:3,1,0,1|OTA:0,0>';
 /** Every reply after the end: the `P:` field is gone. */
 const AFTER = '<Idle|MPos:-11.6000,-14.6000,-3.0000|L:0, 0, 0, 0.0,100.0|C:3,1,0,1|OTA:0,0>';
+/** The state word the machine reports when it wants a person: `run` must not play into it. */
+const ALARMED = '<Alarm|MPos:-11.6000,-14.6000,-3.0000|L:0, 0, 0, 0.0,100.0|C:3,1,0,1|OTA:0,0>';
 
-/** A fake controller: `play` is answered, each `?` takes the next status line (silence past the end). */
-async function fakeController(status: string[]) {
+/**
+ * A fake controller. Each `?` takes the next status line (silence past the end of the list), and a
+ * command line (`play …`) is answered with the file size.
+ *
+ * `before` is the queue for the PRE-PLAY status poll — the one sent before `play` — and it defaults to
+ * the idle-no-`P` line the machine reports when nothing has run, because `run` refuses to play
+ * anything whose status does not read `Idle`. The two queues are separate on purpose: `before: []`
+ * means "the pre-play poll went unanswered", not "the job's first status reply is missing".
+ */
+async function fakeController(
+  status: string[],
+  opts: { before?: string[]; playReply?: string | null } = {},
+) {
   const seen: string[] = [];
   const sockets = new Set<Socket>();
   const server: Server = createServer((socket) => {
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
     const decoder = new FrameDecoder();
+    let before = 0;
     let polls = 0;
+    let played = false;
     socket.on('data', (chunk) => {
       for (const frame of decoder.push(new Uint8Array(chunk))) {
         if (frame.type === PTYPE_CTRL_SINGLE) {
           seen.push('?');
-          const next = status[polls++];
+          const queue = played ? status : (opts.before ?? [AFTER]);
+          const next = queue[played ? polls++ : before++];
           if (next !== undefined) socket.write(Buffer.from(reply(next)));
         } else if (frame.type === PTYPE_CTRL_MULTI) {
           const line = decodeText(frame.data).trim();
           seen.push(line);
-          socket.write(Buffer.from(reply('File size 791\r\n')));
+          played = true;
+          const said = opts.playReply === undefined ? 'File size 791\r\n' : opts.playReply;
+          if (said !== null) socket.write(Buffer.from(reply(said)));
         }
       }
     });
@@ -113,9 +136,11 @@ describe('#386 run — the harness poll loop (against a fake controller)', () =>
       try {
         const { code, stdout, stderr } = await runHarness(controller.port, ['--json']);
         expect(code).toBe(0);
-        // The program line is BUILT from the path, and it is the FIRST thing sent.
-        expect(controller.seen[0]).toBe('play /sd/gcodes/fake.nc');
-        expect(controller.seen).toEqual(['play /sd/gcodes/fake.nc', '?', '?']);
+        // The pre-play status poll comes FIRST, then the program line, and the program line is BUILT
+        // from the path rather than passed through.
+        expect(controller.seen[0]).toBe('?');
+        expect(controller.seen[1]).toBe('play /sd/gcodes/fake.nc');
+        expect(controller.seen).toEqual(['?', 'play /sd/gcodes/fake.nc', '?', '?']);
         expect(JSON.parse(stdout)).toMatchObject({
           path: '/sd/gcodes/fake.nc',
           outcome: 'finished',
@@ -145,10 +170,12 @@ describe('#386 run — the harness poll loop (against a fake controller)', () =>
       try {
         const { code, stdout, stderr } = await runHarness(controller.port, ['--json']);
         expect(code).toBe(0);
-        expect(controller.seen).toEqual(['play /sd/gcodes/fake.nc', '?', '?', '?']);
+        expect(controller.seen).toEqual(['?', 'play /sd/gcodes/fake.nc', '?', '?', '?']);
         const out = JSON.parse(stdout) as { outcome: string; polls: number; percent: number | null };
         expect(out).toMatchObject({ outcome: 'finished', polls: 3, percent: null });
-        // The mid-job Idle was displayed, not acted on: three polls came after it.
+        // The mid-job Idle was displayed, not acted on: ONE more poll came after it (the review
+        // corrected this comment's earlier "three"), and that poll ended the run because the `P` field
+        // was gone — which is the only way this run can end when it misses the 100 % reply.
         expect(stderr).toContain('74%');
         expect(stderr).not.toContain('100%');
       } finally {
@@ -165,7 +192,9 @@ describe('#386 run — the harness poll loop (against a fake controller)', () =>
       try {
         const { code, stderr, trace } = await runHarness(controller.port, ['--first-reply', '200']);
         expect(code).toBe(1);
-        expect(controller.seen.filter((l) => l === '?')).toHaveLength(3);
+        // The pre-play poll is answered (the default idle line), so the run starts; every poll AFTER
+        // `play` goes unanswered.
+        expect(controller.seen).toEqual(['?', 'play /sd/gcodes/fake.nc', '?', '?', '?']);
         expect(stderr).toContain('no status reply');
         expect(stderr).toContain('the physical stop is the stop');
         // The trace records both sides even when the machine says nothing back.
@@ -176,5 +205,92 @@ describe('#386 run — the harness poll loop (against a fake controller)', () =>
       }
     },
     45_000,
+  );
+
+  it(
+    'refuses to play unless the status reads Idle: a running job, an alarm, or a poll nobody answered',
+    async () => {
+      // `play` on a machine that is already running — or in an alarm — is the one way this command
+      // could turn a person's intent into something else, and the status poll is the only evidence
+      // this tool has. An unanswered poll is not evidence (#386 review).
+      const cases = [
+        { why: 'a job is already running', before: [RUNNING], said: 'not `Idle`' },
+        { why: 'the controller is alarming', before: [ALARMED], said: 'ALARM' },
+        { why: 'the poll went unanswered', before: [], said: 'did not answer a status poll' },
+      ];
+      for (const { why, before, said } of cases) {
+        const controller = await fakeController([RUNNING, END], { before });
+        try {
+          const { code, stdout, stderr } = await runHarness(controller.port, ['--json', '--first-reply', '250']);
+          expect(stderr, why).toContain(said);
+          expect(stderr, why).toContain('Nothing was played');
+          expect(controller.seen, why).toEqual(['?']);
+          // No summary at all: there is no job to summarize.
+          expect(stdout, why).toBe('');
+          expect(code, why).toBe(1);
+        } finally {
+          await controller.close();
+        }
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'stops without polling when the controller answers `play` with an error',
+    async () => {
+      const controller = await fakeController([RUNNING, END], { playReply: 'Error: no such file\r\n' });
+      try {
+        const { code, stderr } = await runHarness(controller.port, ['--json']);
+        expect(code).toBe(1);
+        expect(controller.seen).toEqual(['?', 'play /sd/gcodes/fake.nc']);
+        expect(stderr).toContain('did not accept that program');
+      } finally {
+        await controller.close();
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'watches anyway when `play` is not answered — only an error reply stops the run',
+    async () => {
+      // The controller may still be opening the file, and its reply can arrive later than a console
+      // line's window. A silent `play` is not a refused one (#386 review), so the poll starts and the
+      // job is watched to its end.
+      const controller = await fakeController([RUNNING, END], { playReply: null });
+      try {
+        const { code, stdout, stderr } = await runHarness(controller.port, ['--json', '--first-reply', '250']);
+        expect(code).toBe(0);
+        expect(controller.seen).toEqual(['?', 'play /sd/gcodes/fake.nc', '?', '?']);
+        expect(stderr).toContain('was not answered');
+        expect(stderr).toContain('started anyway');
+        expect(JSON.parse(stdout)).toMatchObject({ outcome: 'finished', percent: 100 });
+      } finally {
+        await controller.close();
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'stops polling, non-zero, when a job never reports a P field',
+    async () => {
+      // A `?` that keeps answering with no `P` is a controller that is up and a job this tool cannot
+      // see either way. The old loop polled it forever (#386 review); the bound is `--no-progress`.
+      const controller = await fakeController([AFTER, AFTER, AFTER, AFTER]);
+      try {
+        const { code, stdout, stderr } = await runHarness(controller.port, ['--json', '--no-progress', '400']);
+        expect(code).toBe(1);
+        expect(JSON.parse(stdout)).toMatchObject({ outcome: 'never-started' });
+        expect(stderr).toContain('no `P` progress field');
+        expect(stderr).toContain('nothing was stopped from here');
+        // It did not keep polling: the pre-play poll, `play`, and one poll that found nothing.
+        expect(controller.seen).toEqual(['?', 'play /sd/gcodes/fake.nc', '?']);
+      } finally {
+        await controller.close();
+      }
+    },
+    30_000,
   );
 });
