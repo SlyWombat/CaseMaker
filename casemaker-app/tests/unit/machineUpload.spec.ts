@@ -40,6 +40,16 @@ const LYING_REPORT: VerifyReport = {
 
 const BAD_REPORT: VerifyReport = { ...OK_REPORT, ok: false, findings: LYING_REPORT.findings };
 
+// Verbatim replies from `docs/bench/traces/2026-10-12-poll.log` — the same three the desktop spec
+// reads the finish rule off, plus the Alarm line and the garbage a bench socket can return. At
+// module scope because two blocks below need the same bytes: the parser's table (#390) and the
+// upload gate that must act on what it parses.
+const RUN = '<Run|MPos:-11.6000,-14.6000,-3.0000|WPos:136.8000,110.2000,61.6109|S:7128.4,12000.0|T:1,0.507,1|P:0,56,4|OTA:0,0>';
+const MID_JOB_IDLE = '<Idle|MPos:-98.4000,-102.8000,-9.6109|WPos:50.0000,22.0000,55.0000|S:11988.6,12000.0|T:1,0.507,1|P:29,74,42|OTA:0,0>';
+const END = '<Idle|MPos:-11.6000,-14.6000,-3.0000|WPos:136.8000,110.2000,61.6109|S:0.0,12000.0|P:34,100,51|OTA:0,0>';
+const AFTER = '<Idle|MPos:-11.6000,-14.6000,-3.0000|WPos:136.8000,110.2000,61.6109|S:0.0,12000.0|OTA:0,0>';
+const ALARM = '<Alarm|MPos:-9.890,-12.830,-85.788|H:10|S:0.0|T:1,-9.752,1>';
+
 /** A transport that answers exactly as scripted. */
 function fakeClient(over: Partial<MachineUploadClient> = {}): MachineUploadClient {
   return {
@@ -268,6 +278,37 @@ describe('#296 uploadProgram — the machine is asked NOW, not remembered', () =
     expect((await run()).kind).toBe('uploaded');
   });
 
+  // #390. The state word is not the whole question, and these two lines are the bench's own bytes.
+  // `MID_JOB_IDLE` is the ~4 s `M05` spin-down: the controller calls it Idle while the program it
+  // has not finished still owns the machine, and `P:` is the only field that says so. Writing to the
+  // card there is the one thing this check is for, so a gate that stops at the state word is open
+  // in exactly the window it was built to close.
+  it('refuses a mid-job Idle — the state word alone cannot see the spin-down (#390)', async () => {
+    let uploads = 0;
+    use(
+      fakeClient({
+        status: async () => ({ ok: true, text: MID_JOB_IDLE }),
+        upload: async () => {
+          uploads += 1;
+          return { ok: true, bytes: 3, packets: 1, alreadyPresent: false };
+        },
+      }),
+    );
+    const result = await run();
+    expect(result.kind).toBe('busy');
+    if (result.kind !== 'busy') return;
+    expect(result.detail).toContain('74%');
+    expect(result.status).toBe(MID_JOB_IDLE);
+    expect(uploads).toBe(0);
+  });
+
+  it('uploads at 100 % — the end of a job is Idle with the program finished (#390)', async () => {
+    // The other half of the same rule: the fix must not make every job-end line look busy, which is
+    // what a gate that refused any `P:` field would do.
+    use(fakeClient({ status: async () => ({ ok: true, text: END }) }));
+    expect((await run()).kind).toBe('uploaded');
+  });
+
   it('reads the state word out of a real status line', () => {
     expect(controllerState('<Idle|MPos:-1.0000,-1.0000,-1.0000|WPos:147.4,123.8,57.6>')).toBe('Idle');
     expect(controllerState('<Run>')).toBe('Run');
@@ -277,14 +318,6 @@ describe('#296 uploadProgram — the machine is asked NOW, not remembered', () =
 });
 
 describe('#390 jobProgressPercent — the web-safe restatement of readJobProgress’s percent', () => {
-  // Verbatim replies from `docs/bench/traces/2026-10-12-poll.log` — the same three the desktop spec
-  // reads the finish rule off, plus the Alarm line and the garbage a bench socket can return.
-  const RUN = '<Run|MPos:-11.6000,-14.6000,-3.0000|WPos:136.8000,110.2000,61.6109|S:7128.4,12000.0|T:1,0.507,1|P:0,56,4|OTA:0,0>';
-  const MID_JOB_IDLE = '<Idle|MPos:-98.4000,-102.8000,-9.6109|WPos:50.0000,22.0000,55.0000|S:11988.6,12000.0|T:1,0.507,1|P:29,74,42|OTA:0,0>';
-  const END = '<Idle|MPos:-11.6000,-14.6000,-3.0000|WPos:136.8000,110.2000,61.6109|S:0.0,12000.0|P:34,100,51|OTA:0,0>';
-  const AFTER = '<Idle|MPos:-11.6000,-14.6000,-3.0000|WPos:136.8000,110.2000,61.6109|S:0.0,12000.0|OTA:0,0>';
-  const ALARM = '<Alarm|MPos:-9.890,-12.830,-85.788|H:10|S:0.0|T:1,-9.752,1>';
-
   it('reads the percent while a program runs, 100 at its end, and null once the field is gone', () => {
     expect(jobProgressPercent(RUN)).toBe(56);
     expect(jobProgressPercent(MID_JOB_IDLE)).toBe(74);

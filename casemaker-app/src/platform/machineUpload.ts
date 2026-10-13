@@ -226,6 +226,23 @@ export async function uploadProgram(
     return { kind: 'busy', filename, detail: `it reports ${state} rather than Idle, so nothing was sent`, status: reading.text };
   }
 
+  // IDLE IS NOT ENOUGH, and this is the window the state word hides (#390). The Z1 reads `Idle`
+  // MID-JOB — for the ~4 s spin-down at `M05`, before the head goes home — so a line like
+  // `<Idle|…|S:11988.6…|P:29,74,42>` passes the test above while a program still owns the machine
+  // (`Z1-Bridge-Protocol.md` §6, traces `docs/bench/traces/2026-10-12-poll*.log`). `P:` is present
+  // only while a program is running, so a percent below 100 means one is, whatever the state word
+  // says. Writing to `/sd/gcodes/` in that window is the very thing this check exists to avoid, so
+  // the state word cannot be the whole gate.
+  const percent = jobProgressPercent(reading.text);
+  if (percent !== null && percent < 100) {
+    return {
+      kind: 'busy',
+      filename,
+      detail: `it reports Idle, but its status line says a program is ${percent}% through — writing to the card now could disturb it, so nothing was sent`,
+      status: reading.text,
+    };
+  }
+
   let attempt: UploadAttempt;
   try {
     attempt = await client.upload(target, { filename, content, report: program.verify });
