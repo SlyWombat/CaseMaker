@@ -119,7 +119,9 @@ async function runHarness(
   child.stdout.on('data', (d: string) => (stdout += d));
   child.stderr.on('data', (d: string) => (stderr += d));
   const code = await new Promise<number | null>((resolve) => child.on('exit', resolve));
-  let written = '';
+  // No initial value: both arms assign, and a `= ''` here is dead — the catch already covers the
+  // file the run never wrote.
+  let written: string;
   try {
     written = readFileSync(trace, 'utf8');
   } catch {
