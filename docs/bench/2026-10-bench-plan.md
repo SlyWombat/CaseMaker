@@ -37,7 +37,8 @@ possible. **Nothing here is scheduled; the maintainer calls each session.**
   | Fresh blank 2 | a coupon, then turn the blank end for end and cut a second | The coupon cell and the magnet pocket are symmetric about the blank's centre, so turned 180° the same file cuts the other end. Re-check the position (#391) after turning. |
   | Fresh blank 3 | the fourth coupon | spare end for a re-cut |
 
-  Three fresh blanks, plus today's. The V-bit's Z0 is probed at the middle of the groove band: the 0.33 mm dome is larger than
+  Three fresh blanks, plus today's. The V-bit's Z0 is probed at the middle of the groove band
+  (work X ≈ 7, Y ≈ 9, between the second and third grooves): the 0.33 mm dome is larger than
   the 0.2 mm steps between groove depths.
 - **How to run a file** (from Windows, `casemaker-app/`): `z1.mjs send <host> 'M331'`, then
   `z1.mjs run <host> /sd/gcodes/<file>.nc --i-am-at-the-machine --first-reply 10000 --trace <log>`,
@@ -182,14 +183,19 @@ the wizard's Auto Z and leveling can overwrite a console Z0 (D1's `G10 L20` move
 5. **#284 restart proof:** stop one coupon mid-cut, `generateRestart`, compare the floor across
    the seam.
 6. Last: swap to the 30° V-bit, `M491`, cut the **#185** grooves on the ladder blank:
-   `185-v-groove.nc`, four 10 mm grooves along +Y in the FRONT clear band (Y 4..14, in front of the
-   magnet pocket), X 6 / 14 / 22 / 30 at 0.6 / 0.8 / 1.0 / 1.2 mm deep, shallowest first. Caliper
+   `185-v-groove.nc`, four 10 mm grooves along +Y (Y 4..14, in front of the magnet pocket's 15.6
+   front edge) in the free section **left of row A** — the fixed-jaw side, work X 2.5 / 5.5 / 8.5 /
+   11.5 at 0.6 / 0.8 / 1.0 / 1.2 mm deep, shallowest first. Caliper
    each groove's **top opening** — not its floor: a 0.3 mm flat tip leaves a 0.3 mm floor at every
    depth, so the floor reads the tip however deep the groove is — and compare with
    `w(d) = 0.3 + 2·d·tan 15°` = 0.622 / 0.729 / 0.836 / 0.943 mm;
    the 0.8 mm groove is the 0.81 mm reveal depth, #185's own reading. **Confirm the groove placement
-   first:** the brief says "the same X/Y band as Row B", which Row B occupies; the front clear band
-   is free — and at X ≥ 6 the grooves clear the unmeasured jaws' 2 mm band.
+   first:** the brief originally said "the same X/Y band as Row B", and a groove at X 30 *is* in Row
+   B's band (squares X 28.55..33.55), which this blank has already been cut in — hence the maintainer's
+   move left (2026-10-12). The strip is full 3.81 mm thickness, its left bound is the unmeasured jaws'
+   2 mm band at work X 2 (so X 2.5 is 0.19 mm clear and safe only because the jaws' tops are 1.2 mm
+   below the top face, too deep for a 0.6 mm groove to reach), and its right bound is the magnet
+   pocket's wall at X 12.55 (X 11.5 leaves 0.58 mm for the widest opening).
 
 Consumables: the ladder blank, +1 for the stroke test, 1–3 coupon blanks; the flat and the V-bit.
 Unblocks: the #165 verdict, the #166 §7.2 table, #209, the Z-chain error, the G32 answer, the PLA

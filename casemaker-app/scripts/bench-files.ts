@@ -458,8 +458,9 @@ type CouponSpecFile = Omit<CouponSpec, 'base'> & { basePath: string; note: strin
  * as-clamped badge blank and the fitted cutter rather than chosen:
  *
  *  - `origin` is the REAR clear band (Y 60.6..76.2), which is empty on this part: the cell sits on
- *    solid material, so a membrane (row A) cannot confound a feed reading, and the front band stays
- *    free for #185's V-grooves.
+ *    solid material, so a membrane (row A) cannot confound a feed reading, and it is clear of both
+ *    cut rows and of #185's V-groove strip (which is left of row A in the FRONT band, X 2.5..11.5 ×
+ *    Y 4..14 — the two share this blank, so neither may sit where the other cuts).
  *  - `text.size` 11.0 mm in Barlow BOLD is the largest cap height whose cell the APP accepts on this
  *    blank. The binding limit is NOT `edgeMargin`: it is the vise. The fixed jaw's face is at work
  *    X 0 and the moving jaw's at X 38.1, and the collision check grows each by the 2 mm PROVISIONAL
@@ -554,20 +555,35 @@ const V_BIT_KEY = 'inv:kz-engrave-30-0-3';
  */
 const vOpeningWidth = (depth: number): number => V_TIP + 2 * depth * Math.tan((V_HALF_ANGLE_DEG * Math.PI) / 180);
 
-// The FRONT clear band (Y < 15.6, the magnet pocket's front edge), 10 mm long, 1.6 mm clear of the
-// pocket: the plan's own placement decision (S3 step 6 — 185's brief says "the same X/Y band as Row
-// B", which Row B occupies). Four X positions, 8 mm apart, each ≥ 6 mm off a jaw face; they run
-// SHALLOWEST FIRST so the file's own order says which groove is which.
+// The free section LEFT OF ROW A, on the fixed-jaw side — the maintainer's placement (2026-10-12,
+// bench plan S3 step 6, #185): "about X 2–11.5 in the job frame, full thickness, clear of the
+// magnet pocket". The brief's original "the same X/Y band as Row B" had put them at X 6..30, where
+// the X 30 groove sits in Row B's own band (squares X 28.55..33.55) — which the first bench session
+// cut into this blank. The strip left of Row A is untouched.
+//
+// Still along +Y and still 10 mm long (Y 4, in front of the magnet pocket's 15.6 front edge), four
+// grooves 3 mm apart across that window, SHALLOWEST FIRST so the file's own order says which groove
+// is which. Both bounds are properties of the blank and the vise, not taste:
+//
+//   * LEFT. The fixed jaw's face is declared at work X 0 and the UNMEASURED vise grows each jaw box
+//     by its own 2 mm band (#208, `uncertaintyFor('default')`), so the free section begins at X 2.
+//     At X 2.5 the 0.6 mm groove's cone — tip half-width 0.15 mm + d·tan 15° = 0.31 mm — leaves
+//     0.19 mm to that edge. It may sit this close only because the jaws' TOPS stand 1.2 mm BELOW
+//     the stock's top face (`stockProud`): a 0.6 mm groove never reaches the Z at which a jaw
+//     exists. The deepest groove is the furthest from the jaw, so nothing here is near it.
+//   * RIGHT. The magnet pocket's left wall is at work X 12.55 (the 13 mm pocket dimension, centred).
+//     X 11.5 leaves 0.58 mm between the widest top opening (0.943 mm, the 1.2 mm groove) and that
+//     wall. The whole strip is full 3.81 mm thickness — no membrane under any of it.
 const V_Y0 = 4;
 const V_Y1 = 14;
 const V_FEED = 500;
 const V_PLUNGE = 200;
 const V_RPM = 12000;
 const V_GROOVES = [
-  { x: 6, depth: 0.6 },
-  { x: 14, depth: 0.8 },
-  { x: 22, depth: 1.0 },
-  { x: 30, depth: 1.2 },
+  { x: 2.5, depth: 0.6 },
+  { x: 5.5, depth: 0.8 },
+  { x: 8.5, depth: 1.0 },
+  { x: 11.5, depth: 1.2 },
 ] as const;
 
 /** The job that supplies the verifier's context — stock, vise, frame. It generates nothing. */
@@ -587,7 +603,8 @@ function vGrooveSeconds(): number {
   const xy = Z1.rapidEstimate.xyMmPerMin;
   const z = Z1.rapidEstimate.zMmPerMin;
   let seconds = 0;
-  let prevX = V_GROOVES[0].x; // the opening rapid lands on the first groove's start
+  // `number`, not the literal the `as const` tuple's first entry carries: the loop reassigns it.
+  let prevX: number = V_GROOVES[0].x; // the opening rapid lands on the first groove's start
   for (const g of V_GROOVES) {
     const xyTravel = Math.hypot(g.x - prevX, V_Y1 - V_Y0); // from the last groove's END point
     if (g !== V_GROOVES[0]) seconds += (xyTravel / xy) * 60;
@@ -639,9 +656,14 @@ function vGrooveNc(): string {
     '; non-flat tool), so no engrave job can generate a program for one. It was checked by the',
     '; app\'s own verifier (verifyProgram) before being written, the same gate the upload path uses.',
     ';',
-    '; Cut it on the LADDER blank, FRONT clear band (Y 4..14, in front of the magnet pocket at',
-    '; Y 15.6), after #165\'s ladder and #176\'s stroke, with the 30 V-bit in T1 (M491, plan S3',
-    '; step 6). Four grooves, 10 mm long along +Y, at #165\'s first four depths, shallowest first.',
+    '; Cut it on the LADDER blank in the free section LEFT OF ROW A (the fixed-jaw side), after',
+    '; #165\'s ladder and #176\'s stroke, with the 30 V-bit in T1 (M491, plan S3 step 6). Four',
+    '; grooves, 10 mm long along +Y (Y 4..14, in front of the magnet pocket\'s 15.6 front edge), at',
+    '; #165\'s first four depths, shallowest first.',
+    ';',
+    '; The section is full 3.81 mm thickness — the magnet pocket\'s left wall is at X 12.55 — and the',
+    '; grooves are 3 mm apart across it. X 2.5 and X 11.5 are the section\'s own bounds, not taste:',
+    '; the unmeasured jaws\' 2 mm band starts at X 2, and the pocket wall ends the strip at 11.5.',
     ';',
     '; CALIPER the TOP OPENING width of each groove (across the top, not the floor) and compare it',
     '; with',
