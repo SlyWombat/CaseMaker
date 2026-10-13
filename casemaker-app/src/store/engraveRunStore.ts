@@ -23,6 +23,7 @@ import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle'
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { SimStatus } from './simStore';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { simErrors } from '@/engine/cnc/simGate';
 import { feedCatalogueRows } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -118,12 +119,19 @@ export function requiredAckCodes(v: EngraveRunView): string[] {
   return [...codes].filter((c) => ACKNOWLEDGE_CODES.has(c));
 }
 
-/** Count errors across the findings, the verifier and the sweep (#206's "zero errors"). */
+/**
+ * Count errors across the findings, the verifier and the sweep (#206's "zero errors").
+ *
+ * The sweep's slice goes through `simErrors` (`engine/cnc/simGate.ts`) rather than filtering
+ * `severity` here, so that the app and the scripts that produce files (`engrave-job.ts`,
+ * `bench-files.ts`) answer "did the simulation report an error?" with one function and not two
+ * (#393).
+ */
 export function runErrorCodes(v: EngraveRunView): string[] {
   const codes: string[] = [];
   for (const f of v.generated?.findings ?? []) if (f.severity === 'error') codes.push(f.code);
   for (const f of v.generated?.verify?.findings ?? []) if (f.severity === 'error') codes.push(f.code);
-  for (const d of v.simDiagnostics) if (d.severity === 'error') codes.push(d.code);
+  for (const d of simErrors(v.simDiagnostics)) codes.push(d.code);
   return codes;
 }
 

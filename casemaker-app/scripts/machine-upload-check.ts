@@ -30,8 +30,11 @@ import { asVerifiedProgram, uploadVerifiedProgram } from '../src/platform/deskto
 import { GCODE_DIR, md5Hex } from '../src/platform/desktop/protocol.ts';
 import { createNodeTransport } from '../tools/z1/transport.node.mjs';
 import { engraveGenerate } from '../src/workers/sim/engraveGenerate';
+import { createSimSession } from '../src/workers/sim/session';
+import { simErrors, simulationProblem } from '../src/engine/cnc/simGate';
 import { runSheetFileName } from '../src/engine/cnc/engrave/runSheet';
-import { jobTool } from '../src/engine/cnc/engrave/jobSetup';
+import { jobTool, toSetup } from '../src/engine/cnc/engrave/jobSetup';
+import { Z1 } from '../src/engine/cnc/machine';
 import { parseEngraveJob } from '../src/store/engraveJobSchema';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '../src/engine/fonts/registry';
 
@@ -61,7 +64,8 @@ if (!parsed.ok) {
 }
 const job = parsed.job;
 // No Makera feed rows in a headless run (#324): the catalogue tier needs a house service.
-const generated = engraveGenerate(tl, job, jobTool(job), []);
+const tool = jobTool(job);
+const generated = engraveGenerate(tl, job, tool, []);
 
 console.log(`job      : ${job.name}`);
 console.log(`stage    : ${generated.stage}   ok: ${generated.ok}`);
@@ -70,8 +74,24 @@ for (const f of generated.verify?.findings ?? []) {
   console.log(`   ${f.severity.padEnd(7)} ${f.code}: ${f.message}`);
 }
 
-if (generated.nc === null || generated.verify == null) {
-  console.error('\nno program or no report — the gate has nothing to judge, nothing is sent.');
+if (tool === null || generated.nc === null || generated.verify == null) {
+  console.error('\nno tool, no program or no report — the gates have nothing to judge, nothing is sent.');
+  process.exit(1);
+}
+
+// #393. The verifier below is the SOCKET's rule (#255), and it is not the simulation's question:
+// `session.load` reports `ok: true` for a sweep that drove the cutter into the jaw, so a program
+// the app's Upload button refuses (its `uploadBlocker` is never weaker than Save's) would be
+// carried straight to the card by the one tool in this repo that hands a file to the real machine.
+// Same predicate as the app and the other two producers; the sim is a few seconds here.
+const session = createSimSession(tl);
+const sim = session.load(generated.nc, toSetup(job, Z1), tool, Z1.id);
+session.dispose();
+console.log(`sim      : ok=${sim.ok}   errors=${simErrors(sim.diagnostics).length}`);
+const simProblem = simulationProblem(sim.diagnostics);
+if (simProblem !== null) {
+  for (const d of simErrors(sim.diagnostics)) console.error(`   ERROR ${d.code}: ${d.message}`);
+  console.error(`\nthe simulation refuses this program (${simProblem}) — nothing is prepared or sent.`);
   process.exit(1);
 }
 

@@ -49,6 +49,7 @@ import {
   runSheetFrameFileName,
 } from '../src/engine/cnc/engrave/runSheet';
 import { parseEngraveJob } from '../src/store/engraveJobSchema';
+import { simErrors, simulationProblem } from '../src/engine/cnc/simGate';
 import { buildCouponPrograms, type CouponRecord, type CouponRecordRow, type CouponSpec } from '../src/engine/cnc/engrave/couponJob';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '../src/engine/fonts/registry';
 import type { EngraveJob } from '../src/types/engraveJob';
@@ -132,6 +133,16 @@ function stemFor(job: EngraveJob): string {
   return stem;
 }
 
+/**
+ * The receipt for a job that got through. The count is kept beside each list for the run's summary
+ * line, but every error is NAMED (#393): a bare count tells the operator that something is wrong
+ * and not what, so a program whose cutter reached the jaw reads exactly like one that grazed the
+ * stock top. The warnings are the run sheet's business and are carried there.
+ *
+ * No simulation error reaches here: `runJob` names them and stops before this prints. The count
+ * stays on the line anyway (through the same `simErrors` the refusal uses), so the line reads the
+ * same whether it is a receipt or a post-mortem.
+ */
 function receipt(generated: EngraveGenerated, loadDiags: SimDiagnostic[], load: SimLoadOk): void {
   const warn = (findings: { severity: string; code: string; message: string }[]) => {
     for (const f of findings.filter((x) => x.severity === 'warning')) console.log(`     warn  ${f.code}: ${f.message}`);
@@ -141,13 +152,14 @@ function receipt(generated: EngraveGenerated, loadDiags: SimDiagnostic[], load: 
     `  cam        ${generated.cam?.operations} ops, ${generated.cam?.cuttingMoves} cutting moves, ` +
       `${generated.cam?.passes} passes, ~${Math.round(generated.cam?.estimatedSeconds ?? 0)}s`,
   );
-  const errs = generated.findings.filter((f) => f.severity === 'error').length;
-  console.log(`  findings   ${errs} error, ${generated.findings.length - errs} warning`);
+  const errs = generated.findings.filter((f) => f.severity === 'error');
+  console.log(`  findings   ${errs.length} error, ${generated.findings.length - errs.length} warning`);
+  for (const f of errs) console.log(`     ERROR ${f.code}: ${f.message}`);
   warn(generated.findings);
   warn(generated.verify?.findings ?? []);
   console.log(
     `  sim        ok=${load.ok}, count=${load.count}, removed=${load.stats.removedVolume.toFixed(2)} mm³, ` +
-      `${loadDiags.filter((d) => d.severity === 'error').length} errors`,
+      `${simErrors(loadDiags).length} errors`,
   );
   warn(loadDiags);
 }
@@ -188,6 +200,21 @@ function runJob(job: EngraveJob, outDir: string, opts: { writeJobDocument: boole
     console.error(`\n${job.name}`);
     console.error(JSON.stringify(load.diagnostics, null, 2));
     console.error('  !! simulation refused the file');
+    session.dispose();
+    return { ok: false };
+  }
+
+  // #393 — THE OTHER HALF OF THE GATE, and the one that was missing. `load.ok` means the sweep
+  // produced material, NOT that the program is safe: a run that drove the cutter 0.97 mm³ into the
+  // fixed jaw is `ok: true` with a `tool-into-fixture` ERROR among its diagnostics, because the
+  // panel has to be able to DRAW that cut (`simGate.ts`). Trusting `ok` alone wrote four 11.5 mm
+  // coupons whose own simulation said they hit the jaw, and receipted them "all generated".
+  const simProblem = simulationProblem(load.diagnostics);
+  if (simProblem !== null) {
+    console.error(`\n${job.name}`);
+    for (const d of simErrors(load.diagnostics)) console.error(`  ERROR ${d.code}: ${d.message}`);
+    console.error(`  !! ${simProblem}`);
+    console.error(`  !! nothing written: a job the simulation refuses is a document to fix, not a file`);
     session.dispose();
     return { ok: false };
   }

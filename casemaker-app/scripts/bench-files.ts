@@ -51,6 +51,7 @@ import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial'
 import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
 import { HOP_Z } from '@/engine/cnc/cam/ir';
 import { stockDepthLimit, verifyProgram } from '@/engine/cnc/verify';
+import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
 import type { CouponSpec } from '@/engine/cnc/engrave/couponJob';
 import type { EngraveJob, EngraveRectShape } from '@/types/engraveJob';
 import { version as CAM_VERSION } from '../package.json';
@@ -279,15 +280,22 @@ if (!simLoad.ok) {
   console.error(JSON.stringify(simLoad.diagnostics, null, 2));
   throw new Error('#165 ladder simulation refused');
 }
-const simErrors = simLoad.diagnostics.filter((d) => d.severity === 'error');
+// #393 — an error-severity diagnostic refuses the file even though `ok` is true: `ok` means the
+// sweep produced material, not that the program is safe (`simGate.ts`). The same predicate the
+// coupon generator and the app's Save gate use. Checked BEFORE the sheet is built and before
+// anything is written, so a job the simulation refuses leaves no half a job on disk.
+const simProblem = simulationProblem(simLoad.diagnostics);
 session.dispose();
+if (simProblem !== null) {
+  for (const d of simErrors(simLoad.diagnostics)) console.error(`  ERROR ${d.code}: ${d.message}`);
+  throw new Error(`row ${row}: ${simProblem}`);
+}
 
 const sheet = buildRunSheet(job, generated, { diagnostics: simLoad.diagnostics });
 const base = `165-depth-ladder-row-${row}`;
 if (sheet.header.fileName !== `${base}.nc`) {
   throw new Error(`run sheet file name drifted: ${sheet.header.fileName}`);
 }
-if (simErrors.length > 0) throw new Error(`row ${row}: ${simErrors.length} simulation error(s)`);
 console.log(`#165 depth ladder, row ${row}`);
 console.log(`  file       ${base}.nc  (${generated.nc.length} bytes, ${generated.nc.split('\n').length} lines)`);
 console.log(`  stage      ${generated.stage}, ok=${generated.ok}`);
@@ -296,7 +304,7 @@ console.log(`  findings   ${generated.findings.filter((f) => f.severity === 'err
 for (const f of generated.findings.filter((f) => f.severity === 'warning')) console.log(`     warn  ${f.code}: ${f.message}`);
 console.log(`  verify     ${generated.verify?.findings.filter((f) => f.severity === 'error').length ?? '?'} error, ${generated.verify?.findings.filter((f) => f.severity === 'warning').length ?? '?'} warning`);
 for (const f of generated.verify?.findings.filter((f) => f.severity === 'warning') ?? []) console.log(`     warn  ${f.code}: ${f.message}`);
-console.log(`  sim        ok=${simLoad.ok}, count=${simLoad.count}, removed=${fmt(simLoad.stats.removedVolume)} mm³, ${simErrors.length} errors, ${simLoad.diagnostics.length - simErrors.length} warnings`);
+console.log(`  sim        ok=${simLoad.ok}, count=${simLoad.count}, removed=${fmt(simLoad.stats.removedVolume)} mm³, ${simErrors(simLoad.diagnostics).length} errors, ${simLoad.diagnostics.length - simErrors(simLoad.diagnostics).length} warnings`);
 for (const d of simLoad.diagnostics.filter((x) => x.severity !== 'error')) console.log(`     warn  ${d.code}: ${d.message}`);
 console.log(`  sheet      ${sheet.header.fileName}  hash=${sheet.header.fileHash}  time=${sheet.header.estimatedTime}`);
 
@@ -397,9 +405,13 @@ steps 1–3 are the part it is missing; step 4 is its §9 record.*
     console.error(JSON.stringify(simLoad.diagnostics, null, 2));
     throw new Error('#176 stroke simulation refused');
   }
-  const simErrors = simLoad.diagnostics.filter((d) => d.severity === 'error');
+  // #393 — checked before the sheet and before any file, like the ladder above.
+  const simProblem = simulationProblem(simLoad.diagnostics);
   session.dispose();
-  if (simErrors.length > 0) throw new Error(`#176 stroke: ${simErrors.length} simulation error(s)`);
+  if (simProblem !== null) {
+    for (const d of simErrors(simLoad.diagnostics)) console.error(`  ERROR ${d.code}: ${d.message}`);
+    throw new Error(`#176 stroke: ${simProblem}`);
+  }
 
   const sheet = buildRunSheet(job, generated, { diagnostics: simLoad.diagnostics });
   const base = '176-g32-stroke';
@@ -411,7 +423,7 @@ steps 1–3 are the part it is missing; step 4 is its §9 record.*
   console.log(`  cam        ${generated.cam?.operations} ops, ${generated.cam?.cuttingMoves} cutting moves, ~${generated.cam?.estimatedSeconds}s`);
   console.log(`  findings   ${generated.findings.filter((f) => f.severity === 'error').length} error, ${generated.findings.filter((f) => f.severity === 'warning').length} warning`);
   for (const f of generated.findings.filter((f) => f.severity === 'warning')) console.log(`     warn  ${f.code}: ${f.message}`);
-  console.log(`  sim        ok=${simLoad.ok}, count=${simLoad.count}, removed=${fmt(simLoad.stats.removedVolume)} mm³, ${simErrors.length} errors`);
+  console.log(`  sim        ok=${simLoad.ok}, count=${simLoad.count}, removed=${fmt(simLoad.stats.removedVolume)} mm³, ${simErrors(simLoad.diagnostics).length} errors`);
   console.log(`  sheet      ${sheet.header.fileName}  hash=${sheet.header.fileHash}  time=${sheet.header.estimatedTime}`);
 
   writeFileSync(join(outDir, `${base}.nc`), generated.nc);

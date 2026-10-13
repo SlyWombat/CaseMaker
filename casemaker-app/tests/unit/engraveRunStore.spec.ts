@@ -148,6 +148,36 @@ describe('engraveRunStore (#206)', () => {
     expect(uploadBlocker(v)).toBe('the program carries no verifier report');
   });
 
+  // #393 — the app's own half of the gap, and the reason the rule got one name. The session's
+  // `ok: true` means the sweep produced material, so a program that drove the cutter into the jaw
+  // reaches this store as a DIAGNOSTIC and nowhere else. If `runErrorCodes` stopped reading the
+  // sweep's errors, Save and Upload would both open on a program the simulation refused — and the
+  // scripts that write the bench files ask the same predicate (`engine/cnc/simGate.ts`).
+  it('refuses to save or upload a program the simulation reported an error in (#393)', () => {
+    const okGen: EngraveGenerated = {
+      ...clean(),
+      verify: { ok: true, findings: [], stats: { lines: 1, cuttingMoves: 1, deepestZ: -1, bbox: { min: [0, 0, -1], max: [1, 1, 0] } } },
+    };
+    const v = view({
+      generated: okGen,
+      simStatus: 'ready',
+      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+      acknowledged: true,
+      simDiagnostics: [
+        {
+          source: 'sweep',
+          severity: 'error',
+          code: 'tool-into-fixture',
+          message: "checkpoint 0: the cutter drives 0.967 mm³ into the fixture 'Vise fixed jaw (left)'",
+          checkpoint: 0,
+        },
+      ],
+    });
+    expect(runErrorCodes(v)).toEqual(['tool-into-fixture']);
+    expect(saveBlocker(v)).toBe('1 error outstanding');
+    expect(uploadBlocker(v)).toBe(saveBlocker(v));
+  });
+
   it('marks a generated result stale as soon as the job is edited', async () => {
     setEngraveRunClientLoader(async () => ({
       engraveGenerate: async () => NOTHING,
