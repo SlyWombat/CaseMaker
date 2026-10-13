@@ -330,3 +330,101 @@ describe('#302 the console panel — the checkbox and the press', () => {
     expect(wire.closes).toBe(0);
   });
 });
+
+// #386 item 3 — output that arrived with no line in flight. `protocol.ts` keeps it out of `text`; this
+// pins the half the person sees: it is drawn ABOVE the reply, labelled as answering nothing, and a
+// line whose only company was an old frame is still a line nothing answered.
+describe('#386 item 3 — a frame that arrived with no line in flight', () => {
+  beforeEach(() => {
+    caps.drive = true;
+    withMachine();
+  });
+
+  /** The bench's real case: `M491`'s macro tail, still on the wire when the next line went out. */
+  const M491_TAIL = 'M492.3\r\nERROR: Probe dead or not set, please charge or set first!\r\nok\r\n';
+
+  it('is drawn beside the reply, never merged into it, and not counted as the line’s own', async () => {
+    fakeConsole((l) => ({
+      ok: true,
+      line: l,
+      text: '<Idle|MPos:0,0,0>',
+      frames: 1,
+      elapsedMs: 40,
+      carried: { text: M491_TAIL, frames: 3 },
+    }));
+    render(<MachinesScope />);
+    fireEvent.click(armed());
+    fireEvent.change(line(), { target: { value: '?' } });
+    fireEvent.click(send());
+
+    await waitFor(() => expect(q('manage-console-carried-0')).not.toBeNull());
+    const carried = screen.getByTestId('manage-console-carried-0');
+    expect(carried.textContent).toContain('no line was in flight');
+    expect(carried.textContent).toContain('not a reply to anything above');
+    expect(carried.textContent).toContain('ERROR: Probe dead or not set');
+    expect(carried.querySelector('pre')?.textContent).toBe(M491_TAIL);
+    // The reply is the line's own and NOTHING else: the carried text is nowhere in it. That is the
+    // property the whole change exists for — a late `ERROR:`/`ALARM:` read as the answer to `?`.
+    const entry = screen.getByTestId('manage-console-entry-0');
+    const own = [...entry.querySelectorAll('pre')].filter((p) => p.closest('.console-carried') === null);
+    expect(own.map((p) => p.textContent)).toEqual(['<Idle|MPos:0,0,0>']);
+    // Its timing is its own too: three frames that answered nothing are not folded into "1 frame".
+    expect(screen.getByTestId('manage-console-note-0').textContent).toBe('1 frame · 40 ms');
+  });
+
+  it('a line nothing answered is still a timeout when an old alarm was waiting', async () => {
+    fakeConsole((l) => ({
+      ok: false,
+      reason: 'timeout',
+      line: l,
+      detail: 'no reply within 60000 ms',
+      text: '',
+      carried: { text: '[PRB:-9.890,-12.830,-76.700:0]\r\nALARM: Probe fail\r\nok\r\n', frames: 3 },
+    }));
+    render(<MachinesScope />);
+    fireEvent.click(armed());
+    fireEvent.change(line(), { target: { value: '?' } });
+    fireEvent.click(send());
+
+    await waitFor(() => expect(q('manage-console-entry-0')).not.toBeNull());
+    expect(screen.getByTestId('manage-console-entry-0').getAttribute('data-kind')).toBe('timeout');
+    // The alarm IS shown — it happened, and hiding it would be its own lie — but above a plain
+    // "nothing answered this", which is the plain note, not the partial-reply one.
+    expect(screen.getByTestId('manage-console-carried-0').textContent).toContain('ALARM: Probe fail');
+    expect(screen.getByTestId('manage-console-note-0').textContent).toBe('no reply within 60000 ms');
+  });
+
+  it('the copied transcript marks it as unasked-for, so a paste cannot read as a reply', async () => {
+    // Found by reading a bench trace: a transcript pasted into an issue is where a late alarm is
+    // read out of context, and the marker is the only thing in the text that says it answered nothing.
+    const writes: string[] = [];
+    const had = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: (t: string) => (writes.push(t), Promise.resolve()) },
+    });
+    try {
+      fakeConsole((l) => ({
+        ok: false,
+        reason: 'timeout',
+        line: l,
+        detail: 'no reply within 60000 ms',
+        text: '',
+        carried: { text: 'ALARM: Probe fail\r\n', frames: 1 },
+      }));
+      render(<MachinesScope />);
+      fireEvent.click(armed());
+      fireEvent.change(line(), { target: { value: '?' } });
+      fireEvent.click(send());
+      await waitFor(() => expect(q('manage-console-copy')).not.toBeNull());
+
+      fireEvent.click(screen.getByTestId('manage-console-copy'));
+      await waitFor(() => expect(writes).toHaveLength(1));
+      expect(writes[0]).toContain('(no line in flight) ALARM: Probe fail');
+      expect(writes[0].indexOf('> ?')).toBeLessThan(writes[0].indexOf('(no line in flight)'));
+    } finally {
+      if (had) Object.defineProperty(navigator, 'clipboard', had);
+      else delete (navigator as unknown as { clipboard?: unknown }).clipboard;
+    }
+  });
+});

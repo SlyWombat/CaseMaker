@@ -59,10 +59,16 @@ const ALARMED = '<Alarm|MPos:-11.6000,-14.6000,-3.0000|L:0, 0, 0, 0.0,100.0|C:3,
  * the idle-no-`P` line the machine reports when nothing has run, because `run` refuses to play
  * anything whose status does not read `Idle`. The two queues are separate on purpose: `before: []`
  * means "the pre-play poll went unanswered", not "the job's first status reply is missing".
+ *
+ * `unsolicited` sends a frame that answers NOTHING, `delayMs` after the reply to the Nth job poll
+ * (`afterPoll`, 0-based) — the controller still talking when no line is in flight, which is what
+ * #386 item 3 is about. The delay has to clear the poll's own quiet window (`--quiet`, 150 ms here)
+ * and land well before the next poll (one `--interval`, 2000 ms by default) so the frame is provably
+ * waiting on the socket when the next line goes out.
  */
 async function fakeController(
   status: string[],
-  opts: { before?: string[]; playReply?: string | null } = {},
+  opts: { before?: string[]; playReply?: string | null; unsolicited?: { afterPoll: number; text: string; delayMs?: number } } = {},
 ) {
   const seen: string[] = [];
   const sockets = new Set<Socket>();
@@ -80,6 +86,13 @@ async function fakeController(
           const queue = played ? status : (opts.before ?? [AFTER]);
           const next = queue[played ? polls++ : before++];
           if (next !== undefined) socket.write(Buffer.from(reply(next)));
+          const u = opts.unsolicited;
+          if (played && u !== undefined && polls - 1 === u.afterPoll) {
+            const timer = setTimeout(() => {
+              if (!socket.destroyed) socket.write(Buffer.from(reply(u.text)));
+            }, u.delayMs ?? 500);
+            timer.unref();
+          }
         } else if (frame.type === PTYPE_CTRL_MULTI) {
           const line = decodeText(frame.data).trim();
           seen.push(line);
@@ -274,6 +287,14 @@ describe('#386 run — the harness poll loop (against a fake controller)', () =>
       const cases = [
         { why: 'a job is already running', before: [RUNNING], said: 'not `Idle`' },
         { why: 'the controller is alarming', before: [ALARMED], said: 'ALARM' },
+        // #386 item 3: the alarm need not be in the state word. The 2026-10-12 trace's own shape —
+        // a perfectly `Idle` status line, and the alarm as its own line beside it — is the case a
+        // state-word-only gate plays straight through.
+        {
+          why: 'an alarm line sits beside an Idle reply',
+          before: [`${AFTER}\r\nALARM: Probe fail\r\n`],
+          said: 'ALARM: Probe fail',
+        },
         { why: 'the poll went unanswered', before: [], said: 'did not answer a status poll' },
       ];
       for (const { why, before, said } of cases) {
@@ -292,6 +313,37 @@ describe('#386 run — the harness poll loop (against a fake controller)', () =>
       }
     },
     30_000,
+  );
+
+  it(
+    'ends a running job on an alarm the controller said with no line in flight (#386 item 3)',
+    async () => {
+      // The `M491` tail's shape on the bench: the controller keeps talking after a macro, and the
+      // frame lands on the socket while the poll loop is between lines, so it belongs to no line.
+      // Carrying changes where that text is SHOWN, never whether an alarm is acted on: the run ends
+      // as `alarm` exactly as it would if the line had answered a poll — `out.text` being empty is
+      // not evidence that nothing happened.
+      const controller = await fakeController([RUNNING, AFTER, AFTER], {
+        unsolicited: { afterPoll: 0, text: 'ALARM: Probe fail\r\n', delayMs: 500 },
+      });
+      try {
+        const { code, stdout, stderr, trace } = await runHarness(controller.port, ['--json']);
+        expect(code).toBe(1);
+        // Two polls: the one that reported `Run`, and the one whose carry read found the alarm. A
+        // third would mean the loop kept watching a machine that had said it was in an alarm.
+        expect(controller.seen).toEqual(['?', 'play /sd/gcodes/fake.nc', '?', '?']);
+        expect(JSON.parse(stdout)).toMatchObject({ outcome: 'alarm', polls: 2 });
+        expect(stderr).toContain('ALARM: Probe fail');
+        expect(stderr).toContain('with no line in flight');
+        // And the trace keeps it, marked for what it is: the person reading it later sees the alarm
+        // there rather than only under the next poll's reply (#386 item 3's marker).
+        expect(trace).toContain('with no line in flight');
+        expect(trace).toContain('ALARM: Probe fail');
+      } finally {
+        await controller.close();
+      }
+    },
+    45_000,
   );
 
   it(

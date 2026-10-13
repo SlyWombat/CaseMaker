@@ -39,6 +39,11 @@ interface Entry {
   kind: ConsoleSendResult['kind'];
   /** The controller's reply, verbatim — empty when there was none. */
   text: string;
+  /**
+   * Output that was already waiting when this line went out, so it answers nothing (#386 item 3).
+   * Drawn beside the reply and never as it: a macro still talking, or an alarm that arrived late.
+   */
+  carried: { text: string; frames: number } | null;
   /** The aside: the elapsed time and frame count, or why there is no reply. */
   note: string;
 }
@@ -158,6 +163,17 @@ function ConsolePanel({ host, port }: { host: string; port: number }) {
                 <div className="console-line">
                   <span className="dim">&gt;</span> {e.line}
                 </div>
+                {e.carried !== null && (
+                  // Above the reply, because it arrived first — and labelled as what it is, so a
+                  // macro's late tail or an old alarm is never read as this line's answer.
+                  <div className="console-carried" data-testid={`manage-console-carried-${i}`}>
+                    <div className="console-carried-note">
+                      the controller said this while no line was in flight — {e.carried.frames} frame
+                      {e.carried.frames === 1 ? '' : 's'}, not a reply to anything above
+                    </div>
+                    <pre className="console-reply">{e.carried.text}</pre>
+                  </div>
+                )}
                 {e.text.length > 0 && <pre className="console-reply">{e.text}</pre>}
                 <div className="console-note" data-testid={`manage-console-note-${i}`}>
                   {e.note}
@@ -202,12 +218,17 @@ function ConsolePanel({ host, port }: { host: string; port: number }) {
 
 /** The one press's answer, as a transcript entry. */
 function entryFor(result: ConsoleSendResult): Entry {
+  const carried =
+    'carried' in result && result.carried !== undefined
+      ? { text: result.carried.text, frames: result.carried.frames }
+      : null;
   switch (result.kind) {
     case 'sent':
       return {
         line: result.line,
         kind: 'sent',
         text: result.text,
+        carried,
         note: `${result.frames} frame${result.frames === 1 ? '' : 's'} · ${result.elapsedMs} ms`,
       };
     case 'timeout':
@@ -215,7 +236,10 @@ function entryFor(result: ConsoleSendResult): Entry {
         line: result.line,
         kind: 'timeout',
         text: result.text,
+        carried,
         // A half-reply and an empty box are different things to read, so they are said differently.
+        // With output carried above it the box is empty and the reason is the plain one: nothing
+        // answered THIS line, whatever the controller had been saying on its own.
         note:
           result.text.length === 0
             ? result.detail
@@ -224,7 +248,7 @@ function entryFor(result: ConsoleSendResult): Entry {
     case 'refused':
     case 'error':
     case 'unavailable':
-      return { line: result.line, kind: result.kind, text: '', note: result.detail };
+      return { line: result.line, kind: result.kind, text: '', carried: null, note: result.detail };
   }
 }
 
@@ -244,7 +268,16 @@ function transcriptText(host: string, port: number, entries: readonly Entry[]): 
   // would be an invention).
   const head = `console transcript — ${host}:${port}`;
   const body = entries.map((e) =>
-    [`> ${e.line}`, e.text.length > 0 ? e.text : '', `· ${e.note}`].filter((s) => s.length > 0).join('\n'),
+    [
+      `> ${e.line}`,
+      // Marked as unasked-for in the copy too: a pasted transcript is where a late alarm is read
+      // out of context, and the marker is the only thing that says it answered nothing.
+      e.carried !== null ? `(no line in flight) ${e.carried.text}` : '',
+      e.text.length > 0 ? e.text : '',
+      `· ${e.note}`,
+    ]
+      .filter((s) => s.length > 0)
+      .join('\n'),
   );
   return [head, ...body].join('\n\n');
 }

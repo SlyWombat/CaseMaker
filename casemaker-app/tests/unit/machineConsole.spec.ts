@@ -191,6 +191,47 @@ describe('#302 the console seam — one connection, one line per press', () => {
     expect(result.detail).toContain('no reply within');
   });
 
+  it('rides carried output beside the answer and never folds it into the text (#386 item 3)', async () => {
+    // The seam's job is only to pass it through as its own field. If it were merged into `text` the
+    // panel could not tell it apart from a reply, and the panel is where the distinction is shown.
+    const carried = { text: 'ERROR: Probe dead or not set, please charge or set first!\r\n', frames: 2 };
+    const fake = fakeSession((line) => ({ ok: true, line, text: 'ok', frames: 1, elapsedMs: 40, carried }));
+    use(fake.session);
+    const result = await attachConsole(TARGET).send('?');
+    expect(result.kind).toBe('sent');
+    if (result.kind !== 'sent') return;
+    expect(result.carried).toEqual(carried);
+    expect(result.text).toBe('ok');
+  });
+
+  it('carries it on a timeout too, where the answer is the absence of one', async () => {
+    const carried = { text: 'ALARM: Probe fail\r\n', frames: 1 };
+    const fake = fakeSession((line) => ({
+      ok: false,
+      reason: 'timeout',
+      line,
+      detail: 'no reply within 60000 ms',
+      text: '',
+      carried,
+    }));
+    use(fake.session);
+    const result = await attachConsole(TARGET).send('?');
+    expect(result.kind).toBe('timeout');
+    if (result.kind !== 'timeout') return;
+    expect(result.text).toBe('');
+    expect(result.carried).toEqual(carried);
+  });
+
+  it('adds no carried field at all when the transport had none', async () => {
+    // Absent rather than present-and-undefined: the panel asks `'carried' in result`, and a field
+    // that is always there would make every reply look like it had company.
+    const fake = fakeSession();
+    use(fake.session);
+    const result = await attachConsole(TARGET).send('?');
+    expect(result.kind).toBe('sent');
+    expect('carried' in result).toBe(false);
+  });
+
   it('turns a dead socket into an error answer rather than a thrown exception', async () => {
     const fake = fakeSession(() => {
       throw new Error('tcpRead: connection reset by peer');

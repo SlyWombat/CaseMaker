@@ -20,8 +20,12 @@
  *
  * WHAT THIS MODULE DOES NOT DO. No queue, no repeat, no polling, no history: every line is one call
  * from one press, and the session exists only so a reply that straddles two lines is not lost (the
- * reason `openConsole` keeps one frame channel). Motion still needs a person at the machine
- * (`/Fabrication.md` §8) — the panel asks for that, and this module cannot check it.
+ * reason `openConsole` keeps one frame channel). A macro is the case that catches both halves of
+ * that: it keeps talking after the 800 ms quiet window has closed its reply, and what arrives late is
+ * CARRIED on the next line's answer rather than merged into it (#386 item 3) — a `?` whose only
+ * "reply" was an old frame is a poll that nothing answered, which is a different thing to show and a
+ * different thing to act on. Motion still needs a person at the machine (`/Fabrication.md` §8) — the
+ * panel asks for that, and this module cannot check it.
  *
  * THE TEST SEAM. `setMachineConsoleLoader` swaps the client, matching `setMachineUploadLoader` and
  * `setMachineProbeLoader`. Everything below the loader — the guard, the lazy open, the mapping from
@@ -61,10 +65,32 @@ export const CONSOLE_TIMING: ConsoleTiming = { firstReplyMs: 60_000, quietMs: 80
  * `platform/desktop/protocol.ts` — sockets — into the web bundle, which is the leak
  * `capabilities.ts` exists to prevent. `machineConsole.spec.ts` keeps the two in step by
  * construction, so a field changed on either side is a type error rather than a silently dropped one.
+ *
+ * `carried` is output that arrived with no line in flight and is deliberately NOT part of `text`
+ * (#386 item 3) — see `protocol.ts`'s `ConsoleCarried` for why merging it would be the bug.
  */
+export interface ConsoleCarried {
+  text: string;
+  frames: number;
+}
+
 export type ConsoleSend =
-  | { ok: true; line: string; text: string; frames: number; elapsedMs: number }
-  | { ok: false; reason: 'refused' | 'timeout'; line: string; detail: string; text: string };
+  | {
+      ok: true;
+      line: string;
+      text: string;
+      frames: number;
+      elapsedMs: number;
+      carried?: ConsoleCarried;
+    }
+  | {
+      ok: false;
+      reason: 'refused' | 'timeout';
+      line: string;
+      detail: string;
+      text: string;
+      carried?: ConsoleCarried;
+    };
 
 /** The socket-facing half: open one session, send lines on it, close it. */
 export interface MachineConsoleSession {
@@ -86,11 +112,21 @@ export interface MachineConsoleClient {
  *     arrived, because an empty box and a half-reply are different things to read.
  *   - `error` — the socket failed, or the exchange went somewhere the protocol does not allow.
  *   - `unavailable` — nothing was attempted: this build cannot reach a machine at all.
+ *
+ * `carried` rides beside `sent` and `timeout` — an answer and an eviction can happen on the same
+ * press, and the transcript has to be able to show both without confusing one for the other.
  */
 export type ConsoleSendResult =
-  | { kind: 'sent'; line: string; text: string; frames: number; elapsedMs: number }
+  | {
+      kind: 'sent';
+      line: string;
+      text: string;
+      frames: number;
+      elapsedMs: number;
+      carried?: ConsoleCarried;
+    }
   | { kind: 'refused'; line: string; detail: string }
-  | { kind: 'timeout'; line: string; detail: string; text: string }
+  | { kind: 'timeout'; line: string; detail: string; text: string; carried?: ConsoleCarried }
   | { kind: 'error'; line: string; detail: string }
   | { kind: 'unavailable'; line: string; detail: string };
 
@@ -201,14 +237,25 @@ export function attachConsole(target: MachineConsoleTarget): ConsoleHandle {
         session = null;
         return { kind: 'error', line, detail: reasonOf(e) };
       }
+      // Output that arrived with no line in flight is passed along as its own field, never folded
+      // into `text`: the panel's whole job here is to keep "what answered this line" and "what the
+      // controller said on its own" apart (#386 item 3).
+      const beside = send.carried === undefined ? {} : { carried: send.carried };
       if (send.ok) {
-        return { kind: 'sent', line, text: send.text, frames: send.frames, elapsedMs: send.elapsedMs };
+        return {
+          kind: 'sent',
+          line,
+          text: send.text,
+          frames: send.frames,
+          elapsedMs: send.elapsedMs,
+          ...beside,
+        };
       }
       // The transport's own two reasons map one to one, so this is a narrowing rather than a table
       // that could miss one. (`refused` is unreachable here — the guard above already ran — and is
       // mapped rather than asserted away, so a divergence shows up as an answer, not a crash.)
       return send.reason === 'timeout'
-        ? { kind: 'timeout', line, detail: send.detail, text: send.text }
+        ? { kind: 'timeout', line, detail: send.detail, text: send.text, ...beside }
         : { kind: 'refused', line, detail: send.detail };
     },
 

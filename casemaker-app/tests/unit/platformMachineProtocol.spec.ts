@@ -4,8 +4,11 @@
 // in the test, so the discover/identify/upload/status state machines are exercised end to end with
 // no socket, no desktop build and no controller. The wire facts come from Z1-Bridge-Protocol.md.
 
+import { setTimeout as sleep } from 'node:timers/promises';
+
 import { describe, expect, it } from 'vitest';
 import {
+  CARRY_READ_MS,
   crc16Ccitt,
   decodeText,
   discoveryDatagrams,
@@ -59,7 +62,8 @@ function decodeAll(writes: Uint8Array[]): Frame[] {
 
 class FakeTransport implements MachineTransport {
   writes: Uint8Array[] = [];
-  reads: Uint8Array[] = [];
+  /** Scripted bytes, each with the moment it becomes readable. */
+  reads: Array<{ at: number; chunk: Uint8Array }> = [];
   udpLines: string[] = [];
   /** Arrival times handed back beside `udpLines`, one per line in the same order (#275); a missing
    *  entry reads as 0, so a spec that cares about the text alone does not have to set any. */
@@ -71,8 +75,19 @@ class FakeTransport implements MachineTransport {
   /** The timeout each `tcpRead` was asked for — how a spec sees which window a caller chose. */
   readTimeouts: number[] = [];
 
+  /** Bytes already on the socket: readable by any read, including one that waits no time at all. */
   queueRead(...chunks: Uint8Array[]): void {
-    this.reads.push(...chunks);
+    this.queueReadAfter(0, ...chunks);
+  }
+
+  /**
+   * Bytes that arrive `afterMs` from now — how a spec says a REPLY comes after the line that caused
+   * it. A read whose window expires before they are due finds nothing, which is what a socket that
+   * has not spoken yet looks like, and it is the only way to tell a reply apart from output that was
+   * already waiting (the console's pre-send carry read, #386 item 3).
+   */
+  queueReadAfter(afterMs: number, ...chunks: Uint8Array[]): void {
+    for (const chunk of chunks) this.reads.push({ at: Date.now() + afterMs, chunk });
   }
 
   async udpListen(port: number, windowMs: number): Promise<UdpDatagram[]> {
@@ -89,10 +104,41 @@ class FakeTransport implements MachineTransport {
   }
   async tcpRead(_conn: number, _max: number, timeoutMs: number): Promise<Uint8Array> {
     this.readTimeouts.push(timeoutMs);
-    return this.reads.shift() ?? EMPTY;
+    const head = this.reads[0];
+    if (head === undefined) return EMPTY; // nothing scripted: the window ends, as it always has
+    const wait = head.at - Date.now();
+    if (wait >= timeoutMs) return EMPTY; // not due inside this window, so this window sees nothing
+    if (wait > 0) await sleep(wait);
+    this.reads.shift();
+    return head.chunk;
   }
   async tcpClose(conn: number): Promise<void> {
     this.closed.push(conn);
+  }
+}
+
+/**
+ * A transport whose replies are scripted PER LINE: `script[i]` answers the i-th write.
+ *
+ * `platformMachineBridge.spec.ts` uses this fake for its own reason, and #386 item 3 added a second
+ * one: a console session now reads what is already waiting BEFORE it writes (the carry read), so with
+ * a flat queue of reads the FIRST line's reply would be offered to the second line's carry read and
+ * reported as output that arrived from nowhere. Filling `pending` on the write is the fake being the
+ * thing the session talks to — nothing is waiting until the line that asks for it has gone out — and
+ * the tests that WANT something waiting before a line use the flat `FakeTransport`, whose queue is
+ * the socket's own buffer.
+ */
+class ScriptedTransport extends FakeTransport {
+  script: Uint8Array[][] = [];
+  private pending: Uint8Array[] = [];
+
+  override async tcpWrite(conn: number, data: Uint8Array): Promise<void> {
+    await super.tcpWrite(conn, data);
+    this.pending = [...(this.script[this.writes.length - 1] ?? [])];
+  }
+
+  override async tcpRead(): Promise<Uint8Array> {
+    return this.pending.shift() ?? EMPTY;
   }
 }
 
@@ -965,8 +1011,8 @@ describe('#302 console — a session', () => {
   });
 
   it('sends a line as one console frame and returns every reply frame, in order', async () => {
-    const transport = new FakeTransport();
-    transport.queueRead(encodeFrame(0x81, utf8('ok\r\n')), encodeFrame(0x81, utf8('Info: homed\r\n')));
+    const transport = new ScriptedTransport();
+    transport.script = [[encodeFrame(0x81, utf8('ok\r\n')), encodeFrame(0x81, utf8('Info: homed\r\n'))]];
     const out = await openConsole(transport, 1).send('G28', { firstReplyMs: 50, quietMs: 20 });
     expect(out.ok).toBe(true);
     if (!out.ok) return;
@@ -979,8 +1025,8 @@ describe('#302 console — a session', () => {
   });
 
   it('sends ? as the single status byte, as runStatus does', async () => {
-    const transport = new FakeTransport();
-    transport.queueRead(encodeFrame(0x81, utf8('<Idle|MPos:0,0,0>')));
+    const transport = new ScriptedTransport();
+    transport.script = [[encodeFrame(0x81, utf8('<Idle|MPos:0,0,0>'))]];
     const out = await openConsole(transport, 1).send('?', { firstReplyMs: 50, quietMs: 20 });
     expect(out.ok).toBe(true);
     const sent = decodeAll(transport.writes)[0];
@@ -998,20 +1044,90 @@ describe('#302 console — a session', () => {
   });
 
   it('keeps bytes that arrived with one line for the next (one channel per session)', async () => {
-    const transport = new FakeTransport();
+    const transport = new ScriptedTransport();
     // Two frames land in ONE chunk: the first answers G0, the second is the next line's reply.
-    transport.queueRead(
-      new Uint8Array([...encodeFrame(0x81, utf8('ok')), ...encodeFrame(0x81, utf8('<Idle|MPos:1,1,1>'))]),
-    );
+    transport.script = [
+      [new Uint8Array([...encodeFrame(0x81, utf8('ok')), ...encodeFrame(0x81, utf8('<Idle|MPos:1,1,1>'))])],
+    ];
     const session = openConsole(transport, 1);
     const first = await session.send('G0 X1', { firstReplyMs: 50, quietMs: 20 });
     expect(first.ok && first.text).toBe('ok<Idle|MPos:1,1,1>');
   });
 
   it('ignores a non-reply frame crossing the exchange', async () => {
-    const transport = new FakeTransport();
-    transport.queueRead(encodeFrame(0x10, utf8('noise')), encodeFrame(0x81, utf8('ok')));
+    const transport = new ScriptedTransport();
+    transport.script = [[encodeFrame(0x10, utf8('noise')), encodeFrame(0x81, utf8('ok'))]];
     const out = await openConsole(transport, 1).send('M5', { firstReplyMs: 50, quietMs: 20 });
     expect(out.ok && out.text).toBe('ok');
+  });
+});
+
+describe('#386 item 3 — a frame that arrived with no line in flight belongs to no line', () => {
+  /**
+   * The exchange these are written from is `docs/bench/traces/2026-10-12-console.log`, the M491 macro
+   * whose tail (`M492.3` → `ERROR: Probe dead or not set…` → `ok`) arrives after the reply window
+   * closed on the quiet gap the probe moves open (`Z1-Firmware-Dialect.md` §11.9), and the G38.2
+   * probe that answers `[PRB:-9.890,-12.830,-76.700:0]` / `ALARM: Probe fail` / `ok`.
+   */
+  const M491_TAIL = 'M492.3\r\nERROR: Probe dead or not set, please charge or set first!\r\nok\r\n';
+
+  /** When a reply comes: AFTER the line that caused it, and later than the carry read's own window —
+   *  otherwise the session would be right to call it output that had already arrived. */
+  const REPLY_ARRIVES_MS = CARRY_READ_MS + 3;
+
+  it('carries what was already waiting, instead of answering the new line with it', async () => {
+    // Flat queue and no script, because these chunks ARE the socket's own buffer: the point of the
+    // pre-send read is that whatever is here now cannot be a reply to a line that has not gone out.
+    const transport = new FakeTransport();
+    transport.queueRead(
+      encodeFrame(0x81, utf8('M492.3\r\n')),
+      encodeFrame(0x81, utf8('ERROR: Probe dead or not set, please charge or set first!\r\n')),
+      encodeFrame(0x81, utf8('ok\r\n')),
+    );
+    transport.queueReadAfter(REPLY_ARRIVES_MS, encodeFrame(0x81, utf8('<Idle|MPos:0,0,0>')));
+
+    const out = await openConsole(transport, 1).send('?', { firstReplyMs: 50, quietMs: 20 });
+
+    // The poll's own answer is the status line and nothing else — the macro's tail is not counted as
+    // a frame of it, which is what "3 frames" would have said before.
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.text).toBe('<Idle|MPos:0,0,0>');
+    expect(out.frames).toBe(1);
+    expect(out.carried).toEqual({ text: M491_TAIL, frames: 3 });
+  });
+
+  it('reports the line as UNANSWERED when the only frames were carried', async () => {
+    // The safety half, and why the carried text is not merged into the reply's. `machineVacuum.ts`
+    // and `z1.mjs run` read a reply's text as what the machine is doing NOW, so a `?` answered by an
+    // old alarm is not "still in Alarm" — it is a poll nothing answered, which is a different move
+    // (refuse to start a program; refuse to switch the vacuum).
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('[PRB:-9.890,-12.830,-76.700:0]\r\nALARM: Probe fail\r\nok\r\n')));
+
+    const out = await openConsole(transport, 1).send('?', { firstReplyMs: 30 });
+
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.reason).toBe('timeout');
+    expect(out.text).toBe('');
+    expect(out.carried?.text).toContain('ALARM: Probe fail');
+  });
+
+  it('carries nothing when the socket was quiet before the line, and says so by leaving it off', async () => {
+    const transport = new ScriptedTransport();
+    transport.script = [[encodeFrame(0x81, utf8('ok'))]];
+    const out = await openConsole(transport, 1).send('M5', { firstReplyMs: 50, quietMs: 20 });
+    expect(out.ok && out.text).toBe('ok');
+    expect(out.carried).toBeUndefined();
+  });
+
+  it('reads late output on demand, and silence is null', async () => {
+    // What the bench harness asks before it leaves a session: one explicit read, no line, no polling.
+    const transport = new FakeTransport();
+    transport.queueRead(encodeFrame(0x81, utf8('Done ATC\r\n')));
+    const session = openConsole(transport, 1);
+    expect(await session.late(20)).toEqual({ text: 'Done ATC\r\n', frames: 1 });
+    expect(await session.late(5)).toBeNull();
   });
 });

@@ -434,6 +434,49 @@ Replies to `?` took **0.6–0.7 s** on this bench, so any poll interval has to b
 2 s was used, and a 0.6 s poll is the interval that faulted the console (the bench day's own lesson,
 §8). Traces: `docs/bench/traces/2026-10-12-poll*.log`.
 
+### Which frames answer which line — the carried read (#386 item 3)
+
+A console session closes a reply after a **quiet window** (800 ms of silence by default), and that is
+what makes a macro unreadable: `M491` runs the tool-length probe for **15 s** on this bench, and the
+trace shows its tail — `M492.3 ERROR: Probe dead or not set, please charge or set first!` — still
+arriving long after the window closed (`docs/bench/traces/2026-10-12-console.log`; the macro is quoted
+whole in §11.9 of `/Z1-Firmware-Dialect.md`). Whatever is still on the socket then lands **under the
+next line typed**, and an old `ALARM: Probe fail` read as the answer to a fresh `?` is how a finished
+program's alarm becomes a running machine's state.
+
+**The rule the sink implements.** Before it writes, a session reads what is ALREADY on the socket
+(`CARRY_READ_MS`, a couple of milliseconds). Anything present then is *proven* to answer no line of
+this session's: the session is the only writer and it writes one line at a time, so nothing it sent can
+be being answered yet. Those frames are returned BESIDE the answer as `carried` — never merged into
+`text`, and never counted in the reply's frame count or elapsed time. A `?` whose only company was a
+stale alarm is therefore a **timeout**, not "answered, state Alarm".
+
+**Why not a wider quiet window.** Waiting longer after every press delays every press, and it still
+cannot say that a frame answered nothing — the ambiguity is in *which* line owns the frames, not in how
+long the window is. The pre-write read is the only ordering statement available on a single socket.
+
+**Carrying changes where text is SHOWN, never whether an alarm is acted on.** An alarm the controller
+said with no line in flight is still the controller saying what state it is in, so the callers that
+decide from status — `uploadProgram` and `toggleVacuum`'s idle gates in the app, and `z1.mjs run`'s
+pre-play gate and its poll loop — read the alarm over the reply AND the carried frames alike
+(`alarmLine`: the dialect's own words, `ALARM`, `Probe fail`, `error:`). A run that catches one ends as
+`alarm`, exactly as it would if the frame had answered the poll.
+
+**What it does not fix, and does not pretend to.** Three residues, kept here rather than glossed:
+
+- A late frame that arrives DURING the next line's window cannot be told from its reply. The window is
+  the session's, and a controller still talking while a line is in flight is indistinguishable from one
+  answering it.
+- Frames that arrive while nobody is reading (the module has no idle reader and no polling loop, §8)
+  are not lost — they are seen at the **next press**, as carried output. They are not seen *now*.
+- A session's **first** line on a fresh connection has nothing to carry: the connection is new, so the
+  ambiguity only exists from the second line on. The panel's console, `z1.mjs console` and `run`'s poll
+  loop are all multi-line sessions, which is where it matters.
+
+A caller that wants a macro's whole tail keeps reading: the session exposes `late(windowMs)`, which
+reads until that much silence, and `z1.mjs console` calls it once on the way out so the `M491` tail is
+recorded instead of lost with the socket.
+
 ## 7. Transport interface
 
 The protocol layer above is transport-agnostic. It runs against a five-call interface —
@@ -493,7 +536,10 @@ touching callers.
   is one command — `z1.mjs run <host> <path> --i-am-at-the-machine` — which polls the status ONCE
   before it plays and plays only on a reply that reads `Idle` with no alarm (a `play` on a machine
   already running, or in an alarm, is the one way that command could turn a person's intent into
-  something else; a poll nobody answered is not evidence of either state, so it refuses too). It then
+  something else; a poll nobody answered is not evidence of either state, so it refuses too). Both
+  gates — this one and the poll loop behind it — read the alarm over the reply **and** over frames that
+  arrived with no line in flight (§6's carried read), because carrying changes where the text is shown,
+  never whether it is acted on. It then
   sends `play` built from a checked card path, polls on that same connection (refusing `--interval`
   under 2 s, measuring the interval from one send to the next, the first `?` one interval after
   `play`), prints a line per poll, and stops on §6's two end conditions. A `play` the controller does

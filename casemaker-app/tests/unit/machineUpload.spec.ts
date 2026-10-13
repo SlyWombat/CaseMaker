@@ -3,13 +3,14 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   programBytes,
   setMachineUploadLoader,
+  alarmLine,
   controllerState,
   jobProgressPercent,
   uploadProgram,
   type MachineUploadClient,
   type UploadAttempt,
 } from '@/platform/machineUpload';
-import { readJobProgress, type UploadOutcome } from '@/platform/desktop/protocol';
+import { alarmLine as desktopAlarmLine, readJobProgress, type UploadOutcome } from '@/platform/desktop/protocol';
 import type { VerifyReport } from '@/engine/cnc/verify';
 
 /**
@@ -309,6 +310,45 @@ describe('#296 uploadProgram — the machine is asked NOW, not remembered', () =
     expect((await run()).kind).toBe('uploaded');
   });
 
+  // #386 item 3. The alarm is not only in the state word: the 2026-10-12 trace has `ALARM: Probe fail`
+  // as a line of its own, the `M491` tail's error arrives with no line in flight at all, and a state
+  // word can read `Idle` in the same breath. A gate that only reads the state word is open in exactly
+  // that case, and a card write is what it lets through.
+  it('refuses an alarm that sits beside a perfectly Idle status line (#386 item 3)', async () => {
+    let uploads = 0;
+    // The trace's own two halves: the controller answers `?` with a status line, and the alarm is the
+    // next line — one exchange, two very different statements.
+    const text = '<Idle|MPos:-11.6000,-14.6000,-3.0000|WPos:136.8000,110.2000,61.6109|S:0.0,12000.0|OTA:0,0>\r\nALARM: Probe fail\r\nok\r\n';
+    use(
+      fakeClient({
+        status: async () => ({ ok: true, text }),
+        upload: async () => {
+          uploads += 1;
+          return { ok: true, bytes: 3, packets: 1, alreadyPresent: false };
+        },
+      }),
+    );
+    const result = await run();
+    expect(result.kind).toBe('busy');
+    if (result.kind !== 'busy') return;
+    // The machine's own words, so the person knows WHICH alarm to clear at the machine.
+    expect(result.detail).toContain('ALARM: Probe fail');
+    expect(result.detail).toContain('clear it at the machine first');
+    expect(result.status).toBe(text);
+    expect(uploads).toBe(0);
+  });
+
+  it('refuses the M491 tail’s probe error, which arrives as a bare line (#386 item 3)', async () => {
+    // `Z1-Firmware-Dialect.md` §11.9: `M492.3 ERROR: Probe dead or not set, please charge or set
+    // first!` — a status read that catches this must not read it as an idle machine with a bit of
+    // noise in it.
+    use(fakeClient({ status: async () => ({ ok: true, text: 'M492.3\r\nERROR: Probe dead or not set, please charge or set first!\r\nok\r\n' }) }));
+    const result = await run();
+    expect(result.kind).toBe('busy');
+    if (result.kind !== 'busy') return;
+    expect(result.detail).toContain('Probe dead or not set');
+  });
+
   it('reads the state word out of a real status line', () => {
     expect(controllerState('<Idle|MPos:-1.0000,-1.0000,-1.0000|WPos:147.4,123.8,57.6>')).toBe('Idle');
     expect(controllerState('<Run>')).toBe('Run');
@@ -344,5 +384,49 @@ describe('#390 jobProgressPercent — the web-safe restatement of readJobProgres
     for (const line of [RUN, MID_JOB_IDLE, END, AFTER, ALARM, '', 'garbage', '<Idle|P:9,0,0>']) {
       expect(jobProgressPercent(line)).toBe(readJobProgress(line).percent);
     }
+  });
+});
+
+describe('#386 alarmLine — the alarm read wherever the controller says it', () => {
+  // The bench's own lines. First the ones that ARE an alarm: the two the 2026-10-12 trace gives (a
+  // failed probe, and the controller's own "I did not hear the CTRL"), the lock a lift hits
+  // (`Z1-Firmware-Dialect.md` §11.9), the state word itself, and — the case a state-word-only gate
+  // misses — an alarm line sitting beside a reply that reads perfectly `Idle`.
+  const ALARMS: Array<[string, string]> = [
+    ['ALARM: Probe fail', 'ALARM: Probe fail'],
+    ['ALARM: Mainboard did not receive a status response from the CTRL', 'ALARM: Mainboard did not receive a status response from the CTRL'],
+    ['error:Alarm lock', 'error:Alarm lock'],
+    ['ERROR: Probe dead or not set, please charge or set first!', 'ERROR: Probe dead or not set, please charge or set first!'],
+    [ALARM, ALARM],
+    ['ok\r\nALARM: Probe fail\r\nok', 'ALARM: Probe fail'],
+    ['<Idle|MPos:0,0,0>\r\nALARM: Probe fail', 'ALARM: Probe fail'],
+  ];
+
+  // And the lines that are not, including everything the finish rule and the percent are read off:
+  // a false positive here would refuse a machine that is perfectly ready.
+  const QUIET: Array<string | null> = [
+    RUN,
+    MID_JOB_IDLE,
+    END,
+    AFTER,
+    '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128>',
+    'ok',
+    'File size 791',
+    '[PRB:-9.890,-12.830,-76.700:0]',
+    '',
+    null,
+  ];
+
+  it('reads the alarm out of the bench’s own lines, state word or not', () => {
+    for (const [text, expected] of ALARMS) expect(alarmLine(text)).toBe(expected);
+    for (const text of QUIET) expect(alarmLine(text)).toBeNull();
+  });
+
+  it('agrees with the desktop `alarmLine` it is restated from, line for line', () => {
+    // The restatement's honest check, the one `jobProgressPercent` gets: the same ANSWER over real
+    // replies, so a word added on one side and not the other fails here instead of silently gating a
+    // card write on half a rule.
+    for (const [text] of ALARMS) expect(alarmLine(text)).toBe(desktopAlarmLine(text));
+    for (const text of QUIET) expect(alarmLine(text)).toBe(desktopAlarmLine(text));
   });
 });

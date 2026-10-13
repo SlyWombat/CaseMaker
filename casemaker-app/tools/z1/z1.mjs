@@ -195,10 +195,24 @@ async function sendTraced(session, file, line, flags, opts = {}) {
     out = { ok: false, reason: 'failed', detail: `the socket failed: ${error instanceof Error ? error.message : String(error)}`, text: '' };
   }
   const body = out.ok ? out.text.replace(/\r/g, '').trimEnd() : `[${out.reason}] ${out.detail}`;
-  trace(file, `${at}  > ${line}\n${body.split('\n').map((l) => `    ${l}`).join('\n')}\n${out.ok ? `    (${out.frames} frame(s), ${out.elapsedMs} ms)\n` : ''}`);
+  // Output that arrived with no line in flight (#386 item 3): a macro still talking, or an alarm that
+  // arrived after its line's window closed. Marked as belonging to no line in the trace AND on the
+  // display, because a transcript read later is exactly where an old `ALARM: Probe fail` gets taken
+  // for the answer to the line above it.
+  const carried = out.carried
+    ? `[${out.carried.frames} frame(s) that arrived with no line in flight — not a reply to ${JSON.stringify(line)}]\n` +
+      out.carried.text.replace(/\r/g, '').trimEnd()
+    : '';
+  const indent = (text) => text.split('\n').map((l) => `    ${l}`).join('\n');
+  trace(
+    file,
+    `${at}  > ${line}\n${[carried, body].filter((s) => s.length > 0).map(indent).join('\n')}\n${out.ok ? `    (${out.frames} frame(s), ${out.elapsedMs} ms)\n` : ''}`,
+  );
   // A polling loop echoes nothing: its own progress line is the display, the trace file is the record
   // of every reply, and stdout stays clean for `--json`.
-  if (opts.echo !== false) console.log(body.length > 0 ? body : '(no reply text)');
+  if (opts.echo !== false) {
+    console.log([carried, body.length > 0 ? body : '(no reply text)'].filter((s) => s.length > 0).join('\n'));
+  }
   return out;
 }
 
@@ -430,6 +444,29 @@ async function main() {
           await sendTraced(session, file, line, flags);
         }
         if (refusedLine) process.exitCode = 1;
+        // One last read on the way out (#386 item 3). A macro can still be talking when a person types
+        // `exit`, and `M491`'s tail — `M492.3 ERROR: Probe dead or not set…`, the whole reason §11.9
+        // exists — arrives tens of seconds after the line that started it. Those frames belong to no
+        // line, so they are shown with that marker rather than lost with the socket. Bounded by the
+        // quiet window; a socket that is already gone is not a failure here, because nothing was being
+        // asked of the machine.
+        try {
+          const late = await session.late(num(flags.quiet, 800));
+          if (late !== null) {
+            const text = late.text.replace(/\r/g, '').trimEnd();
+            trace(
+              file,
+              `${new Date().toISOString()}  · ${late.frames} frame(s) arrived with no line in flight\n${text.split('\n').map((l) => `    ${l}`).join('\n')}\n`,
+            );
+            console.log(
+              `[${late.frames} frame(s) arrived after the last line — no line was in flight]\n${text}`,
+            );
+          }
+        } catch (error) {
+          process.stderr.write(
+            `(nothing more was read on the way out: ${error instanceof Error ? error.message : String(error)})\n`,
+          );
+        }
       } finally {
         rl.close();
       }
@@ -470,16 +507,27 @@ async function main() {
         // refused too, because "probably idle" is not a state this tool may start a program on.
         const before = await sendTraced(session, file, '?', flags, { echo: false });
         const beforeState = before.ok ? P.readJobProgress(before.text).state : null;
+        // The alarm is read over BOTH halves of what came back — the poll's own reply and anything
+        // that arrived with no line in flight (#386 item 3). A frame the controller sent with no line
+        // in flight is still it saying what state it is in, and this gate is the one that decides
+        // whether a program may be started: carrying changes where the text is SHOWN, never whether an
+        // alarm is acted on. `P.alarmLine` is the dialect's words (`ALARM:`, `Probe fail`, `error:`),
+        // the same reader the app's vacuum and upload gates use.
+        const alarm = P.alarmLine(before.text) ?? P.alarmLine(before.carried?.text ?? null);
         if (stopAsked === 1) {
           // Ctrl-C while the pre-play poll was in flight (#386 review): the program was never sent, so
           // there is nothing to abort and nothing is left running. Same exit code a Ctrl-C gives.
           console.error('Ctrl-C before the program started. Nothing was played.');
           process.exitCode = 130;
+        } else if (alarm !== null) {
+          console.error(
+            `the controller is in an ALARM (\`${alarm}\`)` +
+              `${before.ok ? '' : ', said with no line in flight — the status poll was not answered'}. ` +
+              'Nothing was played: clear it at the machine first.',
+          );
+          process.exitCode = 1;
         } else if (!before.ok) {
           console.error(`the machine did not answer a status poll (${before.detail}), so whether it is idle is unknown. Nothing was played.`);
-          process.exitCode = 1;
-        } else if (/ALARM/i.test(before.text) || beforeState === 'Alarm') {
-          console.error('the controller is in an ALARM (see the trace above). Nothing was played: clear it at the machine first.');
           process.exitCode = 1;
         } else if (beforeState !== 'Idle') {
           console.error(
@@ -542,7 +590,21 @@ async function main() {
                 }
               } else {
                 misses = 0;
-                if (/ALARM/i.test(out.text) || P.readJobProgress(out.text).state === 'Alarm') {
+                // The alarm is read over BOTH halves of the poll's answer: the reply itself and any
+                // frame that arrived with no line in flight (#386 item 3). Carrying changes where that
+                // text is SHOWN, never whether an alarm ends the run — the controller saying `ALARM`
+                // with no line in flight is the same machine in the same state as one saying it inside
+                // a reply, and `out.text` being empty is not evidence that nothing happened.
+                //
+                // One reader, not two: `P.alarmLine` matches the state word too (`<Alarm|…>`), which is
+                // what the old `/ALARM/i.test(…) || state === 'Alarm'` pair was doing in two ways.
+                const alarm = P.alarmLine(out.text) ?? P.alarmLine(out.carried?.text ?? null);
+                if (alarm !== null) {
+                  const inReply = P.alarmLine(out.text) !== null;
+                  console.error(
+                    `the controller said \`${alarm}\`${inReply ? '' : ' with no line in flight'} — an alarm. ` +
+                      'Nothing further is sent from here; the physical stop is the stop.',
+                  );
                   outcome = 'alarm';
                   process.exitCode = 1;
                   break;

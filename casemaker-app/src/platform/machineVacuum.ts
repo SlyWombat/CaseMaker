@@ -30,6 +30,14 @@
  * console handle: a control that opens and closes its own socket cannot interleave with the console's
  * replies, and one command channel (`Z1-Bridge-Protocol.md` §1) is not shared between two senders.
  *
+ * AND AN ALARM REFUSES, wherever its words appear. A locked controller answers a lift with
+ * `error:Alarm lock` (`Z1-Firmware-Dialect.md` §11.9), and the words do not always sit in the state
+ * word: the 2026-10-12 trace has `ALARM: Probe fail` as a line of its own, and `M491`'s tail —
+ * `ERROR: Probe dead or not set…` — arrives with no line in flight at all (#386 item 3). The ask is
+ * therefore read for an alarm across the reply AND the carried frames, and either one refuses. That
+ * is the whole of the carried rule here: it changes where text is SHOWN, never whether it is acted
+ * on.
+ *
  * WHAT THIS MODULE DOES NOT DO. It does not remember anything: "what did I last send" is the panel's
  * fact, not the socket's, because there is no read-back — the status line does not report the vacuum
  * mode (bench, 2026-10-12), so no amount of polling could recover it. It also does not run a job;
@@ -37,7 +45,7 @@
  * removal) stays unmodelled (`Z1-Firmware-Dialect.md` §11.3, #283).
  */
 
-import { controllerState, jobProgressPercent } from './machineUpload';
+import { alarmLine, controllerState, jobProgressPercent } from './machineUpload';
 import { attachConsole, type MachineConsoleTarget } from './machineConsole';
 
 /** The machine's bare `M331`/`M332` — "turning extend out mode on/off", the vacuum (#283). */
@@ -55,8 +63,8 @@ export function vacuumLine(on: boolean): string {
  *   - `toggled` — the machine took the code. `on` is the state now, and `status` is the idle line
  *     that let it start (verbatim, as `uploadProgram` carries it).
  *   - `busy` — the machine answered and a program still owns the vacuum: a state word that is not
- *     `Idle`, or an `Idle` line whose `P:` percent says the job has not finished (see below). Nothing
- *     was sent; `status` is its line.
+ *     `Idle`, an `Idle` line whose `P:` percent says the job has not finished (see below), or a
+ *     controller that is in an alarm. Nothing was sent; `status` is its line.
  *   - `refused` — the guards refused the line (never the case for `M331`/`M332` today, mapped rather
  *     than asserted away so a divergence is an answer and not a crash).
  *   - `timeout` / `error` — the socket failed, or the exchange went where the protocol does not
@@ -95,6 +103,21 @@ export async function toggleVacuum(target: MachineConsoleTarget, on: boolean): P
         return { kind: 'refused', detail: ask.detail };
       case 'sent':
         break;
+    }
+    // 1a. AN ALARM REFUSES, and it is asked over BOTH halves of what came back: the reply's own text
+    //     and anything that arrived with no line in flight (the session hands the second back as
+    //     `carried`, #386 item 3). A machine that has locked itself — `ALARM: Probe fail`, the `M491`
+    //     tail's `ERROR: Probe dead or not set…` — refuses a lift with `error:Alarm lock`
+    //     (`Z1-Firmware-Dialect.md` §11.9), and switching the vacuum is no more welcome. Carrying
+    //     only changes where that text is SHOWN, never whether it is acted on, so the same test runs
+    //     over both and the sentence quotes the machine's own line.
+    const alarm = alarmLine(ask.text) ?? alarmLine(ask.carried?.text ?? null);
+    if (alarm !== null) {
+      return {
+        kind: 'busy',
+        detail: `the controller is in an alarm (\`${alarm}\`), so nothing was sent — clear it at the machine first`,
+        status: ask.text,
+      };
     }
     const state = controllerState(ask.text);
     if (state === null) {

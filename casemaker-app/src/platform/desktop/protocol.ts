@@ -469,6 +469,36 @@ export function readJobProgress(text: string): JobProgress {
   return { state: state === null ? null : state[1]!, line: num(0), percent: num(1), elapsedS: num(2) };
 }
 
+/**
+ * The words the controller uses when it has stopped for its own reasons — a bare line, not a state
+ * word: `ALARM: Probe fail` after a `G38.2` finds nothing (`Z1-Firmware-Dialect.md` §11.2), the
+ * `ERROR: Probe dead or not set…` line an `M491` macro ends with (§11.9), and Marlin's own
+ * `error:`/`error:Alarm lock` prefix for a command it refused. The words are the dialect's, read off
+ * the 2026-10-12 trace, not a list invented here.
+ */
+const ALARM_WORDS = /\bALARM\b|Probe fail|error:/i;
+
+/**
+ * The controller's own alarm line, if this text carries one — the first one, verbatim, or null.
+ *
+ * A status line's state word already reads `Alarm` when the machine is locked, so why a second
+ * reader? Because the alarm is not only in the state word: the 2026-10-12 trace shows it arriving as
+ * its own line (`ALARM: Probe fail`), it can share a reply with a state word that reads `Idle` (the
+ * `M491` tail lands beside a poll's answer), and a caller deciding whether the machine is free has to
+ * act on it wherever it appears — a frame that arrived with no line in flight is still the controller
+ * saying the machine is in a state, and carrying only changes where that text is SHOWN
+ * ({@link ConsoleCarried}, #386 item 3).
+ *
+ * Returns the line rather than a boolean so the refusal can quote what the machine actually said.
+ */
+export function alarmLine(text: string | null): string | null {
+  if (text === null) return null;
+  for (const line of text.split(/\r?\n/)) {
+    if (ALARM_WORDS.test(line)) return line.trim();
+  }
+  return null;
+}
+
 /** Send `?` and return the controller's status line verbatim. Empty is reported as `ok: false`. */
 export async function runStatus(
   transport: MachineTransport,
@@ -1111,13 +1141,67 @@ export interface ConsoleOptions {
   maxMs?: number;
 }
 
+/**
+ * Frames that arrived with NO line in flight — the controller talking on its own, or the tail of a
+ * macro whose reply window closed early (#386 item 3, `Z1-Firmware-Dialect.md` §11.9: `M491`'s
+ * `M492.3 ERROR: Probe dead or not set…` lands tens of seconds after the line that started it).
+ *
+ * They are reported BESIDE a line's answer and never merged into it, because the reading that must
+ * not happen is an old frame taken for the current answer: a `?` whose only "reply" was a stale
+ * alarm is a poll that went UNANSWERED, and calling it `ok` with the state `Alarm` is how a finished
+ * program's alarm becomes a running machine's state (`machineVacuum.ts` and `z1.mjs run` both read
+ * that text as what the machine is doing now).
+ */
+export interface ConsoleCarried {
+  /** The frames' text, verbatim, in arrival order. */
+  text: string;
+  frames: number;
+}
+
+/**
+ * How long a line's send keeps reading for output that had ALREADY arrived before it wrote. Not a
+ * wait for a reply, and emphatically not a wider quiet window.
+ *
+ * A frame sitting on the socket before the line went out is PROVEN to belong to no line this session
+ * sent: the session is the only writer, and it writes one line at a time, so nothing it sent can be
+ * being answered yet. That is the whole of the guarantee — everything arriving after the write is the
+ * reply's, and stays the reply's, even when it is really the tail of the line before.
+ *
+ * Small on purpose: a longer window delays every press and separates the two cases no better, and a
+ * zero window would never ask the socket at all (it would only empty the decoder's own queue), which
+ * is why this is a couple of milliseconds rather than none.
+ */
+export const CARRY_READ_MS = 2;
+
 export type ConsoleOutcome =
-  | { ok: true; line: string; text: string; frames: number; elapsedMs: number }
-  | { ok: false; reason: 'refused' | 'timeout'; line: string; detail: string; text: string };
+  | {
+      ok: true;
+      line: string;
+      text: string;
+      frames: number;
+      elapsedMs: number;
+      carried?: ConsoleCarried;
+    }
+  | {
+      ok: false;
+      reason: 'refused' | 'timeout';
+      line: string;
+      detail: string;
+      text: string;
+      carried?: ConsoleCarried;
+    };
 
 /** A console on one open connection; its channel survives from line to line. */
 export interface ConsoleSession {
   send(line: string, opts?: ConsoleOptions): Promise<ConsoleOutcome>;
+  /**
+   * Read what has arrived with no line in flight, waiting up to `windowMs` after the last frame.
+   *
+   * `send` asks this before it writes, so a caller that wants the controller's own late output — the
+   * bench harness before it leaves, say — asks the same question rather than inventing a second one.
+   * `null` is "the socket was quiet", which is the ordinary answer.
+   */
+  late(windowMs: number): Promise<ConsoleCarried | null>;
 }
 
 /**
@@ -1130,6 +1214,26 @@ export interface ConsoleSession {
  */
 export function openConsole(transport: MachineTransport, conn: number): ConsoleSession {
   const channel = new FrameChannel(transport, conn);
+
+  /**
+   * Frames that arrive now, reading until `windowMs` of silence. The wait restarts after each frame,
+   * so one window is a silence budget rather than a total one: the pre-send read (`CARRY_READ_MS`)
+   * takes a burst whole, and a caller draining at the end of a session gets the macro that is still
+   * talking instead of the part of it that fit in one window.
+   */
+  async function late(windowMs: number): Promise<ConsoleCarried | null> {
+    const parts: string[] = [];
+    let frames = 0;
+    for (;;) {
+      const next = await channel.next(windowMs);
+      if (next === null) break;
+      if (next.type < 0x80) continue; // not a reply to a console line
+      parts.push(decodeText(next.data));
+      frames++;
+    }
+    return frames === 0 ? null : { text: parts.join(''), frames };
+  }
+
   return {
     async send(line, opts = {}) {
       const problem = consoleProblem(line);
@@ -1138,6 +1242,10 @@ export function openConsole(transport: MachineTransport, conn: number): ConsoleS
       const firstReplyMs = opts.firstReplyMs ?? 3000;
       const quietMs = opts.quietMs ?? 800;
       const maxMs = opts.maxMs ?? 15000;
+
+      // BEFORE the write, and that ordering is the whole of it (#386 item 3): whatever is here now
+      // cannot be this line's reply, because this line has not gone out yet.
+      const carried = await late(CARRY_READ_MS);
 
       const frame =
         line.trim() === '?'
@@ -1161,6 +1269,7 @@ export function openConsole(transport: MachineTransport, conn: number): ConsoleS
       }
       const text = parts.join('');
       const elapsedMs = Date.now() - started;
+      const beside = carried === null ? {} : { carried };
       if (frames === 0) {
         return {
           ok: false,
@@ -1168,9 +1277,12 @@ export function openConsole(transport: MachineTransport, conn: number): ConsoleS
           line,
           detail: `no reply within ${firstReplyMs} ms of sending ${JSON.stringify(line)}`,
           text: '',
+          ...beside,
         };
       }
-      return { ok: true, line, text, frames, elapsedMs };
+      return { ok: true, line, text, frames, elapsedMs, ...beside };
     },
+
+    late,
   };
 }

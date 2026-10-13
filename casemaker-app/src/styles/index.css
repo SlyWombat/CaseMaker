@@ -2678,6 +2678,18 @@ button:disabled {
   margin-left: 10px;
   color: var(--cm-color-on-surface-muted);
 }
+/* Output that arrived with no line in flight (#386 item 3). Set apart from the reply in the one way
+   a transcript can be read quickly — a left rule and a quieter voice — because the mistake it
+   prevents is reading a late alarm as the answer to the line just typed. */
+.manage .console-carried {
+  margin: 2px 0 2px 10px;
+  padding-left: 8px;
+  border-left: 2px solid var(--m-hairline);
+}
+.manage .console-carried-note {
+  color: var(--cm-color-on-surface-muted);
+  font-style: italic;
+}
 
 /* --- the vacuum switch, above the console (#390) -------------------------- */
 .manage .mvacuum {

@@ -105,6 +105,48 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
     expect(fake.closes).toBe(1);
   });
 
+  // #386 item 3. The alarm does not have to be in the state word, and it does not have to be in the
+  // reply: `ALARM: Probe fail` is a line of its own in the 2026-10-12 trace, and a frame the
+  // controller sent with no line in flight is still the controller saying what state it is in. A
+  // locked controller refuses a lift with `error:Alarm lock` (`Z1-Firmware-Dialect.md` §11.9), and
+  // switching the vacuum there is no more welcome — so both halves refuse, and neither sends the code.
+  it('refuses an alarm line that sits beside an Idle reply (#386 item 3)', async () => {
+    const text = `${IDLE}\r\nALARM: Probe fail\r\nok\r\n`;
+    const fake = fakeSession((line) =>
+      line === '?' ? { ok: true, line, text, frames: 3, elapsedMs: 40 } : { ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 },
+    );
+    const result = await toggleVacuum(TARGET, true);
+
+    expect(result.kind).toBe('busy');
+    if (result.kind !== 'busy') return;
+    expect(result.detail).toContain('ALARM: Probe fail');
+    expect(result.detail).toContain('clear it at the machine first');
+    expect(result.status).toBe(text);
+    expect(fake.sent).toEqual(['?']);
+    expect(fake.closes).toBe(1);
+  });
+
+  it('refuses an alarm the controller said with no line in flight (#386 item 3)', async () => {
+    // The `M491` tail's shape: the `?` is answered normally, and the alarm was already on the socket
+    // when it went out — the session hands that back as `carried`, never as the reply.
+    const summary = 'M492.3\r\nERROR: Probe dead or not set, please charge or set first!\r\n';
+    const fake = fakeSession((line) =>
+      line === '?'
+        ? { ok: true, line, text: IDLE, frames: 1, elapsedMs: 30, carried: { text: summary, frames: 3 } }
+        : { ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 },
+    );
+    const result = await toggleVacuum(TARGET, false);
+
+    expect(result.kind).toBe('busy');
+    if (result.kind !== 'busy') return;
+    expect(result.detail).toContain('Probe dead or not set');
+    // `status` is the reply the machine gave to the ask, not the carried text: the two are different
+    // statements and the refusal names one of them in `detail`.
+    expect(result.status).toBe(IDLE);
+    expect(fake.sent).toEqual(['?']);
+    expect(fake.closes).toBe(1);
+  });
+
   it('refuses a mid-job Idle — a `P:` percent below 100 is a program that still owns the vacuum', async () => {
     // Verbatim from `docs/bench/traces/2026-10-12-poll.log`: `Idle` at 90 %, the spindle still turning,
     // ~4 s before the trip home at `M05` (`Z1-Bridge-Protocol.md` §6). The state word alone passes

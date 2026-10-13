@@ -118,6 +118,17 @@ not wire the `!` and `~` realtime bytes. **The physical stop is the stop**: the 
 and no jog, so anything that moves needs a person standing at the machine (chapter 8.4, and
 `/Fabrication.md` §8).
 
+**A macro keeps talking after its line is answered.** `M491` runs the tool-length probe for about
+fifteen seconds, so its tail — including `ERROR: Probe dead or not set, please charge or set first!`
+— arrives long after the reply to `M491` was closed and shown. The panel does not hand that tail to
+whatever you send next: it shows it in its own block above the reply, labelled "the controller said
+this while no line was in flight", and it is never counted as the answer to the line you just typed
+(so a `?` that nothing answered still reads as a timeout, not as "Idle" or "Alarm"). The same rule
+runs the other way for anything that decides: a `M331`/`M332` press, an upload, and `z1.mjs run`'s
+own checks all refuse on an alarm wherever the controller said it, the reply or the late tail alike.
+A transcript copy marks those lines with `(no line in flight)` for the same reason — it is the one
+thing in the text that says the line answered nothing.
+
 **One line, one command — the console is not a way to run a program.** The box holds one line, and
 so does the controller: paste a program in and it arrives as a single line whose commands all run.
 Doing that is what faulted the machine on 2026-10-12 — the spindle kept turning, the front button

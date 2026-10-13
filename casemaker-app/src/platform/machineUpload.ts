@@ -97,6 +97,29 @@ export function jobProgressPercent(text: string | null): number | null {
   return Number.isFinite(v) ? v : null;
 }
 
+/** The dialect's own words for an alarm — `protocol.ts`'s constant, restated with the reader above. */
+const ALARM_WORDS = /\bALARM\b|Probe fail|error:/i;
+
+/**
+ * The controller's own alarm line from a status text, or null — **`protocol.ts`'s `alarmLine`,
+ * restated web-safe**, for the reason {@link jobProgressPercent} restates `readJobProgress`, and kept
+ * in step the same way (`machineUpload.spec.ts` runs both over one table of the 2026-10-12 trace's
+ * own lines). The first line that carries the dialect's alarm words is returned verbatim.
+ *
+ * WHY A DECISION NEEDS THIS AND NOT JUST THE STATE WORD. `controllerState` reads the state word at the
+ * front of a status line, and an alarm is not always there: the trace shows it arriving as its own
+ * line, `ALARM: Probe fail`, beside a reply that reads perfectly `Idle` (the two halves of one
+ * exchange), and a frame that arrived with no line in flight carries the same words (#386 item 3).
+ * A gate asking "may I send this now?" has to act on the alarm whichever of those it came in.
+ */
+export function alarmLine(text: string | null): string | null {
+  if (text === null) return null;
+  for (const line of text.split(/\r?\n/)) {
+    if (ALARM_WORDS.test(line)) return line.trim();
+  }
+  return null;
+}
+
 /** The socket-facing half of the upload: one status read, one transfer. */
 export interface MachineUploadClient {
   /**
@@ -118,7 +141,9 @@ export interface MachineUploadClient {
  *     because it already held an identical file (the MD5 step matched), which is a success with a
  *     different sentence, not a failure.
  *   - `refused` — the machine was offered the file and declined it. A result about the machine.
- *   - `busy` — nothing was sent: the machine, asked just now, did not say it was idle (#296).
+ *   - `busy` — nothing was sent: the machine, asked just now, did not say it was idle (#296). Three
+ *     answers land here and `detail` says which: a state word that is not `Idle`, an `Idle` line whose
+ *     `P:` percent says a job is still running (#390), or a controller that is in an alarm.
  *   - `timeout` / `error` — the socket failed, or the exchange went somewhere the protocol does not
  *     allow. A result about the network.
  *   - `unavailable` — nothing was attempted, because this build cannot reach a machine at all.
@@ -217,6 +242,21 @@ export async function uploadProgram(
   }
   if (!reading.ok || reading.text === null) {
     return { kind: 'error', filename, detail: 'could not confirm the machine is idle before writing: it did not answer a status request' };
+  }
+  // AN ALARM OUTRANKS THE STATE WORD, and it is asked first because it is the more specific
+  // statement: a controller that has locked itself (`ALARM: Probe fail`, `error:Alarm lock`) may well
+  // report `Idle`, and writing to its card is not a thing to do while it is in that state. Checked
+  // over the whole text rather than the state word alone — the 2026-10-12 trace's alarm is its own
+  // line beside an ordinary status line — and the sentence quotes the machine's own words, because
+  // "clear it at the machine first" is only honest once the person can see WHICH alarm it is.
+  const alarm = alarmLine(reading.text);
+  if (alarm !== null) {
+    return {
+      kind: 'busy',
+      filename,
+      detail: `the controller is in an alarm (\`${alarm}\`), so nothing was sent — clear it at the machine first`,
+      status: reading.text,
+    };
   }
   const state = controllerState(reading.text);
   if (state === null) {
