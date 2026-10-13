@@ -649,7 +649,7 @@ export interface LabelDepthInputs {
   voidLimit: { name: string; limit: Mm; estimated?: boolean } | null;
   /**
    * How near THIS ITEM's own extent comes to the vise's jaws, in XY — `labelJawReach`, or the
-   * `itemReachesJaws` reading reduced to a `reaches` flag (#369).
+   * `idJawReach` reading for a kind whose own extent cannot be measured (#369, #394).
    *
    * The jaw floor is `stockProud − clearance`, a Z rule, and it used to be charged to every line on
    * the blank whatever its position. It applies only where a jaw can actually reach the cut, which
@@ -661,7 +661,10 @@ export interface LabelDepthInputs {
    * jaw bound charged to a line the jaws cannot reach — the exact bug — and there is no honest
    * default, because "the jaws bind everything" is the reading #369 removed.
    */
-  jawReach: { jaw: 'fixed' | 'moving'; gap: Mm; reaches: boolean };
+  // Structurally `partPlan.JawReach`, restated rather than imported: `partPlan` is built ON this
+  // module, so the edge would be a cycle — and a `type`-only import is still an edge a reader has
+  // to trace. Only `jaw` and `gap` are read below; the flags are the caller's to interpret.
+  jawReach: { jaw: 'fixed' | 'moving'; gap: Mm; reaches: boolean; overJaw: boolean };
   /**
    * The Z-error margin in force for this job, mm — `effectiveMargins`' `boundaryMargin`, as the
    * checker will resolve it. REQUIRED for the same reason: this module does not read the settings
@@ -780,9 +783,13 @@ export function recommendLabelDepth(
   const clearance = Math.max(job.jawClearance, margin);
   const { stockProud } = job.workholding.vise;
   // #369 — the jaw floor is a Z rule with an XY precondition, and the basis states which one held
-  // rather than which number won. The gap is measured against the line's ESTIMATED extent (the box
-  // `voidLimitForItem` also reads), which is an upper bound on the real ink, so the real clearance is
-  // at least the number quoted — hence "at least", and hence "within" on the other side.
+  // rather than which number won. `reaches` is that precondition: the swept cut can come over a jaw
+  // once the vise's own band is allowed for (#394), which is the same reading `stock-proud-too-small`
+  // warns on, so a depth recommended here is never one the app's own warning refuses. The gap is
+  // measured against the line's own extent — MEASURED where its face is up, and `inkBoxOf`'s
+  // documented estimate where it is not (#394) — and either way that box CONTAINS the ink, so the
+  // real distance is at least the number quoted: hence "at least", and hence "within" on the other
+  // side.
   const { jaw, gap, reaches } = inputs.jawReach;
   if (reaches) {
     candidates.push({

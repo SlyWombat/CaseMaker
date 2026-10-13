@@ -484,6 +484,17 @@ describe('the label depth a blank allows (#362)', () => {
   });
 
   /**
+   * The demo 'CASE' line placed where the JAWS can reach it (#394). The line MEASURES 46.28 mm
+   * wide, so its own default (x = 50 on the 76.2 mm badge blank) comes 3.06 mm off the moving jaw
+   * face — past the 2.5 mm reach a default vise's 2 mm band plus the cutter's 0.5 mm radius opens,
+   * so it would be charged no jaw floor at all and the jaw's own tests would be testing nothing.
+   * At x = 24 its box comes 0.86 mm off the FIXED jaw face: the jaw floor is in play, and the other
+   * jaw is still 28.06 mm away, so which jaw answers is unambiguous.
+   */
+  const nearJaw = (over: Partial<EngraveLabel> = {}): EngraveLabel =>
+    label({ position: { x: 24, y: 43 }, ...over });
+
+  /**
    * The inputs a caller hands `recommendLabelDepth`, with the JAW reach worked out for the very line
    * being judged — the way all three app callers do it (`EngravePanel`, `engraveJobStore`,
    * `runSheet`), so a test cannot pass on a reach no caller would have supplied (#369).
@@ -496,7 +507,7 @@ describe('the label depth a blank allows (#362)', () => {
     const boundaryMargin = over.boundaryMargin ?? 0.2;
     return {
       voidLimit: null,
-      jawReach: labelJawReach(job, line, Math.max(job.jawClearance, boundaryMargin)),
+      jawReach: labelJawReach(job, line),
       boundaryMargin,
       ...over,
     };
@@ -540,7 +551,7 @@ describe('the label depth a blank allows (#362)', () => {
     // gets a fresh answer rather than a floor frozen against this one.
     const badge = badgeJob();
     const job: EngraveJob = { ...badge, stock: { ...badge.stock, print: PRINT_0_2 }, keepOuts: [] };
-    const rec = recommendLabelDepth(job, label(), inputsFor(job, label()))!;
+    const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw()))!;
     expect(rec.depth).toBe(0.6);
     expect(rec.depthIntent).toBe('surface');
     expect(rec.basis[0]).toContain('which lands inside the colour split');
@@ -585,7 +596,7 @@ describe('the label depth a blank allows (#362)', () => {
     expect(margin).toBe(0.28);
     expect(splitDepthOf(job)).toBe(1.2);
 
-    const rec = recommendLabelDepth(job, label(), inputsFor(job, label(), { boundaryMargin: margin }))!;
+    const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw(), { boundaryMargin: margin }))!;
     expect(rec.depthIntent).toBe('surface');
     expect(rec.depth).toBe(0.92);
     expect(rec.basis[0]).toContain('stops in the top colour at 0.92 mm');
@@ -617,7 +628,7 @@ describe('the label depth a blank allows (#362)', () => {
       keepOuts: [],
     };
     expect(splitDepthOf(job)).toBeCloseTo(1.4, 9);
-    const rec = recommendLabelDepth(job, label(), inputsFor(job, label()))!;
+    const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw()))!;
     expect(rec.depth).toBe(0.905);
     expect(rec.depthIntent).toBeUndefined();
     expect(rec.basis[0]).toContain('above the jaw tops');
@@ -642,8 +653,8 @@ describe('the label depth a blank allows (#362)', () => {
 
     // The line the badge route seeds: 'Name' at 8 mm on (38.1, 6.775), whose ink box stops short of
     // the pocket's roof at y = 12.55. It reaches NO void, and since #369 it is clear of the JAWS too
-    // — even at the estimate's widest box, 62.4 mm across a 76.2 mm blank, it comes no nearer than
-    // 6.9 mm to a jaw face, past the 3.5 mm reach the vise's own uncertainty opens up. So the blank's
+    // — its MEASURED box is 28.2857 mm across a 76.2 mm blank (#394), so it comes 23.957 mm from
+    // either jaw face, far past the 2.5 mm reach the vise's own uncertainty opens up. So the blank's
     // underside is what answers, 2.81 mm, and the basis says the jaws set no limit rather than
     // staying silent about them.
     const beside = label({ text: 'Name', size: 8, position: { x: 38.1, y: 6.775 } });
@@ -651,7 +662,7 @@ describe('the label depth a blank allows (#362)', () => {
     const besideRec = recommendLabelDepth(job, beside, inputsFor(job, beside))!;
     expect(besideRec.depth).toBe(2.81);
     expect(besideRec.basis[0]).toContain("the blank's 1 mm minimum floor allows 2.81 mm");
-    expect(besideRec.basis[1]).toContain('clear of both jaws by at least 6.9 mm; the jaws set no limit here');
+    expect(besideRec.basis[1]).toContain('clear of both jaws by at least 23.957 mm; the jaws set no limit here');
 
     // A blank with nothing declared under it has no void floor to keep, and a void that does not cut
     // cannot bind anything either.
@@ -722,7 +733,7 @@ describe('the label depth a blank allows (#362)', () => {
     // 1.905 mm proud less the job's own 1 mm clearance. The blank's underside (3.81 − 1 = 2.81)
     // is nowhere near binding: this is the jaw check's own budget, said before the wizard opens.
     // `stockProud < deepest + jawClearance` is strict, so a floor landing exactly on it is inside.
-    const rec = recommendLabelDepth(job, label(), inputsFor(job, label()))!;
+    const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw()))!;
     expect(rec.depth).toBe(0.905);
     expect(1.905 < rec.depth + job.jawClearance).toBe(false);
     // NOT a reveal: there is no split on this blank, and stamping one would make the item fail the
@@ -732,7 +743,9 @@ describe('the label depth a blank allows (#362)', () => {
     // #345's rule: the recommendation may be STRICTER than the setting. A domed blank keeps its
     // 0.5 mm boundary margin over the jaws, not the house 1 mm... which is the looser of the two.
     const loose = badgeJob({ keepOuts: [], jawClearance: 0.1 });
-    expect(recommendLabelDepth(loose, label(), inputsFor(loose, label(), { boundaryMargin: 0.5 }))!.depth).toBe(1.405);
+    expect(
+      recommendLabelDepth(loose, nearJaw(), inputsFor(loose, nearJaw(), { boundaryMargin: 0.5 }))!.depth,
+    ).toBe(1.405);
   });
 
   it('says nothing about an item that has stated its own intent, or cut nothing at all', () => {
@@ -748,7 +761,7 @@ describe('the label depth a blank allows (#362)', () => {
     // …and a blank with no room for any cut gives NO depth rather than a made-up one: the jaw
     // check goes on saying what is wrong with the setup, which is a thing to fix, not to cut.
     const tight = badgeJob({ keepOuts: [], jawClearance: 3 });
-    expect(recommendLabelDepth(tight, label(), inputsFor(tight, label()))).toBeNull();
+    expect(recommendLabelDepth(tight, nearJaw(), inputsFor(tight, nearJaw()))).toBeNull();
   });
 
   it('falls back to the blank’s own underside when nothing else limits it', () => {
@@ -791,31 +804,32 @@ describe('the label depth a blank allows (#362)', () => {
   });
 
   // #369 — the jaw bound is XY-aware, exactly as #365 made the void bound: a jaw limits only the
-  // lines whose own ink box comes within its reach (the vise's uncertainty, the job's clearance and
-  // the cutter's radius), and a line clear of both jaws is bound by something else — or nothing.
+  // lines whose own ink box comes within its reach (the vise's uncertainty and the cutter's radius,
+  // #394), and a line clear of both jaws is bound by something else — or nothing.
   it('charges a jaw only to the lines it can reach, and names the jaw that binds (#369)', () => {
     const job = badgeJob({ keepOuts: [] });
     // The blank's jaws face each other 76.2 mm apart in X and span the whole 38.1 mm of Y. A 'Name'
-    // line 8 mm tall is 62.4 mm wide at `inkBoxOf`'s estimate, so centred on the blank it stops
-    // 6.9 mm short of either jaw face — past the 3.5 mm reach the default vise's own 2 mm uncertainty
-    // opens up (2 + the job's 1 mm clearance + the cutter's 0.5 mm radius). Clear: no jaw bound.
+    // line 8 mm tall MEASURES 28.2857 mm wide (#394), so centred on the blank it stops 23.957 mm
+    // short of either jaw face — past the 2.5 mm reach the default vise's own 2 mm uncertainty plus
+    // the cutter's 0.5 mm radius opens up. Clear: no jaw bound.
     const centred = label({ text: 'Name', size: 8, position: { x: 38.1, y: 6.775 } });
-    const clear = labelJawReach(job, centred, job.jawClearance);
+    const clear = labelJawReach(job, centred);
     expect(clear.jaw).toBe('fixed');
-    expect(clear.gap).toBeCloseTo(6.9, 9);
+    expect(clear.gap).toBeCloseTo(23.957, 3);
     expect(clear.reaches).toBe(false);
     const clearRec = recommendLabelDepth(job, centred, inputsFor(job, centred))!;
     expect(clearRec.depth).toBe(2.81);
     // The jaws are still SAID, in the not-binding tail the panel row does not print: a clause that
     // named the floor and stayed silent about the jaws would read as if none had been considered.
-    expect(clearRec.basis[1]).toBe('clear of both jaws by at least 6.9 mm; the jaws set no limit here');
+    expect(clearRec.basis[1]).toBe('clear of both jaws by at least 23.957 mm; the jaws set no limit here');
 
-    // The same line moved until its box comes 2 mm off the fixed jaw — the issue's own example. Now
-    // the jaw bound is the shallowest floor, and the clause says which jaw and why.
-    const nearFixed = label({ text: 'Name', size: 8, position: { x: 33.2, y: 6.775 } });
-    const at = labelJawReach(job, nearFixed, job.jawClearance);
+    // The same line moved until its measured box comes 2 mm off the fixed jaw — the issue's own
+    // example. Its half-width is 14.1429 mm, so x = 16.1429 puts the left face at 2.0000 mm. Now the
+    // jaw bound is the shallowest floor, and the clause says which jaw and why.
+    const nearFixed = label({ text: 'Name', size: 8, position: { x: 16.1429, y: 6.775 } });
+    const at = labelJawReach(job, nearFixed);
     expect(at.jaw).toBe('fixed');
-    expect(at.gap).toBeCloseTo(2, 9);
+    expect(at.gap).toBeCloseTo(2, 3);
     expect(at.reaches).toBe(true);
     const rec = recommendLabelDepth(job, nearFixed, inputsFor(job, nearFixed))!;
     expect(rec.depth).toBe(0.905);
@@ -824,15 +838,21 @@ describe('the label depth a blank allows (#362)', () => {
     // …and it is the jaws, not the blank's underside, that bind: the not-binding tail says so.
     expect(rec.basis[1]).toContain('not binding');
 
-    // A line wide enough to span the blank reaches BOTH jaws, and the tie goes to the fixed one —
-    // the first the envelope declares — so the clause names one jaw rather than flickering between two.
-    expect(labelJawReach(job, label(), job.jawClearance)).toMatchObject({ jaw: 'fixed', gap: 0, reaches: true });
+    // A line wide enough to hang past BOTH jaw faces reaches both, and the tie goes to the fixed one
+    // — the first the envelope declares — so the clause names one jaw rather than flickering between
+    // two. 'CASE' at 30 mm measures 99.171 mm, wider than the blank is long, and centred at x = 38.1
+    // it pokes out of each end; a line whose box overlaps a jaw is 0 mm from it, not a negative gap.
+    expect(labelJawReach(job, label({ size: 30, position: { x: 38.1, y: 43 } }))).toMatchObject({
+      jaw: 'fixed',
+      gap: 0,
+      reaches: true,
+    });
 
     // Rotation turns the line's extent about its centre, read in the jaws' own frame: a line 8 mm
-    // tall and 62.4 mm wide faces the fixed jaw with its 8.4 mm half-HEIGHT once turned 90°, so it
-    // comes further clear (29.7 mm) than upright, and the projection is what answers that.
+    // tall and 28.2857 mm wide faces the fixed jaw with its 4.046 mm half-HEIGHT once turned 90°, so
+    // it comes further clear (34.054 mm) than upright, and the projection is what answers that.
     const turned = label({ text: 'Name', size: 8, position: { x: 38.1, y: 6.775 }, rotation: 90 });
-    expect(labelJawReach(job, turned, job.jawClearance).gap).toBeCloseTo(29.7, 9);
+    expect(labelJawReach(job, turned).gap).toBeCloseTo(34.054, 3);
   });
 
   it('hands the seeded badge line over clean through the real generate path (#369)', () => {

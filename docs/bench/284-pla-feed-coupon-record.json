@@ -5,7 +5,7 @@
   "material": "pla",
   "toolKey": "inv:kz-o-flute-2-12",
   "cuttingDiameter": 2,
-  "generatedOn": "2026-10-12",
+  "generatedOn": "2026-10-13",
   "cutOn": null,
   "baseOverride": {},
   "note": "Fill \"verdict\" (ok / poor / broke), \"cutOn\" (YYYY-MM-DD) and any note per program. If more than one program cut ok, mark exactly one \"chosen\": true. Then run scripts/feeds-readback.ts on this file.",

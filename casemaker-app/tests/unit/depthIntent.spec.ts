@@ -192,10 +192,13 @@ describe('the two-state control against the checker (#170 review)', () => {
       { ...label, depthIntent: undefined },
       {
         voidLimit: null,
-        // #369 — the jaw bound, on the reach this line's own extent has: the 'CASE' line spans the
-        // whole 100 mm blank at the estimate's 109.2 mm, so it reaches both jaws and the 3 mm floor
-        // is a candidate here exactly as it was before.
-        jawReach: labelJawReach(job, label, Math.max(job.jawClearance, MARGIN)),
+        // #369 — the jaw bound, on the reach this line's own extent has. #394 measures that extent:
+        // the demo 'CASE' line is 46.28 mm wide, so centred on the 100 mm plank it stands 26.86 mm
+        // clear of both jaws and NOTHING here is charged a jaw floor. The estimate it replaced read
+        // 109.2 mm, wide enough to be "at" both jaws, and this row used to take the jaw's 3 mm floor
+        // through it. The assertion below is the one that matters either way — the row and the
+        // control must state the same floor — and on this blank that floor is the split's.
+        jawReach: labelJawReach(job, label),
         boundaryMargin: MARGIN,
       },
     )!;

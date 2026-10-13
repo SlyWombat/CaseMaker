@@ -226,6 +226,11 @@ describe('validateJob (#200)', () => {
     const job = defaultEngraveJob(); // deepest 2.0 -> needs stockProud >= 3
     job.workholding.vise.stockProud = 2.5;
     job.workholding.vise.source = 'saved';
+    // The line has to be one the jaws can REACH, or there is no jaw for the stand to be short
+    // for (#369, #394). The demo 'CASE' line MEASURES 46.28 mm wide, so centred on this 100 mm
+    // plank it sits 26.9 mm clear of both jaw faces; moved to x = 24 its box comes 0.86 mm off the
+    // fixed jaw — inside the 2 mm band the vise's own uncertainty opens plus the cutter's 0.5 mm.
+    job.labels[0]!.position = { x: 24, y: 43 };
     expect(validateJob(job).some((f) => f.code === 'stock-proud-too-small')).toBe(true);
     // #362 — the clearance is the JOB's number, not a constant in the check: at 0.4 mm asked for,
     // a 2.5 mm stand clears a 2 mm cut.
@@ -245,9 +250,10 @@ describe('validateJob (#200)', () => {
     const job = defaultEngraveJob(); // deepest 2.0 -> needs stockProud >= 3
     job.workholding.vise.stockProud = 2.5;
     job.workholding.vise.source = 'saved';
-    // The demo 'CASE' line is 109.2 mm wide at the estimate across a 100 mm plank: EDGE TO EDGE, its
-    // box spans past both jaw faces, so the jaws are exactly what this stand is short for.
-    job.labels = [job.labels[0]!];
+    // The demo 'CASE' line MEASURES 46.28 mm wide (#394) across a 100 mm plank, so it is only the
+    // jaws' business once it is moved near one: at x = 24 its box comes 0.86 mm off the fixed jaw
+    // face, and the jaws are exactly what this stand is short for.
+    job.labels = [{ ...job.labels[0]!, position: { x: 24, y: 43 } }];
     expect(validateJob(job).some((f) => f.code === 'stock-proud-too-small')).toBe(true);
 
     // The same stand, with the line moved and shrunk clear of both jaws: the 2.5 mm is still short of
@@ -388,8 +394,12 @@ describe('engraveJobStore (#200)', () => {
     const s = () => useEngraveJobStore.getState();
     const id = s().job.labels[0]!.id;
 
-    s().updateLabel(id, { depth: 1.2 });
-    expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'user' });
+    // The depth AND where the line sits: the warning below is about a cut working below the jaw
+    // tops, and since #369/#394 only a line the jaws can REACH is charged — 'CASE' at 14 mm
+    // MEASURES 46.28 mm wide, so on the 76.2 mm badge blank it needs to sit near a jaw face (at
+    // x = 24 its box comes 0.86 mm off the fixed one) for the question to be in play at all.
+    s().updateLabel(id, { depth: 1.2, position: { x: 24, y: 43 } });
+    expect(s().job.sources?.labels?.[id]).toEqual({ depth: 'user', layout: 'user' });
 
     // A badge stating NO print (#368): the evidence this test wants is the PER-LINE void answer, and
     // on a printed blank the colour band is tighter than either line's void, so all three would come
@@ -411,7 +421,12 @@ describe('engraveJobStore (#200)', () => {
     // The provenance survives the round trip: zod strips every key its object does not name, and a
     // `user` depth coming back unclaimed would let the NEXT blank overwrite it (#310's trap).
     const second = await freshStore();
-    expect(second.useEngraveJobStore.getState().job.sources?.labels?.[id]).toEqual({ depth: 'user' });
+    // Both claims, not just the depth: the `layout` stamp was typed here too, and a claim the
+    // round trip dropped would let the next blank re-lay a line the user placed.
+    expect(second.useEngraveJobStore.getState().job.sources?.labels?.[id]).toEqual({
+      depth: 'user',
+      layout: 'user',
+    });
     expect(second.useEngraveJobStore.getState().job.labels[0]!.depth).toBe(1.2);
   });
 

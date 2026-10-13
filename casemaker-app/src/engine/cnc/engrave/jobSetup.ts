@@ -387,11 +387,16 @@ export function validateJob(job: EngraveJob): JobFinding[] {
   // in XY (#369). The jaw check is about a floor working below the jaw TOPS, and a line with blank
   // material between it and both jaw faces cannot put a floor there whatever its depth; charging it
   // is what made the shipped badge hand-off warn about its own recommendation. `itemReachesJaws`
-  // reads a label's own ink box and answers the strict yes for the kinds it cannot measure, so this
-  // can only warn where it warned before, plus nothing.
+  // reads a label's own MEASURED ink box (#394) and answers the strict yes for the kinds it cannot
+  // measure, so this can only warn where it warned before, plus nothing.
+  //
+  // The reading is the reach the floor applies over — the sweep plus the vise's own uncertainty —
+  // not the narrower one the run sheet stops on (#394): a warning is advice and may be raised a band
+  // early, where a stop is an instruction. The `jawClearance` is charged to the depth itself below,
+  // which is where the Z rule belongs.
   const reachingDepths = (items: readonly (EngraveAnyItem | EngraveTraceItem | EngraveDrill)[]) =>
     items
-      .filter((item) => itemReachesJaws(job, item, jawClearance))
+      .filter((item) => itemReachesJaws(job, item))
       .map((item) => ({ id: item.id, depth: item.depth }));
   const candidateDepths: { id: string; depth: number }[] = [
     ...reachingDepths(enabled),

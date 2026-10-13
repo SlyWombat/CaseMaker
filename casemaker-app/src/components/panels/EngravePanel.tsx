@@ -463,10 +463,11 @@ export function EngravePanel(): JSX.Element {
     return recommendLabelDepth(job, label, {
       voidLimit: voidLimitForItem(job, label, margins.boundaryMargin, measure),
       // #369 — the jaw bound is charged to this line only where a jaw can reach it, on the same
-      // estimate box the void bound above reads. `max(jawClearance, boundaryMargin)` is the
-      // clearance the floor itself holds (the module's own `Math.max`), so the reach is the same
-      // number the clause will quote.
-      jawReach: labelJawReach(job, label, Math.max(job.jawClearance, margins.boundaryMargin)),
+      // box the void bound above reads (#394 measures it inside `labelJawReach`, off the job's own
+      // faces). The clearance the floor holds is the `Math.max` `recommendLabelDepth` itself applies
+      // (`job.jawClearance` against the margin), so the reach and the clause cannot quote two
+      // different clearances.
+      jawReach: labelJawReach(job, label),
       boundaryMargin: margins.boundaryMargin,
       ...(intent === undefined ? {} : { intent }),
     });

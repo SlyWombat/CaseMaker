@@ -361,9 +361,17 @@ jaw's floor and names it too. The extent is the line's whole ink box — the hon
 cut, since the check it answers to is a positional one — measured from the same face the layout was,
 and where that face is not parsed yet the box falls back to a documented upper-bound estimate, which
 the sentence says where it is used ("measured against the line's estimated extent — its face is not
-parsed yet"). The jaw reach alone is judged on that estimate always, never the parsed face: the
-check that refuses a cut at the jaws reads the job as data and cannot parse a face, so the two work
-from the same box — which is why the clause says "at least". A line **you** typed or placed is left
+parsed yet"). The reach behind both the jaw limit and the `stock-proud-too-small` warning is the
+vise's own uncertainty plus the cutter's radius on that same box, and nothing else (#394): the band
+is where an unmeasured vise's faces may be, the radius is how far the cutter's disc works outside the
+line's box, and the job's **jaw clearance** is not in it — that is a Z rule, charged to the depth
+(`deepest + clearance`, the blank standing that much higher than the floor) rather than a claim about
+which region of the blank in XY the rule applies over. One reader asks a stricter question of the
+same reach: the run sheet's stop step prints a threshold only where the cutter's own disc — no band
+allowed for — really comes over a jaw face, and names the cut and the jaw that trip it, because a stop
+line is an instruction to someone standing at the machine and the operator has to be able to see why.
+A job whose cuts all sit clear of the jaws prints no threshold and says so; the warning still fires
+inside the band, because with the jaws unmeasured that is where a face may be. A line **you** typed or placed is left
 exactly where it is, text and position both — and so is one an earlier take seeded, once you have
 touched it: taking a second badge blank re-lays only what the app still owns.
 
@@ -881,7 +889,7 @@ running passes above; the rest are the checks the runner does not do on its own:
 | `drill-too-deep` | error | A hole is deeper than the cutter's flute, so chips cannot clear (#220). | Drill shallower, or use a cutter with a longer flute. |
 | `drill-through-unavailable` | error | The hole is asked to cut all the way through, which needs a sacrificial board (#213) and the through-cut rules (#218) that are not in yet (#220). | Drill to a floor instead, or wait for the through-cut work. |
 | `tool-missing` | error | The job names a tool that is not in the library. | Pick a real tool. |
-| `stock-proud-too-small` | warning | A cut comes within reach of a jaw and the blank stands too far below the jaw tops for its depth, so the cutter would work below the jaws. | Seat the blank higher. |
+| `stock-proud-too-small` | warning | A cut comes within the cutter's reach of a jaw — the vise's own uncertainty plus the cutter's radius — and the blank stands too far below the jaw tops for its depth, so the cutter would work below the jaws. | Seat the blank higher. |
 | `vise-default` | warning | The vise dimensions are unmeasured defaults, so collisions cannot be trusted. | Measure your vise. |
 | `vise-stock-not-proud` | error | The blank is not proud of the jaws at all — the cutter would hit the vise. | Seat the blank proud. |
 | `vise-stock-proud-exceeds-thickness` | error | The blank stands proud by more than its own thickness; the numbers do not add up. | Re-check the vise and stock numbers. |

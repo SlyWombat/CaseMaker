@@ -8,6 +8,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   buildRunSheet,
   formatDuration,
@@ -24,7 +27,10 @@ import {
   type RunSheetStackUp,
 } from '@/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { buildCouponPrograms, type CouponSpec } from '@/engine/cnc/engrave/couponJob';
+import { labelJawReach } from '@/engine/cnc/engrave/partPlan';
 import { dedupeFindings, jobTool, validateJob } from '@/engine/cnc/engrave/jobSetup';
+import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { feedsFor } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc';
 import { DEFAULT_VISE, validateVise } from '@/engine/cnc/fixture';
@@ -32,6 +38,20 @@ import { presetJawStrips, presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import type { EngraveJob } from '@/types/engraveJob';
 
 const NOW = new Date('2026-10-04T00:00:00Z');
+
+const APP = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/**
+ * The bench's own committed blank (`docs/bench/165-depth-ladder-row-A.job.json`) — the base job the
+ * S3 coupons are carved from (#284): 38.1 × 76.2 × 3.81 mm PLA, clamped with the 2 mm O-flute and
+ * standing 1.2 mm proud. Read through the store's schema, the way the app reads it.
+ */
+function benchJob(): EngraveJob {
+  const path = join(APP, '..', 'docs', 'bench', '165-depth-ladder-row-A.job.json');
+  const parsed = parseEngraveJob(JSON.parse(readFileSync(path, 'utf8')));
+  if (!parsed.ok) throw new Error(`${path} should parse: ${parsed.errors.join('; ')}`);
+  return parsed.job;
+}
 
 /** A stand-in for the exact `.nc` text; the sheet only hashes it. */
 const NC = [';@MKR|BEGIN', 'G21 G90', 'T1 M6', 'S12000', 'G1 Z-2.000 F200', 'G1 X10 Y10 F500', 'M5', 'G28', 'M2'].join('\n');
@@ -130,11 +150,20 @@ describe('runSheet (#207)', () => {
     expect(a.header.fileName).toBe(b.header.fileName);
   });
 
-  it('sets section 3\'s stop threshold to the deepest enabled depth plus 1', () => {
+  it('sets section 3\'s stop threshold to the deepest cut that sweeps over a jaw, plus the clearance', () => {
+    // #394 — the stop is printed only for a cut the cutter really gets OVER a jaw (`gap <= radius`,
+    // the narrow reading), and the number is the deepest of THOSE. The demo 'CASE' line MEASURES
+    // 46.28 mm across the 100 mm plank, 26.9 mm clear of either face, so it is placed over the fixed
+    // jaw here to make the stop live at all — under the old ESTIMATE box it read 109.2 mm and
+    // reached from anywhere on the blank, which is what put a stop on every sheet.
     const job = defaultEngraveJob();
-    expect(section(sheetFor(job), 'load').steps.find((s) => s.text.includes('stop'))!.text).toContain('3 mm');
-    job.labels[2]!.depth = 5; // deepest is now 5 -> threshold 6
-    expect(section(sheetFor(job), 'load').steps.find((s) => s.text.includes('stop'))!.text).toContain('6 mm');
+    job.labels = [{ ...job.labels[0]!, position: { x: 23, y: 43 } }];
+    const stopStep = () => section(sheetFor(job), 'load').steps.find((s) => s.text.includes('stop'))!;
+    expect(stopStep().text).toContain('less than 3 mm, stop');
+    // The stop NAMES the cut that trips it and the jaw, so the operator can see what to look at.
+    expect(stopStep().text).toContain('Engrave "CASE" sweeps over the fixed jaw');
+    job.labels[0]!.depth = 5; // the deepest cut over a jaw is now 5 -> threshold 6
+    expect(stopStep().text).toContain('less than 6 mm, stop');
   });
 
   it('opens section 8 with the unmeasured-vise warning only when the vise is a default', () => {
@@ -707,7 +736,10 @@ describe('runSheet (#207)', () => {
     });
 
     it('clears the cutter by the job’s OWN jaw clearance, not a constant', () => {
-      const job = defaultEngraveJob(); // deepest cut 2.0 mm, jawClearance 1.0
+      // #394 — the 'CASE' line is moved over the fixed jaw's face, because the stop is only printed
+      // for a cut the cutter gets over a jaw and the measured box of a centred line never does.
+      const base = defaultEngraveJob(); // deepest cut 2.0 mm, jawClearance 1.0
+      const job: EngraveJob = { ...base, labels: [{ ...base.labels[0]!, position: { x: 23, y: 43 } }] };
       const stop = section(sheetFor(job), 'load').steps.find((s) =>
         s.text.includes('would work below the jaw tops'),
       )!;
@@ -720,23 +752,77 @@ describe('runSheet (#207)', () => {
       expect(wider.text).toContain('less than 3.5 mm, stop');
     });
 
-    it('says the jaws set no limit where no cut comes within their reach (#369)', () => {
-      // The demo plank's lines span the whole 100 mm blank, so they reach both jaws and the stop
-      // above is live. Shrunk and moved clear of them — the XY test #369 added — a number below the
-      // face would be a stop the app's own jaw check does not make, so it is dropped and the sentence
-      // says why instead of printing a limit nobody has to keep.
+    it('says the jaws set no limit where no cut comes over one (#369, #394)', () => {
+      // The line above is on the fixed jaw's face, so the stop is live. Moved clear of it — the XY
+      // test #369 added, now read against the MEASURED box (#394) — a number below the face would be
+      // a stop the app's own jaw check does not make, so it is dropped and the sentence says why
+      // instead of printing a limit nobody has to keep.
       const job = defaultEngraveJob();
       const clear: EngraveJob = {
         ...job,
         labels: [{ ...job.labels[0]!, text: 'Name', size: 8, position: { x: 50, y: 30 } }],
       };
       const step = section(sheetFor(clear), 'load').steps.find((s) =>
-        s.text.includes('comes within reach of a jaw'),
+        s.text.includes('sweeps over a jaw'),
       )!;
-      expect(step.text).toContain('no cut on this job comes within reach of a jaw');
+      expect(step.text).toContain('No cut on this job sweeps over a jaw');
       expect(step.text).not.toContain('would work below the jaw tops');
       // The face height the operator records is unchanged: only the "stop below" number goes.
       expect(step.text).toContain('4 mm above the jaw tops');
+    });
+
+    it('leaves a coupon cell the cutter clears off the stop, and still warns while the band covers it (#394)', () => {
+      // The coupon-shaped case the maintainer ruled on. The #284 coupons cut 11 mm value cells on
+      // the as-clamped badge blank — built here the way `scripts/bench-files.ts` builds them, from
+      // the bench's own base job — and a cell's MEASURED ink is 33.49 mm across that blank's
+      // 38.1 mm: 2.31 mm in from each jaw face. Under the old ESTIMATE box (1.95 em per character,
+      // 85.8 mm) every cell "reached" both jaws, so §3 printed "less than 1.8 mm, stop" on every
+      // coupon — which a blank standing 1.2 mm proud trips — and on the ladder before it.
+      //
+      // The rule's two readings separate exactly here. 2.31 mm is INSIDE the unmeasured vise's own
+      // 2 mm band plus the cutter's 1 mm radius, which is the reading the WARNING uses and one it
+      // may keep raising a band early (decision 28); it is OUTSIDE the radius alone, which is the
+      // reading the STOP uses — and a stop is an instruction to a person, not advice.
+      const coupon = (size: number): EngraveJob => {
+        const spec: CouponSpec = {
+          id: '284-pla-feed',
+          title: '284 PLA feed coupon',
+          parameter: 'feed',
+          values: [500],
+          base: benchJob(),
+          text: { size, pitch: 16 },
+          origin: { x: 19.05, y: 68 },
+          depth: 0.8,
+          font: 'sans-default',
+          weight: 'bold',
+        };
+        return buildCouponPrograms(spec)[0]!.job;
+      };
+      const stepOf = (job: EngraveJob) =>
+        section(sheetFor(job), 'load').steps.find((s) => s.text.includes('sweeps over a jaw'))!;
+
+      const cell = coupon(11);
+      const reach = labelJawReach(cell, cell.labels[0]!);
+      expect(reach.jaw).toBe('fixed');
+      expect(reach.gap).toBeCloseTo(2.31, 2);
+      expect(reach.reaches).toBe(true);
+      expect(reach.overJaw).toBe(false);
+      // The warning fires — 0.8 mm of cut plus the job's 1.0 mm of clearance is past the 1.2 mm this
+      // blank stands — and the sheet states the stand it must be measured against.
+      expect(validateJob(cell).map((f) => f.code)).toContain('stock-proud-too-small');
+      expect(stepOf(cell).text).toContain('1.2 mm above the jaw tops');
+      // …but the stop is not printed: the geometry says there is nothing under a jaw to trip it, and
+      // a number the job cannot trip is a number the operator has to argue with at the machine.
+      expect(stepOf(cell).text).toContain('No cut on this job sweeps over a jaw, so there is no stop threshold to check');
+      expect(stepOf(cell).text).not.toContain('If it is less than');
+
+      // The other half of the ruling: a cell the cutter clears by MORE than the band raises neither.
+      // The same value at 10 mm leaves 3.83 mm on each side, past the 3 mm the band and the radius
+      // reach together — so the warning goes too, not just the stop.
+      const clear = coupon(10);
+      expect(labelJawReach(clear, clear.labels[0]!).reaches).toBe(false);
+      expect(validateJob(clear).map((f) => f.code)).not.toContain('stock-proud-too-small');
+      expect(stepOf(clear).text).toContain('No cut on this job sweeps over a jaw');
     });
   });
 });
