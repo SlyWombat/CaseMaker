@@ -6,7 +6,7 @@
 // are skipped rather than failed when absent, so a checkout that lacks them stays green.
 
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { verifyProgram, stockDepthLimit, sacrificialDepthLimit, type VerifyContext } from '@/engine/cnc/verify';
@@ -45,22 +45,24 @@ const lineOf = (ctx: VerifyContext, text: string, code: string): (number | null)
   verifyProgram(text, ctx).findings.find((f) => f.code === code)?.line;
 
 /**
- * A minimal valid program: preamble, one tool, the vacuum on, spindle on, the machine-frame
- * retract, an opening XY rapid, a plunge.
+ * A minimal valid program: preamble, one tool, the vacuum on, the machine-frame retract, the
+ * spindle, an opening XY rapid, a plunge.
  *
  * THE ACCESSORY WORD IS `M331` (#283): it is what our post writes — bare `M331` where it used to
  * write `M7` — so it is what a program of ours carries. (`M7`/`M9` are still accepted by the
  * verifier; see the dialect test below.)
  *
- * THE RETRACT IS PART OF MINIMAL-VALID NOW (#384). After a manual `M6` the head's Z is wherever the
- * last job left it, so a file that rapids in XY without first establishing Z is refused — the check
- * this helper would otherwise trip on every program it builds. `G53 G0 Z-3` is what the post writes
- * and the shortest thing that works: absolute in the MACHINE frame, which is the frame the
- * clearance is known in, so `ctxFor`'s setup resolves it to a known work Z (17 mm above the stock
- * top on every stock this file uses).
+ * THE ORDER IS THE POST'S (#384, #396). After a manual `M6` the head's Z is wherever the last job
+ * left it, so the file lifts in the MACHINE frame BEFORE anything else moves — `G53 G0 Z-3`, which
+ * is what the post writes and the shortest thing that works: absolute in the frame the clearance is
+ * known in, so `ctxFor`'s setup resolves it to a known work Z (17 mm above the stock top on every
+ * stock this file uses). The spindle follows the lift, never leads it: a spindle started with no Z
+ * established is refused (#396), and `S12000 M3` spun up at "whatever Z the head was at" is exactly
+ * the hand-written shape that rule exists for. (This helper carried the pre-#392 order — spindle
+ * first — until #396; the two fixtures and every `docs/bench` file already lift first.)
  */
 function program(body: string[], over: Partial<VerifyContext> = {}): { text: string; ctx: VerifyContext } {
-  const text = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 Z-3', ...body].join('\n');
+  const text = ['G90 G21', 'T1 M6', 'M331', 'G53 G0 Z-3', 'S12000 M3', ...body].join('\n');
   return { text, ctx: ctxFor(over) };
 }
 
@@ -160,7 +162,7 @@ describe('cncVerify (#174): the checks', () => {
   });
 
   it('rapid-too-low: the machine-frame retract cures it, and one retract covers the whole opening', () => {
-    const withRetract = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 Z-3', 'G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02'].join('\n');
+    const withRetract = ['G90 G21', 'T1 M6', 'M331', 'G53 G0 Z-3', 'S12000 M3', 'G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor(), withRetract)).not.toContain('rapid-too-low');
   });
 
@@ -178,14 +180,14 @@ describe('cncVerify (#174): the checks', () => {
     expect(report.ok).toBe(false);
 
     // The machine-frame lift before it is what cures it — and then the same line is fine.
-    const lifted = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 Z-3', 'G0 X10 Y8 Z5', 'G1 Z-1 F200', 'G1 X10 Y6', 'M5', 'M02'].join('\n');
+    const lifted = ['G90 G21', 'T1 M6', 'M331', 'G53 G0 Z-3', 'S12000 M3', 'G0 X10 Y8 Z5', 'G1 Z-1 F200', 'G1 X10 Y6', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor(), lifted)).not.toContain('rapid-too-low');
   });
 
   it('rapid-too-low: a G53 X/Y word on its own retract does not establish a work Z', () => {
     // The retract has to be a Z move in the machine frame. `G53 G0 X5` moves in MACHINE X — the
     // work Z is still unknown, and an XY rapid after it is exactly as dangerous as before.
-    const sideways = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 X-5', 'G0 X5 Y5', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
+    const sideways = ['G90 G21', 'T1 M6', 'M331', 'G53 G0 X-5', 'S12000 M3', 'G0 X5 Y5', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor(), sideways)).toContain('rapid-too-low');
   });
 
@@ -193,6 +195,84 @@ describe('cncVerify (#174): the checks', () => {
     const text = ['G90 G21', 'T1 M6', 'M331', 'G0 X5 Y5 Z5', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
     const ctx = ctxFor();
     expect(codes(ctx, text)).toContain('spindle-off-cut');
+  });
+
+  // #396 — THE SPINDLE MUST NOT START AT A Z THE PROGRAM NEVER ESTABLISHED. After a manual `M6`
+  // (our post's own `T1 M6` is a NO-OP when the tool is already T1, which is exactly the case where
+  // the operator swapped it by hand) the head is wherever the last job left it, possibly inside the
+  // part. #392 made every X/Y rapid say where it starts; this says the same of the spindle. A `G53`
+  // lift — what our post (#384) and restarts write — or an absolute Z move establishes it; neither
+  // means the file never placed the tool in Z at all, and the cutter spins up wherever it sits.
+  it('spindle-at-unknown-z: an M3 before any Z is established is refused (#396)', () => {
+    const text = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G0 Z5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02'].join('\n');
+    const report = verifyProgram(text, ctxFor());
+    const f = report.findings.find((x) => x.code === 'spindle-at-unknown-z');
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe('error');
+    expect(f?.line).toBe(4); // the `S12000 M3` itself, not the move that follows it
+    expect(f?.message).toContain('a `G53` lift, or an absolute Z move');
+    expect(report.ok).toBe(false);
+  });
+
+  it('spindle-at-unknown-z: the machine-frame lift before it cures it — the post and restart order', () => {
+    const lifted = ['G90 G21', 'T1 M6', 'M331', 'G53 G0 Z-3', 'S12000 M3', 'G0 Z5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02'].join('\n');
+    expect(codes(ctxFor(), lifted)).not.toContain('spindle-at-unknown-z');
+  });
+
+  it('spindle-at-unknown-z: an absolute Z move before it establishes Z too (#396)', () => {
+    const zed = ['G90 G21', 'T1 M6', 'M331', 'G0 Z5', 'S12000 M3', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02'].join('\n');
+    expect(codes(ctxFor(), zed)).not.toContain('spindle-at-unknown-z');
+  });
+
+  // THE REVIEW THE ISSUE ASKS FOR (#396): the new rule must not retroactively refuse the app's OWN
+  // output. `docs/bench` is the one place a real, committed program lives that is not produced inside
+  // a test — every file there was posted by the same post (#384 order: lift, then spindle), so the
+  // rule must leave all of them alone. The post and the restart are covered where they are built:
+  // `postZ1.spec.ts` / `engraveGenerate.spec.ts` verify the post's own files, and `restart.spec.ts`
+  // self-verifies the restart (the two committed fixtures above cover the post and the authored file).
+  describe('spindle-at-unknown-z (#396): the app never trips its own rule', () => {
+    const BENCH = join(HERE, '..', '..', '..', 'docs', 'bench');
+    const benchFiles = existsSync(BENCH) ? readdirSync(BENCH).filter((f) => f.endsWith('.nc')).sort() : [];
+
+    it.skipIf(benchFiles.length === 0)('no committed `docs/bench` program is refused for it', () => {
+      // A ctx permissive enough that the Z rule is what is under test, not the geometry: any depth
+      // and any rapid height are allowed, so a bench file's own stock and tool do not matter — the
+      // rule reads machine STATE (was a Z established before the spindle?), never the geometry.
+      const permissive = (): VerifyContext => ctxFor({ depthLimit: () => 1000, minRapidZ: -1000 });
+      const reports = benchFiles.map((f) => ({
+        file: f,
+        report: verifyProgram(readFileSync(join(BENCH, f), 'utf8'), permissive()),
+      }));
+      console.log(`[#396] docs/bench files checked: ${benchFiles.length}`);
+      for (const { file, report } of reports) {
+        if (report.findings.some((x) => x.code === 'spindle-at-unknown-z')) {
+          console.log(`[#396] REFUSED: ${file} — ${report.findings.map((x) => x.code).join(', ')}`);
+        }
+      }
+      expect(reports.filter((r) => r.report.findings.some((x) => x.code === 'spindle-at-unknown-z')).map((r) => r.file)).toEqual([]);
+      // The directory really was found — a silent empty glob would make the assertion above vacuous.
+      expect(benchFiles.length).toBeGreaterThan(10);
+      // ...and the verifier really LOWERED every file. A timeline that failed to build carries a
+      // `parse-error` ("could not be lowered to moves") and never reaches the event loop, where the
+      // spindle words are read — so such a file's clean name would prove nothing. (`cuttingMoves` is
+      // the wrong probe: a frame file traces in rapids and counts zero while still holding an `M3`.)
+      const unlowered = reports
+        .filter((r) => r.report.findings.some((x) => x.message.includes('could not be lowered to moves')))
+        .map((r) => r.file);
+      expect(unlowered).toEqual([]);
+      expect(reports.every((r) => r.report.stats.lines > 0)).toBe(true);
+    });
+  });
+
+  it('spindle-at-unknown-z: the hand-written shape it targets — an XY rapid, the spindle, then Z', () => {
+    // Studio's own `TopClamp.nc` (reference-gcode/Z1) opens exactly this way: an XY rapid at
+    // "whatever Z the head is at", then the spindle, then `G0 Z5`. Both #392 and #396 refuse it —
+    // the rapid starts at an unknown Z and the spindle comes on at one — which is the whole point:
+    // a file that states no Z cannot be run safely from an unknown head height.
+    const studio = ['G90 G21', 'T1 M6', 'G0 X5 Y5', 'S12000 M3', 'G0 Z5', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
+    const got = codes(ctxFor(), studio);
+    expect(got).toContain('rapid-too-low');
+    expect(got).toContain('spindle-at-unknown-z');
   });
 
   it('not-our-dialect: an arc, a G91/G92 and an I/J word are all refused', () => {
@@ -232,7 +312,7 @@ describe('cncVerify (#174): the checks', () => {
     expect(codes(vacuum.ctx, vacuum.text)).not.toContain('not-our-dialect');
 
     // Legacy words: accepted, because the controller accepts them (`ok`, and it blows nothing).
-    const air = ['G90 G21', 'T1 M6', 'M7', 'S12000 M3', 'G53 G0 Z-3', 'G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M9', 'M5', 'M02'].join('\n');
+    const air = ['G90 G21', 'T1 M6', 'M7', 'G53 G0 Z-3', 'S12000 M3', 'G0 X5 Y5', 'G1 Z-1 F200', 'G1 X10', 'M9', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor(), air)).not.toContain('not-our-dialect');
 
     // A sub-code is a DIFFERENT command from the bare mode: `M331.1` blows, `M331.2` cleans the
@@ -263,7 +343,7 @@ describe('cncVerify (#174): the checks', () => {
 
     // The word after the number is irrelevant — a legal one is dropped just the same, and the
     // bench's own second line (`N11 G4 P0.1`, a dwell) is refused too.
-    const dwell = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 Z-3', 'N11 G4 P0.1', 'G0 X5 Y5', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
+    const dwell = ['G90 G21', 'T1 M6', 'M331', 'G53 G0 Z-3', 'S12000 M3', 'N11 G4 P0.1', 'G0 X5 Y5', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor(), dwell)).toContain('numbered-line');
 
     // ...and a program with no N word raises nothing here, which is every file our post writes.
@@ -287,12 +367,12 @@ describe('cncVerify (#174): the checks', () => {
   });
 
   it('rpm-too-high: an S above the machine ceiling', () => {
-    const text = ['G90 G21', 'T1 M6', 'M331', 'S20000 M3', 'G0 X5 Y5 Z5', 'G1 Z-1 F200', 'G1 X10', 'G0 Z5', 'M5', 'M02'].join('\n');
+    const text = ['G90 G21', 'T1 M6', 'M331', 'G53 G0 Z-3', 'S20000 M3', 'G0 X5 Y5 Z5', 'G1 Z-1 F200', 'G1 X10', 'G0 Z5', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor(), text)).toContain('rpm-too-high');
   });
 
   it('bad-preamble: a first motion without G90 and G21', () => {
-    const text = ['T1 M6', 'M331', 'S12000 M3', 'G0 X5 Y5 Z5', 'G1 Z-1 F200', 'G1 X10', 'G0 Z5', 'M5', 'M02'].join('\n');
+    const text = ['T1 M6', 'M331', 'G53 G0 Z-3', 'S12000 M3', 'G0 X5 Y5 Z5', 'G1 Z-1 F200', 'G1 X10', 'G0 Z5', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor(), text)).toContain('bad-preamble');
   });
 
@@ -408,7 +488,7 @@ describe('sacrificialDepthLimit (#213 §3): the depth table', () => {
 describe('cut-outside-stock against supportedFootprint (#213 §3)', () => {
   const STOCK = { length: 20, width: 10, thickness: 5 };
   // A stroke from X = 17 to X = 23: it runs 3 mm past the part's right edge at X = 20.
-  const PAST_EDGE = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 Z-3', 'G0 X17 Y5', 'G1 Z-1 F200', 'G1 X23', 'M5', 'M02'].join('\n');
+  const PAST_EDGE = ['G90 G21', 'T1 M6', 'M331', 'G53 G0 Z-3', 'S12000 M3', 'G0 X17 Y5', 'G1 Z-1 F200', 'G1 X23', 'M5', 'M02'].join('\n');
 
   it('with no sacrificial material, 3 mm past the edge is refused at the tool edge', () => {
     expect(codes(ctxFor(), PAST_EDGE)).toContain('cut-outside-stock');
@@ -423,7 +503,7 @@ describe('cut-outside-stock against supportedFootprint (#213 §3)', () => {
 
   it('a stroke that leaves the strip too is still cut-outside-stock', () => {
     const depthLimit = sacrificialDepthLimit(STOCK, presetJawStrips(), { minFloor: 1, breakthrough: 0.3 });
-    const pastStrip = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G53 G0 Z-3', 'G0 X23 Y5', 'G1 Z-1 F200', 'G1 X30', 'M5', 'M02'].join('\n');
+    const pastStrip = ['G90 G21', 'T1 M6', 'M331', 'G53 G0 Z-3', 'S12000 M3', 'G0 X23 Y5', 'G1 Z-1 F200', 'G1 X30', 'M5', 'M02'].join('\n');
     expect(codes(ctxFor({ depthLimit }), pastStrip)).toContain('cut-outside-stock');
   });
 });

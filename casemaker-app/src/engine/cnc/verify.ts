@@ -227,8 +227,8 @@ const known3 = (p: Pos): p is [number, number, number] => p[0] !== null && p[1] 
  * line refused under its own code, because the machine will not run one (#385) — (3) every
  * error the runner raised, then the checks the runner does not do — (4) cut depth from the
  * injected limit, (5) the stock outline under the tool edge, (6) cutting with the spindle
- * off, (7) feed ceiling and missing feed, (8) spindle ceiling, (9) low XY rapids, (10) the
- * preamble, (11) the ending, (12) single tool.
+ * off, (7) feed ceiling and missing feed, (8) spindle ceiling and a spindle start with no Z
+ * established (#396), (9) low XY rapids, (10) the preamble, (11) the ending, (12) single tool.
  */
 export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
   const findings: VerifyFinding[] = [];
@@ -317,6 +317,24 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
       if (ev.kind === 'spindle') {
         if (ev.rpm !== null && ev.rpm > ctx.machine.maxRpm) {
           push('rpm-too-high', ev.line, `a spindle speed of ${ev.rpm} RPM exceeds the ${ctx.machine.name}'s ${ctx.machine.maxRpm} RPM ceiling`);
+        }
+        // ---- #396. A SPINDLE MUST NOT START AT A Z THE PROGRAM NEVER ESTABLISHED. After a manual
+        // `M6` the head is wherever the last job left it — possibly inside the part — and our post
+        // and restarts answer it the same way: a `G53 G0 Z<clearance>` lift in the MACHINE frame
+        // (#384), BEFORE the spindle starts (#392), so a program of ours always states a Z first.
+        // A file that does not — a hand-written one, or an import — spins the cutter up wherever
+        // the head was left. The Z is ESTABLISHED when either frame knows it: a `G53` lift sets the
+        // machine Z, and an absolute move sets the work Z (our dialect is all-absolute, `G90`).
+        // Neither known means the program never placed the tool in Z at all. Read against the state
+        // BEFORE the word, on EVERY start: the program's own `T1 M6` is a no-op when the tool is
+        // already T1 (the operator changed it by hand), which is exactly the `#384` case where the
+        // head sits wherever the last job left it.
+        if (ev.state !== 'off' && state.work[2] === null && state.machine[2] === null) {
+          push(
+            'spindle-at-unknown-z',
+            ev.line,
+            'the spindle starts with no Z established: nothing has placed the tool in Z first (a `G53` lift, or an absolute Z move), so it comes on wherever the head was left — possibly in the part',
+          );
         }
         state = applyEvent(state, ev, ctx.setup);
         continue;
