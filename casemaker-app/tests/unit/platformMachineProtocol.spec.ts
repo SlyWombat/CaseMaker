@@ -36,6 +36,7 @@ import {
   PTYPE_FILE_RETRY,
   PTYPE_FILE_START,
   PTYPE_FILE_VIEW,
+  consolePipedProblem,
   type Frame,
   type MachineTransport,
   type Md5SumOutcome,
@@ -780,7 +781,70 @@ describe('#302 console — the guards', () => {
     expect(consoleProblem('G0\u0001X1')).not.toBeNull();
     expect(consoleProblem('')).not.toBeNull();
     expect(consoleProblem('G'.repeat(201))).not.toBeNull();
-    expect(consoleProblem('G'.repeat(200))).toBeNull();
+    // The length probe is a single command that happens to be 200 characters long: `'G'.repeat(200)`
+    // used to stand here and is now refused for a different reason entirely (see the count test).
+    expect(consoleProblem(`G1 X${'1'.repeat(196)}`)).toBeNull();
+  });
+
+  it('refuses a line the dispatcher would run as more than one command (#386)', () => {
+    // The paste case, and the reason the rule exists: the box holds one line, so a program pasted into
+    // it arrives joined with spaces and runs as every command in it. Three lines of the air program:
+    expect(consoleProblem('G0 X10 G1 Y20 G1 X0 Y0')).toContain('3 commands');
+    expect(consoleProblem('G0 X10 M3 S1000')).toContain('2 commands');
+    // The count is the FIRMWARE's split, which cuts a line by LETTER and not by whitespace, so a
+    // word count is not the rule and these two are both two commands:
+    expect(consoleProblem('G0X10G1Y20')).not.toBeNull();
+    expect(consoleProblem('G0X10M5')).not.toBeNull();
+    // The refusal names the reason and the way out, because the answer is read by a person who has
+    // just pasted something and needs to know what to do instead.
+    const why = consoleProblem('G21 G90') as string;
+    expect(why).toContain('one command per line');
+    expect(why).toContain('play');
+    // And one command is still one command however it is written, including the idioms this repo
+    // sends: no-space words, a second word that is not a command letter, and `G53`'s move.
+    for (const line of [
+      'G1X10Y20',
+      'G1 X10 Y20 F500',
+      'M3 S12000',
+      'T1 M6',
+      'G28',
+      'G53 G0 X-50 Y-50',
+      'G53 X-50 Y-50',
+      'M491',
+      '?',
+    ]) {
+      expect(consoleProblem(line), line).toBeNull();
+    }
+    // A bare `X…` line is dispatched with the modal motion prefixed, so it counts the words after it.
+    expect(consoleProblem('X10 Y10')).toBeNull();
+    expect(consoleProblem('X10 Y10 M3')).not.toBeNull();
+    // A lowercase line is the controller's SHELL's, where a G word means nothing — the same split the
+    // gate has always made (`cnc-guide.md` chapter 8's `console-line`).
+    expect(consoleProblem('echo G0 X1 G1 X2')).toBeNull();
+  });
+});
+
+describe('#386 console — a piped session polls and nothing else', () => {
+  it('sends the status poll, and refuses every other line with the way out', () => {
+    expect(consolePipedProblem('?')).toBeNull();
+    expect(consolePipedProblem('  ?  ')).toBeNull();
+    // A blank line is not a line; the caller drops it rather than being told off for it.
+    expect(consolePipedProblem('')).toBeNull();
+
+    for (const line of ['G28', 'G0 X10', 'M5', 'play /sd/gcodes/x.nc', 'ls /sd', 'config-get sd']) {
+      expect(consolePipedProblem(line), line).not.toBeNull();
+    }
+    const why = consolePipedProblem('G0 X10') as string;
+    expect(why).toContain('status poll');
+    expect(why).toContain('--i-am-at-the-machine');
+  });
+
+  it('is stricter than the typed path, not a second opinion about the same lines', () => {
+    // Anything the typed guards refuse is still refused here — the rules stack, they do not replace.
+    expect(consolePipedProblem('config-set sd x 1')).not.toBeNull();
+    // And a run path that is fine typed (`play`, recorded as open in §8) is not fine piped.
+    expect(consoleProblem('play /sd/gcodes/x.nc')).toBeNull();
+    expect(consolePipedProblem('play /sd/gcodes/x.nc')).not.toBeNull();
   });
 });
 

@@ -108,7 +108,8 @@ export interface ConsoleHandle {
    * dev-mode StrictMode runs that cleanup ONCE ON MOUNT. A handle that went permanently dead there
    * would answer "this console is closed" to every press in a dev build — found by browser QA on
    * 2026-10-12 (`npm run dev:desktop`), where the first press came back with exactly that sentence.
-   * The property that matters is the one kept: a FAILED send never reconnects by itself.
+   * The property that matters is the one kept: a FAILED LINE is never re-sent by itself. Dropping the
+   * session after a socket-level failure is what keeps the next press working (#386).
    */
   close(): Promise<void>;
 }
@@ -191,9 +192,13 @@ export function attachConsole(target: MachineConsoleTarget): ConsoleHandle {
       try {
         send = await opened.session.send(line, CONSOLE_TIMING);
       } catch (e) {
-        // `tcpRead` rejects when the peer closed the connection, so a dead socket arrives here
-        // rather than as an outcome. The session is kept: the next line reports the same thing, and
-        // reconnecting by itself is the one thing this module does not do.
+        // `tcpRead` rejects when the peer closed the connection, so a dead socket arrives here rather
+        // than as an outcome. The SESSION is dropped — the LINE never is: the next press opens a fresh
+        // one, so a dropped link (the controller left the network, or `power.sh on --cycle`) costs one
+        // press instead of a trip out to Manage → Machines and back (#386). Re-sending the failed line
+        // here would be the app moving the machine again on its own, which is the thing this module
+        // must not do.
+        session = null;
         return { kind: 'error', line, detail: reasonOf(e) };
       }
       if (send.ok) {

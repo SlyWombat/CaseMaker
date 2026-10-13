@@ -118,6 +118,16 @@ not wire the `!` and `~` realtime bytes. **The physical stop is the stop**: the 
 and no jog, so anything that moves needs a person standing at the machine (chapter 8.4, and
 `/Fabrication.md` §8).
 
+**One line, one command — the console is not a way to run a program.** The box holds one line, and
+so does the controller: paste a program in and it arrives as a single line whose commands all run.
+Doing that is what faulted the machine on 2026-10-12 — the spindle kept turning, the front button
+did nothing, and cutting the power was the only stop — so a line the controller would run as more
+than one command is now refused, and the refusal says so. To run a program, upload it and start it
+with `play /sd/gcodes/<file>`, which is how the machine's own software starts one. Progress while it
+runs is the `P:<line>,<percent>,<seconds>` field of the status line; the job is finished when that
+percent reaches 100 **and** the state reads `Idle`, because `Idle` also appears partway through a
+program.
+
 ---
 
 ## 3 · Ideas you need first

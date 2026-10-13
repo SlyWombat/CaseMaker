@@ -1033,9 +1033,9 @@ function wordHex(word: number): string {
  * loads this module and must not import sockets to do it (#302 item 4). This is a relative import,
  * not the `@/` alias, because `tools/z1/z1.mjs` runs THIS file under Node, which resolves no alias.
  */
-import { consoleProblem } from '../../engine/cnc/consoleGate.ts';
+import { consolePipedProblem, consoleProblem } from '../../engine/cnc/consoleGate.ts';
 
-export { consoleProblem };
+export { consolePipedProblem, consoleProblem };
 
 export interface ConsoleOptions {
   /** How long to wait for the FIRST reply frame. Default 3000. */

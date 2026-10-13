@@ -112,7 +112,14 @@ the machine). \`console\` asks for it once, in words, before the first line. Bot
 bridge's guards (protocol.ts \`consoleProblem\`): one printable line; no config-set, no card writes,
 no reset or flashing; the realtime bytes are not wired — the physical stop is the stop. Every line
 sent and every reply is appended to a trace file (default docs/bench/traces/<date>-console.log), so a
-session is a recorded trace. Nothing polls, repeats or queues.`);
+session is a recorded trace. Nothing polls, repeats or queues.
+
+ONE LINE IS ONE COMMAND, and a PIPED console is the status poll alone (#386). Feeding a program
+through the console line by line faulted the controller on 2026-10-12 (\`ALARM: Mainboard did not
+receive a status response from the CTRL\`) and left the spindle turning with the plug as the only
+stop, so \`consoleProblem\` refuses a line the dispatcher would run as more than one command, and
+when stdin is not a keyboard — \`console < program.nc\`, or any script — only \`?\` is sent
+(\`consolePipedProblem\`). To run a program: upload it and \`play /sd/gcodes/<file>\`.`);
 }
 
 /** The trace file for a session: one dated file per day unless --trace says otherwise. */
@@ -289,16 +296,40 @@ async function main() {
           }
         }
         trace(file, `\n=== console session ${new Date().toISOString()} ${host}:${port} ===\n`);
-        process.stderr.write(`connected to ${host}:${port}. One line per Enter; "exit" or Ctrl-D to leave. The physical stop is the stop.\ntrace: ${file}\n`);
+        // A PIPED session is the status poll and nothing else (#386): `console < program.nc` streams a
+        // program one line at a time, and that is what faulted the controller. `isTTY` is the test for
+        // "a person is typing", so it is the test for "a line may move the machine".
+        const typed = process.stdin.isTTY === true;
+        if (!typed) {
+          process.stderr.write(
+            'stdin is not a keyboard: this session sends the status poll (?) and refuses everything else (#386).\n',
+          );
+        }
+        process.stderr.write(
+          typed
+            ? `connected to ${host}:${port}. One line per Enter; "exit" or Ctrl-D to leave. The physical stop is the stop.\ntrace: ${file}\n`
+            : `connected to ${host}:${port}. Poll only. The physical stop is the stop.\ntrace: ${file}\n`,
+        );
         const session = P.openConsole(transport, conn);
+        let refusedLine = false;
         for (;;) {
-          const raw = await ask('z1> ');
+          const raw = await ask(typed ? 'z1> ' : '');
           if (raw === null) break;
           const line = raw.trim();
           if (line === '') continue;
           if (line === 'exit' || line === 'quit') break;
+          if (!typed) {
+            const problem = P.consolePipedProblem(line);
+            if (problem !== null) {
+              // Loud, and the exit code says so: a script must not read a refusal as a run.
+              console.error(problem);
+              refusedLine = true;
+              continue;
+            }
+          }
           await sendTraced(session, file, line, flags);
         }
+        if (refusedLine) process.exitCode = 1;
       } finally {
         rl.close();
       }

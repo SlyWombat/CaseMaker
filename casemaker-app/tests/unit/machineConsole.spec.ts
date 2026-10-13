@@ -254,6 +254,41 @@ describe('#302 the console seam — closing', () => {
   });
 });
 
+describe('#386 the console seam — a dead socket costs one press, not a re-sent line', () => {
+  it('drops the session on a socket failure and never re-sends the line that failed', async () => {
+    // What a `power.sh on --cycle` looks like from here: the controller leaves the network and the
+    // read in flight rejects. The cached session used to stay, so every later press failed the same
+    // way until the user left Manage → Machines and came back (#386).
+    const dead = fakeSession(() => {
+      throw new Error('tcpRead: connection reset by peer');
+    });
+    const live = fakeSession();
+    const sessions = [dead.session, live.session];
+    let opens = 0;
+    setMachineConsoleLoader(async () => ({
+      async open() {
+        opens += 1;
+        // The controller is back by the next press; a third open would be a bug, so it stays on the
+        // last one and the assertion on `opens` is what catches it.
+        return sessions[Math.min(opens, sessions.length) - 1]!;
+      },
+    }));
+    const console = attachConsole(TARGET);
+
+    const first = await console.send('M5');
+    expect(first.kind).toBe('error');
+    expect(dead.sent).toEqual(['M5']);
+
+    // One press later the panel is on a fresh session — and the line that failed is NOT among what
+    // went out, on either session: re-sending it would be the app moving the machine by itself.
+    const second = await console.send('?');
+    expect(second.kind).toBe('sent');
+    expect(opens).toBe(2);
+    expect(live.sent).toEqual(['?']);
+    expect(dead.sent).toEqual(['M5']);
+  });
+});
+
 describe('#302 the restated console reply', () => {
   /** Both ways, so a field added on either side is a compile error rather than a silent drop. */
   type Mutual<A, B> = A extends B ? (B extends A ? true : never) : never;

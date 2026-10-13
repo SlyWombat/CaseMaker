@@ -410,6 +410,23 @@ appears to carry an active tool number and an offset. **No field of this line is
 bridge** — it is surfaced verbatim, and that is exactly why it can be recorded here without a
 parser being invented for it.
 
+**OBSERVED 2026-10-12 — a running job reports its progress, and `Idle` is NOT the end of a job:**
+
+```
+P:<line>,<percent>,<elapsed s>
+```
+
+`P` appears once a program is running (`play`, §8), and its percent reaches **100** at the end. The
+field that costs a part if it is misread is not `P` but the state word beside it: every run of the air
+program reported **`Idle` mid-job** — 3–4 s at `M05`, the spin-down before `G28`, then `Run` again for
+the trip home. So a caller that stops polling because it saw `Idle` loses the rest of the file. Job end
+is `P` percent 100 **and** `Idle`. One trace reads `Run → Idle → Run → Idle` and ends
+`P:34,100,51`; the rest of the line is the standard Marlin-style field set above.
+
+Replies to `?` took **0.6–0.7 s** on this bench, so any poll interval has to be slower than that —
+2 s was used, and a 0.6 s poll is the interval that faulted the console (the bench day's own lesson,
+§8). Traces: `docs/bench/traces/2026-10-12-poll*.log`.
+
 ## 7. Transport interface
 
 The protocol layer above is transport-agnostic. It runs against a five-call interface —
@@ -436,14 +453,36 @@ touching callers.
   motion without a file" and kept the console out of the first pass (`/Fabrication.md` §14.4 R10).
   That was a scoping decision, not a firmware limit, and it was reopened for a **typed console**
   (#302): `consoleProblem` / `openConsole` / the bridge's `sendConsoleLine`. It sends one line the
-  caller was asked to send, never on its own, and refuses `config-set`, card writes, resets and the
-  realtime bytes. A DRO, pendant and overrides are still out. The bridge can also upload a verified
+  caller was asked to send, never on its own, and refuses `config-set`, card writes, resets, the
+  realtime bytes, and **a line the dispatcher would run as more than one command** (#386, below). A
+  DRO, pendant and overrides are still out. The bridge can also upload a verified
   `.nc`, report status, read a file off the card and read the machine's own configuration. Each read
   (§5) is a console command, not an MDI box: the caller passes a **path** or a **key**, the bridge
   builds the one command itself and refuses anything outside a plain path's or a plain key's alphabet.
   The distinction still matters for the READS: a checked parameter cannot become a second command. The
   console is the deliberate exception (#302): free text, but one guarded line, explicit send, a person
   at the machine, and a recorded trace.
+- **`play` is not refused — recorded, not silently true (#386).** `play /sd/gcodes/<file>` starts a
+  file that is already on the card, and the maintainer used it at the bench on 2026-10-12 as the way a
+  job actually runs (six clean runs). It is therefore reachable from the console for **any** file
+  on the card, including one that never went through the verified upload of §5. Restricting it to files
+  this session uploaded is one of two answers the issue leaves open ("restrict it … or record that it
+  stays open"); this is the record, and the restriction stays an open decision on #386 rather than a
+  rule stated here.
+- **One line is one command, and a piped console polls and nothing else (#386).** Streamed, the console
+  faulted the controller, and this is the same bench day as §6's `P:`: feeding the air program line by
+  line through our console with `?` every 0.6 s raised `ALARM: Mainboard did not receive a status
+  response from the CTRL (RX error)`, froze the status in `Run` **with the spindle still turning**, and
+  the front button did nothing — cutting the plug was the only stop (19:39:38Z, no wired e-stop on this
+  bench). Traces: `docs/bench/traces/2026-10-12-console.log`, and #302's run table. The mechanism is why
+  one line can be a whole program: the firmware splits a line into commands **by letter**, not by
+  whitespace (`gcode/lexer.ts` is a reading of `GcodeDispatch.cpp`), so a block pasted into the console's
+  single-line box arrives joined with spaces and dispatches as every command in it. So `consoleProblem`
+  asks that same split and refuses a line that is more than one command, and `consolePipedProblem` — the
+  rule `z1.mjs console` applies when stdin is not a keyboard — allows the status poll `?` and refuses
+  every other line, because a piped session has nobody at the machine to watch it. What is LEFT is the
+  path the bench proved: upload the verified `.nc` (§5), then `play` it, polling the status (§6) every
+  2 s or slower on one connection. Job end is `P` percent 100 and `Idle`, never `Idle` alone.
 - The single-byte e-stop byte is **not** wired: an e-stop that travels over the same socket the
   bridge is mid-transfer on is worse than useless. The physical stop is the stop.
 - A machine refusal is surfaced as a refusal. The upload result has an explicit *refused* outcome

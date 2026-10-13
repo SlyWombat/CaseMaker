@@ -17,7 +17,10 @@
  */
 
 import type { Diagnostic } from './types';
-import { CM_PREFIX, MKR_PREFIX } from './mkrHeader';
+// Written with its extension, and it has to stay that way: this module is reached under plain Node
+// through `tools/z1/z1.mjs` → `platform/desktop/protocol.ts` → `consoleGate.ts`, and Node resolves no
+// extensionless specifier. (`allowImportingTsExtensions` makes the extension legal for tsc and vite.)
+import { CM_PREFIX, MKR_PREFIX } from './mkrHeader.ts';
 
 /** One parsed word: a letter and its value, with the number as it was written. */
 export interface Word {
