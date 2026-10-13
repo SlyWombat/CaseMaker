@@ -804,7 +804,7 @@ but something is assumed or unmeasured), or **info** (worth knowing).
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|
 | `tool-change-noop` | info | `M6` to the tool that is already active does nothing — no change, no length calibration. | Confirm the tool in the spindle. |
-| `tool-change-ambiguous` | info | The starting tool was not stated, so whether this is a real change cannot be known; it is treated as one. | State the starting tool if you know it. |
+| `tool-change-ambiguous` | info | The starting tool was not stated, so whether this is a real change cannot be known; it is treated as one for the picture. If it is in fact a no-op the head never moves, so the height the change's macro ends at is **not** counted as an established Z: a `M3` after it still reports `spindle-at-unknown-z`, and an X/Y rapid after it still reports `rapid-too-low`. | State the starting tool if you know it. |
 | `g92-4-manual-home` | warning | `G92.4` redefines the machine position; the setup no longer holds and positions are unknown from here. | Avoid it, or re-establish the origin. |
 | `wcs-set-unmodelled` | warning | `G10 L…` writes an offset other than G54, which the app does not model; ignored. | Use G54. |
 | `wcs-unmodelled` | warning | `G55`–`G59` selects an offset the app was not given; positions are unknown until G54 returns. | Stay on G54. |

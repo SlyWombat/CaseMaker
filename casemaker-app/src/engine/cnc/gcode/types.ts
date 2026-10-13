@@ -109,6 +109,18 @@ export interface ToolChangeEvent extends BaseEvent {
    * the surrounding steps then own the head position, so the reducer must not forget Z.
    */
   expanded?: boolean;
+  /**
+   * Set by the RUNNER when the macro above is drawn only because the change could not be RULED
+   * OUT — the starting tool was never stated, so whether `T1 M6` does anything cannot be known.
+   * If the tool is already active the firmware does nothing and the head never moves, so the
+   * clearance Z the macro ends at is not a Z the PROGRAM established. The macro is still drawn
+   * (the animation is the point, #182 Q14); this says which consumers may not take its Z as
+   * evidence — the verifier's established-Z checks do not (#396 follow-up).
+   *
+   * Absent when the change is real, and when the head's Z was ALREADY established: with a known
+   * Z the no-op branch leaves the head at that same known Z, so the ambiguity costs nothing.
+   */
+  speculative?: boolean;
 }
 
 export interface PauseEvent extends BaseEvent {

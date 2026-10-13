@@ -330,6 +330,23 @@ describe('the tool-change macro, animated from the machine profile (#182 Q14, #1
     expect(tl.events[tcIdx]).toMatchObject({ kind: 'tool-change', expanded: true });
   });
 
+  it('a change that cannot be ruled out is marked speculative: its clearance Z is not evidence (#396 follow-up)', () => {
+    // The starting tool was never stated, so whether `T1 M6` does anything cannot be known. The
+    // macro is still drawn (the test above), but `T1 M6` does NOTHING on a machine already holding
+    // T1 — and then the head never moved, so the clearance Z the macro ends at is not a Z the
+    // program placed. The mark says so; the verifier's established-Z checks read it.
+    const unknown = buildTimeline(parseGcode('T1M6\n'), setupWith({ startingTool: 'unknown' }), M);
+    expect(unknown.events.find((e) => e.kind === 'tool-change')).toMatchObject({ expanded: true, speculative: true });
+    // A change that IS real: the head really goes there, so its Z is evidence like any other.
+    expect(buildTimeline(parseGcode('T1M6\n'), setupWith({ startingTool: 2 }), M).events.find((e) => e.kind === 'tool-change')).not.toHaveProperty(
+      'speculative',
+    );
+    // And an unruleoutable change made AFTER a Z was established: the no-op branch would leave the
+    // head at that same known Z, so the ambiguity cannot cost anything and the mark is not set.
+    const lifted = buildTimeline(parseGcode('G90\nG53 G0 Z-3\nT1M6\n'), setupWith({ startingTool: 'unknown' }), M);
+    expect(lifted.events.find((e) => e.kind === 'tool-change')).not.toHaveProperty('speculative');
+  });
+
   it('the head goes where the firmware sends it: clearance, change position, safe, sensor, and BACK', () => {
     const tl = buildTimeline(parseGcode(prog), setupWith({ startingTool: 1 }), M);
     // The program's work (-50, -60, -10) with the stub WCS at (0, 0, 3.81) is machine (-50, -60, -6.19).

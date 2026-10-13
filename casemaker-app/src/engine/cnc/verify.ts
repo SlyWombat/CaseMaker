@@ -306,11 +306,22 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
     let state: MachineState = initialState(ctx.setup);
     let seenCut = false;
     const toolNumbers = new Set<number>();
+    // #396 follow-up — A MACRO THE RUNNER COULD NOT RULE OUT IS NOT Z EVIDENCE. `T1 M6` with an
+    // unstated starting tool is expanded because it cannot be ruled out; if the tool is already
+    // active the firmware does nothing, the head never moves, and the clearance Z the macro ends
+    // at is one the machine may never have reached. The runner marks that change (`speculative`,
+    // set only when the Z was in doubt to begin with), and this flag carries it forward: it says
+    // "the state knows a Z, but only because of that macro". An event that places the Z itself —
+    // a move the PROGRAM wrote that commands Z, or a `G28`/`M491` (certain macros) — clears it,
+    // and the two established-Z checks below read it alongside the state.
+    let zUnproven = false;
 
     for (const ev of timeline.events) {
       if (ev.kind === 'tool-change') {
         toolNumbers.add(ev.tool);
         if (seenCut) push('multi-tool', ev.line, `an M6 to T${ev.tool} appears after the first cutting move; V1 is single-tool`);
+        // A real change's macro places the head; a no-op forgets its Z outright (the reducer).
+        zUnproven = ev.speculative === true;
         state = applyEvent(state, ev, ctx.setup);
         continue;
       }
@@ -329,17 +340,22 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         // BEFORE the word, on EVERY start: the program's own `T1 M6` is a no-op when the tool is
         // already T1 (the operator changed it by hand), which is exactly the `#384` case where the
         // head sits wherever the last job left it.
-        if (ev.state !== 'off' && state.work[2] === null && state.machine[2] === null) {
+        if (ev.state !== 'off' && (zUnproven || (state.work[2] === null && state.machine[2] === null))) {
           push(
             'spindle-at-unknown-z',
             ev.line,
-            'the spindle starts with no Z established: nothing has placed the tool in Z first (a `G53` lift, or an absolute Z move), so it comes on wherever the head was left — possibly in the part',
+            `the spindle starts with no Z established: nothing has placed the tool in Z first (a \`G53\` lift, or an absolute Z move), so it comes on wherever the head was left — possibly in the part${zUnproven ? "; the file's own `M6` may be a no-op (the starting tool is unstated), so the Z its macro ends at is not one the program established" : ''}`,
           );
         }
         state = applyEvent(state, ev, ctx.setup);
         continue;
       }
       if (ev.kind !== 'move') {
+        // #396 follow-up — `G28` and `M491` are CERTAIN macros: the head really does go to the
+        // clearance Z (#182), so they place the tool in Z whatever an earlier `M6` left in doubt.
+        // SOURCE ONLY: the tool-change macro carries a synthetic `tlo-calibrate` step of its own,
+        // and that one is exactly as uncertain as the change it belongs to.
+        if ((ev.kind === 'home' || ev.kind === 'tlo-calibrate') && ev.synthetic === undefined) zUnproven = false;
         state = applyEvent(state, ev, ctx.setup);
         continue;
       }
@@ -348,6 +364,10 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
       // the offsets are the runner's, not a second implementation's (the runner sets both
       // `work` and `machine` on every move while the WCS is G54, which our dialect requires).
       const m: MoveEvent = ev;
+      // #396 follow-up — a move the PROGRAM wrote that commands Z places the tool itself. The
+      // moves of an expanded macro are synthetic (the runner's own steps), so they cannot clear
+      // it however much Z they appear to assert.
+      if (m.synthetic === undefined && m.commanded[2] === true) zUnproven = false;
       const after = applyEvent(state, m, ctx.setup);
       const fromW = state.work;
       const toW = after.work;
@@ -456,7 +476,11 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         const movedX = axisMoved(fromW[0], toW[0]);
         const movedY = axisMoved(fromW[1], toW[1]);
         if (movedX || movedY) {
-          if (fromW[2] === null) {
+          // #396 follow-up — `zUnproven` gates the PROGRAM's rapids only. The steps of an expanded
+          // macro are the FIRMWARE's moves: it traverses at its own clearance Z, which on the
+          // branch where the macro runs it really reaches, so a macro step is never refused for
+          // starting at a Z the FILE did not place.
+          if (fromW[2] === null || (zUnproven && m.synthetic === undefined)) {
             const ends = toW[2] === null ? '' : ` (stating only where it ends, Z=${fmt(toW[2])}, places nothing: the tool travels to that end from wherever it was)`;
             push('rapid-too-low', m.line, `an X/Y rapid starts at a Z the program never established: nothing lifts the tool to a known height first, so the move runs diagonally from an unknown height${ends}`);
           } else {

@@ -275,6 +275,42 @@ describe('cncVerify (#174): the checks', () => {
     expect(got).toContain('spindle-at-unknown-z');
   });
 
+  // #396 FOLLOW-UP — AN `M6` THAT CANNOT BE RULED OUT DOES NOT ESTABLISH Z. With an unstated
+  // starting tool the runner still DRAWS the tool-change macro (the animation is the point, #182
+  // Q14) and the macro ends at clearance Z — but `T1 M6` does nothing at all when T1 is already
+  // loaded, and then the head never moved. So the answer must not depend on how the setup states
+  // the starting tool: an unruleoutable change is no more evidence of a placed Z than a no-op.
+  const unknownTool = (over: Partial<VerifyContext> = {}): VerifyContext => {
+    const c = ctxFor(over);
+    return { ...c, setup: { ...c.setup, startingTool: 'unknown' } };
+  };
+
+  it('spindle-at-unknown-z: an M6 that cannot be ruled out does not establish Z either (#396 follow-up)', () => {
+    const text = ['G90 G21', 'T1 M6', 'M331', 'S12000 M3', 'G0 Z5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02'].join('\n');
+    // Stated as already active: the change is a no-op and nothing has placed Z.
+    expect(codes(ctxFor(), text)).toContain('spindle-at-unknown-z');
+    // Unstated: the macro is drawn, and the clearance Z it ends at must count for nothing.
+    const f = verifyProgram(text, unknownTool()).findings.find((x) => x.code === 'spindle-at-unknown-z');
+    expect(f).toBeDefined();
+    expect(f?.line).toBe(4); // the `S12000 M3` itself
+    expect(f?.message).toContain('may be a no-op');
+  });
+
+  it('spindle-at-unknown-z: a Z the PROGRAM places still counts under an unstated starting tool (#396 follow-up)', () => {
+    const rest = ['S12000 M3', 'G0 Z5', 'G1 Z-1 F200', 'G1 X10', 'M5', 'M02'];
+    // The post's own order: the machine-frame lift follows the change, and it is the file's.
+    expect(codes(unknownTool(), ['G90 G21', 'T1 M6', 'M331', 'G53 G0 Z-3', ...rest].join('\n'))).not.toContain('spindle-at-unknown-z');
+    // And a Z established BEFORE the change: the no-op branch would leave the head at that same
+    // known Z, so the macro's own clearance Z was never the only evidence for it.
+    expect(codes(unknownTool(), ['G90 G21', 'G53 G0 Z-3', 'T1 M6', 'M331', ...rest].join('\n'))).not.toContain('spindle-at-unknown-z');
+  });
+
+  it('rapid-too-low: an XY rapid after an unruleoutable M6 starts at no established Z either (#392, #396 follow-up)', () => {
+    // The same hand-written shape as `TopClamp.nc`, reached through the macro instead of around it.
+    const studio = ['G90 G21', 'T1 M6', 'G0 X5 Y5', 'S12000 M3', 'G0 Z5', 'G1 Z-1 F200', 'M5', 'M02'].join('\n');
+    expect(codes(unknownTool(), studio)).toContain('rapid-too-low');
+  });
+
   it('not-our-dialect: an arc, a G91/G92 and an I/J word are all refused', () => {
     const arc = program(['G0 X5 Y5 Z5', 'G1 Z-1 F200', 'G2 X10 Y5 I2.5 J0', 'M5', 'M02']);
     expect(codes(arc.ctx, arc.text)).toContain('not-our-dialect');

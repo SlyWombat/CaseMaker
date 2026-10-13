@@ -504,10 +504,21 @@ export function toolChangeMacro(ev: ToolChangeEvent, before: MachineState, m: Mi
   const saved = before.machine;
   const atClear: Pos = [saved[0], saved[1], tc.clearanceZ];
   const parked: Pos = [tc.changePosition[0], tc.changePosition[1], tc.clearanceZ];
+  // #396 follow-up — WHY THIS MACRO MIGHT NOT HAPPEN AT ALL. A change is expanded when it cannot
+  // be RULED OUT, which includes the case where the starting tool was never stated: `T1 M6` does
+  // nothing on a machine that already holds T1, and then none of the steps below run and the head
+  // is exactly where it was. So the clearance Z they end at is not a Z the program established.
+  // The macro is still drawn — the animation is the point (#182 Q14) — and the uncertainty rides
+  // on the change event for the consumers that must not take that Z as evidence.
+  //
+  // Marked only when the Z is ALREADY in doubt: had the program established one, the no-op branch
+  // leaves the head at that same known Z, so the ambiguity cannot cost anything.
+  const speculative = isRealToolChange(before, ev.tool) === null && before.work[2] === null && before.machine[2] === null;
+  const change: ToolChangeEvent = speculative ? { ...ev, expanded: true, speculative: true } : { ...ev, expanded: true };
   return [
     mv(saved, atClear, [false, false, true]),
     mv(atClear, parked, [true, true, false]),
-    { ...ev, expanded: true },
+    change,
     ...calibrationSteps(base, before.a ?? null, parked, saved, m),
   ];
 }
