@@ -1,6 +1,6 @@
 # Run sheet — 165 depth ladder row A
 
-Generated 2026-10-12 · file `165-depth-ladder-row-A.nc` · sha256 `94d39f74` · estimated cutting time 1 min 8 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08 (#281)) — a planning estimate, not a measured cycle time.)
+Generated 2026-10-13 · file `165-depth-ladder-row-A.nc` · sha256 `94d39f74` · estimated cutting time 1 min 8 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08 (#281)) — a planning estimate, not a measured cycle time.)
 
 ## 1 · What you need
 

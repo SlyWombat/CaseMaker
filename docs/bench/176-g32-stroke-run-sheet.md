@@ -1,6 +1,6 @@
 # Run sheet — 176 g32 stroke
 
-Generated 2026-10-12 · file `176-g32-stroke.nc` · sha256 `0f53250c` · estimated cutting time 20 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08 (#281)) — a planning estimate, not a measured cycle time.)
+Generated 2026-10-13 · file `176-g32-stroke.nc` · sha256 `0f53250c` · estimated cutting time 20 s (cutting + rapids through the trapezoid, timed on a rapid model of 1200 mm/min XY / 600 mm/min Z at 150 mm/s² (config read 2026-10-07 + stopwatch 2026-10-08 (#281)) — a planning estimate, not a measured cycle time.)
 
 ## Console steps this file cannot carry — #176
 

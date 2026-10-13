@@ -42,6 +42,7 @@ import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import {
   buildRunSheet,
   runSheetDiagramSvg,
+  runSheetFrameFileName,
   type RunSheet,
   type RunSheetStep,
 } from '@/engine/cnc/engrave/runSheet';
@@ -176,6 +177,27 @@ function ladderJob(row: 'A' | 'B'): EngraveJob {
   };
 }
 
+/**
+ * Write the dry-run FRAME file (#244) the run sheet's §6 sends the operator to, and return its name.
+ *
+ * `engraveGenerate` produces both programs from one job; `engrave-job.ts` writes both. This script
+ * wrote only the cutting one, so every sheet here told the operator to load a file nobody had
+ * written — a bench step that cannot be taken (a3's review of 3bc11ee, 2026-10-12). The sheet NAMES
+ * the frame from the job (`runSheetFrameFileName`), so the name this writes is checked against the
+ * program's own stem: the two must be the same file.
+ */
+function writeFrameFile(job: EngraveJob, base: string, frameNc: string | null): string {
+  const name = runSheetFrameFileName(job.name);
+  if (name !== `${base}-frame.nc`) {
+    throw new Error(`frame file name drifted: the run sheet loads ${name}, the program is ${base}.nc`);
+  }
+  if (frameNc === null) {
+    throw new Error(`${base}: the pipeline produced no frame program, but the run sheet's dry run loads one`);
+  }
+  writeFileSync(join(outDir, name), frameNc);
+  return name;
+}
+
 // ---------------------------------------------------------------------------------------------
 // #207 run sheet -> Markdown (the app's structure, rendered for the bench binder)
 // ---------------------------------------------------------------------------------------------
@@ -280,6 +302,7 @@ console.log(`  sheet      ${sheet.header.fileName}  hash=${sheet.header.fileHash
 
 writeFileSync(join(outDir, `${base}.nc`), generated.nc);
 writeFileSync(join(outDir, `${base}.job.json`), JSON.stringify(job, null, 2) + '\n');
+console.log(`  frame      ${writeFrameFile(job, base, generated.frameNc)}  (${generated.frameNc?.length ?? 0} bytes)`);
 writeFileSync(join(outDir, `${base}-run-sheet.md`), renderRunSheetMarkdown(sheet, { footer: LADDER_FOOTER }));
 }
 
@@ -393,6 +416,7 @@ steps 1–3 are the part it is missing; step 4 is its §9 record.*
 
   writeFileSync(join(outDir, `${base}.nc`), generated.nc);
   writeFileSync(join(outDir, `${base}.job.json`), JSON.stringify(job, null, 2) + '\n');
+  console.log(`  frame      ${writeFrameFile(job, base, generated.frameNc)}  (${generated.frameNc?.length ?? 0} bytes)`);
   writeFileSync(
     join(outDir, `${base}-run-sheet.md`),
     renderRunSheetMarkdown(sheet, {
@@ -505,10 +529,18 @@ const V_BIT_30_0_3 = {
 
 const V_TIP = 0.3;
 const V_HALF_ANGLE_DEG = 15;
+/** The INCLUDED angle the header states: the bit's own name is "30°", so 2 × the half angle. */
+const V_INCLUDED_ANGLE_DEG = 2 * V_HALF_ANGLE_DEG;
 /** The cutter's house-inventory key, as the ladder's job carries its own (`#332`'s `;@CM|` record). */
 const V_BIT_KEY = 'inv:kz-engrave-30-0-3';
-/** #185's own formula, the thing the caliper is checked against: `w(d) = tip + 2·d·tan(halfAngle)`. */
-const vFloorWidth = (depth: number): number => V_TIP + 2 * depth * Math.tan((V_HALF_ANGLE_DEG * Math.PI) / 180);
+/**
+ * #185's own formula, the thing the caliper is checked against: `w(d) = tip + 2·d·tan(halfAngle)`.
+ *
+ * THE WIDTH IT GIVES IS THE TOP OPENING, NOT THE FLOOR. A V-bit's floor is its flat tip — 0.3 mm at
+ * every depth — so the caliper on the groove's floor would read the tip however deep the groove is,
+ * and the formula above would be checked against the wrong edge of the groove.
+ */
+const vOpeningWidth = (depth: number): number => V_TIP + 2 * depth * Math.tan((V_HALF_ANGLE_DEG * Math.PI) / 180);
 
 // The FRONT clear band (Y < 15.6, the magnet pocket's front edge), 10 mm long, 1.6 mm clear of the
 // pocket: the plan's own placement decision (S3 step 6 — 185's brief says "the same X/Y band as Row
@@ -561,7 +593,7 @@ function vGrooveNc(): string {
   const vTool = `number=${V_BIT_30_0_3.number}|id=${V_BIT_30_0_3.id}|name=${V_BIT_30_0_3.name}` +
     `|type=${V_BIT_30_0_3.typeText}|handlediameter=${V_BIT_30_0_3.handleDiameter}` +
     `|sticklength=0|shoulderlength=0|flutelength=0|diameter=${V_BIT_30_0_3.diameter}` +
-    `|tipdiameter=${V_BIT_30_0_3.tipDiameter}|cornerradius=0|angle=0|halfAngle=${V_BIT_30_0_3.halfAngle}`;
+    `|tipdiameter=${V_BIT_30_0_3.tipDiameter}|cornerradius=0|angle=${V_INCLUDED_ANGLE_DEG}|halfAngle=${V_BIT_30_0_3.halfAngle}`;
 
   const header = [
     ';@MKR|BEGIN',
@@ -580,7 +612,7 @@ function vGrooveNc(): string {
     ...V_GROOVES.map(
       (g, i) =>
         `;@MKR|TOOLPATH|number=${i + 1}|tool_number=${V_BIT_30_0_3.number}` +
-        `|name=[T1]V-groove ${g.depth.toFixed(1)} deep at X ${g.x}, predicted floor width ${fmt(vFloorWidth(g.depth))}mm`,
+        `|name=[T1]V-groove ${g.depth.toFixed(1)} deep at X ${g.x}, predicted top opening ${fmt(vOpeningWidth(g.depth))}mm`,
     ),
     ';@MKR|END',
   ];
@@ -599,18 +631,20 @@ function vGrooveNc(): string {
     '; Y 15.6), after #165\'s ladder and #176\'s stroke, with the 30 V-bit in T1 (M491, plan S3',
     '; step 6). Four grooves, 10 mm long along +Y, at #165\'s first four depths, shallowest first.',
     ';',
-    '; CALIPER the floor width of each groove and compare it with',
+    '; CALIPER the TOP OPENING width of each groove (across the top, not the floor) and compare it',
+    '; with',
     ';   w(d) = tip + 2 d tan(halfAngle)   (tip 0.3 mm, half angle 15 deg):',
     ...V_GROOVES.map(
       (g) =>
-        `;   X ${String(g.x).padStart(2)}  d ${g.depth.toFixed(1)} mm  ->  predicted ${fmt(vFloorWidth(g.depth))} mm` +
+        `;   X ${String(g.x).padStart(2)}  d ${g.depth.toFixed(1)} mm  ->  predicted ${fmt(vOpeningWidth(g.depth))} mm` +
         `${g.depth === 0.8 ? '   <-- the 0.81 mm reveal depth: #185\'s own reading' : ''}`,
     ),
     ';',
-    '; The tip and the included angle are MEASURED under a loupe first (#185 step 1, plan desk',
-    '; item 3): w(d) above is only as good as the tip they report. Stage 1 of #185 — the',
-    '; morphological opening over the bundled fonts - needs no machine; it is',
-    '; docs/bench/185-font-opening.md.',
+    '; Every groove\'s FLOOR is the tip\'s own 0.3 mm flat, at every depth: that is why the check',
+    '; above is on the opening. The tip and the included angle are MEASURED under a loupe first',
+    '; (#185 step 1, plan desk item 3): w(d) above is only as good as the tip they report.',
+    '; Stage 1 of #185 — the morphological opening over the bundled fonts - needs no machine; it',
+    '; is docs/bench/185-font-opening.md.',
     ';',
     `T1 M6`,
     'M331',
@@ -625,7 +659,7 @@ function vGrooveNc(): string {
   body.push(`G0 X${fmt(V_GROOVES[0].x)} Y${V_Y0}`, `S${V_RPM} M3`, 'G0 Z5');
   V_GROOVES.forEach((g, i) => {
     body.push(`;@MKR|TOOLPATH_START|toolpath_number=${i + 1}`);
-    body.push(`; groove ${i + 1} of ${V_GROOVES.length}: ${g.depth.toFixed(1)} mm deep at X ${g.x}, width ${fmt(vFloorWidth(g.depth))} mm`);
+    body.push(`; groove ${i + 1} of ${V_GROOVES.length}: ${g.depth.toFixed(1)} mm deep at X ${g.x}, top opening ${fmt(vOpeningWidth(g.depth))} mm`);
     // The post's own shape: the FIRST op is seeded by the head lines above (XY already set), every
     // later one restates it. Matching it keeps a hand-written file indistinguishable from a
     // generated one at the machine.
@@ -663,7 +697,7 @@ function jobMaterialName(): string {
   console.log(`  verify     ok=${report.ok}, ${report.findings.filter((f) => f.severity === 'error').length} error, ${report.findings.filter((f) => f.severity === 'warning').length} warning`);
   for (const f of report.findings) console.log(`     ${f.severity === 'error' ? 'ERR ' : 'warn'} ${f.code}${f.line === null ? '' : ` (line ${f.line})`}: ${f.message}`);
   console.log(`  moves      ${report.stats.cuttingMoves} cutting moves, deepest Z ${fmt(report.stats.deepestZ)}`);
-  console.log(`  predicted  ${V_GROOVES.map((g) => `d${g.depth.toFixed(1)}->w${fmt(vFloorWidth(g.depth))}`).join(', ')} mm`);
+  console.log(`  predicted  top opening ${V_GROOVES.map((g) => `d${g.depth.toFixed(1)}->w${fmt(vOpeningWidth(g.depth))}`).join(', ')} mm`);
   if (!report.ok) throw new Error('#185 V-groove file FAILED the app\'s verifier — do not hand it to the machine');
   writeFileSync(join(outDir, '185-v-groove.nc'), nc);
 }
@@ -681,6 +715,7 @@ const AIR_RISE = 25;
  * Raise every motion `Z` word by `dz`. Header/comment lines (`;@MKR|…`, including `ORIGIN … z=3`)
  * are skipped: the ORIGIN is the reference the motion is measured from, so raising it too would
  * cancel the move and put the cutter back in the stock.
+ *
  */
 function raiseMotionZ(text: string, dz: number): string {
   return text

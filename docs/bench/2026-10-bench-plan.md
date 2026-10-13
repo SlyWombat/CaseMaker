@@ -52,6 +52,14 @@ possible. **Nothing here is scheduled; the maintainer calls each session.**
   upload gate uses before it was written. **While the vise is unmeasured, no cell on this blank may
   be wider than 34.1 mm across the jaws**: the 2 mm default band around the jaws, not `edgeMargin`,
   is the limit, and 11 mm is the largest cap height the app accepts for a coupon label.
+- **Every sheet's §6 dry run loads a `<stem>-frame.nc`, and they all exist now** (2026-10-12, a3).
+  Only the coupons' frames had been written: the ladder and #176 sheets told the operator to load a
+  file nobody had written, which is a bench step that cannot be taken. `bench-files.ts` writes all
+  six (rows A/B, the stroke, the four coupons), and the pipeline has already refused any frame that
+  fails the verifier. The V-bit sheet's measuring note in S3 step 6 also changed what the caliper
+  reads: the **top opening**, not the floor. A 0.3 mm flat tip leaves a 0.3 mm floor at every depth,
+  so `w(d) = 0.3 + 2·d·tan 15°` is the width across the *top*; the file's header states the
+  included angle (`angle=30`) alongside the half angle.
 - The 2026-10-04 single-file ladder is **superseded** by the `-row-A` / `-row-B` files and moved to
   `docs/bench/superseded/`. Its card copy (`/sd/gcodes/165-depth-ladder.nc`), which would cut into the moving jaw on today's
   clamping, was **deleted from the card on 2026-10-12** at the maintainer's request (`md5` now answers
@@ -172,7 +180,9 @@ the wizard's Auto Z and leveling can overwrite a console Z0 (D1's `G10 L20` move
 6. Last: swap to the 30° V-bit, `M491`, cut the **#185** grooves on the ladder blank:
    `185-v-groove.nc`, four 10 mm grooves along +Y in the FRONT clear band (Y 4..14, in front of the
    magnet pocket), X 6 / 14 / 22 / 30 at 0.6 / 0.8 / 1.0 / 1.2 mm deep, shallowest first. Caliper
-   each floor and compare with `w(d) = 0.3 + 2·d·tan 15°` = 0.622 / 0.729 / 0.836 / 0.943 mm;
+   each groove's **top opening** — not its floor: a 0.3 mm flat tip leaves a 0.3 mm floor at every
+   depth, so the floor reads the tip however deep the groove is — and compare with
+   `w(d) = 0.3 + 2·d·tan 15°` = 0.622 / 0.729 / 0.836 / 0.943 mm;
    the 0.8 mm groove is the 0.81 mm reveal depth, #185's own reading. **Confirm the groove placement
    first:** the brief says "the same X/Y band as Row B", which Row B occupies; the front clear band
    is free — and at X ≥ 6 the grooves clear the unmeasured jaws' 2 mm band.
