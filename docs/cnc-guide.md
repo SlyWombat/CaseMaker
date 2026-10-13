@@ -518,14 +518,14 @@ held** (#272, decision 26), not written out by hand: it says what the jaws alrea
 to what accuracy, names each edge to touch on the blank in physical words ("the back edge — the
 one furthest from you, about 19 mm along from the left end"), and reports the residual the
 registration leaves. If no reachable edge can resolve an axis, it prints the refusal and names
-what is in the way instead of a sequence it cannot stand behind. The same section carries the
-**optional** check of where the blank really is (#391): the wired probe is Z-only, so it cannot
+what is in the way instead of a sequence it cannot stand behind. **Where the blank really is** is a
+separate, later check (#391) and is **not printed yet**: the wire probe is Z-only, so it cannot
 touch a side — it finds an edge by touching *down* at points across it and watching where the
-reading changes. The sheet gives the positions, what the reading should be at each, the job's own
-thresholds for reading them (the blank's dome, the height it stands proud, the margin) and what to
-write in the record column. It is an offer rather than a step, because it costs a tool change and
-it is worth taking when the blank in the jaws is not the one the origin was just set against; a
-setup the scan cannot work on prints that sentence instead of the sequence. When the job declares
+reading changes, and the steps that would tell you to do that are held until a review's findings
+are fixed (a travel limit named as a field the machine has, a tip diameter stated as measured when
+no tip has been measured, a correction that reads back to front). The plan itself is written and
+tested (`materialScan.ts`); it reaches no sheet until those steps are safe to follow. When the job
+declares
 sacrificial material (#213) the loading
 section also carries a **side view** of the assembly — the jaws at the faces they really clamp,
 the board, the strips and the part, each at its own thickness, with Z = 0 drawn on the *part's*
@@ -917,10 +917,11 @@ step's text:
 | `no-outline` | error | The part's outline needs a geometry kernel to evaluate (a boolean or offset shape), and the planner is kernel-free, so it has nothing to measure against. | Nothing you can do from the app — this is a wiring gap the caller closes by evaluating the outline in the worker first. |
 | `no-reachable-edge` | error | On an axis the fixture leaves open, that axis still has a straight edge long enough and clear of the fixture. The message names the obstruction. | Move or remove whatever the message names — that is what is sitting on the edge. |
 
-**Checking where the blank really is** (material-position scan — #391). The probe-planning rule
-holds here too: no screen raises these, and the run sheet's work-origin section prints the refusal
-as the step's own text. They refuse the *check*, never the job — the check is optional, so a refusal
-costs the operator the sentence and nothing else.
+**Checking where the blank really is** (material-position scan — #391). **No screen and no run
+sheet raises these yet.** The plan is written and tested, but its operator-facing steps are held
+while a review's findings stand, so `planMaterialScan` is called by nothing that prints: a refusal
+below reaches no one until that changes. They refuse the *check*, never the job — the check is
+optional, so a refusal would cost the operator the sentence and nothing else.
 
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|

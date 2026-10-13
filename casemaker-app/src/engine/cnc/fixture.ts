@@ -290,8 +290,11 @@ export function validateVise(
     findings.push({
       severity: 'warning',
       code: 'vise-grip-shallow',
+      // The number is printed, so it is printed the way every other figure is (#394 review): a
+      // float subtraction of two stated millimetres came out as `2.6100000000000003` on the badge
+      // blank, in the run sheet's own warnings section.
       message:
-        `Only ${grip} mm of ${what} is gripped below the jaw tops; under ${GRIP_MIN} mm ` +
+        `Only ${fmtMm(grip)} mm of ${what} is gripped below the jaw tops; under ${GRIP_MIN} mm ` +
         `the part can lift (PROVISIONAL threshold, #208).`,
     });
   }
@@ -320,4 +323,9 @@ export function validateVise(
   }
 
   return findings;
+}
+
+/** `2.6100000000000003` → `2.61`. Trailing zeros dropped, like every other printed figure. */
+function fmtMm(n: number): string {
+  return String(Number(n.toFixed(3)));
 }

@@ -1271,31 +1271,18 @@ export interface JawReach {
 }
 
 /**
- * How near an ITEM comes to the jaws, as a yes/no (#369) — the reading `validateJob`'s
- * `stock-proud-too-small` asks for: whether the item's swept cut can come over a jaw at all.
- *
- * A LABEL is answered by `labelJawReach` below. Every other kind — a shape, a trace, a drilled
- * hole — declares no ink box this module measures, and for them the STRICT reading stands: they
- * are charged the jaw floor wherever they sit. That over-warns rather than under-warns, it is what
- * every one of them did before #369, and the geometric sweep (`tool-into-fixture`) is the real
- * collision check for all of them (issue item 2). Measuring a shape's own outline here would be
- * this function's answer for a shape, and no caller has one to ask with.
- */
-export function itemReachesJaws(
-  job: EngraveJob,
-  item: EngraveAnyItem | EngraveTraceItem | EngraveDrill,
-): boolean {
-  return idJawReach(job, item.id).reaches;
-}
-
-/**
- * The whole `JawReach`, by ID — for a caller holding only the plan's plain item (`plan.engraves` —
- * id, name, profile, depth) rather than the document's: the run sheet, which reads the same funnel
- * every other reader does and must not answer this question a second way.
+ * The whole `JawReach`, by ID — for a caller holding an item rather than a label: the run sheet's
+ * stop line (#394), and `validateJob`'s `stock-proud-too-small`, which needs the reach whole so it
+ * can word a cut inside the band differently from one that really comes over a jaw (#394 review).
+ * Each reads the same funnel every other reader does and must not answer this question a second way.
  *
  * The whole rule lives here, once. A LABEL is the one kind with an extent this module can measure
  * (`labelJawReach`); every other id belongs to a shape, a trace or a drill, and for those the
- * strict reading stands. A label id is never a shape's: ids are minted per list and unique.
+ * STRICT reading stands — they are charged the jaw floor wherever they sit. That over-warns rather
+ * than under-warns, it is what every one of them did before #369, and the geometric sweep
+ * (`tool-into-fixture`) is the real collision check for all of them (issue item 2). Measuring a
+ * shape's own outline would be this function's answer for a shape, and no caller has one to ask
+ * with. A label id is never a shape's: ids are minted per list and unique.
  */
 export function idJawReach(job: EngraveJob, id: string): JawReach {
   const label = job.labels.find((l) => l.id === id);

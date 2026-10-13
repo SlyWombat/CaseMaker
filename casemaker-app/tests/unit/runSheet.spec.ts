@@ -23,6 +23,7 @@ import {
   sha256Hex,
   type RunSheet,
   type RunSheetGenerated,
+  type RunSheetOptions,
   type RunSheetSim,
   type RunSheetStackUp,
 } from '@/engine/cnc/engrave/runSheet';
@@ -82,8 +83,13 @@ function stubGenerated(job: EngraveJob, nc: string = NC, frame = true): RunSheet
   };
 }
 
-function sheetFor(job: EngraveJob, sim: RunSheetSim | null = NO_SIM, nc: string = NC): RunSheet {
-  return buildRunSheet(job, stubGenerated(job, nc), sim, NOW);
+function sheetFor(
+  job: EngraveJob,
+  sim: RunSheetSim | null = NO_SIM,
+  nc: string = NC,
+  options: RunSheetOptions = {},
+): RunSheet {
+  return buildRunSheet(job, stubGenerated(job, nc), sim, NOW, undefined, options);
 }
 
 const section = (sheet: RunSheet, id: string) => {
@@ -411,7 +417,12 @@ describe('runSheet (#207)', () => {
   // edge find decision 26 superseded. The sequence, the datum it starts from and the residual it
   // leaves all come from `planProbing`; the section's job is to say them in physical words.
   describe('section 5 — the work origin is derived from the workholding (#272)', () => {
-    const origin = (job: EngraveJob) => section(sheetFor(job), 'origin').steps.map((s) => s.text);
+    // §5 is two halves: the origin, from the workholding, and the material-position check (#391),
+    // which is HELD — `buildRunSheet` prints it only when `RunSheetOptions.materialScan` is set.
+    // `SCAN` is how the assertions about that half ask for it; the default is asserted below.
+    const SCAN: RunSheetOptions = { materialScan: true };
+    const origin = (job: EngraveJob, options: RunSheetOptions = {}): string[] =>
+      section(sheetFor(job, NO_SIM, NC, options), 'origin').steps.map((s) => s.text);
 
     it('names the datum the jaws supply, then one step per touch, then the residual', () => {
       const texts = origin(defaultEngraveJob());
@@ -454,7 +465,7 @@ describe('runSheet (#207)', () => {
     // sheet saying them in words a person at the machine can act on (and about it not saying them
     // when they would not be true).
     it('offers the material-position scan, in physical landmarks and the plan’s own numbers', () => {
-      const steps = section(sheetFor(defaultEngraveJob()), 'origin').steps;
+      const steps = section(sheetFor(defaultEngraveJob(), NO_SIM, NC, SCAN), 'origin').steps;
       const texts = steps.map((s) => s.text);
 
       // It is an OFFER, and it says why it costs something: a tool change.
@@ -513,12 +524,26 @@ describe('runSheet (#207)', () => {
       // itself still resolves (the jaws reference X and rotation here), which is the point: the two
       // refusals are separate questions.
       const job = defaultEngraveJob({ ...DEFAULT_VISE, stockProud: 0.05 });
-      const texts = origin(job);
+      const texts = origin(job, SCAN);
       expect(texts.filter((t) => t.startsWith('Touch '))).toHaveLength(3);
       const refused = texts.filter((t) => t.includes('cannot be checked with the probe'));
       expect(refused).toHaveLength(1);
       expect(refused[0]).toContain('check the blank against it with a rule instead');
       expect(texts.some((t) => t.startsWith('Check '))).toBe(false);
+    });
+
+    // #391, review of 36f3837 — the block is HELD: the plan is right, the steps a person would follow
+    // are not safe yet (a travel cap with no field behind it, an unmeasured tip stated as measured, a
+    // direction that reads backwards). So the sheet stops printing them for EVERY caller, and this is
+    // the assertion that keeps it that way. It is the whole of the hold: the origin still prints, and
+    // `materialScan.spec.ts` still tests the module the block was made of.
+    it('does not print the material-position check unless the caller asks for it (#391 hold)', () => {
+      const texts = origin(defaultEngraveJob());
+      expect(texts.some((t) => t.startsWith('OPTIONAL, BEFORE THE FIRST CUT'))).toBe(false);
+      expect(texts.some((t) => t.startsWith('Check '))).toBe(false);
+      expect(texts.filter((t) => t.startsWith('Touch '))).toHaveLength(3);
+      // The same job, asked for: the block is there, so the hold is a switch and not a deletion.
+      expect(origin(defaultEngraveJob(), SCAN).some((t) => t.startsWith('OPTIONAL, BEFORE THE FIRST CUT'))).toBe(true);
     });
   });
 

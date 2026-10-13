@@ -216,53 +216,6 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
           "text": "Z is always probed on the engraved face (§7.2): no fixture can supply it",
           "unverified": "#208",
         },
-        {
-          "text": "OPTIONAL, BEFORE THE FIRST CUT — check where the blank really is, with the wired probe. It is Z-only, so it cannot touch a side: it finds an edge by touching DOWN at points across it and watching where the reading changes. 4 edges, 4 touches each, a few minutes, one tool change. Skip this if this is the blank you have just set the origin against.",
-          "unverified": "#208",
-        },
-        {
-          "text": "Fit the probe and touch off ONCE on the blank’s top face, near the middle (M491 for the probe’s own length). Every reading below is a change from this one, so its Z is the zero depth to compare against.",
-          "unverified": "#208",
-        },
-        {
-          "text": "Set the touch-off’s travel limit — the cap — before the first edge touch:",
-          "unverified": "#208",
-          "value": "cap 5 mm below the reference",
-        },
-        {
-          "record": "X where the reading stops being the blank (mm)",
-          "text": "Check the left edge — the one against the fixed jaw — at the middle of the blank’s width. Touch down at 3.5 and 1.5 mm inside (the blank’s own top), at 1.2 mm outside (the blank’s edge itself — the tip is over the corner), and at 3.5 mm outside (off the blank and lower — the jaw’s top, or whatever is under the tip).",
-          "unverified": "#208",
-        },
-        {
-          "record": "X where the reading stops being the blank (mm)",
-          "text": "Check the right edge — the one against the moving jaw — at the middle of the blank’s width. Touch down at 3.5 and 1.5 mm inside (the blank’s own top), at 1.2 mm outside (the blank’s edge itself — the tip is over the corner), and at 3.5 mm outside (off the blank and lower — the jaw’s top, or whatever is under the tip).",
-          "unverified": "#208",
-        },
-        {
-          "record": "Y where the reading stops being the blank (mm)",
-          "text": "Check the front edge — the one nearest you — at the middle of the blank’s length. Touch down at 3.5 and 1.5 mm inside (the blank’s own top), at 1.2 mm outside (the blank’s edge itself — the tip is over the corner), and at 3.5 mm outside (nothing at all: the tip stops on its travel cap) — no jaw reaches under the tip past that edge, so a miss there is the expected reading, not a fault.",
-          "unverified": "#208",
-        },
-        {
-          "record": "Y where the reading stops being the blank (mm)",
-          "text": "Check the back edge — the one furthest from you — at the middle of the blank’s length. Touch down at 3.5 and 1.5 mm inside (the blank’s own top), at 1.2 mm outside (the blank’s edge itself — the tip is over the corner), and at 3.5 mm outside (nothing at all: the tip stops on its travel cap) — no jaw reaches under the tip past that edge, so a miss there is the expected reading, not a fault.",
-          "unverified": "#208",
-        },
-        {
-          "text": "Reading the depths: within 0.38 mm of the reference is the blank’s own top, 3.95 mm or more below it is off the blank, and between the two the tip is on the edge itself. The reading leaves the blank about 0.998 mm BEFORE the edge, so measure back 0.998 mm from where it changed: that is where the edge is. If the change comes at the inside touch nearest the edge, bisect — halve the gap, touch the middle, keep the two readings that straddle it — until the two are 1 mm apart.",
-          "unverified": "#208",
-        },
-        {
-          "record": "edge that is out, and by how much (mm)",
-          "text": "Compare with the file: the edges should lie where it says they do — X = 0 and X = 100 for the left and right, Y = 0 and Y = 60 for the front and back — after the 0.998 mm above is taken off. More than the job’s own margin out, and the blank has moved: re-clamp it, or set the origin from the measured position. Do not cut until the two agree.",
-          "unverified": "#208",
-          "value": "allowed 1 mm",
-        },
-        {
-          "text": "Put the CUTTER back and measure its length again (M491): the probe and the cutter are different tools, and every Z in the program is the cutter’s.",
-          "unverified": "#208",
-        },
       ],
       "title": "5 · Set the work origin",
     },
@@ -549,53 +502,6 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
         },
         {
           "text": "Z is always probed on the engraved face (§7.2): no fixture can supply it",
-          "unverified": "#208",
-        },
-        {
-          "text": "OPTIONAL, BEFORE THE FIRST CUT — check where the blank really is, with the wired probe. It is Z-only, so it cannot touch a side: it finds an edge by touching DOWN at points across it and watching where the reading changes. 4 edges, 4 touches each, a few minutes, one tool change. Skip this if this is the blank you have just set the origin against.",
-          "unverified": "#208",
-        },
-        {
-          "text": "Fit the probe and touch off ONCE on the blank’s top face, near the middle (M491 for the probe’s own length). Every reading below is a change from this one, so its Z is the zero depth to compare against.",
-          "unverified": "#208",
-        },
-        {
-          "text": "Set the touch-off’s travel limit — the cap — before the first edge touch:",
-          "unverified": "#208",
-          "value": "cap 5 mm below the reference",
-        },
-        {
-          "record": "X where the reading stops being the blank (mm)",
-          "text": "Check the left edge — the one against the fixed jaw — at the middle of the blank’s width. Touch down at 3.5 and 1.5 mm inside (the blank’s own top), at 1.2 mm outside (the blank’s edge itself — the tip is over the corner), and at 3.5 mm outside (off the blank and lower — the jaw’s top, or whatever is under the tip).",
-          "unverified": "#208",
-        },
-        {
-          "record": "X where the reading stops being the blank (mm)",
-          "text": "Check the right edge — the one against the moving jaw — at the middle of the blank’s width. Touch down at 3.5 and 1.5 mm inside (the blank’s own top), at 1.2 mm outside (the blank’s edge itself — the tip is over the corner), and at 3.5 mm outside (off the blank and lower — the jaw’s top, or whatever is under the tip).",
-          "unverified": "#208",
-        },
-        {
-          "record": "Y where the reading stops being the blank (mm)",
-          "text": "Check the front edge — the one nearest you — at the middle of the blank’s length. Touch down at 3.5 and 1.5 mm inside (the blank’s own top), at 1.2 mm outside (the blank’s edge itself — the tip is over the corner), and at 3.5 mm outside (nothing at all: the tip stops on its travel cap) — no jaw reaches under the tip past that edge, so a miss there is the expected reading, not a fault.",
-          "unverified": "#208",
-        },
-        {
-          "record": "Y where the reading stops being the blank (mm)",
-          "text": "Check the back edge — the one furthest from you — at the middle of the blank’s length. Touch down at 3.5 and 1.5 mm inside (the blank’s own top), at 1.2 mm outside (the blank’s edge itself — the tip is over the corner), and at 3.5 mm outside (nothing at all: the tip stops on its travel cap) — no jaw reaches under the tip past that edge, so a miss there is the expected reading, not a fault.",
-          "unverified": "#208",
-        },
-        {
-          "text": "Reading the depths: within 0.38 mm of the reference is the blank’s own top, 3.95 mm or more below it is off the blank, and between the two the tip is on the edge itself. The reading leaves the blank about 0.998 mm BEFORE the edge, so measure back 0.998 mm from where it changed: that is where the edge is. If the change comes at the inside touch nearest the edge, bisect — halve the gap, touch the middle, keep the two readings that straddle it — until the two are 1 mm apart.",
-          "unverified": "#208",
-        },
-        {
-          "record": "edge that is out, and by how much (mm)",
-          "text": "Compare with the file: the edges should lie where it says they do — X = 0 and X = 100 for the left and right, Y = 0 and Y = 60 for the front and back — after the 0.998 mm above is taken off. More than the job’s own margin out, and the blank has moved: re-clamp it, or set the origin from the measured position. Do not cut until the two agree.",
-          "unverified": "#208",
-          "value": "allowed 1 mm",
-        },
-        {
-          "text": "Put the CUTTER back and measure its length again (M491): the probe and the cutter are different tools, and every Z in the program is the cutter’s.",
           "unverified": "#208",
         },
       ],

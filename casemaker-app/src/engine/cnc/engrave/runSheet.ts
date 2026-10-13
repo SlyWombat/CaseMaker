@@ -908,6 +908,11 @@ function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string
  * IT IS AN OFFER, and the sheet says so, because the check costs a tool change: the probe goes in
  * for it and the cutter comes back after. When the blank is the one the origin was just set
  * against, the check confirms what the operator has already seen with their own hands.
+ *
+ * HELD, not printed (#391): `buildRunSheet` calls this only when `RunSheetOptions.materialScan` is
+ * set, and nothing in the app sets it. The steps below are the review's list of what to fix before
+ * they reach an operator — they are kept, compiled and tested so that fixing them is the only work
+ * left. See `RunSheetOptions.materialScan` for the list.
  */
 function materialPositionSteps(job: EngraveJob, onBoard: boolean, unverified: string): RunSheetStep[] {
   const part = onBoard ? 'part' : 'blank';
@@ -1004,12 +1009,34 @@ function materialPositionSteps(job: EngraveJob, onBoard: boolean, unverified: st
   return steps;
 }
 
+/**
+ * What a caller may switch ON, over and above the sheet the app has always printed. Every field is
+ * absent by default, so a caller that passes nothing gets exactly the shipped sheet — and adding a
+ * field here cannot change one that is already on paper.
+ */
+export interface RunSheetOptions {
+  /**
+   * Print §5's material-position check (`materialScan.ts`, #391). **OFF, deliberately and for now.**
+   *
+   * It is the operator-facing half of a feature whose printed steps a review has held (#391, review
+   * of 36f3837 on 2026-10-13): the travel cap names a field the machine does not show, the tip's
+   * diameter is stated as a fact when no tip has been measured, the correction's direction reads
+   * backwards, and the bisection covers one direction only. The scan itself is fine and stays where
+   * it is; what is held is what it TELLS a person to do at the machine, so no sheet — the app's, the
+   * bench generator's, or a committed `docs/bench` one — carries those steps until they land.
+   *
+   * Nothing in the app sets it. `runSheet.spec.ts` does, so the block cannot rot while it is held.
+   */
+  materialScan?: boolean;
+}
+
 export function buildRunSheet(
   job: EngraveJob,
   generated: RunSheetGenerated,
   sim: RunSheetSim | null,
   now: Date = new Date(),
   settings: MarginSettings = MARGIN_DEFAULTS,
+  options: RunSheetOptions = {},
 ): RunSheet {
   // One resolution, here: the sheet's own numbers and the panel's come off the same call with the
   // same house setting, and the BLOCK's recommendation is made from the setting rather than from
@@ -1198,9 +1225,16 @@ export function buildRunSheet(
   // ---- 5 · Set the work origin (⚠ #208) ------------------------------------------------------
   // #391 — where the origin IS, then how the operator checks it against the blank actually in the
   // jaws. One section, because they are one task: a corrected origin is corrected on the spot.
+  //
+  // The second half is HELD (`RunSheetOptions.materialScan`): it prints only when the caller asks for
+  // it, and nothing in the app or the bench generator does. The plan is sound; the steps an operator
+  // would follow are not yet safe, which is what #391's review of 36f3837 lists — a travel cap with
+  // no field behind it, a tip diameter stated as fact, a correction direction that reads back to
+  // front, and bisection that covers one direction only. Holding one array entry is the whole change:
+  // `materialScan.ts` and its spec are untouched, so the block comes back the moment the fixes land.
   const originSteps: RunSheetStep[] = [
     ...registrationSteps(job, onBoard, UNVERIFIED),
-    ...materialPositionSteps(job, onBoard, UNVERIFIED),
+    ...(options.materialScan === true ? materialPositionSteps(job, onBoard, UNVERIFIED) : []),
   ];
 
   // ---- 6 · Dry run ---------------------------------------------------------------------------
