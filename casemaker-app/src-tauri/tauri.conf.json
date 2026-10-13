@@ -29,7 +29,9 @@
   "bundle": {
     "active": true,
     "targets": ["msi", "nsis"],
-    "publisher": "SlyWombat",
+    "publisher": "Electric RV Corporation",
+    "homepage": "https://electricrv.ca/casemaker/",
+    "copyright": "© 2026 Electric RV Corporation",
     "shortDescription": "Parametric 3D-printable enclosure designer",
     "longDescription": "Case Maker is a parametric 3D-printable enclosure designer for microcontrollers and single-board computers. Visualize boards, place mounting points, and generate production-ready STL/3MF files for slicers.",
     "category": "DeveloperTool",
