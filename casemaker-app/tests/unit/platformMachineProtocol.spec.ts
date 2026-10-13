@@ -37,6 +37,9 @@ import {
   PTYPE_FILE_START,
   PTYPE_FILE_VIEW,
   consolePipedProblem,
+  MIN_STATUS_POLL_MS,
+  playProgramLine,
+  readJobProgress,
   type Frame,
   type MachineTransport,
   type Md5SumOutcome,
@@ -797,11 +800,14 @@ describe('#302 console — the guards', () => {
     expect(consoleProblem('G0X10M5')).not.toBeNull();
     // The refusal names the reason and the way out, because the answer is read by a person who has
     // just pasted something and needs to know what to do instead.
-    const why = consoleProblem('G21 G90') as string;
+    const why = consoleProblem('G0 X10 G1 Y20 G1 X0 Y0') as string;
     expect(why).toContain('one command per line');
     expect(why).toContain('play');
     // And one command is still one command however it is written, including the idioms this repo
-    // sends: no-space words, a second word that is not a command letter, and `G53`'s move.
+    // sends: no-space words, a second word that is not a command letter, `G53`'s move, and the
+    // modal-only G words, which are that move's PREFIX and not a command of their own (#386 review:
+    // `G91 G38.2 Z-8 F300` is the probe line the bench sends, and three lines like it were refused
+    // as two commands before this).
     for (const line of [
       'G1X10Y20',
       'G1 X10 Y20 F500',
@@ -810,17 +816,43 @@ describe('#302 console — the guards', () => {
       'G28',
       'G53 G0 X-50 Y-50',
       'G53 X-50 Y-50',
+      'G21 G90',
+      'G90 G0 X0 Y0',
+      'G91 G38.2 Z-8 F300',
+      'G91 G0 Z1',
+      'G91 G0 X10',
+      'G91',
       'M491',
       '?',
     ]) {
       expect(consoleProblem(line), line).toBeNull();
     }
+    // A prefix does not hide a second command behind it: this is still a modal set AND a real move
+    // AND a second move.
+    expect(consoleProblem('G90 G0 X10 G1 Y20')).not.toBeNull();
+    expect(consoleProblem('G91 G0 X10 M3')).toContain('2 commands');
     // A bare `X…` line is dispatched with the modal motion prefixed, so it counts the words after it.
     expect(consoleProblem('X10 Y10')).toBeNull();
     expect(consoleProblem('X10 Y10 M3')).not.toBeNull();
     // A lowercase line is the controller's SHELL's, where a G word means nothing — the same split the
     // gate has always made (`cnc-guide.md` chapter 8's `console-line`).
     expect(consoleProblem('echo G0 X1 G1 X2')).toBeNull();
+  });
+
+  it('strips an N line number before counting (#386 review)', () => {
+    // The reading is `interpreter.ts`'s own, and it is hardware-confirmed (#385, 2026-10-12): the
+    // firmware strips the number but keeps testing the ORIGINAL first character, so a numbered line
+    // whose command is G/M/T/S runs NOTHING — `N10 M5` answered `ok - ignore: [M5]` and the spindle
+    // stayed on. Nothing to stream, so nothing to refuse.
+    expect(consoleProblem('N10 M5')).toBeNull();
+    expect(consoleProblem('N10 G1 X5')).toBeNull();
+    expect(consoleProblem('N10 G0 X10 G1 Y20')).toBeNull();
+    // A bare-axis remainder DOES survive, by being re-dispatched with the modal motion prefixed — so
+    // `N10 X0 G1 X10` is two commands, and it passed the gate before this because `splitCommands`
+    // falls through on a leading `N` and called the whole line one slice.
+    expect(consoleProblem('N10 X0 G1 X10')).toContain('2 commands');
+    expect(consoleProblem('N10 X10 Y10')).toBeNull();
+    expect(consoleProblem('N10X5')).toBeNull();
   });
 });
 
@@ -845,6 +877,62 @@ describe('#386 console — a piped session polls and nothing else', () => {
     // And a run path that is fine typed (`play`, recorded as open in §8) is not fine piped.
     expect(consoleProblem('play /sd/gcodes/x.nc')).toBeNull();
     expect(consolePipedProblem('play /sd/gcodes/x.nc')).not.toBeNull();
+  });
+});
+
+describe('#386 run — reading a job out of a status line', () => {
+  // Verbatim replies from docs/bench/traces/2026-10-12-poll.log, the air run that lost the controller
+  // once that day. They are here because the finish rule is read off THEM, not off the field list:
+  // there is an `Idle` in the middle of that job, and there is no `P:` at all after its end.
+  const FIRST = '<Run|MPos:-11.6000,-14.6000,-3.0000,0.0000,0.0000|WPos:136.8000,110.2000,61.6109,0.0000,0.0000|F:0.0,500.0,100.0|S:7128.4,12000.0,100.0,0,36.1,24.6,0,0,0,0|T:1,0.507,1|L:0, 0, 0, 0.0,100.0|P:0,56,4|C:3,1,0,1|E:0,0,0,692,7610|OTA:0,0>';
+  const MID_JOB_IDLE = '<Idle|MPos:-98.4000,-102.8000,-9.6109,0.0000,0.0000|WPos:50.0000,22.0000,55.0000,0.0000,0.0000|F:0.0,2000.0,100.0|S:11988.6,12000.0,100.0,0,39.2,24.8,0,0,0,0|T:1,0.507,1|L:0, 0, 0, 0.0,100.0|P:29,74,42|C:3,1,0,1|E:0,0,0,692,7610|OTA:0,0>';
+  const END = '<Idle|MPos:-11.6000,-14.6000,-3.0000,0.0000,0.0000|WPos:136.8000,110.2000,61.6109,0.0000,0.0000|F:0.0,500.0,100.0|S:0.0,12000.0,100.0,0,39.1,24.8,0,0,0,0|T:1,0.507,1|L:0, 0, 0, 0.0,100.0|P:34,100,51|C:3,1,0,1|E:0,0,0,692,7610|OTA:0,0>';
+  const AFTER = '<Idle|MPos:-11.6000,-14.6000,-3.0000,0.0000,0.0000|WPos:136.8000,110.2000,61.6109,0.0000,0.0000|F:0.0,500.0,100.0|S:0.0,12000.0,100.0,0,38.9,24.8,0,0,0,0|T:1,0.507,1|L:0, 0, 0, 0.0,100.0|C:3,1,0,1|E:0,0,0,692,7610|OTA:0,0>';
+
+  /** The rule `z1.mjs run` stops on: percent 100 AND `Idle` in ONE reply. */
+  const finished = (text: string): boolean => {
+    const p = readJobProgress(text);
+    return p.percent === 100 && p.state === 'Idle';
+  };
+
+  it('reads the state word and the three P fields', () => {
+    expect(readJobProgress(FIRST)).toEqual({ state: 'Run', line: 0, percent: 56, elapsedS: 4 });
+    expect(readJobProgress(END)).toEqual({ state: 'Idle', line: 34, percent: 100, elapsedS: 51 });
+  });
+
+  it('does not read the mid-job Idle as the end — that is 3-4 s of the job at M05', () => {
+    expect(readJobProgress(MID_JOB_IDLE).state).toBe('Idle');
+    expect(readJobProgress(MID_JOB_IDLE).percent).toBe(74);
+    expect(finished(MID_JOB_IDLE)).toBe(false);
+    expect(finished(END)).toBe(true);
+  });
+
+  it('reports a status with no P field at all, which is every reply after the job', () => {
+    // This is why the caller must have seen a percent before: the field LEAVING is what the end looks
+    // like if the 100 % reply was missed, and it must not read as "finished" on the first poll.
+    expect(readJobProgress(AFTER)).toEqual({ state: 'Idle', line: null, percent: null, elapsedS: null });
+    expect(finished(AFTER)).toBe(false);
+    expect(finished('')).toBe(false);
+    expect(readJobProgress('<Alarm|MPos:-9.890,-12.830,-85.788|H:10|S:0.0|T:1,-9.752,1>').state).toBe('Alarm');
+  });
+
+  it('keeps the poll floor the bench measured, and it is not below 2 s', () => {
+    // `?` replies took 0.6-0.7 s and a poll every 0.6 s faulted the controller on 2026-10-12; 2 s is
+    // what every clean run since has used, and it is the floor `z1.mjs run` and a piped console refuse
+    // to go under.
+    expect(MIN_STATUS_POLL_MS).toBeGreaterThanOrEqual(2000);
+  });
+
+  it('builds the play line from a path, and refuses anything that is not one', () => {
+    expect(playProgramLine('/sd/gcodes/284-PLA-feed-coupon-F500.nc')).toBe(
+      'play /sd/gcodes/284-PLA-feed-coupon-F500.nc',
+    );
+    // Whatever it builds is a line the console accepts — the two guards cannot disagree.
+    expect(consoleProblem(playProgramLine('/sd/gcodes/x.nc') as string)).toBeNull();
+
+    for (const path of ['', 'x.nc', '/sd/gcodes/a b.nc', '/sd/gcodes/x.nc; rm -rf /sd', '/sd/gcodes/x.nc\nM3', '/sd/gcodes/*.nc']) {
+      expect(playProgramLine(path), JSON.stringify(path)).toBeNull();
+    }
   });
 });
 

@@ -18,6 +18,11 @@
  * answer is the same whether it was pasted, typed, or piped (#386 also limits a PIPED session to the
  * status poll — see `consolePipedProblem`).
  *
+ * That count is the dispatcher's OWN reading, which the review of 2026-10-12 sharpened twice: a
+ * prefix word (`G53`, and the modal-only `G90`/`G91`/`G20`/`G21`) is part of the command it prefixes
+ * rather than a second one, and an `N` line number is stripped first — a numbered line whose command
+ * is G/M/T/S does nothing on this machine at all (#385). See `dispatchedCommands`.
+ *
  * WHY THE RULES LIVE IN `engine/`. Two callers ask them and must never disagree:
  *
  *   - `platform/desktop/protocol.ts` — the sink. Every line that reaches a socket passes through it,
@@ -49,6 +54,40 @@ const CONSOLE_LINE = /^[\x20-\x7e]{1,200}$/;
 const BARE_MOTION = 'XYZAF';
 
 /**
+ * The G words that are a PREFIX on the command that follows, never a command of their own (#386
+ * review, 2026-10-12).
+ *
+ * `G53` is a machine-coordinate prefix on its move (`interpreter.ts` `handleG53`), and the four
+ * modal-only words set a mode that belongs to the next command: `G91 G38.2 Z-8 F300` is the probe
+ * line this bench sends, `G91 G0 Z1` is §11.7's cycle and `G91 G0 X10` is the runbook's, and all
+ * three were refused as two commands. The alternative the review named — splitting them into two
+ * console lines — risks a line that leaves relative mode on, which is worse than the refusal.
+ */
+const PREFIX_G = new Set([53, 90, 91, 20, 21]);
+
+/**
+ * The line's body after an `N` line number, or `null` when a number means the whole line does
+ * NOTHING (#386 review item 3, `interpreter.ts` `n-line-ignored`, #385).
+ *
+ * The firmware strips the number and keeps testing the ORIGINAL first character, `N`, which matches
+ * none of its G/M/T/S branches — `N10 M5` answered `ok - ignore: [M5]` on the bench on 2026-10-12
+ * and the spindle stayed on. Only a remainder that begins with a BARE AXIS survives, and it survives
+ * by being re-dispatched with the modal motion prefixed, so that is what is counted here:
+ * `N10 X0 G1 X10` is TWO commands and `N10 M5` is none.
+ *
+ * `splitCommands` falls through on a leading `N` and reports the whole line as one slice, which is
+ * how a numbered two-command line passed the gate before this.
+ */
+function afterLineNumber(text: string): string | null {
+  if (text[0] !== 'N') return text;
+  let i = 0;
+  while (i < text.length && 'N0123456789.,- '.includes(text[i] as string)) i++;
+  const rest = text.slice(i);
+  if (rest === '') return '';
+  return BARE_MOTION.includes(rest[0] as string) ? rest : null;
+}
+
+/**
  * How many commands one line dispatches (#386).
  *
  * NOT a count of `G`/`M` words. The firmware cuts a line into commands BY LETTER, so `G1X10Y20` is
@@ -56,30 +95,32 @@ const BARE_MOTION = 'XYZAF';
  * of `GcodeDispatch.cpp` that already answers exactly this. It is asked rather than re-invented: a
  * word count would refuse the first two and pass the third.
  *
- * Two things are then added, both from the interpreter's own dispatch loop, because a slice is not
+ * Three things are then added, all from the interpreter's own dispatch loop, because a slice is not
  * always a dispatch:
  *
+ *   - an `N`-numbered line is read first (`afterLineNumber`): a number whose command is G/M/T/S
+ *     makes the line do nothing at all, and a bare-axis remainder is counted without its number;
  *   - a bare `X…`/`F…` line is dispatched with the modal motion prefixed, so it is split that way;
- *   - `G53` followed on the same line by `G0`/`G1` is ONE command — G53 is that move's machine-
- *     coordinate prefix, not a second command (interpreter.ts `handleG53`). `G53 G0 X-50 Y-50` is a
- *     shape this repo sends and `cncProbePlan`'s job uses; counting slices would refuse it.
+ *   - a slice carrying ONLY prefix G words (`PREFIX_G`) is that next command's prefix, not a
+ *     command: `G53 G0 X-50 Y-50`, `G91 G38.2 Z-8 F300` and `G21 G90` are each ONE command. A
+ *     prefix slice with nothing after it is the whole line (`G91` alone is legitimate) and counts.
  *
  * `text` is the line as `classifyLine` returns it for a code line: leading blanks already removed.
  */
 function dispatchedCommands(text: string): number {
-  const prefixed = BARE_MOTION.includes(text[0] ?? '') ? `G0 ${text}` : text;
+  const body = afterLineNumber(text);
+  if (body === null || body === '') return 0;
+  const prefixed = BARE_MOTION.includes(body[0] as string) ? `G0 ${body}` : body;
   const commands = splitCommands(prefixed);
   let dispatches = 0;
   for (let i = 0; i < commands.length; i++) {
+    const slice = commands[i] as string;
+    const codes = parseWords(slice, 0, []).filter((w) => w.letter === 'G' || w.letter === 'M');
+    const isPrefix =
+      codes.length > 0 &&
+      codes.every((w) => w.letter === 'G' && PREFIX_G.has(codeParts(w.text).code));
+    if (isPrefix && i + 1 < commands.length) continue;
     dispatches++;
-    const words = parseWords(commands[i] as string, 0, []);
-    const g = words.find((w) => w.letter === 'G');
-    if (g === undefined || codeParts(g.text).code !== 53) continue;
-    const next = commands[i + 1];
-    const ng = next === undefined ? undefined : parseWords(next, 0, []).find((w) => w.letter === 'G');
-    // `G53` with no following G0/G1 is its own command (it reuses the modal motion); with one, that
-    // move is the G53's and the pair is dispatched once.
-    if (ng !== undefined && codeParts(ng.text).code <= 1) i++;
   }
   return dispatches;
 }

@@ -33,6 +33,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { dirname, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { createNodeTransport } from './transport.node.mjs';
 import * as P from '../../src/platform/desktop/protocol.ts';
@@ -105,21 +106,38 @@ line per distinct machine. Nothing is decided from field 4: it is an observation
 MOTION AND THE CONSOLE (#302). Two commands send a line you typed, which can move the machine:
 
   node tools/z1/z1.mjs send    <host> "<line>" --i-am-at-the-machine [--trace <file>]
-  node tools/z1/z1.mjs console <host> [--i-am-at-the-machine] [--trace <file>]
+  node tools/z1/z1.mjs console <host> [--i-am-at-the-machine] [--interval <ms>] [--trace <file>]
+  node tools/z1/z1.mjs run     <host> <path> --i-am-at-the-machine [--interval <ms>] [--trace <file>] [--json]
 
 \`send\` refuses to run without --i-am-at-the-machine (/Fabrication.md §8: motion needs a person at
-the machine). \`console\` asks for it once, in words, before the first line. Both go through the
+the machine), and \`run\` asks for the same flag for the same reason. \`console\` asks for it once, in
+words, before the first line. Both go through the
 bridge's guards (protocol.ts \`consoleProblem\`): one printable line; no config-set, no card writes,
 no reset or flashing; the realtime bytes are not wired — the physical stop is the stop. Every line
 sent and every reply is appended to a trace file (default docs/bench/traces/<date>-console.log), so a
-session is a recorded trace. Nothing polls, repeats or queues.
+session is a recorded trace. A typed line is never repeated, queued or retried: \`run\` is the one
+command that sends anything on its own, and only because it was asked to watch the job it started.
 
 ONE LINE IS ONE COMMAND, and a PIPED console is the status poll alone (#386). Feeding a program
 through the console line by line faulted the controller on 2026-10-12 (\`ALARM: Mainboard did not
 receive a status response from the CTRL\`) and left the spindle turning with the plug as the only
 stop, so \`consoleProblem\` refuses a line the dispatcher would run as more than one command, and
 when stdin is not a keyboard — \`console < program.nc\`, or any script — only \`?\` is sent
-(\`consolePipedProblem\`). To run a program: upload it and \`play /sd/gcodes/<file>\`.`);
+(\`consolePipedProblem\`), paced at one poll per ${P.MIN_STATUS_POLL_MS} ms.
+
+TO RUN A PROGRAM, use \`run\`: it uploads nothing and decides nothing, it sends \`play <path>\` and
+then the status poll \`?\` every \`--interval\` ms (default ${P.MIN_STATUS_POLL_MS}, the rate the bench
+uses; a faster one is refused — 0.6 s faulted the controller on 2026-10-12) on the SAME connection,
+until one reply says the job is finished. What that takes is worth knowing: the air file of
+2026-10-12 reported \`Idle\` for 3–4 s in the middle of itself (at \`M05\`), so job end is \`P\` percent
+100 together with \`Idle\`, never \`Idle\` alone — and the \`P\` field disappears from the status once
+the job is over, so a run that misses the 100 % reply ends on the poll after it. One line is printed
+per poll (to stderr; stdout stays clean for \`--json\`), and Ctrl-C sends \`abort\` — the console's own
+stop-the-play word — so the machine is not left cutting unwatched, and exits 130; a second Ctrl-C
+leaves at once. Three polls in a row with no reply at all end it too, non-zero: the socket is gone,
+and this tool cannot claim it stopped anything. \`abort\` is a request to the controller, not the
+e-stop: the physical stop is the stop, and the vacuum and the spindle are the program's own
+business.`);
 }
 
 /** The trace file for a session: one dated file per day unless --trace says otherwise. */
@@ -135,7 +153,7 @@ function trace(file, text) {
 }
 
 /** Send one line through an open console session, echo and record both sides. */
-async function sendTraced(session, file, line, flags) {
+async function sendTraced(session, file, line, flags, opts = {}) {
   const at = new Date().toISOString();
   const out = await session.send(line, {
     firstReplyMs: num(flags['first-reply'], 3000),
@@ -144,7 +162,9 @@ async function sendTraced(session, file, line, flags) {
   });
   const body = out.ok ? out.text.replace(/\r/g, '').trimEnd() : `[${out.reason}] ${out.detail}`;
   trace(file, `${at}  > ${line}\n${body.split('\n').map((l) => `    ${l}`).join('\n')}\n${out.ok ? `    (${out.frames} frame(s), ${out.elapsedMs} ms)\n` : ''}`);
-  console.log(body.length > 0 ? body : '(no reply text)');
+  // A polling loop echoes nothing: its own progress line is the display, the trace file is the record
+  // of every reply, and stdout stays clean for `--json`.
+  if (opts.echo !== false) console.log(body.length > 0 ? body : '(no reply text)');
   return out;
 }
 
@@ -249,7 +269,7 @@ async function main() {
   }
 
   const port = num(flags.port, P.COMMAND_TCP_PORT);
-  if (cmd !== 'identify' && cmd !== 'status' && cmd !== 'read' && cmd !== 'config' && cmd !== 'md5' && cmd !== 'send' && cmd !== 'console') {
+  if (cmd !== 'identify' && cmd !== 'status' && cmd !== 'read' && cmd !== 'config' && cmd !== 'md5' && cmd !== 'send' && cmd !== 'console' && cmd !== 'run') {
     console.error(`unknown command: ${cmd}`);
     usage();
     process.exit(2);
@@ -260,6 +280,20 @@ async function main() {
     console.error('send moves hardware. Re-run with --i-am-at-the-machine once you are at the machine with your hand near the stop (/Fabrication.md §8).');
     process.exit(2);
   }
+  if (cmd === 'run' && flags['i-am-at-the-machine'] !== true) {
+    console.error('run starts a program on the machine. Re-run with --i-am-at-the-machine once you are at the machine with your hand near the stop (/Fabrication.md §8).');
+    process.exit(2);
+  }
+  // The poll interval is a floor, not a preference (#386): `?` every 0.6 s is what faulted the
+  // controller on 2026-10-12, and the bench's rate, 2 s, is the slowest-tested one that never did.
+  const intervalMs = num(flags.interval, P.MIN_STATUS_POLL_MS);
+  if (!(intervalMs >= P.MIN_STATUS_POLL_MS)) {
+    console.error(
+      `--interval must be milliseconds and at least ${P.MIN_STATUS_POLL_MS}: the status poll is what the controller ` +
+        'answers in 0.6–0.7 s, and asking faster than that faulted it on 2026-10-12 (#386).',
+    );
+    process.exit(2);
+  }
   if (cmd === 'send') {
     const line = positional[2];
     const problem = line === undefined ? 'send needs a line, e.g. send 192.168.10.43 "G28" --i-am-at-the-machine' : P.consoleProblem(line);
@@ -267,6 +301,17 @@ async function main() {
       console.error(problem);
       process.exit(2);
     }
+  }
+  // The `play` line is BUILT here from a checked path, the way `read` and `config` build theirs: the
+  // caller passes a path on the card, never a line, so a path can never smuggle a second command.
+  const playLine = cmd === 'run' && positional[2] !== undefined ? P.playProgramLine(positional[2]) : null;
+  if (cmd === 'run' && playLine === null) {
+    console.error(
+      positional[2] === undefined
+        ? `run needs the card path of a program, e.g. run ${host} /sd/gcodes/<file>.nc --i-am-at-the-machine`
+        : `run takes an absolute path on the card, plain characters only — not ${JSON.stringify(positional[2])}`,
+    );
+    process.exit(2);
   }
 
   const conn = await transport.tcpConnect(host, port, num(flags.timeout, 3000));
@@ -312,6 +357,7 @@ async function main() {
         );
         const session = P.openConsole(transport, conn);
         let refusedLine = false;
+        let lastPipedPollAt = null;
         for (;;) {
           const raw = await ask(typed ? 'z1> ' : '');
           if (raw === null) break;
@@ -326,12 +372,145 @@ async function main() {
               refusedLine = true;
               continue;
             }
+            // A piped poll has a FLOOR (#386): `?` in a tight loop is the shape that faulted the
+            // controller on 2026-10-12, so a script's polls are paced at --interval (default
+            // MIN_STATUS_POLL_MS). A TYPED line is never delayed — at the keyboard the person at the
+            // machine sets the pace, which is the whole reason the console is allowed at all.
+            if (lastPipedPollAt !== null) {
+              const wait = intervalMs - (Date.now() - lastPipedPollAt);
+              if (wait > 0) {
+                process.stderr.write(`  (paced: waiting ${wait} ms — the poll is at most one per ${intervalMs} ms)\n`);
+                await sleep(wait);
+              }
+            }
+            lastPipedPollAt = Date.now();
           }
           await sendTraced(session, file, line, flags);
         }
         if (refusedLine) process.exitCode = 1;
       } finally {
         rl.close();
+      }
+    } else if (cmd === 'run') {
+      const file = tracePath(flags);
+      trace(file, `\n=== run session ${new Date().toISOString()} ${host}:${port} ===\n`);
+      const session = P.openConsole(transport, conn);
+      let stopAsked = 0;
+      // Ctrl-C does not kill the process: it asks for the play to be aborted, which is a single line
+      // this session is allowed to send because a person pressed the key. The send happens at the next
+      // poll boundary, never during one: a reply belongs to one open request (protocol.ts's channel),
+      // and two lines in flight would attach the next reply to the wrong one.
+      const onSigint = () => {
+        if (stopAsked === 1) {
+          console.error('\nleaving now. The machine was NOT stopped — the physical stop is the stop.');
+          process.exit(130);
+        }
+        stopAsked = 1;
+        process.stderr.write('\nCtrl-C — `abort` goes out at the next poll boundary. The physical stop is the stop.\n');
+      };
+      process.on('SIGINT', onSigint);
+      try {
+        // Everything this command prints on the way goes to stderr; stdout carries the one summary
+        // line (or the JSON), so a script can read it and a person can watch the rest.
+        const played = await sendTraced(session, file, playLine, flags, { echo: false });
+        if (played.ok) {
+          const said = played.text.replace(/\r/g, '').trim();
+          if (said.length > 0) process.stderr.write(`  ${said.split('\n').join('\n  ')}\n`);
+        }
+        if (!played.ok) {
+          // No reply at all: nothing is running that we know of, and polling would be guesswork.
+          console.error(`\`${playLine}\` was not answered (${played.detail}). Nothing is being polled.`);
+          process.exitCode = 1;
+        } else if (/\berror\b|not found|no such file|unknown/i.test(played.text)) {
+          console.error('the controller did not accept that program (see its reply above). Nothing is being polled.');
+          process.exitCode = 1;
+        } else {
+          process.stderr.write(
+            `polling \`?\` every ${intervalMs} ms until the job finishes (Ctrl-C aborts; a second one leaves). The physical stop is the stop.\n`,
+          );
+          let polls = 0;
+          let seenProgress = false;
+          let misses = 0;
+          let outcome = 'left';
+          let last = { state: null, line: null, percent: null, elapsedS: null };
+          for (;;) {
+            const polledAt = Date.now();
+            const out = await sendTraced(session, file, '?', flags, { echo: false });
+            polls++;
+            if (!out.ok) {
+              // A missed poll is not a failed job, so it is retried — but three in a row means the
+              // socket is gone (#386: the controller does drop it), and polling a dead socket forever
+              // would report nothing while the spindle is still turning.
+              misses++;
+              process.stderr.write(`  ${String(polls).padStart(3)}  (no status reply: ${out.detail})\n`);
+              if (misses >= 3) {
+                outcome = 'unreachable';
+                process.exitCode = 1;
+                break;
+              }
+            } else {
+              misses = 0;
+              if (/ALARM/i.test(out.text) || P.readJobProgress(out.text).state === 'Alarm') {
+                outcome = 'alarm';
+                process.exitCode = 1;
+                break;
+              }
+              const p = P.readJobProgress(out.text);
+              last = p;
+              if (p.percent !== null) seenProgress = true;
+              process.stderr.write(
+                `  ${String(polls).padStart(3)}  ${p.state ?? '?'}  ${(p.percent === null ? '   ' : `${p.percent}`).padStart(3)}%` +
+                  `  line ${p.line ?? '–'}  ${p.elapsedS ?? '–'} s\n`,
+              );
+              // Job end is percent 100 AND `Idle` in one reply — `Idle` alone is 3–4 s of the job at
+              // `M05`. The `P` field then leaves the status entirely, so a run that missed the 100 %
+              // reply ends here instead of polling forever (both halves are in the 2026-10-12 trace).
+              if (p.percent === 100 && p.state === 'Idle') {
+                outcome = 'finished';
+                break;
+              }
+              if (seenProgress && p.percent === null && p.state === 'Idle') {
+                outcome = 'finished';
+                break;
+              }
+              if (!seenProgress && polls === 5 && p.state === 'Idle') {
+                process.stderr.write('  (no progress field in five polls — the job may not have started)\n');
+              }
+            }
+            if (stopAsked === 1) {
+              await sendTraced(session, file, 'abort', flags);
+              outcome = 'aborted';
+              process.exitCode = 130;
+              break;
+            }
+            const wait = intervalMs - (Date.now() - polledAt);
+            if (wait > 0) await sleep(wait);
+          }
+          const why =
+            outcome === 'finished'
+              ? 'the job is finished'
+              : outcome === 'aborted'
+                ? 'aborted'
+                : outcome === 'unreachable'
+                  ? 'the status stopped answering — NOT stopped from here'
+                  : 'stopped at an alarm';
+          if (asJson) {
+            console.log(JSON.stringify({ path: positional[2], outcome, polls, ...last }, null, 2));
+          } else {
+            console.log(
+              `${playLine} — ${why}: ${last.percent ?? '–'}%, line ${last.line ?? '–'}, ` +
+                `${last.elapsedS ?? '–'} s on the controller's clock, ${polls} poll(s).`,
+            );
+          }
+          if (outcome === 'aborted') {
+            console.error('`abort` was sent, but it is a request, not the e-stop: check the spindle and the vacuum switch.');
+          }
+          if (outcome === 'unreachable') {
+            console.error('three polls in a row went unanswered — the socket or the controller is gone. The job may still be running: the physical stop is the stop.');
+          }
+        }
+      } finally {
+        process.off('SIGINT', onSigint);
       }
     } else if (cmd === 'identify') {
       const id = await P.runIdentify(transport, conn, host, { windowMs: num(flags.window, 1500) });

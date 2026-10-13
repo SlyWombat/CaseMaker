@@ -423,6 +423,13 @@ the trip home. So a caller that stops polling because it saw `Idle` loses the re
 is `P` percent 100 **and** `Idle`. One trace reads `Run → Idle → Run → Idle` and ends
 `P:34,100,51`; the rest of the line is the standard Marlin-style field set above.
 
+**`P` also LEAVES the status once the job is over.** In that same trace, `P:34,100,51` is the last
+reply that carries the field at all: every poll after it is `<Idle|…|C:…|E:…|OTA:0,0>`, with no `P:`
+between `L:` and `C:`. So "no percent" is not "no job has ever run" — it is what the line looks like
+both before a program starts and after one ends, and a caller that missed the single 100 % reply can
+still end honestly on "a `P` was seen, and now it is gone, and the state is `Idle`". That is the rule
+`z1.mjs run` exits on, and the reason it does not stop on the state word alone.
+
 Replies to `?` took **0.6–0.7 s** on this bench, so any poll interval has to be slower than that —
 2 s was used, and a 0.6 s poll is the interval that faulted the console (the bench day's own lesson,
 §8). Traces: `docs/bench/traces/2026-10-12-poll*.log`.
@@ -482,7 +489,13 @@ touching callers.
   rule `z1.mjs console` applies when stdin is not a keyboard — allows the status poll `?` and refuses
   every other line, because a piped session has nobody at the machine to watch it. What is LEFT is the
   path the bench proved: upload the verified `.nc` (§5), then `play` it, polling the status (§6) every
-  2 s or slower on one connection. Job end is `P` percent 100 and `Idle`, never `Idle` alone.
+  2 s or slower on one connection. Job end is `P` percent 100 and `Idle`, never `Idle` alone. That path
+  is one command — `z1.mjs run <host> <path> --i-am-at-the-machine` — which sends `play` built from a
+  checked card path, polls on that same connection (refusing `--interval` under 2 s), prints a line per
+  poll, and stops on §6's two end conditions. Ctrl-C there sends `abort`, the Smoothieware console word
+  for aborting the current play (the context `play`, `md5sum` and `config-get` all come from; not yet
+  observed on this machine): a request to the controller, which is why the tool says so and exits 130
+  rather than claiming the machine stopped. The physical stop is still the stop.
 - The single-byte e-stop byte is **not** wired: an e-stop that travels over the same socket the
   bridge is mid-transfer on is worse than useless. The physical stop is the stop.
 - A machine refusal is surfaced as a refusal. The upload result has an explicit *refused* outcome

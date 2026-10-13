@@ -426,6 +426,49 @@ export interface MachineStatus {
   diagnostics: string[];
 }
 
+/**
+ * How fast a caller may poll the status, ms — never below this (§6, #386).
+ *
+ * Replies to `?` took **0.6–0.7 s** on this bench, and a poll every 0.6 s is the interval that
+ * faulted the controller on 2026-10-12 (`ALARM: Mainboard did not receive a status response from the
+ * CTRL`, spindle frozen in `Run`, the mains plug the only stop). 2 s is what the bench used for every
+ * clean run since. It is the floor for `z1.mjs run`'s polling loop and for a piped `console` session.
+ */
+export const MIN_STATUS_POLL_MS = 2000;
+
+/** What a status line says about the running job (§6, #386). Every field is null when absent. */
+export interface JobProgress {
+  /** The state word at the front of the line: `Idle`, `Run`, `Alarm`, `Home`, … (`<Run|MPos:…>`). */
+  state: string | null;
+  /** `P:`'s first field — the line of the file being run. */
+  line: number | null;
+  /** `P:`'s second field — percent complete, 100 at the end. */
+  percent: number | null;
+  /** `P:`'s third field — seconds elapsed in the job. */
+  elapsedS: number | null;
+}
+
+/**
+ * Read a status line for the job's progress. Pure text, so the caller decides what "finished" means.
+ *
+ * The decision itself is NOT here, because it is the one thing about this reply that reads wrong at a
+ * glance: `Idle` appears **mid-job** — the air file reports it for 3–4 s at `M05` and then `Run`
+ * again for the trip home (traces: `docs/bench/traces/2026-10-12-poll*.log`) — so a caller that stops
+ * on the state word alone loses the rest of the file. **Job end is percent 100 AND `Idle`.**
+ */
+export function readJobProgress(text: string): JobProgress {
+  const state = /^<([A-Za-z]+)/.exec(text.trim());
+  const p = /(?:^|\|)P:([^|>]*)/.exec(text);
+  const fields = p === null ? [] : (p[1] as string).split(',');
+  const num = (i: number): number | null => {
+    const raw = fields[i]?.trim();
+    if (raw === undefined || raw === '') return null;
+    const v = Number(raw);
+    return Number.isFinite(v) ? v : null;
+  };
+  return { state: state === null ? null : state[1]!, line: num(0), percent: num(1), elapsedS: num(2) };
+}
+
 /** Send `?` and return the controller's status line verbatim. Empty is reported as `ok: false`. */
 export async function runStatus(
   transport: MachineTransport,
@@ -1036,6 +1079,28 @@ function wordHex(word: number): string {
 import { consolePipedProblem, consoleProblem } from '../../engine/cnc/consoleGate.ts';
 
 export { consolePipedProblem, consoleProblem };
+
+/**
+ * A path a program may be started from: absolute, and nothing but path characters — no space, no
+ * shell punctuation, no quote. The same shape `READABLE_PATH` guards `cat` and `md5sum` with, and for
+ * the same reason: `play` is a lowercase SHELL line, so anything the shell would read as a second
+ * word or a separator (`play /sd/a.nc; rm …`) must never be buildable from a caller's argument.
+ */
+const PLAYABLE_PATH = /^\/[A-Za-z0-9._/-]+$/;
+
+/**
+ * The one console line that STARTS a program, or null for a path that may not be played (#386 review).
+ *
+ * This is the run path the bench uses: upload the verified `.nc` (§5), then `play /sd/gcodes/<file>`,
+ * polling the status every {@link MIN_STATUS_POLL_MS} or slower on the same connection (Z1-Bridge-
+ * Protocol.md §8). It is built here, at the sink, from a checked path rather than accepted as a
+ * free-text line — the same distinction `read` and `config` are built on. Which files may be played
+ * at all (this session's uploads, or any file on the card) stays the open decision it is recorded as
+ * in §8; this only refuses a path that is not a plain card path.
+ */
+export function playProgramLine(path: string): string | null {
+  return PLAYABLE_PATH.test(path) ? `play ${path}` : null;
+}
 
 export interface ConsoleOptions {
   /** How long to wait for the FIRST reply frame. Default 3000. */

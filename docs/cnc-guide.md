@@ -126,7 +126,9 @@ than one command is now refused, and the refusal says so. To run a program, uplo
 with `play /sd/gcodes/<file>`, which is how the machine's own software starts one. Progress while it
 runs is the `P:<line>,<percent>,<seconds>` field of the status line; the job is finished when that
 percent reaches 100 **and** the state reads `Idle`, because `Idle` also appears partway through a
-program.
+program. The bench harness has exactly that path as one command —
+`tools/z1/z1.mjs run <host> <path> --i-am-at-the-machine` sends `play` and then polls, printing a
+line per poll and stopping when the job ends (Ctrl-C there asks the controller to abort the play).
 
 ---
 
