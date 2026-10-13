@@ -39,6 +39,10 @@ possible. **Nothing here is scheduled; the maintainer calls each session.**
 
   Three fresh blanks, plus today's. The V-bit's Z0 is probed at the middle of the groove band: the 0.33 mm dome is larger than
   the 0.2 mm steps between groove depths.
+- **How to run a file** (from Windows, `casemaker-app/`): `z1.mjs send <host> 'M331'`, then
+  `z1.mjs run <host> /sd/gcodes/<file>.nc --i-am-at-the-machine --first-reply 10000 --trace <log>`,
+  then `send 'M332'` if the program didn't. Until the `run` follow-ups land (#386 comment), keep
+  `--first-reply 10000`: a `play` reply slower than 3 s otherwise ends the polling while the job runs.
 - **Next in S3:** #176's G32 stroke test, the #284 coupons and restart proof, #185 V-grooves. Before
   any of them: lift the head before `play` (#384) and set Z0 as the cutter tip's own height (#387).
 - **S3's files are written; none of them has been run** (2026-10-12). `scripts/bench-files.ts` builds
