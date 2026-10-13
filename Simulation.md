@@ -665,8 +665,11 @@ one Z level at 0.7 s. The affordable structure, and the one real CAM simulators 
 - **Scrubbing is then instant**: the stock at step *k* is `stock − union(removals[0..k])`,
   and the unions are already computed. Seeking backwards is as cheap as forwards.
 - **Between checkpoints, animate the tool over a static stock.** Moving a tool mesh along a
-  polyline is free. The material does not visibly update mid-checkpoint, which is what every
-  CAM simulator does and nobody notices.
+  polyline is free. The material does not visibly update mid-checkpoint, and that is a
+  compromise **this** path makes to keep an exact boolean — not what every CAM simulator
+  does: a dexel or voxel simulator updates the material per move, and pays for it with a
+  stock that is only ever approximately the cut solid. Here each checkpoint is the exact CSG
+  result and everything between two of them is stale (#191 item 3).
 - **Pause points are markers on the step bar**, not checkpoints — `M6`, `M490.1`, `M600`
   (§1.1). In the code a pause opens a *segment*; a checkpoint is a run of cuts, so a pause
   followed by no cut is not one (corrected by code review #4). The stock shown at a pause is
@@ -705,6 +708,14 @@ so leaving a Z and returning to it later is a *new* checkpoint and "everything c
 never includes a cut from later in the program. (Keyed on (segment, Z) alone — the first
 version — a return to an earlier Z was folded into the old checkpoint and playback showed it
 early.)
+
+The count is therefore driven by the number of **operations**, not by Z levels alone (#191 item
+3): one checkpoint per contiguous run of cuts at one (segment, Z), so a badge's few segments cost
+a few dozen and a program that leaves a level and returns pays for a new one every time. A vendor
+job with one operation per feature does not stay small — the PCB files run 298 and 912 checkpoints
+(§8.0's seek measurements) against a `MAX_CHECKPOINTS` of 1000 (`workers/geometry/sweep.ts`),
+which refuses a denser program by name (`dense-3d-refused`) rather than loading something
+playback cannot afford.
 
 Three objects exist after a run — **stock**, **result**, and **removed volume** — and all
 three are useful. The removed volume is the most informative and should be visible rather
@@ -860,3 +871,18 @@ about how the part will *look* beyond which colour volume a floor lands in.
 Stubbing `placement` is what makes that true: every open question about probing, the camera
 and the fixture decides what eventually *fills* that field, not whether any of this works.
 This is the whole V1 critical path that is available today.
+
+**And the stub answers none of those questions — it defers them.** Two are worth naming,
+because nothing above can fail on them and a green build is not evidence about either (#191
+item 1):
+
+- **That Studio's probed origin is the corner and the direction `toWorkFrame` assumes.** §2
+  takes `topFrontLeft` with front = −Y from `/Makera-Parity.md` §6.1, and §6.1 titles itself
+  *a hypothesis, not a fact*: it rests on one sample whose stock is square, so it cannot even
+  say whether `length` runs along X or Y. Only #165 tests it on the machine — the ladder cut
+  for the depth chain, and the side-quest Studio job §6.1 names for the origin's axis.
+- **Two transforms a typed registration never produces.** `placement` and `wcs` are both
+  entered by hand, so they agree by construction: the WCS-relative-to-part residual
+  `uncertainty` is meant to describe (§1.1) is never produced, and a real result carrying
+  `rotationZ ≠ 0` — which a static `.nc` cannot compensate — has nothing here to refuse it.
+  The refusal threshold is the one item on #191 that is a decision rather than a document.
