@@ -128,7 +128,9 @@ runs is the `P:<line>,<percent>,<seconds>` field of the status line; the job is 
 percent reaches 100 **and** the state reads `Idle`, because `Idle` also appears partway through a
 program. The bench harness has exactly that path as one command —
 `tools/z1/z1.mjs run <host> <path> --i-am-at-the-machine` sends `play` and then polls, printing a
-line per poll and stopping when the job ends (Ctrl-C there asks the controller to abort the play).
+line per poll and stopping when the job ends. Ctrl-C there sends `abort`, the word Studio's own grey
+Stop sends: the spindle stops at once, the moves it had already queued finish, and the vacuum is
+switched off, because an aborted program never reaches its own.
 
 ---
 

@@ -132,12 +132,14 @@ until one reply says the job is finished. What that takes is worth knowing: the 
 2026-10-12 reported \`Idle\` for 3–4 s in the middle of itself (at \`M05\`), so job end is \`P\` percent
 100 together with \`Idle\`, never \`Idle\` alone — and the \`P\` field disappears from the status once
 the job is over, so a run that misses the 100 % reply ends on the poll after it. One line is printed
-per poll (to stderr; stdout stays clean for \`--json\`), and Ctrl-C sends \`abort\` — the console's own
-stop-the-play word — so the machine is not left cutting unwatched, and exits 130; a second Ctrl-C
-leaves at once. Three polls in a row with no reply at all end it too, non-zero: the socket is gone,
-and this tool cannot claim it stopped anything. \`abort\` is a request to the controller, not the
-e-stop: the physical stop is the stop, and the vacuum and the spindle are the program's own
-business.`);
+per poll (to stderr; stdout stays clean for \`--json\`), and Ctrl-C sends \`abort\` — the very word
+Studio's own grey Stop sends, observed at the bench on 2026-10-12 (#303) — so the machine is not left
+cutting unwatched, and exits 130; a second Ctrl-C leaves at once. \`abort\` stops the SPINDLE at once,
+but the controller finishes the moves it had already queued before it answers (~18 s in that
+observation), and \`run\` then sends \`M332\` — the one line it sends that the program did not ask for —
+because an aborted program never ran its own vacuum-off. Three polls in a row with no reply at all end
+it too, non-zero: the socket is gone, and this tool cannot claim it stopped anything. The physical
+stop is still the stop.`);
 }
 
 /** The trace file for a session: one dated file per day unless --trace says otherwise. */
@@ -478,7 +480,15 @@ async function main() {
               }
             }
             if (stopAsked === 1) {
-              await sendTraced(session, file, 'abort', flags);
+              // #303, bench 2026-10-12: this is the word Studio's own grey Stop sends. The spindle
+              // stops at once, but the controller first drains the queue it already had and answers
+              // `Aborted playing or paused file` when it is done — ~18 s in that observation, so the
+              // window is 30 s here rather than a poll's 15.
+              await sendTraced(session, file, 'abort', { ...flags, max: flags.max ?? 30000 });
+              // Then the vacuum, because the program's own tail — its `M332` (§11.10) — never ran.
+              // This is the one line `run` sends that the program did not ask for, and it only ever
+              // follows a stop the operator pressed.
+              await sendTraced(session, file, 'M332', flags);
               outcome = 'aborted';
               process.exitCode = 130;
               break;
@@ -503,7 +513,10 @@ async function main() {
             );
           }
           if (outcome === 'aborted') {
-            console.error('`abort` was sent, but it is a request, not the e-stop: check the spindle and the vacuum switch.');
+            console.error(
+              '`abort` was sent: the spindle stops at once, but the controller finishes the moves it had already queued ' +
+                '(~18 s on 2026-10-12) before it answers. `M332` follows it here, because an aborted program never ran its own.',
+            );
           }
           if (outcome === 'unreachable') {
             console.error('three polls in a row went unanswered — the socket or the controller is gone. The job may still be running: the physical stop is the stop.');
