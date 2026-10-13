@@ -109,7 +109,31 @@ async function runHarness(
   const trace = join(mkdtempSync(join(tmpdir(), 'casemaker-386-run-')), 'trace.log');
   const child = spawn(
     process.execPath,
-    [Z1, 'run', '127.0.0.1', '/sd/gcodes/fake.nc', '--i-am-at-the-machine', '--port', String(port), '--trace', trace, '--quiet', '150', ...extra],
+    [
+      Z1,
+      'run',
+      '127.0.0.1',
+      '/sd/gcodes/fake.nc',
+      '--i-am-at-the-machine',
+      '--port',
+      String(port),
+      '--trace',
+      trace,
+      '--quiet',
+      '150',
+      // The CONNECT window, not a rule under test: on a loaded machine the child's own start plus the
+      // connect can outlast the 3 s default, and then the run never reaches its first poll. The gate
+      // saw exactly that on 2026-10-13 — the full parallel run failed "gives up, non-zero…" with
+      // `expected [] to equal Array(5)`. That EMPTY `seen` is the evidence: a lost REPLY window would
+      // have left the pre-play `?` in it (`[ '?' ]`, what the test would then print), because the
+      // frame is written before any window is waited on. Empty means the run never wrote a frame at
+      // all. `tcpConnect` sits outside the run's `try` (`z1.mjs:359`), so it throws, node exits 1, and
+      // the `code` assertion above the failing one passes — which is the signature that was reported.
+      // `--timeout` reaches only `tcpConnect`, so no test's subject moves.
+      '--timeout',
+      '20000',
+      ...extra,
+    ],
     { cwd: APP },
   );
   let stdout = '';
@@ -221,7 +245,10 @@ describe('#386 run — the harness poll loop (against a fake controller)', () =>
     async () => {
       const controller = await fakeController([]);
       try {
-        const { code, stderr, trace } = await runHarness(controller.port, ['--first-reply', '200']);
+        // `--first-reply` sets every reply window in the run, and the subject here is the THREE-MISS
+        // rule, not the window: a window short enough to be lost to a loaded machine's start would
+        // fail this test at the pre-play poll, which is a different rule entirely.
+        const { code, stderr, trace } = await runHarness(controller.port, ['--first-reply', '2000']);
         expect(code).toBe(1);
         // The pre-play poll is answered (the default idle line), so the run starts; every poll AFTER
         // `play` goes unanswered.
@@ -252,7 +279,7 @@ describe('#386 run — the harness poll loop (against a fake controller)', () =>
       for (const { why, before, said } of cases) {
         const controller = await fakeController([RUNNING, END], { before });
         try {
-          const { code, stdout, stderr } = await runHarness(controller.port, ['--json', '--first-reply', '250']);
+          const { code, stdout, stderr } = await runHarness(controller.port, ['--json', '--first-reply', '2000']);
           expect(stderr, why).toContain(said);
           expect(stderr, why).toContain('Nothing was played');
           expect(controller.seen, why).toEqual(['?']);
@@ -291,7 +318,10 @@ describe('#386 run — the harness poll loop (against a fake controller)', () =>
       // job is watched to its end.
       const controller = await fakeController([RUNNING, END], { playReply: null });
       try {
-        const { code, stdout, stderr } = await runHarness(controller.port, ['--json', '--first-reply', '250']);
+        // The same window, same reason: this is the silent-`play` wait the test is about, and it is
+        // also the pre-play poll's window. 250 ms is a loaded machine's coin flip at the poll, which
+        // would fail the test on a rule it is not about; 2 s expires just as surely at the `play`.
+        const { code, stdout, stderr } = await runHarness(controller.port, ['--json', '--first-reply', '2000']);
         expect(code).toBe(0);
         expect(controller.seen).toEqual(['?', 'play /sd/gcodes/fake.nc', '?', '?']);
         expect(stderr).toContain('was not answered');
