@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv4Addr};
+
 use clap::Parser;
 use house::{house_dir, HouseLock};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
@@ -61,6 +63,32 @@ fn window_capability(origin: &str) -> Result<String, serde_json::Error> {
     document["identifier"] = serde_json::Value::from("embedded-server");
     document["remote"] = serde_json::json!({ "urls": [format!("{origin}/*")] });
     Ok(document.to_string())
+}
+
+/// The address the window is loaded from — and, since #389, the one its capability grants (#402).
+///
+/// 127.0.0.1 is the working path for the two cases the app means to serve: the unspecified address,
+/// which the OS routes to the loopback path, and the primary loopback itself. Any other bound
+/// address is used as it is, because the window's origin has to be an address this machine is known
+/// to answer on, and the server bound exactly one.
+///
+/// That predicate is NOT `is_loopback()`, which is true for the whole of `127.0.0.0/8`: a sibling
+/// loopback — `--host 127.0.0.2`, the ordinary way to run a second instance off 127.0.0.1 — was
+/// bound and then thrown away, so the window, and with it every `machine_*` grant, pointed at
+/// 127.0.0.1, where this run had nothing listening (#402).
+///
+/// V6 keeps the mapping it had: a V6 loopback or unspecified bind becomes 127.0.0.1, and any other
+/// V6 address is passed through unbracketed, which is not a usable URL host. Both are #401's, where
+/// the bracketing and the address a V6 bind implies belong; mapping `::1` here rather than passing
+/// it on is what keeps this change from trading a dead window for that issue's startup panic.
+fn webview_host(bind_addr: IpAddr) -> String {
+    match bind_addr {
+        IpAddr::V4(v4) if v4.is_unspecified() || v4 == Ipv4Addr::LOCALHOST => {
+            "127.0.0.1".to_string()
+        }
+        IpAddr::V6(v6) if v6.is_unspecified() || v6.is_loopback() => "127.0.0.1".to_string(),
+        ip => ip.to_string(),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -182,13 +210,13 @@ pub fn run() {
             // ORIGIN, and so the identity of every `localStorage` store it has (#312) — which is
             // exactly why it is not allowed to change under a running app, and why the capability
             // that grants it is built from this string rather than guessed (#389).
-            let host_for_webview = match server_handle.bind_addr {
-                std::net::IpAddr::V4(v4) if v4.is_unspecified() || v4.is_loopback() => {
-                    "127.0.0.1".to_string()
-                }
-                ip => ip.to_string(),
-            };
-            let window_url = format!("http://{}:{}", host_for_webview, server_handle.bound_port);
+            // The predicate moved into `webview_host` (#402) so that the address can be tested on
+            // its own, and because it is now narrower than `is_loopback()`.
+            let window_url = format!(
+                "http://{}:{}",
+                webview_host(server_handle.bind_addr),
+                server_handle.bound_port
+            );
 
             // #389 — the grant, added BEFORE the window exists, because the URL above is what it
             // grants: this window's origin is the embedded server, and Tauri allows a remote origin
@@ -226,4 +254,40 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Case Maker");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The bug #402 is about: the server served a sibling loopback and the window was sent to
+    /// 127.0.0.1 anyway, where nothing was listening. `is_loopback()` is true for all of
+    /// `127.0.0.0/8`; a sibling address has to be used exactly as it was bound.
+    #[test]
+    fn webview_host_uses_a_sibling_loopback_as_bound() {
+        assert_eq!(webview_host("127.0.0.2".parse().unwrap()), "127.0.0.2");
+        assert_eq!(webview_host("127.13.9.4".parse().unwrap()), "127.13.9.4");
+    }
+
+    /// The two cases where 127.0.0.1 is the working path whatever was bound, and the LAN case
+    /// (#389's `--host 192.168.10.16`, where the window must not fall back to loopback).
+    #[test]
+    fn webview_host_maps_only_what_loopback_serves() {
+        assert_eq!(webview_host("127.0.0.1".parse().unwrap()), "127.0.0.1");
+        assert_eq!(webview_host("0.0.0.0".parse().unwrap()), "127.0.0.1");
+        assert_eq!(
+            webview_host("192.168.10.16".parse().unwrap()),
+            "192.168.10.16"
+        );
+    }
+
+    /// Pinned deliberately, because it is the boundary this change stops at: V6 is still mapped or
+    /// passed through unbracketed, so `--host 2001:db8::5` still reaches `window_capability` as an
+    /// invalid pattern. #401 replaces all three of these.
+    #[test]
+    fn webview_host_leaves_v6_to_401() {
+        assert_eq!(webview_host("::1".parse().unwrap()), "127.0.0.1");
+        assert_eq!(webview_host("::".parse().unwrap()), "127.0.0.1");
+        assert_eq!(webview_host("2001:db8::5".parse().unwrap()), "2001:db8::5");
+    }
 }
