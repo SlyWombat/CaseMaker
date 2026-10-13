@@ -20,7 +20,9 @@
 //     handed to the app's OWN verifier here before it is written, so the file that reaches the
 //     bench is one the upload gate would accept.
 //   * #208 D1's air program — `tests/e2e/fixtures/three-strokes.nc` (#199) with every motion Z
-//     raised 25 mm, so nothing touches.
+//     raised 25 mm, so nothing touches. Checked like the V-groove file, and against the placement
+//     the file's own header implies (#395): the raise is what decides whether it stays inside the
+//     machine's Z travel, so the check reports the headroom the blank has to give it.
 //
 // Outputs land in `docs/bench/`. Run from `casemaker-app/`:
 //   npx tsx --tsconfig tsconfig.scripts.json scripts/bench-files.ts
@@ -38,6 +40,9 @@ import ManifoldModule from 'manifold-3d';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { createSimSession } from '@/workers/sim/session';
 import { Z1 } from '@/engine/cnc/machine';
+import { parseGcode, setupFromHeader, stubSetup, type Setup } from '@/engine/cnc';
+import { toolFromMkrRecord } from '@/engine/cnc/tool';
+import type { Vec3 } from '@/types/units';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import {
   buildRunSheet,
@@ -48,7 +53,7 @@ import {
 } from '@/engine/cnc/engrave/runSheet';
 import { DEFAULT_VISE } from '@/engine/cnc/fixture';
 import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
-import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
+import { DEFAULT_JAW_CLEARANCE_MM, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { HOP_Z } from '@/engine/cnc/cam/ir';
 import { stockDepthLimit, verifyProgram } from '@/engine/cnc/verify';
 import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
@@ -767,12 +772,91 @@ function raiseMotionZ(text: string, dz: number): string {
 }
 
 const air = raiseMotionZ(fixture, AIR_RISE);
-writeFileSync(join(outDir, '208-D1-three-strokes-air.nc'), air);
+
+// #395: CHECKED BEFORE IT IS WRITTEN, like the V-groove file above — this one used to be the only
+// file here that went to `docs/bench/` unread, and it is the file the bench actually plays.
+//
+// It is also the only one with no `EngraveJob` behind it: it is the #199 fixture, raised. So the
+// placement comes from the file's OWN header, which is the path the app takes for a program it did
+// not write (`tests/unit/simFixtures.spec.ts` loads the same fixture this way, and the e2e drives
+// it). Nothing is hand-built: `stubSetup` fits the header's 60 × 30 × 6 stock into the machine, and
+// its own docstring is honest about what that is — a stub, whose top face lands at the profile's
+// tool-change safe height. A real placement comes from probing (decisions 26 and 28).
+{
+  const parsedAir = parseGcode(air);
+  const airPart = setupFromHeader(parsedAir.header).patch.part;
+  const airToolRec = parsedAir.header?.records.find((r) => r.tag === 'TOOL');
+  if (!airPart || airPart.kind !== 'prism' || airPart.outline.kind !== 'p-rect' || !airToolRec) {
+    throw new Error("#208 D1: the air file's header does not prefill a cuboid stock and a tool");
+  }
+  const airTool = toolFromMkrRecord(airToolRec);
+  const airSetup = stubSetup(airPart, { kind: 'tape-down', contact: airPart.outline }, { startingTool: 1 }, Z1);
+  // The stock alone, on the shipped floor (#345's default): the air file cuts nothing, so this
+  // limit is not what the verdict turns on — the depth checks simply need a limit to run against.
+  const airLimit = stockDepthLimit(
+    { length: airPart.outline.size[0], width: airPart.outline.size[1], thickness: airPart.thickness },
+    MARGIN_DEFAULTS.minFloor,
+  );
+
+  /** The same file, verified with the blank's top face `drop` mm lower than the stub puts it. */
+  const verifyAir = (drop: number) => {
+    const shift = (v: Vec3): Vec3 => [v[0], v[1], v[2] - drop];
+    const setup: Setup = { ...airSetup, placement: { ...airSetup.placement, origin: shift(airSetup.placement.origin) }, wcs: { ...airSetup.wcs, origin: shift(airSetup.wcs.origin) } };
+    return verifyProgram(air, { setup, machine: Z1, tool: airTool, depthLimit: airLimit, minRapidZ: HOP_Z });
+  };
+
+  const report = verifyAir(0);
+  const errors = report.findings.filter((f) => f.severity === 'error');
+  console.log('\n#208 D1 air program (checked before it is written — #395)');
+  console.log(`  file      208-D1-three-strokes-air.nc  (${air.length} bytes, ${air.split('\n').length} lines)`);
+  console.log(`  place     wcs ${JSON.stringify(airSetup.wcs.origin)} — the stub fits the header's stock with its top face at the safe Z ${Z1.toolChange.safeZ}`);
+  console.log(`  verify    ok=${report.ok}, ${errors.length} error, ${report.findings.length - errors.length} warning`);
+  for (const f of report.findings) console.log(`     ${f.severity === 'error' ? 'ERR ' : 'warn'} ${f.code}${f.line === null ? '' : ` (line ${f.line})`}: ${f.message}`);
+  console.log(`  moves     ${report.stats.cuttingMoves} cutting moves, deepest Z ${fmt(report.stats.deepestZ)} (work)`);
+
+  // THE ONE CLAUSE WHOSE VERDICT IS NOT A PROPERTY OF THE PROGRAM. Every other finding is about the
+  // file itself; `outside-envelope` is about the file AND the placement, and the placement here is
+  // the stub's worst case. So it is measured rather than pronounced: how far below the tool-change
+  // height the blank's top face has to sit before every move is inside the machine's Z travel. The
+  // raise is what puts it there — the fixture's own `G0 Z15` becomes `G0 Z40`, which is 20 mm above
+  // the top of travel at the stub placement.
+  let headroom = 0;
+  for (; headroom <= 60; headroom += 5) {
+    if (!verifyAir(headroom).findings.some((f) => f.severity === 'error' && /^outside-envelope:/.test(f.message))) break;
+  }
+  if (headroom > 0) {
+    console.log(`  headroom  REQUIRED: the blank's top face must sit >= ${headroom} mm below the tool-change safe height, or the raised moves run past the top of Z travel`);
+  } else {
+    console.log('  headroom  none needed: every move is inside the travel with the stock at the safe height');
+  }
+
+  // A defective program is not a placement question, and is never written.
+  const defects = errors.filter((f) => !/^outside-envelope:/.test(f.message));
+  if (defects.length > 0) {
+    throw new Error(`#208 D1 air file FAILED the app's verifier (${defects.length}) — do not hand it to the machine`);
+  }
+
+  // The air premise itself, which is what the file is FOR: it must remove nothing, and draw no
+  // gouge. This is independent of where the blank sits.
+  const session = createSimSession(tl);
+  const sim = session.load(air, airSetup, airTool, Z1.id);
+  const simProblem = sim.ok ? null : simulationProblem(sim.diagnostics);
+  const removed = sim.ok ? sim.stats.removedVolume : Number.NaN;
+  const gouges = sim.ok ? sim.meshes.gouges.length : Number.NaN;
+  console.log(`  sim       ok=${sim.ok}, ${simErrors(sim.diagnostics).length} errors, removed ${fmt(removed)} mm³, ${gouges} gouges`);
+  for (const d of simErrors(sim.diagnostics).filter((d) => d.code !== 'outside-envelope')) console.error(`     ERROR ${d.code}: ${d.message}`);
+  session.dispose();
+  if (simProblem !== null) throw new Error(`#208 D1 air file: the sweep refused it — ${simProblem}`);
+  if (removed !== 0 || gouges !== 0) {
+    throw new Error(`#208 D1 air file is not air: it removes ${fmt(removed)} mm³ and draws ${gouges} gouge(s)`);
+  }
+
+  writeFileSync(join(outDir, '208-D1-three-strokes-air.nc'), air);
+}
 
 // ---------------------------------------------------------------------------------------------
 // Console receipt
 // ---------------------------------------------------------------------------------------------
 
-console.log('#208 D1 air program');
-console.log(`  file       208-D1-three-strokes-air.nc  (${air.length} bytes, ${air.split('\n').length} lines)`);
+console.log('\n#208 D1 air program — every Z word, as written');
 for (const line of air.split('\n').filter((l) => /Z/.test(l) && !l.trimStart().startsWith(';'))) console.log(`     ${line}`);

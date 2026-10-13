@@ -2,7 +2,11 @@
 // client is faked, so this is the pure half of the store.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
+import * as store from '@/store/engraveRunStore';
+import * as gate from '@/store/engraveRunGate';
 import {
   useEngraveRunStore,
   setEngraveRunClientLoader,
@@ -350,5 +354,29 @@ describe('engraveRunStore (#206)', () => {
     }
     expect(generatedWith).toBeNull();
     expect(loadedWith).toBeNull();
+  });
+});
+
+describe('#395 one gate, two ways to reach it', () => {
+  // The reason the gates live in their own module, and the only thing that keeps them there: the
+  // store cannot be loaded outside a browser (`platform/features` reads vite `define`s), so a script
+  // that needs one of these has to be able to import it WITHOUT the store. The script that actually
+  // hands a file to the machine (`scripts/machine-upload-check.ts`) does exactly that.
+  it('is the same implementation at both paths, not a re-implementation', () => {
+    expect(store.uploadBlocker).toBe(gate.uploadBlocker);
+    expect(store.saveBlocker).toBe(gate.saveBlocker);
+    expect(store.runErrorCodes).toBe(gate.runErrorCodes);
+    expect(store.requiredAckCodes).toBe(gate.requiredAckCodes);
+    expect(store.ACKNOWLEDGE_CODES).toBe(gate.ACKNOWLEDGE_CODES);
+  });
+
+  it('keeps the gate module free of runtime imports that need a browser', () => {
+    // A text guard, and one level deep: it pins the module's own imports, not the whole graph. What
+    // it catches is the regression that would matter — a runtime import added to this module (the
+    // obvious one being `featureSim`), which is how every other store here would break a node
+    // script. The gate's behaviour is pinned by the tests above; this pins its addressability.
+    const src = readFileSync(join(process.cwd(), 'src/store/engraveRunGate.ts'), 'utf8');
+    const runtimeImports = [...src.matchAll(/^import\s+(?!type\b)[^'"]*'([^']+)'/gm)].map((m) => m[1]);
+    expect(runtimeImports).toEqual(['@/engine/cnc/simGate']);
   });
 });

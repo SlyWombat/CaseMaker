@@ -7,7 +7,13 @@
 //        --dir <path> (the card directory; default GCODE_DIR = /sd/gcodes),
 //        --calibration <file.json> (the app's saved machine calibration, #279/#395; without it the
 //                                   shipped profile is used, which is what the app runs before
-//                                   any probe).
+//                                   any probe),
+//        --my-machine <file.json> (the app's exported "my machine" record, #247 — the program is
+//                                  generated with ITS #345 depth margins, which is what the app
+//                                  would use; without it, the shipped defaults),
+//        --acknowledge (the panel's clearance tick, said out loud. A run that asks for an
+//                       acknowledgement — an unmeasured vise — is refused without it, exactly as
+//                       the app refuses to Save or Upload one).
 //
 // Why this exists rather than "just drive the desktop app": the GUI needs a Rust build and a person
 // clicking, and the thing that is actually unproven is the PROTOCOL, not the button (the button has
@@ -21,6 +27,12 @@
 // the card is inert until Studio's five-step Machining Wizard is driven by hand at the machine
 // (recorded 2026-10-07, docs/bench/2026-10-bench-day-1.md D0). This script sends a file and reports
 // what the controller said. It has no motion path and cannot start a job.
+//
+// THE GATE IS THE APP'S OWN (#395). This script does not decide for itself whether a program is fit
+// to send: it builds the end state of the app's run and asks `uploadBlocker` — the function that
+// disables the Upload button — so anything the button refuses is refused here too, and the two
+// cannot drift apart. `src/store/engraveRunGate.ts` exists for that: the run store itself cannot be
+// imported outside a browser.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,11 +46,17 @@ import { GCODE_DIR, md5Hex } from '../src/platform/desktop/protocol.ts';
 import { createNodeTransport } from '../tools/z1/transport.node.mjs';
 import { engraveGenerate } from '../src/workers/sim/engraveGenerate';
 import { createSimSession } from '../src/workers/sim/session';
-import { simErrors, simulationProblem } from '../src/engine/cnc/simGate';
+import type { SimDiagnostic } from '../src/workers/sim/session';
+import { simErrors } from '../src/engine/cnc/simGate';
 import { runSheetFileName } from '../src/engine/cnc/engrave/runSheet';
 import { jobTool, toSetup } from '../src/engine/cnc/engrave/jobSetup';
 import { jobMachine, parseMachineCalibration, type MachineCalibration } from '../src/engine/cnc/calibration';
+import { effectiveMargins, MARGIN_DEFAULTS, type MarginSettings } from '../src/engine/cnc/engrave/depthBounds';
+import type { OracleReport } from '../src/engine/cnc/engrave/oracle';
 import { parseEngraveJob } from '../src/store/engraveJobSchema';
+import { parseMyMachineFile } from '../src/store/myMachineFile';
+import { requiredAckCodes, uploadBlocker, type EngraveRunView } from '../src/store/engraveRunGate';
+import type { SimStatus } from '../src/store/simStore';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '../src/engine/fonts/registry';
 
 const [jobPath, host] = process.argv.slice(2);
@@ -88,6 +106,36 @@ function savedCalibration(): MachineCalibration | null {
   return parsedCal.calibration;
 }
 
+/**
+ * The house depth margins the app would generate this job with (#345), read from the app's own
+ * "my machine" export (#247) — or the shipped defaults when no file is given.
+ *
+ * WHY A FILE, AND WHY HERE. The app resolves them from `useSettingsStore`, which a headless run has
+ * no localStorage for; the export carries them. This script used to call `engraveGenerate` with no
+ * margins at all, which silently took the worker's own fallback — the shipped defaults — so a job
+ * generated here could differ from the same job generated in the app, on the one number that gates
+ * where a cut is allowed to reach (#395).
+ */
+function houseMargins(): { margins: MarginSettings; from: string } {
+  const flag = process.argv.indexOf('--my-machine');
+  if (flag === -1) return { margins: MARGIN_DEFAULTS, from: 'the shipped defaults (no --my-machine)' };
+  const path = process.argv[flag + 1];
+  if (path === undefined) {
+    console.error('--my-machine needs the path of a saved "my machine" record');
+    process.exit(2);
+  }
+  const record = parseMyMachineFile(readFileSync(path, 'utf8'));
+  if (!record.ok) {
+    console.error(`${path} is not a machine record: ${record.reason}`);
+    process.exit(2);
+  }
+  if (record.margins === null) {
+    console.error(`${path} carries no margins (it was exported before #345) — pass a current one, or leave the flag off for the shipped defaults`);
+    process.exit(2);
+  }
+  return { margins: record.margins, from: path };
+}
+
 // No Makera feed rows in a headless run (#324): the catalogue tier needs a house service.
 const tool = jobTool(job);
 // The machine the file is posted AND swept against, resolved ONCE (#395). `engraveGenerate`
@@ -97,9 +145,17 @@ const tool = jobTool(job);
 // machines — and `session.load` resolves the id it is given the same way.
 const calibration = savedCalibration();
 const mill = jobMachine(job, calibration);
-const generated = engraveGenerate(tl, job, tool, [], calibration);
+// The depth margins the APP would gate this job's cuts against (#345), for the same reason as the
+// calibration above: a job carrying its own record keeps them, and one that does not runs on the
+// house setting — not on whatever the worker falls back to when it is handed nothing (#395).
+const house = houseMargins();
+const margins = effectiveMargins(job, house.margins);
+const generated = engraveGenerate(tl, job, tool, [], calibration, margins);
 
 console.log(`job      : ${job.name}`);
+console.log(
+  `margins  : boundary ${margins.boundaryMargin} mm, z ±${margins.zTolerance}   (${job.margins ? "this job's own record" : house.from})`,
+);
 console.log(
   `machine  : ${mill.id}   ${calibration === null ? 'shipped profile (no calibration passed)' : `calibrated ${calibration.measuredAt} — ${calibration.source}`}`,
 );
@@ -110,31 +166,89 @@ for (const f of generated.verify?.findings ?? []) {
 }
 for (const e of generated.errors) console.log(`   ${e.stage.padEnd(7)} ${e.message}`);
 
-// #395 — `generated.ok`, not "there is a file and a report". `engraveGenerate` returns
-// `ok: false` WITH an `nc` and a PASSING `verify` when only the FRAME file fails (#244): the
-// program is fine and the file beside it was refused, which is exactly what the app's own Save
-// gate refuses on (`saveBlocker` reads `ok`). Gating on the three nulls alone let this script
-// write and upload a program the app would not.
-if (tool === null || !generated.ok || generated.nc === null || generated.verify == null) {
-  console.error('\nno tool, or the pipeline did not reach a clean finish — the gates have nothing to judge, nothing is sent.');
+// The app's run stops here when the job has no cutter at all (`run()` sets a blocked phase with
+// "the job has no usable cutter" and never sweeps). Said plainly rather than inferred from whatever
+// the shared gate answers about a run that never happened.
+if (tool === null) {
+  console.error('\nthe job has no usable cutter — nothing is swept, prepared or sent.');
   process.exit(1);
 }
 
-// #393. The verifier below is the SOCKET's rule (#255), and it is not the simulation's question:
-// `session.load` reports `ok: true` for a sweep that drove the cutter into the jaw, so a program
-// the app's Upload button refuses (its `uploadBlocker` is never weaker than Save's) would be
-// carried straight to the card by the one tool in this repo that hands a file to the real machine.
-// Same predicate as the app and the other two producers; the sim is a few seconds here.
-const session = createSimSession(tl);
-const sim = session.load(generated.nc, toSetup(job, mill), tool, mill.id, { calibration });
-session.dispose();
-console.log(`sim      : ok=${sim.ok}   errors=${simErrors(sim.diagnostics).length}`);
-const simProblem = simulationProblem(sim.diagnostics);
-// #395 — `!sim.ok` too, not only the diagnostics: `ok: false` is the sweep's own refusal, and a
-// refusal that carried no error diagnosis would otherwise pass this gate by silence.
-if (!sim.ok || simProblem !== null) {
-  for (const d of simErrors(sim.diagnostics)) console.error(`   ERROR ${d.code}: ${d.message}`);
-  console.error(`\nthe simulation refuses this program (${simProblem ?? 'no error diagnostic, but the load did not succeed'}) — nothing is prepared or sent.`);
+// #395. THE APP'S OWN GATE, not a second list of conditions. The app runs
+// generate → simulate → oracle and then asks ONE question of the end state — `uploadBlocker`, which
+// is never weaker than Save's. This script is that pipeline by hand, so it builds the same end state
+// and asks the same function.
+//
+// What it used to do instead was re-list the conditions for itself, and the list came out weaker
+// than the app's in the two places that matter — a program whose sweep does not match the
+// prediction (`oracle.ok`), and an unticked clearance acknowledgement (`requiredAckCodes`) — so a
+// program the Upload button refuses could be carried to the card by the one tool in this repo that
+// hands a file to the real machine. The sweep's own refusal WAS stated here, and correctly;
+// stating a safety rule correctly in two places is what a rule does before the two drift.
+//
+// WHERE the app's run stops is part of the gate, not a detail: `run()` never sweeps a program
+// `engraveGenerate` refused (`!ok || nc === null` returns first). Copied exactly, or this script
+// would judge a program the app never judged — and the frame-file failure (#244) is exactly that
+// case: `ok: false` with a PASSING `verify` and CLEAN findings, because the program is fine and the
+// file beside it was refused. Sweeping it here would have turned a refusal into a pass.
+const run = {
+  simStatus: 'idle' as SimStatus,
+  simDiagnostics: [] as SimDiagnostic[],
+  oracle: null as OracleReport | null,
+};
+const programNc = generated.ok ? generated.nc : null;
+if (programNc !== null) {
+  const session = createSimSession(tl);
+  const sim = session.load(programNc, toSetup(job, mill), tool, mill.id, { calibration });
+  run.simStatus = sim.ok ? 'ready' : 'refused';
+  run.simDiagnostics = sim.diagnostics;
+  // The oracle the app's own run performs, against the same prediction and on the same session, so
+  // it is the prediction this program was CAM'd from and not a second one.
+  if (sim.ok) run.oracle = session.oracle(generated.predicted);
+  session.dispose();
+}
+console.log(`sim      : ${run.simStatus}   errors=${simErrors(run.simDiagnostics).length}`);
+// Named, not counted: a `ready` load can still carry an error diagnostic — a sweep that drove the
+// cutter into the fixed jaw comes back `ok: true` (#393) — and the gate below refuses on it.
+for (const d of simErrors(run.simDiagnostics)) console.error(`   ERROR ${d.code}: ${d.message}`);
+if (run.oracle !== null) {
+  console.log(`oracle   : ok=${run.oracle.ok}   band=${run.oracle.band}   worst under/over ${run.oracle.worst.underCut}/${run.oracle.worst.overCut}`);
+}
+
+const acknowledged = process.argv.includes('--acknowledge');
+const view: EngraveRunView = {
+  generated,
+  oracle: run.oracle,
+  simDiagnostics: run.simDiagnostics,
+  simStatus: run.simStatus,
+  // As the store leaves it: `ready` only once the oracle has passed, `blocked` otherwise. The gate
+  // reads the three in-flight phases, not these, but a view that is not the app's is a view that
+  // can disagree with it.
+  phase: run.oracle?.ok ? 'ready' : 'blocked',
+  acknowledged,
+  staleSince: null,
+  error: null,
+};
+const blocker = uploadBlocker(view);
+if (blocker !== null) {
+  // The tick is the one the script cannot press, so it names what a person has to look at first.
+  const missing = requiredAckCodes(view);
+  if (missing.length > 0 && !acknowledged) {
+    console.error(`\nthis job's run flags a clearance check for a person to make at the machine: ${missing.join(', ')}.`);
+    console.error('Once they have made it, pass --acknowledge and run again.');
+  }
+  // The app's own sentence, quoted: it is what the Upload button would show, and re-wording it here
+  // would be the second statement of a reason this whole change is about not having.
+  console.error(`\nthe app's own upload gate refuses this program: "${blocker}" — nothing is prepared or sent.`);
+  process.exit(1);
+}
+
+// The gate above has already proved both of these exist — it refuses a run with no program, and one
+// whose verifier report is missing — so this is the same fact, narrowed, rather than a second gate.
+// It is here because a crash is not a refusal: if the gate ever stopped proving it, the honest
+// answer to "may this go to the machine?" is still no.
+if (generated.nc === null || generated.verify === null) {
+  console.error('\nno program, or no verifier report — nothing is prepared or sent.');
   process.exit(1);
 }
 

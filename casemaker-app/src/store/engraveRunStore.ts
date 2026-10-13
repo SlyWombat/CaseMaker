@@ -23,7 +23,6 @@ import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle'
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { SimStatus } from './simStore';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
-import { simErrors } from '@/engine/cnc/simGate';
 import { feedCatalogueRows } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -32,8 +31,26 @@ import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useSettingsStore } from './settingsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSimStore } from './simStore';
+import type { EngraveRunPhase } from './engraveRunGate';
 
-export type EngraveRunPhase = 'idle' | 'generating' | 'simulating' | 'checking' | 'ready' | 'blocked';
+/**
+ * The gates on the run's result, and the shape they read (#395), from their own module — re-exported
+ * HERE so every existing import site (`EngravePanel`, the QA harness, the specs) keeps working.
+ *
+ * They are not in this file because this file cannot be loaded outside a browser: the
+ * `platform/features` import below reads vite `define`s, so a node script that imports this module
+ * for `uploadBlocker` dies with `ReferenceError: __FEATURE_SIM__ is not defined` — which is how
+ * `scripts/machine-upload-check.ts` ended up re-stating the rule, weakly, for itself. One
+ * implementation, one statement of the rule, two ways to reach it.
+ */
+export {
+  ACKNOWLEDGE_CODES,
+  requiredAckCodes,
+  runErrorCodes,
+  saveBlocker,
+  uploadBlocker,
+} from './engraveRunGate';
+export type { EngraveRunPhase, EngraveRunView } from './engraveRunGate';
 
 /** The two worker calls the run needs. */
 export type EngraveRunClient = {
@@ -56,24 +73,6 @@ let clientLoader: () => Promise<EngraveRunClient> = loadClient;
 export function setEngraveRunClientLoader(fn: (() => Promise<EngraveRunClient>) | null): void {
   clientLoader = fn ?? loadClient;
 }
-
-/**
- * The warning codes that mean "a human must look at the machine before this file is run"
- * (#206): an unmeasured vise, and a holder whose reach or clearance to the fixture is not
- * proven. A warning from any of these lists requires the panel's acknowledgement tick.
- *
- * All three are questions the run ASKED and could not answer, so they stay rare on purpose: a
- * default vise job raises `vise-default` only while the vise is unmeasured, and
- * `holder-vs-fixture-unproven` only where an obstacle rises above the stock top with the collet
- * nut's size unstated (#314 — on a vise job the nut is provably held off by the cutter's own
- * shoulder, so the code, and this tick with it, must not appear at all). Seeing a tick prompt
- * therefore still means exactly what it says: go and look at the machine.
- */
-export const ACKNOWLEDGE_CODES: ReadonlySet<string> = new Set([
-  'vise-default',
-  'holder-vs-fixture-unproven',
-  'holder-unproven',
-]);
 
 export interface EngraveRunState {
   /** The last generated result — kept on screen while a newer run builds. */
@@ -102,78 +101,6 @@ export interface EngraveRunState {
   setAcknowledged: (v: boolean) => void;
   /** Forget the run (and the staleness). Does not touch the job. */
   reset: () => void;
-}
-
-/** Everything but `generate`/`setAcknowledged`/`reset`, for the pure helpers below. */
-export type EngraveRunView = Pick<
-  EngraveRunState,
-  'generated' | 'oracle' | 'simDiagnostics' | 'simStatus' | 'phase' | 'acknowledged' | 'staleSince' | 'error'
->;
-
-/** Warning codes across every row, so an acknowledgement is required for the right reasons. */
-export function requiredAckCodes(v: EngraveRunView): string[] {
-  const codes = new Set<string>();
-  for (const f of v.generated?.findings ?? []) if (f.severity === 'warning') codes.add(f.code);
-  for (const f of v.generated?.verify?.findings ?? []) if (f.severity === 'warning') codes.add(f.code);
-  for (const d of v.simDiagnostics) if (d.severity === 'warning') codes.add(d.code);
-  return [...codes].filter((c) => ACKNOWLEDGE_CODES.has(c));
-}
-
-/**
- * Count errors across the findings, the verifier and the sweep (#206's "zero errors").
- *
- * The sweep's slice goes through `simErrors` (`engine/cnc/simGate.ts`) rather than filtering
- * `severity` here, so that the app and the scripts that produce files (`engrave-job.ts`,
- * `bench-files.ts`) answer "did the simulation report an error?" with one function and not two
- * (#393).
- */
-export function runErrorCodes(v: EngraveRunView): string[] {
-  const codes: string[] = [];
-  for (const f of v.generated?.findings ?? []) if (f.severity === 'error') codes.push(f.code);
-  for (const f of v.generated?.verify?.findings ?? []) if (f.severity === 'error') codes.push(f.code);
-  for (const d of simErrors(v.simDiagnostics)) codes.push(d.code);
-  return codes;
-}
-
-/**
- * Why Save is disabled, or null when it is allowed. Order matters: the first true reason is the
- * one the user should fix first.
- */
-export function saveBlocker(v: EngraveRunView): string | null {
-  if (!v.generated) return 'Generate first.';
-  if (v.staleSince !== null) return 'the job or the machine frame changed since it was generated';
-  const errors = runErrorCodes(v);
-  if (errors.length > 0) return `${errors.length} error${errors.length === 1 ? '' : 's'} outstanding`;
-  if (v.phase === 'generating' || v.phase === 'simulating' || v.phase === 'checking') return 'the run is still going';
-  if (v.generated.nc === null) return 'no program was produced';
-  if (v.simStatus !== 'ready') return 'the simulation did not finish';
-  if (!v.oracle) return 'the prediction has not been checked';
-  if (!v.oracle.ok) return 'the simulation does not match the prediction';
-  const missing = requiredAckCodes(v);
-  if (missing.length > 0 && !v.acknowledged) return 'tick the clearance checkbox below';
-  return null;
-}
-
-/**
- * Why uploading to the machine is disabled, or null when it is allowed (#255).
- *
- * **Never weaker than {@link saveBlocker}** — every reason Save is blocked is a reason Upload is
- * blocked, and the first line here is what makes that true rather than a coincidence of the two
- * lists happening to agree. That direction is the safe one: a program nobody may keep is certainly
- * not one to send.
- *
- * The one clause it adds is the verifier's report having to EXIST. `saveBlocker` does not need it —
- * `runErrorCodes` reads `generated.verify?.findings ?? []`, so an absent report contributes no
- * errors and a program with no report would slip through. Uploading does need it: the upload gate
- * is a statement about a report (`programUploadProblem`), and there is no such statement to make
- * without one. Reachable only from a hand-edited store, and answered with a sentence rather than a
- * crash.
- */
-export function uploadBlocker(v: EngraveRunView): string | null {
-  const save = saveBlocker(v);
-  if (save !== null) return save;
-  if (!v.generated?.verify) return 'the program carries no verifier report';
-  return null;
 }
 
 let seq = 0;
