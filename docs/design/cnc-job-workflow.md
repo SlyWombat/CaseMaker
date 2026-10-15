@@ -189,6 +189,7 @@ UI, and on the few places where the pipeline still stops short:
 | **KEEP** | Manage › Tools, Machines, the console, the vacuum switch | the house is where cutters and machines live, not the job |
 | **CHANGE** | Start wizard step 2 ("badge-blank / blank") → **stock from a library** (§4.1) | the brief's item 1; the template route stays as the house stock's "badge blank" entry |
 | **CHANGE** | setup step 1 "What is holding the part?" → **mounting with orientation** (§4.2): which edge against the fixed jaw, which face up | #383 is a bug today because orientation is a sentence in the panel, not a question |
+| **CHANGE** | the item list → **one line per item** (chevron, then the visible checkbox and Remove together at the FRONT, then kind, name, depth), undoable remove, collapse/expand all (§4.3) | #411: the maintainer found the live list cluttered and could not find remove |
 | **CHANGE** | the single `toolKey` → a **tool list per setup**, auto-picked with rest machining (§4.5) | #410's scope addition; #278's model |
 | **CHANGE** | Generate row → **the Design → Cut switch** (§4.6) with its own screen | the brief's item 5 |
 | **CHANGE** | "estimated cutting time" → **a phase list with per-phase times and sources** (§4.8) | the brief's item 7 |
@@ -528,25 +529,51 @@ V-bit-as-flat refusal. The preview still shows the designed shape, hatched, labe
 needs 3D".
 
 **Screen.** Design mode is the Engrave panel's Items section promoted to the whole right rail, with
-the viewport as the canvas (drag, rotate, snap to the up face, nudge by typed numbers):
+the viewport as the canvas (drag, rotate, snap to the up face, nudge by typed numbers). **Every item
+is one line until you open it** — the maintainer's finding on the live build, 2026-10-15, filed as
+#411 for the current panel; this design is the same list, so the two stay consistent:
 
 ```
- ┌─ Cut-away ────────────────────────────────────────────┐
- │ from single.3mf (3 volumes)            [ re-read file ]│
- │  ▣ Single Barrel      text, Segoe UI Black  1.00 mm ▾  │
- │      reach: 2 mm O-flute 71 % · 0.6 corn 99 % · lost 1 %│
- │  ▣ (Like the Whiskey) text, Segoe UI       1.00 mm ▾  │
- │      reach: 2 mm 23 % · 0.6 corn 94 % · lost 6 % ⚠     │
- │  ▣ br                 SVG outline          1.00 mm ▾  │
- │ + Add ▾   text · box · cylinder · tube · sphere ·      │
- │           outline (SVG/DXF) · image · 3MF · object     │
- │ Depth margins  0.2 mm · for this blank 0.2 ✓            │
- └───────────────────────────────────────────────────────┘
+ ┌─ Cut-away (3 items)                            [ collapse all ] [ + Add ▾ ] ─┐
+ │ ▸ ◉ ✕  T  Single Barrel         1.00 mm  reveal                             │
+ │ ▾ ◉ ✕  T  (Like the Whiskey)    1.00 mm  reveal                             │
+ │     text   (Like the Whiskey)         font  Segoe UI ▾   weight  400 ▾        │
+ │     cap    5.3 mm    x 12.2   y −6.5   rot 0°   depth 1.00 ▸ reveal · surface │
+ │     reach: 2 mm O-flute 23 % · 0.6 corn 94 % · lost 6 % ⚠  [show lost]        │
+ │     from single.3mf › volume "(Like the Whiskey)"                              │
+ │ ▸ ◉ ✕  ◫  br  (SVG outline)     1.00 mm  reveal                             │
+ │ ─ Voids under the face (1) ─────────────────────────────────────────────────  │
+ │ ▸ ▢  Magnet pocket  (from the badge)  ceiling 1.51 mm   ◉                     │
+ │ Depth margins  0.2 mm · for this blank 0.2 ✓                                   │
+ └────────────────────────────────────────────────────────────────────────────────┘
+   after a remove:  ┌ "(Like the Whiskey)" removed.   [ Undo ]  ┐   (8 s, or until the next edit)
 ```
 
-Each item row carries its **reach** per candidate cutter and its **lost** share, live, in the same
-words `item-detail-lost` already uses. The numbers come from the opened region (flat) or the groove
-width (V) and are what §4.5's auto-pick ranks on.
+The collapsed line, the same for every kind (label, shape, combined, trace, vector, 3MF volume,
+drill, 3D primitive, keep-out), reads left to right as follows. The **chevron** comes first. Then the
+**enabled/visible** checkbox (◉ cut / ○ hidden; a hidden item is kept, drawn ghosted, and cut by
+nothing) and **Remove** (✕, with a "Remove" tooltip and an accessible name), *together at the front of
+the line*. The maintainer asked for this on 2026-10-15: remove sits next to the show/hide control and
+never wraps away to the far end of a second line, as it does in today's label row (#411). After them
+come the **kind glyph** (`T` text, `◫` outline, `▢` box, `○` cylinder, `◎` tube, `●` sphere, `⌖` hole,
+`—` trace), the **name** (the text, the file volume's name, or "Box 12 × 8") and the **depth** with its
+intent word (`reveal` / `surface` / a typed number; a 3D primitive shows its height; a void shows its
+ceiling). Every row puts these in the same columns. A warning on an item shows as `⚠` on its line so a
+collapsed list still says where the problems are.
+
+Rules: a new item opens expanded and every other row collapses; the row last edited stays open;
+`collapse all` / `expand all` on the header; the per-item state is remembered for the session;
+clicking an item in the viewport expands its row and scrolls to it, and hovering a row highlights
+the item in the viewport. **Remove is undoable**: the item and its position go to an undo stack,
+a toast offers `Undo` for 8 s or until the next edit, and `Ctrl-Z` undoes it too — no confirmation
+dialog, because an undo is cheaper than a question. `Remove all` (today's button) keeps its
+confirmation, since it empties the stack's usefulness. Ten items fit on one screen without scrolling
+at 1440 × 900 (#411's acceptance), and the phone/tablet layouts (#134) get the same one-line rows.
+
+Each item's expanded editor carries its **reach** per candidate cutter and its **lost** share, live,
+in the same words `item-detail-lost` already uses. The numbers come from the opened region (flat) or
+the groove width (V) and are what §4.5's auto-pick ranks on; the collapsed line carries only the
+`⚠` when the loss is above the job's threshold.
 
 **Validation.** As today (`item-depth-bound`, `depth-exceeds-stock`, `cut-too-deep`, jaw reach), plus:
 an item that cuts a face the jaw clamps on in this setup (`cuts-clamped-face`, error) — the reason
@@ -1068,6 +1095,7 @@ review. Sizes are relative (S: a day; M: days; L: weeks).
 | Cut-away | 3D primitives (box, cylinder, tube, sphere) as removals; sloped/curved refused by name | **NEW**; 3D cutting is #222 | M |
 | Cut-away | target object = stock − object; depends on through-cuts and tabs | **NEW**; #218, #213 | L |
 | Cut-away | `cuts-clamped-face` finding | **NEW** | S |
+| Cut-away | one-line item rows for every kind, Remove with its word, undo toast + Ctrl-Z, collapse/expand all, viewport-select expands the row | **#411** (filed for the current panel; this design keeps the same list) | M |
 | Setups | setup planning from face normals; manual override; per-setup items, tools, registration; the remount page with picture and confirmation question; ledge-seat and grip-after checks; stock carried between setups in the sweep | **NEW** (the maintainer's addition, 2026-10-15) | L |
 | Setups | features cut in setup 1 as references for the scan | **NEW**, on #391's physics | M |
 | Setups | the rotary as the alternative (indexed faces, class I) | #223, #241 | — |
@@ -1158,7 +1186,7 @@ cadence), `2026-10-15-185-air.log` / `-cut.log` (41 s / 52 s), `2026-10-12-cut-r
 `casemaker-app/scripts/engrave-job.ts`; `samples/badge-blank/single.3mf`
 (`Metadata/Slic3r_PE_model.config`). Issues: #166, #176, #185, #188, #191, #208, #213, #218, #221,
 #222, #223, #238, #240, #242, #244, #247, #249, #254, #272, #277, #278, #280, #281, #283, #289, #303,
-#304, #347, #383, #386, #387, #390, #391, #405, #406, #407, #408, #409, #410.
+#304, #347, #383, #386, #387, #390, #391, #405, #406, #407, #408, #409, #410, #411.
 
 **Makera** (cached at `docs/market-research/raw/makera/`): `Z1-QuickStart.txt`,
 `software-MakeraCAM_userguide.txt`, `software-MakeraCAM_Intro.txt`, `software-MakeraCAM_tutorials.txt`,
