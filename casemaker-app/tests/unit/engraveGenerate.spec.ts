@@ -10,8 +10,11 @@ import { frameCorners } from '@/workers/sim/engraveGenerate';
 import { UNMEASURED_FEEDS_TABLE, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { defaultBoundaryMargin } from '@/engine/cnc/engrave/depthBounds';
-import { labelGlyphMeasure, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
+import { labelGlyphMeasure, traceSelfOverlaps, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import { bindingVoidsByRegion } from '@/workers/sim/engraveGeometry';
+import { createSimSession } from '@/workers/sim/session';
+import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { Z1 } from '@/engine/cnc/machine';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { CAM_ID, CAM_NAME } from '@/engine/cnc/post/z1';
 import { version as APP_VERSION } from '../../package.json';
@@ -22,7 +25,7 @@ import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { viseForNewJob } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
-import type { Tool } from '@/engine/cnc/tool';
+import { cuttingForTrace, cuttingRadiusForSweep, flatEndMill, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveTraceItem } from '@/types/engraveJob';
 
 describe('engraveGenerate with a saved machine frame (#297)', () => {
@@ -775,5 +778,235 @@ describe('the frame file (#244)', () => {
     expect(g.ok).toBe(false);
     expect(g.frameNc).toBeNull();
     expect(g.frameVerify).toBeNull();
+  });
+});
+
+// #405 — a V-bit TRACE job, end to end. Two rules hold the whole feature up, and both are here: a
+// V-bit is NEVER swept as a flat end mill (its groove is the cone's, and the column engine is the
+// authority for it), and a V-bit is never a stand-in for a flat end mill on a REGION (opening a
+// glyph needs ONE cutting width; the V-carve that would lift that stays in #221).
+describe('a V-bit trace job (#405)', () => {
+  /** The text job's default cutter: the 30° engraving bit, 0.3 mm tip, 3.175 mm shank. */
+  const bit30 = (over: Partial<Tool> = {}): Tool =>
+    flatEndMill(0.3, {
+      name: 'Single Flute Engraving Bit 30 x 0.3',
+      typeText: 'Engraving',
+      shape: 'engraving',
+      handleDiameter: 3.175,
+      diameter: 3.175,
+      tipDiameter: 0.3,
+      angle: 30,
+      halfAngle: 15,
+      ...over,
+    });
+
+  /**
+   * The bench blank with `traces` as the only enabled items: 38.1 × 76.2 × 3.81 mm PLA, a 1.0 mm
+   * floor and a 1.0 mm edge margin, and the vise seated so the blank stands proud — the job's own
+   * numbers from `docs/bench/single-barrel.job.json`.
+   */
+  const traceJob = (traces: EngraveTraceItem[], over: Partial<EngraveJob> = {}): EngraveJob => {
+    const base = defaultEngraveJob();
+    return {
+      ...base,
+      name: 'single barrel',
+      stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'pla' },
+      labels: [],
+      shapes: [],
+      toolKey: 'inv:kz-engrave-30-0-3',
+      tool: bit30(),
+      minFloor: 1,
+      edgeMargin: 1,
+      breakthrough: 0.3,
+      workholding: { ...base.workholding, vise: { ...base.workholding.vise, stockProud: 1.2 } },
+      traces,
+      ...over,
+    };
+  };
+
+  /** A Hershey stroke-label trace, reading along +Y (rotation 90°) like the bench job's two lines. */
+  const label = (id: string, text: string, size: number, x: number, depth = 1): EngraveTraceItem => ({
+    id,
+    kind: 'stroke-label',
+    text,
+    font: 'hershey-simplex',
+    size,
+    position: { x, y: 38.1 },
+    rotation: 90,
+    depth,
+    enabled: true,
+  });
+
+  it('cuts two stroke-label traces with the 30° × 0.3 mm bit and posts a clean program', () => {
+    const job = traceJob([label('title', 'Single Barrel', 7.7, 13.69), label('sub', '(Like the Whiskey)', 5.4, 25.64)]);
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    // Two operations, one per trace (#219's CAM appends after the region CAM's — here there is none).
+    expect(g.cam!.operations).toBe(2);
+    // The hand file's own numbers (#185), now reached through the feeds row: S12000, F200 plunge,
+    // F500 along, ONE pass straight to 1.0 mm deep.
+    expect(g.nc).toContain('S12000');
+    expect(g.nc).toContain('G1 Z-1 F200');
+    expect(g.nc).toContain('F500');
+    // ONE pass straight to depth: EVERY plunge line lands on -1 and no intermediate depth is cut.
+    // (A Hershey label is many separate strokes — one plunge each, ~50 for these two lines together
+    // — so the count is not the pass count; the DEPTHS are, and there is only one of them.)
+    const plunges = g.nc!.match(/G1 Z-[\d.]+ F\d+/g) ?? [];
+    expect(plunges.length).toBeGreaterThan(0);
+    expect(plunges.every((line) => line.includes('Z-1 F200'))).toBe(true);
+    expect(g.nc).not.toMatch(/G1 Z-0\./);
+    // The header states the CONE — a reader that only saw `diameter=3.175` would picture a shank-wide
+    // cutter. `type=Engraving` is OUR word for a non-flat cutter (#268/#187, see `post/z1.ts`).
+    expect(g.nc).toContain('tipdiameter=0.3');
+    expect(g.nc).toContain('|angle=30|halfAngle=15');
+    expect(g.nc).toContain('type=Engraving');
+    // The tool record the app writes names the cutter it was written for (#332).
+    expect(g.nc).toContain(';@CM|TOOL|key=inv:kz-engrave-30-0-3');
+  });
+
+  it('never takes the flat path: `cuttingRadiusForSweep` refuses the cone, the trace path takes it', () => {
+    // This is the hard rule. The exact 2.5D sweeper has ONE radius and a cone has none, so it must
+    // keep refusing — and the trace path, which knows the depth, is where a V-bit is accepted.
+    const v = cuttingRadiusForSweep(bit30());
+    expect(v.ok).toBe(false);
+    if (v.ok) throw new Error('a V-bit must not have a single sweep radius');
+    expect(v.reason).toContain('flat end mill only');
+
+    const trace = cuttingForTrace(bit30());
+    expect(trace.ok).toBe(true);
+    if (!trace.ok) throw new Error(trace.reason);
+    expect(trace.tool.shape).toBe('v');
+    expect(isVTraceTool(bit30())).toBe(true);
+    // A flat end mill still answers the same shape it always did.
+    expect(cuttingForTrace(flatEndMill(1.0))).toMatchObject({ ok: true, tool: { shape: 'flat', radius: 0.5 } });
+  });
+
+  it('refuses a REGION cut with a V-bit by name, pointing at #221', () => {
+    const job = traceJob([label('title', 'Single Barrel', 7.7, 13.69)], {
+      labels: defaultEngraveJob().labels.slice(0, 1),
+    });
+    const g = generate(tl, job);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    expect(g.nc).toBeNull();
+    const refusal = g.findings.find((f) => f.code === 'region-v-carve-unavailable');
+    expect(refusal).toBeDefined();
+    expect(refusal!.severity).toBe('error');
+    expect(refusal!.message).toContain('#221');
+    // A refusal of the REGION, not of the cutter: the same tool cuts the same job's trace.
+    expect(g.nc).toBeNull();
+  });
+
+  it('REFUSES a METAL-line V-bit on a PLA job, by name', () => {
+    // The 30°/60° engravers Makera lists for metal are not the cutters for a PLA blank — the
+    // maintainer's ruling, and the claim is about the PAIR — so the job stops rather than being
+    // cut on numbers nobody measured (#405 review). The name alone states the line here.
+    const metal = bit30({ name: 'Engraving V-bit 30 x 0.5 (Metal)', tipDiameter: 0.5, diameter: 3.175 });
+    const job = traceJob([label('title', 'Single Barrel', 7.7, 13.69)], { tool: metal });
+    const g = generate(tl, job);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    expect(g.nc).toBeNull();
+    const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
+    expect(refusal).toBeDefined();
+    expect(refusal!.severity).toBe('error');
+    expect(refusal!.message).toContain(metal.name); // the refusal NAMES the cutter
+    expect(refusal!.message).toContain('PLA');
+  });
+
+  it('refuses a metal-line V-bit named by its BOX CODE too — the `-M-` segment', () => {
+    // `C1-BIT-ENGRAVE-M-60-0.1` states the line in its code as well as in its name: the code is the
+    // half that survives a renamed or shortened cutter, and a job carrying a code files it as the
+    // `Tool`'s `id` (our post writes `id=…`). This cutter's name is a STUB — the real label's
+    // "…for Metal…" phrase is not in it — so the code half is the only thing that can catch it here.
+    const byCode = bit30({
+      name: 'Single Flute Engraving Bit 60 x 0.1',
+      id: 'C1-BIT-ENGRAVE-M-60-0.1',
+      tipDiameter: 0.1,
+      angle: 60,
+      halfAngle: 30,
+    });
+    const job = traceJob([label('title', 'Single Barrel', 7.7, 13.69)], { tool: byCode });
+    const g = generate(tl, job);
+    expect(g.ok).toBe(false);
+    const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
+    expect(refusal).toBeDefined();
+    expect(refusal!.severity).toBe('error');
+    // …and the same cutter on a METAL blank is exactly what that bit is for: no refusal.
+    const onMetal = generate(tl, traceJob([label('title', 'Single Barrel', 7.7, 13.69)], {
+      tool: byCode,
+      stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'aluminium-6061' },
+    }));
+    expect(onMetal.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
+  });
+
+  it('refuses an OWNED metal-line V-bit as the inventory actually files it — label name, id null', () => {
+    // The shape a job really carries for `inv:kz-engrave-m-60-0-1`: `toolRegistry.inventoryEntryFor`
+    // hands the job the inventory's own snapshot, whose `id` is `null` (the box code lives on the
+    // possession as `codes[].value`, not on the cutter). The label names the line as the phrase
+    // "for Metal", which does NOT end in `(Metal)` and is the only statement left — so a reading
+    // that needed the code, or only the `(Metal)` suffix, would let the 60° bit this house owns cut
+    // PLA (#405 review). This is the cutter the review named.
+    const owned = bit30({
+      name: 'Single Flute Engraving Bit for Metal - 1/8" Shank 60° * 0.1mm',
+      id: null,
+      tipDiameter: 0.1,
+      angle: 60,
+      halfAngle: 30,
+    });
+    const g = generate(tl, traceJob([label('title', 'Single Barrel', 7.7, 13.69)], { tool: owned }));
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    expect(g.nc).toBeNull();
+    const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
+    expect(refusal).toBeDefined();
+    expect(refusal!.severity).toBe('error');
+    expect(refusal!.message).toContain('60'); // the refusal NAMES the cutter it stopped
+    expect(refusal!.message).toContain('PLA');
+  });
+
+  it('is swept by the COLUMN engine, and the run sheet says so (#405)', () => {
+    const job = traceJob([label('title', 'Single Barrel', 7.7, 13.69)]);
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(g.nc as string, toSetup(job, Z1), jobTool(job)!, Z1.id);
+      expect(load.ok).toBe(true);
+      if (!load.ok) throw new Error(JSON.stringify(load.diagnostics));
+      // The one vocabulary for which backend produced the numbers. A V trace can never read 'exact'.
+      expect(load.stats.engine).toBe('column');
+      expect(load.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+      const sheet = buildRunSheet(job, g, { diagnostics: load.diagnostics, outcome: 'swept', engine: load.stats.engine });
+      expect(JSON.stringify(sheet)).toContain('sampled column engine');
+      // A trace-only job steps over nothing, so the sheet must not instruct a step-over (#191's
+      // `stepOverFraction` is inert for a cone — see the PLA V row in `feeds.ts`).
+      const cut = sheet.sections.find((s) => s.id === 'cut');
+      const value = cut!.steps.map((s) => s.value ?? '').join(' ');
+      expect(value).toContain('no step-over');
+      expect(value).not.toContain('mm step-over');
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('reads the merge threshold off the groove WIDTH at the trace’s depth, not the tip', () => {
+    // The width oracle the whole feature turns on: `w(d) = tip + 2·d·tan(halfAngle)`. Two strokes
+    // 0.5 mm apart merge at 1.0 mm deep (0.836 mm wide) and do not at 0.1 mm (0.354 mm wide) — so
+    // the radius handed to the check has to be a function of depth, which is what `traceRadiusAt` is.
+    const r1 = traceRadiusAt(bit30(), 1);
+    const r01 = traceRadiusAt(bit30(), 0.1);
+    expect(r1).toBeCloseTo(0.8359 / 2, 4);
+    expect(r01).toBeCloseTo(0.1768, 4);
+    const paths: [number, number][][] = [
+      [[0, 0], [30, 0]],
+      [[0, 0.5], [30, 0.5]],
+    ];
+    expect(traceSelfOverlaps(paths, [false, false], r1!)).toHaveLength(1);
+    expect(traceSelfOverlaps(paths, [false, false], r01!)).toHaveLength(0);
+    // A flat end mill's opening does not depend on the depth, which is why one number used to do.
+    expect(traceRadiusAt(flatEndMill(1.0), 1)).toBe(0.5);
+    expect(traceRadiusAt(flatEndMill(1.0), 2.5)).toBe(0.5);
   });
 });

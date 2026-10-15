@@ -37,7 +37,7 @@ import { applyEvent, buildTimeline, initialState, type MachineState } from './em
 import type { MillProfile } from './machine';
 import { sacrificialBoxes, type SacrificialBox } from './sacrificial';
 import type { Setup } from './setup';
-import { cuttingDiameter, cuttingRadiusForSweep, type Tool } from './tool';
+import { cuttingDiameter, cuttingRadiusForSweep, traceRadiusAt, type Tool } from './tool';
 
 /** Deepest permitted cut (positive mm below the top face) at a work-frame XY. 0 = no cutting allowed here. */
 export type DepthLimit = (x: number, y: number) => number;
@@ -300,7 +300,6 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
       if (d.severity === 'error') push('runner-error', d.line, `${d.code}: ${d.message}`);
     }
 
-    const toolRadius = toolRadiusOf(ctx.tool);
     const minRapidZ = ctx.minRapidZ;
 
     let state: MachineState = initialState(ctx.setup);
@@ -412,17 +411,28 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         // above 0 at the four points ±r in X and Y. With a sacrificial setup the limit is
         // `sacrificialDepthLimit`, positive over `supportedFootprint` (#213), so this is "the
         // cutter left the part onto air", not "it touched anything but the part".
-        let outside: { x: number; y: number } | null = null;
+        //
+        // The EDGE is the cutter's footprint at the DEEPEST point of the move, and for a V-bit
+        // that is a function of the depth (#405): a 30° bit 1 mm down cuts a groove 0.418 mm
+        // half-wide, where the tip alone is 0.15 — reading the tip would let the flank walk off the
+        // stock by 0.27 mm unnoticed. The move's lowest point is the honest reading, so the depth
+        // comes from the endpoints' own Z rather than from a bound taken over the whole file.
+        let outside: { x: number; y: number; radius: number } | null = null;
+        const deepestOfMove = Math.min(
+          fromW[2] ?? 0,
+          toW[2] ?? 0,
+        );
+        const edgeRadius = toolRadiusOf(ctx.tool, Math.max(0, -deepestOfMove));
         for (const p of [fromW, toW]) {
           if (p[0] === null || p[1] === null) continue;
           for (const [px, py] of [
-            [p[0] + toolRadius, p[1]],
-            [p[0] - toolRadius, p[1]],
-            [p[0], p[1] + toolRadius],
-            [p[0], p[1] - toolRadius],
+            [p[0] + edgeRadius, p[1]],
+            [p[0] - edgeRadius, p[1]],
+            [p[0], p[1] + edgeRadius],
+            [p[0], p[1] - edgeRadius],
           ] as [number, number][]) {
             if (ctx.depthLimit(px, py) <= 0) {
-              outside = { x: px, y: py };
+              outside = { x: px, y: py, radius: edgeRadius };
               break;
             }
           }
@@ -432,7 +442,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
           push(
             'cut-outside-stock',
             m.line,
-            `the ${fmt(toolRadius)} mm-radius cutter edge reaches (${fmt(outside.x)}, ${fmt(outside.y)}), outside the stock`,
+            `the ${fmt(outside.radius)} mm-radius cutter edge reaches (${fmt(outside.x)}, ${fmt(outside.y)}), outside the stock`,
           );
         }
 
@@ -538,14 +548,25 @@ function collect(min: Vec3, max: Vec3, p: [number, number, number]): void {
 }
 
 /**
- * The cutter radius for the stock-outline check. V1 sweeps a flat end mill; the sweep's own
- * refusal (`cuttingRadiusForSweep`) is the authority. A tool it refuses has no usable
- * radius, so the edge test degenerates to the centre — the sweep will refuse the same job
- * for the same reason, so the verifier does not invent a second refusal code here.
+ * The cutter radius for the stock-outline check at `depth` mm below the top face.
+ *
+ * A flat end mill's answer does not depend on the depth — the sweep's own contract
+ * (`cuttingRadiusForSweep`) is the authority for one, and the verifier does not invent a second
+ * refusal code for a tool it refuses. A V-BIT's does: its footprint is the groove's half-width at
+ * the depth it is cutting, `tip + d·tan(halfAngle)`, and `traceRadiusAt` is the ONE statement of
+ * that (#405). Reading the TIP instead (the `cuttingDiameter` fallback below) under-reads the
+ * footprint of the very cutter this check exists for: a 30° bit 1 mm down cuts 0.418 mm half-wide,
+ * not the 0.15 mm tip, so the flank could walk 0.27 mm off the stock with nothing said.
+ *
+ * A tool that can neither sweep nor trace (a ball nose, a bull nose) still falls back to its
+ * cutting diameter: the sweep refuses the job for the same reason, so the degenerate reading is
+ * never the one that decides anything.
  */
-function toolRadiusOf(tool: Tool): number {
+function toolRadiusOf(tool: Tool, depth: number): number {
   const r = cuttingRadiusForSweep(tool);
   if (r.ok) return r.radius;
+  const v = traceRadiusAt(tool, depth);
+  if (v !== null) return v;
   const d = cuttingDiameter(tool);
   return d === null || !(d > 0) ? 0 : d / 2;
 }

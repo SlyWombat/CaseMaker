@@ -416,8 +416,14 @@ describe('no catalogue loaded is exactly the old behaviour', () => {
   it('every row of the table resolves as it did, unstamped', () => {
     for (const row of FEEDS_TABLE) {
       const diameter = (row.minDiameter + row.maxDiameter) / 2;
-      const res = feedsFor(feedCatalogueRows(), row.material, flatEndMill(diameter), Z1);
-      expect(res.ok, `${row.material} ${diameter}`).toBe(true);
+      // The row's OWN edge (#405): the V row's numbers are a cone's, so a flat end mill built to
+      // its diameter would resolve against a different row — or none.
+      const cutter =
+        (row.edge ?? 'flat') === 'v'
+          ? flatEndMill(diameter, { shape: 'engraving', typeText: 'Engraving', tipDiameter: diameter, diameter: 3.175, halfAngle: 15, angle: 30 })
+          : flatEndMill(diameter);
+      const res = feedsFor(feedCatalogueRows(), row.material, cutter, Z1);
+      expect(res.ok, `${row.material} ${row.edge ?? 'flat'} ${diameter}`).toBe(true);
       if (!res.ok) continue;
       expect(res.catalogue).toBeNull();
       expect(res.provenance).toBe(row.provenance);

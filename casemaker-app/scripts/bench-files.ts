@@ -529,11 +529,12 @@ console.log('    npx tsx --tsconfig tsconfig.scripts.json scripts/engrave-job.ts
 // #185 — the V-groove reach test: HAND-WRITTEN, because the pipeline cannot generate it
 // ---------------------------------------------------------------------------------------------
 
-// A V-bit has no sweep: `cuttingRadiusForSweep` refuses a non-flat tool, so `feedsFor` refuses it
-// and no job can generate a program for one. The bench still needs the file (#185 asks for four
-// grooves at #165's first four depths, calipered against `w(d) = tip + 2·d·tan(halfAngle)`), so it
-// is written here and handed to the app's OWN verifier before it is written — the same gate the
-// upload path uses (#386), so what reaches the bench is what the app would have accepted.
+// #405 gave the pipeline a way to write a program for a V-bit — a single-stroke TRACE, on the PLA
+// V row in `feeds.ts` — so "no job can generate one" is no longer true. THIS file is still written
+// here rather than generated: it is a REACH test, four grooves at #165's first four depths in ONE
+// program, and it is the reference `w(d) = tip + 2·d·tan(halfAngle)` was calipered against. It is
+// handed to the app's OWN verifier before it is written — the same gate the upload path uses
+// (#386), so what reaches the bench is what the app would have accepted.
 const V_BIT_30_0_3 = {
   number: 1,
   id: 'C1-BIT-ENGRAVE-30-0.3',

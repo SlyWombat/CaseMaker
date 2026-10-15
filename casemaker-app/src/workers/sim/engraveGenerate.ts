@@ -39,8 +39,10 @@ import { version as CAM_VERSION } from '../../../package.json';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
 import { feedsFor, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
-import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
-import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt } from '@/engine/cnc/engrave/partPlan';
+import { cuttingForTrace, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
+import { isMetalTool } from '@/engine/cnc/registerCutter';
+import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
+import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { dedupeFindings, toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
@@ -193,6 +195,63 @@ export interface EngraveRegions {
 }
 
 /**
+ * What a V-BIT in a job means (#405): the two findings that are about the job rather than about the
+ * geometry, both of which need the PLAN, which is why they are raised here and not in
+ * `engravabilityFindings` (that module is handed measurements, not items).
+ *
+ * `null` tool, or any cutter that is not a cone, answers nothing: every job before #405 had a flat
+ * end mill and must produce exactly the findings it produced before.
+ */
+function vCutterFindings(job: EngraveJob, plan: PartPlan, tool: Tool | null): JobFinding[] {
+  if (tool === null || !isVTraceTool(tool)) return [];
+  const findings: JobFinding[] = [];
+
+  // 1. A REGION needs ONE cutting width. Opening a glyph or a pocket means offsetting its outline
+  // by the cutter's radius (`generateEngrave`), and a cone has no single radius: its width at the
+  // depth the path is at is part of the answer. The toolpath that does cut a region with a V-bit is
+  // a medial-axis V-carve — #221's remaining piece — so this is a refusal by name, on the item that
+  // asked, rather than a refusal of the cutter (which traces perfectly well).
+  const region = plan.engraves[0];
+  if (region !== undefined) {
+    const others = plan.engraves.length - 1;
+    findings.push({
+      severity: 'error',
+      code: 'region-v-carve-unavailable',
+      labelId: region.id,
+      message:
+        `${region.name} is a REGION${others > 0 ? ` (and ${others} other item${others === 1 ? '' : 's'})` : ''}: opening it needs the cutter's ` +
+        `width, and a V-bit's width changes with the depth of the cut — cutting a region with one is a V-carve, ` +
+        `which this app does not do yet (#221). Use a flat end mill for regions, or make the artwork a stroke trace.`,
+    });
+  }
+
+  // 2. Makera's "for Metal" line: REFUSED by name on a blank that is not metal (#405 review, the
+  // maintainer's 2026-10-09 ruling). This was a warning, and it stopped the 60° bit only by
+  // accident — that bit's 0.1 mm tip falls outside every PLA V row, so the job died at the feeds
+  // stage for a reason that says nothing about the line. A metal 30° 0.3 mm ENGRAVER has the same
+  // name and a tip INSIDE the V row's band, so it would have cut PLA on numbers nobody measured
+  // for it with nothing but a sentence on the sheet.
+  //
+  // A cutter ground for metal is not the cutter for a plastic or a wood — the claim is about the
+  // PAIR, and this half of it fails — so the job does not run. `isMetalTool` reads every statement
+  // of the line a cutter can carry: the NAME (`(Metal)` as a catalogue row spells it, `for Metal`
+  // as the printed label spells it — the form an owned `inv:` cutter actually reaches a job with)
+  // and the `-M-` box code, so a cutter filed under a code is refused too.
+  if (isMetalTool(tool) && !isMetalMaterial(job.stock.material)) {
+    findings.push({
+      severity: 'error',
+      code: 'tool-metal-line',
+      message:
+        `"${tool.name}" is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}: ` +
+        `the bit's geometry and its coating are ground for metal, and no feed row was written for it on this material. ` +
+        `Pick a wood/plastic cutter for this blank, or change the stock to a metal before cutting.`,
+    });
+  }
+
+  return findings;
+}
+
+/**
  * The disc a plunge drill opens at one hole: radius `r`, polygonized with the same segment count
  * `segmentsForRadius` picks everywhere else (#190). The holes are unioned so a dense array whose
  * discs overlap still yields one region per drill item rather than double-counted overlap — the
@@ -224,8 +283,14 @@ export function engraveRegions(
 ): EngraveRegions {
   const plan = toPartPlan(job);
   const perChar = perCharFor(job);
-  const r = tool ? cuttingRadiusForSweep(tool) : null;
-  const radius = r && r.ok ? r.radius : null;
+  // The cutter, split into the two things the pipeline needs from it (#405). `radius` is the FLAT
+  // radius the REGION stages take: measuring a glyph's opening, opening it with an offset, sweeping
+  // it into a drill disc. A V-bit has none — its width is a function of depth — so it answers null
+  // there and is refused a region by name below. A trace, by contrast, needs only the width at the
+  // trace's own depth, which `traceRadiusAt` gives for both shapes.
+  const usable = tool === null ? null : cuttingForTrace(tool);
+  const radius = usable !== null && usable.ok && usable.tool.shape === 'flat' ? usable.tool.radius : null;
+  const traceRadius = tool === null ? null : (depth: number): number | null => traceRadiusAt(tool, depth);
 
   const measured = radius === null ? [] : measureLabels(tl, plan, radius, job.edgeMargin, perChar);
   const engFindings = radius === null ? [] : engravabilityFindings(job, measured, ratioAtFor(tl, job, radius), tool);
@@ -236,7 +301,7 @@ export function engraveRegions(
   const voidCuts: CutRegion[] =
     plan.stock.keepOuts.length === 0
       ? []
-      : [...engraveCutRegions(plan, measured), ...traceCutRegions(tl, plan, radius)];
+      : [...engraveCutRegions(plan, measured), ...(traceRadius === null ? [] : traceCutRegions(tl, plan, traceRadius))];
 
   // #345 decision B — ONE scan decides which void binds each region, and BOTH stages read it: the
   // per-move warning (#171) and the per-item bound, so the banner and the item cannot name
@@ -257,6 +322,7 @@ export function engraveRegions(
     ...validateJob(job),
     ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
     ...engFindings,
+    ...vCutterFindings(job, plan, tool),
     ...voidFindings,
     // #345 — every item judged against every bound under its footprint: the split on the side its
     // own `depthIntent` put it, and the ceiling of any void it sits over. A no-op for a job with
@@ -303,7 +369,7 @@ export function engraveRegions(
   // The list is `cuts` rather than a private array because it is the ONE place the cut classes are
   // enumerated (#288): the prediction below and `engravePreview`'s picture are both its projection,
   // so a fourth class (#218's cut-outs) lands in the program, the oracle and the preview together.
-  const cuts: CutRegion[] = [...regions, ...traceCutRegions(tl, plan, radius)];
+  const cuts: CutRegion[] = [...regions, ...(traceRadius === null ? [] : traceCutRegions(tl, plan, traceRadius))];
   const predicted: OraclePredicted[] = cuts.map((c) => ({ depth: c.depth, polygons: c.polygons }));
 
   return { plan, measured, regions, cuts, predicted, tool, radius, findings, colourBoundaryDepth, margins };
@@ -377,8 +443,14 @@ function frameProgram(
   tool: Tool,
   limit: DepthLimit,
 ): { nc: string; verify: VerifyReport } | { error: string } {
-  const radius = cuttingRadiusForSweep(tool);
-  const moves = frameCorners(ir, radius.ok ? radius.radius : 0, FRAME_Z);
+  // The cutter's footprint in XY, grown by the SAME rule the corner box has always been built with
+  // (#244): the disc the toolpath removes. A V-bit's is the groove at the DEEPEST cut in the program
+  // (#405) — a cone's opening widens with depth, and the frame has to cover the widest cut it makes,
+  // not the tip's 0.3 mm. `traceRadiusAt` answers both shapes, so a flat end mill's frame is
+  // unchanged to the last digit.
+  const deepestCut = ir.operations.reduce((deepest, op) => Math.max(deepest, op.depth), 0);
+  const radius = traceRadiusAt(tool, deepestCut);
+  const moves = frameCorners(ir, radius ?? 0, FRAME_Z);
   if (moves === null) return { error: 'the toolpath has no positioned move to trace' };
   const frameIr: ToolpathIR = {
     frame: 'flat', // the frame trace is a flat-frame air move; no rotary frame exists yet (#237)
@@ -468,7 +540,7 @@ export function engraveGenerate(
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, predicted, radius, findings } = engraveRegions(tl, job, tool, margins);
+  const { plan, regions, predicted, findings } = engraveRegions(tl, job, tool, margins);
   const errors: EngraveFailure[] = [];
 
   const stop = (stage: EngraveStage, extra?: { feeds?: FeedsResult | null; message?: string }): EngraveGenerated => {
@@ -492,17 +564,25 @@ export function engraveGenerate(
   if (findings.some((f) => f.severity === 'error')) return stop('findings');
 
   // 2. feeds (#202). A tool the library cannot resolve reads as `tool-missing` above; a tool with
-  // no row, or a step-over past the radius (#191), refuses here.
-  if (tool === null || radius === null) {
-    return stop('feeds', { message: radius === null && tool !== null ? 'the job tool is not a flat end mill V1 can sweep' : 'the job has no usable cutter' });
-  }
+  // no row, or a step-over past the radius (#191), refuses here. A V-BIT passes this gate since
+  // #405 — it is a cutter this CAM can trace with, and `radius` being null only says it opens no
+  // region — so the refusal is the trace path's own (`cuttingForTrace`), which names a ball nose,
+  // a bull nose, or a cone whose header states no tip or angle.
+  if (tool === null) return stop('feeds', { message: 'the job has no usable cutter' });
+  const usable = cuttingForTrace(tool);
+  if (!usable.ok) return stop('feeds', { message: usable.reason });
   const feeds = feedsFor(catalogue, job.stock.material, tool, mill, job.cutOverride);
   if (!feeds.ok) return stop('feeds', { feeds, message: feeds.reason });
 
   // 3. the CAM core (#172), on the SAME opened polygons stage 1 measured.
-  let ir: ReturnType<typeof generateEngrave>;
+  let ir: ToolpathIR;
   try {
-    ir = generateEngrave(tl, regions, tool, feeds.params, mill.rapidEstimate);
+    // A job with no REGION item has nothing for the region CAM to open — and since #405 it must not
+    // be handed an empty list either: a trace-only job can now reach this line with a CONE for a
+    // tool, and `generateEngrave` refuses a V-bit by name (rightly: opening a region needs the
+    // offset radius). The two CAMs return IRs describing the same machine state, so a job with no
+    // regions simply IS the trace IR, and its `.nc` is unchanged.
+    const regionIr = regions.length === 0 ? null : generateEngrave(tl, regions, tool, feeds.params, mill.rapidEstimate);
     // #287 — single-line traces (#219) are their own CAM: the cutter's centre follows the path,
     // so there is no region to open, no offset and no pocketing. They are appended AFTER the
     // region operations, so a trace can shift no pocket's ordering, and a job with none joins an
@@ -517,7 +597,8 @@ export function engraveGenerate(
     // place traces ahead of its cut-out class rather than leaving this append at the end — a
     // released part can shift under the tape, which is exactly what the drills-first rule avoids.
     const traceIr = generateTrace(plan.traces, tool, feeds.params, mill.rapidEstimate);
-    if (traceIr.operations.length > 0) ir = concatToolpathIR(ir, traceIr);
+    if (regionIr === null) ir = traceIr;
+    else ir = traceIr.operations.length > 0 ? concatToolpathIR(regionIr, traceIr) : regionIr;
   } catch (e) {
     return stop('cam', { feeds, message: e instanceof Error ? e.message : String(e) });
   }

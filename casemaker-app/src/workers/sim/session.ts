@@ -32,7 +32,7 @@ import { applyEvent, buildTimeline, parseGcode, resolveMachine, MACHINES, type F
 import { moveSeconds, rapidRate, type RapidEstimate } from '@/engine/cnc/cam/ir';
 
 import type { Mm } from '@/types/units';
-import type { Tool } from '@/engine/cnc/tool';
+import { isVTraceTool, type Tool } from '@/engine/cnc/tool';
 import { computeOracle, oracleBand, type OraclePredicted, type OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
@@ -240,8 +240,9 @@ export interface SimSession {
    * removal against the CAM's `predicted` regions, level by level. The session owns the removal
    * solid, so this is the only place the comparison can be made without shipping wasm handles.
    *
-   * Throws when no SWEPT program is loaded (a path-only refusal owns no removal) — the caller
-   * only reaches this after a load that reported `ok`.
+   * Throws when no SWEPT program is loaded — a path-only refusal owns no removal, and a
+   * column-engine live (a rotary job or a V-bit trace) has no removal solid at all, only its grid
+   * (#405). The caller only reaches this after a load that reported `ok`.
    */
   oracle(predicted: readonly OraclePredicted[]): OracleReport;
   dispose(): void;
@@ -316,7 +317,14 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // 2.5D sweeper: the exact one refuses it by name and its `MAX_CHECKPOINTS` gate would refuse
     // the vendor files as dense 3D anyway. Routing here also means the dense-3D classifier never
     // applies to a rotary job, whose checkpoint count is expected to exceed it.
-    if (timeline.summary.rotary) {
+    //
+    // A V-BIT traces the same way and for the same kind of reason (#405, the hook #221 reserved):
+    // the exact sweeper's contract is one flat cutting radius (`cuttingRadiusForSweep`), and a
+    // cone's cutting width is a function of depth, so it refuses a V by name. The column engine
+    // models the cone directly, so a V tool routes here whether or not the job is rotary — and a
+    // rotary V job is refused inside `columnSweep` rather than swept as a flat disc. This is the
+    // ONE place the decision is made: a job whose tool is a cone never reaches `sweepTimeline`.
+    if (timeline.summary.rotary || isVTraceTool(tool)) {
       const col = columnSweep(timeline, tool, setup, opts);
       if (!col.ok) {
         // Same contract as a refused exact sweep (#194): keep the runner's work, draw the path,
@@ -482,9 +490,22 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
   /**
    * The volumetric oracle (#206). The band is derived from the checkpoints' worst contour count,
    * exactly as the sweep derives its own simplify budget (sweep.ts §562), so the two agree.
+   *
+   * The oracle compares a REMOVAL SOLID against the CAM's predicted regions, and only the exact
+   * 2.5D sweeper produces one: a column-engine live keeps its material as the sampled grid, so
+   * there is no solid to compare and the refusal names that, rather than the old "no swept
+   * program is loaded" which was true of a path-only refusal and misleading here (#405). Both
+   * jobs that route to the column engine reach this: a rotary job (#239), and a V-bit trace,
+   * whose cut only the cone profile can model (#405). The prediction for a groove is #221's
+   * remaining piece — this refusal is where its absence shows.
    */
   const oracle = (predicted: readonly OraclePredicted[]): OracleReport => {
     const l = live;
+    if (l && l.kind === 'column') {
+      throw new Error(
+        'oracle: a column-engine sweep (a rotary job, or a V-bit trace) keeps its material as a sampled grid, so there is no removal solid to compare against the CAM\'s predicted regions — the volumetric prediction for a grooved cut is still open (#221)',
+      );
+    }
     if (!l || l.kind !== 'swept') throw new Error('oracle: no swept program is loaded');
     const removal = l.sweep.removal;
     if (!removal) throw new Error('oracle: the loaded program removed no material');

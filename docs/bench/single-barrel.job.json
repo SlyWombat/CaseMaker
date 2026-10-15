@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 2,
+  "name": "single barrel",
+  "machineId": "Z1",
+  "jawClearance": 1,
+  "stock": {
+    "length": 38.1,
+    "width": 76.2,
+    "thickness": 3.81,
+    "material": "pla"
+  },
+  "labels": [],
+  "shapes": [],
+  "workholding": {
+    "kind": "vise",
+    "vise": {
+      "stockProud": 1.2,
+      "fixedJawThickness": 10,
+      "movingJawThickness": 10,
+      "jawLength": 100,
+      "jawStartY": -10,
+      "source": "default",
+      "uncertainty": 0.5
+    }
+  },
+  "toolKey": "inv:kz-engrave-30-0-3",
+  "tool": {
+    "number": 1,
+    "id": "C1-BIT-ENGRAVE-30-0.3",
+    "name": "Single Flute Engraving Bit 30 x 0.3",
+    "typeText": "Engraving",
+    "shape": "engraving",
+    "handleDiameter": 3.175,
+    "tipDiameter": 0.3,
+    "diameter": 3.175,
+    "cornerRadius": 0,
+    "angle": 30,
+    "halfAngle": 15,
+    "fluteLength": null,
+    "shoulderLength": null,
+    "stickout": null,
+    "centreCutting": null
+  },
+  "minFloor": 1,
+  "edgeMargin": 1,
+  "sacrificial": {
+    "under": null,
+    "sides": {
+      "left": null,
+      "right": null,
+      "front": null,
+      "back": null
+    },
+    "source": "default"
+  },
+  "breakthrough": 0.3,
+  "customFonts": [],
+  "traces": [
+    {
+      "id": "trc-single-barrel-title",
+      "kind": "stroke-label",
+      "text": "Single Barrel",
+      "font": "hershey-simplex",
+      "size": 7.74,
+      "position": {
+        "x": 13.69,
+        "y": 38.1
+      },
+      "rotation": 90,
+      "depth": 1,
+      "enabled": true
+    },
+    {
+      "id": "trc-single-barrel-sub",
+      "kind": "stroke-label",
+      "text": "(Like the Whiskey)",
+      "font": "hershey-simplex",
+      "size": 5.4,
+      "position": {
+        "x": 25.64,
+        "y": 38.1
+      },
+      "rotation": 90,
+      "depth": 1,
+      "enabled": true
+    }
+  ]
+}

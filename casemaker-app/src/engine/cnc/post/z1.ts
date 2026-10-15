@@ -179,6 +179,11 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): 
       `number=${ir.toolNumber}`,
       `id=${ir.tool.id ?? 0}`,
       `name=${sanitizeMkrValue(ir.tool.name)}`,
+      // #268/#187 — `type=` is written VERBATIM from the tool's own `typeText`, and only the FLAT
+      // end mill's word (`Flat End`) was read out of a Studio sample: for a non-flat tool (a V-bit
+      // whose `typeText` is `Engraving`) this is OUR word, not Studio's, because Studio's own value
+      // for a non-flat tool has never been read. #268 is that read; until it is made, a file this
+      // post writes for a V-bit states a type the machine's reader has not been shown to expect.
       `type=${sanitizeMkrValue(ir.tool.typeText)}`,
       `handlediameter=${numberOrZero(ir.tool.handleDiameter)}`,
       `sticklength=${numberOrZero(ir.tool.stickout)}`,
@@ -190,6 +195,18 @@ export function postZ1(ir: ToolpathIR, ctx: PostContext, machine: MillProfile): 
       `angle=${numberOrZero(ir.tool.angle)}`,
       `halfAngle=${numberOrZero(ir.tool.halfAngle)}`,
     ),
+    // #268 — the mark that travels WITH the file, not just a note in this source. `type=` above is
+    // written from the tool's own `typeText`, and a flat end mill's word (`Flat End`) is the only
+    // one ever read out of a Studio sample; for a V-bit it is `Engraving`, OUR word. A reader of
+    // the `.nc` (a person, a diff, the machine's own log) cannot tell a checked field from a
+    // guessed one, so say so where the guess is. Emitted only for a non-flat cutter, and as a bare
+    // `;` comment so Studio's own reader, which ignores what it does not know, is unaffected.
+    ...(ir.tool.shape === 'flat'
+      ? []
+      : [
+          `; type=${sanitizeMkrValue(ir.tool.typeText)} is UNVERIFIED against Makera Studio (#268):` +
+            ` a non-flat cutter's own word for this field, not one read out of a Studio sample`,
+        ]),
     // #332: our own record, right after the one it qualifies, naming the cutter by OUR key — the
     // only way a file can say WHICH cutter it was written for when the cutter has no vendor `g_ID`
     // (a clone, a hand-typed definition: #212 keeps the id off them, so the MKR line says id=0).

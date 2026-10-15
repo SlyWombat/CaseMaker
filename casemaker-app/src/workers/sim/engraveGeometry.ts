@@ -27,6 +27,7 @@ import { voidCeilingFor } from '@/engine/cnc/layerStack';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { itemLabel } from '@/engine/cnc/engrave/jobSetup';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
+import { vCone } from '@/engine/cnc/vProfile';
 import { aabbOfProfile, pOffset, type Profile } from '@/engine/compiler/profile';
 import type {
   EngraveAnyItem,
@@ -201,6 +202,21 @@ export function suggestCapHeight(
 export type LabelRatioAt = (labelId: string, size: number) => number;
 
 /**
+ * How a finding names the cutter it is about. A flat end mill is its diameter; a V-BIT is its tip
+ * and its angle (#405), because "a 0.3 mm cutter" describes only the floor of the groove it cuts
+ * and the angle is the other half of what the operator has to picture. Falls back to "the cutter"
+ * when the job names none — a sentence must not invent a number.
+ */
+function cutterPhrase(tool: Tool | null): string {
+  if (tool === null) return 'the cutter';
+  const diameter = cuttingDiameter(tool);
+  if (diameter === null) return 'the cutter';
+  const cone = vCone(tool);
+  if (cone !== null) return `a ${diameter} mm ${Math.round(cone.halfAngleDeg * 2)}° V-bit`;
+  return `a ${diameter} mm cutter`;
+}
+
+/**
  * Turn the measured losses into job findings (#201, #214).
  *
  * Codes and thresholds are the issue's table, renamed `item-*` by #214 (a shape is an item
@@ -224,8 +240,7 @@ export function engravabilityFindings(
   tool: Tool | null,
 ): JobFinding[] {
   const findings: JobFinding[] = [];
-  const diameter = tool === null ? null : cuttingDiameter(tool);
-  const cutter = diameter === null ? 'the cutter' : `a ${diameter} mm cutter`;
+  const cutter = cutterPhrase(tool);
 
   for (const row of m) {
     const src = findItem(job, row.labelId);
@@ -358,20 +373,24 @@ export function engraveCutRegions(plan: PartPlan, measured: readonly LabelEngrav
  * move the cut clear, it costs nothing — is exactly the advice that helps. Material over a void is
  * an unsupported membrane whatever the depth, so a traced line crossing one will chatter.
  *
- * `toolRadius` is null when the job has no usable cutter, in which case there is nothing to sweep
- * and the list is empty — the same "no cutter, nothing measured" rule `measureLabels` follows.
+ * `radiusAt` is the cutter's half-opening at a DEPTH, or null when the job has no cutter a trace
+ * can take (#405): a V-bit's groove widens as it deepens, so each trace is swept at its own depth
+ * rather than at one fixed radius, and a tool that cannot trace at all gives nothing to sweep and
+ * the list is empty — the same "no cutter, nothing measured" rule `measureLabels` follows.
  */
 export function traceCutRegions(
   tl: ManifoldToplevel,
   plan: PartPlan,
-  toolRadius: number | null,
+  radiusAt: (depth: number) => number | null,
 ): CutRegion[] {
-  if (toolRadius === null || toolRadius <= 0 || plan.traces.length === 0) return [];
-  return plan.traces.map((t) => {
+  if (plan.traces.length === 0) return [];
+  return plan.traces.flatMap((t): CutRegion[] => {
+    const toolRadius = radiusAt(t.depth);
+    if (toolRadius === null || toolRadius <= 0) return [];
     const cs = executeProfile(tl, traceSweptProfile(t.paths, t.closed, toolRadius));
     try {
       // `toPolygons()` returns each contour as [x, y][]; the same shape `measureLabels` produces.
-      return { id: t.id, name: t.name, depth: t.depth, polygons: cs.toPolygons() as [number, number][][] };
+      return [{ id: t.id, name: t.name, depth: t.depth, polygons: cs.toPolygons() as [number, number][][] }];
     } finally {
       cs.delete();
     }

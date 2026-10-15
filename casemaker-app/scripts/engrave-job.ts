@@ -158,8 +158,8 @@ function receipt(generated: EngraveGenerated, loadDiags: SimDiagnostic[], load: 
   warn(generated.findings);
   warn(generated.verify?.findings ?? []);
   console.log(
-    `  sim        ok=${load.ok}, count=${load.count}, removed=${load.stats.removedVolume.toFixed(2)} mm³, ` +
-      `${simErrors(loadDiags).length} errors`,
+    `  sim        ok=${load.ok}, engine=${load.stats.engine}, count=${load.count}, ` +
+      `removed=${load.stats.removedVolume.toFixed(2)} mm³, ${simErrors(loadDiags).length} errors`,
   );
   warn(loadDiags);
 }
@@ -222,7 +222,7 @@ function runJob(job: EngraveJob, outDir: string, opts: { writeJobDocument: boole
   const stem = stemFor(job);
   // #243: the run sheet's §8 carries the coverage sentence, so the sheet must be handed the run's
   // outcome and diagnostics — exactly what the Simulate panel would. This run swept.
-  const sheet = buildRunSheet(job, generated, { diagnostics: load.diagnostics, outcome: 'swept' });
+  const sheet = buildRunSheet(job, generated, { diagnostics: load.diagnostics, outcome: 'swept', engine: load.stats.engine });
   if (sheet.header.fileName !== `${stem}.nc`) {
     fail(`run sheet file name drifted: expected ${stem}.nc, got ${sheet.header.fileName}`);
   }

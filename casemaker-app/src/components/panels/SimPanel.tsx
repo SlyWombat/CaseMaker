@@ -508,9 +508,11 @@ export function SimPanel() {
             <span data-testid="sim-placement-badge" title={STUB_TITLE} style={TAG}>
               placement: stub
             </span>
-            {/* Which backend swept this job (#222): the exact 2.5D sweeper or the column engine. */}
+            {/* Which backend swept this job (#222): the exact 2.5D sweeper or the column engine.
+                `stats.engine` is REQUIRED (#405), so no fallback: the two could disagree, and a
+                V-bit trace — swept by the column engine's cone profile — must never read "exact". */}
             <span data-testid="sim-backend" title={BACKEND_TITLE} style={TAG}>
-              backend: {info.stats.engine ?? 'exact'}
+              backend: {info.stats.engine}
             </span>
           </h3>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

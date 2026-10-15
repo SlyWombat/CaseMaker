@@ -15,6 +15,7 @@
 
 import type { MkrRecord } from './gcode/types';
 import { mkrNumber } from './gcode/mkrHeader';
+import { isVShape, grooveRadiusAt, vCone, type VCone } from './vProfile';
 
 export type ToolShape = 'flat' | 'ball' | 'tapered-ball' | 'engraving' | 'chamfer' | 'drill' | 'thread' | 'bull' | 'unknown';
 
@@ -121,6 +122,32 @@ export function toolFromMkrRecord(rec: MkrRecord): Tool {
   };
 }
 
+/**
+ * Is this cutter on Makera's "for Metal" line, as stated by its NAME?
+ *
+ * The line is spelled two ways in a name, and Makera uses both:
+ *
+ *   - the `(Metal)` SUFFIX on a catalogue ROW's name (`3.175*12mm Flat End(Metal)`, the row the
+ *     built-in `flat-3.175x12-metal` was copied from, the convention `catalogue.rs` records, #379
+ *     review). Anchored to the END, so a name that merely mentions metal is not caught;
+ *   - the phrase `for Metal` that the printed BOX LABEL carries (`Single Flute Engraving Bit for
+ *     Metal - 1/8" Shank 60° * 0.1mm`, the maintainer's own 60° engraver). This is the form that
+ *     reaches a JOB: an owned cutter is filed under an `inv:` key with `id = null` and the label's
+ *     text as its name (`toolRegistry.inventoryEntryFor`), so no code is in the `Tool` to read and
+ *     the name is the only statement left. The phrase is matched whole, followed by a delimiter, so
+ *     a name like "for metal-free plastics" is not a claim about the line.
+ *
+ * The line has a THIRD statement — the printed BOX CODE's `-M-` segment (`C1-BIT-ENGRAVE-M-…`, read
+ * by `registerCutter.parseBoxCode`) — which `registerCutter.isMetalTool` asks alongside this one,
+ * for a `Tool` that carries a code as its `id` and a renamed or shortened name. The name reading
+ * lives here alone so the two readers cannot drift about what a name means: two regexes would be
+ * two chances to disagree about which line a cutter is on.
+ */
+export function isMetalCutterName(name: string): boolean {
+  const n = name.trim();
+  return /\(metal\)$/i.test(n) || /\bfor\s+metal\b(?![\w-])/i.test(n);
+}
+
 /** A flat end mill of the given cutting diameter, for tests and for the app's own jobs. */
 export function flatEndMill(cuttingDiameter: number, opts: Partial<Tool> = {}): Tool {
   return {
@@ -187,6 +214,12 @@ export function vendorId(tool: Tool): string | null {
  * The radius the V1 sweep uses, or a refusal naming why. Only a flat end mill qualifies; a
  * flat end mill with a corner radius is a bull nose and is refused too, because its sweep at
  * constant Z is not a capsule.
+ *
+ * This is the EXACT 2.5D sweeper's contract and NOTHING else's (#405). A V-bit has no single
+ * flat radius — its cutting width is a function of depth — so it is refused here by name and
+ * simulated by the column engine's cone profile instead. Lifting THIS refusal is exactly what
+ * the issue's `tool.ts` header forbids ("never simulate a V-bit as a flat end mill"): every
+ * caller that needs a trace-capable cutter asks {@link cuttingForTrace}.
  */
 export function cuttingRadiusForSweep(tool: Tool): RadiusResult {
   if (tool.shape !== 'flat') {
@@ -200,4 +233,61 @@ export function cuttingRadiusForSweep(tool: Tool): RadiusResult {
     return { ok: false, reason: `tool "${tool.name}" has no usable cutting diameter (tipdiameter=${tool.tipDiameter}, diameter=${tool.diameter})` };
   }
   return { ok: true, radius: d / 2 };
+}
+
+/**
+ * The cutter a TRACE path takes (#405): a flat end mill, OR a V-bit whose cone the column engine
+ * can sweep. A trace follows the line, so nothing is offset from it and this is not a sweep
+ * radius in `cuttingRadiusForSweep`'s sense — it is the geometry the two consumers that need it
+ * read: the CAM's validation, and the `columnEngine`'s cone profile.
+ *
+ * `flat` carries the same radius `cuttingRadiusForSweep` would give (a bull nose is still refused,
+ * for the same reason: its constant-Z sweep is not a capsule). `v` carries the CONE — the tip
+ * radius and the flank angle — because that is what a V trace's cut actually depends on.
+ *
+ * A REGION (a label, a shape) is still flat-only: opening a glyph needs ONE cutting width, and a
+ * V-bit's width is a function of depth, so a region item with a V tool is refused by name and the
+ * medial-axis V-carve that would lift it stays in #221. This function does not know which kind of
+ * item asked; the callers that build regions keep asking `cuttingRadiusForSweep`.
+ */
+export type TraceTool = { shape: 'flat'; radius: number } | { shape: 'v'; cone: VCone };
+export type TraceToolResult = { ok: true; tool: TraceTool } | { ok: false; reason: string };
+
+export function cuttingForTrace(tool: Tool): TraceToolResult {
+  if (isVShape(tool)) {
+    const cone = vCone(tool);
+    if (cone === null) {
+      return {
+        ok: false,
+        reason:
+          `tool "${tool.name}" (${tool.typeText || tool.shape}) states no usable cone: a V trace needs a` +
+          ` tip diameter (tipdiameter=${tool.tipDiameter}) and an angle (halfAngle=${tool.halfAngle}, angle=${tool.angle})`,
+      };
+    }
+    return { ok: true, tool: { shape: 'v', cone } };
+  }
+  const flat = cuttingRadiusForSweep(tool);
+  return flat.ok ? { ok: true, tool: { shape: 'flat', radius: flat.radius } } : flat;
+}
+
+/** Is this tool a cone the trace path takes? The one predicate the routing and the findings share. */
+export function isVTraceTool(tool: Tool): boolean {
+  const r = cuttingForTrace(tool);
+  return r.ok && r.tool.shape === 'v';
+}
+
+/**
+ * The half-opening a TRACE with this tool cuts at `depth` below the tip plane, mm — or `null` when
+ * the tool cannot trace at all.
+ *
+ * ONE statement of a question three readers ask (#405): the region a trace's cut sweeps (the void
+ * check's, and the oracle's), the stroke-merge check (#219) and the jaw reach (#369). A flat end
+ * mill's answer does not depend on the depth, which is why the pre-#405 code could carry a single
+ * radius around; a V-bit's does — the groove opens as it deepens — so the depth is an argument and
+ * the callers that know an item's own depth pass it.
+ */
+export function traceRadiusAt(tool: Tool, depth: number): number | null {
+  const r = cuttingForTrace(tool);
+  if (!r.ok) return null;
+  return r.tool.shape === 'v' ? grooveRadiusAt(r.tool.cone, depth) : r.tool.radius;
 }

@@ -2,23 +2,51 @@
 // pin its shape, the two refusals (no row; step-over past the radius) and the machine clamp.
 
 import { describe, it, expect } from 'vitest';
-import { FEEDS_TABLE, feedsFor } from '@/engine/cnc/feeds';
+import { FEEDS_TABLE, feedsFor, type FeedsEntry } from '@/engine/cnc/feeds';
 import { flatEndMill, cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { Z1, CLAMP_REFUSE_FRACTION } from '@/engine/cnc/machine';
 
-/** A cutter for a row, in the middle of its range, so the row is unambiguous. */
-function cutterFor(minDiameter: number, maxDiameter: number) {
-  return flatEndMill((minDiameter + maxDiameter) / 2);
+/**
+ * A cutter that lands in a row's range, on the row's OWN edge (#405): a row states the edge its
+ * numbers were written for, and a V-bit's numbers are not a flat end mill's, so a flat cutter built
+ * to the V row's diameter would resolve against a different row — or none.
+ */
+function cutterFor(row: FeedsEntry) {
+  const mid = (row.minDiameter + row.maxDiameter) / 2;
+  return (row.edge ?? 'flat') === 'v'
+    ? flatEndMill(mid, { shape: 'engraving', typeText: 'Engraving', tipDiameter: mid, diameter: 3.175, halfAngle: 15, angle: 30 })
+    : flatEndMill(mid);
+}
+
+/** The 30° × 0.3 mm engraving bit — the text job's default cutter (#405). */
+function vBit30(tip: number) {
+  return flatEndMill(tip, {
+    name: 'Single Flute Engraving Bit 30 x 0.3',
+    typeText: 'Engraving',
+    shape: 'engraving',
+    tipDiameter: tip,
+    diameter: 3.175,
+    halfAngle: 15,
+    angle: 30,
+  });
 }
 
 describe('the V1 feeds table', () => {
-  it('is entirely unmeasured and carries its provenance', () => {
+  it('is entirely unmeasured, and every row names its own source', () => {
     expect(FEEDS_TABLE.length).toBeGreaterThan(0);
     for (const row of FEEDS_TABLE) {
       expect(row.status).toBe('unmeasured');
-      expect(row.provenance).toContain('Starting value');
-      expect(row.provenance).toContain('#209');
-      expect(row.provenance).toContain('TopClamp.nc');
+      // #405 splits this: the V row's numbers come from a BENCH CUT on the machine
+      // (`docs/bench/185-v-groove.nc`), not from Studio's own sample, so one provenance string for
+      // the whole table is no longer the truth.
+      if ((row.edge ?? 'flat') === 'v') {
+        expect(row.provenance).toContain('#185');
+        expect(row.provenance).toContain('185-v-groove.nc');
+      } else {
+        expect(row.provenance).toContain('Starting value');
+        expect(row.provenance).toContain('#209');
+        expect(row.provenance).toContain('TopClamp.nc');
+      }
     }
   });
 
@@ -32,8 +60,8 @@ describe('the V1 feeds table', () => {
   it('every row resolves for a cutter in its range, with NO diagnostics on the Z1', () => {
     // The table itself must never need clamping: it is written for this machine (#184, #202).
     for (const row of FEEDS_TABLE) {
-      const res = feedsFor([], row.material, cutterFor(row.minDiameter, row.maxDiameter), Z1);
-      expect(res.ok, `${row.material} ${row.minDiameter}-${row.maxDiameter}`).toBe(true);
+      const res = feedsFor([], row.material, cutterFor(row), Z1);
+      expect(res.ok, `${row.material} ${row.edge ?? 'flat'} ${row.minDiameter}-${row.maxDiameter}`).toBe(true);
       if (!res.ok) continue;
       expect(res.entry).toBe(row);
       expect(res.diagnostics).toEqual([]);
@@ -105,6 +133,67 @@ describe('feedsFor selects a row by cutting diameter', () => {
     expect(expected.ok).toBe(false);
     if (expected.ok) throw new Error('expected a refusal');
     expect(res.reason).toBe(expected.reason);
+  });
+});
+
+describe('feedsFor and the V-bit row (#405)', () => {
+  it('PLA + the 30° × 0.3 mm engraving bit -> the V row: S12000, F500 along, F200 plunge, one 1 mm pass', () => {
+    const res = feedsFor([], 'pla', vBit30(0.3), Z1);
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.entry.edge).toBe('v');
+    expect(res.entry.material).toBe('pla');
+    // The hand-written bench file's own numbers (`docs/bench/185-v-groove.nc`), which the
+    // 2026-10-15 cut confirmed: this row starts where a cut known to have worked started.
+    expect(res.params.rpm).toBe(12000);
+    expect(res.params.feed).toBe(500);
+    expect(res.params.plungeFeed).toBe(200);
+    // One pass to the 1.0 mm colour-reveal depth: stepDown = depth means `zPasses` returns one pass.
+    expect(res.params.stepDown).toBe(1.0);
+    // The provenance is the bench cut, and it says it is a STARTING value, not a coupon result.
+    expect(res.entry.provenance).toContain('185-v-groove.nc');
+    expect(res.entry.provenance).toContain('#284');
+  });
+
+  it('selects on the EDGE: a 0.4 mm flat end mill takes the V row for nothing', () => {
+    // The V row's range (0.3–0.5 mm) covers the flat's diameter, and its numbers were written for
+    // a cutter that engages its flank. Were the edge not part of selection, this flat end mill
+    // would run a cone's feed. It has no flat PLA row at 0.4 mm, so the honest answer is a refusal.
+    const flat = flatEndMill(0.4);
+    const res = feedsFor([], 'pla', flat, Z1);
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('expected a refusal');
+    expect(res.reason).toContain('0.4 mm');
+  });
+
+  it('refuses a V-bit in a material with no V row, and says which row is missing', () => {
+    const res = feedsFor([], 'softwood', vBit30(0.3), Z1);
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('expected a refusal');
+    // Not the flat cutter's "no row in this range" sentence: a cone is never asked of the vendor
+    // table at all (#405), so the refusal names the missing row rather than a tier that would
+    // never have answered.
+    expect(res.reason).toContain('V-bit');
+    expect(res.reason).toContain('PLA only');
+  });
+
+  it('refuses the metal bit’s 0.1 mm tip: outside every V row, so no numbers, no job', () => {
+    // The 60° bit is a METAL cutter (the `(Metal)` line by name). Its 0.1 mm tip falls outside the
+    // V row's 0.3–0.5 mm range — a tip, not a shank — so a PLA job on it is refused rather than
+    // handed a feed invented for a different cone. Supporting the geometry is not licensing the job.
+    const metal = flatEndMill(0.1, {
+      name: 'Engraving V-bit 60° 0.1 (Metal)',
+      typeText: 'Engraving',
+      shape: 'engraving',
+      tipDiameter: 0.1,
+      diameter: 3.175,
+      halfAngle: 30,
+      angle: 60,
+    });
+    const res = feedsFor([], 'pla', metal, Z1);
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('expected a refusal');
+    expect(res.reason).toContain('V-bit');
   });
 });
 

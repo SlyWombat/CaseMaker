@@ -8,10 +8,12 @@
  *
  * Consequently this module needs NO `ManifoldToplevel`, and takes no `tl`: nothing here evaluates
  * geometry, so a trace toolpath is a pure function of the paths and the feeds — which is also why
- * it can be tested without the wasm harness. The tool is still validated with
- * `cuttingRadiusForSweep` (the same contract as `generateEngrave`) so a V-bit — whose cutting
- * width depends on depth and so cannot satisfy the "one cutter wide" promise — is refused; for a
- * flat end mill the radius is otherwise unused, because nothing is ever offset.
+ * it can be tested without the wasm harness. The tool is still validated with `cuttingForTrace`:
+ * a flat end mill of any diameter, or — since #405 — a V-BIT, whose cut the column engine models as
+ * a cone. A V trace is exactly the case the "one cutter wide" promise never covered, which is why
+ * the groove's width is a function of depth and lives in `vProfile.ts` rather than here; a ball or
+ * bull nose is still refused by name. For a flat end mill the radius is otherwise unused, because
+ * nothing is ever offset.
  *
  * CONVENTIONAL vs CLIMB is meaningless here: the cutter is on the line, and it cuts both walls of
  * the groove in one pass, so there is no "inside" to walk. `MILLING` (`engraveJob.ts`) applies to
@@ -25,7 +27,7 @@
 
 import type { Mm } from '@/types/units';
 import type { CutParams } from '../feeds';
-import { cuttingRadiusForSweep, type Tool } from '../tool';
+import { cuttingForTrace, type Tool } from '../tool';
 import { zPasses } from './engraveJob';
 import {
   estimateCycleSeconds,
@@ -140,9 +142,9 @@ function buildTraceMoves(trace: TracePaths, params: CutParams): CamMove[] {
 /**
  * The toolpath IR for a set of traces.
  *
- * `traces` are `PartPlan.traces` in document order; `tool` must be a plain flat end mill
- * (`cuttingRadiusForSweep`), and `params` arrive from `feedsFor` (#202) — this module owns no
- * feeds, RPM or step values. `rapid` is the machine's rapid model for the operation's
+ * `traces` are `PartPlan.traces` in document order; `tool` must be one `cuttingForTrace` accepts —
+ * a flat end mill, or a V-bit (#405) — and `params` arrive from `feedsFor` (#202) — this module owns
+ * no feeds, RPM or step values. `rapid` is the machine's rapid model for the operation's
  * `estimatedSeconds` (#281), required and placed before `order` for the reason `generateEngrave`
  * states. `order` is the ordering strategy; only `'nearest'` exists in V1, matching
  * `generateEngrave`.
@@ -154,8 +156,8 @@ export function generateTrace(
   rapid: RapidEstimate,
   order: 'nearest' = 'nearest',
 ): ToolpathIR {
-  const radiusResult = cuttingRadiusForSweep(tool);
-  if (!radiusResult.ok) throw new Error(`generateTrace: ${radiusResult.reason}`);
+  const usable = cuttingForTrace(tool);
+  if (!usable.ok) throw new Error(`generateTrace: ${usable.reason}`);
   const toolNumber = toolNumberFor(tool);
 
   const strategies: Record<'nearest', (items: readonly TracePaths[]) => TracePaths[]> = {

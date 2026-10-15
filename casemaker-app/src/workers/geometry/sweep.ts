@@ -149,12 +149,14 @@ export interface SweepStats {
   contours: number;
   ms: { union2d: number; extrude: number; subtract: number; airCheck: number; total: number };
   /**
-   * Which backend produced these numbers (#239, `/Rotary.md` §5.5). Absent means the EXACT 2.5D
-   * sweep, whose numbers carry no sampling error; `'column'` means the sampled column engine,
-   * whose every number is only meaningful together with `resolution`. Set explicitly by the
-   * column engine so a reader never has to guess which confidence to attach.
+   * Which backend produced these numbers (#239, `/Rotary.md` §5.5, #405). REQUIRED: the exact 2.5D
+   * sweep sets `'exact'`, whose numbers carry no sampling error, and the sampled column engine sets
+   * `'column'`, whose every number is only meaningful together with `resolution`. It used to be
+   * optional with "absent means exact"; #405 made it required so that a reader is told the
+   * authority for a V-bit's cut — which only the column engine can produce — rather than inferring
+   * it from a missing field.
    */
-  engine?: 'exact' | 'column';
+  engine: 'exact' | 'column';
   /**
    * The column engine's sampled grid (#239): spacing along the stock axis (`dx`, mm) and around
    * it (`dThetaDeg`, degrees). Present only when `engine === 'column'`. A column-engine number
@@ -1126,6 +1128,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         checkpointsSwept: solids.length,
         checkpointsSkipped: skipped,
         contours,
+        engine: 'exact',
         ms: { union2d: msUnion, extrude: msExtrude, subtract: msSubtract, airCheck: msAir, total: performance.now() - t0 },
       },
       diagnostics,

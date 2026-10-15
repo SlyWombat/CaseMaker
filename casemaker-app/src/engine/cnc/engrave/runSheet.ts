@@ -131,6 +131,12 @@ export interface RunSheetSim {
    * blind-spot sentence the same way the Simulate panel does.
    */
   outcome?: SimRunOutcome;
+  /**
+   * #405 — which backend swept the material (`SimLoadOk.stats.engine`): `'exact'` or `'column'`.
+   * Carried so the coverage disclaimer can say a sampled column sweep's numbers carry a grid
+   * resolution (a rotary job, or a V-bit trace). Omitted when the caller did not load one.
+   */
+  engine?: 'exact' | 'column';
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -820,6 +826,7 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
   const envelope = viseEnvelope(job.stock, job.workholding.vise, job.sacrificial);
   return {
     outcome: sim?.outcome ?? 'swept',
+    engine: sim?.engine,
     fixtureLabels: envelope.boxes.map((b) => b.label),
     fixtureSource: envelope.source,
     sacrificialModelled: hasSacrificial(job.sacrificial),
@@ -1400,12 +1407,24 @@ export function buildRunSheet(
   // ---- 7 · Cut -------------------------------------------------------------------------------
   const cutSteps: RunSheetStep[] = [];
   if (params !== null) {
+    // #405 — A TRACE-ONLY JOB DOES NOT STEP OVER. A trace puts the cutter ON the line: there are
+    // no contour-parallel loops, so nothing is ever stepped over, and the `stepOverFraction` a V
+    // row has to carry for `CutParams`'s sake is inert (see the PLA V row in `feeds.ts`). Printing
+    // a step-over here would hand the operator a number for a cut the program never makes — and
+    // for a V bit it is the TIP's fraction of the TIP (0.45 × 0.3 mm), which reads like a real
+    // pitch. A job with any region item keeps the full line: those loops DO step over.
+    const traceOnly =
+      items.length === 0 && (job.traces?.some((t) => t.enabled && !t.construction) ?? false);
     cutSteps.push({
-      text: `Spindle, feed, plunge, passes and step-down. Vacuum ${params.air ? 'on' : 'off'}.`,
-      value:
-        `${params.rpm} RPM · ${fmtNum(params.feed)} mm/min feed · ${fmtNum(params.plungeFeed)} mm/min ` +
-        `plunge · ${generated.cam?.passes ?? 1} × ${fmtNum(params.stepDown)} mm passes · ` +
-        `${fmtNum(params.stepOver)} mm step-over`,
+      text: traceOnly
+        ? `Spindle, feed and plunge. Vacuum ${params.air ? 'on' : 'off'}.`
+        : `Spindle, feed, plunge, passes and step-down. Vacuum ${params.air ? 'on' : 'off'}.`,
+      value: traceOnly
+        ? `${params.rpm} RPM · ${fmtNum(params.feed)} mm/min feed · ${fmtNum(params.plungeFeed)} mm/min ` +
+          'plunge · a single stroke on every line, cut straight to depth — no step-over'
+        : `${params.rpm} RPM · ${fmtNum(params.feed)} mm/min feed · ${fmtNum(params.plungeFeed)} mm/min ` +
+          `plunge · ${generated.cam?.passes ?? 1} × ${fmtNum(params.stepDown)} mm passes · ` +
+          `${fmtNum(params.stepOver)} mm step-over`,
     });
   } else {
     cutSteps.push({ text: 'Cutting parameters were not resolved for this job.' });

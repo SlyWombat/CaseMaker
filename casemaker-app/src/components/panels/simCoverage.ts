@@ -20,6 +20,13 @@ export type SimRunOutcome = 'swept' | 'path-only' | 'refused';
 export interface SimCoverageInput {
   outcome: SimRunOutcome;
   /**
+   * Which backend swept the material (#222/#405): the exact 2.5D boolean sweeper (`'exact'`) or the
+   * sampled column engine (`'column'`). Undefined means the caller did not say — the disclaimer
+   * makes no claim about the backend then. A `'column'` sweep is stated because its numbers carry a
+   * grid resolution the exact sweeper's do not, and since #405 a V-bit trace is swept that way.
+   */
+  engine?: 'exact' | 'column';
+  /**
    * Labels of the fixture obstacles the sweep was given (#204), in order. Empty means no fixture
    * was modelled — the default setup, where `fixture-unchecked` reports the workholding is not an
    * obstacle yet.
@@ -53,6 +60,15 @@ export function coverageDisclaimer(input: SimCoverageInput): string[] {
     if (input.sacrificialModelled) obstacles.push('the sacrificial material');
     if (input.fixtureLabels.length > 0) obstacles.push(`the modelled fixture (${input.fixtureLabels.join(', ')})`);
     out.push(`Checked: the tool against ${joinAnd(obstacles)}.`);
+
+    // #405 — a rotary job or a V-bit trace keeps its material as a sampled grid, so its numbers
+    // carry a resolution the exact boolean sweeper's do not. The claim is about the NUMBERS, not a
+    // blind spot, so it sits with `Checked:` rather than `Not checked:`.
+    if (input.engine === 'column') {
+      out.push(
+        'The material was swept by the sampled column engine, not the exact 2.5D boolean, so its removed volume and gouge depths carry a grid resolution.',
+      );
+    }
 
     const blind: string[] = [
       'the spindle body, head and gantry',

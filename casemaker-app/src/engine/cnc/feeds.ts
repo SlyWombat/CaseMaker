@@ -73,7 +73,7 @@
  */
 
 import { z } from 'zod';
-import { cuttingRadiusForSweep, vendorId } from './tool';
+import { cuttingForTrace, vendorId } from './tool';
 import type { Tool } from './tool';
 import { clampToMachine } from './machine';
 import type { ClampDiagnostic, MillProfile } from './machine';
@@ -131,7 +131,18 @@ export interface FeedsMeasurement {
 
 export interface FeedsEntry {
   material: StockMaterial;
-  /** Applies to flat end mills with cutting diameter in [minDiameter, maxDiameter], mm. */
+  /**
+   * The cutter's EDGE the row is written for (#405): a flat end mill, or a V-bit's cone. Absent
+   * means `'flat'` — every row before #405, and every coupon, which cuts with a flat end mill.
+   *
+   * It is part of SELECTION, not a comment: the numbers a cone wants are not the numbers a flat end
+   * wants. A V-bit cuts with its flank, engages a fraction of the material a same-diameter flat end
+   * does and is asked for a different step-down, so a V-bit resolving against a flat row would run
+   * a feed that was measured for a cutter it is not. The two rows also cover different diameters:
+   * a cutter's cutting diameter is its tip here, not the shank.
+   */
+  edge?: 'flat' | 'v';
+  /** Applies to cutters with cutting diameter in [minDiameter, maxDiameter], mm. */
   minDiameter: number;
   maxDiameter: number;
   /**
@@ -232,6 +243,34 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.5, stepOverFraction: 0.45, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance: PROVENANCE,
+  },
+  {
+    // The V-BIT row (#405), for the single-stroke text job. Its numbers are the hand-written bench
+    // file `docs/bench/185-v-groove.nc`'s own — S12000, F500 along, F200 plunge, ONE PASS to depth
+    // — and the bench cut on 2026-10-15 confirmed them in a PLA blank (the 0.836 mm groove at
+    // d = 1.0, #185). They are deliberately no more aggressive than that file: this row starts
+    // where a cut that is known to have worked started, and a coupon is what raises it (#248).
+    //
+    // The diameter range covers the engraving bits' TIPS (0.3 and 0.5 mm) — a tip, not a shank:
+    // Makera writes 3.175 into `diameter` for these, and a row keyed on the shank would answer for
+    // a cutter it has never seen. A metal bit's 0.1 mm tip therefore falls OUTSIDE every V row and
+    // the job is refused for want of cutting parameters, which is the honest answer for a cutter
+    // whose numbers nobody has.
+    //
+    // `stepOverFraction` is carried because `CutParams` requires it, and it is INERT here: a trace
+    // puts the cutter on the line, so nothing is ever stepped over. `stepDown` is 1.0 — one pass to
+    // the colour-reveal depth the text job cuts at — and a deeper job simply takes a second pass.
+    material: 'pla',
+    edge: 'v',
+    minDiameter: 0.3,
+    maxDiameter: 0.5,
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: 0.45, peckFraction: 1.0, air: true },
+    status: 'unmeasured',
+    provenance:
+      'From the 2026-10-15 bench cut (#185, `docs/bench/185-v-groove.nc`): the hand file\'s own ' +
+      'numbers — S12000, F500 along, F200 plunge, one pass to depth — cut a clean V groove in PLA ' +
+      '(0.836 mm opening at 1.0 mm deep, the 30° × 0.3 mm bit). Starting values, not a coupon ' +
+      'measurement: #284 is what measures this row.',
   },
 ];
 
@@ -687,13 +726,27 @@ function entryFor(
   diameter: number,
   machine: MillProfile,
   table: readonly FeedsEntry[],
+  edge: 'flat' | 'v',
 ): EntryChoice {
   const entry = table.find(
-    (e) => e.material === material && diameter >= e.minDiameter && diameter <= e.maxDiameter,
+    (e) => e.material === material && (e.edge ?? 'flat') === edge && diameter >= e.minDiameter && diameter <= e.maxDiameter,
   );
   if (entry) return { ok: true, entry, catalogueOnly: false };
-  if (table.some((e) => e.material === material)) {
-    return { ok: false, reason: `no cutting parameters for a ${diameter} mm cutter in ${material}` };
+  if (table.some((e) => e.material === material && (e.edge ?? 'flat') === edge)) {
+    return { ok: false, reason: `no cutting parameters for a ${diameter} mm ${edge === 'v' ? 'V-bit' : 'cutter'} in ${material}` };
+  }
+  // A V-bit with no row for its MATERIAL at all: the vendor's catalogue cannot answer it either —
+  // Makera's rows are keyed by `g_ID` and state a flat end mill's numbers, and a cone's cutting
+  // properties are not one of `CATALOGUE_FIELDS` (#405). So the refusal says which row is missing
+  // rather than marching the cutter through a tier that was never written for it.
+  if (edge === 'v') {
+    return {
+      ok: false,
+      reason:
+        `no cutting parameters for a ${diameter} mm V-bit in ${MATERIAL_LABELS[material]}: the starting ` +
+        `table has a V-bit row for PLA only, and ${CATALOGUE_LABEL} states a flat end mill's numbers, ` +
+        `never a cone's. Pick PLA, or a flat end mill for this material.`,
+    };
   }
 
   const label = MATERIAL_LABELS[material];
@@ -781,11 +834,14 @@ export type FeedsResult =
 /**
  * Resolve the cutting parameters for a material and a tool, or refuse with a reason.
  *
- * The tool must be one `cuttingRadiusForSweep` accepts — a plain flat end mill — because V1
- * sweeps nothing else (`tool.ts`). The cutter's diameter selects a row; no row means no cut — with
- * one exception, and it is a MATERIAL's (#347): a material the starting table has no row for at all
- * is answered by the user's own catalogue row (`entryFor`, Route A), which then stands ALONE, so a
- * vendor number this job cannot use refuses the job instead of being passed over.
+ * The tool must be one `cuttingForTrace` accepts — a flat end mill, or a V-bit (#405) — because
+ * those are the cutters this app can generate a toolpath for (`tool.ts`). The cutter's cutting
+ * diameter selects a row: for a flat end mill the diameter, for a V-bit its TIP, since a cone's
+ * shank is not what cuts. The row is matched on the cutter's EDGE as well as its material and
+ * diameter, so a cone can never resolve to a flat end mill's numbers and vice versa. No row means no
+ * cut — with one exception, and it is a MATERIAL's (#347): a material the starting table has no row
+ * for at all is answered by the user's own catalogue row (`entryFor`, Route A), which then stands
+ * ALONE, so a vendor number this job cannot use refuses the job instead of being passed over.
  *
  * THE TIERS, in the order this function consults them (#310's precedence, minus the rung that has
  * no writer yet): the row a coupon measured answers alone; otherwise Makera's catalogue answers —
@@ -818,11 +874,16 @@ export function feedsFor(
   table: readonly FeedsEntry[] = FEEDS_TABLE,
 ): FeedsResult {
   const snapshot = catalogueOf(catalogue);
-  const radius = cuttingRadiusForSweep(tool);
-  if (!radius.ok) return { ok: false, reason: radius.reason };
-  const diameter = radius.radius * 2;
+  // The cutter, in the table's terms: a flat end mill of some diameter, or a V-bit whose cutting
+  // diameter is its TIP (#405). `cuttingForTrace` refuses anything no CAM here can cut with, which
+  // is the same refusal `cuttingRadiusForSweep` made before it — a ball nose, a bull nose, or a
+  // cone whose header states no tip or angle.
+  const usable = cuttingForTrace(tool);
+  if (!usable.ok) return { ok: false, reason: usable.reason };
+  const edge: 'flat' | 'v' = usable.tool.shape === 'v' ? 'v' : 'flat';
+  const diameter = usable.tool.shape === 'v' ? usable.tool.cone.tipRadius * 2 : usable.tool.radius * 2;
 
-  const choice = entryFor(snapshot, material, tool, diameter, machine, table);
+  const choice = entryFor(snapshot, material, tool, diameter, machine, table, edge);
   if (!choice.ok) return { ok: false, reason: choice.reason };
   const { entry, catalogueOnly } = choice;
 
@@ -882,11 +943,15 @@ export function feedsFor(
   }
 
   // #191: contour-parallel loops further apart than the radius leave an uncut spine. Refuse,
-  // never clamp silently.
-  if (params.stepOver > radius.radius) {
+  // never clamp silently. The radius here is the cutting radius at the blank's surface — for a V
+  // bit that is its tip (the width it opens grows with depth, but a step-over that leaves a spine
+  // is measured against the widest the loop's own pitch can reach, and it is the tip a `v` row's
+  // `stepOverFraction` is a fraction of).
+  const toolRadius = diameter / 2;
+  if (params.stepOver > toolRadius) {
     return {
       ok: false,
-      reason: `step-over ${params.stepOver} mm exceeds the ${radius.radius} mm radius of the ${diameter} mm cutter: contour-parallel loops would leave an uncut spine (#191), and an override that leaves material is refused rather than clamped`,
+      reason: `step-over ${params.stepOver} mm exceeds the ${toolRadius} mm radius of the ${diameter} mm cutter: contour-parallel loops would leave an uncut spine (#191), and an override that leaves material is refused rather than clamped`,
     };
   }
 

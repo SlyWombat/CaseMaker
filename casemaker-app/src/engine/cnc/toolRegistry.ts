@@ -28,7 +28,7 @@
  * obstacles use (`/Fabrication.md` decision 28).
  */
 
-import { cuttingRadiusForSweep, type Tool } from './tool';
+import { traceRadiusAt, type Tool } from './tool';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from './toolLibrary';
 import type { Mm } from '@/types/units';
 
@@ -142,20 +142,28 @@ export function toolForJob(job: ToolNamingJob, entries: readonly ToolLibraryEntr
  * The radius the JOB's cutter sweeps in XY, mm — the disc of material the toolpath removes, read
  * from the same `toolForJob` every other reader asks (#369).
  *
- * `0` when the job names no tool, or names one the V1 sweep refuses: a ball nose, a V-bit or a
- * bull nose has no single flat radius (`cuttingRadiusForSweep`), and neither does a missing entry.
- * 0 is the honest number for a FOOTPRINT — a cutter the app cannot sweep is not a cutter with a
- * smaller radius — and it is not a silent hole: the job is refused for `tool-missing`, or for the
- * sweep's own reason, long before anything is cut.
+ * `depth` is the cut's own depth below the top face, mm, and only a V-bit's answer depends on it
+ * (#405): a cone's footprint at its tip plane is the tip, and opens as it deepens, so the honest
+ * radius for a footprint is the groove's half-opening AT THAT DEPTH (`grooveRadiusAt`). A flat end
+ * mill ignores it. The default of 0 is the tip — the narrowest a V-bit cuts, and the right answer
+ * for a reader that has no depth to hand.
+ *
+ * `0` when the job names no tool, or names one the trace path refuses: a ball nose, or a bull nose
+ * has no single flat radius (`cuttingRadiusForSweep`), and neither does a missing entry. 0 is the
+ * honest number for a FOOTPRINT — a cutter the app cannot sweep is not a cutter with a smaller
+ * radius — and it is not a silent hole: the job is refused for `tool-missing`, or for the sweep's
+ * own reason, long before anything is cut.
  *
  * More than one field wants this, exactly as they want `cuttingDiameter`: the reach the jaw floor
- * applies over (`partPlan.labelJawReach`), and #219's stroke-merge check in `validateJob`.
+ * applies over (`partPlan.labelJawReach`), and #219's stroke-merge check, which asks
+ * `traceRadiusAt` for itself because it judges each trace at that trace's own depth.
  */
-export function sweepRadiusForJob(job: ToolNamingJob): Mm {
+export function sweepRadiusForJob(job: ToolNamingJob, depth: Mm = 0): Mm {
   const tool = toolForJob(job, getTools());
   if (!tool) return 0;
-  const r = cuttingRadiusForSweep(tool);
-  return r.ok ? r.radius : 0;
+  // `traceRadiusAt` answers for both shapes: a flat end mill's radius, or a cone's half-opening at
+  // this depth. `null` is a cutter neither the sweep nor a trace can use.
+  return traceRadiusAt(tool, depth) ?? 0;
 }
 
 /** `resolveTool` against a list handed in, for a caller that has one (the workers). */

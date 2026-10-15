@@ -242,7 +242,7 @@ describe('trace model (#219)', () => {
     const job = {
       traces: [line({ id: 'u', points: [[0, 0], [0, 10], [0.8, 10], [0.8, 0]] })],
     } as unknown as EngraveJob;
-    const findings = traceSelfOverlapFindings(job, R);
+    const findings = traceSelfOverlapFindings(job, () => R);
     expect(findings).toHaveLength(1);
     expect(findings[0]!.code).toBe('trace-self-overlap');
     expect(findings[0]!.severity).toBe('warning');
@@ -251,7 +251,7 @@ describe('trace model (#219)', () => {
     const clear = {
       traces: [line({ id: 'c', points: [[0, 0], [0, 10], [1.2, 10], [1.2, 0]] })],
     } as unknown as EngraveJob;
-    expect(traceSelfOverlapFindings(clear, R)).toHaveLength(0);
+    expect(traceSelfOverlapFindings(clear, () => R)).toHaveLength(0);
   });
 
   it("predicted region of an 'L' is rounded at the elbow, with the capsule's area", () => {

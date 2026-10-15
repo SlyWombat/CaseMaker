@@ -45,7 +45,7 @@ const READY = {
   ok: true,
   diagnostics: CAPPED,
   summary: { diagnosticCounts: { 'outside-envelope': 30 } },
-  stats: { removedVolume: 1284.6, ms: { total: 840 } },
+  stats: { engine: 'exact', removedVolume: 1284.6, ms: { total: 840 } },
   count: 10,
   meshes: { stock: {}, result: {}, removal: null, gouges: [] },
 } as unknown as SimLoadResult;
@@ -389,7 +389,7 @@ describe('SimPanel', () => {
       fireEvent.click(screen.getByTestId('sim-simulate'));
     });
     await screen.findByTestId('sim-result');
-    // READY carries no `stats.engine`, so the badge reads the exact default.
+    // READY reports the exact sweeper's own `stats.engine`, which is the field the badge reads.
     expect(screen.getByTestId('sim-backend').textContent).toContain('exact');
     expect(screen.queryByTestId('sim-axis-clamped')).toBeNull();
   });

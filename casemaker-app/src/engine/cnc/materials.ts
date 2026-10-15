@@ -69,3 +69,18 @@ export const MATERIAL_LABELS: Readonly<Record<StockMaterial, string>> = {
   brass: 'Brass',
   copper: 'Copper',
 };
+
+/**
+ * Is this a metal? The four metals in {@link STOCK_MATERIALS}, listed rather than derived from the
+ * string — a name is not a category, and `aluminium-6061` beginning with a letter that once meant
+ * "metal" is a coincidence nobody should have to preserve (#405).
+ *
+ * It exists because ONE question needs it: a cutter ground for metal is not the cutter for a plastic
+ * or a wood, which is a statement about the PAIR and so cannot live on either side alone. Makera
+ * states the cutter's half in the cutter's name — `(Metal)` on a catalogue row, `for Metal` on the
+ * printed label (`isMetalCutterName`) — and the printed box code adds a third statement; this is the
+ * blank's half.
+ */
+export function isMetalMaterial(material: StockMaterial): boolean {
+  return material === 'aluminium-6061' || material === 'aluminium-7075' || material === 'brass' || material === 'copper';
+}

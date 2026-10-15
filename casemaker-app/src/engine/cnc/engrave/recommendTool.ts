@@ -5,6 +5,12 @@
  * losing detail.** A larger cutter is stiffer, clears faster and breaks less; the only reason
  * to go smaller is that the text needs it — which is exactly what #201 measures.
  *
+ * TRACES WIDEN THE FIELD (#405). A job whose enabled items are all TRACES (a `line` or a
+ * `stroke-label` — a line the cutter follows, `#219`) may also be cut by a V-bit, whose groove is a
+ * function of depth and so is exactly a single-stroke line. A V-bit stays excluded the moment the
+ * job holds a REGION item: opening a glyph needs one cutting width, and a cone's width grows with
+ * depth, so the medial-axis V-carve that would lift that refusal stays in #221.
+ *
  * This module is PURE: it is handed the per-candidate measurements (`measure`) and never
  * touches Manifold. That is what makes the rule testable without wasm, and it is why the type
  * and the ratio threshold come from #201 rather than being re-declared here — the rule and
@@ -29,7 +35,7 @@
 
 import { feedsFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { cuttingDiameter, cuttingRadiusForSweep } from '@/engine/cnc/tool';
+import { cuttingDiameter, cuttingForTrace } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveAnyItem, EngraveJob } from '@/types/engraveJob';
 import { LOST_DETAIL_RATIO, type LabelEngravability } from '@/workers/sim/engraveGeometry';
@@ -157,7 +163,7 @@ function compromiseReason(job: EngraveJob, pick: ToolCandidate): string {
 function noCandidateReason(toolCount: number): string {
   return toolCount === 0
     ? 'There are no cutters in the tool list to recommend from.'
-    : 'No cutter in the list is a flat end mill with cutting parameters for this material.';
+    : 'No cutter in the list is a flat end mill (or, for a trace-only job, a V-bit) with cutting parameters for this material.';
 }
 
 /**
@@ -183,6 +189,13 @@ export function recommendTool(
   const deepest = ([...job.labels, ...job.shapes, ...(job.combined ?? [])] as EngraveAnyItem[])
     .filter((item) => item.enabled)
     .reduce((max, item) => Math.max(max, item.depth), 0);
+  // #405 — a job whose enabled items are all TRACES (its region lists are empty) may take a V-bit;
+  // one that holds a region item may not (opening a glyph needs a single cutting width). Traces live
+  // in their own list (#219), so "has a region" is any enabled item in the four region lists — an
+  // imported vector outline (#217) included.
+  const hasRegions = ([...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])] as EngraveAnyItem[]).some(
+    (item) => item.enabled,
+  );
 
   const candidates: ToolCandidate[] = tools.map((entry) => {
     const tool = entry.tool;
@@ -193,8 +206,13 @@ export function recommendTool(
     const reachOk = reach === null || deepest <= reach;
     const base = { key: entry.key, diameter, worst: null, reachKnown, reachOk } as const;
 
-    const radius = cuttingRadiusForSweep(tool);
-    if (!radius.ok) return { ...base, qualifies: false, excluded: 'not-flat' as const };
+    const usable = cuttingForTrace(tool);
+    if (!usable.ok) return { ...base, qualifies: false, excluded: 'not-flat' as const };
+    // A V-bit is a trace-only cutter: its width is a function of depth, so a region item (a glyph to
+    // open) cannot be cut by one and it is excluded by the same name a non-flat cutter always was.
+    if (usable.tool.shape === 'v' && hasRegions) {
+      return { ...base, qualifies: false, excluded: 'not-flat' as const };
+    }
     // #347 — the JOB's machine. The profile only supplies the clamp ceilings here, which no
     // calibration touches, so this needs no saved frame to be right.
     if (!feedsFor(catalogue, job.stock.material, tool, jobMachine(job)).ok) {
@@ -217,7 +235,7 @@ export function recommendTool(
       }
     }
 
-    return { ...base, diameter: radius.radius * 2, qualifies: ratioOk && reachOk, worst };
+    return { ...base, qualifies: ratioOk && reachOk, worst };
   });
 
   const eligible = candidates.filter((c) => c.excluded === undefined);

@@ -40,10 +40,51 @@ import type { Timeline, Checkpoint } from '@/engine/cnc/emulator/timeline';
 import { partToWork } from '@/engine/cnc/frames';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import type { Setup } from '@/engine/cnc/setup';
-import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
+import { cuttingForTrace, type Tool } from '@/engine/cnc/tool';
 import type { NodeMeshOutput } from './meshOutput';
 import type { SweepDiagnostic, SweepStats } from './sweep';
 import { MAX_AIR_CHECKS, MAX_GOUGES } from './sweep';
+
+/**
+ * The cutter a column sweep removes material with (#405).
+ *
+ * A FLAT end mill is a disc of `radius` at the tip plane — the whole of V1 until #405. A V-bit is
+ * a CONE: the same flat tip of `radius`, then a flank rising at `1/tanHalf` away from the axis, so
+ * the floor a move leaves at a column depends on how far that column is from the tool's path. The
+ * exact 2.5D sweeper has no form for that (`cuttingRadiusForSweep` refuses it by name); here it is
+ * a height profile over the disc, which is exactly what a column grid holds.
+ */
+export interface ColumnCutter {
+  /** Cutting radius at the tip plane, mm. */
+  radius: number;
+  /** The cone's rise per mm of radial distance, or `null` for a flat end (a level floor). */
+  tanHalf: number | null;
+}
+
+/** The surface a column at radial distance `rho` from the tool axis is left at: tip Z + this. */
+export function surfaceAboveTip(cutter: ColumnCutter, rho: number): number {
+  if (cutter.tanHalf === null) return rho <= cutter.radius ? 0 : Infinity;
+  const h = (rho - cutter.radius) / cutter.tanHalf;
+  return h > 0 ? h : 0;
+}
+
+/**
+ * The furthest a cutter can reach in XY from its own axis when its tip sits `aboveTip` mm below
+ * the stock's top: the tip radius for a flat end, and the radius at which the cone's flank meets
+ * the top face for a V-bit. The loop bounds and the grid's padding both need it.
+ *
+ * THE INVERSE OF {@link surfaceAboveTip}, not another reading of it (#405 review). The flank RISES
+ * `1/tanHalf` per mm of radial distance — `h = (ρ − r_t)/tanHalf` — so the radial distance that
+ * reaches a given rise is the rise TIMES the tangent: `ρ = r_t + h·tanHalf`. The two agree at 45°
+ * and part company either side of it, and the form that matters is the one that UNDER-SCANS when
+ * it is wrong: `r_t + h/tanHalf` reads the flank as if it were the steep one everywhere, so above
+ * 45° it stops the sweep short of where the bit actually cuts (a 120° chamfer 1 mm down reaches
+ * 0.58 mm where the real flank is 1.73 mm out) and the groove is drawn about a third of its width.
+ * Below 45° it over-scans by `1/tanHalf²` and only wastes time.
+ */
+export function cutterReach(cutter: ColumnCutter, aboveTip: number): number {
+  return cutter.tanHalf === null ? cutter.radius : cutter.radius + aboveTip * cutter.tanHalf;
+}
 
 /** A column grid. Rotary: `u` is work X, `v` is the stock angle θ in degrees, `h` is radius ρ. */
 export interface ColumnGrid {
@@ -121,14 +162,14 @@ export const COLUMN_MAX_ANCHORS = 32;
 
 export interface ColumnParameterisation {
   readonly kind: 'rotary' | 'flat';
-  /** Build the initial grid from the setup, the tool and the program's own extent. */
-  buildGrid(setup: Setup, toolRadius: number, moves: readonly CutMove[], res: ColumnResolution): ColumnGrid;
+  /** Build the initial grid from the setup, the cutter and the program's own extent. */
+  buildGrid(setup: Setup, cutter: ColumnCutter, moves: readonly CutMove[], res: ColumnResolution): ColumnGrid;
   /**
    * Subtract one move. `crossed` is set when the model cannot hold the cut (rotary: a genuine
    * axis crossing), `clamped` when a shallow axis dip was clamped and the sweep may continue.
    * The threshold is the tool radius — see `ROTARY.applyMove`, decision R8.
    */
-  applyMove(grid: ColumnGrid, m: CutMove, toolRadius: number): MoveResult;
+  applyMove(grid: ColumnGrid, m: CutMove, cutter: ColumnCutter): MoveResult;
   /** The grid's surface at display resolution. */
   mesh(grid: ColumnGrid, res: ColumnResolution): NodeMeshOutput;
   /** Removed and (uncut) stock volume, mm³, from the grid. */
@@ -210,11 +251,12 @@ export function closestAngularOffset(thetaDeg: number, aLo: number, aHi: number)
 export const ROTARY: ColumnParameterisation = {
   kind: 'rotary',
 
-  buildGrid(setup, toolRadius, moves, res) {
+  buildGrid(setup, cutter, moves, res) {
     const part = setup.part;
     if (part.kind !== 'cylinder') {
       throw new Error(`the rotary column engine sweeps a cylinder stock; the setup's part is a ${part.kind}`);
     }
+    const toolRadius = cutter.radius;
     const R = part.diameter / 2;
     // The grid spans the STOCK's axial extent in work coordinates, widened to cover every move
     // (plus one tool radius) so a program that reaches past the stub's placement is still
@@ -237,7 +279,11 @@ export const ROTARY: ColumnParameterisation = {
     return { kind: 'rotary', nu, nv, u0: xMin + res.dx / 2, du: (xMax - xMin) / nu, v0: 0, dv: 360 / nv, initial: R, base: 0, h };
   },
 
-  applyMove(grid, m, toolRadius) {
+  applyMove(grid, m, cutter) {
+    // A cone never reaches here: `columnSweep` refuses a V-bit on a rotary job by name. The
+    // rotary model's whole premise is a vertical flat tip, and a cone about a turntable axis is a
+    // different body (#221's chamfer profiles).
+    const toolRadius = cutter.radius;
     // R8, amended 2026-10-05 — clamp shallow, refuse deep, threshold at the TOOL RADIUS. A dip
     // within one tool radius is a shallow graze: clamp it to the axis, report `axis-clamped` and
     // continue. At or past one tool radius below the axis the cut genuinely crosses, and a
@@ -316,21 +362,25 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
 
 /**
  * The FLAT parameterisation (#222, `/Rotary.md` §4.1): columns over (x, y) holding the remaining
- * top Z. A vertical flat end mill's footprint is the disc of radius `r_t` swept along the move's
- * XY segment, and the floor it leaves is FLAT at the move's lowest tip Z — no `1/cos φ` falloff,
+ * top Z. A vertical cutter's footprint is the disc of radius `r_t` swept along the move's XY
+ * segment, and the floor it leaves is FLAT at the move's lowest tip Z — no `1/cos φ` falloff,
  * which is the curved-surface case of §4.2 and belongs to the rotary engine. This is the dexel
  * engine #222 asks for: the cost is the columns a move touches, not the number of Z levels.
  *
  * Work frame: the ordinary 3-axis frame. The stock's top face is `initial`, its bottom `base`; a
- * cut is clamped to `base` because nothing can be removed below the blank. A non-flat tool
- * footprint (ball, bull, V) is a height profile over the disc and is NOT modelled here —
- * `cuttingRadiusForSweep` refuses such a tool before the sweep reaches this parameterisation
- * (#221 will add the profiles).
+ * cut is clamped to `base` because nothing can be removed below the blank.
+ *
+ * A NON-FLAT footprint is a height profile over that disc, and this is where it is modelled
+ * (#405, the hook #221 reserved here): a V-bit's floor at a column is `tipZ + (ρ − r_t)/tan`, ρ
+ * being the column's distance from the move's segment, so the groove it leaves is a V and not a
+ * slot of the tip's width. A BALL or a BULL nose is still refused before the sweep reaches this
+ * parameterisation (`cuttingRadiusForSweep`): their constant-Z footprint is a profile too, but
+ * nothing yet needs it and a wrong profile is worse than a refusal.
  */
 export const FLAT: ColumnParameterisation = {
   kind: 'flat',
 
-  buildGrid(setup, toolRadius, moves, res) {
+  buildGrid(setup, cutter, moves, res) {
     const part = setup.part;
     if (part.kind !== 'prism') {
       throw new Error(`the flat column engine sweeps a prism stock; the setup's part is a ${part.kind}`);
@@ -338,6 +388,12 @@ export const FLAT: ColumnParameterisation = {
     const bb = aabbOfProfile(part.outline);
     const initial = partToWork(setup, [0, 0, part.thickness])[2];
     const base = partToWork(setup, [0, 0, 0])[2];
+    // The widest the cutter can be over this program: its tip radius, or — for a cone — the radius
+    // at which the flank meets the top face at the DEEPEST tip the moves reach. Padding the grid by
+    // anything less would clip the outer edge of a deep V groove.
+    let aboveTip = 0;
+    for (const m of moves) aboveTip = Math.max(aboveTip, Math.max(0, initial - m.z));
+    const toolRadius = cutterReach(cutter, aboveTip);
     let xMin = Infinity;
     let xMax = -Infinity;
     let yMin = Infinity;
@@ -387,24 +443,36 @@ export const FLAT: ColumnParameterisation = {
     };
   },
 
-  applyMove(grid, m, toolRadius) {
+  applyMove(grid, m, cutter) {
     const { nu, nv, u0, du, v0, dv, h, initial, base } = grid;
     if (m.z >= initial) return { written: 0, crossed: null, clamped: null }; // wholly above the blank
     const xLo = Math.min(m.u0, m.u1);
     const xHi = Math.max(m.u0, m.u1);
     const yLo = Math.min(m.v0, m.v1);
     const yHi = Math.max(m.v0, m.v1);
-    const floor = m.z < base ? base : m.z; // nothing below the blank's bottom
+    // The cutter's XY reach at THIS tip Z: a flat end's radius, or the radius at which a cone's
+    // flank is at the top face. Columns past it cannot be touched by the move.
+    const reach = cutterReach(cutter, Math.max(0, initial - m.z));
     let written = 0;
-    const iLo = Math.max(0, Math.floor((xLo - toolRadius - u0) / du));
-    const iHi = Math.min(nu - 1, Math.ceil((xHi + toolRadius - u0) / du));
-    const jLo = Math.max(0, Math.floor((yLo - toolRadius - v0) / dv));
-    const jHi = Math.min(nv - 1, Math.ceil((yHi + toolRadius - v0) / dv));
+    const iLo = Math.max(0, Math.floor((xLo - reach - u0) / du));
+    const iHi = Math.min(nu - 1, Math.ceil((xHi + reach - u0) / du));
+    const jLo = Math.max(0, Math.floor((yLo - reach - v0) / dv));
+    const jHi = Math.min(nv - 1, Math.ceil((yHi + reach - v0) / dv));
     for (let j = jLo; j <= jHi; j++) {
       const y = v0 + j * dv;
       for (let i = iLo; i <= iHi; i++) {
         const x = u0 + i * du;
-        if (distToSegment(x, y, xLo, yLo, xHi, yHi) > toolRadius) continue;
+        // The move's OWN segment, `(u0,v0)–(u1,v1)` — NOT the bbox diagonal `(xLo,yLo)–(xHi,yHi)`.
+        // The two agree for an axis-aligned move and differ for a diagonal one, which is most of a
+        // glyph's strokes: using the bbox diagonal cuts the wrong columns, and since the gouge
+        // check reads the segment it should have used, the cut and the check then disagree by the
+        // difference (#405 — FLAT was unreachable until a V trace, so nothing had compared them).
+        const rho = distToSegment(x, y, m.u0, m.v0, m.u1, m.v1);
+        if (rho > reach) continue;
+        // The floor this column is left at: the tip plane for a flat end, and the cone's flank
+        // height above it for a V-bit (#405). Clamped to the blank's bottom.
+        const f = m.z + surfaceAboveTip(cutter, rho);
+        const floor = f < base ? base : f;
         const idx = j * nu + i;
         if (floor < (h[idx] as number)) {
           h[idx] = floor;
@@ -686,16 +754,33 @@ function zeroStats(): SweepStats {
  * Sweep a timeline with the column engine. A ROTARY job (A moves) uses the rotary
  * parameterisation and refuses (`rotary-stock`) a non-cylinder stock; a non-rotary job uses the
  * FLAT parameterisation and refuses (`flat-stock`) a non-prism stock. Both refuse (`tool-refused`)
- * a non-flat tool. The rotary engine refuses (`axis-crossing`) a genuine crossing and warns
- * (`axis-clamped`) about shallow dips it clamped. Diagnostic `code`s match the exact sweeper's
- * vocabulary so the UI does not learn a second set.
+ * a tool neither parameterisation can hold: a ball or bull nose, or — since #405 — a V-bit on a
+ * ROTARY job, whose cone has no form in a single-valued radius column. The rotary engine refuses
+ * (`axis-crossing`) a genuine crossing and warns (`axis-clamped`) about shallow dips it clamped.
+ * Diagnostic `code`s match the exact sweeper's vocabulary so the UI does not learn a second set.
  */
 export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?: ColumnSweepOpts): ColumnOutcome {
   const t0 = performance.now();
-  const rr = cuttingRadiusForSweep(tool);
-  if (!rr.ok) return { ok: false, diagnostics: [{ severity: 'error', code: 'tool-refused', message: rr.reason }] };
-  const toolRadius = rr.radius;
   const rotary = timeline.summary.rotary;
+  // The cutter, in the parameterisation's terms. The FLAT engine takes a V-bit's cone (#405);
+  // ROTARY takes a flat end mill only, and refuses a cone by name rather than sweeping it as one
+  // — a V-bit on a turntable is #221's chamfer-profile work, not a flat tip.
+  const trace = cuttingForTrace(tool);
+  if (!trace.ok) return { ok: false, diagnostics: [{ severity: 'error', code: 'tool-refused', message: trace.reason }] };
+  const cutter: ColumnCutter =
+    trace.tool.shape === 'v' ? { radius: trace.tool.cone.tipRadius, tanHalf: trace.tool.cone.tanHalf } : { radius: trace.tool.radius, tanHalf: null };
+  if (rotary && cutter.tanHalf !== null) {
+    return {
+      ok: false,
+      diagnostics: [
+        {
+          severity: 'error',
+          code: 'tool-refused',
+          message: `the rotary column engine sweeps a flat end mill only; tool "${tool.name}" is a V-bit, whose cone about a turntable axis is a different body (#221's chamfer profiles)`,
+        },
+      ],
+    };
+  }
   const param: ColumnParameterisation = rotary ? ROTARY : FLAT;
   if (rotary && setup.part.kind !== 'cylinder') {
     return { ok: false, diagnostics: [{ severity: 'error', code: 'rotary-stock', message: `the rotary column engine sweeps a cylinder stock; the setup's part is a ${setup.part.kind}` }] };
@@ -711,7 +796,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   const tBuild = performance.now();
   let grid: ColumnGrid;
   try {
-    grid = param.buildGrid(setup, toolRadius, allMoves, res);
+    grid = param.buildGrid(setup, cutter, allMoves, res);
   } catch (e) {
     return { ok: false, diagnostics: [{ severity: 'error', code: rotary ? 'rotary-stock' : 'flat-stock', message: e instanceof Error ? e.message : String(e) }] };
   }
@@ -732,7 +817,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
 
   for (let k = 0; k < count; k++) {
     for (const m of perCheckpoint[k] as CutMove[]) {
-      const r = param.applyMove(grid, m, toolRadius);
+      const r = param.applyMove(grid, m, cutter);
       ops += r.written;
       if (r.crossed) {
         stats.ms.total = performance.now() - t0;
@@ -745,7 +830,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
             {
               severity: 'error',
               code: 'axis-crossing',
-              message: `line ${m.line}: the cutter tip reaches radius Z ${r.crossed.z.toFixed(3)}, deeper than the tool radius ${toolRadius.toFixed(4)} mm below the rotary axis, at step ${m.step}: a single-valued radius column cannot represent a cut that crosses the axis (/Rotary.md §4.3, decision R8)`,
+              message: `line ${m.line}: the cutter tip reaches radius Z ${r.crossed.z.toFixed(3)}, deeper than the tool radius ${cutter.radius.toFixed(4)} mm below the rotary axis, at step ${m.step}: a single-valued radius column cannot represent a cut that crosses the axis (/Rotary.md §4.3, decision R8)`,
             },
           ],
         };
@@ -764,12 +849,21 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     }
   }
   const tSweep = performance.now();
-  if (clampedMoves > 0) diagnostics.push({ severity: 'warning', code: 'axis-clamped', message: `${clampedMoves} cutting move(s) took the cutter tip past the rotary axis by less than the tool radius ${toolRadius.toFixed(4)} mm and were clamped to Z 0 (deepest Z ${clampedWorst.toFixed(3)}): the cut did not come out as deep as the program asked and its far-side hollow is not modelled (/Rotary.md §4.3, decision R8)` });
+  if (clampedMoves > 0) diagnostics.push({ severity: 'warning', code: 'axis-clamped', message: `${clampedMoves} cutting move(s) took the cutter tip past the rotary axis by less than the tool radius ${cutter.radius.toFixed(4)} mm and were clamped to Z 0 (deepest Z ${clampedWorst.toFixed(3)}): the cut did not come out as deep as the program asked and its far-side hollow is not modelled (/Rotary.md §4.3, decision R8)` });
 
-  // Gouges: a rapid whose tip is below a column's remaining material (§4.4). Detected, not
-  // subtracted; reported with the count and the first step. Solids are a follow-up (see the file
-  // note). The check is parameterisation-specific — the rotary model is angular, the flat one a
-  // swept disc over (x, y) — so each has its own.
+  // Gouges: a rapid whose cutter would cut material (§4.4). Detected, not subtracted; reported
+  // with the count and the first step. Solids are a follow-up (see the file note). The check is
+  // parameterisation-specific — the rotary model is angular, the flat one a swept disc over
+  // (x, y) — so each has its own.
+  //
+  // The loop BOUND is the cutter's widest footprint over the blank — a flat end's radius, or a
+  // cone's flank at the stock's bottom — but the per-column TEST is the cutter's own floor at that
+  // column (#405): the tip plane for a flat, the cone's flank height above it for a V-bit, exactly
+  // the floor `applyMove` writes. A fixed disc footprint is WRONG for a cone — it would call a V
+  // trace's own retract a gouge, because columns just outside the groove (0.84 mm wide at 1 mm
+  // deep) still stand at the top and the cone's widest reach is 3× that — and the honest test for
+  // both shapes is one expression, since `surfaceAboveTip` is 0 inside a flat's radius.
+  const gougeRadius = cutterReach(cutter, Math.max(0, grid.initial - grid.base));
   const gouges: { step: number; line: number }[] = [];
   {
     let checked = 0;
@@ -785,9 +879,9 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
         ? (() => {
             const aEnd = timeline.stateAt(mv.step).a;
             const aStart = timeline.stateAt(mv.step - 1).a;
-            return gougeAlong(grid, mv, toolRadius, aStart ?? aEnd ?? 0, aEnd ?? aStart ?? 0);
+            return gougeAlong(grid, mv, gougeRadius, aStart ?? aEnd ?? 0, aEnd ?? aStart ?? 0);
           })()
-        : gougeAlongFlat(grid, mv, toolRadius);
+        : gougeAlongFlat(grid, mv, gougeRadius, cutter);
       if (gouged) {
         if (gouges.length < MAX_GOUGES) gouges.push({ step: mv.step, line: mv.line });
       }
@@ -829,7 +923,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     const scratch: ColumnGrid = { ...grid, h: (a >= 0 ? (anchors.get(a) as Float32Array) : grid.h).slice() };
     const from = a >= 0 ? a : 0;
     if (a < 0) scratch.h.fill(grid.initial);
-    for (let i = from; i <= kk; i++) for (const m of perCheckpoint[i] as CutMove[]) param.applyMove(scratch, m, toolRadius);
+    for (let i = from; i <= kk; i++) for (const m of perCheckpoint[i] as CutMove[]) param.applyMove(scratch, m, cutter);
     return param.mesh(scratch, displayRes);
   };
 
@@ -897,15 +991,26 @@ function gougeAlong(
 }
 
 /**
- * The flat-parameterisation gouge check (#222): a rapid whose tip is below the remaining top Z of
- * any column the tool passes over. The tool is a disc of radius `r_t` swept along the move's XY
- * segment; a column is gouged when the tip Z there is below its remaining `h`. Sampled at the grid
- * pitch, capped so a long rapid stays bounded.
+ * Sub-micron slack on the gouge comparison, mm. The cut pass and the gouge check compute the
+ * distance from a column to the move's segment along two different code paths, and for a column
+ * beside a segment's endpoint the two answers differ in the last bits (~1e-9 mm) — enough for a
+ * `<` to call a retract out of its own groove a gouge. A real gouge removes material by a
+ * fraction of a millimetre, so a micron of slack hides the noise and not a cut.
+ */
+const GOUGE_EPSILON = 1e-6;
+
+/**
+ * The flat-parameterisation gouge check (#222): a rapid whose cutter would cut material the program
+ * has not removed. `toolRadius` bounds the columns the move can touch (the cutter's widest reach);
+ * a column is gouged when the cutter's floor there — `tipZ + surfaceAboveTip` for the cutter's own
+ * shape (#405) — is below its remaining `h`. Sampled at the grid pitch, capped so a long rapid
+ * stays bounded.
  */
 function gougeAlongFlat(
   grid: ColumnGrid,
   mv: { from: readonly [number, number, number]; to: readonly [number, number, number] },
   toolRadius: number,
+  cutter: ColumnCutter,
 ): boolean {
   const { nu, nv, u0, du, v0, dv, h } = grid;
   const xLo = Math.min(mv.from[0], mv.to[0]);
@@ -928,8 +1033,14 @@ function gougeAlongFlat(
       const yc = v0 + j * dv;
       for (let i = iLo; i <= iHi; i++) {
         const xc = u0 + i * du;
-        if (distToSegment(xc, yc, mv.from[0], mv.from[1], mv.to[0], mv.to[1]) > toolRadius) continue;
-        if (tipZ < (h[j * nu + i] as number)) return true;
+        const rho = distToSegment(xc, yc, mv.from[0], mv.from[1], mv.to[0], mv.to[1]);
+        if (rho > toolRadius) continue;
+        // The floor the cutter leaves at this column is `applyMove`'s (`tipZ + surfaceAboveTip`):
+        // 0 above the tip inside a flat end's radius, a rising flank outside a V-bit's tip. A
+        // column standing above that floor is material the rapid cuts — a gouge. For a flat end
+        // this is exactly `tipZ < h`.
+        const floorHere = tipZ + surfaceAboveTip(cutter, rho);
+        if (floorHere < (h[j * nu + i] as number) - GOUGE_EPSILON) return true;
       }
     }
   }

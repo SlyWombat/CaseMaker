@@ -1,7 +1,7 @@
 import { rectProfile } from '@/engine/compiler/profile';
 import type { MillProfile } from '@/engine/cnc/machine';
 import { getTools, toolForJob } from '@/engine/cnc/toolRegistry';
-import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
+import { cuttingRadiusForSweep, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
 import { stubSetup, type Setup, type Workholding } from '@/engine/cnc/setup';
@@ -54,6 +54,19 @@ export type JobFindingCode =
   | 'item-chars-lost'
   | 'item-detail-lost'
   | 'item-outside-stock'
+  // A V-BIT against a REGION item (#405). Opening a glyph or a shape means offsetting its outline
+  // by ONE cutting width, and a cone's width is a function of depth, so the toolpath that cuts a
+  // region with one is a medial-axis V-carve — the piece of #221 this change does not include. A
+  // trace (constant depth, the cutter on the line) is what a V-bit can do here, so the finding
+  // names the region item rather than refusing the cutter. Raised with the plan in hand, because
+  // "is this item a region?" is `toPartPlan`'s rule and must not be restated (engraveGenerate).
+  | 'region-v-carve-unavailable'
+  // A cutter Makera NAMES for metal, on a job cutting something that is not (#405). The line is a
+  // property of the pair — the bit and the blank — so it cannot live on either side alone, and no
+  // feed table can enforce it: a metal bit will happily cut PLA, badly, at numbers nobody measured.
+  // A warning, not an error: the cut is the user's to make, but they are told what the box says the
+  // bit is for.
+  | 'tool-metal-line'
   // Under-surface voids (#171, built on #231's keep-outs). The warning for cutting over a
   // membrane that spans an unsupported void: a fact about OVERLAP, not depth — the material has
   // nothing under it however shallow the cut. There is deliberately no error twin here: a cut
@@ -439,12 +452,11 @@ export function validateJob(job: EngraveJob): JobFinding[] {
 
   // A trace whose cutter-swept strokes come closer than the cutter width fills in (#219): the
   // letters merge. A warning, not an error — the cut still exists, it is just not what was drawn.
-  // It needs the cutter's radius, so it is skipped when the job names no usable flat cutter.
+  // It needs the cutter's width, so it is skipped when the job names no cutter the trace path can
+  // take. Since #405 that width is a FUNCTION of the trace's own depth — a V-bit's groove opens as
+  // it deepens — so the radius is asked per trace rather than resolved once.
   const tool = jobTool(job);
-  if (tool) {
-    const r = cuttingRadiusForSweep(tool);
-    if (r.ok) findings.push(...traceSelfOverlapFindings(job, r.radius));
-  }
+  if (tool) findings.push(...traceSelfOverlapFindings(job, (depth) => traceRadiusAt(tool, depth)));
 
   findings.push(...validateSacrificial(job));
 

@@ -240,3 +240,102 @@ describe('recommendTool integration (#211)', () => {
     expect(candidate(rec, 'flat-3.175x12-metal').qualifies).toBe(false);
   });
 });
+
+// #405 — a TRACE-ONLY job may take a V-bit, and a job with a region may not. The two rules the
+// issue states are what these cases hold: a V-bit is never a stand-in for a flat end mill where a
+// glyph has to be OPENED (one cutting width is needed, and a cone's width changes with depth), and
+// a trace follows the line, so a cone is exactly the cutter for it.
+describe('recommendTool and V-bits (#405)', () => {
+  /** The text job's default cutter: the 30° engraving bit, 0.3 mm tip, 3.175 mm shank. */
+  const vBit = (key = 'inv:v30', over: Partial<Tool> = {}): ToolLibraryEntry => ({
+    key,
+    tool: flatEndMill(0.3, {
+      name: 'Single Flute Engraving Bit 30 x 0.3',
+      typeText: 'Engraving',
+      shape: 'engraving',
+      tipDiameter: 0.3,
+      diameter: 3.175,
+      angle: 30,
+      halfAngle: 15,
+      shoulderLength: 12,
+      ...over,
+    }),
+    provenance: 'recommendTool test',
+  });
+
+  /**
+   * A PLA job whose only enabled items are traces: every region list is empty, which is the state
+   * that may take a cone. `material` is a parameter because the V row is PLA's alone.
+   */
+  const traceJob = (material: EngraveJob['stock']['material'] = 'pla'): EngraveJob => {
+    const base = defaultEngraveJob();
+    return {
+      ...base,
+      stock: { ...base.stock, material },
+      labels: [],
+      shapes: [],
+      combined: [],
+      vectors: [],
+      traces: [
+        {
+          id: 'tr1',
+          kind: 'stroke-label',
+          text: 'Single Barrel',
+          font: 'hershey-simplex',
+          size: 8,
+          position: { x: 50, y: 30 },
+          rotation: 0,
+          depth: 1,
+          enabled: true,
+        },
+      ],
+    };
+  };
+
+  it('excludes a V-bit from a job that holds a region item, and never measures it', () => {
+    const job = jobWithLabel('l1', 'CASE', 1);
+    const measure = vi.fn((_key: string) => [row('l1', 1)]);
+    const rec = recommendTool(job, [vBit(), tool('flat', 1.0)], [], measure);
+    // One candidate measured — the flat one. A cone is not measured against a glyph at all, because
+    // a cone has no single width for the glyph's opening to be measured against.
+    expect(measure).toHaveBeenCalledTimes(1);
+    expect(measure).toHaveBeenCalledWith('flat');
+    expect(candidate(rec, 'inv:v30').excluded).toBe('not-flat');
+    expect(candidate(rec, 'flat').excluded).toBeUndefined();
+    expect(rec.key).toBe('flat');
+  });
+
+  it('qualifies a V-bit for a trace-only job and measures it', () => {
+    const job = traceJob();
+    const measure = vi.fn((_key: string) => [row('tr1', 1)]);
+    const rec = recommendTool(job, [vBit()], [], measure);
+    expect(measure).toHaveBeenCalledWith('inv:v30');
+    expect(candidate(rec, 'inv:v30').excluded).toBeUndefined();
+    expect(candidate(rec, 'inv:v30').qualifies).toBe(true);
+    // The cone's own cutting diameter is its TIP (0.3), not the 3.175 shank — the tip is what cuts.
+    expect(compromiseOf(rec).diameter).toBe(0.3);
+    expect(rec.key).toBe('inv:v30');
+    expect(rec.compromise).toBe(false);
+  });
+
+  it('still excludes a V-bit with no V row for the material', () => {
+    // The V row is PLA's alone (#405): a softwood trace job has no numbers for a cone, and Makera's
+    // own rows state a flat end mill's numbers, never a cone's — so there is nothing to fall back on.
+    const rec = recommendTool(traceJob('softwood'), [vBit()], [], allRows(1));
+    expect(candidate(rec, 'inv:v30').excluded).toBe('no-feeds');
+    expect(rec.key).toBeNull();
+  });
+
+  it('names the V-bit option when a job with a region has nothing else to recommend', () => {
+    const rec = recommendTool(jobWithLabel('l1', 'CASE', 1), [vBit()], [], allRows(1));
+    expect(rec.key).toBeNull();
+    expect(rec.reason).toContain('V-bit');
+  });
+});
+
+/** The recommended candidate itself, for the fields the pick's own assertions read. */
+function compromiseOf(rec: ToolRecommendation): ToolCandidate {
+  const c = rec.candidates.find((x) => x.key === rec.key);
+  expect(c, `the recommended candidate ${rec.key}`).toBeDefined();
+  return c!;
+}

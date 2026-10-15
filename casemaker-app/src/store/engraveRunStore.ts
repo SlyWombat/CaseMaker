@@ -89,6 +89,13 @@ export interface EngraveRunState {
    * panel loaded afterwards.
    */
   pathOnly: boolean;
+  /**
+   * #405 — which backend swept the material this run (`SimLoadOk.stats.engine`), or null before a
+   * run. Captured here, like `pathOnly`, so the run sheet's coverage disclaimer can say a column
+   * sweep's numbers carry a grid resolution (a rotary job, or a V-bit trace) from THIS run and not
+   * whatever the Simulate panel loaded afterwards.
+   */
+  simEngine: 'exact' | 'column' | null;
   phase: EngraveRunPhase;
   /** The clearance acknowledgement (see `ACKNOWLEDGE_CODES`), reset on every Generate. */
   acknowledged: boolean;
@@ -111,6 +118,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     simDiagnostics: [] as SimDiagnostic[],
     simStatus: null as SimStatus | null,
     pathOnly: false,
+    simEngine: null as 'exact' | 'column' | null,
     acknowledged: false,
     staleSince: null as number | null,
     error: null as string | null,
@@ -196,7 +204,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       set({ phase: 'blocked', simStatus: sim.status, simDiagnostics: sim.diagnostics, pathOnly: sim.pathOnly, error: sim.status === 'error' ? sim.error : null });
       return;
     }
-    set({ phase: 'checking', simStatus: sim.status, simDiagnostics: sim.diagnostics, pathOnly: sim.pathOnly });
+    set({ phase: 'checking', simStatus: sim.status, simDiagnostics: sim.diagnostics, pathOnly: sim.pathOnly, simEngine: sim.info?.stats.engine ?? null });
 
     try {
       const oracle = await client.simOracle(generated.predicted);
@@ -213,6 +221,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     simDiagnostics: [],
     simStatus: null,
     pathOnly: false,
+    simEngine: null,
     phase: 'idle',
     acknowledged: false,
     staleSince: null,

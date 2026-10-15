@@ -20,7 +20,7 @@
 
 import type { Coded, HouseHealth, InventoryItem, Origin } from '@/platform/houseClient';
 import { newId } from '@/utils/id';
-import { shapeFromType, type Tool, type ToolShape } from './tool';
+import { isMetalCutterName, shapeFromType, type Tool, type ToolShape } from './tool';
 import type { ToolLibraryEntry } from './toolLibrary';
 import { catalogueIdOf, tierOf } from './toolTiers';
 
@@ -294,13 +294,37 @@ function sameLength(a: number | null, b: number | null): boolean {
  * The line is not a field on a row — `ToolSchema` carries dimensions and nothing about what a bit
  * was ground for — so the row's own NAME is what states it: `3.175*12mm Flat End(Metal)` is the row
  * the built-in was copied from, and `catalogue.rs` records the same `(Metal)` convention (#379
- * review). Anchored to the END of the name, so this is a claim about the line and not about a row
- * that happens to mention metal somewhere in the middle of it.
+ * review). The reading itself is `tool.isMetalCutterName`, the one copy of it; this is the row's
+ * half of the question.
  */
-const METAL_ROW = /\(metal\)$/i;
-
 function isMetalRow(entry: ToolLibraryEntry): boolean {
-  return METAL_ROW.test(entry.tool.name.trim());
+  return isMetalCutterName(entry.tool.name);
+}
+
+/**
+ * Whether a CUTTER — a `Tool` in the spindle, or the snapshot a job carries — is on Makera's "for
+ * Metal" line (#405 review).
+ *
+ * The line is stated three ways in the wild, and ANY one of them is enough:
+ *
+ *   - the NAME, read by `isMetalCutterName` — the one copy of that reading, shared with
+ *     {@link isMetalRow}. A catalogue ROW spells it as the `(Metal)` suffix; a printed LABEL spells
+ *     it as the phrase `for Metal` (`Single Flute Engraving Bit for Metal - 1/8" Shank 60° * 0.1mm`);
+ *   - the printed BOX CODE's `-M-` segment (`C1-BIT-ENGRAVE-M-60-0.1`, #379) — read by
+ *     `parseBoxCode`, the one copy of THAT, so a cutter filed under a code cannot slip past a check
+ *     that only ever looked at a name. The code a `Tool` carries is its `id`: our own post writes it
+ *     into `;@MKR|TOOL|id=…` and `toolFromMkrRecord` reads it back, which is how a job says which
+ *     printed code its cutter is (`docs/bench/single-barrel.nc` files the 30° bit under
+ *     `id=C1-BIT-ENGRAVE-30-0.3`).
+ *
+ * Neither statement is redundant, and the code half is no substitute for the name half: an owned
+ * cutter reached through an `inv:` key is the inventory's own snapshot, whose `id` is `null`
+ * (`toolRegistry.inventoryEntryFor`), so the label's name is the ONLY statement such a `Tool`
+ * carries.
+ */
+export function isMetalTool(tool: Tool): boolean {
+  if (isMetalCutterName(tool.name)) return true;
+  return tool.id !== null && (parseBoxCode(tool.id)?.metal ?? false);
 }
 
 /**

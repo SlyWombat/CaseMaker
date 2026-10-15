@@ -831,14 +831,22 @@ export type TraceFindingCode = 'trace-outside-stock' | 'trace-self-overlap';
 /**
  * `trace-self-overlap` findings for every enabled, non-construction trace in the job. A warning,
  * not an error: the trace still cuts, it just fills in.
+ *
+ * `radiusAt` is the cutter's half-opening at a DEPTH, not a single radius (#405): a V-bit's groove
+ * widens as it deepens, so each trace is judged at its own depth. A caller whose cutter cuts one
+ * width passes a constant (`tool.traceRadiusAt` for a flat end mill, or the tool's own wrapper).
+ * A trace the cutter cannot trace at all answers `null` and raises nothing — the job is refused
+ * for the cutter elsewhere, and guessing a width here would invent a second opinion about it.
  */
 export function traceSelfOverlapFindings(
   job: EngraveJob,
-  radius: Mm,
+  radiusAt: (depth: Mm) => number | null,
 ): { severity: 'warning'; code: TraceFindingCode; labelId: string; message: string }[] {
   const out: { severity: 'warning'; code: TraceFindingCode; labelId: string; message: string }[] = [];
   for (const item of job.traces ?? []) {
     if (!item.enabled || item.construction) continue;
+    const radius = radiusAt(item.depth);
+    if (radius === null) continue;
     const { paths, closed } = tracePaths(item);
     const overlaps = traceSelfOverlaps(paths, closed, radius);
     if (overlaps.length === 0) continue;
@@ -1371,7 +1379,9 @@ export function labelJawReach(job: EngraveJob, label: EngraveLabel): JawReach {
   // to ask about — but it lands on the same conservative answer: no jaw bound bought or lost.
   if (nearest === null) return { jaw: 'fixed', gap: 0, reaches: true, overJaw: true };
 
-  const radius = sweepRadiusForJob(job);
+  // The cutter's footprint at THIS item's depth (#405): a V-bit's groove is wider the deeper the
+  // label goes, and the toolpath here is the label's own, so its own depth is the one to read.
+  const radius = sweepRadiusForJob(job, label.depth);
   return {
     jaw: nearest.jaw,
     gap: nearest.gap,
