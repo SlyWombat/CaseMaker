@@ -70,23 +70,36 @@ possible. **Nothing here is scheduled; the maintainer calls each session.**
   clamping, was **deleted from the card on 2026-10-12** at the maintainer's request (`md5` now answers
   not found). Our console's `play` can run any card file (#386).
 
-## Z1 low-profile vise: product constants (calipers, 2026-10-13, in progress)
+## Z1 low-profile vise: product constants (calipers, 2026-10-13 and 2026-10-15, complete)
 
 The vise is identical on every Z1 (maintainer, 2026-10-13), so these become the shipped
 `DEFAULT_VISE`, measured once on the reference unit, not per-user values. Photos:
-`img/2026-10-13-vise-front-profile.jpg`, `img/2026-10-13-vise-top.jpg`. Each jaw carries an
-L-shaped slotted soft jaw: a tall bar, with a lower ledge facing inward that the blank sits on.
+`img/2026-10-13-vise-front-profile.jpg`, `img/2026-10-13-vise-top.jpg`,
+`img/2026-10-15-vise-top-jaws-apart.jpg`. Each jaw carries an L-shaped slotted soft jaw: a tall
+bar, with a lower ledge facing inward that the blank sits on. The jaws run front to back (Y) and
+clamp in X.
 
 | Dimension | Fixed jaw | Moving jaw | Note |
 |---|---|---|---|
 | Soft-jaw top width (flat top of the tall bar) | 10 mm | 10 mm | agrees with the 2026-10-08 probe (top at 3–8 mm out from the blank, a miss at 13 mm; moving side a miss 6 mm out) |
 | Step, jaw top down to the blank ledge | 3.1 mm | 3.1 mm | first read as 3 mm, corrected |
-| Ledge depth (how far it sticks out from the tall bar) | — | — | **next to measure** |
-| Soft-jaw length (along the jaw, Y) | — | — | to measure |
-| Blank thickness at its middle | — | — | to measure: a 3.1 mm step and the probed 1.07–1.21 mm proud imply ~4.2 mm, against 3.81 designed and the ~3.5 mm nut reading. Either the blank isn't seated on the ledges, or a number is off |
+| Ledge depth (how far it sticks out from the tall bar's face) | 1.9 mm | 1.9 mm | 2026-10-15 |
+| Tall-bar length (along the jaw, Y) | 100 mm | — | 2026-10-15 |
+| Jaw block width across (X) | 37.5 mm | differs | the moving jaw's width varies because of its side locking screw; not needed, the probe finds the blank's edges |
 
-Not changed in the code yet: `DEFAULT_VISE` still holds 10.5 / 9 (0116f36). It moves to the
-measured set in one commit once the table is complete.
+**The blank, measured 2026-10-15:** 3.82 mm thick at the middle of the long side, clear of the
+cut squares, so the print matches the 3.81 mm design. Seated on a 3.1 mm ledge it would stand
+**0.72 mm** proud. The probe on 2026-10-08 read 1.07–1.21 mm proud, so the blank sat about
+0.35–0.5 mm above the ledges that day. The cause is not established: an unseated blank, the blank's
+dome, or lift under clamping. The nut method's surface reading (5.4 − 1.9 = 3.5 mm) disagrees with the
+direct 3.82 mm by about 0.3 mm, cause not established; the direct reading is the thickness, and the
+cut depths are unaffected because each is 5.4 minus a reading over the same nut. So the jaw top stands 0.7–1.2 mm below the blank's top, and
+`stockProud` stays a per-job value; only the jaw geometry is a constant.
+
+`jawStartY` is not a vise constant: it depends on where the blank is clamped along the 100 mm jaw.
+
+Not changed in the code yet: `DEFAULT_VISE` still holds 10.5 / 9 / 80 (0116f36). It moves to the
+measured set in one commit.
 
 ## The one gate on every chip-making session: the cutter
 
