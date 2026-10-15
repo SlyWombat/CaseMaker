@@ -33,7 +33,7 @@ inner corner at the **front-left** of the bed (Makera's "lower-left corner").
      5.9 [Registration](#59-registration) · 5.10 [Running](#510-running)
 6. [Save and reload](#6-save-and-reload)
 7. [Gaps, mapped to issues](#7-gaps)
-8. [Open questions for the maintainer](#8-open-questions)
+8. [Decisions (2026-10-15)](#8-decisions-the-maintainer-2026-10-15)
 9. [Sources](#9-sources)
 - [Appendix A: Makera Studio, read from the install](#appendix-a-makera-studio-0120-read-from-the-install-static-2026-10-15)
 - [Appendix B: worked example — an aluminium plate on the anchor bracket](#appendix-b-worked-example-an-aluminium-plate-on-the-anchor-bracket)
@@ -1023,9 +1023,7 @@ Mapped to issues where they exist; **NEW** otherwise; not filed. S: a day; M: da
 | Plan | light `M821`/`M822` observed | **NEW** (bench) | S |
 | Plan | bed-clean / blow / ioniser mapping | #283, #289 | bench |
 | Registration | the generic planner: method by stock and mount; bracket datum written by the app; 3D-probe corner/edge/bore cycles; the stepped scan executed by the app; origin write in #387's order | **#391**, **#387**, #188 | L |
-| Registration | the 3D probe used at the bench: conductive vs non-conductive, repeatability | **NEW** (bench) | S |
 | Registration | the probe's laser: `M831` observed from our console, the dot's size at height; the laser frame and point-to-origin as off-by-default toggles | **NEW** (bench + S) | S |
-| Registration | camera sees the dot? calibration to machine coordinates, lighting on dark/shiny stock, accuracy — before any camera method | #189, #286 (research) | L |
 | Registration | the rim's contact model | #391 (open) | bench |
 | Registration | auto-level as a phase | #176 | bench |
 | Run | play/poll/finish in the app; phase progress; viewport follows `P` | **NEW** on #386 | M |
@@ -1040,54 +1038,63 @@ Not reopened: a first-run machine wizard (R1), a G-code editor (R8), a job queue
 
 ---
 
-## 8. Open questions
+## 8. Decisions (the maintainer, 2026-10-15)
+
+The 21 open questions of draft 2, answered one at a time. Where the answer differs from the draft's
+recommendation, the maintainer's words are quoted.
 
 **The location**
-1. Build the location entity now with one location and one machine in it (pay the seam once, as
-   decision 25 did for the machine profile), or keep "the house" as the only container until a
-   second machine or a second shop exists?
-2. Where the shelf lives: `house.json` beside the tools (one export), or `location.json` as its
-   own document?
-3. Offcuts: proposed automatically at the end of every run (one question), or only when the
-   operator adds one?
-4. Tool condition states — new / used / worn / broken — and whether runtime (#381) or the operator's
-   mark is what retires a cutter.
-5. The plug on the machine record: state only, or on/off from the app (CLAUDE.md calls it a
-   physical act; today it is deliberately not on the Machines card)?
+1. **Build the location entity now**, with one location and one machine in it.
+2. **The shelf lives inside the location**: one `location.json` holds machines, accessories, tools
+   and materials, with one export. `house.json`'s tools move into it.
+3. **Offcuts are proposed at the end of a run "only if there is leftover stock that has some size to
+   it."** A minimum usable size decides; it ships as a chosen default (labelled chosen, not measured).
+4. **Tool condition is new / used / worn / broken, set by the operator.** Runtime (#381) only warns
+   ("check this bit") past a threshold; it never retires a cutter.
+5. **The plug: "full control, but don't assume that there is a controllable switch, most people will
+   not."** A controllable power switch is an optional integration on the machine record (Home
+   Assistant is one provider, not the model). With one, the app may switch on at job start and off
+   at the end, never off while running, off only after Idle and home. Without one, nothing in the
+   flow depends on it.
 
 **Stock and operations**
-6. Facing on by default for raw metal and wood (the stock's `finish` decides), off for sheet?
-7. Through-cuts always need a declared sacrificial board (#218's rule): does the Z1's own MDF
-   wasteboard count as that board on the bracket and on tape, with its state tracked in the location?
-8. Roadmap order after V1: finish passes → cut-outs → drills/threads/chamfer → adaptive → 3D →
-   rotary — or move adaptive clearing earlier because the plate jobs are aluminium?
-9. Ramped / helical entry was refused for engraving (R16); reopen it for metals?
+6. **Facing: the stock's finish decides.** Rough or unknown → on; finished sheet or printed blank → off;
+   always overridable.
+7. **The Z1's MDF wasteboard counts as the sacrificial board**, tracked in the location (thickness,
+   scarred areas, last resurfaced), with a warning before a cut reaches it.
+8. **Roadmap order as drafted**: finish passes → cut-outs with tabs → drill/thread/chamfer → adaptive
+   → 3D → rotary.
+9. **Ramped / helical entry reopens for metal pockets**, delivered with adaptive clearing. Engraving
+   keeps straight plunges.
 
 **Mounting and registration**
-10. Default mount for a plate: the anchor bracket + clamps (Makera's default) or tape? And the
-    bracket's XY as the datum with a confirming touch optional, or always probe?
-11. The 3D probe (owned, never used): schedule a bench row to settle conductive/non-conductive and
-    repeatability before it becomes a default method.
-12. May the app write a corrected origin (`G10 L2`, cutter Z0 recomputed) when a registration finds
-    the stock off by more than the margin, or "stop and re-seat" only?
-13. Auto-level default: by the stock's flatness and the mount (domed/unknown, thin cuts, tape), or
-    off until #176 proves the `G32 R1` / `M370` sequence here?
-14. Air run default: on only for a program the machine has never run, or always?
+10. **Plate default: anchor bracket + clamps, the bracket's XY as the datum**; a confirming touch is
+    offered, optional.
+11. **The 3D probe is the default registration method now.** No separate repeatability bench row.
+12. **The app may write a corrected origin after confirmation**: show the measured offset, then on OK
+    write `G10 L2` and recompute the cutter's Z0 (#387's order).
+13. **Auto-level is off until #176 proves `G32 R1` / `M370` here**, then on by default by the stock's
+    flatness and the mount (domed/unknown, thin cuts, tape).
+14. **Air run defaults on only for a program this machine has not run** (package hash); identical
+    repeats default off.
 
 **Tools and running**
-15. Two tools: one program per tool (proven) or wait for the `M6` observation (#278) and one file?
-16. Stop button now with its honest label, or after #303 records Studio's grey Stop?
-17. "I am at the machine": one tick per moving phase (a scan sends dozens of lines), with every line
-    shown live, or per line as today?
-18. The light in the machine strip from the start (one console line confirms `M821`/`M822`)?
-19. The 2 % third-tool threshold and 0.1 mm rest overlap: shipped defaults with provenance, or set
-    from the first two-tool cut?
-20. Vacuum bed and sphere stock: confirmed not offered?
-21. The laser point-to-origin option: is ±1 mm (a chosen band until the dot is measured) a result
-    worth offering at all, or only the frame — and if the camera can see the dot, does a camera
-    method get built before the 3D probe is proven?
+15. **One program per tool now** with a directed bit change; one file with `M6` once #278 observes it.
+16. **A Stop button now**, sending `abort`, labelled honestly (stops the program; the machine's button
+    is the emergency stop). #303 refines it.
+17. **"I am at the machine": once per job.** Directed physical steps (bit change, remount, probe in/out)
+    still each need their own "done" before the job continues — the one confirmation does not cover
+    them.
+18. **The light (`M821`/`M822`) is in the machine strip from the start**, after a one-line bench check.
+19. **The 2 % third-tool threshold and 0.1 mm rest overlap ship as defaults labelled chosen**, updated
+    from the first two-tool cut.
+20. **Vacuum bed and sphere stock stay out.** A vacuum bed is listed only if the location owns one;
+    sphere stock is refused with a reason.
+21. **The probe laser: the laser frame and laser point-to-origin ship as user options, off by default.
+    No camera work** — camera-assisted edge finding is not pursued (the 2026-10-15 frames stay as a
+    record only).
 
-Badge-specific questions are in Appendix C.
+Badge-specific questions are in Appendix C (the badge is about 1 % of CNC jobs; not prioritised).
 
 ---
 
