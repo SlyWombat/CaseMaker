@@ -2,18 +2,23 @@
  * Traces → toolpath IR (#219).
  *
  * A trace is a polyline the cutter's CENTRE follows, so unlike `generateEngrave` there is no
- * region to open, no offset and no pocketing: the moves ARE the path, plunged to each depth pass.
- * That is the whole point — a single-stroke font's strokes are one cutter wide, so the cut line
- * is the artwork, and offsetting it (in or out) would widen the groove and close up the letters.
+ * region to open and no pocketing: the moves ARE the path, plunged to each depth pass. That is the
+ * point — a single-stroke font's strokes are one cutter wide, so the cut line is the artwork, and
+ * pocketing it would close up the letters.
+ *
+ * It is NOT true that nothing here is ever offset. A BOLD stroke (#409) arrives ALREADY widened
+ * into parallel passes by `partPlan.tracePaths`: the offsetting is done once, at layout time, where
+ * the job's tool and the item's `weight` are in scope, so this module stays a pure "walk the
+ * polyline" and never re-derives a width. By the time paths reach here, an ordinary stroke is one
+ * line and a bold stroke is several, and each is cut on its own centre line exactly as before.
  *
  * Consequently this module needs NO `ManifoldToplevel`, and takes no `tl`: nothing here evaluates
  * geometry, so a trace toolpath is a pure function of the paths and the feeds — which is also why
  * it can be tested without the wasm harness. The tool is still validated with `cuttingForTrace`:
  * a flat end mill of any diameter, or — since #405 — a V-BIT, whose cut the column engine models as
- * a cone. A V trace is exactly the case the "one cutter wide" promise never covered, which is why
- * the groove's width is a function of depth and lives in `vProfile.ts` rather than here; a ball or
- * bull nose is still refused by name. For a flat end mill the radius is otherwise unused, because
- * nothing is ever offset.
+ * a cone. A V trace is exactly the case the "one cutter wide" idea never covered, which is why the
+ * groove's width is a function of depth and lives in `vProfile.ts` rather than here; a ball or
+ * bull nose is still refused by name. For a flat end mill the radius is otherwise unused.
  *
  * CONVENTIONAL vs CLIMB is meaningless here: the cutter is on the line, and it cuts both walls of
  * the groove in one pass, so there is no "inside" to walk. `MILLING` (`engraveJob.ts`) applies to

@@ -65,6 +65,48 @@ const CAP_HEIGHT_UNITS: number = (() => {
 const FALLBACK_CHAR = '?';
 
 /**
+ * Options for {@link strokeGlyphPaths} (#409). Both default to the font's own layout, so a caller
+ * that passes nothing gets exactly the pre-#409 output — the two job fields that feed them are
+ * optional, and the panel and specs that typeset in the pure font keep working unchanged.
+ */
+export interface StrokeTypesetOptions {
+  /**
+   * Horizontal CONDENSE (#409): x is multiplied by this, y is NOT, so the cap height still equals
+   * `size` — the line gets shorter without its letters getting shorter, which is what lets a line
+   * bound by its LENGTH gain height. 1 (the default) is the face's own widths.
+   */
+  widthScale?: number;
+  /**
+   * The width the cutter removes on the cut at the item's depth, mm (#409). The layout keeps at
+   * least this much CLEAR, uncut surface between two adjacent glyphs' ink. A groove reaches
+   * `cutWidth / 2` to either side of the centre line it is cut on, so the two neighbours each eat
+   * `cutWidth / 2` from the gap between them and the rule
+
+   *     inkGap − cutWidth ≥ cutWidth   ⟺   inkGap ≥ 2·cutWidth
+
+   * is what this enforces: wherever the font's own advance leaves a tighter ink gap, an extra
+   * advance is inserted to make it up. 0 (the default) inserts nothing — the font's own spacing.
+   * The caller computes the number (it needs the job's tool and the item's depth, neither of which
+   * this pure module sees).
+   */
+  minGapCutWidth?: number;
+}
+
+/** The x-extent of a glyph's ink at x-scale `gx`, in the layout frame, or `null` for no strokes. */
+function glyphInkX(strokes: readonly (readonly [number, number][])[], gx: number): { min: number; max: number } | null {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const stroke of strokes) {
+    for (const [x] of stroke) {
+      const xs = x * gx;
+      if (xs < min) min = xs;
+      if (xs > max) max = xs;
+    }
+  }
+  return max > -Infinity ? { min, max } : null;
+}
+
+/**
  * Typeset `text` in a single-stroke font as open polylines, in millimetres, with the BASELINE on
  * y = 0 and y increasing up (the job frame's convention). `size` is the cap height in mm, the same
  * meaning as `EngraveLabel.size` and `TextLabel.size`.
@@ -74,23 +116,158 @@ const FALLBACK_CHAR = '?';
  * spacing is the font's, not a constant. A character with no glyph (a hand-edited file, a
  * non-ASCII symbol) typesets as '?'. Whitespace advances with no strokes.
  *
+ * `options` (#409) is the only thing that moves a glyph off the face's own placement: `widthScale`
+ * condenses the line, and `minGapCutWidth` opens up any gap the font leaves tighter than the cut
+ * needs (see {@link StrokeTypesetOptions}). With neither, this is the face's own layout, unchanged.
+ *
  * The placement to a centre (`labelProfile`'s centring) is the caller's, so this stays the pure
  * baseline-at-origin layout the two item kinds share.
  */
-export function strokeGlyphPaths(text: string, fontId: StrokeFontId, size: Mm): [Mm, Mm][][] {
+export function strokeGlyphPaths(
+  text: string,
+  fontId: StrokeFontId,
+  size: Mm,
+  options: StrokeTypesetOptions = {},
+): [Mm, Mm][][] {
   const font = strokeFontById(fontId);
   const scale = size / CAP_HEIGHT_UNITS;
+  const gx = scale * (options.widthScale ?? 1); // condense applies to x only; y stays `scale`
+  const requiredInkGap = 2 * (options.minGapCutWidth ?? 0);
   const paths: [Mm, Mm][][] = [];
   let penX = 0;
+  // The layout-frame x of the previous INKED glyph's right-most ink, or null before the first ink.
+  let prevInkMax: number | null = null;
   for (const char of text) {
     const glyph = font.glyphs[char] ?? font.glyphs[FALLBACK_CHAR];
     if (!glyph) continue;
     const [left, right, strokes] = glyph;
+    const ink = glyphInkX(strokes, gx);
+    // The clear-surface rule: bump this glyph right until the ink gap to the previous inked glyph
+    // is at least `2 * cutWidth`. Only when a cut width was given, and only between two glyphs
+    // that both carry ink (whitespace neither eats nor must be kept clear of).
+    if (requiredInkGap > 0 && ink !== null && prevInkMax !== null) {
+      const naturalGap = penX + ink.min - prevInkMax;
+      if (naturalGap < requiredInkGap) penX += requiredInkGap - naturalGap;
+    }
     for (const stroke of strokes) {
       if (stroke.length < 2) continue; // a single point is not a line to cut
-      paths.push(stroke.map(([x, y]): [Mm, Mm] => [penX + x * scale, -y * scale]));
+      paths.push(stroke.map(([x, y]): [Mm, Mm] => [penX + x * gx, -y * scale]));
     }
-    penX += (right - left) * scale;
+    if (ink !== null) prevInkMax = penX + ink.max;
+    penX += (right - left) * gx;
   }
   return paths;
+}
+
+/**
+ * Offset a polyline laterally by `distance`, mm — positive to the LEFT of travel, negative right
+ * (#409). An interior vertex gets a MITER join up to `MITER_LIMIT`, and is CHAMFERED above it: the
+ * two offset lines stop on their own segment's normal, so a sharp apex (the "A", "K", "W", "<")
+ * cannot throw a spike past the width the spacing rule budgeted. The two ends move on their own
+ * segment's normal (a flat cap), so the offset copy does not grow past the stroke's ends. A
+ * zero-length segment is skipped and the neighbouring vertex absorbs it.
+ *
+ * Pure, so the bold passes that use it are testable without a cutter or a job.
+ */
+export function offsetPolyline(path: readonly [Mm, Mm][], distance: number): [Mm, Mm][] {
+  const copy = (): [Mm, Mm][] => path.map(([x, y]): [Mm, Mm] => [x, y]);
+  if (distance === 0 || path.length < 2) return copy();
+
+  // Unit LEFT normal of each segment (null for a zero-length segment).
+  const normals: ([number, number] | null)[] = [];
+  for (let i = 0; i < path.length - 1; i++) {
+    const [x0, y0] = path[i]!;
+    const [x1, y1] = path[i + 1]!;
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.hypot(dx, dy);
+    normals.push(len < 1e-12 ? null : [-dy / len, dx / len]);
+  }
+  // The nearest usable normal for an endpoint, scanning inward to skip zero-length segments.
+  const endNormal = (fromStart: boolean): [number, number] | null => {
+    if (fromStart) {
+      for (let i = 0; i < normals.length; i++) if (normals[i]) return normals[i]!;
+    } else {
+      for (let i = normals.length - 1; i >= 0; i--) if (normals[i]) return normals[i]!;
+    }
+    return null;
+  };
+
+  // A miter reaches `|distance| / cos(θ/2)` from the vertex. Past `MITER_LIMIT` that is a spike: at
+  // a 40° apex it is 2.9·|distance|, so the outer bold pass's groove edge lands ~1.39 mm from the
+  // vertex against the ~0.75 mm the spacing rule budgeted. Above the limit the join is CHAMFERED —
+  // both offset lines stop at `|distance|`, exactly the budget — instead of spiking.
+  const MITER_LIMIT = 1.5;
+  const out: [Mm, Mm][] = [];
+  for (let i = 0; i < path.length; i++) {
+    const [x, y] = path[i]!;
+    if (i === 0 || i === path.length - 1) {
+      const nm = endNormal(i === 0);
+      out.push(nm ? [x + nm[0] * distance, y + nm[1] * distance] : [x, y]);
+      continue;
+    }
+    const n1 = normals[i - 1]!;
+    const n2 = normals[i]!;
+    if (!n1 && !n2) {
+      out.push([x, y]);
+      continue;
+    }
+    if (!n1 || !n2) {
+      const nm = (n1 ?? n2)!;
+      out.push([x + nm[0] * distance, y + nm[1] * distance]);
+      continue;
+    }
+    let mx = n1[0] + n2[0];
+    let my = n1[1] + n2[1];
+    const ml = Math.hypot(mx, my);
+    if (ml < 1e-9) {
+      // A 180° reversal: the offset lines are parallel and never meet; use this segment's normal.
+      out.push([x + n1[0] * distance, y + n1[1] * distance]);
+      continue;
+    }
+    mx /= ml;
+    my /= ml;
+    // miter length = |distance| / cos(θ/2); cos(θ/2) is the miter direction's projection on n1.
+    const cos = mx * n1[0] + my * n1[1];
+    const ratio = 1 / Math.max(cos, 1e-6);
+    if (ratio > MITER_LIMIT) {
+      // Chamfer: each offset line ends on its own segment's normal, `|distance|` from the vertex.
+      out.push([x + n1[0] * distance, y + n1[1] * distance]);
+      out.push([x + n2[0] * distance, y + n2[1] * distance]);
+      continue;
+    }
+    out.push([x + mx * distance * ratio, y + my * distance * ratio]);
+  }
+  return out;
+}
+
+/**
+ * Expand each stroke of a typeset label into the parallel passes a BOLD cut needs (#409), so the
+ * UNION of the passes' grooves reaches `weight` mm wide. `cutWidth` is the width ONE pass removes
+ * at the item's depth (a V groove's top opening, or a flat cutter's diameter).
+ *
+ * The passes are placed symmetrically from `−(weight − cutWidth)/2` to `+(weight − cutWidth)/2` at
+ * a step no larger than `cutWidth`, so the neighbouring grooves always overlap and no uncut spine
+ * is left between them (#191's rule). They share the stroke's depth, so a re-cut cannot gouge the
+ * floor below it (#409: depth is unchanged), and the end offset is a flat cap, so the pass does not
+ * run past the stroke's end. When `weight` is not wider than a single pass — or no cut width is
+ * known — the strokes come back untouched: bold was not asked for, or nothing changed it.
+ */
+export function boldStrokePasses(
+  paths: readonly (readonly [Mm, Mm][])[],
+  cutWidth: number,
+  weight: number,
+): [Mm, Mm][][] {
+  const clone = (): [Mm, Mm][][] => paths.map((p) => p.map(([x, y]): [Mm, Mm] => [x, y]));
+  if (!(cutWidth > 0) || !(weight > cutWidth)) return clone();
+
+  const span = weight - cutWidth; // the distance the outer pass centres must cover, total
+  const steps = Math.max(1, Math.ceil(span / cutWidth));
+  const step = span / steps;
+  const offsets: number[] = [];
+  for (let i = 0; i <= steps; i++) offsets.push(-span / 2 + i * step);
+
+  const out: [Mm, Mm][][] = [];
+  for (const path of paths) for (const offset of offsets) out.push(offsetPolyline(path, offset));
+  return out;
 }

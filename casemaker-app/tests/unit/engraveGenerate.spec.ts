@@ -3,7 +3,9 @@
 // `.nc` a user saves is the text this function returns, never a re-derivation.
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 
+import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { tl } from './helpers/manifoldExec';
 import { generate, regions } from './helpers/engravePipeline';
 import { frameCorners } from '@/workers/sim/engraveGenerate';
@@ -26,7 +28,7 @@ import { viseForNewJob } from '@/engine/cnc/fixture';
 import { defaultBadgeParams } from '@/types/badge';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { cuttingForTrace, cuttingRadiusForSweep, flatEndMill, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
-import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveTraceItem } from '@/types/engraveJob';
+import type { EngraveDrill, EngraveJob, EngraveKeepOut, EngraveLabel, EngraveLineItem, EngraveStrokeLabelItem, EngraveTraceItem } from '@/types/engraveJob';
 
 describe('engraveGenerate with a saved machine frame (#297)', () => {
   const read = calibrationFromReplies(new Map(Object.entries(Z1_FRAME_REPLIES)), {
@@ -825,7 +827,14 @@ describe('a V-bit trace job (#405)', () => {
   };
 
   /** A Hershey stroke-label trace, reading along +Y (rotation 90°) like the bench job's two lines. */
-  const label = (id: string, text: string, size: number, x: number, depth = 1): EngraveTraceItem => ({
+  const label = (
+    id: string,
+    text: string,
+    size: number,
+    x: number,
+    depth = 1,
+    over: Partial<EngraveStrokeLabelItem> = {},
+  ): EngraveStrokeLabelItem => ({
     id,
     kind: 'stroke-label',
     text,
@@ -835,17 +844,67 @@ describe('a V-bit trace job (#405)', () => {
     rotation: 90,
     depth,
     enabled: true,
+    ...over,
   });
 
-  it('cuts two stroke-label traces with the 30° × 0.3 mm bit and posts a clean program', () => {
-    const job = traceJob([label('title', 'Single Barrel', 7.7, 13.69), label('sub', '(Like the Whiskey)', 5.4, 25.64)]);
-    const g = generate(tl, job);
+  /** The COMMITTED bench job, straight off disk — the real document, not a re-typed copy. */
+  const benchJob = (): EngraveJob => {
+    const raw = readFileSync(new URL('../../../docs/bench/single-barrel.job.json', import.meta.url), 'utf8');
+    const parsed = parseEngraveJob(JSON.parse(raw));
+    if (!parsed.ok) throw new Error(parsed.errors.join('; '));
+    return parsed.job;
+  };
+
+  /** Motion lines only: the header carries the app version and the tool record, not geometry. */
+  const motionLines = (nc: string): string[] =>
+    nc
+      .split('\n')
+      .filter((l) => /^\s*G[01]\b/.test(l))
+      .map((l) => l.trim());
+
+  /**
+   * A #409-PREVIEW variant of the title line. This is NOT what `docs/bench/single-barrel.job.json`
+   * states — that job carries none of the new fields and is the plain V-bit job (see the committed
+   * job test below). These are the values the #409 preview was cut from: bigger, bold, condensed and
+   * spaced so the letters stay a groove apart and the line stays inside the blank's edge margin. The
+   * line runs along +Y, so the length the margin bounds is Y.
+   */
+  const title = (x = 13.69): EngraveTraceItem =>
+    label('title', 'Single Barrel', 8.6, x, 1, { widthScale: 0.78, weight: 1.5, spacing: 'cut-width' });
+
+  it('cuts the COMMITTED bench job end to end and regenerates its motion lines byte-for-byte', () => {
+    // The plain V-bit path, against the real document. `docs/bench/single-barrel.job.json` states
+    // none of the #409 fields, so it must produce exactly the .nc committed beside it — the default
+    // identity the #409 review asked for, pinned on the MOTION lines.
+    const g = generate(tl, benchJob());
     expect(g.ok).toBe(true);
     expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
     // Two operations, one per trace (#219's CAM appends after the region CAM's — here there is none).
     expect(g.cam!.operations).toBe(2);
-    // The hand file's own numbers (#185), now reached through the feeds row: S12000, F200 plunge,
-    // F500 along, ONE pass straight to 1.0 mm deep.
+    // The hand file's own numbers (#185), now reached through the feeds row.
+    expect(g.nc).toContain('S12000');
+    expect(g.nc).toContain('G1 Z-1 F200');
+    expect(g.nc).toContain('F500');
+    // The header states the CONE — a reader that only saw `diameter=3.175` would picture a shank-wide
+    // cutter. `type=Engraving` is OUR word for a non-flat cutter (#268/#187, see `post/z1.ts`).
+    expect(g.nc).toContain('tipdiameter=0.3');
+    expect(g.nc).toContain('|angle=30|halfAngle=15');
+    expect(g.nc).toContain('type=Engraving');
+    // The tool record the app writes names the cutter it was written for (#332).
+    expect(g.nc).toContain(';@CM|TOOL|key=inv:kz-engrave-30-0-3');
+    const committed = readFileSync(new URL('../../../docs/bench/single-barrel.nc', import.meta.url), 'utf8');
+    expect(motionLines(g.nc!)).toEqual(motionLines(committed));
+  });
+
+  it('cuts two BOLD, condensed, spaced stroke-label traces with the same bit (#409 fields)', () => {
+    const job = traceJob([
+      title(),
+      label('sub', '(Like the Whiskey)', 5.4, 25.64, 1, { widthScale: 0.94, spacing: 'cut-width' }),
+    ]);
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(g.cam!.operations).toBe(2);
     expect(g.nc).toContain('S12000');
     expect(g.nc).toContain('G1 Z-1 F200');
     expect(g.nc).toContain('F500');
@@ -856,13 +915,12 @@ describe('a V-bit trace job (#405)', () => {
     expect(plunges.length).toBeGreaterThan(0);
     expect(plunges.every((line) => line.includes('Z-1 F200'))).toBe(true);
     expect(g.nc).not.toMatch(/G1 Z-0\./);
-    // The header states the CONE — a reader that only saw `diameter=3.175` would picture a shank-wide
-    // cutter. `type=Engraving` is OUR word for a non-flat cutter (#268/#187, see `post/z1.ts`).
     expect(g.nc).toContain('tipdiameter=0.3');
     expect(g.nc).toContain('|angle=30|halfAngle=15');
     expect(g.nc).toContain('type=Engraving');
-    // The tool record the app writes names the cutter it was written for (#332).
     expect(g.nc).toContain(';@CM|TOOL|key=inv:kz-engrave-30-0-3');
+    // Bold really widened the strokes: more motion than the one-pass-per-stroke default.
+    expect(motionLines(g.nc!).length).toBeGreaterThan(0);
   });
 
   it('never takes the flat path: `cuttingRadiusForSweep` refuses the cone, the trace path takes it', () => {
@@ -883,7 +941,7 @@ describe('a V-bit trace job (#405)', () => {
   });
 
   it('refuses a REGION cut with a V-bit by name, pointing at #221', () => {
-    const job = traceJob([label('title', 'Single Barrel', 7.7, 13.69)], {
+    const job = traceJob([title()], {
       labels: defaultEngraveJob().labels.slice(0, 1),
     });
     const g = generate(tl, job);
@@ -903,7 +961,7 @@ describe('a V-bit trace job (#405)', () => {
     // maintainer's ruling, and the claim is about the PAIR — so the job stops rather than being
     // cut on numbers nobody measured (#405 review). The name alone states the line here.
     const metal = bit30({ name: 'Engraving V-bit 30 x 0.5 (Metal)', tipDiameter: 0.5, diameter: 3.175 });
-    const job = traceJob([label('title', 'Single Barrel', 7.7, 13.69)], { tool: metal });
+    const job = traceJob([title()], { tool: metal });
     const g = generate(tl, job);
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
@@ -927,14 +985,14 @@ describe('a V-bit trace job (#405)', () => {
       angle: 60,
       halfAngle: 30,
     });
-    const job = traceJob([label('title', 'Single Barrel', 7.7, 13.69)], { tool: byCode });
+    const job = traceJob([title()], { tool: byCode });
     const g = generate(tl, job);
     expect(g.ok).toBe(false);
     const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
     expect(refusal).toBeDefined();
     expect(refusal!.severity).toBe('error');
     // …and the same cutter on a METAL blank is exactly what that bit is for: no refusal.
-    const onMetal = generate(tl, traceJob([label('title', 'Single Barrel', 7.7, 13.69)], {
+    const onMetal = generate(tl, traceJob([title()], {
       tool: byCode,
       stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'aluminium-6061' },
     }));
@@ -955,7 +1013,7 @@ describe('a V-bit trace job (#405)', () => {
       angle: 60,
       halfAngle: 30,
     });
-    const g = generate(tl, traceJob([label('title', 'Single Barrel', 7.7, 13.69)], { tool: owned }));
+    const g = generate(tl, traceJob([title()], { tool: owned }));
     expect(g.ok).toBe(false);
     expect(g.stage).toBe('findings');
     expect(g.nc).toBeNull();
@@ -967,7 +1025,7 @@ describe('a V-bit trace job (#405)', () => {
   });
 
   it('is swept by the COLUMN engine, and the run sheet says so (#405)', () => {
-    const job = traceJob([label('title', 'Single Barrel', 7.7, 13.69)]);
+    const job = traceJob([title()]);
     const g = generate(tl, job);
     expect(g.ok).toBe(true);
     const session = createSimSession(tl);

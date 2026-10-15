@@ -15,7 +15,7 @@ import {
   type Profile,
 } from '@/engine/compiler/profile';
 import { resolveFont } from '@/engine/fonts/registry';
-import { strokeGlyphPaths } from '@/engine/fonts/stroke/strokeFont';
+import { strokeGlyphPaths, boldStrokePasses } from '@/engine/fonts/stroke/strokeFont';
 import type {
   EngraveAnyItem,
   EngraveCombinedShape,
@@ -24,6 +24,7 @@ import type {
   EngraveKeepOut,
   EngraveLabel,
   EngraveShape,
+  EngraveStrokeLabelItem,
   EngraveTraceItem,
   EngraveVectorShape,
 } from '@/types/engraveJob';
@@ -32,6 +33,8 @@ import type { Mm } from '@/types/units';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import { supportedFootprint } from '@/engine/cnc/sacrificial';
 import { sweepRadiusForJob } from '@/engine/cnc/toolRegistry';
+import type { Tool } from '@/engine/cnc/tool';
+import { grooveWidthAt, vCone } from '@/engine/cnc/vProfile';
 import { defaultBoundaryMargin, voidFloor, voidMargin } from '@/engine/cnc/engrave/depthBounds';
 import { inkBoxOf, type InkBox, type InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import { voidCeilingFor } from '@/engine/cnc/layerStack';
@@ -565,20 +568,58 @@ function pathsBounds(
  * `position` — exactly `labelProfile`'s three moves, so the same text in a stroke font lands where
  * the outline-font label would.
  *
+ * `tool` (#409) is the cutter the job names, and it is what the three new stroke-label fields are
+ * about: the typeset layout needs the width a pass removes at the item's depth, so `spacing:
+ * 'cut-width'` can open the gaps between glyphs to leave clear surface and a `weight` can widen
+ * each stroke into parallel passes; `widthScale` condenses the line and needs no tool. The numbers
+ * are computed HERE — the one place the job's tool is in scope — and handed to the pure typesetter;
+ * with no tool, or a tool that is no cone (a flat end mill's cut width is its diameter, not a V's
+ * depth-dependent opening), no numbers are computed and the layout is exactly the font's own, so a
+ * tool-less job is unchanged. That `tool` is OPTIONAL so the pure callers (specs, the sim's own
+ * region builder) need not have one.
+ *
  * A blank stroke label yields no paths; `toPartPlan` then keeps it out of the plan rather than
  * emitting an empty operation.
  */
-export function tracePaths(item: EngraveTraceItem): { paths: [Mm, Mm][][]; closed: boolean[] } {
+export function tracePaths(
+  item: EngraveTraceItem,
+  tool?: Tool | null,
+): { paths: [Mm, Mm][][]; closed: boolean[]; groups: number[] } {
   if (item.kind === 'line') {
     const path = item.points.map(([x, y]): [Mm, Mm] => {
       const [rx, ry] = rotateAboutOrigin([x, y], item.rotation);
       return [rx + item.position.x, ry + item.position.y];
     });
-    return { paths: [path], closed: [item.closed] };
+    return { paths: [path], closed: [item.closed], groups: [0] };
   }
 
-  const raw = strokeGlyphPaths(item.text, item.font, item.size);
-  if (raw.length === 0) return { paths: [], closed: [] };
+  // The cut width of ONE pass at this item's depth, from the job's tool, and the width it actually
+  // reaches once a bold `weight` widens it. Null when the tool is absent or is not a cone.
+  const width = strokeCutWidth(item, tool);
+
+  // Spacing is OPT-IN (#409 review): `spacing: 'cut-width'` is the field that opens the glyph
+  // gaps, so a job that states neither it nor `weight` lays out exactly as the font's own metrics
+  // do — which is what keeps every stored V-bit job (the committed bench job included)
+  // regenerating byte-for-byte. It needs the cone's cut width, so a tool-less or flat job is
+  // unchanged either way.
+  const gapWidth = item.spacing === 'cut-width' && width !== null ? width.cut : 0;
+  let raw = strokeGlyphPaths(item.text, item.font, item.size, {
+    widthScale: item.widthScale,
+    minGapCutWidth: gapWidth,
+  });
+  if (raw.length === 0) return { paths: [], closed: [], groups: [] };
+  // Bold: replace each stroke with the parallel passes that bring its cut up to `weight`. The
+  // passes share the depth, so the floor is not re-cut below it; only a known, narrower single-pass
+  // width can be widened, so a tool-less job (or a `weight` no wider than one pass) is untouched.
+  const bold = width !== null && item.weight !== undefined && item.weight > width.natural;
+  const sourceCount = raw.length;
+  if (bold) raw = boldStrokePasses(raw, width.natural, item.weight!);
+  // The passes of ONE source stroke are one group: they are meant to merge into a single wide
+  // stroke, so the stroke-merge check must not report them against each other (only against other
+  // strokes). A non-bold path is its own group, which restores the check's old behaviour exactly.
+  const passes = bold ? raw.length / sourceCount : 1;
+  const groups = raw.map((_, i) => Math.floor(i / passes));
+
   const box = pathsBounds(raw);
   const cx = box ? (box.min[0] + box.max[0]) / 2 : 0;
   const cy = box ? (box.min[1] + box.max[1]) / 2 : 0;
@@ -588,7 +629,28 @@ export function tracePaths(item: EngraveTraceItem): { paths: [Mm, Mm][][]; close
       return [rx + item.position.x, ry + item.position.y];
     }),
   );
-  return { paths, closed: paths.map(() => false) };
+  return { paths, closed: paths.map(() => false), groups };
+}
+
+/**
+ * The width a `stroke-label`'s cut reaches on the blank, mm (#409): the width of ONE pass at the
+ * item's depth for a V cone — `natural` — and the wider width a bold `weight` lifts it to — `cut`
+ * (equal to `natural` when there is no bold, or the weight is no wider than one pass).
+ *
+ * `null` when the job's tool is absent, or is not a cone. A flat end mill's cut is its diameter at
+ * every depth, and it never closes a letter, so both the layout (`tracePaths`) and the stroke-merge
+ * check (`traceSelfOverlapFindings`) leave such a job exactly as it was — that is the "do not
+ * regress a job with no tool" rule of #409, and the reason the two readers share this one number
+ * rather than each guessing it.
+ */
+function strokeCutWidth(
+  item: EngraveStrokeLabelItem,
+  tool: Tool | null | undefined,
+): { natural: number; cut: number } | null {
+  const cone = tool ? vCone(tool) : null;
+  if (cone === null) return null;
+  const natural = grooveWidthAt(cone, item.depth);
+  return { natural, cut: Math.max(natural, item.weight ?? 0) };
 }
 
 /**
@@ -780,11 +842,18 @@ export interface TraceSelfOverlap {
  * The test is between CAPSULES, not the drawn path: two parallel strokes 0.8 mm apart with a 1 mm
  * cutter (r = 0.5) come closer than 1.0 mm and are reported. `overlap` is the amount they merge
  * by.
+ *
+ * `groups` (#409), when given, is a group index per path: two segments in the SAME group are
+ * skipped, exactly as two segments of one path are. A bold stroke's parallel passes share a group
+ * because they are SUPPOSED to merge into one wide stroke, and reporting them as merged would tell
+ * the operator to "space the lines apart" on a bold label — the opposite of the intent. Undefined
+ * (the default) groups nothing, so a caller predating #409 sees every pair.
  */
 export function traceSelfOverlaps(
   paths: readonly (readonly [Mm, Mm][])[],
   closed: readonly boolean[],
   radius: Mm,
+  groups?: readonly number[],
 ): TraceSelfOverlap[] {
   if (radius <= 0) return [];
   const threshold = 2 * radius;
@@ -796,6 +865,7 @@ export function traceSelfOverlaps(
     const sClosed = closed[s.path] ?? false;
     for (let j = i + 1; j < segs.length; j++) {
       const t = segs[j]!;
+      if (t.path !== s.path && groups !== undefined && groups[s.path] === groups[t.path]) continue;
       if (t.path === s.path) {
         const count = countPerPath[s.path]!;
         const diff = (t.segment - s.segment + count) % count;
@@ -847,8 +917,12 @@ export function traceSelfOverlapFindings(
     if (!item.enabled || item.construction) continue;
     const radius = radiusAt(item.depth);
     if (radius === null) continue;
-    const { paths, closed } = tracePaths(item);
-    const overlaps = traceSelfOverlaps(paths, closed, radius);
+    const { paths, closed, groups } = tracePaths(item, job.tool);
+    // Judge the merge at the NATURAL half-width (#409 review). A bold stroke's `paths` are the
+    // already-OFFSET passes, so they are checked as they are: applying the bold `weight / 2` to a
+    // centreline that has already been moved out would report fusions the passes themselves do not
+    // make. The passes of one stroke are one group and are not reported against each other.
+    const overlaps = traceSelfOverlaps(paths, closed, radius, groups);
     if (overlaps.length === 0) continue;
     const worst = overlaps.reduce((m, o) => Math.max(m, o.overlap), 0);
     out.push({
@@ -1477,7 +1551,7 @@ export function toPartPlan(job: EngraveJob): PartPlan {
   const traces: PartPlan['traces'] = [];
   for (const item of job.traces ?? []) {
     if (!item.enabled || item.construction) continue;
-    const { paths, closed } = tracePaths(item);
+    const { paths, closed } = tracePaths(item, job.tool);
     if (paths.length === 0) continue;
     traces.push({ id: item.id, name: traceOperationName(item), paths, closed, depth: item.depth });
   }

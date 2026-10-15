@@ -381,6 +381,33 @@ export interface EngraveStrokeLabelItem extends EngraveTraceBase {
   font: StrokeFontId;
   /** Cap height, mm — the same meaning as `EngraveLabel.size`. */
   size: Mm;
+  /**
+   * Horizontal CONDENSE (#409), default 1 (absent). x is scaled by this and y is not, so a line
+   * bound by its LENGTH (a long name across a rectangle) gains height without getting longer — the
+   * cap height still equals `size`. Under 1 is narrower; over 1 is wider.
+   */
+  widthScale?: number;
+  /**
+   * Target CUT width for a BOLD stroke, mm (#409) — the width the union of the stroke's parallel
+   * passes must reach. Absent = no bold (one cutter width). A number, NOT the `'regular'|'bold'`
+   * enum `EngraveLabel` carries: that one picks a TTF face, this one states a V groove's measured
+   * width. Only a V cone has the depth-dependent width bold offsets are built from, so a job whose
+   * tool is absent or is not a cone ignores it (the layout is then the font's own).
+   */
+  weight?: Mm;
+  /**
+   * Widen the gaps between neighbouring glyphs to at least one groove's width of CLEAR, uncut
+   * surface (#409). OPT-IN and ABSENT by default, so a job that states nothing here lays out
+   * exactly as the font's own metrics do and regenerates byte-for-byte — turning this on by
+   * default would silently re-cut every stored V-bit job.
+   *
+   * `'cut-width'` is the one value: the layout inserts tracking so that `inkGap ≥ 2 × cutWidth`
+   * between two adjacent glyphs (a groove reaches half its width to either side of the centre
+   * line it is cut on, so each neighbour eats half the gap). It needs a V cone — the cone's
+   * depth-dependent opening is what makes "a groove's width" a number — so a tool-less or flat
+   * job ignores it, exactly as it ignores `weight`.
+   */
+  spacing?: 'cut-width';
 }
 
 export type EngraveTraceItem = EngraveLineItem | EngraveStrokeLabelItem;

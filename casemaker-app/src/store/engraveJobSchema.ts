@@ -50,6 +50,11 @@ const machineIdSchema = z
 
 /** The largest a label's cap height may be, mm. A blank this size is 12 mm thick; 100 mm is a guard, not a physical limit. */
 const MAX_LABEL_SIZE = 100;
+/**
+ * The widest a bold stroke's target cut width may be, mm (#409). A 30° bit 1 mm deep cuts 0.836 mm,
+ * so a few mm is the whole useful range; 20 mm is a parser guard, not a physical limit.
+ */
+const MAX_STROKE_WEIGHT = 20;
 /** Longest label text, characters. Matches nothing physical — a parser and display guard. */
 const MAX_TEXT_LENGTH = 200;
 
@@ -218,6 +223,16 @@ const traceKindsSchema = z.discriminatedUnion('kind', [
     text: z.string().max(MAX_TEXT_LENGTH),
     font: z.string().min(1),
     size: z.number().finite().min(1).max(MAX_LABEL_SIZE),
+    // #409 — all three OPTIONAL (absent, not defaulted) so a pre-#409 job carries no key and
+    // round-trips byte-for-byte. `widthScale` condenses x only; `weight` is a bold target cut
+    // width, the width the stroke's parallel passes must span; `spacing: 'cut-width'` is the
+    // opt-in that opens the glyph gaps to a groove's width of clear surface. Spacing is NOT on by
+    // default even when the tool is a cone — that would silently re-cut every stored V-bit job.
+    // Unknown keys are stripped by this schema, so these three MUST live here or the engine never
+    // sees them (the #219/#285 trap).
+    widthScale: z.number().finite().min(0.5).max(2).optional(),
+    weight: z.number().finite().positive().max(MAX_STROKE_WEIGHT).optional(),
+    spacing: z.literal('cut-width').optional(),
   }),
 ]);
 
