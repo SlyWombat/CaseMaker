@@ -36,6 +36,7 @@ import { useMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { MachineConsole } from './MachineConsole';
 import { MachineVacuum } from './MachineVacuum';
+import { MachineStop } from './MachineStop';
 import { formatStamp, mm } from './display';
 
 /** One `label → value` pair in the card's two-column read-out. */
@@ -308,6 +309,8 @@ export function MachinesScope() {
               host={machine.host}
               port={machine.port}
             />
+            {/* #424 — Stop: `abort` for a running program, labelled as not the emergency stop. */}
+            <MachineStop host={machine.host} port={machine.port} />
             {/* #302 item 4 — the console, collapsed, at the foot of the card. It owns its own
                 `canDriveMachine` rule and draws nothing without it, so a web build sees the card it
                 has always seen (#354's rule: do not offer what cannot work). */}
