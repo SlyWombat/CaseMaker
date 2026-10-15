@@ -96,6 +96,9 @@ direct 3.82 mm by about 0.3 mm, cause not established; the direct reading is the
 cut depths are unaffected because each is 5.4 minus a reading over the same nut. So the jaw top stands 0.7–1.2 mm below the blank's top, and
 `stockProud` stays a per-job value; only the jaw geometry is a constant.
 
+**The wired probe's tip, measured 2026-10-15:** 2.0 mm outside diameter, a hollow cylinder with
+no ball (A8 in the day-1 sheet). The code still assumes 3 mm (`PROBE_SPEC`).
+
 `jawStartY` is not a vise constant: it depends on where the blank is clamped along the 100 mm jaw.
 
 Not changed in the code yet: `DEFAULT_VISE` still holds 10.5 / 9 / 80 (0116f36). It moves to the

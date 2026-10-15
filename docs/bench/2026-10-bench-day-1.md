@@ -341,15 +341,15 @@ used the same). The tip sets how far a touch stands off a corner and how short a
 the plan's *edges and axes* are sound whatever it is, but the millimetre along them is nominal until
 this is measured. Nothing in A1–A7 measures it: A1 is cutters, and the probe is not one.
 
-**Recorded:** _not yet run — one number + one photo._
+**Recorded 2026-10-15 (calipers, maintainer):**
 
 | Field | Value |
 |---|---|
-| Probe (3D Probe / 3D Probe Rod / wired Z-only) | |
-| Tip diameter, mm (widest) | |
-| Stem diameter, mm (if a ball on a stem) | |
+| Probe (3D Probe / 3D Probe Rod / wired Z-only) | wired probe (the one held in the collet for touch-off) |
+| Tip diameter, mm (widest) | **2.0**: outside of the shaft just above its end. No ball: the end is a hollow tip that sometimes shows a red light about 2 mm across |
+| Stem diameter, mm (if a ball on a stem) | n/a, a plain cylinder, so a side touch's stand-off is the 1.0 mm radius |
 
-Photo: `docs/bench/img/A8-probe-tip.jpg`
+Photo: not taken.
 
 **Goes to:** `PROBE_SPEC.tipDiameter` in `engrave/registration.ts`, replacing 3 and its
 `PROVISIONAL (#208)` note; #188 (the probe plan's stand-off). Pin it with a `cncProbePlan.spec.ts`
