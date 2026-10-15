@@ -826,8 +826,10 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
   // occupies X [0,100], Y [0,60], Z [-12,0] and cuts are negative Z.
   const FSLAB = { kind: 'prism' as const, outline: { kind: 'p-rect' as const, size: [100, 60] as [number, number] }, thickness: 12 };
   const FSTOCK = { length: 100, width: 60, thickness: 12 };
-  // The issue's parameters: jaw tops at Z = -4 (stockProud 4), 15 mm jaws, jawStartY -10 and
-  // jawLength 80 so the jaws span Y -10..70; uncertainty 0 unless a test says otherwise.
+  // The shipped vise as the job would now carry it: jaw tops at Z = -4 (stockProud 4), 10 mm jaws
+  // and a 100 mm bar starting at jawStartY -10, so the jaws span Y -10..90; uncertainty 0 unless a
+  // test says otherwise. (The cuts here all run inside Y 10..50, so the bar's length changes
+  // nothing they see — only the Z of the jaw tops and their X faces are in play.)
   const FVISE = { ...DEFAULT_VISE, uncertainty: 0 };
   const T3 = flatEndMill(3.175); // radius 1.5875
   /** A fixture job on the 12 mm blank: the default vise as its two inflated obstacle boxes. */
@@ -923,10 +925,12 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
     expect(warns[0]?.message).toContain('Toe clamp');
   });
 
-  it('#314: an unmeasured band that lifts a jaw above the stock top says so, and names the jaw', () => {
+  it('#314: an uncertainty band that lifts a jaw above the stock top says so, and names the jaw', () => {
     // The vise case, and the one a test with `uncertainty: 0` never sees: jaws declared BELOW the
-    // stock top (there they must be), and the 2 mm unmeasured band around them reaching above it.
-    // Reporting that as an obstacle "rising" would send the user looking for something on the part
+    // stock top (there they must be), and the band around them reaching above it. The band is 2 mm
+    // here rather than the shipped 0.5 (#208's caliper, 2026-10-13/15) — the band is the test's own
+    // input and any positive one does — but the message may not call it UNMEASURED any more.
+    // Reporting it as an obstacle "rising" would send the user looking for something on the part
     // that is not there — what rose was the uncertainty.
     const banded = stubSetup(FSLAB, HOLD, {
       fixture: {
@@ -940,7 +944,7 @@ describe('#204: the fixture is an obstacle the sweep refuses to cut into', () =>
     const warn = out.value.diagnostics.find((d) => d.code === 'holder-vs-fixture-unproven');
     expect(warn?.message).toContain('Vise fixed jaw (left)');
     expect(warn?.message).toContain('declared 1.905 mm below the stock top');
-    expect(warn?.message).toContain('unmeasured 2 mm band');
+    expect(warn?.message).toContain('2 mm uncertainty band');
     expect(warn?.message).toContain('lifts its top 0.095 mm ABOVE');
     expect(warn?.message).toContain("collet nut's size is not known");
   });

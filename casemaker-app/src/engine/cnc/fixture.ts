@@ -21,6 +21,23 @@ import { hasSacrificial, noneSacrificial, stripHeight, viseJawShift } from './sa
  * — #208 photographs and calipers the real vise, and refines the boxes only where a box is
  * shown to be wrong.
  *
+ * THE LEDGE IS A NOTE, NOT A THIRD BOX (#208, decided 2026-10-15, with the calipers in hand).
+ * Each soft jaw is an L: a 10 mm bar whose top is the jaw top, and a ledge 1.9 mm deep set 3.1 mm
+ * below that top, facing inward, which the blank sits on. The ledge is the one unmodelled feature
+ * that would carry material INSIDE the blank's own footprint (x 0…1.9 in from each jaw face), so
+ * it was worth asking for. Three reasons it stays out:
+ *   1. Its top plane IS the blank's underside — on a seated blank, `stockProud` + the 3.1 mm step =
+ *      the blank's thickness — so a box whose top is that plane, grown by any `uncertainty` at all,
+ *      would claim material *inside the blank* and refuse edge cuts that cut blank and nothing else.
+ *   2. No verified program reaches it. Over the part a cut stops at `thickness − minFloor`
+ *      (`verify.ts`), which is above the blank's underside, and the cutter column the sweep tests
+ *      rises FROM the tool tip — so the column never reaches the ledge's plane, let alone below it.
+ *      Only a `through` cut with `breakthrough` passes the underside at all, and nothing generates one.
+ *   3. Nothing that asks "what is in the way" needs it. The probe plan tests the jaw FACES
+ *      (`probePlan.ts` obstructionsOf), not the envelope, and the envelope's own Y span is the bar.
+ * Revisit if a through-cut with breakthrough is ever generated (the cutter would then pass the
+ * ledge's plane beside the blank's edge), or when a probe has to reach under the blank.
+ *
  * The work frame is the job frame (`/Simulation.md` §2, `toSetup`): origin at the stock's
  * top-front-left corner, +X to the right along the jaws' clamping direction, +Y away from the
  * operator, Z = 0 on the stock's top face with cuts at negative Z.
@@ -46,15 +63,36 @@ export const GRIP_MIN = 3;
  * Where a dimension came from is the whole point (decision 28), so the default uncertainty is
  * a function of the source, never a bare constant at the call site.
  *
- * PROVISIONAL (#208): both bands are guesses until the real vise is measured.
+ * The two bands were 2 and 0.5 while the jaw widths were only bounded by §11.8's probe bands — "a
+ * default is not a measurement". The jaws are calipered now (#208, 2026-10-13/15), so the shipped
+ * default rests on readings too and both sources carry the same band, which is a chosen figure
+ * rather than a reading the way either of the old two was (see `DEFAULT_UNCERTAINTY`). The function
+ * stays: a source that is NOT a measurement would still need a band of its own.
  */
 export function uncertaintyFor(source: ViseParams['source']): Mm {
   return source === 'default' ? DEFAULT_UNCERTAINTY : SAVED_UNCERTAINTY;
 }
 
-/** A default is not a measurement: the jaws may be anywhere in this band. PROVISIONAL (#208). */
-const DEFAULT_UNCERTAINTY: Mm = 2;
-/** A measurement still carries caliper/mounting error. PROVISIONAL (#208). */
+/**
+ * The band the SHIPPED default carries, mm. It was 2 while the jaws could have been anywhere in
+ * §11.8's bands; both jaw widths and the bar's length are calipered now
+ * (`docs/bench/2026-10-bench-plan.md`, "Z1 low-profile vise: product constants", 2026-10-13 and
+ * 2026-10-15) and the maintainer's ruling is that the vise is identical on every Z1 — so what is
+ * left is caliper and mounting error, the same residual a user's own saved measurement carries.
+ *
+ * The figure is CHOSEN, not measured (#391 review, item 3): nothing has calipered the spread of a
+ * remount, and it is not the caliper's own resolution. It is the number that has to cover clamping
+ * repeatability, the blank's dome and a hand-set origin's error, and it is deliberately the same
+ * for a saved measurement for the same reason — a reading does not make a remount repeatable. What
+ * it must NOT try to cover is any of those errors INDIVIDUALLY: the origin is the user's, and it
+ * is named on the run sheet rather than absorbed here (#391 review, item 2).
+ *
+ * `source` stays `'default'`: this is the SHIPPED set, not a reading of anyone's own vise, and the
+ * run sheet (`vise-default`) still says where it came from. What changed is that a cut near a jaw
+ * face is now judged against a number someone measured rather than against a 2 mm cloud.
+ */
+const DEFAULT_UNCERTAINTY: Mm = 0.5;
+/** A measurement still carries caliper/mounting error — the same figure, for the same reason. */
 const SAVED_UNCERTAINTY: Mm = 0.5;
 
 /**
@@ -65,55 +103,82 @@ const SAVED_UNCERTAINTY: Mm = 0.5;
 export const DEFAULT_STOCK_PROUD: Mm = 4;
 
 /**
+ * The soft jaws' ledge: its top sits this far below the jaw top, mm — a caliper reading, not a
+ * guess (#208, 2026-10-15, `docs/bench/2026-10-bench-plan.md`). A blank SEATED on the ledges
+ * therefore stands `thickness − LEDGE_STEP` proud of the jaw tops, and the ledge, not the stock,
+ * is what fixes that.
+ */
+export const LEDGE_STEP: Mm = 3.1;
+
+/**
  * How far a stock of `thickness` stands proud of the jaw tops by default, mm — the HONEST
  * default (#231 item 2).
  *
  * `stockProud` is a job input (`ViseParams.stockProud`) and stays one; this is the value the
  * SHIPPED default vise carries — what a new job starts from, and what `viseAfterStockEdit`
  * re-derives whenever an edit restates the blank's thickness (#344), so a job saved while the two
- * disagreed does not stay stuck. It used to be a bare 4 mm, which is not a
- * truth: on a stock at or under 4 mm thick — the 3.81 mm badge blank #165 cuts — a flat 4 mm is
- * taller than the whole blank and `validateVise` refuses it outright
- * (`vise-stock-proud-exceeds-thickness`), so the job had to override the vise by hand.
+ * disagreed does not stay stuck. It used to be a bare 4 mm, which is not a truth: on a stock at or
+ * under 4 mm thick — the 3.81 mm badge blank #165 cuts — a flat 4 mm is taller than the whole blank
+ * and `validateVise` refuses it outright (`vise-stock-proud-exceeds-thickness`), so the job had to
+ * override the vise by hand.
  *
- * So the default tracks the stock: the part stands proud by HALF its own thickness — never more
- * than the 4 mm working height — so at least as much of it is in the jaws as above them, on any
- * blank. On the 12 mm default blank this is exactly the shipped 4 mm, so nothing that used the
- * default changes. It is still unmeasured (`source: 'default'`), so `validateVise` warns.
+ * So the default tracks the stock, and takes the LOWER of the two rules that can apply:
+ *
+ *   - **the ledge** (#208 review, 2026-10-15) — a blank taller than the step seats on the soft
+ *     jaws' ledges and stands `thickness − LEDGE_STEP` proud: 0.72 mm on the 3.82 mm badge blank.
+ *     This is what the calipers describe, and it is the SAFER of the two: a lower blank puts the
+ *     modelled jaw top at `−stockProud`, so taking the seated value keeps that plane at or above
+ *     where the real jaw top is (the seated 0.72 and the 0.99 mm the 2026-10-15 probe read), and
+ *     the jaw box — grown by `uncertainty` — covers the real jaw. The half-thickness rule put the
+ *     modelled top 0.4–0.7 mm BELOW the real one on this blank, which is clearance the tool does
+ *     not really have;
+ *   - **half the thickness**, capped at the 4 mm working height — the case with no ledge to seat
+ *     on: a blank no taller than the step (its top would be at or under the jaw tops), or one
+ *     taller than 7.1 mm, where the cap is under the seated value and decides anyway. On the 12 mm
+ *     default blank this is the shipped 4 mm, so nothing that used the default changes.
  */
 export function defaultStockProud(thickness: Mm): Mm {
-  return Math.min(DEFAULT_STOCK_PROUD, thickness / 2);
+  const half = Math.min(DEFAULT_STOCK_PROUD, thickness / 2);
+  // A blank no taller than the step cannot be seated on the ledges at all — its top would be at or
+  // below the jaw tops — so there is no seated value to prefer and the working height stands.
+  if (thickness <= LEDGE_STEP) return half;
+  return Math.min(half, thickness - LEDGE_STEP);
 }
 
 /**
  * The shipped default `ViseParams` for the Z1 low-profile vise, for a job that has no saved
- * measurement. Published NOWHERE (/Fabrication.md §7.3): jaw capacity, jaw length, jaw height,
- * the slot and lip, and the fixed jaw's offset from the anchor pins are all unmeasured, so
- * every number here is a PROVISIONAL (#208) placeholder.
+ * measurement. The vise is identical on every Z1 (maintainer, 2026-10-13), so these are the
+ * product's own numbers — measured once on the reference unit, not per-user values. `source` stays
+ * `'default'` because they are not a reading of anyone's OWN vise; `measuredAt` stays absent for
+ * the same reason (it dates a reading, and this is a shipped set).
  *
- * The two jaw WIDTHS are the exception, and they are why they are not 15 any more (#391 review
- * item 7). §11.8 probed the jaw tops on the badge blank and puts the fixed jaw's top at roughly
- * 8–13 mm of material and the moving jaw's at roughly 6–12 (its top is narrow: "6 mm right of it is
- * already a miss"); a 15 mm jaw is outside both, and the material-scan plan reads a jaw's top as a
- * SURFACE — 15 would have it stand where the clamp has nothing, so a correct reading would look like
- * a fault. These are the middle of those two bands, and the shipped `uncertainty` (±2) sits inside
- * both: 8.5–12.5 inside the fixed jaw's 8–13, 7–11 inside the moving jaw's 6–12. Still `source:
- * 'default'`, still provisional — the C-series jaws measurement (#208) replaces all of it.
+ * MEASURED — the caliper table is the authority and this is a copy of it (#208, 2026-10-13 and
+ * 2026-10-15, `docs/bench/2026-10-bench-plan.md` "Z1 low-profile vise: product constants"):
+ * the soft-jaw top is 10 mm across on BOTH jaws, and the tall bar is 100 mm long in Y. Those two
+ * widths had been 15 (#391's review: outside both of §11.8's probed bands, so the material-scan's
+ * "a jaw's top is a SURFACE" reading would have looked like a fault), then 10.5 and 9 — the middle
+ * of each band, still a guess. Both are now the number on the calipers. The bar's 100 mm is why a
+ * `jaw-jaw-short` warning is harder to earn than it was at 80: Y coverage is judged against it
+ * (`validateVise`), and `jawStartY` below decides where the bar sits relative to the stock.
+ *
+ * STILL PROVISIONAL (#208): `GRIP_MIN` and `VISE_BODY_DEPTH` at the top of this file — how high the
+ * vise body stands and how much grip a part needs before it can lift are both unmeasured, and no
+ * test cut has been run under the probe.
  *
  * `stockProud` here is the shipped working height, correct for the 12 mm default blank. A job on
  * a DIFFERENT stock must resolve its default through `viseForNewJob` (below), never from this
  * constant: `DEFAULT_VISE` knows no stock, so its 4 mm would refuse a thin blank.
  *
- * NOTE (#203): this is the ONE place the five placeholder numbers live. `engrave/defaults.ts`
- * imports `DEFAULT_VISE` for a new job's vise, and `engraveJobStore` passes a saved
- * `ViseParams` back in through `defaultEngraveJob(vise)` when settings holds one.
+ * NOTE (#203): this is the ONE place the shipped numbers live. `engrave/defaults.ts` imports
+ * `DEFAULT_VISE` for a new job's vise, and `engraveJobStore` passes a saved `ViseParams` back in
+ * through `defaultEngraveJob(vise)` when settings holds one.
  */
 export const DEFAULT_VISE: ViseParams = {
-  stockProud: DEFAULT_STOCK_PROUD, // PROVISIONAL (#208): how far the top face stands above the jaw tops.
-  fixedJawThickness: 10.5, // §11.8's band is ~8–13; the middle of it (#391 review item 7).
-  movingJawThickness: 9, // §11.8's band is ~6–12 — this jaw's top is narrow (#391 review item 7).
-  jawLength: 80, // PROVISIONAL (#208): jaw length in Y.
-  jawStartY: -10, // PROVISIONAL (#208): jaw start relative to the stock's front edge (Y).
+  stockProud: DEFAULT_STOCK_PROUD, // Per-job, not a vise constant — `defaultStockProud` derives it from the stock.
+  fixedJawThickness: 10, // Calipered 2026-10-13: the soft-jaw top is 10 mm across (#208).
+  movingJawThickness: 10, // Calipered 2026-10-13: 10 on this jaw too — 9 was §11.8's band (#208).
+  jawLength: 100, // Calipered 2026-10-15: the tall bar's length in Y (#208).
+  jawStartY: -10, // NOT a vise constant (#208): where the blank is clamped along the 100 mm bar.
   source: 'default',
   uncertainty: DEFAULT_UNCERTAINTY,
 };
@@ -327,7 +392,12 @@ export function validateVise(
     findings.push({
       severity: 'warning',
       code: 'vise-default',
-      message: 'Vise dimensions are unmeasured defaults (#208); collisions cannot be trusted yet.',
+      // Still a warning now that the jaws are calipered: the numbers are the product's, measured
+      // once on the reference unit, and this job's vise has not been measured ITSELF. The sentence
+      // says which of the two it is, because "unmeasured defaults" stopped being true on 2026-10-15.
+      message:
+        'Vise dimensions are the shipped defaults, measured once on the reference unit (#208); ' +
+        'they are not a measurement of this machine\'s own vise.',
     });
   }
 

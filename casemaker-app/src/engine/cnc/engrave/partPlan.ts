@@ -1242,7 +1242,7 @@ export function voidLimitForItem(
  *
  *   - `reaches` — the WARNING's and the depth recommendation's: the swept cut could come over this
  *     jaw once the vise's own band is allowed for. Decision 28's band is the point of the term: an
- *     unmeasured vise's faces may be anywhere in it, so a cut inside the band still warns;
+ *     vise's faces may be anywhere in it, so a cut inside the band still warns;
  *   - `overJaw` — the run sheet's STOP line: the cutter's own disc does reach the jaw footprint
  *     with no band assumed. A stop is an instruction to the operator standing at the machine, so it
  *     is the reading that asks whether the cutter really gets there.

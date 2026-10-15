@@ -369,7 +369,8 @@ describe('#280 — step 2, what are you making', () => {
     // The hand-off itself is the seed (#352): the badge's blank is the stock, no button pressed.
     const job = useEngraveJobStore.getState().job;
     expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([76.2, 38.1, 3.81]);
-    expect(job.workholding.vise.stockProud).toBeCloseTo(1.905, 9);
+    // Seated on the jaws' 3.1 mm ledges: 3.81 − 3.1 (#208's calipers, #391 review item 1).
+    expect(job.workholding.vise.stockProud).toBeCloseTo(0.71, 9);
     // …and the void the badge's model already has came with it (#271 route 1), so nothing floats.
     expect((job.keepOuts ?? []).map((k) => k.id)).toContain(BADGE_POCKET_KEEP_OUT_ID);
     // …and so did the LINES (#363 review): the three demo words were laid out for the 100 × 60 mm

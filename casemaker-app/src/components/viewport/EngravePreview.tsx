@@ -37,9 +37,13 @@ const JAW_COLOR = '#4b5563';
 /** PROVISIONAL (#205): the axis marker's length as a fraction of the stock's smaller side. */
 const AXIS_FRACTION = 0.2;
 
-/** Where the vise numbers came from, in words (decision 28: a default is not a measurement). */
+/**
+ * Where the vise numbers came from, in words (decision 28: a default is not a measurement). The
+ * shipped jaws are calipered (#208, 2026-10-15), so 'default' means "shipped, measured on the
+ * reference unit" — not the unmeasured defaults these words used to name.
+ */
 function sourceWords(source: ViseParams['source']): string {
-  if (source === 'default') return 'unmeasured defaults';
+  if (source === 'default') return 'shipped defaults (reference unit)';
   if (source === 'saved') return 'saved vise';
   return 'measured for this setup';
 }

@@ -106,12 +106,12 @@
     "kind": "vise",
     "vise": {
       "stockProud": 1.2,
-      "fixedJawThickness": 15,
-      "movingJawThickness": 15,
-      "jawLength": 80,
+      "fixedJawThickness": 10,
+      "movingJawThickness": 10,
+      "jawLength": 100,
       "jawStartY": -10,
       "source": "default",
-      "uncertainty": 2
+      "uncertainty": 0.5
     }
   },
   "toolKey": "inv:kz-o-flute-2-12",

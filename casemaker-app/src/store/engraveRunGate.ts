@@ -26,11 +26,12 @@ import { simErrors } from '@/engine/cnc/simGate';
 
 /**
  * The warning codes that mean "a human must look at the machine before this file is run"
- * (#206): an unmeasured vise, and a holder whose reach or clearance to the fixture is not
- * proven. A warning from any of these lists requires the panel's acknowledgement tick.
+ * (#206): a vise that has not been measured on THIS machine, and a holder whose reach or
+ * clearance to the fixture is not proven. A warning from any of these lists requires the panel's
+ * acknowledgement tick.
  *
  * All three are questions the run ASKED and could not answer, so they stay rare on purpose: a
- * default vise job raises `vise-default` only while the vise is unmeasured, and
+ * default vise job raises `vise-default` only while the vise is the shipped set, and
  * `holder-vs-fixture-unproven` only where an obstacle rises above the stock top with the collet
  * nut's size unstated (#314 — on a vise job the nut is provably held off by the cutter's own
  * shoulder, so the code, and this tick with it, must not appear at all). Seeing a tick prompt

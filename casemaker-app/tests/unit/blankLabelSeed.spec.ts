@@ -365,8 +365,8 @@ describe('#363 — the store hand-off', () => {
     // The seeded line sits in the free band BESIDE the magnet pocket, so since #365 the void bound
     // asks about the voids the LINE reaches and finds none. Since #369 the JAWS are asked the same
     // way — by the line's own ink box — and this line is clear of them too: even at `inkBoxOf`'s
-    // widest estimate it comes no nearer than 6.9 mm to a jaw face, past the 3.5 mm reach the vise's
-    // own uncertainty opens up. So the blank's underside answers: 3.81 − 1 = 2.81 mm. While every line
+    // widest estimate it comes no nearer than 6.9 mm to a jaw face, past the 1 mm reach the jaws are
+    // judged by (`uncertainty + radius`, #391/#394). So the blank's underside answers: 3.81 − 1 = 2.81 mm. While every line
     // was charged the blank-wide jaw floor it took 1.905 − 1 = 0.905 whether or not it went near a
     // jaw; before #365 it was handed the pocket's 0.51 — half of what the blank allows, on a line the
     // seed had deliberately placed clear of the pocket.
@@ -466,6 +466,14 @@ describe('#363 — the store hand-off', () => {
 
     const id = s().job.labels[0]!.id;
     s().updateLabel(id, { text: 'DAVE' });
+    // The stand is STATED rather than inherited, because the subject here is the per-line answer
+    // and the shipped default no longer has a jaw floor to give: since #391 review item 1 a new
+    // job SEATS a 3.81 mm blank on the jaws' 3.1 mm ledges, so the blank stands 0.71 mm above the
+    // jaw tops and no floor can keep the 1 mm of clearance a cut over a jaw must. The walk then
+    // declines and the shipped depths stand — its own test, `engraveJob.spec.ts`'s "seats a badge
+    // blank on the ledge it can reach". 1.905 mm is the default of the day for a 3.81 mm blank
+    // (`min(4, t/2)` before the ledge rule), and stating it keeps this test about the arithmetic.
+    s().setVise({ stockProud: 1.905 });
     // A badge stating NO print (#368): the point of this test is the PER-LINE answer, and the three
     // per-line constraints it names are the blank's own. A printed badge adds a fourth, tighter one
     // (the colour band) that binds all three alike — see the next test.
@@ -492,7 +500,7 @@ describe('#363 — the store hand-off', () => {
     // The badge the template makes now states its print (#368), so the blank carries a colour
     // boundary and the walk has a band to place the seeded line in. The line is 8 mm tall on a
     // 76.2 × 38.1 blank, so its box comes no nearer than 6.9 mm to a jaw face at the estimate — past
-    // the 3.5 mm reach — and since #369 the jaws leave it alone. So the split is the shallowest floor
+    // the 1 mm reach the jaws are judged by — and since #369 the jaws leave it alone. So the split is the shallowest floor
     // and it wins outright: the blank's own reveal, 0.8 + 0.2 = 1.0, with the intent that means it.
     // Before #369 the jaw floor 0.905 was charged to every line alike, which lands INSIDE the split's
     // ±0.2 mm band where neither colour is decided, so the walk demoted it to the 0.6 `surface`.
@@ -641,17 +649,33 @@ describe('#364 — the bare-blank hand-off', () => {
 
     const job = s().job;
     // Thickness is deliberately NOT part of the footprint test: 100 × 60 × 4 is still the plank
-    // those three words were written for, so they stay — at the depths the 4 mm slab allows.
+    // those three words were written for, so they stay — and they keep the depths they ship with,
+    // because on this blank the walk finds no floor to write.
+    //
+    // #391 review item 1 is why. A new job now SEATS the blank on the jaws' 3.1 mm ledges, so a
+    // 4 mm slab stands `4 − 3.1 = 0.9` mm above the jaw tops — less than the 1 mm of clearance a
+    // floor must keep over a jaw, which makes the jaw candidate `0.9 − 1 = −0.1` mm. A candidate
+    // at or below zero is not a shallow depth to cut, it is a setup the jaw check reports, so
+    // `recommendLabelDepth` answers null and every line keeps its number (#362's own rule).
+    //
+    // The hand-off runs before any face is parsed (#180), so the box that reaches those jaws is
+    // `inkBoxOf`'s upper-bound estimate — 109.2 mm of 'CASE' on a 100 mm plank — and these centred
+    // lines read as touching a jaw they in fact sit 26.9 mm clear of. Hence the asymmetry the two
+    // assertions below pin: the WALK declines at hand-off, and the CHECKER, which measures, has
+    // nothing to say about the jaws at all.
     expect(job.labels.map((l) => l.text)).toEqual(['CASE', 'MAKER', 'first chips']);
-    expect(job.labels.map((l) => l.depth)).toEqual([1, 1, 1]);
+    expect(job.labels.map((l) => l.depth)).toEqual([2, 1, 0.5]);
+    expect(job.workholding.vise.stockProud).toBeCloseTo(0.9, 9);
 
     const g = generate(tl, job);
     expect(errorCodes(g)).toEqual([]);
-    // The `stock-proud-too-small` warning goes with the depth: the deepest cut is now 1 mm, inside
-    // the 2 mm the slab stands proud. The vise-grip warning is #344's business and stays — it is
-    // honest about a 4 mm blank in jaws whose default wants more.
+    // No `stock-proud-too-small`, for the measurement reason above: the deepest cut is 2 mm, which
+    // a 4 mm blank's 1 mm floor allows (2 mm left under it) and which no jaw is under in fact.
     expect(g.findings.some((f) => f.code === 'stock-proud-too-small')).toBe(false);
-    expect(g.findings.some((f) => f.code === 'vise-grip-shallow')).toBe(true);
+    // And the grip warning #344 raised here is GONE rather than kept: the seated blank leaves
+    // `4 − 0.9 = 3.1` mm below the jaw tops, past the 3 mm floor under which a part can lift, where
+    // the 2 mm stand this blank used to be modelled at left only 2 mm.
+    expect(g.findings.some((f) => f.code === 'vise-grip-shallow')).toBe(false);
   }, 60_000);
 
   it('never replaces a label set the person has touched', async () => {

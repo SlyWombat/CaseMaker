@@ -654,7 +654,8 @@ describe('the label depth a blank allows (#362)', () => {
     // The line the badge route seeds: 'Name' at 8 mm on (38.1, 6.775), whose ink box stops short of
     // the pocket's roof at y = 12.55. It reaches NO void, and since #369 it is clear of the JAWS too
     // — its MEASURED box is 28.2857 mm across a 76.2 mm blank (#394), so it comes 23.957 mm from
-    // either jaw face, far past the 2.5 mm reach the vise's own uncertainty opens up. So the blank's
+    // either jaw face, far past the 1 mm reach the jaws are judged by (`uncertainty + radius`, 0.5 mm
+    // of band and a 1 mm cutter, #391/#394). So the blank's
     // underside is what answers, 2.81 mm, and the basis says the jaws set no limit rather than
     // staying silent about them.
     const beside = label({ text: 'Name', size: 8, position: { x: 38.1, y: 6.775 } });
@@ -810,8 +811,8 @@ describe('the label depth a blank allows (#362)', () => {
     const job = badgeJob({ keepOuts: [] });
     // The blank's jaws face each other 76.2 mm apart in X and span the whole 38.1 mm of Y. A 'Name'
     // line 8 mm tall MEASURES 28.2857 mm wide (#394), so centred on the blank it stops 23.957 mm
-    // short of either jaw face — past the 2.5 mm reach the default vise's own 2 mm uncertainty plus
-    // the cutter's 0.5 mm radius opens up. Clear: no jaw bound.
+    // short of either jaw face — past the 1.0 mm reach the shipped vise's own 0.5 mm uncertainty
+    // (calipered 2026-10-13/15, #208) plus the cutter's 0.5 mm radius opens up. Clear: no jaw bound.
     const centred = label({ text: 'Name', size: 8, position: { x: 38.1, y: 6.775 } });
     const clear = labelJawReach(job, centred);
     expect(clear.jaw).toBe('fixed');
@@ -823,17 +824,25 @@ describe('the label depth a blank allows (#362)', () => {
     // named the floor and stayed silent about the jaws would read as if none had been considered.
     expect(clearRec.basis[1]).toBe('clear of both jaws by at least 23.957 mm; the jaws set no limit here');
 
-    // The same line moved until its measured box comes 2 mm off the fixed jaw — the issue's own
-    // example. Its half-width is 14.1429 mm, so x = 16.1429 puts the left face at 2.0000 mm. Now the
-    // jaw bound is the shallowest floor, and the clause says which jaw and why.
-    const nearFixed = label({ text: 'Name', size: 8, position: { x: 16.1429, y: 6.775 } });
+    // …and the issue's own example, the same line 2 mm off the fixed jaw, is CLEAR now: the reach is
+    // 0.5 + 0.5 = 1.0 mm, so 2 mm is twice it. Pinned because it moved with the caliper, not with
+    // any change to this rule.
+    expect(labelJawReach(job, label({ text: 'Name', size: 8, position: { x: 16.1429, y: 6.775 } })).reaches).toBe(
+      false,
+    );
+
+    // The same line moved until its measured box comes 0.75 mm off the fixed jaw — inside the reach,
+    // outside the radius alone. Its half-width is 14.1429 mm, so x = 14.8929 puts the left face at
+    // 0.7500 mm. Now the jaw bound is the shallowest floor, and the clause says which jaw and why.
+    const nearFixed = label({ text: 'Name', size: 8, position: { x: 14.8929, y: 6.775 } });
     const at = labelJawReach(job, nearFixed);
     expect(at.jaw).toBe('fixed');
-    expect(at.gap).toBeCloseTo(2, 3);
+    expect(at.gap).toBeCloseTo(0.75, 3);
     expect(at.reaches).toBe(true);
+    expect(at.overJaw).toBe(false);
     const rec = recommendLabelDepth(job, nearFixed, inputsFor(job, nearFixed))!;
     expect(rec.depth).toBe(0.905);
-    expect(rec.basis[0]).toContain('within 2 mm of the fixed jaw');
+    expect(rec.basis[0]).toContain('within 0.75 mm of the fixed jaw');
     expect(rec.basis[0]).toContain('stands 1.905 mm above the jaw tops');
     // …and it is the jaws, not the blank's underside, that bind: the not-binding tail says so.
     expect(rec.basis[1]).toContain('not binding');

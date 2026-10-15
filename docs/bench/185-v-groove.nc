@@ -32,8 +32,9 @@ G90 G21
 ; #165's first four depths, shallowest first.
 ;
 ; The section is full 3.81 mm thickness — the magnet pocket's left wall is at X 12.55 — and the
-; grooves are 3 mm apart across it. X 2.5 and X 11.5 are the section's own bounds, not taste:
-; the unmeasured jaws' 2 mm band starts at X 2, and the pocket wall ends the strip at 11.5.
+; grooves are 3 mm apart across it. The section is bounded by the vise and the pocket, not by
+; taste: the jaws' ±0.5 band (calipered 2026-10-13/15, #208) starts at X 0.5, and the pocket
+; wall ends the strip at X 11.5. The four grooves sit inside that window, the first at X 2.5.
 ;
 ; CALIPER the TOP OPENING width of each groove (across the top, not the floor) and compare it
 ; with

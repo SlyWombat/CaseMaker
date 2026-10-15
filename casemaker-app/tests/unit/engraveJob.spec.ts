@@ -229,7 +229,8 @@ describe('validateJob (#200)', () => {
     // The line has to be one the jaws can REACH, or there is no jaw for the stand to be short
     // for (#369, #394). The demo 'CASE' line MEASURES 46.28 mm wide, so centred on this 100 mm
     // plank it sits 26.9 mm clear of both jaw faces; moved to x = 24 its box comes 0.86 mm off the
-    // fixed jaw — inside the 2 mm band the vise's own uncertainty opens plus the cutter's 0.5 mm.
+    // fixed jaw — inside the 1 mm reach the jaws are judged by (the vise's 0.5 mm band plus the
+    // cutter's 0.5 mm radius, #391/#394).
     job.labels[0]!.position = { x: 24, y: 43 };
     expect(validateJob(job).some((f) => f.code === 'stock-proud-too-small')).toBe(true);
     // #362 — the clearance is the JOB's number, not a constant in the check: at 0.4 mm asked for,
@@ -338,8 +339,8 @@ describe('engraveJobStore (#200)', () => {
 
   // #362 — the hand-off the issue was opened for. Before this, taking a 3.81 mm badge blank left
   // the 12 mm softwood job's 2.0 / 1.0 / 0.5 mm depths on it, and the wizard's own blank step
-  // complained about the job it had just built: 1.905 mm proud cannot carry a 2 mm cut with 1 mm
-  // of clearance wanted under it.
+  // complained about the job it had just built: the 1.905 mm stand of the day cannot carry a 2 mm cut
+  // with 1 mm of clearance wanted under it.
   //
   // #363 then replaced the LINES too: the three demo labels were laid out for the 100 × 60 mm plank
   // and ran off the 76.2 mm badge, so the route seeds one `Name` line (see `blankLabelSeed.spec.ts`
@@ -361,8 +362,9 @@ describe('engraveJobStore (#200)', () => {
     //
     // #369 is what lets it be the reveal. The seeded line sits 6.775 mm from the front edge, centred
     // under the blank's width, and even at `inkBoxOf`'s widest estimate it comes no nearer than
-    // 6.9 mm to a jaw face — past the 3.5 mm the vise's own uncertainty opens up — so the jaws set no
-    // limit here. While every line was charged the blank-wide jaw floor it took 1.905 − 1 = 0.905,
+    // 6.9 mm to a jaw face — past the 1 mm reach the jaws are judged by (`uncertainty + radius`, 0.5
+    // mm of band and a 1 mm cutter, #394) — so the jaws set no limit here. While every line was
+    // charged the blank-wide jaw floor it took 1.905 − 1 = 0.905,
     // which landed inside the split's ±0.2 mm band and came back up as a 0.6 mm `surface` floor.
     // (Before #368 the badge stated no print, so the line took that 0.905 with no band to demote it;
     // before #365 it was handed the pocket's 0.51, half the depth the blank allows.)
@@ -393,6 +395,12 @@ describe('engraveJobStore (#200)', () => {
     const { useEngraveJobStore } = await freshStore();
     const s = () => useEngraveJobStore.getState();
     const id = s().job.labels[0]!.id;
+
+    // The stand this test weighs against is stated rather than inherited: since #391 review item 1
+    // the shipped badge default SEATS the blank (0.71 mm proud), which leaves the jaws no floor to
+    // clear at this line's position and makes the subject here — the per-line void bound — the
+    // wrong question. The seated default's own consequence has its own test below.
+    s().setVise({ stockProud: 1.905 });
 
     // The depth AND where the line sits: the warning below is about a cut working below the jaw
     // tops, and since #369/#394 only a line the jaws can REACH is charged — 'CASE' at 14 mm
@@ -430,6 +438,32 @@ describe('engraveJobStore (#200)', () => {
     expect(second.useEngraveJobStore.getState().job.labels[0]!.depth).toBe(1.2);
   });
 
+  // #391 review item 1 — the shipped default no longer stands a blank at half its thickness: a
+  // blank that can seat on the jaws' 3.1 mm ledges takes the SEATED value (#208's calipers), which
+  // on the 3.81 mm badge blank is 0.71 mm. The jaws are what that moves: `stockProud − clearance`
+  // is negative on any line the jaws can reach, so the recommendation has no floor to offer and
+  // answers with nothing (`winner.depth <= 0`), and the walk leaves those lines exactly where they
+  // were rather than writing a made-up floor. The warning is what carries the news.
+  it('seats a badge blank on the ledge it can reach, and says the jaws leave no depth at all (#391)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const s = () => useEngraveJobStore.getState();
+    s().updateLabel(s().job.labels[0]!.id, { depth: 1.2, position: { x: 24, y: 43 } });
+
+    s().takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ print: undefined })));
+    const job = s().job;
+    expect(job.workholding.vise.stockProud).toBeCloseTo(0.71, 9);
+
+    // 'MAKER' and 'first chips' are the 100 × 60 job's own lines, and at 46 and 38 mm wide they run
+    // off the badge blank's 76.2 mm length and come over the moving jaw — where a floor that stays
+    // 1 mm clear of the jaw tops is a floor above the blank's own face. So both keep the depths they
+    // arrived with, and the user's own 1.2 is untouched as always.
+    expect(job.labels.map((l) => l.depth)).toEqual([1.2, 1.0, 0.5]);
+    expect(stepFindings('blank', job, defaultSetupAnswers(job)).map((f) => f.code)).toContain(
+      'stock-proud-too-small',
+    );
+  });
+
   // #362 review — the recommendation writes a `depthIntent` of its OWN (`'reveal'`, or the
   // `'surface'` a band demotion stamps), and the guard in `recommendLabelDepth` declines any item
   // that states one. Without a provenance on that intent, the app's own statement would lock the
@@ -439,6 +473,9 @@ describe('engraveJobStore (#200)', () => {
     const seeded = defaultEngraveJob();
     const id = seeded.labels[0]!.id;
     seeded.labels[0] = { ...seeded.labels[0]!, depth: 0.6, depthIntent: 'surface' };
+    // As above: the blank is seated at a stand that keeps the jaws out of this line's question, so
+    // this test stays about the intent and the void rather than about the seated default (#391).
+    seeded.workholding.vise = { ...seeded.workholding.vise, stockProud: 1.905, source: 'saved' };
     // The `layout` claim is what stands the badge route aside here, and it is the only thing that
     // can: an app-computed `depth`/`depthIntent` is a past answer of the app's own and no longer
     // keeps a job out of the seed (#363 review follow-up — `demoShape` stopped comparing the intent
@@ -640,8 +677,8 @@ describe('engraveJobStore (#200)', () => {
     setStock(badgeBlankFor(defaultBadgeParams()).stock, 'computed');
     const { stock, workholding } = useEngraveJobStore.getState().job;
     expect(stock.thickness).toBe(3.81);
-    // Half the blank, capped at the shipped 4 mm — the number `viseForNewJob(…, stock)` gives.
-    expect(workholding.vise.stockProud).toBeCloseTo(1.905, 9);
+    // The seated value, not half the blank — the number `viseForNewJob(…, stock)` gives.
+    expect(workholding.vise.stockProud).toBeCloseTo(0.71, 9);
     // A derived number is still NOT a measurement (decision 28), so the source stays `default`
     // and the vise still warns that the jaws are unmeasured.
     expect(workholding.vise.source).toBe('default');
@@ -681,7 +718,7 @@ describe('engraveJobStore (#200)', () => {
     useEngraveJobStore.getState().setStock(badgeBlankFor(defaultBadgeParams()).stock, 'computed');
 
     const { stock, workholding } = useEngraveJobStore.getState().job;
-    expect(workholding.vise.stockProud).toBeCloseTo(1.905, 9);
+    expect(workholding.vise.stockProud).toBeCloseTo(0.71, 9);
     expect(validateVise(stock, workholding.vise).some((f) => f.severity === 'error')).toBe(false);
   });
 

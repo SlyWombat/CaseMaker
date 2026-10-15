@@ -427,7 +427,7 @@ export function validateJob(job: EngraveJob): JobFinding[] {
         `so ` +
         (deepestItem.reach.overJaw
           ? 'the cutter would work below the jaw tops'
-          : 'the cutter could work below the jaw tops, if the unmeasured jaw sits within its band') +
+          : 'the cutter could work below the jaw tops, if the jaw face sits within its band, nearer the cut') +
         ` (stockProud ≥ ${deepest + jawClearance} mm).`,
     });
   }

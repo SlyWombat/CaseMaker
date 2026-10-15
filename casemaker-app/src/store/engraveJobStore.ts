@@ -925,8 +925,10 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       }
 
       // Unconditional, and after either branch (#364): the walk is right at every thickness — the
-      // demo plank's own three lines are re-depthed to 3/3/3 on a 100 × 60 × 12 and to 1/1/1 on a
-      // 100 × 60 × 4 — and it is the only thing that writes the seeded line's real depth (#362).
+      // demo plank's own three lines are re-depthed to 3/3/3 on a 100 × 60 × 12, and left exactly
+      // as they ship on a 100 × 60 × 4, whose seated blank stands too little above the jaw tops for
+      // any floor to clear them (#391) — and it is the only thing that writes the seeded line's
+      // real depth (#362).
       get().redepthLabelsForBlank();
     },
 

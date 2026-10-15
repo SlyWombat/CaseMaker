@@ -222,8 +222,12 @@ describe('the shipped default, and its provenance (#203)', () => {
     expect(DEFAULT_VISE.stockProud).toBe(4);
   });
 
-  it('a default keeps uncertainty 2; a saved or measured vise gets 0.5', () => {
-    expect(uncertaintyFor('default')).toBe(2);
+  it('the calipered band is 0.5 for every source: the shipped set is measured on the reference unit', () => {
+    // Both bands were 0.5 by 2026-10-15 (§11.8's widths were the 2 mm: the shipped numbers were
+    // nobody's reading). `uncertaintyFor` stays because a source that is NOT a reading would need
+    // its own band — a `saved` vise whose user typed numbers off a datasheet, say — but today the
+    // caliper is what every source's figures rest on.
+    expect(uncertaintyFor('default')).toBe(0.5);
     expect(uncertaintyFor('saved')).toBe(0.5);
     expect(uncertaintyFor('measured')).toBe(0.5);
   });
@@ -364,11 +368,19 @@ describe('stockProud: a job input with an honest default (#231 item 2)', () => {
   // The 3.81 mm badge blank #165 cuts: a flat 4 mm lies above the whole blank.
   const BADGE = { length: 76.2, width: 38.1, thickness: 3.81 };
 
-  it('derives the default proud from the stock: half the thickness, capped at the shipped 4 mm', () => {
+  it('derives the default proud from the stock: the seated value, else half the thickness capped at 4 mm', () => {
     expect(defaultStockProud(12)).toBe(4); // the default blank: unchanged, the shipped 4 mm
     expect(defaultStockProud(8)).toBe(4);
-    expect(defaultStockProud(6)).toBe(3);
-    expect(defaultStockProud(3.81)).toBeCloseTo(1.905, 9);
+    // 6 mm is past the seated rule (6 − 3.1 = 2.9) and under the 7.1 mm where the 4 mm cap starts to
+    // decide, so the ledge is what the default takes.
+    expect(defaultStockProud(6)).toBeCloseTo(2.9, 9);
+    // The badge blank: seated on the 3.1 mm ledges it stands 0.71 mm proud (#208), which is BELOW
+    // half the blank and so is the number the default carries (#391 review item 1).
+    expect(defaultStockProud(3.81)).toBeCloseTo(0.71, 9);
+    // A blank no taller than the ledge step cannot seat on it — its top would be at or under the jaw
+    // tops — so the working-height rule stands, and `validateVise` is what refuses a bad one.
+    expect(defaultStockProud(3)).toBe(1.5);
+    expect(defaultStockProud(2)).toBe(1);
   });
 
   it('the shipped DEFAULT_VISE still refuses the badge blank — the gap this closes', () => {
@@ -378,8 +390,11 @@ describe('stockProud: a job input with an honest default (#231 item 2)', () => {
 
   it('a new job on the badge blank gets an honest proud and is not refused', () => {
     const vise = viseForNewJob(undefined, BADGE);
-    expect(vise.stockProud).toBeCloseTo(1.905, 9);
-    // Still unmeasured: the source, and so the `vise-default` warning, are unchanged.
+    // The seated value, not half the blank: 0.71 mm is what the calipers say a badge blank on the
+    // ledges stands proud of the jaw tops (#208/#391 review item 1).
+    expect(vise.stockProud).toBeCloseTo(0.71, 9);
+    // Still the SHIPPED set: the source, and so the `vise-default` warning, are unchanged — the
+    // numbers are the product's, measured once on the reference unit, not this machine's vise.
     expect(vise.source).toBe('default');
     const codes = validateVise(BADGE, vise).map((f) => f.code);
     expect(codes).not.toContain('vise-stock-proud-exceeds-thickness');

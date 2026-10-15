@@ -834,10 +834,11 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
     // WHICH obstacle, not "an obstacle" (#314 review, folded into #362). `fixtureBoxes` right here
     // carries the id and the label, and the message was throwing them away — so the one case that
     // most needs naming was also the one that said least. The jaws are why it matters: a vise's
-    // `defaultStockProud` is `thickness / 2`, so on a blank thinner than 4 mm the UNMEASURED 2 mm
-    // band (`DEFAULT_UNCERTAINTY`) lifts a jaw top that sits BELOW the stock top to just above it,
-    // and the finding reads as a physical obstruction when what actually rose was the uncertainty.
-    // Say both numbers, and say which one did the rising.
+    // `defaultStockProud` is `thickness / 2`, so on a blank thinner than 4 mm a jaw top can sit just
+    // BELOW the stock top, close enough that the band around it (`DEFAULT_UNCERTAINTY` — 2 mm while
+    // the jaws were unmeasured, 0.5 and calipered since 2026-10-15) lifts it above, and the finding
+    // then reads as a physical obstruction when what actually rose was the uncertainty. Say both
+    // numbers, and say which one did the rising.
     const name = tallestBox?.label ?? 'an obstacle';
     const rise = (fixtureTop - topZ).toFixed(3);
     const band = setup.fixture?.uncertainty ?? 0;
@@ -852,7 +853,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         // but the text must state the distance it means rather than inherit it from an invariant
         // three hundred lines away.
         ? `the ${name} is declared ${(topZ - declaredTop).toFixed(3)} mm below the stock top, but the ` +
-          `unmeasured ${band} mm band around it lifts its top ${rise} mm ABOVE — and the collet ` +
+          `${band} mm uncertainty band around it lifts its top ${rise} mm ABOVE — and the collet ` +
           `nut's size is not known: clearance to it cannot be proven`
         : `the ${name} rises ${rise} mm above the stock top and the collet nut's size is not ` +
           `known: clearance to it cannot be proven`,

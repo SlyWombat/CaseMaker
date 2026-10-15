@@ -708,10 +708,10 @@ export interface LabelDepthRecommendation {
  * The depth THIS blank lets THIS item be cut at, and the arithmetic that decided it (#362).
  *
  * The issue this answers is a clash of three defaults that never knew about each other: a 3.81 mm
- * badge blank (`badgeBlankFor`, #352), the vise standing it 1.905 mm proud (`defaultStockProud`,
- * #344) and the 2 mm label depth the 12 mm softwood job shipped with — so the wizard handed over a
- * job its own findings already complained about. The route that knows the blank now also says how
- * deep it may be cut.
+ * badge blank (`badgeBlankFor`, #352), the vise standing it 1.905 mm proud (the `defaultStockProud`
+ * of the day, #344; since #391 it SEATS the blank on the jaws' 3.1 mm ledges, 0.71 mm) and the 2 mm
+ * label depth the 12 mm softwood job shipped with — so the wizard handed over a job its own findings
+ * already complained about. The route that knows the blank now also says how deep it may be cut.
  *
  * The answer is the SHALLOWEST of four floors, each of which is a real plane or a real budget:
  *

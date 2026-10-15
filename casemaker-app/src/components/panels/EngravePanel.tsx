@@ -251,9 +251,13 @@ function toolOptionLabel(e: ToolLibraryEntry): string {
   return d === null ? `${e.tool.name} — cutting diameter unknown` : `${e.tool.name} — Ø ${d} mm cutting`;
 }
 
-/** The badge that says where the vise numbers came from (decision 28: a default is not a measurement). */
+/**
+ * The badge that says where the vise numbers came from (decision 28: a default is not a
+ * measurement). The shipped set is calipered as of 2026-10-15 (#208), so 'default' no longer means
+ * "nobody measured it" — it means nobody measured THIS machine's vise, and the badge says that.
+ */
 function viseBadge(v: ViseParams): string {
-  if (v.source === 'default') return 'default · unmeasured';
+  if (v.source === 'default') return 'shipped · reference unit';
   if (v.source === 'saved') return v.measuredAt ? `saved · ${v.measuredAt}` : 'saved';
   return 'measured · this setup';
 }

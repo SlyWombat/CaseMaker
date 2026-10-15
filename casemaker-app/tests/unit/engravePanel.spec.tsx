@@ -92,12 +92,14 @@ describe('EngravePanel (#205)', () => {
     expect(screen.getByTestId('engrave-thin-strokes').textContent).toContain('3.175 mm');
   });
 
-  it('changes the vise badge from unmeasured defaults once the vise is saved', () => {
+  it('changes the vise badge from the shipped set once the vise is saved', () => {
     render(<EngravePanel />);
-    expect(screen.getByTestId('engrave-vise-badge').textContent).toMatch(/unmeasured/);
+    // "shipped · reference unit", not "unmeasured": the numbers ARE measured — once, on the unit
+    // Makera measured, which is not this user's vise (#208, 2026-10-15).
+    expect(screen.getByTestId('engrave-vise-badge').textContent).toMatch(/shipped/);
     fireEvent.click(screen.getByTestId('engrave-vise-save'));
     expect(screen.getByTestId('engrave-vise-badge').textContent).toMatch(/^saved/);
-    expect(screen.getByTestId('engrave-vise-badge').textContent).not.toMatch(/unmeasured/);
+    expect(screen.getByTestId('engrave-vise-badge').textContent).not.toMatch(/shipped/);
   });
 
   it('shows a refused cutting override and disables Generate', () => {

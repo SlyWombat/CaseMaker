@@ -97,10 +97,11 @@ describe('guided job setup — the pure answers (#254)', () => {
     // …and the flow reaches it through `validateJob` on the would-be document too.
     expect(stepFindings('blank', job, answers).some((f) => f.code === 'vise-stock-proud-exceeds-thickness')).toBe(true);
 
-    // The fix is half the blank (capped at the shipped 4 mm), asserted as the user's setup.
+    // The fix is the blank's own seating on the jaws' ledges (#208/#391 review item 1), asserted as
+    // the user's setup: 3.81 − 3.1 mm of ledge step.
     const fix = stockProudFix(answers);
     expect(fix).not.toBeNull();
-    expect(fix!.stockProud).toBeCloseTo(1.905, 6);
+    expect(fix!.stockProud).toBeCloseTo(0.71, 6);
     expect(fix!.source).toBe('saved');
 
     // Applying it resolves the refusal.
@@ -201,7 +202,8 @@ describe('guided job setup — the flow in the panel (#254)', () => {
     expect(screen.getByTestId('engrave-setup-step-blank').textContent).toContain(
       'vise-stock-proud-exceeds-thickness',
     );
-    expect(screen.getByTestId('engrave-setup-fix-proud').textContent).toContain('1.905');
+    // The seated value, not half the blank: the fix button names the number it would write.
+    expect(screen.getByTestId('engrave-setup-fix-proud').textContent).toContain('0.71');
     fireEvent.click(screen.getByTestId('engrave-setup-fix-proud'));
     expect(screen.getByTestId('engrave-setup-step-blank').textContent).not.toContain(
       'vise-stock-proud-exceeds-thickness',
@@ -214,7 +216,7 @@ describe('guided job setup — the flow in the panel (#254)', () => {
 
     const job = useEngraveJobStore.getState().job;
     expect(job.stock.thickness).toBe(3.81);
-    expect(job.workholding.vise.stockProud).toBeCloseTo(1.905, 6);
+    expect(job.workholding.vise.stockProud).toBeCloseTo(0.71, 6);
     expect(job.workholding.vise.source).toBe('saved');
     // Every value the flow wrote is tagged, and shows on the panel.
     expect(screen.getByTestId('engrave-stock-thickness-source').getAttribute('data-source')).toBe('user');
@@ -222,14 +224,14 @@ describe('guided job setup — the flow in the panel (#254)', () => {
     expect(screen.getByTestId('engrave-vise-badge').textContent).toMatch(/^saved/);
   });
 
-  it('renders the blank step’s unmeasured-vise warning once, not once per validator (#353)', () => {
+  it('renders the blank step’s shipped-vise warning once, not once per validator (#353)', () => {
     render(<EngravePanel />);
     toBlankStep();
     // The row is keyed by code, so two copies would be two elements with the same testid — which
     // is exactly what the review saw. One row, and its words, is the fix.
     const rows = screen.getAllByTestId('engrave-setup-step-finding-vise-default');
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.textContent).toContain('unmeasured defaults');
+    expect(rows[0]!.textContent).toContain('the shipped defaults, measured once on the reference unit');
   });
 
   it('“Same as last job” finishes in one click without changing the numbers', () => {

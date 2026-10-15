@@ -172,13 +172,13 @@ describe('runSheet (#207)', () => {
     expect(stopStep().text).toContain('less than 6 mm, stop');
   });
 
-  it('opens section 8 with the unmeasured-vise warning only when the vise is a default', () => {
+  it('opens section 8 with the shipped-vise warning only when the vise is a default', () => {
     const def = section(sheetFor(defaultEngraveJob()), 'warnings');
-    expect(def.steps[0]!.text).toContain('unmeasured defaults');
+    expect(def.steps[0]!.text).toContain('the shipped defaults, measured once on the reference unit');
     expect(def.steps[0]!.bold).toBe(true);
 
     const measured = section(sheetFor(defaultEngraveJob({ ...DEFAULT_VISE, source: 'measured' })), 'warnings');
-    expect(measured.steps.some((s) => s.text.includes('unmeasured defaults'))).toBe(false);
+    expect(measured.steps.some((s) => s.text.includes('measured once on the reference unit'))).toBe(false);
   });
 
   it('flags every unverified step with an issue number, and the three assumed sections in full', () => {
@@ -475,10 +475,11 @@ describe('runSheet (#207)', () => {
       expect(offer).toContain('Skip this if this is the blank you have just set the origin against');
 
       // #391 review item 2 — what the numbers REST ON comes before the numbers, and the tip leads:
-      // it is the one figure every position is derived from and no tip has been measured.
+      // it is the one figure every position is derived from. A8 measured it on 2026-10-15, so the
+      // step now names a reading where it used to say AS ASSUMED.
       const assume = texts.find((t) => t.startsWith('Before you touch anything'))!;
       expect(assume).toContain('what the numbers below assume');
-      expect(texts.some((t) => t.includes('3 mm across AS ASSUMED'))).toBe(true);
+      expect(texts.some((t) => t.includes('The tip is 2 mm across, measured'))).toBe(true);
       expect(texts.some((t) => t.includes('starts no dome'))).toBe(false);
 
       // The reference touch everything else is measured from.
@@ -490,8 +491,8 @@ describe('runSheet (#207)', () => {
       expect(checks).toHaveLength(4);
       expect(checks[0]).toContain('the left edge — the one against the fixed jaw');
       expect(checks[0]).toContain('at the middle of the blank’s width');
-      expect(checks[0]).toContain('3.5 and 1.5 mm inside');
-      expect(checks[0]).toContain('at 0.9 mm outside');
+      expect(checks[0]).toContain('3 and 1 mm inside');
+      expect(checks[0]).toContain('at 0.7 mm outside');
       expect(checks[0]).toContain('the blank’s edge itself');
       // The END edges have a jaw top past them; the SIDE edges have the gap between the jaws, so
       // their outward touch runs to the cap instead — and the sheet says that is expected.
@@ -508,7 +509,7 @@ describe('runSheet (#207)', () => {
       expect(reading).toContain('3.95 mm or more below is off the blank');
       const compare = steps.find((s) => s.value?.startsWith('allowed '))!;
       expect(compare.value).toBe('allowed 1 mm');
-      expect(compare.text).toContain('after the 0.384 mm above is taken back toward the blank');
+      expect(compare.text).toContain('after the 0.312 mm above is taken back toward the blank');
 
       // The tool change back, because every Z in the program is the CUTTER's.
       expect(texts[texts.length - 1]).toContain('Put the CUTTER back and measure its length again');
@@ -564,8 +565,8 @@ describe('runSheet (#207)', () => {
       // measured back toward the blank. The old wording said BEFORE, which is the opposite — and a
       // sheet that is one word out sends the operator to the wrong side of the line they just found.
       const correction = texts.find((t) => t.startsWith('The reading leaves the blank'))!;
-      expect(correction).toContain('0.384 mm PAST the real edge');
-      expect(correction).toContain('is 0.384 mm INSIDE where the reading changed');
+      expect(correction).toContain('0.312 mm PAST the real edge');
+      expect(correction).toContain('is 0.312 mm INSIDE where the reading changed');
       expect(correction).toContain('back toward the blank');
       expect(correction).not.toContain('BEFORE');
 
@@ -574,7 +575,7 @@ describe('runSheet (#207)', () => {
       const bisect = texts.find((t) => t.startsWith('To place an edge more finely'))!;
       expect(bisect).toContain('in either direction');
       expect(bisect).toContain('inward or outward');
-      expect(bisect).toContain('no more than 0.384 mm apart');
+      expect(bisect).toContain('no more than 0.312 mm apart');
 
       // A pass whose four readings are all the blank, or whose innermost is already off it, has
       // nothing to bisect between: the step says which way to step and that a miss counts as off.
@@ -708,10 +709,10 @@ describe('runSheet (#207)', () => {
       expect(svg).toContain('fixed jaw (left)');
       expect(svg).toContain("Z0 — the part's top face");
       // The viewBox is in millimetres and flipped: Z runs up the page, so its TOP edge is -zmax.
-      // X spans the board (−10) and the fixed jaw — 10.5 mm thick, its face on the part's own edge
-      // (§11.8's band, #391 item 7) → −20.5 — with the 6 mm margin → −26.5; the drawing is 6 mm
+      // X spans the board (−10) and the fixed jaw — 10 mm thick, calipered (#208, 2026-10-13/15),
+      // its face on the part's own edge → −20 — with the 6 mm margin → −26; the drawing is 6 mm
       // above the part's top face → the viewBox starts at −6.
-      expect(svg).toContain('viewBox="-26.5 -6 151.5 44"');
+      expect(svg).toContain('viewBox="-26 -6 152 44"');
     });
 
     it('tells the operator to fix the part to the board, and that Z0 is the PART, not the board', () => {
@@ -873,10 +874,17 @@ describe('runSheet (#207)', () => {
       // 85.8 mm) every cell "reached" both jaws, so §3 printed "less than 1.8 mm, stop" on every
       // coupon — which a blank standing 1.2 mm proud trips — and on the ladder before it.
       //
-      // The rule's two readings separate exactly here. 2.31 mm is INSIDE the unmeasured vise's own
-      // 2 mm band plus the cutter's 1 mm radius, which is the reading the WARNING uses and one it
-      // may keep raising a band early (decision 28); it is OUTSIDE the radius alone, which is the
-      // reading the STOP uses — and a stop is an instruction to a person, not advice.
+      // The rule's two readings separate exactly here. 1.1648 mm is INSIDE the shipped vise's own
+      // 0.5 mm band plus the cutter's 1 mm radius — a 1.5 mm reach — which is the reading the
+      // WARNING uses and one it may keep raising a band early (decision 28); it is OUTSIDE the
+      // radius alone, which is the reading the STOP uses — and a stop is an instruction to a
+      // person, not advice.
+      //
+      // The cell is 11.75 mm, not the bench's own 11: the band went 2 → 0.5 mm on 2026-10-15 when
+      // the vise's jaws were calipered (#208), and the reach with it, 3 → 1.5 mm. The coupon's real
+      // 11 mm cell now sits 2.31 mm out — clear by 0.81 mm past the reach — and would exercise only
+      // the half of the ruling below it. A cell has to come to 11.75 mm for the two readings to
+      // part company at all, which is itself the measure of how much the caliper bought.
       const coupon = (size: number): EngraveJob => {
         const spec: CouponSpec = {
           id: '284-pla-feed',
@@ -895,12 +903,18 @@ describe('runSheet (#207)', () => {
       const stepOf = (job: EngraveJob) =>
         section(sheetFor(job), 'load').steps.find((s) => s.text.includes('sweeps over a jaw'))!;
 
-      const cell = coupon(11);
+      const cell = coupon(11.75);
       const reach = labelJawReach(cell, cell.labels[0]!);
       expect(reach.jaw).toBe('fixed');
-      expect(reach.gap).toBeCloseTo(2.31, 2);
+      expect(reach.gap).toBeCloseTo(1.1648, 3);
       expect(reach.reaches).toBe(true);
       expect(reach.overJaw).toBe(false);
+      // The bench's own 11 mm cell, the size the four #284 coupons are cut at, no longer reaches:
+      // 2.31 mm is 0.81 mm past the measured band and the radius together. Pinned, because it is a
+      // consequence of the caliper rather than of anything this rule does.
+      const real = coupon(11);
+      expect(labelJawReach(real, real.labels[0]!).gap).toBeCloseTo(2.3064, 3);
+      expect(labelJawReach(real, real.labels[0]!).reaches).toBe(false);
       // The warning fires — 0.8 mm of cut plus the job's 1.0 mm of clearance is past the 1.2 mm this
       // blank stands — and the sheet states the stand it must be measured against.
       expect(validateJob(cell).map((f) => f.code)).toContain('stock-proud-too-small');
@@ -911,7 +925,7 @@ describe('runSheet (#207)', () => {
       expect(stepOf(cell).text).not.toContain('If it is less than');
 
       // The other half of the ruling: a cell the cutter clears by MORE than the band raises neither.
-      // The same value at 10 mm leaves 3.83 mm on each side, past the 3 mm the band and the radius
+      // The same value at 10 mm leaves 3.83 mm on each side, past the 1.5 mm the band and the radius
       // reach together — so the warning goes too, not just the stop.
       const clear = coupon(10);
       expect(labelJawReach(clear, clear.labels[0]!).reaches).toBe(false);

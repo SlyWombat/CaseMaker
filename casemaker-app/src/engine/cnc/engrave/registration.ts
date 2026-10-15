@@ -43,10 +43,13 @@ import type { Mm, Vec2 } from '@/types/units';
  * (`/Z1-Firmware-Dialect.md` §11.7). It is Z-only; the X/Y touches this planner lists are what
  * the 3D Probe (held in reserve) would do, and for the vise the jaws already fix X and rotation.
  *
- * THE TIP DIAMETER IS PROVISIONAL (#208, #188): unmeasured for either probe. 3 mm is the common
- * ball for a probe of this class and is what `cncProbePlan.spec.ts` used. The tip sets how far a touch stands off a corner and how short an edge may be, so where
- * that matters the plan is nominal — the *edges and axes* it chooses are the finding, the
- * millimetre along them is not.
+ * THE TIP IS MEASURED NOW (#208 A8, 2026-10-15, `docs/bench/2026-10-bench-day-1.md`): the wired
+ * probe is a plain cylinder, 2.0 mm across, no ball — the 3 mm "common ball for a probe of this
+ * class" it used to stand in for is gone. A side touch therefore stands 1.0 mm off the corner
+ * (`planProbing`'s `tipR`), and the shortest useful edge is 4 mm (`minEdgeLength`'s default,
+ * `2 × tipDiameter`), where it was 6. The tip sets how far a touch stands off a corner and how
+ * short an edge may be; the *edges and axes* the plan chooses are the finding either way.
+ * `cncProbePlan.spec.ts` pins both figures, so a change to the tip moves the planned touches.
  *
  * `toleranceMm` is deliberately ABSENT, which the planner documents as "probe every axis the
  * fixture leaves open". `EngraveJob` states no XY tolerance — `edgeMargin` is the slack the
@@ -56,7 +59,7 @@ import type { Mm, Vec2 } from '@/types/units';
  * touches where §7.3's V1 table calls for one: the jaws hold X and rotation to ±0.05 mm, and the
  * plan re-resolves both because it was not told that 0.05 mm is good enough.
  */
-export const PROBE_SPEC: ProbeSpec = { tipDiameter: 3 };
+export const PROBE_SPEC: ProbeSpec = { tipDiameter: 2 };
 
 /** The blank as the probe sees it. The outline is always a `Profile` here — never polygons. */
 export interface JobProbePart extends ProbePart {

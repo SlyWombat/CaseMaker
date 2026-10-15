@@ -23,6 +23,7 @@ import {
   roundedRect,
 } from '@/engine/compiler/profile';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
+import { PROBE_SPEC } from '@/engine/cnc/engrave/registration';
 import type { Workholding } from '@/engine/cnc/setup';
 import type { Vec2 } from '@/types/units';
 
@@ -207,6 +208,37 @@ describe('profilePolygons (the kernel-free subset)', () => {
     expect(profilePolygons(pRotate(90, rectProfile(2, 2)))![0]![1]![1]).toBeCloseTo(2, 9);
     // pMirrorX reflects across x = 0: (2, 0) → (−2, 0).
     expect(profilePolygons(pMirrorX(rectProfile(2, 2)))![0]![1]).toEqual([-2, 0]);
+  });
+
+  it('the measured tip (#208 A8, 2026-10-15): 2.0 mm across, so a radius-1 touch and a 4 mm edge', () => {
+    // The wired probe was calipered: a plain cylinder 2.0 mm across, no ball. It was standing in at
+    // 3 mm ("a common ball for a probe of this class") and EVERY figure below derives from it, which
+    // is why the pin is here rather than only in `registration.ts`'s comment.
+    expect(PROBE_SPEC.tipDiameter).toBe(2);
+    const r = planProbing(PLATE, { kind: 'tape-down', contact: rectProfile(60, 30) }, PROBE_SPEC);
+    if ('refuse' in r) throw new Error('refused');
+    // No touch comes within a tip radius of an edge's ends — 1.0 mm now, where the 3 mm tip kept
+    // them 1.5 mm back.
+    expectClearOfCorners(r, 1.0);
+    // `minEdgeLength` follows the tip (2 × tipDiameter): 4 mm, where the 3 mm tip asked for 6. On a
+    // 4 mm edge the radius is exactly a quarter of it, so the contacts land on the two ends of the
+    // usable span and each stands 1.0 mm off a corner — 1.5 with the old tip, and the edge itself
+    // was one the old tip refused outright.
+    const square = (w: number): Workholding => ({ kind: 'tape-down', contact: rectProfile(w, w) });
+    const four = planProbing({ outline: rectProfile(4, 4) }, square(4), PROBE_SPEC);
+    if ('refuse' in four) throw new Error('a 4 mm square is exactly `minEdgeLength` and must plan');
+    const pair = four.touches.filter((t) => t.fixes.includes('rotation'));
+    expect(pair).toHaveLength(2);
+    const [a, b] = pair[0]!.edge;
+    expect(pair[0]!.edge).toEqual(pair[1]!.edge); // one edge carries the pair, which is what reads rotation
+    for (const t of pair) {
+      const off = Math.min(
+        Math.hypot(t.at[0] - a[0], t.at[1] - a[1]),
+        Math.hypot(t.at[0] - b[0], t.at[1] - b[1]),
+      );
+      expect(off, `touch ${t.at}`).toBeCloseTo(1.0, 9);
+    }
+    expect('refuse' in planProbing({ outline: rectProfile(3.5, 3.5) }, square(3.5), PROBE_SPEC)).toBe(true);
   });
 
   it('returns null for a rounded rect, so the badge outline comes from the worker', () => {

@@ -50,10 +50,10 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
         "label": "Fixed jaw (left)",
         "max": [
           0,
-          70,
+          90,
         ],
         "min": [
-          -10.5,
+          -10,
           -10,
         ],
       },
@@ -61,8 +61,8 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
         "id": "vise-moving-jaw",
         "label": "Moving jaw (right)",
         "max": [
-          109,
-          70,
+          110,
+          90,
         ],
         "min": [
           100,
@@ -205,7 +205,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
           "unverified": "#208",
         },
         {
-          "text": "X0 Y0 Z0 is the top-front-left corner of the blank. That leaves the work origin within ±0.02 mm in X and Y and ±0.02° in rotation. Move there and check by eye before going on.",
+          "text": "X0 Y0 Z0 is the top-front-left corner of the blank. That leaves the work origin within ±0.02 mm in X and Y and ±0.02° in rotation. Move there and check by eye before going on. How well YOU set it is not modelled: the file places the blank at this corner and judges the jaws against it, so an origin that is out by a little — or a blank sitting differently from what was measured — shifts the whole job relative to both without the app knowing. The only X/Y slack for that is this job's edge margin, 1 mm, which is the gap the content keeps from a stock edge rather than a locating tolerance: a cut standing at that margin has used all of it.",
           "unverified": "#208",
         },
         {
@@ -262,7 +262,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
       "steps": [
         {
           "bold": true,
-          "text": "Vise dimensions are unmeasured defaults (#208); collisions cannot be trusted yet.",
+          "text": "Vise dimensions are the shipped defaults, measured once on the reference unit (#208); they are not a measurement of this machine's own vise.",
         },
         {
           "text": "Checked: the tool against the stock and the modelled fixture (Vise fixed jaw (left), Vise moving jaw (right)).",
@@ -360,10 +360,10 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
         "label": "Fixed jaw (left)",
         "max": [
           0,
-          70,
+          90,
         ],
         "min": [
-          -10.5,
+          -10,
           -10,
         ],
       },
@@ -371,8 +371,8 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
         "id": "vise-moving-jaw",
         "label": "Moving jaw (right)",
         "max": [
-          109,
-          70,
+          110,
+          90,
         ],
         "min": [
           100,
@@ -493,7 +493,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
           "unverified": "#208",
         },
         {
-          "text": "X0 Y0 Z0 is the top-front-left corner of the blank. That leaves the work origin within ±0.02 mm in X and Y and ±0.02° in rotation. Move there and check by eye before going on.",
+          "text": "X0 Y0 Z0 is the top-front-left corner of the blank. That leaves the work origin within ±0.02 mm in X and Y and ±0.02° in rotation. Move there and check by eye before going on. How well YOU set it is not modelled: the file places the blank at this corner and judges the jaws against it, so an origin that is out by a little — or a blank sitting differently from what was measured — shifts the whole job relative to both without the app knowing. The only X/Y slack for that is this job's edge margin, 1 mm, which is the gap the content keeps from a stock edge rather than a locating tolerance: a cut standing at that margin has used all of it.",
           "unverified": "#208",
         },
         {
@@ -550,7 +550,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "steps": [
         {
           "bold": true,
-          "text": "Vise dimensions are unmeasured defaults (#208); collisions cannot be trusted yet.",
+          "text": "Vise dimensions are the shipped defaults, measured once on the reference unit (#208); they are not a measurement of this machine's own vise.",
         },
         {
           "text": "Checked: the tool against the stock and the modelled fixture (Vise fixed jaw (left), Vise moving jaw (right)).",

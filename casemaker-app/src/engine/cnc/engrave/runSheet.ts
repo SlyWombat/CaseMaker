@@ -156,7 +156,7 @@ export interface RunSheetStep {
    * is an assumption, not a measured fact; the view must show the tag.
    */
   unverified?: string;
-  /** Render the step's text bold. The unmeasured-vise warning opens section 8 this way. */
+  /** Render the step's text bold. The `vise-default` warning opens section 8 this way. */
   bold?: boolean;
 }
 
@@ -792,7 +792,10 @@ function buildDiagram(job: EngraveJob, plan: PartPlan): RunSheetDiagram {
   };
 }
 
-/** The unmeasured-vise warning text — the same wording `validateJob` uses (`jobSetup.ts`). */
+/**
+ * Whether this job's vise is the shipped default — the warning `validateVise` raises for it
+ * (`vise-default`, `fixture.ts`; #353 keeps it to that one validator), which §8 must open with.
+ */
 function isViseDefault(vise: ViseParams): boolean {
   return vise.source === 'default';
 }
@@ -894,7 +897,20 @@ function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string
       `X0 Y0 Z0 is the top-front-left corner of the ${onBoard ? 'part' : 'blank'}. That leaves the ` +
       `work origin within ±${fmtNum(plan.residual)} mm in X and Y` +
       (plan.rotationResidual > 0 ? ` and ±${fmtNum(plan.rotationResidual)}° in rotation` : '') +
-      '. Move there and check by eye before going on.',
+      '. Move there and check by eye before going on. ' +
+      // #391 review item 2 — the ±residual above is what the PLAN leaves open, not how well the
+      // operator then sets it. Nothing in the app carries a term for that error (or for the blank
+      // sitting differently from the model): every check judges the cut against the blank and the
+      // jaws AT THIS ORIGIN, so a shifted origin moves the job in the real world without moving it
+      // in the model. `edgeMargin` is the X/Y slack the content keeps from a stock edge — it is not
+      // a locating tolerance, but it is all there is, so the sheet says so where the origin is set
+      // rather than letting it be absorbed into the vise's own uncertainty band.
+      `How well YOU set it is not modelled: the file places the blank at this corner and judges the ` +
+      `jaws against it, so an origin that is out by a little — or a ${onBoard ? 'part' : 'blank'} ` +
+      `sitting differently from what was measured — shifts the whole job relative to both without the ` +
+      `app knowing. The only X/Y slack for that is this job's edge margin, ${fmtNum(job.edgeMargin)} mm, ` +
+      'which is the gap the content keeps from a stock edge rather than a locating tolerance: a cut ' +
+      'standing at that margin has used all of it.',
     unverified,
   });
   // The planner's own caveats — the static-`.nc` rotation limitation, why Z is always probed, and
@@ -921,8 +937,9 @@ function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string
  * HELD, not printed (#391): `buildRunSheet` calls this only when `RunSheetOptions.materialScan` is
  * set, and nothing in the app sets it. The block was written, reviewed and held (review of 36f3837,
  * 2026-10-13); the review's seven items are now IN, one step each — the sendable `G38.2` line from a
- * stated start height with its travel cap and the miss's `$X`/lift, the tip stated as the assumption
- * every figure derives from, the correction reading PAST the edge as the module always meant, the
+ * stated start height with its travel cap and the miss's `$X`/lift, the tip stated as the figure
+ * every other one derives from (an assumption when this was written; measured 2026-10-15, A8), the
+ * correction reading PAST the edge as the module always meant, the
  * dome as a shape judged edge by edge, bisection either way and a step for a pass that never
  * bracketed the edge, and per-jaw numbers inside §11.8's bounds carrying their own uncertainty —
  * but the hold is not lifted until a person has read them again. See `RunSheetOptions.materialScan`.
@@ -1122,11 +1139,15 @@ export interface RunSheetOptions {
    * on 2026-10-13). That review's seven items are now all IN — see `materialPositionSteps` for the
    * list and which step carries each — and the module and the block are both tested; what remains is
    * that no person has read the rebuilt steps at a machine, so no sheet — the app's, the bench
-   * generator's, or a committed `docs/bench` one — prints them yet. Two figures in them are still
-   * assumptions rather than measurements, and the steps SAY so rather than implying otherwise: the
-   * probe's tip diameter (#208 A8, never measured, and every position derives from it), and the
-   * blank's dome, which stands in from the badge blank where the job states none (#345). Lifting the
-   * hold is the maintainer's call, not this flag's.
+   * generator's, or a committed `docs/bench` one — prints them yet. The probe's tip used to be the
+   * loudest assumption in them; A8 calipered it on 2026-10-15 (#208), so the step now names the
+   * reading — but the CONTACT MODEL around that reading is still a ball's (`materialScan.ts`'s
+   * round-foot note), and A8's tip is a hollow cylinder with no ball, so the corner band and the
+   * resolution are arithmetic on a shape the probe does not have. That is #391's own open item, and
+   * the second reason the hold stands. Two figures are still assumptions and the steps SAY so: the
+   * blank's dome, which stands in from the badge blank where the job states none (#345) — and,
+   * unstated by any document, the 0.05 mm dial. Lifting the hold is the maintainer's call, not this
+   * flag's.
    *
    * Nothing in the app sets it. `runSheet.spec.ts` does, so the block cannot rot while it is held.
    */
@@ -1159,8 +1180,9 @@ export function buildRunSheet(
   // Only the cuts the cutter really gets OVER a jaw decide how far proud the blank must stand
   // (#369, #394). A floor works below the jaw tops only where a jaw is under it in XY, so a
   // blank-wide `deepest + clearance` told the operator to stop on a job the app itself had just
-  // recommended: the badge hand-off stands 1.905 mm proud and cuts 1.0 mm, inside the 2.0 mm a
-  // blank-wide reading demands. And the line this step prints is a STOP — an instruction to the
+  // recommended: the badge hand-off's seeded line stands 6.9 mm clear of either jaw and cuts 1.0 mm,
+  // yet the blank-wide reading demands `1.0 + 1` mm of stand — more than the vise default of the day
+  // gave it (1.905) and far more than the seated default gives it now (0.71, #391). And the line this step prints is a STOP — an instruction to the
   // operator at the machine — so it takes the narrower reading the same rule answers with: the
   // cutter's own disc reaching the jaw face (`overJaw`, #394), not the wider reach the warning is
   // allowed to raise a band early on. The whole rule is `idJawReach`'s, so the paper and the panel
@@ -1410,10 +1432,18 @@ export function buildRunSheet(
   // ---- 8 · Warnings carried from the app -----------------------------------------------------
   const warnings: RunSheetStep[] = [];
   const seen = new Set<string>();
+  /**
+   * Where the `vise-default` warning landed, so §8 can open with it in bold. Recorded by CODE as
+   * the warning is pushed, never by matching its words: the message is prose that changes when the
+   * facts do (it stopped saying "unmeasured defaults" on 2026-10-15), and a `findIndex` over prose
+   * fails SILENTLY — a wording edit would leave the section un-opened with nothing to show for it.
+   */
+  let viseWarningAt = -1;
   const pushWarning = (code: string, message: string): void => {
     const key = `${code}|${message}`;
     if (seen.has(key)) return;
     seen.add(key);
+    if (code === 'vise-default' && viseWarningAt < 0) viseWarningAt = warnings.length;
     warnings.push({ text: message });
   };
   for (const f of generated.findings) {
@@ -1434,10 +1464,9 @@ export function buildRunSheet(
     // caller says there was none.
     for (const sentence of coverageDisclaimer(coverageFor(job, generated, sim))) pushWarning('coverage', sentence);
   }
-  // "If the vise dimensions are unmeasured defaults, this section opens with that, in bold."
-  const viseIndex = warnings.findIndex((s) => s.text.includes('unmeasured defaults'));
-  if (isViseDefault(vise) && viseIndex >= 0) {
-    const [viseWarning] = warnings.splice(viseIndex, 1);
+  // "If the vise is the shipped default, this section opens with that, in bold."
+  if (isViseDefault(vise) && viseWarningAt >= 0) {
+    const [viseWarning] = warnings.splice(viseWarningAt, 1);
     viseWarning!.bold = true;
     warnings.unshift(viseWarning!);
   }

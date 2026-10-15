@@ -13,17 +13,25 @@
  * edge, after the origin has been set by whatever means the fixture allows.
  *
  * WHAT ONE TOUCH MEASURES — and it is not the tip's diameter alone, which is why this is written
- * down rather than assumed. A ball tip of radius `r` descending `o` mm OUTSIDE the blank's edge:
+ * down rather than assumed. A tip of outer radius `r` descending `o` mm OUTSIDE the blank's edge:
  *
- *     o <= 0        the ball is over the blank's top face and stops on it.              depth 0
- *     0 < o < r     the ball is over the jaw, but still meets the blank's CORNER first and
+ *     o <= 0        the tip is over the blank's top face and stops on it.                depth 0
+ *     0 < o < r     the tip is over the jaw, but still meets the blank's CORNER first and
  *                   stops that much lower:  r − sqrt(r² − o²), rising from 0 to r.
- *     o >= r        the corner is out of reach. A jaw's top stops the ball `stockProud` down
+ *     o >= r        the corner is out of reach. A jaw's top stops the tip `stockProud` down
  *                   when one is under the tip; with none, nothing stops it at all.
  *
  * So the trigger's depth below the blank's own top rises smoothly as the tip steps out, and only
- * the tip's POSITION says whether the ball's centre is still over the blank. The machine reports
- * the depth, so the scan reads the depth and asks it one question: has it left the blank's top?
+ * the tip's POSITION says whether it is still over the blank. The machine reports the depth, so
+ * the scan reads the depth and asks it one question: has it left the blank's top?
+ *
+ * THE CONTACT MODEL IS A ROUND FOOT, AND THE TIP IS NOT ONE. A8 calipered the wired probe on
+ * 2026-10-15 (#208): it is a plain cylinder 2.0 mm across, "a hollow cylinder, no ball". What
+ * meets the blank's edge is therefore a rim at 1.0 mm, and `r − sqrt(r² − o²)` is written for a
+ * ROUND foot of that radius — the rim's own reading against a square edge has not been measured
+ * on the bench. The figure this module derives (`r` in, the 0.31 mm resolution out) is the
+ * radius's, and re-checking the model against the cylinder is an open item for the #391
+ * re-review, filed there rather than settled here.
  *
  * AND THAT QUESTION HAS THE BLANK'S DOME IN IT. The face being scanned is domed — 0.33 mm across
  * the 38 mm badge blank and 0.1 mm along its length (#345, §11.8), a slow rise that a touch near
@@ -36,11 +44,11 @@
  *
  * WHAT THAT LEAVES AS THE RESOLUTION. A reading leaves the blank's own top once the corner
  * contact has sunk it past that local top by more than the dial can tell — a fixed 0.05 mm — so
- * the outward distance at which the change appears is `sqrt(2·r·0.05 − 0.05²)`: **0.4 mm** with
- * the assumed 3 mm tip, at every edge, and *not* the ~1 mm the dome-sized band gave before. That
- * is the figure the sheet asks the operator to measure back by, and it is one more reason the
- * tip's own measurement (#208 A8) is worth taking: the plan states both the assumption and the
- * figure, rather than leaving either implied.
+ * the outward distance at which the change appears is `sqrt(2·r·0.05 − 0.05²)`: **0.31 mm** with
+ * the measured 2.0 mm tip (#208 A8 — it was 0.4 mm while the tip stood in at 3 mm unmeasured), at
+ * every edge, and *not* the ~1 mm the dome-sized band gave before. That is the figure the sheet
+ * asks the operator to measure back by, and the reason the tip is stated on the sheet rather than
+ * folded into a margin: the plan names the number it came from.
  *
  * NOTHING HERE DRIVES THE MACHINE, and nothing here needs to: the plan is a list of positions and
  * what to expect at each, the run sheet prints it in the operator's words, and the touches are
@@ -109,7 +117,7 @@ export type ScanEdge = JobSide;
  * What one downward touch found, read off the depth it triggered at.
  *
  * `corner` is the informative one and the reason the tip's geometry is written out above: a
- * reading there says the ball is over the blank's EDGE, so the edge is within a tip radius of the
+ * reading there says the tip is over the blank's EDGE, so the edge is within a tip radius of the
  * point that produced it. `below` and `miss` both mean "not the blank", and are separate because
  * only a miss says the travel cap was reached — which is the reading that means the tip had
  * nothing under it at all.
@@ -235,8 +243,8 @@ export interface MaterialScanPlan {
    *
    * ONE figure for every edge, and not by approximation: each edge's band is its own top plus the
    * dial, so the corner contact has to climb past the DIAL, the same 0.05 mm everywhere. It is
-   * what the tip's radius buys and the tip alone (`sqrt(2·r·0.05 − 0.05²)`), which is why an
-   * unmeasured tip (#208 A8) is stated as an assumption rather than folded into a margin.
+   * what the tip's radius buys and the tip alone (`sqrt(2·r·0.05 − 0.05²)`), which is why the tip
+   * is stated on the sheet — measured, #208 A8 — rather than folded into a margin.
    */
   resolutionMm: Mm;
   /**
@@ -327,7 +335,7 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
     -(tipR + SCAN_COARSE_STEP_MM),
     // Close to the edge, still on the blank — the near side of the bracket.
     -tipR,
-    // AIMED AT THE EDGE ITSELF: the middle of the corner band, where the ball meets the blank's
+    // AIMED AT THE EDGE ITSELF: the middle of the corner band, where the tip meets the blank's
     // corner and the reading goes deepest before the jaw takes it. The one sample whose expected
     // reading is neither the blank's top nor past it, so it is the one that places the edge within
     // a tip radius of a position the operator can read off the machine. Rounded to a tenth, because
@@ -352,8 +360,9 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
       const reach = jawReach(point[0], point[1]);
       // The reading the plan stands behind is the one the fixture's NOMINAL dimensions give. When
       // the uncertainty reaches this point the other one is named beside it, rather than folded
-      // away: a jaw's width is unmeasured (#208), so "the jaw's top, or nothing at all if the jaw
-      // ends short of here" is the honest sentence and one reading is not a fault (item 7).
+      // away: the jaw is calipered now, so the band is narrow (±0.5, #208 2026-10-15), but it is
+      // still a band — "the jaw's top, or nothing at all if the jaw runs wider than its number"
+      // stays the honest sentence, and one reading is not a fault (item 7).
       const sure = predictedDepthMm(offsetMm, tipR, proud, dropMm, reach === 'on');
       const touch: ScanTouch = {
         edge,
@@ -401,13 +410,15 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
     missTravelMm,
     resolutionMm,
     notes: [
-      // THE ASSUMPTION FIRST (#391 review item 2): it is the figure every other one is derived
-      // from, no tip has ever been measured, and an operator reading a prediction is entitled to
-      // know which of these numbers is a guess.
-      `The tip is ${fmtNum(probe.tipDiameter)} mm across AS ASSUMED, not as measured (#208 A8): no ` +
-        `tip has been measured, and every position and depth below is derived from this one figure — ` +
-        `the ${fmtNum(resolutionMm)} mm the reading stands past the edge is its radius and the dial, ` +
-        'and a smaller tip is a sharper scan.',
+      // THE TIP FIRST (#391 review item 2): it is the figure every other one here is derived from,
+      // so an operator reading a prediction is entitled to know what it is and where it came from.
+      // It used to say AS ASSUMED — no tip had been measured. A8 calipered it on 2026-10-15, so the
+      // sentence now names the reading instead (and still names WHICH probe it is, because the
+      // machine ships three and only the wired one is the touch-off tip).
+      `The tip is ${fmtNum(probe.tipDiameter)} mm across, measured (#208 A8, 2026-10-15: the wired ` +
+        `probe's shaft — a hollow cylinder, no ball): every position and depth below is derived ` +
+        `from this one figure — the ${fmtNum(resolutionMm)} mm the reading stands past the edge is ` +
+        'its radius and the dial, and a smaller tip is a sharper scan.',
       flatness
         ? `The ${fmtNum(dome)} mm the reads are allowed to vary by is the dome the job states ` +
           `(${flatness.source}, across its ${flatness.across}).`
@@ -472,13 +483,13 @@ interface EdgeSide {
  * this file: the plan's own expectations are made from it.
  */
 function predictedDepthMm(o: Mm, tipR: Mm, proud: Mm, dropMm: Mm, jawUnder: boolean): Mm | null {
-  // Inside the edge the ball lands on the blank's own face, which is `dropMm` down here.
+  // Inside the edge the tip lands on the blank's own face, which is `dropMm` down here.
   if (o <= 0) return dropMm;
   // The corner contact is a CLIMB up from that face (`r − sqrt(r² − o²)`), and a reading is a depth
   // below the reference: the blank's local top plus the climb.
   const climb = o < tipR ? tipR - Math.sqrt(tipR * tipR - o * o) : null;
   const corner = climb === null ? null : dropMm + climb;
-  // Whichever the ball meets first — the jaw's top only stops it if the jaw stands above the
+  // Whichever the tip meets first — the jaw's top only stops it if the jaw stands above the
   // corner, and past a full radius the corner is out of reach entirely.
   if (jawUnder && (corner === null || proud <= corner)) return proud;
   return corner;

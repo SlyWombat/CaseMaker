@@ -165,8 +165,10 @@ function ladderJob(row: 'A' | 'B'): EngraveJob {
     // jaw tops (`vise-grip-shallow`, under 3 mm), and the deepest floor (1.6 mm below the top face)
     // is 0.4 mm BELOW the declared jaw tops — harmless for these squares, which run down the blank's
     // centre at X 19.05/31.05 and never reach a jaw face at X 0 / 38.1, which is exactly what
-    // `itemReachesJaws` (#369) decides before it charges a depth. A3/A5 measure the vise itself; the
-    // rest of this record stays `source: 'default'` with its 2 mm uncertainty band.
+    // `itemReachesJaws` (#369) decides before it charges a depth. A3/A5 measured the vise itself on
+    // 2026-10-13/15 (#208), so the dimensions here are the calipered product set and the band is
+    // ±0.5; what is still `default` is the SOURCE — nobody has measured THIS machine's vise — and
+    // `validateVise` says exactly that on the sheet.
     workholding: { kind: 'vise', vise: { ...DEFAULT_VISE, stockProud: STOCK_PROUD } },
     // The job's own snapshot (`tool`) is what it generates with (#305 design point 2); `toolKey` is
     // the name it is filed under, and the two must not disagree. `flat-1.0` was the builtin default
@@ -468,28 +470,35 @@ type CouponSpecFile = Omit<CouponSpec, 'base'> & { basePath: string; note: strin
  *    solid material, so a membrane (row A) cannot confound a feed reading, and it is clear of both
  *    cut rows and of #185's V-groove strip (which is left of row A in the FRONT band, X 2.5..11.5 ×
  *    Y 4..14 — the two share this blank, so neither may sit where the other cuts).
- *  - `text.size` 11.0 mm in Barlow BOLD is the largest cap height whose cell the APP accepts on this
- *    blank. The binding limit is NOT `edgeMargin`: it is the vise. The fixed jaw's face is at work
- *    X 0 and the moving jaw's at X 38.1, and the collision check grows each by the 2 mm PROVISIONAL
- *    band (#208 — the vise is unmeasured), so the cutter's body must stay inside X 2.0..36.1. The
- *    label CAM sweeps the cutter INSIDE the glyph outline, so the ink box's own edge is as far as
- *    the cutter's body reaches: the ink must lie in X 2.0..36.1, a **34.1 mm** ceiling. At 11.5 mm
- *    the ink was 35.0 mm wide and the sim reported it as it should — `tool-into-fixture`, the cutter
- *    driving 2.2 and 3.4 mm³ into the fixed jaw. At 11.0 mm the ink is 33.49 × 11.30 mm, X
- *    2.31..35.79 — 0.31 mm inside each band — and the sim is clean.
+ *  - `text.size` 11.0 mm in Barlow BOLD is the cap height this coupon ships at: the largest the app
+ *    accepted on this blank WHEN IT WAS SIZED (0116f36 — the ceiling has moved since; see the note
+ *    after this list). Two limits set it and the tighter one was the vise: the fixed jaw's face is
+ *    at work X 0 and the moving jaw's at X 38.1, and the collision check grows each by the vise's own
+ *    band, which was then the 2 mm an unmeasured default carried (#208). So the cutter's body had to
+ *    stay inside X 2.0..36.1, and the ink box with it — its own edge is as far as the cutter's body
+ *    reaches, the label CAM sweeping INSIDE the glyph outline — a **34.1 mm** ceiling, against
+ *    `edgeMargin`'s looser 36.1. At 11.5 mm the ink was 35.0 mm wide and the sim reported it as it
+ *    should — `tool-into-fixture`, the cutter driving 2.2 and 3.4 mm³ into the fixed jaw. At 11.0 mm
+ *    the ink is 33.49 × 11.30 mm, X 2.31..35.79 — 0.31 mm inside the band the app then carried — and
+ *    the sim is clean.
  *  - …and it is the one face that survives this cutter at all: Barlow bold at 11.0 loses 18 % of its
  *    area to the 2 mm opening (`item-detail-lost`, a warning the run sheet carries), while every
  *    other bundled face at any size that FITS loses the label entirely (`item-empty`) or a whole
  *    character. The cell is a label, not a pocket (#248), so the cutter's reach decides how large
- *    the value text can be — and on a 38.1 mm blank the jaw band, not the text, sets the ceiling.
+ *    the value text can be — and on a 38.1 mm blank it is the jaws or the job's own edge inset that
+ *    sets the ceiling, never the text.
  *  - `values` bracket the row's own 500 (the number a readback adopts), and the row's own value must
  *    be cut or there is nothing to adopt (`measurementFromRecord`).
  *  - `depth` 0.8 mm is the badge's reveal depth (#166), so the feed is judged at the depth the
  *    acceptance run cuts at.
  *
- * All of that re-opens after runbook A1 measures the vise: a measured vise has no 2 mm band, the
- * ceiling goes back to ~36 mm and this cell could be enlarged. Until then this is the cell the app
- * itself will let through the upload gate, and the one an operator may run.
+ * A3/A5 calipered the vise on 2026-10-13/15, so its band is ±0.5 and the vise's own ceiling moved
+ * out to an ink 37.1 mm wide (X 0.5..37.6). The tighter limit is now `edgeMargin`, at 36.1 — where
+ * the vise held it to 34.1 — so a cell up to ~11.86 mm of cap height passes where 11.0 was the cap
+ * (measured 2026-10-15: 11.85 mm writes its program, 12 mm stops at findings with
+ * `item-outside-stock`). The cell stays 11.0 mm anyway: that is what the four committed files were
+ * generated at, and re-sizing it would change what the coupon's own value text measures. Enlarging
+ * it is a bench decision, not a consequence of the caliper.
  */
 const COUPON_SPEC: CouponSpecFile = {
   id: '284-pla-feed',
@@ -572,12 +581,15 @@ const vOpeningWidth = (depth: number): number => V_TIP + 2 * depth * Math.tan((V
 // grooves 3 mm apart across that window, SHALLOWEST FIRST so the file's own order says which groove
 // is which. Both bounds are properties of the blank and the vise, not taste:
 //
-//   * LEFT. The fixed jaw's face is declared at work X 0 and the UNMEASURED vise grows each jaw box
-//     by its own 2 mm band (#208, `uncertaintyFor('default')`), so the free section begins at X 2.
-//     At X 2.5 the 0.6 mm groove's cone — tip half-width 0.15 mm + d·tan 15° = 0.31 mm — leaves
-//     0.19 mm to that edge. It may sit this close only because the jaws' TOPS stand 1.2 mm BELOW
-//     the stock's top face (`stockProud`): a 0.6 mm groove never reaches the Z at which a jaw
-//     exists. The deepest groove is the furthest from the jaw, so nothing here is near it.
+//   * LEFT. The fixed jaw's face is declared at work X 0 and the vise — calipered 2026-10-13/15, so
+//     its band is ±0.5, not the ±2 an unmeasured default carried (#208, `uncertaintyFor('default')`)
+//     — grows each jaw box, so the free section begins at X 0.5. X 2.5 is the brief's own "about X 2"
+//     and the 0.6 mm groove's cone is 0.31 mm half-wide there (tip half-width 0.15 mm + d·tan 15°),
+//     so its edge sits at X 2.19: 1.69 mm clear of the grown jaw, where the ±2 band the plan was
+//     written under left 0.19 mm. Both margins are against the app's BOX, and what made the old thin
+//     one safe to cut is the box's TOP: the jaws' tops stand 1.2 mm BELOW the stock's top face
+//     (`stockProud`), and at ±0.5 the grown top is 0.7 mm below it — still under the 0.6 mm groove's
+//     floor. Nothing here is close to a jaw: the deepest groove is also the furthest from it.
 //   * RIGHT. The magnet pocket's left wall is at work X 12.55 (the 13 mm pocket dimension, centred).
 //     X 11.5 leaves 0.58 mm between the widest top opening (0.943 mm, the 1.2 mm groove) and that
 //     wall. The whole strip is full 3.81 mm thickness — no membrane under any of it.
@@ -669,8 +681,9 @@ function vGrooveNc(): string {
     '; #165\'s first four depths, shallowest first.',
     ';',
     '; The section is full 3.81 mm thickness — the magnet pocket\'s left wall is at X 12.55 — and the',
-    '; grooves are 3 mm apart across it. X 2.5 and X 11.5 are the section\'s own bounds, not taste:',
-    '; the unmeasured jaws\' 2 mm band starts at X 2, and the pocket wall ends the strip at 11.5.',
+    '; grooves are 3 mm apart across it. The section is bounded by the vise and the pocket, not by',
+    '; taste: the jaws\' ±0.5 band (calipered 2026-10-13/15, #208) starts at X 0.5, and the pocket',
+    '; wall ends the strip at X 11.5. The four grooves sit inside that window, the first at X 2.5.',
     ';',
     '; CALIPER the TOP OPENING width of each groove (across the top, not the floor) and compare it',
     '; with',

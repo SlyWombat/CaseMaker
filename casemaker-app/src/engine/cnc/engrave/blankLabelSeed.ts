@@ -23,11 +23,12 @@
  *
  * The JAW bound knows where the line is too, since #369: a line's own ink box decides whether the
  * jaws can reach it, and this one comes no nearer than 6.9 mm to a jaw face even at the estimate's
- * width — past the 3.5 mm reach the vise's own uncertainty opens up — so the jaws set no limit
- * here and the split's reveal is what the walk writes. While every line was charged the blank-wide
- * jaw floor, this line took 1.905 − 1 = 0.905 mm instead, which lands inside the split's ±0.2 mm
- * band and came back up as a 0.6 mm `surface` floor: a two-colour blank handed over with a floor
- * that stops just short of its colour boundary.
+ * width — past the 1 mm reach the jaws are judged by (`uncertainty + radius`, #394: 0.5 mm of vise
+ * band and a 1 mm cutter) — so the jaws set no limit here and the split's reveal is what the walk
+ * writes. While every line was charged the blank-wide jaw floor, this line took 1.905 − 1 =
+ * 0.905 mm instead (the vise default of the day; a new job now SEATS the blank at `thickness − 3.1`,
+ * #391), which lands inside the split's ±0.2 mm band and came back up as a 0.6 mm `surface` floor:
+ * a two-colour blank handed over with a floor that stops just short of its colour boundary.
  *
  * The BARE blank (#364) takes the same rule with `BLANK_SEED_TEXT` and no pocket, so `freeBands`
  * answers its whole usable face as one band: a `Text` line sized to the blank, rather than three

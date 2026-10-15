@@ -81,11 +81,22 @@ clamp in X.
 
 | Dimension | Fixed jaw | Moving jaw | Note |
 |---|---|---|---|
-| Soft-jaw top width (flat top of the tall bar) | 10 mm | 10 mm | agrees with the 2026-10-08 probe (top at 3–8 mm out from the blank, a miss at 13 mm; moving side a miss 6 mm out) |
+| Soft-jaw top width (flat top of the tall bar) | 10 mm | 10 mm | calipered 2026-10-13. The FIXED side agrees with the 2026-10-08 probe (a top at 3–8 mm out from the blank, a miss at 13 mm); the MOVING side does not — that pass read a miss only 6 mm out, which a 10 mm top cannot produce. Unsettled, see below |
 | Step, jaw top down to the blank ledge | 3.1 mm | 3.1 mm | first read as 3 mm, corrected |
 | Ledge depth (how far it sticks out from the tall bar's face) | 1.9 mm | 1.9 mm | 2026-10-15 |
 | Tall-bar length (along the jaw, Y) | 100 mm | — | 2026-10-15 |
 | Jaw block width across (X) | 37.5 mm | differs | the moving jaw's width varies because of its side locking screw; not needed, the probe finds the blank's edges |
+
+**The moving jaw's top is the one caliper reading with a contradicting witness.** The 2026-10-08
+probe reads a *miss* only 6 mm out from the blank on the moving side, where the fixed side reads a
+top at 3–8 mm out and a miss at 13 mm. A 10 mm soft-jaw top cannot produce a miss 6 mm out unless
+the blank sat further from that face than it looked, or the tip dropped past the jaw's own inner
+edge. §11.8 read the moving jaw's top as *narrow* on that basis, which is where the 9 mm the code
+carried until 2026-10-13 came from. Both readings cannot describe the surface under the run sheet's
+3.5 mm outward touch at that end, and the sheet would teach an operator that the touch reads "the
+jaw's top" where the machine reads a miss. A stepped touch pass across the moving end on the next
+session settles it in one gesture — the same pass the material scan wants for the probe's rim
+(#391).
 
 **The blank, measured 2026-10-15:** 3.82 mm thick at the middle of the long side, clear of the
 cut squares, so the print matches the 3.81 mm design. Seated on a 3.1 mm ledge it would stand
@@ -97,12 +108,46 @@ cut depths are unaffected because each is 5.4 minus a reading over the same nut.
 `stockProud` stays a per-job value; only the jaw geometry is a constant.
 
 **The wired probe's tip, measured 2026-10-15:** 2.0 mm outside diameter, a hollow cylinder with
-no ball (A8 in the day-1 sheet). The code still assumes 3 mm (`PROBE_SPEC`).
+no ball (A8 in the day-1 sheet).
 
 `jawStartY` is not a vise constant: it depends on where the blank is clamped along the 100 mm jaw.
 
-Not changed in the code yet: `DEFAULT_VISE` still holds 10.5 / 9 / 80 (0116f36). It moves to the
-measured set in one commit.
+**In the code since 2026-10-15 (this commit).** `DEFAULT_VISE` holds 10 / 10 / 100 (0116f36 had
+10.5 / 9 / 80). It keeps `source: 'default'` — the numbers are the product's, measured once on the
+reference unit, and no user's own vise has been measured — and its uncertainty is **±0.5** rather
+than the ±2 an unmeasured set carried (`uncertaintyFor('default')`, decision 28). 0.5 is a CHOSEN
+band, not a reading (#391 review item 3): nothing has calipered the spread of a remount, and it is
+not the caliper's resolution — it is the number that has to cover clamping repeatability and the
+blank's dome, and it is the same for a saved measurement because a reading does not make a remount
+repeatable. The consequences are real rather than cosmetic: a cut near a jaw face is now judged
+against a ±0.5 band, and on a blank thinner than 4 mm the `holder-vs-fixture-unproven` warning can
+disappear, because it was the band that lifted the jaw's top above the stock top, not the jaw.
+`PROBE_SPEC.tipDiameter` is **2** (was 3, provisional) — side touches stand 1.0 mm off a corner, the
+shortest useful edge falls from 6 to 4 mm, and the material scan's resolution goes 0.384 → 0.312 mm.
+Both figures are pinned in `cncProbePlan.spec.ts`; the regenerated bench files carry the new wording.
+A new job's default proud is the seated value where it exists (see the open question above); §5 of
+the run sheet now states, where the origin is set, that how well it is set is not modelled
+(#391 review item 2), because the ×2 band that used to absorb that as a side effect is gone.
+
+**The ledge is a note, not a third obstacle box (decided 2026-10-15, in `fixture.ts`).** The 1.9 mm
+ledge and its 3.1 mm step have no field in the obstacle model, and they should not get one: the
+ledge's top plane IS the blank's underside (`stockProud + 3.1 = thickness` on a seated blank), so an
+inflated box would claim material inside the blank and refuse correct edge cuts; nothing the app
+generates reaches below the part (`minFloor` over the stock), and the probe plan uses the jaw FACES,
+not the envelope. Revisit if a through-cut with breakthrough is ever generated, or when a probe has
+to reach under the blank.
+
+**Open question the calipers created, answered for now by the safer number:** a new job's
+`stockProud` was the half-thickness rule (`min(4, t/2)`), but a blank actually seated on the ledges
+stands `thickness − 3.1` proud — 0.72 mm on the 3.82 mm badge blank, 8.9 mm on a 12 mm one. The two
+disagree on every blank except a 6.2 mm one. Since 2026-10-15 the default takes the LOWER of the two
+(`min(4, t/2, t − 3.1)`, `defaultStockProud`), which is the seated value wherever the ledge is the
+smaller number, and the half-thickness rule for a blank no taller than the step or taller than
+7.1 mm. The reason is not preference but safety: the modelled jaw top is `−stockProud`, so the
+half-thickness rule put it 0.4–0.7 mm BELOW the real jaw top on the badge blank — clearance the tool
+does not have — while the seated value keeps the modelled top at or above the real one (0.72 seated
+vs 0.99 mm read by the 2026-10-15 probe), inside the ±0.5 band either way. Which rule the maintainer
+WANTS a new job to start from is still open; the shipped one is now the conservative half of it.
 
 ## The one gate on every chip-making session: the cutter
 

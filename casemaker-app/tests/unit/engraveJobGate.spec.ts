@@ -1,6 +1,6 @@
 // #393 — the guard, driven through the REAL producer of the bench coupons.
 //
-// `scripts/engrave-job.ts` wrote four 11.5 mm #284 coupons whose own simulation said the cutter was
+// `scripts/engrave-job.ts` wrote four coupons whose own simulation said the cutter was
 // 2.2–3.4 mm³ inside the fixed jaw, and receipted them "all generated": it gated on `load.ok`,
 // which means "the sweep produced material" and not "the program is safe" (`simGate.ts`). The
 // refusal is three lines in that script, so the only honest test of it is the script itself.
@@ -10,14 +10,30 @@
 // a gate that refuses everything would pass the refusal half on its own: the same script, the same
 // base job, a size the app accepts must still write its program.
 //
-// The base job is the bench's own committed blank (`docs/bench/165-depth-ladder-row-A.job.json`).
-// If its geometry ever moves so that 11.5 mm no longer reaches the jaw this test FAILS rather than
-// silently proving nothing — that is loud and right, and the fix is to re-derive both sizes from
-// the blank.
+// The base job is the bench's own committed blank (`docs/bench/165-depth-ladder-row-A.job.json`),
+// with ONE field STATED rather than inherited: the vise's `uncertainty`, 2 mm (`benchBase`).
+//
+// That one field is the whole of the 2026-10-15 change (#208). Calipering the vise took that band
+// from 2 mm to 0.5, and with it the sweep's ability to refuse ANY coupon cell on this blank. The
+// sweep collides where a cell's own gap falls inside the jaw's band, and the job's `edgeMargin` —
+// 1 mm, its own inset — is what makes `item-outside-stock` refuse the cell first. 0.5 < 1, so the
+// collision sits wholly inside the region findings already rejects and nothing reaches the sweep.
+// Read off the machine, not reasoned about: at 11.5, 11.6, 11.7, 11.75, 11.8 and 11.85 mm the
+// script writes its program; at 12 mm it stops at findings.
+//
+// 2 mm is the band an UNMEASURED vise carries — the state this app shipped until that caliper, and
+// the state #393 was filed against — so declaring it restores the case the gate exists for without
+// inventing any geometry. The refusal it produces is recognisably the original: 2.469 mm³ into the
+// fixed jaw at checkpoint 0, against the 2.2–3.4 mm³ those four coupons receipted.
+//
+// Everything else the refusal needs — the blank's length, the cell's origin, the font's own
+// metrics — is the committed blank's. If its geometry ever moves so that 11.5 mm no longer reaches
+// the jaw this test FAILS rather than silently proving nothing — that is loud and right, and the
+// fix is to re-derive both sizes from the blank.
 
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +42,21 @@ const APP = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TSX = join(APP, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 /** The rear clear band of the as-clamped badge blank — where the bench's own #284 coupon sits. */
 const BASE_JOB = join(APP, '..', 'docs', 'bench', '165-depth-ladder-row-A.job.json');
+/** The band an unmeasured vise carries, mm — see the header. */
+const UNMEASURED_VISE_BAND_MM = 2;
+
+/**
+ * The committed blank, read as JSON with its vise's band written in. Deliberately not parsed into
+ * an `EngraveJob` here: the script parses it, and a test that re-typed the document would be free
+ * to disagree with the file the bench actually cuts from.
+ */
+function benchBase(): Record<string, unknown> {
+  const raw = JSON.parse(readFileSync(BASE_JOB, 'utf8')) as {
+    workholding: { vise: Record<string, unknown> };
+  };
+  raw.workholding.vise.uncertainty = UNMEASURED_VISE_BAND_MM;
+  return raw as unknown as Record<string, unknown>;
+}
 
 /**
  * Run `scripts/engrave-job.ts --coupon` on a coupon spec at `text.size` and return what it said,
@@ -44,7 +75,7 @@ function runCoupon(textSize: number, id: string): { status: number | null; outpu
       title: `393 ${id}`,
       parameter: 'feed',
       values: [500],
-      basePath: BASE_JOB,
+      base: benchBase(),
       text: { size: textSize, pitch: 16 },
       origin: { x: 19.05, y: 68 },
       depth: 0.8,
