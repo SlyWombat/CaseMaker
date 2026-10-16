@@ -264,6 +264,97 @@
       "setAt": null,
       "unit": "s"
     },
+    "registration.capBelowSurfaceMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.coarseStepMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.cornerClearanceMm": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.edgeMarginMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.fineStepMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.parkAboveSurfaceMm": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.scanInsideMm": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.scanReachMm": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.surfaceBandMm": {
+      "value": 0.25,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.surfaceFastFeed": {
+      "value": 300.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min"
+    },
+    "registration.surfaceSeekMm": {
+      "value": 60.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.surfaceSlowFeed": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min"
+    },
+    "registration.surfaceToleranceMm": {
+      "value": 0.4,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.tipRadiusMm": {
+      "value": 0.7,
+      "source": "measured",
+      "setAt": "2026-10-15T19:03:20.874Z",
+      "unit": "mm",
+      "note": "effective rim offset of the wired probe, from the 2026-10-15 bench scan (trace 18:59-19:03): the 38.1 mm blank read 39.5 mm wide, (39.5 - 38.1) / 2 = 0.70 mm, +/- 0.25 at a 0.5 mm step; the tip's outside diameter is 2.0 mm"
+    },
+    "registration.touchFeed": {
+      "value": 150.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min"
+    },
     "rest.overlapMm": {
       "value": 0.5,
       "source": "chosen",

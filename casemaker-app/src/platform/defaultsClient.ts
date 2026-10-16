@@ -43,6 +43,14 @@ export const ShopDefaultSchema = z
     source: z.enum(DEFAULT_SOURCES),
     setAt: filled.nullable().default(null),
     unit: z.string().max(16).nullable().default(null),
+    /** Where a measured value came from, in a sentence (#430 review). */
+    note: z
+      .string()
+      .max(400)
+      // eslint-disable-next-line no-control-regex
+      .refine((v) => !/[\u0000-\u001f\u007f-\u009f]/.test(v), 'has a control character')
+      .nullable()
+      .default(null),
   })
   .strict()
   .superRefine((d, ctx) => {
@@ -52,6 +60,9 @@ export const ShopDefaultSchema = z
   });
 
 export type ShopDefault = z.infer<typeof ShopDefaultSchema>;
+
+/** What the surface tolerance must leave below the park height, mm — `defaults.rs`'s `PARK_CLEARANCE_MM`. */
+export const PARK_CLEARANCE_MM = 0.5;
 
 /** A key this build knows: its rule, and the value used when there is no location to read. */
 export interface KnownDefault {
@@ -71,6 +82,23 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(10).max(1800),
     fallback: 180,
   },
+  // #430 — the stepped edge scan and the surface touch, as the 2026-10-15 bench ran them.
+  'registration.capBelowSurfaceMm': { label: 'touch cap below the surface', unit: 'mm', rule: z.number().min(0.1).max(1), fallback: 0.5 },
+  'registration.coarseStepMm': { label: 'scan coarse step', unit: 'mm', rule: z.number().min(0.1).max(10), fallback: 1.0 },
+  'registration.fineStepMm': { label: 'scan fine step', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },
+  'registration.parkAboveSurfaceMm': { label: 'park height above the surface', unit: 'mm', rule: z.number().min(2).max(30), fallback: 3.0 },
+  'registration.scanInsideMm': { label: 'scan start inside the edge', unit: 'mm', rule: z.number().min(0.5).max(30), fallback: 3.0 },
+  'registration.scanReachMm': { label: 'scan reach past the edge', unit: 'mm', rule: z.number().min(0.5).max(50), fallback: 5.0 },
+  'registration.cornerClearanceMm': { label: 'clearance from a rounded corner', unit: 'mm', rule: z.number().min(0).max(30), fallback: 2.0 },
+  'registration.surfaceBandMm': { label: 'surface band', unit: 'mm', rule: z.number().min(0.01).max(1), fallback: 0.25 },
+  // MEASURED 2026-10-15 — the effective rim offset; the note in location.json says how. The fallback is that measurement.
+  'registration.tipRadiusMm': { label: 'probe rim offset (measured)', unit: 'mm', rule: z.number().min(0).max(3), fallback: 0.7 },
+  'registration.surfaceToleranceMm': { label: 'surface tolerance', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 0.4 },
+  'registration.edgeMarginMm': { label: 'registration margin', unit: 'mm', rule: z.number().min(0.01).max(20), fallback: 0.5 },
+  'registration.surfaceSeekMm': { label: 'surface seek travel, at most', unit: 'mm', rule: z.number().min(1).max(100), fallback: 60.0 },
+  'registration.touchFeed': { label: 'scan touch feed', unit: 'mm/min', rule: z.number().min(10).max(1000), fallback: 150.0 },
+  'registration.surfaceFastFeed': { label: 'surface touch, fast', unit: 'mm/min', rule: z.number().min(10).max(1000), fallback: 300.0 },
+  'registration.surfaceSlowFeed': { label: 'surface touch, slow', unit: 'mm/min', rule: z.number().min(5).max(500), fallback: 100.0 },
   // #415 — past how many minutes of runtime a cutter gets "check this bit". It only warns.
   'tools.runtimeWarnMinutes': {
     label: 'runtime before "check this bit"',
@@ -91,6 +119,18 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
 export const ShopDefaultsSchema = z.record(z.string(), ShopDefaultSchema).superRefine((map, ctx) => {
   if (Object.keys(map).length > 200) {
     ctx.addIssue({ code: 'custom', message: 'the shop defaults hold more than 200 keys' });
+  }
+  // #430 review: the surface band inside the touch cap, as `defaults.rs` checks it.
+  const band = map['registration.surfaceBandMm']?.value;
+  const cap = map['registration.capBelowSurfaceMm']?.value;
+  if (typeof band === 'number' && typeof cap === 'number' && band >= cap) {
+    ctx.addIssue({ code: 'custom', message: `registration.surfaceBandMm (${band}) must be less than registration.capBelowSurfaceMm (${cap})` });
+  }
+  // The surface tolerance inside the park height less a clearance — `defaults.rs`'s PARK_CLEARANCE_MM.
+  const tol = map['registration.surfaceToleranceMm']?.value;
+  const park = map['registration.parkAboveSurfaceMm']?.value;
+  if (typeof tol === 'number' && typeof park === 'number' && tol >= park - PARK_CLEARANCE_MM) {
+    ctx.addIssue({ code: 'custom', message: `registration.surfaceToleranceMm (${tol}) must be less than registration.parkAboveSurfaceMm (${park}) less ${PARK_CLEARANCE_MM}` });
   }
   for (const [key, d] of Object.entries(map)) {
     if (!DEFAULT_KEY.test(key)) {

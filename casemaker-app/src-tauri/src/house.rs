@@ -3674,6 +3674,7 @@ mod tests {
             source: DefaultSource::Chosen,
             set_at: Some("2026-10-15T00:00:00.000Z".into()),
             unit: Some("mm".into()),
+            note: None,
         };
         assert!(matches!(
             store.put_default("rest.overlapMm", chosen(serde_json::json!(0.5)), None).await,

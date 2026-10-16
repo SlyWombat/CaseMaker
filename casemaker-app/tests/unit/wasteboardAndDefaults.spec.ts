@@ -92,7 +92,7 @@ describe('the shop defaults (location.json `defaults`)', () => {
       { 'rest.overlapMm': { value: 1, source: 'chosen' } },
       { 'power.onWaitSeconds': { value: 5, ...chosen } },
       { 'wasteboard.depthLimitMm': { value: -1, ...chosen } },
-      { 'rest.overlapMm': { value: 1, ...chosen, note: 'unknown field' } },
+      { 'rest.overlapMm': { value: 1, ...chosen, comment: 'unknown field' } },
       { 'rest.overlapMm': { value: 1, ...chosen, unit: 'millimetres-per-minute' } },
     ]) {
       expect(ShopDefaultsSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);

@@ -1,0 +1,37 @@
+/**
+ * The registration in sentences (#430 phase 1) — the one UI-facing piece before the job flow draws
+ * it: what the plan will do, and what the run found. Pure.
+ */
+
+import type { RegistrationPlan } from './plan';
+import type { RegistrationOutcome } from './outcome';
+
+const n = (v: number) => String(Math.round(v * 100) / 100);
+
+export function summarizePlan(plan: RegistrationPlan): string {
+  const s = plan.settings;
+  const edges =
+    plan.scans.length === 0
+      ? 'no edge scan (the bracket fixes X and Y)'
+      : plan.scans.map((sc) => `the ${sc.edge} edge at ${sc.edge === 'left' || sc.edge === 'right' ? 'Y' : 'X'} ${n(sc.along)}`).join(', ');
+  return (
+    `Home, fit the wired probe and measure it (M491); touch the surface at the cut area's centre ` +
+    `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}); then scan ${edges} — stepping ${n(s.coarseStepMm)} mm, ` +
+    `then ${n(s.fineStepMm)} mm, stopping at the first touch off the stock, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.`
+  );
+}
+
+export function summarizeOutcome(o: RegistrationOutcome): string {
+  if (!o.usable) {
+    return `The measurement is not usable, and no origin will be written from it: ${o.problems.join('; ')}.`;
+  }
+  const parts: string[] = [];
+  if (o.measured.x) parts.push(`X off by ${n(o.offset.x)} mm`);
+  if (o.measured.y) parts.push(`Y off by ${n(o.offset.y)} mm`);
+  if (o.rotationDeg !== null) parts.push(`turned ${n(o.rotationDeg)}° (${n(o.rotationShiftMm ?? 0)} mm over its length)`);
+  const found = parts.length === 0 ? 'the surface was found' : `the stock is ${parts.join(', ')}`;
+  const verdict = o.withinMargin
+    ? `within the ${n(o.margin)} mm margin — confirmed`
+    : `outside the ${n(o.margin)} mm margin — set the origin from the measurement (after you confirm), or stop and re-seat`;
+  return `${found}; ${verdict}.`;
+}
