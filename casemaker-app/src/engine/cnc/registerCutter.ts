@@ -442,6 +442,9 @@ export function itemFromEntry(entry: ToolLibraryEntry, choice: EntryChoice): Inv
     codes: choice.code ? [choice.code] : [],
     addedAt: choice.now,
     notes: textOrNull(choice.notes),
+    // #415: a newly registered cutter has no copy described and no collet fit stated.
+    copies: [],
+    colletFits: null,
   };
 }
 
@@ -612,5 +615,8 @@ export function itemFromForm(form: CutterForm, now: string): InventoryItem {
     codes: [],
     addedAt: now,
     notes: textOrNull(form.notes),
+    // #415: a newly registered cutter has no copy described and no collet fit stated.
+    copies: [],
+    colletFits: null,
   };
 }

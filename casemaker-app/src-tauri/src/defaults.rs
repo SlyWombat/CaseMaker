@@ -55,6 +55,9 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     ("power.onWaitSeconds", 180.0, "s"),
     // #417 — how deep a cut may go into the wasteboard before it is warned about.
     ("wasteboard.depthLimitMm", 0.5, "mm"),
+    // #415 — past how many minutes of runtime a cutter gets a "check this bit" note. Ten hours, as a
+    // starting point nobody measured; runtime only warns, it never retires a cutter (Q4).
+    ("tools.runtimeWarnMinutes", 600.0, "min"),
 ];
 
 pub fn seeded() -> ShopDefaults {
@@ -102,6 +105,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
     match key {
         "power.onWaitSeconds" => Some(need(n.is_some_and(|v| (10.0..=1800.0).contains(&v)), "10 to 1800 seconds")),
         "wasteboard.depthLimitMm" => Some(need(n.is_some_and(|v| (0.0..=50.0).contains(&v)), "0 to 50 mm")),
+        "tools.runtimeWarnMinutes" => Some(need(n.is_some_and(|v| v > 0.0 && v <= 100_000.0), "above 0, up to 100000 minutes")),
         _ => None,
     }
 }

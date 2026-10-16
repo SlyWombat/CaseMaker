@@ -174,7 +174,22 @@
         }
       ],
       "addedAt": "2026-10-09T09:05:00.000Z",
-      "notes": null
+      "notes": null,
+      "copies": [
+        {
+          "id": "copy-1",
+          "condition": "worn",
+          "whereabouts": {
+            "kind": "machine",
+            "machineId": "machine-1a2b3c"
+          },
+          "runtimeWarnMinutes": 120.0,
+          "notes": "chipped flute?"
+        }
+      ],
+      "colletFits": [
+        "machine-1a2b3c"
+      ]
     }
   ],
   "stock": [
@@ -254,6 +269,12 @@
       "source": "chosen",
       "setAt": "2026-10-15T08:00:00.000Z",
       "unit": "mm"
+    },
+    "tools.runtimeWarnMinutes": {
+      "value": 600.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "min"
     },
     "wasteboard.depthLimitMm": {
       "value": 0.5,

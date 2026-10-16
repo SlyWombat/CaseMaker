@@ -104,6 +104,8 @@ const ITEM: InventoryItem = {
   codes: [{ symbology: 'qr', value: 'C1-BIT-FLAT-2-0' }],
   addedAt: '2026-10-08T10:00:00.000Z',
   notes: 'drawer 3',
+  copies: [],
+  colletFits: null,
 };
 
 /** A controller that answered once — the record the machines tests are about (#311, #354). */

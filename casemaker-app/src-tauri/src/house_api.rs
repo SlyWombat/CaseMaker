@@ -733,6 +733,8 @@ mod tests {
             }],
             added_at: "2026-10-08T00:00:00.000Z".to_string(),
             notes: None,
+            copies: vec![],
+            collet_fits: None,
         }
     }
 

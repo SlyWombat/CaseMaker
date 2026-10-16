@@ -64,8 +64,10 @@ function ownedItem(over: Partial<InventoryItem> = {}): InventoryItem {
     codes: [{ symbology: 'qr', value: 'C1-BIT-BALL-NOSE-1-4' }],
     addedAt: '2026-10-02T00:00:00.000Z',
     notes: null,
+    copies: [],
+    colletFits: null,
     ...over,
-  };
+  } as InventoryItem;
 }
 
 beforeEach(() => setSeededIds(true));

@@ -68,6 +68,7 @@
  */
 
 import { z } from 'zod';
+import { ToolCopySchema, copiesProblem, machineClash, machineIdText } from '@/engine/cnc/toolCondition';
 import { ToolLibrarySchema, ToolSchema, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { FeedCatalogueSchema, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 
@@ -244,6 +245,13 @@ export const InventoryItemSchema = z.object({
   /** ISO timestamp from the client's clock: when the user registered it. */
   addedAt: z.string().min(1),
   notes: z.string().nullable().default(null),
+  /** The copies the operator described (#415): condition and where each is. At most `quantity`. */
+  copies: z.array(ToolCopySchema).default([]),
+  /** The machines this cutter's shank fits a collet of (#415). Null is "not stated". */
+  colletFits: z.array(machineIdText).nullable().default(null),
+}).superRefine((item, ctx) => {
+  const why = copiesProblem(item.quantity, item.copies, item.colletFits);
+  if (why !== null) ctx.addIssue({ code: 'custom', path: ['copies'], message: why });
 });
 
 /**
@@ -275,6 +283,11 @@ export const InventorySchema = z.array(InventoryItemSchema).superRefine((list, c
       codes.add(coded.value);
     });
   });
+  // #415 review: one cutter per spindle across the whole inventory, as `house.rs` checks it.
+  const clash = machineClash(list);
+  if (clash !== null) {
+    ctx.addIssue({ code: 'custom', message: `two cutters both have a copy in machine ${clash} — a spindle holds one cutter` });
+  }
 });
 
 export type Coded = z.infer<typeof CodedSchema>;

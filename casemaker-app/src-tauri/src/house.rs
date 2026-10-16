@@ -398,6 +398,20 @@ pub struct InventoryItem {
     pub added_at: String,
     #[serde(default)]
     pub notes: Option<String>,
+    /// The copies the operator has described (#415): condition, where each is. At most `quantity`;
+    /// a copy with no entry has no condition set and is in its box (`tool_copy.rs`).
+    ///
+    /// LEFT OUT OF THE JSON WHEN EMPTY, unlike every other field here (#415 review): an item that
+    /// describes no copies and states no fits is then byte-for-byte what it was before #415, so an
+    /// export of such an inventory still imports into an older build. An item that DOES carry either
+    /// is refused by an older build (`deny_unknown_fields`) — that break is the honest one: the older
+    /// build would otherwise drop the conditions on its next write.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub copies: Vec<crate::tool_copy::ToolCopy>,
+    /// The machines this cutter's shank fits a collet of (#415), by machine id. `None` is "not
+    /// stated", which is a different answer from "fits none" (`Some([])`). Left out when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collet_fits: Option<Vec<String>>,
 }
 
 impl InventoryItem {
@@ -421,6 +435,7 @@ impl InventoryItem {
         if let Some(origin) = &self.origin {
             origin.validate()?;
         }
+        crate::tool_copy::validate_copies(&self.id, self.quantity, &self.copies, self.collet_fits.as_deref())?;
         // A code is evidence of what this cutter is: an empty one identifies nothing, and the same
         // value twice on one item is one code written twice.
         let mut seen = HashSet::new();
@@ -514,6 +529,11 @@ pub(crate) fn validate_tiers(tools: &[UserTool], inventory: &[InventoryItem]) ->
     let mut codes = HashSet::new();
     for i in inventory {
         i.validate()?;
+        if let Some(m) = crate::tool_copy::machine_clash(inventory, i) {
+            return Err(HouseError::BadEntry(format!(
+                "two cutters both have a copy in machine {m} — a spindle holds one cutter"
+            )));
+        }
         if !ids.insert(i.id.as_str()) {
             return Err(HouseError::BadEntry(format!(
                 "{} is registered twice: one id, one possession",
@@ -1222,6 +1242,11 @@ impl HouseStore {
                  registering a second"
             )));
         }
+        if let Some(m) = crate::tool_copy::machine_clash(&inner.location.inventory, &item) {
+            return Err(HouseError::Conflict(format!(
+                "another cutter already has a copy in machine {m} — move that one to its box first"
+            )));
+        }
         let mut next = inner.location.clone();
         next.inventory.push(item);
         self.commit(&mut inner, next)
@@ -1250,6 +1275,11 @@ impl HouseStore {
         if let Some(code) = clashing_code(&inner.location.inventory, &item) {
             return Err(HouseError::Conflict(format!(
                 "{code} is already on another cutter"
+            )));
+        }
+        if let Some(m) = crate::tool_copy::machine_clash(&inner.location.inventory, &item) {
+            return Err(HouseError::Conflict(format!(
+                "another cutter already has a copy in machine {m} — move that one to its box first"
             )));
         }
         let mut next = inner.location.clone();
@@ -1754,12 +1784,14 @@ impl HouseStore {
                 if found != Some(u64::from(HOUSE_SCHEMA_VERSION)) {
                     return Err(version_refusal("house", HOUSE_SCHEMA_VERSION));
                 }
-                let doc: HouseDoc = serde_json::from_value(value).map_err(|e| {
+                let mut doc: HouseDoc = serde_json::from_value(value).map_err(|e| {
                     HouseError::BadEntry(format!("not a Case Maker house file: {e}"))
                 })?;
-                doc.validate()?;
                 let mut inner = self.inner.write().await;
                 Self::writable(&inner.location_problem)?;
+                // The operator's conditions survive an inventory rebuild (#415 review).
+                crate::tool_copy::carry_copies(&inner.location.inventory, &mut doc.inventory);
+                doc.validate()?;
                 let mut next = inner.location.clone();
                 next.tools = doc.tools;
                 next.inventory = doc.inventory;
@@ -1842,6 +1874,8 @@ mod tests {
             }],
             added_at: "2026-10-08T00:00:00.000Z".to_string(),
             notes: None,
+            copies: vec![],
+            collet_fits: None,
         }
     }
 
@@ -3726,5 +3760,125 @@ mod tests {
         store.import(&serde_json::to_vec(&doc).unwrap()).await.unwrap();
         let exported = store.export().await.unwrap();
         store.import(&exported).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_item_carries_its_copies_and_collet_fits_through_the_service() {
+        // #415. An old inventory (no `copies`) reads unchanged; a described copy round-trips; a copy
+        // the item does not own is refused.
+        use crate::tool_copy::{Condition, ToolCopy, Whereabouts};
+        let (_dir, store) = store();
+        let mut item = an_item("inv-1");
+        item.quantity = 2;
+        item.copies = vec![ToolCopy {
+            id: "c-1".into(),
+            condition: Condition::Worn,
+            whereabouts: Whereabouts::Machine { machine_id: "m-1".into() },
+            runtime_warn_minutes: Some(120.0),
+            notes: None,
+        }];
+        item.collet_fits = Some(vec!["m-1".into()]);
+        store.create_inventory(item.clone()).await.unwrap();
+        let (bytes, etag) = store.inventory().await.unwrap();
+        let served: Vec<InventoryItem> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(served[0], item);
+
+        // More copies described than owned: two copies on a quantity of one (#415 review — the old
+        // version set quantity 0, which the item's own rule refuses before the copies are looked at).
+        let mut too_many = item.clone();
+        too_many.quantity = 1;
+        too_many.copies.push(ToolCopy {
+            id: "c-2".into(),
+            condition: Condition::New,
+            whereabouts: Whereabouts::Box {},
+            runtime_warn_minutes: None,
+            notes: None,
+        });
+        let err = store.update_inventory(too_many, Some(&etag)).await.unwrap_err();
+        assert!(err.to_string().contains("only 1 are owned"), "{err}");
+        // An item from before #415 parses with no copies and no stated fits.
+        let old: InventoryItem = serde_json::from_value(serde_json::json!({
+            "id": "inv-9", "tool": serde_json::to_value(a_tool("x")).unwrap(), "quantity": 1,
+            "addedAt": "2026-10-08T00:00:00.000Z"
+        }))
+        .unwrap();
+        assert!(old.copies.is_empty() && old.collet_fits.is_none());
+    }
+
+    fn a_copy(id: &str, machine: Option<&str>) -> crate::tool_copy::ToolCopy {
+        crate::tool_copy::ToolCopy {
+            id: id.into(),
+            condition: crate::tool_copy::Condition::Worn,
+            whereabouts: match machine {
+                Some(m) => crate::tool_copy::Whereabouts::Machine { machine_id: m.into() },
+                None => crate::tool_copy::Whereabouts::Box {},
+            },
+            runtime_warn_minutes: None,
+            notes: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_house_import_keeps_the_copies_the_operator_described() {
+        // #415 review, blocking: the Kazoo rebuild (`build-house.ts` → POST /import) writes items with
+        // no copies, and must not wipe the conditions.
+        let (_dir, store) = store();
+        let mut item = an_item("kz-c1");
+        item.quantity = 3;
+        item.copies = vec![a_copy("in-spindle", Some("m-1")), a_copy("boxed-1", None), a_copy("boxed-2", None)];
+        item.collet_fits = Some(vec!["m-1".into()]);
+        store.create_inventory(item.clone()).await.unwrap();
+
+        // Same count: everything carried over.
+        let mut rebuilt = HouseDoc::default();
+        rebuilt.inventory = vec![an_item("kz-c1")];
+        rebuilt.inventory[0].quantity = 3;
+        store.import(&serde_json::to_vec(&rebuilt).unwrap()).await.unwrap();
+        let served: Vec<InventoryItem> = serde_json::from_slice(&store.inventory().await.unwrap().0).unwrap();
+        assert_eq!(served[0].copies, item.copies);
+        assert_eq!(served[0].collet_fits, item.collet_fits);
+
+        // The count fell to 1: boxed copies go first, the last-listed first; the spindle copy stays.
+        rebuilt.inventory[0].quantity = 1;
+        store.import(&serde_json::to_vec(&rebuilt).unwrap()).await.unwrap();
+        let served: Vec<InventoryItem> = serde_json::from_slice(&store.inventory().await.unwrap().0).unwrap();
+        assert_eq!(served[0].copies.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["in-spindle"]);
+
+        // A file that STATES copies is the authority for them.
+        rebuilt.inventory[0].quantity = 2;
+        rebuilt.inventory[0].copies = vec![a_copy("from-file", None)];
+        store.import(&serde_json::to_vec(&rebuilt).unwrap()).await.unwrap();
+        let served: Vec<InventoryItem> = serde_json::from_slice(&store.inventory().await.unwrap().0).unwrap();
+        assert_eq!(served[0].copies.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["from-file"]);
+        assert_eq!(served[0].collet_fits, None, "the file stated copies and no fits");
+    }
+
+    #[tokio::test]
+    async fn an_item_with_no_copies_exports_as_it_did_before_them() {
+        // #415 review: an older build refuses unknown keys, so an empty `copies` / null `colletFits`
+        // must not be written at all.
+        let (_dir, store) = store();
+        store.create_inventory(an_item("inv-1")).await.unwrap();
+        let exported = String::from_utf8(store.export().await.unwrap()).unwrap();
+        assert!(!exported.contains("copies") && !exported.contains("colletFits"), "{exported}");
+        let (bytes, _) = store.inventory().await.unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(!text.contains("copies"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn one_machine_holds_one_cutter_across_the_whole_inventory() {
+        let (_dir, store) = store();
+        let mut a = an_item("inv-a");
+        a.copies = vec![a_copy("a1", Some("m-1"))];
+        store.create_inventory(a.clone()).await.unwrap();
+        let mut b = an_item("inv-b");
+        b.copies = vec![a_copy("b1", Some("m-1"))];
+        let err = store.create_inventory(b.clone()).await.unwrap_err();
+        assert!(matches!(err, HouseError::Conflict(_)), "{err:?}");
+        // Through an import, too: the document is refused whole.
+        let mut doc = HouseDoc::default();
+        doc.inventory = vec![a, b];
+        assert!(matches!(store.import(&serde_json::to_vec(&doc).unwrap()).await, Err(HouseError::BadEntry(_))));
     }
 }

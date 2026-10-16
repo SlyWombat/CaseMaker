@@ -71,6 +71,13 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(10).max(1800),
     fallback: 180,
   },
+  // #415 — past how many minutes of runtime a cutter gets "check this bit". It only warns.
+  'tools.runtimeWarnMinutes': {
+    label: 'runtime before "check this bit"',
+    unit: 'min',
+    rule: z.number().gt(0).max(100_000),
+    fallback: 600,
+  },
   // #417 — how deep a cut may go into the wasteboard before it is warned about.
   'wasteboard.depthLimitMm': {
     label: 'wasteboard depth limit',

@@ -48,6 +48,7 @@ import { formatDay, mm } from './display';
 import { cloneOf, useSelectedEntry, useSelectedItem } from './selection';
 import { CutterFields } from './doors/CutterFields';
 import { RegisterDoor } from './RegisterDoor';
+import { ToolCopies } from './ToolCopies';
 
 /** The `tag` modifier for a tier. One class per tier id, so no mapping table has to stay in step. */
 function tagClassFor(tier: ToolTier): string {
@@ -246,6 +247,14 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
           item={item}
         />
       )}
+      {/* #415 — the copies (condition, where each is) and the collet fits. Keyed on what it is seeded
+          from, as the editor above is. */}
+      {item !== null && (
+        <ToolCopies
+          key={`${item.id}\u0000${JSON.stringify(item.copies)}\u0000${JSON.stringify(item.colletFits)}`}
+          item={item}
+        />
+      )}
 
       {tier === 'yours' && (
         <div className="btn-row">
@@ -342,7 +351,13 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
   // The count rule is the register doors' rule, imported rather than re-derived (#331): blank means
   // one at both ends, and the sentence a refusal shows is the one sentence, in `registerCutter.ts`.
   const qty = quantityOrOne(quantity);
-  const qtyProblem = quantityProblem(quantity);
+  // #415 review: a count below the copies described would be refused by the service; say why here,
+  // before the save, and what to do about it.
+  const copiesBlock =
+    quantityProblem(quantity) === null && quantityOrOne(quantity) < item.copies.length
+      ? `${item.copies.length} copies are described below — forget the details of ${item.copies.length - quantityOrOne(quantity)} first, then lower the count`
+      : null;
+  const qtyProblem = quantityProblem(quantity) ?? copiesBlock;
   const nextNotes = notes.trim().length === 0 ? null : notes;
   const dirty = qtyProblem === null && (qty !== item.quantity || nextNotes !== item.notes);
   const disabled = busy !== null;
@@ -390,6 +405,11 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
           onChange={(e) => setNotes(e.target.value)}
         />
       </label>
+      {copiesBlock !== null && (
+        <p className="hint" data-status="error" data-testid="manage-item-copies-block">
+          {copiesBlock}
+        </p>
+      )}
       <div className="btn-row">
         <button
           type="button"

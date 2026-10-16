@@ -63,6 +63,8 @@ const ITEM: InventoryItem = {
   codes: [{ symbology: 'qr', value: 'C1-BIT-FLAT-2-0' }],
   addedAt: '2026-01-02T03:04:05.000Z',
   notes: null,
+  copies: [],
+  colletFits: null,
 };
 
 const REPORT: SyncReport = {

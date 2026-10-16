@@ -18,6 +18,7 @@ mod machine;
 mod server;
 mod power;
 mod stock;
+mod tool_copy;
 mod wasteboard;
 
 #[derive(Debug, Parser)]
