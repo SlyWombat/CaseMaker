@@ -82,6 +82,13 @@ describe('the location contract (#412)', () => {
     expect(parsed.data!.unreadableMachines[0]!.reason).toContain('margins');
   });
 
+  it('reads a location from before the shelf (no `stock` key) with an empty one (#413 review)', () => {
+    const { stock: _s, ...older } = doc() as Doc & { stock?: unknown };
+    const parsed = LocationDocSchema.safeParse(older);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    expect(parsed.data!.stock).toEqual([]);
+  });
+
   it('leaves a house file, and anything else, to the service to judge', () => {
     expect(checkLocationImport('{"kind":"casemaker-house","schemaVersion":1}').kind).toBe('other');
     expect(checkLocationImport('not json').kind).toBe('other');

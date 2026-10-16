@@ -155,5 +155,70 @@
       "addedAt": "2026-10-09T09:05:00.000Z",
       "notes": null
     }
+  ],
+  "stock": [
+    {
+      "id": "stock-plate1",
+      "material": "aluminium-6061",
+      "form": "plate",
+      "size": {
+        "length": 100,
+        "width": 100,
+        "thickness": 5
+      },
+      "layers": [],
+      "finish": "rough",
+      "flatness": "flat",
+      "domeHeight": null,
+      "conductive": true,
+      "quantity": 2,
+      "reservations": [
+        {
+          "jobId": "job-1",
+          "quantity": 1,
+          "at": "2026-10-15T10:00:00.000Z"
+        }
+      ],
+      "consumed": [],
+      "source": "purchased",
+      "notes": null,
+      "addedAt": "2026-10-15T09:00:00.000Z"
+    },
+    {
+      "id": "stock-blank1",
+      "material": "pla",
+      "form": "printed-blank",
+      "size": {
+        "length": 60,
+        "width": 30,
+        "thickness": 3
+      },
+      "layers": [
+        {
+          "name": "white",
+          "thickness": 0.6
+        },
+        {
+          "name": "black",
+          "thickness": 2.4
+        }
+      ],
+      "finish": "printed",
+      "flatness": "domed",
+      "domeHeight": 0.2,
+      "conductive": false,
+      "quantity": 0,
+      "reservations": [],
+      "consumed": [
+        {
+          "jobId": "job-12",
+          "quantity": 1,
+          "at": "2026-10-14T10:00:00.000Z"
+        }
+      ],
+      "source": "printed",
+      "notes": "the two-colour badge blank",
+      "addedAt": "2026-10-14T09:00:00.000Z"
+    }
   ]
 }

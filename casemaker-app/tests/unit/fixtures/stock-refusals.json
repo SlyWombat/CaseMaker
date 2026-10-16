@@ -1,0 +1,197 @@
+[
+  {
+    "why": "a sphere (Q20)",
+    "patch": {
+      "form": "sphere"
+    }
+  },
+  {
+    "why": "a form nobody named",
+    "patch": {
+      "form": "cone"
+    }
+  },
+  {
+    "why": "a plate with no width",
+    "patch": {
+      "size": {
+        "length": 100,
+        "thickness": 5
+      }
+    }
+  },
+  {
+    "why": "a plate with a diameter",
+    "patch": {
+      "size": {
+        "length": 100,
+        "width": 100,
+        "thickness": 5,
+        "diameter": 3
+      }
+    }
+  },
+  {
+    "why": "a negative length",
+    "patch": {
+      "size": {
+        "length": -1,
+        "width": 100,
+        "thickness": 5
+      }
+    }
+  },
+  {
+    "why": "a tube inside out",
+    "patch": {
+      "form": "tube",
+      "size": {
+        "diameter": 10,
+        "innerDiameter": 12,
+        "length": 5
+      }
+    }
+  },
+  {
+    "why": "layers thicker than the stock",
+    "patch": {
+      "layers": [
+        {
+          "name": "top",
+          "thickness": 6
+        }
+      ]
+    }
+  },
+  {
+    "why": "layers on a rod",
+    "patch": {
+      "form": "rod",
+      "size": {
+        "diameter": 10,
+        "length": 100
+      },
+      "layers": [
+        {
+          "name": "top",
+          "thickness": 1
+        }
+      ]
+    }
+  },
+  {
+    "why": "a layer with a blank name",
+    "patch": {
+      "layers": [
+        {
+          "name": "  ",
+          "thickness": 1
+        }
+      ]
+    }
+  },
+  {
+    "why": "domed with no height",
+    "patch": {
+      "flatness": "domed",
+      "domeHeight": null
+    }
+  },
+  {
+    "why": "a dome height on flat stock",
+    "patch": {
+      "domeHeight": 0.3
+    }
+  },
+  {
+    "why": "more reserved than there is",
+    "patch": {
+      "reservations": [
+        {
+          "jobId": "a",
+          "quantity": 3,
+          "at": "2026-10-15T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "why": "one job, two reservations",
+    "patch": {
+      "reservations": [
+        {
+          "jobId": "a",
+          "quantity": 1,
+          "at": "2026-10-15T12:00:00.000Z"
+        },
+        {
+          "jobId": "a",
+          "quantity": 1,
+          "at": "2026-10-15T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "why": "a reservation of none",
+    "patch": {
+      "reservations": [
+        {
+          "jobId": "a",
+          "quantity": 0,
+          "at": "2026-10-15T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "why": "a reservation naming no job",
+    "patch": {
+      "reservations": [
+        {
+          "jobId": "  ",
+          "quantity": 1,
+          "at": "2026-10-15T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "why": "an id with a slash",
+    "patch": {
+      "id": "a/b"
+    }
+  },
+  {
+    "why": "an id with a space at one end",
+    "patch": {
+      "id": " stock-1"
+    }
+  },
+  {
+    "why": "no time it was added",
+    "patch": {
+      "addedAt": "  "
+    }
+  },
+  {
+    "why": "a negative quantity",
+    "patch": {
+      "quantity": -1
+    }
+  },
+  {
+    "why": "a key this build does not know",
+    "patch": {
+      "voids": []
+    }
+  },
+  {
+    "why": "a material this app has no word for",
+    "patch": {
+      "material": "titanium"
+    },
+    "zodOnly": true,
+    "note": "the material vocabulary is the client's (engine/cnc/materials.ts); the service only checks a plain non-empty word"
+  }
+]

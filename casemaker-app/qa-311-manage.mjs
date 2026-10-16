@@ -271,7 +271,8 @@ const svc = makeService();
   // The rail: the scopes, the reserved slot, and the service's own state in the foot.
   check('[1] the rail names both scopes', (await page.getByTestId('manage-scope-tools').count()) === 1
     && (await page.getByTestId('manage-scope-machines').count()) === 1);
-  check('[1] Materials is drawn as reserved, not as an empty feature', await page.getByTestId('manage-scope-materials').isDisabled());
+  // #413 — Materials is the stock shelf now, a scope like the others.
+  check('[1] Materials is a scope (the stock shelf, #413)', await page.getByTestId('manage-scope-materials').isEnabled());
   const foot = (await page.getByTestId('manage-rail-foot').innerText()).replace(/\s+/g, ' ');
   check('[1] the foot says what the service is', foot.includes('house service · present'), foot.slice(0, 90));
   check('[1] the foot names the origin it asked', foot.includes('127.0.0.1:5199'), foot);

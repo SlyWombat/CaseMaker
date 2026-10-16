@@ -32,6 +32,7 @@ import {
   type HouseRequestOptions,
   type HouseWrite,
 } from './houseClient';
+import { StockShelfSchema } from './stockClient';
 
 /** Magic string that says "this is a Case Maker location file". Equal to `location.rs`'s. */
 export const LOCATION_KIND = 'casemaker-location';
@@ -176,6 +177,8 @@ export const LocationDocSchema = z.object({
     });
   }),
   inventory: InventorySchema.default([]),
+  /** The stock shelf (#413), strict like the rest of an import. */
+  stock: StockShelfSchema.default([]),
 });
 
 export type LocationDoc = z.infer<typeof LocationDocSchema>;

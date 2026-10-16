@@ -35,6 +35,7 @@
 
 use crate::house::{HouseError, HouseStore, InventoryItem, ToolLibraryEntry};
 use crate::location::MachineRecord;
+use crate::stock::StockItem;
 use axum::body::Body;
 use axum::extract::{OriginalUri, Path, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
@@ -64,6 +65,9 @@ pub fn routes(store: Arc<HouseStore>) -> Router {
         .route("/api/v1/location/machines/*id", put(put_machine))
         // #412 re-review. Dismiss the "house.json changed after location.json" warning. No body.
         .route("/api/v1/location/house-warning/dismiss", post(dismiss_house_warning))
+        // #413. The stock shelf: its own list, `ETag` and guarded writes, as the inventory has.
+        .route("/api/v1/stock", get(list_stock).post(create_stock))
+        .route("/api/v1/stock/*id", patch(update_stock).delete(delete_stock))
         .route("/api/v1/export", get(export_house))
         .route("/api/v1/import", post(import_house))
         // #308. POST and nothing else: a sync reads Makera Studio's own database and replaces the
@@ -289,6 +293,56 @@ async fn delete_inventory(
 ) -> Response<Body> {
     let guard = if_match(&headers);
     match store.delete_inventory(&id, guard.as_deref()).await {
+        Ok(()) => empty(StatusCode::NO_CONTENT),
+        Err(e) => error_response(e),
+    }
+}
+
+async fn list_stock(State(store): State<Arc<HouseStore>>, headers: HeaderMap) -> Response<Body> {
+    match store.stock().await {
+        Ok((bytes, etag)) => json_with_etag(bytes, etag, &headers, StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+async fn create_stock(
+    State(store): State<Arc<HouseStore>>,
+    axum::Json(item): axum::Json<StockItem>,
+) -> Response<Body> {
+    match store.create_stock(item).await {
+        Ok(()) => empty(StatusCode::CREATED),
+        Err(e) => error_response(e),
+    }
+}
+
+/// Replace a shelf entry. GUARDED on the shelf's `ETag` (#321's rule, #413).
+async fn update_stock(
+    State(store): State<Arc<HouseStore>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    axum::Json(item): axum::Json<StockItem>,
+) -> Response<Body> {
+    if item.id != id {
+        return error_response(HouseError::BadEntry(format!(
+            "the body's id {} does not match the URL's {id}",
+            item.id
+        )));
+    }
+    let guard = if_match(&headers);
+    match store.update_stock(item, guard.as_deref()).await {
+        Ok(()) => empty(StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+/// Take an entry off the shelf. Guarded as `update_stock` is.
+async fn delete_stock(
+    State(store): State<Arc<HouseStore>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let guard = if_match(&headers);
+    match store.delete_stock(&id, guard.as_deref()).await {
         Ok(()) => empty(StatusCode::NO_CONTENT),
         Err(e) => error_response(e),
     }
@@ -958,6 +1012,38 @@ mod tests {
             .contains("location.json"));
         let exported = json_of(res).await;
         assert_eq!(exported["machines"][0]["id"], serde_json::json!("machine-1"));
+    }
+
+    #[tokio::test]
+    async fn the_stock_shelf_walks_its_lifecycle_over_http() {
+        // #413. Created unguarded, edited and removed under the shelf's own validator.
+        let (_dir, app) = app_under_test();
+        let item = serde_json::to_value(crate::stock::tests::a_plate("s-1")).unwrap();
+        let res = app.clone().oneshot(post_json("/api/v1/stock", &item)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        let mut sphere = item.clone();
+        sphere["id"] = serde_json::json!("s-2");
+        sphere["form"] = serde_json::json!("sphere");
+        let res = app.clone().oneshot(post_json("/api/v1/stock", &sphere)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert!(json_of(res).await["error"].as_str().unwrap().contains("sphere"));
+
+        let mut edited = item.clone();
+        edited["quantity"] = serde_json::json!(5);
+        let res = app.clone().oneshot(patch_json("/api/v1/stock/s-1", None, &edited)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::PRECONDITION_REQUIRED);
+        let tag = etag_of(&app, "/api/v1/stock").await;
+        let res = app.clone().oneshot(patch_json("/api/v1/stock/s-1", Some(&tag), &edited)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let listed = json_of(app.clone().oneshot(get("/api/v1/stock")).await.unwrap()).await;
+        assert_eq!(listed[0]["quantity"], serde_json::json!(5));
+
+        let res = app.clone().oneshot(delete("/api/v1/stock/s-1", Some(&tag))).await.unwrap();
+        assert_eq!(res.status(), StatusCode::PRECONDITION_FAILED, "the validator moved");
+        let tag = etag_of(&app, "/api/v1/stock").await;
+        let res = app.clone().oneshot(delete("/api/v1/stock/s-1", Some(&tag))).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
     }
 
     #[tokio::test]

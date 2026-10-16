@@ -1,5 +1,5 @@
 /**
- * The Manage surface's scopes rail (#311): House (Tools; Materials reserved) and Machines, with the
+ * The Manage surface's scopes rail (#311): House (Tools, Materials) and Machines, with the
  * house service's own state in the foot.
  *
  * The foot is the one place in the app that states what the service IS rather than what it served —
@@ -7,9 +7,8 @@
  * problem with its own files. That is what someone debugging "why is my cutter not in the list"
  * reads first, so it is drawn rather than hidden behind a hover.
  *
- * MATERIALS IS DRAWN, NOT BUILT. It stays in the rail disabled and tagged `later`, which is what
- * the maintainer approved (#311 decision 3): the slot is reserved, and an empty scope pretending to
- * be a feature is exactly what the issue says not to build.
+ * MATERIALS IS THE STOCK SHELF (#413). It was drawn disabled and tagged `later` until there was a
+ * shelf to show (#311 decision 3); it is a scope like the others now.
  */
 
 import type { JSX } from 'react';
@@ -78,11 +77,8 @@ export function ManageRail() {
           />
         ),
       )}
-      <button type="button" className="nav nav--later" disabled data-testid="manage-scope-materials">
-        <span className="nav__icon">🧱</span>
-        <span>Materials</span>
-        <em>later</em>
-      </button>
+      {/* #413 — the stock shelf. No count here: the shelf is read when the scope opens. */}
+      {scopeButton('materials', '🧱', 'Materials', <span />)}
 
       <div className="nav__divider">Machines</div>
       {scopeButton(

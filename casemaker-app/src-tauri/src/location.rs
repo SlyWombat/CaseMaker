@@ -26,12 +26,15 @@
 // code (`MACHINES.Z1`, `DEFAULT_VISE`) and a machine record names its profile by `profileId`; only
 // per-unit numbers — this machine's calibration, its saved vise and sacrificial setup — are stored.
 //
-// WHAT IS NOT HERE YET, ON PURPOSE. The stock shelf (#413), the wasteboard's state (#417) and an
-// optional power switch (#416) are later, additive keys on this document or on a machine record;
+// THE STOCK SHELF (#413) is `stock`, its entries' rules in `stock.rs`.
+//
+// WHAT IS NOT HERE YET, ON PURPOSE. The wasteboard's state (#417) and an optional power switch
+// (#416) are later, additive keys on this document or on a machine record;
 // no placeholder shapes are stubbed for them. A document that carries one of those keys before this
 // build knows it is refused by `deny_unknown_fields`, exactly as a misspelled key is (#339).
 
 use crate::house::{validate_tiers, HouseDoc, HouseError, InventoryItem, UserTool};
+use crate::stock::{validate_shelf, StockItem};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -158,6 +161,9 @@ pub struct LocationDoc {
     pub tools: Vec<UserTool>,
     #[serde(default)]
     pub inventory: Vec<InventoryItem>,
+    /// The stock shelf (#413): the material on hand. Its own endpoint, `ETag` and guarded writes.
+    #[serde(default)]
+    pub stock: Vec<StockItem>,
 }
 
 /// What `GET /api/v1/location` serves: the location without its two tool tiers, which have their
@@ -198,6 +204,7 @@ impl LocationDoc {
             machines: Vec::new(),
             tools: Vec::new(),
             inventory: Vec::new(),
+            stock: Vec::new(),
         }
     }
 
@@ -261,7 +268,8 @@ impl LocationDoc {
                 )));
             }
         }
-        validate_tiers(&self.tools, &self.inventory)
+        validate_tiers(&self.tools, &self.inventory)?;
+        validate_shelf(&self.stock)
     }
 }
 

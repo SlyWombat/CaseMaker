@@ -15,6 +15,7 @@ mod house_api;
 mod location;
 mod machine;
 mod server;
+mod stock;
 
 #[derive(Debug, Parser)]
 #[command(name = "casemaker", about = "Parametric 3D-printable enclosure designer")]

@@ -72,6 +72,7 @@
 
 use crate::catalogue::{CatalogueDoc, SyncNote, SyncReport, SyncSummary, CATALOGUE_KIND};
 use crate::etag::etag_for;
+use crate::stock::StockItem;
 use crate::location::{
     LocationDoc, MachineRecord, LOCATION_FILE, LOCATION_KIND, LOCATION_SCHEMA_VERSION,
 };
@@ -667,6 +668,14 @@ fn tools_bytes(inner: &Inner) -> Result<Vec<u8>, HouseError> {
 /// write lands somewhere in the middle of the file. Same free-function rule as `tools_bytes`.
 fn inventory_bytes(inner: &Inner) -> Result<Vec<u8>, HouseError> {
     let mut items = inner.location.inventory.clone();
+    items.sort_by(|a, b| a.added_at.cmp(&b.added_at).then(a.id.cmp(&b.id)));
+    json_bytes(&items)
+}
+
+/// The `/stock` body (#413): the shelf in the order it was added, so a list a UI renders does not
+/// reshuffle on a write. Same free-function rule as `tools_bytes`.
+fn stock_bytes(inner: &Inner) -> Result<Vec<u8>, HouseError> {
+    let mut items = inner.location.stock.clone();
     items.sort_by(|a, b| a.added_at.cmp(&b.added_at).then(a.id.cmp(&b.id)));
     json_bytes(&items)
 }
@@ -1268,6 +1277,68 @@ impl HouseStore {
             Some(existing) => *existing = record,
             None => next.machines.push(record),
         }
+        self.commit(&mut inner, next)
+    }
+
+    /// The stock shelf, with its `ETag` (#413).
+    pub async fn stock(&self) -> Result<(Vec<u8>, String), HouseError> {
+        let inner = self.inner.read().await;
+        let bytes = stock_bytes(&inner)?;
+        let etag = etag_for(&bytes);
+        Ok((bytes, etag))
+    }
+
+    /// Put an entry on the shelf. Not guarded: a create is judged against its id, which is a
+    /// stronger answer than a validator (the rule `create_inventory` follows).
+    pub async fn create_stock(&self, item: StockItem) -> Result<(), HouseError> {
+        item.validate()?;
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        if inner.location.stock.iter().any(|s| s.id == item.id) {
+            return Err(HouseError::Conflict(format!("{} is already on the shelf", item.id)));
+        }
+        let mut next = inner.location.clone();
+        next.stock.push(item);
+        self.commit(&mut inner, next)
+    }
+
+    /// Replace an entry — an edit, a reservation, a use. GUARDED (#321) on the shelf's `ETag`, so two
+    /// windows reserving the last plate cannot both win.
+    ///
+    /// The PRECONDITION IS CHECKED FIRST (#413 review): a write based on an old shelf is a 412 whatever
+    /// else is wrong with it, because the fix is to re-read — and the re-read may make the rest moot.
+    pub async fn update_stock(&self, item: StockItem, if_match: Option<&str>) -> Result<(), HouseError> {
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        check_precondition(&etag_for(&stock_bytes(&inner)?), if_match, "the stock shelf")?;
+        item.validate()?;
+        let mut next = inner.location.clone();
+        let Some(existing) = next.stock.iter_mut().find(|s| s.id == item.id) else {
+            return Err(HouseError::NotFound(format!("{} is not on the shelf", item.id)));
+        };
+        *existing = item;
+        self.commit(&mut inner, next)
+    }
+
+    /// Take an entry off the shelf. Guarded as `update_stock` is.
+    pub async fn delete_stock(&self, id: &str, if_match: Option<&str>) -> Result<(), HouseError> {
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        check_precondition(&etag_for(&stock_bytes(&inner)?), if_match, "the stock shelf")?;
+        let mut next = inner.location.clone();
+        let Some(item) = next.stock.iter().find(|s| s.id == id) else {
+            return Err(HouseError::NotFound(format!("{id} is not on the shelf")));
+        };
+        // A reserved entry is a job's (#413 review): removing it would leave the job holding stock
+        // that is not there. The job releases it first; the UI's disabled button is not the guard.
+        if !item.reservations.is_empty() {
+            let jobs: Vec<&str> = item.reservations.iter().map(|r| r.job_id.as_str()).collect();
+            return Err(HouseError::Conflict(format!(
+                "{id} is reserved for {} — release it from the job before taking it off the shelf",
+                jobs.join(", ")
+            )));
+        }
+        next.stock.retain(|s| s.id != id);
         self.commit(&mut inner, next)
     }
 
@@ -3046,5 +3117,153 @@ mod tests {
         assert!(read.as_ref().is_err_and(|e| e.contains("cannot tell whether it exists")), "{read:?}");
         #[cfg(not(unix))]
         assert!(matches!(read, Ok(None)), "{read:?}");
+    }
+
+    // — the stock shelf (#413) ----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn the_shelf_is_written_under_its_own_validator() {
+        use crate::stock::tests::a_plate;
+        let (dir, store) = store();
+        store.create_stock(a_plate("s-1")).await.unwrap();
+        assert!(matches!(store.create_stock(a_plate("s-1")).await, Err(HouseError::Conflict(_))));
+        // A sphere never reaches the shelf (Q20).
+        let sphere = crate::stock::StockItem { form: "sphere".into(), ..a_plate("s-2") };
+        assert!(matches!(store.create_stock(sphere).await, Err(HouseError::BadEntry(_))));
+
+        let (bytes, etag) = store.stock().await.unwrap();
+        let listed: Vec<crate::stock::StockItem> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(listed.len(), 1);
+
+        // Guarded: none, stale, current.
+        let reserved = crate::stock::StockItem {
+            reservations: vec![crate::stock::StockClaim {
+                job_id: "job-1".into(),
+                quantity: 2,
+                at: "2026-10-15T01:00:00.000Z".into(),
+            }],
+            ..a_plate("s-1")
+        };
+        assert!(matches!(
+            store.update_stock(reserved.clone(), None).await,
+            Err(HouseError::PreconditionRequired(_))
+        ));
+        assert!(matches!(
+            store.update_stock(reserved.clone(), Some("\"old\"")).await,
+            Err(HouseError::StalePrecondition(_))
+        ));
+        store.update_stock(reserved, Some(&etag)).await.unwrap();
+
+        // More reserved than there is: refused, and the shelf is as it was.
+        let (before, etag) = store.stock().await.unwrap();
+        let over = crate::stock::StockItem {
+            reservations: vec![crate::stock::StockClaim {
+                job_id: "job-2".into(),
+                quantity: 3,
+                at: "2026-10-15T02:00:00.000Z".into(),
+            }],
+            ..a_plate("s-1")
+        };
+        assert!(matches!(store.update_stock(over, Some(&etag)).await, Err(HouseError::BadEntry(_))));
+        assert_eq!(store.stock().await.unwrap().0, before);
+
+        // A shelf write moves neither the tools' nor the location's validator.
+        assert_eq!(store.tools().await.unwrap().0, b"[]");
+        let (loc, _) = store.location().await.unwrap();
+        assert!(!String::from_utf8(loc).unwrap().contains("s-1"), "the shelf is not on /location");
+
+        // Reserved: refused (#413 review). Released, then removed.
+        assert!(matches!(store.delete_stock("s-1", Some(&etag)).await, Err(HouseError::Conflict(_))));
+        store.update_stock(a_plate("s-1"), Some(&etag)).await.unwrap();
+        let (_, etag) = store.stock().await.unwrap();
+        store.delete_stock("s-1", Some(&etag)).await.unwrap();
+        assert_eq!(store.stock().await.unwrap().0, b"[]");
+        let written = fs::read_to_string(dir.path().join(LOCATION_FILE)).unwrap();
+        assert!(written.contains("\"stock\": []"), "{written}");
+    }
+
+    #[tokio::test]
+    async fn the_shelf_travels_with_the_location_and_survives_a_house_import() {
+        let (_dir, store) = store();
+        store.import(&location_fixture()).await.unwrap();
+        let (shelf, _) = store.stock().await.unwrap();
+        let items: Vec<crate::stock::StockItem> = serde_json::from_slice(&shelf).unwrap();
+        // Ordered by `addedAt`: the blank was put on the shelf first.
+        assert_eq!(items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["stock-blank1", "stock-plate1"]);
+
+        // A house file replaces the tools and keeps the shelf, as it keeps the machine.
+        store.import(&house_fixture()).await.unwrap();
+        assert_eq!(store.stock().await.unwrap().0, shelf);
+
+        let exported: LocationDoc = serde_json::from_slice(&store.export().await.unwrap()).unwrap();
+        assert_eq!(exported.stock.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_reserved_entry_cannot_be_removed_and_a_stale_invalid_write_is_a_412() {
+        use crate::stock::tests::a_plate;
+        let (_dir, store) = store();
+        let reserved = crate::stock::StockItem {
+            reservations: vec![crate::stock::StockClaim {
+                job_id: "job-1".into(),
+                quantity: 1,
+                at: "2026-10-15T01:00:00.000Z".into(),
+            }],
+            ..a_plate("s-1")
+        };
+        store.create_stock(reserved).await.unwrap();
+        let (_, etag) = store.stock().await.unwrap();
+        let err = store.delete_stock("s-1", Some(&etag)).await.unwrap_err();
+        assert!(matches!(err, HouseError::Conflict(_)), "{err:?}");
+        assert!(err.to_string().contains("job-1"), "{err}");
+
+        // Stale AND invalid: the stale guard answers first.
+        let invalid = crate::stock::StockItem { form: "sphere".into(), ..a_plate("s-1") };
+        assert!(matches!(
+            store.update_stock(invalid, Some("\"old\"")).await,
+            Err(HouseError::StalePrecondition(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_location_from_before_the_shelf_reads_with_an_empty_one() {
+        // #413 review: the shared fixture has a shelf now, so the pre-#413 shape is tested on its own.
+        let dir = TempDir::new().unwrap();
+        let mut doc: serde_json::Value = serde_json::from_slice(&location_fixture()).unwrap();
+        doc.as_object_mut().unwrap().remove("stock");
+        fs::write(dir.path().join(LOCATION_FILE), serde_json::to_vec(&doc).unwrap()).unwrap();
+        let store = HouseStore::open(dir.path().to_path_buf());
+        assert!(store.health().await.problems.is_empty());
+        assert_eq!(store.stock().await.unwrap().0, b"[]");
+        assert_eq!(store.tools().await.unwrap().0.is_empty(), false);
+    }
+
+    /// `tests/unit/fixtures/stock-refusals.json`: ONE table of entries the shelf refuses, read by this
+    /// test and by `stockShelf.spec.ts` (#413 review). Each case patches the fixture's plate; a case
+    /// marked `"zodOnly": true` is a rule only the client holds (the material vocabulary).
+    #[test]
+    fn the_shared_refusal_table_is_refused_here_too() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/unit/fixtures/stock-refusals.json");
+        let cases: Vec<serde_json::Value> = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let loc: serde_json::Value = serde_json::from_slice(&location_fixture()).unwrap();
+        let mut checked = 0;
+        for case in &cases {
+            if case["zodOnly"].as_bool() == Some(true) {
+                continue;
+            }
+            let mut entry = loc["stock"][0].clone();
+            for (k, v) in case["patch"].as_object().unwrap() {
+                entry[k] = v.clone();
+            }
+            let why = case["why"].as_str().unwrap();
+            // Either door refuses it: the parse (a shape serde cannot hold) or the rules.
+            let refused = match serde_json::from_value::<crate::stock::StockItem>(entry) {
+                Err(_) => true,
+                Ok(item) => item.validate().is_err(),
+            };
+            assert!(refused, "{why} was accepted");
+            checked += 1;
+        }
+        assert!(checked >= 10, "the table should carry the shared cases ({checked})");
     }
 }
