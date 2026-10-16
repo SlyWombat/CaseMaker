@@ -974,6 +974,11 @@ what a machine on a bench has been trammed to:
 | `machine-calibrated-frame` | info | Positions come from this machine's own configuration, read from it, with the date it was read. | Nothing — this is the good state. |
 | `machine-vendor-frame` | warning | Positions are the vendor's shipped defaults for a STOCK Z1: this machine's own configuration has not been read, and a machine that has been trammed keeps its anchors — and so its tool-length sensor and change position — elsewhere. | Run the machine check in the start wizard with the machine on the network. |
 | `machine-calibration-ignored` | warning | A saved calibration was read from a DIFFERENT machine (its own id is in the message), so it is deliberately not used here. | Check which machine this job is set for. |
+| `cannot-seat` | error | In this setup the stock is too short to sit on the vise ledges with its top above the jaw tops (#428). | Use another mount for this setup (tape or the bracket), or choose another face to go up. |
+| `clamp-on-cut` | error | A jaw would close on a part of the stock that an earlier setup already cut, so the grip is not sound (#428). | Move the item to a later setup, or change the setup order so that face is clamped before it is cut. |
+| `cuts-clamped-face` | error | This setup cuts into the face that one of the jaws grips (#428). | Move the item to a setup where that face is not clamped. |
+| `rests-on-cut` | error | The face going down rests on the ledges, or the bed, where an earlier setup cut it, so it will not sit flat (#428). | Reorder the setups, or add a sacrificial board under the stock. |
+| `thin-grip` | warning | The jaws grip less of the stock than the shop's minimum grip (`setups.minGripMm`) (#428). | Raise the stock, use a shorter grip setting only if you accept it, or choose another mount. |
 
 ### 8.2 G-code the simulator understands
 
