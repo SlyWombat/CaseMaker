@@ -55,6 +55,7 @@ the PETG** — the burr's chips welded, so heat and chip packing in the thermopl
 
 ## Tomorrow
 1. Regenerate the rest pass for the chosen second cutter; simulate it.
-2. Fresh blank or the same ladder blank (re-scan either way).
+2. **A new blank** (maintainer): measure it, full edge scan, and re-measure the dome for Z0 — none of today's
+   positions or surface readings carry over; only the routine and the tool-length method do.
 3. The whole routine above, including the frame check and the vacuum left on across the bit change.
 - Research for tomorrow's second cutter: [2026-10-16-fine-detail-petg-pagf.md](2026-10-16-fine-detail-petg-pagf.md).
