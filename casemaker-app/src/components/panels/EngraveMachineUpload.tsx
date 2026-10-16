@@ -3,6 +3,8 @@ import type { MachineObservation } from '@/platform/machineProbe';
 import { programBytes, uploadProgram, type MachineUploadResult } from '@/platform/machineUpload';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import { describeUpload } from './engraveUploadCopy';
+import { EngraveLaserFrame, frameBounds } from './EngraveLaserFrame';
+import { useSettingsStore } from '@/store/settingsStore';
 
 /**
  * #255 — send the verified program to the machine, from beside Save in the engrave panel.
@@ -82,6 +84,8 @@ export function EngraveMachineUpload({
   const [result, setResult] = useState<MachineUploadResult | null>(null);
 
   const label = machine === null ? 'the machine' : (machine.name ?? machine.host);
+  // #431 — the laser frame is a user option, off by default (decision Q21).
+  const laserFrameOn = useSettingsStore((s) => s.laserOptions.frame);
 
   // Order matters, and matches `uploadBlocker`'s own reasoning: the run's trust first, then whether
   // there is anywhere to send it. Whether the machine is busy is NOT a clause here (#296): the wizard's
@@ -199,6 +203,10 @@ export function EngraveMachineUpload({
         >
           {describeUpload(result, label)}
         </p>
+      )}
+
+      {laserFrameOn && machine !== null && program !== null && (
+        <EngraveLaserFrame host={machine.host} port={machine.port} bounds={frameBounds(program.verify.stats.bbox)} />
       )}
     </div>
   );

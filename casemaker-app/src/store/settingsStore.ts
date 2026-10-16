@@ -64,6 +64,25 @@ export interface AppSettings {
    * per call, in `resolveMachine`.
    */
   machineCalibration?: MachineCalibration;
+  /**
+   * The probe laser's two user options (#431, maintainer decision Q21): the laser frame and the
+   * laser point-to-origin. Both are OFF by default — the job does not ask for more interaction
+   * unless the user turns them on.
+   */
+  laserOptions: LaserOptions;
+}
+
+export interface LaserOptions {
+  frame: boolean;
+  pointToOrigin: boolean;
+}
+
+export const LASER_OPTIONS_DEFAULT: LaserOptions = { frame: false, pointToOrigin: false };
+
+function parseLaserOptions(raw: unknown): LaserOptions {
+  if (typeof raw !== 'object' || raw === null) return { ...LASER_OPTIONS_DEFAULT };
+  const o = raw as Record<string, unknown>;
+  return { frame: o.frame === true, pointToOrigin: o.pointToOrigin === true };
 }
 
 const SETTINGS_KEY = 'casemaker.settings.v1';
@@ -79,6 +98,7 @@ const DEFAULTS: AppSettings = {
   fixtures: {},
   margins: { ...MARGIN_DEFAULTS },
   toolPicks: {},
+  laserOptions: { ...LASER_OPTIONS_DEFAULT },
 };
 
 const VALID_FORMATS: ReadonlySet<ExportFormat> = new Set(['stl-binary', 'stl-ascii', '3mf']);
@@ -373,6 +393,7 @@ function loadSettings(): AppSettings {
       fixtures: parseFixtures(parsed.fixtures),
       margins: parseMargins(parsed.margins),
       toolPicks: parseToolPicks(parsed.toolPicks),
+      laserOptions: parseLaserOptions(parsed.laserOptions),
       ...pickCalibration(parsed.machineCalibration),
     };
   } catch {
@@ -436,6 +457,8 @@ export interface SettingsState extends AppSettings {
   setMachineCalibration: (calibration: MachineCalibration) => void;
   /** Forget it and go back to the profile's vendor defaults. */
   clearMachineCalibration: () => void;
+  /** The probe laser's options (#431); both off by default. */
+  setLaserOptions: (options: LaserOptions) => void;
   resetSettings: () => void;
 }
 
@@ -516,10 +539,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       set({ machineCalibration: undefined });
       persist(next);
     },
+    setLaserOptions: (laserOptions) => {
+      set({ laserOptions });
+      persist({ ...get(), laserOptions });
+    },
     resetSettings: () => {
       // `margins` is cloned, not shared: `DEFAULTS` is module state, and a reset that handed out
       // the same object the next edit would then mutate is how a "reset" stops resetting.
-      const fresh = { ...DEFAULTS, margins: { ...MARGIN_DEFAULTS } };
+      const fresh = { ...DEFAULTS, margins: { ...MARGIN_DEFAULTS }, laserOptions: { ...LASER_OPTIONS_DEFAULT } };
       // Zustand's `set` MERGES, so a key `DEFAULTS` does not carry would survive a reset. The
       // machine's saved frame (#279) is one: it has to go back to "nothing read" like every other
       // setting, or "reset" would leave a calibration in force that nothing on screen claims.
