@@ -1737,6 +1737,11 @@ impl HouseStore {
                 // A location exported before the shop defaults gets the seeds, as one read at load does.
                 crate::defaults::add_missing_seeds(&mut doc.defaults);
                 doc.validate()?;
+                // An import is a WRITE: `seeded` is held to the write rule here too (#416/#417
+                // re-review) — the app's own starting value, exactly, or the entry is `chosen`.
+                for (key, d) in &doc.defaults {
+                    crate::defaults::validate_write(key, d)?;
+                }
                 let mut inner = self.inner.write().await;
                 Self::writable(&inner.location_problem)?;
                 let before = inner.location.clone();
@@ -3702,5 +3707,24 @@ mod tests {
         let same = store.export().await.unwrap();
         store.import(&same).await.unwrap();
         assert!(store.power_status("m-1").await.unwrap().has_token);
+    }
+
+    #[tokio::test]
+    async fn an_import_cannot_fake_a_seeded_default() {
+        let (_dir, store) = store();
+        let mut doc: serde_json::Value = serde_json::from_slice(&location_fixture()).unwrap();
+        // A seed claimed for a value that is not the seed, and for a key that has none.
+        for (key, value) in [("power.onWaitSeconds", serde_json::json!(600)), ("rest.overlapMm", serde_json::json!(0.5))] {
+            let mut faked = doc.clone();
+            faked["defaults"][key] = serde_json::json!({ "value": value, "source": "seeded", "setAt": null, "unit": null });
+            let err = store.import(&serde_json::to_vec(&faked).unwrap()).await.unwrap_err();
+            assert!(matches!(err, HouseError::BadEntry(_)), "{key}: {err:?}");
+            assert!(err.to_string().contains("seeded"), "{err}");
+        }
+        // The app's own export — seeds at their seed values — still imports.
+        doc["defaults"]["power.onWaitSeconds"] = serde_json::json!({ "value": 180.0, "source": "seeded", "setAt": null, "unit": "s" });
+        store.import(&serde_json::to_vec(&doc).unwrap()).await.unwrap();
+        let exported = store.export().await.unwrap();
+        store.import(&exported).await.unwrap();
     }
 }

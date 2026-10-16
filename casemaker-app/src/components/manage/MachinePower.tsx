@@ -63,7 +63,14 @@ function depsFor(machine: MachineRecord): PowerDeps {
   };
 }
 
-export function MachinePower({ machine }: { machine: MachineRecord }) {
+export function MachinePower({
+  machine,
+  probeGapMs,
+}: {
+  machine: MachineRecord;
+  /** The pause between the probes that decide "silent" — the default 2 s; a test passes a short one. */
+  probeGapMs?: number;
+}) {
   const [status, setStatus] = useState<PowerStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<{ kind: 'ok' | 'warn' | 'error'; text: string } | null>(null);
@@ -110,7 +117,7 @@ export function MachinePower({ machine }: { machine: MachineRecord }) {
     setAsk(null);
     try {
       const wait = shopDefault('power.onWaitSeconds');
-      const r = await powerOnAndWait(depsFor(machine), { waitSeconds: wait.value });
+      const r = await powerOnAndWait(depsFor(machine), { waitSeconds: wait.value, probeGapMs });
       if (r.ok) setNote({ kind: 'ok', text: 'On — the machine answered.' });
       else {
         setNote({ kind: 'error', text: r.reason });
@@ -128,7 +135,7 @@ export function MachinePower({ machine }: { machine: MachineRecord }) {
     setAsk(null);
     try {
       const wait = shopDefault('power.onWaitSeconds');
-      const r = await cycleConfirmed(depsFor(machine), { waitSeconds: wait.value });
+      const r = await cycleConfirmed(depsFor(machine), { waitSeconds: wait.value, probeGapMs });
       setNote(r.ok ? { kind: 'ok', text: 'Cycled — the machine answered.' } : { kind: 'error', text: r.reason });
     } finally {
       setBusy(null);
@@ -144,7 +151,7 @@ export function MachinePower({ machine }: { machine: MachineRecord }) {
       const deps = depsFor(machine);
       // Several probes, never one (#416 review): a single silent answer is a network blip as often
       // as a dead controller, and this decides whether mains is cut.
-      const fresh = await probeSettled(deps);
+      const fresh = await probeSettled(deps, { gapMs: probeGapMs });
       // The card knows of no running job; the status line's own `P:` is what the guard reads.
       const verdict = manualOffAllowed({ canReadStatus: true, status: fresh, jobRunning: false, confirmedSilent });
       if (!verdict.ok && 'needsConfirm' in verdict) {

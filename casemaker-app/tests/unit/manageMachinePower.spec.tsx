@@ -54,7 +54,8 @@ const MACHINE: MachineRecord = {
 };
 
 async function pressOff() {
-  render(<MachinePower machine={MACHINE} />);
+  // A short probe gap: the real one is 2 s between each of three probes.
+  render(<MachinePower machine={MACHINE} probeGapMs={5} />);
   await waitFor(() => expect((screen.getByTestId('manage-power-off') as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByTestId('manage-power-off'));
 }
@@ -81,10 +82,10 @@ describe('#416 the card’s Off', () => {
 
   it('a silent machine is NOT switched off until the person confirms', async () => {
     await pressOff();
-    const confirm = await screen.findByTestId('manage-power-off-confirm', {}, { timeout: 8000 });
+    const confirm = await screen.findByTestId('manage-power-off-confirm');
     expect(world.switched).toEqual([]);
     expect(screen.getByTestId('manage-power-note').textContent).toContain('switch it off anyway');
     fireEvent.click(confirm);
-    await waitFor(() => expect(world.switched).toEqual([false]), { timeout: 8000 });
-  }, 20000);
+    await waitFor(() => expect(world.switched).toEqual([false]));
+  });
 });
