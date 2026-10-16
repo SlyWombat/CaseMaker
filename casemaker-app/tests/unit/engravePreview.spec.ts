@@ -18,6 +18,7 @@ import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { presetJawStrips, presetPartOnBoard } from '@/engine/cnc/sacrificial';
+import { itemConditionSummary, type ConditionSummary } from '@/engine/cnc/toolCondition';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { viseForNewJob } from '@/engine/cnc/fixture';
@@ -777,5 +778,47 @@ describe('engravePreview — the colour boundary (#285, #345)', () => {
     const job = badgeJob(true, 0.6, { depthIntent: 'surface' });
     const p = buildPreview(job, { ...effectiveMargins(job, MARGIN_DEFAULTS), boundaryMargin: 0.5, source: 'user' });
     expect(p.findings.filter((f) => f.code === 'item-depth-bound')).toHaveLength(1);
+  });
+});
+
+// #442 — the plain `conditions` argument the worker's previewer is handed, put to work end to end.
+// `engravePreviewConditions.spec.ts` proves the store hands the table across the boundary and
+// `recommendTool.spec.ts` proves the rule reads it; this pins that the table actually reaches the
+// recommendation the worker returns, so a break anywhere between them is caught here.
+describe('engravePreview — the bench’s cutter conditions (#442)', () => {
+  // Its own previewer: the tests above pin the shared one’s latest generation.
+  const pv = createEngravePreviewer(tl);
+  let g = 0;
+  function buildPreview(job: EngraveJob, conditions: ReadonlyMap<string, ConditionSummary>) {
+    const p = preview(pv, job, ++g, [], effectiveMargins(job, MARGIN_DEFAULTS), conditions);
+    if (!p) throw new Error('the previewer refused a fresh generation');
+    return p;
+  }
+
+  it('drops the job’s own cutter when every copy is marked broken, and picks another (#442)', () => {
+    // The default job names the 1.0 mm built-in, so its own cutter is the one to mark broken. The
+    // summary is built by `toolCondition`'s own function — the very one `toolRegistryStore` fills the
+    // lookup with — so this is not a hand-shaped summary that could differ from the app's.
+    const job = defaultEngraveJob();
+    const summary = itemConditionSummary({
+      id: job.toolKey,
+      quantity: 1,
+      copies: [
+        { id: 'c1', condition: 'broken', whereabouts: { kind: 'box' }, runtimeWarnMinutes: null, notes: null, runtimeMinutes: null },
+      ],
+    });
+
+    // The control: with no table handed in, the job's own cutter is the pick — so the change below is
+    // the conditions' doing and not a default of this fixture.
+    expect(buildPreview(job, new Map()).recommendation.key).toBe(job.toolKey);
+
+    const p = buildPreview(job, new Map([[job.toolKey, summary]]));
+    const own = p.recommendation.candidates.find((c) => c.key === job.toolKey)!;
+    // The operator's own statement outranks the numbers, and it arrives as the caller's summary — the
+    // worker derives nothing of its own — so the broken cutter is out by name, before it is measured.
+    expect(own.excluded).toBe('broken');
+    expect(own.condition).toEqual(summary);
+    // …and the rule moves to the cutter it can still cut with: the other built-in.
+    expect(p.recommendation.key).toBe('flat-3.175x12-metal');
   });
 });

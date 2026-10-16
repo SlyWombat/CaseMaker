@@ -67,7 +67,9 @@ test('editing the job after Generate makes the result stale and blocks Save', as
   await page.getByTestId('engrave-ack').check();
   await expect(page.getByTestId('engrave-save')).toBeEnabled();
 
-  // Change a label's depth: the run no longer describes the job on screen.
+  // Change a label's depth: the run no longer describes the job on screen. #411 folds a job's
+  // rows, so the field is behind the chevron.
+  await page.getByTestId('engrave-label-expand-0').click();
   const depth = page.getByTestId('engrave-label-depth-0');
   await depth.fill('1.8');
   await depth.blur();
@@ -306,7 +308,9 @@ test('#368 — a badge that states its print reaches Engrave with a live colour 
 
   // The seeded line is clear of both jaws (#369), so the blank's own colour split is what binds it
   // and the walk writes the reveal itself: 0.8 + 0.2 = 1.0, one printed layer PAST the boundary — so
-  // the control opens with that state already pressed.
+  // the control opens with that state already pressed. #411: the route SEEDS the line, so the row
+  // arrives folded like any other.
+  await page.getByTestId('engrave-label-expand-0').click();
   const depth = page.getByTestId('engrave-label-depth-0');
   await expect(depth).toHaveValue('1');
   await expect(page.getByTestId('engrave-label-reveal-0')).toHaveAttribute('aria-pressed', 'true');
@@ -318,4 +322,229 @@ test('#368 — a badge that states its print reaches Engrave with a live colour 
   await expect(page.getByTestId('engrave-label-surface-0')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('engrave-label-reveal-0')).toHaveAttribute('aria-pressed', 'false');
   await page.screenshot({ path: 'test-results/368-badge-print-split.png' });
+});
+
+test('#411 — ten items each on one line, remove at the front of the line, and undo at its site', async ({
+  cm,
+  page,
+}) => {
+  // The maintainer's own report: the list was "very cluttered", the objects could not "be easily
+  // collapsed to a single line", and the remove control sat at the far right of a WRAPPING second
+  // line, away from the item's name. So this is measured, not asserted in words: at a narrow-ish
+  // panel every one of ten rows is ONE line, remove is the leftmost thing on it, beside the
+  // show/hide box, and nothing pushes the panel sideways. The design's acceptance is "ten items fit
+  // at 1440 × 900"; this runs NARROWER than that on purpose — at 1024 the rail is at its tightest,
+  // so a row that fits here fits there.
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await cm.ready();
+  await openEngravePanel(page);
+
+  // One press to open the Add menu (it is a `<details>`: pressing the summary again would close it),
+  // then seven labels. The default job ships three.
+  await page.getByTestId('engrave-add-summary').click();
+  for (let i = 0; i < 7; i += 1) await page.getByTestId('engrave-add-label').click();
+  await expect(page.getByTestId('engrave-item-count')).toHaveText('10');
+  // A row a person just added arrives OPEN (they are looking for exactly its fields); the claim
+  // below is about the folded list, which is what the panel shows for a job it did not just extend.
+  await page.getByTestId('engrave-item-collapse-all').click();
+
+  const geometry = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="engrave-label-row-"]'));
+    const panel = document.querySelector<HTMLElement>('[data-testid="context-panel"]')!;
+    return {
+      rows: rows.length,
+      // One line each: every child of the head shares a vertical centre, so the row cannot be the
+      // two-line box the report describes.
+      split: rows.flatMap((row, i) => {
+        const kids = Array.from(row.querySelector('.engrave-item-row__head')!.children) as HTMLElement[];
+        const centres = kids.map((k) => {
+          const r = k.getBoundingClientRect();
+          return r.top + r.height / 2;
+        });
+        return Math.max(...centres) - Math.min(...centres) > 2 ? [i] : [];
+      }),
+      heights: rows.map((row) => Math.round(row.getBoundingClientRect().height)),
+      // Front cluster order, left to right, and where the name starts.
+      order: rows.map((row) => {
+        const at = (sel: string) => {
+          const el = row.querySelector<HTMLElement>(sel);
+          return el ? el.getBoundingClientRect().left : null;
+        };
+        return { remove: at('.engrave-item-row__remove'), show: at('.engrave-item-row__show'), name: at('.engrave-item-row__name') };
+      }),
+      overflowing: rows.filter((r) => r.scrollWidth > r.clientWidth + 1).length,
+      panelOverflow: panel.scrollWidth - panel.clientWidth,
+      headHeight: document.querySelector<HTMLElement>('.engrave-item-row__head')!.getBoundingClientRect().height,
+    };
+  });
+
+  expect(geometry.rows).toBe(10);
+  expect(geometry.split, 'rows whose head wrapped onto a second line').toEqual([]);
+  // Every row is one head line plus the border: no row is a two-line box.
+  expect(Math.max(...geometry.heights)).toBeLessThanOrEqual(Math.ceil(geometry.headHeight) + 12);
+  for (const [i, o] of geometry.order.entries()) {
+    expect(o.remove, `row ${i} has no remove on its line`).not.toBeNull();
+    expect(o.remove!, `row ${i}: remove is not the frontmost control`).toBeLessThan(o.show!);
+    expect(o.remove!, `row ${i}: remove wrapped away from the name`).toBeLessThan(o.name!);
+  }
+  expect(geometry.overflowing, 'rows whose content runs past the row').toBe(0);
+  expect(geometry.panelOverflow, 'the item list pushed the panel sideways').toBeLessThanOrEqual(0);
+  await page.screenshot({ path: 'test-results/411-ten-items-one-line.png' });
+
+  // Remove from the COLLAPSED line — the row is folded, which is the state the report was about.
+  await expect(page.getByTestId('engrave-label-expand-0')).toHaveAttribute('aria-expanded', 'false');
+  await page.getByTestId('engrave-label-remove-0').click();
+  await expect(page.getByTestId('engrave-item-count')).toHaveText('9');
+  await expect(page.getByTestId('engrave-undo-what')).toHaveText('Label “CASE” removed.');
+
+  // The undo puts it back at the index it came from, not at the end of the list.
+  await page.getByTestId('engrave-undo').click();
+  await expect(page.getByTestId('engrave-item-count')).toHaveText('10');
+  await expect(page.locator('[data-testid="engrave-label-row-0"] .engrave-item-row__name')).toHaveText('CASE');
+  await expect(page.getByTestId('engrave-undo-strip')).toHaveCount(0);
+});
+
+test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z', async ({
+  cm,
+  page,
+}) => {
+  // The design's acceptance — "ten items fit at 1440 × 900" — on a job of MIXED kinds, because the
+  // uniform case is the one that cannot fail: a shape pocket and a trace are different editors with
+  // different widths, a void is the panel's other list, and the rows that carry a `⚠` are the ones
+  // the maintainer's review changed (the sentences moved into the body, so the line must NOT have
+  // grown). The list is measured where the panel is at its widest, which is where ten rows have the
+  // most room and the least excuse.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await cm.ready();
+  await openEngravePanel(page);
+  await page.getByTestId('engrave-add-summary').click();
+
+  // Five labels (the default job's three plus two), two shape pockets, both kinds of trace (a
+  // polyline and single-line text — different editors, same line) and one hole. Ten in all, and no
+  // two kinds sharing an editor width.
+  for (let i = 0; i < 2; i += 1) await page.getByTestId('engrave-add-label').click();
+  await page.getByTestId('engrave-add-rect').click();
+  await page.getByTestId('engrave-add-circle').click();
+  await page.getByTestId('engrave-add-line').click();
+  await page.getByTestId('engrave-add-stroke-label').click();
+  await page.getByTestId('engrave-add-drill').click();
+  await expect(page.getByTestId('engrave-item-count')).toHaveText('10');
+
+  // A VOID as well, because the review asked for one and it is the panel's other list: the same
+  // shell, drawn ABOVE the items, so it pushes the ten rows down — which is the harder version of
+  // "ten items fit at 1440 × 900" and the one worth measuring.
+  await page.getByTestId('engrave-add-keepout-rect').click();
+  await expect(page.getByTestId('engrave-keepout-row-0')).toBeVisible();
+
+  // The one row that carries a `⚠`: a label the person made too deep for the blank. It arrives open
+  // (a row just added is open), so its fields are here without a press, and 11.5 mm is past the
+  // 11 mm the panel says this stock allows — the finding the line must count without growing.
+  await page.getByTestId('engrave-label-depth-4').fill('11.5');
+  await expect(page.getByTestId('engrave-label-warn-4')).toBeVisible();
+  // And a name too long for the line, on the other added row: the name has to ELIDE rather than push
+  // the front cluster away — the maintainer's "remove must never wrap away from the item's name".
+  await page.getByTestId('engrave-label-text-3').fill('A NAME LONG ENOUGH THAT IT CANNOT POSSIBLY FIT');
+
+  await page.getByTestId('engrave-item-collapse-all').click();
+  await page.getByTestId('engrave-keepout-collapse-all').click();
+
+  const geometry = await page.evaluate(() => {
+    const itemRows = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '[data-testid^="engrave-label-row-"], [data-testid^="engrave-shape-row-"], ' +
+          '[data-testid^="engrave-trace-row-"], [data-testid^="engrave-drill-row-"]',
+      ),
+    );
+    const voidRows = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-testid^="engrave-keepout-row-"]'),
+    );
+    // Every row of either list, in document order — one shell, one set of claims.
+    const rows = [...voidRows, ...itemRows];
+    const head = rows[0]!.querySelector<HTMLElement>('.engrave-item-row__head')!;
+    const panel = document.querySelector<HTMLElement>('[data-testid="context-panel"]')!;
+    // The panel is a scroller, and a press in the Stock section above leaves it scrolled; the
+    // acceptance is about the LIST, so the box it is measured in is put back at the top first.
+    for (let el: HTMLElement | null = itemRows[0]!; el; el = el.parentElement) el.scrollTop = 0;
+    const itemsHeading = document.querySelector<HTMLElement>('[data-testid="engrave-item-count"]')!.closest('h3')!;
+    return {
+      items: itemRows.length,
+      voids: voidRows.length,
+      // One line each: every child of the head shares a vertical centre. This is the claim the
+      // maintainer's report was about, and it is the one a `⚠` or a long name could break.
+      split: rows.flatMap((row, i) => {
+        const centres = Array.from(row.querySelector('.engrave-item-row__head')!.children).map((k) => {
+          const r = k.getBoundingClientRect();
+          return r.top + r.height / 2;
+        });
+        return Math.max(...centres) - Math.min(...centres) > 2 ? [i] : [];
+      }),
+      headHeight: head.getBoundingClientRect().height,
+      heights: rows.map((row) => Math.round(row.getBoundingClientRect().height)),
+      warnings: rows.filter((r) => r.querySelector('.engrave-item-row__warn') !== null).length,
+      // The long name is CUT OFF rather than allowed to push the controls: a name that fits is not
+      // evidence of anything, so this counts the rows whose name element is wider than its box.
+      elided: rows.filter((r) => {
+        const name = r.querySelector<HTMLElement>('.engrave-item-row__name');
+        return name !== null && name.scrollWidth > name.clientWidth + 1;
+      }).length,
+      overflowing: rows.filter((r) => r.scrollWidth > r.clientWidth + 1).length,
+      listOverflow: panel.scrollWidth - panel.clientWidth,
+      // The ten item rows and their own heading, from the heading's top to the tenth row's bottom.
+      // This is the design's "ten items fit at 1440 × 900" stated as what it is about: the LIST's
+      // own extent. Measured on the list rather than on the panel's scroll position, because the
+      // panel legitimately scrolls — the guided-setup buttons, the stock fields and the void list
+      // all sit above the items, so "is the tenth row on screen right now" is a question about
+      // where the scroller happens to be, not about whether the rows are one line each.
+      itemsBlockHeight: Math.round(
+        itemRows[itemRows.length - 1]!.getBoundingClientRect().bottom - itemsHeading.getBoundingClientRect().top,
+      ),
+      // …and the window that block has to fit in: the panel's own visible height, so "without
+      // scrolling" is a claim about the list rather than about the whole panel.
+      scrollerHeight: (() => {
+        for (let el = itemRows[0]!.parentElement; el; el = el.parentElement) {
+          if (el.scrollHeight > el.clientHeight + 1) return el.clientHeight;
+        }
+        return window.innerHeight;
+      })(),
+    };
+  });
+
+  expect(geometry.items).toBe(10);
+  expect(geometry.voids).toBe(1);
+  expect(geometry.split, 'rows whose head wrapped onto a second line').toEqual([]);
+  expect(geometry.warnings, 'the finding never reached a line').toBeGreaterThan(0);
+  expect(geometry.elided, 'the long name was not cut off — the line grew instead').toBeGreaterThan(0);
+  // One head line plus the border, for every kind — including the row with the `⚠` and the long name.
+  expect(Math.max(...geometry.heights)).toBeLessThanOrEqual(Math.ceil(geometry.headHeight) + 12);
+  expect(geometry.overflowing, 'a row ran past its own box').toBe(0);
+  expect(geometry.listOverflow, 'the list pushed the panel sideways').toBeLessThanOrEqual(0);
+  // Ten rows are one line each, so the block cannot be taller than ten head lines plus the header —
+  // which is the whole content of "ten items fit at 1440 × 900". Stated as arithmetic rather than as
+  // a magic number: the block is what ten single-line rows and one header come to.
+  expect(
+    geometry.itemsBlockHeight,
+    `the ten item rows and their header need ${geometry.itemsBlockHeight} px`,
+  ).toBeLessThanOrEqual(10 * (Math.ceil(geometry.headHeight) + 12) + 80);
+  expect(geometry.itemsBlockHeight).toBeLessThanOrEqual(900);
+  // …and "without scrolling": the whole list — its header and all ten rows — fits the panel's own
+  // visible height, so the person never scrolls WITHIN the list. The panel scrolls as a whole (the
+  // set-up buttons, the stock fields and the void list are above it), which is what it did before
+  // #411 and is not what this acceptance is about.
+  expect(
+    geometry.itemsBlockHeight,
+    `the list needs ${geometry.itemsBlockHeight} px of the panel's ${geometry.scrollerHeight} px`,
+  ).toBeLessThanOrEqual(geometry.scrollerHeight);
+  await page.screenshot({ path: 'test-results/411-mixed-items-1440.png' });
+
+  // Ctrl-Z, in the real app: the shortcut in `AppShell` gives a pending removal precedence over the
+  // project's undo. The unit spec pins the rule; only here is the key actually pressed.
+  await page.getByTestId('engrave-label-remove-0').click();
+  await expect(page.getByTestId('engrave-item-count')).toHaveText('9');
+  await page.keyboard.press('Control+z');
+  await expect(page.getByTestId('engrave-item-count')).toHaveText('10');
+  await expect(page.locator('[data-testid="engrave-label-row-0"] .engrave-item-row__name')).toHaveText('CASE');
+  await expect(page.getByTestId('engrave-undo-strip')).toHaveCount(0);
+  // …and with nothing pending the key is the project's again, which is to say it undoes nothing here:
+  // the job is where it was a press ago either way, so the strip is the observable.
+  await page.keyboard.press('Control+z');
 });

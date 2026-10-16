@@ -12,6 +12,7 @@ import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
+import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import {
@@ -64,6 +65,7 @@ export function preview(
   gen: number,
   catalogue: readonly FeedCatalogueRow[] = [],
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
+  conditions: ReadonlyMap<string, ConditionSummary> = new Map(),
 ): EngravePreview | null {
-  return previewer.engravePreview(job, TOOL_LIBRARY, catalogue, gen, margins);
+  return previewer.engravePreview(job, TOOL_LIBRARY, catalogue, gen, margins, conditions);
 }

@@ -21,6 +21,7 @@ import { ensureFontsLoaded, fontKeysForLabels } from '@/engine/fonts/registry';
 import { getToplevel } from './geometry/ManifoldRuntime';
 import type { NodeMeshOutput } from './geometry/meshOutput';
 import { createSimSession, type SimFrame, type SimLoadOpts, type SimLoadResult, type SimPath, type SimSession } from './sim/session';
+import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import { engraveGenerate as runEngraveGenerate, type EngraveGenerated } from './sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
@@ -101,10 +102,11 @@ const api = {
    * vise jaws and the sacrificial material (#213). `null` when `gen` is stale. Every mesh
    * buffer is transferred.
    *
-   * `tools` is the caller's tool registry snapshot (#305) and `catalogue` its Makera feed rows
-   * (#324); both cross by structured clone, like the `Tool` `simLoad` takes: the worker cannot
-   * see the app's module state, so the list it measures and recommends from, and the feed rows
-   * its recommendation filters on, have to be sent to it.
+   * `tools` is the caller's tool registry snapshot (#305), `catalogue` its Makera feed rows
+   * (#324) and `conditions` the inventory's condition summaries by registry key (#442); all
+   * cross by structured clone, like the `Tool` `simLoad` takes: the worker cannot see the app's
+   * module state, so the list it measures and recommends from, the feed rows its recommendation
+   * filters on, and the broken and worn copies it passes over, have to be sent to it.
    */
   async engravePreview(
     job: EngraveJob,
@@ -112,12 +114,13 @@ const api = {
     catalogue: readonly FeedCatalogueRow[],
     gen: number,
     margins: EngraveMargins,
+    conditions: ReadonlyMap<string, ConditionSummary>,
   ): Promise<EngravePreview | null> {
     // Issue #180 — the preview typesets labels through the synchronous `resolveFont`, and the
     // bundled faces are static assets now, so load the keys this job's enabled labels need
     // first. A shapes-only job (or one with every label disabled/empty) passes `[]`.
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    const p = (await getPreviewer()).engravePreview(job, tools, catalogue, gen, margins);
+    const p = (await getPreviewer()).engravePreview(job, tools, catalogue, gen, margins, conditions);
     if (!p) return null;
     return Comlink.transfer(p, buffersOf([p.stock, ...p.floors.map((f) => f.mesh), ...p.fixture.map((f) => f.mesh), ...p.sacrificial.map((s) => s.mesh)]));
   },

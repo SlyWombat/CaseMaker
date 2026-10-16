@@ -115,6 +115,8 @@ test('visual QA: Engrave panel — stock, labels, tool recommendation and depth-
   await page.getByTestId('engrave-tool').selectOption('flat-3.175x12-metal');
   const selBefore = await page.getByTestId('engrave-tool').inputValue();
   const recBefore = await page.getByTestId('engrave-recommendation').innerText().catch(() => '(none)');
+  // #411 — the cap-height field is in the row's body, which a job's rows arrive folded.
+  await page.getByTestId('engrave-label-expand-0').click();
   await page.getByTestId('engrave-label-size-0').fill('4');
   await page.waitForTimeout(4000);
   const selAfter = await page.getByTestId('engrave-tool').inputValue();

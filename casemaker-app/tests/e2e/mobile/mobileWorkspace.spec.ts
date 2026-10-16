@@ -169,6 +169,8 @@ test('a label’s text field keeps a usable width at phone width (#350)', async 
   if (sideX < 0) await page.getByTestId('sidebar-handle').click();
   await page.getByTestId('sidebar-button-cnc-engrave').click();
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
+  // #411 — the field lives in the row's body, behind the chevron.
+  await page.getByTestId('engrave-label-expand-0').click();
 
   const m = await page.getByTestId('engrave-label-text-0').evaluate((el) => {
     const input = el as HTMLInputElement;
@@ -176,7 +178,9 @@ test('a label’s text field keeps a usable width at phone width (#350)', async 
     // What shares the input's own flex line. This is the assertion that can only pass with the
     // fix: the width below could in principle come out large on some other layout, but a SELECT or
     // a BUTTON on this line is the bug itself — `flex: 1` gives the input a zero basis, so any
-    // non-shrinking sibling takes its width and the input pays.
+    // non-shrinking sibling takes its width and the input pays. #411 moved the field into the
+    // body's own line, where nothing shares it at all (the font picker and the weight toggle are
+    // the NEXT line, and the show/hide checkbox is up on the collapsed row).
     const line = Array.from(input.parentElement!.children).map(
       (c) => `${c.tagName}:${(c as HTMLElement).dataset.testid ?? ''}`,
     );
@@ -189,14 +193,61 @@ test('a label’s text field keeps a usable width at phone width (#350)', async 
       clipped: input.scrollWidth > input.clientWidth,
     };
   });
-  expect(m.line, 'the text field still shares its line').toEqual([
-    'INPUT:engrave-label-enabled-0',
-    'INPUT:engrave-label-text-0',
-  ]);
+  expect(m.line, 'the text field has its line to itself').toEqual(['INPUT:engrave-label-text-0']);
   expect(m.text.length, 'the deterministic job’s first label').toBeGreaterThan(0);
   expect(m.width, 'the text field is a sliver').toBeGreaterThanOrEqual(120);
   expect(m.width / m.rowWidth, 'the text field is a minority of its own row').toBeGreaterThanOrEqual(0.5);
   expect(m.clipped, 'the text field clips its value').toBe(false);
+});
+
+/**
+ * #411 — the remove control on the collapsed line, at phone width. The maintainer could not find it
+ * on the desktop build at all, so on a phone — where the row is at its tightest and there is no
+ * hover to reveal a tooltip — it has to be a real touch target, not the 12 px glyph the row would
+ * otherwise give it. The rule is media-queried (`max-width: 1024px`), so it is only true at a
+ * narrow width; this is the spec that can tell whether the query is doing anything.
+ */
+test('the remove control on an item line is a real touch target at phone width (#411)', async ({
+  cm,
+  page,
+}) => {
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+    window.__caseMaker!.engraveReset();
+  });
+  const sideX = await page.getByTestId('sidebar').evaluate((el) => el.getBoundingClientRect().x);
+  if (sideX < 0) await page.getByTestId('sidebar-handle').click();
+  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await expect(page.getByTestId('engrave-panel')).toBeVisible();
+
+  // The row is FOLDED, which is the state the report was about and the state a phone opens on.
+  const box = await page.getByTestId('engrave-label-remove-0').boundingBox();
+  expect(box, 'there is no remove control on the line').not.toBeNull();
+  expect(box!.width, 'the touch target is narrower than a fingertip').toBeGreaterThanOrEqual(24);
+  expect(box!.height, 'the touch target is shorter than a fingertip').toBeGreaterThanOrEqual(24);
+
+  // It is the FRONT of the line, beside the show/hide box — not wrapped away from the name.
+  const [show, name] = await Promise.all([
+    page.getByTestId('engrave-label-enabled-0').boundingBox(),
+    page.getByTestId('engrave-label-expand-0').boundingBox(),
+  ]);
+  expect(box!.x).toBeLessThan(show!.x);
+  expect(box!.x).toBeLessThan(name!.x);
+
+  // And it works from the line, with the undo offered at the same place.
+  await page.getByTestId('engrave-label-remove-0').tap();
+  await expect(page.getByTestId('engrave-item-count')).toHaveText('2');
+  await page.getByTestId('engrave-undo').tap();
+  await expect(page.getByTestId('engrave-item-count')).toHaveText('3');
+
+  // The rule is a media query, so it is the EDGE that can be wrong: 1024 is the top of the band it
+  // covers, and one pixel over it is a desktop row again. Measured there rather than only at 390 so
+  // the boundary is what is being checked, not just that some narrow width works.
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const atEdge = await page.getByTestId('engrave-label-remove-0').boundingBox();
+  expect(atEdge!.width, 'the touch target drops below 24 px at the top of the band').toBeGreaterThanOrEqual(24);
+  expect(atEdge!.height, 'the touch target drops below 24 px at the top of the band').toBeGreaterThanOrEqual(24);
 });
 
 /**

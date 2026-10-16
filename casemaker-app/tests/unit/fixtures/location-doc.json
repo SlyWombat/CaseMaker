@@ -890,6 +890,20 @@
       "setAt": null,
       "unit": "rpm",
       "note": "placeholder, not measured; not a vendor number: the adaptive spindle speed until a measured row replaces it"
+    },
+    "engrave.newItemDepthMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the depth a new label, shape, combined shape, traced line or imported outline starts at, in the panel where the person then sets the depth that matters"
+    },
+    "engrave.newDrillDepthMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the depth a new hole starts at — deeper than an item's own starting depth because a hole that shallow shows nothing on the preview"
     }
   }
 }

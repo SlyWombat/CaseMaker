@@ -1,5 +1,7 @@
 import type { CSSProperties, JSX } from 'react';
 import { FontPicker, WeightPicker } from '@/components/panels/FontPicker';
+import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
@@ -23,6 +25,10 @@ import type { EngraveLabel } from '@/types/engraveJob';
  * checker accepts. On a one-colour blank depth
  * is a free number and the field stands alone, which is also what retires the slider this row used
  * to carry: a continuous control is exactly the wrong shape for a choice that has two answers.
+ *
+ * #411 rewrote the OUTER shape of the row, not the editor: `EngraveItemRow` owns the one-line head
+ * (remove, show/hide, chevron, "T", the text as the name, the depth) and draws the editor below only
+ * while the row is open. Everything from the text field down is unchanged.
  */
 
 const NUM: CSSProperties = { width: 60 };
@@ -149,9 +155,25 @@ export function EngraveLabelRow({
   );
 
   return (
-    <div
-      data-testid={`engrave-label-row-${index}`}
-      style={{ border: '1px solid #2a2f36', borderRadius: 4, padding: 6, marginBottom: 6 }}
+    // #411 — the row is a line now: remove and show/hide at the front, the text as the name, the
+    // depth as the one number, and everything below behind the chevron. The trash icon is the one
+    // control the maintainer could not find, and it sat at the far right of this row's *wrapping*
+    // second line, away from the name it belongs to.
+    <EngraveItemRow
+      id={label.id}
+      prefix="engrave-label"
+      index={index}
+      glyph="T"
+      kindWord="Label"
+      name={label.text.trim() === '' ? '(empty label)' : label.text}
+      summary={rowSummary(label.depth)}
+      enabled={label.enabled}
+      enabledTitle="A disabled label is kept in the job but not cut."
+      removeTitle="Remove this label."
+      removeNoun="label"
+      findings={findings}
+      onToggleEnabled={(enabled) => onChange({ enabled })}
+      onRemove={onRemove}
     >
       {/* #350 — the text gets the line to itself. Sharing one with the font picker and the weight
           toggle collapsed it to a sliver: `flex: 1` gives the input a flex-basis of 0, so it is the
@@ -160,14 +182,6 @@ export function EngraveLabelRow({
           collapse rather than preventing it. Its own line is the only arrangement where the
           label's most important field cannot lose that fight. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <input
-          type="checkbox"
-          checked={label.enabled}
-          data-testid={`engrave-label-enabled-${index}`}
-          aria-label={`Label ${index + 1} enabled`}
-          title="A disabled label is kept in the job but not cut."
-          onChange={(e) => onChange({ enabled: e.target.checked })}
-        />
         <input
           type="text"
           value={label.text}
@@ -179,9 +193,6 @@ export function EngraveLabelRow({
         />
       </div>
 
-      {/* The font picker, the weight toggle and the remove button are three fixed-width controls
-          with no shrink between them, so at the 320 px rail they overrun the row rather than wrap.
-          `flexWrap` (as on the field line below) lets them take a second line instead. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 4 }}>
         <FontPicker
           value={label.font}
@@ -196,16 +207,6 @@ export function EngraveLabelRow({
           aria-label={`Label ${index + 1} weight`}
           title="Regular or bold (bundled fonts only; an embedded font is used as-is)."
         />
-        <button
-          type="button"
-          data-testid={`engrave-label-remove-${index}`}
-          aria-label={`Remove label ${index + 1}`}
-          title="Remove this label."
-          style={{ marginLeft: 'auto' }}
-          onClick={onRemove}
-        >
-          🗑
-        </button>
       </div>
 
       <div style={LABEL_INLINE}>
@@ -291,16 +292,6 @@ export function EngraveLabelRow({
           {label.depth === recommended.depth ? '' : ` This label is at ${mm(label.depth)} mm.`}
         </p>
       )}
-
-      {findings.map((f, i) => (
-        <p
-          key={`${f.code}-${i}`}
-          data-testid={`engrave-label-finding-${index}-${f.code}`}
-          style={{ ...MUTED, color: SEVERITY_COLOR[f.severity] }}
-        >
-          {f.message}
-        </p>
-      ))}
-    </div>
+    </EngraveItemRow>
   );
 }

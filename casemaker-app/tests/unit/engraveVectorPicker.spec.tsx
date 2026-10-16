@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { EngravePanel } from '@/components/panels/EngravePanel';
-import { useEngraveJobStore, ENGRAVE_JOB_KEY } from '@/store/engraveJobStore';
+import { useEngraveJobStore, ENGRAVE_JOB_KEY, NEW_ITEM_DEPTH_KEY } from '@/store/engraveJobStore';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
@@ -18,6 +18,8 @@ import {
 } from '@/store/engravePreviewStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { openTextFile } from '@/utils/openTextFile';
+import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import type { EngraveVectorShape } from '@/types/engraveJob';
 
 vi.mock('@/utils/openTextFile', () => ({ openTextFile: vi.fn() }));
@@ -56,6 +58,8 @@ function theVector(): EngraveVectorShape {
 beforeEach(() => {
   setEngravePreviewClientLoader(async () => NO_PREVIEW);
   useSettingsStore.getState().resetSettings();
+  // #451 — one case below puts a shop default in place, and it would otherwise leak into the rest.
+  resetShopDefaultsStore();
   act(() => {
     useEngraveJobStore.setState({ job: defaultEngraveJob() });
   });
@@ -173,6 +177,21 @@ describe('EngravePanel — the import dialog size control (#217)', () => {
     fireEvent.click(screen.getByTestId('engrave-import-cancel'));
     expect(screen.queryByTestId('engrave-import-dialog')).toBeNull();
     expect(useEngraveJobStore.getState().job.vectors ?? []).toHaveLength(0);
+  });
+
+  it('starts the accepted outline at the shop’s own new-item depth (#451)', async () => {
+    // The panel writes this one itself (`acceptOutline`), so it is the one starting depth the store
+    // cannot supply: it has to go through the same reader, or an imported outline would begin at a
+    // number the location has nothing to do with.
+    useShopDefaultsStore.setState({
+      status: 'present',
+      defaults: ShopDefaultsSchema.parse({
+        [NEW_ITEM_DEPTH_KEY]: { value: 3, source: 'chosen', setAt: '2026-10-16', unit: 'mm', note: null },
+      }),
+    });
+    await openImport('square.svg', MM_SQUARE);
+    fireEvent.click(screen.getByTestId('engrave-import-accept'));
+    expect(theVector().depth).toBe(3);
   });
 });
 

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { shopDefault } from '@/store/shopDefaultsStore';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { DEFAULT_STROKE_FONT_ID } from '@/engine/fonts/stroke/strokeFont';
 import {
@@ -13,6 +14,11 @@ import { defaultStockProud, todayISODate, viseForNewJob } from '@/engine/cnc/fix
 import { sacrificialForNewJob } from '@/engine/cnc/sacrificial';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
+import {
+  itemKindWord,
+  itemRowName,
+  type EngraveNamedItem,
+} from '@/engine/cnc/engrave/jobSetup';
 import { effectiveMargins, recommendLabelDepth } from '@/engine/cnc/engrave/depthBounds';
 import { labelGlyphMeasure, labelJawReach, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import {
@@ -184,7 +190,32 @@ function loadJob(): EngraveJob {
   return newDefaultJob();
 }
 
-function newLabel(job: EngraveJob): EngraveLabel {
+/**
+ * #451 — where a newly added item STARTS, out of the code and into the location's shop defaults
+ * (`defaultsClient.ts` / `defaults.rs`: `engrave.newItemDepthMm`, `engrave.newDrillDepthMm`). Both
+ * are CHOSEN, not measured: nobody measured what depth a new label should begin at, and the person
+ * who just asked for it is about to set the number that matters.
+ *
+ * What is left here is the FALLBACK for a build with no location to read — the hosted web build.
+ * `shopDefault` labels it, so a value read this way never passes as the shop's own.
+ *
+ * The readings happen HERE, in the store, for the same reason `newDefaultJob` reads the vise here:
+ * `newLabel` and its siblings stay pure functions of their arguments.
+ */
+export const NEW_ITEM_DEPTH_KEY = 'engrave.newItemDepthMm';
+export const NEW_DRILL_DEPTH_KEY = 'engrave.newDrillDepthMm';
+
+/** The depth a new item of any kind but a hole starts at, mm. */
+export function newItemDepthMm(): number {
+  return shopDefault(NEW_ITEM_DEPTH_KEY).value;
+}
+
+/** The depth a new hole starts at, mm — its own starting point, and the reason is in `newDrill`. */
+export function newDrillDepthMm(): number {
+  return shopDefault(NEW_DRILL_DEPTH_KEY).value;
+}
+
+function newLabel(job: EngraveJob, depth: number): EngraveLabel {
   return {
     id: newEngraveLabelId(),
     text: 'New text',
@@ -194,7 +225,7 @@ function newLabel(job: EngraveJob): EngraveLabel {
     // Centre of the stock; the caller moves it. Depth must be > 0 or the schema rejects it.
     position: { x: job.stock.length / 2, y: job.stock.width / 2 },
     rotation: 0,
-    depth: 0.5,
+    depth,
     enabled: true,
   };
 }
@@ -293,12 +324,12 @@ function withStockSource(
  * freshly added item never lands the job in a state that cannot be reloaded. Centred on the
  * stock like a new label; the caller moves it.
  */
-function newShape(kind: EngraveShape['kind'], job: EngraveJob): EngraveShape {
+function newShape(kind: EngraveShape['kind'], job: EngraveJob, depth: number): EngraveShape {
   const base: EngraveShapeBase = {
     id: newEngraveShapeId(),
     position: { x: job.stock.length / 2, y: job.stock.width / 2 },
     rotation: 0,
-    depth: 0.5,
+    depth,
     enabled: true,
   };
   switch (kind) {
@@ -320,12 +351,16 @@ function newShape(kind: EngraveShape['kind'], job: EngraveJob): EngraveShape {
  * the job has nothing to reference — the panel disables that button rather than creating an
  * item whose reference the schema would reject on the next load.
  */
-function newCombined(kind: EngraveCombinedShape['kind'], job: EngraveJob): EngraveCombinedShape | null {
+function newCombined(
+  kind: EngraveCombinedShape['kind'],
+  job: EngraveJob,
+  depth: number,
+): EngraveCombinedShape | null {
   const base: EngraveShapeBase = {
     id: newEngraveShapeId(),
     position: { x: job.stock.length / 2, y: job.stock.width / 2 },
     rotation: 0,
-    depth: 0.5,
+    depth,
     enabled: true,
   };
   const first = [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])][0] ?? null;
@@ -344,12 +379,12 @@ function newCombined(kind: EngraveCombinedShape['kind'], job: EngraveJob): Engra
  * is valid against the schema. A `line` is a short open polyline the user redraws; a
  * `stroke-label` uses the one bundled single-stroke face at the default cap height.
  */
-function newTrace(kind: EngraveTraceItem['kind'], job: EngraveJob): EngraveTraceItem {
+function newTrace(kind: EngraveTraceItem['kind'], job: EngraveJob, depth: number): EngraveTraceItem {
   const base = {
     id: newEngraveTraceId(),
     position: { x: job.stock.length / 2, y: job.stock.width / 2 },
     rotation: 0,
-    depth: 0.5,
+    depth,
     enabled: true,
   };
   if (kind === 'line') {
@@ -360,17 +395,20 @@ function newTrace(kind: EngraveTraceItem['kind'], job: EngraveJob): EngraveTrace
 }
 
 /**
- * A brand-new plunge drill (#220), centred on the stock at a 1 mm depth — the same `0.5`-class
- * starting depth the other items use, comfortably inside the 12 mm default blank. An array
- * starts as a 2 × 2 lattice at 10 mm pitch, which the row editor then replaces. There is no
- * diameter: the hole IS the cutter's (#220), so a new drill just needs somewhere to be.
+ * A brand-new plunge drill (#220), centred on the stock. An array starts as a 2 × 2 lattice at
+ * 10 mm pitch, which the row editor then replaces. There is no diameter: the hole IS the cutter's
+ * (#220), so a new drill just needs somewhere to be.
+ *
+ * Its starting depth is its own shop default (#451, `engrave.newDrillDepthMm`) rather than the
+ * items' one: a hole that begins as shallow as a label shows nothing on the preview, so the two
+ * start from different numbers and each says why.
  */
-function newDrill(kind: EngraveDrill['kind'], job: EngraveJob): EngraveDrill {
+function newDrill(kind: EngraveDrill['kind'], job: EngraveJob, depth: number): EngraveDrill {
   const base = {
     id: newEngraveDrillId(),
     position: { x: job.stock.length / 2, y: job.stock.width / 2 },
     rotation: 0,
-    depth: 1.0,
+    depth,
     enabled: true,
     through: false,
   };
@@ -408,6 +446,50 @@ function newKeepOut(kind: EngraveKeepOut['kind'], job: EngraveJob): EngraveKeepO
       // A 20 × 10 ring at the centre; the row editor replaces the points.
       return { ...base, kind: 'polygon', points: [[-10, -5], [10, -5], [10, 5], [-10, 5]] };
   }
+}
+
+/**
+ * A removal that can still be taken back (#411): what to say about it, and how to put it back.
+ *
+ * `restore` re-inserts the item AT ITS OLD INDEX rather than appending, so undoing a removal leaves
+ * the list — and the run sheet built from it — as it was. The entry is off the stack by the time the
+ * restore runs (`undoRemove` pops first, and `apply` retires the rest), so a restore cannot arm
+ * another one.
+ */
+export interface PendingRemoval {
+  /** What was removed, in the panel's words: `Label “CASE”`, `Rectangle “Face”`, `Void`. */
+  what: string;
+  /**
+   * Which list it came out of — the panel draws the strip at the removal site, and a void removed
+   * from "Voids under the face" must not have its undo offered under the item list below it.
+   */
+  section: 'items' | 'voids';
+  /** Puts it back, through `apply` like every other write. */
+  restore: () => void;
+}
+
+/**
+ * How long a removal may be taken back, ms — the design's 8 seconds and the maintainer's "the toast
+ * stays for 8 s" (#411). It is when the strip goes away ON ITS OWN: the button and Ctrl-Z both read
+ * the stack, and any other edit retires it immediately.
+ */
+export const REMOVAL_UNDO_MS = 8_000;
+
+/**
+ * The one timer that retires the strip.
+ *
+ * It is armed for the TOP of the stack and re-armed whenever the top changes, so a second removal
+ * restarts the window instead of ending the first one's — which is the maintainer's "a quick second
+ * removal never loses the first one's undo". When it fires the whole stack goes: what the person can
+ * see is one strip, and leaving an undo behind that nothing on screen offers would be a lie about
+ * what is still possible.
+ */
+let undoWindow: ReturnType<typeof setTimeout> | null = null;
+
+/** Retire the strip's timer — a write, a pop or an empty stack all end the same window. */
+function clearUndoWindow(): void {
+  if (undoWindow !== null) clearTimeout(undoWindow);
+  undoWindow = null;
 }
 
 export interface EngraveJobState {
@@ -471,7 +553,7 @@ export interface EngraveJobState {
   updateKeepOut: (id: string, patch: KeepOutPatch) => void;
   /** Declare `keepOut` outright, replacing any void already declared under its id (#271). */
   upsertKeepOut: (keepOut: EngraveKeepOut) => void;
-  removeKeepOut: (id: string) => void;
+  removeKeepOut: (id: string, undoable?: boolean) => void;
   /**
    * Take a `BadgeBlank` as this job's blank (#271 route 1, #352) — the ONE owner of that write,
    * shared by the panel's "Use the badge blank" and the wizard's hand-off seed so the two cannot
@@ -543,6 +625,23 @@ export interface EngraveJobState {
   updateVector: (id: string, patch: VectorPatch) => void;
   removeVector: (id: string) => void;
   /**
+   * The removals the panel may still take back (#411), oldest first — a STACK, so each one can be
+   * undone in turn. The panel draws a strip for the top, at the list it came out of.
+   *
+   * Removing an item is the one destructive press in this panel and it sits at the FRONT of every
+   * row, where a slip is easy — so the removal leaves this behind and the panel draws an inline
+   * strip at the removal site instead of a dialog (the maintainer's decision, and the reason it is
+   * not an app-wide toast: the undo belongs where the thing was). It is cleared by the NEXT WRITE
+   * of any kind, which is `apply`'s doing rather than a timer, and it is not part of the document:
+   * `persist` writes `job` alone, so a reopen has nothing stale to offer.
+   */
+  removalUndo: readonly PendingRemoval[];
+  /**
+   * Put the most recently removed item back where it was, and retire that strip. The one under it
+   * stays on the stack for its own undo — see `REMOVAL_UNDO_MS` for when the stack goes away.
+   */
+  undoRemove: () => void;
+  /**
    * Replace the sacrificial material model (#213). The caller owns `source`: the panel passes
    * `'saved'` for an edit it made, a preset carries its own, `noneSacrificial()` clears it.
    */
@@ -572,9 +671,65 @@ export interface EngraveJobState {
 }
 
 export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
+  /** Arm the 8 s window for whatever is on top now; an empty stack has nothing to retire. */
+  const armUndoWindow = (): void => {
+    clearUndoWindow();
+    if (get().removalUndo.length === 0) return;
+    undoWindow = setTimeout(() => {
+      undoWindow = null;
+      set({ removalUndo: [] });
+    }, REMOVAL_UNDO_MS);
+  };
+
   const apply = (mutate: (job: EngraveJob) => EngraveJob): void => {
-    set((s) => ({ job: mutate(s.job) }));
+    // Every write retires the undo stack (#411) — the maintainer's "until the next edit", as a
+    // consequence of the one path all writes take rather than a timer or a per-call-site rule.
+    clearUndoWindow();
+    set((s) => ({ job: mutate(s.job), removalUndo: [] }));
     persist(get().job);
+  };
+
+  /**
+   * A person's removal (#411): take the item out, then leave the undo behind — ON TOP of whatever
+   * undos are already there, so a second removal in quick succession does not throw the first one
+   * away (the maintainer's decision on the review).
+   *
+   * `restore` is a whole-job function of its own rather than a re-insert through an `addX`, because
+   * an add builds a DEFAULT item at the end of the list — that is a different item in a different
+   * place, and the undo would silently lose the text, the depth and the row's position in the run
+   * sheet. `at` is where the item sat; nothing can move in between, because any other write clears
+   * the stack (see `apply`).
+   */
+  const removeWithUndo = (
+    mutate: (job: EngraveJob) => EngraveJob,
+    what: string,
+    restore: (job: EngraveJob) => EngraveJob,
+    section: PendingRemoval['section'] = 'items',
+  ): void => {
+    // Read the stack BEFORE `apply`, which is about to retire it: this removal's own write is one
+    // of the writes that clears the stack, and the undos under it are not this press's to lose.
+    const earlier = get().removalUndo;
+    apply(mutate);
+    set({ removalUndo: [...earlier, { what, section, restore: () => apply(restore) }] });
+    armUndoWindow();
+  };
+
+  /** `Item at index 3` back into the list it came from, clamped for a list that has shrunk. */
+  const insertAt = <T>(list: readonly T[], at: number, item: T): T[] => {
+    const next = [...list];
+    next.splice(Math.max(0, Math.min(at, next.length)), 0, item);
+    return next;
+  };
+
+  /**
+   * What the strip calls this item: the kind's word, and the item's own name when it has one —
+   * `Label “CASE”`, `Rectangle “Face”`, `Hole array`. The words come from `itemKindWord` and
+   * `itemRowName` (#411), the same two the collapsed line reads, so the strip cannot name a thing
+   * differently from the row it took it from.
+   */
+  const removalWhat = (item: EngraveNamedItem, kindWord = itemKindWord(item)): string => {
+    const name = itemRowName(item);
+    return name === '' ? kindWord : `${kindWord} “${name}”`;
   };
 
   return {
@@ -612,7 +767,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       }),
 
     addLabel: () => {
-      const label = newLabel(get().job);
+      const label = newLabel(get().job, newItemDepthMm());
       apply((job) => ({ ...job, labels: [...job.labels, label] }));
       return label.id;
     },
@@ -668,22 +823,44 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         };
       }),
 
-    removeLabel: (id) =>
-      apply((job) => {
-        // #363 (review nit) — a removed label must not leave its claim behind. `sources.labels` is
-        // keyed by label id, so the entry survives the label and is then an orphan: nothing reads
-        // it (every lookup is by a live label's id), but it is carried by the document and counted
-        // by nothing. Deleted the same way `updateLabel` drops a claim that has gone empty, map and
-        // all, so the field never holds an empty object.
-        const sources: EngraveJobSources = { ...(job.sources ?? {}) };
-        if (sources.labels) {
-          const labels = { ...sources.labels };
-          delete labels[id];
-          if (Object.keys(labels).length > 0) sources.labels = labels;
-          else delete sources.labels;
-        }
-        return { ...job, labels: job.labels.filter((l) => l.id !== id), sources };
-      }),
+    removeLabel: (id) => {
+      const at = get().job.labels.findIndex((l) => l.id === id);
+      const label = get().job.labels[at];
+      if (!label) return;
+      // #411 — the undo has to bring the CLAIMS back too, not just the label: a depth the person
+      // typed and a layout the app refused to re-lay are what the document says about this line, and
+      // a restore that dropped them would hand the next blank change a label it may re-depth.
+      const claim = get().job.sources?.labels?.[id];
+      removeWithUndo(
+        (job) => {
+          // #363 (review nit) — a removed label must not leave its claim behind. `sources.labels` is
+          // keyed by label id, so the entry survives the label and is then an orphan: nothing reads
+          // it (every lookup is by a live label's id), but it is carried by the document and counted
+          // by nothing. Deleted the same way `updateLabel` drops a claim that has gone empty, map and
+          // all, so the field never holds an empty object.
+          const sources: EngraveJobSources = { ...(job.sources ?? {}) };
+          if (sources.labels) {
+            const labels = { ...sources.labels };
+            delete labels[id];
+            if (Object.keys(labels).length > 0) sources.labels = labels;
+            else delete sources.labels;
+          }
+          return { ...job, labels: job.labels.filter((l) => l.id !== id), sources };
+        },
+        removalWhat(label, 'Label'),
+        (job) => {
+          if (!claim) return { ...job, labels: insertAt(job.labels, at, label) };
+          return {
+            ...job,
+            labels: insertAt(job.labels, at, label),
+            sources: {
+              ...(job.sources ?? {}),
+              labels: { ...(job.sources?.labels ?? {}), [label.id]: claim },
+            },
+          };
+        },
+      );
+    },
 
     setTool: (key, source = 'user') =>
       apply((job) => ({
@@ -697,7 +874,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       })),
 
     addShape: (kind) => {
-      const shape = newShape(kind, get().job);
+      const shape = newShape(kind, get().job, newItemDepthMm());
       apply((job) => ({ ...job, shapes: [...job.shapes, shape] }));
       return shape.id;
     },
@@ -717,10 +894,19 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         ),
       })),
 
-    removeShape: (id) => apply((job) => ({ ...job, shapes: job.shapes.filter((s) => s.id !== id) })),
+    removeShape: (id) => {
+      const at = get().job.shapes.findIndex((s) => s.id === id);
+      const shape = get().job.shapes[at];
+      if (!shape) return;
+      removeWithUndo(
+        (job) => ({ ...job, shapes: job.shapes.filter((s) => s.id !== id) }),
+        removalWhat(shape),
+        (job) => ({ ...job, shapes: insertAt(job.shapes, at, shape) }),
+      );
+    },
 
     addCombined: (kind) => {
-      const item = newCombined(kind, get().job);
+      const item = newCombined(kind, get().job, newItemDepthMm());
       if (!item) return null;
       apply((job) => ({ ...job, combined: [...(job.combined ?? []), item] }));
       return item.id;
@@ -741,11 +927,20 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         ),
       })),
 
-    removeCombined: (id) =>
-      apply((job) => ({ ...job, combined: (job.combined ?? []).filter((c) => c.id !== id) })),
+    removeCombined: (id) => {
+      const list = get().job.combined ?? [];
+      const at = list.findIndex((c) => c.id === id);
+      const item = list[at];
+      if (!item) return;
+      removeWithUndo(
+        (job) => ({ ...job, combined: (job.combined ?? []).filter((c) => c.id !== id) }),
+        removalWhat(item),
+        (job) => ({ ...job, combined: insertAt(job.combined ?? [], at, item) }),
+      );
+    },
 
     addTrace: (kind) => {
-      const trace = newTrace(kind, get().job);
+      const trace = newTrace(kind, get().job, newItemDepthMm());
       apply((job) => ({ ...job, traces: [...(job.traces ?? []), trace] }));
       return trace.id;
     },
@@ -765,11 +960,20 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         ),
       })),
 
-    removeTrace: (id) =>
-      apply((job) => ({ ...job, traces: (job.traces ?? []).filter((t) => t.id !== id) })),
+    removeTrace: (id) => {
+      const list = get().job.traces ?? [];
+      const at = list.findIndex((t) => t.id === id);
+      const trace = list[at];
+      if (!trace) return;
+      removeWithUndo(
+        (job) => ({ ...job, traces: (job.traces ?? []).filter((t) => t.id !== id) }),
+        removalWhat(trace),
+        (job) => ({ ...job, traces: insertAt(job.traces ?? [], at, trace) }),
+      );
+    },
 
     addDrill: (kind) => {
-      const drill = newDrill(kind, get().job);
+      const drill = newDrill(kind, get().job, newDrillDepthMm());
       apply((job) => ({ ...job, drills: [...(job.drills ?? []), drill] }));
       return drill.id;
     },
@@ -789,8 +993,17 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         ),
       })),
 
-    removeDrill: (id) =>
-      apply((job) => ({ ...job, drills: (job.drills ?? []).filter((d) => d.id !== id) })),
+    removeDrill: (id) => {
+      const list = get().job.drills ?? [];
+      const at = list.findIndex((d) => d.id === id);
+      const drill = list[at];
+      if (!drill) return;
+      removeWithUndo(
+        (job) => ({ ...job, drills: (job.drills ?? []).filter((d) => d.id !== id) }),
+        removalWhat(drill),
+        (job) => ({ ...job, drills: insertAt(job.drills ?? [], at, drill) }),
+      );
+    },
 
     addKeepOut: (kind) => {
       const keepOut = newKeepOut(kind, get().job);
@@ -825,8 +1038,31 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         return { ...job, keepOuts: next };
       }),
 
-    removeKeepOut: (id) =>
-      apply((job) => ({ ...job, keepOuts: (job.keepOuts ?? []).filter((k) => k.id !== id) })),
+    /**
+     * Remove one void (#271). The word "void" is this call's, not `itemKindWord`'s: the row's
+     * collapsed line names the FOOTPRINT ("Rectangle"), but a removal is about the blank, and the
+     * strip is the one place that says so.
+     *
+     * `undoable: false` is for the route writes (`takeBadgeBlank`, `takeDesign`), which clear a void
+     * the app itself stamped under a fixed id: nobody declared it, so there is nothing of a person's
+     * to take back, and a strip appearing out of a file import would be the panel talking about
+     * something the person never did.
+     */
+    removeKeepOut: (id, undoable = true) => {
+      const list = get().job.keepOuts ?? [];
+      const at = list.findIndex((k) => k.id === id);
+      const keepOut = list[at];
+      if (!keepOut || !undoable) {
+        apply((job) => ({ ...job, keepOuts: (job.keepOuts ?? []).filter((k) => k.id !== id) }));
+        return;
+      }
+      removeWithUndo(
+        (job) => ({ ...job, keepOuts: (job.keepOuts ?? []).filter((k) => k.id !== id) }),
+        removalWhat(keepOut, 'Void'),
+        (job) => ({ ...job, keepOuts: insertAt(job.keepOuts ?? [], at, keepOut) }),
+        'voids',
+      );
+    },
 
     // #352 — the badge's blank, applied in one place. The stock goes through `setStock` rather than
     // being written here, so the `print`/`flatness` clearing and the vise follow (#344) stay
@@ -837,7 +1073,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       get().setStock(blank.stock, 'computed');
       if (blank.pocket) get().upsertKeepOut(blank.pocket);
       else if ((get().job.keepOuts ?? []).some((k) => k.id === BADGE_POCKET_KEEP_OUT_ID)) {
-        get().removeKeepOut(BADGE_POCKET_KEEP_OUT_ID);
+        get().removeKeepOut(BADGE_POCKET_KEEP_OUT_ID, false);
       }
       // #363 — and the LINES, where the job's set is still one a ROUTE laid out. Those three demo
       // lines were laid out for the 100 × 60 mm default plank and nothing had ever moved them, so a
@@ -910,7 +1146,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       // and only THAT void is taken away.
       if (patch.keepOut) get().upsertKeepOut(patch.keepOut);
       else if ((get().job.keepOuts ?? []).some((k) => k.id === DESIGN_POCKET_KEEP_OUT_ID)) {
-        get().removeKeepOut(DESIGN_POCKET_KEEP_OUT_ID);
+        get().removeKeepOut(DESIGN_POCKET_KEEP_OUT_ID, false);
       }
 
       const replaces = designReplacesItems(get().job);
@@ -1098,8 +1334,17 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         ),
       })),
 
-    removeVector: (id) =>
-      apply((job) => ({ ...job, vectors: (job.vectors ?? []).filter((v) => v.id !== id) })),
+    removeVector: (id) => {
+      const list = get().job.vectors ?? [];
+      const at = list.findIndex((v) => v.id === id);
+      const vector = list[at];
+      if (!vector) return;
+      removeWithUndo(
+        (job) => ({ ...job, vectors: (job.vectors ?? []).filter((v) => v.id !== id) }),
+        removalWhat(vector),
+        (job) => ({ ...job, vectors: insertAt(job.vectors ?? [], at, vector) }),
+      );
+    },
 
     setSacrificial: (sacrificial) => apply((job) => ({ ...job, sacrificial })),
 
@@ -1159,5 +1404,53 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     replace: (job) => apply(() => job),
 
     reset: () => apply(() => newDefaultJob()),
+
+    removalUndo: [],
+
+    undoRemove: () => {
+      const stack = get().removalUndo;
+      const top = stack[stack.length - 1];
+      if (!top) return;
+      // `restore` writes through `apply`, which retires the WHOLE stack and the window — so the
+      // undos underneath are put back after it rather than being lost to a write that is this
+      // undo's own. An undo cannot be undone into a second removal: the restore re-inserts the item
+      // and arms nothing.
+      top.restore();
+      set({ removalUndo: stack.slice(0, -1) });
+      armUndoWindow();
+    },
   };
 });
+
+/**
+ * Ctrl-Z's precedence rule, in one place (#411): while a removal can still be taken back, the key
+ * takes THAT back.
+ *
+ * A removal beats the project's undo because it is the more recent, more local thing — the person
+ * pressed a `✕` beside an item, not something in the case geometry — and because the alternative is
+ * an undo that does nothing visible where they are looking. Once the stack is empty the key is the
+ * project's again, exactly as it was before this existed: no press is swallowed.
+ *
+ * A free function rather than a hook so the shortcut handler reads live state at keypress time; a
+ * subscribed value would be a render behind, and the handler is not re-created per render.
+ *
+ * Returns whether it used the press.
+ */
+export function undoEngraveRemoval(): boolean {
+  const { removalUndo, undoRemove } = useEngraveJobStore.getState();
+  if (removalUndo.length === 0) return false;
+  undoRemove();
+  return true;
+}
+
+/**
+ * Test seam (#411): forget any removal still waiting to be taken back, and its window.
+ *
+ * The stack is module-level and the window is a real timer, so a spec that removed an item would
+ * hand the next one a live strip — or, worse, a timeout armed on the previous spec's clock that
+ * fires into a stack this one just built.
+ */
+export function resetEngraveRemovalUndo(): void {
+  clearUndoWindow();
+  useEngraveJobStore.setState({ removalUndo: [] });
+}

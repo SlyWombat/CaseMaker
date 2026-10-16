@@ -15,6 +15,13 @@ import { labelProfile, toPartPlan } from '@/engine/cnc/engrave/partPlan';
 import { flatEndMill, cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { measureLabels, type LabelEngravability } from '@/workers/sim/engraveGeometry';
+import {
+  itemConditionSummary,
+  type Condition,
+  type ConditionSummary,
+  type ItemWithCopies,
+  type ToolCopy,
+} from '@/engine/cnc/toolCondition';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { EngraveJob } from '@/types/engraveJob';
 
@@ -330,6 +337,128 @@ describe('recommendTool and V-bits (#405)', () => {
     const rec = recommendTool(jobWithLabel('l1', 'CASE', 1), [vBit()], [], allRows(1));
     expect(rec.key).toBeNull();
     expect(rec.reason).toContain('V-bit');
+  });
+});
+
+// #415/#442 — the cutter's CONDITION, as the operator set it. The summaries below are built by
+// `toolCondition`'s own `itemConditionSummary` — the very function `toolRegistryStore` fills the
+// lookup with — so a note asserted here is the note the panel will print, and `conditionsOf` is the
+// plain table the main thread sends into the sim worker.
+describe('recommendTool — the cutters’ condition (#442)', () => {
+  /** One described copy of a cutter, in its box. */
+  function copyOf(id: string, condition: Condition): ToolCopy {
+    return {
+      id,
+      condition,
+      whereabouts: { kind: 'box' },
+      runtimeWarnMinutes: null,
+      notes: null,
+      runtimeMinutes: null,
+    };
+  }
+
+  /** The summary the inventory would build for `quantity` copies of a cutter, the first described. */
+  function summaryOf(id: string, condition: Condition, quantity = 1): ConditionSummary {
+    const item: ItemWithCopies = { id, quantity, copies: [copyOf(`${id}-1`, condition)] };
+    return itemConditionSummary(item);
+  }
+
+  /** A registry key and its condition, as the third argument's table holds them. */
+  function held(id: string, condition: Condition): [string, ConditionSummary] {
+    return [`inv:${id}`, summaryOf(id, condition)];
+  }
+
+  function conditionsOf(...rows: [string, ConditionSummary][]): ReadonlyMap<string, ConditionSummary> {
+    return new Map(rows);
+  }
+
+  it('drops a cutter whose every copy is marked broken, by name, before measuring it', () => {
+    const job = jobWithLabel('l1', 'CASE', 1);
+    const tools = [tool('inv:good', 1.0), tool('inv:dead', 3.175)];
+    const measure = vi.fn((_key: string) => [row('l1', 1)]);
+    const rec = recommendTool(job, tools, [], measure, conditionsOf(held('good', 'used'), held('dead', 'broken')));
+
+    // 3.175 mm would win on size alone; the operator has said it cannot cut, so it never even gets
+    // measured — a catalogue row or a detail ratio for a bit that cannot cut is not worth computing.
+    expect(measure).toHaveBeenCalledTimes(1);
+    expect(measure).toHaveBeenCalledWith('inv:good');
+    expect(candidate(rec, 'inv:dead').excluded).toBe('broken');
+    expect(candidate(rec, 'inv:dead').condition?.usable).toBe(0);
+    expect(rec.key).toBe('inv:good');
+  });
+
+  it('prefers a fresh copy to a worn one of the same diameter, and says nothing about it', () => {
+    const job = jobWithLabel('l1', 'CASE', 1);
+    // Same diameter, same unknown reach: the key order alone would recommend the worn one first.
+    const tools = [tool('inv:aworn', 1.0), tool('inv:bfresh', 1.0)];
+    const rec = recommendTool(job, tools, [], allRows(1), conditionsOf(held('aworn', 'worn'), held('bfresh', 'new')));
+    expect(rec.key).toBe('inv:bfresh');
+    expect(rec.conditionNote).toBeNull();
+  });
+
+  it('still picks a worn cutter when it is the only one, and carries the warning', () => {
+    const job = jobWithLabel('l1', 'CASE', 1);
+    const rec = recommendTool(job, [tool('inv:only', 1.0)], [], allRows(1), conditionsOf(held('only', 'worn')));
+    expect(rec.key).toBe('inv:only');
+    // The warning is `toolCondition`'s own sentence, not a second spelling of it.
+    expect(rec.conditionNote).toBe(summaryOf('only', 'worn').note);
+    expect(rec.conditionNote).toContain('check it before the cut');
+  });
+
+  it('does not let a fresh small cutter outrank a worn large one', () => {
+    // The decision this pins: condition breaks a TIE on diameter, it is not a priority over it. A
+    // 2.0 mm cutter that keeps every item intact is still the right tool for the job even if the copy
+    // on the bench has some hours on it — it clears more and it is stiffer than a fresh 1.0 mm.
+    const job = jobWithLabel('l1', 'CASE', 1);
+    const rec = recommendTool(
+      job,
+      [tool('inv:small', 1.0), tool('inv:big', 2.0)],
+      [],
+      allRows(1),
+      conditionsOf(held('small', 'new'), held('big', 'worn')),
+    );
+    expect(rec.key).toBe('inv:big');
+    // Both qualify (1.0 and 2.0 mm both have softwood rows), so the pick is a real ranking and not
+    // an exclusion: the worn big one wins on diameter, and carries its caution into the panel.
+    expect(candidate(rec, 'inv:small').qualifies).toBe(true);
+    expect(candidate(rec, 'inv:big').qualifies).toBe(true);
+    expect(rec.conditionNote).toContain('worn');
+  });
+
+  it('treats a cutter the table says nothing about as unstated, never as worn or broken', () => {
+    // A catalogue row, a built-in, or a bench whose inventory has not loaded: `null` is "nobody has
+    // said", which is a different answer from "worn", and it must not read as a caution.
+    const job = jobWithLabel('l1', 'CASE', 1);
+    const rec = recommendTool(job, [tool('cat:x', 1.0)], [], allRows(1), conditionsOf(held('other', 'broken')));
+    expect(rec.key).toBe('cat:x');
+    expect(candidate(rec, 'cat:x').condition).toBeNull();
+    expect(rec.conditionNote).toBeNull();
+  });
+
+  it('says why nothing was picked when every cutter that could cut is marked broken', () => {
+    const job = jobWithLabel('l1', 'CASE', 1);
+    const rec = recommendTool(
+      job,
+      [tool('inv:one', 1.0), tool('inv:two', 2.0)],
+      [],
+      allRows(1),
+      conditionsOf(held('one', 'broken'), held('two', 'broken')),
+    );
+    expect(rec.key).toBeNull();
+    expect(rec.reason).toContain('2 other cutters are marked broken');
+    // The base sentence is kept: a broken cutter is one reason among the others, and the list may
+    // also hold cutters refused for their shape or their feeds.
+    expect(rec.reason).toContain('flat end mill');
+  });
+
+  it('behaves exactly as before when no condition table is handed in', () => {
+    // The web build with no service, and every caller that has no inventory: no cutter is excluded
+    // and none is cautioned, because the app knows of no possession of any of them.
+    const job = jobWithLabel('l1', 'CASE', 1);
+    const rec = recommendTool(job, [tool('flat', 1.0)], [], allRows(1));
+    expect(rec.key).toBe('flat');
+    expect(rec.conditionNote).toBeNull();
+    expect(candidate(rec, 'flat').condition).toBeNull();
   });
 });
 

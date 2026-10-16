@@ -11,8 +11,8 @@
  * ONE MEASUREMENT PASS, TWO ANSWERS. The per-item rows are the exact `LabelEngravability` rows
  * `recommendTool` was about to use, captured as it asks for them. So the table and the
  * recommendation can never disagree about a cutter — and a candidate `recommendTool` excludes
- * before measuring (`not-flat`, `no-feeds`) is reported here as excluded, with the reason, rather
- * than silently missing from the table.
+ * before measuring (`not-flat`, `no-feeds`, `broken`) is reported here as excluded, with the
+ * reason, rather than silently missing from the table.
  *
  * PURE, like `recommendTool`: it is handed the measurement seam and touches no Manifold itself.
  * That is what lets the rule be tested without wasm, and it is why the caller binds `measure` to
@@ -20,6 +20,7 @@
  */
 
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
+import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { LOST_DETAIL_RATIO, type LabelEngravability } from '@/workers/sim/engraveGeometry';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -123,19 +124,30 @@ function enabledItems(job: EngraveJob): { id: string; name: string; depth: numbe
  * `measureLabels(tl, toPartPlan(job), radius, job.edgeMargin, …)` bound to the candidate's radius.
  * It is called EXACTLY ONCE per candidate that reaches the measurement stage, and its rows are
  * captured here, so the table costs no more wasm than the recommendation already did.
+ *
+ * `conditions` is handed straight to `recommendTool` (#442) — the table's own columns are about
+ * reach, but which cutters are in the table at all is the recommendation's answer, and a broken
+ * cutter has to be excluded in both places or the two would disagree about the bench.
  */
 export function reachabilityFor(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
   measure: (key: string) => LabelEngravability[],
+  conditions?: ReadonlyMap<string, ConditionSummary> | null,
 ): Reachability {
   const measured = new Map<string, LabelEngravability[]>();
-  const recommendation = recommendTool(job, tools, catalogue, (key) => {
-    const rows = measure(key);
-    measured.set(key, rows);
-    return rows;
-  });
+  const recommendation = recommendTool(
+    job,
+    tools,
+    catalogue,
+    (key) => {
+      const rows = measure(key);
+      measured.set(key, rows);
+      return rows;
+    },
+    conditions,
+  );
 
   const items = enabledItems(job);
 
@@ -250,6 +262,7 @@ export interface ReachTableRow {
 function exclusionWords(excluded: ToolCandidate['excluded'] | null): string | null {
   if (excluded === 'not-flat') return 'not a flat end mill (or a V-bit on a job with regions)';
   if (excluded === 'no-feeds') return 'no cutting parameters for this material';
+  if (excluded === 'broken') return 'every copy of it is marked broken';
   return null;
 }
 

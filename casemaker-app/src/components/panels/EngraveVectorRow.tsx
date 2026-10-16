@@ -1,4 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
+import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { VectorPatch } from '@/store/engraveJobStore';
 import type { EngraveVectorShape } from '@/types/engraveJob';
@@ -22,15 +24,6 @@ const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, 
 const INVALID: CSSProperties = { borderColor: '#7a2828', color: '#f0b4ad' };
 const ROW_INLINE: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 4 };
 const FIELD_LABEL: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa4b0' };
-const TAG: CSSProperties = {
-  fontSize: 10,
-  color: '#9aa4b0',
-  border: '1px solid #2a2f36',
-  borderRadius: 3,
-  padding: '1px 4px',
-  whiteSpace: 'nowrap',
-};
-
 const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a' };
 
 export interface EngraveVectorRowProps {
@@ -77,20 +70,27 @@ export function EngraveVectorRow({
   );
 
   return (
-    <div
-      data-testid={`engrave-vector-row-${index}`}
-      style={{ border: '1px solid #2a2f36', borderRadius: 4, padding: 6, marginBottom: 6 }}
+    // #411 — the collapsed line. An imported outline's IDENTITY is `sourceName` (the file it came
+    // from): `name` is optional and usually empty, so a row named by `name` would read as blank on
+    // a list of four imported files.
+    <EngraveItemRow
+      id={shape.id}
+      prefix="engrave-vector"
+      index={index}
+      glyph="◫"
+      kindWord="Imported outline"
+      name={shape.name?.trim() ? shape.name : shape.sourceName}
+      summary={rowSummary(shape.depth)}
+      enabled={shape.enabled}
+      enabledTitle="A disabled outline is kept in the job but not cut."
+      removeTitle="Remove this outline."
+      removeNoun="imported outline"
+      findings={findings}
+      onToggleEnabled={(enabled) => onChange({ enabled })}
+      onRemove={onRemove}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <input
-          type="checkbox"
-          checked={shape.enabled}
-          data-testid={`engrave-vector-enabled-${index}`}
-          aria-label={`Imported outline ${index + 1} enabled`}
-          title="A disabled outline is kept in the job but not cut."
-          onChange={(e) => onChange({ enabled: e.target.checked })}
-        />
-        <span style={TAG}>Imported outline</span>
+      <label style={ROW_INLINE}>
+        <span>name</span>
         <input
           type="text"
           value={shape.name ?? ''}
@@ -101,16 +101,7 @@ export function EngraveVectorRow({
           style={{ flex: 1, minWidth: 0 }}
           onChange={(e) => onChange({ name: e.target.value || undefined })}
         />
-        <button
-          type="button"
-          data-testid={`engrave-vector-remove-${index}`}
-          aria-label={`Remove imported outline ${index + 1}`}
-          title="Remove this outline."
-          onClick={onRemove}
-        >
-          🗑
-        </button>
-      </div>
+      </label>
 
       <p style={MUTED} data-testid={`engrave-vector-source-${index}`}>
         {shape.sourceName} · {shape.width} × {shape.height} mm — the size was set at import; remove
@@ -180,16 +171,6 @@ export function EngraveVectorRow({
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-vector-maxdepth-${index}`}>
         Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
       </p>
-
-      {findings.map((f, i) => (
-        <p
-          key={`${f.code}-${i}`}
-          data-testid={`engrave-vector-finding-${index}-${f.code}`}
-          style={{ ...MUTED, color: SEVERITY_COLOR[f.severity] }}
-        >
-          {f.message}
-        </p>
-      ))}
-    </div>
+    </EngraveItemRow>
   );
 }

@@ -37,6 +37,7 @@ import { sacrificialBoxes, type SacrificialBox } from '@/engine/cnc/sacrificial'
 import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { toolForJob } from '@/engine/cnc/toolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { recommendTool, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
@@ -169,6 +170,10 @@ export interface EngravePreviewer {
    * `margins` is the job's depth thresholds as the main thread resolved them (#345), handed in for
    * the same reason again: reading them here would need `useSettingsStore`, and a preview drawn to
    * a different margin than the run uses would show a void floor the verifier does not enforce.
+   *
+   * `conditions` is the inventory's condition summaries by registry key (#442), handed in for the
+   * same reason a fourth time: `toolCondition`'s map lives on the main thread, so the recommendation
+   * below would see a bench with no cutter marked worn or broken at all.
    */
   engravePreview(
     job: EngraveJob,
@@ -176,6 +181,7 @@ export interface EngravePreviewer {
     catalogue: readonly FeedCatalogueRow[],
     gen: number,
     margins: EngraveMargins,
+    conditions: ReadonlyMap<string, ConditionSummary>,
   ): EngravePreview | null;
 }
 
@@ -251,6 +257,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     catalogue: readonly FeedCatalogueRow[],
     gen: number,
     margins: EngraveMargins,
+    conditions: ReadonlyMap<string, ConditionSummary>,
   ): EngravePreview | null => {
     if (gen < latestGen) return null;
     latestGen = gen;
@@ -373,12 +380,19 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // the user cannot choose. With the built-ins alone that is two cutters, so the "early stop
     // for long lists" rule (measure in ascending diameter, stop after the first failure that
     // follows a pass) does not apply yet: until the list is long, measure them all.
-    const recommendation = recommendTool(job, tools, catalogue, (key) => {
-      const entry = tools.find((e) => e.key === key);
-      if (!entry) return [];
-      const r = cuttingRadiusForSweep(entry.tool);
-      return r.ok ? measureLabels(tl, plan, r.radius, job.edgeMargin, perChar) : [];
-    });
+    const recommendation = recommendTool(
+      job,
+      tools,
+      catalogue,
+      (key) => {
+        const entry = tools.find((e) => e.key === key);
+        if (!entry) return [];
+        const r = cuttingRadiusForSweep(entry.tool);
+        return r.ok ? measureLabels(tl, plan, r.radius, job.edgeMargin, perChar) : [];
+      },
+      // #442 — the bench's own condition summaries, sent with the job because this realm has none.
+      conditions,
+    );
 
     return {
       stock: stockMesh,

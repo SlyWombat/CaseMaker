@@ -169,6 +169,16 @@ export function conditionForKey(key: string): ConditionSummary | null {
   return summaries.get(key) ?? null;
 }
 
+/**
+ * Every summary, keyed by registry key, as plain data (#442) — the table `recommendTool` is HANDED,
+ * the way it is handed `tools` and Makera's feed rows (#305/#324). It has to be handed for the same
+ * reason: the tool choice runs inside the sim worker, where this module's map is empty, so a lookup
+ * made there would quietly answer "no condition known" for every cutter on the bench.
+ */
+export function inventoryConditions(): ReadonlyMap<string, ConditionSummary> {
+  return new Map(summaries);
+}
+
 /** Test seam. */
 export function resetInventoryConditions(): void {
   summaries = new Map();

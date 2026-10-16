@@ -1,4 +1,6 @@
 import { useState, type CSSProperties, type JSX } from 'react';
+import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { ShapePatch } from '@/store/engraveJobStore';
 import type { EngraveShape } from '@/types/engraveJob';
@@ -16,6 +18,9 @@ import type { Mm } from '@/types/units';
  * The polygon editor keeps its text LOCAL and only commits points that parse to 3–500 of them:
  * a half-typed ring must never reach the job, or the schema would reject the whole document on
  * the next load.
+ *
+ * #411 changed only the row's OUTER shape: `EngraveItemRow` owns the one-line head and draws the
+ * editor below it while the row is open. The fields are the ones they were, moved one level in.
  */
 
 const NUM: CSSProperties = { width: 60 };
@@ -23,14 +28,6 @@ const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, 
 const INVALID: CSSProperties = { borderColor: '#7a2828', color: '#f0b4ad' };
 const ROW_INLINE: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 4 };
 const FIELD_LABEL: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa4b0' };
-const TAG: CSSProperties = {
-  fontSize: 10,
-  color: '#9aa4b0',
-  border: '1px solid #2a2f36',
-  borderRadius: 3,
-  padding: '1px 4px',
-  whiteSpace: 'nowrap',
-};
 const POINTS: CSSProperties = {
   width: '100%',
   minHeight: 54,
@@ -46,6 +43,17 @@ const KIND_LABEL: Record<EngraveShape['kind'], string> = {
   circle: 'Circle',
   slot: 'Slot',
   polygon: 'Polygon',
+};
+
+/**
+ * The one-glyph-per-kind column of the collapsed line (#411). The design's own mockup draws ▭ for a
+ * face and ▢ for a pocket; the rest follow it, and a shape reads as itself rather than as "Shape".
+ */
+const KIND_GLYPH: Record<EngraveShape['kind'], string> = {
+  rect: '▭',
+  circle: '◯',
+  slot: '▬',
+  polygon: '⬠',
 };
 
 /** The numeric fields a row can edit, across all kinds. */
@@ -135,20 +143,29 @@ export function EngraveShapeRow({
   );
 
   return (
-    <div
-      data-testid={`engrave-shape-row-${index}`}
-      style={{ border: '1px solid #2a2f36', borderRadius: 4, padding: 6, marginBottom: 6 }}
+    // #411 — one line per shape: remove, show/hide, chevron, the kind's own glyph, the name (or the
+    // kind's word when it has none) and the depth; the editor below opens on the chevron.
+    <EngraveItemRow
+      id={shape.id}
+      prefix="engrave-shape"
+      index={index}
+      glyph={KIND_GLYPH[shape.kind]}
+      kindWord={KIND_LABEL[shape.kind]}
+      name={shape.name?.trim() ? shape.name : KIND_LABEL[shape.kind]}
+      summary={rowSummary(shape.depth)}
+      enabled={shape.enabled}
+      enabledTitle="A disabled shape is kept in the job but not cut."
+      removeTitle="Remove this shape."
+      removeNoun="shape"
+      findings={findings}
+      onToggleEnabled={(enabled) => onChange({ enabled })}
+      onRemove={onRemove}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <input
-          type="checkbox"
-          checked={shape.enabled}
-          data-testid={`engrave-shape-enabled-${index}`}
-          aria-label={`Shape ${index + 1} enabled`}
-          title="A disabled shape is kept in the job but not cut."
-          onChange={(e) => onChange({ enabled: e.target.checked })}
-        />
-        <span style={TAG}>{KIND_LABEL[shape.kind]}</span>
+      {/* The optional name lives in the editor rather than on the line: the line has no room for a
+          text field beside the two controls and the summary, and a name nobody has set should read
+          as the kind ("Circle"), not as an empty box. */}
+      <label style={ROW_INLINE}>
+        <span>name</span>
         <input
           type="text"
           value={shape.name ?? ''}
@@ -159,16 +176,7 @@ export function EngraveShapeRow({
           style={{ flex: 1, minWidth: 0 }}
           onChange={(e) => onChange({ name: e.target.value || undefined })}
         />
-        <button
-          type="button"
-          data-testid={`engrave-shape-remove-${index}`}
-          aria-label={`Remove shape ${index + 1}`}
-          title="Remove this shape."
-          onClick={onRemove}
-        >
-          🗑
-        </button>
-      </div>
+      </label>
 
       <div style={ROW_INLINE}>
         {shape.kind === 'rect' && (
@@ -269,16 +277,6 @@ export function EngraveShapeRow({
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-shape-maxdepth-${index}`}>
         Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
       </p>
-
-      {findings.map((f, i) => (
-        <p
-          key={`${f.code}-${i}`}
-          data-testid={`engrave-shape-finding-${index}-${f.code}`}
-          style={{ ...MUTED, color: SEVERITY_COLOR[f.severity] }}
-        >
-          {f.message}
-        </p>
-      ))}
-    </div>
+    </EngraveItemRow>
   );
 }

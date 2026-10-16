@@ -15,7 +15,13 @@ import {
   traceSelfOverlapFindings,
   type JawReach,
 } from '@/engine/cnc/engrave/partPlan';
-import type { EngraveAnyItem, EngraveDrill, EngraveJob, EngraveTraceItem } from '@/types/engraveJob';
+import type {
+  EngraveAnyItem,
+  EngraveDrill,
+  EngraveJob,
+  EngraveKeepOut,
+  EngraveTraceItem,
+} from '@/types/engraveJob';
 
 /**
  * The two pure derivations that turn an `EngraveJob` into the emulator's inputs (#200).
@@ -122,6 +128,69 @@ export function itemLabel(item: EngraveAnyItem): string {
     case 'vector':
       return `Imported vector${name} "${item.sourceName}" ${item.width}×${item.height}`;
   }
+}
+
+/**
+ * Every item the panel's one-line list draws (#411), which is wider than `EngraveAnyItem`: the
+ * traces, the drills and the under-surface voids each have a line of their own there even though a
+ * combined shape cannot reference one.
+ */
+export type EngraveNamedItem = EngraveAnyItem | EngraveTraceItem | EngraveDrill | EngraveKeepOut;
+
+/**
+ * The KIND in a word — "Rectangle", "Cut-away", "Single-line text", "Hole array" (#411).
+ *
+ * One copy, because two sentences now name an item's kind: the collapsed line that draws it and the
+ * undo strip that says what was removed. Two maps would let the row say "Cut-away" and the strip
+ * "Cutaway" about the same thing, and the panel has no other reason for a second opinion.
+ *
+ * `itemLabel` is the fuller sentence (`Rectangle "Face" 20×10`) for a finding message, where there is
+ * room for the dimensions; this is the two words a list line has room for. A VOID answers with its
+ * footprint's word here — the word "void" is the panel's, said once on the row's own tooltip.
+ */
+export function itemKindWord(item: EngraveNamedItem): string {
+  if (!('kind' in item)) return 'Label';
+  switch (item.kind) {
+    case 'rect':
+      return 'Rectangle';
+    case 'circle':
+      return 'Circle';
+    case 'slot':
+      return 'Slot';
+    case 'polygon':
+      return 'Polygon';
+    case 'border':
+      return 'Border';
+    case 'frame':
+      return 'Frame';
+    case 'cutaway':
+      return 'Cut-away';
+    case 'vector':
+      return 'Imported outline';
+    case 'line':
+      return 'Line';
+    case 'stroke-label':
+      return 'Single-line text';
+    case 'drill':
+      return 'Hole';
+    case 'drill-array':
+      return 'Hole array';
+  }
+}
+
+/**
+ * The item's own name, trimmed, or `''` when it has none — the caller decides what to draw instead
+ * (`itemKindWord`, or the label row's "(empty label)"), because a collapsed line and an undo strip
+ * are two different sentences and "Rectangle Rectangle" is what a helper that guessed would print.
+ *
+ * A LABEL is named by its text: it has no `name` field at all, and its text is what the line reads.
+ * A VECTOR falls back to `sourceName`, the file it came from, because its outline IS the imported
+ * file — the same reason the vector row names it that way.
+ */
+export function itemRowName(item: EngraveNamedItem): string {
+  if (!('kind' in item)) return item.text.trim();
+  if (item.kind === 'vector') return item.name?.trim() || item.sourceName;
+  return item.name?.trim() ?? '';
 }
 
 /** Does this item produce any region at all? A shape always does; a label needs text. */

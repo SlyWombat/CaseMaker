@@ -19,6 +19,7 @@ import { getTools } from '@/engine/cnc/toolRegistry';
 import { feedCatalogueRows } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { inventoryConditions, type ConditionSummary } from '@/engine/cnc/toolCondition';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useSettingsStore } from './settingsStore';
@@ -32,6 +33,8 @@ export type EngravePreviewClient = {
     catalogue: readonly FeedCatalogueRow[],
     gen: number,
     margins: EngraveMargins,
+    /** The inventory's condition summaries by registry key (#442) — see `run` for why it is read here. */
+    conditions: ReadonlyMap<string, ConditionSummary>,
   ) => Promise<EngravePreview | null>;
 };
 
@@ -78,12 +81,16 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set) => {
       // The job's depth thresholds, resolved HERE (#345) for the same reason the registry snapshot
       // is read here: the worker cannot see `useSettingsStore`, and a preview drawn to a different
       // margin than the run will use would show a void floor the verifier does not enforce.
+      // The inventory's condition summaries go the same way as the registry snapshot (#442): the
+      // worker has no copy of `toolCondition`'s map, so the recommendation that skips broken cutters
+      // and notes a worn one would otherwise answer for a bench with no conditions set.
       const preview = await client.engravePreview(
         job,
         getTools(),
         feedCatalogueRows(),
         mine,
         effectiveMargins(job, useSettingsStore.getState().margins),
+        inventoryConditions(),
       );
       if (mine !== seq) return; // superseded by a newer request
       // `preview === null` means the worker saw a newer generation already; keep the last one.

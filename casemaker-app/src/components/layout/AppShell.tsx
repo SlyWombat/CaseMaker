@@ -12,6 +12,9 @@ import { Viewport } from '@/components/viewport/Viewport';
 import { ManageMode } from '@/components/manage/ManageMode';
 import { useRebuildOnProjectChange } from '@/hooks/useRebuildOnProjectChange';
 import { undoProject, redoProject, useProjectStore } from '@/store/projectStore';
+// Static rather than lazy: `EngravePanel` imports this store from `ContextPanel`, which is in the
+// eager bundle already, so reaching for it here costs nothing and the shortcut needs it at keypress.
+import { undoEngraveRemoval } from '@/store/engraveJobStore';
 import { useStartWizardStore } from '@/store/startWizardStore';
 import { useManageModeStore } from '@/store/manageModeStore';
 
@@ -22,7 +25,10 @@ function useUndoRedoShortcuts(): void {
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
         e.preventDefault();
-        undoProject();
+        // #411: a pending engrave removal outranks the project's undo — the person's last press was
+        // a `✕` on an item, and Ctrl-Z has to take that back. Empty stack, the key is the project's
+        // again (the precedence rule and its reasoning live in `undoEngraveRemoval`).
+        if (!undoEngraveRemoval()) undoProject();
       } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
         e.preventDefault();
         redoProject();

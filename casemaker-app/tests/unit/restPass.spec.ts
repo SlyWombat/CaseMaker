@@ -102,7 +102,7 @@ function tableOf(rows: { key: string; diameter: number; share: number }[]): Reac
       qualifies: true,
     })),
     items: [],
-    recommendation: { key: null, compromise: false, reason: 'built by hand', candidates: [] },
+    recommendation: { key: null, compromise: false, reason: 'built by hand', conditionNote: null, candidates: [] },
     totalShare: new Map(rows.map((r) => [r.key, r.share])),
   };
 }

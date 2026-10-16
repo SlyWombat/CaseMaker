@@ -12,6 +12,7 @@ import type { MachineCalibration, Setup } from '@/engine/cnc';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
+import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
@@ -183,10 +184,11 @@ export const simPath = (): Promise<SimPath> => getSimApi().simPath();
  * vise jaws. `null` when `gen` is older than one the worker has already answered; mesh buffers
  * are transferred. Independent of any loaded simulation program.
  *
- * `tools` is the resolved registry snapshot (#305), `catalogue` the Makera feed rows (#324) and
- * `margins` the job's depth thresholds (#345): the worker cannot read the app's module state, so
- * the list it resolves and recommends from — and the rows that recommendation filters on, and the
- * margins its void limits are drawn to — are all sent with the job. Plain data, like the `Tool`
+ * `tools` is the resolved registry snapshot (#305), `catalogue` the Makera feed rows (#324),
+ * `margins` the job's depth thresholds (#345) and `conditions` the inventory's condition summaries
+ * (#442): the worker cannot read the app's module state, so the list it resolves and recommends
+ * from — and the rows that recommendation filters on, the margins its void limits are drawn to, and
+ * the broken and worn copies it passes over — are all sent with the job. Plain data, like the `Tool`
  * `simLoad` takes.
  */
 export const engravePreview = (
@@ -195,7 +197,9 @@ export const engravePreview = (
   catalogue: readonly FeedCatalogueRow[],
   gen: number,
   margins: EngraveMargins,
-): Promise<EngravePreview | null> => getSimApi().engravePreview(job, tools, catalogue, gen, margins);
+  conditions: ReadonlyMap<string, ConditionSummary>,
+): Promise<EngravePreview | null> =>
+  getSimApi().engravePreview(job, tools, catalogue, gen, margins, conditions);
 
 /**
  * Generate → verify, headless, in the sim worker (#206). Returns the exact `.nc` text and the

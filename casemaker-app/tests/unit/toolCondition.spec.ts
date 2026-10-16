@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   conditionForKey,
   conditionRank,
+  inventoryConditions,
   itemConditionSummary,
   resetInventoryConditions,
   runtimeWarning,
@@ -111,6 +112,28 @@ describe('#415 condition for tool choice', () => {
     setInventoryConditions([{ id: 'x', quantity: 1, copies: [copy('a', 'broken')] }], (id) => `inv:${id}`);
     expect(conditionForKey('inv:x')?.usable).toBe(0);
     expect(conditionForKey('cat:1')).toBeNull();
+  });
+
+  // #442 — the same table as PLAIN DATA, for the sim worker: the tool choice runs over there, where
+  // this module's map is empty, so the recommendation has to be handed the bench's conditions. If the
+  // snapshot ever diverged from `conditionForKey`, the worker would skip a different set of cutters
+  // than the panel's own picker names.
+  it('hands the whole table across the worker boundary, as a copy the caller cannot write back into', () => {
+    setInventoryConditions(
+      [
+        { id: 'x', quantity: 1, copies: [copy('a', 'broken')] },
+        { id: 'y', quantity: 2, copies: [copy('a', 'worn')] },
+      ],
+      (id) => `inv:${id}`,
+    );
+    const snapshot = inventoryConditions();
+    expect([...snapshot.keys()].sort()).toEqual(['inv:x', 'inv:y']);
+    expect(snapshot.get('inv:x')).toEqual(conditionForKey('inv:x'));
+    expect(snapshot.get('inv:y')).toEqual(conditionForKey('inv:y'));
+    expect(snapshot.get('cat:1')).toBeUndefined();
+    // A copy, not the module's own map: a worker that mutated what it was sent cannot reach back in.
+    (snapshot as Map<string, unknown>).set('inv:x', 'clobbered');
+    expect(conditionForKey('inv:x')?.usable).toBe(0);
   });
 });
 

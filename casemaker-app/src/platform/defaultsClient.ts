@@ -203,6 +203,13 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // ── #451 (end)
   'sim.columnFlatPitchYMm': { label: 'flat simulation grid Y pitch (chosen)', unit: 'mm', rule: z.number().min(0.05).max(0.5), fallback: 0.1 },
   // ── #438 (end)
+  // ── #451 new-item starting depths (begin) — where an item the panel just added begins. CHOSEN,
+  // not measured: nobody measured what depth a new item should start at, and the person who asked
+  // for it is about to set the number that matters. Read by `engraveJobStore` (its `newItemDepthMm`
+  // / `newDrillDepthMm`, which the panel's outline import also goes through), once per add.
+  'engrave.newItemDepthMm': { label: 'depth a new item starts at (chosen)', unit: 'mm', rule: z.number().min(0.05).max(20), fallback: 0.5 },
+  'engrave.newDrillDepthMm': { label: 'depth a new hole starts at (chosen)', unit: 'mm', rule: z.number().min(0.05).max(20), fallback: 1.0 },
+  // ── #451 new-item starting depths (end)
   // ── #421 (begin) — the run plan's phase times (§5.8). Two were TIMED in the 2026-10-15 console
   // trace and are seeded `measured` with a note (`defaults.rs`'s MEASURED_SEEDS): `$H` and `M491`. The
   // rest are chosen — the touch time too: its series came from a console script, not the app runner. Each fallback is its seed. The remount and re-registration

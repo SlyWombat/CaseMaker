@@ -1,4 +1,6 @@
 import { useState, type CSSProperties, type JSX } from 'react';
+import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { rowSummary } from '@/components/panels/engraveRowText';
 import { STROKE_FONTS } from '@/engine/fonts/stroke/strokeFont';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { TracePatch } from '@/store/engraveJobStore';
@@ -24,14 +26,6 @@ const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, 
 const INVALID: CSSProperties = { borderColor: '#7a2828', color: '#f0b4ad' };
 const ROW_INLINE: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 4 };
 const FIELD_LABEL: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa4b0' };
-const TAG: CSSProperties = {
-  fontSize: 10,
-  color: '#9aa4b0',
-  border: '1px solid #2a2f36',
-  borderRadius: 3,
-  padding: '1px 4px',
-  whiteSpace: 'nowrap',
-};
 const POINTS: CSSProperties = {
   width: '100%',
   minHeight: 54,
@@ -132,20 +126,26 @@ export function EngraveTraceRow({
   );
 
   return (
-    <div
-      data-testid={`engrave-trace-row-${index}`}
-      style={{ border: '1px solid #2a2f36', borderRadius: 4, padding: 6, marginBottom: 6 }}
+    // #411 — the collapsed line. A trace's kind is its glyph on the line and its word in the
+    // tooltip, so "Line" and "Single-line text" stay distinguishable while both read as one line.
+    <EngraveItemRow
+      id={trace.id}
+      prefix="engrave-trace"
+      index={index}
+      glyph={trace.kind === 'line' ? '∿' : '𝑡'}
+      kindWord={kindLabel}
+      name={trace.name?.trim() ? trace.name : kindLabel}
+      summary={rowSummary(trace.depth)}
+      enabled={trace.enabled}
+      enabledTitle="A disabled trace is kept in the job but not cut."
+      removeTitle="Remove this trace."
+      removeNoun="trace"
+      findings={findings}
+      onToggleEnabled={(enabled) => onChange({ enabled })}
+      onRemove={onRemove}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <input
-          type="checkbox"
-          checked={trace.enabled}
-          data-testid={`engrave-trace-enabled-${index}`}
-          aria-label={`${kindLabel} ${index + 1} enabled`}
-          title="A disabled trace is kept in the job but not cut."
-          onChange={(e) => onChange({ enabled: e.target.checked })}
-        />
-        <span style={TAG}>{kindLabel}</span>
+      <label style={ROW_INLINE}>
+        <span>name</span>
         <input
           type="text"
           value={trace.name ?? ''}
@@ -156,16 +156,7 @@ export function EngraveTraceRow({
           style={{ flex: 1, minWidth: 0 }}
           onChange={(e) => onChange({ name: e.target.value || undefined })}
         />
-        <button
-          type="button"
-          data-testid={`engrave-trace-remove-${index}`}
-          aria-label={`Remove ${kindLabel} ${index + 1}`}
-          title="Remove this trace."
-          onClick={onRemove}
-        >
-          🗑
-        </button>
-      </div>
+      </label>
 
       {trace.kind === 'line' && (
         <label style={{ display: 'block', marginTop: 4 }}>
@@ -301,16 +292,6 @@ export function EngraveTraceRow({
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-trace-maxdepth-${index}`}>
         Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
       </p>
-
-      {findings.map((f, i) => (
-        <p
-          key={`${f.code}-${i}`}
-          data-testid={`engrave-trace-finding-${index}-${f.code}`}
-          style={{ ...MUTED, color: SEVERITY_COLOR[f.severity] }}
-        >
-          {f.message}
-        </p>
-      ))}
-    </div>
+    </EngraveItemRow>
   );
 }

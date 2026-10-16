@@ -1,4 +1,6 @@
 import { useState, type CSSProperties, type JSX } from 'react';
+import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { rowSummary } from '@/components/panels/engraveRowText';
 import type { VoidLimitParts } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { KeepOutPatch } from '@/store/engraveJobStore';
@@ -32,6 +34,12 @@ import type { Mm } from '@/types/units';
  * The polygon editor keeps its text LOCAL and commits only a ring of 3–500 valid points, exactly
  * as the shape row does: a half-typed ring must never reach the job, or the schema would reject
  * the whole document on the next load.
+ *
+ * #411 changed only the row's OUTER shape, and ONE thing about the number on it: the collapsed line
+ * has room for one figure, and for a void that figure is the ceiling — so the line prints it with
+ * the datum it is measured from (`3 mm ↑`, up from the BOTTOM face), because a bare "3 mm" beside
+ * the depths on every other line is the one reading that is wrong by the whole thickness. The
+ * editor still carries the full field and its sentence.
  */
 
 const NUM: CSSProperties = { width: 60 };
@@ -39,14 +47,6 @@ const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, 
 const INVALID: CSSProperties = { borderColor: '#7a2828', color: '#f0b4ad' };
 const ROW_INLINE: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 4 };
 const FIELD_LABEL: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa4b0' };
-const TAG: CSSProperties = {
-  fontSize: 10,
-  color: '#9aa4b0',
-  border: '1px solid #2a2f36',
-  borderRadius: 3,
-  padding: '1px 4px',
-  whiteSpace: 'nowrap',
-};
 const POINTS: CSSProperties = {
   width: '100%',
   minHeight: 54,
@@ -181,20 +181,28 @@ export function EngraveKeepOutRow({
   );
 
   return (
-    <div
-      data-testid={`engrave-keepout-row-${index}`}
-      style={{ border: '1px solid #2a2f36', borderRadius: 4, padding: 6, marginBottom: 6 }}
+    // #411 — the collapsed line, and the editor below it. A void has no name of its own, so an
+    // unnamed one reads its kind ("Rectangle") rather than as an empty field.
+    <EngraveItemRow
+      id={keepOut.id}
+      prefix="engrave-keepout"
+      index={index}
+      glyph="▤"
+      kindWord={`Void · ${KIND_LABEL[keepOut.kind]}`}
+      name={keepOut.name?.trim() ? keepOut.name : KIND_LABEL[keepOut.kind]}
+      // The datum is part of the number here: every other row's figure is a depth below the
+      // engraved face, and a void's ceiling is measured up from the bottom one.
+      summary={`${rowSummary(keepOut.zCeiling)} ↑`}
+      enabled={keepOut.enabled}
+      enabledTitle="A disabled void reserves nothing: the depth limit ignores it, as if it were not there. The blank has not changed."
+      removeTitle="Remove this void. The blank still has it — only the job forgets."
+      removeNoun="void"
+      findings={findings}
+      onToggleEnabled={(enabled) => onChange({ enabled })}
+      onRemove={onRemove}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <input
-          type="checkbox"
-          checked={keepOut.enabled}
-          data-testid={`engrave-keepout-enabled-${index}`}
-          aria-label={`Void ${index + 1} enabled`}
-          title="A disabled void reserves nothing: the depth limit ignores it, as if it were not there. The blank has not changed."
-          onChange={(e) => onChange({ enabled: e.target.checked })}
-        />
-        <span style={TAG}>{KIND_LABEL[keepOut.kind]}</span>
+      <label style={ROW_INLINE}>
+        <span>name</span>
         <input
           type="text"
           value={keepOut.name ?? ''}
@@ -205,16 +213,7 @@ export function EngraveKeepOutRow({
           style={{ flex: 1, minWidth: 0 }}
           onChange={(e) => onChange({ name: e.target.value || undefined })}
         />
-        <button
-          type="button"
-          data-testid={`engrave-keepout-remove-${index}`}
-          aria-label={`Remove void ${index + 1}`}
-          title="Remove this void. The blank still has it — only the job forgets."
-          onClick={onRemove}
-        >
-          🗑
-        </button>
-      </div>
+      </label>
 
       <div style={ROW_INLINE}>
         {keepOut.kind === 'rect' && (
@@ -299,16 +298,6 @@ export function EngraveKeepOutRow({
           ? `A ceiling of ${keepOut.zCeiling} mm is not inside a ${thickness} mm blank — the void reaches the engraving face, so no cut over it can keep the minimum floor.`
           : `Leaves ${depth.membrane.toFixed(2)} mm of material above it${byLayerGrid ? ' as designed' : ''}: a cut over this void may go ${depth.limit.toFixed(2)} mm deep — ${limitWords}.`}
       </p>
-
-      {findings.map((f, i) => (
-        <p
-          key={`${f.code}-${i}`}
-          data-testid={`engrave-keepout-finding-${index}-${f.code}`}
-          style={{ ...MUTED, color: SEVERITY_COLOR[f.severity] }}
-        >
-          {f.message}
-        </p>
-      ))}
-    </div>
+    </EngraveItemRow>
   );
 }

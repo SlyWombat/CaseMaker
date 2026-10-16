@@ -750,6 +750,152 @@ body, html, #root {
   padding: 4px 0 6px 22px;
   font-size: 11px;
 }
+
+/* Issue #411 — the engrave panel's item list: one line per item, remove at the FRONT beside
+   show/hide, and the editor folded away behind the chevron. The maintainer reported the list as
+   "very cluttered", asked that objects "be easily collapsed to a single line", and then reported
+   that remove "wraps far away" from the name.
+
+   `nowrap` on the head plus `min-width: 0` and an ellipsis on the name is what makes "remove must
+   never wrap away from the item's name" a property of the arrangement rather than a matter of how
+   long a particular name happens to be: the name is the only thing on the line that gives up width,
+   and everything in front of it and after it is shrink-proof. */
+.engrave-item-row {
+  border: 1px solid #2a2f36;
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+}
+/* Kept and drawn, cut by nothing — the row says so by looking switched off. */
+.engrave-item-row--hidden {
+  opacity: 0.55;
+}
+.engrave-item-row__head {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+.engrave-item-row__remove,
+.engrave-item-row__show,
+.engrave-item-row__summary,
+.engrave-item-row__warn {
+  flex: 0 0 auto;
+}
+.engrave-item-row__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  cursor: pointer;
+  color: var(--cm-color-on-surface-muted);
+  font-size: 12px;
+  line-height: 1;
+}
+.engrave-item-row__remove:hover {
+  color: #f0b4ad;
+}
+.engrave-item-row__show {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+}
+.engrave-item-row__expand {
+  /* The row's own line is the only flexible thing in it, so the chevron, glyph and name stay
+     beside the two controls at the front at every rail width. */
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: #cbd5e1;
+  font-size: 12px;
+  cursor: pointer;
+}
+.engrave-item-row__expand:hover {
+  color: #fff;
+}
+.engrave-item-row__caret,
+.engrave-item-row__glyph {
+  flex: 0 0 auto;
+}
+.engrave-item-row__glyph {
+  color: var(--cm-color-on-surface-muted);
+}
+.engrave-item-row__name {
+  flex: 1 1 auto;
+  /* The one thing on the line that gives up width — see the block comment above. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.engrave-item-row__summary {
+  color: var(--cm-color-on-surface-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.engrave-item-row__warn {
+  color: #e0c07a;
+  cursor: help;
+}
+/* An error is not a warning: it is the reason Generate refuses, so the row's ⚠ takes the red the
+   field findings use. The sentences themselves are inside the body — see `__finding` below. */
+.engrave-item-row__warn--error {
+  color: #f0b4ad;
+}
+/* The sentences the ⚠ counts, drawn under the line it belongs to and only while the row is open:
+   the line stays ONE line whatever is wrong with the item (the maintainer's decision, #411). */
+.engrave-item-row__finding {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.engrave-item-row__finding--error {
+  color: #f0b4ad;
+}
+.engrave-item-row__finding--warning {
+  color: #e0c07a;
+}
+.engrave-item-row__body {
+  padding: 4px 0 2px 26px;
+  font-size: 11px;
+}
+/* A finger needs a target it can hit (#134, #411 review: the ✕ was ~12 px). On a touch layout the
+   row's head grows to 24 px to hold it; on the dense desktop rail it stays compact, which is what
+   the maintainer asked the list to be. 1024 is included because that is a tablet held sideways —
+   the tablet project's own landscape case. */
+@media (max-width: 1024px) {
+  .engrave-item-row__remove {
+    min-width: 24px;
+    min-height: 24px;
+    margin: -2px 0;
+  }
+}
+/* #411 — the undo strip a removal leaves at its own site. It sits in the list's flow (it pushes
+   the rows down for as long as it lives) rather than floating over them, so "which list did that
+   come out of" is answered by position and not by reading the sentence. */
+.engrave-undo-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 4px;
+  padding: 3px 6px;
+  border-left: 2px solid var(--cm-color-primary);
+  font-size: 11px;
+  color: var(--cm-color-on-surface-variant);
+}
+.engrave-undo-strip button {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 1px 6px;
+}
 .port-coord-grid {
   display: grid;
   /* minmax(0, 1fr) is the critical part — prevents number inputs' default
@@ -1902,6 +2048,23 @@ button:disabled {
   box-sizing: border-box;
 }
 .labelled-field__hint-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Visually hidden, still announced (#411 review): a live region has to be in the DOM and EMPTY
+   before its text is written, so a status message cannot be a node that appears with its message
+   already in it. Clipped rather than `display: none` — that would take it out of the accessibility
+   tree and leave nothing to announce into. The same idiom as `.labelled-field__hint-sr` above,
+   under a name that says what it is rather than which field first needed it. */
+.sr-only {
   position: absolute;
   width: 1px;
   height: 1px;

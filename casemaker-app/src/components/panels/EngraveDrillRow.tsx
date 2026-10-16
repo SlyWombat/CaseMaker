@@ -1,4 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
+import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { DrillPatch } from '@/store/engraveJobStore';
 import type { EngraveDrill } from '@/types/engraveJob';
@@ -15,6 +17,10 @@ import type { EngraveDrill } from '@/types/engraveJob';
  * `count` fields commit only whole numbers ≥ 1, because the schema refuses a fractional count
  * outright (a silently floored lattice is not what the user typed) and a bad value would make the
  * whole job unloadable. `pitch` is any positive number.
+ *
+ * #411 changed only the row's OUTER shape: `EngraveItemRow` owns the one-line head — where the
+ * kind used to be a `TAG` span beside a full-width name field, it is now the glyph `⌖` and, for an
+ * unnamed hole, the word "Hole" — and draws the editor below while the row is open.
  */
 
 const NUM: CSSProperties = { width: 60 };
@@ -22,14 +28,6 @@ const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, 
 const INVALID: CSSProperties = { borderColor: '#7a2828', color: '#f0b4ad' };
 const ROW_INLINE: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 4 };
 const FIELD_LABEL: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa4b0' };
-const TAG: CSSProperties = {
-  fontSize: 10,
-  color: '#9aa4b0',
-  border: '1px solid #2a2f36',
-  borderRadius: 3,
-  padding: '1px 4px',
-  whiteSpace: 'nowrap',
-};
 
 const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a' };
 
@@ -113,20 +111,27 @@ export function EngraveDrillRow({
   };
 
   return (
-    <div
-      data-testid={`engrave-drill-row-${index}`}
-      style={{ border: '1px solid #2a2f36', borderRadius: 4, padding: 6, marginBottom: 6 }}
+    // #411 — the collapsed line, and the editor below it. The kind is the glyph `⌖` on the line and
+    // its word in the tooltip; a drilled hole has no name of its own, so an unnamed one reads "Hole"
+    // / "Hole array" rather than as a blank field, exactly as the shape rows read their kind.
+    <EngraveItemRow
+      id={drill.id}
+      prefix="engrave-drill"
+      index={index}
+      glyph="⌖"
+      kindWord={kindLabel}
+      name={drill.name?.trim() ? drill.name : kindLabel}
+      summary={rowSummary(drill.depth)}
+      enabled={drill.enabled}
+      enabledTitle="A disabled drill is kept in the job but not cut."
+      removeTitle="Remove this drill."
+      removeNoun={kindLabel}
+      findings={findings}
+      onToggleEnabled={(enabled) => onChange({ enabled })}
+      onRemove={onRemove}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <input
-          type="checkbox"
-          checked={drill.enabled}
-          data-testid={`engrave-drill-enabled-${index}`}
-          aria-label={`${kindLabel} ${index + 1} enabled`}
-          title="A disabled drill is kept in the job but not cut."
-          onChange={(e) => onChange({ enabled: e.target.checked })}
-        />
-        <span style={TAG}>{kindLabel}</span>
+      <label style={ROW_INLINE}>
+        <span>name</span>
         <input
           type="text"
           value={drill.name ?? ''}
@@ -137,16 +142,7 @@ export function EngraveDrillRow({
           style={{ flex: 1, minWidth: 0 }}
           onChange={(e) => onChange({ name: e.target.value || undefined })}
         />
-        <button
-          type="button"
-          data-testid={`engrave-drill-remove-${index}`}
-          aria-label={`Remove ${kindLabel} ${index + 1}`}
-          title="Remove this drill."
-          onClick={onRemove}
-        >
-          🗑
-        </button>
-      </div>
+      </label>
 
       <p style={MUTED}>
         The hole is exactly the cutter&rsquo;s diameter — for a bigger hole, add a circle pocket instead.
@@ -226,16 +222,6 @@ export function EngraveDrillRow({
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-drill-maxdepth-${index}`}>
         Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
       </p>
-
-      {findings.map((f, i) => (
-        <p
-          key={`${f.code}-${i}`}
-          data-testid={`engrave-drill-finding-${index}-${f.code}`}
-          style={{ ...MUTED, color: SEVERITY_COLOR[f.severity] }}
-        >
-          {f.message}
-        </p>
-      ))}
-    </div>
+    </EngraveItemRow>
   );
 }

@@ -1,8 +1,9 @@
 import { featureSim } from '@/platform/features';
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
-import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { newItemDepthMm, useEngraveJobStore } from '@/store/engraveJobStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
+import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
 import { useEngraveRunStore, requiredAckCodes, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
 import { canDriveMachine } from '@/platform/capabilities';
@@ -233,6 +234,22 @@ function allItems(job: EngraveJob): EngraveAnyItem[] {
   return [...job.labels, ...job.shapes, ...(job.combined ?? []), ...(job.vectors ?? [])];
 }
 
+/**
+ * Every id the ITEM list of §2 draws (#411), which is wider than `allItems`: a trace and a drill
+ * each have a line there even though no combined shape may reference one. The header's "expand all"
+ * has to open exactly the rows that are on screen, so it reads this rather than `allItems`.
+ */
+function itemRowIds(job: EngraveJob): string[] {
+  return [
+    ...job.labels.map((i) => i.id),
+    ...job.shapes.map((i) => i.id),
+    ...(job.combined ?? []).map((i) => i.id),
+    ...(job.traces ?? []).map((i) => i.id),
+    ...(job.drills ?? []).map((i) => i.id),
+    ...(job.vectors ?? []).map((i) => i.id),
+  ];
+}
+
 const ATTACH_METHODS: readonly { value: SacrificialUnder['attach']; label: string }[] = [
   { value: 'tape', label: 'tape' },
   { value: 'glue', label: 'glue' },
@@ -306,6 +323,94 @@ const OVERRIDE_FIELDS: readonly { key: keyof Omit<CutParams, 'air'>; label: stri
   { key: 'stepDown', label: 'step-down', unit: 'mm' },
   { key: 'stepOver', label: 'step-over', unit: 'mm' },
 ];
+
+/**
+ * A list header's fold controls (#411): "collapse all" folds every row of THAT list back to its one
+ * line, "expand all" opens the rows it is handed.
+ *
+ * They write to `engraveRowStore` and never to the job — how a list is folded is where the person
+ * left the panel, not a fact about the part (see that store's own note). Both are handed this
+ * list's own ids: the header of "Items" folds items, not the voids list above it (#411 review).
+ */
+function RowFolds({ testidPrefix, ids }: { testidPrefix: string; ids: readonly string[] }): JSX.Element {
+  const collapseAll = useEngraveRowStore((s) => s.collapseAll);
+  const expandAll = useEngraveRowStore((s) => s.expandAll);
+  return (
+    <span style={{ display: 'inline-flex', gap: 4, marginLeft: 6, verticalAlign: 'middle' }}>
+      <button
+        type="button"
+        data-testid={`${testidPrefix}-collapse-all`}
+        title="Fold every row in this list to its single line."
+        onClick={() => collapseAll(ids)}
+      >
+        collapse all
+      </button>
+      <button
+        type="button"
+        data-testid={`${testidPrefix}-expand-all`}
+        title="Open every row in this list at once."
+        onClick={() => expandAll(ids)}
+      >
+        expand all
+      </button>
+    </span>
+  );
+}
+
+/**
+ * The take-back for a removal, drawn at the REMOVAL SITE (#411) — under the header of the list the
+ * item came out of, not in an app-wide toast.
+ *
+ * The maintainer's decision was "undoable, no dialog": remove is the one destructive press in this
+ * panel and #411 moved it to the FRONT of every row, where a slip is easy. It is not the app's
+ * Ctrl-Z target by default (project undo is) — but while a removal is pending it takes precedence,
+ * because it is the more recent, more local thing (see `AppShell`'s shortcut). The strip says which.
+ *
+ * It appears only for the section the removal happened in — a void's undo offered under the item
+ * list below it would be about the wrong thing — and it shows the TOP of the stack, so undoing one
+ * reveals the next (`engraveJobStore`'s `removalUndo`). The stack retires on the next edit of any
+ * kind, or after `REMOVAL_UNDO_MS`.
+ */
+function UndoRemoval({ section }: { section: 'items' | 'voids' }): JSX.Element | null {
+  const stack = useEngraveJobStore((s) => s.removalUndo);
+  const undoRemove = useEngraveJobStore((s) => s.undoRemove);
+  const button = useRef<HTMLButtonElement | null>(null);
+  const top = stack[stack.length - 1];
+  const mine = top !== undefined && top.section === section ? top : null;
+  // The press that removed the item took the control with it — the row is gone — so focus would
+  // otherwise fall to `<body>` and a keyboard user would have to hunt along the panel for the way
+  // back (#411 review). It goes to the Undo this removal just produced, once per removal.
+  useEffect(() => {
+    if (mine !== null) button.current?.focus();
+  }, [mine]);
+  if (mine === null) return null;
+  return (
+    <p className="engrave-undo-strip" data-testid="engrave-undo-strip">
+      <span data-testid="engrave-undo-what">{mine.what} removed.</span>
+      <button ref={button} type="button" data-testid="engrave-undo" title="Put it back where it was." onClick={undoRemove}>
+        Undo
+      </button>
+    </p>
+  );
+}
+
+/**
+ * What a removal is announced as (#411 review: a `role="status"` region that arrives already filled
+ * is silent — a live region has to be in the DOM, and EMPTY, before the text is written into it).
+ *
+ * So this one is always here and never seen, and the visible strip above it carries no live role at
+ * all. Hidden with a clip rather than `display: none`, which would take it out of the accessibility
+ * tree and leave nothing to announce into.
+ */
+function RemovalAnnouncement(): JSX.Element {
+  const stack = useEngraveJobStore((s) => s.removalUndo);
+  const top = stack[stack.length - 1];
+  return (
+    <p className="sr-only" role="status" aria-live="polite" data-testid="engrave-undo-announce">
+      {top === undefined ? '' : `${top.what} removed. Undo is available.`}
+    </p>
+  );
+}
 
 export function EngravePanel(): JSX.Element {
   const job = useEngraveJobStore((s) => s.job);
@@ -859,13 +964,19 @@ export function EngravePanel(): JSX.Element {
 
   /** The dialog's accepted (possibly rescaled) outline becomes a job item centred on the stock. */
   function acceptOutline(outline: OutlineImport): void {
-    addVector(
-      toVectorShape(outline, {
-        id: newEngraveShapeId(),
-        position: { x: job.stock.length / 2, y: job.stock.width / 2 },
-        depth: 0.5,
-        name: outline.sourceName,
-      }),
+    // #411 — like every other add, it arrives open: an imported outline's placement and depth are
+    // exactly what the import dialog could not settle.
+    expandEngraveRow(
+      addVector(
+        toVectorShape(outline, {
+          id: newEngraveShapeId(),
+          position: { x: job.stock.length / 2, y: job.stock.width / 2 },
+          // #451 — the same starting depth the store's own "Add…" entries use, read from the one
+          // reader so an imported outline and a drawn shape cannot begin at different numbers.
+          depth: newItemDepthMm(),
+          name: outline.sourceName,
+        }),
+      ),
     );
     closeImport();
   }
@@ -1042,6 +1153,10 @@ export function EngravePanel(): JSX.Element {
 
   return (
     <div className="panel-stack" data-testid="engrave-panel">
+      {/* Empty, unseen and ALWAYS here, so there is a live region to write a removal into (#411
+          review). See `RemovalAnnouncement` for why the visible strip cannot be the live one. */}
+      <RemovalAnnouncement />
+
       {/* The guided job setup (#254): a path INTO this panel. A new job can be set up from here
           without hunting through the fields below; skipping it leaves every field as it was. */}
       <button
@@ -1195,12 +1310,14 @@ export function EngravePanel(): JSX.Element {
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-keepout-count">
           {keepOuts.length}
         </span>
+        <RowFolds testidPrefix="engrave-keepout" ids={keepOuts.map((ko) => ko.id)} />
       </h4>
       <p style={MUTED}>
         A pocket the blank already has, cut into its <strong>bottom</strong> face. The ceiling is
         measured up from that face — the opposite direction from every depth in this panel. The
         job refuses any cut that would break through the material left over one.
       </p>
+      <UndoRemoval section="voids" />
       {keepOuts.map((ko, i) => (
         <EngraveKeepOutRow
           key={ko.id}
@@ -1229,7 +1346,7 @@ export function EngravePanel(): JSX.Element {
             type="button"
             data-testid={`engrave-add-keepout-${k.value}`}
             title={`Declare a ${k.label.toLowerCase()} pocket in the blank's bottom face — the depth limit will respect it.`}
-            onClick={() => addKeepOut(k.value)}
+            onClick={() => expandEngraveRow(addKeepOut(k.value))}
           >
             {k.label}
           </button>
@@ -1242,7 +1359,9 @@ export function EngravePanel(): JSX.Element {
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-item-count">
           {job.labels.length + job.shapes.length + combinedCount + traceCount + drillCount + vectorCount}
         </span>
+        <RowFolds testidPrefix="engrave-item" ids={itemRowIds(job)} />
       </h3>
+      <UndoRemoval section="items" />
       {job.labels.map((label, i) => (
         <EngraveLabelRow
           key={label.id}
@@ -1328,7 +1447,9 @@ export function EngravePanel(): JSX.Element {
               type="button"
               data-testid={`engrave-add-${k.value}`}
               title={k.value === 'label' ? 'Add a text label.' : `Add a ${k.label.toLowerCase()} pocket.`}
-              onClick={() => (k.value === 'label' ? addLabel() : addShape(k.value as EngraveShape['kind']))}
+              // #411 — a NEW item arrives open: it is a default until its fields are set, and the
+              // person who just asked for it is looking for exactly those fields.
+              onClick={() => (k.value === 'label' ? expandEngraveRow(addLabel()) : expandEngraveRow(addShape(k.value as EngraveShape['kind'])))}
             >
               {k.label}
             </button>
@@ -1347,7 +1468,12 @@ export function EngravePanel(): JSX.Element {
                   ? `A ${k.label.toLowerCase()} follows another item; add a label or a shape first.`
                   : `Add a ${k.label.toLowerCase()} built from other items.`
               }
-              onClick={() => addCombined(k.value)}
+              // #411 — open on arrival, like every other add. A frame/cut-away can refuse (no
+              // reference), and then there is no row to open.
+              onClick={() => {
+                const id = addCombined(k.value);
+                if (id) expandEngraveRow(id);
+              }}
             >
               {k.label}
             </button>
@@ -1365,7 +1491,7 @@ export function EngravePanel(): JSX.Element {
                   ? 'Add a polyline the cutter traces — the groove is exactly the cutter’s width.'
                   : 'Add text in a single-stroke font, traced as a line rather than pocketed.'
               }
-              onClick={() => addTrace(k.value)}
+              onClick={() => expandEngraveRow(addTrace(k.value))}
             >
               {k.label}
             </button>
@@ -1383,7 +1509,7 @@ export function EngravePanel(): JSX.Element {
                   ? 'Add one plunge-drilled hole, exactly the cutter’s diameter.'
                   : 'Add a rectangular array of plunge-drilled holes.'
               }
-              onClick={() => addDrill(k.value)}
+              onClick={() => expandEngraveRow(addDrill(k.value))}
             >
               {k.label}
             </button>
@@ -1529,6 +1655,16 @@ export function EngravePanel(): JSX.Element {
               rec.reason
             )}
           </p>
+          {/* #442 — what the pick's condition asks the operator to do. Its own line, not folded into
+              the sentence above: "check this bit" is a different claim from why this cutter. */}
+          {rec.conditionNote && (
+            <p
+              data-testid="engrave-recommendation-condition"
+              style={{ ...MUTED, color: '#e0c07a', margin: '4px 0 0' }}
+            >
+              {rec.conditionNote}
+            </p>
+          )}
           <details style={{ marginTop: 4 }}>
             <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>
               Why? — {rec.candidates.length} cutters considered
@@ -1538,10 +1674,14 @@ export function EngravePanel(): JSX.Element {
                 const detail = c.excluded
                   ? c.excluded === 'not-flat'
                     ? 'not a flat end mill'
-                    : 'no cutting parameters for this material'
+                    : c.excluded === 'broken'
+                      ? 'every copy is marked broken'
+                      : 'no cutting parameters for this material'
                   : c.worst
-                    ? `worst item "${itemDisplay(c.worst.labelId)}" · ${Math.round(c.worst.ratio * 100)} % kept`
-                    : 'not measured';
+                    ? `worst item "${itemDisplay(c.worst.labelId)}" · ${Math.round(c.worst.ratio * 100)} % kept${c.condition?.best === 'worn' ? ' · worn' : ''}`
+                    : c.condition?.best === 'worn'
+                      ? 'worn'
+                      : 'not measured';
                 return (
                   <div
                     key={c.key}

@@ -1,4 +1,6 @@
 import type { CSSProperties, JSX } from 'react';
+import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
+import { rowSummary } from '@/components/panels/engraveRowText';
 import { itemLabel, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import type { CombinedPatch } from '@/store/engraveJobStore';
 import type { EngraveAnyItem, EngraveCombinedShape } from '@/types/engraveJob';
@@ -24,14 +26,6 @@ const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, 
 const INVALID: CSSProperties = { borderColor: '#7a2828', color: '#f0b4ad' };
 const ROW_INLINE: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 4 };
 const FIELD_LABEL: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa4b0' };
-const TAG: CSSProperties = {
-  fontSize: 10,
-  color: '#9aa4b0',
-  border: '1px solid #2a2f36',
-  borderRadius: 3,
-  padding: '1px 4px',
-  whiteSpace: 'nowrap',
-};
 const ISLANDS: CSSProperties = {
   display: 'flex',
   flexWrap: 'wrap',
@@ -48,6 +42,13 @@ const KIND_LABEL: Record<EngraveCombinedShape['kind'], string> = {
   border: 'Border',
   frame: 'Frame',
   cutaway: 'Cut-away',
+};
+
+/** The collapsed line's glyph per combined kind (#411): a ring, a picture frame, a hole cut out. */
+const KIND_GLYPH: Record<EngraveCombinedShape['kind'], string> = {
+  border: '▢',
+  frame: '⬚',
+  cutaway: '◌',
 };
 
 /**
@@ -133,20 +134,26 @@ export function EngraveCombinedRow({
   };
 
   return (
-    <div
-      data-testid={`engrave-combined-row-${index}`}
-      style={{ border: '1px solid #2a2f36', borderRadius: 4, padding: 6, marginBottom: 6 }}
+    // #411 — the collapsed line, and the editor below it. A combined item's identity is its kind
+    // until someone names it, so an unnamed one reads "Cut-away" rather than blank.
+    <EngraveItemRow
+      id={shape.id}
+      prefix="engrave-combined"
+      index={index}
+      glyph={KIND_GLYPH[shape.kind]}
+      kindWord={KIND_LABEL[shape.kind]}
+      name={shape.name?.trim() ? shape.name : KIND_LABEL[shape.kind]}
+      summary={rowSummary(shape.depth)}
+      enabled={shape.enabled}
+      enabledTitle="A disabled item is kept in the job but not cut, and cannot be referenced."
+      removeTitle="Remove this item."
+      removeNoun={KIND_LABEL[shape.kind].toLowerCase()}
+      findings={findings}
+      onToggleEnabled={(enabled) => onChange({ enabled })}
+      onRemove={onRemove}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <input
-          type="checkbox"
-          checked={shape.enabled}
-          data-testid={`engrave-combined-enabled-${index}`}
-          aria-label={`${KIND_LABEL[shape.kind]} ${index + 1} enabled`}
-          title="A disabled item is kept in the job but not cut, and cannot be referenced."
-          onChange={(e) => onChange({ enabled: e.target.checked })}
-        />
-        <span style={TAG}>{KIND_LABEL[shape.kind]}</span>
+      <label style={ROW_INLINE}>
+        <span>name</span>
         <input
           type="text"
           value={shape.name ?? ''}
@@ -157,16 +164,7 @@ export function EngraveCombinedRow({
           style={{ flex: 1, minWidth: 0 }}
           onChange={(e) => onChange({ name: e.target.value || undefined })}
         />
-        <button
-          type="button"
-          data-testid={`engrave-combined-remove-${index}`}
-          aria-label={`Remove ${KIND_LABEL[shape.kind]} ${index + 1}`}
-          title="Remove this item."
-          onClick={onRemove}
-        >
-          🗑
-        </button>
-      </div>
+      </label>
 
       {shape.kind === 'border' && (
         <div style={ROW_INLINE}>
@@ -251,16 +249,6 @@ export function EngraveCombinedRow({
       <p style={{ ...MUTED, ...(depthInvalid ? { color: SEVERITY_COLOR.error } : null) }} data-testid={`engrave-combined-maxdepth-${index}`}>
         Max depth {maxDepth} mm here — the stock thickness less the minimum floor.
       </p>
-
-      {findings.map((f, i) => (
-        <p
-          key={`${f.code}-${i}`}
-          data-testid={`engrave-combined-finding-${index}-${f.code}`}
-          style={{ ...MUTED, color: SEVERITY_COLOR[f.severity] }}
-        >
-          {f.message}
-        </p>
-      ))}
-    </div>
+    </EngraveItemRow>
   );
 }

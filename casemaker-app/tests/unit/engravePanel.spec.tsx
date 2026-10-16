@@ -7,8 +7,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { EngravePanel } from '@/components/panels/EngravePanel';
-import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngraveJobStore, undoEngraveRemoval, resetEngraveRemovalUndo, REMOVAL_UNDO_MS } from '@/store/engraveJobStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
+import { resetEngraveRows } from '@/store/engraveRowStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
   setEngravePreviewClientLoader,
@@ -40,6 +41,15 @@ const NO_PREVIEW: EngravePreviewClient = { engravePreview: async () => null };
 const rows = (): HTMLElement[] => screen.queryAllByTestId(/^engrave-label-row-/);
 
 /**
+ * #411 — an item's editor lives behind its row's chevron, so a spec that reads or fills one of its
+ * fields opens the row first. The rows a job STARTS with are folded; a row a test adds through the
+ * panel is not (the add handlers expand it), which is why the "Add …" cases need nothing here.
+ */
+const expand = (prefix: string, index = 0): void => {
+  fireEvent.click(screen.getByTestId(`${prefix}-expand-${index}`));
+};
+
+/**
  * Press a button whose handler AWAITS the labels' faces before it writes (#365 review): the click's
  * effect lands on a microtask, so a `fireEvent.click` alone would assert against a store nobody has
  * written to yet.
@@ -53,6 +63,11 @@ const press = async (el: HTMLElement): Promise<void> => {
 beforeEach(() => {
   setEngravePreviewClientLoader(async () => NO_PREVIEW);
   useSettingsStore.getState().resetSettings();
+  // #411 — the fold is module-level session state, so a spec that expanded a row would otherwise
+  // leave the next one with an editor already showing. The removal undo is the same kind of state
+  // and carries a live timer with it, so it goes too.
+  resetEngraveRows();
+  resetEngraveRemovalUndo();
   act(() => {
     useEngraveJobStore.setState({ job: defaultEngraveJob() });
   });
@@ -76,6 +91,7 @@ describe('EngravePanel (#205)', () => {
   it('marks a depth past the floor and shows the finding under that row', () => {
     render(<EngravePanel />);
     // 12 mm stock, 1 mm minimum floor -> at most 11 mm.
+    expand('engrave-label');
     expect(screen.getByTestId('engrave-label-maxdepth-0').textContent).toContain('11');
     expect(screen.queryByTestId('engrave-label-finding-0-depth-exceeds-stock')).toBeNull();
 
@@ -386,6 +402,8 @@ describe('EngravePanel — combined shapes (#215)', () => {
     fireEvent.click(screen.getByTestId('engrave-add-cutaway'));
     const labelId = useEngraveJobStore.getState().job.labels[0]!.id;
     fireEvent.click(screen.getByTestId(`engrave-combined-island-0-${labelId}`));
+    // The job's own label, not one this test added: fold it open to reach its control (#411).
+    expand('engrave-label');
     fireEvent.click(screen.getByTestId('engrave-label-construction-0'));
 
     const job = useEngraveJobStore.getState().job;
@@ -855,6 +873,7 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     // The void is declared, drawn as a row, and stated as a consequence.
     expect(job.keepOuts!.map((k) => k.id)).toEqual([BADGE_POCKET_KEEP_OUT_ID]);
     expect(screen.getByTestId('engrave-keepout-count').textContent?.trim()).toBe('1');
+    expand('engrave-keepout');
     expect(screen.getByTestId('engrave-keepout-membrane-0').textContent).toContain('1.51');
 
     // 1.51 mm of declared membrane over the pocket, and because the blank states its print the roof
@@ -886,6 +905,7 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
     });
     render(<EngravePanel />);
 
+    expand('engrave-keepout'); // #411 — the sentence is in the row's editor now
     const readout = screen.getByTestId('engrave-keepout-membrane-0').textContent ?? '';
     expect(readout).toContain('1.20'); // the number the run enforces — the one a person types against
     expect(readout).not.toContain('1.31'); // the analytic one it printed before
@@ -959,6 +979,10 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
       useEngraveJobStore.getState().updateLabel(id, { position: { x: 38.1, y: 19.05 } });
     });
     render(<EngravePanel />);
+    // #411 — the recommendation is part of the row's editor, which is folded on a job that starts
+    // from a blank. Both lines: the seeded one and the one this test added.
+    expand('engrave-label');
+    expand('engrave-label', 1);
 
     const seeded = recommended(0)!;
     expect(seeded).toContain('Recommended 2.81 mm');
@@ -983,6 +1007,7 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
   it('keeps the sentence after the person types their own number, and reconciles the two', () => {
     takeBadgeBlank();
     render(<EngravePanel />);
+    expand('engrave-label'); // #411
     fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '1.2' } });
 
     const line = recommended(0)!;
@@ -1000,6 +1025,9 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
       useEngraveJobStore.getState().addLabel();
     });
     render(<EngravePanel />);
+    // #411 — both rows open: row 0 is the one the two refusals are pressed on, row 1 the control.
+    expand('engrave-label');
+    expand('engrave-label', 1);
     // A construction label cuts nothing, so there is no depth to recommend (#215).
     fireEvent.click(screen.getByTestId('engrave-label-construction-0'));
     expect(recommended(0)).toBeNull();
@@ -1053,6 +1081,7 @@ describe('EngravePanel — where a label’s depth came from (#362 review)', () 
       useEngraveJobStore.getState().redepthLabelsForBlank();
     });
     render(<EngravePanel />);
+    expand('engrave-label'); // #411 — the recommendation is inside the row now
 
     // The row the panel offers is the JOB's number, not the house default — which is the margin the
     // recommendation below was worked out with.
@@ -1181,6 +1210,7 @@ describe('EngravePanel — the two-state depth control (#170)', () => {
   it('offers no colour state on a blank that states no print, and writes no intent from the field', () => {
     // The default job: PLA, one colour, no print. Depth is a free number and the field stands alone.
     render(<EngravePanel />);
+    expand('engrave-label'); // #411 — "no control is drawn" is only meaningful with the row open
     expect(screen.queryByTestId('engrave-label-surface-0')).toBeNull();
     expect(screen.queryByTestId('engrave-label-reveal-0')).toBeNull();
 
@@ -1196,6 +1226,7 @@ describe('EngravePanel — the two-state depth control (#170)', () => {
   it('writes the layer past the split for each state, and lights only the one that is on', () => {
     printedBlank();
     render(<EngravePanel />);
+    expand('engrave-label'); // #411 — the two states live in the row's editor
 
     const surface = screen.getByTestId('engrave-label-surface-0');
     const reveal = screen.getByTestId('engrave-label-reveal-0');
@@ -1230,6 +1261,7 @@ describe('EngravePanel — the two-state depth control (#170)', () => {
   it('takes a typed depth as the override, and says the number is the user’s', () => {
     printedBlank();
     render(<EngravePanel />);
+    expand('engrave-label'); // #411
     fireEvent.click(screen.getByTestId('engrave-label-reveal-0'));
 
     fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '1.55' } });
@@ -1261,6 +1293,7 @@ describe('EngravePanel — the two-state depth control (#170)', () => {
     // (#362): left standing it would go on claiming a colour the blank does not have, with nothing
     // on screen to say why no recommendation appears.
     render(<EngravePanel />);
+    expand('engrave-label'); // #411 — the field that clears the intent is in the row's editor
     const id = useEngraveJobStore.getState().job.labels[0]!.id;
     act(() => {
       useEngraveJobStore.getState().updateLabel(id, { depthIntent: 'reveal' });
@@ -1276,5 +1309,252 @@ describe('EngravePanel — the two-state depth control (#170)', () => {
     // `undefined`, and a claim that outlived its intent would keep the label out of the app's reach
     // for good.
     expect(job.sources?.labels?.[id]).toEqual({ depth: 'user' });
+  });
+});
+
+// #411 — the list's fold and the removal's undo. Both are panel state, not job data: how the list is
+// folded is where the person left the panel, and the undo is a property of the last press rather
+// than of the document.
+describe('EngravePanel item rows (#411)', () => {
+  it('folds the whole item list with the header’s two controls', () => {
+    render(<EngravePanel />);
+    // A job that arrives from a file is one line per item: the editor of every row is closed.
+    expect(screen.queryByTestId('engrave-label-text-0')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('engrave-item-expand-all'));
+    for (const i of [0, 1, 2]) expect(screen.getByTestId(`engrave-label-text-${i}`)).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('engrave-item-collapse-all'));
+    expect(screen.queryByTestId('engrave-label-text-0')).toBeNull();
+  });
+
+  it('opens only the void list with the void header’s expand-all', () => {
+    act(() => {
+      useEngraveJobStore.getState().addKeepOut('rect');
+    });
+    render(<EngravePanel />);
+
+    fireEvent.click(screen.getByTestId('engrave-keepout-expand-all'));
+    expect(screen.getByTestId('engrave-keepout-width-0')).toBeTruthy();
+    // The two sections fold separately: the item list is untouched by the void header's control.
+    expect(screen.queryByTestId('engrave-label-text-0')).toBeNull();
+  });
+
+  it('arrives with the editor showing when an item is added', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-add-label'));
+    // The new row is the LAST label, and it is the only one open.
+    expect(screen.getByTestId('engrave-label-text-3')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-label-text-0')).toBeNull();
+  });
+
+  it('offers the removal’s undo at the removal site, and puts the item back where it was', () => {
+    render(<EngravePanel />);
+    const before = useEngraveJobStore.getState().job.labels.map((l) => l.id);
+
+    fireEvent.click(screen.getByTestId('engrave-label-remove-1'));
+    expect(useEngraveJobStore.getState().job.labels.map((l) => l.id)).toEqual([
+      before[0],
+      before[2],
+    ]);
+    expect(screen.getByTestId('engrave-undo-what').textContent).toContain('removed.');
+    // The strip names the thing in the row's own words.
+    expect(screen.getByTestId('engrave-undo-what').textContent).toContain('Label');
+
+    fireEvent.click(screen.getByTestId('engrave-undo'));
+    // Back at index 1, not appended: the list (and the run sheet built from it) is what it was.
+    expect(useEngraveJobStore.getState().job.labels.map((l) => l.id)).toEqual(before);
+    expect(screen.queryByTestId('engrave-undo-strip')).toBeNull();
+  });
+
+  it('brings a removed label’s claims back with it', () => {
+    render(<EngravePanel />);
+    const id = useEngraveJobStore.getState().job.labels[0]!.id;
+    expand('engrave-label');
+    fireEvent.change(screen.getByTestId('engrave-label-depth-0'), { target: { value: '1.5' } });
+    expect(useEngraveJobStore.getState().job.sources?.labels?.[id]).toEqual({ depth: 'user' });
+
+    // The removal takes the claim with it (#363), so the undo has to be the one that brings it back:
+    // a restored label whose typed depth had lost its provenance would be re-depthable by the next
+    // blank change (#362).
+    fireEvent.click(screen.getByTestId('engrave-label-remove-0'));
+    expect(useEngraveJobStore.getState().job.sources?.labels?.[id]).toBeUndefined();
+    fireEvent.click(screen.getByTestId('engrave-undo'));
+    expect(useEngraveJobStore.getState().job.sources?.labels?.[id]).toEqual({ depth: 'user' });
+  });
+
+  it('retires the undo on the next edit of any kind', () => {
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-label-remove-0'));
+    expect(screen.getByTestId('engrave-undo-strip')).toBeTruthy();
+
+    // Any write — including one that has nothing to do with the removal — retires the strip, which
+    // is the maintainer's "until the next edit" without a timer.
+    fireEvent.click(screen.getByTestId('engrave-add-label'));
+    expect(screen.queryByTestId('engrave-undo-strip')).toBeNull();
+    expect(useEngraveJobStore.getState().removalUndo).toEqual([]);
+  });
+
+  it('offers a void’s undo under the voids, not under the item list below it', () => {
+    act(() => {
+      useEngraveJobStore.getState().addKeepOut('rect');
+    });
+    render(<EngravePanel />);
+
+    fireEvent.click(screen.getByTestId('engrave-keepout-remove-0'));
+    const strip = screen.getByTestId('engrave-undo-strip');
+    expect(strip.textContent).toContain('Void');
+
+    // Placement, not just presence: the strip is drawn above the "Items" heading, in the section the
+    // void came out of — an undo offered under the item list would look like it belonged to an item.
+    const itemsHeading = screen.getByTestId('engrave-item-count').closest('h3')!;
+    expect(strip.compareDocumentPosition(itemsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('engrave-undo'));
+    expect(useEngraveJobStore.getState().job.keepOuts).toHaveLength(1);
+    expect(screen.queryByTestId('engrave-undo-strip')).toBeNull();
+  });
+
+  it('arms no undo for a void a ROUTE stamped, only for one a person removed', () => {
+    // `takeBadgeBlank` removes the pocket void by id when a badge has none. Nobody declared it, and a
+    // strip appearing out of a blank change would be the panel offering to undo something the person
+    // never did.
+    act(() => {
+      useEngraveJobStore.getState().upsertKeepOut({
+        id: BADGE_POCKET_KEEP_OUT_ID,
+        kind: 'rect',
+        name: 'Magnet pocket',
+        position: { x: 10, y: 10 },
+        rotation: 0,
+        enabled: true,
+        width: 10,
+        height: 6,
+        cornerRadius: 0,
+        zCeiling: 1.9,
+      });
+    });
+    render(<EngravePanel />);
+
+    // A badge whose model declares no pocket, so the route clears the stale one rather than writing
+    // its own.
+    act(() => {
+      useEngraveJobStore
+        .getState()
+        .takeBadgeBlank(badgeBlankFor(defaultBadgeParams({ magnetPocket: null })));
+    });
+    expect(useEngraveJobStore.getState().job.keepOuts ?? []).toHaveLength(0);
+    expect(useEngraveJobStore.getState().removalUndo).toEqual([]);
+    expect(screen.queryByTestId('engrave-undo-strip')).toBeNull();
+  });
+
+  it('folds only its own list when a section header says “collapse all”', () => {
+    // The bug the review found: `collapseAll` cleared the whole open set, so pressing it on the ITEMS
+    // header also folded the void list below it. A list header acts on its own list.
+    act(() => {
+      useEngraveJobStore.getState().addKeepOut('rect');
+    });
+    render(<EngravePanel />);
+    fireEvent.click(screen.getByTestId('engrave-item-expand-all'));
+    fireEvent.click(screen.getByTestId('engrave-keepout-expand-all'));
+    expect(screen.getByTestId('engrave-label-text-0')).toBeTruthy();
+    expect(screen.getByTestId('engrave-keepout-width-0')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('engrave-item-collapse-all'));
+    expect(screen.queryByTestId('engrave-label-text-0')).toBeNull();
+    expect(screen.getByTestId('engrave-keepout-width-0')).toBeTruthy();
+  });
+
+  it('keeps every removal undoable in turn, newest first', () => {
+    // The maintainer's decision: "a quick second removal never loses the first one's undo."
+    render(<EngravePanel />);
+    const before = useEngraveJobStore.getState().job.labels.map((l) => l.id);
+
+    fireEvent.click(screen.getByTestId('engrave-label-remove-0')); // CASE
+    expect(screen.getByTestId('engrave-undo-what').textContent).toContain('CASE');
+    fireEvent.click(screen.getByTestId('engrave-label-remove-0')); // MAKER, now first
+    expect(screen.getByTestId('engrave-undo-what').textContent).toContain('MAKER');
+    // Both are still held, oldest first — the strip only ever shows the top.
+    expect(useEngraveJobStore.getState().removalUndo.map((r) => r.what)).toHaveLength(2);
+
+    fireEvent.click(screen.getByTestId('engrave-undo'));
+    expect(screen.getByTestId('engrave-undo-what').textContent).toContain('CASE');
+    fireEvent.click(screen.getByTestId('engrave-undo'));
+    // Both back, each at its own index — the list is what it was, not two appended items.
+    expect(useEngraveJobStore.getState().job.labels.map((l) => l.id)).toEqual(before);
+    expect(screen.queryByTestId('engrave-undo-strip')).toBeNull();
+  });
+
+  it('takes a removal back on Ctrl-Z, and only then on the project’s undo', () => {
+    // The precedence rule the shortcut in `AppShell` reads (`undoEngraveRemoval`): a pending removal
+    // outranks the project's undo, so the key undoes the thing the person just did. An empty stack
+    // returns false, which is the shortcut's signal to fall through to `undoProject` — no press is
+    // swallowed. This is the seam; that the handler calls it is an e2e (`engrave.spec.ts`).
+    render(<EngravePanel />);
+    const before = useEngraveJobStore.getState().job.labels.map((l) => l.id);
+    expect(undoEngraveRemoval()).toBe(false);
+
+    fireEvent.click(screen.getByTestId('engrave-label-remove-0'));
+    expect(undoEngraveRemoval()).toBe(true);
+    expect(useEngraveJobStore.getState().job.labels.map((l) => l.id)).toEqual(before);
+    expect(undoEngraveRemoval()).toBe(false);
+  });
+
+  it('re-arms the 8 s window for each removal, then retires the whole stack', () => {
+    vi.useFakeTimers();
+    try {
+      render(<EngravePanel />);
+      fireEvent.click(screen.getByTestId('engrave-label-remove-0'));
+      act(() => {
+        vi.advanceTimersByTime(REMOVAL_UNDO_MS - 1);
+      });
+      expect(screen.getByTestId('engrave-undo-strip')).toBeTruthy();
+
+      // The window belongs to the TOP of the stack, not to a moment in the session: a removal made
+      // just before the first would have lapsed still gets its own full 8 s, so at 15.998 s — nearly
+      // twice the window after the first press — the strip is up. A single fixed deadline would have
+      // retired it at 8 s.
+      act(() => {
+        vi.advanceTimersByTime(REMOVAL_UNDO_MS - 1);
+      });
+      fireEvent.click(screen.getByTestId('engrave-label-remove-0'));
+      act(() => {
+        vi.advanceTimersByTime(REMOVAL_UNDO_MS - 1);
+      });
+      expect(screen.getByTestId('engrave-undo-strip')).toBeTruthy();
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      // The whole stack goes, not just the top: what the person can see is one strip, and an undo
+      // nothing offers any more would be a lie about what is still possible.
+      expect(screen.queryByTestId('engrave-undo-strip')).toBeNull();
+      expect(useEngraveJobStore.getState().removalUndo).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('moves the focus to Undo, because the press took the control with it', () => {
+    // #411 review: the row and its `✕` are gone after the press, so without this the focus falls to
+    // `<body>` and a keyboard user has to hunt along the panel to find the way back.
+    render(<EngravePanel />);
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.click(screen.getByTestId('engrave-label-remove-0'));
+    expect(document.activeElement).toBe(screen.getByTestId('engrave-undo'));
+  });
+
+  it('announces the removal into a live region that was already there and empty', () => {
+    // #411 review: a `role="status"` node that ARRIVES with its text is not announced — the region
+    // has to be in the document, and empty, before the text is written into it. Hence a region that
+    // is always present and never seen, and a visible strip with no live role at all.
+    render(<EngravePanel />);
+    const live = screen.getByTestId('engrave-undo-announce');
+    expect(live.getAttribute('role')).toBe('status');
+    expect(live.textContent).toBe('');
+
+    fireEvent.click(screen.getByTestId('engrave-label-remove-0'));
+    expect(screen.getByTestId('engrave-undo-announce').textContent).toContain('CASE');
+    // The visible strip carries the words for the eye, not a second announcement for the ear.
+    expect(screen.getByTestId('engrave-undo-strip').getAttribute('role')).toBeNull();
   });
 });

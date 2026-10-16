@@ -236,6 +236,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // ── #451 (end)
     ("sim.columnFlatPitchYMm", 0.1, "mm", "chosen, not measured: the flat simulation grid's Y pitch; the oracle's band grows with the cell and the sim's memory and time with 1/pitch"),
     // ── #438 (end)
+    // ── #451 new-item starting depths (begin) — where an item the Engrave panel just added begins.
+    // CHOSEN, not measured: nobody measured what depth a new item should start at, and the person who
+    // asked for it is about to set the number that matters. A hole starts deeper than an item because
+    // a hole that begins as shallow as a label shows nothing on the preview.
+    ("engrave.newItemDepthMm", 0.5, "mm", "chosen, not measured: the depth a new label, shape, combined shape, traced line or imported outline starts at, in the panel where the person then sets the depth that matters"),
+    ("engrave.newDrillDepthMm", 1.0, "mm", "chosen, not measured: the depth a new hole starts at — deeper than an item's own starting depth because a hole that shallow shows nothing on the preview"),
+    // ── #451 new-item starting depths (end)
     // ── #421 (begin) — the run plan's phase times that the app has not timed: chosen.
     ("plan.touchSeconds", 15.0, "s", "chosen, not measured as the app's runner would take it: 15 s a touch, from the 2026-10-15 console trace's edge scans, driven by a console script, not the app runner. 32 touch-to-touch intervals under 20 s (G38.2 Z-5, 16:35:59 to 16:50:34): median 13.3 s, mean 14.0 s, range 10.4 to 19.7 s; the round trips between touches are included"),
     ("plan.fitProbeSeconds", 45.0, "s", "chosen, not measured: fitting the wired probe by hand, from the plan of section 5.8; the first timed run replaces it"),
@@ -661,6 +668,14 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "0.05 to 0.5 mm",
         )),
         // ── #438 (end)
+        // ── #451 new-item starting depths (begin) — `defaultsClient.ts` states the same bounds. Not
+        // 0: the job's schema refuses a depth of zero or less, so a starting depth under this would
+        // be an item that cannot be added.
+        "engrave.newItemDepthMm" | "engrave.newDrillDepthMm" => Some(need(
+            n.is_some_and(|v| (0.05..=20.0).contains(&v)),
+            "0.05 to 20 mm",
+        )),
+        // ── #451 new-item starting depths (end)
         // ── #421 (begin) — the run plan's phase times (`defaultsClient.ts` states the same bounds).
         "plan.homeSeconds" | "plan.toolLengthSeconds" => Some(need(
             n.is_some_and(|v| (5.0..=300.0).contains(&v)),
