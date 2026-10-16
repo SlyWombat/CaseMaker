@@ -33,6 +33,11 @@ export interface Removal {
    * (#428 review) — its box's depth comes off that face, and the next setup's height is the new one.
    */
   facing?: boolean;
+  /**
+   * #429: this removal is ONE connected opening (a single hole, a single slot), so its box is its
+   * footprint. Only such a removal is used as a registration reference; a group ("the four holes") is not.
+   */
+  connected?: boolean;
 }
 
 export type Mount = 'vise' | 'bracket' | 'tape';

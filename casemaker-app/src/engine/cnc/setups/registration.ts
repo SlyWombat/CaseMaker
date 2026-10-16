@@ -7,7 +7,7 @@
  */
 
 import { LEDGE_STEP } from '../fixture';
-import { planRegistration, type BracketOrigin, type PlanObstacle, type PlanResult, type RegistrationSettings } from '../registration';
+import { planReferences, planRegistration, type BracketOrigin, type PlanObstacle, type PlanResult, type ReferenceOpening, type RegistrationSettings } from '../registration';
 import { machineSize, toMachine, type Vec } from './orient';
 import type { MountSpec, Setup } from './types';
 
@@ -57,4 +57,65 @@ export function registrationFor(
     settings,
   );
   return { plan, references: referenceFeatures(setup) };
+}
+
+/** A cut's footprint in the setup's work XY, and how deep it reaches below the face now up. */
+function footprint(setup: Setup, c: Setup['stockBefore']['cuts'][number]): { min: [number, number]; max: [number, number]; depth: number } {
+  const b = setup.stockBefore.bounds;
+  const dims = machineSize(setup.rotation, b);
+  const pts: Vec[] = [];
+  for (const x of [c.box.min[0], c.box.max[0]]) for (const y of [c.box.min[1], c.box.max[1]]) for (const z of [c.box.min[2], c.box.max[2]]) pts.push(toMachine(setup.rotation, b, [x, y, z]));
+  const r = (n: number) => Math.round(n * 1000) / 1000;
+  return {
+    min: [r(Math.min(...pts.map((p) => p[0]))), r(Math.min(...pts.map((p) => p[1])))],
+    max: [r(Math.max(...pts.map((p) => p[0]))), r(Math.max(...pts.map((p) => p[1])))],
+    depth: r(dims.z - Math.min(...pts.map((p) => p[2]))),
+  };
+}
+
+/**
+ * The openings earlier setups cut through to this setup's up face, as footprints in its work XY with
+ * their own depth (#429) — only removals that say they are ONE connected opening; a group's bounding
+ * box would put a scan's mid-line through the solid stock between its holes. Everything else open to
+ * the face now up is returned as `blind`: no scan starts, and no surface touch lands, on it.
+ */
+export function referenceOpenings(setup: Setup): { openings: ReferenceOpening[]; blind: { min: [number, number]; max: [number, number] }[]; refused: string[] } {
+  const openings: ReferenceOpening[] = [];
+  const blind: { min: [number, number]; max: [number, number] }[] = [];
+  const refused: string[] = [];
+  for (const c of setup.stockBefore.cuts.filter((k) => k.opensTo.includes(setup.faceUp))) {
+    const f = footprint(setup, c);
+    if (c.opensTo.length > 1 && c.connected === true) openings.push({ itemId: c.id, name: c.name, ...f });
+    else {
+      blind.push({ min: f.min, max: f.max });
+      if (c.opensTo.length > 1) refused.push(`${c.name}: not marked as one connected opening, so its outline is not known well enough to scan`);
+    }
+  }
+  return { openings, blind, refused };
+}
+
+/** #429 — the registration plan for a setup that registers on the openings earlier setups cut. */
+export function referenceRegistrationFor(
+  setup: Setup,
+  mount: MountSpec,
+  input: { seatMachineZ: number; cornerRadius: number; cutCentre?: { x: number; y: number } },
+  settings: RegistrationSettings,
+): PlanResult {
+  const dims = machineSize(setup.rotation, setup.stockBefore.bounds);
+  const { openings, blind, refused } = referenceOpenings(setup);
+  if (openings.length === 0) {
+    return { ok: false, reason: `no earlier cut can be a reference: ${refused.join('; ') || 'none passes through to this face'}` };
+  }
+  return planReferences(
+    {
+      stock: { xMin: 0, yMin: 0, xMax: dims.x, yMax: dims.y, cornerRadius: input.cornerRadius },
+      mount: mount.kind,
+      expectedSurface: { machineZ: input.seatMachineZ + dims.z, from: `the seat at machine Z ${input.seatMachineZ} + the stock's ${dims.z} mm this way up (setup ${setup.index})` },
+      fixtureBelowSurfaceMm: mount.kind === 'vise' ? dims.z - LEDGE_STEP : undefined,
+      ...(input.cutCentre ? { cutCentre: input.cutCentre } : {}),
+      openings,
+      blind,
+    },
+    settings,
+  );
 }

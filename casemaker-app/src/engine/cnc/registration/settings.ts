@@ -29,6 +29,10 @@ export interface RegistrationSettings {
    * tip's 1.0 mm radius. The location's note says how.
    */
   tipRadiusMm: number;
+  /** The rim offset's own spread, ± mm (measured with it): it cancels in a centre, doubles in a width (#429). */
+  tipRadiusUncertaintyMm: number;
+  /** The tip's outside diameter, mm: an opening narrower than this cannot be entered at all (#429). */
+  tipDiameterMm: number;
   /** How far the stock may sit from where the job expects it before the plan says so. */
   edgeMarginMm: number;
   /** The longest the surface touch may ever travel — a ceiling on the seek the plan computes. */
@@ -50,6 +54,8 @@ const KEYS: Record<keyof RegistrationSettings, string> = {
   cornerClearanceMm: 'registration.cornerClearanceMm',
   surfaceBandMm: 'registration.surfaceBandMm',
   tipRadiusMm: 'registration.tipRadiusMm',
+  tipRadiusUncertaintyMm: 'registration.tipRadiusUncertaintyMm',
+  tipDiameterMm: 'registration.tipDiameterMm',
   surfaceToleranceMm: 'registration.surfaceToleranceMm',
   edgeMarginMm: 'registration.edgeMarginMm',
   surfaceSeekMm: 'registration.surfaceSeekMm',

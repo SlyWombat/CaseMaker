@@ -94,6 +94,9 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'registration.surfaceBandMm': { label: 'surface band', unit: 'mm', rule: z.number().min(0.01).max(1), fallback: 0.25 },
   // MEASURED 2026-10-15 — the effective rim offset; the note in location.json says how. The fallback is that measurement.
   'registration.tipRadiusMm': { label: 'probe rim offset (measured)', unit: 'mm', rule: z.number().min(0).max(3), fallback: 0.7 },
+  // MEASURED 2026-10-15 with the rim offset (#429): its spread, and the tip's outside diameter.
+  'registration.tipRadiusUncertaintyMm': { label: 'probe rim offset spread (measured)', unit: 'mm', rule: z.number().min(0).max(2), fallback: 0.25 },
+  'registration.tipDiameterMm': { label: 'probe tip diameter (measured)', unit: 'mm', rule: z.number().min(0.2).max(10), fallback: 2.0 },
   'registration.surfaceToleranceMm': { label: 'surface tolerance', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 0.4 },
   'registration.edgeMarginMm': { label: 'registration margin', unit: 'mm', rule: z.number().min(0.01).max(20), fallback: 0.5 },
   'registration.surfaceSeekMm': { label: 'surface seek travel, at most', unit: 'mm', rule: z.number().min(1).max(100), fallback: 60.0 },

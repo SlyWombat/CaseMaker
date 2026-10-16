@@ -36,6 +36,7 @@ import type { ConsoleSendResult } from '@/platform/machineConsole';
 import { scanPositions, type EdgeScan, type RegistrationPlan } from './plan';
 import { classifyTouch, lastPrb, type Prb } from './readings';
 import { computeOutcome, correctionLine, type RegistrationOutcome, type RunData, type ScanRecord, type ScanTouch } from './outcome';
+import { referenceOutcome } from './references';
 
 export interface RegistrationConsole {
   send(line: string): Promise<ConsoleSendResult>;
@@ -248,7 +249,8 @@ export async function runRegistration(plan: RegistrationPlan, deps: ExecDeps): P
     await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
     await io.send('$H');
     const data: RunData = { probeRefZ: ref.z, surface: slow, scans };
-    return { ok: true, data, outcome: computeOutcome(plan, data), transcript: io.transcript };
+    // A plan that registers on earlier-setup features has its own outcome (#429); #430's is unchanged.
+    return { ok: true, data, outcome: plan.references ? referenceOutcome(plan, data) : computeOutcome(plan, data), transcript: io.transcript };
   } catch (e) {
     if (e instanceof Stop) return { ok: false, reason: await io.stopped(e.message), transcript: io.transcript };
     throw e;

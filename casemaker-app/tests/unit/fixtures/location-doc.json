@@ -541,6 +541,20 @@
       "setAt": null,
       "unit": null,
       "note": "chosen, not measured: offer an offcut back to the shelf at the end of a run that split the stock (false: never ask)"
+    },
+    "registration.tipRadiusUncertaintyMm": {
+      "value": 0.25,
+      "source": "measured",
+      "setAt": "2026-10-15T19:03:20.874Z",
+      "unit": "mm",
+      "note": "the rim offset's own spread from the same 2026-10-15 bench scan: +/- 0.25 mm at a 0.5 mm step. It cancels in a centre between two walls, and doubles in a width between them"
+    },
+    "registration.tipDiameterMm": {
+      "value": 2.0,
+      "source": "measured",
+      "setAt": "2026-10-15T19:03:20.874Z",
+      "unit": "mm",
+      "note": "the wired probe tip's outside diameter, as recorded with the 2026-10-15 bench scan: an opening must be wider than this to be entered at all"
     }
   }
 }

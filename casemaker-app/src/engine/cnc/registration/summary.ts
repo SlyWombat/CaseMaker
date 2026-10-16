@@ -10,6 +10,14 @@ const n = (v: number) => String(Math.round(v * 100) / 100);
 
 export function summarizePlan(plan: RegistrationPlan): string {
   const s = plan.settings;
+  if (plan.references) {
+    // #429 review: the walls by their labels, and the surface touch where it really is.
+    return (
+      `Home, fit the wired probe and measure it (M491); touch the surface at (${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}), ` +
+      `on solid stock clear of every opening; then scan ${plan.scans.map((sc) => sc.label ?? `the ${sc.edge} edge`).join(', ')} — stepping ${n(s.coarseStepMm)} mm, ` +
+      `then ${n(s.fineStepMm)} mm, stopping at the first touch that falls into the opening, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.`
+    );
+  }
   const edges =
     plan.scans.length === 0
       ? 'no edge scan (the bracket fixes X and Y)'

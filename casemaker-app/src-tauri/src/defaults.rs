@@ -54,7 +54,8 @@ pub type ShopDefaults = BTreeMap<String, ShopDefault>;
 
 /// Values a fresh location starts with that were MEASURED, not chosen: written with `measured`, the
 /// date, and a note saying how (#430 review). `(key, value, unit, measured at, how)`.
-pub const MEASURED_SEEDS: &[(&str, f64, &str, &str, &str)] = &[(
+pub const MEASURED_SEEDS: &[(&str, f64, &str, &str, &str)] = &[
+    (
     "registration.tipRadiusMm",
     0.7,
     "mm",
@@ -62,7 +63,24 @@ pub const MEASURED_SEEDS: &[(&str, f64, &str, &str, &str)] = &[(
     "effective rim offset of the wired probe, from the 2026-10-15 bench scan (trace 18:59-19:03): \
      the 38.1 mm blank read 39.5 mm wide, (39.5 - 38.1) / 2 = 0.70 mm, +/- 0.25 at a 0.5 mm step; \
      the tip's outside diameter is 2.0 mm",
-)];
+    ),
+    (
+        "registration.tipRadiusUncertaintyMm",
+        0.25,
+        "mm",
+        "2026-10-15T19:03:20.874Z",
+        "the rim offset's own spread from the same 2026-10-15 bench scan: +/- 0.25 mm at a 0.5 mm step. \
+         It cancels in a centre between two walls, and doubles in a width between them",
+    ),
+    (
+        "registration.tipDiameterMm",
+        2.0,
+        "mm",
+        "2026-10-15T19:03:20.874Z",
+        "the wired probe tip's outside diameter, as recorded with the 2026-10-15 bench scan: an opening must \
+         be wider than this to be entered at all",
+    ),
+];
 
 /// What a fresh location starts with. Each is a value somebody chose for this app; the source says so.
 pub const SEEDS: &[(&str, f64, &str)] = &[
@@ -338,6 +356,14 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "registration.surfaceBandMm" => Some(need(
             n.is_some_and(|v| (0.01..=1.0).contains(&v)),
             "0.01 to 1 mm",
+        )),
+        "registration.tipRadiusUncertaintyMm" => Some(need(
+            n.is_some_and(|v| (0.0..=2.0).contains(&v)),
+            "0 to 2 mm",
+        )),
+        "registration.tipDiameterMm" => Some(need(
+            n.is_some_and(|v| (0.2..=10.0).contains(&v)),
+            "0.2 to 10 mm",
         )),
         "registration.tipRadiusMm" => Some(need(
             n.is_some_and(|v| (0.0..=3.0).contains(&v)),

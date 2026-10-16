@@ -63,6 +63,11 @@ export interface EdgeScan {
   limit: number;
   coarseStep: number;
   fineStep: number;
+  /**
+   * What the scan finds, in words, when it is not one of the stock's own edges — "the left wall of the
+   * four holes" (#429). The finding's sentences use it; the stock's edge name otherwise.
+   */
+  label?: string;
 }
 
 export interface PlanInput {
@@ -124,6 +129,25 @@ export interface RegistrationPlan {
   mountObstacles: PlanObstacle[];
   settings: RegistrationSettings;
   notes: string[];
+  /**
+   * #429 — a plan that registers on FEATURES cut in an earlier setup: each one's expected centre and
+   * which of `scans` read its walls. Present only on such a plan; its outcome is `referenceOutcome`.
+   */
+  references?: ReferenceEntry[];
+  /** #429 — the pair the turn is read between, how far apart, and to what resolution across the stock. */
+  referenceRotation?: { between: [string, string]; separation: number; resolutionMm: number } | null;
+}
+
+export interface ReferenceEntry {
+  itemId: string;
+  name: string;
+  /** Its expected centre, work XY. */
+  centre: { x: number; y: number };
+  /** Its expected size across X and Y, mm — what the measured wall separation is checked against. */
+  size: { x: number; y: number };
+  /** Indices into `scans`: the walls read on each axis (one or two each). */
+  xScans: number[];
+  yScans: number[];
 }
 
 export type PlanResult = { ok: true; plan: RegistrationPlan } | { ok: false; reason: string };

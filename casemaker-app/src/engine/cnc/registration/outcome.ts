@@ -86,20 +86,22 @@ const r3 = (n: number) => Math.round(n * 1000) / 1000;
 export function edgeFrom(record: ScanRecord, tipRadius: number): EdgeFinding {
   const { scan, touches } = record;
   const base = { edge: scan.edge, along: scan.along, expectedAt: scan.expectedAt };
-  if (touches.length === 0) return { ...base, foundAt: null, problem: `the ${scan.edge} scan made no touch` };
+  // The name a sentence uses: a feature's wall by its label (#429), else the stock's edge.
+  const what = scan.label ?? `the ${scan.edge} edge`;
+  if (touches.length === 0) return { ...base, foundAt: null, problem: `the scan of ${what} made no touch` };
   const above = touches.find((t) => t.kind === 'above');
   if (above) {
     return {
       ...base,
       foundAt: null,
-      problem: `a touch on the ${scan.edge} scan read ${r3(above.prb.z)}, higher than the stock — a clamp or a taller jaw is in the way`,
+      problem: `a touch on the scan of ${what} read ${r3(above.prb.z)}, higher than the stock — a clamp or a taller jaw is in the way`,
     };
   }
   if (touches[0]!.kind !== 'stock') {
     return {
       ...base,
       foundAt: null,
-      problem: `the first touch, ${Math.abs(scan.start - scan.expectedAt)} mm inside where the ${scan.edge} edge should be, was already off the stock — it is not where the job expects it`,
+      problem: `the first touch, ${Math.abs(scan.start - scan.expectedAt)} mm short of where ${what} should be, was already off the stock — it is not where the job expects it`,
     };
   }
   const ordered = [...touches].sort((a, b) => scan.outward * (a.at - b.at));
@@ -113,7 +115,7 @@ export function edgeFrom(record: ScanRecord, tipRadius: number): EdgeFinding {
     }
   }
   if (lastOn === null || firstOff === null) {
-    return { ...base, foundAt: null, problem: `no ${scan.edge} edge was found within the scan's reach` };
+    return { ...base, foundAt: null, problem: `${what} was not found within the scan's reach` };
   }
   return { ...base, foundAt: r3((lastOn + firstOff) / 2 - scan.outward * tipRadius), problem: null };
 }
