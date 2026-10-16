@@ -40,17 +40,24 @@ const INSUNITS_MM: Record<number, number> = {
   11: 1e-7, // angstroms
   12: 1e-6, // nanometres
   13: 1e-3, // micrometres
-  14: 0.1, // decimetres
-  15: 10, // decametres
-  16: 1e12, // gigametres
-  17: 1.495978707e14, // astronomical units
-  18: 9.4607304725808e18, // light years
-  19: 3.08567758149137e19, // parsecs
-  20: 3.08567758149137e16, // US survey feet
+  14: 100, // decimetres (#453: was 0.1)
+  15: 10000, // decametres
+  16: 100000, // hectometres
+  17: 1e12, // gigametres
+  18: 1.495978707e14, // astronomical units
+  19: 9.4607304725808e18, // light years
+  20: 3.08567758149137e19, // parsecs
+  21: 1200000 / 3937, // US survey feet (#453: was shifted one code down from 15 on)
+  22: 100000 / 3937, // US survey inches
+  23: 3600000 / 3937, // US survey yards
+  24: 6336000000 / 3937, // US survey miles
 };
 
-/** Default chord error for DXF arcs, mm. PROVISIONAL: the same budget as glyph flattening. */
-const DXF_CHORD_TOLERANCE_MM = 0.02;
+/**
+ * Default chord error for DXF arcs, mm — the no-service FALLBACK of the shop default
+ * `import.dxfChordToleranceMm` (#451). The caller passes the location's value.
+ */
+export const DXF_CHORD_TOLERANCE_FALLBACK_MM = 0.02;
 
 /**
  * Endpoints closer than this join into one chain, mm. PROVISIONAL: DXF geometry that shares a
@@ -274,7 +281,12 @@ function lwPolylineRing(e: Entity, tol: number, notes: string[]): Vec2[] | null 
  * Parse a DXF document into an outline import. Pure and dependency-free; see the module header
  * for what is in and out of scope.
  */
-export function parseDxfOutline(text: string, sourceName = 'outline.dxf'): OutlineParseResult {
+export function parseDxfOutline(
+  text: string,
+  sourceName = 'outline.dxf',
+  opts: { chordToleranceMm?: number } = {},
+): OutlineParseResult {
+  const chordMm = opts.chordToleranceMm ?? DXF_CHORD_TOLERANCE_FALLBACK_MM;
   if (text.length >= MAX_OUTLINE_FILE_BYTES) {
     return {
       ok: false,
@@ -301,7 +313,7 @@ export function parseDxfOutline(text: string, sourceName = 'outline.dxf'): Outli
   for (const e of entities) {
     switch (e.type) {
       case 'LWPOLYLINE': {
-        const ring = lwPolylineRing(e, DXF_CHORD_TOLERANCE_MM / unitMm, notes);
+        const ring = lwPolylineRing(e, chordMm / unitMm, notes);
         if (ring) rings.push(ring.map(scale));
         break;
       }
@@ -310,7 +322,7 @@ export function parseDxfOutline(text: string, sourceName = 'outline.dxf'): Outli
         const cy = firstValue(e.pairs, 20);
         const r = firstValue(e.pairs, 40);
         if (cx === null || cy === null || r === null || !(r > 0)) break;
-        const n = segmentsForRadius(r, DXF_CHORD_TOLERANCE_MM / unitMm);
+        const n = segmentsForRadius(r, chordMm / unitMm);
         const ring: Vec2[] = [];
         for (let i = 0; i < n; i++) {
           const t = (2 * Math.PI * i) / n;
@@ -326,7 +338,7 @@ export function parseDxfOutline(text: string, sourceName = 'outline.dxf'): Outli
         const a0 = firstValue(e.pairs, 50) ?? 0;
         const a1 = firstValue(e.pairs, 51) ?? 360;
         if (cx === null || cy === null || r === null || !(r > 0)) break;
-        segments.push({ points: arcPoints(cx, cy, r, a0, a1, DXF_CHORD_TOLERANCE_MM / unitMm) });
+        segments.push({ points: arcPoints(cx, cy, r, a0, a1, chordMm / unitMm) });
         break;
       }
       case 'LINE': {

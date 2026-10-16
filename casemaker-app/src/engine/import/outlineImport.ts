@@ -4,6 +4,7 @@ import type { EngraveVectorShape } from '@/types/engraveJob';
 import { parseSvgOutline } from './svgOutline';
 import { parseDxfOutline } from './dxfOutline';
 import type { OutlineImport, OutlineParseResult } from './outlineTypes';
+import { shopDefault } from '@/store/shopDefaultsStore';
 
 /**
  * The front door to vector import (#217): pick a file, dispatch to the pure parser for its
@@ -30,10 +31,14 @@ export { importRasterFromDisk, RASTER_EXTENSIONS, setRasterDecodeLoader } from '
 export type { RasterImportResult, RasterDecoder } from './imageDecode';
 
 /** Dispatch by extension: `.svg` and `.dxf` only. The name is stamped onto the result. */
-export function parseOutlineFile(text: string, fileName: string): OutlineParseResult {
+export function parseOutlineFile(
+  text: string,
+  fileName: string,
+  opts: { dxfChordToleranceMm?: number } = {},
+): OutlineParseResult {
   const ext = fileName.toLowerCase().split('.').pop() ?? '';
   if (ext === 'svg') return parseSvgOutline(text, fileName);
-  if (ext === 'dxf') return parseDxfOutline(text, fileName);
+  if (ext === 'dxf') return parseDxfOutline(text, fileName, { chordToleranceMm: opts.dxfChordToleranceMm });
   return {
     ok: false,
     error: `Unsupported outline format ".${ext}": import an SVG or a DXF file.`,
@@ -48,7 +53,8 @@ export function parseOutlineFile(text: string, fileName: string): OutlineParseRe
 export async function importOutlineFromDisk(): Promise<OutlineParseResult | null> {
   const file = await openTextFile({ description: 'Vector outline', extensions: OUTLINE_EXTENSIONS });
   if (!file) return null;
-  return parseOutlineFile(file.text, file.name);
+  // #451 — the arc chord error is a shop default, read from the location at the import.
+  return parseOutlineFile(file.text, file.name, { dxfChordToleranceMm: shopDefault('import.dxfChordToleranceMm').value });
 }
 
 /** The placement fields the panel supplies when it turns an import into a job item. */

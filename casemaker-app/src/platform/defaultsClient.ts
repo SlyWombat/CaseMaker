@@ -160,6 +160,9 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // ── #438 (begin) — the column engine's FLAT grid Y pitch. Chosen, not measured: the oracle's grid
   // term is half a cell diagonal, and cost grows as 1/pitch. Read by simStore at a load; the worker
   // gets the number, never this module. Fallback = columnEngine's COLUMN_FLAT_PITCH_Y_FALLBACK_MM.
+  // ── #451 (begin) — the DXF arc chord error, mm: accuracy against point count. Chosen.
+  'import.dxfChordToleranceMm': { label: 'DXF arc chord error (chosen)', unit: 'mm', rule: z.number().min(0.001).max(0.5), fallback: 0.02 },
+  // ── #451 (end)
   'sim.columnFlatPitchYMm': { label: 'flat simulation grid Y pitch (chosen)', unit: 'mm', rule: z.number().min(0.05).max(0.5), fallback: 0.1 },
   // ── #438 (end)
   // ── #421 (begin) — the run plan's phase times (§5.8). Two were TIMED in the 2026-10-15 console

@@ -562,6 +562,13 @@
       "unit": "mm",
       "note": "the wired probe tip's outside diameter, as recorded with the 2026-10-15 bench scan: an opening must be wider than this to be entered at all"
     },
+    "import.dxfChordToleranceMm": {
+      "value": 0.02,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the most a flattened DXF arc may stray from the true arc; smaller is more points"
+    },
     "sim.columnFlatPitchYMm": {
       "value": 0.1,
       "source": "seeded",

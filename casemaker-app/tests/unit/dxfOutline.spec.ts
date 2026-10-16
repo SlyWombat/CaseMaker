@@ -174,6 +174,37 @@ describe('parseDxfOutline (#217): units', () => {
     expect(r.height).toBeCloseTo(25.4, 6);
   });
 
+  // #453 — the table was shifted one code down from 15 on: 15 read as 10 mm (decametres are
+  // 10 000), and 20 (parsecs in the AutoCAD table) was labelled US survey feet at 3.09e16 mm.
+  it.each([
+    [14, 100], // decimetres
+    [15, 10000], // decametres
+    [16, 100000], // hectometres
+    [21, 1200000 / 3937], // US survey feet
+    [22, 100000 / 3937], // US survey inches
+    [23, 3600000 / 3937], // US survey yards
+  ])('$INSUNITS = %i scales a 1 × 1 drawing to %f mm', (code, mm) => {
+    const unit: [number, number][] = [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [0, 1],
+    ];
+    const r = ok(parseDxfOutline(dxf(lwPolyline(unit), code)));
+    expect(r.width).toBeCloseTo(mm, 6);
+  });
+
+  it('a US survey foot is 304.8006 mm, not the old 3.09e16 (#453)', () => {
+    const r = ok(parseDxfOutline(dxf(lwPolyline([[0, 0], [1, 0], [1, 1], [0, 1]]), 21)));
+    expect(r.width).toBeCloseTo(304.8006096, 6);
+  });
+
+  it('the arc chord error comes from the caller, the shop default (#451)', () => {
+    const fine = ok(parseDxfOutline(dxf(circle(0, 0, 10)), 'c.dxf', { chordToleranceMm: 0.001 }));
+    const coarse = ok(parseDxfOutline(dxf(circle(0, 0, 10)), 'c.dxf', { chordToleranceMm: 0.2 }));
+    expect(fine.contours[0]!.length).toBeGreaterThan(coarse.contours[0]!.length);
+  });
+
   it('a missing $INSUNITS defaults to mm with a visible note', () => {
     const r = ok(parseDxfOutline(dxf(lwPolyline(square))));
     expect(r.width).toBeCloseTo(10, 6);

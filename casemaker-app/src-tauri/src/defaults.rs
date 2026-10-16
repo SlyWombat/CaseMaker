@@ -231,6 +231,9 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("adaptive.entryFeed", 200.0, "mm/min", "placeholder, not measured; not a vendor number: the helix and ramp entry feed until a measured row replaces it"),
     ("adaptive.spindleRpm", 12000.0, "rpm", "placeholder, not measured; not a vendor number: the adaptive spindle speed until a measured row replaces it"),
     // ── #438 (begin) — the column engine's FLAT grid Y pitch: chosen, not measured.
+    // ── #451 (begin) — the DXF arc chord error: chosen, not measured.
+    ("import.dxfChordToleranceMm", 0.02, "mm", "chosen, not measured: the most a flattened DXF arc may stray from the true arc; smaller is more points"),
+    // ── #451 (end)
     ("sim.columnFlatPitchYMm", 0.1, "mm", "chosen, not measured: the flat simulation grid's Y pitch; the oracle's band grows with the cell and the sim's memory and time with 1/pitch"),
     // ── #438 (end)
     // ── #421 (begin) — the run plan's phase times that the app has not timed: chosen.
@@ -552,6 +555,12 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "1000 to 30000 rpm",
         )),
         // ── #438 (begin)
+        // ── #451 (begin)
+        "import.dxfChordToleranceMm" => Some(need(
+            n.is_some_and(|v| (0.001..=0.5).contains(&v)),
+            "0.001 to 0.5 mm",
+        )),
+        // ── #451 (end)
         "sim.columnFlatPitchYMm" => Some(need(
             n.is_some_and(|v| (0.05..=0.5).contains(&v)),
             "0.05 to 0.5 mm",
