@@ -450,6 +450,22 @@ const cutOverrideSchema = z.object({
  */
 const fieldSourceSchema = z.enum(['computed', 'catalogue', 'user', 'measured']);
 
+/**
+ * Where the stock came from (#418, `EngraveJob.stockEntry`). Strict where it can be: the form is
+ * one of the rectangular ones a job can hold, and a shelf pick names its entry.
+ */
+const stockEntrySchema = z
+  .object({
+    kind: z.enum(['shelf', 'file', 'made']),
+    shelfId: z.string().min(1).nullable(),
+    file: z.object({ name: z.string(), sha256: z.string().regex(/^[0-9a-f]{64}$/) }).nullable(),
+    form: z.enum(['sheet', 'plate', 'block', 'printed-blank']),
+    finish: z.enum(['rough', 'finished', 'printed', 'unknown']),
+    conductive: z.boolean(),
+  })
+  .refine((e) => e.kind !== 'shelf' || e.shelfId !== null, 'a shelf pick names its shelf entry')
+  .refine((e) => e.kind !== 'file' || e.file !== null, 'stock read from a file names the file');
+
 const jobSourcesSchema = z.object({
   stock: z
     .object({
@@ -561,6 +577,9 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   // `ToolSchema` the library entries use, so a job file cannot smuggle in a tool shape the
   // sweeper would then have to defend against.
   tool: ToolSchema.nullish(),
+  // #418's material-first start: where the stock came from. OPTIONAL, not defaulted, for the same
+  // byte-for-byte reason as `combined`/`traces`/`tool`.
+  stockEntry: stockEntrySchema.optional(),
 });
 
 export const engraveJobSchema = z

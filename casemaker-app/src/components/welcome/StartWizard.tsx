@@ -16,7 +16,14 @@ import { useMachineStore, type MachineCheckOutcome } from '@/store/machineStore'
 import { useStartWizardStore } from '@/store/startWizardStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { EngraveSetupFlow } from '@/components/panels/EngraveSetupFlow';
+import { readDesignFile } from '@/engine/import/designImport';
+import { useStockStore } from '@/store/stockStore';
 import type { Project } from '@/types/project';
+import type { JobStockEntry } from '@/types/engraveJob';
+import type { SetupStepId } from '@/engine/cnc/engrave/setupFlow';
+import { jobItemCount } from '@/engine/cnc/stockStart';
+import '@/store/stockEntryFollow';
+import { StartStockStep, type PendingStock } from './StartStockStep';
 
 /**
  * The startup wizard (#280, filed from #274) — three questions and a panel.
@@ -30,9 +37,10 @@ import type { Project } from '@/types/project';
  *    half blocks: a job can be authored, verified and simulated with no machine at all, which is the
  *    same conclusion MillMage's skippable setup and Bantam's "will not prevent you from milling"
  *    reach (UI-PATTERNS §1).
- * 2. **What are you making?** Five project types, each one an existing template spec. Ours is the
- *    question the field does not ask, because every other product is single-purpose CAM; the
- *    nearest equivalent is new-from-template, which is exactly the route this reuses.
+ * 2. **What are you cutting from?** (#418, §5.1) The material first, then the stock: off the shelf
+ *    (#413), typed here (and optionally put on the shelf), or an STL/3MF used as the stock — see
+ *    `StartStockStep`. The two templates (blank, badge blank) are still offered beneath it, as the
+ *    new-from-template route they always were.
  * 3. **How is it held?** Delegated, not duplicated: `EngraveSetupFlow` (#254) already owns
  *    workholding, material, blank and cutter, already seeds from the job, and already writes
  *    through the one tagged answer path. A second copy would be a second place to change.
@@ -82,7 +90,41 @@ const JOB_TYPE_IDS = ['badge-blank', 'blank'] as const;
  */
 const MACHINE_PROFILES = Object.values(MACHINES);
 
-type Step = 'machine' | 'job' | 'setup';
+/**
+ * `stock` is #418's material-first step (§5.1); the two templates are offered beneath it. `setup`
+ * hands over to the mount — `EngraveSetupFlow`'s holding step alone after a stock pick, every step
+ * after a template (whose blank has not been asked about).
+ */
+type Step = 'machine' | 'stock' | 'setup';
+
+/**
+ * A new project whose part IS the stock (#418): the `blank` template, sized to it, so the viewport
+ * draws the piece that was picked rather than the template's 100 × 60 × 12. Square corners — a plate
+ * off the shelf has no radius, and `blankStockFor` reads width → length, height → width.
+ */
+/** Take `stockEntry` off the job, if it carries one. */
+function clearStockEntry(): void {
+  const store = useEngraveJobStore.getState();
+  if (store.job.stockEntry === undefined) return;
+  const next = { ...store.job };
+  delete next.stockEntry;
+  store.replace(next);
+}
+
+function projectForStock(stock: { length: number; width: number; thickness: number }): Project | null {
+  const template = findTemplateAcrossSources('blank');
+  if (template === undefined) return null;
+  const project = template.build();
+  const blank = project.case.blank;
+  if (blank === undefined) return null;
+  return {
+    ...project,
+    case: {
+      ...project.case,
+      blank: { ...blank, enabled: true, width: stock.length, height: stock.width, thickness: stock.thickness, cornerRadius: 0 },
+    },
+  };
+}
 
 /** `100 × 60 × 12 mm` — the work area is the envelope's span, machine coordinates run negative. */
 function span(min: number, max: number): number {
@@ -270,6 +312,13 @@ export function StartWizard(): JSX.Element {
 
   const [step, setStep] = useState<Step>('machine');
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<PendingStock | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  // Which steps the mount hand-off asks: a stock pick has answered the material and the blank.
+  const [setupSteps, setSetupSteps] = useState<readonly SetupStepId[] | undefined>(undefined);
+  // #418 review — the job open now has items, and starting from stock would replace it: ask first.
+  const [confirmReplace, setConfirmReplace] = useState<{ pending: PendingStock; items: number } | null>(null);
   const [address, setAddress] = useState('');
 
   // `probeMachine` resolves every failure into one of its four outcomes, so there is nothing to
@@ -298,13 +347,100 @@ export function StartWizard(): JSX.Element {
     clearHistory();
     setSection('cnc-engrave');
     await seedStockFromProject(project);
+    // #418 review — a template's blank is the stock now, so a shelf entry or file an earlier start
+    // named is no longer where it came from.
+    clearStockEntry();
     // Hand off to step 3, which is the flow's own overlay: the wizard gets out of the way rather
     // than stacking a second dialog on top of it.
+    setSetupSteps(undefined);
     setStep('setup');
     await scheduleImmediate(project);
   }
 
-  if (step === 'setup') return <EngraveSetupFlow onClose={closeWizard} />;
+  /**
+   * #418 — start a NEW job from the stock step 2 settled, with an empty design, and hand over to the
+   * mount. Applied here and not seeded: a pick off the shelf is an explicit answer, so
+   * `seedStockFromProject`'s "never overwrite a typed size" guard does not apply.
+   *
+   * A new project is a new job: the job store is `reset` (the machine chosen in step 1 is kept), then
+   * the stock goes through `setStock` — so the vise's `stockProud` follows the thickness (#344) —
+   * and the job is left with no items. There is one job per browser until #425's save/open, so the
+   * job that was open is replaced; the wizard is the door for a NEW project, which is what that means.
+   *
+   * The stock entry is NAMED on the job (`stockEntry.shelfId`) and not reserved: Cut mode (#419)
+   * reserves it. A typed piece the user asked to keep goes on the shelf first, and a refusal there
+   * stops the start rather than leaving a job that names an entry that does not exist.
+   */
+  async function startFromStock(p: PendingStock): Promise<void> {
+    setStarting(true);
+    setStartError(null);
+    try {
+      const store = useEngraveJobStore.getState();
+      const machineId = store.job.machineId;
+      let entry: JobStockEntry;
+      if (p.kind === 'design') {
+        const read = await readDesignFile(p.file);
+        if (!read.ok) {
+          setStartError(read.error);
+          return;
+        }
+        store.reset();
+        store.setMachine(machineId);
+        // #410's own route: the blank, its void and the design's items, in one write.
+        store.takeDesign(read.patch);
+        entry = {
+          kind: 'file',
+          shelfId: null,
+          file: { name: read.filename, sha256: p.sha256 },
+          form: 'printed-blank',
+          finish: 'printed',
+          conductive: false,
+        };
+      } else {
+        if (p.saveToShelf !== null) {
+          const shelf = useStockStore.getState();
+          const ok = await shelf.add(p.saveToShelf);
+          if (!ok) {
+            setStartError(`It could not be put on the shelf: ${useStockStore.getState().notice?.text ?? 'no reason was given'}`);
+            return;
+          }
+        }
+        store.reset();
+        store.setMachine(machineId);
+        // A size read off a file is the app's reading of it; a shelf entry or a typed piece is the
+        // user's statement. `print`/`flatness` are cleared explicitly (see `stockStart.ts`).
+        store.setStock(
+          { ...p.choice.stock, print: undefined, flatness: undefined },
+          p.choice.entry.kind === 'file' ? 'computed' : 'user',
+        );
+        entry = p.choice.entry;
+      }
+      const job = useEngraveJobStore.getState().job;
+      // The empty design: a stock pick brings no lines. (A design file brings its own items.)
+      store.replace({
+        ...job,
+        ...(p.kind === 'design' ? {} : { labels: [], shapes: [] }),
+        stockEntry: entry,
+      });
+
+      const stock = useEngraveJobStore.getState().job.stock;
+      const project = projectForStock(stock);
+      if (project === null) {
+        setStartError('the blank template is missing from this build');
+        return;
+      }
+      setProject(project); // also flips welcomeMode off
+      clearHistory();
+      setSection('cnc-engrave');
+      setSetupSteps(['holding']);
+      setStep('setup');
+      await scheduleImmediate(project);
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  if (step === 'setup') return <EngraveSetupFlow onClose={closeWizard} steps={setupSteps} />;
 
   const jobTypes = JOB_TYPE_IDS.map((id) => findTemplateAcrossSources(id)).filter(
     (t): t is NonNullable<typeof t> => t !== undefined,
@@ -423,30 +559,65 @@ export function StartWizard(): JSX.Element {
           </div>
         )}
 
-        {step === 'job' && (
-          <div data-testid="start-wizard-step-job" style={{ marginTop: 8 }}>
-            <p style={MUTED}>
-              What are you cutting? Each of these sets the project up; a machine can be connected
-              later, or not at all.
-            </p>
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 6 }}>
-              {jobTypes.map((t) => (
-                <li key={t.id}>
+        {step === 'stock' && (
+          <>
+            <StartStockStep onChange={setPending} />
+            {confirmReplace !== null && (
+              <div
+                data-testid="start-wizard-replace-confirm"
+                style={{ border: '1px solid #7a5a28', background: '#241d12', borderRadius: 4, padding: 6, marginTop: 6 }}
+              >
+                <p style={{ ...MUTED, color: '#e0c07a', margin: 0 }}>
+                  The job open now has {confirmReplace.items} item{confirmReplace.items === 1 ? '' : 's'} on it. A new
+                  project starts a new job, and there is one job here until save and open land (#425) — starting
+                  replaces it, and its items are lost.
+                </p>
+                <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                   <button
                     type="button"
-                    data-testid={`start-wizard-job-${t.id}`}
-                    style={{ width: '100%', textAlign: 'left', padding: 6 }}
+                    data-testid="start-wizard-replace-yes"
                     onClick={() => {
-                      void chooseJob(t.id);
+                      const p = confirmReplace.pending;
+                      setConfirmReplace(null);
+                      void startFromStock(p);
                     }}
                   >
-                    <div style={{ fontSize: 12, color: '#cfe' }}>{t.name}</div>
-                    <div style={MUTED}>{t.description}</div>
+                    Replace it
                   </button>
-                </li>
-              ))}
-            </ul>
-          </div>
+                  <button type="button" data-testid="start-wizard-replace-no" onClick={() => setConfirmReplace(null)}>
+                    Keep it
+                  </button>
+                </div>
+              </div>
+            )}
+            {startError !== null && (
+              <p style={{ ...MUTED, color: '#f0b4ad' }} data-testid="start-wizard-start-error">
+                {startError}
+              </p>
+            )}
+            <div data-testid="start-wizard-step-job" style={{ marginTop: 10, borderTop: '1px solid #2a2f36', paddingTop: 6 }}>
+              <p style={MUTED}>
+                Or start from a template — its blank becomes the stock, and the setup asks the rest.
+              </p>
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 6 }}>
+                {jobTypes.map((t) => (
+                  <li key={t.id}>
+                    <button
+                      type="button"
+                      data-testid={`start-wizard-job-${t.id}`}
+                      style={{ width: '100%', textAlign: 'left', padding: 6 }}
+                      onClick={() => {
+                        void chooseJob(t.id);
+                      }}
+                    >
+                      <div style={{ fontSize: 12, color: '#cfe' }}>{t.name}</div>
+                      <div style={MUTED}>{t.description}</div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </>
         )}
 
         <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
@@ -471,9 +642,26 @@ export function StartWizard(): JSX.Element {
               data-testid="start-wizard-next"
               style={{ padding: '3px 12px' }}
               title="A job does not need a machine."
-              onClick={() => setStep('job')}
+              onClick={() => setStep('stock')}
             >
               {canDriveMachine ? 'Next' : 'Continue without a machine'}
+            </button>
+          )}
+          {step === 'stock' && (
+            <button
+              type="button"
+              data-testid="start-wizard-stock-next"
+              style={{ padding: '3px 12px' }}
+              disabled={pending === null || starting}
+              title={pending === null ? 'Pick the stock first.' : 'Start the job on this stock, then say how it is held.'}
+              onClick={() => {
+                if (pending === null) return;
+                const items = jobItemCount(useEngraveJobStore.getState().job);
+                if (items > 0) setConfirmReplace({ pending, items });
+                else void startFromStock(pending);
+              }}
+            >
+              {starting ? 'Starting…' : 'Next: mount'}
             </button>
           )}
         </div>

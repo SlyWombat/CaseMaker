@@ -1,0 +1,309 @@
+// @vitest-environment jsdom
+// Issue #418 — the start wizard's material-first step: shelf stock → mount → an empty design, with
+// the project's part sized to the stock. The shelf is a fake house client (as `stockShelf.spec.ts`
+// fakes it); `scheduleImmediate` is mocked because jsdom has no geometry worker.
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+import locationDoc from './fixtures/location-doc.json';
+import { StartWizard } from '@/components/welcome/StartWizard';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { setHouseClientLoader, type HouseCall, type HouseClient } from '@/platform/houseClient';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { resetMachineStore } from '@/store/machineStore';
+import { createDefaultProject, useProjectStore } from '@/store/projectStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import { resetStartWizard } from '@/store/startWizardStore';
+import { resetStockStore } from '@/store/stockStore';
+import { useViewportStore } from '@/store/viewportStore';
+import type { JobStockEntry } from '@/types/engraveJob';
+
+vi.mock('@/engine/jobs/JobScheduler', () => ({ scheduleImmediate: vi.fn(async () => {}) }));
+
+const caps = vi.hoisted(() => ({ drive: false }));
+vi.mock('@/platform/capabilities', async (orig) => {
+  const real = await orig<typeof import('@/platform/capabilities')>();
+  return {
+    ...real,
+    get canDriveMachine() {
+      return caps.drive;
+    },
+  };
+});
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const SHELF = (locationDoc as { stock: unknown[] }).stock;
+
+/** The service's shelf: GET and POST, and every request logged. `null` = no service at all. */
+function fakeShelf(initial: unknown[] | null) {
+  const items = JSON.parse(JSON.stringify(initial ?? [])) as Array<{ id: string }>;
+  const calls: string[] = [];
+  const client = {
+    call: async (method: string, path: string, body?: unknown): Promise<HouseCall> => {
+      calls.push(`${method} ${path}`);
+      if (initial === null) return { kind: 'absent', reason: 'no house service here' };
+      if (method === 'GET' && path === '/stock') return { kind: 'ok', text: JSON.stringify(items), etag: '"s-1"' };
+      if (method === 'POST' && path === '/stock') {
+        items.push(body as { id: string });
+        return { kind: 'ok', text: '' };
+      }
+      return { kind: 'refused', status: 400, message: `unexpected ${method} ${path}` };
+    },
+  } as unknown as HouseClient;
+  setHouseClientLoader(async () => client);
+  return { calls, items: () => items };
+}
+
+beforeEach(() => {
+  cleanup();
+  resetMachineStore();
+  useSettingsStore.getState().resetSettings();
+  resetStartWizard();
+  resetStockStore();
+  useProjectStore.setState({ project: createDefaultProject('rpi-4b'), welcomeMode: true });
+  useViewportStore.setState({ activeSidebarSection: null, selection: null });
+  useEngraveJobStore.setState({ job: defaultEngraveJob() });
+});
+
+afterEach(() => {
+  cleanup();
+  setHouseClientLoader(null);
+});
+
+async function toStockStep(): Promise<void> {
+  render(<StartWizard />);
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('start-wizard-next'));
+  });
+  expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
+}
+
+function chooseMaterial(value: string): void {
+  fireEvent.change(screen.getByTestId('start-wizard-stock-material'), { target: { value } });
+}
+
+describe('the material-first start (#418)', () => {
+  it('shelf stock → mount → an empty design, the part sized to the stock, nothing reserved', async () => {
+    const svc = fakeShelf(SHELF);
+    await toStockStep();
+    chooseMaterial('aluminium-6061');
+    const plate = await screen.findByTestId('start-wizard-shelf-item-stock-plate1');
+    expect(plate.getAttribute('data-state')).toBe('ok');
+    fireEvent.click(plate);
+
+    expect(screen.getByTestId('start-wizard-stock-summary').textContent).toContain('100 × 100 × 5');
+    // Q6: rough plate → facing on by default.
+    expect(screen.getByTestId('start-wizard-stock-facing').getAttribute('data-state')).toBe('on');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+
+    // The mount, alone: the shelf answered the material and the blank.
+    await screen.findByTestId('engrave-setup-flow');
+    expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
+    expect(screen.getByTestId('engrave-setup-progress').textContent).toBe('1 / 1');
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.stock).toMatchObject({ length: 100, width: 100, thickness: 5, material: 'aluminium-6061' });
+    expect(job.sources?.stock?.length).toBe('user');
+    expect(job.labels).toEqual([]);
+    expect(job.shapes).toEqual([]);
+    expect(job.stockEntry).toEqual({
+      kind: 'shelf',
+      shelfId: 'stock-plate1',
+      file: null,
+      form: 'plate',
+      finish: 'rough',
+      conductive: true,
+    });
+    // The vise followed the 5 mm plate (#344): the shipped 4 mm proud would not seat it.
+    expect(job.workholding.vise.stockProud).toBeLessThanOrEqual(5 - 3.1 + 1e-9);
+
+    // The part IS the stock — what the viewport draws.
+    const project = useProjectStore.getState().project;
+    expect(useProjectStore.getState().welcomeMode).toBe(false);
+    expect(project.case.blank).toMatchObject({ enabled: true, width: 100, height: 100, thickness: 5, cornerRadius: 0 });
+    expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-engrave');
+
+    // Named, not reserved: Cut mode (#419) reserves.
+    expect(svc.calls.filter((c) => !c.startsWith('GET'))).toEqual([]);
+
+    // Finishing the mount writes the holding answer and leaves the design empty.
+    fireEvent.click(screen.getByTestId('engrave-setup-next'));
+    expect(useEngraveJobStore.getState().job.labels).toEqual([]);
+    expect(useEngraveJobStore.getState().job.stockEntry?.shelfId).toBe('stock-plate1');
+  });
+
+  it('a used-up entry is listed, greyed, with the job that used it', async () => {
+    fakeShelf(SHELF);
+    await toStockStep();
+    chooseMaterial('pla');
+    const blank = await screen.findByTestId('start-wizard-shelf-item-stock-blank1');
+    expect(blank.getAttribute('data-state')).toBe('refused');
+    expect((blank as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('start-wizard-shelf-item-stock-blank1-reason').textContent).toBe('none left — consumed by job-12');
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('no service: the shelf door says so, and a typed piece still starts the job', async () => {
+    fakeShelf(null);
+    await toStockStep();
+    await waitFor(() =>
+      expect(screen.getByTestId('start-wizard-shelf-state').getAttribute('data-state')).toBe('absent'),
+    );
+    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
+    expect((screen.getByTestId('start-wizard-make-save') as HTMLInputElement).disabled).toBe(true);
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '80' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '50' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '6' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    await screen.findByTestId('engrave-setup-flow');
+    const job = useEngraveJobStore.getState().job;
+    expect(job.stock).toMatchObject({ length: 80, width: 50, thickness: 6 });
+    expect(job.stockEntry).toMatchObject({ kind: 'made', shelfId: null, form: 'plate', finish: 'unknown' });
+    // Non-square on purpose: an X/Y swap would show here. Length (X) is the blank's width, width (Y)
+    // its height — `blankStockFor`'s mapping, read back the other way.
+    expect(useProjectStore.getState().project.case.blank).toMatchObject({ width: 80, height: 50, thickness: 6 });
+  });
+
+  it('a typed piece kept on the shelf is POSTed first, and the job names the new entry', async () => {
+    const svc = fakeShelf(SHELF);
+    await toStockStep();
+    chooseMaterial('brass');
+    await waitFor(() =>
+      expect(screen.getByTestId('start-wizard-shelf-state').getAttribute('data-state')).toBe('empty'),
+    );
+    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
+    fireEvent.change(screen.getByTestId('start-wizard-make-form'), { target: { value: 'block' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '40' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '30' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '20' } });
+    fireEvent.change(screen.getByTestId('start-wizard-stock-finish'), { target: { value: 'finished' } });
+    fireEvent.click(screen.getByTestId('start-wizard-make-save'));
+    expect(screen.getByTestId('start-wizard-stock-facing').getAttribute('data-state')).toBe('off');
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    await screen.findByTestId('engrave-setup-flow');
+    expect(svc.calls).toContain('POST /stock');
+    const saved = svc.items().find((i) => (i as { material?: string }).material === 'brass')!;
+    expect(useEngraveJobStore.getState().job.stockEntry).toMatchObject({ kind: 'made', shelfId: saved.id, form: 'block' });
+  });
+
+  it('round stock is not on offer to type; a disc on the shelf is refused by name', async () => {
+    const disc = {
+      ...(SHELF[0] as object),
+      id: 'stock-disc1',
+      form: 'disc',
+      size: { diameter: 50, thickness: 5 },
+      reservations: [],
+    };
+    fakeShelf([...SHELF, disc]);
+    await toStockStep();
+    chooseMaterial('aluminium-6061');
+    await screen.findByTestId('start-wizard-shelf-item-stock-disc1');
+    expect(screen.getByTestId('start-wizard-shelf-item-stock-disc1-reason').textContent).toMatch(/a disc is round stock/);
+    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
+    const forms = Array.from((screen.getByTestId('start-wizard-make-form') as HTMLSelectElement).options).map((o) => o.value);
+    expect(forms).toEqual(['plate', 'block', 'sheet', 'printed-blank']);
+  });
+
+  it('the templates are still offered beneath the stock step', async () => {
+    fakeShelf(SHELF);
+    await toStockStep();
+    expect(screen.getByTestId('start-wizard-job-blank')).toBeDefined();
+    expect(screen.getByTestId('start-wizard-job-badge-blank')).toBeDefined();
+  });
+
+  it('asks before replacing a job that has items, and Keep it leaves the job alone', async () => {
+    fakeShelf(SHELF);
+    const before = { ...defaultEngraveJob(), labels: defaultEngraveJob().labels.slice(0, 1) };
+    useEngraveJobStore.setState({ job: before });
+    await toStockStep();
+    chooseMaterial('aluminium-6061');
+    fireEvent.click(await screen.findByTestId('start-wizard-shelf-item-stock-plate1'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    expect(screen.getByTestId('start-wizard-replace-confirm').textContent).toContain('1 item on it');
+    fireEvent.click(screen.getByTestId('start-wizard-replace-no'));
+    expect(screen.queryByTestId('start-wizard-replace-confirm')).toBeNull();
+    expect(useEngraveJobStore.getState().job).toBe(before);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-replace-yes'));
+    });
+    await screen.findByTestId('engrave-setup-flow');
+    expect(useEngraveJobStore.getState().job.labels).toEqual([]);
+  });
+
+  it('a job with only the demo lines starts without asking', async () => {
+    fakeShelf(SHELF);
+    await toStockStep();
+    chooseMaterial('aluminium-6061');
+    fireEvent.click(await screen.findByTestId('start-wizard-shelf-item-stock-plate1'));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    expect(screen.queryByTestId('start-wizard-replace-confirm')).toBeNull();
+    await screen.findByTestId('engrave-setup-flow');
+  });
+
+  it('the skipped blank and cutter steps still say what is wrong, on the mount step', async () => {
+    fakeShelf(null);
+    await toStockStep();
+    fireEvent.click(screen.getByTestId('start-wizard-stock-door-make'));
+    // 4.5 mm: the shipped vise stands it 4 mm proud on a 3.1 mm step, more than the seated value.
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '30' } });
+    fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '4.5' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    await screen.findByTestId('engrave-setup-step-holding');
+    // Force the proud past the blank, as a saved vise would: the blank step's fix must still appear.
+    useEngraveJobStore.getState().setVise({ stockProud: 5, source: 'saved' });
+    cleanup();
+    const { EngraveSetupFlow } = await import('@/components/panels/EngraveSetupFlow');
+    render(<EngraveSetupFlow onClose={() => {}} steps={['holding']} />);
+    expect(screen.getByTestId('engrave-setup-fix-slot')).toBeDefined();
+    expect(screen.getByTestId('engrave-setup-step-finding-vise-stock-proud-exceeds-thickness')).toBeDefined();
+  });
+});
+
+describe('stockEntry follows the stock (#418 review)', () => {
+  const entry: JobStockEntry = { kind: 'shelf', shelfId: 'stock-plate1', file: null, form: 'plate', finish: 'rough', conductive: true };
+
+  it('an edit to the size or the material clears it; re-stating the same stock keeps it', async () => {
+    await import('@/store/stockEntryFollow');
+    const store = useEngraveJobStore.getState();
+    store.replace({ ...defaultEngraveJob(), stockEntry: entry });
+    store.setStock({ length: useEngraveJobStore.getState().job.stock.length });
+    expect(useEngraveJobStore.getState().job.stockEntry).toEqual(entry);
+    store.setStock({ length: 90 });
+    expect(useEngraveJobStore.getState().job).not.toHaveProperty('stockEntry');
+
+    store.replace({ ...useEngraveJobStore.getState().job, stockEntry: entry });
+    store.setStock({ material: 'brass' });
+    expect(useEngraveJobStore.getState().job).not.toHaveProperty('stockEntry');
+  });
+
+  it('a template start clears an entry an earlier start named', async () => {
+    fakeShelf(SHELF);
+    useEngraveJobStore.setState({ job: { ...defaultEngraveJob(), stockEntry: entry } });
+    await toStockStep();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-job-blank'));
+    });
+    await screen.findByTestId('engrave-setup-flow');
+    expect(useEngraveJobStore.getState().job).not.toHaveProperty('stockEntry');
+  });
+});

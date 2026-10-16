@@ -70,7 +70,18 @@ function FindingRow({ finding, testid }: { finding: JobFinding; testid: string }
   );
 }
 
-export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Element {
+export function EngraveSetupFlow({
+  onClose,
+  steps: only,
+}: {
+  onClose: () => void;
+  /**
+   * Ask only these steps, in `SETUP_STEPS` order (#418). The material-first start has already
+   * answered the material and the blank from the shelf, so it asks the mount alone rather than
+   * offering the shelf's dimensions up to be typed over. Absent = every step, as before.
+   */
+  steps?: readonly SetupStepId[];
+}): JSX.Element {
   const job = useEngraveJobStore((s) => s.job);
   const applySetup = useEngraveJobStore((s) => s.applySetup);
   // #305 — the resolved list, not `TOOL_LIBRARY`. `body()` is a plain function called from this
@@ -82,14 +93,31 @@ export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Elem
   const [answers, setAnswers] = useState<SetupAnswers>(() => defaultSetupAnswers(job));
   const [index, setIndex] = useState(0);
 
-  const step = SETUP_STEPS[index]!;
-  const last = index === SETUP_STEPS.length - 1;
+  const shown = useMemo(
+    () => (only === undefined ? SETUP_STEPS : SETUP_STEPS.filter((st) => only.includes(st.id))),
+    [only],
+  );
+  const step = shown[index] ?? SETUP_STEPS[0]!;
+  const last = index >= shown.length - 1;
   const stepId: SetupStepId = step.id;
 
   // What the current answers would cause, on the exact document the flow would write. The blank
   // step's checks include `validateVise`, so the #231 refusal appears here with its fix.
-  const findings = useMemo(() => stepFindings(stepId, job, answers), [stepId, job, answers]);
-  const fix = useMemo(() => (stepId === 'blank' ? stockProudFix(answers) : null), [stepId, answers]);
+  // #418 review — a step that is SKIPPED still has its checks: the material-first start skips the
+  // blank and the cutter, and the vise's proud height and a missing cutter must not go unsaid. The
+  // last step shown carries the skipped steps' findings (and the blank's proud fix) as its own.
+  const skipped = useMemo(
+    () => (last ? SETUP_STEPS.map((st) => st.id).filter((id) => !shown.some((st) => st.id === id)) : []),
+    [last, shown],
+  );
+  const findings = useMemo(
+    () => [stepId, ...skipped].flatMap((id) => stepFindings(id, job, answers)),
+    [stepId, skipped, job, answers],
+  );
+  const fix = useMemo(
+    () => (stepId === 'blank' || skipped.includes('blank') ? stockProudFix(answers) : null),
+    [stepId, skipped, answers],
+  );
 
   // #352 — where the blank's numbers came from. All three dims at `'computed'` is the hand-off
   // seed's own stamp (`seedStockFromProject`), so 76.2 need not look hand-typed. The line goes the
@@ -113,6 +141,28 @@ export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Elem
   function next(): void {
     if (last) finish();
     else setIndex((i) => i + 1);
+  }
+
+  function fixSlot(): JSX.Element | null {
+    if (!fix) return null;
+    return (
+      <div
+        data-testid="engrave-setup-fix-slot"
+        style={{ border: '1px solid #7a5a28', background: '#241d12', borderRadius: 4, padding: 6, marginTop: 4 }}
+      >
+        <p style={{ ...MUTED, color: '#e0c07a', margin: 0 }}>
+          The vise holds the stock {answers.vise.stockProud} mm proud, taller than this{' '}
+          {answers.stock.thickness} mm blank.
+        </p>
+        <button
+          type="button"
+          data-testid="engrave-setup-fix-proud"
+          onClick={() => setAnswers((a) => withVise(a, { stockProud: fix.stockProud, source: fix.source }))}
+        >
+          Set stock proud to {fix.stockProud} mm
+        </button>
+      </div>
+    );
   }
 
   function body(): JSX.Element {
@@ -201,24 +251,7 @@ export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Elem
                 any you measured.
               </p>
             )}
-            {fix && (
-              <div
-                data-testid="engrave-setup-fix-slot"
-                style={{ border: '1px solid #7a5a28', background: '#241d12', borderRadius: 4, padding: 6, marginTop: 4 }}
-              >
-                <p style={{ ...MUTED, color: '#e0c07a', margin: 0 }}>
-                  The vise holds the stock {answers.vise.stockProud} mm proud, taller than this{' '}
-                  {answers.stock.thickness} mm blank.
-                </p>
-                <button
-                  type="button"
-                  data-testid="engrave-setup-fix-proud"
-                  onClick={() => setAnswers((a) => withVise(a, { stockProud: fix.stockProud, source: fix.source }))}
-                >
-                  Set stock proud to {fix.stockProud} mm
-                </button>
-              </div>
-            )}
+            {fixSlot()}
           </>
         );
       case 'cutter':
@@ -253,7 +286,7 @@ export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Elem
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <b style={{ flex: 1, fontSize: 13 }}>Set up this job</b>
           <span style={MUTED} data-testid="engrave-setup-progress">
-            {index + 1} / {SETUP_STEPS.length}
+            {index + 1} / {shown.length}
           </span>
           <button type="button" data-testid="engrave-setup-close" onClick={onClose}>
             Close
@@ -266,6 +299,7 @@ export function EngraveSetupFlow({ onClose }: { onClose: () => void }): JSX.Elem
 
         <div data-testid={`engrave-setup-step-${stepId}`}>
           {body()}
+          {stepId !== 'blank' && fixSlot()}
           {findings.length > 0 && (
             <div data-testid="engrave-setup-findings" style={{ marginTop: 6 }}>
               {findings.map((f, i) => (

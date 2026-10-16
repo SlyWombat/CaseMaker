@@ -785,4 +785,33 @@ export interface EngraveJob {
    */
   sources?: EngraveJobSources;
   customFonts: CustomFont[];
+  /**
+   * Where the stock came from (#418, §5.1) — the shelf entry, the file, or a piece typed in the start
+   * wizard — and the facts about it the rectangle above cannot carry: its form and its finish.
+   *
+   * OPTIONAL, and absent on every job written before the material-first start, so such a document
+   * round-trips byte-for-byte. Nothing RESERVES the entry yet: Cut mode (#419) reserves `shelfId`
+   * when the job enters it; until then the job only names it.
+   */
+  stockEntry?: JobStockEntry;
+}
+
+/** The forms a job's stock can take (#418): the rectangular ones. A rod, tube or disc is refused. */
+export type JobStockForm = 'sheet' | 'plate' | 'block' | 'printed-blank';
+
+/** A shelf entry's finish (#413) — what decides the facing default (decision Q6, #432). */
+export type JobStockFinish = 'rough' | 'finished' | 'printed' | 'unknown';
+
+/** Where a job's stock came from (#418). See {@link EngraveJob.stockEntry}. */
+export interface JobStockEntry {
+  /** `shelf` — picked off the location's shelf; `file` — an STL/3MF used as the stock; `made` — typed. */
+  kind: 'shelf' | 'file' | 'made';
+  /** The shelf entry's id: set for `shelf`, and for `made` when it was also put on the shelf. */
+  shelfId: string | null;
+  /** The file the stock was read from, with its SHA-256 (hex), for `file`. */
+  file: { name: string; sha256: string } | null;
+  form: JobStockForm;
+  finish: JobStockFinish;
+  /** Whether a touch probe can find its edges electrically (§5.9); the shelf entry's own answer. */
+  conductive: boolean;
 }
