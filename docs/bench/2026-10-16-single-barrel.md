@@ -57,3 +57,4 @@ the PETG** — the burr's chips welded, so heat and chip packing in the thermopl
 1. Regenerate the rest pass for the chosen second cutter; simulate it.
 2. Fresh blank or the same ladder blank (re-scan either way).
 3. The whole routine above, including the frame check and the vacuum left on across the bit change.
+- Research for tomorrow's second cutter: [2026-10-16-fine-detail-petg-pagf.md](2026-10-16-fine-detail-petg-pagf.md).
