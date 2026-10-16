@@ -13,17 +13,31 @@ export function summarizePlan(plan: RegistrationPlan): string {
   const edges =
     plan.scans.length === 0
       ? 'no edge scan (the bracket fixes X and Y)'
+      : plan.mount === 'bracket'
+        ? `the right edge at Y ${n(plan.scans[0]!.along)} and the back edge at X ${n(plan.scans[1]!.along)} only to confirm the stock is in the bracket's corner (the bracket fixes X and Y)`
       : plan.scans.map((sc) => `the ${sc.edge} edge at ${sc.edge === 'left' || sc.edge === 'right' ? 'Y' : 'X'} ${n(sc.along)}`).join(', ');
+  const clamps = plan.mountObstacles.filter((o) => o.kind === 'clamp').map((o) => o.label);
+  const assumes =
+    plan.mount === 'bracket'
+      ? ` It assumes ${clamps.length === 0 ? 'no clamps on the stock' : clamps.join('; ')} — you confirm that before the probe moves.`
+      : '';
   return (
     `Home, fit the wired probe and measure it (M491); touch the surface at the cut area's centre ` +
     `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}); then scan ${edges} — stepping ${n(s.coarseStepMm)} mm, ` +
-    `then ${n(s.fineStepMm)} mm, stopping at the first touch off the stock, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.`
+    `then ${n(s.fineStepMm)} mm, stopping at the first touch off the stock, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.${assumes}`
   );
 }
 
 export function summarizeOutcome(o: RegistrationOutcome): string {
   if (!o.usable) {
     return `The measurement is not usable, and no origin will be written from it: ${o.problems.join('; ')}.`;
+  }
+  if (o.currentG54 === null && !o.bracketCheck) {
+    return 'The surface was found. X and Y were NOT checked: they are the bracket’s, taken on trust (no confirming touch).';
+  }
+  if (o.bracketCheck) {
+    const c = o.bracketCheck;
+    return `X and Y from the bracket; the confirming touch found the right edge ${n(c.x ?? 0)} mm and the back edge ${n(c.y ?? 0)} mm from where the bracket’s corner puts them — within the ${n(o.margin)} mm margin.`;
   }
   const parts: string[] = [];
   if (o.measured.x) parts.push(`X off by ${n(o.offset.x)} mm`);

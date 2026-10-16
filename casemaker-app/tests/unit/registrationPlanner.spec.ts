@@ -44,7 +44,8 @@ function input(mount: 'vise' | 'tape' | 'bracket' = 'vise', over: Partial<PlanIn
     mount,
     expectedSurface: { machineZ: SURFACE, from: 'the vise top and the blank’s proud height' },
     fixtureBelowSurfaceMm: mount === 'vise' ? 0.72 : undefined,
-    bracketOrigin: mount === 'bracket' ? { x: G54.x, y: G54.y, from: 'anchor1 + (0, 0)' } : undefined,
+    bracketOrigin: mount === 'bracket' ? { x: G54.x, y: G54.y, from: 'anchor1 + (0, 0)', offsetMeasured: true } : undefined,
+    mountObstacles: mount === 'bracket' ? [] : undefined,
     ...over,
   };
 }
@@ -152,7 +153,10 @@ function fakeZ1(opts: {
   idle?: boolean;
   polls?: number;
   landShift?: number;
+  /** The G54 in force for plain `G0` moves, when it is not where the stock is (a stale origin). */
+  g54?: { x: number; y: number };
 }) {
+  const inForce = opts.g54 ?? G54;
   const surface = opts.surface ?? SURFACE;
   const a = opts.actual;
   let mode: 'G90' | 'G91' = 'G90';
@@ -192,13 +196,21 @@ function fakeZ1(opts: {
       if (line === 'G90' || line === 'G91') return (mode = line), reply('ok');
       let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);
       if (m) return (pos.z = Number(m[1])), reply('ok');
+      // #427 — the bracket's moves are sent in machine coordinates.
+      m = /^G53 G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(line);
+      if (m) {
+        xyMovesAtZ.push(pos.z);
+        pos.x = Number(m[1]) + (xyMovesAtZ.length > 1 ? (opts.landShift ?? 0) : 0);
+        pos.y = Number(m[2]);
+        return reply('ok');
+      }
       m = /^G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec(line);
       if (m) {
         xyMovesAtZ.push(pos.z);
         if (mode === 'G90') {
           // `landShift` moves every XY move AFTER the surface one: a scan that lands somewhere else.
-          pos.x = Number(m[1]) + G54.x + (xyMovesAtZ.length > 1 ? (opts.landShift ?? 0) : 0);
-          pos.y = Number(m[2]) + G54.y;
+          pos.x = Number(m[1]) + inForce.x + (xyMovesAtZ.length > 1 ? (opts.landShift ?? 0) : 0);
+          pos.y = Number(m[2]) + inForce.y;
         } else {
           pos.x += Number(m[1]);
           pos.y += Number(m[2]);
@@ -455,22 +467,151 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
 
   it('reproduces the bench’s own origin, byte for byte in value', async () => {
     // The bracket mount: X, Y from the anchor (the bench's own G54), the surface touched at the bench's point.
+    // NOT WHAT THE BENCH SENT (#427): the bench moved there in work XY under the G54 then in force,
+    // (-180.5, -182.2) + (5.95, 6.4). The bracket path now sends `G53 G0` from the bracket's origin, which
+    // the bench never ran on this path, so the surface point is the one that lands on the same machine XY
+    // (-174.55, -175.8) from the bracket's origin; the Z readings, and so the written line, are the bench's.
     const p = plan('bracket', {
-      cutCentre: { x: 5.95, y: 6.4 },
+      cutCentre: { x: 7, y: 9 },
       expectedSurface: { machineZ: -56.1, from: 'the bench' },
-      bracketOrigin: { x: -181.55, y: -184.8, from: 'the bench’s G54' },
+      bracketOrigin: { x: -181.55, y: -184.8, from: 'the bench’s G54', offsetMeasured: true },
     });
     const z1 = replay();
     const r = await runRegistration(p, { console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome.surfaceZ).toBe(-56.116);
     expect(r.outcome.probeRefZ).toBe(-76.061);
-    // The origin in force at the touch, from the trace's own machine XY.
-    expect(r.outcome.currentG54).toEqual({ x: -180.5, y: -182.2 });
+    expect(z1.lines).toContain('G53 G0 X-174.55 Y-175.8');
+    expect(r.outcome.usable).toBe(true);
+    // Nothing was sent in the G54 in force, so none is reported; XY is the bracket's, not checked.
+    expect(r.outcome.currentG54).toBeNull();
+    expect(r.outcome.xyChecked).toBe(false);
     const applied = await applyCorrection(r.outcome, { console: z1.console, operator: yes }, { confirmed: true });
     if (!applied.ok) throw new Error(applied.reason);
     expect(applied.cutterRefZ).toBe(-79.158);
     expect(applied.line).toBe('G10 L2 P1 X-181.550 Y-184.800 Z-59.213');
     expect(applied.line).toBe(correctionLine(r.outcome, -79.158));
+  });
+});
+
+describe('#427 the bracket: XY from the datum, an optional confirming touch', () => {
+  const SEATED = { ...BLANK };
+  /** A clamp on the back edge, 15 mm in from the left-hand corner, 12 mm above the stock. */
+  const CLAMP = { kind: 'clamp' as const, label: 'the clamp on the back edge, 15 mm in from the left-hand corner', min: [12, 68] as [number, number], max: [27, 98] as [number, number], topZ: 12 };
+  const ARM = { kind: 'bracket' as const, label: 'the bracket’s left arm', min: [-10, -10] as [number, number], max: [0, 100] as [number, number], topZ: 5 };
+  const confirm = (over: Partial<PlanInput> = {}) => plan('bracket', { bracketConfirm: true, mountObstacles: [CLAMP, ARM], ...over });
+  const asked: string[] = [];
+  const operator = async (step: { kind: string; text: string }) => (asked.push(`${step.kind}: ${step.text}`), true);
+
+  it('without the confirm: no scan, the surface touch sent from the bracket’s origin — and XY reported as NOT checked', async () => {
+    const p = plan('bracket');
+    expect(p.scans).toEqual([]);
+    const z1 = fakeZ1({ actual: SEATED });
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    expect(z1.lines).toContain('G53 G0 X-162.5 Y-146.7');
+    expect(z1.lines.some((l) => /^G0 X/.test(l))).toBe(false);
+    expect(r.outcome).toMatchObject({ correctedG54: G54, currentG54: null, xyChecked: false, withinMargin: false, usable: true });
+    expect(r.outcome.bracketCheck).toBeUndefined();
+    expect(summarizeOutcome(r.outcome)).toContain('NOT checked');
+    expect(summarizeOutcome(r.outcome)).not.toContain('confirmed');
+  });
+
+  it('a stale G54 several mm off the bracket changes nothing: the touches land on the stock and the bracket’s origin is written', async () => {
+    const p = confirm();
+    const z1 = fakeZ1({ actual: SEATED, g54: { x: G54.x + 6, y: G54.y - 4 } });
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.outcome.usable).toBe(true);
+    const applied = await applyCorrection(r.outcome, { console: z1.console, operator: yes }, { confirmed: true });
+    expect(applied.ok && applied.line).toMatch(/^G10 L2 P1 X-181\.550 Y-184\.800 /);
+  });
+
+  it('the bracket’s offset unmeasured: the confirming touch is required', () => {
+    const unmeasured = { x: G54.x, y: G54.y, from: 'anchor 1 + a default offset', offsetMeasured: false };
+    expect(planRegistration(input('bracket', { bracketOrigin: unmeasured }), S)).toMatchObject({ ok: false, reason: expect.stringContaining('confirming touch is required') });
+    expect(planRegistration(input('bracket', { bracketOrigin: unmeasured, bracketConfirm: true }), S)).toMatchObject({ ok: true });
+  });
+
+  it('refuses without the mount’s obstacles, with a top at the travel height, or with the surface point under a clamp', () => {
+    expect(planRegistration(input('bracket', { mountObstacles: undefined }), S)).toMatchObject({ ok: false });
+    // The stock's top at −56.17: a clamp 53 mm above it reaches machine Z −3.
+    expect(planRegistration(input('bracket', { mountObstacles: [{ ...CLAMP, topZ: 53 }] }), S)).toMatchObject({ ok: false, reason: expect.stringContaining('travel height') });
+    const over = { ...CLAMP, min: [15, 30] as [number, number], max: [25, 45] as [number, number] };
+    expect(planRegistration(input('bracket', { mountObstacles: [over] }), S)).toMatchObject({ ok: false, reason: expect.stringContaining('surface touch point') });
+  });
+
+  it('the confirm scans the RIGHT and BACK edges — the arms are on the left and front — clear of the clamps', () => {
+    const open = plan('bracket', { bracketConfirm: true });
+    expect(open.scans.map((s) => [s.edge, s.along])).toEqual([
+      ['right', 38.1],
+      ['back', 19.05],
+    ]);
+    const p = confirm();
+    const back = p.scans.find((s) => s.edge === 'back')!;
+    const grow = S.tipRadiusMm + S.cornerClearanceMm;
+    expect(back.along < CLAMP.min[0] - grow || back.along > CLAMP.max[0] + grow).toBe(true);
+    expect(back.along).toBeGreaterThan(ARM.max[0] + grow);
+    // The plan names the clamps it assumes.
+    expect(summarizePlan(p)).toContain('It assumes the clamp on the back edge, 15 mm in from the left-hand corner');
+    const wall = { ...CLAMP, min: [-5, 70] as [number, number], max: [45, 90] as [number, number] };
+    expect(planRegistration(input('bracket', { bracketConfirm: true, mountObstacles: [wall] }), S)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('register without the confirming touch'),
+    });
+  });
+
+  it('the operator confirms the clamps before anything moves sideways; a no stops it', async () => {
+    asked.length = 0;
+    const z1 = fakeZ1({ actual: SEATED });
+    const r = await runRegistration(confirm(), { console: z1.console, operator });
+    expect(r.ok).toBe(true);
+    expect(asked[1]).toContain('confirm-mount: Check the clamps before the probe moves: the plan assumes the clamp on the back edge');
+    const z2 = fakeZ1({ actual: SEATED });
+    const no = await runRegistration(confirm(), { console: z2.console, operator: async (st) => st.kind !== 'confirm-mount' });
+    expect(no).toMatchObject({ ok: false, reason: expect.stringContaining('clamps were not confirmed') });
+    expect(z2.lines.some((l) => /^G53 G0 X/.test(l))).toBe(false);
+  });
+
+  it('every scan starts at the seek height and every other scan move is at the park height', async () => {
+    const p = confirm();
+    const z1 = fakeZ1({ actual: SEATED });
+    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    const parkZ = r.data.surface.z + S.parkAboveSurfaceMm;
+    // XY moves: the surface point, then each scan's touches in order.
+    let i = 1;
+    for (const sc of r.data.scans) {
+      sc.touches.forEach((_, k) => {
+        if (k === 0) expect(z1.xyMovesAtZ[i]).toBe(-3);
+        else expect(z1.xyMovesAtZ[i]).toBeCloseTo(parkZ, 3);
+        i++;
+      });
+    }
+    expect(i).toBe(z1.xyMovesAtZ.length);
+    // A surface touch that did not land where it was sent is caught.
+    const moved = computeOutcome(plan('bracket'), { ...r.data, scans: [], surface: { ...r.data.surface, x: r.data.surface.x + 1 } });
+    expect(moved.problems.join(' ')).toContain('not at');
+  });
+
+  it('a seated stock confirms; the origin stays the bracket’s', async () => {
+    const z1 = fakeZ1({ actual: SEATED });
+    const r = await runRegistration(confirm(), { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.outcome).toMatchObject({ usable: true, xyChecked: true, withinMargin: true, correctedG54: G54 });
+    expect(Math.abs(r.outcome.bracketCheck!.x!)).toBeLessThanOrEqual(0.3);
+    expect(Math.abs(r.outcome.bracketCheck!.y!)).toBeLessThanOrEqual(0.3);
+    expect(summarizeOutcome(r.outcome)).toContain('from the bracket');
+  });
+
+  it('a stock not pushed into the corner is caught, and no origin is written', async () => {
+    const off = { ...SEATED, xMin: 1.5, xMax: 39.6 };
+    const z1 = fakeZ1({ actual: off });
+    const r = await runRegistration(confirm(), { console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.outcome.usable).toBe(false);
+    expect(r.outcome.problems.join(' ')).toContain('push the stock into the bracket’s corner');
+    const applied = await applyCorrection(r.outcome, { console: z1.console, operator: yes }, { confirmed: true });
+    expect(applied.ok).toBe(false);
   });
 });

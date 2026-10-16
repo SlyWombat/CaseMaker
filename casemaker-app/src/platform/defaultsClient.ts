@@ -116,6 +116,20 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().gt(0).max(100_000),
     fallback: 600,
   },
+  // #427 — the anchor bracket and its top clamps. NONE IS MEASURED: each is seeded with a note saying
+  // so and naming what to caliper (`defaults.rs`'s UNMEASURED_SEEDS); a fallback is the same default.
+  'bracket.originOffsetXMm': { label: 'bracket corner from anchor, X (not measured)', unit: 'mm', rule: z.number().min(-20).max(20), fallback: 0 },
+  'bracket.originOffsetYMm': { label: 'bracket corner from anchor, Y (not measured)', unit: 'mm', rule: z.number().min(-20).max(20), fallback: 0 },
+  'bracket.fitMm': { label: 'bracket fit (not measured)', unit: 'mm', rule: z.number().min(0.01).max(2), fallback: 0.1 },
+  'bracket.armLengthXMm': { label: 'bracket front arm length (not measured)', unit: 'mm', rule: z.number().min(5).max(300), fallback: 100 },
+  'bracket.armLengthYMm': { label: 'bracket left arm length (not measured)', unit: 'mm', rule: z.number().min(5).max(300), fallback: 100 },
+  'bracket.armWidthMm': { label: 'bracket arm thickness (not measured)', unit: 'mm', rule: z.number().min(1).max(50), fallback: 10 },
+  'bracket.heightMm': { label: 'bracket height (not measured)', unit: 'mm', rule: z.number().min(1).max(80), fallback: 10 },
+  'clamps.topLengthMm': { label: 'top clamp length (not measured)', unit: 'mm', rule: z.number().min(5).max(150), fallback: 30 },
+  'clamps.topWidthMm': { label: 'top clamp width (not measured)', unit: 'mm', rule: z.number().min(3).max(80), fallback: 15 },
+  'clamps.topHeightMm': { label: 'top clamp height above the stock (not measured)', unit: 'mm', rule: z.number().min(1).max(80), fallback: 12 },
+  'clamps.topReachMm': { label: 'top clamp reach onto the stock (not measured)', unit: 'mm', rule: z.number().min(1).max(50), fallback: 8 },
+  'clamps.topInFromCornerMm': { label: 'top clamp in from the corner', unit: 'mm', rule: z.number().min(0).max(200), fallback: 15 },
   // #417 — how deep a cut may go into the wasteboard before it is warned about.
   'wasteboard.depthLimitMm': {
     label: 'wasteboard depth limit',
@@ -124,6 +138,25 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     fallback: 0.5,
   },
 };
+
+/**
+ * Keys with NO seed and no fallback: a value that only means something once it is measured on this
+ * machine (#427). Held to their rule when present; {@link readMeasured} answers null when absent.
+ */
+export const MEASURED_ONLY: Readonly<Record<string, Omit<KnownDefault, 'fallback'>>> = {
+  // The machine Z of the surface the stock sits on beside the bracket — what the surface touch expects
+  // the stock's top above. `defaults.rs` bounds it the same way.
+  'bracket.seatMachineZ': { label: 'surface beside the bracket, machine Z', unit: 'mm', rule: z.number().min(-150).max(0) },
+};
+
+/** A measured-only key's value with its provenance, or null when the location has none. */
+export function readMeasured(map: ShopDefaults | null, key: string): { value: number; source: DefaultSource; setAt: string | null; note: string | null } | null {
+  const rule = MEASURED_ONLY[key];
+  if (!rule) throw new Error(`${key} is not a measured-only key`);
+  const d = map?.[key];
+  if (!d || typeof d.value !== 'number' || !rule.rule.safeParse(d.value).success) return null;
+  return { value: d.value, source: d.source, setAt: d.setAt, note: d.note };
+}
 
 /** The whole section: well-formed keys, each value valid, and each known key within its rule. */
 export const ShopDefaultsSchema = z.record(z.string(), ShopDefaultSchema).superRefine((map, ctx) => {
@@ -147,7 +180,7 @@ export const ShopDefaultsSchema = z.record(z.string(), ShopDefaultSchema).superR
       ctx.addIssue({ code: 'custom', path: [key], message: 'a key is dotted lowerCamel words, like power.onWaitSeconds' });
       continue;
     }
-    const known = KNOWN_DEFAULTS[key];
+    const known = KNOWN_DEFAULTS[key] ?? MEASURED_ONLY[key];
     if (known && !known.rule.safeParse(d.value).success) {
       ctx.addIssue({ code: 'custom', path: [key], message: `${key} is outside its bounds` });
     }

@@ -408,6 +408,90 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm"
+    },
+    "bracket.originOffsetXMm": {
+      "value": 0.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: the stock's corner in the bracket from anchor 1 along X. 0 is Makera's own (Z1 QuickStart: work origin relative to Anchor 1, X offset 0); caliper the bracket's inside face to the anchor"
+    },
+    "bracket.originOffsetYMm": {
+      "value": 0.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: the stock's corner in the bracket from anchor 1 along Y. 0 is Makera's own (Z1 QuickStart: Y offset 0); caliper the bracket's inside face to the anchor"
+    },
+    "bracket.fitMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: how closely a corner pushed into the bracket repeats (the design's +/-0.1)"
+    },
+    "bracket.armLengthXMm": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: the bracket arm along the stock's front edge, from the inside corner to its end (100: the 100 mm plate Makera ships for it)"
+    },
+    "bracket.armLengthYMm": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: the bracket arm along the stock's left edge, from the inside corner to its end (100: the 100 mm plate Makera ships for it)"
+    },
+    "bracket.armWidthMm": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: how thick each arm is, from the face the stock touches to its outside"
+    },
+    "bracket.heightMm": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: the top of the bracket (and its screw heads) above the surface the stock sits on"
+    },
+    "clamps.topLengthMm": {
+      "value": 30.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: a top clamp's length, pointing onto the stock"
+    },
+    "clamps.topWidthMm": {
+      "value": 15.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: a top clamp's width, along the edge it holds"
+    },
+    "clamps.topHeightMm": {
+      "value": 12.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: a fitted top clamp's highest point (screw head included) above the stock's top"
+    },
+    "clamps.topReachMm": {
+      "value": 8.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: how far a top clamp's nose reaches in over the stock from its edge"
+    },
+    "clamps.topInFromCornerMm": {
+      "value": 15.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen placement, not a measurement: a clamp's side this far in from the corner of the edge it holds"
     }
   }
 }

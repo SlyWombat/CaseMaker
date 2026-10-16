@@ -41,7 +41,17 @@ export interface RegistrationConsole {
   send(line: string): Promise<ConsoleSendResult>;
 }
 
-export type OperatorStep = { kind: 'fit-probe' | 'fit-cutter'; text: string };
+export type OperatorStep = { kind: 'fit-probe' | 'fit-cutter' | 'confirm-mount'; text: string };
+
+/**
+ * The sentence the operator confirms before anything moves sideways on the bracket (#427 review): the
+ * plan's scan lines and travel are clear only of the clamps where the PLAN puts them.
+ */
+export function mountConfirmText(plan: RegistrationPlan): string {
+  const clamps = plan.mountObstacles.filter((o) => o.kind === 'clamp').map((o) => o.label);
+  const where = clamps.length === 0 ? 'no clamps at all on the stock' : clamps.join('; ');
+  return `Check the clamps before the probe moves: the plan assumes ${where}. Continue only if that is what is on the machine — a clamp anywhere else may be in the probe's path.`;
+}
 
 export interface ExecDeps {
   console: RegistrationConsole;
@@ -132,11 +142,29 @@ function session(deps: ExecDeps) {
 
 type Session = ReturnType<typeof session>;
 
-/** One scan touch at `at`: XY at the park height, Idle, probe down at most to the cap, clear a miss, lift. */
-async function touch(io: Session, plan: RegistrationPlan, scan: EdgeScan, at: number, parkZ: number, surfaceZ: number): Promise<ScanTouch> {
+/**
+ * The XY move to a work position. On the bracket it is sent in MACHINE coordinates from the bracket's
+ * origin (#427) — `G53 G0 X Y`, observed `ok` on the bench (Z1-Firmware-Dialect.md, the B6 trace) — so the
+ * touches land on the stock whatever G54 was left in force; elsewhere, plain `G0` in the work frame.
+ */
+function moveXY(plan: RegistrationPlan, x: number, y: number): string {
+  const o = plan.mount === 'bracket' ? plan.bracketOrigin : null;
+  return o ? `G53 G0 X${f(o.x + x)} Y${f(o.y + y)}` : `G0 X${f(x)} Y${f(y)}`;
+}
+
+/**
+ * One scan touch at `at`: XY at the park height, Idle, probe down at most to the cap, clear a miss, lift.
+ * `travelHigh` (#427): the move that STARTS a scan on the bracket goes at the seek height (machine Z −3)
+ * and only then down to the park — the clamps and the bracket's arms stand above the stock, higher than
+ * the park, and the move between two scan lines (or from the surface point) is not checked against them.
+ * The touches ALONG a scan line stay at the park: the line itself is kept clear of the clamps.
+ */
+async function touch(io: Session, plan: RegistrationPlan, scan: EdgeScan, at: number, parkZ: number, surfaceZ: number, travelHigh = false): Promise<ScanTouch> {
   const s = plan.settings;
   const [x, y] = scan.edge === 'left' || scan.edge === 'right' ? [at, scan.along] : [scan.along, at];
-  await io.send(`G0 X${f(x)} Y${f(y)}`);
+  if (travelHigh) await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
+  await io.send(moveXY(plan, x, y));
+  if (travelHigh) await io.send(`G53 G0 Z${f(parkZ)}`);
   await io.idle();
   io.at(`as low as ${s.capBelowSurfaceMm} mm below the surface (a scan touch)`);
   await io.send('G91');
@@ -155,7 +183,7 @@ async function scanEdge(io: Session, plan: RegistrationPlan, scan: EdgeScan, par
   const touches: ScanTouch[] = [];
   let lastOn: number | null = null;
   for (const p of scanPositions(scan)) {
-    const t = await touch(io, plan, scan, p, parkZ, surfaceZ);
+    const t = await touch(io, plan, scan, p, parkZ, surfaceZ, plan.mount === 'bracket' && touches.length === 0);
     touches.push(t);
     if (t.kind !== 'stock') {
       // Something above the surface (a clamp): stop the scan here and say so (outcome.ts).
@@ -195,10 +223,13 @@ export async function runRegistration(plan: RegistrationPlan, deps: ExecDeps): P
     }
     const ref = lastPrb(await io.send('M491'));
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
+    if (plan.mount === 'bracket' && !(await deps.operator({ kind: 'confirm-mount', text: mountConfirmText(plan) }))) {
+      throw new Stop('stopped: the clamps were not confirmed where the plan puts them');
+    }
 
     await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
     await io.send('G90');
-    await io.send(`G0 X${f(plan.surfacePoint.x)} Y${f(plan.surfacePoint.y)}`);
+    await io.send(moveXY(plan, plan.surfacePoint.x, plan.surfacePoint.y));
     await io.idle();
     io.at(`as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface seek)`);
     await io.send('G91');

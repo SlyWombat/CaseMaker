@@ -61,8 +61,19 @@ export interface RegistrationOutcome {
   margin: number;
   surfaceZ: number;
   probeRefZ: number;
-  currentG54: { x: number; y: number };
+  /** The G54 in force during the touches — null on the bracket, where every move was sent in machine XY. */
+  currentG54: { x: number; y: number } | null;
   correctedG54: { x: number; y: number };
+  /**
+   * Whether X and Y were CHECKED by a touch. On the bracket without the confirming touch they were not:
+   * they are the bracket's, taken on trust (#427 review) — never shown as "confirmed".
+   */
+  xyChecked: boolean;
+  /**
+   * Bracket with Q10's confirming touch (#427): how far each far edge is from where the bracket's corner
+   * and the stock's size put it, mm (null: that edge was not scanned). The origin stays the bracket's.
+   */
+  bracketCheck?: { x: number | null; y: number | null };
   /** Whether an origin may be written from this at all. */
   usable: boolean;
   /** Why not, one sentence each. Empty when usable. */
@@ -131,12 +142,16 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
     }
   }
 
-  const currentG54 = { x: r3(data.surface.x - plan.surfacePoint.x), y: r3(data.surface.y - plan.surfacePoint.y) };
+  // The frame the touches were sent in: the G54 in force, read back from the surface touch — or, on the
+  // bracket, the bracket's origin, because every move there is sent in machine XY from it (#427).
+  const onBracket = plan.mount === 'bracket' && plan.bracketOrigin !== null;
+  const g54InForce = { x: r3(data.surface.x - plan.surfacePoint.x), y: r3(data.surface.y - plan.surfacePoint.y) };
+  const sentFrom = onBracket ? { x: plan.bracketOrigin!.x, y: plan.bracketOrigin!.y } : g54InForce;
   for (const r of data.scans) {
     for (const t of r.touches) {
       const wx = r.scan.edge === 'left' || r.scan.edge === 'right' ? t.at : r.scan.along;
       const wy = r.scan.edge === 'left' || r.scan.edge === 'right' ? r.scan.along : t.at;
-      if (Math.abs(t.prb.x - wx - currentG54.x) > 0.01 || Math.abs(t.prb.y - wy - currentG54.y) > 0.01) {
+      if (Math.abs(t.prb.x - wx - sentFrom.x) > 0.01 || Math.abs(t.prb.y - wy - sentFrom.y) > 0.01) {
         problems.push(
           `a touch landed at machine (${t.prb.x}, ${t.prb.y}), not where it was sent — the origin moved during the scan`,
         );
@@ -151,16 +166,49 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
   }
 
   let offset = { x: r3(mean(dxs)), y: r3(mean(dys)) };
-  let correctedG54 = { x: r3(currentG54.x + offset.x), y: r3(currentG54.y + offset.y) };
+  let correctedG54 = { x: r3(g54InForce.x + offset.x), y: r3(g54InForce.y + offset.y) };
+  // #427 — on the bracket every move is sent in machine XY from the bracket's origin, so the surface touch
+  // must have landed exactly there: anything else means the move did not go where it was sent (or ran in
+  // another frame), and nothing measured here can be trusted.
   if (plan.mount === 'bracket' && plan.bracketOrigin) {
-    correctedG54 = { x: r3(plan.bracketOrigin.x), y: r3(plan.bracketOrigin.y) };
-    offset = { x: r3(correctedG54.x - currentG54.x), y: r3(correctedG54.y - currentG54.y) };
-    notes.push(`X and Y from the bracket: ${plan.bracketOrigin.from}`);
+    const want = { x: plan.bracketOrigin.x + plan.surfacePoint.x, y: plan.bracketOrigin.y + plan.surfacePoint.y };
+    if (Math.abs(data.surface.x - want.x) > 0.01 || Math.abs(data.surface.y - want.y) > 0.01) {
+      problems.push(
+        `the surface touch landed at machine (${data.surface.x}, ${data.surface.y}), not at (${r3(want.x)}, ${r3(want.y)}) where it was sent from the bracket’s origin`,
+      );
+    }
+  }
+  let bracketCheck: RegistrationOutcome['bracketCheck'];
+  if (plan.mount === 'bracket' && plan.bracketOrigin && plan.scans.length > 0) {
+    // The touches were sent from the bracket's origin (G53), so a found edge's distance from where it was
+    // expected is the stock's distance from the corner — plus its size error.
+    bracketCheck = { x: measured.x ? r3(mean(dxs)) : null, y: measured.y ? r3(mean(dys)) : null };
+    for (const [axis, dev, edge] of [
+      ['X', bracketCheck.x, 'right'],
+      ['Y', bracketCheck.y, 'back'],
+    ] as const) {
+      if (dev === null) problems.push(`the confirming touch found no ${edge} edge`);
+      else if (Math.abs(dev) > s.edgeMarginMm) {
+        problems.push(
+          `the ${edge} edge is ${dev} mm (${axis}) from where the bracket’s corner and the stock’s size put it — more than the ${s.edgeMarginMm} mm margin: push the stock into the bracket’s corner on both faces and check its size, then register again`,
+        );
+      }
+    }
+  }
+  if (onBracket) {
+    // The origin is the bracket's. The G54 in force before is unknown here (nothing was sent in it), so
+    // there is no offset from it to report: the confirming touch's deviations are `bracketCheck`.
+    correctedG54 = { x: r3(plan.bracketOrigin!.x), y: r3(plan.bracketOrigin!.y) };
+    offset = { x: 0, y: 0 };
+    notes.push(`X and Y from the bracket: ${plan.bracketOrigin!.from}`);
+    if (!bracketCheck) notes.push('X and Y were NOT checked by any touch: they are the bracket’s, taken on trust');
   }
 
   const usable = problems.length === 0;
+  const xyChecked = onBracket ? bracketCheck !== undefined : measured.x && measured.y;
   const withinMargin =
     usable &&
+    xyChecked &&
     Math.abs(offset.x) <= s.edgeMarginMm &&
     Math.abs(offset.y) <= s.edgeMarginMm &&
     (rotationShiftMm === null || rotationShiftMm <= s.edgeMarginMm);
@@ -175,11 +223,13 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
     },
     rotationDeg,
     rotationShiftMm,
+    xyChecked,
+    ...(bracketCheck ? { bracketCheck } : {}),
     withinMargin,
     margin: s.edgeMarginMm,
     surfaceZ: data.surface.z,
     probeRefZ: data.probeRefZ,
-    currentG54,
+    currentG54: onBracket ? null : g54InForce,
     correctedG54,
     usable,
     problems,

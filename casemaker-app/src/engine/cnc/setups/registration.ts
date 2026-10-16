@@ -7,7 +7,7 @@
  */
 
 import { LEDGE_STEP } from '../fixture';
-import { planRegistration, type PlanResult, type RegistrationSettings } from '../registration';
+import { planRegistration, type BracketOrigin, type PlanObstacle, type PlanResult, type RegistrationSettings } from '../registration';
 import { machineSize, toMachine, type Vec } from './orient';
 import type { MountSpec, Setup } from './types';
 
@@ -33,7 +33,14 @@ export function referenceFeatures(setup: Setup): ReferenceFeature[] {
 export function registrationFor(
   setup: Setup,
   mount: MountSpec,
-  input: { seatMachineZ: number; cornerRadius: number; bracketOrigin?: { x: number; y: number; from: string } },
+  input: {
+    seatMachineZ: number;
+    cornerRadius: number;
+    bracketOrigin?: BracketOrigin;
+    /** Bracket (#427): the clamps and arms as placed, and whether to take the confirming touch. */
+    mountObstacles?: PlanObstacle[];
+    bracketConfirm?: boolean;
+  },
   settings: RegistrationSettings,
 ): { plan: PlanResult; references: ReferenceFeature[] } {
   const dims = machineSize(setup.rotation, setup.stockBefore.bounds);
@@ -44,6 +51,8 @@ export function registrationFor(
       expectedSurface: { machineZ: input.seatMachineZ + dims.z, from: `the seat at machine Z ${input.seatMachineZ} + the stock's ${dims.z} mm this way up (setup ${setup.index})` },
       fixtureBelowSurfaceMm: mount.kind === 'vise' ? dims.z - LEDGE_STEP : undefined,
       bracketOrigin: input.bracketOrigin,
+      mountObstacles: input.mountObstacles,
+      bracketConfirm: input.bracketConfirm,
     },
     settings,
   );

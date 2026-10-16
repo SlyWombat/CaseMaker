@@ -109,6 +109,81 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     ("setups.reregisterMinutes", 2.0, "min"),
 ];
 
+/// #427 — the anchor bracket and its top clamps. NOT MEASURED: starting values written `seeded` WITH a
+/// note that says so and names what to caliper, so nobody mistakes one for a measurement. Measuring one
+/// replaces it with a `measured` value, dated, through the same section. `(key, value, unit, note)`.
+pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
+    (
+        "bracket.originOffsetXMm",
+        0.0,
+        "mm",
+        "default, not measured: the stock's corner in the bracket from anchor 1 along X. 0 is Makera's own \
+         (Z1 QuickStart: work origin relative to Anchor 1, X offset 0); caliper the bracket's inside face to the anchor",
+    ),
+    (
+        "bracket.originOffsetYMm",
+        0.0,
+        "mm",
+        "default, not measured: the stock's corner in the bracket from anchor 1 along Y. 0 is Makera's own \
+         (Z1 QuickStart: Y offset 0); caliper the bracket's inside face to the anchor",
+    ),
+    (
+        "bracket.fitMm",
+        0.1,
+        "mm",
+        "default, not measured: how closely a corner pushed into the bracket repeats (the design's +/-0.1)",
+    ),
+    (
+        "bracket.armLengthXMm",
+        100.0,
+        "mm",
+        "default, not measured: the bracket arm along the stock's front edge, from the inside corner to its end (100: the 100 mm plate Makera ships for it)",
+    ),
+    (
+        "bracket.armLengthYMm",
+        100.0,
+        "mm",
+        "default, not measured: the bracket arm along the stock's left edge, from the inside corner to its end (100: the 100 mm plate Makera ships for it)",
+    ),
+    (
+        "bracket.armWidthMm",
+        10.0,
+        "mm",
+        "default, not measured: how thick each arm is, from the face the stock touches to its outside",
+    ),
+    (
+        "bracket.heightMm",
+        10.0,
+        "mm",
+        "default, not measured: the top of the bracket (and its screw heads) above the surface the stock sits on",
+    ),
+    (
+        "clamps.topLengthMm",
+        30.0,
+        "mm",
+        "default, not measured: a top clamp's length, pointing onto the stock",
+    ),
+    ("clamps.topWidthMm", 15.0, "mm", "default, not measured: a top clamp's width, along the edge it holds"),
+    (
+        "clamps.topHeightMm",
+        12.0,
+        "mm",
+        "default, not measured: a fitted top clamp's highest point (screw head included) above the stock's top",
+    ),
+    (
+        "clamps.topReachMm",
+        8.0,
+        "mm",
+        "default, not measured: how far a top clamp's nose reaches in over the stock from its edge",
+    ),
+    (
+        "clamps.topInFromCornerMm",
+        15.0,
+        "mm",
+        "chosen placement, not a measurement: a clamp's side this far in from the corner of the edge it holds",
+    ),
+];
+
 pub fn seeded() -> ShopDefaults {
     let mut map = ShopDefaults::new();
     add_missing_seeds(&mut map);
@@ -128,6 +203,21 @@ pub fn add_missing_seeds(map: &mut ShopDefaults) -> bool {
                     set_at: None,
                     unit: Some((*unit).to_string()),
                     note: None,
+                },
+            );
+            added = true;
+        }
+    }
+    for (key, value, unit, note) in UNMEASURED_SEEDS {
+        if !map.contains_key(*key) {
+            map.insert(
+                (*key).to_string(),
+                ShopDefault {
+                    value: serde_json::json!(value),
+                    source: DefaultSource::Seeded,
+                    set_at: None,
+                    unit: Some((*unit).to_string()),
+                    note: Some((*note).to_string()),
                 },
             );
             added = true;
@@ -191,6 +281,18 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "run.noProgressMs" => Some(need(n.is_some_and(|v| (15000.0..=600000.0).contains(&v)), "15000 to 600000 ms")),
         "run.missLimit" => Some(need(n.is_some_and(|v| (1.0..=10.0).contains(&v) && v.fract() == 0.0), "a whole number of polls, 1 to 10")),
         "registration.surfaceSlowFeed" => Some(need(n.is_some_and(|v| (5.0..=500.0).contains(&v)), "5 to 500 mm/min")),
+        "bracket.originOffsetXMm" | "bracket.originOffsetYMm" => Some(need(n.is_some_and(|v| (-20.0..=20.0).contains(&v)), "-20 to 20 mm")),
+        "bracket.fitMm" => Some(need(n.is_some_and(|v| (0.01..=2.0).contains(&v)), "0.01 to 2 mm")),
+        "bracket.armLengthXMm" | "bracket.armLengthYMm" => Some(need(n.is_some_and(|v| (5.0..=300.0).contains(&v)), "5 to 300 mm")),
+        "bracket.armWidthMm" => Some(need(n.is_some_and(|v| (1.0..=50.0).contains(&v)), "1 to 50 mm")),
+        "bracket.heightMm" => Some(need(n.is_some_and(|v| (1.0..=80.0).contains(&v)), "1 to 80 mm")),
+        // Measured only — no seed: the machine Z of the surface the stock sits on beside the bracket.
+        "bracket.seatMachineZ" => Some(need(n.is_some_and(|v| (-150.0..=0.0).contains(&v)), "-150 to 0 (machine Z)")),
+        "clamps.topLengthMm" => Some(need(n.is_some_and(|v| (5.0..=150.0).contains(&v)), "5 to 150 mm")),
+        "clamps.topWidthMm" => Some(need(n.is_some_and(|v| (3.0..=80.0).contains(&v)), "3 to 80 mm")),
+        "clamps.topHeightMm" => Some(need(n.is_some_and(|v| (1.0..=80.0).contains(&v)), "1 to 80 mm")),
+        "clamps.topReachMm" => Some(need(n.is_some_and(|v| (1.0..=50.0).contains(&v)), "1 to 50 mm")),
+        "clamps.topInFromCornerMm" => Some(need(n.is_some_and(|v| (0.0..=200.0).contains(&v)), "0 to 200 mm")),
         "tools.runtimeWarnMinutes" => Some(need(n.is_some_and(|v| v > 0.0 && v <= 100_000.0), "above 0, up to 100000 minutes")),
         _ => None,
     }
@@ -206,7 +308,11 @@ pub const MAX_UNIT: usize = 16;
 
 /// The seed for `key`, if it has one.
 pub fn seed_of(key: &str) -> Option<f64> {
-    SEEDS.iter().find(|(k, _, _)| *k == key).map(|(_, v, _)| *v)
+    SEEDS
+        .iter()
+        .find(|(k, _, _)| *k == key)
+        .map(|(_, v, _)| *v)
+        .or_else(|| UNMEASURED_SEEDS.iter().find(|(k, ..)| *k == key).map(|(_, v, ..)| *v))
 }
 
 /// A WRITE's extra rule (#416/#417 review): `seeded` is the app's own word for its starting value, so
@@ -299,6 +405,10 @@ mod tests {
             } else {
                 assert_eq!(d.source, DefaultSource::Seeded, "{k}");
             }
+            // #427: an unmeasured accessory size says so, in its note.
+            if UNMEASURED_SEEDS.iter().any(|(u, ..)| u == k) {
+                assert!(d.note.as_deref().is_some_and(|n| n.contains("not measured") || n.contains("not a measurement")), "{k}");
+            }
         }
         let mut band_over_cap = s.clone();
         band_over_cap.insert("registration.surfaceBandMm".into(), ShopDefault { value: serde_json::json!(0.5), ..s["registration.surfaceBandMm"].clone() });
@@ -307,6 +417,11 @@ mod tests {
         tol_over_park.insert("registration.surfaceToleranceMm".into(), ShopDefault { value: serde_json::json!(2.6), ..s["registration.surfaceToleranceMm"].clone() });
         assert!(validate_all(&tol_over_park).is_err(), "a tolerance that reaches the park height");
         assert_eq!(s["power.onWaitSeconds"].value, serde_json::json!(180.0));
+        // The bracket's seat is measured only: never seeded, bounded when set.
+        assert!(!s.contains_key("bracket.seatMachineZ"));
+        assert!(validate_one("bracket.seatMachineZ", &chosen(serde_json::json!(5.0))).is_err());
+        validate_one("bracket.seatMachineZ", &chosen(serde_json::json!(-70.2))).unwrap();
+        validate_write("bracket.armWidthMm", &ShopDefault { note: None, ..s["bracket.armWidthMm"].clone() }).unwrap();
     }
 
     #[test]
@@ -347,6 +462,19 @@ mod tests {
             many.insert(format!("x.k{i}"), chosen(serde_json::json!(1)));
         }
         assert!(validate_all(&many).is_err());
+    }
+
+    #[test]
+    fn a_reset_bracket_size_comes_back_with_its_note() {
+        // `reset_default` removes the key and re-adds the missing seeds: the "not measured" note returns.
+        let mut map = seeded();
+        map.insert("bracket.heightMm".into(), chosen(serde_json::json!(14.0)));
+        map.remove("bracket.heightMm");
+        assert!(add_missing_seeds(&mut map));
+        let d = &map["bracket.heightMm"];
+        assert_eq!(d.source, DefaultSource::Seeded);
+        assert_eq!(d.value, serde_json::json!(10.0));
+        assert!(d.note.as_deref().is_some_and(|n| n.contains("not measured")));
     }
 
     fn seeded_map() -> ShopDefaults {

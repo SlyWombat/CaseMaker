@@ -979,6 +979,13 @@ what a machine on a bench has been trammed to:
 | `cuts-clamped-face` | error | This setup cuts into the face that one of the jaws grips (#428). | Move the item to a setup where that face is not clamped. |
 | `rests-on-cut` | error | The face going down rests on the ledges, or the bed, where an earlier setup cut it, so it will not sit flat (#428). | Reorder the setups, or add a sacrificial board under the stock. |
 | `thin-grip` | warning | The jaws grip less of the stock than the shop's minimum grip (`setups.minGripMm`) (#428). | Raise the stock, use a shorter grip setting only if you accept it, or choose another mount. |
+| `clamp-in-path` | error | A move of the program passes over a top clamp lower than the clamp's top, so the tool would hit it (#427). The clamp is named by its edge and how far it is from a corner. | Slide the clamp along its edge, or move it to the other free edge (back or right), clear of the cut. |
+| `bracket-in-path` | error | A move of the program passes over one of the anchor bracket's arms (the left arm, or the front arm nearest you) lower than the arm's top (#427). | Keep the cut inside the stock's edge on that side. The bracket does not move. |
+| `clamp-unchecked` | error | Part of the toolpath could not be checked against the clamps and the bracket (#427). There are three cases: the tool has no stated diameter; a move starts from a position the program never set, below the clamps' tops; or the collet nut comes down below a clamp's top and the nut's size is not recorded. | State the cutter's diameter. Lift to a known height before moving sideways. Record the collet nut's size, or use a longer stick-out. |
+| `clamp-off-stock` | error | A top clamp hangs past the end of the edge it is on, so it would not hold the stock (#427). | Move the clamp in along the edge. |
+| `clamps-overlap` | error | Two top clamps are placed on top of each other (#427). | Move one of them along the edge. |
+| `stock-past-arm` | warning | The stock's edge is longer than the bracket arm it sits against, so only the part along the arm is squared, and the bracket's fit error grows toward the far end (#427). | Accept it for a rough part, or check the far end before cutting. |
+| `mount-unmeasured` | info | The bracket and clamp sizes are the shop's defaults, not measurements, so the clearances are only as good as those defaults (#427). | Measure the bracket and clamps with calipers and save the values in the shop defaults. |
 
 ### 8.2 G-code the simulator understands
 

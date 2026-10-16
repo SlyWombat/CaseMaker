@@ -16,7 +16,17 @@
  *
  * WHICH EDGES, BY MOUNT (§5.9's table):
  *   - bracket — XY is the anchor bracket's (machine-known): the work origin comes from anchor1 and the
- *     stock's offset in the bracket; no scan, only the surface.
+ *     stock's offset in the bracket; only the surface, unless Q10's OPTIONAL confirming touch is asked
+ *     for (`bracketConfirm`, #427): one scan across the RIGHT edge and one across the BACK — the bracket's
+ *     arms are on the left and the front, where a scan would land on the bracket — kept clear of the
+ *     clamps. They confirm the stock is pushed into the corner; they never move the origin. While the
+ *     bracket's offset from the anchor is a default, not measured, the confirming touch is REQUIRED.
+ *     The plan carries the mount's obstacles (`mountObstacles`: the clamps and the arms, as the job
+ *     places them): a top that reaches the travel height (machine Z −3) is refused, the surface point
+ *     must be clear of them, and the operator confirms the clamps are where the plan puts them before
+ *     anything moves sideways (`execute.ts`).
+ *     Every XY move on the bracket is sent in MACHINE coordinates (`G53`), from the bracket's origin, so
+ *     the touches land on the stock whatever G54 was left in force.
  *   - vise — the left edge (a confirm against the fixed jaw) and the front edge (Y — Appendix C). The
  *     jaw tops must sit clear BELOW the park height and below the surface band, or a scan could not
  *     tell a jaw from the stock — or would move sideways into one.
@@ -71,7 +81,35 @@ export interface PlanInput {
   /** Vise: how far the jaw tops sit BELOW the stock's top (the stock's proud height), mm. */
   fixtureBelowSurfaceMm?: number;
   /** Bracket: the work origin in MACHINE XY, from anchor1 and the stock's offset in the bracket. */
-  bracketOrigin?: { x: number; y: number; from: string };
+  bracketOrigin?: BracketOrigin;
+  /**
+   * Bracket, REQUIRED (#427): the clamps and the bracket's arms as the job places them, work XY, each top
+   * in work Z (above the stock's top) — `mounts/bracket.ts`'s `clampObstacles` / `bracketObstacles`.
+   * An empty list says "no clamps", and the operator is asked to confirm that too.
+   */
+  mountObstacles?: PlanObstacle[];
+  /**
+   * Bracket: Q10's confirming touch (#427) — scans across the right and back edges, each line kept clear
+   * of `mountObstacles`. Optional once the bracket's offset is measured; required until then.
+   */
+  bracketConfirm?: boolean;
+}
+
+/** The bracket's origin in machine XY, and whether its offset from the anchor was measured. */
+export interface BracketOrigin {
+  x: number;
+  y: number;
+  from: string;
+  offsetMeasured: boolean;
+}
+
+export interface PlanObstacle {
+  kind: 'clamp' | 'bracket';
+  label: string;
+  min: [number, number];
+  max: [number, number];
+  /** Its highest point, work Z (the stock's top is 0). */
+  topZ: number;
 }
 
 export interface RegistrationPlan {
@@ -81,7 +119,9 @@ export interface RegistrationPlan {
   /** The surface touch: from machine Z −3, at most this far down; and the band a reading must land in. */
   seek: { fromMachineZ: number; travelMm: number; band: { min: number; max: number } };
   scans: EdgeScan[];
-  bracketOrigin: { x: number; y: number; from: string } | null;
+  bracketOrigin: BracketOrigin | null;
+  /** Bracket: what stands above the stock, as the operator must confirm it (#427). Empty elsewhere. */
+  mountObstacles: PlanObstacle[];
   settings: RegistrationSettings;
   notes: string[];
 }
@@ -158,10 +198,71 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   const midY = (stock.yMin + stock.yMax) / 2;
   const midX = (stock.xMin + stock.xMax) / 2;
   let bracketOrigin: RegistrationPlan['bracketOrigin'] = null;
+  let mountObstacles: PlanObstacle[] = [];
   if (mount === 'bracket') {
     if (!input.bracketOrigin) return { ok: false, reason: 'the bracket mount needs the origin from the machine’s anchor' };
+    if (!input.mountObstacles) {
+      return { ok: false, reason: 'the bracket mount needs where the clamps and the bracket’s arms are — the probe travels beside them' };
+    }
     bracketOrigin = input.bracketOrigin;
-    notes.push(`the bracket fixes X and Y: the origin is ${input.bracketOrigin.from}; only the surface is touched`);
+    mountObstacles = input.mountObstacles;
+    // Every top must sit below the travel height, with the surface's own tolerance to spare.
+    for (const o of mountObstacles) {
+      const topMachine = r3(exp + o.topZ);
+      if (topMachine >= SEEK_FROM_MACHINE_Z - s.surfaceToleranceMm) {
+        return {
+          ok: false,
+          reason: `${o.label} stands to machine Z ${topMachine}, up to the probe's travel height (machine Z ${SEEK_FROM_MACHINE_Z}): the probe would be driven into it — use lower clamps or thinner stock`,
+        };
+      }
+    }
+    // The surface point must not be under (or beside) anything standing above the stock.
+    const grow = s.tipRadiusMm + s.cornerClearanceMm;
+    const under = mountObstacles.find(
+      (o) => surfacePoint.x > o.min[0] - grow && surfacePoint.x < o.max[0] + grow && surfacePoint.y > o.min[1] - grow && surfacePoint.y < o.max[1] + grow,
+    );
+    if (under) return { ok: false, reason: `the surface touch point is at ${under.label}: move the clamp, or touch the stock somewhere clear of it` };
+    if (!input.bracketConfirm && !input.bracketOrigin.offsetMeasured) {
+      return {
+        ok: false,
+        reason: 'the bracket’s offset from the anchor is a default, not measured: the confirming touch is required until it is measured',
+      };
+    }
+    if (!input.bracketConfirm) {
+      notes.push(`the bracket fixes X and Y: the origin is ${input.bracketOrigin.from}; only the surface is touched`);
+    } else {
+      const ys = span(stock.yMin, stock.yMax, 'right');
+      if (typeof ys === 'string') return { ok: false, reason: ys };
+      const xs = span(stock.xMin, stock.xMax, 'back');
+      if (typeof xs === 'string') return { ok: false, reason: xs };
+      // A line clear of every clamp and arm, grown by the probe's rim and the corner clearance.
+      const clearLine = (edge: 'right' | 'back', lo: number, hi: number): number | null => {
+        const scan = scanFor(edge, (lo + hi) / 2, stock, s);
+        const [a, b] = [Math.min(scan.start, scan.limit), Math.max(scan.start, scan.limit)];
+        const mid = (lo + hi) / 2;
+        const candidates = Array.from({ length: 9 }, (_, i) => lo + ((hi - lo) * i) / 8).sort((p, q) => Math.abs(p - mid) - Math.abs(q - mid));
+        for (const c of [mid, ...candidates]) {
+          const hits = mountObstacles.some((r) => {
+            const [across, along] = edge === 'right' ? ([0, 1] as const) : ([1, 0] as const);
+            return r.max[across] + grow > a && r.min[across] - grow < b && c > r.min[along] - grow && c < r.max[along] + grow;
+          });
+          if (!hits) return r3(c);
+        }
+        return null;
+      };
+      const yRight = clearLine('right', ys.lo, ys.hi);
+      const xBack = clearLine('back', xs.lo, xs.hi);
+      if (yRight === null || xBack === null) {
+        return {
+          ok: false,
+          reason: `no line across the ${yRight === null ? 'right' : 'back'} edge stays clear of the clamps: move a clamp, or register without the confirming touch`,
+        };
+      }
+      scans.push(scanFor('right', yRight, stock, s), scanFor('back', xBack, stock, s));
+      notes.push(
+        `the bracket fixes X and Y: the origin is ${input.bracketOrigin.from}; the right and back edges are scanned only to confirm the stock is pushed into the corner (they carry its size error too), and never move the origin`,
+      );
+    }
   } else {
     if (mount === 'vise') {
       const proud = input.fixtureBelowSurfaceMm;
@@ -201,6 +302,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       seek: { fromMachineZ: SEEK_FROM_MACHINE_Z, travelMm: travel, band },
       scans,
       bracketOrigin,
+      mountObstacles,
       settings: s,
       notes,
     },

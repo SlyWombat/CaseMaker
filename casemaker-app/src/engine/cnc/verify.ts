@@ -10,7 +10,9 @@
  * is an injected `DepthLimit` function, because wood has no layer stack: CNC-2 passes
  * "thickness − minFloor inside the stock, 0 outside", CNC-3's badge passes #178's
  * `maxDepthAt`. Same verifier. The FIXTURE (the vise) is NOT checked here — that needs
- * solids and the simulation does it (#204). #206 requires both.
+ * solids and the simulation does it (#204). #206 requires both. The one exception is the bracket and
+ * its top clamps (#427): their footprints are flat rectangles with a top, so `clamp-in-path` and
+ * `bracket-in-path` are exact segment tests here (`mounts/inPath.ts`), when the caller passes them.
  *
  * THE PARSER AND THE RUNNER ARE CALLED, NEVER DUPLICATED: `parseGcode` lowers the file to
  * the event stream (#174's parser half, already landed), `buildTimeline` runs it and raises
@@ -37,6 +39,9 @@ import { applyEvent, buildTimeline, initialState, type MachineState } from './em
 import type { MillProfile } from './machine';
 import { sacrificialBoxes, type SacrificialBox } from './sacrificial';
 import type { Setup } from './setup';
+// inPath only (types from bracket): the verifier runs in workers and must not pull in the defaults client.
+import { mountInPath, type PathSegment } from './mounts/inPath';
+import type { MountObstacle } from './mounts/bracket';
 import { cuttingDiameter, cuttingRadiusForSweep, traceRadiusAt, type Tool } from './tool';
 
 /** Deepest permitted cut (positive mm below the top face) at a work-frame XY. 0 = no cutting allowed here. */
@@ -60,6 +65,11 @@ export interface VerifyContext {
    * nothing, and the message then ends exactly where it always did.
    */
   limitReasonAt?: (x: number, y: number) => string;
+  /**
+   * #427 — the mount's obstacles: the bracket's arms and the top clamps, work frame, with the mount's
+   * uncertainty. OPTIONAL: absent means this mount has none modelled, and nothing here changes.
+   */
+  mountObstacles?: { obstacles: MountObstacle[]; uncertainty: number };
 }
 
 export interface VerifyFinding {
@@ -294,6 +304,10 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
   const bboxMin: Vec3 = [Infinity, Infinity, Infinity];
   const bboxMax: Vec3 = [-Infinity, -Infinity, -Infinity];
   let sawAnyPoint = false;
+  /** Every move with both ends known, for the mount's in-path test (#427). */
+  const segments: PathSegment[] = [];
+  /** Moves with an end the program never placed: the lowest Z known on them (null: none), and the line. */
+  const unplaced: { line: number | null; lowZ: number | null }[] = [];
 
   if (timeline !== null) {
     for (const d of timeline.diagnostics) {
@@ -375,6 +389,13 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
       if (known3(toW)) {
         collect(bboxMin, bboxMax, toW);
         sawAnyPoint = true;
+      }
+      if (known3(fromW) && known3(toW)) segments.push({ line: m.line, mode: m.mode, from: fromW, to: toW });
+      // A firmware macro's own steps travel at its clearance, and a line that commands no X or Y moves
+      // straight up or down: neither sweeps sideways into a clamp. Anything else unplaced is recorded.
+      else if (m.synthetic === undefined && (m.commanded[0] || m.commanded[1])) {
+        const [za, zb] = [fromW[2], toW[2]];
+        unplaced.push({ line: m.line, lowZ: za === null || zb === null ? null : Math.min(za, zb) });
       }
 
       if (isCut) {
@@ -509,6 +530,58 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
 
       if (isCut) seenCut = true;
       state = after;
+    }
+
+    // ---- 12. clamp-in-path / bracket-in-path (#427). The widest part of the tool that can pass
+    // alongside a clamp is its body — the shank or the cutting diameter, whichever is larger.
+    const mount = ctx.mountObstacles;
+    if (mount && mount.obstacles.length > 0) {
+      const widths = [ctx.tool.handleDiameter, ctx.tool.diameter, ctx.tool.tipDiameter, cuttingDiameter(ctx.tool)].filter(
+        (d): d is number => d !== null && d > 0,
+      );
+      if (widths.length === 0) {
+        push('clamp-unchecked', null, 'the tool states no diameter, so the clamps and the bracket could not be checked against the toolpath');
+      } else {
+        for (const f of mountInPath(segments, mount.obstacles, { radius: Math.max(...widths) / 2, uncertainty: mount.uncertainty })) {
+          push(f.code, f.line, f.message);
+        }
+      }
+      // A move with an end the program never placed cannot be clipped. It is safe only when both its ends
+      // are known to be above every obstacle's top; otherwise it is reported, never silently left out.
+      const highest = Math.max(...mount.obstacles.map((o) => o.topZ)) + mount.uncertainty;
+      const blind = unplaced.filter((u) => u.lowZ === null || u.lowZ < highest);
+      if (blind.length > 0) {
+        push(
+          'clamp-unchecked',
+          blind[0]!.line,
+          `${blind.length} move${blind.length === 1 ? '' : 's'} (the first here) ${blind.length === 1 ? 'has' : 'have'} a position the program never placed, below the clamps' tops at Z ${fmt(highest)}, so ${blind.length === 1 ? 'it' : 'they'} could not be checked against the clamps and the bracket`,
+        );
+      }
+      // The collet nut rides `stickout` above the tip. If the deepest cut brings it below a clamp's top, the
+      // nut's own clearance matters: checked with the machine's nut when it is known, said plainly when not.
+      const stickout = ctx.tool.stickout;
+      if (stickout !== null && stickout > 0 && segments.length > 0) {
+        const lowestTip = Math.min(...segments.map((sg) => Math.min(sg.from[2], sg.to[2])));
+        if (lowestTip + stickout < highest) {
+          const nut = ctx.machine.holder;
+          if (nut === null) {
+            push(
+              'clamp-unchecked',
+              null,
+              `the cutter sticks out ${fmt(stickout)} mm and reaches Z ${fmt(lowestTip)}, so its collet nut comes down to Z ${fmt(lowestTip + stickout)}, below the clamps' tops at Z ${fmt(highest)}; the nut's size is not recorded, so its clearance from the clamps could not be checked`,
+            );
+          } else {
+            const raised = segments.map((sg) => ({
+              ...sg,
+              from: [sg.from[0], sg.from[1], sg.from[2] + stickout] as [number, number, number],
+              to: [sg.to[0], sg.to[1], sg.to[2] + stickout] as [number, number, number],
+            }));
+            for (const f of mountInPath(raised, mount.obstacles, { radius: nut.nutDiameter / 2, uncertainty: mount.uncertainty })) {
+              push(f.code, f.line, `the collet nut (${fmt(stickout)} mm above the tip): ${f.message}`);
+            }
+          }
+        }
+      }
     }
 
     if (toolNumbers.size > 1) {
