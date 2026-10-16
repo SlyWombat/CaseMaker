@@ -265,7 +265,7 @@ export function ToolsScope() {
               className="btn"
               data-testid="manage-export"
               disabled={actionsDisabled}
-              title="Save the house — your definitions and the inventory — as one JSON file"
+              title="Save the location — its machine, your definitions and the inventory — as one JSON file (location.json)"
               onClick={() => void exportHouse()}
             >
               {busy === 'export' ? 'Saving…' : 'Export'}
@@ -275,7 +275,7 @@ export function ToolsScope() {
               className="btn"
               data-testid="manage-import"
               disabled={actionsDisabled}
-              title="Load a house file over the service’s own"
+              title="Load a location.json over the service’s own — or an older house.json, which replaces only the definitions and the inventory"
               onClick={() => importInput.current?.click()}
             >
               {busy === 'import' ? 'Loading…' : 'Import'}

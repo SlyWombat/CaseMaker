@@ -59,16 +59,19 @@ import {
   type SyncSummary,
 } from '@/platform/houseClient';
 import { useToolRegistryStore } from './toolRegistryStore';
+import { checkLocationImport, LOCATION_FILENAME } from '@/platform/locationClient';
+import { applyMachineToSettings, suppressSeeding, useLocationStore } from './locationStore';
 
 /**
- * What the house file is called when it is saved. The service sets `Content-Disposition` for its own
- * export, but a fetch's body carries no filename — this is the panel's button, not a navigation.
+ * What the exported file is called when it is saved. The service sets `Content-Disposition` for its
+ * own export, but a fetch's body carries no filename — this is the panel's button, not a navigation.
  *
- * NOT #247's "my machine" file (`casemaker-my-machine.json`), which is a different, wider document:
- * it carries the fixture measurements today and is the one a maintainer moves between their own two
- * Macs. This file is the house's two tiers, which is what the service serves and accepts.
+ * SINCE #412 THE EXPORT IS THE LOCATION: `location.json`, holding the machine record (the "my
+ * machine" sections among it) beside the house's two tiers. An older `house.json` still imports — the
+ * service replaces only the tool tiers from it and keeps the machine. The browser-only "my machine"
+ * file (`casemaker-my-machine.json`) stays for a build with no service.
  */
-export const HOUSE_FILENAME = 'house.json';
+export const HOUSE_FILENAME = LOCATION_FILENAME;
 
 /** Which action is running. Named rather than a boolean, so the panel can say what it is waiting on. */
 export type HouseAction =
@@ -306,9 +309,13 @@ export const useHouseStore = create<HouseState>((set, get) => {
           const why = saveText(res.text, HOUSE_FILENAME);
           if (why !== null) return { ok: false, kind: 'error', text: why };
           const { entries, items } = useToolRegistryStore.getState();
+          // The machine count only when the location has been read: a sentence about machines the
+          // window never asked about would be a guess.
+          const location = useLocationStore.getState().location;
+          const machines = location === null ? '' : `, ${plural(location.machines.length, 'machine', 'machines')},`;
           return {
             ok: true,
-            text: `Saved ${HOUSE_FILENAME} — ${plural(entries.length, 'definition', 'definitions')} and ${plural(items.length, 'cutter', 'cutters')} in the inventory.`,
+            text: `Saved ${HOUSE_FILENAME} — ${plural(entries.length, 'definition', 'definitions')}${machines} and ${plural(items.length, 'cutter', 'cutters')} in the inventory.`,
           };
         },
         // Nothing about the house changed by saving it, so there is nothing to re-read. The feeds
@@ -318,10 +325,31 @@ export const useHouseStore = create<HouseState>((set, get) => {
 
     importHouse: (text) =>
       attempt('import', async () => {
+        // A location file is held to this build's schemas BEFORE it is sent (#412): the service
+        // stores the machine's sections without reading them, so a malformed one would be accepted
+        // there and then fail every location read here. A house file goes as it always has.
+        const check = checkLocationImport(text);
+        if (check.kind === 'refused') return { ok: false, kind: 'refused', text: check.reason };
         const res = await houseImportHouse(text);
-        return res.kind === 'ok'
-          ? { ok: true, text: 'Loaded the house file.' }
-          : failed(res);
+        if (res.kind !== 'ok') return failed(res);
+        // The location changed under this window: re-read it, then — for a location file — put its
+        // machine's numbers into this window's settings, which is what importing a machine means.
+        // Re-read FIRST, so the settings' write-through compares against the imported record and
+        // finds nothing to write back.
+        if (useLocationStore.getState().status === 'present') {
+          await useLocationStore.getState().refresh();
+          if (check.kind === 'location') {
+            const machine = check.doc.machines[0];
+            // A location imported with NO machine stays that way: re-seeding it from this window's
+            // settings on the next edit would undo the import (#412 review).
+            if (machine !== undefined) applyMachineToSettings(machine);
+            else suppressSeeding();
+          }
+        }
+        return {
+          ok: true,
+          text: check.kind === 'location' ? 'Loaded the location file.' : 'Loaded the house file — the tools and inventory; the machine record is unchanged.',
+        };
       }),
 
     dismissNotice: () => set({ notice: null }),

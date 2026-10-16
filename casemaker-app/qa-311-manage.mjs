@@ -427,8 +427,9 @@ const svc = makeService();
   const download = page.waitForEvent('download', { timeout: 10000 }).catch(() => null);
   await page.getByTestId('manage-export').click();
   const file = await download;
-  check('[1] Export hands the house over as house.json',
-    file !== null && file.suggestedFilename() === 'house.json', file?.suggestedFilename() ?? 'no download');
+  // #412 — the export is the location now: one file holding the machine record and both tool tiers.
+  check('[1] Export hands the location over as location.json',
+    file !== null && file.suggestedFilename() === 'location.json', file?.suggestedFilename() ?? 'no download');
   check('[1] the export is a GET, and it wrote nothing',
     requests.includes('GET /api/v1/export') && svc.calls.every((c) => c.pathname !== '/api/v1/export'));
 

@@ -60,6 +60,7 @@ const HEALTH: HouseHealth = {
   feedRows: 0,
   catalogueSyncedAt: '2026-10-08T09:30:00.000Z',
   problems: [],
+  warnings: [],
   lastSync: null,
 };
 

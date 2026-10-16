@@ -38,6 +38,12 @@
 // than a promise. `catalogue.rs` is the reader that fills the first one (#308); its type is
 // {@link crate::catalogue::CatalogueDoc}, and `HouseStore::sync_catalogue` is what replaces it.
 //
+// SINCE #412 THE USER'S DOCUMENT IS `location.json`, NOT `house.json`. The two user tiers moved into
+// the location (`location.rs`, decision Q2) beside the machine records; this store keeps that
+// document, serves `/tools` and `/inventory` from it byte-for-byte as before, and migrates a
+// `house.json` into it once, on open, leaving the old file where it was. Wherever this file says
+// "the house file" below, the location is what is now written; the rules are unchanged.
+//
 // THE BUILTINS ARE NOT IN HERE. `TOOL_LIBRARY` (`engine/cnc/toolLibrary.ts`) is the client's
 // permanent `builtin` tier (#305) and the client merges it, so `GET /api/v1/tools` carries only the
 // tiers ABOVE it: `cat:` and `user:`. Serving the builtins would list them twice in every picker.
@@ -66,6 +72,9 @@
 
 use crate::catalogue::{CatalogueDoc, SyncNote, SyncReport, SyncSummary, CATALOGUE_KIND};
 use crate::etag::etag_for;
+use crate::location::{
+    LocationDoc, MachineRecord, LOCATION_FILE, LOCATION_KIND, LOCATION_SCHEMA_VERSION,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -480,41 +489,47 @@ impl HouseDoc {
     /// So this is the client's own contract, restated where the data is written: every tool is a
     /// full {@link ToolLibraryEntry} (key, tool, provenance), keys are unique, and no two inventory
     /// items share an id or a code.
-    fn validate(&self) -> Result<(), HouseError> {
-        let mut keys = HashSet::new();
-        for t in &self.tools {
-            // The entry is the thing that goes on the wire, so the entry is what is validated —
-            // plus the `origin`, which `ToolLibraryEntry` does not carry.
-            t.validate()?;
-            if !keys.insert(t.key.as_str()) {
-                return Err(HouseError::BadEntry(format!(
-                    "{} appears twice in the tool list: one key, one cutter",
-                    t.key
-                )));
-            }
-        }
-        let mut ids = HashSet::new();
-        let mut codes = HashSet::new();
-        for i in &self.inventory {
-            i.validate()?;
-            if !ids.insert(i.id.as_str()) {
-                return Err(HouseError::BadEntry(format!(
-                    "{} is registered twice: one id, one possession",
-                    i.id
-                )));
-            }
-            for c in &i.codes {
-                if !codes.insert(c.value.as_str()) {
-                    return Err(HouseError::BadEntry(format!(
-                        "the code {} is on more than one cutter: the code is what the inventory is \
-                         looked up by, so it names one",
-                        c.value
-                    )));
-                }
-            }
-        }
-        Ok(())
+    pub(crate) fn validate(&self) -> Result<(), HouseError> {
+        validate_tiers(&self.tools, &self.inventory)
     }
+}
+
+/// The house document's rule, over the two tiers wherever they are kept (#412): `house.json` used
+/// to be the only place, and `location.json` now holds the same two lists under exactly this rule.
+pub(crate) fn validate_tiers(tools: &[UserTool], inventory: &[InventoryItem]) -> Result<(), HouseError> {
+    let mut keys = HashSet::new();
+    for t in tools {
+        // The entry is the thing that goes on the wire, so the entry is what is validated —
+        // plus the `origin`, which `ToolLibraryEntry` does not carry.
+        t.validate()?;
+        if !keys.insert(t.key.as_str()) {
+            return Err(HouseError::BadEntry(format!(
+                "{} appears twice in the tool list: one key, one cutter",
+                t.key
+            )));
+        }
+    }
+    let mut ids = HashSet::new();
+    let mut codes = HashSet::new();
+    for i in inventory {
+        i.validate()?;
+        if !ids.insert(i.id.as_str()) {
+            return Err(HouseError::BadEntry(format!(
+                "{} is registered twice: one id, one possession",
+                i.id
+            )));
+        }
+        for c in &i.codes {
+            if !codes.insert(c.value.as_str()) {
+                return Err(HouseError::BadEntry(format!(
+                    "the code {} is on more than one cutter: the code is what the inventory is \
+                     looked up by, so it names one",
+                    c.value
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// What `GET /api/v1/health` answers (#306's shape).
@@ -536,6 +551,11 @@ pub struct Health {
     /// One sentence per document that could not be read. A non-empty list is also why writes are
     /// refused: the store will not overwrite a file it could not understand.
     pub problems: Vec<String>,
+    /// One sentence per thing worth knowing that does NOT stop a write (#412): today, a `house.json`
+    /// written after `location.json` — an older build's edits, which this build never reads.
+    /// Defaulted, so a reader from before the field sees an empty list.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 /// Everything the API can refuse, and why. Mapped to HTTP status codes in `house_api.rs`.
@@ -639,16 +659,23 @@ fn json_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, HouseError> {
 fn tools_bytes(inner: &Inner) -> Result<Vec<u8>, HouseError> {
     let mut entries: Vec<ToolLibraryEntry> =
         inner.catalogue.tools.iter().map(ToolLibraryEntry::from).collect();
-    entries.extend(inner.house.tools.iter().map(ToolLibraryEntry::from));
+    entries.extend(inner.location.tools.iter().map(ToolLibraryEntry::from));
     json_bytes(&entries)
 }
 
 /// The `/inventory` body, ordered by `added_at` so a list a UI renders does not reshuffle when a
 /// write lands somewhere in the middle of the file. Same free-function rule as `tools_bytes`.
 fn inventory_bytes(inner: &Inner) -> Result<Vec<u8>, HouseError> {
-    let mut items = inner.house.inventory.clone();
+    let mut items = inner.location.inventory.clone();
     items.sort_by(|a, b| a.added_at.cmp(&b.added_at).then(a.id.cmp(&b.id)));
     json_bytes(&items)
+}
+
+/// The `/location` body (#412): the location's identity and machines, without the tool tiers. Same
+/// free-function rule as `tools_bytes`, for the same reason — a guarded machine write needs it while
+/// it holds the write guard.
+fn location_bytes(inner: &Inner) -> Result<Vec<u8>, HouseError> {
+    json_bytes(&inner.location.view())
 }
 
 /// The `If-Match` precondition (#321), evaluated BEFORE the method changes anything — RFC 9110
@@ -748,9 +775,21 @@ fn io_err(path: &Path, e: &std::io::Error) -> HouseError {
 ///
 /// A file that exists but does not parse is an `Err` with a sentence naming it, never a silent
 /// default: the caller keeps that sentence and refuses to write over the file.
-fn read_doc<T: for<'de> Deserialize<'de>>(path: &Path, kind: &str) -> Result<Option<T>, String> {
-    if !path.exists() {
-        return Ok(None);
+///
+/// `version` is the document's OWN version (#412): the house and the catalogue are
+/// `HOUSE_SCHEMA_VERSION`, the location is `LOCATION_SCHEMA_VERSION`, and the two move independently.
+fn read_doc<T: for<'de> Deserialize<'de>>(
+    path: &Path,
+    kind: &str,
+    version: u32,
+) -> Result<Option<T>, String> {
+    // `try_exists`, not `exists` (#412 review): `exists` reads "could not tell" — a permission
+    // error, a dead network share — as "not there", and the caller then writes a fresh empty
+    // location over a file it simply could not see. An unanswerable question is a problem.
+    match path.try_exists() {
+        Ok(false) => return Ok(None),
+        Ok(true) => {}
+        Err(e) => return Err(format!("{}: cannot tell whether it exists: {e}", path.display())),
     }
     let bytes = fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)
@@ -763,13 +802,13 @@ fn read_doc<T: for<'de> Deserialize<'de>>(path: &Path, kind: &str) -> Result<Opt
             file_kind
         ));
     }
-    let version = value
+    let found = value
         .get("schemaVersion")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
-    if version != u64::from(HOUSE_SCHEMA_VERSION) {
+    if found != u64::from(version) {
         return Err(format!(
-            "{} is version {version}; this build reads version {HOUSE_SCHEMA_VERSION}",
+            "{} is version {found}; this build reads version {version}",
             path.display()
         ));
     }
@@ -779,10 +818,12 @@ fn read_doc<T: for<'de> Deserialize<'de>>(path: &Path, kind: &str) -> Result<Opt
 }
 
 struct Inner {
-    house: HouseDoc,
+    /// The user's own document (#412): the location, which holds the tool tiers `house.json` did.
+    location: LocationDoc,
     catalogue: CatalogueDoc,
-    /// Why `house.json` could not be read, if it could not. Non-empty ⇒ every write is refused.
-    house_problem: Option<String>,
+    /// Why the user's document could not be read — `location.json`, or the `house.json` it would
+    /// have been migrated from — if it could not. Non-empty ⇒ every write is refused.
+    location_problem: Option<String>,
     catalogue_problem: Option<String>,
 }
 
@@ -794,6 +835,21 @@ pub struct HouseStore {
     /// takes no arguments, and this is the seam a test points at a fixture (#308).
     studio_db: Option<PathBuf>,
     inner: RwLock<Inner>,
+    /// What is known about a `house.json` changed after the migration (#412 review), mirrored in
+    /// `house-watch.json` so it survives a restart. See `stale_house_warning`.
+    house_watch: std::sync::Mutex<Option<HouseWatch>>,
+}
+
+/// The file the stale-`house.json` state is kept in, beside the documents. Ours, not the user's.
+const HOUSE_WATCH_FILE: &str = "house-watch.json";
+
+/// A `house.json` seen modified after `location.json`: its modification time (nanoseconds since the
+/// epoch) and whether the user has dealt with it — dismissed the warning, or imported a house file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HouseWatch {
+    house_modified: u64,
+    acknowledged: bool,
 }
 
 impl HouseStore {
@@ -810,30 +866,10 @@ impl HouseStore {
     /// The same, with the vendor database named explicitly — `None` for a platform with no data
     /// directory to look in, and a fixture path in tests.
     pub fn open_with(dir: PathBuf, studio_db: Option<PathBuf>) -> HouseStore {
-        let house_path = dir.join(HOUSE_FILE);
-        let (house, house_problem) = match read_doc::<HouseDoc>(&house_path, HOUSE_KIND) {
-            // Parsing is not enough (#320): a hand-edited `house.json` can parse and still hold a
-            // duplicate key or a tool the client refuses, and serving it is what makes the whole
-            // house read `absent` on the other side. A document that fails its own rules is treated
-            // exactly like one that fails to parse — the reason goes in `/health`, the user's file
-            // is left alone, and every write is refused until it is dealt with by hand.
-            Ok(Some(doc)) => match doc.validate() {
-                Ok(()) => (doc, None),
-                Err(e) => {
-                    let why = format!("{} cannot be served: {e}", house_path.display());
-                    log::warn!("house service: {why}");
-                    (HouseDoc::default(), Some(why))
-                }
-            },
-            Ok(None) => (HouseDoc::default(), None),
-            Err(e) => {
-                log::warn!("house service: {e}");
-                (HouseDoc::default(), Some(e))
-            }
-        };
+        let (location, location_problem) = Self::load_location(&dir);
         let catalogue_path = dir.join(CATALOGUE_FILE);
         let (catalogue, catalogue_problem) =
-            match read_doc::<CatalogueDoc>(&catalogue_path, CATALOGUE_KIND) {
+            match read_doc::<CatalogueDoc>(&catalogue_path, CATALOGUE_KIND, HOUSE_SCHEMA_VERSION) {
                 // The same rule as the house, one tier down (#339): a parsed entry is not a servable
                 // one. A corrupted row with a non-`cat:` key would go out on `/tools`, the client's
                 // `isToolKey` would refuse the WHOLE list, and the house would read absent while
@@ -853,15 +889,100 @@ impl HouseStore {
                     (CatalogueDoc::default(), Some(e))
                 }
             };
-        HouseStore {
+        let house_watch = fs::read(dir.join(HOUSE_WATCH_FILE))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<HouseWatch>(&b).ok());
+        let store = HouseStore {
             dir,
             studio_db,
             inner: RwLock::new(Inner {
-                house,
+                location,
                 catalogue,
-                house_problem,
+                location_problem,
                 catalogue_problem,
             }),
+            house_watch: std::sync::Mutex::new(house_watch),
+        };
+        // Looked for at open too, BEFORE anything can write the location: an older build cannot run
+        // beside this one (the lock), so its edits are always made while this one is closed, and
+        // the first write after opening would otherwise make `location.json` the newer file.
+        let _ = store.stale_house_warning();
+        store
+    }
+
+    /// The user's document, and why it could not be read if it could not (#412).
+    ///
+    /// `location.json` first: if it is there it is the authority, readable or not — an unreadable
+    /// location is a problem, and `house.json` is NOT consulted behind it, because serving the old
+    /// file would quietly undo every write made since the migration. If it is absent, a readable
+    /// and valid `house.json` is migrated into a new location, which is written at once; the old
+    /// file is left exactly where it is. An unreadable or invalid `house.json` is the problem
+    /// instead, nothing is written, and every write is refused until it is dealt with by hand —
+    /// the rule `house.json` always had (#320, #339).
+    fn load_location(dir: &Path) -> (LocationDoc, Option<String>) {
+        let location_path = dir.join(LOCATION_FILE);
+        match read_doc::<LocationDoc>(&location_path, LOCATION_KIND, LOCATION_SCHEMA_VERSION) {
+            // Parsing is not enough (#320): a hand-edited document can parse and still hold a
+            // duplicate key or a tool the client refuses.
+            Ok(Some(doc)) => {
+                return match doc.validate() {
+                    Ok(()) => (doc, None),
+                    Err(e) => {
+                        let why = format!("{} cannot be served: {e}", location_path.display());
+                        log::warn!("house service: {why}");
+                        (LocationDoc::fresh(), Some(why))
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                log::warn!("house service: {e}");
+                return (LocationDoc::fresh(), Some(e));
+            }
+        }
+
+        let house_path = dir.join(HOUSE_FILE);
+        match read_doc::<HouseDoc>(&house_path, HOUSE_KIND, HOUSE_SCHEMA_VERSION) {
+            Ok(Some(house)) => match house.validate() {
+                Ok(()) => {
+                    let location = LocationDoc::from_house(house, HOUSE_FILE);
+                    // Written now, so the migration happens once and `location.json` is the marker.
+                    // A failed write is not fatal: the location is served from memory and the first
+                    // write through `commit` lands it — the same file, the same rows.
+                    Self::write_location_now(&location_path, &location);
+                    (location, None)
+                }
+                Err(e) => {
+                    let why = format!("{} cannot be served: {e}", house_path.display());
+                    log::warn!("house service: {why}");
+                    (LocationDoc::fresh(), Some(why))
+                }
+            },
+            // A first run. The empty location is written now rather than at the first write, so its
+            // id is the same across restarts from the start (#412 review: an id minted per open
+            // would change under any client that read it). A failed write is not fatal, as above.
+            Ok(None) => {
+                let location = LocationDoc::fresh();
+                Self::write_location_now(&location_path, &location);
+                (location, None)
+            }
+            Err(e) => {
+                log::warn!("house service: {e}");
+                (LocationDoc::fresh(), Some(e))
+            }
+        }
+    }
+
+    /// Write a location at open — the migration's and the first run's. Logged, never fatal: the
+    /// document is served from memory and the first `commit` lands it.
+    fn write_location_now(path: &Path, location: &LocationDoc) {
+        match serde_json::to_vec_pretty(location) {
+            Ok(bytes) => {
+                if let Err(e) = write_atomic(path, &bytes) {
+                    log::warn!("house service: could not write {}: {e}", path.display());
+                }
+            }
+            Err(e) => log::warn!("house service: could not serialize the location: {e}"),
         }
     }
 
@@ -874,10 +995,73 @@ impl HouseStore {
             feed_rows: inner.catalogue.feeds.len(),
             catalogue_synced_at: inner.catalogue.synced_at.clone(),
             last_sync: inner.catalogue.last_sync.clone(),
-            problems: [&inner.house_problem, &inner.catalogue_problem]
+            problems: [&inner.location_problem, &inner.catalogue_problem]
                 .iter()
                 .filter_map(|p| (*p).clone())
                 .collect(),
+            warnings: self.stale_house_warning().into_iter().collect(),
+        }
+    }
+
+    /// A `house.json` modified AFTER `location.json` (#412 review). The migration is one-way, so an
+    /// older build that still writes `house.json` writes into a file this build never reads again —
+    /// its edits would vanish without a word. A warning and not a problem: the location is still the
+    /// authority, and refusing writes would not bring the older build's edits back.
+    ///
+    /// IT PERSISTS UNTIL IT IS DEALT WITH (re-review). Comparing modification times alone would hide
+    /// it at this build's next write, which makes `location.json` the newer file again. So the first
+    /// sighting is RECORDED (`house-watch.json`, with the `house.json` time it was seen at) and the
+    /// warning stays until the user dismisses it or imports a house file. A `house.json` changed
+    /// again after that — a different modification time — is a new sighting.
+    fn stale_house_warning(&self) -> Option<String> {
+        let nanos = |name: &str| {
+            fs::metadata(self.dir.join(name))
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos() as u64)
+        };
+        let mut watch = self.house_watch.lock().unwrap_or_else(|e| e.into_inner());
+        if let (Some(house), Some(location)) = (nanos(HOUSE_FILE), nanos(LOCATION_FILE)) {
+            let seen_before = watch.map(|w| w.house_modified);
+            let changed_since_seen = seen_before.is_some_and(|t| t != house);
+            if (house > location && seen_before != Some(house)) || changed_since_seen {
+                let next = HouseWatch { house_modified: house, acknowledged: false };
+                self.save_watch(&next);
+                *watch = Some(next);
+            }
+        }
+        match *watch {
+            Some(w) if !w.acknowledged => Some(format!(
+                "{HOUSE_FILE} was changed after {LOCATION_FILE} — by an older Case Maker build, most \
+                 likely. This build reads only {LOCATION_FILE}, so those changes are not in your \
+                 tools: re-enter them here, or import that {HOUSE_FILE} (it replaces the tools and \
+                 inventory and keeps the machine)"
+            )),
+            _ => None,
+        }
+    }
+
+    /// The user has dealt with the stale `house.json` — dismissed the warning, or imported a house
+    /// file. Recorded against the `house.json` time it was seen at, so only a NEW change raises it.
+    pub fn acknowledge_house_warning(&self) {
+        let mut watch = self.house_watch.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(w) = watch.as_mut() {
+            w.acknowledged = true;
+            let copy = *w;
+            self.save_watch(&copy);
+        }
+    }
+
+    /// Logged, never fatal: losing the record only means the warning is judged afresh next time.
+    fn save_watch(&self, watch: &HouseWatch) {
+        match serde_json::to_vec(watch) {
+            Ok(bytes) => {
+                if let Err(e) = write_atomic(&self.dir.join(HOUSE_WATCH_FILE), &bytes) {
+                    log::warn!("house service: could not record the house.json warning: {e}");
+                }
+            }
+            Err(e) => log::warn!("house service: could not serialize the house.json warning: {e}"),
         }
     }
 
@@ -916,14 +1100,14 @@ impl HouseStore {
     pub async fn create_tool(&self, entry: ToolLibraryEntry) -> Result<(), HouseError> {
         entry.validate()?;
         let mut inner = self.inner.write().await;
-        Self::writable(&inner.house_problem)?;
-        if inner.house.tools.iter().any(|t| t.key == entry.key) {
+        Self::writable(&inner.location_problem)?;
+        if inner.location.tools.iter().any(|t| t.key == entry.key) {
             return Err(HouseError::Conflict(format!(
                 "{} is already in the house",
                 entry.key
             )));
         }
-        let mut next = inner.house.clone();
+        let mut next = inner.location.clone();
         next.tools.push(UserTool {
             key: entry.key,
             tool: entry.tool,
@@ -947,9 +1131,9 @@ impl HouseStore {
     ) -> Result<(), HouseError> {
         entry.validate()?;
         let mut inner = self.inner.write().await;
-        Self::writable(&inner.house_problem)?;
+        Self::writable(&inner.location_problem)?;
         check_precondition(&etag_for(&tools_bytes(&inner)?), if_match, "the tool list")?;
-        let mut next = inner.house.clone();
+        let mut next = inner.location.clone();
         let Some(existing) = next.tools.iter_mut().find(|t| t.key == entry.key) else {
             return Err(HouseError::NotFound(format!(
                 "{} is not in the house",
@@ -964,9 +1148,9 @@ impl HouseStore {
     /// Remove a user tool. Guarded on the tool list's `ETag`, exactly as `update_tool` is (#321).
     pub async fn delete_tool(&self, key: &str, if_match: Option<&str>) -> Result<(), HouseError> {
         let mut inner = self.inner.write().await;
-        Self::writable(&inner.house_problem)?;
+        Self::writable(&inner.location_problem)?;
         check_precondition(&etag_for(&tools_bytes(&inner)?), if_match, "the tool list")?;
-        let mut next = inner.house.clone();
+        let mut next = inner.location.clone();
         let before = next.tools.len();
         next.tools.retain(|t| t.key != key);
         if next.tools.len() == before {
@@ -982,20 +1166,20 @@ impl HouseStore {
     pub async fn create_inventory(&self, item: InventoryItem) -> Result<(), HouseError> {
         item.validate()?;
         let mut inner = self.inner.write().await;
-        Self::writable(&inner.house_problem)?;
-        if inner.house.inventory.iter().any(|i| i.id == item.id) {
+        Self::writable(&inner.location_problem)?;
+        if inner.location.inventory.iter().any(|i| i.id == item.id) {
             return Err(HouseError::Conflict(format!(
                 "{} is already registered",
                 item.id
             )));
         }
-        if let Some(code) = clashing_code(&inner.house.inventory, &item) {
+        if let Some(code) = clashing_code(&inner.location.inventory, &item) {
             return Err(HouseError::Conflict(format!(
                 "{code} is already on another cutter — change that one's quantity instead of \
                  registering a second"
             )));
         }
-        let mut next = inner.house.clone();
+        let mut next = inner.location.clone();
         next.inventory.push(item);
         self.commit(&mut inner, next)
     }
@@ -1011,21 +1195,21 @@ impl HouseStore {
     ) -> Result<(), HouseError> {
         item.validate()?;
         let mut inner = self.inner.write().await;
-        Self::writable(&inner.house_problem)?;
+        Self::writable(&inner.location_problem)?;
         check_precondition(&etag_for(&inventory_bytes(&inner)?), if_match, "the inventory")?;
         // Existence first: an id nobody registered is a NOT FOUND whatever codes it carries.
-        if !inner.house.inventory.iter().any(|i| i.id == item.id) {
+        if !inner.location.inventory.iter().any(|i| i.id == item.id) {
             return Err(HouseError::NotFound(format!(
                 "{} is not registered",
                 item.id
             )));
         }
-        if let Some(code) = clashing_code(&inner.house.inventory, &item) {
+        if let Some(code) = clashing_code(&inner.location.inventory, &item) {
             return Err(HouseError::Conflict(format!(
                 "{code} is already on another cutter"
             )));
         }
-        let mut next = inner.house.clone();
+        let mut next = inner.location.clone();
         let existing = next
             .inventory
             .iter_mut()
@@ -1039,9 +1223,9 @@ impl HouseStore {
     /// is (#321).
     pub async fn delete_inventory(&self, id: &str, if_match: Option<&str>) -> Result<(), HouseError> {
         let mut inner = self.inner.write().await;
-        Self::writable(&inner.house_problem)?;
+        Self::writable(&inner.location_problem)?;
         check_precondition(&etag_for(&inventory_bytes(&inner)?), if_match, "the inventory")?;
-        let mut next = inner.house.clone();
+        let mut next = inner.location.clone();
         let before = next.inventory.len();
         next.inventory.retain(|i| i.id != id);
         if next.inventory.len() == before {
@@ -1050,12 +1234,50 @@ impl HouseStore {
         self.commit(&mut inner, next)
     }
 
-    /// The house document, pretty-printed: what a "my machine" file carries (#247). The catalogue is
-    /// NOT in here and cannot be — #212's rule that nothing vendor-derived leaves the machine.
+    /// The location without its tool tiers (#412) — id, name, machines — with the `ETag` a machine
+    /// write is guarded on. The tiers have their own endpoints and their own validators.
+    ///
+    /// REFUSED while the user's document cannot be read (#412 review): the store holds a stand-in
+    /// with a fresh id then, and serving it would show a brand-new empty location — a different one
+    /// on every restart — instead of the file the user has and cannot use. The refusal carries the
+    /// problem's own sentence, so the Machines card can show it.
+    pub async fn location(&self) -> Result<(Vec<u8>, String), HouseError> {
+        let inner = self.inner.read().await;
+        Self::writable(&inner.location_problem)?;
+        let bytes = location_bytes(&inner)?;
+        let etag = etag_for(&bytes);
+        Ok((bytes, etag))
+    }
+
+    /// Create or replace one machine record, by id (#412). GUARDED on the location's `ETag`, as the
+    /// tool and inventory writes are on theirs (#321): a machine save based on a location somebody
+    /// else has since changed is refused rather than winning silently. An upsert rather than a
+    /// POST/PATCH pair, because the record is one statement about one machine and the client mints
+    /// its id — the guard, not the key, is what stops two windows from overwriting each other.
+    pub async fn put_machine(
+        &self,
+        record: MachineRecord,
+        if_match: Option<&str>,
+    ) -> Result<(), HouseError> {
+        record.validate()?;
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        check_precondition(&etag_for(&location_bytes(&inner)?), if_match, "the location")?;
+        let mut next = inner.location.clone();
+        match next.machines.iter_mut().find(|m| m.id == record.id) {
+            Some(existing) => *existing = record,
+            None => next.machines.push(record),
+        }
+        self.commit(&mut inner, next)
+    }
+
+    /// The whole location, pretty-printed: the one file a location exports as (#412, §3.5) —
+    /// machines, the user's tool definitions and the inventory. The catalogue is NOT in here and
+    /// cannot be — #212's rule that nothing vendor-derived leaves the machine.
     pub async fn export(&self) -> Result<Vec<u8>, HouseError> {
         let inner = self.inner.read().await;
-        serde_json::to_vec_pretty(&inner.house)
-            .map_err(|e| HouseError::Io(format!("could not serialize the house: {e}")))
+        serde_json::to_vec_pretty(&inner.location)
+            .map_err(|e| HouseError::Io(format!("could not serialize the location: {e}")))
     }
 
     /// Import Makera's catalogue from Studio's own library, replacing the `cat:` tier wholesale
@@ -1172,34 +1394,75 @@ impl HouseStore {
         Ok(report)
     }
 
-    /// Replace the house from an exported document. WHOLE-OR-NOTHING (decision 28): the document is
-    /// parsed, version-checked and VALIDATED before anything is touched, so a truncated, foreign or
-    /// self-contradictory file is refused with a reason and the store is left exactly as it was.
+    /// Load an exported document over the one this service holds. WHOLE-OR-NOTHING (decision 28):
+    /// the document is parsed, version-checked and VALIDATED before anything is touched, so a
+    /// truncated, foreign or self-contradictory file is refused with a reason and the store is left
+    /// exactly as it was.
+    ///
+    /// TWO KINDS ARE ACCEPTED, AND THEY REPLACE DIFFERENT THINGS (#412).
+    ///   * A `casemaker-location` — what `export` now writes — replaces the whole location: its
+    ///     identity, its machines and both tool tiers.
+    ///   * A `casemaker-house` — an older export, and what `tool-labels/build-house.ts` builds and
+    ///     POSTs here — replaces ONLY the two tool tiers and keeps the location's identity and
+    ///     machine records. A house file never knew the machine, so letting it replace the location
+    ///     would make every inventory rebuild silently wipe the machine's saved setup.
     ///
     /// THE VALIDATION IS THE CLIENT'S, NOT A LOOSER ONE (#320). An import this service accepts must
-    /// be one the app can read back, so the whole document is held to `HouseDoc::validate` — every
-    /// tool through the full entry rule, unique keys, unique inventory ids and codes — rather than
-    /// to the two hand-picked checks this once ran. Accepting a document the client refuses is how
-    /// the house reads `absent` with `/health` still saying ok, and nothing naming the import.
+    /// be one the app can read back, so the whole document is held to the same rule `load` holds
+    /// the file to — every tool through the full entry rule, unique keys, unique inventory ids and
+    /// codes, unique machine ids.
     pub async fn import(&self, bytes: &[u8]) -> Result<(), HouseError> {
-        let doc: HouseDoc = serde_json::from_slice(bytes)
-            .map_err(|e| HouseError::BadEntry(format!("not a Case Maker house file: {e}")))?;
-        if doc.kind != HOUSE_KIND {
-            return Err(HouseError::BadEntry(format!(
-                "this is a {} document, not a house file",
-                if doc.kind.is_empty() { "unrecognised" } else { &doc.kind }
-            )));
+        let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| {
+            HouseError::BadEntry(format!("not a Case Maker location or house file: {e}"))
+        })?;
+        let kind = value.get("kind").and_then(|k| k.as_str()).unwrap_or("").to_string();
+        let found = value.get("schemaVersion").and_then(|v| v.as_u64());
+        let version_refusal = |what: &str, reads: u32| {
+            HouseError::BadEntry(format!(
+                "the {what} file is version {}; this build reads version {reads}",
+                found.map_or_else(|| "missing".to_string(), |v| v.to_string())
+            ))
+        };
+        match kind.as_str() {
+            LOCATION_KIND => {
+                if found != Some(u64::from(LOCATION_SCHEMA_VERSION)) {
+                    return Err(version_refusal("location", LOCATION_SCHEMA_VERSION));
+                }
+                let doc: LocationDoc = serde_json::from_value(value).map_err(|e| {
+                    HouseError::BadEntry(format!("not a Case Maker location file: {e}"))
+                })?;
+                doc.validate()?;
+                let mut inner = self.inner.write().await;
+                Self::writable(&inner.location_problem)?;
+                self.commit(&mut inner, doc)
+            }
+            HOUSE_KIND => {
+                if found != Some(u64::from(HOUSE_SCHEMA_VERSION)) {
+                    return Err(version_refusal("house", HOUSE_SCHEMA_VERSION));
+                }
+                let doc: HouseDoc = serde_json::from_value(value).map_err(|e| {
+                    HouseError::BadEntry(format!("not a Case Maker house file: {e}"))
+                })?;
+                doc.validate()?;
+                let mut inner = self.inner.write().await;
+                Self::writable(&inner.location_problem)?;
+                let mut next = inner.location.clone();
+                next.tools = doc.tools;
+                next.inventory = doc.inventory;
+                self.commit(&mut inner, next)?;
+                // Importing a house file is the warning's remedy (#412 review): it is dealt with.
+                self.acknowledge_house_warning();
+                Ok(())
+            }
+            other => Err(HouseError::BadEntry(format!(
+                "this is a{} document, not a location or house file",
+                if other.is_empty() {
+                    "n unrecognised".to_string()
+                } else {
+                    format!(" {other}")
+                }
+            ))),
         }
-        if doc.schema_version != HOUSE_SCHEMA_VERSION {
-            return Err(HouseError::BadEntry(format!(
-                "the file is version {}; this build reads version {HOUSE_SCHEMA_VERSION}",
-                doc.schema_version
-            )));
-        }
-        doc.validate()?;
-        let mut inner = self.inner.write().await;
-        Self::writable(&inner.house_problem)?;
-        self.commit(&mut inner, doc)
     }
 
     /// Refuse to write over a document that could not be read.
@@ -1215,11 +1478,14 @@ impl HouseStore {
 
     /// Persist a candidate document, then adopt it in memory. Disk first, so a write that fails
     /// leaves the in-memory house matching the file rather than ahead of it.
-    fn commit(&self, inner: &mut Inner, next: HouseDoc) -> Result<(), HouseError> {
+    ///
+    /// The document is `location.json` (#412); `house.json` is never written again after the
+    /// migration, so the user's old file stays exactly as it was when it was moved.
+    fn commit(&self, inner: &mut Inner, next: LocationDoc) -> Result<(), HouseError> {
         let bytes = serde_json::to_vec_pretty(&next)
-            .map_err(|e| HouseError::Io(format!("could not serialize the house: {e}")))?;
-        write_atomic(&self.dir.join(HOUSE_FILE), &bytes)?;
-        inner.house = next;
+            .map_err(|e| HouseError::Io(format!("could not serialize the location: {e}")))?;
+        write_atomic(&self.dir.join(LOCATION_FILE), &bytes)?;
+        inner.location = next;
         Ok(())
     }
 }
@@ -1701,6 +1967,8 @@ mod tests {
         assert!(matches!(err, HouseError::Refused(_)));
         // The user's file is byte-for-byte where they left it.
         assert_eq!(fs::read(&path).unwrap(), junk);
+        // And nothing was migrated: no empty location stands in for the house it could not read.
+        assert!(!dir.path().join(LOCATION_FILE).exists(), "a corrupt house.json wrote a location");
     }
 
     #[tokio::test]
@@ -1708,7 +1976,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let store = HouseStore::open(dir.path().to_path_buf());
         store.create_tool(an_entry("user:abc")).await.unwrap();
-        let before = fs::read(dir.path().join(HOUSE_FILE)).unwrap();
+        let before = fs::read(dir.path().join(LOCATION_FILE)).unwrap();
 
         let mut wrong_kind: serde_json::Value =
             serde_json::from_slice(&store.export().await.unwrap()).unwrap();
@@ -1730,7 +1998,7 @@ mod tests {
             store.import(b"not json at all").await,
             Err(HouseError::BadEntry(_))
         ));
-        assert_eq!(fs::read(dir.path().join(HOUSE_FILE)).unwrap(), before);
+        assert_eq!(fs::read(dir.path().join(LOCATION_FILE)).unwrap(), before);
     }
 
     #[tokio::test]
@@ -1811,7 +2079,7 @@ mod tests {
             .import(&exported)
             .await
             .unwrap();
-        let reopened = fs::read_to_string(dir.path().join(HOUSE_FILE)).unwrap();
+        let reopened = fs::read_to_string(dir.path().join(LOCATION_FILE)).unwrap();
         assert!(reopened.contains("C1-BIT-BALL-NOSE-1-4"), "{reopened}");
         assert!(reopened.contains("user:6f7a8b9c0d"), "{reopened}");
     }
@@ -1828,6 +2096,7 @@ mod tests {
     #[tokio::test]
     async fn an_import_the_client_would_refuse_is_refused_here() {
         let (dir, store) = store();
+        let at_open = fs::read(dir.path().join(LOCATION_FILE)).unwrap();
         let cases: Vec<(&str, Box<dyn FnOnce(&mut serde_json::Value)>)> = vec![
             (
                 "one key, two rows (`ToolLibrarySchema` refuses a duplicate)",
@@ -1878,7 +2147,9 @@ mod tests {
             assert_eq!(store.tools().await.unwrap().0, b"[]", "{why}");
             assert_eq!(store.health().await.problems, Vec::<String>::new(), "{why}");
         }
-        assert!(!dir.path().join(HOUSE_FILE).exists(), "nothing was written");
+        // Nothing was written: the location is the empty one the first run wrote, byte for byte.
+        assert_eq!(fs::read(dir.path().join(LOCATION_FILE)).unwrap(), at_open, "nothing was written");
+        assert!(!dir.path().join(HOUSE_FILE).exists(), "house.json is never written");
     }
 
     #[tokio::test]
@@ -2063,7 +2334,7 @@ mod tests {
         let store = store_syncing(&dir, &db);
         store.create_tool(an_entry("user:abc")).await.unwrap();
         store.create_inventory(an_item("inv-1")).await.unwrap();
-        let house_before = fs::read(dir.path().join(HOUSE_FILE)).unwrap();
+        let house_before = fs::read(dir.path().join(LOCATION_FILE)).unwrap();
 
         let report = store.sync_catalogue().await.unwrap();
         assert_eq!(report.total, 2);
@@ -2077,7 +2348,7 @@ mod tests {
 
         // The acceptance criterion, checked as bytes rather than as intent: the user's own file is
         // not rewritten by a sync — not reformatted, not touched at all.
-        assert_eq!(fs::read(dir.path().join(HOUSE_FILE)).unwrap(), house_before);
+        assert_eq!(fs::read(dir.path().join(LOCATION_FILE)).unwrap(), house_before);
 
         // And the tiers are served together, catalogue first, in the vendor's order.
         let (bytes, _) = store.tools().await.unwrap();
@@ -2441,5 +2712,339 @@ mod tests {
         let first = store.sync_catalogue().await.unwrap();
         assert_eq!(first.feed_rows, 0);
         assert!(first.notes.is_empty(), "{:?}", first.notes);
+    }
+
+    // — the location (#412) -----------------------------------------------------------------------
+
+    /// `tests/unit/fixtures/location-doc.json`: the location BOTH sides read, as `house_fixture` is
+    /// for the house. `locationContract.spec.ts` parses it with the client's schemas.
+    fn location_fixture() -> Vec<u8> {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/unit/fixtures/location-doc.json");
+        fs::read(&path).unwrap_or_else(|e| panic!("{} should be readable: {e}", path.display()))
+    }
+
+    fn a_machine(id: &str) -> MachineRecord {
+        MachineRecord {
+            id: id.to_string(),
+            profile_id: Some("Z1".into()),
+            name: Some("Makera_Z1_000000".into()),
+            serial: None,
+            firmware: None,
+            address: Some(crate::location::MachineAddress { host: "192.0.2.10".into(), port: 2222 }),
+            calibration: None,
+            fixtures: Some(serde_json::json!({ "vise": { "source": "measured" } })),
+            margins: None,
+            updated_at: "2026-10-15T00:00:00.000Z".into(),
+        }
+    }
+
+    /// What the house served for a document BEFORE #412 — `tools_bytes` and `inventory_bytes` over a
+    /// `HouseDoc` with no catalogue — computed here from the document itself, so "the migration lost
+    /// nothing" is a comparison of bytes, not of counts.
+    fn served_by_the_old_house(doc: &HouseDoc) -> (Vec<u8>, Vec<u8>) {
+        let tools: Vec<ToolLibraryEntry> = doc.tools.iter().map(ToolLibraryEntry::from).collect();
+        let mut items = doc.inventory.clone();
+        items.sort_by(|a, b| a.added_at.cmp(&b.added_at).then(a.id.cmp(&b.id)));
+        (json_bytes(&tools).unwrap(), json_bytes(&items).unwrap())
+    }
+
+    /// The Kazoo shape: 37 boxes under distinct codes, one user clone — built here, synthetic, since
+    /// the real labels are vendor text and are never committed.
+    fn a_big_house() -> HouseDoc {
+        let mut doc: HouseDoc = serde_json::from_slice(&house_fixture()).unwrap();
+        for n in 0..36 {
+            doc.inventory.push(InventoryItem {
+                added_at: format!("2026-10-12T16:{:02}:00.000Z", n),
+                quantity: 1 + (n % 3),
+                notes: Some(format!("box {n}")),
+                ..an_item(&format!("inv-kazoo-{n:02}"))
+            });
+        }
+        doc
+    }
+
+    #[tokio::test]
+    async fn a_house_file_is_migrated_into_a_location_and_nothing_is_lost() {
+        for (what, house) in [
+            ("the shared fixture", serde_json::from_slice::<HouseDoc>(&house_fixture()).unwrap()),
+            ("a 37-box inventory", a_big_house()),
+        ] {
+            let dir = TempDir::new().unwrap();
+            let house_bytes = serde_json::to_vec_pretty(&house).unwrap();
+            fs::write(dir.path().join(HOUSE_FILE), &house_bytes).unwrap();
+            let (want_tools, want_inventory) = served_by_the_old_house(&house);
+
+            let store = HouseStore::open(dir.path().to_path_buf());
+            assert!(store.health().await.problems.is_empty(), "{what}");
+            let (tools, tools_etag) = store.tools().await.unwrap();
+            let (inventory, inventory_etag) = store.inventory().await.unwrap();
+            // Byte-identical, so the ETags a client already holds are still current after the move.
+            assert_eq!(tools, want_tools, "{what}: the tool list changed");
+            assert_eq!(inventory, want_inventory, "{what}: the inventory changed");
+            assert_eq!(tools_etag, etag_for(&want_tools), "{what}");
+            assert_eq!(inventory_etag, etag_for(&want_inventory), "{what}");
+            assert_eq!(
+                serde_json::from_slice::<Vec<InventoryItem>>(&inventory).unwrap().len(),
+                house.inventory.len(),
+                "{what}"
+            );
+
+            // Written at once, and the old file left byte-for-byte as it was.
+            let written: LocationDoc =
+                serde_json::from_slice(&fs::read(dir.path().join(LOCATION_FILE)).unwrap()).unwrap();
+            assert_eq!(written.tools, house.tools, "{what}");
+            assert_eq!(written.inventory, house.inventory, "{what}");
+            assert!(written.machines.is_empty(), "{what}: the house never knew the machine");
+            assert!(written.migrated_from.as_deref().unwrap().starts_with(HOUSE_FILE), "{what}");
+            assert_eq!(fs::read(dir.path().join(HOUSE_FILE)).unwrap(), house_bytes, "{what}");
+
+            // ONE-WAY: a restart reads the location, not the house again — the id survives, and a
+            // write made after the move is not undone by the old file still being there.
+            store.create_tool(an_entry("user:after-the-move")).await.unwrap();
+            let reopened = HouseStore::open(dir.path().to_path_buf());
+            let (bytes, _) = reopened.location().await.unwrap();
+            let view: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(view["id"], serde_json::json!(written.id), "{what}");
+            let (tools, _) = reopened.tools().await.unwrap();
+            let keys: Vec<ToolLibraryEntry> = serde_json::from_slice(&tools).unwrap();
+            assert!(keys.iter().any(|e| e.key == "user:after-the-move"), "{what}");
+            assert_eq!(fs::read(dir.path().join(HOUSE_FILE)).unwrap(), house_bytes, "{what}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_location_is_a_problem_and_the_old_house_is_not_served_behind_it() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(HOUSE_FILE), house_fixture()).unwrap();
+        let junk = b"{ \"kind\": \"casemaker-location\", truncated";
+        fs::write(dir.path().join(LOCATION_FILE), junk).unwrap();
+
+        let store = HouseStore::open(dir.path().to_path_buf());
+        let h = store.health().await;
+        assert_eq!(h.problems.len(), 1, "{:?}", h.problems);
+        assert!(h.problems[0].contains(LOCATION_FILE), "{:?}", h.problems);
+        // Serving `house.json` here would quietly undo every write made since the migration.
+        assert_eq!(store.tools().await.unwrap().0, b"[]");
+        assert!(matches!(
+            store.create_tool(an_entry("user:abc")).await,
+            Err(HouseError::Refused(_))
+        ));
+        assert!(matches!(
+            store.put_machine(a_machine("m-1"), Some("*")).await,
+            Err(HouseError::Refused(_))
+        ));
+        assert_eq!(fs::read(dir.path().join(LOCATION_FILE)).unwrap(), junk);
+    }
+
+    #[tokio::test]
+    async fn a_fresh_install_writes_its_empty_location_at_once_and_keeps_its_id() {
+        let (dir, store) = store();
+        // Written at open (#412 review): an id minted per open would change under every client.
+        assert!(dir.path().join(LOCATION_FILE).exists());
+        let (bytes, etag) = store.location().await.unwrap();
+        let reopened = HouseStore::open(dir.path().to_path_buf());
+        assert_eq!(reopened.location().await.unwrap(), (bytes.clone(), etag), "same id, same body");
+        let view: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(view["kind"], serde_json::json!(LOCATION_KIND));
+        assert_eq!(view["machines"], serde_json::json!([]));
+        // The tiers are not in the location's own body: they have their own endpoints and ETags.
+        assert!(view.get("tools").is_none() && view.get("inventory").is_none(), "{view}");
+        store.create_tool(an_entry("user:abc")).await.unwrap();
+        assert!(!dir.path().join(HOUSE_FILE).exists(), "house.json is never written");
+    }
+
+    #[tokio::test]
+    async fn a_machine_write_is_guarded_on_the_location_and_upserts_by_id() {
+        let (_dir, store) = store();
+        assert!(matches!(
+            store.put_machine(a_machine("m-1"), None).await,
+            Err(HouseError::PreconditionRequired(_))
+        ));
+        assert!(matches!(
+            store.put_machine(a_machine("m-1"), Some("\"stale\"")).await,
+            Err(HouseError::StalePrecondition(_))
+        ));
+        let (_, etag) = store.location().await.unwrap();
+        store.put_machine(a_machine("m-1"), Some(&etag)).await.unwrap();
+        // The etag moved: the same validator a second time is now stale.
+        assert!(matches!(
+            store.put_machine(a_machine("m-1"), Some(&etag)).await,
+            Err(HouseError::StalePrecondition(_))
+        ));
+        let (_, etag) = store.location().await.unwrap();
+        let replaced = MachineRecord { firmware: Some("1.1.2".into()), ..a_machine("m-1") };
+        store.put_machine(replaced.clone(), Some(&etag)).await.unwrap();
+        let (bytes, _) = store.location().await.unwrap();
+        let view: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(view["machines"].as_array().unwrap().len(), 1, "an upsert, not a second row");
+        assert_eq!(view["machines"][0]["firmware"], serde_json::json!("1.1.2"));
+        // A machine write does not move the tool list's or the inventory's validator.
+        let (tools_before, _) = store.tools().await.unwrap();
+        assert_eq!(tools_before, b"[]");
+
+        let (_, etag) = store.location().await.unwrap();
+        let bad = MachineRecord { margins: Some(serde_json::json!("lots")), ..a_machine("m-2") };
+        assert!(matches!(store.put_machine(bad, Some(&etag)).await, Err(HouseError::BadEntry(_))));
+    }
+
+    #[tokio::test]
+    async fn a_house_import_replaces_the_tools_and_keeps_the_machine() {
+        // `tool-labels/build-house.ts` POSTs a `casemaker-house` document to `/import`. That rebuild
+        // must not wipe the machine record the client wrote — the house file never knew it.
+        let (_dir, store) = store();
+        let (_, etag) = store.location().await.unwrap();
+        store.put_machine(a_machine("m-1"), Some(&etag)).await.unwrap();
+        store.create_tool(an_entry("user:old")).await.unwrap();
+        let (before, _) = store.location().await.unwrap();
+
+        store.import(&house_fixture()).await.unwrap();
+        let (after, _) = store.location().await.unwrap();
+        assert_eq!(after, before, "the location's identity and machine are untouched");
+        let (tools, _) = store.tools().await.unwrap();
+        let keys: Vec<String> = serde_json::from_slice::<Vec<ToolLibraryEntry>>(&tools)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.key)
+            .collect();
+        assert_eq!(keys, ["user:1a2b3c4d5e", "user:6f7a8b9c0d"], "the tiers were replaced");
+    }
+
+    #[tokio::test]
+    async fn the_shared_location_fixture_round_trips_through_export_and_import() {
+        let (_dir, store) = store();
+        store.import(&location_fixture()).await.unwrap();
+        let exported = store.export().await.unwrap();
+        let original: LocationDoc = serde_json::from_slice(&location_fixture()).unwrap();
+        let back: LocationDoc = serde_json::from_slice(&exported).unwrap();
+        assert_eq!(back, original, "export is the document that was imported");
+        // The machine's sections are kept verbatim — the client is their shape authority.
+        assert_eq!(
+            back.machines[0].fixtures.as_ref().unwrap()["vise"]["measuredAt"],
+            serde_json::json!("2026-10-13T12:00:00.000Z")
+        );
+
+        let other = TempDir::new().unwrap();
+        let fresh = HouseStore::open(other.path().to_path_buf());
+        fresh.import(&exported).await.unwrap();
+        assert_eq!(fresh.export().await.unwrap(), exported);
+        assert_eq!(fresh.tools().await.unwrap().0, store.tools().await.unwrap().0);
+        assert_eq!(fresh.inventory().await.unwrap().0, store.inventory().await.unwrap().0);
+        assert_eq!(fresh.location().await.unwrap(), store.location().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_location_import_the_client_would_refuse_is_refused_whole() {
+        let (dir, store) = store();
+        let at_open = fs::read(dir.path().join(LOCATION_FILE)).unwrap();
+        let cases: Vec<(&str, Box<dyn FnOnce(&mut serde_json::Value)>)> = vec![
+            ("a future version", Box::new(|d| d["schemaVersion"] = serde_json::json!(2))),
+            ("no name", Box::new(|d| d["name"] = serde_json::json!(" "))),
+            (
+                "one machine twice",
+                Box::new(|d| {
+                    let m = d["machines"][0].clone();
+                    d["machines"].as_array_mut().unwrap().push(m);
+                }),
+            ),
+            ("a key this build does not know", Box::new(|d| d["shelf"] = serde_json::json!([]))),
+            (
+                "a duplicate tool key, by the house's own rule",
+                Box::new(|d| d["tools"][1]["key"] = d["tools"][0]["key"].clone()),
+            ),
+        ];
+        for (why, break_it) in cases {
+            let mut doc: serde_json::Value = serde_json::from_slice(&location_fixture()).unwrap();
+            break_it(&mut doc);
+            let err = store.import(&serde_json::to_vec(&doc).unwrap()).await.unwrap_err();
+            assert!(
+                matches!(err, HouseError::BadKey(_) | HouseError::BadEntry(_)),
+                "{why} was refused as {err:?}"
+            );
+        }
+        assert_eq!(fs::read(dir.path().join(LOCATION_FILE)).unwrap(), at_open, "nothing was written");
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_location_is_refused_on_its_own_endpoint_not_served_fresh() {
+        // #412 review: serving the stand-in would show a new, empty location with a new id on every
+        // restart, instead of saying the user's file cannot be read.
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(LOCATION_FILE), b"{ broken").unwrap();
+        let store = HouseStore::open(dir.path().to_path_buf());
+        let err = store.location().await.unwrap_err();
+        assert!(matches!(err, HouseError::Refused(_)), "{err:?}");
+        assert!(err.to_string().contains(LOCATION_FILE), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_house_file_written_after_the_location_is_a_warning_on_health() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(HOUSE_FILE), house_fixture()).unwrap();
+        let store = HouseStore::open(dir.path().to_path_buf());
+        let h = store.health().await;
+        assert!(h.warnings.is_empty(), "just migrated: {:?}", h.warnings);
+
+        // An older build saves `house.json` after the migration.
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+        fs::File::options()
+            .write(true)
+            .open(dir.path().join(HOUSE_FILE))
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        let h = store.health().await;
+        assert_eq!(h.warnings.len(), 1, "{:?}", h.warnings);
+        assert!(h.warnings[0].contains(HOUSE_FILE), "{:?}", h.warnings);
+        assert!(h.problems.is_empty(), "a warning, not a refusal: {:?}", h.problems);
+        // Writes are not refused.
+        store.create_tool(an_entry("user:abc")).await.unwrap();
+
+        // It PERSISTS (re-review): a write that makes `location.json` the newer file does not hide
+        // it, and neither does a restart.
+        let set_mtime = |name: &str, secs: u64| {
+            fs::File::options()
+                .write(true)
+                .open(dir.path().join(name))
+                .unwrap()
+                .set_modified(later + std::time::Duration::from_secs(secs))
+                .unwrap();
+        };
+        set_mtime(LOCATION_FILE, 60);
+        assert_eq!(store.health().await.warnings.len(), 1, "hidden by a location write");
+        let reopened = HouseStore::open(dir.path().to_path_buf());
+        assert_eq!(reopened.health().await.warnings.len(), 1, "hidden by a restart");
+
+        // Dismissed: gone, and stays gone across a restart.
+        reopened.acknowledge_house_warning();
+        assert!(reopened.health().await.warnings.is_empty());
+        drop(reopened);
+        let reopened = HouseStore::open(dir.path().to_path_buf());
+        assert!(reopened.health().await.warnings.is_empty(), "a dismissal is remembered");
+
+        // A NEW change to `house.json` is a new sighting, whatever the location's time.
+        set_mtime(HOUSE_FILE, 30);
+        assert_eq!(reopened.health().await.warnings.len(), 1, "a later house.json edit");
+
+        // Importing a house file deals with it.
+        reopened.import(&house_fixture()).await.unwrap();
+        assert!(reopened.health().await.warnings.is_empty(), "the import is the remedy");
+    }
+
+    #[test]
+    fn a_document_whose_existence_cannot_be_checked_is_a_problem_not_absent() {
+        // `try_exists` (re-review). A path under a FILE cannot be checked — the OS answers with an
+        // error, not "no" — and the caller must not take that as a first run.
+        let dir = TempDir::new().unwrap();
+        let not_a_dir = dir.path().join("plain-file");
+        fs::write(&not_a_dir, b"x").unwrap();
+        let under = not_a_dir.join(LOCATION_FILE);
+        let read = read_doc::<LocationDoc>(&under, LOCATION_KIND, LOCATION_SCHEMA_VERSION);
+        // Unix answers ENOTDIR, which `try_exists` reports as an error; Windows reports this path
+        // as not found, which is honestly "not there". Either way it is never a document.
+        #[cfg(unix)]
+        assert!(read.as_ref().is_err_and(|e| e.contains("cannot tell whether it exists")), "{read:?}");
+        #[cfg(not(unix))]
+        assert!(matches!(read, Ok(None)), "{read:?}");
     }
 }

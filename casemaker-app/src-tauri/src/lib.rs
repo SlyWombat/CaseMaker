@@ -12,6 +12,7 @@ mod etag;
 mod guard;
 mod house;
 mod house_api;
+mod location;
 mod machine;
 mod server;
 

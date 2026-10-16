@@ -34,11 +34,12 @@
 // user is editing.
 
 use crate::house::{HouseError, HouseStore, InventoryItem, ToolLibraryEntry};
+use crate::location::MachineRecord;
 use axum::body::Body;
 use axum::extract::{OriginalUri, Path, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
-use axum::routing::{any, get, patch, post};
+use axum::routing::{any, get, patch, post, put};
 use axum::Router;
 use std::sync::Arc;
 
@@ -58,6 +59,11 @@ pub fn routes(store: Arc<HouseStore>) -> Router {
             "/api/v1/inventory/*id",
             patch(update_inventory).delete(delete_inventory),
         )
+        // #412. The location's identity and machines; the tool tiers stay on their own routes.
+        .route("/api/v1/location", get(get_location))
+        .route("/api/v1/location/machines/*id", put(put_machine))
+        // #412 re-review. Dismiss the "house.json changed after location.json" warning. No body.
+        .route("/api/v1/location/house-warning/dismiss", post(dismiss_house_warning))
         .route("/api/v1/export", get(export_house))
         .route("/api/v1/import", post(import_house))
         // #308. POST and nothing else: a sync reads Makera Studio's own database and replaces the
@@ -288,15 +294,52 @@ async fn delete_inventory(
     }
 }
 
-/// The house document for a "my machine" file (#247). `Content-Disposition` is set so the browser
-/// saves rather than renders it — the only endpoint here whose body is a file.
+/// The location (#412): id, name and machine records, without the tool tiers. Its `ETag` is the
+/// validator a machine write must carry.
+async fn get_location(State(store): State<Arc<HouseStore>>, headers: HeaderMap) -> Response<Body> {
+    match store.location().await {
+        Ok((bytes, etag)) => json_with_etag(bytes, etag, &headers, StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+/// The user has seen the stale-`house.json` warning and dealt with it (#412 re-review). Recorded
+/// against that file's modification time, so only a later change to it raises the warning again.
+async fn dismiss_house_warning(State(store): State<Arc<HouseStore>>) -> Response<Body> {
+    store.acknowledge_house_warning();
+    empty(StatusCode::NO_CONTENT)
+}
+
+/// Create or replace one machine record. GUARDED on the location's `ETag` (#321's rule, #412).
+async fn put_machine(
+    State(store): State<Arc<HouseStore>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    axum::Json(record): axum::Json<MachineRecord>,
+) -> Response<Body> {
+    if record.id != id {
+        return error_response(HouseError::BadEntry(format!(
+            "the body's id {} does not match the URL's {id}",
+            record.id
+        )));
+    }
+    let guard = if_match(&headers);
+    match store.put_machine(record, guard.as_deref()).await {
+        Ok(()) => empty(StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+/// The location document as one file (#412, §3.5): machines, definitions and inventory, never the
+/// catalogue. `Content-Disposition` is set so the browser saves rather than renders it — the only
+/// endpoint here whose body is a file.
 async fn export_house(State(store): State<Arc<HouseStore>>) -> Response<Body> {
     match store.export().await {
         Ok(bytes) => {
             let mut res = json_body(StatusCode::OK, bytes);
             res.headers_mut().insert(
                 header::CONTENT_DISPOSITION,
-                HeaderValue::from_static("attachment; filename=\"house.json\""),
+                HeaderValue::from_static("attachment; filename=\"location.json\""),
             );
             res
         }
@@ -846,6 +889,75 @@ mod tests {
                 .status(),
             StatusCode::NO_CONTENT
         );
+    }
+
+    #[tokio::test]
+    async fn the_location_is_read_and_a_machine_written_under_its_validator() {
+        // #412. The location's own body carries no tool tiers, and its ETag guards a machine write
+        // exactly as the lists' ETags guard theirs (#321).
+        let (_dir, app) = app_under_test();
+        let view = json_of(app.clone().oneshot(get("/api/v1/location")).await.unwrap()).await;
+        assert_eq!(view["kind"], serde_json::json!("casemaker-location"));
+        assert!(view.get("tools").is_none(), "{view}");
+
+        let machine = serde_json::json!({
+            "id": "machine-1", "profileId": "Z1", "name": null, "serial": null, "firmware": null,
+            "address": { "host": "192.0.2.10", "port": 2222 },
+            "calibration": null, "fixtures": {}, "margins": null,
+            "updatedAt": "2026-10-15T00:00:00.000Z"
+        });
+        let put = |if_match: Option<&str>, uri: &str, body: &serde_json::Value| {
+            let mut b = Request::builder()
+                .method("PUT")
+                .uri(uri)
+                .header(header::CONTENT_TYPE, "application/json");
+            if let Some(tag) = if_match {
+                b = b.header(header::IF_MATCH, tag);
+            }
+            b.body(Body::from(serde_json::to_vec(body).unwrap())).unwrap()
+        };
+        let res = app
+            .clone()
+            .oneshot(put(None, "/api/v1/location/machines/machine-1", &machine))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::PRECONDITION_REQUIRED);
+
+        let tag = etag_of(&app, "/api/v1/location").await;
+        let res = app
+            .clone()
+            .oneshot(put(Some(&tag), "/api/v1/location/machines/other", &machine))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST, "the URL and the body disagree");
+
+        let res = app
+            .clone()
+            .oneshot(put(Some(&tag), "/api/v1/location/machines/machine-1", &machine))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let view = json_of(app.clone().oneshot(get("/api/v1/location")).await.unwrap()).await;
+        assert_eq!(view["machines"][0]["address"]["host"], serde_json::json!("192.0.2.10"));
+
+        let res = app
+            .clone()
+            .oneshot(put(Some(&tag), "/api/v1/location/machines/machine-1", &machine))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::PRECONDITION_FAILED, "the validator moved");
+
+        // And the export is the location, saved under its own name.
+        let res = app.clone().oneshot(get("/api/v1/export")).await.unwrap();
+        assert!(res
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("location.json"));
+        let exported = json_of(res).await;
+        assert_eq!(exported["machines"][0]["id"], serde_json::json!("machine-1"));
     }
 
     #[tokio::test]

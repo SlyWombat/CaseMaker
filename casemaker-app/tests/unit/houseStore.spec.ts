@@ -30,6 +30,7 @@ const HEALTH: HouseHealth = {
   catalogueSyncedAt: '2026-01-01T00:00:00.000Z',
   lastSync: null,
   problems: [],
+  warnings: [],
 };
 
 const USER: ToolLibraryEntry = {
@@ -303,7 +304,10 @@ describe('a write that works', () => {
     // Re-encoding it would be a chance to change the file the service is asked to accept, and the
     // service is the one that decides what the file is.
     expect(sent).toEqual([{ method: 'POST', path: '/import', body: text }]);
-    expect(state().notice).toEqual({ kind: 'ok', text: 'Loaded the house file.' });
+    expect(state().notice).toEqual({
+      kind: 'ok',
+      text: 'Loaded the house file — the tools and inventory; the machine record is unchanged.',
+    });
   });
 });
 
@@ -457,7 +461,7 @@ describe('the house file', () => {
       expect(download).toBe(HOUSE_FILENAME);
       expect(created).toHaveLength(1);
       expect(state().notice?.text).toBe(
-        'Saved house.json — 1 definition and 1 cutter in the inventory.',
+        'Saved location.json — 1 definition and 1 cutter in the inventory.',
       );
       // Exporting changes nothing, so it must not cost a re-read of the whole house — 1 328 rows.
       expect(log).toEqual(['GET /export']);

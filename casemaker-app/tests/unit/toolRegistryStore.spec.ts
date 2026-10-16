@@ -28,6 +28,7 @@ const HEALTH: HouseHealth = {
   catalogueSyncedAt: null,
   lastSync: null,
   problems: [],
+  warnings: [],
 };
 
 const USER: ToolLibraryEntry = {

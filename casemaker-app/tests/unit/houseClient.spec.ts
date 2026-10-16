@@ -67,6 +67,7 @@ const HEALTH = {
   catalogueSyncedAt: null,
   lastSync: null,
   problems: [],
+  warnings: [],
 };
 
 /** One entry in the shape the service serves — every field explicit, nulls included. */

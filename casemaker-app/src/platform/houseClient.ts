@@ -149,6 +149,11 @@ const HouseHealthSchema = z.object({
    * worth showing to the user rather than swallowing, and worth not treating as "no tools".
    */
   problems: z.array(z.string()),
+  /**
+   * One sentence per thing worth knowing that does NOT stop a write (#412): a `house.json` changed
+   * after `location.json`, by an older build. Defaulted, so a service from before the field answers.
+   */
+  warnings: z.array(z.string()).default([]),
 });
 
 export type HouseHealth = z.infer<typeof HouseHealthSchema>;
@@ -296,9 +301,20 @@ export type HouseFailure =
 export type HouseWrite = { kind: 'ok' } | HouseFailure;
 
 /** One request's outcome before any wrapper has interpreted it: the success body as text, or why not. */
-export type HouseCall = { kind: 'ok'; text: string } | HouseFailure;
+export type HouseCall =
+  | {
+      kind: 'ok';
+      text: string;
+      /**
+       * The response's `ETag`, when it carried one (#412: `GET /location` is read through `call`, and
+       * its validator is what a machine write must send back). Optional so a fake client that only
+       * answers writes need not invent one.
+       */
+      etag?: string | null;
+    }
+  | HouseFailure;
 
-export type HouseMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+export type HouseMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 /**
  * What one catalogue sync found (#308). `changed`/`added`/`removed` are KEYS, so the panel can name
@@ -680,7 +696,7 @@ const realClient: HouseClient = {
       if (res.contentType !== '' && !isJson(res.contentType)) {
         return { kind: 'absent', reason: notTheService(root, res) };
       }
-      return { kind: 'ok', text: res.text };
+      return { kind: 'ok', text: res.text, etag: res.etag };
     }
     const message = refusalOf(res);
     if (message !== null) return { kind: 'refused', status: res.status, message };
@@ -921,6 +937,21 @@ export async function houseSaveServerConfig(
       ? { kind: 'ok', config: parsed.value }
       : { kind: 'error', detail: `the app's own settings ${parsed.why}` };
   });
+}
+
+/**
+ * One request, through the same client and the same never-throws rule as every call above (#412).
+ * Exported for `platform/locationClient.ts`, which reads and writes the location through it rather
+ * than growing this module's {@link HouseClient} interface — every fake client already implements
+ * `call`, so a new document needs no new method on them.
+ */
+export async function houseRequest(
+  method: HouseMethod,
+  path: string,
+  body?: unknown,
+  opts?: HouseRequestOptions,
+): Promise<HouseCall> {
+  return ask((client) => client.call(method, path, body, opts));
 }
 
 /** A write's success body is empty; only its `text` is dropped, never its failure. */

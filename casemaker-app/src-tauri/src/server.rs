@@ -944,6 +944,8 @@ mod tests {
         ("PATCH", "/api/v1/inventory/inv-1", r#"{"id":"inv-1"}"#),
         ("DELETE", "/api/v1/inventory/inv-1", "{}"),
         ("POST", "/api/v1/import", r#"{"kind":"casemaker-house"}"#),
+        ("PUT", "/api/v1/location/machines/m-1", r#"{"id":"m-1"}"#),
+        ("POST", "/api/v1/location/house-warning/dismiss", "{}"),
         ("POST", "/api/v1/catalogue/sync", "{}"),
     ];
 

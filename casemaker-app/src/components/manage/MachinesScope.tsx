@@ -34,6 +34,9 @@ import {
 } from '@/store/myMachineFile';
 import { useMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useLocationStore } from '@/store/locationStore';
+import { LocationCard, LocationProblemCard } from './LocationCard';
+import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { MachineConsole } from './MachineConsole';
 import { MachineVacuum } from './MachineVacuum';
 import { MachineStop } from './MachineStop';
@@ -338,6 +341,10 @@ export function MachinesScope() {
           </div>
         )}
 
+        {/* #412 — the location's own record of this machine, read from `location.json`. Drawn only
+            where there is a house service to hold one; the web build has no location. */}
+        <LocationSection />
+
         <div className="mcard mcard--muted" data-testid="manage-printers">
           <h4>
             Printers <span className="tag tag--muted">from the profile list</span>
@@ -531,3 +538,17 @@ function saveText(text: string, filename: string): string | null {
     return e instanceof Error ? e.message : String(e);
   }
 }
+
+/** The location card, when this window has a location to show (#412) — or the reason it cannot. */
+function LocationSection() {
+  const status = useLocationStore((st) => st.status);
+  const location = useLocationStore((st) => st.location);
+  const reason = useLocationStore((st) => st.reason);
+  const writeNote = useLocationStore((st) => st.writeNote);
+  const warnings = useToolRegistryStore((st) => st.health?.warnings ?? NO_WARNINGS);
+  if (status === 'error') return <LocationProblemCard reason={reason} />;
+  if (status !== 'present' || location === null) return null;
+  return <LocationCard location={location} writeNote={writeNote} warnings={warnings} />;
+}
+
+const NO_WARNINGS: readonly string[] = [];

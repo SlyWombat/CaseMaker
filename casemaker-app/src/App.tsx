@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
+import { startLocationSync } from '@/store/locationStore';
 import { installCaseMakerTestApi } from '@/testing/windowApi';
 
 export default function App() {
@@ -14,5 +15,9 @@ export default function App() {
   useEffect(() => {
     void useToolRegistryStore.getState().refresh();
   }, []);
+  // #412 — once that service answers, read the location and keep its machine record in step with
+  // this window's saved machine setup (`store/locationStore.ts`). A build with no service never
+  // starts it, so the web build's settings behave exactly as before.
+  useEffect(() => startLocationSync(), []);
   return <AppShell />;
 }
