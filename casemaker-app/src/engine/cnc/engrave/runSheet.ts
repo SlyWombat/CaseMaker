@@ -24,14 +24,14 @@ import {
   type MarginSettings,
 } from '@/engine/cnc/engrave/depthBounds';
 import { cuttingDiameter } from '@/engine/cnc/tool';
-import { axesWord, describeTouch, kindWord, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
+import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
 import {
   alongWord,
   inOutWord,
   planMaterialScan,
   surfaceWord,
-  SCAN_COARSE_STEP_MM,
-  SCAN_START_GAP_MM,
+  SCAN_FALLBACK,
+  type MaterialScanSettings,
   type ScanTouch,
 } from '@/engine/cnc/engrave/materialScan';
 import type { FeedsResult } from '@/engine/cnc/feeds';
@@ -879,9 +879,11 @@ function sentence(text: string): string {
  * the part reaches a cut depth only if Z is probed on the wrong face, so the step says which face
  * it means whenever there is a board to confuse it with.
  */
-function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string): RunSheetStep[] {
+function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string, tipDiameterMm?: Mm): RunSheetStep[] {
   const { length, width } = job.stock;
-  const plan = registrationFor(job);
+  // #449 — the tip is the shop's measured `registration.tipDiameterMm` when the caller passed the scan
+  // settings; `PROBE_SPEC` (the same 2.0 mm, its labelled fallback) otherwise.
+  const plan = registrationFor(job, tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: tipDiameterMm });
 
   if ('refuse' in plan) {
     return [
@@ -984,14 +986,21 @@ function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string
  * bracketed the edge, and per-jaw numbers inside §11.8's bounds carrying their own uncertainty —
  * but the hold is not lifted until a person has read them again. See `RunSheetOptions.materialScan`.
  */
-function materialPositionSteps(job: EngraveJob, onBoard: boolean, unverified: string): RunSheetStep[] {
+function materialPositionSteps(
+  job: EngraveJob,
+  onBoard: boolean,
+  unverified: string,
+  scan: MaterialScanSettings = SCAN_FALLBACK,
+): RunSheetStep[] {
   const part = onBoard ? 'part' : 'blank';
   // Nothing to check the blank against when the origin itself could not be resolved: §5 is then one
   // refusal step, and a scan printed under it would be a sequence the sheet has just declined to
   // stand behind. (`registrationFor` is pure point maths on the stock rectangle, so asking it twice
   // costs nothing and keeps this function's own contract — never a scan for an unresolvable origin.)
-  if ('refuse' in registrationFor(job)) return [];
-  const plan = planMaterialScan(job);
+  if ('refuse' in registrationFor(job, { ...PROBE_SPEC, tipDiameter: scan.tipDiameterMm })) return [];
+  // #449/#452 — the scan steps, lifts and caps by the SAME shop defaults the registration planner
+  // reads (`RunSheetOptions.scan`); with none passed, their labelled fallbacks, which are the seeds.
+  const plan = planMaterialScan(job, scan);
   if ('refuse' in plan) {
     return [
       {
@@ -1005,10 +1014,11 @@ function materialPositionSteps(job: EngraveJob, onBoard: boolean, unverified: st
 
   // The plan's own figures, quoted rather than re-derived: the sheet prints what the module decided,
   // and every number below appears exactly once as a source.
-  const gapMm = fmtNum(SCAN_START_GAP_MM);
+  const gapMm = fmtNum(plan.settings.startGapMm);
   const capMm = fmtNum(plan.missTravelMm);
-  const travelMm = fmtNum(SCAN_START_GAP_MM + plan.missTravelMm);
-  const stepMm = fmtNum(SCAN_COARSE_STEP_MM);
+  const travelMm = fmtNum(plan.settings.startGapMm + plan.missTravelMm);
+  const stepMm = fmtNum(plan.settings.coarseStepMm);
+  const feed = fmtNum(plan.settings.touchFeed);
   const biasMm = fmtNum(plan.resolutionMm);
   const belowMm = fmtNum(plan.bands.belowMm);
   /** The blank's own top band at an edge — the left/right and front/back figures differ (the dome). */
@@ -1052,7 +1062,7 @@ function materialPositionSteps(job: EngraveJob, onBoard: boolean, unverified: st
         `the tip may TRAVEL, not a place to go (§11.6): from the ${gapMm} mm gap it descends onto the ` +
         `blank and stops there, or runs the ${gapMm} mm plus the ${capMm} mm cap if there is nothing ` +
         'under it — as far as it may ever go, which is what keeps a touch that finds nothing off the bed:',
-      code: `G38.2 Z-${travelMm} F100`,
+      code: `G38.2 Z-${travelMm} F${feed}`,
       unverified,
     },
     {
@@ -1192,6 +1202,12 @@ export interface RunSheetOptions {
    * Nothing in the app sets it. `runSheet.spec.ts` does, so the block cannot rot while it is held.
    */
   materialScan?: boolean;
+  /**
+   * #449/#452 — the material-position scan's tunables, from the shop defaults the registration planner
+   * reads: `materialScanSettingsFrom(registrationSettings(defaults).settings)`. Passed in, never read
+   * here — this module is in the sim worker's import graph. Absent: `SCAN_FALLBACK`, the seeds.
+   */
+  scan?: MaterialScanSettings;
   /**
    * The reachability table (#410), when the caller has measured one. **Absent for every job the app
    * and the bench script build** — nothing computes it on a hand-authored job, and no sheet that
@@ -1761,8 +1777,8 @@ export function buildRunSheet(
   // front, and bisection that covers one direction only. Holding one array entry is the whole change:
   // `materialScan.ts` and its spec are untouched, so the block comes back the moment the fixes land.
   const originSteps: RunSheetStep[] = [
-    ...registrationSteps(job, onBoard, UNVERIFIED),
-    ...(options.materialScan === true ? materialPositionSteps(job, onBoard, UNVERIFIED) : []),
+    ...registrationSteps(job, onBoard, UNVERIFIED, options.scan?.tipDiameterMm),
+    ...(options.materialScan === true ? materialPositionSteps(job, onBoard, UNVERIFIED, options.scan) : []),
   ];
 
   // ---- 6 · Dry run ---------------------------------------------------------------------------

@@ -61,12 +61,66 @@ import { inflate, viseEnvelope } from '@/engine/cnc/fixture';
 import { DEFAULT_BADGE_DOME_MM } from './fromBadge';
 import type { ObstacleBox } from '@/engine/cnc/setup';
 import { PROBE_SPEC, SIDE_WORDS, type JobSide } from './registration';
-import type { ProbeSpec } from '@/engine/cnc/probePlan';
+// TYPE ONLY: this module is in the sim worker's import graph (via `runSheet.ts`), and a worker never
+// imports `defaultsClient` (#449). The numbers come in as arguments.
+import type { RegistrationSettings } from '@/engine/cnc/registration/settings';
 import type { EngraveJob, StockFlatness } from '@/types/engraveJob';
 import type { Mm, Vec2 } from '@/types/units';
 
-/** How far the tip steps between coarse touches, mm (#391's own example). */
-export const SCAN_COARSE_STEP_MM: Mm = 2;
+/**
+ * The scan's tunables (#449, #452) — the SAME shop defaults the registration planner reads
+ * (`registration.*` in `location.json`), so the printed routine and the app's own scan cannot step
+ * differently. {@link materialScanSettingsFrom} takes them off the planner's resolved settings; with
+ * no location, {@link SCAN_FALLBACK} is used, and each of its numbers is that key's own labelled
+ * fallback in `defaultsClient.ts` (`benchDefaults.spec.ts`/`materialScan.spec.ts` hold them equal).
+ */
+export interface MaterialScanSettings {
+  /** How far the tip steps between coarse touches — `registration.coarseStepMm`. */
+  coarseStepMm: Mm;
+  /** The gap above the reference each touch is sent from — `registration.parkAboveSurfaceMm`. */
+  startGapMm: Mm;
+  /** How far past the jaw tops a touch may travel — `registration.scanMissMarginMm`. */
+  missMarginMm: Mm;
+  /** The depth two readings are told apart by — `registration.readingResolutionMm`. */
+  readingResolutionMm: Mm;
+  /** The wired probe tip's outside diameter — `registration.tipDiameterMm` (measured, #208 A8). */
+  tipDiameterMm: Mm;
+  /** The touch's feed, mm/min — `registration.touchFeed`, the planner's own scan feed. */
+  touchFeed: number;
+}
+
+/** The labelled NO-SERVICE fallback: each figure is its key's fallback (and seed). */
+export const SCAN_FALLBACK: Readonly<MaterialScanSettings> = {
+  coarseStepMm: 1,
+  startGapMm: 3,
+  missMarginMm: 1,
+  readingResolutionMm: 0.05,
+  tipDiameterMm: PROBE_SPEC.tipDiameter,
+  touchFeed: 150,
+};
+
+/** The scan's settings, off the registration planner's own (`registrationSettings(defaults)`). */
+export function materialScanSettingsFrom(
+  s: Pick<
+    RegistrationSettings,
+    'coarseStepMm' | 'parkAboveSurfaceMm' | 'scanMissMarginMm' | 'readingResolutionMm' | 'tipDiameterMm' | 'touchFeed'
+  >,
+): MaterialScanSettings {
+  return {
+    coarseStepMm: s.coarseStepMm,
+    startGapMm: s.parkAboveSurfaceMm,
+    missMarginMm: s.scanMissMarginMm,
+    readingResolutionMm: s.readingResolutionMm,
+    tipDiameterMm: s.tipDiameterMm,
+    touchFeed: s.touchFeed,
+  };
+}
+
+/**
+ * How far the tip steps between coarse touches, mm — the FALLBACK, `registration.coarseStepMm`'s.
+ * It was 2 here while the planner stepped 1 (#452); the sheet now prints the plan's own step.
+ */
+export const SCAN_COARSE_STEP_MM: Mm = SCAN_FALLBACK.coarseStepMm;
 
 /**
  * How far past the jaw tops a touch is allowed to travel before the plan calls it nothing, mm.
@@ -76,7 +130,7 @@ export const SCAN_COARSE_STEP_MM: Mm = 2;
  * the jaw tops is enough to prove there is nothing between them and the cap, and short enough to
  * be harmless if there is.
  */
-export const SCAN_MISS_MARGIN_MM: Mm = 1;
+export const SCAN_MISS_MARGIN_MM: Mm = SCAN_FALLBACK.missMarginMm;
 
 /**
  * How far above the reference the tip is brought before each touch, mm — the height the touch is
@@ -87,10 +141,13 @@ export const SCAN_MISS_MARGIN_MM: Mm = 1;
  * The reference touch leaves the tip on the blank's top; this is the gap lifted above it, and it
  * is the blank's own dome plus room, since the face falls away toward the edges.
  */
-export const SCAN_START_GAP_MM: Mm = 3;
+export const SCAN_START_GAP_MM: Mm = SCAN_FALLBACK.startGapMm;
 
-/** The depth two readings can be told apart by, mm. The machine's dial, not the probe's spec. */
-const DEPTH_TOLERANCE_MM: Mm = 0.05;
+/**
+ * The depth two readings can be told apart by, mm. The machine's dial, not the probe's spec — the
+ * fallback; a plan uses its settings' `readingResolutionMm`.
+ */
+export const DEPTH_TOLERANCE_MM: Mm = SCAN_FALLBACK.readingResolutionMm;
 
 /**
  * What to plan with when the job states no dome. NOT zero: an unstated dome is unknown, and 0 mm
@@ -225,6 +282,8 @@ export interface EdgeScan {
 
 export interface MaterialScanPlan {
   tipRadiusMm: Mm;
+  /** The settings the plan was made with (#449/#452) — the sheet quotes them rather than a constant. */
+  settings: MaterialScanSettings;
   /** The touch every reading is measured from: the blank's top face, at its middle. */
   reference: ScanReference;
   edges: EdgeScan[];
@@ -273,13 +332,15 @@ export type MaterialScanResult = MaterialScanPlan | MaterialScanRefusal;
  * tops, or a dome as deep as the height it stands — rather than planning touches whose readings
  * would be read as a position when they are noise.
  */
-export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC): MaterialScanResult {
+export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = SCAN_FALLBACK): MaterialScanResult {
   const { length, width } = job.stock;
   const vise = job.workholding.vise;
-  const tipR = probe.tipDiameter / 2;
+  const tipR = scan.tipDiameterMm / 2;
   const proud = vise.stockProud;
+  const dial = scan.readingResolutionMm;
+  const step = scan.coarseStepMm;
 
-  if (!(proud > DEPTH_TOLERANCE_MM)) {
+  if (!(proud > dial)) {
     return {
       refuse: true,
       code: 'not-proud-enough',
@@ -291,8 +352,8 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
   }
 
   const dome = job.stock.flatness?.dome ?? PROVISIONAL_DOME_MM;
-  const blankMm = dome + DEPTH_TOLERANCE_MM;
-  const belowMm = proud - DEPTH_TOLERANCE_MM;
+  const blankMm = dome + dial;
+  const belowMm = proud - dial;
   if (belowMm <= blankMm) {
     return {
       refuse: true,
@@ -324,7 +385,7 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
   // past the real edge the change appears (the scan's bias) and how finely the scan can place an
   // edge — because they are the same distance. Past the DIAL rather than the dome, since each edge
   // is judged against the top where that edge is: see `resolutionMm` on the plan.
-  const resolutionMm = cornerBandMm(DEPTH_TOLERANCE_MM, tipR);
+  const resolutionMm = cornerBandMm(dial, tipR);
 
   /** What each of those four is for, in the same order — see `ScanTouch.role`. */
   const roles: readonly ScanTouch['role'][] = ['inside', 'inside', 'edge', 'outside'];
@@ -332,7 +393,7 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
   const offsets: Mm[] = [
     // Clear of the edge, and should read the blank's own top: the touch that catches a blank
     // seated proud of where it is meant to be.
-    -(tipR + SCAN_COARSE_STEP_MM),
+    -(tipR + step),
     // Close to the edge, still on the blank — the near side of the bracket.
     -tipR,
     // AIMED AT THE EDGE ITSELF: the middle of the corner band, where the tip meets the blank's
@@ -342,7 +403,7 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
     // it is a position to jog to and the scan cannot place an edge to a thousandth of anything.
     roundOff((resolutionMm + tipR) / 2),
     // Past the edge: a jaw's top, or nothing at all.
-    tipR + SCAN_COARSE_STEP_MM,
+    tipR + step,
   ];
 
   const edges: EdgeScan[] = sidesFor(job).map(({ edge, axis, dir, nominalMm, alongMm }): EdgeScan => {
@@ -354,7 +415,7 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
     // whose edges sit twice as far below the middle as the figure allows from being read as a cut.
     const [ex, ey] = at(0);
     const dropMm = domeDropMm(job, ex, ey);
-    const edgeBands: ScanBands = { blankMm: dropMm + DEPTH_TOLERANCE_MM, belowMm };
+    const edgeBands: ScanBands = { blankMm: dropMm + dial, belowMm };
     const touches = offsets.map((offsetMm, i): ScanTouch => {
       const point = at(offsetMm);
       const reach = jawReach(point[0], point[1]);
@@ -391,7 +452,9 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
     };
   });
 
-  const missTravelMm = proud + SCAN_MISS_MARGIN_MM;
+  const missTravelMm = proud + scan.missMarginMm;
+  /** The outward touch's offset past the nominal edge, mm — the last of `offsets`. */
+  const outwardMm = tipR + step;
   const flatness: StockFlatness | undefined = job.stock.flatness;
   const acrossX = flatness === undefined || flatness.across === 'width';
   const free = edges.filter((e) => e.jawUnder === 'off');
@@ -404,6 +467,7 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
 
   return {
     tipRadiusMm: tipR,
+    settings: { ...scan },
     reference: { at: [length / 2, width / 2], expect: 'blank' },
     edges,
     bands,
@@ -415,7 +479,7 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
       // It used to say AS ASSUMED — no tip had been measured. A8 calipered it on 2026-10-15, so the
       // sentence now names the reading instead (and still names WHICH probe it is, because the
       // machine ships three and only the wired one is the touch-off tip).
-      `The tip is ${fmtNum(probe.tipDiameter)} mm across, measured (#208 A8, 2026-10-15: the wired ` +
+      `The tip is ${fmtNum(scan.tipDiameterMm)} mm across, measured (#208 A8, 2026-10-15: the wired ` +
         `probe's shaft — a hollow cylinder, no ball): every position and depth below is derived ` +
         `from this one figure — the ${fmtNum(resolutionMm)} mm the reading stands past the edge is ` +
         'its radius and the dial, and a smaller tip is a sharper scan.',
@@ -446,6 +510,13 @@ export function planMaterialScan(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC)
         : []),
       `The ${job.workholding.kind} already fixes X and rotation to within ±${fmtNum(vise.uncertainty)} mm, so the left and right edges mostly re-check that the blank is seated against them; the front and back edges are the free ones.`,
       'A Z-only tip cannot find rotation: this scan says where the edges are, not whether the blank sits square in the jaws.',
+      // #449 review item 5 — #452's 1 mm step brings the outside touch to within a millimetre of the
+      // blank's wall, and it may descend the whole start gap plus the cap there. That is safe only if
+      // nothing wider than the tip reaches the blank's top edge first — an assumption, stated as one.
+      `The outside touch is ${fmtNum(outwardMm)} mm past the edge — the tip's side ${fmtNum(outwardMm - tipR)} mm from ` +
+        `the blank's wall — and may descend ${fmtNum(scan.startGapMm + missTravelMm)} mm from where it is sent. That ` +
+        'ASSUMES the probe’s straight shaft, below anything wider than the tip, is longer than that descent: not ' +
+        'measured. If it is shorter, the wider part meets the blank’s top edge and the reading is not the tip’s.',
     ],
   };
 }

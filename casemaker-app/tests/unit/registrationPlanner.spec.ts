@@ -419,6 +419,42 @@ describe('#430 the executor, on a fake machine', () => {
     expect(z1.mode()).toBe('G90');
   });
 
+  // #449 review item 4 — a location's settings that cannot make a capped touch send NOTHING: not even
+  // the `?`. The refusal is in `runRegistration` itself, not only in the planner.
+  it('settings that cannot make a capped slow touch send nothing at all (#449)', async () => {
+    for (const bad of [{ surfaceSlowSeekMm: 1 }, { surfaceSlowSeekMm: 2.5 }, { idlePollLimit: 0 }]) {
+      const z1 = fakeZ1({ actual: SHIFTED });
+      const p = { ...plan('vise'), settings: { ...S, ...bad } };
+      const r = await runRegistration(p, { console: z1.console, operator: yes });
+      expect(r.ok, JSON.stringify(bad)).toBe(false);
+      if (!r.ok) {
+        expect(r.reason).toMatch(/^nothing was sent: /);
+        expect(r.transcript).toEqual([]);
+      }
+      expect(z1.lines, JSON.stringify(bad)).toEqual([]);
+    }
+  });
+
+  // #449 review item 3 — the slow touch says how low it may go, so a stop during it names the depth.
+  it('a stop during the slow surface touch says how far below the fast reading the probe may be (#449)', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED });
+    const cut = {
+      async send(line: string): Promise<ConsoleSendResult> {
+        if (line.startsWith(`G38.2 Z-${S.surfaceSlowSeekMm} `)) {
+          z1.lines.push(line);
+          return { kind: 'timeout', line, detail: 'no reply', text: '' };
+        }
+        return z1.console.send(line);
+      },
+    };
+    const r = await runRegistration(plan('vise'), { console: cut, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain(`as low as ${S.surfaceSlowSeekMm - 1} mm below the fast touch's reading (the slow surface touch)`);
+    // Relative mode at the stop, and a timeout: `$X` first, then `G90` (the Z1 refuses G90 in alarm).
+    expect(z1.lines.slice(-2)).toEqual(['$X', 'G90']);
+    expect(z1.mode()).toBe('G90');
+  });
+
   it('an alarm in the output between lines stops the run', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
     const noisy = {

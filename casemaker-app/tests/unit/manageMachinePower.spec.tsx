@@ -54,8 +54,9 @@ const MACHINE: MachineRecord = {
 };
 
 async function pressOff() {
-  // A short probe gap: the real one is 2 s between each of three probes.
-  render(<MachinePower machine={MACHINE} probeGapMs={5} />);
+  // The waits return at once: the real gap is 2 s between each of three probes, and #449 holds every
+  // gap to that floor in code, so a test cannot shorten it — it can only not wait for it.
+  render(<MachinePower machine={MACHINE} sleep={async () => {}} />);
   await waitFor(() => expect((screen.getByTestId('manage-power-off') as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByTestId('manage-power-off'));
 }

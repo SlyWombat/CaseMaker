@@ -143,7 +143,11 @@ anything that is not `Idle` with no alarm, then sends `play` and polls, printing
 stopping when the job ends. Ctrl-C there sends `abort`, the word Studio's own grey
 Stop sends: the spindle stops at once, the moves it had already queued finish, and the vacuum is
 switched off once the controller says that queue is done — because an aborted program never reaches
-its own.
+its own. Its poll rate, the waits after an `abort` and the missed-poll limit are the shop defaults the
+app's own run and Stop use (`run.*`, `stop.*` in `location.json`), as are `tools/z1/power.sh`'s waits
+(`power.*`); both print each value and where it came from, and
+`node tools/z1/z1.mjs defaults` lists them without talking to the machine (#449). The status poll is
+never faster than every 2 s, whatever a default says.
 
 ---
 

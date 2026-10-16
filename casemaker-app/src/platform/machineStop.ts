@@ -28,16 +28,67 @@
  */
 
 import { alarmLine, controllerState, jobProgressPercent } from './machineUpload';
-import { attachConsole, STATUS_POLL_TIMING, type ConsoleHandle, type MachineConsoleTarget } from './machineConsole';
+import {
+  attachConsole,
+  STATUS_POLL_TIMING,
+  statusPollTimingFrom,
+  type ConsoleHandle,
+  type ConsoleTiming,
+  type MachineConsoleTarget,
+} from './machineConsole';
 import { VACUUM_OFF } from './machineVacuum';
+import { readDefault, type ShopDefaults } from './defaultsClient';
 
 export const ABORT_LINE = 'abort';
 
-/** After `abort` is answered: polls for `Idle`, and the wait between them (the harness's numbers). */
+/**
+ * After `abort` is answered: polls for `Idle`, and the wait between them (the harness's numbers). The
+ * labelled NO-SERVICE FALLBACKS of the shop's `stop.idlePolls` / `stop.idlePollMs` (#449).
+ */
 export const STOP_IDLE_POLLS = 3;
 export const STOP_IDLE_POLL_MS = 5000;
-/** The status poll's floor after the abort (#386: never faster than 2 s). */
+/** The status poll's floor after the abort (#386: never faster than 2 s). Compiled; a setting only raises it. */
 export const STOP_POLL_FLOOR_MS = 2000;
+
+/** What a stop polls with (#449): the shop's `stop.*` and the status-poll window. */
+export interface StopSettings {
+  idlePolls: number;
+  idlePollMs: number;
+  statusTiming: ConsoleTiming;
+}
+
+export const STOP_FALLBACK: Readonly<StopSettings> = {
+  idlePolls: STOP_IDLE_POLLS,
+  idlePollMs: STOP_IDLE_POLL_MS,
+  statusTiming: STATUS_POLL_TIMING,
+};
+
+/** The stop's settings from the shop's defaults — the labelled fallbacks with no location. */
+export function stopSettings(defaults: ShopDefaults | null): StopSettings {
+  return {
+    idlePolls: readDefault(defaults, 'stop.idlePolls').value,
+    idlePollMs: readDefault(defaults, 'stop.idlePollMs').value,
+    statusTiming: statusPollTimingFrom(defaults),
+  };
+}
+
+/**
+ * The settings as a stop USES them, whatever was passed: a whole number of polls, at least one (a
+ * stop never gives up without asking once), and never a wait under the 2 s floor (#386).
+ */
+function safeStop(s: StopSettings): StopSettings {
+  return {
+    idlePolls: Number.isInteger(s.idlePolls) && s.idlePolls >= 1 ? s.idlePolls : STOP_IDLE_POLLS,
+    idlePollMs: Number.isFinite(s.idlePollMs) ? Math.max(STOP_POLL_FLOOR_MS, s.idlePollMs) : STOP_IDLE_POLL_MS,
+    // Never a shorter reply window than the compiled one (#449 review): the FIRST `?` decides whether
+    // `abort` is sent at all, and a timeout there returns without sending it.
+    statusTiming: {
+      ...s.statusTiming,
+      firstReplyMs: Math.max(STATUS_POLL_TIMING.firstReplyMs, s.statusTiming.firstReplyMs),
+      maxMs: Math.max(STATUS_POLL_TIMING.maxMs, s.statusTiming.maxMs),
+    },
+  };
+}
 
 /**
  * What one press did:
@@ -73,10 +124,11 @@ const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(reso
 export async function stopProgram(
   target: MachineConsoleTarget,
   sleep: (ms: number) => Promise<void> = realSleep,
+  settings: StopSettings = STOP_FALLBACK,
 ): Promise<StopOutcome> {
   const session = attachConsole(target);
   try {
-    return await stopOnSession(session, sleep);
+    return await stopOnSession(session, sleep, settings);
   } finally {
     await session.close();
   }
@@ -91,8 +143,10 @@ export async function stopProgram(
 export async function stopOnSession(
   session: Pick<ConsoleHandle, 'send'>,
   sleep: (ms: number) => Promise<void> = realSleep,
+  settings: StopSettings = STOP_FALLBACK,
 ): Promise<StopOutcome> {
-  const ask = await session.send('?', STATUS_POLL_TIMING);
+  const { idlePolls, idlePollMs, statusTiming } = safeStop(settings);
+  const ask = await session.send('?', statusTiming);
   if (ask.kind !== 'sent') {
     return ask.kind === 'refused' ? { kind: 'error', detail: ask.detail } : { kind: ask.kind, detail: ask.detail };
   }
@@ -120,10 +174,10 @@ export async function stopOnSession(
   }
   // An unanswered `abort` is not a failed one: the controller answers only once its queue drains.
   // Either way, `Idle` on a status poll is what lets `M332` go out.
-  for (let i = 0; i < STOP_IDLE_POLLS; i++) {
+  for (let i = 0; i < idlePolls; i++) {
     // The status floor holds here too (#386): never a `?` within 2 s of the line before it.
     if (i === 0) await sleep(STOP_POLL_FLOOR_MS);
-    const poll = await session.send('?', STATUS_POLL_TIMING);
+    const poll = await session.send('?', statusTiming);
     if (poll.kind === 'sent') {
       const state = controllerState(poll.text);
       if (state !== null && state.toLowerCase() === 'idle' && !programRunning(poll.text)) {
@@ -131,7 +185,7 @@ export async function stopOnSession(
         return { kind: 'stopped', vacuumOff: off.kind === 'sent', status: poll.text };
       }
     }
-    if (i + 1 < STOP_IDLE_POLLS) await sleep(STOP_IDLE_POLL_MS);
+    if (i + 1 < idlePolls) await sleep(idlePollMs);
   }
   return {
     kind: 'draining',

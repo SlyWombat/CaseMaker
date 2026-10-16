@@ -2,7 +2,8 @@
 // controller and a fake clock. Nothing here reaches a machine.
 
 import { describe, expect, it } from 'vitest';
-import type { ConsoleSendResult } from '@/platform/machineConsole';
+import { STATUS_POLL_TIMING, type ConsoleSendResult } from '@/platform/machineConsole';
+import { STOP_FALLBACK } from '@/platform/machineStop';
 import { describeRun, playLine, programHash, readProgress, runProgram, runSettings, RUN_POLL_FLOOR_MS } from '@/platform/machineRun';
 import { readJobProgress } from '@/platform/desktop/protocol';
 
@@ -194,7 +195,14 @@ describe('#423 Stop', () => {
 
 describe('#423 settings and the status reader', () => {
   it('reads the run.* shop defaults, with the poll floor', () => {
-    expect(runSettings(null)).toEqual({ pollMs: 2000, noProgressMs: 30000, missLimit: 3 });
+    // #449 — and the status window and the Stop's polls, each its labelled fallback with no location.
+    expect(runSettings(null)).toEqual({
+      pollMs: 2000,
+      noProgressMs: 30000,
+      missLimit: 3,
+      statusTiming: STATUS_POLL_TIMING,
+      stop: STOP_FALLBACK,
+    });
   });
 
   it('reads a status line exactly as protocol.ts does', () => {

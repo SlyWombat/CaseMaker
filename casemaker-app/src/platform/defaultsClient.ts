@@ -113,6 +113,44 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'run.pollMs': { label: 'run status poll', unit: 'ms', rule: z.number().min(2000).max(60000), fallback: 2000 },
   'run.noProgressMs': { label: 'no-progress timeout', unit: 'ms', rule: z.number().min(15000).max(600000), fallback: 30000 },
   'run.missLimit': { label: 'missed polls before unreachable', unit: 'polls', rule: z.number().int().min(1).max(10), fallback: 3 },
+  // ── #449 (begin) — the probe, scan, console, stop and power timing. CHOSEN, not measured: each seed
+  // is the number the code compiled before, and each fallback is that seed. The 2000 ms poll floors
+  // (`RUN_POLL_FLOOR_MS`, `STOP_POLL_FLOOR_MS`, `MIN_STATUS_POLL_MS`) stay compiled; a rule here can
+  // only sit at or above them. `tools/z1/benchDefaults.mjs` restates the keys the bench tools read,
+  // and `benchDefaults.spec.ts` holds it to these rules and fallbacks.
+  // The slow surface touch's travel: it starts 1 mm above the fast hit (`G0 Z1`), so it must travel
+  // more than that to reach the surface, and at most 2 mm — never more than 1 mm past the fast hit —
+  // so it stays a capped touch (#449 review: 3 mm let it go 2 mm past).
+  'registration.surfaceSlowSeekMm': { label: 'surface touch, slow travel (chosen)', unit: 'mm', rule: z.number().min(1.2).max(2), fallback: 2 },
+  'registration.idlePollLimit': { label: 'status polls waiting for Idle before a touch (chosen)', unit: 'polls', rule: z.number().int().min(1).max(120), fallback: 30 },
+  // The run sheet's down-touch scan (#391, #452): how far past the jaw tops a touch may travel, and
+  // the depth two readings are told apart by. Its step, start gap and tip are the planner's own keys.
+  'registration.scanMissMarginMm': { label: 'scan touch travel past the jaw tops (chosen)', unit: 'mm', rule: z.number().min(0.2).max(3), fallback: 1 },
+  'registration.readingResolutionMm': { label: 'depth two touch readings are told apart by (chosen)', unit: 'mm', rule: z.number().min(0.005).max(0.5), fallback: 0.05 },
+  // The typed console's reply window. The first-reply floor sits above the slowest line timed on the
+  // bench (M491 ~32 s, $H ~31 s, 2026-10-15): a shorter window would call a moving machine timed out.
+  'console.firstReplyMs': { label: 'console line, first reply wait (chosen)', unit: 'ms', rule: z.number().min(40_000).max(300_000), fallback: 60_000 },
+  'console.quietMs': { label: 'console reply, quiet gap that ends it (chosen)', unit: 'ms', rule: z.number().min(200).max(5000), fallback: 800 },
+  'console.maxMs': { label: 'console line, longest reply (chosen)', unit: 'ms', rule: z.number().min(40_000).max(600_000), fallback: 120_000 },
+  // Never under 3000 (#449 review): Stop's first `?` uses this window, and a timeout there returns
+  // before `abort` is sent. The controller answers in 0.6–0.7 s; 3 s is the compiled window it had.
+  'run.statusReplyMs': { label: 'status poll, reply wait (chosen)', unit: 'ms', rule: z.number().min(3000).max(10_000), fallback: 3000 },
+  // After `abort`: the Idle polls before `M332`, and the app's wait between them (never under the 2 s
+  // floor, #386). The bench harness reads `stop.idlePolls` but not the wait: its idle polls are paced
+  // by `run.pollMs`, and its own compiled number there is each poll's reply window, a different thing.
+  'stop.idlePolls': { label: 'status polls after Stop before giving up on Idle (chosen)', unit: 'polls', rule: z.number().int().min(1).max(20), fallback: 3 },
+  'stop.idlePollMs': { label: 'wait between those polls (chosen)', unit: 'ms', rule: z.number().min(2000).max(60_000), fallback: 5000 },
+  // The bench harness's `run` gives `abort` this long to answer (~18 s observed, #303). The app's own
+  // Stop still gives it the console window; re-timing that is the maintainer's call (#449).
+  // At least 20 s (#449 review): above the ~18 s drain observed before `abort` answered (#303).
+  'stop.abortReplyMs': { label: 'abort reply wait, bench harness (chosen)', unit: 'ms', rule: z.number().min(20_000).max(300_000), fallback: 30_000 },
+  'power.probeTries': { label: 'probes before a machine counts as silent (chosen)', unit: 'tries', rule: z.number().int().min(1).max(10), fallback: 3 },
+  // Each probe and each check sends `?`: never closer than the 2 s status floor (#386), which
+  // `powerStore.ts`'s POWER_POLL_FLOOR_MS also applies in code.
+  'power.probeGapSeconds': { label: 'wait between those probes (chosen)', unit: 's', rule: z.number().min(2).max(30), fallback: 2 },
+  'power.cyclePauseSeconds': { label: 'plug cycle, time off (chosen)', unit: 's', rule: z.number().min(3).max(120), fallback: 10 },
+  'power.pollSeconds': { label: 'power-on, wait between checks (chosen)', unit: 's', rule: z.number().min(2).max(60), fallback: 3 },
+  // ── #449 (end)
   // #415 — past how many minutes of runtime a cutter gets "check this bit". It only warns.
   'tools.runtimeWarnMinutes': {
     label: 'runtime before "check this bit"',

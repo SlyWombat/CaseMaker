@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { SCAN_FALLBACK } from '@/engine/cnc/engrave/materialScan';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -522,7 +523,9 @@ describe('runSheet (#207)', () => {
       expect(checks).toHaveLength(4);
       expect(checks[0]).toContain('the left edge — the one against the fixed jaw');
       expect(checks[0]).toContain('at the middle of the blank’s width');
-      expect(checks[0]).toContain('3 and 1 mm inside');
+      // #452 — the planner's own 1 mm coarse step (`registration.coarseStepMm`), not the 2 mm the
+      // sheet used to compile: the clear-of-the-edge touch is the tip's radius plus one step in.
+      expect(checks[0]).toContain('2 and 1 mm inside');
       expect(checks[0]).toContain('at 0.7 mm outside');
       expect(checks[0]).toContain('the blank’s edge itself');
       // The END edges have a jaw top past them; the SIDE edges have the gap between the jaws, so
@@ -561,6 +564,19 @@ describe('runSheet (#207)', () => {
     // #391 review item 1 — the block named a cap the machine has no field for. A `G38.2` takes a
     // TRAVEL distance, so a step an operator can actually send needs both the line and the height it
     // is sent from, and a touch that finds nothing needs a way back out of the Alarm it leaves.
+    // #449/#452 — the sheet's scan is the shop's: a location's step, gap, cap margin and feed are the
+    // numbers it prints, passed in (`RunSheetOptions.scan`) because this module runs in the sim worker.
+    it('prints the shop’s own scan settings when they are passed', () => {
+      const scan = { ...SCAN_FALLBACK, coarseStepMm: 0.5, startGapMm: 4, missMarginMm: 2, touchFeed: 120 };
+      const steps = section(sheetFor(defaultEngraveJob(), NO_SIM, NC, { ...SCAN, scan }), 'origin').steps;
+      const send = steps.find((s) => s.code?.startsWith('G38.2'))!;
+      // 4 mm gap + (4 mm proud + 2 mm margin) cap = 10 mm of travel, at the shop's feed.
+      expect(send.code).toBe('G38.2 Z-10 F120');
+      expect(send.text).toContain('held 4 mm above the top of the blank');
+      const checks = steps.map((s) => s.text).filter((t) => t.startsWith('Check '));
+      expect(checks[0]).toContain('1.5 and 1 mm inside');
+    });
+
     it('gives every touch a sendable line, its cap, and the way back from a miss (#391 item 1)', () => {
       const steps = section(sheetFor(defaultEngraveJob(), NO_SIM, NC, SCAN), 'origin').steps;
       const codes = steps.filter((s) => s.code !== undefined);
@@ -568,7 +584,8 @@ describe('runSheet (#207)', () => {
       // 3 mm of start gap over the blank's top, plus the plan's own cap: 5 mm on this job. The Z word
       // is a travel distance from wherever the tip is, which is why the height is stated at all.
       const send = codes.find((s) => s.code!.startsWith('G38.2'))!;
-      expect(send.code).toBe('G38.2 Z-8 F100');
+      // #452 — the planner's own scan feed (`registration.touchFeed`, 150), where the sheet said F100.
+      expect(send.code).toBe('G38.2 Z-8 F150');
       expect(send.text).toContain('held 3 mm above the top of the blank');
       expect(send.text).toContain('distance the tip may TRAVEL');
       expect(send.text).toContain('runs the 3 mm plus the 5 mm cap');
@@ -615,8 +632,8 @@ describe('runSheet (#207)', () => {
       // nothing to bisect between: the step says which way to step and that a miss counts as off.
       const unbracketed = texts.find((t) => t.startsWith('If the readings do not bracket'))!;
       expect(unbracketed).toContain('ALL FOUR reading the blank');
-      expect(unbracketed).toContain('step 2 mm further OUT');
-      expect(unbracketed).toContain('step 2 mm back IN');
+      expect(unbracketed).toContain('step 1 mm further OUT');
+      expect(unbracketed).toContain('step 1 mm back IN');
       expect(unbracketed).toContain('which counts as off the blank');
     });
 

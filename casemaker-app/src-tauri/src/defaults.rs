@@ -248,6 +248,25 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // ── #421 (end)
     // #431 — the laser point-to-origin's accuracy, ±1 mm, until the dot is measured.
     ("laser.originUncertaintyMm", 1.0, "mm", "chosen, not measured: how far the laser dot's origin may be from the stock's corner (the dot's size, and its offset from the spindle axis, are not measured); point-to-origin is refused for a job whose edge margin is tighter"),
+    // ── #449 (begin) — the probe, scan, console, stop and power timing. Chosen, not measured: each is
+    // the number the code compiled before (`defaultsClient.ts` states the same bounds and fallbacks).
+    // The 2000 ms poll floors stay compiled in the code that polls; these may only sit above them.
+    ("registration.surfaceSlowSeekMm", 2.0, "mm", "chosen, not measured: how far the slow surface touch may travel. It starts 1 mm above the fast touch's hit, so it must travel more than that, and at most 2 mm (never more than 1 mm past the hit), so it stays a capped touch"),
+    ("registration.idlePollLimit", 30.0, "polls", "chosen, not measured: how many status polls the registration waits for Idle before a touch, about a second each, before it stops"),
+    ("registration.scanMissMarginMm", 1.0, "mm", "chosen, not measured: how far past the jaw tops a run-sheet scan touch may travel before it is called nothing; the cap that keeps a touch with nothing under it off the bed"),
+    ("registration.readingResolutionMm", 0.05, "mm", "chosen, not measured: the depth two touch readings are told apart by (the machine's dial, not the probe's spec)"),
+    ("console.firstReplyMs", 60000.0, "ms", "chosen, not measured: how long a typed console line waits for its first reply. Above the slowest lines timed on the bench (M491 about 32 s, $H about 31 s, 2026-10-15)"),
+    ("console.quietMs", 800.0, "ms", "chosen, not measured: the quiet gap that ends a console reply"),
+    ("console.maxMs", 120000.0, "ms", "chosen, not measured: the longest a console reply may run; never shorter than the first-reply wait"),
+    ("run.statusReplyMs", 3000.0, "ms", "chosen, not measured: how long a status poll waits for its reply; the controller answers in 0.6 to 0.7 s (#386)"),
+    ("stop.idlePolls", 3.0, "polls", "chosen, not measured: after abort, how many status polls look for Idle before M332; none reading Idle leaves the vacuum on and says so"),
+    ("stop.idlePollMs", 5000.0, "ms", "chosen, not measured: the wait between those polls; never under the 2 s status floor (#386)"),
+    ("stop.abortReplyMs", 30000.0, "ms", "chosen, not measured as a bound: how long the bench harness's run gives abort to answer (about 18 s observed on 2026-10-12, #303). The app's own Stop gives abort the console window"),
+    ("power.probeTries", 3.0, "tries", "chosen, not measured: how many machine probes, all silent, before a powered machine counts as not answering (#416 review: one silent probe is a Wi-Fi blip as often as a dead controller)"),
+    ("power.probeGapSeconds", 2.0, "s", "chosen, not measured: the wait between those probes"),
+    ("power.cyclePauseSeconds", 10.0, "s", "chosen, not measured: how long a plug cycle leaves the machine off before switching it on again (power.sh on --cycle)"),
+    ("power.pollSeconds", 3.0, "s", "chosen, not measured: the wait between checks while switching on waits for the controller to answer"),
+    // ── #449 (end)
     // #414 — Q3's minimum offcut, 20 x 20 mm at the stock's thickness.
     // #414 — the maintainer, 2026-10-16: runtime is weighted by the material cut. Chosen, not measured.
     ("tools.wearWeight.plastic", 1.0, "x", "chosen, not measured: a minute cutting PLA, ABS, acrylic: the baseline"),
@@ -487,6 +506,72 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (1.0..=10.0).contains(&v) && v.fract() == 0.0),
             "a whole number of polls, 1 to 10",
         )),
+        // ── #449 (begin) — the probe, scan, console, stop and power timing (`defaultsClient.ts` states
+        // the same bounds). The slow surface seek must out-travel the 1 mm lift before it; the console
+        // wait stays above the slowest timed line; nothing polls under the 2 s floor (#386).
+        "registration.surfaceSlowSeekMm" => Some(need(
+            n.is_some_and(|v| (1.2..=2.0).contains(&v)),
+            "1.2 to 2 mm — more than the 1 mm lift before the slow touch, and never more than 1 mm past the fast hit",
+        )),
+        "registration.idlePollLimit" => Some(need(
+            n.is_some_and(|v| (1.0..=120.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of polls, 1 to 120",
+        )),
+        "registration.scanMissMarginMm" => Some(need(
+            n.is_some_and(|v| (0.2..=3.0).contains(&v)),
+            "0.2 to 3 mm",
+        )),
+        "registration.readingResolutionMm" => Some(need(
+            n.is_some_and(|v| (0.005..=0.5).contains(&v)),
+            "0.005 to 0.5 mm",
+        )),
+        "console.firstReplyMs" => Some(need(
+            n.is_some_and(|v| (40000.0..=300000.0).contains(&v)),
+            "40000 to 300000 ms — above the slowest line timed on the bench",
+        )),
+        "console.quietMs" => Some(need(
+            n.is_some_and(|v| (200.0..=5000.0).contains(&v)),
+            "200 to 5000 ms",
+        )),
+        "console.maxMs" => Some(need(
+            n.is_some_and(|v| (40000.0..=600000.0).contains(&v)),
+            "40000 to 600000 ms",
+        )),
+        // Stop's first `?` uses this window; a timeout there returns before `abort` is sent.
+        "run.statusReplyMs" => Some(need(
+            n.is_some_and(|v| (3000.0..=10000.0).contains(&v)),
+            "3000 to 10000 ms",
+        )),
+        "stop.idlePolls" => Some(need(
+            n.is_some_and(|v| (1.0..=20.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of polls, 1 to 20",
+        )),
+        "stop.idlePollMs" => Some(need(
+            n.is_some_and(|v| (2000.0..=60000.0).contains(&v)),
+            "2000 to 60000 ms — never faster than 2 s (#386)",
+        )),
+        "stop.abortReplyMs" => Some(need(
+            n.is_some_and(|v| (20000.0..=300000.0).contains(&v)),
+            "20000 to 300000 ms — above the ~18 s drain observed before abort answered (#303)",
+        )),
+        "power.probeTries" => Some(need(
+            n.is_some_and(|v| (1.0..=10.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of tries, 1 to 10",
+        )),
+        // Each probe and each check sends `?`: never closer than the 2 s status floor (#386).
+        "power.probeGapSeconds" => Some(need(
+            n.is_some_and(|v| (2.0..=30.0).contains(&v)),
+            "2 to 30 seconds — never faster than the 2 s status floor (#386)",
+        )),
+        "power.cyclePauseSeconds" => Some(need(
+            n.is_some_and(|v| (3.0..=120.0).contains(&v)),
+            "3 to 120 seconds",
+        )),
+        "power.pollSeconds" => Some(need(
+            n.is_some_and(|v| (2.0..=60.0).contains(&v)),
+            "2 to 60 seconds — never faster than the 2 s status floor (#386)",
+        )),
+        // ── #449 (end)
         "registration.surfaceSlowFeed" => Some(need(
             n.is_some_and(|v| (5.0..=500.0).contains(&v)),
             "5 to 500 mm/min",

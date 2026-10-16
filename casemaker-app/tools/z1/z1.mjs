@@ -38,9 +38,10 @@ import { fileURLToPath } from 'node:url';
 import { createNodeTransport } from './transport.node.mjs';
 import * as P from '../../src/platform/desktop/protocol.ts';
 import { CAMERA_PORT, captureFrames, saveFrame } from './camera.mjs';
+import { BENCH_DEFAULTS, describeBenchDefaults, readBenchDefaults } from './benchDefaults.mjs';
 
 /** Flags that never take a value. Without this, `--effective <key>` swallows the key as its value. */
-const BOOLEAN_FLAGS = new Set(['json', 'help', 'effective', 'i-am-at-the-machine', 'all']);
+const BOOLEAN_FLAGS = new Set(['json', 'help', 'effective', 'i-am-at-the-machine', 'all', 'sh']);
 
 /**
  * `run`'s own reply windows (#386 review), which are not a console line's.
@@ -48,13 +49,20 @@ const BOOLEAN_FLAGS = new Set(['json', 'help', 'effective', 'i-am-at-the-machine
  * `abort` is the reason they exist: the controller stops the spindle at once but answers only after it
  * has finished the moves it had already queued — ~18 s in the 2026-10-12 observation (#303) — so the
  * reply that says the queue is drained gets 30 s rather than the 3 s a console line is given.
+ *
+ * #449: these are no longer copies. `run` reads them from the shop's defaults in `location.json`
+ * (`benchDefaults.mjs`: `stop.abortReplyMs`, `stop.idlePolls`, `run.noProgressMs`,
+ * `run.missLimit`, `run.pollMs`), the same keys the app reads, and says which values it used. The names
+ * below is a FALLBACK, for the usage text; a run with no location uses every key's fallback.
  */
-const ABORT_REPLY_MS = 30000;
-/** After an abort that never answered: how many polls may still find `Idle`, and each one's window. */
-const ABORT_IDLE_POLLS = 3;
+/**
+ * Each Idle poll's REPLY window after an abort that went unanswered — compiled, not a shop default:
+ * the app's `stop.idlePollMs` is the wait BETWEEN its polls, a different quantity, and these polls are
+ * paced by `run.pollMs` (#449). The number of polls is the shop's `stop.idlePolls`.
+ */
 const ABORT_IDLE_POLL_MS = 5000;
 /** How long a played job may report no `P` progress field before `run` stops polling (`--no-progress`). */
-const NO_PROGRESS_MS = 30000;
+const NO_PROGRESS_MS = BENCH_DEFAULTS['run.noProgressMs'].fallback;
 
 function parseArgs(argv) {
   const positional = [];
@@ -89,6 +97,13 @@ function usage() {
   node tools/z1/z1.mjs md5      <host> <path> [<path> ...] [--window <ms>] [--json]
   node tools/z1/z1.mjs config   <host> <key> [<key> ...] [--source <name>] [--effective] [--json]
   node tools/z1/z1.mjs camera   <host> [--out <file-or-dir>] [--count <n>] [--every <ms>] [--skip <n>] [--port <n>]
+  node tools/z1/z1.mjs defaults [<key> ...] [--location <file>|none] [--json] [--sh]
+
+\`defaults\` (#449) prints the shop defaults the bench tools use — \`run.*\`, \`stop.*\` and \`power.*\` from
+the \`defaults\` section of the app's own \`location.json\` (\`--location\`, else CASEMAKER_LOCATION, else
+%APPDATA%\\casemaker\\location.json), each with its source, or its fallback when there is no file or the
+file's value is out of bounds. It reads one file and talks to no machine. \`--sh\` prints \`key value source\`
+lines for \`power.sh\`, then \`location <file>\` (or \`location none (why)\`). \`run\` reads the same keys, takes \`--location\` too, and prints what it used.
 
 \`config\` reads from source \`sd\` by default, one \`config-get sd <key>\` per key. \`--effective\` asks for
 the merged cache instead (one \`config-get <key>\`) — but on this machine that cache answers
@@ -160,7 +175,7 @@ Ctrl-C leaves at once. \`abort\` stops the SPINDLE at once, but the controller f
 already queued before it answers (~18 s in that observation), and that reply is what \`run\` waits for
 before it sends \`M332\` — the one line it sends that the program did not ask for — because an aborted
 program never ran its own vacuum-off; if the abort goes unanswered, \`M332\` waits for a status poll to
-read \`Idle\` instead, and is NOT sent if none does. Three polls in a row with no reply at all end it
+read \`Idle\` instead, and is NOT sent if none does. Three polls (\`run.missLimit\`) in a row with no reply at all end it
 too, non-zero: the socket is gone, and this tool cannot claim it stopped anything. The physical stop
 is still the stop.`);
 }
@@ -283,6 +298,25 @@ async function main() {
     return;
   }
 
+  // #449 — the shop defaults the bench tools use. Read-only, and before any host: no machine is asked.
+  if (cmd === 'defaults') {
+    const keys = positional.slice(1);
+    const unknown = keys.filter((k) => BENCH_DEFAULTS[k] === undefined);
+    if (unknown.length > 0) {
+      console.error(`not a key the bench tools read: ${unknown.join(', ')} (known: ${Object.keys(BENCH_DEFAULTS).join(', ')})`);
+      process.exit(2);
+    }
+    const read = readBenchDefaults({
+      location: typeof flags.location === 'string' ? flags.location : undefined,
+      keys: keys.length > 0 ? keys : undefined,
+    });
+    if (asJson) console.log(JSON.stringify(read, null, 2));
+    else if (flags.sh === true) for (const [k, v] of Object.entries(read.values)) console.log(`${k} ${v.value} ${v.source}`);
+    else for (const line of describeBenchDefaults(read)) console.log(line);
+    if (flags.sh === true) console.log(read.path !== null ? `location ${read.path}` : `location none (${read.note})`);
+    return;
+  }
+
   const host = positional[1];
   if (host === undefined) {
     usage();
@@ -332,9 +366,15 @@ async function main() {
     console.error('run starts a program on the machine. Re-run with --i-am-at-the-machine once you are at the machine with your hand near the stop (/Fabrication.md §8).');
     process.exit(2);
   }
+  // #449 — `run`'s numbers come from the shop's defaults (`location.json`), the same keys the app's run
+  // and Stop read; each is said, with where it came from, before anything is sent.
+  const shop = cmd === 'run' ? readBenchDefaults({ location: typeof flags.location === 'string' ? flags.location : undefined }) : null;
+  if (shop !== null) for (const line of describeBenchDefaults(shop)) process.stderr.write(`default: ${line}\n`);
+  const shopValue = (key) => (shop !== null ? shop.values[key].value : BENCH_DEFAULTS[key].fallback);
   // The poll interval is a floor, not a preference (#386): `?` every 0.6 s is what faulted the
-  // controller on 2026-10-12, and the bench's rate, 2 s, is the slowest-tested one that never did.
-  const intervalMs = num(flags.interval, P.MIN_STATUS_POLL_MS);
+  // controller on 2026-10-12, and the bench's rate, 2 s, is the slowest-tested one that never did. The
+  // shop's `run.pollMs` may only RAISE it: the floor stays compiled (MIN_STATUS_POLL_MS).
+  const intervalMs = num(flags.interval, Math.max(P.MIN_STATUS_POLL_MS, shopValue('run.pollMs')));
   if (!(intervalMs >= P.MIN_STATUS_POLL_MS)) {
     console.error(
       `--interval must be milliseconds and at least ${P.MIN_STATUS_POLL_MS}: the status poll is what the controller ` +
@@ -345,7 +385,11 @@ async function main() {
   // The bound on "the controller is answering, but reports no job" (#386 review): the status poll
   // cannot tell this tool that a `play` did nothing, so `run` stops asking. It is a flag so the bound
   // itself is testable without a 30-second wait.
-  const noProgressMs = num(flags['no-progress'], NO_PROGRESS_MS);
+  const noProgressMs = num(flags['no-progress'], shopValue('run.noProgressMs'));
+  // After an abort: its reply window, then the Idle polls before `M332` — never under the 2 s floor.
+  const abortReplyMs = shopValue('stop.abortReplyMs');
+  const abortIdlePolls = shopValue('stop.idlePolls');
+  const missLimit = shopValue('run.missLimit');
   if (cmd === 'run' && !(noProgressMs > 0)) {
     console.error('--no-progress must be positive milliseconds: it is how long `run` keeps polling a job that reports no progress.');
     process.exit(2);
@@ -583,7 +627,7 @@ async function main() {
                 // would report nothing while the spindle is still turning.
                 misses++;
                 process.stderr.write(`  ${String(polls).padStart(3)}  (no status reply: ${out.detail})\n`);
-                if (misses >= 3) {
+                if (misses >= missLimit) {
                   outcome = 'unreachable';
                   process.exitCode = 1;
                   break;
@@ -643,10 +687,10 @@ async function main() {
                 // #303, bench 2026-10-12: this is the word Studio's own grey Stop sends. The spindle
                 // stops at once, but the controller first drains the queue it already had and answers
                 // `Aborted playing or paused file` when it is done — ~18 s in that observation, so this
-                // one send gets ABORT_REPLY_MS rather than a console line's 3 s (#386 review).
+                // one send gets `stop.abortReplyMs` (30 s seeded) rather than a console line's 3 s (#386 review).
                 const aborted = await sendTraced(session, file, 'abort', flags, {
                   echo: false,
-                  window: { firstReplyMs: ABORT_REPLY_MS, maxMs: ABORT_REPLY_MS },
+                  window: { firstReplyMs: abortReplyMs, maxMs: abortReplyMs },
                 });
                 abortSent = true;
                 if (aborted.ok) {
@@ -666,7 +710,7 @@ async function main() {
                 // reply in the 2026-10-12 log — so any text at all is not the abort's answer. Without the
                 // word, the Idle polls below decide, which is the same rule one step later.
                 let drained = aborted.ok && /aborted playing/i.test(aborted.text);
-                for (let i = 0; !drained && i < ABORT_IDLE_POLLS; i++) {
+                for (let i = 0; !drained && i < abortIdlePolls; i++) {
                   const q = await pollOnce({ firstReplyMs: ABORT_IDLE_POLL_MS, maxMs: ABORT_IDLE_POLL_MS });
                   if (q.ok && P.readJobProgress(q.text).state === 'Idle') drained = true;
                 }
@@ -675,7 +719,7 @@ async function main() {
                   if (!vacuumOff.ok) console.error(`the vacuum: \`M332\` went unanswered (${vacuumOff.detail}) — check the machine.`);
                 } else {
                   console.error(
-                    `the vacuum: \`M332\` was NOT sent — nothing confirmed the controller had finished draining (${ABORT_IDLE_POLLS} polls ` +
+                    `the vacuum: \`M332\` was NOT sent — nothing confirmed the controller had finished draining (${abortIdlePolls} polls ` +
                       'after the abort did not read `Idle`). Check the machine and the vacuum.',
                   );
                 }
@@ -710,7 +754,7 @@ async function main() {
               );
             }
             if (outcome === 'unreachable') {
-              console.error('three polls in a row went unanswered — the socket or the controller is gone. The job may still be running: the physical stop is the stop.');
+              console.error(`${misses} polls in a row went unanswered — the socket or the controller is gone. The job may still be running: the physical stop is the stop.`);
             }
             if (outcome === 'never-started') {
               console.error(

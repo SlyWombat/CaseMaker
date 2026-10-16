@@ -264,6 +264,111 @@
       "setAt": null,
       "unit": "s"
     },
+    "registration.surfaceSlowSeekMm": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far the slow surface touch may travel. It starts 1 mm above the fast touch's hit, so it must travel more than that, and at most 2 mm (never more than 1 mm past the hit), so it stays a capped touch"
+    },
+    "registration.idlePollLimit": {
+      "value": 30.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "polls",
+      "note": "chosen, not measured: how many status polls the registration waits for Idle before a touch, about a second each, before it stops"
+    },
+    "registration.scanMissMarginMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far past the jaw tops a run-sheet scan touch may travel before it is called nothing; the cap that keeps a touch with nothing under it off the bed"
+    },
+    "registration.readingResolutionMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the depth two touch readings are told apart by (the machine's dial, not the probe's spec)"
+    },
+    "console.firstReplyMs": {
+      "value": 60000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long a typed console line waits for its first reply. Above the slowest lines timed on the bench (M491 about 32 s, $H about 31 s, 2026-10-15)"
+    },
+    "console.quietMs": {
+      "value": 800.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: the quiet gap that ends a console reply"
+    },
+    "console.maxMs": {
+      "value": 120000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: the longest a console reply may run; never shorter than the first-reply wait"
+    },
+    "run.statusReplyMs": {
+      "value": 3000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long a status poll waits for its reply; the controller answers in 0.6 to 0.7 s (#386)"
+    },
+    "stop.idlePolls": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "polls",
+      "note": "chosen, not measured: after abort, how many status polls look for Idle before M332; none reading Idle leaves the vacuum on and says so"
+    },
+    "stop.idlePollMs": {
+      "value": 5000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: the wait between those polls; never under the 2 s status floor (#386)"
+    },
+    "stop.abortReplyMs": {
+      "value": 30000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured as a bound: how long the bench harness's run gives abort to answer (about 18 s observed on 2026-10-12, #303). The app's own Stop gives abort the console window"
+    },
+    "power.probeTries": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "tries",
+      "note": "chosen, not measured: how many machine probes, all silent, before a powered machine counts as not answering (#416 review: one silent probe is a Wi-Fi blip as often as a dead controller)"
+    },
+    "power.probeGapSeconds": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: the wait between those probes"
+    },
+    "power.cyclePauseSeconds": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: how long a plug cycle leaves the machine off before switching it on again (power.sh on --cycle)"
+    },
+    "power.pollSeconds": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: the wait between checks while switching on waits for the controller to answer"
+    },
     "registration.capBelowSurfaceMm": {
       "value": 0.5,
       "source": "seeded",

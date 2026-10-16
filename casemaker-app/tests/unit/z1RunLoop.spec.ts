@@ -132,6 +132,11 @@ async function runHarness(
       String(port),
       '--trace',
       trace,
+      // #449 — `run` reads the shop's defaults from the app's own location.json; `none` keeps a run on
+      // the maintainer's machine from being steered by the maintainer's own file. Every value is then
+      // its fallback, which is what these expectations were written against.
+      '--location',
+      'none',
       '--quiet',
       '150',
       // The CONNECT window, not a rule under test: on a loaded machine the child's own start plus the

@@ -30,17 +30,35 @@ import {
   manualOffAllowed,
   powerOffGuarded,
   powerOnAndWait,
+  powerSettings,
   probeSettled,
   type PowerDeps,
 } from '@/store/powerStore';
-import { shopDefault } from '@/store/shopDefaultsStore';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+
+/**
+ * #449 — the flows' timing from the shop's `power.*` defaults, read at the click. Every gap between
+ * probes is held to the 2 s floor inside `powerStore`, whatever is passed here.
+ */
+function flowOpts() {
+  const s = powerSettings(useShopDefaultsStore.getState().defaults);
+  return {
+    waitSeconds: s.waitSeconds,
+    pollMs: s.pollMs,
+    probeTries: s.probeTries,
+    probeGapMs: s.probeGapMs,
+    pauseMs: s.pauseMs,
+  };
+}
+
+const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 function sentence(res: { kind: string; reason?: string; message?: string; detail?: string }): string {
   return res.message ?? res.reason ?? res.detail ?? 'it did not work';
 }
 
 /** The world a flow runs against, for this machine. */
-function depsFor(machine: MachineRecord): PowerDeps {
+function depsFor(machine: MachineRecord, sleep: (ms: number) => Promise<void>): PowerDeps {
   return {
     switchPlug: async (on) => {
       const res = await houseSwitchPower(machine.id, on);
@@ -58,18 +76,21 @@ function depsFor(machine: MachineRecord): PowerDeps {
         ? { answered: r.observation.status !== null, status: r.observation.status }
         : { answered: false, status: null };
     },
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    sleep,
     now: () => Date.now(),
   };
 }
 
 export function MachinePower({
   machine,
-  probeGapMs,
+  sleep = realSleep,
 }: {
   machine: MachineRecord;
-  /** The pause between the probes that decide "silent" — the default 2 s; a test passes a short one. */
-  probeGapMs?: number;
+  /**
+   * How the flows wait — real time in the app. A test passes one that returns at once, so the 2 s
+   * floor between probes (#449, never lowered) costs it no wall-clock time.
+   */
+  sleep?: (ms: number) => Promise<void>;
 }) {
   const [status, setStatus] = useState<PowerStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -116,8 +137,7 @@ export function MachinePower({
     setNote(null);
     setAsk(null);
     try {
-      const wait = shopDefault('power.onWaitSeconds');
-      const r = await powerOnAndWait(depsFor(machine), { waitSeconds: wait.value, probeGapMs });
+      const r = await powerOnAndWait(depsFor(machine, sleep), flowOpts());
       if (r.ok) setNote({ kind: 'ok', text: 'On — the machine answered.' });
       else {
         setNote({ kind: 'error', text: r.reason });
@@ -134,8 +154,7 @@ export function MachinePower({
     setBusy('cycle');
     setAsk(null);
     try {
-      const wait = shopDefault('power.onWaitSeconds');
-      const r = await cycleConfirmed(depsFor(machine), { waitSeconds: wait.value, probeGapMs });
+      const r = await cycleConfirmed(depsFor(machine, sleep), flowOpts());
       setNote(r.ok ? { kind: 'ok', text: 'Cycled — the machine answered.' } : { kind: 'error', text: r.reason });
     } finally {
       setBusy(null);
@@ -148,10 +167,11 @@ export function MachinePower({
     setNote(null);
     setAsk(null);
     try {
-      const deps = depsFor(machine);
+      const deps = depsFor(machine, sleep);
       // Several probes, never one (#416 review): a single silent answer is a network blip as often
       // as a dead controller, and this decides whether mains is cut.
-      const fresh = await probeSettled(deps, { gapMs: probeGapMs });
+      const opts = flowOpts();
+      const fresh = await probeSettled(deps, { gapMs: opts.probeGapMs, tries: opts.probeTries });
       // The card knows of no running job; the status line's own `P:` is what the guard reads.
       const verdict = manualOffAllowed({ canReadStatus: true, status: fresh, jobRunning: false, confirmedSilent });
       if (!verdict.ok && 'needsConfirm' in verdict) {

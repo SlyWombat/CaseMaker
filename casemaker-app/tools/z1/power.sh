@@ -28,8 +28,16 @@
 # Switching the plug is a PHYSICAL act. This script does it only when run, and nothing else in the
 # repo calls it — it is for the person (or session) the user has told to power the bench.
 #
+# THE WAITS ARE THE SHOP'S (#449). How long `on` waits (`power.onWaitSeconds`), how long a cycle leaves
+# the plug off (`power.cyclePauseSeconds`) and the pause between checks (`power.pollSeconds`) are read
+# from the `defaults` section of the app's own location.json — the keys the app's Machines card uses —
+# through `z1.mjs defaults` (tools/z1/benchDefaults.mjs, which names the file). Each is printed with
+# where it came from. With no file, or if that read fails, the fallbacks below are used and SAID to be
+# fallbacks; they are the same numbers as the app's. `--wait` still overrides the first.
+#
 # Environment: HA (default /mnt/c/Projects/HomeAssistant/scripts/ha-api.sh), Z1_HOST (default
-# 192.168.10.43), Z1_PORT (default 2222), Z1_ENTITY (default switch.makera_cnc).
+# 192.168.10.43), Z1_PORT (default 2222), Z1_ENTITY (default switch.makera_cnc), CASEMAKER_LOCATION
+# (a location.json to read the defaults from, as a Windows or WSL path; `none` for the fallbacks).
 
 set -u
 
@@ -41,13 +49,18 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 cmd="${1:-}"
 [ $# -gt 0 ] && shift
-wait_s=180
+# The labelled fallbacks: `defaultsClient.ts`'s KNOWN_DEFAULTS fallbacks for the same keys
+# (`benchDefaults.spec.ts` holds these three lines to them). Replaced below by the location's values.
+wait_s=180       # power.onWaitSeconds
+cycle_pause_s=10 # power.cyclePauseSeconds
+poll_s=3         # power.pollSeconds
+wait_flag=""
 force=0
 dry=0
 cycle=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --wait) wait_s="${2:?--wait needs a number of seconds}"; shift 2 ;;
+    --wait) wait_flag="${2:?--wait needs a number of seconds}"; shift 2 ;;
     --force) force=1; shift ;;
     --cycle) cycle=1; shift ;;
     --dry-run) dry=1; shift ;;
@@ -81,6 +94,41 @@ status_line() {
 
 state_word() { sed -n 's/.*<\([A-Za-z]*\)[|>].*/\1/p' <<<"$1" | head -1; }
 
+# The shop's defaults for this script (#449), through the harness's one reader. Prints what it used.
+load_defaults() {
+  local loc_arg="" out key value source win app
+  # Paths go into a PowerShell single-quoted string, where the only character to escape is ' itself
+  # (doubled). Nothing here is evaluated by PowerShell.
+  ps_quote() { printf "'%s'" "${1//\'/\'\'}"; }
+  if [ -n "${CASEMAKER_LOCATION:-}" ]; then
+    if [ "$CASEMAKER_LOCATION" = "none" ]; then loc_arg="--location none"
+    else
+      win="$(wslpath -w "$CASEMAKER_LOCATION" 2>/dev/null || printf '%s' "$CASEMAKER_LOCATION")"
+      loc_arg="--location $(ps_quote "$win")"
+    fi
+  fi
+  app="$(ps_quote "$(wslpath -w "$APP_DIR")")"
+  out="$(powershell.exe -NoProfile -Command \
+    "Set-Location $app; node tools/z1/z1.mjs defaults power.onWaitSeconds power.cyclePauseSeconds power.pollSeconds --sh $loc_arg" 2>/dev/null |
+    tr -d '\r')"
+  if [ -z "$out" ]; then
+    say "defaults: could not run z1.mjs defaults - using the fallbacks: power.onWaitSeconds=${wait_s}s, power.cyclePauseSeconds=${cycle_pause_s}s, power.pollSeconds=${poll_s}s (fallback)"
+    return
+  fi
+  while read -r key value source; do
+    if [ "$key" = "location" ]; then say "defaults: read from ${value}${source:+ $source}"; continue; fi
+    # Only a plain positive number is taken; anything else keeps the fallback.
+    [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]] || continue
+    case "$key" in
+      power.onWaitSeconds) wait_s="${value%.*}" ;;
+      power.cyclePauseSeconds) cycle_pause_s="$value" ;;
+      power.pollSeconds) poll_s="$value" ;;
+      *) continue ;;
+    esac
+    say "defaults: $key = $value s ($source)"
+  done <<<"$out"
+}
+
 case "$cmd" in
   status)
     s="$(plug_state)"; [ -n "$s" ] || die "could not read $ENTITY from Home Assistant"
@@ -94,6 +142,8 @@ case "$cmd" in
     ;;
 
   on)
+    load_defaults
+    if [ -n "$wait_flag" ]; then wait_s="$wait_flag"; say "--wait: waiting up to ${wait_s}s, not the default"; fi
     before="$(plug_state)"; [ -n "$before" ] || die "could not read $ENTITY from Home Assistant"
     say "plug is $before"
     if [ "$before" = "on" ] && [ "$cycle" -eq 1 ]; then
@@ -102,7 +152,7 @@ case "$cmd" in
       else
         say "plug is on but the machine is silent on $HOST:$PORT: cycling the plug"
         plug_set off || die "Home Assistant refused turn_off"
-        [ "$dry" -eq 1 ] || sleep 10
+        [ "$dry" -eq 1 ] || sleep "$cycle_pause_s"
         before=off
       fi
     fi
@@ -120,14 +170,14 @@ case "$cmd" in
         [ "$cycle" -eq 0 ] && hint=" The plug was already on: the machine may have failed to join the network (it sometimes does at power-up) - re-run with --cycle."
         die "plug is ON but $HOST:$PORT never accepted a connection in ${wait_s}s (left powered).$hint" 3
       fi
-      sleep 3
+      sleep "$poll_s"
     done
     say "command port is accepting connections after $((SECONDS - (deadline - wait_s)))s"
 
     line=""
     until line="$(status_line)"; [ -n "$line" ]; do
       [ "$SECONDS" -lt "$deadline" ] || die "port is open but no status line came back in ${wait_s}s (plug left ON)" 4
-      sleep 3
+      sleep "$poll_s"
     done
     say "machine answered: $line"
     say "state: $(state_word "$line")"

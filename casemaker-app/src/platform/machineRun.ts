@@ -31,9 +31,15 @@
  * viewport can follow the controller's line number.
  */
 
-import { stopOnSession, type StopOutcome } from './machineStop';
+import { STOP_FALLBACK, stopOnSession, stopSettings, type StopOutcome, type StopSettings } from './machineStop';
 import { alarmLine } from './machineUpload';
-import { STATUS_POLL_TIMING, type ConsoleHandle, type ConsoleSendResult, type ConsoleTiming } from './machineConsole';
+import {
+  STATUS_POLL_TIMING,
+  statusPollTimingFrom,
+  type ConsoleHandle,
+  type ConsoleSendResult,
+  type ConsoleTiming,
+} from './machineConsole';
 import { VACUUM_OFF, VACUUM_ON } from './machineVacuum';
 import { readDefault, type ShopDefaults } from './defaultsClient';
 
@@ -46,6 +52,10 @@ export interface RunSettings {
   pollMs: number;
   noProgressMs: number;
   missLimit: number;
+  /** #449 — the status poll's reply window (`run.statusReplyMs`); `STATUS_POLL_TIMING` when absent. */
+  statusTiming?: ConsoleTiming;
+  /** #449 — what a Stop pressed during the run polls with (`stop.*`); `STOP_FALLBACK` when absent. */
+  stop?: StopSettings;
 }
 
 /** A status line read for the job's progress — `protocol.ts`'s `readJobProgress`, restated web-safe. */
@@ -124,7 +134,8 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
     deps.onEvent?.({ kind: 'sent', line, reply: said(r) });
     return r;
   };
-  const poll = () => send('?', STATUS_POLL_TIMING);
+  const statusTiming = deps.settings.statusTiming ?? STATUS_POLL_TIMING;
+  const poll = () => send('?', statusTiming);
 
   const play = playLine(filename);
   if (play === null) return { kind: 'refused', reason: `${filename} is not a file name the machine can play` };
@@ -173,7 +184,7 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
     if (wait > 0) await sleep(wait);
 
     if (deps.stopRequested()) {
-      const stop = await stopOnSession({ send }, sleep);
+      const stop = await stopOnSession({ send }, sleep, deps.settings.stop ?? STOP_FALLBACK);
       // `not-running` is Idle with no program in progress. After progress was seen, that is the job
       // ending just as Stop was pressed — a finish. Before any, it proves nothing: say so, send nothing.
       if (stop.kind === 'not-running') {
@@ -249,6 +260,8 @@ export function runSettings(defaults: ShopDefaults | null): RunSettings {
     pollMs: Math.max(RUN_POLL_FLOOR_MS, readDefault(defaults, 'run.pollMs').value),
     noProgressMs: readDefault(defaults, 'run.noProgressMs').value,
     missLimit: readDefault(defaults, 'run.missLimit').value,
+    statusTiming: statusPollTimingFrom(defaults),
+    stop: stopSettings(defaults),
   };
 }
 

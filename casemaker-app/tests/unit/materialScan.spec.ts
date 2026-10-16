@@ -144,16 +144,16 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
     // The touches are positions in the WORK frame, so the left edge's outward touch is at negative
     // X — over the fixed jaw — and the back edge's is at Y beyond the blank.
     expect(touchesOf(p, 'left').map((t) => t.at)).toEqual([
-      [3, 30],
+      [2, 30],
       [1, 30],
       [-0.7, 30],
-      [-3, 30],
+      [-2, 30],
     ]);
     expect(touchesOf(p, 'back').map((t) => t.at)).toEqual([
-      [50, 57],
+      [50, 58],
       [50, 59],
       [50, 60.7],
-      [50, 63],
+      [50, 62],
     ]);
   });
 
@@ -168,29 +168,30 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
       ['front', 'off'],
       ['back', 'off'],
     ]);
-    expect(expectations(p, 'left')).toEqual(['-3:blank', '-1:blank', '0.7:corner', '3:below']);
-    expect(expectations(p, 'front')).toEqual(['-3:blank', '-1:blank', '0.7:corner', '3:miss']);
-    expect(expectations(p, 'back')).toEqual(['-3:blank', '-1:blank', '0.7:corner', '3:miss']);
+    expect(expectations(p, 'left')).toEqual(['-2:blank', '-1:blank', '0.7:corner', '2:below']);
+    expect(expectations(p, 'front')).toEqual(['-2:blank', '-1:blank', '0.7:corner', '2:miss']);
+    expect(expectations(p, 'back')).toEqual(['-2:blank', '-1:blank', '0.7:corner', '2:miss']);
   });
 
   // #391 review item 7 — a point the fixture's uncertainty reaches is not a point the plan gets to
   // decide: it carries BOTH readings, and a reading that matches the other one is not a fault. The
   // band is the calipered ±0.5 now (#208, 2026-10-15), and that is what sizes the strip below: it
-  // must push the jaw's face further out than the outward touch (3.0 mm) by LESS than the band, or
+  // must push the jaw's face further out than the outward touch (2.0 mm since #452: the tip's 1 mm
+  // radius plus the planner's 1 mm coarse step, where it was 3.0 at the old 2 mm) by LESS than the band, or
   // the nominal jaw is still under the touch and there is no ambiguity to state.
   it('carries the other reading where the fixture’s uncertainty reaches the touch', () => {
     const job = defaultEngraveJob();
-    // A 3.2 mm strip between the jaw and the blank moves the fixed jaw's FACE 3.2 mm out (#213): the
+    // A 2.2 mm strip between the jaw and the blank moves the fixed jaw's FACE 2.2 mm out (#213): the
     // nominal jaw stops 0.2 mm short of the outward touch, while a jaw at the wide end of its ±0.5 mm
-    // band (face at 2.7 mm) reaches under it. That is the ambiguity, stated as two readings.
+    // band (face at 1.7 mm) reaches under it. That is the ambiguity, stated as two readings.
     const strip = {
       ...job,
       sacrificial: {
         ...job.sacrificial,
         sides: {
           ...job.sacrificial.sides,
-          left: { thickness: 3.2, height: 'flush' as const },
-          right: { thickness: 3.2, height: 'flush' as const },
+          left: { thickness: 2.2, height: 'flush' as const },
+          right: { thickness: 2.2, height: 'flush' as const },
         },
       },
     };
@@ -206,6 +207,34 @@ describe('planMaterialScan — the shipped default blank (#391)', () => {
     }
     // With no strip the same touch has one reading and no second one.
     expect(touchesOf(plan(), 'left')[3]!.alsoMaybe).toBeUndefined();
+
+    // #449 review — the strip this case used before #452 (3.2 mm) now puts the jaw's face 3.2 mm out
+    // and its wide end 2.7 mm out: both beyond the 2.0 mm outward touch, so there is nothing under it
+    // either way — one reading, a miss, and no second one.
+    const wide = {
+      ...job,
+      sacrificial: {
+        ...job.sacrificial,
+        sides: {
+          ...job.sacrificial.sides,
+          left: { thickness: 3.2, height: 'flush' as const },
+          right: { thickness: 3.2, height: 'flush' as const },
+        },
+      },
+    };
+    const far = touchesOf(planned(wide), 'left')[3]!;
+    expect(far.offsetMm).toBe(2);
+    expect(far.expect).toBe('miss');
+    expect(far.alsoMaybe).toBeUndefined();
+  });
+
+  it('states the outside touch’s shaft-length assumption (#449 review)', () => {
+    const note = plan().notes.find((n) => n.startsWith('The outside touch is'))!;
+    // 2 mm past the edge, the tip's side 1 mm from the wall, and the whole descent: the 3 mm gap
+    // plus the 5 mm cap (4 mm proud + 1 mm margin).
+    expect(note).toContain('The outside touch is 2 mm past the edge — the tip\'s side 1 mm from the blank\'s wall');
+    expect(note).toContain('may descend 8 mm');
+    expect(note).toContain('not measured');
   });
 
   it('says which edges the jaws already reference, and that rotation is not in reach', () => {
@@ -286,9 +315,9 @@ describe('planMaterialScan — the bench’s badge blank (#391)', () => {
     // other way round: the blank's left and right edges are the faces the jaws bear on, so those two
     // have a jaw top 1.2 mm below the blank.
     expect(back.jawUnder).toBe('off');
-    expect(expectations(p, 'back')).toEqual(['-3:blank', '-1:blank', '0.7:corner', '3:miss']);
+    expect(expectations(p, 'back')).toEqual(['-2:blank', '-1:blank', '0.7:corner', '2:miss']);
     expect(p.edges.filter((e) => e.jawUnder === 'on').map((e) => e.edge)).toEqual(['left', 'right']);
-    expect(expectations(p, 'left')).toEqual(['-3:blank', '-1:blank', '0.7:corner', '3:below']);
+    expect(expectations(p, 'left')).toEqual(['-2:blank', '-1:blank', '0.7:corner', '2:below']);
   });
 
   it('measures the badge blank’s own shape: 0.33 across it, 0.1 along it', () => {

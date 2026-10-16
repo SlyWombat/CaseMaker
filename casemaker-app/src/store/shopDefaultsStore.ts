@@ -15,6 +15,7 @@ import {
   type ShopDefault,
   type ShopDefaults,
 } from '@/platform/defaultsClient';
+import { setConsoleDefaultsSource } from '@/platform/machineConsole';
 
 export interface ShopDefaultsState {
   status: 'unknown' | 'present' | 'absent' | 'error';
@@ -58,6 +59,9 @@ export const useShopDefaultsStore = create<ShopDefaultsState>((set, get) => {
     reset: (key) => write(() => houseResetDefault(key, get().etag)),
   };
 });
+
+// #449 — every console the app opens reads its reply window from these defaults, at each line.
+setConsoleDefaultsSource(() => useShopDefaultsStore.getState().defaults);
 
 /** The number for `key` right now: the location's, or the labelled fallback with no location. */
 export function shopDefault(key: string): ReadDefault {

@@ -35,6 +35,7 @@
 
 import { consoleProblem } from '@/engine/cnc/consoleGate';
 import { loadMachineBridge } from './capabilities';
+import { readDefault, type ShopDefaults } from './defaultsClient';
 
 /** Where to reach the machine. Always both: an observation carries the port it was reached on. */
 export interface MachineConsoleTarget {
@@ -57,6 +58,10 @@ export interface ConsoleTiming {
   maxMs: number;
 }
 
+/**
+ * The labelled NO-SERVICE FALLBACK (#449): the shop's `console.firstReplyMs`, `console.quietMs` and
+ * `console.maxMs` are what a console uses ({@link consoleTimingFrom}); these are their fallbacks.
+ */
 export const CONSOLE_TIMING: ConsoleTiming = { firstReplyMs: 60_000, quietMs: 800, maxMs: 120_000 };
 
 /**
@@ -65,6 +70,53 @@ export const CONSOLE_TIMING: ConsoleTiming = { firstReplyMs: 60_000, quietMs: 80
  * behind a poll nobody will answer.
  */
 export const STATUS_POLL_TIMING: ConsoleTiming = { firstReplyMs: 3000, quietMs: 800, maxMs: 5000 };
+
+/** How much longer than its first-reply wait a status poll may run (#449): 3000 + 2000 = the 5000 above. */
+export const STATUS_POLL_HEADROOM_MS = 2000;
+
+/**
+ * A typed line's window from the shop's defaults (#449) — the labelled fallbacks with no location. The
+ * ceiling is never let below the first-reply wait: a line must be allowed to finish its first reply.
+ */
+export function consoleTimingFrom(defaults: ShopDefaults | null): ConsoleTiming {
+  const firstReplyMs = readDefault(defaults, 'console.firstReplyMs').value;
+  return {
+    firstReplyMs,
+    quietMs: readDefault(defaults, 'console.quietMs').value,
+    maxMs: Math.max(firstReplyMs, readDefault(defaults, 'console.maxMs').value),
+  };
+}
+
+/** A status poll's window from the shop's defaults (#449): `run.statusReplyMs`, plus the headroom. */
+export function statusPollTimingFrom(defaults: ShopDefaults | null): ConsoleTiming {
+  const firstReplyMs = readDefault(defaults, 'run.statusReplyMs').value;
+  return {
+    firstReplyMs,
+    quietMs: readDefault(defaults, 'console.quietMs').value,
+    maxMs: firstReplyMs + STATUS_POLL_HEADROOM_MS,
+  };
+}
+
+/**
+ * Where a console reads the shop's defaults from (#449). `shopDefaultsStore` sets it when it loads, so
+ * every console the app opens uses the location's window; unset (a test, a build with no store), the
+ * fallbacks. A function, read at each line, so a value changed in Manage reaches the next line.
+ */
+let defaultsSource: () => ShopDefaults | null = () => null;
+
+/** Set where consoles read the shop's defaults; `null` restores "none" (the fallbacks). */
+export function setConsoleDefaultsSource(fn: (() => ShopDefaults | null) | null): void {
+  defaultsSource = fn ?? (() => null);
+}
+
+function currentConsoleTiming(): ConsoleTiming {
+  try {
+    return consoleTimingFrom(defaultsSource());
+  } catch {
+    // A source that cannot answer is no location: the labelled fallbacks.
+    return consoleTimingFrom(null);
+  }
+}
 
 /**
  * What the transport said about one line. **This is the bridge's `ConsoleOutcome` restated**, for the
@@ -145,7 +197,7 @@ export interface ConsoleHandle {
   /**
    * `timing` narrows this ONE line's reply window (#423 review): a status poll is answered in about
    * 0.7 s, so a run's watch gives `?` a few seconds, not the 60 s a typed `M491` needs. Default: the
-   * console's own {@link CONSOLE_TIMING}.
+   * shop's `console.*` window ({@link consoleTimingFrom}), {@link CONSOLE_TIMING} with no location.
    */
   send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult>;
   /**
@@ -212,7 +264,7 @@ export function attachConsole(target: MachineConsoleTarget): ConsoleHandle {
       return { ok: false, result: { kind: 'unavailable', line, detail: reasonOf(e) } };
     }
     try {
-      session = await client.open(target, CONSOLE_TIMING);
+      session = await client.open(target, currentConsoleTiming());
       return { ok: true, session };
     } catch (e) {
       return {
@@ -238,7 +290,7 @@ export function attachConsole(target: MachineConsoleTarget): ConsoleHandle {
 
       let send: ConsoleSend;
       try {
-        send = await opened.session.send(line, { ...CONSOLE_TIMING, ...timing });
+        send = await opened.session.send(line, { ...currentConsoleTiming(), ...timing });
       } catch (e) {
         // `tcpRead` rejects when the peer closed the connection, so a dead socket arrives here rather
         // than as an outcome. The SESSION is dropped — the LINE never is: the next press opens a fresh

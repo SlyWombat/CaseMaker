@@ -27,6 +27,45 @@
  */
 
 import { alarmLine, controllerState, jobProgressPercent } from '@/platform/machineUpload';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+
+/**
+ * #449 — the power flows' timing, from the shop's defaults (`power.*`); each fallback is the number
+ * these flows compiled before. `tools/z1/power.sh` reads the same keys.
+ */
+export interface PowerSettings {
+  /** `power.onWaitSeconds` — how long On waits for the controller to answer. */
+  waitSeconds: number;
+  /** `power.pollSeconds`, as ms — the wait between checks while On waits. */
+  pollMs: number;
+  /** `power.probeTries` — probes, all silent, before a machine counts as not answering. */
+  probeTries: number;
+  /** `power.probeGapSeconds`, as ms — the wait between those probes. */
+  probeGapMs: number;
+  /** `power.cyclePauseSeconds`, as ms — how long a cycle leaves the plug off. */
+  pauseMs: number;
+}
+
+/**
+ * Each probe and each check while On waits sends `?`: never closer than this, whatever a location says
+ * (#386 — 0.6 s faulted the controller). Compiled; the `power.*` rules may only sit above it.
+ */
+export const POWER_POLL_FLOOR_MS = 2000;
+
+export function powerSettings(defaults: ShopDefaults | null): PowerSettings {
+  return {
+    waitSeconds: readDefault(defaults, 'power.onWaitSeconds').value,
+    pollMs: Math.max(POWER_POLL_FLOOR_MS, readDefault(defaults, 'power.pollSeconds').value * 1000),
+    probeTries: readDefault(defaults, 'power.probeTries').value,
+    probeGapMs: Math.max(POWER_POLL_FLOOR_MS, readDefault(defaults, 'power.probeGapSeconds').value * 1000),
+    pauseMs: readDefault(defaults, 'power.cyclePauseSeconds').value * 1000,
+  };
+}
+
+/** A whole number of probes, at least one: "silent" is never decided without asking (#416 review). */
+function triesOf(tries: number | undefined): number {
+  return tries !== undefined && Number.isInteger(tries) && tries >= 1 ? tries : 3;
+}
 
 /** What is known about the machine at the moment of an Off. */
 export interface OffEvidence {
@@ -116,11 +155,12 @@ export async function probeSettled(
   deps: Pick<PowerDeps, 'probe' | 'sleep'>,
   opts: { tries?: number; gapMs?: number } = {},
 ): Promise<string | null> {
-  const tries = opts.tries ?? 3;
+  const tries = triesOf(opts.tries);
   for (let i = 0; i < tries; i++) {
     const r = await deps.probe();
     if (r.answered && r.status !== null) return r.status;
-    if (i < tries - 1) await deps.sleep(opts.gapMs ?? 2000);
+    // Each probe sends `?`: never closer than the 2 s floor (#386, #449), whatever was passed.
+    if (i < tries - 1) await deps.sleep(Math.max(POWER_POLL_FLOOR_MS, opts.gapMs ?? POWER_POLL_FLOOR_MS));
   }
   return null;
 }
@@ -132,7 +172,7 @@ async function waitForAnswer(deps: PowerDeps, waitSeconds: number, pollMs: numbe
     const r = await deps.probe();
     if (r.answered && r.status !== null) return r.status;
     if (deps.now() - start >= waitSeconds * 1000) return null;
-    await deps.sleep(pollMs);
+    await deps.sleep(Math.max(POWER_POLL_FLOOR_MS, pollMs));
   }
 }
 
@@ -143,11 +183,11 @@ async function waitForAnswer(deps: PowerDeps, waitSeconds: number, pollMs: numbe
  */
 export async function powerOnAndWait(
   deps: PowerDeps,
-  opts: { waitSeconds: number; pollMs?: number; probeGapMs?: number },
+  opts: { waitSeconds: number; pollMs?: number; probeGapMs?: number; probeTries?: number },
 ): Promise<PowerOnResult> {
   const pollMs = opts.pollMs ?? 3000;
   if ((await deps.plugIsOn()) === true) {
-    const status = await probeSettled(deps, { gapMs: opts.probeGapMs });
+    const status = await probeSettled(deps, { gapMs: opts.probeGapMs, tries: opts.probeTries });
     if (status !== null) return { ok: true, status };
     return {
       ok: false,
@@ -172,10 +212,10 @@ export async function powerOnAndWait(
  */
 export async function cycleConfirmed(
   deps: PowerDeps,
-  opts: { waitSeconds: number; pollMs?: number; probeGapMs?: number; pauseMs?: number },
+  opts: { waitSeconds: number; pollMs?: number; probeGapMs?: number; probeTries?: number; pauseMs?: number },
 ): Promise<PowerOnResult> {
   if ((await deps.plugIsOn()) !== true) return { ok: false, reason: 'the plug is not on — use On instead' };
-  const answering = await probeSettled(deps, { gapMs: opts.probeGapMs });
+  const answering = await probeSettled(deps, { gapMs: opts.probeGapMs, tries: opts.probeTries });
   if (answering !== null) return { ok: false, reason: 'the machine answered, so it is not cycled' };
   const off = await deps.switchPlug(false);
   if (!off.ok) return { ok: false, reason: off.reason };

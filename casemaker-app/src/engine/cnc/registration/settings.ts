@@ -42,7 +42,24 @@ export interface RegistrationSettings {
   touchFeed: number;
   surfaceFastFeed: number;
   surfaceSlowFeed: number;
+  /**
+   * #449 — how far the SLOW surface touch may travel. It starts {@link SURFACE_LIFT_MM} above the fast
+   * touch's hit, so it must travel further than that to reach the surface again; the rule keeps it
+   * small, so the touch stays capped.
+   */
+  surfaceSlowSeekMm: number;
+  /** #449 — how many `?` polls wait for Idle before a touch; each is a round trip of about a second. */
+  idlePollLimit: number;
+  /** #449/#452 — the run sheet's down-touch scan: how far past the jaw tops a touch may travel. */
+  scanMissMarginMm: number;
+  /** #449/#452 — the depth two touch readings are told apart by (the dial). */
+  readingResolutionMm: number;
 }
+
+/** The lift between the fast and the slow surface touch (`G0 Z1`), mm. Compiled: the sequence's own. */
+export const SURFACE_LIFT_MM = 1;
+/** The furthest the slow surface touch may go past the fast touch's reading, mm (#449 review). Compiled. */
+export const SLOW_SEEK_PAST_HIT_MAX_MM = 1;
 
 const KEYS: Record<keyof RegistrationSettings, string> = {
   capBelowSurfaceMm: 'registration.capBelowSurfaceMm',
@@ -62,6 +79,10 @@ const KEYS: Record<keyof RegistrationSettings, string> = {
   touchFeed: 'registration.touchFeed',
   surfaceFastFeed: 'registration.surfaceFastFeed',
   surfaceSlowFeed: 'registration.surfaceSlowFeed',
+  surfaceSlowSeekMm: 'registration.surfaceSlowSeekMm',
+  idlePollLimit: 'registration.idlePollLimit',
+  scanMissMarginMm: 'registration.scanMissMarginMm',
+  readingResolutionMm: 'registration.readingResolutionMm',
 };
 
 /** The settings, and which of them are fallbacks (there was no location to read them from). */
@@ -89,5 +110,15 @@ export function settingsProblem(s: RegistrationSettings): string | null {
   if (s.surfaceToleranceMm >= s.parkAboveSurfaceMm - PARK_CLEARANCE_MM) {
     return `the surface tolerance (${s.surfaceToleranceMm} mm) must be less than the park height (${s.parkAboveSurfaceMm} mm) less ${PARK_CLEARANCE_MM}`;
   }
+  // #449 — the slow touch starts SURFACE_LIFT_MM above the fast hit: travelling no further than that, it
+  // can never reach the surface again. How far it may go PAST the hit is held to SLOW_SEEK_PAST_HIT_MAX_MM (the key: 2 mm at
+  // most, so at most 1 mm past), and both readings must still land in the surface band (`execute.ts`).
+  if (!(s.surfaceSlowSeekMm > SURFACE_LIFT_MM)) {
+    return `the slow surface touch (${s.surfaceSlowSeekMm} mm) must travel more than the ${SURFACE_LIFT_MM} mm lift before it`;
+  }
+  if (s.surfaceSlowSeekMm > SURFACE_LIFT_MM + SLOW_SEEK_PAST_HIT_MAX_MM) {
+    return `the slow surface touch (${s.surfaceSlowSeekMm} mm) may go more than ${SLOW_SEEK_PAST_HIT_MAX_MM} mm past the fast touch's reading`;
+  }
+  if (!Number.isInteger(s.idlePollLimit) || s.idlePollLimit < 1) return 'the Idle poll limit must be a whole number of polls, at least 1';
   return null;
 }

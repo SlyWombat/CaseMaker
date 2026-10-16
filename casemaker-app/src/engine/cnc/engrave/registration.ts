@@ -58,6 +58,11 @@ import type { Mm, Vec2 } from '@/types/units';
  * rather than to invent a number that would quietly skip a touch. For the vise that means three
  * touches where §7.3's V1 table calls for one: the jaws hold X and rotation to ±0.05 mm, and the
  * plan re-resolves both because it was not told that 0.05 mm is good enough.
+ *
+ * #449 — THE LABELLED NO-SERVICE FALLBACK for the shop's measured `registration.tipDiameterMm` (seeded
+ * 2.0, measured 2026-10-15). A caller with a location passes `{ ...PROBE_SPEC, tipDiameter }` from it
+ * (`RunSheetOptions.scan`); this module stays free of `defaultsClient`, because it is in the sim
+ * worker's import graph. `materialScan.spec.ts` holds the two equal.
  */
 export const PROBE_SPEC: ProbeSpec = { tipDiameter: 2 };
 

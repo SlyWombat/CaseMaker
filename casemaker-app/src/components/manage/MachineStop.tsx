@@ -12,7 +12,8 @@
 import { useState } from 'react';
 import { canDriveMachine } from '@/platform/capabilities';
 import { attachConsole } from '@/platform/machineConsole';
-import { stopProgram } from '@/platform/machineStop';
+import { stopProgram, stopSettings } from '@/platform/machineStop';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 
 export function MachineStop({ host, port }: { host: string; port: number }) {
   return canDriveMachine ? <StopControl host={host} port={port} /> : null;
@@ -29,7 +30,8 @@ function StopControl({ host, port }: { host: string; port: number }) {
     setOfferHome(false);
     setNote('Stopping — the spindle stops now; the moves already queued finish first…');
     try {
-      const r = await stopProgram({ host, port });
+      // #449 — the shop's `stop.*` polls; the 2 s floor holds inside `stopProgram` whatever they say.
+      const r = await stopProgram({ host, port }, undefined, stopSettings(useShopDefaultsStore.getState().defaults));
       switch (r.kind) {
         case 'stopped':
           setNote(

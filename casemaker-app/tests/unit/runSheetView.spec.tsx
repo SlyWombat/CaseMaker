@@ -77,9 +77,9 @@ describe('RunSheetView — the stack-up elevation (#213 §6)', () => {
 
     // Every line the block asks the operator to type: the touch itself, the Alarm clear after a
     // miss, and the lift after every touch.
-    for (const line of ['G38.2 Z-8 F100', '$X', 'G53 G0 Z-3']) {
+    for (const line of ['G38.2 Z-8 F150', '$X', 'G53 G0 Z-3']) {
       expect(screen.getByText(line).tagName).toBe('CODE');
     }
-    expect(screen.getByText('G38.2 Z-8 F100').closest('[data-section-id="origin"]')).not.toBeNull();
+    expect(screen.getByText('G38.2 Z-8 F150').closest('[data-section-id="origin"]')).not.toBeNull();
   });
 });

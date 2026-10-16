@@ -37,6 +37,7 @@ import { scanPositions, type EdgeScan, type RegistrationPlan } from './plan';
 import { classifyTouch, lastPrb, type Prb } from './readings';
 import { computeOutcome, correctionLine, type RegistrationOutcome, type RunData, type ScanRecord, type ScanTouch } from './outcome';
 import { referenceOutcome } from './references';
+import { settingsProblem, SURFACE_LIFT_MM } from './settings';
 
 export interface RegistrationConsole {
   send(line: string): Promise<ConsoleSendResult>;
@@ -68,7 +69,10 @@ export type RunResult =
   | { ok: true; data: RunData; outcome: RegistrationOutcome; transcript: Transcript[] }
   | { ok: false; reason: string; transcript: Transcript[] };
 
-/** How many `?` polls to wait for Idle before a probe — each is a round trip of about a second. */
+/**
+ * How many `?` polls to wait for Idle before a probe — each is a round trip of about a second. The
+ * labelled NO-SERVICE FALLBACK only: the run uses the plan's `registration.idlePollLimit` (#449).
+ */
 export const MAX_IDLE_POLLS = 30;
 
 const f = (n: number) => (Math.round(n * 1000) / 1000).toFixed(3).replace(/\.?0+$/, '') || '0';
@@ -76,7 +80,9 @@ const f = (n: number) => (Math.round(n * 1000) / 1000).toFixed(3).replace(/\.?0+
 class Stop extends Error {}
 
 /** One machine conversation, stopping at the first answer it did not expect. */
-function session(deps: ExecDeps) {
+function session(deps: ExecDeps, idlePollLimit: number = MAX_IDLE_POLLS) {
+  // A bounded wait whatever the location says: a whole number of polls, at least one (#449).
+  const idlePolls = Number.isInteger(idlePollLimit) && idlePollLimit >= 1 ? idlePollLimit : MAX_IDLE_POLLS;
   const transcript: Transcript[] = [];
   let relative = false;
   /** Whether the last answer left the machine in alarm (a miss before its `$X`, or any alarm). */
@@ -104,11 +110,11 @@ function session(deps: ExecDeps) {
 
   /** `?` until the machine reads Idle; stop if it never does. */
   async function idle(): Promise<void> {
-    for (let i = 0; i < MAX_IDLE_POLLS; i++) {
+    for (let i = 0; i < idlePolls; i++) {
       const state = controllerState(await send('?'));
       if (state === 'Idle') return;
     }
-    throw new Stop(`the machine did not read Idle in ${MAX_IDLE_POLLS} status polls`);
+    throw new Stop(`the machine did not read Idle in ${idlePolls} status polls`);
   }
 
   /** Say how low the probe may be from here on (the stop message uses the latest). */
@@ -211,8 +217,11 @@ function inBand(prb: Prb | null, plan: RegistrationPlan, which: string): Prb {
 }
 
 export async function runRegistration(plan: RegistrationPlan, deps: ExecDeps): Promise<RunResult> {
-  const io = session(deps);
+  const io = session(deps, plan.settings.idlePollLimit);
   const s = plan.settings;
+  // #449 — the settings are the location's; a set that cannot make a capped touch sends nothing at all.
+  const bad = settingsProblem(s);
+  if (bad !== null) return { ok: false, reason: `nothing was sent: ${bad}`, transcript: [] };
   try {
     const status = await io.send('?');
     if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
@@ -235,9 +244,14 @@ export async function runRegistration(plan: RegistrationPlan, deps: ExecDeps): P
     io.at(`as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface seek)`);
     await io.send('G91');
     inBand(lastPrb(await io.send(`G38.2 Z-${f(plan.seek.travelMm)} F${f(s.surfaceFastFeed)}`)), plan, 'fast');
-    await io.send('G0 Z1');
+    await io.send(`G0 Z${f(SURFACE_LIFT_MM)}`);
     await io.idle();
-    const slow = inBand(lastPrb(await io.send(`G38.2 Z-2 F${f(s.surfaceSlowFeed)}`)), plan, 'slow');
+    io.at(
+      `as low as ${f(s.surfaceSlowSeekMm - SURFACE_LIFT_MM)} mm below the fast touch's reading (the slow surface touch)`,
+    );
+    // #449 — the slow travel is the shop's `registration.surfaceSlowSeekMm` (1.2 to 2 mm, more than the
+    // lift); a plan whose settings break that never got this far (`settingsProblem`).
+    const slow = inBand(lastPrb(await io.send(`G38.2 Z-${f(s.surfaceSlowSeekMm)} F${f(s.surfaceSlowFeed)}`)), plan, 'slow');
     await io.send('G90');
     const parkZ = slow.z + s.parkAboveSurfaceMm;
     await io.send(`G53 G0 Z${f(parkZ)}`);
