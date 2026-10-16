@@ -133,27 +133,31 @@ export const LEDGE_WIDTH: Mm = 1.9;
  * and `validateVise` refuses it outright (`vise-stock-proud-exceeds-thickness`), so the job had to
  * override the vise by hand.
  *
- * So the default tracks the stock, and takes the LOWER of the two rules that can apply:
+ * So the default tracks the stock, and takes the LOWEST of the rules that can apply,
+ * `min(4, t/2, t − LEDGE_STEP)`, for every blank:
  *
- *   - **the ledge** (#208 review, 2026-10-15) — a blank taller than the step seats on the soft
- *     jaws' ledges and stands `thickness − LEDGE_STEP` proud: 0.72 mm on the 3.82 mm badge blank.
- *     This is what the calipers describe, and it is the SAFER of the two: a lower blank puts the
- *     modelled jaw top at `−stockProud`, so taking the seated value keeps that plane at or above
- *     where the real jaw top is (the seated 0.72 and the 0.99 mm the 2026-10-15 probe read), and
- *     the jaw box — grown by `uncertainty` — covers the real jaw. The half-thickness rule put the
+ *   - **the ledge** (#208 review, 2026-10-15) — the soft jaws' ledges are a hard stop, so a blank
+ *     can stand no LESS than `thickness − LEDGE_STEP` proud: 0.72 mm on the 3.82 mm badge blank.
+ *     That is the safe end, because the modelled jaw top is `−stockProud`. Taking the least proud
+ *     the blank can have puts the modelled plane at the HIGHEST the real jaw top can be. The
+ *     2026-10-15 bench read 0.82–0.90 mm on that blank, above the seated 0.72 and never below it,
+ *     and the jaw box, grown by `uncertainty`, covers the real jaw. The half-thickness rule put the
  *     modelled top 0.4–0.7 mm BELOW the real one on this blank, which is clearance the tool does
  *     not really have;
- *   - **half the thickness**, capped at the 4 mm working height — the case with no ledge to seat
- *     on: a blank no taller than the step (its top would be at or under the jaw tops), or one
- *     taller than 7.1 mm, where the cap is under the seated value and decides anyway. On the 12 mm
- *     default blank this is the shipped 4 mm, so nothing that used the default changes.
+ *   - **half the thickness**, capped at the 4 mm working height — the cap decides on a blank taller
+ *     than 7.1 mm, where the seated value is the larger. On the 12 mm default blank this is the
+ *     shipped 4 mm, so nothing that used the default changes.
+ *
+ * A blank NO TALLER than the step (#406) gets the seated value too, which is `≤ 0`. That is the
+ * truth about it: seated on the ledges, its top is at or below the jaw tops. `validateVise` refuses
+ * that (`vise-stock-not-proud`), and the refusal is the point. The app does not know how the blank
+ * is raised (a packer, a shim, a different hold), so it states no jaw plane it cannot justify. The
+ * user answers by stating the real proud in `ViseParams.stockProud`, the input this job already
+ * has. Until #406 this branch returned `t/2` instead, which modelled the jaw tops up to 1.5 mm
+ * BELOW the real ones on a 3 mm blank. Returning `0` would still be `3.1 − t` too low.
  */
 export function defaultStockProud(thickness: Mm): Mm {
-  const half = Math.min(DEFAULT_STOCK_PROUD, thickness / 2);
-  // A blank no taller than the step cannot be seated on the ledges at all — its top would be at or
-  // below the jaw tops — so there is no seated value to prefer and the working height stands.
-  if (thickness <= LEDGE_STEP) return half;
-  return Math.min(half, thickness - LEDGE_STEP);
+  return Math.min(DEFAULT_STOCK_PROUD, thickness / 2, thickness - LEDGE_STEP);
 }
 
 /**
@@ -315,7 +319,11 @@ function grippedHeights(
   vise: ViseParams,
   sacrificial: Sacrificial,
 ): { left: Mm; right: Mm } {
-  const partGrip = stock.thickness - vise.stockProud;
+  // Clamped to the blank's own thickness (#406): a stock at or below the jaw tops (`stockProud <= 0`,
+  // already refused by `vise-stock-not-proud`) is gripped over its whole height, never MORE than
+  // that. Without the clamp a 2 mm blank seated 1.1 mm below the jaw tops read as 3.1 mm gripped and
+  // the shallow-grip warning fell silent.
+  const partGrip = Math.min(stock.thickness, stock.thickness - vise.stockProud);
   const side = (strip: SacrificialSide | null, overhang: Mm): Mm => {
     // The strip bears when it is at least as thick as the board's overhang, else the board edge.
     if (strip && strip.thickness >= overhang) {
@@ -354,8 +362,14 @@ export function validateVise(
       severity: 'error',
       code: 'vise-stock-not-proud',
       message:
-        `The stock stands ${vise.stockProud} mm above the jaw tops — at or below the surface ` +
-        `being cut, so the tool would run into the jaws.`,
+        `The stock stands ${fmtMm(vise.stockProud)} mm above the jaw tops — at or below the surface ` +
+        `being cut, so the tool would run into the jaws.` +
+        // #406: name WHY on the blank that cannot be seated proud, and what answers it.
+        (thickness <= LEDGE_STEP
+          ? ` A ${fmtMm(thickness)} mm blank is no taller than the jaws' ${LEDGE_STEP} mm ledge ` +
+            `step, so seated on the ledges its top is at or below the jaw tops. Raise it on a ` +
+            `packer and state how far it then stands proud.`
+          : ''),
     });
   }
 

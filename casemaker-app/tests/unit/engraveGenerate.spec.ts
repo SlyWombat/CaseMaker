@@ -139,6 +139,27 @@ describe('engraveGenerate (#206)', () => {
     const withCodes = regions(tl, withBoard).findings.map((f) => f.code);
     expect(withCodes).not.toContain('vise-grip-shallow');
   });
+
+  // #406 — a default job on a blank no taller than the 3.1 mm ledge step now carries a seated proud
+  // ≤ 0. Every consumer downstream must take it without throwing, refuse it by name, and print
+  // the figure without a float tail (3 − 3.1 = -0.10000000000000009).
+  it('takes a 3 mm default job through the pipeline: refused by name, nothing thrown, no float tails (#406)', () => {
+    const base = defaultEngraveJob();
+    const thin: EngraveJob = {
+      ...base,
+      stock: { ...base.stock, thickness: 3 },
+      workholding: { ...base.workholding, vise: viseForNewJob(undefined, { thickness: 3 }) },
+    };
+    expect(thin.workholding.vise.stockProud).toBeLessThanOrEqual(0);
+    for (const findings of [regions(tl, thin).findings, generate(tl, thin).findings]) {
+      const codes = findings.map((f) => f.code);
+      expect(codes).toContain('vise-stock-not-proud');
+      for (const f of findings) {
+        expect(f.message).not.toMatch(/NaN/);
+        expect(f.message).not.toMatch(/\d\.\d{6,}/);
+      }
+    }
+  });
 });
 
 describe('an under-surface void limits the cut (#231 item 3)', () => {

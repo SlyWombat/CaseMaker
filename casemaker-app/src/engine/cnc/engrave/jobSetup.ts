@@ -435,13 +435,14 @@ export function validateJob(job: EngraveJob): JobFinding[] {
       code: 'stock-proud-too-small',
       labelId: deepestItem?.id,
       message:
-        `The stock stands ${job.workholding.vise.stockProud} mm above the jaw tops, but the ` +
+        // Printed rounded (#406): a thin blank's seated proud is `3 − 3.1`, which is a float tail.
+        `The stock stands ${Number(job.workholding.vise.stockProud.toFixed(3))} mm above the jaw tops, but the ` +
         `deepest cut reaches ${deepest} mm; at least ${jawClearance} mm of clearance is wanted, ` +
         `so ` +
         (deepestItem.reach.overJaw
           ? 'the cutter would work below the jaw tops'
           : 'the cutter could work below the jaw tops, if the jaw face sits within its band, nearer the cut') +
-        ` (stockProud ≥ ${deepest + jawClearance} mm).`,
+        ` (stockProud ≥ ${Number((deepest + jawClearance).toFixed(3))} mm).`,
     });
   }
 

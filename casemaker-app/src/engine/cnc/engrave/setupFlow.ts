@@ -264,12 +264,17 @@ export function blankViseFindings(a: SetupAnswers): JobFinding[] {
 
 /**
  * The #231 fix: when the vise's `stockProud` is at or past the blank's thickness, the value that
- * resolves it is half the blank (capped at the shipped 4 mm), applied as the user's asserted
- * setup (`source: 'saved'`). Returns null when nothing needs fixing.
+ * resolves it is the stock-derived default (`defaultStockProud`: the seated value, capped by half
+ * the blank and the shipped 4 mm), applied as the user's asserted setup (`source: 'saved'`).
+ * Returns null when nothing needs fixing — and when nothing the app can offer WOULD fix it (#406):
+ * on a blank no taller than the ledge step the derived value is `≤ 0`, which only trades this
+ * refusal for `vise-stock-not-proud`. That blank needs a packer and a stated proud, not a button.
  */
 export function stockProudFix(a: SetupAnswers): ViseParams | null {
   if (a.vise.stockProud < a.stock.thickness) return null;
-  return { ...a.vise, stockProud: defaultStockProud(a.stock.thickness), source: 'saved' };
+  const stockProud = defaultStockProud(a.stock.thickness);
+  if (stockProud <= 0) return null;
+  return { ...a.vise, stockProud, source: 'saved' };
 }
 
 // ---- answer updaters ---------------------------------------------------------------------------

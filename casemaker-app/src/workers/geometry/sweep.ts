@@ -878,9 +878,9 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   if (fixtureAboveStockTop && holder === null) {
     // WHICH obstacle, not "an obstacle" (#314 review, folded into #362). `fixtureBoxes` right here
     // carries the id and the label, and the message was throwing them away — so the one case that
-    // most needs naming was also the one that said least. The jaws are why it matters: a vise's
-    // `defaultStockProud` is `thickness / 2`, so on a blank thinner than 4 mm a jaw top can sit just
-    // BELOW the stock top, close enough that the band around it (`DEFAULT_UNCERTAINTY` — 2 mm while
+    // most needs naming was also the one that said least. The jaws are why it matters: on a thin
+    // blank a vise's `defaultStockProud` is under a millimetre (the seated `thickness − 3.1`), so a
+    // jaw top can sit just BELOW the stock top, close enough that the band around it (`DEFAULT_UNCERTAINTY` — 2 mm while
     // the jaws were unmeasured, 0.5 and calipered since 2026-10-15) lifts it above, and the finding
     // then reads as a physical obstruction when what actually rose was the uncertainty. Say both
     // numbers, and say which one did the rising.

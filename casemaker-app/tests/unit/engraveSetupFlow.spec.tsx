@@ -110,6 +110,17 @@ describe('guided job setup — the pure answers (#254)', () => {
     expect(stockProudFix(fixed)).toBeNull();
   });
 
+  it('offers no stock-proud fix on a blank no taller than the ledge step (#406)', () => {
+    const job = defaultEngraveJob(); // stockProud 4
+    const answers = defaultSetupAnswers(job);
+    answers.stock = { ...answers.stock, thickness: 3 };
+    // The refusal is real…
+    expect(blankViseFindings(answers).some((f) => f.code === 'vise-stock-proud-exceeds-thickness')).toBe(true);
+    // …but the derived value (3 − 3.1, ≤ 0) would only trade it for `vise-stock-not-proud`, so no
+    // button: the blank needs a packer and a stated proud.
+    expect(stockProudFix(answers)).toBeNull();
+  });
+
   it('shows `vise-default` once on the blank step, not once per validator (#353)', () => {
     const job = defaultEngraveJob();
     const answers = defaultSetupAnswers(job);

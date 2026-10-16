@@ -142,8 +142,11 @@ to reach under the blank.
 stands `thickness − 3.1` proud — 0.72 mm on the 3.82 mm badge blank, 8.9 mm on a 12 mm one. The two
 disagree on every blank except a 6.2 mm one. Since 2026-10-15 the default takes the LOWER of the two
 (`min(4, t/2, t − 3.1)`, `defaultStockProud`), which is the seated value wherever the ledge is the
-smaller number, and the half-thickness rule for a blank no taller than the step or taller than
-7.1 mm. The reason is not preference but safety: the modelled jaw top is `−stockProud`, so the
+smaller number, and the 4 mm cap on a blank taller than 7.1 mm. Since #406 (2026-10-16) that holds
+for a blank no taller than the 3.1 mm step too. It used to fall back to `t/2` there, which modelled
+the jaw tops up to 1.5 mm below the real ones on a 3 mm blank. Now it gets the seated value, `≤ 0`,
+which is true: on the ledges its top is at or below the jaw tops. `vise-stock-not-proud` refuses
+that and asks for a packer and a stated proud, and the setup flow offers no "fix" button for it. The reason is not preference but safety: the modelled jaw top is `−stockProud`, so the
 half-thickness rule put it 0.4–0.7 mm BELOW the real jaw top on the badge blank — clearance the tool
 does not have — while the seated value keeps the modelled top at or above the real one (0.72 seated
 vs 0.99 mm read by the 2026-10-15 probe), inside the ±0.5 band either way. Which rule the maintainer
