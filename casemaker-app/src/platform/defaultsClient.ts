@@ -6,9 +6,9 @@
  *
  * OPEN TO NEW KEYS, VALIDATED. The section maps a dotted lowerCamel key (`power.onWaitSeconds`) to
  * `{ value, source, setAt?, unit? }`. Any well-formed key is kept and served; a key listed in
- * {@link KNOWN_DEFAULTS} is ALSO held to its own rule here. A new consumer (#436's rest-machining
- * defaults, next) adds its key to that registry — its rule and its labelled fallback — and nothing
- * else about the section changes.
+ * {@link KNOWN_DEFAULTS} is ALSO held to its own rule here. A new consumer adds its key to that
+ * registry — its rule and its labelled fallback — and nothing else about the section changes. #436's
+ * rest-machining pair went in that way and needed no other edit.
  *
  * THE FALLBACK IS FOR NO SERVICE, AND SAYS SO. {@link readDefault} answers the stored value with its
  * source when the location has one, and the registry's fallback marked `fallback` when it does not
@@ -17,6 +17,7 @@
 
 import { z } from 'zod';
 import { GRIP_MIN } from '@/engine/cnc/fixture';
+import { REST_MACHINING_FALLBACK } from '@/engine/cnc/engrave/restSettings';
 import {
   houseRequest,
   type HouseFailure,
@@ -178,6 +179,27 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
  */
 export const MEASURED_ONLY: Readonly<Record<string, Omit<KnownDefault, 'fallback'>>> = {
   // The machine Z of the surface the stock sits on beside the bracket — what the surface touch expects
+  // #436 — rest machining's two numbers. The maintainer moved them out of code on 2026-10-16 ("That
+  // type of setting should be something we keep in our own database and not compiled in"), so the
+  // only literal left in TypeScript is `restSettings.ts`'s no-service fallback, and the fallbacks
+  // below are that same pair. Both are CHOSEN, not measured (Q19) — the first two-tool cut replaces
+  // them. `rest.overlapMm` is the LEAST the band both programs cut may be: the band itself is
+  // re-derived per job from the job's own two cutters (`overlapForJob`), and this is the floor the
+  // derivation sits on — a pair that needs a wider band gets one, and a pair that needs less keeps
+  // this. `rest.thirdToolPct` is the leftover share above which a third cutter is suggested, in
+  // PERCENT because that is the unit an operator reads it in.
+  'rest.overlapMm': {
+    label: 'rest-machining overlap, at least',
+    unit: 'mm',
+    rule: z.number().min(0).max(20),
+    fallback: REST_MACHINING_FALLBACK.overlap,
+  },
+  'rest.thirdToolPct': {
+    label: 'leftover share that suggests a third cutter (chosen)',
+    unit: '%',
+    rule: z.number().min(0.1).max(50),
+    fallback: REST_MACHINING_FALLBACK.thirdToolFraction * 100,
+  },
   // the stock's top above. `defaults.rs` bounds it the same way.
   'bracket.seatMachineZ': { label: 'surface beside the bracket, machine Z', unit: 'mm', rule: z.number().min(-150).max(0) },
 };

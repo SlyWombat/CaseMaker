@@ -31,6 +31,7 @@ import {
   type ReachRow,
 } from './reachability';
 import type { EngraveJob, EngraveVectorShape } from '@/types/engraveJob';
+import type { SeamFacts, ThirdToolAdvice } from './restSettings';
 
 /** One candidate for the first bite, with the numbers the choice was made on. */
 export interface RoughCandidate {
@@ -337,16 +338,25 @@ export interface RestPassFacts {
   cutArea: number;
   clearedArea: number;
   restArea: number;
-  /** How far the rest pass reaches back into tool 1's territory, mm. */
+  /**
+   * How far the rest pass reaches back into tool 1's territory, mm — the band the rest program was
+   * actually generated with, which is the job's own derivation floored by the shop's number (or an
+   * operator's typed override), never the stored number as such (#436). It is `seam.overlap`.
+   */
   overlap: number;
   /**
-   * Where that number came from, as a clause the sheet can put after it. The default is the second
-   * cutter's own DIAMETER — a floor with a physical reason (below it the generator's closing erases
-   * the residue slivers at the seam instead of cutting them) — and `--overlap` is a typed one, and
-   * the operator has to be able to tell which they are reading: "Do not shrink it" means something
-   * different about a number the machine's own geometry produced than about one somebody guessed.
+   * The band, where it came from, and what THIS pair of cutters says about it (#436). The sheet
+   * needs all three together: the number means one thing when the job's own geometry produced it
+   * and another when somebody chose it, and on a chosen default the second half is the whole
+   * reason the operator can act — "0.1 mm is below the 0.49 mm this pair's residues need" is a
+   * sentence; "0.1 mm" alone is a number nobody can judge.
    */
-  overlapNote: string;
+  seam: SeamFacts;
+  /**
+   * Whether what neither program removed is worth a third cutter, and the threshold it was judged
+   * against (#436). Null when the job states no removable area to take a share of.
+   */
+  thirdTool: ThirdToolAdvice | null;
   /** mm³ the SECOND program removed, from its own sweep run on the first program's result. */
   restRemovedVolume: number;
   /** What neither program removed: the design material still standing after both. */

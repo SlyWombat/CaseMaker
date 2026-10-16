@@ -3732,6 +3732,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_fresh_location_gets_the_rest_machining_seeds() {
+        // #436 — the two numbers a two-tool job runs on are SHOP SETTINGS, so a fresh location has to
+        // come up holding them. A bench whose document lacked them would run the build's own fallback
+        // pair instead, which is the very thing the maintainer moved them out of the code to avoid.
+        use crate::defaults::{DefaultSource, ShopDefault};
+        let (dir, store) = store();
+        let (bytes, _) = store.defaults().await.unwrap();
+        let d: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(d["rest.overlapMm"]["value"], serde_json::json!(0.5), "the band's floor");
+        assert_eq!(d["rest.overlapMm"]["unit"], serde_json::json!("mm"));
+        assert_eq!(d["rest.thirdToolPct"]["value"], serde_json::json!(2.0), "the threshold");
+        assert_eq!(d["rest.thirdToolPct"]["unit"], serde_json::json!("%"));
+        for k in ["rest.overlapMm", "rest.thirdToolPct"] {
+            assert_eq!(d[k]["source"], serde_json::json!("seeded"), "{k}");
+            // A seeded value says what it is, which is the whole point of the provenance (#436).
+            assert!(d[k]["note"].as_str().is_some_and(|n| n.contains("not measured")), "{k}");
+        }
+        // Written to the document, not only served from an in-memory default.
+        assert!(fs::read_to_string(dir.path().join(LOCATION_FILE)).unwrap().contains("rest.thirdToolPct"));
+        // And each seed is held to its own rule, which is what makes the value usable as a floor.
+        let chosen = |v: f64| ShopDefault {
+            value: serde_json::json!(v),
+            source: DefaultSource::Chosen,
+            set_at: Some("2026-10-16T00:00:00.000Z".into()),
+            unit: None,
+            note: None,
+        };
+        assert!(crate::defaults::validate_one("rest.overlapMm", &chosen(25.0)).is_err());
+        assert!(crate::defaults::validate_one("rest.thirdToolPct", &chosen(60.0)).is_err());
+        crate::defaults::validate_one("rest.overlapMm", &chosen(1.0)).unwrap();
+        crate::defaults::validate_one("rest.thirdToolPct", &chosen(5.0)).unwrap();
+    }
+
+    #[tokio::test]
     async fn a_default_is_set_guarded_open_to_new_keys_and_reset_to_its_seed() {
         use crate::defaults::{DefaultSource, ShopDefault};
         let (_dir, store) = store();
@@ -3743,12 +3777,13 @@ mod tests {
             note: None,
         };
         assert!(matches!(
-            store.put_default("rest.overlapMm", chosen(serde_json::json!(0.5)), None).await,
+            store.put_default("shop.exampleMm", chosen(serde_json::json!(0.5)), None).await,
             Err(HouseError::PreconditionRequired(_))
         ));
         let (_, etag) = store.defaults().await.unwrap();
-        // A key this build has never heard of — the peer's — is accepted when well-formed.
-        store.put_default("rest.overlapMm", chosen(serde_json::json!(0.5)), Some(&etag)).await.unwrap();
+        // A key this build has never heard of — the peer's — is accepted when well-formed: it has no
+        // seed to claim, so it is `chosen`, and a reset removes it rather than restoring one.
+        store.put_default("shop.exampleMm", chosen(serde_json::json!(0.5)), Some(&etag)).await.unwrap();
         let (_, etag) = store.defaults().await.unwrap();
         assert!(matches!(
             store.put_default("wasteboard.depthLimitMm", chosen(serde_json::json!(-2)), Some(&etag)).await,
@@ -3759,10 +3794,10 @@ mod tests {
         let (_, etag) = store.defaults().await.unwrap();
         store.reset_default("wasteboard.depthLimitMm", Some(&etag)).await.unwrap();
         let (_, etag) = store.defaults().await.unwrap();
-        store.reset_default("rest.overlapMm", Some(&etag)).await.unwrap();
+        store.reset_default("shop.exampleMm", Some(&etag)).await.unwrap();
         let d: serde_json::Value = serde_json::from_slice(&store.defaults().await.unwrap().0).unwrap();
         assert_eq!(d["wasteboard.depthLimitMm"]["source"], serde_json::json!("seeded"), "back to its seed");
-        assert!(d.get("rest.overlapMm").is_none(), "an unseeded key is removed");
+        assert!(d.get("shop.exampleMm").is_none(), "an unseeded key is removed");
         // And they travel with the export.
         assert!(String::from_utf8(store.export().await.unwrap()).unwrap().contains("wasteboard.depthLimitMm"));
     }
@@ -3814,8 +3849,12 @@ mod tests {
     async fn an_import_cannot_fake_a_seeded_default() {
         let (_dir, store) = store();
         let mut doc: serde_json::Value = serde_json::from_slice(&location_fixture()).unwrap();
-        // A seed claimed for a value that is not the seed, and for a key that has none.
-        for (key, value) in [("power.onWaitSeconds", serde_json::json!(600)), ("rest.overlapMm", serde_json::json!(0.5))] {
+        // A seed claimed for a value that is not the seed, and for a key that has none at all.
+        for (key, value) in [
+            ("power.onWaitSeconds", serde_json::json!(600)),
+            ("rest.overlapMm", serde_json::json!(0.6)),
+            ("bracket.seatMachineZ", serde_json::json!(-70.2)),
+        ] {
             let mut faked = doc.clone();
             faked["defaults"][key] = serde_json::json!({ "value": value, "source": "seeded", "setAt": null, "unit": null });
             let err = store.import(&serde_json::to_vec(&faked).unwrap()).await.unwrap_err();

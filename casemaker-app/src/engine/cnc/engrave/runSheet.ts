@@ -46,6 +46,7 @@ import {
 } from '@/engine/cnc/engrave/reachability';
 import { fmtDiameter } from '@/engine/cnc/engrave/recommendTool';
 import type { RestPassFacts } from '@/engine/cnc/engrave/restPass';
+import { restSeamSentence } from '@/engine/cnc/engrave/restSettings';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
 import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
@@ -1409,13 +1410,14 @@ function restPassSteps(facts: RestPassFacts): RunSheetStep[] {
       value: `${fmtNum(r.depth)} mm deep`,
     });
   }
-  steps.push({
-    text:
-      `The second program reaches ${fmtNum(facts.overlap)} mm back into the first one’s territory — ` +
-      `${facts.overlapNote}. A band that wide is cut by both cutters, so the second one’s own scallop ` +
-      'at the seam falls on material that is already gone: no ridge can survive there. Do not shrink it.',
-    value: `${fmtNum(facts.overlap)} mm overlap`,
-  });
+  // #436 — the band, its provenance, and what this JOB says about it. The old sentence claimed the
+  // second cutter's scallop always fell on material the first program had already taken, which was
+  // true of the diameter-wide default it was written against and is not true of a chosen band below
+  // the scallop; the claim is now derived per job, and so is the band the pair's residue slivers
+  // need. Silence would read as "the number is fine", which is the one thing this sheet may not
+  // imply about a chosen value.
+  const seam = restSeamSentence(facts.seam);
+  steps.push({ text: seam.text, value: seam.value });
 
   // The chained simulation, which is the only reason either number above can be trusted: program 2
   // was swept on program 1's result, so the sweep knew what was already gone.
@@ -1464,6 +1466,18 @@ function restPassSteps(facts: RestPassFacts): RunSheetStep[] {
           : ` The largest is ${worst.name}: ${mm2(worst.area)} of it at ${fmtNum(worst.depth)} mm.`),
       value: `${mm2(facts.leftover.area)} unreachable`,
     });
+    // #436 — the same remainder as a SHARE of what the design asked for, against the threshold that
+    // decides whether a third program is worth writing. It sits under the unreachable sentence and
+    // not in its place: that one says WHICH item is short, this one says whether it is enough to act
+    // on, and a reader who wants the second is the reader who is choosing cutters.
+    if (facts.thirdTool !== null) {
+      steps.push({
+        text: facts.thirdTool.text,
+        value: `${pct(facts.thirdTool.share)} of the design${
+          facts.thirdTool.suggested ? ' — a third cutter is suggested' : ''
+        }`,
+      });
+    }
   } else {
     steps.push({
       text:

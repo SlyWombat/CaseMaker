@@ -155,6 +155,15 @@ function mm2(v: number): string {
 }
 
 /**
+ * `0.493 mm`, at the precision the sheet prints a band at — the same three places
+ * `restSettings` uses. The band is DERIVED (#436), so it arrives as
+ * `0.49302855497458753` and would print as that if it went in raw.
+ */
+function mm(v: number): string {
+  return `${Number(v.toFixed(3))} mm`;
+}
+
+/**
  * Measure the rest region. Every handle this opens is closed before it returns.
  *
  * Regions with nothing left to cut are DROPPED, not returned empty: a zero-area item is an
@@ -253,9 +262,14 @@ export function restMachining(tl: ManifoldToplevel, input: RestInput): RestResul
       `${mm2(cutArea)} the second tool could cut was already gone`,
   );
   if (input.overlap > 0) {
+    // WHAT the band is, and no judgement about whether it is enough (#436). This note used to add
+    // "so no ridge can survive at the seam", which was true of the diameter-wide band it was written
+    // against and is not true of a chosen band narrower than the second cutter's own scallop — and a
+    // measurement that states a verdict is a verdict nobody re-checks. `restSettings` derives the
+    // judgement from the same two cutters, per job, and the run sheet prints it there.
     notes.push(
-      `the rest pass overlaps the first tool by ${input.overlap} mm, so a band that wide is cut ` +
-        'by both programs and no ridge can survive at the seam',
+      `the rest pass overlaps the first tool by ${mm(input.overlap)}, so a band that wide is cut ` +
+        'by both programs',
     );
   }
   return { regions, cutArea, clearedArea, restArea, notes };

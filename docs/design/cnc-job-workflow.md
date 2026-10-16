@@ -1088,7 +1088,14 @@ recommendation, the maintainer's words are quoted.
 18. **The light (`M821`/`M822`) is in the machine strip from the start**, after a one-line bench check.
 19. **The 2 % third-tool threshold and the rest overlap ship as defaults labelled chosen**, updated
     from the first two-tool cut. *Revised the same day:* the measured `single.3mf` pair left 3.4 % standing
-    at 0.1 mm, so the overlap is **"~0.5 mm, worked out per job"** from the cutters (#436).
+    at 0.1 mm, so the overlap is **"~0.5 mm, worked out per job"** from the cutters (#436). *Revised
+    again:* they are **shop settings, not compiled constants** — the maintainer, 2026-10-16: *"That type
+    of setting should be something we keep in our own database and not compiled in."* Both live in the
+    location's own `defaults` (`rest.overlapMm` seeded 0.5 mm, `rest.thirdToolPct` seeded 2 %), and
+    they are not used alike: the overlap in the document is the **floor** under a band each job derives
+    from its own two cutters, while the threshold is used as stored. The **scripted CLI route reads
+    both from the document**; the engrave panel does not read them and does not need to yet, because it
+    plans no rest pass. The compiled pair is only the labelled no-service fallback.
 20. **Vacuum bed and sphere stock stay out.** A vacuum bed is listed only if the location owns one;
     sphere stock is refused with a reason.
 21. **The probe laser: the laser frame and laser point-to-origin ship as user options, off by default.
@@ -1452,7 +1459,8 @@ middle, clear of both ledges. A sideways flip would move the reference to the mo
 width still has a contradicting probe witness (2026-10-08 miss 6 mm out vs the calipered 10 mm) —
 offered only when the geometry needs it.
 
-**Tools.** T1 `C1-BIT-O-FLUTE-2-12` (rough), T2 `C1-BIT-CORN-0.6-3` (rest, 0.1 mm overlap; feeds a
+**Tools.** T1 `C1-BIT-O-FLUTE-2-12` (rough), T2 `C1-BIT-CORN-0.6-3` (rest, overlapping T1 by the
+shop's own `rest.overlapMm` — 0.5 mm seeded, worked out per job from the two cutters (#436); feeds a
 placeholder row with our provenance, #410 item 3). One program per tool; Z0 for T2 from the
 tool-length difference (#387).
 

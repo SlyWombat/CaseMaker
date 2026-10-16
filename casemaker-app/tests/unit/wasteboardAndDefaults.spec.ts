@@ -75,6 +75,8 @@ describe('the shop defaults (location.json `defaults`)', () => {
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     expect(LocationDocSchema.safeParse(DOC).success).toBe(true);
     expect(parsed.data!['rest.overlapMm']?.source).toBe('chosen');
+    // #436's second key, read the same way: the document holds both rest-machining numbers.
+    expect(parsed.data!['rest.thirdToolPct']?.value).toBe(2);
   });
 
   it('reads the location’s value with its source, and the fallback only with no location — labelled', () => {

@@ -30,6 +30,17 @@
 // design across the vise jaws (#383, default `ccw`); `--tool` is the cutter key (default the
 // library's `flat-1.0`). Nothing is placed by hand: every number comes out of the file.
 //
+// `--rest none` keeps this a single-program run. Otherwise the design is cut by two cutters, and the
+// second program runs on #436's two numbers — a seam band and the threshold at which a third cutter
+// is suggested. NEITHER IS COMPILED IN: both are read from the `defaults` section of the machine's
+// own document (`rest.overlapMm`, `rest.thirdToolPct`), seeded at 0.5 mm and 2 % and CHOSEN rather
+// than measured, and each is printed with where it came from — the location's own value, or the
+// labelled fallback this build carries when there is no document to read. The overlap is also
+// DERIVED, per job, from the two cutters that will actually run: the stored 0.5 mm is the FLOOR
+// under that derivation, not the band itself. `--overlap <mm>` and `--third-tool <pct>` override
+// them for one run and are labelled as typed. The run sheet carries the same provenance, because a
+// number an operator acts on has to say what it is.
+//
 // The machine's own tool documents are read from the same file the desktop app's embedded server
 // does (`dirs::data_dir()/casemaker/`), so a job naming a cutter the user OWNS (`inv:…`) resolves
 // here instead of failing as an unknown key. SINCE #412 that file is `location.json`, with
@@ -63,6 +74,15 @@ import { engraveGenerate, type EngraveGenerated } from '../src/workers/sim/engra
 import { createSimSession, type SimDiagnostic, type SimLoadOk, type SimSession } from '../src/workers/sim/session';
 import { unionRemoval, restMachining } from '../src/workers/sim/engraveRest';
 import { restJobFor, roughPick, restToolPick, unroughedItems, type RestPassFacts } from '../src/engine/cnc/engrave/restPass';
+import {
+  REST_OVERLAP_KEY,
+  REST_THIRD_TOOL_KEY,
+  restSeamFacts,
+  thirdToolAdvice,
+  type RestSettingSource,
+  type SeamCutter,
+  type SeamFactsInput,
+} from '../src/engine/cnc/engrave/restSettings';
 import type { Tool } from '../src/engine/cnc/tool';
 import type { NodeMeshOutput } from '../src/workers/geometry/meshOutput';
 import { Z1 } from '../src/engine/cnc/machine';
@@ -99,6 +119,7 @@ import { engravePreviewSvg } from './lib/engravePreviewSvg';
 import { svgToPng } from './lib/svgToPng';
 import { InventorySchema, type InventoryItem } from '../src/platform/houseClient';
 import { checkLocationImport } from '../src/platform/locationClient';
+import { KNOWN_DEFAULTS, readDefault, type ShopDefaults } from '../src/platform/defaultsClient';
 import { inventoryEntryFor } from '../src/store/toolRegistryStore';
 import { defaultEngraveJob } from '../src/engine/cnc/engrave/defaults';
 import { viseForNewJob } from '../src/engine/cnc/fixture';
@@ -123,6 +144,14 @@ for (const key of BUNDLED_FONT_KEYS) {
 // ---------------------------------------------------------------------------------------------
 // The house: the machine's own cutters, read off disk
 // ---------------------------------------------------------------------------------------------
+
+/**
+ * The shop's tunable defaults, as the document holds them (#416/#417), or null when this run has no
+ * document to read them from — a house file from before the section existed, or no file at all. Null
+ * is not "no values": it is what {@link readDefault} answers a labelled `fallback` for, which is the
+ * same thing the app itself does with no house service. Set by {@link loadDocs}; read below.
+ */
+let shopDefaults: ShopDefaults | null = null;
 
 /**
  * Where the desktop app keeps the machine's own documents — `dirs::data_dir()/casemaker/` on the
@@ -179,6 +208,9 @@ function loadDocs(paths: readonly string[]): void {
   if (location.kind === 'location') {
     tools = location.doc.tools;
     inventory = location.doc.inventory;
+    // #436 — the shop's own rest-machining numbers live here, not in the source. A document that
+    // predates the section reads as `{}`, which `readDefault` answers with the labelled fallback.
+    shopDefaults = location.doc.defaults;
     what = `location "${location.doc.name}"`;
   } else {
     let json: unknown;
@@ -202,6 +234,14 @@ function loadDocs(paths: readonly string[]): void {
     `${what}: ${path} — ${tools.length} tool${tools.length === 1 ? '' : 's'} from the user's own ` +
       `list, ${inventory.length} owned cutter${inventory.length === 1 ? '' : 's'}`,
   );
+  // #436 — say which rest-machining numbers this run is about to use, and where each came from, so a
+  // sheet that reads oddly can be traced back to the document (or to the absence of one) before the
+  // program is run. Silent about a key the document simply has not set: `readDefault` falls back and
+  // the seam sentence says so where it matters.
+  for (const key of [REST_OVERLAP_KEY, REST_THIRD_TOOL_KEY]) {
+    const d = shopDefaults?.[key];
+    if (d !== undefined) console.log(`  default ${key} = ${String(d.value)}${d.unit ?? ''} (${d.source})`);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -216,6 +256,8 @@ interface Args {
   tool?: string;
   rest?: string;
   overlap?: number;
+  /** #436 — the third-tool threshold, as a PERCENT of the design's own removal area. */
+  thirdTool?: number;
   location?: string;
   out?: string;
 }
@@ -230,9 +272,26 @@ function parseArgs(argv: string[]): Args {
     else if (a === '--tool') args.tool = argv[++i];
     else if (a === '--rest') args.rest = argv[++i];
     else if (a === '--overlap') {
-      const v = Number(argv[++i]);
-      if (!Number.isFinite(v) || v < 0) throw new Error(`--overlap must be a distance in mm, not "${argv[i]}"`);
-      args.overlap = v;
+      // Checked against the DOCUMENT's own rule for the key this flag overrides — the registry's,
+      // which is the same rule `defaults.rs` holds the stored value to — rather than against a
+      // second opinion about the same setting. A band the location would refuse cannot be typed
+      // past it, and the bounds cannot drift apart because there is only one copy of them
+      // (#436 review).
+      const parsed = KNOWN_DEFAULTS[REST_OVERLAP_KEY]!.rule.safeParse(Number(argv[++i]));
+      if (!parsed.success) {
+        const why = parsed.error.issues[0]?.message ?? 'the location’s own rule';
+        throw new Error(`--overlap is a seam band in mm (${why}), not "${argv[i]}"`);
+      }
+      args.overlap = parsed.data;
+    } else if (a === '--third-tool') {
+      const parsed = KNOWN_DEFAULTS[REST_THIRD_TOOL_KEY]!.rule.safeParse(Number(argv[++i]));
+      if (!parsed.success) {
+        const why = parsed.error.issues[0]?.message ?? 'the location’s own rule';
+        throw new Error(
+          `--third-tool is a percentage of the design's removal area (${why}), not "${argv[i]}"`,
+        );
+      }
+      args.thirdTool = parsed.data;
     } else if (a === '--location') args.location = argv[++i];
     else if (a === '--turn') {
       const v = argv[++i];
@@ -254,7 +313,7 @@ const USAGE =
   'usage: scripts/engrave-job.ts <job.json> [--out <dir>]\n' +
   '       scripts/engrave-job.ts --coupon <coupon-spec.json> [--out <dir>]\n' +
   '       scripts/engrave-job.ts --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
-  '              [--rest <key|none>] [--overlap <mm>] [--out <dir>]\n' +
+  '              [--rest <key|none>] [--overlap <mm>] [--third-tool <pct>] [--out <dir>]\n' +
   '       [--location <location.json|house.json>]  (any input; default: the app’s own location)';
 
 let args: Args;
@@ -267,8 +326,8 @@ try {
 const inputs = [args.job, args.coupon, args.from3mf].filter((v) => v !== undefined);
 if (inputs.length === 0) fail(USAGE);
 if (inputs.length > 1) fail('pass a job, --coupon OR --from-3mf — exactly one');
-if (!args.from3mf && (args.turn || args.tool || args.rest || args.overlap !== undefined)) {
-  fail('--turn, --tool, --rest and --overlap only apply to --from-3mf');
+if (!args.from3mf && (args.turn || args.tool || args.rest || args.overlap !== undefined || args.thirdTool !== undefined)) {
+  fail('--turn, --tool, --rest, --overlap and --third-tool only apply to --from-3mf');
 }
 
 // Before ANY job resolves a cutter: `jobTool` reads the registry, so the machine's own documents
@@ -942,43 +1001,104 @@ if (args.job) {
     // Against its own SIMULATED REMOVAL, not against its offsets (#410's scope note: "computed from
     // tool 1's simulated removal, not from its offset alone").
     //
-    // THE OVERLAP IS THE SECOND CUTTER'S OWN DIAMETER, and it was chosen from the bench numbers
-    // rather than from a preference between two plausible stories. The rest region is a RESIDUE: the
-    // slivers of design material tool 1's scalloped boundary left behind, plus every feature too
-    // narrow for it to enter. A residue sliver is about `r1 − √(r1² − s1²/4)` wide — on the badge's
-    // ⌀2 mm / 0.9 mm step-over that is 0.107 mm — and the generator runs every item through
-    // `engravableProfile`, a morphological CLOSING of radius `r2` that erases anything narrower than
-    // `2·r2` = 0.6 mm. So a sliver only survives to be cut when `sliver + overlap ≥ 2·r2`, which for
-    // a 0.1 mm sliver means an overlap of about the second cutter's diameter. Less than that and the
-    // closing eats the slivers of REAL artwork: one step-over (0.24 mm) left 9.893 mm² of the badge
-    // standing, where the same ⌀0.6 mm cutter run as ONE program over the whole file leaves 0.265.
+    // THE BAND IS DERIVED PER JOB, AND ITS FLOOR IS THE SHOP'S OWN DOCUMENT (#436; the maintainer,
+    // 2026-10-16: "~0.5 mm, worked out per job", and "That type of setting should be something we
+    // keep in our own database and not compiled in"). The stored `rest.overlapMm` — read from
+    // `location.json`'s `defaults`, seeded at 0.5 mm, CHOSEN rather than measured (Q19), to be
+    // updated from the first two-tool cut — is the LEAST the band may be; what the job's own pair of
+    // cutters needs sets it when that is wider. `--overlap` is an operator's override of both and is
+    // used exactly as typed. The source travels with the number, so the sheet says which of them the
+    // operator is reading — and what the pair says about it either way, including when the answer is
+    // "this band is too narrow". `restSettings.ts` is where every part of that judgement lives.
     //
-    // The number is a floor with a physical reason, not a safety margin to be trimmed: below it the
-    // second program is not merely slower, it leaves the part unfinished. `--overlap` lowers it
-    // deliberately (and the sheet then reports the leftovers it causes, per item, in mm²).
+    // WHAT A BAND HAS TO BEAT, measured on the badge blank (#410). The rest region is a RESIDUE: the
+    // slivers tool 1's scalloped boundary left behind, plus every feature too narrow for it to
+    // enter. A residue sliver is about `r1 − √(r1² − s1²/4)` wide — 0.107 mm for ⌀2 mm at a 0.9 mm
+    // step-over — and `engravableProfile` closes anything narrower than `2·r2`, the second cutter's
+    // own diameter. A sliver therefore survives to be cut only when `sliver + overlap ≥ diameter2`,
+    // so the band THIS pair needs is about 0.493 mm: at a 0.1 mm band the badge left 12.24 mm²
+    // (3.41 % of what it asks to remove) standing, and at 0.6 mm only 0.79 mm² (0.22 %) — so the
+    // 0.5 mm the shop now seeds is the value that derivation points at, which is why it is the seed
+    // and not the old 0.1. Nothing narrower than the residues need reaches this route through the
+    // document: the derivation raises the band past the seed, and only a typed `--overlap` can put a
+    // too-narrow band in front of the operator — which is exactly when the sheet has to say so. The
+    // sheet reports the gap and the leftovers per item, in mm², whichever band the run used.
     //
-    // WHAT IT COSTS, measured on the badge blank: the grown region is 233.9 mm² where only 101.5 mm²
-    // of it was ever standing material, so the second program re-traverses the seam band at fine-bit
-    // pace — 21 min 35 s against the first program's 94 s, for a pair total of 23 min 9 s where one
-    // ⌀0.6 mm program takes 22 min 21 s. The split is a wash on a design whose rest is the STROKES;
-    // it pays where the rest is a few compact regions and the wide bit does most of the design.
+    // WHAT IT COSTS AT THE BAND THE RESIDUES NEED, also measured: the grown region is 233.9 mm²
+    // where only 101.5 mm² of it was ever standing material, so the second program re-traverses the
+    // seam band at fine-bit pace — 21 min 35 s against the first program's 94 s, for a pair total of
+    // 23 min 9 s where one ⌀0.6 mm program takes 22 min 21 s. The split is a wash on a design whose
+    // rest is the STROKES; it pays where the rest is a few compact regions and the wide bit does
+    // most of the design.
     // `restChosen` is non-null in this branch, so `restTool` resolved — this is the type's own guard,
     // and it fails rather than falling through, because a rest program without its cutter is not one.
     if (restTool === null) fail(`--rest "${restChosen.key}" did not resolve to a cutter`);
     const restFeeds = feedsFor([], job.stock.material, restTool, jobMachine(job), undefined);
     const stepOver2 = restFeeds.ok ? restFeeds.params.stepOver : null;
-    const overlap = args.overlap ?? restChosen.diameter;
-    const overlapNote =
-      args.overlap !== undefined
-        ? `typed on the command line (--overlap ${args.overlap})`
-        : `the ${restChosen.key} diameter — the first cutter’s scalloped boundary leaves residue ` +
-          'slivers about 0.1 mm wide, and this generator erases anything narrower than the cutter, ' +
-          'so the band that keeps those slivers cuttable is the cutter’s own width' +
-          (stepOver2 !== null && stepOver2 > 0
-            ? `; ${stepOver2} mm, one step-over in ${job.stock.material}, is the ridge scale and ` +
-              'does not keep them'
-            : '');
-    console.log(`  overlap    ${overlap.toFixed(3)} mm — ${overlapNote}`);
+    // The FIRST cutter's step-over shapes the residue the band has to make cuttable, so it comes
+    // from the same feeds table through the same resolver as the second one — never from a number
+    // typed into this file.
+    const tool1 = jobTool(job);
+    const roughFeeds = tool1 === null ? null : feedsFor([], job.stock.material, tool1, jobMachine(job), undefined);
+    const stepOver1 = roughFeeds !== null && roughFeeds.ok ? roughFeeds.params.stepOver : null;
+    // The stored number and where it came from, together — never the number alone (#436).
+    const overlapRead = readDefault(shopDefaults, REST_OVERLAP_KEY);
+    const roughCutter: SeamCutter = { key: tool1Key, diameter: p1.diameter, stepOver: stepOver1 };
+    const restCutter: SeamCutter = {
+      key: restChosen.key,
+      diameter: restChosen.diameter,
+      stepOver: stepOver2,
+    };
+    // THE BAND THIS JOB CUTS WITH IS DERIVED, and the stored number is the FLOOR under it (#436
+    // review item 1). The maintainer's rule is "~0.5 mm, worked out per job": a pair whose residues
+    // need more than the shop stores gets the wider band, and one that needs less keeps the shop's,
+    // which is the number the shop has a reason for. `--overlap` is an operator's override of both
+    // and is used exactly as typed, so a deliberately narrow band is a measurement rather than a
+    // no-op. `overlapForJob` is where that choice lives; nothing here re-decides it.
+    const overlapSource: RestSettingSource = args.overlap === undefined ? overlapRead.source : 'user';
+    const thirdToolRead = readDefault(shopDefaults, REST_THIRD_TOOL_KEY);
+    const thirdToolPct = args.thirdTool ?? thirdToolRead.value;
+    const thirdToolSource: RestSettingSource = args.thirdTool === undefined ? thirdToolRead.source : 'user';
+    const seam = restSeamFacts({
+      stored: overlapRead.value,
+      ...(args.overlap === undefined ? null : { typed: args.overlap }),
+      source: overlapSource,
+      rough: roughCutter,
+      rest: restCutter,
+    } satisfies SeamFactsInput);
+    // The band the programs are actually handed — not the stored number, which is only its floor.
+    const overlap = seam.overlap;
+    console.log(`  overlap    ${overlap.toFixed(3)} mm — ${seam.note}`);
+    // "the floor it started from", not "the location's value": the floor is the fallback too on a
+    // build with no location to read, and a sentence naming the wrong one is the defect this route
+    // exists to avoid.
+    if (seam.derivedFromCutters && seam.needed !== null) {
+      console.log(
+        `  overlap    raised off the ${overlapRead.value.toFixed(3)} mm floor this run started from: ` +
+          `the band this job’s own two cutters need is ${seam.needed.toFixed(3)} mm`,
+      );
+    }
+    // An unknown step-over is a MISSING number, and it is reported as one: "narrower than unknown mm"
+    // claimed a comparison that was never made (#436 review).
+    if (seam.restStepOver === null) {
+      console.log(
+        '  seam       this material states no step-over for the second cutter, so whether the band ' +
+          'reaches past its own scallop is not judged here',
+      );
+    } else if (!seam.coversScallop) {
+      console.log(
+        '  seam       a ridge can survive where the two programs meet: the band is narrower than ' +
+          `the second cutter’s own scallop (${seam.restStepOver.toFixed(3)} mm)`,
+      );
+    }
+    if (seam.needed !== null && !seam.keepsSlivers) {
+      console.log(
+        `  seam       the first cutter leaves slivers about ${seam.sliver.toFixed(3)} mm wide and the ` +
+          `second cutter closes anything under ${seam.restDiameter.toFixed(3)} mm, so a band of about ` +
+          `${seam.needed.toFixed(3)} mm is what keeps them cuttable — this one is under it, and they ` +
+          'are counted in the leftover instead of being cut',
+      );
+    }
     const rest1 = restMachining(tl, { removal: p1.load.meshes.removal, cuts: designCuts, overlap });
     for (const n of rest1.notes) console.log(`  rest       ${n}`);
 
@@ -1076,7 +1196,21 @@ if (args.job) {
         clearedArea: rest1.clearedArea,
         restArea: kept.reduce((sum, r) => sum + r.area, 0),
         overlap,
-        overlapNote,
+        seam,
+        // #436 — the share is taken over `rest1.cutArea`, the area this design asks the SECOND tool
+        // to open, which is the denominator the rest numbers above are already measured against. The
+        // numerator is the same design measured on the union of both removals, so the two are areas
+        // of one object and the ratio means what it says.
+        // The threshold is the shop's own, at `rest.thirdToolPct` (a PERCENT in the document, a
+        // fraction here, which is the unit the comparison is written in). `--third-tool` wins.
+        // The seam goes in with it, because a remainder that is really the band's own shortfall is
+        // not a reason for another cutter — the advice says to widen the band instead (#436 review).
+        thirdTool: thirdToolAdvice(
+          left.restArea,
+          rest1.cutArea,
+          { thirdToolFraction: thirdToolPct / 100, source: thirdToolSource },
+          seam,
+        ),
         restRemovedVolume: p2.load.stats.removedVolume,
         leftover: {
           area: left.restArea,
@@ -1117,6 +1251,17 @@ if (args.job) {
           `${facts.restRemovedVolume.toFixed(2)} mm³ on top of the first, and ` +
           `${facts.leftover.area.toFixed(2)} mm² of the design is left standing between them.`,
       );
+      // #436 — the threshold's answer, at the terminal as well as on the sheet: the operator
+      // choosing a third cutter is standing at the machine, not reading the sheet.
+      if (facts.thirdTool !== null) {
+        console.log(
+          `  leftover   ${(facts.thirdTool.share * 100).toFixed(2)} % of what the design asks for ` +
+            `(threshold ${(facts.thirdTool.fraction * 100).toFixed(2)} %): ` +
+            (facts.thirdTool.suggested
+              ? 'a third cutter is suggested for it'
+              : 'too small to act on — no third cutter suggested'),
+        );
+      }
     }
   }
 

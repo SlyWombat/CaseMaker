@@ -361,6 +361,12 @@
       "setAt": "2026-10-15T08:00:00.000Z",
       "unit": "mm"
     },
+    "rest.thirdToolPct": {
+      "value": 2.0,
+      "source": "chosen",
+      "setAt": "2026-10-15T08:00:00.000Z",
+      "unit": "%"
+    },
     "run.missLimit": {
       "value": 3.0,
       "source": "seeded",

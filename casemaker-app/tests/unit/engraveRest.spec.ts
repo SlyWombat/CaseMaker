@@ -184,6 +184,13 @@ describe('restMachining (#410)', () => {
     expect(withNote.notes.join(' ')).toContain('50');
     expect(withNote.notes.join(' ')).toContain('100');
     expect(withNote.notes.join(' ')).toContain('overlaps the first tool by 0.6 mm');
+    // #436 — the band is DERIVED per job now, so it arrives as a full-precision double
+    // (0.49302855497458753 for the badge's pair). A note that interpolated it raw would print
+    // all seventeen digits to the operator; the note rounds it the way the sheet does.
+    const derived = restMachining(tl, { removal, cuts: [square(0.5)], overlap: 0.49302855497458753 });
+    const note = derived.notes.join(' ');
+    expect(note).toContain('overlaps the first tool by 0.493 mm');
+    expect(note).not.toContain('0.49302855497458753');
     // With no overlap there is no band, and a note claiming one would be a false statement on the
     // run sheet about how the part is cut.
     const noNote = restMachining(tl, { removal, cuts: [square(0.5)], overlap: 0 });

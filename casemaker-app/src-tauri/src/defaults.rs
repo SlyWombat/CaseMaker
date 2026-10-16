@@ -261,6 +261,11 @@ pub fn add_missing_seeds(map: &mut ShopDefaults) -> bool {
                     set_at: None,
                     unit: None,
                     note: Some((*note).to_string()),
+    // #436 — rest machining's two numbers, out of the code and into the document (the maintainer,
+    // 2026-10-16: "That type of setting should be something we keep in our own database and not
+    // compiled in"). Both chosen, not measured (Q19); the first two-tool cut replaces them.
+    ("rest.overlapMm", 0.5, "mm", "chosen, not measured: the LEAST the band both programs cut at the seam may be. The band itself is worked out per job from that job's own two cutters, and this is the floor under it — a 2 mm cutter at a 0.9 mm step-over leaves slivers 0.107 mm wide and a 0.6 mm rest cutter closes anything narrower, so the badge's pair needs about 0.493 mm. The first two-tool cut replaces this"),
+    ("rest.thirdToolPct", 2.0, "%", "chosen, not measured: the share of a job's own removal area that may still be standing after both programs have run before a third cutter is suggested"),
                 },
             );
             added = true;
@@ -379,6 +384,16 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         )),
         "registration.tipRadiusUncertaintyMm" => Some(need(
             n.is_some_and(|v| (0.0..=2.0).contains(&v)),
+        // #436 — rest machining. A band wider than any cutter is not a band; a third-cutter
+        // threshold is a share, so it never reaches the whole job.
+        "rest.overlapMm" => Some(need(
+            n.is_some_and(|v| (0.0..=20.0).contains(&v)),
+            "0 to 20 mm",
+        )),
+        "rest.thirdToolPct" => Some(need(
+            n.is_some_and(|v| (0.1..=50.0).contains(&v)),
+            "0.1 to 50 percent",
+        )),
             "0 to 2 mm",
         )),
         "registration.tipDiameterMm" => Some(need(
@@ -759,14 +774,17 @@ mod tests {
 
     #[test]
     fn an_unknown_key_is_kept_when_well_formed() {
-        validate_one("rest.overlapMm", &chosen(serde_json::json!(0.5))).unwrap();
+        // A key this build has never heard of — the peer's, or a newer build's — is kept as long as
+        // its shape is right. `rest.overlapMm` used to be the example here and is now KNOWN (#436
+        // seeds it), so the example is a key no build claims, which is what the name promises.
+        validate_one("shop.exampleMm", &chosen(serde_json::json!(0.5))).unwrap();
         validate_one("rest.thirdToolEnabled", &chosen(serde_json::json!(true))).unwrap();
         for (k, v) in [
             ("Rest.overlap", serde_json::json!(1)),
             ("overlap", serde_json::json!(1)),
             ("rest.overlap-mm", serde_json::json!(1)),
-            ("rest.overlapMm", serde_json::json!({ "a": 1 })),
-            ("rest.overlapMm", serde_json::json!([1])),
+            ("shop.exampleMm", serde_json::json!({ "a": 1 })),
+            ("shop.exampleMm", serde_json::json!([1])),
         ] {
             assert!(validate_one(k, &chosen(v)).is_err(), "{k} accepted");
         }
@@ -774,7 +792,7 @@ mod tests {
             set_at: None,
             ..chosen(serde_json::json!(1))
         };
-        assert!(validate_one("rest.overlapMm", &undated).is_err());
+        assert!(validate_one("shop.exampleMm", &undated).is_err());
     }
 
     #[test]
@@ -800,7 +818,7 @@ mod tests {
             "a faked seed"
         );
         assert!(
-            validate_write("rest.overlapMm", &seeded(serde_json::json!(0.5))).is_err(),
+            validate_write("bracket.seatMachineZ", &seeded(serde_json::json!(-70.2))).is_err(),
             "no seed to claim"
         );
         let long_unit = ShopDefault {
