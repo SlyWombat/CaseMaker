@@ -1086,8 +1086,9 @@ recommendation, the maintainer's words are quoted.
     still each need their own "done" before the job continues — the one confirmation does not cover
     them.
 18. **The light (`M821`/`M822`) is in the machine strip from the start**, after a one-line bench check.
-19. **The 2 % third-tool threshold and 0.1 mm rest overlap ship as defaults labelled chosen**, updated
-    from the first two-tool cut.
+19. **The 2 % third-tool threshold and the rest overlap ship as defaults labelled chosen**, updated
+    from the first two-tool cut. *Revised the same day:* the measured `single.3mf` pair left 3.4 % standing
+    at 0.1 mm, so the overlap is **"~0.5 mm, worked out per job"** from the cutters (#436).
 20. **Vacuum bed and sphere stock stay out.** A vacuum bed is listed only if the location owns one;
     sphere stock is refused with a reason.
 21. **The probe laser: the laser frame and laser point-to-origin ship as user options, off by default.
