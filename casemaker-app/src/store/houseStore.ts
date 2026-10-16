@@ -60,7 +60,7 @@ import {
 } from '@/platform/houseClient';
 import { useToolRegistryStore } from './toolRegistryStore';
 import { checkLocationImport, LOCATION_FILENAME } from '@/platform/locationClient';
-import { applyMachineToSettings, suppressSeeding, useLocationStore } from './locationStore';
+import { applyMachineToSettings, settleMarginsAfterImport, suppressSeeding, useLocationStore } from './locationStore';
 
 /**
  * What the exported file is called when it is saved. The service sets `Content-Disposition` for its
@@ -344,6 +344,9 @@ export const useHouseStore = create<HouseState>((set, get) => {
             // settings on the next edit would undo the import (#412 review).
             if (machine !== undefined) applyMachineToSettings(machine);
             else suppressSeeding();
+            // #447: the file brought its own shop defaults, and maybe a machine that still carries
+            // depth margins — re-read the section and move those in (one way, as on connect).
+            await settleMarginsAfterImport();
           }
         }
         return {

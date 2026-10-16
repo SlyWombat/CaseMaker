@@ -210,6 +210,21 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(0).max(50),
     fallback: 0.5,
   },
+  // ── #447 (begin) — the house depth margins (#345), out of browser storage and into the location.
+  // CHOSEN, not measured. The two Z-error margins a job COPIES (`boundaryMarginMm`, `zToleranceMm`),
+  // the four that SEED a new job's own fields, and the ± on a caliper-measured stock thickness. The
+  // bounds start at 0 and stay generous because `settingsStore.parseMargins` accepts any finite value
+  // ≥ 0: a number someone already saved must not be refused on its way in (`shopMargins.ts`). Each
+  // fallback is `depthBounds.ts`'s MARGIN_DEFAULTS / MEASURED_THICKNESS_TOLERANCE_MM (a spec holds
+  // them equal; importing depthBounds here would pull the geometry evaluator into every client).
+  'margins.boundaryMarginMm': { label: 'boundary margin (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 0.2 },
+  'margins.zToleranceMm': { label: 'Z tolerance (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 0.05 },
+  'margins.minFloorMm': { label: 'minimum floor a new job starts from (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 1.0 },
+  'margins.edgeMarginMm': { label: 'edge margin a new job starts from (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 1.0 },
+  'margins.jawClearanceMm': { label: 'jaw clearance a new job starts from (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 1.0 },
+  'margins.breakthroughMm': { label: 'breakthrough a new job starts from (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 0.3 },
+  'margins.measuredThicknessToleranceMm': { label: '± on a measured stock thickness (not measured)', unit: 'mm', rule: z.number().min(0).max(10), fallback: 0.05 },
+  // ── #447 (end)
 };
 
 /**

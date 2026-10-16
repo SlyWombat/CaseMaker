@@ -75,6 +75,12 @@ export interface MarginSettings extends Omit<EngraveMargins, 'source'> {
    * the jaws this operator wants), which is why a job may state its own.
    */
   jawClearance: Mm;
+  /**
+   * The ± a caliper-measured stock thickness adds to the Z budget, mm (#447) — the shop default
+   * `margins.measuredThicknessToleranceMm`, which the location's projection fills in. Absent (the
+   * no-service build, a record from before #447) is {@link MEASURED_THICKNESS_TOLERANCE_MM}.
+   */
+  measuredThicknessTolerance?: Mm;
 }
 
 /** `0.2` — one printed layer at the layer height most printers use when nothing says otherwise. */
@@ -98,6 +104,10 @@ export const DEFAULT_JAW_CLEARANCE_MM: Mm = 1.0;
  * The shipped thresholds, and the fallback whenever a stored setting is missing or malformed. The
  * seeds are exactly the constants `defaultEngraveJob` used before they moved here, so a fresh
  * install produces the job it always did.
+ *
+ * #447: with a location these are the SEEDS of the `margins.*` shop defaults (`defaults.rs`), and the
+ * house setting is read from there (`store/shopMargins.ts`). Here they are the labelled fallback for a
+ * build with no house service, and for documents and headless scripts that state none.
  */
 export const MARGIN_DEFAULTS: MarginSettings = {
   boundaryMargin: DEFAULT_BOUNDARY_MARGIN_MM,
@@ -498,6 +508,12 @@ export interface ZBudgetInputs {
    * (#254's source) — the model's thickness is exact, a caliper's is not.
    */
   thicknessUncertainty?: Mm;
+  /**
+   * The thickness WAS measured, and the ± is the house setting's (#447): `recommendMargins` reads
+   * `setting.measuredThicknessTolerance`, falling back to {@link MEASURED_THICKNESS_TOLERANCE_MM}.
+   * An explicit `thicknessUncertainty` wins over it.
+   */
+  thicknessMeasured?: boolean;
 }
 
 /** What `recommendMargins` worked out, and the arithmetic in words for the panel and the sheet. */
@@ -540,7 +556,7 @@ export interface MarginRecommendation {
  */
 export function recommendMargins(
   job: EngraveJob,
-  setting: Pick<MarginSettings, 'boundaryMargin' | 'source'>,
+  setting: Pick<MarginSettings, 'boundaryMargin' | 'source' | 'measuredThicknessTolerance'>,
   inputs: ZBudgetInputs = {},
 ): MarginRecommendation {
   const basis: string[] = [];
@@ -565,9 +581,14 @@ export function recommendMargins(
     }
   }
 
-  if (inputs.thicknessUncertainty !== undefined) {
-    zTolerance += inputs.thicknessUncertainty;
-    basis.push(`the measured thickness adds ${mm(inputs.thicknessUncertainty)} mm`);
+  const thickness =
+    inputs.thicknessUncertainty ??
+    (inputs.thicknessMeasured === true
+      ? (setting.measuredThicknessTolerance ?? MEASURED_THICKNESS_TOLERANCE_MM)
+      : undefined);
+  if (thickness !== undefined) {
+    zTolerance += thickness;
+    basis.push(`the measured thickness adds ${mm(thickness)} mm`);
   }
 
   return {
@@ -581,6 +602,10 @@ export function recommendMargins(
  * The ± a MEASURED stock thickness carries, mm. A caliper on a printed blank: the same order as the
  * vise jaws' own residual, and PROVISIONAL the same way (#208 owes the bench measurement). Used
  * only when `sources.stock.thickness` says the number was measured rather than computed.
+ *
+ * #447: the shop default `margins.measuredThicknessToleranceMm` is the number in force, carried on the
+ * house setting (`MarginSettings.measuredThicknessTolerance`); this is its seed and its labelled
+ * fallback with no house service.
  */
 export const MEASURED_THICKNESS_TOLERANCE_MM: Mm = 0.05;
 
@@ -595,10 +620,9 @@ export const MEASURED_THICKNESS_TOLERANCE_MM: Mm = 0.05;
  * have to say so on the document before either caller can read it.
  */
 export function zBudgetInputsFor(job: EngraveJob): ZBudgetInputs {
-  return {
-    thicknessUncertainty:
-      job.sources?.stock?.thickness === 'measured' ? MEASURED_THICKNESS_TOLERANCE_MM : undefined,
-  };
+  // #447: the FACT, not the number — the ± is the house setting's, which `recommendMargins` is
+  // handed alongside, so the panel and the sheet both take the shop's value without restating it.
+  return job.sources?.stock?.thickness === 'measured' ? { thicknessMeasured: true } : {};
 }
 
 /**

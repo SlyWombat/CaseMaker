@@ -14,6 +14,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useSettingsStore, type ExportFormat, type ExportLayoutMode } from '@/store/settingsStore';
+import { useLocationStore } from '@/store/locationStore';
+import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { MARGIN_DEFAULTS, type MarginSettings } from '@/engine/cnc/engrave/depthBounds';
 import { featureSim } from '@/platform/features';
 import { canRunLocalServer } from '@/platform/capabilities';
@@ -245,6 +247,14 @@ export function SettingsMenu({ onClose }: Props) {
   const setExportLayout = useSettingsStore((s) => s.setExportLayout);
   const setExportFormat = useSettingsStore((s) => s.setExportFormat);
   const setMargins = useSettingsStore((s) => s.setMargins);
+  // #447: where the margins live — the shop defaults, the machine record, or this browser only.
+  const marginsHome = useLocationStore((s) => s.marginsHome);
+  // "This browser only" is a claim about the service, so it waits for the service's answer (#447
+  // review): before the house is known absent, the home is not settled yet.
+  const houseStatus = useToolRegistryStore((s) => s.status);
+  const locationStatus = useLocationStore((s) => s.status);
+  const settled = houseStatus === 'absent' || locationStatus === 'absent' || locationStatus === 'error';
+  const shownHome = marginsHome !== 'browser' || settled ? marginsHome : 'pending';
   const reset = useSettingsStore((s) => s.resetSettings);
   const ref = useRef<HTMLDivElement | null>(null);
   // #181 — the embedded-server controls are a desktop capability, not a runtime property of the
@@ -385,6 +395,15 @@ export function SettingsMenu({ onClose }: Props) {
             >
               Restore the shipped margins
             </button>
+          </p>
+          <p className="settings-hint" data-testid="settings-margins-home" data-home={shownHome}>
+            {shownHome === 'defaults'
+              ? "Kept in the shop's location.json (the shop defaults), for every window on this shop."
+              : shownHome === 'record'
+                ? "Kept on the shop's machine record in location.json."
+                : shownHome === 'browser'
+                  ? 'Kept in this browser only — there is no shop service here, so these are its own numbers.'
+                  : 'Looking for the shop service — where these are kept is settled when it answers.'}
           </p>
         </>
       )}

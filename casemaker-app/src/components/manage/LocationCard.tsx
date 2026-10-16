@@ -15,6 +15,7 @@ import { MachinePower } from './MachinePower';
 import { MachineWasteboard } from './MachineWasteboard';
 import { houseDismissHouseWarning } from '@/platform/locationClient';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
+import { useLocationStore } from '@/store/locationStore';
 
 /** Dismiss, then re-read `/health` (through the registry's refresh) so the warning goes. */
 async function dismissHouseWarning(): Promise<void> {
@@ -41,6 +42,8 @@ function provenance(source: string | undefined, at: string | undefined): string 
 }
 
 function MachineKv({ machine }: { machine: MachineRecord }) {
+  // #447: the margins moved off the record into the shop defaults; a null section then says where.
+  const marginsHome = useLocationStore((s) => s.marginsHome);
   const vise = machine.fixtures?.vise;
   const sacrificial = machine.fixtures?.sacrificial;
   return (
@@ -59,7 +62,13 @@ function MachineKv({ machine }: { machine: MachineRecord }) {
       </Kv>
       <Kv label="vise">{vise === undefined ? '— the shipped default' : provenance(vise.source, vise.measuredAt)}</Kv>
       <Kv label="sacrificial">{sacrificial === undefined ? '— none saved' : sacrificial.source}</Kv>
-      <Kv label="depth margins">{machine.margins === null ? '— not in the location' : machine.margins.source}</Kv>
+      <Kv label="depth margins">
+        {machine.margins !== null
+          ? machine.margins.source
+          : marginsHome === 'defaults'
+            ? 'in the shop defaults (margins.*)'
+            : '— not in the location'}
+      </Kv>
       <Kv label="recorded">{formatStamp(machine.updatedAt) ?? machine.updatedAt}</Kv>
       {/* #417 — the wasteboard, and #416 — the optional power switch (which draws nothing when the
           machine has none, beyond a collapsed set-up on the desktop build). */}

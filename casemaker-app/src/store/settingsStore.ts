@@ -44,6 +44,12 @@ export interface AppSettings {
    *
    * A house default is not a recommendation (decision 28): `source` says whether this is the
    * shipped set or the user's own, and a job's own `margins` always wins over it.
+   *
+   * #447: with a location whose service serves the shop defaults, this is a PROJECTION of the
+   * `margins.*` keys of `location.json` (`store/shopMargins.ts`, kept in step by `locationStore`) and
+   * the copy in browser storage is only a start-up cache the location overwrites on connect. With no
+   * house service (the hosted web build) it is this browser's own setting, as before, and the
+   * Settings menu says so.
    */
   margins: MarginSettings;
   /**
@@ -284,6 +290,7 @@ export function parseMargins(raw: unknown): MarginSettings {
   ) {
     return { ...MARGIN_DEFAULTS };
   }
+  const tol = thicknessTolerance(o.measuredThicknessTolerance);
   return {
     boundaryMargin: o.boundaryMargin as number,
     zTolerance: o.zTolerance as number,
@@ -291,8 +298,19 @@ export function parseMargins(raw: unknown): MarginSettings {
     edgeMargin: o.edgeMargin as number,
     breakthrough: o.breakthrough as number,
     jawClearance: (rawClearance as number | undefined) ?? MARGIN_DEFAULTS.jawClearance,
+    ...(tol !== undefined ? { measuredThicknessTolerance: tol } : {}),
     source: source as MarginSettings['source'],
   };
+}
+
+/**
+ * #447's optional `measuredThicknessTolerance`: a number of 0 or more is kept; anything else —
+ * absent, or malformed — is `undefined`, no opinion, and the reader falls back to the shop's value
+ * or the constant. It is dropped ALONE (#447 review): an optional figure with its own fallback is no
+ * reason to throw away the five thresholds beside it.
+ */
+function thicknessTolerance(raw: unknown): number | undefined {
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? raw : undefined;
 }
 
 /**
@@ -326,6 +344,7 @@ export function parseMarginsStrict(raw: unknown): { ok: true; margins: MarginSet
   ) {
     return { ok: false, reason: "the margins record's jawClearance is not a number" };
   }
+  const tol = thicknessTolerance(o.measuredThicknessTolerance);
   return {
     ok: true,
     margins: {
@@ -335,6 +354,7 @@ export function parseMarginsStrict(raw: unknown): { ok: true; margins: MarginSet
       edgeMargin: o.edgeMargin as number,
       breakthrough: o.breakthrough as number,
       jawClearance: (rawClearance as number | undefined) ?? MARGIN_DEFAULTS.jawClearance,
+      ...(tol !== undefined ? { measuredThicknessTolerance: tol } : {}),
       source: source as MarginSettings['source'],
     },
   };

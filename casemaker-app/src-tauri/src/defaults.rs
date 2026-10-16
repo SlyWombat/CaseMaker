@@ -261,6 +261,16 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // compiled in"). Both chosen, not measured (Q19); the first two-tool cut replaces them.
     ("rest.overlapMm", 0.5, "mm", "chosen, not measured: the LEAST the band both programs cut at the seam may be. The band itself is worked out per job from that job's own two cutters, and this is the floor under it — a 2 mm cutter at a 0.9 mm step-over leaves slivers 0.107 mm wide and a 0.6 mm rest cutter closes anything narrower, so the badge's pair needs about 0.493 mm. The first two-tool cut replaces this"),
     ("rest.thirdToolPct", 2.0, "%", "chosen, not measured: the share of a job's own removal area that may still be standing after both programs have run before a third cutter is suggested"),
+    // ── #447 (begin) — the house depth margins (#345), out of browser storage. Chosen, not measured:
+    // the numbers `depthBounds.ts`'s MARGIN_DEFAULTS shipped with, which a job copies or seeds from.
+    ("margins.boundaryMarginMm", 0.2, "mm", "chosen, not measured: how far every floor stays clear of a plane it must not cross; 0.2 is one printed layer at the common layer height. While it is the seed, a blank that states its print uses its own layer height instead"),
+    ("margins.zToleranceMm", 0.05, "mm", "chosen, not measured: how far this machine is expected to put the blank and the registration out in Z; a job's recommendation adds the blank's own dome to it"),
+    ("margins.minFloorMm", 1.0, "mm", "chosen, not measured: material that must remain under the deepest cut; seeds each new job, which then owns its own value"),
+    ("margins.edgeMarginMm", 1.0, "mm", "chosen, not measured: how close an item may come to a stock edge; seeds each new job"),
+    ("margins.jawClearanceMm", 1.0, "mm", "chosen, not measured: how far a cut's floor must stay above the vise jaws' tops; seeds each new job"),
+    ("margins.breakthroughMm", 0.3, "mm", "chosen, not measured: how far a through-cut may pass below the part's underside; seeds each new job"),
+    ("margins.measuredThicknessToleranceMm", 0.05, "mm", "not measured: the +/- a caliper-measured stock thickness adds to a job's Z budget; provisional until the bench measures it (#208)"),
+    // ── #447 (end)
 ];
 
 /// Yes/no starting values, seeded `chosen`-in-spirit with a note (#414: the maintainer's "option to
@@ -636,6 +646,22 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| v > 0.0 && v <= 100_000.0),
             "above 0, up to 100000 minutes",
         )),
+        // ── #447 (begin) — the house depth margins (`defaultsClient.ts` states the same bounds). From
+        // 0, because the browser setting they migrate from accepted any value of 0 or more.
+        "margins.boundaryMarginMm"
+        | "margins.zToleranceMm"
+        | "margins.minFloorMm"
+        | "margins.edgeMarginMm"
+        | "margins.jawClearanceMm"
+        | "margins.breakthroughMm" => Some(need(
+            n.is_some_and(|v| (0.0..=100.0).contains(&v)),
+            "0 to 100 mm",
+        )),
+        "margins.measuredThicknessToleranceMm" => Some(need(
+            n.is_some_and(|v| (0.0..=10.0).contains(&v)),
+            "0 to 10 mm",
+        )),
+        // ── #447 (end)
         _ => None,
     }
 }

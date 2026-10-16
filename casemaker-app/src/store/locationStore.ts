@@ -31,6 +31,16 @@
  *
  * NO LOCATION, NO CHANGE. A build with no house service (the hosted web build) never reaches
  * `present`, so nothing here runs and the settings behave exactly as before.
+ *
+ * THE DEPTH MARGINS LEFT THE MACHINE RECORD (#447). They are shop defaults now — the `margins.*` keys
+ * of the location's `defaults` section (`shopMargins.ts`) — and `settingsStore.margins` is a
+ * projection of them. On connect, {@link settleMargins} moves the old copy in ONE WAY: the machine
+ * record's `margins` (or, for a location with no machine yet, this browser's), written `chosen` with a
+ * note; only once every write is in does the record's `margins` go to `null` and this browser get
+ * its marker, so a failed move loses nothing and a later reset to the seed is never undone by an old
+ * copy. Until then — and against a service that serves no defaults section — the margins keep #412's
+ * record path (`marginsHome: 'record'`). The vise, the sacrificial setup and the calibration stay on
+ * the machine record, where #412 put them.
  */
 
 import { create } from 'zustand';
@@ -45,12 +55,29 @@ import {
   type LocationView,
   type MachineRecord,
 } from '@/platform/locationClient';
-import { useSettingsStore, type FixturesSettings } from './settingsStore';
+import { parseMarginsStrict, useSettingsStore, type FixturesSettings } from './settingsStore';
 import { useMachineStore } from './machineStore';
 import { useToolRegistryStore } from './toolRegistryStore';
 import { useShopDefaultsStore } from './shopDefaultsStore';
+import {
+  legacyMargins,
+  marginWrites,
+  marginsFromDefaults,
+  marginsMovedFor,
+  markMarginsMoved,
+  migrationNote,
+  pendingMargins,
+  setPendingMargins,
+} from './shopMargins';
 
 export type LocationStatus = 'unknown' | 'present' | 'absent' | 'error';
+
+/**
+ * Where the house depth margins live in this window (#447): `browser` with no location (the web
+ * build: browser storage, labelled), `record` on the machine record (#412's path — a service with no
+ * defaults section, or a move that has not gone in yet), `defaults` in the shop defaults.
+ */
+export type MarginsHome = 'browser' | 'record' | 'defaults';
 
 export interface LocationState {
   status: LocationStatus;
@@ -61,6 +88,8 @@ export interface LocationState {
   reason: string | null;
   /** What the last machine write said when it did not work — shown on the Machines card. */
   writeNote: string | null;
+  /** Where the depth margins live (#447). */
+  marginsHome: MarginsHome;
   refresh: () => Promise<void>;
   /** `stale` is a 412/428: the location was re-read, and the caller should merge and retry. */
   saveMachine: (record: MachineRecord) => Promise<'ok' | 'stale' | 'failed'>;
@@ -72,6 +101,7 @@ export const useLocationStore = create<LocationState>((set, get) => ({
   etag: null,
   reason: null,
   writeNote: null,
+  marginsHome: 'browser',
 
   refresh: async () => {
     const res = await houseLocation();
@@ -139,12 +169,13 @@ export function stableJson(value: unknown): string {
  * checked, nothing saved and the shipped margins has nothing to migrate — and the app is a case
  * designer first, so a user with no CNC is not given a machine they do not have.
  */
-export function hasAnythingToSeed(local: LocalMachine): boolean {
+export function hasAnythingToSeed(local: LocalMachine, marginsInRecord = true): boolean {
   return (
     local.observation !== null ||
     local.calibration !== undefined ||
     Object.keys(local.fixtures).length > 0 ||
-    local.margins.source !== 'default'
+    // #447: margins kept in the shop defaults are no reason to record a machine.
+    (marginsInRecord && local.margins.source !== 'default')
   );
 }
 
@@ -171,6 +202,8 @@ export function observationApplies(obs: MachineObservation | null, existing: Mac
 /** The three sections a window holds, by their record key. */
 const SECTIONS = ['fixtures', 'margins', 'calibration'] as const;
 type Section = (typeof SECTIONS)[number];
+/** #447: the sections once the margins live in the shop defaults. */
+const SECTIONS_WITHOUT_MARGINS: readonly Section[] = ['fixtures', 'calibration'];
 
 function localSection(local: LocalMachine, k: Section): unknown {
   return k === 'calibration' ? (local.calibration ?? null) : local[k];
@@ -194,10 +227,13 @@ export function mergeMachine(
   server: MachineRecord | null,
   base: MachineRecord | null,
   now: string,
+  // #447: false once the margins live in the shop defaults — the record's `margins` is then written
+  // `null` (the move is done) and never merged or taken into the settings.
+  marginsInRecord = true,
 ): { record: MachineRecord; fromLocation: Partial<Pick<MachineRecord, Section>> } {
   const fromLocation: Partial<Pick<MachineRecord, Section>> = {};
-  const sections = {} as Pick<MachineRecord, Section>;
-  for (const k of SECTIONS) {
+  const sections = { margins: null } as Pick<MachineRecord, Section>;
+  for (const k of marginsInRecord ? SECTIONS : SECTIONS_WITHOUT_MARGINS) {
     const mine = localSection(local, k);
     const localChanged = base === null || server === null || stableJson(mine) !== stableJson(base[k]);
     if (localChanged) {
@@ -280,7 +316,8 @@ function applySections(sections: Partial<Pick<MachineRecord, Section>>): void {
   applying = true;
   try {
     if (sections.fixtures != null) s.replaceFixtures(sections.fixtures);
-    if (sections.margins != null) s.setMargins(sections.margins);
+    // #447: margins in the shop defaults are projected from there, never from a record's old copy.
+    if (sections.margins != null && marginsInRecord()) s.setMargins(sections.margins);
     if (sections.calibration != null) s.setMachineCalibration(sections.calibration);
   } finally {
     applying = false;
@@ -321,12 +358,13 @@ export async function pushMachine(now: () => string = () => new Date().toISOStri
       const { status, location } = useLocationStore.getState();
       if (status !== 'present' || location === null) return;
       const server = location.machines[0] ?? null;
+      const withMargins = marginsInRecord();
       if (server === null) {
         // A machine this build could not read is not replaced by a seed: that would overwrite it.
         if (location.unreadableMachines.length > 0 || seedSuppressed) return;
-        if (!hasAnythingToSeed(localMachine())) return;
+        if (!hasAnythingToSeed(localMachine(), withMargins)) return;
       }
-      const { record, fromLocation } = mergeMachine(localMachine(), server, baseline, now());
+      const { record, fromLocation } = mergeMachine(localMachine(), server, baseline, now(), withMargins);
       applySections(fromLocation);
       if (server !== null && sameRecord(record, server)) {
         setBaseline(server);
@@ -357,21 +395,216 @@ export async function pushMachine(now: () => string = () => new Date().toISOStri
  * where it has one, and this window seeds it where it does not.
  */
 export async function reconcileLocation(): Promise<void> {
-  // The shop's defaults are read on the same connect: thresholds and waits come from the location.
-  void useShopDefaultsStore.getState().refresh();
-  await useLocationStore.getState().refresh();
+  // The shop's defaults are read on the same connect: thresholds and waits come from the location —
+  // and, since #447, the depth margins, so the read is awaited before the margins are settled.
+  await Promise.all([useShopDefaultsStore.getState().refresh(), useLocationStore.getState().refresh()]);
   const { status, location } = useLocationStore.getState();
   if (status !== 'present' || location === null) return;
   const existing = location.machines[0];
+  const stored = storedBaseline();
+  await settleMargins(existing ?? null, stored);
   if (existing !== undefined) {
     // #439: a base this window stored for the SAME machine is merged against — so an edit whose write
     // failed before the restart is written, and a section only the location changed is still taken in.
     // Without one, the location's record wins.
-    const stored = storedBaseline();
     if (stored !== null && stored.id === existing.id) baseline = stored;
     else applyMachineToSettings(existing);
   }
   await pushMachine();
+  confirmMarginsMoved();
+}
+
+// ── #447: the depth margins in the shop defaults ────────────────────────────────────────────────
+
+/** Whether the margins still travel on the machine record (anything but `defaults`). */
+function marginsInRecord(): boolean {
+  return useLocationStore.getState().marginsHome !== 'defaults';
+}
+
+/** True while this window writes margins: the section changes under it, and is projected after. */
+let writingMargins = false;
+/** One margins write-through at a time, in order. */
+let marginChain: Promise<void> = Promise.resolve();
+
+/** Make the shop defaults say what `want` says; one retry against a fresh read on a refusal. */
+async function writeMargins(
+  want: MarginSettings,
+  opts: { migrate: boolean; note?: string | null; asOf?: string | null },
+): Promise<boolean> {
+  writingMargins = true;
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const shop = useShopDefaultsStore.getState();
+      const writes = marginWrites(want, shop.defaults, new Date().toISOString(), opts);
+      let ok = true;
+      for (const w of writes) {
+        ok = w.op === 'set' ? await shop.set(w.key, w.value) : await shop.reset(w.key);
+        if (!ok) break;
+      }
+      if (ok) return true;
+    }
+    return false;
+  } finally {
+    writingMargins = false;
+  }
+}
+
+/** Rebuild `settingsStore.margins` from the shop defaults, when they are the margins' home. */
+export function projectMargins(): void {
+  if (writingMargins || useLocationStore.getState().marginsHome !== 'defaults') return;
+  // A section that could not be read projects nothing: the fallbacks are not the shop's numbers.
+  if (useShopDefaultsStore.getState().status !== 'present') return;
+  // An edit the shop has not taken yet stays in this window until it is written (#447 review).
+  const loc = useLocationStore.getState().location;
+  if (loc !== null && pendingMargins(loc.id) !== null) return;
+  const next = marginsFromDefaults(useShopDefaultsStore.getState().defaults);
+  if (stableJson(next) === stableJson(useSettingsStore.getState().margins)) return;
+  applying = true;
+  try {
+    useSettingsStore.getState().setMargins(next);
+  } finally {
+    applying = false;
+  }
+}
+
+/**
+ * An edit to the margins (the Settings menu, Restore, a "my machine" import), written to the shop
+ * defaults. A refused write keeps the edit — in this window, and in this browser's storage as a
+ * pending write (#447 review, the #439 way) that the next connect sends — and says so on the Machines
+ * card.
+ */
+export function writeMarginsThrough(): Promise<void> {
+  marginChain = marginChain.then(async () => {
+    if (marginsInRecord()) return;
+    const loc = useLocationStore.getState().location;
+    const want = useSettingsStore.getState().margins;
+    const at = new Date().toISOString();
+    const ok = await writeMargins(want, { migrate: false });
+    if (ok) {
+      setPendingMargins(null);
+      projectMargins();
+    } else {
+      if (loc !== null) setPendingMargins({ locationId: loc.id, margins: want, at });
+      useLocationStore.setState({
+        writeNote: `The depth margins were not saved to the shop defaults: ${useShopDefaultsStore.getState().reason ?? 'the write was refused'}. They are kept here and sent on the next connect.`,
+      });
+    }
+  });
+  return marginChain;
+}
+
+/**
+ * Send a pending margins edit left by an earlier session (#447 review). A shop key set by hand AFTER
+ * the edit is newer and kept. Still refused: the edit stays pending, and in this window's settings.
+ */
+async function flushPendingMargins(locationId: string): Promise<void> {
+  const pending = pendingMargins(locationId);
+  if (pending === null) return;
+  const parsed = parseMarginsStrict(pending.margins);
+  if (!parsed.ok) {
+    setPendingMargins(null);
+    return;
+  }
+  const ok = await writeMargins(parsed.margins, { migrate: false, asOf: pending.at });
+  if (ok) {
+    setPendingMargins(null);
+    return;
+  }
+  applying = true;
+  try {
+    useSettingsStore.getState().setMargins(parsed.margins);
+  } finally {
+    applying = false;
+  }
+  useLocationStore.setState({
+    writeNote: `A depth-margin edit from an earlier session is still not saved to the shop defaults: ${useShopDefaultsStore.getState().reason ?? 'the write was refused'}.`,
+  });
+}
+
+/**
+ * The move is DONE only once the location no longer carries the old copy (#447 review): no machine
+ * record, or one whose `margins` the write-through has already emptied. Only then is this browser's
+ * marker set — a failed null-out leaves it unset, and the next connect tries again.
+ */
+function confirmMarginsMoved(): void {
+  const { status, location, marginsHome } = useLocationStore.getState();
+  if (status !== 'present' || location === null || marginsHome !== 'defaults') return;
+  const record = location.machines[0];
+  if (record === undefined || record.margins === null) markMarginsMoved(location.id);
+}
+
+/**
+ * Decide where the margins live, and move the old copy in — once (see the module doc). `storedBase` is
+ * #439's stored merge base, which tells an unsent local edit from a stale one; an import passes null,
+ * because the record it just put in place is the newer intent.
+ */
+export async function settleMargins(record: MachineRecord | null, storedBase: MachineRecord | null): Promise<void> {
+  const { status, location } = useLocationStore.getState();
+  if (status !== 'present' || location === null) return;
+  const shop = useShopDefaultsStore.getState();
+  // The location has MOVED when its record's margins are already null or this browser moved them:
+  // whatever the section read says now, margins never go back onto the record from a cache.
+  const moved = marginsMovedFor(location.id) || (record !== null && record.margins === null);
+  if (shop.status !== 'present' || shop.defaults === null) {
+    // A location that has not moved keeps #412's record path (an older service with no section, or
+    // a read that failed before the move). One that HAS moved keeps the shop defaults as the home and
+    // projects nothing until the section reads again (`projectMargins`).
+    useLocationStore.setState({ marginsHome: moved ? 'defaults' : 'record' });
+    return;
+  }
+  const legacy = legacyMargins({
+    record,
+    local: useSettingsStore.getState().margins,
+    storedBase,
+    migrated: marginsMovedFor(location.id),
+    defaults: shop.defaults,
+    same: sameMargins,
+  });
+  if (legacy !== null) {
+    const ok = await writeMargins(legacy.margins, {
+      migrate: true,
+      note: migrationNote(legacy.from),
+      asOf: legacy.asOf,
+    });
+    if (!ok) {
+      useLocationStore.setState({
+        marginsHome: 'record',
+        writeNote: `The depth margins could not be moved into the shop defaults, so they stay on the machine record: ${useShopDefaultsStore.getState().reason ?? 'the write was refused'}.`,
+      });
+      return;
+    }
+  }
+  // The marker waits for the record's copy to be emptied (`confirmMarginsMoved`, after the push).
+  useLocationStore.setState({ marginsHome: 'defaults' });
+  await flushPendingMargins(location.id);
+  projectMargins();
+}
+
+/** Two margin records alike, the #447 thickness ± aside (a projected cache carries it, a record does not). */
+function sameMargins(a: unknown, b: unknown): boolean {
+  const strip = (m: unknown) => {
+    if (m === null || typeof m !== 'object') return m;
+    const { measuredThicknessTolerance: _drop, ...rest } = m as Record<string, unknown>;
+    void _drop;
+    return rest;
+  };
+  return stableJson(strip(a)) === stableJson(strip(b));
+}
+
+/**
+ * After a location import (#447): the imported document brought its own defaults section, and maybe
+ * a machine record that still carries margins — re-read the section, and move them in.
+ */
+export async function settleMarginsAfterImport(): Promise<void> {
+  await useShopDefaultsStore.getState().refresh();
+  const { status, location } = useLocationStore.getState();
+  if (status !== 'present' || location === null) return;
+  const record = location.machines[0] ?? null;
+  // The import is the newer intent: no unsent-edit check, and a browser copy is not brought back.
+  if (record !== null && record.margins !== null) await settleMargins(record, null);
+  else if (useLocationStore.getState().marginsHome === 'defaults') projectMargins();
+  await pushMachine();
+  confirmMarginsMoved();
 }
 
 /**
@@ -392,9 +625,20 @@ export function startLocationSync(): () => void {
     void pushMachine();
   };
   const offSettings = useSettingsStore.subscribe((s, prev) => {
-    if (s.fixtures !== prev.fixtures || s.margins !== prev.margins || s.machineCalibration !== prev.machineCalibration) {
+    // #447: a margins edit goes to the shop defaults once they are its home, not to the record.
+    const marginsMoved = s.margins !== prev.margins && !applying && !marginsInRecord();
+    if (marginsMoved) void writeMarginsThrough();
+    if (
+      s.fixtures !== prev.fixtures ||
+      (s.margins !== prev.margins && !marginsMoved) ||
+      s.machineCalibration !== prev.machineCalibration
+    ) {
       onChange();
     }
+  });
+  // #447: another window's margin, a reset, or an import changes the section: project it.
+  const offDefaults = useShopDefaultsStore.subscribe((s, prev) => {
+    if (s.defaults !== prev.defaults) projectMargins();
   });
   const offMachine = useMachineStore.subscribe((s, prev) => {
     if (s.machine !== prev.machine) onChange();
@@ -402,14 +646,24 @@ export function startLocationSync(): () => void {
   return () => {
     offRegistry();
     offSettings();
+    offDefaults();
     offMachine();
   };
 }
 
 /** Test seam. */
 export function resetLocationStore(): void {
-  useLocationStore.setState({ status: 'unknown', location: null, etag: null, reason: null, writeNote: null });
+  useLocationStore.setState({
+    status: 'unknown',
+    location: null,
+    etag: null,
+    reason: null,
+    writeNote: null,
+    marginsHome: 'browser',
+  });
   pushing = null;
+  writingMargins = false;
+  marginChain = Promise.resolve();
   again = false;
   applying = false;
   baseline = null;

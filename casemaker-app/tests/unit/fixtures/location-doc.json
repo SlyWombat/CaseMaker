@@ -415,6 +415,55 @@
       "setAt": null,
       "unit": "mm"
     },
+    "margins.boundaryMarginMm": {
+      "value": 0.2,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far every floor stays clear of a plane it must not cross; 0.2 is one printed layer at the common layer height. While it is the seed, a blank that states its print uses its own layer height instead"
+    },
+    "margins.zToleranceMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far this machine is expected to put the blank and the registration out in Z; a job's recommendation adds the blank's own dome to it"
+    },
+    "margins.minFloorMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: material that must remain under the deepest cut; seeds each new job, which then owns its own value"
+    },
+    "margins.edgeMarginMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how close an item may come to a stock edge; seeds each new job"
+    },
+    "margins.jawClearanceMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far a cut's floor must stay above the vise jaws' tops; seeds each new job"
+    },
+    "margins.breakthroughMm": {
+      "value": 0.3,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far a through-cut may pass below the part's underside; seeds each new job"
+    },
+    "margins.measuredThicknessToleranceMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "not measured: the +/- a caliper-measured stock thickness adds to a job's Z budget; provisional until the bench measures it (#208)"
+    },
     "bracket.originOffsetXMm": {
       "value": 0.0,
       "source": "seeded",
