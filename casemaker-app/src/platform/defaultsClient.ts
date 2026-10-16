@@ -164,21 +164,6 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // ── #438 (end)
   // #414 — Q3: an offcut is offered only when both its sides reach this. Chosen, not measured.
   'offcut.minSideMm': { label: 'smallest offcut worth keeping (each side)', unit: 'mm', rule: z.number().min(1).max(1000), fallback: 20 },
-  // #417 — how deep a cut may go into the wasteboard before it is warned about.
-  'wasteboard.depthLimitMm': {
-    label: 'wasteboard depth limit',
-    unit: 'mm',
-    rule: z.number().min(0).max(50),
-    fallback: 0.5,
-  },
-};
-
-/**
- * Keys with NO seed and no fallback: a value that only means something once it is measured on this
- * machine (#427). Held to their rule when present; {@link readMeasured} answers null when absent.
- */
-export const MEASURED_ONLY: Readonly<Record<string, Omit<KnownDefault, 'fallback'>>> = {
-  // The machine Z of the surface the stock sits on beside the bracket — what the surface touch expects
   // #436 — rest machining's two numbers. The maintainer moved them out of code on 2026-10-16 ("That
   // type of setting should be something we keep in our own database and not compiled in"), so the
   // only literal left in TypeScript is `restSettings.ts`'s no-service fallback, and the fallbacks
@@ -200,6 +185,21 @@ export const MEASURED_ONLY: Readonly<Record<string, Omit<KnownDefault, 'fallback
     rule: z.number().min(0.1).max(50),
     fallback: REST_MACHINING_FALLBACK.thirdToolFraction * 100,
   },
+  // #417 — how deep a cut may go into the wasteboard before it is warned about.
+  'wasteboard.depthLimitMm': {
+    label: 'wasteboard depth limit',
+    unit: 'mm',
+    rule: z.number().min(0).max(50),
+    fallback: 0.5,
+  },
+};
+
+/**
+ * Keys with NO seed and no fallback: a value that only means something once it is measured on this
+ * machine (#427). Held to their rule when present; {@link readMeasured} answers null when absent.
+ */
+export const MEASURED_ONLY: Readonly<Record<string, Omit<KnownDefault, 'fallback'>>> = {
+  // The machine Z of the surface the stock sits on beside the bracket — what the surface touch expects
   // the stock's top above. `defaults.rs` bounds it the same way.
   'bracket.seatMachineZ': { label: 'surface beside the bracket, machine Z', unit: 'mm', rule: z.number().min(-150).max(0) },
 };
