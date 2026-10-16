@@ -604,6 +604,55 @@
       "setAt": null,
       "unit": "rpm",
       "note": "placeholder, not measured; not a vendor number: the drilling spindle speed until a measured row replaces it"
+    },
+    "adaptive.engagementFraction": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the most new material a clearing move may take per mm of travel, as a fraction of the cutter diameter"
+    },
+    "adaptive.stepDownMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the deepest level adaptive clearing cuts at once"
+    },
+    "adaptive.helixDiameterFraction": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the helix entry's diameter as a fraction of the cutter diameter; the helix is refused where its bore does not fit"
+    },
+    "adaptive.rampAngleDeg": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "deg",
+      "note": "chosen, not measured: the descent angle of the helix and ramp entries"
+    },
+    "adaptive.cutFeed": {
+      "value": 600.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min",
+      "note": "placeholder, not measured; not a vendor number: the adaptive clearing feed until a measured row replaces it"
+    },
+    "adaptive.entryFeed": {
+      "value": 200.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min",
+      "note": "placeholder, not measured; not a vendor number: the helix and ramp entry feed until a measured row replaces it"
+    },
+    "adaptive.spindleRpm": {
+      "value": 12000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "rpm",
+      "note": "placeholder, not measured; not a vendor number: the adaptive spindle speed until a measured row replaces it"
     }
   }
 }

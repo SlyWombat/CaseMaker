@@ -146,6 +146,15 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'drill.plungeFeed': { label: 'drilling feed (placeholder)', unit: 'mm/min', rule: z.number().min(5).max(2000), fallback: 100 },
   'drill.spindleRpm': { label: 'drilling spindle speed (placeholder)', unit: 'rpm', rule: z.number().min(1000).max(30000), fallback: 10000 },
   // #431 — the laser point-to-origin's accuracy: ±1 mm, chosen, not measured.
+  // #433 — adaptive clearing for metal pockets. The engagement, step-down, helix and ramp are chosen; the
+  // feeds and the spindle speed are our own placeholders. None measured, none a vendor number.
+  'adaptive.engagementFraction': { label: 'adaptive engagement cap, in cutter diameters (chosen)', unit: 'x', rule: z.number().min(0.02).max(0.5), fallback: 0.1 },
+  'adaptive.stepDownMm': { label: 'adaptive step-down (chosen)', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 1 },
+  'adaptive.helixDiameterFraction': { label: 'helix entry diameter, in cutter diameters (chosen)', unit: 'x', rule: z.number().min(0.1).max(0.95), fallback: 0.5 },
+  'adaptive.rampAngleDeg': { label: 'helix and ramp entry angle (chosen)', unit: 'deg', rule: z.number().min(0.5).max(30), fallback: 2 },
+  'adaptive.cutFeed': { label: 'adaptive clearing feed (placeholder)', unit: 'mm/min', rule: z.number().min(5).max(1200), fallback: 600 },
+  'adaptive.entryFeed': { label: 'adaptive entry feed (placeholder)', unit: 'mm/min', rule: z.number().min(5).max(1200), fallback: 200 },
+  'adaptive.spindleRpm': { label: 'adaptive spindle speed (placeholder)', unit: 'rpm', rule: z.number().min(1000).max(30000), fallback: 12000 },
   'laser.originUncertaintyMm': { label: 'laser point-to-origin accuracy (chosen)', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 1 },
   // ── #438 (begin) — the column engine's FLAT grid Y pitch. Chosen, not measured: the oracle's grid
   // term is half a cell diagonal, and cost grows as 1/pitch. Read by simStore at a load; the worker

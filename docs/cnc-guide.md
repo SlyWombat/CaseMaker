@@ -934,6 +934,23 @@ simulation does report about one is the sweep's own list, next:
 | `rpm-refused` | error | The requested spindle speed is so far above the ceiling it was refused. | Use a sane spindle speed. |
 | `catalogue-ignored` | warning | Makera's own table states a number this job cannot use — a `0` (Studio writes one into a column it never filled) or a speed past the ceiling — so that one field comes from the app's starting table instead of from Makera (#325). The job cuts; it does not fail. | Nothing. If every cut of this material reads this way, the vendor's row is not the one you want — set your own value for that field. |
 
+**Adaptive clearing of a metal pocket** (CAM — #433; the toolpath exists, no job panel offers it yet). Here
+*engagement* means the new material a move removes per mm of travel. On a straight cut it is the width
+of cut; into a corner or round a small bore it is more than the stepover would say. The cap is the
+location default `adaptive.engagementFraction` × the cutter's diameter. Entry moves (the helix or the ramp)
+are bounded by `adaptive.rampAngleDeg` instead.
+
+| Code | Severity | What it means in plain words | What to do |
+|---|---|---|---|
+| `adaptive-not-flat` | error | Adaptive clearing needs a flat end mill. A ball, V, chamfer, drill or bull-nose cutter is refused by name. | Choose a flat end mill. |
+| `adaptive-bad-settings` | error | The pocket has no depth, or an adaptive setting is out of range. For example, a helix wider than the cutter would leave a core of material standing in the middle. | Fix the depth or the `adaptive.*` setting the message names. |
+| `adaptive-no-room` | error | No part of the pocket is wide enough for the cutter at all. | Use a smaller cutter, or widen the pocket. |
+| `adaptive-region-too-large` | error | The pocket would need a material grid beyond what the planner holds at this engagement. A light cut on a big pocket means a fine grid. | Raise the engagement, or split the pocket. |
+| `adaptive-helix-refused` | info | The helical entry's bore does not fit at the roomiest point of the pocket, so the cutter ramps in along a straight line instead. The message gives both sizes. | Nothing. The ramp is the planned fallback. |
+| `adaptive-no-entry` | error | Neither a helix nor a ramp at least the cutter's diameter long fits, and a metal pocket is never plunged straight in. | Use a smaller cutter, a smaller helix fraction, or a wider pocket. |
+| `adaptive-engagement-exceeded` | error | Part of the pocket narrows to a slot the cutter could only cut at full width, past the cap. The message says where and how much. Another entry there would be slotting under another name. | Use a smaller cutter, or widen that part of the pocket. |
+| `adaptive-step-limit` | error | The clearing path ran past its step bound. This is a fault in the planner, refused rather than cut from a half-made plan. | Report it, with the pocket. |
+
 **Planning the probe** (probe plan — #188). The run sheet's work-origin section is this plan,
 printed (#272); the codes below are raised by no screen yet — a refusal reaches the sheet as the
 step's text:
