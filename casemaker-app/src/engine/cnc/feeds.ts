@@ -245,6 +245,29 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     provenance: PROVENANCE,
   },
   {
+    // The FINEST FLAT row (#410), for the 0.6 mm corn cutter the badge blank's text needs. It is a
+    // PLACEHOLDER and says so: no vendor row exists for this cutter's diameter, and the numbers
+    // below are the running values the 0.8-1.6 mm row already uses (the Z1's own emitted
+    // S12000 / F500 / F200) with the ENGAGEMENT cut back, because a 0.6 mm end mill is the least
+    // stiff cutter on the bench and the 0.3 mm step-down that suits a 1 mm cutter is a large bite
+    // for it. Nothing here is measured; #284's coupons are what settle it, and a coupon never edits
+    // this literal — it appends to the overlay below (#248 item 3).
+    //
+    // APPENDED, not inserted before the 0.8 mm row, on purpose: the first matching row wins, so a
+    // 0.8 mm cutter must still take the 0.8-1.6 mm row. This row covers the diameters that fall
+    // BELOW every other flat row — the 0.6 mm corn, and any finer cutter the bench acquires.
+    material: 'pla',
+    minDiameter: 0.5,
+    maxDiameter: 0.8,
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 0.2, stepOverFraction: 0.4, peckFraction: 1.0, air: true },
+    status: 'unmeasured',
+    provenance:
+      'PLACEHOLDER, nothing measured: the 0.8-1.6 mm row\'s own starting values (S12000, F500, ' +
+      'F200 — the Z1\'s emitted defaults) with the step-down and step-over cut back for a 0.6 mm ' +
+      'cutter, which is the least stiff bit the bench owns. No vendor row for this diameter. #284 ' +
+      'measures it.',
+  },
+  {
     // The V-BIT row (#405), for the single-stroke text job. Its numbers are the hand-written bench
     // file `docs/bench/185-v-groove.nc`'s own — S12000, F500 along, F200 plunge, ONE PASS to depth
     // — and the bench cut on 2026-10-15 confirmed them in a PLA blank (the 0.836 mm groove at

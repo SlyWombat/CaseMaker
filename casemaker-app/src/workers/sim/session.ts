@@ -218,6 +218,15 @@ export interface SimLoadOpts {
    * saved record can never aim this machine's probe at another one's numbers.
    */
   calibration?: MachineCalibration | null;
+  /**
+   * The material a PREVIOUS program left, as the removal mesh its own sweep produced (#410, the
+   * rest pass). This program is then swept starting from that part rather than from the blank —
+   * see `SweepOpts.priorRemoval`, which is where the subtraction happens. The EXACT sweeper
+   * takes it; a rotary job or a V-bit (the column engine) is REFUSED with `prior-removal-column`
+   * rather than swept without it, because a rest pass simulated against the wrong stock is a
+   * picture of a cut that will not happen.
+   */
+  priorRemoval?: NodeMeshOutput;
 }
 
 export interface SimSession {
@@ -325,6 +334,17 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // rotary V job is refused inside `columnSweep` rather than swept as a flat disc. This is the
     // ONE place the decision is made: a job whose tool is a cone never reaches `sweepTimeline`.
     if (timeline.summary.rotary || isVTraceTool(tool)) {
+      // A rest pass is measured against the material a previous program left, and only the exact
+      // sweeper can start from it. Silently sweeping the blank instead would draw a cut nobody is
+      // going to make, so the pair is refused by name (#410).
+      if (opts?.priorRemoval) {
+        return refuse(
+          'prior-removal-column',
+          timeline.summary.rotary
+            ? 'a rotary job cannot be a rest pass: the column engine has no way to start from the material a previous program left'
+            : `tool "${tool.name}" is a cone (a V-bit), and a rest pass is measured on a flat cutter's floor: the column engine cannot start from the material a previous program left`,
+        );
+      }
       const col = columnSweep(timeline, tool, setup, opts);
       if (!col.ok) {
         // Same contract as a refused exact sweep (#194): keep the runner's work, draw the path,

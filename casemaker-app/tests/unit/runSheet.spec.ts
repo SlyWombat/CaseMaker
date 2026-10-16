@@ -514,8 +514,11 @@ describe('runSheet (#207)', () => {
       // The tool change back, because every Z in the program is the CUTTER's.
       expect(texts[texts.length - 1]).toContain('Put the CUTTER back and measure its length again');
 
-      // What the operator writes down, so the sheet's record column is not empty for this block.
-      expect(steps.filter((s) => s.record !== undefined).map((s) => s.record)).toEqual([
+      // What the operator writes down for THIS block — the section's own Z0 blank (#410 review item
+      // 1, which is above the offer) is not one of them, so the block is sliced from the offer down.
+      const from = steps.findIndex((s) => s.text.startsWith('OPTIONAL, BEFORE THE FIRST CUT'));
+      expect(from).toBeGreaterThan(-1);
+      expect(steps.slice(from).filter((s) => s.record !== undefined).map((s) => s.record)).toEqual([
         'X where the reading stops being the blank (mm)',
         'X where the reading stops being the blank (mm)',
         'Y where the reading stops being the blank (mm)',

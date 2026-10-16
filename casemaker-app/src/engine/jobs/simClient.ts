@@ -15,6 +15,7 @@ import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { SimWorkerApi, SimFrame, SimLoadResult, SimPath, EngravePreview, EngraveGenerated } from '@/workers/sim.worker';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
+import type { DesignJobPatch, DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 import { createFrameCoalescer } from './frameCoalescer';
 
 let simWorker: Worker | null = null;
@@ -223,3 +224,17 @@ export const engraveGenerate = (
  */
 export const simOracle = (predicted: OraclePredicted[]): Promise<OracleReport> =>
   getSimApi().simOracle(predicted);
+
+/**
+ * Read a PrusaSlicer project (.3mf) as a blank-and-items patch (#410 item 4's second entry point).
+ * The parsing and the frame turn happen in the worker, which owns the ManifoldToplevel they need;
+ * what comes back is plain data for the job store, so no handle crosses.
+ *
+ * `bytes` is COPIED by structured clone, not transferred: the caller's `ArrayBuffer` is the only
+ * copy of the user's file in this realm, and a transferred one would leave the panel holding a
+ * detached buffer if the read failed.
+ */
+export const readDesign3mf = (
+  bytes: ArrayBuffer,
+  direction: DesignReadingDirection,
+): Promise<DesignJobPatch> => getSimApi().readDesign3mf(bytes, direction);

@@ -120,6 +120,24 @@ export interface EngraveGenerated {
   errors: EngraveFailure[];
 }
 
+/**
+ * #201's measurement for ONE cutter and nothing else: how much of each item its opening reaches.
+ *
+ * `engraveRegions` computes exactly these rows on its way to a toolpath, which is the right price
+ * for a job you are about to cut and the wrong one for a scan over a dozen candidate cutters
+ * (#410's reachability table), most of which will not be picked. Same `measureLabels` call, same
+ * `perChar`, same `toPartPlan`, so a share reported by a scan is the share the run would measure —
+ * the scan cannot disagree with the program it is deciding.
+ *
+ * Returns `[]` for a cutter that cannot open a region at all: a non-flat, or a V-bit, whose groove
+ * width is a function of depth (#405). Nothing was measured, so nothing is claimed.
+ */
+export function measureEngraving(tl: ManifoldToplevel, job: EngraveJob, tool: Tool): LabelEngravability[] {
+  const usable = cuttingForTrace(tool);
+  if (!usable.ok || usable.tool.shape !== 'flat') return [];
+  return measureLabels(tl, toPartPlan(job), usable.tool.radius, job.edgeMargin, perCharFor(job));
+}
+
 /** `perChar` for a job: one single-character glyph profile per character, in text order. */
 function perCharFor(job: EngraveJob): (labelId: string) => PerCharGlyph[] {
   return (labelId) => {

@@ -24,6 +24,9 @@ import { createSimSession, type SimFrame, type SimLoadOpts, type SimLoadResult, 
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import { engraveGenerate as runEngraveGenerate, type EngraveGenerated } from './sim/engraveGenerate';
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
+import { readDesign } from '@/engine/import/design3mf';
+import { parsePrusaThreeMf } from '@/engine/import/prusa3mf';
+import { designJobFor, type DesignJobPatch, type DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 
 let session: SimSession | null = null;
 async function getSession(): Promise<SimSession> {
@@ -149,6 +152,19 @@ const api = {
    */
   async simOracle(predicted: OraclePredicted[]): Promise<OracleReport> {
     return (await getSession()).oracle(predicted);
+  },
+  /**
+   * Read a PrusaSlicer project (.3mf) as a blank-and-items patch (#410 item 4's second entry
+   * point). The work is `readDesign` + `designJobFor`, both of which need a ManifoldToplevel to
+   * slice the file's meshes, which is why this is here rather than in the panel: it is the same
+   * toplevel the engrave preview slices the stock with, and `readDesign` is a synchronous,
+   * second-scale wasm call exactly like the ones this worker exists to keep off the main thread.
+   *
+   * `bytes` is the whole file. The RESULT is plain data — no handle crosses, the same rule every
+   * other method here follows — so the panel can hand it straight to the job store.
+   */
+  async readDesign3mf(bytes: ArrayBuffer, direction: DesignReadingDirection): Promise<DesignJobPatch> {
+    return designJobFor(readDesign(await getToplevel(), parsePrusaThreeMf(bytes)), { direction });
   },
 };
 

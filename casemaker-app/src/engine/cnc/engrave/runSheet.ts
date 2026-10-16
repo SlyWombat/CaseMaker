@@ -35,6 +35,17 @@ import {
   type ScanTouch,
 } from '@/engine/cnc/engrave/materialScan';
 import type { FeedsResult } from '@/engine/cnc/feeds';
+import {
+  finerThan,
+  reachTable,
+  untouchedBy,
+  untouchedByAll,
+  type Reachability,
+  type ReachRow,
+  type ReachTableRow,
+} from '@/engine/cnc/engrave/reachability';
+import { fmtDiameter } from '@/engine/cnc/engrave/recommendTool';
+import type { RestPassFacts } from '@/engine/cnc/engrave/restPass';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { VISE_BODY_DEPTH, viseEnvelope } from '@/engine/cnc/fixture';
 import { hasSacrificial, stripHeight, viseJawShift } from '@/engine/cnc/sacrificial';
@@ -894,9 +905,21 @@ function registrationSteps(job: EngraveJob, onBoard: boolean, unverified: string
     });
   });
   steps.push({
-    text: onBoard
-      ? "Z0: the PART's top face — probe it, or touch off on it. NOT the board's top face."
-      : "Z0: the blank's top face — probe it, or touch off on it.",
+    // #410 review item 1 — the Z0 the whole job is cut against, and WHO set it. A second cutter's Z0
+    // is not a second touch-off: it is the difference between this tool's PRB and the new cutter's,
+    // so both numbers have to be readable later, on paper, by an operator with the machine in front
+    // of them. The reference is named as "the tool that set Z0" rather than as the probe, because
+    // nothing here knows which of the two was in the spindle: the cutter, freshly calibrated in the
+    // step above, or the probe — and the formula's second term is whichever one it was.
+    text:
+      (onBoard
+        ? "Z0: the PART's top face — probe it, or touch off on it. NOT the board's top face."
+        : "Z0: the blank's top face — probe it, or touch off on it.") +
+      ' Record the reading AND the tool that made it: on a job cut by two cutters the second ' +
+      'program’s Z0 is worked out from this surface and the PRB of whichever tool took this ' +
+      'touch, so both go on this one blank — the first cutter’s own PRB is a separate reading, ' +
+      'taken where it is fitted.',
+    record: 'surface Z (mm) and the PRB of the tool that set Z0 (mm)',
     unverified,
   });
   steps.push({
@@ -1159,6 +1182,351 @@ export interface RunSheetOptions {
    * Nothing in the app sets it. `runSheet.spec.ts` does, so the block cannot rot while it is held.
    */
   materialScan?: boolean;
+  /**
+   * The reachability table (#410), when the caller has measured one. **Absent for every job the app
+   * and the bench script build** — nothing computes it on a hand-authored job, and no sheet that
+   * exists today gains a line.
+   *
+   * It is `Reachability` itself rather than a pre-rendered block, because the sheet is not the only
+   * place that prints it: the panel and the CLI's own report read the same object through the same
+   * `reachTable` (#410's "the run sheet and the panel cannot disagree about what a row says"). What
+   * this function adds is the sheet's framing — which numbers the operator has to record, and what
+   * the numbers mean for the bit in the collet.
+   *
+   * It exists because of the ONE case a single number cannot carry: a design whose strokes are
+   * finer than any cutter on the bench. `item-empty` refuses such a job outright, and the design
+   * route turns the item off and reports the area — so the sheet has to say which region the file
+   * asked for and no bit can cut, or the operator would find the absence only on the part.
+   */
+  reachability?: Reachability;
+  /**
+   * The regions the CALLER turned off because no cutter it measured reaches them (#410), from
+   * `untouchedByAll`. It is the one fact the table cannot carry when the table is measured on the
+   * job AS CUT: a disabled item is not in it at all, so the operator would be told a percentage of
+   * a smaller design and never told what left it.
+   *
+   * Its presence is what turns the report's last lines on; a caller that measured a job it did not
+   * edit can omit it, and the sheet then derives the same list from the table itself.
+   */
+  unreachable?: { row: ReachRow; cutters: number }[];
+  /**
+   * The two-tool rest pass (#410's scope comment), when the caller ran one. **Absent for every job
+   * the app and the bench script build** — a job document names ONE cutter, so a sheet for a single
+   * program has nothing to say about a second one, and every sheet that exists today gains no line.
+   *
+   * It carries the facts rather than the two jobs: what each program is, what tool 1 could not reach,
+   * what tool 2 measured as its rest, and what the chained simulation says is left. This sheet IS
+   * program 1's sheet — the header names its file and its hash — so the second program is described
+   * as a step of it and not given a sheet of its own, which would be two documents for one setup.
+   */
+  restPass?: RestPassFacts;
+}
+
+/** A share as the operator reads it. Rounded to the whole percent: a tenth is not a fact about a cutter. */
+function pct(share: number): string {
+  return `${Math.round(share * 100)} %`;
+}
+
+/**
+ * #410's reachability report, as sheet steps.
+ *
+ * GROUPED BY OUTCOME, not cutter by cutter. The bench's twelve owned flat end mills fall into four
+ * distinct readings on one badge — the 3.0 and 3.175 mm bits reach nothing, 2 mm reaches 62 % of the
+ * design, 1 mm 83 %, 0.6 mm 87 % — and twelve rows that say four things bury the four. Every cutter
+ * sharing a row is named in full, so a row is never a summary the operator cannot check against the
+ * tool list in their hand.
+ *
+ * Item names come from `reach.items`, which `itemName` (#211's namer) filled — the SAME namer the
+ * recommendation's own sentences use, so a region cannot be one thing here and another there. It
+ * speaks a label and an imported outline with the quotes that belong around them, so this renderer
+ * adds none of its own.
+ */
+function reachabilitySteps(
+  reach: Reachability,
+  chosenKey: string | null,
+  unreachable: { row: ReachRow; cutters: number }[],
+): RunSheetStep[] {
+  const rows = reachTable(reach);
+  const measured = rows.filter((r) => r.excluded === null);
+  const unmeasured = rows.filter((r) => r.excluded !== null);
+  const steps: RunSheetStep[] = [];
+  const name = (i: number): string => reach.items[i]?.name ?? '?';
+
+  steps.push({
+    text:
+      'What each of your cutters can actually reach on THIS design, measured from the file. A cutter ' +
+      'reaches a region only where its own width fits the strokes, so a wider bit cannot enter at ' +
+      'all; the share is the area of the region it opens, and the flats are listed largest first.',
+  });
+
+  // Identical shares on identical items are one outcome, however many cutters produce it.
+  const groups = new Map<string, ReachTableRow[]>();
+  for (const row of measured) {
+    const signature = row.shares.map((s) => (s === null ? '-' : s.toFixed(4))).join('|');
+    const group = groups.get(signature);
+    if (group) group.push(row);
+    else groups.set(signature, [row]);
+  }
+  const byDiameter = [...groups.values()].sort((a, b) => b[0]!.diameter - a[0]!.diameter);
+  for (const group of byDiameter) {
+    const head = group[0]!;
+    const shares = head.shares.map((s, i) => `${name(i)} ${pct(s ?? 0)}`).join(' · ');
+    steps.push({
+      text: `⌀ ${fmtDiameter(head.diameter)} mm — ${group.map((g) => g.key).join(', ')}`,
+      value: `${shares} · ${pct(head.total)} of the whole design`,
+    });
+  }
+
+  // The cutters that cannot open a region at all, by reason — a drill, a ball-nose or a V-bit is not
+  // a worse choice here, it is not a choice, and saying so stops an operator wondering why the bit
+  // they would have reached for is absent from the list above.
+  const byReason = new Map<string, number>();
+  for (const row of unmeasured) byReason.set(row.excluded!, (byReason.get(row.excluded!) ?? 0) + 1);
+  for (const [reason, count] of [...byReason].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    steps.push({ text: `${count} of your ${rows.length} cutters were not measured: ${reason}.` });
+  }
+
+  steps.push({
+    text: chosenKey === null ? 'No cutter from this list is on the job.' : 'The cutter on this job.',
+    value:
+      chosenKey === null
+        ? undefined
+        : `${chosenKey} — ${reach.recommendation.reason}`,
+  });
+
+  // The regions NOTHING reaches: the one number no cutter choice can change, and the reason the
+  // sheet has to name them rather than let the operator find the absence on the part. The caller's
+  // list is used when it has one — the table above may be of a job these regions were already
+  // turned off in — and derived from the table when it has not.
+  const nothingReaches = new Set(unreachable.map((u) => u.row.itemId));
+  for (const { row, cutters } of unreachable) {
+    steps.push({
+      text:
+        `${row.name} is cut by none of the ${cutters} cutters measured above — the file asks for ` +
+        `${fmtNum(row.glyphArea)} mm² of it and no bit you own reaches any of that. ` +
+        'It stays in the job turned off, so the program does not cut it.',
+      value: `${fmtNum(row.glyphArea)} mm² unreachable`,
+    });
+  }
+
+  // The other 0 %: the item IS reachable, just not by the bit in the collet. That is a decision, not
+  // a fact, so it is worded as one — with the cutter that would take it.
+  if (chosenKey !== null) {
+    for (const row of untouchedBy(reach, chosenKey)) {
+      if (nothingReaches.has(row.itemId)) continue;
+      const finer = reach.cutters
+        .filter((c) => c.excluded === null)
+        .map((c) => ({ c, r: c.rows.find((x) => x.itemId === row.itemId) }))
+        .filter((x) => x.r !== undefined && x.r.ratio > 0)
+        .sort((a, b) => b.r!.ratio - a.r!.ratio || a.c.diameter - b.c.diameter)[0];
+      steps.push({
+        text:
+          `${chosenKey} reaches none of ${row.name}` +
+          (finer ? `; ${finer.c.key} reaches ${pct(finer.r!.ratio)} of it` : '') +
+          ' — cut it with that bit, or turn the region off before generating.',
+        value: `${fmtNum(row.glyphArea)} mm² at risk`,
+      });
+    }
+    const finer = finerThan(reach, chosenKey);
+    if (finer) {
+      steps.push({
+        text:
+          `A second, finer bit reaches more: ${finer.key} at ${pct(reach.totalShare.get(finer.key) ?? 0)} ` +
+          `of the design, against ${chosenKey} at ${pct(reach.totalShare.get(chosenKey) ?? 0)}. Cutting ` +
+          'both means one program per bit — the coarse one first, the fine one for what it left — and ' +
+          'everything neither reaches is reported above.',
+      });
+    }
+  }
+
+  return steps;
+}
+
+/**
+ * #410's two-tool rest pass, as the sheet's narrative: what the second program is FOR, what it will
+ * cut, and the numbers the operator may want to check against the part afterwards.
+ *
+ * The physical routine is NOT here. Swapping the cutter, re-probing and setting Z0 a second time are
+ * things the operator does between the two programs, so they are steps of the Cut section
+ * ({@link restSwapSteps}) — a do-step filed under "what you need" would be read once, at the wrong
+ * moment, and then acted on from memory. This section is the reading; that one is the doing.
+ */
+function restPassSteps(facts: RestPassFacts): RunSheetStep[] {
+  const steps: RunSheetStep[] = [];
+  const { rough, rest } = facts;
+  const mm2 = (v: number): string => `${fmtNum(v)} mm²`;
+  const dia = (d: number): string => `⌀ ${fmtDiameter(d)} mm`;
+
+  steps.push({
+    text:
+      `This design is cut in TWO programs, one per cutter. ${rough.nc} clears every region ${dia(
+        rough.diameter,
+      )} can enter; ${rest.nc} then cuts only what the first program LEFT — the inside corners, the ` +
+      'counters, the thin strokes and the tips a wider bit cannot reach. Nothing is cut twice except ' +
+      'the band the second program deliberately overlaps.',
+    value: `${rough.key}, then ${rest.key}`,
+  });
+  steps.push({
+    text: rough.reason,
+    value: `${pct(rough.share)} of the design, ${dia(rough.diameter)}`,
+  });
+  steps.push({ text: rest.reason, value: dia(rest.diameter) });
+
+  // The items program 1 does not contain at all. Saying so is the point: the operator's copy of the
+  // first program has fewer regions in it than the file they imported, and an absence that is never
+  // named reads as a bug in the file.
+  for (const item of facts.unroughed) {
+    steps.push({
+      text:
+        `${item.name} is not in ${rough.nc} at all: ${dia(rough.diameter)} cannot enter a single stroke ` +
+        `of it (${fmtNum(item.area)} mm² of strokes at ${fmtNum(item.depth)} mm). ${rest.key} cuts it in ` +
+        'the second program.',
+      value: `${fmtNum(item.area)} mm² left to ${rest.key}`,
+    });
+  }
+
+  steps.push({
+    text:
+      `Measured against the first program’s OWN simulated removal — the material its toolpath really ` +
+      `took out, not its offset drawn wider: ${rough.nc} removes ${mm2(facts.clearedArea)} of the ` +
+      `${mm2(facts.cutArea)} ${rest.key} could open. What is left is the second program.`,
+    value: `${mm2(facts.restArea)} to cut`,
+  });
+  for (const r of facts.regions) {
+    steps.push({
+      text:
+        `${r.name} — floor at ${fmtNum(r.depth)} mm. The first program took ${mm2(r.clearedArea)} of its ` +
+        `${mm2(r.cutArea)}; ${rest.key} traverses ${mm2(r.area)} of it, overlap included.`,
+      value: `${fmtNum(r.depth)} mm deep`,
+    });
+  }
+  steps.push({
+    text:
+      `The second program reaches ${fmtNum(facts.overlap)} mm back into the first one’s territory — ` +
+      `${facts.overlapNote}. A band that wide is cut by both cutters, so the second one’s own scallop ` +
+      'at the seam falls on material that is already gone: no ridge can survive there. Do not shrink it.',
+    value: `${fmtNum(facts.overlap)} mm overlap`,
+  });
+
+  // The chained simulation, which is the only reason either number above can be trusted: program 2
+  // was swept on program 1's result, so the sweep knew what was already gone.
+  //
+  // AND THE TIME, because the volume alone misleads. On the badge blank the second program takes
+  // 99.6 mm³ of the pair's 354.5 — 28 % of the material — and 21 min 35 s of its 23 min 9 s. The
+  // reason is the overlap: the grown rest region is 233.9 mm² where only 101.5 mm² of it was ever
+  // standing material, and the other 132 mm² — the band the second program deliberately crosses to
+  // reach the seam — is traversed again at the fine bit's pace. An operator who reads only the volume
+  // concludes the fine bit is nearly idle, which is the opposite of what will happen at the machine.
+  // And the honest consequence, measured: with the overlap the region needs to stay cuttable, the
+  // pair totals 23 min 9 s against ONE ⌀0.6 mm program's 22 min 21 s on this design. The split pays
+  // where the rest is a few compact regions, not where it is the strokes.
+  const pairSeconds = rough.seconds + rest.seconds;
+  const pairVolume = rough.removedVolume + rest.removedVolume;
+  const restShare = pairSeconds === 0 ? 0 : rest.seconds / pairSeconds;
+  steps.push({
+    text:
+      `Both programs were simulated TOGETHER, the second one starting from the material the first one ` +
+      `left. ${rest.nc} removes ${fmtNum(facts.restRemovedVolume)} mm³ of the pair’s ` +
+      `${fmtNum(pairVolume)} mm³ — ${pct(pairVolume === 0 ? 0 : facts.restRemovedVolume / pairVolume)} ` +
+      'of the material, and the ONLY measure of how much of this job is clean-up.' +
+      (restShare <= 0.5
+        ? ` It is estimated at ${formatDuration(rest.seconds)} against the first program’s ` +
+          `${formatDuration(rough.seconds)}, and most of that is short passes between the shapes the ` +
+          'first program could not enter.'
+        : ` It is estimated at ${formatDuration(rest.seconds)} of this setup’s ` +
+          `${formatDuration(pairSeconds)} — MOST of it, and the reason is the seam: the second program ` +
+          `has to traverse ${mm2(facts.restArea)} to cut it, where only ` +
+          `${mm2(facts.cutArea - facts.clearedArea)} of that was ever standing material, and the rest ` +
+          `is the ${fmtNum(facts.overlap)} mm band it crosses to reach the seam. On a design whose ` +
+          'rest is the strokes themselves this split is a wash — one fine-bit program over the whole ' +
+          `file reaches the same part more simply. Run ${rough.nc} anyway: it is quick, it takes the ` +
+          'bulk of the material, and it tells the second program what it does not have to cut.'),
+    value: `${fmtNum(facts.restRemovedVolume)} mm³ · ${formatDuration(rest.seconds)}`,
+  });
+  if (facts.leftover.area > 0) {
+    const worst = facts.leftover.byItem[0];
+    steps.push({
+      text:
+        `Neither program reaches all of the design: ${mm2(facts.leftover.area)} is still standing when ` +
+        'both have run. It is the corners and the narrowest tips — a round cutter cannot open a sharp ' +
+        'inside corner, whatever the passes — and no program here claims to cut it.' +
+        (worst === undefined
+          ? ''
+          : ` The largest is ${worst.name}: ${mm2(worst.area)} of it at ${fmtNum(worst.depth)} mm.`),
+      value: `${mm2(facts.leftover.area)} unreachable`,
+    });
+  } else {
+    steps.push({
+      text:
+        'Between them the two programs open every region this design asks for: nothing is left ' +
+        'standing but the round corners the second cutter’s own width puts there.',
+    });
+  }
+  return steps;
+}
+
+/**
+ * The two-tool routine's DO-steps, for the Cut section.
+ *
+ * Z0 IS NOT RE-SET FROM THE SURFACE for the second program. The surface has moved — the first
+ * program cut into it — and the probe and the new cutter have different lengths, so the second
+ * program's zero comes from the DIFFERENCE of the two `M491` readings. That is the formula the bench
+ * used on 2026-10-15, and it is the reason this section exists at all: an operator who re-touches the
+ * surface for tool 2 cuts tool 2's depths shallow by the first program's depth.
+ *
+ * BOTH TERMS OF THE DIFFERENCE ARE ALREADY ON THE PAPER (#410 review item 1). The steps below name
+ * each one by the place it was written — "when you set the origin", "with the cutter" — and never by
+ * section number: the origin step records the surface Z TOGETHER WITH the PRB of the tool that made
+ * the touch, and the step that fits the first cutter records that cutter's own PRB, so the second
+ * program's Z0 is arithmetic over two numbers the operator wrote down at the machine rather than a
+ * third reading. That "together with" is the whole point: the formula names a reference, and until
+ * it did, nothing on the paper said WHICH tool the reference reading belonged to — the cutter,
+ * freshly calibrated, or the probe. Numbers are avoided because the printed list gains and loses
+ * sections (the rest section, the reachability table), so a number written into this text is a stale
+ * claim the first time one is added.
+ */
+function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
+  const { rough, rest } = facts;
+  const dia = `⌀ ${fmtDiameter(rest.diameter)} mm`;
+  return [
+    {
+      text:
+        `Run ${rough.nc} to the end — ${rough.moves} cutting moves, about ${formatDuration(rough.seconds)}. ` +
+        `Then home the machine and change the cutter to ${rest.key} (${dia}). Nothing moves but the Z ` +
+        'reference, so the X and Y origin stays where it is.',
+      code: '$H',
+      record: `depth after ${rough.nc} (mm), per region above`,
+      unverified: '#410',
+    },
+    {
+      text:
+        'Calibrate the new cutter’s length the same way as the first (M491) and record its PRB. This ' +
+        'is a reading of THIS cutter alone: the Z0 below compares it with the tool that set Z0, and ' +
+        'that reference reading was written down when the origin was set, so neither is re-taken here.',
+      code: 'M491',
+      record: 'the new cutter’s PRB (mm)',
+      unverified: '#410',
+    },
+    {
+      text:
+        'Set Z0 for the second program from those two readings, NOT by touching the surface again: ' +
+        'Z0 = the surface Z you recorded when you set the origin + (this cutter’s PRB − the PRB of ' +
+        'the tool that set Z0, recorded there beside it). The surface has been cut since that ' +
+        'reading, so touching it off again would sink every one of the second program’s floors by ' +
+        'the first program’s own depth.',
+      value: 'Z0 = surface + (cutter PRB − reference PRB)',
+      record: 'Z0 for the second program (mm)',
+      unverified: '#410',
+    },
+    {
+      text:
+        `Load ${rest.nc} and run it. The cutter traces only the rest: expect it to cut in short passes ` +
+        'around the shapes the first program could not enter, and to spend most of its time in the air ' +
+        'between them.',
+      value: `about ${formatDuration(rest.seconds)}`,
+      unverified: '#410',
+    },
+  ];
 }
 
 export function buildRunSheet(
@@ -1344,6 +1712,11 @@ export function buildRunSheet(
   const cutterSteps: RunSheetStep[] = [
     {
       text: 'Fit the cutter with its collar. Run tool-length calibration from Studio (M491).',
+      // #410 review item 1 — the reading itself, on paper. Every Z in the program is this cutter's,
+      // and a second cutter's Z0 is worked out from the difference between two of these readings (the
+      // swap routine in the Cut section, and the origin step), so the number has to be written down
+      // where it is taken.
+      record: "the cutter's PRB (mm)",
       unverified: UNVERIFIED,
     },
     {
@@ -1447,6 +1820,9 @@ export function buildRunSheet(
   cutSteps.push({
     text: 'Stay at the machine. Stop it if the sound changes, the blank moves, or the cutter loads up.',
   });
+  // #410 — the second program's routine joins THIS section, not the narrative one: it is a sequence
+  // of things done at the machine, in order, after the first file has run to its end.
+  if (options.restPass !== undefined) cutSteps.push(...restSwapSteps(options.restPass));
 
   // ---- 8 · Warnings carried from the app -----------------------------------------------------
   const warnings: RunSheetStep[] = [];
@@ -1504,19 +1880,38 @@ export function buildRunSheet(
     { text: 'Anything that went wrong', record: 'notes' },
   );
 
+  // #410 — the reachability report, when the caller measured one, sits directly after §1: that
+  // section names the cutter, and this one is why it is that cutter. Section NUMBERS are worked out
+  // from position below, so a sheet that gains or loses a section cannot be mis-numbered — and a
+  // sheet without this one is byte-identical to the sheet that existed before the section did.
+  const reachSteps =
+    options.reachability === undefined
+      ? null
+      : reachabilitySteps(
+          options.reachability,
+          job.toolKey,
+          options.unreachable ?? untouchedByAll(options.reachability),
+        );
+
+  const sections: { id: string; title: string; steps: RunSheetStep[] }[] = [
+    { id: 'need', title: 'What you need', steps: needSteps },
+    ...(reachSteps ? [{ id: 'reach', title: 'What each cutter reaches', steps: reachSteps }] : []),
+    ...(options.restPass
+      ? [{ id: 'rest', title: 'Two tools, one blank', steps: restPassSteps(options.restPass) }]
+      : []),
+    { id: 'mount', title: 'Mount the vise', steps: mountSteps },
+    { id: 'load', title: 'Load the blank', steps: loadSteps },
+    { id: 'cutter', title: 'Fit the cutter and measure its length', steps: cutterSteps },
+    { id: 'origin', title: 'Set the work origin', steps: originSteps },
+    { id: 'dry-run', title: 'Dry run', steps: dryRunSteps },
+    { id: 'cut', title: 'Cut', steps: cutSteps },
+    { id: 'warnings', title: 'Warnings carried from the app', steps: warnings },
+    { id: 'record', title: 'Record afterwards', steps: recordSteps },
+  ].map((section, i) => ({ ...section, title: `${i + 1} · ${section.title}` }));
+
   return {
     header,
-    sections: [
-      { id: 'need', title: '1 · What you need', steps: needSteps },
-      { id: 'mount', title: '2 · Mount the vise', steps: mountSteps },
-      { id: 'load', title: '3 · Load the blank', steps: loadSteps },
-      { id: 'cutter', title: '4 · Fit the cutter and measure its length', steps: cutterSteps },
-      { id: 'origin', title: '5 · Set the work origin', steps: originSteps },
-      { id: 'dry-run', title: '6 · Dry run', steps: dryRunSteps },
-      { id: 'cut', title: '7 · Cut', steps: cutSteps },
-      { id: 'warnings', title: '8 · Warnings carried from the app', steps: warnings },
-      { id: 'record', title: '9 · Record afterwards', steps: recordSteps },
-    ],
+    sections,
     diagram,
     // Absent rather than null for a job without sacrificial material, so its sheet — and the
     // snapshot of it — is byte-identical to before this field existed.

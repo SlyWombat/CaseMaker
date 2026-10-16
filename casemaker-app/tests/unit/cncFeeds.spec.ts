@@ -42,6 +42,15 @@ describe('the V1 feeds table', () => {
       if ((row.edge ?? 'flat') === 'v') {
         expect(row.provenance).toContain('#185');
         expect(row.provenance).toContain('185-v-groove.nc');
+      } else if (row.provenance.startsWith('PLACEHOLDER')) {
+        // #410 adds the third kind of source, and the weakest one: the finest flat row exists so
+        // the 0.6 mm corn cutter the rest pass needs is not excluded as `no-feeds`, and there is no
+        // cutter of that diameter in any vendor row and no bench cut of one — so its numbers are the
+        // 0.8-1.6 mm row's own, with the engagement cut back, and it SAYS so. A placeholder passes
+        // only by naming the issue that will measure it; without that the branch above would be a
+        // way for any row to dodge the rule.
+        expect(row.provenance).toContain('#284');
+        expect(row.provenance).toContain('nothing measured');
       } else {
         expect(row.provenance).toContain('Starting value');
         expect(row.provenance).toContain('#209');

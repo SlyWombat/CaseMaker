@@ -22,6 +22,7 @@ import {
   mayRelayoutLabels,
 } from '@/engine/cnc/engrave/blankLabelSeed';
 import { BADGE_POCKET_KEEP_OUT_ID, type BadgeBlank } from '@/engine/cnc/engrave/fromBadge';
+import { DESIGN_POCKET_KEEP_OUT_ID, designReplacesItems, type DesignJobPatch } from '@/engine/cnc/engrave/fromDesign';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
 import type { BlankParams } from '@/types/blank';
 import type { CutParams } from '@/engine/cnc/feeds';
@@ -489,6 +490,27 @@ export interface EngraveJobState {
    */
   takeBlankStock: (blank: BlankParams) => void;
   /**
+   * Take a PrusaSlicer design as this job's blank, its items and its void (#410 item 4) — the third
+   * source of a blank beside the badge and the bare blank, and the only one that also brings ITEMS.
+   *
+   * The patch is `designJobFor`'s, read out of the file in the sim worker: this method owns the
+   * WRITE, exactly as `takeBadgeBlank` owns its own, so the panel and any future caller cannot drift
+   * into two versions of "the file is the job". Three writes, in this order:
+   *
+   *   1. the STOCK, through `setStock` — the one place the `stockProud` re-derivation and the vise
+   *      follow (#344) live, rather than a second copy of them here;
+   *   2. the VOID the design brought, under its fixed id (`DESIGN_POCKET_KEEP_OUT_ID`), or that id
+   *      removed when the file has no pocket. Voids under any other id are the person's and stay;
+   *   3. the ITEMS — see `designReplacesItems`: over a job that is still the app's own, the design's
+   *      vectors REPLACE the demo words (they are laid out for a 100 × 60 mm plank and would be cut
+   *      into the badge); over a job a person has worked on, they are ADDED and the job reports what
+   *      no longer fits.
+   *
+   * The cutter and the feeds are untouched: a design states no cutter, and which bit cuts it is the
+   * reachability decision the panel makes with the numbers in front of it (#410's second half).
+   */
+  takeDesign: (patch: DesignJobPatch) => void;
+  /**
    * Give every label a depth THIS blank allows, and say who decided (#362) — the arithmetic is
    * `recommendLabelDepth`, this is only the walk over the labels and the provenance.
    *
@@ -873,6 +895,55 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       // deep" is arithmetic on the blank that was just applied, so it has to run AFTER the stock
       // and the pocket, on the job as it now stands — and after the seed, which is a label with a
       // starting depth and no claim, so this walk is what writes the number it really takes (#363).
+      get().redepthLabelsForBlank();
+    },
+
+    // #410 item 4 — the design file's route into an open job. See the interface's doc for the order
+    // of the three writes; the notes that came with the patch are the panel's to show, not the
+    // document's to hold, which is why nothing here carries them.
+    takeDesign: (patch) => {
+      get().setStock(patch.stock, 'computed');
+
+      // The void: `upsertKeepOut` under the id the design's own pocket is always declared with, so a
+      // second design lands on the same void. `takeBadgeBlank` reads its pocket's id out the same way
+      // and for the same reason — a design that states no pocket has said the job has no such void,
+      // and only THAT void is taken away.
+      if (patch.keepOut) get().upsertKeepOut(patch.keepOut);
+      else if ((get().job.keepOuts ?? []).some((k) => k.id === DESIGN_POCKET_KEEP_OUT_ID)) {
+        get().removeKeepOut(DESIGN_POCKET_KEEP_OUT_ID);
+      }
+
+      const replaces = designReplacesItems(get().job);
+      apply((current) => {
+        if (!replaces) {
+          // The person's job, with the design's items added. The blank has changed under their own
+          // items, and the findings say which of them no longer fit — reported, never moved.
+          return { ...current, vectors: [...(current.vectors ?? []), ...patch.vectors] };
+        }
+        const sources: EngraveJobSources = { ...(current.sources ?? {}), ...patch.sources };
+        // The claims on the lines this call just dropped are about lines that are gone. `takeBadgeBlank`
+        // deletes its own label claim map for the same reason (#363 review).
+        delete sources.labels;
+        return {
+          ...current,
+          // The project's own title, over the name the job shipped with. This branch is only reached
+          // by a job the app laid out, so there is no person's name to overwrite — and a design that
+          // had one to overwrite is a job a person has worked on, which is the branch above.
+          name: patch.name,
+          labels: [],
+          shapes: [],
+          combined: [],
+          traces: [],
+          drills: [],
+          vectors: patch.vectors,
+          sources,
+        };
+      });
+
+      // #362 — a depth for each line the blank has not been told about, the same walk the other two
+      // blank routes end with. A no-op on the replacement branch (the design's items are vectors and
+      // carry their own measured depths), and load-bearing on the other: those lines were laid out
+      // and depthed for a blank this call has just replaced.
       get().redepthLabelsForBlank();
     },
 

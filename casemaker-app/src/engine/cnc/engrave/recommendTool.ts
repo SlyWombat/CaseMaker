@@ -70,8 +70,12 @@ function reachOf(entry: ToolLibraryEntry): number | null {
   return entry.tool.shoulderLength ?? entry.tool.fluteLength;
 }
 
-/** Deterministic diameter formatting for a reason sentence: 1 -> "1.0", 3.175 -> "3.175". */
-function fmtDiameter(d: number): string {
+/**
+ * Deterministic diameter formatting for a reason sentence: 1 -> "1.0", 3.175 -> "3.175".
+ * Exported so the run sheet's reachability table spells a diameter the way this module's own
+ * sentences do — one cutter has one name on one sheet (#410).
+ */
+export function fmtDiameter(d: number): string {
   return Number.isInteger(d) ? d.toFixed(1) : String(d);
 }
 
@@ -97,8 +101,12 @@ function qualifyingReason(pick: ToolCandidate): string {
     : 'Largest cutter that keeps every item intact (reach not recorded).';
 }
 
-/** The item (label, shape or combined shape) a measurement row names, if the job still has it (#214/#215). */
-function findItem(job: EngraveJob, id: string): EngraveAnyItem | undefined {
+/**
+ * The item (label, shape or combined shape) a measurement row names, if the job still has it
+ * (#214/#215). Exported so `reachability.ts` prints item names the same way this module's own
+ * sentences do — one namer, so a report and a recommendation cannot describe one item differently.
+ */
+export function findItem(job: EngraveJob, id: string): EngraveAnyItem | undefined {
   return (
     job.labels.find((l) => l.id === id) ??
     job.shapes.find((s) => s.id === id) ??
@@ -107,8 +115,8 @@ function findItem(job: EngraveJob, id: string): EngraveAnyItem | undefined {
   );
 }
 
-/** A short human name for the worst item, without assuming it is a label (#214/#215). */
-function itemName(item: EngraveAnyItem): string {
+/** A short human name for the worst item, without assuming it is a label (#214/#215). Exported with {@link findItem}. */
+export function itemName(item: EngraveAnyItem): string {
   if (!('kind' in item)) return `"${item.text}"`;
   switch (item.kind) {
     case 'rect':
@@ -125,9 +133,13 @@ function itemName(item: EngraveAnyItem): string {
       return `the ${item.width} mm frame`;
     case 'cutaway':
       return `the cut-away with ${item.islands.length} island${item.islands.length === 1 ? '' : 's'}`;
-    // Imported vector outline (#217), now a member of `EngraveAnyItem`.
+    // Imported vector outline (#217), now a member of `EngraveAnyItem`. An outline imported from a
+    // PROJECT file carries the name the file gave it (#410: a PrusaSlicer volume's name), and that
+    // name is what the operator sees on the part — so it wins over a size this module could state.
     case 'vector':
-      return `the imported outline ${item.width}×${item.height} mm`;
+      return item.name !== undefined && item.name !== ''
+        ? `"${item.name}"`
+        : `the imported outline ${item.width}×${item.height} mm`;
   }
 }
 

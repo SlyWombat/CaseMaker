@@ -37,6 +37,7 @@ import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { obstructionLabels } from '@/engine/cnc/probePlan';
 import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM, segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { executeProfile, type ManifoldToplevel } from './evaluateOp';
+import { manifoldOfMesh, type NodeMeshOutput } from './meshOutput';
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
 type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
@@ -228,6 +229,15 @@ export interface SweepOpts {
    * the stock top. Below it the shoulder gate has already proven the shank clear (#314).
    */
   machine?: MillProfile;
+  /**
+   * The material a PREVIOUS program left, as a mesh (#410, the rest pass). Subtracted from the
+   * stock before the sweep begins, so this program is simulated on the part the machine will
+   * actually be holding: its `removal` is what it removes beyond that, its `result` is the blank
+   * after both programs, and a rapid into a rib the first program left standing is a crash.
+   *
+   * Unsupported by the column engine (a V-bit or a rotary job), which refuses it by name.
+   */
+  priorRemoval?: NodeMeshOutput;
 }
 
 /** A counter-clockwise n-gon inscribed in the circle of radius r about (cx, cy). */
@@ -757,7 +767,40 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   }
   const st = stockFromSetup(tl, setup);
   if (isDiag(st)) return { ok: false, diagnostics: [st] };
-  const { stock, topZ } = st;
+  let { stock, topZ } = st;
+
+  // A REST PASS (#410): the material the PREVIOUS program left is the material this one starts
+  // from. Seed the stock with it once, here, and everything downstream reads the truth rather
+  // than the blank's original shape — the air-move rechecks (a rapid through a rib the first
+  // program left standing is a crash, and a rapid over an open pocket is not), the per-checkpoint
+  // removal, `result`, the volume split and the volumetric oracle.
+  //
+  // The mesh round-trip before the original is deleted is the ONE MANIFOLD TRAP this file's
+  // `sacrificial` and `airMaterial` already avoid the same way: `subtract` is lazy, so deleting
+  // an input of the result corrupts it. A leaf has no inputs.
+  if (opts?.priorRemoval) {
+    const seed = manifoldOfMesh(tl, opts.priorRemoval);
+    if (seed === null) {
+      stock.delete();
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            severity: 'error',
+            code: 'prior-removal-invalid',
+            message: 'the material a previous program was said to have left is not a closed solid, so this sweep cannot start from it',
+          },
+        ],
+      };
+    }
+    const pre = stock.subtract(seed);
+    seed.delete();
+    const leaf = new tl.Manifold(pre.getMesh());
+    pre.delete();
+    stock.delete();
+    stock = leaf;
+    topZ = stock.boundingBox().max[2];
+  }
 
   // The sacrificial material as a SECOND body (#213 §4): the union of the job's boxes, in the
   // work frame, materialised into a true LEAF (a mesh round-trip, the same trick `playback.ts`

@@ -1,4 +1,4 @@
-import type { ManifoldToplevel } from './evaluateOp';
+import { deduplicateMesh, type ManifoldToplevel } from './evaluateOp';
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
 
@@ -48,6 +48,38 @@ export function meshOutputOf(m: ManifoldInstance, componentCount = 1): NodeMeshO
     bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
     componentCount,
   };
+}
+
+/**
+ * The OTHER direction: a closed solid from a mesh this module produced. Returns null when the
+ * mesh is not one — an empty mesh, a mesh that is not closed, or one Manifold rejects — because
+ * every caller has an honest answer for "there is nothing to measure against" and none for a crash
+ * mid-report.
+ *
+ * `deduplicateMesh` is not optional here. Manifold rejects a mesh whose shared edges do not
+ * reference identical vertex indices, and `positions` is a Float32 array, so two triangles that
+ * meet exactly can carry two spellings of the same corner. `manifoldOfMesh(meshOutputOf(m))`
+ * round-trips, which is what makes it usable as a leaf: a solid with no lazy children cannot be
+ * disturbed by deleting the handle it was built from (playback.ts, ONE MANIFOLD TRAP).
+ */
+export function manifoldOfMesh(tl: ManifoldToplevel, mesh: NodeMeshOutput): ManifoldInstance | null {
+  if (mesh.indices.length < 3 || mesh.positions.length < 9) return null;
+  const { positions, indices } = deduplicateMesh(mesh.positions, mesh.indices);
+  // `ofMesh` THROWS `ManifoldError: Not manifold` for a mesh that is not closed — it does not
+  // report through `status()` and carry on — so the two failure paths are both here. Measured, not
+  // assumed: an open triangle mesh throws, which is why this is a `try` and not just the check below.
+  let solid: ManifoldInstance;
+  try {
+    solid = tl.Manifold.ofMesh(new tl.Mesh({ numProp: 3, vertProperties: positions, triVerts: indices }));
+  } catch {
+    return null;
+  }
+  const status = solid.status();
+  if (status !== 'NoError') {
+    solid.delete();
+    return null;
+  }
+  return solid;
 }
 
 function flattenPositions(src: Float32Array, numProp: number, numVert: number): Float32Array {

@@ -1,5 +1,5 @@
 import { featureSim } from '@/platform/features';
-import { useEffect, useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
@@ -49,6 +49,7 @@ import {
 import { newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
 import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
 import { blankStockFor } from '@/engine/cnc/engrave/fromBlank';
+import { readDesignFile } from '@/engine/import/designImport';
 import {
   defaultSacrificialSide,
   defaultSacrificialUnder,
@@ -330,6 +331,7 @@ export function EngravePanel(): JSX.Element {
   const removeKeepOut = useEngraveJobStore((s) => s.removeKeepOut);
   const takeBadgeBlank = useEngraveJobStore((s) => s.takeBadgeBlank);
   const takeBlankStock = useEngraveJobStore((s) => s.takeBlankStock);
+  const takeDesign = useEngraveJobStore((s) => s.takeDesign);
   const addVector = useEngraveJobStore((s) => s.addVector);
   const updateVector = useEngraveJobStore((s) => s.updateVector);
   const removeVector = useEngraveJobStore((s) => s.removeVector);
@@ -519,6 +521,45 @@ export function EngravePanel(): JSX.Element {
     // demo words laid out for a plank on a blank that is not one.
     takeBlankStock(blankPart);
     setBlankPartNotes(blankStockFor(blankPart).notes);
+  }
+
+  // Issue #410 item 4 — the third way a blank gets into this job, and the only one that brings the
+  // ITEMS with it: a PrusaSlicer project (`.3mf`). The file is read in the sim worker (it needs a
+  // ManifoldToplevel to slice the volumes) and what comes back is the same kind of patch the badge
+  // route builds; `takeDesign` owns the write.
+  //
+  // The value here is not typing three widths and four depths correctly: it is that the blank, its
+  // magnet pocket, every footprint and every floor come off the file's own mesh, in the operator's
+  // frame — the top face's depth is measured from the top face, not from a nominal height.
+  //
+  // No direction control: the shipped quarter turn is what this route uses and the first of the
+  // notes states it in words, so a job cannot be built without the operator being able to read
+  // which way it went.
+  const designInputRef = useRef<HTMLInputElement>(null);
+  const [designNotes, setDesignNotes] = useState<string[] | null>(null);
+  const [designError, setDesignError] = useState<string | null>(null);
+  const [designReading, setDesignReading] = useState(false);
+
+  async function readDesign(file: File): Promise<void> {
+    setDesignError(null);
+    setDesignNotes(null);
+    setDesignReading(true);
+    try {
+      const result = await readDesignFile(file);
+      if (!result.ok) {
+        setDesignError(result.error);
+        return;
+      }
+      // The same wait the two blank routes do and for the same reason: this patch sets the stock,
+      // and the store's own walks MEASURE what they lay out against it (#364, #365 review).
+      await ensureSeedFontsLoaded(job.labels, job.customFonts ?? []);
+      takeDesign(result.patch);
+      setDesignNotes([`Read ${result.filename}.`, ...result.patch.notes]);
+    } catch (e) {
+      setDesignError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDesignReading(false);
+    }
   }
   const errors = findings.filter((f) => f.severity === 'error');
   const blockedByFeeds = feeds !== null && !feeds.ok;
@@ -1003,6 +1044,59 @@ export function EngravePanel(): JSX.Element {
       >
         Set up this job…
       </button>
+
+      {/* #410 item 4 — the design file's way in, beside the guided setup because it is a whole-job
+          entry and not a stock field: it brings the blank, the void AND the items. Its own button
+          rather than a step of the wizard, because the file answers questions the wizard would
+          otherwise ask and then have to be corrected. */}
+      <button
+        type="button"
+        data-testid="engrave-design-import"
+        disabled={designReading}
+        title="Read a PrusaSlicer project (.3mf): its blank, its magnet pocket and every volume it cuts become this job. The cutter, the vise and the margins are left as they are."
+        style={{ width: '100%', padding: 6 }}
+        onClick={() => designInputRef.current?.click()}
+      >
+        {designReading ? 'Reading the design…' : 'Import a design (.3mf)…'}
+      </button>
+      {/* A plain file input, hidden, rather than the File System Access picker `openTextFile` uses:
+          the picker is Chrome-only, and this route needs the BYTES, not a decoded string. */}
+      <input
+        ref={designInputRef}
+        type="file"
+        accept=".3mf,model/3mf"
+        style={{ display: 'none' }}
+        data-testid="engrave-design-input"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file) void readDesign(file);
+        }}
+      />
+      {designError && (
+        <p style={{ ...MUTED, color: SEVERITY_COLOR.error }} data-testid="engrave-design-error">
+          {designError}
+        </p>
+      )}
+      {designNotes && (
+        // Closed by default, unlike the two blank routes' notes: this patch describes a whole
+        // printed badge, and `designJobFor` says everything it settled — the blank, the turn, the
+        // colour split, the dome, the void and every volume's own depth. As an open block that is
+        // forty lines between the button and the Stock fields, which pushes the cutter and Generate
+        // below the fold of a job that has just been read successfully. The first note names the
+        // file, so the summary is where the operator is told what happened and the rest is one
+        // press away (#410 review).
+        <details data-testid="engrave-design-notes" style={{ marginTop: 2 }}>
+          <summary data-testid="engrave-design-summary" style={{ ...MUTED, cursor: 'pointer' }}>
+            {designNotes[0]} {designNotes.length - 1} notes on what the file settled.
+          </summary>
+          {designNotes.slice(1).map((note, i) => (
+            <p key={i} style={MUTED} data-testid={`engrave-design-note-${i}`}>
+              {note}
+            </p>
+          ))}
+        </details>
+      )}
 
       {/* 1 — stock */}
       <h3 style={SUBHEAD}>Stock</h3>

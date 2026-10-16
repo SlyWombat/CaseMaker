@@ -859,6 +859,8 @@ simulation does report about one is the sweep's own list, next:
 |---|---|---|---|
 | `stock-unsupported` | error | V1 sweeps a rectangular (prism) block only. | Use a rectangular blank. |
 | `stock-invalid` | error | Stock thickness is not positive. | Type a real thickness. |
+| `prior-removal-invalid` | error | A rest pass was told what material a previous program left (#410), and that material is not a closed solid — so the sweep has no starting material to subtract from. | Simulate the first program and pass ITS result. |
+| `prior-removal-column` | error | A rest pass was asked for on a job the COLUMN engine sweeps — a rotary job, or a V-bit, whose cutting width changes with depth. Only the exact 2.5D sweep can start from the material a previous program left, so the pair is refused by name rather than swept from the blank (#410). | Measure the rest with a flat cutter, or cut the second program as a program of its own. |
 | `air-moves-unchecked` | warning | More air moves than the app checks; some were not verified. | Split a very long job. |
 | `spindle-off-near-bed` | error | A feed move with the spindle off comes within a hair of the bed. | Turn the spindle on, or move it away. |
 | `rapid-below-bed` | error | A rapid goes below the bed. | Fix the Z. |

@@ -171,6 +171,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
       "id": "cutter",
       "steps": [
         {
+          "record": "the cutter's PRB (mm)",
           "text": "Fit the cutter with its collar. Run tool-length calibration from Studio (M491).",
           "unverified": "#208",
         },
@@ -201,7 +202,8 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
           "unverified": "#208",
         },
         {
-          "text": "Z0: the blank's top face — probe it, or touch off on it.",
+          "record": "surface Z (mm) and the PRB of the tool that set Z0 (mm)",
+          "text": "Z0: the blank's top face — probe it, or touch off on it. Record the reading AND the tool that made it: on a job cut by two cutters the second program’s Z0 is worked out from this surface and the PRB of whichever tool took this touch, so both go on this one blank — the first cutter’s own PRB is a separate reading, taken where it is fitted.",
           "unverified": "#208",
         },
         {
@@ -459,6 +461,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
       "id": "cutter",
       "steps": [
         {
+          "record": "the cutter's PRB (mm)",
           "text": "Fit the cutter with its collar. Run tool-length calibration from Studio (M491).",
           "unverified": "#208",
         },
@@ -489,7 +492,8 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
           "unverified": "#208",
         },
         {
-          "text": "Z0: the blank's top face — probe it, or touch off on it.",
+          "record": "surface Z (mm) and the PRB of the tool that set Z0 (mm)",
+          "text": "Z0: the blank's top face — probe it, or touch off on it. Record the reading AND the tool that made it: on a job cut by two cutters the second program’s Z0 is worked out from this surface and the PRB of whichever tool took this touch, so both go on this one blank — the first cutter’s own PRB is a separate reading, taken where it is fitted.",
           "unverified": "#208",
         },
         {
