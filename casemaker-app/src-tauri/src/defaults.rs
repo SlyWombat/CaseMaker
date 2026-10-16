@@ -80,6 +80,22 @@ pub const MEASURED_SEEDS: &[(&str, f64, &str, &str, &str)] = &[
         "the wired probe tip's outside diameter, as recorded with the 2026-10-15 bench scan: an opening must \
          be wider than this to be entered at all",
     ),
+    // ── #421 (begin) — the run plan's phase times, timed in docs/bench/traces/2026-10-15-console.log.
+    (
+        "plan.homeSeconds",
+        27.5,
+        "s",
+        "2026-10-15T23:37:01.349Z",
+        "the mean of the five $H homes in the 2026-10-15 console trace: 27.0, 27.7, 29.4, 22.3 and 31.2 s (send to reply, 16:55, 17:14, 17:25, 19:14, 23:37)",
+    ),
+    (
+        "plan.toolLengthSeconds",
+        31.4,
+        "s",
+        "2026-10-15T18:53:49.247Z",
+        "the four complete M491 tool-length touches on the wired probe in the 2026-10-15 console trace, sent to Done ATC: 31.36, 31.25, 32.18 and 31.35 s (16:34, 16:55, 17:15, 18:53); a fifth at 18:58 ended early and is not counted",
+    ),
+    // ── #421 (end)
 ];
 
 /// What a fresh location starts with. Each is a value somebody chose for this app; the source says so.
@@ -217,6 +233,16 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // ── #438 (begin) — the column engine's FLAT grid Y pitch: chosen, not measured.
     ("sim.columnFlatPitchYMm", 0.1, "mm", "chosen, not measured: the flat simulation grid's Y pitch; the oracle's band grows with the cell and the sim's memory and time with 1/pitch"),
     // ── #438 (end)
+    // ── #421 (begin) — the run plan's phase times that the app has not timed: chosen.
+    ("plan.touchSeconds", 15.0, "s", "chosen, not measured as the app's runner would take it: 15 s a touch, from the 2026-10-15 console trace's edge scans, driven by a console script, not the app runner. 32 touch-to-touch intervals under 20 s (G38.2 Z-5, 16:35:59 to 16:50:34): median 13.3 s, mean 14.0 s, range 10.4 to 19.7 s; the round trips between touches are included"),
+    ("plan.fitProbeSeconds", 45.0, "s", "chosen, not measured: fitting the wired probe by hand, from the plan of section 5.8; the first timed run replaces it"),
+    ("plan.fitCutterSeconds", 60.0, "s", "chosen, not measured: fitting a cutter by hand at a bit change, from the plan of section 5.8; the first timed run replaces it"),
+    ("plan.clearanceSeconds", 10.0, "s", "chosen, not measured: the vacuum off and the clearance move after a cut (observed, not timed)"),
+    ("plan.finishSeconds", 15.0, "s", "chosen, not measured: the end of a job, M332, spindle off, G28 (observed, not timed)"),
+    ("plan.autoLevelPoints", 9.0, "points", "chosen, not measured: the auto-level grid's point count, Makera Studio's own 3 x 3 default"),
+    ("plan.autoLevelPointSeconds", 10.0, "s", "chosen, not measured: one auto-level point; an estimate until #176 runs a grid here"),
+    ("plan.autoLevelShallowMm", 0.5, "mm", "chosen, not measured: on stock not known flat, a cut shallower than this wants an auto-level grid (Makera Studio's own rule)"),
+    // ── #421 (end)
     // #431 — the laser point-to-origin's accuracy, ±1 mm, until the dot is measured.
     ("laser.originUncertaintyMm", 1.0, "mm", "chosen, not measured: how far the laser dot's origin may be from the stock's corner (the dot's size, and its offset from the spindle axis, are not measured); point-to-origin is refused for a job whose edge margin is tighter"),
     // #414 — Q3's minimum offcut, 20 x 20 mm at the stock's thickness.
@@ -531,6 +557,36 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "0.05 to 0.5 mm",
         )),
         // ── #438 (end)
+        // ── #421 (begin) — the run plan's phase times (`defaultsClient.ts` states the same bounds).
+        "plan.homeSeconds" | "plan.toolLengthSeconds" => Some(need(
+            n.is_some_and(|v| (5.0..=300.0).contains(&v)),
+            "5 to 300 seconds",
+        )),
+        "plan.touchSeconds" | "plan.autoLevelPointSeconds" => Some(need(
+            n.is_some_and(|v| (1.0..=120.0).contains(&v)),
+            "1 to 120 seconds",
+        )),
+        "plan.fitProbeSeconds" | "plan.fitCutterSeconds" => Some(need(
+            n.is_some_and(|v| (5.0..=1800.0).contains(&v)),
+            "5 to 1800 seconds",
+        )),
+        "plan.clearanceSeconds" => Some(need(
+            n.is_some_and(|v| (0.0..=300.0).contains(&v)),
+            "0 to 300 seconds",
+        )),
+        "plan.finishSeconds" => Some(need(
+            n.is_some_and(|v| (0.0..=600.0).contains(&v)),
+            "0 to 600 seconds",
+        )),
+        "plan.autoLevelPoints" => Some(need(
+            n.is_some_and(|v| v.fract() == 0.0 && (4.0..=400.0).contains(&v)),
+            "a whole number of points, 4 to 400",
+        )),
+        "plan.autoLevelShallowMm" => Some(need(
+            n.is_some_and(|v| (0.05..=10.0).contains(&v)),
+            "0.05 to 10 mm",
+        )),
+        // ── #421 (end)
         "laser.originUncertaintyMm" => Some(need(
             n.is_some_and(|v| (0.05..=10.0).contains(&v)),
             "0.05 to 10 mm",

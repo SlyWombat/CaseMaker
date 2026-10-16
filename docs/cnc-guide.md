@@ -1009,6 +1009,15 @@ what a machine on a bench has been trammed to:
 | `stock-past-arm` | warning | The stock's edge is longer than the bracket arm it sits against, so only the part along the arm is squared, and the bracket's fit error grows toward the far end (#427). | Accept it for a rough part, or check the far end before cutting. |
 | `mount-unmeasured` | info | The bracket and clamp sizes are the shop's defaults, not measurements, so the clearances are only as good as those defaults (#427). | Measure the bracket and clamps with calipers and save the values in the shop defaults. |
 
+**Planning the run** (run plan — #421). The plan lists the job's phases with a time for each: home, probe in, registration, bit change, air run, cut, finish. Each time says where it came from: measured, chosen, a fallback, or estimated. No screen shows the plan yet; the job flow (#419) will show it:
+
+| Code | Severity | What it means in plain words | What to do |
+|---|---|---|---|
+| `plan-cut-unestimated` | warning | A program has no time estimate yet, usually because it has not been generated. The plan's total leaves that program out, so the total is less than the real time. | Generate the program. The plan then times it with the machine's own rapid rates. |
+| `plan-registration-unplanned` | info | A setup has no registration plan, or the registration planner refused one. Its registration time is the shop's re-registration estimate (`setups.reregisterMinutes`), not a count of its touches. | Nothing, if the estimate is close enough. Otherwise give the setup a registration plan, or fix what the planner refused. |
+| `plan-defaults-fallback` | info | No location was read, so some phase times are the app's built-in fallbacks rather than your shop's values. | Run the desktop app with its house service, so the plan reads your location's `plan.*` values. |
+| `plan-air-run-unhashed` | info | A program has no hash yet, so the plan treats it as one this machine has never run, and its air run defaults on (Q14). | Nothing: the air run is the safe default. Once the program is generated it has a hash. |
+
 ### 8.2 G-code the simulator understands
 
 > **Status: Available**.

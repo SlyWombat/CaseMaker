@@ -569,6 +569,76 @@
       "unit": "mm",
       "note": "chosen, not measured: the flat simulation grid's Y pitch; the oracle's band grows with the cell and the sim's memory and time with 1/pitch"
     },
+    "plan.homeSeconds": {
+      "value": 27.5,
+      "source": "measured",
+      "setAt": "2026-10-15T23:37:01.349Z",
+      "unit": "s",
+      "note": "the mean of the five $H homes in the 2026-10-15 console trace: 27.0, 27.7, 29.4, 22.3 and 31.2 s (send to reply, 16:55, 17:14, 17:25, 19:14, 23:37)"
+    },
+    "plan.toolLengthSeconds": {
+      "value": 31.4,
+      "source": "measured",
+      "setAt": "2026-10-15T18:53:49.247Z",
+      "unit": "s",
+      "note": "the four complete M491 tool-length touches on the wired probe in the 2026-10-15 console trace, sent to Done ATC: 31.36, 31.25, 32.18 and 31.35 s (16:34, 16:55, 17:15, 18:53); a fifth at 18:58 ended early and is not counted"
+    },
+    "plan.touchSeconds": {
+      "value": 15.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured as the app's runner would take it: 15 s a touch, from the 2026-10-15 console trace's edge scans, driven by a console script, not the app runner. 32 touch-to-touch intervals under 20 s (G38.2 Z-5, 16:35:59 to 16:50:34): median 13.3 s, mean 14.0 s, range 10.4 to 19.7 s; the round trips between touches are included"
+    },
+    "plan.fitProbeSeconds": {
+      "value": 45.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: fitting the wired probe by hand, from the plan of section 5.8; the first timed run replaces it"
+    },
+    "plan.fitCutterSeconds": {
+      "value": 60.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: fitting a cutter by hand at a bit change, from the plan of section 5.8; the first timed run replaces it"
+    },
+    "plan.clearanceSeconds": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: the vacuum off and the clearance move after a cut (observed, not timed)"
+    },
+    "plan.finishSeconds": {
+      "value": 15.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: the end of a job, M332, spindle off, G28 (observed, not timed)"
+    },
+    "plan.autoLevelPoints": {
+      "value": 9.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "points",
+      "note": "chosen, not measured: the auto-level grid's point count, Makera Studio's own 3 x 3 default"
+    },
+    "plan.autoLevelPointSeconds": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: one auto-level point; an estimate until #176 runs a grid here"
+    },
+    "plan.autoLevelShallowMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: on stock not known flat, a cut shallower than this wants an auto-level grid (Makera Studio's own rule)"
+    },
     "laser.originUncertaintyMm": {
       "value": 1.0,
       "source": "seeded",

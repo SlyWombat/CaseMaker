@@ -162,6 +162,21 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // gets the number, never this module. Fallback = columnEngine's COLUMN_FLAT_PITCH_Y_FALLBACK_MM.
   'sim.columnFlatPitchYMm': { label: 'flat simulation grid Y pitch (chosen)', unit: 'mm', rule: z.number().min(0.05).max(0.5), fallback: 0.1 },
   // ── #438 (end)
+  // ── #421 (begin) — the run plan's phase times (§5.8). Two were TIMED in the 2026-10-15 console
+  // trace and are seeded `measured` with a note (`defaults.rs`'s MEASURED_SEEDS): `$H` and `M491`. The
+  // rest are chosen — the touch time too: its series came from a console script, not the app runner. Each fallback is its seed. The remount and re-registration
+  // are the setups planner's own keys (`setups.*`, above), not restated here.
+  'plan.homeSeconds': { label: 'home ($H) (measured)', unit: 's', rule: z.number().min(5).max(300), fallback: 27.5 },
+  'plan.toolLengthSeconds': { label: 'tool-length touch, M491 (measured)', unit: 's', rule: z.number().min(5).max(300), fallback: 31.4 },
+  'plan.touchSeconds': { label: 'one registration touch (chosen)', unit: 's', rule: z.number().min(1).max(120), fallback: 15 },
+  'plan.fitProbeSeconds': { label: 'fitting the probe by hand (chosen)', unit: 's', rule: z.number().min(5).max(1800), fallback: 45 },
+  'plan.fitCutterSeconds': { label: 'fitting a cutter by hand (chosen)', unit: 's', rule: z.number().min(5).max(1800), fallback: 60 },
+  'plan.clearanceSeconds': { label: 'vacuum off and clearance after a cut (chosen)', unit: 's', rule: z.number().min(0).max(300), fallback: 10 },
+  'plan.finishSeconds': { label: 'end of the job (chosen)', unit: 's', rule: z.number().min(0).max(600), fallback: 15 },
+  'plan.autoLevelPoints': { label: 'auto-level grid points (chosen)', unit: 'points', rule: z.number().int().min(4).max(400), fallback: 9 },
+  'plan.autoLevelPointSeconds': { label: 'one auto-level point (chosen)', unit: 's', rule: z.number().min(1).max(120), fallback: 10 },
+  'plan.autoLevelShallowMm': { label: 'a cut shallower than this wants a grid (chosen)', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 0.5 },
+  // ── #421 (end)
   // #414 — Q3: an offcut is offered only when both its sides reach this. Chosen, not measured.
   'offcut.minSideMm': { label: 'smallest offcut worth keeping (each side)', unit: 'mm', rule: z.number().min(1).max(1000), fallback: 20 },
   // #436 — rest machining's two numbers. The maintainer moved them out of code on 2026-10-16 ("That
