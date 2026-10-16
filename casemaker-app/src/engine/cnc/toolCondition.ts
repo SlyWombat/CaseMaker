@@ -26,6 +26,8 @@ export const machineIdText = z.string().refine((v) => v.trim().length > 0 && !CO
 /** The most copies an item may describe, and the largest per-copy override — `tool_copy.rs`'s caps. */
 export const MAX_COPIES = 500;
 export const MAX_WARN_MINUTES = 100_000;
+/** `tool_copy.rs`'s MAX_RUNTIME_MINUTES: a sanity bound on counted runtime. */
+export const MAX_RUNTIME_MINUTES = 10_000_000;
 
 export const WhereaboutsSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('box') }).strict(),
@@ -40,6 +42,13 @@ export const ToolCopySchema = z
     /** This cutter's own runtime-warning threshold, minutes; overrides `tools.runtimeWarnMinutes`. */
     runtimeWarnMinutes: z.number().finite().positive().max(MAX_WARN_MINUTES).nullable().default(null),
     notes: z.string().nullable().default(null),
+    /**
+     * Wear-minutes COUNTED BY CASE MAKER (#414): cutting minutes × the material's wear weight, added when
+     * a run the app played finishes, to the copy recorded as in that machine. Runs from Makera Studio are
+     * not counted. `tool_copy.rs` leaves it out of the JSON while none is counted; a copy that carries
+     * one is refused by a build from before this field.
+     */
+    runtimeMinutes: z.number().finite().nonnegative().max(MAX_RUNTIME_MINUTES).nullable().default(null),
   })
   .strict();
 

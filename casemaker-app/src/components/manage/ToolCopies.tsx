@@ -16,6 +16,7 @@ import {
   MAX_WARN_MINUTES,
   copiesProblem,
   itemConditionSummary,
+  runtimeWarning,
   type Condition,
   type ToolCopy,
 } from '@/engine/cnc/toolCondition';
@@ -118,6 +119,14 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
               }}
             />
           </label>
+          <p className="hint" data-testid={`manage-copy-runtime-${i}`}>
+            {c.runtimeMinutes === null
+              ? 'runtime: none counted yet (counted by Case Maker; runs from Makera Studio are not)'
+              : `runtime: ${Math.round(c.runtimeMinutes)} min, counted by Case Maker${(() => {
+                  const w = runtimeWarning(c.runtimeMinutes, c.runtimeWarnMinutes, threshold.value);
+                  return w === null ? '' : ` — ${w}`;
+                })()}`}
+          </p>
           <button type="button" className="btn btn--sm" onClick={() => setCopies((cs) => cs.filter((_, j) => j !== i))}>
             Forget this copy’s details
           </button>
@@ -137,7 +146,7 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
           onClick={() =>
             setCopies((cs) => [
               ...cs,
-              { id: newId('copy'), condition: 'used', whereabouts: { kind: 'box' }, runtimeWarnMinutes: null, notes: null },
+              { id: newId('copy'), condition: 'used', whereabouts: { kind: 'box' }, runtimeWarnMinutes: null, notes: null, runtimeMinutes: null },
             ])
           }
         >

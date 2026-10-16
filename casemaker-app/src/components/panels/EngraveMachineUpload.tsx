@@ -5,7 +5,7 @@ import type { VerifyReport } from '@/engine/cnc/verify';
 import { describeUpload } from './engraveUploadCopy';
 import { EngraveLaserFrame } from './EngraveLaserFrame';
 import { EngraveMachineRun } from './EngraveMachineRun';
-import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
+import { machineKey, useMachineRunStore, type RunContext } from '@/store/machineRunStore';
 import { programHash } from '@/platform/machineRun';
 import { frameBounds } from '@/platform/machineLaser';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -64,6 +64,12 @@ export interface EngraveMachineUploadProps {
    * stored observation stops claiming otherwise. Optional: a test, or a host with no store, may omit it.
    */
   onLiveStatus?: (live: { busy: boolean; status: string }) => void;
+  /**
+   * What the run's end needs to know about the job (#414): its id, the shelf entry it reserved, the
+   * stock as cut, the cutter. Optional — the job flow (#419) will supply it; without it the run still
+   * counts the cutter's runtime from the program, and leaves the shelf alone with a note.
+   */
+  runContext?: Omit<RunContext, 'nc'>;
 }
 
 /** ISO → something a person reads, or the raw string when it will not parse. Never "Invalid Date". */
@@ -83,6 +89,7 @@ export function EngraveMachineUpload({
   program,
   filename,
   onLiveStatus,
+  runContext,
 }: EngraveMachineUploadProps): JSX.Element {
   const [stage, setStage] = useState<'idle' | 'confirm' | 'sending'>('idle');
   const [result, setResult] = useState<MachineUploadResult | null>(null);
@@ -138,7 +145,9 @@ export function EngraveMachineUpload({
     setResult(outcome);
     // The run panel is drawn from the machine's store entry (#423): an upload that went through is
     // what prepares it, with the program's hash for the once-per-program confirmation.
-    if (outcome.kind === 'uploaded') prepareRun({ host: machine.host, port: machine.port }, outcome.filename, programHash(program.nc));
+    if (outcome.kind === 'uploaded') {
+      prepareRun({ host: machine.host, port: machine.port }, outcome.filename, programHash(program.nc), { ...runContext, nc: program.nc });
+    }
     setStage('idle');
   }
 

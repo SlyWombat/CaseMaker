@@ -3,8 +3,12 @@
 // ONLY THE COPIES SOMEBODY SAID SOMETHING ABOUT. An inventory item is one code and a `quantity`
 // (#309); `copies` lists at most that many copies, each with the operator's condition and where it
 // is. A copy with no entry has NO condition set and is in its box — nothing is guessed, and an
-// inventory written before this field needs no migration. Runtime is #381's (its "decide first"
-// questions are open); this record carries only the per-cutter override of the warning threshold.
+// inventory written before this field needs no migration.
+//
+// RUNTIME (#381, #414) is COUNTED BY CASE MAKER: minutes of cutting-feed time weighted by the material's
+// wear weight, added when a run the app played finishes, to the copy recorded as in that machine. Jobs
+// run from Makera Studio are not counted.
+// It only warns past a threshold (Q4); it never changes the condition.
 
 use crate::house::HouseError;
 use serde::{Deserialize, Serialize};
@@ -45,12 +49,19 @@ pub struct ToolCopy {
     pub runtime_warn_minutes: Option<f64>,
     #[serde(default)]
     pub notes: Option<String>,
+    /// Wear-minutes counted by Case Maker (#414): cutting minutes × the material's wear weight. Left out
+    /// of the JSON while nothing has been counted, so such a file still imports into a build from before
+    /// this field; once a copy carries a runtime, that older build refuses it as an unknown key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_minutes: Option<f64>,
 }
 
 /// The most copies an item may describe, a cap well above any drawer. Stated in Zod too.
 pub const MAX_COPIES: usize = 500;
 /// The largest per-copy runtime-warning override, minutes — the shop default's own bound.
 pub const MAX_WARN_MINUTES: f64 = 100_000.0;
+/// The most runtime a copy may carry, minutes: a sanity bound (about nineteen years of cutting).
+pub const MAX_RUNTIME_MINUTES: f64 = 10_000_000.0;
 
 /// `copies` and `colletFits` on one item, against its `quantity`.
 pub(crate) fn validate_copies(
@@ -83,6 +94,11 @@ pub(crate) fn validate_copies(
                 return bad(format!(
                     "two copies are in machine {machine_id} at once — a spindle holds one cutter"
                 ));
+            }
+        }
+        if let Some(m) = c.runtime_minutes {
+            if !(m.is_finite() && (0.0..=MAX_RUNTIME_MINUTES).contains(&m)) {
+                return bad(format!("copy {}'s runtime must be 0 to {MAX_RUNTIME_MINUTES} minutes", c.id));
             }
         }
         if let Some(m) = c.runtime_warn_minutes {
@@ -162,8 +178,21 @@ pub(crate) fn carry_copies(
 mod tests {
     use super::*;
 
+    #[test]
+    fn runtime_is_bounded_and_left_out_when_never_counted() {
+        let mut c = copy("a", Condition::Used, Whereabouts::Box {});
+        let text = serde_json::to_string(&c).unwrap();
+        assert!(!text.contains("runtimeMinutes"), "{text}");
+        c.runtime_minutes = Some(12.5);
+        let back: ToolCopy = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.runtime_minutes, Some(12.5));
+        validate_copies("i", 1, &[c.clone()], None).unwrap();
+        c.runtime_minutes = Some(-1.0);
+        assert!(validate_copies("i", 1, &[c], None).is_err());
+    }
+
     fn copy(id: &str, c: Condition, w: Whereabouts) -> ToolCopy {
-        ToolCopy { id: id.into(), condition: c, whereabouts: w, runtime_warn_minutes: None, notes: None }
+        ToolCopy { id: id.into(), condition: c, whereabouts: w, runtime_warn_minutes: None, notes: None, runtime_minutes: None }
     }
     fn in_machine(m: &str) -> Whereabouts {
         Whereabouts::Machine { machine_id: m.into() }

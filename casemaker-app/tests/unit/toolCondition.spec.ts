@@ -29,6 +29,7 @@ const copy = (id: string, condition: ToolCopy['condition']): ToolCopy => ({
   whereabouts: { kind: 'box' },
   runtimeWarnMinutes: null,
   notes: null,
+  runtimeMinutes: null,
 });
 
 afterEach(resetInventoryConditions);

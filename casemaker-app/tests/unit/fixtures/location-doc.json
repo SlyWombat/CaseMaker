@@ -492,6 +492,48 @@
       "setAt": null,
       "unit": "mm",
       "note": "chosen placement, not a measurement: a clamp's side this far in from the corner of the edge it holds"
+    },
+    "offcut.minSideMm": {
+      "value": 20.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: an offcut is offered back to the shelf only when both its sides are at least this (Q3: only leftover stock that has some size to it)"
+    },
+    "tools.wearWeight.plastic": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: a minute cutting PLA, ABS, acrylic: the baseline"
+    },
+    "tools.wearWeight.wood": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: a minute cutting softwood, hardwood, MDF: about as hard on a cutter as plastic"
+    },
+    "tools.wearWeight.aluminium": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: a minute cutting 6061, 7075: three times the wear of plastic"
+    },
+    "tools.wearWeight.brass": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: a minute cutting brass: free-cutting, twice plastic"
+    },
+    "tools.wearWeight.copper": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: a minute cutting copper: gummy, as hard on a cutter as aluminium"
     }
   }
 }

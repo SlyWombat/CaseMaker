@@ -3777,6 +3777,7 @@ mod tests {
             whereabouts: Whereabouts::Machine { machine_id: "m-1".into() },
             runtime_warn_minutes: Some(120.0),
             notes: None,
+            runtime_minutes: None,
         }];
         item.collet_fits = Some(vec!["m-1".into()]);
         store.create_inventory(item.clone()).await.unwrap();
@@ -3794,6 +3795,7 @@ mod tests {
             whereabouts: Whereabouts::Box {},
             runtime_warn_minutes: None,
             notes: None,
+            runtime_minutes: None,
         });
         let err = store.update_inventory(too_many, Some(&etag)).await.unwrap_err();
         assert!(err.to_string().contains("only 1 are owned"), "{err}");
@@ -3816,6 +3818,7 @@ mod tests {
             },
             runtime_warn_minutes: None,
             notes: None,
+            runtime_minutes: None,
         }
     }
 

@@ -181,7 +181,14 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         15.0,
         "mm",
         "chosen placement, not a measurement: a clamp's side this far in from the corner of the edge it holds",
-    ),
+    ),    // #414 — Q3's minimum offcut, 20 x 20 mm at the stock's thickness.
+    // #414 — the maintainer, 2026-10-16: runtime is weighted by the material cut. Chosen, not measured.
+    ("tools.wearWeight.plastic", 1.0, "x", "chosen, not measured: a minute cutting PLA, ABS, acrylic: the baseline"),
+    ("tools.wearWeight.wood", 1.0, "x", "chosen, not measured: a minute cutting softwood, hardwood, MDF: about as hard on a cutter as plastic"),
+    ("tools.wearWeight.aluminium", 3.0, "x", "chosen, not measured: a minute cutting 6061, 7075: three times the wear of plastic"),
+    ("tools.wearWeight.brass", 2.0, "x", "chosen, not measured: a minute cutting brass: free-cutting, twice plastic"),
+    ("tools.wearWeight.copper", 3.0, "x", "chosen, not measured: a minute cutting copper: gummy, as hard on a cutter as aluminium"),
+    ("offcut.minSideMm", 20.0, "mm", "chosen, not measured: an offcut is offered back to the shelf only when both its sides are at least this (Q3: only leftover stock that has some size to it)"),
 ];
 
 pub fn seeded() -> ShopDefaults {
@@ -256,44 +263,167 @@ pub fn valid_key(key: &str) -> bool {
 /// The bounds of the keys this build knows. `None` for a key it does not: kept, held to the general
 /// rule only.
 fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
-    let need = |ok: bool, what: &str| if ok { Ok(()) } else { Err(format!("{key} must be {what}")) };
+    let need = |ok: bool, what: &str| {
+        if ok {
+            Ok(())
+        } else {
+            Err(format!("{key} must be {what}"))
+        }
+    };
     match key {
-        "power.onWaitSeconds" => Some(need(n.is_some_and(|v| (10.0..=1800.0).contains(&v)), "10 to 1800 seconds")),
-        "wasteboard.depthLimitMm" => Some(need(n.is_some_and(|v| (0.0..=50.0).contains(&v)), "0 to 50 mm")),
-        "registration.capBelowSurfaceMm" => Some(need(n.is_some_and(|v| (0.1..=1.0).contains(&v)), "0.1 to 1 mm")),
-        "registration.coarseStepMm" => Some(need(n.is_some_and(|v| (0.1..=10.0).contains(&v)), "0.1 to 10 mm")),
-        "registration.fineStepMm" => Some(need(n.is_some_and(|v| (0.05..=5.0).contains(&v)), "0.05 to 5 mm")),
-        "registration.parkAboveSurfaceMm" => Some(need(n.is_some_and(|v| (2.0..=30.0).contains(&v)), "2 to 30 mm")),
-        "registration.scanInsideMm" => Some(need(n.is_some_and(|v| (0.5..=30.0).contains(&v)), "0.5 to 30 mm")),
-        "registration.scanReachMm" => Some(need(n.is_some_and(|v| (0.5..=50.0).contains(&v)), "0.5 to 50 mm")),
-        "registration.cornerClearanceMm" => Some(need(n.is_some_and(|v| (0.0..=30.0).contains(&v)), "0 to 30 mm")),
-        "registration.surfaceBandMm" => Some(need(n.is_some_and(|v| (0.01..=1.0).contains(&v)), "0.01 to 1 mm")),
-        "registration.tipRadiusMm" => Some(need(n.is_some_and(|v| (0.0..=3.0).contains(&v)), "0 to 3 mm")),
-        "registration.surfaceToleranceMm" => Some(need(n.is_some_and(|v| (0.05..=10.0).contains(&v)), "0.05 to 10 mm")),
-        "registration.edgeMarginMm" => Some(need(n.is_some_and(|v| (0.01..=20.0).contains(&v)), "0.01 to 20 mm")),
-        "registration.surfaceSeekMm" => Some(need(n.is_some_and(|v| (1.0..=100.0).contains(&v)), "1 to 100 mm")),
-        "registration.touchFeed" => Some(need(n.is_some_and(|v| (10.0..=1000.0).contains(&v)), "10 to 1000 mm/min")),
-        "registration.surfaceFastFeed" => Some(need(n.is_some_and(|v| (10.0..=1000.0).contains(&v)), "10 to 1000 mm/min")),
-        "setups.minGripMm" => Some(need(n.is_some_and(|v| (0.5..=50.0).contains(&v)), "0.5 to 50 mm")),
-        "setups.remountMinutes" => Some(need(n.is_some_and(|v| (0.5..=120.0).contains(&v)), "0.5 to 120 min")),
-        "setups.reregisterMinutes" => Some(need(n.is_some_and(|v| (0.5..=120.0).contains(&v)), "0.5 to 120 min")),
-        "run.pollMs" => Some(need(n.is_some_and(|v| (2000.0..=60000.0).contains(&v)), "2000 to 60000 ms — never faster than 2 s (#386)")),
-        "run.noProgressMs" => Some(need(n.is_some_and(|v| (15000.0..=600000.0).contains(&v)), "15000 to 600000 ms")),
-        "run.missLimit" => Some(need(n.is_some_and(|v| (1.0..=10.0).contains(&v) && v.fract() == 0.0), "a whole number of polls, 1 to 10")),
-        "registration.surfaceSlowFeed" => Some(need(n.is_some_and(|v| (5.0..=500.0).contains(&v)), "5 to 500 mm/min")),
-        "bracket.originOffsetXMm" | "bracket.originOffsetYMm" => Some(need(n.is_some_and(|v| (-20.0..=20.0).contains(&v)), "-20 to 20 mm")),
-        "bracket.fitMm" => Some(need(n.is_some_and(|v| (0.01..=2.0).contains(&v)), "0.01 to 2 mm")),
-        "bracket.armLengthXMm" | "bracket.armLengthYMm" => Some(need(n.is_some_and(|v| (5.0..=300.0).contains(&v)), "5 to 300 mm")),
-        "bracket.armWidthMm" => Some(need(n.is_some_and(|v| (1.0..=50.0).contains(&v)), "1 to 50 mm")),
-        "bracket.heightMm" => Some(need(n.is_some_and(|v| (1.0..=80.0).contains(&v)), "1 to 80 mm")),
+        "power.onWaitSeconds" => Some(need(
+            n.is_some_and(|v| (10.0..=1800.0).contains(&v)),
+            "10 to 1800 seconds",
+        )),
+        "wasteboard.depthLimitMm" => Some(need(
+            n.is_some_and(|v| (0.0..=50.0).contains(&v)),
+            "0 to 50 mm",
+        )),
+        "registration.capBelowSurfaceMm" => Some(need(
+            n.is_some_and(|v| (0.1..=1.0).contains(&v)),
+            "0.1 to 1 mm",
+        )),
+        "registration.coarseStepMm" => Some(need(
+            n.is_some_and(|v| (0.1..=10.0).contains(&v)),
+            "0.1 to 10 mm",
+        )),
+        "registration.fineStepMm" => Some(need(
+            n.is_some_and(|v| (0.05..=5.0).contains(&v)),
+            "0.05 to 5 mm",
+        )),
+        "registration.parkAboveSurfaceMm" => Some(need(
+            n.is_some_and(|v| (2.0..=30.0).contains(&v)),
+            "2 to 30 mm",
+        )),
+        "registration.scanInsideMm" => Some(need(
+            n.is_some_and(|v| (0.5..=30.0).contains(&v)),
+            "0.5 to 30 mm",
+        )),
+        "registration.scanReachMm" => Some(need(
+            n.is_some_and(|v| (0.5..=50.0).contains(&v)),
+            "0.5 to 50 mm",
+        )),
+        "registration.cornerClearanceMm" => Some(need(
+            n.is_some_and(|v| (0.0..=30.0).contains(&v)),
+            "0 to 30 mm",
+        )),
+        "registration.surfaceBandMm" => Some(need(
+            n.is_some_and(|v| (0.01..=1.0).contains(&v)),
+            "0.01 to 1 mm",
+        )),
+        "registration.tipRadiusMm" => Some(need(
+            n.is_some_and(|v| (0.0..=3.0).contains(&v)),
+            "0 to 3 mm",
+        )),
+        "registration.surfaceToleranceMm" => Some(need(
+            n.is_some_and(|v| (0.05..=10.0).contains(&v)),
+            "0.05 to 10 mm",
+        )),
+        "registration.edgeMarginMm" => Some(need(
+            n.is_some_and(|v| (0.01..=20.0).contains(&v)),
+            "0.01 to 20 mm",
+        )),
+        "registration.surfaceSeekMm" => Some(need(
+            n.is_some_and(|v| (1.0..=100.0).contains(&v)),
+            "1 to 100 mm",
+        )),
+        "registration.touchFeed" => Some(need(
+            n.is_some_and(|v| (10.0..=1000.0).contains(&v)),
+            "10 to 1000 mm/min",
+        )),
+        "registration.surfaceFastFeed" => Some(need(
+            n.is_some_and(|v| (10.0..=1000.0).contains(&v)),
+            "10 to 1000 mm/min",
+        )),
+        "setups.minGripMm" => Some(need(
+            n.is_some_and(|v| (0.5..=50.0).contains(&v)),
+            "0.5 to 50 mm",
+        )),
+        "setups.remountMinutes" => Some(need(
+            n.is_some_and(|v| (0.5..=120.0).contains(&v)),
+            "0.5 to 120 min",
+        )),
+        "setups.reregisterMinutes" => Some(need(
+            n.is_some_and(|v| (0.5..=120.0).contains(&v)),
+            "0.5 to 120 min",
+        )),
+        "run.pollMs" => Some(need(
+            n.is_some_and(|v| (2000.0..=60000.0).contains(&v)),
+            "2000 to 60000 ms — never faster than 2 s (#386)",
+        )),
+        "run.noProgressMs" => Some(need(
+            n.is_some_and(|v| (15000.0..=600000.0).contains(&v)),
+            "15000 to 600000 ms",
+        )),
+        "run.missLimit" => Some(need(
+            n.is_some_and(|v| (1.0..=10.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of polls, 1 to 10",
+        )),
+        "registration.surfaceSlowFeed" => Some(need(
+            n.is_some_and(|v| (5.0..=500.0).contains(&v)),
+            "5 to 500 mm/min",
+        )),
+        "bracket.originOffsetXMm" | "bracket.originOffsetYMm" => Some(need(
+            n.is_some_and(|v| (-20.0..=20.0).contains(&v)),
+            "-20 to 20 mm",
+        )),
+        "bracket.fitMm" => Some(need(
+            n.is_some_and(|v| (0.01..=2.0).contains(&v)),
+            "0.01 to 2 mm",
+        )),
+        "bracket.armLengthXMm" | "bracket.armLengthYMm" => Some(need(
+            n.is_some_and(|v| (5.0..=300.0).contains(&v)),
+            "5 to 300 mm",
+        )),
+        "bracket.armWidthMm" => Some(need(
+            n.is_some_and(|v| (1.0..=50.0).contains(&v)),
+            "1 to 50 mm",
+        )),
+        "bracket.heightMm" => Some(need(
+            n.is_some_and(|v| (1.0..=80.0).contains(&v)),
+            "1 to 80 mm",
+        )),
         // Measured only — no seed: the machine Z of the surface the stock sits on beside the bracket.
-        "bracket.seatMachineZ" => Some(need(n.is_some_and(|v| (-150.0..=0.0).contains(&v)), "-150 to 0 (machine Z)")),
-        "clamps.topLengthMm" => Some(need(n.is_some_and(|v| (5.0..=150.0).contains(&v)), "5 to 150 mm")),
-        "clamps.topWidthMm" => Some(need(n.is_some_and(|v| (3.0..=80.0).contains(&v)), "3 to 80 mm")),
-        "clamps.topHeightMm" => Some(need(n.is_some_and(|v| (1.0..=80.0).contains(&v)), "1 to 80 mm")),
-        "clamps.topReachMm" => Some(need(n.is_some_and(|v| (1.0..=50.0).contains(&v)), "1 to 50 mm")),
-        "clamps.topInFromCornerMm" => Some(need(n.is_some_and(|v| (0.0..=200.0).contains(&v)), "0 to 200 mm")),
-        "tools.runtimeWarnMinutes" => Some(need(n.is_some_and(|v| v > 0.0 && v <= 100_000.0), "above 0, up to 100000 minutes")),
+        "bracket.seatMachineZ" => Some(need(
+            n.is_some_and(|v| (-150.0..=0.0).contains(&v)),
+            "-150 to 0 (machine Z)",
+        )),
+        "clamps.topLengthMm" => Some(need(
+            n.is_some_and(|v| (5.0..=150.0).contains(&v)),
+            "5 to 150 mm",
+        )),
+        "clamps.topWidthMm" => Some(need(
+            n.is_some_and(|v| (3.0..=80.0).contains(&v)),
+            "3 to 80 mm",
+        )),
+        "clamps.topHeightMm" => Some(need(
+            n.is_some_and(|v| (1.0..=80.0).contains(&v)),
+            "1 to 80 mm",
+        )),
+        "clamps.topReachMm" => Some(need(
+            n.is_some_and(|v| (1.0..=50.0).contains(&v)),
+            "1 to 50 mm",
+        )),
+        "clamps.topInFromCornerMm" => Some(need(
+            n.is_some_and(|v| (0.0..=200.0).contains(&v)),
+            "0 to 200 mm",
+        )),
+        "tools.wearWeight.plastic"
+        | "tools.wearWeight.wood"
+        | "tools.wearWeight.aluminium"
+        | "tools.wearWeight.brass"
+        | "tools.wearWeight.copper" => Some(need(
+            n.is_some_and(|v| (0.1..=20.0).contains(&v)),
+            "0.1 to 20",
+        )),
+        "offcut.minSideMm" => Some(need(
+            n.is_some_and(|v| (1.0..=1000.0).contains(&v)),
+            "1 to 1000 mm",
+        )),
+        "tools.runtimeWarnMinutes" => Some(need(
+            n.is_some_and(|v| v > 0.0 && v <= 100_000.0),
+            "above 0, up to 100000 minutes",
+        )),
         _ => None,
     }
 }
@@ -312,7 +442,12 @@ pub fn seed_of(key: &str) -> Option<f64> {
         .iter()
         .find(|(k, _, _)| *k == key)
         .map(|(_, v, _)| *v)
-        .or_else(|| UNMEASURED_SEEDS.iter().find(|(k, ..)| *k == key).map(|(_, v, ..)| *v))
+        .or_else(|| {
+            UNMEASURED_SEEDS
+                .iter()
+                .find(|(k, ..)| *k == key)
+                .map(|(_, v, ..)| *v)
+        })
 }
 
 /// A WRITE's extra rule (#416/#417 review): `seeded` is the app's own word for its starting value, so
@@ -320,7 +455,9 @@ pub fn seed_of(key: &str) -> Option<f64> {
 /// it sets is `chosen` or `measured`, dated.
 pub fn validate_write(key: &str, d: &ShopDefault) -> Result<(), HouseError> {
     validate_one(key, d)?;
-    if d.source == DefaultSource::Seeded && seed_of(key).is_none_or(|seed| d.value.as_f64() != Some(seed)) {
+    if d.source == DefaultSource::Seeded
+        && seed_of(key).is_none_or(|seed| d.value.as_f64() != Some(seed))
+    {
         return Err(HouseError::BadEntry(format!(
             "default {key}: only the app's own starting value is `seeded` — a value you set is `chosen` (or `measured`), with the date"
         )));
@@ -340,13 +477,22 @@ pub fn validate_one(key: &str, d: &ShopDefault) -> Result<(), HouseError> {
         serde_json::Value::String(s) if s.len() <= 200 && !s.chars().any(char::is_control) => {}
         _ => return bad("a value is a finite number, true/false or a short string".into()),
     }
-    if d.note.as_deref().is_some_and(|n| n.len() > 400 || n.chars().any(char::is_control)) {
+    if d.note
+        .as_deref()
+        .is_some_and(|n| n.len() > 400 || n.chars().any(char::is_control))
+    {
         return bad("a note is a sentence of at most 400 characters".into());
     }
-    if d.unit.as_deref().is_some_and(|u| u.len() > MAX_UNIT || u.chars().any(char::is_control)) {
-        return bad(format!("a unit is a short word ({MAX_UNIT} characters at most)"));
+    if d.unit
+        .as_deref()
+        .is_some_and(|u| u.len() > MAX_UNIT || u.chars().any(char::is_control))
+    {
+        return bad(format!(
+            "a unit is a short word ({MAX_UNIT} characters at most)"
+        ));
     }
-    if d.source != DefaultSource::Seeded && d.set_at.as_deref().is_none_or(|s| s.trim().is_empty()) {
+    if d.source != DefaultSource::Seeded && d.set_at.as_deref().is_none_or(|s| s.trim().is_empty())
+    {
         return bad("a chosen or measured value says when it was set".into());
     }
     if let Some(Err(why)) = known_rule(key, n) {
@@ -366,7 +512,10 @@ pub fn validate_all(map: &ShopDefaults) -> Result<(), HouseError> {
     // #430 review: the surface band must be inside the touch cap, or a hit at the cap's depth could
     // read as "on the stock".
     let num = |k: &str| map.get(k).and_then(|d| d.value.as_f64());
-    if let (Some(band), Some(cap)) = (num("registration.surfaceBandMm"), num("registration.capBelowSurfaceMm")) {
+    if let (Some(band), Some(cap)) = (
+        num("registration.surfaceBandMm"),
+        num("registration.capBelowSurfaceMm"),
+    ) {
         if band >= cap {
             return Err(HouseError::BadEntry(format!(
                 "registration.surfaceBandMm ({band}) must be less than registration.capBelowSurfaceMm ({cap})"
@@ -375,7 +524,10 @@ pub fn validate_all(map: &ShopDefaults) -> Result<(), HouseError> {
     }
     // The surface tolerance inside the park height, less a clearance: a surface found at the top of
     // the band must still leave the park above it (#430 re-review).
-    if let (Some(tol), Some(park)) = (num("registration.surfaceToleranceMm"), num("registration.parkAboveSurfaceMm")) {
+    if let (Some(tol), Some(park)) = (
+        num("registration.surfaceToleranceMm"),
+        num("registration.parkAboveSurfaceMm"),
+    ) {
         if tol >= park - PARK_CLEARANCE_MM {
             return Err(HouseError::BadEntry(format!(
                 "registration.surfaceToleranceMm ({tol}) must be less than registration.parkAboveSurfaceMm ({park}) less {PARK_CLEARANCE_MM}"
@@ -390,7 +542,13 @@ mod tests {
     use super::*;
 
     fn chosen(v: serde_json::Value) -> ShopDefault {
-        ShopDefault { value: v, source: DefaultSource::Chosen, set_at: Some("2026-10-15T00:00:00.000Z".into()), unit: None, note: None }
+        ShopDefault {
+            value: v,
+            source: DefaultSource::Chosen,
+            set_at: Some("2026-10-15T00:00:00.000Z".into()),
+            unit: None,
+            note: None,
+        }
     }
 
     #[test]
@@ -401,27 +559,61 @@ mod tests {
         for (k, d) in &s {
             if MEASURED_SEEDS.iter().any(|(m, ..)| m == k) {
                 assert_eq!(d.source, DefaultSource::Measured, "{k}");
-                assert!(d.set_at.is_some() && d.note.as_deref().is_some_and(|n| n.contains("2026-10-15")), "{k}");
+                assert!(
+                    d.set_at.is_some()
+                        && d.note.as_deref().is_some_and(|n| n.contains("2026-10-15")),
+                    "{k}"
+                );
             } else {
                 assert_eq!(d.source, DefaultSource::Seeded, "{k}");
             }
             // #427: an unmeasured accessory size says so, in its note.
             if UNMEASURED_SEEDS.iter().any(|(u, ..)| u == k) {
-                assert!(d.note.as_deref().is_some_and(|n| n.contains("not measured") || n.contains("not a measurement")), "{k}");
+                assert!(
+                    d.note.as_deref().is_some_and(
+                        |n| n.contains("not measured") || n.contains("not a measurement")
+                    ),
+                    "{k}"
+                );
             }
         }
         let mut band_over_cap = s.clone();
-        band_over_cap.insert("registration.surfaceBandMm".into(), ShopDefault { value: serde_json::json!(0.5), ..s["registration.surfaceBandMm"].clone() });
-        assert!(validate_all(&band_over_cap).is_err(), "a band as deep as the cap");
+        band_over_cap.insert(
+            "registration.surfaceBandMm".into(),
+            ShopDefault {
+                value: serde_json::json!(0.5),
+                ..s["registration.surfaceBandMm"].clone()
+            },
+        );
+        assert!(
+            validate_all(&band_over_cap).is_err(),
+            "a band as deep as the cap"
+        );
         let mut tol_over_park = s.clone();
-        tol_over_park.insert("registration.surfaceToleranceMm".into(), ShopDefault { value: serde_json::json!(2.6), ..s["registration.surfaceToleranceMm"].clone() });
-        assert!(validate_all(&tol_over_park).is_err(), "a tolerance that reaches the park height");
+        tol_over_park.insert(
+            "registration.surfaceToleranceMm".into(),
+            ShopDefault {
+                value: serde_json::json!(2.6),
+                ..s["registration.surfaceToleranceMm"].clone()
+            },
+        );
+        assert!(
+            validate_all(&tol_over_park).is_err(),
+            "a tolerance that reaches the park height"
+        );
         assert_eq!(s["power.onWaitSeconds"].value, serde_json::json!(180.0));
         // The bracket's seat is measured only: never seeded, bounded when set.
         assert!(!s.contains_key("bracket.seatMachineZ"));
         assert!(validate_one("bracket.seatMachineZ", &chosen(serde_json::json!(5.0))).is_err());
         validate_one("bracket.seatMachineZ", &chosen(serde_json::json!(-70.2))).unwrap();
-        validate_write("bracket.armWidthMm", &ShopDefault { note: None, ..s["bracket.armWidthMm"].clone() }).unwrap();
+        validate_write(
+            "bracket.armWidthMm",
+            &ShopDefault {
+                note: None,
+                ..s["bracket.armWidthMm"].clone()
+            },
+        )
+        .unwrap();
     }
 
     #[test]
@@ -437,7 +629,10 @@ mod tests {
         ] {
             assert!(validate_one(k, &chosen(v)).is_err(), "{k} accepted");
         }
-        let undated = ShopDefault { set_at: None, ..chosen(serde_json::json!(1)) };
+        let undated = ShopDefault {
+            set_at: None,
+            ..chosen(serde_json::json!(1))
+        };
         assert!(validate_one("rest.overlapMm", &undated).is_err());
     }
 
@@ -451,11 +646,26 @@ mod tests {
 
     #[test]
     fn seeded_is_the_apps_word_and_the_section_is_capped() {
-        let seeded = |v: serde_json::Value| ShopDefault { value: v, source: DefaultSource::Seeded, set_at: None, unit: None, note: None };
+        let seeded = |v: serde_json::Value| ShopDefault {
+            value: v,
+            source: DefaultSource::Seeded,
+            set_at: None,
+            unit: None,
+            note: None,
+        };
         validate_write("power.onWaitSeconds", &seeded(serde_json::json!(180.0))).unwrap();
-        assert!(validate_write("power.onWaitSeconds", &seeded(serde_json::json!(600))).is_err(), "a faked seed");
-        assert!(validate_write("rest.overlapMm", &seeded(serde_json::json!(0.5))).is_err(), "no seed to claim");
-        let long_unit = ShopDefault { unit: Some("millimetres-per-minute".into()), ..chosen(serde_json::json!(1)) };
+        assert!(
+            validate_write("power.onWaitSeconds", &seeded(serde_json::json!(600))).is_err(),
+            "a faked seed"
+        );
+        assert!(
+            validate_write("rest.overlapMm", &seeded(serde_json::json!(0.5))).is_err(),
+            "no seed to claim"
+        );
+        let long_unit = ShopDefault {
+            unit: Some("millimetres-per-minute".into()),
+            ..chosen(serde_json::json!(1))
+        };
         assert!(validate_one("rest.overlapMm", &long_unit).is_err());
         let mut many = seeded_map();
         for i in 0..MAX_KEYS {
@@ -474,7 +684,10 @@ mod tests {
         let d = &map["bracket.heightMm"];
         assert_eq!(d.source, DefaultSource::Seeded);
         assert_eq!(d.value, serde_json::json!(10.0));
-        assert!(d.note.as_deref().is_some_and(|n| n.contains("not measured")));
+        assert!(d
+            .note
+            .as_deref()
+            .is_some_and(|n| n.contains("not measured")));
     }
 
     fn seeded_map() -> ShopDefaults {

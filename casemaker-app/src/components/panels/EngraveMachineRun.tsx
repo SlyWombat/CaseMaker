@@ -38,6 +38,9 @@ export function EngraveMachineRun({ target }: EngraveMachineRunProps): JSX.Eleme
   const defaults = useShopDefaultsStore((s) => s.defaults);
   const start = useMachineRunStore((s) => s.start);
   const requestStop = useMachineRunStore((s) => s.requestStop);
+  const keepOffcut = useMachineRunStore((s) => s.keepOffcut);
+  const skipOffcut = useMachineRunStore((s) => s.skipOffcut);
+  const answerStockUsed = useMachineRunStore((s) => s.answerStockUsed);
   const [atMachine, setAtMachine] = useState(false);
   const [homeNote, setHomeNote] = useState<string | null>(null);
   if (!entry) return null;
@@ -122,6 +125,42 @@ export function EngraveMachineRun({ target }: EngraveMachineRunProps): JSX.Eleme
         </button>
       )}
       {homeNote !== null && <p style={MUTED}>{homeNote}</p>}
+
+      {!running && entry.pendingStock !== null && (
+        <div data-testid="engrave-run-stock-question">
+          <p style={MUTED}>
+            The run was stopped. Was the stock ({entry.pendingStock.entryId}) used? Yes takes it off the shelf; no keeps it reserved for
+            {' '}{entry.pendingStock.jobId}.
+          </p>
+          <button type="button" data-testid="engrave-run-stock-used" onClick={() => void answerStockUsed(machine, true)}>
+            Yes, it was used
+          </button>{' '}
+          <button type="button" data-testid="engrave-run-stock-unused" onClick={() => void answerStockUsed(machine, false)}>
+            No, keep it
+          </button>
+        </div>
+      )}
+      {/* #414 — the end of the run, worked out once in the store: what it did, and at most one question. */}
+      {!running && entry.end !== null && (
+        <div data-testid="engrave-run-end" data-kind={entry.end.kind}>
+          {entry.end.lines.map((l, i) => (
+            <p key={i} style={MUTED}>
+              {l}
+            </p>
+          ))}
+          {entry.end.offcut?.state === 'asked' && (
+            <div data-testid="engrave-run-offcut">
+              <p style={MUTED}>{entry.end.offcut.text}</p>
+              <button type="button" data-testid="engrave-run-offcut-keep" onClick={() => void keepOffcut(machine)}>
+                Keep it on the shelf
+              </button>{' '}
+              <button type="button" data-testid="engrave-run-offcut-skip" onClick={() => skipOffcut(machine)}>
+                Dismiss
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

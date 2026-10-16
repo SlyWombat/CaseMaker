@@ -77,7 +77,7 @@ describe('#415 review — the editor’s edges', () => {
   it('shows a copy in a machine this location does not hold as that machine, not as "in its box"', () => {
     const item = {
       ...ITEM,
-      copies: [{ id: 'c1', condition: 'used' as const, whereabouts: { kind: 'machine' as const, machineId: 'm-gone' }, runtimeWarnMinutes: null, notes: null }],
+      copies: [{ id: 'c1', condition: 'used' as const, whereabouts: { kind: 'machine' as const, machineId: 'm-gone' }, runtimeWarnMinutes: null, notes: null, runtimeMinutes: null }],
     };
     render(<ToolCopies item={item} />);
     const where = screen.getByTestId('manage-copy-where-0') as HTMLSelectElement;
