@@ -16,6 +16,7 @@
  */
 
 import { z } from 'zod';
+import { GRIP_MIN } from '@/engine/cnc/fixture';
 import {
   houseRequest,
   type HouseFailure,
@@ -99,6 +100,11 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'registration.touchFeed': { label: 'scan touch feed', unit: 'mm/min', rule: z.number().min(10).max(1000), fallback: 150.0 },
   'registration.surfaceFastFeed': { label: 'surface touch, fast', unit: 'mm/min', rule: z.number().min(10).max(1000), fallback: 300.0 },
   'registration.surfaceSlowFeed': { label: 'surface touch, slow', unit: 'mm/min', rule: z.number().min(5).max(500), fallback: 100.0 },
+  // #428 — the setups planner.
+  // The fallback is fixture.ts's GRIP_MIN — the one compiled figure, shared with validateVise.
+  'setups.minGripMm': { label: 'least stock to grip', unit: 'mm', rule: z.number().min(0.5).max(50), fallback: GRIP_MIN },
+  'setups.remountMinutes': { label: 'remount estimate', unit: 'min', rule: z.number().min(0.5).max(120), fallback: 3 },
+  'setups.reregisterMinutes': { label: 're-registration estimate', unit: 'min', rule: z.number().min(0.5).max(120), fallback: 2 },
   // #423 — the run screen's watch. 2000 ms is the poll's floor (0.6 s faulted the controller, #386).
   'run.pollMs': { label: 'run status poll', unit: 'ms', rule: z.number().min(2000).max(60000), fallback: 2000 },
   'run.noProgressMs': { label: 'no-progress timeout', unit: 'ms', rule: z.number().min(15000).max(600000), fallback: 30000 },

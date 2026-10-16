@@ -379,6 +379,24 @@
       "setAt": null,
       "unit": "ms"
     },
+    "setups.minGripMm": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "setups.remountMinutes": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "min"
+    },
+    "setups.reregisterMinutes": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "min"
+    },
     "tools.runtimeWarnMinutes": {
       "value": 600.0,
       "source": "seeded",

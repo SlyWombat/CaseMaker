@@ -102,6 +102,11 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     ("run.pollMs", 2000.0, "ms"),
     ("run.noProgressMs", 30000.0, "ms"),
     ("run.missLimit", 3.0, "polls"),
+    // #428 — the setups planner: the least stock left to grip (today's provisional GRIP_MIN), and the
+    // phase estimates for a remount and the re-registration after it — chosen, not measured.
+    ("setups.minGripMm", 3.0, "mm"),
+    ("setups.remountMinutes", 3.0, "min"),
+    ("setups.reregisterMinutes", 2.0, "min"),
 ];
 
 pub fn seeded() -> ShopDefaults {
@@ -179,6 +184,9 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "registration.surfaceSeekMm" => Some(need(n.is_some_and(|v| (1.0..=100.0).contains(&v)), "1 to 100 mm")),
         "registration.touchFeed" => Some(need(n.is_some_and(|v| (10.0..=1000.0).contains(&v)), "10 to 1000 mm/min")),
         "registration.surfaceFastFeed" => Some(need(n.is_some_and(|v| (10.0..=1000.0).contains(&v)), "10 to 1000 mm/min")),
+        "setups.minGripMm" => Some(need(n.is_some_and(|v| (0.5..=50.0).contains(&v)), "0.5 to 50 mm")),
+        "setups.remountMinutes" => Some(need(n.is_some_and(|v| (0.5..=120.0).contains(&v)), "0.5 to 120 min")),
+        "setups.reregisterMinutes" => Some(need(n.is_some_and(|v| (0.5..=120.0).contains(&v)), "0.5 to 120 min")),
         "run.pollMs" => Some(need(n.is_some_and(|v| (2000.0..=60000.0).contains(&v)), "2000 to 60000 ms — never faster than 2 s (#386)")),
         "run.noProgressMs" => Some(need(n.is_some_and(|v| (15000.0..=600000.0).contains(&v)), "15000 to 600000 ms")),
         "run.missLimit" => Some(need(n.is_some_and(|v| (1.0..=10.0).contains(&v) && v.fract() == 0.0), "a whole number of polls, 1 to 10")),

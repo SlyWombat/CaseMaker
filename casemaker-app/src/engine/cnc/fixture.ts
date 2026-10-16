@@ -53,7 +53,11 @@ import { hasSacrificial, noneSacrificial, stripHeight, viseJawShift } from './sa
 export const VISE_BODY_DEPTH = 20;
 
 /**
- * The minimum stock gripped below the jaw tops, mm, below which the part can lift.
+ * The minimum stock gripped below the jaw tops, mm, below which the part can lift — the LABELLED
+ * FALLBACK only. The shop's own value is `setups.minGripMm` in `location.json` (the maintainer's
+ * rule: thresholds live in our database, not compiled in); this is what `defaultsClient.ts`'s registry
+ * falls back to with no house service, and `validateVise`'s default when its caller passes none. One
+ * figure, one place — the setups planner and the vise check both read the shop default through it.
  *
  * PROVISIONAL (#208): a placeholder threshold; #208's measurements and test cuts replace it.
  */
@@ -109,6 +113,13 @@ export const DEFAULT_STOCK_PROUD: Mm = 4;
  * is what fixes that.
  */
 export const LEDGE_STEP: Mm = 3.1;
+
+/**
+ * The soft jaws' ledge WIDTH: how far each ledge reaches in under the blank from its jaw face, mm —
+ * calipered on 2026-10-15 (#208), with the step above. The blank's down face rests on
+ * these two strips, so a cut there leaves it nothing to sit on (#428's `rests-on-cut`).
+ */
+export const LEDGE_WIDTH: Mm = 1.9;
 
 /**
  * How far a stock of `thickness` stands proud of the jaw tops by default, mm — the HONEST
@@ -332,6 +343,8 @@ export function validateVise(
   stock: { length: Mm; width: Mm; thickness: Mm },
   vise: ViseParams,
   sacrificial: Sacrificial = noneSacrificial(),
+  /** The shop's `setups.minGripMm` (`shopDefault(…)`); the labelled fallback when not passed. */
+  minGripMm: Mm = GRIP_MIN,
 ): JobFinding[] {
   const findings: JobFinding[] = [];
   const { width, thickness } = stock;
@@ -359,7 +372,7 @@ export function validateVise(
   // What the jaws grip: the weaker of the two jaws, the side that lets go first.
   const gripped = grippedHeights(stock, vise, sacrificial);
   const grip = Math.min(gripped.left, gripped.right);
-  if (grip < GRIP_MIN) {
+  if (grip < minGripMm) {
     const what = hasSacrificial(sacrificial) ? 'the material between the jaws' : 'the stock';
     findings.push({
       severity: 'warning',
@@ -368,7 +381,7 @@ export function validateVise(
       // float subtraction of two stated millimetres came out as `2.6100000000000003` on the badge
       // blank, in the run sheet's own warnings section.
       message:
-        `Only ${fmtMm(grip)} mm of ${what} is gripped below the jaw tops; under ${GRIP_MIN} mm ` +
+        `Only ${fmtMm(grip)} mm of ${what} is gripped below the jaw tops; under ${minGripMm} mm ` +
         `the part can lift (PROVISIONAL threshold, #208).`,
     });
   }
