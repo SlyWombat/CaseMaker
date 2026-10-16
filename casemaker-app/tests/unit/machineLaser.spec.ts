@@ -74,7 +74,7 @@ describe('#431 the options default off, and the frame reads the program extent',
   });
 
   it('frameBounds takes XY from the verify bbox and refuses an empty one', async () => {
-    const { frameBounds } = await import('@/components/panels/EngraveLaserFrame');
+    const { frameBounds } = await import('@/platform/machineLaser');
     expect(frameBounds({ min: [1, 2, -1], max: [30, 40, 5] })).toEqual({ minX: 1, minY: 2, maxX: 30, maxY: 40 });
     expect(frameBounds({ min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] })).toBeNull();
   });

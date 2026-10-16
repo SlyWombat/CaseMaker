@@ -11,15 +11,6 @@ import { runLaserFrame, type XYBounds } from '@/platform/machineLaser';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 
-/** The program's XY extent, or null when the report holds no points. */
-export function frameBounds(bbox: { min: readonly number[]; max: readonly number[] }): XYBounds | null {
-  const [minX, minY] = bbox.min;
-  const [maxX, maxY] = bbox.max;
-  const all = [minX, minY, maxX, maxY];
-  if (!all.every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
-  return { minX: minX as number, minY: minY as number, maxX: maxX as number, maxY: maxY as number };
-}
-
 export function EngraveLaserFrame({
   host,
   port,

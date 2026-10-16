@@ -32,6 +32,15 @@ export interface XYBounds {
   maxY: number;
 }
 
+/** The program's XY extent, or null when the report holds no points. */
+export function frameBounds(bbox: { min: readonly number[]; max: readonly number[] }): XYBounds | null {
+  const [minX, minY] = bbox.min;
+  const [maxX, maxY] = bbox.max;
+  const all = [minX, minY, maxX, maxY];
+  if (!all.every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+  return { minX: minX as number, minY: minY as number, maxX: maxX as number, maxY: maxY as number };
+}
+
 /** The frame's motion lines, pure: lift, the four corners in the work offset, and back to the first. */
 export function laserFrameLines(b: XYBounds): string[] {
   const f = (n: number) => Number(n.toFixed(3)).toString();

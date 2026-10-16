@@ -3,7 +3,8 @@ import type { MachineObservation } from '@/platform/machineProbe';
 import { programBytes, uploadProgram, type MachineUploadResult } from '@/platform/machineUpload';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import { describeUpload } from './engraveUploadCopy';
-import { EngraveLaserFrame, frameBounds } from './EngraveLaserFrame';
+import { EngraveLaserFrame } from './EngraveLaserFrame';
+import { frameBounds } from '@/platform/machineLaser';
 import { useSettingsStore } from '@/store/settingsStore';
 
 /**
