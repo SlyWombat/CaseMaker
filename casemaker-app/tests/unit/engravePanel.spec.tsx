@@ -299,7 +299,7 @@ describe('EngravePanel — sacrificial material (#213)', () => {
   it('shows a front strip without a board as an error finding', () => {
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-sac-side-front'));
-    expect(screen.getByTestId('engrave-finding-side-strip-unsupported')).toBeTruthy();
+    expect(screen.getByTestId('engrave-finding-0-side-strip-unsupported')).toBeTruthy();
     expect((screen.getByTestId('engrave-generate') as HTMLButtonElement).disabled).toBe(true);
   });
 

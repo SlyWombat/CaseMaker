@@ -1972,7 +1972,11 @@ export function EngravePanel(): JSX.Element {
           {jobFindings.map((f, i) => (
             <div
               key={`${f.code}-${i}`}
-              data-testid={`engrave-finding-${f.code}`}
+              // #411 review — the index is part of the test id, the same way the row shell's own
+              // finding lines carry theirs (`${prefix}-finding-${index}-${code}`). Two findings can
+              // share a code on one job (two labels both too deep), and the key above has always
+              // said so; a test id carrying only the code would have been two nodes under one name.
+              data-testid={`engrave-finding-${i}-${f.code}`}
               style={{ display: 'flex', gap: 6, fontSize: 12, lineHeight: 1.45, margin: '3px 0', color: '#d1d5db' }}
             >
               <span style={{ color: SEVERITY_COLOR[f.severity], flexShrink: 0 }}>●</span>
