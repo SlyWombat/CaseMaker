@@ -31,6 +31,7 @@ const input = (over: Partial<DrillBitInput> = {}): DrillBitInput => ({
   ],
   depth: { kind: 'blind', fullDiameterDepth: 3 },
   settings: S,
+  pointAngleSource: sources.pointAngleDeg,
   stock: STOCK,
   ...over,
 });

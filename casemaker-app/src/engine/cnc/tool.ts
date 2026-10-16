@@ -9,8 +9,10 @@
  * approximated. Simulating a V-bit as a flat end mill would draw a cut the machine will
  * not make.
  *
- * V1 sweeps a FLAT end mill only (`/Simulation.md` §4.5): its swept volume at constant Z
- * is exact 2D geometry. Every other shape is refused here, by name.
+ * The EXACT sweeper takes a FLAT end mill only (`/Simulation.md` §4.5): its swept volume at
+ * constant Z is exact 2D geometry, and `cuttingRadiusForSweep` refuses every other shape by name.
+ * The column engine sweeps the rest it has a model for (#405 the V-bit, #382 the drill's point and
+ * the thread mill's envelope); a ball or a bull nose is still refused everywhere (#222).
  */
 
 import type { MkrRecord } from './gcode/types';
@@ -290,4 +292,29 @@ export function traceRadiusAt(tool: Tool, depth: number): number | null {
   const r = cuttingForTrace(tool);
   if (!r.ok) return null;
   return r.tool.shape === 'v' ? grooveRadiusAt(r.tool.cone, depth) : r.tool.radius;
+}
+
+/** The drill-point angles a drill can have, degrees included — the one range the CAM and the sim check. */
+export const DRILL_POINT_RANGE_DEG = { min: 60, max: 150 } as const;
+
+export type DrillPointResult = { ok: true; deg: number; from: string; stated: boolean } | { ok: false; reason: string };
+
+/**
+ * A drill's INCLUDED point angle, and where it came from (#382, #434) — or why there is none.
+ *
+ * The drill's own `angle` when its record states one (a 0 is unset, as everywhere in this vocabulary),
+ * else the shop's `drill.pointAngleDeg` as the caller read it, with that reading's source. The ONE
+ * statement of the rule: the #434 CAM plans a hole's tip depth from it and the column engine sweeps
+ * the point from it, so the planned point and the simulated point cannot disagree.
+ */
+export function drillPointAngle(tool: Tool, fallback: { deg: number; source: string }): DrillPointResult {
+  const stated = tool.angle !== null && tool.angle > 0;
+  const deg = stated ? (tool.angle as number) : fallback.deg;
+  const from = stated
+    ? `${tool.name}'s own record`
+    : `the shop default drill.pointAngleDeg (${fallback.source} — the drill states none)`;
+  if (!(deg >= DRILL_POINT_RANGE_DEG.min && deg <= DRILL_POINT_RANGE_DEG.max)) {
+    return { ok: false, reason: `a ${deg}° point angle (${from}) is not a drill's — ${DRILL_POINT_RANGE_DEG.min} to ${DRILL_POINT_RANGE_DEG.max}° is` };
+  }
+  return { ok: true, deg, from, stated };
 }

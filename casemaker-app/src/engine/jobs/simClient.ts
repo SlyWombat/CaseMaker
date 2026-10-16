@@ -82,6 +82,11 @@ export interface SimLoadOpts {
    * position. A record for a different machine is ignored by `resolveMachine`.
    */
   calibration?: MachineCalibration | null;
+  /**
+   * The shop's `drill.pointAngleDeg` and its source, for a drill that states no point angle (#382).
+   * The worker cannot read the location, so the caller sends what it read.
+   */
+  drillPointDefault?: { deg: number; source: string } | null;
 }
 
 /** The two stages of a load (#224). */
@@ -131,7 +136,7 @@ export async function loadSim(gcodeText: string, setup: Setup, tool: Tool, machi
           // (comlink.mjs:310), so a proxy nested in a plain object is never recognised, falls
           // through as RAW, and the raw function reaches `postMessage`: "could not be cloned".
           // Only a TOP-LEVEL argument can carry a proxy, which is why `onProgress` is its own.
-          { budgetMs: sweepBudget, calibration: opts?.calibration ?? null },
+          { budgetMs: sweepBudget, calibration: opts?.calibration ?? null, drillPointDefault: opts?.drillPointDefault ?? null },
           opts?.onProgress ? Comlink.proxy(opts.onProgress) : undefined,
         )
         .then(async (r) => {

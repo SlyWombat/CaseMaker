@@ -19,6 +19,7 @@ import { MACHINES } from '@/engine/cnc/machine';
 // TYPE from the worker session, nothing else.
 import { simulationProblem } from '@/engine/cnc/simGate';
 import { useSettingsStore } from '@/store/settingsStore';
+import { shopDefault } from '@/store/shopDefaultsStore';
 import { stepAtTime, timeAtStep, totalTime } from '@/engine/cnc/playbackClock';
 import { generateRestart as buildRestart, stockFromSetup, type RestartResult } from '@/engine/cnc/restart';
 import type { Tool } from '@/engine/cnc/tool';
@@ -223,6 +224,8 @@ interface LoadArgs {
   tool: Tool;
   machineId: string | null;
   calibration: MachineCalibration | null;
+  /** The shop's `drill.pointAngleDeg`, read once at the load like `calibration` (#382). */
+  drillPointDefault: { deg: number; source: string };
 }
 let lastLoad: LoadArgs | null = null;
 
@@ -249,6 +252,7 @@ export const useSimStore = create<SimState>()((set, get) => {
           if (mine === loadSeq) set({ phase });
         },
         calibration: args.calibration,
+        drillPointDefault: args.drillPointDefault,
       });
       if (mine !== loadSeq) return; // superseded by a newer load or a dispose
       if (!r.ok) {
@@ -301,7 +305,8 @@ export const useSimStore = create<SimState>()((set, get) => {
       // and so a retry or a restart cannot drift onto a different frame than the job was loaded on.
       const calibration =
         calibrationOverride !== undefined ? calibrationOverride : (useSettingsStore.getState().machineCalibration ?? null);
-      lastLoad = { gcodeText, setup, tool, machineId, calibration };
+      const point = shopDefault('drill.pointAngleDeg');
+      lastLoad = { gcodeText, setup, tool, machineId, calibration, drillPointDefault: { deg: point.value, source: point.source } };
       await run(lastLoad, get().budgetMs);
     },
     async retryWithLongerBudget() {

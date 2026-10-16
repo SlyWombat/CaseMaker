@@ -555,7 +555,7 @@ sacrificial board (#218).
 | **Profile cut-out with tabs**; through pocket | follow an outline outside/inside through the stock onto the board, tabs hold the piece; loose-piece check | planned, blocked by #213 (done) and #204 (done) | #218 |
 | **Rest machining**, two tools | the second cutter cuts only what the first could not reach | planned | #410 (two files), #278 (one file with `M6`) |
 | Holes: plunge-drilled at the cutter's diameter, pecked | built | #220 | — |
-| Holes: **drilled with a drill bit**; **thread milling** (M3–M5 with Makera's thread mills) | the drill and thread-mill shapes exist in the inventory and the catalogue; no CAM and no simulation | planned | #382 (simulate every owned cutter) + **NEW** CAM |
+| Holes: **drilled with a drill bit**; **thread milling** (M3–M5 with Makera's thread mills) | simulated (#382): a drill as its point cone (its own angle, else `drill.pointAngleDeg`) on its cylinder, and a thread mill as its cutting-diameter cylinder envelope, labelled as over-removal. Drill-bit peck CAM is built (#434 phase 1, not yet wired to a job). Thread-mill CAM is not built | drill CAM partial, thread CAM planned | #434 |
 | **Chamfer** | a V or chamfer bit along an edge at a fixed offset and depth | planned | #221 (piece) |
 | Engraving: single-line traces, V traces, V text | built (#219, #405, #409) | V groove oracle pending | #408 |
 | V-carve (medial axis), flat-depth clearing | planned | #221 | — |
@@ -1004,7 +1004,7 @@ Mapped to issues where they exist; **NEW** otherwise; not filed. S: a day; M: da
 | CAM | **facing / surfacing** op with stock-state carry and Z0 move | **NEW** | M |
 | CAM | profile cut-outs with tabs, through pockets, loose-piece check | **#218** | L |
 | CAM | finish pass and stock-to-leave | **#250** | M |
-| CAM | drill-bit holes and thread milling CAM; simulate every owned cutter | #382 + **NEW** | L |
+| CAM | drill-bit holes and thread milling CAM (simulation done, #382) | #434 | L |
 | CAM | chamfer; V-carve medial axis; V groove oracle | #221, **#408** | M–L |
 | CAM | adaptive/HSM clearing for metals; ramped entry reopened | **NEW** (after #250) | L |
 | CAM | 3D relief / sloped surfaces (roadmap phase) | #222 | L |

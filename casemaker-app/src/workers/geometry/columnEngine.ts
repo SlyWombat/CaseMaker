@@ -40,10 +40,10 @@ import type { Timeline, Checkpoint } from '@/engine/cnc/emulator/timeline';
 import { partToWork } from '@/engine/cnc/frames';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import type { Setup } from '@/engine/cnc/setup';
-import { cuttingForTrace, type Tool } from '@/engine/cnc/tool';
+import { cuttingDiameter, cuttingForTrace, drillPointAngle, type Tool } from '@/engine/cnc/tool';
 import type { NodeMeshOutput } from './meshOutput';
 import type { SweepDiagnostic, SweepStats } from './sweep';
-import { MAX_AIR_CHECKS, MAX_GOUGES } from './sweep';
+import { MAX_AIR_CHECKS, MAX_GOUGES, holderGate } from './sweep';
 
 /**
  * The cutter a column sweep removes material with (#405).
@@ -59,11 +59,20 @@ export interface ColumnCutter {
   radius: number;
   /** The cone's rise per mm of radial distance, or `null` for a flat end (a level floor). */
   tanHalf: number | null;
+  /**
+   * The cone's OUTER radius, mm, where it meets the cutter's cylindrical body — or absent for a cone
+   * with no stated end (a V-bit, #405, whose flank is taken to run to the top face). A DRILL has one
+   * (#382): its point is a cone from a sharp tip out to the drill's radius, and past that radius the
+   * drill is a wall, so nothing beyond it is cut however deep the tip goes. Ignored for a flat end,
+   * whose `radius` already is its outer edge.
+   */
+  outerRadius?: number;
 }
 
 /** The surface a column at radial distance `rho` from the tool axis is left at: tip Z + this. */
 export function surfaceAboveTip(cutter: ColumnCutter, rho: number): number {
   if (cutter.tanHalf === null) return rho <= cutter.radius ? 0 : Infinity;
+  if (cutter.outerRadius !== undefined && rho > cutter.outerRadius) return Infinity;
   const h = (rho - cutter.radius) / cutter.tanHalf;
   return h > 0 ? h : 0;
 }
@@ -83,7 +92,101 @@ export function surfaceAboveTip(cutter: ColumnCutter, rho: number): number {
  * Below 45° it over-scans by `1/tanHalf²` and only wastes time.
  */
 export function cutterReach(cutter: ColumnCutter, aboveTip: number): number {
-  return cutter.tanHalf === null ? cutter.radius : cutter.radius + aboveTip * cutter.tanHalf;
+  if (cutter.tanHalf === null) return cutter.radius;
+  const cone = cutter.radius + aboveTip * cutter.tanHalf;
+  // A bounded cone (a drill, #382) reaches no further than its body, however deep the tip is.
+  return cutter.outerRadius !== undefined && cone > cutter.outerRadius ? cutter.outerRadius : cone;
+}
+
+/**
+ * The point angle for a drill that states none: the shop default `drill.pointAngleDeg` as the CALLER
+ * read it — or, for the app's own drilling job, the value the #434 CAM planned the hole with
+ * (`DrillBitPlan.simDrillPoint`), so the simulation sweeps the point the plan used rather than
+ * re-reading a setting that may have changed since. Passed in, never read here: the geometry worker
+ * does not import the location client (#382 review).
+ */
+export interface DrillPointDefault {
+  /** `drill.pointAngleDeg`, included, degrees. */
+  deg: number;
+  /** That reading's source (`chosen`, `measured`, `seeded`, or `fallback` with no location). */
+  source: string;
+}
+
+export type ColumnCutterResult =
+  | { ok: true; cutter: ColumnCutter; kind: 'flat' | 'v' | 'drill' | 'thread-envelope'; diagnostics: SweepDiagnostic[] }
+  | { ok: false; reason: string };
+
+/**
+ * The cutter the column engine sweeps for a `Tool`, or a refusal naming why (#382). The SIMULATOR's
+ * resolver only: `cuttingForTrace` stays the CAM's contract (a drill is not a trace tool), and this
+ * one adds the shapes the column engine has a model for and the CAM does not trace with.
+ *
+ *   - flat end mill, V-bit (engraving, chamfer): exactly `cuttingForTrace`'s reading (#405);
+ *   - DRILL: a sharp cone of the drill's point angle — `drillPointAngle`, the same rule the #434 CAM
+ *     plans the hole by — bounded at the drill's radius by its body. An `info` names the angle and
+ *     whether the drill stated it or the shop default supplied it;
+ *   - THREAD MILL: its cutting diameter as a flat cylinder at the tip — an ENVELOPE, conservative
+ *     over-removal, and a `warning` says so: the teeth on a helix are not a solid of revolution, and
+ *     the thread form is not modelled. Never sized from the thread spec (an M5 mill does not cut a
+ *     5 mm hole: it orbits). A thread mill that states no cutting diameter is refused by name.
+ *
+ * A ball, a bull nose, an unknown shape: refused, as before (#222).
+ */
+export function columnCutterFor(tool: Tool, drillDefault?: DrillPointDefault | null): ColumnCutterResult {
+  if (tool.shape === 'drill') {
+    const d = cuttingDiameter(tool);
+    if (d === null || !(d > 0)) {
+      return { ok: false, reason: `drill "${tool.name}" states no cutting diameter (tipdiameter=${tool.tipDiameter}, diameter=${tool.diameter})` };
+    }
+    const stated = tool.angle !== null && tool.angle > 0;
+    if (!stated && !drillDefault) {
+      return {
+        ok: false,
+        reason: `drill "${tool.name}" states no point angle and no shop default (drill.pointAngleDeg) was passed to the simulation; type the drill's angle, or load it through the app, which passes the location's default`,
+      };
+    }
+    const point = drillPointAngle(tool, drillDefault ?? { deg: tool.angle as number, source: 'unused' });
+    if (!point.ok) return { ok: false, reason: `drill "${tool.name}": ${point.reason}` };
+    const half = (point.deg / 2) * (Math.PI / 180);
+    return {
+      ok: true,
+      kind: 'drill',
+      cutter: { radius: 0, tanHalf: Math.tan(half), outerRadius: d / 2 },
+      diagnostics: [
+        {
+          severity: 'info',
+          code: 'drill-point-angle',
+          message: `drill "${tool.name}" (⌀${d}) is simulated with a ${point.deg}° point from ${point.from}; its point length is ${(d / 2 / Math.tan(half)).toFixed(3)} mm`,
+        },
+      ],
+    };
+  }
+  if (tool.shape === 'thread') {
+    const d = cuttingDiameter(tool);
+    if (d === null || !(d > 0)) {
+      return {
+        ok: false,
+        reason: `thread mill "${tool.name}" states no cutting diameter (tipdiameter=${tool.tipDiameter}, diameter=${tool.diameter}); the thread size it is for is not its cutting diameter, so nothing is assumed`,
+      };
+    }
+    return {
+      ok: true,
+      kind: 'thread-envelope',
+      cutter: { radius: d / 2, tanHalf: null },
+      diagnostics: [
+        {
+          severity: 'warning',
+          code: 'thread-envelope',
+          message: `thread mill "${tool.name}" is simulated as a ⌀${d} mm cylinder (its cutting diameter) all the way up: around the teeth and the neck that over-removes, but the wider shank above the neck is not modelled, so a cut deeper than the neck shows less than the shank would take (the neck check, holder-collision / holder-unproven, says whether it is), and the thread form itself is not modelled`,
+        },
+      ],
+    };
+  }
+  const trace = cuttingForTrace(tool);
+  if (!trace.ok) return trace;
+  return trace.tool.shape === 'v'
+    ? { ok: true, kind: 'v', cutter: { radius: trace.tool.cone.tipRadius, tanHalf: trace.tool.cone.tanHalf }, diagnostics: [] }
+    : { ok: true, kind: 'flat', cutter: { radius: trace.tool.radius, tanHalf: null }, diagnostics: [] };
 }
 
 /** A column grid. Rotary: `u` is work X, `v` is the stock angle θ in degrees, `h` is radius ρ. */
@@ -181,6 +284,11 @@ export interface ColumnSweepOpts {
   onProgress?: (done: number, total: number) => void;
   /** Override the §4.4 sim-resolution estimate (a spec and the probe set this). */
   resolution?: ColumnResolution;
+  /**
+   * The shop's `drill.pointAngleDeg`, read by the caller, for a drill that states no angle (#382).
+   * Absent: the registry's labelled fallback, reported with source `fallback`.
+   */
+  drillPointDefault?: DrillPointDefault | null;
 }
 
 export interface ColumnSweepOk {
@@ -381,9 +489,11 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
  * A NON-FLAT footprint is a height profile over that disc, and this is where it is modelled
  * (#405, the hook #221 reserved here): a V-bit's floor at a column is `tipZ + (ρ − r_t)/tan`, ρ
  * being the column's distance from the move's segment, so the groove it leaves is a V and not a
- * slot of the tip's width. A BALL or a BULL nose is still refused before the sweep reaches this
- * parameterisation (`cuttingRadiusForSweep`): their constant-Z footprint is a profile too, but
- * nothing yet needs it and a wrong profile is worse than a refusal.
+ * slot of the tip's width. A DRILL is the same cone with a sharp tip, BOUNDED at the drill's radius
+ * (`ColumnCutter.outerRadius`, #382), and a THREAD MILL is swept as its cutting-diameter cylinder, an
+ * envelope (`columnCutterFor`). A BALL or a BULL nose is still refused before the sweep reaches this
+ * parameterisation: their constant-Z footprint is a profile too, but it is #222's, and a wrong
+ * profile is worse than a refusal.
  */
 export const FLAT: ColumnParameterisation = {
   kind: 'flat',
@@ -762,31 +872,31 @@ function zeroStats(): SweepStats {
  * Sweep a timeline with the column engine. A ROTARY job (A moves) uses the rotary
  * parameterisation and refuses (`rotary-stock`) a non-cylinder stock; a non-rotary job uses the
  * FLAT parameterisation and refuses (`flat-stock`) a non-prism stock. Both refuse (`tool-refused`)
- * a tool neither parameterisation can hold: a ball or bull nose, or — since #405 — a V-bit on a
- * ROTARY job, whose cone has no form in a single-valued radius column. The rotary engine refuses
+ * a tool neither parameterisation can hold: a ball or bull nose, or — since #405 — a V-bit, and
+ * since #382 a drill or a thread mill, on a ROTARY job, which has no form in a single-valued radius
+ * column. The rotary engine refuses
  * (`axis-crossing`) a genuine crossing and warns (`axis-clamped`) about shallow dips it clamped.
  * Diagnostic `code`s match the exact sweeper's vocabulary so the UI does not learn a second set.
  */
 export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?: ColumnSweepOpts): ColumnOutcome {
   const t0 = performance.now();
   const rotary = timeline.summary.rotary;
-  // The cutter, in the parameterisation's terms. The FLAT engine takes a V-bit's cone (#405);
-  // ROTARY takes a flat end mill only, and refuses a cone by name rather than sweeping it as one
-  // — a V-bit on a turntable is #221's chamfer-profile work, not a flat tip.
-  const trace = cuttingForTrace(tool);
-  if (!trace.ok) return { ok: false, diagnostics: [{ severity: 'error', code: 'tool-refused', message: trace.reason }] };
-  const cutter: ColumnCutter =
-    trace.tool.shape === 'v' ? { radius: trace.tool.cone.tipRadius, tanHalf: trace.tool.cone.tanHalf } : { radius: trace.tool.radius, tanHalf: null };
-  if (rotary && cutter.tanHalf !== null) {
+  // The cutter, in the parameterisation's terms. The FLAT engine takes a V-bit's cone (#405), a
+  // drill's bounded point and a thread mill's envelope (#382); ROTARY takes a flat end mill only, and
+  // refuses the rest by name rather than sweeping them as one — a V-bit on a turntable is #221's
+  // chamfer-profile work, and a drill or a thread mill about the A axis has no model here.
+  const resolved = columnCutterFor(tool, opts?.drillPointDefault);
+  if (!resolved.ok) return { ok: false, diagnostics: [{ severity: 'error', code: 'tool-refused', message: resolved.reason }] };
+  if (rotary && resolved.kind !== 'flat') {
+    const what =
+      resolved.kind === 'v'
+        ? "a V-bit, whose cone about a turntable axis is a different body (#221's chamfer profiles)"
+        : resolved.kind === 'drill'
+          ? 'a drill, whose cone point about a turntable axis is not modelled'
+          : 'a thread mill, whose envelope about a turntable axis is not modelled';
     return {
       ok: false,
-      diagnostics: [
-        {
-          severity: 'error',
-          code: 'tool-refused',
-          message: `the rotary column engine sweeps a flat end mill only; tool "${tool.name}" is a V-bit, whose cone about a turntable axis is a different body (#221's chamfer profiles)`,
-        },
-      ],
+      diagnostics: [{ severity: 'error', code: 'tool-refused', message: `the rotary column engine sweeps a flat end mill only; tool "${tool.name}" is ${what}` }],
     };
   }
   const param: ColumnParameterisation = rotary ? ROTARY : FLAT;
@@ -797,6 +907,15 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     return { ok: false, diagnostics: [{ severity: 'error', code: 'flat-stock', message: `the flat column engine sweeps a prism stock; the setup's part is a ${setup.part.kind}` }] };
   }
   const res = opts?.resolution ?? COLUMN_SIM_RESOLUTION;
+  // A thread mill's ENVELOPE is widened by half a cell diagonal (#382 review): a column is cut when
+  // its CENTRE is within the radius, so at the 0.1 mm default a small radius can lose up to half a
+  // cell around its edge. Widened, every column whose cell the true cylinder touches is cut — the
+  // over-removal side, which is the side an envelope promises.
+  let cutter = resolved.cutter;
+  if (resolved.kind === 'thread-envelope') {
+    const pad = Math.hypot(res.dx, res.dThetaDeg) / 2;
+    cutter = { ...cutter, radius: cutter.radius + pad };
+  }
 
   // Resolve every checkpoint's moves once. `stateAt` is snapshotted (O(512)), not recomputed.
   const perCheckpoint = timeline.checkpoints.map((cp) => (rotary ? rotaryMovesOf(cp, timeline) : flatMovesOf(cp, timeline)));
@@ -810,7 +929,19 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   }
   const stats = zeroStats();
   stats.resolution = { dx: grid.du, dThetaDeg: grid.dv };
-  const diagnostics: SweepDiagnostic[] = [];
+  // The cutter's own notes first: the drill's point and where its angle came from, the thread mill's
+  // envelope (#382) — said wherever the result is read, never only in a comment.
+  const diagnostics: SweepDiagnostic[] = [...resolved.diagnostics];
+  // The thread mill's NECK (#382 review): the envelope is its cutting diameter all the way up, which
+  // is honest only as deep as the neck reaches. Past it the shank is wider and would rub, so the
+  // exact sweeper's own holder gate is asked — `holder-collision` past a stated shoulder/flute
+  // length, `holder-unproven` when the record states neither.
+  if (resolved.kind === 'thread-envelope') {
+    let deepest: number | null = null;
+    for (const m of allMoves) if (m.z < grid.initial) deepest = Math.max(deepest ?? 0, grid.initial - m.z);
+    const neck = holderGate(tool, deepest);
+    if (neck) diagnostics.push(neck);
+  }
   const tGrid = performance.now();
 
   const count = perCheckpoint.length;

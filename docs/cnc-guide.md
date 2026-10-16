@@ -310,7 +310,10 @@ instead of guessing:
   **tool path is still drawn** so you can inspect the file; the stock is not, because the
   sweep that would produce it was refused. A **Try again with a longer limit** button may
   appear.
-- **An unknown tool shape**: V1 sweeps a flat end mill only.
+- **A tool shape it has no model for**: the simulator sweeps a flat end mill, a V-bit or chamfer,
+  a drill (its point cone on its cylinder) and a thread mill (as its cutting-diameter cylinder,
+  labelled `thread-envelope`, with its neck checked). A ball or bull nose, or a cutter whose record lacks the tip, angle or
+  diameter its model needs, is refused with `tool-refused`, and the message names what is missing.
 
 Every refusal and warning has a short code. Chapter 8 lists all of them.
 
@@ -860,7 +863,7 @@ simulation does report about one is the sweep's own list, next:
 | `stock-unsupported` | error | V1 sweeps a rectangular (prism) block only. | Use a rectangular blank. |
 | `stock-invalid` | error | Stock thickness is not positive. | Type a real thickness. |
 | `prior-removal-invalid` | error | A rest pass was told what material a previous program left (#410), and that material is not a closed solid — so the sweep has no starting material to subtract from. | Simulate the first program and pass ITS result. |
-| `prior-removal-column` | error | A rest pass was asked for on a job the COLUMN engine sweeps — a rotary job, or a V-bit, whose cutting width changes with depth. Only the exact 2.5D sweep can start from the material a previous program left, so the pair is refused by name rather than swept from the blank (#410). | Measure the rest with a flat cutter, or cut the second program as a program of its own. |
+| `prior-removal-column` | error | A rest pass was asked for on a job the COLUMN engine sweeps — a rotary job, a V-bit (whose cutting width changes with depth), a drill or a thread mill (#382). Only the exact 2.5D sweep can start from the material a previous program left, so the pair is refused by name rather than swept from the blank (#410). | Measure the rest with a flat cutter, or cut the second program as a program of its own. |
 | `air-moves-unchecked` | warning | More air moves than the app checks; some were not verified. | Split a very long job. |
 | `spindle-off-near-bed` | error | A feed move with the spindle off comes within a hair of the bed. | Turn the spindle on, or move it away. |
 | `rapid-below-bed` | error | A rapid goes below the bed. | Fix the Z. |
@@ -874,7 +877,9 @@ simulation does report about one is the sweep's own list, next:
 | `flat-stock` | error | The column engine's flat (3-axis) parameterisation was handed a job whose blank is not a prism. | Use a rectangular blank. |
 | `axis-crossing` | error | A rotary cut reaches the axis deeper than the tool radius (the cutter tip at radius Z ≤ −r); a single-valued radius column cannot represent a cut that crosses the axis. | Keep the cutter off the axis, or use a shorter tool. |
 | `axis-clamped` | warning | A rotary cut dipped just past the axis (within one tool radius) and was clamped to it; the far-side hollow is not modelled, and the cut did not come out the depth the program asked for. | Keep the cutter off the axis, or accept the clamped picture. |
-| `tool-refused` | error | The selected tool shape is not a flat end mill, which is all V1 sweeps. | Pick a flat end mill. |
+| `tool-refused` | error | The simulator has no model for this cutter, or the cutter's record does not state what its model needs. The exact sweep takes a flat end mill. The column engine also takes a V-bit or chamfer with a stated tip and angle, a drill with a stated diameter, and a thread mill with a stated cutting diameter (#405, #382). A ball or bull nose is refused, and so is anything on a rotary job except a flat end mill. The message names what is missing, for example a chamfer box code that states no tip, or a thread mill whose only size is its thread. | Type the missing number on the cutter, or pick a cutter the simulator models. |
+| `drill-point-angle` | info | A drill is simulated as a cone point on a cylinder. The message names the included point angle used and where it came from: the drill's own record, or the shop default `drill.pointAngleDeg`, which is *chosen*, not measured. The #434 drilling CAM plans the hole's tip depth from the same rule and hands the simulation the angle it planned with (#382). A drill with no angle of its own is refused (`tool-refused`) when no default reaches the simulation. | If the drill's point is not the default, type its angle on the cutter. |
+| `thread-envelope` | warning | A thread mill is simulated as a plain cylinder of its cutting diameter all the way up, an **envelope**, widened by half a grid cell so no column the cutter touches is missed. Around the teeth and the neck that over-removes. The wider shank above the neck is **not** modelled, so a cut deeper than the neck would show less than the shank takes. The neck check says whether it is: `holder-collision` past a stated flute or shoulder length, `holder-unproven` when the cutter states neither. The thread form is not modelled (#382). | Read the drawn hole as the mill's reach, not as the thread. Type the mill's flute length so the neck can be checked. |
 | `probe-fitted-cut` | error | A cutting move was made with `T0` active — `T0` is the **probe**, and a probe is contact, not removal. No cutter is modelled for it, and nothing is drawn as removed. The post never writes a probe cut, so the file is foreign or broken. | Check the tool numbers; re-post the job. |
 | `dense-3d-refused` | error | Too many separate cut runs at one (segment, Z): a 3D or dense job the 2.5D sweep will not take on. | — |
 | `sweep-budget-exceeded` | error | The sweep would take longer than the allowed budget, so it was stopped. | Retry with a longer limit, or simplify the job. |

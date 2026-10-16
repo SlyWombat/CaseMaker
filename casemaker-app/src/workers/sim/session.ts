@@ -32,7 +32,8 @@ import { applyEvent, buildTimeline, parseGcode, resolveMachine, MACHINES, type F
 import { moveSeconds, rapidRate, type RapidEstimate } from '@/engine/cnc/cam/ir';
 
 import type { Mm } from '@/types/units';
-import { isVTraceTool, type Tool } from '@/engine/cnc/tool';
+import { type Tool } from '@/engine/cnc/tool';
+import { isVShape } from '@/engine/cnc/vProfile';
 import {
   columnOracleBand,
   computeOracle,
@@ -46,7 +47,7 @@ import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
 import { boxSolid, sweepTimeline, type SweepDiagnostic, type SweepResult, type SweepStats } from '../geometry/sweep';
-import { columnSweep, type ColumnSweepOk } from '../geometry/columnEngine';
+import { columnSweep, type ColumnSweepOk, type DrillPointDefault } from '../geometry/columnEngine';
 
 export type DiagnosticSource = 'parser' | 'runner' | 'sweep';
 
@@ -235,6 +236,22 @@ export interface SimLoadOpts {
    * picture of a cut that will not happen.
    */
   priorRemoval?: NodeMeshOutput;
+  /**
+   * The shop's `drill.pointAngleDeg` as the app read it from the location, for a drill whose record
+   * states no point angle (#382). Absent: the registry's labelled fallback (source `fallback`).
+   */
+  drillPointDefault?: DrillPointDefault | null;
+}
+
+/**
+ * Does this tool's job go to the COLUMN engine on a prism? A V-bit or chamfer (#405), a drill and a
+ * thread mill (#382): the exact sweeper's contract is one flat cutting radius, and none of these has
+ * one it can honestly use. One that states too little to sweep (a box-code chamfer with no tip, a
+ * thread mill with no cutting diameter) still routes here, so the column engine's refusal — which
+ * names what is missing — is the one the user reads.
+ */
+export function sweepsOnColumn(tool: Tool): boolean {
+  return isVShape(tool) || tool.shape === 'drill' || tool.shape === 'thread';
 }
 
 export interface SimSession {
@@ -351,7 +368,9 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     // models the cone directly, so a V tool routes here whether or not the job is rotary — and a
     // rotary V job is refused inside `columnSweep` rather than swept as a flat disc. This is the
     // ONE place the decision is made: a job whose tool is a cone never reaches `sweepTimeline`.
-    if (timeline.summary.rotary || isVTraceTool(tool)) {
+    // A DRILL (its point is a cone) and a THREAD MILL (swept as its envelope) route the same way
+    // (#382) — `sweepsOnColumn`.
+    if (timeline.summary.rotary || sweepsOnColumn(tool)) {
       // A rest pass is measured against the material a previous program left, and only the exact
       // sweeper can start from it. Silently sweeping the blank instead would draw a cut nobody is
       // going to make, so the pair is refused by name (#410).
@@ -360,7 +379,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
           'prior-removal-column',
           timeline.summary.rotary
             ? 'a rotary job cannot be a rest pass: the column engine has no way to start from the material a previous program left'
-            : `tool "${tool.name}" is a cone (a V-bit), and a rest pass is measured on a flat cutter's floor: the column engine cannot start from the material a previous program left`,
+            : `tool "${tool.name}" is a ${tool.shape === 'drill' ? 'drill' : tool.shape === 'thread' ? 'thread mill' : 'cone (a V-bit)'}, which the column engine sweeps, and a rest pass is measured on a flat cutter's floor: the column engine cannot start from the material a previous program left`,
         );
       }
       const col = columnSweep(timeline, tool, setup, opts);

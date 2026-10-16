@@ -24,7 +24,7 @@
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { HOP_Z, SAFE_Z, estimateCycleSeconds, toolNumberFor, type CamMove, type CamOperation, type RapidEstimate, type ToolpathIR } from './ir';
 import { orderHolesNearest, peckDepths } from './drill';
-import type { Tool } from '../tool';
+import { drillPointAngle, type Tool } from '../tool';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -74,6 +74,8 @@ export interface DrillBitInput {
   holes: readonly (readonly [number, number])[];
   depth: HoleDepth;
   settings: DrillSettings;
+  /** Where `settings.pointAngleDeg` came from — `drillSettings`' own source for it (`fallback` with no location). */
+  pointAngleSource: string;
   /** The stock's XY size, to refuse a hole whose edge leaves it. Optional. */
   stock?: { length: number; width: number };
 }
@@ -82,6 +84,11 @@ export interface DrillBitPlan {
   diameter: number;
   /** The included point angle, and where it came from. */
   angle: { deg: number; from: string };
+  /**
+   * The point default this plan was made with, to hand the simulation (`SimLoadOpts.drillPointDefault`)
+   * so it sweeps the point the plan used rather than re-reading the setting (#382 review).
+   */
+  simDrillPoint: { deg: number; source: string };
   /** How far the tip is below the full diameter, mm. */
   pointLength: number;
   /** The tip's depth below the top, positive mm. */
@@ -115,13 +122,10 @@ export function planDrillBit(input: DrillBitInput): DrillBitResult {
   const d = drillDiameter(tool);
   if (d === null) return { ok: false, reason: `${tool.name} states no diameter` };
   if (input.holes.length === 0) return { ok: false, reason: 'there are no holes to drill' };
-  const stated = tool.angle !== null && tool.angle > 0;
-  const angle = stated
-    ? { deg: tool.angle!, from: `${tool.name}'s own record` }
-    : { deg: s.pointAngleDeg, from: 'the shop default drill.pointAngleDeg (chosen — the drill states none)' };
-  if (!(angle.deg >= 60 && angle.deg <= 150)) {
-    return { ok: false, reason: `a ${angle.deg}° point angle (${angle.from}) is not a drill's — 60 to 150° is` };
-  }
+  // The one rule the simulator sweeps the point by too (#382), so the plan and the sim agree.
+  const point0 = drillPointAngle(tool, { deg: s.pointAngleDeg, source: input.pointAngleSource });
+  if (!point0.ok) return point0;
+  const angle = { deg: point0.deg, from: point0.from };
   if (input.stock) {
     const r = d / 2;
     const off = input.holes.find(([x, y]) => x - r < 0 || y - r < 0 || x + r > input.stock!.length || y + r > input.stock!.width);
@@ -162,6 +166,7 @@ export function planDrillBit(input: DrillBitInput): DrillBitResult {
     plan: {
       diameter: d,
       angle,
+      simDrillPoint: { deg: s.pointAngleDeg, source: input.pointAngleSource },
       pointLength: r3(point),
       tipDepth: r3(tipDepth),
       peck: r3(peck),
