@@ -88,6 +88,18 @@ export const ToolLibraryEntrySchema = z.object({
   tool: ToolSchema,
   /** Where the numbers came from, for the panel. */
   provenance: z.string().min(1),
+  /**
+   * Makera's own `metalDuty` column, served BESIDE `tool` for a `cat:` row only (#398) — never on
+   * `ToolSchema`, which is the CAM view and stays narrow (#212 "do not widen `Tool`"). Absent on a
+   * built-in, a `user:`/`inv:` row and a clone (whose catalogue is gone; it answers by its name),
+   * and on a payload from a service older than the field.
+   *
+   * What it MEANS was read off the real install before it was wired: `0` on exactly the Non Metal
+   * groups, `1` on the `(Metal)` line AND on every corn, drill, thread and chamfer row. So `1` is
+   * "rated for metal", not "on the metal line" — `registerCutter.isMetalRow` reads a `0` and leaves
+   * a `1` to the name.
+   */
+  metalDuty: z.number().int().nullable().optional(),
 });
 
 export const ToolLibrarySchema = z.array(ToolLibraryEntrySchema).superRefine((list, ctx) => {

@@ -291,13 +291,22 @@ function sameLength(a: number | null, b: number | null): boolean {
 /**
  * Whether a catalogue row is on Makera's "for Metal" line.
  *
- * The line is not a field on a row — `ToolSchema` carries dimensions and nothing about what a bit
- * was ground for — so the row's own NAME is what states it: `3.175*12mm Flat End(Metal)` is the row
- * the built-in was copied from, and `catalogue.rs` records the same `(Metal)` convention (#379
- * review). The reading itself is `tool.isMetalCutterName`, the one copy of it; this is the row's
- * half of the question.
+ * Two sources, and neither alone is the line (#398):
+ *
+ *   - the vendor's own `metalDuty` column, served beside the row's `tool`. Read off the real install
+ *     before it was wired, it holds `0` on exactly the Non Metal groups — so a `0` is the vendor
+ *     saying "not the metal line", and it wins over a name that says otherwise. But `1` is on the
+ *     `(Metal)` line AND on every corn, drill, thread and chamfer row: "rated for metal", not "on the
+ *     metal line". A corn bit is `1`, shape `flat`, and its box (`BIT-CORN-2.0-10.5`) carries no
+ *     `-M-`; reading `1` as the line would rank a same-tip plain flat ahead of the corn row the box
+ *     names. So a `1` says nothing this function can use, and is left to
+ *   - the row's NAME: `3.175*12mm Flat End(Metal)` is the row the built-in was copied from, and
+ *     `catalogue.rs` records the same `(Metal)` convention (#379 review). The reading itself is
+ *     `tool.isMetalCutterName`, the one copy of it. It is also the whole answer for a row with no
+ *     column — a built-in, or a `cat:` row from a service older than the field.
  */
 function isMetalRow(entry: ToolLibraryEntry): boolean {
+  if (entry.metalDuty === 0) return false;
   return isMetalCutterName(entry.tool.name);
 }
 

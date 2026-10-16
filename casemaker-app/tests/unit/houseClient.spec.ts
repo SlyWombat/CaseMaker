@@ -289,6 +289,24 @@ describe('houseTools', () => {
     if (read.kind !== 'error') throw new Error('unreachable');
     expect(read.detail).toContain('shape');
   });
+
+  it('keeps a catalogue row’s metalDuty beside its tool, and refuses one that is not an integer (#398)', async () => {
+    // Synthetic rows, in the shape `house.rs::tools_bytes` serves: the column beside `tool` on a
+    // `cat:` row (a 0 is a value, not a blank), and no key at all on a `user:` row.
+    const rated = { ...ENTRY, key: 'cat:00000000-0000-0000-0000-000000000001', metalDuty: 1 };
+    const plain = { ...ENTRY, key: 'cat:00000000-0000-0000-0000-000000000002', metalDuty: 0 };
+    stubFetch(() => ({ contentType: 'application/json', body: JSON.stringify([rated, plain, ENTRY]) }));
+    const read = await houseTools(null, { base: BASE });
+    if (read.kind !== 'ok') throw new Error(read.kind);
+    expect(read.entries.map((e) => e.metalDuty)).toEqual([1, 0, undefined]);
+    expect(read.entries.every((e) => !('metalDuty' in e.tool))).toBe(true);
+
+    stubFetch(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify([{ ...rated, metalDuty: 'yes' }]),
+    }));
+    expect((await houseTools(null, { base: BASE })).kind).toBe('error');
+  });
 });
 
 describe('houseFeeds (#310)', () => {

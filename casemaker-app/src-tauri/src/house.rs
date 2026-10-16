@@ -353,7 +353,8 @@ impl From<&UserTool> for ToolLibraryEntry {
 
 /// A catalogue row is served to the client as the same shape as every other tier: the `extras` and
 /// the `contentHash` are the sync's bookkeeping and do not go on the wire, where the client's
-/// `ToolLibraryEntrySchema` is the only thing that reads.
+/// `ToolLibraryEntrySchema` is the only thing that reads. The one exception is `metalDuty`, which
+/// `tools_bytes` adds beside the entry (#398, `ServedEntry`).
 impl From<&crate::catalogue::CatalogueEntry> for ToolLibraryEntry {
     fn from(e: &crate::catalogue::CatalogueEntry) -> Self {
         ToolLibraryEntry {
@@ -678,10 +679,38 @@ fn json_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, HouseError> {
 /// list's validator WHILE it holds the write guard — and a method would take a second lock on an
 /// `RwLock` already held by the same task, which is a deadlock rather than a syntax error.
 fn tools_bytes(inner: &Inner) -> Result<Vec<u8>, HouseError> {
-    let mut entries: Vec<ToolLibraryEntry> =
-        inner.catalogue.tools.iter().map(ToolLibraryEntry::from).collect();
-    entries.extend(inner.location.tools.iter().map(ToolLibraryEntry::from));
+    let mut entries: Vec<ServedEntry> = inner
+        .catalogue
+        .tools
+        .iter()
+        .map(|e| ServedEntry { entry: ToolLibraryEntry::from(e), metal_duty: e.extras.metal_duty })
+        .collect();
+    entries.extend(
+        inner
+            .location
+            .tools
+            .iter()
+            .map(|t| ServedEntry { entry: ToolLibraryEntry::from(t), metal_duty: None }),
+    );
     json_bytes(&entries)
+}
+
+/// One `/tools` row as served (#398): the {@link ToolLibraryEntry} every tier shares, plus the one
+/// catalogue column the client reads, `metalDuty`. It sits BESIDE `tool`, not in it (#212 "do not
+/// widen `Tool`"), and only a `cat:` row has one: a `user:` row has no vendor column to state it,
+/// so the key is omitted rather than sent as a `null` that would read like a vendor's blank.
+///
+/// What the real install's column holds was read off a sync before this was wired (#398): `0` on
+/// exactly the Non Metal groups, `1` on the metal line AND on every corn, drill, thread and chamfer
+/// row — "rated for metal", not "on the metal line". The client reads it as such; this only carries
+/// it. The rest of the extras and the `contentHash` stay off the wire.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServedEntry {
+    #[serde(flatten)]
+    entry: ToolLibraryEntry,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metal_duty: Option<i64>,
 }
 
 /// The `/inventory` body, ordered by `added_at` so a list a UI renders does not reshuffle when a
@@ -2015,6 +2044,43 @@ mod tests {
         let h = store.health().await;
         assert!(h.has_catalogue);
         assert_eq!(h.catalogue_synced_at.as_deref(), Some("2026-10-08T12:00:00.000Z"));
+    }
+
+    #[tokio::test]
+    async fn a_catalogue_rows_metal_duty_is_served_beside_its_tool() {
+        // #398: the one catalogue column the client reads. A `cat:` row carries the vendor's value
+        // (0 and NULL included as stated: 0 is a value, a NULL column is omitted); a `user:` row has
+        // no catalogue column at all, so the key is absent, and it never goes inside `tool` (#212).
+        let dir = TempDir::new().unwrap();
+        let mut rated = a_catalogue_entry("00000000-0000-0000-0000-000000000001");
+        rated.extras.metal_duty = Some(1);
+        let mut plain = a_catalogue_entry("00000000-0000-0000-0000-000000000002");
+        plain.tool.name = "synthetic plain flat".to_string();
+        plain.extras.metal_duty = Some(0);
+        let unstated = a_catalogue_entry("00000000-0000-0000-0000-000000000003");
+        let catalogue = CatalogueDoc {
+            synced_at: Some("2026-10-08T12:00:00.000Z".to_string()),
+            tools: vec![rated, plain, unstated],
+            ..CatalogueDoc::default()
+        };
+        fs::write(dir.path().join(CATALOGUE_FILE), serde_json::to_vec_pretty(&catalogue).unwrap()).unwrap();
+        let store = HouseStore::open(dir.path().to_path_buf());
+        store.create_tool(an_entry("user:abc")).await.unwrap();
+
+        let (bytes, _) = store.tools().await.unwrap();
+        let raw: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(raw[0]["metalDuty"], serde_json::json!(1), "{raw}");
+        assert_eq!(raw[1]["metalDuty"], serde_json::json!(0), "{raw}");
+        assert!(raw[2].get("metalDuty").is_none(), "{raw}");
+        assert_eq!(raw[3]["key"], serde_json::json!("user:abc"));
+        assert!(raw[3].get("metalDuty").is_none(), "{raw}");
+        for row in raw.as_array().unwrap() {
+            assert!(row["tool"].get("metalDuty").is_none(), "{row}");
+            assert!(row.get("extras").is_none(), "{row}");
+        }
+        // The shared entry shape still reads the body: the extra key is beside it, not in it.
+        let entries: Vec<ToolLibraryEntry> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(entries.len(), 4);
     }
 
     #[tokio::test]

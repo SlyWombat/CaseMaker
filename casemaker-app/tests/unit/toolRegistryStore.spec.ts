@@ -19,6 +19,7 @@ import {
   type InventoryItem,
 } from '@/platform/houseClient';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
+import { resolveCode } from '@/engine/cnc/registerCutter';
 
 const HEALTH: HouseHealth = {
   ok: true,
@@ -174,6 +175,33 @@ describe('refresh against a house service', () => {
     expect(state().status).toBe('present');
     expect(state().entries).toEqual([USER]);
     expect(getTools().map((e) => e.key)).toContain('user:1a2b3c4d5e');
+  });
+
+  it('hands a catalogue row’s metalDuty through to the list the Scan door resolves against (#398)', async () => {
+    // Synthetic rows. The vendor's 0 on a row whose name says `(Metal)` is the case only the column
+    // can decide, so it is the one that proves the field reached `resolveCode` and was not rebuilt
+    // away on the way (`houseTools` → `setRegistry` → `getTools` → `useToolRegistry`).
+    const row = (key: string, name: string, metalDuty: number): ToolLibraryEntry => ({
+      key,
+      provenance: 'synthetic catalogue row',
+      tool: { ...USER.tool, name, tipDiameter: 2 },
+      metalDuty,
+    });
+    const statedPlain = row('cat:00000000-0000-0000-0000-00000000000a', 'synthetic 2mm flat(Metal)', 0);
+    const metal = row('cat:00000000-0000-0000-0000-00000000000b', 'synthetic second 2mm flat(Metal)', 1);
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        tools: () => ({ kind: 'ok', etag: '"e2"', entries: [statedPlain, metal] }),
+      }),
+    );
+    await state().refresh();
+
+    const served = getTools().find((e) => e.key === statedPlain.key);
+    expect(served?.metalDuty).toBe(0);
+    const got = resolveCode('C1-BIT-O-FLUTE-M-2-8', [], getTools());
+    if (got.kind !== 'candidates') throw new Error(got.kind);
+    expect(got.rows.map((r) => r.key)).toEqual([metal.key, statedPlain.key]);
   });
 });
 

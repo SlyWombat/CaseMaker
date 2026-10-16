@@ -577,6 +577,55 @@ describe('resolveCode — the scan door’s three outcomes', () => {
     }
   });
 
+  // #398 — the vendor's own `metalDuty` column, served beside the row's tool. Synthetic rows: the
+  // value set ({0, 1}) and what each value covers were read off the real install, not its rows. `0`
+  // is exactly the Non Metal groups; `1` is the `(Metal)` line AND every corn, drill, thread and
+  // chamfer row, so it is "rated for metal", not the line.
+  function withDuty(entry: ToolLibraryEntry, metalDuty: number | null | undefined): ToolLibraryEntry {
+    return metalDuty === undefined ? entry : { ...entry, metalDuty };
+  }
+  const flat2 = (key: string, name: string, metalDuty: number | null | undefined) =>
+    withDuty(catalogueRow({ key, name, shape: 'flat', tipDiameter: 2, fluteLength: 8 }), metalDuty);
+
+  it('does not read a metal-rated row as the metal line: a corn row still leads a plain box (#398)', () => {
+    // The bench's own corn box carries no `-M-`, and every corn row is `metalDuty: 1`. Read as the
+    // line, the `1` would rank a same-tip plain flat ahead of the corn row the box names.
+    const corn = flat2('cat:444444444444', 'synthetic 2mm corn', 1);
+    const plain = flat2('cat:555555555555', 'synthetic 2mm flat', 0);
+    const metal = flat2('cat:666666666666', 'synthetic 2mm flat(Metal)', 1);
+    const got = resolveCode('C1-BIT-CORN-2.0-10.5', [], [corn, plain, metal]);
+    expect(got.kind).toBe('candidates');
+    if (got.kind !== 'candidates') return;
+    expect(got.rows.map((r) => r.key)).toEqual(['cat:444444444444', 'cat:555555555555', 'cat:666666666666']);
+    // And a metal box still puts the `(Metal)` row first, with the rated-only rows behind it.
+    const m = resolveCode('C1-BIT-O-FLUTE-M-2-8', [], [corn, plain, metal]);
+    if (m.kind !== 'candidates') throw new Error(m.kind);
+    expect(m.rows.map((r) => r.key)).toEqual(['cat:666666666666', 'cat:444444444444', 'cat:555555555555']);
+  });
+
+  it('takes the vendor’s 0 over a name that says metal (#398)', () => {
+    const stated = flat2('cat:777777777777', 'synthetic 2mm flat(Metal)', 0);
+    const plain = flat2('cat:555555555555', 'synthetic 2mm flat', 0);
+    const got = resolveCode('C1-BIT-O-FLUTE-M-2-8', [], [stated, plain]);
+    if (got.kind !== 'candidates') throw new Error(got.kind);
+    // Neither is on the metal line, so the order is the catalogue's and both are still offered.
+    expect(got.rows.map((r) => r.key)).toEqual(['cat:777777777777', 'cat:555555555555']);
+    const plainBox = resolveCode('C1-BIT-O-FLUTE-2-8', [], [plain, stated]);
+    if (plainBox.kind !== 'candidates') throw new Error(plainBox.kind);
+    expect(plainBox.rows.map((r) => r.key)).toEqual(['cat:555555555555', 'cat:777777777777']);
+  });
+
+  it.each([
+    ['null', null],
+    ['absent', undefined],
+  ] as const)('falls back to the name when the column is %s (#398)', (_label, duty) => {
+    const metal = flat2('cat:666666666666', 'synthetic 2mm flat(Metal)', duty);
+    const plain = flat2('cat:555555555555', 'synthetic 2mm flat', duty);
+    const got = resolveCode('C1-BIT-O-FLUTE-M-2-8', [], [plain, metal]);
+    if (got.kind !== 'candidates') throw new Error(got.kind);
+    expect(got.rows.map((r) => r.key)).toEqual(['cat:666666666666', 'cat:555555555555']);
+  });
+
   it('has no prefill when there was nothing to read', () => {
     expect(resolveCode('not a code', [], [])).toEqual({ kind: 'unknown', prefill: null });
     expect(resolveCode('   ', [], [])).toEqual({ kind: 'unknown', prefill: null });
