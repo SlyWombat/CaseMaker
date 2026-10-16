@@ -361,6 +361,24 @@
       "setAt": "2026-10-15T08:00:00.000Z",
       "unit": "mm"
     },
+    "run.missLimit": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "polls"
+    },
+    "run.noProgressMs": {
+      "value": 30000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms"
+    },
+    "run.pollMs": {
+      "value": 2000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms"
+    },
     "tools.runtimeWarnMinutes": {
       "value": 600.0,
       "source": "seeded",

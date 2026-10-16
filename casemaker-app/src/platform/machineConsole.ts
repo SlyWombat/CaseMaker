@@ -60,6 +60,13 @@ export interface ConsoleTiming {
 export const CONSOLE_TIMING: ConsoleTiming = { firstReplyMs: 60_000, quietMs: 800, maxMs: 120_000 };
 
 /**
+ * A status poll's window (#423 review): `?` answers in 0.6–0.7 s (#386), and the harness's `run` gives
+ * it 3 s. A 60 s window would make "three missed polls" take three minutes, and keep a Stop waiting
+ * behind a poll nobody will answer.
+ */
+export const STATUS_POLL_TIMING: ConsoleTiming = { firstReplyMs: 3000, quietMs: 800, maxMs: 5000 };
+
+/**
  * What the transport said about one line. **This is the bridge's `ConsoleOutcome` restated**, for the
  * reason `machineUpload.ts` restates `UploadOutcome`: importing the type would pull
  * `platform/desktop/protocol.ts` — sockets — into the web bundle, which is the leak
@@ -135,7 +142,12 @@ export type ConsoleSendResult =
  * socket appears with the first line that passes the guards, and stays for the rest of the session.
  */
 export interface ConsoleHandle {
-  send(line: string): Promise<ConsoleSendResult>;
+  /**
+   * `timing` narrows this ONE line's reply window (#423 review): a status poll is answered in about
+   * 0.7 s, so a run's watch gives `?` a few seconds, not the 60 s a typed `M491` needs. Default: the
+   * console's own {@link CONSOLE_TIMING}.
+   */
+  send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult>;
   /**
    * Close the socket if one was opened. Idempotent, and NOT the end of the console: a later line
    * opens a new session.
@@ -215,7 +227,7 @@ export function attachConsole(target: MachineConsoleTarget): ConsoleHandle {
   }
 
   return {
-    async send(line: string): Promise<ConsoleSendResult> {
+    async send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult> {
       // The guards first, and here rather than at the socket alone: a refused line must cost no
       // connection, which is only true if the refusal is decided before the session is opened.
       const problem = consoleProblem(line);
@@ -226,7 +238,7 @@ export function attachConsole(target: MachineConsoleTarget): ConsoleHandle {
 
       let send: ConsoleSend;
       try {
-        send = await opened.session.send(line, CONSOLE_TIMING);
+        send = await opened.session.send(line, { ...CONSOLE_TIMING, ...timing });
       } catch (e) {
         // `tcpRead` rejects when the peer closed the connection, so a dead socket arrives here rather
         // than as an outcome. The SESSION is dropped — the LINE never is: the next press opens a fresh

@@ -16,13 +16,19 @@
  * Homing afterwards is offered by the panel as its own press, never sent from here: it is motion,
  * and the person who pressed Stop decides when the head moves again.
  *
- * WHEN IT REFUSES. Only a running program is stopped: a status line with a `P:` percent below 100.
- * An `Idle` line with no `P:` has nothing to abort, and sending `abort` there would be a line with
- * no purpose. An alarm is reported, not acted on — a locked controller needs the machine.
+ * WHEN IT ABORTS, AND WHEN IT DOES NOT (#423 review). Anything but a machine at rest is aborted: a
+ * status line with a `P:` percent below 100, AND a `Run` line with no `P:` or with `P:` at 100 (the
+ * trip home after a program's end) — a machine that is moving is never read as finished. Only
+ * `Idle` with no program in progress is "not running", and gets nothing: sending `abort` there would
+ * be a line with no purpose. An alarm is reported, not acted on — a locked controller needs the
+ * machine. Its status polls use the short status window and keep the 2 s floor (#386).
+ *
+ * `stopOnSession` is the same stop on a session the caller holds — the run screen's (#423), which
+ * stops the program it is watching on its own connection.
  */
 
 import { alarmLine, controllerState, jobProgressPercent } from './machineUpload';
-import { attachConsole, type MachineConsoleTarget } from './machineConsole';
+import { attachConsole, STATUS_POLL_TIMING, type ConsoleHandle, type MachineConsoleTarget } from './machineConsole';
 import { VACUUM_OFF } from './machineVacuum';
 
 export const ABORT_LINE = 'abort';
@@ -30,6 +36,8 @@ export const ABORT_LINE = 'abort';
 /** After `abort` is answered: polls for `Idle`, and the wait between them (the harness's numbers). */
 export const STOP_IDLE_POLLS = 3;
 export const STOP_IDLE_POLL_MS = 5000;
+/** The status poll's floor after the abort (#386: never faster than 2 s). */
+export const STOP_POLL_FLOOR_MS = 2000;
 
 /**
  * What one press did:
@@ -68,46 +76,67 @@ export async function stopProgram(
 ): Promise<StopOutcome> {
   const session = attachConsole(target);
   try {
-    const ask = await session.send('?');
-    if (ask.kind !== 'sent') {
-      return ask.kind === 'refused' ? { kind: 'error', detail: ask.detail } : { kind: ask.kind, detail: ask.detail };
-    }
-    const alarm = alarmLine(ask.text) ?? alarmLine(ask.carried?.text ?? null);
-    if (alarm !== null) {
-      return {
-        kind: 'alarm',
-        detail: `the controller is in an alarm (\`${alarm}\`), so nothing was sent — use the machine's own button`,
-        status: ask.text,
-      };
-    }
-    if (!programRunning(ask.text)) return { kind: 'not-running', status: ask.text };
-
-    const aborted = await session.send(ABORT_LINE);
-    if (aborted.kind !== 'sent' && aborted.kind !== 'timeout') {
-      return aborted.kind === 'refused'
-        ? { kind: 'error', detail: aborted.detail }
-        : { kind: aborted.kind, detail: aborted.detail };
-    }
-    // An unanswered `abort` is not a failed one: the controller answers only once its queue drains.
-    // Either way, `Idle` on a status poll is what lets `M332` go out.
-    for (let i = 0; i < STOP_IDLE_POLLS; i++) {
-      const poll = await session.send('?');
-      if (poll.kind === 'sent') {
-        const state = controllerState(poll.text);
-        if (state !== null && state.toLowerCase() === 'idle' && !programRunning(poll.text)) {
-          const off = await session.send(VACUUM_OFF);
-          return { kind: 'stopped', vacuumOff: off.kind === 'sent', status: poll.text };
-        }
-      }
-      if (i + 1 < STOP_IDLE_POLLS) await sleep(STOP_IDLE_POLL_MS);
-    }
-    return {
-      kind: 'draining',
-      detail:
-        '`abort` went out and the spindle is stopping, but the controller has not reported Idle yet — the vacuum is ' +
-        'still on (`M332` was not sent). Wait for the head to stop, then switch the vacuum off.',
-    };
+    return await stopOnSession(session, sleep);
   } finally {
     await session.close();
   }
+}
+
+/**
+ * The stop itself, on a session the caller already holds (#423): the run screen stops the program
+ * it is watching on its OWN connection, at a poll boundary, rather than opening a second one beside
+ * it. Same rule as {@link stopProgram}: `?` first, abort only a running program, refuse an alarm, and
+ * `M332` only after a poll reads `Idle`.
+ */
+export async function stopOnSession(
+  session: Pick<ConsoleHandle, 'send'>,
+  sleep: (ms: number) => Promise<void> = realSleep,
+): Promise<StopOutcome> {
+  const ask = await session.send('?', STATUS_POLL_TIMING);
+  if (ask.kind !== 'sent') {
+    return ask.kind === 'refused' ? { kind: 'error', detail: ask.detail } : { kind: ask.kind, detail: ask.detail };
+  }
+  const alarm = alarmLine(ask.text) ?? alarmLine(ask.carried?.text ?? null);
+  if (alarm !== null) {
+    return {
+      kind: 'alarm',
+      detail: `the controller is in an alarm (\`${alarm}\`), so nothing was sent — use the machine's own button`,
+      status: ask.text,
+    };
+  }
+  // NOT RUNNING means Idle with no program in progress (#423 review). A `Run` line with no `P`, or with
+  // `P` at 100 (the trip home after the program's end), is a machine that is moving: it is aborted like
+  // a program, never treated as finished.
+  const askState = controllerState(ask.text);
+  if (askState !== null && askState.toLowerCase() === 'idle' && !programRunning(ask.text)) {
+    return { kind: 'not-running', status: ask.text };
+  }
+
+  const aborted = await session.send(ABORT_LINE);
+  if (aborted.kind !== 'sent' && aborted.kind !== 'timeout') {
+    return aborted.kind === 'refused'
+      ? { kind: 'error', detail: aborted.detail }
+      : { kind: aborted.kind, detail: aborted.detail };
+  }
+  // An unanswered `abort` is not a failed one: the controller answers only once its queue drains.
+  // Either way, `Idle` on a status poll is what lets `M332` go out.
+  for (let i = 0; i < STOP_IDLE_POLLS; i++) {
+    // The status floor holds here too (#386): never a `?` within 2 s of the line before it.
+    if (i === 0) await sleep(STOP_POLL_FLOOR_MS);
+    const poll = await session.send('?', STATUS_POLL_TIMING);
+    if (poll.kind === 'sent') {
+      const state = controllerState(poll.text);
+      if (state !== null && state.toLowerCase() === 'idle' && !programRunning(poll.text)) {
+        const off = await session.send(VACUUM_OFF);
+        return { kind: 'stopped', vacuumOff: off.kind === 'sent', status: poll.text };
+      }
+    }
+    if (i + 1 < STOP_IDLE_POLLS) await sleep(STOP_IDLE_POLL_MS);
+  }
+  return {
+    kind: 'draining',
+    detail:
+      '`abort` went out and the spindle is stopping, but the controller has not reported Idle yet — the vacuum is ' +
+      'still on (`M332` was not sent). Wait for the head to stop, then switch the vacuum off.',
+  };
 }

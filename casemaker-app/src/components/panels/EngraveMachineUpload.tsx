@@ -4,6 +4,9 @@ import { programBytes, uploadProgram, type MachineUploadResult } from '@/platfor
 import type { VerifyReport } from '@/engine/cnc/verify';
 import { describeUpload } from './engraveUploadCopy';
 import { EngraveLaserFrame } from './EngraveLaserFrame';
+import { EngraveMachineRun } from './EngraveMachineRun';
+import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
+import { programHash } from '@/platform/machineRun';
 import { frameBounds } from '@/platform/machineLaser';
 import { useSettingsStore } from '@/store/settingsStore';
 
@@ -26,9 +29,9 @@ import { useSettingsStore } from '@/store/settingsStore';
  * verified-only predicate again before it loads the bridge. Nothing here re-derives safety from the
  * shape of the report — it reports what the gate already decided.
  *
- * WHAT IT DOES NOT DO: start the job. The bridge writes a file to the machine's card and reports
- * the controller's answer. Makera's own Studio then opens a five-step Machining Wizard; nothing in
- * this panel may imply that step has happened.
+ * UPLOAD DOES NOT START THE JOB. The bridge writes a file to the machine's card and reports the
+ * controller's answer. Once it has gone through, `EngraveMachineRun` offers "Run it" (#423) — a
+ * separate press, with its own once-per-job "I am at the machine".
  */
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
@@ -83,6 +86,10 @@ export function EngraveMachineUpload({
 }: EngraveMachineUploadProps): JSX.Element {
   const [stage, setStage] = useState<'idle' | 'confirm' | 'sending'>('idle');
   const [result, setResult] = useState<MachineUploadResult | null>(null);
+  // #423 review: while a program runs on this machine, nothing is uploaded to it — and the run panel
+  // under this one (which holds Stop) cannot be swapped out from under the operator.
+  const runningHere = useMachineRunStore((s) => (machine === null ? false : s.runs[machineKey(machine)]?.running === true));
+  const prepareRun = useMachineRunStore((s) => s.prepare);
 
   const label = machine === null ? 'the machine' : (machine.name ?? machine.host);
   // #431 — the laser frame is a user option, off by default (decision Q21).
@@ -93,6 +100,7 @@ export function EngraveMachineUpload({
   // `busy` is a memory, and a memory that blocks the button could never be cleared by the very check
   // that now asks the machine. The upload asks it live; this panel only shows what it last heard.
   const blocked =
+    (runningHere ? 'a program is running on this machine — stop it or let it finish first' : null) ??
     blocker ??
     (machine === null
       ? 'no machine has been reached'
@@ -128,6 +136,9 @@ export function EngraveMachineUpload({
     if (outcome.kind === 'busy') onLiveStatus?.({ busy: true, status: outcome.status });
     else if (outcome.kind === 'uploaded') onLiveStatus?.({ busy: false, status: outcome.status });
     setResult(outcome);
+    // The run panel is drawn from the machine's store entry (#423): an upload that went through is
+    // what prepares it, with the program's hash for the once-per-program confirmation.
+    if (outcome.kind === 'uploaded') prepareRun({ host: machine.host, port: machine.port }, outcome.filename, programHash(program.nc));
     setStage('idle');
   }
 
@@ -172,8 +183,8 @@ export function EngraveMachineUpload({
             {machine.host}:{machine.port}?
           </p>
           <p style={MUTED}>
-            This writes the file to the machine. It does not start the job — that is step 2 in
-            Makera Studio, at the machine.
+            This writes the file to the machine. It does not start the job — once it is on the card,
+            “Run it” starts it from here, or Makera Studio at the machine.
           </p>
           <div style={{ display: 'flex', gap: 6 }}>
             <button
@@ -205,6 +216,10 @@ export function EngraveMachineUpload({
           {describeUpload(result, label)}
         </p>
       )}
+
+      {/* #423 — the machine's run, from its store entry: present once an upload has prepared it, and
+          still there (with its Stop) when this panel is closed and reopened mid-run. */}
+      {machine !== null && <EngraveMachineRun target={{ host: machine.host, port: machine.port }} />}
 
       {laserFrameOn && machine !== null && program !== null && (
         <EngraveLaserFrame host={machine.host} port={machine.port} bounds={frameBounds(program.verify.stats.bbox)} />

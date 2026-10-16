@@ -99,6 +99,10 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'registration.touchFeed': { label: 'scan touch feed', unit: 'mm/min', rule: z.number().min(10).max(1000), fallback: 150.0 },
   'registration.surfaceFastFeed': { label: 'surface touch, fast', unit: 'mm/min', rule: z.number().min(10).max(1000), fallback: 300.0 },
   'registration.surfaceSlowFeed': { label: 'surface touch, slow', unit: 'mm/min', rule: z.number().min(5).max(500), fallback: 100.0 },
+  // #423 — the run screen's watch. 2000 ms is the poll's floor (0.6 s faulted the controller, #386).
+  'run.pollMs': { label: 'run status poll', unit: 'ms', rule: z.number().min(2000).max(60000), fallback: 2000 },
+  'run.noProgressMs': { label: 'no-progress timeout', unit: 'ms', rule: z.number().min(15000).max(600000), fallback: 30000 },
+  'run.missLimit': { label: 'missed polls before unreachable', unit: 'polls', rule: z.number().int().min(1).max(10), fallback: 3 },
   // #415 — past how many minutes of runtime a cutter gets "check this bit". It only warns.
   'tools.runtimeWarnMinutes': {
     label: 'runtime before "check this bit"',

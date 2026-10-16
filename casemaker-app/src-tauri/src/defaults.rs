@@ -96,6 +96,12 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     ("registration.touchFeed", 150.0, "mm/min"),
     ("registration.surfaceFastFeed", 300.0, "mm/min"),
     ("registration.surfaceSlowFeed", 100.0, "mm/min"),
+    // #423 — the run screen's watch, as the harness's `run` keeps it: `?` every 2 s at most (0.6 s
+    // faulted the controller on 2026-10-12, #386 — 2000 ms is also the floor), a job that shows no
+    // progress field for 30 s is not a job, and three unanswered polls in a row are "unreachable".
+    ("run.pollMs", 2000.0, "ms"),
+    ("run.noProgressMs", 30000.0, "ms"),
+    ("run.missLimit", 3.0, "polls"),
 ];
 
 pub fn seeded() -> ShopDefaults {
@@ -173,6 +179,9 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "registration.surfaceSeekMm" => Some(need(n.is_some_and(|v| (1.0..=100.0).contains(&v)), "1 to 100 mm")),
         "registration.touchFeed" => Some(need(n.is_some_and(|v| (10.0..=1000.0).contains(&v)), "10 to 1000 mm/min")),
         "registration.surfaceFastFeed" => Some(need(n.is_some_and(|v| (10.0..=1000.0).contains(&v)), "10 to 1000 mm/min")),
+        "run.pollMs" => Some(need(n.is_some_and(|v| (2000.0..=60000.0).contains(&v)), "2000 to 60000 ms — never faster than 2 s (#386)")),
+        "run.noProgressMs" => Some(need(n.is_some_and(|v| (15000.0..=600000.0).contains(&v)), "15000 to 600000 ms")),
+        "run.missLimit" => Some(need(n.is_some_and(|v| (1.0..=10.0).contains(&v) && v.fract() == 0.0), "a whole number of polls, 1 to 10")),
         "registration.surfaceSlowFeed" => Some(need(n.is_some_and(|v| (5.0..=500.0).contains(&v)), "5 to 500 mm/min")),
         "tools.runtimeWarnMinutes" => Some(need(n.is_some_and(|v| v > 0.0 && v <= 100_000.0), "above 0, up to 100000 minutes")),
         _ => None,
