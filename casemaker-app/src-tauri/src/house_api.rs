@@ -68,6 +68,20 @@ pub fn routes(store: Arc<HouseStore>) -> Router {
         // #413. The stock shelf: its own list, `ETag` and guarded writes, as the inventory has.
         .route("/api/v1/stock", get(list_stock).post(create_stock))
         .route("/api/v1/stock/*id", patch(update_stock).delete(delete_stock))
+        // #416. An optional power switch per machine: its config (guarded on the location), its token
+        // (this computer only, into the secure store), and the switch itself.
+        .route(
+            "/api/v1/power/:id",
+            get(power_status).put(set_power).delete(remove_power),
+        )
+        .route("/api/v1/power/:id/token", put(set_power_token))
+        .route("/api/v1/power/:id/on", post(power_on))
+        .route("/api/v1/power/:id/off", post(power_off))
+        // #417. The machine's wasteboard record (null clears it), guarded on the location.
+        .route("/api/v1/wasteboard/:id", put(set_wasteboard))
+        // The shop's defaults: tunable values with provenance, open to new keys (`defaults.rs`).
+        .route("/api/v1/defaults", get(list_defaults))
+        .route("/api/v1/defaults/:key", put(put_default).delete(reset_default))
         .route("/api/v1/export", get(export_house))
         .route("/api/v1/import", post(import_house))
         // #308. POST and nothing else: a sync reads Makera Studio's own database and replaces the
@@ -343,6 +357,176 @@ async fn delete_stock(
 ) -> Response<Body> {
     let guard = if_match(&headers);
     match store.delete_stock(&id, guard.as_deref()).await {
+        Ok(()) => empty(StatusCode::NO_CONTENT),
+        Err(e) => error_response(e),
+    }
+}
+
+/// Refuse a request that did not come from the computer Case Maker runs on (#416 review). A power
+/// switch's configuration says where its token is sent, and its on/off cuts a machine's mains: both
+/// are decisions for the person at that computer, not for any browser on the LAN (decision 35's rule,
+/// as `config_api` applies it).
+fn local_only(peer: std::net::SocketAddr, what: &str) -> Option<Response<Body>> {
+    let ip = peer.ip().to_canonical();
+    (!ip.is_loopback()).then(|| {
+        json_error(
+            StatusCode::FORBIDDEN,
+            format!("{what} only from the computer Case Maker runs on, and this request came from {ip}"),
+        )
+    })
+}
+
+type Peer = axum::extract::ConnectInfo<std::net::SocketAddr>;
+
+fn power_json(status: crate::house::PowerStatus) -> Response<Body> {
+    match serde_json::to_vec(&status) {
+        Ok(bytes) => json_body(StatusCode::OK, bytes),
+        Err(e) => error_response(HouseError::Io(format!("could not report the switch: {e}"))),
+    }
+}
+
+/// The switch, whether a token is saved, and the plug's state (#416). Never the token.
+async fn power_status(State(store): State<Arc<HouseStore>>, Path(id): Path<String>) -> Response<Body> {
+    match store.power_status(&id).await {
+        Ok(s) => power_json(s),
+        Err(e) => error_response(e),
+    }
+}
+
+/// Set up or change a machine's switch. Guarded on the location's `ETag` (#321's rule).
+async fn set_power(
+    State(store): State<Arc<HouseStore>>,
+    axum::extract::ConnectInfo(peer): Peer,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    axum::Json(switch): axum::Json<crate::power::PowerSwitch>,
+) -> Response<Body> {
+    if let Some(refused) = local_only(peer, "a power switch can be set up") {
+        return refused;
+    }
+    let guard = if_match(&headers);
+    match store.set_power(&id, Some(switch), guard.as_deref()).await {
+        Ok(()) => empty(StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+/// Remove a machine's switch, and its token. Guarded as `set_power` is.
+async fn remove_power(
+    State(store): State<Arc<HouseStore>>,
+    axum::extract::ConnectInfo(peer): Peer,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    if let Some(refused) = local_only(peer, "a power switch can be removed") {
+        return refused;
+    }
+    let guard = if_match(&headers);
+    match store.set_power(&id, None, guard.as_deref()).await {
+        Ok(()) => empty(StatusCode::NO_CONTENT),
+        Err(e) => error_response(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TokenBody {
+    token: String,
+}
+
+/// Save a switch's token in the secure store (#416). FROM THIS COMPUTER ONLY — decision 35's rule,
+/// as `config_api` applies it: whoever can set the token decides what the app's switch talks to, and
+/// the LAN is a boundary for the house's data, not for the machine's mains.
+async fn set_power_token(
+    State(store): State<Arc<HouseStore>>,
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    Path(id): Path<String>,
+    body: axum::body::Bytes,
+) -> Response<Body> {
+    if let Some(refused) = local_only(peer, "a power switch's token can be saved") {
+        return refused;
+    }
+    // Parsed by hand so a refusal can never echo the body back (serde's error quotes the input).
+    let Ok(TokenBody { token }) = serde_json::from_slice::<TokenBody>(&body) else {
+        return error_response(HouseError::BadEntry("this endpoint takes {\"token\": \"…\"}".into()));
+    };
+    match store.set_power_token(&id, &token).await {
+        Ok(()) => empty(StatusCode::NO_CONTENT),
+        Err(e) => error_response(e),
+    }
+}
+
+async fn power_on(
+    State(store): State<Arc<HouseStore>>,
+    axum::extract::ConnectInfo(peer): Peer,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    if let Some(refused) = local_only(peer, "a machine's power can be switched") {
+        return refused;
+    }
+    match store.switch_power(&id, true).await {
+        Ok(s) => power_json(s),
+        Err(e) => error_response(e),
+    }
+}
+
+async fn power_off(
+    State(store): State<Arc<HouseStore>>,
+    axum::extract::ConnectInfo(peer): Peer,
+    Path(id): Path<String>,
+) -> Response<Body> {
+    if let Some(refused) = local_only(peer, "a machine's power can be switched") {
+        return refused;
+    }
+    match store.switch_power(&id, false).await {
+        Ok(s) => power_json(s),
+        Err(e) => error_response(e),
+    }
+}
+
+/// Record, change or clear (`null`) a machine's wasteboard (#417). Guarded on the location's `ETag`.
+async fn set_wasteboard(
+    State(store): State<Arc<HouseStore>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    axum::Json(board): axum::Json<Option<crate::wasteboard::Wasteboard>>,
+) -> Response<Body> {
+    let guard = if_match(&headers);
+    match store.set_wasteboard(&id, board, guard.as_deref()).await {
+        Ok(()) => empty(StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+async fn list_defaults(State(store): State<Arc<HouseStore>>, headers: HeaderMap) -> Response<Body> {
+    match store.defaults().await {
+        Ok((bytes, etag)) => json_with_etag(bytes, etag, &headers, StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+/// Set one default. Guarded on the defaults' `ETag`.
+async fn put_default(
+    State(store): State<Arc<HouseStore>>,
+    Path(key): Path<String>,
+    headers: HeaderMap,
+    axum::Json(value): axum::Json<crate::defaults::ShopDefault>,
+) -> Response<Body> {
+    let guard = if_match(&headers);
+    match store.put_default(&key, value, guard.as_deref()).await {
+        Ok(()) => empty(StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+/// Reset one default to its seed (or remove a key with none). Guarded on the defaults' `ETag`.
+async fn reset_default(
+    State(store): State<Arc<HouseStore>>,
+    Path(key): Path<String>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let guard = if_match(&headers);
+    match store.reset_default(&key, guard.as_deref()).await {
         Ok(()) => empty(StatusCode::NO_CONTENT),
         Err(e) => error_response(e),
     }
@@ -1044,6 +1228,65 @@ mod tests {
         let tag = etag_of(&app, "/api/v1/stock").await;
         let res = app.clone().oneshot(delete("/api/v1/stock/s-1", Some(&tag))).await.unwrap();
         assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn a_power_token_is_saved_only_from_this_computer_and_never_echoed() {
+        // #416. The secure store here is the test build's memory one (`house::default_secrets`).
+        let (_dir, app) = app_under_test();
+        let tag = etag_of(&app, "/api/v1/location").await;
+        let machine = serde_json::json!({
+            "id": "m-1", "profileId": "Z1", "updatedAt": "2026-10-15T00:00:00.000Z"
+        });
+        let put = |uri: &str, tag: Option<&str>, body: String| {
+            let mut b = Request::builder().method("PUT").uri(uri).header(header::CONTENT_TYPE, "application/json");
+            if let Some(t) = tag {
+                b = b.header(header::IF_MATCH, t);
+            }
+            b.body(Body::from(body)).unwrap()
+        };
+        let res = app.clone().oneshot(put("/api/v1/location/machines/m-1", Some(&tag), machine.to_string())).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let tag = etag_of(&app, "/api/v1/location").await;
+        let sw = r#"{"provider":"home-assistant","baseUrl":"http://127.0.0.1:9","entityId":"switch.makera_cnc"}"#;
+        let peer = |mut req: Request<Body>, addr: &str| {
+            req.extensions_mut()
+                .insert(axum::extract::ConnectInfo(addr.parse::<std::net::SocketAddr>().unwrap()));
+            req
+        };
+        // From the LAN: refused — set-up, on and off are this computer's (#416 review).
+        let res = app.clone().oneshot(peer(put("/api/v1/power/m-1", Some(&tag), sw.into()), "192.168.10.20:5000")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        let res = app.clone().oneshot(peer(put("/api/v1/power/m-1", Some(&tag), sw.into()), "127.0.0.1:5000")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        for verb in ["on", "off"] {
+            let req = Request::builder().method("POST").uri(format!("/api/v1/power/m-1/{verb}")).body(Body::empty()).unwrap();
+            let res = app.clone().oneshot(peer(req, "192.168.10.20:5000")).await.unwrap();
+            assert_eq!(res.status(), StatusCode::FORBIDDEN, "{verb} from the LAN");
+        }
+        let tag = etag_of(&app, "/api/v1/location").await;
+        let req = Request::builder().method("DELETE").uri("/api/v1/power/m-1").header(header::IF_MATCH, &tag).body(Body::empty()).unwrap();
+        assert_eq!(app.clone().oneshot(peer(req, "10.0.0.9:1")).await.unwrap().status(), StatusCode::FORBIDDEN);
+
+        let with_peer = |addr: &str, body: &str| {
+            let mut req = put("/api/v1/power/m-1/token", None, body.into());
+            req.extensions_mut()
+                .insert(axum::extract::ConnectInfo(addr.parse::<std::net::SocketAddr>().unwrap()));
+            req
+        };
+        let res = app.clone().oneshot(with_peer("192.168.10.20:5000", r#"{"token":"lan-secret"}"#)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        let res = app.clone().oneshot(with_peer("127.0.0.1:5000", r#"{"tokn":"oops-secret"}"#)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert!(!String::from_utf8(bytes_of(res).await).unwrap().contains("oops-secret"), "echoed the body");
+        let res = app.clone().oneshot(with_peer("127.0.0.1:5000", r#"{"token":"local-secret"}"#)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        let status = json_of(app.clone().oneshot(get("/api/v1/power/m-1")).await.unwrap()).await;
+        assert_eq!(status["hasToken"], serde_json::json!(true));
+        assert!(!status.to_string().contains("local-secret"), "{status}");
+        // Nothing listens on port 9: the problem is said, without the token.
+        assert!(status["problem"].as_str().is_some(), "{status}");
     }
 
     #[tokio::test]

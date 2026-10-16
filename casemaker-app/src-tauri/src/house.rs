@@ -680,6 +680,12 @@ fn stock_bytes(inner: &Inner) -> Result<Vec<u8>, HouseError> {
     json_bytes(&items)
 }
 
+/// The `/defaults` body: the shop's defaults, keyed and sorted (a `BTreeMap`), so the bytes — and
+/// the `ETag` — depend only on the content.
+fn defaults_bytes(inner: &Inner) -> Result<Vec<u8>, HouseError> {
+    json_bytes(&inner.location.defaults)
+}
+
 /// The `/location` body (#412): the location's identity and machines, without the tool tiers. Same
 /// free-function rule as `tools_bytes`, for the same reason — a guarded machine write needs it while
 /// it holds the write guard.
@@ -844,9 +850,33 @@ pub struct HouseStore {
     /// takes no arguments, and this is the seam a test points at a fixture (#308).
     studio_db: Option<PathBuf>,
     inner: RwLock<Inner>,
+    /// Where a power switch's token is kept (#416): the OS store in the app, a memory one in tests.
+    secrets: std::sync::Arc<dyn crate::power::SecretStore>,
     /// What is known about a `house.json` changed after the migration (#412 review), mirrored in
     /// `house-watch.json` so it survives a restart. See `stale_house_warning`.
     house_watch: std::sync::Mutex<Option<HouseWatch>>,
+}
+
+/// The secure store a store opens with. In a TEST build it is always the in-memory one, so no test —
+/// whatever it calls — can reach the real Credential Manager (#416).
+fn default_secrets() -> std::sync::Arc<dyn crate::power::SecretStore> {
+    #[cfg(test)]
+    return std::sync::Arc::new(crate::power::MemorySecretStore::default());
+    #[cfg(not(test))]
+    return std::sync::Arc::new(crate::power::OsSecretStore);
+}
+
+/// What `GET /api/v1/power/:id` answers (#416). Never the token: only whether one is saved.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PowerStatus {
+    /// The configured switch, or null — the default, and then nothing else here means anything.
+    pub switch: Option<crate::power::PowerSwitch>,
+    pub has_token: bool,
+    /// The plug as the provider reported it just now, when it could be asked.
+    pub state: Option<crate::power::PlugState>,
+    /// Why the state could not be read, in a sentence that never contains the token.
+    pub problem: Option<String>,
 }
 
 /// The file the stale-`house.json` state is kept in, beside the documents. Ours, not the user's.
@@ -911,6 +941,7 @@ impl HouseStore {
                 catalogue_problem,
             }),
             house_watch: std::sync::Mutex::new(house_watch),
+            secrets: default_secrets(),
         };
         // Looked for at open too, BEFORE anything can write the location: an older build cannot run
         // beside this one (the lock), so its edits are always made while this one is closed, and
@@ -933,7 +964,10 @@ impl HouseStore {
         match read_doc::<LocationDoc>(&location_path, LOCATION_KIND, LOCATION_SCHEMA_VERSION) {
             // Parsing is not enough (#320): a hand-edited document can parse and still hold a
             // duplicate key or a tool the client refuses.
-            Ok(Some(doc)) => {
+            Ok(Some(mut doc)) => {
+                // A location from before the shop defaults (or before a seed this build adds) reads
+                // the seed values, in memory; the next write stores them (`defaults.rs`).
+                crate::defaults::add_missing_seeds(&mut doc.defaults);
                 return match doc.validate() {
                     Ok(()) => (doc, None),
                     Err(e) => {
@@ -1273,10 +1307,208 @@ impl HouseStore {
         Self::writable(&inner.location_problem)?;
         check_precondition(&etag_for(&location_bytes(&inner)?), if_match, "the location")?;
         let mut next = inner.location.clone();
+        let mut record = record;
         match next.machines.iter_mut().find(|m| m.id == record.id) {
-            Some(existing) => *existing = record,
-            None => next.machines.push(record),
+            Some(existing) => {
+                // The power switch (#416) and the wasteboard (#417) have their OWN endpoints: a
+                // machine PUT — the settings write-through — keeps what is stored, whatever its body
+                // says, so a window that has not read them cannot wipe them.
+                record.power = existing.power.clone();
+                record.wasteboard = existing.wasteboard.clone();
+                *existing = record;
+            }
+            None => {
+                record.power = None;
+                record.wasteboard = None;
+                next.machines.push(record);
+            }
         }
+        self.commit(&mut inner, next)
+    }
+
+    /// The machine's switch config, or why there is none to act on.
+    async fn switch_of(&self, machine_id: &str) -> Result<Option<crate::power::PowerSwitch>, HouseError> {
+        let inner = self.inner.read().await;
+        Self::writable(&inner.location_problem)?;
+        let machine = inner
+            .location
+            .machines
+            .iter()
+            .find(|m| m.id == machine_id)
+            .ok_or_else(|| HouseError::NotFound(format!("machine {machine_id} is not in the location")))?;
+        Ok(machine.power.clone())
+    }
+
+    fn token_of(&self, machine_id: &str, sw: &crate::power::PowerSwitch) -> Result<Option<String>, HouseError> {
+        self.secrets
+            .get(&crate::power::token_account(machine_id, sw))
+            .map_err(HouseError::Io)
+    }
+
+    /// Delete the tokens of every switch in `before` that `after` no longer points at the same server
+    /// (#416 review): a removed switch, a removed machine, a moved address or provider. Logged, not
+    /// fatal — the token is filed by address anyway, so a stale one can never be SENT anywhere new.
+    fn drop_moved_tokens(&self, before: &LocationDoc, after: &LocationDoc) {
+        for m in &before.machines {
+            let Some(old) = &m.power else { continue };
+            let still = after
+                .machines
+                .iter()
+                .find(|n| n.id == m.id)
+                .and_then(|n| n.power.as_ref())
+                .is_some_and(|new| crate::power::same_server(old, new));
+            if !still {
+                if let Err(e) = self.secrets.delete(&crate::power::token_account(&m.id, old)) {
+                    log::warn!("house service: could not remove a power switch's old token: {e}");
+                }
+            }
+        }
+    }
+
+    /// The switch, whether a token is saved, and the plug's state when it can be asked (#416). The
+    /// provider is asked OUTSIDE the lock: a slow Home Assistant must not stall every other request.
+    pub async fn power_status(&self, machine_id: &str) -> Result<PowerStatus, HouseError> {
+        let switch = self.switch_of(machine_id).await?;
+        let Some(sw) = switch.clone() else {
+            return Ok(PowerStatus { switch: None, has_token: false, state: None, problem: None });
+        };
+        let token = self.token_of(machine_id, &sw)?;
+        let Some(token) = token else {
+            return Ok(PowerStatus {
+                switch,
+                has_token: false,
+                state: None,
+                problem: Some("no token is saved for this switch on this computer".into()),
+            });
+        };
+        let (state, problem) = match crate::power::plug_state(&sw, &token).await {
+            Ok(s) => (Some(s), None),
+            Err(e) => (None, Some(e)),
+        };
+        Ok(PowerStatus { switch, has_token: true, state, problem })
+    }
+
+    /// Set up, change or remove (`None`) a machine's switch. GUARDED on the location's `ETag`, as a
+    /// machine write is. Removing it also removes its token from the secure store.
+    pub async fn set_power(
+        &self,
+        machine_id: &str,
+        switch: Option<crate::power::PowerSwitch>,
+        if_match: Option<&str>,
+    ) -> Result<(), HouseError> {
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        check_precondition(&etag_for(&location_bytes(&inner)?), if_match, "the location")?;
+        if let Some(sw) = &switch {
+            sw.validate()?;
+        }
+        let before = inner.location.clone();
+        let mut next = before.clone();
+        let machine = next
+            .machines
+            .iter_mut()
+            .find(|m| m.id == machine_id)
+            .ok_or_else(|| HouseError::NotFound(format!("machine {machine_id} is not in the location")))?;
+        machine.power = switch;
+        self.commit(&mut inner, next.clone())?;
+        // A removed switch, or one pointed at a different server, loses its token (#416 review).
+        self.drop_moved_tokens(&before, &next);
+        Ok(())
+    }
+
+    /// Save a switch's token in the secure store (#416). The machine must have a switch to use it.
+    /// The caller (`house_api`) has already refused any peer that is not this computer.
+    pub async fn set_power_token(&self, machine_id: &str, token: &str) -> Result<(), HouseError> {
+        let Some(sw) = self.switch_of(machine_id).await? else {
+            return Err(HouseError::Conflict(format!(
+                "machine {machine_id} has no power switch set up to use a token"
+            )));
+        };
+        if token.trim().is_empty() || token != token.trim() || token.chars().any(|c| c.is_control()) {
+            return Err(HouseError::BadEntry(
+                "the token is empty or has spaces or control characters in it".into(),
+            ));
+        }
+        // Filed under the address it is saved FOR: it can only ever be sent there.
+        self.secrets
+            .set(&crate::power::token_account(machine_id, &sw), token)
+            .map_err(HouseError::Refused)
+    }
+
+    /// Switch the plug (#416). The GUARDS — never off while running, off only after Idle and a home —
+    /// are the client's, which alone can read the controller's status; this only refuses a machine
+    /// with no switch or no token, and reports what the provider said.
+    pub async fn switch_power(&self, machine_id: &str, on: bool) -> Result<PowerStatus, HouseError> {
+        let sw = self.switch_of(machine_id).await?.ok_or_else(|| {
+            HouseError::Conflict(format!("machine {machine_id} has no power switch"))
+        })?;
+        let token = self.token_of(machine_id, &sw)?.ok_or_else(|| {
+            HouseError::Conflict("no token is saved for this switch on this computer".into())
+        })?;
+        crate::power::plug_set(&sw, &token, on).await.map_err(HouseError::Refused)?;
+        self.power_status(machine_id).await
+    }
+
+    /// Record, change or clear (`None`) a machine's wasteboard (#417). Guarded on the location's
+    /// `ETag`.
+    pub async fn set_wasteboard(
+        &self,
+        machine_id: &str,
+        board: Option<crate::wasteboard::Wasteboard>,
+        if_match: Option<&str>,
+    ) -> Result<(), HouseError> {
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        check_precondition(&etag_for(&location_bytes(&inner)?), if_match, "the location")?;
+        if let Some(b) = &board {
+            b.validate()?;
+        }
+        let mut next = inner.location.clone();
+        let machine = next
+            .machines
+            .iter_mut()
+            .find(|m| m.id == machine_id)
+            .ok_or_else(|| HouseError::NotFound(format!("machine {machine_id} is not in the location")))?;
+        machine.wasteboard = board;
+        self.commit(&mut inner, next)
+    }
+
+    /// The shop's defaults, with their `ETag`.
+    pub async fn defaults(&self) -> Result<(Vec<u8>, String), HouseError> {
+        let inner = self.inner.read().await;
+        Self::writable(&inner.location_problem)?;
+        let bytes = defaults_bytes(&inner)?;
+        let etag = etag_for(&bytes);
+        Ok((bytes, etag))
+    }
+
+    /// Set one default. GUARDED on the defaults' own `ETag`, precondition first.
+    pub async fn put_default(
+        &self,
+        key: &str,
+        value: crate::defaults::ShopDefault,
+        if_match: Option<&str>,
+    ) -> Result<(), HouseError> {
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        check_precondition(&etag_for(&defaults_bytes(&inner)?), if_match, "the shop defaults")?;
+        crate::defaults::validate_write(key, &value)?;
+        let mut next = inner.location.clone();
+        next.defaults.insert(key.to_string(), value);
+        crate::defaults::validate_all(&next.defaults)?;
+        self.commit(&mut inner, next)
+    }
+
+    /// Remove one default: a seeded key goes back to its seed, any other key is removed.
+    pub async fn reset_default(&self, key: &str, if_match: Option<&str>) -> Result<(), HouseError> {
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        check_precondition(&etag_for(&defaults_bytes(&inner)?), if_match, "the shop defaults")?;
+        let mut next = inner.location.clone();
+        if next.defaults.remove(key).is_none() {
+            return Err(HouseError::NotFound(format!("{key} is not one of the shop's defaults")));
+        }
+        crate::defaults::add_missing_seeds(&mut next.defaults);
         self.commit(&mut inner, next)
     }
 
@@ -1499,13 +1731,19 @@ impl HouseStore {
                 if found != Some(u64::from(LOCATION_SCHEMA_VERSION)) {
                     return Err(version_refusal("location", LOCATION_SCHEMA_VERSION));
                 }
-                let doc: LocationDoc = serde_json::from_value(value).map_err(|e| {
+                let mut doc: LocationDoc = serde_json::from_value(value).map_err(|e| {
                     HouseError::BadEntry(format!("not a Case Maker location file: {e}"))
                 })?;
+                // A location exported before the shop defaults gets the seeds, as one read at load does.
+                crate::defaults::add_missing_seeds(&mut doc.defaults);
                 doc.validate()?;
                 let mut inner = self.inner.write().await;
                 Self::writable(&inner.location_problem)?;
-                self.commit(&mut inner, doc)
+                let before = inner.location.clone();
+                self.commit(&mut inner, doc.clone())?;
+                // An imported switch pointed elsewhere does not inherit this computer's token.
+                self.drop_moved_tokens(&before, &doc);
+                Ok(())
             }
             HOUSE_KIND => {
                 if found != Some(u64::from(HOUSE_SCHEMA_VERSION)) {
@@ -2806,6 +3044,8 @@ mod tests {
             calibration: None,
             fixtures: Some(serde_json::json!({ "vise": { "source": "measured" } })),
             margins: None,
+            power: None,
+            wasteboard: None,
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }
     }
@@ -3265,5 +3505,202 @@ mod tests {
             checked += 1;
         }
         assert!(checked >= 10, "the table should carry the shared cases ({checked})");
+    }
+
+    // — the power switch (#416) and the wasteboard (#417) ------------------------------------------
+
+    /// A store with one machine in it, and its location validator.
+    async fn store_with_machine() -> (TempDir, HouseStore) {
+        let (dir, store) = store();
+        let (_, etag) = store.location().await.unwrap();
+        store.put_machine(a_machine("m-1"), Some(&etag)).await.unwrap();
+        (dir, store)
+    }
+
+    #[tokio::test]
+    async fn with_no_switch_the_status_says_none_and_switching_is_refused() {
+        let (_dir, store) = store_with_machine().await;
+        let s = store.power_status("m-1").await.unwrap();
+        assert!(s.switch.is_none() && !s.has_token && s.state.is_none() && s.problem.is_none());
+        assert!(matches!(store.switch_power("m-1", true).await, Err(HouseError::Conflict(_))));
+        assert!(matches!(store.set_power_token("m-1", "t").await, Err(HouseError::Conflict(_))));
+        assert!(matches!(store.power_status("nope").await, Err(HouseError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn a_switch_is_configured_tokened_and_switched_through_a_fake_home_assistant() {
+        let ha = crate::power::tests::fake_ha("tok-1").await;
+        let (dir, store) = store_with_machine().await;
+        let (_, etag) = store.location().await.unwrap();
+        store
+            .set_power("m-1", Some(crate::power::tests::a_switch(&ha.base_url)), Some(&etag))
+            .await
+            .unwrap();
+        let s = store.power_status("m-1").await.unwrap();
+        assert!(s.switch.is_some() && !s.has_token, "{s:?}");
+
+        store.set_power_token("m-1", "tok-1").await.unwrap();
+        let s = store.switch_power("m-1", true).await.unwrap();
+        assert_eq!(s.state, Some(crate::power::PlugState::On));
+        let s = store.switch_power("m-1", false).await.unwrap();
+        assert_eq!(s.state, Some(crate::power::PlugState::Off));
+
+        // The token is in the secure store and NOWHERE in the document, the view or the export.
+        let file = fs::read_to_string(dir.path().join(LOCATION_FILE)).unwrap();
+        let export = String::from_utf8(store.export().await.unwrap()).unwrap();
+        let view = String::from_utf8(store.location().await.unwrap().0).unwrap();
+        for text in [&file, &export, &view] {
+            assert!(!text.contains("tok-1"), "the token leaked");
+        }
+        assert!(file.contains("switch.makera_cnc"));
+        let status = serde_json::to_string(&store.power_status("m-1").await.unwrap()).unwrap();
+        assert!(!status.contains("tok-1") && status.contains("\"hasToken\":true"), "{status}");
+
+        // Removing the switch removes its token too.
+        let (_, etag) = store.location().await.unwrap();
+        store.set_power("m-1", None, Some(&etag)).await.unwrap();
+        let sw = crate::power::tests::a_switch(&ha.base_url);
+        assert_eq!(store.secrets.get(&crate::power::token_account("m-1", &sw)).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_machine_put_keeps_the_switch_and_the_wasteboard() {
+        // The settings write-through PUTs the whole machine record; it must not wipe either field.
+        let (_dir, store) = store_with_machine().await;
+        let (_, etag) = store.location().await.unwrap();
+        store
+            .set_power("m-1", Some(crate::power::tests::a_switch("http://ha.local:8123")), Some(&etag))
+            .await
+            .unwrap();
+        let (_, etag) = store.location().await.unwrap();
+        store
+            .set_wasteboard("m-1", Some(crate::wasteboard::tests::a_board()), Some(&etag))
+            .await
+            .unwrap();
+        let (_, etag) = store.location().await.unwrap();
+        let mut edited = a_machine("m-1");
+        edited.margins = Some(serde_json::json!({ "source": "user" }));
+        store.put_machine(edited, Some(&etag)).await.unwrap();
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        let m = &view["machines"][0];
+        assert_eq!(m["margins"]["source"], serde_json::json!("user"));
+        assert_eq!(m["power"]["entityId"], serde_json::json!("switch.makera_cnc"));
+        assert_eq!(m["wasteboard"]["thickness"], serde_json::json!(10.0));
+    }
+
+    #[tokio::test]
+    async fn a_wasteboard_is_guarded_validated_and_cleared() {
+        let (_dir, store) = store_with_machine().await;
+        assert!(matches!(
+            store.set_wasteboard("m-1", Some(crate::wasteboard::tests::a_board()), None).await,
+            Err(HouseError::PreconditionRequired(_))
+        ));
+        let (_, etag) = store.location().await.unwrap();
+        let bad = crate::wasteboard::Wasteboard { thickness: 0.0, ..crate::wasteboard::tests::a_board() };
+        assert!(matches!(store.set_wasteboard("m-1", Some(bad), Some(&etag)).await, Err(HouseError::BadEntry(_))));
+        store.set_wasteboard("m-1", Some(crate::wasteboard::tests::a_board()), Some(&etag)).await.unwrap();
+        let (_, etag) = store.location().await.unwrap();
+        store.set_wasteboard("m-1", None, Some(&etag)).await.unwrap();
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        assert_eq!(view["machines"][0]["wasteboard"], serde_json::Value::Null);
+    }
+
+    // — the shop's defaults --------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn a_fresh_location_is_seeded_and_an_older_one_gets_the_seeds_at_load() {
+        let (dir, store) = store();
+        let (bytes, _) = store.defaults().await.unwrap();
+        let d: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(d["power.onWaitSeconds"]["source"], serde_json::json!("seeded"));
+        assert_eq!(d["wasteboard.depthLimitMm"]["value"], serde_json::json!(0.5));
+        // On disk too: the fresh location was written with them.
+        assert!(fs::read_to_string(dir.path().join(LOCATION_FILE)).unwrap().contains("power.onWaitSeconds"));
+
+        let older = TempDir::new().unwrap();
+        let mut doc: serde_json::Value = serde_json::from_slice(&location_fixture()).unwrap();
+        doc.as_object_mut().unwrap().remove("defaults");
+        fs::write(older.path().join(LOCATION_FILE), serde_json::to_vec(&doc).unwrap()).unwrap();
+        let reopened = HouseStore::open(older.path().to_path_buf());
+        let d: serde_json::Value = serde_json::from_slice(&reopened.defaults().await.unwrap().0).unwrap();
+        assert_eq!(d["wasteboard.depthLimitMm"]["source"], serde_json::json!("seeded"));
+    }
+
+    #[tokio::test]
+    async fn a_default_is_set_guarded_open_to_new_keys_and_reset_to_its_seed() {
+        use crate::defaults::{DefaultSource, ShopDefault};
+        let (_dir, store) = store();
+        let chosen = |v: serde_json::Value| ShopDefault {
+            value: v,
+            source: DefaultSource::Chosen,
+            set_at: Some("2026-10-15T00:00:00.000Z".into()),
+            unit: Some("mm".into()),
+        };
+        assert!(matches!(
+            store.put_default("rest.overlapMm", chosen(serde_json::json!(0.5)), None).await,
+            Err(HouseError::PreconditionRequired(_))
+        ));
+        let (_, etag) = store.defaults().await.unwrap();
+        // A key this build has never heard of — the peer's — is accepted when well-formed.
+        store.put_default("rest.overlapMm", chosen(serde_json::json!(0.5)), Some(&etag)).await.unwrap();
+        let (_, etag) = store.defaults().await.unwrap();
+        assert!(matches!(
+            store.put_default("wasteboard.depthLimitMm", chosen(serde_json::json!(-2)), Some(&etag)).await,
+            Err(HouseError::BadEntry(_))
+        ));
+        store.put_default("wasteboard.depthLimitMm", chosen(serde_json::json!(1.0)), Some(&etag)).await.unwrap();
+        // The defaults' ETag is their own: the location view and the shelf did not move.
+        let (_, etag) = store.defaults().await.unwrap();
+        store.reset_default("wasteboard.depthLimitMm", Some(&etag)).await.unwrap();
+        let (_, etag) = store.defaults().await.unwrap();
+        store.reset_default("rest.overlapMm", Some(&etag)).await.unwrap();
+        let d: serde_json::Value = serde_json::from_slice(&store.defaults().await.unwrap().0).unwrap();
+        assert_eq!(d["wasteboard.depthLimitMm"]["source"], serde_json::json!("seeded"), "back to its seed");
+        assert!(d.get("rest.overlapMm").is_none(), "an unseeded key is removed");
+        // And they travel with the export.
+        assert!(String::from_utf8(store.export().await.unwrap()).unwrap().contains("wasteboard.depthLimitMm"));
+    }
+
+    #[tokio::test]
+    async fn a_moved_address_or_an_import_drops_the_token_and_never_sends_it_elsewhere() {
+        // #416 review: the token is a credential for ONE server. Pointing the switch at another
+        // address — by the endpoint or by an import — must leave it with no token at all.
+        let real = crate::power::tests::fake_ha("tok-1").await;
+        let attacker = crate::power::tests::fake_ha("tok-1").await;
+        let (_dir, store) = store_with_machine().await;
+        let (_, etag) = store.location().await.unwrap();
+        store.set_power("m-1", Some(crate::power::tests::a_switch(&real.base_url)), Some(&etag)).await.unwrap();
+        store.set_power_token("m-1", "tok-1").await.unwrap();
+        assert!(store.power_status("m-1").await.unwrap().has_token);
+
+        // 1. The endpoint moves the address.
+        let (_, etag) = store.location().await.unwrap();
+        store.set_power("m-1", Some(crate::power::tests::a_switch(&attacker.base_url)), Some(&etag)).await.unwrap();
+        let s = store.power_status("m-1").await.unwrap();
+        assert!(!s.has_token, "the token followed the address");
+        assert!(matches!(store.switch_power("m-1", true).await, Err(HouseError::Conflict(_))));
+        assert!(attacker.seen.lock().unwrap().is_empty(), "the other server was sent something");
+        let sw_real = crate::power::tests::a_switch(&real.base_url);
+        assert_eq!(store.secrets.get(&crate::power::token_account("m-1", &sw_real)).unwrap(), None, "left behind");
+
+        // 2. An import moves it back to the real server: still no token (it was dropped), and an
+        //    import that moves a TOKENED switch elsewhere drops that token too.
+        let (_, etag) = store.location().await.unwrap();
+        store.set_power("m-1", Some(sw_real.clone()), Some(&etag)).await.unwrap();
+        store.set_power_token("m-1", "tok-1").await.unwrap();
+        let mut doc: serde_json::Value = serde_json::from_slice(&store.export().await.unwrap()).unwrap();
+        doc["machines"][0]["power"]["baseUrl"] = serde_json::json!(attacker.base_url);
+        store.import(&serde_json::to_vec(&doc).unwrap()).await.unwrap();
+        assert!(!store.power_status("m-1").await.unwrap().has_token);
+        assert_eq!(store.secrets.get(&crate::power::token_account("m-1", &sw_real)).unwrap(), None);
+        assert!(attacker.seen.lock().unwrap().is_empty());
+
+        // An import that keeps the same server keeps the token.
+        let (_, etag) = store.location().await.unwrap();
+        store.set_power("m-1", Some(sw_real.clone()), Some(&etag)).await.unwrap();
+        store.set_power_token("m-1", "tok-1").await.unwrap();
+        let same = store.export().await.unwrap();
+        store.import(&same).await.unwrap();
+        assert!(store.power_status("m-1").await.unwrap().has_token);
     }
 }

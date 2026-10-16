@@ -28,9 +28,11 @@
 //
 // THE STOCK SHELF (#413) is `stock`, its entries' rules in `stock.rs`.
 //
-// WHAT IS NOT HERE YET, ON PURPOSE. The wasteboard's state (#417) and an optional power switch
-// (#416) are later, additive keys on this document or on a machine record;
-// no placeholder shapes are stubbed for them. A document that carries one of those keys before this
+// A MACHINE'S POWER SWITCH (#416) AND WASTEBOARD (#417) are optional fields on its record, each
+// with its own endpoint (`power.rs`, `wasteboard.rs`).
+//
+// WHAT IS NOT HERE YET, ON PURPOSE. Anything else is a later, additive key on this document or on a
+// machine record; no placeholder shapes are stubbed for it. A document that carries one of those keys before this
 // build knows it is refused by `deny_unknown_fields`, exactly as a misspelled key is (#339).
 
 use crate::house::{validate_tiers, HouseDoc, HouseError, InventoryItem, UserTool};
@@ -88,6 +90,14 @@ pub struct MachineRecord {
     /// `MarginSettings` (#345), as the client sent it.
     #[serde(default)]
     pub margins: Option<serde_json::Value>,
+    /// An optional controllable power switch (#416). None is the default and the common case. Written
+    /// only through `/api/v1/power/:id`; a machine PUT keeps whatever is stored (`put_machine`).
+    #[serde(default)]
+    pub power: Option<crate::power::PowerSwitch>,
+    /// The machine's own wasteboard as a tracked sacrificial board (#417). Written only through
+    /// `/api/v1/wasteboard/:id`, and kept across a machine PUT the same way.
+    #[serde(default)]
+    pub wasteboard: Option<crate::wasteboard::Wasteboard>,
     /// ISO timestamp, the client's clock: when this record was last written.
     pub updated_at: String,
 }
@@ -108,6 +118,12 @@ impl MachineRecord {
                     self.id
                 )));
             }
+        }
+        if let Some(p) = &self.power {
+            p.validate()?;
+        }
+        if let Some(w) = &self.wasteboard {
+            w.validate()?;
         }
         for (what, section) in [
             ("calibration", &self.calibration),
@@ -164,6 +180,10 @@ pub struct LocationDoc {
     /// The stock shelf (#413): the material on hand. Its own endpoint, `ETag` and guarded writes.
     #[serde(default)]
     pub stock: Vec<StockItem>,
+    /// The shop's tunable defaults — thresholds, waits, chosen values — with provenance
+    /// (`defaults.rs`). Open to new keys; its own endpoint, `ETag` and guarded writes.
+    #[serde(default)]
+    pub defaults: crate::defaults::ShopDefaults,
 }
 
 /// What `GET /api/v1/location` serves: the location without its two tool tiers, which have their
@@ -205,6 +225,7 @@ impl LocationDoc {
             tools: Vec::new(),
             inventory: Vec::new(),
             stock: Vec::new(),
+            defaults: crate::defaults::seeded(),
         }
     }
 
@@ -269,7 +290,8 @@ impl LocationDoc {
             }
         }
         validate_tiers(&self.tools, &self.inventory)?;
-        validate_shelf(&self.stock)
+        validate_shelf(&self.stock)?;
+        crate::defaults::validate_all(&self.defaults)
     }
 }
 
@@ -288,6 +310,8 @@ mod tests {
             calibration: None,
             fixtures: Some(serde_json::json!({})),
             margins: None,
+            power: None,
+            wasteboard: None,
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }
     }

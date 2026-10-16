@@ -120,4 +120,22 @@ describe('#412 the location card', () => {
       setHouseClientLoader(null);
     }
   });
+
+  it('with no power switch, no power state or On/Off appears (#416)', () => {
+    const noSwitch = { ...VIEW, machines: [{ ...VIEW.machines[0]!, power: null }] };
+    useLocationStore.setState({ status: 'present', location: noSwitch });
+    render(<MachinesScope />);
+    expect(screen.queryByTestId('manage-power')).toBeNull();
+    expect(screen.queryByTestId('manage-power-on')).toBeNull();
+    expect(screen.queryByTestId('manage-power-off')).toBeNull();
+    expect(screen.getByTestId('manage-machine-detail').textContent).not.toContain('power.sh');
+  });
+
+  it('shows the wasteboard from the location, with the shop default’s limit', () => {
+    useLocationStore.setState({ status: 'present', location: VIEW });
+    render(<MachinesScope />);
+    expect(screen.getByTestId('manage-wasteboard-summary').textContent).toContain('10.0 mm (measured');
+    expect(screen.getByTestId('manage-wasteboard-summary').textContent).toContain('1 scar');
+    expect(screen.getByTestId('manage-wasteboard-limit').textContent).toContain('fallback');
+  });
 });

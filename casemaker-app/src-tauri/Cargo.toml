@@ -49,6 +49,16 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 # which is a place to be quietly wrong about a value the user reads.
 chrono = "0.4.45"
 
+# #416 — a power switch's token lives in the desktop's secure store (Credential Manager / Keychain),
+# never in a file. Pinned to 3.6 (`~`, as single-instance is): its MSRV is 1.75, under this crate's
+# 1.89. Gated to the two platforms whose native store it is built with; anywhere else `power.rs`
+# refuses to save a token rather than fall back to keyring's in-memory mock, which forgets it.
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "~3.6", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "~3.6", default-features = false, features = ["apple-native"] }
+
 [dev-dependencies]
 # `config.rs`'s tests have used this since the first commit without it ever being declared, so
 # `cargo test --lib` did not compile at all until now (found while testing #299).

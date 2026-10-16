@@ -8,6 +8,7 @@ use tauri_plugin_dialog::DialogExt;
 mod catalogue;
 mod config;
 mod config_api;
+mod defaults;
 mod etag;
 mod guard;
 mod house;
@@ -15,7 +16,9 @@ mod house_api;
 mod location;
 mod machine;
 mod server;
+mod power;
 mod stock;
+mod wasteboard;
 
 #[derive(Debug, Parser)]
 #[command(name = "casemaker", about = "Parametric 3D-printable enclosure designer")]

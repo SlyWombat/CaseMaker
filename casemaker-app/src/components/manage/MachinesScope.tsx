@@ -462,11 +462,8 @@ export function MachinesScope() {
           this app writes for it — the numbers the file is verified against (#184, #208).
         </p>
 
-        <div className="panel-subhead">Bench power</div>
-        <p className="hint">
-          Not here. The plug is a physical act and stays with the person at the machine
-          (<code>tools/z1/power.sh</code>).
-        </p>
+        {/* #416 — no "Bench power" paragraph for everyone: a machine with no switch shows nothing
+            about power. A configured switch is on the machine card (`MachinePower`). */}
       </aside>
     </>
   );

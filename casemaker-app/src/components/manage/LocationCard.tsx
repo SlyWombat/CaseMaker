@@ -11,6 +11,8 @@
 import type { ReactNode } from 'react';
 import type { LocationView, MachineRecord } from '@/platform/locationClient';
 import { formatStamp } from './display';
+import { MachinePower } from './MachinePower';
+import { MachineWasteboard } from './MachineWasteboard';
 import { houseDismissHouseWarning } from '@/platform/locationClient';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 
@@ -59,6 +61,10 @@ function MachineKv({ machine }: { machine: MachineRecord }) {
       <Kv label="sacrificial">{sacrificial === undefined ? '— none saved' : sacrificial.source}</Kv>
       <Kv label="depth margins">{machine.margins === null ? '— not in the location' : machine.margins.source}</Kv>
       <Kv label="recorded">{formatStamp(machine.updatedAt) ?? machine.updatedAt}</Kv>
+      {/* #417 — the wasteboard, and #416 — the optional power switch (which draws nothing when the
+          machine has none, beyond a collapsed set-up on the desktop build). */}
+      <MachineWasteboard machine={machine} />
+      <MachinePower machine={machine} />
     </div>
   );
 }

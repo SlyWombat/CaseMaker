@@ -33,6 +33,9 @@ import {
   type HouseWrite,
 } from './houseClient';
 import { StockShelfSchema } from './stockClient';
+import { ShopDefaultsSchema } from './defaultsClient';
+import { PowerSwitchSchema } from './powerClient';
+import { WasteboardSchema } from '@/engine/cnc/wasteboard';
 
 /** Magic string that says "this is a Case Maker location file". Equal to `location.rs`'s. */
 export const LOCATION_KIND = 'casemaker-location';
@@ -89,6 +92,10 @@ export const MachineRecordSchema = z.object({
     const r = parseMarginsStrict(raw);
     return r.ok ? { ok: true, value: r.margins } : r;
   }),
+  /** An optional power switch (#416). Never a token: that is in the desktop's secure store. */
+  power: PowerSwitchSchema.nullable().default(null),
+  /** The machine's wasteboard (#417). */
+  wasteboard: WasteboardSchema.nullable().default(null),
   updatedAt: z.string().min(1),
 });
 
@@ -179,6 +186,8 @@ export const LocationDocSchema = z.object({
   inventory: InventorySchema.default([]),
   /** The stock shelf (#413), strict like the rest of an import. */
   stock: StockShelfSchema.default([]),
+  /** The shop's tunable defaults, with provenance (`defaultsClient.ts`). */
+  defaults: ShopDefaultsSchema.default({}),
 });
 
 export type LocationDoc = z.infer<typeof LocationDocSchema>;

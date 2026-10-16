@@ -949,6 +949,14 @@ mod tests {
         ("POST", "/api/v1/stock", r#"{"id":"s-1"}"#),
         ("PATCH", "/api/v1/stock/s-1", r#"{"id":"s-1"}"#),
         ("DELETE", "/api/v1/stock/s-1", "{}"),
+        ("PUT", "/api/v1/power/m-1", r#"{"provider":"home-assistant"}"#),
+        ("DELETE", "/api/v1/power/m-1", "{}"),
+        ("PUT", "/api/v1/power/m-1/token", r#"{"token":"x"}"#),
+        ("POST", "/api/v1/power/m-1/on", "{}"),
+        ("POST", "/api/v1/power/m-1/off", "{}"),
+        ("PUT", "/api/v1/wasteboard/m-1", "null"),
+        ("PUT", "/api/v1/defaults/rest.overlapMm", r#"{"value":1,"source":"seeded"}"#),
+        ("DELETE", "/api/v1/defaults/rest.overlapMm", "{}"),
         ("POST", "/api/v1/catalogue/sync", "{}"),
     ];
 

@@ -41,6 +41,7 @@ import {
 import { useSettingsStore, type FixturesSettings } from './settingsStore';
 import { useMachineStore } from './machineStore';
 import { useToolRegistryStore } from './toolRegistryStore';
+import { useShopDefaultsStore } from './shopDefaultsStore';
 
 export type LocationStatus = 'unknown' | 'present' | 'absent' | 'error';
 
@@ -213,6 +214,11 @@ export function mergeMachine(
       firmware: server?.firmware ?? null,
       address: obs ? { host: obs.host, port: obs.port } : (server?.address ?? null),
       ...sections,
+      // LOCATION-ONLY fields (#416, #417): written through their own endpoints, never by this
+      // write-through — copied from the served record so a settings write cannot wipe them (the
+      // service keeps them on a machine PUT anyway) and `sameRecord` does not flap on them.
+      power: server?.power ?? null,
+      wasteboard: server?.wasteboard ?? null,
       updatedAt: now,
     },
     fromLocation,
@@ -317,6 +323,8 @@ export async function pushMachine(now: () => string = () => new Date().toISOStri
  * where it has one, and this window seeds it where it does not.
  */
 export async function reconcileLocation(): Promise<void> {
+  // The shop's defaults are read on the same connect: thresholds and waits come from the location.
+  void useShopDefaultsStore.getState().refresh();
   await useLocationStore.getState().refresh();
   const { status, location } = useLocationStore.getState();
   if (status !== 'present' || location === null) return;

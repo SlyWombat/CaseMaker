@@ -69,6 +69,27 @@
         "jawClearance": 1,
         "source": "user"
       },
+      "power": {
+        "provider": "home-assistant",
+        "baseUrl": "http://homeassistant.local:8123",
+        "entityId": "switch.makera_cnc"
+      },
+      "wasteboard": {
+        "thickness": 10.0,
+        "thicknessSource": "measured",
+        "measuredAt": "2026-10-15T07:00:00.000Z",
+        "lastResurfacedAt": null,
+        "scars": [
+          {
+            "x": -150.0,
+            "y": -150.0,
+            "width": 40.0,
+            "height": 20.0,
+            "at": "2026-10-15T08:00:00.000Z",
+            "jobId": "job-1"
+          }
+        ]
+      },
       "updatedAt": "2026-10-15T09:00:00.000Z"
     }
   ],
@@ -220,5 +241,25 @@
       "notes": "the two-colour badge blank",
       "addedAt": "2026-10-14T09:00:00.000Z"
     }
-  ]
+  ],
+  "defaults": {
+    "power.onWaitSeconds": {
+      "value": 180.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s"
+    },
+    "rest.overlapMm": {
+      "value": 0.5,
+      "source": "chosen",
+      "setAt": "2026-10-15T08:00:00.000Z",
+      "unit": "mm"
+    },
+    "wasteboard.depthLimitMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    }
+  }
 }

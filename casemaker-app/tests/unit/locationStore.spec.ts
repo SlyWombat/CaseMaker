@@ -317,6 +317,24 @@ describe('the "my machine" migration into the location (#412)', () => {
     expect(service.machines()[0]!.margins).toEqual(theirs);
   });
 
+  it('a settings write-through keeps the power switch and the wasteboard (#416, #417)', () => {
+    setLocal({ vise: true });
+    const { record } = mergeMachine(localMachine(), null, null, '2026-10-15T07:00:00.000Z');
+    const served: MachineRecord = {
+      ...record,
+      power: { provider: 'home-assistant', baseUrl: 'http://ha.local:8123', entityId: 'switch.makera_cnc' },
+      wasteboard: { thickness: 10, thicknessSource: 'chosen', measuredAt: null, lastResurfacedAt: null, scars: [] },
+    };
+    // Nothing changed locally: nothing to write, even though the local side has no idea of either.
+    expect(sameRecord(mergeMachine(localMachine(), served, served, 'later').record, served)).toBe(true);
+    // A margin edit: written, with both fields carried over untouched.
+    useSettingsStore.setState({ margins: { ...MARGIN_DEFAULTS, minFloor: 0.3, source: 'user' } });
+    const { record: next } = mergeMachine(localMachine(), served, served, 'later');
+    expect(next.power).toEqual(served.power);
+    expect(next.wasteboard).toEqual(served.wasteboard);
+    expect(next.margins?.minFloor).toBe(0.3);
+  });
+
   it('compares records by content, not key order', () => {
     setLocal({ vise: true, calibration: true });
     const { record: mine } = mergeMachine(localMachine(), null, null, '2026-10-15T00:00:00.000Z');
@@ -346,9 +364,11 @@ describe('which machine check may move the record (#412 review)', () => {
     calibration: null,
     fixtures: {},
     margins: null,
+    power: null,
+    wasteboard: null,
     updatedAt: '2026-10-15T08:30:00.000Z',
     ...over,
-  });
+  }) as MachineRecord;
   const check = (over: Partial<MachineObservation> = {}): MachineObservation => ({
     ...OBSERVATION,
     observedAt: '2026-10-15T09:00:00.000Z',
