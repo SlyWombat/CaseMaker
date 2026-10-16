@@ -4,7 +4,8 @@
 2026-10-17 with a different second cutter (see "Tomorrow").
 
 ## Setup
-- Blank: the scrap "ladder" two-colour PLA badge blank (38.1 × 76.2 × 3.81, colour change 3 mm above the
+- Blank: the scrap "ladder" two-colour **PETG** badge blank (maintainer, after the cut — the job and these notes
+  assumed PLA) (38.1 × 76.2 × 3.81, colour change 3 mm above the
   back face), in the vise, long side front-to-back, 38 mm between the jaws — unmoved since 2026-10-15.
 - Programs regenerated from HEAD with `npx tsx --tsconfig tsconfig.scripts.json scripts/engrave-job.ts
   --from-3mf ../samples/badge-blank/single.3mf --out ../.scratch/badge-2026-10-16` (the `--tsconfig` flag is
@@ -40,15 +41,15 @@
 ## What the vendor's own library says (read locally, not committed)
 Makera's cutter library lists its **corn bits only for PCB and carbon fibre — no plastic rows at all**. For
 fine detail in plastic it lists **30° single-flute engraving V-bits** (0.1–0.5 mm tips) and **flat end mills of
-1 mm and up**. Our corn-bit feeds were no harsher than its PCB row, so the likely cause is the cutter type in
-PLA (chip packing and melting on a burr) — an inference; the broken bit was not inspected for melted plastic.
+1 mm and up**. Our corn-bit feeds were no harsher than its PCB row. **Observed (maintainer): the broken corn bit is melted into
+the PETG** — the burr's chips welded, so heat and chip packing in the thermoplastic is the cause, not a guess.
 
 ## Decisions (maintainer)
 - **Follow the database for recommendations**: a cutter the catalogue lists for no row of the job's material
   is not recommended (filed as an issue).
-- Tomorrow: repeat all steps; the second cutter comes from the catalogue's plastic rows (a 30° V-bit — the
-  **yellow case "Single Flute Engraving Bit - 1/8" Shank 30° * 0.3mm"** is owned), informed by an internet
-  search for fine-detail-in-plastic options.
+- **Tomorrow's second cutter is the 30° V-bit** (maintainer): the **yellow case "Single Flute Engraving Bit -
+  1/8" Shank 30° * 0.3mm"**, with feeds informed by an internet search for fine detail in PETG.
+- The job's material is set to PETG for tomorrow, and PETG maps to the catalogue's nearest plastic rows (#455).
 - A 60° bit was considered and set aside: wider groove per depth (reveal needs a ~1.04 mm gap vs ~0.73 mm for
   the 30° 0.3), and the only owned 60° is the orange metal-line bit.
 
