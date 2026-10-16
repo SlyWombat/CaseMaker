@@ -33,7 +33,15 @@ import { moveSeconds, rapidRate, type RapidEstimate } from '@/engine/cnc/cam/ir'
 
 import type { Mm } from '@/types/units';
 import { isVTraceTool, type Tool } from '@/engine/cnc/tool';
-import { computeOracle, oracleBand, type OraclePredicted, type OracleReport } from '@/engine/cnc/engrave/oracle';
+import {
+  columnOracleBand,
+  computeOracle,
+  gridSliceAt,
+  oracleBand,
+  removalSliceAt,
+  type OraclePredicted,
+  type OracleReport,
+} from '@/engine/cnc/engrave/oracle';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import { meshOutputOf, type NodeMeshOutput } from '../geometry/meshOutput';
 import { createPlayback, type Playback } from '../geometry/playback';
@@ -249,9 +257,12 @@ export interface SimSession {
    * removal against the CAM's `predicted` regions, level by level. The session owns the removal
    * solid, so this is the only place the comparison can be made without shipping wasm handles.
    *
-   * Throws when no SWEPT program is loaded — a path-only refusal owns no removal, and a
-   * column-engine live (a rotary job or a V-bit trace) has no removal solid at all, only its grid
-   * (#405). The caller only reaches this after a load that reported `ok`.
+   * Throws when nothing SWEPT is loaded — a path-only refusal owns no removal at all — and for a
+   * ROTARY column live, whose grid's second axis is the stock angle rather than the work frame's Y,
+   * so no 2D region can be read off it. A FLAT column live is judged off its grid (#408), which is
+   * what lets a V-bit trace reach this at all: the cone's removal has no solid to slice either, and
+   * its prediction is a groove rather than one region per item. The caller only reaches this after
+   * a load that reported `ok`.
    */
   oracle(predicted: readonly OraclePredicted[]): OracleReport;
   dispose(): void;
@@ -280,6 +291,13 @@ export function disposeSweep(sweep: SweepResult): void {
 const refuse = (code: string, message: string): SimLoadRefused => ({ ok: false, pathOnly: false, diagnostics: [{ source: 'sweep', severity: 'error', code, message }] });
 
 const tagSweep = (d: SweepDiagnostic): SimDiagnostic => ({ source: 'sweep', severity: d.severity, code: d.code, message: d.message, ...(d.checkpoint !== undefined ? { checkpoint: d.checkpoint } : {}) });
+
+/**
+ * The worst checkpoint's 2D contour count, as a triangle count — the number the sweep's own
+ * simplify budget is derived from (`sweepTimeline`), and so the number the oracle's band must use
+ * to agree with it. One definition, because the oracle now reads it on two engines' paths.
+ */
+const worstContours = (timeline: Timeline): number => timeline.checkpoints.reduce((a, cp) => Math.max(a, cp.steps.length * 3), 0);
 
 export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks): SimSession {
   let live: Live | null = null;
@@ -511,26 +529,34 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * The volumetric oracle (#206). The band is derived from the checkpoints' worst contour count,
    * exactly as the sweep derives its own simplify budget (sweep.ts §562), so the two agree.
    *
-   * The oracle compares a REMOVAL SOLID against the CAM's predicted regions, and only the exact
-   * 2.5D sweeper produces one: a column-engine live keeps its material as the sampled grid, so
-   * there is no solid to compare and the refusal names that, rather than the old "no swept
-   * program is loaded" which was true of a path-only refusal and misleading here (#405). Both
-   * jobs that route to the column engine reach this: a rotary job (#239), and a V-bit trace,
-   * whose cut only the cone profile can model (#405). The prediction for a groove is #221's
-   * remaining piece — this refusal is where its absence shows.
+   * A COLUMN live is judged off its grid (#408). It keeps its material as a sampled height field,
+   * not a solid, so there is nothing to `slice` — the level's cut area is read off the cells cut to
+   * at or below it, and the band gains the grid's own cell size, which is the resolution that
+   * reading is good to. The job that routes here is a V-bit trace, whose cut only the cone profile
+   * can model (#405) and whose prediction is a GROOVE rather than one 2D region per item — the two
+   * halves of the same piece.
+   *
+   * A ROTARY column is still refused, and for a reason no band can answer: its second grid axis is
+   * the stock ANGLE, so its cells are not a picture of the work frame's XY. A 2D region cannot be
+   * read off it at all — the comparison would be between a grid over (X, θ) and polygons over
+   * (X, Y). The refusal names the axis rather than claiming nothing can be done, which was the old
+   * message's overreach: a FLAT column sweep can be compared, and now is.
    */
   const oracle = (predicted: readonly OraclePredicted[]): OracleReport => {
     const l = live;
     if (l && l.kind === 'column') {
-      throw new Error(
-        'oracle: a column-engine sweep (a rotary job, or a V-bit trace) keeps its material as a sampled grid, so there is no removal solid to compare against the CAM\'s predicted regions — the volumetric prediction for a grooved cut is still open (#221)',
-      );
+      const grid = l.column.grid;
+      if (grid.kind !== 'flat') {
+        throw new Error(
+          'oracle: this is a ROTARY column sweep, whose grid runs over (X, θ): a 2D region in the work frame cannot be read off it, so the CAM\'s predicted regions cannot be compared with the material it left',
+        );
+      }
+      return computeOracle(tl, gridSliceAt(tl, grid), predicted, columnOracleBand(worstContours(l.timeline), grid));
     }
     if (!l || l.kind !== 'swept') throw new Error('oracle: no swept program is loaded');
     const removal = l.sweep.removal;
     if (!removal) throw new Error('oracle: the loaded program removed no material');
-    const contours = l.timeline.checkpoints.reduce((a, cp) => Math.max(a, cp.steps.length * 3), 0);
-    return computeOracle(tl, removal, predicted, oracleBand(contours));
+    return computeOracle(tl, removalSliceAt(removal), predicted, oracleBand(worstContours(l.timeline)));
   };
 
   const stateAt = (step: number): MachineState | null => (live ? live.timeline.stateAt(Math.trunc(step)) : null);

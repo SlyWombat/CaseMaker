@@ -190,6 +190,14 @@ export interface ColumnSweepOk {
   /** Work-frame Z of the stock's top: for a rotary job, the stock RADIUS (R6). */
   stockTopZ: number;
   radius: number;
+  /**
+   * The FINAL grid — the material as the sweep left it, which is the whole answer this engine has
+   * (#408). `meshAt(count - 1)` gives the same state as a display mesh; this is the sim-resolution
+   * field itself, which is what the oracle reads a level's cut area off (`gridSliceAt`), since a
+   * column live has no removal solid to slice. Shared, not a copy: nothing mutates a grid after
+   * its sweep returns.
+   */
+  grid: ColumnGrid;
   stats: SweepStats;
   diagnostics: SweepDiagnostic[];
   /** Uncut stock, display resolution. */
@@ -932,6 +940,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
     count,
     stockTopZ: grid.initial,
     radius: grid.initial,
+    grid,
     stats,
     diagnostics,
     stock,

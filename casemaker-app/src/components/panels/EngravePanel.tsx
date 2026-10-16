@@ -600,7 +600,16 @@ export function EngravePanel(): JSX.Element {
     // the sheet resolves it the same way `engraveRunStore` did at Generate, so its depth notes are
     // the numbers the verifier enforced and its recommendation is made from the SETTING.
     setSheet(
-      buildRunSheet(job, generated, { diagnostics: run.simDiagnostics, engine: run.simEngine ?? undefined }, new Date(), houseMargins),
+      buildRunSheet(
+        job,
+        generated,
+        // #408 — the band the prediction was judged to, so the sheet states the tolerance behind its
+        // "matches prediction" claim next to the engine sentence. Undefined until the check ran, and
+        // the sheet then claims nothing about a comparison.
+        { diagnostics: run.simDiagnostics, engine: run.simEngine ?? undefined, oracleBand: run.oracle?.band },
+        new Date(),
+        houseMargins,
+      ),
     );
   }
 

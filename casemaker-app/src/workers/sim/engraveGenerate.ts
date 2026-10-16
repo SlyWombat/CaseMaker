@@ -40,6 +40,7 @@ import type { MillProfile } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
 import { feedsFor, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { cuttingForTrace, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
+import { vCone } from '@/engine/cnc/vProfile';
 import { isMetalTool } from '@/engine/cnc/registerCutter';
 import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -387,8 +388,26 @@ export function engraveRegions(
   // The list is `cuts` rather than a private array because it is the ONE place the cut classes are
   // enumerated (#288): the prediction below and `engravePreview`'s picture are both its projection,
   // so a fourth class (#218's cut-outs) lands in the program, the oracle and the preview together.
-  const cuts: CutRegion[] = [...regions, ...(traceRadius === null ? [] : traceCutRegions(tl, plan, traceRadius))];
-  const predicted: OraclePredicted[] = cuts.map((c) => ({ depth: c.depth, polygons: c.polygons }));
+  const traceCuts: CutRegion[] = traceRadius === null ? [] : traceCutRegions(tl, plan, traceRadius);
+  const cuts: CutRegion[] = [...regions, ...traceCuts];
+
+  // #408 — a V TRACE's PREDICTION is a groove, not a region. What a cone removes at a level depends
+  // on how far below its tip that level is, so a trace entry cannot be the mouth's polygon set the
+  // picture uses: at the trace's own floor that set is 3x too wide and the oracle would call the
+  // real cut an under-cut. The entry carries the cone and the CAM's OWN passes instead (a bold
+  // stroke arrives at `plan.traces` already widened into parallel passes), and the oracle dilates
+  // them by the reach at each level — the mouth at the top face, the tip's own flat at the floor.
+  //
+  // So the two tool shapes produce the prediction DIFFERENTLY rather than one supplementing the
+  // other: a flat cutter keeps `traceCutRegions`' region, and a cone replaces it. Adding the groove
+  // beside the mouth would predict both at once and fail every V job on the overlap.
+  const cone = tool === null ? null : vCone(tool);
+  const predicted: OraclePredicted[] = [
+    ...regions.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.polygons })),
+    ...(cone === null
+      ? traceCuts.map((c): OraclePredicted => ({ depth: c.depth, polygons: c.polygons }))
+      : plan.traces.map((t): OraclePredicted => ({ depth: t.depth, polygons: [], groove: { paths: t.paths, closed: t.closed, cone } }))),
+  ];
 
   return { plan, measured, regions, cuts, predicted, tool, radius, findings, colourBoundaryDepth, margins };
 }

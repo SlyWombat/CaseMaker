@@ -148,6 +148,14 @@ export interface RunSheetSim {
    * resolution (a rotary job, or a V-bit trace). Omitted when the caller did not load one.
    */
   engine?: 'exact' | 'column';
+  /**
+   * #408 — the band the oracle judged the prediction with (`OracleReport.band`), mm. Carried so the
+   * sheet states the TOLERANCE the "matches prediction" claim was made to, beside the engine
+   * disclaimer: a report that says a program matches the plan without saying how close is a claim
+   * the reader cannot weigh, and the band is where most of its width comes from (a column sweep's
+   * is dominated by its grid pitch). Omitted when no prediction was checked.
+   */
+  oracleBand?: number;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -838,6 +846,7 @@ function coverageFor(job: EngraveJob, generated: RunSheetGenerated, sim: RunShee
   return {
     outcome: sim?.outcome ?? 'swept',
     engine: sim?.engine,
+    oracleBand: sim?.oracleBand,
     fixtureLabels: envelope.boxes.map((b) => b.label),
     fixtureSource: envelope.source,
     sacrificialModelled: hasSacrificial(job.sacrificial),

@@ -247,6 +247,37 @@ describe('runSheet (#207)', () => {
     expect(warnings.some((t) => t.includes('the collet nut'))).toBe(true);
   });
 
+  // #408 — the two halves of one caveat, and both come from the RUN rather than from prose: which
+  // engine swept the material, and the band the oracle judged the prediction to. The second is what
+  // makes "matches the prediction" falsifiable to its reader, so a sheet that printed the claim
+  // without it would be stating a conclusion with no stated tolerance. What the claim COVERS is
+  // named too: a V trace's groove is a different width at every level, so "at every level the plan
+  // cuts to, and … one derived level just under the top face" is the difference between a checked
+  // shape and a checked centreline. The extra level is stated CONDITIONALLY, because the sheet has
+  // no way to know whether this job cuts a trace — and a flat job told it was judged at a groove's
+  // mouth would be reading a claim about a check that never happened.
+  it('states the sampled engine, the levels checked and the oracle band (#408)', () => {
+    const job = defaultEngraveJob();
+    const sim: RunSheetSim = { diagnostics: [], engine: 'column', oracleBand: 0.1463 };
+    const warnings = section(buildRunSheet(job, stubGenerated(job), sim, NOW), 'warnings').steps.map((s) => s.text);
+    expect(warnings.some((t) => t.includes('sampled column engine'))).toBe(true);
+    expect(warnings.some((t) => t.includes('every level the plan cuts to'))).toBe(true);
+    expect(warnings.some((t) => t.includes('where the job cuts a V-bit trace'))).toBe(true);
+    expect(warnings.some((t) => t.includes('just under the top face'))).toBe(true);
+    expect(warnings.some((t) => t.includes("The comparison's band is 0.146 mm"))).toBe(true);
+  });
+
+  it('claims neither when the run states neither (#408)', () => {
+    // An exact sweep that checked no prediction says nothing about a band — and naming one would
+    // put a tolerance in the sheet for a comparison the run never made. The levels go with it: a
+    // sheet that named them would be describing a check that did not happen.
+    const job = defaultEngraveJob();
+    const warnings = section(sheetFor(job), 'warnings').steps.map((s) => s.text);
+    expect(warnings.some((t) => t.includes('sampled column engine'))).toBe(false);
+    expect(warnings.some((t) => t.includes('every level the plan cuts to'))).toBe(false);
+    expect(warnings.some((t) => t.includes('band of'))).toBe(false);
+  });
+
   it('says a path-only run swept no geometry (#243)', () => {
     const job = defaultEngraveJob();
     const sim: RunSheetSim = { diagnostics: [], outcome: 'path-only' };

@@ -27,6 +27,14 @@ export interface SimCoverageInput {
    */
   engine?: 'exact' | 'column';
   /**
+   * The band the oracle judged the prediction with (#408), mm — the width by which a boundary may
+   * disagree before it counts as a CAM error. Undefined when the caller checked no prediction, or
+   * has not checked one yet, and then the disclaimer makes no claim about a comparison. It is the
+   * OTHER half of the `'column'` sentence: that one says the numbers are sampled, this one says how
+   * far apart two sampled answers may be and still be the same answer.
+   */
+  oracleBand?: number;
+  /**
    * Labels of the fixture obstacles the sweep was given (#204), in order. Empty means no fixture
    * was modelled — the default setup, where `fixture-unchecked` reports the workholding is not an
    * obstacle yet.
@@ -67,6 +75,21 @@ export function coverageDisclaimer(input: SimCoverageInput): string[] {
     if (input.engine === 'column') {
       out.push(
         'The material was swept by the sampled column engine, not the exact 2.5D boolean, so its removed volume and gouge depths carry a grid resolution.',
+      );
+    }
+
+    // #408 — what the "matches prediction" claim is about, and to what tolerance. Derived, never
+    // hand-set: the band is the pipeline's own approximations added up (the sweep's simplification
+    // and one arc chord each, plus a column grid's cell diagonal when the material was sampled).
+    // Printed because the claim is otherwise unfalsifiable to its reader: "matches" to what, over
+    // what? The LEVELS are named for the same reason — a V trace's groove is a different width at
+    // every level, so which levels were asked decides what the answer covers.
+    if (input.oracleBand !== undefined) {
+      out.push(
+        "Checked against the CAM's predicted regions at every level the plan cuts to — and, where the job cuts a V-bit trace, whose groove is a different width at each depth, at one derived level just under the top face, where that groove is widest.",
+      );
+      out.push(
+        `The comparison's band is ${input.oracleBand.toFixed(3)} mm: a boundary that disagrees by less than that is the two engines' own resolution, not a CAM error.`,
       );
     }
 

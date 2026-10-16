@@ -64,6 +64,21 @@ describe('session routing — rotary', () => {
     s.dispose();
   });
 
+  it('refuses to check a prediction against a rotary sweep, naming the axis (#408 review 3)', () => {
+    // #408 taught the oracle to judge a FLAT column live off its grid, which is what lets a V-bit
+    // trace be checked at all. A ROTARY column cannot be judged the same way, and the reason is
+    // geometrical rather than a missing feature: its second grid axis is the stock ANGLE, so its
+    // cells are a picture of (X, θ) — comparing one with a region in the work frame's (X, Y) would
+    // be comparing two different planes. The refusal must therefore say so rather than claim the
+    // sampled engine is unpinnable, which was the old message's overreach.
+    const s = createSimSession(tl);
+    const r = s.load(WRAPPED, setup(), tool, null);
+    expect(r.ok).toBe(true);
+    expect(() => s.oracle([])).toThrow(/ROTARY column sweep/);
+    expect(() => s.oracle([])).toThrow(/\(X, θ\)/);
+    s.dispose();
+  });
+
   it('refuses a rotary job that crosses the axis, keeping the path', () => {
     const s = createSimSession(tl);
     const r = s.load(CROSSING, setup(), tool, null);
