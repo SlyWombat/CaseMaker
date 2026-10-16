@@ -4,6 +4,8 @@ import { programBytes, uploadProgram, type MachineUploadResult } from '@/platfor
 import type { VerifyReport } from '@/engine/cnc/verify';
 import { describeUpload } from './engraveUploadCopy';
 import { EngraveLaserFrame } from './EngraveLaserFrame';
+import { EngraveLaserPoint } from './EngraveLaserPoint';
+import { useShopDefault } from '@/store/shopDefaultsStore';
 import { EngraveMachineRun } from './EngraveMachineRun';
 import { machineKey, useMachineRunStore, type RunContext } from '@/store/machineRunStore';
 import { programHash } from '@/platform/machineRun';
@@ -70,6 +72,11 @@ export interface EngraveMachineUploadProps {
    * counts the cutter's runtime from the program, and leaves the shelf alone with a note.
    */
   runContext?: Omit<RunContext, 'nc'>;
+  /**
+   * The job's own edge margin, mm (#431: laser point-to-origin is refused when it is tighter than the
+   * dot). Optional: without it the house's margin setting is used, and the panel says so.
+   */
+  jobEdgeMarginMm?: number;
 }
 
 /** ISO → something a person reads, or the raw string when it will not parse. Never "Invalid Date". */
@@ -90,6 +97,7 @@ export function EngraveMachineUpload({
   filename,
   onLiveStatus,
   runContext,
+  jobEdgeMarginMm,
 }: EngraveMachineUploadProps): JSX.Element {
   const [stage, setStage] = useState<'idle' | 'confirm' | 'sending'>('idle');
   const [result, setResult] = useState<MachineUploadResult | null>(null);
@@ -101,6 +109,9 @@ export function EngraveMachineUpload({
   const label = machine === null ? 'the machine' : (machine.name ?? machine.host);
   // #431 — the laser frame is a user option, off by default (decision Q21).
   const laserFrameOn = useSettingsStore((s) => s.laserOptions.frame);
+  const laserPointOn = useSettingsStore((s) => s.laserOptions.pointToOrigin);
+  const houseEdgeMargin = useSettingsStore((s) => s.margins.edgeMargin);
+  const laserUncertainty = useShopDefault('laser.originUncertaintyMm');
 
   // Order matters, and matches `uploadBlocker`'s own reasoning: the run's trust first, then whether
   // there is anywhere to send it. Whether the machine is busy is NOT a clause here (#296): the wizard's
@@ -229,6 +240,19 @@ export function EngraveMachineUpload({
       {/* #423 — the machine's run, from its store entry: present once an upload has prepared it, and
           still there (with its Stop) when this panel is closed and reopened mid-run. */}
       {machine !== null && <EngraveMachineRun target={{ host: machine.host, port: machine.port }} />}
+
+      {laserPointOn && machine !== null && (
+        <EngraveLaserPoint
+          host={machine.host}
+          port={machine.port}
+          margin={
+            jobEdgeMarginMm !== undefined
+              ? { mm: jobEdgeMarginMm, from: "the job's edge margin" }
+              : { mm: houseEdgeMargin, from: 'the house edge margin (the job did not say its own)' }
+          }
+          uncertainty={{ mm: laserUncertainty.value, source: laserUncertainty.source }}
+        />
+      )}
 
       {laserFrameOn && machine !== null && program !== null && (
         <EngraveLaserFrame host={machine.host} port={machine.port} bounds={frameBounds(program.verify.stats.bbox)} />

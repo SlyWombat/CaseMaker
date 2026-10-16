@@ -199,7 +199,9 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         15.0,
         "mm",
         "chosen placement, not a measurement: a clamp's side this far in from the corner of the edge it holds",
-    ),    // #414 — Q3's minimum offcut, 20 x 20 mm at the stock's thickness.
+    ),    // #431 — the laser point-to-origin's accuracy, ±1 mm, until the dot is measured.
+    ("laser.originUncertaintyMm", 1.0, "mm", "chosen, not measured: how far the laser dot's origin may be from the stock's corner (the dot's size, and its offset from the spindle axis, are not measured); point-to-origin is refused for a job whose edge margin is tighter"),
+    // #414 — Q3's minimum offcut, 20 x 20 mm at the stock's thickness.
     // #414 — the maintainer, 2026-10-16: runtime is weighted by the material cut. Chosen, not measured.
     ("tools.wearWeight.plastic", 1.0, "x", "chosen, not measured: a minute cutting PLA, ABS, acrylic: the baseline"),
     ("tools.wearWeight.wood", 1.0, "x", "chosen, not measured: a minute cutting softwood, hardwood, MDF: about as hard on a cutter as plastic"),
@@ -469,6 +471,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         | "tools.wearWeight.copper" => Some(need(
             n.is_some_and(|v| (0.1..=20.0).contains(&v)),
             "0.1 to 20",
+        )),
+        "laser.originUncertaintyMm" => Some(need(
+            n.is_some_and(|v| (0.05..=10.0).contains(&v)),
+            "0.05 to 10 mm",
         )),
         "offcut.minSideMm" => Some(need(
             n.is_some_and(|v| (1.0..=1000.0).contains(&v)),

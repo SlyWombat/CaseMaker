@@ -139,6 +139,8 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'tools.wearWeight.aluminium': { label: 'wear weight, aluminium', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 3 },
   'tools.wearWeight.brass': { label: 'wear weight, brass', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 2 },
   'tools.wearWeight.copper': { label: 'wear weight, copper', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 3 },
+  // #431 — the laser point-to-origin's accuracy: ±1 mm, chosen, not measured.
+  'laser.originUncertaintyMm': { label: 'laser point-to-origin accuracy (chosen)', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 1 },
   // #414 — Q3: an offcut is offered only when both its sides reach this. Chosen, not measured.
   'offcut.minSideMm': { label: 'smallest offcut worth keeping (each side)', unit: 'mm', rule: z.number().min(1).max(1000), fallback: 20 },
   // #417 — how deep a cut may go into the wasteboard before it is warned about.

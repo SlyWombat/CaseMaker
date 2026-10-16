@@ -555,6 +555,13 @@
       "setAt": "2026-10-15T19:03:20.874Z",
       "unit": "mm",
       "note": "the wired probe tip's outside diameter, as recorded with the 2026-10-15 bench scan: an opening must be wider than this to be entered at all"
+    },
+    "laser.originUncertaintyMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far the laser dot's origin may be from the stock's corner (the dot's size, and its offset from the spindle axis, are not measured); point-to-origin is refused for a job whose edge margin is tighter"
     }
   }
 }

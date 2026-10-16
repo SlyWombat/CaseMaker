@@ -1,0 +1,96 @@
+// @vitest-environment jsdom
+// #431 slice 2 — the point-to-origin panel, against a fake console: refused for a tight margin; arm,
+// start, jog, confirm, write X/Y, laser off, home; the laser is switched off when the panel goes away.
+
+import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { EngraveLaserPoint } from '@/components/panels/EngraveLaserPoint';
+import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { MachineLaserOptions } from '@/components/manage/MachineLaserOptions';
+import { resetLaserHomeStore, useLaserHomeStore } from '@/store/laserHomeStore';
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const AT = '<Idle|MPos:-120.5000,-130.2500,-3.0000>';
+function fake(fail?: string): string[] {
+  const sent: string[] = [];
+  setMachineConsoleLoader(async () => ({
+    open: async () => ({
+      async send(line: string): Promise<ConsoleSend> {
+        sent.push(line);
+        if (line === fail) return { ok: false, line, reason: 'timeout', detail: 'no reply', text: '' };
+        return { ok: true, line, text: line === '?' ? AT : 'ok', frames: 1, elapsedMs: 1 };
+      },
+      async close() {},
+    }),
+  }));
+  return sent;
+}
+const props = (mm: number) => ({ host: '192.0.2.10', port: 2222, margin: { mm, from: "the job's edge margin" }, uncertainty: { mm: 1, source: 'seeded' } });
+
+afterEach(() => {
+  cleanup();
+  setMachineConsoleLoader(null);
+  resetLaserHomeStore();
+});
+
+describe('#431 EngraveLaserPoint', () => {
+  it('is refused, by name, for a job whose margin is tighter than ±1 mm', () => {
+    fake();
+    render(<EngraveLaserPoint {...props(0.5)} />);
+    expect(screen.getByTestId('engrave-laser-point-refused').textContent).toContain('tighter than the laser dot');
+    expect(screen.queryByTestId('engrave-laser-point-start')).toBeNull();
+  });
+
+  it('arm, start, jog, confirm: writes X and Y, then laser off and home', async () => {
+    const sent = fake();
+    render(<EngraveLaserPoint {...props(2)} />);
+    expect((screen.getByTestId('engrave-laser-point-start') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('engrave-laser-point-arm'));
+    fireEvent.click(screen.getByTestId('engrave-laser-point-start'));
+    await screen.findByTestId('engrave-laser-point-jog');
+    fireEvent.click(screen.getByTestId('engrave-laser-jog-X+1'));
+    await waitFor(() => expect(sent).toContain('G0 X1'));
+    fireEvent.click(screen.getByTestId('engrave-laser-point-set'));
+    expect(sent.some((l) => l.startsWith('G10'))).toBe(false); // the confirmation comes first
+    fireEvent.click(screen.getByTestId('engrave-laser-point-confirm-yes'));
+    await waitFor(() => expect(sent).toContain('$H'));
+    expect(sent).toEqual(['?', 'G53 G0 Z-3', 'M831', 'G91', 'G0 X1', 'G90', '?', 'G10 L2 P1 X-120.500 Y-130.250', 'M832', '$H']);
+    expect(screen.getByTestId('engrave-laser-point-note').textContent).toContain('The laser is off');
+  });
+
+  it('the panel going away switches the laser off and MOVES NOTHING; the home it owes is offered next time, as a button', async () => {
+    const sent = fake();
+    const view = render(<EngraveLaserPoint {...props(2)} />);
+    fireEvent.click(screen.getByTestId('engrave-laser-point-arm'));
+    fireEvent.click(screen.getByTestId('engrave-laser-point-start'));
+    await screen.findByTestId('engrave-laser-point-jog');
+    view.unmount();
+    await waitFor(() => expect(sent.at(-1)).toBe('M832'));
+    expect(sent).not.toContain('$H');
+    await waitFor(() => expect(Object.keys(useLaserHomeStore.getState().pending)).toEqual(['192.0.2.10:2222']));
+    // Reopened: it says so, and Home is a button — sent only when pressed.
+    render(<EngraveLaserPoint {...props(2)} />);
+    expect(screen.getByTestId('engrave-laser-point-home-owed').textContent).toContain('Home the machine before the next step');
+    expect(sent).not.toContain('$H');
+    fireEvent.click(screen.getByTestId('engrave-laser-point-home'));
+    await waitFor(() => expect(sent.at(-1)).toBe('$H'));
+    await waitFor(() => expect(screen.queryByTestId('engrave-laser-point-home-owed')).toBeNull());
+  });
+
+  it('a failed jog: laser off, no home sent, Home offered — here and on the machine card', async () => {
+    const sent = fake('G0 X1');
+    render(<EngraveLaserPoint {...props(2)} />);
+    fireEvent.click(screen.getByTestId('engrave-laser-point-arm'));
+    fireEvent.click(screen.getByTestId('engrave-laser-point-start'));
+    await screen.findByTestId('engrave-laser-point-jog');
+    fireEvent.click(screen.getByTestId('engrave-laser-jog-X+1'));
+    await screen.findByTestId('engrave-laser-point-home-owed');
+    expect(sent.slice(-2)).toEqual(['G90', 'M832']);
+    expect(sent).not.toContain('$H');
+    render(<MachineLaserOptions />);
+    expect(screen.getByTestId('manage-laser-home-owed').textContent).toContain('192.0.2.10');
+    fireEvent.click(screen.getByTestId('manage-laser-home'));
+    await waitFor(() => expect(sent.at(-1)).toBe('$H'));
+  });
+});
