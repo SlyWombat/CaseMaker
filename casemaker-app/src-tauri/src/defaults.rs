@@ -199,7 +199,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         15.0,
         "mm",
         "chosen placement, not a measurement: a clamp's side this far in from the corner of the edge it holds",
-    ),    // #431 — the laser point-to-origin's accuracy, ±1 mm, until the dot is measured.
+    ),    // #434 — peck drilling with drill bits: the pecks chosen, the feeds placeholders. None measured.
+    ("drill.peckDiameters", 1.0, "x", "chosen, not measured: each peck goes this many drill diameters deep before the drill retracts to clear chips"),
+    ("drill.peckClearanceMm", 0.5, "mm", "chosen, not measured: after a peck the drill rapids back down to this far above the floor it just cut"),
+    ("drill.pointAngleDeg", 118.0, "deg", "chosen, not measured: a twist drill's included point angle, used only when the drill's own record states none"),
+    ("drill.plungeFeed", 100.0, "mm/min", "placeholder, not measured; not a vendor number: the drilling feed until a measured row replaces it"),
+    ("drill.spindleRpm", 10000.0, "rpm", "placeholder, not measured; not a vendor number: the drilling spindle speed until a measured row replaces it"),
+    // #431 — the laser point-to-origin's accuracy, ±1 mm, until the dot is measured.
     ("laser.originUncertaintyMm", 1.0, "mm", "chosen, not measured: how far the laser dot's origin may be from the stock's corner (the dot's size, and its offset from the spindle axis, are not measured); point-to-origin is refused for a job whose edge margin is tighter"),
     // #414 — Q3's minimum offcut, 20 x 20 mm at the stock's thickness.
     // #414 — the maintainer, 2026-10-16: runtime is weighted by the material cut. Chosen, not measured.
@@ -471,6 +477,26 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         | "tools.wearWeight.copper" => Some(need(
             n.is_some_and(|v| (0.1..=20.0).contains(&v)),
             "0.1 to 20",
+        )),
+        "drill.peckDiameters" => Some(need(
+            n.is_some_and(|v| (0.1..=10.0).contains(&v)),
+            "0.1 to 10 diameters",
+        )),
+        "drill.peckClearanceMm" => Some(need(
+            n.is_some_and(|v| (0.05..=5.0).contains(&v)),
+            "0.05 to 5 mm",
+        )),
+        "drill.pointAngleDeg" => Some(need(
+            n.is_some_and(|v| (60.0..=150.0).contains(&v)),
+            "60 to 150 degrees",
+        )),
+        "drill.plungeFeed" => Some(need(
+            n.is_some_and(|v| (5.0..=2000.0).contains(&v)),
+            "5 to 2000 mm/min",
+        )),
+        "drill.spindleRpm" => Some(need(
+            n.is_some_and(|v| (1000.0..=30000.0).contains(&v)),
+            "1000 to 30000 rpm",
         )),
         "laser.originUncertaintyMm" => Some(need(
             n.is_some_and(|v| (0.05..=10.0).contains(&v)),

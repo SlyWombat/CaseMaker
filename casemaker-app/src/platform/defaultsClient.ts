@@ -139,6 +139,12 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'tools.wearWeight.aluminium': { label: 'wear weight, aluminium', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 3 },
   'tools.wearWeight.brass': { label: 'wear weight, brass', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 2 },
   'tools.wearWeight.copper': { label: 'wear weight, copper', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 3 },
+  // #434 — peck drilling with drill bits. The pecks are chosen; the feeds are our own placeholders.
+  'drill.peckDiameters': { label: 'peck depth, in drill diameters (chosen)', unit: 'x', rule: z.number().min(0.1).max(10), fallback: 1 },
+  'drill.peckClearanceMm': { label: 'peck re-entry clearance (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },
+  'drill.pointAngleDeg': { label: 'drill point angle when unstated (chosen)', unit: 'deg', rule: z.number().min(60).max(150), fallback: 118 },
+  'drill.plungeFeed': { label: 'drilling feed (placeholder)', unit: 'mm/min', rule: z.number().min(5).max(2000), fallback: 100 },
+  'drill.spindleRpm': { label: 'drilling spindle speed (placeholder)', unit: 'rpm', rule: z.number().min(1000).max(30000), fallback: 10000 },
   // #431 — the laser point-to-origin's accuracy: ±1 mm, chosen, not measured.
   'laser.originUncertaintyMm': { label: 'laser point-to-origin accuracy (chosen)', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 1 },
   // #414 — Q3: an offcut is offered only when both its sides reach this. Chosen, not measured.

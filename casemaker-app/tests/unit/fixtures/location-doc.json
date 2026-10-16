@@ -562,6 +562,41 @@
       "setAt": null,
       "unit": "mm",
       "note": "chosen, not measured: how far the laser dot's origin may be from the stock's corner (the dot's size, and its offset from the spindle axis, are not measured); point-to-origin is refused for a job whose edge margin is tighter"
+    },
+    "drill.peckDiameters": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: each peck goes this many drill diameters deep before the drill retracts to clear chips"
+    },
+    "drill.peckClearanceMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: after a peck the drill rapids back down to this far above the floor it just cut"
+    },
+    "drill.pointAngleDeg": {
+      "value": 118.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "deg",
+      "note": "chosen, not measured: a twist drill's included point angle, used only when the drill's own record states none"
+    },
+    "drill.plungeFeed": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min",
+      "note": "placeholder, not measured; not a vendor number: the drilling feed until a measured row replaces it"
+    },
+    "drill.spindleRpm": {
+      "value": 10000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "rpm",
+      "note": "placeholder, not measured; not a vendor number: the drilling spindle speed until a measured row replaces it"
     }
   }
 }
