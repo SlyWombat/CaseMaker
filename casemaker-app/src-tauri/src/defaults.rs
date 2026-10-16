@@ -227,6 +227,11 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("tools.wearWeight.brass", 2.0, "x", "chosen, not measured: a minute cutting brass: free-cutting, twice plastic"),
     ("tools.wearWeight.copper", 3.0, "x", "chosen, not measured: a minute cutting copper: gummy, as hard on a cutter as aluminium"),
     ("offcut.minSideMm", 20.0, "mm", "chosen, not measured: an offcut is offered back to the shelf only when both its sides are at least this (Q3: only leftover stock that has some size to it)"),
+    // #436 — rest machining's two numbers, out of the code and into the document (the maintainer,
+    // 2026-10-16: "That type of setting should be something we keep in our own database and not
+    // compiled in"). Both chosen, not measured (Q19); the first two-tool cut replaces them.
+    ("rest.overlapMm", 0.5, "mm", "chosen, not measured: the LEAST the band both programs cut at the seam may be. The band itself is worked out per job from that job's own two cutters, and this is the floor under it — a 2 mm cutter at a 0.9 mm step-over leaves slivers 0.107 mm wide and a 0.6 mm rest cutter closes anything narrower, so the badge's pair needs about 0.493 mm. The first two-tool cut replaces this"),
+    ("rest.thirdToolPct", 2.0, "%", "chosen, not measured: the share of a job's own removal area that may still be standing after both programs have run before a third cutter is suggested"),
 ];
 
 /// Yes/no starting values, seeded `chosen`-in-spirit with a note (#414: the maintainer's "option to
@@ -261,11 +266,6 @@ pub fn add_missing_seeds(map: &mut ShopDefaults) -> bool {
                     set_at: None,
                     unit: None,
                     note: Some((*note).to_string()),
-    // #436 — rest machining's two numbers, out of the code and into the document (the maintainer,
-    // 2026-10-16: "That type of setting should be something we keep in our own database and not
-    // compiled in"). Both chosen, not measured (Q19); the first two-tool cut replaces them.
-    ("rest.overlapMm", 0.5, "mm", "chosen, not measured: the LEAST the band both programs cut at the seam may be. The band itself is worked out per job from that job's own two cutters, and this is the floor under it — a 2 mm cutter at a 0.9 mm step-over leaves slivers 0.107 mm wide and a 0.6 mm rest cutter closes anything narrower, so the badge's pair needs about 0.493 mm. The first two-tool cut replaces this"),
-    ("rest.thirdToolPct", 2.0, "%", "chosen, not measured: the share of a job's own removal area that may still be standing after both programs have run before a third cutter is suggested"),
                 },
             );
             added = true;
@@ -384,6 +384,8 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         )),
         "registration.tipRadiusUncertaintyMm" => Some(need(
             n.is_some_and(|v| (0.0..=2.0).contains(&v)),
+            "0 to 2 mm",
+        )),
         // #436 — rest machining. A band wider than any cutter is not a band; a third-cutter
         // threshold is a share, so it never reaches the whole job.
         "rest.overlapMm" => Some(need(
@@ -393,8 +395,6 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "rest.thirdToolPct" => Some(need(
             n.is_some_and(|v| (0.1..=50.0).contains(&v)),
             "0.1 to 50 percent",
-        )),
-            "0 to 2 mm",
         )),
         "registration.tipDiameterMm" => Some(need(
             n.is_some_and(|v| (0.2..=10.0).contains(&v)),
@@ -539,7 +539,6 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (1.0..=1000.0).contains(&v)),
             "1 to 1000 mm",
         )),
-        "tools.runtimeWarnMinutes" => Some(need(
         "adaptive.engagementFraction" => Some(need(
             n.is_some_and(|v| (0.02..=0.5).contains(&v)),
             "0.02 to 0.5 diameters",
@@ -568,6 +567,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (1000.0..=30000.0).contains(&v)),
             "1000 to 30000 rpm",
         )),
+        "tools.runtimeWarnMinutes" => Some(need(
             n.is_some_and(|v| v > 0.0 && v <= 100_000.0),
             "above 0, up to 100000 minutes",
         )),
