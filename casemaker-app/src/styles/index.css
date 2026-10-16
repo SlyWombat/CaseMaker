@@ -779,6 +779,7 @@ body, html, #root {
 .engrave-item-row__remove,
 .engrave-item-row__show,
 .engrave-item-row__summary,
+.engrave-item-row__intent,
 .engrave-item-row__warn {
   flex: 0 0 auto;
 }
@@ -841,6 +842,14 @@ body, html, #root {
   font-variant-numeric: tabular-nums;
   font-size: 11px;
 }
+/* §5.3 — the depth's intent word, beside the number and quieter than it: the number is the fact and
+   the word is where it came from. Italic so it cannot be misread as part of the name, which elides
+   immediately to its left. */
+.engrave-item-row__intent {
+  color: var(--cm-color-on-surface-muted);
+  font-size: 11px;
+  font-style: italic;
+}
 .engrave-item-row__warn {
   color: #e0c07a;
   cursor: help;
@@ -869,9 +878,14 @@ body, html, #root {
 }
 /* A finger needs a target it can hit (#134, #411 review: the ✕ was ~12 px). On a touch layout the
    row's head grows to 24 px to hold it; on the dense desktop rail it stays compact, which is what
-   the maintainer asked the list to be. 1024 is included because that is a tablet held sideways —
-   the tablet project's own landscape case. */
-@media (max-width: 1024px) {
+   the maintainer asked the list to be.
+   Two different ways to be a touch layout, and a width query only catches one of them (#411
+   review): being NARROW (1024 is a tablet held sideways — the tablet project's own landscape case)
+   and being driven by a FINGER, which a wide touch tablet is at 1280 px and up, where the width
+   query alone left the ✕ at 12 px on a device that has no mouse at all. So the query is the union:
+   a narrow rail (mouse or not, it has no room to spare) OR a coarse pointer (a finger, any width).
+   A mouse on a wide screen matches neither and keeps the compact row. */
+@media (max-width: 1024px), (pointer: coarse) {
   .engrave-item-row__remove {
     min-width: 24px;
     min-height: 24px;

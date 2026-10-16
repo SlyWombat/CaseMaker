@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
-import { rowSummary } from '@/components/panels/engraveRowText';
+import { intentWord, rowSummary } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { resetEngraveRows } from '@/store/engraveRowStore';
 
@@ -35,10 +35,17 @@ interface RowOptions {
   findings?: JobFinding[];
   onRemove?: () => void;
   onToggleEnabled?: (enabled: boolean) => void;
+  /** §5.3's intent word. Omitted by default, which is how most kinds call the shell. */
+  intent?: string | null;
 }
 
 /** One row with an editor in it, so "the body is absent" is a claim about a body that exists when open. */
-function row({ findings = [], onRemove = noop, onToggleEnabled = noop }: RowOptions = {}): void {
+function row({
+  findings = [],
+  onRemove = noop,
+  onToggleEnabled = noop,
+  intent,
+}: RowOptions = {}): void {
   render(
     <EngraveItemRow
       id="item-1"
@@ -48,6 +55,7 @@ function row({ findings = [], onRemove = noop, onToggleEnabled = noop }: RowOpti
       kindWord="Widget"
       name="Face"
       summary={rowSummary(0.3)}
+      intent={intent}
       enabled
       enabledTitle="A disabled widget is kept in the job but not cut."
       removeTitle="Remove this widget."
@@ -143,6 +151,36 @@ describe('EngraveItemRow (#411)', () => {
   it('has no ⚠ when the item has nothing to warn about', () => {
     row();
     expect(screen.queryByTestId('engrave-widget-warn-0')).toBeNull();
+  });
+
+  it('draws the intent word beside the number, and draws nothing where there is no intent', () => {
+    // §5.3 — the design's line reads "the depth with its intent word", and the word earns its place
+    // because `0.3 mm surface` and `0.3 mm` are different claims about the same digits. Beside the
+    // number rather than in a tooltip: a folded list is exactly where that has to be readable.
+    row({ intent: 'surface' });
+    expect(screen.getByTestId('engrave-widget-intent-0').textContent).toBe('surface');
+    // …and beside the number, not somewhere else on the line.
+    const summary = screen.getByText('0.3 mm');
+    expect(summary.nextElementSibling).toBe(screen.getByTestId('engrave-widget-intent-0'));
+    cleanup();
+
+    // A kind with no intent to state draws the span at all — not an empty one. `custom` is the
+    // person's own number, and a word on it would claim a provenance it does not have.
+    row({ intent: intentWord('custom') });
+    expect(screen.queryByTestId('engrave-widget-intent-0')).toBeNull();
+    cleanup();
+
+    row();
+    expect(screen.queryByTestId('engrave-widget-intent-0')).toBeNull();
+  });
+
+  it('maps only the two intents the two-state control itself shows', () => {
+    // The line and the control must not be able to disagree about what an intent is called, so the
+    // words are the control's own and the rest of the union draws nothing.
+    expect(intentWord('surface')).toBe('surface');
+    expect(intentWord('reveal')).toBe('reveal');
+    expect(intentWord('custom')).toBeNull();
+    expect(intentWord(undefined)).toBeNull();
   });
 
   it('prints the one number at the precision the run sheet uses, without a float tail', () => {

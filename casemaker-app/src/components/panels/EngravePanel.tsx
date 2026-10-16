@@ -1,5 +1,5 @@
 import { featureSim } from '@/platform/features';
-import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type JSX, type RefObject } from 'react';
 import { newItemDepthMm, useEngraveJobStore } from '@/store/engraveJobStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
@@ -332,12 +332,27 @@ const OVERRIDE_FIELDS: readonly { key: keyof Omit<CutParams, 'air'>; label: stri
  * left the panel, not a fact about the part (see that store's own note). Both are handed this
  * list's own ids: the header of "Items" folds items, not the voids list above it (#411 review).
  */
-function RowFolds({ testidPrefix, ids }: { testidPrefix: string; ids: readonly string[] }): JSX.Element {
+function RowFolds({
+  testidPrefix,
+  ids,
+  firstButtonRef,
+}: {
+  testidPrefix: string;
+  ids: readonly string[];
+  /**
+   * Where focus goes when the undo strip in THIS list unmounts under the cursor (#411 review).
+   * The strip's own button is the focus holder and it disappears with the strip, so the section
+   * needs somewhere stable to hand it to — and the list's own header is the nearest thing that is
+   * always there and always belongs to the same list.
+   */
+  firstButtonRef?: RefObject<HTMLButtonElement | null>;
+}): JSX.Element {
   const collapseAll = useEngraveRowStore((s) => s.collapseAll);
   const expandAll = useEngraveRowStore((s) => s.expandAll);
   return (
     <span style={{ display: 'inline-flex', gap: 4, marginLeft: 6, verticalAlign: 'middle' }}>
       <button
+        ref={firstButtonRef}
         type="button"
         data-testid={`${testidPrefix}-collapse-all`}
         title="Fold every row in this list to its single line."
@@ -371,18 +386,44 @@ function RowFolds({ testidPrefix, ids }: { testidPrefix: string; ids: readonly s
  * reveals the next (`engraveJobStore`'s `removalUndo`). The stack retires on the next edit of any
  * kind, or after `REMOVAL_UNDO_MS`.
  */
-function UndoRemoval({ section }: { section: 'items' | 'voids' }): JSX.Element | null {
+function UndoRemoval({
+  section,
+  fallbackRef,
+}: {
+  section: 'items' | 'voids';
+  /** The list's header control, to hand focus to when this strip goes (see the effect below). */
+  fallbackRef?: RefObject<HTMLButtonElement | null>;
+}): JSX.Element | null {
   const stack = useEngraveJobStore((s) => s.removalUndo);
   const undoRemove = useEngraveJobStore((s) => s.undoRemove);
   const button = useRef<HTMLButtonElement | null>(null);
   const top = stack[stack.length - 1];
   const mine = top !== undefined && top.section === section ? top : null;
+  // Whether THIS strip is what took the focus. Without it the "give it back" half below would fire
+  // on the panel's first render, when nothing has been removed and focus is legitimately nowhere.
+  const tookFocus = useRef(false);
   // The press that removed the item took the control with it — the row is gone — so focus would
   // otherwise fall to `<body>` and a keyboard user would have to hunt along the panel for the way
   // back (#411 review). It goes to the Undo this removal just produced, once per removal.
+  //
+  // …AND IT HAS TO COME BACK (#411 review). The Undo button is INSIDE the strip, so every way the
+  // strip can go — the person takes the undo, the 8 s window runs out, or another edit retires the
+  // stack — removes the focused element from the document and drops focus to `<body>`, which loses
+  // a keyboard user's place in the panel entirely. The test is `activeElement`, not "was the strip
+  // on screen": if the person has since clicked into a field, focus is on that field and it is not
+  // this effect's to move.
   useEffect(() => {
-    if (mine !== null) button.current?.focus();
-  }, [mine]);
+    if (mine !== null) {
+      tookFocus.current = true;
+      button.current?.focus();
+      return undefined;
+    }
+    if (!tookFocus.current) return undefined;
+    tookFocus.current = false;
+    const active = document.activeElement;
+    if (active === null || active === document.body) fallbackRef?.current?.focus();
+    return undefined;
+  }, [mine, fallbackRef]);
   if (mine === null) return null;
   return (
     <p className="engrave-undo-strip" data-testid="engrave-undo-strip">
@@ -641,6 +682,10 @@ export function EngravePanel(): JSX.Element {
   // notes states it in words, so a job cannot be built without the operator being able to read
   // which way it went.
   const designInputRef = useRef<HTMLInputElement>(null);
+  // The one place each list's undo strip can hand focus back to when it goes (#411 review). One per
+  // list, because a void's strip must not drop the cursor into the item list below it.
+  const voidsFoldRef = useRef<HTMLButtonElement | null>(null);
+  const itemsFoldRef = useRef<HTMLButtonElement | null>(null);
   const [designNotes, setDesignNotes] = useState<string[] | null>(null);
   const [designError, setDesignError] = useState<string | null>(null);
   const [designReading, setDesignReading] = useState(false);
@@ -1310,14 +1355,14 @@ export function EngravePanel(): JSX.Element {
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-keepout-count">
           {keepOuts.length}
         </span>
-        <RowFolds testidPrefix="engrave-keepout" ids={keepOuts.map((ko) => ko.id)} />
+        <RowFolds testidPrefix="engrave-keepout" ids={keepOuts.map((ko) => ko.id)} firstButtonRef={voidsFoldRef} />
       </h4>
       <p style={MUTED}>
         A pocket the blank already has, cut into its <strong>bottom</strong> face. The ceiling is
         measured up from that face — the opposite direction from every depth in this panel. The
         job refuses any cut that would break through the material left over one.
       </p>
-      <UndoRemoval section="voids" />
+      <UndoRemoval section="voids" fallbackRef={voidsFoldRef} />
       {keepOuts.map((ko, i) => (
         <EngraveKeepOutRow
           key={ko.id}
@@ -1359,9 +1404,9 @@ export function EngravePanel(): JSX.Element {
         <span style={{ ...TAG, marginLeft: 4 }} data-testid="engrave-item-count">
           {job.labels.length + job.shapes.length + combinedCount + traceCount + drillCount + vectorCount}
         </span>
-        <RowFolds testidPrefix="engrave-item" ids={itemRowIds(job)} />
+        <RowFolds testidPrefix="engrave-item" ids={itemRowIds(job)} firstButtonRef={itemsFoldRef} />
       </h3>
-      <UndoRemoval section="items" />
+      <UndoRemoval section="items" fallbackRef={itemsFoldRef} />
       {job.labels.map((label, i) => (
         <EngraveLabelRow
           key={label.id}

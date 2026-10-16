@@ -19,8 +19,9 @@ import { useEngraveRowStore } from '@/store/engraveRowStore';
  *
  * WHAT STAYS IN THE ROW. Everything a kind needs to be *edited* is the caller's `children`, drawn
  * only while the row is open. The shell owns the line: the fold, the two controls at the front, the
- * name, the one-number summary and the `⚠`. A kind that wanted a second control up here would be
- * re-deciding what the list looks like; the design's answer is the glyph (`docs/design/cnc-job-workflow.md`).
+ * name, the one-number summary, the intent word beside it (§5.3) and the `⚠`. A kind that wanted a
+ * second control up here would be re-deciding what the list looks like; the design's answer is the
+ * glyph (`docs/design/cnc-job-workflow.md`).
  *
  * THE LINE IS ONE LINE, ERRORS INCLUDED (the maintainer's decision on the #411 review). An earlier
  * pass wrote an error out under the head so that a row hiding the reason Generate refuses would not
@@ -55,6 +56,14 @@ export interface EngraveItemRowProps {
   name: string;
   /** The one number on the right — the depth, or the void's ceiling. */
   summary: string;
+  /**
+   * The intent word that belongs beside that number (§5.3), or null for the kinds that have none.
+   *
+   * A plain string rather than the model's union: the shell draws a word, it does not decide what
+   * the words are — `intentWord` in `engraveRowText` maps the job's vocabulary to this, and keeping
+   * the mapping there is what stops a kind inventing a word of its own.
+   */
+  intent?: string | null;
   enabled: boolean;
   /** What a disabled item of THIS kind means (the show/hide tooltip). */
   enabledTitle: string;
@@ -99,6 +108,7 @@ export function EngraveItemRow({
   kindWord,
   name,
   summary,
+  intent = null,
   enabled,
   enabledTitle,
   removeTitle,
@@ -158,6 +168,14 @@ export function EngraveItemRow({
           <span className="engrave-item-row__name">{name}</span>
         </button>
         <span className="engrave-item-row__summary">{summary}</span>
+        {/* §5.3 — the depth's intent word, drawn only by the kinds that state one. It is beside the
+            number rather than in the tooltip because "surface" and "custom" are different claims
+            about the same digits, and a folded list is where that has to be readable. */}
+        {intent !== null && (
+          <span className="engrave-item-row__intent" data-testid={`${prefix}-intent-${index}`}>
+            {intent}
+          </span>
+        )}
         {findings.length > 0 && (
           <span
             className={`engrave-item-row__warn${errors.length > 0 ? ' engrave-item-row__warn--error' : ''}`}

@@ -1,7 +1,7 @@
 import type { CSSProperties, JSX } from 'react';
 import { FontPicker, WeightPicker } from '@/components/panels/FontPicker';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
-import { rowSummary } from '@/components/panels/engraveRowText';
+import { rowSummary, intentWord } from '@/components/panels/engraveRowText';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { mm } from '@/engine/cnc/engrave/depthBounds';
 import type { LabelDepthRecommendation } from '@/engine/cnc/engrave/depthBounds';
@@ -167,6 +167,11 @@ export function EngraveLabelRow({
       kindWord="Label"
       name={label.text.trim() === '' ? '(empty label)' : label.text}
       summary={rowSummary(label.depth)}
+      // §5.3 — the word the two-state control below writes, put back on the folded line: a label
+      // whose depth was chosen by the colour rule says so without the row being opened. `custom` and
+      // an unstated intent draw nothing (`intentWord`), which is the honest answer for a number a
+      // person typed.
+      intent={intentWord(label.depthIntent)}
       enabled={label.enabled}
       enabledTitle="A disabled label is kept in the job but not cut."
       removeTitle="Remove this label."

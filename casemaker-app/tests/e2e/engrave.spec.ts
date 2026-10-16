@@ -19,6 +19,16 @@ async function openEngravePanel(page: Page): Promise<void> {
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 }
 
+/**
+ * A 12 × 12 mm plate: one closed, FILLED path, and the size stated in millimetres on the element —
+ * so the parser takes the file's own units instead of assuming 96 px/inch, and the dialog has
+ * nothing to warn about (#217). Written here rather than checked in, so the drawing and the row
+ * asserted against it are in one file.
+ */
+const PLATE_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="12mm" height="12mm" viewBox="0 0 12 12">' +
+  '<path d="M0 0 H12 V12 H0 Z"/></svg>';
+
 // The sweep and the oracle run in the worker; under swiftshader a full run takes tens of seconds,
 // so these get well past Playwright's 30 s default.
 test.setTimeout(240_000);
@@ -419,15 +429,32 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
   await openEngravePanel(page);
   await page.getByTestId('engrave-add-summary').click();
 
-  // Five labels (the default job's three plus two), two shape pockets, both kinds of trace (a
-  // polyline and single-line text — different editors, same line) and one hole. Ten in all, and no
-  // two kinds sharing an editor width.
-  for (let i = 0; i < 2; i += 1) await page.getByTestId('engrave-add-label').click();
+  // Ten rows, and every ROAD to one: four labels (the default job's three, which arrive folded, plus
+  // one added), a shape pocket, a COMBINED shape built from the others, both kinds of trace (a
+  // polyline and single-line text — different editors, same line), a hole, and an outline imported
+  // FROM A FILE. The imported one is the only kind that arrives through a dialog and a parse rather
+  // than a button, and the combined one is the only kind whose contents are other rows — so those
+  // two are what a row's summary could quietly differ on.
+  await page.getByTestId('engrave-add-label').click();
   await page.getByTestId('engrave-add-rect').click();
-  await page.getByTestId('engrave-add-circle').click();
+  await page.getByTestId('engrave-add-border').click();
   await page.getByTestId('engrave-add-line').click();
   await page.getByTestId('engrave-add-stroke-label').click();
   await page.getByTestId('engrave-add-drill').click();
+  // The picker, answered the way `engraveTrace.spec.ts` answers the trace one: the e2e build uses
+  // the plain file input, so this is the app's own import path and not a seam of the test's own.
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByTestId('engrave-add-import-outline').click();
+  await (await chooser).setFiles({
+    name: 'plate.svg',
+    mimeType: 'image/svg+xml',
+    buffer: Buffer.from(PLATE_SVG),
+  });
+  await expect(page.getByTestId('engrave-import-dialog')).toBeVisible();
+  await page.getByTestId('engrave-import-accept').click();
+  await expect(page.getByTestId('engrave-vector-row-0')).toBeVisible();
+  // …and it is an ordinary tenth item: the vector reached the same list, with the same shell.
+  await expect(page.getByTestId('engrave-vector-row-0')).toHaveCount(1);
   await expect(page.getByTestId('engrave-item-count')).toHaveText('10');
 
   // A VOID as well, because the review asked for one and it is the panel's other list: the same
@@ -436,14 +463,26 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
   await page.getByTestId('engrave-add-keepout-rect').click();
   await expect(page.getByTestId('engrave-keepout-row-0')).toBeVisible();
 
-  // The one row that carries a `⚠`: a label the person made too deep for the blank. It arrives open
-  // (a row just added is open), so its fields are here without a press, and 11.5 mm is past the
-  // 11 mm the panel says this stock allows — the finding the line must count without growing.
-  await page.getByTestId('engrave-label-depth-4').fill('11.5');
-  await expect(page.getByTestId('engrave-label-warn-4')).toBeVisible();
-  // And a name too long for the line, on the other added row: the name has to ELIDE rather than push
-  // the front cluster away — the maintainer's "remove must never wrap away from the item's name".
-  await page.getByTestId('engrave-label-text-3').fill('A NAME LONG ENOUGH THAT IT CANNOT POSSIBLY FIT');
+  // TWO kinds of `⚠`, because they are two claims: an ERROR blocks Generate and a WARNING does not,
+  // and a line that counted them the same would be hiding the difference.
+  //
+  // The error is a label the person made too deep for the blank. Its row arrives open (a row just
+  // added is open), so its fields are here without a press, and 11.5 mm is past the 11 mm the panel
+  // says this stock allows — the finding the line must count without growing.
+  await page.getByTestId('engrave-label-depth-3').fill('11.5');
+  await expect(page.getByTestId('engrave-label-warn-3')).toBeVisible();
+  await expect(page.getByTestId('engrave-label-warn-3')).toHaveClass(/engrave-item-row__warn--error/);
+  // The warning is the hole's, and it is the default cutter's own uncertainty rather than anything
+  // typed here: nothing records that the built-in cutter centre-cuts, so a job that plunges gets
+  // `plunge-unproven` as a warning (`jobSetup.ts`). It sits on a FOLDED row — the drill's — which is
+  // where the `⚠` has to be legible, and it must NOT be wearing the error's class.
+  await expect(page.getByTestId('engrave-drill-warn-0')).toBeVisible();
+  await expect(page.getByTestId('engrave-drill-warn-0')).not.toHaveClass(/engrave-item-row__warn--error/);
+  await expect(page.getByTestId('engrave-drill-warn-0')).toHaveAttribute('aria-label', /warning/);
+  // And a name too long for the line, on the other open row (the added pocket's name field): the name
+  // has to ELIDE rather than push the front cluster away — the maintainer's "remove must never wrap
+  // away from the item's name".
+  await page.getByTestId('engrave-shape-name-0').fill('A NAME LONG ENOUGH THAT IT CANNOT POSSIBLY FIT');
 
   await page.getByTestId('engrave-item-collapse-all').click();
   await page.getByTestId('engrave-keepout-collapse-all').click();
@@ -452,7 +491,8 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
     const itemRows = Array.from(
       document.querySelectorAll<HTMLElement>(
         '[data-testid^="engrave-label-row-"], [data-testid^="engrave-shape-row-"], ' +
-          '[data-testid^="engrave-trace-row-"], [data-testid^="engrave-drill-row-"]',
+          '[data-testid^="engrave-combined-row-"], [data-testid^="engrave-trace-row-"], ' +
+          '[data-testid^="engrave-vector-row-"], [data-testid^="engrave-drill-row-"]',
       ),
     );
     const voidRows = Array.from(
@@ -481,6 +521,15 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
       headHeight: head.getBoundingClientRect().height,
       heights: rows.map((row) => Math.round(row.getBoundingClientRect().height)),
       warnings: rows.filter((r) => r.querySelector('.engrave-item-row__warn') !== null).length,
+      // …and the two kinds of `⚠` counted apart, because they are two claims: the class is what the
+      // row uses to say which (`__warn--error`). A job with only errors in it would pass a bare
+      // "something was flagged" count, so the warning-only one is counted on its own.
+      warnOnly: rows.filter(
+        (r) =>
+          r.querySelector('.engrave-item-row__warn') !== null &&
+          r.querySelector('.engrave-item-row__warn--error') === null,
+      ).length,
+      warnError: rows.filter((r) => r.querySelector('.engrave-item-row__warn--error') !== null).length,
       // The long name is CUT OFF rather than allowed to push the controls: a name that fits is not
       // evidence of anything, so this counts the rows whose name element is wider than its box.
       elided: rows.filter((r) => {
@@ -513,6 +562,10 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
   expect(geometry.voids).toBe(1);
   expect(geometry.split, 'rows whose head wrapped onto a second line').toEqual([]);
   expect(geometry.warnings, 'the finding never reached a line').toBeGreaterThan(0);
+  // Both kinds are on the line, and neither wore the other's class — which is also what keeps the
+  // warning-only case honest: it is measured on the rows, not read off the panel's total.
+  expect(geometry.warnOnly, 'no warning-only ⚠ — nothing tested the class that must NOT be set').toBeGreaterThan(0);
+  expect(geometry.warnError, 'no error ⚠ on any row').toBeGreaterThan(0);
   expect(geometry.elided, 'the long name was not cut off — the line grew instead').toBeGreaterThan(0);
   // One head line plus the border, for every kind — including the row with the `⚠` and the long name.
   expect(Math.max(...geometry.heights)).toBeLessThanOrEqual(Math.ceil(geometry.headHeight) + 12);
@@ -540,11 +593,25 @@ test('#411 — ten MIXED items and a void on one line at 1440 × 900, and Ctrl-Z
   // project's undo. The unit spec pins the rule; only here is the key actually pressed.
   await page.getByTestId('engrave-label-remove-0').click();
   await expect(page.getByTestId('engrave-item-count')).toHaveText('9');
+  // Focus went to the take-back rather than to `<body>`: the press that removed the item unmounted
+  // the control that held it, and a keyboard user would otherwise have to hunt along the panel for
+  // the way back. Only a real browser can answer this — jsdom does not move focus on unmount.
+  await expect(page.getByTestId('engrave-undo')).toBeFocused();
   await page.keyboard.press('Control+z');
   await expect(page.getByTestId('engrave-item-count')).toHaveText('10');
   await expect(page.locator('[data-testid="engrave-label-row-0"] .engrave-item-row__name')).toHaveText('CASE');
   await expect(page.getByTestId('engrave-undo-strip')).toHaveCount(0);
-  // …and with nothing pending the key is the project's again, which is to say it undoes nothing here:
-  // the job is where it was a press ago either way, so the strip is the observable.
+  // …and it comes BACK the same way it went: the Undo button was inside the strip, so taking the
+  // undo removes the focused element and focus would fall to `<body>` a second time. It lands on
+  // the list's own header control instead (#411 review) — the nearest thing that belongs to the
+  // same list and is always there.
+  await expect(page.getByTestId('engrave-item-collapse-all')).toBeFocused();
+  // …and with nothing pending the key is the PROJECT's again. What that press must not do is take
+  // the removal a second time: two presses after one `✕` leave the job exactly as one press did —
+  // ten items, row 0 still the label it was, no strip. (The project half of that fall-through is
+  // about the case, not the engrave job, and is deliberately not asserted here.)
   await page.keyboard.press('Control+z');
+  await expect(page.getByTestId('engrave-item-count')).toHaveText('10');
+  await expect(page.locator('[data-testid="engrave-label-row-0"] .engrave-item-row__name')).toHaveText('CASE');
+  await expect(page.getByTestId('engrave-undo-strip')).toHaveCount(0);
 });
