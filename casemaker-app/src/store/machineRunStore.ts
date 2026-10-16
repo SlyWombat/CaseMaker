@@ -30,7 +30,7 @@ import { runProgram, type Progress, type RunOutcome, type RunSettings } from '@/
 import { copyInMachine, offcutOffer, programCuts, runtimeOf, wearKey, weighRuntime, withRuntime } from '@/engine/cnc/runEnd';
 import type { StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
-import { readDefault } from '@/platform/defaultsClient';
+import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { newStockId, useStockStore } from './stockStore';
 import { useToolRegistryStore } from './toolRegistryStore';
 import { useHouseStore } from './houseStore';
@@ -54,6 +54,8 @@ export interface RunContext {
   toolRadius?: number;
   /** The job's cutter as a registry key (`inv:<id>`), when known. */
   toolKey?: string;
+  /** Where the job's part sits, work XY — which piece of a split stock is not scrap. */
+  partAt?: { x: number; y: number };
   /** The material cut, for the wear weight. Default: the reserved shelf entry's. */
   material?: StockItem['material'];
 }
@@ -79,6 +81,8 @@ export interface RunEndIO {
   updateItem: (item: InventoryItem) => Promise<{ ok: boolean; text: string }>;
   machineIdFor: (target: { host: string; port: number }) => string | null;
   minSideMm: () => number;
+  /** `offcut.offer`: false turns offcut offers off entirely. */
+  offerOffcuts: () => boolean;
   /** The wear weight for a `tools.wearWeight.*` key, with its source. */
   wearWeight: (key: string) => { value: number; source: string };
   newId: () => string;
@@ -108,6 +112,7 @@ const storeIO: RunEndIO = {
     useLocationStore.getState().location?.machines.find((m) => m.address?.host === target.host && m.address.port === target.port)?.id ?? null,
   minSideMm: () => readDefault(useShopDefaultsStore.getState().defaults, 'offcut.minSideMm').value,
   wearWeight: (key) => readDefault(useShopDefaultsStore.getState().defaults, key),
+  offerOffcuts: () => readFlag(useShopDefaultsStore.getState().defaults, 'offcut.offer').value,
   newId: newStockId,
   now: () => new Date().toISOString(),
 };
@@ -178,7 +183,8 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
   let offcut: RunEnd['offcut'] = null;
   if (!ctx || !hasStock) {
     // Said above.
-  } else if (parent === null) lines.push('No offcut is offered: the shelf entry is not loaded.');
+  } else if (!io.offerOffcuts()) lines.push('No offcut is offered: the shop has offcut offers turned off (offcut.offer).');
+  else if (parent === null) lines.push('No offcut is offered: the shelf entry is not loaded.');
   else if (!ctx.stockXY || ctx.toolRadius === undefined) lines.push('No offcut is offered: the job did not say the stock’s size as cut, or the cutter’s radius.');
   else {
     const offer = offcutOffer({
@@ -187,6 +193,7 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
       cuts: cuts!,
       toolRadius: ctx.toolRadius,
       minSideMm: io.minSideMm(),
+      ...(ctx.partAt ? { partAt: ctx.partAt } : {}),
       jobId: ctx.jobId!,
       id: io.newId(),
       at: io.now(),
@@ -226,7 +233,7 @@ export interface MachineRunState {
   requestStop: (machine: string) => void;
   /** The offcut question: one click keeps it on the shelf. */
   keepOffcut: (machine: string) => Promise<void>;
-  /** Dismissing the question skips the offcut. */
+  /** "Ignore scrap" on this run: the offcut is skipped, nothing reaches the shelf. */
   skipOffcut: (machine: string) => void;
   /** A stopped run: was the stock used? Yes consumes it; no leaves the reservation. */
   answerStockUsed: (machine: string, used: boolean) => Promise<void>;
@@ -348,7 +355,7 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
     skipOffcut: (machine) => {
       const end = get().runs[machine]?.end;
       if (!end?.offcut || end.offcut.state !== 'asked') return;
-      patch(machine, { end: { ...end, offcut: { ...end.offcut, state: 'skipped' } } });
+      patch(machine, { end: { ...end, offcut: { ...end.offcut, state: 'skipped' }, lines: [...end.lines, 'Scrap ignored: nothing was added to the shelf.'] } });
     },
     answerStockUsed: async (machine, used) => {
       const entry = get().runs[machine];

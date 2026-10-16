@@ -155,7 +155,7 @@ export function EngraveMachineRun({ target }: EngraveMachineRunProps): JSX.Eleme
                 Keep it on the shelf
               </button>{' '}
               <button type="button" data-testid="engrave-run-offcut-skip" onClick={() => skipOffcut(machine)}>
-                Dismiss
+                Ignore scrap
               </button>
             </div>
           )}

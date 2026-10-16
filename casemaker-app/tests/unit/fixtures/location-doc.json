@@ -534,6 +534,13 @@
       "setAt": null,
       "unit": "x",
       "note": "chosen, not measured: a minute cutting copper: gummy, as hard on a cutter as aluminium"
+    },
+    "offcut.offer": {
+      "value": true,
+      "source": "seeded",
+      "setAt": null,
+      "unit": null,
+      "note": "chosen, not measured: offer an offcut back to the shelf at the end of a run that split the stock (false: never ask)"
     }
   }
 }

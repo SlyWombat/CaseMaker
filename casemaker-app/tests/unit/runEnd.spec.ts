@@ -130,14 +130,49 @@ describe('#414 the leftover, and the offcut only when it has some size to it (Q3
     expect(small).toMatchObject({ kind: 'none', reason: expect.stringContaining('under the 20 mm smallest offcut') });
   });
 
-  it('only after a through-cut: engraving, a part on tabs, or an edge-to-edge cut offer none', () => {
+  describe('only when the cuts divide the stock into at least two pieces (the maintainer, 2026-10-16)', () => {
     const base = { parent: PLATE, stockXY: { x: 100, y: 100 }, toolRadius: 1.5, minSideMm: 20, jobId: 'job-1', id: 'x', at: 'now' };
-    expect(offcutOffer({ ...base, cuts: programCuts(NC) })).toMatchObject({ kind: 'none', reason: expect.stringContaining('nothing was cut through') });
-    expect(offcutOffer({ ...base, cuts: programCuts(profile(20, 20, 50, 50, true)) })).toMatchObject({ kind: 'none', reason: expect.stringContaining('tabs') });
-    const split = [...HEAD, 'G0 X50 Y0', 'G0 Z1', 'G1 Z-5.2 F300', 'G1 X50 Y100 F600', ...TAIL].join('\n');
-    expect(offcutOffer({ ...base, cuts: programCuts(split) })).toMatchObject({ kind: 'none', reason: expect.stringContaining('edge to edge') });
-    const sep = separatedLeftover({ x: 100, y: 100 }, programCuts(CUT_OUT).segments, 1.5, -5);
-    expect(sep.ok && sep.parts).toBe(1);
+    const ONE_PIECE = 'did not divide it into two pieces';
+
+    it('a drilled through-hole: one piece with a hole in it, no offer', () => {
+      const drill = [...HEAD, 'G0 X50 Y50', 'G0 Z1', 'G1 Z-5.5 F200', 'G0 Z5', 'G0 X20 Y80', 'G0 Z1', 'G1 Z-5.5 F200', ...TAIL].join('\n');
+      expect(offcutOffer({ ...base, cuts: programCuts(drill) })).toMatchObject({ kind: 'none', reason: expect.stringContaining(ONE_PIECE) });
+    });
+
+    it('a cleared through-pocket, or a slot that separates nothing: no offer', () => {
+      const pocket = [...HEAD, 'G0 X20 Y20', 'G0 Z1', 'G1 Z-5.2 F300'];
+      for (let y = 20; y <= 50; y += 2) pocket.push(`G1 X50 Y${y} F600`, `G1 X20 Y${y + 1}`);
+      pocket.push(...TAIL);
+      expect(offcutOffer({ ...base, cuts: programCuts(pocket.join('\n')) })).toMatchObject({ kind: 'none', reason: expect.stringContaining(ONE_PIECE) });
+      const slot = [...HEAD, 'G0 X20 Y50', 'G0 Z1', 'G1 Z-5.2 F300', 'G1 X80 Y50 F600', ...TAIL].join('\n');
+      expect(offcutOffer({ ...base, cuts: programCuts(slot) })).toMatchObject({ kind: 'none', reason: expect.stringContaining(ONE_PIECE) });
+      // A profile with a tab left in it holds the part on: still one piece.
+      expect(offcutOffer({ ...base, cuts: programCuts(profile(20, 20, 50, 50, true)) })).toMatchObject({ kind: 'none', reason: expect.stringContaining(ONE_PIECE) });
+      // Engraving only: nothing went through at all.
+      expect(offcutOffer({ ...base, cuts: programCuts(NC) })).toMatchObject({ kind: 'none', reason: expect.stringContaining('still one piece') });
+    });
+
+    it('a profile cut-out that splits the stock, leftover above the minimum: offered', () => {
+      expect(separatedLeftover({ x: 100, y: 100 }, programCuts(CUT_OUT).segments, 1.5, -5)).toMatchObject({ ok: true, pieces: 2 });
+      expect(offcutOffer({ ...base, cuts: programCuts(CUT_OUT) }).kind).toBe('offer');
+    });
+
+    it('the same split with the leftover below the minimum: none', () => {
+      expect(offcutOffer({ ...base, stockXY: { x: 40, y: 40 }, cuts: programCuts(profile(12, 12, 28, 28)) })).toMatchObject({
+        kind: 'none',
+        reason: expect.stringContaining('under the 20 mm smallest offcut'),
+      });
+    });
+
+    it('a cut edge to edge is two pieces: offered from the one that is not the part, when the job says where its part is', () => {
+      const split = [...HEAD, 'G0 X30 Y0', 'G0 Z1', 'G1 Z-5.2 F300', 'G1 X30 Y100 F600', ...TAIL].join('\n');
+      expect(offcutOffer({ ...base, cuts: programCuts(split) })).toMatchObject({ kind: 'none', reason: expect.stringContaining('does not say which one is its part') });
+      const offer = offcutOffer({ ...base, cuts: programCuts(split), partAt: { x: 15, y: 50 } });
+      if (offer.kind !== 'offer') throw new Error(offer.reason);
+      // The part is the left 30 mm; the scrap is right of X 31.5.
+      expect(offer.leftover.x).toBeGreaterThanOrEqual(31.5);
+      expect(offer.item.size).toMatchObject({ length: 100 });
+    });
   });
 
   it('refuses when the cuts are not on the stock as given', () => {
@@ -193,6 +228,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
   const item = (copies: ToolCopy[]): InventoryItem => ({ id: 'kz-a', copies, tool: { name: '3.175 flat' } }) as unknown as InventoryItem;
   let inventory: InventoryItem[] = [];
   let shelfLoaded = true;
+  let offer = true;
   let runningAtWrite: (boolean | undefined)[] = [];
   const io: RunEndIO = {
     refreshStock: async () => {
@@ -206,6 +242,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
     updateItem: async (i) => (runningAtWrite.push(useMachineRunStore.getState().runs[M]?.running), calls.push(`runtime ${i.copies[0]?.runtimeMinutes}`), { ok: true, text: '' }),
     machineIdFor: () => 'm-1',
     minSideMm: () => 20,
+    offerOffcuts: () => offer,
     wearWeight: (key) => readDefault(DEFAULTS, key),
     newId: () => 'stock-off1',
     now: () => '2026-10-16T12:00:00.000Z',
@@ -224,6 +261,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
     calls.length = 0;
     runningAtWrite = [];
     shelfLoaded = true;
+    offer = true;
     inventory = [item([ToolCopySchema.parse({ id: 'a1', condition: 'used', whereabouts: { kind: 'machine', machineId: 'm-1' } })])];
     setRunEndIO(io);
     resetMachineRunStore();
@@ -254,7 +292,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
   it('an engrave-only finish consumes the stock but offers no offcut, and says why', async () => {
     const end = await endOfRun(TARGET, finished, { ...ctx, nc: NC });
     expect(end.offcut).toBeNull();
-    expect(end.lines.join(' ')).toContain('nothing was cut through');
+    expect(end.lines.join(' ')).toContain('still one piece');
   });
 
   it('a stop asks whether the stock was used, and changes nothing until answered', async () => {
@@ -272,6 +310,26 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
       expect((await endOfRun(TARGET, o, ctx)).kind).toBe('nothing');
     }
     expect(calls).toEqual([]);
+  });
+
+  it('offcut.offer false: no offer at all, said so', async () => {
+    offer = false;
+    const end = await endOfRun(TARGET, finished, ctx);
+    expect(end.offcut).toBeNull();
+    expect(end.lines.join(' ')).toContain('offcut offers turned off (offcut.offer)');
+    expect(calls.some((c) => c.startsWith('add'))).toBe(false);
+  });
+
+  it('“Ignore scrap” on this run: no offer kept and no shelf change', async () => {
+    const end = await endOfRun(TARGET, finished, ctx);
+    useMachineRunStore.setState({ runs: { [M]: entry({ end }) } });
+    calls.length = 0;
+    useMachineRunStore.getState().skipOffcut(M);
+    await useMachineRunStore.getState().keepOffcut(M);
+    expect(calls).toEqual([]);
+    const after = useMachineRunStore.getState().runs[M]!.end!;
+    expect(after.offcut!.state).toBe('skipped');
+    expect(after.lines.join(' ')).toContain('Scrap ignored');
   });
 
   it('the offcut is kept once; dismissing skips it', async () => {

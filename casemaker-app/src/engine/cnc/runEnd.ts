@@ -8,12 +8,15 @@
  *     tool-length touch are not cutting and are not counted. When a cutting move has no feed the sum
  *     is not trustworthy, and the run's own elapsed time is used instead — labelled as that, because
  *     it includes everything the machine did.
- *   - OFFER AN OFFCUT only "if there is leftover stock that has some size to it" (Q3), and — the
- *     maintainer, 2026-10-16 — "only after a through-cut": when the job cut a part FREE of the stock,
- *     the leftover is the stock that is now a separate piece, and its largest rectangle the cuts did not
- *     reach is offered when both sides are at least `offcut.minSideMm` (seeded 20, chosen). An
- *     engrave-only job, a part still held by tabs, or a cut edge to edge (which piece is the part is
- *     then unknown) offers none, and says why.
+ *   - OFFER AN OFFCUT only when the cuts DIVIDE THE STOCK INTO AT LEAST TWO DISTINCT PIECES (the
+ *     maintainer, 2026-10-16: "it needs to cut the stock into at least two parts — not just remove
+ *     material or cut thru as drilling a hole thru does not make two distinct parts"). A drilled or
+ *     bored through-hole, a cleared through-pocket, or a slot that separates nothing leaves ONE piece
+ *     with a hole in it, and offers nothing. Of the pieces, the part is the one holding the job's part
+ *     (`partAt`), or — when the job does not say — the pieces that do not reach the stock's edge; the
+ *     rest is the leftover, offered when its largest uncut rectangle has both sides at least
+ *     `offcut.minSideMm` (seeded 20, chosen). `offcut.offer` false turns offers off, and the operator can
+ *     ignore the scrap on any run.
  *   - WEIGHTED BY THE MATERIAL (the maintainer, 2026-10-16): metal wears a cutter faster than plastic,
  *     so the minutes added are the cutting minutes × the material's `tools.wearWeight.<class>` (shop
  *     defaults, seeded as chosen). The runtime on a copy is these weighted minutes.
@@ -209,43 +212,47 @@ export function largestLeftover(stock: { x: number; y: number }, segments: reado
   return largestFree(g, stock, (k) => !blocked[k]);
 }
 
-export type SeparatedLeftover = { ok: true; rect: Rect | null; parts: number } | { ok: false; reason: string };
+export type SeparatedLeftover = { ok: true; rect: Rect | null; pieces: number } | { ok: false; reason: string };
 
 /**
- * After a THROUGH-CUT (the maintainer's rule, 2026-10-16): the cuts that reach the stock's bottom
- * (`throughZ`, = −thickness) split it into pieces. A piece that does not reach the stock's edge is a
- * part cut free; the pieces that do are the leftover. The rectangle offered is the largest one in the
- * leftover that no cut reaches. Refused when no part was cut free (engraving only, or a part still held
- * by tabs), or when the cut runs edge to edge — the pieces then all reach the edge, and which one is the
- * part is unknown.
+ * The pieces the THROUGH-cuts (those reaching `throughZ`, = −thickness) divide the stock into, and the
+ * leftover among them. A piece is a connected region of stock no through-cut reaches; a speck the size
+ * of the grid's own rounding (under four cells) is not a piece. Fewer than two pieces: nothing was
+ * separated — a through-hole, a through-pocket, a slot to nowhere — and nothing is offered.
+ *
+ * Which piece is the PART: the one containing `partAt` (work XY), when the job says; otherwise the
+ * pieces that do not reach the stock's edge (a part cut out of the middle). When every piece reaches the
+ * edge and the job does not say where its part is, which one is scrap is unknown, and nothing is offered.
  */
 export function separatedLeftover(
   stock: { x: number; y: number },
   segments: readonly (CutSegment & { lowZ: number })[],
   radius: number,
   throughZ: number,
+  partAt?: { x: number; y: number },
 ): SeparatedLeftover {
   if (!(stock.x > 0 && stock.y > 0)) return { ok: false, reason: 'the stock has no size' };
   const through = segments.filter((s) => s.lowZ <= throughZ + 1e-6);
-  if (through.length === 0) return { ok: false, reason: 'nothing was cut through the stock (an engrave-only job leaves no separate piece)' };
+  if (through.length === 0) return { ok: false, reason: 'nothing was cut through the stock, so it is still one piece' };
   const g = gridFor(stock);
   const wall = markCuts(g, through, radius);
   const blocked = markCuts(g, segments, radius);
   const { nx, ny } = g;
-  // The pieces: connected cells the through-cut does not reach.
   const piece = new Int32Array(nx * ny).fill(-1);
-  const touchesEdge: boolean[] = [];
+  const pieces: { touchesEdge: boolean; cells: number }[] = [];
   for (let k0 = 0; k0 < nx * ny; k0++) {
     if (wall[k0] || piece[k0] !== -1) continue;
-    const id = touchesEdge.length;
-    touchesEdge.push(false);
+    const id = pieces.length;
+    const p = { touchesEdge: false, cells: 0 };
+    pieces.push(p);
     const queue = [k0];
     piece[k0] = id;
     while (queue.length > 0) {
       const k = queue.pop()!;
+      p.cells++;
       const i = k % nx;
       const j = (k - i) / nx;
-      if (i === 0 || j === 0 || i === nx - 1 || j === ny - 1) touchesEdge[id] = true;
+      if (i === 0 || j === 0 || i === nx - 1 || j === ny - 1) p.touchesEdge = true;
       for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
         const a = i + di;
         const b = j + dj;
@@ -258,13 +265,29 @@ export function separatedLeftover(
       }
     }
   }
-  const parts = touchesEdge.filter((t) => !t).length;
-  if (parts === 0) {
-    return touchesEdge.length > 1
-      ? { ok: false, reason: 'the through-cut runs from edge to edge, so which piece is the part is unknown' }
-      : { ok: false, reason: 'no part was cut free of the stock (a part still held by tabs counts as not free)' };
+  const real = pieces.map((p) => p.cells >= 4);
+  const count = real.filter(Boolean).length;
+  if (count < 2) {
+    return { ok: false, reason: 'the cuts went through the stock but did not divide it into two pieces (a through-hole, pocket or slot leaves one piece with a hole in it)' };
   }
-  return { ok: true, rect: largestFree(g, stock, (k) => !blocked[k] && piece[k]! >= 0 && touchesEdge[piece[k]!] === true), parts };
+  let isPart: (id: number) => boolean;
+  if (partAt) {
+    const i = Math.min(nx - 1, Math.max(0, Math.floor(partAt.x / g.cell)));
+    const j = Math.min(ny - 1, Math.max(0, Math.floor(partAt.y / g.cell)));
+    const id = piece[j * nx + i]!;
+    if (id < 0) return { ok: false, reason: 'the job’s part is where a through-cut ran, so which piece is the part is unknown' };
+    isPart = (k) => k === id;
+  } else {
+    if (pieces.every((p, k) => !real[k] || p.touchesEdge)) {
+      return { ok: false, reason: `the cuts split the stock into ${count} pieces edge to edge, and the job does not say which one is its part` };
+    }
+    isPart = (k) => !pieces[k]!.touchesEdge;
+  }
+  const leftover = (k: number) => {
+    const id = piece[k]!;
+    return id >= 0 && real[id] === true && !isPart(id) && !blocked[k];
+  };
+  return { ok: true, rect: largestFree(g, stock, leftover), pieces: count };
 }
 
 /** Whether every cut lies on the stock as given (its centre within a cutter radius of it). */
@@ -298,6 +321,8 @@ export function offcutOffer(input: {
   cuts: ProgramCuts;
   toolRadius: number;
   minSideMm: number;
+  /** Where the job's part is, work XY — which piece is not scrap. Optional. */
+  partAt?: { x: number; y: number };
   jobId: string;
   id: string;
   at: string;
@@ -312,7 +337,7 @@ export function offcutOffer(input: {
   }
   const off = cutsOnStock(input.stockXY, cuts.segments, input.toolRadius);
   if (off !== null) return { kind: 'none', reason: off };
-  const sep = separatedLeftover(input.stockXY, cuts.segments, input.toolRadius, -parent.size.thickness);
+  const sep = separatedLeftover(input.stockXY, cuts.segments, input.toolRadius, -parent.size.thickness, input.partAt);
   if (!sep.ok) return { kind: 'none', reason: sep.reason };
   const left = sep.rect;
   if (left === null) return { kind: 'none', reason: 'the cuts reach every part of what is left — nothing usable remains' };

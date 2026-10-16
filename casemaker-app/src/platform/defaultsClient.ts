@@ -157,6 +157,24 @@ export const MEASURED_ONLY: Readonly<Record<string, Omit<KnownDefault, 'fallback
   'bracket.seatMachineZ': { label: 'surface beside the bracket, machine Z', unit: 'mm', rule: z.number().min(-150).max(0) },
 };
 
+/**
+ * Yes/no keys this build knows (#414), with the value used when there is no location — `defaults.rs`'s
+ * FLAG_SEEDS. A stored value that is not true/false is refused by the section's schema.
+ */
+export const KNOWN_FLAGS: Readonly<Record<string, { label: string; fallback: boolean }>> = {
+  // The maintainer, 2026-10-16: "plus option to ignore scrap" — false turns offcut offers off.
+  'offcut.offer': { label: 'offer offcuts at the end of a run', fallback: true },
+};
+
+/** A flag's value and where it came from — `fallback` with no location or no readable entry. */
+export function readFlag(map: ShopDefaults | null, key: string): { value: boolean; source: DefaultSource | 'fallback' } {
+  const known = KNOWN_FLAGS[key];
+  if (!known) throw new Error(`${key} is not a known flag`);
+  const d = map?.[key];
+  if (d && typeof d.value === 'boolean') return { value: d.value, source: d.source };
+  return { value: known.fallback, source: 'fallback' };
+}
+
 /** A measured-only key's value with its provenance, or null when the location has none. */
 export function readMeasured(map: ShopDefaults | null, key: string): { value: number; source: DefaultSource; setAt: string | null; note: string | null } | null {
   const rule = MEASURED_ONLY[key];
@@ -186,6 +204,10 @@ export const ShopDefaultsSchema = z.record(z.string(), ShopDefaultSchema).superR
   for (const [key, d] of Object.entries(map)) {
     if (!DEFAULT_KEY.test(key)) {
       ctx.addIssue({ code: 'custom', path: [key], message: 'a key is dotted lowerCamel words, like power.onWaitSeconds' });
+      continue;
+    }
+    if (KNOWN_FLAGS[key] && typeof d.value !== 'boolean') {
+      ctx.addIssue({ code: 'custom', path: [key], message: `${key} must be true or false` });
       continue;
     }
     const known = KNOWN_DEFAULTS[key] ?? MEASURED_ONLY[key];

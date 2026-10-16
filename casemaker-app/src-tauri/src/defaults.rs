@@ -191,6 +191,19 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("offcut.minSideMm", 20.0, "mm", "chosen, not measured: an offcut is offered back to the shelf only when both its sides are at least this (Q3: only leftover stock that has some size to it)"),
 ];
 
+/// Yes/no starting values, seeded `chosen`-in-spirit with a note (#414: the maintainer's "option to
+/// ignore scrap"). `(key, value, note)`.
+pub const FLAG_SEEDS: &[(&str, bool, &str)] = &[(
+    "offcut.offer",
+    true,
+    "chosen, not measured: offer an offcut back to the shelf at the end of a run that split the stock (false: never ask)",
+)];
+
+/// The flags this build knows: a key here must hold true or false.
+fn is_flag(key: &str) -> bool {
+    FLAG_SEEDS.iter().any(|(k, ..)| *k == key)
+}
+
 pub fn seeded() -> ShopDefaults {
     let mut map = ShopDefaults::new();
     add_missing_seeds(&mut map);
@@ -200,6 +213,21 @@ pub fn seeded() -> ShopDefaults {
 /// Fill in any seed the map does not have. Returns whether anything was added.
 pub fn add_missing_seeds(map: &mut ShopDefaults) -> bool {
     let mut added = false;
+    for (key, value, note) in FLAG_SEEDS {
+        if !map.contains_key(*key) {
+            map.insert(
+                (*key).to_string(),
+                ShopDefault {
+                    value: serde_json::json!(value),
+                    source: DefaultSource::Seeded,
+                    set_at: None,
+                    unit: None,
+                    note: Some((*note).to_string()),
+                },
+            );
+            added = true;
+        }
+    }
     for (key, value, unit) in SEEDS {
         if !map.contains_key(*key) {
             map.insert(
@@ -455,9 +483,15 @@ pub fn seed_of(key: &str) -> Option<f64> {
 /// it sets is `chosen` or `measured`, dated.
 pub fn validate_write(key: &str, d: &ShopDefault) -> Result<(), HouseError> {
     validate_one(key, d)?;
-    if d.source == DefaultSource::Seeded
-        && seed_of(key).is_none_or(|seed| d.value.as_f64() != Some(seed))
-    {
+    let flag_seed = FLAG_SEEDS
+        .iter()
+        .find(|(k, ..)| *k == key)
+        .map(|(_, v, _)| *v);
+    let is_the_seed = match flag_seed {
+        Some(seed) => d.value.as_bool() == Some(seed),
+        None => seed_of(key).is_some_and(|seed| d.value.as_f64() == Some(seed)),
+    };
+    if d.source == DefaultSource::Seeded && !is_the_seed {
         return Err(HouseError::BadEntry(format!(
             "default {key}: only the app's own starting value is `seeded` — a value you set is `chosen` (or `measured`), with the date"
         )));
@@ -494,6 +528,9 @@ pub fn validate_one(key: &str, d: &ShopDefault) -> Result<(), HouseError> {
     if d.source != DefaultSource::Seeded && d.set_at.as_deref().is_none_or(|s| s.trim().is_empty())
     {
         return bad("a chosen or measured value says when it was set".into());
+    }
+    if is_flag(key) && !d.value.is_boolean() {
+        return bad(format!("{key} must be true or false"));
     }
     if let Some(Err(why)) = known_rule(key, n) {
         return bad(why);
@@ -672,6 +709,23 @@ mod tests {
             many.insert(format!("x.k{i}"), chosen(serde_json::json!(1)));
         }
         assert!(validate_all(&many).is_err());
+    }
+
+    #[test]
+    fn the_offer_flag_is_seeded_true_and_must_stay_a_flag() {
+        let s = seeded();
+        assert_eq!(s["offcut.offer"].value, serde_json::json!(true));
+        assert!(validate_one("offcut.offer", &chosen(serde_json::json!(false))).is_ok());
+        assert!(validate_one("offcut.offer", &chosen(serde_json::json!(1))).is_err());
+        let seeded_false = ShopDefault {
+            value: serde_json::json!(false),
+            ..s["offcut.offer"].clone()
+        };
+        assert!(
+            validate_write("offcut.offer", &seeded_false).is_err(),
+            "a faked seed"
+        );
+        validate_write("offcut.offer", &s["offcut.offer"]).unwrap();
     }
 
     #[test]
