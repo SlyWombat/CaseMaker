@@ -718,7 +718,7 @@ have something to say — a library file it could not read and replaced, feed ro
 left empty — and those sentences are listed under the result, below the counts, where they stay
 until the next sync (#328). Each carries its weight: a sync that **lost** something (a replaced
 file, an emptied feed matrix) is marked in amber, information is not. The service remembers the
-last sync's notes, so they are still there after a restart, dated. **Export** and **Import** move the house as a `house.json` file.
+last sync's notes, so they are still there after a restart, dated. **Export** and **Import** move the location — its machine, your tool definitions and the inventory — as one `location.json` file (#412). An older `house.json` still imports: it replaces the two tool tiers and leaves the machine.
 
 **No service: the Tools scope is absent, not broken.** The cutters live in a small service the
 desktop app runs. With nothing running, the app does not show you an empty list or a broken one — it

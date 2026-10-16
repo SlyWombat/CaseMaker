@@ -30,11 +30,14 @@
 // design across the vise jaws (#383, default `ccw`); `--tool` is the cutter key (default the
 // library's `flat-1.0`). Nothing is placed by hand: every number comes out of the file.
 //
-// `--house <house.json>` points at the machine's own tool documents, the same file the desktop
-// app's embedded server reads (`dirs::data_dir()/casemaker/house.json`), so a job naming a cutter
-// the user OWNS (`inv:…`) resolves here instead of failing as an unknown key. Default: that same
-// path. Absent file is not an error — the built-in tier is what a headless run falls back to, the
-// way the app itself does with no house service.
+// The machine's own tool documents are read from the same file the desktop app's embedded server
+// does (`dirs::data_dir()/casemaker/`), so a job naming a cutter the user OWNS (`inv:…`) resolves
+// here instead of failing as an unknown key. SINCE #412 that file is `location.json`, with
+// `house.json` — what it was before the location migration — as the fallback; a run on a machine
+// that has never been opened by a #412 build is exactly what it always was. Absent files are not an
+// error — the built-in tier is what a headless run falls back to, the way the app itself does with
+// no house service. `--location <file>` names one instead; the document's own `kind` says which of
+// the two it is.
 //
 // For each program it writes, into `--out` (default: the document's own directory, or the working
 // directory for `--from-3mf`, which has no document to sit beside):
@@ -50,7 +53,7 @@
 // NOTHING here measures anything. It emits INPUTS and the machine's receipt; the operator records
 // the verdicts in the coupon record, and the readback applies them to the table.
 
-import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, join, basename, isAbsolute } from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -74,7 +77,7 @@ import { parseEngraveJob } from '../src/store/engraveJobSchema';
 import { simErrors, simulationProblem } from '../src/engine/cnc/simGate';
 import { buildCouponPrograms, type CouponRecord, type CouponRecordRow, type CouponSpec } from '../src/engine/cnc/engrave/couponJob';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '../src/engine/fonts/registry';
-import { ToolLibrarySchema } from '../src/engine/cnc/toolLibrary';
+import { ToolLibrarySchema, type ToolLibraryEntry } from '../src/engine/cnc/toolLibrary';
 import { entryFor, getTools, setInventoryEntries, setRegistry } from '../src/engine/cnc/toolRegistry';
 import {
   finerThan,
@@ -94,7 +97,8 @@ import { jobMachine } from '../src/engine/cnc/calibration';
 import { executeProfile } from '../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from './lib/engravePreviewSvg';
 import { svgToPng } from './lib/svgToPng';
-import { InventorySchema } from '../src/platform/houseClient';
+import { InventorySchema, type InventoryItem } from '../src/platform/houseClient';
+import { checkLocationImport } from '../src/platform/locationClient';
 import { inventoryEntryFor } from '../src/store/toolRegistryStore';
 import { defaultEngraveJob } from '../src/engine/cnc/engrave/defaults';
 import { viseForNewJob } from '../src/engine/cnc/fixture';
@@ -121,54 +125,82 @@ for (const key of BUNDLED_FONT_KEYS) {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Where the desktop app keeps the house — `dirs::data_dir()/casemaker/house.json` on the Rust side,
- * spelled here for the same two platforms: `%APPDATA%` on Windows, `$XDG_DATA_HOME` (or
+ * Where the desktop app keeps the machine's own documents — `dirs::data_dir()/casemaker/` on the
+ * Rust side, spelled here for the same two platforms: `%APPDATA%` on Windows, `$XDG_DATA_HOME` (or
  * `~/.local/share`) elsewhere. Deliberately the SAME path, so a headless run and the app see one
  * set of cutters; there is no second copy to drift.
+ *
+ * Two names, tried in order, because #412 moved the user's document from the second to the first
+ * (`location.rs`): on a machine the location migration has run on, both files are on disk and only
+ * `location.json` is still being edited, so reading the older one would resolve the job against a
+ * frozen copy of the cutter list. On a machine it has not run on, `location.json` does not exist and
+ * `house.json` is still the truth.
  */
-function defaultHousePath(): string | null {
+function defaultDocPaths(): string[] {
   const base =
     process.platform === 'win32'
       ? process.env.APPDATA
       : (process.env.XDG_DATA_HOME ?? (process.env.HOME ? join(process.env.HOME, '.local', 'share') : undefined));
-  return base ? join(base, 'casemaker', 'house.json') : null;
+  if (!base) return [];
+  const dir = join(base, 'casemaker');
+  return [join(dir, 'location.json'), join(dir, 'house.json')];
 }
 
 /**
- * Load the house documents into the tool registry, so `inv:…` keys resolve.
+ * Load the machine's own documents into the tool registry, so `inv:…` keys resolve. The first path
+ * that exists wins; nothing existing is not an error (see below).
  *
- * An absent or unreadable file is NOT a failure: a headless run with no house is exactly the app
+ * An absent or unreadable file is NOT a failure: a headless run with no document is exactly the app
  * with no house service, and the built-in tier is what both fall back to (#305). A file that is
- * present but does not match the schema IS a failure — reading half of it would put a cutter in
- * the registry that the app itself would refuse, which is worse than having none.
+ * present but does not match the schema IS a failure — reading half of it would put a cutter in the
+ * registry that the app itself would refuse, which is worse than having none.
  *
- * The two documents are validated with the same zod schemas `houseClient` uses on the HTTP path, so
- * a file this script accepts is a file the service would have served.
+ * A LOCATION is checked by `checkLocationImport`, the very function the panel holds an imported file
+ * to (#412): one rule for the document, so a `location.json` this script reads is one the app would
+ * have accepted — machine records included, which is the point of checking the whole document rather
+ * than the two tiers this run actually wants. Anything of another kind is read as the house, with
+ * the same two zod schemas `houseClient` uses on the HTTP path.
  */
-function loadHouse(path: string | null): void {
-  if (path === null) return;
+function loadDocs(paths: readonly string[]): void {
+  const path = paths.find((p) => existsSync(p));
+  if (path === undefined) return; // no documents on this machine — the built-ins carry the run
   let raw: string;
   try {
     raw = readFileSync(path, 'utf8');
   } catch {
-    return; // no house on this machine — the built-ins carry the run
+    return;
   }
-  let json: unknown;
-  try {
-    json = JSON.parse(raw);
-  } catch (e) {
-    return fail(`${path} is not JSON: ${(e as Error).message}`);
+
+  let tools: ToolLibraryEntry[];
+  let inventory: InventoryItem[];
+  let what: string;
+  const location = checkLocationImport(raw);
+  if (location.kind === 'refused') return fail(`${path}: ${location.reason}`);
+  if (location.kind === 'location') {
+    tools = location.doc.tools;
+    inventory = location.doc.inventory;
+    what = `location "${location.doc.name}"`;
+  } else {
+    let json: unknown;
+    try {
+      json = JSON.parse(raw);
+    } catch (e) {
+      return fail(`${path} is not JSON: ${(e as Error).message}`);
+    }
+    const doc = json as { tools?: unknown; inventory?: unknown };
+    const parsedTools = ToolLibrarySchema.safeParse(doc.tools ?? []);
+    if (!parsedTools.success) return fail(`${path}: "tools" is not a tool list:\n  ${parsedTools.error.message}`);
+    const parsedInventory = InventorySchema.safeParse(doc.inventory ?? []);
+    if (!parsedInventory.success) return fail(`${path}: "inventory" is not an inventory:\n  ${parsedInventory.error.message}`);
+    tools = parsedTools.data;
+    inventory = parsedInventory.data;
+    what = 'house';
   }
-  const doc = json as { tools?: unknown; inventory?: unknown };
-  const tools = ToolLibrarySchema.safeParse(doc.tools ?? []);
-  if (!tools.success) return fail(`${path}: "tools" is not a tool list:\n  ${tools.error.message}`);
-  const inventory = InventorySchema.safeParse(doc.inventory ?? []);
-  if (!inventory.success) return fail(`${path}: "inventory" is not an inventory:\n  ${inventory.error.message}`);
-  setRegistry(tools.data);
-  setInventoryEntries(inventory.data.map(inventoryEntryFor));
+  setRegistry(tools);
+  setInventoryEntries(inventory.map(inventoryEntryFor));
   console.log(
-    `house: ${path} — ${tools.data.length} tool${tools.data.length === 1 ? '' : 's'} from the user's own ` +
-      `list, ${inventory.data.length} owned cutter${inventory.data.length === 1 ? '' : 's'}`,
+    `${what}: ${path} — ${tools.length} tool${tools.length === 1 ? '' : 's'} from the user's own ` +
+      `list, ${inventory.length} owned cutter${inventory.length === 1 ? '' : 's'}`,
   );
 }
 
@@ -184,7 +216,7 @@ interface Args {
   tool?: string;
   rest?: string;
   overlap?: number;
-  house?: string;
+  location?: string;
   out?: string;
 }
 
@@ -201,7 +233,7 @@ function parseArgs(argv: string[]): Args {
       const v = Number(argv[++i]);
       if (!Number.isFinite(v) || v < 0) throw new Error(`--overlap must be a distance in mm, not "${argv[i]}"`);
       args.overlap = v;
-    } else if (a === '--house') args.house = argv[++i];
+    } else if (a === '--location') args.location = argv[++i];
     else if (a === '--turn') {
       const v = argv[++i];
       if (v !== 'ccw' && v !== 'cw') throw new Error(`--turn must be "ccw" or "cw", not "${v}"`);
@@ -223,7 +255,7 @@ const USAGE =
   '       scripts/engrave-job.ts --coupon <coupon-spec.json> [--out <dir>]\n' +
   '       scripts/engrave-job.ts --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
   '              [--rest <key|none>] [--overlap <mm>] [--out <dir>]\n' +
-  '       [--house <house.json>]  (any input; default: the app’s own house document)';
+  '       [--location <location.json|house.json>]  (any input; default: the app’s own location)';
 
 let args: Args;
 try {
@@ -239,8 +271,9 @@ if (!args.from3mf && (args.turn || args.tool || args.rest || args.overlap !== un
   fail('--turn, --tool, --rest and --overlap only apply to --from-3mf');
 }
 
-// Before ANY job resolves a cutter: `jobTool` reads the registry, so the house has to be in it first.
-loadHouse(args.house ?? defaultHousePath());
+// Before ANY job resolves a cutter: `jobTool` reads the registry, so the machine's own documents
+// have to be in it first.
+loadDocs(args.location === undefined ? defaultDocPaths() : [args.location]);
 
 const readJson = (path: string): unknown => {
   try {
