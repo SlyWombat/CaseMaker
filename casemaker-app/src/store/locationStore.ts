@@ -23,6 +23,12 @@
  * A section the record does not carry (`null`) leaves the local one alone — the "no opinion" rule
  * the "my machine" import already follows — and the next write-through fills it in.
  *
+ * THE MERGE'S BASE IS PERSISTED (#439). It is kept beside the settings in `localStorage`, so an edit
+ * whose write failed (a service error, a second 412) survives a restart: on the next connect a stored
+ * base for the same machine is the merge's base, and the edit — changed since that base — is written
+ * instead of being overwritten by the location's record. With no stored base (or one for another
+ * machine) the location's record wins, as above.
+ *
  * NO LOCATION, NO CHANGE. A build with no house service (the hosted web build) never reaches
  * `present`, so nothing here runs and the settings behave exactly as before.
  */
@@ -33,6 +39,7 @@ import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { MarginSettings } from '@/engine/cnc/engrave/depthBounds';
 import type { MachineObservation } from '@/platform/machineProbe';
 import {
+  MachineRecordSchema,
   houseLocation,
   housePutMachine,
   type LocationView,
@@ -236,8 +243,35 @@ export function sameRecord(a: MachineRecord, b: MachineRecord): boolean {
  * half-applied record.
  */
 let applying = false;
-/** The record this window's settings last agreed with — the merge's base. */
+/** The record this window's settings last agreed with — the merge's base. Persisted (#439): see {@link setBaseline}. */
 let baseline: MachineRecord | null = null;
+
+/** Where the base is kept beside the settings, so a failed write is merged — not overwritten — on the next start. */
+export const BASELINE_KEY = 'casemaker.location.baseline.v1';
+
+/** Set the merge's base, in memory and in this browser's storage. */
+function setBaseline(record: MachineRecord): void {
+  baseline = record;
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(BASELINE_KEY, JSON.stringify(record));
+  } catch {
+    // Storage full or blocked: the base lives in memory only, as before #439.
+  }
+}
+
+/** The stored base, when there is one this build can read. */
+export function storedBaseline(): MachineRecord | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(BASELINE_KEY);
+    if (raw === null) return null;
+    const parsed = MachineRecordSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 /** Set when an import put a location with NO machine in place: not re-seeded from this window. */
 let seedSuppressed = false;
 
@@ -259,7 +293,7 @@ function applySections(sections: Partial<Pick<MachineRecord, Section>>): void {
  */
 export function applyMachineToSettings(record: MachineRecord): void {
   applySections(record);
-  baseline = record;
+  setBaseline(record);
 }
 
 /** An import put a location with no machine in place: do not re-seed it from this window (#412 review). */
@@ -295,7 +329,7 @@ export async function pushMachine(now: () => string = () => new Date().toISOStri
       const { record, fromLocation } = mergeMachine(localMachine(), server, baseline, now());
       applySections(fromLocation);
       if (server !== null && sameRecord(record, server)) {
-        baseline = server;
+        setBaseline(server);
         continue;
       }
       const outcome = await useLocationStore.getState().saveMachine(record);
@@ -303,7 +337,7 @@ export async function pushMachine(now: () => string = () => new Date().toISOStri
         // The merge's base is the record THIS window wrote (re-review), not the re-read: a re-read
         // that already carries another window's next change would otherwise become the base, and
         // that change would read as "unchanged here" and never reach these settings.
-        baseline = record;
+        setBaseline(record);
       } else if (outcome === 'stale' && staleRetries-- > 0) {
         // Re-read already happened: merge against what the other window wrote, and try once more.
         again = true;
@@ -329,7 +363,14 @@ export async function reconcileLocation(): Promise<void> {
   const { status, location } = useLocationStore.getState();
   if (status !== 'present' || location === null) return;
   const existing = location.machines[0];
-  if (existing !== undefined) applyMachineToSettings(existing);
+  if (existing !== undefined) {
+    // #439: a base this window stored for the SAME machine is merged against — so an edit whose write
+    // failed before the restart is written, and a section only the location changed is still taken in.
+    // Without one, the location's record wins.
+    const stored = storedBaseline();
+    if (stored !== null && stored.id === existing.id) baseline = stored;
+    else applyMachineToSettings(existing);
+  }
   await pushMachine();
 }
 
@@ -373,4 +414,14 @@ export function resetLocationStore(): void {
   applying = false;
   baseline = null;
   seedSuppressed = false;
+}
+
+/** Test seam: forget the stored base too (a fresh browser). */
+export function clearStoredBaseline(): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(BASELINE_KEY);
+  } catch {
+    // nothing stored
+  }
 }

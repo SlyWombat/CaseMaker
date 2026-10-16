@@ -18,6 +18,7 @@ import {
 import type { MachineObservation } from '@/platform/machineProbe';
 import type { MachineRecord } from '@/platform/locationClient';
 import {
+  clearStoredBaseline,
   localMachine,
   mergeMachine,
   observationApplies,
@@ -76,7 +77,7 @@ const OBSERVATION: MachineObservation = {
 };
 
 /** The service's location, held in the fake: machines plus a validator that moves on every write. */
-function fakeService(initial: MachineRecord[] = [], hooks: { afterPut?: (machines: unknown[]) => void } = {}) {
+function fakeService(initial: MachineRecord[] = [], hooks: { afterPut?: (machines: unknown[]) => void; failPuts?: () => boolean } = {}) {
   let machines: unknown[] = initial.map((m) => JSON.parse(JSON.stringify(m)));
   let version = 1;
   const puts: MachineRecord[] = [];
@@ -112,6 +113,7 @@ function fakeService(initial: MachineRecord[] = [], hooks: { afterPut?: (machine
     call: async (method, path, body, opts): Promise<HouseCall> => {
       if (method === 'GET' && path === '/location') return { kind: 'ok', text: view(), etag: etag() };
       if (method === 'PUT' && path.startsWith('/location/machines/')) {
+        if (hooks.failPuts?.()) return { kind: 'refused', status: 500, message: 'the service could not write the location' };
         if (opts?.ifMatch !== etag()) {
           return { kind: 'refused', status: opts?.ifMatch ? 412 : 428, message: 'the location changed since you read it' };
         }
@@ -167,6 +169,7 @@ function setLocal(opts: { vise?: boolean; calibration?: boolean; observed?: bool
 
 beforeEach(() => {
   resetLocationStore();
+  clearStoredBaseline();
   resetHouseStore();
   setLocal({});
 });
@@ -456,3 +459,65 @@ async function vi_waitFor(cond: () => boolean, tries = 50): Promise<void> {
   }
   throw new Error('the condition never held');
 }
+
+describe('#439 an edit whose write failed survives a restart', () => {
+  const theirs = () =>
+    mergeMachine(
+      { fixtures: { vise: { ...VISE } }, margins: { ...MARGIN_DEFAULTS, source: 'user' }, calibration: CALIBRATION, observation: OBSERVATION },
+      null,
+      null,
+      '2026-10-15T09:00:00.000Z',
+    ).record;
+
+  /** Connect, edit the margins while every write fails, then "restart": the window's memory is gone. */
+  async function failedEditThenRestart(service: ReturnType<typeof fakeService>, failing: { on: boolean }) {
+    await reconcileLocation();
+    failing.on = true;
+    useSettingsStore.getState().setMargins({ ...MARGIN_DEFAULTS, edgeMargin: 0.9, source: 'user' });
+    await pushMachine();
+    expect(service.puts).toHaveLength(0);
+    expect(useLocationStore.getState().writeNote).toContain('could not write');
+    failing.on = false;
+    resetLocationStore(); // the in-memory base is gone; the stored one and the settings remain
+  }
+
+  it('the next connect merges against the stored base and writes the edit, instead of overwriting it', async () => {
+    const failing = { on: false };
+    const service = fakeService([theirs()], { failPuts: () => failing.on });
+    setLocal({});
+    await failedEditThenRestart(service, failing);
+    await reconcileLocation();
+    expect(useSettingsStore.getState().margins.edgeMargin).toBe(0.9);
+    expect(service.puts).toHaveLength(1);
+    expect(service.machines()[0]!.margins?.edgeMargin).toBe(0.9);
+  });
+
+  it('a section only the location changed meanwhile is still taken in', async () => {
+    const failing = { on: false };
+    const service = fakeService([theirs()], { failPuts: () => failing.on });
+    setLocal({});
+    await failedEditThenRestart(service, failing);
+    service.writeElsewhere({ fixtures: { vise: { ...VISE, stockProud: 2.25 } } });
+    await reconcileLocation();
+    expect(useSettingsStore.getState().fixtures.vise?.stockProud).toBe(2.25);
+    expect(useSettingsStore.getState().margins.edgeMargin).toBe(0.9);
+    expect(service.machines()[0]!.fixtures).toMatchObject({ vise: { stockProud: 2.25 } });
+    expect(service.machines()[0]!.margins?.edgeMargin).toBe(0.9);
+  });
+
+  it('with no stored base — or one for another machine — the location’s record wins, as before', async () => {
+    for (const other of [false, true]) {
+      resetLocationStore();
+      clearStoredBaseline();
+      const failing = { on: false };
+      const service = fakeService([theirs()], { failPuts: () => failing.on });
+      setLocal({});
+      await failedEditThenRestart(service, failing);
+      if (other) localStorage.setItem('casemaker.location.baseline.v1', JSON.stringify({ ...service.machines()[0], id: 'machine-other' }));
+      else clearStoredBaseline();
+      await reconcileLocation();
+      expect(useSettingsStore.getState().margins.edgeMargin).toBe(MARGIN_DEFAULTS.edgeMargin);
+      expect(service.puts).toHaveLength(0);
+    }
+  });
+});
