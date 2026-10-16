@@ -241,6 +241,11 @@ export interface SimLoadOpts {
    * states no point angle (#382). Absent: the registry's labelled fallback (source `fallback`).
    */
   drillPointDefault?: DrillPointDefault | null;
+  /**
+   * The shop's `sim.columnFlatPitchYMm` as the app read it (#438): the column engine's FLAT grid Y
+   * pitch, mm. Absent: `COLUMN_FLAT_PITCH_Y_FALLBACK_MM`. A rotary job ignores it.
+   */
+  flatPitchYMm?: number | null;
 }
 
 /**

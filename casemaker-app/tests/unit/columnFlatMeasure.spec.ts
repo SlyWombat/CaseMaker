@@ -65,7 +65,9 @@ function measure(file: string): void {
   const distinctZ = new Set(timeline.checkpoints.map((c) => c.zKey)).size;
   const rss0 = process.memoryUsage().rss / 1024 / 1024;
   const t1 = performance.now();
-  const out = columnSweep(timeline, flatEndMill(3.175), setup, { resolution: COLUMN_SIM_RESOLUTION });
+  // No `resolution`: the flat engine's own grid, as a load builds it — 0.1 mm in X and the flat Y
+  // pitch's fallback (0.1 mm since #438; this file measured 0.1 × 0.25 mm before it).
+  const out = columnSweep(timeline, flatEndMill(3.175), setup);
   const tSweep = performance.now() - t1;
   const rss1 = process.memoryUsage().rss / 1024 / 1024;
   const stock = `${(extent.maxX - extent.minX + 10).toFixed(1)}x${(extent.maxY - extent.minY + 10).toFixed(1)}x${extent.thickness.toFixed(2)}`;

@@ -39,7 +39,7 @@ import {
 } from '@/engine/cnc/engrave/oracle';
 import { grooveRadiusAt, vCone, type VCone } from '@/engine/cnc/vProfile';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
-import type { ColumnGrid } from '@/workers/geometry/columnEngine';
+import { COLUMN_FLAT_PITCH_Y_FALLBACK_MM, COLUMN_SIM_RESOLUTION, type ColumnGrid } from '@/workers/geometry/columnEngine';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { saveBlocker, uploadBlocker, type EngraveRunView } from '@/store/engraveRunGate';
 import { Z1 } from '@/engine/cnc/machine';
@@ -219,8 +219,9 @@ describe('the V-trace prediction is a groove (#408 item 1)', () => {
 
     // Which is the point of the level, and what answers the resolution finding #408 reported: judged
     // only at its floors, this job asks the narrowest question a V trace can be asked — a 0.3 mm
-    // strip of tip under a 0.1 × 0.25 mm grid, judged through a 0.146 mm band — so what it
-    // certifies is that the groove's FLOOR sits on the centreline. The same groove here is 0.81 mm
+    // strip of tip, which under #408's 0.1 × 0.25 mm grid was judged through a 0.146 mm band and so
+    // certified little more than that the groove's FLOOR sits on the centreline (#438 has since
+    // given the flat grid a 0.1 mm Y pitch and a 0.083 mm band). The same groove here is 0.81 mm
     // wide, 2.7× the floor's strip, so the comparison at this level is about the shape the plan
     // draws rather than about one line through it.
     const floor = levels[2]!;
@@ -314,12 +315,22 @@ describe('the column engine’s slice and band (#408 items 2 and 3)', () => {
     expect(columnBandTerm(grid)).toBeCloseTo(Math.hypot(1, 1) / 2, 12);
     expect(columnOracleBand(1000, grid)).toBeCloseTo(oracleBand(1000) + columnBandTerm(grid), 12);
 
-    // The term is the GRID's, so a coarser grid is told the truth about itself: at the sim
-    // resolution (0.1 mm × 0.25 mm) the term is 0.13 mm, ten times the sweep's own band, which is
-    // why a column sweep judged at the exact band fails on sampling alone.
-    const sim: ColumnGrid = { ...grid, du: 0.1, dv: 0.25 };
-    expect(columnBandTerm(sim)).toBeCloseTo(0.134629, 6);
-    expect(columnBandTerm(sim)).toBeGreaterThan(8 * oracleBand(1000));
+    // The term is the GRID's, so a coarser grid is told the truth about itself: at #408's flat
+    // resolution (0.1 mm × 0.25 mm — the rotary's 0.25° reused as millimetres) the term is 0.13 mm,
+    // ten times the sweep's own band, which is why a column sweep judged at the exact band fails on
+    // sampling alone.
+    const old: ColumnGrid = { ...grid, du: 0.1, dv: 0.25 };
+    expect(columnBandTerm(old)).toBeCloseTo(0.134629, 6);
+    expect(columnBandTerm(old)).toBeGreaterThan(8 * oracleBand(1000));
+
+    // #438: a FLAT job now takes its own Y pitch — the shop's `sim.columnFlatPitchYMm`, whose
+    // labelled fallback is 0.1 mm — so its cell is 0.1 × 0.1 and the term halves to 0.071 mm.
+    // Still over four times the sweep's own band at 1000 contours: the grid remains most of what is allowed.
+    expect(COLUMN_FLAT_PITCH_Y_FALLBACK_MM).toBe(0.1);
+    const flat: ColumnGrid = { ...grid, du: COLUMN_SIM_RESOLUTION.dx, dv: COLUMN_FLAT_PITCH_Y_FALLBACK_MM };
+    expect(columnBandTerm(flat)).toBeCloseTo(Math.SQRT2 * 0.05, 9);
+    expect(columnBandTerm(flat)).toBeCloseTo(0.070711, 6);
+    expect(columnBandTerm(flat)).toBeGreaterThan(4 * oracleBand(1000));
   });
 });
 
@@ -345,22 +356,24 @@ describe('the oracle refuses a V trace cut short (#408 acceptance 2)', () => {
       const level = report.levels[1]!;
 
       // A single trace has ONE floor, and at a trace's own floor the cone is down to its tip: the
-      // predicted region is a 0.3 mm strip, whatever depth the job names. The column grid samples
-      // the stock at 0.1 × 0.25 mm (`COLUMN_SIM_RESOLUTION`), so it resolves that strip as ONE row
-      // of cells — 30 × 0.25 mm², under the strip's rounded true area. This is the resolution the
-      // band pays for, and the reason the band is stated on the run sheet beside the result.
+      // predicted region is a 0.3 mm strip, whatever depth the job names. The flat column grid
+      // samples the stock at 0.1 × 0.1 mm (#438: its own Y pitch, `COLUMN_FLAT_PITCH_Y_FALLBACK_MM`),
+      // so it resolves that strip as THREE rows of cells — and the mask's area is the strip's to
+      // within a few hundredths of a mm². Under #408's 0.1 × 0.25 mm grid it was ONE 0.25 mm row,
+      // 7.5 mm² against the strip's 9.07.
       expect(level.predictedArea).toBeCloseTo(capsuleArea(30, CONE.tipRadius), 2);
-      expect(level.simulatedArea).toBeCloseTo(0.25 * 30, 1);
-      expect(level.simulatedArea).toBeLessThan(level.predictedArea);
+      expect(level.simulatedArea).toBeCloseTo(level.predictedArea, 1);
 
-      // The band is 0.146 mm — half a 0.1 × 0.25 mm cell's diagonal, plus the sweep's own 0.012 —
-      // and that is all but the tip's own 0.15 mm. So the strip that survives the comparison AT THE
-      // FLOOR is 0.004 mm wide, and the floor level alone would prove little more than that the
-      // groove's centreline is where the plan draws it. That is the resolution finding of #408, and
-      // it is the shallow level above that answers it: at 0.1 mm down the same groove is 0.78 mm
-      // wide — three cells, not one — so the comparison there is about the shape, not the line.
-      expect(report.band).toBeGreaterThan(0.1);
-      expect(report.band).toBeLessThan(0.2);
+      // The band is 0.083 mm — half a ~0.1 × 0.1 mm cell's diagonal (0.0706: the cells are refit to
+      // the grid's extent, so a hair under 0.1), plus the sweep's own 0.012. So the strip that
+      // survives the comparison AT THE FLOOR is ±0.067 mm about the centreline: the floor level
+      // checks that the tip cut a strip of real width there. Under #408's 0.25 mm pitch the band
+      // was 0.146 mm and that strip ±0.004 mm — a check of the centreline alone, the finding #438
+      // was opened for. The shallow level above still asks about the shape: at 0.1 mm down the
+      // same groove is 0.78 mm wide.
+      expect(report.band).toBeGreaterThan(0.08);
+      expect(report.band).toBeLessThan(0.085);
+      expect(CONE.tipRadius - report.band).toBeGreaterThan(0.065);
       expect(mouth.predictedArea).toBeCloseTo(capsuleArea(30, grooveRadiusAt(CONE, 0.9)), 2);
       expect(mouth.simulatedArea).toBeGreaterThan(2 * level.simulatedArea);
       expect(mouth.predictedArea).toBeGreaterThan(2 * level.predictedArea);
@@ -385,22 +398,24 @@ describe('the oracle refuses a V trace cut short (#408 acceptance 2)', () => {
       // And the refusal is the SHALLOW level's, which is what makes it useful: the prediction is
       // ERODED by the band before the comparison — only what is definitely inside the plan is held
       // against the sim — so at 0.1 mm down what is left to be judged is a strip of
-      // `grooveRadiusAt(cone, 0.9) − band` = 0.245 mm either side of the centreline, or 14.7 mm²
-      // over the 30 mm stroke. A file that cut only its first half leaves half of that behind.
+      // `grooveRadiusAt(cone, 0.9) − band` = 0.309 mm either side of the centreline (0.245 under
+      // #408's coarser grid), or 18.5 mm² over the 30 mm stroke. A file that cut only its first
+      // half leaves half of that behind.
       const reach = grooveRadiusAt(CONE, 0.9);
       const missed = 2 * (reach - report.band) * (25 - 10);
-      expect(missed).toBeCloseTo(7.35, 1);
+      expect(missed).toBeCloseTo(9.26, 1);
       expect(mouth.underCut).toBeGreaterThan(missed * 0.9);
       expect(mouth.underCut).toBeLessThan(missed * 1.1);
 
-      // At the FLOOR the same file leaves only `2·(tipRadius − band)·15` mm² — the 0.004 mm strip
-      // above, halved — which is still two orders of magnitude over the floor, and is an honest
-      // measure of how little a sampled grid at this resolution can certify at a trace's tip.
+      // At the FLOOR the same file leaves `2·(tipRadius − band)·15` mm² — the ±0.067 mm strip
+      // above, over the half it did not cut: about 2 mm², three orders of magnitude over the floor.
+      // Under #408's 0.25 mm pitch that strip was ±0.004 mm, so the floor's share of this miss was
+      // about a quarter of a mm²: the tip is now judged on a width, not a line (#438).
       const eroded = 2 * (CONE.tipRadius - report.band) * 30;
-      expect(eroded).toBeGreaterThan(0.2);
-      expect(eroded).toBeLessThan(0.25);
-      expect(level.underCut).toBeGreaterThan(eroded * 0.25);
-      expect(level.underCut).toBeLessThan(eroded * 0.75);
+      expect(eroded).toBeGreaterThan(3.9);
+      expect(eroded).toBeLessThan(4.2);
+      expect(level.underCut).toBeGreaterThan(eroded * 0.4);
+      expect(level.underCut).toBeLessThan(eroded * 0.6);
       // Nothing was cut outside the plan at either level, so the refusal is the under-cut's alone —
       // a band that had swallowed this would have shown up as an over-cut instead.
       expect(report.worst.overCut).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
@@ -424,15 +439,27 @@ describe('the oracle refuses a program the plan does not describe (#408 review 4
       // The plan's floor is z = −1 and the file cuts to −1.5, so at that level the cone still has
       // 0.5 mm of flank above it: its own cut there spans `grooveRadiusAt(cone, 0.5)` = 0.284 mm
       // either side, where the plan says the tip's 0.15. Everything the mask reaches past the
-      // grown region's 0.296 mm line is material the job never asked to remove — and the sim's mask
-      // is whole 0.25 mm cells, so it steps over that line rather than up to it.
+      // grown region's 0.233 mm line is material the job never asked to remove: 0.051 mm a side,
+      // about 3.1 mm² over the 30 mm stroke. At 0.1 mm down the same holds one flank higher —
+      // the file's cone reaches 0.525 mm (`grooveRadiusAt(cone, 1.4)`), the grown plan 0.474.
+      //
+      // Under #408's 0.25 mm pitch the grown line sat at 0.296 mm, BEYOND the file's own 0.284 at
+      // the floor, so the over-cut there was the 0.25 mm cells stepping over the line, not the
+      // extra depth. At 0.1 mm the extra width is outside the band on its own, and the mask reads
+      // it to within a cell: between a quarter and twice the true excess (0.1 mm rows, so up to
+      // 0.05 mm of each 0.051 mm side is quantisation).
       const fileReach = grooveRadiusAt(CONE, 0.5);
       const grownHalf = CONE.tipRadius + report.band;
       expect(fileReach).toBeCloseTo(0.2839745962, 8);
-      expect(grownHalf).toBeCloseTo(0.2963, 3);
-      expect(fileReach).toBeGreaterThan(CONE.tipRadius);
-      expect(floor.overCut).toBeGreaterThan(4);
-      expect(mouth.overCut).toBeGreaterThan(4);
+      expect(grownHalf).toBeCloseTo(0.2326, 3);
+      expect(fileReach).toBeGreaterThan(grownHalf);
+      const floorExcess = 2 * (fileReach - grownHalf) * 30;
+      expect(floor.overCut).toBeGreaterThan(floorExcess * 0.25);
+      expect(floor.overCut).toBeLessThan(floorExcess * 2);
+      const mouthExcess = 2 * (grooveRadiusAt(CONE, 1.4) - (grooveRadiusAt(CONE, 0.9) + report.band)) * 30;
+      expect(mouthExcess).toBeGreaterThan(2.5);
+      expect(mouth.overCut).toBeGreaterThan(mouthExcess * 0.25);
+      expect(mouth.overCut).toBeLessThan(mouthExcess * 2);
 
       // It cut everything the plan named and then some, so the disagreement is one-way: nothing is
       // under-cut. A bad program is not merely "different" — the direction says what went wrong.
@@ -445,8 +472,9 @@ describe('the oracle refuses a program the plan does not describe (#408 review 4
   it('catches a trace cut 0.1 mm to the side of the planned stroke', () => {
     const job = traceJob();
     const g = generate(tl, job);
-    // The program's own Y is 20.1 where the job's trace is at 20 — under half the grid's 0.25 mm
-    // across-stroke pitch, which is the case the sampled engine is least able to see (#438).
+    // The program's own Y is 20.1 where the job's trace is at 20 — ONE cell of the flat grid's
+    // 0.1 mm across-stroke pitch (#438; under half a cell at #408's 0.25 mm), and only 0.017 mm
+    // more than the 0.083 mm band, so it is about the smallest shift the oracle can promise to see.
     const off = load(job, posted(job, 40, 1, 20.1), bit30());
     try {
       const report = off.session.oracle(g.predicted);
@@ -454,17 +482,21 @@ describe('the oracle refuses a program the plan does not describe (#408 review 4
       const mouth = report.levels[0]!;
       const floor = report.levels[1]!;
 
-      // It is caught, and on both sides, though by the grid's quantisation rather than by any
-      // measurement of position: the shift moves a boundary ROW of cells from cut to uncut, so the
-      // rows the mask leaves behind fall inside the eroded prediction (7.3 mm² of eroded strip at
-      // the shallow level, of which 0.7 is missed) and the rows it keeps reach past the grown
-      // region on the other side. What this spec pins is that THIS misalignment is caught — not
-      // that the mask resolves a shift of any size: a shift landing between two cell centres is
-      // still invisible to it, which is #438's subject and deliberately left there.
-      expect(mouth.underCut).toBeGreaterThan(10 * ORACLE_AREA_FLOOR);
+      // It is caught, and on both sides. The shift exceeds the band by 0.017 mm a side — about
+      // 0.5 mm² over the stroke at either level — and what the mask reads of that depends on where
+      // the shifted edges fall between cell centres. At the FLOOR (edges at 19.95 and 20.25) a
+      // whole boundary row changes sides, so it is read as ~0.84 mm² under-cut on one side and the
+      // same over-cut on the other: the tip's strip is now three rows wide, so this level judges
+      // position, where under #408's single 0.25 mm row it could not. At the shallow level the
+      // edges land near cell centres and the mask reads only a hundredth or so — still over the
+      // floor, but it is the floor level that refuses this file now (under #408 it was the
+      // shallow level). A shift inside the band remains invisible by construction: that is what
+      // the band promises not to report.
+      expect(floor.underCut).toBeGreaterThan(0.25);
+      expect(floor.overCut).toBeGreaterThan(0.25);
+      expect(mouth.underCut).toBeGreaterThan(ORACLE_AREA_FLOOR);
       expect(mouth.overCut).toBeGreaterThan(ORACLE_AREA_FLOOR);
-      expect(floor.underCut).toBeGreaterThan(10 * ORACLE_AREA_FLOOR);
-      expect(mouth.underCut).toBeGreaterThan(floor.underCut);
+      expect(floor.underCut).toBeGreaterThan(mouth.underCut);
       // And the plan itself is untouched: the prediction the file is judged against is the job's.
       expect(mouth.predictedArea).toBeCloseTo(capsuleArea(30, grooveRadiusAt(CONE, 0.9)), 2);
     } finally {
@@ -497,9 +529,9 @@ describe('the committed bench job passes the oracle in the panel (#408 acceptanc
       expect(report.levels.map((l) => l.z)).toEqual([-0.1, -1]);
       expect(report.levels[0]!.predictedArea).toBeGreaterThan(2 * report.levels[1]!.predictedArea);
       // The band is the column engine's own, so it is stated rather than assumed: the sweep's term
-      // plus half a 0.1 × 0.25 mm cell's diagonal.
-      expect(report.band).toBeGreaterThan(0.1);
-      expect(report.band).toBeLessThan(0.2);
+      // plus half a ~0.1 × 0.1 mm cell's diagonal (#438; 0.148 at #408's 0.1 × 0.25 mm).
+      expect(report.band).toBeGreaterThan(0.08);
+      expect(report.band).toBeLessThan(0.09);
       expect(report.worst.underCut).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
       expect(report.worst.overCut).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
       expect(report.ok).toBe(true);

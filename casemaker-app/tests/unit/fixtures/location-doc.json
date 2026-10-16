@@ -556,6 +556,13 @@
       "unit": "mm",
       "note": "the wired probe tip's outside diameter, as recorded with the 2026-10-15 bench scan: an opening must be wider than this to be entered at all"
     },
+    "sim.columnFlatPitchYMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the flat simulation grid's Y pitch; the oracle's band grows with the cell and the sim's memory and time with 1/pitch"
+    },
     "laser.originUncertaintyMm": {
       "value": 1.0,
       "source": "seeded",

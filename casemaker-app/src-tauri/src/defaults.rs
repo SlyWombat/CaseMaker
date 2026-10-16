@@ -205,6 +205,9 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("drill.pointAngleDeg", 118.0, "deg", "chosen, not measured: a twist drill's included point angle, used only when the drill's own record states none"),
     ("drill.plungeFeed", 100.0, "mm/min", "placeholder, not measured; not a vendor number: the drilling feed until a measured row replaces it"),
     ("drill.spindleRpm", 10000.0, "rpm", "placeholder, not measured; not a vendor number: the drilling spindle speed until a measured row replaces it"),
+    // ── #438 (begin) — the column engine's FLAT grid Y pitch: chosen, not measured.
+    ("sim.columnFlatPitchYMm", 0.1, "mm", "chosen, not measured: the flat simulation grid's Y pitch; the oracle's band grows with the cell and the sim's memory and time with 1/pitch"),
+    // ── #438 (end)
     // #431 — the laser point-to-origin's accuracy, ±1 mm, until the dot is measured.
     ("laser.originUncertaintyMm", 1.0, "mm", "chosen, not measured: how far the laser dot's origin may be from the stock's corner (the dot's size, and its offset from the spindle axis, are not measured); point-to-origin is refused for a job whose edge margin is tighter"),
     // #414 — Q3's minimum offcut, 20 x 20 mm at the stock's thickness.
@@ -498,6 +501,12 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (1000.0..=30000.0).contains(&v)),
             "1000 to 30000 rpm",
         )),
+        // ── #438 (begin)
+        "sim.columnFlatPitchYMm" => Some(need(
+            n.is_some_and(|v| (0.05..=0.5).contains(&v)),
+            "0.05 to 0.5 mm",
+        )),
+        // ── #438 (end)
         "laser.originUncertaintyMm" => Some(need(
             n.is_some_and(|v| (0.05..=10.0).contains(&v)),
             "0.05 to 10 mm",

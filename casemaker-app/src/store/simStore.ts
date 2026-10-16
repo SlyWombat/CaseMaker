@@ -226,6 +226,8 @@ interface LoadArgs {
   calibration: MachineCalibration | null;
   /** The shop's `drill.pointAngleDeg`, read once at the load like `calibration` (#382). */
   drillPointDefault: { deg: number; source: string };
+  /** The shop's `sim.columnFlatPitchYMm`, read once at the load for the same reason (#438). */
+  flatPitchYMm: number;
 }
 let lastLoad: LoadArgs | null = null;
 
@@ -253,6 +255,7 @@ export const useSimStore = create<SimState>()((set, get) => {
         },
         calibration: args.calibration,
         drillPointDefault: args.drillPointDefault,
+        flatPitchYMm: args.flatPitchYMm,
       });
       if (mine !== loadSeq) return; // superseded by a newer load or a dispose
       if (!r.ok) {
@@ -306,7 +309,16 @@ export const useSimStore = create<SimState>()((set, get) => {
       const calibration =
         calibrationOverride !== undefined ? calibrationOverride : (useSettingsStore.getState().machineCalibration ?? null);
       const point = shopDefault('drill.pointAngleDeg');
-      lastLoad = { gcodeText, setup, tool, machineId, calibration, drillPointDefault: { deg: point.value, source: point.source } };
+      const flatPitch = shopDefault('sim.columnFlatPitchYMm');
+      lastLoad = {
+        gcodeText,
+        setup,
+        tool,
+        machineId,
+        calibration,
+        drillPointDefault: { deg: point.value, source: point.source },
+        flatPitchYMm: flatPitch.value,
+      };
       await run(lastLoad, get().budgetMs);
     },
     async retryWithLongerBudget() {

@@ -147,6 +147,11 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'drill.spindleRpm': { label: 'drilling spindle speed (placeholder)', unit: 'rpm', rule: z.number().min(1000).max(30000), fallback: 10000 },
   // #431 — the laser point-to-origin's accuracy: ±1 mm, chosen, not measured.
   'laser.originUncertaintyMm': { label: 'laser point-to-origin accuracy (chosen)', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 1 },
+  // ── #438 (begin) — the column engine's FLAT grid Y pitch. Chosen, not measured: the oracle's grid
+  // term is half a cell diagonal, and cost grows as 1/pitch. Read by simStore at a load; the worker
+  // gets the number, never this module. Fallback = columnEngine's COLUMN_FLAT_PITCH_Y_FALLBACK_MM.
+  'sim.columnFlatPitchYMm': { label: 'flat simulation grid Y pitch (chosen)', unit: 'mm', rule: z.number().min(0.05).max(0.5), fallback: 0.1 },
+  // ── #438 (end)
   // #414 — Q3: an offcut is offered only when both its sides reach this. Chosen, not measured.
   'offcut.minSideMm': { label: 'smallest offcut worth keeping (each side)', unit: 'mm', rule: z.number().min(1).max(1000), fallback: 20 },
   // #417 — how deep a cut may go into the wasteboard before it is warned about.
