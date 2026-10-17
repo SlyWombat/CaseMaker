@@ -25,9 +25,20 @@ import { StockItemSchema, type StockItem } from '@/platform/stockClient';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob, Sacrificial } from '@/types/engraveJob';
 
-/** The gate, asked the plan's four questions (§2.2) and nothing else. */
+/**
+ * The gate, asked the plan's four questions (§2.2) and nothing else. The scope is setup 0 and the
+ * job's own cutter — what a single-setup job IS, stated by the caller rather than defaulted by the
+ * collector (#419 §3.2).
+ */
 function rowsFor(job: EngraveJob, over: Partial<PreflightInput> = {}): PreflightRow[] {
-  return collect({ job, generated: null, calibration: null, shelfItem: null, ...over });
+  return collect({
+    scope: { setupIndex: 0, toolKey: job.toolKey },
+    job,
+    generated: null,
+    calibration: null,
+    shelfItem: null,
+    ...over,
+  });
 }
 
 /**
@@ -401,13 +412,37 @@ describe('preflight: the shape of the gate (not a rule, just its contract)', () 
       expect(['error', 'warning']).toContain(row.severity);
       // §2.2/§7: the hub`s scroll target is deliberately unresolved, so it is always null here.
       expect(row.cause.hubTarget).toBeNull();
-      // One setup, one tool: the job model carries no `setups[]`, so the scope keys are UNSET.
-      // Never `0` / the job`s `toolKey` — a fabricated value would outlive the job model as a wrong
-      // answer rather than an absent one. When #428/#429 land, the hub supplies the scope its loop
-      // is on and this assertion is what will have to change.
-      expect(row.cause.setupIndex).toBeUndefined();
-      expect(row.cause.toolKey).toBeUndefined();
+      // The scope the call was made for, copied onto every row — this call asked about setup 0 and
+      // the job`s own cutter.
+      expect(row.cause.setupIndex).toBe(0);
+      expect(row.cause.toolKey).toBe(job.toolKey);
     }
+  });
+
+  it('stamps the scope it is handed, and changes nothing else about the answer (#419 §3.2)', () => {
+    // The hub loops `(setupIndex, tool)` and owns the aggregate; the collector`s one job is to say
+    // which iteration a row came from. So the same job asked about two scopes must return the same
+    // rows with only the pair changed — anything else would mean the scope reached into a rule.
+    const job = defaultEngraveJob();
+    job.labels[0]!.depth = 100;
+    const first = rowsFor(job);
+    const second = collect({
+      scope: { setupIndex: 1, toolKey: 'v-bit-0.3-30' },
+      job,
+      generated: null,
+      calibration: null,
+      shelfItem: null,
+    });
+    expect(second.length).toBe(first.length);
+    for (const row of second) {
+      expect(row.cause.setupIndex).toBe(1);
+      expect(row.cause.toolKey).toBe('v-bit-0.3-30');
+    }
+    const withoutScope = (rows: PreflightRow[]) =>
+      rows.map(({ cause, ...row }) => ({ ...row, cause: { ...cause, setupIndex: undefined, toolKey: undefined } }));
+    expect(withoutScope(second)).toEqual(withoutScope(first));
+    // A rebuild of one scope is still deterministic.
+    expect(rowsFor(job)).toEqual(first);
   });
 
   it('is deterministic: one job, one answer, twice', () => {

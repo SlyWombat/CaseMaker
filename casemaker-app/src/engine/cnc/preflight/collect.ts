@@ -25,12 +25,12 @@
  * {@link PreflightCause.toolKey} are the row-level address that carries which scope an answer came
  * from.
  *
- * Today `EngraveJob` still names ONE `toolKey` and ONE `workholding` and has no `setups[]`, so there
- * is exactly one scope, both cause keys are UNSET (never defaulted — see {@link PreflightCause}), and
- * the caller's loop has one iteration. That is a fact about the job model, not a shape this module
- * bakes in: no `setups[]`, no per-setup machinery and no scope parameter live here, because there is
- * nothing yet for them to describe. This module reads a job; when the job model grows setups, that
- * loop is the caller's to write and this doc is where to start.
+ * THE SCOPE IS THE CALLER'S. `PreflightInput.scope` ({@link PreflightScope}) names the setup index
+ * and cutter key this call answers for, and every row comes back carrying that pair in its `cause`.
+ * The collector reads no `setups[]` of its own — a collector that parsed the job's setup list would
+ * be a second planner. A job that carries no setups is not a special case: its caller states
+ * `{ setupIndex: 0, toolKey: job.toolKey }`, which is the scope such a job has. The loop, the
+ * aggregate and "each later sweep on the earlier result" (§5.6) are the hub's.
  */
 
 import type { EngraveJob } from '@/types/engraveJob';
@@ -45,7 +45,7 @@ import type { VerifyReport } from '@/engine/cnc/verify';
 import { saveBlocker, type EngraveRunView } from '@/store/engraveRunGate';
 import type { StockItem } from '@/platform/stockClient';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
-import type { PreflightCause, PreflightOwner, PreflightRow } from './types';
+import type { PreflightCause, PreflightOwner, PreflightRow, PreflightScope } from './types';
 
 /**
  * Everything the gate is asked about (#419 §2.2).
@@ -57,19 +57,17 @@ import type { PreflightCause, PreflightOwner, PreflightRow } from './types';
  *
  * THIS IS ONE SCOPE, NOT THE WHOLE JOB. Every field describes a single setup-and-tool scope — the
  * one whose program `generated` holds and whose cutter `reach` measured — so the type is the input
- * to ONE iteration of the hub's `(setupIndex, tool)` loop, not to the aggregate. It is not yet a
- * `SetupScope` wrapper because there is nothing to wrap: `EngraveJob` has one `workholding` and one
- * `toolKey`, so today's scope IS today's job and a wrapper would hold one field and a lie. The
- * wrapper becomes worth writing when the job model carries setups; until then the same `job` object
- * is handed to every iteration because there is only one, and the hub keys its aggregate on the
- * `(setupIndex, tool)` it iterated WITH — {@link PreflightCause.setupIndex} /
- * {@link PreflightCause.toolKey} are where that pair will ride on a row once the owners can state it.
+ * to ONE iteration of the hub's `(setupIndex, tool)` loop, not to the aggregate. `scope` is what
+ * makes that explicit: the caller states which setup and cutter it is asking about, and the
+ * collector stamps that pair onto every row it returns.
  */
 export interface PreflightInput {
+  /** The setup-and-tool scope this answer is for; every returned row carries it in `cause`. */
+  scope: PreflightScope;
   /**
-   * The job, as the Design surface holds it — the subject of THIS scope. When `EngraveJob` grows
-   * `setups[]`, this is the setup-and-tool scope under test (the plan's `(setupIndex, tool)`), and
-   * the caller passes one per iteration.
+   * The job, as the Design surface holds it. The same job object may be handed to every iteration —
+   * `scope`, not this field, says which of its setups is under test — so the collector never has to
+   * decide how a setup narrows the job.
    */
   job: EngraveJob;
   /**
@@ -126,7 +124,7 @@ export interface PreflightInput {
  * deliberately not used at all — the order is the order rows are pushed.
  */
 export function collect(input: PreflightInput): PreflightRow[] {
-  const { job } = input;
+  const { job, scope } = input;
   const rows: PreflightRow[] = [];
 
   // ---- 1. The job as data, and the work-holding (owners that speak `JobFinding[]`) ------------
@@ -184,7 +182,7 @@ export function collect(input: PreflightInput): PreflightRow[] {
         code: row.finding.code,
         message: row.finding.message,
         owner,
-        cause: causeFor(row.finding.labelId),
+        cause: causeFor(scope, { labelId: row.finding.labelId }),
       });
     }
   }
@@ -205,7 +203,7 @@ export function collect(input: PreflightInput): PreflightRow[] {
       code: 'no-cutter',
       message: input.reach.recommendation.reason,
       owner: 'reach',
-      cause: { hubTarget: null },
+      cause: causeFor(scope),
     });
   }
 
@@ -226,7 +224,7 @@ export function collect(input: PreflightInput): PreflightRow[] {
         code: finding.code,
         message: finding.message,
         owner: 'verify',
-        cause: { line: finding.line, hubTarget: null } satisfies PreflightCause,
+        cause: causeFor(scope, { line: finding.line }),
       });
     }
   }
@@ -260,7 +258,7 @@ export function collect(input: PreflightInput): PreflightRow[] {
     // that report, and is excluded by `frameClean` above.
     const noFrame = gen.nc !== null && gen.frameVerify === null;
     if (why !== undefined && verifyClean && frameClean) {
-      const refusal = { severity: 'error' as const, message: why, owner: 'generate' as const, cause: { hubTarget: null } };
+      const refusal = { severity: 'error' as const, message: why, owner: 'generate' as const, cause: causeFor(scope) };
       // TWO LITERALS rather than a ternary, because `cncGuide.spec.ts` harvests codes by scanning
       // the source for a `code:` field written as a quoted kebab-case literal — and a ternary in
       // that position would hide BOTH rows from the guide gate, leaving two codes the guide is never
@@ -306,7 +304,7 @@ export function collect(input: PreflightInput): PreflightRow[] {
         code: 'no-generate',
         message: block,
         owner: 'engraveRunGate',
-        cause: { hubTarget: null },
+        cause: causeFor(scope),
       });
     }
   }
@@ -326,7 +324,7 @@ export function collect(input: PreflightInput): PreflightRow[] {
         code: 'stock-refusal',
         message: picked.reason,
         owner: 'stockStart',
-        cause: { hubTarget: null },
+        cause: causeFor(scope),
       });
     }
   }
@@ -334,9 +332,24 @@ export function collect(input: PreflightInput): PreflightRow[] {
   return rows;
 }
 
-/** The `cause` for a `JobFinding`: the item it named, and nothing the owner did not say. */
-function causeFor(labelId: string | undefined): PreflightCause {
-  return labelId === undefined ? { hubTarget: null } : { labelId, hubTarget: null };
+/**
+ * The `cause` for a row: the scope this call answers for (copied, never inferred) plus whatever the
+ * owner already said — the item it named, the program line it pointed at. A key the owner did not
+ * state is absent, not `undefined`: `cause` is read by `toEqual` in the suite and by the page, and
+ * "the owner named no item" is a different fact from "the owner named this item and it was blank".
+ */
+function causeFor(
+  scope: PreflightScope,
+  said: { labelId?: string; line?: number | null } = {},
+): PreflightCause {
+  const cause: PreflightCause = {
+    setupIndex: scope.setupIndex,
+    toolKey: scope.toolKey,
+    hubTarget: null,
+  };
+  if (said.labelId !== undefined) cause.labelId = said.labelId;
+  if (said.line !== undefined) cause.line = said.line;
+  return cause;
 }
 
 /**

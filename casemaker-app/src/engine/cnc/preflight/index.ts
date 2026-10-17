@@ -10,4 +10,4 @@
 
 export { collect } from './collect';
 export type { PreflightInput } from './collect';
-export type { PreflightCause, PreflightOwner, PreflightRow, PreflightSeverity } from './types';
+export type { PreflightCause, PreflightOwner, PreflightRow, PreflightScope, PreflightSeverity } from './types';

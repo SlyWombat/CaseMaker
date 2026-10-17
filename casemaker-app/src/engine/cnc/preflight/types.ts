@@ -90,10 +90,27 @@ export type PreflightOwner =
  * #429/#430's remount registration) and, within a setup, ONE PROGRAM PER TOOL (#410's route); the
  * maintainer ruled out the plan's 1-setup v1. Preflight answers for ONE setup-and-tool scope at a
  * time (`collect.ts`), so a row has to be able to say which scope it came from. {@link
- * PreflightCause.setupIndex} and {@link PreflightCause.toolKey} are that address; both are UNSET
- * today, because `EngraveJob` still carries one `workholding` and one `toolKey` and has no
- * `setups[]` — there is exactly one scope to be in.
+ * PreflightCause.setupIndex} and {@link PreflightCause.toolKey} are that address, copied from the
+ * {@link PreflightScope} the caller states. A single-setup job is not a special case of the type:
+ * its caller states `{ setupIndex: 0, toolKey: job.toolKey }`, which is what that job IS, not a
+ * default invented here.
  */
+
+/**
+ * The setup-and-tool scope ONE `collect()` call answers for (#419 §5.6's `(setupIndex, tool)`).
+ *
+ * STATED BY THE CALLER, never derived in the collector. The hub runs the gate once per scope and
+ * owns the aggregate; the collector only stamps the pair it was handed onto every row it returns,
+ * so a reader can always say which setup and cutter an answer was about. It reads no `setups[]` of
+ * its own — a collector that parsed the job's setup list would be a second planner.
+ */
+export interface PreflightScope {
+  /** The setup's position in the job's order, 0 first. */
+  setupIndex: number;
+  /** The cutter key this scope's program is written for (`EngraveJob.toolKey` today). */
+  toolKey: string;
+}
+
 export interface PreflightCause {
   /** The item the finding points at, when the owner named one (`JobFinding.labelId`). */
   labelId?: string;
@@ -103,24 +120,16 @@ export interface PreflightCause {
    */
   line?: number | null;
   /**
-   * Which setup of a multi-setup job the row came from — the setup index the hub keys its aggregate
-   * on (§5.6's `(setupIndex, tool)`).
-   *
-   * UNSET TODAY, and deliberately so: `EngraveJob` has no `setups[]` yet, so `collect()` is always
-   * called for setup 0 and there is no value to carry. It stays `undefined` rather than being
-   * defaulted to `0` — a fabricated index would read as a statement about a job that does not have
-   * setups, and would survive the job model landing as a wrong answer rather than an absent one.
-   * The setups planner (#428) is what fills it.
+   * Which setup of the job the row came from — the index the hub keys its aggregate on (§5.6's
+   * `(setupIndex, tool)`). COPIED from {@link PreflightScope} on the input, never inferred from the
+   * row's subject: `collect()` answers for one scope, so every row it returns carries that scope.
    */
-  setupIndex?: number;
+  setupIndex: number;
   /**
-   * Which tool of the setup the row came from — the job's `toolKey` for the scope this answer is
-   * for, once a setup carries several (#410's one-program-per-tool).
-   *
-   * UNSET TODAY for the same reason as {@link PreflightCause.setupIndex}: one job names one
-   * `toolKey`, so the scope is implicit and the collector has nothing to state. Never invented.
+   * Which tool of the setup the row came from — the cutter key the scope's program is written for
+   * (#410's one-program-per-tool). COPIED from {@link PreflightScope}, never invented.
    */
-  toolKey?: string;
+  toolKey: string;
   /**
    * PLACEHOLDER — the hub's scroll/addressing target, deliberately unresolved (§2.2, §7).
    *
