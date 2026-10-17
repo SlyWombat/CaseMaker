@@ -169,6 +169,9 @@ describe('recommendTool (#211)', () => {
     // The built-in metal cutter's id, with a spindle speed far past the Z1's ceiling: the number is
     // passed over field by field (`feedsFor`), so this candidate is NOT excluded.
     const cutter = tool('t', 1.0, { id: '112111313812' });
+    // The default job is softwood, and the row is a Softwood row — the catalogue LISTS this cutter
+    // for the job's material (#455 asks that question before feeds). The absurd RPM is what this
+    // case is about; the material only has to be one the catalogue-and-mapping rule accepts.
     const absurd: FeedCatalogueRow = {
       cutterId: '112111313812',
       material: 'Softwood',
@@ -337,6 +340,130 @@ describe('recommendTool and V-bits (#405)', () => {
     const rec = recommendTool(jobWithLabel('l1', 'CASE', 1), [vBit()], [], allRows(1));
     expect(rec.key).toBeNull();
     expect(rec.reason).toContain('V-bit');
+  });
+});
+
+// #455 — the catalogue's MATERIAL LIST, not merely its numbers. A cutter must not be recommended
+// for a material the catalogue does not list it for; picking one by hand warns by name. Rows here
+// are SYNTHETIC — no vendor table is committed — and each case is a shape the real catalogue has.
+describe('recommendTool and the catalogue’s material list (#455)', () => {
+  const CORN = 'TiN Coating Corn Bit - 1/8" Shank 0.6mm * 3mm';
+  /** The incident's cutter: a corn bit Makera lists for PCB and carbon fibre, never for plastic. */
+  const corn = (key: string): ToolLibraryEntry => ({
+    key,
+    tool: flatEndMill(0.6, { id: '900000000001', name: CORN }),
+    provenance: 'recommendTool test',
+  });
+  const catRow = (cutterId: string, material: string): FeedCatalogueRow => ({
+    cutterId,
+    material,
+    rpm: 12000,
+    feed: 500,
+    plungeFeed: 200,
+    stepDown: 0.4,
+  });
+
+  /** The default job is softwood; these cases are the printed-blank plastic the incident cut. */
+  function plaJob(): EngraveJob {
+    const job = jobWithLabel('l1', 'CASE', 1);
+    job.stock = { ...job.stock, material: 'pla' };
+    return job;
+  }
+
+  it('excludes a cutter the catalogue lists only for other materials, and says which', () => {
+    const job = plaJob();
+    const measure = vi.fn((_key: string) => [row('l1', 1)]);
+    const rec = recommendTool(
+      job,
+      [corn('inv:corn')],
+      [catRow('900000000001', 'PCB'), catRow('900000000001', 'Carbon Fiber')],
+      measure,
+    );
+
+    // It is out before it is measured: a detail ratio for a bit the vendor says is for PCB is not a
+    // number worth computing.
+    expect(measure).not.toHaveBeenCalled();
+    const c = candidate(rec, 'inv:corn');
+    expect(c.excluded).toBe('no-catalogue-row');
+    // The warning is BY NAME, with the vendor's own material words and the job's material named.
+    expect(c.catalogueNote).toContain(CORN);
+    expect(c.catalogueNote).toContain('PCB');
+    expect(c.catalogueNote).toContain('Carbon Fiber');
+    expect(c.catalogueNote).toContain('not PLA');
+
+    expect(rec.key).toBeNull();
+    expect(rec.reason).toContain('can be recommended for this material');
+    expect(rec.reason).toContain('PCB');
+  });
+
+  it('takes the labelled plastic mapping when the catalogue has no PLA row', () => {
+    const job = plaJob();
+    // Acrylic listed FIRST on purpose: the map prefers ABS, so the choice must not follow the
+    // catalogue's row order.
+    const rec = recommendTool(
+      job,
+      [corn('inv:corn')],
+      [catRow('900000000001', 'Acrylic'), catRow('900000000001', 'ABS')],
+      allRows(1),
+    );
+
+    expect(rec.key).toBe('inv:corn');
+    expect(candidate(rec, 'inv:corn').excluded).toBeUndefined();
+    expect(rec.catalogueNote).toContain('ABS row standing in');
+    expect(rec.catalogueNote).toContain('mapping this app makes');
+    expect(rec.catalogueNote).toContain('not something Makera says about PLA');
+  });
+
+  it('keeps an owned cutter the catalogue cannot name, with an honest note instead of a refusal', () => {
+    // PLA job, and a real catalogue IS loaded — with rows for somebody else's cutter. "No rows"
+    // for this one means "no twin", the case the issue says must rest on the operator.
+    const mine: ToolLibraryEntry = {
+      key: 'user:mine',
+      tool: flatEndMill(1.0),
+      provenance: 'recommendTool test',
+    };
+    const rec = recommendTool(
+      plaJob(),
+      [mine],
+      [catRow('900000000001', 'ABS')],
+      allRows(1),
+    );
+
+    expect(rec.key).toBe('user:mine');
+    expect(candidate(rec, 'user:mine').excluded).toBeUndefined();
+    expect(rec.catalogueNote).toContain('rests on the operator');
+    // No catalogue row names it because it carries no Makera id, which is a different sentence.
+    expect(rec.catalogueNote).toContain('carries no Makera cutter id');
+  });
+
+  it('warns by name when the job names a cutter the catalogue does not recommend', () => {
+    const job = plaJob();
+    job.toolKey = 'inv:corn';
+    const rec = recommendTool(
+      job,
+      [corn('inv:corn'), tool('inv:ok', 1.0)],
+      [catRow('900000000001', 'PCB'), catRow('900000000001', 'Carbon Fiber')],
+      allRows(1),
+    );
+
+    // The recommendation picks another cutter, and the warning about the job's own choice still
+    // travels — this is the "picked by hand" case, not the auto-pick.
+    expect(rec.key).toBe('inv:ok');
+    expect(rec.selectedNote).toContain(CORN);
+    expect(rec.selectedNote).toContain('PCB');
+    expect(rec.selectedNote).toContain('not PLA');
+    expect(rec.selectedNote).toContain('still cuts');
+    // A warning, not a block: the job's cutter is excluded from the PICK and still generated.
+    expect(candidate(rec, 'inv:corn').excluded).toBe('no-catalogue-row');
+  });
+
+  it('adds no note when the catalogue row is the material’s own', () => {
+    const job = jobWithLabel('l1', 'CASE', 1);
+    job.stock = { ...job.stock, material: 'abs' };
+    const rec = recommendTool(job, [corn('inv:corn')], [catRow('900000000001', 'ABS')], allRows(1));
+    expect(rec.key).toBe('inv:corn');
+    expect(rec.catalogueNote).toBeNull();
+    expect(rec.selectedNote).toBeNull();
   });
 });
 

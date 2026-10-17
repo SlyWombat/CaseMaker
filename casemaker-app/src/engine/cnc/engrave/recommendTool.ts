@@ -39,9 +39,21 @@
  * does ANY table have cutting parameters for this cutter and material, and can the machine run
  * them. The rows are still handed in — they are what the same call returns for the program, and the
  * one seam is worth keeping one seam.
+ *
+ * "ARE THERE NUMBERS" IS NOT "IS IT FOR THIS MATERIAL" (#455). The starting table will answer a
+ * plastic job for any flat cutter, and that is how a corn bit the catalogue lists only for PCB and
+ * carbon fibre was picked as a PLA badge's rest cutter and broke on PETG. Before feeds are asked,
+ * the catalogue is asked what it LISTS this cutter for ({@link catalogueStandingFor}): a cutter the
+ * catalogue lists and does not list for this material is excluded by name with 'no-catalogue-row',
+ * and the sentence carries the vendor's own material words. A rest pair's second tool is chosen from
+ * candidates that survived this same filter (`reachability.ts`'s `finerThan`, `restPass`), so the
+ * pair inherits the rule without its own copy of it. An owned cutter with no catalogue twin is NOT
+ * excluded — the catalogue cannot vouch for it and cannot veto it — it carries an honest note
+ * instead, and a hand-picked cutter that the catalogue does not recommend still cuts: the pick
+ * names the warning (`selectedNote`) rather than blocking the program.
  */
 
-import { feedsFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { catalogueCoverageFor, catalogueStandingFor, feedsFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { cuttingDiameter, cuttingForTrace } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -51,9 +63,10 @@ import { LOST_DETAIL_RATIO, type LabelEngravability } from '@/workers/sim/engrav
 
 /**
  * Why a tool was dropped before measuring (#211: flat-ends only, and only cutters that exist;
- * #442: and only cutters that are not marked broken).
+ * #442: and only cutters that are not marked broken; #455: and only cutters the catalogue lists
+ * for this material, when it lists the cutter at all).
  */
-export type ToolExclusion = 'not-flat' | 'no-feeds' | 'broken';
+export type ToolExclusion = 'not-flat' | 'no-feeds' | 'broken' | 'no-catalogue-row';
 
 export interface ToolCandidate {
   key: string;
@@ -70,8 +83,17 @@ export interface ToolCandidate {
    * Null is NOT "worn": it ranks as an unstated condition and carries no note.
    */
   condition: ConditionSummary | null;
-  /** Why it was excluded before measuring, if it was: 'not-flat' | 'no-feeds' | 'broken'. */
+  /** Why it was excluded before measuring, if it was: 'not-flat' | 'no-feeds' | 'broken' | 'no-catalogue-row'. */
   excluded?: ToolExclusion;
+  /**
+   * The catalogue's own sentence about this cutter and the job's material (#455), or null/absent
+   * when it has nothing to add. When `excluded === 'no-catalogue-row'` it is the exclusion's reason
+   * ("Makera's catalogue lists TiN Coating Corn Bit for PCB or Carbon Fiber, not PLA…"); on a
+   * qualifying cutter it is the labelled nearest-plastic mapping, or the honest note that no
+   * catalogue row can name an owned cutter. Optional so a hand-built candidate in a test stays a
+   * candidate, exactly as `condition` is.
+   */
+  catalogueNote?: string | null;
 }
 
 export interface ToolRecommendation {
@@ -86,6 +108,22 @@ export interface ToolRecommendation {
    * only the reason would otherwise be printing a recommendation with no caution in it.
    */
   conditionNote: string | null;
+  /**
+   * The catalogue's own sentence about the PICK and the job's material (#455): a labelled
+   * nearest-plastic mapping ("its ABS row standing in — a mapping this app makes"), or the note
+   * that no catalogue row can name this cutter. Null when the catalogue has nothing to add — an
+   * unsynced catalogue, or a row of the material's own. Not folded into `reason` for the
+   * `conditionNote` reason: "why this cutter" and "what Makera actually lists it for" are
+   * different claims.
+   */
+  catalogueNote: string | null;
+  /**
+   * The warning the job's OWN cutter carries when it was named by hand and the catalogue does not
+   * recommend it for this material (#455), or null. The rule warns, it does not block: the job
+   * still generates with this cutter, and this sentence says what the catalogue lists it for and
+   * that the decision is now the operator's.
+   */
+  selectedNote: string | null;
   /** Every tool considered, for the "why?" disclosure. */
   candidates: ToolCandidate[];
 }
@@ -215,14 +253,68 @@ function compromiseReason(job: EngraveJob, pick: ToolCandidate): string {
  * (#442): a cutter marked broken is one reason among the others, and saying "everything that would
  * qualify is broken" when a V-bit was also refused for the job's regions would be a claim the
  * candidate list does not support.
+ *
+ * The catalogue's own answer gets the same treatment (#455), and it changes the BASE sentence: when
+ * a cutter was dropped because the catalogue lists it for other materials, "no cutter has cutting
+ * parameters for this material" would be false — the starting table answers a PLA job happily. What
+ * is true is that nothing can be RECOMMENDED for the material, and the catalogue's sentences say
+ * which cutters and why.
  */
-function noCandidateReason(toolCount: number, brokenCount: number): string {
+function noCandidateReason(
+  toolCount: number,
+  brokenCount: number,
+  catalogueNotes: readonly string[],
+): string {
   if (toolCount === 0) return 'There are no cutters in the tool list to recommend from.';
   const base =
-    'No cutter in the list is a flat end mill (or, for a trace-only job, a V-bit) with cutting parameters for this material.';
-  return brokenCount === 0
-    ? base
-    : `${base} ${brokenCount} other cutter${brokenCount === 1 ? '' : 's'} ${brokenCount === 1 ? 'is' : 'are'} marked broken.`;
+    catalogueNotes.length > 0
+      ? 'No cutter in the list can be recommended for this material.'
+      : 'No cutter in the list is a flat end mill (or, for a trace-only job, a V-bit) with cutting parameters for this material.';
+  const broken =
+    brokenCount === 0
+      ? ''
+      : ` ${brokenCount} other cutter${brokenCount === 1 ? '' : 's'} ${brokenCount === 1 ? 'is' : 'are'} marked broken.`;
+  return base + catalogueClause(catalogueNotes) + broken;
+}
+
+/**
+ * The catalogue's own words, added to the no-pick reason (#455). One cutter's sentence reads as
+ * itself; several are all listed, because a shop whose every bit is a corn bit needs to know that
+ * every one of them was ruled out, not only the first.
+ */
+function catalogueClause(notes: readonly string[]): string {
+  if (notes.length === 0) return '';
+  return notes.length === 1
+    ? ` The catalogue's own answer rules it out: ${notes[0]}`
+    : ` The catalogue's own answer rules ${notes.length} cutters out: ${notes.join(' ')}`;
+}
+
+/**
+ * The caution the job's OWN cutter carries when it was named by hand and the catalogue does not
+ * recommend it for this material (#455), or null.
+ *
+ * "Picking one by hand must warn by name" — this is the by-name half, and it is a WARNING, not a
+ * refusal: the job's toolKey is the operator's assertion, and the engine still generates the
+ * program with it. What the sentence adds is the catalogue's own material list and the fact that
+ * the decision is now the operator's, the same shape `conditionNote` has for a worn bit.
+ */
+function handPickedNote(
+  job: EngraveJob,
+  tools: readonly ToolLibraryEntry[],
+  catalogue: readonly FeedCatalogueRow[],
+): string | null {
+  const entry = tools.find((e) => e.key === job.toolKey);
+  if (!entry) return null;
+  const standing = catalogueStandingFor(
+    catalogueCoverageFor(catalogue, job.stock.material, entry.tool),
+    job.stock.material,
+    entry.tool.name,
+  );
+  if (standing.recommend || standing.note === null) return null;
+  return (
+    `${standing.note} This job names it by hand, so it still cuts if you run it — check the bit ` +
+    `and the feeds first.`
+  );
 }
 
 /**
@@ -287,10 +379,33 @@ export function recommendTool(
     if (condition !== null && condition.usable === 0) {
       return { ...base, qualifies: false, excluded: 'broken' as const };
     }
+    // #455 — what the catalogue LISTS this cutter for, before what numbers exist. A cutter the
+    // catalogue lists and does not list for this material is out by name, with the vendor's own
+    // material words in `catalogueNote`; an owned cutter it cannot name stays in with the note. The
+    // rest-pair's second tool comes from these same survivors (`finerThan`), so the rule covers it
+    // without a second copy.
+    const catalogueStanding = catalogueStandingFor(
+      catalogueCoverageFor(catalogue, job.stock.material, tool),
+      job.stock.material,
+      tool.name,
+    );
+    if (!catalogueStanding.recommend) {
+      return {
+        ...base,
+        qualifies: false,
+        excluded: 'no-catalogue-row' as const,
+        catalogueNote: catalogueStanding.note,
+      };
+    }
     // #347 — the JOB's machine. The profile only supplies the clamp ceilings here, which no
     // calibration touches, so this needs no saved frame to be right.
     if (!feedsFor(catalogue, job.stock.material, tool, jobMachine(job)).ok) {
-      return { ...base, qualifies: false, excluded: 'no-feeds' as const };
+      return {
+        ...base,
+        qualifies: false,
+        excluded: 'no-feeds' as const,
+        catalogueNote: catalogueStanding.note,
+      };
     }
 
     const rows = measure(entry.key);
@@ -309,10 +424,13 @@ export function recommendTool(
       }
     }
 
-    return { ...base, qualifies: ratioOk && reachOk, worst };
+    return { ...base, qualifies: ratioOk && reachOk, worst, catalogueNote: catalogueStanding.note };
   });
 
   const eligible = candidates.filter((c) => c.excluded === undefined);
+  // #455 — the caution the job's own (hand-picked) cutter must carry, independent of what the
+  // recommendation picked. Computed before the returns so every outcome carries it.
+  const selectedNote = handPickedNote(job, tools, catalogue);
 
   const qualifying = eligible.filter((c) => c.qualifies);
   if (qualifying.length > 0) {
@@ -322,6 +440,8 @@ export function recommendTool(
       compromise: false,
       reason: qualifyingReason(pick),
       conditionNote: pick.condition?.note ?? null,
+      catalogueNote: pick.catalogueNote ?? null,
+      selectedNote,
       candidates,
     };
   }
@@ -333,10 +453,25 @@ export function recommendTool(
       compromise: true,
       reason: compromiseReason(job, pick),
       conditionNote: pick.condition?.note ?? null,
+      catalogueNote: pick.catalogueNote ?? null,
+      selectedNote,
       candidates,
     };
   }
 
   const broken = candidates.filter((c) => c.excluded === 'broken').length;
-  return { key: null, compromise: false, reason: noCandidateReason(tools.length, broken), conditionNote: null, candidates };
+  // The catalogue's refusals, in the order the cutters were listed, for the no-pick sentence.
+  const catalogueNotes = candidates
+    .filter((c) => c.excluded === 'no-catalogue-row')
+    .map((c) => c.catalogueNote)
+    .filter((note): note is string => note !== null && note !== undefined);
+  return {
+    key: null,
+    compromise: false,
+    reason: noCandidateReason(tools.length, broken, catalogueNotes),
+    conditionNote: null,
+    catalogueNote: null,
+    selectedNote,
+    candidates,
+  };
 }

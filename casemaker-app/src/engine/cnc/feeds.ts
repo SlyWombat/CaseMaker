@@ -9,7 +9,10 @@
  *   2. Makera's own catalogue ({@link setFeedCatalogue}), the vendor's numbers for the vendor's
  *      own cutters, imported from Studio's database by the house service (#308's reader, #310's
  *      table). It covers the cutters Makera sells and the materials Makera lists, and nothing
- *      else: a cutter of the user's own, or PLA, has no row here and never will.
+ *      else: a cutter of the user's own has no row here, and neither has PLA, PETG or PA-GF. Since
+ *      #455 a printed-blank plastic is answered by the nearest plastic rows the catalogue DOES
+ *      list, through {@link CATALOGUE_MATERIAL_ALIASES} — always labelled as a mapping, never as a
+ *      vendor statement about the job's material.
  *   3. {@link MEASURED_ROWS} — what a coupon cut on THIS machine settled (#248, #284). It is the
  *      top of the stack, and a catalogue row never overrides it.
  *
@@ -30,21 +33,33 @@
  *     our row — a conservative 45 % of the cutter — as do peck and air, which are this app's
  *     machining decisions rather than anything a vendor table states.
  *   - **The PLA badge job.** No row in `t_MaterialList` is PLA, PETG, nylon or a generic plastic,
- *     so the tier cannot serve it at all (#165's measured numbers remain the only source).
+ *     so the tier cannot serve it DIRECTLY. Since #455 it serves it through the nearest plastic
+ *     rows the catalogue does list — ABS and acrylic — and says so in every sentence that uses
+ *     them: a mapping, never a vendor statement about PLA. #165's measured numbers remain the only
+ *     measurement of a plastic on this machine.
  *   - **The ceiling.** 32 of the catalogue's rows specify 15 000 RPM, and the Z1's spindle stops
  *     at 13 000. They are not dropped or edited: they go through `clampToMachine` like every other
  *     number, which clamps them and says so (#184, #310).
  *
- * AND IT DOES NOT WIDEN COVERAGE — except where the starting table has NO ROW FOR THE MATERIAL AT
- * ALL (#347). A cutter the starting table has no row for at a diameter it covers — 6 mm and up,
- * since every wood row stops at 3.2 mm — is still refused before the catalogue is consulted, so a
- * catalogue row for a 6 mm cutter changes nothing today. What #347 adds is the other kind of gap: a
- * MATERIAL the table does not cover at all, which a machine profile can declare (the Z1's metals,
- * and ABS and Acrylic). There a catalogue row is not a better number standing above a starting
- * value — it is the WHOLE answer, with this app's step-over, peck and air, and a vendor number this
- * job cannot use refuses the job rather than yielding, because underneath there is nothing to yield
- * to. So coverage widens for a MATERIAL, never for a cutter: the cutter's own vendor id is what
- * selects a row, and what makes the answer attributable to one cutter Makera sells.
+ * AND IT DOES NOT WIDEN COVERAGE FOR A CUTTER — except where the starting table has NO ROW FOR THE
+ * MATERIAL AT ALL (#347). A cutter the starting table has no row for at a diameter it covers — 6 mm
+ * and up, since every wood row stops at 3.2 mm — is still refused before the catalogue is consulted,
+ * so a catalogue row for a 6 mm cutter changes nothing today. What #347 adds is the other kind of
+ * gap: a MATERIAL the table does not cover at all, which a machine profile can declare (the Z1's
+ * metals, and ABS and Acrylic). There a catalogue row is not a better number standing above a
+ * starting value — it is the WHOLE answer, with this app's step-over, peck and air, and a vendor
+ * number this job cannot use refuses the job rather than yielding, because underneath there is
+ * nothing to yield to. So coverage widens for a MATERIAL, never for a cutter: the cutter's own
+ * vendor id is what selects a row, and what makes the answer attributable to one cutter Makera sells.
+ *
+ * AND A DIFFERENT QUESTION BESIDE "ARE THERE NUMBERS" (#455): does the catalogue LIST this cutter
+ * for this material at all? A cutter must not be recommended, or auto-picked as the second of a
+ * rest-machining pair, on the strength of numbers from somewhere else — the starting table answered
+ * the job for a corn bit the catalogue lists only for PCB and carbon fibre, and the bit broke on the
+ * PETG blank. {@link catalogueStandingFor} is that question, in the catalogue's own words, and
+ * `recommendTool` applies it; a row reached through {@link CATALOGUE_MATERIAL_ALIASES} is labelled a
+ * mapping, and a cutter the catalogue has never heard of is the operator's own — a note, not a
+ * veto.
  *
  * AND IT YIELDS WHERE IT CANNOT ANSWER (#325). A tier that sits ABOVE the default must not VETO it:
  * a vendor row stating a number this app cannot cut with — Studio's `0` in a column it never filled,
@@ -408,8 +423,9 @@ export const FEEDS_TABLE: readonly FeedsEntry[] =
  * — the 12-digit id the `.nc` header calls `id=` and this app carries as `Tool.id`. So the numbers
  * attach to Makera's cutter wherever it appears: as a `cat:` catalogue entry, as a built-in whose
  * geometry came from a Makera sample (`flat-3.175x12-metal` IS `112111313812`), or as a cutter the
- * user registered from a file of theirs. A cutter with no vendor id — anything this app made up,
- * and PLA regardless — has no row and never picks one up.
+ * user registered from a file of theirs. A cutter with no vendor id — anything this app made up —
+ * has no row and never picks one up, and so has a material with no vendor name at all: PLA, PETG
+ * and PA-GF are served only through the labelled {@link CATALOGUE_MATERIAL_ALIASES} mapping (#455).
  */
 export interface FeedCatalogueRow {
   /** `Tool.id`: the vendor's own cutter id. */
@@ -478,6 +494,161 @@ export const CATALOGUE_MATERIALS: Readonly<Record<string, StockMaterial>> = {
 export function catalogueMaterialFor(vendorName: string): StockMaterial | null {
   if (!Object.prototype.hasOwnProperty.call(CATALOGUE_MATERIALS, vendorName)) return null;
   return CATALOGUE_MATERIALS[vendorName]!;
+}
+
+/**
+ * The app materials whose catalogue rows stand in for one the catalogue has no row of its own
+ * (#455): "map it to its nearest plastic rows (ABS or acrylic), and label that as a mapping".
+ *
+ * `t_MaterialList` lists no PLA, PETG or PA-GF — no printed-blank filament stock at all. Its only
+ * plastics are ABS and acrylic, the two nearest neighbours of a printed blank among the materials
+ * it does list. The map is APP material → app materials whose own vendor rows may answer it, in
+ * preference order. ABS first is an app choice, not a vendor claim: neither vendor row ranks the
+ * other, and fixing the order is what makes the same catalogue give the same answer twice.
+ *
+ * A mapping is NEVER a vendor statement about the job's material. Every caller that acts on one
+ * labels it as a mapping — {@link catalogueStandingFor}'s note, {@link catalogueProvenance},
+ * {@link catalogueOnlyRow} — so an ABS row can never read as Makera recommending a PLA cut.
+ *
+ * FOLLOW-UP (#456): PETG and PA-GF join `StockMaterial` there. Both are printed-blank plastics the
+ * catalogue also lists no row for, and both map to these same two rows:
+ *
+ *     petg: ['abs', 'acrylic'],
+ *     'pa-gf': ['abs', 'acrylic'],
+ *
+ * They are deliberately absent until the words exist in `StockMaterial` — a key that type does not
+ * carry would be a typo, not a mapping. PA-GF is also abrasive, so #415's wear weighting has to
+ * come with it; that class is #456/#415's, not this map's.
+ */
+export const CATALOGUE_MATERIAL_ALIASES: Readonly<Partial<Record<StockMaterial, readonly StockMaterial[]>>> = {
+  pla: ['abs', 'acrylic'],
+};
+
+/**
+ * What the user's synced catalogue says about ONE cutter and ONE material (#455) — the question
+ * "is this cutter listed for this material at all", which is not the same question as "are there
+ * numbers for this job" ({@link feedsFor}).
+ *
+ *   - `covered`: a row names this cutter and answers this material. `via` is the app material whose
+ *     row stood in when the catalogue has no word for the job's material (a
+ *     {@link CATALOGUE_MATERIAL_ALIASES} mapping), or null when the row is the material's own. The
+ *     row's vendor word is kept on the row for the sentence that names it.
+ *   - `not-for-material`: the catalogue lists this cutter, and the materials it lists do not
+ *     include this one. This is the incident's shape (#455): the corn bit's rows are PCB and carbon
+ *     fibre, and a PLA badge job must not be recommended it. `listedFor` is the vendor's own words,
+ *     verbatim and deduplicated in catalogue order, because the warning has to say what Makera
+ *     actually wrote — "'PCB or Carbon Fiber', not PLA" — rather than a paraphrase.
+ *   - `unlisted`: no row names this cutter at all. Three reasons, and they are not the same claim:
+ *     the cutter carries no vendor id, so no row CAN name it; the catalogue has no rows loaded, so
+ *     nothing can be said; or the loaded catalogue does not list it.
+ *
+ * An UNLISTED cutter is NOT refused. A cutter of the operator's own, or a Makera cutter missing
+ * from a partial sync, is one the catalogue cannot speak to — and "cannot speak to it" is not
+ * "says no". The recommendation keeps it and carries a note instead
+ * ({@link catalogueStandingFor}).
+ */
+export type CatalogueCoverage =
+  | { kind: 'covered'; row: FeedCatalogueRow; via: StockMaterial | null }
+  | { kind: 'not-for-material'; listedFor: readonly string[] }
+  | { kind: 'unlisted'; why: 'no-vendor-id' | 'no-catalogue' | 'cutter-absent' };
+
+/**
+ * The catalogue's coverage of a cutter for a material (#455). `catalogue` is the caller's rows,
+ * never the module state: `feedsFor`'s docs say why (a worker is a separate module realm, #324).
+ *
+ * A direct row always beats a mapped one, and the aliases are tried in the MAP's order rather than
+ * the catalogue's, so which plastic stands in is an app decision that cannot change with row order.
+ * A row the vendor wrote for a material this app has no word for (`PCB`, `Carbon Fiber`) is not a
+ * candidate for anything: it names a material no job here can have.
+ */
+export function catalogueCoverageFor(
+  catalogue: readonly FeedCatalogueRow[],
+  material: StockMaterial,
+  tool: Tool,
+): CatalogueCoverage {
+  const cutterId = vendorId(tool);
+  if (cutterId === null) return { kind: 'unlisted', why: 'no-vendor-id' };
+  if (catalogue.length === 0) return { kind: 'unlisted', why: 'no-catalogue' };
+  const rows = catalogue.filter((row) => row.cutterId === cutterId);
+  if (rows.length === 0) return { kind: 'unlisted', why: 'cutter-absent' };
+  const direct = rows.find((row) => catalogueMaterialFor(row.material) === material);
+  if (direct) return { kind: 'covered', row: direct, via: null };
+  for (const stand of CATALOGUE_MATERIAL_ALIASES[material] ?? []) {
+    const row = rows.find((r) => catalogueMaterialFor(r.material) === stand);
+    if (row) return { kind: 'covered', row, via: stand };
+  }
+  return { kind: 'not-for-material', listedFor: [...new Set(rows.map((row) => row.material))] };
+}
+
+/** "ABS", "ABS or acrylic", "PCB, Carbon Fiber or Brass" — the vendor's own words, joined for a sentence. */
+function listMaterials(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? 'no material';
+  return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+}
+
+/**
+ * What {@link CatalogueCoverage} means for a RECOMMENDATION, in one sentence (#455).
+ *
+ * `recommend: false` is the issue's rule and only one case reaches it: the catalogue lists this
+ * cutter and the job's material is not among its materials. The rest are notes, because a catalogue
+ * that cannot vouch for a cutter must not take it away from an operator who knows better:
+ *
+ *   - an owned cutter, or one missing from a partial sync, "rests on the operator, with an honest
+ *     note" — the issue's words;
+ *   - a mapped plastic is recommended, and the note says the row is ABS or acrylic standing in,
+ *     a mapping this app makes and not a statement Makera makes about PLA;
+ *   - with no catalogue synced there is nothing to say, so no note — an offline job reads exactly as
+ *     it did before this rule existed.
+ *
+ * `toolName` is the name the warning must say out loud ("Makera's catalogue lists TiN Coating Corn
+ * Bit … for PCB or Carbon Fiber, not PLA"). The caller decides whether that warning is a refusal
+ * (`recommend === false`) or a caution beside a hand pick (`recommend === true` and a note).
+ */
+export interface CatalogueStanding {
+  recommend: boolean;
+  note: string | null;
+}
+
+export function catalogueStandingFor(
+  coverage: CatalogueCoverage,
+  material: StockMaterial,
+  toolName: string,
+): CatalogueStanding {
+  const label = MATERIAL_LABELS[material];
+  switch (coverage.kind) {
+    case 'covered': {
+      if (coverage.via === null) return { recommend: true, note: null };
+      return {
+        recommend: true,
+        note:
+          `${CATALOGUE_LABEL} lists no ${label} row, so this is its ${rowMaterialWords(coverage.row)} ` +
+          `row standing in — a mapping this app makes, not something Makera says about ${label}.`,
+      };
+    }
+    case 'not-for-material':
+      return {
+        recommend: false,
+        note:
+          `${CATALOGUE_LABEL} lists ${toolName} for ${listMaterials(coverage.listedFor)}, not ` +
+          `${label}, so it is not recommended for this material.`,
+      };
+    case 'unlisted':
+      if (coverage.why === 'no-catalogue') return { recommend: true, note: null };
+      if (coverage.why === 'no-vendor-id') {
+        return {
+          recommend: true,
+          note:
+            `No catalogue row can name this cutter — it carries no Makera cutter id — so its ` +
+            `recommendation rests on the operator.`,
+        };
+      }
+      return {
+        recommend: true,
+        note:
+          `${CATALOGUE_LABEL} has no rows for this cutter, so its recommendation rests on the ` +
+          `operator.`,
+      };
+  }
 }
 
 /**
@@ -567,31 +738,14 @@ function syncedSentence(snapshot: FeedCatalogue): string {
   return snapshot.syncedOn === null ? '' : ` The catalogue was synced ${snapshot.syncedOn.slice(0, 10)}.`;
 }
 
-/**
- * The catalogue row for a tool and a material, or null. A row is selected only when it names THIS
- * cutter (`Tool.id` — see {@link FeedCatalogueRow}) and its material maps to THIS material. The
- * first match wins; the vendor's table has one row per (cutter, material) pair, and a second one
- * would be a duplicate rather than a preference.
- *
- * `catalogue` is the caller's rows, never the module state: on the far side of a worker boundary
- * that state is an empty array, and reading it there is the #324 defect.
- */
-function catalogueRowFor(
-  catalogue: readonly FeedCatalogueRow[],
-  tool: Tool,
-  material: StockMaterial,
-): FeedCatalogueRow | null {
-  const cutterId = vendorId(tool);
-  if (cutterId === null) return null;
-  for (const row of catalogue) {
-    if (row.cutterId !== cutterId) continue;
-    if (catalogueMaterialFor(row.material) === material) return row;
-  }
-  return null;
-}
-
 /** The panel's word for where a field's value came from, and what a catalogue row reads as. */
 const CATALOGUE_LABEL = "Makera's catalogue";
+
+/** A row's material the way a sentence names it: the app's LABEL when the vendor word maps, else the vendor's own word. */
+function rowMaterialWords(row: FeedCatalogueRow): string {
+  const mapped = catalogueMaterialFor(row.material);
+  return mapped === null ? row.material : MATERIAL_LABELS[mapped];
+}
 
 /** The four numbers a catalogue row states, and how this file's sentences name each one. */
 type CatalogueField = 'rpm' | 'feed' | 'plungeFeed' | 'stepDown';
@@ -665,9 +819,16 @@ function catalogueProvenance(
   entry: FeedsEntry,
   ignored: readonly CatalogueField[],
   snapshot: FeedCatalogue,
+  mappedFor: StockMaterial | null,
 ): string {
   const material = catalogueMaterialFor(row.material) ?? row.material;
   const fromCoupon = entry.status === 'measured';
+  const mapped =
+    mappedFor === null
+      ? ''
+      : ` ${CATALOGUE_LABEL} lists no ${MATERIAL_LABELS[mappedFor]} row, so this is its ` +
+        `${rowMaterialWords(row)} row standing in — a mapping this app makes, not something Makera ` +
+        `says about ${MATERIAL_LABELS[mappedFor]}.`;
   const passedOver = ignored.length
     ? ` Not used for this job: the row's ${ignored
         .map((f) => CATALOGUE_FIELD[f].label)
@@ -681,6 +842,7 @@ function catalogueProvenance(
     `app's, not the table's.` +
     (fromCoupon ? ' A coupon has measured this row; those fields win.' : '') +
     syncedSentence(snapshot) +
+    mapped +
     passedOver
   );
 }
@@ -700,7 +862,15 @@ function catalogueOnlyRow(
   row: FeedCatalogueRow,
   tool: Tool,
   snapshot: FeedCatalogue,
+  mappedFor: StockMaterial | null,
 ): FeedsEntry {
+  const rowMaterial = MATERIAL_LABELS[catalogueMaterialFor(row.material) ?? material];
+  const mapped =
+    mappedFor === null
+      ? ''
+      : ` ${CATALOGUE_LABEL} lists no ${MATERIAL_LABELS[mappedFor]} row, so this is its ${rowMaterial} ` +
+        `row standing in — a mapping this app makes, not something Makera says about ` +
+        `${MATERIAL_LABELS[mappedFor]}.`;
   return {
     material,
     minDiameter: diameter,
@@ -717,9 +887,10 @@ function catalogueOnlyRow(
     // NOT `measured`: no coupon cut this. It is a vendor's starting point standing alone.
     status: 'unmeasured',
     provenance:
-      `${CATALOGUE_LABEL}'s row for ${tool.name} in ${MATERIAL_LABELS[material]} — the whole answer ` +
+      `${CATALOGUE_LABEL}'s row for ${tool.name} in ${rowMaterial} — the whole answer ` +
       `for this material, because this app's starting table has no row for it.` +
-      syncedSentence(snapshot),
+      syncedSentence(snapshot) +
+      mapped,
   };
 }
 
@@ -774,10 +945,11 @@ function entryFor(
 
   const label = MATERIAL_LABELS[material];
   const named = `a ${diameter} mm cutter in ${label}`;
+  const coverage = catalogueCoverageFor(snapshot.rows, material, tool);
   // The cutter has to carry Makera's own id for any of their rows to name it (#332: a clone's
   // rendered cutter carries no identity of its own — and neither does a `0`, which is what a file
   // with no `g_ID` writes there: `vendorId`).
-  if (vendorId(tool) === null) {
+  if (coverage.kind === 'unlisted' && coverage.why === 'no-vendor-id') {
     return {
       ok: false,
       reason:
@@ -787,8 +959,7 @@ function entryFor(
         `a cutter Makera sells.`,
     };
   }
-  const row = catalogueRowFor(snapshot.rows, tool, material);
-  if (row === null) {
+  if (coverage.kind === 'unlisted') {
     return {
       ok: false,
       reason:
@@ -799,6 +970,22 @@ function entryFor(
         syncedSentence(snapshot),
     };
   }
+  // The catalogue lists this cutter, and not for this material (#455). It knew the cutter and said
+  // what it is for; that answer is what stands, rather than a starting-table number the vendor never
+  // wrote for this pair. The vendor's own material words are in the sentence on purpose.
+  if (coverage.kind === 'not-for-material') {
+    return {
+      ok: false,
+      reason:
+        `no cutting parameters for ${named}: the starting table has no row for ${label}, and ` +
+        `${CATALOGUE_LABEL} lists ${tool.name} for ${listMaterials(coverage.listedFor)}, not ` +
+        `${label}. Makera states no numbers for this pair — sync a catalogue that has one, or pick ` +
+        `a material it lists.` +
+        syncedSentence(snapshot),
+    };
+  }
+  const row = coverage.row;
+  const mappedFor = coverage.via === null ? null : material;
   // Nothing below this row to fall back on, so a number this job cannot use is the end of it. The
   // screening is `catalogueRefusal`, the same one the tier above uses, so the two cannot disagree
   // about what "this job cannot use it" means.
@@ -814,7 +1001,11 @@ function entryFor(
         `${label} to answer it instead.`,
     };
   }
-  return { ok: true, entry: catalogueOnlyRow(material, diameter, row, tool, snapshot), catalogueOnly: true };
+  return {
+    ok: true,
+    entry: catalogueOnlyRow(material, diameter, row, tool, snapshot, mappedFor),
+    catalogueOnly: true,
+  };
 }
 
 /**
@@ -912,8 +1103,12 @@ export function feedsFor(
 
   // #310 — the catalogue rung. A row a coupon has measured is NOT eligible: "a catalogue row never
   // overrides a measured row" is the rule this tier exists under, and it is the difference between
-  // a vendor's starting point and this machine's own answer.
-  const row = entry.status === 'measured' ? null : catalogueRowFor(snapshot.rows, tool, material);
+  // a vendor's starting point and this machine's own answer. #455: the row is reached through
+  // `catalogueCoverageFor`, so a printed-blank plastic takes the nearest plastic row — and the
+  // provenance below says it is a mapping.
+  const cover = entry.status === 'measured' ? null : catalogueCoverageFor(snapshot.rows, material, tool);
+  const row = cover?.kind === 'covered' ? cover.row : null;
+  const mappedFor = cover?.kind === 'covered' && cover.via !== null ? material : null;
 
   const params: CutParams = {
     rpm: entry.params.rpm,
@@ -1041,7 +1236,7 @@ export function feedsFor(
   // over entirely supplied nothing, and `catalogue: null` is how the panel is told so.
   const answered = row !== null && used.size > 0;
   const provenance =
-    (answered && row ? catalogueProvenance(row, tool, entry, ignored, snapshot) : entry.provenance) +
+    (answered && row ? catalogueProvenance(row, tool, entry, ignored, snapshot, mappedFor) : entry.provenance) +
     (catalogueOnly ? CATALOGUE_ONLY_NOTE : '');
 
   // The row DID answer (`answered`) rather than merely existing: a vendor row whose numbers were

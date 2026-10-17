@@ -70,6 +70,11 @@ function previewWith(conditionNote: string | null): EngravePreview {
       compromise: false,
       reason: 'Largest cutter that keeps every item intact.',
       conditionNote,
+      // #455's sentences, added to `ToolRecommendation` after this spec was written. They are not
+      // what this file tests (the panel does not render them yet — the #455 report says so), and
+      // null is the ordinary "the catalogue had nothing to add".
+      catalogueNote: null,
+      selectedNote: null,
       candidates: [PICK],
     },
   };

@@ -9,10 +9,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   CATALOGUE_MATERIALS,
+  CATALOGUE_MATERIAL_ALIASES,
   FEEDS_TABLE,
   UNMEASURED_FEEDS_TABLE,
   applyMeasurements,
+  catalogueCoverageFor,
   catalogueMaterialFor,
+  catalogueStandingFor,
   clearFeedCatalogue,
   feedCatalogueRows,
   feedCatalogueSnapshot,
@@ -559,5 +562,86 @@ describe('a material the starting table has no row for is answered by the catalo
     if (!wood.ok) throw new Error(wood.reason);
     expect(wood.params.feed).toBe(900); // HARDWOOD_ROW still answers wood
     expect(wood.provenance).not.toContain('no row in the starting table');
+  });
+});
+
+// #455 — a printed-blank plastic is answered by the NEAREST PLASTIC ROWS the catalogue lists, and
+// every sentence that uses one says it is a mapping. The rows are synthetic and the incident's
+// shape: the vendor's table has no PLA row, and a corn bit's rows are PCB and carbon fibre.
+describe('the nearest-plastic mapping (#455)', () => {
+  const ABS_ROW: FeedCatalogueRow = {
+    cutterId: VENDOR_ID,
+    material: 'ABS',
+    rpm: 11000,
+    feed: 700,
+    plungeFeed: 250,
+    stepDown: 0.8,
+  };
+  const ACRYLIC_ROW: FeedCatalogueRow = { ...ABS_ROW, material: 'Acrylic', rpm: 10500 };
+  const PCB_ROW: FeedCatalogueRow = { ...ABS_ROW, material: 'PCB' };
+  const CARBON_ROW: FeedCatalogueRow = { ...ABS_ROW, material: 'Carbon Fiber' };
+
+  it('maps PLA to ABS and acrylic, in the app’s order', () => {
+    expect(CATALOGUE_MATERIAL_ALIASES.pla).toEqual(['abs', 'acrylic']);
+  });
+
+  it('answers a PLA job from the ABS row, and stamps the provenance as a mapping', () => {
+    const res = feedsFor([ABS_ROW], 'pla', makeraCutter(), Z1);
+    if (!res.ok) throw new Error(res.reason);
+    // The vendor's four numbers, standing over the starting table as a catalogue row always does.
+    expect(res.params.rpm).toBe(11000);
+    expect(res.params.feed).toBe(700);
+    expect(res.catalogue).toEqual(ABS_ROW);
+    expect(res.sources.rpm).toBe('catalogue');
+    // A mapping is labelled wherever it is used, never presented as a vendor statement about PLA.
+    expect(res.provenance).toContain('ABS row standing in');
+    expect(res.provenance).toContain('mapping this app makes');
+    expect(res.provenance).toContain('not something Makera says about PLA');
+  });
+
+  it('prefers ABS over acrylic whatever order the catalogue lists them in', () => {
+    setFeedCatalogue([ACRYLIC_ROW, ABS_ROW]);
+    const res = feedsFor(feedCatalogueRows(), 'pla', makeraCutter(), Z1);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.catalogue).toEqual(ABS_ROW);
+    expect(res.provenance).toContain('ABS row standing in');
+  });
+
+  it('never adopts a row the catalogue lists for another material', () => {
+    // The incident: the starting table answers the PLA job anyway, so only the catalogue's own
+    // material list can stop this cut. `feedsFor` does not adopt the PCB row — the recommendation
+    // rule is what refuses the cutter (`recommendTool.spec.ts`).
+    const res = feedsFor([PCB_ROW], 'pla', makeraCutter(), Z1);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.catalogue).toBeNull();
+    expect(res.provenance).not.toContain('PCB');
+  });
+
+  it('asks coverage in the vendor’s own material words, and refuses only "listed, not for this"', () => {
+    const covered = catalogueCoverageFor([ACRYLIC_ROW, ABS_ROW], 'pla', makeraCutter());
+    expect(covered).toMatchObject({ kind: 'covered', via: 'abs' });
+    expect(catalogueStandingFor(covered, 'pla', 'a cutter')).toEqual({ recommend: true, note: expect.any(String) });
+
+    const other = catalogueCoverageFor([PCB_ROW, CARBON_ROW], 'pla', makeraCutter());
+    expect(other).toMatchObject({ kind: 'not-for-material', listedFor: ['PCB', 'Carbon Fiber'] });
+    const standing = catalogueStandingFor(other, 'pla', 'TiN Coating Corn Bit');
+    expect(standing.recommend).toBe(false);
+    expect(standing.note).toContain('TiN Coating Corn Bit');
+    expect(standing.note).toContain('PCB');
+    expect(standing.note).toContain('Carbon Fiber');
+    expect(standing.note).toContain('not PLA');
+  });
+
+  it('does not refuse a cutter the catalogue has never heard of — that rests on the operator', () => {
+    const absent = catalogueCoverageFor([ABS_ROW], 'pla', flatEndMill(1.0, { id: '999999999999' }));
+    expect(absent).toEqual({ kind: 'unlisted', why: 'cutter-absent' });
+    const standing = catalogueStandingFor(absent, 'pla', 'anonymous cutter');
+    expect(standing.recommend).toBe(true);
+    expect(standing.note).toContain('rests on the operator');
+
+    // With no catalogue synced there is nothing to say, so an offline job reads exactly as before.
+    const none = catalogueCoverageFor([], 'pla', makeraCutter());
+    expect(none).toEqual({ kind: 'unlisted', why: 'no-catalogue' });
+    expect(catalogueStandingFor(none, 'pla', 'a cutter')).toEqual({ recommend: true, note: null });
   });
 });

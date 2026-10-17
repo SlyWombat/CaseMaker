@@ -96,13 +96,22 @@ function tableOf(rows: { key: string; diameter: number; share: number }[]): Reac
       diameter: r.diameter,
       shape: 'flat',
       excluded: null,
+      excludedNote: null,
       rows: [],
       bestRatio: r.share,
       worstRatio: r.share,
       qualifies: true,
     })),
     items: [],
-    recommendation: { key: null, compromise: false, reason: 'built by hand', conditionNote: null, candidates: [] },
+    recommendation: {
+      key: null,
+      compromise: false,
+      reason: 'built by hand',
+      conditionNote: null,
+      catalogueNote: null,
+      selectedNote: null,
+      candidates: [],
+    },
     totalShare: new Map(rows.map((r) => [r.key, r.share])),
   };
 }

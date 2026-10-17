@@ -11,7 +11,8 @@
  * ONE MEASUREMENT PASS, TWO ANSWERS. The per-item rows are the exact `LabelEngravability` rows
  * `recommendTool` was about to use, captured as it asks for them. So the table and the
  * recommendation can never disagree about a cutter — and a candidate `recommendTool` excludes
- * before measuring (`not-flat`, `no-feeds`, `broken`) is reported here as excluded, with the
+ * before measuring (`not-flat`, `no-feeds`, `broken`, and since #455 `no-catalogue-row`: the
+ * catalogue lists the cutter, and not for this material) is reported here as excluded, with the
  * reason, rather than silently missing from the table.
  *
  * PURE, like `recommendTool`: it is handed the measurement seam and touches no Manifold itself.
@@ -67,6 +68,14 @@ export interface CutterReach {
    * as if it were a flat of its tip diameter (#405).
    */
   excluded: ToolCandidate['excluded'] | null;
+  /**
+   * The catalogue's own sentence when the catalogue is why this cutter was dropped (#455) —
+   * "Makera's catalogue lists TiN Coating Corn Bit … for PCB or Carbon Fiber, not PLA…" — else null.
+   * Kept apart from `excluded` so a caller can print the vendor's words about the material. This is
+   * also what the CLI's reach table and the run sheet show: a headless run carries no catalogue at
+   * all, so the table is the only place its reason can appear when one IS loaded.
+   */
+  excludedNote: string | null;
   /** One row per item, in the job's own item order. Empty when the cutter was excluded. */
   rows: ReachRow[];
   /** The largest share of any single item this cutter reaches, 0…1. The "best it can do". */
@@ -178,6 +187,7 @@ export function reachabilityFor(
       diameter: candidate.diameter,
       shape: entry?.tool.shape ?? null,
       excluded: candidate.excluded ?? null,
+      excludedNote: candidate.excluded === 'no-catalogue-row' ? (candidate.catalogueNote ?? null) : null,
       rows: cells,
       bestRatio: ratios.length === 0 ? 0 : Math.max(...ratios),
       worstRatio: ratios.length === 0 ? 0 : Math.min(...ratios),
@@ -259,10 +269,14 @@ export interface ReachTableRow {
 }
 
 /** Why a cutter was dropped before measuring, in one phrase, for a table cell. */
-function exclusionWords(excluded: ToolCandidate['excluded'] | null): string | null {
+function exclusionWords(excluded: ToolCandidate['excluded'] | null, note: string | null): string | null {
   if (excluded === 'not-flat') return 'not a flat end mill (or a V-bit on a job with regions)';
   if (excluded === 'no-feeds') return 'no cutting parameters for this material';
   if (excluded === 'broken') return 'every copy of it is marked broken';
+  // #455 — the catalogue's own sentence has the vendor's material words in it, which is exactly
+  // what "not recommended" must say. The generic phrase is only for a note that somehow is not
+  // there, and a caller reading it still learns the reason class.
+  if (excluded === 'no-catalogue-row') return note ?? 'the catalogue lists no row for it in this material';
   return null;
 }
 
@@ -275,7 +289,7 @@ export function reachTable(reach: Reachability): ReachTableRow[] {
     key: cutter.key,
     name: cutter.name,
     diameter: cutter.diameter,
-    excluded: exclusionWords(cutter.excluded),
+    excluded: exclusionWords(cutter.excluded, cutter.excludedNote),
     shares: cutter.excluded === null ? cutter.rows.map((r) => r.ratio) : cutter.rows.map(() => null),
     total: reach.totalShare.get(cutter.key) ?? 0,
     qualifies: cutter.qualifies,

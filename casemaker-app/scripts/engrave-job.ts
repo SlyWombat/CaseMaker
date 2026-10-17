@@ -353,6 +353,12 @@ const readJson = (path: string): unknown => {
  * feed rows reach a headless run (#324), so the pre-filter asks the starting table and the machine
  * and nothing else. That is a deliberate narrowing, and it is why `--tool` exists — a cutter the
  * house's catalogue alone can vouch for will not be chosen here, but it can still be named.
+ *
+ * #455's material-list rule therefore cannot fire on this path either: it is the CATALOGUE saying
+ * "not for this material", and there is no catalogue here to say it. Nothing is lost from the
+ * reporting side — `reachTable` prints a `no-catalogue-row` cutter with the catalogue's own sentence
+ * (`CutterReach.excludedNote`), so a caller that HAS rows gets the why in the same table and column
+ * as every other exclusion. Loading a catalogue into the CLI would be new plumbing, not this rule.
  */
 function scanReach(job: EngraveJob): ReturnType<typeof reachabilityFor> {
   return reachabilityFor(job, getTools(), [], (key) => {
@@ -387,6 +393,10 @@ function printReach(reach: ReturnType<typeof reachabilityFor>): void {
   } else if (pick !== null) {
     console.log(`  → #211 picks ${pick}, and no smaller cutter reaches more: one program is enough.`);
   }
+  // #455 — a caution about the cutter the job NAMES, when it is not one the catalogue recommends.
+  // Always null on this path (no catalogue is loaded; see `scanReach`), but printed here rather
+  // than in each caller so a run that does have rows cannot silently drop it.
+  if (reach.recommendation.selectedNote !== null) console.log(`  ! ${reach.recommendation.selectedNote}`);
 }
 
 /**

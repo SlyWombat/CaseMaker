@@ -17,6 +17,7 @@ import {
 } from '@/engine/cnc/engrave/reachability';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { LabelEngravability } from '@/workers/sim/engraveGeometry';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -187,6 +188,42 @@ describe('reachabilityFor (#410)', () => {
     expect(rows[0]!.shares).toEqual([null]);
     expect(rows[1]!.excluded).toBeNull();
     expect(rows[1]!.shares).toEqual([0]);
+  });
+
+  it('never offers a cutter the catalogue lists for other materials as a rest-pair second tool (#455)', () => {
+    const job = jobWith('big', 'small');
+    job.stock = { ...job.stock, material: 'pla' };
+    // Synthetic rows in the incident's shape: the corn bit is listed for PCB and carbon fibre only.
+    const catalogue: FeedCatalogueRow[] = ['PCB', 'Carbon Fiber'].map((material) => ({
+      cutterId: '900000000001',
+      material,
+      rpm: 12000,
+      feed: 500,
+      plungeFeed: 200,
+      stepDown: 0.4,
+    }));
+    const corn = tool('inv:corn', 0.6, { id: '900000000001', name: 'TiN Coating Corn Bit' });
+    const wide = tool('wide', 3.175, { shoulderLength: 12 });
+    const fine = tool('fine', 1.0, { shoulderLength: 12 });
+    const reach = reachabilityFor(
+      job,
+      [wide, fine, corn],
+      catalogue,
+      measuring({ wide: { big: 300, small: 0 }, fine: { big: 880, small: 80 } }),
+    );
+
+    const cornReach = reach.cutters.find((c) => c.key === 'inv:corn')!;
+    expect(cornReach.excluded).toBe('no-catalogue-row');
+    expect(cornReach.excludedNote).toContain('PCB');
+    expect(cornReach.excludedNote).toContain('not PLA');
+    // The second tool of the pair is chosen from the SAME survivors, so the rule needs no second
+    // copy for rest machining: the smaller corn bit is not offered, `fine` is.
+    expect(finerThan(reach, 'wide')!.key).toBe('fine');
+    // And the table a run sheet or the CLI prints carries the catalogue's own words.
+    const row = reachTable(reach).find((r) => r.key === 'inv:corn')!;
+    expect(row.excluded).toContain('PCB');
+    expect(row.excluded).toContain('not PLA');
+    expect(row.shares).toEqual([null, null]);
   });
 
   it('carries the cutters’ own names, and falls back to the key when the library has no entry', () => {
