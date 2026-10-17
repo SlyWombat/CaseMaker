@@ -92,6 +92,7 @@ import { EngraveTraceRow } from './EngraveTraceRow';
 import { EngraveVectorRow } from './EngraveVectorRow';
 import { EngraveImportDialog } from './EngraveImportDialog';
 import { EngraveSetupFlow } from './EngraveSetupFlow';
+import { EngraveSetupsSection } from './EngraveSetupsSection';
 import { RunSheetView } from './RunSheetView';
 import { coverageDisclaimer, type SimRunOutcome } from './simCoverage';
 import { viseEnvelope } from '@/engine/cnc/fixture';
@@ -2271,6 +2272,8 @@ export function EngravePanel(): JSX.Element {
           </button>
         )}
       </div>
+
+      <EngraveSetupsSection />
 
       {/* 6 — cutting parameters */}
       <h3 style={SUBHEAD}>

@@ -3160,3 +3160,83 @@ button:disabled {
   color: var(--cm-color-on-primary-container);
   font-weight: 600;
 }
+
+/* The Setups section (#471, §5.4): one compact line per setup, with the editors behind its
+   chevron. The colours follow the engrave panel's own inline palette, so the section reads as part
+   of that panel rather than a second design. */
+.engrave-setups {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #2a2f36;
+}
+.engrave-setups__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.engrave-setups__header h3 {
+  color: #d1d5db;
+  font-weight: 600;
+}
+.engrave-setups__header button {
+  font-size: 11px;
+}
+.engrave-setups__row {
+  border: 1px solid #2a2f36;
+  border-radius: 4px;
+  background: #141a21;
+  margin: 6px 0;
+}
+.engrave-setups__row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 5px 6px;
+}
+.engrave-setups__expand {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 0;
+  color: #d1d5db;
+  font-size: 12px;
+  padding: 0;
+  cursor: pointer;
+}
+.engrave-setups__caret {
+  color: #9aa4b0;
+  width: 10px;
+}
+.engrave-setups__items {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.engrave-setups__items button {
+  font-size: 10px;
+  padding: 1px 5px;
+  background: none;
+}
+.engrave-setups__body {
+  border-top: 1px solid #2a2f36;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.engrave-setups__body button {
+  font-size: 11px;
+}
+.engrave-setups__body select {
+  max-width: 260px;
+}
+.engrave-setups__registration,
+.engrave-setups__body > div {
+  width: 100%;
+}
