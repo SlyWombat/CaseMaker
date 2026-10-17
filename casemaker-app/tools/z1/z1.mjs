@@ -48,7 +48,7 @@ const BOOLEAN_FLAGS = new Set(['json', 'help', 'effective', 'i-am-at-the-machine
  *
  * `abort` is the reason they exist: the controller stops the spindle at once but answers only after it
  * has finished the moves it had already queued — ~18 s in the 2026-10-12 observation (#303) — so the
- * reply that says the queue is drained gets 30 s rather than the 3 s a console line is given.
+ * reply that says the queue is drained gets 60 s rather than the 3 s a console line is given.
  *
  * #449: these are no longer copies. `run` reads them from the shop's defaults in `location.json`
  * (`benchDefaults.mjs`: `stop.abortReplyMs`, `stop.idlePolls`, `run.noProgressMs`,
@@ -687,7 +687,7 @@ async function main() {
                 // #303, bench 2026-10-12: this is the word Studio's own grey Stop sends. The spindle
                 // stops at once, but the controller first drains the queue it already had and answers
                 // `Aborted playing or paused file` when it is done — ~18 s in that observation, so this
-                // one send gets `stop.abortReplyMs` (30 s seeded) rather than a console line's 3 s (#386 review).
+                // one send gets `stop.abortReplyMs` (60 s seeded) rather than a console line's 3 s (#386 review).
                 const aborted = await sendTraced(session, file, 'abort', flags, {
                   echo: false,
                   window: { firstReplyMs: abortReplyMs, maxMs: abortReplyMs },

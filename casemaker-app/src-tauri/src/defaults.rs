@@ -268,7 +268,7 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("run.statusReplyMs", 3000.0, "ms", "chosen, not measured: how long a status poll waits for its reply; the controller answers in 0.6 to 0.7 s (#386)"),
     ("stop.idlePolls", 3.0, "polls", "chosen, not measured: after abort, how many status polls look for Idle before M332; none reading Idle leaves the vacuum on and says so"),
     ("stop.idlePollMs", 5000.0, "ms", "chosen, not measured: the wait between those polls; never under the 2 s status floor (#386)"),
-    ("stop.abortReplyMs", 30000.0, "ms", "chosen, not measured as a bound: how long the bench harness's run gives abort to answer (about 18 s observed on 2026-10-12, #303). The app's own Stop gives abort the console window"),
+    ("stop.abortReplyMs", 60000.0, "ms", "chosen, not measured as a bound: how long abort is given to answer (about 18 s observed on 2026-10-12, #303). The app's Stop and the bench harness's run share this one number (maintainer, 2026-10-16)"),
     ("power.probeTries", 3.0, "tries", "chosen, not measured: how many machine probes, all silent, before a powered machine counts as not answering (#416 review: one silent probe is a Wi-Fi blip as often as a dead controller)"),
     ("power.probeGapSeconds", 2.0, "s", "chosen, not measured: the wait between those probes"),
     ("power.cyclePauseSeconds", 10.0, "s", "chosen, not measured: how long a plug cycle leaves the machine off before switching it on again (power.sh on --cycle)"),
@@ -557,6 +557,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (2000.0..=60000.0).contains(&v)),
             "2000 to 60000 ms — never faster than 2 s (#386)",
         )),
+        // The app's Stop and the harness's run both read this for the `abort` reply window.
         "stop.abortReplyMs" => Some(need(
             n.is_some_and(|v| (20000.0..=300000.0).contains(&v)),
             "20000 to 300000 ms — above the ~18 s drain observed before abort answered (#303)",

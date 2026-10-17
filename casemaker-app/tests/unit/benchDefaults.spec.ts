@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { KNOWN_DEFAULTS, ShopDefaultsSchema, type ShopDefaults } from '@/platform/defaultsClient';
 import { BENCH_DEFAULTS, accepts, readBenchDefaults, describeBenchDefaults } from '../../tools/z1/benchDefaults.mjs';
 import { CONSOLE_TIMING, STATUS_POLL_TIMING, consoleTimingFrom, statusPollTimingFrom } from '@/platform/machineConsole';
-import { STOP_FALLBACK, STOP_IDLE_POLLS, STOP_IDLE_POLL_MS, STOP_POLL_FLOOR_MS, stopOnSession, stopSettings } from '@/platform/machineStop';
+import { STOP_ABORT_REPLY_MS, STOP_FALLBACK, STOP_IDLE_POLLS, STOP_IDLE_POLL_MS, STOP_POLL_FLOOR_MS, stopOnSession, stopSettings } from '@/platform/machineStop';
 import { runSettings } from '@/platform/machineRun';
 import { POWER_POLL_FLOOR_MS, powerSettings, probeSettled } from '@/store/powerStore';
 import { PROBE_SPEC } from '@/engine/cnc/engrave/registration';
@@ -214,10 +214,13 @@ describe('#449 the values reach the code, and the floors still hold', () => {
     const out = await stopOnSession(session, async (ms) => void slept.push(ms), {
       idlePolls: 4,
       idlePollMs: 500,
+      abortReplyMs: 45_000,
       statusTiming: { firstReplyMs: 4000, quietMs: 800, maxMs: 6000 },
     });
     expect(out.kind).toBe('draining');
     expect(sent.filter((s) => s.line === 'abort')).toHaveLength(1);
+    // `abort` is given the shop's window, not a console line's (#449).
+    expect(sent.find((s) => s.line === 'abort')!.first).toBe(45_000);
     expect(polls).toBe(1 + 4);
     expect(sent.find((s) => s.line === '?')!.first).toBe(4000);
     expect(slept.every((ms) => ms >= STOP_POLL_FLOOR_MS)).toBe(true);
@@ -285,6 +288,24 @@ describe('#449 the values reach the code, and the floors still hold', () => {
     };
     await stopOnSession(session, async () => {}, { ...STOP_FALLBACK, statusTiming: { firstReplyMs: 500, quietMs: 800, maxMs: 900 } });
     expect(windows).toEqual([STATUS_POLL_TIMING.firstReplyMs]);
+  });
+
+  it('Stop gives `abort` the shop’s `stop.abortReplyMs` window (#449)', async () => {
+    const windows: { line: string; first?: number }[] = [];
+    const session = {
+      send: async (line: string, timing?: { firstReplyMs?: number }) => {
+        windows.push({ line, first: timing?.firstReplyMs });
+        return { kind: 'sent' as const, line, text: '<Run|MPos:0,0,0|P:5,40,10>', frames: 1, elapsedMs: 700 };
+      },
+    };
+    // A location that moved the key: `abort` gets its number, not the console's 60 s.
+    await stopOnSession(session, async () => {}, stopSettings(chosen({ 'stop.abortReplyMs': 25_000 })));
+    expect(windows.find((w) => w.line === 'abort')!.first).toBe(25_000);
+    // Seeded (or no location): the compiled 60 s, the window the app always used.
+    windows.length = 0;
+    await stopOnSession(session, async () => {}, stopSettings(SEEDED));
+    expect(windows.find((w) => w.line === 'abort')!.first).toBe(STOP_ABORT_REPLY_MS);
+    expect(STOP_ABORT_REPLY_MS).toBe(fallback('stop.abortReplyMs'));
   });
 
   it('the Rust and the zod bounds of every #449 key are the same numbers', () => {

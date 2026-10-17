@@ -335,11 +335,11 @@
       "note": "chosen, not measured: the wait between those polls; never under the 2 s status floor (#386)"
     },
     "stop.abortReplyMs": {
-      "value": 30000.0,
+      "value": 60000.0,
       "source": "seeded",
       "setAt": null,
       "unit": "ms",
-      "note": "chosen, not measured as a bound: how long the bench harness's run gives abort to answer (about 18 s observed on 2026-10-12, #303). The app's own Stop gives abort the console window"
+      "note": "chosen, not measured as a bound: how long abort is given to answer (about 18 s observed on 2026-10-12, #303). The app's Stop and the bench harness's run share this one number (maintainer, 2026-10-16)"
     },
     "power.probeTries": {
       "value": 3.0,

@@ -33,10 +33,11 @@ export const BENCH_DEFAULTS = Object.freeze({
   'run.pollMs': { min: 2000, max: 60000, fallback: 2000, unit: 'ms' },
   'run.noProgressMs': { min: 15000, max: 600000, fallback: 30000, unit: 'ms' },
   'run.missLimit': { min: 1, max: 10, int: true, fallback: 3, unit: 'polls' },
-  // `z1.mjs run`'s Ctrl-C: the abort's reply window, then how many Idle polls before `M332`. NOT
-  // `stop.idlePollMs`: in the app that is the wait between those polls, while the harness paces them by
-  // `run.pollMs` and its compiled 5000 there is each poll's REPLY window — a different quantity.
-  'stop.abortReplyMs': { min: 20000, max: 300000, fallback: 30000, unit: 'ms' },
+  // `z1.mjs run`'s Ctrl-C and the app's Stop both give `abort` this reply window; then how many Idle
+  // polls before `M332`. NOT `stop.idlePollMs`: in the app that is the wait between those polls, while
+  // the harness paces them by `run.pollMs` and its compiled 5000 there is each poll's REPLY window — a
+  // different quantity.
+  'stop.abortReplyMs': { min: 20000, max: 300000, fallback: 60000, unit: 'ms' },
   'stop.idlePolls': { min: 1, max: 20, int: true, fallback: 3, unit: 'polls' },
   // `power.sh on` — how long it waits, the pause in a cycle, and the wait between checks.
   'power.onWaitSeconds': { min: 10, max: 1800, fallback: 180, unit: 's' },

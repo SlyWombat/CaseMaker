@@ -140,10 +140,10 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // by `run.pollMs`, and its own compiled number there is each poll's reply window, a different thing.
   'stop.idlePolls': { label: 'status polls after Stop before giving up on Idle (chosen)', unit: 'polls', rule: z.number().int().min(1).max(20), fallback: 3 },
   'stop.idlePollMs': { label: 'wait between those polls (chosen)', unit: 'ms', rule: z.number().min(2000).max(60_000), fallback: 5000 },
-  // The bench harness's `run` gives `abort` this long to answer (~18 s observed, #303). The app's own
-  // Stop still gives it the console window; re-timing that is the maintainer's call (#449).
-  // At least 20 s (#449 review): above the ~18 s drain observed before `abort` answered (#303).
-  'stop.abortReplyMs': { label: 'abort reply wait, bench harness (chosen)', unit: 'ms', rule: z.number().min(20_000).max(300_000), fallback: 30_000 },
+  // How long `abort` gets to answer (~18 s observed, #303). ONE number for both the app's Stop and the
+  // bench harness's `run` (maintainer, 2026-10-16: Stop's abort wait is the shop setting, so the two
+  // share a value). At least 20 s (#449 review): above the ~18 s drain observed before `abort` answered.
+  'stop.abortReplyMs': { label: 'abort reply wait (chosen)', unit: 'ms', rule: z.number().min(20_000).max(300_000), fallback: 60_000 },
   'power.probeTries': { label: 'probes before a machine counts as silent (chosen)', unit: 'tries', rule: z.number().int().min(1).max(10), fallback: 3 },
   // Each probe and each check sends `?`: never closer than the 2 s status floor (#386), which
   // `powerStore.ts`'s POWER_POLL_FLOOR_MS also applies in code.

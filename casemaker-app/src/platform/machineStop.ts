@@ -47,6 +47,14 @@ export const ABORT_LINE = 'abort';
  */
 export const STOP_IDLE_POLLS = 3;
 export const STOP_IDLE_POLL_MS = 5000;
+/**
+ * How long `abort` itself is given to answer — the labelled NO-SERVICE FALLBACK of the shop's
+ * `stop.abortReplyMs` (#449). The controller stops the spindle at once, then drains the moves already
+ * queued (~18 s observed, #303) before it answers, so 60 s is where the app's Stop always sat (the
+ * console's own first-reply window). The maintainer, 2026-10-16: the app reads the shop's number too,
+ * so it and the bench harness share one.
+ */
+export const STOP_ABORT_REPLY_MS = 60_000;
 /** The status poll's floor after the abort (#386: never faster than 2 s). Compiled; a setting only raises it. */
 export const STOP_POLL_FLOOR_MS = 2000;
 
@@ -54,12 +62,15 @@ export const STOP_POLL_FLOOR_MS = 2000;
 export interface StopSettings {
   idlePolls: number;
   idlePollMs: number;
+  /** The `abort` reply window (#449): `stop.abortReplyMs`. */
+  abortReplyMs: number;
   statusTiming: ConsoleTiming;
 }
 
 export const STOP_FALLBACK: Readonly<StopSettings> = {
   idlePolls: STOP_IDLE_POLLS,
   idlePollMs: STOP_IDLE_POLL_MS,
+  abortReplyMs: STOP_ABORT_REPLY_MS,
   statusTiming: STATUS_POLL_TIMING,
 };
 
@@ -68,18 +79,21 @@ export function stopSettings(defaults: ShopDefaults | null): StopSettings {
   return {
     idlePolls: readDefault(defaults, 'stop.idlePolls').value,
     idlePollMs: readDefault(defaults, 'stop.idlePollMs').value,
+    abortReplyMs: readDefault(defaults, 'stop.abortReplyMs').value,
     statusTiming: statusPollTimingFrom(defaults),
   };
 }
 
 /**
  * The settings as a stop USES them, whatever was passed: a whole number of polls, at least one (a
- * stop never gives up without asking once), and never a wait under the 2 s floor (#386).
+ * stop never gives up without asking once), never a wait under the 2 s floor (#386), and a finite
+ * `abort` window (a hand-built setting with none falls back to the compiled one).
  */
 function safeStop(s: StopSettings): StopSettings {
   return {
     idlePolls: Number.isInteger(s.idlePolls) && s.idlePolls >= 1 ? s.idlePolls : STOP_IDLE_POLLS,
     idlePollMs: Number.isFinite(s.idlePollMs) ? Math.max(STOP_POLL_FLOOR_MS, s.idlePollMs) : STOP_IDLE_POLL_MS,
+    abortReplyMs: Number.isFinite(s.abortReplyMs) ? s.abortReplyMs : STOP_ABORT_REPLY_MS,
     // Never a shorter reply window than the compiled one (#449 review): the FIRST `?` decides whether
     // `abort` is sent at all, and a timeout there returns without sending it.
     statusTiming: {
@@ -145,7 +159,7 @@ export async function stopOnSession(
   sleep: (ms: number) => Promise<void> = realSleep,
   settings: StopSettings = STOP_FALLBACK,
 ): Promise<StopOutcome> {
-  const { idlePolls, idlePollMs, statusTiming } = safeStop(settings);
+  const { idlePolls, idlePollMs, abortReplyMs, statusTiming } = safeStop(settings);
   const ask = await session.send('?', statusTiming);
   if (ask.kind !== 'sent') {
     return ask.kind === 'refused' ? { kind: 'error', detail: ask.detail } : { kind: ask.kind, detail: ask.detail };
@@ -166,7 +180,9 @@ export async function stopOnSession(
     return { kind: 'not-running', status: ask.text };
   }
 
-  const aborted = await session.send(ABORT_LINE);
+  // `abort` is answered only once the queue it already had has drained, so it gets the shop's
+  // `stop.abortReplyMs`, not a console line's window (#449; the harness's `run` gives it the same).
+  const aborted = await session.send(ABORT_LINE, { firstReplyMs: abortReplyMs, maxMs: abortReplyMs });
   if (aborted.kind !== 'sent' && aborted.kind !== 'timeout') {
     return aborted.kind === 'refused'
       ? { kind: 'error', detail: aborted.detail }
