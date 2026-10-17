@@ -26,6 +26,7 @@ import { describe, it, expect } from 'vitest';
 import { buildRunSheet, type RunSheet, type RunSheetGenerated, type RunSheetStep } from '@/engine/cnc/engrave/runSheet';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { RestPassFacts } from '@/engine/cnc/engrave/restPass';
+import type { CutParams, FeedsResult } from '@/engine/cnc/feeds';
 import { REST_MACHINING_FALLBACK, restSeamFacts, thirdToolAdvice } from '@/engine/cnc/engrave/restSettings';
 import type { EngraveJob } from '@/types/engraveJob';
 
@@ -51,11 +52,21 @@ function job(): EngraveJob {
   return j;
 }
 
+/** Each program's own cutting numbers (#437 item 8): different cutters, different rows. */
+const PARAMS_1: CutParams = { rpm: 12000, feed: 700, plungeFeed: 200, stepDown: 0.6, stepOver: 0.9, peck: 1, air: true };
+const PARAMS_2: CutParams = { rpm: 18000, feed: 420, plungeFeed: 120, stepDown: 0.3, stepOver: 0.24, peck: 1, air: true };
+
+/**
+ * Program 1's resolved feeds (#437 item 8). The sheet reads only `ok` and `params` off a
+ * `FeedsResult`; the rest of the resolution is `feeds.spec.ts`'s, so this is a stub with those two.
+ */
+const FEEDS = { ok: true, params: PARAMS_1 } as unknown as FeedsResult;
+
 /** The generated half, stubbed: the sheet only hashes the program and reads the findings. */
 function generated(): RunSheetGenerated {
   return {
     findings: [],
-    feeds: null,
+    feeds: FEEDS,
     cam: { operations: 2, cuttingMoves: 40, estimatedSeconds: 200, passes: 1 },
     nc: 'G21 G90\nT1 M6\nM2',
     verify: null,
@@ -73,6 +84,9 @@ function facts(): RestPassFacts {
     diameter: 2,
     nc: 'single-rough.nc',
     frame: 'single-rough.frame.nc',
+    params: PARAMS_1,
+    passes: 2,
+    traceOnly: false,
     moves: 1200,
     seconds: 900,
     removedVolume: 250,
@@ -84,7 +98,11 @@ function facts(): RestPassFacts {
     key: 'o-flute-0.6',
     diameter: 0.6,
     nc: 'single-rest.nc',
+    // Null by default, so the "no frame was produced" step is what most cases below exercise.
     frame: null,
+    params: PARAMS_2,
+    passes: 3,
+    traceOnly: false,
     moves: 3400,
     seconds: 1300,
     removedVolume: 99.6,
@@ -194,6 +212,81 @@ describe('the run sheet records what the second program’s Z0 is worked out fro
     expect(solo.sections.some((s) => s.id === 'rest')).toBe(false);
     expect(solo.sections.length).toBe(sheet().sections.length - 1);
     expect(section('cut', solo).some((s) => /second program/.test(s.text))).toBe(false);
+  });
+});
+
+/**
+ * #437 item 8 — program 2 is on the sheet in its own right: its cutting numbers, and its dry run.
+ *
+ * The Cut section used to open with ONE parameters step built from the job's feeds — program 1's —
+ * which in a two-tool job silently read as the whole job's. And no step anywhere named the second
+ * program's frame, so its dry run had to be improvised at the machine.
+ */
+describe('program 2 on the sheet (#437 item 8)', () => {
+  it('states each program’s own parameters, each named by its file', () => {
+    const cut = section('cut');
+    const p1 = stepMatching(cut, /^Program 1, single-rough\.nc/);
+    const p2 = stepMatching(cut, /^Program 2, single-rest\.nc/);
+
+    // Program 1 keeps its own numbers, now labelled.
+    expect(p1.value).toContain('12000 RPM');
+    // Program 1's pass count is the generated program's own (`cam.passes`), the expression the
+    // sheet has always used for it.
+    expect(p1.value).toContain('1 × 0.6 mm passes');
+    expect(p1.value).toContain('0.9 mm step-over');
+    // Program 2's are the SECOND cutter's, and they are not program 1's written twice.
+    expect(p2.text).toContain('o-flute-0.6');
+    expect(p2.value).toContain('18000 RPM');
+    expect(p2.value).toContain('420 mm/min feed');
+    expect(p2.value).toContain('3 × 0.3 mm passes');
+    expect(p2.value).toContain('0.24 mm step-over');
+    expect(p2.value).not.toContain('12000 RPM');
+  });
+
+  it('says so rather than staying blank when program 2’s parameters did not resolve', () => {
+    const noParams = sheet({ rest: { ...facts().rest, params: null } });
+    const p2 = stepMatching(section('cut', noParams), /^Program 2, single-rest\.nc/);
+    expect(p2.text).toContain('cutting parameters were not resolved for this program');
+    expect(p2.value).toBeUndefined();
+  });
+
+  it('drops the step-over for a trace-only rest program, because it never steps over', () => {
+    const traced = sheet({ rest: { ...facts().rest, traceOnly: true } });
+    const p2 = stepMatching(section('cut', traced), /^Program 2, single-rest\.nc/);
+    expect(p2.text).toContain('spindle, feed and plunge');
+    expect(p2.value).toContain('no step-over');
+    expect(p2.value).not.toContain('passes');
+  });
+
+  it('names program 2’s frame file and its height, in the swap routine', () => {
+    const framed = sheet({ rest: { ...facts().rest, frame: 'single-rest.frame.nc' } });
+    const step = stepMatching(section('cut', framed), /^Load single-rest\.frame\.nc/);
+    // The height is the frame file's own (#244): baked into the file, so there is no offset to set.
+    expect(step.value).toBe('20 mm above the work');
+    expect(step.text).toContain("program 2's outline");
+    // It sits in the swap routine, after the Z0 step: program 2's frame cannot run before that Z0
+    // exists, so putting it in the Dry run section would name a file that is not runnable yet.
+    const cut = section('cut', framed);
+    expect(cut.indexOf(step)).toBeGreaterThan(cut.findIndex((s) => /^Set Z0 for the second program/.test(s.text)));
+    expect(cut.indexOf(step)).toBeLessThan(cut.findIndex((s) => /^Load single-rest\.nc/.test(s.text)));
+  });
+
+  it('refuses a program with no frame instead of naming a file that was never produced', () => {
+    const step = stepMatching(section('cut'), /There is no frame file for this program/);
+    expect(step.bold).toBe(true);
+    expect(step.text).toContain('it did not pass verification');
+    // It names the program so the operator knows which one, and no frame file at all.
+    expect(step.text).toContain('single-rest.nc');
+    expect(step.text).not.toMatch(/\.frame\.nc/);
+  });
+
+  it('leaves a one-program sheet exactly as it was', () => {
+    const solo = buildRunSheet(job(), generated(), null, NOW, undefined, {});
+    const cut = section('cut', solo).map((s) => `${s.text} ${s.value ?? ''}`);
+    // No program labels, and no second program's line: the historic wording, once.
+    expect(cut.some((t) => /Program 1, |Program 2, /.test(t))).toBe(false);
+    expect(cut.some((t) => t.includes('There is no frame file for this program'))).toBe(false);
+    expect(JSON.stringify(solo)).not.toContain('single-rest');
   });
 });
 

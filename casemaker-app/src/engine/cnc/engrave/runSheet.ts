@@ -1577,6 +1577,28 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
       record: 'Z0 for the second program (mm)',
       unverified: '#410',
     },
+    // #437 item 8 — program 2 has its own dry run, and it belongs HERE rather than in the Dry run
+    // section: its frame can only be run after the cutter change and the new Z0, and a step in §8
+    // would tell the operator to run a file whose Z0 does not exist yet. A null frame is not
+    // hypothetical (#273): a program the verifier refuses is generated but has no frame, and naming
+    // a file that was never produced is the failure mode the Dry run section already documents.
+    rest.frame === null
+      ? {
+          text:
+            'There is no frame file for this program: it did not pass verification, so the trace was ' +
+            `never produced. Do not run ${rest.nc} — clear the errors, regenerate, and the frame ` +
+            'comes back with the program.',
+          bold: true,
+          unverified: '#410',
+        }
+      : {
+          text:
+            `Load ${rest.frame} and run it. It traces program 2's outline in the air, the same ` +
+            `${fmtNum(FRAME_Z)} mm above the work — no Z offset to set. If the trace is not where the ` +
+            'rest should land, stop.',
+          value: `${fmtNum(FRAME_Z)} mm above the work`,
+          unverified: '#410',
+        },
     {
       text:
         `Load ${rest.nc} and run it. The cutter traces only the rest: expect it to cut in short passes ` +
@@ -1858,6 +1880,10 @@ export function buildRunSheet(
 
   // ---- 7 · Cut -------------------------------------------------------------------------------
   const cutSteps: RunSheetStep[] = [];
+  // The one-program parameters step, kept by reference: a two-tool job relabels it PROGRAM 1 and
+  // prints program 2's beside it (#437 item 8), and doing that by finding it again in the list
+  // would be a search over prose.
+  let programParams: RunSheetStep | null = null;
   const threadMachining = generated.threadMachining ?? null;
   const threadPlans = generated.threads ?? null;
   if (plan.threads.length > 0) {
@@ -1908,7 +1934,7 @@ export function buildRunSheet(
     // pitch. A job with any region item keeps the full line: those loops DO step over.
     const traceOnly =
       items.length === 0 && (job.traces?.some((t) => t.enabled && !t.construction) ?? false);
-    cutSteps.push({
+    const step: RunSheetStep = {
       text: traceOnly
         ? `Spindle, feed and plunge. Vacuum ${params.air ? 'on' : 'off'}.`
         : `Spindle, feed, plunge, passes and step-down. Vacuum ${params.air ? 'on' : 'off'}.`,
@@ -1918,9 +1944,38 @@ export function buildRunSheet(
         : `${params.rpm} RPM · ${fmtNum(params.feed)} mm/min feed · ${fmtNum(params.plungeFeed)} mm/min ` +
           `plunge · ${generated.cam?.passes ?? 1} × ${fmtNum(params.stepDown)} mm passes · ` +
           `${fmtNum(params.stepOver)} mm step-over`,
-    });
+    };
+    cutSteps.push(step);
+    programParams = step;
   } else {
     cutSteps.push({ text: 'Cutting parameters were not resolved for this job.' });
+  }
+  // #437 item 8 — a two-tool job has a SECOND program, and its numbers are its own: a different
+  // cutter in the same material, with a different feed and its own pass count. Printing one
+  // parameters line for the pair reads as the whole job's and is wrong for half of it. Everything
+  // here is gated on `restPass`, so a one-program sheet is byte-identical to the sheet before it.
+  if (options.restPass !== undefined) {
+    const { rough, rest } = options.restPass;
+    if (programParams !== null) programParams.text = `Program 1, ${rough.nc} — ${programParams.text}`;
+    const label = `Program 2, ${rest.nc} (${rest.key}, ⌀ ${fmtNum(rest.diameter)} mm) — `;
+    const p = rest.params;
+    if (p === null) {
+      cutSteps.push({ text: `${label}cutting parameters were not resolved for this program.` });
+    } else {
+      // The trace-only rule is the rest program's own fact (`RestProgram.traceOnly`), not an
+      // assumption about what a rest pass writes today: a trace puts the cutter on the line, so a
+      // step-over printed beside it would be a number for a cut the program never makes (#405).
+      cutSteps.push({
+        text: rest.traceOnly
+          ? `${label}spindle, feed and plunge. Vacuum ${p.air ? 'on' : 'off'}.`
+          : `${label}spindle, feed, plunge, passes and step-down. Vacuum ${p.air ? 'on' : 'off'}.`,
+        value: rest.traceOnly
+          ? `${p.rpm} RPM · ${fmtNum(p.feed)} mm/min feed · ${fmtNum(p.plungeFeed)} mm/min plunge · ` +
+            'a single stroke on every line, cut straight to depth — no step-over'
+          : `${p.rpm} RPM · ${fmtNum(p.feed)} mm/min feed · ${fmtNum(p.plungeFeed)} mm/min plunge · ` +
+            `${rest.passes} × ${fmtNum(p.stepDown)} mm passes · ${fmtNum(p.stepOver)} mm step-over`,
+      });
+    }
   }
   for (const item of items) {
     // #231 item 3 — say which cut sits over a void, and the depth the material there allows,

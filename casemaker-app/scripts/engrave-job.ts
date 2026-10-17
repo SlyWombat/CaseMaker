@@ -112,7 +112,7 @@ import {
 import { MARGIN_DEFAULTS } from '../src/engine/cnc/engrave/depthBounds';
 import { engraveRegions, measureEngraving } from '../src/workers/sim/engraveGenerate';
 import { cuttingDiameter } from '../src/engine/cnc/tool';
-import { feedsFor } from '../src/engine/cnc/feeds';
+import { feedsFor, type CutParams } from '../src/engine/cnc/feeds';
 import { jobMachine } from '../src/engine/cnc/calibration';
 import { executeProfile } from '../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from './lib/engravePreviewSvg';
@@ -127,6 +127,7 @@ import { designJobFor, type DesignReadingDirection } from '../src/engine/cnc/eng
 import { readDesign } from '../src/engine/import/design3mf';
 import { parsePrusaThreeMf } from '../src/engine/import/prusa3mf';
 import type { EngraveJob } from '../src/types/engraveJob';
+import { toPartPlan } from '../src/engine/cnc/engrave/partPlan';
 import { renderRunSheetMarkdown } from './runSheetMarkdown';
 
 const require = createRequire(import.meta.url);
@@ -1173,6 +1174,18 @@ if (args.job) {
       const dia1 = p1.diameter;
       const share1 = shareOf(cut, tool1Key);
       const seconds = (g: EngraveGenerated): number => Math.round(g.cam?.estimatedSeconds ?? 0);
+      // #437 item 8 — each program's own cutting numbers, read the SAME way the sheet reads them
+      // (`generated.feeds && generated.feeds.ok ? params : null`, `cam?.passes ?? 1`), so the two
+      // lines cannot disagree about how a number was arrived at.
+      const cutParams = (g: EngraveGenerated): CutParams | null =>
+        g.feeds && g.feeds.ok ? g.feeds.params : null;
+      const passCount = (g: EngraveGenerated): number => g.cam?.passes ?? 1;
+      // The trace-only rule is #405's, and the sheet applies it to program 1 from its own plan. It
+      // is derived here for each program's OWN job rather than assumed from the kind of program a
+      // rest pass writes today: a trace-bearing second program must not print a step-over.
+      const traceOnlyOf = (j: EngraveJob): boolean =>
+        toPartPlan(j).engraves.length === 0 &&
+        (j.traces?.some((t) => t.enabled && !t.construction) ?? false);
       facts = {
         rough: {
           key: tool1Key,
@@ -1182,6 +1195,9 @@ if (args.job) {
           reason: roughReason,
           nc: `${stem1}.nc`,
           frame: p1.generated.frameNc === null ? null : runSheetFrameFileName(job.name),
+          params: cutParams(p1.generated),
+          passes: passCount(p1.generated),
+          traceOnly: traceOnlyOf(job),
           moves: p1.generated.cam?.cuttingMoves ?? 0,
           seconds: seconds(p1.generated),
           removedVolume: p1.load.stats.removedVolume,
@@ -1192,6 +1208,9 @@ if (args.job) {
           reason: restChosen.reason,
           nc: `${stem2}.nc`,
           frame: p2.generated.frameNc === null ? null : runSheetFrameFileName(restJob.name),
+          params: cutParams(p2.generated),
+          passes: passCount(p2.generated),
+          traceOnly: traceOnlyOf(restJob),
           moves: p2.generated.cam?.cuttingMoves ?? 0,
           seconds: seconds(p2.generated),
           removedVolume: p2.load.stats.removedVolume,

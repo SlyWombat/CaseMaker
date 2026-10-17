@@ -31,6 +31,7 @@ import {
   type ReachRow,
 } from './reachability';
 import type { EngraveJob, EngraveVectorShape } from '@/types/engraveJob';
+import type { CutParams } from '@/engine/cnc/feeds';
 import type { SeamFacts, ThirdToolAdvice } from './restSettings';
 
 /** One candidate for the first bite, with the numbers the choice was made on. */
@@ -304,6 +305,23 @@ export interface RestProgram {
   nc: string;
   /** Its dry-run frame file, or null when the generator produced none. */
   frame: string | null;
+  /**
+   * The cutting parameters this program was generated with, or null when its feeds did not resolve
+   * (#437 item 8). The sheet states each program's own numbers: the two programs are different
+   * cutters in the same material, so program 1's RPM and step-over are not program 2's, and a sheet
+   * that printed one line for the pair would be handing the operator the wrong numbers for half the
+   * job. Type-only here — the route reads it off the generated program.
+   */
+  params: CutParams | null;
+  /** Passes the generator made at `params.stepDown` — the count the sheet prints, never a guess. */
+  passes: number;
+  /**
+   * Whether this program is trace-only (#437 item 8): a trace puts the cutter ON the line, so
+   * nothing is ever stepped over and a step-over printed beside it would be a number for a cut the
+   * program never makes. A fact the route derives from the program's own job, not an assumption the
+   * sheet makes about the kind of program a rest pass writes today.
+   */
+  traceOnly: boolean;
   /** Cutting moves in the program, and the generator's own estimate. */
   moves: number;
   seconds: number;
