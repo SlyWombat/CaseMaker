@@ -106,7 +106,11 @@ export interface ReleaseRecord {
   active: number | null;
   /** The next program, when the run is waiting at the bit-change pause. */
   next: number | null;
-  /** The once-per-release "I am at the machine". */
+  /**
+   * "I am at the machine" (D-17) — asked once per PROGRAM, not once per release: it is cleared at
+   * every bit-change pause and when a stop leaves the run resumable, so the next program's start
+   * needs a fresh tick from the operator standing there.
+   */
   atMachine: boolean;
   /** The job faces first; the operator has said the face file was run. */
   facingConfirmed: boolean;
@@ -297,7 +301,8 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         if (vacuum !== 'off' && rec.airOn) await closeSpan(machine, 'The job’s last program finished without its own M332.');
         return;
       }
-      patch(machine, { files, vacuum, phase: 'bit-change', active: index, next: pending[0]!.index });
+      // D-17: the bit change is a new program, so the at-machine tick is asked again.
+      patch(machine, { files, vacuum, phase: 'bit-change', active: index, next: pending[0]!.index, atMachine: false });
       say(
         machine,
         `Program ${index} of ${file.total} finished. The machine is homed and the vacuum stays on: change the cutter for program ${pending[0]!.index} before it plays.`,
@@ -308,7 +313,8 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     if (outcome.kind === 'aborted' || outcome.kind === 'stopped-unconfirmed') {
       const vacuum =
         outcome.kind === 'aborted' && outcome.stop.kind === 'stopped' ? (outcome.stop.vacuumOff ? 'off' : 'unknown') : 'unknown';
-      patch(machine, { phase: 'stopped', active: index, next: null, vacuum, stoppedBetween: false });
+      // D-17: a resume plays a program again, so it is a fresh start and asks for the tick again.
+      patch(machine, { phase: 'stopped', active: index, next: null, vacuum, stoppedBetween: false, atMachine: false });
       say(
         machine,
         `Program ${index} of ${file.total} did not finish. The stock stays reserved; resuming plays program ${index} again from its beginning.`,
@@ -353,7 +359,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       const planned = releasePrograms(job.name, generated.programs, done);
       if (current !== undefined && current.jobId === job.id && sameHashes(current.files, planned)) {
         // A remount, or a refresh after a run finished elsewhere: keep the upload results and the
-        // once-per-release confirmations, and read the finished list again.
+        // confirmations (the at-machine tick, the face file), and read the finished list again.
         const merged = releasePrograms(job.name, generated.programs, done).map((f, i) => ({
           ...f,
           upload: current.files[i]!.upload,
@@ -410,7 +416,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         const f = files[i]!;
         if (f.upload === 'uploaded' || f.upload === 'present') continue;
         if (get().records[machine]?.stopAsked === true) {
-          patch(machine, { phase: 'stopped', uploading: null });
+          patch(machine, { phase: 'stopped', uploading: null, atMachine: false });
           say(machine, 'Uploading stopped. The files already written stay on the card.');
           return;
         }
@@ -500,7 +506,8 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         // undoes mid-cut. `startRelease` refuses `closing`, and the panel disables the button.
         patch(machine, { phase: 'closing', next: null, stopAsked: false, stoppedBetween: true });
         void closeSpan(machine, 'Stopped between programs.').finally(() => {
-          if (get().records[machine]?.phase === 'closing') patch(machine, { phase: 'stopped' });
+          // D-17: the stop cleared it, so a resume asks for the tick again.
+          if (get().records[machine]?.phase === 'closing') patch(machine, { phase: 'stopped', atMachine: false });
         });
       }
     },

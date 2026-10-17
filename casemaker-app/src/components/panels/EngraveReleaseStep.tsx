@@ -3,7 +3,7 @@
  * stop at the bit change, and say what the vacuum is doing across it.
  *
  * The store is `store/engraveReleaseStore.ts`. This component draws its state and makes the physical
- * confirmations the step cannot: the once-per-run "I am at the machine", and the bit-change
+ * confirmations the step cannot: the per-program "I am at the machine", and the bit-change
  * confirmation naming the next cutter, its `M491` reading and the Z0 difference. The run itself is
  * still `machineRunStore`'s entry, drawn through `EngraveMachineRun controlled`, so progress, Stop,
  * the end-of-run lines and the offcut question are the same components the single-file run uses.
@@ -88,12 +88,16 @@ function ChangePanel({
   next,
   ok,
   setOk,
+  atMachine,
+  setAtMachine,
   onConfirm,
 }: {
   previous: ReleaseFile;
   next: ReleaseFile;
   ok: boolean;
   setOk: (v: boolean) => void;
+  atMachine: boolean;
+  setAtMachine: (v: boolean) => void;
   onConfirm: () => void;
 }): JSX.Element {
   const label = labelOf(next.toolKey);
@@ -127,10 +131,21 @@ function ChangePanel({
         />{' '}
         The cutter is changed, calibrated (M491), and Z0 is set from the two readings.
       </label>
+      {/* D-17 — the at-machine tick is per PROGRAM: the bit-change pause cleared it, and program
+          {next.index} does not start until the operator standing there says it again. */}
+      <label style={MUTED}>
+        <input
+          type="checkbox"
+          checked={atMachine}
+          data-testid="engrave-release-at-machine"
+          onChange={(e) => setAtMachine(e.target.checked)}
+        />{' '}
+        I am at the machine, with the head clear and the stock clamped — for program {next.index}.
+      </label>
       <button
         type="button"
         data-testid="engrave-release-change-done"
-        disabled={!ok}
+        disabled={!ok || !atMachine}
         style={{ width: '100%', padding: 7, marginTop: 6 }}
         onClick={onConfirm}
       >
@@ -335,7 +350,8 @@ export function EngraveReleaseStep({
                     data-testid="engrave-release-at-machine"
                     onChange={(e) => setAtMachine(target, e.target.checked)}
                   />{' '}
-                  I am at the machine, with the head clear and the stock clamped — asked once for the whole release.
+                  I am at the machine, with the head clear and the stock clamped — asked for each program, and
+                  again after a stop.
                 </label>
                 <button
                   type="button"
@@ -382,6 +398,8 @@ export function EngraveReleaseStep({
                 next={nextAtIndex}
                 ok={changeOk}
                 setOk={(v) => setChangeOkFor(v ? nextAtIndex.index : null)}
+                atMachine={atMachine}
+                setAtMachine={(v) => setAtMachine(target, v)}
                 onConfirm={() => confirmChange(target)}
               />
               <button

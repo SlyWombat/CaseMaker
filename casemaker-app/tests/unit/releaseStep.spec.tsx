@@ -291,7 +291,11 @@ describe('#469 the release step', () => {
       useEngraveReleaseStore.getState().records[`${TARGET.host}:${TARGET.port}`]?.notes.some((n) => n.includes('stays on')),
     ).toBe(true);
 
+    // D-17 — the bit change cleared the at-machine tick: program 2 does not start without it.
+    expect((screen.getByTestId('engrave-release-change-done') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
+    expect((screen.getByTestId('engrave-release-change-done') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
     fireEvent.click(screen.getByTestId('engrave-release-change-done'));
     await screen.findByTestId('engrave-release-done', undefined, { timeout: 10000 });
 
@@ -301,6 +305,23 @@ describe('#469 the release step', () => {
     ]);
     // M332 was in program 2's own text, not sent by the release step between files.
     expect(sent.filter((l) => l === 'M332')).toHaveLength(0);
+  }, 30000);
+
+  it('asks “I am at the machine” again for every program: the bit change clears the tick (D-17)', async () => {
+    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    await uploadAndStart();
+    await screen.findByTestId('engrave-release-change', undefined, { timeout: 10000 });
+
+    // Program 1 ran with the tick; the pause cleared it, so program 2's start is disabled until
+    // the operator standing at the machine says so for THIS program.
+    expect(record()?.atMachine).toBe(false);
+    const done = () => screen.getByTestId('engrave-release-change-done') as HTMLButtonElement;
+    expect(done().disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
+    expect(done().disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
+    expect(record()?.atMachine).toBe(true);
+    expect(done().disabled).toBe(false);
   }, 30000);
 
   it('a Stop between programs closes the span: M332 then $H, on an Idle machine', async () => {
@@ -424,6 +445,9 @@ describe('#469 the release step', () => {
 
     releaseSpanClose();
     await waitFor(() => expect(record()?.phase).toBe('stopped'), { timeout: 5000 });
+    // D-17 — the stop cleared the tick, so a resume is a fresh start.
+    expect((screen.getByTestId('engrave-release-start') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
     expect((screen.getByTestId('engrave-release-start') as HTMLButtonElement).disabled).toBe(false);
 
     fireEvent.click(screen.getByTestId('engrave-release-start'));
@@ -445,6 +469,7 @@ describe('#469 the release step', () => {
       useEngraveReleaseStore.getState().stop(TARGET);
     });
     await waitFor(() => expect(record()?.phase).toBe('stopped'), { timeout: 5000 });
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
     fireEvent.click(screen.getByTestId('engrave-release-start'));
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 5000 });
 
