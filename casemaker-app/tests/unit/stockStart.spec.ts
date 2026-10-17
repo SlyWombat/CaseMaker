@@ -23,7 +23,8 @@ import {
   jobItemCount,
   stockStillNamed,
 } from '@/engine/cnc/stockStart';
-import { meshAsStock, plain3mfProblem, readStockFile, sha256Hex } from '@/engine/import/meshStock';import { strToU8, zipSync } from 'fflate';
+import { meshAsStock, plain3mfProblem, readStockFile, sha256Hex } from '@/engine/import/meshStock';
+import { strToU8, zipSync } from 'fflate';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 import { StockItemSchema, stockProblem, type StockItem } from '@/platform/stockClient';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
