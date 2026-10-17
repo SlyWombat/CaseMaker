@@ -895,7 +895,6 @@ describe('JobSetup (#419 J2)', () => {
         stock: BLANK,
         mount,
         expectedSurface: { machineZ: -56.172, from: 'the vise top and the blank’s proud height' },
-        seekFromMachineZ: -3,
         fixtureBelowSurfaceMm: mount === 'vise' ? 0.72 : undefined,
         bracketOrigin:
           mount === 'bracket'
