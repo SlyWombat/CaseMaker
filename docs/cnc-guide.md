@@ -600,7 +600,12 @@ touch a side — it finds an edge by touching *down* at points across it and wat
 reading changes, and the steps that would tell you to do that are held until a review's findings
 are fixed (a travel limit named as a field the machine has, a tip diameter stated as measured when
 no tip has been measured, a correction that reads back to front). The plan itself is written and
-tested (`materialScan.ts`); it reaches no sheet until those steps are safe to follow. When the job
+tested (`materialScan.ts`); it reaches no sheet until those steps are safe to follow. On a
+**V-carve** job the sheet also states the bit's cone, the **colour plane** it resolved from the
+print — the layer-quantised film, with the file's raw boundary beside it — each item's plane radius,
+floor inset and surface outset, and the **effective pass pitch beside the requested one**; a pitch
+the CAM had to clamp is printed in the same warning words as the app's note, so the paper and the
+program cannot disagree. When the job
 declares
 sacrificial material (#213) the loading
 section also carries a **side view** of the assembly — the jaws at the faces they really clamp,

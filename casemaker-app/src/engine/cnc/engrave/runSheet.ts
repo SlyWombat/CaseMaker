@@ -27,6 +27,11 @@ import {
 } from '@/engine/cnc/engrave/depthBounds';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { cutterLegend, cutterProfileSvg } from '@/engine/cnc/cutterProfile';
+// #221 — the V-carve facts are the CAM's own arithmetic and cone resolution, imported rather than
+// re-derived: the sheet, the panel and the program must not print different plane radii or pitches.
+import { vCone } from '@/engine/cnc/vProfile';
+import { vCarvePlane, vCarveStepover } from '@/engine/cnc/vCarveGeometry';
+import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
 import {
   alongWord,
@@ -2050,6 +2055,58 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
   ];
 }
 
+/**
+ * The blank's colour plane, mm below the top face — the CAM's `f` (#221).
+ *
+ * `colourBoundaryFor` (`workers/sim/stackDepthLimit.ts`) owns the gate at generate time, but it
+ * lives on the worker side of the engine→worker boundary. This module is pure engine data and must
+ * not invert that direction, so it calls the SAME pure arithmetic the worker helper wraps:
+ * `colourBoundaryDepthFor` (`layerStack.ts`, whose own comment names the run sheet as a caller).
+ *
+ * The gate is the job's FILM SOURCE, not a second rule: `toPartPlan` copies `job.stock.print` into
+ * `plan.stock.split`/`layerHeight`, so a job that states no print (or whose plan carries no grid)
+ * has no colour plane — exactly the `gridOf` test `colourBoundaryFor` applies. The raw model split
+ * is deliberately not used: the printed boundary is layer-quantised, and the resolved value is the
+ * material (the thick fixture's 0.81 reads 0.80 on 0.2 mm layers; no finding is raised).
+ *
+ * FOLLOW-UP (#492/J19): when the laminate's `stock.colour` cap lands, its gate joins this one. The
+ * print path is implemented now because it is the only film source in this base.
+ */
+function colourPlaneFor(job: EngraveJob, plan: PartPlan): Mm | null {
+  const { thickness, split, layerHeight, firstLayerHeight } = plan.stock;
+  if (job.stock.print === undefined || split === undefined || layerHeight === undefined) return null;
+  return colourBoundaryDepthFor(thickness, split, layerHeight, firstLayerHeight ?? layerHeight);
+}
+
+/**
+ * §1's colour-plane statement for a V-carve job (#221): the resolved film, with the file's raw
+ * model split beside it, or the no-film case where the plane IS the floor. The issue asks for the
+ * raw beside the resolved value verbatim ("0.80 mm below the top, from the file's 0.81 on 0.2 mm
+ * layers") because the snap is the print's, not an error to be corrected.
+ */
+function colourPlaneStep(job: EngraveJob, plan: PartPlan, film: Mm | null): RunSheetStep {
+  const print = job.stock.print;
+  if (film === null || print === undefined || plan.stock.split === undefined) {
+    return {
+      text:
+        'The blank states no colour film, so the V-bit’s colour plane IS the floor: the design is ' +
+        'correct at the cut depth, and a pointed bit draws a line twice the depth times ' +
+        'tan(half-angle) wide at the surface and nothing at the bottom.',
+      value: 'no film — the plane is the floor',
+    };
+  }
+  const raw = plan.stock.thickness - plan.stock.split;
+  const layer = plan.stock.layerHeight ?? print.layerHeight;
+  return {
+    text:
+      `The colour plane — where the V-bit’s design is correct — is ${fmtNum(film)} mm below the top, ` +
+      `from the file's raw ${fmtNum(raw)} mm boundary on ${fmtNum(layer)} mm layers. The print is ` +
+      'layer-quantised, so this is the printed boundary rather than the model’s arithmetic; no ' +
+      'warning is raised for the difference.',
+    value: `colour plane ${fmtNum(film)} mm`,
+  };
+}
+
 export function buildRunSheet(
   job: EngraveJob,
   generated: RunSheetGenerated,
@@ -2134,6 +2191,13 @@ export function buildRunSheet(
   const tool = jobTool(job);
   const diameter = tool ? cuttingDiameter(tool) : null;
   const params = generated.feeds && generated.feeds.ok ? generated.feeds.params : null;
+  // #221 — the V-carve facts are resolved ONCE, with the engine's own functions: the cone from the
+  // job's cutter, and the colour plane from the print grid the plan carries. A V-carve job is a V
+  // bit cutting a REGION: a trace-only V job has a cone but no plane geometry to state, and a flat
+  // job has neither, so both get none of the steps below.
+  const cone = tool === null ? null : vCone(tool);
+  const film = colourPlaneFor(job, plan);
+  const vCarveJob = cone !== null && items.length > 0;
   const nc = generated.nc;
   // #347 — the JOB's machine. Read once, here, rather than handed in: the name is the profile's and
   // no saved calibration touches it, so the sheet and the panel cannot disagree about which machine
@@ -2174,6 +2238,24 @@ export function buildRunSheet(
         'touch tip, so it triggers on PLA (measured 2026-10-08, 0.001 mm). The 3D Probe stays in reserve.',
     },
   ];
+  // #221 — a V-carve job's design is not the tip: it is the cone's width at the colour plane. State
+  // the cone and the plane before the cutter is loaded, so the operator can check the bit and the
+  // blank's printed film against the numbers §7 uses.
+  if (vCarveJob && cone !== null) {
+    needSteps.splice(
+      2,
+      0,
+      {
+        text:
+          'The V-bit’s cone. The design is correct at the colour plane, not at the tip: every width ' +
+          'this sheet states is measured on the cone’s wall at that plane.',
+        value:
+          `⌀ ${fmtNum(cone.tipRadius * 2)} mm tip · ${fmtNum(cone.halfAngleDeg)}° half-angle ` +
+          `(${fmtNum(cone.halfAngleDeg * 2)}° included)`,
+      },
+      colourPlaneStep(job, plan, film),
+    );
+  }
   // #445 — a thread program cuts the thread only; the pilot is not in the file. The sheet says what
   // has to exist before it runs: the ISO basic minor (D1 = D − 1.0825P, `FASTENERS`) and the depth,
   // cleared by the shop's own `pilotTipClearanceMm`. The pilot DEPTH is not recomputed here —
@@ -2575,10 +2657,50 @@ export function buildRunSheet(
           ? ` (DEEPER than the ${fmtNum(keepOutLimit(job, over.solidThickness, margins.boundaryMargin))} mm the void allows)`
           : ` (deepest cut there ${fmtNum(keepOutLimit(job, over.solidThickness, margins.boundaryMargin))} mm)`)
       : '';
-    cutSteps.push({
-      text: `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)}`,
-      value: `${fmtNum(item.depth)} mm deep`,
-    });
+    if (vCarveJob && cone !== null) {
+      // #221 — the per-item V facts are the CAM's own numbers: the plane from `vCarvePlane`, the
+      // pitch from `vCarveStepover` at the ratio the feeds row's step-over states (the same ratio
+      // the `vcarve-stepover-clamped` finding reads). The design is correct at the colour plane, so
+      // the floor inset and the surface outset are what the operator should expect to see in the
+      // blank; the effective pitch is what the program actually runs.
+      const plane = vCarvePlane(cone, item.depth, film);
+      const ratio =
+        params === null || cone.tipRadius <= 0 ? null : params.stepOver / (2 * cone.tipRadius);
+      const stepover =
+        ratio !== null && Number.isFinite(ratio) && ratio > 0 && ratio <= 1
+          ? vCarveStepover(plane.planeRadius, cone, ratio)
+          : null;
+      // The clamp sentence is the finding's own, not a softer paraphrase: the sheet, the panel and
+      // §8 must agree that this is a note about a correct cut, not a fault. §8 carries the full
+      // finding verbatim; this line states the same fact beside the item's numbers.
+      const pitch =
+        stepover === null
+          ? 'the pass pitch was not resolved for this job'
+          : `pass pitch ${fmtNum(stepover.effective)} mm at the colour plane, from the requested ` +
+            `${fmtNum(stepover.requested)} mm` +
+            (stepover.clamped
+              ? ` — clamped to the cutter’s ${fmtNum(cone.tipRadius)} mm tip radius: a wider pitch ` +
+                'would leave a ridge of the top colour down strokes narrower than two passes apart'
+              : '');
+      cutSteps.push({
+        text:
+          `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+          (film === null
+            ? 'with no film the colour plane is the floor, and the cone reaches '
+            : 'at the colour plane the cone reaches ') +
+          `${fmtNum(plane.planeRadius)} mm radius: the floor is ${fmtNum(plane.floorInset)} mm ` +
+          `inside the design each side, the surface ${fmtNum(plane.surfaceOutset)} mm outside it; ` +
+          `${pitch}.`,
+        value:
+          `${fmtNum(item.depth)} mm deep · plane radius ${fmtNum(plane.planeRadius)} mm · ` +
+          `floor inset ${fmtNum(plane.floorInset)} mm · surface outset ${fmtNum(plane.surfaceOutset)} mm`,
+      });
+    } else {
+      cutSteps.push({
+        text: `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)}`,
+        value: `${fmtNum(item.depth)} mm deep`,
+      });
+    }
   }
   cutSteps.push({
     text: 'Stay at the machine. Stop it if the sound changes, the blank moves, or the cutter loads up.',
