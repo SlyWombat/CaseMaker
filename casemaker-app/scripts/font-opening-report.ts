@@ -19,6 +19,11 @@
 // NOT model decision 14's depth coupling (a stroke wider than w(d) can only be reached at a
 // shallower floor). See §7.4.
 //
+// The legibility bar is the app's DEFAULT (#451). Since #451 the bar is a shop setting
+// (`engrave.lostDetailWarnRatio`); a script has no location to read, so every `✓`/`✗` below is
+// judged at the labelled fallback the app ships with, and the report says so where it states the
+// threshold.
+//
 // Run (Windows, from casemaker-app; `node_modules` are Windows-native):
 //   npx tsx --tsconfig tsconfig.scripts.json scripts/font-opening-report.ts
 
@@ -34,7 +39,14 @@ import { BUNDLED_FONTS, registerBundledFontBytes } from '@/engine/fonts/registry
 import { BUNDLED_FONT_URLS } from '@/engine/fonts/fontAssets';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { labelProfile, toPartPlan } from '@/engine/cnc/engrave/partPlan';
-import { LOST_DETAIL_RATIO, measureLabels, type PerCharGlyph } from '@/workers/sim/engraveGeometry';
+import { LOST_DETAIL_RATIO_FALLBACK, measureLabels, type PerCharGlyph } from '@/workers/sim/engraveGeometry';
+
+/**
+ * The app's legibility bar as this report judges it (#451). A script has no location to read, so
+ * this is the labelled DEFAULT: a shop that changed `engrave.lostDetailWarnRatio` gets a table
+ * judged at 90 %, and the report's own header says which bar it used.
+ */
+const LOST_DETAIL_RATIO = LOST_DETAIL_RATIO_FALLBACK;
 import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
 
 const here = dirname(fileURLToPath(import.meta.url));
