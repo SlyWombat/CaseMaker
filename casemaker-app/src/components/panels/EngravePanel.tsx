@@ -18,6 +18,7 @@ import { canDriveMachine } from '@/platform/capabilities';
 import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { EngraveReleaseStep } from './EngraveReleaseStep';
 import { EngravePreflight } from './EngravePreflight';
+import { EngraveRegistrationStep } from './EngraveRegistrationStep';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
@@ -2702,7 +2703,17 @@ export function EngravePanel(): JSX.Element {
       )}
         </>
       ) : (
-        preflight !== null && <EngravePreflight report={preflight} onBackToDesign={backToDesign} />
+        preflight !== null && (
+          <>
+            {/* #495 — the registration step runs the setup's approved plan, then the gate's
+                findings read below it. The release step (slice 3) mounts on this same page. */}
+            <EngraveRegistrationStep
+              job={job}
+              target={machine === null ? null : { host: machine.host, port: machine.port }}
+            />
+            <EngravePreflight report={preflight} onBackToDesign={backToDesign} />
+          </>
+        )
       )}
     </div>
   );

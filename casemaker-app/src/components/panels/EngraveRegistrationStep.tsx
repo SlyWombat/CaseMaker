@@ -1,0 +1,501 @@
+/**
+ * #495 — THE REGISTRATION STEP, from the Cut screen: run the setup's APPROVED registration plan on
+ * the machine, show what every touch found, and — only from a measurement inside the margin — write
+ * the origin and record the outcome for the release step.
+ *
+ * WHERE THE PLAN COMES FROM. `job.setups[0].registration.plan` is the plan the Setups section
+ * planned and the operator approved (#471). It is deliberately NOT re-derived here: a location's
+ * `registration.*` settings can move, and re-planning would silently replace the steps that were
+ * approved. A job with no approved plan shows that sentence and runs nothing.
+ *
+ * WHAT IT RUNS. `runRegistration(plan)` (#430, J17's executor) — home, fit the wired probe, M491,
+ * the surface seek, the edge scans, and home again — over the same `attachConsole` the rest of the
+ * app uses. The executor polls `?` and stops on an alarm; this component adds only the operator
+ * prompts it cannot make and the display of what came back.
+ *
+ * WHAT IT WRITES. `applyCorrection(outcome, …)` is called only when the measurement is usable AND
+ * every measured deviation is inside the plan's margin (#495 §4: a spread wider than the band is a
+ * refusal, not an origin). It writes `G10 L2 P1 X Y Z` in #387's order, after the cutter's own
+ * `M491`, and only after the operator presses the button. The outcome is then recorded in
+ * `engraveRegistrationStore` — the ONE registration record #494's release gate reads. An unusable
+ * or out-of-margin measurement writes nothing and records nothing, so the release stays blocked.
+ *
+ * `RegistrationOutcome` is SESSION state (#495 decision): the document holds the approved plan, not
+ * the last measurement.
+ *
+ * #475's extents touches are not shown as measured here: `runRegistration` probes the registration
+ * point and the edges, while #475's surface-spread plan is printed by the run sheet and has no
+ * console executor in this base. The step does not invent readings for it.
+ */
+
+import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
+import type { EngraveJob } from '@/types/engraveJob';
+import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
+import type { RegistrationOutcome, ScanRecord } from '@/engine/cnc/registration/outcome';
+import { summarizeOutcome, summarizePlan } from '@/engine/cnc/registration/summary';
+import {
+  applyCorrection,
+  runRegistration,
+  type ApplyResult,
+  type OperatorStep,
+  type RunResult,
+  type Transcript,
+} from '@/engine/cnc/registration/execute';
+import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
+import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+
+const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
+const MONO: CSSProperties = {
+  fontSize: 10,
+  fontFamily: 'monospace',
+  maxHeight: 150,
+  overflow: 'auto',
+  margin: '4px 0',
+  color: '#c8d3de',
+};
+const BOX: CSSProperties = {
+  marginTop: 6,
+  padding: 8,
+  border: '1px solid #3a4552',
+  borderRadius: 4,
+  background: '#1b2027',
+};
+const OK = '#9fd19b';
+const BAD = '#f0b4ad';
+const WARN = '#e0c07a';
+
+export interface EngraveRegistrationStepProps {
+  /** The job whose approved setup-1 registration is run. */
+  job: EngraveJob;
+  /** Where the machine was last reached, or null. The step cannot do anything without one. */
+  target: { host: string; port: number } | null;
+}
+
+type Phase = 'idle' | 'running' | 'measured' | 'writing' | 'recorded' | 'failed';
+
+const TOUCH_WORDS: Record<string, string> = {
+  stock: 'on the stock',
+  below: 'BELOW — off the stock (MISS)',
+  above: 'HIGH — something above the surface',
+  miss: 'MISS — nothing within the cap',
+};
+
+const n = (v: number): string => String(Math.round(v * 1000) / 1000);
+
+/** The plan the Setups section approved for the job's first setup, or why there is none. */
+function approvedPlan(job: EngraveJob): { plan: RegistrationPlan | null; why: string | null } {
+  if (job.setups === undefined) {
+    return {
+      plan: null,
+      why: 'This job has no saved setup yet. Plan its registration in Design → Setups, approve it, then run it here.',
+    };
+  }
+  const registration = job.setups[0]?.registration;
+  if (registration === undefined) {
+    return {
+      plan: null,
+      why: 'Setup 1 has no approved registration plan. Plan and approve it in Design → Setups, then run it here.',
+    };
+  }
+  return { plan: registration.plan, why: null };
+}
+
+/**
+ * Whether the origin may be written from this measurement.
+ *
+ * `usable` is the executor's own rule (every edge bracketed, every axis measured, every touch where
+ * it was sent). A measurement outside the edge margin is still "usable" but is exactly the refusal
+ * #495 §4 names, so it gets no origin. The one exception is the bracket's X/Y taken on trust: there
+ * is no measured deviation to be outside a margin when the confirming touch was not taken.
+ */
+function writerRefusal(outcome: RegistrationOutcome): string | null {
+  if (!outcome.usable) {
+    return `No origin is written from this measurement: ${outcome.problems.join('; ')}.`;
+  }
+  const measuredXY = outcome.bracketCheck !== undefined || outcome.currentG54 !== null;
+  if (measuredXY && !outcome.withinMargin) {
+    return `No origin is written: the stock is outside the ${n(outcome.margin)} mm margin. ${summarizeOutcome(outcome)} Re-seat it and run the registration again.`;
+  }
+  return null;
+}
+
+/** A scan's touches, in the executor's own classifications. */
+function ScanBlock({ record, index }: { record: ScanRecord; index: number }): JSX.Element {
+  const scan = record.scan;
+  return (
+    <div data-testid={`engrave-registration-scan-${index}`} data-edge={scan.edge} style={{ margin: '5px 0' }}>
+      <div style={{ fontSize: 11, color: '#d1d5db' }}>
+        <strong>{scan.label ?? `The ${scan.edge} edge`}</strong> — expected at {n(scan.expectedAt)} mm
+        {scan.label === undefined ? '' : ` (${scan.edge})`}
+      </div>
+      {record.touches.map((touch, i) => (
+        <div
+          key={i}
+          data-testid={`engrave-registration-touch-${index}-${i}`}
+          data-kind={touch.kind}
+          style={{ ...MUTED, paddingLeft: 10 }}
+        >
+          {n(touch.at)} mm · machine Z {touch.prb.touched ? n(touch.prb.z) : 'no touch'} ·{' '}
+          {TOUCH_WORDS[touch.kind] ?? touch.kind}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TranscriptBlock({ transcript }: { transcript: Transcript[] }): JSX.Element {
+  if (transcript.length === 0) return <></>;
+  return (
+    <details style={{ marginTop: 4 }}>
+      <summary style={MUTED}>Machine transcript ({transcript.length} lines)</summary>
+      <pre style={MONO} data-testid="engrave-registration-transcript">
+        {transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n')}
+      </pre>
+    </details>
+  );
+}
+
+export function EngraveRegistrationStep({ job, target }: EngraveRegistrationStepProps): JSX.Element {
+  const { plan, why } = approvedPlan(job);
+  const record = useEngraveRegistrationStore((s) => s.record);
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [atMachine, setAtMachine] = useState(false);
+  const [prompt, setPrompt] = useState<OperatorStep | null>(null);
+  const [result, setResult] = useState<RunResult | null>(null);
+  const [written, setWritten] = useState<ApplyResult | null>(null);
+  const [homeNote, setHomeNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleRef = useRef<ConsoleHandle | null>(null);
+  const resolverRef = useRef<((ok: boolean) => void) | null>(null);
+  const aliveRef = useRef(true);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      resolverRef.current?.(false);
+      resolverRef.current = null;
+      const handle = handleRef.current;
+      handleRef.current = null;
+      void handle?.close();
+    };
+  }, []);
+
+  const busy = phase === 'running' || phase === 'writing';
+
+  function askOperator(step: OperatorStep): Promise<boolean> {
+    if (!aliveRef.current) return Promise.resolve(false);
+    setPrompt(step);
+    return new Promise<boolean>((resolve) => {
+      resolverRef.current = (ok) => {
+        resolverRef.current = null;
+        if (aliveRef.current) setPrompt(null);
+        resolve(ok);
+      };
+    });
+  }
+
+  function answer(ok: boolean): void {
+    resolverRef.current?.(ok);
+  }
+
+  /** Stop, then home. The executor's stop sentence has already cleared G90/$X where it could. */
+  async function homeAfterStop(handle: ConsoleHandle, reason: string): Promise<string> {
+    try {
+      if (/alarm/i.test(reason)) await handle.send('$X');
+      const reply = await handle.send('$H');
+      return reply.kind === 'sent'
+        ? 'The machine was homed after the stop.'
+        : `The machine did not answer the home command (${reply.kind}) — home it by hand.`;
+    } catch {
+      return 'The machine could not be homed — home it by hand.';
+    }
+  }
+
+  async function start(): Promise<void> {
+    if (target === null || plan === null || !atMachine || busy) return;
+    setPhase('running');
+    setResult(null);
+    setWritten(null);
+    setHomeNote(null);
+    setError(null);
+    const handle = attachConsole(target);
+    handleRef.current = handle;
+    try {
+      const r = await runRegistration(plan, {
+        console: { send: (line) => handle.send(line) },
+        // The at-machine tick already names the wired probe, so the executor's first prompt is
+        // answered by it; every other step (the bracket's clamps, the cutter) is a fresh press.
+        operator: (step) => (step.kind === 'fit-probe' ? Promise.resolve(true) : askOperator(step)),
+      });
+      if (!aliveRef.current) return;
+      if (!r.ok) {
+        const note = await homeAfterStop(handle, r.reason);
+        if (!aliveRef.current) return;
+        setResult(r);
+        setHomeNote(note);
+        setPhase('failed');
+        handleRef.current = null;
+        await handle.close();
+        return;
+      }
+      setResult(r);
+      setPhase('measured');
+      if (writerRefusal(r.outcome) !== null) {
+        handleRef.current = null;
+        await handle.close();
+      }
+    } catch (e) {
+      if (!aliveRef.current) return;
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase('failed');
+      handleRef.current = null;
+      await handle.close();
+    }
+  }
+
+  async function writeOrigin(): Promise<void> {
+    if (target === null || plan === null || result?.ok !== true || busy) return;
+    if (writerRefusal(result.outcome) !== null) return;
+    setPhase('writing');
+    setError(null);
+    const handle = handleRef.current ?? attachConsole(target);
+    handleRef.current = handle;
+    try {
+      const a = await applyCorrection(
+        result.outcome,
+        { console: { send: (line) => handle.send(line) }, operator: askOperator },
+        { confirmed: true },
+      );
+      if (!aliveRef.current) return;
+      setWritten(a);
+      if (!a.ok) {
+        setPhase('failed');
+        handleRef.current = null;
+        await handle.close();
+        return;
+      }
+      record(job.id, target, plan, result.outcome);
+      setPhase('recorded');
+      handleRef.current = null;
+      await handle.close();
+    } catch (e) {
+      if (!aliveRef.current) return;
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase('failed');
+      handleRef.current = null;
+      await handle.close();
+    }
+  }
+
+  function again(): void {
+    // A measurement that was not written still holds the console open: release it before a new run.
+    const handle = handleRef.current;
+    handleRef.current = null;
+    void handle?.close();
+    setPhase('idle');
+    setResult(null);
+    setWritten(null);
+    setHomeNote(null);
+    setError(null);
+    setPrompt(null);
+  }
+
+  const outcome = result?.ok === true ? result.outcome : null;
+  const refusal = outcome === null ? null : writerRefusal(outcome);
+  const data = result?.ok === true ? result.data : null;
+
+  return (
+    <div
+      data-testid="engrave-registration"
+      data-phase={phase}
+      data-state={plan === null ? 'no-plan' : busy ? 'busy' : phase}
+      style={{ ...BOX, marginTop: 8 }}
+    >
+      <h3 style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 600, color: '#c8d3de' }}>
+        Registration — find the stock, then set the origin
+      </h3>
+
+      {target === null && (
+        <p style={{ ...MUTED, color: WARN }} data-testid="engrave-registration-no-machine">
+          No machine is connected. Reach it first, then come back to register.
+        </p>
+      )}
+
+      {why !== null && (
+        <p style={{ ...MUTED, color: WARN }} data-testid="engrave-registration-no-plan">
+          {why}
+        </p>
+      )}
+
+      {plan !== null && (
+        <>
+          <p style={{ ...MUTED, color: '#c8d3de' }} data-testid="engrave-registration-plan">
+            Setup 1 · {job.setups?.[0]?.registration?.expected ?? 'the approved plan'}
+          </p>
+          <p style={MUTED} data-testid="engrave-registration-plan-summary">
+            {summarizePlan(plan)}
+          </p>
+
+          {(phase === 'idle' || phase === 'failed' || phase === 'recorded') && target !== null && (
+            <>
+              <label style={MUTED}>
+                <input
+                  type="checkbox"
+                  checked={atMachine}
+                  data-testid="engrave-registration-at-machine"
+                  onChange={(e) => setAtMachine(e.target.checked)}
+                />{' '}
+                I am at the machine, with the wired probe fitted and the head clear.
+              </label>
+              <button
+                type="button"
+                data-testid="engrave-registration-start"
+                disabled={!atMachine}
+                style={{ width: '100%', padding: 7, marginTop: 6 }}
+                onClick={() => void start()}
+              >
+                {phase === 'idle' ? 'Run the registration' : 'Run the registration again'}
+              </button>
+            </>
+          )}
+
+          {busy && (
+            <div data-testid="engrave-registration-waiting">
+              <p style={MUTED}>
+                {phase === 'writing' ? 'Writing the origin…' : 'Talking to the machine…'}
+              </p>
+              {prompt !== null && (
+                <div data-testid="engrave-registration-operator" style={{ marginTop: 6 }}>
+                  <p style={{ fontSize: 12, color: '#e6edf5', margin: '0 0 4px' }}>
+                    {prompt.text}
+                  </p>
+                  <button
+                    type="button"
+                    data-testid="engrave-registration-continue"
+                    style={{ padding: 6, marginRight: 6 }}
+                    onClick={() => answer(true)}
+                  >
+                    Continue
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="engrave-registration-stop"
+                    style={{ padding: 6 }}
+                    onClick={() => answer(false)}
+                  >
+                    Stop
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {result !== null && !result.ok && (
+            <div data-testid="engrave-registration-failed" style={{ marginTop: 6 }}>
+              <p style={{ fontSize: 12, color: BAD, margin: '0 0 4px' }}>{result.reason}</p>
+              {homeNote !== null && <p style={MUTED}>{homeNote}</p>}
+              <TranscriptBlock transcript={result.transcript} />
+            </div>
+          )}
+
+          {outcome !== null && data !== null && (
+            <div data-testid="engrave-registration-touches" style={{ marginTop: 6 }}>
+              <div
+                data-testid="engrave-registration-surface"
+                data-in-band={
+                  data.surface.z >= plan.seek.band.min && data.surface.z <= plan.seek.band.max
+                    ? 'true'
+                    : 'false'
+                }
+                style={{ fontSize: 11, color: '#d1d5db' }}
+              >
+                <strong>Surface</strong> at ({n(plan.surfacePoint.x)}, {n(plan.surfacePoint.y)}) — read
+                machine Z {n(data.surface.z)}, expected {n(plan.seek.band.min)} to{' '}
+                {n(plan.seek.band.max)}.
+              </div>
+              {data.scans.map((scan, i) => (
+                <ScanBlock key={i} record={scan} index={i} />
+              ))}
+
+              <div
+                data-testid="engrave-registration-verdict"
+                data-usable={outcome.usable ? 'true' : 'false'}
+                data-within-margin={outcome.withinMargin ? 'true' : 'false'}
+                style={{ fontSize: 12, color: refusal === null ? OK : BAD, marginTop: 6 }}
+              >
+                {summarizeOutcome(outcome)}
+              </div>
+              {outcome.problems.length > 0 && (
+                <ul style={{ ...MUTED, paddingLeft: 18 }} data-testid="engrave-registration-problems">
+                  {outcome.problems.map((problem, i) => (
+                    <li key={i}>{problem}</li>
+                  ))}
+                </ul>
+              )}
+
+              {phase === 'measured' && refusal === null && (
+                <>
+                  <p style={MUTED}>
+                    Writing the origin also asks you to take the probe out and fit the cutter; its{' '}
+                    <code>M491</code> sets Z0 in #387's order.
+                  </p>
+                  <button
+                    type="button"
+                    data-testid="engrave-registration-write"
+                    style={{ width: '100%', padding: 7, marginTop: 4 }}
+                    onClick={() => void writeOrigin()}
+                  >
+                    Write the origin from this measurement
+                  </button>
+                </>
+              )}
+              {refusal !== null && (
+                <p style={{ ...MUTED, color: BAD }} data-testid="engrave-registration-refusal">
+                  {refusal}
+                </p>
+              )}
+              <TranscriptBlock transcript={result !== null && result.ok ? result.transcript : []} />
+            </div>
+          )}
+
+          {written !== null && written.ok && (
+            <div data-testid="engrave-registration-written" style={{ marginTop: 6 }}>
+              <p style={{ fontSize: 12, color: OK, margin: '0 0 4px' }}>
+                Origin written: <code>{written.line}</code>
+              </p>
+              <p style={MUTED} data-testid="engrave-registration-recorded">
+                Registration recorded for the release step, with the plan that was approved.
+              </p>
+              <TranscriptBlock transcript={written.transcript} />
+            </div>
+          )}
+          {written !== null && !written.ok && (
+            <div data-testid="engrave-registration-write-failed" style={{ marginTop: 6 }}>
+              <p style={{ fontSize: 12, color: BAD, margin: '0 0 4px' }}>{written.reason}</p>
+              <TranscriptBlock transcript={written.transcript} />
+            </div>
+          )}
+
+          {error !== null && (
+            <p style={{ ...MUTED, color: BAD }} data-testid="engrave-registration-error">
+              {error}
+            </p>
+          )}
+
+          {(phase === 'measured' || phase === 'failed' || phase === 'recorded') && (
+            <button
+              type="button"
+              data-testid="engrave-registration-again"
+              style={{ width: '100%', padding: 5, marginTop: 6 }}
+              onClick={again}
+            >
+              Run it again
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
