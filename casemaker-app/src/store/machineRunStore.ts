@@ -354,7 +354,16 @@ const flags = new Map<string, { stop: boolean }>();
 
 export const useMachineRunStore = create<MachineRunState>((set, get) => {
   const patch = (machine: string, p: Partial<RunEntry>) =>
-    set((s) => ({ runs: { ...s.runs, [machine]: { ...(s.runs[machine] as RunEntry), ...p } } }));
+    set((s) => {
+      const current = s.runs[machine];
+      // A late callback from a run whose entry was forgotten — a reset while an `endOfRun` or
+      // offcut write was still in flight — must not resurrect a HALF entry. `prepare` is the only
+      // writer of `filename`, `programHash` and `lines`; a patch alone carries none of them, and
+      // `EngraveMachineRun` renders `entry.lines`, so a resurrected fragment would crash the panel.
+      // Dropping the patch is right: there is no run left for it to describe.
+      if (current === undefined) return s;
+      return { runs: { ...s.runs, [machine]: { ...current, ...p } } };
+    });
 
   return {
     runs: {},

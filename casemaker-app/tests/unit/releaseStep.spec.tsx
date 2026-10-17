@@ -47,6 +47,7 @@ import { facingRegistrationBlocker, releaseBlocker, uploadBlocker } from '@/stor
 import { planRegistration } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
+import type { StockItem } from '@/platform/stockClient';
 import { describeUpload } from '@/components/panels/engraveUploadCopy';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import type { VerifyReport } from '@/engine/cnc/verify';
@@ -846,6 +847,45 @@ describe('#469 the release step', () => {
     expect(describeRun(o)).toContain('stays on for the next program');
     expect(describeRun({ ...o, span: 'none' })).toContain('without the vacuum');
     expect(describeUpload({ kind: 'uploaded', filename: 'p.nc', bytes: 3, packets: 1, alreadyPresent: false, status: '' }, 'Z1')).toContain('p.nc');
+  });
+
+  // A run's end writes land AFTER the store says the run finished, and a test that resets the
+  // store while one is in flight used to leave a fragment behind: the late `patch` re-created the
+  // entry from nothing — no file, no `lines` — and `EngraveMachineRun` crashed on
+  // `entry.lines.length`, failing whichever test rendered next (a different one each run). The
+  // store now drops a patch for an entry that no longer exists.
+  it('a late end-of-run write cannot resurrect a forgotten run', async () => {
+    const key = machineKey(TARGET);
+    useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'hash-1');
+    const prepared = useMachineRunStore.getState().runs[key]!;
+    let answer: (r: { ok: boolean; text: string }) => void = () => {};
+    useMachineRunStore.setState({
+      runs: {
+        ...useMachineRunStore.getState().runs,
+        [key]: {
+          ...prepared,
+          end: {
+            kind: 'finished',
+            lines: [],
+            offcut: { item: { id: 'offcut-1' } as StockItem, text: 'offcut', state: 'asked' },
+            stockQuestion: null,
+          },
+        },
+      },
+    });
+    setRunEndIO({
+      ...runEndIO([]),
+      // The offcut write is the async step: the reset lands while it is in flight.
+      addOffcut: () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const keeping = useMachineRunStore.getState().keepOffcut(key);
+    resetMachineRunStore();
+    answer({ ok: true, text: '' });
+    await keeping;
+    expect(useMachineRunStore.getState().runs[key]).toBeUndefined();
   });
 });
 
