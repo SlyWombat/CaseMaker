@@ -3,11 +3,13 @@ import { aabbOfProfile } from '@/engine/compiler/profile';
 import { jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
   idJawReach,
+  jawGapFor,
   keepOutLimit,
   keepOutLimitParts,
   keepOutMembrane,
   labelGlyphMeasure,
   labelJawReach,
+  sweptCuts,
   toPartPlan,
   voidLimitForItem,
   type JawReach,
@@ -1845,7 +1847,7 @@ export function buildRunSheet(
   const measure = labelGlyphMeasure(job.customFonts ?? []);
   // #207 section 3: below the deepest cut that sweeps OVER a jaw, by the clearance the JOB keeps,
   // the cutter is under the jaw tops. The number is the job's own `jawClearance` (#362 review) — the
-  // same one `stock-proud-too-small` and `recommendLabelDepth` hold a floor to, so the printout
+  // same one `vise-jaw-collision` and `recommendLabelDepth` hold a floor to, so the printout
   // cannot tell the operator to stop somewhere the app does not. `null` when no cut comes over a jaw
   // (#369, #394): there is then no depth that would put a floor under one, and the step says so
   // instead of printing a stop the job cannot trip.
@@ -1857,6 +1859,27 @@ export function buildRunSheet(
       ? `value. If it is less than ${fmtNum(stopBelow)} mm, stop: ${deepestOver.item.name} sweeps ` +
         `over the ${deepestOver.reach.jaw} jaw, so the cutter would work below the jaw tops.`
       : 'value. No cut on this job sweeps over a jaw, so there is no stop threshold to check.';
+  // #488 — the load step states the proud it expects and the CLEARANCE RESULT, not a requirement.
+  // The nearest cut's swept extent and the jaw face it comes nearest decide whether the blank needs
+  // to stand higher at all; both are read through the same `sweptCuts`/`jawGapFor` pair
+  // `validateJob`'s `vise-jaw-collision` uses, so the paper and the panel cannot disagree.
+  const nearestCut = sweptCuts(job, plan).reduce<{
+    name: string;
+    jaw: 'fixed' | 'moving';
+    gap: number;
+  } | null>((nearest, cut) => {
+    const { jaw, gap } = jawGapFor(job, cut.box);
+    return nearest === null || gap < nearest.gap ? { name: cut.name, jaw, gap } : nearest;
+  }, null);
+  const clearanceWords =
+    nearestCut === null
+      ? 'No cut on this job comes near a jaw.'
+      : nearestCut.gap >= job.jawClearance
+        ? `Every cut keeps at least ${fmtNum(job.jawClearance)} mm clear of the jaws` +
+          // The note's own case (#488): a blank below the jaw tops is not a reason to find a packer.
+          (vise.stockProud <= 0 ? ', so the blank below the jaw tops needs no packer.' : '.')
+        : `The nearest cut, ${nearestCut.name}, comes within ${fmtNum(nearestCut.gap)} mm of the ` +
+          `${nearestCut.jaw} jaw face — inside the ${fmtNum(job.jawClearance)} mm the job keeps clear.`;
   const tool = jobTool(job);
   const diameter = tool ? cuttingDiameter(tool) : null;
   const params = generated.feeds && generated.feeds.ok ? generated.feeds.params : null;
@@ -2004,7 +2027,8 @@ export function buildRunSheet(
     },
     {
       text:
-        `The ${onBoard ? "part's " : ''}top face must stand ${fmtNum(vise.stockProud)} mm above the jaw tops. Record the measured ` +
+        `The ${onBoard ? "part's " : ''}top face stands ${fmtNum(vise.stockProud)} mm above the jaw tops. ` +
+        `${clearanceWords} Record the measured ` +
         stopWords,
       record: 'measured stock proud (mm)',
     },

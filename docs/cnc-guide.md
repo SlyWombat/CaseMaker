@@ -392,7 +392,7 @@ jaw's floor and names it too. The extent is the line's whole ink box — the hon
 cut, since the check it answers to is a positional one — measured from the same face the layout was,
 and where that face is not parsed yet the box falls back to a documented upper-bound estimate, which
 the sentence says where it is used ("measured against the line's estimated extent — its face is not
-parsed yet"). The reach behind both the jaw limit and the `stock-proud-too-small` warning is the
+parsed yet"). The reach behind the jaw limit the depth recommendation applies is the
 vise's own uncertainty plus the cutter's radius on that same box, and nothing else (#394): the band
 is where an unmeasured vise's faces may be, the radius is how far the cutter's disc works outside the
 line's box, and the job's **jaw clearance** is not in it — that is a Z rule, charged to the depth
@@ -999,9 +999,9 @@ simulation does report about one is the sweep's own list, next:
 | `thread-flute-unproven` | warning | Nothing recorded for the thread mill states its flute length, so the run-out below the last full thread has not been shown to clear the flutes (#208 records the owned cutters' lengths). | Record the cutter's flute length. |
 | `tool-missing` | error | The job names a tool that is not in the library. | Pick a real tool. |
 | `tool-metal-line` | error | The cutter is on Makera's "for Metal" line — its name says so (the `(Metal)` suffix a catalogue row uses, or the phrase `for Metal` the printed label carries), or its box code holds the `-M-` segment — and this job cuts wood or plastic. Its geometry and its coating are ground for metal, and no feed row was written for it on this material, so the pass is refused (#405). | Use a wood/plastic engraving bit for this blank, or change the stock to a metal before cutting. |
-| `stock-proud-too-small` | warning | A cut comes within the cutter's reach of a jaw — the vise's own uncertainty plus the cutter's radius — and the blank stands too far below the jaw tops for its depth, so the cutter would work below the jaws. | Seat the blank higher. |
+| `vise-jaw-collision` | error | A cut's swept extent comes inside the job's jaw clearance of a jaw face (the extent is an engrave's own outline — a pocket, or a label's glyph outline, both cut with the toolpath held inside it — a trace's stroke plus its radius, or a drill/thread disc), or the cut works so far below the jaw tops that the cutter's flute cannot reach it with the clearance kept (#488). A blank below the jaw tops is not refused by itself: what matters is where its cuts are. | Move the cut in from the jaw, or raise the blank on a packer and state how far it then stands proud; for the depth case, use a cutter with a longer flute. |
 | `vise-default` | warning | The vise dimensions are unmeasured defaults, so collisions cannot be trusted. | Measure your vise. |
-| `vise-stock-not-proud` | error | The blank is not proud of the jaws at all — the cutter would hit the vise. | Seat the blank proud. |
+| `vise-stock-not-proud` | warning | The blank sits at or below the jaw tops. Since #488 this is a note, not a refusal: the job's cuts were measured against the jaw faces and every one keeps the jaw clearance, so no packer is needed. | Nothing, unless a `vise-jaw-collision` names the cut that does not clear. |
 | `vise-stock-proud-exceeds-thickness` | error | The blank stands proud by more than its own thickness; the numbers do not add up. | Re-check the vise and stock numbers. |
 | `vise-grip-shallow` | warning | The jaws grip too little of the blank to hold it safely. | Seat the blank deeper, or use thicker stock. |
 | `vise-jaw-short` | warning | The jaws are shorter than the blank, so part of it is unsupported. | Check the jaw length. |

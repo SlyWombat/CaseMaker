@@ -149,12 +149,13 @@ export const LEDGE_WIDTH: Mm = 1.9;
  *     shipped 4 mm, so nothing that used the default changes.
  *
  * A blank NO TALLER than the step (#406) gets the seated value too, which is `≤ 0`. That is the
- * truth about it: seated on the ledges, its top is at or below the jaw tops. `validateVise` refuses
- * that (`vise-stock-not-proud`), and the refusal is the point. The app does not know how the blank
- * is raised (a packer, a shim, a different hold), so it states no jaw plane it cannot justify. The
- * user answers by stating the real proud in `ViseParams.stockProud`, the input this job already
- * has. Until #406 this branch returned `t/2` instead, which modelled the jaw tops up to 1.5 mm
- * BELOW the real ones on a 3 mm blank. Returning `0` would still be `3.1 − t` too low.
+ * truth about it: seated on the ledges, its top is at or below the jaw tops. Since #488 that is a
+ * NOTE rather than a refusal: the app does not know how the blank is raised (a packer, a shim, a
+ * different hold), so it states no jaw plane it cannot justify, and whether the job is cuttable is
+ * decided by where its cuts are — `validateJob` measures every cut's swept extent against the jaw
+ * faces and refuses (`vise-jaw-collision`) only when one comes too near. Until #406 this branch
+ * returned `t/2` instead, which modelled the jaw tops up to 1.5 mm BELOW the real ones on a 3 mm
+ * blank. Returning `0` would still be `3.1 − t` too low.
  */
 export function defaultStockProud(thickness: Mm): Mm {
   return Math.min(DEFAULT_STOCK_PROUD, thickness / 2, thickness - LEDGE_STEP);
@@ -319,10 +320,9 @@ function grippedHeights(
   vise: ViseParams,
   sacrificial: Sacrificial,
 ): { left: Mm; right: Mm } {
-  // Clamped to the blank's own thickness (#406): a stock at or below the jaw tops (`stockProud <= 0`,
-  // already refused by `vise-stock-not-proud`) is gripped over its whole height, never MORE than
-  // that. Without the clamp a 2 mm blank seated 1.1 mm below the jaw tops read as 3.1 mm gripped and
-  // the shallow-grip warning fell silent.
+  // Clamped to the blank's own thickness (#406): a stock at or below the jaw tops (`stockProud <= 0`)
+  // is gripped over its whole height, never MORE than that. Without the clamp a 2 mm blank seated
+  // 1.1 mm below the jaw tops read as 3.1 mm gripped and the shallow-grip warning fell silent.
   const partGrip = Math.min(stock.thickness, stock.thickness - vise.stockProud);
   const side = (strip: SacrificialSide | null, overhang: Mm): Mm => {
     // The strip bears when it is at least as thick as the board's overhang, else the board edge.
@@ -357,21 +357,10 @@ export function validateVise(
   const findings: JobFinding[] = [];
   const { width, thickness } = stock;
 
-  if (vise.stockProud <= 0) {
-    findings.push({
-      severity: 'error',
-      code: 'vise-stock-not-proud',
-      message:
-        `The stock stands ${fmtMm(vise.stockProud)} mm above the jaw tops — at or below the surface ` +
-        `being cut, so the tool would run into the jaws.` +
-        // #406: name WHY on the blank that cannot be seated proud, and what answers it.
-        (thickness <= LEDGE_STEP
-          ? ` A ${fmtMm(thickness)} mm blank is no taller than the jaws' ${LEDGE_STEP} mm ledge ` +
-            `step, so seated on the ledges its top is at or below the jaw tops. Raise it on a ` +
-            `packer and state how far it then stands proud.`
-          : ''),
-    });
-  }
+  // A blank at or below the jaw tops is NOT refused here (#488). Whether it can be cut depends on
+  // where the cuts are, not on the blank's height: a job whose cuts keep clear of the jaw faces
+  // works perfectly well below them. That rule needs the items, so it lives in `validateJob`
+  // (`vise-jaw-collision` and the `vise-stock-not-proud` note), where the geometry is known.
 
   if (vise.stockProud >= thickness) {
     findings.push({

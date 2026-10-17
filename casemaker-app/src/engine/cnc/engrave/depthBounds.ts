@@ -68,7 +68,7 @@ export interface MarginSettings extends Omit<EngraveMargins, 'source'> {
   breakthrough: Mm;
   /**
    * How far a cut's floor must stay above the vise jaws' TOPS, mm (#362) — the clearance the
-   * `stock-proud-too-small` check used to carry as a bare `1` in its own arithmetic.
+   * jaw-collision rule (`vise-jaw-collision`, #488) carries in its own arithmetic.
    *
    * A seed, like the three above: a new job takes it as its own `jawClearance`, and the check and
    * `recommendLabelDepth` both read that. The number is a property of the SETUP (how much room over
@@ -829,9 +829,10 @@ export function recommendLabelDepth(
   const { stockProud } = job.workholding.vise;
   // #369 — the jaw floor is a Z rule with an XY precondition, and the basis states which one held
   // rather than which number won. `reaches` is that precondition: the swept cut can come over a jaw
-  // once the vise's own band is allowed for (#394), which is the same reading `stock-proud-too-small`
-  // warns on, so a depth recommended here is never one the app's own warning refuses. The gap is
-  // measured against the line's own extent — MEASURED where its face is up, and `inkBoxOf`'s
+  // once the vise's own band is allowed for (#394). The recommendation is advisory — it may hold a
+  // floor to the band — while the refusal (`vise-jaw-collision`, #488) is judged on the stated
+  // geometry with no band, because an instruction has to be shown by the numbers the job holds. The
+  // gap is measured against the line's own extent — MEASURED where its face is up, and `inkBoxOf`'s
   // documented estimate where it is not (#394) — and either way that box CONTAINS the ink, so the
   // real distance is at least the number quoted: hence "at least", and hence "within" on the other
   // side.

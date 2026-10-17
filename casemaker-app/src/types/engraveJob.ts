@@ -953,9 +953,9 @@ export interface EngraveJob {
   breakthrough: Mm;
   /**
    * How far a cut's floor must stay above the vise jaws' TOPS, mm (#362). PROVISIONAL 1.0, the
-   * same clearance the `stock-proud-too-small` check carried as a bare `1` before #345's rule
-   * moved the number onto the document; the house setting (`MarginSettings.jawClearance`) only
-   * SEEDS it, exactly as it seeds `minFloor`.
+   * same clearance the jaw check carried as a bare constant before #345's rule moved the number
+   * onto the document (#488); the house setting (`MarginSettings.jawClearance`) only SEEDS it,
+   * exactly as it seeds `minFloor`.
    *
    * A property of the SETUP and not of the blank, which is why the job states its own: a blank
    * that will be re-fixtured, or an operator who wants more room over hardened jaws, should not

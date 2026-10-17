@@ -33,6 +33,7 @@ import type { CustomFont } from '@/types/textLabel';
 import { FASTENERS } from '@/engine/compiler/fasteners';
 import type { Mm } from '@/types/units';
 import { viseEnvelope } from '@/engine/cnc/fixture';
+import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import { supportedFootprint } from '@/engine/cnc/sacrificial';
 import { sweepRadiusForJob } from '@/engine/cnc/toolRegistry';
 import type { Tool } from '@/engine/cnc/tool';
@@ -166,7 +167,7 @@ export function labelProfile(label: EngraveLabel, customFonts: readonly CustomFo
  * is built out of this module's `labelProfile`: that function typesets at the origin, centred on the
  * line's own ink box, so a probe at (0, 0) hands the box straight back. Its readers — the seed that
  * lays a line out (`blankLabelSeed`), the store's re-depth walk, the panel's row, and the jaw reach
- * behind BOTH the `stock-proud-too-small` warning and §3's stop line (`labelJawReach`, #394) — must
+ * behind the jaw reach and depth recommendation (`labelJawReach`, #394) and §3's stop line — must
  * measure the same box, or a line can be laid out clear of a void and then advised the void's depth
  * anyway (#365), or charged a stop it does not come near (#394).
  *
@@ -1390,8 +1391,8 @@ export interface JawReach {
   gap: Mm;
   /**
    * The swept cut can come over this jaw, the vise's own band allowed for:
-   * `gap ≤ radius + uncertainty`. The reading the jaw FLOOR applies over (#369) — `validateJob`'s
-   * `stock-proud-too-small` and `recommendLabelDepth`.
+   * `gap ≤ radius + uncertainty`. The reading the jaw FLOOR applies over (#369) — the depth
+   * recommendation (`recommendLabelDepth`).
    */
   reaches: boolean;
   /**
@@ -1403,15 +1404,14 @@ export interface JawReach {
 
 /**
  * The whole `JawReach`, by ID — for a caller holding an item rather than a label: the run sheet's
- * stop line (#394), and `validateJob`'s `stock-proud-too-small`, which needs the reach whole so it
- * can word a cut inside the band differently from one that really comes over a jaw (#394 review).
- * Each reads the same funnel every other reader does and must not answer this question a second way.
+ * stop line (#394) and the depth recommendation (#369). Each reads the same funnel every other
+ * reader does and must not answer this question a second way.
  *
  * The whole rule lives here, once. A LABEL is the one kind with an extent this module can measure
  * (`labelJawReach`); every other id belongs to a shape, a trace or a drill, and for those the
  * STRICT reading stands — they are charged the jaw floor wherever they sit. That over-warns rather
  * than under-warns, it is what every one of them did before #369, and the geometric sweep
- * (`tool-into-fixture`) is the real collision check for all of them (issue item 2). Measuring a
+ * (`sweptCuts`/`vise-jaw-collision`, #488) is the real collision check for all of them. Measuring a
  * shape's own outline would be this function's answer for a shape, and no caller has one to ask
  * with. A label id is never a shape's: ids are minted per list and unique.
  */
@@ -1464,7 +1464,6 @@ const JAW_TIE_EPSILON: Mm = 1e-6;
 export function labelJawReach(job: EngraveJob, label: EngraveLabel): JawReach {
   const measure = labelGlyphMeasure(job.customFonts ?? []);
   const box = labelFootprint(label, inkBoxOf(label.text, label.font, label.weight, label.size, measure));
-  const envelope = viseEnvelope(job.stock, job.workholding.vise, job.sacrificial);
   // The box's own bounds, as an axis-aligned box that CONTAINS it: a label's rotation turns the
   // box, and the projection of a turned box onto the stock's axes contains it, so the gap below is
   // never larger than the real one. Conservative in the direction that matters — a smaller gap
@@ -1473,18 +1472,61 @@ export function labelJawReach(job: EngraveJob, label: EngraveLabel): JawReach {
   const [vx, vy] = rotateVec(0, 1, box.rotation);
   const halfX = box.halfWidth * Math.abs(ux) + box.halfHeight * Math.abs(vx);
   const halfY = box.halfWidth * Math.abs(uy) + box.halfHeight * Math.abs(vy);
-  const minX = box.x - halfX;
-  const maxX = box.x + halfX;
-  const minY = box.y - halfY;
-  const maxY = box.y + halfY;
+  const nearest = jawGapFor(job, {
+    minX: box.x - halfX,
+    maxX: box.x + halfX,
+    minY: box.y - halfY,
+    maxY: box.y + halfY,
+  });
 
+  // The cutter's footprint at THIS item's depth (#405): a V-bit's groove is wider the deeper the
+  // label goes, and the toolpath here is the label's own, so its own depth is the one to read.
+  const radius = sweepRadiusForJob(job, label.depth);
+  return {
+    jaw: nearest.jaw,
+    gap: nearest.gap,
+    reaches: nearest.gap <= nearest.uncertainty + radius,
+    overJaw: nearest.gap <= radius,
+  };
+}
+
+/**
+ * The clear XY distance from a stock-frame box to the NEAREST jaw's footprint, and which jaw that
+ * is (#488). Chebyshev, exactly like the reach above: the larger of the two axis gaps, never more
+ * than the true corner-to-corner distance, so the number and the tests built on it are the
+ * conservative reading.
+ *
+ * The gap is measured to the jaw's face as `viseEnvelope` places it, so sacrificial material
+ * that pushes the faces outward (#213) moves this answer with it — the same envelope every other
+ * jaw reader uses, because two functions disagreeing about where a jaw face is would be a
+ * collision check that disagrees with the run sheet.
+ *
+ * `viseEnvelope` always declares both jaws. The impossible empty case answers `fixed`/0 rather
+ * than throwing; the strict `JAW_REACH_UNKNOWN` reading is `labelJawReach`'s own.
+ */
+export function jawGapFor(job: EngraveJob, box: SweptBox): {
+  jaw: 'fixed' | 'moving';
+  gap: Mm;
+  /** The vise's own band, carried with the envelope's provenance — the reach's third term. */
+  uncertainty: Mm;
+} {
+  const envelope = viseEnvelope(job.stock, job.workholding.vise, job.sacrificial);
+  const nearest = nearestJaw(envelope, box);
+  return { ...nearest, uncertainty: envelope.uncertainty };
+}
+
+/** The jaw loop itself, so `jawGapFor` and any future reader share one tie rule. */
+function nearestJaw(
+  envelope: FixtureEnvelope,
+  box: SweptBox,
+): { jaw: 'fixed' | 'moving'; gap: Mm } {
   let nearest: { jaw: 'fixed' | 'moving'; gap: Mm } | null = null;
   for (const jaw of envelope.boxes) {
     const gap = Math.max(
-      jaw.min[0] - maxX,
-      minX - jaw.max[0],
-      jaw.min[1] - maxY,
-      minY - jaw.max[1],
+      jaw.min[0] - box.maxX,
+      box.minX - jaw.max[0],
+      jaw.min[1] - box.maxY,
+      box.minY - jaw.max[1],
       0,
     );
     // An exact tie keeps the FIRST jaw `viseEnvelope` declares — the fixed one — so the jaw a
@@ -1497,20 +1539,99 @@ export function labelJawReach(job: EngraveJob, label: EngraveLabel): JawReach {
       nearest = { jaw: jaw.id === 'vise-moving-jaw' ? 'moving' : 'fixed', gap };
     }
   }
-  // `viseEnvelope` always declares both jaws; the guard keeps the types honest rather than the code.
-  // Nothing to reach is not the strict reading `JAW_REACH_UNKNOWN` is — it is a blank with no jaws
-  // to ask about — but it lands on the same conservative answer: no jaw bound bought or lost.
-  if (nearest === null) return { jaw: 'fixed', gap: 0, reaches: true, overJaw: true };
+  return nearest ?? { jaw: 'fixed', gap: 0 };
+}
 
-  // The cutter's footprint at THIS item's depth (#405): a V-bit's groove is wider the deeper the
-  // label goes, and the toolpath here is the label's own, so its own depth is the one to read.
-  const radius = sweepRadiusForJob(job, label.depth);
+/** An axis-aligned box in the stock frame, mm — a cut's extent in XY (#488). */
+export interface SweptBox {
+  minX: Mm;
+  maxX: Mm;
+  minY: Mm;
+  maxY: Mm;
+}
+
+/** One enabled cut, and the box its cutter really sweeps in XY (#488). */
+export interface SweptCut {
+  id: string;
+  name: string;
+  depth: Mm;
+  box: SweptBox;
+}
+
+/** The box grown by `by` mm on every side. */
+function grownBox(box: SweptBox, by: Mm): SweptBox {
   return {
-    jaw: nearest.jaw,
-    gap: nearest.gap,
-    reaches: nearest.gap <= envelope.uncertainty + radius,
-    overJaw: nearest.gap <= radius,
+    minX: box.minX - by,
+    maxX: box.maxX + by,
+    minY: box.minY - by,
+    maxY: box.maxY + by,
   };
+}
+
+/** The box widened to contain the point; the point itself when there is no box yet. */
+function coverPoint(box: SweptBox | null, x: Mm, y: Mm): SweptBox {
+  if (box === null) return { minX: x, maxX: x, minY: y, maxY: y };
+  return {
+    minX: Math.min(box.minX, x),
+    maxX: Math.max(box.maxX, x),
+    minY: Math.min(box.minY, y),
+    maxY: Math.max(box.maxY, y),
+  };
+}
+
+/**
+ * Every enabled cut on the job as the box its cutter sweeps in XY, in the stock frame (#488) —
+ * the geometric reading the jaw-collision rule asks, and the run sheet's clearance sentence.
+ *
+ * What the box is depends on how the item is cut, and the difference is real:
+ *
+ *   - an ENGRAVE — a shape pocket, an imported outline, a combined ring, or a LABEL's glyph
+ *     outline — is cut by a toolpath held INSIDE the outline (the offset of the region by the
+ *     cutter's radius), so the outline IS the swept extent. Growing it by the radius again would
+ *     refuse a pocket the cutter fits exactly, and would refuse the #488 spec's own thin-film
+ *     job whose items sit 1 mm inside the blank's edges with a 2 mm cutter;
+ *   - a TRACE is the line reading: its cutter's CENTRE follows the path, and the material reaches
+ *     one radius beyond it, so the stroke's bounding box is grown by the sweep radius at its own
+ *     depth (a V-bit opens as it deepens, #405);
+ *   - a DRILL is a disc of the cutter's radius at each hole centre (the array's lattice included);
+ *   - a THREAD is a disc of the thread's MAJOR radius — the widest its orbit reaches.
+ *
+ * The air frame and the helix/ramp entries are deliberately not part of this: the frame is traced
+ * at its own height above the stock and every lead-in is inside the pocket it enters, so neither
+ * can put material anywhere its item's box does not already cover.
+ *
+ * `plan` is accepted so a caller that already built one (the run sheet) reads the same profiles
+ * without a second walk of the job.
+ */
+export function sweptCuts(job: EngraveJob, plan: PartPlan = toPartPlan(job)): SweptCut[] {
+  const cuts: SweptCut[] = [];
+  const add = (id: string, name: string, depth: Mm, box: SweptBox, growBy: Mm) =>
+    cuts.push({ id, name, depth, box: grownBox(box, growBy) });
+
+  for (const item of plan.engraves) {
+    const aabb = aabbOfProfile(item.profile);
+    if (!aabb) continue;
+    const box = { minX: aabb.min[0], maxX: aabb.max[0], minY: aabb.min[1], maxY: aabb.max[1] };
+    add(item.id, item.name, item.depth, box, 0);
+  }
+  for (const trace of plan.traces) {
+    let box: SweptBox | null = null;
+    for (const path of trace.paths) for (const [x, y] of path) box = coverPoint(box, x, y);
+    if (box !== null) add(trace.id, trace.name, trace.depth, box, sweepRadiusForJob(job, trace.depth));
+  }
+  for (const drill of plan.drills) {
+    let box: SweptBox | null = null;
+    for (const [x, y] of drill.holes) box = coverPoint(box, x, y);
+    // A drill's hole is the cutter's own diameter, so the sweep is its flat radius; the depth
+    // argument is 0 because only a V-bit's radius varies with depth and a V-bit cannot drill.
+    if (box !== null) add(drill.id, drill.name, drill.depth, box, sweepRadiusForJob(job, 0));
+  }
+  for (const thread of plan.threads) {
+    const [x, y] = thread.position;
+    const r = FASTENERS[thread.size].major / 2;
+    add(thread.id, thread.name, thread.depth, { minX: x, maxX: x, minY: y, maxY: y }, r);
+  }
+  return cuts;
 }
 
 /**

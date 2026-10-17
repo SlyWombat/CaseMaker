@@ -223,7 +223,7 @@ const STEP_CODES: Record<SetupStepId, ReadonlySet<JobFinding['code']>> = {
   ]),
   material: new Set(),
   blank: new Set([
-    'stock-proud-too-small',
+    'vise-jaw-collision',
     'vise-stock-not-proud',
     'vise-stock-proud-exceeds-thickness',
     'vise-grip-shallow',
@@ -268,15 +268,17 @@ export function blankViseFindings(a: SetupAnswers): JobFinding[] {
  * The #231 fix: when the vise's `stockProud` is at or past the blank's thickness, the value that
  * resolves it is the stock-derived default (`defaultStockProud`: the seated value, capped by half
  * the blank and the shipped 4 mm), applied as the user's asserted setup (`source: 'saved'`).
- * Returns null when nothing needs fixing — and when nothing the app can offer WOULD fix it (#406):
- * on a blank no taller than the ledge step the derived value is `≤ 0`, which only trades this
- * refusal for `vise-stock-not-proud`. That blank needs a packer and a stated proud, not a button.
+ * Returns null when nothing needs fixing.
+ *
+ * On a blank no taller than the ledge step the derived value is `≤ 0` — the blank's top at or below
+ * the jaw tops. Since #488 that is no longer a refusal, so the fix is offered there too: the job is
+ * cuttable whenever its cuts keep `jawClearance` clear of the jaw faces, and the panel's own
+ * findings say so. Before #488 this returned null, because the value only traded this refusal for
+ * `vise-stock-not-proud`.
  */
 export function stockProudFix(a: SetupAnswers): ViseParams | null {
   if (a.vise.stockProud < a.stock.thickness) return null;
-  const stockProud = defaultStockProud(a.stock.thickness);
-  if (stockProud <= 0) return null;
-  return { ...a.vise, stockProud, source: 'saved' };
+  return { ...a.vise, stockProud: defaultStockProud(a.stock.thickness), source: 'saved' };
 }
 
 // ---- answer updaters ---------------------------------------------------------------------------

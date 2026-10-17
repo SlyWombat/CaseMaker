@@ -780,7 +780,7 @@ describe('runSheet (#207)', () => {
 
       const load = section(sheet, 'load').steps.map((s) => s.text).join(' ');
       expect(load).toContain('Fix the part to the board before loading');
-      expect(load).toContain("The part's top face must stand");
+      expect(load).toContain("The part's top face stands");
 
       const origin = section(sheet, 'origin').steps.map((s) => s.text).join(' ');
       expect(origin).toContain("Z0: the PART's top face");
@@ -1005,22 +1005,26 @@ describe('runSheet (#207)', () => {
       const real = coupon(11);
       expect(labelJawReach(real, real.labels[0]!).gap).toBeCloseTo(2.3064, 3);
       expect(labelJawReach(real, real.labels[0]!).reaches).toBe(false);
-      // The warning fires — 0.8 mm of cut plus the job's 1.0 mm of clearance is past the 1.2 mm this
-      // blank stands — and the sheet states the stand it must be measured against.
-      expect(validateJob(cell).map((f) => f.code)).toContain('stock-proud-too-small');
+      // Since #488 the blank's height is not a refusal of its own: the cut's swept extent keeps
+      // 1.1648 mm clear of the fixed jaw face — past the job's 1.0 mm — so the job is cuttable and
+      // the sheet states the clearance it keeps instead of demanding a taller stand.
+      expect(validateJob(cell).map((f) => f.code)).not.toContain('vise-jaw-collision');
       expect(stepOf(cell).text).toContain('1.2 mm above the jaw tops');
+      expect(stepOf(cell).text).toContain('at least 1 mm clear of the jaws');
       // …but the stop is not printed: the geometry says there is nothing under a jaw to trip it, and
       // a number the job cannot trip is a number the operator has to argue with at the machine.
       expect(stepOf(cell).text).toContain('No cut on this job sweeps over a jaw, so there is no stop threshold to check');
       expect(stepOf(cell).text).not.toContain('If it is less than');
 
-      // The other half of the ruling: a cell the cutter clears by MORE than the band raises neither.
+      // The other half of the ruling: a cell the cutter clears by MORE than the band still reaches
+      // neither a jaw nor the clearance rule.
       // The same value at 10 mm leaves 3.83 mm on each side, past the 1.5 mm the band and the radius
-      // reach together — so the warning goes too, not just the stop.
+      // reach together — so the reach goes too, not just the stop.
       const clear = coupon(10);
       expect(labelJawReach(clear, clear.labels[0]!).reaches).toBe(false);
-      expect(validateJob(clear).map((f) => f.code)).not.toContain('stock-proud-too-small');
+      expect(validateJob(clear).map((f) => f.code)).not.toContain('vise-jaw-collision');
       expect(stepOf(clear).text).toContain('No cut on this job sweeps over a jaw');
+      expect(stepOf(clear).text).toContain('at least 1 mm clear of the jaws');
     });
   });
 });

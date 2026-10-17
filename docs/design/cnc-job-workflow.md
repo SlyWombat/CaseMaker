@@ -518,9 +518,10 @@ seated value (`min(4, t/2, t − 3.1)`, #391 review); the thin-stock case is #40
 
 **Validation.** Clamp footprints inside the toolpath (`clamp-in-path`, error, with "move it to the
 back edge" as the fix); stock larger than the bracket's arms hold (warning); `vise-grip-shallow`,
-`stock-proud-too-small`, `vise-jaw-short`, `vise-opening-unmeasured` (the opening is published
-nowhere); a rotary stock outside ⌀80 × 150; a mount the location does not own (refused, with the
-sentence).
+`vise-jaw-collision` (a cut's swept extent inside the jaw clearance, #488), `vise-stock-not-proud`
+(a note when a blank below the jaw tops still clears), `vise-jaw-short`, `vise-opening-unmeasured`
+(the opening is published nowhere); a rotary stock outside ⌀80 × 150; a mount the location does not
+own (refused, with the sentence).
 
 **Saved:** `mount { kind, orientation { faceUp, againstReference, nearestYou }, params with source, clamps[], sacrificial }`.
 

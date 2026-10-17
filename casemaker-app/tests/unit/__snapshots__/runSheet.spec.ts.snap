@@ -154,7 +154,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
         },
         {
           "record": "measured stock proud (mm)",
-          "text": "The top face must stand 4 mm above the jaw tops. Record the measured value. No cut on this job sweeps over a jaw, so there is no stop threshold to check.",
+          "text": "The top face stands 4 mm above the jaw tops. Every cut keeps at least 1 mm clear of the jaws. Record the measured value. No cut on this job sweeps over a jaw, so there is no stop threshold to check.",
         },
         {
           "text": "Push the blank's front edge to where the file expects it: the front edge is 10 mm behind the front of the jaws.",
@@ -432,7 +432,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for the default job 1`] 
         },
         {
           "record": "measured stock proud (mm)",
-          "text": "The top face must stand 4 mm above the jaw tops. Record the measured value. No cut on this job sweeps over a jaw, so there is no stop threshold to check.",
+          "text": "The top face stands 4 mm above the jaw tops. Every cut keeps at least 1 mm clear of the jaws. Record the measured value. No cut on this job sweeps over a jaw, so there is no stop threshold to check.",
         },
         {
           "text": "Push the blank's front edge to where the file expects it: the front edge is 10 mm behind the front of the jaws.",

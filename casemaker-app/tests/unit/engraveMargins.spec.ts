@@ -950,7 +950,7 @@ describe('the label depth a blank allows (#362)', () => {
     const found = gen.findings;
     expect(found.filter((f) => f.severity === 'error')).toEqual([]);
     expect(found.map((f) => f.code)).not.toContain('item-depth-bound');
-    expect(found.map((f) => f.code)).not.toContain('stock-proud-too-small');
+    expect(found.map((f) => f.code)).not.toContain('vise-jaw-collision');
 
     // The fixture check lives in the SWEEP, not in `generate` (#369 follow-up): `engraveGenerate`
     // returns the program but never builds a timeline, so `tool-into-fixture` has no way to fire

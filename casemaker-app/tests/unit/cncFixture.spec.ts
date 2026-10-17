@@ -112,9 +112,12 @@ describe('inflate / boxesOverlap (#203)', () => {
 });
 
 describe('validateVise (#203)', () => {
-  it('errors when the stock is not proud of the jaw tops', () => {
+  it('does not refuse a blank at or below the jaw tops by itself (#488)', () => {
+    // The blank's height says nothing about whether its cuts reach a jaw; `validateJob` measures the
+    // cuts and notes the height (`vise-stock-not-proud`) or refuses a cut (`vise-jaw-collision`).
     const findings = validateVise(STOCK, { ...DEFAULT_VISE, stockProud: 0 });
-    expect(findings.some((f) => f.code === 'vise-stock-not-proud' && f.severity === 'error')).toBe(true);
+    expect(findings.filter((f) => f.severity === 'error')).toHaveLength(0);
+    expect(findings.map((f) => f.code)).not.toContain('vise-stock-not-proud');
   });
 
   it('errors when the stock stands proud by its whole thickness', () => {
@@ -378,8 +381,9 @@ describe('stockProud: a job input with an honest default (#231 item 2)', () => {
     // half the blank and so is the number the default carries (#391 review item 1).
     expect(defaultStockProud(3.81)).toBeCloseTo(0.71, 9);
     // A blank no taller than the ledge step gets the seated value too (#406): on the ledges its top
-    // is at or below the jaw tops, so the proud is ≤ 0 and `validateVise` refuses it. It used to fall
-    // back to t/2 (1.5 on a 3 mm blank), which put the modelled jaw top BELOW the real one.
+    // is at or below the jaw tops, so the proud is ≤ 0. It used to fall back to t/2 (1.5 on a 3 mm
+    // blank), which put the modelled jaw top BELOW the real one. Since #488 the ≤ 0 value is not a
+    // refusal: the job's cuts decide, and a cut that keeps the jaw clearance gets a note instead.
     expect(defaultStockProud(3.1)).toBe(0);
     expect(defaultStockProud(3)).toBeCloseTo(-0.1, 9);
     expect(defaultStockProud(2)).toBeCloseTo(-1.1, 9);
@@ -400,7 +404,6 @@ describe('stockProud: a job input with an honest default (#231 item 2)', () => {
     expect(vise.source).toBe('default');
     const codes = validateVise(BADGE, vise).map((f) => f.code);
     expect(codes).not.toContain('vise-stock-proud-exceeds-thickness');
-    expect(codes).not.toContain('vise-stock-not-proud');
   });
 
   it('never re-derives a saved or measured vise, even one that would refuse the stock', () => {
@@ -417,7 +420,8 @@ describe('stockProud: a job input with an honest default (#231 item 2)', () => {
 
 // #406 — a blank no taller than the 3.1 mm ledge step. The default must never model the jaw tops
 // LOWER than they really are, and on the ledges they are at or above this blank's top. So the
-// default states the seated value and the vise check refuses it, rather than inventing a plane.
+// default states the seated value rather than inventing a plane. Since #488 that value is not a
+// refusal on its own: the job's cuts are measured against the jaw faces.
 describe('a blank no taller than the ledge step (#406)', () => {
   const thin = (thickness: number) => ({ length: 40, width: 30, thickness });
 
@@ -430,27 +434,15 @@ describe('a blank no taller than the ledge step (#406)', () => {
     }
   });
 
-  it('a new job on a 3 mm blank is refused, by name, and told what answers it', () => {
+  it('a new job on a 3 mm blank gets the seated value and is not refused', () => {
     const vise = viseForNewJob(undefined, thin(3));
-    expect(vise.stockProud).toBeLessThanOrEqual(0);
-    const finding = validateVise(thin(3), vise).find((f) => f.code === 'vise-stock-not-proud');
-    expect(finding?.severity).toBe('error');
-    // The figure is printed like every other one, with no float tail from 3 − 3.1.
-    expect(finding!.message).toContain('-0.1 mm above the jaw tops');
-    expect(finding!.message).toContain('3.1 mm ledge');
-    expect(finding!.message).toContain('packer');
+    expect(vise.stockProud).toBeCloseTo(-0.1, 9);
+    expect(validateVise(thin(3), vise).filter((f) => f.severity === 'error')).toHaveLength(0);
   });
 
   it('the envelope puts the jaw tops at or above the thin blank’s top face', () => {
     const env = viseEnvelope(thin(3), viseForNewJob(undefined, thin(3)));
     for (const b of env.boxes) expect(b.max[2]).toBeGreaterThanOrEqual(0);
-  });
-
-  it('a seated blank taller than the step keeps the ledge note out of the message', () => {
-    const msg = validateVise(thin(5), { ...DEFAULT_VISE, stockProud: 0 }).find(
-      (f) => f.code === 'vise-stock-not-proud',
-    )!.message;
-    expect(msg).not.toContain('ledge');
   });
 
   it('a stock below the jaw tops is gripped over its own height, never more — the shallow warning stays', () => {
@@ -465,7 +457,6 @@ describe('a blank no taller than the ledge step (#406)', () => {
     const packed: ViseParams = { ...DEFAULT_VISE, stockProud: 1, source: 'saved', uncertainty: 0.5 };
     expect(viseForNewJob(packed, thin(3)).stockProud).toBe(1);
     const codes = validateVise(thin(3), packed).map((f) => f.code);
-    expect(codes).not.toContain('vise-stock-not-proud');
     expect(codes).not.toContain('vise-stock-proud-exceeds-thickness');
   });
 });

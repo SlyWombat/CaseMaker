@@ -164,9 +164,10 @@ describe('engraveGenerate (#206)', () => {
   });
 
   // #406 — a default job on a blank no taller than the 3.1 mm ledge step now carries a seated proud
-  // ≤ 0. Every consumer downstream must take it without throwing, refuse it by name, and print
-  // the figure without a float tail (3 − 3.1 = -0.10000000000000009).
-  it('takes a 3 mm default job through the pipeline: refused by name, nothing thrown, no float tails (#406)', () => {
+  // ≤ 0. Every consumer downstream must take it without throwing, note it by name (#488 — the
+  // height alone is no longer a refusal), and print the figure without a float tail
+  // (3 − 3.1 = -0.10000000000000009).
+  it('takes a 3 mm default job through the pipeline: noted by name, nothing thrown, no float tails (#406, #488)', () => {
     const base = defaultEngraveJob();
     const thin: EngraveJob = {
       ...base,

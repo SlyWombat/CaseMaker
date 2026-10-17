@@ -732,9 +732,9 @@ describe('#364 — the bare-blank hand-off', () => {
 
     const g = generate(tl, job);
     expect(errorCodes(g)).toEqual([]);
-    // No `stock-proud-too-small`, for the measurement reason above: the deepest cut is 2 mm, which
-    // a 4 mm blank's 1 mm floor allows (2 mm left under it) and which no jaw is under in fact.
-    expect(g.findings.some((f) => f.code === 'stock-proud-too-small')).toBe(false);
+    // No jaw collision, for the measurement reason above: the deepest cut is 2 mm, which
+    // a 4 mm blank's 1 mm floor allows (2 mm left under it), and which no jaw is under in fact.
+    expect(g.findings.some((f) => f.code === 'vise-jaw-collision')).toBe(false);
     // And the grip warning #344 raised here is GONE rather than kept: the seated blank leaves
     // `4 − 0.9 = 3.1` mm below the jaw tops, past the 3 mm floor under which a part can lift, where
     // the 2 mm stand this blank used to be modelled at left only 2 mm.

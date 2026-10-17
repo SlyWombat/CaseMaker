@@ -8,13 +8,14 @@ import { stubSetup, type FixtureEnvelope, type Setup, type Workholding } from '@
 import {
   drillHoles,
   drillOperationName,
-  idJawReach,
+  jawGapFor,
   polygonSelfIntersects,
   resolveItems,
+  sweptCuts,
   threadOperationName,
   traceOperationName,
   traceSelfOverlapFindings,
-  type JawReach,
+  type SweptCut,
 } from '@/engine/cnc/engrave/partPlan';
 import { FASTENERS } from '@/engine/compiler/fasteners';
 import type {
@@ -41,7 +42,7 @@ export type JobFindingCode =
   | 'depth-exceeds-stock'
   | 'no-items'
   | 'tool-missing'
-  | 'stock-proud-too-small'
+  | 'vise-jaw-collision'
   | 'vise-default'
   | 'vise-stock-not-proud'
   | 'vise-stock-proud-exceeds-thickness'
@@ -733,57 +734,77 @@ export function validateJob(job: EngraveJob): JobFinding[] {
     });
   }
 
-  // The clearance is the JOB's (#362), not a constant in this check: #345's rule is that a verifier
-  // holds a threshold it was given. `minFloor`/`edgeMargin`/`breakthrough` are read the same way,
-  // off the document, and this one joins them.
+  // #488 — THE JAW RULE IS GEOMETRIC. A blank below the jaw tops is not a refusal by itself: what
+  // decides is whether a cut can reach a jaw. Every enabled cut's SWEPT extent (`sweptCuts`: the
+  // outline for an engrave — a label or a pocket — the line plus its cutter radius for a trace, a
+  // disc for a drill or a thread) is measured against the jaw faces `viseEnvelope` places, and the
+  // job's own `jawClearance` (#362) is the margin it must keep. Only a cut that comes inside that
+  // margin is refused. The reading is the STATED geometry, with no uncertainty band: a refusal is
+  // an instruction, and it must be shown by the numbers the job holds rather than by a band the
+  // real jaw may or may not fill.
   const jawClearance = job.jawClearance;
-  // The deepest cut across region items, traces AND drills — but only the ones the JAWS can reach
-  // in XY (#369). The jaw check is about a floor working below the jaw TOPS, and a line with blank
-  // material between it and both jaw faces cannot put a floor there whatever its depth; charging it
-  // is what made the shipped badge hand-off warn about its own recommendation. `idJawReach` reads a
-  // label's own MEASURED ink box (#394) and answers the strict yes for the kinds it cannot measure,
-  // so this can only warn where it warned before, plus nothing.
-  //
-  // The reading is the reach the floor applies over — the sweep plus the vise's own uncertainty —
-  // not the narrower one the run sheet stops on (#394): a warning is advice and may be raised a band
-  // early, where a stop is an instruction. The `jawClearance` is charged to the depth itself below,
-  // which is where the Z rule belongs.
-  //
-  // That difference is why the whole `JawReach` is kept and not just its `reaches` flag (#394
-  // review): a cut that only enters the BAND has not been shown to come over a jaw at all, and the
-  // message may not say it does. `overJaw` is the cutter's own disc, so the sentence below picks
-  // "would" or "could" off the same reading the run sheet's stop line uses.
-  const reachingDepths = (items: readonly (EngraveAnyItem | EngraveTraceItem | EngraveDrill | EngraveThread)[]) =>
-    items
-      .map((item) => ({ id: item.id, depth: item.depth, reach: idJawReach(job, item.id) }))
-      .filter((item) => item.reach.reaches);
-  const candidateDepths: { id: string; depth: number; reach: JawReach }[] = [
-    ...reachingDepths(enabled),
-    ...reachingDepths(enabledTraces),
-    ...reachingDepths(enabledDrills),
-    ...reachingDepths(enabledThreads),
-  ];
-  const deepestItem = candidateDepths.reduce<{ id: string; depth: number; reach: JawReach } | null>(
-    (deepestSoFar, item) => (!deepestSoFar || item.depth > deepestSoFar.depth ? item : deepestSoFar),
+  const swept = sweptCuts(job);
+  for (const cut of swept) {
+    const { jaw, gap } = jawGapFor(job, cut.box);
+    if (gap >= jawClearance) continue;
+    findings.push({
+      severity: 'error',
+      code: 'vise-jaw-collision',
+      labelId: cut.id,
+      message:
+        `${cut.name} comes within ${fmt3(gap)} mm of the ${jaw} jaw face; the job keeps ` +
+        `${fmt3(jawClearance)} mm clear, so the cutter would run into the jaw. ` +
+        `Move the cut in from the jaw by ${fmt3(jawClearance - gap)} mm` +
+        // #406's packer advice, moved here (#488 item 2): raising the blank only answers a blank
+        // that sits below the jaw tops, and it is one of two answers, not the rule.
+        (job.workholding.vise.stockProud <= 0
+          ? `, or raise the blank on a packer so it works above the jaw tops and state how far it then stands proud.`
+          : '.'),
+    });
+  }
+
+  // The cutter also has to REACH the depth: the jaw tops are at `−stockProud`, so a cut `d` deep
+  // works `d − stockProud` below them, and the flutes must cover that with the same clearance
+  // kept. Only a cutter that states its flute length can be judged; one that does not is the
+  // record's own uncertainty (`thread-flute-unproven`'s pattern), not a refusal invented here.
+  const deepestCut = swept.reduce<SweptCut | null>(
+    (deepest, cut) => (deepest === null || cut.depth > deepest.depth ? cut : deepest),
     null,
   );
-  const deepest = deepestItem?.depth ?? 0;
-  // `deepestItem === null` is a job whose every cut sits clear of the jaws: nothing works below the
-  // jaw tops, so there is no clearance to ask for — not a clearance of zero.
-  if (deepestItem !== null && job.workholding.vise.stockProud < deepest + jawClearance) {
+  const cuttingTool = jobTool(job);
+  const belowJawTops = deepestCut === null ? 0 : deepestCut.depth - job.workholding.vise.stockProud;
+  if (
+    cuttingTool !== null &&
+    cuttingTool.fluteLength !== null &&
+    deepestCut !== null &&
+    belowJawTops > cuttingTool.fluteLength - jawClearance
+  ) {
+    findings.push({
+      severity: 'error',
+      code: 'vise-jaw-collision',
+      labelId: deepestCut.id,
+      message:
+        `${deepestCut.name} cuts ${fmt3(deepestCut.depth)} mm deep, which is ${fmt3(belowJawTops)} mm ` +
+        `below the jaw tops; the ${fmt3(cuttingTool.fluteLength)} mm flute of "${cuttingTool.name}" reaches ` +
+        `${fmt3(cuttingTool.fluteLength - jawClearance)} mm with ${fmt3(jawClearance)} mm kept clear. ` +
+        `Use a cutter with a longer flute, or raise the blank so the cut works less far below the jaw tops.`,
+    });
+  }
+
+  // #488 item 2 — a blank BELOW the jaw tops is a NOTE, not an error. The cuts above are the whole
+  // question and every one of them kept the margin, so the note says the fact and the result: the
+  // operator is not asked to find a packer the job does not need.
+  if (
+    job.workholding.vise.stockProud <= 0 &&
+    swept.length > 0 &&
+    !findings.some((f) => f.code === 'vise-jaw-collision')
+  ) {
     findings.push({
       severity: 'warning',
-      code: 'stock-proud-too-small',
-      labelId: deepestItem?.id,
+      code: 'vise-stock-not-proud',
       message:
-        // Printed rounded (#406): a thin blank's seated proud is `3 − 3.1`, which is a float tail.
-        `The stock stands ${Number(job.workholding.vise.stockProud.toFixed(3))} mm above the jaw tops, but the ` +
-        `deepest cut reaches ${deepest} mm; at least ${jawClearance} mm of clearance is wanted, ` +
-        `so ` +
-        (deepestItem.reach.overJaw
-          ? 'the cutter would work below the jaw tops'
-          : 'the cutter could work below the jaw tops, if the jaw face sits within its band, nearer the cut') +
-        ` (stockProud ≥ ${Number((deepest + jawClearance).toFixed(3))} mm).`,
+        `The blank sits ${fmt3(-job.workholding.vise.stockProud)} mm below the jaw tops; the cut ` +
+        `stays at least ${fmt3(jawClearance)} mm clear of the jaws, so it needs no packer.`,
     });
   }
 
@@ -804,6 +825,11 @@ export function validateJob(job: EngraveJob): JobFinding[] {
   findings.push(...setupProgramFindings(job));
 
   return findings;
+}
+
+/** A printed millimetre figure: rounded to 0.001, trailing zeros dropped (`2.0` → `2`, `2.61`). */
+function fmt3(n: number): number {
+  return Number(n.toFixed(3));
 }
 
 /**

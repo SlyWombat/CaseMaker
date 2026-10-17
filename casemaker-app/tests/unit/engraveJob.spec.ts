@@ -284,49 +284,70 @@ describe('validateJob (#200)', () => {
     expect(validateJob(job).some((f) => f.code === 'no-items')).toBe(true);
   });
 
-  it('warns when the stock stands too little above the jaw tops for the deepest cut', () => {
-    const job = defaultEngraveJob(); // deepest 2.0 -> needs stockProud >= 3
+  it('refuses a cut whose swept extent comes inside the job’s jaw clearance, naming item, jaw and distance (#488)', () => {
+    const job = defaultEngraveJob();
     job.workholding.vise.stockProud = 2.5;
     job.workholding.vise.source = 'saved';
-    // The line has to be one the jaws can REACH, or there is no jaw for the stand to be short
-    // for (#369, #394). The demo 'CASE' line MEASURES 46.28 mm wide, so centred on this 100 mm
-    // plank it sits 26.9 mm clear of both jaw faces; moved to x = 24 its box comes 0.86 mm off the
-    // fixed jaw — inside the 1 mm reach the jaws are judged by (the vise's 0.5 mm band plus the
-    // cutter's 0.5 mm radius, #391/#394).
+    // The demo 'CASE' line sits 26.9 mm clear of both jaw faces when centred on this 100 mm plank;
+    // moved to x = 24 its swept extent comes 0.86 mm off the fixed jaw.
     job.labels[0]!.position = { x: 24, y: 43 };
-    expect(validateJob(job).some((f) => f.code === 'stock-proud-too-small')).toBe(true);
-    // #362 — the clearance is the JOB's number, not a constant in the check: at 0.4 mm asked for,
-    // a 2.5 mm stand clears a 2 mm cut.
-    const tight: EngraveJob = { ...job, jawClearance: 0.4 };
-    expect(validateJob(tight).some((f) => f.code === 'stock-proud-too-small')).toBe(false);
-    // …and the message quotes the number it was given, so a job that asks for more says so.
-    job.jawClearance = 1.5;
-    const msg = validateJob(job).find((f) => f.code === 'stock-proud-too-small')!.message;
-    expect(msg).toContain('at least 1.5 mm of clearance is wanted');
-    expect(msg).toContain('stockProud ≥ 3.5 mm');
+    const collision = validateJob(job).find((f) => f.code === 'vise-jaw-collision');
+    expect(collision?.severity).toBe('error');
+    expect(collision?.labelId).toBe(job.labels[0]!.id);
+    // The sentence names the item, the jaw and the distance, and the move that clears it.
+    expect(collision!.message).toContain('CASE');
+    expect(collision!.message).toContain('fixed jaw face');
+    expect(collision!.message).toContain('0.86 mm');
+    expect(collision!.message).toContain('0.14 mm');
+    // #362 — the clearance is the JOB's number: at 0.4 mm asked for, the same 0.86 mm gap clears.
+    expect(validateJob({ ...job, jawClearance: 0.4 }).some((f) => f.code === 'vise-jaw-collision')).toBe(false);
+    // …and at 1.5 mm the refusal quotes the number it was given.
+    expect(
+      validateJob({ ...job, jawClearance: 1.5 }).find((f) => f.code === 'vise-jaw-collision')!.message,
+    ).toContain('1.5 mm clear');
   });
 
-  // #369 — the check is XY-aware too: it asks only about the items whose own extent comes within a
-  // jaw's reach, the same rule #365 gave the voids. A line clear of both jaws cannot make it fire,
-  // because the jaws are not what it is short for.
-  it('asks the jaws about an item only where the item can reach them (#369)', () => {
-    const job = defaultEngraveJob(); // deepest 2.0 -> needs stockProud >= 3
-    job.workholding.vise.stockProud = 2.5;
-    job.workholding.vise.source = 'saved';
-    // The demo 'CASE' line MEASURES 46.28 mm wide (#394) across a 100 mm plank, so it is only the
-    // jaws' business once it is moved near one: at x = 24 its box comes 0.86 mm off the fixed jaw
-    // face, and the jaws are exactly what this stand is short for.
-    job.labels = [{ ...job.labels[0]!, position: { x: 24, y: 43 } }];
-    expect(validateJob(job).some((f) => f.code === 'stock-proud-too-small')).toBe(true);
-
-    // The same stand, with the line moved and shrunk clear of both jaws: the 2.5 mm is still short of
-    // the 2.0 mm cut, but not for the jaws' sake, and nothing else on this blank limits a depth — so
-    // the finding that guards the jaws has nothing to say. (A blank-wide check would still fire.)
-    const clear: EngraveJob = {
-      ...job,
-      labels: [{ ...job.labels[0]!, text: 'Name', size: 8, position: { x: 50, y: 30 } }],
+  // #488 — the rule is geometric, not a stand rule: a blank below the jaw tops is a NOTE when every
+  // cut keeps its distance, and the packer advice appears only in a refusal.
+  it('notes a blank below the jaw tops when the cuts stay clear, and refuses only a cut that does not', () => {
+    const base = defaultEngraveJob();
+    const thin: EngraveJob = {
+      ...base,
+      stock: { ...base.stock, thickness: 1.5 },
+      workholding: { ...base.workholding, vise: { ...base.workholding.vise, stockProud: -1.6, source: 'saved' } },
+      labels: [{ ...base.labels[0]!, text: 'Name', size: 8, position: { x: 50, y: 7.5 }, depth: 0.4 }],
     };
-    expect(validateJob(clear).some((f) => f.code === 'stock-proud-too-small')).toBe(false);
+    const note = validateJob(thin).find((f) => f.code === 'vise-stock-not-proud');
+    expect(note?.severity).toBe('warning');
+    expect(note!.message).toContain('1.6 mm below the jaw tops');
+    expect(note!.message).toContain('at least 1 mm clear of the jaws');
+    expect(note!.message).toContain('needs no packer');
+    expect(validateJob(thin).some((f) => f.code === 'vise-jaw-collision')).toBe(false);
+
+    // The same blank with a pocket edge 0.3 mm from the fixed jaw's face: a refusal, and the packer
+    // is offered there (#488's spec numbers).
+    const near: EngraveJob = {
+      ...thin,
+      labels: [],
+      shapes: [
+        {
+          id: 'pocket',
+          kind: 'rect',
+          width: 10,
+          height: 6,
+          cornerRadius: 0,
+          position: { x: 5.3, y: 7.5 },
+          rotation: 0,
+          depth: 0.4,
+          enabled: true,
+        },
+      ],
+    };
+    const collision = validateJob(near).find((f) => f.code === 'vise-jaw-collision');
+    expect(collision?.severity).toBe('error');
+    expect(collision!.message).toContain('0.3 mm of the fixed jaw face');
+    expect(collision!.message).toContain('packer');
+    expect(validateJob(near).some((f) => f.code === 'vise-stock-not-proud')).toBe(false);
   });
 
   // #219: a trace is work too, so a job of traces alone is not "no items"; its own findings
@@ -447,7 +468,7 @@ describe('engraveJobStore (#200)', () => {
     // The bar the issue set: the wizard does not hand over a job its own findings complain about.
     const findings = stepFindings('blank', job, defaultSetupAnswers(job));
     expect(findings.filter((f) => f.severity === 'error')).toEqual([]);
-    expect(findings.map((f) => f.code)).not.toContain('stock-proud-too-small');
+    expect(findings.map((f) => f.code)).not.toContain('vise-jaw-collision');
     // …while the warnings that are telling the truth about an unmeasured vise stay.
     expect(findings.map((f) => f.code)).toContain('vise-default');
   });
@@ -482,10 +503,10 @@ describe('engraveJobStore (#200)', () => {
     expect(job.labels[0]!.depth).toBe(1.2);
     expect(job.labels[1]!.depth).toBe(0.51);
     expect(job.labels[2]!.depth).toBe(0.51);
-    // 1.2 + 1 mm of clearance is past the 1.905 mm stand, and the check says so: the guard protects
-    // the user's number, it does not silence the warning about it.
+    // The user's 1.2 mm cut sits 0.86 mm from the fixed jaw face, inside the job's 1 mm clearance:
+    // the guard protects the user's number, it does not silence the collision finding about it.
     expect(stepFindings('blank', job, defaultSetupAnswers(job)).map((f) => f.code)).toContain(
-      'stock-proud-too-small',
+      'vise-jaw-collision',
     );
 
     // The provenance survives the round trip: zod strips every key its object does not name, and a
@@ -522,7 +543,7 @@ describe('engraveJobStore (#200)', () => {
     // arrived with, and the user's own 1.2 is untouched as always.
     expect(job.labels.map((l) => l.depth)).toEqual([1.2, 1.0, 0.5]);
     expect(stepFindings('blank', job, defaultSetupAnswers(job)).map((f) => f.code)).toContain(
-      'stock-proud-too-small',
+      'vise-jaw-collision',
     );
   });
 
@@ -624,7 +645,7 @@ describe('engraveJobStore (#200)', () => {
     const parsed = parseEngraveJob(raw);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    // The 1 mm the `stock-proud-too-small` check hard-coded, so no stored job changes behaviour.
+    // The 1 mm the jaw-clearance rule carries, so no stored job changes behaviour.
     expect(parsed.job.jawClearance).toBe(1.0);
 
     const stated = parseEngraveJob({ ...JSON.parse(JSON.stringify(defaultEngraveJob())), jawClearance: 2.5, schemaVersion: 2 });

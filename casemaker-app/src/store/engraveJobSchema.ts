@@ -757,7 +757,7 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   sacrificial: sacrificialSchema,
   breakthrough: z.number().finite().nonnegative(),
   // #362's jaw clearance. DEFAULTED, unlike the optional keys below: the shipped value is the 1 mm
-  // the `stock-proud-too-small` check hard-coded before it became a setting, so a job written
+  // the jaw check carried as a bare constant before it became a setting (#488), so a job written
   // without this field loads with exactly the clearance it was judged by, and no document changes
   // behaviour by the field existing.
   jawClearance: z.number().finite().nonnegative().default(DEFAULT_JAW_CLEARANCE_MM),

@@ -108,7 +108,7 @@ describe('engraveRunStore (#206)', () => {
       ...clean(),
       findings: [
         { severity: 'warning', code: 'vise-default', message: 'unmeasured ' },
-        { severity: 'warning', code: 'stock-proud-too-small', message: 'not an ack code' },
+        { severity: 'warning', code: 'vise-stock-not-proud', message: 'not an ack code' },
       ],
     };
     expect(requiredAckCodes(view({ generated: g }))).toEqual(['vise-default']);
