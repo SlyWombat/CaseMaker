@@ -2,7 +2,9 @@
  * The engrave preview (#205): the stock with EVERY cut the program will make removed to its own
  * depth — a label's or shape's opened region, a drill's holes (#220), a trace's swept groove
  * (#219/#287) — the floor of each cut, the vise jaws and the sacrificial material (#213) —
- * evaluated in the sim worker.
+ * evaluated in the sim worker. A V-bit trace's groove is the CONE swept along its path, not its
+ * mouth extruded straight down (#420 slice 4): the body comes from `engraveGroove`, which reads
+ * the same `vProfile.ts` the CAM and the simulator do.
  *
  * Why the sim worker and not the geometry worker (`/Simulation.md`, #205): the preview needs
  * Manifold (profile evaluation, extrusion) and it is driven on a 150 ms debounce by the panel,
@@ -32,7 +34,13 @@
 
 import type { EngraveJob, EngraveMargins } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
-import { toPartPlan, keepOutLimit, keepOutMembrane, labelProfile } from '@/engine/cnc/engrave/partPlan';
+import {
+  toPartPlan,
+  keepOutLimit,
+  keepOutMembrane,
+  labelProfile,
+  traceSweptProfile,
+} from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import { sacrificialBoxes, type SacrificialBox } from '@/engine/cnc/sacrificial';
@@ -46,6 +54,8 @@ import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evalua
 import { boxSolid, OVERSHOOT_MM } from '@/workers/geometry/sweep';
 import { meshOutputOf, type NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import { probeResiduals, type ProbeResiduals } from '@/engine/cnc/probePlan';
+import { grooveRadiusAt, vCone } from '@/engine/cnc/vProfile';
+import { vGrooveSolid } from './engraveGroove';
 import {
   registrationBandsFor,
   type EngravePreviewRegistrationBand,
@@ -372,6 +382,13 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     const tool = toolForJob(job, tools);
     const { plan, measured, cuts, findings, colourBoundaryDepth } = engraveRegions(tl, job, tool, margins, shop);
 
+    // #420 slice 4 — a V-bit trace's cut is the cone dragged along its path, not its mouth
+    // extruded straight down. The cone comes from the same `vCone` the oracle and the column
+    // engine resolve, and the trace's own geometry comes from the plan those cuts were built
+    // from, so the tapered body and the swept prediction describe one cutter and one path.
+    const cone = tool === null ? null : vCone(tool);
+    const traceById = new Map(plan.traces.map((t) => [t.id, t] as const));
+
     // A label whose findings include an error is left out of the cut — the stock is drawn
     // uncut there — but its row and findings are still reported (the issue's rule).
     const errored = new Set(
@@ -401,7 +418,9 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
 
     // One pass over `cuts` — labels, shapes (#214), drills (#220) and traces (#219) alike. Each
     // carries its own polygons and its own depth already, so this loop is about Manifold, not about
-    // item kinds: a class added to `cuts` is drawn without anything here changing (#288).
+    // item kinds: a class added to `cuts` is drawn without anything here changing (#288). The one
+    // exception is a V-bit trace, whose polygons are only its MOUTH; its body is the cone swept
+    // along the path (#420 slice 4), built above from the same trace the cut came from.
     //
     // A cut whose item has an ERROR finding is left out — the "drawn uncut, still reported" rule
     // below — and every class reports with `labelId` set to the item's own id, drills and traces
@@ -409,6 +428,31 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     for (const cut of cuts) {
       if (cut.polygons.length === 0) continue;
       if (errored.has(cut.id)) continue;
+
+      // #420 slice 4 — a V-bit TRACE is drawn as the cone swept along its path: the mouth at the
+      // top face and the tip's own flat at the floor. Its floor is the tip reach, not the mouth
+      // footprint the straight cuts use, so the picture and the oracle agree at both levels.
+      const trace = traceById.get(cut.id);
+      if (trace !== undefined && cone !== null) {
+        const groove = vGrooveSolid(tl, trace.paths, trace.closed, cone, cut.depth, OVERSHOOT_MM);
+        if (groove !== null) {
+          cutBodies.push({ body: groove, depth: cut.depth });
+          // A sharp tip closes the floor to a line: there is nothing with area to draw.
+          const floorRadius = grooveRadiusAt(cone, 0);
+          if (floorRadius > 0) {
+            const floorCS = executeProfile(tl, traceSweptProfile(trace.paths, trace.closed, floorRadius));
+            const floorBody = tl.Manifold.extrude(floorCS, FLOOR_THICKNESS_MM);
+            floorCS.delete();
+            const floorSolid = floorBody.translate([0, 0, -cut.depth]);
+            floorBody.delete();
+            floors.push({ labelId: cut.id, depth: cut.depth, mesh: meshOutputOf(floorSolid) });
+            floorSolid.delete();
+          }
+        }
+        // A V trace is never fallen back to a cylinder: if its cone cannot be swept there is no
+        // honest body to draw, and a straight slot would be the very disagreement this fixes.
+        continue;
+      }
 
       const openedCS = executeProfile(tl, { kind: 'p-poly', contours: cut.polygons });
 

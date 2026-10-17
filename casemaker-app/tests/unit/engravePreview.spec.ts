@@ -15,8 +15,10 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
-import { cuttingRadiusForSweep } from '@/engine/cnc/tool';
+import { cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
+import { grooveRadiusAt, vCone } from '@/engine/cnc/vProfile';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
+import { OVERSHOOT_MM } from '@/workers/geometry/sweep';
 import { presetJawStrips, presetPartOnBoard } from '@/engine/cnc/sacrificial';
 import { itemConditionSummary, type ConditionSummary } from '@/engine/cnc/toolCondition';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -425,6 +427,83 @@ describe('engravePreview — drills and traces are in the picture (#288)', () =>
     const labelArea = p.engravability.find((row) => row.labelId === 'lbl')!.openedArea;
     const expected = labelArea * 0.5 + capsule * 2;
     expect(Math.abs(removedVolume(job, p) - expected) / expected).toBeLessThan(0.03);
+  });
+
+  it('cuts a V-bit trace as the cone it sweeps, not a straight-walled slot (#420 slice 4)', () => {
+    /** The bench bit: 30° included, 0.3 mm tip (halfAngle is measured from the axis). */
+    const bit30 = (): Tool => ({
+      number: 1,
+      id: 'C1-BIT-ENGRAVE-30-0.3',
+      name: 'Single Flute Engraving Bit 30 x 0.3',
+      typeText: 'Engraving',
+      shape: 'engraving',
+      handleDiameter: 3.175,
+      tipDiameter: 0.3,
+      diameter: 3.175,
+      cornerRadius: 0,
+      angle: 30,
+      halfAngle: 15,
+      fluteLength: null,
+      shoulderLength: null,
+      stickout: null,
+      centreCutting: null,
+    });
+
+    const job = oneLabelJob();
+    job.labels = [];
+    job.shapes = [];
+    job.drills = [];
+    job.tool = bit30();
+    const depth = 1;
+    job.traces = [
+      {
+        kind: 'line',
+        id: 'tr',
+        position: { x: 20, y: 30 },
+        rotation: 0,
+        points: [
+          [0, 0],
+          [30, 0],
+        ],
+        closed: false,
+        depth,
+        enabled: true,
+      },
+    ];
+    const p = buildPreview(job);
+
+    const cone = vCone(bit30())!;
+    const r0 = cone.tipRadius;
+    const t = cone.tanHalf;
+    // The body's top is above the face (OVERSHOOT), so the cone is a shade wider there; that is
+    // also the segment count the builder uses at every level.
+    const bodyTopR = grooveRadiusAt(cone, depth + OVERSHOOT_MM);
+    const n = segmentsForRadius(bodyTopR);
+    const capFactor = (n / 2) * Math.sin((2 * Math.PI) / n);
+    const length = 30;
+    // The volume of the cone swept along the line, integrated level by level: a rectangle of
+    // length `length` and cap at each end, with the reach from `grooveRadiusAt`.
+    const integrated =
+      2 * length * (r0 * depth + (t * depth * depth) / 2) +
+      capFactor * (r0 * r0 * depth + r0 * t * depth * depth + (t * t * depth ** 3) / 3);
+
+    const removed = removedVolume(job, p);
+    expect(Math.abs(removed - integrated) / integrated).toBeLessThan(1e-3);
+
+    // The shape being replaced: the mouth footprint extruded straight down. The taper must remove
+    // materially less, and by the cone's own difference rather than a mesh accident.
+    const mouthR = grooveRadiusAt(cone, depth);
+    const slot = (2 * length * mouthR + Math.PI * mouthR * mouthR) * depth;
+    expect(removed).toBeLessThan(slot * 0.9);
+
+    // The floor is the TIP's flat, not the mouth.
+    const floor = p.floors.find((f) => f.labelId === 'tr');
+    expect(floor).toBeDefined();
+    expect(floor!.depth).toBe(depth);
+    const tipSegments = segmentsForRadius(r0);
+    const tipCap = (tipSegments / 2) * Math.sin((2 * Math.PI) / tipSegments);
+    const floorArea = meshVolume(floor!.mesh) / FLOOR_THICKNESS_MM;
+    expect(floorArea).toBeCloseTo(2 * length * r0 + tipCap * r0 * r0, 4);
   });
 
   // The anti-drift test #288 is about: `engraveRegions().cuts` is the one list the prediction, the
