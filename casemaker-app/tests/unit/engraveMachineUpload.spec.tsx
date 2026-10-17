@@ -17,12 +17,24 @@ import {
 } from '@/platform/machineUpload';
 import type { MachineObservation } from '@/platform/machineProbe';
 import type { VerifyReport } from '@/engine/cnc/verify';
+import { setInventoryEntries, resetRegistry } from '@/engine/cnc/toolRegistry';
+import { flatEndMill } from '@/engine/cnc/tool';
+import {
+  resetInventoryConditions,
+  setInventoryConditions,
+  type ToolCopy,
+} from '@/engine/cnc/toolCondition';
+import { useToolRegistryStore } from '@/store/toolRegistryStore';
+import type { InventoryItem } from '@/platform/houseClient';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => {
   cleanup();
   setMachineUploadLoader(null);
+  resetRegistry();
+  resetInventoryConditions();
+  useToolRegistryStore.setState({ items: [] });
 });
 
 beforeEach(() => {
@@ -274,5 +286,61 @@ describe('#255 EngraveMachineUpload — the sentence for each outcome', () => {
     const sentence = describeUpload(cases[1]![0], 'The Z1');
     expect(sentence).toContain('no data was sent');
     expect(sentence).not.toContain('packets');
+  });
+});
+
+describe('#491 EngraveMachineUpload — the cutter line', () => {
+  const TOOL = flatEndMill(0.5, { name: '0.5*2mm Engraving(Metal)' });
+  const ITEM: InventoryItem = {
+    id: 'engraver',
+    tool: TOOL,
+    origin: null,
+    quantity: 1,
+    codes: [{ symbology: 'qr', value: 'C1-BIT-ENGRAVE' }],
+    addedAt: '2026-10-17T00:00:00.000Z',
+    notes: null,
+    copies: [],
+    colletFits: null,
+  };
+  const copy = (where: ToolCopy['whereabouts']): ToolCopy => ({
+    id: 'c-1',
+    condition: 'new',
+    whereabouts: where,
+    runtimeWarnMinutes: null,
+    notes: null,
+    runtimeMinutes: null,
+  });
+
+  /** The panel reads a possession's identity from the registry entry and the store's items. */
+  const seed = (where: ToolCopy['whereabouts']): void => {
+    setInventoryEntries([{ key: 'inv:engraver', tool: TOOL, provenance: 'registered here' }]);
+    useToolRegistryStore.setState({ items: [ITEM] });
+    setInventoryConditions(
+      [{ id: 'engraver', quantity: 1, copies: [copy(where)] }],
+      (id) => `inv:${id}`,
+    );
+  };
+
+  it('names the chosen copy’s case first, then the full label and the box code', () => {
+    seed({ kind: 'box', case: { colour: 'yellow', label: 'yellow base, clear tube' } });
+    render(<EngraveMachineUpload {...props({ runContext: { toolKey: 'inv:engraver' } })} />);
+
+    expect(screen.getByTestId('engrave-upload-cutter').textContent).toBe(
+      'Cutter: Yellow case — 0.5*2mm Engraving(Metal) (C1-BIT-ENGRAVE)',
+    );
+  });
+
+  it('shows the old colourless line when the copy states no case — never a guessed one', () => {
+    seed({ kind: 'box' });
+    render(<EngraveMachineUpload {...props({ runContext: { toolKey: 'inv:engraver' } })} />);
+
+    const text = screen.getByTestId('engrave-upload-cutter').textContent!;
+    expect(text).toBe('Cutter: 0.5*2mm Engraving(Metal) (C1-BIT-ENGRAVE)');
+    expect(text.toLowerCase()).not.toContain('case');
+  });
+
+  it('draws no cutter line when the run names no cutter', () => {
+    render(<EngraveMachineUpload {...props()} />);
+    expect(screen.queryByTestId('engrave-upload-cutter')).toBeNull();
   });
 });

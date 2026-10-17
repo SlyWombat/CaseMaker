@@ -30,6 +30,7 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter } from '@/engine/cnc/tool';
+import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { V_BIT_REST_SENTENCE } from '@/engine/cnc/engrave/reachability';
 import { validateVise } from '@/engine/cnc/fixture';
@@ -829,7 +830,10 @@ export function EngravePanel(): JSX.Element {
         houseMargins,
         // #475 — the surface touches are the shop's own `registration.surfaceTouchCount`, resolved
         // by the same reader the registration planner uses; the labelled fallback is the seed (5).
-        { surfaceTouchCount: registrationSettings(shopDefaults).settings.surfaceTouchCount },
+        // #491 — the chosen copy's case, or both when the pick is indifferent; null leaves the
+        // colourless sentence. Read here from the registry's copy pool (this thread), never in the
+        // pure sheet module.
+        { surfaceTouchCount: registrationSettings(shopDefaults).settings.surfaceTouchCount, toolCase: caseWordsForKey(job.toolKey) ?? undefined },
       ),
     );
   }

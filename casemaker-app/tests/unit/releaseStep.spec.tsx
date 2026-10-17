@@ -18,6 +18,9 @@ import { MachineRecordSchema, type MachineRecord } from '@/platform/locationClie
 import { describeRun, programHash } from '@/platform/machineRun';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { resetInventoryConditions, setInventoryConditions, type ToolCopy } from '@/engine/cnc/toolCondition';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
 import {
   programVacuumSpan,
   releaseFileName,
@@ -216,6 +219,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  resetInventoryConditions();
   setMachineConsoleLoader(null);
   setMachineUploadLoader(null);
   setHouseClientLoader(null);
@@ -529,5 +533,42 @@ describe('#469 the release step', () => {
     expect(describeRun(o)).toContain('stays on for the next program');
     expect(describeRun({ ...o, span: 'none' })).toContain('without the vacuum');
     expect(describeUpload({ kind: 'uploaded', filename: 'p.nc', bytes: 3, packets: 1, alreadyPresent: false, status: '' }, 'Z1')).toContain('p.nc');
+  });
+});
+
+// #491 — the bit-change instruction leads with the case colour of the copy the pick would choose,
+// in the bench's form: "Yellow case — <full label name> (<code>)". A cutter with no case keeps the
+// colourless sentence.
+describe('#491 the release step names the cutter’s case', () => {
+  const yellow: ToolCopy = {
+    id: 'yellow-1',
+    condition: 'new',
+    whereabouts: { kind: 'box', case: { colour: 'yellow', label: 'yellow base, clear tube' } },
+    runtimeWarnMinutes: null,
+    notes: null,
+    runtimeMinutes: null,
+  };
+
+  it('prints the colour word before the next program’s full label name and code', async () => {
+    // The shop owns the built-in `flat-3.175x12-metal` in a yellow case: #454's correspondence
+    // carries the copies to the key the program names.
+    setInventoryConditions(
+      [
+        {
+          id: 'engraver',
+          quantity: 1,
+          copies: [yellow],
+          tool: flatEndMill(3.175, { name: '3.175 mm flat end (Metal)', shoulderLength: 12 }),
+        },
+      ],
+      (id) => `inv:${id}`,
+      TOOL_LIBRARY,
+    );
+    render(<EngraveReleaseStep target={TARGET} job={twoSetupJob()} generated={generated()} blocker={null} />);
+    await uploadAndStart();
+    const sentence = await screen.findByTestId('engrave-release-change-sentence', undefined, { timeout: 10000 });
+    expect(sentence.textContent).toContain(
+      'Change the cutter for program 2 of 2: Yellow case — 3.175*12mm Flat End(Metal) (flat-3.175x12-metal).',
+    );
   });
 });

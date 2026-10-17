@@ -11,6 +11,8 @@ import { machineKey, useMachineRunStore, type RunContext } from '@/store/machine
 import { programHash, programOwnsVacuum } from '@/platform/machineRun';
 import { frameBounds, type LaserLift } from '@/platform/machineLaser';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useToolRegistryStore } from '@/store/toolRegistryStore';
+import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
 
 /**
  * #255 — send the verified program to the machine, from beside Save in the engrave panel.
@@ -129,6 +131,11 @@ export function EngraveMachineUpload({
   const laserPointOn = useSettingsStore((s) => s.laserOptions.pointToOrigin);
   const houseEdgeMargin = useSettingsStore((s) => s.margins.edgeMargin);
   const laserUncertainty = useShopDefault('laser.originUncertaintyMm');
+  // #491 — the cutter this file was posted for, named the way the bench names it: case colour,
+  // full label name, box code. `runContext.toolKey` is the same key the run store records.
+  const items = useToolRegistryStore((s) => s.items);
+  const cutter =
+    runContext?.toolKey === undefined ? null : cutterIdentity(runContext.toolKey, items);
 
   // Order matters, and matches `uploadBlocker`'s own reasoning: the run's trust first, then whether
   // there is anywhere to send it. Whether the machine is busy is NOT a clause here (#296): the wizard's
@@ -220,6 +227,18 @@ export function EngraveMachineUpload({
       >
         {stage === 'sending' ? 'Uploading…' : 'Upload to machine…'}
       </button>
+
+      {cutter !== null && (
+        <p style={MUTED} data-testid="engrave-upload-cutter">
+          Cutter:{' '}
+          {cutter.casePhrase !== null && (
+            <>
+              <strong>{cutter.casePhrase}</strong> —{' '}
+            </>
+          )}
+          <strong>{cutter.name}</strong> ({cutter.code})
+        </p>
+      )}
 
       {blocked !== null && (
         <p style={MUTED} data-testid="engrave-upload-blocked">

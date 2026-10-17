@@ -39,6 +39,8 @@ import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { cutterProfileScale } from '@/engine/cnc/cutterProfile';
 import { CutterProfile } from '@/components/ui/CutterProfile';
+import { caseSwatch, copyCaseSummary, distinctCases } from '@/engine/cnc/caseColour';
+import type { ToolCopy } from '@/engine/cnc/toolCondition';
 import type { InventoryItem } from '@/platform/houseClient';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useHouseStore, useLastSync } from '@/store/houseStore';
@@ -449,6 +451,7 @@ export function ToolsScope() {
                 <th className="num">Shoulder</th>
                 <th className="num">Stick-out</th>
                 <th className="num">Qty</th>
+                <th>Case</th>
                 <th>From</th>
               </tr>
             </thead>
@@ -474,7 +477,7 @@ export function ToolsScope() {
               })}
               {groups.length === 0 && (
                 <tr className="more">
-                  <td colSpan={10} data-testid="manage-no-matches">
+                  <td colSpan={11} data-testid="manage-no-matches">
                     nothing matches “{query}”
                   </td>
                 </tr>
@@ -513,6 +516,41 @@ export function ToolsScope() {
   );
 }
 
+/**
+ * The cases a possession's copies live in (#491): ONE SWATCH PER DISTINCT CASE and the count beside
+ * them. Only copies that state a case contribute — a row whose copies are undescribed shows the
+ * not-applicable dot. A colour outside the palette prints its word with an outlined swatch, never a
+ * guessed paint chip.
+ */
+function CaseCell({ copies }: { copies: readonly ToolCopy[] }): ReactNode {
+  const cases = distinctCases(copies);
+  if (cases.length === 0) return <span className="num dim">{NOT_APPLICABLE}</span>;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}>
+      {cases.map((c) => {
+        const paint = caseSwatch(c.colour);
+        return (
+          <span
+            key={c.colour.toLowerCase()}
+            title={c.label ?? `${c.colour.toLowerCase()} case`}
+            data-case={c.colour.toLowerCase()}
+            data-testid={`manage-tools-case-swatch-${c.colour.toLowerCase()}`}
+            style={{
+              display: 'inline-block',
+              width: 9,
+              height: 9,
+              borderRadius: 2,
+              background: paint ?? 'transparent',
+              border: paint === null ? '1px dashed #7d8894' : '1px solid #10151a',
+            }}
+          />
+        );
+      })}
+      <small>{copyCaseSummary(copies)}</small>
+    </span>
+  );
+}
+
 /** One tier: its heading row, its rows, and (for the capped catalogue) the line saying so. */
 function Rows({
   tier,
@@ -537,7 +575,7 @@ function Rows({
   return (
     <>
       <tr className="grp" data-testid={`manage-group-${tier}`}>
-        <td colSpan={10}>
+        <td colSpan={11}>
           {TIER_HEADING[tier]} <small>{tierNote(tier, count)}</small>
         </td>
       </tr>
@@ -582,6 +620,9 @@ function Rows({
             <td className={possession === null ? 'num dim' : 'num'}>
               {possession === null ? NOT_APPLICABLE : possession.quantity}
             </td>
+            <td data-testid={`manage-tools-case-${entry.key}`}>
+              <CaseCell copies={possession?.copies ?? []} />
+            </td>
             <td>
               <span className={`tag tag--${tier}`}>{TIER_TAG[tier]}</span>
             </td>
@@ -590,7 +631,7 @@ function Rows({
       })}
       {more > 0 && (
         <tr className="more">
-          <td colSpan={10} data-testid={`manage-more-${tier}`}>
+          <td colSpan={11} data-testid={`manage-more-${tier}`}>
             … {more} more catalogue {more === 1 ? 'row' : 'rows'} — search or scroll
           </td>
         </tr>

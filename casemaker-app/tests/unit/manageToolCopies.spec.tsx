@@ -105,3 +105,56 @@ describe('#415 review — the editor’s edges', () => {
     expect((updateItem.mock.calls[0] as unknown as [InventoryItem])[0].copies[0]?.runtimeWarnMinutes).toBe(0.5);
   });
 });
+
+describe('#491 — the case on a boxed copy', () => {
+  it('records the colour and the label, and “not set” condition saves as null', () => {
+    const updateItem = vi.fn(async () => true);
+    useHouseStore.setState({ updateItem });
+    render(<ToolCopies item={ITEM} />);
+    fireEvent.click(screen.getByTestId('manage-copy-add'));
+
+    // A copy added only to say which case it lives in states no condition — it is not "new".
+    expect((screen.getByTestId('manage-copy-condition-0') as HTMLSelectElement).value).toBe('');
+    // The label cannot be typed before there is a colour to attach it to.
+    expect((screen.getByTestId('manage-copy-case-label-0') as HTMLInputElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByTestId('manage-copy-case-0'), { target: { value: 'yellow' } });
+    fireEvent.change(screen.getByTestId('manage-copy-case-label-0'), { target: { value: 'yellow base, clear tube' } });
+    fireEvent.click(screen.getByTestId('manage-copies-save'));
+
+    const saved = (updateItem.mock.calls[0] as unknown as [InventoryItem])[0];
+    expect(saved.copies).toEqual([
+      expect.objectContaining({
+        condition: null,
+        whereabouts: { kind: 'box', case: { colour: 'yellow', label: 'yellow base, clear tube' } },
+      }),
+    ]);
+  });
+
+  it('shows a recorded case back, and forgets it when the copy moves to a machine', () => {
+    const item = {
+      ...ITEM,
+      copies: [
+        {
+          id: 'c1',
+          condition: 'used' as const,
+          whereabouts: {
+            kind: 'box' as const,
+            case: { colour: 'green', label: 'green lid' },
+          },
+          runtimeWarnMinutes: null,
+          notes: null,
+          runtimeMinutes: null,
+        },
+      ],
+    };
+    render(<ToolCopies item={item} />);
+    expect((screen.getByTestId('manage-copy-case-0') as HTMLInputElement).value).toBe('green');
+    expect((screen.getByTestId('manage-copy-case-label-0') as HTMLInputElement).value).toBe('green lid');
+
+    fireEvent.change(screen.getByTestId('manage-copy-where-0'), { target: { value: 'm-1' } });
+    // A machine copy is not in a case: the fields go, and the union carries no case.
+    expect(screen.queryByTestId('manage-copy-case-0')).toBeNull();
+    expect(screen.queryByTestId('manage-copy-case-label-0')).toBeNull();
+  });
+});

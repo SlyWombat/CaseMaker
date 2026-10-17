@@ -26,6 +26,8 @@ import { planRun } from '@/engine/cnc/plan/phases';
 import { finishedProgramsFor } from '@/store/locationStore';
 import { useEngraveReleaseStore, type ReleaseFile } from '@/store/engraveReleaseStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { useToolRegistryStore } from '@/store/toolRegistryStore';
+import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
 import { EngraveMachineRun } from './EngraveMachineRun';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
@@ -58,7 +60,8 @@ function labelOf(toolKey: string): { name: string; note: string } {
 }
 
 function FileRow({ file }: { file: ReleaseFile }): JSX.Element {
-  const label = labelOf(file.toolKey);
+  const items = useToolRegistryStore((s) => s.items);
+  const label = cutterIdentity(file.toolKey, items);
   const state =
     file.done
       ? 'already finished on this machine — skipped'
@@ -73,7 +76,10 @@ function FileRow({ file }: { file: ReleaseFile }): JSX.Element {
               : 'to upload';
   return (
     <li data-testid={`engrave-release-file-${file.index}`} data-state={file.done ? 'done' : file.upload}>
-      Program {file.index} of {file.total} · Setup {file.setupIndex} · <strong>{label.name}</strong> ({file.toolKey})
+      Program {file.index} of {file.total} · Setup {file.setupIndex} ·{' '}
+      {label.casePhrase !== null && <strong>{label.casePhrase}</strong>}
+      {label.casePhrase !== null && ' — '}
+      <strong>{label.name}</strong> ({label.code})
       <br />
       <span style={MUTED}>
         {file.filename} — {state}
@@ -100,12 +106,19 @@ function ChangePanel({
   setAtMachine: (v: boolean) => void;
   onConfirm: () => void;
 }): JSX.Element {
-  const label = labelOf(next.toolKey);
+  const items = useToolRegistryStore((s) => s.items);
+  const label = cutterIdentity(next.toolKey, items);
   return (
     <div style={BOX} data-testid="engrave-release-change">
-      <p style={{ fontSize: 12, color: '#e6edf5', margin: '0 0 6px' }}>
+      <p style={{ fontSize: 12, color: '#e6edf5', margin: '0 0 6px' }} data-testid="engrave-release-change-sentence">
         Program {previous.index} of {previous.total} finished; the machine homed and the vacuum is still on.
-        Change the cutter for program {next.index} of {next.total}: <strong>{label.name}</strong> ({label.note}).
+        Change the cutter for program {next.index} of {next.total}:{' '}
+        {label.casePhrase !== null && (
+          <>
+            <strong>{label.casePhrase}</strong> —{' '}
+          </>
+        )}
+        <strong>{label.name}</strong> ({label.code}).
       </p>
       <ol style={{ ...MUTED, paddingLeft: 18 }}>
         <li>

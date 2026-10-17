@@ -21,6 +21,7 @@ import {
   type ToolCopy,
 } from '@/engine/cnc/toolCondition';
 import type { InventoryItem } from '@/platform/houseClient';
+import { CASE_SWATCH } from '@/engine/cnc/caseColour';
 import type { MachineRecord } from '@/platform/locationClient';
 import { useHouseStore } from '@/store/houseStore';
 import { useLocationStore } from '@/store/locationStore';
@@ -49,6 +50,8 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
     return m ? (m.name ?? m.profileId ?? m.id) : `${id} (not in this location)`;
   };
   const patch = (i: number, p: Partial<ToolCopy>) => setCopies((cs) => cs.map((c, j) => (j === i ? { ...c, ...p } : c)));
+  /** A copy's case, or null — a function because the union does not narrow inside callbacks. */
+  const boxCase = (c: ToolCopy) => (c.whereabouts.kind === 'box' ? (c.whereabouts.case ?? null) : null);
 
   return (
     <>
@@ -63,10 +66,13 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
             <span>copy {i + 1} — condition</span>
             <select
               className="fld"
-              value={c.condition}
+              value={c.condition ?? ''}
               data-testid={`manage-copy-condition-${i}`}
-              onChange={(e) => patch(i, { condition: e.target.value as Condition })}
+              onChange={(e) => patch(i, { condition: e.target.value === '' ? null : (e.target.value as Condition) })}
             >
+              {/* #491 — a copy may be recorded only to say which case it lives in. "not set" is
+                  the explicit answer, not a missing one: nothing here guesses "new". */}
+              <option value="">not set</option>
               {CONDITIONS.map((k) => (
                 <option key={k} value={k}>
                   {k}
@@ -82,7 +88,10 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
               data-testid={`manage-copy-where-${i}`}
               onChange={(e) =>
                 patch(i, {
-                  whereabouts: e.target.value === 'box' ? { kind: 'box' } : { kind: 'machine', machineId: e.target.value },
+                  whereabouts:
+                    e.target.value === 'box'
+                      ? { kind: 'box', case: c.whereabouts.kind === 'box' ? (c.whereabouts.case ?? null) : null }
+                      : { kind: 'machine', machineId: e.target.value },
                 })
               }
             >
@@ -99,6 +108,57 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
               )}
             </select>
           </label>
+          {c.whereabouts.kind === 'box' && (
+            <>
+              {/* #491 — the case is a property of the BOXED copy. Blank means nobody recorded one:
+                  it is never filled from the cutter's other copies, and the instruction and drawing
+                  then show no colour. The label is the full descriptor ("yellow base, clear tube")
+                  and is optional. */}
+              <label className="lf">
+                <span>case colour <em>blank: not recorded</em></span>
+                <input
+                  className="fld fld--text"
+                  list="manage-case-colours"
+                  placeholder="yellow"
+                  value={boxCase(c)?.colour ?? ''}
+                  data-testid={`manage-copy-case-${i}`}
+                  onChange={(e) => {
+                    const colour = e.target.value.trim();
+                    patch(i, {
+                      whereabouts: {
+                        kind: 'box',
+                        case:
+                          colour === ''
+                            ? null
+                            : { colour, label: boxCase(c)?.label ?? null },
+                      },
+                    });
+                  }}
+                />
+              </label>
+              <label className="lf">
+                <span>case label <em>optional — what the case says</em></span>
+                <input
+                  className="fld fld--text"
+                  placeholder="yellow base, clear tube"
+                  value={boxCase(c)?.label ?? ''}
+                  disabled={boxCase(c) == null}
+                  data-testid={`manage-copy-case-label-${i}`}
+                  onChange={(e) => {
+                    const current = boxCase(c);
+                    if (current == null) return;
+                    const label = e.target.value.trim();
+                    patch(i, {
+                      whereabouts: {
+                        kind: 'box',
+                        case: { colour: current.colour, label: label === '' ? null : label },
+                      },
+                    });
+                  }}
+                />
+              </label>
+            </>
+          )}
           <label className="lf">
             <span>
               check after, min <em>blank: the shop’s {threshold.value} ({threshold.source})</em>
@@ -146,13 +206,25 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
           onClick={() =>
             setCopies((cs) => [
               ...cs,
-              { id: newId('copy'), condition: 'used', whereabouts: { kind: 'box' }, runtimeWarnMinutes: null, notes: null, runtimeMinutes: null },
+              {
+                id: newId('copy'),
+                condition: null,
+                whereabouts: { kind: 'box', case: null },
+                runtimeWarnMinutes: null,
+                notes: null,
+                runtimeMinutes: null,
+              },
             ])
           }
         >
           ＋ Describe a copy
         </button>
       </div>
+      <datalist id="manage-case-colours">
+        {Object.keys(CASE_SWATCH).map((c) => (
+          <option key={c} value={c} />
+        ))}
+      </datalist>
 
       <div className="panel-subhead">Collet fits</div>
       {machines.length === 0 ? (

@@ -1600,6 +1600,14 @@ function materialPositionSteps(
  */
 export interface RunSheetOptions {
   /**
+   * #491 — the colour word(s) for the job's cutter, from `caseWordsForKey(job.toolKey)`: `Yellow
+   * case`, or both cases in condition order for an indifferent pick. Passed in, never read from
+   * `toolCondition`'s map here: the sheet is pure data and builds in realms (the sim worker, the
+   * bench CLI) where that map is empty. Undefined means no case was recorded — the step keeps the
+   * colourless wording it has always had, and nothing is guessed.
+   */
+  toolCase?: string;
+  /**
    * Print §5's material-position check (`materialScan.ts`, #391). **OFF, deliberately and for now.**
    *
    * It is the operator-facing half of a feature whose printed steps a review held (review of 36f3837
@@ -2150,7 +2158,9 @@ export function buildRunSheet(
       value: `${fmtNum(length)} × ${fmtNum(width)} × ${fmtNum(thickness)} mm ${MATERIAL_LABELS[material]}`,
     },
     {
-      text: tool ? `The cutter — ${tool.name}.` : 'The cutter named by the job.',
+      text: tool
+        ? `The cutter — ${options.toolCase === undefined ? '' : `${options.toolCase} — `}${tool.name}.`
+        : 'The cutter named by the job.',
       value: diameter === null ? 'cutting diameter unknown' : `⌀ ${fmtNum(diameter)} mm cutting`,
     },
     {

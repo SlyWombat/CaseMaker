@@ -1589,5 +1589,31 @@ describe('the surface spread (#475)', () => {
     expect(all).toContain('may land from');
     expect(all).toContain('mm below Z0 and nowhere else');
     expect(steps.some((s) => s.bold === true && s.text.startsWith('this blank is bowed'))).toBe(false);
+// #491 — the sheet's "The cutter" step carries the colour word of the copy the pick would choose.
+// The sheet stays pure: the word is handed in (`toolCase`), never read from a registry the bench
+// CLI and the sim worker do not have. Absent means the old colourless sentence — never a guess.
+describe('#491 the cutter’s case on the run sheet', () => {
+  const cutterStep = (options: RunSheetOptions) =>
+    section(sheetFor(defaultEngraveJob(), NO_SIM, NC, options), 'need').steps.find((s) =>
+      s.text.startsWith('The cutter'),
+    )!;
+
+  it('prints the word before the full label name', () => {
+    expect(cutterStep({}).text).not.toContain('case');
+    expect(cutterStep({ toolCase: 'Yellow case' }).text).toMatch(/^The cutter — Yellow case — .+\.$/);
+    expect(cutterStep({ toolCase: 'Yellow case (new) or green case (used)' }).text).toContain(
+      'Yellow case (new) or green case (used) —',
+    );
+  });
+
+  it('leaves a sheet built without the option byte-identical to before the field existed', () => {
+    // One job and one generated result: `defaultEngraveJob()` mints fresh label ids each call, so
+    // two of them would differ for a reason that has nothing to do with the new option.
+    const job = defaultEngraveJob();
+    const generated = stubGenerated(job);
+    expect(JSON.stringify(buildRunSheet(job, generated, NO_SIM, NOW))).toBe(
+      JSON.stringify(buildRunSheet(job, generated, NO_SIM, NOW, undefined, {})),
+    );
+    expect(cutterStep({}).text).not.toContain('— Yellow');
   });
 });
