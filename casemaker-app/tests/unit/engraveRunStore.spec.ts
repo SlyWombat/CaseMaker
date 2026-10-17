@@ -166,6 +166,34 @@ describe('engraveRunStore (#206)', () => {
     expect(uploadBlocker(v)).toBe('the program carries no verifier report');
   });
 
+  // #469 (review R2) — the app uploads and plays ONE program. A job with two (a job stating
+  // `setups[]`, or a facing job's face file beside its engraving) would leave the machine with
+  // half the job and, on a `'first'` span, the vacuum on. Save stays open — the files are good —
+  // and only Upload, which is the act that cannot complete, is shut.
+  it('shuts Upload — and only Upload — on a job with more than one program (#469)', () => {
+    const report = { ok: true, findings: [], stats: { lines: 1, cuttingMoves: 1, deepestZ: -1, bbox: { min: [0, 0, -1] as [number, number, number], max: [1, 1, 0] as [number, number, number] } } };
+    const program = (setupIndex: number): EngraveGenerated['programs'][number] => ({
+      setupIndex,
+      setupId: `setup-${setupIndex}`,
+      toolKey: 'flat-1.0',
+      nc: 'G90\nM02',
+      verify: report,
+      frameNc: null,
+      frameVerify: null,
+      programHash: `hash-${setupIndex}`,
+      cam: null,
+    });
+    const v = view({
+      generated: { ...clean(), verify: report, programs: [program(1), program(2)] },
+      simStatus: 'ready',
+      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+    });
+    expect(saveBlocker(v)).toBeNull();
+    expect(uploadBlocker(v)).toBe('this job is 2 programs; the app plays one');
+    // One program is not refused: the single-file case is every job the app can play today.
+    expect(uploadBlocker({ ...v, generated: { ...v.generated!, programs: [program(1)] } })).toBeNull();
+  });
+
   // #393 — the app's own half of the gap, and the reason the rule got one name. The session's
   // `ok: true` means the sweep produced material, so a program that drove the cutter into the jaw
   // reaches this store as a DIAGNOSTIC and nowhere else. If `runErrorCodes` stopped reading the

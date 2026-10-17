@@ -174,7 +174,17 @@ export function EngraveMachineUpload({
     // The run panel is drawn from the machine's store entry (#423): an upload that went through is
     // what prepares it, with the program's hash for the once-per-program confirmation.
     if (outcome.kind === 'uploaded') {
-      prepareRun({ host: machine.host, port: machine.port }, outcome.filename, programHash(program.nc), { ...runContext, nc: program.nc });
+      // #469 (review R20) — the app's own upload OWNS the vacuum, whatever the text says. The span
+      // is the post's decision (#419 decision 4) and this file is the whole of what was uploaded:
+      // a file that carries its own `M331`/`M332` says so in words, while an `air: false` job
+      // carries none — and the runner's text test would then bracket that file, switching the
+      // vacuum ON at the very job that asked for it off. `vacuumOwned` is the context's own answer,
+      // so the runner does not have to infer the job from one file of it.
+      prepareRun({ host: machine.host, port: machine.port }, outcome.filename, programHash(program.nc), {
+        ...runContext,
+        nc: program.nc,
+        vacuumOwned: true,
+      });
     }
     setStage('idle');
   }

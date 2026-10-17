@@ -117,10 +117,17 @@ describe('#423 the run panel, in the real tree', () => {
     setMachineConsoleLoader(async () => client(0));
     render(upload('M02\n'));
     await uploadIt();
+    // The prepare the app makes says the file owns the vacuum (#469 R20), rather than leaving the
+    // runner to infer it from the text of one file of the job.
+    expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.context?.vacuumOwned).toBe(true);
     fireEvent.click(screen.getByTestId('engrave-run-at-machine'));
     fireEvent.click(screen.getByTestId('engrave-run-start'));
     await waitFor(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeout: 6000 });
-    expect(sent).toEqual(['?', 'M331', 'play /sd/gcodes/job.nc', '?', 'M332', '$H']);
+    // #469 (R20) — the app's upload OWNS the vacuum, so the runner adds no `M331`/`M332` of its
+    // own here, even though this fixture program states neither: a job's span is the post's
+    // decision, and an `air: false` file legitimately carries no words. The machine homes on
+    // every finish; it is the file (or its absence) that switches the vacuum.
+    expect(sent).toEqual(['?', 'play /sd/gcodes/job.nc', '?', '$H']);
     expect(screen.queryByTestId('engrave-run-home')).toBeNull();
     // The same program again: no question. A different program under the same name: asked again.
     expect(screen.queryByTestId('engrave-run-at-machine')).toBeNull();

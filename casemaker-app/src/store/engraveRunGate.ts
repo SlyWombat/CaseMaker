@@ -113,16 +113,25 @@ export function saveBlocker(v: EngraveRunView): string | null {
  * lists happening to agree. That direction is the safe one: a program nobody may keep is certainly
  * not one to send.
  *
- * The one clause it adds is the verifier's report having to EXIST. `saveBlocker` does not need it —
- * `runErrorCodes` reads `generated.verify?.findings ?? []`, so an absent report contributes no
- * errors and a program with no report would slip through. Uploading does need it: the upload gate
- * is a statement about a report (`programUploadProblem`), and there is no such statement to make
- * without one. Reachable only from a hand-edited store, and answered with a sentence rather than a
- * crash.
+ * The clauses it adds are about the UPLOAD, not about the program's trust:
+ *
+ *   - **one file only (#469, review R2).** The app uploads and plays a single program, so a job
+ *     with more than one (a job stating `setups[]`, or a facing job whose face file is its own) has
+ *     files nothing here can play. Uploading file one would leave the machine with half the job and
+ *     — on a `'first'` span — the vacuum on. Until the #419 §3 release step plays the list, this
+ *     refuses by name rather than sending the first file and hoping.
+ *   - **the verifier's report having to EXIST.** `saveBlocker` does not need it —
+ *     `runErrorCodes` reads `generated.verify?.findings ?? []`, so an absent report contributes no
+ *     errors and a program with no report would slip through. Uploading does need it: the upload
+ *     gate is a statement about a report (`programUploadProblem`), and there is no such statement
+ *     to make without one. Reachable only from a hand-edited store, and answered with a sentence
+ *     rather than a crash.
  */
 export function uploadBlocker(v: EngraveRunView): string | null {
   const save = saveBlocker(v);
   if (save !== null) return save;
+  const count = (v.generated?.programs ?? []).length;
+  if (count > 1) return `this job is ${count} programs; the app plays one`;
   if (!v.generated?.verify) return 'the program carries no verifier report';
   return null;
 }
