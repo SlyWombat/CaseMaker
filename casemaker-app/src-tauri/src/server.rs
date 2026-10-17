@@ -955,6 +955,7 @@ mod tests {
         ("POST", "/api/v1/power/m-1/on", "{}"),
         ("POST", "/api/v1/power/m-1/off", "{}"),
         ("PUT", "/api/v1/wasteboard/m-1", "null"),
+        ("POST", "/api/v1/finished-programs/m-1", r#"{"hash":"a1b2c3d4"}"#),
         ("PUT", "/api/v1/defaults/rest.overlapMm", r#"{"value":1,"source":"seeded"}"#),
         ("DELETE", "/api/v1/defaults/rest.overlapMm", "{}"),
         ("POST", "/api/v1/catalogue/sync", "{}"),

@@ -11,6 +11,7 @@ mod config_api;
 mod defaults;
 mod etag;
 mod feeds;
+mod finished_programs;
 mod guard;
 mod house;
 mod house_api;

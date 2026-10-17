@@ -13,20 +13,21 @@
  *
  * THE END OF A RUN (#414) is worked out HERE, once per run, the moment its outcome is known — never in
  * a panel, where a remount would apply it twice:
- *   - FINISHED: the job's reserved stock is consumed, the cutting time is added to the copy recorded as
- *     in this machine, and an offcut with usable size is OFFERED (one click keeps it, dismissing skips
- *     it). Each says what it did, or why not — a run with no stock entry (#419 has not landed) skips
- *     the shelf with a note.
+ *   - FINISHED: the program's FNV hash is recorded on this machine (#419 §4.5), the job's reserved
+ *     stock is consumed, the cutting time is added to the copy recorded as in this machine, and an
+ *     offcut with usable size is OFFERED (one click keeps it, dismissing skips it). Each says what it
+ *     did, or why not — a run with no stock entry (#419 has not landed) skips the shelf with a note.
  *   - STOPPED: nothing is changed; the operator is asked whether the stock was used (yes consumes it,
- *     no leaves the reservation for a re-run). No runtime is counted for a stopped run. An unanswered
- *     question is CARRIED to the machine's next run entry, never dropped without a word.
+ *     no leaves the reservation for a re-run). No runtime is counted for a stopped run, and the
+ *     program is NOT recorded as finished. An unanswered question is CARRIED to the machine's next
+ *     run entry, never dropped without a word.
  *   - ALARM, UNREACHABLE, REFUSED, NEVER STARTED: nothing is changed, and the end says so.
  * The runtime write is not retried: a failed one is reported, so it is never counted twice.
  */
 
 import { create } from 'zustand';
 import { attachConsole } from '@/platform/machineConsole';
-import { runProgram, type Progress, type RunOutcome, type RunSettings } from '@/platform/machineRun';
+import { programHash, runProgram, type Progress, type RunOutcome, type RunSettings } from '@/platform/machineRun';
 import { copyInMachine, offcutOffer, programCuts, runtimeOf, wearKey, weighRuntime, withRuntime } from '@/engine/cnc/runEnd';
 import type { StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
@@ -34,7 +35,7 @@ import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { newStockId, useStockStore } from './stockStore';
 import { useToolRegistryStore } from './toolRegistryStore';
 import { useHouseStore } from './houseStore';
-import { useLocationStore } from './locationStore';
+import { machineAt, useLocationStore } from './locationStore';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 
 /**
@@ -80,6 +81,8 @@ export interface RunEndIO {
   inventory: () => readonly InventoryItem[];
   updateItem: (item: InventoryItem) => Promise<{ ok: boolean; text: string }>;
   machineIdFor: (target: { host: string; port: number }) => string | null;
+  /** Record a program that FINISHED cleanly on this machine (#419 §4.5); `added: false` when it was already there. */
+  recordFinishedProgram: (machineId: string, hash: string) => Promise<{ ok: boolean; added: boolean; text: string }>;
   minSideMm: () => number;
   /** `offcut.offer`: false turns offcut offers off entirely. */
   offerOffcuts: () => boolean;
@@ -108,8 +111,8 @@ const storeIO: RunEndIO = {
     const ok = await useHouseStore.getState().updateItem(item);
     return { ok, text: ok ? '' : (useHouseStore.getState().notice?.text ?? 'the inventory did not take the change') };
   },
-  machineIdFor: (target) =>
-    useLocationStore.getState().location?.machines.find((m) => m.address?.host === target.host && m.address.port === target.port)?.id ?? null,
+  machineIdFor: (target) => machineAt(target)?.id ?? null,
+  recordFinishedProgram: (machineId, hash) => useLocationStore.getState().recordFinishedProgram(machineId, hash),
   minSideMm: () => readDefault(useShopDefaultsStore.getState().defaults, 'offcut.minSideMm').value,
   wearWeight: (key) => readDefault(useShopDefaultsStore.getState().defaults, key),
   offerOffcuts: () => readFlag(useShopDefaultsStore.getState().defaults, 'offcut.offer').value,
@@ -144,6 +147,26 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
   }
   const lines: string[] = [];
   const cuts = ctx ? programCuts(ctx.nc) : null;
+  const machineId = io.machineIdFor(target);
+  // The program FINISHED cleanly (#419 §4.5): remember its FNV hash on this machine, so the plan
+  // stops offering it the air run (Q14). ONLY this branch records — a stopped run may have cut part
+  // way, and its program is still "new". The key is `programHash`, the run confirmation's key
+  // (decision 3), never #277's SHA-256 `ncHash`.
+  if (ctx !== null) {
+    const hash = programHash(ctx.nc);
+    if (machineId === null) {
+      lines.push('The finished program was not recorded: this machine is not one of the location’s.');
+    } else {
+      const r = await io.recordFinishedProgram(machineId, hash);
+      lines.push(
+        r.ok
+          ? r.added
+            ? `The program is recorded as finished on this machine (${hash}), so it will not be offered the air run again.`
+            : `The program was already recorded as finished on this machine (${hash}).`
+          : `The finished program was NOT recorded (${hash}), so it will be offered the air run again: ${r.text}`,
+      );
+    }
+  }
   // The shelf as it is NOW: its store is otherwise loaded only by Manage › Materials.
   if (hasStock) await io.refreshStock();
   const parent = hasStock && ctx ? io.stockItem(ctx.stockEntryId!) : null;
@@ -158,7 +181,6 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
 
   // The runtime — written once, never retried.
   const reading = cuts ? runtimeOf(cuts, outcome.last.elapsedS) : null;
-  const machineId = io.machineIdFor(target);
   if (reading === null) lines.push('No runtime was counted: neither the program nor the run says how long it cut.');
   else if (cuts && cuts.tools.length > 1) lines.push('No runtime was counted: the program changes between tools, and one program per tool is the rule (Q15).');
   else if (machineId === null) lines.push('No runtime was counted: this machine is not one of the location’s.');

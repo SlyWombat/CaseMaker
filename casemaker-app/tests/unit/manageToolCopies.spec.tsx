@@ -37,7 +37,7 @@ beforeEach(() => {
       unreadableMachines: [],
       machines: [{
         id: 'm-1', profileId: 'Z1', name: 'Makera_Z1_000000', serial: null, firmware: null, address: null,
-        calibration: null, fixtures: null, margins: null, power: null, wasteboard: null, updatedAt: 'x',
+        calibration: null, fixtures: null, margins: null, power: null, wasteboard: null, finishedPrograms: [], updatedAt: 'x',
       }],
     },
   });

@@ -50,6 +50,7 @@ const MACHINE: MachineRecord = {
   margins: null,
   power: { provider: 'home-assistant', baseUrl: 'http://ha.local:8123', entityId: 'switch.makera_cnc' },
   wasteboard: null,
+  finishedPrograms: [],
   updatedAt: '2026-10-15T00:00:00.000Z',
 };
 

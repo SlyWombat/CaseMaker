@@ -327,6 +327,7 @@ describe('the "my machine" migration into the location (#412)', () => {
       ...record,
       power: { provider: 'home-assistant', baseUrl: 'http://ha.local:8123', entityId: 'switch.makera_cnc' },
       wasteboard: { thickness: 10, thicknessSource: 'chosen', measuredAt: null, lastResurfacedAt: null, scars: [] },
+      finishedPrograms: ['a1b2c3d4'],
     };
     // Nothing changed locally: nothing to write, even though the local side has no idea of either.
     expect(sameRecord(mergeMachine(localMachine(), served, served, 'later').record, served)).toBe(true);
@@ -335,6 +336,7 @@ describe('the "my machine" migration into the location (#412)', () => {
     const { record: next } = mergeMachine(localMachine(), served, served, 'later');
     expect(next.power).toEqual(served.power);
     expect(next.wasteboard).toEqual(served.wasteboard);
+    expect(next.finishedPrograms).toEqual(served.finishedPrograms);
     expect(next.margins?.minFloor).toBe(0.3);
   });
 
@@ -369,6 +371,7 @@ describe('which machine check may move the record (#412 review)', () => {
     margins: null,
     power: null,
     wasteboard: null,
+    finishedPrograms: [],
     updatedAt: '2026-10-15T08:30:00.000Z',
     ...over,
   }) as MachineRecord;

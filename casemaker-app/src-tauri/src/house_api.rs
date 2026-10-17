@@ -84,6 +84,10 @@ pub fn routes(store: Arc<HouseStore>) -> Router {
         .route("/api/v1/power/:id/off", post(power_off))
         // #417. The machine's wasteboard record (null clears it), guarded on the location.
         .route("/api/v1/wasteboard/:id", put(set_wasteboard))
+        // #419 §4.5. Append one finished program's FNV hash to a machine's list. A POST action, not
+        // a guarded PUT: an append needs no prior read, and two windows finishing at once must both
+        // land (see `HouseStore::add_finished_program`).
+        .route("/api/v1/finished-programs/:id", post(add_finished_program))
         // The shop's defaults: tunable values with provenance, open to new keys (`defaults.rs`).
         .route("/api/v1/defaults", get(list_defaults))
         .route("/api/v1/defaults/:key", put(put_default).delete(reset_default))
@@ -551,6 +555,25 @@ async fn set_wasteboard(
     let guard = if_match(&headers);
     match store.set_wasteboard(&id, board, guard.as_deref()).await {
         Ok(()) => empty(StatusCode::OK),
+        Err(e) => error_response(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FinishedProgramBody {
+    hash: String,
+}
+
+/// Record one program that finished cleanly on a machine (#419 §4.5). A repeat is a no-op, so a
+/// retry after a dropped response cannot duplicate the hash.
+async fn add_finished_program(
+    State(store): State<Arc<HouseStore>>,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<FinishedProgramBody>,
+) -> Response<Body> {
+    match store.add_finished_program(&id, &body.hash).await {
+        Ok(()) => empty(StatusCode::NO_CONTENT),
         Err(e) => error_response(e),
     }
 }
@@ -1255,6 +1278,56 @@ mod tests {
             .contains("location.json"));
         let exported = json_of(res).await;
         assert_eq!(exported["machines"][0]["id"], serde_json::json!("machine-1"));
+    }
+
+    #[tokio::test]
+    async fn a_finished_program_is_appended_over_http_without_a_validator() {
+        // #419 §4.5. An APPEND, not a read-modify-write: no `If-Match`, and a repeat is a no-op.
+        let (_dir, app) = app_under_test();
+        let machine = serde_json::json!({
+            "id": "m-1", "profileId": "Z1", "name": null, "serial": null, "firmware": null,
+            "address": null, "calibration": null, "fixtures": null, "margins": null,
+            "updatedAt": "2026-10-15T00:00:00.000Z"
+        });
+        let tag = etag_of(&app, "/api/v1/location").await;
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/v1/location/machines/m-1")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::IF_MATCH, tag.as_str())
+                    .body(Body::from(serde_json::to_vec(&machine).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let body = serde_json::json!({ "hash": "a1b2c3d4" });
+        let res = app.clone().oneshot(post_json("/api/v1/finished-programs/m-1", &body)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        // A repeat (a retried request, or a second window) is a no-op, not a duplicate.
+        let res = app.clone().oneshot(post_json("/api/v1/finished-programs/m-1", &body)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        let view = json_of(app.clone().oneshot(get("/api/v1/location")).await.unwrap()).await;
+        assert_eq!(view["machines"][0]["finishedPrograms"], serde_json::json!(["a1b2c3d4"]));
+
+        // A blank hash and a machine that does not exist are refused.
+        let res = app
+            .clone()
+            .oneshot(post_json("/api/v1/finished-programs/m-1", &serde_json::json!({ "hash": " " })))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let res = app
+            .clone()
+            .oneshot(post_json("/api/v1/finished-programs/nope", &body))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

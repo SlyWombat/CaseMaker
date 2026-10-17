@@ -32,7 +32,9 @@
 // the shared fixture, which another workstream holds — round-trips byte for byte.
 //
 // A MACHINE'S POWER SWITCH (#416) AND WASTEBOARD (#417) are optional fields on its record, each
-// with its own endpoint (`power.rs`, `wasteboard.rs`).
+// with its own endpoint (`power.rs`, `wasteboard.rs`). ITS FINISHED PROGRAMS (#419 §4.5) are the
+// append-only FNV hashes of the programs it has finished cleanly (`finished_programs.rs`), also with
+// their own endpoint and kept across a machine PUT.
 //
 // WHAT IS NOT HERE YET, ON PURPOSE. Anything else is a later, additive key on this document or on a
 // machine record; no placeholder shapes are stubbed for it. A document that carries one of those keys before this
@@ -102,6 +104,12 @@ pub struct MachineRecord {
     /// `/api/v1/wasteboard/:id`, and kept across a machine PUT the same way.
     #[serde(default)]
     pub wasteboard: Option<crate::wasteboard::Wasteboard>,
+    /// The FNV program hashes this machine has FINISHED cleanly (#419 §4.5, Q14) — the air-run
+    /// "already run" list. Written only through `/api/v1/finished-programs/:id` and kept across a
+    /// machine PUT the same way power and the wasteboard are. An EMPTY list is OMITTED, so a record
+    /// written before this section existed round-trips without gaining a key (the shared fixture).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub finished_programs: Vec<String>,
     /// ISO timestamp, the client's clock: when this record was last written.
     pub updated_at: String,
 }
@@ -129,6 +137,7 @@ impl MachineRecord {
         if let Some(w) = &self.wasteboard {
             w.validate()?;
         }
+        crate::finished_programs::validate_list(&self.id, &self.finished_programs)?;
         for (what, section) in [
             ("calibration", &self.calibration),
             ("fixtures", &self.fixtures),
@@ -324,6 +333,7 @@ mod tests {
             margins: None,
             power: None,
             wasteboard: None,
+            finished_programs: Vec::new(),
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }
     }
@@ -356,9 +366,27 @@ mod tests {
                 address: Some(MachineAddress { host: "".into(), port: 2222 }),
                 ..a_machine("x")
             },
+            MachineRecord { finished_programs: vec![" ".into()], ..a_machine("x") },
         ] {
             assert!(matches!(broken.validate(), Err(HouseError::BadEntry(_))), "{broken:?}");
         }
+    }
+
+    #[test]
+    fn a_machine_with_no_finished_programs_says_nothing_about_them() {
+        // #419 §4.5. An EMPTY list is the same document as an absent one, so the shared
+        // `location-doc.json` (which has no `finishedPrograms`) gains no key through a round trip —
+        // the same property `feeds` has, and what `skip_serializing_if` buys.
+        let machine = a_machine("m-1");
+        machine.validate().unwrap();
+        let v = serde_json::to_value(&machine).unwrap();
+        assert!(v.get("finishedPrograms").is_none(), "{v}");
+
+        let mut with_hashes = a_machine("m-1");
+        with_hashes.finished_programs = vec!["a1b2c3d4".into()];
+        with_hashes.validate().unwrap();
+        let v = serde_json::to_value(&with_hashes).unwrap();
+        assert_eq!(v["finishedPrograms"], serde_json::json!(["a1b2c3d4"]));
     }
 
     #[test]

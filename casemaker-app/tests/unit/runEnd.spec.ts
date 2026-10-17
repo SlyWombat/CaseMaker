@@ -22,7 +22,7 @@ import { ToolCopySchema, type ToolCopy } from '@/engine/cnc/toolCondition';
 import { ShopDefaultsSchema, readDefault } from '@/platform/defaultsClient';
 import { StockItemSchema, type StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
-import type { RunOutcome } from '@/platform/machineRun';
+import { programHash, type RunOutcome } from '@/platform/machineRun';
 import { endOfRun, machineKey, resetMachineRunStore, setRunEndIO, useMachineRunStore, type RunContext, type RunEndIO } from '@/store/machineRunStore';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -241,6 +241,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
     inventory: () => inventory,
     updateItem: async (i) => (runningAtWrite.push(useMachineRunStore.getState().runs[M]?.running), calls.push(`runtime ${i.copies[0]?.runtimeMinutes}`), { ok: true, text: '' }),
     machineIdFor: () => 'm-1',
+    recordFinishedProgram: async (machineId, hash) => (calls.push(`finished ${machineId} ${hash}`), { ok: true, added: true, text: '' }),
     minSideMm: () => 20,
     offerOffcuts: () => offer,
     wearWeight: (key) => readDefault(DEFAULTS, key),
@@ -274,7 +275,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
   it('a finish refreshes the shelf, consumes the stock, adds the weighted runtime, and asks about the offcut', async () => {
     shelfLoaded = false; // the shelf store is loaded only by Manage › Materials
     const end = await endOfRun(TARGET, finished, ctx);
-    expect(calls).toEqual(['refresh', 'consume stock-plate1 job-1', `runtime ${stored}`]);
+    expect(calls).toEqual([`finished m-1 ${programHash(CUT_OUT)}`, 'refresh', 'consume stock-plate1 job-1', `runtime ${stored}`]);
     expect(end.kind).toBe('finished');
     expect(end.offcut?.state).toBe('asked');
     expect(end.offcut?.text).toContain('left over from the cut-out');
@@ -283,8 +284,8 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
 
   it('no stock entry: the shelf is left alone with a note; the runtime is still counted, unweighted', async () => {
     const end = await endOfRun(TARGET, finished, { nc: CUT_OUT });
-    expect(calls).toEqual([`runtime ${Math.round(cutMinutes * 1000) / 1000}`]);
-    expect(end.lines[0]).toContain('No shelf entry is recorded');
+    expect(calls).toEqual([`finished m-1 ${programHash(CUT_OUT)}`, `runtime ${Math.round(cutMinutes * 1000) / 1000}`]);
+    expect(end.lines.join(' ')).toContain('No shelf entry is recorded');
     expect(end.lines.join(' ')).toContain('unweighted');
     expect(end.offcut).toBeNull();
   });
@@ -400,12 +401,15 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
 
   it('end to end through start(): the run is over (session closed, not running) before the end-of-run saves', async () => {
     setMachineConsoleLoader(async () => z1('finish'));
-    useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'h', ctx);
+    useMachineRunStore.getState().prepare(TARGET, 'job.nc', programHash(ctx.nc), ctx);
     expect(useMachineRunStore.getState().start(TARGET, { pollMs: 2000, noProgressMs: 30000, missLimit: 3 })).toBe(true);
     await waitForEnd();
     const run = useMachineRunStore.getState().runs[M]!;
     expect(run.outcome?.kind).toBe('finished');
     expect(run.end?.kind).toBe('finished');
+    // The persisted key is the program's own FNV hash (#419 §4.5) — what the upload computed and
+    // what the plan will compare against.
+    expect(calls).toContain(`finished m-1 ${programHash(ctx.nc)}`);
     expect(calls.indexOf('closed')).toBeLessThan(calls.indexOf('consume stock-plate1 job-1'));
     expect(runningAtWrite).toEqual([false, false]);
     expect(calls.filter((c) => c.startsWith('consume'))).toHaveLength(1);

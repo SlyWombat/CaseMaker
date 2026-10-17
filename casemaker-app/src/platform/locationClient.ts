@@ -97,6 +97,14 @@ export const MachineRecordSchema = z.object({
   power: PowerSwitchSchema.nullable().default(null),
   /** The machine's wasteboard (#417). */
   wasteboard: WasteboardSchema.nullable().default(null),
+  /**
+   * The FNV program hashes this machine has FINISHED cleanly (#419 §4.5) — `RunPlanInput.finishedHashes`
+   * (Q14). Its own append endpoint (`finishedProgramsClient.ts`), never a machine write. Defaulted:
+   * a record written before the section existed has no key, and an empty list is its absence.
+   */
+  finishedPrograms: z
+    .array(z.string().min(1).refine((h) => h === h.trim(), 'a hash has no space at either end'))
+    .default([]),
   updatedAt: z.string().min(1),
 });
 

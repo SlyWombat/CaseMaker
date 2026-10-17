@@ -1378,16 +1378,19 @@ impl HouseStore {
         let mut record = record;
         match next.machines.iter_mut().find(|m| m.id == record.id) {
             Some(existing) => {
-                // The power switch (#416) and the wasteboard (#417) have their OWN endpoints: a
-                // machine PUT — the settings write-through — keeps what is stored, whatever its body
-                // says, so a window that has not read them cannot wipe them.
+                // The power switch (#416), the wasteboard (#417) and the finished programs (#419
+                // §4.5) have their OWN endpoints: a machine PUT — the settings write-through — keeps
+                // what is stored, whatever its body says, so a window that has not read them cannot
+                // wipe them.
                 record.power = existing.power.clone();
                 record.wasteboard = existing.wasteboard.clone();
+                record.finished_programs = existing.finished_programs.clone();
                 *existing = record;
             }
             None => {
                 record.power = None;
                 record.wasteboard = None;
+                record.finished_programs = Vec::new();
                 next.machines.push(record);
             }
         }
@@ -1538,6 +1541,31 @@ impl HouseStore {
             .find(|m| m.id == machine_id)
             .ok_or_else(|| HouseError::NotFound(format!("machine {machine_id} is not in the location")))?;
         machine.wasteboard = board;
+        self.commit(&mut inner, next)
+    }
+
+    /// Record that a program FINISHED cleanly on this machine (#419 §4.5): append its FNV hash to
+    /// the machine's list (`finished_programs.rs`).
+    ///
+    /// NOT guarded on the location's `ETag`. This is an append to one section with a single writer
+    /// per finish, and two windows that each finished a run must BOTH be recorded — a stale-validator
+    /// refusal would silently lose the second. The store's write lock makes the dedupe and the cap
+    /// atomic, which is what the guard would otherwise have bought. A hash already on the list is a
+    /// no-op and writes nothing.
+    pub async fn add_finished_program(&self, machine_id: &str, hash: &str) -> Result<(), HouseError> {
+        crate::finished_programs::validate_hash(hash)?;
+        let mut inner = self.inner.write().await;
+        Self::writable(&inner.location_problem)?;
+        let mut next = inner.location.clone();
+        let machine = next
+            .machines
+            .iter_mut()
+            .find(|m| m.id == machine_id)
+            .ok_or_else(|| HouseError::NotFound(format!("machine {machine_id} is not in the location")))?;
+        if machine.finished_programs.iter().any(|h| h == hash) {
+            return Ok(());
+        }
+        crate::finished_programs::append(&mut machine.finished_programs, hash);
         self.commit(&mut inner, next)
     }
 
@@ -3220,6 +3248,7 @@ mod tests {
             margins: None,
             power: None,
             wasteboard: None,
+            finished_programs: Vec::new(),
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }
     }
@@ -3880,6 +3909,58 @@ mod tests {
         store.set_wasteboard("m-1", None, Some(&etag)).await.unwrap();
         let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
         assert_eq!(view["machines"][0]["wasteboard"], serde_json::Value::Null);
+    }
+
+    // — a machine's finished programs (#419 §4.5) ----------------------------------------------------
+
+    #[tokio::test]
+    async fn a_machine_gains_finished_programs_once_and_keeps_them_across_a_machine_put() {
+        let (_dir, store) = store_with_machine().await;
+        // No ETag: an append is not a read-modify-write (see `add_finished_program`'s note).
+        store.add_finished_program("m-1", "a1b2c3d4").await.unwrap();
+        store.add_finished_program("m-1", "a1b2c3d4").await.unwrap();
+        store.add_finished_program("m-1", "0badf00d").await.unwrap();
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        assert_eq!(
+            view["machines"][0]["finishedPrograms"],
+            serde_json::json!(["a1b2c3d4", "0badf00d"])
+        );
+
+        // The settings write-through must not wipe the list, as it must not wipe power/wasteboard.
+        let (_, etag) = store.location().await.unwrap();
+        store.put_machine(a_machine("m-1"), Some(&etag)).await.unwrap();
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        assert_eq!(
+            view["machines"][0]["finishedPrograms"],
+            serde_json::json!(["a1b2c3d4", "0badf00d"])
+        );
+    }
+
+    #[tokio::test]
+    async fn a_finished_program_needs_a_hash_and_a_machine_that_exists() {
+        let (_dir, store) = store_with_machine().await;
+        assert!(matches!(store.add_finished_program("m-1", " ").await, Err(HouseError::BadEntry(_))));
+        assert!(matches!(
+            store.add_finished_program("nope", "a1b2c3d4").await,
+            Err(HouseError::NotFound(_))
+        ));
+        // Neither refusal wrote anything.
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        assert!(view["machines"][0].get("finishedPrograms").is_none(), "{view}");
+    }
+
+    #[tokio::test]
+    async fn the_finished_program_list_keeps_its_cap() {
+        let (_dir, store) = store_with_machine().await;
+        let cap = crate::finished_programs::MAX_FINISHED_PROGRAMS;
+        for i in 0..cap + 5 {
+            store.add_finished_program("m-1", &format!("h{i:04}")).await.unwrap();
+        }
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        let list = view["machines"][0]["finishedPrograms"].as_array().unwrap();
+        assert_eq!(list.len(), cap);
+        assert_eq!(list.last().unwrap(), &serde_json::json!("h0204"));
+        assert_ne!(list[0], serde_json::json!("h0000"), "the oldest entry was not dropped");
     }
 
     // — the shop's defaults --------------------------------------------------------------------------

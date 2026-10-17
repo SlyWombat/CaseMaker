@@ -55,6 +55,7 @@ import {
   type LocationView,
   type MachineRecord,
 } from '@/platform/locationClient';
+import { houseAddFinishedProgram } from '@/platform/finishedProgramsClient';
 import { parseMarginsStrict, useSettingsStore, type FixturesSettings } from './settingsStore';
 import { useMachineStore } from './machineStore';
 import { useToolRegistryStore } from './toolRegistryStore';
@@ -93,6 +94,11 @@ export interface LocationState {
   refresh: () => Promise<void>;
   /** `stale` is a 412/428: the location was re-read, and the caller should merge and retry. */
   saveMachine: (record: MachineRecord) => Promise<'ok' | 'stale' | 'failed'>;
+  /**
+   * Append a finished program's FNV hash to a machine's persisted list (#419 §4.5). `added: false`
+   * with `ok: true` means the machine already had it — a repeated finish, with no request sent.
+   */
+  recordFinishedProgram: (machineId: string, hash: string) => Promise<{ ok: boolean; added: boolean; text: string }>;
 }
 
 export const useLocationStore = create<LocationState>((set, get) => ({
@@ -133,6 +139,27 @@ export const useLocationStore = create<LocationState>((set, get) => ({
       return 'stale';
     }
     return 'failed';
+  },
+
+  recordFinishedProgram: async (machineId, hash) => {
+    const machine = get().location?.machines.find((m) => m.id === machineId) ?? null;
+    if (machine === null) {
+      return { ok: false, added: false, text: `machine ${machineId} is not in the location` };
+    }
+    // Already on the list this window has read: nothing to send. The service dedupes as well, so a
+    // second window racing this one cannot duplicate it.
+    if (machine.finishedPrograms.includes(hash)) return { ok: true, added: false, text: '' };
+    const res = await houseAddFinishedProgram(machineId, hash);
+    if (res.kind !== 'ok') {
+      const text = res.kind === 'absent' ? res.reason : res.kind === 'refused' ? res.message : res.detail;
+      set({ writeNote: text });
+      return { ok: false, added: false, text };
+    }
+    // Re-read so this window's copy is the list the service now holds, and the next finish's dedupe
+    // check is against it. A failed re-read leaves the append recorded but this copy stale; the
+    // service's own dedupe still keeps the next append honest.
+    await get().refresh();
+    return { ok: true, added: true, text: '' };
   },
 }));
 
@@ -257,11 +284,12 @@ export function mergeMachine(
       firmware: server?.firmware ?? null,
       address: obs ? { host: obs.host, port: obs.port } : (server?.address ?? null),
       ...sections,
-      // LOCATION-ONLY fields (#416, #417): written through their own endpoints, never by this
-      // write-through — copied from the served record so a settings write cannot wipe them (the
+      // LOCATION-ONLY fields (#416, #417, #419 §4.5): written through their own endpoints, never by
+      // this write-through — copied from the served record so a settings write cannot wipe them (the
       // service keeps them on a machine PUT anyway) and `sameRecord` does not flap on them.
       power: server?.power ?? null,
       wasteboard: server?.wasteboard ?? null,
+      finishedPrograms: server?.finishedPrograms ?? [],
       updatedAt: now,
     },
     fromLocation,
@@ -271,6 +299,27 @@ export function mergeMachine(
 /** Two records with the same content, `updatedAt` aside. */
 export function sameRecord(a: MachineRecord, b: MachineRecord): boolean {
   return stableJson({ ...a, updatedAt: '' }) === stableJson({ ...b, updatedAt: '' });
+}
+
+/**
+ * The machine whose last-known address is this run target, or null. The address match is how a run
+ * (`host:port`, as the console reaches it) is tied to the location's durable record.
+ */
+export function machineAt(target: { host: string; port: number }): MachineRecord | null {
+  return (
+    useLocationStore.getState().location?.machines.find(
+      (m) => m.address?.host === target.host && m.address.port === target.port,
+    ) ?? null
+  );
+}
+
+/**
+ * The FNV hashes the machine at `target` has finished cleanly — exactly `RunPlanInput.finishedHashes`
+ * (#419 §4.5, Q14), so the plan stops treating an already-cut program as new. Empty with no location,
+ * or for an address no machine matches.
+ */
+export function finishedProgramsFor(target: { host: string; port: number }): readonly string[] {
+  return machineAt(target)?.finishedPrograms ?? [];
 }
 
 /**
