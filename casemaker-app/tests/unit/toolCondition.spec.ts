@@ -13,8 +13,11 @@ import {
   resetInventoryConditions,
   runtimeWarning,
   setInventoryConditions,
+  type ItemWithCopies,
   type ToolCopy,
 } from '@/engine/cnc/toolCondition';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { InventoryItemSchema, InventorySchema } from '@/platform/houseClient';
 import { readDefault, ShopDefaultsSchema } from '@/platform/defaultsClient';
 
@@ -145,5 +148,104 @@ describe('#415 runtime only warns', () => {
     expect(runtimeWarning(601, null, shop.value)).toContain('check this bit');
     expect(runtimeWarning(130, 120, shop.value)).toContain('set for it');
     expect(runtimeWarning(null, null, shop.value)).toBeNull();
+  });
+});
+
+// #454 — a built-in or catalogue row adopts the condition of the physical copies that are the same
+// cutter, so a broken owned bit cannot leave its identical twin looking fresh and a worn one cannot
+// lose a tie in silence. The correspondence is diameter, shape and line, and the adopted note says
+// whose copies it is about.
+describe('#454 a definition adopts the condition of the copies that are the same cutter', () => {
+  const BUILTIN_1MM = TOOL_LIBRARY.find((e) => e.key === 'flat-1.0')!;
+  const BUILTIN_31 = TOOL_LIBRARY.find((e) => e.key === 'flat-3.175x12-metal')!;
+
+  const ONE_MM = flatEndMill(1, { name: '1 mm flat end' });
+  const WIDE_METAL = flatEndMill(3.175, { name: '3.175 mm flat end (Metal)', shoulderLength: 12 });
+
+  /** An item with a definition, which is what lets it correspond to an entry at all. */
+  function owned(id: string, tool: Tool, copies: ToolCopy[], quantity = Math.max(1, copies.length)): ItemWithCopies {
+    return { id, quantity, copies, tool };
+  }
+
+  it('answers the built-in with a broken owned 1 mm cutter, and says whose copies it is', () => {
+    setInventoryConditions([owned('only', ONE_MM, [copy('only-1', 'broken')])], (id) => `inv:${id}`, TOOL_LIBRARY);
+
+    // The possession’s own summary is untouched …
+    expect(conditionForKey('inv:only')).toMatchObject({ best: 'broken', usable: 0 });
+    // … and the built-in that would otherwise have looked fresh is out for the same reason.
+    const adopted = conditionForKey('flat-1.0')!;
+    expect(adopted).toMatchObject({ best: 'broken', usable: 0 });
+    expect(adopted.note).toContain('every copy of this cutter is marked broken');
+    // The attribution: no operator described the shipped assumption.
+    expect(adopted.note).toContain('shop’s own copies');
+    // The worker reads this same table, not a second copy of the rule (#442).
+    expect(inventoryConditions().get('flat-1.0')).toEqual(adopted);
+  });
+
+  it('carries a worn owned 3.175 mm cutter to the built-in on the same line', () => {
+    setInventoryConditions([owned('worn', WIDE_METAL, [copy('worn-1', 'worn')])], (id) => `inv:${id}`, TOOL_LIBRARY);
+    const adopted = conditionForKey(BUILTIN_31.key)!;
+    expect(adopted).toMatchObject({ best: 'worn', usable: 1 });
+    expect(adopted.note).toContain('marked worn');
+    expect(adopted.note).toContain('check it before the cut');
+    expect(adopted.note).toContain('shop’s own copies');
+  });
+
+  it('links on diameter, shape and line only', () => {
+    // Each of these differs from `flat-1.0` in exactly one of the three, and must not adopt it.
+    setInventoryConditions(
+      [
+        owned('wider', flatEndMill(1.5, { name: '1.5 mm flat end' }), [copy('a', 'broken')]),
+        owned('round', flatEndMill(1, { name: '1 mm ball end', shape: 'ball' }), [copy('b', 'broken')]),
+        owned('metal', flatEndMill(1, { name: '1 mm flat end (Metal)' }), [copy('c', 'broken')]),
+      ],
+      (id) => `inv:${id}`,
+      TOOL_LIBRARY,
+    );
+    expect(conditionForKey('flat-1.0')).toBeNull();
+    // And the 3.175 mm built-in has no correspondence either.
+    expect(conditionForKey(BUILTIN_31.key)).toBeNull();
+    // The possessions themselves still answer.
+    expect(conditionForKey('inv:metal')!.usable).toBe(0);
+  });
+
+  it('pools every possession that corresponds to one entry, so one broken box cannot hide a usable copy', () => {
+    // The same physical cutter registered twice: once from a broken box, once with an unstated
+    // spare. Which row the service lists first must not decide whether the built-in is usable.
+    const items = [
+      owned('boxed', ONE_MM, [copy('boxed-1', 'broken')]),
+      owned('spare', ONE_MM, []),
+    ];
+    setInventoryConditions(items, (id) => `inv:${id}`, [BUILTIN_1MM]);
+    expect(conditionForKey('flat-1.0')).toMatchObject({ best: null, usable: 1, note: null });
+
+    // With every pooled copy broken there is nothing left to choose — the entry is out, and the
+    // note still says whose copies said so.
+    setInventoryConditions(
+      [owned('boxed', ONE_MM, [copy('boxed-1', 'broken')]), owned('spare', ONE_MM, [copy('spare-1', 'broken')])],
+      (id) => `inv:${id}`,
+      [BUILTIN_1MM],
+    );
+    expect(conditionForKey('flat-1.0')).toMatchObject({ best: 'broken', usable: 0 });
+    expect(conditionForKey('flat-1.0')!.note).toContain('shop’s own copies');
+  });
+
+  it('reads a catalogue row’s vendor metalDuty 0 as the plain line, and a 1 by the name', () => {
+    const cat = (key: string, name: string, metalDuty: number): ToolLibraryEntry => ({
+      key,
+      tool: flatEndMill(1, { name }),
+      provenance: 'synthetic catalogue row',
+      metalDuty,
+    });
+    const plain = cat('cat:plain', '1 mm flat end(Metal)', 0);
+    const metal = cat('cat:metal', '1 mm flat end(Metal)', 1);
+    setInventoryConditions([owned('metalowned', flatEndMill(1, { name: '1 mm flat end for Metal' }), [])], (id) => `inv:${id}`, [
+      plain,
+      metal,
+    ]);
+    // The vendor’s 0 wins over the `(Metal)` suffix, exactly as `registerCutter.isMetalRow` reads it;
+    // a 1 is only “rated for metal”, so the name decides.
+    expect(conditionForKey(plain.key)).toBeNull();
+    expect(conditionForKey(metal.key)).not.toBeNull();
   });
 });

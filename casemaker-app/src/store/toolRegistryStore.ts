@@ -54,10 +54,11 @@
  */
 
 import { create } from 'zustand';
-import { inventoryKey, setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
+import { getTools, inventoryKey, setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
 import { resetInventoryConditions, setInventoryConditions } from '@/engine/cnc/toolCondition';
 import { clearFeedCatalogue, setFeedCatalogue } from '@/engine/cnc/feeds';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
+import { tierOf } from '@/engine/cnc/toolTiers';
 import {
   houseFeeds,
   houseInventory,
@@ -150,6 +151,18 @@ function clearHouseTiers(): void {
   setRegistry([]);
   setInventoryEntries([]);
   resetInventoryConditions();
+}
+
+/**
+ * The definitions a possession can correspond to (#454): the permanent built-ins and the
+ * catalogue's own rows. Deliberately not `user:` — a definition the house typed or cloned is not a
+ * second way of naming the physical cutter — and not `inv:`, which has its own key already.
+ */
+function adoptionTargets(): readonly ToolLibraryEntry[] {
+  return getTools().filter((e) => {
+    const tier = tierOf(e.key);
+    return tier === 'builtin' || tier === 'catalogue';
+  });
 }
 
 /** The in-flight refresh, so a double-mount is one request. */
@@ -254,8 +267,6 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
         // Only a real read re-pushes the tier: a 304's entries are already in the registry, and
         // replacing them with equal ones would churn the snapshot every picker re-renders from.
         setInventoryEntries(inventory.items.map(inventoryEntryFor));
-        // #415 — each possession's condition summary, by the same `inv:` key tool choice sees.
-        setInventoryConditions(inventory.items, inventoryKey);
         items = inventory.items;
         inventoryEtag = inventory.etag;
         inventoryError = null;
@@ -265,11 +276,17 @@ export const useToolRegistryStore = create<ToolRegistryState>((set, get) => ({
         inventoryError = null;
       } else {
         setInventoryEntries([]);
-        resetInventoryConditions();
         items = [];
         inventoryEtag = null;
         inventoryError = reasonFor(inventory);
       }
+
+      // #415/#454 — every possession's condition summary, keyed by the same `inv:` key tool choice
+      // sees, plus the built-in and `cat:` keys the same physical cutters correspond to. Rebuilt
+      // after every outcome rather than only on a real inventory read: a 304 keeps the items, but
+      // the tool list above may have gained or lost a catalogue row the linking matches against,
+      // and an empty `items` here clears the table exactly as `resetInventoryConditions` would.
+      setInventoryConditions(items, inventoryKey, adoptionTargets());
 
       set({
         status: 'present',

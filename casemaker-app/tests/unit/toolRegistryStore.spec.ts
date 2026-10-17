@@ -20,6 +20,7 @@ import {
 } from '@/platform/houseClient';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { resolveCode } from '@/engine/cnc/registerCutter';
+import { conditionForKey } from '@/engine/cnc/toolCondition';
 
 const HEALTH: HouseHealth = {
   ok: true,
@@ -348,6 +349,41 @@ describe('the inventory (#309)', () => {
     expect(state().inventoryEtag).toBe('"i1"');
     // The snapshot itself is untouched by the 304 — every picker re-renders from this identity.
     expect(getTools()).toBe(first);
+  });
+
+  it('links an owned cutter to the catalogue row it corresponds to, and not to a user: definition (#454)', async () => {
+    // The built-ins are 1.0 and 3.175 mm, so the 2 mm cutter below has a catalogue twin only.
+    const CAT: ToolLibraryEntry = {
+      key: 'cat:00000000-0000-0000-0000-00000000000c',
+      provenance: 'synthetic catalogue row',
+      tool: { ...USER.tool },
+    };
+    const OWNED: InventoryItem = {
+      ...ITEM,
+      quantity: 1,
+      copies: [
+        { id: 'copy-1', condition: 'broken', whereabouts: { kind: 'box' }, runtimeWarnMinutes: null, notes: null, runtimeMinutes: null },
+      ],
+    };
+    setHouseClientLoader(async () =>
+      fakeClient({
+        probe: { kind: 'present', health: HEALTH, base: '' },
+        tools: () => ({ kind: 'ok', etag: '"e2"', entries: [USER, CAT] }),
+        inventory: () => ({ kind: 'ok', etag: '"i1"', items: [OWNED] }),
+      }),
+    );
+    await state().refresh();
+
+    // The catalogue row answers with the physical copies that are the same cutter, and the note
+    // says where the condition came from. A user: definition does not adopt: it is a definition the
+    // house typed, not a second name for the cutter in the drawer.
+    const adopted = conditionForKey(CAT.key)!;
+    expect(adopted).toMatchObject({ best: 'broken', usable: 0 });
+    expect(adopted.note).toContain('shop’s own copies');
+    expect(conditionForKey(USER.key)).toBeNull();
+    // The possession itself keeps its own key and its own note.
+    expect(conditionForKey('inv:1a2b3c4d5e')).toMatchObject({ best: 'broken', usable: 0 });
+    expect(conditionForKey('inv:1a2b3c4d5e')!.note).not.toContain('shop’s own copies');
   });
 });
 
