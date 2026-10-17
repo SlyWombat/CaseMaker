@@ -121,8 +121,14 @@ const METAL_MARKER = 'M';
  * and left in the tail it was read as one of the cutter's numbers: `C1-BIT-DRILL-2.5-12-10PCS` came
  * out a 12 mm drill and `C1-BIT-ENGRAVE-30-0.3-10PCS` a 0.3° engraver, both naming the pack count
  * and neither the cutter (#379 review).
+ *
+ * The `S` is optional (#465): the short form `C1-BIT-O-FLUTE-M-3.175-12-5PC` is the same store
+ * suffix with one letter fewer, and left in the tail it makes a fixed-length tail the wrong length,
+ * so the reader falls through to a split that loses a field. Dropping it cannot lose information,
+ * because a pack count is never a fact about the cutter — it says how many came in the box, which
+ * the inventory's own `quantity` records, not what the bit is — so both forms read the same cutter.
  */
-const PACK_SUFFIX = /^\d+PCS$/;
+const PACK_SUFFIX = /^\d+PCS?$/;
 
 /**
  * A type word is a WORD: it starts with a letter, never a number. Once a split of the tokens would

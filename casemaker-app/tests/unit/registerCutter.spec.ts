@@ -327,6 +327,32 @@ describe('parseBoxCode — the printed box code (#377, #378, #379)', () => {
     });
   });
 
+  // #465 — the store may write the short pack form too, and a pack count is never a cutter fact, so
+  // the suffix can be dropped whichever length it is: `-5PC` is `-10PCS` with one letter fewer, and
+  // the two must read the same cutter. Left in the tail it is not just a number off the end — it
+  // makes a fixed-length tail the wrong length, and the reading falls through to a split that loses
+  // a field (here the 12 would become the tip and the cutter's own 3.175 would be gone).
+  it('drops a short pack suffix too: a `-5PC` SKU reads its `-10PCS` twin (#465)', () => {
+    const short = parseBoxCode('C1-BIT-O-FLUTE-M-3.175-12-5PC');
+    expect(short).toEqual(parseBoxCode('C1-BIT-O-FLUTE-M-3.175-12-10PCS'));
+    expect(short).toEqual({
+      shape: 'flat',
+      tipDiameter: 3.175,
+      fluteLength: 12,
+      includedAngle: null,
+      threadSpec: null,
+      metal: true,
+    });
+  });
+
+  // #465 acceptance — the widened suffix must not turn a thread’s pack count into a cutter fact.
+  // `THREAD-M5-15PC` drops `15PC` and leaves `THREAD-M5`: a spec with no flute, which is not a code
+  // this app reads — and in particular not the metal marker and not a 15 mm thread. The box code’s
+  // own `M5` protection is pinned unchanged above.
+  it('does not read a short pack suffix as the metal marker or a flute (#465)', () => {
+    expect(parseBoxCode('C1-BIT-THREAD-M5-15PC')).toBeNull();
+  });
+
   it('drops the pack suffix before the type word is searched, not after (#379 review)', () => {
     // The suffix is the STORE's token and the tail is read from the end, so a code whose only other
     // number is a tip has nothing left to be a flute: `DRILL-2.5-10PCS` is not a reading at all,
