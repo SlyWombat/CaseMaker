@@ -9,6 +9,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { EngravePanel } from '@/components/panels/EngravePanel';
 import { useEngraveJobStore, undoEngraveRemoval, resetEngraveRemovalUndo, REMOVAL_UNDO_MS } from '@/store/engraveJobStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
+import { useMachineStore } from '@/store/machineStore';
+import { resetEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { resetEngraveRows } from '@/store/engraveRowStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
@@ -27,11 +29,20 @@ import { presetJawStrips } from '@/engine/cnc/sacrificial';
 import { runSheetFileName, runSheetFrameFileName } from '@/engine/cnc/engrave/runSheet';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
 import { clearFeedCatalogue, setFeedCatalogue, type FeedCatalogueRow } from '@/engine/cnc/feeds';
-import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
+import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 
 // The save path is the thing under test (#207): mock it so a test can read the files the panel
 // hands it, without a real download. EngravePanel imports only `saveEngraveProgram` from here.
 vi.mock('@/engine/exportTrigger', () => ({ saveEngraveProgram: vi.fn() }));
+// #469 — the desktop gate around the machine surfaces. This harness is jsdom, where the real
+// `__BUILD_TARGET__` is not desktop, so the routing tests would otherwise be dead code. The
+// getter keeps the other 90-odd tests in the web-build state they were written for.
+const caps = vi.hoisted(() => ({ canDriveMachine: false }));
+vi.mock('@/platform/capabilities', () => ({
+  get canDriveMachine() {
+    return caps.canDriveMachine;
+  },
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -1913,5 +1924,125 @@ describe('EngravePanel (#432 review R11) — the facing row', () => {
     faceJob({ enabled: true, depth: 0 });
     show(generated());
     expect(screen.queryByTestId('engrave-run-facing')).toBeNull();
+  });
+});
+
+// #469 / #419 §3 — which machine surface the panel offers. A job whose generated result has more
+// than one program is the release step's (it uploads the whole list and plays it in order); a
+// one-program job keeps the single-file upload. The capability is mocked desktop above, and the
+// machine is seeded so the release step has a target to plan against.
+describe('EngravePanel — the release step routing (#469)', () => {
+  const TARGET = { host: '192.0.2.10', port: 2222 };
+  const VERIFY = {
+    ok: true,
+    findings: [],
+    stats: { lines: 1, cuttingMoves: 0, deepestZ: 0, bbox: { min: [0, 0, 0] as [number, number, number], max: [1, 1, 0] as [number, number, number] } },
+  };
+
+  function program(index: number, toolKey: string): EngraveProgram {
+    const nc = `G0 X${index} Y0\nM02\n`;
+    return {
+      setupIndex: index,
+      setupId: `setup-${index}`,
+      toolKey,
+      nc,
+      verify: VERIFY,
+      frameNc: null,
+      frameVerify: null,
+      programHash: `hash-${index}`,
+      cam: null,
+    };
+  }
+
+  function generated(programs: EngraveProgram[], over: Partial<EngraveGenerated> = {}): EngraveGenerated {
+    return {
+      ok: true,
+      stage: 'done',
+      findings: [],
+      feeds: null,
+      threads: null,
+      cam: null,
+      nc: programs[0]?.nc ?? null,
+      verify: programs[0]?.verify ?? null,
+      frameNc: null,
+      frameVerify: null,
+      facingNc: null,
+      facingVerify: null,
+      facingToolKey: null,
+      facingError: null,
+      facingCam: null,
+      predicted: [],
+      programs,
+      errors: [],
+      ...over,
+    };
+  }
+
+  function show(result: EngraveGenerated): void {
+    act(() => {
+      useMachineStore.setState({
+        machine: {
+          name: 'Z1',
+          host: TARGET.host,
+          port: TARGET.port,
+          busy: false,
+          ip: null,
+          mac: null,
+          status: '<Idle|MPos:0,0,0>',
+          profileId: 'Z1',
+          observedAt: '2026-10-17T00:00:00.000Z',
+          notes: [],
+        },
+      });
+      useEngraveRunStore.setState({
+        generated: result,
+        oracle: { ok: true, band: 0, levels: [], worst: { underCut: 0, overCut: 0 } },
+        simDiagnostics: [],
+        simStatus: 'ready',
+        phase: 'ready',
+        acknowledged: false,
+        staleSince: null,
+        error: null,
+      });
+    });
+    render(<EngravePanel />);
+  }
+
+  beforeEach(() => {
+    caps.canDriveMachine = true;
+  });
+
+  afterEach(() => {
+    caps.canDriveMachine = false;
+    useEngraveRunStore.getState().reset();
+    useMachineStore.setState({ machine: null });
+    resetEngraveReleaseStore();
+  });
+
+  it('routes a multi-program job to the release step, not the single-file upload', async () => {
+    show(generated([program(1, 'flat-1.0'), program(2, 'flat-3.175x12-metal')]));
+
+    expect(await screen.findByTestId('engrave-release')).toBeTruthy();
+    // The one-file upload is not offered beside it: there would be two run panels and one of them
+    // would play half the job with the vacuum left on.
+    expect(screen.queryByTestId('engrave-upload-panel')).toBeNull();
+    expect(screen.getByTestId('engrave-release-upload').textContent).toContain('Upload all 2 programs');
+  });
+
+  it('keeps the single-file upload for a one-program job', async () => {
+    show(generated([program(1, 'flat-1.0')]));
+
+    expect(await screen.findByTestId('engrave-upload-panel')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-release')).toBeNull();
+  });
+
+  it('shows the release blocker, and no run controls, when the release step may not own the job', async () => {
+    // A faced job: the face file is not in `programs`, so the release step refuses by name.
+    show(generated([program(1, 'flat-1.0'), program(2, 'flat-3.175x12-metal')], { facingNc: 'M02\n' }));
+
+    const blocked = await screen.findByTestId('engrave-release-blocked');
+    expect(blocked.textContent).toContain('faces the stock first');
+    expect(screen.queryByTestId('engrave-release-upload')).toBeNull();
+    expect(screen.queryByTestId('engrave-release-start')).toBeNull();
   });
 });
