@@ -207,6 +207,24 @@ function checkStepoverRatio(ratio: number): void {
 }
 
 /**
+ * The two numbers a V-carve pass spacing has: what the feeds row ASKED for at the colour plane,
+ * and what the floor allows the CAM to run (#221).
+ *
+ * `requested` is `ratio × 2·planeRadius` — {@link vCarvePlaneStepover}; `effective` is that
+ * request clamped to the cone's `tipRadius`, which is {@link vCarvePassPitch}. They are returned
+ * together, from one function, so the panel, the run sheet and the CAM can never print different
+ * pitches: `clamped` is true exactly when the floor, not the seed, set the number.
+ */
+export interface VCarveStepover {
+  /** The plane step-over the feeds row asks for, mm — `ratio × grooveWidth`. */
+  requested: number;
+  /** The pass pitch the CAM runs, mm — `requested` clamped to the tip radius. */
+  effective: number;
+  /** True when the clamp, not the request, set `effective`. */
+  clamped: boolean;
+}
+
+/**
  * The pass spacing the FLOOR allows: the plane's step-over, clamped to the TIP RADIUS (#221).
  *
  * `vCarvePlaneStepover` is the engagement the feeds row asks for at the colour plane, but the
@@ -225,15 +243,26 @@ function checkStepoverRatio(ratio: number): void {
  * leaves material behind, and the feeds validation already refuses an operator OVERRIDE past the
  * tip width — a different question, about what was asked for rather than what the floor allows.
  */
+export function vCarveStepover(
+  planeRadius: number,
+  cone: VCone,
+  ratio: number = DEFAULT_V_CARVE_STEPOVER_RATIO,
+): VCarveStepover {
+  positive('planeRadius', planeRadius);
+  positive('tipRadius', cone.tipRadius);
+  checkStepoverRatio(ratio);
+  const requested = 2 * planeRadius * ratio;
+  const effective = Math.min(requested, cone.tipRadius);
+  return { requested, effective, clamped: effective < requested - 1e-12 };
+}
+
+/** The CAM's pass pitch: {@link vCarveStepover}'s `effective`, mm. */
 export function vCarvePassPitch(
   planeRadius: number,
   cone: VCone,
   ratio: number = DEFAULT_V_CARVE_STEPOVER_RATIO,
 ): number {
-  positive('planeRadius', planeRadius);
-  positive('tipRadius', cone.tipRadius);
-  checkStepoverRatio(ratio);
-  return Math.min(2 * planeRadius * ratio, cone.tipRadius);
+  return vCarveStepover(planeRadius, cone, ratio).effective;
 }
 
 /**

@@ -18,6 +18,7 @@ import {
   vCarvePlane,
   vCarvePlaneStepover,
   vCarveRadialStep,
+  vCarveStepover,
 } from '@/engine/cnc/vCarveGeometry';
 import { vCone, type VCone } from '@/engine/cnc/vProfile';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -248,6 +249,34 @@ describe('vCarvePassPitch (#221 slice B)', () => {
     expect(() => vCarvePassPitch(0.2, { ...cone, tipRadius: 0 })).toThrow(/tipRadius/);
     expect(() => vCarvePassPitch(0.2, cone, 0)).toThrow(/ratio/);
     expect(() => vCarvePassPitch(0.2, cone, 1.2)).toThrow(/ratio/);
+  });
+});
+
+describe('vCarveStepover (#221 slice D)', () => {
+  const cone = bit30();
+
+  it('returns the request, the effective pitch and whether the clamp set it', () => {
+    const thin = vCarvePlane(cone, 0.394, 0.2);
+    const badge = vCarvePlane(cone, 0.985, 0.81);
+    const clamps = vCarveStepover(thin.planeRadius, cone);
+    // The seed asks 0.6 × 0.40396 = 0.242 at the plane; the 0.15 tip radius is the floor's bound.
+    expect(clamps.requested).toBeCloseTo(0.242, 3);
+    expect(clamps.effective).toBeCloseTo(0.15, 12);
+    expect(clamps.clamped).toBe(true);
+    expect(vCarveStepover(badge.planeRadius, cone).clamped).toBe(true);
+    // A request under the radius is honoured exactly and is NOT a clamp: the seed still governs a
+    // wide-tipped cutter.
+    const gentle = vCarveStepover(thin.planeRadius, cone, 0.3);
+    expect(gentle.requested).toBeCloseTo(0.1212, 4);
+    expect(gentle.effective).toBeCloseTo(gentle.requested, 12);
+    expect(gentle.clamped).toBe(false);
+    // The CAM's own number is this struct's effective pitch, never a second computation.
+    expect(vCarvePassPitch(thin.planeRadius, cone)).toBe(clamps.effective);
+  });
+
+  it('agrees with vCarvePlaneStepover on the request', () => {
+    const plane = vCarvePlane(cone, 0.394, 0.2);
+    expect(vCarveStepover(plane.planeRadius, cone).requested).toBeCloseTo(vCarvePlaneStepover(plane), 12);
   });
 });
 
