@@ -27,6 +27,7 @@
 
 import type { Mm } from '@/types/units';
 import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
+import { printedLayerGridOf } from '@/engine/cnc/layerStack';
 import { deeper, shallower, splitDepthOf } from './depthBounds';
 
 /** The three states the schema carries: the two a control can press, and "no statement". */
@@ -89,9 +90,11 @@ export interface LabelSplit {
  */
 export function jobSplit(job: Pick<EngraveJob, 'stock'>, boundaryMargin: Mm): LabelSplit | null {
   const depth = splitDepthOf(job);
-  const print = job.stock.print;
-  if (depth === null || print === undefined) return null;
-  return { depth, step: Math.max(print.layerHeight, boundaryMargin) };
+  if (depth === null) return null;
+  // A laminate has no printed layer: the margin in force IS its step (#492). A printed blank steps
+  // by its regular layer, or the larger margin.
+  const grid = printedLayerGridOf(job.stock);
+  return { depth, step: Math.max(grid?.layerHeight ?? 0, boundaryMargin) };
 }
 
 /**

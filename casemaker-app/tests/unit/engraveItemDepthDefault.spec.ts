@@ -82,6 +82,39 @@ describe('a new item’s starting depth (#451)', () => {
     expect(lastDepth(useEngraveJobStore.getState().job.drills ?? [])).toBe(2);
   });
 
+  it('starts at the stock kind’s recommendation on a colour blank (#492)', () => {
+    // The location's number is still the plain-stock recommendation; a laminate overrides it with
+    // cap + margin, because that is the depth the blank's own colour plane asks for.
+    store({ [NEW_ITEM_DEPTH_KEY]: 3, [NEW_DRILL_DEPTH_KEY]: 2 });
+    const base = defaultEngraveJob();
+
+    act(() => {
+      useEngraveJobStore.setState({
+        job: {
+          ...base,
+          stock: {
+            ...base.stock,
+            material: 'plastic',
+            thickness: 1.5,
+            colour: { kind: 'laminate', capMm: 0.075 },
+          },
+        },
+      });
+    });
+    useEngraveJobStore.getState().addLabel();
+    expect(lastDepth(useEngraveJobStore.getState().job.labels)).toBe(0.1);
+    useEngraveJobStore.getState().addShape('rect');
+    expect(lastDepth(useEngraveJobStore.getState().job.shapes)).toBe(0.1);
+
+    // Back on plain stock the field arrives at the shop's chosen number again — the stock kind only
+    // set the recommendation, never a rule that the operator cannot override.
+    act(() => {
+      useEngraveJobStore.setState({ job: defaultEngraveJob() });
+    });
+    useEngraveJobStore.getState().addLabel();
+    expect(lastDepth(useEngraveJobStore.getState().job.labels)).toBe(3);
+  });
+
   it('starts at the labelled fallback when there is no location to read', () => {
     // `resetShopDefaultsStore` leaves `defaults: null`, which is what the hosted web build has.
     const reader = newItemDepthMm();

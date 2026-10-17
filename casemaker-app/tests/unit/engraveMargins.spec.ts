@@ -47,11 +47,11 @@ import type { EngraveJob, EngraveKeepOut, EngraveLabel } from '@/types/engraveJo
 import { itemDepthBoundFindings } from '@/workers/sim/engraveGeometry';
 
 /** A printed blank's facts, as a job carries them (#285/#345): no wasm, so the numbers are exact. */
-function printedJob(print: EngraveJob['stock']['print'], flatness?: EngraveJob['stock']['flatness']): EngraveJob {
-  return { ...defaultEngraveJob(), stock: { ...defaultEngraveJob().stock, print, flatness } };
+function printedJob(colour: EngraveJob['stock']['colour'], flatness?: EngraveJob['stock']['flatness']): EngraveJob {
+  return { ...defaultEngraveJob(), stock: { ...defaultEngraveJob().stock, colour, flatness } };
 }
 
-const PRINT_0_2 = { split: 3.0, layerHeight: 0.2, firstLayerHeight: 0.2 };
+const PRINT_0_2 = { kind: 'printed', capMm: 9.0, layerHeight: 0.2, firstLayerHeight: 0.2 } as const;
 
 describe('the depth-bound model (#345)', () => {
   it('refuses a floor ON the plane from either side, and passes one margin clear', () => {
@@ -175,12 +175,12 @@ describe('the house margins and the job’s own (#345)', () => {
   it('defaults the boundary margin to one printed layer, or the common 0.2 without a print', () => {
     expect(DEFAULT_BOUNDARY_MARGIN_MM).toBe(0.2);
     expect(defaultBoundaryMargin(printedJob(PRINT_0_2))).toBe(0.2);
-    expect(defaultBoundaryMargin(printedJob({ split: 3, layerHeight: 0.3 }))).toBe(0.3);
+    expect(defaultBoundaryMargin(printedJob({ kind: 'printed', capMm: 9, layerHeight: 0.3 }))).toBe(0.3);
     expect(defaultBoundaryMargin(defaultEngraveJob())).toBe(0.2);
   });
 
   it('resolves a job with no margins from the settings, reading the blank’s own layers', () => {
-    const printed = printedJob({ split: 3, layerHeight: 0.3 });
+    const printed = printedJob({ kind: 'printed', capMm: 9, layerHeight: 0.3 });
     // A SHIPPED default is not a number the user chose, so the blank's own layer height is read off
     // it: a badge with 0.3 mm layers gets 0.3 without anyone typing it.
     expect(effectiveMargins(printed, MARGIN_DEFAULTS)).toEqual({
@@ -253,7 +253,7 @@ describe('the recommendation (#345)', () => {
     // left on `'default'` resolves to `defaultBoundaryMargin(job)` — the blank's own layer height —
     // so a 0.3 mm-layer blank is already running 0.3, and an advice of 0.2 would sit BELOW it. The
     // same resolver `effectiveMargins` uses, so the two cannot disagree.
-    const thickLayers = printedJob({ split: 3, layerHeight: 0.3, firstLayerHeight: 0.3 });
+    const thickLayers = printedJob({ kind: 'printed', capMm: 9, layerHeight: 0.3, firstLayerHeight: 0.3 });
     expect(
       recommendMargins(thickLayers, { boundaryMargin: 0.2, source: 'default' }).boundaryMargin,
     ).toBeCloseTo(0.3, 9);
@@ -297,7 +297,7 @@ describe('the run sheet prints the margins (#345)', () => {
     // this is the only place the operator can read that the margin beside it is not the one the
     // ceiling kept.
     expect(step.value).toBe(
-      '0.2 mm boundary margin · the house default · no print stated: a void’s ceiling keeps the ' +
+      '0.2 mm boundary margin · the house default · no print grid stated: a void’s ceiling keeps the ' +
         'job’s minimum floor, 1 mm',
     );
     expect(step.text).toContain('Recommended for this blank: 0.2 mm');
@@ -357,7 +357,7 @@ describe('the margins reach the program only where a bound does (#345)', () => {
   });
 
   /** The 12 mm blank with a void under a 1.9 mm cut — the job the two verdict tests below share. */
-  function deepCutOverVoid(print?: EngraveJob['stock']['print']): EngraveJob {
+  function deepCutOverVoid(colour?: EngraveJob['stock']['colour']): EngraveJob {
     const pocket: EngraveKeepOut = {
       id: 'pocket',
       name: 'Magnet pocket',
@@ -374,7 +374,7 @@ describe('the margins reach the program only where a bound does (#345)', () => {
     const label = { ...(base.labels[0] as EngraveLabel) };
     return {
       ...base,
-      stock: print === undefined ? base.stock : { ...base.stock, print },
+      stock: colour === undefined ? base.stock : { ...base.stock, colour },
       labels: [{ ...label, text: 'CASE', size: 10, depth: 1.9, position: { x: 50, y: 30 } }],
       keepOuts: [pocket],
     };
@@ -386,7 +386,7 @@ describe('the margins reach the program only where a bound does (#345)', () => {
     // #345 A: with a print, the layer grid carries the Z-error, so the margin in force is the
     // boundary margin and the raw limit is the layer-aligned ceiling. The ceiling is 12 − 10 = 2 mm
     // of membrane and 2 mm is a layer line (0.2 × 10), so it is 2.0 exactly.
-    const job = deepCutOverVoid({ split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 });
+    const job = deepCutOverVoid({ kind: 'printed', capMm: 9, layerHeight: 0.2, firstLayerHeight: 0.2 });
     // 2.0 − 0.2 = 1.8, so 1.9 is out — and #345 B says the ITEM is what gets named, against the
     // plane it crossed, rather than a move the operator never typed.
     const f = generate(tl, job).findings.find((x) => x.code === 'item-depth-bound');
@@ -438,7 +438,7 @@ describe('the margins reach the program only where a bound does (#345)', () => {
       // Split depth 12 − 10.6 = 1.4, so a reveal needs 1.4 + 0.2 = 1.6 — shallower than the
       // 1.8 the void allows. 1.9 is a legal reveal AND past the void's floor.
       ...base,
-      stock: { ...base.stock, print: { split: 10.6, layerHeight: 0.2, firstLayerHeight: 0.2 } },
+      stock: { ...base.stock, colour: { kind: 'printed', capMm: 1.4, layerHeight: 0.2, firstLayerHeight: 0.2 } },
       labels: [
         { ...label, text: 'CASE', size: 10, depth: 1.9, position: { x: 50, y: 30 }, depthIntent: 'reveal' },
       ],
@@ -519,10 +519,10 @@ describe('the label depth a blank allows (#362)', () => {
     // 3.81 mm blank, split 3.0 → the boundary is 0.81 mm down, quantised onto 0.2 mm layers.
     // The NOMINAL number is what a recommendation that did its own arithmetic would use, and it
     // is half a layer away from the plane `item-depth-bound` then judges the floor against.
-    const printed = badgeJob({ stock: { ...badgeJob().stock, print: PRINT_0_2 } });
+    const printed = badgeJob({ stock: { ...badgeJob().stock, colour: { kind: 'printed', capMm: 0.81, layerHeight: 0.2, firstLayerHeight: 0.2 } } });
     expect(splitDepthOf(printed)).toBe(0.8);
     expect(splitDepthOf(badgeJob())).toBeNull(); // no stated print → no split at all
-    expect(splitDepthOf({ stock: { ...badgeJob().stock, print: { split: 3, layerHeight: 0.2 } } })).toBe(0.8);
+    expect(splitDepthOf({ stock: { ...badgeJob().stock, colour: { kind: 'printed', capMm: 0.81, layerHeight: 0.2 } } })).toBe(0.8);
   });
 
   it('recommends the split’s depth when the blank states its print — and says what it means', () => {
@@ -530,7 +530,7 @@ describe('the label depth a blank allows (#362)', () => {
     // floors are deeper (the jaws 4 − 1 = 3, the underside 12 − 1 = 11). The split is the shallowest,
     // so the recommendation is the reveal the blank is FOR — and 1.4 is a LAYER LINE, which is what
     // lets `checkBounds` accept exactly `at + m` against the plane the checker computes for itself.
-    const job = printedJob({ split: 10.6, layerHeight: 0.2, firstLayerHeight: 0.2 });
+    const job = printedJob({ kind: 'printed', capMm: 1.4, layerHeight: 0.2, firstLayerHeight: 0.2 });
     expect(splitDepthOf(job)).toBeCloseTo(1.4, 9);
     const rec = recommendLabelDepth(job, label(), inputsFor(job, label()))!;
     expect(rec.depth).toBe(1.6);
@@ -552,7 +552,7 @@ describe('the label depth a blank allows (#362)', () => {
     // from the right side — and it is stamped as the app's own, so a thicker blank or a moved split
     // gets a fresh answer rather than a floor frozen against this one.
     const badge = badgeJob();
-    const job: EngraveJob = { ...badge, stock: { ...badge.stock, print: PRINT_0_2 }, keepOuts: [] };
+    const job: EngraveJob = { ...badge, stock: { ...badge.stock, colour: { kind: 'printed', capMm: 0.81, layerHeight: 0.2, firstLayerHeight: 0.2 } }, keepOuts: [] };
     const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw()))!;
     expect(rec.depth).toBe(0.6);
     expect(rec.depthIntent).toBe('surface');
@@ -586,7 +586,7 @@ describe('the label depth a blank allows (#362)', () => {
     const base = badgeJob();
     const job: EngraveJob = {
       ...base,
-      stock: { ...base.stock, print: { split: 2.61, layerHeight: 0.2, firstLayerHeight: 0.2 } },
+      stock: { ...base.stock, colour: { kind: 'printed', capMm: 1.2, layerHeight: 0.2, firstLayerHeight: 0.2 } },
       workholding: { kind: 'vise', vise: { ...base.workholding.vise, stockProud: 2.2 } },
       keepOuts: [],
       // Stated BY THE JOB so the whole path runs at 0.28: `effectiveMargins` gives a job its own
@@ -626,7 +626,7 @@ describe('the label depth a blank allows (#362)', () => {
     const badge = badgeJob();
     const job: EngraveJob = {
       ...badge,
-      stock: { ...badge.stock, print: { split: 2.41, layerHeight: 0.2, firstLayerHeight: 0.2 } },
+      stock: { ...badge.stock, colour: { kind: 'printed', capMm: 1.4, layerHeight: 0.2, firstLayerHeight: 0.2 } },
       keepOuts: [],
     };
     expect(splitDepthOf(job)).toBeCloseTo(1.4, 9);

@@ -23,7 +23,7 @@ import {
   voidMargin,
   type BoundViolation,
 } from '@/engine/cnc/engrave/depthBounds';
-import { voidCeilingFor } from '@/engine/cnc/layerStack';
+import { printedLayerGridOf, voidCeilingFor } from '@/engine/cnc/layerStack';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { itemLabel } from '@/engine/cnc/engrave/jobSetup';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
@@ -495,7 +495,7 @@ export function bindingVoidsByRegion(
   // and a job dozens of cuts, and every evaluation is a Clipper2 op (#205 runs this on a debounce).
   const voids = plan.stock.keepOuts.map((ko) => {
     const membrane = keepOutMembrane(job, ko.zCeiling);
-    const ceiling = voidCeilingFor(membrane, plan.stock.thickness, job.stock.print);
+    const ceiling = voidCeilingFor(membrane, plan.stock.thickness, printedLayerGridOf(job.stock));
     return {
       name: ko.name,
       membrane,

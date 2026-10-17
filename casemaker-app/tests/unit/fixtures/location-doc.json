@@ -203,6 +203,8 @@
         "thickness": 5
       },
       "layers": [],
+      "capMm": null,
+      "capSource": null,
       "finish": "rough",
       "flatness": "flat",
       "domeHeight": null,
@@ -239,6 +241,8 @@
           "thickness": 2.4
         }
       ],
+      "capMm": null,
+      "capSource": null,
       "finish": "printed",
       "flatness": "domed",
       "domeHeight": 0.2,
@@ -255,6 +259,29 @@
       "source": "printed",
       "notes": "the two-colour badge blank",
       "addedAt": "2026-10-14T09:00:00.000Z"
+    },
+    {
+      "id": "stock-laminate1",
+      "material": "plastic",
+      "form": "sheet",
+      "size": {
+        "length": 76,
+        "width": 25.35,
+        "thickness": 1.5
+      },
+      "layers": [],
+      "capMm": 0.075,
+      "capSource": "assumed",
+      "finish": "finished",
+      "flatness": "flat",
+      "domeHeight": null,
+      "conductive": false,
+      "quantity": 1,
+      "reservations": [],
+      "consumed": [],
+      "source": "purchased",
+      "notes": "Bought two-colour engraving laminate on the vise (76 x 25.35 x 1.5 mm); maker states no plastic. The 0.075 mm cap is ASSUMED (0.003 in, no datasheet), not measured; correct it from the sheet when measured.",
+      "addedAt": "2026-10-17T09:00:00.000Z"
     }
   ],
   "feeds": [

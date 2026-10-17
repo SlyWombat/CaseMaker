@@ -405,6 +405,8 @@ export const WEAR_CLASS: Readonly<Record<StockMaterial, WearClass>> = {
   tpu: 'plastic',
   pva: 'plastic',
   acrylic: 'plastic',
+  // #492 — an unspecified bought plastic is weighted as plastic, not as a fibre-filled abrasive.
+  plastic: 'plastic',
   softwood: 'wood',
   hardwood: 'wood',
   mdf: 'wood',

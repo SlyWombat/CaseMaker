@@ -62,6 +62,9 @@ export const STOCK_MATERIALS = [
   'tpu',
   'pva',
   'acrylic',
+  // #492 — unspecified bought plastic (the engraving laminate). Deliberately NOT in
+  // PRINTED_BLANK_MATERIALS below: a laminate is purchased, not printed.
+  'plastic',
   'aluminium-6061',
   'aluminium-7075',
   'brass',
@@ -92,6 +95,7 @@ export const MATERIAL_LABELS: Readonly<Record<StockMaterial, string>> = {
   tpu: 'TPU',
   pva: 'PVA',
   acrylic: 'Acrylic',
+  plastic: 'plastic (unspecified)',
   'aluminium-6061': 'Aluminium 6061',
   'aluminium-7075': 'Aluminium 7075',
   brass: 'Brass',

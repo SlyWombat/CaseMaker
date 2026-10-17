@@ -37,11 +37,11 @@ use std::collections::HashSet;
 /// The longest a `note` or a `provenance` may be, matching `defaults.rs`'s note rule.
 const MAX_SENTENCE: usize = 400;
 
-/// The eleven starting rows (#450 slice 3): exactly the values the compiled `UNMEASURED_FEEDS_TABLE`
-/// held, every one `seeded` and labelled unmeasured. **No vendor numbers**: the three wood step-downs
-/// are conservative guesses for a 150 W spindle, the PLA rows are the bench's running values, and the
-/// V rows are the one hand-written bench file's own numbers (the PETG one adds the observed two-colour
-/// blank run) — each row's `provenance` says which.
+/// The twelve starting rows (#450 slice 3, #221, #492): exactly the values the compiled
+/// `UNMEASURED_FEEDS_TABLE` held, every one `seeded` and labelled unmeasured. **No vendor numbers**:
+/// the three wood step-downs are conservative guesses for a 150 W spindle, the PLA rows are the
+/// bench's running values, and the V rows are the one hand-written bench file's own numbers (the
+/// PETG and plastic ones add the observed two-colour blank run) — each row's `provenance` says which.
 ///
 /// ONE SPECIMEN, TWO READERS. `tests/unit/fixtures/feed-table.json`'s `good` list is the same rows,
 /// the shared `tests/unit/fixtures/location-doc.json` carries them in its `feeds` section (#450
@@ -402,13 +402,13 @@ pub(crate) mod tests {
         assert!(serde_json::from_value::<FeedRow>(v).is_err());
     }
 
-    /// The seeded table is a valid table: eleven rows, all `seeded` (so no date), each labelled
+    /// The seeded table is a valid table: twelve rows, all `seeded` (so no date), each labelled
     /// unmeasured in its own provenance. This is the property a fresh location depends on.
     #[test]
     fn the_seed_rows_are_a_valid_unmeasured_table() {
         let rows = seeded_rows();
         validate_table(&rows).unwrap();
-        assert_eq!(rows.len(), 11);
+        assert_eq!(rows.len(), 12);
         assert!(rows.iter().all(|r| r.source == FeedSource::Seeded && r.set_at.is_none()));
         assert!(rows.iter().all(|r| !r.provenance.trim().is_empty()));
     }
@@ -448,7 +448,7 @@ pub(crate) mod tests {
         for (row, raw) in good.iter().zip(doc["good"].as_array().unwrap()) {
             assert_eq!(serde_json::to_value(row).unwrap(), *raw, "a row does not round-trip");
         }
-        assert!(good.len() >= 11, "the specimen should carry the eleven starting rows");
+        assert!(good.len() >= 12, "the specimen should carry the twelve starting rows");
         assert_eq!(
             serde_json::to_value(seeded_rows()).unwrap(),
             doc["good"],

@@ -395,7 +395,7 @@ describe('an under-surface void limits the cut (#231 item 3)', () => {
 
 // #285 — a job that states its print takes its DEPTH LIMIT from the blank sliced on the printer's
 // own layer grid, rather than from the nominal membrane arithmetic. The switch is
-// `EngraveJob.stock.print` (`fromBadge.ts` writes it only when the badge declares one, #166), and
+// `EngraveJob.stock.colour` (`fromBadge.ts` writes it only when the badge declares one, #166), and
 // the pair below is what it buys: over the pocket the nominal membrane is 1.51 mm and the layer grid
 // leaves 1.4 mm of solid, so the print is the STRICTER of the two — 1.25 mm sits between them.
 //
@@ -1068,7 +1068,7 @@ describe('a V-bit trace job (#405)', () => {
     const second = regionLabel({ id: 'pair-b' });
     const job = traceJob([], {
       labels: [first, second],
-      stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'petg', print: { split: 3.61, layerHeight: 0.2 } },
+      stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'petg', colour: { kind: 'printed', capMm: 0.2, layerHeight: 0.2 } },
       minFloor: 1,
     });
     const r = regions(tl, job);
@@ -1105,7 +1105,7 @@ describe('a V-bit trace job (#405)', () => {
     const job = traceJob([], {
       labels: [],
       vectors: [lobes],
-      stock: { length: 38.1, width: 76.2, thickness: 1.5, material: 'petg', print: { split: 1.3, layerHeight: 0.2 } },
+      stock: { length: 38.1, width: 76.2, thickness: 1.5, material: 'petg', colour: { kind: 'printed', capMm: 0.2, layerHeight: 0.2 } },
     });
     const r = regions(tl, job);
     const merge = r.findings.find((f) => f.code === 'vcarve-surface-merge' && f.labelId === 'lobe-item');

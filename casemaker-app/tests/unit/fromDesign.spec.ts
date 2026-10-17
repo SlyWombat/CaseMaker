@@ -71,7 +71,7 @@ describe('the blank, as the job frame has it (#410)', () => {
 
   it('carries the file’s own print facts, and the dome across the axis that is 38.1', () => {
     const stock = designJobFor(design()).stock;
-    expect(stock.print).toEqual({ split: 3, layerHeight: 0.2 });
+    expect(stock.colour).toEqual({ kind: 'printed', capMm: 0.81, layerHeight: 0.2 });
     // `across: 'length'` — NOT the badge route's `'width'`. The blanks are the same part but this
     // job's frame is turned, so the 38.1 mm span #345 measured the dome across is the LENGTH here.
     // `source: 'badge'` — this route copies the badge blank's default; it measured nothing here.
@@ -85,7 +85,7 @@ describe('the blank, as the job frame has it (#410)', () => {
       width: 'computed',
       thickness: 'computed',
       material: 'computed',
-      print: 'computed',
+      colour: 'computed',
       flatness: 'computed',
     });
   });
@@ -116,7 +116,7 @@ describe('the dome is the badge blank’s, never an invented default (#437)', ()
       ),
     );
     const patch = designJobFor(plaque);
-    expect(patch.stock.print).toEqual({ split: 3, layerHeight: 0.2 });
+    expect(patch.stock.colour).toEqual({ kind: 'printed', capMm: 0.81, layerHeight: 0.2 });
     expect(patch.stock.flatness).toBeUndefined();
     // No value, no provenance claim: a stale `flatness: 'computed'` would outlive the value.
     expect('flatness' in (patch.sources.stock ?? {})).toBe(false);
@@ -331,7 +331,7 @@ describe('a direction is a parameter, not a constant (#410 / #383)', () => {
     expect(designPointToJob(stub, -10, -5, 'cw')).toEqual({ x: 0, y: 20 });
     expect(designPointToJob(stub, 10, 5, 'cw')).toEqual({ x: 10, y: 0 });
     // No print in the file, no print on the blank — and the note says so rather than guessing one.
-    expect(designJobFor(stub).stock.print).toBeUndefined();
+    expect(designJobFor(stub).stock.colour).toBeUndefined();
     expect(designJobFor(stub).stock.flatness).toBeUndefined();
     expect(designJobFor(stub).notes.join('\n')).toContain('states no print');
   });

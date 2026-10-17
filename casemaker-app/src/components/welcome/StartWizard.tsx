@@ -422,10 +422,18 @@ export function StartWizard(): JSX.Element {
         store.reset();
         store.setMachine(machineId);
         // A size read off a file is the app's reading of it; a shelf entry or a typed piece is the
-        // user's statement. `print`/`flatness` are cleared explicitly (see `stockStart.ts`).
+        // user's statement. The colour facts are NOT cleared here any more (#492): a shelf
+        // laminate's cap is a fact of the chosen piece, and a design file states no print facts at
+        // all rather than erasing the entry's. `flatness` is still cleared — no choice here carries
+        // a direction for its dome.
+        const colourSource = p.choice.colourSource;
         store.setStock(
-          { ...p.choice.stock, print: undefined, flatness: undefined },
-          p.choice.entry.kind === 'file' ? 'computed' : 'user',
+          { ...p.choice.stock, flatness: undefined },
+          colourSource !== undefined
+            ? { colour: colourSource }
+            : p.choice.entry.kind === 'file'
+              ? 'computed'
+              : 'user',
         );
         entry = p.choice.entry;
       }

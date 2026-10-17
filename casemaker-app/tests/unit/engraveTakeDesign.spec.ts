@@ -86,7 +86,7 @@ function designPatch(over: Partial<DesignJobPatch> = {}): DesignJobPatch {
       width: 38.1,
       thickness: 3.81,
       material: 'pla',
-      print: { split: 2.3, layerHeight: 0.2 },
+      colour: { kind: 'printed', capMm: 1.51, layerHeight: 0.2 },
       flatness: { dome: 0.33, across: 'length', source: 'badge' },
     },
     vectors: [designVector()],
@@ -97,7 +97,7 @@ function designPatch(over: Partial<DesignJobPatch> = {}): DesignJobPatch {
         width: 'computed',
         thickness: 'computed',
         material: 'computed',
-        print: 'computed',
+        colour: 'computed',
         flatness: 'computed',
       },
     },
@@ -203,15 +203,15 @@ describe('takeDesign (#410)', () => {
     // left the badge's colour split governing a design that never declared one.
     const printed = designPatch();
     useEngraveJobStore.getState().takeDesign(printed);
-    expect(job().stock.print).toBeDefined();
+    expect(job().stock.colour).toBeDefined();
 
     const plain = designPatch();
-    plain.stock = { length: 76.2, width: 38.1, thickness: 3.81, material: 'pla', print: undefined, flatness: undefined };
+    plain.stock = { length: 76.2, width: 38.1, thickness: 3.81, material: 'pla', colour: undefined, flatness: undefined };
     plain.sources = { stock: { length: 'computed', width: 'computed', thickness: 'computed', material: 'computed' } };
     useEngraveJobStore.getState().takeDesign(plain);
-    expect(job().stock.print).toBeUndefined();
+    expect(job().stock.colour).toBeUndefined();
     expect(job().stock.flatness).toBeUndefined();
-    expect(job().sources?.stock?.print).toBeUndefined();
+    expect(job().sources?.stock?.colour).toBeUndefined();
   });
 
   it('ADDS the design’s items to a job a person has worked on, and keeps their name', () => {

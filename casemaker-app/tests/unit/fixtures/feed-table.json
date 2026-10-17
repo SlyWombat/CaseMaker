@@ -131,6 +131,18 @@
       "setAt": null,
       "note": null,
       "provenance": "OBSERVED 2026-10-17, not measured: the 30° × 0.3 mm V-bit ran PETG at S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured PETG, and this row is a chosen placeholder for the two-colour blank. #284 is what settles it."
+    },
+    {
+      "id": "feed-plastic-v-0.3-0.5",
+      "material": "plastic",
+      "edge": "v",
+      "minDiameter": 0.3,
+      "maxDiameter": 0.5,
+      "params": { "rpm": 12000.0, "feed": 500.0, "plungeFeed": 200.0, "stepDown": 1.0, "stepOverFraction": 0.6, "peckFraction": 1.0, "air": true },
+      "source": "seeded",
+      "setAt": null,
+      "note": "The purchased two-colour laminate's V row (#492), chosen from the PETG observation of 2026-10-17 and unmeasured on laminate; the PLA V row stays for PLA.",
+      "provenance": "OBSERVED 2026-10-17, not measured: chosen from the PETG observation of 2026-10-17, unmeasured on laminate — the 30° × 0.3 mm V-bit ran S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured plastic, and this row is a chosen placeholder for the two-colour laminate. #284 is what settles it."
     }
   ],
   "refused": [

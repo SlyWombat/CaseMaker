@@ -69,11 +69,37 @@ describe('a shelf entry as the stock (#418)', () => {
     const r = stockFromShelf(blank, Z1);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.choice.stock).not.toHaveProperty('print');
+    expect(r.choice.stock).not.toHaveProperty('colour');
     expect(r.choice.stock).not.toHaveProperty('flatness');
     expect(r.choice.notes.join(' ')).toMatch(/2 layers \(white, black\) are not carried/);
     expect(r.choice.notes.join(' ')).toMatch(/domed 0.2 mm/);
     expect(r.choice.entry.form).toBe('printed-blank');
+  });
+
+  // #492 — a purchased two-colour laminate states a cap, not a print. The fixture's 0.075 mm is
+  // ASSUMED, and both the stock it produces and the sentence beside it have to say so.
+  it('carries a laminate’s cap, its assumed provenance and no print facts (#492)', () => {
+    const laminate = SHELF.find((s) => s.id === 'stock-laminate1')!;
+    const r = stockFromShelf(laminate, Z1);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.choice.stock).toMatchObject({
+      material: 'plastic',
+      colour: { kind: 'laminate', capMm: 0.075 },
+    });
+    expect(r.choice.stock).not.toHaveProperty('flatness');
+    expect(r.choice.colourSource).toBe('assumed');
+    expect(r.choice.notes.join(' ')).toMatch(/colour cap is 0.075 mm — ASSUMED/);
+    expect(r.choice.notes.join(' ')).toMatch(/no printed layers, no filament/);
+  });
+
+  it('reads a measured cap as measured, never as the assumed number (#492)', () => {
+    const laminate = SHELF.find((s) => s.id === 'stock-laminate1')!;
+    const r = stockFromShelf({ ...laminate, capSource: 'measured' }, Z1);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.choice.colourSource).toBe('measured');
+    expect(r.choice.notes.join(' ')).toMatch(/measured and recorded/);
   });
 
   it('round stock is refused by name, with where it belongs; a sphere is not a form', () => {
@@ -220,7 +246,6 @@ describe('the post-facing re-touch band (#473)', () => {
     expect(facingRetouchTolerance(zero)).toBe(FACING_RETOUCH_TOLERANCE_FALLBACK_MM);
   });
 });
-
 // #432 slice 4 — the finish the panel and the sheet read, and the choice a new job starts with.
 // Seeded rather than interpreted at Generate: a job with no `facing` key must plan as it did before
 // #432, so the default has to be WRITTEN when the job is made.
@@ -241,7 +266,7 @@ describe('the facing choice a new job starts with (#432 slice 4)', () => {
 
   it('reads a printed blank’s implied finish when no entry names one', () => {
     const job = defaultEngraveJob();
-    const printed = { ...job, stock: { ...job.stock, print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 } } };
+    const printed = { ...job, stock: { ...job.stock, colour: { kind: 'printed' as const, capMm: 9, layerHeight: 0.2, firstLayerHeight: 0.2 } } };
     expect(finishOf(printed)).toBe('printed');
   });
 

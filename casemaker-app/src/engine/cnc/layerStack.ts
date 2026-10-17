@@ -166,6 +166,54 @@ export function colourBoundaryDepthFor(
 }
 
 /**
+ * The two-colour stock facts this module reads (#492). Structural rather than importing
+ * `EngraveJob`, so the pure helpers stay importable from the main chunk.
+ */
+export interface ColourStock {
+  thickness: Mm;
+  colour?: {
+    kind: 'printed' | 'laminate';
+    capMm: Mm;
+    layerHeight?: Mm;
+    firstLayerHeight?: Mm;
+  };
+}
+
+/**
+ * Where the colour plane really is, in depth below the engraved face — the film `f` every depth
+ * sentence reads (#221/#492).
+ *
+ * A PURCHASED laminate states its cap directly: the colour plane is a manufactured fact and there
+ * is no printer grid to snap to. A PRINTED blank states a cap too (`thickness − split`), but its
+ * colour plane sits on a real layer line, so a printed blank with a layer height snaps that cap
+ * onto the grid. A printed blank with no layer height has a cap and no grid, and the cap stands.
+ * No colour facts at all returns null — not 0 — so callers keep the analytic depth limit.
+ */
+export function colourBoundaryDepthOf(stock: ColourStock): Mm | null {
+  const colour = stock.colour;
+  if (colour === undefined) return null;
+  if (colour.kind === 'laminate' || colour.layerHeight === undefined) return colour.capMm;
+  return colourBoundaryDepthFor(
+    stock.thickness,
+    stock.thickness - colour.capMm,
+    colour.layerHeight,
+    colour.firstLayerHeight ?? colour.layerHeight,
+  );
+}
+
+/** The printer grid a PRINTED colour plane can be snapped to; a laminate never has one (#492). */
+export function printedLayerGridOf(
+  stock: ColourStock,
+): { layerHeight: Mm; firstLayerHeight?: Mm } | undefined {
+  const colour = stock.colour;
+  if (colour?.kind !== 'printed' || colour.layerHeight === undefined) return undefined;
+  return {
+    layerHeight: colour.layerHeight,
+    ...(colour.firstLayerHeight !== undefined ? { firstLayerHeight: colour.firstLayerHeight } : {}),
+  };
+}
+
+/**
  * The deepest cut that leaves a whole printed layer over a void whose roof is `membrane` mm below
  * the engraved face — the layer grid's answer where `keepOutLimit`'s is the design's arithmetic.
  *
@@ -208,14 +256,14 @@ export function layerAlignedDepthFor(
 export function voidCeilingFor(
   membrane: Mm,
   thickness: Mm,
-  print: { layerHeight: Mm; firstLayerHeight?: Mm } | undefined,
+  grid: { layerHeight: Mm; firstLayerHeight?: Mm } | undefined,
 ): Mm {
-  if (print === undefined) return membrane;
+  if (grid === undefined) return membrane;
   return layerAlignedDepthFor(
     membrane,
     thickness,
-    print.layerHeight,
-    print.firstLayerHeight ?? print.layerHeight,
+    grid.layerHeight,
+    grid.firstLayerHeight ?? grid.layerHeight,
   );
 }
 

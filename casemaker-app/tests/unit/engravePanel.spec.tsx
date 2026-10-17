@@ -982,7 +982,7 @@ describe('EngravePanel — the badge blank (#271 route 1)', () => {
       width: 76.2,
       thickness: 3.81,
       material: 'pla',
-      print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 },
+      colour: { kind: 'printed', capMm: 0.81, layerHeight: 0.2, firstLayerHeight: 0.2 },
       flatness: { dome: 0.33, across: 'length', source: 'badge' },
     });
     expect((screen.getByTestId('engrave-stock-length') as HTMLInputElement).value).toBe('38.1');
@@ -1338,8 +1338,9 @@ describe('EngravePanel — the two-state depth control (#170)', () => {
           ...job,
           stock: {
             ...job.stock,
-            print: {
-              split: defaultBadgeParams().splitHeight,
+            colour: {
+              kind: 'printed',
+              capMm: defaultBadgeParams().thickness - defaultBadgeParams().splitHeight,
               layerHeight: 0.2,
               firstLayerHeight: 0.2,
             },
@@ -1775,7 +1776,7 @@ describe('EngravePanel (#432 slice 4) — the facing choice', () => {
       useEngraveJobStore.setState({
         job: {
           ...base,
-          stock: { ...base.stock, print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 } },
+          stock: { ...base.stock, colour: { kind: 'printed', capMm: 9, layerHeight: 0.2, firstLayerHeight: 0.2 } },
         },
       });
     });
@@ -2159,7 +2160,10 @@ describe('EngravePanel — the V-carve strategy (#221)', () => {
 
   it('waits for the print to resolve rather than showing no-film arithmetic as a placeholder', () => {
     const job = vJob();
-    job.stock = { ...job.stock, print: { split: 1.2, layerHeight: 0.2 } };
+    job.stock = {
+      ...job.stock,
+      colour: { kind: 'printed', capMm: job.stock.thickness - 1.2, layerHeight: 0.2 },
+    };
     show(job, null); // the preview that resolves the film has not landed yet
     expect(screen.getByTestId('engrave-vcarve-depth-note').textContent).toContain(
       'resolving it from the print',

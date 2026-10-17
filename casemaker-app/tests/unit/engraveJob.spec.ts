@@ -153,6 +153,78 @@ describe('EngraveJob schema (#200)', () => {
     expect(parsed.job).toEqual(job);
   });
 
+  // #492 — the stock's colour facts are the top colour's thickness from the engraved face, not the
+  // old `print.split` frame from the bottom. Both kinds have to survive a round trip, with where the
+  // number came from kept beside it, because the schema strips every key it does not name.
+  it('keeps a printed colour cap, its layer grid and its provenance through a round trip (#492)', () => {
+    const job = defaultEngraveJob();
+    job.stock.colour = { kind: 'printed', capMm: 1.27, layerHeight: 0.2, firstLayerHeight: 0.3 };
+    job.sources = { stock: { colour: 'assumed' } };
+
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.stock.colour).toEqual({
+      kind: 'printed',
+      capMm: 1.27,
+      layerHeight: 0.2,
+      firstLayerHeight: 0.3,
+    });
+    expect(parsed.job.sources?.stock?.colour).toBe('assumed');
+    expect(parsed.job).toEqual(job);
+  });
+
+  it('keeps a laminate cap with no layer grid, which is not a print (#492)', () => {
+    const job = defaultEngraveJob();
+    job.stock.colour = { kind: 'laminate', capMm: 0.075 };
+
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.stock.colour).toEqual({ kind: 'laminate', capMm: 0.075 });
+    expect(parsed.job).toEqual(job);
+  });
+
+  it('migrates a pre-#492 stock.print to a printed colour cap measured from the face', () => {
+    // The old split was the boundary's height above the BOTTOM face; `capMm` is the thickness left
+    // above it, so the two are complements about `thickness` (12 − 3 = 9).
+    const raw = JSON.parse(JSON.stringify(defaultEngraveJob())) as Record<string, unknown>;
+    const stock = raw.stock as Record<string, unknown>;
+    stock.print = { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 };
+    raw.sources = { stock: { print: 'computed' } };
+
+    const parsed = parseEngraveJob(raw);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.stock.colour).toEqual({
+      kind: 'printed',
+      capMm: 9,
+      layerHeight: 0.2,
+      firstLayerHeight: 0.2,
+    });
+    expect('print' in parsed.job.stock).toBe(false);
+    expect(parsed.job.sources?.stock?.colour).toBe('computed');
+    expect('print' in (parsed.job.sources?.stock ?? {})).toBe(false);
+  });
+
+  it('refuses a colour cap that cannot fit the stock, or laminate layers, or a first layer alone (#492)', () => {
+    const overThick = defaultEngraveJob();
+    overThick.stock.colour = { kind: 'laminate', capMm: overThick.stock.thickness + 0.1 };
+    expect(parseEngraveJob(overThick).ok).toBe(false);
+
+    const zero = defaultEngraveJob();
+    zero.stock.colour = { kind: 'laminate', capMm: 0 };
+    expect(parseEngraveJob(zero).ok).toBe(false);
+
+    const laminaLayers = defaultEngraveJob();
+    laminaLayers.stock.colour = { kind: 'laminate', capMm: 0.075, layerHeight: 0.2 };
+    expect(parseEngraveJob(laminaLayers).ok).toBe(false);
+
+    const firstOnly = defaultEngraveJob();
+    firstOnly.stock.colour = { kind: 'printed', capMm: 1, firstLayerHeight: 0.3 };
+    expect(parseEngraveJob(firstOnly).ok).toBe(false);
+  });
+
   it('rejects depth: -1 with a message naming labels[0].depth', () => {
     const job = defaultEngraveJob();
     job.labels[0]!.depth = -1;
@@ -737,24 +809,24 @@ describe('engraveJobStore (#200)', () => {
   // #285 review — `print` is the one stock field a patch can CLEAR. An explicit `undefined` means
   // "this blank states no print", an OMITTED key means "this patch says nothing about it", and the
   // two must not be confused or a stale layer grid outlives the blank it described.
-  it('setStock clears stock.print on an explicit undefined, and leaves it alone when omitted', async () => {
+  it('setStock clears stock.colour on an explicit undefined, and leaves it alone when omitted', async () => {
     backing.clear();
     const { useEngraveJobStore } = await freshStore();
     const { setStock } = useEngraveJobStore.getState();
 
-    setStock({ print: { split: 3.0, layerHeight: 0.2 } }, 'computed');
-    expect(useEngraveJobStore.getState().job.stock.print).toEqual({ split: 3.0, layerHeight: 0.2 });
-    expect(useEngraveJobStore.getState().job.sources?.stock?.print).toBe('computed');
+    setStock({ colour: { kind: 'printed', capMm: 9.0, layerHeight: 0.2 } }, 'computed');
+    expect(useEngraveJobStore.getState().job.stock.colour).toEqual({ kind: 'printed', capMm: 9.0, layerHeight: 0.2 });
+    expect(useEngraveJobStore.getState().job.sources?.stock?.colour).toBe('computed');
 
     // An omitted key still means "leave it alone" — every other caller relies on that.
     setStock({ thickness: 4 });
-    expect(useEngraveJobStore.getState().job.stock.print).toEqual({ split: 3.0, layerHeight: 0.2 });
+    expect(useEngraveJobStore.getState().job.stock.colour).toEqual({ kind: 'printed', capMm: 9.0, layerHeight: 0.2 });
 
     // And the provenance goes with the value: a source for a value that is gone is a lie.
-    setStock({ print: undefined }, 'computed');
+    setStock({ colour: undefined }, 'computed');
     const { job } = useEngraveJobStore.getState();
-    expect('print' in job.stock).toBe(false);
-    expect(job.sources?.stock?.print).toBeUndefined();
+    expect('colour' in job.stock).toBe(false);
+    expect(job.sources?.stock?.colour).toBeUndefined();
   });
 
   // #464 — `fibre` follows the same CLEAR rule as `print`, and the reason is the same shape: a
@@ -791,8 +863,9 @@ describe('engraveJobStore (#200)', () => {
       badgeBlankFor(defaultBadgeParams({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } })).stock,
       'computed',
     );
-    expect(useEngraveJobStore.getState().job.stock.print).toEqual({
-      split: 3.0,
+    expect(useEngraveJobStore.getState().job.stock.colour).toEqual({
+      kind: 'printed',
+      capMm: 0.81,
       layerHeight: 0.2,
       firstLayerHeight: 0.2,
     });
@@ -802,7 +875,7 @@ describe('engraveJobStore (#200)', () => {
     // whose print is no longer known.
     setStock(badgeBlankFor(defaultBadgeParams({ print: undefined })).stock, 'computed');
     const { job } = useEngraveJobStore.getState();
-    expect(job.stock.print).toBeUndefined();
+    expect(job.stock.colour).toBeUndefined();
     // The rest of the blank still came through, so this is a CLEAR of the print, not a wipe.
     expect(job.stock.thickness).toBe(3.81);
     expect(job.stock.material).toBe('pla');

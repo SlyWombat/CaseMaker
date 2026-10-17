@@ -29,7 +29,7 @@
  * minFloor)`.
  *
  * PURE. No wasm, no store, no React: the numbers are arithmetic on facts the job already holds
- * (`stock.print`, the keep-outs, the vises), which is what lets the panel, the run sheet and the
+ * (`stock.colour`, the keep-outs, the vises), which is what lets the panel, the run sheet and the
  * verifier all read the same rule. The one wasm-backed input — how deep the cutter may go before it
  * reaches a void — arrives as a plain number from the layer stack that computed it.
  *
@@ -39,7 +39,7 @@
  */
 
 import { DEFAULT_BREAKTHROUGH } from '@/engine/cnc/sacrificial';
-import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
+import { colourBoundaryDepthOf, printedLayerGridOf } from '@/engine/cnc/layerStack';
 import { probeResiduals } from '@/engine/cnc/probePlan';
 import type { EngraveAnyItem, EngraveJob, EngraveLabel, EngraveMargins, FieldSource, MarginSource } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
@@ -209,12 +209,13 @@ export function shallower(v: number): Mm {
  * The boundary margin a job with no stated one runs on: ONE PRINTED LAYER.
  *
  * That is the smallest distance a floor can be from a plane and still be on a different printed
- * layer — below it, sanding or a slightly deep cut reaches the plane. A blank that states its print
- * (`stock.print.layerHeight`, #285) tells us the real layer height; every other blank gets the
+ * layer — below it, sanding or a slightly deep cut reaches the plane. A printed blank that states
+ * its layer height (`stock.colour.layerHeight`, #285, former `stock.print.layerHeight` under #492)
+ * tells us the real layer height; every other blank gets the
  * common 0.2.
  */
 export function defaultBoundaryMargin(job: Pick<EngraveJob, 'stock'>): Mm {
-  return job.stock.print?.layerHeight ?? DEFAULT_BOUNDARY_MARGIN_MM;
+  return printedLayerGridOf(job.stock)?.layerHeight ?? DEFAULT_BOUNDARY_MARGIN_MM;
 }
 
 /**
@@ -344,7 +345,9 @@ export function splitBound(intent: EngraveLabel['depthIntent'], splitDepth: Mm |
  * `stackDepthLimit` all call it, so none of them can keep a different distance from the same plane.
  */
 export function voidMargin(job: Pick<EngraveJob, 'stock' | 'minFloor'>, boundaryMargin: Mm): Mm {
-  return job.stock.print === undefined ? Math.max(boundaryMargin, job.minFloor) : boundaryMargin;
+  return printedLayerGridOf(job.stock) === undefined
+    ? Math.max(boundaryMargin, job.minFloor)
+    : boundaryMargin;
 }
 
 /**
@@ -357,7 +360,7 @@ export function voidMarginWords(
   job: Pick<EngraveJob, 'stock' | 'minFloor'>,
   boundaryMargin: Mm,
 ): string {
-  const keepsFloor = job.stock.print === undefined && job.minFloor >= boundaryMargin;
+  const keepsFloor = printedLayerGridOf(job.stock) === undefined && job.minFloor >= boundaryMargin;
   return keepsFloor
     ? `the ${mm(job.minFloor)} mm minimum floor`
     : `the ${mm(boundaryMargin)} mm boundary margin`;
@@ -628,24 +631,120 @@ export function zBudgetInputsFor(job: EngraveJob): ZBudgetInputs {
 }
 
 /**
- * Where the colour split lands below the engraved face, mm — or null when the blank states no print
- * (#166/#285).
+ * Where the colour plane lands below the engraved face, mm — or null when the blank states no
+ * two-colour facts (#166/#285/#492).
  *
- * The GRID's answer, not the nominal `thickness − split`: the boundary is a fact about the
- * printer's layers, and `colourBoundaryDepthFor` is the one function that says where it is
- * (`colourBoundaryFor` asks it for the per-move verifier and `item-depth-bound`). A recommendation
- * that used the nominal height would sit up to half a layer away from the plane the checker then
- * judges it against — which is how a recommendation ends up failing its own check.
+ * A PRINTED blank's answer is the GRID's, not the nominal `thickness − split`: the boundary is a
+ * fact about the printer's layers, and `colourBoundaryDepthFor` is the one function that says where
+ * it is (`colourBoundaryFor` asks it for the per-move verifier and `item-depth-bound`). A
+ * recommendation that used the nominal height would sit up to half a layer away from the plane the
+ * checker then judges it against — which is how a recommendation ends up failing its own check.
+ *
+ * A PURCHASED laminate has no grid: its stated cap IS the colour plane's depth below the face, and
+ * `colourBoundaryDepthOf` returns it unchanged (#492).
  */
 export function splitDepthOf(job: Pick<EngraveJob, 'stock'>): Mm | null {
-  const print = job.stock.print;
-  if (print === undefined) return null;
-  return colourBoundaryDepthFor(
-    job.stock.thickness,
-    print.split,
-    print.layerHeight,
-    print.firstLayerHeight ?? print.layerHeight,
-  );
+  return colourBoundaryDepthOf(job.stock);
+}
+
+/**
+ * `0.025` mm — how far below a purchased laminate's cap a floor sits (#492).
+ *
+ * The maintainer's first laminate depth is 0.1 mm on a 0.075 mm cap, which is `cap + 0.025`. It is
+ * deliberately NOT `boundaryMargin` (0.2, one printed layer): a laminate has no printed layer grid,
+ * and its cap is a manufactured plane, so the margin is the small clearance the supplier's tolerance
+ * and the machine's Z resolution need rather than a whole printer layer.
+ */
+export const LAMINATE_CAP_MARGIN_MM: Mm = 0.025;
+
+/**
+ * `0.5` mm — the built-in starting depth when no location states one. It mirrors
+ * `KNOWN_DEFAULTS['engrave.newItemDepthMm'].fallback`; the store passes the location's own number
+ * (and its provenance) into {@link recommendedEngraveDepth} whenever it has one.
+ */
+export const DEFAULT_ENGRAVE_DEPTH_MM: Mm = 0.5;
+
+/** The shop's "depth a new item starts at" and where that number came from (#451, #492). */
+export interface EngraveDepthDefault {
+  value: Mm;
+  /** `fallback` means no location stated one; the others are the default registry's own words. */
+  source: 'seeded' | 'chosen' | 'measured' | 'fallback';
+}
+
+/** Which stock fact supplied a recommendation — the rule, not merely a label for the UI. */
+export type EngraveDepthSource = 'laminate-cap' | 'printed-colour-line' | 'shop-default';
+
+/**
+ * The depth a depth field arrives filled with on THIS stock, and the sentence beside it (#492).
+ *
+ * ENGRAVE — flat or V — is available on any stock; this number is only the RECOMMENDATION. The
+ * operator may always type another depth, and no depth field or refusal is keyed to the stock kind.
+ * What the kind chooses is which of three rules answers:
+ *
+ *   - `laminate` — through the cap by {@link LAMINATE_CAP_MARGIN_MM}: cap + 0.025 mm (0.1 mm on
+ *     the 0.075 mm fixture). The cap is a manufactured plane, unsnapped.
+ *   - `printed` — through the colour line by the job's boundary margin, on the printer's layer grid
+ *     (`colourBoundaryDepthOf`, the #285 model). This is the same candidate `recommendLabelDepth`
+ *     calls its colour-split floor.
+ *   - no colour facts — the shop's engraving-depth default, with its provenance. The same sentence
+ *     says the blank has no cap, so a V-carve's plane is the floor.
+ *
+ * ONE function, so the panel, the run sheet and the store's new-item seeding cannot explain the
+ * same field with three different numbers or three different sentences (#492 J19).
+ */
+export function recommendedEngraveDepth(
+  stock: EngraveJob['stock'],
+  options: { boundaryMargin?: Mm; shopDepth?: EngraveDepthDefault } = {},
+): { depth: Mm; reason: string; source: EngraveDepthSource; plane: Mm | null } {
+  const colour = stock.colour;
+  if (colour?.kind === 'laminate') {
+    const cap = colourBoundaryDepthOf(stock) ?? colour.capMm;
+    const depth = deeper(cap + LAMINATE_CAP_MARGIN_MM);
+    return {
+      depth,
+      source: 'laminate-cap',
+      plane: cap,
+      reason:
+        `the laminate's cap is ${mm(cap)} mm under the face, so going through the top colour needs ` +
+        `${mm(depth)} mm (${mm(LAMINATE_CAP_MARGIN_MM)} mm clear of the cap)`,
+    };
+  }
+
+  const plane = colourBoundaryDepthOf(stock);
+  if (plane !== null) {
+    // The job's own margin when it has one; otherwise one printed layer, or the common default when
+    // the blank states no layer height. This is the same resolution `recommendLabelDepth` receives
+    // from `effectiveMargins`, so the starting value and the later re-depth agree.
+    const margin = options.boundaryMargin ?? defaultBoundaryMargin({ stock });
+    const depth = deeper(plane + margin);
+    const grid = printedLayerGridOf(stock);
+    return {
+      depth,
+      source: 'printed-colour-line',
+      plane,
+      reason:
+        `the colour split is ${mm(plane)} mm under the face, so reaching the bottom colour needs ` +
+        `${mm(depth)} mm (${mm(margin)} mm clear of the line` +
+        (grid === undefined
+          ? '; no layer height is stated, so the colour plane is the cap itself'
+          : `, one ${mm(grid.layerHeight)} mm printed layer`) +
+        ')',
+    };
+  }
+
+  const shop = options.shopDepth ?? { value: DEFAULT_ENGRAVE_DEPTH_MM, source: 'fallback' as const };
+  const provenance =
+    shop.source === 'fallback'
+      ? `the built-in ${mm(shop.value)} mm fallback (chosen, not measured; no location states an engraving depth)`
+      : `the shop's ${mm(shop.value)} mm engraving-depth default (${shop.source}, not measured)`;
+  return {
+    depth: roundDepth(shop.value),
+    source: 'shop-default',
+    plane: null,
+    reason:
+      `${provenance}: a new item starts there, and the depth stays the operator's choice. ` +
+      'The blank states no colour line, so a V-carve’s plane is the floor',
+  };
 }
 
 /** What `recommendLabelDepth` needs that the item itself does not hold. */
@@ -800,14 +899,19 @@ export function recommendLabelDepth(
   const candidates: { depth: Mm; clause: string }[] = [];
 
   const split = splitDepthOf(job);
-  if (split !== null) {
-    candidates.push({
-      depth: deeper(split + margin),
-      clause:
-        `the colour split is ${mm(split)} mm under the face, so reaching the bottom colour needs ` +
-        `${mm(deeper(split + margin))} mm`,
-    });
+  // #492 — the colour plane's recommendation is the SAME one a new item's depth field starts with:
+  // a laminate through its cap by the laminate margin, a print through its grid-snapped colour line
+  // by the job's boundary margin. Delegating here is what makes the panel's row, the run sheet's
+  // sentence and the store's seeded depth one source rather than three arithmetics.
+  const stockDepth = split === null ? null : recommendedEngraveDepth(job.stock, { boundaryMargin: margin });
+  if (split !== null && stockDepth !== null) {
+    candidates.push({ depth: stockDepth.depth, clause: stockDepth.reason });
   }
+  // The two-colour INTENT is a statement about the printer's layer grid (a floor on one side of the
+  // colour line). A purchased laminate has no such grid (#492), so its recommendation names the cap
+  // without stamping a `surface`/`reveal` claim no printed bound describes; the printed band test
+  // below (split ± one printed layer) is likewise not a rule about a manufactured cap.
+  const printedColour = job.stock.colour?.kind === 'printed';
 
   if (inputs.voidLimit) {
     const { name, limit, estimated } = inputs.voidLimit;
@@ -896,7 +1000,7 @@ export function recommendLabelDepth(
   // neither bound's business, so nothing checks it — and on a domed blank the two-tone floor it
   // would leave is exactly what the margin exists to prevent. It is demoted to a `surface` floor,
   // which is the deepest depth in the band a bound can actually hold the floor to (#362 review).
-  if (split !== null && winner.depth > split - margin + DEPTH_EPS && winner.depth < split + margin - DEPTH_EPS) {
+  if (printedColour && split !== null && winner.depth > split - margin + DEPTH_EPS && winner.depth < split + margin - DEPTH_EPS) {
     const surface = shallower(split - margin);
     // `surface ≤ 0` is a two-colour blank whose split is too near the face for any floor to stay in
     // the top colour: there is nothing to demote TO, so the winner stands and the basis says so.
@@ -916,7 +1020,7 @@ export function recommendLabelDepth(
 
   // The intent, only where the floor really is on the far side of the split by the margin a
   // `reveal` bound demands.
-  const reveal = split !== null && winner.depth >= split + margin - DEPTH_EPS;
+  const reveal = printedColour && split !== null && winner.depth >= split + margin - DEPTH_EPS;
 
   return {
     depth: winner.depth,

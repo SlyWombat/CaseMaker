@@ -71,7 +71,7 @@ export interface DesignImport {
   stock: { lengthX: Mm; widthY: Mm; thickness: Mm; minX: Mm; minY: Mm; zMin: Mm; zMax: Mm };
   /**
    * The colour change height above the BACK FACE, mm, or null for a single-extruder blank — the
-   * frame `PartSpec.colourSplit` and `stock.print.split` state, and the one the pocket below is
+   * frame `PartSpec.colourSplit` and `stock.colour`'s cap (`thickness − capMm`) state, and the one the pocket below is
    * sliced in. NOT an absolute file z: those two agree only on a blank that happens to start at
    * z = 0, and a lifted blank would put the boundary somewhere else entirely.
    */
@@ -197,7 +197,7 @@ export function readDesign(tl: ManifoldToplevel, file: PrusaThreeMf): DesignImpo
 
   // The colour split: the top of the material of the LOWEST extruder present, as a HEIGHT ABOVE THE
   // BLANK'S BACK FACE — the frame `DesignImport.colourSplit` documents, and the only one every
-  // consumer reads it in: `PartSpec.colourSplit`, `stock.print.split` and the pocket slice below.
+  // consumer reads it in: `PartSpec.colourSplit`, `stock.colour`'s cap (`thickness − capMm`) and the pocket slice below.
   // The file's own absolute z is converted here, once. A blank printed in one extruder has no
   // boundary, and the job's depth model stays analytic (as for any job whose stock states no print,
   // #285).

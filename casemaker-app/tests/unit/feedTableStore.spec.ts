@@ -60,7 +60,7 @@ describe('the feeds table store (#450 slice 2)', () => {
     const s = useFeedTableStore.getState();
     expect(s.status).toBe('present');
     expect(s.rows.map((r) => r.id)).toEqual((GOOD as Array<{ id: string }>).map((r) => r.id));
-    expect(s.rows).toHaveLength(11);
+    expect(s.rows).toHaveLength(12);
     expect(s.unreadable).toEqual([]);
     expect(s.etag).toBe('"f-1"');
   });
@@ -114,7 +114,7 @@ describe('the feeds table store (#450 slice 2)', () => {
   it('sets aside a row this build cannot read, and keeps the rest', async () => {
     fakeTable([...GOOD, { id: 'feed-new', material: 'unobtainium' }]);
     await useFeedTableStore.getState().refresh();
-    expect(useFeedTableStore.getState().rows).toHaveLength(11);
+    expect(useFeedTableStore.getState().rows).toHaveLength(12);
     expect(useFeedTableStore.getState().unreadable.map((u) => u.id)).toEqual(['feed-new']);
   });
 

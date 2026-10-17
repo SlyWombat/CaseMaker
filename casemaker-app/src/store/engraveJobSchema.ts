@@ -405,16 +405,61 @@ const sacrificialSchema = z.object({
 });
 
 /**
- * The print facts a two-colour blank's depth model needs (#285). OPTIONAL, not defaulted: a job
- * that is not a badge keeps no key, so it round-trips byte-for-byte and its depth limit stays the
- * analytic one. `split`/`layerHeight` are bounded by the same limits as the stock's own Z, so a
- * hand-edited file cannot smuggle in a boundary that is not on the blank.
+ * The colour planes a two-colour blank's depth model needs (#492, from #285). OPTIONAL, not
+ * defaulted: a job that is not a two-colour blank keeps no key, so it round-trips byte-for-byte
+ * and its depth limit stays the analytic one. `capMm`/`layerHeight` are bounded by the same limits
+ * as the stock's own Z, so a hand-edited file cannot smuggle in a boundary that is not on the
+ * blank. The stock-level `superRefine` checks `capMm` against THIS blank's thickness and refuses a
+ * laminate that claims layers.
  */
-const stockPrintSchema = z.object({
-  split: z.number().finite().nonnegative().max(STOCK_LIMITS.thickness),
-  layerHeight: z.number().finite().positive().max(STOCK_LIMITS.thickness),
+const stockColourSchema = z.object({
+  kind: z.enum(['printed', 'laminate']),
+  capMm: z.number().finite().nonnegative().max(STOCK_LIMITS.thickness),
+  // Printed only. Absent is a printed blank whose slicer never stated a grid: its cap is still a
+  // fact, but there is no layer line to snap the boundary to.
+  layerHeight: z.number().finite().positive().max(STOCK_LIMITS.thickness).optional(),
   firstLayerHeight: z.number().finite().positive().max(STOCK_LIMITS.thickness).optional(),
 });
+
+/**
+ * Pre-#492 migration: a job's `stock.print: { split, layerHeight, firstLayerHeight? }` becomes
+ * `stock.colour: { kind: 'printed', capMm: thickness − split, … }`.
+ *
+ * The old `split` was the colour change height above the blank's BOTTOM face; `capMm` is the top
+ * colour's thickness from the engraved face, so the two are complements about `thickness`. This is
+ * the ONE place the old document shape is read — everything downstream reads `colour` — and it
+ * runs before the object schema, so `print` is not a key this build can accidentally keep.
+ *
+ * A malformed `print` is left alone and stripped by the object schema: an unreadable old print is
+ * "no colour facts", never a guess.
+ */
+function migrateStockPrint(raw: unknown): unknown {
+  if (typeof raw !== 'object' || raw === null) return raw;
+  const record = raw as Record<string, unknown>;
+  if (record.colour !== undefined || record.print === undefined) return raw;
+  const print = record.print;
+  const thickness = record.thickness;
+  if (
+    typeof print !== 'object' ||
+    print === null ||
+    typeof thickness !== 'number' ||
+    !Number.isFinite(thickness)
+  ) {
+    return raw;
+  }
+  const { split, layerHeight, firstLayerHeight } = print as Record<string, unknown>;
+  if (typeof split !== 'number' || typeof layerHeight !== 'number') return raw;
+  const { print: _print, ...rest } = record;
+  return {
+    ...rest,
+    colour: {
+      kind: 'printed',
+      capMm: thickness - split,
+      layerHeight,
+      ...(firstLayerHeight !== undefined ? { firstLayerHeight } : {}),
+    },
+  };
+}
 
 /**
  * The printed face's dome (#345). OPTIONAL, not defaulted, for the same byte-for-byte reason as
@@ -428,18 +473,58 @@ const stockFlatnessSchema = z.object({
   source: z.enum(['badge', 'user', 'measured']),
 });
 
-const stockSchema = z.object({
-  length: z.number().finite().positive().max(STOCK_LIMITS.length),
-  width: z.number().finite().positive().max(STOCK_LIMITS.width),
-  thickness: z.number().finite().positive().max(STOCK_LIMITS.thickness),
-  material: z.enum(STOCK_MATERIALS),
-  // #464 — the fibre a printed blank's filament states, beside the material. OPTIONAL, not
-  // defaulted: a job that has never seen a fibre filament keeps no key and round-trips byte-for-
-  // byte, and `setStock` clears it when a later import states none.
-  fibre: z.enum(['cf', 'gf']).optional(),
-  print: stockPrintSchema.optional(),
-  flatness: stockFlatnessSchema.optional(),
-});
+const stockObjectSchema = z
+  .object({
+    length: z.number().finite().positive().max(STOCK_LIMITS.length),
+    width: z.number().finite().positive().max(STOCK_LIMITS.width),
+    thickness: z.number().finite().positive().max(STOCK_LIMITS.thickness),
+    material: z.enum(STOCK_MATERIALS),
+    // #464 — the fibre a printed blank's filament states, beside the material. OPTIONAL, not
+    // defaulted: a job that has never seen a fibre filament keeps no key and round-trips byte-for-
+    // byte, and `setStock` clears it when a later import states none.
+    fibre: z.enum(['cf', 'gf']).optional(),
+    colour: stockColourSchema.optional(),
+    flatness: stockFlatnessSchema.optional(),
+  })
+  .superRefine((stock, ctx) => {
+    const colour = stock.colour;
+    if (colour === undefined) return;
+    // The cap is measured from the engraved face, so it cannot be thicker than the blank. (The
+    // legacy migration makes cap = thickness − split, which is already inside the stock.)
+    if (colour.capMm > stock.thickness + 1e-9) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['colour', 'capMm'],
+        message: 'the colour cap cannot be thicker than the stock',
+      });
+    }
+    if (colour.kind === 'laminate') {
+      if (colour.capMm <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['colour', 'capMm'],
+          message: 'a laminate states a positive cap',
+        });
+      }
+      // A laminate is bought with its colour plane already in it: there is no layer grid to snap
+      // to, so a layer height here would be invented print facts.
+      if (colour.layerHeight !== undefined || colour.firstLayerHeight !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['colour', 'kind'],
+          message: 'a laminate has no print layers',
+        });
+      }
+    } else if (colour.firstLayerHeight !== undefined && colour.layerHeight === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['colour', 'firstLayerHeight'],
+        message: 'a first layer height needs the layer height it belongs to',
+      });
+    }
+  });
+
+const stockSchema = z.preprocess(migrateStockPrint, stockObjectSchema);
 
 /**
  * The job's own Z-error margins (#345). OPTIONAL, not defaulted: a job with none runs on the house
@@ -500,7 +585,7 @@ const facingSchema = z.object({
  * the value would come back reading `computed`. Every key is optional, so a job that asserts
  * nothing carries no `sources` key at all and round-trips.
  */
-const fieldSourceSchema = z.enum(['computed', 'catalogue', 'user', 'measured']);
+const fieldSourceSchema = z.enum(['computed', 'catalogue', 'user', 'measured', 'assumed']);
 
 /**
  * Where the stock came from (#418, `EngraveJob.stockEntry`). Strict where it can be: the form is
@@ -736,40 +821,51 @@ const jobRunLogEntrySchema = z
   })
   .strict();
 
-const jobSourcesSchema = z.object({
-  stock: z
-    .object({
-      length: fieldSourceSchema.optional(),
-      width: fieldSourceSchema.optional(),
-      thickness: fieldSourceSchema.optional(),
-      material: fieldSourceSchema.optional(),
-      // #464 — the fibre flag, stamped with the material it came beside. Listed for the same
-      // reason as `flatness`: zod strips an unnamed key, and a round trip would keep the value
-      // while losing the record of where it came from.
-      fibre: fieldSourceSchema.optional(),
-      // #285 — the badge's own print facts, stamped when they became the job's.
-      print: fieldSourceSchema.optional(),
-      // #345 — the printed face's dome, stamped with the print it belongs to. Listed explicitly
-      // because zod STRIPS what an object does not name: the far side of a round trip would lose
-      // the provenance while keeping the value, which is worse than either.
-      flatness: fieldSourceSchema.optional(),
-    })
-    .optional(),
-  tool: fieldSourceSchema.optional(),
-  cut: z
-    .object({
-      rpm: fieldSourceSchema.optional(),
-      feed: fieldSourceSchema.optional(),
-      plungeFeed: fieldSourceSchema.optional(),
-      stepDown: fieldSourceSchema.optional(),
-      stepOver: fieldSourceSchema.optional(),
-      // `peck` was missing here while `EngraveJobSources.cut` has had it all along (#220 added the
-      // field to `CutParams`), so a job that stamped the peck's source lost the stamp on load.
-      // Found fixing the same object for #310.
-      peck: fieldSourceSchema.optional(),
-      air: fieldSourceSchema.optional(),
-    })
-    .optional(),
+const jobSourcesSchema = z
+  .object({
+    stock: z
+      .object({
+        length: fieldSourceSchema.optional(),
+        width: fieldSourceSchema.optional(),
+        thickness: fieldSourceSchema.optional(),
+        material: fieldSourceSchema.optional(),
+        // #464 — the fibre flag, stamped with the material it came beside. Listed for the same
+        // reason as `flatness`: zod strips an unnamed key, and a round trip would keep the value
+        // while losing the record of where it came from.
+        fibre: fieldSourceSchema.optional(),
+        // #492 — the two-colour facts' provenance. Pre-#492 documents stamped this as `print`.
+        colour: fieldSourceSchema.optional(),
+        print: fieldSourceSchema.optional(),
+        // #345 — the printed face's dome, stamped with the print it belongs to. Listed explicitly
+        // because zod STRIPS what an object does not name: the far side of a round trip would lose
+        // the provenance while keeping the value, which is worse than either.
+        flatness: fieldSourceSchema.optional(),
+      })
+      .transform((stock) => {
+        // Same complement as `migrateStockPrint`: an old `print` stamp is this job's colour stamp.
+        if (stock.colour !== undefined || stock.print === undefined) {
+          const { print: _print, ...rest } = stock;
+          return rest;
+        }
+        const { print, ...rest } = stock;
+        return { ...rest, colour: print };
+      })
+      .optional(),
+    tool: fieldSourceSchema.optional(),
+    cut: z
+      .object({
+        rpm: fieldSourceSchema.optional(),
+        feed: fieldSourceSchema.optional(),
+        plungeFeed: fieldSourceSchema.optional(),
+        stepDown: fieldSourceSchema.optional(),
+        stepOver: fieldSourceSchema.optional(),
+        // `peck` was missing here while `EngraveJobSources.cut` has had it all along (#220 added the
+        // field to `CutParams`), so a job that stamped the peck's source lost the stamp on load.
+        // Found fixing the same object for #310.
+        peck: fieldSourceSchema.optional(),
+        air: fieldSourceSchema.optional(),
+      })
+      .optional(),
   // #362 — per-label provenance, keyed by label id. Named explicitly for the same reason
   // `flatness` above is: zod strips what an object does not name, and a user's typed depth coming
   // back as an unclaimed one would let the next `takeBadgeBlank` overwrite it.

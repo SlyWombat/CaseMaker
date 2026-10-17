@@ -44,7 +44,7 @@ export interface BadgeMagnetPocket {
  * height moves every depth number on the blank (decision 27, `/Fabrication.md` §7.1).
  *
  * Only their PRESENCE matters to the engrave side (#285): `fromBadge.ts` copies them — with the
- * split — into `EngraveJob.stock.print`, and that is what lets the job slice the compiled solid
+ * split — into `EngraveJob.stock.colour` (as the printed blank's cap, #492), and that is what lets the job slice the compiled solid
  * on the printer's real layer grid. A badge that declares no print leaves the job's depth limit
  * analytic, unchanged.
  *

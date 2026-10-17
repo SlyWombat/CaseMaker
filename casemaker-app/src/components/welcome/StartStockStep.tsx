@@ -68,7 +68,10 @@ function entryLine(item: StockItem): string {
     .map((f) => (f === 'diameter' || f === 'innerDiameter' ? `⌀${mm(item.size[f])}` : mm(item.size[f])))
     .join(' × ');
   const free = item.quantity - item.reservations.reduce((a, r) => a + r.quantity, 0);
-  return `${item.form} ${size} · ×${item.quantity}${free < item.quantity ? ` (${free} free)` : ''} · ${item.finish}`;
+  // #492 — a laminate's cap is the reason to pick it, so it is named in the line. `assumed` is
+  // kept visible: the maintainer's 0.075 mm is not a measurement.
+  const cap = item.capMm == null ? '' : ` · cap ${mm(item.capMm)} (${item.capSource})`;
+  return `${item.form} ${size} · ×${item.quantity}${free < item.quantity ? ` (${free} free)` : ''} · ${item.finish}${cap}`;
 }
 
 export function StartStockStep({

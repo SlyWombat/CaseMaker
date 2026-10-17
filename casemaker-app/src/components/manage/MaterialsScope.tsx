@@ -26,9 +26,11 @@ import {
   STOCK_FLATNESS,
   STOCK_FORMS,
   STOCK_SOURCES,
+  STOCK_CAP_SOURCES,
   formIsFlat,
   stockProblem,
   type SizeField,
+  type StockCapSource,
   type StockForm,
   type StockItem,
 } from '@/platform/stockClient';
@@ -87,6 +89,9 @@ interface Draft {
   form: StockForm;
   size: Record<SizeField, string>;
   layers: { name: string; thickness: string }[];
+  /** #492 — a purchased laminate's cap, text so a half-typed value is not a refusal. */
+  capMm: string;
+  capSource: StockCapSource;
   finish: StockItem['finish'];
   flatness: StockItem['flatness'];
   domeHeight: string;
@@ -105,6 +110,8 @@ function draftOf(item: StockItem | null): Draft {
       form: 'plate',
       size: { ...EMPTY_SIZE },
       layers: [],
+      capMm: '',
+      capSource: 'assumed',
       finish: 'rough',
       flatness: 'flat',
       domeHeight: '',
@@ -121,6 +128,8 @@ function draftOf(item: StockItem | null): Draft {
     form: item.form,
     size,
     layers: item.layers.map((l) => ({ name: l.name, thickness: String(l.thickness) })),
+    capMm: item.capMm == null ? '' : String(item.capMm),
+    capSource: item.capSource ?? 'assumed',
     finish: item.finish,
     flatness: item.flatness,
     domeHeight: item.domeHeight == null ? '' : String(item.domeHeight),
@@ -146,6 +155,9 @@ function itemFromDraft(d: Draft, base: StockItem | null, now: string): StockItem
     form: d.form,
     size,
     layers: formIsFlat(d.form) ? d.layers.map((l) => ({ name: l.name.trim(), thickness: num(l.thickness) })) : [],
+    capMm: formIsFlat(d.form) && d.capMm.trim() !== '' ? num(d.capMm) : null,
+    capSource:
+      formIsFlat(d.form) && d.capMm.trim() !== '' ? d.capSource : null,
     finish: d.finish,
     flatness: d.flatness,
     domeHeight: d.flatness === 'domed' ? num(d.domeHeight) : null,
@@ -266,7 +278,7 @@ export function MaterialsScope() {
               <tr>
                 <th style={{ width: '30%' }}>Stock</th>
                 <th>Size (mm)</th>
-                <th>Layers</th>
+                <th>Colour</th>
                 <th>Finish</th>
                 <th>Flatness</th>
                 <th className="num">On hand</th>
@@ -296,7 +308,7 @@ export function MaterialsScope() {
                     </button>
                   </td>
                   <td>{sizeLine(item)}</td>
-                  <td>{item.layers.length === 0 ? '—' : item.layers.map((l) => `${l.name} ${mm(l.thickness)}`).join(' / ')}</td>
+                  <td>{item.layers.length === 0 ? (item.capMm == null ? '—' : `cap ${mm(item.capMm)} (${item.capSource})`) : item.layers.map((l) => `${l.name} ${mm(l.thickness)}`).join(' / ')}</td>
                   <td>{item.finish}</td>
                   <td>{item.flatness === 'domed' ? `domed ${mm(item.domeHeight)}` : item.flatness}</td>
                   <td className={item.quantity === 0 ? 'num dim' : 'num'}>{countLine(item)}</td>
@@ -614,6 +626,41 @@ function StockEditor({
             >
               ＋ Layer
             </button>
+          </div>
+          <div className="panel-subhead">Laminate cap</div>
+          <p className="hint">
+            A bought two-colour sheet states one cap thickness, not printed layers. Leave the cap
+            empty for ordinary stock; if you state one, remove the layers above — a laminate has no
+            printer grid.
+          </p>
+          <div className="grid2">
+            <label className="lf">
+              <span>cap, from the top face (mm)</span>
+              <input
+                className="fld fld--num"
+                type="number"
+                min={0}
+                step="any"
+                value={draft.capMm}
+                data-testid="manage-stock-cap-mm"
+                onChange={(e) => patch({ capMm: e.target.value })}
+              />
+            </label>
+            <label className="lf">
+              <span>cap came from</span>
+              <select
+                className="fld"
+                value={draft.capSource}
+                data-testid="manage-stock-cap-source"
+                onChange={(e) => patch({ capSource: e.target.value as StockCapSource })}
+              >
+                {STOCK_CAP_SOURCES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </>
       )}

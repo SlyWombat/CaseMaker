@@ -29,11 +29,13 @@ describe('the feeds table (#450), against the shared specimen', () => {
   it('parses every good row, and the table as a whole', () => {
     expect(feedTableProblem(GOOD)).toBeNull();
     const rows = FeedsTableSchema.parse(GOOD);
-    expect(rows).toHaveLength(11);
-    // An absent edge reads as flat; the two V rows are the cones.
+    expect(rows).toHaveLength(12);
+    // An absent edge reads as flat; these are the three cones — PLA's bench-cut row, PETG's
+    // observed row (#221), and the plastic row #492 carried over from that PETG observation.
     expect(rows.filter((r) => effectiveEdge(r) === 'v').map((r) => r.id)).toEqual([
       'feed-pla-v-0.3-0.5',
       'feed-petg-v-0.3-0.5',
+      'feed-plastic-v-0.3-0.5',
     ]);
     // An absent note and setAt are null, not missing; the numbers are the row's own.
     expect(rows[0]!.note).toBeNull();

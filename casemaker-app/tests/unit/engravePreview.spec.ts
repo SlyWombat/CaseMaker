@@ -583,7 +583,7 @@ describe('engravePreview — V-carve outlines (#221)', () => {
         width: 76.2,
         thickness: 1.5,
         material: 'petg',
-        print: { split: 1.3, layerHeight: 0.2 },
+        colour: { kind: 'printed', capMm: 0.2, layerHeight: 0.2 },
       },
       labels: [{ ...base.labels[0]!, position: { x: 19, y: 28 }, size: 8, depth: 0.394 }],
       toolKey: 'inv:kz-engrave-30-0-3',

@@ -32,6 +32,13 @@ export const STOCK_FLATNESS = ['flat', 'domed', 'unknown'] as const;
 export type StockFlatness = (typeof STOCK_FLATNESS)[number];
 export const STOCK_SOURCES = ['purchased', 'printed', 'offcut', 'other'] as const;
 export type StockSource = (typeof STOCK_SOURCES)[number];
+/**
+ * Where a laminate's cap came from (#492). `assumed` is the maintainer's 0.075 mm until the sheet
+ * is measured; it is a different claim from a datasheet's or a bench reading and must read as one.
+ * A printed blank has no cap of its own on the shelf — its colour facts are the job's print.
+ */
+export const STOCK_CAP_SOURCES = ['assumed', 'measured'] as const;
+export type StockCapSource = (typeof STOCK_CAP_SOURCES)[number];
 
 /** The sentence a sphere is refused with — the same reason `stock.rs` gives. */
 export const SPHERE_REFUSAL =
@@ -92,6 +99,14 @@ export const StockItemSchema = z
       })
       .strict(),
     layers: z.array(z.object({ name: filled, thickness: mm }).strict()).default([]),
+    /**
+     * The top colour's thickness from the top face, mm (#492) — a PURCHASED two-colour laminate's
+     * stated cap. `null` on every other entry. It is not a layer: a row with a cap carries no
+     * `layers`, because a laminate has no printer grid.
+     */
+    capMm: mm.nullable().default(null),
+    /** Where the cap came from (#492). Present exactly when `capMm` is. */
+    capSource: z.enum(STOCK_CAP_SOURCES).nullable().default(null),
     finish: z.enum(STOCK_FINISHES),
     flatness: z.enum(STOCK_FLATNESS),
     domeHeight: mm.nullable().default(null),
@@ -135,6 +150,21 @@ export const StockItemSchema = z
       issue("domed stock needs the dome's height, in mm", ['domeHeight']);
     }
     if (item.flatness !== 'domed' && item.domeHeight != null) issue('only domed stock has a dome height', ['domeHeight']);
+    // #492 — a purchased laminate's colour cap. It requires a flat top and a thickness to measure
+    // from, cannot exceed the stock, and cannot sit beside printed layers: those are two different
+    // descriptions of a colour plane, and claiming both would let the depth model pick one silently.
+    if (item.capMm != null) {
+      if (!formIsFlat(form) || item.size.thickness == null) {
+        issue(`a ${form} has no flat top to carry a colour cap`, ['capMm']);
+      } else if (!(item.capMm > 0) || item.capMm > item.size.thickness + 1e-9) {
+        issue(`the colour cap must be above 0 and no thicker than the ${item.size.thickness} mm stock`, ['capMm']);
+      }
+      if (item.layers.length > 0) issue('a laminate has no printed layers', ['layers']);
+      if (form === 'printed-blank') issue('a printed blank states its colour in the job, not as a shelf cap', ['capMm']);
+      if (item.capSource == null) issue('a colour cap states where it came from, assumed or measured', ['capSource']);
+    } else if (item.capSource != null) {
+      issue('only a stock entry with a colour cap states a cap source', ['capSource']);
+    }
     const jobs = new Set<string>();
     for (const r of item.reservations) {
       if (jobs.has(r.jobId)) issue(`job ${r.jobId} holds two reservations`, ['reservations']);

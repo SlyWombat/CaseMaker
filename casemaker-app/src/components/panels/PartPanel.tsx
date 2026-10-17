@@ -105,14 +105,14 @@ function mm(v: number): string {
   return `${Number(v.toFixed(3))}`;
 }
 
-/** A print fact for the stale note: `0.2` or `none`, since the badge can state one and no longer. */
-function printMm(v: number | undefined): string {
+/** A two-colour fact for the stale note: `0.2` or `none`, since the part can state one and no longer. */
+function factMm(v: number | undefined): string {
   return v === undefined ? 'none' : mm(v);
 }
 
 function staleStockLines(
   job: EngraveJob,
-  wanted: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'print'>,
+  wanted: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'colour'>,
   bridge: string,
 ): string[] {
   const sources = job.sources?.stock ?? {};
@@ -121,23 +121,26 @@ function staleStockLines(
   );
   const detail = moved.map((f) => `${f} ${mm(job.stock[f])} → ${mm(wanted[f])} mm`);
 
-  // The PRINT rides the same hand-off (#368): a job whose blank carries a COMPUTED print is slicing
-  // this part on a layer grid and a colour split, so a badge edited since — a new layer height, a
-  // moved split, or a print lost altogether — leaves the job describing a blank that is not this
-  // one. Only when the job's own print is computed, because that is the copy that came from here.
-  if (sources.print === 'computed') {
-    const now = job.stock.print;
-    const next = wanted.print;
+  // The COLOUR facts ride the same hand-off (#368/#492): a job whose blank carries COMPUTED colour
+  // facts is slicing this part on a colour plane, so a part edited since — a new layer height, a
+  // moved cap, or the facts lost altogether — leaves the job describing a blank that is not this
+  // one. Only when the job's own facts are computed, because that is the copy that came from here.
+  if (sources.colour === 'computed') {
+    const now = job.stock.colour;
+    const next = wanted.colour;
+    if ((now?.kind ?? null) !== (next?.kind ?? null)) {
+      detail.push(`colour source ${now?.kind ?? 'none'} → ${next?.kind ?? 'none'}`);
+    }
     if (now?.layerHeight !== next?.layerHeight) {
-      detail.push(`layer height ${printMm(now?.layerHeight)} → ${printMm(next?.layerHeight)} mm`);
+      detail.push(`layer height ${factMm(now?.layerHeight)} → ${factMm(next?.layerHeight)} mm`);
     }
     if (now?.firstLayerHeight !== next?.firstLayerHeight) {
       detail.push(
-        `first layer ${printMm(now?.firstLayerHeight)} → ${printMm(next?.firstLayerHeight)} mm`,
+        `first layer ${factMm(now?.firstLayerHeight)} → ${factMm(next?.firstLayerHeight)} mm`,
       );
     }
-    if (now?.split !== next?.split) {
-      detail.push(`colour split ${printMm(now?.split)} → ${printMm(next?.split)} mm`);
+    if (now?.capMm !== next?.capMm) {
+      detail.push(`colour cap ${factMm(now?.capMm)} → ${factMm(next?.capMm)} mm`);
     }
   }
 

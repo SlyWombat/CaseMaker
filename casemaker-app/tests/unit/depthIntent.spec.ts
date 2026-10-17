@@ -99,7 +99,7 @@ describe('floorColour (#170)', () => {
 describe('jobSplit (#170)', () => {
   it('is null for a blank that states no print — the control is not offered, not zeroed', () => {
     const job = defaultEngraveJob();
-    expect(job.stock.print).toBeUndefined();
+    expect(job.stock.colour).toBeUndefined();
     expect(jobSplit(job, 0.2)).toBeNull();
   });
 
@@ -110,7 +110,7 @@ describe('jobSplit (#170)', () => {
     // `item-depth-bound` refuses against.
     const job = defaultEngraveJob();
     job.stock.thickness = 3.81;
-    job.stock.print = { split: 2.54, layerHeight: 0.2, firstLayerHeight: 0.2 };
+    job.stock.colour = { kind: 'printed', capMm: 1.27, layerHeight: 0.2, firstLayerHeight: 0.2 };
     expect(jobSplit(job, 0.2)!.depth).toBe(splitDepthOf(job));
   });
 
@@ -120,7 +120,7 @@ describe('jobSplit (#170)', () => {
     // thickness − split = 1.27 nominal; on a 0.2 mm grid the boundary is the layer line NEAREST it,
     // which is 1.2 (0.07 away against 0.13 to 1.4) — the same number `item-depth-bound` judges
     // against, because both ask `colourBoundaryDepthFor` (#285, #345).
-    job.stock.print = { split: 2.54, layerHeight: 0.2, firstLayerHeight: 0.2 };
+    job.stock.colour = { kind: 'printed', capMm: 1.27, layerHeight: 0.2, firstLayerHeight: 0.2 };
     expect(jobSplit(job, 0.2)).toEqual({ depth: 1.2, step: 0.2 });
     // A margin TIGHTER than a layer changes nothing: the step is a layer, because a floor a layer
     // off the plane is already further off it than this job's margin asks for.
@@ -134,7 +134,7 @@ describe('jobSplit (#170)', () => {
     // `item-depth-bound` refuses and the worker drops from the cut (#170 review).
     const job = defaultEngraveJob();
     job.stock.thickness = 3.81;
-    job.stock.print = { split: 2.54, layerHeight: 0.2, firstLayerHeight: 0.2 };
+    job.stock.colour = { kind: 'printed', capMm: 1.27, layerHeight: 0.2, firstLayerHeight: 0.2 };
     expect(jobSplit(job, 0.331)).toEqual({ depth: 1.2, step: 0.331 });
   });
 
@@ -144,7 +144,7 @@ describe('jobSplit (#170)', () => {
     // forgets — `jobSplit` reads the same `splitDepthOf` the verifier does.
     const job = defaultEngraveJob();
     job.stock.thickness = 3.81;
-    job.stock.print = { split: 2.54, layerHeight: 0.2, firstLayerHeight: 0.3 };
+    job.stock.colour = { kind: 'printed', capMm: 1.27, layerHeight: 0.2, firstLayerHeight: 0.3 };
     const split = jobSplit(job, 0.2);
     expect(split).not.toBeNull();
     expect(split!.step).toBe(0.2);
@@ -152,6 +152,26 @@ describe('jobSplit (#170)', () => {
     // 0.2 grid puts it at 1.2. The boundary MOVES with the first layer's height, and this is one of
     // the places that has to know.
     expect(split!.depth).toBeCloseTo(1.3, 9);
+  });
+
+  // #492 — a purchased laminate has no printed layer grid, so its cap is the film verbatim. The
+  // bench's first engraving is 0.1 mm deep, which is THROUGH the assumed 0.075 mm cap and into the
+  // core — the surface intent cannot hold there, and that is the honest answer.
+  it('takes a laminate cap verbatim, with no layer grid to snap it to (#492)', () => {
+    const job = defaultEngraveJob();
+    job.stock.thickness = 1.5;
+    job.stock.colour = { kind: 'laminate', capMm: 0.075 };
+    expect(splitDepthOf(job)).toBeCloseTo(0.075, 9);
+    const split = jobSplit(job, 0.2);
+    expect(split).toEqual({ depth: 0.075, step: 0.2 });
+    const bound = boundsFor(
+      job,
+      { ...job.labels[0]!, depthIntent: 'surface' },
+      { split: 0.075 },
+      0.2,
+    )[0]!;
+    expect(bound.at).toBeCloseTo(0.075, 9);
+    expect(checkBounds(0.1, [bound], 0.2)).not.toBeNull();
   });
 });
 
@@ -164,7 +184,7 @@ describe('the two-state control against the checker (#170 review)', () => {
   function printedBadge(): ReturnType<typeof defaultEngraveJob> {
     const job = defaultEngraveJob();
     job.stock.thickness = 3.81;
-    job.stock.print = { split: 2.54, layerHeight: 0.2, firstLayerHeight: 0.2 };
+    job.stock.colour = { kind: 'printed', capMm: 1.27, layerHeight: 0.2, firstLayerHeight: 0.2 };
     return job;
   }
   /** The margin `recommendMargins` offers a domed blank: more than a layer, so the step changes. */

@@ -261,7 +261,7 @@ describe('the thick badge fixture (single.3mf)', () => {
     expect(patch.stock.width).toBeCloseTo(76.2, 2);
     expect(patch.stock.thickness).toBeCloseTo(3.81, 2);
     expect(patch.stock.material).toBe('petg');
-    expect(patch.stock.print).toEqual({ split: 3, layerHeight: 0.2 });
+    expect(patch.stock.colour).toMatchObject({ kind: 'printed', capMm: 0.81, layerHeight: 0.2 });
     expect(patch.vectors).toHaveLength(3);
     expect(patch.vectors.map((v) => v.name)).toEqual([
       '(Like the Whiskey)',
@@ -323,7 +323,8 @@ describe('the thin-film fixture (thin-film/single-thin.3mf)', () => {
     expect(patch.stock.width).toBeCloseTo(76.0, 2);
     expect(patch.stock.thickness).toBeCloseTo(1.5, 2);
     expect(patch.stock.material).toBe('petg');
-    expect(patch.stock.print).toEqual({ split: 1.3, layerHeight: 0.2 });
+    expect(patch.stock.colour).toMatchObject({ kind: 'printed', layerHeight: 0.2 });
+    expect(patch.stock.colour!.capMm).toBeCloseTo(0.2, 9);
     expect(patch.vectors).toHaveLength(3);
   });
 });

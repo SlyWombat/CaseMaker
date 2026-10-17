@@ -22,9 +22,11 @@ import {
   recommendLabelDepth,
   recommendMargins,
   splitBound,
+  splitDepthOf,
   zBudgetInputsFor,
   type MarginSettings,
 } from '@/engine/cnc/engrave/depthBounds';
+import { printedLayerGridOf } from '@/engine/cnc/layerStack';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { cutterLegend, cutterProfileSvg } from '@/engine/cnc/cutterProfile';
 // #221 — the V-carve facts are the CAM's own arithmetic and cone resolution, imported rather than
@@ -595,8 +597,8 @@ export function sha256Hex(input: string): string {
  */
 function usesBoundaryMargin(job: EngraveJob, plan: PartPlan): boolean {
   if (plan.stock.keepOuts.length > 0) return true;
-  const split = job.stock.print?.split;
-  if (split === undefined) return false;
+  const split = splitDepthOf(job);
+  if (split === null) return false;
   // Read off the LABELS, not the plan: `plan.engraves` is the four fields a cut needs and does not
   // carry `depthIntent`, and only a label can state one. The two skips mirror
   // `itemDepthBoundFindings` exactly — a disabled or construction label is not judged, so it is not
@@ -629,7 +631,7 @@ function marginsStep(
   // that void keeps. The only place the operator can read which rule applied is here; saying it only
   // when the structural floor is the larger one keeps the line about the margin that actually binds.
   const voidKeepsFloor =
-    job.stock.print === undefined &&
+    printedLayerGridOf(job.stock) === undefined &&
     plan.stock.keepOuts.length > 0 &&
     job.minFloor > margins.boundaryMargin;
   return {
@@ -639,8 +641,44 @@ function marginsStep(
     value:
       `${fmtNum(margins.boundaryMargin)} mm boundary margin · ${marginSourceWords(margins.source)}` +
       (voidKeepsFloor
-        ? ` · no print stated: a void’s ceiling keeps the job’s minimum floor, ${fmtNum(job.minFloor)} mm`
+        ? ` · no print grid stated: a void’s ceiling keeps the job’s minimum floor, ${fmtNum(job.minFloor)} mm`
         : ''),
+  };
+}
+
+/**
+ * The two-colour facts, in §1 (#492) — the sheet's print-facts step.
+ *
+ * A purchased laminate states a cap, not a print: no layers, no filament, no extruder. The step
+ * says that plainly and names the cap's provenance, because the maintainer's 0.075 mm is ASSUMED
+ * until the sheet is measured; printing "stated" without that word would present a guess as a datum.
+ * A printed blank keeps its old sentence, now with the cap as the number the job holds.
+ */
+function colourStep(job: EngraveJob): RunSheetStep | null {
+  const colour = job.stock.colour;
+  if (colour === undefined) return null;
+  const source = job.sources?.stock?.colour;
+  if (colour.kind === 'laminate') {
+    const assumed = source === 'assumed';
+    return {
+      text:
+        `Two-colour laminate: cap ${fmtNum(colour.capMm)} mm ` +
+        (assumed
+          ? '(assumed — carried from the stock entry; this sheet has no measured cap).'
+          : '(stated by the stock entry).') +
+        ' The core is the second colour; there are no printed layers and no filament.',
+      value: `${fmtNum(colour.capMm)} mm cap${assumed ? ' (assumed)' : ''}`,
+    };
+  }
+  const split = job.stock.thickness - colour.capMm;
+  const grid = printedLayerGridOf(job.stock);
+  return {
+    text:
+      `Two-colour print: colour change ${fmtNum(split)} mm above the bottom face` +
+      (grid === undefined
+        ? ' — no layer height is stated, so the colour plane is the nominal one.'
+        : `; ${fmtNum(grid.layerHeight)} mm layers${source === 'assumed' ? ' (assumed)' : ''}.`),
+    value: `${fmtNum(colour.capMm)} mm cap`,
   };
 }
 
@@ -2063,18 +2101,23 @@ function restSwapSteps(facts: RestPassFacts): RunSheetStep[] {
  * not invert that direction, so it calls the SAME pure arithmetic the worker helper wraps:
  * `colourBoundaryDepthFor` (`layerStack.ts`, whose own comment names the run sheet as a caller).
  *
- * The gate is the job's FILM SOURCE, not a second rule: `toPartPlan` copies `job.stock.print` into
- * `plan.stock.split`/`layerHeight`, so a job that states no print (or whose plan carries no grid)
- * has no colour plane — exactly the `gridOf` test `colourBoundaryFor` applies. The raw model split
- * is deliberately not used: the printed boundary is layer-quantised, and the resolved value is the
- * material (the thick fixture's 0.81 reads 0.80 on 0.2 mm layers; no finding is raised).
+ * The gate is the job's FILM SOURCE, not a second rule. For a printed blank, `toPartPlan` copies the
+ * colour facts into `plan.stock.split`/`layerHeight`, so a job that states no colour facts (or whose
+ * plan carries no grid) has no colour plane — exactly the `gridOf` test `colourBoundaryFor` applies.
+ * The raw model split is deliberately not used: the printed boundary is layer-quantised, and the
+ * resolved value is the material (the thick fixture's 0.81 reads 0.80 on 0.2 mm layers; no finding is
+ * raised).
  *
- * FOLLOW-UP (#492/J19): when the laminate's `stock.colour` cap lands, its gate joins this one. The
- * print path is implemented now because it is the only film source in this base.
+ * A laminate's film is its cap (`stock.colour.capMm`, #492), read directly: there is no print grid to
+ * quantise to. It is still only a FILM SOURCE — no colour facts at all means the plane is the floor,
+ * and the V-carve strategy itself never requires one.
  */
 function colourPlaneFor(job: EngraveJob, plan: PartPlan): Mm | null {
+  const colour = job.stock.colour;
+  if (colour === undefined) return null;
+  if (colour.kind === 'laminate') return colour.capMm;
   const { thickness, split, layerHeight, firstLayerHeight } = plan.stock;
-  if (job.stock.print === undefined || split === undefined || layerHeight === undefined) return null;
+  if (split === undefined || layerHeight === undefined) return null;
   return colourBoundaryDepthFor(thickness, split, layerHeight, firstLayerHeight ?? layerHeight);
 }
 
@@ -2082,21 +2125,33 @@ function colourPlaneFor(job: EngraveJob, plan: PartPlan): Mm | null {
  * §1's colour-plane statement for a V-carve job (#221): the resolved film, with the file's raw
  * model split beside it, or the no-film case where the plane IS the floor. The issue asks for the
  * raw beside the resolved value verbatim ("0.80 mm below the top, from the file's 0.81 on 0.2 mm
- * layers") because the snap is the print's, not an error to be corrected.
+ * layers") because the snap is the print's, not an error to be corrected. A laminate (#492) has no
+ * raw companion: its cap is the manufacturer's figure, stated alone.
  */
 function colourPlaneStep(job: EngraveJob, plan: PartPlan, film: Mm | null): RunSheetStep {
-  const print = job.stock.print;
-  if (film === null || print === undefined || plan.stock.split === undefined) {
+  const colour = job.stock.colour;
+  const noFilm: RunSheetStep = {
+    text:
+      'The blank states no colour film, so the V-bit’s colour plane IS the floor: the design is ' +
+      'correct at the cut depth, and a pointed bit draws a line twice the depth times ' +
+      'tan(half-angle) wide at the surface and nothing at the bottom.',
+    value: 'no film — the plane is the floor',
+  };
+  if (film === null || colour === undefined) return noFilm;
+  if (colour.kind === 'laminate') {
     return {
       text:
-        'The blank states no colour film, so the V-bit’s colour plane IS the floor: the design is ' +
-        'correct at the cut depth, and a pointed bit draws a line twice the depth times ' +
-        'tan(half-angle) wide at the surface and nothing at the bottom.',
-      value: 'no film — the plane is the floor',
+        `The colour plane — where the V-bit’s design is correct — is the laminate's cap, ` +
+        `${fmtNum(film)} mm below the top. The cap is the manufacturer's figure for the two-colour ` +
+        'sheet; there is no print grid to quantise it to.',
+      value: `colour plane ${fmtNum(film)} mm`,
     };
   }
+  // `colourPlaneFor` returns a film for a printed blank only when the plan carries both, so this
+  // guard restates that contract rather than guessing a layer height.
+  if (plan.stock.split === undefined || plan.stock.layerHeight === undefined) return noFilm;
   const raw = plan.stock.thickness - plan.stock.split;
-  const layer = plan.stock.layerHeight ?? print.layerHeight;
+  const layer = plan.stock.layerHeight;
   return {
     text:
       `The colour plane — where the V-bit’s design is correct — is ${fmtNum(film)} mm below the top, ` +
@@ -2281,6 +2336,10 @@ export function buildRunSheet(
   // #345 — the margin every bound in this job is drawn to, with its source and the arithmetic the
   // app recommends for this blank. Only when a bound exists: see `usesBoundaryMargin`.
   if (usesBoundaryMargin(job, plan)) needSteps.push(marginsStep(job, plan, margins, settings));
+  // #492 — the colour plane's own fact, and where its number came from. A laminate says "cap";
+  // a printed blank says "colour change"; a one-colour job says nothing.
+  const colour = colourStep(job);
+  if (colour !== null) needSteps.push(colour);
   // #231 item 3 — an under-surface void is a property of the blank the operator must know about
   // before probing Z, so each one is stated up front with the material left over it.
   for (const ko of diagram.keepOuts) {

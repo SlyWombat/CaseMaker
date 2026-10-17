@@ -27,7 +27,7 @@
 // per-unit numbers — this machine's calibration, its saved vise and sacrificial setup — are stored.
 //
 // THE STOCK SHELF (#413) is `stock`, its entries' rules in `stock.rs`. THE FEEDS TABLE (#450) is
-// `feeds`, its rows' rules in `feeds.rs`. A FRESH location starts with the eleven placeholder rows
+// `feeds`, its rows' rules in `feeds.rs`. A FRESH location starts with the twelve placeholder rows
 // (`feeds::seeded_rows`, labelled `seeded` and unmeasured) so the panel's numbers are the shop's
 // own from the first run; an EMPTY table is still omitted from the document, so a location written
 // before the table existed — including the shared fixture, which another workstream holds —
@@ -197,7 +197,7 @@ pub struct LocationDoc {
     #[serde(default)]
     pub stock: Vec<StockItem>,
     /// The feeds table (#450): the cutting numbers for one (material, cutter edge, diameter band).
-    /// Its own endpoint, `ETag` and guarded writes. A fresh location holds the eleven seeded rows
+    /// Its own endpoint, `ETag` and guarded writes. A fresh location holds the twelve seeded rows
     /// and #450 slice 5 put them in the shared `location-doc.json` too; the table is OMITTED while
     /// empty, so a location written before the table existed round-trips without gaining a key
     /// until a read or an import seeds it.
@@ -404,14 +404,14 @@ mod tests {
 
     #[test]
     fn a_fresh_location_holds_the_seeded_feeds_table() {
-        // #450 slice 3: the eleven starting rows, all labelled `seeded` (unmeasured in their
+        // #450 slice 3: the twelve starting rows, all labelled `seeded` (unmeasured in their
         // provenance). A fresh location is valid with them, and writes the key because it holds rows.
         let loc = LocationDoc::fresh();
         assert_eq!(loc.feeds, crate::feeds::seeded_rows());
         assert!(!loc.feeds.is_empty());
         loc.validate().unwrap();
         let v = serde_json::to_value(&loc).unwrap();
-        assert_eq!(v["feeds"].as_array().unwrap().len(), 11, "{v}");
+        assert_eq!(v["feeds"].as_array().unwrap().len(), 12, "{v}");
         assert_eq!(v["feeds"][0]["source"], serde_json::json!("seeded"));
     }
 

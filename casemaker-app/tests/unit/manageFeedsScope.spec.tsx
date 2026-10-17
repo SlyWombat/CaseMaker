@@ -107,7 +107,7 @@ describe('#450 Manage › Tools › Feeds', () => {
     const source = screen.getByTestId('manage-feeds-source-feed-pla-flat-0.8-1.6');
     expect(source.textContent).toBe('seeded');
     expect(source.getAttribute('data-source')).toBe('seeded');
-    expect(screen.getByTestId('manage-feeds-counts').textContent).toContain('11 seeded');
+    expect(screen.getByTestId('manage-feeds-counts').textContent).toContain('12 seeded');
   });
 
   it('adds a row through the form as a chosen row with a date, never as seeded', async () => {
@@ -157,7 +157,7 @@ describe('#450 Manage › Tools › Feeds', () => {
     });
     expect(typeof posted.setAt).toBe('string');
     expect(posted.setAt).not.toBe('');
-    await waitFor(() => expect(svc.rows()).toHaveLength(12));
+    await waitFor(() => expect(svc.rows()).toHaveLength(13));
     await screen.findByTestId(`manage-feeds-row-${posted.id}`);
   });
 
@@ -312,7 +312,7 @@ describe('#450 Manage › Tools › Feeds', () => {
     fireEvent.click(screen.getByTestId('manage-feed-remove'));
 
     await waitFor(() => expect(svc.sent.some((s) => s.method === 'DELETE')).toBe(true));
-    await waitFor(() => expect(svc.rows()).toHaveLength(10));
+    await waitFor(() => expect(svc.rows()).toHaveLength(11));
     await waitFor(() => expect(screen.queryByTestId('manage-feeds-row-feed-pla-v-0.3-0.5')).toBeNull());
     expect(screen.getByTestId('manage-feed-detail-empty')).toBeTruthy();
   });

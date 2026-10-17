@@ -172,6 +172,28 @@ describe('the material-first start (#418)', () => {
     expect(useEngraveJobStore.getState().job.stockEntry?.shelfId).toBe('stock-plate1');
   });
 
+  it('a laminate row names its assumed cap, and the job takes the cap and its provenance (#492)', async () => {
+    fakeShelf(SHELF);
+    await toStockStep();
+    chooseMaterial('plastic');
+    const laminate = await screen.findByTestId('start-wizard-shelf-item-stock-laminate1');
+    expect(laminate.textContent).toContain('cap 0.075 (assumed)');
+    fireEvent.click(laminate);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    await screen.findByTestId('engrave-setup-flow');
+
+    const job = useEngraveJobStore.getState().job;
+    expect(job.stock.material).toBe('plastic');
+    expect(job.stock.colour).toEqual({ kind: 'laminate', capMm: 0.075 });
+    expect(job.sources?.stock?.colour).toBe('assumed');
+    // A laminate is not a print: no layer grid and no dome are invented from the shelf entry.
+    expect(job.stock).not.toHaveProperty('flatness');
+    expect(job.sources?.stock?.colour).not.toBe('computed');
+  });
+
   it('a used-up entry is listed, greyed, with the job that used it', async () => {
     fakeShelf(SHELF);
     await toStockStep();

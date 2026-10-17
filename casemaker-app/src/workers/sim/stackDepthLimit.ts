@@ -6,7 +6,8 @@
  * because the number it produces is a fact about the PRINT — a colour boundary and a pocket roof
  * land where the slicer's layers put them, not where the design says (decision 27). This module
  * is its caller, and this module is the one place that decides whether a job has colour layers at
- * all: `job.stock.print` (#166 via `fromBadge.ts`), absent for every job that is not a badge.
+ * all: `job.stock.colour` (#166 via `fromBadge.ts`; `stock.print` before #492), absent for every job
+ * that is not a badge.
  *
  * WHAT IT REPLACES, and what it does not. The stack's `maxDepthAt` is the running intersection of
  * the layers from the engraved face down, so a point over a pocket is simply not solid in the
@@ -47,8 +48,8 @@
 
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
-import { buildLayerStack, colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
-import { defaultBoundaryMargin, voidFloor } from '@/engine/cnc/engrave/depthBounds';
+import { buildLayerStack, printedLayerGridOf } from '@/engine/cnc/layerStack';
+import { defaultBoundaryMargin, splitDepthOf, voidFloor } from '@/engine/cnc/engrave/depthBounds';
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
 import { sacrificialDepthLimit, type DepthLimit } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
@@ -74,42 +75,50 @@ export interface StackDepthLimit {
 const EPS = 1e-9;
 
 /**
- * The layer grid the plan carries for a job that states a print, or `null` for a job that does not.
- * The ONE gate: `stack.stock.print` absent, or a plan that has not copied the grid, means there are
- * no colour layers and every caller keeps its pre-#285 answer.
+ * The layer grid the plan carries for a PRINTED job that states a layer height, or `null` for a job
+ * that does not. The ONE gate: a laminate has no printed layers at all, and a printed blank without
+ * a layer height has no grid to snap to — both keep their pre-#285 answer (#492). `split` is still
+ * the plan's part-frame colour change (`thickness − capMm`), so the stack's own boundary arithmetic
+ * is unchanged.
  */
 function gridOf(
   plan: PartPlan,
   job: EngraveJob,
 ): { thickness: Mm; split: Mm; layerHeight: Mm; firstLayerHeight: Mm } | null {
-  const { thickness, split, layerHeight, firstLayerHeight } = plan.stock;
-  if (job.stock.print === undefined || split === undefined || layerHeight === undefined) return null;
-  return { thickness, split, layerHeight, firstLayerHeight: firstLayerHeight ?? layerHeight };
+  const { thickness, split } = plan.stock;
+  const grid = printedLayerGridOf(job.stock);
+  if (grid === undefined || split === undefined) return null;
+  return {
+    thickness,
+    split,
+    layerHeight: grid.layerHeight,
+    firstLayerHeight: grid.firstLayerHeight ?? grid.layerHeight,
+  };
 }
 
 /**
- * Where the job's colour boundary lands, mm below the engraved face ON a real layer line, or `null`
- * when the job states no print (#285 review).
+ * Where the job's colour plane is, mm below the engraved face, or `null` when the job states no
+ * two-colour facts (#285 review/#492).
  *
- * PURE — the boundary is a rule about the layer grid, not a measurement of the solid, so this
- * answers off `colourBoundaryDepthFor` without a Manifold toplevel. `engraveRegions` used to build
- * the whole stack just to read this one number and free it again, keeping the wasm live twice per
- * generate and once per preview keystroke for a value the grid already holds.
+ * PURE. A printed blank's answer is on a real layer line (`colourBoundaryDepthOf` snaps it); a
+ * laminate's is its stated cap, unsnapped (#492). No Manifold toplevel either way: the boundary is
+ * a rule about the layer grid or the stock entry, not a measurement of the solid, so this answers
+ * off `colourBoundaryDepthFor` without a Manifold toplevel. `engraveRegions` used to build the whole
+ * stack just to read this one number and free it again, keeping the wasm live twice per generate and
+ * once per preview keystroke for a value the grid already holds.
  *
- * THE SNAP IS CORRECT — DO NOT "FIX" IT BACK TO THE RAW SUBTRACTION (#221 slice C review). The
- * boundary describes the PRINTED part, and a print is layer-quantised. The thick acceptance
- * fixture's model is 3.81 mm with the colour change at 3.0 mm, whose raw difference is 0.81 mm;
- * printed at 0.2 mm layers the part is 19 layers = 3.80 mm, with the colour change at layer 15,
- * so the film physically is 0.80 mm below the top. The raw 0.81 is the model's arithmetic and
- * never existed as material. Where the run sheet states the print facts it prints the resolved
+ * THE SNAP IS CORRECT — DO NOT "FIX" IT BACK TO THE RAW SUBTRACTION (#221 slice C review). For a
+ * PRINTED blank the boundary describes the printed part, and a print is layer-quantised. The thick
+ * acceptance fixture's model is 3.81 mm with the colour change at 3.0 mm, whose raw difference is
+ * 0.81 mm; printed at 0.2 mm layers the part is 19 layers = 3.80 mm, with the colour change at
+ * layer 15, so the film physically is 0.80 mm below the top. The raw 0.81 is the model's arithmetic
+ * and never existed as material. Where the run sheet states the print facts it prints the resolved
  * value with the raw beside it ("colour plane 0.80 mm below the top, from the file's 0.81 on
- * 0.2 mm layers"); there is deliberately no finding for this.
+ * 0.2 mm layers"); there is deliberately no finding for this. A laminate's cap is not snapped; it
+ * is the stock entry's stated number (#492).
  */
-export function colourBoundaryFor(plan: PartPlan, job: EngraveJob): Mm | null {
-  const grid = gridOf(plan, job);
-  return grid === null
-    ? null
-    : colourBoundaryDepthFor(grid.thickness, grid.split, grid.layerHeight, grid.firstLayerHeight);
+export function colourBoundaryFor(_plan: PartPlan, job: EngraveJob): Mm | null {
+  return splitDepthOf(job);
 }
 
 /**

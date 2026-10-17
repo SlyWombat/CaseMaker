@@ -190,7 +190,7 @@ describe('the void depth limit (#231, #351)', () => {
       ...jobWithKeepOut(),
       stock: {
         ...defaultEngraveJob().stock,
-        print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 },
+        colour: { kind: 'printed', capMm: 9, layerHeight: 0.2, firstLayerHeight: 0.2 },
       },
     };
     expect(keepOutLimitAt(job, 50, 30)).toBeCloseTo(1.8, 9); // 2 − 0.2
@@ -346,9 +346,9 @@ describe('the run sheet reports the void (#231)', () => {
     // composes the two with a `min` the way `jobDepthLimit` does — it used to print the membrane's
     // own answer, and here that is 3.0 mm against the 2.81 the verifier refuses past, an operator
     // reading a depth the machine will not cut.
-    const thin = (print?: { split: number; layerHeight: number }): EngraveJob => ({
+    const thin = (colour?: EngraveJob['stock']['colour']): EngraveJob => ({
       ...defaultEngraveJob(),
-      stock: { length: 76.2, width: 38.1, thickness: 3.81, material: 'pla', ...(print ? { print } : {}) },
+      stock: { length: 76.2, width: 38.1, thickness: 3.81, material: 'pla', ...(colour ? { colour } : {}) },
       keepOuts: [rectKeepOut({ zCeiling: 0.5 })], // 3.31 mm of membrane, over a 2.81 mm floor
     });
     const sheetVoid = (job: EngraveJob): string =>
@@ -359,7 +359,7 @@ describe('the run sheet reports the void (#231)', () => {
     // With a print the ceiling is on the layer grid (3.2 mm of solid, less 0.2) while the blank's
     // own floor is 2.81 — so the FLOOR is the shallower half, and the row says so rather than
     // crediting a void that is not what limits the cut.
-    expect(sheetVoid(thin({ split: 3.0, layerHeight: 0.2 }))).toBe(
+    expect(sheetVoid(thin({ kind: 'printed', capMm: 0.81, layerHeight: 0.2 }))).toBe(
       'deepest cut 2.81 mm (the blank’s own 1 mm floor, not the void, sets this)',
     );
 

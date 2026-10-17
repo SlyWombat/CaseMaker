@@ -30,7 +30,7 @@ import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { vCone } from '@/engine/cnc/vProfile';
 import { DEFAULT_V_CARVE_STEPOVER_RATIO, vCarvePlane, vCarveStepover } from '@/engine/cnc/vCarveGeometry';
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
-import type { EngraveJob, StockPrint } from '@/types/engraveJob';
+import type { EngraveJob } from '@/types/engraveJob';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 
 const NOW = new Date('2026-10-04T00:00:00Z');
@@ -65,14 +65,20 @@ function bit30(): Tool {
 }
 
 /**
- * The bench job as a V-carve: the 30° bit, and the print facts the thick fixture states. `print`
- * is omitted entirely (not set undefined) for the no-film case, because absence is the switch.
+ * The bench job as a V-carve: the 30° bit, and the print facts the thick fixture states. The
+ * argument is the old `split` (the colour change measured from the BOTTOM); #492 stores the same
+ * fact as `colour.capMm` measured from the engraved face, so the helper converts. `colour` is
+ * omitted entirely (not set undefined) for the no-film case, because absence is the switch.
  */
-function benchVJob(print?: StockPrint): EngraveJob {
+function benchVJob(splitFromBottom?: number): EngraveJob {
   const base = benchJob();
+  const colour =
+    splitFromBottom === undefined
+      ? undefined
+      : { kind: 'printed' as const, capMm: base.stock.thickness - splitFromBottom, layerHeight: 0.2 };
   return {
     ...base,
-    stock: { ...base.stock, ...(print === undefined ? {} : { print }) },
+    stock: { ...base.stock, ...(colour === undefined ? {} : { colour }) },
     toolKey: 'inv:kz-engrave-30-0-3',
     tool: bit30(),
   };
@@ -110,7 +116,7 @@ const section = (sheet: RunSheet, id: string) => {
   return s!;
 };
 
-const job = () => benchVJob({ split: 3.0, layerHeight: 0.2 });
+const job = () => benchVJob(3.0);
 const coneOf = (j: EngraveJob) => {
   const tool = jobTool(j);
   if (tool === null) throw new Error('the job should name its cutter');
@@ -198,7 +204,7 @@ describe('run sheet V-carve facts (#221)', () => {
   });
 
   it('prints requested = effective when the feeds override is under the tip radius', () => {
-    const j = benchVJob({ split: 3.0, layerHeight: 0.2 });
+    const j = benchVJob(3.0);
     const gentle: EngraveJob = { ...j, cutOverride: { ...j.cutOverride, stepOver: 0.09 } };
     const cone = coneOf(gentle);
     const plane = vCarvePlane(cone, 1.0, colourBoundaryDepthFor(3.81, 3.0, 0.2));

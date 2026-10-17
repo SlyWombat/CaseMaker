@@ -29,9 +29,10 @@
  *     itself. Nothing here depends on which way the operator turns the blank over. The quarter
  *     turn above does move its EXTENTS though — `pocket.length` runs along the badge's X, so on
  *     the blank it is the Y extent of the rect.
- *   - `splitHeight` and the badge's own `print` (#166) travel into `EngraveJob.stock.print` when
- *     the badge states one (#285). That is the switch that puts the colour boundary into the
- *     depth model; a badge without a print leaves the job's limit analytic and its `.nc` unchanged.
+ *   - `splitHeight` and the badge's own `print` (#166) travel into `EngraveJob.stock.colour` when
+ *     the badge states one (#285/#492), as `{ kind: 'printed', capMm: thickness − splitHeight, … }`.
+ *     That is the switch that puts the colour boundary into the depth model; a badge without a
+ *     print leaves the job's limit analytic and its `.nc` unchanged.
  *
  * This module is PURE and returns a patch, not a job: the caller decides what to do with it, and
  * `engraveJobStore` owns the write (and the `sources` stamping, #254).
@@ -64,27 +65,30 @@ function mm(v: number): string {
 }
 
 /**
- * The blank's print facts, in `EngraveJob.stock`'s shape, or `undefined` when the badge states
- * none (#285).
+ * The blank's colour facts, in `EngraveJob.stock`'s shape, or `undefined` when the badge states
+ * none (#285/#492).
  *
- * This is the switch the whole colour-boundary path hangs off. `EngraveJob.stock.print` is what
+ * This is the switch the whole colour-boundary path hangs off. `EngraveJob.stock.colour` is what
  * makes the app slice the compiled solid on the printer's layer grid instead of trusting a
  * nominal design height — so it is written ONLY when the badge actually declares its print
  * (`BadgeParams.print`, #166). A badge that does not leaves the job's depth limit analytic and
  * its `.nc` byte-identical to before.
  *
- * The split travels with it: the job is a standalone document and must not have to look back at
- * the project's badge to know where its colour boundary is.
+ * The cap travels with it: the job is a standalone document and must not have to look back at
+ * the project's badge to know where its colour boundary is. `capMm` is measured from the engraved
+ * (top) face, and the badge's `splitHeight` is from the bottom, so they are complements about
+ * `thickness` (#492).
  *
  * The key is always present, `undefined` when the badge states no print (#285 review). It is the
- * difference between "this blank states no print" and "this patch says nothing about the print":
+ * difference between "this blank states no colour facts" and "this patch says nothing about them":
  * `setStock` clears on the first and leaves alone on the second, so "Use the badge blank" on a badge
  * that has lost its print can take a stale layer grid away.
  */
-function stockPrintFor(badge: BadgeParams): EngraveJob['stock']['print'] {
+function stockColourFor(badge: BadgeParams): EngraveJob['stock']['colour'] {
   if (!badge.print) return undefined;
   return {
-    split: badge.splitHeight,
+    kind: 'printed',
+    capMm: badge.thickness - badge.splitHeight,
     layerHeight: badge.print.layerHeight,
     firstLayerHeight: badge.print.firstLayerHeight,
   };
@@ -144,7 +148,7 @@ function stockFlatnessFor(badge: BadgeParams): EngraveJob['stock']['flatness'] {
  */
 export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
   const pocket = badge.magnetPocket;
-  const print = stockPrintFor(badge);
+  const colour = stockColourFor(badge);
   const flatness = stockFlatnessFor(badge);
   const notes = [
     `The badge's blank, ${mm(badge.height)} × ${mm(badge.width)} × ${mm(badge.thickness)} mm PLA, ` +
@@ -152,11 +156,13 @@ export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
       `a quarter turn to sit in the vise: the ${mm(badge.width)} mm side now runs along Y.`,
   ];
 
-  if (print) {
+  if (colour) {
     notes.push(
-      `The blank's print came with it: a ${mm(badge.splitHeight)} mm colour split at ` +
-        `${mm(print.layerHeight)} mm layers, so the colour boundary is measured on the printer's own ` +
-        'layer grid rather than at the nominal height.',
+      `The blank's print came with it: a ${mm(badge.splitHeight)} mm colour split, ` +
+        `a ${mm(colour.capMm)} mm top colour` +
+        (colour.layerHeight === undefined ? '' : `, at ${mm(colour.layerHeight)} mm layers`) +
+        ', so the colour boundary is measured on the printer’s own layer grid rather than at the ' +
+        'nominal height.',
     );
   }
 
@@ -175,7 +181,7 @@ export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
         width: badge.width,
         thickness: badge.thickness,
         material: 'pla',
-        print,
+        colour,
         flatness,
       },
       pocket: null,
@@ -195,7 +201,7 @@ export function badgeBlankFor(badge: BadgeParams): BadgeBlank {
       width: badge.width,
       thickness: badge.thickness,
       material: 'pla',
-      print,
+      colour,
       flatness,
     },
     pocket: {

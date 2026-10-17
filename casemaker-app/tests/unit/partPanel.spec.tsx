@@ -272,10 +272,10 @@ describe('PartPanel (#282) — the engrave job’s side of it', () => {
           length: 38.1,
           width: 76.2,
           thickness: 3.81,
-          print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 },
+          colour: { kind: 'printed', capMm: 0.81, layerHeight: 0.2, firstLayerHeight: 0.2 },
         },
         sources: {
-          stock: { length: 'computed', width: 'computed', thickness: 'computed', print: 'computed' },
+          stock: { length: 'computed', width: 'computed', thickness: 'computed', colour: 'computed' },
         },
         keepOuts: [
           {
@@ -321,7 +321,7 @@ describe('PartPanel (#282) — the engrave job’s side of it', () => {
     // grid would become — nothing, the value “Use the badge blank” would write.
     const note = screen.getByTestId('part-job-note').textContent ?? '';
     expect(note).toContain('layer height 0.2 → none mm');
-    expect(note).toContain('colour split 3 → none mm');
+    expect(note).toContain('colour cap 0.81 → none mm');
   });
 });
 

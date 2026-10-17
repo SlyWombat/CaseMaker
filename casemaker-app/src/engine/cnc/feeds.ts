@@ -338,6 +338,27 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
       'no coupon measured PETG, and this row is a chosen placeholder for the two-colour blank. #284 ' +
       'is what settles it.',
   },
+  {
+    // The PLASTIC V row (#492): the purchased two-colour laminate's material is the generic
+    // `plastic`, and the row is carried from the PETG observation of 2026-10-17 — the closest
+    // bench evidence this material has — rather than invented. The PETG row stays for PETG.
+    //
+    // OBSERVED, on 2026-10-17, on the 30° × 0.3 mm bit: the run below was on PETG, not laminate;
+    // it is not a coupon measurement and not a catalogue row. The numbers are the PLA V row's own.
+    // REMOVABLE AS ONE ENTRY if the maintainer does not want an unmeasured plastic row to ship.
+    material: 'plastic',
+    edge: 'v',
+    minDiameter: 0.3,
+    maxDiameter: 0.5,
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: DEFAULT_V_CARVE_STEPOVER_RATIO, peckFraction: 1.0, air: true },
+    status: 'unmeasured',
+    provenance:
+      'OBSERVED 2026-10-17, not measured: chosen from the PETG observation of 2026-10-17, ' +
+      'unmeasured on laminate — the 30° × 0.3 mm V-bit ran S12000, F500 along, F200 plunge for ' +
+      '856 s without melting. The numbers are the PLA V row\'s own starting values; no coupon ' +
+      'measured plastic, and this row is a chosen placeholder for the two-colour laminate. #284 ' +
+      'is what settles it.',
+  },
 ];
 
 // ---------------------------------------------------------------------------------------------
@@ -664,6 +685,10 @@ export const CATALOGUE_MATERIAL_ALIASES: Readonly<Partial<Record<StockMaterial, 
   pp: ['abs', 'acrylic'],
   tpu: ['abs', 'acrylic'],
   pva: ['abs', 'acrylic'],
+  // #492 — the bought engraving laminate's maker names no plastic. The catalogue's only plastic
+  // rows are ABS and acrylic, so it is answered by those, as a labelled mapping: NOT by PETG or PLA
+  // (neither of which the catalogue lists at all).
+  plastic: ['abs', 'acrylic'],
 };
 
 /**
@@ -1097,8 +1122,8 @@ function entryFor(
       ok: false,
       reason:
         `no cutting parameters for a ${diameter} mm V-bit in ${MATERIAL_LABELS[material]}: the starting ` +
-        `table has a V-bit row for PLA and PETG only, and ${CATALOGUE_LABEL} states a flat end mill's ` +
-        `numbers, never a cone's. Pick PLA or PETG, or a flat end mill for this material.`,
+        `table has a V-bit row for PLA, PETG and plastic only, and ${CATALOGUE_LABEL} states a flat end mill's numbers, ` +
+        `never a cone's. Pick PLA, PETG or plastic, or a flat end mill for this material.`,
     };
   }
 

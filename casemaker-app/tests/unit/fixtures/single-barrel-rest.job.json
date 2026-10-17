@@ -7,8 +7,9 @@
     "width": 76.2,
     "thickness": 3.81,
     "material": "pla",
-    "print": {
-      "split": 3,
+    "colour": {
+      "kind": "printed",
+      "capMm": 0.81,
       "layerHeight": 0.2
     },
     "flatness": {
@@ -22481,7 +22482,7 @@
       "width": "computed",
       "thickness": "computed",
       "material": "computed",
-      "print": "computed",
+      "colour": "computed",
       "flatness": "computed"
     },
     "tool": "computed"

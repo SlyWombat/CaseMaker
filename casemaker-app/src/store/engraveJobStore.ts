@@ -20,7 +20,7 @@ import {
   itemRowName,
   type EngraveNamedItem,
 } from '@/engine/cnc/engrave/jobSetup';
-import { effectiveMargins, recommendLabelDepth } from '@/engine/cnc/engrave/depthBounds';
+import { effectiveMargins, recommendLabelDepth, recommendedEngraveDepth } from '@/engine/cnc/engrave/depthBounds';
 import { labelGlyphMeasure, labelJawReach, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import {
   BLANK_SEED_TEXT,
@@ -247,6 +247,23 @@ export function newItemDepthMm(): number {
   return shopDefault(NEW_ITEM_DEPTH_KEY).value;
 }
 
+/**
+ * The depth a new item starts at on THIS blank (#492): the stock kind recommends, and the operator
+ * changes it if they like.
+ *
+ * A laminate's field arrives at cap + the laminate margin (0.1 mm on the 0.075 mm fixture), a
+ * printed blank's at the colour line + one layer, and plain stock at the shop's engraving-depth
+ * default (#451). The pure arithmetic is `recommendedEngraveDepth`; this function only resolves the
+ * location's fallback and the job's own margin, the way every other depth reader does.
+ */
+export function newItemDepthFor(job: EngraveJob): number {
+  const shop = shopDefault(NEW_ITEM_DEPTH_KEY);
+  return recommendedEngraveDepth(job.stock, {
+    boundaryMargin: effectiveMargins(job, useSettingsStore.getState().margins).boundaryMargin,
+    shopDepth: { value: shop.value, source: shop.source },
+  }).depth;
+}
+
 /** The depth a new hole starts at, mm — its own starting point, and the reason is in `newDrill`. */
 export function newDrillDepthMm(): number {
   return shopDefault(NEW_DRILL_DEPTH_KEY).value;
@@ -353,10 +370,12 @@ function viseAfterStockEdit(job: EngraveJob, patch: Partial<EngraveJob['stock']>
 function withStockSource(
   job: EngraveJob,
   keys: readonly (keyof EngraveJob['stock'])[],
-  source: FieldSource,
+  source: FieldSource | Partial<Record<keyof EngraveJob['stock'], FieldSource>>,
 ): EngraveJobSources {
   const stock = { ...(job.sources?.stock ?? {}) };
-  for (const key of keys) stock[key] = source;
+  for (const key of keys) {
+    stock[key] = typeof source === 'string' ? source : (source[key] ?? 'user');
+  }
   return { ...(job.sources ?? {}), stock };
 }
 
@@ -573,10 +592,17 @@ export interface EngraveJobState {
   /**
    * Merge a stock edit and stamp each edited field's source (#254). Defaults to `'user'`.
    *
+   * A single word stamps every edited key; a per-key map is for the one case where they differ —
+   * a laminate's cap can be `assumed` while the dimensions it sits beside are the user's typing
+   * (#492).
+   *
    * A patch that changes the thickness carries the SHIPPED-DEFAULT vise with it, re-deriving its
    * `stockProud` from the new blank (#344). A saved or measured vise is never touched.
    */
-  setStock: (patch: Partial<EngraveJob['stock']>, source?: FieldSource) => void;
+  setStock: (
+    patch: Partial<EngraveJob['stock']>,
+    source?: FieldSource | Partial<Record<keyof EngraveJob['stock'], FieldSource>>,
+  ) => void;
   /** Add a default label and return its id. */
   addLabel: () => string;
   updateLabel: (id: string, patch: Partial<EngraveLabel>) => void;
@@ -841,17 +867,18 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           (k) => patch[k] !== undefined,
         );
         const stock = { ...job.stock, ...patch };
-        // `print`, `flatness` and `fibre` are the stock fields a patch can CLEAR (#285 review,
-        // #345, #464). "Use the badge blank" on a badge that has lost its print must take the
-        // layer grid away with it, or the stack limit goes on applying to a blank whose print is
+        // `colour`, `flatness` and `fibre` are the stock fields a patch can CLEAR (#285 review,
+        // #345, #464, #492). "Use the badge blank" on a badge that has lost its print must take the
+        // colour facts away with it, or the stack limit goes on applying to a blank whose print is
         // no longer known — and the stated dome (`flatness`) is a fact about the SAME printed
         // blank, so it goes with it too. The fibre flag goes for the same reason a design import
         // states it beside the material: re-importing a plain PETG file over a `PETG-CF` one must
         // stop the runs being weighed as abrasive. An explicit `undefined` says that; an OMITTED
-        // key still means "leave it alone", which is what every other caller relies on. The
-        // provenance goes with it — a source for a value that is gone is a lie.
+        // key still means "leave it alone", which is what every other caller relies on — a laminate
+        // imported from a design that states no print facts keeps the cap its stock entry gave it.
+        // The provenance goes with it — a source for a value that is gone is a lie.
         const sources = withStockSource(job, keys, source);
-        for (const key of ['print', 'flatness', 'fibre'] as const) {
+        for (const key of ['colour', 'flatness', 'fibre'] as const) {
           if (key in patch && patch[key] === undefined) {
             delete stock[key];
             if (sources.stock) delete sources.stock[key];
@@ -866,7 +893,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       }),
 
     addLabel: () => {
-      const label = newLabel(get().job, newItemDepthMm());
+      const label = newLabel(get().job, newItemDepthFor(get().job));
       apply((job) => ({ ...job, labels: [...job.labels, label] }));
       return label.id;
     },
@@ -973,7 +1000,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       })),
 
     addShape: (kind) => {
-      const shape = newShape(kind, get().job, newItemDepthMm());
+      const shape = newShape(kind, get().job, newItemDepthFor(get().job));
       apply((job) => ({ ...job, shapes: [...job.shapes, shape] }));
       return shape.id;
     },
@@ -1005,7 +1032,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     },
 
     addCombined: (kind) => {
-      const item = newCombined(kind, get().job, newItemDepthMm());
+      const item = newCombined(kind, get().job, newItemDepthFor(get().job));
       if (!item) return null;
       apply((job) => ({ ...job, combined: [...(job.combined ?? []), item] }));
       return item.id;
@@ -1039,7 +1066,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
     },
 
     addTrace: (kind) => {
-      const trace = newTrace(kind, get().job, newItemDepthMm());
+      const trace = newTrace(kind, get().job, newItemDepthFor(get().job));
       apply((job) => ({ ...job, traces: [...(job.traces ?? []), trace] }));
       return trace.id;
     },

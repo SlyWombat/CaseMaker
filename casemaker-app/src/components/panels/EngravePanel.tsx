@@ -1,6 +1,6 @@
 import { featureSim } from '@/platform/features';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type RefObject } from 'react';
-import { newItemDepthMm, useEngraveJobStore } from '@/store/engraveJobStore';
+import { newItemDepthFor, useEngraveJobStore } from '@/store/engraveJobStore';
 import { useProjectStore } from '@/store/projectStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
@@ -194,6 +194,9 @@ const SOURCE_LABEL: Record<FieldSource, string> = {
   catalogue: 'Makera',
   user: 'typed',
   measured: 'measured',
+  // #492 — the laminate cap the maintainer told us to assume until the sheet is measured. It is
+  // neither a bench reading nor a typed number, and the word says so.
+  assumed: 'assumed',
 };
 const SOURCE_COLOR: Record<FieldSource, string> = {
   computed: '#9aa4b0',
@@ -202,6 +205,7 @@ const SOURCE_COLOR: Record<FieldSource, string> = {
   catalogue: '#d0b26a',
   user: '#9aa4b0',
   measured: '#9fd19b',
+  assumed: '#d0b26a',
 };
 
 /** The tag that shows a field's provenance (#246/#254), or null when nothing was asserted. */
@@ -624,11 +628,17 @@ export function EngravePanel(): JSX.Element {
   const cone = tool ? vCone(tool) : null;
   const hasRegions = hasRegionItems(job);
   const vCarveJob = cone !== null && hasRegions;
-  // The preview may still be resolving. If the blank states a print and no preview has landed yet,
-  // the plane is UNKNOWN — showing the no-film arithmetic here would be a wrong number, not a
-  // placeholder.
-  const filmPending = job.stock.print !== undefined && preview === null;
-  const film = filmPending ? null : (preview?.colourBoundaryDepth ?? null);
+  // The preview may still be resolving. If the blank is a PRINT and no preview has landed yet, the
+  // plane is UNKNOWN — showing the no-film arithmetic here would be a wrong number, not a
+  // placeholder. A laminate (#492) needs no preview: its plane is the cap the stock states, which is
+  // the same value the sheet's `colourPlaneFor` reads.
+  const filmPending = job.stock.colour?.kind === 'printed' && preview === null;
+  const film =
+    job.stock.colour?.kind === 'laminate'
+      ? job.stock.colour.capMm
+      : filmPending
+        ? null
+        : (preview?.colourBoundaryDepth ?? null);
   const vCarveRatio =
     cone !== null && cone.tipRadius > 0 && params !== null ? params.stepOver / (2 * cone.tipRadius) : null;
   const vCarveItems = vCarveJob
@@ -1250,9 +1260,10 @@ export function EngravePanel(): JSX.Element {
         toVectorShape(outline, {
           id: newEngraveShapeId(),
           position: { x: job.stock.length / 2, y: job.stock.width / 2 },
-          // #451 — the same starting depth the store's own "Add…" entries use, read from the one
-          // reader so an imported outline and a drawn shape cannot begin at different numbers.
-          depth: newItemDepthMm(),
+          // #451/#492 — the same starting depth the store's own "Add…" entries use, read from the
+          // one stock-aware reader so an imported outline and a drawn shape cannot begin at
+          // different numbers, and a laminate's field arrives at its cap + margin.
+          depth: newItemDepthFor(job),
           name: outline.sourceName,
         }),
       ),

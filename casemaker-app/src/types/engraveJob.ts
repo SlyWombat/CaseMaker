@@ -67,6 +67,10 @@ export type StockMaterial =
   | 'tpu'
   | 'pva'
   | 'acrylic'
+  // #492 — a purchased two-colour laminate whose maker did not state what plastic it is. It is a
+  // PLASTIC, not a printed blank: no layers, no filament, and (via #493) no facing. The catalogue
+  // answers it through the same nearest-plastic mapping as the printed classes.
+  | 'plastic'
   | 'aluminium-6061'
   | 'aluminium-7075'
   | 'brass'
@@ -102,7 +106,7 @@ export type FilamentFibre = 'cf' | 'gf';
  * The sim's own `FieldSource` (`store/simSetupStore.ts`) is a DIFFERENT type — `header | user |
  * default`, about a file's `;@MKR|TOOL` header — and is not this one (#310).
  */
-export type FieldSource = 'computed' | 'catalogue' | 'user' | 'measured';
+export type FieldSource = 'computed' | 'catalogue' | 'user' | 'measured' | 'assumed';
 
 /**
  * Per-field provenance for the job's asserted values (#246 cutting overrides, #254 guided job
@@ -112,12 +116,15 @@ export type FieldSource = 'computed' | 'catalogue' | 'user' | 'measured';
  */
 export interface EngraveJobSources {
   /**
-   * Which stock fields were asserted, and how (#254). Absent = the shipped default blank. `print`
+   * Which stock fields were asserted, and how (#254). Absent = the shipped default blank. `colour`
    * and `flatness` are stamped by whoever copies a badge's print facts in (#285, #345), the same
    * way `material` is stamped when a badge becomes the blank.
+   *
+   * `print` was this key's name before #492; a document that still carries it is migrated on load
+   * to `colour` (see `engraveJobSchema.ts`), so nothing in this build reads the old key.
    */
   stock?: Partial<
-    Record<'length' | 'width' | 'thickness' | 'material' | 'fibre' | 'print' | 'flatness', FieldSource>
+    Record<'length' | 'width' | 'thickness' | 'material' | 'fibre' | 'colour' | 'flatness', FieldSource>
   >;
   /** Provenance of `toolKey` (#254). Absent = the shipped default cutter. */
   tool?: FieldSource;
@@ -638,31 +645,38 @@ export interface Sacrificial {
 }
 
 /**
- * The print facts the depth model needs from whoever sliced the blank (#285, on #166's field).
+ * The colour planes the depth model needs, and where they come from (#492, growing out of #285).
  *
- * A two-colour blank's go/no-go is the colour split, and that only exists as a fact about the
- * PRINT: the boundary lands where the slicer's layer grid puts it. This carries the three inputs
- * `buildLayerStack` (decision 27) needs, so the app can slice the compiled solid on the printer's
- * own grid rather than on the nominal design height.
+ * A two-colour blank's go/no-go is its colour boundary. There are two ways a blank gets one:
  *
- * PART-frame z, like `zCeiling`: `split` is the colour change height above the blank's BOTTOM
- * face — the same number `BadgeParams.splitHeight` carries, and the reason the two agree about
- * where the boundary is.
+ *   - `printed` — a slicer laid down two filaments, so the boundary is a fact about the PRINT and
+ *     lands on the slicer's layer grid. `layerHeight` is the grid (`buildLayerStack`, decision 27);
+ *     unless it is stated the boundary is the stated cap, exactly as a laminate's is.
+ *   - `laminate` — a PURCHASED sheet of one colour over another (#492). There are no layers and no
+ *     filament to ask about: the cap's own thickness IS the boundary. `layerHeight` is meaningless
+ *     and is refused by the schema.
  *
- * OPTIONAL, and its ABSENCE IS THE SWITCH (#285). A job without it has no colour layers as far as
+ * `capMm` is the TOP colour's thickness measured from the engraved face — the number every depth
+ * sentence actually wants, and the film `f` #221's V-carve reads. On a printed blank it is
+ * `thickness − split`, where `split` is the colour change height above the BOTTOM face that
+ * `BadgeParams.splitHeight` carries; the schema migrates a pre-#492 `print: { split, … }` to that
+ * form on load.
+ *
+ * OPTIONAL, and its ABSENCE IS THE SWITCH (#285). A job without it has no colour plane as far as
  * the app is concerned: its depth limit stays the analytic `jobDepthLimit` and its `.nc` is
- * byte-identical to before. `fromBadge.ts` sets it the moment a badge declares its own print
- * (`BadgeParams.print`, #166) — until then nothing in the app writes it.
+ * byte-identical to before.
  *
- * A `Mm` is the MODEL's layer height, a slicer setting the user states, never a measurement of
- * the printed blank.
+ * A `Mm` is the MODEL's number — a slicer setting or a supplier's stated cap — never a
+ * measurement of the blank in the vise.
  */
-export interface StockPrint {
-  /** Colour change height above the blank's BOTTOM face, mm (PART-frame z). */
-  split: Mm;
-  /** The slicer's layer height, mm. */
-  layerHeight: Mm;
-  /** The first layer's own height, mm; absent = the same as `layerHeight`. */
+export interface StockColour {
+  /** Where the second colour comes from: a print's layers, or a purchased laminate's cap. */
+  kind: 'printed' | 'laminate';
+  /** The top colour's thickness from the engraved face, mm. `0` only in a migrated degenerate print. */
+  capMm: Mm;
+  /** The slicer's layer height, mm. `printed` only; absent = no grid to snap to. */
+  layerHeight?: Mm;
+  /** The first layer's own height, mm; absent = the same as `layerHeight`. `printed` only. */
   firstLayerHeight?: Mm;
 }
 
@@ -904,9 +918,9 @@ export interface EngraveJob {
    */
   machineId: string;
   /**
-   * length = X, width = Y, thickness = Z. `print` is the badge path's colour-layer input (#285);
-   * absent for every job that is not a two-colour blank. `flatness` is the dome the printed face
-   * carries (#345), where anyone has stated one.
+   * length = X, width = Y, thickness = Z. `colour` is the colour-plane input (#492, from #285);
+   * absent for every job that is not a two-colour blank or a laminate. `flatness` is the dome the
+   * printed face carries (#345), where anyone has stated one.
    */
   stock: {
     length: Mm;
@@ -924,7 +938,7 @@ export interface EngraveJob {
      * or every later run is still weighed as abrasive.
      */
     fibre?: FilamentFibre;
-    print?: StockPrint;
+    colour?: StockColour;
     flatness?: StockFlatness;
   };
   labels: EngraveLabel[];

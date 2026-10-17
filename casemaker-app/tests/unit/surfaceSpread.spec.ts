@@ -23,7 +23,7 @@ import { readDefault } from '@/platform/defaultsClient';
 import { defaultBadgeParams } from '@/types/badge';
 import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
 
-const PRINT_0_2 = { split: 3.0, layerHeight: 0.2, firstLayerHeight: 0.2 };
+const COLOUR_0_2 = { kind: 'printed' as const, capMm: 0.81, layerHeight: 0.2, firstLayerHeight: 0.2 };
 
 /** The badge's own blank, with the demo line placed over the magnet pocket (nearJaw's x = 24). */
 function badgeJob(over: Partial<EngraveJob> = {}): EngraveJob {
@@ -32,7 +32,7 @@ function badgeJob(over: Partial<EngraveJob> = {}): EngraveJob {
   const line = base.labels[0] as EngraveLabel;
   return {
     ...base,
-    stock: { ...blank.stock, print: PRINT_0_2 },
+    stock: { ...blank.stock, colour: COLOUR_0_2 },
     workholding: { kind: 'vise', vise: { ...viseForNewJob(undefined, blank.stock), stockProud: 1.905 } },
     keepOuts: blank.pocket ? [blank.pocket] : [],
     labels: [{ ...line, position: { x: 24, y: 43 }, depth: 1.1 }],

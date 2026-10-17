@@ -46,6 +46,14 @@ describe('the V1 feeds table', () => {
           expect(row.provenance).toContain('OBSERVED 2026-10-17');
           expect(row.provenance).toContain('not measured');
           expect(row.provenance).toContain('#284');
+        } else if (row.material === 'plastic') {
+          // #492's two-colour laminate: the PETG observation (#221) carried over to the generic
+          // plastic material, with the PLA V row's own numbers — a labelled placeholder, never a
+          // measured row.
+          expect(row.provenance).toContain('OBSERVED 2026-10-17');
+          expect(row.provenance).toContain('not measured');
+          expect(row.provenance).toContain('PETG observation');
+          expect(row.provenance).toContain('#284');
         } else {
           expect(row.provenance).toContain('#185');
           expect(row.provenance).toContain('185-v-groove.nc');
@@ -191,7 +199,7 @@ describe('feedsFor and the V-bit row (#405)', () => {
     // table at all (#405), so the refusal names the missing row rather than a tier that would
     // never have answered.
     expect(res.reason).toContain('V-bit');
-    expect(res.reason).toContain('PLA and PETG only');
+    expect(res.reason).toContain('PLA, PETG and plastic only');
   });
 
   it('refuses the metal bit’s 0.1 mm tip: outside every V row, so no numbers, no job', () => {

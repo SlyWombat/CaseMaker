@@ -42,7 +42,7 @@ describe('badgeBlankFor (#271)', () => {
       width: 76.2,
       thickness: 3.81,
       material: 'pla',
-      print: { split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 },
+      colour: { kind: 'printed', capMm: 0.81, layerHeight: 0.2, firstLayerHeight: 0.2 },
     });
     // The note prints the stock in the job's own order, and says why it is the other way round
     // from the badge's numbers — a sentence the person reading 38.1 × 76.2 is owed (#383).
@@ -114,7 +114,7 @@ describe('the badge’s print becomes the job’s (#285)', () => {
     // A badge with no print is a legacy project's badge, or one a test builds by hand. The job
     // must be exactly what it was before #285 existed.
     const blank = badgeBlankFor(noPrint());
-    expect(blank.stock.print).toBeUndefined();
+    expect(blank.stock.colour).toBeUndefined();
     // …and the plan therefore has no colour layers at all, which is what keeps the depth limit
     // analytic and the `.nc` byte-identical.
     expect(toPartPlan(jobForBadge(noPrint())).stock.split).toBeUndefined();
@@ -126,7 +126,12 @@ describe('the badge’s print becomes the job’s (#285)', () => {
     // boundary, so #170's surface/reveal control and #351's layer-aligned limit are live.
     const blank = badgeBlankFor(defaultBadgeParams());
     expect(defaultBadgeParams().print).toEqual({ layerHeight: 0.2, firstLayerHeight: 0.2 });
-    expect(blank.stock.print).toEqual({ split: 3, layerHeight: 0.2, firstLayerHeight: 0.2 });
+    expect(blank.stock.colour).toEqual({
+      kind: 'printed',
+      capMm: 0.81,
+      layerHeight: 0.2,
+      firstLayerHeight: 0.2,
+    });
     expect(toPartPlan(jobForBadge()).stock.split).toBe(3);
   });
 
@@ -135,7 +140,12 @@ describe('the badge’s print becomes the job’s (#285)', () => {
     const blank = badgeBlankFor(badge);
     // The split travels WITH the blank: a job document is standalone and must not have to look
     // back at the project's badge to know where its colour boundary is.
-    expect(blank.stock.print).toEqual({ split: 3.0, layerHeight: 0.2, firstLayerHeight: 0.2 });
+    expect(blank.stock.colour).toEqual({
+      kind: 'printed',
+      capMm: 0.81,
+      layerHeight: 0.2,
+      firstLayerHeight: 0.2,
+    });
     // The blank itself is unchanged — the print adds a fact, it does not move a dimension.
     expect(blank.stock.thickness).toBe(3.81);
     expect(blank.notes.join(' ')).toContain('3 mm colour split');
@@ -155,7 +165,12 @@ describe('the badge’s print becomes the job’s (#285)', () => {
     const withPrint = parseEngraveJob(JSON.parse(JSON.stringify(jobForBadge(badge))) as unknown);
     expect(withPrint.ok).toBe(true);
     if (!withPrint.ok) return;
-    expect(withPrint.job.stock.print).toEqual({ split: 3.0, layerHeight: 0.2, firstLayerHeight: 0.2 });
+    expect(withPrint.job.stock.colour).toEqual({
+      kind: 'printed',
+      capMm: 0.81,
+      layerHeight: 0.2,
+      firstLayerHeight: 0.2,
+    });
 
     // The other direction: a job built from a print-less badge keeps no key, so it round-trips
     // byte-for-byte.
@@ -164,7 +179,8 @@ describe('the badge’s print becomes the job’s (#285)', () => {
     );
     expect(without.ok).toBe(true);
     if (!without.ok) return;
-    expect(without.job.stock.print).toBeUndefined();
+    expect(without.job.stock.colour).toBeUndefined();
     expect('print' in without.job.stock).toBe(false);
+    expect(without.job.stock.colour).toBeUndefined();
   });
 });

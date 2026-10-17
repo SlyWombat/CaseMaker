@@ -104,10 +104,10 @@ describe('the engrave depth legend (#349)', () => {
 // ramp of depth swatches would name colours the meshes are NOT in. The legend says which two colours
 // the floors are drawn in instead, where they part, and that the colours are stand-ins.
 describe('the engrave legend on a blank that states its split (#170)', () => {
-  /** The shipped job, printed: a 3.0 mm split on a 12 mm blank puts the boundary 9 mm down. */
-  function printed(split = 11): EngraveJob {
+  /** The shipped job, printed: a 1 mm top colour on a 12 mm blank puts the boundary 1 mm down. */
+  function printed(capMm = 1): EngraveJob {
     const job = defaultEngraveJob();
-    job.stock.print = { split, layerHeight: 0.2, firstLayerHeight: 0.2 };
+    job.stock.colour = { kind: 'printed', capMm, layerHeight: 0.2, firstLayerHeight: 0.2 };
     useEngraveJobStore.setState({ job });
     return job;
   }

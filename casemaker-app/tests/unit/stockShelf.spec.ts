@@ -33,6 +33,13 @@ describe('the shelf entry (#413), against the shared fixture', () => {
     const blank = StockItemSchema.parse(SHELF[1]);
     expect(blank.layers.map((l) => l.name)).toEqual(['white', 'black']);
     expect(blank.flatness).toBe('domed');
+
+    // #492 — the purchased laminate: a cap and where it came from, no layers and no print facts.
+    const laminate = StockItemSchema.parse(SHELF.find((s) => (s as { id?: string }).id === 'stock-laminate1'));
+    expect(laminate.material).toBe('plastic');
+    expect(laminate.capMm).toBe(0.075);
+    expect(laminate.capSource).toBe('assumed');
+    expect(laminate.layers).toEqual([]);
   });
 
   it('refuses a sphere by name (Q20)', () => {
@@ -122,7 +129,7 @@ describe('the shelf store (#413)', () => {
   it('reads, reserves through the guarded PATCH, and consumes', async () => {
     const svc = fakeShelf(SHELF);
     await useStockStore.getState().refresh();
-    expect(useStockStore.getState().items).toHaveLength(2);
+    expect(useStockStore.getState().items).toHaveLength(SHELF.length);
 
     expect(await useStockStore.getState().reserve('stock-plate1', 'job-2', 1)).toBe(true);
     expect(svc.calls).toContain('PATCH /stock/stock-plate1');
@@ -158,7 +165,7 @@ describe('the shelf store (#413)', () => {
   it('sets aside an entry this build cannot read, and keeps the rest', async () => {
     fakeShelf([...SHELF, { id: 'stock-new', material: 'unobtainium' }]);
     await useStockStore.getState().refresh();
-    expect(useStockStore.getState().items).toHaveLength(2);
+    expect(useStockStore.getState().items).toHaveLength(SHELF.length);
     expect(useStockStore.getState().unreadable.map((u) => u.id)).toEqual(['stock-new']);
   });
 });

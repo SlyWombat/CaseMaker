@@ -44,7 +44,7 @@ const NO_PREVIEW: EngravePreviewClient = { engravePreview: async () => null };
 /** The patch the fake reader hands back: the file's blank, one item and a note. */
 const PATCH: DesignJobPatch = {
   name: 'Single Barrel Badge',
-  stock: { length: 76.2, width: 38.1, thickness: 3.81, material: 'pla', print: undefined, flatness: undefined },
+  stock: { length: 76.2, width: 38.1, thickness: 3.81, material: 'pla', colour: undefined, flatness: undefined },
   vectors: [
     {
       kind: 'vector',

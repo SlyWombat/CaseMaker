@@ -92,7 +92,7 @@ describe('#413 Manage › Materials', () => {
     await waitFor(() => expect(svc.sent.some((s) => s.method === 'POST')).toBe(true));
     const posted = svc.sent.find((s) => s.method === 'POST')!.body as Record<string, unknown>;
     expect(posted).toMatchObject({ material: 'acrylic', form: 'rod', size: { diameter: 10, length: 120 }, conductive: false });
-    await waitFor(() => expect(svc.items()).toHaveLength(3));
+    await waitFor(() => expect(svc.items()).toHaveLength(SHELF.length + 1));
   });
 
   it('edits and removes an entry under the shelf’s validator', async () => {
@@ -111,7 +111,11 @@ describe('#413 Manage › Materials', () => {
     expect((screen.getByTestId('manage-stock-remove') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('manage-stock-pick-stock-blank1'));
     fireEvent.click(screen.getByTestId('manage-stock-remove'));
-    await waitFor(() => expect(svc.items().map((i) => i.id)).toEqual(['stock-plate1']));
+    await waitFor(() =>
+      expect(svc.items().map((i) => i.id)).toEqual(
+        SHELF.map((s) => (s as { id: string }).id).filter((id) => id !== 'stock-blank1'),
+      ),
+    );
   });
 
   it('says it is reading while the first read is in flight, not "empty" or "no service"', () => {

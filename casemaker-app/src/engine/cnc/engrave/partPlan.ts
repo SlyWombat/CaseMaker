@@ -40,7 +40,7 @@ import type { Tool } from '@/engine/cnc/tool';
 import { grooveWidthAt, vCone } from '@/engine/cnc/vProfile';
 import { defaultBoundaryMargin, voidFloor, voidMargin } from '@/engine/cnc/engrave/depthBounds';
 import { inkBoxOf, type InkBox, type InkMeasure } from '@/engine/cnc/engrave/inkBox';
-import { voidCeilingFor } from '@/engine/cnc/layerStack';
+import { printedLayerGridOf, voidCeilingFor } from '@/engine/cnc/layerStack';
 import type { DepthLimit } from '@/engine/cnc/verify';
 import { sacrificialDepthLimit } from '@/engine/cnc/verify';
 
@@ -75,13 +75,20 @@ export interface PartPlan {
     /** Under-surface voids, in the stock XY frame; `zCeiling` is PART-frame z from the bottom. */
     keepOuts: { id: string; name: string; footprint: Profile; zCeiling: Mm }[];
     /**
-     * The blank's colour split, PART-frame z from the bottom face — copied from
-     * `EngraveJob.stock.print` (#285). ABSENT for a job that states no print, which is every job
-     * that is not a two-colour blank: a part the printer made in one colour has no boundary for
-     * anything downstream to work from, and the depth limit stays analytic.
+     * The blank's colour change, PART-frame z from the bottom face — derived from
+     * `EngraveJob.stock.colour.capMm` (#492, formerly `stock.print.split`, #285). ABSENT for a job
+     * that states no two-colour facts, which is every single-colour blank: a part made in one colour
+     * has no boundary for anything downstream to work from, and the depth limit stays analytic.
+     *
+     * The geometry is unchanged: the same child solids, the same solid model, the same colour
+     * change height. Only WHERE the number comes from moved.
      */
     split?: Mm;
-    /** The slicer's layer height, mm (#285). Present exactly when `split` is. */
+    /**
+     * The slicer's layer height, mm (#285). Present exactly when `split` is AND the blank is
+     * `kind: 'printed'` with a stated layer height — a purchased laminate has no printer grid, so
+     * it carries `split` alone (#492).
+     */
     layerHeight?: Mm;
     /** The first layer's own height, mm (#285); absent = the same as `layerHeight`. */
     firstLayerHeight?: Mm;
@@ -1120,7 +1127,7 @@ export function keepOutLimitParts(
   membrane: Mm,
   margin: Mm = defaultBoundaryMargin(job),
 ): VoidLimitParts {
-  const ceiling = voidCeilingFor(membrane, job.stock.thickness, job.stock.print);
+  const ceiling = voidCeilingFor(membrane, job.stock.thickness, printedLayerGridOf(job.stock));
   const overVoid = voidFloor(ceiling, voidMargin(job, margin));
   const stockFloor = job.stock.thickness - job.minFloor;
   return { membrane, ceiling, overVoid, stockFloor, limit: Math.max(0, Math.min(overVoid, stockFloor)) };
@@ -1820,10 +1827,12 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
     keepOuts.push({ id: ko.id, name: ko.name ?? '', footprint: keepOutProfile(ko), zCeiling: ko.zCeiling });
   }
 
-  // #285 — the blank's print, when the job holds one. This is the ONLY place the plan learns
-  // there are colour layers at all; everything downstream (the stack, the boundary, the limit)
-  // is inert without it.
-  const print = job.stock.print;
+  // #492 — the blank's two-colour facts, when the job holds one. This is the ONLY place the plan
+  // learns there are colour planes at all; everything downstream (the stack, the boundary, the
+  // limit) is inert without it. `split` stays PART-frame z, the frame #178 reads: cap is measured
+  // from the TOP face, so the colour change is `thickness − capMm`.
+  const colour = job.stock.colour;
+  const layerGrid = printedLayerGridOf(job.stock);
 
   // #432 — the job's facing choice, as a depth or nothing. A toggle that is on with a zero depth
   // (the field not filled in yet) is NOT a facing pass: it removes nothing, and the plan says so
@@ -1836,9 +1845,17 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
       supported: supportedFootprint(job.stock, job.sacrificial),
       thickness: job.stock.thickness,
       keepOuts,
-      // #285 — the badge's print facts, copied straight through when the job states them. Both
-      // keys are absent otherwise, so a job without a print plans exactly as it always did.
-      ...(print ? { split: print.split, layerHeight: print.layerHeight, firstLayerHeight: print.firstLayerHeight } : {}),
+      // #492 — the two-colour facts, copied in the plan's own frame. A laminate carries `split`
+      // only (no printer grid); a printed blank carries its layer height too. Every key is absent
+      // for a single-colour job, so it plans exactly as it always did.
+      ...(colour
+        ? {
+            split: job.stock.thickness - colour.capMm,
+            ...(layerGrid
+              ? { layerHeight: layerGrid.layerHeight, firstLayerHeight: layerGrid.firstLayerHeight }
+              : {}),
+          }
+        : {}),
     },
     engraves,
     traces,

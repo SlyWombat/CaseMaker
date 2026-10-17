@@ -263,13 +263,10 @@ export function designJobFor(
     // or every later run is still weighed as cutting an abrasive. A file whose class is unknown
     // states no fibre either (`parseFilament` only flags one beside a base it mapped).
     fibre: filament?.fibre ?? undefined,
-    // Both keys are ALWAYS present and `undefined` when the file states no print — the convention
-    // `fromBadge.ts` documents and the reason for it is the same here (#285 review). A job taking
-    // this patch may already carry a layer grid from a blank that had one, and `setStock` reads the
-    // KEY to decide whether to clear it: omitted means "this patch says nothing about the print",
-    // which is not what a design that stated none has said. The CLI route builds a fresh job and
-    // would never have noticed; the panel's import applies onto the job that is open.
-    print: undefined,
+    // The colour facts are written ONLY when the file states both a colour split and a layer
+    // height (#492). A design that states neither claims NO print facts — its geometry is all this
+    // import knows, and a laminate's cap is the STOCK ENTRY's fact, not the file's. The key is
+    // omitted entirely in that case, so `setStock` leaves an existing stock-entry cap alone.
     flatness: undefined,
   };
 
@@ -328,8 +325,9 @@ export function designJobFor(
   // boundary on the printer's own layer grid instead of a nominal height (#285), so they travel
   // with the blank rather than being re-derived from the badge template.
   if (design.colourSplit !== null && design.layerHeight !== null) {
-    stock.print = {
-      split: um(design.colourSplit),
+    stock.colour = {
+      kind: 'printed',
+      capMm: um(design.stock.thickness) - um(design.colourSplit),
       layerHeight: um(design.layerHeight),
       ...(design.firstLayerHeight !== null && design.firstLayerHeight !== design.layerHeight
         ? { firstLayerHeight: um(design.firstLayerHeight) }
@@ -357,8 +355,9 @@ export function designJobFor(
     }
   } else {
     notes.push(
-      'The file states no print (no colour split, or no layer height), so the depth limit stays ' +
-        'analytic: nothing here claims a colour boundary or a dome.',
+      'The file states no print facts (no colour split, or no layer height), so this import claims ' +
+        'none: the geometry is all it brings. A two-colour laminate’s cap comes from its stock entry, ' +
+        'not from the design file.',
     );
   }
 
@@ -448,7 +447,7 @@ export function designJobFor(
         // The fibre came out of the same class word the material did (#464), so it carries the
         // same stamp — and only when a flag was actually written, like every other key here.
         ...(stock.fibre !== undefined ? { fibre: 'computed' as const } : {}),
-        ...(stock.print ? { print: 'computed' as const } : {}),
+        ...(stock.colour ? { colour: 'computed' as const } : {}),
         // Only when a dome was actually written (#437): a flatness the patch did not state must not
         // claim provenance, or the job's merge would keep a stale stamp for a value it never got.
         ...(stock.flatness ? { flatness: 'computed' as const } : {}),

@@ -59,6 +59,15 @@ pub enum StockSource {
     Other,
 }
 
+/// Where a laminate's cap came from (#492). `assumed` is a number nobody has measured; `measured`
+/// is a bench or datasheet reading. A printed blank's colour facts are the JOB's, not the shelf's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StockCapSource {
+    Assumed,
+    Measured,
+}
+
 /// The dimensions, in mm. Which are required depends on the form, and the rest must be absent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -104,6 +113,13 @@ pub struct StockItem {
     pub size: StockSize,
     #[serde(default)]
     pub layers: Vec<StockLayer>,
+    /// The top colour's thickness from the top face, mm (#492) — a purchased laminate's cap. Absent
+    /// on every other entry. It is not a layer: a cap and printed layers may not both be stated.
+    #[serde(default)]
+    pub cap_mm: Option<f64>,
+    /// Where that cap came from (#492). Present exactly when `cap_mm` is.
+    #[serde(default)]
+    pub cap_source: Option<StockCapSource>,
     pub finish: StockFinish,
     pub flatness: StockFlatness,
     /// The dome's height in mm. Required when `flatness` is `domed`, absent otherwise.
@@ -243,6 +259,42 @@ impl StockItem {
             }
         }
 
+        // A purchased laminate's colour cap (#492): a flat top, a thickness to measure from, a
+        // positive cap inside the stock, and no printed layers. The two descriptions of a colour
+        // plane are mutually exclusive here, so the job never has to choose between them silently.
+        match (self.cap_mm, self.cap_source) {
+            (Some(cap), Some(_)) => {
+                let Some(total) = thickness.filter(|_| form.is_flat()) else {
+                    return Err(bad(id, format!("a {} has no flat top to carry a colour cap", self.form)));
+                };
+                if !(cap.is_finite() && cap > 0.0) {
+                    return Err(bad(id, format!("the colour cap must be above 0 mm, not {cap}")));
+                }
+                if cap > total + 1e-9 {
+                    return Err(bad(
+                        id,
+                        format!("a {cap} mm colour cap is thicker than the {total} mm stock"),
+                    ));
+                }
+                if !self.layers.is_empty() {
+                    return Err(bad(id, "a laminate has no printed layers"));
+                }
+                if form == StockForm::PrintedBlank {
+                    return Err(bad(
+                        id,
+                        "a printed blank states its colour in the job, not as a shelf cap",
+                    ));
+                }
+            }
+            (Some(_), None) => {
+                return Err(bad(id, "a colour cap states where it came from, assumed or measured"));
+            }
+            (None, Some(_)) => {
+                return Err(bad(id, "only an entry with a colour cap states a cap source"));
+            }
+            (None, None) => {}
+        }
+
         match (self.flatness, self.dome_height) {
             (StockFlatness::Domed, Some(h)) if h.is_finite() && h > 0.0 => {}
             (StockFlatness::Domed, _) => {
@@ -313,6 +365,8 @@ pub(crate) mod tests {
                 ..StockSize::default()
             },
             layers: vec![],
+            cap_mm: None,
+            cap_source: None,
             finish: StockFinish::Rough,
             flatness: StockFlatness::Flat,
             dome_height: None,
@@ -374,6 +428,58 @@ pub(crate) mod tests {
         }
         .validate()
         .unwrap();
+        // #492 — a purchased two-colour laminate: a stated cap, no layers.
+        StockItem {
+            material: "plastic".into(),
+            form: "sheet".into(),
+            size: StockSize {
+                length: Some(76.0),
+                width: Some(25.35),
+                thickness: Some(1.5),
+                ..StockSize::default()
+            },
+            cap_mm: Some(0.075),
+            cap_source: Some(StockCapSource::Assumed),
+            finish: StockFinish::Finished,
+            conductive: false,
+            source: StockSource::Purchased,
+            ..a_plate("s-5")
+        }
+        .validate()
+        .unwrap();
+    }
+
+    #[test]
+    fn a_colour_cap_outside_its_rules_is_refused() {
+        let laminate = StockItem {
+            form: "sheet".into(),
+            cap_mm: Some(0.075),
+            cap_source: Some(StockCapSource::Assumed),
+            ..a_plate("s-1")
+        };
+        laminate.clone().validate().unwrap();
+        let cases: Vec<(&str, StockItem)> = vec![
+            ("a cap without a source", StockItem { cap_source: None, ..laminate.clone() }),
+            ("a source without a cap", StockItem { cap_mm: None, ..laminate.clone() }),
+            ("a cap thicker than the stock", StockItem { cap_mm: Some(50.0), ..laminate.clone() }),
+            ("a zero cap", StockItem { cap_mm: Some(0.0), ..laminate.clone() }),
+            (
+                "a cap beside printed layers",
+                StockItem {
+                    layers: vec![StockLayer { name: "top".into(), thickness: 0.5 }],
+                    ..laminate.clone()
+                },
+            ),
+            ("a cap on a rod", StockItem {
+                form: "rod".into(),
+                size: StockSize { diameter: Some(10.0), length: Some(100.0), ..StockSize::default() },
+                ..laminate.clone()
+            }),
+            ("a cap on a printed blank", StockItem { form: "printed-blank".into(), ..laminate }),
+        ];
+        for (why, item) in cases {
+            assert!(matches!(item.validate(), Err(HouseError::BadEntry(_))), "{why} was accepted");
+        }
     }
 
     #[test]

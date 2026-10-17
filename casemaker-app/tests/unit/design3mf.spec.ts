@@ -137,7 +137,7 @@ describe('the PrusaSlicer project reader (#410)', () => {
     expect(design.stock.zMax).toBeCloseTo(3.81, 3);
     expect(design.colourSplit).toBeCloseTo(3.0, 3); // T2 bottom tops out at 3.0
     // A HEIGHT above the back face (#410 review item 4) — the frame `PartSpec.colourSplit` and
-    // `stock.print.split` state — so the top colour's thickness is the blank's own thickness less it.
+    // `stock.colour.split` state — so the top colour's thickness is the blank's own thickness less it.
     expect(design.stock.thickness - design.colourSplit!).toBeCloseTo(0.81, 3);
   });
 
@@ -146,7 +146,7 @@ describe('the PrusaSlicer project reader (#410)', () => {
     // back face sits in the file. Everything the reader measures must therefore come back the same,
     // and the two places the split is used — the `print.split` the job carries, and the slice the
     // magnet pocket is read from — are where a frame mix-up hides: the split reported as the file's
-    // absolute z (7.5 here) makes `stock.print.split` a nonsense height AND puts the pocket slice at
+    // absolute z (7.5 here) makes `stock.colour.split` a nonsense height AND puts the pocket slice at
     // 5 + 3.75 = 8.75 mm, above the blank, where it finds no hole and reports no void.
     const design = readDesign(tl, fixtureFile({ zOffset: 5 }));
     expect(design.stock.zMin).toBeCloseTo(5, 3);

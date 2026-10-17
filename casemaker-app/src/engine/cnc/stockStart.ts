@@ -16,8 +16,10 @@
  * shelf already refuses one (`SPHERE_REFUSAL`).
  *
  * WHAT IS NOT CARRIED. A shelf entry's `layers` carry a name and a thickness but no layer height, and
- * its `domeHeight` has no direction; the job's `print` and `flatness` need both. Neither is invented:
- * they stay absent and the notes say so. (The two-colour badge is ~1 % of jobs, §8.)
+ * its `domeHeight` has no direction; the job's `colour` (printed layers) and `flatness` need both.
+ * Neither is invented: they stay absent and the notes say so. A laminate's `capMm` IS carried
+ * (#492) — it is a stated fact about the sheet, and its provenance travels with it as `assumed` or
+ * `measured`. (The two-colour badge is ~1 % of jobs, §8.)
  *
  * The facing default (decision Q6) is {@link facingDefault}; the facing operation itself is #432.
  */
@@ -27,7 +29,7 @@ import type { StockItem } from '@/platform/stockClient';
 import { isShippedDemoLabelSet } from './engrave/blankLabelSeed';
 import type { MillProfile } from './machine';
 import { isMetalMaterial, isWoodMaterial, MATERIAL_LABELS } from './materials';
-import type { EngraveFacing, EngraveJob, JobStockEntry, JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
+import type { EngraveFacing, EngraveJob, FieldSource, JobStockEntry, JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 
 /** The rectangular forms a job's stock can take, in the order the wizard offers them. */
 export const JOB_STOCK_FORMS: readonly JobStockForm[] = ['plate', 'block', 'sheet', 'printed-blank'];
@@ -41,8 +43,14 @@ export interface StockBox {
 
 /** What a choice does to the new job: its stock, where it came from, and what to tell the user. */
 export interface StockChoice {
-  stock: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'material'>;
+  stock: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'material' | 'colour'>;
   entry: JobStockEntry;
+  /**
+   * Where the entry's cap came from (#492), when it carried one. The stock's own dimensions and
+   * material are the user's statement; a laminate cap may be the maintainer's ASSUMED 0.075 mm,
+   * which must not be presented as measured.
+   */
+  colourSource?: FieldSource;
   notes: string[];
 }
 
@@ -143,6 +151,19 @@ export function stockFromShelf(item: StockItem, machine: MillProfile): StockChoi
         'the shelf records no layer height, and the job will not invent one.',
     );
   }
+  // #492 — a purchased two-colour laminate states its cap as a stock fact. It is NOT a print: no
+  // layers and no filament travel with it. `capSource` says whether the number is the assumed one.
+  const colour =
+    item.capMm != null ? ({ kind: 'laminate', capMm: item.capMm } as const) : undefined;
+  if (colour !== undefined) {
+    notes.push(
+      `Its colour cap is ${mm(colour.capMm)} mm` +
+        (item.capSource === 'assumed'
+          ? ' — ASSUMED (no datasheet); measure the sheet and correct the entry before trusting a depth.'
+          : ' — measured and recorded on the shelf entry.') +
+        ' The job treats it as a laminate: no printed layers, no filament.',
+    );
+  }
   if (item.flatness === 'domed') {
     notes.push(
       `It is recorded as domed ${item.domeHeight ?? '?'} mm; the job does not carry the dome yet (the shelf does not say across which side).`,
@@ -156,7 +177,11 @@ export function stockFromShelf(item: StockItem, machine: MillProfile): StockChoi
         width: item.size.width!,
         thickness: item.size.thickness!,
         material: item.material,
+        ...(colour !== undefined ? { colour } : {}),
       },
+      ...(colour !== undefined
+        ? { colourSource: item.capSource === 'measured' ? ('measured' as const) : ('assumed' as const) }
+        : {}),
       entry: { kind: 'shelf', shelfId: item.id, file: null, form, finish: item.finish, conductive: item.conductive },
       notes,
     },
@@ -207,6 +232,8 @@ export function shelfItemFromMade(made: MadeStock, id: string, now: string): Sto
     form: made.form,
     size: { length: made.length, width: made.width, thickness: made.thickness },
     layers: [],
+    capMm: null,
+    capSource: null,
     finish: made.finish,
     flatness: 'unknown',
     domeHeight: null,
@@ -262,7 +289,10 @@ export function stockFromFile(file: FileStock, machine: MillProfile): StockChoic
  * the panel and the run sheet must say so rather than guess from the material.
  */
 export function finishOf(job: Pick<EngraveJob, 'stockEntry' | 'stock'>): JobStockFinish | null {
-  return job.stockEntry?.finish ?? (job.stock.print !== undefined ? 'printed' : null);
+  return (
+    job.stockEntry?.finish ??
+    (job.stock.colour?.kind === 'printed' ? 'printed' : null)
+  );
 }
 
 /**

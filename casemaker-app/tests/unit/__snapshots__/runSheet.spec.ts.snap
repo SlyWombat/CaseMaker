@@ -124,7 +124,7 @@ exports[`runSheet (#207) > snapshots the whole RunSheet for a job with a depth b
         },
         {
           "text": "Depth margins — how far every floor stays clear of a plane: a void’s ceiling, the colour split. Recommended for this blank: 0.2 mm — the wired probe adds 0.001 mm; flatness unknown: no number for the dome.",
-          "value": "0.2 mm boundary margin · the house default · no print stated: a void’s ceiling keeps the job’s minimum floor, 1 mm",
+          "value": "0.2 mm boundary margin · the house default · no print grid stated: a void’s ceiling keeps the job’s minimum floor, 1 mm",
         },
         {
           "text": "Under-surface void — Magnet pocket. The blank is only 2 mm thick over it: do not cut through.",
