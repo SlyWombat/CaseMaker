@@ -18,6 +18,7 @@ import { useViewportStore } from '@/store/viewportStore';
 import { EngraveSetupFlow } from '@/components/panels/EngraveSetupFlow';
 import { PanelErrorBoundary } from '@/components/ui/PanelErrorBoundary';
 import { readDesignFile } from '@/engine/import/designImport';
+import { embedSource } from '@/engine/cnc/engrave/jobSources';
 import { useStockStore } from '@/store/stockStore';
 import type { Project } from '@/types/project';
 import type { JobStockEntry } from '@/types/engraveJob';
@@ -390,6 +391,17 @@ export function StartWizard(): JSX.Element {
         store.setMachine(machineId);
         // #410's own route: the blank, its void and the design's items, in one write.
         store.takeDesign(read.patch);
+        // #425 §4 — the file itself travels with the job, content-addressed. The derived items
+        // above are what the job cuts; this record is the provenance a re-import proves itself
+        // against, embedded when it fits the 4 MiB cap. `p.sha256` is the digest the picker
+        // already computed, so the record and the stock entry cannot disagree about the file.
+        const { source } = await embedSource({
+          kind: '3mf',
+          name: read.filename,
+          bytes: await p.file.arrayBuffer(),
+          sha256: p.sha256,
+        });
+        store.addSourceFile(source);
         entry = {
           kind: 'file',
           shelfId: null,

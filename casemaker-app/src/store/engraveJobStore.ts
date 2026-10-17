@@ -64,9 +64,11 @@ import type {
   EngraveVectorShape,
   FieldSource,
   JobSetup,
+  JobSource,
   Sacrificial,
   ViseParams,
 } from '@/types/engraveJob';
+import { withSource } from '@/engine/cnc/engrave/jobSources';
 import { parseEngraveJob, type ParseEngraveJobResult } from './engraveJobSchema';
 import { useSettingsStore } from './settingsStore';
 
@@ -661,6 +663,14 @@ export interface EngraveJobState {
    * reachability decision the panel makes with the numbers in front of it (#410's second half).
    */
   takeDesign: (patch: DesignJobPatch) => void;
+  /**
+   * Record one file the job was made from (#425 §4), content-addressed by its SHA-256 so the same
+   * file named twice stays one record. The caller has already hashed and embedded it
+   * (`jobSources.ts`); this is only the document write, and it takes the same `apply` path as
+   * every other edit. Never removes a record: a stale one is verification's to report, not a
+   * write's to hide.
+   */
+  addSourceFile: (source: JobSource) => void;
   /**
    * Give every label a depth THIS blank allows, and say who decided (#362) — the arithmetic is
    * `recommendLabelDepth`, this is only the walk over the labels and the provenance.
@@ -1313,6 +1323,13 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       // carry their own measured depths), and load-bearing on the other: those lines were laid out
       // and depthed for a blank this call has just replaced.
       get().redepthLabelsForBlank();
+    },
+
+    addSourceFile: (source) => {
+      apply((current) => ({
+        ...current,
+        sourceFiles: withSource(current.sourceFiles, source),
+      }));
     },
 
     // #364 — the bare blank's twin. `blankStockFor` is the blank's own reading of itself
