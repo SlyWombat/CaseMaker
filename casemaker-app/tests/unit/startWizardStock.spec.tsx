@@ -84,6 +84,41 @@ function chooseMaterial(value: string): void {
   fireEvent.change(screen.getByTestId('start-wizard-stock-material'), { target: { value } });
 }
 
+/** A closed 40 × 30 × 6 mm box as an ASCII STL — the smallest file the stock reader accepts. */
+function boxStl(name = 'blank.stl'): File {
+  const p: [number, number, number][] = [
+    [0, 0, 0],
+    [40, 0, 0],
+    [40, 30, 0],
+    [0, 30, 0],
+    [0, 0, 6],
+    [40, 0, 6],
+    [40, 30, 6],
+    [0, 30, 6],
+  ];
+  const faces = [
+    [4, 5, 6],
+    [4, 6, 7], // top
+    [0, 2, 1],
+    [0, 3, 2], // bottom
+    [0, 1, 5],
+    [0, 5, 4], // y = 0
+    [1, 2, 6],
+    [1, 6, 5], // x = 40
+    [2, 3, 7],
+    [2, 7, 6], // y = 30
+    [3, 0, 4],
+    [3, 4, 7], // x = 0
+  ];
+  const facets = faces
+    .map(
+      (f) =>
+        `facet normal 0 0 0\nouter loop\n${f.map((i) => `vertex ${p[i]!.join(' ')}`).join('\n')}\nendloop\nendfacet`,
+    )
+    .join('\n');
+  return new File([`solid blank\n${facets}\nendsolid blank\n`], name);
+}
+
 describe('the material-first start (#418)', () => {
   it('shelf stock → mount → an empty design, the part sized to the stock, nothing reserved', async () => {
     const svc = fakeShelf(SHELF);
@@ -305,5 +340,32 @@ describe('stockEntry follows the stock (#418 review)', () => {
     });
     await screen.findByTestId('engrave-setup-flow');
     expect(useEngraveJobStore.getState().job).not.toHaveProperty('stockEntry');
+  });
+});
+
+describe('a mesh loaded as stock takes its finish default from the material (#463)', () => {
+  // The classes a slicer can produce — PrusaSlicer's filament words, #456.
+  const PRINTED = ['pla', 'petg', 'pet', 'abs', 'asa', 'hips', 'pa', 'pa-cf', 'pa-gf', 'pc', 'pp', 'tpu', 'pva'];
+  // A board sawn from stock: the answer is not settled yet, so it must not be guessed (#463).
+  const NOT_PRINTED = ['softwood', 'hardwood', 'mdf', 'acrylic', 'aluminium-6061', 'brass'];
+
+  /** Pick the material, load the same box as stock, and answer with the finish the step chose. */
+  async function loadMesh(material: string): Promise<string> {
+    fakeShelf(SHELF);
+    await toStockStep();
+    chooseMaterial(material);
+    fireEvent.click(screen.getByTestId('start-wizard-stock-door-load'));
+    fireEvent.change(screen.getByTestId('start-wizard-load-file'), { target: { files: [boxStl()] } });
+    // The finish select appears only once the file has been read as a mesh.
+    const finish = await screen.findByTestId('start-wizard-stock-finish');
+    return (finish as HTMLSelectElement).value;
+  }
+
+  it.each(PRINTED)('%s: the finish defaults to printed', async (material) => {
+    expect(await loadMesh(material)).toBe('printed');
+  });
+
+  it.each(NOT_PRINTED)('%s: the finish stays unknown', async (material) => {
+    expect(await loadMesh(material)).toBe('unknown');
   });
 });

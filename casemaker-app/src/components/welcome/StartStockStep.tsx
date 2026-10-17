@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { materialOptionsFor } from '@/engine/cnc/engrave/setupFlow';
-import { MATERIAL_LABELS } from '@/engine/cnc/materials';
+import { MATERIAL_LABELS, isPrintedBlankMaterial } from '@/engine/cnc/materials';
 import {
   JOB_STOCK_FORMS,
   facingDefault,
@@ -177,7 +177,8 @@ export function StartStockStep({
       const read = await readStockFile(file);
       setFileRead({ read, file });
       // A printed blank is the usual reason to load a mesh as stock; say so as the default finish.
-      if (read.kind === 'mesh' && finish === 'unknown' && (material === 'pla' || material === 'abs')) setFinish('printed');
+      // The material answers whether it is one — sheets (acrylic, MDF) are not, and stay unknown (#463).
+      if (read.kind === 'mesh' && finish === 'unknown' && isPrintedBlankMaterial(material)) setFinish('printed');
     } finally {
       setReading(false);
     }

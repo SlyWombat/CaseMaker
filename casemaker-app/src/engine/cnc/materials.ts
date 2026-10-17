@@ -112,3 +112,38 @@ export const MATERIAL_LABELS: Readonly<Record<StockMaterial, string>> = {
 export function isMetalMaterial(material: StockMaterial): boolean {
   return material === 'aluminium-6061' || material === 'aluminium-7075' || material === 'brass' || material === 'copper';
 }
+
+/**
+ * The classes a slicer can produce: the printed-blank materials (#456), listed rather than derived
+ * from the string. A name is not a category — the same reason {@link isMetalMaterial} gives — and a
+ * new class must answer this question here instead of being silently under-covered by a heuristic.
+ *
+ * The woods, MDF and acrylic are deliberately absent: a board loaded as stock may well have been
+ * cut from a sheet, and what its finish should default to is a different question with no answer
+ * yet (#463). `satisfies readonly StockMaterial[]` makes a typo a compile error; the schema already
+ * refuses a material outside `STOCK_MATERIALS`.
+ */
+export const PRINTED_BLANK_MATERIALS = [
+  'pla',
+  'petg',
+  'pet',
+  'abs',
+  'asa',
+  'hips',
+  'pa',
+  'pa-cf',
+  'pa-gf',
+  'pc',
+  'pp',
+  'tpu',
+  'pva',
+] as const satisfies readonly StockMaterial[];
+
+/**
+ * Is this stock a printed blank — the thing a 3D printer makes, rather than a board sawn from a
+ * sheet? It exists because the start wizard asks it once: a mesh loaded as stock is usually a
+ * printed blank, and the finish default follows from the material being one (#463).
+ */
+export function isPrintedBlankMaterial(material: StockMaterial): boolean {
+  return PRINTED_BLANK_MATERIALS.some((printed) => printed === material);
+}
