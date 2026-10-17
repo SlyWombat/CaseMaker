@@ -635,13 +635,44 @@ describe('runSheet (#207)', () => {
       expect(bisect).toContain('inward or outward');
       expect(bisect).toContain('no more than 0.312 mm apart');
 
-      // A pass whose four readings are all the blank, or whose innermost is already off it, has
+      // A pass whose readings are all the blank, or whose innermost is already off it, has
       // nothing to bisect between: the step says which way to step and that a miss counts as off.
+      // "All of them" rather than "all four", because a jaw-referenced edge (#430) has one touch
+      // and this pass applies to the scanned edges only.
       const unbracketed = texts.find((t) => t.startsWith('If the readings do not bracket'))!;
-      expect(unbracketed).toContain('ALL FOUR reading the blank');
+      expect(unbracketed).toContain('ALL of them reading the blank');
       expect(unbracketed).toContain('step 1 mm further OUT');
       expect(unbracketed).toContain('step 1 mm back IN');
       expect(unbracketed).toContain('which counts as off the blank');
+    });
+
+    // #430 — a blank at or below the jaw tops. The gripped edges are read off the jaw's face, and
+    // the sheet has to say so: a step that sent the operator walking outward across those edges
+    // would send the tip onto the jaw's top, which then stands ABOVE the blank and reads as stock.
+    it('reads the gripped edges off the jaw when the blank sits below the jaw tops (#430)', () => {
+      const job = defaultEngraveJob();
+      job.stock = { ...job.stock, length: 76, width: 25.35, thickness: 1.5 };
+      job.workholding = {
+        ...job.workholding,
+        kind: 'vise',
+        vise: { ...job.workholding.vise, stockProud: -1.6 },
+      };
+      const texts = origin(job, SCAN);
+      // The offer counts the two kinds of edge rather than promising four touches at every one.
+      const offer = texts.find((t) => t.startsWith('OPTIONAL, BEFORE THE FIRST CUT'))!;
+      expect(offer).toContain('two jaw-referenced edges with one confirming touch each');
+      expect(offer).toContain('two scanned edges with four touches each');
+      // The gripped edge's step is one confirming touch, named as a reference and fenced off.
+      const jawStep = texts.find((t) => t.startsWith('Check the left edge'))!;
+      expect(jawStep).toContain('BY REFERENCE rather than by scanning');
+      expect(jawStep).toContain('the moving jaw closes onto its width');
+      expect(jawStep).toContain('Do NOT touch past this edge');
+      expect(jawStep).toContain('the blank’s own top');
+      // The free ends keep their outward walk, and the cap is quoted below the BLANK's top.
+      expect(texts.some((t) => t.startsWith('Check the back edge') && t.includes('outside'))).toBe(true);
+      expect(texts.join(' ')).toContain('below the BLANK’s top');
+      // The HIGH signature is stated in the jaw's own sign: above the reference, not below it.
+      expect(texts.join(' ')).toContain('1.6 mm ABOVE the reference');
     });
 
     it('leaves the block out entirely when the setup cannot support it', () => {

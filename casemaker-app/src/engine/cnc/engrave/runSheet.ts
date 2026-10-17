@@ -1235,13 +1235,37 @@ function materialPositionSteps(
     fmtNum(plan.edges.find((e) => e.edge === edge)!.bands.blankMm);
   const sidesMm = bandMm('left');
   const endsMm = bandMm('front');
+  // #430 — a blank at or below the jaw tops splits the plan: the gripped edges are read off the
+  // jaw's face (one confirming touch each), and only the free ends are scanned outward. The steps
+  // have to say which is which; a sheet that printed four touches at every edge would send the
+  // operator across the jaw's top on the two edges where that reading is the jaw, not stock.
+  const jawRef = plan.edges.filter((e) => e.reference === 'jaw');
+  const scanned = plan.edges.filter((e) => e.reference === 'scanned');
+  const numberWord = (n: number): string =>
+    ['no', 'one', 'two', 'three', 'four', 'five'][n] ?? String(n);
+  const edgesPhrase =
+    jawRef.length === 0
+      ? `${plan.edges.length} edges, ${numberWord(plan.edges[0]!.touches.length)} touches each`
+      : `${numberWord(jawRef.length)} jaw-referenced ${jawRef.length === 1 ? 'edge' : 'edges'} with one confirming touch each and ` +
+        `${numberWord(scanned.length)} scanned ${scanned.length === 1 ? 'edge' : 'edges'} with ` +
+        `${numberWord(scanned[0]!.touches.length)} touches each`;
+  /** The jaw's top relative to the reference: above it when the blank sits at or below the jaw tops. */
+  const jawAbove = plan.bands.jawMm <= plan.bands.blankMm;
+  /**
+   * The HIGH signature (#430 item 2): a reading that stops at the jaw's own top rather than having
+   * nothing under it. With the jaw above the blank it arrives ABOVE the reference; with the blank
+   * proud by less than the tip's radius plus the outward margin it arrives below — either way it is
+   * the jaw, not stock, and the depths step says which.
+   */
+  const jawNear =
+    !jawAbove && plan.bands.jawMm > 0 && plan.bands.jawMm < plan.tipRadiusMm + plan.settings.missMarginMm;
 
   const steps: RunSheetStep[] = [
     {
       text:
         'OPTIONAL, BEFORE THE FIRST CUT — check where the blank really is, with the wired probe. It ' +
         'is Z-only, so it cannot touch a side: it finds an edge by touching DOWN at points across ' +
-        `it and watching where the reading changes. ${plan.edges.length} edges, ${plan.edges[0]!.touches.length} touches each, a few minutes, one tool change. ` +
+        `it and watching where the reading changes. ${edgesPhrase}, a few minutes, one tool change. ` +
         'Skip this if this is the blank you have just set the origin against.',
       unverified,
     },
@@ -1292,21 +1316,40 @@ function materialPositionSteps(
     },
   ];
 
+  // #391 review item 7 — when the fixture's own uncertainty reaches this point, the plan carries a
+  // second reading: the nominal jaw stops short of it, and a jaw at the wide end of its band does
+  // not. A step that printed only the first would turn a CORRECT reading into a fault the operator
+  // has to explain. The second reading is always the jaw's TOP, because growing the box can only
+  // add jaw — `ScanTouch.alsoMaybe` owns that direction.
+  const reads = (t: ScanTouch): string =>
+    t.alsoMaybe === undefined
+      ? surfaceWord(t.expect)
+      : `${surfaceWord(t.expect)} — or, if the jaw reaches this far after all, ${surfaceWord(t.alsoMaybe)}`;
+
   // One step per edge. The four touches of an edge differ only in how far they sit from it, so the
   // step is one sentence with the expected reading beside each position.
   for (const scan of plan.edges) {
+    // #430 situation 1: a gripped edge with the blank at or below the jaw tops. There is no
+    // outward scan here at all — the jaw's face is the edge's reference, and one touch on the
+    // blank's own top inside it confirms the blank is seated against that face.
+    if (scan.reference === 'jaw') {
+      const confirm = scan.touches[0]!;
+      steps.push({
+        text:
+          `Check ${sideWords(scan.edge)} — at ${alongWord(scan.edge)}, BY REFERENCE rather than by ` +
+          'scanning: the blank is pushed against the fixed jaw and the moving jaw closes onto its ' +
+          'width, so this edge is where the jaw’s face is. Touch down once, ' +
+          `${fmtNum(Math.abs(confirm.offsetMm))} mm inside it (${reads(confirm)}): the blank’s own top ` +
+          'there confirms it is seated against the jaw. Do NOT touch past this edge — the jaw’s top ' +
+          'stands above the blank there, and an outward reading would be the jaw, not stock.',
+        record: `${scan.axis === 'x' ? 'X' : 'Y'} of the jaw face, and whether the inside touch was the blank (mm)`,
+        unverified,
+      });
+      continue;
+    }
     const aimed = scan.touches.find((t) => t.role === 'edge')!;
     const inside = scan.touches.filter((t) => t.role === 'inside');
     const outward = scan.touches[scan.touches.length - 1]!;
-    // #391 review item 7 — when the fixture's own uncertainty reaches this point, the plan carries a
-    // second reading: the nominal jaw stops short of it, and a jaw at the wide end of its band does
-    // not. A step that printed only the first would turn a CORRECT reading into a fault the operator
-    // has to explain. The second reading is always the jaw's TOP, because growing the box can only
-    // add jaw — `ScanTouch.alsoMaybe` owns that direction.
-    const reads = (t: ScanTouch): string =>
-      t.alsoMaybe === undefined
-        ? surfaceWord(t.expect)
-        : `${surfaceWord(t.expect)} — or, if the jaw reaches this far after all, ${surfaceWord(t.alsoMaybe)}`;
     steps.push({
       text:
         `Check ${sideWords(scan.edge)} — at ${alongWord(scan.edge)}. Touch down at ` +
@@ -1329,7 +1372,14 @@ function materialPositionSteps(
       'Reading the depths. Each edge is judged against the blank’s own top WHERE THAT EDGE IS, not ' +
       `against one number, because the face is domed: within ${sidesMm} mm of the reference is the ` +
       `blank at the left and right edges, ${endsMm} mm at the front and back, and ${belowMm} mm or more ` +
-      'below is off the blank at any of them. Between the two the tip is on the edge itself.',
+      'below is off the blank at any of them. Between the two the tip is on the edge itself.' +
+      (jawAbove
+        ? ` A reading at the jaw’s own height — ${fmtNum(-plan.bands.jawMm)} mm ABOVE the reference — ` +
+          'is the jaw, not the blank.'
+        : jawNear
+          ? ` A reading at ${fmtNum(plan.bands.jawMm)} mm below the reference is the jaw’s own top: ` +
+            'off the blank, not stock.'
+          : ''),
     unverified,
   });
   steps.push({
@@ -1359,19 +1409,31 @@ function materialPositionSteps(
       // #391 review item 6 — the pass that never brackets the edge, which the old steps had no answer
       // for: an operator whose four readings were all "the blank" had nothing to bisect between.
       `If the readings do not bracket the change at all, the edge is not where the first pass looked. ` +
-      `ALL FOUR reading the blank means every touch was still on it: step ${stepMm} mm further OUT and ` +
+      `ALL of them reading the blank means every touch was still on it: step ${stepMm} mm further OUT and ` +
       `try again. An OFF reading at the innermost touch means the pass started past the edge: step ` +
       `${stepMm} mm back IN. Keep stepping until two neighbouring readings straddle the change, then ` +
       'bisect as above — and past an edge with no jaw under the tip the change arrives as a miss, ' +
-      'which counts as off the blank.',
+      'which counts as off the blank.' +
+      (jawRef.length > 0
+        ? ' This pass is for the scanned edges only: a jaw-referenced edge has nothing to bracket, ' +
+          'because it is read off the jaw’s face.'
+        : ''),
     unverified,
   });
   steps.push({
     text:
-      `Compare with the file: the edges should lie where it says they do — X = 0 and X = ${fmtNum(job.stock.length)} for the ` +
-      `left and right, Y = 0 and Y = ${fmtNum(job.stock.width)} for the front and back — after the ${biasMm} mm ` +
-      'above is taken back toward the blank. More than the job’s own margin out, and the blank has moved: re-clamp it, or set the ' +
-      'origin from the measured position. Do not cut until the two agree.',
+      jawRef.length === 0
+        ? `Compare with the file: the edges should lie where it says they do — X = 0 and X = ${fmtNum(job.stock.length)} for the ` +
+          `left and right, Y = 0 and Y = ${fmtNum(job.stock.width)} for the front and back — after the ${biasMm} mm ` +
+          'above is taken back toward the blank. More than the job’s own margin out, and the blank has moved: re-clamp it, or set the ' +
+          'origin from the measured position. Do not cut until the two agree.'
+        : `Compare with the file: the scanned edges should lie where it says they do — ` +
+          `${scanned.map((e) => `${e.axis.toUpperCase()} = ${fmtNum(e.nominalMm)}`).join(' and ')} ` +
+          `after the ${biasMm} mm above is taken back toward the blank. The jaw-referenced edges are ` +
+          'not measured: what to confirm there is that the blank is seated against the jaw’s face ' +
+          '(the inside touch found the blank’s own top) and that the jaw is where the fixture says. ' +
+          'More than the job’s own margin out, and the blank has moved: re-clamp it, or set the ' +
+          'origin from the measured position. Do not cut until the two agree.',
     value: `allowed ${fmtNum(job.edgeMargin)} mm`,
     record: 'edge that is out, and by how much (mm)',
     unverified,

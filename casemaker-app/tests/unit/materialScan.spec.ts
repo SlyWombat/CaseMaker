@@ -18,6 +18,7 @@ import {
   planMaterialScan,
   alongWord,
   inOutWord,
+  surfaceOf,
   surfaceWord,
   SCAN_COARSE_STEP_MM,
   SCAN_MISS_MARGIN_MM,
@@ -371,9 +372,125 @@ describe('the words the run sheet prints (#391)', () => {
   });
 
   it('says what each reading means, misses included', () => {
-    const words: TouchSurface[] = ['blank', 'corner', 'below', 'miss'];
+    const words: TouchSurface[] = ['blank', 'corner', 'below', 'high', 'miss'];
     for (const w of words) expect(surfaceWord(w).length).toBeGreaterThan(10);
     expect(surfaceWord('miss')).toContain('travel cap');
     expect(surfaceWord('corner')).toContain('edge');
+    // #430 — a HIGH reading is the jaw standing ABOVE the blank, and the word must not let it be
+    // mistaken for stock: that confusion is the whole reason the surface exists.
+    expect(surfaceWord('high')).toContain('jaw');
+    expect(surfaceWord('high')).toContain('ABOVE the blank');
+    expect(surfaceWord('high')).not.toContain('blank’s own top');
+  });
+});
+
+// #430 — A BLANK AT OR BELOW THE JAW TOPS. The bench's thin film (76 × 25.35 × 1.5, sitting
+// 1.6 mm below the jaw tops) is the case: there is no proud edge to scan outward, because a step
+// past it lands on the jaw's top, which now stands ABOVE the blank and would read as stock. The
+// gripped edges are then read from the jaw's face itself, and only the free ends are scanned.
+describe('planMaterialScan — a blank below the jaw tops (#430)', () => {
+  /** The bench job on a thin film blank: same vise, 1.6 mm BELOW the jaw tops. */
+  function thinFilmJob(): EngraveJob {
+    const job = benchJob();
+    job.stock = { ...job.stock, length: 76, width: 25.35, thickness: 1.5 };
+    job.workholding = {
+      ...job.workholding,
+      kind: 'vise',
+      vise: { ...job.workholding.vise, stockProud: -1.6 },
+    };
+    return job;
+  }
+
+  it('references the gripped edges by the jaw and scans the free ends outward', () => {
+    const p = planned(thinFilmJob());
+    // The plan no longer refuses a blank under the jaw tops: the jaw IS the reference.
+    expect(p.bands.jawMm).toBe(-1.6);
+    // The left and right edges are the faces the jaws close on, so they are read from the jaw
+    // itself — one confirming touch, no outward walk.
+    expect(p.edges.map((e) => [e.edge, e.reference])).toEqual([
+      ['left', 'jaw'],
+      ['right', 'jaw'],
+      ['front', 'scanned'],
+      ['back', 'scanned'],
+    ]);
+    for (const edge of ['left', 'right'] as const) {
+      const touches = touchesOf(p, edge);
+      expect(touches).toHaveLength(1);
+      expect(touches[0]!.offsetMm).toBe(-(p.tipRadiusMm + SCAN_COARSE_STEP_MM));
+      expect(touches[0]!.expect).toBe('blank');
+    }
+    // The free ends keep today's four touches, and they still run to the cap — nothing lies at
+    // jaw height past the middle of a side.
+    for (const edge of ['front', 'back'] as const) {
+      expect(touchesOf(p, edge).map((t) => t.offsetMm)).toEqual([
+        -(p.tipRadiusMm + SCAN_COARSE_STEP_MM),
+        -p.tipRadiusMm,
+        0.7,
+        p.tipRadiusMm + SCAN_COARSE_STEP_MM,
+      ]);
+      expect(touchesOf(p, edge).map((t) => t.expect)).toEqual(['blank', 'blank', 'corner', 'miss']);
+    }
+  });
+
+  it('caps the free ends below the BLANK’s top, and says why the jaw cannot bound them', () => {
+    const p = planned(thinFilmJob());
+    // The jaw stands ABOVE the blank, so a cap at the jaw's height would be inside the descent
+    // rather than under it. The reference is the blank's own top and the cap is the margin below it.
+    expect(p.missTravelMm).toBeCloseTo(SCAN_MISS_MARGIN_MM, 6);
+    const note = p.notes.join(' ');
+    expect(note).toContain('BELOW the jaw tops');
+    expect(note).toContain('the left edge and the right edge');
+    expect(note).toContain('by the JAW, not scanned outward');
+    expect(note).toContain('The jaw cannot bound this one');
+    // And the HIGH signature is named, because the free ends can never produce it but the operator
+    // needs to know what a reading at the jaw's height means.
+    expect(note).toContain('ABOVE the reference');
+    expect(note).toContain('HIGH signature');
+  });
+
+  it('reports a HIGH reading at the jaw’s height as the jaw, not as stock', () => {
+    const p = planned(thinFilmJob());
+    const bands = edgeOf(p, 'left').bands;
+    // The jaw's top is 1.6 mm ABOVE the reference: a trigger there is the jaw. Without the jaw
+    // band it would fall inside the blank's own band and read as the blank's top — the misreading
+    // that made the thin film unscannable.
+    expect(surfaceOf(p.bands.jawMm, bands, 0.05)).toBe('high');
+    expect(surfaceOf(0, bands, 0.05)).toBe('blank');
+    expect(surfaceOf(0.7, bands, 0.05)).not.toBe('high');
+  });
+});
+
+describe('planMaterialScan — the 3.81 badge above the jaw tops is unchanged (#430)', () => {
+  /** The bench badge at the height the maintainer's issue states: 0.71 mm proud. */
+  function badgeJob(): EngraveJob {
+    const job = benchJob();
+    job.workholding = {
+      ...job.workholding,
+      kind: 'vise',
+      vise: { ...job.workholding.vise, stockProud: 0.71 },
+    };
+    return job;
+  }
+
+  it('keeps today’s four-touch plan on every edge', () => {
+    const p = planned(badgeJob());
+    expect(p.edges.every((e) => e.reference === 'scanned')).toBe(true);
+    expect(expectations(p, 'left')).toEqual(['-2:blank', '-1:blank', '0.7:corner', '2:below']);
+    expect(expectations(p, 'right')).toEqual(['-2:blank', '-1:blank', '0.7:corner', '2:below']);
+    expect(expectations(p, 'front')).toEqual(['-2:blank', '-1:blank', '0.7:corner', '2:miss']);
+    expect(expectations(p, 'back')).toEqual(['-2:blank', '-1:blank', '0.7:corner', '2:miss']);
+    // The jaw is still read as `below`, not as `high`: it stands BELOW the blank, where the band
+    // order already reads it correctly, and re-wording it would change a plan that is right.
+    expect(touchesOf(p, 'left')[3]!.expect).toBe('below');
+  });
+
+  it('adds only the HIGH-signature note, because the jaw is within the tip radius plus the margin', () => {
+    const p = planned(badgeJob());
+    const note = p.notes.find((n) => n.includes('HIGH signature'))!;
+    expect(note).toContain('0.71 mm below the reference');
+    expect(note).toContain('never as the blank’s own top');
+    // The badge's plan itself is otherwise what it was: the same bands, the same cap.
+    expect(p.bands.jawMm).toBe(0.71);
+    expect(p.missTravelMm).toBeCloseTo(0.71 + SCAN_MISS_MARGIN_MM, 6);
   });
 });

@@ -183,8 +183,16 @@ export type ScanEdge = JobSide;
  * point that produced it. `below` and `miss` both mean "not the blank", and are separate because
  * only a miss says the travel cap was reached — which is the reading that means the tip had
  * nothing under it at all.
+ *
+ * `high` is the fourth "not the blank", and it exists because of a blank at or below the jaw tops
+ * (#430): the jaw's top then stands ABOVE the blank's, so a touch that finds the jaw stops at a
+ * depth that would otherwise read as the blank's own top. It is the signature the scan needs to
+ * stop walking across the jaw — and the one a touch INSIDE the blank can also give when the blank
+ * is narrower than the file says, which is why it is a separate word rather than folded into
+ * `below`: "the tip is on the jaw, above the reference" is a different fact from "the tip went
+ * past everything".
  */
-export type TouchSurface = 'blank' | 'corner' | 'below' | 'miss';
+export type TouchSurface = 'blank' | 'corner' | 'below' | 'high' | 'miss';
 
 /**
  * What the fixture leaves under a point: a jaw's top certainly, nothing certainly, or — between
@@ -204,6 +212,13 @@ export interface ScanBands {
   blankMm: Mm;
   /** At or below this, the reading is off the blank — the jaw's top, or anything lower. */
   belowMm: Mm;
+  /**
+   * The jaw's own top, mm below the reference — `stockProud`, and NEGATIVE when the jaw stands
+   * above the blank (#430). A reading at this depth is the jaw, whatever the blank's band says:
+   * with the blank at or below the jaw tops the two heights collide, and without this the jaw is
+   * read as stock and the scan walks on across it.
+   */
+  jawMm: Mm;
 }
 
 /** One downward touch the operator makes. */
@@ -281,6 +296,17 @@ export interface EdgeScan {
    * see from where they stand and the plan can, and it is why those touches are capped.
    */
   jawUnder: JawReach;
+  /**
+   * What fixes this edge's coordinate (#430): the scan walking outward until the reading leaves
+   * the blank (`'scanned'`), or the JAW ITSELF (`'jaw'`).
+   *
+   * A gripped edge is referenced by the jaw when the blank sits at or below the jaw tops: the
+   * blank is pushed against the fixed jaw and the moving jaw closes onto its width, so X comes
+   * from the fixture's own geometry — and there is no outward scan to make, because the tip
+   * would step onto the jaw's top, which then stands ABOVE the blank and would read as stock.
+   * One touch on the blank's top beside the jaw confirms it is seated against the jaw face.
+   */
+  reference: 'scanned' | 'jaw';
   /** In the order they are taken: inboard first, outward after. */
   touches: ScanTouch[];
 }
@@ -296,8 +322,9 @@ export interface MaterialScanPlan {
    * The band the JOB's own statement gives — its stated dome plus the dial — which is the OUTER
    * bound: the blank's face is domed by at most that much anywhere, and each edge is judged
    * against the tighter band it carries (`EdgeScan.bands`), because the top where that edge is sits
-   * above the figure's own extreme. Only `belowMm`, the jaw's top, is the same for every edge and
-   * is therefore exact wherever it is read.
+   * above the figure's own extreme. `belowMm` is the jaw's top wherever the jaw stands below the
+   * blank; with the blank at or below the jaw tops (#430) there is no such band, and `belowMm` is
+   * instead the deepest the corner contact can read — `jawMm` carries the jaw's top, negative.
    */
   bands: ScanBands;
   /** How far below the reference a touch may travel before it is certainly on nothing, mm. */
@@ -345,7 +372,12 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
   const dial = scan.readingResolutionMm;
   const step = scan.coarseStepMm;
 
-  if (!(proud > dial)) {
+  // A blank at or below the jaw tops is not refused on that account any more (#430): the jaw
+  // face becomes the reference for a gripped edge, and only the FREE ends are scanned outward.
+  // What is refused is a blank that is proud of the jaw tops by less than the dial — there the
+  // outward scan cannot tell the blank's height from the jaw's.
+  const belowJawTops = proud <= 0;
+  if (!belowJawTops && !(proud > dial)) {
     return {
       refuse: true,
       code: 'not-proud-enough',
@@ -359,7 +391,10 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
   const dome = job.stock.flatness?.dome ?? PROVISIONAL_DOME_MM;
   const blankMm = dome + dial;
   const belowMm = proud - dial;
-  if (belowMm <= blankMm) {
+  // Only a blank ABOVE the jaw tops can have its edge hidden by its own dome: the refusal asks
+  // whether the jaw is still below the blank's top somewhere in its band. Below the jaw tops the
+  // jaw is the reference instead, so the question does not arise (#430).
+  if (!belowJawTops && belowMm <= blankMm) {
     return {
       refuse: true,
       code: 'dome-covers-the-jaw',
@@ -370,7 +405,9 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
     };
   }
 
-  const bands: ScanBands = { blankMm, belowMm };
+  const bands: ScanBands = belowJawTops
+    ? { blankMm, belowMm: dome + tipR, jawMm: proud }
+    : { blankMm, belowMm, jawMm: proud };
   // The fixture as an obstacle envelope — the ONE statement of where the jaws are (`viseEnvelope`
   // already carries the sacrificial shift, so a strip between jaw and blank moves the jaw's top
   // with it and this needs no second copy of that rule).
@@ -420,8 +457,13 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
     // whose edges sit twice as far below the middle as the figure allows from being read as a cut.
     const [ex, ey] = at(0);
     const dropMm = domeDropMm(job, ex, ey);
-    const edgeBands: ScanBands = { blankMm: dropMm + dial, belowMm };
-    const touches = offsets.map((offsetMm, i): ScanTouch => {
+    // A blank at or below the jaw tops has no band under it to read against, so `belowMm` here is
+    // the deepest the corner contact can go (this edge's top plus a tip radius) and the jaw's own
+    // height rides in `jawMm` (#430). Above the jaw tops the bands are today's.
+    const edgeBands: ScanBands = belowJawTops
+      ? { blankMm: dropMm + dial, belowMm: dropMm + tipR, jawMm: proud }
+      : { blankMm: dropMm + dial, belowMm, jawMm: proud };
+    const probe = (offsetMm: Mm, role: ScanTouch['role']): ScanTouch => {
       const point = at(offsetMm);
       const reach = jawReach(point[0], point[1]);
       // The reading the plan stands behind is the one the fixture's NOMINAL dimensions give. When
@@ -433,17 +475,27 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
       const touch: ScanTouch = {
         edge,
         offsetMm,
-        role: roles[i] ?? 'inside',
+        role,
         at: point,
-        expect: surfaceOf(sure, edgeBands),
+        expect: surfaceOf(sure, edgeBands, dial),
       };
       if (reach === 'maybe') {
-        const other = surfaceOf(predictedDepthMm(offsetMm, tipR, proud, dropMm, true), edgeBands);
+        const other = surfaceOf(predictedDepthMm(offsetMm, tipR, proud, dropMm, true), edgeBands, dial);
         if (other !== touch.expect) touch.alsoMaybe = other;
       }
       return touch;
-    });
+    };
     const outward = at(tipR);
+    const jawUnder = jawReach(outward[0], outward[1]);
+    // SITUATION 1 of #430's plan: the blank is at or below the jaw tops and this edge is gripped
+    // by the jaws. The jaw face is the reference and there is NOTHING to scan outward — the tip
+    // would step onto the jaw's top, which stands above the blank and would read as stock. One
+    // touch on the blank's own top inside the edge confirms the blank is seated against the jaw.
+    // A free end is untouched by this: it keeps today's four touches (situation 3).
+    const jawReference = belowJawTops && jawUnder !== 'off';
+    const touches = jawReference
+      ? [probe(-(tipR + step), 'inside')]
+      : offsets.map((offsetMm, i) => probe(offsetMm, roles[i] ?? 'inside'));
     return {
       edge,
       axis,
@@ -452,18 +504,41 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
       alongMm,
       dropMm,
       bands: edgeBands,
-      jawUnder: jawReach(outward[0], outward[1]),
+      jawUnder,
+      reference: jawReference ? 'jaw' : 'scanned',
       touches,
     };
   });
 
-  const missTravelMm = proud + scan.missMarginMm;
+  // With the blank below the jaw tops the reference is the blank's own top, so the cap is the
+  // margin below IT — not below the jaw's, which would be the tip's descent past both of them.
+  // The free ends are the only scanned edges here, and nothing lies under them (situation 3).
+  const missTravelMm = belowJawTops ? scan.missMarginMm : proud + scan.missMarginMm;
   /** The outward touch's offset past the nominal edge, mm — the last of `offsets`. */
   const outwardMm = tipR + step;
   const flatness: StockFlatness | undefined = job.stock.flatness;
   const acrossX = flatness === undefined || flatness.across === 'width';
-  const free = edges.filter((e) => e.jawUnder === 'off');
-  const unsure = edges.filter((e) => e.jawUnder === 'maybe');
+  const jawReferenced = edges.filter((e) => e.reference === 'jaw');
+  const free = edges.filter((e) => e.reference === 'scanned' && e.jawUnder === 'off');
+  const unsure = edges.filter((e) => e.reference === 'scanned' && e.jawUnder === 'maybe');
+  // A blank at or below the jaw tops with no gripped edge at all has neither a jaw to reference
+  // nor a proud edge to scan: the fixture's own boxes do not cover the sides the blank is
+  // supposedly clamped between, which is exactly the state this scan cannot read.
+  if (belowJawTops && jawReferenced.length === 0) {
+    return {
+      refuse: true,
+      code: 'not-proud-enough',
+      message:
+        `the blank stands ${fmtNum(proud)} mm proud of the jaw tops — at or below them — and no ` +
+        'jaw reaches either gripped edge, so there is nothing to reference the blank against. ' +
+        'Check the vise’s stated jaw positions before planning a scan by hand',
+    };
+  }
+  // A HIGH reading is one that stops at the jaw's top ABOVE the blank, and it is only possible
+  // with a blank at or below the jaw tops. With the blank proud by less than the tip's radius
+  // plus the outward margin the outward touch can also stop on the jaw's top, which is then
+  // BELOW the blank — the same touch as today, and the note says which signature it is (item 2).
+  const highSignature = belowJawTops || (proud > 0 && proud < tipR + scan.missMarginMm);
   /** The blank's own height below the reference at one edge's touch line, mm. */
   const dropAt = (edge: ScanEdge): Mm => edges.find((e) => e.edge === edge)!.dropMm;
   /** The two figures the shape is built from: the span the job's own dome names, and the other. */
@@ -499,12 +574,42 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
         `job states is taken across the span it names; the other span carries the ` +
         `${fmtNum(otherDrop)} mm §11.8 measured on the badge blank. Each edge’s step prints the ` +
         'height it is judged against.',
+      ...(jawReferenced.length > 0
+        ? [
+            `The blank sits ${fmtNum(-proud)} mm BELOW the jaw tops, so ${names(jawReferenced.map((e) => e.edge))} ` +
+              `are referenced by the JAW, not scanned outward: the blank is pushed against the fixed ` +
+              `jaw and the moving jaw closes onto its width, so the jaw faces are where those edges ` +
+              `are. One touch on the blank’s own top ${fmtNum(tipR + step)} mm inside each confirms ` +
+              'the blank is seated against the jaw. A step past the edge is not taken — it would land ' +
+              'on the jaw’s top, which stands above the blank and would read as stock.',
+          ]
+        : []),
+      ...(highSignature
+        ? [
+            belowJawTops
+              ? `A reading at the jaw’s own height — ${fmtNum(-proud)} mm ABOVE the reference — is the ` +
+                'HIGH signature: it is the jaw, not the blank, and the scan reads it as off the blank ' +
+                'rather than as stock.'
+              : `The jaw tops lie only ${fmtNum(proud)} mm below the reference, inside the tip radius ` +
+                `plus the ${fmtNum(scan.missMarginMm)} mm outward margin, so an outward touch can ` +
+                'stop on them. That reading is the HIGH signature — the jaw’s top, not stock — and ' +
+                'the step prints it as off the blank, never as the blank’s own top.',
+          ]
+        : []),
       free.length > 0
-        ? `Nothing lies at jaw height under the tip past ${names(free.map((e) => e.edge))} — a jaw ` +
-          'reaches only along the blank’s ends — so those outside touches have nothing to stop ' +
-          `them: a miss there is the expected reading, not a fault, and the cap ${fmtNum(missTravelMm)} mm ` +
-          'below the reference is what keeps them off the bed.'
-        : 'Every edge has a jaw top outside it, so an outside touch stops on the jaw rather than on the cap.',
+        ? belowJawTops
+          ? `Nothing lies at jaw height under the tip past ${names(free.map((e) => e.edge))} — a jaw ` +
+            'reaches only along the blank’s ends — so those outside touches have nothing to stop ' +
+            `them: a miss there is the expected reading, not a fault, and the cap ${fmtNum(missTravelMm)} mm ` +
+            'below the BLANK’s top is what keeps them off the bed. The jaw cannot bound this one: it ' +
+            `stands ${fmtNum(-proud)} mm above the blank, inside the cap rather than below it.`
+          : `Nothing lies at jaw height under the tip past ${names(free.map((e) => e.edge))} — a jaw ` +
+            'reaches only along the blank’s ends — so those outside touches have nothing to stop ' +
+            `them: a miss there is the expected reading, not a fault, and the cap ${fmtNum(missTravelMm)} mm ` +
+            'below the reference is what keeps them off the bed.'
+        : belowJawTops
+          ? 'Every edge is referenced by a jaw, so nothing is scanned outward and no touch descends past the blank.'
+          : 'Every edge has a jaw top outside it, so an outside touch stops on the jaw rather than on the cap.',
       ...(unsure.length > 0
         ? [
             `Past ${names(unsure.map((e) => e.edge))} the answer is not certain either way: the ` +
@@ -513,7 +618,9 @@ export function planMaterialScan(job: EngraveJob, scan: MaterialScanSettings = S
               'both readings.',
           ]
         : []),
-      `The ${job.workholding.kind} already fixes X and rotation to within ±${fmtNum(vise.uncertainty)} mm, so the left and right edges mostly re-check that the blank is seated against them; the front and back edges are the free ones.`,
+      jawReferenced.length > 0 && free.length > 0
+        ? `The ${job.workholding.kind} already fixes X and rotation to within ±${fmtNum(vise.uncertainty)} mm, which is what makes ${names(jawReferenced.map((e) => e.edge))} readable by reference at all; ${names(free.map((e) => e.edge))} are the free ones, and the scan measures them.`
+        : `The ${job.workholding.kind} already fixes X and rotation to within ±${fmtNum(vise.uncertainty)} mm, so the left and right edges mostly re-check that the blank is seated against them; the front and back edges are the free ones.`,
       'A Z-only tip cannot find rotation: this scan says where the edges are, not whether the blank sits square in the jaws.',
       // #449 review item 5 — #452's 1 mm step brings the outside touch to within a millimetre of the
       // blank's wall, and it may descend the whole start gap plus the cap there. That is safe only if
@@ -571,9 +678,20 @@ function predictedDepthMm(o: Mm, tipR: Mm, proud: Mm, dropMm: Mm, jawUnder: bool
   return corner;
 }
 
-/** Which surface a trigger depth was, on this job's bands. `null` is a touch that never fired. */
-function surfaceOf(depthMm: Mm | null, bands: ScanBands): TouchSurface {
+/**
+ * Which surface a trigger depth was, on this job's bands. `null` is a touch that never fired.
+ *
+ * Exported as the ONE classifier, so a live reading and a planned one are judged by the same rule
+ * (#430): a touch that stops at the jaw's own height while the jaw stands above the blank is
+ * `high` — the jaw, not stock — and the operator is told which signature it is.
+ */
+export function surfaceOf(depthMm: Mm | null, bands: ScanBands, dialMm: Mm): TouchSurface {
   if (depthMm === null) return 'miss';
+  // THE JAW FIRST, and only where it stands at or above the blank's band (#430). There a reading
+  // at the jaw's height would otherwise fall inside the blank's band and be read as stock — the
+  // one misreading this issue exists to prevent. Where the jaw is BELOW the blank the band order
+  // already reads it as `below`, and moving it to `high` would change a plan that is right.
+  if (bands.jawMm <= bands.blankMm && Math.abs(depthMm - bands.jawMm) <= dialMm) return 'high';
   if (depthMm <= bands.blankMm) return 'blank';
   if (depthMm >= bands.belowMm) return 'below';
   return 'corner';
@@ -645,6 +763,8 @@ export function surfaceWord(surface: TouchSurface): string {
       return 'the blank’s edge itself — the tip is over the corner';
     case 'below':
       return 'off the blank and lower — the jaw’s top, or whatever is under the tip';
+    case 'high':
+      return 'the jaw’s top ABOVE the blank — off the blank, not stock';
     case 'miss':
       return 'nothing at all: the tip stops on its travel cap';
   }
