@@ -303,6 +303,21 @@
   width: 44px;
 }
 
+/* #489 review — in a list every drawing shares one px/mm, so each SVG keeps its natural size and
+   a 1 mm flat is genuinely smaller than a 6.35 mm ball. The inline width/height on the SVG does
+   the arithmetic; these rules only stop the mounts from stretching it back out. */
+.cutter-profile.is-shared-scale,
+.tbl .cutter-profile.is-shared-scale {
+  width: auto;
+}
+
+.cutter-profile.is-shared-scale .cutter-profile__svg,
+.tbl .cutter-profile.is-shared-scale .cutter-profile__svg {
+  width: auto;
+  height: auto;
+  max-width: none;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .cutter-profile__path,
   .cutter-profile__dimension-text,

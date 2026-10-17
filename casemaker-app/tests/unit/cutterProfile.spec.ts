@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCutterProfile,
   cutterDimensionSpecs,
+  cutterProfileScale,
   cutterProfileSvg,
   fmtMm,
   SHAPE_DIMENSION_CODES,
@@ -129,6 +130,16 @@ describe('cutterProfile (#489)', () => {
     expect(an).toMatchObject({ field: 'angle', value: 15, text: '15°' });
   });
 
+  it('puts AN clear of the flank a narrow V measures (#489 review)', () => {
+    // A 30° engraver is 15° a side: a label centred on the arc sits on the cone's own edge. AN
+    // reads outward from the measured flank; TI spans the whole point and stays centred.
+    const an = buildCutterProfile(ENGRAVER, FULL).dimensions.find((d) => d.code === 'AN')!;
+    expect(an.textAt.anchor).toBe('start');
+    expect(an.textAt.x).toBeGreaterThan(0);
+    const ti = buildCutterProfile(CHAMFER, FULL).dimensions.find((d) => d.code === 'TI')!;
+    expect(ti.textAt.anchor).toBe('middle');
+  });
+
   it('draws a missing field as a dashed dimension with ? and a dashed edge', () => {
     // Every Makera engraver/chamfer leaves shoulderLength empty: the shoulder must be visibly
     // unknown, not drawn as a measured length.
@@ -240,10 +251,56 @@ describe('cutterProfile (#489)', () => {
       shoulderLength: 20,
     });
     const model = buildCutterProfile(tiny, FULL);
-    expect(model.scaleBars.length).toBeGreaterThanOrEqual(2);
+    // One bar, under the tool on the axis, labelled as a scale rather than as a tool dimension.
+    expect(model.scaleBars.length).toBe(1);
+    const bar = model.scaleBars[0]!;
+    expect(bar.x1).toBe(-bar.x2);
+    expect(bar.textAt.text).toMatch(/^scale [\d.]+ mm$/);
+    expect(bar.textAt.x).toBe(0);
+    // Only the axis that had to be compressed is named, in words.
     expect(model.scaleNote).not.toBeNull();
-    expect(model.scaleNote).toContain('scale');
-    expect(model.scaleNoteAt!.text).toContain('read the bars');
+    expect(model.scaleNote).toMatch(/(length|width) compressed [\d.]+×/);
+    expect(model.scaleNoteAt!.text).toBe(model.scaleNote);
+  });
+
+  it('gives a list one uniform scale, so relative sizes are true (#489 review)', () => {
+    const small = flatEndMill(1, {
+      name: '1 mm flat end',
+      handleDiameter: 1,
+      fluteLength: 6,
+      shoulderLength: 20,
+    });
+    const ball = flatEndMill(6.35, {
+      name: '6.35 mm ball end',
+      shape: 'ball',
+      handleDiameter: 6.35,
+      tipDiameter: 6.35,
+      diameter: 6.35,
+      cornerRadius: 3.175,
+      fluteLength: 10,
+      shoulderLength: 18,
+    });
+    const scale = cutterProfileScale([small, ball], 'full');
+    const smallModel = buildCutterProfile(small, { ...FULL, scale });
+    const ballModel = buildCutterProfile(ball, { ...FULL, scale });
+    expect(smallModel.scale).toEqual({ x: scale, y: scale });
+    expect(ballModel.scale).toEqual({ x: scale, y: scale });
+    // No axis is compressed when the scale is chosen for the list.
+    expect(smallModel.scaleNote).toBeNull();
+    expect(ballModel.scaleNote).toBeNull();
+    // The drawing is not stretched to its mount: smaller cutter, narrower drawing.
+    expect(smallModel.viewBox.width).toBeLessThan(ballModel.viewBox.width);
+    // Both bars state the same mm length, because the px/mm is the same.
+    expect(smallModel.scaleBars[0]!.x2 - smallModel.scaleBars[0]!.x1).toBe(
+      ballModel.scaleBars[0]!.x2 - ballModel.scaleBars[0]!.x1,
+    );
+  });
+
+  it('picks its own uniform scale when it is drawn alone, with no compression note', () => {
+    const model = buildCutterProfile(tool('flat', { tipDiameter: 3.175, diameter: 3.175 }), FULL);
+    expect(model.scale.x).toBe(model.scale.y);
+    expect(model.scaleNote).toBeNull();
+    expect(model.scaleBars.length).toBe(1);
   });
 
   it('has no dimensions or scale bars in the picker thumbnail', () => {

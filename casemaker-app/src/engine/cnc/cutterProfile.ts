@@ -65,6 +65,13 @@ export interface CutterRefusal {
 
 export interface CutterProfileOptions {
   size?: CutterProfileSize;
+  /**
+   * SVG units per mm, shared by every drawing in a list (#489 review). Without it a drawing fits
+   * itself, which makes a 1 mm flat look as large as a 6.35 mm ball once the SVG is stretched to
+   * the mount's width. Pass the value from {@link cutterProfileScale} with the same size and every
+   * drawing in the list keeps its true relative size.
+   */
+  scale?: number | null;
   /** The job's cut depth, mm. Draws the V-bit's groove width at that depth when the tool is a cone. */
   grooveDepth?: number | null;
   /** The simulator's refusal for this cutter/job, drawn greyed with its reason. */
@@ -161,6 +168,8 @@ export interface CutterProfileScaleBar {
 export interface CutterProfileModel {
   size: CutterProfileSize;
   viewBox: { x: number; y: number; width: number; height: number };
+  /** SVG units per mm actually used, per axis. Equal unless a single drawing had to compress one. */
+  scale: { x: number; y: number };
   title: string;
   desc: string;
   shape: ToolShape;
@@ -1102,14 +1111,22 @@ function placeDimensions(
       }
       const mid = (a0 + a1) / 2;
       const labelR = radius + 9;
+      // AN is the half angle, and on a narrow V (a 30° engraver is 15° a side) the arc's midpoint
+      // is only a few pixels from the axis: a centred label there sits on the cone's own edge (#489
+      // visual review). Put AN just outside the measured flank, reading away from the tool; TI spans
+      // the whole point and its centred label is clear inside a wide cone.
+      const isAn = spec.code === 'AN';
+      const labelAngle = isAn ? a1 : mid;
       out.push({
         ...spec,
         paths,
         textAt: {
-          x: labelR * Math.cos(mid * DEG),
-          y: Y(0) - labelR * Math.sin(mid * DEG) + 3,
+          x: isAn
+            ? radius * Math.cos(labelAngle * DEG) + 14
+            : labelR * Math.cos(mid * DEG),
+          y: Y(0) - radius * Math.sin(labelAngle * DEG) + 3,
           text: `${spec.code} ${spec.text}`,
-          anchor: 'middle',
+          anchor: isAn ? 'start' : 'middle',
           missing,
         },
       });
@@ -1231,34 +1248,71 @@ function niceBarMm(scale: number, minUnits: number, maxUnits: number): { mm: num
   return { mm: best, units: best * scale };
 }
 
+/** The layout a tool's numbers produce, before any scale is chosen. */
+function layoutFor(tool: Tool): { lay: Layout; cone: VCone | null } {
+  const cone = vCone(tool);
+  const dc = cuttingDiameterSource(tool);
+  const tip = positive(tool.tipDiameter);
+  return {
+    lay: axialLayout(tool, cone, dc.value !== null ? dc.value / 2 : null, tip !== null ? tip / 2 : null),
+    cone,
+  };
+}
+
+/** The largest scale at which this tool fits its mount at one uniform px/mm. */
+function fitScale(lay: Layout, size: CutterProfileSize): number {
+  const dims = sizeOf(size);
+  const widthRoom = dims.w * (size === 'thumb' ? 0.92 : 0.56);
+  const heightRoom = dims.h * (size === 'thumb' ? 0.9 : 0.66);
+  const fitX = widthRoom / Math.max(0.2, lay.maxRmm * 2);
+  const fitY = heightRoom / Math.max(1, lay.shankTopMm);
+  return Math.min(fitX, fitY);
+}
+
+/**
+ * One scale for a list of drawings (#489 review), so the tools table, a picker list and a sheet
+ * drawn side by side keep their true relative sizes: a 1 mm flat looks small beside a 6.35 mm ball.
+ * The smallest fit among the tools is the one every drawing can use. Pass it to each
+ * `buildCutterProfile`/`CutterProfile` with the same `size`.
+ */
+export function cutterProfileScale(
+  tools: readonly Tool[],
+  size: CutterProfileSize = 'full',
+): number {
+  let scale = Infinity;
+  for (const tool of tools) scale = Math.min(scale, fitScale(layoutFor(tool).lay, size));
+  // The same ceiling the single-drawing path applies, so a list of only tiny cutters cannot blow
+  // the mount's px/mm up without bound.
+  return Number.isFinite(scale) ? Math.min(scale, 200) : 1;
+}
+
 /**
  * The profile, as a model the two renderers share. Pure: same input, same output, no DOM.
  */
 export function buildCutterProfile(tool: Tool, options: CutterProfileOptions = {}): CutterProfileModel {
   const size = options.size ?? 'full';
   const dims = sizeOf(size);
-  const cone = vCone(tool);
-  const dc = cuttingDiameterSource(tool);
-  const tip = positive(tool.tipDiameter);
-  const bodyRmm = dc.value !== null ? dc.value / 2 : null;
-  const tipRmm = tip !== null ? tip / 2 : null;
-  const lay = axialLayout(tool, cone, bodyRmm, tipRmm);
+  const { lay, cone } = layoutFor(tool);
 
-  // One uniform scale is the truthful default. Width or length is only stretched when it would be
-  // unreadably thin at that scale; the bars say which axis was stretched and by how much.
-  const widthRoom = dims.w * (size === 'thumb' ? 0.92 : 0.56);
-  const heightRoom = dims.h * (size === 'thumb' ? 0.9 : 0.66);
-  const fitX = widthRoom / Math.max(0.2, lay.maxRmm * 2);
-  const fitY = heightRoom / Math.max(1, lay.shankTopMm);
-  const uniform = Math.min(fitX, fitY);
-  let sx = uniform;
-  let sy = uniform;
-  const minWidth = size === 'thumb' ? 8 : 14;
-  const minHeight = size === 'thumb' ? 22 : 32;
-  if (lay.maxRmm * 2 * sx < minWidth) sx = minWidth / Math.max(0.2, lay.maxRmm * 2);
-  if (lay.shankTopMm * sy < minHeight) sy = minHeight / Math.max(1, lay.shankTopMm);
-  lay.sx = Math.min(sx, 260);
-  lay.sy = Math.min(sy, 200);
+  // One uniform scale is the truthful default. For a single drawing, an axis is only stretched when
+  // it would be unreadably thin at that scale, and the note says which one and by how much. A
+  // caller passing a shared `scale` gets that scale untouched on both axes, so a list stays
+  // comparable.
+  const shared = positive(options.scale ?? null);
+  if (shared !== null) {
+    lay.sx = Math.min(shared, 260);
+    lay.sy = lay.sx;
+  } else {
+    const uniform = fitScale(lay, size);
+    let sx = uniform;
+    let sy = uniform;
+    const minWidth = size === 'thumb' ? 8 : 14;
+    const minHeight = size === 'thumb' ? 22 : 32;
+    if (lay.maxRmm * 2 * sx < minWidth) sx = minWidth / Math.max(0.2, lay.maxRmm * 2);
+    if (lay.shankTopMm * sy < minHeight) sy = minHeight / Math.max(1, lay.shankTopMm);
+    lay.sx = Math.min(sx, 260);
+    lay.sy = Math.min(sy, 200);
+  }
   lay.font = dims.font;
 
   const built = buildProfile(tool, cone, lay, options);
@@ -1292,71 +1346,53 @@ export function buildCutterProfile(tool: Tool, options: CutterProfileOptions = {
   for (const m of extraMarks) addTextBounds(b, m, dims.font);
   if (built.groove !== null) addTextBounds(b, built.groove.label, dims.font);
 
-  // ---- scale bars ---------------------------------------------------------------------------
+  // ---- one scale bar, under the tool on the shank's axis (#489 review) -----------------------
   const scaleBars: CutterProfileScaleBar[] = [];
   let scaleNote: string | null = null;
   let scaleNoteAt: CutterProfileText | null = null;
   if (size !== 'thumb') {
     const base = boundsOrFallback(b);
     const barY = base.maxY + 22;
-    const startX = base.minX + 8;
-    const hBar = niceBarMm(lay.sx, 34, 78);
+    const bar = niceBarMm(lay.sx, 34, 78);
+    const half = bar.units / 2;
     scaleBars.push({
       orientation: 'horizontal',
-      x1: startX,
+      x1: -half,
       y1: barY,
-      x2: startX + hBar.units,
+      x2: half,
       y2: barY,
       ticks: [
-        { x1: startX, y1: barY - 4, x2: startX, y2: barY + 4 },
-        { x1: startX + hBar.units, y1: barY - 4, x2: startX + hBar.units, y2: barY + 4 },
+        { x1: -half, y1: barY - 4, x2: -half, y2: barY + 4 },
+        { x1: half, y1: barY - 4, x2: half, y2: barY + 4 },
       ],
-      mm: hBar.mm,
+      mm: bar.mm,
       textAt: {
-        x: startX + hBar.units / 2,
+        x: 0,
         y: barY + 13,
-        text: `${fmtMm(hBar.mm)} mm wide`,
+        text: `scale ${bar.mm} mm`,
         anchor: 'middle',
       },
     });
-    const vBar = niceBarMm(lay.sy, 30, 62);
-    const vx = startX + hBar.units + 42;
-    scaleBars.push({
-      orientation: 'vertical',
-      x1: vx,
-      y1: barY + 4,
-      x2: vx,
-      y2: barY + 4 + vBar.units,
-      ticks: [
-        { x1: vx - 4, y1: barY + 4, x2: vx + 4, y2: barY + 4 },
-        { x1: vx - 4, y1: barY + 4 + vBar.units, x2: vx + 4, y2: barY + 4 + vBar.units },
-      ],
-      mm: vBar.mm,
-      textAt: {
-        x: vx + 7,
-        y: barY + 4 + vBar.units / 2 + 3,
-        text: `${fmtMm(vBar.mm)} mm long`,
-        anchor: 'start',
-      },
-    });
+    // The scale bar measures the horizontal axis. Say so only when a single drawing really had to
+    // compress the other axis to fit its mount; a shared list scale never does.
     const ratio = lay.sy / lay.sx;
-    if (ratio < 0.75) scaleNote = `length drawn at ×${ratio.toFixed(2)} the width scale`;
-    else if (ratio > 1.33) scaleNote = `width drawn at ×${(1 / ratio).toFixed(2)} the length scale`;
-    for (const bar of scaleBars) {
-      addPoint(b, bar.x1, bar.y1, 4);
-      addPoint(b, bar.x2, bar.y2, 4);
-      addTextBounds(b, bar.textAt, dims.font);
-      for (const t of bar.ticks) {
+    if (ratio < 0.75) scaleNote = `length compressed ${fmtDeg(1 / ratio)}×`;
+    else if (ratio > 1.33) scaleNote = `width compressed ${fmtDeg(ratio)}×`;
+    for (const b1 of scaleBars) {
+      addPoint(b, b1.x1, b1.y1, 4);
+      addPoint(b, b1.x2, b1.y2, 4);
+      addTextBounds(b, b1.textAt, dims.font);
+      for (const t of b1.ticks) {
         addPoint(b, t.x1, t.y1);
         addPoint(b, t.x2, t.y2);
       }
     }
     if (scaleNote !== null) {
       scaleNoteAt = {
-        x: startX,
-        y: barY + 30,
-        text: `${scaleNote} — read the bars, not a ruler`,
-        anchor: 'start',
+        x: 0,
+        y: barY + 28,
+        text: scaleNote,
+        anchor: 'middle',
       };
       addTextBounds(b, scaleNoteAt, dims.font - 0.5);
     }
@@ -1397,6 +1433,7 @@ export function buildCutterProfile(tool: Tool, options: CutterProfileOptions = {
       width: Math.max(1, final.maxX - final.minX + padX * 2),
       height: Math.max(1, final.maxY - final.minY + padY * 2),
     },
+    scale: { x: lay.sx, y: lay.sy },
     title,
     desc,
     shape: tool.shape,

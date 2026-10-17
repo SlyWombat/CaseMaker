@@ -30,6 +30,12 @@ import './cutterProfile.css';
 export interface CutterProfileProps {
   tool: Tool;
   size?: CutterProfileSize;
+  /**
+   * SVG units per mm shared by every drawing in a list (#489 review), from
+   * `cutterProfileScale`. With it the SVG keeps its natural size instead of being stretched to the
+   * mount's width, so a 1 mm flat really does look smaller than a 6.35 mm ball beside it.
+   */
+  scale?: number | null;
   /** The job's cut depth, mm, for the honest V groove overlay. */
   grooveDepth?: number | null;
   /** The simulator's refusal, drawn greyed with its reason. */
@@ -67,6 +73,7 @@ function textProps(t: CutterProfileText): {
 export function CutterProfile({
   tool,
   size = 'full',
+  scale = null,
   grooveDepth = null,
   refusal = null,
   labelColor = null,
@@ -84,12 +91,13 @@ export function CutterProfile({
     () =>
       buildCutterProfile(tool, {
         size,
+        scale,
         grooveDepth,
         refusal,
         labelColor,
         condition,
       }),
-    [tool, size, grooveDepth, refusal, labelColor, condition],
+    [tool, size, scale, grooveDepth, refusal, labelColor, condition],
   );
 
   // A dimension hover wins while it lasts; otherwise the editor's highlighted field does.
@@ -105,9 +113,11 @@ export function CutterProfile({
   };
 
   const isRefused = model.refusal !== null;
+  const sharedScale = scale !== null;
   const wrapperClass = [
     'cutter-profile',
     `cutter-profile--${size}`,
+    sharedScale ? 'is-shared-scale' : '',
     isRefused ? 'is-refused' : '',
     className ?? '',
   ]
@@ -119,6 +129,11 @@ export function CutterProfile({
       <svg
         className="cutter-profile__svg"
         viewBox={`${model.viewBox.x} ${model.viewBox.y} ${model.viewBox.width} ${model.viewBox.height}`}
+        style={
+          sharedScale
+            ? { width: model.viewBox.width, height: model.viewBox.height, maxWidth: 'none' }
+            : undefined
+        }
         role="img"
         aria-labelledby={`${titleId} ${descId}`}
       >

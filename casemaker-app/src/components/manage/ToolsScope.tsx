@@ -37,6 +37,7 @@ import {
 import { inventoryKey } from '@/engine/cnc/toolRegistry';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter } from '@/engine/cnc/tool';
+import { cutterProfileScale } from '@/engine/cnc/cutterProfile';
 import { CutterProfile } from '@/components/ui/CutterProfile';
 import type { InventoryItem } from '@/platform/houseClient';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
@@ -87,6 +88,9 @@ export function ToolsScope() {
   const items = useToolRegistryStore((s) => s.items);
   const refresh = useToolRegistryStore((s) => s.refresh);
   const tools = useToolRegistry();
+  // One scale for the whole table (#489 review): the drawings sit in one column, and stretching
+  // each SVG to the column's width made a 1 mm flat look as large as a 6.35 mm ball.
+  const profileScale = useMemo(() => cutterProfileScale(tools.map((e) => e.tool), 'thumb'), [tools]);
 
   const search = useManageModeStore((s) => s.search);
   const tier = useManageModeStore((s) => s.tier);
@@ -463,6 +467,7 @@ export function ToolsScope() {
                     item={itemsByKey}
                     selectedKey={selectedKey}
                     onSelect={select}
+                    profileScale={profileScale}
                     more={capped ? g.entries.length - drawn.length : 0}
                   />
                 );
@@ -516,6 +521,7 @@ function Rows({
   item,
   selectedKey,
   onSelect,
+  profileScale,
   more,
 }: {
   tier: ToolTier;
@@ -524,6 +530,8 @@ function Rows({
   item: Map<string, InventoryItem>;
   selectedKey: string | null;
   onSelect: (key: string) => void;
+  /** The one px/mm every thumbnail in this table shares (#489 review). */
+  profileScale: number;
   more: number;
 }) {
   return (
@@ -563,7 +571,7 @@ function Rows({
             </td>
             {/* A silhouette, not the dimensioned drawing: 129 catalogue rows must stay scannable. */}
             <td className="thumb">
-              <CutterProfile tool={t} size="thumb" testId={`manage-tools-profile-${entry.key}`} />
+              <CutterProfile tool={t} size="thumb" scale={profileScale} testId={`manage-tools-profile-${entry.key}`} />
             </td>
             <td>{t.shape}</td>
             <td className={dim(tip)}>{mm(tip)}</td>
