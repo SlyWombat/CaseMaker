@@ -675,11 +675,22 @@ describe('the feed catalogue reaches the worker (#324)', () => {
   );
   if (!starting || starting.params.rpm === HARDWOOD_ROW.rpm) throw new Error('the fixture must differ');
 
-  /** A hardwood job in the Makera metal flat end, cutting one 10 × 10 pocket 1.0 mm deep. */
+  /**
+   * A hardwood job in the ⌀3.175 flat end, cutting one 10 × 10 pocket 1.0 mm deep. The cutter is
+   * the vendor id the row names — that is what this case is about — under a plain name: the built-in
+   * row's own `(Metal)` spelling is on Makera's metal line, and a hardwood job carrying it is now
+   * refused by `tool-metal-line` (#407), which would mask the catalogue question under test.
+   */
   function job(): EngraveJob {
     return {
       ...defaultEngraveJob(),
       toolKey: 'flat-3.175x12-metal',
+      tool: flatEndMill(3.175, {
+        id: VENDOR_ID,
+        name: '3.175*12mm Flat End',
+        fluteLength: 12,
+        shoulderLength: 12,
+      }),
       stock: { ...defaultEngraveJob().stock, material: 'hardwood' },
       labels: [],
       shapes: [
@@ -1044,6 +1055,63 @@ describe('a V-bit trace job (#405)', () => {
     expect(refusal!.severity).toBe('error');
     expect(refusal!.message).toContain('60'); // the refusal NAMES the cutter it stopped
     expect(refusal!.message).toContain('PLA');
+  });
+
+  // #407 — the metal-line refusal is about the PAIR (the bit's line and the blank's material), so
+  // it is judged for EVERY cutter, not only the cones `vCutterFindings` runs for. Makera's built-in
+  // `flat-3.175x12-metal` row is the cutter the scoping gap let through: a flat end mill ground and
+  // coated for metal, cutting PLA on numbers nobody measured for it.
+  /** Makera's built-in metal FLAT end mill, named exactly as its catalogue row spells it. */
+  const metalFlat = (over: Partial<Tool> = {}): Tool =>
+    flatEndMill(3.175, {
+      id: '112111313812',
+      name: '3.175*12mm Flat End(Metal)',
+      fluteLength: 12,
+      shoulderLength: 12,
+      ...over,
+    });
+
+  it('REFUSES Makera’s metal FLAT end mill on PLA — the check is not V-scoped (#407)', () => {
+    const flat = metalFlat();
+    const job = traceJob([title()], { toolKey: 'flat-3.175x12-metal', tool: flat });
+    const g = generate(tl, job);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    expect(g.nc).toBeNull();
+    const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
+    expect(refusal).toBeDefined();
+    expect(refusal!.severity).toBe('error');
+    expect(refusal!.message).toContain(flat.name); // the refusal NAMES the cutter
+    expect(refusal!.message).toContain('PLA');
+  });
+
+  it('does not refuse the same metal FLAT on a metal blank (#407)', () => {
+    // The pair is what the finding judges: the same cutter is exactly the one aluminium wants.
+    const job = traceJob([title()], {
+      toolKey: 'flat-3.175x12-metal',
+      tool: metalFlat(),
+      stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'aluminium-6061' },
+    });
+    const g = generate(tl, job);
+    expect(g.findings.some((f) => f.code === 'tool-metal-line')).toBe(false);
+  });
+
+  it('refuses a `-M-`-coded FLAT end mill on WOOD too (#407)', () => {
+    // The code half of `isMetalTool` was already correct; the reach is what #407 fixes. A flat whose
+    // NAME says nothing about the line is still refused when its box code carries the segment.
+    const coded = flatEndMill(3.175, { id: 'C1-BIT-FLAT-M-3.175-12', name: 'Flat End 3.175' });
+    const job = traceJob([title()], {
+      toolKey: 'flat-3.175x12-metal',
+      tool: coded,
+      stock: { length: 38.1, width: 76.2, thickness: 3.81, material: 'hardwood' },
+    });
+    const g = generate(tl, job);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const refusal = g.findings.find((f) => f.code === 'tool-metal-line');
+    expect(refusal).toBeDefined();
+    expect(refusal!.severity).toBe('error');
+    expect(refusal!.message).toContain(coded.name);
   });
 
   it('is swept by the COLUMN engine, and the run sheet says so (#405)', () => {

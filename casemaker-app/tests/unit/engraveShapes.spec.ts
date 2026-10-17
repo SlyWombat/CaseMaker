@@ -24,6 +24,7 @@ import { executeProfile } from '@/workers/geometry/evaluateOp';
 import { generateEngrave } from '@/engine/cnc/cam/engraveJob';
 import { feedsFor } from '@/engine/cnc/feeds';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
+import { flatEndMill } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
 import { createSimSession } from '@/workers/sim/session';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
@@ -320,6 +321,15 @@ describe('⌀6 circle end to end (#214): generate → verify → simulate → or
   it('removes the opened area to a flat floor at the asked depth, and the oracle agrees', () => {
     const job = shapeJob(circle({ id: 'c6', diameter: 6, depth: 2, name: 'port' }), {
       toolKey: 'flat-3.175x12-metal',
+      // The built-in row's `(Metal)` name is on Makera's metal line and a PLA job carrying it is
+      // refused at findings (#407). This case is about the ⌀3.175 geometry, so it carries the same
+      // cutter — vendor id and all — under a plain name.
+      tool: flatEndMill(3.175, {
+        id: '112111313812',
+        name: '3.175*12mm Flat End',
+        fluteLength: 12,
+        shoulderLength: 12,
+      }),
     });
 
     const g = generate(tl, job);

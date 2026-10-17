@@ -263,26 +263,65 @@ export interface EngraveRegions {
 }
 
 /**
- * What a V-BIT in a job means (#405): the two findings that are about the job rather than about the
- * geometry, both of which need the PLAN, which is why they are raised here and not in
- * `engravabilityFindings` (that module is handed measurements, not items).
+ * Makera's "for Metal" line: REFUSED by name on a blank that is not metal (#405 review, the
+ * maintainer's 2026-10-09 ruling). This is a finding about the PAIR — the bit's line and the blank's
+ * material — so it is judged for EVERY cutter a job resolves, whatever its shape (#407).
+ *
+ * This was a warning, and it stopped the 60° bit only by accident — that bit's 0.1 mm tip falls
+ * outside every PLA V row, so the job died at the feeds stage for a reason that says nothing about
+ * the line. A metal 30° 0.3 mm ENGRAVER has the same name and a tip INSIDE the V row's band, so it
+ * would have cut PLA on numbers nobody measured for it with nothing but a sentence on the sheet.
+ *
+ * A cutter ground for metal is not the cutter for a plastic or a wood — the claim is about the
+ * PAIR, and this half of it fails — so the job does not run. `isMetalTool` reads every statement
+ * of the line a cutter can carry: the NAME (`(Metal)` as a catalogue row spells it, `for Metal`
+ * as the printed label spells it — the form an owned `inv:` cutter actually reaches a job with)
+ * and the `-M-` box code, so a cutter filed under a code is refused too.
+ *
+ * The reach is deliberate (#407): this lived inside `vCutterFindings`, which only runs for
+ * engraving/chamfer shapes, so a metal FLAT end mill on PLA — the built-in
+ * `3.175*12mm Flat End(Metal)` is exactly that bit — was never judged. Nothing about the hazard is
+ * specific to a V, so the flat family cannot slip past it.
+ *
+ * `null` tool answers nothing: there is no cutter to name.
+ */
+function metalLineFindings(job: EngraveJob, tool: Tool | null): JobFinding[] {
+  if (tool === null || !isMetalTool(tool) || isMetalMaterial(job.stock.material)) return [];
+  return [
+    {
+      severity: 'error',
+      code: 'tool-metal-line',
+      message:
+        `"${tool.name}" is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}: ` +
+        `the bit's geometry and its coating are ground for metal, and no feed row was written for it on this material. ` +
+        `Pick a wood/plastic cutter for this blank, or change the stock to a metal before cutting.`,
+    },
+  ];
+}
+
+/**
+ * What a V-BIT in a job means (#405): the finding about the job rather than about the geometry,
+ * which needs the PLAN, which is why it is raised here and not in `engravabilityFindings` (that
+ * module is handed measurements, not items).
  *
  * `null` tool, or any cutter that is not a cone, answers nothing: every job before #405 had a flat
- * end mill and must produce exactly the findings it produced before.
+ * end mill and must produce exactly the findings it produced before. The metal-line refusal is not
+ * here — it is a claim about the pair and so is judged for every cutter, in
+ * {@link metalLineFindings} (#407).
  */
-function vCutterFindings(job: EngraveJob, plan: PartPlan, tool: Tool | null): JobFinding[] {
+function vCutterFindings(plan: PartPlan, tool: Tool | null): JobFinding[] {
   if (tool === null || !isVTraceTool(tool)) return [];
-  const findings: JobFinding[] = [];
 
-  // 1. A REGION needs ONE cutting width. Opening a glyph or a pocket means offsetting its outline
+  // A REGION needs ONE cutting width. Opening a glyph or a pocket means offsetting its outline
   // by the cutter's radius (`generateEngrave`), and a cone has no single radius: its width at the
   // depth the path is at is part of the answer. The toolpath that does cut a region with a V-bit is
   // a medial-axis V-carve — #221's remaining piece — so this is a refusal by name, on the item that
   // asked, rather than a refusal of the cutter (which traces perfectly well).
   const region = plan.engraves[0];
-  if (region !== undefined) {
-    const others = plan.engraves.length - 1;
-    findings.push({
+  if (region === undefined) return [];
+  const others = plan.engraves.length - 1;
+  return [
+    {
       severity: 'error',
       code: 'region-v-carve-unavailable',
       labelId: region.id,
@@ -290,33 +329,8 @@ function vCutterFindings(job: EngraveJob, plan: PartPlan, tool: Tool | null): Jo
         `${region.name} is a REGION${others > 0 ? ` (and ${others} other item${others === 1 ? '' : 's'})` : ''}: opening it needs the cutter's ` +
         `width, and a V-bit's width changes with the depth of the cut — cutting a region with one is a V-carve, ` +
         `which this app does not do yet (#221). Use a flat end mill for regions, or make the artwork a stroke trace.`,
-    });
-  }
-
-  // 2. Makera's "for Metal" line: REFUSED by name on a blank that is not metal (#405 review, the
-  // maintainer's 2026-10-09 ruling). This was a warning, and it stopped the 60° bit only by
-  // accident — that bit's 0.1 mm tip falls outside every PLA V row, so the job died at the feeds
-  // stage for a reason that says nothing about the line. A metal 30° 0.3 mm ENGRAVER has the same
-  // name and a tip INSIDE the V row's band, so it would have cut PLA on numbers nobody measured
-  // for it with nothing but a sentence on the sheet.
-  //
-  // A cutter ground for metal is not the cutter for a plastic or a wood — the claim is about the
-  // PAIR, and this half of it fails — so the job does not run. `isMetalTool` reads every statement
-  // of the line a cutter can carry: the NAME (`(Metal)` as a catalogue row spells it, `for Metal`
-  // as the printed label spells it — the form an owned `inv:` cutter actually reaches a job with)
-  // and the `-M-` box code, so a cutter filed under a code is refused too.
-  if (isMetalTool(tool) && !isMetalMaterial(job.stock.material)) {
-    findings.push({
-      severity: 'error',
-      code: 'tool-metal-line',
-      message:
-        `"${tool.name}" is on Makera's "for Metal" line, and this job cuts ${MATERIAL_LABELS[job.stock.material]}: ` +
-        `the bit's geometry and its coating are ground for metal, and no feed row was written for it on this material. ` +
-        `Pick a wood/plastic cutter for this blank, or change the stock to a metal before cutting.`,
-    });
-  }
-
-  return findings;
+    },
+  ];
 }
 
 /**
@@ -394,7 +408,8 @@ export function engraveRegions(
     ...validateJob(job),
     ...validateVise(job.stock, job.workholding.vise, job.sacrificial),
     ...engFindings,
-    ...vCutterFindings(job, plan, tool),
+    ...metalLineFindings(job, tool),
+    ...vCutterFindings(plan, tool),
     ...voidFindings,
     // #345 — every item judged against every bound under its footprint: the split on the side its
     // own `depthIntent` put it, and the ceiling of any void it sits over. A no-op for a job with
