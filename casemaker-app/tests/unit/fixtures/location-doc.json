@@ -1142,6 +1142,27 @@
       "setAt": null,
       "unit": "x",
       "note": "chosen, not measured: how much of a free band the seeded line takes, as a share of it; more fill means a taller cap and less clearance"
+    },
+    "facing.roughMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the facing depth filled in for rough stock — the heavy end of the 0.2 to 0.5 mm skim general practice uses; the person is asked and can change it"
+    },
+    "facing.unknownMm": {
+      "value": 0.2,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the facing depth filled in when the stock's finish is unknown — the light end of the same 0.2 to 0.5 mm skim"
+    },
+    "facing.marginMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: added to a probed top's high-to-low spread to fill in the facing depth, so the skim clears the highest point of the face"
     }
   }
 }

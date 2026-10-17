@@ -298,6 +298,15 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // BLANK_BAND_FILL_FALLBACK. Bounded above 0: zero would size the line to no band at all.
   'engrave.blankBandFill': { label: 'blank band fill, as a share of the free band (chosen)', unit: 'x', rule: z.number().min(0.05).max(1), fallback: 0.7 },
   // ── #451 blank band fill (end)
+  // ── #432 facing (begin) — the depth a facing pass arrives filled in with. CHOSEN, not measured:
+  // the maintainer's decision of 2026-10-17 asks the depth every time facing is on and fills in the
+  // probed top's spread plus the margin, or one of these two fallbacks without a probe. General
+  // practice is a light 0.2–0.5 mm skim; the repo has no measured figure. Fallbacks =
+  // `stockStart.ts`'s FACING_DEPTH_FALLBACK_MM.
+  'facing.roughMm': { label: 'facing depth, rough stock (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },
+  'facing.unknownMm': { label: 'facing depth, finish unknown (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.2 },
+  'facing.marginMm': { label: 'facing margin over a probed spread (chosen)', unit: 'mm', rule: z.number().min(0).max(2), fallback: 0.1 },
+  // ── #432 facing (end)
   // ── #421 (begin) — the run plan's phase times (§5.8). Two were TIMED in the 2026-10-15 console
   // trace and are seeded `measured` with a note (`defaults.rs`'s MEASURED_SEEDS): `$H` and `M491`. The
   // rest are chosen — the touch time too: its series came from a console script, not the app runner. Each fallback is its seed. The remount and re-registration

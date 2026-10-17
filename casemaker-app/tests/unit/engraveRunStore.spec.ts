@@ -36,6 +36,10 @@ const NOTHING: EngraveGenerated = {
   verify: null,
   frameNc: null,
   frameVerify: null,
+  facingNc: null,
+  facingVerify: null,
+  facingToolKey: null,
+  facingError: null,
   predicted: [],
   errors: [],
 };
@@ -66,6 +70,10 @@ function clean(): EngraveGenerated {
     verify: null,
     frameNc: null,
     frameVerify: null,
+    facingNc: null,
+    facingVerify: null,
+    facingToolKey: null,
+    facingError: null,
     predicted: [],
     errors: [],
   };

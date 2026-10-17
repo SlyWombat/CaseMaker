@@ -301,6 +301,14 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // bounds and fallback. It trades cap height against the clearance the dome and the print want.
     ("engrave.blankBandFill", 0.7, "x", "chosen, not measured: how much of a free band the seeded line takes, as a share of it; more fill means a taller cap and less clearance"),
     // ── #451 blank band fill (end)
+    // ── #432 facing (begin) — the depth a facing pass arrives filled in with. CHOSEN, not measured:
+    // the maintainer's decision of 2026-10-17 asks the depth every time facing is on and fills in
+    // the probed top's spread plus the margin, or one of these two fallbacks without a probe.
+    // General practice is a light 0.2 to 0.5 mm skim; `defaultsClient.ts` states the same bounds.
+    ("facing.roughMm", 0.5, "mm", "chosen, not measured: the facing depth filled in for rough stock — the heavy end of the 0.2 to 0.5 mm skim general practice uses; the person is asked and can change it"),
+    ("facing.unknownMm", 0.2, "mm", "chosen, not measured: the facing depth filled in when the stock's finish is unknown — the light end of the same 0.2 to 0.5 mm skim"),
+    ("facing.marginMm", 0.1, "mm", "chosen, not measured: added to a probed top's high-to-low spread to fill in the facing depth, so the skim clears the highest point of the face"),
+    // ── #432 facing (end)
     // ── #421 (begin) — the run plan's phase times that the app has not timed: chosen.
     ("plan.touchSeconds", 15.0, "s", "chosen, not measured as the app's runner would take it: 15 s a touch, from the 2026-10-15 console trace's edge scans, driven by a console script, not the app runner. 32 touch-to-touch intervals under 20 s (G38.2 Z-5, 16:35:59 to 16:50:34): median 13.3 s, mean 14.0 s, range 10.4 to 19.7 s; the round trips between touches are included"),
     ("plan.fitProbeSeconds", 45.0, "s", "chosen, not measured: fitting the wired probe by hand, from the plan of section 5.8; the first timed run replaces it"),
@@ -880,6 +888,16 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "0.05 to 1, the share of the free band the line takes",
         )),
         // ── #451 engrave findings (end)
+        // ── #432 facing — `defaultsClient.ts` states the same bounds. Above 0: a facing depth of
+        // zero is the job saying it does not face, not a shop seed for how far a skim goes.
+        "facing.roughMm" | "facing.unknownMm" => Some(need(
+            n.is_some_and(|v| (0.05..=5.0).contains(&v)),
+            "0.05 to 5 mm",
+        )),
+        "facing.marginMm" => Some(need(
+            n.is_some_and(|v| (0.0..=2.0).contains(&v)),
+            "0 to 2 mm",
+        )),
         // ── #421 (begin) — the run plan's phase times (`defaultsClient.ts` states the same bounds).
         "plan.homeSeconds" | "plan.toolLengthSeconds" => Some(need(
             n.is_some_and(|v| (5.0..=300.0).contains(&v)),

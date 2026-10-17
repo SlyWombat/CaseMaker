@@ -270,6 +270,71 @@ export function facingDefault(finish: JobStockFinish): { on: boolean; reason: st
   }
 }
 
+/**
+ * The facing depth seeds (#432): the two fallbacks, and the margin added to a probed spread, mm.
+ *
+ * The maintainer's decision of 2026-10-17: the depth is ASKED every time facing is on, and the
+ * field arrives filled in — the probed top's high-to-low spread plus the margin when the blank has
+ * been probed, otherwise 0.5 mm for rough stock and 0.2 mm when the finish is unknown (general
+ * practice is a light 0.2–0.5 mm skim; the repo has no measured figure). Each of these is a shop
+ * setting (`facing.roughMm`, `facing.unknownMm`, `facing.marginMm`), so the three are stored here
+ * only as the no-service fallbacks — the caller reads the location and passes the values in.
+ */
+export const FACING_DEPTH_FALLBACK_MM = { rough: 0.5, unknown: 0.2, margin: 0.1 } as const;
+
+/**
+ * The most a facing pass may claim to remove, mm. A skim is a skim: the schema's bound for a hand-
+ * edited document. The job's own thickness check is `facing-too-deep` (`validateJob`), not this.
+ */
+export const FACING_DEPTH_MAX_MM = 10;
+
+/** The shop's three facing figures, as the caller reads them from the location. */
+export interface FacingDepthShop {
+  rough: number;
+  unknown: number;
+  margin: number;
+}
+
+/**
+ * The depth filled into a facing job's depth field (#432): the answer to "how far", not the choice
+ * of whether to face — that is `facingDefault`'s, from the finish.
+ *
+ * When the blank has been PROBED, the probed top's high-to-low spread is the measured out-of-flat,
+ * and the shop's margin is added so the skim clears the highest point rather than grazing it.
+ * Without a probe the finish decides: rough stock takes the rough figure, unknown stock the light
+ * one. A finished or printed blank is not faced by default, so nobody has said what its skim should
+ * be — a person who switches facing on for one gets the light figure and a sentence saying it was
+ * the fallback, rather than a number invented for a finish that implies no skim at all.
+ */
+export function facingDepthDefault(
+  finish: JobStockFinish,
+  opts: {
+    /** High-to-low spread the probe found on the top, mm; null/absent = not probed. */
+    probedSpreadMm?: number | null;
+    /** The shop's figures; absent keys fall back to {@link FACING_DEPTH_FALLBACK_MM}. */
+    shop?: Partial<FacingDepthShop>;
+  } = {},
+): { depthMm: number; reason: string } {
+  const shop = { ...FACING_DEPTH_FALLBACK_MM, ...opts.shop };
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const spread = opts.probedSpreadMm;
+  if (typeof spread === 'number' && Number.isFinite(spread) && spread >= 0) {
+    return {
+      depthMm: round2(spread + shop.margin),
+      reason: `the probe found the top varies by ${round2(spread)} mm, plus the shop's ${shop.margin} mm margin`,
+    };
+  }
+  switch (finish) {
+    case 'rough':
+      return { depthMm: shop.rough, reason: `rough stock, so the shop's ${shop.rough} mm skim is filled in — measure or change it` };
+    case 'unknown':
+      return { depthMm: shop.unknown, reason: `the finish is not known, so the light ${shop.unknown} mm skim is filled in — measure or change it` };
+    case 'finished':
+    case 'printed':
+      return { depthMm: shop.unknown, reason: `a ${finish} face implies no skim, so the lightest fallback (${shop.unknown} mm) is filled in — change it if this face should come off` };
+  }
+}
+
 const FORM_LABELS: Record<JobStockForm, string> = {
   plate: 'Plate',
   block: 'Block',

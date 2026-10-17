@@ -42,6 +42,7 @@ import { feedsFor, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } fr
 import { cuttingDiameter, cuttingForTrace, isVTraceTool, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import { threadMillIR, threadSettings, type ThreadMillPlan, type ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
 import type { ShopDefaults } from '@/platform/defaultsClient';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { vCone } from '@/engine/cnc/vProfile';
 import { isMetalTool } from '@/engine/cnc/registerCutter';
 import { MATERIAL_LABELS, isMetalMaterial } from '@/engine/cnc/materials';
@@ -49,6 +50,8 @@ import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan }
 import { dedupeFindings, toSetup, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
+import { generateFacing } from '@/engine/cnc/cam/facing';
+import { chooseFacingTool } from '@/engine/cnc/engrave/facingTool';
 import { generateTrace } from '@/engine/cnc/cam/trace';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
@@ -104,6 +107,14 @@ export interface EngraveShopOpts {
    * snapshot. `null`/absent means no location: `readDefault` then labels each fallback.
    */
   defaults?: ShopDefaults | null;
+  /**
+   * #432 slice 2 — the registry snapshot (`getTools()`), handed in for the same reason `catalogue`
+   * is: the sim worker cannot see the tool registry, so the facing pass's own cutter is chosen from
+   * the list the picker is showing rather than from the worker's empty module state. Absent: no
+   * facing tool can be chosen, and a job that faces has its facing program refused with that
+   * reason — the engraving still generates.
+   */
+  tools?: readonly ToolLibraryEntry[] | null;
 }
 
 /** A stage refusal with its reason, so the panel can list it under the right row. */
@@ -161,6 +172,31 @@ export interface EngraveGenerated {
   frameNc: string | null;
   /** #244 — `verifyProgram`'s report on `frameNc`, or null when no frame was produced. */
   frameVerify: VerifyReport | null;
+  /**
+   * #432 slice 2 — the FACING program, as its own `.nc` beside the job: the skim of the blank's
+   * top, posted against the PROBED top (Z = 0 is the blank as the probe found it) with its own
+   * cutter (`facingToolKey`). The engraving program is NOT shifted — it stays in the document's
+   * frame, whose Z = 0 is the faced surface — because slice 4 re-zeros Z on that surface between the
+   * two files; the two programs meet physically, never arithmetically.
+   *
+   * `null` when the job does not face, when the run stopped before the artefact was built, or when
+   * it could not be produced — `facingError` then says why. A null here never fails the run: the
+   * engraving still generates and is still savable.
+   */
+  facingNc: string | null;
+  /**
+   * #432 — `verifyProgram`'s report on `facingNc`, or null when none was produced. A report with
+   * errors means the file was WITHHELD (see `facingError`): no unchecked program is handed over.
+   */
+  facingVerify: VerifyReport | null;
+  /**
+   * #432 — the registry key of the cutter the facing program was written for, or null with
+   * `facingNc`. The operator loads it for the facing file alone; it is deliberately not the job's
+   * `toolKey`, which is the cutter the engraving runs.
+   */
+  facingToolKey: string | null;
+  /** #432 — why the facing program is absent, or null. Never a stage refusal: the run is not stopped. */
+  facingError: string | null;
   /**
    * The regions the CAM cut and the oracle must match (#206 §3): each region item's opened
    * polygons, each drill's discs, and — since #287 — each single-line trace's swept region.
@@ -591,6 +627,81 @@ function frameProgram(
 }
 
 /**
+ * The FACING program (#432 slice 2): the skim of the blank's top, as its own file.
+ *
+ * Posted against the PROBED top — Z0 is the blank as the probe found it, which is the surface this
+ * program removes — with the facing pass's OWN cutter (`chooseFacingTool`), its own feeds row, and
+ * the SAME post and verifier as the job. The file's header names that cutter, not the job's: the
+ * operator loads it for this file alone, and a header claiming the engraving bit would send them to
+ * the wrong station.
+ *
+ * A verifier error WITHHOLDS the file: `nc` comes back null with the report attached, because the
+ * one rule this pipeline has is that a program is only handed over after it has been checked.
+ *
+ * Nothing here can fail the RUN. Every refusal — no suitable cutter, no feeds row, an unsupported
+ * geometry, a verifier error — comes back as `error` with `nc: null`, and the caller keeps the
+ * engraving the run already produced.
+ */
+function facingProgram(
+  job: EngraveJob,
+  depth: Mm,
+  ctx: PostContext,
+  machine: MillProfile,
+  setup: Setup,
+  limit: DepthLimit,
+  tools: readonly ToolLibraryEntry[],
+  catalogue: readonly FeedCatalogueRow[],
+  table: readonly FeedsEntry[] | undefined,
+): { nc: string | null; verify: VerifyReport | null; toolKey: string | null; error: string | null } {
+  const pick = chooseFacingTool(tools, catalogue, job.stock.material, job.facing?.toolKey ?? null);
+  if (pick.entry === null) return { nc: null, verify: null, toolKey: null, error: pick.reason };
+  const tool = pick.entry.tool;
+  const toolKey = pick.entry.key;
+  // The facing pass resolves its OWN feeds: it is a different cutter in the same material, so the
+  // engraving's numbers are not its numbers. `feedsFor` is the same resolver the program above uses,
+  // against the same catalogue and the same shop table.
+  //
+  // NO `cutOverride` — deliberately. The job's override is the hand-entered speed and feed for the
+  // job's ENGRAVING cutter (#205): a person who typed 12 000 rpm for a 1 mm flat has said nothing
+  // about the 6 mm mill that skims the top, and handing those numbers over would run the big cutter
+  // at a small cutter's feed rate. The facing file's S/F are the row's own for the facing cutter.
+  const feeds = feedsFor(catalogue, job.stock.material, tool, machine, undefined, table);
+  if (!feeds.ok) {
+    return { nc: null, verify: null, toolKey, error: `the facing cutter "${tool.name}": ${feeds.reason}` };
+  }
+  try {
+    const ir = generateFacing(
+      { length: job.stock.length, width: job.stock.width },
+      tool,
+      feeds.params,
+      machine.rapidEstimate,
+      depth,
+    );
+    const posted = postZ1(ir, { ...ctx, toolKey }, machine);
+    if (!posted.ok) return { nc: null, verify: null, toolKey, error: posted.errors.join('; ') };
+    const verify = verifyProgram(posted.text, {
+      setup,
+      machine,
+      tool,
+      depthLimit: limit,
+      minRapidZ: ir.hopZ,
+    });
+    const refused = verify.findings.filter((f) => f.severity === 'error');
+    if (refused.length > 0) {
+      return {
+        nc: null,
+        verify,
+        toolKey,
+        error: `the facing program has ${refused.length} verifier error(s)`,
+      };
+    }
+    return { nc: posted.text, verify, toolKey, error: null };
+  } catch (e) {
+    return { nc: null, verify: null, toolKey, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
  * The tail of the `cut-too-deep` sentence: WHICH plane the limit at (x, y) is (#285, #345).
  *
  * Two answers, and the difference is what the operator acts on. Over a void the solid itself
@@ -681,6 +792,13 @@ export function engraveGenerate(
       verify: null,
       frameNc: null,
       frameVerify: null,
+      // Nothing about the facing pass is known yet: a run that stops before the artefact is built
+      // reports no facing file, no reason, and no tool — `facingError` is "the program could not be
+      // produced", not "the run stopped first".
+      facingNc: null,
+      facingVerify: null,
+      facingToolKey: null,
+      facingError: null,
       predicted,
       errors,
     };
@@ -706,6 +824,11 @@ export function engraveGenerate(
   let threadPlans: ThreadMillPlan[] | null = null;
   let threadMachining: ThreadSettingsResult | null = null;
   let ir: ToolpathIR;
+  // #432 — the facing depth the plan carries, or 0 when the job does not face. It decides whether
+  // the facing artefact is built at all; it never touches the ENGRAVING program, which stays in the
+  // document's frame (Z0 = the faced surface) because the re-touch re-zeros Z there between the two
+  // programs. Slice 3 orders the two; slice 4 is the re-touch itself.
+  const facingDepth = plan.facing?.depth ?? 0;
   if (plan.threads.length > 0) {
     const resolved = threadSettings(shop.defaults ?? null, catalogue, job.stock.material, tool, mill);
     // Carried from here on, refusals included: even a run that stops still knows which numbers it
@@ -779,6 +902,19 @@ export function engraveGenerate(
       return stop('cam', { feeds, message: e instanceof Error ? e.message : String(e) });
     }
   }
+
+  // #432 — FACING IS ITS OWN PROGRAM, and this one is untouched by it.
+  //
+  // The skim is posted against the blank's PROBED top and posted as its own file (below, beside the
+  // frame file), with its own cutter: a 0.5 mm skim wants the widest flat the shop can justify,
+  // while the engraving's cutter is chosen for the detail its items need. The engraving program
+  // stays in the DOCUMENT's frame, whose Z = 0 is the faced surface, and its verifier's rapid floor
+  // is therefore its own `hopZ` — nothing here is shifted, because nothing here is post-shift. What
+  // makes the two files meet physically is the re-touch (slice 4): the machine re-zeros Z on the
+  // faced surface between the facing program and this one, so a label the document calls 2 mm deep
+  // physically sits 2 mm below the faced top in BOTH frames. A shift here would double-lower the
+  // cut by the full facing depth once that re-touch lands.
+  const minRapidZ = ir.hopZ;
   const cam = summarize(ir);
 
   // 4. the post-processor (#173).
@@ -815,24 +951,34 @@ export function engraveGenerate(
   const setup = toSetup(job, mill);
 
   try {
-    const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ: ir.hopZ, ...(limitReasonAt ? { limitReasonAt } : {}) });
+    const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ, ...(limitReasonAt ? { limitReasonAt } : {}) });
     if (verify.findings.some((f) => f.severity === 'error')) {
       errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, predicted, errors };
     }
 
-    // 6. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
+    // 6. the FACING file (#432 slice 2): the skim of the blank's top, as its own program, beside
+    // the job. It shares nothing with the engraving program — its own cutter, its own feeds, its own
+    // post and verify — and it can refind nothing either: a refusal is carried as `facingError` and
+    // the run still succeeds, because an operator who cannot face in this app can face in their own
+    // program and still cut what this run produced.
+    const facing =
+      facingDepth > 0
+        ? facingProgram(job, facingDepth, ctx, mill, setup, limit, shop.tools ?? [], catalogue, shop.feeds ?? undefined)
+        : { nc: null, verify: null, toolKey: null, error: null };
+
+    // 7. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
     // THIS gated action from the same toolpath, and checked by the SAME verifier — a frame the
     // operator cannot run at the wrong Z, because the Z is in the file.
     const frame = frameProgram(ir, ctx, mill, setup, tool, limit);
     if ('error' in frame) {
       errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, predicted, errors };
     }
     const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
     if (frameErrors.length > 0) {
       errors.push({ stage: 'verify', message: `the frame file has ${frameErrors.length} verifier error(s)` });
-      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, predicted, errors };
+      return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: frame.nc, frameVerify: frame.verify, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, predicted, errors };
     }
 
     return {
@@ -847,6 +993,10 @@ export function engraveGenerate(
       verify,
       frameNc: frame.nc,
       frameVerify: frame.verify,
+      facingNc: facing.nc,
+      facingVerify: facing.verify,
+      facingToolKey: facing.toolKey,
+      facingError: facing.error,
       predicted,
       errors,
     };

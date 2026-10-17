@@ -788,15 +788,17 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           (k) => patch[k] !== undefined,
         );
         const stock = { ...job.stock, ...patch };
-        // `print` and `flatness` are the two stock fields a patch can CLEAR (#285 review, #345).
-        // "Use the badge blank" on a badge that has lost its print must take the layer grid away
-        // with it, or the stack limit goes on applying to a blank whose print is no longer known —
-        // and the stated dome (`flatness`) is a fact about the SAME printed blank, so it goes with
-        // it too. An explicit `undefined` says that; an OMITTED key still means "leave it alone",
-        // which is what every other caller relies on. The provenance goes with it — a source for a
-        // value that is gone is a lie.
+        // `print`, `flatness` and `fibre` are the stock fields a patch can CLEAR (#285 review,
+        // #345, #464). "Use the badge blank" on a badge that has lost its print must take the
+        // layer grid away with it, or the stack limit goes on applying to a blank whose print is
+        // no longer known — and the stated dome (`flatness`) is a fact about the SAME printed
+        // blank, so it goes with it too. The fibre flag goes for the same reason a design import
+        // states it beside the material: re-importing a plain PETG file over a `PETG-CF` one must
+        // stop the runs being weighed as abrasive. An explicit `undefined` says that; an OMITTED
+        // key still means "leave it alone", which is what every other caller relies on. The
+        // provenance goes with it — a source for a value that is gone is a lie.
         const sources = withStockSource(job, keys, source);
-        for (const key of ['print', 'flatness'] as const) {
+        for (const key of ['print', 'flatness', 'fibre'] as const) {
           if (key in patch && patch[key] === undefined) {
             delete stock[key];
             if (sources.stock) delete sources.stock[key];

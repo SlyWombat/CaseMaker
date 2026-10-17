@@ -287,11 +287,20 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       findings.filter((f) => f.severity === 'error' && f.labelId !== undefined).map((f) => f.labelId as string),
     );
 
+    // #432 — a faced job is drawn as the blank that REMAINS after the skim. The document's cuts
+    // are all written from the faced top, which is this preview's Z = 0, so the extrusion is the
+    // blank's thickness less the facing depth and it is still translated to put that face at 0.
+    // Nothing else moves: the cuts, the floors and the fixture keep the frame they were built in,
+    // and a job that does not face is drawn exactly as before.
+    const facingDepth = plan.facing?.depth ?? 0;
+    // A facing depth past the blank is a `facing-too-deep` error; there is no body to draw, so the
+    // preview falls back to the blank as it arrived rather than extruding a negative height.
+    const facedThickness = job.stock.thickness - facingDepth > 0 ? job.stock.thickness - facingDepth : job.stock.thickness;
     const stockCS = executeProfile(tl, plan.stock.outline);
-    const stockBody = tl.Manifold.extrude(stockCS, job.stock.thickness);
+    const stockBody = tl.Manifold.extrude(stockCS, facedThickness);
     stockCS.delete();
     // The prism extrudes from z = 0 up; translate so the TOP face is at Z = 0 (cuts at −Z).
-    const placedStock = stockBody.translate([0, 0, -job.stock.thickness]);
+    const placedStock = stockBody.translate([0, 0, -facedThickness]);
     stockBody.delete();
 
     const cutBodies: ManifoldInstance[] = [];

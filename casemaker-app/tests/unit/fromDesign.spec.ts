@@ -484,4 +484,27 @@ describe('the job’s stock material comes from the file, or is left alone (#456
     expect(patch.notes.join('\n')).toContain('PVB');
     expect(patch.notes.join('\n')).toContain('does not map to a stock material');
   });
+
+  // #464 — the fill is a flag BESIDE the base plastic, and the job carries it so the run can
+  // weigh tool wear as abrasive. `PETG-CF` is still cut as PETG.
+  it('carries a composite class’s fibre beside its base plastic', () => {
+    const patch = designJobFor(designFor('filament_type = PETG-CF'));
+    expect(patch.stock.material).toBe('petg');
+    expect(patch.stock.fibre).toBe('cf');
+    expect(patch.sources.stock?.fibre).toBe('computed');
+    const notes = patch.notes.join('\n');
+    expect(notes).toContain('carbon fibre fill');
+    expect(notes).toContain('weighed as cutting an abrasive');
+    expect(notes).not.toContain('carbon fibre, PETG'); // the material line names the BASE alone
+  });
+
+  it('states NO fibre — the key present and undefined — so a plain import clears an old flag', () => {
+    const patch = designJobFor(designFor('filament_type = PETG'));
+    // Present-and-undefined, the `print`/`flatness` convention: `setStock` reads the KEY to decide
+    // whether a stale value is cleared, and an omitted key would leave a `PETG-CF` flag behind.
+    expect('fibre' in patch.stock).toBe(true);
+    expect(patch.stock.fibre).toBeUndefined();
+    expect('fibre' in (patch.sources.stock ?? {})).toBe(false);
+    expect(patch.notes.join('\n')).not.toContain('fill');
+  });
 });

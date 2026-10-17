@@ -119,6 +119,20 @@ export interface PartPlan {
     depth: Mm;
     through: boolean;
   }[];
+  /**
+   * FACING (#432), the job's own pass over the stock's top — `{ depth }` when it faces, `null`
+   * otherwise. Not a sibling list: there is exactly one top, it is not an item, and nothing in
+   * the panel selects it. It is carried here because CAM, the preview and the verifier must agree
+   * on one number.
+   *
+   * `depth` is the TOTAL taken off, positive mm. The PASSES and the STEP-OVER are deliberately
+   * absent: they come from the feeds row for the cutter and material, and `toPartPlan` takes the
+   * job alone — resolving `feedsFor` here would need the tool and the catalogue, and would give a
+   * second module an opinion about what a cutter may take. The CAM divides the two at generate
+   * time. `stock.thickness` above stays the BLANK's thickness: every reader's frame is the blank,
+   * and the faced surface is `facing.depth` below its top.
+   */
+  facing: { depth: Mm } | null;
 }
 
 /**
@@ -1635,6 +1649,11 @@ export function toPartPlan(job: EngraveJob): PartPlan {
   // is inert without it.
   const print = job.stock.print;
 
+  // #432 — the job's facing choice, as a depth or nothing. A toggle that is on with a zero depth
+  // (the field not filled in yet) is NOT a facing pass: it removes nothing, and the plan says so
+  // with `null` rather than handing CAM a zero-depth operation.
+  const facing = job.facing !== undefined && job.facing.enabled && job.facing.depth > 0 ? { depth: job.facing.depth } : null;
+
   return {
     stock: {
       outline: stockOutline,
@@ -1649,5 +1668,6 @@ export function toPartPlan(job: EngraveJob): PartPlan {
     traces,
     drills,
     threads,
+    facing,
   };
 }

@@ -911,6 +911,7 @@ simulation does report about one is the sweep's own list, next:
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|
 | `depth-exceeds-stock` | error | An item cuts so deep the floor left under it is below the minimum. | Make it shallower or use thicker stock. |
+| `facing-too-deep` | error | The job asks to face its stock's top, and the depth asked is more than the blank has spare above the minimum floor — so the skim alone would break through. Facing also LOWERS every item's own limit, because the floor is measured from the faced surface: an item that just fitted the blank may be refused as `depth-exceeds-stock` once facing is on. | Ask for a lighter skim, or use thicker stock. |
 | `no-items` | error | The job has no enabled label with text or shape. Formerly `no-labels`. | Add one. |
 | `polygon-self-intersecting` | error | A polygon shape crosses itself, so the outline is not a simple region. | Fix the points so the outline does not cross itself. |
 | `item-reference` | error | A frame or cut-away names an item that is missing, disabled, or part of a cycle, so the ring or pocket cannot be built. | Point it at a real, enabled item that does not depend on it. |

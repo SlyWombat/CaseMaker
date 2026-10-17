@@ -4,6 +4,7 @@ import { STOCK_MATERIALS } from '@/engine/cnc/materials';
 import { ToolSchema } from '@/engine/cnc/toolLibrary';
 import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
 import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
+import { FACING_DEPTH_MAX_MM } from '@/engine/cnc/stockStart';
 import { MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS } from '@/engine/import/outlineTypes';
 import { FACES, type Face } from '@/engine/cnc/setups/types';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -432,6 +433,10 @@ const stockSchema = z.object({
   width: z.number().finite().positive().max(STOCK_LIMITS.width),
   thickness: z.number().finite().positive().max(STOCK_LIMITS.thickness),
   material: z.enum(STOCK_MATERIALS),
+  // #464 — the fibre a printed blank's filament states, beside the material. OPTIONAL, not
+  // defaulted: a job that has never seen a fibre filament keeps no key and round-trips byte-for-
+  // byte, and `setStock` clears it when a later import states none.
+  fibre: z.enum(['cf', 'gf']).optional(),
   print: stockPrintSchema.optional(),
   flatness: stockFlatnessSchema.optional(),
 });
@@ -468,6 +473,24 @@ const cutOverrideSchema = z.object({
   // #220: the peck depth for plunge drilling, mm.
   peck: z.number().finite().optional(),
   air: z.boolean().optional(),
+});
+
+/**
+ * The job's facing choice (#432). `depth` is the TOTAL taken off the top, mm, and it is the depth
+ * every later program is posted from — so a job cannot say "face" without saying how far.
+ *
+ * Zero is legal and means "nothing to remove": the toggle can be on with the default not yet
+ * filled, and the plan treats a zero depth as no facing. The upper bound is the same one
+ * `defaults.rs` states for the shop's facing depth seeds — a skim is a skim, and a number that
+ * would take a whole blank belongs in a different operation. `facing-too-deep` (validateJob) is the
+ * check against the JOB's own thickness; this one only keeps a hand-edited document sane.
+ */
+const facingSchema = z.object({
+  enabled: z.boolean(),
+  depth: z.number().finite().min(0).max(FACING_DEPTH_MAX_MM),
+  // #432 slice 2 — the facing program's own cutter, as a registry key. OPTIONAL, so a job written
+  // before the field existed round-trips byte-for-byte, and null/absent asks the default rule.
+  toolKey: z.string().min(1).nullable().optional(),
 });
 
 /**
@@ -655,6 +678,10 @@ const jobSourcesSchema = z.object({
       width: fieldSourceSchema.optional(),
       thickness: fieldSourceSchema.optional(),
       material: fieldSourceSchema.optional(),
+      // #464 — the fibre flag, stamped with the material it came beside. Listed for the same
+      // reason as `flatness`: zod strips an unnamed key, and a round trip would keep the value
+      // while losing the record of where it came from.
+      fibre: fieldSourceSchema.optional(),
       // #285 — the badge's own print facts, stamped when they became the job's.
       print: fieldSourceSchema.optional(),
       // #345 — the printed face's dome, stamped with the print it belongs to. Listed explicitly
@@ -739,6 +766,9 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   margins: engraveMarginsSchema.optional(),
   // #205's hand-override of the feeds/speeds. Optional, so a v2 job without it is unchanged.
   cutOverride: cutOverrideSchema.optional(),
+  // #432's facing choice. OPTIONAL, not defaulted, for the byte-for-byte reason every list below
+  // gives: an absent key means the job does not face, which is what every stored document says.
+  facing: facingSchema.optional(),
   // #214's shape pockets. Defaulted to empty so a v2 job written before shapes existed (and
   // the v1 transform below) still loads as a text-only job.
   shapes: z.array(shapeSchema).default([]),

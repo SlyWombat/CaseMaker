@@ -457,6 +457,11 @@ describe('EngravePanel — the run sheet mount (#207)', () => {
       // write BOTH files (#273): the sheet's dry run loads this one by name.
       frameNc: `${nc}\n;frame\n`,
       frameVerify: null,
+      // #432 — a run that does not face emits no facing program, and that is not a refusal.
+      facingNc: null,
+      facingVerify: null,
+      facingToolKey: null,
+      facingError: null,
       predicted: [],
       errors: [],
     };

@@ -20,6 +20,7 @@ import {
   engraveRegions,
   type EngraveGenerated,
   type EngraveRegions,
+  type EngraveShopOpts,
 } from '@/workers/sim/engraveGenerate';
 import { engravabilityFindings, type LabelEngravability, type LabelRatioAt } from '@/workers/sim/engraveGeometry';
 import type { EngravePreview, EngravePreviewer } from '@/workers/sim/engravePreview';
@@ -36,8 +37,11 @@ export function generate(
   calibration: MachineCalibration | null = null,
   catalogue: readonly FeedCatalogueRow[] = [],
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
+  // #432 — the shop options, for the halves of the pipeline that read the location: the facing
+  // pass's tool list (`shop.tools`) and its feeds table. Absent is the no-location build.
+  shop: EngraveShopOpts = {},
 ): EngraveGenerated {
-  return engraveGenerate(tl, job, jobTool(job), catalogue, calibration, margins);
+  return engraveGenerate(tl, job, jobTool(job), catalogue, calibration, margins, shop);
 }
 
 /** `engraveRegions` for a job, with the cutter that job names. */

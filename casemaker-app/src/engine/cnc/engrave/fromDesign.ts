@@ -256,6 +256,12 @@ export function designJobFor(
     // The file's OWN filament class when it names one this app knows (#456). Omitted otherwise:
     // an unknown or absent type must not silently become PLA, so the job's material stays as it is.
     ...(material !== null ? { material } : {}),
+    // The fibre the same filament states, when it states one this app knows (#464). ALWAYS present
+    // and `undefined` when the file names none — same convention as `print` below, and the reason
+    // it matters: re-importing a plain PETG design over a `PETG-CF` one has to take the flag away,
+    // or every later run is still weighed as cutting an abrasive. A file whose class is unknown
+    // states no fibre either (`parseFilament` only flags one beside a base it mapped).
+    fibre: filament?.fibre ?? undefined,
     // Both keys are ALWAYS present and `undefined` when the file states no print — the convention
     // `fromBadge.ts` documents and the reason for it is the same here (#285 review). A job taking
     // this patch may already carry a layer grid from a blank that had one, and `setStock` reads the
@@ -299,6 +305,16 @@ export function designJobFor(
       `The blank's filament is ${MATERIAL_LABELS[material]}, read from the file's own ${stated}. ` +
         "The job's stock material is the file's, not an assumption.",
     );
+    // #464 — the fill is a separate statement on the job, so say which one was read and what it
+    // changes. The material above is the BASE plastic on purpose; only the wear weighting reads
+    // this flag, and a note that folded the two together would misdescribe what the row says.
+    if (stock.fibre !== undefined) {
+      const fill = stock.fibre === 'cf' ? 'carbon fibre' : 'glass fibre';
+      notes.push(
+        `The same filament states a ${fill} fill: the blank is cut as its base plastic, and the run's ` +
+          'tool wear is weighed as cutting an abrasive — that is what the fibre flag on the job is for.',
+      );
+    }
   } else if (filament !== null) {
     const stated = filament.types.length > 0 ? filament.types.join(', ') : 'no filament_type';
     notes.push(
@@ -428,6 +444,9 @@ export function designJobFor(
         width: 'computed',
         thickness: 'computed',
         ...(material !== null ? { material: 'computed' as const } : {}),
+        // The fibre came out of the same class word the material did (#464), so it carries the
+        // same stamp — and only when a flag was actually written, like every other key here.
+        ...(stock.fibre !== undefined ? { fibre: 'computed' as const } : {}),
         ...(stock.print ? { print: 'computed' as const } : {}),
         // Only when a dome was actually written (#437): a flatness the patch did not state must not
         // claim provenance, or the job's merge would keep a stale stamp for a value it never got.

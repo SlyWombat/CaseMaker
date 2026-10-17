@@ -134,6 +134,22 @@ describe('EngraveJob schema (#200)', () => {
     expect(parsed.job).toEqual(job);
   });
 
+  // #464 — the fibre flag sits beside the material, so the schema has to name BOTH or a round trip
+  // keeps the value while losing the record of where it came from.
+  it('keeps the #464 fibre flag and its provenance through a round trip', () => {
+    const job = defaultEngraveJob();
+    job.stock.material = 'petg';
+    job.stock.fibre = 'cf';
+    job.sources = { stock: { material: 'computed', fibre: 'computed' } };
+
+    const parsed = parseEngraveJob(JSON.parse(JSON.stringify(job)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.stock.fibre).toBe('cf');
+    expect(parsed.job.sources?.stock?.fibre).toBe('computed');
+    expect(parsed.job).toEqual(job);
+  });
+
   it('rejects depth: -1 with a message naming labels[0].depth', () => {
     const job = defaultEngraveJob();
     job.labels[0]!.depth = -1;
@@ -678,6 +694,30 @@ describe('engraveJobStore (#200)', () => {
     const { job } = useEngraveJobStore.getState();
     expect('print' in job.stock).toBe(false);
     expect(job.sources?.stock?.print).toBeUndefined();
+  });
+
+  // #464 — `fibre` follows the same CLEAR rule as `print`, and the reason is the same shape: a
+  // design import states the flag whenever the file states one, so re-importing a PLAIN PETG file
+  // over a `PETG-CF` one must take it away — otherwise every later run is still weighed as cutting
+  // an abrasive, which is a heavier number nobody asked for.
+  it('setStock clears stock.fibre on an explicit undefined, and leaves it alone when omitted (#464)', async () => {
+    backing.clear();
+    const { useEngraveJobStore } = await freshStore();
+    const { setStock } = useEngraveJobStore.getState();
+
+    setStock({ material: 'petg', fibre: 'cf' }, 'computed');
+    expect(useEngraveJobStore.getState().job.stock.fibre).toBe('cf');
+    expect(useEngraveJobStore.getState().job.sources?.stock?.fibre).toBe('computed');
+
+    // An omitted key still says nothing about the blank.
+    setStock({ thickness: 4 });
+    expect(useEngraveJobStore.getState().job.stock.fibre).toBe('cf');
+
+    // The provenance goes with the value.
+    setStock({ fibre: undefined }, 'computed');
+    const { job } = useEngraveJobStore.getState();
+    expect('fibre' in job.stock).toBe(false);
+    expect(job.sources?.stock?.fibre).toBeUndefined();
   });
 
   it('"Use the badge blank" takes a stale print away when the badge loses it (#285 review)', async () => {

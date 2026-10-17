@@ -117,7 +117,7 @@ export interface EngraveJobSources {
    * way `material` is stamped when a badge becomes the blank.
    */
   stock?: Partial<
-    Record<'length' | 'width' | 'thickness' | 'material' | 'print' | 'flatness', FieldSource>
+    Record<'length' | 'width' | 'thickness' | 'material' | 'fibre' | 'print' | 'flatness', FieldSource>
   >;
   /** Provenance of `toolKey` (#254). Absent = the shipped default cutter. */
   tool?: FieldSource;
@@ -830,6 +830,17 @@ export interface EngraveJob {
     width: Mm;
     thickness: Mm;
     material: StockMaterial;
+    /**
+     * The fibre the blank's filament states (#464), BESIDE the material rather than folded into it
+     * — see {@link FilamentFibre}. `PETG-CF` is `material: 'petg'` with `fibre: 'cf'`: the feeds
+     * table and the catalogue read the base, and the run's tool wear reads the fibre.
+     *
+     * OPTIONAL and absent when no file has stated one, like `print`/`flatness`, so a job that has
+     * never seen a fibre filament round-trips byte-for-byte. It is also a field a patch can CLEAR
+     * (`setStock`): re-importing a plain PETG design over a PETG-CF one must take the flag away,
+     * or every later run is still weighed as abrasive.
+     */
+    fibre?: FilamentFibre;
     print?: StockPrint;
     flatness?: StockFlatness;
   };
@@ -968,6 +979,17 @@ export interface EngraveJob {
    */
   cutOverride?: Partial<CutParams>;
   /**
+   * Whether the job FACES the stock first, and how deep (#432) — a skim over the whole top so Z0
+   * lands on a cut surface rather than on whatever the blank arrived as.
+   *
+   * OPTIONAL, and absent is off: every document written before this field existed round-trips
+   * byte-for-byte and plans exactly as it did. Present, `enabled` is the two-state choice the
+   * finish SEEDS (`facingDefault`) and `depth` is the number a person is asked for once facing is
+   * on — the depth the whole job is then posted relative to, which is why it lives on the document
+   * and not on an item.
+   */
+  facing?: EngraveFacing;
+  /**
    * Where the asserted values came from (#246/#254). Optional: a job that has never had a setup
    * applied carries no key, so a pre-#246 document round-trips byte-for-byte.
    */
@@ -1002,4 +1024,26 @@ export interface JobStockEntry {
   finish: JobStockFinish;
   /** Whether a touch probe can find its edges electrically (§5.9); the shelf entry's own answer. */
   conductive: boolean;
+}
+
+/**
+ * The job's facing choice (#432). See {@link EngraveJob.facing}.
+ *
+ * `depth` is the TOTAL material taken off the top, not the per-pass bite: the pass step comes from
+ * the feeds row for the cutter and material, and the plan divides one by the other. Keeping the
+ * document's number whole means re-picking a cutter does not silently change what the job claims
+ * to remove.
+ */
+export interface EngraveFacing {
+  /** The two-state choice. `facingDefault` seeds it from the stock's finish; a person overrides it. */
+  enabled: boolean;
+  /** Material taken off the top face, mm — the depth every later program is posted from. */
+  depth: Mm;
+  /**
+   * The cutter the facing program runs with (#432 slice 2), as a registry key — its OWN choice,
+   * never the job's engraving cutter. Optional and null/absent asks the default rule
+   * (`engrave/facingTool.ts`): the largest flat end mill the catalogue recommends for the blank's
+   * material.
+   */
+  toolKey?: string | null;
 }

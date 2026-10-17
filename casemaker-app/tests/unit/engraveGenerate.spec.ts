@@ -9,6 +9,8 @@ import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { tl } from './helpers/manifoldExec';
 import { generate, regions } from './helpers/engravePipeline';
 import { frameCorners, engraveGenerate } from '@/workers/sim/engraveGenerate';
+import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import { UNMEASURED_FEEDS_TABLE, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
@@ -1264,5 +1266,182 @@ describe('engraveGenerate with a milled thread (#445)', () => {
     expect(out.ok).toBe(false);
     expect(out.stage).toBe('findings');
     expect(out.findings.some((f) => f.code === 'thread-wrong-tool')).toBe(true);
+  });
+});
+
+describe('facing the stock’s top (#432 slices 1–2)', () => {
+  const faced = (over: Partial<EngraveJob> = {}): EngraveJob => ({
+    ...defaultEngraveJob(),
+    facing: { enabled: true, depth: 0.5 },
+    ...over,
+  });
+
+  // The facing pass's OWN cutter: a 3.175 mm flat that is not Makera's metal line, so it is the
+  // largest eligible flat for this softwood blank and the job's own cutter (`flat-1.0`) stays the
+  // engraving tool. Its station (T2) is what proves the facing file is a separate program with a
+  // separate cutter, not the job's program with a skim prepended.
+  const FACING: ToolLibraryEntry = {
+    key: 'user:facing-3.175',
+    tool: flatEndMill(3.175, { number: 2, name: '3.175 mm flat (facing)' }),
+    provenance: 'this spec’s own facing cutter',
+  };
+  const SHOP: EngraveShopOpts = { tools: [FACING, ...TOOL_LIBRARY] };
+
+  it('emits the facing pass as its own verified program and leaves the engraving byte-identical', () => {
+    const plain = generate(tl, defaultEngraveJob());
+    const g = generate(tl, faced(), null, [], undefined, SHOP);
+    expect(
+      g.ok,
+      JSON.stringify(
+        {
+          stage: g.stage,
+          errors: g.errors,
+          findings: g.findings.filter((f) => f.severity === 'error'),
+          verify: g.verify?.findings.slice(0, 6),
+          facingError: g.facingError,
+        },
+        null,
+        2,
+      ),
+    ).toBe(true);
+    expect(g.stage).toBe('done');
+
+    // The engraving program is UNTOUCHED: no facing operation, no Z shift. The two files meet in
+    // the machine because the re-touch re-zeros Z on the faced surface between them (#432 slice 4),
+    // so lowering the cuts here would double-count the skim.
+    expect(g.nc).toBe(plain.nc);
+    expect(g.cam).toEqual(plain.cam);
+    expect(g.verify!.stats.deepestZ).toBe(plain.verify!.stats.deepestZ);
+    expect(g.verify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+
+    // The facing file is a program in its own right: the post's preamble, its own cutter's station,
+    // the one operation, and the post's ending.
+    expect(g.facingNc, `${g.facingError} ${JSON.stringify(g.facingVerify?.findings.slice(0, 3))}`).not.toBeNull();
+    expect(g.facingNc!.startsWith(';@MKR|BEGIN')).toBe(true);
+    expect(g.facingNc!.trimEnd().endsWith('M02')).toBe(true);
+    const names = g.facingNc!.split('\n').filter((l) => l.startsWith(';@MKR|TOOLPATH|'));
+    expect(names).toHaveLength(1);
+    expect(names[0]).toContain('name=[T2]Face stock top 0.5mm');
+    expect(g.facingToolKey).toBe('user:facing-3.175');
+    expect(g.facingError).toBeNull();
+    expect(g.facingVerify).not.toBeNull();
+    expect(g.facingVerify!.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    // The skim really removes 0.5 mm, from the probed top down.
+    expect(g.facingVerify!.stats.deepestZ).toBeCloseTo(-0.5, 6);
+  });
+
+  // #432 review — `job.cutOverride` is the hand-entered S/F for the job's ENGRAVING cutter (#205).
+  // Someone who typed numbers for a 1 mm flat has said nothing about the mill that skims the top,
+  // so the facing file resolves its own row and the override never reaches it.
+  it('resolves the facing file’s S/F from the facing cutter’s row, not the job’s cut override', () => {
+    const words = (nc: string, letter: 'S' | 'F'): string[] =>
+      [...nc.matchAll(new RegExp(`\\b${letter}(\\d+)`, 'g'))].map((m) => m[1]!);
+
+    const plain = generate(tl, faced(), null, [], undefined, SHOP);
+    const overridden = generate(
+      tl,
+      faced({ cutOverride: { rpm: 9000, feed: 300, plungeFeed: 150 } }),
+      null,
+      [],
+      undefined,
+      SHOP,
+    );
+    for (const g of [plain, overridden]) {
+      expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
+      expect(g.facingNc).not.toBeNull();
+      expect(g.facingError).toBeNull();
+    }
+
+    // The override IS live on the job — the engraving program carries the numbers that were typed.
+    // (Compared rather than quoted: the starting table's own values are not this spec's business.)
+    expect(words(overridden.nc!, 'S')).not.toEqual(words(plain.nc!, 'S'));
+    expect(words(overridden.nc!, 'F')).not.toEqual(words(plain.nc!, 'F'));
+
+    // …and the facing file is exactly what it was: same spindle, same feeds, to the word.
+    expect(words(overridden.facingNc!, 'S')).toEqual(words(plain.facingNc!, 'S'));
+    expect(words(overridden.facingNc!, 'F')).toEqual(words(plain.facingNc!, 'F'));
+    expect(words(overridden.facingNc!, 'S')).not.toContain('9000');
+    expect(words(overridden.facingNc!, 'F')).not.toContain('300');
+  });
+
+  it('emits no facing file when facing is off or its depth is zero', () => {
+    const plain = generate(tl, defaultEngraveJob());
+    for (const facing of [
+      undefined,
+      { enabled: false, depth: 0.5 },
+      { enabled: true, depth: 0 },
+    ]) {
+      const g = generate(tl, { ...defaultEngraveJob(), facing }, null, [], undefined, SHOP);
+      expect(g.ok).toBe(true);
+      expect(g.nc).toBe(plain.nc);
+      expect(g.facingNc).toBeNull();
+      expect(g.facingVerify).toBeNull();
+      expect(g.facingToolKey).toBeNull();
+      // "Not asked for" is not "refused": the reason channel stays empty.
+      expect(g.facingError).toBeNull();
+    }
+  });
+
+  it('refuses a facing depth that eats the minimum floor, before any CAM', () => {
+    const thickness = 3;
+    const g = generate(tl, faced({ stock: { ...defaultEngraveJob().stock, thickness }, minFloor: 1, facing: { enabled: true, depth: 2.5 } }));
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const finding = g.findings.find((f) => f.code === 'facing-too-deep');
+    expect(finding?.severity).toBe('error');
+    expect(g.cam).toBeNull();
+  });
+
+  it('round-trips the facing choice, its depth and its own cutter key through the schema', () => {
+    // The document is what survives a save: the schema STRIPS keys it does not know, so the
+    // facing cutter would silently disappear from every saved job if it were only on the type.
+    const job = faced({ facing: { enabled: true, depth: 0.5, toolKey: 'user:facing-3.175' } });
+    const parsed = parseEngraveJob(structuredClone(job) as unknown);
+    expect(parsed.ok, parsed.ok ? '' : parsed.errors.join('; ')).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.job.facing).toEqual({ enabled: true, depth: 0.5, toolKey: 'user:facing-3.175' });
+  });
+
+  it('refuses the facing FILE, not the run, when no flat cutter can face the blank', () => {
+    const plain = generate(tl, defaultEngraveJob());
+    const g = generate(tl, faced(), null, [], undefined, { tools: [] });
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    // The engraving is what the run produced: it is untouched, and still savable.
+    expect(g.nc).toBe(plain.nc);
+    expect(g.facingNc).toBeNull();
+    expect(g.facingVerify).toBeNull();
+    expect(g.facingToolKey).toBeNull();
+    expect(g.facingError).toMatch(/no flat end mill/);
+  });
+
+  it('will not default to a metal-line cutter on a non-metal blank', () => {
+    // The built-in 3.175 flat is `3.175*12mm Flat End(Metal)` — bigger than the 1 mm, and still not
+    // the facing default on softwood. With it as the ONLY flat, the file is refused by name.
+    const metalOnly = TOOL_LIBRARY.filter((e) => e.key === 'flat-3.175x12-metal');
+    const g = generate(tl, faced(), null, [], undefined, { tools: metalOnly });
+    expect(g.ok).toBe(true);
+    expect(g.facingNc).toBeNull();
+    expect(g.facingError).toMatch(/for Metal/);
+  });
+
+  it('faces a thread job with its own flat, and leaves the thread program to the thread mill', () => {
+    const MILL: Tool = flatEndMill(4, { name: '4 mm thread mill', typeText: 'Thread Mill', shape: 'thread', tipDiameter: 4, diameter: 4, fluteLength: 20 });
+    const job: EngraveJob = {
+      ...defaultEngraveJob(),
+      labels: [],
+      shapes: [],
+      traces: [],
+      drills: [],
+      tool: MILL,
+      threads: [
+        { kind: 'thread', id: 'thr-a', position: { x: 50, y: 30 }, enabled: true, size: 'M5', standard: 'metric', classFit: '6H', depth: 5, through: false },
+      ],
+      facing: { enabled: true, depth: 0.5 },
+    };
+    const g = engraveGenerate(tl, job, MILL, [], null, undefined, { tools: [FACING, ...TOOL_LIBRARY] });
+    expect(g.ok).toBe(true);
+    expect(g.facingNc, `${g.facingError} ${JSON.stringify(g.facingVerify?.findings.slice(0, 3))}`).not.toBeNull();
+    expect(g.facingToolKey).toBe('user:facing-3.175');
   });
 });

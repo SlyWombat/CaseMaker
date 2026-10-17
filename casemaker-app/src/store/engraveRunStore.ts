@@ -26,6 +26,7 @@ import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
+import { getTools } from '@/engine/cnc/toolRegistry';
 import type { MachineCalibration } from '@/engine/cnc';
 import { effectiveMargins } from '@/engine/cnc/engrave/depthBounds';
 import { useSettingsStore } from './settingsStore';
@@ -158,6 +159,10 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // like the catalogue below and for the same reason: the worker cannot see the location, and
       // a program built on the compiled rows would disagree with the panel's.
       feeds: resolvedFeedsTable().table,
+      // #432 slice 2 — the cutter list the facing pass chooses from, sent for the same reason the
+      // catalogue is (the worker's registry is empty). The snapshotted list, not a re-read after the
+      // await: the facing tool must be one the picker this run was started from shows.
+      tools: getTools(),
     };
 
     // The cutter, resolved ONCE on this side (#305): the sim worker cannot see the registry, so

@@ -110,7 +110,12 @@ export type JobFindingCode =
   | 'thread-too-deep'
   | 'thread-through-unavailable'
   | 'thread-pilot-unproven'
-  | 'thread-flute-unproven';
+  | 'thread-flute-unproven'
+  // Facing (#432). The job's facing depth is taken off the same blank every item is measured
+  // against, so the check is one number against the stock's minimum floor — not a per-item one.
+  // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check
+  // measures from the faced surface.
+  | 'facing-too-deep';
 
 export interface JobFinding {
   severity: 'error' | 'warning';
@@ -377,11 +382,27 @@ export function validateJob(job: EngraveJob): JobFinding[] {
   // nothing.
   const enabledThreads: EngraveThread[] = (job.threads ?? []).filter((t) => t.enabled);
   const { thickness } = job.stock;
-  const floorAllowed = thickness - job.minFloor;
+
+  // #432 — the facing skim is material the items no longer have under them. Every item's depth is
+  // measured from the FACED top (that is the frame the document is written in), so the floor an
+  // item may cut to is one facing-depth lower than the blank's own: `thickness − facing − minFloor`.
+  // Absent, disabled or zero means the job does not face and every number below is unchanged.
+  const facingDepth = job.facing !== undefined && job.facing.enabled && job.facing.depth > 0 ? job.facing.depth : 0;
+  if (facingDepth > thickness - job.minFloor) {
+    findings.push({
+      severity: 'error',
+      code: 'facing-too-deep',
+      message:
+        `The facing pass would take ${facingDepth} mm off the ${thickness} mm stock, leaving less ` +
+        `than the ${job.minFloor} mm minimum floor. A facing pass is a light skim: keep it shallow, ` +
+        `or start from thicker stock.`,
+    });
+  }
+  const floorAllowed = thickness - facingDepth - job.minFloor;
 
   for (const item of enabled) {
     if (item.depth > floorAllowed) {
-      const remaining = thickness - item.depth;
+      const remaining = thickness - facingDepth - item.depth;
       findings.push({
         severity: 'error',
         code: 'depth-exceeds-stock',
@@ -395,7 +416,7 @@ export function validateJob(job: EngraveJob): JobFinding[] {
 
   for (const trace of enabledTraces) {
     if (trace.depth > floorAllowed) {
-      const remaining = thickness - trace.depth;
+      const remaining = thickness - facingDepth - trace.depth;
       findings.push({
         severity: 'error',
         code: 'depth-exceeds-stock',
@@ -428,7 +449,7 @@ export function validateJob(job: EngraveJob): JobFinding[] {
           `cut into the vise.`,
       });
     } else if (drill.depth > floorAllowed) {
-      const remaining = thickness - drill.depth;
+      const remaining = thickness - facingDepth - drill.depth;
       findings.push({
         severity: 'error',
         code: 'depth-exceeds-stock',
