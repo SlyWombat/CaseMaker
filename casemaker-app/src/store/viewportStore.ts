@@ -31,6 +31,10 @@ export type ViewportSelection =
   | { kind: 'snap-catch'; catchId: string }      // Phase 4c (#95)
   | { kind: 'mounting-feature'; featureId: string } // Phase 4d (#96)
   | { kind: 'component'; componentId: string }   // Phase 4e (#97)
+  // #441 — an item of the engrave preview. This is the ONE kind that belongs to a sidebar
+  // section: it is set by clicking geometry in the engrave panel's own preview, so the click
+  // must not take the right rail away from the panel whose row it opened.
+  | { kind: 'engrave-item'; itemId: string }
   | null;
 
 /** Sidebar section ID — set when the user clicks a section header in
@@ -203,8 +207,26 @@ export const useViewportStore = create<ViewportState>()((set, get) => ({
     set({ cameraMode: m });
     savePersisted({ ...get(), cameraMode: m });
   },
-  setSelection: (s) => set({ selection: s, activeSidebarSection: s ? null : get().activeSidebarSection }),
-  setActiveSidebarSection: (s) => set({ activeSidebarSection: s, selection: s ? null : get().selection }),
+  // #441 — every selection except an engrave item clears the active section, because the right
+  // rail only ever shows ONE thing. An engrave item is the exception and not an oversight: it is
+  // selected FROM the engrave section's preview, so clearing the section would unmount the panel
+  // (and the preview) the click came from before its row could be seen open.
+  setSelection: (s) =>
+    set({
+      selection: s,
+      activeSidebarSection:
+        s && s.kind !== 'engrave-item' ? null : get().activeSidebarSection,
+    }),
+  setActiveSidebarSection: (s) =>
+    set((state) => {
+      // Opening a section still clears the geometry selection. CLOSING one normally leaves the
+      // selection alone, with one exception (#441): an engrave item means nothing once the
+      // engrave preview that gave it is gone, so it is dropped rather than left pointing into a
+      // row list nobody can see.
+      const selection =
+        s !== null || state.selection?.kind === 'engrave-item' ? null : state.selection;
+      return { activeSidebarSection: s, selection };
+    }),
   setShellRender: (m) => {
     set({ shellRender: m });
     savePersisted({ ...get(), shellRender: m });

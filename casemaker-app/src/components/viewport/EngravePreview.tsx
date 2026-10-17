@@ -24,11 +24,13 @@ import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useViewportStore } from '@/store/viewportStore';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { ViseParams } from '@/types/engraveJob';
 import { geometryFromMesh, SACRIFICIAL_COLOR } from './simGeometry';
 import { floorColor, VOID_COLOR } from './engraveRamp';
 import { clampLabelBox, projectToCanvas } from './projectedLabel';
+import { activateEngraveItem } from './engravePick';
 
 /** The same neutral wood tone the simulation's stock uses (#197). */
 const STOCK_COLOR = '#c9a26b';
@@ -59,12 +61,31 @@ function useMeshGeometry(mesh: NodeMeshOutput | null): THREE.BufferGeometry | nu
   return geom;
 }
 
-/** One cut's floor, coloured by `floorColor` — the depth ramp, or the two-colour reading (#170). */
+/**
+ * One cut's floor, coloured by `floorColor` — the depth ramp, or the two-colour reading (#170).
+ *
+ * #441 — the floor is also its item's PICK TARGET. The tag is the job's own item id, the same
+ * string the panel's row list keys on, so `activateEngraveItem` can select the item and open its
+ * row without a parallel index. The Select-tool gate is read fresh at click time, exactly as the
+ * #83 pickers do, so an orbit drag over the preview never selects. Floors that belong to traces,
+ * drills, vectors and combined shapes resolve the same way: the preview emits one floor per cut,
+ * and every cut carries its item's id.
+ */
 function Floor({ mesh, color, labelId }: { mesh: NodeMeshOutput; color: string; labelId: string }) {
   const geom = useMeshGeometry(mesh);
   if (!geom) return null;
   return (
-    <mesh geometry={geom} name={`engrave-floor-${labelId}`} userData={{ engraveFloor: labelId }}>
+    <mesh
+      geometry={geom}
+      name={`engrave-floor-${labelId}`}
+      userData={{ engraveFloor: labelId }}
+      onClick={(e) => {
+        const { activeTool } = useViewportStore.getState();
+        if (activeTool !== 'select') return;
+        if (!activateEngraveItem(e.object)) return;
+        e.stopPropagation();
+      }}
+    >
       <meshStandardMaterial color={color} metalness={0.05} roughness={0.7} />
     </mesh>
   );

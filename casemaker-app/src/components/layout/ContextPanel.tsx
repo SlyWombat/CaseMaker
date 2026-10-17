@@ -119,6 +119,10 @@ export function ContextPanel() {
   }
 
   const isOpen = !isCompact || drawerOpen;
+  // #441 — an engrave-item selection belongs to the engrave panel: it opens that item's row and
+  // has no SelectionPanel of its own, so the rail keeps showing the section that produced it.
+  // Every other selection takes the rail, as before.
+  const hasSelectionEditor = selection !== null && selection.kind !== 'engrave-item';
   const className = [
     'context-panel',
     isCompact ? 'context-panel--drawer' : 'context-panel--rail',
@@ -149,7 +153,7 @@ export function ContextPanel() {
             content's × (the section editor's, or the selection's) and the two read as one control
             duplicated; the handle tab on the right edge is the drawer's affordance, and it says so
             in its own label. Rail mode never had one, so this is also the two modes agreeing. */}
-        {selection ? (
+        {hasSelectionEditor ? (
           <SelectionPanel />
         ) : activeSection ? (
           <div data-testid={`context-section-${activeSection}`} style={{ padding: 8 }}>

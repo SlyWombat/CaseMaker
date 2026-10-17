@@ -284,6 +284,10 @@ export function SelectionPanel() {
     );
   }
 
+  // #441 — an engrave item has no editor here: its selection opens a row in the engrave panel it
+  // was picked from, and `ContextPanel` keeps that section on screen instead of this panel.
+  if (selection.kind === 'engrave-item') return null;
+
   // HAT
   const placement = project.hats?.find((h) => h.id === selection.hatPlacementId);
   if (!placement) {

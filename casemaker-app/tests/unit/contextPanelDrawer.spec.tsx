@@ -109,3 +109,16 @@ describe('#360 — the export modal leaves the drawer it is opened from', () => 
     expect(screen.getByTestId('context-panel').contains(backdrop!), 'not inside the drawer').toBe(false);
   });
 });
+
+describe('#441 — an engrave item selected in the preview keeps its panel', () => {
+  it('leaves the engrave section in the rail rather than swapping in a SelectionPanel', () => {
+    setWidth(1440);
+    useViewportStore.setState({
+      activeSidebarSection: 'cnc-engrave',
+      selection: { kind: 'engrave-item', itemId: 'label-1' },
+    });
+    render(<ContextPanel />);
+    expect(screen.getByTestId('context-section-cnc-engrave')).toBeTruthy();
+    expect(screen.queryByTestId('selection-panel')).toBeNull();
+  });
+});

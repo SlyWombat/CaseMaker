@@ -11,6 +11,7 @@ import { useViewportStore } from '@/store/viewportStore';
 describe('Issue #83 — viewport selection', () => {
   beforeEach(() => {
     useViewportStore.getState().setSelection(null);
+    useViewportStore.setState({ activeSidebarSection: null });
   });
 
   it('default selection is null', () => {
@@ -67,5 +68,57 @@ describe('Issue #83 — viewport selection', () => {
     expect(raw).not.toContain('h-keep-me-out-of-disk');
     // restore for other tests
     useViewportStore.getState().setShowLid(true);
+  });
+});
+
+/**
+ * Issue #441 — engrave items are selected from the engrave panel's own preview. That is the one
+ * selection kind that MUST coexist with a sidebar section: clearing the section on selection
+ * would unmount the panel (and its preview) whose row the click just opened.
+ */
+describe('Issue #441 — engrave-item selection and the right rail', () => {
+  beforeEach(() => {
+    useViewportStore.setState({ selection: null, activeSidebarSection: null });
+  });
+
+  it('carries the job item id', () => {
+    useViewportStore.getState().setSelection({ kind: 'engrave-item', itemId: 'label-9' });
+    expect(useViewportStore.getState().selection).toEqual({
+      kind: 'engrave-item',
+      itemId: 'label-9',
+    });
+  });
+
+  it('keeps the engrave section open when the item is selected', () => {
+    useViewportStore.getState().setActiveSidebarSection('cnc-engrave');
+    useViewportStore.getState().setSelection({ kind: 'engrave-item', itemId: 'label-9' });
+    expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-engrave');
+  });
+
+  it('still clears the section for every other selection kind', () => {
+    useViewportStore.getState().setActiveSidebarSection('cnc-engrave');
+    useViewportStore.getState().setSelection({ kind: 'host' });
+    expect(useViewportStore.getState().activeSidebarSection).toBeNull();
+  });
+
+  it('drops the engrave selection when its section is closed', () => {
+    useViewportStore.getState().setActiveSidebarSection('cnc-engrave');
+    useViewportStore.getState().setSelection({ kind: 'engrave-item', itemId: 'shape-2' });
+    useViewportStore.getState().setActiveSidebarSection(null);
+    expect(useViewportStore.getState().selection).toBeNull();
+  });
+
+  it('drops the engrave selection when another section opens', () => {
+    useViewportStore.getState().setActiveSidebarSection('cnc-engrave');
+    useViewportStore.getState().setSelection({ kind: 'engrave-item', itemId: 'shape-2' });
+    useViewportStore.getState().setActiveSidebarSection('board');
+    expect(useViewportStore.getState().selection).toBeNull();
+  });
+
+  it('clearing the selection (empty canvas) leaves the section open', () => {
+    useViewportStore.getState().setActiveSidebarSection('cnc-engrave');
+    useViewportStore.getState().setSelection({ kind: 'engrave-item', itemId: 'shape-2' });
+    useViewportStore.getState().setSelection(null);
+    expect(useViewportStore.getState().activeSidebarSection).toBe('cnc-engrave');
   });
 });
