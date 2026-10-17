@@ -27,7 +27,12 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { ORACLE_AREA_FLOOR } from '@/engine/cnc/engrave/oracle';
 import { vCone, type VCone } from '@/engine/cnc/vProfile';
-import { cutDepthAtDistance, vCarvePlane } from '@/engine/cnc/vCarveGeometry';
+import {
+  DEFAULT_V_CARVE_STEPOVER_RATIO,
+  cutDepthAtDistance,
+  vCarvePlane,
+  vCarveStepover,
+} from '@/engine/cnc/vCarveGeometry';
 import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import type { EngraveRegions } from '@/workers/sim/engraveGenerate';
@@ -553,6 +558,486 @@ describe('the thick fixture as a V-carve job (#221)', () => {
       const offset = makeClipperOffset(tl);
       expectConeLevel(session, r, film, film, offset);
       expectConeLevel(session, r, film, 0.2, offset);
+    } finally {
+      session.dispose();
+    }
+  });
+});
+
+/**
+ * #221 slice 9 (thin half) — END-TO-END ACCEPTANCE on the thin fixture, appended as its own
+ * self-contained describe because slice C's spec is a sibling commit.
+ *
+ * One job, the whole design, one V-bit: generate → findings → the column engine's cone → the
+ * V-carve oracle at the floors. It covers the two finding cases the slice asks for in ONE run —
+ * the `vcarve-surface-merge` warning the fixture's tight strokes raise, and the
+ * `vcarve-stepover-clamped` note with the requested pitch beside the effective one.
+ *
+ * THE FILM IS READ, NOT ASSUMED. Today `single-thin.3mf` states its colour split through its print,
+ * so `colourBoundaryDepth` resolves to 0.2 mm; when #492 (J19) makes it a purchased laminate with
+ * an assumed 0.075 mm cap, the helper follows the source. Every relationship below is stated in
+ * terms of `f`, and exactly one test pins today's 0.2 so a silent fixture move is still loud.
+ */
+describe('the thin fixture end to end (#221 acceptance)', () => {
+  const design = read(join('thin-film', 'single-thin.3mf'));
+
+  /** 15° from the axis: the half angle of the bench's 30° engraving bit. */
+  const TAN15 = Math.tan(Math.PI / 12);
+
+  /** The finding messages' own formatter (`Math.round(v·1000)/1000`). */
+  const mm = (v: number): string => String(Math.round(v * 1000) / 1000);
+
+  /** The 30° engraving bit the bench ran: 0.3 mm tip, 3.175 mm shank, 15° half angle. */
+  function bit30(): Tool {
+    return flatEndMill(0.3, {
+      name: 'Single Flute Engraving Bit 30 x 0.3',
+      typeText: 'Engraving',
+      shape: 'engraving',
+      handleDiameter: 3.175,
+      diameter: 3.175,
+      tipDiameter: 0.3,
+      angle: 30,
+      halfAngle: 15,
+    });
+  }
+
+  /** The bench's one-bit job for the fixture (1.2 mm proud; legal on the 1.5 mm blank). */
+  function thinJob(): EngraveJob {
+    const patch = designJobFor(design);
+    const base = defaultEngraveJob();
+    return {
+      ...base,
+      name: patch.name,
+      stock: { ...base.stock, ...patch.stock },
+      labels: [],
+      shapes: [],
+      vectors: [...patch.vectors],
+      keepOuts: patch.keepOut ? [patch.keepOut] : [],
+      toolKey: 'inv:kz-engrave-30-0-3',
+      tool: bit30(),
+      workholding: {
+        ...base.workholding,
+        vise: { ...base.workholding.vise, stockProud: 1.2 },
+      },
+    };
+  }
+
+  /** The cone the job's bit describes, or a loud failure — no flat fallback. */
+  function coneOf(job: EngraveJob): VCone {
+    const tool = jobTool(job);
+    if (tool === null) throw new Error('the job should name its cutter');
+    const cone = vCone(tool);
+    if (cone === null) throw new Error('the 30° bit must have a cone');
+    return cone;
+  }
+
+  /**
+   * The film the pipeline actually resolved for this job, mm — the source the expectations use.
+   * It is the colour boundary the PRINT has, so it follows the print split today and the laminate
+   * assumption when #492 lands; only the pinned test below states a number.
+   */
+  function filmFrom(r: EngraveRegions): number {
+    const film = r.colourBoundaryDepth;
+    if (film === null) throw new Error('the thin fixture states a colour split');
+    return film;
+  }
+
+  /** Area of a polygon set, through the same kernel the plan itself went through. */
+  function area(polys: Polygons): number {
+    const cs = tl.CrossSection.ofPolygons(polys);
+    const a = cs.area();
+    cs.delete();
+    return a;
+  }
+
+  /**
+   * The cone's level-set identity as the oracle consumes it: at `depth` below the top face the
+   * material the cone removes is the design offset by `(film − depth)·tanHalf`. At the film that is
+   * the design itself; above it the region grows toward the surface opening, below it shrinks
+   * toward the floor.
+   */
+  function coneLevels(
+    r: EngraveRegions,
+    film: number,
+    depth: number,
+    offset: OffsetFn,
+  ): { depth: number; polygons: Polygons }[] {
+    return r.cuts.map((cut) => {
+      if (cut.vCarve === undefined) throw new Error(`${cut.name ?? cut.id} is cut by the cone`);
+      const delta = (film - depth) * TAN15;
+      return { depth, polygons: delta === 0 ? cut.vCarve.plane : offset(cut.vCarve.plane, delta) };
+    });
+  }
+
+  /** Ask the oracle about ONE level that is not a floor, and require it inside the area floor. */
+  function expectLevel(session: SimSession, r: EngraveRegions, film: number, depth: number, offset: OffsetFn): void {
+    const report = session.oracle(coneLevels(r, film, depth, offset));
+    expect(
+      report.ok,
+      JSON.stringify({ depth, band: report.band, worst: report.worst, levels: report.levels }),
+    ).toBe(true);
+    expect(report.worst.underCut).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+    expect(report.worst.overCut).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+  }
+
+  // The ONE pinned film. If this fails, the fixture (or #492's laminate source) moved and every
+  // relationship below must be re-read against the new material — do not adjust it to pass.
+  it('pins today’s film at 0.2 mm, read from the plan rather than assumed by the assertions', () => {
+    const r = regions(tl, thinJob());
+    expect(filmFrom(r)).toBeCloseTo(0.2, 12);
+  });
+
+  it('states planeRadius, the floor and the surface as functions of the film it read', () => {
+    const job = thinJob();
+    const r = regions(tl, job);
+    const film = filmFrom(r);
+    const cone = coneOf(job);
+    const offset = makeClipperOffset(tl);
+    expect(r.cuts).toHaveLength(3);
+
+    for (const cut of r.cuts) {
+      const v = cut.vCarve;
+      expect(v, `${cut.name ?? cut.id} is cut by the cone`).toBeDefined();
+      if (v === undefined) continue;
+      const label = cut.name ?? cut.id;
+      const e = cut.depth - film;
+
+      // The CAM's offset IS the colour-plane model, not a second derivation of it.
+      const plane = vCarvePlane(cone, cut.depth, film);
+      expect(v.planeDepth, label).toBeCloseTo(plane.film, 12);
+      expect(v.planeRadius, label).toBeCloseTo(plane.planeRadius, 12);
+
+      // planeRadius = tipRadius + (D − f)·tanHalf.
+      expect(v.planeRadius, label).toBeCloseTo(cone.tipRadius + e * TAN15, 9);
+      // The floor is (D − f)·tanHalf narrower per side than the design.
+      expect(v.floorInset, label).toBeCloseTo(e * TAN15, 9);
+      // The surface opening is the design outset by f·tanHalf per side.
+      expect(v.surfaceOutset, label).toBeCloseTo(film * TAN15, 9);
+      // Floor to surface is the whole cone: (D − f) + f = D.
+      expect(v.floorInset + v.surfaceOutset, label).toBeCloseTo(cut.depth * TAN15, 9);
+
+      // The same identities through the flank arithmetic the column engine sweeps: at rPlane the
+      // cone is exactly f below the top; one surface outset further out it reaches the top face;
+      // and a tip radius from the toolpath is uncut.
+      expect(cut.depth - cutDepthAtDistance(cone, v.planeRadius, cut.depth), label).toBeCloseTo(film, 9);
+      expect(
+        cut.depth - cutDepthAtDistance(cone, v.planeRadius + v.surfaceOutset, cut.depth),
+        label,
+      ).toBeCloseTo(0, 9);
+      expect(cutDepthAtDistance(cone, cone.tipRadius, cut.depth), label).toBeCloseTo(0, 12);
+
+      // And the drawn outlines are exactly those offsets of the design.
+      expect(area(v.surface), label).toBeCloseTo(area(offset(v.plane, film * TAN15)), 6);
+      expect(area(v.floor), label).toBeCloseTo(area(offset(v.plane, -e * TAN15)), 6);
+      expect(area(v.surface), label).toBeGreaterThan(area(v.plane));
+      expect(area(v.plane), label).toBeGreaterThan(area(v.floor));
+    }
+  });
+
+  // The two finding cases, in ONE generated job. Both are warnings: the colour line at the plane
+  // is still correct, so neither refuses the cut.
+  it('raises the surface-merge warning and the clamped-pitch note, with both pitches stated', () => {
+    const job = thinJob();
+    const r = regions(tl, job);
+    const film = filmFrom(r);
+    const cone = coneOf(job);
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
+
+    const merges = g.findings.filter((f) => f.code === 'vcarve-surface-merge');
+    expect(merges.length).toBeGreaterThan(0);
+    for (const merge of merges) expect(merge.severity).toBe('warning');
+    // The item the manager named to watch: "(Like the Whiskey)" at 6.2 mm cap height.
+    const sub = r.cuts.find((c) => c.name?.includes('(Like the Whiskey)'));
+    expect(sub).toBeDefined();
+    const subMerge = merges.find((m) => m.labelId === sub!.id);
+    expect(subMerge).toBeDefined();
+    // The threshold is the surface wall offset from f: 2 × f·tanHalf, not a hard-coded 0.107.
+    expect(subMerge!.message).toContain(`closer than ${mm(2 * film * TAN15)} mm`);
+    expect(subMerge!.message).toContain(`2 × the ${mm(film * TAN15)} mm surface wall offset`);
+    expect(subMerge!.message).toContain('ridge of the top colour');
+
+    const notes = g.findings.filter((f) => f.code === 'vcarve-stepover-clamped');
+    expect(notes).toHaveLength(3);
+    for (const note of notes) {
+      expect(note.severity).toBe('warning');
+      const cut = r.cuts.find((c) => c.id === note.labelId);
+      expect(cut).toBeDefined();
+      const planeRadius = cut!.vCarve!.planeRadius;
+      // The request is the seed × the groove width at the plane; the floor allows the tip radius.
+      const step = vCarveStepover(planeRadius, cone, DEFAULT_V_CARVE_STEPOVER_RATIO);
+      expect(step.requested).toBeCloseTo(DEFAULT_V_CARVE_STEPOVER_RATIO * 2 * planeRadius, 9);
+      expect(step.clamped).toBe(true);
+      // "Beside the requested one": the same note carries the effective pitch AND the request.
+      expect(note.message).toContain(`pitch ${mm(step.effective)} mm`);
+      expect(note.message).toContain(`requested ${mm(step.requested)} mm`);
+    }
+  });
+
+  it('sweeps the program on the column cone and the oracle accepts every floor', () => {
+    const job = thinJob();
+    const r = regions(tl, job);
+    const film = filmFrom(r);
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+
+    const tool = jobTool(job);
+    expect(tool).not.toBeNull();
+    if (g.nc === null || tool === null) throw new Error('the job should generate a program');
+
+    const setup = toSetup(job, jobMachine(job, null));
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(g.nc, setup, tool, job.machineId);
+      expect(load.ok, load.ok ? '' : JSON.stringify(load.diagnostics)).toBe(true);
+      if (!load.ok) return;
+      expect(load.stats.engine).toBe('column');
+      expect(load.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+
+      // The work origin is the stock's top face. The deepest CUTTING move is the deepest stated
+      // item depth and nothing goes below it: D is the floor by construction.
+      const deepestFloor = Math.max(...r.cuts.map((cut) => cut.depth));
+      const path = session.simPath();
+      let deepestCut = 0;
+      for (let i = 0; i < path.kind.length; i++) {
+        if (path.kind[i] === 1) deepestCut = Math.min(deepestCut, path.xyz[i * 3 + 2]!);
+      }
+      expect(deepestCut).toBeCloseTo(-deepestFloor, 4);
+
+      // Floor levels: one per distinct item depth (0.394 text, 0.399 logo today), all accepted.
+      const oracle = session.oracle(g.predicted);
+      expect(oracle.ok, JSON.stringify({ worst: oracle.worst, levels: oracle.levels })).toBe(true);
+      const distinctFloors = new Set(r.cuts.map((cut) => cut.depth));
+      expect(oracle.levels).toHaveLength(distinctFloors.size);
+      for (const depth of distinctFloors) {
+        expect(
+          oracle.levels.some((level) => Math.abs(-level.z - depth) < 1e-5),
+          `a floor at ${depth} mm`,
+        ).toBe(true);
+      }
+      expect(oracle.worst.underCut).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+      expect(oracle.worst.overCut).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+
+      // The colour plane itself (depth = f is the design) and a mid-wall level, on the same grid.
+      const offset = makeClipperOffset(tl);
+      expectLevel(session, r, film, film, offset);
+      expectLevel(session, r, film, film / 2, offset);
+    } finally {
+      session.dispose();
+    }
+  });
+});
+
+/**
+ * #221 slice 9 (thick half) — ACCEPTANCE GATES on `single.3mf`, appended self-contained beside
+ * slice C's sibling describe.
+ *
+ * A later edit to the fixture must fail here rather than silently move the numbers the slice was
+ * accepted on: the model's 3.81 mm and split 3.0 (raw film 0.81) print as 19 × 0.2 = 3.80 mm with
+ * the colour change at layer 15 (film 0.80); the floors are 0.985/0.985/0.998; the column engine
+ * sweeps the cone and the oracle accepts both floors with zero under- and over-cut.
+ */
+describe('the thick fixture acceptance gates (#221)', () => {
+  const design = read('single.3mf');
+  const TAN15 = Math.tan(Math.PI / 12);
+
+  function bit30(): Tool {
+    return flatEndMill(0.3, {
+      name: 'Single Flute Engraving Bit 30 x 0.3',
+      typeText: 'Engraving',
+      shape: 'engraving',
+      handleDiameter: 3.175,
+      diameter: 3.175,
+      tipDiameter: 0.3,
+      angle: 30,
+      halfAngle: 15,
+    });
+  }
+
+  /** The bench's one-bit job; 1.2 mm proud, the value the thick acceptance ran with. */
+  function thickJob(): EngraveJob {
+    const patch = designJobFor(design);
+    const base = defaultEngraveJob();
+    return {
+      ...base,
+      name: patch.name,
+      stock: { ...base.stock, ...patch.stock },
+      labels: [],
+      shapes: [],
+      vectors: [...patch.vectors],
+      keepOuts: patch.keepOut ? [patch.keepOut] : [],
+      toolKey: 'inv:kz-engrave-30-0-3',
+      tool: bit30(),
+      workholding: {
+        ...base.workholding,
+        vise: { ...base.workholding.vise, stockProud: 1.2 },
+      },
+    };
+  }
+
+  function coneOf(job: EngraveJob): VCone {
+    const tool = jobTool(job);
+    if (tool === null) throw new Error('the job should name its cutter');
+    const cone = vCone(tool);
+    if (cone === null) throw new Error('the 30° bit must have a cone');
+    return cone;
+  }
+
+  function area(polys: Polygons): number {
+    const cs = tl.CrossSection.ofPolygons(polys);
+    const a = cs.area();
+    cs.delete();
+    return a;
+  }
+
+  function coneLevels(
+    r: EngraveRegions,
+    film: number,
+    depth: number,
+    offset: OffsetFn,
+  ): { depth: number; polygons: Polygons }[] {
+    return r.cuts.map((cut) => {
+      if (cut.vCarve === undefined) throw new Error(`${cut.name ?? cut.id} is cut by the cone`);
+      const delta = (film - depth) * TAN15;
+      return { depth, polygons: delta === 0 ? cut.vCarve.plane : offset(cut.vCarve.plane, delta) };
+    });
+  }
+
+  function expectLevel(session: SimSession, r: EngraveRegions, film: number, depth: number, offset: OffsetFn): void {
+    const report = session.oracle(coneLevels(r, film, depth, offset));
+    expect(
+      report.ok,
+      JSON.stringify({ depth, band: report.band, worst: report.worst, levels: report.levels }),
+    ).toBe(true);
+    expect(report.worst.underCut).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+    expect(report.worst.overCut).toBeLessThanOrEqual(ORACLE_AREA_FLOOR);
+  }
+
+  it('pins the PRINTED film: 19 × 0.2 mm layers, colour change at layer 15, 0.80 mm', () => {
+    // The model's raw subtraction is 3.81 − 3.0 = 0.81, but the printed part is layer-quantised:
+    // 19 layers of 0.2 = 3.80 mm, with the colour change at layer 15. 0.80 is the material; the
+    // 0.01 is the model's arithmetic and never existed. No finding is raised for the difference.
+    const layerHeight = design.layerHeight;
+    const colourSplit = design.colourSplit;
+    expect(layerHeight, 'the fixture states its print grid').not.toBeNull();
+    expect(colourSplit, 'the fixture states its colour split').not.toBeNull();
+    if (layerHeight === null || colourSplit === null) throw new Error('the fixture states its print');
+    const layers = Math.round(design.stock.thickness / layerHeight);
+    const splitAtLayer = Math.round(colourSplit / layerHeight);
+    expect(layers).toBe(19);
+    expect(splitAtLayer).toBe(15);
+    const printedFilm = (layers - splitAtLayer) * layerHeight;
+    expect(printedFilm).toBeCloseTo(0.8, 12);
+    const rawModelFilm = design.stock.thickness - colourSplit;
+    expect(rawModelFilm).toBeCloseTo(0.81, 6);
+    expect(rawModelFilm - printedFilm).toBeCloseTo(0.01, 6);
+
+    const r = regions(tl, thickJob());
+    expect(r.colourBoundaryDepth).toBeCloseTo(printedFilm, 12);
+
+    // The three measured floors the acceptance used.
+    expect(region(design, 'Single Barrel').depth).toBeCloseTo(0.985, 3);
+    expect(region(design, '(Like the Whiskey)').depth).toBeCloseTo(0.985, 3);
+    expect(region(design, 'br').depth).toBeCloseTo(0.998, 3);
+  });
+
+  it('holds the blank 1.2 mm proud so the jaw tops stay below the 0.998 floor', () => {
+    const job = thickJob();
+    const setup = toSetup(job, jobMachine(job, null));
+    const jaws = (setup.fixture?.boxes ?? []).filter((b) => b.id.startsWith('vise-'));
+    expect(jaws.length).toBe(2);
+    for (const jaw of jaws) {
+      // Work origin is the stock top; the jaw tops are at −stockProud.
+      expect(jaw.max[2]).toBeCloseTo(-1.2, 12);
+    }
+    // The default 0.71 would grip ABOVE the logo's 0.998 floor; 1.2 is also under the 3.81 blank.
+    const deepestFloor = Math.max(...regions(tl, job).cuts.map((cut) => cut.depth));
+    expect(deepestFloor).toBeCloseTo(0.998, 3);
+    expect(deepestFloor).toBeLessThan(1.2);
+    expect(job.workholding.vise.stockProud).toBeLessThan(job.stock.thickness);
+  });
+
+  it('generates one program with the same one V-bit and no error finding', () => {
+    const g = generate(tl, thickJob());
+    expect(g.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.stage).toBe('done');
+    expect(g.nc).not.toBeNull();
+    expect(g.nc).toContain('type=Engraving');
+    expect(g.nc).toContain('tipdiameter=0.3');
+    expect(g.nc).toContain(';@CM|TOOL|key=inv:kz-engrave-30-0-3');
+    expect(g.cam!.operations).toBe(3);
+  });
+
+  it('sweeps the cone and the oracle accepts both floors with zero under- and over-cut', () => {
+    const job = thickJob();
+    const cone = coneOf(job);
+    const r = regions(tl, job);
+    const film = r.colourBoundaryDepth;
+    expect(film).not.toBeNull();
+    if (film === null) throw new Error('the badge states a colour split');
+    expect(film).toBeCloseTo(0.8, 12);
+
+    // The plane arithmetic and the outlines the accepted run drew.
+    for (const cut of r.cuts) {
+      const v = cut.vCarve;
+      expect(v).toBeDefined();
+      if (v === undefined) continue;
+      const plane = vCarvePlane(cone, cut.depth, film);
+      expect(v.planeRadius).toBeCloseTo(plane.planeRadius, 12);
+      expect(v.floorInset).toBeCloseTo(plane.floorInset, 12);
+      expect(v.surfaceOutset).toBeCloseTo(plane.surfaceOutset, 12);
+      expect(v.floorInset + v.surfaceOutset).toBeCloseTo(cut.depth * TAN15, 9);
+      expect(area(v.surface)).toBeGreaterThan(area(v.plane));
+      expect(area(v.plane)).toBeGreaterThan(area(v.floor));
+    }
+
+    const g = generate(tl, job);
+    expect(g.ok).toBe(true);
+    const tool = jobTool(job);
+    expect(tool).not.toBeNull();
+    if (g.nc === null || tool === null) throw new Error('the job should generate a program');
+
+    const setup = toSetup(job, jobMachine(job, null));
+    const session = createSimSession(tl);
+    try {
+      const load = session.load(g.nc, setup, tool, job.machineId);
+      expect(load.ok, load.ok ? '' : JSON.stringify(load.diagnostics)).toBe(true);
+      if (!load.ok) return;
+      expect(load.stats.engine).toBe('column');
+      expect(load.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+
+      // Work origin is the stock top; the deepest cutting move is the logo's own 0.998.
+      const path = session.simPath();
+      let deepestCut = 0;
+      for (let i = 0; i < path.kind.length; i++) {
+        if (path.kind[i] === 1) deepestCut = Math.min(deepestCut, path.xyz[i * 3 + 2]!);
+      }
+      expect(deepestCut).toBeCloseTo(-0.998, 4);
+
+      // Two floors (0.985 text, 0.998 logo), the accepted band, and NO under- or over-cut.
+      const oracle = session.oracle(g.predicted);
+      expect(oracle.ok, JSON.stringify({ worst: oracle.worst, levels: oracle.levels })).toBe(true);
+      expect(oracle.band).toBeCloseTo(0.090622, 6);
+      expect(oracle.levels).toHaveLength(2);
+      expect(oracle.worst.underCut).toBe(0);
+      expect(oracle.worst.overCut).toBe(0);
+
+      const text = oracle.levels.find((level) => Math.abs(-level.z - 0.985) < 1e-6);
+      const logo = oracle.levels.find((level) => Math.abs(-level.z - 0.998) < 1e-6);
+      expect(text, 'the 0.985 floor').toBeDefined();
+      expect(logo, 'the 0.998 floor').toBeDefined();
+      // The areas the slice was accepted on — a fixture edit that moves the glyphs moves these.
+      expect(text!.predictedArea).toBeCloseTo(365.45, 2);
+      expect(text!.simulatedArea).toBeCloseTo(365.73, 2);
+      expect(logo!.predictedArea).toBeCloseTo(78.11, 2);
+      expect(logo!.simulatedArea).toBeCloseTo(78.16, 2);
+
+      // The colour plane (d = 0.8) and a shallow wall level (d = 0.2) on the same simulated grid.
+      const offset = makeClipperOffset(tl);
+      expectLevel(session, r, film, film, offset);
+      expectLevel(session, r, film, 0.2, offset);
     } finally {
       session.dispose();
     }

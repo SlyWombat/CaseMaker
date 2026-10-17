@@ -862,6 +862,12 @@ asks for a step-over at the plane, but the floor is cleared by the tip disc alon
 clamps the pass pitch to the tip radius and `vcarve-stepover-clamped` states both numbers — the
 pitch it runs and the one that was asked for.
 
+The film `f` in those formulas is the colour boundary the **print** has, read on the printer's
+layer grid (§6) — not the model's raw subtraction. The thick acceptance blank's model is 3.81 mm
+with the colour change at 3.0 mm, a raw 0.81 mm; printed in 0.2 mm layers its 19 layers put the
+change at layer 15, so the film is 0.80 mm. The resolved value is the material; the app raises no
+diagnostic for the difference, and the depths are measured against the printed film.
+
 **Using the camera to find the part (#189) — open.** The Z1 has an integrated camera. It cannot
 measure Z, and Studio does not use it for origin-setting, so today it is a webcam you can
 watch. The plan is to calibrate it against the machine's own motions — the machine is a far
