@@ -100,6 +100,13 @@ export interface ToolCandidate {
    * candidate, exactly as `condition` is.
    */
   catalogueNote?: string | null;
+  /**
+   * True when this candidate is a V-bit excluded by `not-flat` BECAUSE the job holds a region item
+   * (#221/#486) — the one `not-flat` case with its own answer. A ball or bull nose keeps the
+   * generic phrase, and so does a V-bit that was excluded for not being a cutting tool at all.
+   * Optional for the same reason as `condition` and `catalogueNote`.
+   */
+  vTrace?: boolean;
 }
 
 export interface ToolRecommendation {
@@ -388,7 +395,7 @@ export function recommendTool(
     // A V-bit is a trace-only cutter: its width is a function of depth, so a region item (a glyph to
     // open) cannot be cut by one and it is excluded by the same name a non-flat cutter always was.
     if (usable.tool.shape === 'v' && hasRegions) {
-      return { ...base, qualifies: false, excluded: 'not-flat' as const };
+      return { ...base, qualifies: false, excluded: 'not-flat' as const, vTrace: true };
     }
     // #442 — a cutter the operator has marked broken, copy by copy, is out before its feeds are
     // looked at and before it is measured: whether the catalogue has a row for a bit is not a

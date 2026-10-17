@@ -31,6 +31,7 @@ import { useToolRegistry } from '@/hooks/useToolRegistry';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { dedupeFindings, jobTool, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { V_BIT_REST_SENTENCE } from '@/engine/cnc/engrave/reachability';
 import { validateVise } from '@/engine/cnc/fixture';
 import { keepOutLimitParts, keepOutMembrane, labelGlyphMeasure, labelJawReach, voidLimitForItem } from '@/engine/cnc/engrave/partPlan';
 import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, labelFontsLoaded } from '@/engine/fonts/registry';
@@ -1983,7 +1984,12 @@ export function EngravePanel(): JSX.Element {
               {rec.candidates.map((c) => {
                 const detail = c.excluded
                   ? c.excluded === 'not-flat'
-                    ? 'not a flat end mill'
+                    ? // #221/#486 — a V-bit is excluded from a design with regions because the
+                      // operation it would be is a V-carve, not because it cannot cut. The generic
+                      // phrase stays for a ball or bull nose, and for a V-bit that is not a cutter.
+                      c.vTrace
+                      ? V_BIT_REST_SENTENCE
+                      : 'not a flat end mill'
                     : c.excluded === 'broken'
                       ? 'every copy is marked broken'
                       : c.excluded === 'no-catalogue-row'

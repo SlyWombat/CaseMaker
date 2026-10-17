@@ -311,8 +311,22 @@ describe('recommendTool and V-bits (#405)', () => {
     expect(measure).toHaveBeenCalledTimes(1);
     expect(measure).toHaveBeenCalledWith('flat');
     expect(candidate(rec, 'inv:v30').excluded).toBe('not-flat');
+    // #221/#486 — this is the ONE `not-flat` case with its own answer, so the candidate says so:
+    // the panel prints "the second program would be a V-carve" rather than "not a flat end mill".
+    expect(candidate(rec, 'inv:v30').vTrace).toBe(true);
     expect(candidate(rec, 'flat').excluded).toBeUndefined();
+    expect(candidate(rec, 'flat').vTrace).toBeUndefined();
     expect(rec.key).toBe('flat');
+  });
+
+  it('does not mark a ball nose as the V-carve case', () => {
+    // The flag is about the CUTTER KIND and the job, not about being non-flat: a ball nose keeps
+    // the generic phrase, because no V-carve is what a ball nose would be.
+    const job = jobWithLabel('l1', 'CASE', 1);
+    const ball = tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' });
+    const rec = recommendTool(job, [ball, tool('flat', 1.0)], [], vi.fn((_key: string) => [row('l1', 1)]));
+    expect(candidate(rec, 'ball').excluded).toBe('not-flat');
+    expect(candidate(rec, 'ball').vTrace).toBeUndefined();
   });
 
   it('qualifies a V-bit for a trace-only job and measures it', () => {
