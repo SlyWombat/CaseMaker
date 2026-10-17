@@ -42,6 +42,7 @@ import type { EngraveJob } from '@/types/engraveJob';
 import type { Orientation } from '@/engine/cnc/setups/types';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { ThreadPlanFacts, ThreadSettingsResult } from '@/engine/cnc/cam/threadMill';
+import { renderRunSheetMarkdown } from '../../scripts/runSheetMarkdown';
 
 const NOW = new Date('2026-10-04T00:00:00Z');
 
@@ -702,6 +703,56 @@ describe('runSheet (#207)', () => {
       expect(texts.filter((t) => t.startsWith('Touch '))).toHaveLength(3);
       // The same job, asked for: the block is there, so the hold is a switch and not a deletion.
       expect(origin(defaultEngraveJob(), SCAN).some((t) => t.startsWith('OPTIONAL, BEFORE THE FIRST CUT'))).toBe(true);
+    });
+  });
+
+  // #489 — the sheet carries the cutter's own side profile, from the same model the app draws.
+  // It sits under "What you need" (the section that names the cutter) and is absent when the job
+  // names no cutter, so a sheet with nothing to draw stays the sheet it was.
+  describe('the cutter profile (#489)', () => {
+    it('draws the job tool, monochrome and self-contained, with the V groove at the deepest cut', () => {
+      const job = defaultEngraveJob();
+      job.tool = flatEndMill(3.175, {
+        name: '30° engraving bit',
+        typeText: 'Engraving',
+        shape: 'engraving',
+        tipDiameter: 0.3,
+        diameter: 3.175,
+        halfAngle: 15,
+        angle: 30,
+        fluteLength: 6,
+        shoulderLength: null,
+      });
+      const sheet = sheetFor(job);
+      expect(sheet.toolProfileSvg).toBeDefined();
+      const svg = sheet.toolProfileSvg!;
+      expect(svg.startsWith('<svg')).toBe(true);
+      expect(svg).toContain('30° engraving bit');
+      expect(svg).toContain('AN');
+      expect(svg).toContain('D1');
+      // The groove is drawn at the job's own deepest cut, not a guessed depth.
+      expect(svg).toMatch(/at [\d.]+ mm deep/);
+      expect(svg).not.toContain('<image');
+      expect(svg).not.toContain('href=');
+    });
+
+    it('is absent when the job names no cutter', () => {
+      const job = defaultEngraveJob();
+      job.tool = null;
+      job.toolKey = 'user:not-in-this-house';
+      const sheet = sheetFor(job);
+      expect('toolProfileSvg' in sheet).toBe(false);
+    });
+
+    it('embeds the same drawing in the Markdown, under the cutter section', () => {
+      const sheet = sheetFor(defaultEngraveJob());
+      const md = renderRunSheetMarkdown(sheet);
+      const need = md.indexOf('## 1 · What you need');
+      const drawing = md.indexOf(sheet.toolProfileSvg!);
+      const mount = md.indexOf('## 2 · Mount the vise');
+      expect(need).toBeGreaterThan(-1);
+      expect(drawing).toBeGreaterThan(need);
+      expect(drawing).toBeLessThan(mount);
     });
   });
 

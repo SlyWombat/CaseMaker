@@ -41,6 +41,12 @@ export function renderRunSheetMarkdown(s: RunSheet, footerNote?: string): string
       out.push('');
       out.push(runSheetDiagramSvg(s.diagram));
     }
+    // #489 — the cutter drawing belongs under the section that names the cutter, matching the
+    // app's RunSheetView. Markdown keeps the SVG inline; it is self-contained.
+    if (section.id === 'need' && s.toolProfileSvg !== undefined) {
+      out.push('');
+      out.push(s.toolProfileSvg);
+    }
   }
   if (footerNote) {
     out.push('');

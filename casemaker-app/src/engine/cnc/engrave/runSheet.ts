@@ -26,6 +26,7 @@ import {
   type MarginSettings,
 } from '@/engine/cnc/engrave/depthBounds';
 import { cuttingDiameter } from '@/engine/cnc/tool';
+import { cutterProfileSvg } from '@/engine/cnc/cutterProfile';
 import { axesWord, describeTouch, kindWord, PROBE_SPEC, readsWord, registrationFor, sideWords } from '@/engine/cnc/engrave/registration';
 import {
   alongWord,
@@ -359,6 +360,13 @@ export interface RunSheet {
    * sacrificial material, so a job that does not use it produces a byte-identical sheet.
    */
   stackUp?: RunSheetStackUp;
+  /**
+   * The job cutter's monochrome side profile (#489), drawn under "What you need" — the section
+   * that names the cutter. Standalone SVG from the same model the app draws, with the V-bit's
+   * groove at the job's deepest cut. ABSENT when the job names no tool, so an old job's sheet is
+   * byte-identical to before this field existed.
+   */
+  toolProfileSvg?: string;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2469,6 +2477,16 @@ export function buildRunSheet(
     { id: 'record', title: 'Record afterwards', steps: recordSteps },
   ].map((section, i) => ({ ...section, title: `${i + 1} · ${section.title}` }));
 
+  // #489 — the cutter as the paper should show it: the job tool's own profile, monochrome, with a
+  // V-bit's groove at the deepest cut this job makes. The model is the app's, so the drawing in the
+  // rail and the drawing at the bench cannot disagree. No tool named = no drawing to make.
+  const deepestCut = items.reduce<number | null>(
+    (deepest, item) => (deepest === null || item.depth > deepest ? item.depth : deepest),
+    null,
+  );
+  const toolProfileSvg =
+    tool === null ? undefined : cutterProfileSvg(tool, { size: 'print', grooveDepth: deepestCut });
+
   return {
     header,
     sections,
@@ -2476,6 +2494,7 @@ export function buildRunSheet(
     // Absent rather than null for a job without sacrificial material, so its sheet — and the
     // snapshot of it — is byte-identical to before this field existed.
     ...(stackUp ? { stackUp } : null),
+    ...(toolProfileSvg === undefined ? null : { toolProfileSvg }),
   };
 }
 

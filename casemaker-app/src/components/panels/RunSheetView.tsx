@@ -104,6 +104,15 @@ export function RunSheetView({ sheet, onClose }: { sheet: RunSheet; onClose?: ()
                 </li>
               ))}
             </ol>
+            {/* #489 — the cutter this sheet names, under the section that names it. Monochrome
+                standalone SVG from the same model the app draws. */}
+            {section.id === 'need' && sheet.toolProfileSvg !== undefined && (
+              <div
+                className="run-sheet-diagram run-sheet-tool-profile"
+                data-testid="run-sheet-tool-profile"
+                dangerouslySetInnerHTML={{ __html: sheet.toolProfileSvg }}
+              />
+            )}
             {section.id === 'origin' && (
               <div
                 className="run-sheet-diagram"

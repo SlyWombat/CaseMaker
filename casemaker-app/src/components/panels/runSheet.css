@@ -135,6 +135,16 @@
   height: auto;
 }
 
+/* #489 — the cutter profile is a standalone SVG string, so it carries its own classes. */
+.run-sheet-tool-profile {
+  max-width: 300px;
+}
+
+.run-sheet-tool-profile .cutter-profile-svg {
+  width: 100%;
+  height: auto;
+}
+
 /* SVG internals. The viewBox is in millimetres, so stroke widths and font sizes are in mm too. */
 .run-sheet-stock {
   fill: #fff;
