@@ -183,6 +183,10 @@ describe('cutterProfile (#489)', () => {
     expect(model.groove!.label.text).toContain('0.836');
     expect(model.groove!.paths.length).toBeGreaterThanOrEqual(3);
     expect(model.groove!.paths.some((p) => p.role === 'groove' && !p.dashed)).toBe(true);
+    // The engraver also dimensions its tip (D1) under the point; the groove note is moved below
+    // that line so the two texts cannot overprint (found in the #489 visual QA).
+    const d1 = model.dimensions.find((d) => d.code === 'D1')!;
+    expect(model.groove!.label.y).toBeGreaterThan(d1.textAt.y + 8);
   });
 
   it('does not invent a groove for a non-V tool', () => {

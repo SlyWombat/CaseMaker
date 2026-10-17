@@ -1264,6 +1264,16 @@ export function buildCutterProfile(tool: Tool, options: CutterProfileOptions = {
   const built = buildProfile(tool, cone, lay, options);
   const specs = cutterDimensionSpecs(tool);
   const dimensions = size === 'thumb' ? [] : placeDimensions(tool, specs, lay, cone);
+  // A V-bit's D1 sits directly under the tip — exactly where the groove note would land. Move the
+  // note below that dimension line rather than letting the two texts overprint each other. Chamfer
+  // has no D1, so its note keeps the leader it was built with.
+  const tipDimension = dimensions.find((d) => d.code === 'D1');
+  if (built.groove !== null && tipDimension !== undefined) {
+    built.groove.label = {
+      ...built.groove.label,
+      y: tipDimension.textAt.y + lay.font + 4,
+    };
+  }
   const extraMarks = size === 'thumb' ? [] : built.extraMarks;
   const judged = judgeRefusal(tool);
   const refusal = options.refusal ?? judged;
