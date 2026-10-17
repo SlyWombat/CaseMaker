@@ -11,7 +11,9 @@ import { EngraveMachineUpload } from '@/components/panels/EngraveMachineUpload';
 import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleClient } from '@/platform/machineConsole';
 import { setMachineUploadLoader } from '@/platform/machineUpload';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
-import { machineKey, resetMachineRunStore, useMachineRunStore } from '@/store/machineRunStore';
+import { machineKey, resetMachineRunStore, runContextFor, useMachineRunStore } from '@/store/machineRunStore';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import type { Tool } from '@/engine/cnc/tool';
 import type { MachineObservation } from '@/platform/machineProbe';
 import type { VerifyReport } from '@/engine/cnc/verify';
 
@@ -53,8 +55,15 @@ const MACHINE: MachineObservation = {
   status: '<Idle|MPos:0,0,0>', profileId: 'Z1', observedAt: '2026-10-16T00:00:00.000Z', notes: [],
 };
 const VERIFY: VerifyReport = { ok: true, findings: [], stats: { lines: 1, cuttingMoves: 0, deepestZ: 0, bbox: { min: [0, 0, 0], max: [1, 1, 0] } } };
-const upload = (nc = 'M02\n') => (
-  <EngraveMachineUpload blocker={null} machine={MACHINE} program={{ nc, verify: VERIFY }} filename="job.nc" lift={{ zMachine: -3, zFloorMachine: -102 }} />
+const upload = (nc = 'M02\n', onProgramLine?: (line: number | null) => void) => (
+  <EngraveMachineUpload
+    blocker={null}
+    machine={MACHINE}
+    program={{ nc, verify: VERIFY }}
+    filename="job.nc"
+    lift={{ zMachine: -3, zFloorMachine: -102 }}
+    onProgramLine={onProgramLine}
+  />
 );
 
 beforeEach(() => {
@@ -124,5 +133,65 @@ describe('#423 the run panel, in the real tree', () => {
   it('draws nothing for a machine with no prepared program', () => {
     render(<EngraveMachineRun target={TARGET} />);
     expect(screen.queryByTestId('engrave-run')).toBeNull();
+  });
+
+  // #442's #423 item — "the viewport follows P": the run panel hands the panel the source line the
+  // controller reports, and reports each line ONCE, so a follower is not re-seeked per render.
+  it('reports the machine’s source line to the panel as it changes, once per change', async () => {
+    setMachineConsoleLoader(async () => client(1));
+    const lines: (number | null)[] = [];
+    render(upload('M02\n', (line) => lines.push(line)));
+    await uploadIt();
+    fireEvent.click(screen.getByTestId('engrave-run-at-machine'));
+    fireEvent.click(screen.getByTestId('engrave-run-start'));
+    // The fake controller runs reporting `P:10,20,5` and finishes on `P:9,100,4`.
+    await waitFor(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeout: 12000 });
+    expect(lines).toContain(10);
+    expect(lines).toContain(9);
+    // Consecutive repeats are dropped: the effect is keyed on the line, not on renders.
+    for (let i = 1; i < lines.length; i += 1) expect(lines[i]).not.toBe(lines[i - 1]);
+  }, 20000);
+});
+
+// #442 (#414/#464) — what the engrave panel hands the run, built once and tested here rather than
+// by rendering the whole panel behind `canDriveMachine`.
+describe('runContextFor', () => {
+  const tool: Tool = {
+    number: 1, id: null, name: 'A 30° engraver', typeText: 'type=tapered-ball', shape: 'tapered-ball',
+    handleDiameter: 3.175, tipDiameter: 0.4, diameter: 3.175, cornerRadius: null, angle: 30,
+    halfAngle: 15, fluteLength: null, shoulderLength: null, stickout: null, centreCutting: null,
+  };
+
+  it('names the job, the stock in the job’s frame, the cutter, the base material and its fibre', () => {
+    const job = defaultEngraveJob();
+    const ctx = runContextFor({ ...job, stock: { ...job.stock, length: 120, width: 80, material: 'petg', fibre: 'cf' } }, tool);
+    expect(ctx.jobId).toBe(job.id);
+    expect(ctx.stockXY).toEqual({ x: 120, y: 80 });
+    expect(ctx.toolRadius).toBe(0.2); // the cutting half-diameter, not the shank
+    expect(ctx.toolKey).toBe(job.toolKey);
+    expect(ctx.material).toBe('petg'); // the base plastic decides the feeds
+    expect(ctx.fibre).toBe('cf'); // the fibre is beside it (#464), and makes the wear abrasive
+  });
+
+  it('omits partAt: the job never says where its part sits, so the offcut logic uses the stock edges', () => {
+    expect('partAt' in runContextFor(defaultEngraveJob(), tool)).toBe(false);
+  });
+
+  it('omits the shelf entry, the radius and the fibre when the job states none of them', () => {
+    const job = defaultEngraveJob();
+    const ctx = runContextFor({ ...job, stockEntry: undefined, stock: { ...job.stock, fibre: undefined } }, null);
+    expect('stockEntryId' in ctx).toBe(false);
+    expect('toolRadius' in ctx).toBe(false); // never a zero
+    expect('fibre' in ctx).toBe(false);
+    expect(ctx.material).toBe(job.stock.material);
+  });
+
+  it('carries the shelf entry the job reserved', () => {
+    const job = defaultEngraveJob();
+    const ctx = runContextFor(
+      { ...job, stockEntry: { kind: 'shelf', shelfId: 'inv:stock-7', file: null, form: 'plate', finish: 'finished', conductive: false } },
+      tool,
+    );
+    expect(ctx.stockEntryId).toBe('inv:stock-7');
   });
 });

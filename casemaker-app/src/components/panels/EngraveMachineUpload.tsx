@@ -87,6 +87,11 @@ export interface EngraveMachineUploadProps {
    * dot). Optional: without it the house's margin setting is used, and the panel says so.
    */
   jobEdgeMarginMm?: number;
+  /**
+   * Told the source line the machine reports as it runs (#442's #423 item), so the panel drawing the
+   * job can follow `P`. Forwarded to `EngraveMachineRun`, which calls it only when the line changes.
+   */
+  onProgramLine?: (line: number | null) => void;
 }
 
 /** ISO → something a person reads, or the raw string when it will not parse. Never "Invalid Date". */
@@ -109,6 +114,7 @@ export function EngraveMachineUpload({
   onLiveStatus,
   runContext,
   jobEdgeMarginMm,
+  onProgramLine,
 }: EngraveMachineUploadProps): JSX.Element {
   const [stage, setStage] = useState<'idle' | 'confirm' | 'sending'>('idle');
   const [result, setResult] = useState<MachineUploadResult | null>(null);
@@ -250,7 +256,7 @@ export function EngraveMachineUpload({
 
       {/* #423 — the machine's run, from its store entry: present once an upload has prepared it, and
           still there (with its Stop) when this panel is closed and reopened mid-run. */}
-      {machine !== null && <EngraveMachineRun target={{ host: machine.host, port: machine.port }} />}
+      {machine !== null && <EngraveMachineRun target={{ host: machine.host, port: machine.port }} onProgramLine={onProgramLine} />}
 
       {laserPointOn && machine !== null && (
         <EngraveLaserPoint

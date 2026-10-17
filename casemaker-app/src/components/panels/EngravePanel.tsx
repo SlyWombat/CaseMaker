@@ -6,6 +6,9 @@ import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { expandEngraveRow, useEngraveRowStore } from '@/store/engraveRowStore';
 import { useEngraveRunStore, requiredAckCodes, runErrorCodes, saveBlocker, uploadBlocker } from '@/store/engraveRunStore';
 import { useMachineStore } from '@/store/machineStore';
+import { useSimStore } from '@/store/simStore';
+import { runContextFor } from '@/store/machineRunStore';
+import { stepAtLine } from '@/engine/cnc/playbackClock';
 import { canDriveMachine } from '@/platform/capabilities';
 import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { saveEngraveProgram } from '@/engine/exportTrigger';
@@ -115,6 +118,14 @@ const SUBHEAD: CSSProperties = { margin: '12px 0 4px', fontSize: 12, fontWeight:
 const SUBSUB: CSSProperties = { margin: '10px 0 2px', fontSize: 11, fontWeight: 600, color: '#9aa4b0' };
 const FIELD: CSSProperties = { width: 74 };
 const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9aa4b0' };
+
+/**
+ * A value as a field should PRINT it (#406). Binary float noise a person should never read —
+ * `3.2 − 3.1` is `0.10000000000000009`, and a thin blank's `stockProud` can be its negative — is
+ * removed at six decimals, four below the 0.001 mm the controller moves in, so anything typed on
+ * purpose survives. The stored value is untouched: this is the display only.
+ */
+const shownNumber = (v: number): number => Number(v.toFixed(6));
 const TAG: CSSProperties = {
   fontSize: 10,
   color: '#9aa4b0',
@@ -833,6 +844,21 @@ export function EngravePanel(): JSX.Element {
       : null;
   const cam = run.generated?.cam ?? null;
 
+  // #442 (#414) — what the run's end is told about the job, built in ONE place
+  // (`runContextFor`), so the panel and its unit test cannot disagree about it.
+  const runContext = runContextFor(job, tool);
+
+  // #442's #423 item — the viewport follows the line the machine reports. The step is looked up in
+  // the path the simulation loaded (the same program Generate posted and Upload sent), so the tool
+  // marker lands where the controller says it is rather than where a wall clock thinks it should
+  // be. A path with no line data, or a line before the first vertex, moves nothing.
+  const followProgramLine = (line: number | null): void => {
+    if (line === null) return;
+    const sim = useSimStore.getState();
+    const step = sim.path === null ? null : stepAtLine(sim.path, line);
+    if (step !== null) sim.setStep(step);
+  };
+
   // #243 (§14.2 A2) — the blind-spot half of the Simulated row. The SAME pure builder the
   // Simulate panel uses, fed from THIS run rather than re-written: the fixture the setup
   // modelled, whether sacrificial material was included, and the codes the sweep raised — the
@@ -1141,7 +1167,7 @@ export function EngravePanel(): JSX.Element {
       <input
         type="number"
         step="any"
-        value={job.workholding.vise[key]}
+        value={shownNumber(job.workholding.vise[key])}
         data-testid={`engrave-vise-${key}`}
         aria-label={`Vise ${label}`}
         title={title}
@@ -2293,6 +2319,9 @@ export function EngravePanel(): JSX.Element {
                   zFloorMachine: jobMachine(job).softEndstop.zMin,
                 }}
                 onLiveStatus={noteLiveStatus}
+                runContext={runContext}
+                jobEdgeMarginMm={job.edgeMargin}
+                onProgramLine={followProgramLine}
               />
             )}
 

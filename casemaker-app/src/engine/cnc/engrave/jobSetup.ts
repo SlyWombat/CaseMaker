@@ -4,7 +4,7 @@ import { getTools, toolForJob } from '@/engine/cnc/toolRegistry';
 import { cuttingDiameter, cuttingRadiusForSweep, traceRadiusAt, type Tool } from '@/engine/cnc/tool';
 import { viseEnvelope } from '@/engine/cnc/fixture';
 import { validateSacrificial, viseJawShift } from '@/engine/cnc/sacrificial';
-import { stubSetup, type Setup, type Workholding } from '@/engine/cnc/setup';
+import { stubSetup, type FixtureEnvelope, type Setup, type Workholding } from '@/engine/cnc/setup';
 import {
   drillHoles,
   drillOperationName,
@@ -26,7 +26,7 @@ import type {
   EngraveTraceItem,
   JobSetup,
 } from '@/types/engraveJob';
-import type { Orientation } from '@/engine/cnc/setups/types';
+import type { Mount, Orientation } from '@/engine/cnc/setups/types';
 
 /**
  * The two pure derivations that turn an `EngraveJob` into the emulator's inputs (#200).
@@ -342,11 +342,25 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
 }
 
 /**
+ * How the job holds the stock for its FIRST setup (#419 J2, #442's #427 item): the stored setup's
+ * mount when the document states setups, and `workholding`'s — the vise — for the implicit one.
+ *
+ * This is the one reader a caller needs to decide whether the mount's obstacles apply at all: a
+ * program on the bracket is checked against the bracket's arms and clamps; a program in the vise is
+ * not (`bracketMount` answers `null`).
+ */
+export function jobMount(job: EngraveJob): Mount {
+  return job.setups?.[0]?.mount.kind ?? job.workholding.kind;
+}
+
+/**
  * The part, its workholding and the work origin, for the emulator.
  *
- * The obstacle boxes themselves are #203's job, not this one.
+ * `fixture` REPLACES the vise's envelope when the job is held on the bracket (#442's #427 item):
+ * one mount is in the machine, so its boxes are the fixture — not the vise's and not both. Absent,
+ * the vise's envelope is derived exactly as before (#203).
  */
-export function toSetup(job: EngraveJob, machine: MillProfile): Setup {
+export function toSetup(job: EngraveJob, machine: MillProfile, fixture?: FixtureEnvelope): Setup {
   const { length, width, thickness } = job.stock;
   const vise = job.workholding.vise;
   const workholding = workholdingFor(job);
@@ -358,7 +372,7 @@ export function toSetup(job: EngraveJob, machine: MillProfile): Setup {
     // vise's obstacle envelope (#203), carried with its provenance so the emulator never
     // mistakes a default for a measurement. The sacrificial model rides along (#213) so the
     // sweep can model it as a second body; absent, every pre-#213 caller is unchanged.
-    { startingTool: 1, fixture: viseEnvelope(job.stock, vise, job.sacrificial), sacrificial: job.sacrificial },
+    { startingTool: 1, fixture: fixture ?? viseEnvelope(job.stock, vise, job.sacrificial), sacrificial: job.sacrificial },
     machine,
   );
 }

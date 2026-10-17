@@ -14,7 +14,7 @@
  * machine CONFIRMED (Idle, vacuum off).
  */
 
-import { useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { attachConsole } from '@/platform/machineConsole';
 import { describeRun, runSettings } from '@/platform/machineRun';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
@@ -26,10 +26,16 @@ const LOG: CSSProperties = { fontSize: 10, fontFamily: 'monospace', maxHeight: 1
 
 export interface EngraveMachineRunProps {
   target: { host: string; port: number };
+  /**
+   * The source line the machine last reported (`progress.line`), or null when it reports none
+   * (#442's #423 item: "the viewport follows `P`"). Called only when the line CHANGES, so a panel
+   * can move a follower without re-seeking the simulation on every render.
+   */
+  onProgramLine?: (line: number | null) => void;
 }
 
 /** The run panel for a machine, or nothing when no program has been prepared for it. */
-export function EngraveMachineRun({ target }: EngraveMachineRunProps): JSX.Element | null {
+export function EngraveMachineRun({ target, onProgramLine }: EngraveMachineRunProps): JSX.Element | null {
   const machine = machineKey(target);
   const entry = useMachineRunStore((s) => s.runs[machine]);
   const key = runKey(target, entry?.programHash ?? '');
@@ -43,6 +49,17 @@ export function EngraveMachineRun({ target }: EngraveMachineRunProps): JSX.Eleme
   const answerStockUsed = useMachineRunStore((s) => s.answerStockUsed);
   const [atMachine, setAtMachine] = useState(false);
   const [homeNote, setHomeNote] = useState<string | null>(null);
+  // #442's #423 item — the panel follows the line the machine reports. The callback is kept in a
+  // ref so a parent that passes a fresh closure on each render does not fire it again for a line
+  // that has not changed; the effect below is the only caller.
+  const lineCallback = useRef(onProgramLine);
+  const line = entry?.progress?.line ?? null;
+  useEffect(() => {
+    lineCallback.current = onProgramLine;
+  });
+  useEffect(() => {
+    lineCallback.current?.(line);
+  }, [line]);
   if (!entry) return null;
   const running = entry.running;
 

@@ -33,6 +33,33 @@ export interface InPathFinding {
 
 const fmt = (n: number) => String(Math.round(n * 1000) / 1000);
 
+/**
+ * The strips of the top a face pass cannot cut because the mount stands over them (#432 decision
+ * 5): each obstacle's footprint, grown by the cutter's radius and the mount's fit and clipped to the
+ * stock, in one sentence per strip.
+ *
+ * This is what a refused skim carries instead of silently shrinking its raster. It is measured from
+ * the OBSTACLES the app models, not guessed: an obstacle that stands clear of the stock contributes
+ * nothing, and a stock with no obstacle over it says nothing at all.
+ */
+export function unfacedBands(
+  obstacles: MountObstacle[],
+  stock: { x: number; y: number },
+  opts: { radius: number; uncertainty: number },
+): string[] {
+  const grow = opts.radius + opts.uncertainty;
+  const out: string[] = [];
+  for (const o of obstacles) {
+    const x0 = Math.max(o.min[0] - grow, 0);
+    const x1 = Math.min(o.max[0] + grow, stock.x);
+    const y0 = Math.max(o.min[1] - grow, 0);
+    const y1 = Math.min(o.max[1] + grow, stock.y);
+    if (x1 - x0 <= 0 || y1 - y0 <= 0) continue;
+    out.push(`a ${fmt(x1 - x0)} mm × ${fmt(y1 - y0)} mm band of the top (${o.label} stands over it) could not be faced`);
+  }
+  return out;
+}
+
 /** The part of the XY segment inside the rectangle, as a parameter range on [0, 1], or null. */
 export function clipToRect(a: Vec3, b: Vec3, min: [number, number], max: [number, number]): [number, number] | null {
   let t0 = 0;

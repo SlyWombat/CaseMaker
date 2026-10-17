@@ -12,6 +12,7 @@ import {
   anchorFrom,
   bracketDatum,
   bracketExpectedSurface,
+  bracketMount,
   bracketObstacles,
   bracketSettings,
   clampObstacles,
@@ -19,9 +20,13 @@ import {
   defaultClampPlacements,
   mountEnvelope,
   mountInPath,
+  unfacedBands,
   validateBracketMount,
+  type MountObstacle,
   type PathSegment,
 } from '@/engine/cnc/mounts';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { jobMount, jobSetups, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import { Z1 } from '@/engine/cnc/machine';
 import { stubSetup } from '@/engine/cnc/setup';
@@ -240,5 +245,82 @@ describe('#427 the verifier runs it on the file', () => {
   it('a tool with no stated diameter cannot be checked, and says so', () => {
     const blind = flatEndMill(3, { handleDiameter: null, tipDiameter: null, diameter: null });
     expect(codes(prog(['G0 X10 Y50']), ctx({ tool: blind }))).toContain('clamp-unchecked');
+  });
+});
+
+// #442's #427 item — the boxes above, assembled on the caller's side and carried to the verifier as
+// plain data. The worker cannot read the location (it must not import `defaultsClient`), so this is
+// the #451 pattern: resolve here, send the answer.
+describe('#442 the mount, assembled for a job', () => {
+  const STOCK = { x: 100, y: 100, z: 5 };
+
+  it('bracketMount answers only for the bracket — the vise and the tape are held elsewhere', () => {
+    // Not an omission: handing a vise job the bracket's arms would refuse every cut near the front
+    // and left edges, and a false refusal teaches an operator to ignore the verifier.
+    expect(bracketMount(STOCK, 'vise', DEFAULTS)).toBeNull();
+    expect(bracketMount(STOCK, 'tape', DEFAULTS)).toBeNull();
+  });
+
+  it('bracketMount carries both arms and both clamps, the fit as their uncertainty, and the same boxes as solids', () => {
+    const m = bracketMount(STOCK, 'bracket', DEFAULTS)!;
+    expect(m.obstacles.map((o) => o.id)).toEqual(['bracket-front-arm', 'bracket-left-arm', 'clamp-1', 'clamp-2']);
+    expect(m.uncertainty).toBe(B.settings.fitMm);
+    // `Setup.fixture` and `verifyProgram`'s `mountObstacles` read ONE statement of the mount.
+    expect(m.fixture.boxes.map((b) => b.id)).toEqual(m.obstacles.map((o) => o.id));
+    expect(m.fixture.boxes.map((b) => b.max[2])).toEqual(m.obstacles.map((o) => o.topZ));
+    expect(m.fixture.source).toBe('default'); // no bracket size is measured yet
+  });
+
+  it('a board under the stock lowers the bracket and the fixture floor, never the clamps', () => {
+    const on = bracketMount(STOCK, 'bracket', DEFAULTS, 2)!;
+    const off = bracketMount(STOCK, 'bracket', DEFAULTS, 0)!;
+    const top = (m: typeof on, id: string) => m.obstacles.find((o) => o.id === id)!.topZ;
+    expect(top(on, 'bracket-front-arm')).toBe(top(off, 'bracket-front-arm') - 2);
+    expect(top(on, 'clamp-1')).toBe(top(off, 'clamp-1'));
+    // The boxes run from the bed — the board is between the bracket and the stock, not under both.
+    expect(on.fixture.boxes[0]).toMatchObject({ min: [-10, -10, -7], max: [100, 0, 3] });
+  });
+
+  it('jobMount reads the stored first setup, and a job with no setups is the vise', () => {
+    const job = defaultEngraveJob();
+    expect(jobMount(job)).toBe('vise');
+    const [implicit] = jobSetups(job);
+    const stored = { ...implicit!, id: 'setup-bracket', mount: { kind: 'bracket' as const, board: false } };
+    expect(jobMount({ ...job, setups: [stored] })).toBe('bracket');
+  });
+
+  it('toSetup carries the mount’s boxes as the fixture, and the vise’s envelope without one', () => {
+    const job = defaultEngraveJob();
+    const mount = bracketMount({ x: job.stock.length, y: job.stock.width, z: job.stock.thickness }, 'bracket', DEFAULTS)!;
+    expect(toSetup(job, Z1, mount.fixture).fixture).toBe(mount.fixture);
+    // ONE mount is in the machine: with no bracket the vise envelope is derived exactly as before.
+    const vise = toSetup(job, Z1).fixture!;
+    expect(vise.boxes.map((b) => b.id)).toEqual(['vise-fixed-jaw', 'vise-moving-jaw']);
+  });
+});
+
+// #432 decision 5 — the raster covers the whole top and the verifier is its guard, so a refused skim
+// reports the strip it could not face rather than silently shrinking the pass.
+describe('#432 the strips a refused skim could not face', () => {
+  const clamp: MountObstacle = {
+    id: 'clamp-1',
+    kind: 'clamp',
+    label: 'the clamp on the back edge',
+    fix: 'move it clear of the cut',
+    min: [0, 54],
+    max: [100, 60],
+    topZ: 0.5,
+  };
+  const opts = { radius: 2, uncertainty: 0.5 };
+
+  it('names each strip, grown by the cutter and the fit and clipped to the stock', () => {
+    // 54 − (2 + 0.5) = 51.5 to the stock’s edge at 60: an 8.5 mm band, the whole width.
+    expect(unfacedBands([clamp], { x: 100, y: 60 }, opts)).toEqual([
+      'a 100 mm × 8.5 mm band of the top (the clamp on the back edge stands over it) could not be faced',
+    ]);
+  });
+
+  it('an obstacle that stands clear of the stock says nothing', () => {
+    expect(unfacedBands([{ ...clamp, min: [0, 70], max: [100, 80] }], { x: 100, y: 60 }, { radius: 2, uncertainty: 0.5 })).toEqual([]);
   });
 });

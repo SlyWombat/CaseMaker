@@ -6,7 +6,7 @@
 // a value) and its `step` strictly increases, which is what `SimPath` guarantees.
 
 import { describe, it, expect } from 'vitest';
-import { advance, lineAtStep, stepAtTime, timeAtStep, totalTime, type ClockInput } from '@/engine/cnc/playbackClock';
+import { advance, lineAtStep, stepAtLine, stepAtTime, timeAtStep, totalTime, type ClockInput } from '@/engine/cnc/playbackClock';
 
 /**
  * Four vertices, in order:
@@ -84,6 +84,36 @@ describe('playbackClock: step and time (#198)', () => {
     expect(lineAtStep(path, 6)).toBe(13);
     expect(lineAtStep(path, -1)).toBeNull();
     expect(lineAtStep({ t: path.t, step: path.step }, 4)).toBeNull(); // a hand-built path may omit it
+  });
+
+  // #442's #423 item — the machine reports `P` (a source line); the viewport follows it.
+  it('stepAtLine is the step of the last vertex at or before a source line, null without line data', () => {
+    expect(stepAtLine(path, 10)).toBe(0);
+    expect(stepAtLine(path, 11)).toBe(2);
+    expect(stepAtLine(path, 12)).toBe(4);
+    expect(stepAtLine(path, 13)).toBe(6);
+    expect(stepAtLine(path, 999)).toBe(6); // past the end: the tool is at the last vertex
+    expect(stepAtLine(path, 9)).toBeNull(); // before the first vertex
+    expect(stepAtLine({ t: path.t, step: path.step }, 11)).toBeNull(); // a hand-built path may omit it
+    expect(stepAtLine({ t: new Float32Array(0), step: new Uint32Array(0), line: new Uint32Array(0) }, 1)).toBeNull();
+  });
+
+  it('stepAtLine takes the LAST vertex a line produced, so a canned cycle lands where it ends', () => {
+    // Line 20 is one command that expands to three moves: the tool is at the third once it runs.
+    const canned: ClockInput = {
+      t: Float32Array.from([0, 1, 2, 3]),
+      step: Uint32Array.from([0, 1, 2, 3]),
+      line: Uint32Array.from([19, 20, 20, 20]),
+    };
+    expect(stepAtLine(canned, 19)).toBe(0);
+    expect(stepAtLine(canned, 20)).toBe(3);
+  });
+
+  it('lineAtStep and stepAtLine are inverses where one vertex owns a line', () => {
+    for (const [step, line] of [[0, 10], [2, 11], [4, 12], [6, 13]] as const) {
+      expect(lineAtStep(path, step)).toBe(line);
+      expect(stepAtLine(path, line)).toBe(step);
+    }
   });
 });
 

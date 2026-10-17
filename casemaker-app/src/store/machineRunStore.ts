@@ -31,7 +31,8 @@ import { programHash, programOwnsVacuum, runProgram, type Progress, type RunOutc
 import { copyInMachine, offcutOffer, programCuts, runtimeOf, wearKey, weighRuntime, withRuntime } from '@/engine/cnc/runEnd';
 import type { StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
-import type { FilamentFibre } from '@/types/engraveJob';
+import type { EngraveJob, FilamentFibre } from '@/types/engraveJob';
+import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { newStockId, useStockStore } from './stockStore';
 import { useToolRegistryStore } from './toolRegistryStore';
@@ -75,6 +76,31 @@ export interface RunContext {
    * bit change — the one thing the maintainer said not to do. Absent: the program text decides.
    */
   vacuumOwned?: boolean;
+}
+
+/**
+ * What the engrave panel can tell a run about its job (#442's #414 item, with #464's fibre): the
+ * parts of `RunContext` the panel actually knows.
+ *
+ * `partAt` is deliberately absent. The job never states where its part sits, so the offcut logic
+ * reads "the pieces that do not reach the stock's edge" — a weaker answer than a stated point, and
+ * an honest one, where a point picked by the app would be a guess about which piece is the part.
+ *
+ * The cutter is the JOB's (`jobTool(job)`), not the registry's entry for its key: a re-collared bit
+ * must not change what the run says it cut with. `toolRadius` is the cutting half-diameter, and is
+ * left out when no cutter resolved rather than sent as a zero.
+ */
+export function runContextFor(job: EngraveJob, tool: Tool | null): Omit<RunContext, 'nc'> {
+  const diameter = tool === null ? null : cuttingDiameter(tool);
+  return {
+    jobId: job.id,
+    ...(job.stockEntry?.shelfId ? { stockEntryId: job.stockEntry.shelfId } : {}),
+    stockXY: { x: job.stock.length, y: job.stock.width },
+    ...(diameter === null ? {} : { toolRadius: diameter / 2 }),
+    toolKey: job.toolKey,
+    material: job.stock.material,
+    ...(job.stock.fibre === undefined ? {} : { fibre: job.stock.fibre }),
+  };
 }
 
 export interface RunEnd {

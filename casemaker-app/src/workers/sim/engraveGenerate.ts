@@ -64,6 +64,8 @@ import { concatToolpathIR, estimateCycleSeconds, HOP_Z, type CamMove, type Toolp
 import { postZ1, type PostContext, type VacuumSpan } from '@/engine/cnc/post/z1';
 import { FRAME_Z } from '@/engine/cnc/engrave/runSheet';
 import type { Setup } from '@/engine/cnc/setup';
+import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
+import { unfacedBands } from '@/engine/cnc/mounts/inPath';
 import { verifyProgram, type DepthLimit, type VerifyReport } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import {
@@ -121,6 +123,16 @@ export interface EngraveShopOpts {
    * reason — the engraving still generates.
    */
   tools?: readonly ToolLibraryEntry[] | null;
+  /**
+   * #442's #427 item — the mount's obstacles (the bracket's arms and the top clamps, with the fit),
+   * or `null` when the job is held in the vise. Resolved on the CALLER's side for the same reason
+   * `defaults` is: the bracket sizes are shop defaults the location owns, and this worker must not
+   * pull the defaults client in (`verify.ts`'s boundary, `mounts/bracket.ts`'s import).
+   *
+   * Absent or null changes nothing: the verifier is handed no obstacles and the simulation checks
+   * the vise's own envelope, exactly as every pre-#427 run did.
+   */
+  mount?: MountObstacles | null;
 }
 
 /** A stage refusal with its reason, so the panel can list it under the right row. */
@@ -628,6 +640,14 @@ export function frameCorners(ir: ToolpathIR, radius: number, z: number): CamMove
  * the post's own, never a hand-written second dialect the machine might refuse. Returns the
  * posted text plus its verify report, or the reason it could not be produced.
  */
+/**
+ * The verifier's view of the mount (#442's #427 item): the obstacles and the fit, or nothing at all
+ * when the job is held in the vise — and then `verify.ts` behaves exactly as it did before #427.
+ */
+function mountCtx(mount: MountObstacles | null | undefined): { mountObstacles?: { obstacles: MountObstacles['obstacles']; uncertainty: number } } {
+  return mount ? { mountObstacles: { obstacles: mount.obstacles, uncertainty: mount.uncertainty } } : {};
+}
+
 function frameProgram(
   ir: ToolpathIR,
   ctx: PostContext,
@@ -635,6 +655,7 @@ function frameProgram(
   setup: Setup,
   tool: Tool,
   limit: DepthLimit,
+  mount: MountObstacles | null | undefined,
 ): { nc: string; verify: VerifyReport } | { error: string } {
   // The cutter's footprint in XY, grown by the SAME rule the corner box has always been built with
   // (#244): the disc the toolpath removes. A V-bit's is the groove at the DEEPEST cut in the program
@@ -678,7 +699,7 @@ function frameProgram(
   };
   const posted = postZ1(frameIr, ctx, machine, { vacuum: 'none' });
   if (!posted.ok) return { error: posted.errors.join('; ') };
-  const verify = verifyProgram(posted.text, { setup, machine, tool, depthLimit: limit, minRapidZ: frameIr.hopZ });
+  const verify = verifyProgram(posted.text, { setup, machine, tool, depthLimit: limit, minRapidZ: frameIr.hopZ, ...mountCtx(mount) });
   return { nc: posted.text, verify };
 }
 
@@ -705,6 +726,7 @@ function facingProgram(
   machine: MillProfile,
   setup: Setup,
   limit: DepthLimit,
+  mount: MountObstacles | null | undefined,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
   table: readonly FeedsEntry[] | undefined,
@@ -768,14 +790,30 @@ function facingProgram(
       tool,
       depthLimit: limit,
       minRapidZ: ir.hopZ,
+      ...mountCtx(mount),
     });
     const refused = verify.findings.filter((f) => f.severity === 'error');
     if (refused.length > 0) {
+      // #432 decision 5 — the whole top is the raster and the verifier is its guard, so a skim that
+      // would run into the mount is refused and the refusal names the strips it could not face
+      // rather than shrinking the pass behind the operator's back. `mount` is non-null here in
+      // practice (a mount finding cannot exist without obstacles), but the guard keeps the type
+      // honest.
+      const atMount = refused.some((f) => f.code === 'clamp-in-path' || f.code === 'bracket-in-path');
+      const bands =
+        atMount && mount
+          ? unfacedBands(mount.obstacles, { x: job.stock.length, y: job.stock.width }, {
+              radius: (cuttingDiameter(tool) ?? 0) / 2,
+              uncertainty: mount.uncertainty,
+            })
+          : [];
       return {
         nc: null,
         verify,
         toolKey,
-        error: `the facing program has ${refused.length} verifier error(s)`,
+        error:
+          `the facing program has ${refused.length} verifier error(s)` +
+          (bands.length > 0 ? `: the skim would run into the mount, and ${bands.join('; ')}` : ''),
         // No file, so there is nothing whose numbers the sheet could print.
         cam: null,
       };
@@ -1169,10 +1207,10 @@ function generateOneProgram(
   const limitReasonAt = stack
     ? (x: number, y: number): string => depthLimitReason(stack, job, x, y)
     : undefined;
-  const setup = toSetup(job, mill);
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined);
 
   try {
-    const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ, ...(limitReasonAt ? { limitReasonAt } : {}) });
+    const verify = verifyProgram(nc, { setup, machine: mill, tool, depthLimit: limit, minRapidZ, ...(limitReasonAt ? { limitReasonAt } : {}), ...mountCtx(shop.mount) });
     if (verify.findings.some((f) => f.severity === 'error')) {
       errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
       return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted, errors };
@@ -1185,13 +1223,13 @@ function generateOneProgram(
     // program and still cut what this run produced.
     const facing =
       withFacing && facingDepth > 0
-        ? facingProgram(job, facingDepth, ctx, mill, setup, limit, shop.tools ?? [], catalogue, shop.feeds ?? undefined)
+        ? facingProgram(job, facingDepth, ctx, mill, setup, limit, shop.mount, shop.tools ?? [], catalogue, shop.feeds ?? undefined)
         : { nc: null, verify: null, toolKey: null, error: null, cam: null };
 
     // 7. the frame file (#244): the job's XY extent traced in the air, beside the job. Produced by
     // THIS gated action from the same toolpath, and checked by the SAME verifier — a frame the
     // operator cannot run at the wrong Z, because the Z is in the file.
-    const frame = frameProgram(ir, ctx, mill, setup, tool, limit);
+    const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount);
     if ('error' in frame) {
       errors.push({ stage: 'verify', message: `the frame file could not be produced: ${frame.error}` });
       return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: facing.nc, facingVerify: facing.verify, facingToolKey: facing.toolKey, facingError: facing.error, facingCam: facing.cam, predicted, errors };

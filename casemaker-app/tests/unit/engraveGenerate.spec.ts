@@ -10,6 +10,7 @@ import { tl } from './helpers/manifoldExec';
 import { generate, regions } from './helpers/engravePipeline';
 import { frameCorners, engraveGenerate } from '@/workers/sim/engraveGenerate';
 import type { EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import type { MountObstacle, MountObstacles } from '@/engine/cnc/mounts';
 import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import { UNMEASURED_FEEDS_TABLE, type FeedCatalogueRow } from '@/engine/cnc/feeds';
@@ -1457,6 +1458,62 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     expect(g.ok).toBe(true);
     expect(g.facingNc, `${g.facingError} ${JSON.stringify(g.facingVerify?.findings.slice(0, 3))}`).not.toBeNull();
     expect(g.facingToolKey).toBe('user:facing-3.175');
+  });
+});
+
+// #442's #427 item — the mount's boxes, resolved on the caller's side (the worker cannot read the
+// location) and handed to BOTH programs' verifiers, and to `toSetup` as the fixture. The clamp here
+// is a plain `MountObstacle`, because what is under test is the wiring, not the bracket's sizes
+// (their own spec is `bracketMount.spec.ts`).
+describe('the mount reaches the verifier and the facing pass (#442)', () => {
+  /** A clamp that only a pass cutting where the labels are (or the whole top) can reach. */
+  const clamp = (min: [number, number], max: [number, number]): MountObstacle => ({
+    id: 'clamp-test',
+    kind: 'clamp',
+    label: 'the clamp on the back edge',
+    fix: 'move it clear of the cut',
+    min,
+    max,
+    // Below `HOP_Z` (1 mm), so rapids clear it and only a CUTTING move can be refused.
+    topZ: 0.5,
+  });
+  const OVER_LABELS = clamp([0, 38], [100, 44]);
+  const OVER_BACK_EDGE = clamp([0, 54], [100, 60]);
+  // The facing pass needs its own cutter in the shop list (the worker's registry is empty).
+  const FACING_TOOL: ToolLibraryEntry = {
+    key: 'user:facing-3.175',
+    tool: flatEndMill(3.175, { number: 2, name: '3.175 mm flat (facing)' }),
+    provenance: 'this spec’s own facing cutter',
+  };
+  const mountOf = (o: MountObstacle): MountObstacles => ({
+    obstacles: [o],
+    uncertainty: 0.1,
+    fixture: {
+      boxes: [{ id: o.id, label: o.label, min: [o.min[0], o.min[1], -12], max: [o.max[0], o.max[1], o.topZ] }],
+      source: 'default',
+      uncertainty: 0.1,
+    },
+  });
+
+  it('a cut over the clamp is refused, and the same job without the mount passes', () => {
+    expect(generate(tl, defaultEngraveJob()).ok).toBe(true);
+    const g = generate(tl, defaultEngraveJob(), null, [], undefined, { mount: mountOf(OVER_LABELS) });
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('verify');
+    const f = g.verify!.findings.find((x) => x.code === 'clamp-in-path');
+    expect(f?.message).toContain('the clamp on the back edge');
+  });
+
+  it('a skim that would run into the mount is refused, and names the band it could not face', () => {
+    const faced: EngraveJob = { ...defaultEngraveJob(), facing: { enabled: true, depth: 0.5 } };
+    const g = generate(tl, faced, null, [], undefined, { tools: [FACING_TOOL, ...TOOL_LIBRARY], mount: mountOf(OVER_BACK_EDGE) });
+    // The engraving is untouched and the run still succeeded — only the skim is withheld (#432).
+    expect(g.ok, `${g.stage} ${JSON.stringify(g.errors)}`).toBe(true);
+    expect(g.facingNc).toBeNull();
+    expect(g.facingError).toContain('could not be faced');
+    expect(g.facingError).toContain('the clamp on the back edge stands over it');
+    // …and the strip is measured, not guessed: from the clamp’s nose, grown by the cutter and the fit.
+    expect(g.facingError).toMatch(/a 100 mm × 7\.6\d\d mm band of the top/);
   });
 });
 

@@ -22,7 +22,8 @@ import type { EngraveGenerated, EngraveShopOpts } from '@/workers/sim/engraveGen
 import type { OraclePredicted, OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { SimStatus } from './simStore';
-import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { jobMount, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { bracketMount } from '@/engine/cnc/mounts/bracket';
 import { feedCatalogueRows, resolvedFeedsTable } from '@/engine/cnc/feeds';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -151,10 +152,22 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // Z each drill's re-entry rapid stops at, and the whole location crosses as `defaults` so the
     // worker can read the `thread.*` set (#445 D6) without a second IPC. Reading them before the
     // await keeps the run's inputs one snapshot.
+    const shopDefaults = useShopDefaultsStore.getState().defaults;
+    // #442's #427 item — the mount's obstacles, resolved HERE for the same reason the shop defaults
+    // are: the bracket's sizes live in the location's defaults and the worker must not import the
+    // defaults client. `null` in the vise, and then the verifier and the sweep are exactly what
+    // they were before #427. The same object gates the program AND loads the simulation below, so
+    // the verifier and the sweep check one set of boxes.
+    const mount = bracketMount(
+      { x: job.stock.length, y: job.stock.width, z: job.stock.thickness },
+      jobMount(job),
+      shopDefaults,
+      job.sacrificial.under?.thickness ?? 0,
+    );
     const shop: EngraveShopOpts = {
       lostDetailWarnRatio: shopDefault('engrave.lostDetailWarnRatio').value,
       peckClearanceMm: shopDefault('drill.peckClearanceMm').value,
-      defaults: useShopDefaultsStore.getState().defaults,
+      defaults: shopDefaults,
       // #450 slice 3 — the table the worker's `feedsFor` resolves against. Read from this realm,
       // like the catalogue below and for the same reason: the worker cannot see the location, and
       // a program built on the compiled rows would disagree with the panel's.
@@ -163,6 +176,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       // catalogue is (the worker's registry is empty). The snapshotted list, not a re-read after the
       // await: the facing tool must be one the picker this run was started from shows.
       tools: getTools(),
+      mount,
     };
 
     // The cutter, resolved ONCE on this side (#305): the sim worker cannot see the registry, so
@@ -222,7 +236,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         .getState()
         .loadProgram(
           generated.nc,
-          toSetup(job, jobMachine(job, calibration)),
+          toSetup(job, jobMachine(job, calibration), mount?.fixture),
           tool,
           job.machineId,
           calibration,

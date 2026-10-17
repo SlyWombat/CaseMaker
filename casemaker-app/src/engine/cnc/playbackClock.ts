@@ -88,6 +88,30 @@ export function lineAtStep(path: ClockInput, step: number): number | null {
 }
 
 /**
+ * The program step a machine has reached when it reports source line `line` (#442's #423 item):
+ * the step of the last vertex whose line is `<= line`, or `null` when the path carries no line
+ * data. `lineAtStep`'s inverse, and the same binary search shape.
+ *
+ * The machine's `P` line counts the file's lines; a vertex's `line` is the 1-based source line its
+ * move came from. Several moves can share one line (a canned cycle), so the answer is the LAST
+ * vertex that line produced — where the tool is once the controller has executed it.
+ */
+export function stepAtLine(path: ClockInput, line: number): number | null {
+  if (!path.line) return null;
+  const n = path.line.length;
+  if (n === 0) return null;
+  let lo = 0;
+  let hi = n;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((path.line[mid] as number) <= line) lo = mid + 1;
+    else hi = mid;
+  }
+  const i = lo - 1;
+  return i < 0 ? null : (path.step[i] as number);
+}
+
+/**
  * Advance a playing clock by `dtWallSeconds * speed` of program time.
  *
  * Stops at the end of the program, or on the FIRST pause step that lies in

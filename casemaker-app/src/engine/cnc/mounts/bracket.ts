@@ -318,6 +318,52 @@ export function mountEnvelope(obstacles: MountObstacle[], b: BracketSettingsRead
   return { boxes, source: b.unmeasured.length === 0 ? 'measured' : 'default', uncertainty: b.settings.fitMm };
 }
 
+/**
+ * The mount's obstacles, as a program on this mount is checked against (#427): the two arms and
+ * the clamps, in the work frame, with the fit as their uncertainty — plus the same boxes as the
+ * sweep's fixture envelope (#203), so the verifier and the simulation read ONE statement.
+ */
+export interface MountObstacles {
+  obstacles: MountObstacle[];
+  /** The fit, mm: how far the stock's corner may sit from the bracket's datum. */
+  uncertainty: number;
+  /** The same boxes as solids, for `Setup.fixture`. */
+  fixture: FixtureEnvelope;
+}
+
+/**
+ * The obstacles a job is checked against, or `null` when it is held some other way (#442's #427
+ * item, decision Q10: a plate's default mount is the anchor bracket plus clamps).
+ *
+ * `null` for the vise and the tape is not an omission. A blank in the vise is nowhere near the
+ * bracket, and handing its program the arms would refuse every cut within the arms' reach of the
+ * front and left edges — a false refusal is as destructive as a missed one, because it teaches an
+ * operator to ignore the verifier.
+ *
+ * `underMm` is the board the stock stands on (#213): it lifts the stock, so the bracket's own top
+ * stands that much further below the stock's top. The clamps sit on the stock and do not move.
+ */
+export function bracketMount(
+  stock: StockSize,
+  mount: 'vise' | 'bracket' | 'tape',
+  defaults: ShopDefaults | null,
+  underMm = 0,
+): MountObstacles | null {
+  if (mount !== 'bracket') return null;
+  const b = bracketSettings(defaults);
+  const obstacles: MountObstacle[] = [
+    ...bracketObstacles(stock, b.settings, underMm),
+    ...clampObstacles(stock, defaultClampPlacements(stock, b.settings), b.settings),
+  ];
+  return {
+    obstacles,
+    uncertainty: b.settings.fitMm,
+    // The bracket stands on the bed the stock sits on (under the board when there is one), and its
+    // top is `height` above that; the boxes run from the bed up to each obstacle's own top.
+    fixture: mountEnvelope(obstacles, b, -stock.z - underMm),
+  };
+}
+
 // ---------------------------------------------------------------------------------------------------
 // The mount's own checks.
 
