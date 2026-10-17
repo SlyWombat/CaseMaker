@@ -968,8 +968,9 @@ function facingSteps(
     const on = facing.enabled && facing.depth > 0;
     steps.push({
       text: on
-        ? `This job still has a ${fmtNum(facing.depth)} mm facing pass, but ${refusal}. Turn facing ` +
-          'off in the Engrave panel and generate again before running it.'
+        ? `The facing program was not produced: ${refusal}. This job still has a ` +
+          `${fmtNum(facing.depth)} mm facing pass; turn facing off in the Engrave panel and generate ` +
+          'again before running it.'
         : `No facing pass — ${refusal}.`,
       bold: on,
       value: on ? 'facing on, not offered' : 'facing off',

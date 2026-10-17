@@ -1295,8 +1295,9 @@ describe('runSheet — the facing phase (#432 slice 3)', () => {
     const steps = section(sheet, 'facing').steps;
     expect(steps).toHaveLength(1);
     expect(steps[0]!.text).toContain('still has a 0.5 mm facing pass');
+    expect(steps[0]!.text).toContain('The facing program was not produced');
     expect(steps[0]!.text).toContain('facing is not offered on printed plastic');
-    expect(steps[0]!.text).toContain('Turn facing off in the Engrave panel');
+    expect(steps[0]!.text).toContain('turn facing off in the Engrave panel');
     expect(steps[0]!.value).toBe('facing on, not offered');
     expect(steps[0]!.bold).toBe(true);
   });

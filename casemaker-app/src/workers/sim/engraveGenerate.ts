@@ -59,6 +59,7 @@ import { validateVise } from '@/engine/cnc/fixture';
 import { generateEngrave, zPasses, type EngraveRegion } from '@/engine/cnc/cam/engraveJob';
 import { generateFacing, type FacingCamSummary } from '@/engine/cnc/cam/facing';
 import { chooseFacingTool } from '@/engine/cnc/engrave/facingTool';
+import { facingRefusal } from '@/engine/cnc/stockStart';
 import { generateTrace } from '@/engine/cnc/cam/trace';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { concatToolpathIR, estimateCycleSeconds, HOP_Z, type CamMove, type ToolpathIR } from '@/engine/cnc/cam/ir';
@@ -758,6 +759,12 @@ function facingProgram(
   error: string | null;
   cam: FacingCamSummary | null;
 } {
+  // #474 — the rule is the MATERIAL's, not the panel's. A legacy or hand-edited job that still turns
+  // facing on for a printed plastic must not get a face file either: the worker refuses it by name,
+  // so the R11 Facing row and the run sheet say why rather than walking the operator through a pass
+  // the app will not produce.
+  const refusal = facingRefusal(job.stock.material);
+  if (refusal !== null) return { nc: null, verify: null, toolKey: null, error: refusal, cam: null };
   const pick = chooseFacingTool(
     tools,
     catalogue,

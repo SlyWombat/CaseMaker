@@ -1471,6 +1471,21 @@ describe('facing the stock’s top (#432 slices 1–2)', () => {
     }
   });
 
+  // #474 — the rule lives in the worker too: the panel and the seed only keep honest jobs honest,
+  // and a legacy or hand-edited job with facing on must not get a face file for a plastic.
+  it('refuses the facing file on printed plastic, whatever the job says, and keeps it for wood', () => {
+    const plastic = faced({ stock: { ...defaultEngraveJob().stock, material: 'pla' } });
+    const g = generate(tl, plastic, null, [], undefined, SHOP);
+    expect(g.ok).toBe(true);
+    expect(g.facingNc).toBeNull();
+    expect(g.facingError).toBe(
+      'facing is not offered on printed plastic: a flat cutter smears a thermoplastic top',
+    );
+    // A wood job with the same facing choice still gets its file: the material is the rule.
+    const wood = generate(tl, faced(), null, [], undefined, SHOP);
+    expect(wood.facingNc).not.toBeNull();
+  });
+
   it('refuses a facing depth that eats the minimum floor, before any CAM', () => {
     const thickness = 3;
     const g = generate(tl, faced({ stock: { ...defaultEngraveJob().stock, thickness }, minFloor: 1, facing: { enabled: true, depth: 2.5 } }));
