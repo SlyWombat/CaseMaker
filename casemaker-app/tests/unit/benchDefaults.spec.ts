@@ -48,6 +48,12 @@ const NEW_KEYS = [
   'power.probeGapSeconds',
   'power.cyclePauseSeconds',
   'power.pollSeconds',
+  // #449 "smaller timings" — the machine transport's four windows and the house request timeout.
+  'machine.connectTimeoutMs',
+  'machine.discoveryWindowMs',
+  'machine.identifyWindowMs',
+  'machine.uploadInactivityMs',
+  'house.requestTimeoutMs',
 ];
 
 const fallback = (key: string): number => KNOWN_DEFAULTS[key]!.fallback;

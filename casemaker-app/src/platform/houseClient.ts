@@ -92,11 +92,32 @@ export const HOUSE_API_PATH = '/api/v1';
 export const HOUSE_SCHEMA_VERSION = 1;
 
 /**
- * How long a request gets before it is called dead. A service on this machine or this LAN answers in
- * single-digit milliseconds; two seconds means it is not there, and the difference between "slow"
- * and "gone" cannot be established from here anyway.
+ * How long a request gets before it is called dead — the labelled NO-SERVICE FALLBACK of the shop's
+ * `house.requestTimeoutMs` (#449). A service on this machine or this LAN answers in single-digit
+ * milliseconds; two seconds means it is not there, and the difference between "slow" and "gone"
+ * cannot be established from here anyway.
+ *
+ * THIS MODULE NEVER IMPORTS THE DEFAULTS REGISTRY. `defaultsClient.ts` imports the request function
+ * from here, so reading `KNOWN_DEFAULTS` back would close a cycle. Instead `houseDefaults` calls
+ * {@link setHouseRequestTimeoutMs} after it parses the section; until then this constant applies.
  */
 export const DEFAULT_TIMEOUT_MS = 2000;
+
+let requestTimeoutMs = DEFAULT_TIMEOUT_MS;
+
+/**
+ * Set the request timeout, ms — the stored `house.requestTimeoutMs` once `defaultsClient` has read
+ * it. A value that is not a finite positive number is ignored rather than accepted: a transport
+ * timeout of 0 or NaN is not a shop setting, it is a dead client.
+ */
+export function setHouseRequestTimeoutMs(ms: number): void {
+  if (Number.isFinite(ms) && ms > 0) requestTimeoutMs = ms;
+}
+
+/** The timeout requests currently use, ms — the stored value or {@link DEFAULT_TIMEOUT_MS}. */
+export function houseRequestTimeoutMs(): number {
+  return requestTimeoutMs;
+}
 
 /**
  * One sentence about a sync that still succeeded, and its weight (#328). `loss` is something the
@@ -460,7 +481,7 @@ async function send(
   opts: HouseRequestOptions & { etag?: string | null; body?: unknown },
 ): Promise<RawResponse> {
   const root = (opts.base ?? houseBaseUrl()).replace(/\/+$/, '');
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = opts.timeoutMs ?? requestTimeoutMs;
 
   const controller = new AbortController();
   const timer = setTimeout(

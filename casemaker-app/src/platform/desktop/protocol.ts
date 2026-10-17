@@ -267,6 +267,13 @@ export function parseDiscoveryDatagram(text: string): DiscoveredMachine | null {
 }
 
 /**
+ * How long to listen for the machine's UDP broadcast, ms — the labelled NO-SERVICE FALLBACK of the
+ * shop's `machine.discoveryWindowMs` (#449). A caller that has read the location passes its number;
+ * this module is pure protocol and never imports the registry.
+ */
+export const DISCOVERY_WINDOW_MS = 3000;
+
+/**
  * Every datagram received in the listen window, in arrival order, each with the time it arrived and
  * its text **unparsed** — no de-duplication and nothing discarded (#275). This is what wants field 4
  * watched against field 3 as the machine changes state: a machine list would collapse the repeats
@@ -278,7 +285,7 @@ export async function discoveryDatagrams(
   transport: MachineTransport,
   opts: { port?: number; windowMs?: number } = {},
 ): Promise<UdpDatagram[]> {
-  return transport.udpListen(opts.port ?? DISCOVERY_UDP_PORT, opts.windowMs ?? 3000);
+  return transport.udpListen(opts.port ?? DISCOVERY_UDP_PORT, opts.windowMs ?? DISCOVERY_WINDOW_MS);
 }
 
 /** Listen for the machine's broadcast and return unique machines in arrival order. */
@@ -394,13 +401,20 @@ export function extractMac(text: string): string | null {
  * plausible value out of whatever arrived) and a reply that does not match the observed shape
  * should be readable rather than silently dropped.
  */
+/**
+ * How long each reply to the identify asks is waited for, ms — the labelled NO-SERVICE FALLBACK of
+ * the shop's `machine.identifyWindowMs` (#449). `M482.5` then `M482.4` each get their own window,
+ * and the controller's answer to either is a single line (§4).
+ */
+export const IDENTIFY_WINDOW_MS = 1500;
+
 export async function runIdentify(
   transport: MachineTransport,
   conn: number,
   host: string,
   opts: { windowMs?: number } = {},
 ): Promise<MachineIdentity> {
-  const windowMs = opts.windowMs ?? 1500;
+  const windowMs = opts.windowMs ?? IDENTIFY_WINDOW_MS;
   const channel = new FrameChannel(transport, conn);
 
   await transport.tcpWrite(conn, encodeFrame(PTYPE_CTRL_MULTI, utf8('M482.5')));
@@ -585,6 +599,13 @@ export function encodeTransferName(path: string): string {
 }
 
 /**
+ * How long an upload waits for the machine's next frame before it cancels, ms — the labelled
+ * NO-SERVICE FALLBACK of the shop's `machine.uploadInactivityMs` (#449). A caller that has read the
+ * location passes its number; this module is pure protocol and never imports the registry.
+ */
+export const UPLOAD_INACTIVITY_MS = 9000;
+
+/**
  * The receiver-driven file upload. The machine asks for packets by sequence; we answer. Returns an
  * explicit outcome — a refusal (`0xB5` after data began) is never retried and never reported as a
  * success.
@@ -597,7 +618,7 @@ export async function runUpload(
   opts: UploadOptions = {},
 ): Promise<UploadOutcome> {
   const packetSize = opts.packetSize ?? WIFI_PACKET_SIZE;
-  const inactivityMs = opts.inactivityMs ?? 9000;
+  const inactivityMs = opts.inactivityMs ?? UPLOAD_INACTIVITY_MS;
   if (!Number.isInteger(packetSize) || packetSize <= 0) {
     return { ok: false, reason: 'error', detail: `invalid packet size ${packetSize}` };
   }

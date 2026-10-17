@@ -20,6 +20,7 @@ import { GRIP_MIN } from '@/engine/cnc/fixture';
 import { REST_MACHINING_FALLBACK } from '@/engine/cnc/engrave/restSettings';
 import {
   houseRequest,
+  setHouseRequestTimeoutMs,
   type HouseFailure,
   type HouseReadFailure,
   type HouseRequestOptions,
@@ -150,6 +151,20 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'power.probeGapSeconds': { label: 'wait between those probes (chosen)', unit: 's', rule: z.number().min(2).max(30), fallback: 2 },
   'power.cyclePauseSeconds': { label: 'plug cycle, time off (chosen)', unit: 's', rule: z.number().min(3).max(120), fallback: 10 },
   'power.pollSeconds': { label: 'power-on, wait between checks (chosen)', unit: 's', rule: z.number().min(2).max(60), fallback: 3 },
+  // The desktop machine transport's four windows (#449, "smaller timings"): the TCP connect, the
+  // UDP discovery listen, the identify reply, and how long an upload waits for the machine's next
+  // frame. CHOSEN, not measured: each is the number `protocol.ts` / `machineBridge.ts` compiled
+  // before, and each is the labelled no-service fallback there. `machineTiming` reads all four,
+  // and the web-side wrappers pass them into the pure protocol calls.
+  'machine.connectTimeoutMs': { label: 'machine TCP connect timeout (chosen)', unit: 'ms', rule: z.number().min(500).max(30_000), fallback: 3000 },
+  'machine.discoveryWindowMs': { label: 'UDP discovery listen window (chosen)', unit: 'ms', rule: z.number().min(500).max(60_000), fallback: 3000 },
+  'machine.identifyWindowMs': { label: 'identify reply window (chosen)', unit: 'ms', rule: z.number().min(250).max(30_000), fallback: 1500 },
+  'machine.uploadInactivityMs': { label: 'upload inactivity window (chosen)', unit: 'ms', rule: z.number().min(1000).max(120_000), fallback: 9000 },
+  // The house service's own request timeout (#449). CHOSEN, not measured: a service on this machine
+  // or this LAN answers in single-digit milliseconds, and 2 s is where the client called it gone.
+  // `houseClient.ts` must never import this registry (this module imports IT), so the client keeps
+  // the fallback and `houseDefaults` hands it the stored value.
+  'house.requestTimeoutMs': { label: 'house service request timeout (chosen)', unit: 'ms', rule: z.number().min(250).max(30_000), fallback: 2000 },
   // ── #449 (end)
   // #415 — past how many minutes of runtime a cutter gets "check this bit". It only warns.
   'tools.runtimeWarnMinutes': {
@@ -396,6 +411,55 @@ export function readDefault(map: ShopDefaults | null, key: string): ReadDefault 
   return { value: known.fallback, source: 'fallback' };
 }
 
+// ── The live section, for platform modules that cannot import the store ────────────────────────
+type DefaultsSource = () => ShopDefaults | null;
+let liveSource: DefaultsSource = () => null;
+
+/**
+ * Point the platform modules at the section the store currently holds (#449). The store calls this
+ * once; `machineProbe`, `machineUpload` and the console read {@link liveShopDefaults} rather than
+ * importing the zustand store, which would drag React and the whole store graph into modules the
+ * protocol specs and the desktop boundary load on their own.
+ */
+export function setLiveDefaultsSource(source: DefaultsSource): void {
+  liveSource = source;
+}
+
+/**
+ * The section as it stands now, or null when nothing has read one — `readDefault` then answers the
+ * labelled fallback, which is the no-service behaviour the hosted build wants anyway.
+ */
+export function liveShopDefaults(): ShopDefaults | null {
+  try {
+    return liveSource();
+  } catch {
+    // A source that throws (a store torn down mid-request) is no service, not a crash.
+    return null;
+  }
+}
+
+/** The desktop machine transport's four windows, ms (#449, "smaller timings"). */
+export interface MachineTiming {
+  connectTimeoutMs: number;
+  discoveryWindowMs: number;
+  identifyWindowMs: number;
+  uploadInactivityMs: number;
+}
+
+/**
+ * Read the machine transport's four windows from the section — the location's number where it has
+ * one within the rule, the registry's labelled fallback otherwise. One reading, so a caller cannot
+ * mix a stored window with a compiled one for the same connect.
+ */
+export function machineTiming(map: ShopDefaults | null): MachineTiming {
+  return {
+    connectTimeoutMs: readDefault(map, 'machine.connectTimeoutMs').value,
+    discoveryWindowMs: readDefault(map, 'machine.discoveryWindowMs').value,
+    identifyWindowMs: readDefault(map, 'machine.identifyWindowMs').value,
+    uploadInactivityMs: readDefault(map, 'machine.uploadInactivityMs').value,
+  };
+}
+
 function firstIssue(error: z.ZodError): string {
   const issue = error.issues[0];
   if (!issue) return 'unrecognised shape';
@@ -420,6 +484,10 @@ export async function houseDefaults(opts?: HouseRequestOptions): Promise<Default
   }
   const parsed = ShopDefaultsSchema.safeParse(json);
   if (!parsed.success) return { kind: 'error', detail: `the shop defaults do not match this build: ${firstIssue(parsed.error)}` };
+  // The section's own request timeout (#449) applies from the NEXT request: the read that fetches it
+  // had to run on the compiled fallback. `houseClient` never imports this module — this is the one
+  // call that hands it the stored number, keeping the dependency one-way.
+  setHouseRequestTimeoutMs(readDefault(parsed.data, 'house.requestTimeoutMs').value);
   return { kind: 'ok', etag: res.etag ?? null, defaults: parsed.data };
 }
 

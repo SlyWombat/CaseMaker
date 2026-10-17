@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   houseBaseUrl,
+  DEFAULT_TIMEOUT_MS,
   houseFeeds,
   houseRegisterItem,
   houseRegisterTool,
@@ -13,24 +14,29 @@ import {
   houseRemoveTool,
   houseReplaceItem,
   houseReplaceTool,
+  houseRequestTimeoutMs,
   houseSyncCatalogue,
   houseTools,
   probeHouse,
   setHouseClientLoader,
+  setHouseRequestTimeoutMs,
   HOUSE_API_PATH,
   HOUSE_SCHEMA_VERSION,
   type HouseClient,
   type InventoryItem,
 } from '@/platform/houseClient';
+import { houseDefaults, KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 
 const BASE = 'http://127.0.0.1:8000';
 
 beforeEach(() => {
   setHouseClientLoader(null);
+  setHouseRequestTimeoutMs(DEFAULT_TIMEOUT_MS);
 });
 
 afterEach(() => {
+  setHouseRequestTimeoutMs(DEFAULT_TIMEOUT_MS);
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -236,6 +242,51 @@ describe('probeHouse', () => {
     expect(probe.kind).toBe('error');
     if (probe.kind !== 'error') throw new Error('unreachable');
     expect(probe.detail).toContain('no answer within 10 ms');
+  });
+});
+
+describe('#449 the request timeout is a shop default with a labelled fallback', () => {
+  it('the compiled fallback is the registry’s house.requestTimeoutMs fallback', () => {
+    expect(DEFAULT_TIMEOUT_MS).toBe(KNOWN_DEFAULTS['house.requestTimeoutMs']!.fallback);
+    expect(houseRequestTimeoutMs()).toBe(DEFAULT_TIMEOUT_MS);
+  });
+
+  it('a request with no explicit timeout uses the value the defaults client set', async () => {
+    vi.stubGlobal(
+      'fetch',
+      (_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+        }),
+    );
+    setHouseRequestTimeoutMs(12);
+    const probe = await probeHouse({ base: BASE });
+    expect(probe.kind).toBe('error');
+    if (probe.kind !== 'error') throw new Error('unreachable');
+    expect(probe.detail).toContain('no answer within 12 ms');
+  });
+
+  it('the stored house.requestTimeoutMs reaches the client once the section is read', async () => {
+    // The real read path: `houseDefaults` parses the section and hands `houseClient` the number.
+    // That request itself ran on the compiled fallback — the section cannot set its own timeout
+    // before it has been fetched.
+    stubFetch(() => ({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        'house.requestTimeoutMs': { value: 4321, source: 'chosen', setAt: '2026-10-16T00:00:00.000Z', unit: 'ms', note: null },
+      }),
+    }));
+    const read = await houseDefaults({ base: BASE });
+    expect(read.kind).toBe('ok');
+    expect(houseRequestTimeoutMs()).toBe(4321);
+  });
+
+  it('refuses a nonsense value rather than breaking every request with it', () => {
+    setHouseRequestTimeoutMs(4321);
+    setHouseRequestTimeoutMs(0);
+    expect(houseRequestTimeoutMs()).toBe(4321);
+    setHouseRequestTimeoutMs(Number.NaN);
+    expect(houseRequestTimeoutMs()).toBe(4321);
   });
 });
 

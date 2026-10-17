@@ -40,6 +40,7 @@
 
 import { CALIBRATION_KEY_LIST, calibrationFromReplies, type MachineCalibration } from '@/engine/cnc/calibration';
 import { loadMachineBridge } from './capabilities';
+import { liveShopDefaults, machineTiming } from './defaultsClient';
 
 /**
  * The command port a typed address connects to when none is given: `COMMAND_TCP_PORT`
@@ -102,7 +103,10 @@ export interface MachineProbeClient {
 }
 
 export interface MachineProbeOptions {
-  /** How long to listen for the broadcast. Defaults to the bridge's own (3000 ms). */
+  /**
+   * How long to listen for the broadcast, ms. Defaults to the shop's `machine.discoveryWindowMs`
+   * (#449) — `protocol.ts`'s 3000 ms labelled fallback with no location.
+   */
   windowMs?: number;
   /**
    * A typed address: skip the search and connect straight here. The manual fallback for a machine
@@ -208,12 +212,22 @@ export function profileForDiscoveredName(name: string): string | null {
 /** The real client: the bridge, reached only through the capability guard. */
 async function loadRealClient(): Promise<MachineProbeClient> {
   const bridge = await loadMachineBridge();
+  // The three windows the probe spends (#449), read at each call from the section the store holds:
+  // the identify reply, and the connect timeout every socket here uses. `protocol.ts` and
+  // `machineBridge.ts` keep their compiled numbers as labelled fallbacks for no location.
+  const timing = () => machineTiming(liveShopDefaults());
   return {
     discover: (opts) => bridge.discover({ windowMs: opts.windowMs }),
-    identify: (target) => bridge.identify(target),
-    status: (target) => bridge.status(target),
+    identify: (target) => {
+      const t = timing();
+      return bridge.identify(target, { windowMs: t.identifyWindowMs, connectTimeoutMs: t.connectTimeoutMs });
+    },
+    status: (target) => bridge.status(target, { connectTimeoutMs: timing().connectTimeoutMs }),
     readConfig: async (target, keys, opts) => {
-      const outcomes = await bridge.readConfigValues(target, keys, { source: opts.source });
+      const outcomes = await bridge.readConfigValues(target, keys, {
+        source: opts.source,
+        connectTimeoutMs: timing().connectTimeoutMs,
+      });
       const values = new Map<string, string>();
       const failures: ConfigReadSummary['failures'] = [];
       for (const o of outcomes) {
@@ -274,7 +288,9 @@ export async function probeMachine(opts: MachineProbeOptions = {}): Promise<Mach
 
   let found: DiscoveredMachineSummary[];
   try {
-    found = await client.discover({ windowMs: opts.windowMs });
+    // The shop's discovery window (#449), read now rather than compiled here. The web build has no
+    // location: `readDefault` answers the labelled 3000 ms fallback.
+    found = await client.discover({ windowMs: opts.windowMs ?? machineTiming(liveShopDefaults()).discoveryWindowMs });
   } catch (e) {
     return { kind: 'error', detail: `the search failed: ${reasonOf(e)}` };
   }

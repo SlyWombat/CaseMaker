@@ -7,8 +7,12 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { describe, expect, it } from 'vitest';
+import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import {
   CARRY_READ_MS,
+  DISCOVERY_WINDOW_MS,
+  IDENTIFY_WINDOW_MS,
+  UPLOAD_INACTIVITY_MS,
   crc16Ccitt,
   decodeText,
   discoveryDatagrams,
@@ -1129,5 +1133,37 @@ describe('#386 item 3 — a frame that arrived with no line in flight belongs to
     const session = openConsole(transport, 1);
     expect(await session.late(20)).toEqual({ text: 'Done ATC\r\n', frames: 1 });
     expect(await session.late(5)).toBeNull();
+  });
+});
+
+describe('#449 the transport windows are shop defaults, with labelled fallbacks', () => {
+  it('the compiled constants are the registry’s fallbacks, not separate numbers', () => {
+    expect(DISCOVERY_WINDOW_MS).toBe(KNOWN_DEFAULTS['machine.discoveryWindowMs']!.fallback);
+    expect(IDENTIFY_WINDOW_MS).toBe(KNOWN_DEFAULTS['machine.identifyWindowMs']!.fallback);
+    expect(UPLOAD_INACTIVITY_MS).toBe(KNOWN_DEFAULTS['machine.uploadInactivityMs']!.fallback);
+  });
+
+  it('discovery listens for the fallback when the caller passes no window', async () => {
+    const transport = new FakeTransport();
+    await runDiscovery(transport, { port: 3333 });
+    expect(transport.listenWindow).toBe(DISCOVERY_WINDOW_MS);
+  });
+
+  it('identify gives each ask the fallback window when the caller passes none', async () => {
+    const transport = new FakeTransport();
+    await runIdentify(transport, 1, '192.168.10.16');
+    // One drain per ask (M482.5, then M482.4), each at the compiled fallback.
+    expect(transport.readTimeouts.filter((ms) => ms === IDENTIFY_WINDOW_MS)).toHaveLength(2);
+  });
+
+  it('an upload cancels at the fallback inactivity window when the caller passes none', async () => {
+    const transport = new FakeTransport();
+    const outcome = await runUpload(transport, 1, '/sd/gcodes/badge.nc', new Uint8Array([1, 2, 3]), {
+      packetSize: 1024,
+    });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe('timeout');
+    expect(outcome.detail).toContain(`${UPLOAD_INACTIVITY_MS} ms`);
   });
 });

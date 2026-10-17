@@ -29,6 +29,7 @@
 import type { VerifyReport } from '@/engine/cnc/verify';
 import { programUploadProblem } from '@/engine/cnc/uploadGate';
 import { loadMachineBridge } from './capabilities';
+import { liveShopDefaults, machineTiming } from './defaultsClient';
 
 /** Where to reach the machine. Always both: an observation carries the port it was reached on. */
 export interface MachineUploadTarget {
@@ -174,9 +175,13 @@ export function programBytes(nc: string): Uint8Array {
 /** The real client: the bridge, reached only through the capability guard. */
 async function loadRealClient(): Promise<MachineUploadClient> {
   const bridge = await loadMachineBridge();
+  // The connect timeout and the upload's inactivity window are the shop's (#449), read at each call
+  // from the section the store holds; with no location `protocol.ts` / `machineBridge.ts` answer
+  // their labelled compiled fallbacks.
+  const timing = () => machineTiming(liveShopDefaults());
   return {
     status: async (target) => {
-      const reading = await bridge.status(target);
+      const reading = await bridge.status(target, { connectTimeoutMs: timing().connectTimeoutMs });
       return { ok: reading.ok, text: reading.text };
     },
     upload: async (target, program) => {
@@ -188,7 +193,11 @@ async function loadRealClient(): Promise<MachineUploadClient> {
         // disagree, this is the line that makes it visible instead of sending the program anyway.
         return { ok: false, reason: 'error', detail: 'the program has not passed the verifier' };
       }
-      return bridge.uploadVerifiedProgram(target, verified);
+      const t = timing();
+      return bridge.uploadVerifiedProgram(target, verified, {
+        inactivityMs: t.uploadInactivityMs,
+        connectTimeoutMs: t.connectTimeoutMs,
+      });
     },
   };
 }

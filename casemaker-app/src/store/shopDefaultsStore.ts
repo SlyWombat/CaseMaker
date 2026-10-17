@@ -11,11 +11,11 @@ import {
   housePutDefault,
   houseResetDefault,
   readDefault,
+  setLiveDefaultsSource,
   type ReadDefault,
   type ShopDefault,
   type ShopDefaults,
 } from '@/platform/defaultsClient';
-import { setConsoleDefaultsSource } from '@/platform/machineConsole';
 
 export interface ShopDefaultsState {
   status: 'unknown' | 'present' | 'absent' | 'error';
@@ -60,8 +60,10 @@ export const useShopDefaultsStore = create<ShopDefaultsState>((set, get) => {
   };
 });
 
-// #449 — every console the app opens reads its reply window from these defaults, at each line.
-setConsoleDefaultsSource(() => useShopDefaultsStore.getState().defaults);
+// #449 — the console, the probe and the upload read their timing windows from these defaults, at
+// each use. They ask `defaultsClient` rather than importing this store, so the platform modules
+// stay free of React and of the store graph.
+setLiveDefaultsSource(() => useShopDefaultsStore.getState().defaults);
 
 /** The number for `key` right now: the location's, or the labelled fallback with no location. */
 export function shopDefault(key: string): ReadDefault {

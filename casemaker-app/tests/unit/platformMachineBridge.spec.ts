@@ -5,11 +5,15 @@
 // transport must satisfy.
 
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
 import {
   asVerifiedProgram,
+  DEFAULT_CONNECT_TIMEOUT_MS,
   DESKTOP_ONLY_MARKER,
   discover,
   identify,
@@ -18,6 +22,7 @@ import {
   uploadVerifiedProgram,
   type VerifiedProgram,
 } from '@/platform/desktop/machineBridge';
+import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import {
   decodeText,
   encodeFrame,
@@ -66,6 +71,8 @@ class FakeTransport implements MachineTransport {
   connects = 0;
   closed: number[] = [];
   listenPort: number | null = null;
+  /** The timeout each `tcpConnect` was asked for — how a spec sees which connect window was used. */
+  connectTimeouts: number[] = [];
 
   queueRead(...chunks: Uint8Array[]): void {
     this.reads.push(...chunks);
@@ -75,8 +82,9 @@ class FakeTransport implements MachineTransport {
     // The bridge reads the text and nothing else, so a fixed arrival time is enough here (#275).
     return this.udpLines.map((text) => ({ at: 0, text }));
   }
-  async tcpConnect(_host: string, _port: number, _timeoutMs: number): Promise<number> {
+  async tcpConnect(_host: string, _port: number, timeoutMs: number): Promise<number> {
     this.connects++;
+    this.connectTimeouts.push(timeoutMs);
     return 1;
   }
   async tcpWrite(_conn: number, data: Uint8Array): Promise<void> {
@@ -93,6 +101,28 @@ class FakeTransport implements MachineTransport {
 describe('#255 machine bridge — the desktop boundary', () => {
   it('keeps the marker the platform-gate check greps for', () => {
     expect(DESKTOP_ONLY_MARKER).toBe('casemaker-desktop-bridge-v1');
+  });
+});
+
+describe('#449 the connect timeout is a shop default with a labelled fallback', () => {
+  it('the compiled fallback is the registry’s machine.connectTimeoutMs fallback', () => {
+    expect(DEFAULT_CONNECT_TIMEOUT_MS).toBe(KNOWN_DEFAULTS['machine.connectTimeoutMs']!.fallback);
+  });
+
+  it('uses the fallback when the caller passes no timeout, and the caller’s number when it does', async () => {
+    const fallback = new FakeTransport();
+    await identify({ host: '192.168.10.43', port: 2222 }, { transport: fallback });
+    expect(fallback.connectTimeouts).toEqual([DEFAULT_CONNECT_TIMEOUT_MS]);
+
+    const chosen = new FakeTransport();
+    await identify({ host: '192.168.10.43', port: 2222 }, { transport: chosen, connectTimeoutMs: 750 });
+    expect(chosen.connectTimeouts).toEqual([750]);
+  });
+
+  it('every connect site reads the one constant rather than restating a literal', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'platform', 'desktop', 'machineBridge.ts'), 'utf8');
+    expect(src.match(/opts\.connectTimeoutMs \?\? DEFAULT_CONNECT_TIMEOUT_MS/g)).toHaveLength(6);
+    expect(src).not.toMatch(/connectTimeoutMs \?\? \d/);
   });
 });
 

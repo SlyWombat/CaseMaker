@@ -369,6 +369,41 @@
       "unit": "s",
       "note": "chosen, not measured: the wait between checks while switching on waits for the controller to answer"
     },
+    "machine.connectTimeoutMs": {
+      "value": 3000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long a TCP connect to the machine's command port may take before it is called unreachable; the bridge compiled 3 s"
+    },
+    "machine.discoveryWindowMs": {
+      "value": 3000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long the app listens for the machine's UDP broadcast before deciding it is not announcing itself; the protocol compiled 3 s"
+    },
+    "machine.identifyWindowMs": {
+      "value": 1500.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long each reply to the identify asks (M482.5, then M482.4) is waited for; the protocol compiled 1.5 s"
+    },
+    "machine.uploadInactivityMs": {
+      "value": 9000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long an upload waits for the machine's next frame before it cancels the transfer; the protocol compiled 9 s"
+    },
+    "house.requestTimeoutMs": {
+      "value": 2000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long a house service request gets before it is called dead; a service on this machine or LAN answers in single-digit milliseconds, and the client compiled 2 s"
+    },
     "registration.capBelowSurfaceMm": {
       "value": 0.5,
       "source": "seeded",

@@ -35,7 +35,7 @@
 
 import { consoleProblem } from '@/engine/cnc/consoleGate';
 import { loadMachineBridge } from './capabilities';
-import { readDefault, type ShopDefaults } from './defaultsClient';
+import { liveShopDefaults, machineTiming, readDefault, type ShopDefaults } from './defaultsClient';
 
 /** Where to reach the machine. Always both: an observation carries the port it was reached on. */
 export interface MachineConsoleTarget {
@@ -98,20 +98,14 @@ export function statusPollTimingFrom(defaults: ShopDefaults | null): ConsoleTimi
 }
 
 /**
- * Where a console reads the shop's defaults from (#449). `shopDefaultsStore` sets it when it loads, so
- * every console the app opens uses the location's window; unset (a test, a build with no store), the
- * fallbacks. A function, read at each line, so a value changed in Manage reaches the next line.
+ * Where a console reads the shop's defaults from (#449): {@link liveShopDefaults}, which
+ * `shopDefaultsStore` keeps pointed at the section it holds. A function, read at each line, so a
+ * value changed in Manage reaches the next line; with no store (a test, the hosted build) it
+ * answers null and the labelled fallbacks apply.
  */
-let defaultsSource: () => ShopDefaults | null = () => null;
-
-/** Set where consoles read the shop's defaults; `null` restores "none" (the fallbacks). */
-export function setConsoleDefaultsSource(fn: (() => ShopDefaults | null) | null): void {
-  defaultsSource = fn ?? (() => null);
-}
-
 function currentConsoleTiming(): ConsoleTiming {
   try {
-    return consoleTimingFrom(defaultsSource());
+    return consoleTimingFrom(liveShopDefaults());
   } catch {
     // A source that cannot answer is no location: the labelled fallbacks.
     return consoleTimingFrom(null);
@@ -226,7 +220,11 @@ async function loadRealClient(): Promise<MachineConsoleClient> {
     // The timing reaches the wire per LINE (`live.send`), not at open: connecting has its own
     // timeout, and the reply window is a property of the line being sent.
     async open(target, _timing) {
-      const live = await bridge.openConsoleSession(target);
+      // The CONNECT timeout is the shop's too (#449), read here rather than at the bridge: the
+      // bridge is desktop-only and pure protocol and never imports the defaults registry.
+      const live = await bridge.openConsoleSession(target, {
+        connectTimeoutMs: machineTiming(liveShopDefaults()).connectTimeoutMs,
+      });
       return {
         send: (line, t) => live.send(line, t),
         close: () => live.close(),

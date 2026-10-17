@@ -293,6 +293,14 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("power.probeGapSeconds", 2.0, "s", "chosen, not measured: the wait between those probes"),
     ("power.cyclePauseSeconds", 10.0, "s", "chosen, not measured: how long a plug cycle leaves the machine off before switching it on again (power.sh on --cycle)"),
     ("power.pollSeconds", 3.0, "s", "chosen, not measured: the wait between checks while switching on waits for the controller to answer"),
+    // The desktop machine transport's four windows (#449, "smaller timings"), and the house
+    // service's own request timeout. Each is the number the code compiled before; `protocol.ts`,
+    // `machineBridge.ts` and `houseClient.ts` keep each as a labelled no-service fallback.
+    ("machine.connectTimeoutMs", 3000.0, "ms", "chosen, not measured: how long a TCP connect to the machine's command port may take before it is called unreachable; the bridge compiled 3 s"),
+    ("machine.discoveryWindowMs", 3000.0, "ms", "chosen, not measured: how long the app listens for the machine's UDP broadcast before deciding it is not announcing itself; the protocol compiled 3 s"),
+    ("machine.identifyWindowMs", 1500.0, "ms", "chosen, not measured: how long each reply to the identify asks (M482.5, then M482.4) is waited for; the protocol compiled 1.5 s"),
+    ("machine.uploadInactivityMs", 9000.0, "ms", "chosen, not measured: how long an upload waits for the machine's next frame before it cancels the transfer; the protocol compiled 9 s"),
+    ("house.requestTimeoutMs", 2000.0, "ms", "chosen, not measured: how long a house service request gets before it is called dead; a service on this machine or LAN answers in single-digit milliseconds, and the client compiled 2 s"),
     // ── #449 (end)
     // #414 — Q3's minimum offcut, 20 x 20 mm at the stock's thickness.
     // #414 — the maintainer, 2026-10-16: runtime is weighted by the material cut. Chosen, not measured.
@@ -598,6 +606,28 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "power.pollSeconds" => Some(need(
             n.is_some_and(|v| (2.0..=60.0).contains(&v)),
             "2 to 60 seconds — never faster than the 2 s status floor (#386)",
+        )),
+        // The desktop machine transport's four windows, and the house service's request timeout
+        // (#449, "smaller timings"). Bounds match `defaultsClient.ts`'s KNOWN_DEFAULTS exactly.
+        "machine.connectTimeoutMs" => Some(need(
+            n.is_some_and(|v| (500.0..=30000.0).contains(&v)),
+            "500 to 30000 ms",
+        )),
+        "machine.discoveryWindowMs" => Some(need(
+            n.is_some_and(|v| (500.0..=60000.0).contains(&v)),
+            "500 to 60000 ms",
+        )),
+        "machine.identifyWindowMs" => Some(need(
+            n.is_some_and(|v| (250.0..=30000.0).contains(&v)),
+            "250 to 30000 ms",
+        )),
+        "machine.uploadInactivityMs" => Some(need(
+            n.is_some_and(|v| (1000.0..=120000.0).contains(&v)),
+            "1000 to 120000 ms",
+        )),
+        "house.requestTimeoutMs" => Some(need(
+            n.is_some_and(|v| (250.0..=30000.0).contains(&v)),
+            "250 to 30000 ms",
         )),
         // ── #449 (end)
         "registration.surfaceSlowFeed" => Some(need(

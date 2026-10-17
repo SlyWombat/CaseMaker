@@ -8,6 +8,7 @@ import {
   type ConfigReadSummary,
   type MachineProbeClient,
 } from '@/platform/machineProbe';
+import { KNOWN_DEFAULTS, setLiveDefaultsSource, type ShopDefaults } from '@/platform/defaultsClient';
 import { COMMAND_TCP_PORT } from '@/platform/desktop/protocol';
 import { CALIBRATION_KEYS } from '@/engine/cnc/calibration';
 import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
@@ -21,7 +22,10 @@ import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
  * no numbers, and "no machine" is an outcome rather than an error.
  */
 
-afterEach(() => setMachineProbeLoader(null));
+afterEach(() => {
+  setMachineProbeLoader(null);
+  setLiveDefaultsSource(() => null);
+});
 
 /**
  * A client that answers exactly as scripted, so each outcome can be reached deliberately.
@@ -276,5 +280,57 @@ describe('#279 — the machine is asked what its own frame is set to', () => {
     if (result.kind !== 'found') throw new Error('the machine answered its broadcast');
     expect(result.calibration).toBeNull();
     expect(result.observation.notes.join(' ')).toMatch(/coordinate frame could not be read/i);
+  });
+});
+
+describe('#449 the discovery window comes from the shop defaults', () => {
+  function chosenWindow(value: number): ShopDefaults {
+    return {
+      'machine.discoveryWindowMs': { value, source: 'chosen', setAt: '2026-10-16T00:00:00.000Z', unit: 'ms', note: null },
+    } as ShopDefaults;
+  }
+
+  it('the fallback is the registry’s machine.discoveryWindowMs fallback (the protocol’s compiled 3 s)', async () => {
+    let seen: number | undefined;
+    use(
+      fakeClient({
+        discover: async (opts) => {
+          seen = opts.windowMs;
+          return [];
+        },
+      }),
+    );
+    expect(await probeMachine()).toEqual({ kind: 'not-found' });
+    expect(seen).toBe(KNOWN_DEFAULTS['machine.discoveryWindowMs']!.fallback);
+  });
+
+  it('a stored window reaches the search', async () => {
+    setLiveDefaultsSource(() => chosenWindow(7500));
+    let seen: number | undefined;
+    use(
+      fakeClient({
+        discover: async (opts) => {
+          seen = opts.windowMs;
+          return [];
+        },
+      }),
+    );
+    expect(await probeMachine()).toEqual({ kind: 'not-found' });
+    expect(seen).toBe(7500);
+  });
+
+  it('an explicit windowMs still outranks the shop’s', async () => {
+    setLiveDefaultsSource(() => chosenWindow(7500));
+    let seen: number | undefined;
+    use(
+      fakeClient({
+        discover: async (opts) => {
+          seen = opts.windowMs;
+          return [];
+        },
+      }),
+    );
+    await probeMachine({ windowMs: 250 });
+    expect(seen).toBe(250);
   });
 });

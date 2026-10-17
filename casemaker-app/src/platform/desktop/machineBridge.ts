@@ -61,10 +61,17 @@ export interface MachineTarget {
   port?: number;
 }
 
+/**
+ * The TCP connect timeout, ms — the labelled NO-SERVICE FALLBACK of the shop's
+ * `machine.connectTimeoutMs` (#449). Every connect in this file uses it when the caller passes none;
+ * the web-side wrappers pass the number they read from the location.
+ */
+export const DEFAULT_CONNECT_TIMEOUT_MS = 3000;
+
 /** Common options. `transport` is the USB seam and the test seam; production uses the sockets. */
 export interface BridgeOptions {
   transport?: MachineTransport;
-  /** TCP connect timeout. Defaults to 3000 ms. */
+  /** TCP connect timeout. Defaults to {@link DEFAULT_CONNECT_TIMEOUT_MS}. */
   connectTimeoutMs?: number;
 }
 
@@ -105,7 +112,7 @@ function transportOf(opts: BridgeOptions): MachineTransport {
   return opts.transport ?? tauriTransport;
 }
 
-/** Listen for the machine's UDP broadcast for `opts.windowMs` (default 3000) and return it. */
+/** Listen for the machine's UDP broadcast for `opts.windowMs` (the protocol's fallback 3000 ms) and return it. */
 export async function discover(
   opts: BridgeOptions & { port?: number; windowMs?: number } = {},
 ): Promise<DiscoveredMachine[]> {
@@ -122,7 +129,7 @@ export async function identify(
   opts: BridgeOptions & { windowMs?: number } = {},
 ): Promise<MachineIdentity> {
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? 3000);
+  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
     return await runIdentify(transport, conn, target.host, { windowMs: opts.windowMs });
   } finally {
@@ -136,7 +143,7 @@ export async function status(
   opts: BridgeOptions & { windowMs?: number } = {},
 ): Promise<MachineStatus> {
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? 3000);
+  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
     return await runStatus(transport, conn, { windowMs: opts.windowMs });
   } finally {
@@ -181,7 +188,7 @@ export async function readConfigValues(
   opts: BridgeOptions & { source?: string; windowMs?: number } = {},
 ): Promise<ConfigReadOutcome[]> {
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? 3000);
+  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
     const out: ConfigReadOutcome[] = [];
     for (const key of keys) {
@@ -236,7 +243,7 @@ export async function uploadVerifiedProgram(
   const destination = uploadPath(opts.directory ?? GCODE_DIR, program.filename);
 
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? 3000);
+  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
     return await runUpload(transport, conn, destination, program.content, {
       packetSize: opts.packetSize,
@@ -267,7 +274,7 @@ export async function sendConsoleLine(
   const problem = consoleProblem(line);
   if (problem !== null) return { ok: false, reason: 'refused', line, detail: problem, text: '' };
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? 3000);
+  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   try {
     return await openConsole(transport, conn).send(line, opts);
   } finally {
@@ -297,7 +304,7 @@ export async function openConsoleSession(
   opts: BridgeOptions = {},
 ): Promise<LiveConsole> {
   const transport = transportOf(opts);
-  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? 3000);
+  const conn = await transport.tcpConnect(target.host, target.port ?? COMMAND_TCP_PORT, opts.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
   const session = openConsole(transport, conn);
   return {
     send: (line, sendOpts) => session.send(line, sendOpts),
