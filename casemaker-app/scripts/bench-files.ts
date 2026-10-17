@@ -142,7 +142,7 @@ function ladderShape(row: 'A' | 'B', i: number): EngraveRectShape {
 
 function ladderJob(row: 'A' | 'B'): EngraveJob {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     // #419's job identity. A REAL value, not `newId`: this script writes the job to disk, and
     // re-running it must update the same document rather than mint a new identity each time.
     id: `job-depth-ladder-${row.toLowerCase()}`,
