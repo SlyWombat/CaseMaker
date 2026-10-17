@@ -1741,6 +1741,28 @@ export function EngravePanel(): JSX.Element {
               {rec.conditionNote}
             </p>
           )}
+          {/* #455/#458 — what the catalogue itself says. Its own line for the same reason the
+              condition note has one: "what Makera lists it for" is a third claim, and the mapping
+              note ("its ABS row standing in") has to be visible as a mapping, not as a fact. */}
+          {rec.catalogueNote && (
+            <p
+              data-testid="engrave-recommendation-catalogue"
+              style={{ ...MUTED, margin: '4px 0 0' }}
+            >
+              {rec.catalogueNote}
+            </p>
+          )}
+          {/* #455/#458 — the job's OWN cutter, named by hand, when the catalogue does not
+              recommend it for this material. The rule warns and does not block, so this sentence
+              is what makes "warn by name" true in the UI: the decision is the operator's. */}
+          {rec.selectedNote && (
+            <p
+              data-testid="engrave-recommendation-selected"
+              style={{ ...MUTED, color: '#e0c07a', margin: '4px 0 0' }}
+            >
+              {rec.selectedNote}
+            </p>
+          )}
           <details style={{ marginTop: 4 }}>
             <summary style={{ fontSize: 11, color: '#9aa4b0', cursor: 'pointer' }}>
               Why? — {rec.candidates.length} cutters considered
@@ -1752,7 +1774,12 @@ export function EngravePanel(): JSX.Element {
                     ? 'not a flat end mill'
                     : c.excluded === 'broken'
                       ? 'every copy is marked broken'
-                      : 'no cutting parameters for this material'
+                      : c.excluded === 'no-catalogue-row'
+                        ? // #455/#458 — the catalogue's own words. "No cutting parameters" is
+                          // the opposite of true here: the starting table answers these cutters
+                          // and it is the catalogue that named the materials it is listed for.
+                          (c.catalogueNote ?? 'not listed by the catalogue for this material')
+                        : 'no cutting parameters for this material'
                   : c.worst
                     ? `worst item "${itemDisplay(c.worst.labelId)}" · ${Math.round(c.worst.ratio * 100)} % kept${c.condition?.best === 'worn' ? ' · worn' : ''}`
                     : c.condition?.best === 'worn'

@@ -52,10 +52,19 @@ const PICK: ToolCandidate = {
 
 /**
  * The smallest object the `EngravePreview` type allows that this part of the panel can render: the
- * panel reads only `findings` and `recommendation` off it, so the rest are empty. `conditionNote` is
- * the field under test — the single thing that differs between the two cases below.
+ * panel reads only `findings` and `recommendation` off it, so the rest are empty. The three notes are
+ * the fields under test — the single thing that differs between each pair of cases below — and
+ * `candidates` is overridden for the "why?" disclosure's rows (#458).
  */
-function previewWith(conditionNote: string | null): EngravePreview {
+function previewWith(
+  notes: {
+    conditionNote?: string | null;
+    catalogueNote?: string | null;
+    selectedNote?: string | null;
+  } = {},
+  candidates: ToolCandidate[] = [PICK],
+): EngravePreview {
+  const { conditionNote = null, catalogueNote = null, selectedNote = null } = notes;
   return {
     stock: EMPTY_MESH,
     floors: [],
@@ -70,12 +79,11 @@ function previewWith(conditionNote: string | null): EngravePreview {
       compromise: false,
       reason: 'Largest cutter that keeps every item intact.',
       conditionNote,
-      // #455's sentences, added to `ToolRecommendation` after this spec was written. They are not
-      // what this file tests (the panel does not render them yet — the #455 report says so), and
-      // null is the ordinary "the catalogue had nothing to add".
-      catalogueNote: null,
-      selectedNote: null,
-      candidates: [PICK],
+      // #455's sentences, printed since #458. Null is the ordinary "the catalogue had nothing to
+      // add", and the default for the cases that are about the condition note alone.
+      catalogueNote,
+      selectedNote,
+      candidates,
     },
   };
 }
@@ -104,7 +112,7 @@ describe('the panel’s condition note (#442)', () => {
   const NOTE = 'the only usable copy of this cutter is marked worn — check it before the cut';
 
   it('prints the pick’s condition note on its own line, apart from the reason', () => {
-    useEngravePreviewStore.setState({ preview: previewWith(NOTE), status: 'ready' });
+    useEngravePreviewStore.setState({ preview: previewWith({ conditionNote: NOTE }), status: 'ready' });
     render(<EngravePanel />);
 
     const line = screen.getByTestId('engrave-recommendation-condition');
@@ -116,12 +124,92 @@ describe('the panel’s condition note (#442)', () => {
   });
 
   it('prints no condition line when the recommendation carries no note', () => {
-    useEngravePreviewStore.setState({ preview: previewWith(null), status: 'ready' });
+    useEngravePreviewStore.setState({ preview: previewWith(), status: 'ready' });
     render(<EngravePanel />);
 
     // The recommendation itself is on screen — so "absent" is a claim about a recommendation that
     // exists, not about a panel that rendered nothing.
     expect(screen.getByTestId('engrave-recommendation')).toBeTruthy();
     expect(screen.queryByTestId('engrave-recommendation-condition')).toBeNull();
+  });
+});
+
+// #458 — the two notes #455 hands the panel and nothing printed: what the catalogue says about the
+// pick, and what it says about a cutter the person named by hand. Both are their own lines for the
+// condition note's reason (#442): three different claims, three sentences.
+describe('the panel’s catalogue and hand-pick notes (#458)', () => {
+  const CATALOGUE = 'Makera lists this cutter for ABS only — its ABS row is standing in, a mapping this app makes.';
+  const SELECTED = 'The catalogue lists this cutter for PCB or Carbon Fiber, not PLA. The job will still run it; the decision is yours.';
+
+  it('prints the pick’s catalogue note and the hand-pick warning, each on its own line', () => {
+    useEngravePreviewStore.setState({
+      preview: previewWith({ catalogueNote: CATALOGUE, selectedNote: SELECTED }),
+      status: 'ready',
+    });
+    render(<EngravePanel />);
+
+    expect(screen.getByTestId('engrave-recommendation-catalogue').textContent).toBe(CATALOGUE);
+    expect(screen.getByTestId('engrave-recommendation-selected').textContent).toBe(SELECTED);
+    // Not folded into the reason: a caller reading only the reason must not take the mapping for a
+    // fact, nor miss that the catalogue does not recommend this cutter.
+    const block = screen.getByTestId('engrave-recommendation');
+    const firstP = block.querySelector('p')!.textContent;
+    expect(firstP).not.toContain(CATALOGUE);
+    expect(firstP).not.toContain(SELECTED);
+  });
+
+  it('prints neither line when the catalogue has nothing to add', () => {
+    useEngravePreviewStore.setState({ preview: previewWith(), status: 'ready' });
+    render(<EngravePanel />);
+
+    expect(screen.getByTestId('engrave-recommendation')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-recommendation-catalogue')).toBeNull();
+    expect(screen.queryByTestId('engrave-recommendation-selected')).toBeNull();
+  });
+
+  it('states a no-catalogue-row candidate’s own reason, not "no cutting parameters"', () => {
+    // The sentence "no cutting parameters for this material" is the exact claim #455 exists to
+    // stop making: the starting table answers this cutter, and it is the CATALOGUE that refused it
+    // for a named material.
+    const sentence = 'Makera’s catalogue lists TiN Coating Corn Bit for PCB or Carbon Fiber, not PLA';
+    const excluded: ToolCandidate = {
+      key: 'corn-1.0',
+      diameter: 1,
+      qualifies: false,
+      worst: null,
+      reachKnown: false,
+      reachOk: true,
+      condition: null,
+      excluded: 'no-catalogue-row',
+      catalogueNote: sentence,
+    };
+    useEngravePreviewStore.setState({ preview: previewWith({}, [PICK, excluded]), status: 'ready' });
+    render(<EngravePanel />);
+
+    // The rows live in the "why?" disclosure; jsdom keeps its content in the DOM either way.
+    const row = screen.getByTestId('engrave-candidate-corn-1.0');
+    expect(row.textContent).toContain(sentence);
+    expect(row.textContent).not.toContain('no cutting parameters');
+  });
+
+  it('keeps the old wording for a candidate excluded for want of cutting parameters', () => {
+    // The guard for the branch above: `no-feeds` still reads as it did, so the new wording is a
+    // branch and not a replacement.
+    const excluded: ToolCandidate = {
+      key: 'corn-1.0',
+      diameter: 1,
+      qualifies: false,
+      worst: null,
+      reachKnown: false,
+      reachOk: true,
+      condition: null,
+      excluded: 'no-feeds',
+    };
+    useEngravePreviewStore.setState({ preview: previewWith({}, [PICK, excluded]), status: 'ready' });
+    render(<EngravePanel />);
+
+    expect(screen.getByTestId('engrave-candidate-corn-1.0').textContent).toContain(
+      'no cutting parameters for this material',
+    );
   });
 });
