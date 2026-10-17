@@ -61,7 +61,9 @@ pub struct ToolCopy {
     /// label corpus states which box each bit is in and nothing about wear, so the migration and
     /// the label import create one copy per box with a case and no condition. The alternatives
     /// were to drop the case or to claim "new" for a bit nobody examined — the guess #415 refused.
-    #[serde(default)]
+    /// Left out while unstated, beside `label` and `runtimeMinutes`: an absent condition reads as
+    /// null in Zod, and a bare case copy then carries only what it means to say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub condition: Option<Condition>,
     pub whereabouts: Whereabouts,
     /// This cutter's own runtime-warning threshold, minutes — overrides the shop default

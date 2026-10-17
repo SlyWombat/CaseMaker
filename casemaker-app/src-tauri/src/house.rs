@@ -4315,6 +4315,7 @@ mod tests {
     async fn a_house_import_keeps_the_copies_the_operator_described() {
         // #415 review, blocking: the Kazoo rebuild (`build-house.ts` → POST /import) writes items with
         // no copies, and must not wipe the conditions.
+        use crate::tool_copy::{Condition, ToolCopy, Whereabouts};
         let (_dir, store) = store();
         let mut item = an_item("kz-c1");
         item.quantity = 3;
