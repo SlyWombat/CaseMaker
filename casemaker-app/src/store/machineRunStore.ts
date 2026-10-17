@@ -27,7 +27,7 @@
 
 import { create } from 'zustand';
 import { attachConsole } from '@/platform/machineConsole';
-import { programHash, programOwnsVacuum, runProgram, type Progress, type RunOutcome, type RunSettings } from '@/platform/machineRun';
+import { programHash, programOwnsVacuum, runProgram, type Progress, type RunOutcome, type RunSettings, type VacuumSpan } from '@/platform/machineRun';
 import { copyInMachine, offcutOffer, programCuts, runtimeOf, wearKey, weighRuntime, withRuntime } from '@/engine/cnc/runEnd';
 import type { StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
@@ -76,6 +76,27 @@ export interface RunContext {
    * bit change — the one thing the maintainer said not to do. Absent: the program text decides.
    */
   vacuumOwned?: boolean;
+  /**
+   * #419 decision 4 / #469 — this file's share of the job's vacuum span, said by the upload that
+   * wrote it: `whole`, `first`, `middle`, `last`, or `none` for an `air: false` job. The runner uses
+   * it for its log and its finishing sentence; a middle file carries no words, and `none` must not
+   * be mistaken for "the runner should bracket it".
+   */
+  vacuumSpan?: VacuumSpan;
+  /**
+   * #419 §4.5 / #469 — the program's FNV hash, when the caller already has it. The finished-program
+   * record uses this rather than re-hashing the text, so the key that `finishedProgramsFor` reads is
+   * the same one the plan was given even if a future post changes how the hash is taken.
+   */
+  programHash?: string;
+  /**
+   * Where this file sits in the job's cut order (1-based) and how many files there are. The release
+   * step sets both on every file. A run with no fields keeps the old end-of-run behaviour; a run
+   * that has them consumes the job's reserved stock and offers its offcut only when the JOB's last
+   * program finished, never once per file.
+   */
+  programIndex?: number;
+  programTotal?: number;
 }
 
 /**
@@ -173,15 +194,29 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 /** Work out — and, for a finished run, apply — the end of a run. Called once, when the outcome is known. */
 export async function endOfRun(target: { host: string; port: number }, outcome: RunOutcome, ctx: RunContext | null): Promise<RunEnd> {
   const hasStock = ctx?.stockEntryId !== undefined && ctx.jobId !== undefined;
+  // #469 — a multi-program job consumes its blank ONCE, when the job's last program finishes. The
+  // release step says which file this is; a caller that does not (a single-file upload) is the job.
+  const lastProgram =
+    ctx?.programIndex === undefined || ctx?.programTotal === undefined || ctx.programIndex >= ctx.programTotal;
+  const programWord =
+    ctx?.programIndex !== undefined && ctx?.programTotal !== undefined
+      ? `program ${ctx.programIndex} of ${ctx.programTotal}`
+      : 'the program';
   if (outcome.kind === 'aborted' || outcome.kind === 'stopped-unconfirmed') {
     return {
       kind: 'stopped',
       lines: [
-        hasStock ? 'The run was stopped: nothing was taken off the shelf yet.' : 'The run was stopped: nothing was changed.',
+        hasStock
+          ? lastProgram
+            ? 'The run was stopped: nothing was taken off the shelf yet.'
+            : `The run was stopped at ${programWord}: the stock stays reserved for the rest of the job.`
+          : 'The run was stopped: nothing was changed.',
         'No cutter runtime is counted for a stopped run.',
       ],
       offcut: null,
-      stockQuestion: hasStock ? 'ask' : null,
+      // Asked only when this was the job's last file: a stop at program 1 of 3 does not mean the
+      // blank is spent, and consuming it would end the reservation a resumed run still needs.
+      stockQuestion: hasStock && lastProgram ? 'ask' : null,
     };
   }
   if (outcome.kind !== 'finished') {
@@ -195,7 +230,7 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
   // way, and its program is still "new". The key is `programHash`, the run confirmation's key
   // (decision 3), never #277's SHA-256 `ncHash`.
   if (ctx !== null) {
-    const hash = programHash(ctx.nc);
+    const hash = ctx.programHash ?? programHash(ctx.nc);
     if (machineId === null) {
       lines.push('The finished program was not recorded: this machine is not one of the location’s.');
     } else {
@@ -216,6 +251,10 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
   // The stock.
   if (!hasStock || !ctx) {
     lines.push('No shelf entry is recorded for this job, so the shelf is unchanged (the job flow, #419, will say which stock it reserved).');
+  } else if (!lastProgram) {
+    lines.push(
+      `${programWord} finished cleanly: the stock stays reserved until the job's last program finishes.`,
+    );
   } else {
     const r = await io.consume(ctx.stockEntryId!, ctx.jobId!);
     lines.push(r.ok ? `Stock used: ${ctx.stockEntryId} is taken off the shelf.` : `The stock was not taken off the shelf: ${r.text}`);
@@ -248,6 +287,8 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
   let offcut: RunEnd['offcut'] = null;
   if (!ctx || !hasStock) {
     // Said above.
+  } else if (!lastProgram) {
+    // The job is not finished, so its blank is not scrap yet; the last program offers one.
   } else if (!io.offerOffcuts()) lines.push('No offcut is offered: the shop has offcut offers turned off (offcut.offer).');
   else if (parent === null) lines.push('No offcut is offered: the shelf entry is not loaded.');
   else if (!ctx.stockXY || ctx.toolRadius === undefined) lines.push('No offcut is offered: the job did not say the stock’s size as cut, or the cutter’s radius.');
@@ -355,7 +396,11 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
             // #419 Q-E — a file that carries its own words owns the vacuum; a middle file of a
             // multi-file job carries none, so its context says so explicitly. A run prepared
             // without either (anything not uploaded through the job flow) keeps the fallback.
-            programOwnsVacuum: prepared.context?.vacuumOwned === true || programOwnsVacuum(prepared.context?.nc),
+            programOwnsVacuum:
+              prepared.context?.vacuumOwned === true ||
+              prepared.context?.vacuumSpan !== undefined ||
+              programOwnsVacuum(prepared.context?.nc),
+            ...(prepared.context?.vacuumSpan === undefined ? {} : { vacuumSpan: prepared.context.vacuumSpan }),
             stopRequested: () => f.stop,
             onEvent: (e) => {
               const entry = get().runs[machine];

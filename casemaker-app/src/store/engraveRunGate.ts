@@ -135,3 +135,33 @@ export function uploadBlocker(v: EngraveRunView): string | null {
   if (!v.generated?.verify) return 'the program carries no verifier report';
   return null;
 }
+
+/**
+ * Why the #419 §3 RELEASE STEP is disabled, or null when it may take the whole run (#469).
+ *
+ * The release step is the one owner of a multi-program run: it uploads every file and plays them
+ * in order. It is therefore allowed where {@link uploadBlocker} must refuse — a job of more than
+ * one program — and this is the gate that lifts that refusal: `uploadBlocker`'s count clause is
+ * deliberately absent here, while every other reason it states is kept.
+ *
+ * The verifier requirement is per PROGRAM, not just the first: each file is a separate upload and
+ * a separate cut, and `generated.verify` describes only program 1 (the adapter the single-file
+ * surfaces read). A list is runnable only when every entry carries a report that passed.
+ *
+ * A FACED JOB is refused for now. The face file is its own program (`generated.facingNc`) and the
+ * generator moves the run's `M331` into it; the release step plays `generated.programs`, which does
+ * not include the face file. Uploading the engraving files alone would start a run whose first file
+ * carries no vacuum-on and whose Z0 assumes a surface nobody skimmed. The sentence sends the
+ * operator to the run sheet's facing section, which is where that file is downloaded and run today.
+ */
+export function releaseBlocker(v: EngraveRunView): string | null {
+  const save = saveBlocker(v);
+  if (save !== null) return save;
+  const programs = v.generated?.programs ?? [];
+  if (programs.length === 0) return 'no program was produced';
+  if (programs.some((p) => !p.verify?.ok)) return 'a program did not pass the verifier';
+  if (v.generated?.facingNc !== null && v.generated?.facingNc !== undefined) {
+    return 'this job faces the stock first, and the release step does not play the face program yet — run the face file from the run sheet, then its engraving file here';
+  }
+  return null;
+}

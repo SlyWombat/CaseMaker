@@ -53,6 +53,7 @@ export {
   runErrorCodes,
   saveBlocker,
   uploadBlocker,
+  releaseBlocker,
 } from './engraveRunGate';
 export type { EngraveRunPhase, EngraveRunView } from './engraveRunGate';
 

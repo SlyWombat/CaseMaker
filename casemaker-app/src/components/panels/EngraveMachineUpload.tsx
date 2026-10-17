@@ -8,7 +8,7 @@ import { EngraveLaserPoint } from './EngraveLaserPoint';
 import { useShopDefault } from '@/store/shopDefaultsStore';
 import { EngraveMachineRun } from './EngraveMachineRun';
 import { machineKey, useMachineRunStore, type RunContext } from '@/store/machineRunStore';
-import { programHash } from '@/platform/machineRun';
+import { programHash, programOwnsVacuum } from '@/platform/machineRun';
 import { frameBounds, type LaserLift } from '@/platform/machineLaser';
 import { useSettingsStore } from '@/store/settingsStore';
 
@@ -184,6 +184,10 @@ export function EngraveMachineUpload({
         ...runContext,
         nc: program.nc,
         vacuumOwned: true,
+        // #469 — one file is the whole job here, so its span is `whole` when it carries the words
+        // and `none` when the job runs with the accessory output off. The runner's finishing
+        // sentence can then say what actually happened instead of crediting an absent M332.
+        vacuumSpan: programOwnsVacuum(program.nc) ? 'whole' : 'none',
       });
     }
     setStage('idle');

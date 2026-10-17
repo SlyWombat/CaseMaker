@@ -97,16 +97,27 @@ export type RunEvent =
   /** Something the run decided, said in the log the operator is reading. */
   | { kind: 'note'; text: string };
 
-/** Who switches the vacuum: this run's bracket, or the program's own words. */
-export type VacuumOwner = 'runner' | 'program';
+/**
+ * Which vacuum words a program's text carries (#419 decision 4), when the app's upload knows and
+ * says so. `whole` is a one-program job; `first`/`middle`/`last` are the shares of a multi-program
+ * run; `none` is a job whose accessory output is off (`air: false`), so no word is in any file.
+ *
+ * The span is the JOB's, not the file's guess: a middle file carries neither word, and the runner
+ * must not read that silence as "nobody owns the vacuum" and bracket it. The caller that uploaded
+ * the file says which share it is; {@link RunDeps.vacuumSpan} carries the answer into the log.
+ */
+export type VacuumSpan = 'whole' | 'first' | 'middle' | 'last' | 'none';
+
+/** Who switches the vacuum: this run's bracket, the program's own words, or the job's span. */
+export type VacuumOwner = 'runner' | 'program' | 'job';
 
 export type RunOutcome =
   | { kind: 'refused'; reason: string }
-  | { kind: 'finished'; last: Progress; homed: boolean; vacuumOff: boolean; vacuumOwner?: VacuumOwner }
+  | { kind: 'finished'; last: Progress; homed: boolean; vacuumOff: boolean; vacuumOwner?: VacuumOwner; span?: VacuumSpan }
   | { kind: 'aborted'; stop: StopOutcome; last: Progress }
   | { kind: 'alarm'; alarm: string; last: Progress }
   | { kind: 'unreachable'; last: Progress; misses: number }
-  | { kind: 'never-started'; last: Progress; vacuumOff: boolean; vacuumOwner?: VacuumOwner }
+  | { kind: 'never-started'; last: Progress; vacuumOff: boolean; vacuumOwner?: VacuumOwner; span?: VacuumSpan }
   /**
    * Stop was pressed before the machine ever reported progress, and it reads Idle: nothing here can
    * tell whether the program ran, so nothing further is sent — no `M332`, no home (#423 re-review).
@@ -122,6 +133,13 @@ export interface RunDeps {
    * files). Defaults to false: a file that never says so keeps the runner's fallback bracket.
    */
   programOwnsVacuum?: boolean;
+  /**
+   * #419 decision 4 / #469 — this file's share of the job's vacuum span, when the upload knows it.
+   * Set to `none` for an `air: false` job: the runner must send neither word, and the outcome says
+   * the job runs without the vacuum rather than claiming a program switched it off. When present it
+   * outranks `programOwnsVacuum` and makes the owner `job`.
+   */
+  vacuumSpan?: VacuumSpan;
   /** True once the person pressed Stop; read at every poll boundary. */
   stopRequested: () => boolean;
   onEvent?: (e: RunEvent) => void;
@@ -179,14 +197,21 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
   }
   if (deps.stopRequested()) return { kind: 'refused', reason: 'Stop was pressed before the program started; nothing was played' };
 
-  // 2 — the vacuum, unless the program switches it itself (#419 Q-E). A caller that does not say
-  // keeps the old bracket: files posted before #419, or uploaded from elsewhere, carry none.
-  const vacOwner: VacuumOwner = deps.programOwnsVacuum === true ? 'program' : 'runner';
-  if (vacOwner === 'program') {
+  // 2 — the vacuum, unless the job owns the span (#419 Q-E). A caller that does not say keeps the
+  // old bracket: files posted before #419, or uploaded from elsewhere, carry none.
+  const span = deps.vacuumSpan;
+  const vacOwner: VacuumOwner =
+    span !== undefined ? 'job' : deps.programOwnsVacuum === true ? 'program' : 'runner';
+  if (vacOwner !== 'runner') {
     // Said in the log the operator is reading, so "why did no M331 appear?" has its answer there.
     deps.onEvent?.({
       kind: 'note',
-      text: 'The program switches the vacuum itself (M331/M332 in the file), so this run does not bracket it.',
+      text:
+        vacOwner === 'job'
+          ? span === 'none'
+            ? 'The job runs without the vacuum (its accessory output is off), so this run sends no M331 or M332.'
+            : 'The job owns the vacuum span (M331 on its first program, M332 on its last), so this run does not bracket this file.'
+          : 'The program switches the vacuum itself (M331/M332 in the file), so this run does not bracket it.',
     });
   } else {
     const vac = await send(VACUUM_ON);
@@ -255,7 +280,7 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
       // own words never executed, so there is nothing to switch either way.
       const vacuumOff =
         vacOwner === 'runner' && p.state === 'Idle' ? (await send(VACUUM_OFF)).kind === 'sent' : false;
-      return { kind: 'never-started', last, vacuumOff, vacuumOwner: vacOwner };
+      return { kind: 'never-started', last, vacuumOff, vacuumOwner: vacOwner, ...(span === undefined ? {} : { span }) };
     }
   }
 
@@ -269,9 +294,47 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
       last: at,
       vacuumOff: off !== null && off.kind === 'sent' && anyAlarm(off) === null,
       vacuumOwner: vacOwner,
+      ...(span === undefined ? {} : { span }),
       homed: home.kind === 'sent' && anyAlarm(home) === null,
     };
   }
+}
+
+/** What a finished file left the vacuum doing, in the operator's words (#419 decision 4). */
+function finishedVacuum(o: Extract<RunOutcome, { kind: 'finished' }>): string {
+  if (o.vacuumOwner === 'job') {
+    switch (o.span) {
+      case 'whole':
+      case 'last':
+        return 'The program switched the vacuum off itself (its own M332); ';
+      case 'first':
+        return 'The vacuum stays on for the next program (the job turns it off at its last file); ';
+      case 'middle':
+        return 'The vacuum stays on for the next program (the job’s first file turned it on); ';
+      case 'none':
+        return 'This job runs without the vacuum; ';
+      default:
+        return 'The job owns the vacuum span; ';
+    }
+  }
+  if (o.vacuumOwner === 'program') return 'The program switched the vacuum off itself (its own M332); ';
+  return o.vacuumOff ? 'Vacuum off; ' : 'The vacuum-off (M332) was not confirmed — check it; ';
+}
+
+/** What a program that never started left the vacuum doing. */
+function noStartVacuum(o: Extract<RunOutcome, { kind: 'never-started' }>): string {
+  if (o.vacuumOwner === 'job') {
+    if (o.span === 'middle' || o.span === 'last') {
+      return 'The program never began; the vacuum is still on from the job’s earlier file — switch it off when you are at the machine.';
+    }
+    return 'The program never ran, so nothing was switched either way.';
+  }
+  if (o.vacuumOwner === 'program') {
+    return 'The program owns the vacuum words and never ran, so nothing was switched either way.';
+  }
+  return o.vacuumOff
+    ? 'The vacuum was switched off again.'
+    : 'The machine did not read Idle, so the vacuum was left as it is — check the machine.';
 }
 
 /** The outcome in a sentence, for the panel. */
@@ -280,13 +343,9 @@ export function describeRun(o: RunOutcome): string {
     case 'refused':
       return `Not started: ${o.reason}.`;
     case 'finished':
-      return `Finished${o.last.elapsedS !== null ? ` in ${Math.round(o.last.elapsedS)} s` : ''}. ${
-        o.vacuumOwner === 'program'
-          ? 'The program switched the vacuum off itself (its own M332); '
-          : o.vacuumOff
-            ? 'Vacuum off; '
-            : 'The vacuum-off (M332) was not confirmed — check it; '
-      }${o.homed ? 'homed' : 'the home ($H) was not confirmed — home it'}.`;
+      return `Finished${o.last.elapsedS !== null ? ` in ${Math.round(o.last.elapsedS)} s` : ''}. ${finishedVacuum(o)}${
+        o.homed ? 'homed' : 'the home ($H) was not confirmed — home it'
+      }.`;
     case 'aborted':
       return o.stop.kind === 'stopped'
         ? `Stopped at line ${o.last.line ?? '?'}${o.stop.vacuumOff ? ', vacuum off' : ' — the vacuum-off was not confirmed'}. Home the machine when the head is clear.`
@@ -296,13 +355,7 @@ export function describeRun(o: RunOutcome): string {
     case 'unreachable':
       return `Silence is not stopped: ${o.misses} status polls in a row went unanswered. The job was NOT stopped from here and the vacuum was not switched off — the physical stop (the machine's button, the plug) is the stop.`;
     case 'never-started':
-      return `No job progress ever appeared — nothing here was watching a job.${
-        o.vacuumOwner === 'program'
-          ? ' The program owns the vacuum words and never ran, so nothing was switched either way.'
-          : o.vacuumOff
-            ? ' The vacuum was switched off again.'
-            : ' The machine did not read Idle, so the vacuum was left as it is — check the machine.'
-      }`;
+      return `No job progress ever appeared — nothing here was watching a job. ${noStartVacuum(o)}`;
     case 'stopped-unconfirmed':
       return 'Stop was pressed before the machine reported any progress, and it reads Idle — nothing shows whether the program ran, so nothing further was sent (no M332: the vacuum is still on; no home). Check the machine.';
   }

@@ -32,10 +32,18 @@ export interface EngraveMachineRunProps {
    * can move a follower without re-seeking the simulation on every render.
    */
   onProgramLine?: (line: number | null) => void;
+  /**
+   * #469 — drawn BESIDE the release step's own controls rather than owning the run. The release step
+   * prepares each program and starts it, so this panel must not offer a second Start, Stop or
+   * at-machine tick; it still shows the live progress, the log, the outcome, the end-of-run lines
+   * and the offcut/stock questions, which are the machine store's answers and belong to the run
+   * whichever component started it.
+   */
+  controlled?: boolean;
 }
 
 /** The run panel for a machine, or nothing when no program has been prepared for it. */
-export function EngraveMachineRun({ target, onProgramLine }: EngraveMachineRunProps): JSX.Element | null {
+export function EngraveMachineRun({ target, onProgramLine, controlled = false }: EngraveMachineRunProps): JSX.Element | null {
   const machine = machineKey(target);
   const entry = useMachineRunStore((s) => s.runs[machine]);
   const key = runKey(target, entry?.programHash ?? '');
@@ -87,14 +95,26 @@ export function EngraveMachineRun({ target, onProgramLine }: EngraveMachineRunPr
   // runs with the vacuum left off. "Vacuum on before it plays" described a run that does not happen
   // in either case. Only an entry prepared some other way is bracketed by the runner.
   const ownsVacuum = entry.context?.vacuumOwned === true || programOwnsVacuum(entry.context?.nc);
-  const vacuumLine = !ownsVacuum
-    ? 'Vacuum on before it plays, off after; the machine homes when it finishes.'
-    : programOwnsVacuum(entry.context?.nc)
-      ? 'The program switches the vacuum on and off itself; the machine homes when it finishes.'
-      : 'This program runs without the vacuum; the machine homes when it finishes.';
+  const span = entry.context?.vacuumSpan;
+  const vacuumLine =
+    span === 'first'
+      ? 'This program switches the vacuum on, and the job leaves it on for the next program.'
+      : span === 'middle'
+        ? 'The vacuum stays on across this program: the job’s first file switched it on, and its last turns it off.'
+        : span === 'last'
+          ? 'The vacuum is on from the job’s earlier file; this program switches it off at its end. The machine homes when it finishes.'
+          : span === 'whole'
+            ? 'The program switches the vacuum on and off itself; the machine homes when it finishes.'
+            : span === 'none'
+              ? 'This job runs without the vacuum; the machine homes when it finishes.'
+              : !ownsVacuum
+                ? 'Vacuum on before it plays, off after; the machine homes when it finishes.'
+                : programOwnsVacuum(entry.context?.nc)
+                  ? 'The program switches the vacuum on and off itself; the machine homes when it finishes.'
+                  : 'This program runs without the vacuum; the machine homes when it finishes.';
   return (
     <div data-testid="engrave-run" data-file={entry.filename}>
-      {!confirmed && !running && (
+      {!controlled && !confirmed && !running && (
         <label style={MUTED}>
           <input
             type="checkbox"
@@ -105,23 +125,27 @@ export function EngraveMachineRun({ target, onProgramLine }: EngraveMachineRunPr
           I am at the machine, with the head clear and the stock clamped — asked once for this program.
         </label>
       )}
-      <button
-        type="button"
-        data-testid="engrave-run-start"
-        disabled={!canRun}
-        style={{ width: '100%', padding: 7, marginTop: 6 }}
-        title={
-          running ? 'A program is running on this machine' : canRun ? `Play ${entry.filename} on the machine` : 'Confirm you are at the machine first'
-        }
-        onClick={run}
-      >
-        {running ? 'Running…' : `Run ${entry.filename}`}
-      </button>
-      <p style={MUTED} data-testid="engrave-run-vacuum">
-        {vacuumLine}
-      </p>
+      {!controlled && (
+        <button
+          type="button"
+          data-testid="engrave-run-start"
+          disabled={!canRun}
+          style={{ width: '100%', padding: 7, marginTop: 6 }}
+          title={
+            running ? 'A program is running on this machine' : canRun ? `Play ${entry.filename} on the machine` : 'Confirm you are at the machine first'
+          }
+          onClick={run}
+        >
+          {running ? 'Running…' : `Run ${entry.filename}`}
+        </button>
+      )}
+      {!controlled && (
+        <p style={MUTED} data-testid="engrave-run-vacuum">
+          {vacuumLine}
+        </p>
+      )}
 
-      {running && (
+      {!controlled && running && (
         <button
           type="button"
           data-testid="engrave-run-stop"
