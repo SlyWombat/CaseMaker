@@ -313,3 +313,77 @@ describe.skipIf(!existsSync(plainPath))('the reader refuses what it cannot use (
     expect(() => parsePrusaThreeMf(buf)).toThrow(PrusaThreeMfError);
   });
 });
+
+describe.skipIf(!hasSample)('the blank’s material, read from the project (#456)', () => {
+  it('reads the maintainer’s blank as PETG, from the two blank extruders only', () => {
+    expect(readDesign(tl, parsePrusaThreeMf(sample())).filament).toEqual({
+      types: ['PETG'],
+      settingsIds: ['Generic PETG @XL'],
+      material: 'petg',
+    });
+  });
+});
+
+describe('the blank’s material maps only classes the app knows (#456)', () => {
+  const designWith = (settings?: string) =>
+    // The fixture blank prints with extruder 2, so a per-extruder list needs a first entry.
+    readDesign(
+      tl,
+      parsePrusaThreeMf(
+        project({
+          volumes: [fixtureBlank()],
+          settings: settings?.replace('filament_type = ', 'filament_type = PLA;'),
+        }),
+      ),
+    );
+  const twoParts = (type: string, ids?: string) => {
+    const settings = [
+      ...(type === '' ? [] : [`filament_type = ${type}`]),
+      ...(ids === undefined ? [] : [`filament_settings_id = ${ids}`]),
+    ].join('\n');
+    return readDesign(
+      tl,
+      parsePrusaThreeMf(
+        project({
+          volumes: [
+            { ...fixtureBlank(), name: 'bottom', extruder: 1 },
+            { ...fixtureBlank(), name: 'top', extruder: 2, box: [[0, 0, 4], [20, 10, 6]] },
+          ],
+          settings,
+        }),
+      ),
+    );
+  };
+
+  it('maps PLA, PETG and ABS to the app’s own names', () => {
+    expect(designWith('filament_type = PLA').filament?.material).toBe('pla');
+    expect(designWith('filament_type = PETG').filament?.material).toBe('petg');
+    expect(designWith('filament_type = ABS').filament?.material).toBe('abs');
+  });
+
+  it('leaves an unknown type unmapped — it never falls back to PLA', () => {
+    const filament = designWith('filament_type = ASA').filament!;
+    expect(filament.types).toEqual(['ASA']);
+    expect(filament.material).toBeNull();
+  });
+
+  it('leaves an absent filament_type unmapped', () => {
+    const filament = designWith().filament!;
+    expect(filament.types).toEqual([]);
+    expect(filament.material).toBeNull();
+  });
+
+  it('uses filament_settings_id only when the type is absent, and only a whole-word class', () => {
+    const fallback = designWith('filament_settings_id = "a";"Prusament PETG @XL"').filament!;
+    expect(fallback.material).toBe('petg');
+    // The type WINS: an unknown ASA profile whose settings id says PETG is still ASA.
+    const stated = twoParts('ASA;ASA', '"Other";"Prusament PETG @XL"');
+    expect(stated.filament?.material).toBeNull();
+  });
+
+  it('states no single material when the blank’s extruders disagree', () => {
+    const mixed = twoParts('PETG;PLA');
+    expect(mixed.filament?.types).toEqual(['PETG', 'PLA']);
+    expect(mixed.filament?.material).toBeNull();
+  });
+});

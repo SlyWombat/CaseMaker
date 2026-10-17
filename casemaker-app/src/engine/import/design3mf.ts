@@ -1,5 +1,6 @@
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import type { Mm } from '@/types/units';
+import type { StockMaterial } from '@/types/engraveJob';
 import { finalizeOutline } from './outlineTypes';
 import { PrusaThreeMfError, type PrusaShapeVolume, type PrusaTextVolume, type PrusaThreeMf, type PrusaVolume } from './prusa3mf';
 
@@ -83,6 +84,22 @@ export interface DesignImport {
   layerHeight: Mm | null;
   /** The project's first-layer height, mm, or null. */
   firstLayerHeight: Mm | null;
+  /**
+   * The blank's own filament, as the project's print settings state it (#456), or null when the
+   * blank's volumes name no extruder at all.
+   */
+  filament: {
+    /** `filament_type` for the blank's extruders, deduplicated, in the file's order (e.g. `['PETG']`). */
+    types: string[];
+    /** `filament_settings_id` for those extruders — the name a person sees in the slicer. */
+    settingsIds: string[];
+    /**
+     * The app material for the blank, or null when the type is absent, names a class this app does
+     * not know, or the blank's extruders disagree. Null means "the file did not settle it": the
+     * job's existing material is left alone rather than silently becoming PLA.
+     */
+    material: StockMaterial | null;
+  } | null;
   /** Every volume that cuts the top face, in the file's own order. */
   regions: DesignRegion[];
   /** The void under the top face, or null when the blank has none. */
@@ -272,6 +289,7 @@ export function readDesign(tl: ManifoldToplevel, file: PrusaThreeMf): DesignImpo
     colourSplit,
     layerHeight: mmSetting(file, 'layer_height'),
     firstLayerHeight: mmSetting(file, 'first_layer_height'),
+    filament: blankFilamentOf(file),
     regions,
     pocket,
     notes,
@@ -284,6 +302,68 @@ function mmSetting(file: PrusaThreeMf, key: string): number | null {
   if (raw === undefined) return null;
   const v = Number(raw);
   return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+/**
+ * The app materials for the PrusaSlicer filament CLASSES this slice is certain of (#456). Only
+ * these three names map: every other class the slicer can write (ASA, PC, PP, TPU/FLEX, PVA, the
+ * PA family, and the fibre-filled variants) maps to nothing, because a blank the app cannot name
+ * must leave the job's material as it was rather than silently becoming PLA.
+ */
+const FILAMENT_TYPE_MATERIALS: Readonly<Record<string, StockMaterial>> = {
+  PLA: 'pla',
+  PETG: 'petg',
+  ABS: 'abs',
+};
+
+/**
+ * The app material for ONE extruder's filament statements, or null when this app cannot name it.
+ *
+ * PRECEDENCE: `filament_type` is the class and it WINS. When it states anything, that is the whole
+ * answer — a known class maps and an unknown class stays unknown, even if `filament_settings_id`
+ * happens to contain a word this map knows. `filament_settings_id` is consulted only when
+ * `filament_type` is absent: a profile called "Prusament PETG @XL" then makes the blank's type
+ * concrete, matched on a whole word so `PETG` is found there but not inside an unrelated word.
+ */
+function materialForFilament(type: string | null, settingsId: string | null): StockMaterial | null {
+  const stated = type?.trim().toUpperCase() ?? '';
+  if (stated !== '') return FILAMENT_TYPE_MATERIALS[stated] ?? null;
+
+  const profile = settingsId?.toUpperCase() ?? '';
+  const found = Object.entries(FILAMENT_TYPE_MATERIALS)
+    .filter(([word]) => new RegExp(`(^|[^A-Z0-9])${word}([^A-Z0-9]|$)`).test(profile))
+    .map(([, material]) => material);
+  return found.length === 1 ? found[0]! : null;
+}
+
+/**
+ * The blank's filament, from the project's own `filament_type` / `filament_settings_id` (#456).
+ *
+ * The entries are the BLANK's extruders only (`prusa3mf.ts` excludes `NegativeVolume` extruders),
+ * so a modifier's plastic cannot answer for the blank. When those extruders disagree, or any of
+ * them names a class this app cannot map, there is no single material to state and `material` is
+ * null — the job keeps the material it had.
+ */
+function blankFilamentOf(file: PrusaThreeMf): DesignImport['filament'] {
+  if (file.blankFilaments.length === 0) return null;
+  const types: string[] = [];
+  const settingsIds: string[] = [];
+  const materials: StockMaterial[] = [];
+  let resolved = true;
+  for (const filament of file.blankFilaments) {
+    if (filament.type !== null && !types.includes(filament.type)) types.push(filament.type);
+    if (filament.settingsId !== null && !settingsIds.includes(filament.settingsId)) {
+      settingsIds.push(filament.settingsId);
+    }
+    const material = materialForFilament(filament.type, filament.settingsId);
+    if (material === null) resolved = false;
+    else if (!materials.includes(material)) materials.push(material);
+  }
+  return {
+    types,
+    settingsIds,
+    material: resolved && materials.length === 1 ? materials[0]! : null,
+  };
 }
 
 /**

@@ -585,6 +585,18 @@ describe('the nearest-plastic mapping (#455)', () => {
     expect(CATALOGUE_MATERIAL_ALIASES.pla).toEqual(['abs', 'acrylic']);
   });
 
+  it('maps PETG to the same two rows (#456)', () => {
+    expect(CATALOGUE_MATERIAL_ALIASES.petg).toEqual(['abs', 'acrylic']);
+    // PA-GF is deliberately absent from this slice: its abrasive wear weighting is #415's.
+    expect((CATALOGUE_MATERIAL_ALIASES as Record<string, unknown>)['pa-gf']).toBeUndefined();
+    const res = feedsFor([ABS_ROW], 'petg', makeraCutter(), Z1);
+    if (!res.ok) throw new Error(res.reason);
+    expect(res.params.rpm).toBe(11000);
+    expect(res.catalogue).toEqual(ABS_ROW);
+    expect(res.provenance).toContain('mapping this app makes');
+    expect(res.provenance).toContain('not something Makera says about PETG');
+  });
+
   it('answers a PLA job from the ABS row, and stamps the provenance as a mapping', () => {
     const res = feedsFor([ABS_ROW], 'pla', makeraCutter(), Z1);
     if (!res.ok) throw new Error(res.reason);

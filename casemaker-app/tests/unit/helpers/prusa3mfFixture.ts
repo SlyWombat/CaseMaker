@@ -91,6 +91,11 @@ export function project(opts: {
   build?: string;
   /** The project's Title, which becomes the object name. */
   title?: string;
+  /**
+   * `Metadata/Slic3r_PE.config` verbatim, for the print-settings readers (#456). Omitted means the
+   * project carries none, as neither shape above needs it.
+   */
+  settings?: string;
 }): ArrayBuffer {
   const parts = opts.volumes.map((v) => box(v.box[0], v.box[1]));
   const verts: V3[] = parts.flatMap((p) => p.verts);
@@ -149,6 +154,7 @@ export function project(opts: {
   const zip = zipSync({
     '3D/3dmodel.model': strToU8(model),
     'Metadata/Slic3r_PE_model.config': strToU8(config),
+    ...(opts.settings === undefined ? {} : { 'Metadata/Slic3r_PE.config': strToU8(opts.settings) }),
   });
   return zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength) as ArrayBuffer;
 }

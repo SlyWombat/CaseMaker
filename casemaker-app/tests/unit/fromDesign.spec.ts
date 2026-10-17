@@ -20,6 +20,7 @@ import {
   type DesignReadingDirection,
 } from '@/engine/cnc/engrave/fromDesign';
 import { tl } from './helpers/manifoldExec';
+import { fixtureBlank, project } from './helpers/prusa3mfFixture';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const samplePath = join(here, '..', '..', '..', 'samples', 'badge-blank', 'single.3mf');
@@ -72,7 +73,8 @@ describe.skipIf(!hasSample)('the blank, as the job frame has it (#410)', () => {
     expect(patch.stock.length).toBeCloseTo(38.1, 3); // X, across the jaws
     expect(patch.stock.width).toBeCloseTo(76.2, 3); // Y, along the feed
     expect(patch.stock.thickness).toBeCloseTo(3.81, 3);
-    expect(patch.stock.material).toBe('pla');
+    // #456: the blank's two extruders are PETG in the file's own filament_type, not assumed PLA.
+    expect(patch.stock.material).toBe('petg');
   });
 
   it('carries the file’s own print facts, and the dome across the axis that is 38.1', () => {
@@ -320,5 +322,43 @@ describe('a direction is a parameter, not a constant (#410 / #383)', () => {
     );
     expect(patch.vectors).toEqual([]);
     expect(patch.keepOut).toBeNull();
+  });
+});
+
+describe('the job’s stock material comes from the file, or is left alone (#456)', () => {
+  const designFor = (settings?: string) =>
+    // The fixture blank prints with extruder 2, so a per-extruder list needs a first entry.
+    readDesign(
+      tl,
+      parsePrusaThreeMf(
+        project({
+          volumes: [fixtureBlank()],
+          settings: settings?.replace('filament_type = ', 'filament_type = PLA;'),
+        }),
+      ),
+    );
+
+  it('sets PETG and stamps it as read from the file', () => {
+    const patch = designJobFor(designFor('filament_type = PETG'));
+    expect(patch.stock.material).toBe('petg');
+    expect(patch.sources.stock?.material).toBe('computed');
+    const notes = patch.notes.join('\n');
+    expect(notes).toContain("read from the file's own filament_type (PETG)");
+    expect(notes).toContain("The job's stock material is the file's, not an assumption.");
+  });
+
+  it('leaves the material key absent when the file states no filament_type', () => {
+    const patch = designJobFor(designFor());
+    expect('material' in patch.stock).toBe(false);
+    expect('material' in (patch.sources.stock ?? {})).toBe(false);
+    expect(patch.notes.join('\n')).toContain('left as it was');
+  });
+
+  it('leaves the material key absent for an unknown type — never silently PLA', () => {
+    const patch = designJobFor(designFor('filament_type = ASA'));
+    expect('material' in patch.stock).toBe(false);
+    expect('material' in (patch.sources.stock ?? {})).toBe(false);
+    expect(patch.notes.join('\n')).toContain('ASA');
+    expect(patch.notes.join('\n')).toContain('does not map to a stock material');
   });
 });

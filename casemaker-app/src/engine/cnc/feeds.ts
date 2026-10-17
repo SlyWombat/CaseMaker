@@ -510,18 +510,14 @@ export function catalogueMaterialFor(vendorName: string): StockMaterial | null {
  * labels it as a mapping — {@link catalogueStandingFor}'s note, {@link catalogueProvenance},
  * {@link catalogueOnlyRow} — so an ABS row can never read as Makera recommending a PLA cut.
  *
- * FOLLOW-UP (#456): PETG and PA-GF join `StockMaterial` there. Both are printed-blank plastics the
- * catalogue also lists no row for, and both map to these same two rows:
- *
- *     petg: ['abs', 'acrylic'],
- *     'pa-gf': ['abs', 'acrylic'],
- *
- * They are deliberately absent until the words exist in `StockMaterial` — a key that type does not
- * carry would be a typo, not a mapping. PA-GF is also abrasive, so #415's wear weighting has to
- * come with it; that class is #456/#415's, not this map's.
+ * FOLLOW-UP (#456): PETG is a printed-blank plastic the catalogue also lists no row for, and maps
+ * to these same two rows. PA-GF is deliberately NOT here yet: it is absent from `StockMaterial`
+ * for now because it is abrasive and #415's wear weighting has to come with it; that class is
+ * #456/#415's, not this map's.
  */
 export const CATALOGUE_MATERIAL_ALIASES: Readonly<Partial<Record<StockMaterial, readonly StockMaterial[]>>> = {
   pla: ['abs', 'acrylic'],
+  petg: ['abs', 'acrylic'],
 };
 
 /**

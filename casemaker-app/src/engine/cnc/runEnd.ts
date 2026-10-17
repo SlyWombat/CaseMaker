@@ -381,6 +381,7 @@ export function offcutOffer(input: {
 /** The wear classes the shop weights (`tools.wearWeight.<class>`), and which stock materials are which. */
 export const WEAR_CLASS: Readonly<Record<StockMaterial, 'plastic' | 'wood' | 'aluminium' | 'brass' | 'copper'>> = {
   pla: 'plastic',
+  petg: 'plastic',
   abs: 'plastic',
   acrylic: 'plastic',
   softwood: 'wood',

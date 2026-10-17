@@ -491,8 +491,10 @@ export const Z1: MillProfile = {
   // out because `CATALOGUE_MATERIALS` has no exact mapping for them: offering a word this app
   // cannot match to a row would offer a job nothing can answer. (The four plastics and woods the
   // STARTING TABLE covers — softwood, hardwood, MDF, PLA — are in this list where the vendor names
-  // them and are unioned in by the flow where it does not.)
-  materials: ['softwood', 'hardwood', 'abs', 'acrylic', 'aluminium-6061', 'aluminium-7075', 'brass', 'copper'],
+  // them and are unioned in by the flow where it does not.) PETG is the exception (#456): it is a
+  // printed-blank filament with no vendor row of its own, and the #455 mapping answers it from the
+  // ABS and acrylic rows, so the material select must be able to show a job imported as PETG.
+  materials: ['softwood', 'hardwood', 'abs', 'acrylic', 'petg', 'aluminium-6061', 'aluminium-7075', 'brass', 'copper'],
   envelope: { x: { min: -200, max: 0 }, y: { min: -200, max: 0 }, z: { min: -100, max: 0 } },
   maxCutFeed: 1200,
   // The cycle estimate's rapid model (#281), from the controller's own config (`config-get sd`,

@@ -84,6 +84,16 @@ export interface PrusaShapeVolume {
   depth: number | null;
 }
 
+/** One extruder the BLANK's volumes print with, and the filament the project names for it (#456). */
+export interface PrusaBlankFilament {
+  /** The volume metadata's extruder number, 1-based as the file writes it. */
+  extruder: number;
+  /** `filament_type` for that extruder, e.g. `PETG`, or null when the project states none. */
+  type: string | null;
+  /** `filament_settings_id` for that extruder, e.g. `Generic PETG @XL`, or null. */
+  settingsId: string | null;
+}
+
 /** Everything the design reader needs out of one project file. */
 export interface PrusaThreeMf {
   /** The object's name from the config, e.g. `badge-blank-3x1.5x0.15in`. */
@@ -91,6 +101,13 @@ export interface PrusaThreeMf {
   /** The model's unit as the 3MF declares it. Only `millimeter` is accepted. */
   unit: string;
   volumes: PrusaVolume[];
+  /**
+   * The filament the project names for the BLANK's own extruders (#456) — one entry per distinct
+   * `ModelPart` extruder, in the order the volumes first use it. A `NegativeVolume`'s extruder is
+   * a cut, not blank material, so it is excluded: reading every extruder in the project would let
+   * a modifier's plastic answer for the blank.
+   */
+  blankFilaments: PrusaBlankFilament[];
   /** The merged mesh: interleaved xyz and triangle vertex indices, in config facet order. */
   mesh: { vertProperties: Float32Array; triVerts: Uint32Array };
   /**
@@ -304,16 +321,29 @@ export function parsePrusaThreeMf(buf: ArrayBuffer): PrusaThreeMf {
   }
 
   const settingsEntry = zip['Metadata/Slic3r_PE.config'];
+  const settings = settingsEntry ? readSettings(new TextDecoder('utf-8').decode(settingsEntry)) : {};
+  const filamentTypes = perExtruderList(settings.filament_type);
+  const filamentSettings = perExtruderList(settings.filament_settings_id);
+  const blankExtruders: number[] = [];
+  for (const v of volumes) {
+    if (v.volumeType === 'NegativeVolume' || v.extruder === null) continue;
+    if (!blankExtruders.includes(v.extruder)) blankExtruders.push(v.extruder);
+  }
 
   return {
     objectName,
     unit,
     volumes,
+    blankFilaments: blankExtruders.map((extruder) => ({
+      extruder,
+      type: filamentTypes[extruder - 1] || null,
+      settingsId: filamentSettings[extruder - 1] || null,
+    })),
     mesh: {
       vertProperties: new Float32Array(positions),
       triVerts: new Uint32Array(indices),
     },
-    settings: settingsEntry ? readSettings(new TextDecoder('utf-8').decode(settingsEntry)) : {},
+    settings,
     entries: zip,
   };
 }
@@ -333,6 +363,25 @@ function readSettings(text: string): Record<string, string> {
     if (m) out[m[1]!] = m[2]!.trim();
   }
   return out;
+}
+
+/**
+ * A per-extruder setting (`filament_type = PA;PETG;PETG`) as entries in extruder order (#456).
+ *
+ * PrusaSlicer separates the values with `;`, and each value may be quoted
+ * (`filament_settings_id = "Generic PETG @XL";...`); the quotes are the file's escaping, not part
+ * of the name, so they are stripped. A missing setting is an EMPTY list, never `['']`: an absent
+ * `filament_type` means the project states nothing, which the caller must be able to tell from a
+ * stated blank type.
+ */
+function perExtruderList(raw: string | undefined): string[] {
+  if (raw === undefined) return [];
+  return raw.split(';').map((part) => {
+    const value = part.trim();
+    return value.length >= 2 && value.startsWith('"') && value.endsWith('"')
+      ? value.slice(1, -1).trim()
+      : value;
+  });
 }
 
 /**

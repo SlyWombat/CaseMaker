@@ -44,6 +44,7 @@ export type StockMaterial =
   | 'hardwood'
   | 'mdf'
   | 'pla'
+  | 'petg'
   | 'abs'
   | 'acrylic'
   | 'aluminium-6061'

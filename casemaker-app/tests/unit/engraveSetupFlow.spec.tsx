@@ -172,8 +172,8 @@ describe('the material list the job may be cut in (#347)', () => {
       // What this app can cut with no help, in the table's own order…
       'softwood', 'hardwood', 'mdf', 'pla',
       // …then the Z1's own list, which the starting table has no row for: the vendor's
-      // `t_MaterialList` in this app's words, metals included.
-      'abs', 'acrylic', 'aluminium-6061', 'aluminium-7075', 'brass', 'copper',
+      // `t_MaterialList` in this app's words, metals included, plus PETG for printed blanks (#456).
+      'abs', 'acrylic', 'petg', 'aluminium-6061', 'aluminium-7075', 'brass', 'copper',
     ]);
     // Every one of them has a word to show; offering a value the app cannot label would render a
     // blank `<option>`.

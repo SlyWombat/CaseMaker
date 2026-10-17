@@ -1,6 +1,7 @@
 import { newEngraveShapeId } from '@/engine/cnc/engrave/defaults';
 import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
 import { DEFAULT_BADGE_DOME_MM } from '@/engine/cnc/engrave/fromBadge';
+import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import type { DesignImport } from '@/engine/import/design3mf';
 import type { Mm } from '@/types/units';
 import type {
@@ -60,8 +61,12 @@ export const DESIGN_POCKET_KEEP_OUT_ID = 'design-magnet-pocket';
 export interface DesignJobPatch {
   /** The project's name, as the 3MF's Title carries it. */
   name: string;
-  /** The blank, in `EngraveJob.stock`'s shape and the JOB's frame. Always PLA (§7.2). */
-  stock: EngraveJob['stock'];
+  /**
+   * The blank, in `EngraveJob.stock`'s shape and the JOB's frame. `material` is present only when
+   * the file's own `filament_type` names a class this app knows (#456); otherwise the key is
+   * OMITTED, so `setStock` leaves the job's existing material untouched instead of assuming PLA.
+   */
+  stock: Omit<EngraveJob['stock'], 'material'> & { material?: EngraveJob['stock']['material'] };
   /** One item per `NegativeVolume` that cuts the top face, named after the volume. */
   vectors: EngraveVectorShape[];
   /** The void under the top face, or null when the blank has none. */
@@ -187,11 +192,17 @@ export function designJobFor(
   const id = opts.id ?? newEngraveShapeId;
   const { length, width } = designStockSize(design);
   const rotation = designRotation(direction);
-  const stock: EngraveJob['stock'] = {
+  // `undefined` on the synthetic patch shapes older callers build, and null when the file states
+  // no class this app maps; both mean "the file did not settle the material" (#456).
+  const filament = design.filament ?? null;
+  const material = filament?.material ?? null;
+  const stock: DesignJobPatch['stock'] = {
     length,
     width,
     thickness: um(design.stock.thickness),
-    material: 'pla',
+    // The file's OWN filament class when it names one this app knows (#456). Omitted otherwise:
+    // an unknown or absent type must not silently become PLA, so the job's material stays as it is.
+    ...(material !== null ? { material } : {}),
     // Both keys are ALWAYS present and `undefined` when the file states no print — the convention
     // `fromBadge.ts` documents and the reason for it is the same here (#285 review). A job taking
     // this patch may already carry a layer grid from a blank that had one, and `setStock` reads the
@@ -216,6 +227,27 @@ export function designJobFor(
       'its orientation on the bench differs.',
     ...design.notes,
   ];
+
+  // The blank's material, from the project's own filament statement (#456). The note is what makes
+  // the value read as READ FROM THE FILE rather than computed or assumed: `computed` in `sources`
+  // says the app derived the patch, and this sentence says which line of the file it came from.
+  if (material !== null) {
+    const fromSettings =
+      filament!.settingsIds.length > 0
+        ? `, filament_settings_id ${filament!.settingsIds.map((id) => `"${id}"`).join(', ')}`
+        : '';
+    notes.push(
+      `The blank's filament is ${MATERIAL_LABELS[material]}, read from the file's own filament_type ` +
+        `(${filament!.types.join(', ')}${fromSettings}). The job's stock material is the file's, ` +
+        'not an assumption.',
+    );
+  } else if (filament !== null) {
+    const stated = filament.types.length > 0 ? filament.types.join(', ') : 'no filament_type';
+    notes.push(
+      `The file says ${stated} for the blank, which this app does not map to a stock material, so ` +
+        "the job's stock material was left as it was.",
+    );
+  }
 
   // The print facts the file itself carries. They are what makes the depth limit follow the colour
   // boundary on the printer's own layer grid instead of a nominal height (#285), so they travel
@@ -326,7 +358,7 @@ export function designJobFor(
         length: 'computed',
         width: 'computed',
         thickness: 'computed',
-        material: 'computed',
+        ...(material !== null ? { material: 'computed' as const } : {}),
         ...(stock.print ? { print: 'computed' as const, flatness: 'computed' as const } : {}),
       },
     },
